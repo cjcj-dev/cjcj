@@ -98,6 +98,98 @@ private class FaithfulLoopTarget {
     }
 }
 
+private enum FaithfulFinallyControlType {
+    | BREAK
+    | CONTINUE
+    | RETURN
+    | NORMAL
+}
+
+private func FaithfulFinallyControlTypeIndex(kind: FaithfulFinallyControlType): Int64 {
+    return match (kind) {
+        case FaithfulFinallyControlType.BREAK => 0
+        case FaithfulFinallyControlType.CONTINUE => 1
+        case FaithfulFinallyControlType.RETURN => 2
+        case FaithfulFinallyControlType.NORMAL => 3
+    }
+}
+
+private func FaithfulFinallyControlTypeFromIndex(index: Int64): FaithfulFinallyControlType {
+    return match (index) {
+        case 0 => FaithfulFinallyControlType.BREAK
+        case 1 => FaithfulFinallyControlType.CONTINUE
+        case 2 => FaithfulFinallyControlType.RETURN
+        case 3 => FaithfulFinallyControlType.NORMAL
+        case _ => throw IllegalArgumentException("faithful AST2CHIR invalid finally control index ${index}")
+    }
+}
+
+private func FaithfulFinallyControlTypeCount(): Int64 {
+    return 4
+}
+
+private class FaithfulFinallyControlEdge {
+    public let prevBlock: Block
+    public let nextBlock: Block
+    public let controlScopeLevel: UInt32
+
+    public init(prevBlock: Block, nextBlock: Block, controlScopeLevel: UInt32) {
+        this.prevBlock = prevBlock
+        this.nextBlock = nextBlock
+        this.controlScopeLevel = controlScopeLevel
+    }
+}
+
+private class FaithfulFinallyControlContext {
+    public let tryScopeLevel: UInt32
+    public let controlFlowBlocks: ArrayList<ArrayList<FaithfulFinallyControlEdge>> =
+        ArrayList<ArrayList<FaithfulFinallyControlEdge>>()
+
+    public init(tryExpr: AstTryExpr) {
+        tryScopeLevel = tryExpr.scopeLevel
+        var idx: Int64 = 0
+        while (idx < FaithfulFinallyControlTypeCount()) {
+            controlFlowBlocks.add(ArrayList<FaithfulFinallyControlEdge>())
+            idx++
+        }
+    }
+
+    public func Add(kind: FaithfulFinallyControlType, prevBlock: Block, nextBlock: Block,
+        controlScopeLevel: UInt32): Unit {
+        controlFlowBlocks[FaithfulFinallyControlTypeIndex(kind)].add(FaithfulFinallyControlEdge(prevBlock, nextBlock,
+            controlScopeLevel))
+    }
+
+    public func CloneControlFlowBlocks(): ArrayList<ArrayList<FaithfulFinallyControlEdge>> {
+        let out = ArrayList<ArrayList<FaithfulFinallyControlEdge>>()
+        for (edges in controlFlowBlocks) {
+            let copied = ArrayList<FaithfulFinallyControlEdge>()
+            for (edge in edges) {
+                copied.add(edge)
+            }
+            out.add(copied)
+        }
+        return out
+    }
+
+    public func ClearControlFlowBlocks(): Unit {
+        for (edges in controlFlowBlocks) {
+            edges.clear()
+        }
+    }
+
+    public func RestoreControlFlowBlocks(saved: ArrayList<ArrayList<FaithfulFinallyControlEdge>>): Unit {
+        var idx: Int64 = 0
+        while (idx < controlFlowBlocks.size && idx < saved.size) {
+            controlFlowBlocks[idx].clear()
+            for (edge in saved[idx]) {
+                controlFlowBlocks[idx].add(edge)
+            }
+            idx++
+        }
+    }
+}
+
 private class FaithfulInstCalleeInfo {
     public let instParentCustomTy: Type
     public let thisType: Type
@@ -305,6 +397,7 @@ public class Translator {
     private let loopTargetStack: ArrayList<FaithfulLoopTarget> = ArrayList<FaithfulLoopTarget>()
     private let tryCatchContext: ArrayList<Block> = ArrayList<Block>()
     private let tryBodyContext: ArrayList<AstTryExpr> = ArrayList<AstTryExpr>()
+    private let finallyContext: ArrayList<FaithfulFinallyControlContext> = ArrayList<FaithfulFinallyControlContext>()
 
     public init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap) {
         this.builder = builder
@@ -740,6 +833,7 @@ public class Translator {
             }
             StoreReturnValueIfNeeded(CurrentFunction(), value)
             UpdateDelayExitSignalForReturnIfNeeded()
+            RecordFinallyControlIfNeeded(FaithfulFinallyControlType.RETURN)
             builder.CreateExit(None, CurrentBlock())
             let group = RequireParentBlockGroup(CurrentBlock(), "return continuation")
             currentBlock = builder.CreateBlock(group)
@@ -750,6 +844,7 @@ public class Translator {
             return None
         }
         UpdateDelayExitSignalForReturnIfNeeded()
+        RecordFinallyControlIfNeeded(FaithfulFinallyControlType.RETURN)
         builder.CreateExit(None, CurrentBlock())
         let group = RequireParentBlockGroup(CurrentBlock(), "return continuation")
         currentBlock = builder.CreateBlock(group)
@@ -1584,7 +1679,15 @@ public class Translator {
 
     public func Visit(expr: AstJumpExpr): Option<Value> {
         if (let Some(refLoop) <- expr.refLoop) {
+            let shouldRecordFinally = ShouldRecordJumpForFinally(refLoop)
             if (refLoop.astKind == ASTKind.FOR_IN_EXPR && delayExitSignal.isSome()) {
+                if (shouldRecordFinally) {
+                    RecordFinallyControlIfNeeded(if (expr.isBreak) {
+                        FaithfulFinallyControlType.BREAK
+                    } else {
+                        FaithfulFinallyControlType.CONTINUE
+                    }, controlScopeLevel: refLoop.scopeLevel)
+                }
                 UpdateDelayExitSignal(if (expr.isBreak) {
                     CalculateDelayExitLevelForBreak()
                 } else {
@@ -1601,6 +1704,15 @@ public class Translator {
         }
         let target = loopTargetStack[loopTargetStack.size - 1]
         let destination = if (expr.isBreak) { target.breakBlock } else { target.continueBlock }
+        if (let Some(refLoop2) <- expr.refLoop) {
+            if (ShouldRecordJumpForFinally(refLoop2)) {
+                RecordFinallyControlIfNeeded(if (expr.isBreak) {
+                    FaithfulFinallyControlType.BREAK
+                } else {
+                    FaithfulFinallyControlType.CONTINUE
+                }, controlScopeLevel: refLoop2.scopeLevel)
+            }
+        }
         builder.CreateGoTo(destination, CurrentBlock())
         let group = RequireParentBlockGroup(CurrentBlock(), "jump continuation")
         currentBlock = builder.CreateBlock(group)
@@ -1652,6 +1764,9 @@ public class Translator {
         let normalEndBlock = if (hasFinally) { builder.CreateBlock(group) } else { finalEndBlock }
         let exceptionBlock = builder.CreateBlock(group)
 
+        if (hasFinally) {
+            PushFinallyContext(expr, normalEndBlock, finalEndBlock)
+        }
         tryBodyContext.add(expr)
         tryCatchContext.add(exceptionBlock)
         let tryValue = Translator.TranslateASTNode(RequireBlock(expr.tryBlock, "try block"), this)
@@ -1672,7 +1787,7 @@ public class Translator {
 
         if (hasFinally) {
             let finallyBlock = expr.finallyBlock.getOrThrow()
-            TranslateFinally(finallyBlock, pendingExceptionBlock ?? exceptionBlock, normalEndBlock, finalEndBlock)
+            TranslateFinally(finallyBlock, pendingExceptionBlock ?? exceptionBlock)
         }
 
         tryBodyContext.remove(at: tryBodyContext.size - 1)
@@ -2566,6 +2681,47 @@ public class Translator {
         }
     }
 
+    private func PushFinallyContext(expr: AstTryExpr, normalEndBlock: Block, finalEndBlock: Block): Unit {
+        let context = FaithfulFinallyControlContext(expr)
+        context.Add(FaithfulFinallyControlType.NORMAL, normalEndBlock, finalEndBlock, expr.scopeLevel)
+        finallyContext.add(context)
+    }
+
+    private func PopFinallyContext(): FaithfulFinallyControlContext {
+        if (finallyContext.isEmpty()) {
+            throw IllegalStateException("faithful AST2CHIR finally context stack is empty")
+        }
+        let out = finallyContext[finallyContext.size - 1]
+        finallyContext.remove(at: finallyContext.size - 1)
+        return out
+    }
+
+    private func CurrentFinallyContext(): FaithfulFinallyControlContext {
+        if (finallyContext.isEmpty()) {
+            throw IllegalStateException("faithful AST2CHIR finally context stack is empty")
+        }
+        return finallyContext[finallyContext.size - 1]
+    }
+
+    private func RecordFinallyControlIfNeeded(kind: FaithfulFinallyControlType,
+        controlScopeLevel!: UInt32 = 0u32): Unit {
+        if (finallyContext.isEmpty()) {
+            return
+        }
+        let prevBlock = CurrentBlock()
+        let group = RequireParentBlockGroup(prevBlock, "finally control target")
+        let nextBlock = builder.CreateBlock(group)
+        currentBlock = nextBlock
+        CurrentFinallyContext().Add(kind, prevBlock, nextBlock, controlScopeLevel)
+    }
+
+    private func ShouldRecordJumpForFinally(refLoop: AstNode): Bool {
+        if (finallyContext.isEmpty()) {
+            return false
+        }
+        return refLoop.scopeLevel < CurrentFinallyContext().tryScopeLevel
+    }
+
     private func CalculateDelayExitLevelForBreak(): Int64 {
         var level: Int64 = 0
         var idx = blockGroupStack.size - 1
@@ -3103,17 +3259,16 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR exception value has no type")
     }
 
-    private func TranslateFinally(finallyBlock: AstBlock, exceptionBlock: Block, normalEntryBlock: Block,
-        finalEndBlock: Block): Unit {
+    private func TranslateFinally(finallyBlock: AstBlock, exceptionBlock: Block): Unit {
         TranslateFinallyRethrowFlow(finallyBlock, exceptionBlock)
-        currentBlock = normalEntryBlock
-        let _ = Translator.TranslateASTNode(finallyBlock, this)
-        if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateGoTo(finalEndBlock, CurrentBlock())
-        }
+        let finallyControlInfo = PopFinallyContext()
+        TranslateFinallyNormalFlows(finallyBlock, finallyControlInfo)
     }
 
     private func TranslateFinallyRethrowFlow(finallyBlock: AstBlock, exceptionBlock: Block): Unit {
+        let activeContext = CurrentFinallyContext()
+        let savedControlFlowBlocks = activeContext.CloneControlFlowBlocks()
+        activeContext.ClearControlFlowBlocks()
         currentBlock = exceptionBlock
         exceptionBlock.SetExceptions(ArrayList<ClassType>())
         let exceptionTy = ExceptionValueTypeFromFinallyContext()
@@ -3122,13 +3277,66 @@ public class Translator {
         beginCatchArgs.add(exception)
         let beginCatch = RequireResult(builder.CreateIntrinsic(exceptionTy,
             IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), CurrentBlock()))
+        let localScopeMark = localValSymbolTable.Mark()
         let _ = Translator.TranslateASTNode(finallyBlock, this)
+        localValSymbolTable.Restore(localScopeMark)
+        let rethrowEdges = activeContext.CloneControlFlowBlocks()
+        activeContext.RestoreControlFlowBlocks(savedControlFlowBlocks)
+        let endCatchBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "finally rethrow"))
         if (CurrentBlock().GetTerminator().isNone()) {
-            if (let Some(outerBlock) <- CurrentTryCatchBlock()) {
-                builder.CreateRaiseException(beginCatch, outerBlock, CurrentBlock())
-            } else {
-                builder.CreateRaiseException(beginCatch, CurrentBlock())
+            builder.CreateGoTo(endCatchBlock, CurrentBlock())
+        }
+        currentBlock = endCatchBlock
+        if (let Some(outerBlock) <- CurrentTryCatchBlock()) {
+            builder.CreateRaiseException(beginCatch, outerBlock, CurrentBlock())
+        } else {
+            builder.CreateRaiseException(beginCatch, CurrentBlock())
+        }
+        for (edges in rethrowEdges) {
+            for (edge in edges) {
+                if (edge.prevBlock.GetTerminator().isNone()) {
+                    builder.CreateGoTo(endCatchBlock, edge.prevBlock)
+                }
             }
+        }
+    }
+
+    private func TranslateFinallyNormalFlows(finallyBlock: AstBlock,
+        finallyControlInfo: FaithfulFinallyControlContext): Unit {
+        var controlIndex: Int64 = 0
+        while (controlIndex < finallyControlInfo.controlFlowBlocks.size) {
+            let edges = finallyControlInfo.controlFlowBlocks[controlIndex]
+            for (edge in edges) {
+                TranslateFinallyNormalFlow(finallyBlock, FaithfulFinallyControlTypeFromIndex(controlIndex), edge)
+            }
+            controlIndex++
+        }
+    }
+
+    private func TranslateFinallyNormalFlow(finallyBlock: AstBlock, controlType: FaithfulFinallyControlType,
+        edge: FaithfulFinallyControlEdge): Unit {
+        let group = RequireParentBlockGroup(edge.prevBlock, "finally normal flow")
+        let finallyEntryBlock = builder.CreateBlock(group)
+        builder.CreateGoTo(finallyEntryBlock, edge.prevBlock)
+        currentBlock = finallyEntryBlock
+        let localScopeMark = localValSymbolTable.Mark()
+        let _ = Translator.TranslateASTNode(finallyBlock, this)
+        localValSymbolTable.Restore(localScopeMark)
+        if (CurrentBlock().GetTerminator().isSome()) {
+            return
+        }
+        if (finallyContext.isEmpty() || FaithfulFinallyControlTypeIndex(controlType) ==
+            FaithfulFinallyControlTypeIndex(FaithfulFinallyControlType.NORMAL)) {
+            builder.CreateGoTo(edge.nextBlock, CurrentBlock())
+            return
+        }
+        let outerContext = CurrentFinallyContext()
+        if (FaithfulFinallyControlTypeIndex(controlType) ==
+            FaithfulFinallyControlTypeIndex(FaithfulFinallyControlType.RETURN) ||
+            edge.controlScopeLevel < outerContext.tryScopeLevel) {
+            outerContext.Add(controlType, CurrentBlock(), edge.nextBlock, edge.controlScopeLevel)
+        } else {
+            builder.CreateGoTo(edge.nextBlock, CurrentBlock())
         }
     }
 
