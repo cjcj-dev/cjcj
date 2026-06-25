@@ -71,9 +71,12 @@ private func GenerateCommonEnum(irBuilder: IRBuilder2, chirExpr: Expression): LL
                 rawValue = LoadRefAggregateElementIfNeeded(irBuilder, rawValue, sourceTy, storageFieldTy)
             }
         }
+        let fieldTy = containedTypes[idx].GetOriginal()
         let fieldPtr = irBuilder.CreateStructGEP(layoutType, typedPayload, UInt32(idx), name: "enum.field")
-        if (IsGCRefPayloadField(irBuilder, containedTypes[idx].GetOriginal())) {
+        if (IsGCRefPayloadField(irBuilder, fieldTy)) {
             let _ = irBuilder.CallGCWriteRef(rawValue, enumVal, fieldPtr)
+        } else if (IsValueAggregatePointerPayload(rawValue, fieldTy)) {
+            let _ = StoreValueAggregatePointerPayload(irBuilder, enumVal, rawValue, fieldPtr, fieldTy)
         } else {
             let _ = irBuilder.CreateStore(rawValue, fieldPtr)
         }
@@ -107,6 +110,30 @@ private func IsGCRefPayloadField(irBuilder: IRBuilder2, fieldTy: Type): Bool {
         return enumCGType.IsCommonEnum() || enumCGType.IsOptionLikeRef()
     }
     return false
+}
+
+private func IsValueAggregatePointerPayload(rawValue: LLVMValueRef, fieldTy: Type): Bool {
+    let stripped = fieldTy.StripAllRefs()
+    if (!(stripped.IsStruct() || stripped.IsTuple() || stripped.IsVArray())) {
+        return false
+    }
+    let rawTy = unsafe { LLVMTypeOf(rawValue) }
+    return !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12
+}
+
+private func StoreValueAggregatePointerPayload(irBuilder: IRBuilder2, enumVal: LLVMValueRef, rawValue: LLVMValueRef,
+    fieldPtr: LLVMValueRef, fieldTy: Type): LLVMValueRef {
+    let fieldCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), fieldTy.StripAllRefs())
+    let fieldLLVMType = fieldCGType.GetLLVMType()
+    let size = unsafe {
+        LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw),
+            irBuilder.GetCGModule().GetTypeSize(fieldLLVMType), 0)
+    }
+    let align = irBuilder.GetCGModule().GetABITypeAlignment(fieldLLVMType)
+    if (irBuilder.IsLLVMTypeContainsRef(fieldLLVMType)) {
+        return irBuilder.CallGCWriteStruct(enumVal, fieldPtr, rawValue, size, fieldCGType.GetOriginal().ToString())
+    }
+    return irBuilder.CreateMemCpy(fieldPtr, align, rawValue, align, size)
 }
 
 private func CallCommonEnumObjectAlloc(irBuilder: IRBuilder2, storageTy: Type, layoutType: LLVMTypeRef): LLVMValueRef {
