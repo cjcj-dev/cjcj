@@ -8,6 +8,8 @@ public func SelfhostPortStatus_TypeCheckExpr_AssignExpr(): Bool {
     return true
 }
 
+public type AssignRightChecker = (Ty, Expr) -> Bool
+
 private func AssignInvalid(ae: AssignExpr): Ty {
     return TcInvalid(ae)
 }
@@ -116,7 +118,8 @@ private func PreCheckCompoundAssign(leftTy: Ty, ae: AssignExpr): Bool {
     return false
 }
 
-private func CheckAssignRight(typeManager: TypeManager, leftTy: Ty, ae: AssignExpr): Bool {
+private func CheckAssignRight(typeManager: TypeManager, leftTy: Ty, ae: AssignExpr,
+    rightChecker: Option<AssignRightChecker>): Bool {
     if (let Some(rightExpr) <- ae.rightExpr) {
         if (ae.op == TokenKind.EXP_ASSIGN) {
             let rightTy = SynExprShallow(typeManager, rightExpr)
@@ -134,6 +137,9 @@ private func CheckAssignRight(typeManager: TypeManager, leftTy: Ty, ae: AssignEx
                     typeManager.CheckTypeCompatibility(f64Ty, rightTy) != TypeCompatibility.INCOMPATIBLE
             }
             return false
+        }
+        if (let Some(checker) <- rightChecker) {
+            return checker(leftTy, rightExpr)
         }
         return ChkExprShallow(typeManager, leftTy, rightExpr)
     }
@@ -229,7 +235,8 @@ private func SynMultipleAssignExpr(typeManager: TypeManager, ae: AssignExpr): Ty
     return TcTyOrInvalid(ae)
 }
 
-public func SynAssignExpr(typeManager: TypeManager, ae: AssignExpr): Ty {
+public func SynAssignExpr(typeManager: TypeManager, ae: AssignExpr,
+    rightChecker!: Option<AssignRightChecker> = None): Ty {
     if (let Some(desugar) <- ae.desugarExpr) {
         if (let Some(leftValue) <- ae.leftValue) {
             if (leftValue.astKind == ASTKind.TUPLE_LIT) {
@@ -278,7 +285,7 @@ public func SynAssignExpr(typeManager: TypeManager, ae: AssignExpr): Ty {
     if (!IsAssignableExpr(leftExpr)) {
         return AssignInvalid(ae)
     }
-    if (!CheckAssignRight(typeManager, concreteLeftTy, ae)) {
+    if (!CheckAssignRight(typeManager, concreteLeftTy, ae, rightChecker)) {
         return AssignInvalid(ae)
     }
     if (!IsShiftAssignValid(ae, concreteLeftTy)) {

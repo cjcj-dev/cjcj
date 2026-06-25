@@ -2131,7 +2131,7 @@ public class TypeChecker {
     private func CheckCallArgFromContext(ctx: ASTContext, target: Ty, arg: FuncArg): Bool {
         if (let Some(expr) <- arg.expr) {
             typeCheckExprClearKeepTargets(expr)
-            let ok = Check(ctx, target, expr)
+            let ok = Check(ctx, target, expr, clearInferredCallTypes: false)
             if (ok) {
                 arg.SetTy(expr.GetTy() ?? target)
             }
@@ -2950,7 +2950,8 @@ public class TypeChecker {
         }
         if (let Some(assign) <- (expr as AssignExpr)) {
             SynthesizeAssignChildren(ctx, assign)
-            return FinishSynthesize(ctx, assign, SynAssignExpr(impl.typeManager, assign))
+            return FinishSynthesize(ctx, assign, SynAssignExpr(impl.typeManager, assign,
+                rightChecker: Some({ target: Ty, rightExpr: Expr => Check(ctx, target, rightExpr) })))
         }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             return SynthesizeThrowExpr(ctx, throwExpr)
@@ -3137,7 +3138,7 @@ public class TypeChecker {
         return None
     }
 
-    private func Check(ctx: ASTContext, target: Ty, expr: Expr): Bool {
+    private func Check(ctx: ASTContext, target: Ty, expr: Expr, clearInferredCallTypes!: Bool = true): Bool {
         if (let Some(lambda) <- (expr as LambdaExpr)) {
             return FinishCheck(ctx, lambda, CheckLambdaExprWithTarget(ctx, target, lambda))
         }
@@ -3155,7 +3156,9 @@ public class TypeChecker {
             typeCheckExprPutTargetType(ctx, callExpr, target)
             SynthesizeCallChildren(ctx, callExpr)
             let ok = ChkCallExprWithArgChecker(impl.typeManager, impl.diag, Some(target), callExpr,
-                Some({ paramTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, paramTy, arg) }))
+                Some({ paramTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, paramTy, arg) }),
+                desugarChecker: Some({ target2: Ty, expr2: Expr => Check(ctx, target2, expr2) }),
+                clearInferredForTarget: clearInferredCallTypes)
             typeCheckExprClearTargetType(ctx, callExpr)
             return FinishCheck(ctx, callExpr, ok)
         }

@@ -10,6 +10,7 @@ import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
 
 public type CallArgChecker = (Ty, FuncArg) -> Bool
+public type CallDesugarChecker = (Ty, Expr) -> Bool
 
 private class FunctionMatchingUnit {
     public var fd: FuncDecl
@@ -1106,6 +1107,17 @@ private func HasRecordedCallTypeArgs(ce: CallExpr): Bool {
     return false
 }
 
+private func ClearInferredCallTypeArgsForTargetCheck(ce: CallExpr): Unit {
+    if (let Some(base) <- ce.baseFunc) {
+        if (!base.GetTypeArgs().isEmpty()) {
+            return
+        }
+        if (let Some(nameRef) <- (base as NameReferenceExpr)) {
+            nameRef.instTys.clear()
+        }
+    }
+}
+
 private func AllCallArgsHaveCorrectTy(ce: CallExpr): Bool {
     for (arg in ce.args) {
         if (!Ty.IsTyCorrect(arg.GetTy())) {
@@ -1115,7 +1127,21 @@ private func AllCallArgsHaveCorrectTy(ce: CallExpr): Bool {
     return true
 }
 
-private func MarkCallInferenceFailure(failure: Option<CallInferenceFailure>, ce: CallExpr, fd: FuncDecl): Unit {
+private func ShouldReportCallInferenceFailure(target: Option<Ty>): Bool {
+    if (let Some(targetTy) <- target) {
+        return !targetTy.IsQuest() && !targetTy.HasGeneric()
+    }
+    return false
+}
+
+private func MarkCallInferenceFailure(failure: Option<CallInferenceFailure>, ce: CallExpr, fd: FuncDecl,
+    target: Option<Ty>): Unit {
+    if (NeedLastTry(ce)) {
+        return
+    }
+    if (!ShouldReportCallInferenceFailure(target)) {
+        return
+    }
     if (!AllCallArgsHaveCorrectTy(ce)) {
         return
     }
@@ -1379,7 +1405,7 @@ private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr,
         idx++
     }
     if (stat.argTys.size != ce.args.size) {
-        MarkCallInferenceFailure(inferenceFailure, ce, fd)
+        MarkCallInferenceFailure(inferenceFailure, ce, fd, target)
         return false
     }
     let funcRetTy = if (let Some(fdTy) <- fd.GetTy()) {
@@ -1443,7 +1469,7 @@ private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr,
         }
     }
     if ((let None <- stat.solution) || stat.unsolvedCount > 0) {
-        MarkCallInferenceFailure(inferenceFailure, ce, fd)
+        MarkCallInferenceFailure(inferenceFailure, ce, fd, target)
         return false
     }
     typeManager.PackMapping(typeMapping, stat.solution.getOrThrow())
@@ -1453,7 +1479,7 @@ private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr,
 private func DiagnoseForCallInference(diag: Option<BasicDiagnosticEngine>, ce: CallExpr): Unit {
     if (let Some(diagValue) <- diag) {
         if (let Some(base) <- ce.baseFunc) {
-            DiagRef(diagValue, base, BasicDiagKindRefactor.sema_unable_to_infer_generic_func)
+            DiagRefEmit(diagValue, base, BasicDiagKindRefactor.sema_unable_to_infer_generic_func)
         }
     }
 }
@@ -1716,14 +1742,11 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
         return None
     }
     if (let Some(targetTy) <- target) {
-        if (let Some(fdTy) <- fd.GetTy()) {
-            if (let Some(funcTy) <- (typeManager.ApplySubstPack(fdTy, typeMapping) as FuncTy)) {
-                let normalizedRetTy = typeManager.SubstituteTypeAliasInTy(funcTy.retTy)
-                let normalizedTargetTy = typeManager.SubstituteTypeAliasInTy(targetTy)
-                if (!typeManager.IsSubtype(normalizedRetTy, normalizedTargetTy)) {
-                    return None
-                }
-            }
+        let instRetTy = typeManager.ApplySubstPack(GetCallTy(typeManager, ce, fd), typeMapping)
+        let normalizedRetTy = typeManager.SubstituteTypeAliasInTy(instRetTy)
+        let normalizedTargetTy = typeManager.SubstituteTypeAliasInTy(targetTy)
+        if (!instRetTy.HasIdealTy() && !typeManager.IsSubtype(normalizedRetTy, normalizedTargetTy)) {
+            return None
         }
     }
     if (!CheckCandidateConstrains(typeManager, diag, ce, fd, typeMapping)) {
@@ -2208,7 +2231,8 @@ public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEn
 }
 
 public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
-    ce: CallExpr, argChecker: Option<CallArgChecker>): Bool {
+    ce: CallExpr, argChecker: Option<CallArgChecker>, desugarChecker!: Option<CallDesugarChecker> = None,
+    clearInferredForTarget!: Bool = true): Bool {
     if (let Some(desugar) <- ce.desugarExpr) {
         if (Ty.IsTyCorrect(desugar.GetTy())) {
             ce.SetTy(desugar.GetTy().getOrThrow())
@@ -2217,9 +2241,23 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
             }
             return true
         }
+        if (let Some(targetTy) <- target) {
+            if (let Some(checker) <- desugarChecker) {
+                let isWellTyped = checker(targetTy, desugar)
+                ce.SetTy(desugar.GetTy() ?? TypeManager.GetInvalidTy())
+                return isWellTyped && Ty.IsTyCorrect(ce.GetTy())
+            }
+        }
     }
     if (let None <- ce.baseFunc) {
         return ChkBuiltinCall(typeManager, target ?? TypeManager.GetInvalidTy(), ce)
+    }
+    if (clearInferredForTarget) {
+        if (let Some(targetTy) <- target) {
+            if (!targetTy.IsQuest() && !targetTy.HasGeneric()) {
+                ClearInferredCallTypeArgsForTargetCheck(ce)
+            }
+        }
     }
     ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy() ?? TypeManager.GetInvalidTy()))
     if (ChkBuiltinCall(typeManager, target ?? TypeManager.GetInvalidTy(), ce)) {
