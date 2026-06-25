@@ -78,6 +78,12 @@ public func IsBuiltinUnaryExpr(op: TokenKind, ty: Ty): Bool {
 }
 
 public func SynBuiltinUnaryExpr(typeManager: TypeManager, ue: UnaryExpr): Ty {
+    if (let Some(innerExpr) <- ue.expr) {
+        if (!Ty.IsTyCorrect(SynExprShallow(typeManager, innerExpr))) {
+            ue.SetTy(TypeManager.GetInvalidTy())
+            return TypeManager.GetInvalidTy()
+        }
+    }
     if (!IsBuiltinUnaryOperator(ue.op)) {
         ue.SetTy(TypeManager.GetInvalidTy())
         return TypeManager.GetInvalidTy()
