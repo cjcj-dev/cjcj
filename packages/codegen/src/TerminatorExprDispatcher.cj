@@ -115,6 +115,9 @@ private func CreateDirectRet(irBuilder: IRBuilder2, chirExpr: Expression): LLVMV
     if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
         if (cgFunc.IsSRet()) {
             let sretArg = unsafe { LLVMGetParam(cgFunc.GetRawFunction(), 0u32) }
+            if (let Some(structCopy) <- TryCreateStructPtrSRet(irBuilder, directRetValue, sretArg)) {
+                return structCopy
+            }
             if (let Some(retTy) <- CurrentFunctionReturnType(irBuilder, chirExpr)) {
                 if (retTy.IsGeneric()) {
                     irBuilder.StoreGenericSRetReturnValue(directRetValue.GetRawValue(), sretArg, retTy)
@@ -125,7 +128,58 @@ private func CreateDirectRet(irBuilder: IRBuilder2, chirExpr: Expression): LLVMV
             return irBuilder.CreateRetVoid()
         }
     }
+    if (let Some(loadedRet) <- TryLoadStructPtrDirectReturn(irBuilder, directRetValue)) {
+        return irBuilder.CreateRet(loadedRet)
+    }
     return irBuilder.CreateRet(directRetValue.GetRawValue())
+}
+
+private func TryCreateStructPtrSRet(irBuilder: IRBuilder2, value: CGValue, sretArg: LLVMValueRef): Option<LLVMValueRef> {
+    let valueCGType = value.GetCGType() ?? return None
+    if (!valueCGType.IsStructPtrType()) {
+        return None
+    }
+    let structCGType = valueCGType.GetPointerElementType() ?? return None
+    CreateStructPtrCopyToAddress(irBuilder, sretArg, value.GetRawValue(), structCGType)
+    return Some(irBuilder.CreateRetVoid())
+}
+
+private func TryCreateStructSlotSRet(irBuilder: IRBuilder2, slot: CGValue, sretArg: LLVMValueRef): Option<LLVMValueRef> {
+    let slotCGType = slot.GetCGType() ?? return None
+    if (!slotCGType.IsStructPtrType()) {
+        return None
+    }
+    let structCGType = slotCGType.GetPointerElementType() ?? return None
+    CreateStructPtrCopyToAddress(irBuilder, sretArg, slot.GetRawValue(), structCGType)
+    return Some(irBuilder.CreateRetVoid())
+}
+
+private func CreateStructPtrCopyToAddress(irBuilder: IRBuilder2, dest: LLVMValueRef, source: LLVMValueRef,
+    structCGType: CGType): LLVMValueRef {
+    let structSize = if (let Some(size) <- structCGType.GetSize()) { size } else { 0 }
+    let sizeValue = unsafe {
+        LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(structSize), 0)
+    }
+    let align = irBuilder.GetCGModule().GetABITypeAlignment(structCGType.GetLLVMType())
+    if (IsReturnAddressSpacePointer(dest, 1u32) && irBuilder.IsLLVMTypeContainsRef(structCGType.GetLLVMType())) {
+        return irBuilder.CallGCWriteStruct(dest, dest, source, sizeValue, structCGType.GetOriginal().ToString())
+    }
+    return irBuilder.CreateMemCpy(dest, align, source, align, sizeValue)
+}
+
+private func TryLoadStructPtrDirectReturn(irBuilder: IRBuilder2, value: CGValue): Option<LLVMValueRef> {
+    let valueCGType = value.GetCGType() ?? return None
+    if (!valueCGType.IsStructPtrType()) {
+        return None
+    }
+    let structCGType = valueCGType.GetPointerElementType() ?? return None
+    return Some(irBuilder.CreateLoad(structCGType.GetLLVMType(), value.GetRawValue(), name: "ret.struct"))
+}
+
+private func IsReturnAddressSpacePointer(value: LLVMValueRef, addressSpace: UInt32): Bool {
+    let rawTy = unsafe { LLVMTypeOf(value) }
+    return !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12 &&
+        unsafe { LLVMGetPointerAddressSpace(rawTy) } == addressSpace
 }
 
 private func CurrentFunctionReturnType(irBuilder: IRBuilder2, chirExpr: Expression): Option<Type> {
@@ -154,10 +208,13 @@ private func CreateRetFromFunctionReturnSlot(irBuilder: IRBuilder2, parentFunc: 
             }
             if (let Some(slotType) <- retAddr.GetCGType()) {
                 if (let Some(elementType) <- slotType.GetPointerElementType()) {
-                    let loadedRet = irBuilder.CreateLoad(elementType.GetLLVMType(), retAddr.GetRawValue(), name: "ret")
                     if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
                         if (cgFunc.IsSRet()) {
                             let sretArg = unsafe { LLVMGetParam(cgFunc.GetRawFunction(), 0u32) }
+                            if (let Some(structCopy) <- TryCreateStructSlotSRet(irBuilder, retAddr, sretArg)) {
+                                return structCopy
+                            }
+                            let loadedRet = irBuilder.CreateLoad(elementType.GetLLVMType(), retAddr.GetRawValue(), name: "ret")
                             if (retTy.IsGeneric()) {
                                 irBuilder.StoreGenericSRetReturnValue(loadedRet, sretArg, retTy)
                                 return irBuilder.CreateRetVoid()
@@ -166,6 +223,7 @@ private func CreateRetFromFunctionReturnSlot(irBuilder: IRBuilder2, parentFunc: 
                             return irBuilder.CreateRetVoid()
                         }
                     }
+                    let loadedRet = irBuilder.CreateLoad(elementType.GetLLVMType(), retAddr.GetRawValue(), name: "ret")
                     return irBuilder.CreateRet(loadedRet)
                 }
             }
