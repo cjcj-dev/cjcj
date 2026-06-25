@@ -10,7 +10,6 @@ import cangjie_compiler::chir.DeadCodeElimination
 import cangjie_compiler::chir.FaithfulAST2CHIR
 import cangjie_compiler::chir.FuncKind as ChirFuncKind
 import cangjie_compiler::chir.Function as ChirFunction
-import cangjie_compiler::chir.InstantiateGenericFunctionsForPackage
 import cangjie_compiler::chir.Package as RealCHIRPackage
 import cangjie_compiler::ast.Package as RealASTPackage
 import cangjie_compiler::codegen.CHIRData as CodegenCHIRData
@@ -37,8 +36,6 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
         case None => return None
     }
     DeadCodeElimination().UnreachableBlockEliminationForPackage(lowered)
-    // Generic instantiation clones already-lowered source bodies, so instantiated bodies inherit this cleanup.
-    InstantiateGenericFunctionsForPackage(builder, lowered)
     let pluginResult = TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)
     if (!pluginResult.succeed) {
         instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
