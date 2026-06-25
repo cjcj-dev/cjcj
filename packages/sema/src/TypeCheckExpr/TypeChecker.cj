@@ -12,6 +12,7 @@ import cangjie_compiler::sema.Desugar.*
 import cangjie_compiler::sema.FFI.*
 import cangjie_compiler::sema.InheritanceChecker.*
 import cangjie_compiler::sema.LegalityOfUsage.*
+import cangjie_compiler::sema.NativeFFI.*
 
 private func contextPackage(ctx: ASTContext): Option<Package> {
     return ctx.curPackage
@@ -532,6 +533,78 @@ public class TypeChecker {
         }
     }
 
+    private func SetConstructorCalls(pkg: Package): Unit {
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                SetConstructorCallsForDecl(decl)
+            }
+        }
+    }
+
+    private func SetConstructorCallsForDecl(decl: Decl): Unit {
+        if (let Some(structDecl) <- (decl as StructDecl)) {
+            if (let Some(body) <- structDecl.body) {
+                for (member in body.decls) {
+                    if (let Some(funcDecl) <- (member as FuncDecl)) {
+                        if (IsInstanceConstructor(funcDecl)) {
+                            SetFuncDeclConstructorCall(funcDecl)
+                        }
+                    }
+                    SetConstructorCallsForDecl(member)
+                }
+            }
+            return
+        }
+        if (let Some(classDecl) <- (decl as ClassDecl)) {
+            if (let Some(body) <- classDecl.body) {
+                for (member in body.decls) {
+                    if (let Some(funcDecl) <- (member as FuncDecl)) {
+                        if (IsInstanceConstructor(funcDecl)) {
+                            SetFuncDeclConstructorCall(funcDecl)
+                        }
+                    }
+                    SetConstructorCallsForDecl(member)
+                }
+            }
+            return
+        }
+        if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+            if (let Some(body) <- interfaceDecl.body) {
+                for (member in body.decls) {
+                    SetConstructorCallsForDecl(member)
+                }
+            }
+            return
+        }
+        if (let Some(enumDecl) <- (decl as EnumDecl)) {
+            for (member in enumDecl.members) {
+                SetConstructorCallsForDecl(member)
+            }
+            return
+        }
+        if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            for (member in extendDecl.members) {
+                SetConstructorCallsForDecl(member)
+            }
+        }
+    }
+
+    private func SetFuncDeclConstructorCall(fd: FuncDecl): Unit {
+        let funcBody = if (let Some(value) <- fd.funcBody) { value } else { return }
+        let body = if (let Some(value) <- funcBody.body) { value } else { return }
+        if (body.body.isEmpty()) {
+            return
+        }
+        if (let Some(callExpr) <- (body.body[0] as CallExpr)) {
+            if (IsThisConstructorCall(callExpr) && !fd.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
+                fd.constructorCall = ConstructorCall.OTHER_INIT
+            }
+            if (IsSuperConstructorCall(callExpr)) {
+                fd.constructorCall = ConstructorCall.SUPER
+            }
+        }
+    }
+
     private func AddDefaultParamFunctions(pkg: Package): Unit {
         for (file in pkg.files) {
             for (decl in file.decls) {
@@ -941,6 +1014,7 @@ public class TypeChecker {
                 let _ = CollectUnusedImports(pkg)
                 let _ = CheckConstEvaluation(pkg)
                 RunInheritanceCheck(pkg)
+                SetConstructorCalls(pkg)
                 // Check legality of usage after sema type completed.
                 // Mirrors C++ TypeChecker.cpp:2053 (CheckLegalityOfUsage).
                 RunLegalityOfUsageCheck(pkg)
@@ -2027,12 +2101,17 @@ public class TypeChecker {
             ClearLambdaBodyForContextCheck(le)
             RefreshNameReferencesInTree(ctx, le)
             let funcBody = le.funcBody.getOrThrow()
+            let previousFuncBody = currentFuncBody
+            currentFuncBody = Some(funcBody)
+            var bodyOk = true
             if (let Some(body) <- funcBody.body) {
-                if (!CheckBlock(ctx, targetFuncTy.retTy, body)) {
-                    funcBody.SetTy(TypeManager.GetInvalidTy())
-                    let _ = TcInvalid(le)
-                    return false
-                }
+                bodyOk = CheckBlock(ctx, targetFuncTy.retTy, body)
+            }
+            currentFuncBody = previousFuncBody
+            if (!bodyOk) {
+                funcBody.SetTy(TypeManager.GetInvalidTy())
+                let _ = TcInvalid(le)
+                return false
             }
             let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), targetFuncTy.retTy,
                 cfg: CloneLambdaTargetFuncCfg(targetFuncTy))
