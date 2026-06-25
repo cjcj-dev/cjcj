@@ -293,6 +293,9 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     if (let Some(genericStore) <- irBuilder.TryCreateGenericStore(value, addr)) {
         return genericStore
     }
+    if (let Some(structPtrStore) <- TryStoreStructPtrValueForAddress(irBuilder, value, addr)) {
+        return structPtrStore
+    }
     let storedValue = StoreValueForAddress(irBuilder, value, addr)
     if (ShouldUseGCStaticWriteBarrier(irBuilder, addr)) {
         return irBuilder.CallGCWriteStaticRef(storedValue, addr.GetRawValue())
@@ -344,6 +347,33 @@ private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue, addr: C
         }
     }
     return raw
+}
+
+private func TryStoreStructPtrValueForAddress(irBuilder: IRBuilder2, value: CGValue,
+    addr: CGValue): Option<LLVMValueRef> {
+    let raw = value.GetRawValue()
+    if (!IsPointerLLVMValue(raw)) {
+        return None
+    }
+    let valueCGType = value.GetCGType() ?? return None
+    if (!valueCGType.IsStructPtrType()) {
+        return None
+    }
+    let addrCGType = addr.GetCGType() ?? return None
+    let destCGType = addrCGType.GetPointerElementType() ?? return None
+    if (!destCGType.IsStructType()) {
+        return None
+    }
+    let fieldSize = if (let Some(size) <- destCGType.GetSize()) { size } else { 0 }
+    let fieldSizeValue = unsafe {
+        LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(fieldSize), 0)
+    }
+    let align = irBuilder.GetCGModule().GetABITypeAlignment(destCGType.GetLLVMType())
+    if (IsAddressSpacePointer(addr.GetRawValue(), 1u32) && irBuilder.IsLLVMTypeContainsRef(destCGType.GetLLVMType())) {
+        return Some(irBuilder.CallGCWriteStruct(addr.GetRawValue(), addr.GetRawValue(), raw, fieldSizeValue,
+            destCGType.GetOriginal().ToString()))
+    }
+    return Some(irBuilder.CreateMemCpy(addr.GetRawValue(), align, raw, align, fieldSizeValue))
 }
 
 public func GenerateGetElementRef(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
