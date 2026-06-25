@@ -6,6 +6,7 @@ import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.CustomTypeDef
+import cangjie_compiler::chir.ExtendDef
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.Type
@@ -35,10 +36,7 @@ private class ExtensionClassVTable {
 
 public func GenerateInterfaceExtensionDefs(cgMod: CGModule): Unit {
     for (def in cgMod.GetCGContext().GetSubCHIRPackage().chirCustomDefs) {
-        if (def.TestAttr(Attribute.IMPORTED)) {
-            continue
-        }
-        if (!IsCurrentPackageDef(cgMod, def)) {
+        if (!ShouldCollectExtensionDef(cgMod, def)) {
             continue
         }
         GenerateExtensionDefsForCustomDef(cgMod, def)
@@ -51,6 +49,11 @@ public func RedefineTypeInfosForCustomDefs(cgMod: CGModule): Unit {
         if (!IsCurrentPackageDef(cgMod, def)) {
             continue
         }
+        if (let Some(classDef) <- (def as ClassDef)) {
+            if (IsCoreObjectDef(classDef) || IsClosureConversionEnvClass(classDef)) {
+                continue
+            }
+        }
         if (let Some(ty) <- def.GetType()) {
             if (ty.IsGenericRelated()) {
                 continue
@@ -62,6 +65,34 @@ public func RedefineTypeInfosForCustomDefs(cgMod: CGModule): Unit {
 
 private func IsCurrentPackageDef(cgMod: CGModule, def: CustomTypeDef): Bool {
     return def.GetPackageName() == cgMod.GetCGContext().GetCurrentPkgName()
+}
+
+private func ShouldCollectExtensionDef(cgMod: CGModule, def: CustomTypeDef): Bool {
+    if (def.TestAttr(Attribute.IMPORTED) || def.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+        return false
+    }
+    if (!IsCurrentPackageDef(cgMod, def)) {
+        return false
+    }
+    if (let Some(classDef) <- (def as ClassDef)) {
+        return !IsCoreObjectDef(classDef) && !IsClosureConversionEnvClass(classDef)
+    }
+    if (let Some(extendDef) <- (def as ExtendDef)) {
+        return ShouldCollectExtendDef(extendDef)
+    }
+    return true
+}
+
+private func ShouldCollectExtendDef(extendDef: ExtendDef): Bool {
+    if (let Some(extendedType) <- extendDef.GetExtendedType()) {
+        if (!extendedType.IsNominal()) {
+            return true
+        }
+        if (let Some(customTy) <- (extendedType as CustomType)) {
+            return customTy.GetCustomTypeDef().TestAttr(Attribute.IMPORTED)
+        }
+    }
+    return false
 }
 
 private func GenerateExtensionDefsForCustomDef(cgMod: CGModule, def: CustomTypeDef): Unit {
@@ -815,7 +846,11 @@ private func RequireClassType(def: ClassDef): ClassType {
 
 private func IsCoreObjectType(ty: ClassType): Bool {
     let def = ty.GetClassDef()
-    return def.GetPackageName() == "std.core" && def.GetSrcCodeIdentifier() == "Object"
+    return IsCoreObjectDef(def)
+}
+
+private func IsClosureConversionEnvClass(def: ClassDef): Bool {
+    return def.GetAnnotation("IsAutoEnvClass").isSome()
 }
 
 private func RequireCustomType(def: CustomTypeDef): Type {
