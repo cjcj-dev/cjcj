@@ -875,7 +875,7 @@ private func processStructDeclBody(typeManager: TypeManager, ctx: ASTContext, na
                             continue
                         }
                     }
-                    if (IsLegalAccess(node, field)) {
+                    if (IsTargetMemberVisibleToNode(field, node)) {
                         addDeclUnique(results, field)
                     }
                 }
