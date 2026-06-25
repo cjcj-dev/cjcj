@@ -766,6 +766,7 @@ public open class GlobalValue <: Value {
 public class GlobalVar <: GlobalValue {
     private var initializerValue: Option<Value> = None
     private var initFunc: Option<Function> = None
+    private var linkage: Linkage = Linkage.EXTERNAL
 
     public init(ty: Type, identifier: String, srcCodeIdentifier: String, rawMangledName: String, packageName: String) {
         super(ValueKind.KIND_GLOBALVAR, ty, identifier, srcCodeIdentifier, rawMangledName, packageName)
@@ -797,6 +798,14 @@ public class GlobalVar <: GlobalValue {
 
     public func GetInitFunc(): Option<Function> {
         return initFunc
+    }
+
+    public func SetLinkage(value: Linkage): Unit {
+        linkage = value
+    }
+
+    public func GetLinkage(): Linkage {
+        return linkage
     }
 
     public override func ToString(indent: Int64): String {

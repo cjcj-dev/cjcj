@@ -374,7 +374,9 @@ public class FaithfulAST2CHIR {
     private let builder: CHIRBuilder
     private let chirType: CHIRType
     private let importedPackages: ArrayList<AstPackage>
+    private let directImportedPackages: ArrayList<AstPackage>
     private let chirWFC: Bool
+    private let chirOptOverO2: Bool
     private var outputPackage: Option<Package> = None
     private var failure: Bool = false
     private var failureReason: String = ""
@@ -406,11 +408,15 @@ public class FaithfulAST2CHIR {
     private let packageInitializerBlocks: HashMap<Int64, Block> = HashMap<Int64, Block>()
 
     public init(builder: CHIRBuilder, chirType: CHIRType,
-        importedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(), chirWFC!: Bool = false) {
+        importedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(),
+        directImportedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(),
+        chirWFC!: Bool = false, chirOptOverO2!: Bool = false) {
         this.builder = builder
         this.chirType = chirType
         this.importedPackages = importedPkgs
+        this.directImportedPackages = directImportedPkgs
         this.chirWFC = chirWFC
+        this.chirOptOverO2 = chirOptOverO2
     }
 
     public func ToCHIRPackage(node: AstPackage): Bool {
@@ -1158,11 +1164,16 @@ public class FaithfulAST2CHIR {
     }
 
     private func IsSrcImportedDecl(decl: AstDecl): Bool {
-        if (!decl.TestAttr(AstAttribute.IMPORTED) || !decl.TestAttr(AstAttribute.SRC_IMPORTED)) {
+        if (!decl.TestAttr(AstAttribute.IMPORTED)) {
             return false
         }
         if (decl.IsConst()) {
             return true
+        }
+        if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+            if (chirOptOverO2 && funcDecl.isFrozen && !funcDecl.TestAttr(AstAttribute.ABSTRACT)) {
+                return true
+            }
         }
         if (let Some(varDecl) <- (decl as AstVarDecl)) {
             if (varDecl.TestAttr(AstAttribute.STATIC)) {
@@ -1233,6 +1244,9 @@ public class FaithfulAST2CHIR {
                 TranslateImportedFileLiteralInitializer(fileVars, initBlock)
                 continue
             }
+            if (IsImportedInitEntry(fileVars)) {
+                continue
+            }
             let fileInit = if (suffix == "_literal") {
                 TranslateFileLiteralInitializer(fileVars)
             } else {
@@ -1279,6 +1293,10 @@ public class FaithfulAST2CHIR {
         let boolTy = builder.context.GetBoolTy()
         let initFlag = builder.CreateGlobalVar(builder.context.GetRefTy(boolTy), name,
             srcCodeIdentifier: name, rawMangledName: "", packageName: pkg.GetName())
+        initFlag.EnableAttr(Attribute.NO_REFLECT_INFO)
+        initFlag.EnableAttr(Attribute.COMPILER_ADD)
+        initFlag.EnableAttr(Attribute.INITIALIZER)
+        initFlag.EnableAttr(Attribute.NO_DEBUG_INFO)
         let falseConst = builder.CreateConstant(boolTy, BoolLiteral(false), constantBlock)
         if (let Some(initValue) <- falseConst.GetResult()) {
             initFlag.SetInitializerValue(initValue)
@@ -1301,7 +1319,8 @@ public class FaithfulAST2CHIR {
 
     private func UpdateImportsInit(importsInitFunc: Function, suffix: String): Unit {
         let block = DropExitNodeOfInitializer(importsInitFunc)
-        for (pkgName in ImportedPackageNames()) {
+        for (importedPackage in DirectImportedPackages()) {
+            let pkgName = importedPackage.fullPackageName
             let fn = CreateEmptyGVInitFunc(PackageInitFuncName(pkgName, suffix), PackageInitFuncName(pkgName, suffix),
                 "", pkgName)
             fn.EnableAttr(Attribute.IMPORTED)
@@ -1367,7 +1386,7 @@ public class FaithfulAST2CHIR {
             return None
         }
         if (IsImportedInitEntry(fileVars)) {
-            return Some(CreateImportedFileInitFunc(fileVars.file, ""))
+            return None
         }
         let initFuncs = ArrayList<Function>()
         for (decl in fileVars.vars) {
@@ -1391,16 +1410,6 @@ public class FaithfulAST2CHIR {
             builder.CreateExit(None, entry)
         }
         return fileInit
-    }
-
-    private func CreateImportedFileInitFunc(file: AstFile, suffix: String): Function {
-        let name = FileInitFuncName(file, suffix)
-        let fn = CreateEmptyGVInitFunc(name, name, "", FileOwnerPackageName(file))
-        let entry = RequireEntryBlock(fn)
-        if (entry.GetTerminator().isNone()) {
-            builder.CreateExit(None, entry)
-        }
-        return fn
     }
 
     private func IsImportedInitEntry(fileVars: FaithfulInitFileVars): Bool {
@@ -1647,6 +1656,23 @@ public class FaithfulAST2CHIR {
         CollectImportedPackageNames(importedNominalDecls, names)
         CollectImportedPackageNames(importedGenericInstantiatedNominalDecls, names)
         return names
+    }
+
+    private func DirectImportedPackages(): ArrayList<AstPackage> {
+        if (!directImportedPackages.isEmpty()) {
+            return directImportedPackages
+        }
+        let names = ImportedPackageNames()
+        let out = ArrayList<AstPackage>()
+        for (name in names) {
+            for (pkg in importedPackages) {
+                if (pkg.fullPackageName == name) {
+                    out.add(pkg)
+                    break
+                }
+            }
+        }
+        return out
     }
 
     private func CollectImportedPackageNames(decls: ArrayList<AstDecl>, names: ArrayList<String>): Unit {

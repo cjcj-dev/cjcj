@@ -626,6 +626,10 @@ private class CjoFlatBuffer {
         return ReadU64(pos)
     }
 
+    public func U32At(pos: Int64): UInt32 {
+        return ReadU32(pos)
+    }
+
     public func StringAt(pos: Int64): String {
         if (!IsInBounds(pos, 4)) {
             return ""
@@ -747,7 +751,8 @@ private class CjoFullId {
 private class CjoSignatureMaterializer {
     private let packageName: String
     private let pkg: Package
-    private let file: File
+    private let fallbackFile: File
+    private let filesByIndex: HashMap<UInt32, File>
     private let importedPackages: ArrayList<Package>
     private var flat: Option<CjoFlatBuffer> = None
     private var flatAllDecls: Int64 = -1
@@ -759,10 +764,12 @@ private class CjoSignatureMaterializer {
     private let flatTypeCache: HashMap<UInt32, Ty> = HashMap<UInt32, Ty>()
     private let flatGenericParamDecls: HashMap<UInt32, GenericParamDecl> = HashMap<UInt32, GenericParamDecl>()
 
-    public init(packageName: String, pkg: Package, file: File, importedPackages: ArrayList<Package>) {
+    public init(packageName: String, pkg: Package, fallbackFile: File, filesByIndex: HashMap<UInt32, File>,
+        importedPackages: ArrayList<Package>) {
         this.packageName = packageName
         this.pkg = pkg
-        this.file = file
+        this.fallbackFile = fallbackFile
+        this.filesByIndex = filesByIndex
         this.importedPackages = importedPackages
     }
 
@@ -843,13 +850,13 @@ private class CjoSignatureMaterializer {
         while (fileIdx < reader.VectorLength(allFileImports)) {
             let importsTable = reader.VectorOffsetElement(allFileImports, fileIdx)
             if (importsTable >= 0) {
-                MaterializeFlatImports(reader, importsTable)
+                MaterializeFlatImports(reader, importsTable, FileByFlatIndex(UInt32(fileIdx + 1)))
             }
             fileIdx++
         }
     }
 
-    private func MaterializeFlatImports(reader: CjoFlatBuffer, importsTable: Int64): Unit {
+    private func MaterializeFlatImports(reader: CjoFlatBuffer, importsTable: Int64, targetFile: File): Unit {
         let importSpecs = reader.VectorField(importsTable, 4)
         if (importSpecs < 0) {
             return
@@ -858,13 +865,13 @@ private class CjoSignatureMaterializer {
         while (idx < reader.VectorLength(importSpecs)) {
             let importTable = reader.VectorOffsetElement(importSpecs, idx)
             if (importTable >= 0) {
-                file.imports.add(CreateFlatImportSpec(reader, importTable))
+                targetFile.imports.add(CreateFlatImportSpec(reader, importTable, targetFile))
             }
             idx++
         }
     }
 
-    private func CreateFlatImportSpec(reader: CjoFlatBuffer, importTable: Int64): ImportSpec {
+    private func CreateFlatImportSpec(reader: CjoFlatBuffer, importTable: Int64, targetFile: File): ImportSpec {
         let importSpec = ImportSpec()
         let identifier = reader.StringField(importTable, 10)
         let aliasName = reader.StringField(importTable, 12)
@@ -890,8 +897,8 @@ private class CjoSignatureMaterializer {
         importSpec.withImplicitExport = reader.U8Field(importTable, 20, 1u8) != 0u8
         SetFlatImportAccessLevel(importSpec, FlatImportAccessLevel(reader.U8Field(importTable, 14, 0u8)))
         importSpec.EnableAttr(Attribute.IMPORTED)
-        importSpec.curFile = Some(file)
-        importSpec.content.curFile = Some(file)
+        importSpec.curFile = Some(targetFile)
+        importSpec.content.curFile = Some(targetFile)
         return importSpec
     }
 
@@ -972,11 +979,12 @@ private class CjoSignatureMaterializer {
             pkg.genericInstantiatedDecls.add(decl)
             return
         }
+        let targetFile = decl.curFile ?? fallbackFile
         if (decl.IsExportedDecl() || decl.TestAttr(Attribute.FROM_COMMON_PART)) {
-            file.decls.add(decl)
+            targetFile.decls.add(decl)
             return
         }
-        file.exportedInternalDecls.add(decl)
+        targetFile.exportedInternalDecls.add(decl)
     }
 
     private func CreateFlatDeclShell(reader: CjoFlatBuffer, record: CjoFlatDecl): Decl {
@@ -1045,7 +1053,7 @@ private class CjoSignatureMaterializer {
         decl.toBeCompiled = false
         ApplyFlatAttributes(reader, record, decl)
         ApplyFlatAnnotations(reader, record, decl)
-        MarkFlatImportedDecl(decl)
+        MarkFlatImportedDecl(reader, record, decl)
         ApplyFlatDeclHash(reader, record, decl)
     }
 
@@ -1261,10 +1269,19 @@ private class CjoSignatureMaterializer {
         }
     }
 
-    private func MarkFlatImportedDecl(decl: Decl): Unit {
-        decl.curFile = Some(file)
+    private func MarkFlatImportedDecl(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
+        decl.curFile = Some(FileByFlatIndex(FlatDeclFileIndex(reader, record)))
         decl.EnableAttr(Attribute.IMPORTED)
         decl.EnableAttr(Attribute.SRC_IMPORTED)
+    }
+
+    private func FileByFlatIndex(index: UInt32): File {
+        return filesByIndex.get(index) ?? fallbackFile
+    }
+
+    private func FlatDeclFileIndex(reader: CjoFlatBuffer, record: CjoFlatDecl): UInt32 {
+        let beginPos = reader.TableField(record.table, 14)
+        return if (beginPos >= 0) { reader.U32At(beginPos) } else { 0u32 }
     }
 
     private func FlatBuiltInType(reader: CjoFlatBuffer, record: CjoFlatDecl): BuiltInType {
@@ -3518,6 +3535,7 @@ public class ImportManager {
     private let importedPackages: ArrayList<Package> = ArrayList<Package>()
     private let depPkgCjdPaths: HashMap<String, String> = HashMap<String, String>()
     private let directDependencies: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
+    private let directDependencyOrder: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
     private let loadingPackages: HashSet<String> = HashSet<String>()
     private let sourcePackagesForMembers: ArrayList<Package> = ArrayList<Package>()
     private let packageMembers: HashMap<String, HashMap<String, ArrayList<Decl>>> =
@@ -3580,6 +3598,7 @@ public class ImportManager {
         importedPackages.clear()
         depPkgCjdPaths.clear()
         directDependencies.clear()
+        directDependencyOrder.clear()
         loadingPackages.clear()
         sourcePackagesForMembers.clear()
         packageMembers.clear()
@@ -3595,7 +3614,7 @@ public class ImportManager {
             sourcePackagesForMembers.add(pkg)
         }
         for (pkg in pkgs) {
-            let deps = CollectDirectDependencyNames(pkg, sourcePackages)
+            let deps = CollectDirectDependencyNamesInOrder(pkg, sourcePackages)
             let filteredDeps = HashSet<String>()
             for (dep in deps) {
                 if (dep.isEmpty() || dep == pkg.fullPackageName) {
@@ -3610,6 +3629,7 @@ public class ImportManager {
                 }
             }
             directDependencies.add(pkg.fullPackageName, filteredDeps)
+            directDependencyOrder.add(pkg.fullPackageName, deps)
         }
         if (!LoadResolvedImportedPackages()) {
             return false
@@ -3631,6 +3651,17 @@ public class ImportManager {
 
     public func GetAllImportedPackages(): ArrayList<Package> {
         return importedPackages
+    }
+
+    public func GetCurImportedPackages(fullPackageName: String): ArrayList<Package> {
+        let out = ArrayList<Package>()
+        let deps = directDependencyOrder.get(fullPackageName) ?? return out
+        for (dep in deps) {
+            if (let Some(pkg) <- GetPackage(dep)) {
+                out.add(pkg)
+            }
+        }
+        return out
     }
 
     public func AddImportedPackage(pkg: Package): Unit {
@@ -4136,14 +4167,44 @@ public class ImportManager {
         let pkg = CreatePackage(fullPackageName)
         pkg.EnableAttr(Attribute.IMPORTED)
         pkg.hasSourceImportedDecl = true
-        let file = CreateFile(cjoPath)
-        file.curPackage = Some(pkg)
-        pkg.files.add(file)
-        let materializer = CjoSignatureMaterializer(fullPackageName, pkg, file, importedPackages)
+        let (fallbackFile, filesByIndex) = MaterializeCjoFiles(data, pkg, cjoPath)
+        let materializer = CjoSignatureMaterializer(fullPackageName, pkg, fallbackFile, filesByIndex, importedPackages)
         materializer.Materialize(data)
         AddImportedPackageIfMissing(pkg)
         loadingPackages.remove(fullPackageName)
         return true
+    }
+
+    private func MaterializeCjoFiles(data: Array<UInt8>, pkg: Package, cjoPath: String): (File, HashMap<UInt32, File>) {
+        let filesByIndex = HashMap<UInt32, File>()
+        let reader = CjoFlatBuffer(data)
+        let root = reader.RootTable()
+        let filesVec = if (root >= 0) { reader.VectorField(root, 14) } else { -1 }
+        if (filesVec >= 0) {
+            var idx: Int64 = 0
+            while (idx < reader.VectorLength(filesVec)) {
+                let storedPath = reader.StringAt(reader.VectorOffsetElement(filesVec, idx))
+                let file = CreateImportedCjoFile(pkg, if (storedPath.isEmpty()) { cjoPath } else { storedPath },
+                    UInt64(idx + 1))
+                filesByIndex[UInt32(idx + 1)] = file
+                idx++
+            }
+        }
+        if (pkg.files.isEmpty()) {
+            let file = CreateImportedCjoFile(pkg, cjoPath, 1u64)
+            filesByIndex[1u32] = file
+        }
+        return (pkg.files[0], filesByIndex)
+    }
+
+    private func CreateImportedCjoFile(pkg: Package, path: String, fileID: UInt64): File {
+        let file = CreateFile(path)
+        file.fileName = FileUtil.GetFileName(path)
+        file.begin = Position(fileID, 1, 1)
+        file.end = Position(fileID, 1, 1)
+        file.curPackage = Some(pkg)
+        pkg.files.add(file)
+        return file
     }
 
     private func LoadSerializedImportDependencies(data: Array<UInt8>, ownerPackageName: String): Bool {
@@ -4173,10 +4234,20 @@ public class ImportManager {
 
     private func CollectDirectDependencyNames(pkg: Package, sourcePackages: HashSet<String>): HashSet<String> {
         let deps = HashSet<String>()
+        for (dep in CollectDirectDependencyNamesInOrder(pkg, sourcePackages)) {
+            deps.add(dep)
+        }
+        return deps
+    }
+
+    private func CollectDirectDependencyNamesInOrder(pkg: Package, sourcePackages: HashSet<String>): ArrayList<String> {
+        let deps = ArrayList<String>()
+        let seen = HashSet<String>()
         for (file in pkg.files) {
             for (importSpec in file.imports) {
                 let depName = NormalizeImportedPackageName(importSpec.content, sourcePackages)
-                if (!depName.isEmpty() && depName != pkg.fullPackageName) {
+                if (!depName.isEmpty() && depName != pkg.fullPackageName && !seen.contains(depName)) {
+                    seen.add(depName)
                     deps.add(depName)
                 }
             }
