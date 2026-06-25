@@ -102,41 +102,69 @@ extend TypeKind <: Hashable {
 }
 
 public enum Attribute {
-    | ABSTRACT | ANNOTATION | BOXED | BUILTIN | C | CFFI_WRAPPER | COMPILE_TIME_VALUE
-    | CONST | EXTERN | FAST_NATIVE | FOREIGN | GENERIC_INSTANTIATED | IMPLICIT_ADD
-    | IMPORTED | INLINED | MUT | NO_SIDE_EFFECT | OPERATOR | PREVIOUSLY_DESERIALIZED
-    | PRIVATE | PROTECTED | PUBLIC | READONLY | STATIC | SRC_CODE_IMPORTED | THIN | VIRTUAL
+    | STATIC | PUBLIC | PRIVATE | PROTECTED
+    | ABSTRACT | VIRTUAL | OVERRIDE | REDEF | SEALED | FOREIGN
+    | MUT | FINAL | OPERATOR | READONLY | CONST | IMPORTED | GENERIC_INSTANTIATED
+    | NO_DEBUG_INFO | GENERIC | INTERNAL | COMPILER_ADD | NO_REFLECT_INFO | NO_INLINE
+    | NON_RECOMPILE | UNREACHABLE | NO_SIDE_EFFECT | COMMON | SPECIFIC | SKIP_ANALYSIS
+    | DESERIALIZED | INITIALIZER | UNSAFE | JAVA_MIRROR | JAVA_IMPL | OBJ_C_MIRROR
+    | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED
+    | ANNOTATION | BOXED | BUILTIN | C | CFFI_WRAPPER | COMPILE_TIME_VALUE
+    | EXTERN | FAST_NATIVE | IMPLICIT_ADD | INLINED | SRC_CODE_IMPORTED | THIN
 }
 
 public func AttributeIndex(attr: Attribute): Int64 {
     return match (attr) {
-        case Attribute.ABSTRACT => 0
-        case Attribute.ANNOTATION => 1
-        case Attribute.BOXED => 2
-        case Attribute.BUILTIN => 3
-        case Attribute.C => 4
-        case Attribute.CFFI_WRAPPER => 5
-        case Attribute.COMPILE_TIME_VALUE => 6
-        case Attribute.CONST => 7
-        case Attribute.EXTERN => 8
-        case Attribute.FAST_NATIVE => 9
-        case Attribute.FOREIGN => 10
-        case Attribute.GENERIC_INSTANTIATED => 11
-        case Attribute.IMPLICIT_ADD => 12
-        case Attribute.IMPORTED => 13
-        case Attribute.INLINED => 14
-        case Attribute.MUT => 15
-        case Attribute.NO_SIDE_EFFECT => 16
-        case Attribute.OPERATOR => 17
-        case Attribute.PREVIOUSLY_DESERIALIZED => 18
-        case Attribute.PRIVATE => 19
-        case Attribute.PROTECTED => 20
-        case Attribute.PUBLIC => 21
-        case Attribute.READONLY => 22
-        case Attribute.STATIC => 23
-        case Attribute.SRC_CODE_IMPORTED => 24
-        case Attribute.THIN => 25
-        case Attribute.VIRTUAL => 26
+        case Attribute.STATIC => 0
+        case Attribute.PUBLIC => 1
+        case Attribute.PRIVATE => 2
+        case Attribute.PROTECTED => 3
+        case Attribute.ABSTRACT => 4
+        case Attribute.VIRTUAL => 5
+        case Attribute.OVERRIDE => 6
+        case Attribute.REDEF => 7
+        case Attribute.SEALED => 8
+        case Attribute.FOREIGN => 9
+        case Attribute.MUT => 10
+        case Attribute.FINAL => 11
+        case Attribute.OPERATOR => 12
+        case Attribute.READONLY => 13
+        case Attribute.CONST => 14
+        case Attribute.IMPORTED => 15
+        case Attribute.GENERIC_INSTANTIATED => 16
+        case Attribute.NO_DEBUG_INFO => 17
+        case Attribute.GENERIC => 18
+        case Attribute.INTERNAL => 19
+        case Attribute.COMPILER_ADD => 20
+        case Attribute.NO_REFLECT_INFO => 21
+        case Attribute.NO_INLINE => 22
+        case Attribute.NON_RECOMPILE => 23
+        case Attribute.UNREACHABLE => 24
+        case Attribute.NO_SIDE_EFFECT => 25
+        case Attribute.COMMON => 26
+        case Attribute.SPECIFIC => 27
+        case Attribute.SKIP_ANALYSIS => 28
+        case Attribute.DESERIALIZED => 29
+        case Attribute.INITIALIZER => 30
+        case Attribute.UNSAFE => 31
+        case Attribute.JAVA_MIRROR => 32
+        case Attribute.JAVA_IMPL => 33
+        case Attribute.OBJ_C_MIRROR => 34
+        case Attribute.HAS_INITED_FIELD => 35
+        case Attribute.JAVA_HAS_DEFAULT => 36
+        case Attribute.PREVIOUSLY_DESERIALIZED => 37
+        case Attribute.ANNOTATION => 64
+        case Attribute.BOXED => 65
+        case Attribute.BUILTIN => 66
+        case Attribute.C => 67
+        case Attribute.CFFI_WRAPPER => 68
+        case Attribute.COMPILE_TIME_VALUE => 69
+        case Attribute.EXTERN => 70
+        case Attribute.FAST_NATIVE => 71
+        case Attribute.IMPLICIT_ADD => 72
+        case Attribute.INLINED => 73
+        case Attribute.SRC_CODE_IMPORTED => 74
+        case Attribute.THIN => 75
     }
 }
 
@@ -148,26 +176,49 @@ public func AttributeName(attr: Attribute): String {
         case Attribute.BUILTIN => "builtin"
         case Attribute.C => "C"
         case Attribute.CFFI_WRAPPER => "cffiWrapper"
+        case Attribute.COMMON => "common"
         case Attribute.COMPILE_TIME_VALUE => "compileTimeValue"
+        case Attribute.COMPILER_ADD => "compilerAdd"
         case Attribute.CONST => "const"
+        case Attribute.DESERIALIZED => "deserialized"
         case Attribute.EXTERN => "extern"
         case Attribute.FAST_NATIVE => "fastNative"
+        case Attribute.FINAL => "final"
         case Attribute.FOREIGN => "foreign"
+        case Attribute.GENERIC => "generic"
         case Attribute.GENERIC_INSTANTIATED => "genericInstantiated"
+        case Attribute.HAS_INITED_FIELD => "hasInitedField"
         case Attribute.IMPLICIT_ADD => "implicitAdd"
         case Attribute.IMPORTED => "imported"
         case Attribute.INLINED => "inlined"
+        case Attribute.INITIALIZER => "initializer"
+        case Attribute.INTERNAL => "internal"
+        case Attribute.JAVA_HAS_DEFAULT => "javaHasDefault"
+        case Attribute.JAVA_IMPL => "javaImpl"
+        case Attribute.JAVA_MIRROR => "javaMirror"
         case Attribute.MUT => "mut"
+        case Attribute.NO_DEBUG_INFO => "noDebugInfo"
+        case Attribute.NO_INLINE => "noInline"
+        case Attribute.NO_REFLECT_INFO => "noReflectInfo"
         case Attribute.NO_SIDE_EFFECT => "noSideEffect"
+        case Attribute.NON_RECOMPILE => "nonRecompile"
+        case Attribute.OBJ_C_MIRROR => "objCMirror"
         case Attribute.OPERATOR => "operator"
         case Attribute.PREVIOUSLY_DESERIALIZED => "previouslyDeserialized"
         case Attribute.PRIVATE => "private"
         case Attribute.PROTECTED => "protected"
         case Attribute.PUBLIC => "public"
         case Attribute.READONLY => "readonly"
+        case Attribute.REDEF => "redef"
+        case Attribute.SEALED => "sealed"
+        case Attribute.SKIP_ANALYSIS => "skip_analysis"
+        case Attribute.SPECIFIC => "specific"
         case Attribute.STATIC => "static"
         case Attribute.SRC_CODE_IMPORTED => "srcCodeImported"
         case Attribute.THIN => "thin"
+        case Attribute.UNREACHABLE => "unreachable"
+        case Attribute.UNSAFE => "unsafe"
+        case Attribute.OVERRIDE => "override"
         case Attribute.VIRTUAL => "virtual"
     }
 }
@@ -185,6 +236,34 @@ extend Attribute <: Equatable<Attribute> {
 extend Attribute <: Hashable {
     public func hashCode(): Int64 {
         return AttributeIndex(this)
+    }
+}
+
+public enum Linkage {
+    | WEAK_ODR
+    | EXTERNAL
+    | INTERNAL
+    | LINKONCE_ODR
+    | EXTERNAL_WEAK
+}
+
+public func LinkageToInt(value: Linkage): Int64 {
+    return match (value) {
+        case Linkage.WEAK_ODR => 0
+        case Linkage.EXTERNAL => 1
+        case Linkage.INTERNAL => 2
+        case Linkage.LINKONCE_ODR => 3
+        case Linkage.EXTERNAL_WEAK => 4
+    }
+}
+
+extend Linkage <: Equatable<Linkage> {
+    public operator func ==(right: Linkage): Bool {
+        return LinkageToInt(this) == LinkageToInt(right)
+    }
+
+    public operator func !=(right: Linkage): Bool {
+        return !(this == right)
     }
 }
 

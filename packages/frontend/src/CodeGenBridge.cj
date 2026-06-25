@@ -26,7 +26,9 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
     let chirType = CHIRType(builder, CHIRTypeCache())
     let ast2chir = FaithfulAST2CHIR(builder, chirType,
         importedPkgs: instance.importManager.GetAllImportedPackages(),
-        chirWFC: instance.invocation.globalOptions.chirWFC)
+        directImportedPkgs: instance.importManager.GetCurImportedPackages(pkg.fullPackageName),
+        chirWFC: instance.invocation.globalOptions.chirWFC,
+        chirOptOverO2: instance.invocation.globalOptions.IsCHIROptimizationLevelOverO2())
     if (!ast2chir.ToCHIRPackage(pkg)) {
         return None
     }
