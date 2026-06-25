@@ -1182,6 +1182,14 @@ public class IRBuilder2 <: Resource {
         if (IsGCReferenceLLVMType(elementType)) {
             return CallGCReadRef(retValue, typedPayload)
         }
+        if (resultCGType.GetOriginal().IsTuple() && IsLLVMTypeContainsRef(elementType)) {
+            let destPtr = CreateEntryAlloca(resultCGType, name: "sret.tuple")
+            let size = unsafe {
+                LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(elementType), 0)
+            }
+            CallGCReadStruct(destPtr, retValue, typedPayload, size, resultCGType.GetOriginal().ToString())
+            return CreateLoad(elementType, destPtr, name: "sret.value")
+        }
         return CreateLoad(elementType, typedPayload, name: "sret.value")
     }
 
@@ -2185,6 +2193,22 @@ public class IRBuilder2 <: Resource {
             CreateLoad(valueCGType.GetLLVMType(), sourceValue, name: "generic.payload.value")
         } else {
             sourceValue
+        }
+        if (valueTy.IsTuple() && IsLLVMTypeContainsRef(valueCGType.GetLLVMType())) {
+            let storedValueType = unsafe { LLVMTypeOf(storedValue) }
+            let sourcePtr = if (!storedValueType.isNull() && unsafe { LLVMGetTypeKind(storedValueType) } == 12) {
+                storedValue
+            } else {
+                let tmp = CreateEntryAlloca(valueCGType, name: "generic.tuple")
+                StoreAggregateArgToSlot(storedValue, tmp, valueCGType)
+                tmp
+            }
+            let size = unsafe {
+                LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw),
+                    cgMod.GetTypeSize(valueCGType.GetLLVMType()), 0)
+            }
+            CallGCWriteStruct(objectValue, typedPayload, sourcePtr, size, valueCGType.GetOriginal().ToString())
+            return
         }
         CreateStore(storedValue, typedPayload)
     }

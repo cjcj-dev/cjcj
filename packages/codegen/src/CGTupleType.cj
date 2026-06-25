@@ -12,7 +12,7 @@ public class CGTupleType <: CGType {
     }
 
     protected override func GenLLVMType(): LLVMTypeRef {
-        let typeName = chirType.ToString() + ".Type"
+        let typeName = STRUCT_TYPE_PREFIX + chirType.ToString()
         let tupleLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), typeName)
         layoutType = tupleLayout
         if (!cgCtx.IsGeneratedStructType(typeName)) {
