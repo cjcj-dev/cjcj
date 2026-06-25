@@ -110,7 +110,6 @@ public func SetOverflowFlag(node: Node): Unit {
 }
 
 public func SetOverflowStrategyForPkg(pkg: Package): Unit {
-    SetOverflowStrategyForNode(pkg, OverflowStrategy.NA, OverflowStrategy.NA)
     let walker = Walker(pkg, visitPre: { curNode: Node =>
         SetOverflowFlag(curNode)
         VisitAction.WALK_CHILDREN

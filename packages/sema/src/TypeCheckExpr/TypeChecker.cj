@@ -928,6 +928,13 @@ public class TypeChecker {
         let recursivePkgs = BuildRecursiveEliminationPackages(activeContexts)
         PerformRecursiveTypesElimination(recursivePkgs, impl.typeManager)
         let implicitUsedDecls = GetImplicitUsedCoreDecls()
+        let activePkgs = ArrayList<Package>()
+        for (ctx in activeContexts) {
+            if (let Some(pkg) <- contextPackage(ctx)) {
+                activePkgs.add(pkg)
+            }
+        }
+        SetOverflowStrategy(activePkgs)
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
                 SetOverflowStrategyForPkg(pkg)
