@@ -2,6 +2,7 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.Attribute
+import cangjie_compiler::chir.ExtendDef
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GenericType
@@ -30,6 +31,7 @@ public class CGFunctionType <: CGType {
     private var hasBasePtr: Bool = false
     private var llvmFunctionType: Option<LLVMTypeRef> = None
     private let realParamIndices: ArrayList<Int64> = ArrayList<Int64>()
+    private let structParamNeedsBasePtr: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     private let genericParamIndicesMap: ArrayList<GenericParamIndex> = ArrayList<GenericParamIndex>()
     private var methodTypeInfoIndex: Option<Int64> = None
     private var staticMethodTypeInfoIndex: Option<Int64> = None
@@ -44,7 +46,7 @@ public class CGFunctionType <: CGType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: FuncType, extraInfo: TypeExtraInfo) {
         super(cgMod, cgCtx, chirType, cgTypeKind: CGTypeKind.CG_FUNCTION)
         chirFunc = None
-        allowBasePtr = extraInfo.allowBasePtr
+        allowBasePtr = if (extraInfo.forWrapper) { false } else { extraInfo.allowBasePtr }
         methodType = extraInfo.isMethod
         staticMethodType = extraInfo.isStaticMethod
         forWrapper = extraInfo.forWrapper
@@ -57,7 +59,7 @@ public class CGFunctionType <: CGType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirFunc: Function, extraInfo: TypeExtraInfo) {
         super(cgMod, cgCtx, ChirFunctionTypeOf(chirFunc), cgTypeKind: CGTypeKind.CG_FUNCTION)
         this.chirFunc = chirFunc
-        allowBasePtr = extraInfo.allowBasePtr
+        allowBasePtr = if (extraInfo.forWrapper) { false } else { extraInfo.allowBasePtr }
         methodType = chirFunc.GetParentCustomTypeDef().isSome()
         staticMethodType = chirFunc.TestAttr(Attribute.STATIC)
         forWrapper = extraInfo.forWrapper
@@ -72,7 +74,15 @@ public class CGFunctionType <: CGType {
     public func IsMethodType(): Bool { return methodType }
     public func IsStaticMethodType(): Bool { return staticMethodType }
     public func IsConstructorType(): Bool { return constructorType }
-    public func GetRealArgIndices(): ArrayList<Int64> { return realParamIndices }
+    public func GetRealArgIndices(): ArrayList<Int64> { Complete(); return realParamIndices }
+    public func GetStructParamNeedsBasePtrIndices(): HashMap<Int64, Int64> {
+        Complete()
+        let out = HashMap<Int64, Int64>()
+        for ((argIdx, containedIdx) in structParamNeedsBasePtr) {
+            out[argIdx] = containedIdx
+        }
+        return out
+    }
     public func GetGenericParamIndex(genericTy: Type): Option<Int64> {
         Complete()
         for (item in genericParamIndicesMap) {
@@ -104,55 +114,68 @@ public class CGFunctionType <: CGType {
                 retCGType.GetLLVMType()
             }
             let paramLLVMTypes = ArrayList<LLVMTypeRef>()
+            var realArgIdx: Int64 = 0
             if (hasSRet) {
-                if (ContainsGenericType(retTy) && !retTy.IsGeneric()) {
-                    paramLLVMTypes.add(CGType.GetRefType(cgCtx.GetLLVMContext()))
-                } else {
-                    let sretAddrspace = if (retCGType.GetSize().isNone() && !retTy.IsGeneric()) { 1u32 } else { 0u32 }
-                    paramLLVMTypes.add(unsafe { LLVMPointerType(retCGType.GetLLVMType(), sretAddrspace) })
-                }
+                let sretAddrspace = if (retCGType.GetSize().isNone() && !retTy.IsGeneric()) { 1u32 } else { 0u32 }
+                paramLLVMTypes.add(unsafe { LLVMPointerType(retCGType.GetLLVMType(), sretAddrspace) })
+                realArgIdx++
             }
             realParamIndices.clear()
+            structParamNeedsBasePtr.clear()
             genericParamIndicesMap.clear()
+            var containedCGTypeIndex: Int64 = 1
             for (paramTy in funcTy.GetParamTypes()) {
                 let paramCGType = CGType.GetOrCreate(cgMod, paramTy)
-                realParamIndices.add(paramLLVMTypes.size)
+                realParamIndices.add(realArgIdx)
                 let derefParamTy = paramTy.StripAllRefs()
                 if (paramTy.IsRef() && (derefParamTy.IsStruct() || derefParamTy.IsTuple())) {
                     let derefParamCGType = CGType.GetOrCreate(cgMod, derefParamTy)
                     paramLLVMTypes.add(unsafe { LLVMPointerType(derefParamCGType.GetLLVMType(), 1u32) })
                     if (allowBasePtr) {
                         paramLLVMTypes.add(CGType.GetRefType(cgCtx.GetLLVMContext()))
+                        structParamNeedsBasePtr[realArgIdx] = containedCGTypeIndex
+                        realArgIdx++
                         hasBasePtr = true
                     }
-                } else if (ShouldPassByPointer(paramTy, paramCGType)) {
-                    let addrspace = if (paramCGType.GetSize().isSome()) { 0u32 } else { 1u32 }
-                    paramLLVMTypes.add(unsafe { LLVMPointerType(paramCGType.GetLLVMType(), addrspace) })
-                } else {
-                    if (ShouldNeedBasePtr(paramTy) && allowBasePtr) {
-                        paramLLVMTypes.add(unsafe { LLVMPointerType(paramCGType.GetLLVMType(), 0u32) })
+                } else if (paramTy.IsStruct() || paramTy.IsTuple() ||
+                    (paramCGType.GetSize().isNone() && !paramTy.IsGeneric())) {
+                    let addrspace = if (IsFirstStructOrExtendThisParam(containedCGTypeIndex)) {
+                        0u32
+                    } else if (paramCGType.GetSize().isSome()) {
+                        0u32
                     } else {
-                        paramLLVMTypes.add(paramCGType.GetLLVMType())
+                        1u32
                     }
+                    paramLLVMTypes.add(unsafe { LLVMPointerType(paramCGType.GetLLVMType(), addrspace) })
+                } else if (paramCGType.IsStructType() || paramCGType.IsVArrayType()) {
+                    paramLLVMTypes.add(unsafe { LLVMPointerType(paramCGType.GetLLVMType(), 0u32) })
+                } else {
+                    paramLLVMTypes.add(paramCGType.GetLLVMType())
                 }
+                containedCGTypeIndex++
+                realArgIdx++
             }
             if (let Some(fn) <- chirFunc) {
                 for (chirGenericTy in fn.GetGenericTypeParams()) {
-                    genericParamIndicesMap.add(GenericParamIndex(chirGenericTy, paramLLVMTypes.size))
+                    genericParamIndicesMap.add(GenericParamIndex(chirGenericTy, realArgIdx))
                     paramLLVMTypes.add(CGType.GetOrCreateTypeInfoPtrType(cgCtx.GetLLVMContext()))
+                    realArgIdx++
                 }
             } else {
                 for (_ in instantiatedParamTypes) {
                     paramLLVMTypes.add(CGType.GetOrCreateTypeInfoPtrType(cgCtx.GetLLVMContext()))
+                    realArgIdx++
                 }
             }
             if (methodType) {
-                methodTypeInfoIndex = Some(paramLLVMTypes.size)
+                methodTypeInfoIndex = Some(realArgIdx)
                 paramLLVMTypes.add(CGType.GetOrCreateTypeInfoPtrType(cgCtx.GetLLVMContext()))
+                realArgIdx++
             }
             if (staticMethodType) {
-                staticMethodTypeInfoIndex = Some(paramLLVMTypes.size)
+                staticMethodTypeInfoIndex = Some(realArgIdx)
                 paramLLVMTypes.add(CGType.GetOrCreateTypeInfoPtrType(cgCtx.GetLLVMContext()))
+                realArgIdx++
             }
             if (paramLLVMTypes.isEmpty()) {
                 llvmFunctionType = unsafe {
@@ -189,15 +212,22 @@ public class CGFunctionType <: CGType {
 
     protected override func GenContainedCGTypes(): Unit {
         if (let Some(funcTy) <- (chirType as FuncType)) {
-            containedCGTypes.add(CGType.GetOrCreate(cgMod, funcTy.GetReturnType()))
+            var containedCGTypeIndex: Int64 = 0
+            containedCGTypes.add(GetFixedCGType(funcTy.GetReturnType(), containedCGTypeIndex))
+            containedCGTypeIndex++
             for (paramTy in funcTy.GetParamTypes()) {
-                let paramCGType = CGType.GetOrCreate(cgMod, paramTy)
-                if (ShouldPassByPointer(paramTy, paramCGType)) {
-                    let addrspace = if (paramCGType.GetSize().isSome()) { 0u32 } else { 1u32 }
-                    containedCGTypes.add(CGType.GetOrCreate(cgMod,
-                        cgCtx.GetCHIRBuilder().context.GetRefTy(paramTy), extraInfo: TypeExtraInfo(addrspace)))
-                } else {
-                    containedCGTypes.add(paramCGType)
+                containedCGTypes.add(GetFixedCGType(paramTy, containedCGTypeIndex))
+                containedCGTypeIndex++
+            }
+            if (let Some(fn) <- chirFunc) {
+                for (_ in fn.GetGenericTypeParams()) {
+                    containedCGTypes.add(CGTIType(cgMod))
+                }
+                if (fn.GetOuterDeclaredOrExtendedDef().isSome()) {
+                    containedCGTypes.add(CGTIType(cgMod))
+                }
+                if (staticMethodType) {
+                    containedCGTypes.add(CGTIType(cgMod))
                 }
             }
         }
@@ -229,12 +259,60 @@ public class CGFunctionType <: CGType {
         return retTy.IsNothing() || retTy.IsVoid()
     }
 
-    private func ShouldNeedBasePtr(paramTy: Type): Bool {
-        return paramTy.IsStruct() || paramTy.IsTuple()
+    private func GetFixedCGType(paramTy: Type, containedCGTypeIndex: Int64): CGType {
+        let paramCGType = CGType.GetOrCreate(cgMod, paramTy)
+        let derefParamTy = paramTy.StripAllRefs()
+        if (paramTy.IsRef() && derefParamTy.IsStruct()) {
+            return CGType.GetOrCreate(cgMod, paramTy, extraInfo: TypeExtraInfo(1u32))
+        } else if (paramTy.IsStruct() || paramTy.IsTuple() || (paramCGType.GetSize().isNone() && !paramTy.IsGeneric())) {
+            let refType = cgCtx.GetCHIRBuilder().context.GetRefTy(paramTy)
+            if (IsFirstStructOrExtendThisParamForContained(containedCGTypeIndex)) {
+                return CGType.GetOrCreate(cgMod, refType)
+            }
+            let addrspace = if (paramCGType.GetSize().isSome()) { 0u32 } else { 1u32 }
+            return CGType.GetOrCreate(cgMod, refType, extraInfo: TypeExtraInfo(addrspace))
+        } else if (paramCGType.IsStructType() || paramCGType.IsVArrayType()) {
+            return CGType.GetOrCreate(cgMod, cgCtx.GetCHIRBuilder().context.GetRefTy(paramTy),
+                extraInfo: TypeExtraInfo(0u32))
+        } else if (paramCGType.IsStructPtrType() || IsVArrayPtrType(paramCGType)) {
+            return CGType.GetOrCreate(cgMod, paramTy, extraInfo: TypeExtraInfo(1u32))
+        }
+        return CGType.GetOrCreate(cgMod, paramTy)
     }
 
-    private func ShouldPassByPointer(paramTy: Type, cgType: CGType): Bool {
-        return paramTy.IsStruct() || paramTy.IsTuple() || (!cgType.GetSize().isSome() && !paramTy.IsGeneric()) ||
-            cgType.IsStructType() || cgType.IsVArrayType()
+    private func IsVArrayPtrType(cgType: CGType): Bool {
+        if (!cgType.IsPointerType()) {
+            return false
+        }
+        let contained = cgType.GetContainedTypes()
+        return !contained.isEmpty() && contained[0].IsVArrayType()
+    }
+
+    private func IsFirstStructOrExtendThisParam(containedCGTypeIndex: Int64): Bool {
+        if (forWrapper || containedCGTypeIndex != 1 || chirFunc.isNone()) {
+            return false
+        }
+        let fn = chirFunc.getOrThrow()
+        return !fn.TestAttr(Attribute.STATIC) && IsStructOrExtendMethod(fn)
+    }
+
+    private func IsFirstStructOrExtendThisParamForContained(containedCGTypeIndex: Int64): Bool {
+        if (forWrapper || containedCGTypeIndex != 1 || chirFunc.isNone()) {
+            return false
+        }
+        return IsStructOrExtendMethod(chirFunc.getOrThrow())
+    }
+
+    private func IsStructOrExtendMethod(fn: Function): Bool {
+        let declaredParent = fn.GetParentCustomTypeDef() ?? return false
+        if (declaredParent.IsStruct()) {
+            return true
+        }
+        if (let Some(extendDef) <- (declaredParent as ExtendDef)) {
+            if (let Some(extendedTy) <- extendDef.GetExtendedType()) {
+                return extendedTy.IsStruct()
+            }
+        }
+        return false
     }
 }
