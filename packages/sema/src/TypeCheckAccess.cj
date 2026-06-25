@@ -105,6 +105,13 @@ public func IsLegalAccess(accessSite: Node, target: Decl): Bool {
     return IsSamePackage(accessSite, target)
 }
 
+public func IsTargetMemberVisibleToNode(target: Decl, node: Node): Bool {
+    if (IsSameFile(node, target)) {
+        return true
+    }
+    return IsLegalAccess(node, target)
+}
+
 public func GetAccessibleDecls(accessSite: Expr, targets: ArrayList<Decl>): ArrayList<Decl> {
     let out = ArrayList<Decl>()
     for (target in targets) {
