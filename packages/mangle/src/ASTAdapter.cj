@@ -94,6 +94,7 @@ public class MangleAstAdapter {
     private let declCache: HashMap<Int64, MangleDecl> = HashMap<Int64, MangleDecl>()
     private let lambdaCache: HashMap<Int64, MangleDecl> = HashMap<Int64, MangleDecl>()
     private let annotationArrayCache: HashMap<Int64, MangleDecl> = HashMap<Int64, MangleDecl>()
+    private let tyCache: HashMap<Int64, MangleType> = HashMap<Int64, MangleType>()
     private let declPairs: ArrayList<AstDeclPair> = ArrayList<AstDeclPair>()
 
     public init() {}
@@ -141,6 +142,24 @@ public class MangleAstAdapter {
 
     private func StoreAnnotationArray(source: ArrayLit, target: MangleDecl): Unit {
         annotationArrayCache[EnsureAdapterId(source)] = target
+    }
+
+    private func EnsureTyAdapterId(source: Ty): Int64 {
+        if (source.mangleAdapterId < 0) {
+            source.mangleAdapterId = MangleAdapterIdAllocator.Next()
+        }
+        return source.mangleAdapterId
+    }
+
+    private func FindTy(source: Ty): Option<MangleType> {
+        if (source.mangleAdapterId < 0) {
+            return None
+        }
+        return tyCache.get(source.mangleAdapterId)
+    }
+
+    private func StoreTy(source: Ty, target: MangleType): Unit {
+        tyCache[EnsureTyAdapterId(source)] = target
     }
 
     private func SameNode(left: Node, right: Node): Bool {
@@ -700,7 +719,11 @@ public class MangleAstAdapter {
             }
         }
 
+        if (let Some(cached) <- FindTy(source)) {
+            return cached
+        }
         let target = MangleType(source.kind, source.name)
+        StoreTy(source, target)
         for (arg in source.typeArgs) {
             target.typeArgs.add(ConvertTy(arg))
         }
