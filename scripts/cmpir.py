@@ -77,8 +77,49 @@ def normalize(text):
     return out
 
 
+# Per-function canonicalization of NON-semantic names so the two backends become comparable:
+# local SSA values (%x, %0, %val.ov), basic-block labels, and the hash suffix of compiler-generated
+# globals ($const_cjstring.<hash>, lambda/wrapper temp symbols). Mangled user/global symbols (@_CN...)
+# are LEFT INTACT — they must match. After this, any remaining diff is a real instruction/operand/type
+# divergence, which is exactly the bit-parity gap to close.
+_LOCAL = re.compile(r"%[A-Za-z0-9_.$]+|%\"[^\"]+\"")
+_LABEL = re.compile(r"^([A-Za-z0-9_.$]+):")
+_HASHGLOBAL = re.compile(r"(@\"?\$?(?:const_cjstring|const|lambda|Cl|env)[A-Za-z0-9_.$]*?)[.+][A-Za-z0-9_+/-]{6,}(\"?)")
+
+
+def canonicalize(lines):
+    out, names, labels, n, ln = [], {}, {}, [0], [0]
+
+    def local(m):
+        k = m.group(0)
+        if k not in names:
+            n[0] += 1
+            names[k] = f"%v{n[0]}"
+        return names[k]
+
+    for line in lines:
+        if line.startswith("define "):
+            names, labels, n, ln = {}, {}, [0], [0]
+        # canonicalize a hash-suffixed compiler global to a stable name (drop the volatile hash)
+        line = _HASHGLOBAL.sub(lambda m: m.group(1) + ".H" + (m.group(2) or ""), line)
+        m = _LABEL.match(line)
+        if m:
+            lab = m.group(1)
+            if lab not in labels:
+                ln[0] += 1
+                labels[lab] = f"L{ln[0]}"
+            line = labels[lab] + ":" + line[m.end():]
+        # canonicalize block-label REFERENCES (label %foo) and local SSA names
+        line = re.sub(r"label %([A-Za-z0-9_.$]+)",
+                      lambda m: "label %" + labels.setdefault(m.group(1), f"L{(ln.__setitem__(0, ln[0]+1) or ln[0])}"),
+                      line)
+        line = _LOCAL.sub(local, line)
+        out.append(line)
+    return out
+
+
 def disnorm(directory, bckind):
-    """llvm-dis every matching bitcode module in `directory`, concatenate, normalize -> list[str]."""
+    """llvm-dis every matching bitcode module in `directory`, concatenate, normalize, canonicalize."""
     chunks = []
     for bc in sorted(Path(directory).glob(f"*.{bckind}")):
         if bckind == "bc" and bc.name.endswith(".opt.bc"):
@@ -86,7 +127,7 @@ def disnorm(directory, bckind):
         r = subprocess.run([DIS, str(bc), "-o", "-"], capture_output=True, text=True)
         if r.returncode == 0:
             chunks.append(r.stdout)
-    return normalize("\n".join(chunks))
+    return canonicalize(normalize("\n".join(chunks)))
 
 
 def select_fns(lines, name):
