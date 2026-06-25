@@ -5,6 +5,11 @@ import cangjie_compiler::sema.*
 
 public func SynthesizeAndReplaceIdealTy(typeManager: TypeManager, node: Node): Bool {
     if (!Ty.IsTyCorrect(node.GetTy())) {
+        if (let Some(expr) <- (node as Expr)) {
+            let _ = SynExprShallow(typeManager, expr)
+        }
+    }
+    if (!Ty.IsTyCorrect(node.GetTy())) {
         return false
     }
     return ReplaceIdealTy(typeManager, node)
