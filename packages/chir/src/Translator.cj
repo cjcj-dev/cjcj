@@ -40,7 +40,6 @@ import cangjie_compiler::ast.JumpExpr as AstJumpExpr
 import cangjie_compiler::ast.LambdaExpr as AstLambdaExpr
 import cangjie_compiler::ast.LetPatternDestructor as AstLetPatternDestructor
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
-import cangjie_compiler::ast.LitConstKind as AstLitConstKind
 import cangjie_compiler::ast.MainDecl as AstMainDecl
 import cangjie_compiler::ast.MatchExpr as AstMatchExpr
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
@@ -5490,19 +5489,20 @@ public class Translator {
     }
 
     private func TranslateLitConstant(expr: AstLitConstExpr): LiteralValue {
-        return match (expr.kind) {
-            case AstLitConstKind.BOOL => BoolLiteral(expr.stringValue == "true")
-            case AstLitConstKind.UNIT => UnitLiteral()
-            case AstLitConstKind.INTEGER => TranslateIntegerLiteral(expr)
-            case AstLitConstKind.RUNE_BYTE => IntLiteral(expr.constNumValue.asInt.`Int64`())
-            case AstLitConstKind.FLOAT => FloatLiteral(expr.constNumValue.asFloat.value)
-            case AstLitConstKind.RUNE =>
-                let value = if (expr.codepoint.isEmpty()) { r'\0' } else { Rune(expr.codepoint[0]) }
-                RuneLiteral(value)
-            case AstLitConstKind.STRING => StringLiteral(expr.stringValue)
-            case AstLitConstKind.JSTRING => StringLiteral(expr.stringValue)
-            case AstLitConstKind.NONE =>
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: literal NONE")
+        let kind = RequireAstTy(expr).kind
+        return match (kind) {
+            case AstTypeKind.TYPE_UNIT => UnitLiteral()
+            case AstTypeKind.TYPE_FLOAT16 | AstTypeKind.TYPE_FLOAT32 | AstTypeKind.TYPE_FLOAT64 |
+                AstTypeKind.TYPE_IDEAL_FLOAT => FloatLiteral(expr.constNumValue.asFloat.value)
+            case AstTypeKind.TYPE_UINT8 | AstTypeKind.TYPE_UINT16 | AstTypeKind.TYPE_UINT32 |
+                AstTypeKind.TYPE_UINT64 | AstTypeKind.TYPE_UINT_NATIVE | AstTypeKind.TYPE_INT8 |
+                AstTypeKind.TYPE_INT16 | AstTypeKind.TYPE_INT32 | AstTypeKind.TYPE_INT64 |
+                AstTypeKind.TYPE_INT_NATIVE | AstTypeKind.TYPE_IDEAL_INT => TranslateIntegerLiteral(expr)
+            case AstTypeKind.TYPE_RUNE => RuneLiteral(Rune(expr.codepoint[0]))
+            case AstTypeKind.TYPE_BOOLEAN => BoolLiteral(expr.stringValue == "true")
+            case AstTypeKind.TYPE_STRUCT => StringLiteral(expr.stringValue)
+            case _ =>
+                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: literal type")
         }
     }
 
