@@ -9,6 +9,8 @@ import cangjie_compiler::chir.CustomTypeDef
 import cangjie_compiler::chir.ExtendDef
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
+import cangjie_compiler::chir.FuncKind
+import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKindIndex
 
@@ -399,7 +401,8 @@ private func VirtualMethodsHaveSameSlot(left: Function, right: Function): Bool {
 }
 
 private func FuncMayBeInVTable(fn: Function): Bool {
-    if (fn.IsConstructor() || fn.IsFinalizer() || fn.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+    if (fn.IsConstructor() || fn.IsFinalizer() || fn.GetFuncKind() == FuncKind.ANNOFACTORY_FUNC ||
+        fn.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
         return false
     }
     return fn.TestAttr(Attribute.PUBLIC) || fn.TestAttr(Attribute.PROTECTED) ||
@@ -779,6 +782,13 @@ private func UnboxObjectValue(irBuilder: IRBuilder2, objectValue: LLVMValueRef, 
 
 private func OuterTypeInfoForFunction(cgMod: CGModule, targetType: Type, entry: InterfaceFunctionEntry,
     i8PtrType: LLVMTypeRef): LLVMValueRef {
+    if (!targetType.GetTypeArgs().isEmpty()) {
+        if (let Some(method) <- entry.implementation) {
+            if (!method.TestAttr(Attribute.ABSTRACT)) {
+                return unsafe { LLVMConstBitCast(GetOrCreateOuterTypeInfoFn(cgMod, targetType, method), i8PtrType) }
+            }
+        }
+    }
     if (let Some(method) <- entry.implementation) {
         if (let Some(parent) <- method.GetParentCustomTypeDef()) {
             if (let Some(parentType) <- parent.GetType()) {
@@ -787,6 +797,41 @@ private func OuterTypeInfoForFunction(cgMod: CGModule, targetType: Type, entry: 
         }
     }
     return TypeInfoAsI8Ptr(cgMod, targetType, i8PtrType)
+}
+
+private func GetOrCreateOuterTypeInfoFn(cgMod: CGModule, targetType: Type, method: Function): LLVMValueRef {
+    let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext())
+    let params = ArrayList<LLVMTypeRef>()
+    params.add(typeInfoPtrType)
+    let fnType = BuildLLVMFunctionType(typeInfoPtrType, params)
+    let fnName = CGType.GetRuntimeTypeName(targetType) + "_" + GetCodeGenGlobalName(method) + "_GetOuterTiFn"
+    let fn = cgMod.GetOrInsertFunction(fnName, fnType)
+    if (unsafe { LLVMIsDeclaration(fn) } == 0) {
+        return fn
+    }
+    unsafe { LLVMSetLinkage(fn, LLVMLinkageValue(LLVMLinkage.Private)) }
+    SetCangjieGC(fn)
+    let entry = IRBuilder2(cgMod)
+    let block = entry.CreateEntryBasicBlock(fn, "entry")
+    entry.SetInsertPoint(block)
+    let targetTypeInfo = unsafe { LLVMGetParam(fn, 0u32) }
+    let parentType = method.GetParentCustomTypeOrExtendedType() ?? targetType
+    let typeInfo = if (parentType.IsGenericRelated()) {
+        CreateTypeInfoForTemplateCallback(cgMod, entry, parentType.StripAllRefs(), RuntimeGenericParams(targetType),
+            entry.GetTypeArgsFromTypeInfo(targetTypeInfo))
+    } else {
+        CGType.GetOrCreate(cgMod, parentType.StripAllRefs()).GetOrCreateTypeInfo()
+    }
+    entry.CreateRet(entry.CreateBitCast(typeInfo, typeInfoPtrType, name: "outer.ti"))
+    entry.close()
+    return fn
+}
+
+private func RuntimeGenericParams(targetType: Type): ArrayList<GenericType> {
+    if (let Some(customTy) <- (targetType.StripAllRefs() as CustomType)) {
+        return customTy.GetCustomTypeDef().GetGenericTypeParams()
+    }
+    return ArrayList<GenericType>()
 }
 
 private func TypeInfoAsI8Ptr(cgMod: CGModule, ty: Type, i8PtrType: LLVMTypeRef): LLVMValueRef {
@@ -881,6 +926,22 @@ private func RootPackage(name: String): String {
         return name[0..idx]
     }
     return name
+}
+
+private func BuildLLVMFunctionType(returnType: LLVMTypeRef, paramTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {
+    if (paramTypes.isEmpty()) {
+        return unsafe { LLVMFunctionType(returnType, CPointer<LLVMTypeRef>(), 0u32, 0) }
+    }
+    var result = LLVMNullType()
+    try (paramPtr = LibC.malloc<LLVMTypeRef>(count: paramTypes.size).asResource()) {
+        var idx: Int64 = 0
+        while (idx < paramTypes.size) {
+            unsafe { (paramPtr.value + idx).write(paramTypes[idx]) }
+            idx++
+        }
+        result = unsafe { LLVMFunctionType(returnType, paramPtr.value, UInt32(paramTypes.size), 0) }
+    }
+    return result
 }
 
 private func EmitNonExternalExtensionDefsTable(cgMod: CGModule): Unit {
