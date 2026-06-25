@@ -2596,6 +2596,9 @@ public class TypeManager {
             }
         }
         if (leaf.IsClassLike() && root.IsClassLike()) {
+            if (root.IsObject() && leaf.IsClass() && !leaf.IsObject()) {
+                return true
+            }
             let superTys = GetAllSuperTys(leaf, typeMapping: TypeSubst(), withExtended: true)
             for (superTy in superTys.values) {
                 if (isClassTyEqual(superTy, root)) {
