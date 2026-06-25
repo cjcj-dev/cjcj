@@ -1920,8 +1920,7 @@ public class TypeChecker {
         MarkUnsafeBlockChildren(block)
         var existInvalid = false
         for (item in block.body) {
-            let itemTy = SynthesizeNode(ctx, item)
-            if (!Ty.IsTyCorrect(itemTy) || !ReplaceIdealTy(impl.typeManager, item)) {
+            if (!SynthesizeAndReplaceIdealTy(ctx, item)) {
                 existInvalid = true
             }
         }
@@ -1934,6 +1933,15 @@ public class TypeChecker {
             block.SetTy(lastNode.GetTy() ?? TypeManager.GetInvalidTy())
         }
         return block.GetTy() ?? TypeManager.GetInvalidTy()
+    }
+
+    private func SynthesizeAndReplaceIdealTy(ctx: ASTContext, node: Node): Bool {
+        var valid = false
+        try (ds = DiagSuppressor(impl.diag)) {
+            valid = Ty.IsTyCorrect(SynthesizeNode(ctx, node)) && ReplaceIdealTy(impl.typeManager, node) && !ds.HasError()
+            ds.ReportDiag()
+        }
+        return valid
     }
 
     private func MarkUnsafeBlockChildren(block: Block): Unit {
@@ -1958,9 +1966,11 @@ public class TypeChecker {
             return ChkBlock(impl.typeManager, target, block)
         }
         MarkUnsafeBlockChildren(block)
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        var isWellTyped = true
         if (block.body.size > 1) {
             for (idx in 0..block.body.size - 1) {
-                let _ = SynthesizeNode(ctx, block.body[idx])
+                isWellTyped = SynthesizeAndReplaceIdealTy(ctx, block.body[idx]) && isWellTyped
             }
         }
         if (let Some(lastNode) <- block.GetLastExprOrDecl()) {
@@ -1973,13 +1983,25 @@ public class TypeChecker {
                     }
                 }
             }
-            if (let Some(lastExpr) <- (nodeForCheck as Expr)) {
-                let _ = Check(ctx, target, lastExpr)
+            if (nodeForCheck.IsDecl()) {
+                let typeMatched = impl.typeManager.IsSubtype(unitTy, target)
+                isWellTyped = SynthesizeAndReplaceIdealTy(ctx, nodeForCheck) && typeMatched && isWellTyped
+                if (isWellTyped) {
+                    block.SetTy(unitTy)
+                    return true
+                }
             } else {
-                let _ = SynthesizeNode(ctx, nodeForCheck)
+                if (let Some(lastExpr) <- (nodeForCheck as Expr)) {
+                    let checked = Check(ctx, target, lastExpr)
+                    if (isWellTyped && checked) {
+                        block.SetTy(lastExpr.GetTy() ?? TypeManager.GetInvalidTy())
+                        return true
+                    }
+                }
             }
         }
-        return ChkBlock(impl.typeManager, target, block)
+        block.SetTy(TypeManager.GetInvalidTy())
+        return false
     }
 
     private func SynthesizeCallChildren(ctx: ASTContext, callExpr: CallExpr): Unit {
