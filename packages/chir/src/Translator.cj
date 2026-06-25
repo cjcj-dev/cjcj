@@ -1590,6 +1590,12 @@ public class Translator {
         let getter = propDecl.getters[0]
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         let callee = GetSymbolTable(getter)
+        if (getter.TestAttr(AstAttribute.STATIC) || propDecl.TestAttr(AstAttribute.STATIC)) {
+            let instTypeArgs = TranslateMemberAccessInstArgs(expr)
+            let parentTy = TranslateMemberOwnerType(getter)
+            return CreateApplyMaybeWithException(resultTy, callee,
+                FuncCallContext(args: ArrayList<Value>(), instTypeArgs: instTypeArgs, thisType: parentTy))
+        }
         let thisObj = TranslatePropertyGetterThisObject(expr, getter, callee)
         let args = ArrayList<Value>()
         args.add(thisObj)
@@ -5330,6 +5336,9 @@ public class Translator {
     }
 
     private func TranslateStaticTargetOrPackageMemberAccess(expr: AstMemberAccess, target: AstDecl): Option<Value> {
+        if (let Some(propDecl) <- (target as AstPropDecl)) {
+            return Some(TranslatePropertyGetter(expr, propDecl))
+        }
         let targetNode = GetSymbolTable(target)
         if (let Some(_) <- (target as AstVarDecl)) {
             let targetTy = chirTy.TranslateType(RequireAstTy(target))

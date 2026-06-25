@@ -816,15 +816,21 @@ public class IRBuilder2 <: Resource {
                 callArgs.add(CreateBitCast(typeInfo, typeInfoPtrType,
                     name: if (name.isEmpty()) { "generic.ti" } else { name + ".generic.ti" }))
             }
-            if (calleeType.IsMethodType() && !args.isEmpty()) {
+            if (calleeType.IsMethodType()) {
                 if (let Some(overrideTypeInfo) <- methodTypeInfoArg) {
                     callArgs.add(overrideTypeInfo)
-                } else if (let Some(thisTypeInfo) <- CreateOuterTypeInfoArg(args[0])) {
-                    callArgs.add(thisTypeInfo)
+                } else if (!args.isEmpty()) {
+                    if (let Some(thisTypeInfo) <- CreateOuterTypeInfoArg(args[0])) {
+                        callArgs.add(thisTypeInfo)
+                    }
                 }
             }
             if (calleeType.IsStaticMethodType()) {
-                callArgs.add(unsafe { LLVMConstNull(CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())) })
+                if (let Some(staticThisTypeInfo) <- methodTypeInfoArg) {
+                    callArgs.add(staticThisTypeInfo)
+                } else {
+                    callArgs.add(unsafe { LLVMConstNull(CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())) })
+                }
             }
             return callArgs
         }
