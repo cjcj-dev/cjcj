@@ -60,6 +60,8 @@ import cangjie_compiler::ast.SubscriptExpr as AstSubscriptExpr
 import cangjie_compiler::ast.TokenKind as AstTokenKind
 import cangjie_compiler::ast.TokenKindValue as AstTokenKindValue
 import cangjie_compiler::ast.Ty as AstTy
+import cangjie_compiler::ast.TypeKind as AstTypeKind
+import cangjie_compiler::ast.TypeKindInRange as AstTypeKindInRange
 import cangjie_compiler::ast.TupleLit as AstTupleLit
 import cangjie_compiler::ast.TuplePattern as AstTuplePattern
 import cangjie_compiler::ast.TryExpr as AstTryExpr
@@ -5274,7 +5276,7 @@ public class Translator {
         return match (expr.kind) {
             case AstLitConstKind.BOOL => BoolLiteral(expr.stringValue == "true")
             case AstLitConstKind.UNIT => UnitLiteral()
-            case AstLitConstKind.INTEGER => IntLiteral(expr.constNumValue.asInt.`Int64`())
+            case AstLitConstKind.INTEGER => TranslateIntegerLiteral(expr)
             case AstLitConstKind.RUNE_BYTE => IntLiteral(expr.constNumValue.asInt.`Int64`())
             case AstLitConstKind.FLOAT => FloatLiteral(expr.constNumValue.asFloat.value)
             case AstLitConstKind.RUNE =>
@@ -5285,6 +5287,23 @@ public class Translator {
             case AstLitConstKind.NONE =>
                 throw IllegalArgumentException("not yet ported in faithful AST2CHIR: literal NONE")
         }
+    }
+
+    private func TranslateIntegerLiteral(expr: AstLitConstExpr): IntLiteral {
+        let astTy = RequireAstTy(expr)
+        let kind = astTy.kind
+        if (AstTypeKindInRange(kind, AstTypeKind.TYPE_UINT8, AstTypeKind.TYPE_UINT64) ||
+            kind == AstTypeKind.TYPE_UINT_NATIVE) {
+            return IntLiteral(UInt64LiteralBitsToInt64(expr.constNumValue.asInt.Uint64()))
+        }
+        return IntLiteral(expr.constNumValue.asInt.`Int64`())
+    }
+
+    private func UInt64LiteralBitsToInt64(value: UInt64): Int64 {
+        if (value <= UInt64(Int64.Max)) {
+            return Int64(value)
+        }
+        return -Int64(UInt64.Max - value) - 1
     }
 
     private func ToCHIRBinaryOp(op: AstTokenKind): ExprKind {
