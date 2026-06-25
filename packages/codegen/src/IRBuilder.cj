@@ -242,7 +242,7 @@ public class IRBuilder2 <: Resource {
         let rawValue = value.GetRawValue()
         let rawDest = dest.GetRawValue()
         let destTy = destElementCGType.GetOriginal()
-        let typeInfo = GetTypeInfoFromObject(rawValue)
+        let typeInfo = CreateTypeInfo(destTy)
         let blockNames = ArrayList<String>()
         blockNames.add("handle_store_ref")
         blockNames.add("handle_store_non_ref")
@@ -254,7 +254,7 @@ public class IRBuilder2 <: Resource {
         CreateCondBr(CreateTypeInfoIsReferenceCall(typeInfo), blocks[0], blocks[1])
 
         SetInsertPoint(blocks[0])
-        CreateStore(rawValue, rawDest)
+        CreateStore(rawValue, CastStoreSlotForValue(rawDest, rawValue, "generic.store.ref.dest"))
         CreateBr(blocks[2])
 
         SetInsertPoint(blocks[1])
@@ -262,7 +262,7 @@ public class IRBuilder2 <: Resource {
             CreateLoad(destElementCGType.GetLLVMType(), rawDest, name: "generic.store.sret")
         } else {
             let tmp = CallAllocaGenericWithTypeInfo(destTy, typeInfo)
-            CreateStore(tmp, rawDest)
+            CreateStore(tmp, CastStoreSlotForValue(rawDest, tmp, "generic.store.dest"))
             tmp
         }
         CallAssignGeneric(destStorage, rawValue, typeInfo)
@@ -274,19 +274,17 @@ public class IRBuilder2 <: Resource {
 
     public func StoreGenericMemberValue(baseObject: LLVMValueRef, dest: LLVMValueRef, value: CGValue,
         baseTy: Type, fieldTy: Option<Type>): LLVMValueRef {
-        let _ = baseTy
-        let _ = fieldTy
         let valueCGType = value.GetCGType() ?? return LLVMNullValue()
         let valueTy = valueCGType.GetOriginal().StripAllRefs()
         let rawValue = value.GetRawValue()
+        let typeInfo = GetGenericFieldTypeInfo(baseObject, baseTy, fieldTy) ?? CreateTypeInfo(valueTy)
         let source = if (valueCGType.GetSize().isSome() && !valueCGType.IsReference()) {
-            let tmp = CallAllocaGeneric(valueTy)
+            let tmp = CallAllocaGenericWithTypeInfo(valueTy, typeInfo)
             StoreValueToObjectPayload(tmp, rawValue, valueTy)
             tmp
         } else {
             rawValue
         }
-        let typeInfo = CreateTypeInfo(valueTy)
         let blockNames = ArrayList<String>()
         blockNames.add("gcwrite_ref")
         blockNames.add("gcwrite_non_ref")
@@ -360,6 +358,17 @@ public class IRBuilder2 <: Resource {
             idx++
         }
         return None
+    }
+
+    private func CastStoreSlotForValue(slot: LLVMValueRef, value: LLVMValueRef, name: String): LLVMValueRef {
+        let slotTy = unsafe { LLVMTypeOf(slot) }
+        let valueTy = unsafe { LLVMTypeOf(value) }
+        if (slotTy.isNull() || valueTy.isNull() || unsafe { LLVMGetTypeKind(slotTy) } != 12) {
+            return slot
+        }
+        let slotAddrSpace = unsafe { LLVMGetPointerAddressSpace(slotTy) }
+        let typedSlotTy = unsafe { LLVMPointerType(valueTy, slotAddrSpace) }
+        return CreateBitCast(slot, typedSlotTy, name: name)
     }
 
     private func IsLLVMArgument(value: LLVMValueRef): Bool {
@@ -875,7 +884,7 @@ public class IRBuilder2 <: Resource {
                     return CreatePointerCast(raw, CGType.GetOrCreate(cgMod, paramTy).GetLLVMType(),
                         name: if (name.isEmpty()) { "generic.arg" } else { name + ".generic.arg" })
                 }
-                let objectValue = CallValueIntrinsicAlloc(argTy)
+                let objectValue = CallAllocaGeneric(argTy)
                 StoreValueToObjectPayload(objectValue, raw, argTy)
                 return objectValue
             }
@@ -2247,7 +2256,7 @@ public class IRBuilder2 <: Resource {
         } else {
             sourceValue
         }
-        if (valueTy.IsTuple() && IsLLVMTypeContainsRef(valueCGType.GetLLVMType())) {
+        if ((valueTy.IsStruct() || valueTy.IsTuple()) && IsLLVMTypeContainsRef(valueCGType.GetLLVMType())) {
             let storedValueType = unsafe { LLVMTypeOf(storedValue) }
             let sourcePtr = if (!storedValueType.isNull() && unsafe { LLVMGetTypeKind(storedValueType) } == 12) {
                 storedValue
@@ -2279,10 +2288,8 @@ public class IRBuilder2 <: Resource {
             cgMod.GetTypeSize(cgType.GetLayoutType())
         } else if (let Some(staticSize) <- cgType.GetSize()) {
             UInt64(staticSize)
-        } else if (chirTy.IsGeneric()) {
-            return GetLayoutSize32ForAllocaGeneric(cgType, CreateTypeInfo(chirTy))
         } else {
-            0u64
+            return GetLayoutSize32ForAllocaGeneric(cgType, CreateTypeInfo(chirTy))
         }
         return unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), sizeValue, 0) }
     }
