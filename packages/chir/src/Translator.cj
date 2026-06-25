@@ -2009,9 +2009,12 @@ public class Translator {
     }
 
     private func SetClassSuperClass(def: ClassDef, decl: AstClassLikeDecl): Unit {
-        if (let Some(classDecl) <- (decl as AstClassDecl)) {
-            if (let Some(superDecl) <- classDecl.GetSuperClassDecl()) {
-                if (let Some(superAstTy) <- superDecl.GetTy()) {
+        if (def.GetSuperClassTy().isSome()) {
+            return
+        }
+        if (let Some(astTy) <- decl.GetTy()) {
+            if (let Some(classTy) <- (astTy as AstClassTy)) {
+                if (let Some(superAstTy) <- classTy.GetSuperClassTy()) {
                     def.SetSuperClassTy(UnwrapClassType(chirTy.TranslateType(superAstTy)))
                 }
             }
