@@ -501,6 +501,10 @@ private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAcc
         PopulateMemberAccessTargetsFromUpperBounds(typeManager, ma, genericTy)
         return
     }
+    if (baseTy.IsIdeal()) {
+        PopulateIdealMemberAccessTargets(typeManager, ma, baseTy)
+        return
+    }
     let info = LookupInfo(baseTy: Some(baseTy), file: ma.curFile)
     let foundFields = FieldLookup(typeManager, Ty.GetDeclPtrOfTy(Some(baseTy)), ma.field.Val(), info: info)
     for (decl in foundFields) {
@@ -510,6 +514,37 @@ private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAcc
         for (decl in ExtendFieldLookup(typeManager, file, Some(baseTy), ma.field.Val())) {
             AddTargetIfMissing(ma.targets, decl)
         }
+    }
+}
+
+private func PopulateIdealMemberAccessTargets(typeManager: TypeManager, ma: MemberAccess, baseTy: Ty): Unit {
+    let candidates = ArrayList<Decl>()
+    let targetTys = ArrayList<Ty>()
+    if (let Some(file) <- ma.curFile) {
+        for (tyKind in GetIdealTypesByKind(baseTy.kind)) {
+            let concreteTy = TypeManager.GetPrimitiveTy(tyKind)
+            for (decl in ExtendFieldLookup(typeManager, file, Some(concreteTy), ma.field.Val())) {
+                if (!decl.TestAttr(Attribute.STATIC)) {
+                    AddTargetIfMissing(candidates, decl)
+                    targetTys.add(concreteTy)
+                }
+            }
+        }
+    }
+    if (candidates.size > 1) {
+        if (let Some(baseExpr) <- ma.baseExpr) {
+            let _ = ReplaceIdealTy(typeManager, baseExpr)
+            if (let Some(replacedTy) <- baseExpr.GetTy()) {
+                PopulateMemberAccessTargets(typeManager, ma, replacedTy)
+            }
+        }
+        return
+    }
+    if (candidates.size == 1) {
+        if (let Some(baseExpr) <- ma.baseExpr) {
+            baseExpr.SetTy(targetTys[targetTys.size - 1])
+        }
+        AddTargetIfMissing(ma.targets, candidates[0])
     }
 }
 
