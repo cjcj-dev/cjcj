@@ -182,6 +182,10 @@ private func IsReturnAddressSpacePointer(value: LLVMValueRef, addressSpace: UInt
         unsafe { LLVMGetPointerAddressSpace(rawTy) } == addressSpace
 }
 
+private func IsLLVMArgumentValue(value: LLVMValueRef): Bool {
+    return !value.isNull() && !unsafe { LLVMIsAArgument(value) }.isNull()
+}
+
 private func CurrentFunctionReturnType(irBuilder: IRBuilder2, chirExpr: Expression): Option<Type> {
     if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
         if (let Some(rawTy) <- cgFunc.GetOriginal().GetType()) {
@@ -213,6 +217,9 @@ private func CreateRetFromFunctionReturnSlot(irBuilder: IRBuilder2, parentFunc: 
                             let sretArg = unsafe { LLVMGetParam(cgFunc.GetRawFunction(), 0u32) }
                             if (let Some(structCopy) <- TryCreateStructSlotSRet(irBuilder, retAddr, sretArg)) {
                                 return structCopy
+                            }
+                            if (retTy.IsGeneric() && retAddr.IsSRetArg() && IsLLVMArgumentValue(retAddr.GetRawValue())) {
+                                return irBuilder.CreateRetVoid()
                             }
                             let loadedRet = irBuilder.CreateLoad(elementType.GetLLVMType(), retAddr.GetRawValue(), name: "ret")
                             if (retTy.IsGeneric()) {

@@ -38,6 +38,7 @@ private let ALLOCA_GENERIC_INTRINSIC_NAME: String = "llvm.cj.alloca.generic"
 private let ASSIGN_GENERIC_INTRINSIC_NAME: String = "llvm.cj.assign.generic"
 private let GET_TYPE_INFO_INTRINSIC_NAME: String = "llvm.cj.get.type.info"
 private let IS_REFERENCE_INTRINSIC_NAME: String = "llvm.cj.is.reference"
+private let GET_FIELD_OFFSET_INTRINSIC_NAME: String = "llvm.cj.get.field.offset"
 private let GCREAD_GENERIC_INTRINSIC_NAME: String = "llvm.cj.gcread.generic"
 private let GCWRITE_GENERIC_INTRINSIC_NAME: String = "llvm.cj.gcwrite.generic"
 private let MALLOC_OBJECT_INTRINSIC_NAME: String = "llvm.cj.malloc.object"
@@ -153,13 +154,7 @@ public class IRBuilder2 <: Resource {
 
     public func CreateEntryAlloca(cgType: CGType, name!: String = ""): LLVMValueRef {
         let allocatedType = cgType.GetLLVMType()
-        let allocaInst = CreateEntryAlloca(allocatedType, name: name)
-        if (let Some(typeSize) <- cgType.GetSize()) {
-            if (typeSize > 0 && unsafe { LLVMGetTypeKind(allocatedType) } == 10) {
-                let _ = CreateCJMemsetStructWith0(allocaInst, allocatedType)
-            }
-        }
-        return allocaInst
+        return CreateEntryAlloca(allocatedType, name: name)
     }
 
     public func CreateAnonymousStructType(elementTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {
@@ -290,7 +285,7 @@ public class IRBuilder2 <: Resource {
         let valueCGType = value.GetCGType() ?? return LLVMNullValue()
         let valueTy = valueCGType.GetOriginal().StripAllRefs()
         let rawValue = value.GetRawValue()
-        let typeInfo = GetGenericFieldTypeInfo(baseObject, baseTy, fieldTy) ?? CreateTypeInfo(valueTy)
+        let typeInfo = GetGenericFieldTypeInfo(baseTy, fieldTy) ?? CreateTypeInfo(valueTy)
         let source = if (valueCGType.GetSize().isSome() && !valueCGType.IsReference()) {
             let tmp = CallAllocaGenericWithTypeInfo(valueTy, typeInfo)
             StoreValueToObjectPayload(tmp, rawValue, valueTy)
@@ -323,7 +318,7 @@ public class IRBuilder2 <: Resource {
     public func LoadGenericFieldValue(baseObject: LLVMValueRef, source: LLVMValueRef, elementType: CGType,
         baseTy: Type, fieldTy: Option<Type>): LLVMValueRef {
         let valueTy = elementType.GetOriginal().StripAllRefs()
-        let typeInfo = GetGenericFieldTypeInfo(baseObject, baseTy, fieldTy) ?? CreateTypeInfo(valueTy)
+        let typeInfo = GetGenericFieldTypeInfo(baseTy, fieldTy) ?? CreateTypeInfo(valueTy)
         let blockNames = ArrayList<String>()
         blockNames.add("handle_load_ref")
         blockNames.add("handle_load_non_ref")
@@ -340,7 +335,7 @@ public class IRBuilder2 <: Resource {
 
         SetInsertPoint(blocks[1])
         let size = GetLayoutSize32ForAllocaGeneric(elementType, typeInfo)
-        let value = CallAllocaGenericWithTypeInfo(valueTy, typeInfo)
+        let value = CallAllocaGenericWithTypeInfoAndSize(valueTy, typeInfo, size)
         CallGCReadGeneric(value, baseObject, source, size)
         CreateBr(blocks[2])
 
@@ -356,8 +351,7 @@ public class IRBuilder2 <: Resource {
         return phi
     }
 
-    private func GetGenericFieldTypeInfo(baseObject: LLVMValueRef, baseTy: Type,
-        fieldTy: Option<Type>): Option<LLVMValueRef> {
+    private func GetGenericFieldTypeInfo(baseTy: Type, fieldTy: Option<Type>): Option<LLVMValueRef> {
         let genericFieldTy = (fieldTy ?? return None).StripAllRefs()
         if (!genericFieldTy.IsGeneric()) {
             return None
@@ -366,7 +360,7 @@ public class IRBuilder2 <: Resource {
         var idx: Int64 = 0
         for (arg in customTy.GetGenericArgs()) {
             if (arg.StripAllRefs().IsEqual(genericFieldTy)) {
-                return Some(GetTypeInfoFromTypeInfoArgs(GetTypeInfoFromObject(baseObject), idx))
+                return Some(GetTypeInfoFromTypeInfoArgs(CreateTypeInfo(customTy), idx))
             }
             idx++
         }
@@ -1188,12 +1182,19 @@ public class IRBuilder2 <: Resource {
     private func CallAllocaGenericWithTypeInfo(chirTy: Type, typeInfoValue: LLVMValueRef): LLVMValueRef {
         let tyForInfo = chirTy.StripAllRefs()
         let cgTy = CGType.GetOrCreate(cgMod, tyForInfo)
+        return CallAllocaGenericWithTypeInfoAndSize(tyForInfo, typeInfoValue,
+            GetLayoutSize32ForAllocaGeneric(cgTy, typeInfoValue))
+    }
+
+    private func CallAllocaGenericWithTypeInfoAndSize(chirTy: Type, typeInfoValue: LLVMValueRef,
+        size: LLVMValueRef): LLVMValueRef {
+        let tyForInfo = chirTy.StripAllRefs()
         EnsureAllocaGenericLayoutMetadata(tyForInfo, typeInfoValue)
         let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
         let typeInfoArg = CreateBitCast(typeInfoValue, i8PtrType, name: "sret.ti")
         let args = ArrayList<LLVMValueRef>()
         args.add(typeInfoArg)
-        args.add(GetLayoutSize32ForAllocaGeneric(cgTy, typeInfoValue))
+        args.add(size)
         return CreateIntrinsicCall(ALLOCA_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
             name: "sret.generic")
     }
@@ -1482,6 +1483,16 @@ public class IRBuilder2 <: Resource {
             name: "gcread.generic.source"))
         args.add(size)
         return CreateIntrinsicCall(GCREAD_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+    }
+
+    public func CallGetFieldOffset(typeInfo: LLVMValueRef, index: UInt64, preOffset: UInt64): LLVMValueRef {
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreatePointerCast(typeInfo,
+            unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) },
+            name: "field.offset.ti"))
+        args.add(unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), index, 0) })
+        args.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), preOffset, 0) })
+        return CreateIntrinsicCall(GET_FIELD_OFFSET_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
     public func CallGCWriteStruct(baseObject: LLVMValueRef, dest: LLVMValueRef, source: LLVMValueRef,
@@ -2402,6 +2413,9 @@ public class IRBuilder2 <: Resource {
             if (let Some(typeInfoProvider) <- FindGenericTypeInfoProvider(currentFunction, baseTy)) {
                 return typeInfoProvider(this)
             }
+            if (let Some(methodTypeInfo) <- FindMethodOuterTypeInfo(currentFunction, baseTy)) {
+                return methodTypeInfo
+            }
         }
         if (baseTy.IsGeneric()) {
             throw IllegalStateException("missing runtime TypeInfo mapping for generic type: " + baseTy.ToString())
@@ -2427,6 +2441,20 @@ public class IRBuilder2 <: Resource {
             }
         }
         return None
+    }
+
+    private func FindMethodOuterTypeInfo(currentFunction: CGFunction, baseTy: Type): Option<LLVMValueRef> {
+        let ownerFunc = (currentFunction.GetOriginal() as Function) ?? return None
+        let parentDef = ownerFunc.GetParentCustomTypeDef() ?? return None
+        let parentTy = parentDef.GetType() ?? return None
+        let parentCustomTy = (parentTy.StripAllRefs() as CustomType) ?? return None
+        let baseCustomTy = (baseTy.StripAllRefs() as CustomType) ?? return None
+        if (parentCustomTy.GetCustomTypeDef().GetIdentifier() != baseCustomTy.GetCustomTypeDef().GetIdentifier()) {
+            return None
+        }
+        let functionType = currentFunction.GetCGFunctionType() ?? return None
+        let methodTypeInfoIndex = functionType.GetMethodTypeInfoIndex() ?? return None
+        return Some(unsafe { LLVMGetParam(currentFunction.GetRawFunction(), UInt32(methodTypeInfoIndex)) })
     }
 
     public func GetTypeArgsFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {

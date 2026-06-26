@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.Expression
+import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.Field
 import cangjie_compiler::chir.FieldByName
 import cangjie_compiler::chir.LocalVar
@@ -62,7 +63,9 @@ private func GenerateFieldByPath(irBuilder: IRBuilder2, base: Value,
                     name: name + ".addr")
                 if (let Some(fieldType) <- GetFieldCGTypeAtPath(elementType, path)) {
                     if (ShouldLoadGenericClassField(baseCGType, fieldType)) {
-                        return irBuilder.LoadGenericFieldValue(baseValue.GetRawValue(), fieldAddr, fieldType,
+                        let genericFieldAddr = CreateGenericClassFieldAddress(irBuilder, baseValue.GetRawValue(),
+                            baseCGType.GetOriginal(), path) ?? fieldAddr
+                        return irBuilder.LoadGenericFieldValue(baseValue.GetRawValue(), genericFieldAddr, fieldType,
                             baseCGType.GetOriginal(), Some(fieldType.GetOriginal()))
                     }
                     let loaded = irBuilder.CreateLoad(fieldType.GetLLVMType(), fieldAddr, name: name)
@@ -83,6 +86,23 @@ private func GenerateFieldByPath(irBuilder: IRBuilder2, base: Value,
         }
     }
     return LLVMNullValue()
+}
+
+private func CreateGenericClassFieldAddress(irBuilder: IRBuilder2, baseObject: LLVMValueRef, baseTy: Type,
+    path: ArrayList<UInt64>): Option<LLVMValueRef> {
+    if (path.isEmpty()) {
+        return None
+    }
+    let typeInfo = irBuilder.CreateTypeInfo(baseTy.StripAllRefs())
+    let offset = irBuilder.CallGetFieldOffset(typeInfo, path[0], 0u64)
+    let payloadOffset = unsafe {
+        LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), 8u64, 0)
+    }
+    let fullOffset = irBuilder.CreateBinary(ExprKind.ADD, offset, payloadOffset)
+    let i8Type = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let indices = ArrayList<LLVMValueRef>()
+    indices.add(fullOffset)
+    return Some(irBuilder.CreateInBoundsGEP(i8Type, baseObject, indices, name: "field.addr"))
 }
 
 private func GenerateEnumFieldByPath(irBuilder: IRBuilder2, base: Value,
