@@ -42,6 +42,68 @@ public class SubCHIRPackage {
         return false
     }
 
+    public func OwnsGlobalVar(globalVar: GlobalVar): Bool {
+        let name = globalVar.GetIdentifierWithoutPrefix()
+        for (ownedGV in chirGVs) {
+            if (ownedGV.GetIdentifierWithoutPrefix() == name) {
+                return true
+            }
+        }
+        return false
+    }
+
+    public func AddGlobalVar(globalVar: GlobalVar): Bool {
+        if (OwnsGlobalVar(globalVar)) {
+            return false
+        }
+        chirGVs.add(globalVar)
+        return true
+    }
+
+    public func OwnsFunction(fn: Function): Bool {
+        let name = fn.GetIdentifierWithoutPrefix()
+        for (ownedFn in chirFuncs) {
+            if (ownedFn.GetIdentifierWithoutPrefix() == name) {
+                return true
+            }
+        }
+        return false
+    }
+
+    public func AddFunction(fn: Function): Bool {
+        if (OwnsFunction(fn)) {
+            return false
+        }
+        chirFuncs.add(fn)
+        return true
+    }
+
+    private func ContainsFunction(functions: ArrayList<Function>, fn: Function): Bool {
+        let name = fn.GetIdentifierWithoutPrefix()
+        for (ownedFn in functions) {
+            if (ownedFn.GetIdentifierWithoutPrefix() == name) {
+                return true
+            }
+        }
+        return false
+    }
+
+    public func AddForeign(fn: Function): Bool {
+        if (ContainsFunction(chirForeigns, fn)) {
+            return false
+        }
+        chirForeigns.add(fn)
+        return true
+    }
+
+    public func AddImportedCFunc(fn: Function): Bool {
+        if (ContainsFunction(chirImportedCFuncs, fn)) {
+            return false
+        }
+        chirImportedCFuncs.add(fn)
+        return true
+    }
+
     public func AddOwnedTypeTemplateName(name: String): Unit {
         ownedTypeTemplateNames.add(name)
     }
@@ -65,6 +127,10 @@ public class CHIRSplitter {
     private let cgPkgCtx: CGPkgContext
     private var splitNum: Int64 = 0
     private var index: Int64 = 0
+    private let functionOwnerIndices: HashMap<String, Int64> = HashMap<String, Int64>()
+    private let foreignOwnerIndices: HashMap<String, Int64> = HashMap<String, Int64>()
+    private let importedCFuncOwnerIndices: HashMap<String, Int64> = HashMap<String, Int64>()
+    private let globalVarOwnerIndices: HashMap<String, Int64> = HashMap<String, Int64>()
 
     public init(cgPkgCtx: CGPkgContext) {
         this.cgPkgCtx = cgPkgCtx
@@ -73,6 +139,10 @@ public class CHIRSplitter {
     public func SplitCHIRPackage(): ArrayList<SubCHIRPackage> {
         splitNum = CalcSplitsNum()
         index = 0
+        functionOwnerIndices.clear()
+        foreignOwnerIndices.clear()
+        importedCFuncOwnerIndices.clear()
+        globalVarOwnerIndices.clear()
         let packages = ArrayList<SubCHIRPackage>()
         var idx: Int64 = 0
         while (idx < splitNum) {
@@ -167,15 +237,21 @@ public class CHIRSplitter {
         if (let Some(initFn) <- packageInitFunc) {
             let targetIndex = FindLightestPackage(packages)
             packages[targetIndex].mainModule = true
-            packages[targetIndex].chirFuncs.add(initFn)
-            packages[targetIndex].exprNumInChirFuncs += FunctionExprNum(initFn)
+            functionOwnerIndices[initFn.GetIdentifierWithoutPrefix()] = targetIndex
+            if (packages[targetIndex].AddFunction(initFn)) {
+                packages[targetIndex].exprNumInChirFuncs += FunctionExprNum(initFn)
+            }
             if (let Some(literalFn) <- literalInitFunc) {
-                packages[targetIndex].chirFuncs.add(literalFn)
-                packages[targetIndex].exprNumInChirFuncs += FunctionExprNum(literalFn)
+                functionOwnerIndices[literalFn.GetIdentifierWithoutPrefix()] = targetIndex
+                if (packages[targetIndex].AddFunction(literalFn)) {
+                    packages[targetIndex].exprNumInChirFuncs += FunctionExprNum(literalFn)
+                }
             }
             for (toAnyFn in toAnyFuncs) {
-                packages[targetIndex].chirFuncs.add(toAnyFn)
-                packages[targetIndex].exprNumInChirFuncs += FunctionExprNum(toAnyFn)
+                functionOwnerIndices[toAnyFn.GetIdentifierWithoutPrefix()] = targetIndex
+                if (packages[targetIndex].AddFunction(toAnyFn)) {
+                    packages[targetIndex].exprNumInChirFuncs += FunctionExprNum(toAnyFn)
+                }
             }
         }
     }
@@ -194,9 +270,16 @@ public class CHIRSplitter {
         var idx = normalFuncs.size - 1
         while (idx >= 0) {
             let item = normalFuncs[idx]
-            let targetIndex = FindLightestPackage(packages)
-            packages[targetIndex].chirFuncs.add(item.fn)
-            packages[targetIndex].exprNumInChirFuncs += item.exprNum
+            let name = item.fn.GetIdentifierWithoutPrefix()
+            let targetIndex = if (functionOwnerIndices.contains(name)) {
+                functionOwnerIndices[name]
+            } else {
+                FindLightestPackage(packages)
+            }
+            if (packages[targetIndex].AddFunction(item.fn)) {
+                packages[targetIndex].exprNumInChirFuncs += item.exprNum
+            }
+            functionOwnerIndices[name] = targetIndex
             idx--
         }
     }
@@ -207,9 +290,16 @@ public class CHIRSplitter {
             if (!fn.TestAttr(Attribute.FOREIGN) || fn.GetPackageName() != chirPkg.GetName()) {
                 continue
             }
-            let targetIndex = FindLightestPackage(packages)
-            packages[targetIndex].chirForeigns.add(fn)
-            packages[targetIndex].exprNumInChirFuncs += 1
+            let name = fn.GetIdentifierWithoutPrefix()
+            let targetIndex = if (foreignOwnerIndices.contains(name)) {
+                foreignOwnerIndices[name]
+            } else {
+                FindLightestPackage(packages)
+            }
+            if (packages[targetIndex].AddForeign(fn)) {
+                packages[targetIndex].exprNumInChirFuncs += 1
+            }
+            foreignOwnerIndices[name] = targetIndex
         }
     }
 
@@ -218,8 +308,14 @@ public class CHIRSplitter {
             return
         }
         for (globalVar in cgPkgCtx.GetCHIRPackage().GetGlobalVarsWithInit()) {
-            let targetIndex = NextRoundRobinIndex(packages)
-            packages[targetIndex].chirGVs.add(globalVar)
+            let name = globalVar.GetIdentifierWithoutPrefix()
+            let targetIndex = if (globalVarOwnerIndices.contains(name)) {
+                globalVarOwnerIndices[name]
+            } else {
+                NextRoundRobinIndex(packages)
+            }
+            let _ = packages[targetIndex].AddGlobalVar(globalVar)
+            globalVarOwnerIndices[name] = targetIndex
         }
     }
 
@@ -280,8 +376,14 @@ public class CHIRSplitter {
             if (!isCFunc || (!fn.TestAttr(Attribute.PRIVATE) && !fn.TestAttr(Attribute.FOREIGN))) {
                 continue
             }
-            let targetIndex = NextRoundRobinIndex(packages)
-            packages[targetIndex].chirImportedCFuncs.add(fn)
+            let name = fn.GetIdentifierWithoutPrefix()
+            let targetIndex = if (importedCFuncOwnerIndices.contains(name)) {
+                importedCFuncOwnerIndices[name]
+            } else {
+                NextRoundRobinIndex(packages)
+            }
+            let _ = packages[targetIndex].AddImportedCFunc(fn)
+            importedCFuncOwnerIndices[name] = targetIndex
         }
     }
 
