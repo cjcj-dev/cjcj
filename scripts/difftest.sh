@@ -17,6 +17,7 @@ if [ "${1:-}" = "--one" ]; then
   f="$2"; name=$(basename "$f" .cj)
   WORK=$(mktemp -d)
   trap 'rm -rf "$WORK"' EXIT
+  cd "$WORK" || exit 1   # isolate per-worker CWD so concurrent cjc runs don't race on a shared .cached dir
   # reference
   if "$REF" "$f" -o "$WORK/$name.ref" >/dev/null 2>&1; then
     rout=$("$WORK/$name.ref" 2>/dev/null); rexit=$?
