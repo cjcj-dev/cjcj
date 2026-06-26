@@ -61,6 +61,7 @@ public class IRBuilder2 <: Resource {
     private let builder: LLVMBuilderHandle
     private var chirExpr: Option<CHIRExprWrapper> = None
     private var cgFunction: Option<CGFunction> = None
+    private let basePtrs: HashMap<String, LLVMValueRef> = HashMap<String, LLVMValueRef>()
     private var closed: Bool = false
 
     public init(cgMod: CGModule) {
@@ -251,6 +252,8 @@ public class IRBuilder2 <: Resource {
         let rawDest = dest.GetRawValue()
         let destTy = destElementCGType.GetOriginal()
         let typeInfo = CreateTypeInfo(destTy)
+        let managedBase = GetTrackedManagedBase(rawDest)
+        let genericSize = if (managedBase.isSome()) { GetSize32(destTy, valueCGType) } else { LLVMNullValue() }
         let blockNames = ArrayList<String>()
         blockNames.add("handle_store_ref")
         blockNames.add("handle_store_non_ref")
@@ -262,18 +265,26 @@ public class IRBuilder2 <: Resource {
         CreateCondBr(CreateTypeInfoIsReferenceCall(typeInfo), blocks[0], blocks[1])
 
         SetInsertPoint(blocks[0])
-        CreateStore(rawValue, CastStoreSlotForValue(rawDest, rawValue, "generic.store.ref.dest"))
+        if (let Some(baseObject) <- managedBase) {
+            CallGCWrite(rawValue, baseObject, rawDest)
+        } else {
+            CreateStore(rawValue, CastStoreSlotForValue(rawDest, rawValue, "generic.store.ref.dest"))
+        }
         CreateBr(blocks[2])
 
         SetInsertPoint(blocks[1])
-        let destStorage = if (dest.IsSRetArg() && IsLLVMArgument(rawDest)) {
-            CreateLoad(destElementCGType.GetLLVMType(), rawDest, name: "generic.store.sret")
+        if (let Some(baseObject) <- managedBase) {
+            CallGCWriteGeneric(baseObject, rawDest, rawValue, genericSize)
         } else {
-            let tmp = CallAllocaGenericWithTypeInfo(destTy, typeInfo)
-            CreateStore(tmp, CastStoreSlotForValue(rawDest, tmp, "generic.store.dest"))
-            tmp
+            let destStorage = if (dest.IsSRetArg() && IsLLVMArgument(rawDest)) {
+                CreateLoad(destElementCGType.GetLLVMType(), rawDest, name: "generic.store.sret")
+            } else {
+                let tmp = CallAllocaGenericWithTypeInfo(destTy, typeInfo)
+                CreateStore(tmp, CastStoreSlotForValue(rawDest, tmp, "generic.store.dest"))
+                tmp
+            }
+            CallAssignGeneric(destStorage, rawValue, typeInfo)
         }
-        CallAssignGeneric(destStorage, rawValue, typeInfo)
         CreateBr(blocks[2])
 
         SetInsertPoint(blocks[2])
@@ -380,6 +391,60 @@ public class IRBuilder2 <: Resource {
 
     private func IsLLVMArgument(value: LLVMValueRef): Bool {
         return !value.isNull() && !unsafe { LLVMIsAArgument(value) }.isNull()
+    }
+
+    private func GetLLVMValueKey(value: LLVMValueRef): Option<String> {
+        if (value.isNull()) {
+            return None
+        }
+        let name = LLVMCStringToString(unsafe { LLVMGetValueName(value) }) ?? ""
+        if (name.isEmpty()) {
+            return None
+        }
+        return Some(name)
+    }
+
+    private func TrackBasePtr(value: LLVMValueRef, baseObject: LLVMValueRef): Unit {
+        if (let Some(key) <- GetLLVMValueKey(value)) {
+            basePtrs[key] = baseObject
+        }
+    }
+
+    private func GetTrackedBasePtr(value: LLVMValueRef): Option<LLVMValueRef> {
+        let key = GetLLVMValueKey(value) ?? return None
+        if (basePtrs.contains(key)) {
+            return basePtrs[key]
+        }
+        return None
+    }
+
+    private func GetPointerAddressSpace(value: LLVMValueRef): Option<UInt32> {
+        let valueType = unsafe { LLVMTypeOf(value) }
+        if (valueType.isNull() || unsafe { LLVMGetTypeKind(valueType) } != 12) {
+            return None
+        }
+        return Some(unsafe { LLVMGetPointerAddressSpace(valueType) })
+    }
+
+    private func GetTrackedManagedBase(value: LLVMValueRef): Option<LLVMValueRef> {
+        let baseObject = GetTrackedBasePtr(value) ?? return None
+        if ((GetPointerAddressSpace(baseObject) ?? 0u32) == 1u32) {
+            return Some(baseObject)
+        }
+        return None
+    }
+
+    private func PropagateBasePtr(source: LLVMValueRef, result: LLVMValueRef): Unit {
+        if (source.isNull() || result.isNull()) {
+            return
+        }
+        if (let Some(baseObject) <- GetTrackedBasePtr(source)) {
+            TrackBasePtr(result, baseObject)
+            return
+        }
+        if ((GetPointerAddressSpace(source) ?? 0u32) == 1u32) {
+            TrackBasePtr(result, source)
+        }
     }
 
     public func CreateMemSet(pointer: LLVMValueRef, value: LLVMValueRef, len: LLVMValueRef,
@@ -1460,9 +1525,10 @@ public class IRBuilder2 <: Resource {
     public func CallGCWriteGeneric(baseObject: LLVMValueRef, dest: LLVMValueRef, source: LLVMValueRef,
         size: LLVMValueRef): LLVMValueRef {
         let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let basePtrTy = CGType.GetRefType(GetLLVMContext())
         let destPtrTy = unsafe { LLVMPointerType(i8Type, 1u32) }
         let args = ArrayList<LLVMValueRef>()
-        args.add(baseObject)
+        args.add(CreatePointerCast(baseObject, basePtrTy, name: "gcwrite.generic.base"))
         args.add(CreatePointerCast(dest, destPtrTy, name: "gcwrite.generic.dest"))
         args.add(source)
         args.add(size)
@@ -1573,6 +1639,7 @@ public class IRBuilder2 <: Resource {
                 result = unsafe { LLVMBuildGEP2(builder.raw, elementType, pointer, idxPtr.value, UInt32(indices.size), nameCString.value) }
             }
         }
+        PropagateBasePtr(pointer, result)
         return result
     }
 
@@ -1595,6 +1662,7 @@ public class IRBuilder2 <: Resource {
                 }
             }
         }
+        PropagateBasePtr(pointer, result)
         return result
     }
 
@@ -1604,6 +1672,7 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildStructGEP2(builder.raw, elementType, pointer, index, nameCString.value) }
         }
+        PropagateBasePtr(pointer, result)
         return result
     }
 
@@ -1815,6 +1884,7 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildBitCast(builder.raw, value, destType, nameCString.value) }
         }
+        PropagateBasePtr(value, result)
         return result
     }
 
@@ -1911,6 +1981,7 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildPointerCast(builder.raw, value, destType, nameCString.value) }
         }
+        PropagateBasePtr(value, result)
         return result
     }
 
