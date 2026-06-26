@@ -4,10 +4,17 @@ import std.collection.*
 
 public class EnumCtorInfo {
     public let name: String
+    public let mangledName: String
+    public let funcType: Option<FuncType>
+    public let annoInfo: AnnoInfo
     public let payloadTypes: ArrayList<Type> = ArrayList<Type>()
 
-    public init(name: String, payloadTypes: ArrayList<Type>) {
+    public init(name: String, payloadTypes: ArrayList<Type>, mangledName!: String = "",
+        funcType!: Option<FuncType> = None, annoInfo!: AnnoInfo = AnnoInfo()) {
         this.name = name
+        this.mangledName = mangledName
+        this.funcType = funcType
+        this.annoInfo = annoInfo
         for (ty in payloadTypes) {
             this.payloadTypes.add(ty)
         }
@@ -46,12 +53,23 @@ public class EnumDef <: CustomTypeDef {
         ctors.add(info)
     }
 
+    public func GetCtor(index: Int64): EnumCtorInfo {
+        return ctors[index]
+    }
+
     public func GetCtors(): ArrayList<EnumCtorInfo> {
         let out = ArrayList<EnumCtorInfo>()
         for (ctor in ctors) {
             out.add(ctor)
         }
         return out
+    }
+
+    public func SetCtors(items: ArrayList<EnumCtorInfo>): Unit {
+        ctors.clear()
+        for (item in items) {
+            ctors.add(item)
+        }
     }
 
     public func GetConstructorInfos(builder!: Option<CHIRBuilder> = None): ArrayList<EnumCtorInfo> {
