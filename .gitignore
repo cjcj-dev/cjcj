@@ -16,3 +16,4 @@ cjpm.lock.tmp
 *.log
 /tmp/
 .DS_Store
+scripts/__pycache__/

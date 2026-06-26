@@ -18,6 +18,7 @@ public class SubCHIRPackage {
     public let chirFuncs: ArrayList<Function> = ArrayList<Function>()
     public let chirForeigns: ArrayList<Function> = ArrayList<Function>()
     public let chirImportedCFuncs: ArrayList<Function> = ArrayList<Function>()
+    private let ownedTypeTemplateNames: HashSet<String> = HashSet<String>()
 
     public init(splitNum: Int64) {
         this.splitNum = splitNum
@@ -29,6 +30,24 @@ public class SubCHIRPackage {
         chirFuncs.clear()
         chirForeigns.clear()
         chirImportedCFuncs.clear()
+        ownedTypeTemplateNames.clear()
+    }
+
+    public func OwnsCustomDef(def: CustomTypeDef): Bool {
+        for (ownedDef in chirCustomDefs) {
+            if (ownedDef.nodeId == def.nodeId) {
+                return true
+            }
+        }
+        return false
+    }
+
+    public func AddOwnedTypeTemplateName(name: String): Unit {
+        ownedTypeTemplateNames.add(name)
+    }
+
+    public func OwnsTypeTemplateName(name: String): Bool {
+        return ownedTypeTemplateNames.contains(name)
     }
 }
 
@@ -69,6 +88,7 @@ public class CHIRSplitter {
         SplitCHIRExtends(packages)
         SplitCHIRGlobalVars(packages)
         SplitCHIRImportedCFuncs(packages)
+        RegisterOwnedTypeTemplates(packages)
         return packages
     }
 
@@ -262,6 +282,24 @@ public class CHIRSplitter {
             }
             let targetIndex = NextRoundRobinIndex(packages)
             packages[targetIndex].chirImportedCFuncs.add(fn)
+        }
+    }
+
+    private func RegisterOwnedTypeTemplates(packages: ArrayList<SubCHIRPackage>): Unit {
+        let seen = HashSet<String>()
+        for (subPackage in packages) {
+            for (customDef in subPackage.chirCustomDefs) {
+                if (customDef.IsExtend() || !customDef.IsGenericDef()) {
+                    continue
+                }
+                if (let Some(customTy) <- customDef.GetType()) {
+                    let typeTemplateName = CGType.GetNameOfTypeTemplateGV(customTy)
+                    if (!seen.contains(typeTemplateName)) {
+                        seen.add(typeTemplateName)
+                        subPackage.AddOwnedTypeTemplateName(typeTemplateName)
+                    }
+                }
+            }
         }
     }
 }

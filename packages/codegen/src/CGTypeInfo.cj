@@ -302,6 +302,9 @@ public func RedefineTypeInfoGlobal(cgMod: CGModule, chirTy: Type): Unit {
     if (IsImportedCustomType(chirTy)) {
         return
     }
+    if (!OwnsCustomDeclTypeInfo(cgMod, chirTy)) {
+        return
+    }
     let typeInfoTy = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
     let typeInfo = DeclareTypeInfoGlobal(cgMod, chirTy, CGType.GetCGGenericKind(chirTy))
     if (typeInfo.isNull()) {
@@ -349,6 +352,9 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
             CGType.GetCGGenericKind(chirTy) == CGGenericKind.CONCRETE) {
             return
         }
+        if (!OwnsCustomDeclTypeInfo(cgMod, chirTy)) {
+            return
+        }
     }
     if (IsGenericRelatedCustomType(chirTy)) {
         return
@@ -365,6 +371,20 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
 
 private func IsGenericRelatedCustomType(chirTy: Type): Bool {
     return (chirTy as CustomType).isSome() && chirTy.IsGenericRelated()
+}
+
+private func OwnsCustomDeclTypeInfo(cgMod: CGModule, chirTy: Type): Bool {
+    if (let Some(customTy) <- (chirTy.StripAllRefs() as CustomType)) {
+        if (!customTy.GetGenericArgs().isEmpty()) {
+            return true
+        }
+        let def = customTy.GetCustomTypeDef()
+        if (let Some(genericDecl) <- def.GetGenericDecl()) {
+            return cgMod.OwnsCustomTypeDef(genericDecl)
+        }
+        return cgMod.OwnsCustomTypeDef(def)
+    }
+    return true
 }
 
 private func SetConcreteTypeInfoLinkage(typeInfo: LLVMValueRef, chirTy: Type): Unit {
@@ -508,6 +528,14 @@ public func EnsureSourceGenericTypeTemplate(cgMod: CGModule, customTy: CustomTyp
         unsafe { LLVMSetLinkage(typeTemplate, LLVMLinkageValue(LLVMLinkage.ExternalWeak)) }
         return typeTemplate
     }
+    if (IsRuntimeOwnedTypeTemplate(typeTemplateName)) {
+        unsafe { LLVMSetLinkage(typeTemplate, LLVMLinkageValue(LLVMLinkage.External)) }
+        return typeTemplate
+    }
+    if (!cgMod.OwnsTypeTemplateName(typeTemplateName)) {
+        unsafe { LLVMSetLinkage(typeTemplate, LLVMLinkageValue(LLVMLinkage.External)) }
+        return typeTemplate
+    }
     if (!typeTemplate.isNull() && unsafe { LLVMIsDeclaration(typeTemplate) } != 0) {
         if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
             unsafe {
@@ -528,8 +556,11 @@ public func RefreshSourceGenericTypeTemplateInitializer(cgMod: CGModule, customT
     if (sourceTy.GetGenericArgs().isEmpty() || sourceTy.GetCustomTypeDef().TestAttr(Attribute.IMPORTED)) {
         return
     }
-    let typeTemplateTy = CGType.GetOrCreateTypeTemplateType(cgMod.GetLLVMContext())
     let typeTemplateName = SourceGenericTypeTemplateName(sourceTy)
+    if (IsRuntimeOwnedTypeTemplate(typeTemplateName) || !cgMod.OwnsTypeTemplateName(typeTemplateName)) {
+        return
+    }
+    let typeTemplateTy = CGType.GetOrCreateTypeTemplateType(cgMod.GetLLVMContext())
     let typeTemplate = GetOrInsertCodeGenGlobal(cgMod, typeTemplateName, typeTemplateTy)
     if (typeTemplate.isNull()) {
         return
@@ -548,6 +579,12 @@ public func RefreshSourceGenericTypeTemplateInitializer(cgMod: CGModule, customT
 
 private func SourceGenericTypeTemplateName(customTy: CustomType): String {
     return CGType.GetNameOfTypeTemplateGV(SourceCustomType(customTy))
+}
+
+private func IsRuntimeOwnedTypeTemplate(typeTemplateName: String): Bool {
+    return typeTemplateName == "Tuple.tt" || typeTemplateName == "VArray.tt" ||
+        typeTemplateName == "RawArray.tt" || typeTemplateName == "CPointer.tt" ||
+        typeTemplateName == "CFunc.tt" || typeTemplateName == "Closure.tt"
 }
 
 private func SourceGenericTypeTemplateRuntimeName(customTy: CustomType): String {

@@ -3,6 +3,7 @@ package cangjie_compiler::codegen
 import std.collection.*
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.Block
+import cangjie_compiler::chir.CustomTypeDef
 import cangjie_compiler::chir.ExtendDef
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
@@ -94,6 +95,14 @@ public class CGModule {
 
     public func GetCGContext(): CGContext { return cgCtx }
     public func GetLLVMContext(): LLVMContextHandle { return cgCtx.GetLLVMContext() }
+
+    public func OwnsCustomTypeDef(def: CustomTypeDef): Bool {
+        return cgCtx.GetSubCHIRPackage().OwnsCustomDef(def)
+    }
+
+    public func OwnsTypeTemplateName(name: String): Bool {
+        return cgCtx.GetSubCHIRPackage().OwnsTypeTemplateName(name)
+    }
 
     public func GetLLVMModule(): Option<LLVMModuleHandle> {
         return module
