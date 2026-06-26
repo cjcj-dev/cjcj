@@ -3,6 +3,13 @@ package cangjie_compiler::codegen
 import std.collection.*
 import cangjie_compiler::chir.Value
 
+private let LLVM_ALLOCA_OPCODE: Int32 = 26
+private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
+
+foreign {
+    func LLVMGetAllocatedType(alloca: LLVMValueRef): LLVMTypeRef
+}
+
 public class CGFunction <: CGValue {
     private let cgMod: CGModule
     private let chirFunc: Value
@@ -43,6 +50,7 @@ public class CGFunction <: CGValue {
 
     public func Opt(): Unit {
         CGFunction.RemoveUnreachableBlocks(GetRawFunction())
+        AddZeroInitForStructWithRefField()
     }
 
     public func DumpIR(): Unit {
@@ -163,5 +171,47 @@ public class CGFunction <: CGValue {
 
     public static func HasNoUse(value: LLVMValueRef): Bool {
         return unsafe { LLVMGetFirstUse(value) }.isNull()
+    }
+
+    private func AddZeroInitForStructWithRefField(): Unit {
+        let function = GetRawFunction()
+        if (function.isNull() || unsafe { LLVMIsDeclaration(function) } != 0) {
+            return
+        }
+        let entryBlock = unsafe { LLVMGetFirstBasicBlock(function) }
+        if (entryBlock.isNull()) {
+            return
+        }
+
+        let builder = IRBuilder2(cgMod)
+        let structAllocas = ArrayList<(LLVMValueRef, LLVMTypeRef)>()
+        var insertBefore = LLVMNullValue()
+        var inst = unsafe { LLVMGetFirstInstruction(entryBlock) }
+        while (!inst.isNull()) {
+            if (unsafe { LLVMGetInstructionOpcode(inst) } == LLVM_ALLOCA_OPCODE) {
+                let allocatedType = unsafe { LLVMGetAllocatedType(inst) }
+                if (!allocatedType.isNull() && unsafe { LLVMGetTypeKind(allocatedType) } == LLVM_STRUCT_TYPE_KIND &&
+                    builder.IsLLVMTypeContainsRef(allocatedType)) {
+                    structAllocas.add((inst, allocatedType))
+                }
+            } else if (insertBefore.isNull()) {
+                insertBefore = inst
+            }
+            inst = unsafe { LLVMGetNextInstruction(inst) }
+        }
+
+        if (structAllocas.isEmpty()) {
+            builder.close()
+            return
+        }
+        if (insertBefore.isNull()) {
+            builder.SetInsertPoint(entryBlock)
+        } else {
+            builder.SetInsertPointBefore(insertBefore)
+        }
+        for ((alloca, allocatedType) in structAllocas) {
+            builder.CreateCJMemsetStructWith0(alloca, allocatedType)
+        }
+        builder.close()
     }
 }
