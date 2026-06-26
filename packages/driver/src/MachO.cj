@@ -228,9 +228,9 @@ public open class MachO <: ToolChain {
     }
 
     protected override func GenerateLinkOptionsOfBuiltinLibsForStaticLink(tool: Tool): Unit {
-        let dynamicLibraries = HashSet<String>()
-        let staticLibraries = HashSet<String>()
-        let ltoBuiltInDependencies = HashSet<String>()
+        let dynamicLibraries = ArrayList<String>()
+        let staticLibraries = ArrayList<String>()
+        let ltoBuiltInDependencies = ArrayList<String>()
         let dyDependencies = HashSet<String>()
         GatherMachOAlwaysDynamicStdDependencies(driverOptions.directBuiltinDependencies, dyDependencies)
         GatherMachOAlwaysDynamicStdDependencies(driverOptions.indirectBuiltinDependencies, dyDependencies)
@@ -243,16 +243,10 @@ public open class MachO <: ToolChain {
                 dyDependencies)
         }
         if (driverOptions.IsLTOEnabled()) {
-            for (bcFile in ltoBuiltInDependencies) {
-                tool.AppendArg(bcFile)
-            }
+            AppendSortedLinkOrderedSet(tool, ltoBuiltInDependencies)
         }
-        for (lib in staticLibraries) {
-            tool.AppendArg(lib)
-        }
-        for (lib in dynamicLibraries) {
-            tool.AppendArg(lib)
-        }
+        AppendSortedLinkOrderedSet(tool, staticLibraries)
+        AppendSortedLinkOrderedSet(tool, dynamicLibraries)
     }
 
     protected override func GenerateLinkOptionsOfBuiltinLibsForDyLink(tool: Tool): Unit {
@@ -284,15 +278,15 @@ public open class MachO <: ToolChain {
 
     private func AppendMachOStaticBuiltinLibrary(
         pkg: String,
-        dynamicLibraries: HashSet<String>,
-        staticLibraries: HashSet<String>,
-        ltoBuiltInDependencies: HashSet<String>,
+        dynamicLibraries: ArrayList<String>,
+        staticLibraries: ArrayList<String>,
+        ltoBuiltInDependencies: ArrayList<String>,
         dyDependencies: HashSet<String>
     ): Unit {
         if (let Some(staticLib) <- MachOLibCangjieFormat(pkg, ".a")) {
             if (dyDependencies.contains(staticLib) && !driverOptions.linkStatic) {
                 if (let Some(base) <- MachOLibCangjieBaseFormat(pkg)) {
-                    dynamicLibraries.add("-l" + base)
+                    AddLinkOrderedSetValue(dynamicLibraries, "-l" + base)
                 }
                 return
             }
@@ -303,16 +297,16 @@ public open class MachO <: ToolChain {
             }
             if (driverOptions.IsLTOEnabled()) {
                 if (let Some(ffiLib) <- MachOLTOCStdFFILib(staticLib)) {
-                    staticLibraries.add(FileUtil.JoinPath(cangjieLibPath, ffiLib))
+                    AddLinkOrderedSetValue(staticLibraries, FileUtil.JoinPath(cangjieLibPath, ffiLib))
                 }
                 if (let Some(ltoLib) <- MachOLtoLibCangjieFormat(pkg)) {
-                    ltoBuiltInDependencies.add(ltoLib)
+                    AddLinkOrderedSetValue(ltoBuiltInDependencies, ltoLib)
                 }
             } else {
                 if (driverOptions.linkStaticStd ?? true) {
-                    staticLibraries.add(FileUtil.JoinPath(cangjieLibPath, staticLib))
+                    AddLinkOrderedSetValue(staticLibraries, FileUtil.JoinPath(cangjieLibPath, staticLib))
                 } else if (let Some(base) <- MachOLibCangjieBaseFormat(pkg)) {
-                    staticLibraries.add("-l" + base)
+                    AddLinkOrderedSetValue(staticLibraries, "-l" + base)
                 }
             }
             CheckMachOOtherDependenciesOfStaticLib(staticLib, dynamicLibraries, staticLibraries)
@@ -321,38 +315,38 @@ public open class MachO <: ToolChain {
 
     private func CheckMachOOtherDependenciesOfStaticLib(
         libName: String,
-        dynamicLibraries: HashSet<String>,
-        staticLibraries: HashSet<String>
+        dynamicLibraries: ArrayList<String>,
+        staticLibraries: ArrayList<String>
     ): Unit {
         if (libName == "libcangjie-std-net.a") {
             if (driverOptions.target.IsMinGW()) {
-                staticLibraries.add("-l:libws2_32.a")
+                AddLinkOrderedSetValue(staticLibraries, "-l:libws2_32.a")
             }
         } else if (libName == "cangjie-dynamicLoader-openssl.a") {
             if (!driverOptions.target.IsMinGW()) {
-                dynamicLibraries.add("-ldl")
+                AddLinkOrderedSetValue(dynamicLibraries, "-ldl")
             } else {
-                dynamicLibraries.add("-lcrypt32")
+                AddLinkOrderedSetValue(dynamicLibraries, "-lcrypt32")
             }
         } else if (libName == "libcangjie-std-ffi.python.a") {
-            dynamicLibraries.add("-ldl")
+            AddLinkOrderedSetValue(dynamicLibraries, "-ldl")
         } else if (libName == "libcangjie-std-ast.a") {
             if (driverOptions.target.os == OSType.DARWIN) {
-                staticLibraries.add("-lcangjie-std-astFFI")
+                AddLinkOrderedSetValue(staticLibraries, "-lcangjie-std-astFFI")
             } else {
-                staticLibraries.add("-l:libcangjie-std-astFFI.a")
+                AddLinkOrderedSetValue(staticLibraries, "-l:libcangjie-std-astFFI.a")
             }
             if (driverOptions.target.arch != ArchType.AARCH64 && driverOptions.target.os == OSType.LINUX &&
                 driverOptions.target.env != EnvironmentType.OHOS &&
                 driverOptions.target.env != EnvironmentType.ANDROID) {
-                staticLibraries.add("-lclang_rt-builtins")
+                AddLinkOrderedSetValue(staticLibraries, "-lclang_rt-builtins")
             }
             if (driverOptions.target.os == OSType.LINUX &&
                 driverOptions.target.env == EnvironmentType.ANDROID) {
-                staticLibraries.add("-lc++")
-                staticLibraries.add("-lunwind")
+                AddLinkOrderedSetValue(staticLibraries, "-lc++")
+                AddLinkOrderedSetValue(staticLibraries, "-lunwind")
             } else if (!driverOptions.target.IsMacOS() && !driverOptions.target.IsMinGW()) {
-                dynamicLibraries.add("-lgcc_s")
+                AddLinkOrderedSetValue(dynamicLibraries, "-lgcc_s")
             }
         }
     }
