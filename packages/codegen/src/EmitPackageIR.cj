@@ -30,6 +30,7 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
     for (subPackage in splitter.SplitCHIRPackage()) {
         let cgMod = CGModule(subPackage, cgPkgContext)
         cgPkgContext.AddCGModule(cgMod)
+        EmitTypeTemplatesForOwnedGenericCustomDefs(cgMod)
         for (globalVar in subPackage.chirGVs) {
             EmitGlobalVariableIR(cgMod, globalVar)
         }
@@ -57,6 +58,17 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         cgMod.Opt()
     }
     return cgPkgContext.ReleaseLLVMModules()
+}
+
+private func EmitTypeTemplatesForOwnedGenericCustomDefs(cgMod: CGModule): Unit {
+    for (def in cgMod.GetCGContext().GetSubCHIRPackage().chirCustomDefs) {
+        if (def.IsExtend() || !def.IsGenericDef()) {
+            continue
+        }
+        if (let Some(customTy) <- def.GetType()) {
+            EnsureSourceGenericTypeTemplate(cgMod, customTy)
+        }
+    }
 }
 
 private func EmitCJSDKVersion(cgMod: CGModule): Unit {
