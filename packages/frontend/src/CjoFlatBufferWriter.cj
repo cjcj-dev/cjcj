@@ -42,8 +42,8 @@ private class FrontendCjoFlatBufferWriter {
     private let allFileInfo: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let typeKeyToIndex: HashMap<String, UInt32> = HashMap<String, UInt32>()
     private let allTypes: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
-    private let declKeyToIndex: HashMap<String, UInt32> = HashMap<String, UInt32>()
-    private let completedDeclKeys: HashSet<String> = HashSet<String>()
+    private let declKeyToIndex: HashMap<Node, UInt32> = HashMap<Node, UInt32>()
+    private let completedDeclKeys: HashSet<Node> = HashSet<Node>()
     private let allDecls: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let allExprs: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     // Mirrors ASTWriterImpl's savedExprMap (std::map<const Expr*, FormattedIndex>, ASTWriterImpl.h):
@@ -241,7 +241,7 @@ private class FrontendCjoFlatBufferWriter {
         if (decl.fullPackageName.isEmpty()) {
             decl.fullPackageName = currentPackageName
         }
-        let key = DeclKey(decl)
+        let key: Node = decl
         if (let Some(existing) <- declKeyToIndex.get(key)) {
             if (!completedDeclKeys.contains(key)) {
                 SaveDeclBody(decl, key, existing, isTopLevel)
@@ -256,7 +256,7 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     private func PreSaveDeclIndex(decl: Decl): UInt32 {
-        let key = DeclKey(decl)
+        let key: Node = decl
         if (let Some(existing) <- declKeyToIndex.get(key)) {
             return existing
         }
@@ -266,7 +266,7 @@ private class FrontendCjoFlatBufferWriter {
         return next
     }
 
-    private func SaveDeclBody(decl: Decl, key: String, index: UInt32, isTopLevel: Bool): Unit {
+    private func SaveDeclBody(decl: Decl, key: Node, index: UInt32, isTopLevel: Bool): Unit {
         if (completedDeclKeys.contains(key)) {
             return
         }
