@@ -1852,22 +1852,7 @@ private class CjoSignatureMaterializer {
             return Some(LoadFlatLambdaExpr(reader, exprTable))
         }
         if (kind == FLAT_EXPR_KIND_CALL) {
-            // Mirrors ExprLoader.cpp:92-115 LoadCallExpr and ExprLoader.cpp:516-531 LoadFuncArg
-            // while preserving the previous imported-body consumption boundary. The newly expanded
-            // per-kind loaders stay dormant until the source-imported-body emission cut promotes them.
-            var scanIdx: Int64 = 0
-            while (scanIdx < reader.VectorLength(flatAllExprs)) {
-                let scanTable = reader.VectorOffsetElement(flatAllExprs, scanIdx)
-                if (scanTable < 0) {
-                    return None
-                }
-                let scanKind = reader.U16Field(scanTable, 4, 0u16)
-                let scanInfoKind = reader.U8Field(scanTable, 18, 0u8)
-                if (!IsLegacyBodyConsumedFlatExprKind(scanKind, scanInfoKind)) {
-                    return None
-                }
-                scanIdx++
-            }
+            // Mirrors ExprLoader.cpp:92-115 LoadCallExpr and ExprLoader.cpp:516-531 LoadFuncArg.
             let ce = CallExpr()
             LoadFlatExprBasicInfo(reader, exprTable, ce)
             let operands = reader.VectorField(exprTable, 12)
@@ -1935,24 +1920,6 @@ private class CjoSignatureMaterializer {
             return Some(LoadFlatBlock(reader, exprTable))
         }
         return None
-    }
-
-    private func IsLegacyBodyConsumedFlatExprKind(kind: UInt16, infoKind: UInt8): Bool {
-        return kind == FLAT_EXPR_KIND_WILDCARD ||
-            kind == FLAT_EXPR_KIND_RETURN || kind == FLAT_EXPR_KIND_JUMP ||
-            kind == FLAT_EXPR_KIND_MEMBER_ACCESS || kind == FLAT_EXPR_KIND_REF_EXPR ||
-            kind == FLAT_EXPR_KIND_CALL || kind == FLAT_EXPR_KIND_UNARY ||
-            kind == FLAT_EXPR_KIND_LIT_CONST ||
-            kind == FLAT_EXPR_KIND_BINARY || kind == FLAT_EXPR_KIND_SUBSCRIPT ||
-            kind == FLAT_EXPR_KIND_ASSIGN || kind == FLAT_EXPR_KIND_TYPE_CONV ||
-            kind == FLAT_EXPR_KIND_THROW || kind == FLAT_EXPR_KIND_SPAWN ||
-            kind == FLAT_EXPR_KIND_ARRAY_LIT || kind == FLAT_EXPR_KIND_TUPLE_LIT ||
-            kind == FLAT_EXPR_KIND_MATCH || kind == FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR ||
-            kind == FLAT_EXPR_KIND_IF || kind == FLAT_EXPR_KIND_TRY || kind == FLAT_EXPR_KIND_WHILE ||
-            kind == FLAT_EXPR_KIND_DO_WHILE || kind == FLAT_EXPR_KIND_LAMBDA ||
-            kind == FLAT_EXPR_KIND_BLOCK || kind == FLAT_EXPR_KIND_MATCH_CASE ||
-            kind == FLAT_EXPR_KIND_MATCH_CASE_OTHER || kind == FLAT_EXPR_KIND_FOR_IN ||
-            (kind == 0u16 && infoKind == 11u8)
     }
 
     // Mirrors ExprLoader.cpp:348-358 LoadLambdaExpr: LambdaInfo owns a nested FuncBody and

@@ -581,6 +581,11 @@ public class FaithfulAST2CHIR {
                 CollectDeclToList(outer, importedNominalDecls, importedNominalDeclSet)
             }
         }
+        if (IsSrcCodeImportedGlobalDecl(funcDecl)) {
+            CollectDeclToList(funcDecl, globalAndMemberFuncs, globalAndMemberFuncSet)
+            CollectDesugaredDefaultParams(funcDecl, globalAndMemberFuncs, globalAndMemberFuncSet)
+            return
+        }
         CollectDeclToList(funcDecl, importedGlobalAndMemberFuncs, importedGlobalAndMemberFuncSet)
         CollectDesugaredDefaultParams(funcDecl, importedGlobalAndMemberFuncs, importedGlobalAndMemberFuncSet)
     }
