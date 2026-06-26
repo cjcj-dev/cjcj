@@ -31,6 +31,9 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     if (IsOverflowIntrinsic(kind)) {
         return GenerateOverflowIntrinsic(irBuilder, kind, args, resultType)
     }
+    if (kind == IntrinsicKind.PREINITIALIZE) {
+        return GeneratePreInitializeIntrinsic(irBuilder)
+    }
     if (kind == IntrinsicKind.CG_UNSAFE_BEGIN || kind == IntrinsicKind.CG_UNSAFE_END) {
         return UnitOrNull(irBuilder, resultType)
     }
@@ -153,6 +156,13 @@ private func IsArrayIntrinsic(kind: IntrinsicKind): Bool {
         kind == IntrinsicKind.ARRAY_SIZE ||
         kind == IntrinsicKind.ARRAY_CLONE ||
         kind == IntrinsicKind.ARRAY_INIT
+}
+
+private func GeneratePreInitializeIntrinsic(irBuilder: IRBuilder2): LLVMValueRef {
+    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) }
+    let args = ArrayList<LLVMValueRef>()
+    args.add(unsafe { LLVMConstNull(i8PtrType) })
+    return irBuilder.CreateIntrinsicCall("llvm.cj.pre.initialize.package", ArrayList<LLVMTypeRef>(), args)
 }
 
 private func GenerateArraySyscall(irBuilder: IRBuilder2, kind: IntrinsicKind, args: ArrayList<Value>,
