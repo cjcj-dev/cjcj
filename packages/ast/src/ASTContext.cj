@@ -185,9 +185,9 @@ public class ASTContext {
     public var currentMaxDepth: UInt32 = 0u32
     public var currentScopeName: String = TOPLEVEL_SCOPE_NAME
     public let currentCheckingNodes: ArrayList<Node> = ArrayList<Node>()
-    public let targetTypeMap: HashMap<Int64, Ty> = HashMap<Int64, Ty>()
-    public let lastTargetTypeMap: HashMap<Int64, Ty> = HashMap<Int64, Ty>()
-    public let typeCheckCache: HashMap<Int64, TypeCheckCache> = HashMap<Int64, TypeCheckCache>()
+    public let targetTypeMap: HashMap<Node, Ty> = HashMap<Node, Ty>()
+    public let lastTargetTypeMap: HashMap<Node, Ty> = HashMap<Node, Ty>()
+    public let typeCheckCache: HashMap<Node, TypeCheckCache> = HashMap<Node, TypeCheckCache>()
     public var searcher: Searcher = Searcher()
     public let packageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()
     public let resolvedImportedDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
@@ -273,14 +273,14 @@ public class ASTContext {
 
     public func ClearTypeCheckCache(root: Node): Unit {
         let walker = Walker(root, visitPre: { node: Node =>
-            typeCheckCache.remove(NodeIdentityKey(node))
+            typeCheckCache.remove(node)
             VisitAction.WALK_CHILDREN
         })
         walker.Walk()
     }
 
     public func RemoveTypeCheckCache(node: Node): Unit {
-        typeCheckCache.remove(NodeIdentityKey(node))
+        typeCheckCache.remove(node)
     }
 
     public func SkipSynForCorrectTy(node: Node): Unit {
@@ -292,14 +292,14 @@ public class ASTContext {
             }
         }
         cache.lastKey = CacheKey(node.GetTy(), isDesugared, 0)
-        typeCheckCache[NodeIdentityKey(node)] = cache
+        typeCheckCache[node] = cache
     }
 
     public func IsSynSkippedForCorrectTy(node: Node): Bool {
         if (!Ty.IsTyCorrect(node.GetTy()) || node.TyKind() == TypeKind.TYPE_QUEST) {
             return false
         }
-        if (let Some(cache) <- typeCheckCache.get(NodeIdentityKey(node))) {
+        if (let Some(cache) <- typeCheckCache.get(node)) {
             if (let Some(_) <- cache.lastKey) {
                 return true
             }
@@ -318,7 +318,7 @@ public class ASTContext {
     }
 
     public func HasTargetTy(node: Node): Bool {
-        return targetTypeMap.contains(NodeIdentityKey(node))
+        return targetTypeMap.contains(node)
     }
 
     public func AddDeclName(names: Names, decl: Decl): Unit {

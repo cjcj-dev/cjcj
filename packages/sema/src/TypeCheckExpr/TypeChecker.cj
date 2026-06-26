@@ -31,15 +31,15 @@ private func questTy(): Ty {
 }
 
 private func typeCheckExprTargetTypeOf(ctx: ASTContext, node: Node): Option<Ty> {
-    return ctx.targetTypeMap.get(NodeIdentityKey(node))
+    return ctx.targetTypeMap.get(node)
 }
 
 func typeCheckExprPutTargetType(ctx: ASTContext, node: Node, ty: Ty): Unit {
-    ctx.targetTypeMap[NodeIdentityKey(node)] = ty
+    ctx.targetTypeMap[node] = ty
 }
 
 private func typeCheckExprClearTargetType(ctx: ASTContext, node: Node): Unit {
-    ctx.targetTypeMap.remove(NodeIdentityKey(node))
+    ctx.targetTypeMap.remove(node)
 }
 
 private func typeCheckExprAllMacroFuncDecls(targets: ArrayList<Decl>): Bool {

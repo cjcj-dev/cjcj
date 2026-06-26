@@ -84,11 +84,11 @@ private func HasMismatchedEnumSugarTypeArgs(refExpr: RefExpr, decl: Decl): Bool 
 }
 
 private func TargetTypeOf(ctx: ASTContext, refExpr: RefExpr): Option<Ty> {
-    return ctx.targetTypeMap.get(NodeIdentityKey(refExpr))
+    return ctx.targetTypeMap.get(refExpr)
 }
 
 private func PutTargetType(ctx: ASTContext, refExpr: RefExpr, ty: Ty): Unit {
-    ctx.targetTypeMap[NodeIdentityKey(refExpr)] = ty
+    ctx.targetTypeMap[refExpr] = ty
 }
 
 private func RefineAgainstInterface(typeManager: TypeManager, currentTy: Ty, target: Decl): Option<Ty> {
