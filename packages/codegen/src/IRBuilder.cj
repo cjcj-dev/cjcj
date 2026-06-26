@@ -2480,7 +2480,7 @@ public class IRBuilder2 <: Resource {
         let indices = ArrayList<LLVMValueRef>()
         indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(index), 0) })
         let typeInfoSlot = CreateGEP(typeInfoPtrType, tiArray, indices)
-        return CreateInvariantLoad(typeInfoPtrType, typeInfoSlot, name: name)
+        return CreateLoad(typeInfoPtrType, typeInfoSlot, name: name)
     }
 
     public func GetTypeInfoFromTypeInfoArgs(typeInfo: LLVMValueRef, index: Int64): LLVMValueRef {
