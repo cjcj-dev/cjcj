@@ -428,6 +428,9 @@ public class FaithfulAST2CHIR {
         TranslateOtherTopLevelDecls(node)
         SetInitFuncForStaticVar()
         FlatForInExpr(builder).RunOnPackage(CurrentPackage())
+        if (!failure && ConstEvalPass.HasConstGlobalVarInitFuncs(CurrentPackage())) {
+            ConstEvalPass().RunOnPackage(CurrentPackage())
+        }
         if (chirWFC) {
             AST2CHIRCheck()
         }
