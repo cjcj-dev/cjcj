@@ -48,11 +48,7 @@ private class AstObjectIdAllocator {
     }
 }
 
-public func NodeIdentityKey(node: Node): Int64 {
-    return node.objectId
-}
-
-public open class Node {
+public open class Node <: Hashable & Equatable<Node> {
     public var begin: Position = INVALID_POSITION
     public var end: Position = INVALID_POSITION
     public var comments: CommentGroups = CommentGroups()
@@ -78,6 +74,18 @@ public open class Node {
     public init(kind: ASTKind) {
         objectId = AstObjectIdAllocator.Next()
         astKind = kind
+    }
+
+    public operator func ==(right: Node): Bool {
+        return objectId == right.objectId
+    }
+
+    public operator func !=(right: Node): Bool {
+        return objectId != right.objectId
+    }
+
+    public func hashCode(): Int64 {
+        return objectId.hashCode()
     }
 
     public func GetTy(): Option<Ty> {
