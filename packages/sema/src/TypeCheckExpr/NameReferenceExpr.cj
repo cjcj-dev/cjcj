@@ -8,16 +8,6 @@ public func SelfhostPortStatus_TypeCheckExpr_NameReferenceExpr(): Bool {
     return true
 }
 
-private func TcNodeHash(node: Node): Int64 {
-    return node.begin.hashCode() ^ (node.end.hashCode() << 1) ^ ASTKindIndex(node.astKind)
-}
-
-private func TcPutTargetType(ctx: Option<ASTContext>, node: Node, target: Ty): Unit {
-    if (let Some(realCtx) <- ctx) {
-        realCtx.targetTypeMap[TcNodeHash(node)] = target
-    }
-}
-
 func TcUnitTy(): Ty {
     return TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
 }
@@ -664,7 +654,9 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr): Ty {
 
 public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     ctx!: Option<ASTContext> = None): Bool {
-    TcPutTargetType(ctx, expr, target)
+    if (let Some(realCtx) <- ctx) {
+        typeCheckExprPutTargetType(realCtx, expr, target)
+    }
     if (let Some(value) <- (expr as LitConstExpr)) { return ChkLitConstExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as ParenExpr)) { return ChkParenExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as TupleLit)) { return ChkTupleLit(typeManager, target, value) }

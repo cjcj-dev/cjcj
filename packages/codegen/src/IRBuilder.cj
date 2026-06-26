@@ -919,7 +919,7 @@ public class IRBuilder2 <: Resource {
     }
 
     private func IsOptionLikeRefValue(argCGType: CGType): Bool {
-        if (let Some(enumCGType) <- (CGType.GetOrCreate(cgMod, argCGType.GetOriginal().StripAllRefs()) as CGEnumType)) {
+        if (let Some(enumCGType) <- (CGType.GetOrCreate(cgMod, argCGType.GetOriginal()) as CGEnumType)) {
             return enumCGType.IsOptionLikeRef()
         }
         return false
