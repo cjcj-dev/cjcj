@@ -6,8 +6,8 @@ public class ConstEvalPass {
     public init() {}
 
     public static func HasConstGlobalVarInitFuncs(pkg: Package): Bool {
-        for (fn in pkg.GetGlobalFuncsWithBody(includeSrcCodeImported: false)) {
-            if (fn.IsGVInit() && fn.IsCompileTimeValue()) {
+        for (fn in pkg.GetGlobalFuncsWithBody()) {
+            if (ShouldEvaluateConstGlobalInit(fn)) {
                 return true
             }
         }
@@ -50,12 +50,17 @@ public class ConstEvalPass {
 
     private func CollectConstGlobalVarInitFuncs(pkg: Package): ArrayList<Function> {
         let funcs = ArrayList<Function>()
-        for (fn in pkg.GetGlobalFuncsWithBody(includeSrcCodeImported: false)) {
-            if (fn.IsGVInit() && fn.IsCompileTimeValue()) {
+        for (fn in pkg.GetGlobalFuncsWithBody()) {
+            if (ShouldEvaluateConstGlobalInit(fn)) {
                 funcs.add(fn)
             }
         }
         return funcs
+    }
+
+    private static func ShouldEvaluateConstGlobalInit(fn: Function): Bool {
+        return fn.IsGVInit() && fn.IsCompileTimeValue() &&
+            (!fn.TestAttr(Attribute.IMPORTED) || fn.IsSrcCodeImported())
     }
 
     // Mirrors CC src/CHIR/Interpreter/ConstEval.cpp:386-420.
@@ -130,6 +135,12 @@ public class ConstEvalPass {
                             continue
                         }
                     }
+                }
+                if (varType.IsString()) {
+                    if (oldInitializer.GetIdentifier() == "@_CGVat6String5emptyHv") {
+                        return ConstInitRewrite.Remove()
+                    }
+                    return ConstInitRewrite.Failed("string global initializer kept for codegen")
                 }
                 if (let None <- newBody) {
                     let created = builder.CreateBlockGroup(oldInitializer)

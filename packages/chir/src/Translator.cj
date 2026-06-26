@@ -413,6 +413,8 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR global initializer function has no entry block")
         let savedFunc = currentFunc
         let savedBlock = currentBlock
+        let savedDelayExitSignal = delayExitSignal
+        delayExitSignal = None
         currentFunc = fn
         currentBlock = entry
         blockGroupStack.add(body)
@@ -424,6 +426,7 @@ public class Translator {
             builder.CreateExit(None, CurrentBlock())
         }
         blockGroupStack.remove(at: blockGroupStack.size - 1)
+        delayExitSignal = savedDelayExitSignal
         currentFunc = savedFunc
         currentBlock = savedBlock
     }
@@ -510,6 +513,8 @@ public class Translator {
         let body = EnsureFuncBody(fn)
         blockGroupStack.add(body)
         let savedAstFuncDecl = currentAstFuncDecl
+        let savedDelayExitSignal = delayExitSignal
+        delayExitSignal = None
         currentFunc = fn
         currentAstFuncDecl = funcDecl
         let savedBlock = currentBlock
@@ -529,6 +534,7 @@ public class Translator {
             }
         }
         currentBlock = savedBlock
+        delayExitSignal = savedDelayExitSignal
         currentFunc = None
         currentAstFuncDecl = savedAstFuncDecl
         blockGroupStack.remove(at: blockGroupStack.size - 1)
@@ -637,6 +643,8 @@ public class Translator {
         let body = EnsureFuncBody(fn)
         blockGroupStack.add(body)
         let savedAstFuncDecl = currentAstFuncDecl
+        let savedDelayExitSignal = delayExitSignal
+        delayExitSignal = None
         currentFunc = fn
         currentAstFuncDecl = None
         let savedBlock = currentBlock
@@ -652,6 +660,7 @@ public class Translator {
             builder.CreateExit(None, CurrentBlock())
         }
         currentBlock = savedBlock
+        delayExitSignal = savedDelayExitSignal
         currentFunc = None
         currentAstFuncDecl = savedAstFuncDecl
         blockGroupStack.remove(at: blockGroupStack.size - 1)
@@ -969,6 +978,8 @@ public class Translator {
 
         let savedBlock = currentBlock
         let savedLambda = currentLambda
+        let savedDelayExitSignal = delayExitSignal
+        delayExitSignal = None
         blockGroupStack.add(body)
         currentLambda = lambda
         let entry = builder.CreateBlock(body)
@@ -987,6 +998,7 @@ public class Translator {
         }
         currentBlock = savedBlock
         currentLambda = savedLambda
+        delayExitSignal = savedDelayExitSignal
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         if (let Some(result) <- lambda.GetResult()) {
             return Some(result)
@@ -1931,6 +1943,8 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR global pattern initializer function has no entry block")
         let savedFunc = currentFunc
         let savedBlock = currentBlock
+        let savedDelayExitSignal = delayExitSignal
+        delayExitSignal = None
         currentFunc = fn
         currentBlock = entry
         blockGroupStack.add(body)
@@ -1943,6 +1957,7 @@ public class Translator {
             builder.CreateExit(None, CurrentBlock())
         }
         blockGroupStack.remove(at: blockGroupStack.size - 1)
+        delayExitSignal = savedDelayExitSignal
         currentFunc = savedFunc
         currentBlock = savedBlock
     }
@@ -1981,6 +1996,8 @@ public class Translator {
         let savedBlock = currentBlock
         let savedLambda = currentLambda
         let savedAstFuncDecl = currentAstFuncDecl
+        let savedDelayExitSignal = delayExitSignal
+        delayExitSignal = None
         blockGroupStack.add(body)
         currentLambda = lambda
         currentAstFuncDecl = funcDecl
@@ -1999,6 +2016,7 @@ public class Translator {
         currentBlock = savedBlock
         currentLambda = savedLambda
         currentAstFuncDecl = savedAstFuncDecl
+        delayExitSignal = savedDelayExitSignal
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         return Some(lambdaValue)
     }

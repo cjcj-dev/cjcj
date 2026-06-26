@@ -816,6 +816,17 @@ public class GlobalVar <: GlobalValue {
         initFunc = None
     }
 
+    public func DestroyInitializer(): Unit {
+        if (let Some(fn) <- initFunc) {
+            for (user in fn.GetUsers()) {
+                user.RemoveSelfFromBlock()
+            }
+            fn.DestroySelf()
+        }
+        initializerValue = None
+        initFunc = None
+    }
+
     public func GetInitFunc(): Option<Function> {
         return initFunc
     }
@@ -986,6 +997,14 @@ public class Function <: GlobalValue {
 
     public func ReplaceBody(newBody: BlockGroup): Unit {
         InitBody(newBody)
+    }
+
+    public func DestroyFuncBody(): Unit {
+        returnValue = None
+        if (let Some(funcBody) <- body) {
+            funcBody.ClearBlockGroup()
+        }
+        body = None
     }
 
     public func GetEntryBlock(): Option<Block> {

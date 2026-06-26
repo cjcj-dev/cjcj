@@ -131,7 +131,6 @@ public class BCHIRInterpreter {
                 interpStack.ArgsPush(arena.Allocate(InterpreterValue.MakeNull()))
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (opCode == OpCode.FRAME) {
-                env.StartStackFrame()
                 env.AllocateLocalVarsForFrame(code.Get(pc + 1))
                 pc += 2
             } else if (opCode == OpCode.LVAR) {
@@ -176,8 +175,14 @@ public class BCHIRInterpreter {
                 if (functionValue.kind != InterpreterValueKind.IFUNC) {
                     return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "APPLY target is not a function"))
                 }
+                let targetFrame = CurrentFrameName(code, functionValue.GetFunctionIndex())
+                if (targetFrame == "linker_dummy_abort_function") {
+                    return Finish(BCHIRResult(BCHIRResultKind.TRAP,
+                        message: "unresolved APPLY target from " + CurrentFrameName(code, pc)))
+                }
                 interpStack.CtrlPush(ControlState(opCode, interpStack.ArgsSize() - argCount,
                     pc + 1 + GetOpCodeArgSize(opCode), env.GetBP()))
+                env.StartStackFrame()
                 pc = functionValue.GetFunctionIndex()
             } else if (opCode == OpCode.INVOKE || opCode == OpCode.INVOKE_EXC) {
                 let argCount = code.Get(pc + 1)
@@ -192,6 +197,7 @@ public class BCHIRInterpreter {
                     if (let Some(functionIndex) <- FindMethod(receiverObject.GetClassId(), code.Get(pc + 2))) {
                         interpStack.CtrlPush(ControlState(opCode, interpStack.ArgsSize() - argCount,
                             pc + 1 + GetOpCodeArgSize(opCode), env.GetBP()))
+                        env.StartStackFrame()
                         pc = functionIndex
                     } else {
                         return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "method not found in vtable"))
@@ -227,7 +233,8 @@ public class BCHIRInterpreter {
                 if (target.kind != InterpreterValueKind.IPOINTER) {
                     return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "STOREINREF target is not a pointer"))
                 }
-                if (!StoreThroughPointer(PointerWithCodePath(target, pc + 2, code.Get(pc + 1)), value)) {
+                let storePointer = PointerWithCodePath(target, pc + 2, code.Get(pc + 1))
+                if (!StoreThroughPointer(storePointer, value)) {
                     return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid STOREINREF path"))
                 }
                 interpStack.ArgsPush(InterpreterValue.MakeUnit())
@@ -340,6 +347,10 @@ public class BCHIRInterpreter {
                         return Finish(BCHIRResult(BCHIRResultKind.TRAP,
                             message: "invalid ARRAY_GET_UNCHECKED intrinsic operands"))
                     }
+                } else if (BCHIRIntrinsic.IsCanUseSIMD(intrinsicKind)) {
+                    interpStack.ArgsRemove(1)
+                    interpStack.ArgsPush(InterpreterValue.MakeBool(true))
+                    pc += 1 + GetOpCodeArgSize(opCode)
                 } else {
                     return Finish(BCHIRResult(BCHIRResultKind.UNSUPPORTED,
                         message: "unsupported INTRINSIC1 kind ${intrinsicKind}"))
@@ -377,7 +388,8 @@ public class BCHIRInterpreter {
             } else if (opCode == OpCode.NOT_SUPPORTED) {
                 return Finish(BCHIRResult(BCHIRResultKind.UNSUPPORTED, message: "bytecode marked not supported"))
             } else if (opCode == OpCode.ABORT || opCode == OpCode.INVALID) {
-                return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid bytecode operation"))
+                return Finish(BCHIRResult(BCHIRResultKind.TRAP,
+                    message: "invalid bytecode operation at " + CurrentFrameName(code, pc)))
             } else {
                 return Finish(BCHIRResult(BCHIRResultKind.UNSUPPORTED, message: "unsupported bytecode op " +
                     GetOpCodeLabel(opCode)))
@@ -424,6 +436,18 @@ public class BCHIRInterpreter {
     private func Finish(result: BCHIRResult): BCHIRResult {
         lastResult = result
         return result
+    }
+
+    private func CurrentFrameName(code: BCHIRDefinition, pc: Int64): String {
+        var scan = pc
+        while (scan >= 0) {
+            if (OpCodeFromIndex(code.Get(scan)) == OpCode.FRAME) {
+                let name = code.GetMangledNameAnnotation(scan)
+                return if (name.isEmpty()) { "<frame>" } else { name }
+            }
+            scan--
+        }
+        return "<top>"
     }
 
     private func DereferencePointer(pointer: InterpreterValue): Option<InterpreterValue> {

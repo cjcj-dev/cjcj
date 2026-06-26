@@ -15,9 +15,7 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
             context.definition.PushOp(OpCode.TUPLE)
             context.definition.PushCell(expr.GetNumOfOperands())
         case ExprKind.FIELD => TranslateFieldExpression(context, expr)
-        case ExprKind.APPLY =>
-            context.definition.PushOp(OpCode.APPLY)
-            context.definition.PushCell(expr.GetNumOfOperands())
+        case ExprKind.APPLY => TranslateApplyExpression(context, expr)
         case ExprKind.INVOKE => TranslateInvokeExpression(context, expr, false)
         case ExprKind.INSTANCEOF => TranslateInstanceOfExpression(context, expr)
         case ExprKind.TYPECAST => TranslateTypecastExpression(context, expr, false)
@@ -36,6 +34,22 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
         case ExprKind.UNBOX_TO_REF => context.definition.PushOp(OpCode.UNBOX_REF)
         case _ => context.definition.PushOp(OpCode.NOT_SUPPORTED)
     }
+}
+
+private func TranslateApplyExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
+    if (let Some(apply) <- (expr as Apply)) {
+        let callee = apply.GetCallee()
+        if (callee.GetSrcCodeIdentifier() == "std.core:CJ_CORE_CanUseSIMD" ||
+            callee.GetSrcCodeIdentifier() == "CJ_CORE_CanUseSIMD" ||
+            callee.GetIdentifier().contains("CJ_CORE_CanUseSIMD")) {
+            context.definition.PushOp(OpCode.INTRINSIC1)
+            context.definition.PushCell(BCHIRIntrinsic.ToByteCodeKind(IntrinsicKind.CJ_CORE_CAN_USE_SIMD))
+            context.definition.PushCell(0xffffffff)
+            return
+        }
+    }
+    context.definition.PushOp(OpCode.APPLY)
+    context.definition.PushCell(expr.GetNumOfOperands())
 }
 
 private func TranslateFieldExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {

@@ -427,6 +427,7 @@ public class FaithfulAST2CHIR {
         TranslateNominalDecls(node)
         TranslateOtherTopLevelDecls(node)
         SetInitFuncForStaticVar()
+        UpdateMemberVarPath(builder).RunOnPackage(CurrentPackage())
         FlatForInExpr(builder).RunOnPackage(CurrentPackage())
         if (!failure && ConstEvalPass.HasConstGlobalVarInitFuncs(CurrentPackage())) {
             ConstEvalPass().RunOnPackage(CurrentPackage())
@@ -436,6 +437,7 @@ public class FaithfulAST2CHIR {
         }
         if (!failure) {
             ClosureConversion(builder).RunOnPackage(CurrentPackage())
+            ReplaceSrcCodeImportedValAfterConstEval(CurrentPackage())
         }
         return !failure
     }
@@ -1216,6 +1218,48 @@ public class FaithfulAST2CHIR {
             decl.TestAnyAttr(AstAttribute.GLOBAL, AstAttribute.STATIC)
     }
 
+    private func ReplaceSrcCodeImportedValAfterConstEval(pkg: Package): Unit {
+        let initFuncsToRemove = ArrayList<Function>()
+        for (decl in globalAndMemberFuncs) {
+            if (!IsSrcCodeImportedGlobalDecl(decl)) {
+                continue
+            }
+            let fn = (globalCache.Get(decl) as Function) ?? continue
+            fn.DestroyFuncBody()
+        }
+        for (decl in globalAndStaticVars) {
+            if (!IsSrcCodeImportedGlobalDecl(decl)) {
+                continue
+            }
+            let globalVar = (globalCache.Get(decl) as GlobalVar) ?? continue
+            if (let Some(initFunc) <- globalVar.GetInitFunc()) {
+                if (!ContainsFunction(initFuncsToRemove, initFunc)) {
+                    initFuncsToRemove.add(initFunc)
+                }
+            }
+            globalVar.DestroyInitializer()
+        }
+        if (initFuncsToRemove.isEmpty()) {
+            return
+        }
+        let newFuncs = ArrayList<Function>()
+        for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
+            if (!ContainsFunction(initFuncsToRemove, fn)) {
+                newFuncs.add(fn)
+            }
+        }
+        pkg.SetAllGlobalFuncs(newFuncs)
+    }
+
+    private func ContainsFunction(functions: ArrayList<Function>, target: Function): Bool {
+        for (fn in functions) {
+            if (fn == target) {
+                return true
+            }
+        }
+        return false
+    }
+
     private func GroupInitOrderByFile(sortedVars: ArrayList<AstDecl>): ArrayList<FaithfulInitFileVars> {
         let order = ArrayList<FaithfulInitFileVars>()
         for (file in pkgFiles) {
@@ -1258,7 +1302,7 @@ public class FaithfulAST2CHIR {
                 TranslateImportedFileLiteralInitializer(fileVars, initBlock)
                 continue
             }
-            if (IsImportedInitEntry(fileVars)) {
+            if (IsImportedInitEntry(fileVars) && !IsSrcImportedDecl(fileVars.vars[0])) {
                 continue
             }
             let fileInit = if (suffix == "_literal") {
@@ -1382,7 +1426,7 @@ public class FaithfulAST2CHIR {
         if (fileVars.vars.isEmpty()) {
             return None
         }
-        if (IsImportedInitEntry(fileVars)) {
+        if (IsImportedInitEntry(fileVars) && !IsSrcImportedDecl(fileVars.vars[0])) {
             return None
         }
         let initFuncs = ArrayList<Function>()
@@ -2142,6 +2186,7 @@ public class FaithfulAST2CHIR {
         if (decl.TestAttr(AstAttribute.PRIVATE)) { target.EnableAttr(Attribute.PRIVATE) }
         if (decl.TestAttr(AstAttribute.STATIC)) { target.EnableAttr(Attribute.STATIC) }
         if (decl.TestAttr(AstAttribute.MUT)) { target.EnableAttr(Attribute.MUT) }
+        if (decl.IsConst()) { target.EnableAttr(Attribute.CONST) }
         if (decl.TestAttr(AstAttribute.ABSTRACT)) { target.EnableAttr(Attribute.ABSTRACT) }
         if (decl.TestAttr(AstAttribute.OPEN)) { target.EnableAttr(Attribute.VIRTUAL) }
         if (decl.TestAttr(AstAttribute.FOREIGN)) { target.EnableAttr(Attribute.FOREIGN) }

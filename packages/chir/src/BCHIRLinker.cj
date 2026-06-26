@@ -277,6 +277,13 @@ public class BCHIRLinker {
                 topDef.PushCell(MapIndex(typeMap, definition.Get(current + 2 + typeIndex)))
                 typeIndex++
             }
+        } else if (opCode == OpCode.GETREF || opCode == OpCode.STOREINREF || opCode == OpCode.FIELD_TPL) {
+            let pathSize = definition.Get(current + 1)
+            var argIndex: Int64 = 1
+            while (argIndex <= GetOpCodeArgSize(opCode) + pathSize) {
+                topDef.PushCell(definition.Get(current + argIndex))
+                argIndex++
+            }
         } else if (OpHasExceptionHandler(opCode)) {
             CopyExceptionOpArgs(definition, topDef, current, opCode, offset)
         } else {
