@@ -18,7 +18,8 @@ private func IsNamedDecl(decl: Decl, fullPackageName: String, name: String): Boo
     return decl.identifier.Val() == name && (fullPackageName.isEmpty() || decl.fullPackageName == fullPackageName)
 }
 
-private func FindPackageDecl(pkg: Package, fullPackageName: String, name: String): Option<Decl> {
+private func FindPackageDecl(pkg: Package, fullPackageName: String, name: String,
+    context!: Option<ASTContext> = None): Option<Decl> {
     for (decl in pkg.srcImportedNonGenericDecls) {
         if (IsNamedDecl(decl, fullPackageName, name)) {
             return decl
@@ -31,18 +32,41 @@ private func FindPackageDecl(pkg: Package, fullPackageName: String, name: String
             }
         }
     }
+    if (let Some(ctx) <- context) {
+        if (let Some(packageMap) <- ctx.resolvedPackageMemberDeclsMap.get(fullPackageName)) {
+            if (let Some(decls) <- packageMap.get(name)) {
+                for (decl in decls) {
+                    if (IsNamedDecl(decl, fullPackageName, name)) {
+                        return decl
+                    }
+                }
+            }
+        }
+        for (packageDecl in ctx.packageDecls) {
+            if (packageDecl.fullPackageName == fullPackageName ||
+                packageDecl.srcPackage.fullPackageName == fullPackageName) {
+                for (file in packageDecl.srcPackage.files) {
+                    for (decl in file.decls) {
+                        if (IsNamedDecl(decl, fullPackageName, name)) {
+                            return decl
+                        }
+                    }
+                }
+            }
+        }
+    }
     return None
 }
 
-private func FindCoreClassDecl(pkg: Package, name: String): Option<ClassDecl> {
-    if (let Some(decl) <- FindPackageDecl(pkg, CORE_PACKAGE, name)) {
+private func FindCoreClassDecl(pkg: Package, name: String, context!: Option<ASTContext> = None): Option<ClassDecl> {
+    if (let Some(decl) <- FindPackageDecl(pkg, CORE_PACKAGE, name, context: context)) {
         return decl as ClassDecl
     }
     return None
 }
 
-private func FindCoreEnumDecl(pkg: Package, name: String): Option<EnumDecl> {
-    if (let Some(decl) <- FindPackageDecl(pkg, CORE_PACKAGE, name)) {
+private func FindCoreEnumDecl(pkg: Package, name: String, context!: Option<ASTContext> = None): Option<EnumDecl> {
+    if (let Some(decl) <- FindPackageDecl(pkg, CORE_PACKAGE, name, context: context)) {
         return decl as EnumDecl
     }
     return None
@@ -329,7 +353,9 @@ private func AddUnitIfNeeded(typeManager: TypeManager, source: Expr, block: Bloc
     }
 }
 
-public func DesugarTryWithResourcesExpr(typeManager: TypeManager, pkg: Package, tryExpr: TryExpr): Unit {
+public func DesugarTryWithResourcesExpr(typeManager: TypeManager, pkg: Package, tryExpr: TryExpr,
+    context!: Option<ASTContext> = None,
+    synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None): Unit {
     if (tryExpr.resourceSpec.isEmpty() || !Ty.IsTyCorrect(tryExpr.GetTy())) {
         return
     }
@@ -339,15 +365,15 @@ public func DesugarTryWithResourcesExpr(typeManager: TypeManager, pkg: Package, 
     if (let None <- tryExpr.tryBlock) {
         return
     }
-    if (let None <- FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME)) {
+    if (let None <- FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME, context: context)) {
         return
     }
-    if (let None <- FindCoreEnumDecl(pkg, OPTION_TYPE_NAME)) {
+    if (let None <- FindCoreEnumDecl(pkg, OPTION_TYPE_NAME, context: context)) {
         return
     }
 
-    let exceptionDecl = FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME).getOrThrow()
-    let optionDecl = FindCoreEnumDecl(pkg, OPTION_TYPE_NAME).getOrThrow()
+    let exceptionDecl = FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME, context: context).getOrThrow()
+    let optionDecl = FindCoreEnumDecl(pkg, OPTION_TYPE_NAME, context: context).getOrThrow()
     if (let None <- exceptionDecl.GetTy()) {
         return
     }
@@ -359,6 +385,14 @@ public func DesugarTryWithResourcesExpr(typeManager: TypeManager, pkg: Package, 
     AddUnitIfNeeded(typeManager, tryExpr, originalTryBlock)
     if (let Some(tryBlock) <- CreateOuterTryBlock(typeManager, exceptionDecl, someTy, noneTy,
         tryExpr.resourceSpec, originalTryBlock)) {
+        if (let Some(ctx) <- context) {
+            if (let Some(synthesize) <- synthesizer) {
+                let synTy = synthesize(ctx, SynPos.EXPR_ARG, tryBlock)
+                if (Ty.IsTyCorrect(Some(synTy))) {
+                    tryBlock.SetTy(synTy)
+                }
+            }
+        }
         tryBlock.SetTy(unitTy)
         for (catchBlock in tryExpr.catchBlocks) {
             AddUnitIfNeeded(typeManager, tryExpr, catchBlock)
