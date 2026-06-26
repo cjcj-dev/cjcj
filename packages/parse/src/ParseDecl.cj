@@ -1294,6 +1294,10 @@ extend ParserImpl {
         let key = Expect(TokenKind.EXTEND, "expected 'extend'")
         ret.keywordPos = key.Begin()
         ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
+        if (let Some(generic) <- ParseOptionalGeneric()) {
+            ret.generic = generic
+            ret.EnableAttr(Attribute.GENERIC)
+        }
         ret.extendedType = ParseType()
         if (Skip(TokenKind.UPPERBOUND)) {
             ParseInheritedTypes(ret)
