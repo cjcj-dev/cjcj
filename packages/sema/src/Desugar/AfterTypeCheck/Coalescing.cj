@@ -40,7 +40,11 @@ private func GetValueMatchCase(ctor: RefExpr, someExpr: Block, someVar: RefExpr,
         valMatchCase.SetCtxExprForPatterns(selector)
         valMatchCase.patternGuard = None
         valMatchCase.exprOrDecls = someExpr
-        valMatchCase.SetTy(innerTy)
+        if (let Some(body) <- valMatchCase.exprOrDecls) {
+            if (let Some(bodyTy) <- body.GetTy()) {
+                valMatchCase.SetTy(bodyTy)
+            }
+        }
         return valMatchCase
     }
     return None
@@ -69,8 +73,10 @@ public func ConstructOptionMatch(selector: Expr, someExpr: Block, otherExpr: Blo
                             wildMatchCase.SetCtxExprForPatterns(selector)
                             wildMatchCase.patternGuard = None
                             wildMatchCase.exprOrDecls = otherExpr
-                            if (let Some(otherTy) <- otherExpr.GetTy()) {
-                                wildMatchCase.SetTy(otherTy)
+                            if (let Some(body) <- wildMatchCase.exprOrDecls) {
+                                if (let Some(bodyTy) <- body.GetTy()) {
+                                    wildMatchCase.SetTy(bodyTy)
+                                }
                             }
                             CopyBasicInfo(selector, wildMatchCase)
                             matchExpr.matchCases.add(wildMatchCase)
