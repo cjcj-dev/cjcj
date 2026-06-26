@@ -1351,25 +1351,8 @@ public class FaithfulAST2CHIR {
     }
 
     private func AddGenericInstantiatedInit(block: Block): Unit {
-        let argTy = builder.context.GetCPointerTy(builder.context.GetUInt8Ty())
-        let argValue = RequireResult(builder.CreateConstant(argTy, NullLiteral(), block))
-        let argTys = ArrayList<Type>()
-        argTys.add(argTy)
-        let funcTy = builder.context.GetFuncTy(argTys, builder.context.GetVoidTy())
-        let fnName = "llvm.cj.pre.initialize.package"
-        let fn = if (let Some(existing) <- CurrentPackage().TryGetGlobalFunc(GLOBAL_VALUE_PREFIX + fnName)) {
-            existing
-        } else {
-            let created = builder.CreateFunction(funcTy, fnName, srcCodeIdentifier: fnName,
-                rawMangledName: fnName, packageName: CurrentPackage().GetName())
-            created.EnableAttr(Attribute.IMPORTED)
-            created.EnableAttr(Attribute.PUBLIC)
-            AddFunctionToPackage(created)
-            created
-        }
-        let args = ArrayList<Value>()
-        args.add(argValue)
-        builder.CreateApply(builder.context.GetVoidTy(), fn, FuncCallContext(args: args), block)
+        let callContext = IntrisicCallContext(kind: IntrinsicKind.PREINITIALIZE)
+        builder.CreateIntrinsic(builder.context.GetUnitTy(), callContext, block)
     }
 
     private func DropExitNodeOfInitializer(fn: Function): Block {
