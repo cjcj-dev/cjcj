@@ -70,8 +70,8 @@ public class CGModule {
     private let cgCtx: CGContext
     private var module: Option<LLVMModuleHandle>
     private let functions: HashMap<String, CGFunction> = HashMap<String, CGFunction>()
-    private let valueMapping: HashMap<String, CGValue> = HashMap<String, CGValue>()
     private let globalVariables: HashMap<String, CGValue> = HashMap<String, CGValue>()
+    private let localValueMapping: HashMap<Value, CGValue> = HashMap<Value, CGValue>()
     private let basicBlocks: HashMap<Int64, LLVMBasicBlockRef> = HashMap<Int64, LLVMBasicBlockRef>()
     private let linkNameUsedInMeta: HashSet<String> = HashSet<String>()
     private let externalExtensionDefs: ArrayList<LLVMValueRef> = ArrayList<LLVMValueRef>()
@@ -132,8 +132,8 @@ public class CGModule {
             module = None
         }
         functions.clear()
-        valueMapping.clear()
         globalVariables.clear()
+        localValueMapping.clear()
         basicBlocks.clear()
         linkNameUsedInMeta.clear()
         externalExtensionDefs.clear()
@@ -173,7 +173,6 @@ public class CGModule {
         ApplyFunctionABIAttributes(rawFunction, chirValue, cgFuncType)
         MaybeSetCangjieGC(rawFunction, chirValue)
         functions[name] = cgFunc
-        valueMapping[name] = cgFunc
         return cgFunc
     }
 
@@ -433,24 +432,55 @@ public class CGModule {
         }
         let cgValue = CGValue(rawGlobal, cgType)
         globalVariables[name] = cgValue
-        valueMapping[name] = cgValue
         return cgValue
     }
 
     public func GetMappedValue(chirValue: Value): Option<CGValue> {
-        let name = GetCodeGenValueKey(chirValue)
-        if (valueMapping.contains(name)) {
-            return valueMapping[name]
+        if (let Some(functionValue) <- (chirValue as Function)) {
+            let name = GetCodeGenGlobalName(functionValue)
+            if (functions.contains(name)) {
+                return functions[name]
+            }
+            return None
+        }
+        if (let Some(globalValue) <- (chirValue as GlobalVar)) {
+            let name = GetCodeGenGlobalName(globalValue)
+            if (globalVariables.contains(name)) {
+                return globalVariables[name]
+            }
+            return None
+        }
+        if (localValueMapping.contains(chirValue)) {
+            return localValueMapping[chirValue]
         }
         return None
     }
 
     public func SetOrUpdateMappedCGValue(chirValue: Value, value: CGValue): Unit {
-        valueMapping[GetCodeGenValueKey(chirValue)] = value
+        if (let Some(functionValue) <- (chirValue as Function)) {
+            if (let Some(cgFunction) <- (value as CGFunction)) {
+                functions[GetCodeGenGlobalName(functionValue)] = cgFunction
+                return
+            }
+            throw IllegalArgumentException("function mapping requires CGFunction: " + GetCodeGenGlobalName(functionValue))
+        }
+        if (let Some(globalValue) <- (chirValue as GlobalVar)) {
+            globalVariables[GetCodeGenGlobalName(globalValue)] = value
+            return
+        }
+        localValueMapping[chirValue] = value
     }
 
     public func RemoveMappedCGValue(chirValue: Value): Unit {
-        valueMapping.remove(GetCodeGenValueKey(chirValue))
+        if (let Some(functionValue) <- (chirValue as Function)) {
+            functions.remove(GetCodeGenGlobalName(functionValue))
+            return
+        }
+        if (let Some(globalValue) <- (chirValue as GlobalVar)) {
+            globalVariables.remove(GetCodeGenGlobalName(globalValue))
+            return
+        }
+        localValueMapping.remove(chirValue)
     }
 
     public func MaterializeValue(irBuilder: IRBuilder2, chirValue: Value): CGValue {
