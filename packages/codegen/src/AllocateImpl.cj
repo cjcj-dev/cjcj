@@ -2,10 +2,8 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.Allocate
-import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.Type
 
 public func GenerateAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
@@ -65,58 +63,15 @@ private func InitializeAutoEnvCallableAbi(irBuilder: IRBuilder2, obj: LLVMValueR
     let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
     let i8PtrSlotType = unsafe { LLVMPointerType(i8PtrType, 1u32) }
     let typedPayload = irBuilder.CreateBitCast(payload, i8PtrSlotType, name: "autoenv.payload")
+    let methods = classTy.GetClassDef().GetMethods()
     var idx: Int64 = 0
-    while (idx < 2) {
-        let implMethod = FindAutoEnvCallableImplementationMethod(classTy, idx) ?? break
-        let rawMethod = if (let Some(expectedMethod) <- FindAutoEnvCallableExpectedMethod(classTy, idx)) {
-            GetOrCreateExpectedVirtualSlotWrapper(irBuilder.GetCGModule(), implMethod, expectedMethod)
-        } else {
-            irBuilder.GetCGModule().GetOrInsertCGFunction(implMethod).GetRawFunction()
-        }
+    while (idx < methods.size) {
+        let rawMethod = irBuilder.GetCGModule().GetOrInsertCGFunction(methods[idx]).GetRawFunction()
         let methodPtr = irBuilder.CreateBitCast(rawMethod, i8PtrType, name: "autoenv.method")
         let indices = ArrayList<LLVMValueRef>()
         indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(idx), 0) })
-        let slot = irBuilder.CreateGEP(i8PtrType, typedPayload, indices, name: "autoenv.method.addr")
+        let slot = irBuilder.CreateInBoundsGEP(i8PtrType, typedPayload, indices, name: "autoenv.method.addr")
         irBuilder.CreateStore(methodPtr, slot)
         idx++
     }
-}
-
-private func FindAutoEnvCallableImplementationMethod(classTy: ClassType, idx: Int64): Option<Function> {
-    let methods = classTy.GetClassDef().GetMethods()
-    if (idx >= 0 && idx < methods.size) {
-        return Some(methods[idx])
-    }
-    return None
-}
-
-private func FindAutoEnvCallableExpectedMethod(classTy: ClassType, idx: Int64): Option<Function> {
-    if (idx == 0) {
-        return FindAutoEnvGenericBaseMethod(classTy.GetClassDef())
-    }
-    if (idx == 1) {
-        if (let Some(superDef) <- classTy.GetClassDef().GetSuperClassDef()) {
-            if (superDef.GetAnnotation("IsAutoEnvInstBase").isSome()) {
-                let methods = superDef.GetMethods()
-                if (!methods.isEmpty()) {
-                    return Some(methods[0])
-                }
-            }
-        }
-    }
-    return None
-}
-
-private func FindAutoEnvGenericBaseMethod(classDef: ClassDef): Option<Function> {
-    if (classDef.GetAnnotation("IsAutoEnvGenericBase").isSome()) {
-        let methods = classDef.GetMethods()
-        if (!methods.isEmpty()) {
-            return Some(methods[0])
-        }
-        return None
-    }
-    if (let Some(superDef) <- classDef.GetSuperClassDef()) {
-        return FindAutoEnvGenericBaseMethod(superDef)
-    }
-    return None
 }

@@ -29,6 +29,7 @@ private let UG_INTERFACE_KIND: UInt64 = 129u64
 private let UG_RAW_ARRAY_KIND: UInt64 = 130u64
 private let UG_COMMON_ENUM_KIND: UInt64 = 132u64
 private let UG_WEAKREF_KIND: UInt64 = 133u64
+private let UG_FUNC_KIND: UInt64 = 131u64
 private let UG_GENERIC_CUSTOM_KIND: UInt64 = 254u64
 private let UG_GENERIC_KIND: UInt64 = 255u64
 private let UG_TUPLE_KIND: UInt64 = 21u64
@@ -76,7 +77,7 @@ public func GetOrCreateTypeInfoGlobal(cgMod: CGModule, chirTy: Type, genericKind
 
 public func DeclareTypeInfoGlobal(cgMod: CGModule, chirTy: Type, genericKind: CGGenericKind): LLVMValueRef {
     let typeInfoTy = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
-    let typeInfoName = CGType.GetNameOfTypeInfoGV(chirTy)
+    let typeInfoName = TypeInfoGlobalName(cgMod, chirTy)
     if (genericKind == CGGenericKind.STATIC_GI) {
         if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
             try (nameCString = unsafe { LibC.mallocCString(typeInfoName) }.asResource()) {
@@ -473,7 +474,7 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, moduleHandle: LLV
         LLVMPointerType(CGType.GetOrCreateExtensionDefPtrType(contextHandle), 0u32)
     }
     let cgType = CGType.GetOrCreate(cgMod, chirTy)
-    let typeInfoName = CGType.GetNameOfTypeInfoGV(chirTy)
+    let typeInfoName = TypeInfoGlobalName(cgMod, chirTy)
     let fieldCount = UInt64(GetInstanceFieldTypes(cgMod, chirTy).size)
     var inheritedClassNum = InheritedClassNumBase(chirTy)
     let (mtable, updatedInheritedClassNum) = GenerateMTableOfTypeInfo(cgMod, chirTy, i8PtrType, inheritedClassNum)
@@ -481,7 +482,7 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, moduleHandle: LLV
     let sizeValue = TypeInfoSizeValue(cgMod, chirTy, cgType)
     let alignValue = TypeInfoAlignValue(cgMod, chirTy, cgType)
     let typeInfoValues = ArrayList<LLVMValueRef>()
-    typeInfoValues.add(GenerateTypeInfoNameConstant(cgMod, moduleHandle, CGType.GetRuntimeTypeName(chirTy)))
+    typeInfoValues.add(GenerateTypeInfoNameConstant(cgMod, moduleHandle, TypeInfoRuntimeName(cgMod, chirTy)))
     typeInfoValues.add(unsafe { LLVMConstInt(i8Type, TypeInfoKind(cgMod, chirTy), 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i16Type, fieldCount, 0) })
@@ -729,7 +730,77 @@ public func CreateTypeInfoForTemplateCallback(cgMod: CGModule, irBuilder: IRBuil
         return CreateRuntimeTypeInfoForTemplateCallback(cgMod, irBuilder, baseTy, genericParams, runtimeTypeInfoArray,
             plainRuntimeTypeInfoArrayGEP: plainRuntimeTypeInfoArrayGEP)
     }
-    return CGType.GetOrCreate(cgMod, baseTy).GetOrCreateTypeInfo()
+    return GetAutoEnvBaseClosureTypeInfo(cgMod, baseTy) ??
+        CGType.GetOrCreate(cgMod, baseTy).GetOrCreateTypeInfo()
+}
+
+private func GetAutoEnvBaseClosureTypeInfo(cgMod: CGModule, chirTy: Type): Option<LLVMValueRef> {
+    let customTy = (chirTy.StripAllRefs() as CustomType) ?? return None
+    if (!IsAutoEnvBaseType(customTy)) {
+        return None
+    }
+    return Some(CGType.GetOrCreate(cgMod, AutoEnvGenericBaseType(customTy)).GetOrCreateTypeInfo())
+}
+
+private func AutoEnvGenericBaseType(customTy: CustomType): CustomType {
+    if (IsAutoEnvInstBaseType(customTy)) {
+        if (let Some(classTy) <- (customTy as ClassType)) {
+            if (let Some(superTy) <- classTy.GetSuperClassTy()) {
+                if (let Some(superCustomTy) <- (superTy as CustomType)) {
+                    return superCustomTy
+                }
+            }
+        }
+    }
+    return customTy
+}
+
+private func ClosureRuntimeTypeName(cgMod: CGModule, customTy: CustomType): String {
+    let typeArgs = customTy.GetGenericArgs()
+    if (typeArgs.isEmpty()) {
+        return CGType.GetRuntimeTypeName(customTy)
+    }
+    var params = ""
+    var idx: Int64 = 0
+    while (idx + 1 < typeArgs.size) {
+        if (idx > 0) {
+            params += ","
+        }
+        params += RuntimeTypeNameForClosure(cgMod, typeArgs[idx])
+        idx++
+    }
+    return "Closure<(" + params + ")->" + RuntimeTypeNameForClosure(cgMod, typeArgs[typeArgs.size - 1]) + ">"
+}
+
+private func RuntimeTypeNameForClosure(cgMod: CGModule, chirTy: Type): String {
+    let stripped = chirTy.StripAllRefs()
+    if (stripped.IsVoid()) {
+        return UNIT_TYPE_STR
+    }
+    if (let Some(customTy) <- (stripped as CustomType)) {
+        if (IsAutoEnvBaseType(customTy)) {
+            return ClosureRuntimeTypeName(cgMod, AutoEnvGenericBaseType(customTy))
+        }
+    }
+    return CGType.GetRuntimeTypeName(stripped)
+}
+
+private func TypeInfoGlobalName(cgMod: CGModule, chirTy: Type): String {
+    if (let Some(customTy) <- (chirTy.StripAllRefs() as CustomType)) {
+        if (IsAutoEnvBaseType(customTy)) {
+            return ClosureRuntimeTypeName(cgMod, AutoEnvGenericBaseType(customTy)) + ".ti"
+        }
+    }
+    return CGType.GetNameOfTypeInfoGV(chirTy)
+}
+
+private func TypeInfoRuntimeName(cgMod: CGModule, chirTy: Type): String {
+    if (let Some(customTy) <- (chirTy.StripAllRefs() as CustomType)) {
+        if (IsAutoEnvBaseType(customTy)) {
+            return ClosureRuntimeTypeName(cgMod, AutoEnvGenericBaseType(customTy))
+        }
+    }
+    return CGType.GetRuntimeTypeName(chirTy)
 }
 
 private func FindGenericParamIndex(genericTy: GenericType, genericParams: ArrayList<GenericType>): Option<Int64> {
@@ -1078,7 +1149,8 @@ private func GenerateFieldsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoNam
     if (unsafe { LLVMIsDeclaration(fieldsGlobal) } != 0) {
         let fieldInfos = ArrayList<LLVMValueRef>()
         for (fieldTy in fieldTypes) {
-            fieldInfos.add(CGType.GetOrCreate(cgMod, fieldTy.StripAllRefs()).GetOrCreateTypeInfo())
+            fieldInfos.add(GetAutoEnvBaseClosureTypeInfo(cgMod, fieldTy) ??
+                CGType.GetOrCreate(cgMod, fieldTy.StripAllRefs()).GetOrCreateTypeInfo())
         }
         unsafe {
             LLVMSetInitializer(fieldsGlobal, ConstArray(typeInfoPtrType, fieldInfos))
@@ -1300,6 +1372,9 @@ private func TypeInfoAlignValue(cgMod: CGModule, _: Type, cgType: CGType): UInt6
 }
 
 private func TypeInfoKind(cgMod: CGModule, chirTy: Type): UInt64 {
+    if (IsAutoEnvBaseType(chirTy)) {
+        return UG_FUNC_KIND
+    }
     if (let Some(classTy) <- (chirTy as ClassType)) {
         if (IsWeakRefClass(classTy)) {
             return UG_WEAKREF_KIND
@@ -1488,7 +1563,8 @@ private func GenerateSuperOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoPtrT
             return unsafe { LLVMConstNull(typeInfoPtrType) }
         }
         if (let Some(superTy) <- classTy.GetSuperClassTy()) {
-            return CGType.GetOrCreate(cgMod, superTy.StripAllRefs()).GetOrCreateTypeInfo()
+            return GetAutoEnvBaseClosureTypeInfo(cgMod, superTy) ??
+                CGType.GetOrCreate(cgMod, superTy.StripAllRefs()).GetOrCreateTypeInfo()
         }
         if (!IsCoreObjectClass(classTy)) {
             return GetCoreObjectTypeInfo(cgMod)
