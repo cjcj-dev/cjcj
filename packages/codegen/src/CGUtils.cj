@@ -12,13 +12,6 @@ public func GetCodeGenGlobalName(value: Value): String {
     return value.GetIdentifierWithoutPrefix()
 }
 
-public func GetCodeGenValueKey(value: Value): String {
-    if (value.IsGlobal()) {
-        return GetCodeGenGlobalName(value)
-    }
-    return value.GetIdentifierWithoutPrefix()
-}
-
 public func GenNameForBB(name: String, extraInfo!: UInt64 = 0u64): String {
     if (extraInfo != 0u64) {
         return name

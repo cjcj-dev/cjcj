@@ -2,7 +2,7 @@ package cangjie_compiler::chir
 
 import std.collection.*
 
-public open class Value <: Base {
+public open class Value <: Base & Hashable & Equatable<Value> {
     private var ty: Option<Type>
     private var identifier: String
     private let kind: ValueKind
@@ -13,6 +13,18 @@ public open class Value <: Base {
         this.ty = ty
         this.identifier = identifier
         this.kind = kind
+    }
+
+    public operator func ==(right: Value): Bool {
+        return nodeId == right.nodeId
+    }
+
+    public operator func !=(right: Value): Bool {
+        return nodeId != right.nodeId
+    }
+
+    public func hashCode(): Int64 {
+        return nodeId.hashCode()
     }
 
     public func GetValueKind(): ValueKind {
