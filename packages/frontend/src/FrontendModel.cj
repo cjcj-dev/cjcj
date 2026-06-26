@@ -2701,6 +2701,8 @@ private class CjoSignatureMaterializer {
                 lce.codepoint.add(point)
             }
         }
+        // C++ ReferenceLoader.cpp initializes imported literal payloads after type/reference restoration.
+        InitializeLitConstValue(lce)
         lce.EnableAttr(Attribute.IMPORTED)
         return lce
     }

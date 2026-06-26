@@ -2795,11 +2795,17 @@ public class Translator {
 
     private func IsClosedRangeOne(expr: AstForInExpr): Bool {
         let inExpr = expr.inExpression ?? return false
-        if (let Some(rangeCtor) <- ClosedRangeCallExpr(inExpr)) {
-            return IsCallRangeConstructor(rangeCtor)
-        }
         if (let Some(rangeExpr) <- (inExpr as AstRangeExpr)) {
+            if (let Some(desugar) <- rangeExpr.desugarExpr) {
+                if (let Some(callExpr) <- (desugar as AstCallExpr)) {
+                    return IsCallRangeConstructor(callExpr)
+                }
+                return false
+            }
             return rangeExpr.isClosed && IsRangeStepOne(rangeExpr)
+        }
+        if (let Some(callExpr) <- (inExpr as AstCallExpr)) {
+            return IsCallRangeConstructor(callExpr)
         }
         return false
     }
