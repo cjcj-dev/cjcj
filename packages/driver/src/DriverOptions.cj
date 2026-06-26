@@ -389,7 +389,8 @@ public class DriverOptions {
                 out.add(file)
             }
         }
-        if (!frontendOutputFiles.isEmpty()) {
+        let multiBC = (aggressiveParallelCompile ?? 1) > 1
+        if (!frontendOutputFiles.isEmpty() && !multiBC) {
             out.add("-o")
             out.add(frontendOutputFiles[0].filePath)
         }

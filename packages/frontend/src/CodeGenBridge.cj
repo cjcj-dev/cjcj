@@ -18,7 +18,9 @@ import cangjie_compiler::codegen.GenPackageModules
 import cangjie_compiler::codegen.LLVMModuleHandle as LLVMModuleHandle
 import cangjie_compiler::codegen.SavePackageModule
 import cangjie_compiler::meta_transformation.TryRunCHIRMetaTransforms
-import cangjie_compiler::option.MaybeUInt64
+import cangjie_compiler::option.TempFileInfo
+import cangjie_compiler::utils.DEFAULT_PACKAGE_NAME
+import cangjie_compiler::utils.FileUtil
 
 public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTPackage): Option<RealCHIRPackage> {
     let builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
@@ -57,10 +59,7 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
     }
     let packagesToEmit = BuildRealCodeGenPackages(realPackages)
     let codegenOptions = ConvertFrontendOptionsToCodegenOptions(instance.invocation.globalOptions)
-    let savedAPC = codegenOptions.aggressiveParallelCompile
-    if (ShouldEmitSingleExplicitBitcodeOutput(codegenOptions)) {
-        codegenOptions.aggressiveParallelCompile = MaybeUInt64(1u64)
-    }
+    codegenOptions.frontendOutputFiles.clear()
     if (instance.invocation.globalOptions.enIncrementalCompilation) {
         instance.cachedInfo.bitcodeFilesName.clear()
     }
@@ -76,7 +75,6 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
         ClearPackageModules(packageModules)
         packageIndex++
     }
-    codegenOptions.aggressiveParallelCompile = savedAPC
     return emittedAll
 }
 
@@ -244,10 +242,6 @@ public func ConvertFrontendOptionsToCodegenOptions(options: GlobalOptions): Glob
     return options
 }
 
-private func ShouldEmitSingleExplicitBitcodeOutput(options: GlobalOptions): Bool {
-    return !options.output.isEmpty() && !IsDir(options.output) && options.output.endsWith(".bc")
-}
-
 private func emitPackageModules(
     instance: CompilerInstance,
     pkg: RealCHIRPackage,
@@ -262,8 +256,9 @@ private func emitPackageModules(
     var ok = true
     var moduleIndex: Int64 = 0
     while (moduleIndex < modules.size) {
+        let fileName = outputFileNameForModule(instance.invocation.globalOptions, pkg, moduleIndex, modules.size)
         let path = outputPathForModule(instance.invocation.globalOptions, pkg, modules[moduleIndex],
-            packageIndex, moduleIndex, modules.size)
+            packageIndex, moduleIndex, modules.size, fileName)
         var saved = false
         if (!ensureOutputDirectory(path)) {
             instance.diag.Diagnose(DiagCategory.OTHER, DEFAULT_POSITION,
@@ -275,13 +270,22 @@ private func emitPackageModules(
             ok = false
         } else {
             saved = true
+            registerFrontendOutput(instance.invocation.globalOptions, fileName, path)
         }
         if (saved && instance.invocation.globalOptions.enIncrementalCompilation) {
-            instance.cachedInfo.bitcodeFilesName.add(outputCacheNameForModule(pkg, modules[moduleIndex], moduleIndex))
+            instance.cachedInfo.bitcodeFilesName.add(fileName)
         }
         moduleIndex++
     }
     return ok
+}
+
+private func registerFrontendOutput(options: GlobalOptions, moduleName: String, path: String): Unit {
+    options.frontendOutputFiles.add(TempFileInfo(
+        fileName: moduleName,
+        filePath: path,
+        rawPath: path,
+        isFrontendOutput: true))
 }
 
 private func outputPathForModule(
@@ -290,13 +294,29 @@ private func outputPathForModule(
     module: LLVMModuleHandle,
     packageIndex: Int64,
     moduleIndex: Int64,
-    moduleCount: Int64
+    moduleCount: Int64,
+    fileName: String
 ): String {
     if (packageIndex == 0 && moduleCount == 1 && !options.output.isEmpty() && !IsDir(options.output)) {
         return options.output
     }
+    if (options.saveTemps) {
+        return FileUtil.JoinPath(options.tempFolderPath, fileName + ".bc")
+    }
     let moduleName = outputCacheNameForModule(pkg, module, moduleIndex)
     return options.GenerateCachedPathNameForCodeGen(moduleName, ".bc")
+}
+
+private func outputFileNameForModule(options: GlobalOptions, pkg: RealCHIRPackage, moduleIndex: Int64,
+    moduleCount: Int64): String {
+    let prefix = if (moduleCount == 1) { "" } else { moduleIndex.toString() + "-" }
+    if (options.compilePackage || pkg.GetName() != DEFAULT_PACKAGE_NAME) {
+        return prefix + FileUtil.ToCjoFileName(pkg.GetName())
+    }
+    if (!options.srcFiles.isEmpty()) {
+        return prefix + FileUtil.GetFileNameWithoutExtension(options.srcFiles[0])
+    }
+    return prefix + FileUtil.ToCjoFileName(pkg.GetName())
 }
 
 private func outputCacheNameForModule(

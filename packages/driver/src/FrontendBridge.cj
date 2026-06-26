@@ -2,7 +2,8 @@ package cangjie_compiler::driver
 
 import std.collection.*
 import std.fs.Directory as FSDirectory
-import cangjie_compiler::frontend_tool.ExecuteFrontend
+import cangjie_compiler::frontend_tool.DriverOptions as FrontendToolDriverOptions
+import cangjie_compiler::frontend_tool.ExecuteFrontendWithResult
 import cangjie_compiler::utils.FailureReason as UtilsFailureReason
 
 public func ExecuteFrontendPhase(driver: Driver): Bool {
@@ -16,8 +17,13 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
     if (driver.driverOptions.enableVerbose) {
         PrintFrontendCommand(driver.cangjieHome, frontendArgs)
     }
-    let exitCode = ExecuteFrontend(driver.executableName, frontendArgs, driver.driverOptions.environment.allVariables)
-    if (exitCode != 0) {
+    let result = ExecuteFrontendWithResult(driver.executableName, frontendArgs,
+        driver.driverOptions.environment.allVariables)
+    if (result.exitCode != 0) {
+        return false
+    }
+    ApplyFrontendOutputs(driver.driverOptions, result.driverOptions)
+    if (!PublishFrontendBitcodeOutputs(driver.driverOptions)) {
         return false
     }
     if (!ReconcileFrontendOutputs(driver.driverOptions)) {
@@ -29,14 +35,13 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
 private func SeedBuiltinDependenciesFromSources(driver: Driver): Unit {
     driver.driverOptions.directBuiltinDependencies.add("std.core")
     let seen = HashSet<String>()
-    AddStdBuiltinDependencyClosure(driver, "std.core", seen)
     for (sourceFile in driver.driverOptions.srcFiles) {
         let reason = UtilsFailureReason()
         match (FileUtil.ReadFileContent(sourceFile, reason)) {
             case Some(content) =>
                 for (line in content.split("\n")) {
                     match (ExtractImportStdPackage(line)) {
-                        case Some(pkg) => AddDirectStdBuiltinDependency(driver, pkg, seen)
+                        case Some(pkg) => AddDirectStdBuiltinDependency(driver, pkg)
                         case None => ()
                     }
                 }
@@ -45,12 +50,11 @@ private func SeedBuiltinDependenciesFromSources(driver: Driver): Unit {
     }
 }
 
-private func AddDirectStdBuiltinDependency(driver: Driver, pkg: String, seen: HashSet<String>): Unit {
+private func AddDirectStdBuiltinDependency(driver: Driver, pkg: String): Unit {
     if (let None <- StandardLibName(pkg)) {
         return
     }
     driver.driverOptions.directBuiltinDependencies.add(pkg)
-    AddStdBuiltinDependencyClosure(driver, pkg, seen)
 }
 
 private func AddIndirectStdBuiltinDependency(driver: Driver, pkg: String, seen: HashSet<String>): Unit {
@@ -203,15 +207,30 @@ private func PrepareFrontendOutputs(opts: DriverOptions): Bool {
         !opts.frontendOutputFiles.isEmpty()) {
         return true
     }
-    let expectedOutputs = PredictFrontendBitcodeOutputs(opts)
-    if (expectedOutputs.isEmpty()) {
-        eprintln("error: failed to create frontend bitcode output path.")
-        return false
-    }
-    for (output in expectedOutputs) {
-        opts.frontendOutputFiles.add(output)
-    }
     return true
+}
+
+private func ApplyFrontendOutputs(opts: DriverOptions, frontendOpts: FrontendToolDriverOptions): Unit {
+    opts.frontendOutputFiles.clear()
+    for (output in frontendOpts.frontendOutputFiles) {
+        opts.frontendOutputFiles.add(TempFileInfo(
+            fileName: output.fileName,
+            filePath: output.filePath,
+            rawPath: output.rawPath,
+            isFrontendOutput: output.isFrontendOutput,
+            isForeignInput: output.isForeignInput))
+    }
+    opts.inputCjoFile = frontendOpts.inputCjoFile
+    opts.compilationCachedPath = frontendOpts.compilationCachedPath
+    opts.compilationCachedDir = frontendOpts.compilationCachedDir
+    opts.compilationCachedFileName = frontendOpts.compilationCachedFileName
+    opts.incrementalCompileNoChange = frontendOpts.incrementalCompileNoChange
+    for (dep in frontendOpts.directBuiltinDependencies) {
+        opts.directBuiltinDependencies.add(dep)
+    }
+    for (dep in frontendOpts.indirectBuiltinDependencies) {
+        opts.indirectBuiltinDependencies.add(dep)
+    }
 }
 
 private func PrintFrontendCommand(cangjieHome: String, args: Array<String>): Unit {
@@ -262,6 +281,33 @@ private func PublishFrontendCjoOutputs(opts: DriverOptions): Bool {
     return copied
 }
 
+private func PublishFrontendBitcodeOutputs(opts: DriverOptions): Bool {
+    if (!HasFrontendSourceInput(opts) || opts.IsEmitCHIREnable() || opts.frontendOnlyAction ||
+        opts.frontendOutputFiles.isEmpty() || !opts.saveTemps) {
+        return true
+    }
+    var copied = true
+    for (output in opts.frontendOutputFiles) {
+        if (output.isForeignInput) {
+            continue
+        }
+        let fileName = if (output.fileName.isEmpty()) {
+            FileUtil.GetFileNameWithoutExtension(output.filePath)
+        } else {
+            output.fileName
+        }
+        let target = FileUtil.JoinPath(opts.tempFolderPath, fileName + ".bc")
+        if (output.filePath != target && !CopyFile(output.filePath, target)) {
+            eprintln("error: failed to publish bitcode output: " + target)
+            copied = false
+        } else {
+            output.filePath = target
+            output.rawPath = target
+        }
+    }
+    return copied
+}
+
 private func HasFrontendSourceInput(opts: DriverOptions): Bool {
     return !opts.srcFiles.isEmpty() || opts.compilePackage || opts.scanDepPkg || opts.IsCompilingCJMPSpecific()
 }
@@ -274,35 +320,4 @@ private func VerifyFrontendOutputs(opts: DriverOptions): Bool {
         }
     }
     return true
-}
-
-private func PredictFrontendBitcodeOutputs(opts: DriverOptions): ArrayList<TempFileInfo> {
-    let outputs = ArrayList<TempFileInfo>()
-    let fileName = PredictPrimaryFrontendOutputName(opts)
-    if (fileName.isEmpty()) {
-        return outputs
-    }
-    let info = TempFileInfo(fileName: fileName, rawPath: fileName, isFrontendOutput: true)
-    let bcInfo = TempFileManager.Instance().CreateNewFileInfo(info, TempFileKind.T_BC)
-    bcInfo.rawPath = bcInfo.filePath
-    bcInfo.isFrontendOutput = true
-    outputs.add(bcInfo)
-    return outputs
-}
-
-private func PredictPrimaryFrontendOutputName(opts: DriverOptions): String {
-    if (opts.compilePackage && !opts.moduleName.isEmpty()) {
-        return ToCjoFileName(opts.moduleName)
-    }
-    if (!opts.srcFiles.isEmpty()) {
-        return FileUtil.GetFileNameWithoutExtension(opts.srcFiles[0])
-    }
-    return opts.moduleName
-}
-
-private func ToCjoFileName(fullPackageName: String): String {
-    if (let Some(pos) <- fullPackageName.indexOf("::")) {
-        return fullPackageName[pos + 2..] + "@" + fullPackageName[0..pos]
-    }
-    return fullPackageName
 }

@@ -162,7 +162,6 @@ public class CGModule {
         let cgFunc = CGFunction(rawFunction, cgFuncType, chirValue, this)
         AddGenericParamMappings(rawFunction, cgFunc, chirValue, cgFuncType)
         ApplyFunctionABIAttributes(rawFunction, chirValue, cgFuncType)
-        MaybeAttachExceptionPersonality(rawFunction, chirValue)
         MaybeSetCangjieGC(rawFunction, chirValue)
         functions[name] = cgFunc
         valueMapping[name] = cgFunc
@@ -490,6 +489,7 @@ public class CGModule {
     }
 
     public func MapFunctionParameters(chirFunc: Function, cgFunc: CGFunction): Unit {
+        MaybeAttachExceptionPersonality(cgFunc.GetRawFunction(), chirFunc)
         var idx: Int64 = 0
         while (idx < chirFunc.GetNumOfParams()) {
             let param = chirFunc.GetParam(idx)

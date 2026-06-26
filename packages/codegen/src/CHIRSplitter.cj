@@ -1,10 +1,12 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import std.sort.*
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.CustomTypeDef
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GlobalVar
+import cangjie_compiler::utils.REFLECT_PACKAGE_NAME
 
 public class SubCHIRPackage {
     public var mainModule: Bool = false
@@ -27,83 +29,239 @@ public class SubCHIRPackage {
         chirFuncs.clear()
         chirForeigns.clear()
         chirImportedCFuncs.clear()
-        exprNumInChirFuncs = 0
+    }
+}
+
+private class FunctionSplitItem {
+    let exprNum: Int64
+    let fn: Function
+
+    init(exprNum: Int64, fn: Function) {
+        this.exprNum = exprNum
+        this.fn = fn
     }
 }
 
 public class CHIRSplitter {
     private let cgPkgCtx: CGPkgContext
+    private var splitNum: Int64 = 0
+    private var index: Int64 = 0
 
     public init(cgPkgCtx: CGPkgContext) {
         this.cgPkgCtx = cgPkgCtx
     }
 
     public func SplitCHIRPackage(): ArrayList<SubCHIRPackage> {
-        let splitCount = CalcSplitsNum()
+        splitNum = CalcSplitsNum()
+        index = 0
         let packages = ArrayList<SubCHIRPackage>()
         var idx: Int64 = 0
-        while (idx < splitCount) {
-            let subPackage = SubCHIRPackage(splitCount)
+        while (idx < splitNum) {
+            let subPackage = SubCHIRPackage(splitNum)
             subPackage.subCHIRPackageIdx = idx
             packages.add(subPackage)
             idx++
         }
-        if (packages.isEmpty()) {
-            packages.add(SubCHIRPackage(1))
-        }
-        packages[0].mainModule = true
         SplitCHIRFunctions(packages)
+        SplitCHIRClasses(packages)
+        SplitCHIREnums(packages)
+        SplitCHIRStructs(packages)
+        SplitCHIRExtends(packages)
         SplitCHIRGlobalVars(packages)
-        SplitCHIRTypes(packages)
+        SplitCHIRImportedCFuncs(packages)
         return packages
     }
 
     private func CalcSplitsNum(): Int64 {
         let options = cgPkgCtx.GetGlobalOptions()
-        if (options.aggressiveParallelCompile.hasValue && options.aggressiveParallelCompile.value > 1u64) {
-            return Int64(options.aggressiveParallelCompile.value)
+        let chirPkg = cgPkgCtx.GetCHIRPackage()
+        var count = if (options.aggressiveParallelCompile.hasValue) {
+            Int64(options.aggressiveParallelCompile.value)
+        } else {
+            1
         }
-        return 1
+        let bodyFuncCount = chirPkg.GetGlobalFuncsWithBody().size
+        if (count > bodyFuncCount) {
+            count = bodyFuncCount
+        }
+        return count
     }
 
-    private func PickIndex(serial: Int64, packages: ArrayList<SubCHIRPackage>): Int64 {
-        if (packages.isEmpty()) {
-            return 0
+    private func NextRoundRobinIndex(packages: ArrayList<SubCHIRPackage>): Int64 {
+        let idx = index % packages.size
+        index++
+        return idx
+    }
+
+    private func FindLightestPackage(packages: ArrayList<SubCHIRPackage>): Int64 {
+        var best: Int64 = 0
+        var idx: Int64 = 1
+        while (idx < packages.size) {
+            if (packages[idx].exprNumInChirFuncs < packages[best].exprNumInChirFuncs ||
+                (packages[idx].exprNumInChirFuncs == packages[best].exprNumInChirFuncs &&
+                packages[idx].subCHIRPackageIdx < packages[best].subCHIRPackageIdx)) {
+                best = idx
+            }
+            idx++
         }
-        return serial % packages.size
+        return best
+    }
+
+    private func FunctionExprNum(fn: Function): Int64 {
+        if (let Some(body) <- fn.GetBody()) {
+            return body.GetExpressionsNum()
+        }
+        return 0
     }
 
     private func SplitCHIRFunctions(packages: ArrayList<SubCHIRPackage>): Unit {
-        var serial: Int64 = 0
-        for (fn in cgPkgCtx.GetCHIRPackage().GetGlobalFunctions(includePureAbstract: true)) {
-            let targetIndex = PickIndex(serial, packages)
-            if (fn.IsImportedFunc()) {
-                packages[targetIndex].chirForeigns.add(fn)
-            } else {
-                packages[targetIndex].chirFuncs.add(fn)
+        if (packages.isEmpty()) {
+            return
+        }
+        let chirPkg = cgPkgCtx.GetCHIRPackage()
+        let packageInitFunc = chirPkg.GetPackageInitFunc()
+        let literalInitFunc = chirPkg.GetPackageLiteralInitFunc()
+        let toAnyFuncs = ArrayList<Function>()
+        let normalFuncs = ArrayList<FunctionSplitItem>()
+        for (fn in chirPkg.GetGlobalFuncsWithBody()) {
+            if (chirPkg.GetName() == REFLECT_PACKAGE_NAME && fn.GetSrcCodeIdentifier() == "toAny") {
+                toAnyFuncs.add(fn)
+            } else if (!SameFunction(fn, packageInitFunc) && !SameFunction(fn, literalInitFunc)) {
+                normalFuncs.add(FunctionSplitItem(FunctionExprNum(fn), fn))
             }
-            serial++
+        }
+        SplitSpecialFuncs(packages, packageInitFunc, literalInitFunc, toAnyFuncs)
+        SplitNormalFuncs(packages, normalFuncs)
+        SplitForeigns(packages)
+    }
+
+    private func SameFunction(fn: Function, other: Option<Function>): Bool {
+        if (let Some(otherFn) <- other) {
+            return fn.GetIdentifier() == otherFn.GetIdentifier()
+        }
+        return false
+    }
+
+    private func SplitSpecialFuncs(packages: ArrayList<SubCHIRPackage>, packageInitFunc: Option<Function>,
+        literalInitFunc: Option<Function>, toAnyFuncs: ArrayList<Function>): Unit {
+        if (let Some(initFn) <- packageInitFunc) {
+            let targetIndex = FindLightestPackage(packages)
+            packages[targetIndex].mainModule = true
+            packages[targetIndex].chirFuncs.add(initFn)
+            packages[targetIndex].exprNumInChirFuncs += FunctionExprNum(initFn)
+            if (let Some(literalFn) <- literalInitFunc) {
+                packages[targetIndex].chirFuncs.add(literalFn)
+                packages[targetIndex].exprNumInChirFuncs += FunctionExprNum(literalFn)
+            }
+            for (toAnyFn in toAnyFuncs) {
+                packages[targetIndex].chirFuncs.add(toAnyFn)
+                packages[targetIndex].exprNumInChirFuncs += FunctionExprNum(toAnyFn)
+            }
+        }
+    }
+
+    private func SplitNormalFuncs(packages: ArrayList<SubCHIRPackage>,
+        normalFuncs: ArrayList<FunctionSplitItem>): Unit {
+        sort(normalFuncs, by: { left: FunctionSplitItem, right: FunctionSplitItem =>
+            if (left.exprNum < right.exprNum) {
+                Ordering.LT
+            } else if (left.exprNum > right.exprNum) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        }, stable: true)
+        var idx = normalFuncs.size - 1
+        while (idx >= 0) {
+            let item = normalFuncs[idx]
+            let targetIndex = FindLightestPackage(packages)
+            packages[targetIndex].chirFuncs.add(item.fn)
+            packages[targetIndex].exprNumInChirFuncs += item.exprNum
+            idx--
+        }
+    }
+
+    private func SplitForeigns(packages: ArrayList<SubCHIRPackage>): Unit {
+        let chirPkg = cgPkgCtx.GetCHIRPackage()
+        for (fn in chirPkg.GetGlobalFuncsWithoutBody()) {
+            if (!fn.TestAttr(Attribute.FOREIGN) || fn.GetPackageName() != chirPkg.GetName()) {
+                continue
+            }
+            let targetIndex = FindLightestPackage(packages)
+            packages[targetIndex].chirForeigns.add(fn)
+            packages[targetIndex].exprNumInChirFuncs += 1
         }
     }
 
     private func SplitCHIRGlobalVars(packages: ArrayList<SubCHIRPackage>): Unit {
-        var serial: Int64 = 0
-        for (globalVar in cgPkgCtx.GetCHIRPackage().GetGlobalVars()) {
-            let targetIndex = PickIndex(serial, packages)
+        if (packages.isEmpty()) {
+            return
+        }
+        for (globalVar in cgPkgCtx.GetCHIRPackage().GetGlobalVarsWithInit()) {
+            let targetIndex = NextRoundRobinIndex(packages)
             packages[targetIndex].chirGVs.add(globalVar)
-            serial++
         }
     }
 
-    private func SplitCHIRTypes(packages: ArrayList<SubCHIRPackage>): Unit {
-        var serial: Int64 = 0
-        for (customDef in cgPkgCtx.GetCHIRPackage().GetAllCustomTypeDef()) {
-            if (customDef.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+    private func SplitCHIRClasses(packages: ArrayList<SubCHIRPackage>): Unit {
+        if (packages.isEmpty()) {
+            return
+        }
+        for (customDef in cgPkgCtx.GetCHIRPackage().GetClasses()) {
+            let targetIndex = NextRoundRobinIndex(packages)
+            packages[targetIndex].chirCustomDefs.add(customDef)
+        }
+    }
+
+    private func SplitCHIREnums(packages: ArrayList<SubCHIRPackage>): Unit {
+        if (packages.isEmpty()) {
+            return
+        }
+        for (customDef in cgPkgCtx.GetCHIRPackage().GetEnums()) {
+            let targetIndex = NextRoundRobinIndex(packages)
+            packages[targetIndex].chirCustomDefs.add(customDef)
+        }
+        for (customDef in cgPkgCtx.GetCHIRPackage().GetImportedEnums()) {
+            let targetIndex = NextRoundRobinIndex(packages)
+            packages[targetIndex].chirCustomDefs.add(customDef)
+        }
+    }
+
+    private func SplitCHIRStructs(packages: ArrayList<SubCHIRPackage>): Unit {
+        if (packages.isEmpty()) {
+            return
+        }
+        for (customDef in cgPkgCtx.GetCHIRPackage().GetStructs()) {
+            let targetIndex = NextRoundRobinIndex(packages)
+            packages[targetIndex].chirCustomDefs.add(customDef)
+        }
+    }
+
+    private func SplitCHIRExtends(packages: ArrayList<SubCHIRPackage>): Unit {
+        if (packages.isEmpty()) {
+            return
+        }
+        for (customDef in cgPkgCtx.GetCHIRPackage().GetExtends()) {
+            let targetIndex = NextRoundRobinIndex(packages)
+            packages[targetIndex].chirCustomDefs.add(customDef)
+        }
+    }
+
+    private func SplitCHIRImportedCFuncs(packages: ArrayList<SubCHIRPackage>): Unit {
+        if (packages.isEmpty()) {
+            return
+        }
+        for (fn in cgPkgCtx.GetCHIRPackage().GetGlobalFuncsWithoutBody()) {
+            let isCFunc = if (let Some(funcTy) <- fn.GetFuncType()) {
+                funcTy.IsCFunc()
+            } else {
+                false
+            }
+            if (!isCFunc || (!fn.TestAttr(Attribute.PRIVATE) && !fn.TestAttr(Attribute.FOREIGN))) {
                 continue
             }
-            let targetIndex = PickIndex(serial, packages)
-            packages[targetIndex].chirCustomDefs.add(customDef)
-            serial++
+            let targetIndex = NextRoundRobinIndex(packages)
+            packages[targetIndex].chirImportedCFuncs.add(fn)
         }
     }
 }
