@@ -38,7 +38,7 @@ private func typeCheckExprTargetTypeOf(ctx: ASTContext, node: Node): Option<Ty> 
     return ctx.targetTypeMap.get(typeCheckExprNodeHash(node))
 }
 
-private func typeCheckExprPutTargetType(ctx: ASTContext, node: Node, ty: Ty): Unit {
+func typeCheckExprPutTargetType(ctx: ASTContext, node: Node, ty: Ty): Unit {
     ctx.targetTypeMap[typeCheckExprNodeHash(node)] = ty
 }
 
@@ -2839,6 +2839,7 @@ public class TypeChecker {
         if (ok) {
             ctx.SkipSynForCorrectTy(expr)
         }
+        typeCheckExprClearTargetType(ctx, expr)
         return ok
     }
 
@@ -3226,18 +3227,22 @@ public class TypeChecker {
     private func Check(ctx: ASTContext, target: Ty, expr: Expr, clearInferredCallTypes!: Bool = true): Bool {
         if (!Ty.IsTyCorrect(target)) {
             expr.SetTy(TypeManager.GetInvalidTy())
+            typeCheckExprClearTargetType(ctx, expr)
             return false
         }
         typeCheckExprPutTargetType(ctx, expr, target)
         if (expr.TestAttr(Attribute.IS_BROKEN)) {
             expr.SetTy(TypeManager.GetInvalidTy())
+            typeCheckExprClearTargetType(ctx, expr)
             return false
         }
         if (let Some(lambda) <- (expr as LambdaExpr)) {
             return FinishCheck(ctx, lambda, CheckLambdaExprWithTarget(ctx, target, lambda))
         }
         if (let Some(block) <- (expr as Block)) {
-            return CheckBlock(ctx, target, block)
+            let ok = CheckBlock(ctx, target, block)
+            typeCheckExprClearTargetType(ctx, expr)
+            return ok
         }
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
             typeCheckExprPutTargetType(ctx, nameRef, target)
