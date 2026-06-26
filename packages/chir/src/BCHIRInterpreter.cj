@@ -401,6 +401,10 @@ public class BCHIRInterpreter {
         return env.GetGlobal(index)
     }
 
+    public func DereferenceValue(value: InterpreterValue): Option<InterpreterValue> {
+        return DereferencePointer(value)
+    }
+
     public func SetGlobalVar(index: Int64, value: InterpreterValue): Bool {
         return env.SetGlobal(index, value)
     }

@@ -100,6 +100,10 @@ public class BCHIRLinker {
         return globalIds.get(name)
     }
 
+    public func GetGVARId(name: String): Int64 {
+        return globalIds.get(name) ?? -1
+    }
+
     private func GenerateDummyAbortFunction(topDef: BCHIRDefinition): Unit {
         dummyAbortFuncIdx = topDef.NextIndex()
         BCHIRPushOpWithName(topDef, OpCode.FRAME, "linker_dummy_abort_function")
