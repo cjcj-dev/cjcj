@@ -3017,7 +3017,7 @@ public class TypeChecker {
         }
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
             SynthesizeBinaryChildren(ctx, binaryExpr)
-            let binaryTy = SynBinaryExpr(impl.typeManager, binaryExpr)
+            let binaryTy = SynBinaryExpr(impl.typeManager, binaryExpr, ctx: Some(ctx))
             if (Ty.IsTyCorrect(binaryTy)) {
                 return FinishSynthesize(ctx, binaryExpr, binaryTy)
             }
@@ -3159,7 +3159,7 @@ public class TypeChecker {
             return true
         }
         let _ = Synthesize(ctx, be)
-        return ChkExprShallow(impl.typeManager, target, be)
+        return ChkExprShallow(impl.typeManager, target, be, ctx: Some(ctx))
     }
 
     private func ShouldTryBinaryOperatorOverload(be: BinaryExpr): Bool {
@@ -3224,6 +3224,15 @@ public class TypeChecker {
     }
 
     private func Check(ctx: ASTContext, target: Ty, expr: Expr, clearInferredCallTypes!: Bool = true): Bool {
+        if (!Ty.IsTyCorrect(target)) {
+            expr.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
+        typeCheckExprPutTargetType(ctx, expr, target)
+        if (expr.TestAttr(Attribute.IS_BROKEN)) {
+            expr.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
         if (let Some(lambda) <- (expr as LambdaExpr)) {
             return FinishCheck(ctx, lambda, CheckLambdaExprWithTarget(ctx, target, lambda))
         }
@@ -3234,7 +3243,6 @@ public class TypeChecker {
             typeCheckExprPutTargetType(ctx, nameRef, target)
             let _ = Synthesize(ctx, nameRef)
             let ok = ChkNameReferenceExpr(impl.typeManager, target, nameRef)
-            typeCheckExprClearTargetType(ctx, nameRef)
             return FinishCheck(ctx, expr, ok)
         }
         if (let Some(callExpr) <- (expr as CallExpr)) {
@@ -3244,12 +3252,11 @@ public class TypeChecker {
                 Some({ paramTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, paramTy, arg) }),
                 desugarChecker: Some({ target2: Ty, expr2: Expr => Check(ctx, target2, expr2) }),
                 clearInferredForTarget: clearInferredCallTypes)
-            typeCheckExprClearTargetType(ctx, callExpr)
             return FinishCheck(ctx, callExpr, ok)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
             SynthesizeIfChildren(ctx, ifExpr)
-            return FinishCheck(ctx, ifExpr, ChkExprShallow(impl.typeManager, target, ifExpr))
+            return FinishCheck(ctx, ifExpr, ChkExprShallow(impl.typeManager, target, ifExpr, ctx: Some(ctx)))
         }
         if (let Some(matchExpr) <- (expr as MatchExpr)) {
             SynthesizeMatchChildren(ctx, matchExpr)
@@ -3263,7 +3270,7 @@ public class TypeChecker {
         }
         if (expr.IsLoopExpr()) {
             SynthesizeLoopChildren(ctx, expr)
-            return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr))
+            return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx)))
         }
         if (let Some(lit) <- (expr as LitConstExpr)) {
             return FinishCheck(ctx, lit, ChkLitConstExpr(impl.typeManager, target, lit, ctx: Some(ctx)))
@@ -3282,11 +3289,11 @@ public class TypeChecker {
                 returnExpr.refFuncBody = Some(fb)
             }
             SynthesizeReturnChildren(ctx, returnExpr)
-            return FinishCheck(ctx, returnExpr, ChkExprShallow(impl.typeManager, target, returnExpr))
+            return FinishCheck(ctx, returnExpr, ChkExprShallow(impl.typeManager, target, returnExpr, ctx: Some(ctx)))
         }
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
             let _ = SynthesizeNameReference(ctx, nameRef)
-            return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr))
+            return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx)))
         }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             let throwTy = SynthesizeThrowExpr(ctx, throwExpr)
@@ -3315,7 +3322,7 @@ public class TypeChecker {
             return FinishCheck(ctx, asExpr, ChkAsExpr(impl.typeManager, target, asExpr, LookupCoreEnumDecl(ctx, "Option")))
         }
         let _ = Synthesize(ctx, expr)
-        return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr))
+        return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx)))
     }
 
     private func ResolveRefExpr(ctx: ASTContext, refExpr: RefExpr): Unit {

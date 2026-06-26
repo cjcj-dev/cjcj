@@ -94,6 +94,13 @@ public class CGFunctionType <: CGType {
     }
     public func GetMethodTypeInfoIndex(): Option<Int64> { Complete(); return methodTypeInfoIndex }
     public func GetStaticMethodTypeInfoIndex(): Option<Int64> { Complete(); return staticMethodTypeInfoIndex }
+    public func GetParamType(idx: Int64): CGType {
+        let types = GetContainedTypes()
+        if (idx + 1 < types.size) {
+            return types[idx + 1]
+        }
+        return CGType.GetOrCreate(cgMod, VoidType())
+    }
 
     public func GetLLVMFunctionType(): LLVMTypeRef {
         Complete()

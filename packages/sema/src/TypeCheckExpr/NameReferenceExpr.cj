@@ -8,6 +8,16 @@ public func SelfhostPortStatus_TypeCheckExpr_NameReferenceExpr(): Bool {
     return true
 }
 
+private func TcNodeHash(node: Node): Int64 {
+    return node.begin.hashCode() ^ (node.end.hashCode() << 1) ^ ASTKindIndex(node.astKind)
+}
+
+private func TcPutTargetType(ctx: Option<ASTContext>, node: Node, target: Ty): Unit {
+    if (let Some(realCtx) <- ctx) {
+        realCtx.targetTypeMap[TcNodeHash(node)] = target
+    }
+}
+
 func TcUnitTy(): Ty {
     return TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
 }
@@ -652,16 +662,18 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr): Ty {
     return TcInvalid(expr)
 }
 
-public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr): Bool {
+public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
+    ctx!: Option<ASTContext> = None): Bool {
+    TcPutTargetType(ctx, expr, target)
     if (let Some(value) <- (expr as LitConstExpr)) { return ChkLitConstExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as ParenExpr)) { return ChkParenExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as TupleLit)) { return ChkTupleLit(typeManager, target, value) }
     if (let Some(value) <- (expr as CallExpr)) { return ChkCallExprShallow(typeManager, target, value) }
     if (let Some(value) <- (expr as Block)) { return ChkBlock(typeManager, target, value) }
     if (let Some(value) <- (expr as UnaryExpr)) { return ChkUnaryExpr(typeManager, target, value) }
-    if (let Some(value) <- (expr as BinaryExpr)) { return ChkBinaryExpr(typeManager, target, value) }
+    if (let Some(value) <- (expr as BinaryExpr)) { return ChkBinaryExpr(typeManager, target, value, ctx: ctx) }
     if (let Some(value) <- (expr as AssignExpr)) { return ChkAssignExpr(typeManager, target, value) }
-    if (let Some(value) <- (expr as IfExpr)) { return ChkIfExpr(typeManager, target, value) }
+    if (let Some(value) <- (expr as IfExpr)) { return ChkIfExpr(typeManager, target, value, ctx: ctx) }
     if (let Some(value) <- (expr as WhileExpr)) { return ChkWhileExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as DoWhileExpr)) { return ChkDoWhileExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as ForInExpr)) { return ChkForInExpr(typeManager, target, value) }

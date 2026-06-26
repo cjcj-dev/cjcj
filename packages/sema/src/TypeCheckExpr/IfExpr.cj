@@ -84,7 +84,8 @@ public func SynIfExpr(typeManager: TypeManager, ie: IfExpr): Ty {
     return IfInvalid(ie)
 }
 
-private func ChkIfExprNoElse(typeManager: TypeManager, target: Ty, ie: IfExpr): Bool {
+private func ChkIfExprNoElse(typeManager: TypeManager, target: Ty, ie: IfExpr,
+    ctx!: Option<ASTContext> = None): Bool {
     let unitTy = TcUnitTy()
     var ok = true
     if (let Some(thenBody) <- ie.thenBody) {
@@ -93,7 +94,7 @@ private func ChkIfExprNoElse(typeManager: TypeManager, target: Ty, ie: IfExpr): 
         ok = false
     }
     if (let Some(elseExpr) <- ie.elseBody) {
-        ok = Ty.IsTyCorrect(SynExprShallow(typeManager, elseExpr)) && ok
+        ok = ChkExprShallow(typeManager, unitTy, elseExpr, ctx: ctx) && ok
     }
     ok = typeManager.CheckTypeCompatibility(target, unitTy) != TypeCompatibility.INCOMPATIBLE && ok
     if (ok) {
@@ -104,7 +105,8 @@ private func ChkIfExprNoElse(typeManager: TypeManager, target: Ty, ie: IfExpr): 
     return false
 }
 
-private func ChkIfExprTwoBranches(typeManager: TypeManager, target: Ty, ie: IfExpr): Bool {
+private func ChkIfExprTwoBranches(typeManager: TypeManager, target: Ty, ie: IfExpr,
+    ctx!: Option<ASTContext> = None): Bool {
     var ok = true
     if (let Some(thenBody) <- ie.thenBody) {
         ok = ChkBlock(typeManager, target, thenBody) && ok
@@ -112,7 +114,7 @@ private func ChkIfExprTwoBranches(typeManager: TypeManager, target: Ty, ie: IfEx
         ok = false
     }
     if (let Some(elseExpr) <- ie.elseBody) {
-        ok = ChkExprShallow(typeManager, target, elseExpr) && ok
+        ok = ChkExprShallow(typeManager, target, elseExpr, ctx: ctx) && ok
     } else {
         ok = false
     }
@@ -124,7 +126,8 @@ private func ChkIfExprTwoBranches(typeManager: TypeManager, target: Ty, ie: IfEx
     return false
 }
 
-public func ChkIfExpr(typeManager: TypeManager, target: Ty, ie: IfExpr): Bool {
+public func ChkIfExpr(typeManager: TypeManager, target: Ty, ie: IfExpr,
+    ctx!: Option<ASTContext> = None): Bool {
     var ok = true
     if (let Some(condExpr) <- ie.condExpr) {
         ok = TcCheckCondition(typeManager, condExpr) && ok
@@ -132,9 +135,9 @@ public func ChkIfExpr(typeManager: TypeManager, target: Ty, ie: IfExpr): Bool {
         ok = false
     }
     if (IsIfExprWithoutElse(ie)) {
-        ok = ChkIfExprNoElse(typeManager, target, ie) && ok
+        ok = ChkIfExprNoElse(typeManager, target, ie, ctx: ctx) && ok
     } else {
-        ok = ChkIfExprTwoBranches(typeManager, target, ie) && ok
+        ok = ChkIfExprTwoBranches(typeManager, target, ie, ctx: ctx) && ok
     }
     if (!ok) {
         let _ = IfInvalid(ie)

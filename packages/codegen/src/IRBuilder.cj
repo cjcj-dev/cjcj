@@ -874,7 +874,7 @@ public class IRBuilder2 <: Resource {
             var idx: Int64 = 0
             for (arg in args) {
                 let fixedArg = if (idx < paramTys.size) {
-                    FixFuncArg(arg, paramTys[idx], name: name)
+                    FixFuncArg(arg, calleeType.GetParamType(idx), name: name)
                 } else {
                     arg.GetRawValue()
                 }
@@ -918,23 +918,28 @@ public class IRBuilder2 <: Resource {
         return callArgs
     }
 
-    private func FixFuncArg(arg: CGValue, paramTy: Type, name!: String = ""): LLVMValueRef {
+    private func IsOptionLikeRefValue(argCGType: CGType): Bool {
+        if (let Some(enumCGType) <- (CGType.GetOrCreate(cgMod, argCGType.GetOriginal().StripAllRefs()) as CGEnumType)) {
+            return enumCGType.IsOptionLikeRef()
+        }
+        return false
+    }
+
+    private func FixFuncArg(arg: CGValue, destType: CGType, name!: String = ""): LLVMValueRef {
         let raw = arg.GetRawValue()
-        if (paramTy.IsGeneric()) {
-            if (let Some(argCGType) <- arg.GetCGType()) {
-                let argTy = argCGType.GetOriginal()
-                let rawTy = unsafe { LLVMTypeOf(raw) }
-                let isGCObjectPointer = !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12 &&
-                    unsafe { LLVMGetPointerAddressSpace(rawTy) } != 0u32
-                if (argCGType.IsReference() && isGCObjectPointer) {
-                    return CreatePointerCast(raw, CGType.GetOrCreate(cgMod, paramTy).GetLLVMType(),
-                        name: if (name.isEmpty()) { "generic.arg" } else { name + ".generic.arg" })
-                }
+        let paramTy = destType.GetOriginal()
+        let derefParamTy = paramTy.StripAllRefs()
+        let derefDestType = CGType.GetOrCreate(cgMod, derefParamTy)
+        if (let Some(argCGType) <- arg.GetCGType()) {
+            let rawTy = unsafe { LLVMTypeOf(raw) }
+            let isValueOrAddr0 = rawTy.isNull() || unsafe { LLVMGetTypeKind(rawTy) } != 12 ||
+                unsafe { LLVMGetPointerAddressSpace(rawTy) } == 0u32
+            if ((isValueOrAddr0 || IsOptionLikeRefValue(argCGType)) && derefDestType.GetSize().isNone()) {
+                let argTy = argCGType.GetOriginal().StripAllRefs()
                 let objectValue = CallAllocaGeneric(argTy)
                 StoreValueToObjectPayload(objectValue, raw, argTy)
                 return objectValue
             }
-            return raw
         }
         if (paramTy.IsFunc()) {
             if (let Some(funcTy) <- (paramTy as FuncType)) {
@@ -950,20 +955,13 @@ public class IRBuilder2 <: Resource {
             }
             return raw
         }
-        let derefParamTy = paramTy.StripAllRefs()
-        let derefParamCGType = CGType.GetOrCreate(cgMod, derefParamTy)
         if (!(derefParamTy.IsStruct() || derefParamTy.IsTuple() ||
-            derefParamCGType.IsStructType() || derefParamCGType.IsVArrayType())) {
+            derefDestType.IsStructType() || derefDestType.IsVArrayType() || derefParamTy.IsEnum())) {
             return raw
         }
         let rawTy = unsafe { LLVMTypeOf(raw) }
         if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12) {
-            let destPtrTy = if (paramTy.IsRef()) {
-                unsafe { LLVMPointerType(derefParamCGType.GetLLVMType(), 1u32) }
-            } else {
-                let addrspace = if (derefParamCGType.GetSize().isSome()) { 0u32 } else { 1u32 }
-                unsafe { LLVMPointerType(derefParamCGType.GetLLVMType(), addrspace) }
-            }
+            let destPtrTy = destType.GetLLVMType()
             let rawAddrspace = unsafe { LLVMGetPointerAddressSpace(rawTy) }
             let destAddrspace = unsafe { LLVMGetPointerAddressSpace(destPtrTy) }
             if (rawAddrspace != destAddrspace) {
@@ -978,13 +976,13 @@ public class IRBuilder2 <: Resource {
             if ((argTy.IsStruct() || argTy.IsTuple()) && !argTy.IsEqual(derefParamTy)) {
                 let actualSlot = CreateEntryAlloca(argCGType, name: allocaName)
                 StoreAggregateArgToSlot(raw, actualSlot, argCGType)
-                let destPtrTy = unsafe { LLVMPointerType(derefParamCGType.GetLLVMType(), 0u32) }
+                let destPtrTy = destType.GetLLVMType()
                 return CreatePointerCast(actualSlot, destPtrTy,
                     name: if (name.isEmpty()) { "arg.addr.cast" } else { name + ".arg.addr.cast" })
             }
         }
-        let slot = CreateEntryAlloca(derefParamCGType, name: allocaName)
-        StoreAggregateArgToSlot(raw, slot, derefParamCGType)
+        let slot = CreateEntryAlloca(derefDestType, name: allocaName)
+        StoreAggregateArgToSlot(raw, slot, derefDestType)
         return slot
     }
 
