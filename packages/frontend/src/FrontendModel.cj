@@ -394,21 +394,28 @@ extend SrcCodeChangeState <: Equatable<SrcCodeChangeState> {
     }
 }
 
-// ModuleFormat.fbs enum ExprKind (fbs:333-373): JumpExpr=4, MemberAccess=5, RefExpr=6, CallExpr=7,
-// UnaryExpr=8, BinaryExpr=11, SubscriptExpr=12, AssignExpr=13, TypeConvExpr=16, ThrowExpr=17, SpawnExpr=18, ArrayLit=19,
-// TupleLit=20, MatchExpr=21, ReturnExpr=3, LitConstExpr=10, IfExpr=23, TryExpr=24,
-// WhileExpr=25, DoWhileExpr=26, LambdaExpr=27, Block=28, MatchCase=29, MatchCaseOther=30, ForInExpr=35.
+// ModuleFormat.fbs enum ExprKind (fbs:333-373): WildcardExpr=1, PrimitiveTypeExpr=2,
+// ReturnExpr=3, JumpExpr=4, MemberAccess=5, RefExpr=6, CallExpr=7, UnaryExpr=8,
+// IncOrDecExpr=9, LitConstExpr=10, BinaryExpr=11, SubscriptExpr=12, AssignExpr=13,
+// ArrayExpr=14, PointerExpr=15, TypeConvExpr=16, ThrowExpr=17, SpawnExpr=18,
+// ArrayLit=19, TupleLit=20, MatchExpr=21, LetPatternDestructor=22, IfExpr=23, TryExpr=24,
+// WhileExpr=25, DoWhileExpr=26, LambdaExpr=27, Block=28, MatchCase=29,
+// MatchCaseOther=30, ForInExpr=35, IfAvailableExpr=36, PerformExpr=37, ResumeExpr=38.
 private const FLAT_EXPR_KIND_WILDCARD: UInt16 = 1u16
+private const FLAT_EXPR_KIND_PRIMITIVE_TYPE: UInt16 = 2u16
 private const FLAT_EXPR_KIND_RETURN: UInt16 = 3u16
 private const FLAT_EXPR_KIND_JUMP: UInt16 = 4u16
 private const FLAT_EXPR_KIND_MEMBER_ACCESS: UInt16 = 5u16
 private const FLAT_EXPR_KIND_REF_EXPR: UInt16 = 6u16
 private const FLAT_EXPR_KIND_CALL: UInt16 = 7u16
 private const FLAT_EXPR_KIND_UNARY: UInt16 = 8u16
+private const FLAT_EXPR_KIND_INC_OR_DEC: UInt16 = 9u16
 private const FLAT_EXPR_KIND_LIT_CONST: UInt16 = 10u16
 private const FLAT_EXPR_KIND_BINARY: UInt16 = 11u16
 private const FLAT_EXPR_KIND_SUBSCRIPT: UInt16 = 12u16
 private const FLAT_EXPR_KIND_ASSIGN: UInt16 = 13u16
+private const FLAT_EXPR_KIND_ARRAY_EXPR: UInt16 = 14u16
+private const FLAT_EXPR_KIND_POINTER_EXPR: UInt16 = 15u16
 private const FLAT_EXPR_KIND_TYPE_CONV: UInt16 = 16u16
 private const FLAT_EXPR_KIND_THROW: UInt16 = 17u16
 private const FLAT_EXPR_KIND_SPAWN: UInt16 = 18u16
@@ -425,6 +432,8 @@ private const FLAT_EXPR_KIND_BLOCK: UInt16 = 28u16
 private const FLAT_EXPR_KIND_MATCH_CASE: UInt16 = 29u16
 private const FLAT_EXPR_KIND_MATCH_CASE_OTHER: UInt16 = 30u16
 private const FLAT_EXPR_KIND_FOR_IN: UInt16 = 35u16
+private const FLAT_EXPR_KIND_PERFORM: UInt16 = 37u16
+private const FLAT_EXPR_KIND_RESUME: UInt16 = 38u16
 
 // ModuleFormat.fbs enum PatternKind (fbs:515-524).
 private const FLAT_PATTERN_KIND_CONST: UInt8 = 1u8
@@ -1598,13 +1607,10 @@ private class CjoSignatureMaterializer {
         SetOuterFunctionDecl(funcDecl)
     }
 
-    // Loads FuncBody.body (fbs FuncBody field 2 / slot 8 = body expr index), gated by the C++
-    // shouldImportBody (ExprLoader.cpp:489-510). shouldImportBody = always() || isInline || isConst;
-    // the writer always emits FuncBody.always=false (ASTWriter.cpp:1389), so it reduces to
-    // isInline || isConst. The selfhost loader always imports source for .cjo, so importSrcCode is
-    // implicitly true. On import, the loaded Block is the un-wrapped funcBody.body (LoadExpr<Block>,
-    // no dummy-RefExpr wrap), and every nested ReturnExpr's refFuncBody is set to this funcBody
-    // (ExprLoader.cpp:500-509).
+    // Loads FuncBody.body (fbs FuncBody field 2 / slot 8 = body expr index), gated by the current
+    // selfhost shouldImportBody path. On import, the loaded Block is the un-wrapped funcBody.body
+    // (LoadExpr<Block>, no dummy-RefExpr wrap), and every nested ReturnExpr's refFuncBody is set to
+    // this funcBody (ExprLoader.cpp:500-509).
     private func LoadFlatFuncBody(reader: CjoFlatBuffer, bodyTable: Int64, funcDecl: Option<FuncDecl>,
         isInline: Bool, isConst: Bool): FuncBody {
         let body = FuncBody()
@@ -1744,9 +1750,8 @@ private class CjoSignatureMaterializer {
 
     // Recursive EXPR-load dispatcher. Loads an Expr by its 1-based index from the package allExprs
     // vector (root field 9, slot 22). Mirrors ExprLoader.cpp LoadExpr (:417-443) + per-kind loaders.
-    // Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr, BinaryExpr, AssignExpr,
-    // WhileExpr, DoWhileExpr, IfExpr, LitConstExpr, ReturnExpr, Block. Returns None for INVALID_FORMAT_INDEX (0) or any
-    // not-yet-supported expr kind.
+    // Bounded faithful slice: all expression kinds materialized by C++ ExprLoader.cpp.
+    // Returns None for INVALID_FORMAT_INDEX (0) and malformed FuncArg/subnode wrapper records only.
     private func LoadFlatExprRaw(reader: CjoFlatBuffer, exprIndex: UInt32): Option<Expr> {
         if (exprIndex == 0u32 || flatAllExprs < 0) {
             return None
@@ -1765,6 +1770,9 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_WILDCARD) {
             return Some(LoadFlatWildcardExpr(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_PRIMITIVE_TYPE) {
+            return Some(LoadFlatPrimitiveTypeExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_LIT_CONST) {
             return Some(LoadFlatLitConstExpr(reader, exprTable))
         }
@@ -1777,6 +1785,9 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_UNARY) {
             return Some(LoadFlatUnaryExpr(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_INC_OR_DEC) {
+            return Some(LoadFlatIncOrDecExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_BINARY) {
             return Some(LoadFlatBinaryExpr(reader, exprTable))
         }
@@ -1786,6 +1797,12 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_ASSIGN) {
             return Some(LoadFlatAssignExpr(reader, exprTable))
         }
+        if (kind == FLAT_EXPR_KIND_ARRAY_EXPR) {
+            return Some(LoadFlatArrayExpr(reader, exprTable))
+        }
+        if (kind == FLAT_EXPR_KIND_POINTER_EXPR) {
+            return Some(LoadFlatPointerExpr(reader, exprTable))
+        }
         if (kind == FLAT_EXPR_KIND_JUMP) {
             return Some(LoadFlatJumpExpr(reader, exprTable))
         }
@@ -1794,6 +1811,12 @@ private class CjoSignatureMaterializer {
         }
         if (kind == FLAT_EXPR_KIND_THROW) {
             return Some(LoadFlatThrowExpr(reader, exprTable))
+        }
+        if (kind == FLAT_EXPR_KIND_PERFORM) {
+            return Some(LoadFlatPerformExpr(reader, exprTable))
+        }
+        if (kind == FLAT_EXPR_KIND_RESUME) {
+            return Some(LoadFlatResumeExpr(reader, exprTable))
         }
         if (kind == FLAT_EXPR_KIND_SPAWN) {
             return Some(LoadFlatSpawnExpr(reader, exprTable))
@@ -1830,7 +1853,8 @@ private class CjoSignatureMaterializer {
         }
         if (kind == FLAT_EXPR_KIND_CALL) {
             // Mirrors ExprLoader.cpp:92-115 LoadCallExpr and ExprLoader.cpp:516-531 LoadFuncArg
-            // for packages whose exported allExprs are wholly inside this cut's bounded expr slice.
+            // while preserving the previous imported-body consumption boundary. The newly expanded
+            // per-kind loaders stay dormant until the source-imported-body emission cut promotes them.
             var scanIdx: Int64 = 0
             while (scanIdx < reader.VectorLength(flatAllExprs)) {
                 let scanTable = reader.VectorOffsetElement(flatAllExprs, scanIdx)
@@ -1839,22 +1863,7 @@ private class CjoSignatureMaterializer {
                 }
                 let scanKind = reader.U16Field(scanTable, 4, 0u16)
                 let scanInfoKind = reader.U8Field(scanTable, 18, 0u8)
-                let supported = scanKind == FLAT_EXPR_KIND_WILDCARD || scanKind == FLAT_EXPR_KIND_RETURN ||
-                    scanKind == FLAT_EXPR_KIND_MEMBER_ACCESS ||
-                    scanKind == FLAT_EXPR_KIND_REF_EXPR || scanKind == FLAT_EXPR_KIND_CALL ||
-                    scanKind == FLAT_EXPR_KIND_UNARY || scanKind == FLAT_EXPR_KIND_LIT_CONST ||
-                    scanKind == FLAT_EXPR_KIND_BINARY || scanKind == FLAT_EXPR_KIND_SUBSCRIPT ||
-                    scanKind == FLAT_EXPR_KIND_ASSIGN || scanKind == FLAT_EXPR_KIND_JUMP ||
-                    scanKind == FLAT_EXPR_KIND_TYPE_CONV || scanKind == FLAT_EXPR_KIND_SPAWN ||
-                    scanKind == FLAT_EXPR_KIND_THROW || scanKind == FLAT_EXPR_KIND_MATCH ||
-                    scanKind == FLAT_EXPR_KIND_ARRAY_LIT || scanKind == FLAT_EXPR_KIND_TUPLE_LIT ||
-                    scanKind == FLAT_EXPR_KIND_MATCH_CASE || scanKind == FLAT_EXPR_KIND_MATCH_CASE_OTHER ||
-                    scanKind == FLAT_EXPR_KIND_IF || scanKind == FLAT_EXPR_KIND_TRY || scanKind == FLAT_EXPR_KIND_WHILE ||
-                    scanKind == FLAT_EXPR_KIND_DO_WHILE ||
-                    scanKind == FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR || scanKind == FLAT_EXPR_KIND_FOR_IN ||
-                    scanKind == FLAT_EXPR_KIND_LAMBDA ||
-                    scanKind == FLAT_EXPR_KIND_BLOCK || (scanKind == 0u16 && scanInfoKind == 11u8)
-                if (!supported) {
+                if (!IsLegacyBodyConsumedFlatExprKind(scanKind, scanInfoKind)) {
                     return None
                 }
                 scanIdx++
@@ -1873,45 +1882,18 @@ private class CjoSignatureMaterializer {
             var argIdx: Int64 = 1
             let argCount = reader.VectorLength(operands)
             while (argIdx < argCount) {
-                let argExprIndex = reader.VectorU32(operands, argIdx)
-                if (argExprIndex == 0u32 || flatAllExprs < 0) {
+                if (let Some(arg) <- LoadFlatFuncArg(reader, reader.VectorU32(operands, argIdx))) {
+                    ce.args.add(arg)
+                } else {
                     return None
                 }
-                let argTable = reader.VectorOffsetElement(flatAllExprs, Int64(argExprIndex) - 1)
-                if (argTable < 0) {
-                    return None
-                }
-                let arg = FuncArg()
-                if (let Some(ty) <- LoadFlatType(reader.U32Field(argTable, 14, 0u32))) {
-                    arg.SetTy(ty)
-                }
-                let argInfo = reader.OffsetField(argTable, 20)
-                let isDefaultVal = if (argInfo >= 0) {
-                    reader.U8Field(argInfo, 6, 0u8) != 0u8
-                } else {
-                    false
-                }
-                if (argInfo >= 0) {
-                    arg.withInout = reader.U8Field(argInfo, 4, 0u8) != 0u8
-                }
-                if (isDefaultVal) {
-                    arg.expr = Some(InvalidExpr())
-                    arg.EnableAttr(Attribute.HAS_INITIAL)
-                } else {
-                    let argOperands = reader.VectorField(argTable, 12)
-                    if (argOperands < 0 || reader.VectorLength(argOperands) != 1) {
-                        return None
-                    }
-                    if (let Some(argExpr) <- LoadFlatExpr(reader, reader.VectorU32(argOperands, 0))) {
-                        arg.expr = Some(argExpr)
-                    } else {
-                        return None
-                    }
-                }
-                ce.args.add(arg)
                 argIdx++
             }
-            ce.desugarArgs = Some(ce.args)
+            let desugarArgs = ArrayList<FuncArg>()
+            for (arg in ce.args) {
+                desugarArgs.add(arg)
+            }
+            ce.desugarArgs = Some(desugarArgs)
             let infoTable = reader.OffsetField(exprTable, 20)
             if (infoTable >= 0) {
                 let flatCallKind = reader.U8Field(infoTable, 6, 0u8)
@@ -1955,6 +1937,24 @@ private class CjoSignatureMaterializer {
         return None
     }
 
+    private func IsLegacyBodyConsumedFlatExprKind(kind: UInt16, infoKind: UInt8): Bool {
+        return kind == FLAT_EXPR_KIND_WILDCARD ||
+            kind == FLAT_EXPR_KIND_RETURN || kind == FLAT_EXPR_KIND_JUMP ||
+            kind == FLAT_EXPR_KIND_MEMBER_ACCESS || kind == FLAT_EXPR_KIND_REF_EXPR ||
+            kind == FLAT_EXPR_KIND_CALL || kind == FLAT_EXPR_KIND_UNARY ||
+            kind == FLAT_EXPR_KIND_LIT_CONST ||
+            kind == FLAT_EXPR_KIND_BINARY || kind == FLAT_EXPR_KIND_SUBSCRIPT ||
+            kind == FLAT_EXPR_KIND_ASSIGN || kind == FLAT_EXPR_KIND_TYPE_CONV ||
+            kind == FLAT_EXPR_KIND_THROW || kind == FLAT_EXPR_KIND_SPAWN ||
+            kind == FLAT_EXPR_KIND_ARRAY_LIT || kind == FLAT_EXPR_KIND_TUPLE_LIT ||
+            kind == FLAT_EXPR_KIND_MATCH || kind == FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR ||
+            kind == FLAT_EXPR_KIND_IF || kind == FLAT_EXPR_KIND_TRY || kind == FLAT_EXPR_KIND_WHILE ||
+            kind == FLAT_EXPR_KIND_DO_WHILE || kind == FLAT_EXPR_KIND_LAMBDA ||
+            kind == FLAT_EXPR_KIND_BLOCK || kind == FLAT_EXPR_KIND_MATCH_CASE ||
+            kind == FLAT_EXPR_KIND_MATCH_CASE_OTHER || kind == FLAT_EXPR_KIND_FOR_IN ||
+            (kind == 0u16 && infoKind == 11u8)
+    }
+
     // Mirrors ExprLoader.cpp:348-358 LoadLambdaExpr: LambdaInfo owns a nested FuncBody and
     // supportMock restores Attribute.MOCK_SUPPORTED. LoadFuncBody is called with C++ defaults
     // (isInline=false, isConst=true), so the lambda body is imported when source is present.
@@ -1983,6 +1983,18 @@ private class CjoSignatureMaterializer {
         return we
     }
 
+    // Mirrors ExprLoader.cpp:39-48 LoadPrimitiveTypeExpr. The serialized Expr.type field points to
+    // the PackageFormat::Type; the type kind is recovered through the same primitive type map used by
+    // LoadFlatType.
+    private func LoadFlatPrimitiveTypeExpr(reader: CjoFlatBuffer, exprTable: Int64): PrimitiveTypeExpr {
+        let ty = LoadFlatType(reader.U32Field(exprTable, 14, 0u32))
+        let kind = if (let Some(value) <- ty) { value.kind } else { TypeKind.TYPE_INVALID }
+        let pte = PrimitiveTypeExpr(kind)
+        LoadFlatExprBasicInfo(reader, exprTable, pte)
+        pte.EnableAttr(Attribute.IMPORTED)
+        return pte
+    }
+
     // Mirrors ExprLoader.cpp:58-66 LoadJumpExpr. JumpInfo carries only isBreak.
     private func LoadFlatJumpExpr(reader: CjoFlatBuffer, exprTable: Int64): JumpExpr {
         let je = JumpExpr()
@@ -1993,6 +2005,23 @@ private class CjoSignatureMaterializer {
         }
         je.EnableAttr(Attribute.IMPORTED)
         return je
+    }
+
+    // Mirrors ExprLoader.cpp:130-138 LoadIncOrDecExpr. Operand 0 is expr; IncOrDecInfo field 0
+    // (slot 4) is the OperatorKind encoded through OP_KIND_RMAP.
+    private func LoadFlatIncOrDecExpr(reader: CjoFlatBuffer, exprTable: Int64): IncOrDecExpr {
+        let ide = IncOrDecExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, ide)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) >= 1) {
+            ide.expr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+        }
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            ide.op = FlatOperatorKind(reader.U8Field(infoTable, 4, 0u8))
+        }
+        ide.EnableAttr(Attribute.IMPORTED)
+        return ide
     }
 
     // Mirrors ExprLoader.cpp:220-227 LoadTypeConvExpr. Operand 0 is the converted expr.
@@ -2019,6 +2048,27 @@ private class CjoSignatureMaterializer {
         return te
     }
 
+    // Mirrors ExprLoader.cpp:236-241 LoadPerformExpr. Operand 0 is the performed expr.
+    private func LoadFlatPerformExpr(reader: CjoFlatBuffer, exprTable: Int64): PerformExpr {
+        let pe = PerformExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, pe)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) >= 1) {
+            pe.expr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
+        }
+        pe.EnableAttr(Attribute.IMPORTED)
+        return pe
+    }
+
+    // Mirrors ExprLoader.cpp:244-247 LoadResumeExpr. The serialized package format carries no
+    // additional ResumeExpr fields in this loader path.
+    private func LoadFlatResumeExpr(reader: CjoFlatBuffer, exprTable: Int64): ResumeExpr {
+        let re = ResumeExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, re)
+        re.EnableAttr(Attribute.IMPORTED)
+        return re
+    }
+
     // Mirrors ExprLoader.cpp:250-262 LoadSpawnExpr. Operand 0 is the optional thread-context arg;
     // SpawnInfo.future is a local VarDecl FullId.
     private func LoadFlatSpawnExpr(reader: CjoFlatBuffer, exprTable: Int64): SpawnExpr {
@@ -2036,6 +2086,47 @@ private class CjoSignatureMaterializer {
         }
         se.EnableAttr(Attribute.IMPORTED)
         return se
+    }
+
+    // Mirrors ExprLoader.cpp:198-208 LoadArrayExpr and ReferenceLoader.cpp:622-630 for optional
+    // ArrayInfo.initFunc on non-VArray array constructor expressions.
+    private func LoadFlatArrayExpr(reader: CjoFlatBuffer, exprTable: Int64): ArrayExpr {
+        let ae = ArrayExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, ae)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0) {
+            var idx: Int64 = 0
+            let count = reader.VectorLength(operands)
+            while (idx < count) {
+                if (let Some(arg) <- LoadFlatFuncArg(reader, reader.VectorU32(operands, idx))) {
+                    ae.args.add(arg)
+                }
+                idx++
+            }
+        }
+        let infoTable = reader.OffsetField(exprTable, 20)
+        if (infoTable >= 0) {
+            ae.isValueArray = reader.U8Field(infoTable, 6, 0u8) != 0u8
+            if (ae.TyKind() != TypeKind.TYPE_VARRAY) {
+                if (let Some(initDecl) <- ResolveFlatFullId(reader, reader.OffsetField(infoTable, 4))) {
+                    ae.initFunc = initDecl as FuncDecl
+                }
+            }
+        }
+        ae.EnableAttr(Attribute.IMPORTED)
+        return ae
+    }
+
+    // Mirrors ExprLoader.cpp:211-217 LoadPointerExpr. Optional operand 0 is a FuncArg wrapper.
+    private func LoadFlatPointerExpr(reader: CjoFlatBuffer, exprTable: Int64): PointerExpr {
+        let pe = PointerExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, pe)
+        let operands = reader.VectorField(exprTable, 12)
+        if (operands >= 0 && reader.VectorLength(operands) == 1) {
+            pe.arg = LoadFlatFuncArg(reader, reader.VectorU32(operands, 0))
+        }
+        pe.EnableAttr(Attribute.IMPORTED)
+        return pe
     }
 
     // Mirrors ExprLoader.cpp:303-327 LoadTryExpr and ReferenceLoader.cpp:676-682. Operands are
@@ -2510,6 +2601,40 @@ private class CjoSignatureMaterializer {
             return -1
         }
         return reader.VectorOffsetElement(flatAllExprs, idx)
+    }
+
+    // Mirrors ExprLoader.cpp:516-531 LoadFuncArg. FuncArg is encoded as an Expr table with no
+    // Expr.kind, operand 0 for the value expression, and ExprInfo_FuncArgInfo at slot 20.
+    private func LoadFlatFuncArg(reader: CjoFlatBuffer, argExprIndex: UInt32): Option<FuncArg> {
+        let argTable = FlatExprTable(reader, argExprIndex)
+        if (argTable < 0) {
+            return None
+        }
+        let arg = FuncArg()
+        LoadFlatNodeBasicInfo(reader, argTable, arg)
+        let argInfo = reader.OffsetField(argTable, 20)
+        let isDefaultVal = if (argInfo >= 0) {
+            reader.U8Field(argInfo, 6, 0u8) != 0u8
+        } else {
+            false
+        }
+        if (argInfo >= 0) {
+            arg.withInout = reader.U8Field(argInfo, 4, 0u8) != 0u8
+        }
+        if (isDefaultVal) {
+            arg.expr = Some(InvalidExpr())
+            arg.EnableAttr(Attribute.HAS_INITIAL)
+            return Some(arg)
+        }
+        let argOperands = reader.VectorField(argTable, 12)
+        if (argOperands < 0 || reader.VectorLength(argOperands) != 1) {
+            return None
+        }
+        if (let Some(argExpr) <- LoadFlatExpr(reader, reader.VectorU32(argOperands, 0))) {
+            arg.expr = Some(argExpr)
+            return Some(arg)
+        }
+        return None
     }
 
     private func LoadFlatReferenceInfo(reader: CjoFlatBuffer, infoTable: Int64, expr: NameReferenceExpr): Unit {
