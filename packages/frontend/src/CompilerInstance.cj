@@ -510,6 +510,9 @@ public class CompilerInstance {
                 collectCHIRDeclSummary(chirPkg, decl)
             }
         }
+        for (decl in pkg.srcImportedNonGenericDecls) {
+            collectCHIRDeclSummary(chirPkg, decl)
+        }
         chirPkg.declCount = chirPkg.mangleNames.size
         chirData.AppendNewPackage(chirPkg)
         chirData.SetImplicitFuncs(chirPkg, chirPkg.implicitFuncs)
@@ -1137,6 +1140,9 @@ public class CompilerInstance {
     }
 
     private func collectCHIRDeclSummary(chirPkg: CHIRPackage, decl: Decl): Unit {
+        if (decl.TestAttr(Attribute.IMPORTED) && !decl.isUsedImports) {
+            return
+        }
         let name = if (decl.mangledName.isEmpty()) {
             "_C" + (chirPkg.name + "." + decl.identifier.Val()).replace(".", "_")
         } else {

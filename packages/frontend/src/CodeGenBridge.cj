@@ -69,6 +69,8 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
         let realPackage = packagesToEmit[packageIndex]
         instance.chirData.SetCurrentRealCHIRPackage(Some(realPackage))
         let codegenData = CodegenCHIRData(instance.chirData.GetRealCHIRContext(), realPackage)
+        PopulateRealCodegenImplicitFuncs(codegenData, realPackage)
+        PruneImportedFunctionBodiesForRealCodegen(realPackage)
         let packageModules = GenPackageModules(codegenData, codegenOptions,
             instance.invocation.globalOptions.enIncrementalCompilation)
         emittedAll = emitPackageModules(instance, realPackage, packageModules, packageIndex) && emittedAll
@@ -76,6 +78,27 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
         packageIndex++
     }
     return emittedAll
+}
+
+private func PruneImportedFunctionBodiesForRealCodegen(pkg: RealCHIRPackage): Unit {
+    let kept = ArrayList<ChirFunction>()
+    for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
+        if ((fn.TestAttr(ChirAttribute.IMPORTED) || fn.TestAttr(ChirAttribute.SRC_CODE_IMPORTED)) &&
+            fn.GetBody().isSome()) {
+            continue
+        }
+        kept.add(fn)
+    }
+    pkg.SetAllGlobalFuncs(kept)
+}
+
+private func PopulateRealCodegenImplicitFuncs(codegenData: CodegenCHIRData, pkg: RealCHIRPackage): Unit {
+    for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
+        codegenData.AddImplicitFunc(fn.GetIdentifierWithoutPrefix(), fn)
+        if (!fn.GetRawMangledName().isEmpty()) {
+            codegenData.AddImplicitFunc(fn.GetRawMangledName(), fn)
+        }
+    }
 }
 
 private func BuildRealCodeGenPackages(realPackages: ArrayList<RealCHIRPackage>): ArrayList<RealCHIRPackage> {
