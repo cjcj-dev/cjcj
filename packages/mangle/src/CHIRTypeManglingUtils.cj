@@ -231,6 +231,24 @@ private func PackageNameForQualifiedName(def: CustomTypeDef): String {
 
 public func GetTypeQualifiedNameOfCustomType(typeInfo: CustomType, forNameFieldOfTi!: Bool = false): String {
     let def = typeInfo.GetCustomTypeDef()
+    if (def.GetAnnotation("IsAutoEnvInstBase").isSome()) {
+        throw IllegalArgumentException("AutoEnv instantiated base type is unexpected in qualified name")
+    }
+    if (def.GetAnnotation("IsAutoEnvGenericBase").isSome()) {
+        let typeArgs = typeInfo.GetGenericArgs()
+        if (typeArgs.isEmpty()) {
+            throw IllegalArgumentException("AutoEnv generic base type has no type arguments")
+        }
+        let paramTypes = ArrayList<Type>()
+        var idx = 0
+        while (idx + 1 < typeArgs.size) {
+            paramTypes.add(typeArgs[idx])
+            idx++
+        }
+        let params = GetTypeArgsQualifiedName(paramTypes, forNameFieldOfTi: true)
+        let returnType = GetTypeQualifiedName(typeArgs[typeArgs.size - 1], forNameFieldOfTi: true)
+        return MANGLE_CLOSURE_STR + MANGLE_LT_PREFIX + "(${params})->" + returnType + MANGLE_GT_PREFIX
+    }
     var out = PackageNameForQualifiedName(def) + ":" + GetCustomTypeIdentifier(typeInfo)
     let typeArgs = typeInfo.GetGenericArgs()
     if (!typeArgs.isEmpty()) {
