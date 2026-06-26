@@ -1,6 +1,7 @@
 package cangjie_compiler::driver
 
 import std.collection.*
+import std.sort.*
 
 public open class ToolChain {
     protected let driver: Driver
@@ -23,6 +24,68 @@ public open class ToolChain {
     }
 
     protected open func GetSharedLibraryExtension(): String { return ".so" }
+
+    private func CompareLinkStrings(left: String, right: String): Ordering {
+        if (left < right) {
+            return Ordering.LT
+        }
+        if (left > right) {
+            return Ordering.GT
+        }
+        return Ordering.EQ
+    }
+
+    private func CompareInputOrderTuples(left: (String, UInt64), right: (String, UInt64)): Ordering {
+        if (left[1] < right[1]) {
+            return Ordering.LT
+        }
+        if (left[1] > right[1]) {
+            return Ordering.GT
+        }
+        return Ordering.EQ
+    }
+
+    protected func AddLinkOrderedSetValue(values: ArrayList<String>, value: String): Unit {
+        for (existing in values) {
+            if (existing == value) {
+                return
+            }
+        }
+        values.add(value)
+    }
+
+    protected func AppendSortedLinkOrderedSet(tool: Tool, values: ArrayList<String>): Unit {
+        sort(values, by: { left: String, right: String => CompareLinkStrings(left, right) }, stable: true)
+        for (value in values) {
+            tool.AppendArg(value)
+        }
+    }
+
+    private func IsSameInputPath(candidate: String, rawPath: String): Bool {
+        if (candidate == rawPath) {
+            return true
+        }
+        if (let Some(absCandidate) <- FileUtil.GetAbsPath(candidate)) {
+            return absCandidate == rawPath
+        }
+        return false
+    }
+
+    private func FindInputFileOrder(rawPath: String): Option<UInt64> {
+        for (item in driverOptions.orderedInputObjs) {
+            if (item.value == rawPath) {
+                return item.index
+            }
+        }
+        var index: Int64 = 1
+        while (index < driverOptions.argList.size) {
+            if (IsSameInputPath(driverOptions.argList[index], rawPath)) {
+                return UInt64(index - 1)
+            }
+            index++
+        }
+        return None
+    }
 
     protected func CheckAndAddPathTo(results: ArrayList<String>, path: String, base!: String = ""): Unit {
         let fullPath = if (base.isEmpty()) { path } else { FileUtil.JoinPath(base, path) }
@@ -89,9 +152,9 @@ public open class ToolChain {
     }
 
     protected open func GenerateLinkOptionsOfBuiltinLibsForStaticLink(tool: Tool): Unit {
-        let dynamicLibraries = HashSet<String>()
-        let staticLibraries = HashSet<String>()
-        let ltoBuiltInDependencies = HashSet<String>()
+        let dynamicLibraries = ArrayList<String>()
+        let staticLibraries = ArrayList<String>()
+        let ltoBuiltInDependencies = ArrayList<String>()
         let dyDependencies = HashSet<String>()
         GatherAlwaysDynamicStdDependencies(driverOptions.directBuiltinDependencies, dyDependencies)
         GatherAlwaysDynamicStdDependencies(driverOptions.indirectBuiltinDependencies, dyDependencies)
@@ -102,23 +165,12 @@ public open class ToolChain {
             AppendStaticBuiltinLibrary(pkg, dynamicLibraries, staticLibraries, ltoBuiltInDependencies, dyDependencies)
         }
         if (driverOptions.IsLTOEnabled()) {
-            for (bcFile in ltoBuiltInDependencies) {
-                tool.AppendArg(bcFile)
-            }
+            AppendSortedLinkOrderedSet(tool, ltoBuiltInDependencies)
         }
-        let needsElfGroup = driverOptions.target.os == OSType.LINUX || driverOptions.target.os == OSType.WINDOWS
-        if (needsElfGroup) {
-            tool.AppendArg("--start-group")
-        }
-        for (lib in staticLibraries) {
-            tool.AppendArg(lib)
-        }
-        if (needsElfGroup) {
-            tool.AppendArg("--end-group")
-        }
-        for (lib in dynamicLibraries) {
-            tool.AppendArg(lib)
-        }
+        tool.AppendArg("--start-group")
+        AppendSortedLinkOrderedSet(tool, staticLibraries)
+        tool.AppendArg("--end-group")
+        AppendSortedLinkOrderedSet(tool, dynamicLibraries)
     }
 
     protected open func GenerateLinkOptionsOfBuiltinLibsForDyLink(tool: Tool): Unit {
@@ -158,31 +210,31 @@ public open class ToolChain {
 
     private func AppendStaticBuiltinLibrary(
         pkg: String,
-        dynamicLibraries: HashSet<String>,
-        staticLibraries: HashSet<String>,
-        ltoBuiltInDependencies: HashSet<String>,
+        dynamicLibraries: ArrayList<String>,
+        staticLibraries: ArrayList<String>,
+        ltoBuiltInDependencies: ArrayList<String>,
         dyDependencies: HashSet<String>
     ): Unit {
         if (let Some(staticLib) <- LibCangjieFormat(pkg, ".a")) {
             if (dyDependencies.contains(staticLib) && !driverOptions.linkStatic) {
                 if (let Some(dynamicArg) <- BuiltinDynamicLinkArg(pkg)) {
-                    dynamicLibraries.add(dynamicArg)
+                    AddLinkOrderedSetValue(dynamicLibraries, dynamicArg)
                 }
                 return
             }
             if (driverOptions.IsLTOEnabled()) {
                 if (let Some(ffiLib) <- LTOCStdFFILib(staticLib)) {
-                    staticLibraries.add("-l:" + ffiLib)
+                    AddLinkOrderedSetValue(staticLibraries, "-l:" + ffiLib)
                 }
                 if (let Some(ltoLib) <- LtoLibCangjieFormat(pkg)) {
-                    ltoBuiltInDependencies.add(ltoLib)
+                    AddLinkOrderedSetValue(ltoBuiltInDependencies, ltoLib)
                 }
             } else if (driverOptions.EnableSanitizer()) {
                 let cangjieLibPath = FileUtil.JoinPath(FileUtil.JoinPath(FileUtil.JoinPath(driver.cangjieHome, "lib"),
                     driverOptions.GetCangjieLibTargetPathName()), driverOptions.SanitizerTypeToShortString())
-                staticLibraries.add(FileUtil.JoinPath(cangjieLibPath, staticLib))
+                AddLinkOrderedSetValue(staticLibraries, FileUtil.JoinPath(cangjieLibPath, staticLib))
             } else {
-                staticLibraries.add("-l:" + staticLib)
+                AddLinkOrderedSetValue(staticLibraries, "-l:" + staticLib)
             }
             CheckOtherDependenciesOfStaticLib(staticLib, dynamicLibraries, staticLibraries)
         }
@@ -190,38 +242,38 @@ public open class ToolChain {
 
     private func CheckOtherDependenciesOfStaticLib(
         libName: String,
-        dynamicLibraries: HashSet<String>,
-        staticLibraries: HashSet<String>
+        dynamicLibraries: ArrayList<String>,
+        staticLibraries: ArrayList<String>
     ): Unit {
         if (libName == "libcangjie-std-net.a") {
             if (driverOptions.target.IsMinGW()) {
-                staticLibraries.add("-l:libws2_32.a")
+                AddLinkOrderedSetValue(staticLibraries, "-l:libws2_32.a")
             }
         } else if (libName == "libcangjie-dynamicLoader-openssl.a") {
             if (!driverOptions.target.IsMinGW()) {
-                dynamicLibraries.add("-ldl")
+                AddLinkOrderedSetValue(dynamicLibraries, "-ldl")
             } else {
-                dynamicLibraries.add("-lcrypt32")
+                AddLinkOrderedSetValue(dynamicLibraries, "-lcrypt32")
             }
         } else if (libName == "libcangjie-std-ffi.python.a") {
-            dynamicLibraries.add("-ldl")
+            AddLinkOrderedSetValue(dynamicLibraries, "-ldl")
         } else if (libName == "libcangjie-std-ast.a") {
             if (driverOptions.target.os == OSType.DARWIN) {
-                staticLibraries.add("-lcangjie-std-astFFI")
+                AddLinkOrderedSetValue(staticLibraries, "-lcangjie-std-astFFI")
             } else {
-                staticLibraries.add("-l:libcangjie-std-astFFI.a")
+                AddLinkOrderedSetValue(staticLibraries, "-l:libcangjie-std-astFFI.a")
             }
             if (driverOptions.target.arch != ArchType.AARCH64 && driverOptions.target.os == OSType.LINUX &&
                 driverOptions.target.env != EnvironmentType.OHOS &&
                 driverOptions.target.env != EnvironmentType.ANDROID) {
-                staticLibraries.add("-lclang_rt-builtins")
+                AddLinkOrderedSetValue(staticLibraries, "-lclang_rt-builtins")
             }
             if (driverOptions.target.os == OSType.LINUX &&
                 driverOptions.target.env == EnvironmentType.ANDROID) {
-                staticLibraries.add("-lc++")
-                staticLibraries.add("-lunwind")
+                AddLinkOrderedSetValue(staticLibraries, "-lc++")
+                AddLinkOrderedSetValue(staticLibraries, "-lunwind")
             } else if (!driverOptions.target.IsMacOS() && !driverOptions.target.IsMinGW()) {
-                dynamicLibraries.add("-lgcc_s")
+                AddLinkOrderedSetValue(dynamicLibraries, "-lgcc_s")
             }
         }
     }
@@ -291,10 +343,14 @@ public open class ToolChain {
         inputOrderTuples: ArrayList<(String, UInt64)>): Unit {
         var index: UInt64 = 0u64
         for (objFile in objFiles) {
-            inputOrderTuples.add((objFile.filePath, index))
-            index++
+            if (objFile.isFrontendOutput) {
+                tool.AppendArg(objFile.filePath)
+            } else {
+                let order = FindInputFileOrder(objFile.rawPath) ?? UInt64(driverOptions.argList.size) + index
+                inputOrderTuples.add((objFile.filePath, order))
+                index++
+            }
         }
-        let _ = tool
     }
 
     protected func AppendObjectsFromInput(inputOrderTuples: ArrayList<(String, UInt64)>): Unit {
@@ -334,26 +390,11 @@ public open class ToolChain {
         AppendLibrariesFromInput(inputOrderTuples)
         AppendLinkOptionFromInput(inputOrderTuples)
         AppendLinkOptionsFromInput(inputOrderTuples)
-        let used = ArrayList<Bool>()
-        for (_ in 0..inputOrderTuples.size) {
-            used.add(false)
-        }
-        var emitted: Int64 = 0
-        while (emitted < inputOrderTuples.size) {
-            var best: Int64 = -1
-            var idx: Int64 = 0
-            while (idx < inputOrderTuples.size) {
-                if (!used[idx] && (best < 0 || inputOrderTuples[idx][1] < inputOrderTuples[best][1])) {
-                    best = idx
-                }
-                idx++
-            }
-            if (best < 0) {
-                break
-            }
-            used[best] = true
-            tool.AppendArg(inputOrderTuples[best][0])
-            emitted++
+        sort(inputOrderTuples, by: { left: (String, UInt64), right: (String, UInt64) =>
+            CompareInputOrderTuples(left, right)
+        }, stable: true)
+        for (tuple in inputOrderTuples) {
+            tool.AppendArg(tuple[0])
         }
     }
 
