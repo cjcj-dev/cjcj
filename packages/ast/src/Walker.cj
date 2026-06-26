@@ -799,6 +799,13 @@ public class Walker {
                         if (stopIf(WalkNode(ty))) { return VisitAction.STOP_NOW }
                     }
                 }
+            case ASTKind.ANNOTATION =>
+                if (let Some(annotation) <- (curNode as Annotation)) {
+                    if (stopIf(walkExprOption(annotation.baseExpr))) { return VisitAction.STOP_NOW }
+                    for (arg in annotation.args) {
+                        if (stopIf(WalkNode(arg))) { return VisitAction.STOP_NOW }
+                    }
+                }
             case ASTKind.MACRO_EXPAND_EXPR =>
                 if (let Some(macroExpr) <- (curNode as MacroExpandExpr)) {
                     if (stopIf(walkMacroInvocation(macroExpr.invocation))) { return VisitAction.STOP_NOW }
