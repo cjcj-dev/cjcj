@@ -294,6 +294,58 @@ private func findCoreImplicitDeclInPackages(packageDecls: ArrayList<PackageDecl>
     return None
 }
 
+private func findCoreImplicitMemberDeclInMap(instance: CompilerInstance, className: String,
+    memberName: String): Option<Decl> {
+    if (let Some(packageMap) <- instance.resolvedPackageMemberDeclsMap.get("std.core")) {
+        if (let Some(decls) <- packageMap.get(className)) {
+            for (decl in decls) {
+                if (decl.identifier.Val() != className) {
+                    continue
+                }
+                for (member in decl.GetMemberDeclPtrs()) {
+                    if (member.identifier.Val() == memberName) {
+                        return Some(member)
+                    }
+                }
+            }
+        }
+    }
+    return None
+}
+
+private func findCoreImplicitMemberDeclInPackages(packageDecls: ArrayList<PackageDecl>, className: String,
+    memberName: String): Option<Decl> {
+    for (packageDecl in packageDecls) {
+        let pkg = packageDecl.srcPackage
+        if (pkg.fullPackageName != "std.core") {
+            continue
+        }
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                if (decl.identifier.Val() != className) {
+                    continue
+                }
+                for (member in decl.GetMemberDeclPtrs()) {
+                    if (member.identifier.Val() == memberName) {
+                        return Some(member)
+                    }
+                }
+            }
+            for (decl in file.exportedInternalDecls) {
+                if (decl.identifier.Val() != className) {
+                    continue
+                }
+                for (member in decl.GetMemberDeclPtrs()) {
+                    if (member.identifier.Val() == memberName) {
+                        return Some(member)
+                    }
+                }
+            }
+        }
+    }
+    return None
+}
+
 private func addImportedDeclAndDependencies(ctx: ASTContext, decl: Decl): Unit {
     addImportedDeclToCurrentPackage(ctx, decl)
     if (let Some(outer) <- decl.outerDecl) {
@@ -1038,6 +1090,17 @@ public class TypeChecker {
                 let decl = match (findCoreImplicitDeclInMap(instance, name)) {
                     case Some(value) => Some(value)
                     case None => findCoreImplicitDeclInPackages(instance.packageDecls, name)
+                }
+                if (let Some(found) <- decl) {
+                    out.add(found)
+                }
+            }
+            for ((className, memberName) in [
+                ("OutOfMemoryError", "init"), ("Exception", "printStackTrace"), ("Error", "printStackTrace")
+            ]) {
+                let decl = match (findCoreImplicitMemberDeclInMap(instance, className, memberName)) {
+                    case Some(value) => Some(value)
+                    case None => findCoreImplicitMemberDeclInPackages(instance.packageDecls, className, memberName)
                 }
                 if (let Some(found) <- decl) {
                     out.add(found)

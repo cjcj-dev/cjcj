@@ -1396,6 +1396,19 @@ public class IRBuilder2 <: Resource {
         return CreateCallOrInvoke(callee, calleeType, args, name: name)
     }
 
+    public func CreateIntrinsicCallNoInvoke(intrinsicName: String, overloadedTypes: ArrayList<LLVMTypeRef>,
+        args: ArrayList<LLVMValueRef>, name!: String = ""): LLVMValueRef {
+        let callee = GetOrInsertIntrinsicDeclaration(intrinsicName, overloadedTypes)
+        if (callee.isNull()) {
+            return LLVMNullValue()
+        }
+        let calleeType = GetIntrinsicFunctionType(intrinsicName, overloadedTypes)
+        if (calleeType.isNull()) {
+            return LLVMNullValue()
+        }
+        return CreateCall(callee, calleeType, args, name: name)
+    }
+
     public func GenerateCallExpectFunction(val: LLVMValueRef, expectVal: LLVMValueRef): LLVMValueRef {
         let valueType = unsafe { LLVMTypeOf(val) }
         let paramTypes = ArrayList<LLVMTypeRef>()
@@ -2180,6 +2193,79 @@ public class IRBuilder2 <: Resource {
         return CreateCallOrInvoke(GetOrInsertRuntimeFunction(helperName, helperType), helperType, args)
     }
 
+    public func CreateExecAtExitCallbacksCall(): LLVMValueRef {
+        let helperName = "_CNat27CJ_CORE_ExecAtexitCallbacksHv"
+        if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
+            let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
+            return CreateCallOrInvoke(helperFunc)
+        }
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreateEntryAlloca(CGType.GetUnitType(GetLLVMContext())))
+        return CreateImplicitUsedFunctionCall(helperName, args)
+    }
+
+    public func CreateGetCommandLineArgsCall(args: ArrayList<LLVMValueRef>): LLVMValueRef {
+        return CreateImplicitUsedFunctionCall("_CNat18getCommandLineArgsHv", args)
+    }
+
+    public func CreateHandleExceptionCall(exceptionValue: LLVMValueRef): LLVMValueRef {
+        let helperName = "_CNat15handleExceptionHCNat9ExceptionE"
+        if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
+            let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
+            if (let Some(helperFuncType) <- helperFunc.GetCGFunctionType()) {
+                if (let Some(funcTy) <- helperNode.GetFuncType()) {
+                    let args = ArrayList<CGValue>()
+                    args.add(CGValue(exceptionValue, CGType.GetOrCreate(cgMod, funcTy.GetParamType(0))))
+                    return CreateCallOrInvoke(helperFuncType, helperFunc.GetRawFunction(), args)
+                }
+            }
+        }
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreateEntryAlloca(CGType.GetUnitType(GetLLVMContext())))
+        args.add(exceptionValue)
+        return CreateImplicitUsedFunctionCall(helperName, args)
+    }
+
+    public func CreateEPrintlnCall(message: String): LLVMValueRef {
+        let helperName = "_CNat8eprintlnHRNat6StringE"
+        if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
+            let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
+            if (let Some(helperFuncType) <- helperFunc.GetCGFunctionType()) {
+                if (let Some(funcTy) <- helperNode.GetFuncType()) {
+                    let paramRefTy = GetCGContext().GetCHIRBuilder().context.GetRefTy(funcTy.GetParamType(0))
+                    let args = ArrayList<CGValue>()
+                    args.add(CGValue(CreateStringLiteral(message), CGType.GetOrCreate(cgMod, paramRefTy)))
+                    return CreateCallOrInvoke(helperFuncType, helperFunc.GetRawFunction(), args)
+                }
+            }
+        }
+        return LLVMNullValue()
+    }
+
+    public func CallClassIntrinsicInstanceOf(instance: LLVMValueRef, targetTy: Type): LLVMValueRef {
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let i8PtrPtrType = unsafe { LLVMPointerType(i8PtrType, 1u32) }
+        let instanceInt8Ptr = CreateBitCast(instance, i8PtrPtrType, name: "inst.i8ptr")
+        let instanceTypeInfo = CreateLoad(i8PtrType, instanceInt8Ptr, name: "inst.ti")
+        let targetTypeInfo = CreateBitCast(CreateTypeInfo(targetTy), i8PtrType, name: "target.ti")
+        let args = ArrayList<LLVMValueRef>()
+        args.add(instanceTypeInfo)
+        args.add(targetTypeInfo)
+        return CreateIntrinsicCallNoInvoke("llvm.cj.is.subtype", ArrayList<LLVMTypeRef>(), args, name: "is.subtype")
+    }
+
+    public func CallIntrinsicGetVTableFunc(ti: LLVMValueRef, introTypeIdx: LLVMValueRef,
+        funcOffset: LLVMValueRef, introTI: LLVMValueRef): LLVMValueRef {
+        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreateBitCast(ti, i8PtrType))
+        args.add(introTypeIdx)
+        args.add(funcOffset)
+        args.add(CreateBitCast(introTI, i8PtrType))
+        return CreateIntrinsicCallNoInvoke("llvm.cj.get.vtable.func", ArrayList<LLVMTypeRef>(), args)
+    }
+
     public func CreateNegativeArraySizeException(): Unit {
         let helperType = MakeFunctionType(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, ArrayList<LLVMTypeRef>())
         let helper = if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(THROW_NEGATIVE_ARRAY_SIZE_EXCEPTION_FUNC_NAME)) {
@@ -2252,6 +2338,17 @@ public class IRBuilder2 <: Resource {
             }
         }
         CreateUnreachable()
+    }
+
+    private func CreateImplicitUsedFunctionCall(helperName: String, args: ArrayList<LLVMValueRef>): LLVMValueRef {
+        if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
+            let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
+            if (let Some(helperFuncType) <- helperFunc.GetCGFunctionType()) {
+                return CreateCallOrInvoke(helperFunc.GetRawFunction(), helperFuncType.GetLLVMFunctionType(), args)
+            }
+        }
+        let helperType = MakeFunctionTypeFromArgs(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, args)
+        return CreateCallOrInvoke(GetOrInsertRuntimeFunction(helperName, helperType), helperType, args)
     }
 
     private func TryGetFirstParamClassType(fn: Function): Option<Type> {
