@@ -362,9 +362,20 @@ public class CGEnumType <: CGCustomType {
             for (payloadTy in ctor.payloadTypes) {
                 payloadTypes.add(InstantiateEnumPayloadType(enumTy, payloadTy))
             }
-            out.add(EnumCtorInfo(ctor.name, payloadTypes))
+            out.add(EnumCtorInfo(ctor.name, payloadTypes, mangledName: ctor.mangledName,
+                funcType: InstantiateEnumCtorFuncType(enumTy, ctor, payloadTypes), annoInfo: ctor.annoInfo))
         }
         return out
+    }
+
+    private func InstantiateEnumCtorFuncType(enumTy: EnumType, ctor: EnumCtorInfo,
+        payloadTypes: ArrayList<Type>): Option<FuncType> {
+        if (let Some(funcTy) <- ctor.funcType) {
+            if (let Some(instFuncTy) <- (InstantiateEnumPayloadType(enumTy, funcTy) as FuncType)) {
+                return Some(instFuncTy)
+            }
+        }
+        return Some(FuncType(payloadTypes, enumTy))
     }
 
     private func HasRefAssociatedValue(paramTypes: ArrayList<Type>): Bool {

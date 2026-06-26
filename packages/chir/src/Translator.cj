@@ -701,7 +701,14 @@ public class Translator {
                     }
                 }
             }
-            def.AddCtor(EnumCtorInfo(ctor.identifier.Val(), payloadTypes))
+            var ctorFuncType: Option<FuncType> = None
+            if (let Some(customTy) <- def.GetType()) {
+                if (let Some(enumTy) <- (customTy as EnumType)) {
+                    ctorFuncType = Some(builder.context.GetFuncTy(payloadTypes, enumTy))
+                }
+            }
+            def.AddCtor(EnumCtorInfo(ctor.identifier.Val(), payloadTypes,
+                mangledName: ctor.mangledName, funcType: ctorFuncType))
         }
         for (member in enumDecl.members) {
             TranslateMemberDecl(def, member)
