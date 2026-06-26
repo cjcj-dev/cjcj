@@ -80,27 +80,37 @@ public class Driver {
     }
 }
 
-public func ExecuteFrontend(
+public class FrontendExecutionResult {
+    public let exitCode: Int64
+    public let driverOptions: DriverOptions
+
+    public init(exitCode: Int64, driverOptions!: DriverOptions = DriverOptions()) {
+        this.exitCode = exitCode
+        this.driverOptions = driverOptions
+    }
+}
+
+public func ExecuteFrontendWithResult(
     exePath: String,
     args: Array<String>,
     environmentVars: HashMap<String, String>
-): Int64 {
+): FrontendExecutionResult {
     let diag = DiagnosticEngine()
     let invocation = CompilerInvocation()
     ConfigureInvocationPaths(invocation, exePath, environmentVars)
     if (!InitializeCompilerInvocation(invocation, args)) {
-        return 1
+        return FrontendExecutionResult(1)
     }
 
     let globalOptions = invocation.globalOptions
     if (globalOptions.showUsage) {
         PrintFrontendUsage()
-        return 0
+        return FrontendExecutionResult(0)
     }
     if (globalOptions.enableVerbose || globalOptions.printVersionOnly) {
         PrintVersion()
         if (globalOptions.printVersionOnly) {
-            return 0
+            return FrontendExecutionResult(0)
         }
     }
     ConfigureFrontendProfiling(globalOptions)
@@ -108,10 +118,25 @@ public func ExecuteFrontend(
 
     let instance = CreateCompilerInstance(invocation, diag)
     if (ExecuteCompile(instance)) {
+        let incrementalNoChange = if (let Some(incr) <- (instance as IncrementalCompilerInstance)) {
+            incr.kind == IncreKind.NO_CHANGE
+        } else {
+            false
+        }
+        let driverOptions = DriverOptions()
+        driverOptions.CopyFromOptions(instance.invocation.globalOptions, incrementalNoChange)
         let _ = instance.UpdateAndWriteCachedInfoToDisk()
-        return 0
+        return FrontendExecutionResult(0, driverOptions: driverOptions)
     }
-    return 1
+    return FrontendExecutionResult(1)
+}
+
+public func ExecuteFrontend(
+    exePath: String,
+    args: Array<String>,
+    environmentVars: HashMap<String, String>
+): Int64 {
+    return ExecuteFrontendWithResult(exePath, args, environmentVars).exitCode
 }
 
 public func ExecuteFrontend(
