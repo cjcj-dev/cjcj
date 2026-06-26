@@ -68,7 +68,8 @@ private func GenerateFieldByPath(irBuilder: IRBuilder2, base: Value,
                         return irBuilder.LoadGenericFieldValue(baseValue.GetRawValue(), genericFieldAddr, fieldType,
                             baseCGType.GetOriginal(), Some(fieldType.GetOriginal()))
                     }
-                    let loaded = irBuilder.CreateLoad(fieldType.GetLLVMType(), fieldAddr, name: name)
+                    let loaded = LoadClassFieldWithBarrierIfNeeded(irBuilder, baseCGType, baseValue.GetRawValue(),
+                        fieldAddr, fieldType, name)
                     return CastExtractedFieldIfNeeded(irBuilder, loaded, fieldType.GetOriginal(), expectedTy)
                 }
                 return fieldAddr
@@ -207,6 +208,47 @@ private func LoadObjectPayloadField(irBuilder: IRBuilder2, objectValue: LLVMValu
     return LLVMNullValue()
 }
 
+private func LoadClassFieldWithBarrierIfNeeded(irBuilder: IRBuilder2, baseCGType: CGType,
+    baseObject: LLVMValueRef, fieldAddr: LLVMValueRef, fieldType: CGType, name: String): LLVMValueRef {
+    if (!baseCGType.GetOriginal().StripAllRefs().IsClass()) {
+        return irBuilder.CreateLoad(fieldType.GetLLVMType(), fieldAddr, name: name)
+    }
+    if (!IsAddressSpacePointer(baseObject, 1u32) || !IsAddressSpacePointer(fieldAddr, 1u32)) {
+        return irBuilder.CreateLoad(fieldType.GetLLVMType(), fieldAddr, name: name)
+    }
+    if (IsClassGCRefField(irBuilder, fieldType)) {
+        return irBuilder.CallGCReadRef(baseObject, fieldAddr)
+    }
+    if (IsAggregateFieldWithRef(irBuilder, fieldType)) {
+        let fieldSize = if (let Some(size) <- fieldType.GetSize()) { size } else { 0 }
+        let fieldSizeValue = unsafe {
+            LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(fieldSize), 0)
+        }
+        let dest = irBuilder.CreateEntryAlloca(fieldType.GetLLVMType(), name: name + ".gcread")
+        irBuilder.CallGCReadStruct(dest, baseObject, fieldAddr, fieldSizeValue, fieldType.GetOriginal().ToString())
+        return dest
+    }
+    return irBuilder.CreateLoad(fieldType.GetLLVMType(), fieldAddr, name: name)
+}
+
+private func IsClassGCRefField(irBuilder: IRBuilder2, fieldType: CGType): Bool {
+    if (fieldType.IsReference()) {
+        return true
+    }
+    if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(),
+        fieldType.GetOriginal().StripAllRefs()) as CGEnumType)) {
+        return enumCGType.IsOptionLikeRef()
+    }
+    return false
+}
+
+private func IsAggregateFieldWithRef(irBuilder: IRBuilder2, fieldType: CGType): Bool {
+    if (!(fieldType.IsStructType() || fieldType.IsVArrayType())) {
+        return false
+    }
+    return irBuilder.IsLLVMTypeContainsRef(fieldType.GetLLVMType())
+}
+
 private func IsGCRefField(irBuilder: IRBuilder2, fieldTy: Type): Bool {
     let stripped = fieldTy.StripAllRefs()
     if (stripped.IsReferenceType()) {
@@ -216,6 +258,12 @@ private func IsGCRefField(irBuilder: IRBuilder2, fieldTy: Type): Bool {
         return enumCGType.IsCommonEnum() || enumCGType.IsOptionLikeRef()
     }
     return false
+}
+
+private func IsAddressSpacePointer(value: LLVMValueRef, addressSpace: UInt32): Bool {
+    let rawTy = unsafe { LLVMTypeOf(value) }
+    return !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12 &&
+        unsafe { LLVMGetPointerAddressSpace(rawTy) } == addressSpace
 }
 
 private func CastExtractedFieldIfNeeded(irBuilder: IRBuilder2, rawValue: LLVMValueRef, sourceTy: Type,
