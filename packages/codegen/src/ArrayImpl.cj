@@ -17,6 +17,9 @@ public func GenerateLoad(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValue
     if (chirExpr.GetNumOfOperands() == 0) {
         return LLVMNullValue()
     }
+    if (let Some(genericFieldLoad) <- TryLoadGenericClassFieldWithReadBarrier(irBuilder, chirExpr)) {
+        return genericFieldLoad
+    }
     let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
     if (let Some(addrType) <- addr.GetCGType()) {
         if (let Some(pointerElementType) <- addrType.GetPointerElementType()) {
@@ -39,6 +42,38 @@ public func GenerateLoad(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValue
     return LLVMNullValue()
 }
 
+private func TryLoadGenericClassFieldWithReadBarrier(irBuilder: IRBuilder2,
+    loadExpr: Expression): Option<LLVMValueRef> {
+    let local = (loadExpr.GetOperand(0) as LocalVar) ?? return None
+    let ownerExpr = local.GetExpr() ?? return None
+    let (base, fieldTy, fieldPath) = if (let Some(elementRef) <- (ownerExpr as GetElementRef)) {
+        let path = elementRef.GetPath()
+        let (resolvedBase, resolvedTy) = ResolveLoadBaseAndFieldType(elementRef.GetLocation(), Some(path))
+        (resolvedBase, resolvedTy, Some(path))
+    } else if (let Some(elementByName) <- (ownerExpr as GetElementByName)) {
+        let path = ResolveLoadElementPathByNames(elementByName.GetLocation(), elementByName.GetNames())
+        let (resolvedBase, resolvedTy) = ResolveLoadBaseAndFieldType(elementByName.GetLocation(), path)
+        (resolvedBase, resolvedTy, path)
+    } else {
+        return None
+    }
+    if (!IsGenericField(fieldTy)) {
+        return None
+    }
+    let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base)
+    let baseCGType = baseValue.GetCGType() ?? return None
+    if (!baseCGType.GetOriginal().StripAllRefs().IsClass() ||
+        !IsAddressSpacePointer(baseValue.GetRawValue(), 1u32)) {
+        return None
+    }
+    let resultTy = loadExpr.GetResultType() ?? (fieldTy ?? return None)
+    let elementType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
+    let fieldAddr = CreateGenericClassElementAddress(irBuilder, baseValue.GetRawValue(),
+        baseCGType.GetOriginal(), fieldPath) ?? return None
+    return Some(irBuilder.LoadGenericFieldValue(baseValue.GetRawValue(), fieldAddr, elementType,
+        baseCGType.GetOriginal(), fieldTy))
+}
+
 private func TryLoadClassFieldWithReadBarrier(irBuilder: IRBuilder2, loadExpr: Expression, addr: CGValue,
     elementType: CGType): Option<LLVMValueRef> {
     if (!ShouldUseClassFieldReadBarrier(elementType) || !IsAddressSpacePointer(addr.GetRawValue(), 1u32)) {
@@ -46,11 +81,14 @@ private func TryLoadClassFieldWithReadBarrier(irBuilder: IRBuilder2, loadExpr: E
     }
     let local = (loadExpr.GetOperand(0) as LocalVar) ?? return None
     let ownerExpr = local.GetExpr() ?? return None
-    let (base, fieldTy) = if (let Some(elementRef) <- (ownerExpr as GetElementRef)) {
-        ResolveLoadBaseAndFieldType(elementRef.GetLocation(), Some(elementRef.GetPath()))
+    let (base, fieldTy, fieldPath) = if (let Some(elementRef) <- (ownerExpr as GetElementRef)) {
+        let path = elementRef.GetPath()
+        let (resolvedBase, resolvedTy) = ResolveLoadBaseAndFieldType(elementRef.GetLocation(), Some(path))
+        (resolvedBase, resolvedTy, Some(path))
     } else if (let Some(elementByName) <- (ownerExpr as GetElementByName)) {
-        ResolveLoadBaseAndFieldType(elementByName.GetLocation(),
-            ResolveLoadElementPathByNames(elementByName.GetLocation(), elementByName.GetNames()))
+        let path = ResolveLoadElementPathByNames(elementByName.GetLocation(), elementByName.GetNames())
+        let (resolvedBase, resolvedTy) = ResolveLoadBaseAndFieldType(elementByName.GetLocation(), path)
+        (resolvedBase, resolvedTy, path)
     } else {
         return None
     }
@@ -63,11 +101,31 @@ private func TryLoadClassFieldWithReadBarrier(irBuilder: IRBuilder2, loadExpr: E
         return None
     }
     if (IsGenericField(fieldTy)) {
-        return Some(irBuilder.LoadGenericFieldValue(baseValue.GetRawValue(), addr.GetRawValue(), elementType,
+        let genericAddr = CreateGenericClassElementAddress(irBuilder, baseValue.GetRawValue(),
+            baseCGType.GetOriginal(), fieldPath) ?? addr.GetRawValue()
+        return Some(irBuilder.LoadGenericFieldValue(baseValue.GetRawValue(), genericAddr, elementType,
             baseCGType.GetOriginal(), fieldTy))
     }
     let raw = irBuilder.CallGCReadRef(baseValue.GetRawValue(), addr.GetRawValue())
     return Some(irBuilder.CreateBitCast(raw, elementType.GetLLVMType(), name: "load.gcread.cast"))
+}
+
+private func CreateGenericClassElementAddress(irBuilder: IRBuilder2, baseObject: LLVMValueRef, baseTy: Type,
+    path: Option<ArrayList<UInt64>>): Option<LLVMValueRef> {
+    let actualPath = path ?? return None
+    if (actualPath.isEmpty()) {
+        return None
+    }
+    let typeInfo = irBuilder.CreateTypeInfo(baseTy.StripAllRefs())
+    let offset = irBuilder.CallGetFieldOffset(typeInfo, actualPath[0], 0u64)
+    let payloadOffset = unsafe {
+        LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), 8u64, 0)
+    }
+    let fullOffset = irBuilder.CreateBinary(ExprKind.ADD, offset, payloadOffset)
+    let indices = ArrayList<LLVMValueRef>()
+    indices.add(fullOffset)
+    return Some(irBuilder.CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) },
+        baseObject, indices, name: "field.addr"))
 }
 
 private func ResolveLoadBaseAndFieldType(base: Value, path: Option<ArrayList<UInt64>>): (Value, Option<Type>) {
@@ -356,7 +414,8 @@ private func TryStoreStructPtrValueForAddress(irBuilder: IRBuilder2, value: CGVa
         return None
     }
     let valueCGType = value.GetCGType() ?? return None
-    if (!valueCGType.IsStructPtrType()) {
+    if (!(valueCGType.IsStructPtrType() || (!valueCGType.IsReference() &&
+        valueCGType.GetOriginal().StripAllRefs().IsStruct()))) {
         return None
     }
     let addrCGType = addr.GetCGType() ?? return None
