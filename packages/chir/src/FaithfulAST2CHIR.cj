@@ -437,6 +437,7 @@ public class FaithfulAST2CHIR {
         }
         if (!failure) {
             ClosureConversion(builder).RunOnPackage(CurrentPackage())
+            ReplaceSrcCodeImportedValAfterConstEval(CurrentPackage())
         }
         return !failure
     }
@@ -1215,6 +1216,48 @@ public class FaithfulAST2CHIR {
     private func IsGlobalOrStaticVarDecl(decl: AstDecl): Bool {
         return (decl.astKind == ASTKind.VAR_DECL || decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL) &&
             decl.TestAnyAttr(AstAttribute.GLOBAL, AstAttribute.STATIC)
+    }
+
+    private func ReplaceSrcCodeImportedValAfterConstEval(pkg: Package): Unit {
+        let initFuncsToRemove = ArrayList<Function>()
+        for (decl in globalAndMemberFuncs) {
+            if (!IsSrcCodeImportedGlobalDecl(decl)) {
+                continue
+            }
+            let fn = (globalCache.Get(decl) as Function) ?? continue
+            fn.DestroyFuncBody()
+        }
+        for (decl in globalAndStaticVars) {
+            if (!IsSrcCodeImportedGlobalDecl(decl)) {
+                continue
+            }
+            let globalVar = (globalCache.Get(decl) as GlobalVar) ?? continue
+            if (let Some(initFunc) <- globalVar.GetInitFunc()) {
+                if (!ContainsFunction(initFuncsToRemove, initFunc)) {
+                    initFuncsToRemove.add(initFunc)
+                }
+            }
+            globalVar.DestroyInitializer()
+        }
+        if (initFuncsToRemove.isEmpty()) {
+            return
+        }
+        let newFuncs = ArrayList<Function>()
+        for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
+            if (!ContainsFunction(initFuncsToRemove, fn)) {
+                newFuncs.add(fn)
+            }
+        }
+        pkg.SetAllGlobalFuncs(newFuncs)
+    }
+
+    private func ContainsFunction(functions: ArrayList<Function>, target: Function): Bool {
+        for (fn in functions) {
+            if (fn == target) {
+                return true
+            }
+        }
+        return false
     }
 
     private func GroupInitOrderByFile(sortedVars: ArrayList<AstDecl>): ArrayList<FaithfulInitFileVars> {
