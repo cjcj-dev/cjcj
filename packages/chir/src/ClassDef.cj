@@ -7,6 +7,7 @@ public class ClassDef <: CustomTypeDef {
     private var superClassDef: Option<ClassDef> = None
     private var superClassTy: Option<ClassType> = None
     private let implementedInterfaceDefs: ArrayList<ClassDef> = ArrayList<ClassDef>()
+    private var annotationTargets: Option<ArrayList<GlobalVar>> = None
 
     public init(packageName: String, identifier: String) {
         super(packageName, identifier, identifier, CustomDefKind.TYPE_CLASS)
@@ -31,6 +32,35 @@ public class ClassDef <: CustomTypeDef {
         throw IllegalArgumentException("ClassDef requires ClassType")
     }
 
+    public func IsAbstract(): Bool {
+        return TestAttr(Attribute.ABSTRACT)
+    }
+
+    public func IsAnnotation(): Bool {
+        if (let Some(_) <- annotationTargets) {
+            return true
+        }
+        return false
+    }
+
+    public func SetAnnotationTargets(targets: ArrayList<GlobalVar>): Unit {
+        let copied = ArrayList<GlobalVar>()
+        for (target in targets) {
+            copied.add(target)
+        }
+        annotationTargets = copied
+    }
+
+    public func GetAnnotationTargets(): ArrayList<GlobalVar> {
+        let out = ArrayList<GlobalVar>()
+        if (let Some(targets) <- annotationTargets) {
+            for (target in targets) {
+                out.add(target)
+            }
+        }
+        return out
+    }
+
     public func SetSuperClassDef(def: ClassDef): Unit {
         superClassDef = def
         let emptyArgs = ArrayList<Type>()
@@ -48,6 +78,15 @@ public class ClassDef <: CustomTypeDef {
 
     public func GetSuperClassTy(): Option<ClassType> {
         return superClassTy
+    }
+
+    public func GetFinalizer(): Option<Function> {
+        for (method in GetMethods()) {
+            if (method.GetFuncKind() == FuncKind.FINALIZER) {
+                return method
+            }
+        }
+        return None
     }
 
     public func AddImplementedInterfaceDef(def: ClassDef): Unit {
