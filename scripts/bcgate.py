@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 CANGJIE_HOME = os.environ.get("CANGJIE_HOME", "/root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029")
@@ -104,6 +105,8 @@ def main():
     ap.add_argument("--corpus", default=str(REPO / "scripts/difftest_corpus"))
     ap.add_argument("--run", action="store_true", help="run+diff stdout for changed samples")
     ap.add_argument("-v", action="store_true", help="print per-sample IR diff for changed samples")
+    ap.add_argument("-j", "--jobs", type=int, default=min(16, os.cpu_count() or 4),
+                    help="parallel samples to process at once (default: min(16, nproc))")
     args = ap.parse_args()
     e = env()
     samples = sorted(Path(args.corpus).resolve().glob("*.cj"))
@@ -116,25 +119,40 @@ def main():
     from collections import Counter
     differ = Counter()           # function-name -> how many samples it differs in
     only_one_side = Counter()
+
+    def process(src, work):
+        """Per-sample work (independent, isolated workdirs) -> partial result. No shared state."""
+        cand, cerr = emit_funcs(args.cand, src, work / "c" / src.stem, e)
+        base, berr = emit_funcs(args.base, src, work / "b" / src.stem, e)
+        if cand is None or base is None:
+            return {"name": src.name, "error": cerr or berr}
+        shared = set(cand) & set(base)
+        return {
+            "name": src.name,
+            "error": None,
+            "shared": len(shared),
+            "same": sum(1 for n in shared if cand[n] == base[n]),
+            "differ": [n for n in shared if cand[n] != base[n]],
+            "one_side": list(set(cand) ^ set(base)),
+        }
+
     with tempfile.TemporaryDirectory() as work:
         work = Path(work)
-        for src in samples:
-            cand, cerr = emit_funcs(args.cand, src, work / "c" / src.stem, e)
-            base, berr = emit_funcs(args.base, src, work / "b" / src.stem, e)
-            if cand is None or base is None:
-                errors.append((src.name, cerr or berr))
-                continue
-            shared = set(cand) & set(base)
-            same = sum(1 for n in shared if cand[n] == base[n])
-            tot_fn += len(shared)
-            tot_same += same
-            for n in shared:
-                if cand[n] != base[n]:
-                    differ[n] += 1
-            for n in (set(cand) ^ set(base)):
-                only_one_side[n] += 1
-            if same == len(shared) and not (set(cand) ^ set(base)):
-                samples_identical.append(src.name)
+        with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
+            results = list(pool.map(lambda s: process(s, work), samples))
+    # Aggregate serially (sorted by name) so output is identical regardless of completion order.
+    for res in sorted(results, key=lambda r: r["name"]):
+        if res["error"] is not None:
+            errors.append((res["name"], res["error"]))
+            continue
+        tot_fn += res["shared"]
+        tot_same += res["same"]
+        for n in res["differ"]:
+            differ[n] += 1
+        for n in res["one_side"]:
+            only_one_side[n] += 1
+        if res["same"] == res["shared"] and not res["one_side"]:
+            samples_identical.append(res["name"])
 
     pct = (100.0 * tot_same / tot_fn) if tot_fn else 0.0
     print(f"\n=== bcgate PER-FUNCTION parity (candidate vs baseline) over {len(samples)} samples ===")
