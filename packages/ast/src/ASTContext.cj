@@ -195,7 +195,7 @@ public class ASTContext {
     public let resolvedPackageMemberDeclsMap: HashMap<String, HashMap<String, ArrayList<Decl>>> =
         HashMap<String, HashMap<String, ArrayList<Decl>>>()
     public let mem2Decls: HashMap<MemSig, ArrayList<Decl>> = HashMap<MemSig, ArrayList<Decl>>()
-    public let subtypeDeclsMap: HashMap<Int64, ArrayList<Decl>> = HashMap<Int64, ArrayList<Decl>>()
+    public let subtypeDeclsMap: HashMap<Node, ArrayList<Decl>> = HashMap<Node, ArrayList<Decl>>()
     public let declMap: HashMap<Names, ArrayList<Decl>> = HashMap<Names, ArrayList<Decl>>()
     public let enumConstructors: HashMap<String, ArrayList<Decl>> = HashMap<String, ArrayList<Decl>>()
     private let varDeclToVarWithPatternDeclMap: ArrayList<OuterVarWithPatternDecl> = ArrayList<OuterVarWithPatternDecl>()
@@ -436,11 +436,10 @@ public class ASTContext {
     }
 
     public func AddSubtypeDecl(baseDecl: Decl, subtypeDecl: Decl): Unit {
-        let key = declKey(baseDecl)
-        if (!subtypeDeclsMap.contains(key)) {
-            subtypeDeclsMap[key] = ArrayList<Decl>()
+        if (!subtypeDeclsMap.contains(baseDecl)) {
+            subtypeDeclsMap[baseDecl] = ArrayList<Decl>()
         }
-        if (let Some(values) <- subtypeDeclsMap.get(key)) {
+        if (let Some(values) <- subtypeDeclsMap.get(baseDecl)) {
             addDeclUnique(values, subtypeDecl)
         }
     }
@@ -450,7 +449,7 @@ public class ASTContext {
         if (let Some(values) <- mem2Decls.get(memSig)) {
             for (decl in values) {
                 addDeclUnique(out, decl)
-                if (let Some(subtypes) <- subtypeDeclsMap.get(declKey(decl))) {
+                if (let Some(subtypes) <- subtypeDeclsMap.get(decl)) {
                     for (subtype in subtypes) {
                         addDeclUnique(out, subtype)
                     }
@@ -462,11 +461,6 @@ public class ASTContext {
 
     private func enumConstructorKey(name: String, argSize: UInt64): String {
         return name + "#${argSize}"
-    }
-
-    private func declKey(decl: Decl): Int64 {
-        return decl.begin.hashCode() ^ (decl.end.hashCode() << 1) ^
-            (decl.identifier.Val().hashCode() << 2) ^ (ASTKindIndex(decl.astKind) << 3)
     }
 
     private func addDeclUnique(values: ArrayList<Decl>, decl: Decl): Unit {
