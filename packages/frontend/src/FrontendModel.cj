@@ -639,6 +639,14 @@ private class CjoFlatBuffer {
         return ReadU32(pos)
     }
 
+    public func I32At(pos: Int64): Int64 {
+        return ReadI32(pos)
+    }
+
+    public func U8At(pos: Int64): UInt8 {
+        return if (IsInBounds(pos, 1)) { data[pos] } else { 0u8 }
+    }
+
     public func StringAt(pos: Int64): String {
         if (!IsInBounds(pos, 4)) {
             return ""
@@ -882,6 +890,8 @@ private class CjoSignatureMaterializer {
 
     private func CreateFlatImportSpec(reader: CjoFlatBuffer, importTable: Int64, targetFile: File): ImportSpec {
         let importSpec = ImportSpec()
+        importSpec.begin = LoadFlatPosition(reader, reader.TableField(importTable, 4))
+        importSpec.end = LoadFlatPosition(reader, reader.TableField(importTable, 6))
         let identifier = reader.StringField(importTable, 10)
         let aliasName = reader.StringField(importTable, 12)
         if (!aliasName.isEmpty()) {
@@ -1053,7 +1063,15 @@ private class CjoSignatureMaterializer {
     }
 
     private func ApplyFlatDeclBasicInfo(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
-        decl.identifier = SrcIdentifier(record.identifier)
+        decl.begin = LoadFlatPosition(reader, reader.TableField(record.table, 14))
+        decl.end = LoadFlatPosition(reader, reader.TableField(record.table, 16))
+        let identifierPos = LoadFlatPosition(reader, reader.TableField(record.table, 20))
+        let identifierEnd = if (identifierPos == INVALID_POSITION || identifierPos == DEFAULT_POSITION) {
+            identifierPos
+        } else {
+            identifierPos + record.identifier.size
+        }
+        decl.identifier = SrcIdentifier(record.identifier, identifierPos, identifierEnd, false)
         decl.exportId = record.exportId
         decl.mangledName = record.mangledName
         decl.rawMangleName = record.mangledBeforeSema
@@ -1291,6 +1309,21 @@ private class CjoSignatureMaterializer {
     private func FlatDeclFileIndex(reader: CjoFlatBuffer, record: CjoFlatDecl): UInt32 {
         let beginPos = reader.TableField(record.table, 14)
         return if (beginPos >= 0) { reader.U32At(beginPos) } else { 0u32 }
+    }
+
+    private func LoadFlatPosition(reader: CjoFlatBuffer, posTable: Int64): Position {
+        if (posTable < 0) {
+            return INVALID_POSITION
+        }
+        let fileIndex = reader.U32At(posTable)
+        let line = reader.I32At(posTable + 8)
+        let column = reader.I32At(posTable + 12)
+        let fileID = if (fileIndex == 0u32) { 0u64 } else { FileByFlatIndex(fileIndex).begin.fileID }
+        var pos = Position(fileID, line, column)
+        if (reader.U8At(posTable + 16) != 0u8) {
+            pos.Mark(PositionStatus.IGNORE)
+        }
+        return pos
     }
 
     private func FlatBuiltInType(reader: CjoFlatBuffer, record: CjoFlatDecl): BuiltInType {
@@ -1852,22 +1885,7 @@ private class CjoSignatureMaterializer {
             return Some(LoadFlatLambdaExpr(reader, exprTable))
         }
         if (kind == FLAT_EXPR_KIND_CALL) {
-            // Mirrors ExprLoader.cpp:92-115 LoadCallExpr and ExprLoader.cpp:516-531 LoadFuncArg
-            // while preserving the previous imported-body consumption boundary. The newly expanded
-            // per-kind loaders stay dormant until the source-imported-body emission cut promotes them.
-            var scanIdx: Int64 = 0
-            while (scanIdx < reader.VectorLength(flatAllExprs)) {
-                let scanTable = reader.VectorOffsetElement(flatAllExprs, scanIdx)
-                if (scanTable < 0) {
-                    return None
-                }
-                let scanKind = reader.U16Field(scanTable, 4, 0u16)
-                let scanInfoKind = reader.U8Field(scanTable, 18, 0u8)
-                if (!IsLegacyBodyConsumedFlatExprKind(scanKind, scanInfoKind)) {
-                    return None
-                }
-                scanIdx++
-            }
+            // Mirrors ExprLoader.cpp:92-115 LoadCallExpr and ExprLoader.cpp:516-531 LoadFuncArg.
             let ce = CallExpr()
             LoadFlatExprBasicInfo(reader, exprTable, ce)
             let operands = reader.VectorField(exprTable, 12)
@@ -1935,24 +1953,6 @@ private class CjoSignatureMaterializer {
             return Some(LoadFlatBlock(reader, exprTable))
         }
         return None
-    }
-
-    private func IsLegacyBodyConsumedFlatExprKind(kind: UInt16, infoKind: UInt8): Bool {
-        return kind == FLAT_EXPR_KIND_WILDCARD ||
-            kind == FLAT_EXPR_KIND_RETURN || kind == FLAT_EXPR_KIND_JUMP ||
-            kind == FLAT_EXPR_KIND_MEMBER_ACCESS || kind == FLAT_EXPR_KIND_REF_EXPR ||
-            kind == FLAT_EXPR_KIND_CALL || kind == FLAT_EXPR_KIND_UNARY ||
-            kind == FLAT_EXPR_KIND_LIT_CONST ||
-            kind == FLAT_EXPR_KIND_BINARY || kind == FLAT_EXPR_KIND_SUBSCRIPT ||
-            kind == FLAT_EXPR_KIND_ASSIGN || kind == FLAT_EXPR_KIND_TYPE_CONV ||
-            kind == FLAT_EXPR_KIND_THROW || kind == FLAT_EXPR_KIND_SPAWN ||
-            kind == FLAT_EXPR_KIND_ARRAY_LIT || kind == FLAT_EXPR_KIND_TUPLE_LIT ||
-            kind == FLAT_EXPR_KIND_MATCH || kind == FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR ||
-            kind == FLAT_EXPR_KIND_IF || kind == FLAT_EXPR_KIND_TRY || kind == FLAT_EXPR_KIND_WHILE ||
-            kind == FLAT_EXPR_KIND_DO_WHILE || kind == FLAT_EXPR_KIND_LAMBDA ||
-            kind == FLAT_EXPR_KIND_BLOCK || kind == FLAT_EXPR_KIND_MATCH_CASE ||
-            kind == FLAT_EXPR_KIND_MATCH_CASE_OTHER || kind == FLAT_EXPR_KIND_FOR_IN ||
-            (kind == 0u16 && infoKind == 11u8)
     }
 
     // Mirrors ExprLoader.cpp:348-358 LoadLambdaExpr: LambdaInfo owns a nested FuncBody and
@@ -2587,6 +2587,8 @@ private class CjoSignatureMaterializer {
     }
 
     private func LoadFlatNodeBasicInfo(reader: CjoFlatBuffer, exprTable: Int64, node: Node): Unit {
+        node.begin = LoadFlatPosition(reader, reader.TableField(exprTable, 6))
+        node.end = LoadFlatPosition(reader, reader.TableField(exprTable, 8))
         if (let Some(ty) <- LoadFlatType(reader.U32Field(exprTable, 14, 0u32))) {
             node.SetTy(ty)
         }
@@ -2716,6 +2718,7 @@ private class CjoSignatureMaterializer {
         // Expr field 7 (slot 18) = info_type, field 8 (slot 20) = info (LitConstInfo table).
         let infoTable = reader.OffsetField(exprTable, 20)
         let lce = LitConstExpr()
+        LoadFlatExprBasicInfo(reader, exprTable, lce)
         if (infoTable >= 0) {
             // LitConstInfo field 0 (slot 4) strValue, 1 (slot 6) constKind, 2 (slot 8) strKind.
             lce.stringValue = reader.StringField(infoTable, 4)
@@ -2734,6 +2737,8 @@ private class CjoSignatureMaterializer {
                 lce.codepoint.add(point)
             }
         }
+        // C++ ReferenceLoader.cpp initializes imported literal payloads after type/reference restoration.
+        InitializeLitConstValue(lce)
         lce.EnableAttr(Attribute.IMPORTED)
         return lce
     }
@@ -2779,6 +2784,8 @@ private class CjoSignatureMaterializer {
             return None
         }
         LoadFlatPatternTy(reader, patternTable, pattern)
+        pattern.begin = LoadFlatPosition(reader, reader.TableField(patternTable, 6))
+        pattern.end = LoadFlatPosition(reader, reader.TableField(patternTable, 8))
         SyncFlatVarPatternDeclTy(pattern)
         if (let Some(typePattern) <- (pattern as TypePattern)) {
             if (let Some(ty) <- typePattern.GetTy()) {
