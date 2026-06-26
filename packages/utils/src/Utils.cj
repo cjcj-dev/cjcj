@@ -654,15 +654,42 @@ public class Out64 {
     }
 }
 
-private func HashCodeAsUInt64(value: Int64): UInt64 {
-    if (value >= 0) {
-        return UInt64(value)
-    }
-    return 0x8000000000000000u64 + UInt64(value - Int64.Min)
-}
-
+@OverflowWrapping
 public func HashString64(str: String): String {
-    return Out64(v: HashCodeAsUInt64(Int64(str.hashCode())), start: false, finish: false).toString()
+    let bytes = str.toArray()
+    let m = 0xc6a4a7935bd1e995u64
+    let len = bytes.size
+    var hash = 0xc70f6907u64 ^ (UInt64(len) * m)
+    var i = 0
+    while (len - i >= 8) {
+        var data = 0u64
+        var j = 0
+        while (j < 8) {
+            data |= UInt64(bytes[i + j]) << UInt64(j * 8)
+            j++
+        }
+        data *= m
+        data ^= data >> 47u64
+        data *= m
+        hash ^= data
+        hash *= m
+        i += 8
+    }
+    let rem = len - i
+    if (rem > 0) {
+        var data = 0u64
+        var j = 0
+        while (j < rem) {
+            data |= UInt64(bytes[i + j]) << UInt64(j * 8)
+            j++
+        }
+        hash ^= data
+        hash *= m
+    }
+    hash ^= hash >> 47u64
+    hash *= m
+    hash ^= hash >> 47u64
+    return Out64(v: hash, start: false, finish: false).toString()
 }
 
 @When[os == "Linux"]
