@@ -1,6 +1,7 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.CustomTypeDef
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GlobalVar
@@ -97,6 +98,9 @@ public class CHIRSplitter {
     private func SplitCHIRTypes(packages: ArrayList<SubCHIRPackage>): Unit {
         var serial: Int64 = 0
         for (customDef in cgPkgCtx.GetCHIRPackage().GetAllCustomTypeDef()) {
+            if (customDef.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+                continue
+            }
             let targetIndex = PickIndex(serial, packages)
             packages[targetIndex].chirCustomDefs.add(customDef)
             serial++

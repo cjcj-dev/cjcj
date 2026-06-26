@@ -6,13 +6,18 @@ import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.CustomTypeDef
+import cangjie_compiler::chir.EnumDef
+import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.ExtendDef
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.FuncKind
 import cangjie_compiler::chir.GenericType
+import cangjie_compiler::chir.StructDef
+import cangjie_compiler::chir.StructType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKindIndex
+import cangjie_compiler::mangle.GetTypeQualifiedName
 
 private let EXTENSION_DEFS_NAME: String = "NonExternalExtensionDefs"
 
@@ -49,6 +54,9 @@ public func GenerateInterfaceExtensionDefs(cgMod: CGModule): Unit {
 public func RedefineTypeInfosForCustomDefs(cgMod: CGModule): Unit {
     for (def in cgMod.GetCGContext().GetSubCHIRPackage().chirCustomDefs) {
         if (!IsCurrentPackageDef(cgMod, def)) {
+            continue
+        }
+        if (def.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
             continue
         }
         if (let Some(classDef) <- (def as ClassDef)) {
@@ -140,9 +148,11 @@ private func GenerateExtensionDefsForCustomDef(cgMod: CGModule, def: CustomTypeD
         }
     }
     if (emitted) {
-        if (let Some(ty) <- def.GetType()) {
-            cgMod.RegisterExtensionDefStart(ty, startIdx)
-            cgMod.RegisterExtensionDefInterfaces(ty, emittedInterfaces)
+        let targetTy = SourceGenericTargetType(RequireExtensionTargetType(def))
+        cgMod.RegisterExtensionDefStart(targetTy, startIdx)
+        cgMod.RegisterExtensionDefInterfaces(targetTy, emittedInterfaces)
+        if (let Some(customTy) <- (targetTy as CustomType)) {
+            RefreshSourceGenericTypeTemplateInitializer(cgMod, customTy)
         }
     }
 }
@@ -158,9 +168,10 @@ private func CollectSuperClassTypes(classDef: ClassDef): ArrayList<ClassType> {
 }
 
 private func GenerateObjectExtensionDefForType(cgMod: CGModule, targetDef: ClassDef): Bool {
-    let targetType = RequireClassType(targetDef)
+    let targetType = SourceGenericTargetType(RequireClassType(targetDef))
+    let coreObjectTy = RequireClassType(CoreObjectClassDef(targetDef))
     let extensionDefType = CGType.GetOrCreateExtensionDefType(cgMod.GetLLVMContext())
-    let name = CGType.GetRuntimeTypeName(targetType) + ".ed.std.core:Object"
+    let name = ExtensionDefName(targetType, coreObjectTy)
     let extensionDef = GetOrInsertCodeGenGlobal(cgMod, name, extensionDefType)
     if (unsafe { LLVMIsDeclaration(extensionDef) } == 0) {
         return false
@@ -171,11 +182,11 @@ private func GenerateObjectExtensionDefForType(cgMod: CGModule, targetDef: Class
     let i32Type = unsafe { LLVMInt32TypeInContext(context) }
     let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
     let values = ArrayList<LLVMValueRef>()
-    values.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
+    values.add(unsafe { LLVMConstInt(i32Type, UInt64(TypeParamCount(cgMod, targetType)), 0) })
     values.add(unsafe { LLVMConstInt(i8Type, 1u64, 0) })
     values.add(unsafe { LLVMConstInt(i8Type, 0b10000001u64, 0) })
     values.add(unsafe { LLVMConstInt(i16Type, 0u64, 0) })
-    values.add(TypeInfoAsI8Ptr(cgMod, targetType, i8PtrType))
+    values.add(TargetTypeAsI8Ptr(cgMod, targetType, i8PtrType))
     values.add(CoreObjectTypeInfoAsI8Ptr(cgMod, i8PtrType))
     values.add(unsafe { LLVMConstNull(i8PtrType) })
     values.add(unsafe { LLVMConstNull(i8PtrType) })
@@ -190,19 +201,24 @@ private func GenerateObjectExtensionDefForType(cgMod: CGModule, targetDef: Class
 
 private func GenerateExtensionDefForType(cgMod: CGModule, targetDef: CustomTypeDef, inheritedType: ClassType,
     direct: Bool): Bool {
-    let targetType = RequireCustomType(targetDef)
-    let funcs = FunctionsForInheritedType(targetDef, inheritedType)
-    if (funcs.isEmpty() && inheritedType.GetClassDef().IsInterface() &&
-        inheritedType.GetClassDef().nodeId == targetDef.nodeId) {
+    let targetType = SourceGenericTargetType(RequireExtensionTargetType(targetDef))
+    let effectiveInheritedType = if (inheritedType.GetClassDef().nodeId == targetDef.nodeId) {
+        (targetType as ClassType) ?? inheritedType
+    } else {
+        inheritedType
+    }
+    let funcs = FunctionsForInheritedType(targetDef, effectiveInheritedType)
+    if (funcs.isEmpty() && effectiveInheritedType.GetClassDef().IsInterface() &&
+        effectiveInheritedType.GetClassDef().nodeId == targetDef.nodeId) {
         return false
     }
     let extensionDefType = CGType.GetOrCreateExtensionDefType(cgMod.GetLLVMContext())
-    let name = ExtensionDefName(targetType, inheritedType)
+    let name = ExtensionDefName(targetType, effectiveInheritedType)
     let extensionDef = GetOrInsertCodeGenGlobal(cgMod, name, extensionDefType)
     if (unsafe { LLVMIsDeclaration(extensionDef) } == 0) {
         return false
     }
-    let content = BuildExtensionDefContent(cgMod, targetType, inheritedType, funcs, direct)
+    let content = BuildExtensionDefContent(cgMod, targetType, effectiveInheritedType, funcs, direct)
     unsafe {
         LLVMSetInitializer(extensionDef, ConstNamedStruct(extensionDefType, content))
         LLVMSetLinkage(extensionDef, LLVMLinkageValue(LLVMLinkage.Private))
@@ -221,14 +237,125 @@ private func BuildExtensionDefContent(cgMod: CGModule, targetType: Type, inherit
     let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
     let values = ArrayList<LLVMValueRef>()
     values.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
-    values.add(unsafe { LLVMConstInt(i8Type, 1u64, 0) })
+    let (interfaceFnOrTi, isInterfaceTi) = GenerateInterfaceFn(cgMod, targetType, inheritedType, i8PtrType)
+    values.add(unsafe { LLVMConstInt(i8Type, if (isInterfaceTi) { 1u64 } else { 0u64 }, 0) })
     values.add(unsafe { LLVMConstInt(i8Type, ExtensionDefFlag(targetType, inheritedType, direct), 0) })
     values.add(unsafe { LLVMConstInt(i16Type, UInt64(funcs.size), 0) })
-    values.add(TypeInfoAsI8Ptr(cgMod, targetType, i8PtrType))
-    values.add(TypeInfoAsI8Ptr(cgMod, inheritedType, i8PtrType))
+    values[0] = unsafe { LLVMConstInt(i32Type, UInt64(TypeParamCount(cgMod, targetType)), 0) }
+    values.add(TargetTypeAsI8Ptr(cgMod, targetType, i8PtrType))
+    values.add(interfaceFnOrTi)
     values.add(unsafe { LLVMConstNull(i8PtrType) })
     values.add(GenerateFuncTableForType(cgMod, targetType, inheritedType, funcs, i8PtrType))
     return values
+}
+
+private func TypeParamCount(cgMod: CGModule, targetType: Type): Int64 {
+    if (CGType.GetOrCreate(cgMod, targetType.StripAllRefs()).IsDynamicGI()) {
+        return targetType.GetTypeArgs().size
+    }
+    return 0
+}
+
+private func TargetTypeAsI8Ptr(cgMod: CGModule, targetType: Type, i8PtrType: LLVMTypeRef): LLVMValueRef {
+    let baseTy = targetType.StripAllRefs()
+    if (CGType.GetOrCreate(cgMod, baseTy).IsDynamicGI()) {
+        let template = if (let Some(customTy) <- (baseTy as CustomType)) {
+            EnsureSourceGenericTypeTemplate(cgMod, SourceCustomType(customTy))
+        } else {
+            CGType.GetOrCreate(cgMod, baseTy).GetOrCreateTypeTemplate()
+        }
+        return unsafe { LLVMConstBitCast(template, i8PtrType) }
+    }
+    return TypeInfoAsI8Ptr(cgMod, baseTy, i8PtrType)
+}
+
+private func SourceCustomType(customTy: CustomType): CustomType {
+    let def = customTy.GetCustomTypeDef()
+    if (let Some(genericDecl) <- def.GetGenericDecl()) {
+        return SourceCustomTypeForDef(genericDecl, customTy)
+    }
+    if (def.IsGenericDef()) {
+        return SourceCustomTypeForDef(def, customTy)
+    }
+    return def.GetType() ?? customTy
+}
+
+private func SourceCustomTypeForDef(def: CustomTypeDef, fallback: CustomType): CustomType {
+    let genericArgs = ArrayList<Type>()
+    for (param in def.GetGenericTypeParams()) {
+        genericArgs.add(param)
+    }
+    if (let Some(classDef) <- (def as ClassDef)) {
+        return ClassType(classDef, genericArgs)
+    }
+    if (let Some(structDef) <- (def as StructDef)) {
+        return StructType(structDef, genericArgs)
+    }
+    if (let Some(enumDef) <- (def as EnumDef)) {
+        return EnumType(enumDef, genericArgs)
+    }
+    return def.GetType() ?? fallback
+}
+
+private func SourceGenericTargetType(targetType: Type): Type {
+    if (let Some(customTy) <- (targetType.StripAllRefs() as CustomType)) {
+        return SourceCustomType(customTy)
+    }
+    return targetType
+}
+
+private func GenerateInterfaceFn(cgMod: CGModule, targetType: Type, inheritedType: ClassType,
+    i8PtrType: LLVMTypeRef): (LLVMValueRef, Bool) {
+    let runtimeGenericParams = RuntimeGenericParams(targetType)
+    if (!CGType.GetOrCreate(cgMod, inheritedType.StripAllRefs()).IsDynamicGI() ||
+        !CanResolveRuntimeGenericParams(inheritedType, runtimeGenericParams)) {
+        return (TypeInfoAsI8Ptr(cgMod, inheritedType, i8PtrType), true)
+    }
+    let context = cgMod.GetLLVMContext().raw
+    let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext())
+    let params = ArrayList<LLVMTypeRef>()
+    params.add(unsafe { LLVMInt32TypeInContext(context) })
+    params.add(unsafe { LLVMPointerType(typeInfoPtrType, 0u32) })
+    let fnType = BuildLLVMFunctionType(i8PtrType, params)
+    let fnName = ExtensionDefName(targetType, inheritedType) + "_iFn"
+    let fn = cgMod.GetOrInsertFunction(fnName, fnType)
+    if (unsafe { LLVMIsDeclaration(fn) } != 0) {
+        unsafe { LLVMSetLinkage(fn, LLVMLinkageValue(LLVMLinkage.Private)) }
+        AddFnAttr(fn, "native-interface-fn")
+        unsafe { LLVMSetUnnamedAddress(fn, LLVMUnnamedAddrValue(LLVMUnnamedAddr.GlobalUnnamedAddr)) }
+        let entry = IRBuilder2(cgMod)
+        let block = entry.CreateEntryBasicBlock(fn, "entry")
+        entry.SetInsertPoint(block)
+        let runtimeTypeInfoArray = unsafe { LLVMGetParam(fn, 1u32) }
+        let typeInfo = CreateTypeInfoForCallbackBody(cgMod, entry, block, inheritedType.StripAllRefs(),
+            runtimeGenericParams, runtimeTypeInfoArray, plainRuntimeTypeInfoArrayGEP: true)
+        entry.CreateRet(entry.CreateBitCast(typeInfo, i8PtrType, name: "interface.ti"))
+        entry.close()
+    }
+    return (unsafe { LLVMConstBitCast(fn, i8PtrType) }, false)
+}
+
+private func CanResolveRuntimeGenericParams(chirTy: Type, genericParams: ArrayList<GenericType>): Bool {
+    let baseTy = chirTy.StripAllRefs()
+    if (let Some(genericTy) <- (baseTy as GenericType)) {
+        return FindRuntimeGenericParam(genericTy, genericParams).isSome()
+    }
+    for (typeArg in baseTy.GetTypeArgs()) {
+        if (!CanResolveRuntimeGenericParams(typeArg, genericParams)) {
+            return false
+        }
+    }
+    return true
+}
+
+private func FindRuntimeGenericParam(genericTy: GenericType,
+    genericParams: ArrayList<GenericType>): Option<GenericType> {
+    for (param in genericParams) {
+        if (genericTy.IsEqual(param)) {
+            return Some(param)
+        }
+    }
+    return None
 }
 
 private func ExtensionDefFlag(targetType: Type, inheritedType: ClassType, direct: Bool): UInt64 {
@@ -858,7 +985,7 @@ private func GetOrCreateOuterTypeInfoFn(cgMod: CGModule, extendDefName: String, 
     let targetTypeInfo = unsafe { LLVMGetParam(fn, 0u32) }
     let strippedParentType = parentType.StripAllRefs()
     let typeInfo = if (strippedParentType.IsGenericRelated()) {
-        CreateTypeInfoForTemplateCallback(cgMod, entry, strippedParentType, RuntimeGenericParams(targetType),
+        CreateTypeInfoForCallbackBody(cgMod, entry, block, strippedParentType, RuntimeGenericParams(targetType),
             entry.GetTypeArgsFromTypeInfo(targetTypeInfo))
     } else {
         CGType.GetOrCreate(cgMod, strippedParentType).GetOrCreateTypeInfo()
@@ -951,8 +1078,17 @@ private func RequireCustomType(def: CustomTypeDef): Type {
     throw IllegalStateException("custom def has no type: " + def.GetIdentifier())
 }
 
+private func RequireExtensionTargetType(def: CustomTypeDef): Type {
+    if (let Some(extendDef) <- (def as ExtendDef)) {
+        if (let Some(extendedType) <- extendDef.GetExtendedType()) {
+            return extendedType
+        }
+    }
+    return RequireCustomType(def)
+}
+
 private func ExtensionDefName(targetType: Type, inheritedType: ClassType): String {
-    return CGType.GetRuntimeTypeName(targetType) + ".ed." + CGType.GetRuntimeTypeName(inheritedType)
+    return GetTypeQualifiedName(targetType) + "_ed_" + GetTypeQualifiedName(inheritedType)
 }
 
 private func TargetPackageName(targetType: Type): String {

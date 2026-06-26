@@ -134,7 +134,12 @@ public class IRBuilder2 <: Resource {
             unsafe { LLVMPositionBuilderBefore(builder.raw, terminator) }
         }
         let result = CreateAllocaAtCurrentPoint(valueType, name)
-        unsafe { LLVMPositionBuilderAtEnd(builder.raw, currentBlock) }
+        let currentTerminator = unsafe { LLVMGetBasicBlockTerminator(currentBlock) }
+        if (currentTerminator.isNull()) {
+            unsafe { LLVMPositionBuilderAtEnd(builder.raw, currentBlock) }
+        } else {
+            unsafe { LLVMPositionBuilderBefore(builder.raw, currentTerminator) }
+        }
         return result
     }
 
@@ -180,6 +185,14 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildLoad2(builder.raw, elementType, addr, nameCString.value) }
         }
+        return result
+    }
+
+    public func CreateInvariantLoad(elementType: LLVMTypeRef, addr: LLVMValueRef,
+        name!: String = ""): LLVMValueRef {
+        let result = CreateLoad(elementType, addr, name: name)
+        let metadata = LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>())
+        LLVMSetInstructionMetadata(GetLLVMContext(), result, "invariant.load", metadata)
         return result
     }
 
@@ -511,6 +524,45 @@ public class IRBuilder2 <: Resource {
 
     public func GetInsertBlock(): LLVMBasicBlockRef {
         return unsafe { LLVMGetInsertBlock(builder.raw) }
+    }
+
+    public func SetInsertPointBefore(inst: LLVMValueRef): Unit {
+        if (inst.isNull()) {
+            ClearInsertionPoint()
+            return
+        }
+        unsafe { LLVMPositionBuilderBefore(builder.raw, inst) }
+    }
+
+    public func SetInsertPointForPreparingTypeInfo(): Unit {
+        let currentBlock = GetInsertBlock()
+        if (currentBlock.isNull()) {
+            return
+        }
+        let currentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
+        if (currentFunction.isNull()) {
+            return
+        }
+        let firstBlock = unsafe { LLVMGetFirstBasicBlock(currentFunction) }
+        if (firstBlock.isNull()) {
+            return
+        }
+        let prepBlock = if (IsBasicBlockNamed(firstBlock, "prepTi")) {
+            firstBlock
+        } else if (IsBasicBlockNamed(firstBlock, "allocas")) {
+            FindOrCreatePrepTiAfterAllocas(currentFunction, firstBlock)
+        } else {
+            let created = CreateEntryBasicBlock(currentFunction, "prepTi")
+            SetInsertPoint(created)
+            CreateBr(firstBlock)
+            created
+        }
+        let terminator = unsafe { LLVMGetBasicBlockTerminator(prepBlock) }
+        if (terminator.isNull()) {
+            SetInsertPoint(prepBlock)
+        } else {
+            SetInsertPointBefore(terminator)
+        }
     }
 
     public func ClearInsertionPoint(): Unit {
@@ -2383,8 +2435,24 @@ public class IRBuilder2 <: Resource {
         let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
         let typedTypeInfo = CreateBitCast(typeInfo, typeInfoPtrType, name: "ti.typed")
         let typeArgsPtr = CreateStructGEP(typeInfoType, typedTypeInfo, 12u32, name: "ti.typeArgs")
-        let typeArgsRaw = CreateLoad(i8PtrType, typeArgsPtr, name: "ti.typeArgs")
+        let typeArgsRaw = CreateInvariantLoad(i8PtrType, typeArgsPtr, name: "ti.typeArgs")
         return CreateBitCast(typeArgsRaw, unsafe { LLVMPointerType(typeInfoPtrType, 0u32) }, name: "ti.typeArgs.typed")
+    }
+
+    public func GetTypeInfoFromTiArray(tiArray: LLVMValueRef, index: Int64, name!: String = ""): LLVMValueRef {
+        let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
+        let indices = ArrayList<LLVMValueRef>()
+        indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(index), 0) })
+        let typeInfoSlot = CreateInBoundsGEP(typeInfoPtrType, tiArray, indices)
+        return CreateInvariantLoad(typeInfoPtrType, typeInfoSlot, name: name)
+    }
+
+    public func GetTypeInfoFromTiArrayPlain(tiArray: LLVMValueRef, index: Int64, name!: String = ""): LLVMValueRef {
+        let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
+        let indices = ArrayList<LLVMValueRef>()
+        indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(index), 0) })
+        let typeInfoSlot = CreateGEP(typeInfoPtrType, tiArray, indices)
+        return CreateInvariantLoad(typeInfoPtrType, typeInfoSlot, name: name)
     }
 
     public func GetTypeInfoFromTypeInfoArgs(typeInfo: LLVMValueRef, index: Int64): LLVMValueRef {
@@ -2392,15 +2460,15 @@ public class IRBuilder2 <: Resource {
         let typeArgs = GetTypeArgsFromTypeInfo(typeInfo)
         let indices = ArrayList<LLVMValueRef>()
         indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(index), 0) })
-        let typeInfoSlot = CreateGEP(typeInfoPtrType, typeArgs, indices, name: "ti.arg")
-        return CreateLoad(typeInfoPtrType, typeInfoSlot, name: "ti.arg")
+        let typeInfoSlot = CreateInBoundsGEP(typeInfoPtrType, typeArgs, indices, name: "ti.arg")
+        return CreateInvariantLoad(typeInfoPtrType, typeInfoSlot, name: "ti.arg")
     }
 
     public func GetTypeInfoFromObject(obj: LLVMValueRef): LLVMValueRef {
         let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
         let typeInfoSlotType = unsafe { LLVMPointerType(typeInfoPtrType, 1u32) }
         let typeInfoSlot = CreateBitCast(obj, typeInfoSlotType, name: "obj.ti.slot")
-        return CreateLoad(typeInfoPtrType, typeInfoSlot, name: "ti")
+        return CreateInvariantLoad(typeInfoPtrType, typeInfoSlot, name: "ti")
     }
 
     private func CreateGenericRuntimeTypeInfo(chirTy: Type): LLVMValueRef {
@@ -2744,6 +2812,41 @@ public class IRBuilder2 <: Resource {
             }
         }
         return result
+    }
+
+    private func IsBasicBlockNamed(block: LLVMBasicBlockRef, name: String): Bool {
+        if (block.isNull()) {
+            return false
+        }
+        let blockName = unsafe { LLVMGetBasicBlockName(block) }
+        if (blockName.isNull()) {
+            return false
+        }
+        var result = false
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { strcmp(blockName, nameCString.value) } == 0
+        }
+        return result
+    }
+
+    private func FindOrCreatePrepTiAfterAllocas(parentFunction: LLVMValueRef,
+        allocasBlock: LLVMBasicBlockRef): LLVMBasicBlockRef {
+        let nextBlock = unsafe { LLVMGetNextBasicBlock(allocasBlock) }
+        if (!nextBlock.isNull() && IsBasicBlockNamed(nextBlock, "prepTi")) {
+            return nextBlock
+        }
+        let oldEntry = if (nextBlock.isNull()) {
+            unsafe { LLVMGetEntryBasicBlock(parentFunction) }
+        } else {
+            nextBlock
+        }
+        let created = CreateEntryBasicBlock(parentFunction, "prepTi")
+        unsafe { LLVMMoveBasicBlockAfter(created, allocasBlock) }
+        SetInsertPoint(created)
+        if (!oldEntry.isNull()) {
+            CreateBr(oldEntry)
+        }
+        return created
     }
 
     private func ApplyFastMathIfNeeded(value: LLVMValueRef): LLVMValueRef {
