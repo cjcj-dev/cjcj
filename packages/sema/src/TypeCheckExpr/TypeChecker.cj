@@ -1646,6 +1646,10 @@ public class TypeChecker {
     }
 
     private func SynthesizeDecl(ctx: ASTContext, decl: Decl): Ty {
+        // Mirrors C++ TypeChecker.cpp:740-748: imported decls with a correct loaded type are already checked.
+        if (decl.TestAttr(Attribute.IMPORTED) && Ty.IsTyCorrect(decl.GetTy()) && decl.TyKind() != TypeKind.TYPE_QUEST) {
+            return decl.GetTy() ?? TypeManager.GetInvalidTy()
+        }
         if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
             return TypeCheckDeclSetEnumElementTy(impl.typeManager, decl, diag: impl.diag)
         }
