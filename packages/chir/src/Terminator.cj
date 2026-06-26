@@ -1,6 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::utils.{OverflowStrategy, OverflowStrategyName}
 
 public open class Terminator <: Expression {
     private let successors: ArrayList<Block> = ArrayList<Block>()
@@ -398,6 +399,24 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
         return virtualMethodOffset
     }
 
+    public func GetVirtualMethodOffset(builder: CHIRBuilder): UInt64 {
+        let _ = builder
+        if (let Some(offset) <- virtualMethodOffset) {
+            return offset
+        }
+        throw IllegalStateException("virtual method offset is not available")
+    }
+
+    public func GetInstSrcParentCustomTypeOfMethod(builder: CHIRBuilder): ClassType {
+        let _ = builder
+        throw IllegalStateException("instantiated source parent custom type of virtual method is not available")
+    }
+
+    public func GetVirtualMethodAttr(builder: CHIRBuilder): AttributeInfo {
+        let _ = builder
+        throw IllegalStateException("virtual method attribute is not available")
+    }
+
     public override func OperandsToString(): String {
         let parts = ArrayList<String>()
         parts.add(CallTargetPrefix() + GetMethodName() + InstantiatedTypeArgsToString())
@@ -471,16 +490,20 @@ public class InvokeStaticWithException <: DynamicDispatchWithException {
 
 public class IntOpWithException <: ExpressionWithException {
     private let opKind: ExprKind
+    private var overflowStrategy: OverflowStrategy
 
-    public init(opKind: ExprKind, operand: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
+    public init(opKind: ExprKind, operand: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>,
+        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
         super(ExprKind.INT_OP_WITH_EXCEPTION, MakeUnaryTermOperands(operand), successBlock, errorBlock, parent)
         this.opKind = opKind
+        this.overflowStrategy = overflowStrategy
     }
 
     public init(opKind: ExprKind, left: Value, right: Value, successBlock: Block, errorBlock: Block,
-        parent: Option<Block>) {
+        parent: Option<Block>, overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
         super(ExprKind.INT_OP_WITH_EXCEPTION, MakeBinaryTermOperands(left, right), successBlock, errorBlock, parent)
         this.opKind = opKind
+        this.overflowStrategy = overflowStrategy
     }
 
     public func GetOpKind(): ExprKind {
@@ -502,13 +525,37 @@ public class IntOpWithException <: ExpressionWithException {
         return None
     }
 
+    public func GetOverflowStrategy(): OverflowStrategy {
+        if (opKind == ExprKind.DIV) {
+            if (overflowStrategy != OverflowStrategy.NA) {
+                return overflowStrategy
+            }
+        }
+        return OverflowStrategy.THROWING
+    }
+
+    public func SetOverflowStrategy(strategy: OverflowStrategy): Unit {
+        overflowStrategy = strategy
+    }
+
     public override func AddExtraComment(): String {
         let base = super.AddExtraComment()
+        let overflowText = if (overflowStrategy != OverflowStrategy.NA) {
+            "Overflow: " + OverflowStrategyName(overflowStrategy)
+        } else {
+            ""
+        }
         let opText = "op: " + GetOpKindName()
         if (base.isEmpty()) {
-            return opText
+            if (overflowText.isEmpty()) {
+                return opText
+            }
+            return overflowText + " " + opText
         }
-        return base + " " + opText
+        if (overflowText.isEmpty()) {
+            return base + " " + opText
+        }
+        return base + " " + overflowText + " " + opText
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
@@ -519,13 +566,18 @@ public class IntOpWithException <: ExpressionWithException {
             builder.CreateUnaryIntOpWithException(RequiredResultType(this), GetOpKind(), GetLHSOperand(),
                 GetSuccessBlock(), GetErrorBlock(), parent)
         }
+        cloned.SetOverflowStrategy(overflowStrategy)
         return FinishExpressionClone(this, cloned)
     }
 }
 
 public class TypeCastWithException <: ExpressionWithException {
-    public init(source: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
+    private var overflowStrategy: OverflowStrategy
+
+    public init(source: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>,
+        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
         super(ExprKind.TYPECAST_WITH_EXCEPTION, MakeUnaryTermOperands(source), successBlock, errorBlock, parent)
+        this.overflowStrategy = overflowStrategy
     }
 
     public func GetSourceValue(): Value {
@@ -543,9 +595,33 @@ public class TypeCastWithException <: ExpressionWithException {
         return None
     }
 
+    public func GetOverflowStrategy(): OverflowStrategy {
+        if (overflowStrategy == OverflowStrategy.NA) {
+            return OverflowStrategy.THROWING
+        }
+        return overflowStrategy
+    }
+
+    public func SetOverflowStrategy(strategy: OverflowStrategy): Unit {
+        overflowStrategy = strategy
+    }
+
+    public override func AddExtraComment(): String {
+        let base = super.AddExtraComment()
+        if (overflowStrategy == OverflowStrategy.NA) {
+            return base
+        }
+        let overflowText = "Overflow: " + OverflowStrategyName(overflowStrategy)
+        if (base.isEmpty()) {
+            return overflowText
+        }
+        return base + " " + overflowText
+    }
+
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateTypeCastWithException(RequiredResultType(this), GetSourceValue(),
             GetSuccessBlock(), GetErrorBlock(), parent)
+        cloned.SetOverflowStrategy(overflowStrategy)
         return FinishExpressionClone(this, cloned)
     }
 }
