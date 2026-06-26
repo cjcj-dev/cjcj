@@ -38,6 +38,20 @@ private func FindPositionByUInt64Key(entries: ArrayList<(UInt64, Position)>, key
     return None
 }
 
+private class AstObjectIdAllocator {
+    private static var nextId: Int64 = 1
+
+    public static func Next(): Int64 {
+        let out = nextId
+        nextId++
+        return out
+    }
+}
+
+public func NodeIdentityKey(node: Node): Int64 {
+    return node.objectId
+}
+
 public open class Node {
     public var begin: Position = INVALID_POSITION
     public var end: Position = INVALID_POSITION
@@ -51,15 +65,18 @@ public open class Node {
     public var visitedByWalkerID: UInt32 = 0u32
     public var mangleAdapterId: Int64 = -1
     public var isInMacroCall: Bool = false
+    public let objectId: Int64
     public let astKind: ASTKind
     private var attributes: AttributePack = AttributePack()
     private var ty: Option<Ty> = Ty.GetInitialTy()
 
     public init() {
+        objectId = AstObjectIdAllocator.Next()
         astKind = ASTKind.NODE
     }
 
     public init(kind: ASTKind) {
+        objectId = AstObjectIdAllocator.Next()
         astKind = kind
     }
 

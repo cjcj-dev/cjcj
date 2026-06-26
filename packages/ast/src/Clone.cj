@@ -15,16 +15,15 @@ public func SetIsClonedSourceCode(source: Node, target: Node): Unit {
 private class ClonePair {
     public let sourceNode: Node
     public let targetNode: Node
+    public let sourceObjectId: Int64
+    public let targetObjectId: Int64
 
     public init(sourceNode: Node, targetNode: Node) {
         this.sourceNode = sourceNode
         this.targetNode = targetNode
+        sourceObjectId = sourceNode.objectId
+        targetObjectId = targetNode.objectId
     }
-}
-
-private func sameFuncArgNode(left: FuncArg, right: FuncArg): Bool {
-    return left.astKind == right.astKind && left.begin == right.begin && left.end == right.end &&
-        left.name == right.name && left.TestAttr(Attribute.HAS_INITIAL) == right.TestAttr(Attribute.HAS_INITIAL)
 }
 
 private func cloneIdentifier(source: Identifier): Identifier {
@@ -221,6 +220,13 @@ public class ASTCloner {
     private static func findExprClone(pairs: ArrayList<ClonePair>, expr: Expr): Option<Expr> {
         if (let Some(node) <- findNodeClone(pairs, expr)) {
             return node as Expr
+        }
+        return None
+    }
+
+    private static func findFuncArgClone(pairs: ArrayList<ClonePair>, arg: FuncArg): Option<FuncArg> {
+        if (let Some(node) <- findNodeClone(pairs, arg)) {
+            return node as FuncArg
         }
         return None
     }
@@ -1414,22 +1420,8 @@ public class ASTCloner {
                 if (let Some(sourceDesugarArgs) <- src.desugarArgs) {
                     let clonedDesugarArgs = ArrayList<FuncArg>()
                     for (sourceArg in sourceDesugarArgs) {
-                        var found = false
-                        var idx: Int64 = 0
-                        while (!found && idx < src.args.size && idx < dst.args.size) {
-                            if (sameFuncArgNode(sourceArg, src.args[idx])) {
-                                clonedDesugarArgs.add(dst.args[idx])
-                                found = true
-                            }
-                            idx++
-                        }
-                        idx = 0
-                        while (!found && idx < src.defaultArgs.size && idx < dst.defaultArgs.size) {
-                            if (sameFuncArgNode(sourceArg, src.defaultArgs[idx])) {
-                                clonedDesugarArgs.add(dst.defaultArgs[idx])
-                                found = true
-                            }
-                            idx++
+                        if (let Some(cloned) <- findFuncArgClone(cloneAccum, sourceArg)) {
+                            clonedDesugarArgs.add(cloned)
                         }
                     }
                     dst.desugarArgs = Some(clonedDesugarArgs)
