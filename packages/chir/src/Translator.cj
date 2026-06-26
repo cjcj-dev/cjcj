@@ -386,7 +386,7 @@ public class Translator {
     private let chirTy: CHIRType
     private let globalSymbolTable: FaithfulAST2CHIRNodeMap
     private let localValSymbolTable: FaithfulLocalValueMap = FaithfulLocalValueMap()
-    private let exprValueTable: HashMap<String, Value> = HashMap<String, Value>()
+    private let exprValueTable: HashMap<Int64, Value> = HashMap<Int64, Value>()
     private var currentBlock: Option<Block> = None
     private var currentFunc: Option<Function> = None
     private var currentLambda: Option<Lambda> = None
@@ -3669,15 +3669,11 @@ public class Translator {
     }
 
     private func SetExprValue(expr: AstExpr, value: Value): Unit {
-        exprValueTable[ExprValueKey(expr)] = value
+        exprValueTable[expr.objectId] = value
     }
 
     private func TryGetExprValue(expr: AstExpr): Option<Value> {
-        return exprValueTable.get(ExprValueKey(expr))
-    }
-
-    private func ExprValueKey(expr: AstExpr): String {
-        return "${ASTKindIndex(expr.astKind)}:${expr.begin.hashCode()}:${expr.end.hashCode()}"
+        return exprValueTable.get(expr.objectId)
     }
 
     private func EnumPatternPayloadTypes(pattern: AstEnumPattern): ArrayList<Type> {
