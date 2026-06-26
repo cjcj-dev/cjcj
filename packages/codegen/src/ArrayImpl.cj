@@ -76,7 +76,7 @@ private func TryLoadGenericClassFieldWithReadBarrier(irBuilder: IRBuilder2,
 
 private func TryLoadClassFieldWithReadBarrier(irBuilder: IRBuilder2, loadExpr: Expression, addr: CGValue,
     elementType: CGType): Option<LLVMValueRef> {
-    if (!ShouldUseClassFieldReadBarrier(elementType) || !IsAddressSpacePointer(addr.GetRawValue(), 1u32)) {
+    if (!ShouldUseClassFieldReadBarrier(irBuilder, elementType) || !IsAddressSpacePointer(addr.GetRawValue(), 1u32)) {
         return None
     }
     let local = (loadExpr.GetOperand(0) as LocalVar) ?? return None
@@ -148,9 +148,15 @@ private func ResolveLoadElementPathByNames(base: Value, names: ArrayList<String>
     return None
 }
 
-private func ShouldUseClassFieldReadBarrier(elementType: CGType): Bool {
+private func ShouldUseClassFieldReadBarrier(irBuilder: IRBuilder2, elementType: CGType): Bool {
     let stripped = elementType.GetOriginal().StripAllRefs()
-    return stripped.IsGeneric() || stripped.IsReferenceType() || elementType.GetSize().isNone()
+    if (stripped.IsGeneric() || stripped.IsReferenceType() || elementType.GetSize().isNone()) {
+        return true
+    }
+    if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), stripped) as CGEnumType)) {
+        return enumCGType.IsOptionLikeRef()
+    }
+    return false
 }
 
 private func TryGenerateGCReadForLoad(irBuilder: IRBuilder2, chirExpr: Expression, elementType: CGType,
@@ -350,6 +356,9 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, addrOperand)
     if (let Some(genericStore) <- irBuilder.TryCreateGenericStore(value, addr)) {
         return genericStore
+    }
+    if (let Some(memberStore) <- irBuilder.TryCreateManagedMemberStore(value, addr)) {
+        return memberStore
     }
     if (let Some(structPtrStore) <- TryStoreStructPtrValueForAddress(irBuilder, value, addr)) {
         return structPtrStore
@@ -809,7 +818,14 @@ private func ResolveElementTypeByPath(baseTy: Type, path: ArrayList<UInt64>): Op
 
 private func IsManagedReferenceField(irBuilder: IRBuilder2, fieldTy: Option<Type>): Bool {
     if (let Some(ty) <- fieldTy) {
-        return CGType.GetOrCreate(irBuilder.GetCGModule(), ty).IsReference()
+        let fieldCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), ty)
+        if (fieldCGType.IsReference()) {
+            return true
+        }
+        if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(),
+            ty.StripAllRefs()) as CGEnumType)) {
+            return enumCGType.IsOptionLikeRef()
+        }
     }
     return false
 }

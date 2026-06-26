@@ -48,6 +48,15 @@ private let GCREAD_STATIC_REF_INTRINSIC_NAME: String = "llvm.cj.gcread.static.re
 private let GCWRITE_STATIC_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.static.ref"
 private let NEW_CJ_THREAD_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThread"
 private let NEW_CJ_THREAD_NO_RETURN_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThreadNoReturn"
+private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
+private let LLVM_ARRAY_TYPE_KIND: Int32 = 11
+private let LLVM_POINTER_TYPE_KIND: Int32 = 12
+private let LLVM_VECTOR_TYPE_KIND: Int32 = 13
+private let LLVM_SCALABLE_VECTOR_TYPE_KIND: Int32 = 17
+
+foreign {
+    func LLVMGetElementType(valueType: LLVMTypeRef): LLVMTypeRef
+}
 
 private func SignedInt64Bits(value: Int64): UInt64 {
     if (value >= 0) {
@@ -410,7 +419,7 @@ public class IRBuilder2 <: Resource {
         }
     }
 
-    private func GetTrackedBasePtr(value: LLVMValueRef): Option<LLVMValueRef> {
+    public func GetTrackedBasePtr(value: LLVMValueRef): Option<LLVMValueRef> {
         let key = GetLLVMValueKey(value) ?? return None
         if (basePtrs.contains(key)) {
             return basePtrs[key]
@@ -426,12 +435,106 @@ public class IRBuilder2 <: Resource {
         return Some(unsafe { LLVMGetPointerAddressSpace(valueType) })
     }
 
-    private func GetTrackedManagedBase(value: LLVMValueRef): Option<LLVMValueRef> {
+    public func GetTrackedManagedBase(value: LLVMValueRef): Option<LLVMValueRef> {
         let baseObject = GetTrackedBasePtr(value) ?? return None
         if ((GetPointerAddressSpace(baseObject) ?? 0u32) == 1u32) {
             return Some(baseObject)
         }
         return None
+    }
+
+    public func TryCreateManagedMemberStore(value: CGValue, dest: CGValue): Option<LLVMValueRef> {
+        let baseObject = GetTrackedManagedBase(dest.GetRawValue()) ?? return None
+        let valueCGType = value.GetCGType() ?? return None
+        let destCGType = dest.GetCGType() ?? return None
+        let destElementCGType = destCGType.GetPointerElementType() ?? return None
+        if (destElementCGType.GetSize().isNone()) {
+            return Some(StoreUnknownSizeManagedMemberValue(baseObject, dest.GetRawValue(), value, valueCGType,
+                destElementCGType))
+        }
+        if (valueCGType.IsStructPtrType()) {
+            return Some(StoreStructManagedMemberValue(baseObject, dest.GetRawValue(), value, valueCGType))
+        }
+        if (IsVArrayPtrValue(valueCGType) && destElementCGType.IsVArrayType()) {
+            return Some(StoreVArrayManagedMemberValue(baseObject, dest.GetRawValue(), value, valueCGType))
+        }
+        if (valueCGType.IsReference() || IsOptionLikeRefValue(valueCGType)) {
+            return Some(CallGCWriteRef(value.GetRawValue(), baseObject, dest.GetRawValue()))
+        }
+        return None
+    }
+
+    private func StoreUnknownSizeManagedMemberValue(baseObject: LLVMValueRef, dest: LLVMValueRef, value: CGValue,
+        valueCGType: CGType, destElementCGType: CGType): LLVMValueRef {
+        let destTy = destElementCGType.GetOriginal()
+        let blockNames = ArrayList<String>()
+        blockNames.add("gcwrite_ref")
+        blockNames.add("gcwrite_non_ref")
+        blockNames.add("gcwrite_exit")
+        let blocks = CreateAndInsertBasicBlocks(blockNames)
+        if (blocks.size < 3) {
+            return LLVMNullValue()
+        }
+        CreateCondBr(CreateTypeInfoIsReferenceCall(destTy), blocks[0], blocks[1])
+
+        SetInsertPoint(blocks[0])
+        CallGCWriteRef(value.GetRawValue(), baseObject, dest)
+        CreateBr(blocks[2])
+
+        SetInsertPoint(blocks[1])
+        CallGCWriteGeneric(baseObject, dest, value.GetRawValue(), GetSize32(valueCGType.GetOriginal(), valueCGType))
+        CreateBr(blocks[2])
+
+        SetInsertPoint(blocks[2])
+        return LLVMNullValue()
+    }
+
+    private func StoreStructManagedMemberValue(baseObject: LLVMValueRef, dest: LLVMValueRef, value: CGValue,
+        valueCGType: CGType): LLVMValueRef {
+        let structCGType = valueCGType.GetPointerElementType() ?? return CreateStore(value.GetRawValue(), dest)
+        let structType = structCGType.GetLLVMType()
+        let size = unsafe {
+            LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
+        }
+        if (IsLLVMTypeContainsRef(structType)) {
+            let source = ReadManagedAggregateSourceIfNeeded(value.GetRawValue(), structCGType, size)
+            return CallGCWriteStruct(baseObject, dest, source, size, structCGType.GetOriginal().ToString())
+        }
+        let align = cgMod.GetABITypeAlignment(structType)
+        return CreateMemCpy(dest, align, value.GetRawValue(), align, size)
+    }
+
+    private func StoreVArrayManagedMemberValue(baseObject: LLVMValueRef, dest: LLVMValueRef, value: CGValue,
+        valueCGType: CGType): LLVMValueRef {
+        let varrayCGType = valueCGType.GetPointerElementType() ?? return CreateStore(value.GetRawValue(), dest)
+        let varrayType = varrayCGType.GetLLVMType()
+        let size = unsafe {
+            LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(varrayType), 0)
+        }
+        if (IsLLVMTypeContainsRef(varrayType)) {
+            return CallGCWriteStruct(baseObject, dest, value.GetRawValue(), size, varrayCGType.GetOriginal().ToString())
+        }
+        let align = cgMod.GetABITypeAlignment(varrayType)
+        return CreateMemCpy(dest, align, value.GetRawValue(), align, size)
+    }
+
+    private func ReadManagedAggregateSourceIfNeeded(source: LLVMValueRef, sourceCGType: CGType,
+        size: LLVMValueRef): LLVMValueRef {
+        if ((GetPointerAddressSpace(source) ?? 0u32) != 1u32) {
+            return source
+        }
+        let sourceBase = GetTrackedManagedBase(source) ?? source
+        let temp = CreateEntryAlloca(sourceCGType.GetLLVMType(), name: "gcwrite.agg.tmp")
+        CallGCReadStruct(temp, sourceBase, source, size, sourceCGType.GetOriginal().ToString())
+        return temp
+    }
+
+    private func IsVArrayPtrValue(cgType: CGType): Bool {
+        if (!cgType.IsPointerType()) {
+            return false
+        }
+        let elementType = cgType.GetPointerElementType() ?? return false
+        return elementType.IsVArrayType()
     }
 
     private func PropagateBasePtr(source: LLVMValueRef, result: LLVMValueRef): Unit {
@@ -2954,10 +3057,10 @@ public class IRBuilder2 <: Resource {
             return false
         }
         let kind = unsafe { LLVMGetTypeKind(llvmTy) }
-        if (kind == 12) {
+        if (kind == LLVM_POINTER_TYPE_KIND) {
             return unsafe { LLVMGetPointerAddressSpace(llvmTy) } == 1u32
         }
-        if (kind == 10) {
+        if (kind == LLVM_STRUCT_TYPE_KIND) {
             let elementCount = unsafe { LLVMCountStructElementTypes(llvmTy) }
             if (elementCount == 0u32) {
                 return false
@@ -2975,6 +3078,9 @@ public class IRBuilder2 <: Resource {
                 }
             }
             return result
+        }
+        if (kind == LLVM_ARRAY_TYPE_KIND || kind == LLVM_VECTOR_TYPE_KIND || kind == LLVM_SCALABLE_VECTOR_TYPE_KIND) {
+            return IsLLVMTypeContainsRef(unsafe { LLVMGetElementType(llvmTy) })
         }
         return false
     }
