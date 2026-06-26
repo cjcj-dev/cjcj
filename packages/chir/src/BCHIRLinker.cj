@@ -50,12 +50,58 @@ public class BCHIRLinker {
         return topBchir
     }
 
+    public func RunForConstEval(packages: ArrayList<BCHIR>): HashMap<Int64, InterpreterValue> {
+        let globalInitValues = HashMap<Int64, InterpreterValue>()
+        let topDef = topBchir.GetLinkedByteCode()
+        topDef.Resize(0)
+        topDef.PushOp(OpCode.JUMP)
+        let jumpOverDummy = topDef.NextIndex()
+        topDef.PushCell(0)
+        GenerateDummyAbortFunction(topDef)
+        topDef.Set(jumpOverDummy, topDef.NextIndex())
+
+        var pkgIndex: Int64 = 0
+        while (pkgIndex < packages.size) {
+            let pkg = packages[pkgIndex]
+            LinkAndInitGlobalVars(pkg, globalInitValues)
+            if (!pkg.GetMainMangledName().isEmpty()) {
+                topBchir.SetMainMangledName(pkg.GetMainMangledName())
+                topBchir.SetMainExpectedArgs(pkg.GetMainExpectedArgs())
+            }
+            topBchir.packageName = pkg.packageName
+            pkgIndex++
+        }
+
+        topDef.PushOp(OpCode.JUMP)
+        let jumpOverFunctions = topDef.NextIndex()
+        topDef.PushCell(0)
+        for (pkg in packages) {
+            LinkFunctions(pkg, topDef)
+        }
+        topDef.Set(jumpOverFunctions, topDef.NextIndex())
+
+        if (!packages.isEmpty()) {
+            GenerateCallsToConstInitFunctions(packages[packages.size - 1].initFuncsForConsts, topDef)
+        }
+        topDef.PushOp(OpCode.EXIT)
+        topBchir.SetNumGlobalVars(nextGlobalId)
+        for (pkg in packages) {
+            LinkClasses(pkg)
+        }
+        topBchir.LinkDefaultFunctions(functionBodyIndex)
+        return globalInitValues
+    }
+
     public func GetLinkedBCHIR(): BCHIR {
         return topBchir
     }
 
     public func GetGlobalId(name: String): Option<Int64> {
         return globalIds.get(name)
+    }
+
+    public func GetGVARId(name: String): Int64 {
+        return globalIds.get(name) ?? -1
     }
 
     private func GenerateDummyAbortFunction(topDef: BCHIRDefinition): Unit {
@@ -70,6 +116,53 @@ public class BCHIRLinker {
             if (!globalIds.contains(entry.name)) {
                 globalIds[entry.name] = FreshGlobalId()
             }
+        }
+    }
+
+    private func LinkAndInitGlobalVars(pkg: BCHIR, globalInitValues: HashMap<Int64, InterpreterValue>): Unit {
+        for (entry in pkg.GetGlobalVars()) {
+            if (!globalIds.contains(entry.name)) {
+                let id = FreshGlobalId()
+                globalIds[entry.name] = id
+                globalInitValues[id] = ByteCodeToIVal(entry.definition, pkg)
+            }
+        }
+    }
+
+    private func GenerateCallsToConstInitFunctions(constInitFuncs: ArrayList<String>, topDef: BCHIRDefinition): Unit {
+        for (name in constInitFuncs) {
+            if (let Some(functionIndex) <- functionBodyIndex.get(name)) {
+                topDef.PushOp(OpCode.FUNC)
+                topDef.PushCell(functionIndex)
+                topDef.PushOp(OpCode.APPLY)
+                topDef.PushCell(1)
+                topDef.PushOp(OpCode.DROP)
+            }
+        }
+    }
+
+    private func ByteCodeToIVal(definition: BCHIRDefinition, bchir: BCHIR): InterpreterValue {
+        let opCode = OpCodeFromIndex(definition.Get(0))
+        return match (opCode) {
+            case OpCode.UINT8 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT8, definition.Get(1))
+            case OpCode.UINT16 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT16, definition.Get(1))
+            case OpCode.UINT32 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT32, definition.Get(1))
+            case OpCode.UINT64 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT64, definition.Get8Bytes(1))
+            case OpCode.UINTNAT => InterpreterValue.MakeUInt(InterpreterValueKind.IUINTNAT, definition.Get8Bytes(1))
+            case OpCode.INT8 => InterpreterValue.MakeInt(InterpreterValueKind.IINT8, definition.Get(1))
+            case OpCode.INT16 => InterpreterValue.MakeInt(InterpreterValueKind.IINT16, definition.Get(1))
+            case OpCode.INT32 => InterpreterValue.MakeInt(InterpreterValueKind.IINT32, definition.Get(1))
+            case OpCode.INT64 => InterpreterValue.MakeInt(InterpreterValueKind.IINT64, definition.Get8Bytes(1))
+            case OpCode.INTNAT => InterpreterValue.MakeInt(InterpreterValueKind.IINTNAT, definition.Get8Bytes(1))
+            case OpCode.FLOAT16 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT16, Float64(definition.Get(1)))
+            case OpCode.FLOAT32 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT32, Float64(definition.Get(1)))
+            case OpCode.FLOAT64 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT64, Float64(definition.Get8Bytes(1)))
+            case OpCode.RUNE => InterpreterValue.MakeRune(Rune(definition.Get(1)))
+            case OpCode.BOOL => InterpreterValue.MakeBool(definition.Get(1) != 0)
+            case OpCode.UNIT => InterpreterValue.MakeUnit()
+            case OpCode.NULLPTR => InterpreterValue.MakeNull()
+            case OpCode.STRING => InterpreterValue.MakeString(bchir.GetString(definition.Get(1)))
+            case _ => InterpreterValue.MakeInvalid()
         }
     }
 

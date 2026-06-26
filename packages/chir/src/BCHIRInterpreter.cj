@@ -4,6 +4,9 @@ import cangjie_compiler::utils.OverflowStrategy
 import std.collection.*
 
 public class BCHIRInterpreter {
+    public static let INTERNAL_PLAYGROUND_SIZE: Int64 = 20
+    public static let EXTERNAL_PLAYGROUND_SIZE: Int64 = 20
+
     private let bchir: BCHIR
     private let interpStack: InterpreterStack = InterpreterStack()
     private let arena: InterpreterArena = InterpreterArena()
@@ -398,8 +401,20 @@ public class BCHIRInterpreter {
         return env.GetGlobal(index)
     }
 
+    public func DereferenceValue(value: InterpreterValue): Option<InterpreterValue> {
+        return DereferencePointer(value)
+    }
+
     public func SetGlobalVar(index: Int64, value: InterpreterValue): Bool {
         return env.SetGlobal(index, value)
+    }
+
+    public func SetGlobalVars(values: HashMap<Int64, InterpreterValue>): Unit {
+        for (index in values.keys()) {
+            if (let Some(value) <- values.get(index)) {
+                let _ = env.SetGlobal(index, value)
+            }
+        }
     }
 
     public func GetLastResult(): BCHIRResult {
