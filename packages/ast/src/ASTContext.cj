@@ -273,14 +273,14 @@ public class ASTContext {
 
     public func ClearTypeCheckCache(root: Node): Unit {
         let walker = Walker(root, visitPre: { node: Node =>
-            typeCheckCache.remove(nodeHash(node))
+            typeCheckCache.remove(NodeIdentityKey(node))
             VisitAction.WALK_CHILDREN
         })
         walker.Walk()
     }
 
     public func RemoveTypeCheckCache(node: Node): Unit {
-        typeCheckCache.remove(nodeHash(node))
+        typeCheckCache.remove(NodeIdentityKey(node))
     }
 
     public func SkipSynForCorrectTy(node: Node): Unit {
@@ -292,14 +292,14 @@ public class ASTContext {
             }
         }
         cache.lastKey = CacheKey(node.GetTy(), isDesugared, 0)
-        typeCheckCache[nodeHash(node)] = cache
+        typeCheckCache[NodeIdentityKey(node)] = cache
     }
 
     public func IsSynSkippedForCorrectTy(node: Node): Bool {
         if (!Ty.IsTyCorrect(node.GetTy()) || node.TyKind() == TypeKind.TYPE_QUEST) {
             return false
         }
-        if (let Some(cache) <- typeCheckCache.get(nodeHash(node))) {
+        if (let Some(cache) <- typeCheckCache.get(NodeIdentityKey(node))) {
             if (let Some(_) <- cache.lastKey) {
                 return true
             }
@@ -318,7 +318,7 @@ public class ASTContext {
     }
 
     public func HasTargetTy(node: Node): Bool {
-        return targetTypeMap.contains(nodeHash(node))
+        return targetTypeMap.contains(NodeIdentityKey(node))
     }
 
     public func AddDeclName(names: Names, decl: Decl): Unit {
@@ -458,10 +458,6 @@ public class ASTContext {
             }
         }
         return out
-    }
-
-    private func nodeHash(node: Node): Int64 {
-        return node.begin.hashCode() ^ (node.end.hashCode() << 1) ^ ASTKindIndex(node.astKind)
     }
 
     private func enumConstructorKey(name: String, argSize: UInt64): String {

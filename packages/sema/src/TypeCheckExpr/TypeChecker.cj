@@ -30,20 +30,16 @@ private func questTy(): Ty {
     return TypeManager.GetQuestTy()
 }
 
-private func typeCheckExprNodeHash(node: Node): Int64 {
-    return node.begin.hashCode() ^ (node.end.hashCode() << 1) ^ ASTKindIndex(node.astKind)
-}
-
 private func typeCheckExprTargetTypeOf(ctx: ASTContext, node: Node): Option<Ty> {
-    return ctx.targetTypeMap.get(typeCheckExprNodeHash(node))
+    return ctx.targetTypeMap.get(NodeIdentityKey(node))
 }
 
 func typeCheckExprPutTargetType(ctx: ASTContext, node: Node, ty: Ty): Unit {
-    ctx.targetTypeMap[typeCheckExprNodeHash(node)] = ty
+    ctx.targetTypeMap[NodeIdentityKey(node)] = ty
 }
 
 private func typeCheckExprClearTargetType(ctx: ASTContext, node: Node): Unit {
-    ctx.targetTypeMap.remove(typeCheckExprNodeHash(node))
+    ctx.targetTypeMap.remove(NodeIdentityKey(node))
 }
 
 private func typeCheckExprAllMacroFuncDecls(targets: ArrayList<Decl>): Bool {

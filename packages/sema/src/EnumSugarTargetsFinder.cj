@@ -6,10 +6,6 @@ import cangjie_compiler::ast.*
 
 private let ENUM_SUGAR_CORE_PACKAGE_NAME: String = "std.core"
 
-private func EnumSugarNodeHash(node: Node): Int64 {
-    return node.begin.hashCode() ^ (node.end.hashCode() << 1) ^ ASTKindIndex(node.astKind)
-}
-
 private func IsAllEnumSugarFuncDecl(values: ArrayList<Decl>): Bool {
     for (decl in values) {
         if (decl.astKind != ASTKind.FUNC_DECL && decl.astKind != ASTKind.MACRO_DECL) {
@@ -88,13 +84,11 @@ private func HasMismatchedEnumSugarTypeArgs(refExpr: RefExpr, decl: Decl): Bool 
 }
 
 private func TargetTypeOf(ctx: ASTContext, refExpr: RefExpr): Option<Ty> {
-    let key = EnumSugarNodeHash(refExpr)
-    return ctx.targetTypeMap.get(key)
+    return ctx.targetTypeMap.get(NodeIdentityKey(refExpr))
 }
 
 private func PutTargetType(ctx: ASTContext, refExpr: RefExpr, ty: Ty): Unit {
-    let key = EnumSugarNodeHash(refExpr)
-    ctx.targetTypeMap[key] = ty
+    ctx.targetTypeMap[NodeIdentityKey(refExpr)] = ty
 }
 
 private func RefineAgainstInterface(typeManager: TypeManager, currentTy: Ty, target: Decl): Option<Ty> {
