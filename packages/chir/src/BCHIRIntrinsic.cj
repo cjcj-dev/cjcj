@@ -31,6 +31,10 @@ public class BCHIRIntrinsic {
         return kind == 10
     }
 
+    public static func IsCanUseSIMD(kind: Int64): Bool {
+        return kind == 106
+    }
+
     public static func ReferenceEquals(left: InterpreterValue, right: InterpreterValue): Bool {
         if (left.kind == InterpreterValueKind.INULLPTR) {
             return right.kind == InterpreterValueKind.INULLPTR

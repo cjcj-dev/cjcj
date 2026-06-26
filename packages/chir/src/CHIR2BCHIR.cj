@@ -2,6 +2,23 @@ package cangjie_compiler::chir
 
 import std.collection.*
 
+private let CONST_EVAL_FUNCTIONS: Array<String> = [
+    "@_CNat19ArithmeticException6<init>Hv",
+    "@_CNat19ArithmeticException6<init>HRNat6StringE",
+    "@_CNat9Exception6<init>Hv",
+    "@_CNat9Exception6<init>HRNat6StringE",
+    "@_CNat5Error6<init>Hv",
+    "@_CNat5Error6<init>HRNat6StringE",
+    "@_CNat24IllegalArgumentException6<init>Hv",
+    "@_CNat24IllegalArgumentException6<init>HRNat6StringE",
+    "@_CNat25IndexOutOfBoundsException6<init>Hv",
+    "@_CNat25IndexOutOfBoundsException6<init>HRNat6StringE",
+    "@_CNat17OverflowException6<init>Hv",
+    "@_CNat17OverflowException6<init>HRNat6StringE",
+    "@_CNat5ArrayIhE5cloneHv",
+    "@_CNat6String7toArrayHv",
+]
+
 public class CHIR2BCHIRContext {
     public let definition: BCHIRDefinition = BCHIRDefinition()
     public var localVarId: Int64 = 0
@@ -140,7 +157,7 @@ public class CHIR2BCHIR {
 
     private func TranslateFunctions(chirPkg: Package, forConstEval!: Bool): Unit {
         for (function in chirPkg.GetGlobalFuncsWithBody()) {
-            if (forConstEval && !function.IsCompileTimeValue() && function.GetFuncKind() != FuncKind.MAIN_ENTRY) {
+            if (forConstEval && !ShouldTranslateFunctionForConstEval(function)) {
                 continue
             }
             let context = CHIR2BCHIRContext()
@@ -152,6 +169,25 @@ public class CHIR2BCHIR {
                 bchir.SetMainExpectedArgs(function.GetNumOfParams())
             }
         }
+    }
+
+    private func ShouldTranslateFunctionForConstEval(function: Function): Bool {
+        if (function.IsCompileTimeValue()) {
+            return true
+        }
+        for (name in CONST_EVAL_FUNCTIONS) {
+            if (function.GetIdentifier() == name) {
+                return true
+            }
+        }
+        if (bchir.IsCore()) {
+            for (name in BCHIRDefaultFunctionMangledNames()) {
+                if (BCHIRMangledName(function) == name) {
+                    return true
+                }
+            }
+        }
+        return function.IsFinalizer()
     }
 
     public func TranslateFuncDef(context: CHIR2BCHIRContext, function: Function): Unit {

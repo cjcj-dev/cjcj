@@ -427,6 +427,7 @@ public class FaithfulAST2CHIR {
         TranslateNominalDecls(node)
         TranslateOtherTopLevelDecls(node)
         SetInitFuncForStaticVar()
+        UpdateMemberVarPath(builder).RunOnPackage(CurrentPackage())
         FlatForInExpr(builder).RunOnPackage(CurrentPackage())
         if (!failure && ConstEvalPass.HasConstGlobalVarInitFuncs(CurrentPackage())) {
             ConstEvalPass().RunOnPackage(CurrentPackage())
@@ -1258,7 +1259,7 @@ public class FaithfulAST2CHIR {
                 TranslateImportedFileLiteralInitializer(fileVars, initBlock)
                 continue
             }
-            if (IsImportedInitEntry(fileVars)) {
+            if (IsImportedInitEntry(fileVars) && !IsSrcImportedDecl(fileVars.vars[0])) {
                 continue
             }
             let fileInit = if (suffix == "_literal") {
@@ -1382,7 +1383,7 @@ public class FaithfulAST2CHIR {
         if (fileVars.vars.isEmpty()) {
             return None
         }
-        if (IsImportedInitEntry(fileVars)) {
+        if (IsImportedInitEntry(fileVars) && !IsSrcImportedDecl(fileVars.vars[0])) {
             return None
         }
         let initFuncs = ArrayList<Function>()
@@ -2142,6 +2143,7 @@ public class FaithfulAST2CHIR {
         if (decl.TestAttr(AstAttribute.PRIVATE)) { target.EnableAttr(Attribute.PRIVATE) }
         if (decl.TestAttr(AstAttribute.STATIC)) { target.EnableAttr(Attribute.STATIC) }
         if (decl.TestAttr(AstAttribute.MUT)) { target.EnableAttr(Attribute.MUT) }
+        if (decl.IsConst()) { target.EnableAttr(Attribute.CONST) }
         if (decl.TestAttr(AstAttribute.ABSTRACT)) { target.EnableAttr(Attribute.ABSTRACT) }
         if (decl.TestAttr(AstAttribute.OPEN)) { target.EnableAttr(Attribute.VIRTUAL) }
         if (decl.TestAttr(AstAttribute.FOREIGN)) { target.EnableAttr(Attribute.FOREIGN) }
