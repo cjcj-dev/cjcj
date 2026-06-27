@@ -5184,6 +5184,11 @@ public class Translator {
         baseInfo: FaithfulLeftValueInfo, baseTy: Type): Value {
         let address = AddressOfLeftValue(baseInfo, baseTy)
         if (let Some(expectedTy) <- ExpectedThisParamType(funcDecl, callee, address.GetType() ?? baseTy)) {
+            if (expectedTy.IsClassRef()) {
+                let loaded = LoadLeftValue(baseInfo, baseTy) ??
+                    throw IllegalStateException("faithful AST2CHIR setter class receiver produced no value")
+                return CoerceValueForExpectedType(loaded, expectedTy)
+            }
             return CoerceValueForExpectedType(address, expectedTy)
         }
         if (let Some(calleeTy) <- callee.GetType()) {
