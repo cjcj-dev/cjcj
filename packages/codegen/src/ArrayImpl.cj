@@ -587,7 +587,7 @@ private func CallGCWriteStaticStruct(irBuilder: IRBuilder2, dest: LLVMValueRef, 
     args.add(irBuilder.CreatePointerCast(dest, i8PtrType, name: "gcwrite.static.struct.dest"))
     args.add(irBuilder.CreatePointerCast(source, i8PtrType, name: "gcwrite.static.struct.source"))
     args.add(size)
-    let call = irBuilder.CreateIntrinsicCall("llvm.cj.gcwrite.static.struct", overloadedTypes, args)
+    let call = irBuilder.CreateIntrinsicCallNoInvoke("llvm.cj.gcwrite.static.struct", overloadedTypes, args)
     LLVMSetInstructionMetadata(irBuilder.GetLLVMContext(), call, "AggType",
         LLVMCreateMDTupleFromString(irBuilder.GetLLVMContext(), aggTypeName))
     return call

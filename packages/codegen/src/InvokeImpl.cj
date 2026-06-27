@@ -246,7 +246,7 @@ private func BuildVirtualCallee(irBuilder: IRBuilder2, objectValue: CGValue, own
         intrinsicArgs.add(objectTypeInfoRaw)
         intrinsicArgs.add(ownerTypeInfoRaw)
         intrinsicArgs.add(irBuilder.GetInt64(methodIndex))
-        irBuilder.CreateIntrinsicCall(GET_MTABLE_FUNC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), intrinsicArgs,
+        irBuilder.CreateIntrinsicCallNoInvoke(GET_MTABLE_FUNC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), intrinsicArgs,
             name: "invoke.fn")
     } else {
         let introTypeIndex = VTableSizeOf(ownerTy) - 1
@@ -255,7 +255,7 @@ private func BuildVirtualCallee(irBuilder: IRBuilder2, objectValue: CGValue, own
         intrinsicArgs.add(irBuilder.GetInt64(introTypeIndex))
         intrinsicArgs.add(irBuilder.GetInt64(methodIndex))
         intrinsicArgs.add(ownerTypeInfoRaw)
-        irBuilder.CreateIntrinsicCall(GET_VTABLE_FUNC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), intrinsicArgs,
+        irBuilder.CreateIntrinsicCallNoInvoke(GET_VTABLE_FUNC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), intrinsicArgs,
             name: "invoke.fn")
     }
     if (isInterfaceCall && ownerTy.StripAllRefs().GetTypeArgs().isEmpty()) {
@@ -267,7 +267,7 @@ private func BuildVirtualCallee(irBuilder: IRBuilder2, objectValue: CGValue, own
     outerTypeInfoArgs.add(objectTypeInfoRaw)
     outerTypeInfoArgs.add(ownerTypeInfoRaw)
     outerTypeInfoArgs.add(irBuilder.GetInt64(methodIndex))
-    let rawOuterTypeInfo = irBuilder.CreateIntrinsicCall(GET_METHOD_OUTERTYPE_INTRINSIC_NAME,
+    let rawOuterTypeInfo = irBuilder.CreateIntrinsicCallNoInvoke(GET_METHOD_OUTERTYPE_INTRINSIC_NAME,
         ArrayList<LLVMTypeRef>(), outerTypeInfoArgs, name: "invoke.outer.ti.raw")
     let outerTypeInfo = irBuilder.CreateBitCast(rawOuterTypeInfo, typeInfoPtrType, name: "invoke.outer.ti")
     return (irBuilder.CreateBitCast(rawCallee,

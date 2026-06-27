@@ -1604,7 +1604,7 @@ public class IRBuilder2 <: Resource {
         args.add(CreatePointerCast(value, gcRefType, name: "gcwrite.val"))
         args.add(CreatePointerCast(baseObj, gcRefType, name: "gcwrite.base"))
         args.add(CreatePointerCast(fieldPtr, gcRefPtrType, name: "gcwrite.field"))
-        return CreateIntrinsicCall(GCWRITE_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+        return CreateIntrinsicCallNoInvoke(GCWRITE_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
     public func CallGCWriteRef(value: LLVMValueRef, baseObject: LLVMValueRef, place: LLVMValueRef): LLVMValueRef {
@@ -1614,14 +1614,14 @@ public class IRBuilder2 <: Resource {
         args.add(CreatePointerCast(value, refTy, name: "gcwrite.ref.value"))
         args.add(CreatePointerCast(baseObject, refTy, name: "gcwrite.ref.base"))
         args.add(CreatePointerCast(place, refPlaceTy, name: "gcwrite.ref.place"))
-        return CreateIntrinsicCall("llvm.cj.gcwrite.ref", ArrayList<LLVMTypeRef>(), args)
+        return CreateIntrinsicCallNoInvoke("llvm.cj.gcwrite.ref", ArrayList<LLVMTypeRef>(), args)
     }
 
     public func CallGCWriteStaticRef(value: LLVMValueRef, place: LLVMValueRef): LLVMValueRef {
         let args = ArrayList<LLVMValueRef>()
         args.add(value)
         args.add(place)
-        return CreateIntrinsicCall(GCWRITE_STATIC_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+        return CreateIntrinsicCallNoInvoke(GCWRITE_STATIC_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
     public func CallGCWriteGeneric(baseObject: LLVMValueRef, dest: LLVMValueRef, source: LLVMValueRef,
@@ -1634,7 +1634,7 @@ public class IRBuilder2 <: Resource {
         args.add(CreatePointerCast(dest, destPtrTy, name: "gcwrite.generic.dest"))
         args.add(source)
         args.add(size)
-        return CreateIntrinsicCall(GCWRITE_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+        return CreateIntrinsicCallNoInvoke(GCWRITE_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
     public func CallGCReadRef(baseObject: LLVMValueRef, place: LLVMValueRef): LLVMValueRef {
@@ -1643,13 +1643,13 @@ public class IRBuilder2 <: Resource {
         let args = ArrayList<LLVMValueRef>()
         args.add(CreatePointerCast(baseObject, refTy, name: "gcread.ref.base"))
         args.add(CreatePointerCast(place, refPlaceTy, name: "gcread.ref.place"))
-        return CreateIntrinsicCall("llvm.cj.gcread.ref", ArrayList<LLVMTypeRef>(), args, name: "gcread.ref")
+        return CreateIntrinsicCallNoInvoke("llvm.cj.gcread.ref", ArrayList<LLVMTypeRef>(), args, name: "gcread.ref")
     }
 
     public func CallGCReadStaticRef(place: LLVMValueRef): LLVMValueRef {
         let args = ArrayList<LLVMValueRef>()
         args.add(place)
-        return CreateIntrinsicCall(GCREAD_STATIC_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+        return CreateIntrinsicCallNoInvoke(GCREAD_STATIC_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
     public func CallGCReadGeneric(dest: LLVMValueRef, baseObject: LLVMValueRef, source: LLVMValueRef,
@@ -1661,7 +1661,7 @@ public class IRBuilder2 <: Resource {
             unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 1u32) },
             name: "gcread.generic.source"))
         args.add(size)
-        return CreateIntrinsicCall(GCREAD_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+        return CreateIntrinsicCallNoInvoke(GCREAD_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
     public func CallGetFieldOffset(typeInfo: LLVMValueRef, index: UInt64, preOffset: UInt64): LLVMValueRef {
@@ -1694,7 +1694,7 @@ public class IRBuilder2 <: Resource {
         args.add(CreatePointerCast(dest, destPtrTy, name: "gcwrite.struct.dest"))
         args.add(CreatePointerCast(source, sourcePtrTy, name: "gcwrite.struct.source"))
         args.add(size)
-        let call = CreateIntrinsicCall("llvm.cj.gcwrite.struct", overloadedTypes, args)
+        let call = CreateIntrinsicCallNoInvoke("llvm.cj.gcwrite.struct", overloadedTypes, args)
         let metadata = LLVMCreateMDTupleFromString(GetLLVMContext(), aggTypeName)
         LLVMSetInstructionMetadata(GetLLVMContext(), call, "AggType", metadata)
         return call
@@ -1719,7 +1719,7 @@ public class IRBuilder2 <: Resource {
         args.add(CreatePointerCast(baseObject, CGType.GetRefType(GetLLVMContext()), name: "gcread.struct.base"))
         args.add(CreatePointerCast(source, sourcePtrTy, name: "gcread.struct.source"))
         args.add(size)
-        let call = CreateIntrinsicCall("llvm.cj.gcread.struct", overloadedTypes, args)
+        let call = CreateIntrinsicCallNoInvoke("llvm.cj.gcread.struct", overloadedTypes, args)
         let metadata = LLVMCreateMDTupleFromString(GetLLVMContext(), aggTypeName)
         LLVMSetInstructionMetadata(GetLLVMContext(), call, "AggType", metadata)
         return call
