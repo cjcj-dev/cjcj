@@ -90,7 +90,9 @@ public func DeclareTypeInfoGlobal(cgMod: CGModule, chirTy: Type, genericKind: CG
     }
     cgMod.GetCGContext().AddCodeGenAddedFuncsOrVars(chirTy, typeInfoName)
     let typeInfo = GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoTy)
-    if (chirTy.IsPrimitive()) {
+    if (chirTy.IsPrimitive() || chirTy.IsCString()) {
+        // C++ groups CString with primitives/void when attaching the GC-layout metadata
+        // (CGType::GenTypeInfo, CGType.cpp:634); its layout struct is "CString.Type".
         let layoutName = if (chirTy.IsVoid()) { UNIT_TYPE_STR } else { chirTy.ToString() + ".Type" }
         LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), typeInfo, GC_TYPE_META_NAME, layoutName)
     }
