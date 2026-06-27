@@ -297,11 +297,8 @@ private func VTableSizeOf(ownerTy: Type): Int64 {
         if (classDef.IsInterface()) {
             return 0
         }
-        if (IsCoreObjectDef(classDef)) {
-            return 1
-        }
-        var count: Int64 = 2
-        var current = classDef.GetSuperClassDef()
+        var count: Int64 = 0
+        var current: Option<ClassDef> = classDef
         while (let Some(def) <- current) {
             count++
             current = def.GetSuperClassDef()
