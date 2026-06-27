@@ -79,11 +79,10 @@ public func IsBuiltinUnaryExpr(op: TokenKind, ty: Ty): Bool {
 
 public func SynBuiltinUnaryExpr(typeManager: TypeManager, ue: UnaryExpr): Ty {
     if (let Some(innerExpr) <- ue.expr) {
-        // Mirror C++ SynBuiltinUnaryExpr's `Synthesize(ctx, ue.expr)`: the operand is already
-        // synthesized through the IsChecked-guarded path (Synthesize -> SynthesizeNodeChildren ->
-        // Synthesize), so synthesize here only when it has not been visited yet, and never
-        // re-derive an already-typed operand (a context-free re-run would clobber the resolved type).
-        if (innerExpr.GetTy().isNone()) {
+        // Mirror C++ SynBuiltinUnaryExpr's `Synthesize(ctx, ue.expr)`: an operand reset by Clear()
+        // has Initial type and must be synthesized again, but already-typed operands must not be
+        // re-derived by this context-free shallow path.
+        if (innerExpr.GetTy().isNone() || Ty.IsInitialTy(innerExpr.GetTy())) {
             let _ = SynExprShallow(typeManager, innerExpr)
         }
         if (!Ty.IsTyCorrect(innerExpr.GetTy())) {
