@@ -1373,6 +1373,33 @@ private func PropagatePlaceholderAndSolve(typeManager: TypeManager, ce: CallExpr
     return solved
 }
 
+private func SameDeclOpt(left: Option<Decl>, right: Option<Decl>): Bool {
+    match (left) {
+        case Some(leftDecl) => if (let Some(rightDecl) <- right) {
+            SameDecl(leftDecl, rightDecl)
+        } else {
+            false
+        }
+        case None => match (right) {
+            case Some(_) => false
+            case None => true
+        }
+    }
+}
+
+private func TryUpdateEnumTyByTarget(ce: CallExpr, fd: FuncDecl, retTarget: Option<Ty>): Unit {
+    if (let Some(baseFunc) <- ce.baseFunc) {
+        if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+            if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                if (IsEnumCtorWithoutTypeArgs(memberAccess, Some(fd)) &&
+                    SameDeclOpt(Ty.GetDeclPtrOfTy(retTarget), fd.outerDecl)) {
+                    baseExpr.SetTy(retTarget.getOrThrow())
+                }
+            }
+        }
+    }
+}
+
 private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl, paramTys: ArrayList<Ty>,
     typeMapping: SubstPack, inferenceFailure: Option<CallInferenceFailure>, target: Option<Ty>,
     argChecker: Option<CallArgChecker>): Bool {
@@ -1392,7 +1419,7 @@ private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr,
     }
     var idx: Int64 = 0
     while (idx < ce.args.size && idx < paramsTyInOrder.size) {
-        let argTy = typeManager.ReplaceIdealTy(GetExprTy(ce.args[idx]))
+        let argTy = GetExprTy(ce.args[idx])
         stat.argTys.add(argTy)
         stat.failSet.add(!Ty.IsTyCorrect(argTy))
         stat.questParamTys.add(None)
@@ -1421,7 +1448,7 @@ private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr,
                     if (let Some(checker) <- argChecker) {
                         ce.args[argIdx].Clear()
                         if (checker(questParamTy, ce.args[argIdx])) {
-                            stat.argTys[argIdx] = typeManager.ReplaceIdealTy(GetExprTy(ce.args[argIdx]))
+                            stat.argTys[argIdx] = GetExprTy(ce.args[argIdx])
                         }
                     }
                 }
@@ -1725,6 +1752,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     if (paramTyInArgOrder.size != ce.args.size) {
         return None
     }
+    TryUpdateEnumTyByTarget(ce, fd, target)
     let typeMapping = GenerateCallBaseTypeMapping(typeManager, ce)
     if (!InferGenericCallTypeMapping(typeManager, ce, fd, paramTyInArgOrder, typeMapping, inferenceFailure, target,
         argChecker)) {

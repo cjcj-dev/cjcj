@@ -1205,9 +1205,8 @@ public class TypeChecker {
         if (let Some(expr) <- arg.expr) {
             let exprTy = Synthesize(ctx, expr)
             if (Ty.IsTyCorrect(exprTy)) {
-                let concreteTy = TcReplaceIdeal(impl.typeManager, expr)
-                arg.SetTy(concreteTy)
-                return concreteTy
+                arg.SetTy(exprTy)
+                return exprTy
             }
         }
         let invalidTy = TypeManager.GetInvalidTy()
