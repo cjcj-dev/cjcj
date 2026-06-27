@@ -1141,6 +1141,14 @@ public class IRBuilder2 <: Resource {
         return false
     }
 
+    private func IsVArrayPtrType(cgType: CGType): Bool {
+        if (!cgType.IsPointerType()) {
+            return false
+        }
+        let contained = cgType.GetContainedTypes()
+        return !contained.isEmpty() && contained[0].IsVArrayType()
+    }
+
     private func FixFuncArg(arg: CGValue, destType: CGType, name!: String = ""): LLVMValueRef {
         let raw = arg.GetRawValue()
         let paramTy = destType.GetOriginal()
@@ -1165,7 +1173,7 @@ public class IRBuilder2 <: Resource {
                 }
             }
             let rawTy = unsafe { LLVMTypeOf(raw) }
-            if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12) {
+            if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == LLVM_POINTER_TYPE_KIND) {
                 return CreateBitCast(raw, CGType.GetOrCreate(cgMod, paramTy).GetLLVMType(),
                     name: if (name.isEmpty()) { "fn.arg.cast" } else { name + ".fn.arg.cast" })
             }
@@ -1176,10 +1184,17 @@ public class IRBuilder2 <: Resource {
             return raw
         }
         let rawTy = unsafe { LLVMTypeOf(raw) }
-        if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12) {
+        if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == LLVM_POINTER_TYPE_KIND) {
+            let argCGType = arg.GetCGType() ?? return raw
+            if (!argCGType.IsStructPtrType() && !IsVArrayPtrType(argCGType)) {
+                return raw
+            }
             let destPtrTy = destType.GetLLVMType()
+            if (unsafe { LLVMGetTypeKind(destPtrTy) } != LLVM_POINTER_TYPE_KIND) {
+                return raw
+            }
             let rawAddrspace = unsafe { LLVMGetPointerAddressSpace(rawTy) }
-            let destAddrspace = unsafe { LLVMGetPointerAddressSpace(destPtrTy) }
+            let destAddrspace = destType.GetAddrspace()
             if (rawAddrspace != destAddrspace) {
                 return CreateAddrSpaceCast(raw, destPtrTy,
                     name: if (name.isEmpty()) { "arg.cast" } else { name + ".arg.cast" })
