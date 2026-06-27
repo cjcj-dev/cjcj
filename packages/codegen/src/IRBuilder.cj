@@ -1395,7 +1395,11 @@ public class IRBuilder2 <: Resource {
         if (typeInfoValue.isNull() || chirTy.IsGeneric()) {
             return
         }
-        let layoutName = if (chirTy.IsClass()) {
+        let cgType = CGType.GetOrCreate(cgMod, chirTy)
+        let layoutType = cgType.GetLayoutType()
+        let layoutName = if (!layoutType.isNull() && unsafe { LLVMGetTypeKind(layoutType) } == LLVM_STRUCT_TYPE_KIND) {
+            LLVMCStringToString(unsafe { LLVMGetStructName(layoutType) }) ?? ""
+        } else if (chirTy.IsClass()) {
             GetClassObjLayoutName(chirTy.ToString())
         } else if (chirTy.IsRawArray()) {
             ARRAY_LAYOUT_PREFIX + chirTy.ToString()
@@ -1404,6 +1408,9 @@ public class IRBuilder2 <: Resource {
         } else if (chirTy.IsStruct() || chirTy.IsTuple() || chirTy.IsEnum()) {
             STRUCT_TYPE_PREFIX + chirTy.ToString()
         } else {
+            return
+        }
+        if (layoutName.isEmpty()) {
             return
         }
         LLVMSetGlobalStringMetadata(GetLLVMContext(), typeInfoValue, GC_TYPE_META_NAME, layoutName)

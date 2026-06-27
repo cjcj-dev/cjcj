@@ -33,6 +33,7 @@ private let UG_FUNC_KIND: UInt64 = 131u64
 private let UG_GENERIC_CUSTOM_KIND: UInt64 = 254u64
 private let UG_GENERIC_KIND: UInt64 = 255u64
 private let UG_TUPLE_KIND: UInt64 = 21u64
+private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
 private let UG_STRUCT_KIND: UInt64 = 22u64
 private let UG_ENUM_KIND: UInt64 = 23u64
 private let GET_TYPE_INFO_INTRINSIC_NAME: String = "llvm.cj.get.type.info"
@@ -90,7 +91,7 @@ public func DeclareTypeInfoGlobal(cgMod: CGModule, chirTy: Type, genericKind: CG
     }
     cgMod.GetCGContext().AddCodeGenAddedFuncsOrVars(chirTy, typeInfoName)
     let typeInfo = GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoTy)
-    if (chirTy.IsPrimitive() || chirTy.IsCString() || chirTy.IsCPointer()) {
+    if (chirTy.IsPrimitive() || chirTy.IsVoid() || chirTy.IsCString() || chirTy.IsCPointer()) {
         // C++ attaches the GC-layout metadata from the CGType's layout struct name (CGType::GenTypeInfo,
         // CGType.cpp:623/634): primitives/void/CString use "<type>.Type"; every CPointer<T> shares the
         // single "CPointer.Type" layout (CGCPointerType.cpp:21-24), so its metadata is that fixed name.
@@ -329,7 +330,8 @@ public func RedefineTypeInfoGlobal(cgMod: CGModule, chirTy: Type): Unit {
             LLVMSetInitializer(typeInfo, initializer)
             SetConcreteTypeInfoLinkage(typeInfo, chirTy)
         }
-        LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), typeInfo, GC_TYPE_META_NAME, GetLayoutMetadataName(chirTy))
+        LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), typeInfo, GC_TYPE_META_NAME,
+            GetLayoutMetadataName(cgMod, chirTy))
     }
 }
 
@@ -375,7 +377,8 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
             LLVMSetInitializer(typeInfo, initializer)
             SetConcreteTypeInfoLinkage(typeInfo, chirTy)
         }
-        LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), typeInfo, GC_TYPE_META_NAME, GetLayoutMetadataName(chirTy))
+        LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), typeInfo, GC_TYPE_META_NAME,
+            GetLayoutMetadataName(cgMod, chirTy))
     }
 }
 
@@ -1547,7 +1550,15 @@ private func GenerateMTableOfTypeInfo(cgMod: CGModule, chirTy: Type, i8PtrType: 
         updatedInheritedClassNum)
 }
 
-private func GetLayoutMetadataName(chirTy: Type): String {
+private func GetLayoutMetadataName(cgMod: CGModule, chirTy: Type): String {
+    let cgType = CGType.GetOrCreate(cgMod, chirTy)
+    let layoutType = cgType.GetLayoutType()
+    if (!layoutType.isNull() && unsafe { LLVMGetTypeKind(layoutType) } == LLVM_STRUCT_TYPE_KIND) {
+        let layoutName = LLVMCStringToString(unsafe { LLVMGetStructName(layoutType) }) ?? ""
+        if (!layoutName.isEmpty()) {
+            return layoutName
+        }
+    }
     if (chirTy.IsClass()) {
         return GetClassObjLayoutName(chirTy.ToString())
     }
