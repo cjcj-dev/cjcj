@@ -2,6 +2,7 @@ package cangjie_compiler::frontend
 
 import cangjie_compiler::ast.AddCurFile
 import cangjie_compiler::ast.TokenKind
+import cangjie_compiler::conditional_compilation.ConditionalCompilation
 import cangjie_compiler::parse.DiagnosticEngine as ParseDiagnosticEngine
 import cangjie_compiler::parse.DiagSeverity as ParseDiagSeverity
 import cangjie_compiler::parse.Parser as RealParser
@@ -49,7 +50,15 @@ public open class CompileStrategy {
     }
 
     public func ConditionCompile(): Bool {
-        return true
+        // Faithful port of C++ CompileStrategy::ConditionCompile (Frontend/CompileStrategy.cpp:59-67):
+        // run the conditional-compilation pass over each source package; succeed iff it added no errors.
+        let basicDiag = ci.diag.AsBasicDiagnosticEngine()
+        let beforeErrCnt = basicDiag.GetErrorCount()
+        let cc = ConditionalCompilation(ci.invocation.globalOptions, basicDiag)
+        for (pkg in ci.srcPkgs) {
+            cc.HandleConditionalCompilation(pkg)
+        }
+        return beforeErrCnt == basicDiag.GetErrorCount()
     }
 
     public func DesugarAfterSema(): Unit {

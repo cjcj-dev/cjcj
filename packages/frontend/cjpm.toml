@@ -18,6 +18,7 @@
   "cangjie_compiler::basic" = { path = "../basic" }
   "cangjie_compiler::chir" = { path = "../chir" }
   "cangjie_compiler::codegen" = { path = "../codegen" }
+  "cangjie_compiler::conditional_compilation" = { path = "../conditional_compilation" }
   "cangjie_compiler::lex" = { path = "../lex" }
   "cangjie_compiler::mangle" = { path = "../mangle" }
   "cangjie_compiler::meta_transformation" = { path = "../meta_transformation" }
