@@ -73,12 +73,6 @@ private func DiagRefEmit(diag: BasicDiagnosticEngine, node: Node, kind: BasicDia
     builder.Emit()
 }
 
-private func SetInvalid(ce: CallExpr): Ty {
-    ce.SetTy(TypeManager.GetInvalidTy())
-    ce.callKind = CallKind.CALL_INVALID
-    return TypeManager.GetInvalidTy()
-}
-
 private func BodyParamList(fd: FuncDecl): Option<FuncParamList> {
     if (let Some(body) <- fd.funcBody) {
         if (!body.paramLists.isEmpty()) {
@@ -1944,14 +1938,6 @@ private func PostCheckCallExpr(typeManager: TypeManager, diag: Option<BasicDiagn
             }
         }
     }
-    if (fd.TestAttr(Attribute.C) && !ce.TestAttr(Attribute.UNSAFE)) {
-        if (let Some(diagValue) <- diag) {
-            DiagOld(diagValue, ce, BasicDiagKind.sema_unsafe_function_invoke_failed)
-        }
-        ce.SetTy(TypeManager.GetInvalidTy())
-        ce.callKind = CallKind.CALL_INVALID
-        return false
-    }
     if (let Some(fdTy) <- fd.GetTy()) {
         if (fdTy.HasQuestTy()) {
             ce.SetTy(TypeManager.GetInvalidTy())
@@ -2085,54 +2071,20 @@ private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagno
         return false
     }
     let paramTys = CheckCallArgs(None, typeManager, ce, funcTy).getOrThrow()
-    let typeMapping = GenerateCallBaseTypeMapping(typeManager, ce)
+    let typeMapping = if (funcTy.HasGeneric()) {
+        GenerateCallBaseTypeMapping(typeManager, ce)
+    } else {
+        SubstPack()
+    }
     var idx: Int64 = 0
     while (idx < paramTys.size) {
         let param = typeManager.ApplySubstPack(paramTys[idx], typeMapping)
         if (!CheckCallArgCompatible(typeManager, diag, ce, idx, param, argChecker)) {
             return false
         }
-        let argTy = GetExprTy(ce.args[idx])
-        if (funcTy.isC && argTy.IsUnit()) {
-            if (let Some(diagValue) <- diag) {
-                DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_unit_cannot_as_cfunc_arg)
-            }
-            return false
-        }
-        if (Ty.IsCStructType(argTy) && !SameTy(argTy, param)) {
-            if (let Some(diagValue) <- diag) {
-                DiagOldStrings(diagValue, ce.args[idx], BasicDiagKind.sema_cstruct_cannot_autobox, [param.String()])
-            }
-            return false
-        }
         idx++
     }
-    if (funcTy.isC) {
-        for (arg in ce.args) {
-            if (IsVArrayTy(GetExprTy(arg)) && !arg.withInout) {
-                if (let Some(diagValue) <- diag) {
-                    DiagRef(diagValue, arg, BasicDiagKindRefactor.sema_inout_mismatch, args: ["VArray"])
-                }
-                return false
-            }
-        }
-        if (!ce.TestAttr(Attribute.UNSAFE)) {
-            if (let Some(diagValue) <- diag) {
-                DiagOld(diagValue, ce, BasicDiagKind.sema_unsafe_function_invoke_failed)
-            }
-            return false
-        }
-    }
-    if (let Some(base) <- ce.baseFunc) {
-        if (let Some(instFuncTy) <- (typeManager.ApplySubstPack(funcTy, typeMapping) as FuncTy)) {
-            base.SetTy(instFuncTy)
-            ce.SetTy(instFuncTy.retTy)
-        } else {
-            ce.SetTy(typeManager.ApplySubstPack(funcTy.retTy, typeMapping))
-        }
-    } else {
-        ce.SetTy(typeManager.ApplySubstPack(funcTy.retTy, typeMapping))
-    }
+    ce.SetTy(typeManager.ApplySubstPack(funcTy.retTy, typeMapping))
     if (let Some(targetTy) <- target) {
         if (!typeManager.IsSubtype(ce.GetTy() ?? TypeManager.GetInvalidTy(), targetTy)) {
             if (let Some(diagValue) <- diag) {
@@ -2154,11 +2106,32 @@ private func CheckNonNormalCall(typeManager: TypeManager, diag: Option<BasicDiag
                     ce.SetTy(TypeManager.GetInvalidTy())
                     return false
                 }
-                let ok = CheckFuncPtrCall(typeManager, diag, target, ce, funcTy, argChecker: argChecker)
-                if (!ok) {
+                var res = CheckFuncPtrCall(typeManager, diag, target, ce, funcTy, argChecker: argChecker)
+                // VArray must be modified by 'inout' in a CFunc lambda call. (C++ TypeCheckCall.cpp:2928)
+                if (funcTy.IsCFunc()) {
+                    for (arg in ce.args) {
+                        if (IsVArrayTy(GetExprTy(arg)) && !arg.withInout) {
+                            if (let Some(diagValue) <- diag) {
+                                DiagRef(diagValue, arg, BasicDiagKindRefactor.sema_inout_mismatch, args: ["VArray"])
+                            }
+                            res = false
+                            break
+                        }
+                    }
+                }
+                // An unsafe CFunc lambda call must appear in an unsafe context; CheckUnsafeInvoke only
+                // covers calls with a resolvedFunction, so the function-pointer path enforces it here.
+                // (C++ TypeCheckCall.cpp:2937)
+                if (funcTy.isC && !ce.TestAttr(Attribute.UNSAFE) && !IsValidCFuncConstructorCall(ce)) {
+                    if (let Some(diagValue) <- diag) {
+                        DiagOld(diagValue, ce, BasicDiagKind.sema_unsafe_function_invoke_failed)
+                    }
+                    res = false
+                }
+                if (!res) {
                     ce.SetTy(TypeManager.GetInvalidTy())
                 }
-                return ok
+                return res
             }
         }
     }
@@ -2252,6 +2225,14 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
     if (let None <- ce.baseFunc) {
         return ChkBuiltinCall(typeManager, target ?? TypeManager.GetInvalidTy(), ce)
     }
+    let prevCheckTrue = ce.callKind != CallKind.CALL_INVALID && Ty.IsTyCorrect(ce.GetTy()) &&
+        typeManager.GetUnsolvedTyVars().isEmpty()
+    let argsTys = ArrayList<Option<Ty>>()
+    if (prevCheckTrue) {
+        for (arg in ce.args) {
+            argsTys.add(arg.GetTy())
+        }
+    }
     if (clearInferredForTarget) {
         if (let Some(targetTy) <- target) {
             if (!targetTy.IsQuest() && !targetTy.HasGeneric()) {
@@ -2300,7 +2281,22 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
         }
         ce.resolvedFunction = Some(result[0])
     }
-    let _ = SetInvalid(ce)
+    if (prevCheckTrue) {
+        var idx: Int64 = 0
+        while (idx < ce.args.size && idx < argsTys.size) {
+            if (let Some(argTy) <- argsTys[idx]) {
+                ce.args[idx].SetTy(argTy)
+            }
+            idx++
+        }
+    }
+    if (let Some(diagValue) <- diag) {
+        if (!diagValue.GetDiagnoseStatus() && !prevCheckTrue) {
+            ce.callKind = CallKind.CALL_INVALID
+        }
+    } else if (!prevCheckTrue) {
+        ce.callKind = CallKind.CALL_INVALID
+    }
     return false
 }
 

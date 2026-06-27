@@ -468,6 +468,9 @@ private func ChkCallExprShallow(typeManager: TypeManager, target: Ty, ce: CallEx
     if (ChkCallExpr(typeManager, None, Some(target), ce)) {
         return true
     }
+    if (Ty.IsTyCorrect(ce.GetTy())) {
+        return false
+    }
     let _ = TcInvalid(ce)
     return false
 }

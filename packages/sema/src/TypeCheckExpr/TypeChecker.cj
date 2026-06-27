@@ -2918,6 +2918,31 @@ public class TypeChecker {
         return matched
     }
 
+    private func CheckTupleLit(ctx: ASTContext, target: Ty, tupleLit: TupleLit): Bool {
+        // Mirror CheckArrayLit: push the target element types into the children via the full,
+        // ctx-aware Check (so an empty/ideal child literal such as `[]` resolves against its
+        // target element type), then delegate to ChkTupleLit for the authoritative diagnostics,
+        // ideal-type replacement and final SetTy. (C++ TypeChecker::ChkTupleLit, TupleLit.cpp:16)
+        let targetTy = UnboxOptionType(target)
+        var matched = true
+        if (let Some(targetTuple) <- (targetTy as TupleTy)) {
+            if (targetTuple.typeArgs.size == tupleLit.children.size) {
+                var idx: Int64 = 0
+                while (idx < targetTuple.typeArgs.size) {
+                    if (!Check(ctx, targetTuple.typeArgs[idx], tupleLit.children[idx])) {
+                        matched = false
+                        break
+                    }
+                    idx++
+                }
+            }
+        }
+        if (!ChkTupleLit(impl.typeManager, target, tupleLit)) {
+            matched = false
+        }
+        return matched
+    }
+
     private func Synthesize(ctx: ASTContext, expr: Expr): Ty {
         if (expr.TestAttr(Attribute.IS_BROKEN)) {
             expr.SetTy(TypeManager.GetInvalidTy())
@@ -3223,6 +3248,9 @@ public class TypeChecker {
         }
         if (let Some(arrayLit) <- (expr as ArrayLit)) {
             return FinishCheck(ctx, arrayLit, CheckArrayLit(ctx, target, arrayLit))
+        }
+        if (let Some(tupleLit) <- (expr as TupleLit)) {
+            return FinishCheck(ctx, tupleLit, CheckTupleLit(ctx, target, tupleLit))
         }
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
             return FinishCheck(ctx, binaryExpr, CheckBinaryExpr(ctx, target, binaryExpr))
