@@ -1361,11 +1361,9 @@ public class ClosureConversion {
             throw IllegalStateException("ClosureConversion apply has no result type")
         let parent = apply.GetParentBlock() ??
             throw IllegalStateException("ClosureConversion apply has no parent block")
-        let invokeRetTy = GetInvokeABIResultType(methodTy.GetReturnType(), retTy)
-        let invoke = builder.CreateInvoke(invokeRetTy, invokeContext, parent)
+        let invoke = builder.CreateInvoke(retTy, invokeContext, parent)
         invoke.SetVirtualMethodOffset(0u64)
         apply.ReplaceWith(invoke)
-        InsertInvokeResultConversionIfNeeded(invoke, retTy)
     }
 
     private func ConvertApplyWithExceptionToInvokeWithException(apply: ApplyWithException): Unit {
@@ -1384,41 +1382,6 @@ public class ClosureConversion {
                 throw IllegalStateException("ClosureConversion apply-with-exception has no parent block"))
         invoke.SetVirtualMethodOffset(0u64)
         apply.ReplaceWith(invoke)
-    }
-
-    private func GetInvokeABIResultType(methodRetTy: Type, expectedRetTy: Type): Type {
-        if (methodRetTy.IsGeneric() && !expectedRetTy.IsGeneric()) {
-            return methodRetTy
-        }
-        return expectedRetTy
-    }
-
-    private func InsertInvokeResultConversionIfNeeded(invoke: Invoke, expectedRetTy: Type): Unit {
-        let invokeResult = RequireResult(invoke)
-        let invokeRetTy = invokeResult.GetType() ??
-            throw IllegalStateException("ClosureConversion invoke result has no type")
-        if (invokeRetTy.IsEqual(expectedRetTy)) {
-            return
-        }
-        let parent = invoke.GetParentBlock() ??
-            throw IllegalStateException("ClosureConversion invoke has no parent block")
-        let converted = TypeCastOrBoxIfNeeded(invokeResult, expectedRetTy, parent)
-        if (let Some(convertedExpr) <- ValueExpr(converted)) {
-            convertedExpr.MoveAfter(invoke)
-            let users = invokeResult.GetUsers()
-            for (user in users) {
-                if (user.nodeId != convertedExpr.nodeId) {
-                    user.ReplaceOperand(invokeResult, converted)
-                }
-            }
-        }
-    }
-
-    private func ValueExpr(value: Value): Option<Expression> {
-        if (let Some(local) <- value.AsLocalVar()) {
-            return local.GetExpr()
-        }
-        return None
     }
 
     private func ResolveAutoEnvCallParentType(callee: Value, call: Expression): ClassType {
