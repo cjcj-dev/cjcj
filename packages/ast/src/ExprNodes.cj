@@ -1074,7 +1074,6 @@ public class CallExpr <: Expr {
         }
         callKind = CallKind.CALL_INVALID
         resolvedFunction = None
-        desugarArgs = None
     }
 
     public override func ToString(): String {

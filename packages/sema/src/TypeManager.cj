@@ -498,31 +498,34 @@ public class TypeManager {
     }
 
     public func GetInstantiatedTys(ty: Ty, mts: MultiTypeSubst): TySet {
-        if (let Some(gen) <- (ty as GenericsTy)) {
-            if (let Some(values) <- mts.Get(gen)) {
-                return values.Clone()
-            }
+        if (mts.entries.isEmpty()) {
+            return TySet([ty])
         }
-        let out = TySet()
-        out.Add(GetBestInstantiatedTy(ty, mts))
-        return out
+        let usefulTys = TySet([ty])
+        let reduced = ReduceMultiTypeSubst(this, GetAllGenericTys(ty), mts)
+        let mappings = ExpandMultiTypeSubst(reduced, usefulTys)
+        let res = TySet()
+        for (mapping in mappings) {
+            res.Add(GetInstantiatedTy(ty, mapping))
+        }
+        if (res.values.size > 1) {
+            let _ = res.Remove(ty)
+        }
+        return res
     }
 
     public func GetBestInstantiatedTy(ty: Ty, mts: MultiTypeSubst): Ty {
-        if (let Some(gen) <- (ty as GenericsTy)) {
-            if (let Some(values) <- mts.Get(gen)) {
-                if (!values.values.isEmpty()) {
-                    return values.values[0]
-                }
-            }
+        if (mts.entries.isEmpty()) {
+            return ty
         }
-        let subst = TypeSubst()
-        for (entry in mts.entries) {
-            if (!entry.tys.values.isEmpty()) {
-                subst.Put(entry.tyVar, entry.tys.values[0])
-            }
+        if (!Ty.IsTyCorrect(ty)) {
+            return TypeManager.GetInvalidTy()
         }
-        return GetInstantiatedTy(ty, subst)
+        let instTys = GetInstantiatedTys(ty, mts)
+        if (instTys.IsEmpty()) {
+            return ty
+        }
+        return instTys.values[0]
     }
 
     public func GetInstantiatedTy(ty: Ty, typeMapping: TypeSubst): Ty {

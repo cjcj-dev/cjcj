@@ -3256,7 +3256,8 @@ public class TypeChecker {
         if (let Some(callExpr) <- (expr as CallExpr)) {
             SynthesizeCallChildren(ctx, callExpr)
             let callTy = SynCallExprWithArgChecker(impl.typeManager, callExpr,
-                Some({ target: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, target, arg) }), diag: impl.diag)
+                Some({ target: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, target, arg) }), diag: impl.diag,
+                declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }))
             return FinishSynthesize(ctx, callExpr, callTy)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
@@ -3590,7 +3591,8 @@ public class TypeChecker {
             let ok = ChkCallExprWithArgChecker(impl.typeManager, impl.diag, Some(target), callExpr,
                 Some({ paramTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, paramTy, arg) }),
                 desugarChecker: Some({ target2: Ty, expr2: Expr => Check(ctx, target2, expr2) }),
-                clearInferredForTarget: clearInferredCallTypes)
+                clearInferredForTarget: clearInferredCallTypes,
+                declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }))
             return FinishCheck(ctx, callExpr, ok)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {

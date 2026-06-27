@@ -11,6 +11,7 @@ import cangjie_compiler::basic.Range as BasicRange
 
 public type CallArgChecker = (Ty, FuncArg) -> Bool
 public type CallDesugarChecker = (Ty, Expr) -> Bool
+public type CallDeclSynthesizer = (FuncDecl) -> Bool
 
 private class FunctionMatchingUnit {
     public var fd: FuncDecl
@@ -1121,6 +1122,18 @@ private func AllCallArgsHaveCorrectTy(ce: CallExpr): Bool {
     return true
 }
 
+private func NeedSynOnUsed(target: Decl): Bool {
+    // C++ TypeCheckUtil.h:106-112: type decls, func params and already well-typed imported decls do not need
+    // recursive synthesis on use; source imported or still-quest declarations do.
+    if (target.IsTypeDecl() || target.astKind == ASTKind.FUNC_PARAM) {
+        return false
+    }
+    if (!Ty.IsTyCorrect(target.GetTy())) {
+        return true
+    }
+    return (target.GetTy() ?? TypeManager.GetInvalidTy()).HasQuestTy()
+}
+
 private func ShouldReportCallInferenceFailure(target: Option<Ty>): Bool {
     if (let Some(targetTy) <- target) {
         return !targetTy.IsQuest() && !targetTy.HasGeneric()
@@ -1738,7 +1751,8 @@ private func CheckCandidateConstrains(typeManager: TypeManager, diag: Option<Bas
 
 private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr, fd: FuncDecl,
     target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
-    inferenceFailure!: Option<CallInferenceFailure> = None): Option<FunctionMatchingUnit> {
+    inferenceFailure!: Option<CallInferenceFailure> = None,
+    declSynthesizer!: Option<CallDeclSynthesizer> = None): Option<FunctionMatchingUnit> {
     let wrongNormalArgSize = !fd.hasVariableLenArg && !IsPossibleVariadicFunction(fd, ce) && (if (let Some(params) <- BodyParamList(
         fd)) {
         params.params.size != ce.args.size
@@ -1765,6 +1779,15 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     let unit = FunctionMatchingUnit(fd, paramTyInArgOrder, typeMapping)
     unit.argNameValid = argNamesValid
     if (!CheckCallCompatible(typeManager, diag, ce, fd, unit, argChecker: argChecker)) {
+        return None
+    }
+    if (NeedSynOnUsed(fd)) {
+        if (let Some(synthesizer) <- declSynthesizer) {
+            let _ = synthesizer(fd)
+        }
+    }
+    let fdTy = fd.GetTy() ?? TypeManager.GetInvalidTy()
+    if (!Ty.IsTyCorrect(fdTy) || !fdTy.IsFunc()) {
         return None
     }
     if (let Some(targetTy) <- target) {
@@ -1982,11 +2005,12 @@ private func PostCheckCallExpr(typeManager: TypeManager, diag: Option<BasicDiagn
 
 private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
     candidates: ArrayList<FuncDecl>, ce: CallExpr, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
-    inferenceFailure!: Option<CallInferenceFailure> = None): ArrayList<FuncDecl> {
+    inferenceFailure!: Option<CallInferenceFailure> = None,
+    declSynthesizer!: Option<CallDeclSynthesizer> = None): ArrayList<FuncDecl> {
     let legals = ArrayList<FunctionMatchingUnit>()
     for (fd in candidates) {
         if (let Some(unit) <- CheckCandidate(typeManager, diag, ce, fd, target, argChecker: argChecker,
-            inferenceFailure: inferenceFailure)) {
+            inferenceFailure: inferenceFailure, declSynthesizer: declSynthesizer)) {
             legals.add(unit)
         }
     }
@@ -2237,7 +2261,7 @@ public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEn
 
 public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
     ce: CallExpr, argChecker: Option<CallArgChecker>, desugarChecker!: Option<CallDesugarChecker> = None,
-    clearInferredForTarget!: Bool = true): Bool {
+    clearInferredForTarget!: Bool = true, declSynthesizer!: Option<CallDeclSynthesizer> = None): Bool {
     if (let Some(desugar) <- ce.desugarExpr) {
         if (Ty.IsTyCorrect(desugar.GetTy())) {
             ce.SetTy(desugar.GetTy().getOrThrow())
@@ -2295,7 +2319,7 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
     }
     let inferenceFailure = CallInferenceFailure()
     let result = MatchFunctionForCall(typeManager, diag, candidates, ce, target, argChecker: argChecker,
-        inferenceFailure: Some(inferenceFailure))
+        inferenceFailure: Some(inferenceFailure), declSynthesizer: declSynthesizer)
     ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy() ?? TypeManager.GetInvalidTy()))
     if (result.size == 1) {
         return true
@@ -2340,8 +2364,8 @@ public func SynCallExpr(typeManager: TypeManager, ce: CallExpr): Ty {
 }
 
 public func SynCallExprWithArgChecker(typeManager: TypeManager, ce: CallExpr, argChecker: Option<CallArgChecker>,
-    diag!: Option<BasicDiagnosticEngine> = None): Ty {
-    if (ChkCallExprWithArgChecker(typeManager, diag, None, ce, argChecker)) {
+    diag!: Option<BasicDiagnosticEngine> = None, declSynthesizer!: Option<CallDeclSynthesizer> = None): Ty {
+    if (ChkCallExprWithArgChecker(typeManager, diag, None, ce, argChecker, declSynthesizer: declSynthesizer)) {
         return ce.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return TypeManager.GetInvalidTy()

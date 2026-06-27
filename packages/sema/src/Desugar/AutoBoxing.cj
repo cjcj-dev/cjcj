@@ -244,9 +244,15 @@ private func AddOptionBoxHandleArrayExpr(typeManager: TypeManager, arrayExpr: Ar
         }
         if (let Some(arg) <- targetArg) {
             if (let Some(expr) <- arg.expr) {
-                BoxExprIfNeeded(typeManager, typeArgs[0], expr)
                 if (let Some(exprTy) <- expr.GetTy()) {
-                    arg.SetTy(exprTy)
+                    if (NeedBoxOption(typeManager, exprTy, typeArgs[0])) {
+                        if (let Some(optionTarget) <- (typeArgs[0] as EnumTy)) {
+                            TryOptionBox(typeManager, optionTarget, expr)
+                            if (let Some(boxedTy) <- expr.GetTy()) {
+                                arg.SetTy(boxedTy)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -257,9 +263,16 @@ private func AddOptionBoxHandleCallArgs(typeManager: TypeManager, args: ArrayLis
     var idx: Int64 = 0
     while (idx < args.size && idx < funcTy.paramTys.size) {
         if (let Some(expr) <- args[idx].expr) {
-            BoxExprIfNeeded(typeManager, funcTy.paramTys[idx], expr)
             if (let Some(exprTy) <- expr.GetTy()) {
-                args[idx].SetTy(exprTy)
+                let paramTy = funcTy.paramTys[idx]
+                if (NeedBoxOption(typeManager, exprTy, paramTy)) {
+                    if (let Some(optionTarget) <- (paramTy as EnumTy)) {
+                        TryOptionBox(typeManager, optionTarget, expr)
+                        if (let Some(boxedTy) <- expr.GetTy()) {
+                            args[idx].SetTy(boxedTy)
+                        }
+                    }
+                }
             }
         }
         idx++
@@ -306,10 +319,16 @@ private func AddOptionBoxHandleReturnExpr(typeManager: TypeManager, returnExpr: 
         if (let Some(funcBodyTy) <- funcBody.GetTy()) {
             if (let Some(funcTy) <- (funcBodyTy as FuncTy)) {
                 if (let Some(expr) <- returnExpr.expr) {
-                    if (let Some(boxTarget) <- returnExpr.desugarExpr) {
-                        BoxExprIfNeeded(typeManager, funcTy.retTy, boxTarget)
-                    } else {
-                        BoxExprIfNeeded(typeManager, funcTy.retTy, expr)
+                    if (let Some(exprTy) <- expr.GetTy()) {
+                        if (NeedBoxOption(typeManager, exprTy, funcTy.retTy)) {
+                            if (let Some(optionTarget) <- (funcTy.retTy as EnumTy)) {
+                                if (let Some(boxTarget) <- returnExpr.desugarExpr) {
+                                    TryOptionBox(typeManager, optionTarget, boxTarget)
+                                } else {
+                                    TryOptionBox(typeManager, optionTarget, expr)
+                                }
+                            }
+                        }
                     }
                 }
             }
