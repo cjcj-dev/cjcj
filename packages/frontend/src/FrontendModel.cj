@@ -3043,6 +3043,7 @@ private class CjoSignatureMaterializer {
                     for (param in body.paramLists[0].params) {
                         if (let Some(desugar) <- param.desugarDecl) {
                             desugar.ownerFunc = Some(funcDecl)
+                            desugar.outerDecl = Some(parent)
                             SetFlatFuncParentReference(desugar, parent)
                         }
                     }

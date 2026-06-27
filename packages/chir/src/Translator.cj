@@ -2071,9 +2071,29 @@ public class Translator {
         } else if (let Some(varDecl) <- (member as AstVarDecl)) {
             AddMemberVarDecl(def, varDecl)
         } else if (let Some(funcDecl) <- (member as AstFuncDecl)) {
-            if (let Some(value) <- globalSymbolTable.TryGet(funcDecl)) {
-                if (let Some(fn) <- (value as Function)) {
-                    def.AddMethod(fn)
+            AddMethodAndDefaultParamMethods(def, funcDecl)
+        }
+    }
+
+    private func AddMethodAndDefaultParamMethods(def: CustomTypeDef, funcDecl: AstFuncDecl): Unit {
+        if (let Some(value) <- globalSymbolTable.TryGet(funcDecl)) {
+            if (let Some(fn) <- (value as Function)) {
+                def.AddMethod(fn)
+            }
+        }
+        let body = match (funcDecl.funcBody) {
+            case Some(value2) => value2
+            case None => return
+        }
+        if (body.paramLists.isEmpty()) {
+            return
+        }
+        for (param in body.paramLists[0].params) {
+            if (let Some(desugarDecl) <- param.desugarDecl) {
+                if (let Some(value) <- globalSymbolTable.TryGet(desugarDecl)) {
+                    if (let Some(fn) <- (value as Function)) {
+                        def.AddMethod(fn)
+                    }
                 }
             }
         }
@@ -2081,18 +2101,10 @@ public class Translator {
 
     private func AddPropertyAccessors(def: CustomTypeDef, propDecl: AstPropDecl): Unit {
         for (getter in propDecl.getters) {
-            if (let Some(value) <- globalSymbolTable.TryGet(getter)) {
-                if (let Some(fn) <- (value as Function)) {
-                    def.AddMethod(fn)
-                }
-            }
+            AddMethodAndDefaultParamMethods(def, getter)
         }
         for (setter in propDecl.setters) {
-            if (let Some(value2) <- globalSymbolTable.TryGet(setter)) {
-                if (let Some(fn2) <- (value2 as Function)) {
-                    def.AddMethod(fn2)
-                }
-            }
+            AddMethodAndDefaultParamMethods(def, setter)
         }
     }
 
