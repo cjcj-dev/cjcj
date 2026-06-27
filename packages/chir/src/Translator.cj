@@ -3,6 +3,9 @@ package cangjie_compiler::chir
 import std.collection.*
 
 import cangjie_compiler::ast.ASTKind
+import cangjie_compiler::ast.IsValidCFuncConstructorCall
+import cangjie_compiler::ast.BuiltInDecl
+import cangjie_compiler::ast.BuiltInType
 import cangjie_compiler::ast.ASTKindIndex
 import cangjie_compiler::ast.ASTKindName
 import cangjie_compiler::ast.ArrayExpr as AstArrayExpr
@@ -941,6 +944,12 @@ public class Translator {
     public func Visit(expr: AstCallExpr): Option<Value> {
         if (let Some(intrinsicResult) <- TranslateIntrinsicCall(expr)) {
             return Some(intrinsicResult)
+        }
+        if (let Some(cfuncCtor) <- TranslateCFuncConstructorCall(expr)) {
+            return Some(cfuncCtor)
+        }
+        if (let Some(cstrCtor) <- TranslateCStringCtorCall(expr)) {
+            return Some(cstrCtor)
         }
         if (IsFunctionValueCall(expr)) {
             return Some(TranslateFunctionValueCall(expr))
@@ -4330,6 +4339,46 @@ public class Translator {
             previousDefaultArgs.add(value)
             idx++
         }
+    }
+
+    // C++ CHIR Translator::TranslateCFuncConstructorCall (TranslateCallExpr.cpp:756): a builtin
+    // `CFunc<T>(p)` constructor reinterprets its single argument as the CFunc type. The base is the
+    // CFUNC builtin decl (no resolvedFunction / not a FuncDecl), so it must be handled before the
+    // function-value-call path, which would otherwise try to look the `CFunc` base up in the symbol
+    // table. Translate the single argument, deref it and cast it to the call's CFunc result type --
+    // exactly C++ TranslateExprArg(arg, TranslateType(ce.GetTy()), /*deref=*/true).
+    private func TranslateCFuncConstructorCall(expr: AstCallExpr): Option<Value> {
+        if (!IsValidCFuncConstructorCall(expr)) {
+            return None
+        }
+        let arg = RequireFuncArgExpr(expr.args[0], "CFunc constructor argument")
+        let targetTy = chirTy.TranslateType(RequireAstTy(expr))
+        var value = TranslateExprArg(arg)
+        value = GetDerefedValue(value)
+        value = CoerceValueForExpectedType(value, targetTy)
+        return Some(value)
+    }
+
+    // C++ CHIR Translator::TranslateCStringCtorCall (TranslateCallExpr.cpp:606): a builtin
+    // `CString(p)` constructor lowers to a CSTRING_INIT intrinsic over its single argument. Its base
+    // is the CSTRING builtin decl (no resolvedFunction / not a FuncDecl), so like the CFunc
+    // constructor it must be handled before the function-value-call path.
+    private func TranslateCStringCtorCall(expr: AstCallExpr): Option<Value> {
+        if (let Some(base) <- expr.baseFunc) {
+            if (let Some(target) <- base.GetTarget()) {
+                if (let Some(builtinDecl) <- (target as BuiltInDecl)) {
+                    if (builtinDecl.IsType(BuiltInType.CSTRING)) {
+                        let ty = chirTy.TranslateType(RequireAstTy(expr))
+                        let arg = RequireFuncArgExpr(expr.args[0], "CString constructor argument")
+                        let args = ArrayList<Value>()
+                        args.add(TranslateExprArg(arg))
+                        return Some(RequireResult(builder.CreateIntrinsic(ty,
+                            IntrisicCallContext(kind: IntrinsicKind.CSTRING_INIT, args: args), CurrentBlock())))
+                    }
+                }
+            }
+        }
+        return None
     }
 
     private func IsFunctionValueCall(expr: AstCallExpr): Bool {
