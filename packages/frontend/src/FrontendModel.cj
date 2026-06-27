@@ -14,6 +14,7 @@ import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::chir.CHIRContext as RealCHIRContext
 import cangjie_compiler::chir.Package as RealCHIRPackage
 import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.StandardLibName
 import std.collection.*
 import std.sort.*
 
@@ -3661,11 +3662,46 @@ extend FrontendPackageRelation <: Equatable<FrontendPackageRelation> {
     }
 }
 
+public enum DepType {
+    | DIRECT
+    | INDIRECT
+    | BOTH
+}
+
+private func DepTypeIndex(depType: DepType): Int64 {
+    return match (depType) {
+        case DepType.DIRECT => 0
+        case DepType.INDIRECT => 1
+        case DepType.BOTH => 2
+    }
+}
+
+extend DepType <: Equatable<DepType> {
+    public operator func ==(right: DepType): Bool {
+        return DepTypeIndex(this) == DepTypeIndex(right)
+    }
+
+    public operator func !=(right: DepType): Bool {
+        return !(this == right)
+    }
+}
+
+private class StdDepEntry {
+    public var depType: DepType
+    public var fullPackageName: String
+
+    public init(depType: DepType, fullPackageName: String) {
+        this.depType = depType
+        this.fullPackageName = fullPackageName
+    }
+}
+
 public class ImportManager {
     private let diag: DiagnosticEngine
     private let searchPath: ArrayList<String> = ArrayList<String>()
     private let importedPackages: ArrayList<Package> = ArrayList<Package>()
     private let depPkgCjdPaths: HashMap<String, String> = HashMap<String, String>()
+    private let stdDepsMap: HashMap<String, StdDepEntry> = HashMap<String, StdDepEntry>()
     private let directDependencies: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
     private let directDependencyOrder: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
     private let loadingPackages: HashSet<String> = HashSet<String>()
@@ -3729,6 +3765,7 @@ public class ImportManager {
         }
         importedPackages.clear()
         depPkgCjdPaths.clear()
+        stdDepsMap.clear()
         directDependencies.clear()
         directDependencyOrder.clear()
         loadingPackages.clear()
@@ -3758,6 +3795,9 @@ public class ImportManager {
                     if (!cjdPath.isEmpty()) {
                         depPkgCjdPaths.add(dep, cjdPath)
                     }
+                }
+                if (let Some(cjoPath) <- depPkgCjdPaths.get(dep)) {
+                    HandleStdPackage(dep, cjoPath, isRecursive: false)
                 }
             }
             directDependencies.add(pkg.fullPackageName, filteredDeps)
@@ -3802,6 +3842,40 @@ public class ImportManager {
 
     public func GetDepPkgCjdPaths(): HashMap<String, String> {
         return depPkgCjdPaths
+    }
+
+    public func GetUsedSTDLibFiles(depType: DepType): HashSet<String> {
+        let result = HashSet<String>()
+        for (cjoPath in stdDepsMap.keys()) {
+            if (let Some(entry) <- stdDepsMap.get(cjoPath)) {
+                if (entry.depType == depType || entry.depType == DepType.BOTH) {
+                    result.add(cjoPath)
+                }
+            }
+        }
+        return result
+    }
+
+    public func AnalyzeDepStdPkgsOfBC(fullPackageName: String): Bool {
+        if ((let Some(_) <- GetPackage(fullPackageName)) || depPkgCjdPaths.contains(fullPackageName)) {
+            return true
+        }
+        let cjoPath = FileUtil.FindSerializationFile(fullPackageName, ".cjo", searchPath.toArray())
+        if (cjoPath.isEmpty()) {
+            diag.DiagnoseRefactor(DiagKindRefactor.bc_cjo_error, DEFAULT_POSITION, arguments: [fullPackageName])
+            return false
+        }
+        let (ok, data, _) = FileUtil.ReadBinaryFileToBuffer(cjoPath)
+        if (!ok) {
+            diag.DiagnoseRefactor(DiagKindRefactor.bc_cjo_error, DEFAULT_POSITION, arguments: [fullPackageName])
+            return false
+        }
+        depPkgCjdPaths[fullPackageName] = cjoPath
+        for (depStdPkg in ReadAllDependentStdPkgs(data)) {
+            let depCjoPath = FindAndSaveDepStdCjoPath(depStdPkg)
+            HandleStdPackage(depStdPkg, depCjoPath, isRecursive: true)
+        }
+        return true
     }
 
     public func GetImportedDecls(file: File): ArrayList<ImportedDeclGroup> {
@@ -4267,7 +4341,11 @@ public class ImportManager {
                 return false
             }
         }
+        let depNames = ArrayList<String>()
         for (dep in depPkgCjdPaths.keys()) {
+            depNames.add(dep)
+        }
+        for (dep in depNames) {
             if (dep == "std.core" || (let Some(_) <- GetPackage(dep))) {
                 continue
             }
@@ -4295,6 +4373,10 @@ public class ImportManager {
         if (!LoadSerializedImportDependencies(data, fullPackageName)) {
             loadingPackages.remove(fullPackageName)
             return false
+        }
+        for (depStdPkg in ReadAllDependentStdPkgs(data)) {
+            let depCjoPath = FindAndSaveDepStdCjoPath(depStdPkg)
+            HandleStdPackage(depStdPkg, depCjoPath, isRecursive: true)
         }
         let pkg = CreatePackage(fullPackageName)
         pkg.EnableAttr(Attribute.IMPORTED)
@@ -4355,13 +4437,62 @@ public class ImportManager {
             if (!depName.isEmpty() && depName != ownerPackageName && (let None <- GetPackage(depName)) &&
                 !loadingPackages.contains(depName)) {
                 let depPath = FileUtil.FindSerializationFile(depName, ".cjo", searchPath.toArray())
-                if (!depPath.isEmpty() && !LoadImportedPackageFromCjo(depName, depPath)) {
-                    return false
+                if (!depPath.isEmpty()) {
+                    HandleStdPackage(depName, depPath, isRecursive: true)
+                    if (!LoadImportedPackageFromCjo(depName, depPath)) {
+                        return false
+                    }
                 }
             }
             idx++
         }
         return true
+    }
+
+    private func ReadAllDependentStdPkgs(data: Array<UInt8>): ArrayList<String> {
+        let out = ArrayList<String>()
+        let reader = CjoFlatBuffer(data)
+        let root = reader.RootTable()
+        if (root < 0) {
+            return out
+        }
+        let dependentStdPkgs = reader.VectorField(root, 34)
+        if (dependentStdPkgs < 0) {
+            return out
+        }
+        var idx: Int64 = 0
+        while (idx < reader.VectorLength(dependentStdPkgs)) {
+            let depName = reader.StringAt(reader.VectorOffsetElement(dependentStdPkgs, idx))
+            if (!depName.isEmpty()) {
+                out.add(depName)
+            }
+            idx++
+        }
+        return out
+    }
+
+    private func FindAndSaveDepStdCjoPath(fullPackageName: String): String {
+        if (let Some(cachedPath) <- depPkgCjdPaths.get(fullPackageName)) {
+            return cachedPath
+        }
+        let cjoPath = FileUtil.FindSerializationFile(fullPackageName, ".cjo", searchPath.toArray())
+        if (!cjoPath.isEmpty()) {
+            depPkgCjdPaths[fullPackageName] = cjoPath
+        }
+        return cjoPath
+    }
+
+    private func HandleStdPackage(fullPackageName: String, cjoPath: String, isRecursive!: Bool = false): Unit {
+        let depType = if (isRecursive) { DepType.INDIRECT } else { DepType.DIRECT }
+        if (let Some(entry) <- stdDepsMap.get(cjoPath)) {
+            if (entry.depType != depType) {
+                entry.depType = DepType.BOTH
+            }
+            return
+        }
+        if (StandardLibName(fullPackageName).isSome() && !cjoPath.isEmpty() && FileUtil.FileExist(cjoPath)) {
+            stdDepsMap[cjoPath] = StdDepEntry(depType, fullPackageName)
+        }
     }
 
     private func CollectDirectDependencyNames(pkg: Package, sourcePackages: HashSet<String>): HashSet<String> {

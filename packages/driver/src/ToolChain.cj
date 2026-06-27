@@ -285,6 +285,10 @@ public open class ToolChain {
             }
             return "cangjie-" + name
         }
+        let base = FileUtil.ConvertFilenameToLibCangjieBaseFormat(pkg)
+        if (!base.isEmpty()) {
+            return base
+        }
         return None
     }
 

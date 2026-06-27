@@ -9,6 +9,10 @@ private func MachOLibCangjieBaseFormat(pkg: String): Option<String> {
         }
         return "cangjie-" + name
     }
+    let base = FileUtil.ConvertFilenameToLibCangjieBaseFormat(pkg)
+    if (!base.isEmpty()) {
+        return base
+    }
     return None
 }
 

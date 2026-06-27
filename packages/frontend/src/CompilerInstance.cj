@@ -865,6 +865,17 @@ public class CompilerInstance {
     }
 
     private func ModularizeCompilation(): Bool {
+        for (bcPkg in invocation.globalOptions.bcPackageNames) {
+            if (!importManager.AnalyzeDepStdPkgsOfBC(bcPkg)) {
+                return false
+            }
+        }
+        for (objFile in importManager.GetUsedSTDLibFiles(DepType.DIRECT)) {
+            invocation.globalOptions.directBuiltinDependencies.add(objFile)
+        }
+        for (objFile in importManager.GetUsedSTDLibFiles(DepType.INDIRECT)) {
+            invocation.globalOptions.indirectBuiltinDependencies.add(objFile)
+        }
         return packageManager.ResolveDependence(pkgs)
     }
 
