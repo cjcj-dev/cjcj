@@ -2,6 +2,10 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::modules.GetMainPartPkgNameForTestPkg as ModulesGetMainPartPkgNameForTestPkg
+import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
+import cangjie_compiler::modules.IsTestPackage as ModulesIsTestPackage
+import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
 
 public enum TypeAccessIssueKind {
     | INVALID_ACCESS_CONTROL
@@ -92,46 +96,354 @@ public func MaybeStruct(ty: Ty): Bool {
     return false
 }
 
-public func IsLegalAccess(accessSite: Node, target: Decl): Bool {
+private func AccessAddSearchCandidate(values: ArrayList<InheritableDecl>, candidate: InheritableDecl): Unit {
+    for (value in values) {
+        if (SameDecl(value, candidate)) {
+            return
+        }
+    }
+    values.add(candidate)
+}
+
+private func AccessIsVisible(decl: Decl, relation: ModulesPackageRelation): Bool {
+    return decl.TestAttr(Attribute.PUBLIC) || relation == ModulesPackageRelation.SAME_PACKAGE ||
+        (decl.TestAttr(Attribute.PROTECTED) && relation != ModulesPackageRelation.NONE) ||
+        (decl.TestAttr(Attribute.INTERNAL) &&
+            (relation == ModulesPackageRelation.CHILD || relation == ModulesPackageRelation.SAME_PACKAGE))
+}
+
+public func GetCurStructSymbol(ctx: ASTContext, scopeName: String): Option<Symbol> {
+    var scopeGateName = GetScopeGateName(scopeName)
+    while (!scopeGateName.isEmpty()) {
+        if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
+            if (let Some(node) <- symbol.node) {
+                if (node.IsNominalDecl()) {
+                    return Some(symbol)
+                }
+            }
+        }
+        scopeGateName = GetScopeGateName(scopeGateName)
+    }
+    return None
+}
+
+public func SearchTargetDeclForProtectMember(typeManager: TypeManager, curComposite: Node,
+    outerDeclOfTarget: Decl): Bool {
+    var startOpt: Option<InheritableDecl> = curComposite as InheritableDecl
+    if (let Some(extendDecl) <- (curComposite as ExtendDecl)) {
+        if (let Some(extendedType) <- extendDecl.extendedType) {
+            if (let Some(decl) <- Ty.GetDeclPtrOfTy(extendedType.GetTy())) {
+                if (SameDecl(decl, outerDeclOfTarget)) {
+                    return true
+                }
+                startOpt = decl as InheritableDecl
+            }
+        }
+    }
+    if (let None <- startOpt) {
+        return false
+    }
+    let queue = ArrayList<InheritableDecl>()
+    AccessAddSearchCandidate(queue, startOpt.getOrThrow())
+    var idx: Int64 = 0
+    while (idx < queue.size) {
+        let current = queue[idx]
+        if (SameDecl(current, outerDeclOfTarget)) {
+            return true
+        }
+        for (extendDecl in typeManager.GetDeclExtends(current)) {
+            AccessAddSearchCandidate(queue, extendDecl)
+        }
+        if (let Some(classDecl) <- (current as ClassDecl)) {
+            if (let Some(superClass) <- classDecl.GetSuperClassDecl()) {
+                AccessAddSearchCandidate(queue, superClass)
+            }
+        }
+        idx++
+    }
+    return false
+}
+
+private func IsNormalCtorRef(node: Node): Bool {
+    if (let Some(refExpr) <- (node as RefExpr)) {
+        return !refExpr.isThis && !refExpr.isSuper
+    }
+    return true
+}
+
+private func AccessGetRealTarget(declOpt: Option<Decl>): Option<Decl> {
+    if (let Some(decl) <- declOpt) {
+        if (let Some(typeAliasDecl) <- (decl as TypeAliasDecl)) {
+            if (let Some(typeNode) <- typeAliasDecl.typeNode) {
+                if (!typeAliasDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
+                    if (let Some(target) <- typeNode.GetTarget()) {
+                        return AccessGetRealTarget(Some(target))
+                    }
+                }
+            }
+        }
+    }
+    return declOpt
+}
+
+private func AccessIsTypeAccessible(typeManager: TypeManager, file: File, typeNode: Type): Bool {
+    let targetOpt = AccessGetRealTarget(typeNode.GetTarget())
+    if (let Some(target) <- targetOpt) {
+        return typeManager.IsDeclAccessible(file, target)
+    }
+    return true
+}
+
+private func AccessIsExtendAllUpperBoundsImported(typeManager: TypeManager, extendDecl: ExtendDecl,
+    file: File): Bool {
+    if (let None <- extendDecl.generic) {
+        return true
+    }
+    let generic = extendDecl.generic.getOrThrow()
+    for (constraint in generic.genericConstraints) {
+        for (upperBound in constraint.upperBounds) {
+            if (!AccessIsTypeAccessible(typeManager, file, upperBound)) {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+private func AccessIsExtendAccessible(typeManager: TypeManager, file: File, extendDecl: ExtendDecl): Bool {
+    if (let None <- file.curPackage) {
+        return true
+    }
+    let filePackage = file.curPackage.getOrThrow()
+    if (extendDecl.fullPackageName == filePackage.fullPackageName) {
+        return true
+    }
+    if (typeManager.compileTestsOnly && extendDecl.TestAttr(Attribute.FOR_TEST) &&
+        ModulesIsTestPackage(filePackage.fullPackageName) &&
+        ModulesGetMainPartPkgNameForTestPkg(filePackage.fullPackageName) == extendDecl.fullPackageName) {
+        return true
+    }
+    let allUpperBoundsImported = AccessIsExtendAllUpperBoundsImported(typeManager, extendDecl, file)
+    var hasAnyInterfacesImported = false
+    var extendedTypeAccessible = false
+    let extendedDecl = Ty.GetInheritableDeclPtrOfTy(extendDecl.GetTy())
+    let inSamePackage = if (let Some(realExtendedDecl) <- extendedDecl) {
+        extendDecl.fullPackageName == realExtendedDecl.fullPackageName
+    } else {
+        extendDecl.fullPackageName == "std.core"
+    }
+    if (!inSamePackage) {
+        for (inheritedType in extendDecl.inheritedTypes) {
+            if (AccessIsTypeAccessible(typeManager, file, inheritedType)) {
+                hasAnyInterfacesImported = true
+            }
+        }
+        if (let Some(extendedType) <- extendDecl.extendedType) {
+            extendedTypeAccessible = AccessIsTypeAccessible(typeManager, file, extendedType)
+        }
+    } else {
+        hasAnyInterfacesImported = true
+        if (let Some(realExtendedDecl) <- extendedDecl) {
+            let relation = ModulesGetPackageRelation(filePackage.fullPackageName, realExtendedDecl.fullPackageName)
+            extendedTypeAccessible = AccessIsVisible(realExtendedDecl, relation)
+        } else {
+            extendedTypeAccessible = true
+        }
+    }
+    return extendDecl.IsExportedDecl() && allUpperBoundsImported && hasAnyInterfacesImported && extendedTypeAccessible
+}
+
+private func AccessFindImplementInterface(typeManager: TypeManager, file: File, member: Decl,
+    interfaceType: Type): Option<Type> {
+    let _ = file
+    let targetDecl = Ty.GetInheritableDeclPtrOfTy(interfaceType.GetTy())
+    if (let None <- targetDecl) {
+        return None
+    }
+    let inheritableDecl = targetDecl.getOrThrow()
+    for (superType in inheritableDecl.inheritedTypes) {
+        if (let Some(implInterface) <- AccessFindImplementInterface(typeManager, file, member, superType)) {
+            return Some(implInterface)
+        }
+    }
+    for (candidate in inheritableDecl.GetMemberDecls()) {
+        if (typeManager.PairIsOverrideOrImpl(member, candidate)) {
+            return Some(interfaceType)
+        }
+    }
+    return None
+}
+
+private func AccessIsExtendMemberImported(typeManager: TypeManager, extendDecl: ExtendDecl, file: File,
+    member: Decl): Bool {
+    if (extendDecl.inheritedTypes.isEmpty()) {
+        return true
+    }
+    let extendedDecl = Ty.GetInheritableDeclPtrOfTy(extendDecl.GetTy())
+    let inSamePackage = if (let Some(realExtendedDecl) <- extendedDecl) {
+        extendDecl.fullPackageName == realExtendedDecl.fullPackageName
+    } else {
+        extendDecl.fullPackageName == "std.core"
+    }
+    if (inSamePackage) {
+        if (let Some(extendedType) <- extendDecl.extendedType) {
+            return AccessIsTypeAccessible(typeManager, file, extendedType)
+        }
+        return true
+    }
+    for (superType in extendDecl.inheritedTypes) {
+        if (let Some(implInterface) <- AccessFindImplementInterface(typeManager, file, member, superType)) {
+            return AccessIsTypeAccessible(typeManager, file, implInterface)
+        }
+    }
+    return false
+}
+
+private func AccessIsExtendMemberAccessible(typeManager: TypeManager, file: File, member: Decl,
+    baseTy: Ty): Bool {
+    if (let None <- file.curPackage) {
+        return true
+    }
+    if (let None <- typeManager.GetExtendDeclByMember(member, baseTy)) {
+        return true
+    }
+    let extendDecl = typeManager.GetExtendDeclByMember(member, baseTy).getOrThrow()
+    let filePackage = file.curPackage.getOrThrow()
+    if (typeManager.compileTestsOnly && !member.TestAttr(Attribute.PRIVATE) &&
+        extendDecl.TestAttr(Attribute.FOR_TEST) && ModulesIsTestPackage(filePackage.fullPackageName) &&
+        ModulesGetMainPartPkgNameForTestPkg(filePackage.fullPackageName) == member.fullPackageName) {
+        return true
+    }
+    if (extendDecl.fullPackageName == filePackage.fullPackageName) {
+        return true
+    }
+    if (!AccessIsExtendAccessible(typeManager, file, extendDecl)) {
+        return false
+    }
+    if (!member.IsExportedDecl()) {
+        return false
+    }
+    return AccessIsExtendMemberImported(typeManager, extendDecl, file, member)
+}
+
+private func AccessCurCompositeDecl(curComposite: Option<Symbol>): Option<Decl> {
+    if (let Some(symbol) <- curComposite) {
+        if (let Some(node) <- symbol.node) {
+            return node as Decl
+        }
+    }
+    return None
+}
+
+public func IsLegalAccess(typeManager: TypeManager, curComposite: Option<Symbol>, target: Decl, accessSite: Node): Bool {
+    if ((let None <- (target as VarDecl)) && (let None <- (target as FuncDecl)) &&
+        (let None <- (target as ClassLikeDecl))) {
+        return true
+    }
+    if (accessSite.TestAnyAttr(Attribute.IN_CORE, Attribute.IN_MACRO)) {
+        return true
+    }
+    if (!accessSite.IsSamePackage(target)) {
+        if (let Some(file) <- accessSite.curFile) {
+            if (let Some(memberAccess) <- (accessSite as MemberAccess)) {
+                if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                    if (let Some(baseTy) <- baseExpr.GetTy()) {
+                        if (!AccessIsExtendMemberAccessible(typeManager, file, target, baseTy)) {
+                            return false
+                        }
+                    }
+                }
+            }
+        }
+    }
     if (target.TestAttr(Attribute.PUBLIC)) {
         return true
     }
-    if (target.TestAttr(Attribute.PRIVATE)) {
-        return IsSameFile(accessSite, target)
+    var relation = ModulesPackageRelation.NONE
+    if (let Some(file) <- accessSite.curFile) {
+        if (let Some(pkg) <- file.curPackage) {
+            relation = ModulesGetPackageRelation(pkg.fullPackageName, target.fullPackageName)
+        }
     }
-    if (target.TestAttr(Attribute.PROTECTED)) {
-        return IsSamePackage(accessSite, target) || IsInsideNominalRelatedTo(accessSite, target)
+    let curCompositeDecl = AccessCurCompositeDecl(curComposite)
+    let flag = IsClassOrEnumConstructor(target) && !target.TestAttr(Attribute.PRIVATE) && IsNormalCtorRef(accessSite) &&
+        (if (let Some(curDecl) <- curCompositeDecl) {
+            if (let Some(outer) <- target.outerDecl) {
+                !SearchTargetDeclForProtectMember(typeManager, curDecl, outer)
+            } else {
+                true
+            }
+        } else {
+            true
+        })
+    if (target.TestAttr(Attribute.GLOBAL) || flag) {
+        if (target.TestAttr(Attribute.PRIVATE)) {
+            return IsSameFile(accessSite, target)
+        }
+        return AccessIsVisible(target, relation)
     }
-    return IsSamePackage(accessSite, target)
+    let outerDeclOfTarget = target.outerDecl
+    if (let None <- outerDeclOfTarget) {
+        return true
+    }
+    if (!outerDeclOfTarget.getOrThrow().IsNominalDecl()) {
+        return true
+    }
+    let targetOuter = outerDeclOfTarget.getOrThrow()
+    if (target.TestAttr(Attribute.INTERNAL)) {
+        return AccessIsVisible(target, relation)
+    } else if (target.TestAttr(Attribute.PROTECTED)) {
+        if (AccessIsVisible(target, relation)) {
+            return true
+        }
+        if (let Some(curDecl2) <- curCompositeDecl) {
+            return SameDecl(curDecl2, targetOuter) ||
+                SearchTargetDeclForProtectMember(typeManager, curDecl2, targetOuter)
+        }
+        return false
+    }
+    var expectedOuter = targetOuter
+    if (let Some(specific) <- targetOuter.specificImplementation) {
+        expectedOuter = specific
+    }
+    if (let Some(curDecl3) <- curCompositeDecl) {
+        return SameDecl(curDecl3, expectedOuter)
+    }
+    return false
 }
 
-public func IsTargetMemberVisibleToNode(target: Decl, node: Node): Bool {
+public func IsTargetMemberVisibleToNode(typeManager: TypeManager, ctx: ASTContext, target: Decl, node: Node): Bool {
     if (IsSameFile(node, target)) {
         return true
     }
-    return IsLegalAccess(node, target)
+    let sym = GetCurStructSymbol(ctx, node.scopeName)
+    return IsLegalAccess(typeManager, sym, target, node)
 }
 
-public func GetAccessibleDecls(accessSite: Expr, targets: ArrayList<Decl>): ArrayList<Decl> {
+public func GetAccessibleDecls(typeManager: TypeManager, ctx: ASTContext, accessSite: Expr,
+    targets: ArrayList<Decl>): ArrayList<Decl> {
     let out = ArrayList<Decl>()
+    let sym = GetCurStructSymbol(ctx, accessSite.scopeName)
     for (target in targets) {
-        if (IsLegalAccess(accessSite, target)) {
+        if (IsLegalAccess(typeManager, sym, target, accessSite)) {
             out.add(target)
         }
     }
     return out
 }
 
-public func GetAccessibleDecl(accessSite: Expr, targets: ArrayList<Decl>): Option<Decl> {
-    let accessible = GetAccessibleDecls(accessSite, targets)
+public func GetAccessibleDecl(typeManager: TypeManager, ctx: ASTContext, accessSite: Expr,
+    targets: ArrayList<Decl>): Option<Decl> {
+    let accessible = GetAccessibleDecls(typeManager, ctx, accessSite, targets)
     if (accessible.isEmpty()) {
         return None
     }
     return Some(accessible[0])
 }
 
-public func CheckFuncAccessControl(accessSite: Expr, targets: ArrayList<Decl>): (Option<Decl>, Option<TypeAccessIssue>) {
-    let accessibleDecl = GetAccessibleDecl(accessSite, targets)
+public func CheckFuncAccessControl(typeManager: TypeManager, ctx: ASTContext, accessSite: Expr,
+    targets: ArrayList<Decl>): (Option<Decl>, Option<TypeAccessIssue>) {
+    let accessibleDecl = GetAccessibleDecl(typeManager, ctx, accessSite, targets)
     if (let Some(_) <- accessibleDecl) {
         return (accessibleDecl, None)
     }
@@ -149,8 +461,10 @@ public func CheckFuncAccessControl(accessSite: Expr, targets: ArrayList<Decl>): 
     return (None, None)
 }
 
-public func CheckNonFuncAccessControl(accessSite: Expr, target: Decl): Option<TypeAccessIssue> {
-    if (IsLegalAccess(accessSite, target)) {
+public func CheckNonFuncAccessControl(typeManager: TypeManager, ctx: ASTContext, accessSite: Expr,
+    target: Decl): Option<TypeAccessIssue> {
+    let sym = GetCurStructSymbol(ctx, accessSite.scopeName)
+    if (IsLegalAccess(typeManager, sym, target, accessSite)) {
         return None
     }
     return Some(TypeAccessIssue(
@@ -377,48 +691,6 @@ private func IsSameFile(accessSite: Node, target: Decl): Bool {
         if (let Some(right) <- target.curFile) {
             return left.fileHash == right.fileHash && left.filePath == right.filePath
         }
-    }
-    return false
-}
-
-private func IsSamePackage(accessSite: Node, target: Decl): Bool {
-    let leftPackage = AccessSitePackage(accessSite)
-    if (leftPackage.isEmpty() || target.fullPackageName.isEmpty()) {
-        return false
-    }
-    return leftPackage == target.fullPackageName
-}
-
-private func AccessSitePackage(node: Node): String {
-    if (let Some(file) <- node.curFile) {
-        if (let Some(pkg) <- file.curPackage) {
-            return pkg.fullPackageName
-        }
-    }
-    return node.GetFullPackageName()
-}
-
-private func IsInsideNominalRelatedTo(accessSite: Node, target: Decl): Bool {
-    if (!IsSamePackage(accessSite, target)) {
-        return false
-    }
-    if (let Some(targetOuter) <- target.outerDecl) {
-        let targetOuterKey = AccessDeclKey(targetOuter)
-        let found = BoolBox(false)
-        let walker = Walker(accessSite, visitPre: { node: Node =>
-            if (let Some(decl) <- (node as Decl)) {
-                if (decl.IsNominalDecl() && AccessDeclKey(decl) == targetOuterKey) {
-                    found.value = true
-                    return VisitAction.STOP_NOW
-                }
-                if (decl.IsNominalDecl()) {
-                    return VisitAction.SKIP_CHILDREN
-                }
-            }
-            VisitAction.WALK_CHILDREN
-        })
-        let _ = walker.Walk()
-        return found.value
     }
     return false
 }

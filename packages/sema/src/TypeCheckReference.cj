@@ -1068,6 +1068,8 @@ public func TypeCheckReferenceCheckInstanceMemberAccessLegality(
 
 public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
     diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    ctx: ASTContext,
     ma: MemberAccess
 ): Bool {
     let declOpt: Option<Decl> = if (let Some(value) <- ma.target) {
@@ -1097,7 +1099,7 @@ public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
         if (ma.isAlone) {
             let candidates = ArrayList<Decl>()
             candidates.add(decl)
-            let (_, issue) = CheckFuncAccessControl(ma, candidates)
+            let (_, issue) = CheckFuncAccessControl(tm, ctx, ma, candidates)
             if (let Some(accessIssue) <- issue) {
                 TypeCheckReferenceEmitAccessIssue(diag, accessIssue)
                 valid = false
@@ -1110,7 +1112,7 @@ public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
                 valid = false
             }
         }
-    } else if (let Some(issue) <- CheckNonFuncAccessControl(ma, decl)) {
+    } else if (let Some(issue) <- CheckNonFuncAccessControl(tm, ctx, ma, decl)) {
         TypeCheckReferenceEmitAccessIssue(diag, issue)
         valid = false
     }
@@ -1157,6 +1159,8 @@ private func TypeCheckReferenceCopyTargetsOrSingle(targets: ArrayList<Decl>, fal
 
 public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
     diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    ctx: ASTContext,
     re: RefExpr
 ): Bool {
     if (re.isThis || re.isSuper) {
@@ -1178,7 +1182,7 @@ public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
     if (decl.IsFunc()) {
         if (re.isAlone) {
             let candidates = TypeCheckReferenceCopyTargetsOrSingle(re.ref.targets, decl)
-            let (_, issue) = CheckFuncAccessControl(re, candidates)
+            let (_, issue) = CheckFuncAccessControl(tm, ctx, re, candidates)
             if (let Some(accessIssue) <- issue) {
                 TypeCheckReferenceEmitAccessIssue(diag, accessIssue)
                 valid = false
@@ -1191,7 +1195,7 @@ public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
                 valid = false
             }
         }
-    } else if (let Some(issue) <- CheckNonFuncAccessControl(re, decl)) {
+    } else if (let Some(issue) <- CheckNonFuncAccessControl(tm, ctx, re, decl)) {
         TypeCheckReferenceEmitAccessIssue(diag, issue)
         valid = false
     }
@@ -1435,6 +1439,7 @@ private func TypeCheckReferenceCheckLegalityIsSkip(node: Node): Bool {
 
 private func TypeCheckReferenceCheckLegalityForNameReferenceExpr(
     diag: BasicDiagnosticEngine,
+    tm: TypeManager,
     ctx: ASTContext,
     nameRef: NameReferenceExpr
 ): Unit {
@@ -1444,7 +1449,7 @@ private func TypeCheckReferenceCheckLegalityForNameReferenceExpr(
         } else if (refExpr.isSuper) {
             let _ = TypeCheckReferenceCheckUsageOfSuper(diag, ctx, refExpr)
         } else {
-            let _ = TypeCheckReferenceCheckAccessLegalityOfRefExpr(diag, refExpr)
+            let _ = TypeCheckReferenceCheckAccessLegalityOfRefExpr(diag, tm, ctx, refExpr)
         }
     }
 }
@@ -1625,16 +1630,17 @@ private func TypeCheckReferenceCheckMemberAccessInCtorParamOrCtorArg(
 
 private func TypeCheckReferenceCheckLegalityForExpr(
     diag: BasicDiagnosticEngine,
+    tm: TypeManager,
     ctx: ASTContext,
     walkerID: UInt32,
     expr: Expr
 ): VisitAction {
     if (let Some(desugarExpr) <- expr.desugarExpr) {
-        TypeCheckReferenceCheckLegalityOfReferenceInternal(diag, ctx, desugarExpr, walkerID)
+        TypeCheckReferenceCheckLegalityOfReferenceInternal(diag, tm, ctx, desugarExpr, walkerID)
         return VisitAction.SKIP_CHILDREN
     }
     if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
-        TypeCheckReferenceCheckLegalityForNameReferenceExpr(diag, ctx, nameRef)
+        TypeCheckReferenceCheckLegalityForNameReferenceExpr(diag, tm, ctx, nameRef)
         return VisitAction.WALK_CHILDREN
     }
     if (let Some(assignExpr) <- (expr as AssignExpr)) {
@@ -1651,6 +1657,7 @@ private func TypeCheckReferenceCheckLegalityForExpr(
 
 private func TypeCheckReferenceCheckLegalityOfReferenceInternal(
     diag: BasicDiagnosticEngine,
+    tm: TypeManager,
     ctx: ASTContext,
     root: Node,
     walkerID: UInt32
@@ -1663,7 +1670,7 @@ private func TypeCheckReferenceCheckLegalityOfReferenceInternal(
             ctx.currentCheckingNodes.add(current)
         }
         if (let Some(expr) <- (current as Expr)) {
-            return TypeCheckReferenceCheckLegalityForExpr(diag, ctx, walkerID, expr)
+            return TypeCheckReferenceCheckLegalityForExpr(diag, tm, ctx, walkerID, expr)
         }
         if (let Some(funcArg) <- (current as FuncArg)) {
             if (funcArg.withInout) {
@@ -1682,7 +1689,7 @@ private func TypeCheckReferenceCheckLegalityOfReferenceInternal(
             ctx.currentCheckingNodes.remove(at: ctx.currentCheckingNodes.size - 1)
         }
         if (let Some(memberAccess) <- (current as MemberAccess)) {
-            let _ = TypeCheckReferenceCheckAccessLegalityOfMemberAccess(diag, memberAccess)
+            let _ = TypeCheckReferenceCheckAccessLegalityOfMemberAccess(diag, tm, ctx, memberAccess)
         }
         return VisitAction.KEEP_DECISION
     })
@@ -1691,10 +1698,11 @@ private func TypeCheckReferenceCheckLegalityOfReferenceInternal(
 
 public func TypeCheckReferenceCheckLegalityOfReference(
     diag: BasicDiagnosticEngine,
+    tm: TypeManager,
     ctx: ASTContext,
     root: Node
 ): Unit {
-    TypeCheckReferenceCheckLegalityOfReferenceInternal(diag, ctx, root, GetNextWalkerID())
+    TypeCheckReferenceCheckLegalityOfReferenceInternal(diag, tm, ctx, root, GetNextWalkerID())
 }
 
 public func TypeCheckReferenceAddFuncTargetsForMemberAccess(memberAccess: MemberAccess, targets: ArrayList<Decl>): Unit {

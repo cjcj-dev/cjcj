@@ -39,11 +39,12 @@ private func TypeCheckTypeCheckCFuncParamType(diag: BasicDiagnosticEngine, typeN
 
 private func TypeCheckTypeCheckAccessLegality(
     diag: BasicDiagnosticEngine,
+    tm: TypeManager,
     typeNode: Type,
     target: Decl,
     clearTargetOnFail!: Bool = false
 ): Bool {
-    if (IsLegalAccess(typeNode, target)) {
+    if (IsLegalAccess(tm, None, target, typeNode)) {
         return true
     }
     let builder = diag.Diagnose(typeNode.begin, typeNode.end,
@@ -360,12 +361,11 @@ public func TypeCheckTypeCheckRefType(
     tm: TypeManager,
     refType: RefType
 ): Bool {
-    let _ = tm
     if (let None <- refType.ref.target) {
         return true
     }
     let target = refType.ref.target.getOrThrow()
-    if (!TypeCheckTypeCheckAccessLegality(diag, refType, target, clearTargetOnFail: true)) {
+    if (!TypeCheckTypeCheckAccessLegality(diag, tm, refType, target, clearTargetOnFail: true)) {
         return false
     }
     if (!TypeCheckTypeIsGenericTypeWithTypeArgs(refType)) {
@@ -445,12 +445,11 @@ public func TypeCheckTypeCheckQualifiedType(
     tm: TypeManager,
     qualifiedType: QualifiedType
 ): Bool {
-    let _ = tm
     if (let None <- qualifiedType.target) {
         return true
     }
     var valid = true
-    if (!TypeCheckTypeCheckAccessLegality(diag, qualifiedType, qualifiedType.target.getOrThrow())) {
+    if (!TypeCheckTypeCheckAccessLegality(diag, tm, qualifiedType, qualifiedType.target.getOrThrow())) {
         valid = false
     }
     if (!TypeCheckTypeIsGenericTypeWithTypeArgs(qualifiedType)) {

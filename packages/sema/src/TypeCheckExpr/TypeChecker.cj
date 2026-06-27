@@ -412,6 +412,9 @@ public class TypeChecker {
     public init(ci: Option<CompilerInstance>) {
         this.ci = ci
         let tm = if (let Some(instance) <- ci) { instance.typeManager } else { TypeManager() }
+        if (let Some(instance) <- ci) {
+            tm.compileTestsOnly = instance.globalOptions.compileTestsOnly
+        }
         impl = if (let Some(instance) <- ci) {
             TypeCheckerImpl(typeManager: tm, diag: instance.diag)
         } else {
@@ -2724,7 +2727,7 @@ public class TypeChecker {
         if (targets.isEmpty()) {
             return
         }
-        let target = GetAccessibleDecl(memberAccess, targets) ?? targets[0]
+        let target = GetAccessibleDecl(impl.typeManager, ctx, memberAccess, targets) ?? targets[0]
         ReplaceTarget(memberAccess, Some(target))
         AddFuncTargetsForMemberAccess(memberAccess, targets)
     }
@@ -3313,7 +3316,7 @@ public class TypeChecker {
             refExpr.ref.targets.clear()
             return
         }
-        var decl = GetAccessibleDecl(refExpr, targets)
+        var decl = GetAccessibleDecl(impl.typeManager, ctx, refExpr, targets)
         if (let None <- decl) {
             decl = Some(targets[0])
         }

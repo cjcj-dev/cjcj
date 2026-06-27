@@ -275,6 +275,8 @@ public class TypeManager {
     private var nextUniqId: UInt64 = 0u64
     private let resolvedImportedDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
+    private let declToTypeAlias: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
+    public var compileTestsOnly: Bool = false
 
     public init() {
         tyVarScopes.add(TyVarScope())
@@ -300,9 +302,24 @@ public class TypeManager {
                     if (!found) {
                         values.add(decl)
                     }
+                    RecordTypeAlias(decl, name)
                 }
             }
         }
+    }
+
+    private func RecordTypeAlias(decl: Decl, alias: String): Unit {
+        let key = DeclAliasKey(decl)
+        if (!declToTypeAlias.contains(key)) {
+            declToTypeAlias[key] = HashSet<String>()
+        }
+        if (let Some(values) <- declToTypeAlias.get(key)) {
+            values.add(alias)
+        }
+    }
+
+    private func DeclAliasKey(decl: Decl): String {
+        return decl.fullPackageName + "." + decl.identifier.Val()
     }
 
     public static func GetPrimitiveTy(kind: TypeKind): PrimitiveTy {
@@ -921,6 +938,13 @@ public class TypeManager {
                 ret = true
             }
             idx--
+        }
+        if (let Some(aliases) <- declToTypeAlias.get(DeclAliasKey(decl))) {
+            for (aliasName in aliases) {
+                if (!getResolvedImportedDeclsByName(file, aliasName).isEmpty()) {
+                    ret = true
+                }
+            }
         }
         return ret
     }
