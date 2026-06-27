@@ -1164,13 +1164,17 @@ private func AddCurrentGenericInstTyVars(typeManager: TypeManager, generic: Gene
                 typeManager.MakeInstTyVar(typeMapping, genericTy)
                 if (let Some(instTy) <- typeMapping.u2i.Get(genericTy)) {
                     if (let Some(instGenTy) <- (instTy as GenericsTy)) {
-                        for (upperBound in genericTy.upperBounds) {
-                            let instUpperBound = typeManager.ApplySubstPack(upperBound, typeMapping)
-                            if (!TyListContains(instGenTy.upperBounds, instUpperBound)) {
-                                instGenTy.upperBounds.add(instUpperBound)
+                        // Mirrors C++ GetTyVarsToSolve(TypeCheckUtil.cpp:743): a generated instantiation
+                        // variable is still to be solved only when it is not already present in maps.inst.
+                        if (let None <- typeMapping.inst.Get(instGenTy)) {
+                            for (upperBound in genericTy.upperBounds) {
+                                let instUpperBound = typeManager.ApplySubstPack(upperBound, typeMapping)
+                                if (!TyListContains(instGenTy.upperBounds, instUpperBound)) {
+                                    instGenTy.upperBounds.add(instUpperBound)
+                                }
                             }
+                            out.add(instGenTy)
                         }
-                        out.add(instGenTy)
                     }
                 }
             }
