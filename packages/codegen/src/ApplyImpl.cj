@@ -65,9 +65,7 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
     }
     let methodTypeInfoArg = BuildApplyMethodTypeInfoArg(irBuilder, callee, thisType, argValues)
     if (let Some(instFuncTy) <- callType) {
-        let typeInfo = TypeExtraInfo()
-        typeInfo.isMethod = isMethodType
-        typeInfo.isStaticMethod = isStaticMethodType
+        let typeInfo = TypeExtraInfo(0u32, isMethodType, isStaticMethodType, true, instTypeArgs)
         if (let Some(instCGFuncTy) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), instFuncTy,
             extraInfo: typeInfo) as CGFunctionType)) {
             let rawCallee = if (let Some(cgFunctionValue) <- (calleeValue as CGFunction)) {
