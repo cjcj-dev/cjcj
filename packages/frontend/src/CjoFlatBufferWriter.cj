@@ -8,6 +8,7 @@ import cangjie_compiler::mangle.BaseMangler as RealBaseMangler
 import cangjie_compiler::modules.{FlatBufferBuilder, FlatBufferOffset}
 import cangjie_compiler::option.OptimizationLevel
 import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.MAIN_INVOKE
 
 private let CJO_FILE_IDENTIFIER: String = "CJOF"
 private let INVALID_PACKAGE_INDEX: Int64 = -1
@@ -195,11 +196,51 @@ private class FrontendCjoFlatBufferWriter {
         if (!ShouldSerializeTopLevelDecl(decl)) {
             return
         }
-        if (IsSupportedTopLevelDecl(decl)) {
-            let _ = SaveDeclIndex(decl, true)
+        let targets = ArrayList<Decl>()
+        AppendDeclForSerialization(decl, targets)
+        for (target in targets) {
+            if (IsSupportedTopLevelDecl(target)) {
+                let _ = SaveDeclIndex(target, true)
+                continue
+            }
+            throw IllegalArgumentException("not yet serialized in faithful .cjo writer: " + ASTKindName(target.astKind))
+        }
+    }
+
+    // Mirror C++ ASTWriter AppendDecl (Modules/ASTSerialization/ASTWriter.cpp:99-120): a MainDecl/MacroDecl is exported
+    // through its desugared FuncDecl; a VarWithPatternDecl is exported as the VarDecls of its pattern; the synthesized
+    // `$mainInvoke` function is not exported; everything else is exported as-is.
+    private func AppendDeclForSerialization(decl: Decl, out: ArrayList<Decl>): Unit {
+        if (let Some(mainDecl) <- (decl as MainDecl)) {
+            if (let Some(desugar) <- mainDecl.desugarDecl) {
+                out.add(desugar)
+                return
+            }
+        } else if (let Some(macroDecl) <- (decl as MacroDecl)) {
+            if (let Some(desugar) <- macroDecl.desugarDecl) {
+                out.add(desugar)
+                return
+            }
+        } else if (let Some(vpd) <- (decl as VarWithPatternDecl)) {
+            if (let Some(pattern) <- vpd.irrefutablePattern) {
+                let walker = Walker(pattern, visitPre: { node: Node =>
+                    if (node.astKind == ASTKind.VAR_DECL) {
+                        if (let Some(varDecl) <- (node as VarDecl)) {
+                            out.add(varDecl)
+                        }
+                    }
+                    return VisitAction.WALK_CHILDREN
+                })
+                let _ = walker.Walk()
+            }
+            return
+        } else if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            if (funcDecl.identifier.Val() != MAIN_INVOKE) {
+                out.add(decl)
+            }
             return
         }
-        throw IllegalArgumentException("not yet serialized in faithful .cjo writer: " + ASTKindName(decl.astKind))
+        out.add(decl)
     }
 
     private func ShouldSerializeTopLevelDecl(decl: Decl): Bool {
