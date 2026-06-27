@@ -270,8 +270,11 @@ private func AddOptionBoxHandleCallExpr(typeManager: TypeManager, callExpr: Call
     if (let Some(base) <- callExpr.baseFunc) {
         if (let Some(baseTy) <- base.GetTy()) {
             if (let Some(funcTy) <- (baseTy as FuncTy)) {
-                AddOptionBoxHandleCallArgs(typeManager, callExpr.args, funcTy)
-                AddOptionBoxHandleCallArgs(typeManager, callExpr.defaultArgs, funcTy)
+                if (let Some(desugarArgs) <- callExpr.desugarArgs) {
+                    AddOptionBoxHandleCallArgs(typeManager, desugarArgs, funcTy)
+                } else {
+                    AddOptionBoxHandleCallArgs(typeManager, callExpr.args, funcTy)
+                }
             }
         }
     }
