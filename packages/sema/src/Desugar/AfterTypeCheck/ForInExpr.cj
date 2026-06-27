@@ -2,6 +2,7 @@ package cangjie_compiler::sema.Desugar.AfterTypeCheck
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::sema.*
 
 private let INDEX_COMPILER: String = "$index-compiler"
@@ -352,6 +353,68 @@ private func IsStepOne(rangeExpr: RangeExpr): Bool {
     return true
 }
 
+private func IsCallRangeConstructor(callExpr: CallExpr): Bool {
+    let rangeConstructorParamSize: Int64 = 6
+    let rangeConstructorIntLength: Int64 = 3
+    if (callExpr.callKind != CallKind.CALL_OBJECT_CREATION) {
+        return false
+    }
+    let callee = (callExpr.baseFunc ?? return false) as RefExpr
+    let calledFunc = ((callee ?? return false).ref.target ?? return false) as FuncDecl
+    let funcBody = (calledFunc ?? return false).funcBody ?? return false
+    if (funcBody.paramLists.isEmpty() || funcBody.paramLists[0].params.size != rangeConstructorParamSize) {
+        return false
+    }
+    if (callExpr.args.size != rangeConstructorParamSize) {
+        return false
+    }
+    var index: Int64 = 0
+    while (index < rangeConstructorIntLength) {
+        let argTy = callExpr.args[index].GetTy() ?? return false
+        if (!argTy.IsInteger()) {
+            return false
+        }
+        index++
+    }
+    let stepExpr = callExpr.args[rangeConstructorIntLength - 1].expr ?? return false
+    let stepLit = (stepExpr as LitConstExpr) ?? return false
+    let stepValue = stepLit.constNumValue.asInt.`Int64`()
+    if (stepValue != 1 && stepValue != -1) {
+        return false
+    }
+    index = rangeConstructorIntLength
+    while (index < rangeConstructorParamSize) {
+        let argTy = callExpr.args[index].GetTy() ?? return false
+        if (!argTy.IsBoolean()) {
+            return false
+        }
+        index++
+    }
+    let isClosedExpr = callExpr.args[rangeConstructorParamSize - 1].expr ?? return false
+    let isClosedLit = (isClosedExpr as LitConstExpr) ?? return false
+    return isClosedLit.constNumValue.asBoolean
+}
+
+private func IsClosedRangeOne(forInExpr: ForInExpr): Bool {
+    let inExpr = forInExpr.inExpression ?? return false
+    if (let Some(rangeExpr) <- (inExpr as RangeExpr)) {
+        if (let Some(desugar) <- rangeExpr.desugarExpr) {
+            if (let Some(callExpr) <- (desugar as CallExpr)) {
+                return IsCallRangeConstructor(callExpr)
+            }
+            return false
+        }
+        if (rangeExpr.isClosed && IsStepOne(rangeExpr)) {
+            return true
+        }
+        return false
+    }
+    if (let Some(callExpr) <- (inExpr as CallExpr)) {
+        return IsCallRangeConstructor(callExpr)
+    }
+    return false
+}
+
 private func CreateRangeCond(forInExpr: ForInExpr, index: VarDecl, stop: VarDecl, op: TokenKind): BinaryExpr {
     let left = CreateVarRef(index, stop)
     let right = CreateVarRef(stop, stop)
@@ -481,7 +544,18 @@ private func BindRangePatternVar(forInExpr: ForInExpr, index: VarDecl): Unit {
     }
 }
 
-private func ReArrangeForInRangeExpr(forInExpr: ForInExpr, rangeExpr: RangeExpr): Unit {
+private func SynthesizeNode(context: Option<ASTContext>, synthesizer: Option<(ASTContext, SynPos, Node) -> Ty>,
+    pos: SynPos, node: Node): Option<Ty> {
+    if (let Some(ctx) <- context) {
+        if (let Some(synthesize) <- synthesizer) {
+            return Some(synthesize(ctx, pos, node))
+        }
+    }
+    return None
+}
+
+private func ReArrangeForInRangeExpr(forInExpr: ForInExpr, rangeExpr: RangeExpr,
+    context: Option<ASTContext>, synthesizer: Option<(ASTContext, SynPos, Node) -> Ty>): Unit {
     if (let Some(index) <- CreateIndexVar(forInExpr, rangeExpr)) {
         if (let Some(stop) <- CreateStopVar(rangeExpr)) {
             if (let Some(update) <- CreateUpdate(forInExpr, rangeExpr, index)) {
@@ -492,6 +566,16 @@ private func ReArrangeForInRangeExpr(forInExpr: ForInExpr, rangeExpr: RangeExpr)
                     if (increasing) { TokenKind.LT } else { TokenKind.GT }
                 }
                 let rangeCond = CreateRangeCond(forInExpr, index, stop, op)
+                if (let Some(inExpr) <- forInExpr.inExpression) {
+                    CopyBasicInfo(inExpr, update)
+                }
+                AddCurFile(update, file: forInExpr.curFile)
+                if (let Some(updateTy) <- SynthesizeNode(context, synthesizer, SynPos.EXPR_ARG, update)) {
+                    if (!Ty.IsTyCorrect(Some(updateTy))) {
+                        return
+                    }
+                    update.SetTy(updateTy)
+                }
                 BindRangePatternVar(forInExpr, index)
                 FinishRangeRearrange(forInExpr, index, stop, update, rangeCond)
             }
@@ -517,6 +601,93 @@ private func FinishStringDesugar(forInExpr: ForInExpr, index: VarDecl, tmp: VarD
     forInExpr.patternGuard = None
     forInExpr.body = None
     forInExpr.forInKind = ForInKind.FORIN_STRING
+}
+
+private func CreateStringElementCallForRearrange(forInExpr: ForInExpr, tmp: VarDecl,
+    index: VarDecl, end: VarDecl, context: Option<ASTContext>,
+    synthesizer: Option<(ASTContext, SynPos, Node) -> Ty>): Option<CallExpr> {
+    let tmpRef = CreateVarRef(tmp, end)
+    CopyBasicInfo(end, tmpRef)
+    let base = CreateMemberAccess(tmpRef, SUBSCRIPT_OPERATOR_NAME)
+    base.SetTy(Ty.GetInitialTy())
+    if (let Some(baseExpr) <- base.baseExpr) {
+        CopyBasicInfo(end, baseExpr)
+    }
+    let indexRef = CreateVarRef(index, end)
+    CopyBasicInfo(end, indexRef)
+    let args = ArrayList<FuncArg>()
+    args.add(CreateFuncArg(indexRef))
+    if (let Some(argExpr) <- args[0].expr) {
+        CopyBasicInfo(end, argExpr)
+    }
+    let call = CreateCallExpr(base, args)
+    CopyBasicInfo(end, call)
+    AddCurFile(call, file: forInExpr.curFile)
+    if (let Some(callTy) <- SynthesizeNode(context, synthesizer, SynPos.EXPR_ARG, call)) {
+        if (!Ty.IsTyCorrect(Some(callTy))) {
+            return None
+        }
+        call.SetTy(callTy)
+        return call
+    }
+    return Some(call)
+}
+
+private func BindStringPatternVarForRearrange(forInExpr: ForInExpr, tmp: VarDecl,
+    index: VarDecl, end: VarDecl, context: Option<ASTContext>,
+    synthesizer: Option<(ASTContext, SynPos, Node) -> Ty>): Unit {
+    if (let Some(pattern) <- forInExpr.pattern) {
+        if (let Some(varDecl) <- GetRangePatternVarDecl(pattern)) {
+            if (let Some(elemCall) <- CreateStringElementCallForRearrange(
+                forInExpr, tmp, index, end, context, synthesizer)) {
+                varDecl.initializer = elemCall
+            }
+        }
+    }
+}
+
+private func FinishStringRearrange(forInExpr: ForInExpr, index: VarDecl, tmp: VarDecl, end: VarDecl): Unit {
+    let nodes = ArrayList<Node>()
+    nodes.add(index)
+    nodes.add(tmp)
+    nodes.add(end)
+    let block = CreateBlock(nodes, UnitTy())
+    if (let Some(initializer) <- tmp.initializer) {
+        CopyBasicInfo(initializer, block)
+    } else {
+        CopyBasicInfo(forInExpr, block)
+    }
+    AddCurFile(block, file: forInExpr.curFile)
+    forInExpr.inExpression = Some(block)
+    forInExpr.forInKind = ForInKind.FORIN_STRING
+    if (let Some(body) <- forInExpr.body) {
+        RearrangeRefLoop(forInExpr, forInExpr, body)
+    }
+}
+
+private func ReArrangeForInStringExpr(typeManager: TypeManager, forInExpr: ForInExpr,
+    context: Option<ASTContext>, synthesizer: Option<(ASTContext, SynPos, Node) -> Ty>): Unit {
+    let index = CreateStringIndexVar(forInExpr)
+    if (let Some(ctx) <- context) {
+        ctx.AddDeclName(Names(ITER_COMPILER, forInExpr.scopeName), index)
+    }
+    if (let Some(tmp) <- CreateStringTmpVar(forInExpr)) {
+        if (let Some(end) <- CreateStringEndVar(typeManager, forInExpr, tmp)) {
+            if (let Some(initializer) <- end.initializer) {
+                initializer.begin = tmp.begin
+                initializer.end = tmp.end
+                AddCurFile(initializer, file: forInExpr.curFile)
+                if (let Some(endTy) <- SynthesizeNode(context, synthesizer, SynPos.EXPR_ARG, initializer)) {
+                    if (!Ty.IsTyCorrect(Some(endTy))) {
+                        return
+                    }
+                    end.SetTy(endTy)
+                }
+            }
+            BindStringPatternVarForRearrange(forInExpr, tmp, index, end, context, synthesizer)
+            FinishStringRearrange(forInExpr, index, tmp, end)
+        }
+    }
 }
 
 private func CreateIteratorVar(forInExpr: ForInExpr, context: Option<ASTContext>,
@@ -780,7 +951,40 @@ public func DesugarForInRangeExpr(forInExpr: ForInExpr): Unit {
             if (!IsStepOne(rangeExpr)) {
                 return
             }
-            ReArrangeForInRangeExpr(forInExpr, rangeExpr)
+            ReArrangeForInRangeExpr(forInExpr, rangeExpr, None, None)
+        }
+    }
+}
+
+public func ReArrangeForInExpr(typeManager: TypeManager, forInExpr: ForInExpr,
+    context!: Option<ASTContext> = None,
+    synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Unit {
+    if (!Ty.IsTyCorrect(forInExpr.GetTy()) ||
+        (if (let Some(diagEngine) <- diag) { diagEngine.GetErrorCount() != 0u64 } else { false })) {
+        return
+    }
+    if (let Some(_) <- forInExpr.desugarExpr) {
+        return
+    }
+    if (IsClosedRangeOne(forInExpr)) {
+        return
+    }
+    if (let Some(inExpr) <- forInExpr.inExpression) {
+        if (let Some(inTy) <- inExpr.GetTy()) {
+            if (inTy.IsRange() && !inTy.typeArgs.isEmpty() && inTy.typeArgs[0].IsInteger()) {
+                if (let Some(rangeExpr) <- (inExpr as RangeExpr)) {
+                    if (IsStepOne(rangeExpr)) {
+                        ReArrangeForInRangeExpr(forInExpr, rangeExpr, context, synthesizer)
+                        return
+                    }
+                }
+            }
+            if (inTy.IsString()) {
+                ReArrangeForInStringExpr(typeManager, forInExpr, context, synthesizer)
+            } else {
+                DesugarForInExpr(typeManager, forInExpr, context: context, synthesizer: synthesizer)
+            }
         }
     }
 }

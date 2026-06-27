@@ -1,19 +1,22 @@
 package cangjie_compiler::sema.Desugar
 
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.AfterTypeCheck.*
 
 public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
     context!: Option<ASTContext> = None, options!: GlobalOptions = GlobalOptions(),
-    synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None): Unit {
+    synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Unit {
     DesugarDeclsForPackage(pkg, options.enableCoverage)
     let walker = Walker(pkg, visitPre: { node: Node =>
         match (node.astKind) {
             case ASTKind.FOR_IN_EXPR =>
                 if (let Some(forInExpr) <- (node as ForInExpr)) {
-                    DesugarForInExpr(typeManager, forInExpr, context: context, synthesizer: synthesizer)
+                    ReArrangeForInExpr(typeManager, forInExpr, context: context, synthesizer: synthesizer,
+                        diag: diag)
                 }
             case ASTKind.FUNC_PARAM =>
                 if (let Some(param) <- (node as FuncParam)) {

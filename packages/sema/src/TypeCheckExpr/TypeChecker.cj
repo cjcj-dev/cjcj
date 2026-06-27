@@ -1037,7 +1037,7 @@ public class TypeChecker {
                 PerformDesugarAfterTypeCheck(impl.typeManager, pkg, context: Some(ctx), options: GlobalOptions(),
                     synthesizer: Some({ synCtx: ASTContext, pos: SynPos, node: Node =>
                         SynthesizeWithoutRecover(synCtx, pos, node)
-                    }))
+                    }), diag: impl.diag)
                 DesugarAfterInstantiation(impl.typeManager, recursivePkgs, pkg,
                     implicitUsedDecls: Some(implicitUsedDecls))
                 IterateToplevelDecls(pkg, { decl: Decl =>
