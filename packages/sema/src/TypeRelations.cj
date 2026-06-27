@@ -137,6 +137,19 @@ public func SameTy(lhs: Ty, rhs: Ty): Bool {
     if (IsDeclIdentityTy(lhs) || IsDeclIdentityTy(rhs)) {
         return SameNominalTy(lhs, rhs)
     }
+    // A generic type variable is identified by its GenericParamDecl, not by its source name: two distinct decls can
+    // both name their parameter `T` (e.g. ArrayList<T> and a local generic function) yet are different type variables.
+    // C++ compares TyVars by pointer identity; mirror that by comparing the owning decls when both are known, so a
+    // substitution keyed on one decl's `T` does not collide with another decl's `T`.
+    if (let Some(leftGen) <- (lhs as GenericsTy)) {
+        if (let Some(rightGen) <- (rhs as GenericsTy)) {
+            if (let Some(ld) <- leftGen.decl) {
+                if (let Some(rd) <- rightGen.decl) {
+                    return ld.objectId == rd.objectId
+                }
+            }
+        }
+    }
     if (lhs.Hash() == rhs.Hash() && lhs.String() == rhs.String()) {
         return true
     }
