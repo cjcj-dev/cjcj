@@ -722,6 +722,7 @@ private func GetOrCreateExpectedSlotWrapper(cgMod: CGModule, method: Function, e
     entry.SetInsertPoint(block)
     EmitExpectedSlotWrapperBody(entry, wrapper, method, expectedCGType)
     entry.close()
+    CGFunction.AddZeroInitForStructWithRefField(cgMod, wrapper)
     return wrapper
 }
 

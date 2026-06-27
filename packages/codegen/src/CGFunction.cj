@@ -50,7 +50,7 @@ public class CGFunction <: CGValue {
 
     public func Opt(): Unit {
         CGFunction.RemoveUnreachableBlocks(GetRawFunction())
-        AddZeroInitForStructWithRefField()
+        CGFunction.AddZeroInitForStructWithRefField(cgMod, GetRawFunction())
     }
 
     public func DumpIR(): Unit {
@@ -173,8 +173,7 @@ public class CGFunction <: CGValue {
         return unsafe { LLVMGetFirstUse(value) }.isNull()
     }
 
-    private func AddZeroInitForStructWithRefField(): Unit {
-        let function = GetRawFunction()
+    public static func AddZeroInitForStructWithRefField(cgMod: CGModule, function: LLVMValueRef): Unit {
         if (function.isNull() || unsafe { LLVMIsDeclaration(function) } != 0) {
             return
         }
