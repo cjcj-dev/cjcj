@@ -326,6 +326,10 @@ private func typeCheckExprIsArithmeticOperator(op: TokenKind): Bool {
         op == TokenKind.BITAND || op == TokenKind.BITOR || op == TokenKind.BITXOR
 }
 
+private func typeCheckExprIsLogicalOperator(op: TokenKind): Bool {
+    return op == TokenKind.AND || op == TokenKind.OR
+}
+
 private func typeCheckExprAddConcreteIntegerKinds(kinds: ArrayList<TypeKind>): Unit {
     kinds.add(TypeKind.TYPE_INT8)
     kinds.add(TypeKind.TYPE_INT16)
@@ -3186,6 +3190,11 @@ public class TypeChecker {
             return FinishSynthesize(ctx, returnExpr, SynthesizeReturnExpr(ctx, returnExpr))
         }
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
+            if (typeCheckExprIsLogicalOperator(binaryExpr.op)) {
+                if (let None <- binaryExpr.desugarExpr) {
+                    return FinishSynthesize(ctx, binaryExpr, SynthesizeLogicalBinaryExpr(ctx, binaryExpr))
+                }
+            }
             SynthesizeBinaryChildren(ctx, binaryExpr)
             let binaryTy = SynBinaryExpr(impl.typeManager, binaryExpr, ctx: Some(ctx))
             if (Ty.IsTyCorrect(binaryTy)) {
@@ -3281,6 +3290,69 @@ public class TypeChecker {
         return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr))
     }
 
+    private func SynthesizeLogicalBinaryExpr(ctx: ASTContext, be: BinaryExpr): Ty {
+        if (let None <- be.leftExpr) {
+            let invalidTy = TypeManager.GetInvalidTy()
+            be.SetTy(invalidTy)
+            return invalidTy
+        }
+        if (let None <- be.rightExpr) {
+            let invalidTy2 = TypeManager.GetInvalidTy()
+            be.SetTy(invalidTy2)
+            return invalidTy2
+        }
+        let leftExpr = be.leftExpr.getOrThrow()
+        let rightExpr = be.rightExpr.getOrThrow()
+        let leftTy = Synthesize(ctx, leftExpr)
+        let rightTy = Synthesize(ctx, rightExpr)
+        if (!Ty.IsTyCorrect(leftTy) || !Ty.IsTyCorrect(rightTy)) {
+            let invalidTy3 = TypeManager.GetInvalidTy()
+            be.SetTy(invalidTy3)
+            return invalidTy3
+        }
+        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        if (impl.typeManager.IsSubtype(leftTy, boolTy) && impl.typeManager.IsSubtype(rightTy, boolTy)) {
+            be.SetTy(boolTy)
+            return boolTy
+        }
+        let invalidTy4 = TypeManager.GetInvalidTy()
+        be.SetTy(invalidTy4)
+        return invalidTy4
+    }
+
+    private func CheckLogicalBinaryExpr(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
+        if (let None <- be.leftExpr) {
+            be.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
+        if (let None <- be.rightExpr) {
+            be.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
+        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        if (!target.IsBoolean()) {
+            if (!impl.typeManager.IsLitBoxableType(boolTy, target)) {
+                be.SetTy(TypeManager.GetInvalidTy())
+                return false
+            }
+        }
+        let leftExpr = be.leftExpr.getOrThrow()
+        let rightExpr = be.rightExpr.getOrThrow()
+        var ok = true
+        if (!Check(ctx, boolTy, leftExpr)) {
+            ok = false
+        }
+        if (!Check(ctx, boolTy, rightExpr)) {
+            ok = false
+        }
+        if (ok) {
+            be.SetTy(boolTy)
+            return true
+        }
+        be.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+
     private func CheckArithmeticBinaryExpr(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
         if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
             be.SetTy(TypeManager.GetInvalidTy())
@@ -3318,6 +3390,9 @@ public class TypeChecker {
         }
         if (typeCheckExprIsArithmeticOperator(be.op) && CheckArithmeticBinaryExpr(ctx, target, be)) {
             return true
+        }
+        if (typeCheckExprIsLogicalOperator(be.op)) {
+            return CheckLogicalBinaryExpr(ctx, target, be)
         }
         if (TryCheckBinaryOperatorOverload(ctx, target, be)) {
             return true
