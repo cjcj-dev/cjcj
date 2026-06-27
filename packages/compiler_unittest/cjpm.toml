@@ -1,0 +1,21 @@
+[package]
+  cjc-version = "1.1.0"
+  name = "compiler_unittest"
+  organization = "cangjie_compiler"
+  description = "Downstream compiler unittest harness package"
+  version = "0.1.0"
+  target-dir = ""
+  script-dir = ""
+  src-dir = "src"
+  output-type = "static"
+  compile-option = ""
+  override-compile-option = ""
+  link-option = "/root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029/third_party/llvm/lib/libLLVM-15.so -rpath /root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029/third_party/llvm/lib"
+  package-configuration = {}
+
+[dependencies]
+  "cangjie_compiler::ast" = { path = "../ast" }
+  "cangjie_compiler::driver" = { path = "../driver" }
+  "cangjie_compiler::frontend" = { path = "../frontend" }
+  "cangjie_compiler::option" = { path = "../option" }
+  "cangjie_compiler::utils" = { path = "../utils" }

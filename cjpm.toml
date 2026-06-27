@@ -20,6 +20,7 @@
     "packages/frontend",
     "packages/frontend_tool",
     "packages/driver",
+    "packages/compiler_unittest",
     "packages/cjc"
   ]
   build-members = [
@@ -41,6 +42,7 @@
     "packages/frontend",
     "packages/frontend_tool",
     "packages/driver",
+    "packages/compiler_unittest",
     "packages/cjc"
   ]
   test-members = [
@@ -62,6 +64,7 @@
     "packages/frontend",
     "packages/frontend_tool",
     "packages/driver",
+    "packages/compiler_unittest",
     "packages/cjc"
   ]
   compile-option = ""
