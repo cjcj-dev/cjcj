@@ -849,6 +849,7 @@ public class Function <: GlobalValue {
     private let params: ArrayList<Parameter> = ArrayList<Parameter>()
     private let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
     private var returnValue: Option<LocalVar> = None
+    private var overrideSrcFuncType: Option<FuncType> = None
     private var genericDecl: Option<Function> = None
     private var paramDftValHostFunc: Option<Function> = None
     private var blockId: UInt64 = 0u64
@@ -987,6 +988,10 @@ public class Function <: GlobalValue {
         }
         return None
     }
+
+    public func GetOverrideSrcFuncType(): Option<FuncType> { return overrideSrcFuncType }
+    public func SetOverrideSrcFuncType(funcTy: FuncType): Unit { overrideSrcFuncType = funcTy }
+    public func ClearOverrideSrcFuncType(): Unit { overrideSrcFuncType = None }
 
     public func GetBody(): Option<BlockGroup> { return body }
 

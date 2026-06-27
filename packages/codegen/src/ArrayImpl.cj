@@ -2,6 +2,7 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.CustomType
+import cangjie_compiler::chir.Box as ChirBox
 import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.ExprKind
@@ -228,8 +229,7 @@ public func GenerateRawArrayLiteralInit(irBuilder: IRBuilder2, chirExpr: Express
                 LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(elementIdx - 1), 0)
             }
             let elementPtr = CreateRawArrayElementPointer(irBuilder, rawArrayValue, rawArrayTy, indexValue)
-            StoreRawArrayElement(irBuilder, rawArrayValue.GetRawValue(), elementCGType, elementValue.GetRawValue(),
-                elementPtr)
+            StoreRawArrayElement(irBuilder, rawArrayValue.GetRawValue(), elementCGType, elementValue, elementPtr)
             elementIdx++
         }
         return rawArrayValue.GetRawValue()
@@ -339,7 +339,8 @@ private func GenerateRawArrayFillLoop(irBuilder: IRBuilder2, rawArrayValue: CGVa
     irBuilder.SetInsertPoint(loopBodyBlock)
     let elementPtr = CreateRawArrayElementPointer(irBuilder, rawArrayValue, rawArrayTy, currentIndex)
     let elementCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rawArrayTy.GetElementType())
-    StoreRawArrayElement(irBuilder, rawArrayValue.GetRawValue(), elementCGType, initValue, elementPtr)
+    StoreRawArrayElement(irBuilder, rawArrayValue.GetRawValue(), elementCGType, CGValue(initValue, elementCGType),
+        elementPtr)
     let nextIndex = irBuilder.CreateBinary(ExprKind.ADD, currentIndex, oneValue, name: "iterator.next")
     irBuilder.CreateStore(nextIndex, indexSlot)
     irBuilder.CreateBr(loopCondBlock)
@@ -360,11 +361,56 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     }
     let value = irBuilder.GetCGModule().MaterializeValue(irBuilder, valueOperand)
     let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, addrOperand)
+    if (let Some(boxRetStore) <- TryGenerateBoxRetValueStore(irBuilder, chirExpr, valueOperand, addrOperand, value, addr)) {
+        return boxRetStore
+    }
     return CreateTypedStoreForAddress(irBuilder, value, addr)
 }
 
-public func CreateTypedStoreForAddress(irBuilder: IRBuilder2, value: CGValue, addr: CGValue): LLVMValueRef {
-    if (let Some(genericStore) <- irBuilder.TryCreateGenericStore(value, addr)) {
+private func TryGenerateBoxRetValueStore(irBuilder: IRBuilder2, chirExpr: Expression, valueOperand: Value,
+    addrOperand: Value, value: CGValue, addr: CGValue): Option<LLVMValueRef> {
+    let addrLocal = (addrOperand as LocalVar) ?? return None
+    if (!addrLocal.IsRetValue()) {
+        return None
+    }
+    let topLevelFunc = chirExpr.GetTopLevelFunc() ?? return None
+    let overrideSrcFuncType = topLevelFunc.GetOverrideSrcFuncType() ?? return None
+    let addrTy = addrOperand.GetType() ?? return None
+    let addrDerefTy = addrTy.StripAllRefs()
+    if (!addrDerefTy.IsBox()) {
+        return None
+    }
+    let typeArgs = addrDerefTy.GetTypeArgs()
+    if (typeArgs.isEmpty()) {
+        return None
+    }
+
+    let overrideSrcRetType = overrideSrcFuncType.GetReturnType()
+    let retAddrType = irBuilder.GetCGContext().GetCHIRBuilder().context.GetRefTy(overrideSrcRetType)
+    let retAddrCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), retAddrType)
+    let retValueCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), overrideSrcRetType)
+    let needBoxExpr = overrideSrcRetType.IsGeneric() || retValueCGType.GetSize().isNone()
+    let storeValCGType = if (overrideSrcRetType.IsGeneric()) { retValueCGType } else { retAddrCGType }
+    var valueToStore = value.GetRawValue()
+    if (!needBoxExpr) {
+        if (let Some(valueLocal) <- (valueOperand as LocalVar)) {
+            if (let Some(ownerExpr) <- valueLocal.GetExpr()) {
+                if (let Some(boxExpr) <- (ownerExpr as ChirBox)) {
+                    valueToStore = irBuilder.GetCGModule().MaterializeValue(irBuilder,
+                        boxExpr.GetSourceValue()).GetRawValue()
+                }
+            }
+        }
+    }
+
+    let typedValue = CGValue(valueToStore, storeValCGType, isSRetArg: value.IsSRetArg())
+    let typedAddr = CGValue(addr.GetRawValue(), retAddrCGType, isSRetArg: addr.IsSRetArg())
+    return Some(irBuilder.CreateStore(typedValue, typedAddr, typeArgs[0]))
+}
+
+public func CreateTypedStoreForAddress(irBuilder: IRBuilder2, value: CGValue, addr: CGValue,
+    boxType!: Option<Type> = None): LLVMValueRef {
+    if (let Some(genericStore) <- irBuilder.TryCreateGenericStore(value, addr, boxType: boxType)) {
         return genericStore
     }
     if (let Some(memberStore) <- irBuilder.TryCreateManagedMemberStore(value, addr)) {
@@ -417,13 +463,24 @@ private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue, addr: C
         return raw
     }
     if (let Some(valueCGType) <- value.GetCGType()) {
-        if (!valueCGType.IsReference() && valueCGType.GetOriginal().StripAllRefs().IsStruct()) {
+        let valueTy = valueCGType.GetOriginal().StripAllRefs()
+        if (!valueCGType.IsReference() && (valueTy.IsStruct() || valueTy.IsTuple() || valueTy.IsVArray())) {
             return irBuilder.CreateLoad(valueCGType.GetLLVMType(), raw, name: "store.value")
         }
     }
     if (let Some(addrCGType) <- addr.GetCGType()) {
         if (let Some(destCGType) <- addrCGType.GetPointerElementType()) {
             let destTy = destCGType.GetLLVMType()
+            let valueCGType = value.GetCGType() ?? return raw
+            if (ShouldLoadInlineValueForAddressStore(valueCGType, destCGType)) {
+                if (ShouldLoadInlineObjectPayloadForAddressStore(valueCGType)) {
+                    let payload = irBuilder.GetPayloadFromObject(raw)
+                    let payloadPtr = irBuilder.CreateBitCast(payload,
+                        unsafe { LLVMPointerType(destCGType.GetLLVMType(), 1u32) }, name: "store.ref.payload")
+                    return irBuilder.CreateLoad(destCGType.GetLLVMType(), payloadPtr, name: "store.ref.payload.value")
+                }
+                return irBuilder.CreateLoad(destCGType.GetLLVMType(), raw, name: "store.ref.value")
+            }
             if (destCGType.IsVArrayType()) {
                 return irBuilder.CreateLoad(destTy, raw, name: "store.value")
             }
@@ -433,6 +490,23 @@ private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue, addr: C
         }
     }
     return raw
+}
+
+private func ShouldLoadInlineValueForAddressStore(valueCGType: CGType, destCGType: CGType): Bool {
+    if (!valueCGType.IsReference() || destCGType.IsReference() || destCGType.GetSize().isNone()) {
+        return false
+    }
+    let valueElementCGType = valueCGType.GetPointerElementType() ?? return false
+    return valueElementCGType.GetOriginal().StripAllRefs().IsEqual(destCGType.GetOriginal().StripAllRefs())
+}
+
+private func ShouldLoadInlineObjectPayloadForAddressStore(valueCGType: CGType): Bool {
+    let valueTy = valueCGType.GetOriginal().StripAllRefs()
+    if (valueTy.IsRawArray() || valueTy.IsClass() || valueTy.IsBox() || valueTy.IsString()) {
+        return true
+    }
+    let valueElementCGType = valueCGType.GetPointerElementType() ?? return false
+    return !(valueElementCGType.IsStructType() || valueElementCGType.IsVArrayType())
 }
 
 private func TryStoreStructPtrValueForAddress(irBuilder: IRBuilder2, value: CGValue,
@@ -463,16 +537,17 @@ private func TryStoreStructPtrValueForAddress(irBuilder: IRBuilder2, value: CGVa
         LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(fieldSize), 0)
     }
     let align = irBuilder.GetCGModule().GetABITypeAlignment(destCGType.GetLLVMType())
+    let source = ReadManagedAggregateSourceIfNeeded(irBuilder, raw, destCGType, fieldSizeValue)
     if (irBuilder.IsGlobalVariableBasePtr(addr.GetRawValue()) &&
         irBuilder.IsLLVMTypeContainsRef(destCGType.GetLLVMType())) {
-        return Some(CallGCWriteStaticStruct(irBuilder, addr.GetRawValue(), raw, fieldSizeValue,
+        return Some(CallGCWriteStaticStruct(irBuilder, addr.GetRawValue(), source, fieldSizeValue,
             AggregateLLVMTypeName(destCGType)))
     }
     if (IsAddressSpacePointer(addr.GetRawValue(), 1u32) && irBuilder.IsLLVMTypeContainsRef(destCGType.GetLLVMType())) {
-        return Some(irBuilder.CallGCWriteStruct(addr.GetRawValue(), addr.GetRawValue(), raw, fieldSizeValue,
+        return Some(irBuilder.CallGCWriteStruct(addr.GetRawValue(), addr.GetRawValue(), source, fieldSizeValue,
             destCGType.GetOriginal().ToString()))
     }
-    return Some(irBuilder.CreateMemCpy(addr.GetRawValue(), align, raw, align, fieldSizeValue))
+    return Some(irBuilder.CreateMemCpy(addr.GetRawValue(), align, source, align, fieldSizeValue))
 }
 
 private func TryStoreStaticAggregateValueForAddress(irBuilder: IRBuilder2, storedValue: LLVMValueRef,
@@ -554,12 +629,17 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
         let storeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeElementRef.GetValue())
         let storePlace = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeElementRef.GetLocation())
         let storeIndices = BuildStaticElementIndices(irBuilder, path)
-        let storeAddr = CreateElementAddress(irBuilder, storePlace, storeIndices, "store.elem.addr")
+        let locationTy = storeElementRef.GetLocation().GetType()
+        let storeAddr = if (let Some(knownLocationTy) <- locationTy) {
+            CreateElementAddressWithKnownBaseType(irBuilder, storePlace, storeIndices, knownLocationTy, "store.elem.addr")
+        } else {
+            CreateElementAddress(irBuilder, storePlace, storeIndices, "store.elem.addr")
+        }
         if (storeAddr.isNull()) {
             return LLVMNullValue()
         }
-        let fieldTy: Option<Type> = if (let Some(locationTy) <- storeElementRef.GetLocation().GetType()) {
-            ResolveElementTypeByPath(locationTy, path)
+        let fieldTy: Option<Type> = if (let Some(knownLocationTy) <- locationTy) {
+            ResolveElementTypeByPath(knownLocationTy, path)
         } else {
             None
         }
@@ -574,7 +654,8 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
                 let byNameValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeByName.GetValue())
                 let byNamePlace = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeByName.GetLocation())
                 let byNameIndices = BuildStaticElementIndices(irBuilder, path)
-                let byNameAddr = CreateElementAddress(irBuilder, byNamePlace, byNameIndices, "store.elem.addr")
+                let byNameAddr = CreateElementAddressWithKnownBaseType(irBuilder, byNamePlace, byNameIndices,
+                    locationTy, "store.elem.addr")
                 if (byNameAddr.isNull()) {
                     return LLVMNullValue()
                 }
@@ -606,8 +687,7 @@ private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elemen
     if (let Some(baseType) <- baseValue.GetCGType()) {
         if (let Some(rawArrayTy) <- FindRawArrayType(baseType.GetOriginal())) {
             let elementCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rawArrayTy.GetElementType())
-            return StoreRawArrayElement(irBuilder, baseValue.GetRawValue(), elementCGType, rawElementValue,
-                elementPtr)
+            return StoreRawArrayElement(irBuilder, baseValue.GetRawValue(), elementCGType, elementValue, elementPtr)
         }
         if (IsManagedObjectElementBase(baseType.GetOriginal())) {
             if (IsManagedReferenceField(irBuilder, fieldTy)) {
@@ -656,23 +736,32 @@ private func StoreAggregateElementValue(irBuilder: IRBuilder2, baseValue: CGValu
     elementPtr: LLVMValueRef, fieldTy: Type): LLVMValueRef {
     let fieldCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), fieldTy.StripAllRefs())
     let rawElementValue = elementValue.GetRawValue()
-    if (!IsPointerLLVMValue(rawElementValue)) {
-        return irBuilder.CreateStore(rawElementValue, elementPtr)
-    }
     let fieldSize = if (let Some(size) <- fieldCGType.GetSize()) { size } else { 0 }
     let fieldSizeValue = unsafe {
         LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(fieldSize), 0)
     }
     let align = irBuilder.GetCGModule().GetABITypeAlignment(fieldCGType.GetLLVMType())
+    var source = rawElementValue
+    if (!IsPointerLLVMValue(rawElementValue)) {
+        if (irBuilder.IsLLVMTypeContainsRef(fieldCGType.GetLLVMType()) &&
+            (irBuilder.IsGlobalVariableBasePtr(elementPtr) || IsAddressSpacePointer(elementPtr, 1u32))) {
+            source = irBuilder.CreateEntryAlloca(fieldCGType, name: "store.elem.agg")
+            irBuilder.CreateStore(rawElementValue, source)
+        } else {
+            return irBuilder.CreateStore(rawElementValue, elementPtr)
+        }
+    } else {
+        source = ReadManagedAggregateSourceIfNeeded(irBuilder, rawElementValue, fieldCGType, fieldSizeValue)
+    }
     if (irBuilder.IsGlobalVariableBasePtr(elementPtr) && irBuilder.IsLLVMTypeContainsRef(fieldCGType.GetLLVMType())) {
-        return CallGCWriteStaticStruct(irBuilder, elementPtr, rawElementValue, fieldSizeValue,
+        return CallGCWriteStaticStruct(irBuilder, elementPtr, source, fieldSizeValue,
             AggregateLLVMTypeName(fieldCGType))
     }
     if (IsAddressSpacePointer(elementPtr, 1u32) && irBuilder.IsLLVMTypeContainsRef(fieldCGType.GetLLVMType())) {
-        return irBuilder.CallGCWriteStruct(baseValue.GetRawValue(), elementPtr, rawElementValue, fieldSizeValue,
+        return irBuilder.CallGCWriteStruct(baseValue.GetRawValue(), elementPtr, source, fieldSizeValue,
             fieldCGType.GetOriginal().ToString())
     }
-    return irBuilder.CreateMemCpy(elementPtr, align, rawElementValue, align, fieldSizeValue)
+    return irBuilder.CreateMemCpy(elementPtr, align, source, align, fieldSizeValue)
 }
 
 private func StoreElementRawValue(irBuilder: IRBuilder2, value: CGValue): LLVMValueRef {
@@ -712,11 +801,72 @@ private func IsAddressSpacePointer(value: LLVMValueRef, addressSpace: UInt32): B
 }
 
 private func StoreRawArrayElement(irBuilder: IRBuilder2, rawArrayValue: LLVMValueRef, elementCGType: CGType,
-    elementValue: LLVMValueRef, elementPtr: LLVMValueRef): LLVMValueRef {
-    if (elementCGType.IsReference()) {
-        return irBuilder.CallGCWrite(elementValue, rawArrayValue, elementPtr)
+    elementValue: CGValue, elementPtr: LLVMValueRef): LLVMValueRef {
+    let rawElementValue = elementValue.GetRawValue()
+    if (elementCGType.IsStructType() || elementCGType.IsVArrayType()) {
+        return StoreRawArrayAggregateElement(irBuilder, rawArrayValue, elementCGType, elementValue, elementPtr)
     }
-    return irBuilder.CreateStore(elementValue, elementPtr)
+    if (elementCGType.IsReference()) {
+        return irBuilder.CallGCWrite(rawElementValue, rawArrayValue, elementPtr)
+    }
+    return irBuilder.CreateStore(rawElementValue, elementPtr)
+}
+
+private func StoreRawArrayAggregateElement(irBuilder: IRBuilder2, rawArrayValue: LLVMValueRef,
+    elementCGType: CGType, elementValue: CGValue, elementPtr: LLVMValueRef): LLVMValueRef {
+    let rawElementValue = elementValue.GetRawValue()
+    let valueCGType = elementValue.GetCGType() ?? return irBuilder.CreateStore(rawElementValue, elementPtr)
+    if (!IsPointerBackedRawArrayAggregateValue(valueCGType, elementCGType)) {
+        return irBuilder.CreateStore(rawElementValue, elementPtr)
+    }
+    let size = if (let Some(elementSize) <- elementCGType.GetSize()) { elementSize } else { 0 }
+    let sizeValue = unsafe {
+        LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(size), 0)
+    }
+    if (irBuilder.IsLLVMTypeContainsRef(elementCGType.GetLLVMType())) {
+        let source = ReadManagedAggregateSourceIfNeeded(irBuilder, rawElementValue, elementCGType, sizeValue)
+        return irBuilder.CallGCWriteStruct(rawArrayValue, elementPtr, source, sizeValue,
+            elementCGType.GetOriginal().ToString())
+    }
+    let align = irBuilder.GetCGModule().GetABITypeAlignment(elementCGType.GetLLVMType())
+    let source = ReadManagedAggregateSourceIfNeeded(irBuilder, rawElementValue, elementCGType, sizeValue)
+    return irBuilder.CreateMemCpy(elementPtr, align, source, align, sizeValue)
+}
+
+private func ReadManagedAggregateSourceIfNeeded(irBuilder: IRBuilder2, source: LLVMValueRef,
+    sourceCGType: CGType, size: LLVMValueRef): LLVMValueRef {
+    if (!IsAddressSpacePointer(source, 1u32) || !irBuilder.IsLLVMTypeContainsRef(sourceCGType.GetLLVMType())) {
+        return source
+    }
+    let sourceBase = irBuilder.GetTrackedManagedBase(source) ?? source
+    let temp = irBuilder.CreateEntryAlloca(sourceCGType.GetLLVMType(), name: "rawarray.store.tmp")
+    irBuilder.CallGCReadStruct(temp, sourceBase, source, size, sourceCGType.GetOriginal().ToString())
+    return temp
+}
+
+private func IsPointerBackedRawArrayAggregateValue(valueCGType: CGType, elementCGType: CGType): Bool {
+    if (valueCGType.IsStructPtrType() && elementCGType.IsStructType()) {
+        return true
+    }
+    if (IsVArrayPtrValue(valueCGType) && elementCGType.IsVArrayType()) {
+        return true
+    }
+    if (valueCGType.GetOriginal().StripAllRefs().IsString() && elementCGType.IsStructType()) {
+        return true
+    }
+    if (!valueCGType.IsReference()) {
+        return false
+    }
+    let valueElementCGType = valueCGType.GetPointerElementType() ?? return false
+    return valueElementCGType.GetOriginal().StripAllRefs().IsEqual(elementCGType.GetOriginal().StripAllRefs())
+}
+
+private func IsVArrayPtrValue(cgType: CGType): Bool {
+    if (!cgType.IsPointerType()) {
+        return false
+    }
+    let elementType = cgType.GetPointerElementType() ?? return false
+    return elementType.IsVArrayType()
 }
 
 private func ShouldSkipNoOpStore(value: Value, location: Value): Bool {
@@ -816,9 +966,27 @@ private func CreateElementAddress(irBuilder: IRBuilder2, baseValue: CGValue, ind
             }
             return irBuilder.CreateGEP(elementType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)
         }
+        if (baseType.IsStructType() || baseType.IsVArrayType()) {
+            let baseSlot = irBuilder.CreateEntryAlloca(baseType, name: name + ".base")
+            irBuilder.CreateStore(baseValue.GetRawValue(), baseSlot)
+            return irBuilder.CreateGEP(baseType.GetLLVMType(), baseSlot, indices, name: name)
+        }
         return irBuilder.CreateGEP(baseType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)
     }
     return LLVMNullValue()
+}
+
+private func CreateElementAddressWithKnownBaseType(irBuilder: IRBuilder2, baseValue: CGValue,
+    indices: ArrayList<LLVMValueRef>, baseTy: Type, name: String): LLVMValueRef {
+    let strippedBaseTy = baseTy.StripAllRefs()
+    if (!IsPointerLLVMValue(baseValue.GetRawValue()) &&
+        (strippedBaseTy.IsStruct() || strippedBaseTy.IsTuple() || strippedBaseTy.IsVArray())) {
+        let baseCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), strippedBaseTy)
+        let baseSlot = irBuilder.CreateEntryAlloca(baseCGType, name: name + ".base")
+        irBuilder.CreateStore(baseValue.GetRawValue(), baseSlot)
+        return irBuilder.CreateGEP(baseCGType.GetLLVMType(), baseSlot, indices, name: name)
+    }
+    return CreateElementAddress(irBuilder, baseValue, indices, name)
 }
 
 private func AdjustAutoEnvClassFieldIndices(baseTy: Type, indices: ArrayList<LLVMValueRef>): ArrayList<LLVMValueRef> {

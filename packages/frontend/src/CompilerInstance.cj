@@ -152,6 +152,7 @@ public class CompilerInstance {
     public let srcPkgs: ArrayList<Package> = ArrayList<Package>()
     public let realASTPkgs: HashMap<String, RealASTPackage> = HashMap<String, RealASTPackage>()
     public let chirData: CHIRData = CHIRData()
+    public var faithfulSemaInstance: Option<FaithfulSemaCompilerInstance> = None
     private let pkgs: ArrayList<Package> = ArrayList<Package>()
     private let pkgCtxMap: HashMap<String, ASTContext> = HashMap<String, ASTContext>()
     private let depPackageInfo: ArrayList<String> = ArrayList<String>()
@@ -458,6 +459,7 @@ public class CompilerInstance {
         SeedFaithfulSemaResolvedImports(semaInstance)
         let checker = FaithfulSemaTypeChecker(Some(semaInstance))
         checker.TypeCheckForPackages(pkgs)
+        faithfulSemaInstance = Some(semaInstance)
         return diag.GetErrorCount() == 0
     }
 

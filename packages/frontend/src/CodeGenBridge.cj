@@ -28,6 +28,12 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
     let ast2chir = FaithfulAST2CHIR(builder, chirType,
         importedPkgs: instance.importManager.GetAllImportedPackages(),
         directImportedPkgs: instance.importManager.GetCurImportedPackages(pkg.fullPackageName),
+        overrideSrcFuncResolver: Some({ funcDecl =>
+            match (instance.faithfulSemaInstance) {
+                case Some(semaInstance) => semaInstance.typeManager.GetTopOverriddenFuncDecl(Some(funcDecl))
+                case None => None
+            }
+        }),
         chirWFC: instance.invocation.globalOptions.chirWFC,
         chirOptOverO2: instance.invocation.globalOptions.IsCHIROptimizationLevelOverO2())
     if (!ast2chir.ToCHIRPackage(pkg)) {

@@ -273,8 +273,7 @@ private func GenerateOptionLikeNonRefEnum(irBuilder: IRBuilder2, chirExpr: Expre
                 CGType.GetOrCreate(irBuilder.GetCGModule(), associatedValueType))
         }
         let associatedPtr = irBuilder.CreateStructGEP(enumCGType.GetLLVMType(), enumValue, 1u32)
-        let associatedAddr = CGValue(associatedPtr, GetRefCGType(irBuilder, associatedValueType))
-        CreateTypedStoreForAddress(irBuilder, recordValue, associatedAddr)
+        irBuilder.CreateStore(recordValue.GetRawValue(), associatedPtr, associatedValueType)
         return enumValue
     }
     let enumType = (resultTy as EnumType) ?? return LLVMNullValue()

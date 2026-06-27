@@ -213,6 +213,20 @@ public class IRBuilder2 <: Resource {
         return CreateStore(value, dest.GetRawValue())
     }
 
+    public func CreateStore(value: CGValue, dest: CGValue): LLVMValueRef {
+        return CreateTypedStoreForAddress(this, value, dest)
+    }
+
+    public func CreateStore(value: LLVMValueRef, dest: LLVMValueRef, elementType: Type): LLVMValueRef {
+        let refType = GetCGContext().GetCHIRBuilder().context.GetRefTy(elementType)
+        let refCGType = CGType.GetOrCreate(cgMod, refType)
+        return CreateStore(CGValue(value, refCGType), CGValue(dest, refCGType))
+    }
+
+    public func CreateStore(value: CGValue, dest: CGValue, elementType: Type): LLVMValueRef {
+        return CreateTypedStoreForAddress(this, value, dest, boxType: Some(elementType))
+    }
+
     public func IsGlobalVariableBasePtr(value: LLVMValueRef): Bool {
         return !value.isNull() && !unsafe { LLVMIsAGlobalVariable(value) }.isNull()
     }
@@ -248,7 +262,7 @@ public class IRBuilder2 <: Resource {
         return LLVMNullValue()
     }
 
-    public func TryCreateGenericStore(value: CGValue, dest: CGValue): Option<LLVMValueRef> {
+    public func TryCreateGenericStore(value: CGValue, dest: CGValue, boxType!: Option<Type> = None): Option<LLVMValueRef> {
         let valueCGType = value.GetCGType() ?? return None
         let destCGType = dest.GetCGType() ?? return None
         let destElementCGType = destCGType.GetPointerElementType() ?? return None
@@ -260,9 +274,10 @@ public class IRBuilder2 <: Resource {
         let rawValue = value.GetRawValue()
         let rawDest = dest.GetRawValue()
         let destTy = destElementCGType.GetOriginal()
-        let typeInfo = CreateTypeInfo(destTy)
+        let typeInfoTy = boxType ?? destTy
+        let typeInfo = CreateTypeInfo(typeInfoTy)
         let managedBase = GetTrackedManagedBase(rawDest)
-        let genericSize = if (managedBase.isSome()) { GetSize32(destTy, valueCGType) } else { LLVMNullValue() }
+        let genericSize = if (managedBase.isSome()) { GetSize32(typeInfoTy, valueCGType) } else { LLVMNullValue() }
         let blockNames = ArrayList<String>()
         blockNames.add("handle_store_ref")
         blockNames.add("handle_store_non_ref")
@@ -288,7 +303,7 @@ public class IRBuilder2 <: Resource {
             let destStorage = if (dest.IsSRetArg() && IsLLVMArgument(rawDest)) {
                 CreateLoad(destElementCGType.GetLLVMType(), rawDest, name: "generic.store.sret")
             } else {
-                let tmp = CallAllocaGenericWithTypeInfo(destTy, typeInfo)
+                let tmp = CallAllocaGenericWithTypeInfo(typeInfoTy, typeInfo)
                 CreateStore(tmp, CastStoreSlotForValue(rawDest, tmp, "generic.store.dest"))
                 tmp
             }
@@ -2600,10 +2615,14 @@ public class IRBuilder2 <: Resource {
         let payload = GetPayloadFromObject(objectValue)
         let payloadType = unsafe { LLVMPointerType(valueCGType.GetLLVMType(), 1u32) }
         let typedPayload = CreateBitCast(payload, payloadType, name: "generic.payload")
-        let storedValue = if (ShouldLoadGenericAggregateBoxSource(sourceValue, valueTy)) {
+        let storedValue = if (ShouldLoadGenericAggregateBoxSource(sourceValue, valueTy, valueCGType)) {
             CreateLoad(valueCGType.GetLLVMType(), sourceValue, name: "generic.payload.value")
         } else {
             sourceValue
+        }
+        if (valueCGType.IsReference() || IsOptionLikeRefValue(valueCGType)) {
+            CallGCWrite(storedValue, objectValue, typedPayload)
+            return
         }
         if ((valueTy.IsStruct() || valueTy.IsTuple()) && IsLLVMTypeContainsRef(valueCGType.GetLLVMType())) {
             let storedValueType = unsafe { LLVMTypeOf(storedValue) }
@@ -2624,8 +2643,16 @@ public class IRBuilder2 <: Resource {
         CreateStore(storedValue, typedPayload)
     }
 
-    private func ShouldLoadGenericAggregateBoxSource(sourceValue: LLVMValueRef, valueTy: Type): Bool {
+    private func ShouldLoadGenericAggregateBoxSource(sourceValue: LLVMValueRef, valueTy: Type, valueCGType: CGType): Bool {
         if (!(valueTy.IsStruct() || valueTy.IsTuple() || valueTy.IsEnum() || valueTy.IsVArray())) {
+            return false
+        }
+        if (let Some(enumCGType) <- (valueCGType as CGEnumType)) {
+            if (enumCGType.IsOptionLikeRef()) {
+                return false
+            }
+        }
+        if (valueCGType.GetSize().isNone()) {
             return false
         }
         let rawTy = unsafe { LLVMTypeOf(sourceValue) }

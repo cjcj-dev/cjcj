@@ -350,6 +350,7 @@ private func FaithfulIsHashableFileName(fileName: String): Bool {
 public class FaithfulAST2CHIRBuilder {
     private var builder: Option<CHIRBuilder> = None
     private var chirType: Option<CHIRType> = None
+    private var overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None
 
     public init() {}
 
@@ -363,10 +364,17 @@ public class FaithfulAST2CHIRBuilder {
         return this
     }
 
+    public func SetOverrideSrcFuncResolver(
+        resolver: (AstFuncDecl) -> Option<AstFuncDecl>): FaithfulAST2CHIRBuilder {
+        overrideSrcFuncResolver = Some(resolver)
+        return this
+    }
+
     public func Build(): FaithfulAST2CHIR {
         return FaithfulAST2CHIR(
             builder ?? throw IllegalStateException("FaithfulAST2CHIRBuilder requires CHIRBuilder"),
-            chirType ?? throw IllegalStateException("FaithfulAST2CHIRBuilder requires CHIRType"))
+            chirType ?? throw IllegalStateException("FaithfulAST2CHIRBuilder requires CHIRType"),
+            overrideSrcFuncResolver: overrideSrcFuncResolver)
     }
 }
 
@@ -375,6 +383,7 @@ public class FaithfulAST2CHIR {
     private let chirType: CHIRType
     private let importedPackages: ArrayList<AstPackage>
     private let directImportedPackages: ArrayList<AstPackage>
+    private let overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>>
     private let chirWFC: Bool
     private let chirOptOverO2: Bool
     private var outputPackage: Option<Package> = None
@@ -410,11 +419,13 @@ public class FaithfulAST2CHIR {
     public init(builder: CHIRBuilder, chirType: CHIRType,
         importedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(),
         directImportedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(),
+        overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None,
         chirWFC!: Bool = false, chirOptOverO2!: Bool = false) {
         this.builder = builder
         this.chirType = chirType
         this.importedPackages = importedPkgs
         this.directImportedPackages = directImportedPkgs
+        this.overrideSrcFuncResolver = overrideSrcFuncResolver
         this.chirWFC = chirWFC
         this.chirOptOverO2 = chirOptOverO2
     }
@@ -1936,6 +1947,7 @@ public class FaithfulAST2CHIR {
         AttachFunctionGenericParams(funcDecl, fn)
         ApplyDeclAttrs(fn, funcDecl)
         ApplyFuncKind(fn, funcDecl)
+        SetOverrideSrcFuncType(funcDecl, fn)
         if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) {
             fn.SetFuncKind(FuncKind.MAIN_ENTRY)
         }
@@ -1960,9 +1972,18 @@ public class FaithfulAST2CHIR {
         fn.EnableAttr(Attribute.IMPORTED)
         ApplyDeclAttrs(fn, funcDecl)
         ApplyFuncKind(fn, funcDecl)
+        SetOverrideSrcFuncType(funcDecl, fn)
         TranslateFuncParams(funcDecl, fn)
         globalCache.Set(funcDecl, fn)
         AddFunctionToPackage(fn)
+    }
+
+    private func SetOverrideSrcFuncType(funcDecl: AstFuncDecl, fn: Function): Unit {
+        let resolver = overrideSrcFuncResolver ?? return
+        let overrideSrcFuncDecl = resolver(funcDecl) ?? return
+        let overrideSrcFuncTy = AdjustFuncType(overrideSrcFuncDecl,
+            RequireFuncType(chirType.TranslateType(RequireAstTy(overrideSrcFuncDecl))))
+        fn.SetOverrideSrcFuncType(overrideSrcFuncTy)
     }
 
     private func CreateImportedValueSignatureAndSetGlobalCache(varDecl: AstVarDecl): Unit {
