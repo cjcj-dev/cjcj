@@ -1567,8 +1567,14 @@ private func GenerateSuperOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoPtrT
             return unsafe { LLVMConstNull(typeInfoPtrType) }
         }
         if (let Some(superTy) <- classTy.GetSuperClassTy()) {
-            return GetAutoEnvBaseClosureTypeInfo(cgMod, superTy) ??
+            let superTi = GetAutoEnvBaseClosureTypeInfo(cgMod, superTy) ??
                 CGType.GetOrCreate(cgMod, superTy.StripAllRefs()).GetOrCreateTypeInfo()
+            // Coerce to the %TypeInfo* slot type: a DYNAMIC_GI super (e.g. generic Iterator<...>)
+            // resolves to a %GenericCustomTypeInfo* global; the C++ reference output places it in
+            // TYPEINFO_SUPER via `%TypeInfo* bitcast (%GenericCustomTypeInfo* ... to %TypeInfo*)`
+            // (Module::getOrInsertGlobal coercion). LLVMConstBitCast is an identity no-op when the
+            // super is already %TypeInfo* (non-generic super), matching C++ byte-for-byte.
+            return unsafe { LLVMConstBitCast(superTi, typeInfoPtrType) }
         }
         if (!IsCoreObjectClass(classTy)) {
             return GetCoreObjectTypeInfo(cgMod)
