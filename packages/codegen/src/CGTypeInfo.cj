@@ -405,8 +405,15 @@ private func OwnsCustomDeclTypeInfo(cgMod: CGModule, chirTy: Type): Bool {
 }
 
 private func SetConcreteTypeInfoLinkage(typeInfo: LLVMValueRef, chirTy: Type): Unit {
+    // Mirror C++ AST2CHIR LinkTypeInfo (TranslateClassDecl.cpp:57-71 / TranslateEnumDecl.cpp:48-54):
+    // exported (public/protected) type infos keep External linkage, but a non-exported type info would be
+    // INTERNAL, which is invisible across object files. Since a package is compiled into several object
+    // files, the type info of a non-exported class/enum is emitted into one object file yet referenced from
+    // the others, leaving `<pkg>:<Type>.ti` cross-object references unresolved at link. Promote the INTERNAL
+    // case to LINKONCE_ODR so the type info stays visible and ODR-mergeable across the linked binary
+    // (visibility / .cjo export are unchanged). Generic instantiations are already LINKONCE_ODR.
     let linkage = if (chirTy.GetTypeArgs().isEmpty()) {
-        if (ShouldExportTypeInfo(chirTy)) { LLVMLinkage.External } else { LLVMLinkage.Internal }
+        if (ShouldExportTypeInfo(chirTy)) { LLVMLinkage.External } else { LLVMLinkage.LinkOnceODR }
     } else {
         LLVMLinkage.LinkOnceODR
     }
