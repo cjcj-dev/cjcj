@@ -28,7 +28,7 @@ public func GenerateTupleOrAggregateExpression(irBuilder: IRBuilder2, chirExpr: 
             if (idx < containedTypes.size) {
                 let storageTy = containedTypes[idx].GetOriginal()
                 if (let Some(sourceTy) <- operand.GetType()) {
-                    rawValue = CastAggregateElementIfNeeded(irBuilder, rawValue, sourceTy, storageTy)
+                    rawValue = LoadRefAggregateElementIfNeeded(irBuilder, rawValue, sourceTy, storageTy)
                 }
             }
             elements.add(rawValue)
