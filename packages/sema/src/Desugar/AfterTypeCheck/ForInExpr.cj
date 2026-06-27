@@ -28,43 +28,6 @@ private func FuncRetTyOf(decl: Decl): Option<Ty> {
     return None
 }
 
-private func SameImportedAwareDecl(left: Decl, right: Decl): Bool {
-    if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
-        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
-            return left.rawMangleName == right.rawMangleName
-        }
-        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
-            return left.mangledName == right.mangledName
-        }
-    }
-    return SameDecl(left, right)
-}
-
-private func AddImportedDeclIfMissing(values: ArrayList<Decl>, decl: Decl): Unit {
-    for (value in values) {
-        if (SameImportedAwareDecl(value, decl)) {
-            return
-        }
-    }
-    values.add(decl)
-}
-
-private func MarkImportedDeclUsed(decl: Decl): Unit {
-    let _ = decl
-}
-
-private func AddSyntheticImportedTarget(source: Node, decl: Decl): Unit {
-    if (!decl.TestAttr(Attribute.IMPORTED)) {
-        return
-    }
-    MarkImportedDeclUsed(decl)
-    if (let Some(file) <- source.curFile) {
-        if (let Some(pkg) <- file.curPackage) {
-            AddImportedDeclIfMissing(pkg.srcImportedNonGenericDecls, decl)
-        }
-    }
-}
-
 private func UnitTy(): Ty {
     return TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
 }
@@ -107,7 +70,6 @@ private func CreateSynthesizedNoArgMemberCall(source: Node, baseExpr: Expr, name
             }
             if (let Some(funcDecl) <- callExpr.resolvedFunction) {
                 memberAccess.target = funcDecl
-                AddSyntheticImportedTarget(source, funcDecl)
             }
             return Some(callExpr)
         }

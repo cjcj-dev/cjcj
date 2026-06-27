@@ -191,43 +191,6 @@ private func lookupResolvedPackageDecl(ctx: ASTContext, packageName: String, nam
     return None
 }
 
-private func importedAwareDeclKey(decl: Decl): String {
-    if (decl.TestAttr(Attribute.IMPORTED)) {
-        if (!decl.rawMangleName.isEmpty()) {
-            return "raw|" + decl.rawMangleName
-        }
-        if (!decl.mangledName.isEmpty()) {
-            return "mangled|" + decl.mangledName
-        }
-    }
-    return "decl|" + ASTKindName(decl.astKind) + "|" + decl.fullPackageName + "|" + decl.identifier.Val() + "|" +
-        decl.begin.fileID.toString() + ":" + decl.begin.line.toString() + ":" + decl.begin.column.toString() + "|" +
-        decl.end.fileID.toString() + ":" + decl.end.line.toString() + ":" + decl.end.column.toString()
-}
-
-private func ensureSrcImportedDeclKeys(pkg: Package): Unit {
-    if (!pkg.srcImportedNonGenericDeclKeys.isEmpty() || pkg.srcImportedNonGenericDecls.isEmpty()) {
-        return
-    }
-    for (decl in pkg.srcImportedNonGenericDecls) {
-        pkg.srcImportedNonGenericDeclKeys.add(importedAwareDeclKey(decl))
-    }
-}
-
-private func addImportedDeclToCurrentPackage(ctx: ASTContext, decl: Decl): Unit {
-    if (!decl.TestAttr(Attribute.IMPORTED)) {
-        return
-    }
-    if (let Some(pkg) <- ctx.curPackage) {
-        ensureSrcImportedDeclKeys(pkg)
-        let key = importedAwareDeclKey(decl)
-        if (!pkg.srcImportedNonGenericDeclKeys.contains(key)) {
-            pkg.srcImportedNonGenericDecls.add(decl)
-            pkg.srcImportedNonGenericDeclKeys.add(key)
-        }
-    }
-}
-
 private func replaceTypeAliasInNode(typeManager: TypeManager, node: Node): Unit {
     let walker = Walker(node, visitPre: { current: Node =>
         if (current.astKind != ASTKind.TYPE_ALIAS_DECL && Ty.IsTyCorrect(current.GetTy())) {
@@ -340,13 +303,6 @@ private func findCoreImplicitMemberDeclInPackages(packageDecls: ArrayList<Packag
         }
     }
     return None
-}
-
-private func addImportedDeclAndDependencies(ctx: ASTContext, decl: Decl): Unit {
-    addImportedDeclToCurrentPackage(ctx, decl)
-    if (let Some(outer) <- decl.outerDecl) {
-        addImportedDeclToCurrentPackage(ctx, outer)
-    }
 }
 
 private func isStringLiteral(expr: Expr): Bool {
@@ -1211,7 +1167,6 @@ public class TypeChecker {
                 }
             }
             if (let Some(target) <- value.GetTarget()) {
-                addImportedDeclAndDependencies(ctx, target)
                 if (let Some(enumDecl) <- (target as EnumDecl)) {
                     RegisterEnumConstructors(ctx, enumDecl)
                 }
@@ -1426,7 +1381,6 @@ public class TypeChecker {
         activeEnumConstructorRegistrations.add(enumDecl)
         for (constructor in enumDecl.constructors) {
             let _ = PrepareEnumConstructorSignature(ctx, enumDecl, constructor)
-            addImportedDeclAndDependencies(ctx, constructor)
         }
         FinishRegisteringEnumConstructors(enumDecl)
     }
@@ -1960,7 +1914,6 @@ public class TypeChecker {
             if (Ty.IsInitialTy(retType.GetTy())) {
                 SynthesizeTypeNode(ctx, Some(retType))
             } else if (let Some(target) <- retType.GetTarget()) {
-                addImportedDeclAndDependencies(ctx, target)
                 if (let Some(enumDecl) <- (target as EnumDecl)) {
                     RegisterEnumConstructors(ctx, enumDecl)
                 }
@@ -2227,7 +2180,6 @@ public class TypeChecker {
 
     private func LookupCoreDeclForSpawn(ctx: ASTContext, name: String): Option<Decl> {
         if (let Some(decl) <- lookupResolvedPackageDecl(ctx, "std.core", name)) {
-            addImportedDeclAndDependencies(ctx, decl)
             return Some(decl)
         }
         return None
@@ -2743,12 +2695,6 @@ public class TypeChecker {
             }
         }
         let ty = SynNameReferenceExpr(impl.typeManager, nameRef)
-        if (let Some(target) <- nameRef.GetTarget()) {
-            addImportedDeclAndDependencies(ctx, target)
-        }
-        for (target2 in nameRef.GetTargets()) {
-            addImportedDeclAndDependencies(ctx, target2)
-        }
         return ty
     }
 
@@ -2845,7 +2791,6 @@ public class TypeChecker {
 
     private func LookupCoreTy(ctx: ASTContext, name: String): Option<Ty> {
         if (let Some(decl) <- lookupResolvedPackageDecl(ctx, "std.core", name)) {
-            addImportedDeclAndDependencies(ctx, decl)
             return decl.GetTy()
         }
         return None
@@ -2853,7 +2798,6 @@ public class TypeChecker {
 
     private func LookupCoreEnumDecl(ctx: ASTContext, name: String): Option<EnumDecl> {
         if (let Some(decl) <- lookupResolvedPackageDecl(ctx, "std.core", name)) {
-            addImportedDeclAndDependencies(ctx, decl)
             return decl as EnumDecl
         }
         return None
@@ -3084,7 +3028,6 @@ public class TypeChecker {
             if (let Some(lit) <- (expr as LitConstExpr)) {
                 var stringTy: Option<Ty> = None
                 if (let Some(stringDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "String")) {
-                    addImportedDeclAndDependencies(ctx, stringDecl)
                     stringTy = stringDecl.GetTy()
                 }
                 return FinishSynthesize(ctx, lit,
@@ -3095,7 +3038,6 @@ public class TypeChecker {
         if (let Some(rangeExpr) <- (expr as RangeExpr)) {
             var rangeStruct: Option<StructDecl> = None
             if (let Some(rangeDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "Range")) {
-                addImportedDeclAndDependencies(ctx, rangeDecl)
                 rangeStruct = rangeDecl as StructDecl
             }
             return FinishSynthesize(ctx, rangeExpr, SynRangeExpr(impl.typeManager, rangeExpr, rangeDecl: rangeStruct))
@@ -3103,13 +3045,9 @@ public class TypeChecker {
         if (let Some(arrayLit) <- (expr as ArrayLit)) {
             var arrayStruct: Option<StructDecl> = None
             if (let Some(arrayDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "Array")) {
-                addImportedDeclAndDependencies(ctx, arrayDecl)
                 arrayStruct = arrayDecl as StructDecl
             }
             let arrayTy = SynArrayLit(impl.typeManager, arrayLit, arrayStruct)
-            if (let Some(initFunc) <- arrayLit.initFunc) {
-                addImportedDeclAndDependencies(ctx, initFunc)
-            }
             return FinishSynthesize(ctx, arrayLit, arrayTy)
         }
         if (let Some(spawnExpr) <- (expr as SpawnExpr)) {
@@ -3380,11 +3318,5 @@ public class TypeChecker {
             decl = Some(targets[0])
         }
         ModifyTargetOfRef(refExpr, decl.getOrThrow(), targets)
-        for (target in refExpr.ref.targets) {
-            addImportedDeclAndDependencies(ctx, target)
-        }
-        if (let Some(target) <- refExpr.ref.target) {
-            addImportedDeclAndDependencies(ctx, target)
-        }
     }
 }
