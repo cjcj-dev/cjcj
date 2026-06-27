@@ -70,7 +70,7 @@ public class CGEnumType <: CGCustomType {
     private func EnsureClassified(): Unit {
         if (cgEnumTypeKind == CGEnumTypeKind.UNKNOWN) {
             if (let Some(enumTy) <- (chirType as EnumType)) {
-                let defId = enumTy.GetEnumDef().nodeId
+                let defId = enumTy.ToString()
                 if (!cgMod.EnterEnumClassification(defId)) {
                     return
                 }
@@ -91,7 +91,7 @@ public class CGEnumType <: CGCustomType {
     public func IsCommonEnum(): Bool {
         if (cgEnumTypeKind == CGEnumTypeKind.UNKNOWN) {
             if (let Some(enumTy) <- (chirType as EnumType)) {
-                if (cgMod.IsEnumClassificationActive(enumTy.GetEnumDef().nodeId)) {
+                if (cgMod.IsEnumClassificationActive(enumTy.ToString())) {
                     return true
                 }
             }
@@ -489,7 +489,7 @@ public class CGEnumType <: CGCustomType {
     private func ContainsActiveEnumType(ty: Type): Bool {
         let stripped = ty.StripAllRefs()
         if (let Some(enumTy) <- (stripped as EnumType)) {
-            if (cgMod.IsEnumClassificationActive(enumTy.GetEnumDef().nodeId)) {
+            if (cgMod.IsEnumClassificationActive(enumTy.ToString())) {
                 return true
             }
         }

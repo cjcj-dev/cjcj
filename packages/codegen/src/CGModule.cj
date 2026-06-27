@@ -79,7 +79,12 @@ public class CGModule {
     private let extensionDefStartIndices: HashMap<String, Int64> = HashMap<String, Int64>()
     private let extensionDefInterfaces: HashMap<String, ArrayList<MTableInterfaceInfo>> =
         HashMap<String, ArrayList<MTableInterfaceInfo>>()
-    private let enumClassificationStack: HashSet<Int64> = HashSet<Int64>()
+    // Keyed on the SPECIFIC instantiated enum type (ToString), not the shared generic EnumDef
+    // nodeId: all Option<X> instantiations share one EnumDef, so a nodeId key falsely blocks
+    // classifying Option<Int> while Option<String> is mid-classification, leaving cgEnumTypeKind
+    // UNKNOWN -> GenLLVMType bakes the i32 (else-branch) selector. Per-instantiated-type keying
+    // only blocks genuine self-recursion, matching C++'s per-type cache (CGType.cpp:165-173).
+    private let enumClassificationStack: HashSet<String> = HashSet<String>()
     private var diBuilder: Option<DIBuilder> = None
 
     public init(subCHIRPackage: SubCHIRPackage, cgPkgCtx: CGPkgContext) {
@@ -739,20 +744,20 @@ public class CGModule {
         return out
     }
 
-    public func EnterEnumClassification(defId: Int64): Bool {
-        if (enumClassificationStack.contains(defId)) {
+    public func EnterEnumClassification(typeKey: String): Bool {
+        if (enumClassificationStack.contains(typeKey)) {
             return false
         }
-        enumClassificationStack.add(defId)
+        enumClassificationStack.add(typeKey)
         return true
     }
 
-    public func ExitEnumClassification(defId: Int64): Unit {
-        enumClassificationStack.remove(defId)
+    public func ExitEnumClassification(typeKey: String): Unit {
+        enumClassificationStack.remove(typeKey)
     }
 
-    public func IsEnumClassificationActive(defId: Int64): Bool {
-        return enumClassificationStack.contains(defId)
+    public func IsEnumClassificationActive(typeKey: String): Bool {
+        return enumClassificationStack.contains(typeKey)
     }
 
     public static func GetDataLayoutString(target: TripleInfo): String {
