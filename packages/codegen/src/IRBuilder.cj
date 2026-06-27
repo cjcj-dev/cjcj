@@ -1008,6 +1008,7 @@ public class IRBuilder2 <: Resource {
         sretTypeInfoArg: Option<LLVMValueRef>, name!: String = ""): LLVMValueRef {
         let callArgs = TransformCGFunctionArgs(calleeType, args, methodTypeInfoArg, instTypeArgs, sretTypeInfoArg,
             name: name)
+        let llvmCallArgs = TransformLLVMCallArgs(calleeType, callArgs, name: name)
         if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
             let retTy = funcType.GetReturnType()
             let callName = if (retTy.IsUnit() || retTy.IsNothing() || retTy.IsVoid() || calleeType.HasSRet()) {
@@ -1015,7 +1016,7 @@ public class IRBuilder2 <: Resource {
             } else {
                 name
             }
-            let callBase = CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), callArgs, name: callName)
+            let callBase = CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), llvmCallArgs, name: callName)
             if (funcType.IsCFunc()) {
                 SetZExtAttrForCFunc(callBase, calleeType.GetLLVMFunctionType())
             }
@@ -1030,7 +1031,7 @@ public class IRBuilder2 <: Resource {
             }
             return callBase
         }
-        return CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), callArgs, name: name)
+        return CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), llvmCallArgs, name: name)
     }
 
     public func CreateCallOrInvoke(callee: CGFunction, args!: ArrayList<CGValue> = ArrayList<CGValue>(),
@@ -1039,6 +1040,38 @@ public class IRBuilder2 <: Resource {
             return CreateCallOrInvoke(functionType, callee.GetRawFunction(), args, name: name)
         }
         return LLVMNullValue()
+    }
+
+    private func TransformLLVMCallArgs(calleeType: CGFunctionType, callArgs: ArrayList<LLVMValueRef>,
+        name!: String = ""): ArrayList<LLVMValueRef> {
+        if (!calleeType.HasSRet() || callArgs.isEmpty()) {
+            return callArgs
+        }
+        let fixedArgs = ArrayList<LLVMValueRef>()
+        for (arg in callArgs) {
+            fixedArgs.add(arg)
+        }
+        if (let Some(sretParamType) <- GetLLVMFunctionParamType(calleeType.GetLLVMFunctionType(), 0u32)) {
+            let castName = if (name.isEmpty()) { "sret.arg" } else { name + ".sret.arg" }
+            fixedArgs[0] = CreatePointerCast(fixedArgs[0], sretParamType, name: castName)
+        }
+        return fixedArgs
+    }
+
+    private func GetLLVMFunctionParamType(functionType: LLVMTypeRef, paramIndex: UInt32): Option<LLVMTypeRef> {
+        if (functionType.isNull()) {
+            return None
+        }
+        let paramCount = unsafe { LLVMCountParamTypes(functionType) }
+        if (paramIndex >= paramCount) {
+            return None
+        }
+        var result: Option<LLVMTypeRef> = None
+        try (paramTypes = LibC.malloc<LLVMTypeRef>(count: Int64(paramCount)).asResource()) {
+            unsafe { LLVMGetParamTypes(functionType, paramTypes.value) }
+            result = Some(unsafe { (paramTypes.value + Int64(paramIndex)).read() })
+        }
+        return result
     }
 
     private func TransformCGFunctionArgs(calleeType: CGFunctionType, args: ArrayList<CGValue>,
