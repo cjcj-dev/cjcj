@@ -1483,13 +1483,13 @@ private func GenerateExtensionDefPtrOfTypeInfo(cgMod: CGModule, chirTy: Type,
     if (let Some(startIdx) <- cgMod.GetExtensionDefStart(chirTy)) {
         let defs = cgMod.GetNonExternalExtensionDefs()
         if (!defs.isEmpty()) {
-            let extensionDefPtrType = CGType.GetOrCreateExtensionDefPtrType(cgMod.GetLLVMContext())
-            let arrayType = unsafe { LLVMArrayType(extensionDefPtrType, UInt32(defs.size + 1)) }
-            let table = GetOrInsertCodeGenGlobal(cgMod, "NonExternalExtensionDefs", arrayType)
-            let i32Type = unsafe { LLVMInt32TypeInContext(cgMod.GetLLVMContext().raw) }
-            let zero = unsafe { LLVMConstInt(i32Type, 0u64, 0) }
-            let index = unsafe { LLVMConstInt(i32Type, UInt64(startIdx), 0) }
-            return TypeInfoConstInBoundsGEP2(arrayType, table, zero, index)
+            if (let Some(table) <- GetNamedCodeGenGlobal(cgMod, "NonExternalExtensionDefs")) {
+                let arrayType = unsafe { LLVMGlobalGetValueType(table) }
+                let i32Type = unsafe { LLVMInt32TypeInContext(cgMod.GetLLVMContext().raw) }
+                let zero = unsafe { LLVMConstInt(i32Type, 0u64, 0) }
+                let index = unsafe { LLVMConstInt(i32Type, UInt64(startIdx), 0) }
+                return TypeInfoConstInBoundsGEP2(arrayType, table, zero, index)
+            }
         }
     }
     return unsafe { LLVMConstNull(extensionDefPtrPtrType) }
