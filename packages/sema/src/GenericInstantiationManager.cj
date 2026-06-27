@@ -8,7 +8,9 @@ import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 public class CompilerInstance {
     public var typeManager: TypeManager = TypeManager()
     public var globalOptions: OptionGlobalOptions = OptionGlobalOptions()
+    public var frontendDumpActionIsTypeCheck: Bool = false
     public var diag: Option<BasicDiagnosticEngine> = None
+    public let sourcePackages: ArrayList<Package> = ArrayList<Package>()
     public let packageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()
     public let resolvedImportedDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()

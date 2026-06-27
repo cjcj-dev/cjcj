@@ -18,6 +18,14 @@ private func contextPackage(ctx: ASTContext): Option<Package> {
     return ctx.curPackage
 }
 
+private class TypeCheckerBoolBox {
+    public var value: Bool
+
+    public init(value: Bool) {
+        this.value = value
+    }
+}
+
 private func scopeNameOf(node: Node): String {
     return if (node.scopeName.isEmpty()) { TOPLEVEL_SCOPE_NAME } else { node.scopeName }
 }
@@ -1009,6 +1017,7 @@ public class TypeChecker {
         PerformRecursiveTypesElimination(recursivePkgs, impl.typeManager)
         let implicitUsedDecls = GetImplicitUsedCoreDecls()
         let activePkgs = ArrayList<Package>()
+        let hasProgramEntry = TypeCheckerBoolBox(false)
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
                 activePkgs.add(pkg)
@@ -1031,9 +1040,36 @@ public class TypeChecker {
                     }))
                 DesugarAfterInstantiation(impl.typeManager, recursivePkgs, pkg,
                     implicitUsedDecls: Some(implicitUsedDecls))
+                IterateToplevelDecls(pkg, { decl: Decl =>
+                    if (let Some(mainDecl) <- (decl as MainDecl)) {
+                        if (let Some(_) <- mainDecl.desugarDecl) {
+                            hasProgramEntry.value = true
+                        }
+                    }
+                })
             }
         }
         substituteImportedTypeAliasTy(impl.typeManager, recursivePkgs)
+        CheckWhetherHasProgramEntry(hasProgramEntry.value)
+    }
+
+    private func CheckWhetherHasProgramEntry(hasProgramEntry: Bool): Unit {
+        if (let None <- ci) {
+            return
+        }
+        let instance = ci.getOrThrow()
+        if (!instance.globalOptions.CompileExecutable() || instance.globalOptions.enableCompileTest ||
+            instance.frontendDumpActionIsTypeCheck || hasProgramEntry || instance.globalOptions.compileCjd) {
+            return
+        }
+        if (instance.sourcePackages.isEmpty() || instance.sourcePackages[0].files.isEmpty()) {
+            return
+        }
+        if (let Some(diagValue) <- impl.diag) {
+            let file = instance.sourcePackages[0].files[0]
+            let builder = diagValue.Diagnose(file.begin, BasicDiagKind.sema_missing_entry)
+            builder.Emit()
+        }
     }
 
     private func GetImplicitUsedCoreDecls(): ArrayList<Decl> {

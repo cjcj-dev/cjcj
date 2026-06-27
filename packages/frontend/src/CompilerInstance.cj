@@ -452,7 +452,11 @@ public class CompilerInstance {
         }
         let semaInstance = FaithfulSemaCompilerInstance()
         semaInstance.globalOptions = invocation.globalOptions
+        semaInstance.frontendDumpActionIsTypeCheck = invocation.frontendOptions.dumpAction == DumpAction.TYPE_CHECK
         semaInstance.diag = Some(diag.AsBasicDiagnosticEngine())
+        for (pkg in srcPkgs) {
+            semaInstance.sourcePackages.add(pkg)
+        }
         for (importedPackage in importManager.GetAllImportedPackages()) {
             semaInstance.packageDecls.add(RealASTPackageDecl(importedPackage))
         }
