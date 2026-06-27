@@ -371,7 +371,11 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
 }
 
 private func IsGenericRelatedCustomType(chirTy: Type): Bool {
-    return (chirTy as CustomType).isSome() && chirTy.IsGenericRelated()
+    // Faithful to C++ !IsDynamicGI() (CGType.cpp:616 GenTypeInfo asserts !IsDynamicGI): any
+    // generic-related (DYNAMIC_GI) type — including non-CustomType generic tuples like
+    // (Generic-K, Generic-V) — must NOT get a concrete static %TypeInfo. STATIC_GI types
+    // (e.g. ArrayList<String>) have IsGenericRelated()==false and are still emitted.
+    return chirTy.IsGenericRelated()
 }
 
 private func OwnsCustomDeclTypeInfo(cgMod: CGModule, chirTy: Type): Bool {
