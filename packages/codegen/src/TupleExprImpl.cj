@@ -16,27 +16,116 @@ public func GenerateTupleOrAggregateExpression(irBuilder: IRBuilder2, chirExpr: 
                 if (enumCGType.IsOptionLikeRef()) {
                     return GenerateOptionLikeRefEnum(irBuilder, chirExpr, resultTy)
                 }
+                if (enumCGType.IsOptionLikeNonRef()) {
+                    return GenerateOptionLikeNonRefEnum(irBuilder, chirExpr, resultTy, enumCGType)
+                }
+                if (enumCGType.IsZeroSizeEnum()) {
+                    return irBuilder.CreateEntryAlloca(enumCGType, name: "enum.val")
+                }
+                if (enumCGType.IsAllAssociatedValuesAreNonRef()) {
+                    return GenerateAssociatedNonRefEnum(irBuilder, chirExpr, enumCGType)
+                }
             }
         }
         let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
-        let containedTypes = resultCGType.GetContainedTypes()
-        let elements = ArrayList<LLVMValueRef>()
-        var idx: Int64 = 0
-        while (idx < chirExpr.GetNumOfOperands()) {
-            let operand = chirExpr.GetOperand(idx)
-            var rawValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, operand).GetRawValue()
-            if (idx < containedTypes.size) {
-                let storageTy = containedTypes[idx].GetOriginal()
-                if (let Some(sourceTy) <- operand.GetType()) {
-                    rawValue = LoadRefAggregateElementIfNeeded(irBuilder, rawValue, sourceTy, storageTy)
-                }
-            }
-            elements.add(rawValue)
-            idx++
+        if (resultTy.StripAllRefs().IsTuple()) {
+            return GenerateNativeTuple(irBuilder, chirExpr, resultTy, resultCGType)
         }
-        return irBuilder.CreateAggregateValue(resultCGType.GetLLVMType(), elements, name: chirExpr.GetExprKindName())
+        if (resultTy.StripAllRefs().IsStruct()) {
+            return GenerateNativeStruct(irBuilder, chirExpr, resultTy, resultCGType)
+        }
+        return GenerateAggregateValue(irBuilder, chirExpr, resultCGType)
     }
     return LLVMNullValue()
+}
+
+private func GenerateNativeTuple(irBuilder: IRBuilder2, chirExpr: Expression, resultTy: Type,
+    resultCGType: CGType): LLVMValueRef {
+    let resultValue = irBuilder.CreateEntryAlloca(resultCGType)
+    let resultAddr = CGValue(resultValue, GetRefCGType(irBuilder, resultTy))
+    let containedTypes = resultCGType.GetContainedTypes()
+    var idx: Int64 = 0
+    while (idx < chirExpr.GetNumOfOperands()) {
+        let operand = chirExpr.GetOperand(idx)
+        let operandValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, operand)
+        if (idx < containedTypes.size) {
+            let fieldTy = containedTypes[idx].GetOriginal()
+            let fieldPtr = irBuilder.CreateStructGEP(resultCGType.GetLLVMType(), resultValue, UInt32(idx),
+                name: "tuple.field")
+            let fieldAddr = CGValue(fieldPtr, GetRefCGType(irBuilder, fieldTy))
+            CreateTypedStoreForAddress(irBuilder, operandValue, fieldAddr)
+        } else {
+            let indices = ArrayList<LLVMValueRef>()
+            indices.add(LLVMConstI32(irBuilder, 0u64))
+            indices.add(LLVMConstI32(irBuilder, UInt64(idx)))
+            let fieldPtr = irBuilder.CreateGEP(resultCGType.GetLLVMType(), resultAddr.GetRawValue(), indices,
+                name: "tuple.field")
+            let fieldTy = operand.GetType() ?? resultTy
+            let fieldAddr = CGValue(fieldPtr, GetRefCGType(irBuilder, fieldTy))
+            CreateTypedStoreForAddress(irBuilder, operandValue, fieldAddr)
+        }
+        idx++
+    }
+    return resultValue
+}
+
+private func GenerateNativeStruct(irBuilder: IRBuilder2, chirExpr: Expression, _: Type,
+    resultCGType: CGType): LLVMValueRef {
+    let resultValue = irBuilder.CreateEntryAlloca(resultCGType, name: "struct")
+    let containedTypes = resultCGType.GetContainedTypes()
+    var idx: Int64 = 0
+    while (idx < chirExpr.GetNumOfOperands()) {
+        let operandValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(idx))
+        if (idx < containedTypes.size) {
+            let fieldTy = containedTypes[idx].GetOriginal()
+            let fieldPtr = irBuilder.CreateStructGEP(resultCGType.GetLLVMType(), resultValue, UInt32(idx),
+                name: "struct.field")
+            let fieldAddr = CGValue(fieldPtr, GetRefCGType(irBuilder, fieldTy))
+            CreateTypedStoreForAddress(irBuilder, operandValue, fieldAddr)
+        }
+        idx++
+    }
+    return resultValue
+}
+
+private func GenerateAssociatedNonRefEnum(irBuilder: IRBuilder2, chirExpr: Expression,
+    enumCGType: CGEnumType): LLVMValueRef {
+    let enumValue = irBuilder.CreateEntryAlloca(enumCGType, name: "enum.val")
+    let containedTypes = enumCGType.GetContainedTypes()
+    var idx: Int64 = 0
+    while (idx < chirExpr.GetNumOfOperands()) {
+        let operandValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(idx))
+        if (idx < containedTypes.size) {
+            let fieldTy = containedTypes[idx].GetOriginal()
+            let fieldPtr = irBuilder.CreateStructGEP(enumCGType.GetLLVMType(), enumValue, UInt32(idx),
+                name: "enum.field")
+            let fieldAddr = CGValue(fieldPtr, GetRefCGType(irBuilder, fieldTy))
+            CreateTypedStoreForAddress(irBuilder, operandValue, fieldAddr)
+        }
+        idx++
+    }
+    return enumValue
+}
+
+private func GenerateAggregateValue(irBuilder: IRBuilder2, chirExpr: Expression, resultCGType: CGType):
+    LLVMValueRef {
+    let containedTypes = resultCGType.GetContainedTypes()
+    let elements = ArrayList<LLVMValueRef>()
+    var idx: Int64 = 0
+    while (idx < chirExpr.GetNumOfOperands()) {
+        let operand = chirExpr.GetOperand(idx)
+        let operandValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, operand)
+        var rawValue = operandValue.GetRawValue()
+        if (idx < containedTypes.size) {
+            let storageTy = containedTypes[idx].GetOriginal()
+            if (let Some(sourceTy) <- operand.GetType()) {
+                rawValue = LoadRefAggregateElementIfNeeded(irBuilder, rawValue, sourceTy, storageTy)
+            }
+        }
+        elements.add(rawValue)
+        idx++
+    }
+    return irBuilder.CreateAggregateValue(resultCGType.GetLLVMType(), elements, name: chirExpr.GetExprKindName())
 }
 
 private func GenerateCommonEnum(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
@@ -163,6 +252,57 @@ private func GenerateOptionLikeRefEnum(irBuilder: IRBuilder2, chirExpr: Expressi
     return irBuilder.GetCGModule().MaterializeValue(irBuilder, associatedOperand).GetRawValue()
 }
 
+private func GenerateOptionLikeNonRefEnum(irBuilder: IRBuilder2, chirExpr: Expression, resultTy: Type,
+    enumCGType: CGEnumType): LLVMValueRef {
+    let hasAssociatedValue = chirExpr.GetNumOfOperands() > 1
+    if (enumCGType.GetSize().isSome()) {
+        let enumValue = irBuilder.CreateEntryAlloca(enumCGType, name: "enum.val")
+        if (chirExpr.GetNumOfOperands() > 0) {
+            let selectorValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+            let selectorTy = chirExpr.GetOperand(0).GetType() ??
+                irBuilder.GetCGContext().GetCHIRBuilder().context.GetBoolTy()
+            let selectorPtr = irBuilder.CreateStructGEP(enumCGType.GetLLVMType(), enumValue, 0u32)
+            let selectorAddr = CGValue(selectorPtr, GetRefCGType(irBuilder, selectorTy))
+            CreateTypedStoreForAddress(irBuilder, selectorValue, selectorAddr)
+        }
+        let associatedValueType = enumCGType.GetAssociatedValueTypeOfOptionLike() ?? return enumValue
+        let recordValue = if (hasAssociatedValue) {
+            irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(1))
+        } else {
+            CGValue(irBuilder.CreateNullValue(associatedValueType),
+                CGType.GetOrCreate(irBuilder.GetCGModule(), associatedValueType))
+        }
+        let associatedPtr = irBuilder.CreateStructGEP(enumCGType.GetLLVMType(), enumValue, 1u32)
+        let associatedAddr = CGValue(associatedPtr, GetRefCGType(irBuilder, associatedValueType))
+        CreateTypedStoreForAddress(irBuilder, recordValue, associatedAddr)
+        return enumValue
+    }
+    let enumType = (resultTy as EnumType) ?? return LLVMNullValue()
+    let enumTypeInfo = irBuilder.CreateTypeInfo(enumType)
+    let enumValue = irBuilder.CallAllocaGeneric(enumType)
+    let payload = irBuilder.GetPayloadFromObject(enumValue)
+    if (chirExpr.GetNumOfOperands() > 0) {
+        let selectorValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0)).GetRawValue()
+        let selectorPtr = irBuilder.CreateBitCast(payload,
+            unsafe { LLVMPointerType(LLVMInt1TypeInContext(irBuilder.GetLLVMContext().raw), 1u32) })
+        irBuilder.CreateStore(selectorValue, selectorPtr)
+    }
+    if (hasAssociatedValue) {
+        let associatedOffset = irBuilder.CallGetFieldOffset(enumTypeInfo, 1u64, 0u64)
+        let indices = ArrayList<LLVMValueRef>()
+        indices.add(associatedOffset)
+        let i8Type = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 1u32) }
+        let associatedPtr = irBuilder.CreateGEP(i8Type, irBuilder.CreateBitCast(payload, i8PtrType), indices)
+        let associatedValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(1))
+        let associatedType = chirExpr.GetOperand(1).GetType() ?? return enumValue
+        let associatedCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), associatedType)
+        irBuilder.CallGCWriteGeneric(enumValue, associatedPtr, associatedValue.GetRawValue(),
+            irBuilder.GetSize32(associatedType, associatedCGType))
+    }
+    return enumValue
+}
+
 private func CastAggregateElementIfNeeded(irBuilder: IRBuilder2, rawValue: LLVMValueRef, sourceTy: Type,
     storageTy: Type): LLVMValueRef {
     if (sourceTy.IsEqual(storageTy)) {
@@ -170,4 +310,12 @@ private func CastAggregateElementIfNeeded(irBuilder: IRBuilder2, rawValue: LLVMV
     }
     let storageLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), storageTy).GetLLVMType()
     return CastValueToType(irBuilder, rawValue, sourceTy, storageTy, storageLLVMType)
+}
+
+private func GetRefCGType(irBuilder: IRBuilder2, ty: Type): CGType {
+    return CGType.GetOrCreate(irBuilder.GetCGModule(), irBuilder.GetCGContext().GetCHIRBuilder().context.GetRefTy(ty))
+}
+
+private func LLVMConstI32(irBuilder: IRBuilder2, value: UInt64): LLVMValueRef {
+    return unsafe { LLVMConstInt(LLVMInt32TypeInContext(irBuilder.GetLLVMContext().raw), value, 0) }
 }

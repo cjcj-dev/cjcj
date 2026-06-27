@@ -2,6 +2,7 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.CustomType
+import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.GetElementByName
@@ -359,6 +360,10 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     }
     let value = irBuilder.GetCGModule().MaterializeValue(irBuilder, valueOperand)
     let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, addrOperand)
+    return CreateTypedStoreForAddress(irBuilder, value, addr)
+}
+
+public func CreateTypedStoreForAddress(irBuilder: IRBuilder2, value: CGValue, addr: CGValue): LLVMValueRef {
     if (let Some(genericStore) <- irBuilder.TryCreateGenericStore(value, addr)) {
         return genericStore
     }
@@ -443,8 +448,14 @@ private func TryStoreStructPtrValueForAddress(irBuilder: IRBuilder2, value: CGVa
         return None
     }
     let valueTy = valueCGType.GetOriginal().StripAllRefs()
+    let pointerBackedEnumValue = if (let Some(enumCGType) <- (valueCGType as CGEnumType)) {
+        enumCGType.IsOptionLikeNonRef()
+    } else {
+        false
+    }
     if (!(valueCGType.IsStructPtrType() || valueTy.IsString() ||
-        (!valueCGType.IsReference() && valueTy.IsStruct()))) {
+        (!valueCGType.IsReference() && (valueTy.IsStruct() || valueTy.IsTuple() || valueTy.IsVArray())) ||
+        pointerBackedEnumValue)) {
         return None
     }
     let fieldSize = if (let Some(size) <- destCGType.GetSize()) { size } else { 0 }
@@ -587,7 +598,7 @@ private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elemen
         return genericStore
     }
     if (let Some(fieldType) <- fieldTy) {
-        if (IsAggregateFieldType(fieldType)) {
+        if (IsAggregateFieldType(irBuilder, fieldType)) {
             return StoreAggregateElementValue(irBuilder, baseValue, elementValue, elementPtr, fieldType)
         }
     }
@@ -628,9 +639,17 @@ private func IsGenericField(fieldTy: Option<Type>): Bool {
     return false
 }
 
-private func IsAggregateFieldType(fieldTy: Type): Bool {
+private func IsAggregateFieldType(irBuilder: IRBuilder2, fieldTy: Type): Bool {
     let stripped = fieldTy.StripAllRefs()
-    return stripped.IsStruct() || stripped.IsTuple() || stripped.IsVArray()
+    if (stripped.IsStruct() || stripped.IsTuple() || stripped.IsVArray()) {
+        return true
+    }
+    if (let Some(enumTy) <- (stripped as EnumType)) {
+        if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), enumTy) as CGEnumType)) {
+            return enumCGType.IsOptionLikeNonRef()
+        }
+    }
+    return false
 }
 
 private func StoreAggregateElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elementValue: CGValue,

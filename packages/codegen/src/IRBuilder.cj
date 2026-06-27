@@ -1339,7 +1339,7 @@ public class IRBuilder2 <: Resource {
         return slot
     }
 
-    private func CallAllocaGeneric(chirTy: Type): LLVMValueRef {
+    public func CallAllocaGeneric(chirTy: Type): LLVMValueRef {
         let tyForInfo = chirTy.StripAllRefs()
         let typeInfoValue = CreateTypeInfo(tyForInfo)
         return CallAllocaGenericWithTypeInfo(tyForInfo, typeInfoValue)

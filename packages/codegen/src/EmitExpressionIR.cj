@@ -115,7 +115,7 @@ private func MapExpressionResult(cgMod: CGModule, irBuilder: IRBuilder2, chirExp
     rawRet: LLVMValueRef): Unit {
     if (let Some(resultValue) <- chirExpr.GetResult()) {
         let resultType = if (let Some(valueType) <- resultValue.GetType()) {
-            CGType.GetOrCreate(cgMod, valueType)
+            cgMod.GetCGTypeForExpressionResult(valueType, chirExpr)
         } else {
             CGType(cgMod, cgMod.GetCGContext(), Type(TypeKind.TYPE_INVALID))
         }

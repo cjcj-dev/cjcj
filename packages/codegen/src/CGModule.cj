@@ -4,7 +4,10 @@ import std.collection.*
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.Block
 import cangjie_compiler::chir.CustomTypeDef
+import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.ExtendDef
+import cangjie_compiler::chir.ExprKind
+import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GenericType
@@ -501,7 +504,7 @@ public class CGModule {
         if (let Some(localValue) <- (chirValue as LocalVar)) {
             if (let Some(ownerExpr) <- localValue.GetExpr()) {
                 let emitted = DispatchExpression(irBuilder, ownerExpr)
-                let cgValue = CGValue(emitted, GetCGTypeForValue(localValue))
+                let cgValue = CGValue(emitted, GetCGTypeForLocalExpressionValue(localValue, ownerExpr))
                 SetOrUpdateMappedCGValue(localValue, cgValue)
                 return cgValue
             }
@@ -509,6 +512,16 @@ public class CGModule {
         let fallback = CGValue(LLVMNullValue(), GetCGTypeForValue(chirValue))
         SetOrUpdateMappedCGValue(chirValue, fallback)
         return fallback
+    }
+
+    public func GetCGTypeForExpressionResult(valueType: Type, ownerExpr: Expression): CGType {
+        if (ownerExpr.GetExprKind() != ExprKind.TUPLE) {
+            return CGType.GetOrCreate(this, valueType)
+        }
+        if (ShouldUseRefCGTypeForTupleExpressionResult(valueType)) {
+            return CGType.GetOrCreate(this, cgCtx.GetCGPkgContext().GetCHIRBuilder().context.GetRefTy(valueType))
+        }
+        return CGType.GetOrCreate(this, valueType)
     }
 
     public func SetOrUpdateMappedBB(chirBlock: Block, llvmBlock: LLVMBasicBlockRef): Unit {
@@ -810,5 +823,24 @@ public class CGModule {
             return CGType.GetOrCreate(this, valueType)
         }
         return CGType(this, cgCtx, Type(TypeKind.TYPE_INVALID))
+    }
+
+    private func GetCGTypeForLocalExpressionValue(localValue: LocalVar, ownerExpr: Expression): CGType {
+        let valueType = localValue.GetType() ?? return GetCGTypeForValue(localValue)
+        return GetCGTypeForExpressionResult(valueType, ownerExpr)
+    }
+
+    private func ShouldUseRefCGTypeForTupleExpressionResult(valueType: Type): Bool {
+        let stripped = valueType.StripAllRefs()
+        if (stripped.IsStruct() || stripped.IsTuple()) {
+            return true
+        }
+        if (let Some(enumTy) <- (stripped as EnumType)) {
+            if (let Some(enumCGType) <- (CGType.GetOrCreate(this, enumTy) as CGEnumType)) {
+                return enumCGType.IsOptionLikeNonRef() || enumCGType.IsAllAssociatedValuesAreNonRef() ||
+                    enumCGType.IsZeroSizeEnum()
+            }
+        }
+        return false
     }
 }
