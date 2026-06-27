@@ -614,7 +614,8 @@ public func TypeCheckReferenceIsRefTypeArgSizeValid(
     let typeAliasSubstituted = typeArgs[0].TestAttr(Attribute.COMPILER_ADD) && !targets.isEmpty() &&
         targets[0].astKind == ASTKind.TYPE_ALIAS_DECL
     if (typeAliasSubstituted) {
-        isValid = TypeCheckReferenceCheckTargetTypeArgs(GetRealTarget(Some(targets[0])), numTypeArgs)
+        let targetOpt: Option<Decl> = targets[0]
+        isValid = TypeCheckReferenceCheckTargetTypeArgs(GetRealTarget(targetOpt), numTypeArgs)
     } else {
         var idx: Int64 = 0
         while (idx < targets.size) {

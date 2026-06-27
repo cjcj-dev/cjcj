@@ -2158,6 +2158,19 @@ public class TypeChecker {
         return false
     }
 
+    private func CheckLambdaBody(ctx: ASTContext, funcBody: FuncBody): Bool {
+        let _ = SynthesizeFuncBody(ctx, funcBody)
+        if (Ty.IsTyCorrect(funcBody.GetTy() ?? TypeManager.GetInvalidTy())) {
+            if (let Some(body) <- funcBody.body) {
+                if (Ty.IsTyCorrect(body.GetTy() ?? TypeManager.GetInvalidTy())) {
+                    return true
+                }
+            }
+        }
+        funcBody.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+
     private func CheckLambdaExprWithTarget(ctx: ASTContext, target: Ty, le: LambdaExpr): Bool {
         if (let None <- le.funcBody) {
             let _ = TcInvalid(le)
@@ -2165,35 +2178,38 @@ public class TypeChecker {
         }
         let targetTy = UnboxOptionType(target)
         if (let Some(targetFuncTy) <- (targetTy as FuncTy)) {
-            let paramTys = ArrayList<Ty>()
-            if (!CheckLambdaParamsWithTarget(ctx, le, targetFuncTy, paramTys)) {
-                let _ = TcInvalid(le)
-                return false
-            }
-            if (!SetLambdaTargetRetType(le, targetFuncTy.retTy)) {
-                let _ = TcInvalid(le)
-                return false
-            }
-            ClearLambdaBodyForContextCheck(le)
-            RefreshNameReferencesInTree(ctx, le)
-            let funcBody = le.funcBody.getOrThrow()
-            let previousFuncBody = currentFuncBody
-            currentFuncBody = Some(funcBody)
-            var bodyOk = true
-            if (let Some(body) <- funcBody.body) {
-                bodyOk = CheckBlock(ctx, targetFuncTy.retTy, body)
-            }
-            currentFuncBody = previousFuncBody
-            if (!bodyOk) {
+            try (ds = DiagSuppressor(impl.diag)) {
+                let paramTys = ArrayList<Ty>()
+                if (!CheckLambdaParamsWithTarget(ctx, le, targetFuncTy, paramTys)) {
+                    let _ = TcInvalid(le)
+                    return false
+                }
+                if (!SetLambdaTargetRetType(le, targetFuncTy.retTy)) {
+                    let _ = TcInvalid(le)
+                    return false
+                }
+                ClearLambdaBodyForContextCheck(le)
+                RefreshNameReferencesInTree(ctx, le)
+                let funcBody = le.funcBody.getOrThrow()
+                if (CheckLambdaBody(ctx, funcBody)) {
+                    ds.ReportDiag()
+                    var bodyRetTy = targetFuncTy.retTy
+                    if (let Some(funcBodyTy) <- funcBody.GetTy()) {
+                        if (let Some(bodyFuncTy) <- (funcBodyTy as FuncTy)) {
+                            bodyRetTy = bodyFuncTy.retTy
+                        }
+                    }
+                    let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), bodyRetTy,
+                        cfg: CloneLambdaTargetFuncCfg(targetFuncTy))
+                    funcBody.SetTy(funcTy)
+                    le.SetTy(funcTy)
+                    return true
+                }
                 funcBody.SetTy(TypeManager.GetInvalidTy())
-                let _ = TcInvalid(le)
-                return false
+                le.SetTy(funcBody.GetTy() ?? TypeManager.GetInvalidTy())
             }
-            let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), targetFuncTy.retTy,
-                cfg: CloneLambdaTargetFuncCfg(targetFuncTy))
-            funcBody.SetTy(funcTy)
-            le.SetTy(funcTy)
-            return true
+            let _ = TcInvalid(le)
+            return false
         }
         let synTy = Synthesize(ctx, le)
         if (Ty.IsTyCorrect(synTy) && impl.typeManager.CheckTypeCompatibility(target, synTy) !=
@@ -2311,36 +2327,69 @@ public class TypeChecker {
         return false
     }
 
-    private func ReturnExprTargetTy(returnExpr: ReturnExpr): Option<Ty> {
-        if (let None <- returnExpr.refFuncBody) {
-            return None
-        }
-        let fb = returnExpr.refFuncBody.getOrThrow()
-        if (let None <- fb.retType) {
-            return None
-        }
-        let retTy = fb.retType.getOrThrow().GetTy() ?? return None
-        if (retTy.HasInvalidTy() || retTy.IsQuest()) {
-            return None
-        }
-        if (let Some(funcDecl) <- fb.funcDecl) {
-            if (IsInstanceConstructor(funcDecl)) {
-                return Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+    private func replaceReturnClassThisOutsideClass(re: ReturnExpr, expr: Expr): Unit {
+        if (let Some(fb) <- re.refFuncBody) {
+            if (let Some(parent) <- fb.parentClassLike) {
+                if (let Some(_) <- (parent as ClassDecl)) {
+                    return
+                }
             }
         }
-        return Some(retTy)
+        if (let Some(exprTy) <- expr.GetTy()) {
+            if (let Some(classThisTy) <- (exprTy as ClassThisTy)) {
+                if (let Some(classDecl) <- classThisTy.declPtr) {
+                    if (let Some(classTy) <- classDecl.GetTy()) {
+                        expr.SetTy(classTy)
+                    }
+                }
+            }
+        }
     }
 
-    private func SynthesizeReturnChildren(ctx: ASTContext, returnExpr: ReturnExpr): Unit {
-        if (let None <- returnExpr.expr) {
-            return
+    private func SynthesizeReturnExpr(ctx: ASTContext, re: ReturnExpr): Ty {
+        if (let None <- re.refFuncBody) {
+            return TcInvalid(re)
         }
-        let innerExpr = returnExpr.expr.getOrThrow()
-        if (let Some(targetTy) <- ReturnExprTargetTy(returnExpr)) {
-            let _ = Check(ctx, targetTy, innerExpr)
-            return
+        let fb = re.refFuncBody.getOrThrow()
+        if (let None <- fb.retType) {
+            return TcInvalid(re)
         }
-        let _ = Synthesize(ctx, innerExpr)
+        if (let None <- re.expr) {
+            return TcInvalid(re)
+        }
+        let innerExpr = re.expr.getOrThrow()
+        re.SetTy(TypeManager.GetInvalidTy())
+        var isWellTyped = true
+        if (let Some(retTy) <- fb.retType.getOrThrow().GetTy()) {
+            if (Ty.IsTyCorrect(retTy) && !retTy.IsQuest()) {
+                let targetTy = if (let Some(funcDecl) <- fb.funcDecl) {
+                    if (IsInstanceConstructor(funcDecl)) {
+                        TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+                    } else {
+                        retTy
+                    }
+                } else {
+                    retTy
+                }
+                isWellTyped = Check(ctx, targetTy, innerExpr) && isWellTyped
+                if (isWellTyped) {
+                    typeCheckExprPutTargetType(ctx, innerExpr, innerExpr.GetTy() ?? targetTy)
+                }
+            } else {
+                let exprTy = Synthesize(ctx, innerExpr)
+                isWellTyped = Ty.IsTyCorrect(exprTy) && ReplaceIdealTy(impl.typeManager, innerExpr) && isWellTyped
+            }
+        } else {
+            let exprTy2 = Synthesize(ctx, innerExpr)
+            isWellTyped = Ty.IsTyCorrect(exprTy2) && ReplaceIdealTy(impl.typeManager, innerExpr) && isWellTyped
+        }
+        replaceReturnClassThisOutsideClass(re, innerExpr)
+        if (!isWellTyped && NeedCheckBodyReturn(fb)) {
+            return TcInvalid(re)
+        }
+        let nothingTy = TypeManager.GetNothingTy()
+        re.SetTy(nothingTy)
+        return nothingTy
     }
 
     private func AddUniqueBoundDecl(decls: ArrayList<Decl>, decl: Decl): Unit {
@@ -2665,6 +2714,114 @@ public class TypeChecker {
         }
     }
 
+    private func DiagnoseForInIterator(expr: Expr): Unit {
+        if (CanSkipDiag(expr)) {
+            return
+        }
+        if (let Some(diagValue) <- impl.diag) {
+            let tyStr = (expr.GetTy() ?? TypeManager.GetInvalidTy()).String()
+            let builder = diagValue.Diagnose(expr.begin, expr.end,
+                BasicDiagKind.sema_expr_in_forin_must_has_iterator, args: [BasicDiagArgument(tyStr)])
+            builder.Emit()
+        }
+    }
+
+    private func DiagnoseForInGuard(expr: Expr): Unit {
+        if (CanSkipDiag(expr)) {
+            return
+        }
+        if (let Some(diagValue) <- impl.diag) {
+            let builder = diagValue.Diagnose(expr.begin, expr.end, BasicDiagKind.sema_wrong_forin_guard)
+            builder.Emit()
+        }
+    }
+
+    private func DiagnoseForInPattern(forInExpr: ForInExpr): Unit {
+        if (let Some(diagValue) <- impl.diag) {
+            let builder = diagValue.Diagnose(forInExpr.begin, forInExpr.end,
+                BasicDiagKind.sema_forin_pattern_must_be_irrefutable)
+            builder.Emit()
+        }
+    }
+
+    private func GetForInIterableTy(ctx: ASTContext, inTy: Ty): Ty {
+        if (inTy.IsNothing()) {
+            return TypeManager.GetInvalidTy()
+        }
+        let iterableTy = LookupCoreTy(ctx, "Iterable") ?? return TypeManager.GetInvalidTy()
+        if (let Some(genericTy) <- (inTy as GenericsTy)) {
+            if (genericTy.isPlaceholder) {
+                return impl.typeManager.ConstrainByCtor(genericTy, iterableTy) ?? TypeManager.GetInvalidTy()
+            }
+        }
+        let promotedTys = Promotion(impl.typeManager).Promote(inTy, iterableTy)
+        if (!promotedTys.values.isEmpty()) {
+            return promotedTys.values[0]
+        }
+        return TypeManager.GetInvalidTy()
+    }
+
+    private func SynthesizeForInExpr(ctx: ASTContext, forInExpr: ForInExpr): Ty {
+        var isWellTyped = true
+        var inPatternTy: Ty = TypeManager.GetInvalidTy()
+        let boundDecls = ArrayList<Decl>()
+        if (let Some(inExpression) <- forInExpr.inExpression) {
+            let inTy = Synthesize(ctx, inExpression)
+            isWellTyped = Ty.IsTyCorrect(inTy) && ReplaceIdealTy(impl.typeManager, inExpression) && isWellTyped
+            if (let Some(realInTy) <- inExpression.GetTy()) {
+                let iterableTy = GetForInIterableTy(ctx, realInTy)
+                if (Ty.IsTyCorrect(iterableTy) && !iterableTy.typeArgs.isEmpty()) {
+                    inPatternTy = iterableTy.typeArgs[0]
+                } else {
+                    isWellTyped = false
+                    DiagnoseForInIterator(inExpression)
+                }
+            } else {
+                isWellTyped = false
+                DiagnoseForInIterator(inExpression)
+            }
+        } else {
+            isWellTyped = false
+        }
+        if (let Some(pattern) <- forInExpr.pattern) {
+            let patternOk = ChkPattern(impl.typeManager, ctx, inPatternTy, pattern, isPatternInMatch: false)
+            isWellTyped = patternOk && isWellTyped
+            if (patternOk) {
+                CollectPatternBinding(pattern, boundDecls)
+                for (decl in boundDecls) {
+                    BindLocalDeclIfAbsent(ctx, decl)
+                }
+            }
+        } else {
+            isWellTyped = false
+        }
+        if (let Some(patternGuard) <- forInExpr.patternGuard) {
+            if (!Check(ctx, TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN), patternGuard)) {
+                isWellTyped = false
+                DiagnoseForInGuard(patternGuard)
+            }
+        }
+        if (let Some(body) <- forInExpr.body) {
+            isWellTyped = Ty.IsTyCorrect(SynthesizeBlock(ctx, body)) && isWellTyped
+        } else {
+            isWellTyped = false
+        }
+        if (let Some(pattern2) <- forInExpr.pattern) {
+            if (!IsIrrefutablePattern(pattern2)) {
+                isWellTyped = false
+                DiagnoseForInPattern(forInExpr)
+            }
+        }
+        RemovePatternBindings(ctx, boundDecls)
+        let ty = if (isWellTyped) {
+            TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        } else {
+            TypeManager.GetInvalidTy()
+        }
+        forInExpr.SetTy(ty)
+        return ty
+    }
+
     private func SynthesizeLoopChildren(ctx: ASTContext, loopExpr: Expr): Unit {
         if (let Some(forInExpr) <- (loopExpr as ForInExpr)) {
             let boundDecls = ArrayList<Decl>()
@@ -2680,6 +2837,9 @@ public class TypeChecker {
                 if (Ty.IsTyCorrect(elementTy)) {
                     let _ = ChkPattern(impl.typeManager, ctx, elementTy, pattern, isPatternInMatch: false)
                     CollectPatternBinding(pattern, boundDecls)
+                    for (decl in boundDecls) {
+                        BindLocalDeclIfAbsent(ctx, decl)
+                    }
                 }
             }
             if (let Some(patternGuard) <- forInExpr.patternGuard) {
@@ -3012,6 +3172,9 @@ public class TypeChecker {
         if (let Some(jumpExpr) <- (expr as JumpExpr)) {
             return FinishSynthesize(ctx, jumpExpr, SynLoopControlExpr(ctx, jumpExpr))
         }
+        if (let Some(forInExpr) <- (expr as ForInExpr)) {
+            return FinishSynthesize(ctx, forInExpr, SynthesizeForInExpr(ctx, forInExpr))
+        }
         if (expr.IsLoopExpr()) {
             SynthesizeLoopChildren(ctx, expr)
             return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr))
@@ -3020,8 +3183,7 @@ public class TypeChecker {
             if (let Some(fb) <- currentFuncBody) {
                 returnExpr.refFuncBody = Some(fb)
             }
-            SynthesizeReturnChildren(ctx, returnExpr)
-            return FinishSynthesize(ctx, returnExpr, SynExprShallow(impl.typeManager, returnExpr))
+            return FinishSynthesize(ctx, returnExpr, SynthesizeReturnExpr(ctx, returnExpr))
         }
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
             SynthesizeBinaryChildren(ctx, binaryExpr)
@@ -3274,6 +3436,10 @@ public class TypeChecker {
         if (let Some(jumpExpr) <- (expr as JumpExpr)) {
             return FinishCheck(ctx, jumpExpr, ChkLoopControlExpr(ctx, jumpExpr))
         }
+        if (let Some(forInExpr) <- (expr as ForInExpr)) {
+            let _ = SynthesizeForInExpr(ctx, forInExpr)
+            return FinishCheck(ctx, forInExpr, ChkExprShallow(impl.typeManager, target, forInExpr, ctx: Some(ctx)))
+        }
         if (expr.IsLoopExpr()) {
             SynthesizeLoopChildren(ctx, expr)
             return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx)))
@@ -3297,8 +3463,7 @@ public class TypeChecker {
             if (let Some(fb) <- currentFuncBody) {
                 returnExpr.refFuncBody = Some(fb)
             }
-            SynthesizeReturnChildren(ctx, returnExpr)
-            return FinishCheck(ctx, returnExpr, ChkExprShallow(impl.typeManager, target, returnExpr, ctx: Some(ctx)))
+            return FinishCheck(ctx, returnExpr, Ty.IsTyCorrect(SynthesizeReturnExpr(ctx, returnExpr)))
         }
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
             let _ = SynthesizeNameReference(ctx, nameRef)

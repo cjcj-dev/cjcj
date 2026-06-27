@@ -10,9 +10,6 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
     synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None): Unit {
     DesugarDeclsForPackage(pkg, options.enableCoverage)
     let walker = Walker(pkg, visitPre: { node: Node =>
-        if (node.TestAnyAttr(Attribute.HAS_BROKEN, Attribute.IS_BROKEN)) {
-            return VisitAction.SKIP_CHILDREN
-        }
         match (node.astKind) {
             case ASTKind.FOR_IN_EXPR =>
                 if (let Some(forInExpr) <- (node as ForInExpr)) {

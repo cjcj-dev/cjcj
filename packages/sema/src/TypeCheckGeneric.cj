@@ -354,7 +354,8 @@ public func CheckGenericDeclInstantiation(typeManager: TypeManager, decl: Option
 }
 
 public func CheckGenericDeclInstantiation(typeManager: TypeManager, decl: Decl, typeArgs: ArrayList<Ty>): Bool {
-    return CheckGenericDeclInstantiation(typeManager, Some(decl), typeArgs)
+    let declOpt: Option<Decl> = decl
+    return CheckGenericDeclInstantiation(typeManager, declOpt, typeArgs)
 }
 
 public func CheckGenericDeclInstantiation(typeManager: TypeManager, decl: Decl, typeNodes: ArrayList<Type>): Bool {
@@ -660,7 +661,8 @@ extend TypeCheckerImpl {
     }
 
     public func CheckGenericDeclInstantiation(decl: Decl, typeArgs: ArrayList<Ty>, checkNode: Node): Bool {
-        return CheckGenericDeclInstantiation(Some(decl), typeArgs, checkNode)
+        let declOpt: Option<Decl> = decl
+        return CheckGenericDeclInstantiation(declOpt, typeArgs, checkNode)
     }
 
     public func CheckGenericExpr(expr: Expr): Unit {
@@ -677,7 +679,8 @@ extend TypeCheckerImpl {
         let effectiveTypeArgs = filteredTypeArgsForTarget(target, rawTypeArgs)
         expr.SetTy(GetGenericType(typeManager, realTarget, effectiveTypeArgs))
         let checkTys = if (!instTys.isEmpty()) { instTys } else { exprInstantiationTys(expr) }
-        if (!CheckGenericDeclInstantiation(Some(realTarget), checkTys, expr)) {
+        let realTargetOpt: Option<Decl> = realTarget
+        if (!CheckGenericDeclInstantiation(realTargetOpt, checkTys, expr)) {
             expr.SetTy(TypeManager.GetInvalidTy())
         }
     }
