@@ -1175,13 +1175,16 @@ public class TypeChecker {
     }
 
     private func SynthesizeWithoutRecover(ctx: ASTContext, pos: SynPos, node: Node): Ty {
-        let _ = pos
         ctx.ClearTypeCheckCache(node)
         ctx.SkipSynForCorrectTyRec(node)
-        return SynthesizeNode(ctx, node)
+        return SynthesizeNode(ctx, pos, node)
     }
 
     private func SynthesizeNode(ctx: ASTContext, node: Node): Ty {
+        return SynthesizeNode(ctx, SynPos.NONE, node)
+    }
+
+    private func SynthesizeNode(ctx: ASTContext, pos: SynPos, node: Node): Ty {
         if (let Some(typeNode) <- (node as Type)) {
             impl.SetTypeTy(ctx, typeNode)
             return tyOrInvalid(typeNode)
@@ -1196,7 +1199,7 @@ public class TypeChecker {
             return SynthesizeDecl(ctx, decl)
         }
         if (let Some(expr) <- (node as Expr)) {
-            return Synthesize(ctx, expr)
+            return Synthesize(ctx, pos, expr)
         }
         return tyOrInvalid(node)
     }
@@ -1970,6 +1973,10 @@ public class TypeChecker {
     }
 
     private func SynthesizeBlock(ctx: ASTContext, block: Block): Ty {
+        return SynthesizeBlock(ctx, SynPos.NONE, block)
+    }
+
+    private func SynthesizeBlock(ctx: ASTContext, pos: SynPos, block: Block): Ty {
         if (block.body.isEmpty()) {
             let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
             block.SetTy(unitTy)
@@ -1977,8 +1984,14 @@ public class TypeChecker {
         }
         MarkUnsafeBlockChildren(block)
         var existInvalid = false
-        for (item in block.body) {
-            if (!SynthesizeAndReplaceIdealTy(ctx, item)) {
+        for (idx in 0..block.body.size) {
+            let item = block.body[idx]
+            let exprPos = if (idx == block.body.size - 1 && pos != SynPos.UNUSED) {
+                SynPos.IMPLICIT_RETURN
+            } else {
+                SynPos.UNUSED
+            }
+            if (!SynthesizeAndReplaceIdealTy(ctx, exprPos, item)) {
                 existInvalid = true
             }
         }
@@ -1993,10 +2006,11 @@ public class TypeChecker {
         return block.GetTy() ?? TypeManager.GetInvalidTy()
     }
 
-    private func SynthesizeAndReplaceIdealTy(ctx: ASTContext, node: Node): Bool {
+    private func SynthesizeAndReplaceIdealTy(ctx: ASTContext, pos: SynPos, node: Node): Bool {
         var valid = false
         try (ds = DiagSuppressor(impl.diag)) {
-            valid = Ty.IsTyCorrect(SynthesizeNode(ctx, node)) && ReplaceIdealTy(impl.typeManager, node) && !ds.HasError()
+            valid = Ty.IsTyCorrect(SynthesizeNode(ctx, pos, node)) && ReplaceIdealTy(impl.typeManager, node) &&
+                !ds.HasError()
             ds.ReportDiag()
         }
         return valid
@@ -2028,7 +2042,7 @@ public class TypeChecker {
         var isWellTyped = true
         if (block.body.size > 1) {
             for (idx in 0..block.body.size - 1) {
-                isWellTyped = SynthesizeAndReplaceIdealTy(ctx, block.body[idx]) && isWellTyped
+                isWellTyped = SynthesizeAndReplaceIdealTy(ctx, SynPos.UNUSED, block.body[idx]) && isWellTyped
             }
         }
         if (let Some(lastNode) <- block.GetLastExprOrDecl()) {
@@ -2043,7 +2057,8 @@ public class TypeChecker {
             }
             if (nodeForCheck.IsDecl()) {
                 let typeMatched = impl.typeManager.IsSubtype(unitTy, target)
-                isWellTyped = SynthesizeAndReplaceIdealTy(ctx, nodeForCheck) && typeMatched && isWellTyped
+                isWellTyped = SynthesizeAndReplaceIdealTy(ctx, SynPos.IMPLICIT_RETURN, nodeForCheck) && typeMatched &&
+                    isWellTyped
                 if (isWellTyped) {
                     block.SetTy(unitTy)
                     return true
@@ -2629,6 +2644,84 @@ public class TypeChecker {
         }
     }
 
+    private func SynthesizedIfHasMissingElse(ifExpr: IfExpr): Bool {
+        if (let None <- ifExpr.elseBody) {
+            return true
+        }
+        if (let Some(elseExpr) <- ifExpr.elseBody) {
+            if (let Some(elseIf) <- (elseExpr as IfExpr)) {
+                return SynthesizedIfHasMissingElse(elseIf)
+            }
+        }
+        return false
+    }
+
+    private func JoinSynthesizedIfBranchTys(thenTy: Ty, elseTy: Ty, curFile: Option<File>): Ty {
+        if (!Ty.IsTyCorrect(thenTy) || !Ty.IsTyCorrect(elseTy)) {
+            return TypeManager.GetInvalidTy()
+        }
+        if (thenTy.IsNothing()) {
+            return elseTy
+        }
+        if (elseTy.IsNothing()) {
+            return thenTy
+        }
+        let tys = TySet()
+        tys.Add(thenTy)
+        tys.Add(elseTy)
+        return JoinAsVisibleTy(impl.typeManager, tys, curFile: curFile)
+    }
+
+    private func SynthesizeIfExpr(ctx: ASTContext, pos: SynPos, ifExpr: IfExpr): Ty {
+        let conditionBindings = ArrayList<Decl>()
+        var isWellTyped = true
+        if (let Some(condExpr) <- ifExpr.condExpr) {
+            isWellTyped = CheckConditionWithBindings(ctx, condExpr, conditionBindings, false) && isWellTyped
+        } else {
+            isWellTyped = false
+        }
+        if (let Some(thenBody) <- ifExpr.thenBody) {
+            isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, thenBody)) && isWellTyped
+        } else {
+            isWellTyped = false
+        }
+        RemovePatternBindings(ctx, conditionBindings)
+        if (SynthesizedIfHasMissingElse(ifExpr)) {
+            if (let Some(elseBody) <- ifExpr.elseBody) {
+                isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, elseBody)) && isWellTyped
+            }
+            let ifTy = if (isWellTyped) {
+                TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+            } else {
+                TypeManager.GetInvalidTy()
+            }
+            return FinishSynthesize(ctx, ifExpr, ifTy)
+        }
+        if (let Some(elseBody2) <- ifExpr.elseBody) {
+            isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, elseBody2)) && isWellTyped
+        } else {
+            isWellTyped = false
+        }
+        if (!isWellTyped) {
+            return FinishSynthesize(ctx, ifExpr, TypeManager.GetInvalidTy())
+        }
+        if (let Some(thenBody2) <- ifExpr.thenBody) {
+            if (let Some(elseBody3) <- ifExpr.elseBody) {
+                let _ = ReplaceIdealTy(impl.typeManager, thenBody2)
+                let _ = ReplaceIdealTy(impl.typeManager, elseBody3)
+                let thenTy = impl.typeManager.GetThisRealTy(thenBody2.GetTy() ?? TypeManager.GetInvalidTy())
+                let elseTy = impl.typeManager.GetThisRealTy(elseBody3.GetTy() ?? TypeManager.GetInvalidTy())
+                thenBody2.SetTy(thenTy)
+                elseBody3.SetTy(elseTy)
+                if (pos == SynPos.UNUSED) {
+                    return FinishSynthesize(ctx, ifExpr, TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+                }
+                return FinishSynthesize(ctx, ifExpr, JoinSynthesizedIfBranchTys(thenTy, elseTy, ifExpr.curFile))
+            }
+        }
+        return FinishSynthesize(ctx, ifExpr, TypeManager.GetInvalidTy())
+    }
+
     private func SynthesizeMatchChildren(ctx: ASTContext, matchExpr: MatchExpr): Unit {
         var selectorTy: Option<Ty> = None
         if (let Some(selector) <- matchExpr.selector) {
@@ -3143,6 +3236,10 @@ public class TypeChecker {
     }
 
     private func Synthesize(ctx: ASTContext, expr: Expr): Ty {
+        return Synthesize(ctx, SynPos.NONE, expr)
+    }
+
+    private func Synthesize(ctx: ASTContext, pos: SynPos, expr: Expr): Ty {
         if (expr.TestAttr(Attribute.IS_BROKEN)) {
             expr.SetTy(TypeManager.GetInvalidTy())
             return expr.GetTy() ?? TypeManager.GetInvalidTy()
@@ -3151,10 +3248,10 @@ public class TypeChecker {
             return expr.GetTy() ?? TypeManager.GetInvalidTy()
         }
         if (let Some(desugar) <- expr.desugarExpr) {
-            let _ = Synthesize(ctx, desugar)
+            let _ = Synthesize(ctx, pos, desugar)
         }
         if (let Some(block) <- (expr as Block)) {
-            return SynthesizeBlock(ctx, block)
+            return SynthesizeBlock(ctx, pos, block)
         }
         if (let Some(callExpr) <- (expr as CallExpr)) {
             SynthesizeCallChildren(ctx, callExpr)
@@ -3163,8 +3260,7 @@ public class TypeChecker {
             return FinishSynthesize(ctx, callExpr, callTy)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
-            SynthesizeIfChildren(ctx, ifExpr)
-            return FinishSynthesize(ctx, ifExpr, SynExprShallow(impl.typeManager, ifExpr))
+            return SynthesizeIfExpr(ctx, pos, ifExpr)
         }
         if (let Some(matchExpr) <- (expr as MatchExpr)) {
             SynthesizeMatchChildren(ctx, matchExpr)
