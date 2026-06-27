@@ -15,7 +15,9 @@
 
 [dependencies]
   "cangjie_compiler::ast" = { path = "../ast" }
+  "cangjie_compiler::codegen" = { path = "../codegen" }
   "cangjie_compiler::driver" = { path = "../driver" }
   "cangjie_compiler::frontend" = { path = "../frontend" }
   "cangjie_compiler::option" = { path = "../option" }
+  "cangjie_compiler::sema" = { path = "../sema" }
   "cangjie_compiler::utils" = { path = "../utils" }
