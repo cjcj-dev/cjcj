@@ -63,6 +63,15 @@ public class Collector {
             if (let Some(baseExpr2) <- subscriptExpr.baseExpr) {
                 SetIsNotAlone(baseExpr2)
             }
+        } else if (let Some(assignExpr) <- (node as AssignExpr)) {
+            if ((let None <- assignExpr.desugarExpr) && (let Some(leftValue) <- assignExpr.leftValue)) {
+                leftValue.EnableAttr(Attribute.LEFT_VALUE)
+            }
+        }
+        if (let Some(decl) <- (node as Decl)) {
+            if (decl.fullPackageName.isEmpty()) {
+                decl.fullPackageName = ctx.fullPackageName
+            }
         }
         let scopeName = if (node.scopeName.isEmpty()) { TOPLEVEL_SCOPE_NAME } else { node.scopeName }
         let fileHash = if (let Some(file) <- node.curFile) { file.fileHash } else { 0u64 }

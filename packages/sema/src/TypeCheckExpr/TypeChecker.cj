@@ -3307,7 +3307,8 @@ public class TypeChecker {
             targets.add(target)
         }
         if (targets.isEmpty()) {
-            for (target in impl.Lookup(ctx, refExpr.ref.identifier.Val(), scopeNameOf(refExpr), refExpr)) {
+            for (target in impl.Lookup(ctx, refExpr.ref.identifier.Val(), scopeNameOf(refExpr), refExpr,
+                isSetter: refExpr.TestAttr(Attribute.LEFT_VALUE))) {
                 targets.add(target)
             }
         }
