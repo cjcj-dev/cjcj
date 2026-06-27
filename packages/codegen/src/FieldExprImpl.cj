@@ -68,8 +68,9 @@ private func GenerateFieldByPath(irBuilder: IRBuilder2, base: Value,
                         return irBuilder.LoadGenericFieldValue(baseValue.GetRawValue(), genericFieldAddr, fieldType,
                             baseCGType.GetOriginal(), Some(fieldType.GetOriginal()))
                     }
+                    let typedFieldAddr = RetypeFieldAddressForLoad(irBuilder, fieldAddr, fieldType, name)
                     let loaded = LoadClassFieldWithBarrierIfNeeded(irBuilder, baseCGType, baseValue.GetRawValue(),
-                        fieldAddr, fieldType, name)
+                        typedFieldAddr, fieldType, name)
                     return CastExtractedFieldIfNeeded(irBuilder, loaded, fieldType.GetOriginal(), expectedTy)
                 }
                 return fieldAddr
@@ -322,6 +323,20 @@ private func GetFieldCGTypeAtPath(rootType: CGType, path: ArrayList<UInt64>): Op
         currentType = contained[fieldIdx]
     }
     return Some(currentType)
+}
+
+private func RetypeFieldAddressForLoad(irBuilder: IRBuilder2, fieldAddr: LLVMValueRef,
+    fieldType: CGType, name: String): LLVMValueRef {
+    if (fieldType.GetOriginal().StripAllRefs().IsGeneric()) {
+        return fieldAddr
+    }
+    let rawTy = unsafe { LLVMTypeOf(fieldAddr) }
+    if (rawTy.isNull() || unsafe { LLVMGetTypeKind(rawTy) } != 12) {
+        return fieldAddr
+    }
+    let addrspace = unsafe { LLVMGetPointerAddressSpace(rawTy) }
+    let typedPtrTy = unsafe { LLVMPointerType(fieldType.GetLLVMType(), addrspace) }
+    return irBuilder.CreateBitCast(fieldAddr, typedPtrTy, name: name + ".typed")
 }
 
 private func ShouldLoadGenericClassField(baseCGType: CGType, fieldCGType: CGType): Bool {
