@@ -1623,16 +1623,20 @@ public class Translator {
     }
 
     private func TranslatePropertyGetterThisObject(expr: AstMemberAccess, getter: AstFuncDecl, callee: Value): Value {
+        var thisObj: Value
         if (let Some(baseExpr) <- expr.baseExpr) {
             let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr))
             if (PropertyGetterNeedsAddress(callee)) {
-                return AddressOfLeftValue(TranslateExprAsLeftValue(baseExpr), baseTy)
+                thisObj = AddressOfLeftValue(TranslateExprAsLeftValue(baseExpr), baseTy)
+            } else {
+                thisObj = Translator.TranslateASTNode(baseExpr, this) ??
+                    throw IllegalStateException("faithful AST2CHIR property getter base produced no value")
             }
-            return Translator.TranslateASTNode(baseExpr, this) ??
-                throw IllegalStateException("faithful AST2CHIR property getter base produced no value")
+            return NormalizeThisObjectForNonStaticMemberFuncCall(thisObj, getter.TestAttr(AstAttribute.MUT))
         }
         if (let Some(_) <- getter.outerDecl) {
-            return GetCurrentThisObject()
+            thisObj = GetCurrentThisObject()
+            return NormalizeThisObjectForNonStaticMemberFuncCall(thisObj, getter.TestAttr(AstAttribute.MUT))
         }
         throw IllegalStateException("faithful AST2CHIR property getter has no receiver")
     }
@@ -4621,26 +4625,68 @@ public class Translator {
     }
 
     private func TranslateThisObjectForMemberFuncCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
+        var thisObj: Value
         if (let Some(base) <- expr.baseFunc) {
             if (let Some(member) <- (base as AstMemberAccess)) {
                 if (let Some(baseExpr) <- member.baseExpr) {
                     if (IsThisOrSuperRef(baseExpr)) {
-                        return GetCurrentThisObjectForMember(calleeDecl)
+                        thisObj = GetCurrentThisObjectForMember(calleeDecl)
+                        return NormalizeThisObjectForNonStaticMemberFuncCall(thisObj,
+                            calleeDecl.TestAttr(AstAttribute.MUT))
                     }
                     if (calleeDecl.TestAttr(AstAttribute.MUT)) {
                         let leftValue = TranslateExprAsLeftValue(baseExpr)
                         if (leftValue.path.isEmpty()) {
-                            return leftValue.base
+                            thisObj = leftValue.base
+                        } else {
+                            thisObj = LoadLeftValue(leftValue, chirTy.TranslateType(RequireAstTy(baseExpr))) ??
+                                throw IllegalStateException("faithful AST2CHIR mut member call base produced no value")
                         }
-                        return LoadLeftValue(leftValue, chirTy.TranslateType(RequireAstTy(baseExpr))) ??
-                            throw IllegalStateException("faithful AST2CHIR mut member call base produced no value")
+                        return NormalizeThisObjectForNonStaticMemberFuncCall(thisObj,
+                            calleeDecl.TestAttr(AstAttribute.MUT))
                     }
-                    return Translator.TranslateASTNode(baseExpr, this) ??
+                    thisObj = Translator.TranslateASTNode(baseExpr, this) ??
                         throw IllegalStateException("faithful AST2CHIR member call base produced no value")
+                    return NormalizeThisObjectForNonStaticMemberFuncCall(thisObj,
+                        calleeDecl.TestAttr(AstAttribute.MUT))
                 }
             }
         }
-        return GetCurrentThisObjectForMember(calleeDecl)
+        thisObj = GetCurrentThisObjectForMember(calleeDecl)
+        return NormalizeThisObjectForNonStaticMemberFuncCall(thisObj, calleeDecl.TestAttr(AstAttribute.MUT))
+    }
+
+    private func NormalizeThisObjectForNonStaticMemberFuncCall(rawThisObj: Value, needsMutableThis: Bool): Value {
+        let rawThisObjTy = rawThisObj.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR this object has no type: ${rawThisObj.GetIdentifier()}")
+        if (!(rawThisObjTy.IsReferenceTypeWithRefDims(CLASS_REF_DIM) ||
+            rawThisObjTy.IsReferenceTypeWithRefDims(1) ||
+            rawThisObjTy.IsValueOrGenericTypeWithRefDims(1) ||
+            rawThisObjTy.IsValueOrGenericTypeWithRefDims(0))) {
+            throw IllegalStateException("faithful AST2CHIR unsupported this object type: ${rawThisObjTy.ToString()}")
+        }
+        var thisObj = rawThisObj
+        if (!needsMutableThis) {
+            if (rawThisObjTy.IsReferenceTypeWithRefDims(CLASS_REF_DIM) ||
+                rawThisObjTy.IsValueOrGenericTypeWithRefDims(1)) {
+                let pureThisObjTy = rawThisObjTy.StripAllRefs()
+                var targetTy = pureThisObjTy
+                if (pureThisObjTy.IsReferenceType()) {
+                    targetTy = builder.context.GetRefTy(pureThisObjTy)
+                }
+                thisObj = RequireResult(builder.CreateLoad(targetTy, rawThisObj, CurrentBlock()))
+            }
+        } else {
+            if (rawThisObjTy.IsValueOrGenericTypeWithRefDims(0)) {
+                throw IllegalStateException("faithful AST2CHIR mutable this object is not a reference: ${rawThisObjTy.ToString()}")
+            }
+            if (rawThisObjTy.IsReferenceTypeWithRefDims(CLASS_REF_DIM)) {
+                let pureThisObjTy = rawThisObjTy.StripAllRefs()
+                let targetTy = builder.context.GetRefTy(pureThisObjTy)
+                thisObj = RequireResult(builder.CreateLoad(targetTy, rawThisObj, CurrentBlock()))
+            }
+        }
+        return thisObj
     }
 
     private func GetCurrentThisObjectForMember(calleeDecl: AstFuncDecl): Value {
