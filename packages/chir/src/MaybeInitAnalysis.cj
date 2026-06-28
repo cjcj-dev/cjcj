@@ -46,7 +46,7 @@ public class MaybeInitDomain <: GenKillDomain {
             let localIndex = memberIndex - ctorInitInfo.superMemberNums
             return if (IsTrueAt(localIndex)) { MaybeInitMemberKind.LOCAL_MEMBER } else { MaybeInitMemberKind.NA }
         }
-        return MaybeInitMemberKind.NA
+        throw IllegalStateException("MaybeInitDomain member index out of range")
     }
 
     public func SetAllLocalMemberInited(): Unit {
@@ -103,7 +103,7 @@ public class MaybeInitAnalysis {
         if (let Some(body) <- functionValue.GetBody()) {
             allocateIdx = SaveAllocateMap(body, allocateIdx, allocateIdxMap)
         }
-        domainSize = allocateIdx
+        domainSize = ctorInitInfo.localMemberNums + allocateIdx
         if (ctorInitInfo.superClassDef.isSome()) {
             domainSize++
         }
@@ -127,19 +127,20 @@ public class MaybeInitAnalysis {
 
     public func PropagateExpressionEffect(state: MaybeInitDomain, expression: Expression): Unit {
         let kind = expression.GetExprKind()
-        if (kind == ExprKind.ALLOCATE || kind == ExprKind.ALLOCATE_WITH_EXCEPTION) {
+        if (kind == ExprKind.ALLOCATE) {
             HandleAllocateExpr(state, expression)
         } else if (kind == ExprKind.STORE) {
             HandleStoreExpr(state, expression)
-        } else if (kind == ExprKind.STORE_ELEMENT_REF || kind == ExprKind.STORE_ELEMENT_BY_NAME) {
+        } else if (kind == ExprKind.STORE_ELEMENT_REF) {
             HandleStoreElemRefExpr(state, expression)
-        } else if (kind == ExprKind.APPLY || kind == ExprKind.APPLY_WITH_EXCEPTION) {
+        } else if (kind == ExprKind.APPLY) {
             HandleApplyExpr(state, expression)
         }
     }
 
     public func PropagateTerminatorEffect(state: MaybeInitDomain, terminator: Terminator): Option<Block> {
-        PropagateExpressionEffect(state, terminator)
+        let _ = state
+        let _ = terminator
         return None
     }
 
@@ -192,89 +193,67 @@ public class MaybeInitAnalysis {
     }
 
     private func HandleAllocateExpr(state: MaybeInitDomain, allocate: Expression): Unit {
-        if (let Some(result) <- allocate.GetResult()) {
-            if (let Some(index) <- allocateIdxMap.get(result.nodeId)) {
-                state.Kill(index)
-            }
+        let allocateExpr = (allocate as Allocate) ?? throw IllegalStateException("MaybeInitAnalysis expected Allocate")
+        let result = allocateExpr.GetResult() ?? throw IllegalStateException("MaybeInitAnalysis Allocate has no result")
+        if (let Some(index) <- allocateIdxMap.get(result.nodeId)) {
+            state.Kill(index)
         }
     }
 
     private func HandleStoreExpr(state: MaybeInitDomain, store: Expression): Unit {
-        if (store.GetNumOfOperands() >= 2) {
-            let location = store.GetOperand(1)
-            if (let Some(index) <- allocateIdxMap.get(location.nodeId)) {
-                state.Gen(index)
-            }
+        let storeExpr = (store as Store) ?? throw IllegalStateException("MaybeInitAnalysis expected Store")
+        let location = storeExpr.GetLocation()
+        if (let Some(index) <- allocateIdxMap.get(location.nodeId)) {
+            state.Gen(index)
         }
     }
 
     private func HandleStoreElemRefExpr(state: MaybeInitDomain, store: Expression): Unit {
-        if (let Some(storeRef) <- (store as StoreElementRef)) {
-            // modify by cjmp, adapt for var init func create: use the store's top-level func
-            let parentFunc = storeRef.GetTopLevelFunc() ??
-                throw IllegalStateException("MaybeInitAnalysis StoreElementRef has no top-level function")
-            if (let Some(memberIndex) <- IsInitialisingMemberVar(parentFunc, storeRef)) {
-                if (memberIndex >= ctorInitInfo.superMemberNums) {
-                    state.Gen(memberIndex - ctorInitInfo.superMemberNums)
-                }
-            }
+        let storeRef = (store as StoreElementRef) ??
+            throw IllegalStateException("MaybeInitAnalysis expected StoreElementRef")
+        // modify by cjmp, adapt for var init func create: use the store's top-level func
+        let parentFunc = storeRef.GetTopLevelFunc() ??
+            throw IllegalStateException("MaybeInitAnalysis StoreElementRef has no top-level function")
+        let memberIdxOpt = IsInitialisingMemberVar(parentFunc, storeRef)
+        if (memberIdxOpt.isNone()) {
+            return
         }
+        let memberIndex = memberIdxOpt.getOrThrow()
+        if (memberIndex >= ctorInitInfo.superMemberNums + ctorInitInfo.localMemberNums) {
+            throw IllegalStateException("MaybeInitAnalysis member index out of range")
+        }
+        if (memberIndex < ctorInitInfo.superMemberNums) {
+            return
+        }
+        state.Gen(memberIndex - ctorInitInfo.superMemberNums)
     }
 
     private func HandleApplyExpr(state: MaybeInitDomain, apply: Expression): Unit {
         if (!functionValue.IsConstructor()) {
             return
         }
-        if (IsSuperConstructorCall(apply)) {
+        let applyExpr = (apply as Apply) ?? throw IllegalStateException("MaybeInitAnalysis expected Apply")
+        if (applyExpr.IsSuperCall()) {
             state.Gen(domainSize - 1)
             return
         }
-        if (IsDelegatingConstructorCall(apply)) {
-            state.SetAllLocalMemberInited()
-            if (ctorInitInfo.superClassDef.isSome()) {
-                state.Gen(domainSize - 1)
-            }
-        }
-    }
-
-    private func IsSuperConstructorCall(apply: Expression): Bool {
-        if (ctorInitInfo.superClassDef.isNone() || apply.GetNumOfOperands() == 0) {
-            return false
-        }
-        if (let Some(callee) <- apply.GetOperand(0).AsFunction()) {
-            if (!callee.IsConstructor()) {
-                return false
-            }
-            if (let Some(parent) <- callee.GetParentCustomTypeDef()) {
-                if (let Some(superDef) <- ctorInitInfo.superClassDef) {
-                    return parent.nodeId == superDef.nodeId
+        let callee = applyExpr.GetCallee()
+        if (callee.IsFuncWithBody()) {
+            if (let Some(calleeFunc) <- callee.AsFunction()) {
+                let outerDefOpt = calleeFunc.GetOuterDeclaredOrExtendedDef()
+                let sameOuterDef = match ((outerDefOpt, ctorInitInfo.thisCustomDef)) {
+                    case (Some(left), Some(right)) => left.nodeId == right.nodeId
+                    case (None, None) => true
+                    case _ => false
                 }
-            }
-        }
-        return false
-    }
-
-    private func IsDelegatingConstructorCall(apply: Expression): Bool {
-        if (apply.GetNumOfOperands() == 0) {
-            return false
-        }
-        if (let Some(callee) <- apply.GetOperand(0).AsFunction()) {
-            if (!callee.IsConstructor() || !callee.IsFuncWithBody()) {
-                return false
-            }
-            if (let Some(thisDef) <- ctorInitInfo.thisCustomDef) {
-                if (let Some(parent) <- callee.GetParentCustomTypeDef()) {
-                    if (parent.nodeId != thisDef.nodeId) {
-                        return false
+                if (calleeFunc.IsConstructor() && sameOuterDef &&
+                    applyExpr.GetArgs()[0].nodeId == functionValue.GetParam(0).nodeId) {
+                    state.SetAllLocalMemberInited()
+                    if (ctorInitInfo.superClassDef.isSome()) {
+                        state.Gen(domainSize - 1)
                     }
-                } else {
-                    return false
                 }
             }
-            if (apply.GetNumOfOperands() > 1 && functionValue.GetNumOfParams() > 0) {
-                return apply.GetOperand(1).nodeId == functionValue.GetParam(0).nodeId
-            }
         }
-        return false
     }
 }
