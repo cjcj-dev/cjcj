@@ -124,18 +124,19 @@ private func windowsConsoleCtrlHandler(ctrlType: UInt32): Bool {
 @When[os == "Windows"]
 private func windowsUnhandledExceptionHandler(ep: CPointer<WindowsExceptionPointers>): Int32 {
     threadDelaySynchronizer()
-    var exitCode = EXCEPTION_EXECUTE_HANDLER
     unsafe {
-        if (!ep.isNull()) {
-            let exceptionPointers = ep.read()
-            if (!exceptionPointers.exceptionRecord.isNull()) {
-                exitCode = Int32(exceptionPointers.exceptionRecord.read().exceptionCode)
-            }
+        if (ep.isNull()) {
+            return EXCEPTION_EXECUTE_HANDLER
         }
+        let exceptionPointers = ep.read()
+        if (exceptionPointers.exceptionRecord.isNull()) {
+            return EXCEPTION_EXECUTE_HANDLER
+        }
+        let exitCode = Int32(exceptionPointers.exceptionRecord.read().exceptionCode)
+        writeICEMessage(Int64(exitCode))
+        ICE.RemoveTempFile()
+        return exitCode
     }
-    writeICEMessage(Int64(exitCode))
-    ICE.RemoveTempFile()
-    return exitCode
 }
 
 @When[os == "Windows"]
@@ -151,6 +152,13 @@ private let windowsConsoleCtrlHandlerC: WindowsConsoleHandler = { ctrlType: UInt
 @When[os == "Windows"]
 private let windowsUnhandledExceptionHandlerC: WindowsExceptionHandler = {
     ep: CPointer<WindowsExceptionPointers> => windowsUnhandledExceptionHandler(ep)
+}
+
+@When[os == "Windows"]
+public func RegisterCrashExceptionHandler(): Unit {
+    unsafe {
+        let _ = SetUnhandledExceptionFilter(windowsUnhandledExceptionHandlerC)
+    }
 }
 
 @When[os != "Windows"]
