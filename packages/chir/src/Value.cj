@@ -149,7 +149,7 @@ public open class Value <: Base & Hashable & Equatable<Value> {
                 return expr.IsConstant()
             }
         }
-        return TestAttr(Attribute.CONST) || TestAttr(Attribute.COMPILE_TIME_VALUE)
+        return TestAttr(Attribute.CONST)
     }
 
     public func Dump(): Unit {
@@ -416,7 +416,15 @@ public class Block <: Value {
     }
 
     public func GetExpressionsNum(): Int64 {
-        return exprs.size
+        var res: Int64 = 0
+        for (expr in exprs) {
+            if (let Some(lambdaExpr) <- (expr as Lambda)) {
+                let lambdaBody = lambdaExpr.GetBody().getOrThrow()
+                res += lambdaBody.GetExpressionsNum()
+            }
+        }
+        res += exprs.size
+        return res
     }
 
     public func GetNonTerminatorExpressions(): ArrayList<Expression> {
@@ -739,6 +747,15 @@ public open class GlobalValue <: Value {
         return out
     }
 
+    public func SetFeatures(newFeatures: ArrayList<String>): Unit {
+        features.clear()
+        for (feature in newFeatures) {
+            if (!features.contains(feature)) {
+                features.add(feature)
+            }
+        }
+    }
+
     public func AddFeature(feature: String): Unit {
         if (!features.contains(feature)) {
             features.add(feature)
@@ -794,6 +811,14 @@ public class GlobalVar <: GlobalValue {
 
     public override func AsGlobalVar(): Option<GlobalVar> { return this }
 
+    public override func IsSrcCodeImported(): Bool {
+        return TestAttr(Attribute.IMPORTED) && (initializerValue.isSome() || initFunc.isSome())
+    }
+
+    public func IsLocalConst(): Bool {
+        return TestAttr(Attribute.CONST) && TestAttr(Attribute.COMPILER_ADD)
+    }
+
     public func SetInitializerValue(value: Value): Unit {
         initializerValue = value
         initFunc = None
@@ -831,6 +856,18 @@ public class GlobalVar <: GlobalValue {
         return initFunc
     }
 
+    public override func DestroySelf(): Unit {
+        if (let Some(parentDef) <- GetParentCustomTypeDef()) {
+            let variables = ArrayList<GlobalVar>()
+            for (variable in parentDef.GetStaticMemberVars()) {
+                if (variable.nodeId != nodeId) {
+                    variables.add(variable)
+                }
+            }
+            parentDef.SetStaticMemberVars(variables)
+        }
+    }
+
     public override func ToString(indent: Int64): String {
         let typeText = if (let Some(valueTy) <- GetType()) { valueTy.ToString() } else { "<none>" }
         var out = IndentToString(indent) + GetAttributeInfo().ToString() + "global " + GetIdentifier() + ": " + typeText
@@ -856,39 +893,7 @@ public class Function <: GlobalValue {
     private var blockGroupId: UInt64 = 0u64
     private var localId: UInt64 = 0u64
     private var propLocation: DebugLocation = DebugLocation()
-    // Literal strings this function prints when executed, in source order. printNewlines is a
-    // parallel list: true => println (puts, trailing newline), false => print (fputs, no newline).
-    // printIsInt is a parallel list: true => integer print (printStrings holds the decimal text,
-    // lowered via printf("%ld[\n]")); false => string print.
-    public let printStrings: ArrayList<String> = ArrayList<String>()
-    public let printNewlines: ArrayList<Bool> = ArrayList<Bool>()
-    public let printIsInt: ArrayList<Bool> = ArrayList<Bool>()
-    // Runtime-value print directives for the real-body path. Each entry names the
-    // GetIdentifierWithoutPrefix() of a CHIR result Value computed in the body; codegen emits a
-    // printf("%ld"/"%ld\n", <that value>) immediately after the value is materialized, so the
-    // value printed is the genuine runtime result (a loop accumulator, a call result, etc.).
-    // runtimePrintNewlines is a parallel list: true => println (trailing newline), false => print.
-    public let runtimePrintValueIds: ArrayList<String> = ArrayList<String>()
-    public let runtimePrintNewlines: ArrayList<Bool> = ArrayList<Bool>()
-    // Parallel to runtimePrintValueIds: when runtimePrintIsStr[i] is true the directive prints the
-    // literal string text in runtimePrintStrings[i] (puts/fputs) instead of the matched i64 value.
-    // The anchor value identifier is still used to place the call in body flow order. For an integer
-    // directive the entry is (false, "").
-    public let runtimePrintIsStr: ArrayList<Bool> = ArrayList<Bool>()
-    public let runtimePrintStrings: ArrayList<String> = ArrayList<String>()
-    // Parallel to runtimePrintValueIds: when runtimePrintIsBool[i] is true the matched value is an i1
-    // Bool; codegen prints the literal text "true"/"false" selected on that i1 instead of "%ld". For a
-    // non-bool directive the entry is false.
-    public let runtimePrintIsBool: ArrayList<Bool> = ArrayList<Bool>()
-    // Parallel to runtimePrintValueIds: when runtimePrintIsStrValue[i] is true the matched value is a
-    // runtime CString (i8*) String value; codegen prints it directly via puts/fputs (no static text).
-    // This is the String-variable / String-expression print path (vs runtimePrintIsStr, which prints a
-    // compile-time-known literal text). For a non-string-value directive the entry is false.
-    public let runtimePrintIsStrValue: ArrayList<Bool> = ArrayList<Bool>()
-    // Parallel to runtimePrintValueIds: when runtimePrintIsFloat[i] is true the matched value is a
-    // floating-point value (Float64); codegen prints it via printf("%f"/"%f\n", <double>) to match the
-    // reference cjc's six-decimal float formatting. For a non-float directive the entry is false.
-    public let runtimePrintIsFloat: ArrayList<Bool> = ArrayList<Bool>()
+    private var originalLambdaInfo: Option<FuncSigInfo> = None
 
     public init(funcType: FuncType, identifier: String, srcCodeIdentifier: String, rawMangledName: String,
         packageName: String, genericTypeParams!: ArrayList<GenericType> = ArrayList<GenericType>()) {
@@ -901,8 +906,9 @@ public class Function <: GlobalValue {
     public override func AsFunction(): Option<Function> { return this }
 
     public func IsConstructor(): Bool {
-        return funcKind == FuncKind.CLASS_CONSTRUCTOR || funcKind == FuncKind.PRIMAL_CLASS_CONSTRUCTOR ||
-            funcKind == FuncKind.STRUCT_CONSTRUCTOR || funcKind == FuncKind.PRIMAL_STRUCT_CONSTRUCTOR
+        return (funcKind == FuncKind.CLASS_CONSTRUCTOR || funcKind == FuncKind.STRUCT_CONSTRUCTOR ||
+            funcKind == FuncKind.PRIMAL_CLASS_CONSTRUCTOR || funcKind == FuncKind.PRIMAL_STRUCT_CONSTRUCTOR) &&
+            !TestAttr(Attribute.STATIC)
     }
 
     public func IsFinalizer(): Bool { return funcKind == FuncKind.FINALIZER }
@@ -912,7 +918,10 @@ public class Function <: GlobalValue {
         return funcKind == FuncKind.PRIMAL_CLASS_CONSTRUCTOR || funcKind == FuncKind.PRIMAL_STRUCT_CONSTRUCTOR
     }
     public func IsInstanceVarInit(): Bool { return funcKind == FuncKind.INSTANCEVAR_INIT }
-    public func IsStaticInit(): Bool { return funcKind == FuncKind.GLOBALVAR_INIT || funcKind == FuncKind.INSTANCEVAR_INIT }
+    public func IsStaticInit(): Bool {
+        return (funcKind == FuncKind.CLASS_CONSTRUCTOR || funcKind == FuncKind.STRUCT_CONSTRUCTOR) &&
+            GetSrcCodeIdentifier() == "static.init"
+    }
 
     public func GetFuncKind(): FuncKind { return funcKind }
 
@@ -933,6 +942,47 @@ public class Function <: GlobalValue {
             out.add(param)
         }
         return out
+    }
+
+    public func GetGenericTypeParamsRef(): ArrayList<GenericType> {
+        return genericTypeParams
+    }
+
+    public func SetOriginalLambdaInfo(info: FuncSigInfo): Unit {
+        if (funcKind != FuncKind.LAMBDA) {
+            throw IllegalArgumentException("original lambda info requires lambda function")
+        }
+        originalLambdaInfo = info
+    }
+
+    public func GetOriginalLambdaType(): Option<FuncType> {
+        if (funcKind == FuncKind.LAMBDA) {
+            if (let Some(info) <- originalLambdaInfo) {
+                return info.funcType
+            }
+            return None
+        }
+        return GetFuncType()
+    }
+
+    public func GetOriginalGenericTypeParams(): ArrayList<GenericType> {
+        if (funcKind == FuncKind.LAMBDA) {
+            if (let Some(info) <- originalLambdaInfo) {
+                return info.GetGenericTypeParams()
+            }
+            return ArrayList<GenericType>()
+        }
+        return GetGenericTypeParams()
+    }
+
+    public func GetOriginalGenericTypeParamsRef(): ArrayList<GenericType> {
+        if (funcKind == FuncKind.LAMBDA) {
+            if (let Some(info) <- originalLambdaInfo) {
+                return info.genericTypeParams
+            }
+            return ArrayList<GenericType>()
+        }
+        return genericTypeParams
     }
 
     public func IsFastNative(): Bool { return TestAttr(Attribute.FAST_NATIVE) }
@@ -963,6 +1013,18 @@ public class Function <: GlobalValue {
     public func GenerateLocalId(): UInt64 {
         localId++
         return localId
+    }
+
+    public func SetLocalId(id: UInt64): Unit {
+        localId = id
+    }
+
+    public func SetBlockId(id: UInt64): Unit {
+        blockId = id
+    }
+
+    public func SetBlockGroupId(id: UInt64): Unit {
+        blockGroupId = id
     }
 
     public func InheritIDFromFunc(fn: Function): Unit {
@@ -997,18 +1059,32 @@ public class Function <: GlobalValue {
     public func GetBody(): Option<BlockGroup> { return body }
 
     public func InitBody(newBody: BlockGroup): Unit {
+        if (body.isSome()) {
+            throw IllegalArgumentException("function body already initialized")
+        }
         body = newBody
-        newBody.SetOwnerFunc(this)
+        var updateOwner = true
+        if (let Some(owner) <- newBody.GetOwnerFunc()) {
+            updateOwner = owner.nodeId != nodeId
+        }
+        if (updateOwner) {
+            newBody.SetOwnerFunc(this)
+        }
     }
 
     public func ReplaceBody(newBody: BlockGroup): Unit {
+        DestroyFuncBody()
         InitBody(newBody)
     }
 
     public func DestroyFuncBody(): Unit {
         returnValue = None
         if (let Some(funcBody) <- body) {
-            funcBody.ClearBlockGroup()
+            for (block in funcBody.GetBlocks()) {
+                for (expr in block.GetExpressions()) {
+                    expr.RemoveSelfFromBlock()
+                }
+            }
         }
         body = None
     }
@@ -1021,12 +1097,12 @@ public class Function <: GlobalValue {
     }
 
     public func AddParam(param: Parameter): Unit {
-        for (old in params) {
-            if (old.nodeId == param.nodeId) {
-                return
-            }
-        }
         params.add(param)
+        param.SetOwnerFunc(this)
+    }
+
+    public func RemoveParams(): Unit {
+        params.clear()
     }
 
     public func GetParam(index: Int64): Parameter {
@@ -1120,6 +1196,76 @@ public class Function <: GlobalValue {
 
     public func IsMemberFunc(): Bool {
         return GetParentCustomTypeDef().isSome()
+    }
+
+    public func IsClassMethod(): Bool {
+        if (let Some(outerDef) <- GetOuterDeclaredOrExtendedDef()) {
+            return outerDef.IsClass()
+        }
+        return false
+    }
+
+    public func IsStructMethod(): Bool {
+        if (let Some(outerDef) <- GetOuterDeclaredOrExtendedDef()) {
+            return outerDef.IsStruct()
+        }
+        return false
+    }
+
+    public func IsEnumMethod(): Bool {
+        if (let Some(outerDef) <- GetOuterDeclaredOrExtendedDef()) {
+            return outerDef.IsEnum()
+        }
+        return false
+    }
+
+    public func IsInExtend(): Bool {
+        if (let Some(def) <- GetParentCustomTypeDef()) {
+            return def.GetCustomKind() == CustomDefKind.TYPE_EXTEND
+        }
+        return false
+    }
+
+    public func IsInGenericContext(): Bool {
+        if (TestAttr(Attribute.GENERIC)) {
+            return true
+        }
+        if (let Some(def) <- GetParentCustomTypeDef()) {
+            return def.TestAttr(Attribute.GENERIC)
+        }
+        return false
+    }
+
+    public func IsCFunc(): Bool {
+        if (let Some(valueTy) <- GetType()) {
+            return valueTy.IsCFunc()
+        }
+        return false
+    }
+
+    public func IsVirtualFunc(): Bool {
+        return TestAttr(Attribute.VIRTUAL) || TestAttr(Attribute.FINAL)
+    }
+
+    public func IsPureAbstract(): Bool {
+        return TestAttr(Attribute.ABSTRACT) && body.isNone()
+    }
+
+    public override func IsSrcCodeImported(): Bool {
+        return TestAttr(Attribute.IMPORTED) && body.isSome()
+    }
+
+    public override func DestroySelf(): Unit {
+        if (let Some(parentDef) <- GetParentCustomTypeDef()) {
+            let methods = ArrayList<Function>()
+            for (method in parentDef.GetMethods()) {
+                if (method.nodeId != nodeId) {
+                    methods.add(method)
+                }
+            }
+            parentDef.SetMethods(methods)
+        }
+        DestroyFuncBody()
     }
 
     public override func ToString(indent: Int64): String {

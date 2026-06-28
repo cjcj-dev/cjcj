@@ -42,72 +42,7 @@ public func EmitExpressionIR(cgMod: CGModule, irBuilder: IRBuilder2, chirExprs: 
         let rawRet = DispatchExpression(irBuilder, chirExpr)
         if (!rawRet.isNull()) {
             MapExpressionResult(cgMod, irBuilder, chirExpr, rawRet)
-            MaybeEmitRuntimePrint(cgMod, irBuilder, chirExpr, rawRet)
         }
-    }
-}
-
-// If the just-emitted expression's result value matches a runtime-print directive recorded on the
-// owning function (real-body `println(<expr>)` / `print(<expr>)`), emit a printf of that value at
-// the current insert point -- immediately after the value is computed, so the printed value is the
-// genuine runtime result. A directive entry is consumed at most once.
-private func MaybeEmitRuntimePrint(cgMod: CGModule, irBuilder: IRBuilder2, chirExpr: Expression,
-    rawRet: LLVMValueRef): Unit {
-    let resultValue = match (chirExpr.GetResult()) {
-        case Some(v) => v
-        case None => return
-    }
-    let topLevelFunc = match (chirExpr.GetTopLevelFunc()) {
-        case Some(f) => f
-        case None => return
-    }
-    if (topLevelFunc.runtimePrintValueIds.isEmpty()) {
-        return
-    }
-    let resultId = resultValue.GetIdentifierWithoutPrefix()
-    var idx = 0
-    while (idx < topLevelFunc.runtimePrintValueIds.size) {
-        if (topLevelFunc.runtimePrintValueIds[idx] == resultId) {
-            let newline = if (idx < topLevelFunc.runtimePrintNewlines.size) {
-                topLevelFunc.runtimePrintNewlines[idx]
-            } else {
-                true
-            }
-            let isStr = idx < topLevelFunc.runtimePrintIsStr.size && topLevelFunc.runtimePrintIsStr[idx]
-            let isBool = idx < topLevelFunc.runtimePrintIsBool.size && topLevelFunc.runtimePrintIsBool[idx]
-            let isStrValue = idx < topLevelFunc.runtimePrintIsStrValue.size &&
-                topLevelFunc.runtimePrintIsStrValue[idx]
-            let isFloat = idx < topLevelFunc.runtimePrintIsFloat.size &&
-                topLevelFunc.runtimePrintIsFloat[idx]
-            if (isStrValue) {
-                // The matched value is a runtime CString (i8*) String value; print it via puts/fputs.
-                let _ = EmitRuntimeStringValuePrint(cgMod, irBuilder.GetBuilder().raw, rawRet, newline)
-            } else if (isStr) {
-                let text = if (idx < topLevelFunc.runtimePrintStrings.size) {
-                    topLevelFunc.runtimePrintStrings[idx]
-                } else {
-                    ""
-                }
-                let strName = topLevelFunc.GetIdentifier() + ".cjsh.rtstr." + idx.toString()
-                let _ = EmitRuntimeStringPrint(cgMod, irBuilder.GetBuilder().raw, text, newline, strName)
-            } else if (isFloat) {
-                // The matched value is a Float64 (double); print via printf("%f"/"%f\n", <double>) to
-                // match the reference cjc's six-decimal float formatting.
-                let floatName = topLevelFunc.GetIdentifier() + ".cjsh.rtflt." + idx.toString()
-                let _ = EmitRuntimeFloatPrint(cgMod, irBuilder.GetBuilder().raw, rawRet, newline, floatName)
-            } else if (isBool) {
-                // The matched value is an i1; print "true"/"false" selected on it.
-                let boolName = topLevelFunc.GetIdentifier() + ".cjsh.rtbool." + idx.toString()
-                let _ = EmitRuntimeBoolPrint(cgMod, irBuilder.GetBuilder().raw, rawRet, newline, boolName)
-            } else {
-                let fmtName = topLevelFunc.GetIdentifier() + ".cjsh.rtfmt." + idx.toString()
-                let _ = EmitRuntimeIntPrint(cgMod, irBuilder.GetBuilder().raw, rawRet, newline, fmtName)
-            }
-            // Consume this directive so a repeated value identifier is not double-printed.
-            topLevelFunc.runtimePrintValueIds[idx] = ""
-            return
-        }
-        idx++
     }
 }
 

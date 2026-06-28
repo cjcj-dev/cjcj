@@ -20,7 +20,6 @@ private class FunctionGeneratorImpl <: IRGeneratorImpl {
             if (let Some(entryBlock) <- body.GetEntryBlock()) {
                 EmitBasicBlockIR(cgMod, entryBlock)
             }
-            EmitFunctionPrintDirectives(cgMod, cgFunc, chirFunc)
         } else {
             // Declarations are materialized by GetOrInsertCGFunction and have no body to emit.
         }
