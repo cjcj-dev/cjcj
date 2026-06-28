@@ -803,16 +803,43 @@ public class Translator {
         return false
     }
 
+    private func IsUnnecessarySuperCall(node: AstNode): Bool {
+        if (let Some(callExpr) <- (node as AstCallExpr)) {
+            if (let Some(baseFunc) <- callExpr.baseFunc) {
+                if (let Some(refExpr) <- (baseFunc as AstRefExpr)) {
+                    if (refExpr.isSuper) {
+                        if (let Some(astTy) <- callExpr.GetTy()) {
+                            return astTy.IsObject()
+                        }
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private func CollectBlockBodyNodes(block: AstBlock): ArrayList<AstNode> {
+        let nodes = ArrayList<AstNode>()
+        for (body in block.body) {
+            if (IsUnnecessarySuperCall(body)) {
+                continue
+            }
+            nodes.add(body)
+        }
+        return nodes
+    }
+
     public func Visit(block: AstBlock): Option<Value> {
-        if (block.body.isEmpty()) {
+        let nodes = CollectBlockBodyNodes(block)
+        if (nodes.isEmpty()) {
             return None
         }
         var idx: Int64 = 0
-        while (idx + 1 < block.body.size) {
-            TranslateBlockNodeToDiscarded(block.body[idx])
+        while (idx + 1 < nodes.size) {
+            TranslateBlockNodeToDiscarded(nodes[idx])
             idx++
         }
-        return TranslateBlockNodeAsValue(block.body[idx])
+        return TranslateBlockNodeAsValue(nodes[idx])
     }
 
     public func Visit(expr: AstLitConstExpr): Option<Value> {
@@ -5577,7 +5604,13 @@ public class Translator {
     }
 
     private func IsInstanceMember(decl: AstDecl): Bool {
-        return decl.outerDecl.isSome() && !decl.TestAttr(AstAttribute.STATIC) && !decl.TestAttr(AstAttribute.GLOBAL)
+        if (decl.TestAttr(AstAttribute.STATIC)) {
+            return false
+        }
+        if (let Some(outer) <- decl.outerDecl) {
+            return outer.IsNominalDecl()
+        }
+        return false
     }
 
     private func RequireRefBaseType(value: Value): Type {
