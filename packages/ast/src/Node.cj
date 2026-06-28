@@ -111,10 +111,6 @@ public open class Node <: Hashable & Equatable<Node> {
         return attributes.Clone()
     }
 
-    public func GetAttrsVector(): ArrayList<Attribute> {
-        return attributes.GetAllAttrs()
-    }
-
     public func CopyAttrs(attrs: AttributePack): Unit {
         attributes = attrs.Clone()
     }

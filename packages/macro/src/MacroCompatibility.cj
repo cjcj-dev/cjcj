@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::ast.ASTKind as RealASTKind
 import cangjie_compiler::ast.ASTKindIndex as RealASTKindIndex
 import cangjie_compiler::ast.Attribute as RealAttribute
+import cangjie_compiler::ast.AttributePack as RealAttributePack
 import cangjie_compiler::ast.AttributeIndex as RealAttributeIndex
 import cangjie_compiler::ast.ExprKind as RealExprKind
 import cangjie_compiler::ast.Identifier as RealIdentifier
@@ -26,6 +27,7 @@ public import cangjie_compiler::option.MockMode
 public type Range = BasicRange
 public type ASTKind = RealASTKind
 public type Attribute = RealAttribute
+public type AttributePack = RealAttributePack
 public type CompilerGlobalOptions = RealGlobalOptions
 public type Identifier = RealIdentifier
 public type Modifier = RealModifier
@@ -92,7 +94,7 @@ public open class Node {
     public var curFile: Option<File> = None
     public var parent: Option<Node> = None
     public let astKind: ASTKind
-    private let attrs: ArrayList<Attribute> = ArrayList<Attribute>()
+    private var attrs: AttributePack = AttributePack()
 
     public init() {
         astKind = ASTKind.NODE
@@ -111,18 +113,19 @@ public open class Node {
     }
 
     public func EnableAttr(attr: Attribute): Unit {
-        if (!TestAttr(attr)) {
-            attrs.add(attr)
-        }
+        attrs.SetAttr(attr, true)
     }
 
     public func TestAttr(attr: Attribute): Bool {
-        for (item in attrs) {
-            if (AttributeEquals(item, attr)) {
-                return true
-            }
-        }
-        return false
+        return attrs.TestAttr(attr)
+    }
+
+    public func GetAttrs(): AttributePack {
+        return attrs.Clone()
+    }
+
+    public func CopyAttrs(newAttrs: AttributePack): Unit {
+        attrs = newAttrs.Clone()
     }
 
     public func IsInvalid(): Bool {

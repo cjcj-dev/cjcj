@@ -50,8 +50,8 @@ public class ASTHasher {
         for (modifier in decl.modifiers) {
             acc = CombineHash(acc, UInt64(ModifierKindIndexForHash(modifier.modifier)))
         }
-        for (attr in decl.GetAttrsVector()) {
-            acc = CombineHash(acc, UInt64(AttributeIndex(attr)))
+        for (rawAttr in decl.GetAttrs().GetRawAttrs()) {
+            acc = CombineHash(acc, rawAttr)
         }
         return acc
     }

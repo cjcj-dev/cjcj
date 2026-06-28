@@ -453,9 +453,7 @@ private func copyParsedDeclBase(parsedDecl: ParsedDecl, targetDecl: Decl, fallba
     for (parsedAnnotation in parsedDecl.annotations) {
         targetDecl.annotations.add(convertParsedAnnotation(parsedAnnotation, fallbackFile))
     }
-    for (parsedAttr in parsedDecl.GetAttrsVector()) {
-        targetDecl.EnableAttr(parsedAttr)
-    }
+    targetDecl.CopyAttrs(parsedDecl.GetAttrs())
 }
 
 private func convertParsedFuncBody(parsedBody: ParsedFuncBody, fallbackFile: Option<File>): FuncBody {
