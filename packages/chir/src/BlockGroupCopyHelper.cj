@@ -2,26 +2,6 @@ package cangjie_compiler::chir
 
 import std.collection.*
 
-public class BlockGroupCloneResult {
-    public let blocks: ArrayList<Block> = ArrayList<Block>()
-    public let returnValue: Option<LocalVar>
-
-    public init(blocks: ArrayList<Block>, returnValue: Option<LocalVar>) {
-        for (block in blocks) {
-            this.blocks.add(block)
-        }
-        this.returnValue = returnValue
-    }
-
-    public func GetBlocks(): ArrayList<Block> {
-        return blocks.clone()
-    }
-
-    public func GetReturnValue(): Option<LocalVar> {
-        return returnValue
-    }
-}
-
 public class BlockGroupCopyHelper {
     private let builder: CHIRBuilder
 
@@ -29,14 +9,14 @@ public class BlockGroupCopyHelper {
         this.builder = builder
     }
 
-    public func CloneBlockGroup(oldBG: BlockGroup, newBG: BlockGroup): BlockGroupCloneResult {
+    public func CloneBlockGroup(oldBG: BlockGroup, newBG: BlockGroup): (ArrayList<Block>, Option<LocalVar>) {
         let newBlocks = CloneBlockGroupInto(oldBG, newBG)
         let valueMap = HashMap<Int64, Value>()
         let newDebugs = ArrayList<Expression>()
         CollectValueMap(oldBG, newBlocks, valueMap, newDebugs)
         BlockGroupCopyHelper.ReplaceExprOperands(newBlocks, valueMap)
         RemoveClonedDebugExpressions(newDebugs)
-        return BlockGroupCloneResult(newBlocks, FindClonedReturnValue(oldBG, valueMap))
+        return (newBlocks, FindClonedReturnValue(oldBG, valueMap))
     }
 
     public static func ReplaceExprOperands(blocks: ArrayList<Block>, valueMap: HashMap<Int64, Value>): Unit {
