@@ -1,6 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::utils.CJC_ASSERT
 
 public class BCHIRCodePosition {
     public let fileID: Int64
@@ -40,29 +41,23 @@ public class BCHIRDefinition {
         bytecode.add((value >> 32) & 0xffffffff)
     }
 
-    public func Set(index: Int64, value: Int64): Bool {
-        if (index < 0 || index >= bytecode.size) {
-            return false
-        }
+    public func Set(index: Int64, value: Int64): Unit {
+        CJC_ASSERT(index >= 0 && index < bytecode.size)
         bytecode[index] = value
-        return true
     }
 
-    public func SetOp(index: Int64, opCode: OpCode): Bool {
-        return Set(index, OpCodeIndex(opCode))
+    public func SetOp(index: Int64, opCode: OpCode): Unit {
+        CJC_ASSERT(index >= 0 && index < bytecode.size)
+        bytecode[index] = OpCodeIndex(opCode)
     }
 
     public func Get(index: Int64): Int64 {
-        if (index < 0 || index >= bytecode.size) {
-            return 0
-        }
+        CJC_ASSERT(index >= 0 && index < bytecode.size)
         return bytecode[index]
     }
 
     public func Get8Bytes(index: Int64): Int64 {
-        if (index < 0 || index + 1 >= bytecode.size) {
-            return 0
-        }
+        CJC_ASSERT(index >= 0 && index + 1 < bytecode.size)
         return bytecode[index] | (bytecode[index + 1] << 32)
     }
 
@@ -75,12 +70,7 @@ public class BCHIRDefinition {
     }
 
     public func Resize(newSize: Int64): Unit {
-        if (newSize < 0) {
-            return
-        }
-        while (bytecode.size > newSize) {
-            bytecode.remove(at: bytecode.size - 1)
-        }
+        CJC_ASSERT(newSize > bytecode.size)
         while (bytecode.size < newSize) {
             bytecode.add(0)
         }
@@ -324,8 +314,8 @@ public class BCHIR {
     public func GetLinkedByteCode(): BCHIRDefinition { return linkedByteCode }
     public func Get(index: Int64): Int64 { return linkedByteCode.Get(index) }
     public func Get8Bytes(index: Int64): Int64 { return linkedByteCode.Get8Bytes(index) }
-    public func Set(index: Int64, value: Int64): Bool { return linkedByteCode.Set(index, value) }
-    public func SetOp(index: Int64, opCode: OpCode): Bool { return linkedByteCode.SetOp(index, opCode) }
+    public func Set(index: Int64, value: Int64): Unit { linkedByteCode.Set(index, value) }
+    public func SetOp(index: Int64, opCode: OpCode): Unit { linkedByteCode.SetOp(index, opCode) }
     public func Resize(newSize: Int64): Unit { linkedByteCode.Resize(newSize) }
 
     public func AddString(text: String): Int64 {
@@ -498,11 +488,14 @@ public class BCHIR {
     public func LinkDefaultFunctions(mangleToPointer: HashMap<String, Int64>): Unit {
         let names = BCHIRDefaultFunctionMangledNames()
         var idx: Int64 = 0
-        while (idx < names.size && idx < defaultFuncPtrs.size) {
+        while (idx < names.size) {
             if (let Some(pointer) <- mangleToPointer.get(names[idx])) {
                 defaultFuncPtrs[idx] = pointer
             }
             idx++
+        }
+        if (let Some(pointer) <- mangleToPointer.get(mainMangledName)) {
+            defaultFuncPtrs[BCHIRDefaultFunctionKindIndex(BCHIRDefaultFunctionKind.MAIN)] = pointer
         }
     }
 
@@ -527,18 +520,17 @@ public class BCHIR {
 
 public func BCHIRDefaultFunctionMangledNames(): ArrayList<String> {
     let names = ArrayList<String>()
-    names.add("std.core::ArithmeticException.<init>()")
-    names.add("std.core::OverflowException.<init>()")
-    names.add("std.core::IndexOutOfBoundsException.<init>()")
-    names.add("std.core::NegativeArraySizeException.<init>()")
-    names.add("std.core::toString")
-    names.add("std.core::ArithmeticException.<init>(String)")
-    names.add("std.core::OutOfMemoryError.<init>()")
-    names.add("std.core::isError")
-    names.add("std.core::throwError")
-    names.add("std.core::printStackTrace")
-    names.add("std.core::printStackTraceError")
-    names.add("main")
+    names.add("rt$ThrowArithmeticException")
+    names.add("rt$ThrowOverflowException")
+    names.add("rt$ThrowIndexOutOfBoundsException")
+    names.add("rt$ThrowNegativeArraySizeException")
+    names.add("rt$CallToString")
+    names.add("rt$ThrowArithmeticException_msg")
+    names.add("rt$ThrowOutOfMemoryError")
+    names.add("rt$CheckIsError")
+    names.add("rt$ThrowError")
+    names.add("rt$CallPrintStackTrace")
+    names.add("rt$CallPrintStackTraceError")
     return names
 }
 
