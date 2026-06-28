@@ -73,7 +73,7 @@ public class ASTWriter {
         if (let Some(existing) <- savedTypeMap.get(pType)) {
             return existing
         }
-        let nextIndex = UInt64(savedTypes.size + 1)
+        let nextIndex = UInt32(savedTypes.size + 1)
         savedTypes.add(pType)
         savedTypeMap[pType] = nextIndex
         return nextIndex
@@ -621,7 +621,7 @@ public class ASTLoader {
 }
 
 public func ParseFormattedIndex(value: String): FormattedIndex {
-    return ParseUInt64Field(value)
+    return UInt32.parse(value)
 }
 
 public func ParseUInt64Field(value: String): UInt64 {
