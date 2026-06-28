@@ -21,6 +21,7 @@ extend ParserImpl {
                 pkg.hasSpecific = true
             }
         }
+        pkg.EnableAttr(GetModifierAttr(pkg.modifier, ASTKind.PACKAGE_SPEC))
         if (Skip(TokenKind.MACRO)) {
             pkg.macroPos = lastToken.Begin()
             pkg.hasMacro = true
@@ -131,6 +132,7 @@ extend ParserImpl {
             spec.modifier = modifier
         }
         let importTok = Expect(TokenKind.IMPORT, "expected 'import'")
+        spec.EnableAttr(GetModifierAttr(spec.modifier, ASTKind.IMPORT_SPEC))
         spec.importPos = importTok.Begin()
         spec.begin = if (let Some(modifier) <- spec.modifier) {
             modifier.begin
@@ -224,10 +226,8 @@ extend ParserImpl {
             desugared.content.asPos = item.asPos
             desugared.content.aliasName = CloneIdentifier(item.aliasName)
             desugared.content.isBroken = item.isBroken || importSpec.content.hasBroken
-            // C++ ParseImports.cpp:164 EnableAttr(COMPILER_ADD, GetModifierAttr(...)); selfhost 无
-            // GetModifierAttr(modifier-derived attr 为独立既存 gap), 此处补 COMPILER_ADD 使 CheckImportSpec
-            // 的 desugared skip 生效, 避免对超长包名重复诊断。
             desugared.EnableAttr(Attribute.COMPILER_ADD)
+            desugared.EnableAttr(GetModifierAttr(importSpec.modifier, ASTKind.IMPORT_SPEC))
             imports.add(desugared)
         }
     }

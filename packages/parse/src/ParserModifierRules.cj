@@ -62,6 +62,21 @@ extend ParserImpl {
         return attrs
     }
 
+    public func GetModifierAttr(modifier: Option<Modifier>, kind: ASTKind): Attribute {
+        if (let Some(it) <- modifier) {
+            if (let Some(attr) <- GetAttributeByModifier(it.modifier)) {
+                return attr
+            }
+        }
+        if (kind == ASTKind.PACKAGE_SPEC) {
+            return Attribute.PUBLIC
+        }
+        if (kind == ASTKind.IMPORT_SPEC) {
+            return Attribute.PRIVATE
+        }
+        return Attribute.INTERNAL
+    }
+
     private func ReportModifierWarning(defKind: DefKind, scopeKind: ScopeKind, modifiers: ArrayList<Modifier>): Unit {
         if (!HasWarningRules(defKind, scopeKind)) {
             return
