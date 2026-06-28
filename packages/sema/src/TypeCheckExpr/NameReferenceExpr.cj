@@ -4,10 +4,6 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 
-public func SelfhostPortStatus_TypeCheckExpr_NameReferenceExpr(): Bool {
-    return true
-}
-
 func TcUnitTy(): Ty {
     return TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
 }
