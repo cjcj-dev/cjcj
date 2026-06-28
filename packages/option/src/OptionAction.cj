@@ -15,6 +15,8 @@ import cangjie_compiler::utils.TryParseInt as UtilsTryParseInt
 import cangjie_compiler::utils.ValidOverflowStrategy
 import std.collection.*
 
+private let CANGJIE_VISIBLE_OPTIONS_ONLY: Bool = true
+
 public class ActionResult {
     public let handled: Bool
     public let success: Bool
@@ -399,6 +401,10 @@ private func parseCustomOptimization(opts: GlobalOptions, value: String): Action
         if (level == 0) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O0)) }
         if (level == 1) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O1)) }
         if (level == 2) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O2)) }
+        if (CANGJIE_VISIBLE_OPTIONS_ONLY) {
+            Errorln("Optimization level " + value + " is invalid")
+            return handled(success: false)
+        }
         return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O3))
     }
     Errorln("Optimization level " + value + " is invalid")
