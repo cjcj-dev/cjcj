@@ -105,7 +105,6 @@ public class DiagnosticEmitter {
             return builder.toString()
         }
         renderMainDiagnosticSource(builder)
-        renderMacroExpansion(builder)
         for (subDiag in diagnostic.subDiags) {
             renderSubDiagnostic(builder, subDiag)
         }
@@ -403,28 +402,6 @@ public class DiagnosticEmitter {
         builder.append(emptyLinePrefix(width) + before + colorForEmitter(noColor, color, indicator) + "\n")
     }
 
-    private func renderMacroExpansion(builder: StringBuilder): Unit {
-        if (let Some(info) <- diagnostic.macroDiagInfo) {
-            if (info.hasShownCode || info.mcBegin == DEFAULT_POSITION || info.mcEnd == DEFAULT_POSITION) {
-                return
-            }
-            let content = sourceManager.GetContentBetween(info.mcBegin, info.mcEnd)
-            if (content.isEmpty()) {
-                return
-            }
-            info.hasShownCode = true
-            let width = lineWidthForRange(MakeRange(info.mcBegin, info.mcEnd))
-            renderLabeledMessage(builder, "note", MACROCALL_CODE, NOTE_COLOR)
-            renderGutterLine(builder, width)
-            var lineNo = info.mcBegin.line
-            for (line in SplitLines(content)) {
-                builder.append(sourceLinePrefix(info.mcBegin.fileID, lineNo, width) + printableSourceLine(line) + "\n")
-                lineNo++
-            }
-            renderGutterLine(builder, width)
-        }
-    }
-
     private func sourceLineOpt(pos: Position): Option<String> {
         let source = sourceManager.GetSource(pos.fileID)
         let lines = SplitLines(source.buffer)
@@ -542,14 +519,6 @@ public class DiagnosticEmitter {
                 maxLine = maxLineInRange(maxLine, substitution.range)
             }
         }
-        if (maxLine <= 0) {
-            return 0
-        }
-        return "${maxLine}".size
-    }
-
-    private func lineWidthForRange(range: Range): Int64 {
-        let maxLine = if (range.end.line > range.begin.line) { range.end.line } else { range.begin.line }
         if (maxLine <= 0) {
             return 0
         }
