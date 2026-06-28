@@ -34,39 +34,27 @@ public class AttributeInfo {
         Append(info)
     }
 
-    private func AppendIfPresent(parts: ArrayList<String>, attr: Attribute): Unit {
-        if (attrs.contains(attr)) {
-            parts.add(AttributeName(attr))
-        }
-    }
-
     public func ToString(): String {
-        if (attrs.isEmpty()) {
-            return ""
-        }
-        let parts = ArrayList<String>()
-        AppendIfPresent(parts, Attribute.PUBLIC)
-        AppendIfPresent(parts, Attribute.PROTECTED)
-        AppendIfPresent(parts, Attribute.PRIVATE)
-        AppendIfPresent(parts, Attribute.STATIC)
-        AppendIfPresent(parts, Attribute.MUT)
-        AppendIfPresent(parts, Attribute.CONST)
-        AppendIfPresent(parts, Attribute.ABSTRACT)
-        AppendIfPresent(parts, Attribute.VIRTUAL)
-        AppendIfPresent(parts, Attribute.IMPORTED)
-        AppendIfPresent(parts, Attribute.SRC_CODE_IMPORTED)
-        AppendIfPresent(parts, Attribute.FOREIGN)
-        AppendIfPresent(parts, Attribute.C)
-        AppendIfPresent(parts, Attribute.FAST_NATIVE)
-        AppendIfPresent(parts, Attribute.NO_SIDE_EFFECT)
-        AppendIfPresent(parts, Attribute.READONLY)
-        AppendIfPresent(parts, Attribute.BUILTIN)
-        AppendIfPresent(parts, Attribute.THIN)
-        if (parts.isEmpty()) {
-            for (attr in attrs) {
-                parts.add(AttributeName(attr))
+        var out = ""
+        let attrsInOrder = [
+            Attribute.STATIC, Attribute.PUBLIC, Attribute.PRIVATE, Attribute.PROTECTED,
+            Attribute.ABSTRACT, Attribute.VIRTUAL, Attribute.OVERRIDE, Attribute.REDEF,
+            Attribute.SEALED, Attribute.FOREIGN, Attribute.MUT, Attribute.FINAL,
+            Attribute.OPERATOR, Attribute.READONLY, Attribute.CONST, Attribute.IMPORTED,
+            Attribute.GENERIC_INSTANTIATED, Attribute.NO_DEBUG_INFO, Attribute.GENERIC,
+            Attribute.INTERNAL, Attribute.COMPILER_ADD, Attribute.NO_REFLECT_INFO,
+            Attribute.NO_INLINE, Attribute.NON_RECOMPILE, Attribute.UNREACHABLE,
+            Attribute.NO_SIDE_EFFECT, Attribute.COMMON, Attribute.SPECIFIC,
+            Attribute.SKIP_ANALYSIS, Attribute.DESERIALIZED, Attribute.INITIALIZER,
+            Attribute.UNSAFE, Attribute.JAVA_MIRROR, Attribute.JAVA_IMPL,
+            Attribute.OBJ_C_MIRROR, Attribute.HAS_INITED_FIELD, Attribute.JAVA_HAS_DEFAULT,
+            Attribute.PREVIOUSLY_DESERIALIZED
+        ]
+        for (attr in attrsInOrder) {
+            if (attrs.contains(attr)) {
+                out += "[" + AttributeName(attr) + "] "
             }
         }
-        return "[" + JoinStrings(parts, " ") + "] "
+        return out
     }
 }
