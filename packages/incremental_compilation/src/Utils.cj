@@ -445,20 +445,11 @@ public func CompareStrings(left: String, right: String): Ordering {
 }
 
 public func CompareDeclSource(left: IncrDecl, right: IncrDecl): Ordering {
-    if (left.filePath != right.filePath) {
-        return CompareStrings(left.filePath, right.filePath)
-    }
-    if (left.begin.line < right.begin.line) {
+    if (left.begin < right.begin) {
         return Ordering.LT
     }
-    if (left.begin.line > right.begin.line) {
+    if (right.begin < left.begin) {
         return Ordering.GT
     }
-    if (left.begin.column < right.begin.column) {
-        return Ordering.LT
-    }
-    if (left.begin.column > right.begin.column) {
-        return Ordering.GT
-    }
-    return CompareStrings(left.DisplayName(), right.DisplayName())
+    return Ordering.EQ
 }
