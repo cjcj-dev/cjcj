@@ -230,6 +230,8 @@ foreign {
     func LLVMHasPersonalityFn(fn: LLVMValueRef): Int32
     func LLVMGetPersonalityFn(fn: LLVMValueRef): LLVMValueRef
     func LLVMSetPersonalityFn(fn: LLVMValueRef, personalityFn: LLVMValueRef): Unit
+    func LLVMCountBasicBlocks(fn: LLVMValueRef): UInt32
+    func LLVMGetBasicBlocks(fn: LLVMValueRef, basicBlocks: CPointer<LLVMBasicBlockRef>): Unit
     func LLVMGetFirstBasicBlock(fn: LLVMValueRef): LLVMBasicBlockRef
     func LLVMGetNextBasicBlock(block: LLVMBasicBlockRef): LLVMBasicBlockRef
     func LLVMGetEntryBasicBlock(fn: LLVMValueRef): LLVMBasicBlockRef

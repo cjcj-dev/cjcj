@@ -49,8 +49,9 @@ public class CGFunction <: CGValue {
     }
 
     public func Opt(): Unit {
-        CGFunction.RemoveUnreachableBlocks(GetRawFunction())
-        CGFunction.AddZeroInitForStructWithRefField(cgMod, GetRawFunction())
+        let rawFunction = GetRawFunction()
+        CGFunction.RemoveUnreachableBlocks(rawFunction)
+        CGFunction.AddZeroInitForStructWithRefField(cgMod, rawFunction)
     }
 
     public func DumpIR(): Unit {
@@ -61,12 +62,7 @@ public class CGFunction <: CGValue {
         if (function.isNull() || unsafe { LLVMIsDeclaration(function) } != 0) {
             return
         }
-        let blocks = ArrayList<LLVMBasicBlockRef>()
-        var block = unsafe { LLVMGetFirstBasicBlock(function) }
-        while (!block.isNull()) {
-            blocks.add(block)
-            block = unsafe { LLVMGetNextBasicBlock(block) }
-        }
+        let blocks = CGFunction.CollectBasicBlocks(function)
         if (blocks.isEmpty()) {
             return
         }
@@ -111,18 +107,33 @@ public class CGFunction <: CGValue {
         }
     }
 
+    private static func CollectBasicBlocks(function: LLVMValueRef): ArrayList<LLVMBasicBlockRef> {
+        let blocks = ArrayList<LLVMBasicBlockRef>()
+        let count = unsafe { LLVMCountBasicBlocks(function) }
+        if (count == 0u32) {
+            return blocks
+        }
+        try (blockPtr = LibC.malloc<LLVMBasicBlockRef>(count: Int64(count)).asResource()) {
+            unsafe { LLVMGetBasicBlocks(function, blockPtr.value) }
+            var idx: Int64 = 0
+            while (idx < Int64(count)) {
+                let block = unsafe { (blockPtr.value + idx).read() }
+                if (!block.isNull()) {
+                    blocks.add(block)
+                }
+                idx++
+            }
+        }
+        return blocks
+    }
+
     private static func FindBlockIndex(blocks: ArrayList<LLVMBasicBlockRef>, target: LLVMBasicBlockRef): Int64 {
         if (target.isNull()) {
             return -1
         }
-        let targetName = unsafe { LLVMGetBasicBlockName(target) }
-        if (targetName.isNull()) {
-            return -1
-        }
         var idx: Int64 = 0
         while (idx < blocks.size) {
-            let blockName = unsafe { LLVMGetBasicBlockName(blocks[idx]) }
-            if (!blockName.isNull() && unsafe { strcmp(blockName, targetName) } == 0) {
+            if (blocks[idx].toUIntNative() == target.toUIntNative()) {
                 return idx
             }
             idx++

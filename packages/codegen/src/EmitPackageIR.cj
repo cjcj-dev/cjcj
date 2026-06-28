@@ -54,8 +54,8 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         RedefineTypeInfosForCustomDefs(cgMod)
         let keepTypesFunc = KeepSomeTypesManually(cgMod)
         EmitStaticGenericTIsAndLLVMUsed(cgMod, keepTypesFunc)
-        cgMod.EraseUselessInstsAndDeclarations()
         cgMod.Opt()
+        cgMod.EraseUselessInstsAndDeclarations()
     }
     return cgPkgContext.ReleaseLLVMModules()
 }
