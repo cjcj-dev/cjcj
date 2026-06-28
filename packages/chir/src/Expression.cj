@@ -199,7 +199,7 @@ public open class Expression <: Base {
     }
 
     public open func GetOperands(): ArrayList<Value> {
-        return CopyValueList(operands)
+        return operands.clone()
     }
 
     public open func ReplaceOperand(idx: Int64, newOperand: Value): Unit {
@@ -394,9 +394,10 @@ public class UnaryExpression <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateUnaryExpression(GetExprKind(), RequiredResultType(this), GetOperand(0), parent,
+        let cloned = builder.CreateUnaryExpression(GetExprKind(), GetResult().getOrThrow().GetType().getOrThrow(), GetOperand(0), parent,
             overflowStrategy: GetOverflowStrategy())
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -421,9 +422,10 @@ public class BinaryExpression <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateBinaryExpression(GetExprKind(), RequiredResultType(this), GetOperand(0), GetOperand(1),
+        let cloned = builder.CreateBinaryExpression(GetExprKind(), GetResult().getOrThrow().GetType().getOrThrow(), GetOperand(0), GetOperand(1),
             parent, overflowStrategy: GetOverflowStrategy())
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -472,7 +474,7 @@ public class Constant <: Expression {
         if (!IsIntLit()) {
             return false
         }
-        let intTy = (RequiredResultType(this) as IntType) ??
+        let intTy = (GetResult().getOrThrow().GetType().getOrThrow() as IntType) ??
             throw IllegalStateException("int literal requires integer type")
         return intTy.IsSigned()
     }
@@ -491,8 +493,9 @@ public class Constant <: Expression {
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let litVal: LiteralValue = if (literal.IsNullLit()) { NullLiteral() } else { literal }
-        let cloned = builder.CreateConstant(RequiredResultType(this), litVal, parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateConstant(GetResult().getOrThrow().GetType().getOrThrow(), litVal, parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -517,8 +520,9 @@ public class Allocate <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateAllocate(RequiredResultType(this), GetType(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateAllocate(GetResult().getOrThrow().GetType().getOrThrow(), GetType(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -532,8 +536,9 @@ public class Load <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateLoad(RequiredResultType(this), GetLocation(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateLoad(GetResult().getOrThrow().GetType().getOrThrow(), GetLocation(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -552,7 +557,8 @@ public class Store <: Expression {
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateStore(GetValue(), GetLocation(), parent)
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -588,8 +594,9 @@ public class GetElementRef <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateGetElementRef(RequiredResultType(this), GetLocation(), GetPath(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateGetElementRef(GetResult().getOrThrow().GetType().getOrThrow(), GetLocation(), GetPath(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -625,8 +632,9 @@ public class GetElementByName <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateGetElementByName(RequiredResultType(this), GetLocation(), GetNames(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateGetElementByName(GetResult().getOrThrow().GetType().getOrThrow(), GetLocation(), GetNames(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -668,7 +676,8 @@ public class StoreElementRef <: Expression {
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateStoreElementRef(GetValue(), GetLocation(), GetPath(), parent)
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -710,7 +719,8 @@ public class StoreElementByName <: Expression {
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateStoreElementByName(GetValue(), GetLocation(), GetNames(), parent)
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -772,7 +782,7 @@ public open class FuncCall <: Expression {
     }
 
     public func GetInstantiatedTypeArgs(): ArrayList<Type> {
-        return CopyTypeList(instantiatedTypeArgs)
+        return instantiatedTypeArgs.clone()
     }
 
     public func SetInstantiatedTypeArgs(args: ArrayList<Type>): Unit {
@@ -852,11 +862,12 @@ public class Apply <: FuncCall {
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let callContext = FuncCallContext(args: GetArgs(), instTypeArgs: GetInstantiatedTypeArgs(),
             thisType: GetThisType())
-        let cloned = builder.CreateApply(RequiredResultType(this), GetCallee(), callContext, parent)
+        let cloned = builder.CreateApply(GetResult().getOrThrow().GetType().getOrThrow(), GetCallee(), callContext, parent)
         if (IsSuperCall()) {
             cloned.SetSuperCall()
         }
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -946,16 +957,18 @@ public class Invoke <: DynamicDispatch {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let funcContext = FuncCallContext(args: ValuesWithoutFirst(GetArgs()), instTypeArgs: GetInstantiatedTypeArgs(),
-            thisType: GetThisType())
+        let args = GetArgs()
+        args.remove(at: 0)
+        let funcContext = FuncCallContext(args: args, instTypeArgs: GetInstantiatedTypeArgs(), thisType: GetThisType())
         let methodContext = FuncSigInfo(GetMethodType(), funcName: GetMethodName(),
             genericTypeParams: GetGenericTypeParams())
         let invokeContext = InvokeCallContext(GetObject(), funcContext, methodContext)
-        let cloned = builder.CreateInvoke(RequiredResultType(this), invokeContext, parent)
+        let cloned = builder.CreateInvoke(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, parent)
         if (let Some(offset) <- GetVirtualMethodOffset()) {
             cloned.SetVirtualMethodOffset(offset)
         }
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -988,11 +1001,12 @@ public class InvokeStatic <: DynamicDispatch {
         let methodContext = FuncSigInfo(GetMethodType(), funcName: GetMethodName(),
             genericTypeParams: GetGenericTypeParams())
         let invokeContext = InvokeCallContext(GetRTTIValue(), funcContext, methodContext)
-        let cloned = builder.CreateInvokeStatic(RequiredResultType(this), invokeContext, parent)
+        let cloned = builder.CreateInvokeStatic(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, parent)
         if (let Some(offset) <- GetVirtualMethodOffset()) {
             cloned.SetVirtualMethodOffset(offset)
         }
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1006,8 +1020,9 @@ public class GetRTTI <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateGetRTTI(RequiredResultType(this), GetOperand(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateGetRTTI(GetResult().getOrThrow().GetType().getOrThrow(), GetOperand(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1032,8 +1047,9 @@ public class GetRTTIStatic <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateGetRTTIStatic(RequiredResultType(this), GetRTTIType(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateGetRTTIStatic(GetResult().getOrThrow().GetType().getOrThrow(), GetRTTIType(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1072,9 +1088,10 @@ public class TypeCast <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateTypeCast(RequiredResultType(this), GetSourceValue(), parent,
+        let cloned = builder.CreateTypeCast(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent,
             overflowStrategy: GetOverflowStrategy())
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1103,8 +1120,9 @@ public class InstanceOf <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateInstanceOf(RequiredResultType(this), GetObject(), GetType(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateInstanceOf(GetResult().getOrThrow().GetType().getOrThrow(), GetObject(), GetType(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1129,8 +1147,9 @@ public class Box <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateBox(RequiredResultType(this), GetSourceValue(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateBox(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1155,8 +1174,9 @@ public class UnBox <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateUnBox(RequiredResultType(this), GetSourceValue(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateUnBox(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1181,8 +1201,9 @@ public class TransformToGeneric <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateTransformToGeneric(RequiredResultType(this), GetSourceValue(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateTransformToGeneric(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1207,8 +1228,9 @@ public class TransformToConcrete <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateTransformToConcrete(RequiredResultType(this), GetSourceValue(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateTransformToConcrete(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1233,8 +1255,9 @@ public class UnBoxToRef <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateUnBoxToRef(RequiredResultType(this), GetSourceValue(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateUnBoxToRef(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1258,8 +1281,9 @@ public class Tuple <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateTuple(RequiredResultType(this), GetElementValues(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateTuple(GetResult().getOrThrow().GetType().getOrThrow(), GetElementValues(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1295,8 +1319,9 @@ public class Field <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateField(RequiredResultType(this), GetBase(), GetPath(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateField(GetResult().getOrThrow().GetType().getOrThrow(), GetBase(), GetPath(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1332,8 +1357,9 @@ public class FieldByName <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateFieldByName(RequiredResultType(this), GetBase(), GetNames(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateFieldByName(GetResult().getOrThrow().GetType().getOrThrow(), GetBase(), GetNames(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1362,8 +1388,9 @@ public class RawArrayAllocate <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateRawArrayAllocate(RequiredResultType(this), GetElementType(), GetSize(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateRawArrayAllocate(GetResult().getOrThrow().GetType().getOrThrow(), GetElementType(), GetSize(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1391,8 +1418,9 @@ public class RawArrayLiteralInit <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateRawArrayLiteralInit(RequiredResultType(this), GetRawArray(), GetElements(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateRawArrayLiteralInit(GetResult().getOrThrow().GetType().getOrThrow(), GetRawArray(), GetElements(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1414,9 +1442,10 @@ public class RawArrayInitByValue <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateRawArrayInitByValue(RequiredResultType(this), GetRawArray(), GetSize(),
+        let cloned = builder.CreateRawArrayInitByValue(GetResult().getOrThrow().GetType().getOrThrow(), GetRawArray(), GetSize(),
             GetInitValue(), parent)
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1430,8 +1459,9 @@ public class `VArray` <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateVArray(RequiredResultType(this), GetOperands(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateVArray(GetResult().getOrThrow().GetType().getOrThrow(), GetOperands(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1453,8 +1483,9 @@ public class VArrayBuilder <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateVArrayBuilder(RequiredResultType(this), GetSize(), GetItem(), GetInitFunc(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateVArrayBuilder(GetResult().getOrThrow().GetType().getOrThrow(), GetSize(), GetItem(), GetInitFunc(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1464,8 +1495,9 @@ public class GetException <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateGetException(RequiredResultType(this), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateGetException(GetResult().getOrThrow().GetType().getOrThrow(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1503,7 +1535,7 @@ public class Intrinsic <: Expression {
     }
 
     public func GetInstantiatedTypeArgs(): ArrayList<Type> {
-        return CopyTypeList(instantiatedTypeArgs)
+        return instantiatedTypeArgs.clone()
     }
 
     public func GetArgs(): ArrayList<Value> {
@@ -1512,7 +1544,7 @@ public class Intrinsic <: Expression {
 
     public override func OperandsToString(): String {
         let parts = ArrayList<String>()
-        parts.add(IntrinsicKindToString(intrinsicKind) + TypeArgsToString(instantiatedTypeArgs))
+        parts.add(IntrinsicKindToString(intrinsicKind) + TypeVecToString("<", instantiatedTypeArgs, ">", delimiter: ","))
         parts.add(ValueIdsToString(GetArgs()))
         return JoinStrings(parts, ", ")
     }
@@ -1520,8 +1552,9 @@ public class Intrinsic <: Expression {
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let callContext = IntrisicCallContext(kind: GetIntrinsicKind(), args: GetArgs(),
             instTypeArgs: GetInstantiatedTypeArgs())
-        let cloned = builder.CreateIntrinsic(RequiredResultType(this), callContext, parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateIntrinsic(GetResult().getOrThrow().GetType().getOrThrow(), callContext, parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1546,8 +1579,9 @@ public class Debug <: Expression {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateDebug(RequiredResultType(this), GetValue(), GetSrcCodeIdentifier(), parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateDebug(GetResult().getOrThrow().GetType().getOrThrow(), GetValue(), GetSrcCodeIdentifier(), parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1604,14 +1638,15 @@ public class Spawn <: Expression {
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = if (let Some(spawnArg) <- GetSpawnArg()) {
-            builder.CreateSpawn(RequiredResultType(this), GetFuture(), spawnArg, parent)
+            builder.CreateSpawn(GetResult().getOrThrow().GetType().getOrThrow(), GetFuture(), spawnArg, parent)
         } else {
-            builder.CreateSpawn(RequiredResultType(this), GetFuture(), parent)
+            builder.CreateSpawn(GetResult().getOrThrow().GetType().getOrThrow(), GetFuture(), parent)
         }
         if (let Some(fn) <- GetExecuteClosure()) {
             cloned.SetExecuteClosure(fn)
         }
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1626,7 +1661,7 @@ public class GetInstantiateValue <: Expression {
     }
 
     public func GetInstantiateTypes(): ArrayList<Type> {
-        return CopyTypeList(instantiateTys)
+        return instantiateTys.clone()
     }
 
     public func GetInstantiateTypesRef(): ArrayList<Type> {
@@ -1661,8 +1696,9 @@ public class GetInstantiateValue <: Expression {
         } else {
             GetInstantiateTypes()
         }
-        let cloned = builder.CreateGetInstantiateValue(RequiredResultType(this), GetGenericResult(), clonedTypes, parent)
-        return FinishExpressionClone(this, cloned)
+        let cloned = builder.CreateGetInstantiateValue(GetResult().getOrThrow().GetType().getOrThrow(), GetGenericResult(), clonedTypes, parent)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1744,9 +1780,10 @@ public class ForInRange <: ForIn {
                 throw IllegalArgumentException("for-in clone owner expression must be lambda")
             GetLatch().Clone(builder, parentLambda)
         }
-        let cloned = builder.CreateForInRange(RequiredResultType(this), GetInductionVar(), GetLoopCondVar(), parent)
+        let cloned = builder.CreateForInRange(GetResult().getOrThrow().GetType().getOrThrow(), GetInductionVar(), GetLoopCondVar(), parent)
         cloned.InitBlockGroups(newBody, newLatch, newCond)
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1789,9 +1826,10 @@ public class ForInIter <: ForIn {
                 throw IllegalArgumentException("for-in clone owner expression must be lambda")
             GetLatch().Clone(builder, parentLambda)
         }
-        let cloned = builder.CreateForInIter(RequiredResultType(this), GetInductionVar(), GetLoopCondVar(), parent)
+        let cloned = builder.CreateForInIter(GetResult().getOrThrow().GetType().getOrThrow(), GetInductionVar(), GetLoopCondVar(), parent)
         cloned.InitBlockGroups(newBody, newLatch, newCond)
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1834,10 +1872,11 @@ public class ForInClosedRange <: ForIn {
                 throw IllegalArgumentException("for-in clone owner expression must be lambda")
             GetLatch().Clone(builder, parentLambda)
         }
-        let cloned = builder.CreateForInClosedRange(RequiredResultType(this), GetInductionVar(), GetLoopCondVar(),
+        let cloned = builder.CreateForInClosedRange(GetResult().getOrThrow().GetType().getOrThrow(), GetInductionVar(), GetLoopCondVar(),
             parent)
         cloned.InitBlockGroups(newBody, newLatch, newCond)
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -1999,7 +2038,7 @@ public class Lambda <: Expression {
             parts.add("\n" + param.ToString(indent + 1))
         }
         let retText = if (let Some(retTy) <- GetReturnType()) { retTy.ToString() } else { "<none>" }
-        return "[" + identifier + "]" + GenericTypeParamsToString(genericTypeParams) + "(" +
+        return "[" + identifier + "]" + TypeVecToString("<", genericTypeParams, ">", delimiter: ",") + "(" +
             JoinStrings(parts, "") + "): " + retText
     }
 
@@ -2024,7 +2063,7 @@ public class Lambda <: Expression {
         let lambdaFuncTy = funcTy ?? throw IllegalArgumentException("lambda clone requires a function type")
         let newIdentifier = identifier + "." + gLambdaClonedIdx.toString()
         gLambdaClonedIdx++
-        let cloned = builder.CreateLambda(RequiredResultType(this), lambdaFuncTy, parent, isLocalFunc: IsLocalFunc(),
+        let cloned = builder.CreateLambda(GetResult().getOrThrow().GetType().getOrThrow(), lambdaFuncTy, parent, isLocalFunc: IsLocalFunc(),
             identifier: newIdentifier, srcCodeIdentifier: GetSrcCodeIdentifier(),
             genericTypeParams: GetGenericTypeParams())
         if (IsCompileTimeValue()) {
@@ -2048,7 +2087,8 @@ public class Lambda <: Expression {
                 throw IllegalArgumentException("lambda clone could not find cloned return value")
             }
         }
-        return FinishExpressionClone(this, cloned)
+        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        return cloned
     }
 }
 
@@ -2302,7 +2342,14 @@ private func CollectCapturedFromExpressionOperands(expr: Expression, lambdaExpr:
                 shouldCapture = true
             }
         }
-        if (shouldCapture && !ContainsValue(captured, operand)) {
+        var alreadyCaptured = false
+        for (capturedValue in captured) {
+            if (refEq(capturedValue, operand)) {
+                alreadyCaptured = true
+                break
+            }
+        }
+        if (shouldCapture && !alreadyCaptured) {
             captured.add(operand)
         }
     }

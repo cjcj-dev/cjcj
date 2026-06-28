@@ -436,7 +436,14 @@ private func CollectBlocksRecursively(body: BlockGroup): ArrayList<Block> {
 
 private func CollectBlocksRecursively(body: BlockGroup, out: ArrayList<Block>): Unit {
     for (block in body.GetBlocksRef()) {
-        if (!ContainsBlock(out, block)) {
+        var hasBlock = false
+        for (item in out) {
+            if (refEq(item, block)) {
+                hasBlock = true
+                break
+            }
+        }
+        if (!hasBlock) {
             out.add(block)
         }
         for (expr in block.GetExpressionsRef()) {

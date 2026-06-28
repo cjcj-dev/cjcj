@@ -14,7 +14,7 @@ public class BlockGroupCloneResult {
     }
 
     public func GetBlocks(): ArrayList<Block> {
-        return CopyBlockList(blocks)
+        return blocks.clone()
     }
 
     public func GetReturnValue(): Option<LocalVar> {
@@ -88,7 +88,7 @@ public class BlockGroupCopyHelper {
     }
 
     private func CloneLambdaExpression(lambdaExpr: Lambda, parent: Block): Lambda {
-        let resultTy = RequiredResultType(lambdaExpr)
+        let resultTy = lambdaExpr.GetResult().getOrThrow().GetType().getOrThrow()
         let clonedIdentifier = lambdaExpr.GetIdentifier() + ".cloned${builder.context.GetAllNodesNum()}"
         var clonedLambda: Option<Lambda> = None
 
@@ -151,11 +151,11 @@ public class BlockGroupCopyHelper {
 
     private func CloneForInExpression(forInExpr: ForIn, parent: Block): ForIn {
         let newForIn = match (forInExpr.GetExprKind()) {
-            case ExprKind.FORIN_RANGE => builder.CreateForInRange(RequiredResultType(forInExpr),
+            case ExprKind.FORIN_RANGE => builder.CreateForInRange(forInExpr.GetResult().getOrThrow().GetType().getOrThrow(),
                 forInExpr.GetInductionVar(), forInExpr.GetLoopCondVar(), parent)
-            case ExprKind.FORIN_ITER => builder.CreateForInIter(RequiredResultType(forInExpr),
+            case ExprKind.FORIN_ITER => builder.CreateForInIter(forInExpr.GetResult().getOrThrow().GetType().getOrThrow(),
                 forInExpr.GetInductionVar(), forInExpr.GetLoopCondVar(), parent)
-            case ExprKind.FORIN_CLOSED_RANGE => builder.CreateForInClosedRange(RequiredResultType(forInExpr),
+            case ExprKind.FORIN_CLOSED_RANGE => builder.CreateForInClosedRange(forInExpr.GetResult().getOrThrow().GetType().getOrThrow(),
                 forInExpr.GetInductionVar(), forInExpr.GetLoopCondVar(), parent)
             case _ => throw IllegalArgumentException("unsupported ForIn expression kind")
         }

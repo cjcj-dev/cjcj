@@ -241,7 +241,7 @@ public open class Type {
     }
 
     public func GetTypeArgs(): ArrayList<Type> {
-        return CopyTypeList(argTys)
+        return argTys.clone()
     }
 
     public func GetTypeArgsRef(): ArrayList<Type> {
@@ -625,7 +625,7 @@ public class GenericType <: Type {
     }
 
     public func GetUpperBounds(): ArrayList<Type> {
-        return CopyTypeList(upperBounds)
+        return upperBounds.clone()
     }
 
     public func SetUpperBounds(bounds: ArrayList<Type>): Unit {
@@ -700,7 +700,7 @@ public open class CustomType <: Type {
     }
 
     public func GetGenericArgs(): ArrayList<Type> {
-        return CopyTypeList(argTys)
+        return argTys.clone()
     }
 
     public func GetInstantiatedMemberTys(): ArrayList<Type> {
@@ -721,7 +721,7 @@ public open class CustomType <: Type {
     }
 
     public override func ToString(): String {
-        let args = TypeListKey(argTys)
+        let args = TypeVecToString("", argTys, "", delimiter: ",")
         if (args.isEmpty()) {
             return def.GetFullName()
         }

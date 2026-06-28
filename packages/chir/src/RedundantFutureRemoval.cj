@@ -136,7 +136,14 @@ public class RedundantFutureRemoval {
             RemoveDebugUser(usersSet)
         }
         if (usersSet.size == 2) {
-            RemoveExpressionById(usersSet, spawnExpr.nodeId)
+            var idx: Int64 = 0
+            while (idx < usersSet.size) {
+                if (refEq(usersSet[idx], spawnExpr)) {
+                    usersSet.remove(at: idx)
+                    break
+                }
+                idx++
+            }
         }
         if (usersSet.size != 1) {
             return None
@@ -155,7 +162,14 @@ private func IsCoreFuture(def: CustomTypeDef): Bool {
 private func UniqueUsers(users: ArrayList<Expression>): ArrayList<Expression> {
     let out = ArrayList<Expression>()
     for (user in users) {
-        if (!ContainsExpression(out, user)) {
+        var hasUser = false
+        for (item in out) {
+            if (refEq(item, user)) {
+                hasUser = true
+                break
+            }
+        }
+        if (!hasUser) {
             out.add(user)
         }
     }

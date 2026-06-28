@@ -146,7 +146,7 @@ public class CHIRContext {
     }
 
     public func GetTupleTy(fieldTys: ArrayList<Type>): TupleType {
-        let key = "tuple:" + TypeListKey(fieldTys)
+        let key = "tuple:" + TypeVecToString("", fieldTys, "", delimiter: ",")
         if (let Some(cached) <- typeCache.get(key)) {
             if (let Some(found) <- (cached as TupleType)) {
                 return found
@@ -159,7 +159,7 @@ public class CHIRContext {
 
     public func GetFuncTy(paramTys: ArrayList<Type>, retTy: Type, hasVarLenParam!: Bool = false,
         isCFunc!: Bool = false): FuncType {
-        let key = "func:${hasVarLenParam}:${isCFunc}:" + TypeListKey(paramTys) + "->" + retTy.ToString()
+        let key = "func:${hasVarLenParam}:${isCFunc}:" + TypeVecToString("", paramTys, "", delimiter: ",") + "->" + retTy.ToString()
         if (let Some(cached) <- typeCache.get(key)) {
             if (let Some(found) <- (cached as FuncType)) {
                 return found
@@ -247,7 +247,7 @@ public class CHIRContext {
     }
 
     public func GetStructTy(def: StructDef, args: ArrayList<Type>): StructType {
-        let key = "struct:" + def.GetFullName() + "<" + TypeListKey(args) + ">"
+        let key = "struct:" + def.GetFullName() + "<" + TypeVecToString("", args, "", delimiter: ",") + ">"
         if (let Some(cached) <- typeCache.get(key)) {
             if (let Some(found) <- (cached as StructType)) {
                 return found
@@ -260,7 +260,7 @@ public class CHIRContext {
     }
 
     public func GetClassTy(def: ClassDef, args: ArrayList<Type>): ClassType {
-        let key = "class:" + def.GetFullName() + "<" + TypeListKey(args) + ">"
+        let key = "class:" + def.GetFullName() + "<" + TypeVecToString("", args, "", delimiter: ",") + ">"
         if (let Some(cached) <- typeCache.get(key)) {
             if (let Some(found) <- (cached as ClassType)) {
                 return found
@@ -273,7 +273,7 @@ public class CHIRContext {
     }
 
     public func GetEnumTy(def: EnumDef, args: ArrayList<Type>): EnumType {
-        let key = "enum:" + def.GetFullName() + "<" + TypeListKey(args) + ">"
+        let key = "enum:" + def.GetFullName() + "<" + TypeVecToString("", args, "", delimiter: ",") + ">"
         if (let Some(cached) <- typeCache.get(key)) {
             if (let Some(found) <- (cached as EnumType)) {
                 return found

@@ -62,8 +62,8 @@ public class FuncSigInfo {
     }
 
     public func ToString(): String {
-        let typeParamText = GenericTypeParamsToString(genericTypeParams)
-        let paramText = TypeListKey(funcType.GetParamTypes())
+        let typeParamText = TypeVecToString("<", genericTypeParams, ">", delimiter: ",")
+        let paramText = TypeVecToString("", funcType.GetParamTypes(), "", delimiter: ",")
         return funcName + typeParamText + "(" + paramText + ") -> " + funcType.GetReturnType().ToString()
     }
 
@@ -332,7 +332,7 @@ public open class CustomTypeDef <: Base {
     }
 
     public func GetMethods(): ArrayList<Function> {
-        return CopyFunctionList(methods)
+        return methods.clone()
     }
 
     public func SetMethods(items: ArrayList<Function>): Unit {

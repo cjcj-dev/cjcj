@@ -1337,7 +1337,7 @@ public class Translator {
         let lambdaMangledName = FaithfulTranslatorGenerateLambdaFuncMangleName(topLevelFunc, lambdaWrapperCounter)
         lambdaWrapperCounter++
 
-        let lambdaParamTypes = CopyTypeList(instFuncType.instParamTys)
+        let lambdaParamTypes = instFuncType.instParamTys.clone()
         if (!funcDecl.TestAttr(AstAttribute.STATIC)) {
             if (lambdaParamTypes.isEmpty()) {
                 throw IllegalStateException("faithful AST2CHIR member wrapper expected receiver parameter")
@@ -1401,7 +1401,7 @@ public class Translator {
 
     private func CreateMemberWrapperApply(funcDecl: AstFuncDecl, instFuncType: FaithfulInstCalleeInfo,
         thisObj: Option<Value>, lambda: Lambda, lambdaArgs: ArrayList<Value>): Value {
-        let args = CopyValueList(lambdaArgs)
+        let args = lambdaArgs.clone()
         if (let Some(rawThis) <- thisObj) {
             var objExpectedType = instFuncType.instParentCustomTy
             if (objExpectedType.IsReferenceType()) {
@@ -1412,7 +1412,7 @@ public class Translator {
         if (args.size != instFuncType.instParamTys.size) {
             throw IllegalStateException("faithful AST2CHIR member wrapper argument count mismatch")
         }
-        let instTypeArgs = CopyTypeList(instFuncType.instantiatedTypeArgs)
+        let instTypeArgs = instFuncType.instantiatedTypeArgs.clone()
         var callee = GetSymbolTable(funcDecl)
         let funcType = builder.context.GetFuncTy(instFuncType.instParamTys, instFuncType.instRetTy)
         if (let Some(wrapperFunc) <- GetWrapperFuncFromMemberAccess(instFuncType.instParentCustomTy.StripAllRefs(),
@@ -1503,7 +1503,7 @@ public class Translator {
         }
         for (extendDef in customTy.GetCustomTypeDef().GetExtends()) {
             let localParams = CopyGenericTypeList(genericParams)
-            let localReplacements = CopyTypeList(replacements)
+            let localReplacements = replacements.clone()
             if (!CollectGenericReplacementsForMemberWrapper(extendDef.GetExtendedType(), customTy, localParams,
                 localReplacements)) {
                 continue
@@ -1564,7 +1564,7 @@ public class Translator {
                 continue
             }
             let localParams = CopyGenericTypeList(genericParams)
-            let localReplacements = CopyTypeList(replacements)
+            let localReplacements = replacements.clone()
             let methodGenericParams = method.GetGenericTypeParams()
             if (methodGenericParams.size != funcInstTypeArgs.size) {
                 continue
@@ -4333,14 +4333,6 @@ public class Translator {
         load.RemoveSelfFromBlock()
     }
 
-    private func CopyValueList(values: ArrayList<Value>): ArrayList<Value> {
-        let out = ArrayList<Value>()
-        for (value in values) {
-            out.add(value)
-        }
-        return out
-    }
-
     private func DefaultValueFuncDecl(calleeDecl: AstFuncDecl, idx: Int64): AstFuncDecl {
         if (let Some(body) <- calleeDecl.funcBody) {
             if (!body.paramLists.isEmpty() && idx < body.paramLists[0].params.size) {
@@ -4363,7 +4355,7 @@ public class Translator {
                 TranslateFuncInstArgs(expr, calleeDecl)
             }
             var value = CreateApplyMaybeWithException(retTy, defaultFunc,
-                FuncCallContext(args: CopyValueList(previousDefaultArgs), instTypeArgs: instArgs))
+                FuncCallContext(args: previousDefaultArgs.clone(), instTypeArgs: instArgs))
             if (let Some(targetTy) <- expectedTy) {
                 value = CoerceValueForExpectedType(value, targetTy)
             }

@@ -46,7 +46,14 @@ public class DeadCodeElimination {
         let unreachable = body.GetBlocks()
         let workList = ArrayList<Block>()
         workList.add(entryBlock)
-        RemoveBlockById(unreachable, entryBlock.nodeId)
+        var entryIdx: Int64 = 0
+        while (entryIdx < unreachable.size) {
+            if (refEq(unreachable[entryIdx], entryBlock)) {
+                unreachable.remove(at: entryIdx)
+                break
+            }
+            entryIdx++
+        }
 
         var workIdx: Int64 = 0
         while (workIdx < workList.size) {
@@ -82,7 +89,17 @@ public class DeadCodeElimination {
             var succIdx: Int64 = 0
             while (succIdx < updatedTerminator.GetNumOfSuccessor()) {
                 let successor = updatedTerminator.GetSuccessor(succIdx)
-                if (RemoveBlockById(unreachable, successor.nodeId)) {
+                var removed = false
+                var idx: Int64 = 0
+                while (idx < unreachable.size) {
+                    if (refEq(unreachable[idx], successor)) {
+                        unreachable.remove(at: idx)
+                        removed = true
+                        break
+                    }
+                    idx++
+                }
+                if (removed) {
                     workList.add(successor)
                 }
                 succIdx++

@@ -94,7 +94,7 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     }
 
     public func GetUsers(): ArrayList<Expression> {
-        return CopyExpressionList(users)
+        return users.clone()
     }
 
     public func GetUsersRef(): ArrayList<Expression> {
@@ -125,7 +125,7 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     }
 
     public func ReplaceWith(newValue: Value, scope: Option<BlockGroup>): Unit {
-        let oldUsers = CopyExpressionList(users)
+        let oldUsers = users.clone()
         for (user in oldUsers) {
             if (user.GetParentBlock().isNone()) {
                 continue
@@ -340,7 +340,7 @@ public class Block <: Value {
     }
 
     public func GetPredecessors(): ArrayList<Block> {
-        return CopyBlockList(predecessors)
+        return predecessors.clone()
     }
 
     public func GetPredecessorsRef(): ArrayList<Block> {
@@ -386,7 +386,14 @@ public class Block <: Value {
     }
 
     public func AppendExpression(expression: Expression): Unit {
-        if (!ContainsExpression(exprs, expression)) {
+        var hasExpression = false
+        for (expr in exprs) {
+            if (refEq(expr, expression)) {
+                hasExpression = true
+                break
+            }
+        }
+        if (!hasExpression) {
             exprs.add(expression)
         }
         expression.ConnectOperandsAndGroups()
@@ -397,7 +404,14 @@ public class Block <: Value {
     }
 
     public func InsertExprIntoHead(expr: Expression): Unit {
-        RemoveExpressionById(exprs, expr.nodeId)
+        var idx: Int64 = 0
+        while (idx < exprs.size) {
+            if (refEq(exprs[idx], expr)) {
+                exprs.remove(at: idx)
+                break
+            }
+            idx++
+        }
         exprs.add(expr, at: 0)
         expr.ConnectOperandsAndGroups()
         expr.SetParent(this)
@@ -408,7 +422,7 @@ public class Block <: Value {
     }
 
     public func GetExpressions(): ArrayList<Expression> {
-        return CopyExpressionList(exprs)
+        return exprs.clone()
     }
 
     public func GetExpressionsRef(): ArrayList<Expression> {
@@ -479,17 +493,38 @@ public class Block <: Value {
     }
 
     public func RemoveExprOnly(expr: Expression): Unit {
-        RemoveExpressionById(exprs, expr.nodeId)
+        var idx: Int64 = 0
+        while (idx < exprs.size) {
+            if (refEq(exprs[idx], expr)) {
+                exprs.remove(at: idx)
+                break
+            }
+            idx++
+        }
     }
 
     public func AddPredecessor(block: Block): Unit {
-        if (!ContainsBlock(predecessors, block)) {
+        var hasBlock = false
+        for (predecessor in predecessors) {
+            if (refEq(predecessor, block)) {
+                hasBlock = true
+                break
+            }
+        }
+        if (!hasBlock) {
             predecessors.add(block)
         }
     }
 
     public func RemovePredecessor(block: Block): Unit {
-        RemoveBlockById(predecessors, block.nodeId)
+        var idx: Int64 = 0
+        while (idx < predecessors.size) {
+            if (refEq(predecessors[idx], block)) {
+                predecessors.remove(at: idx)
+                break
+            }
+            idx++
+        }
     }
 
     public func ClearPredecessorsOnly(): Unit {
@@ -544,7 +579,14 @@ public class BlockGroup <: Value {
     }
 
     public func AddBlock(block: Block): Unit {
-        if (!ContainsBlock(blocks, block)) {
+        var hasBlock = false
+        for (item in blocks) {
+            if (refEq(item, block)) {
+                hasBlock = true
+                break
+            }
+        }
+        if (!hasBlock) {
             blocks.add(block)
         }
         block.SetParentBlockGroup(this)
@@ -564,7 +606,7 @@ public class BlockGroup <: Value {
     }
 
     public func GetBlocks(): ArrayList<Block> {
-        return CopyBlockList(blocks)
+        return blocks.clone()
     }
 
     public func GetBlocksRef(): ArrayList<Block> {
@@ -576,7 +618,14 @@ public class BlockGroup <: Value {
     }
 
     public func SetEntryBlock(block: Block): Unit {
-        if (!ContainsBlock(blocks, block)) {
+        var hasBlock = false
+        for (item in blocks) {
+            if (refEq(item, block)) {
+                hasBlock = true
+                break
+            }
+        }
+        if (!hasBlock) {
             AddBlock(block)
         }
         entryBlock = block
@@ -624,9 +673,16 @@ public class BlockGroup <: Value {
     }
 
     public func RemoveBlock(block: Block): Unit {
-        RemoveBlockById(blocks, block.nodeId)
+        var idx: Int64 = 0
+        while (idx < blocks.size) {
+            if (refEq(blocks[idx], block)) {
+                blocks.remove(at: idx)
+                break
+            }
+            idx++
+        }
         if (let Some(entry) <- entryBlock) {
-            if (entry.nodeId == block.nodeId) {
+            if (refEq(entry, block)) {
                 entryBlock = if (blocks.isEmpty()) { None } else { blocks[0] }
             }
         }

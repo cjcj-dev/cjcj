@@ -126,164 +126,11 @@ public func JoinStrings(values: ArrayList<String>, delimiter: String): String {
     return out
 }
 
-public func CopyTypeList(values: ArrayList<Type>): ArrayList<Type> {
-    let out = ArrayList<Type>()
-    for (value in values) {
-        out.add(value)
-    }
-    return out
-}
-
-public func CopyValueList(values: ArrayList<Value>): ArrayList<Value> {
-    let out = ArrayList<Value>()
-    for (value in values) {
-        out.add(value)
-    }
-    return out
-}
-
-public func ValuesWithoutFirst(values: ArrayList<Value>): ArrayList<Value> {
-    let out = ArrayList<Value>()
-    var idx: Int64 = 1
-    while (idx < values.size) {
-        out.add(values[idx])
-        idx++
-    }
-    return out
-}
-
-public func CopyExpressionList(values: ArrayList<Expression>): ArrayList<Expression> {
-    let out = ArrayList<Expression>()
-    for (value in values) {
-        out.add(value)
-    }
-    return out
-}
-
-public func CopyBlockList(values: ArrayList<Block>): ArrayList<Block> {
-    let out = ArrayList<Block>()
-    for (value in values) {
-        out.add(value)
-    }
-    return out
-}
-
-public func CopyFunctionList(values: ArrayList<Function>): ArrayList<Function> {
-    let out = ArrayList<Function>()
-    for (value in values) {
-        out.add(value)
-    }
-    return out
-}
-
 public func RequiredResultType(expr: Expression): Type {
     if (let Some(resultTy) <- expr.GetResultType()) {
         return resultTy
     }
     throw IllegalArgumentException("expression clone requires a result type: " + expr.GetExprKindName())
-}
-
-public func FinishExpressionClone(source: Expression, cloned: Expression): Expression {
-    cloned.CopyBaseInfoFrom(source)
-    if (let Some(sourceResult) <- source.GetResult()) {
-        if (let Some(clonedResult) <- cloned.GetResult()) {
-            clonedResult.CopyBaseInfoFrom(sourceResult)
-        }
-    }
-    return cloned
-}
-
-public func TypeListKey(values: ArrayList<Type>): String {
-    let parts = ArrayList<String>()
-    for (value in values) {
-        parts.add(value.ToString())
-    }
-    return JoinStrings(parts, ",")
-}
-
-public func TypeArgsToString(values: ArrayList<Type>): String {
-    if (values.isEmpty()) {
-        return ""
-    }
-    let parts = ArrayList<String>()
-    for (value in values) {
-        parts.add(value.ToString())
-    }
-    return "<" + JoinStrings(parts, ",") + ">"
-}
-
-public func GenericTypeParamsToString(values: ArrayList<GenericType>): String {
-    if (values.isEmpty()) {
-        return ""
-    }
-    let parts = ArrayList<String>()
-    for (value in values) {
-        parts.add(value.ToString())
-    }
-    return "<" + JoinStrings(parts, ",") + ">"
-}
-
-public func RemoveExpressionById(values: ArrayList<Expression>, nodeId: Int64): Bool {
-    var idx: Int64 = 0
-    while (idx < values.size) {
-        if (values[idx].nodeId == nodeId) {
-            values.remove(at: idx)
-            return true
-        }
-        idx++
-    }
-    return false
-}
-
-public func RemoveValueById(values: ArrayList<Value>, nodeId: Int64): Bool {
-    var idx: Int64 = 0
-    while (idx < values.size) {
-        if (values[idx].nodeId == nodeId) {
-            values.remove(at: idx)
-            return true
-        }
-        idx++
-    }
-    return false
-}
-
-public func RemoveBlockById(values: ArrayList<Block>, nodeId: Int64): Bool {
-    var idx: Int64 = 0
-    while (idx < values.size) {
-        if (values[idx].nodeId == nodeId) {
-            values.remove(at: idx)
-            return true
-        }
-        idx++
-    }
-    return false
-}
-
-public func ContainsBlock(values: ArrayList<Block>, block: Block): Bool {
-    for (value in values) {
-        if (value.nodeId == block.nodeId) {
-            return true
-        }
-    }
-    return false
-}
-
-public func ContainsExpression(values: ArrayList<Expression>, expr: Expression): Bool {
-    for (value in values) {
-        if (value.nodeId == expr.nodeId) {
-            return true
-        }
-    }
-    return false
-}
-
-public func ContainsValue(values: ArrayList<Value>, value: Value): Bool {
-    for (item in values) {
-        if (item.nodeId == value.nodeId) {
-            return true
-        }
-    }
-    return false
 }
 
 public func IsApplyToLambda(expr: Expression): Option<Lambda> {
@@ -303,38 +150,47 @@ public func IsApplyToLambda(expr: Expression): Option<Lambda> {
 
 public func GetLambdaCapturedVarsRecursively(lambda: Lambda): ArrayList<Value> {
     let capturedVars = ArrayList<Value>()
-    let visitedLambdaIds = ArrayList<Int64>()
-    CollectLambdaCapturedVarsRecursively(lambda, capturedVars, visitedLambdaIds)
+    let visitedLambdas = ArrayList<Lambda>()
+    CollectLambdaCapturedVarsRecursively(lambda, capturedVars, visitedLambdas)
     return capturedVars
 }
 
 private func CollectLambdaCapturedVarsRecursively(lambda: Lambda, capturedVars: ArrayList<Value>,
-    visitedLambdaIds: ArrayList<Int64>): Unit {
-    if (ContainsInt64(visitedLambdaIds, lambda.nodeId)) {
-        return
+    visitedLambdas: ArrayList<Lambda>): Unit {
+    for (visited in visitedLambdas) {
+        if (refEq(visited, lambda)) {
+            return
+        }
     }
-    visitedLambdaIds.add(lambda.nodeId)
+    visitedLambdas.add(lambda)
     if (let Some(lambdaBody) <- lambda.GetBody()) {
-        VisitLambdaBodyForCapturedVars(lambdaBody, capturedVars, visitedLambdaIds)
+        VisitLambdaBodyForCapturedVars(lambdaBody, capturedVars, visitedLambdas)
     }
     for (captured in lambda.GetCapturedVariables()) {
-        if (IsRefValue(captured) && !ContainsValue(capturedVars, captured)) {
+        var hasCaptured = false
+        for (value in capturedVars) {
+            if (refEq(value, captured)) {
+                hasCaptured = true
+                break
+            }
+        }
+        if (IsRefValue(captured) && !hasCaptured) {
             capturedVars.add(captured)
         }
     }
 }
 
 private func VisitLambdaBodyForCapturedVars(body: BlockGroup, capturedVars: ArrayList<Value>,
-    visitedLambdaIds: ArrayList<Int64>): Unit {
+    visitedLambdas: ArrayList<Lambda>): Unit {
     for (block in body.GetBlocksRef()) {
         for (expr in block.GetExpressionsRef()) {
             if (let Some(appliedLambda) <- IsApplyToLambda(expr)) {
-                CollectLambdaCapturedVarsRecursively(appliedLambda, capturedVars, visitedLambdaIds)
+                CollectLambdaCapturedVarsRecursively(appliedLambda, capturedVars, visitedLambdas)
             } else if (let Some(nestedLambda) <- (expr as Lambda)) {
-                CollectLambdaCapturedVarsRecursively(nestedLambda, capturedVars, visitedLambdaIds)
+                CollectLambdaCapturedVarsRecursively(nestedLambda, capturedVars, visitedLambdas)
             } else {
                 for (group in expr.GetBlockGroups()) {
-                    VisitLambdaBodyForCapturedVars(group, capturedVars, visitedLambdaIds)
+                    VisitLambdaBodyForCapturedVars(group, capturedVars, visitedLambdas)
                 }
             }
         }
@@ -344,15 +200,6 @@ private func VisitLambdaBodyForCapturedVars(body: BlockGroup, capturedVars: Arra
 private func IsRefValue(value: Value): Bool {
     if (let Some(ty) <- value.GetType()) {
         return ty.IsRef()
-    }
-    return false
-}
-
-private func ContainsInt64(values: ArrayList<Int64>, value: Int64): Bool {
-    for (item in values) {
-        if (item == value) {
-            return true
-        }
     }
     return false
 }

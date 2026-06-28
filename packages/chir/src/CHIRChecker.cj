@@ -767,7 +767,14 @@ public class CHIRChecker {
             }
         }
         for (operand in expr.GetOperands()) {
-            if (!ContainsExpression(operand.GetUsersRef(), expr)) {
+            var hasUser = false
+            for (user in operand.GetUsersRef()) {
+                if (refEq(user, expr)) {
+                    hasUser = true
+                    break
+                }
+            }
+            if (!hasUser) {
                 result.AddError("in function ${topLevelFunc.GetIdentifier()}, operand ${operand.GetIdentifier()} " +
                     "is missing user ${expr.GetExprKindName()}.")
             }
