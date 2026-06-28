@@ -29,7 +29,7 @@ public class MPParserImpl {
                 parser.diag.DiagnoseRefactor(
                     DiagKindRefactor.INVALID_MODIFIER,
                     modifier.begin,
-                    "unexpected CJMP modifier '${TokenKindName(modifier.modifier)}' outside common/platform compilation")
+                    "unexpected CJMP modifier '${modifier.ToString()}' outside common/platform compilation")
                 ok = false
             }
         }

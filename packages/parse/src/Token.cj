@@ -7,29 +7,29 @@ public import cangjie_compiler::lex.{
 }
 
 public func ConvertToken(token: Token): String {
-    if (!token.Value().isEmpty()) {
-        return token.Value()
+    if (token.kind == TokenKind.END) {
+        return "'<EOF>'"
     }
-    return TokenKindName(token.kind)
+    if (token.kind == TokenKind.NL) {
+        return "'<NL>'"
+    }
+    if (IsKeyWord(token)) {
+        return "keyword '" + TokenKindLiteral(token.kind) + "'"
+    }
+    if (token.kind == TokenKind.INTEGER_LITERAL || token.kind == TokenKind.FLOAT_LITERAL) {
+        return "literal '" + token.Value() + "'"
+    }
+    if (token.kind == TokenKind.BOOL_LITERAL || token.kind == TokenKind.IDENTIFIER ||
+        token.kind == TokenKind.PACKAGE_IDENTIFIER) {
+        return "'" + token.Value() + "'"
+    }
+    return "'" + TokenKindLiteral(token.kind) + "'"
 }
 
-public func TokenKindName(kind: TokenKind): String {
-    return match (kind) {
-        case TokenKind.IDENTIFIER => "identifier"
-        case TokenKind.PACKAGE_IDENTIFIER => "package identifier"
-        case TokenKind.INTEGER_LITERAL => "integer literal"
-        case TokenKind.FLOAT_LITERAL => "floating literal"
-        case TokenKind.STRING_LITERAL => "string literal"
-        case TokenKind.RUNE_LITERAL => "rune literal"
-        case TokenKind.BOOL_LITERAL => "boolean literal"
-        case TokenKind.NL => "newline"
-        case TokenKind.END => "end of file"
-        case TokenKind.ILLEGAL => "illegal token"
-        case _ =>
-            let literal = TokenKindLiteral(kind)
-            if (!literal.isEmpty()) {
-                return literal
-            }
-            return TokenKindValue(kind)
-    }
+func IsKeyWord(token: Token): Bool {
+    let kindIndex = TokenKindIndex(token.kind)
+    let int8Index = TokenKindIndex(TokenKind.INT8)
+    let identifierIndex = TokenKindIndex(TokenKind.IDENTIFIER)
+    return ((kindIndex >= int8Index && kindIndex < identifierIndex) && token.kind != TokenKind.DOLLAR &&
+        token.kind != TokenKind.UPPERBOUND) || token.kind == TokenKind.AS || token.kind == TokenKind.IS
 }

@@ -351,7 +351,7 @@ extend ParserImpl {
                     diag.DiagnoseRefactor(
                         DiagKindRefactor.INVALID_ANNOTATION,
                         modifier.begin,
-                        "@Annotation cannot be combined with '${TokenKindName(modifier.modifier)}'")
+                        "@Annotation cannot be combined with '${modifier.ToString()}'")
                     anno.isBroken = true
                     return
                 }
