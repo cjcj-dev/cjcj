@@ -237,11 +237,6 @@ public class ASTCacheCalculator {
         for (constructor in constructors) {
             hash = CombineDeclHash(hash, constructor)
         }
-        if (constructors.isEmpty()) {
-            for (mangle in decl.enumConstructorMangles) {
-                hash = CombineHash(hash, StableHash(mangle))
-            }
-        }
         return hash
     }
 
