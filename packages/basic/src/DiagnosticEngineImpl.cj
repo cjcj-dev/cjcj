@@ -29,6 +29,15 @@ public class DiagnosticEngineImpl {
 
     public init() {}
 
+    ~init() {
+        let activeHandler = handler.getOrThrow()
+        if (IsCompilerDiagnosticHandlerKind(activeHandler.GetKind())) {
+            if (activeHandler.IsJsonFormat()) {
+                activeHandler.EmitDiagnosesInJson()
+            }
+        }
+    }
+
     public func HasSourceManager(): Bool {
         if (let Some(_) <- sourceManager) {
             return true
@@ -320,7 +329,6 @@ public class DiagnosticEngineImpl {
         if (let Some(activeHandler) <- handler) {
             if (IsCompilerDiagnosticHandlerKind(activeHandler.GetKind()) && activeHandler.IsJsonFormat()) {
                 activeHandler.CacheTheCountInJsonFormat()
-                activeHandler.EmitDiagnosesInJson()
                 return
             }
         }
