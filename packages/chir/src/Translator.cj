@@ -402,11 +402,14 @@ public class Translator {
     private let tryCatchContext: ArrayList<Block> = ArrayList<Block>()
     private let tryBodyContext: ArrayList<AstTryExpr> = ArrayList<AstTryExpr>()
     private let finallyContext: ArrayList<FaithfulFinallyControlContext> = ArrayList<FaithfulFinallyControlContext>()
+    private let overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>>
 
-    public init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap) {
+    public init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap,
+        overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None) {
         this.builder = builder
         this.chirTy = chirTy
         this.globalSymbolTable = globalSymbolTable
+        this.overrideSrcFuncResolver = overrideSrcFuncResolver
     }
 
     public func TranslateGlobalVarInitializer(fn: Function, decl: AstVarDecl, globalVar: GlobalVar): Unit {
@@ -1430,10 +1433,15 @@ public class Translator {
     }
 
     private func BuildMethodFuncTypeForMemberAccess(funcDecl: AstFuncDecl): FuncType {
-        let funcTy = RequireFuncType(chirTy.TranslateType(RequireAstTy(funcDecl)))
+        let originalFuncDecl = if (let Some(resolver) <- overrideSrcFuncResolver) {
+            resolver(funcDecl) ?? funcDecl
+        } else {
+            funcDecl
+        }
+        let funcTy = RequireFuncType(chirTy.TranslateType(RequireAstTy(originalFuncDecl)))
         let params = funcTy.GetParamTypes()
-        if (!funcDecl.TestAttr(AstAttribute.STATIC)) {
-            params.add(AddRefIfFuncIsMutOrClass(TranslateMemberOwnerType(funcDecl), funcDecl), at: 0)
+        if (!originalFuncDecl.TestAttr(AstAttribute.STATIC)) {
+            params.add(AddRefIfFuncIsMutOrClass(TranslateMemberOwnerType(originalFuncDecl), originalFuncDecl), at: 0)
         }
         return builder.context.GetFuncTy(params, funcTy.GetReturnType())
     }
@@ -4610,7 +4618,7 @@ public class Translator {
                 let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
                 let invokeCtx = InvokeCallContext(rtti, FuncCallContext(args: argValues,
                     instTypeArgs: instTypeArgs, thisType: parentTy),
-                    FuncSigInfo(BuildMethodFuncType(expr, calleeDecl, parentTy), funcName: calleeDecl.identifier.Val()))
+                    FuncSigInfo(BuildMethodFuncTypeForMemberAccess(calleeDecl), funcName: calleeDecl.identifier.Val()))
                 return CreateInvokeStaticMaybeWithException(resultTy, invokeCtx)
             }
             let obj = thisObj ?? throw IllegalStateException("faithful AST2CHIR virtual member call has no this object")
@@ -4618,7 +4626,7 @@ public class Translator {
             let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
             let invokeCtx = InvokeCallContext(obj, FuncCallContext(args: argValues,
                 instTypeArgs: instTypeArgs, thisType: objTy),
-                FuncSigInfo(BuildMethodFuncType(expr, calleeDecl, objTy), funcName: calleeDecl.identifier.Val()))
+                FuncSigInfo(BuildMethodFuncTypeForMemberAccess(calleeDecl), funcName: calleeDecl.identifier.Val()))
             return CreateInvokeMaybeWithException(resultTy, invokeCtx)
         }
         if (let Some(obj) <- thisObj) {
@@ -4863,15 +4871,6 @@ public class Translator {
         let outer = funcDecl.outerDecl ??
             throw IllegalStateException("faithful AST2CHIR member function has no owner decl")
         return chirTy.TranslateType(RequireAstTy(outer))
-    }
-
-    private func BuildMethodFuncType(expr: AstCallExpr, funcDecl: AstFuncDecl, thisTy: Type): FuncType {
-        let baseFuncTy = RequireFuncType(chirTy.TranslateType(CallBaseFuncTy(expr, funcDecl)))
-        let params = baseFuncTy.GetParamTypes()
-        if (!funcDecl.TestAttr(AstAttribute.STATIC)) {
-            params.add(thisTy, at: 0)
-        }
-        return builder.context.GetFuncTy(params, baseFuncTy.GetReturnType())
     }
 
     private func IsThisOrSuperRef(expr: AstExpr): Bool {

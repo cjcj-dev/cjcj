@@ -13,6 +13,9 @@ public func GenerateTupleOrAggregateExpression(irBuilder: IRBuilder2, chirExpr: 
                 if (enumCGType.IsCommonEnum()) {
                     return GenerateCommonEnum(irBuilder, chirExpr)
                 }
+                if (enumCGType.IsOptionLikeT()) {
+                    return GenerateOptionLikeTEnum(irBuilder, chirExpr, resultTy)
+                }
                 if (enumCGType.IsOptionLikeRef()) {
                     return GenerateOptionLikeRefEnum(irBuilder, chirExpr, resultTy)
                 }
@@ -242,6 +245,64 @@ private func CallCommonEnumObjectAlloc(irBuilder: IRBuilder2, storageTy: Type, l
         AddRetAttr(objectValue, "noalias")
     }
     return objectValue
+}
+
+private func GenerateOptionLikeTEnum(irBuilder: IRBuilder2, chirExpr: Expression, resultTy: Type): LLVMValueRef {
+    let enumTy = (resultTy as EnumType) ?? return LLVMNullValue()
+    if (chirExpr.GetNumOfOperands() == 0) {
+        return LLVMNullValue()
+    }
+    let i1Ty = unsafe { LLVMInt1TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let i8Ty = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let i8PtrTy = unsafe { LLVMPointerType(i8Ty, 1u32) }
+    let enumTypeInfo = irBuilder.CreateTypeInfo(enumTy)
+    let enumValue = irBuilder.CallAllocaGeneric(enumTy)
+    let payload = irBuilder.GetPayloadFromObject(enumValue)
+    let castedPayload = irBuilder.CreateBitCast(payload, i8PtrTy)
+    let typeArgs = enumTy.GetTypeArgs()
+    if (typeArgs.isEmpty()) {
+        return enumValue
+    }
+    let associatedType = typeArgs[0]
+    let hasAssociatedValue = chirExpr.GetNumOfOperands() > 1
+    let isRef = irBuilder.CreateTypeInfoIsReferenceCall(associatedType)
+    let blockNames = ArrayList<String>()
+    blockNames.add("ref")
+    blockNames.add("nonRef")
+    blockNames.add("endBB")
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(blockNames)
+    if (blocks.size < 3) {
+        return enumValue
+    }
+    irBuilder.CreateCondBr(isRef, blocks[0], blocks[1])
+
+    irBuilder.SetInsertPoint(blocks[0])
+    if (hasAssociatedValue) {
+        let associatedValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(1))
+        irBuilder.CallGCWrite(associatedValue.GetRawValue(), enumValue, castedPayload)
+    } else {
+        irBuilder.CallGCWrite(unsafe { LLVMConstNull(i8PtrTy) }, enumValue, castedPayload)
+    }
+    irBuilder.CreateBr(blocks[2])
+
+    irBuilder.SetInsertPoint(blocks[1])
+    let selectorValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0)).GetRawValue()
+    let selectorPtr = irBuilder.CreateBitCast(payload, unsafe { LLVMPointerType(i1Ty, 1u32) })
+    irBuilder.CreateStore(selectorValue, selectorPtr)
+    if (hasAssociatedValue) {
+        let associatedOffset = irBuilder.CallGetFieldOffset(enumTypeInfo, 1u64, 0u64)
+        let indices = ArrayList<LLVMValueRef>()
+        indices.add(associatedOffset)
+        let associatedPtr = irBuilder.CreateInBoundsGEP(i8Ty, castedPayload, indices)
+        let associatedValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(1))
+        let associatedCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), associatedType)
+        let associatedTypeSize = irBuilder.GetLayoutSize32(associatedType, associatedCGType)
+        irBuilder.CallGCWriteGeneric(enumValue, associatedPtr, associatedValue.GetRawValue(), associatedTypeSize)
+    }
+    irBuilder.CreateBr(blocks[2])
+
+    irBuilder.SetInsertPoint(blocks[2])
+    return enumValue
 }
 
 private func GenerateOptionLikeRefEnum(irBuilder: IRBuilder2, chirExpr: Expression, _: Type): LLVMValueRef {

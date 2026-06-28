@@ -1111,9 +1111,9 @@ private func ErasePromoteMappingForOmittedBaseTypeArgs(mapping: MultiTypeSubst, 
     }
 }
 
-// Mirrors C++ TypeCheckCall.cpp:895-934.
+// Mirrors C++ ExtraScopes.cpp:237-293.
 private func GenerateTypeMappingForBaseExpr(typeManager: TypeManager, baseExpr: Expr,
-    typeMapping: MultiTypeSubst): Unit {
+    typeMapping: SubstPack): Unit {
     let memberAccess = match (baseExpr as MemberAccess) {
         case Some(value) => value
         case None => return
@@ -1133,21 +1133,47 @@ private func GenerateTypeMappingForBaseExpr(typeManager: TypeManager, baseExpr: 
         typeManager.GenerateGenericMapping(typeMapping, memberBaseTy)
         return
     }
-    let baseDeclOpt = GetRealTarget(memberBase.GetTarget())
-    if (let Some(baseDecl) <- baseDeclOpt) {
-        if (baseDecl.astKind == ASTKind.PACKAGE_DECL) {
+    let directBase = memberBase.GetTarget()
+    let realBase = GetRealTarget(directBase)
+    let directMapping = SubstPack()
+    if (let Some(directDecl) <- directBase) {
+        if (let Some(realDecl) <- realBase) {
+            if (!SameDecl(directDecl, realDecl)) {
+                typeManager.MakeInstTyVar(directMapping, directDecl)
+            }
+        }
+    }
+    if (let Some(realDecl) <- realBase) {
+        if (realDecl.astKind == ASTKind.PACKAGE_DECL) {
             return
         }
         if (let Some(maTarget) <- memberAccess.GetTarget()) {
             if (let Some(outerDecl) <- maTarget.outerDecl) {
-                if (baseDecl.IsTypeDecl() || baseDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                if (realDecl.IsTypeDecl() || realDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
                     let outerTy = match (outerDecl.GetTy()) {
                         case Some(value) => value
                         case None => return
                     }
-                    let promoteMapping = Promotion(typeManager).GetPromoteTypeMapping(memberBaseTy, outerTy)
-                    ErasePromoteMappingForOmittedBaseTypeArgs(promoteMapping, baseDecl, memberBase.GetTypeArgs())
-                    MergeMultiTypeSubsts(typeMapping, promoteMapping)
+                    let instBaseTy = typeManager.GetInstantiatedTy(memberBaseTy, directMapping.u2i)
+                    let promoteMapping = Promotion(typeManager).GetPromoteTypeMapping(instBaseTy, outerTy)
+                    if (let Some(realTy) <- realDecl.GetTy()) {
+                        if (!SameTy(realTy, instBaseTy)) {
+                            typeManager.PackMapping(typeMapping, GenerateTypeMapping(realDecl, instBaseTy.typeArgs))
+                        }
+                    }
+                    ErasePromoteMappingForOmittedBaseTypeArgs(promoteMapping, realDecl, memberBase.GetTypeArgs())
+                    let genericTysInst = GetAllGenericTys(memberBaseTy)
+                    var idx: Int64 = 0
+                    while (idx < directMapping.u2i.entries.size) {
+                        let entry = directMapping.u2i.entries[idx]
+                        if (!TypeCheckCallGenericListContains(genericTysInst, entry.tyVar)) {
+                            directMapping.u2i.entries.remove(at: idx)
+                        } else {
+                            idx++
+                        }
+                    }
+                    typeMapping.Merge(directMapping)
+                    typeManager.PackMapping(typeMapping, promoteMapping)
                     return
                 }
             }
@@ -1440,9 +1466,7 @@ private func GenerateCallBaseTypeMapping(typeManager: TypeManager, diag: Option<
             }
         } else if (let Some(_) <- (base as MemberAccess)) {
             ReplaceTarget(base, Some(fd))
-            let baseTypeMapping = MultiTypeSubst()
-            GenerateTypeMappingForBaseExpr(typeManager, base, baseTypeMapping)
-            typeManager.PackMapping(typeMapping, baseTypeMapping)
+            GenerateTypeMappingForBaseExpr(typeManager, base, typeMapping)
         }
         if (let Some(generic) <- GetCurrentGeneric(fd, ce)) {
             typeManager.PackMapping(typeMapping, GenerateTypeMappingByTyArgs(typeArgs, generic))
@@ -2671,9 +2695,7 @@ private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagno
     let typeMapping = if (funcTy.HasGeneric()) {
         let mapping = SubstPack()
         if (let Some(base) <- ce.baseFunc) {
-            let baseTypeMapping = MultiTypeSubst()
-            GenerateTypeMappingForBaseExpr(typeManager, base, baseTypeMapping)
-            typeManager.PackMapping(mapping, baseTypeMapping)
+            GenerateTypeMappingForBaseExpr(typeManager, base, mapping)
         }
         mapping
     } else {

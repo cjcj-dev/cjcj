@@ -973,7 +973,7 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreateTranslator(): Translator {
-        return Translator(builder, chirType, globalCache)
+        return Translator(builder, chirType, globalCache, overrideSrcFuncResolver: overrideSrcFuncResolver)
     }
 
     private func GlobalDeclAnalysis(): ArrayList<FaithfulInitFileVars> {
