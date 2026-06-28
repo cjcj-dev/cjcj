@@ -20,8 +20,6 @@ private let CC_AUTO_ENV_IMPL_ANNOTATION: String = "IsAutoEnvImpl"
 public class ClosureConversion {
     private let builder: CHIRBuilder
     private var pkg: Option<Package> = None
-    private let convertedLambdaExpressions: ArrayList<Lambda> = ArrayList<Lambda>()
-    private let capturedValues: ArrayList<Value> = ArrayList<Value>()
     private let genericAutoEnvBaseDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
     private let instAutoEnvBaseDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
     private let autoEnvImplDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
@@ -41,18 +39,6 @@ public class ClosureConversion {
         ConvertGlobalFunctions(pkg)
         LiftType(pkg)
         ConvertExpressions(pkg)
-    }
-
-    public func GetConvertedLambdaExpressions(): ArrayList<Lambda> {
-        let out = ArrayList<Lambda>()
-        for (lambdaExpr in convertedLambdaExpressions) {
-            out.add(lambdaExpr)
-        }
-        return out
-    }
-
-    public func GetCapturedValues(): ArrayList<Value> {
-        return CopyValueList(capturedValues)
     }
 
     private func CurrentPackage(): Package {
@@ -89,9 +75,6 @@ public class ClosureConversion {
     private func ConvertNestedFunctions(funcs: ArrayList<Lambda>): Unit {
         for (lambdaFunc in funcs) {
             RecordDuplicateLambdaName(lambdaFunc)
-            if (!ContainsLambda(convertedLambdaExpressions, lambdaFunc)) {
-                convertedLambdaExpressions.add(lambdaFunc)
-            }
             let funcTy = lambdaFunc.GetFuncType() ??
                 throw IllegalStateException("ClosureConversion lambda has no function type")
             if (funcTy.IsCFunc()) {
@@ -171,6 +154,9 @@ public class ClosureConversion {
     private func ConvertExpressions(pkg: Package): Unit {
         let funcs = pkg.GetGlobalFuncsWithBody()
         for (fn in funcs) {
+            if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
+                continue
+            }
             if (let Some(body) <- fn.GetBody()) {
                 ConvertExpressionsInBlockGroup(body)
             }
@@ -195,6 +181,50 @@ public class ClosureConversion {
                         ConvertApplyWithExceptionToInvokeWithException(applyWithException)
                         continue
                     }
+                }
+                if (TypeCastNeedConvertToBox(expr)) {
+                    let cast = (expr as TypeCast) ??
+                        throw IllegalStateException("ClosureConversion TypeCast branch is not a TypeCast")
+                    let resultTy = cast.GetResultType() ??
+                        throw IllegalStateException("ClosureConversion TypeCast has no result type")
+                    let parent = cast.GetParentBlock() ??
+                        throw IllegalStateException("ClosureConversion TypeCast has no parent block")
+                    let box = builder.CreateBox(resultTy, cast.GetSourceValue(), parent)
+                    cast.ReplaceWith(box)
+                    continue
+                }
+                if (TypeCastNeedConvertToUnBox(expr)) {
+                    let cast = (expr as TypeCast) ??
+                        throw IllegalStateException("ClosureConversion TypeCast branch is not a TypeCast")
+                    let resultTy = cast.GetResultType() ??
+                        throw IllegalStateException("ClosureConversion TypeCast has no result type")
+                    let parent = cast.GetParentBlock() ??
+                        throw IllegalStateException("ClosureConversion TypeCast has no parent block")
+                    let unbox = builder.CreateUnBox(resultTy, cast.GetSourceValue(), parent)
+                    cast.ReplaceWith(unbox)
+                    continue
+                }
+                if (BoxNeedConvertToTypeCast(expr)) {
+                    let box = (expr as Box) ??
+                        throw IllegalStateException("ClosureConversion Box branch is not a Box")
+                    let resultTy = box.GetResultType() ??
+                        throw IllegalStateException("ClosureConversion Box has no result type")
+                    let parent = box.GetParentBlock() ??
+                        throw IllegalStateException("ClosureConversion Box has no parent block")
+                    let typecast = builder.CreateTypeCast(resultTy, box.GetSourceValue(), parent)
+                    box.ReplaceWith(typecast)
+                    continue
+                }
+                if (UnBoxNeedConvertToTypeCast(expr)) {
+                    let unbox = (expr as UnBox) ??
+                        throw IllegalStateException("ClosureConversion UnBox branch is not an UnBox")
+                    let resultTy = unbox.GetResultType() ??
+                        throw IllegalStateException("ClosureConversion UnBox has no result type")
+                    let parent = unbox.GetParentBlock() ??
+                        throw IllegalStateException("ClosureConversion UnBox has no parent block")
+                    let typecast = builder.CreateTypeCast(resultTy, unbox.GetSourceValue(), parent)
+                    unbox.ReplaceWith(typecast)
+                    continue
                 }
                 for (subGroup in expr.GetBlockGroups()) {
                     ConvertExpressionsInBlockGroup(subGroup)
@@ -1264,9 +1294,6 @@ public class ClosureConversion {
     private func BoxAllMutableVars(rawEnvs: ArrayList<Value>): ArrayList<Value> {
         let boxedEnvs = ArrayList<Value>()
         for (env in rawEnvs) {
-            if (!ContainsValue(capturedValues, env)) {
-                capturedValues.add(env)
-            }
             if (IsMutableVarType(env)) {
                 if (let Some(local) <- env.AsLocalVar()) {
                     boxedEnvs.add(BoxMutableVar(local))
@@ -1420,6 +1447,38 @@ public class ClosureConversion {
 
     private func ApplyWithExceptionNeedConvertToInvokeWithException(apply: ApplyWithException): Bool {
         return !apply.GetCallee().IsFunc() && IsAutoEnvRefType(apply.GetCallee().GetType())
+    }
+
+    private func TypeCastNeedConvertToBox(expr: Expression): Bool {
+        let typecast = (expr as TypeCast) ?? return false
+        let targetTy = typecast.GetTargetTy() ??
+            throw IllegalStateException("ClosureConversion TypeCast has no target type")
+        let sourceTy = typecast.GetSourceTy() ??
+            throw IllegalStateException("ClosureConversion TypeCast has no source type")
+        return targetTy.IsCJFunc() && !sourceTy.IsCJFunc()
+    }
+
+    private func TypeCastNeedConvertToUnBox(expr: Expression): Bool {
+        let typecast = (expr as TypeCast) ?? return false
+        let sourceTy = typecast.GetSourceTy() ??
+            throw IllegalStateException("ClosureConversion TypeCast has no source type")
+        let targetTy = typecast.GetTargetTy() ??
+            throw IllegalStateException("ClosureConversion TypeCast has no target type")
+        return sourceTy.IsCJFunc() && !targetTy.IsCJFunc()
+    }
+
+    private func BoxNeedConvertToTypeCast(expr: Expression): Bool {
+        let box = (expr as Box) ?? return false
+        let sourceTy = box.GetSourceTy() ??
+            throw IllegalStateException("ClosureConversion Box has no source type")
+        return sourceTy.IsCJFunc()
+    }
+
+    private func UnBoxNeedConvertToTypeCast(expr: Expression): Bool {
+        let unbox = (expr as UnBox) ?? return false
+        let targetTy = unbox.GetTargetTy() ??
+            throw IllegalStateException("ClosureConversion UnBox has no target type")
+        return targetTy.IsCJFunc()
     }
 
     private func IsAutoEnvRefType(tyOpt: Option<Type>): Bool {
@@ -1737,13 +1796,4 @@ public class ClosureConversion {
     private func GenericTypeKey(ty: GenericType): String {
         return ty.GetIdentifier() + "#" + ty.GetSrcCodeIdentifier()
     }
-}
-
-private func ContainsLambda(values: ArrayList<Lambda>, lambdaExpr: Lambda): Bool {
-    for (value in values) {
-        if (value.nodeId == lambdaExpr.nodeId) {
-            return true
-        }
-    }
-    return false
 }
