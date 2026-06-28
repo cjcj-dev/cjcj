@@ -1,5 +1,7 @@
 package cangjie_compiler::chir
 
+import std.collection.*
+
 public func TranslateIntrinsicExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression, withException: Bool): Unit {
     let maybeKind: Option<IntrinsicKind> = if (let Some(intrinsic) <- (expr as Intrinsic)) {
@@ -14,17 +16,45 @@ public func TranslateIntrinsicExpression(compiler: CHIR2BCHIR, context: CHIR2BCH
             kind == IntrinsicKind.BEGIN_CATCH) {
             return
         }
+        let isCType = { ty: Type =>
+            if (ty.IsPrimitive() || ty.IsCString()) {
+                true
+            } else if (let Some(structTy) <- (ty as StructType)) {
+                structTy.GetStructDef().IsCStruct()
+            } else {
+                false
+            }
+        }
+        let auxInfo = ArrayList<Int64>()
+        match (kind) {
+            case IntrinsicKind.ARRAY_BUILT_IN_COPY_TO | IntrinsicKind.ARRAY_CLONE |
+                IntrinsicKind.ARRAY_ACQUIRE_RAW_DATA =>
+                let refTy = (expr.GetOperand(0).GetType().getOrThrow() as RefType).getOrThrow()
+                let arrayTy = (refTy.GetTypeArgsRef()[0] as RawArrayType).getOrThrow()
+                let valueTy = arrayTy.GetTypeArgsRef()[0]
+                auxInfo.add(if (isCType(valueTy)) { compiler.GetTypeIdx(arrayTy) } else { 0xffffffff })
+            case IntrinsicKind.ARRAY_GET | IntrinsicKind.ARRAY_GET_UNCHECKED | IntrinsicKind.ARRAY_SET |
+                IntrinsicKind.ARRAY_SET_UNCHECKED =>
+                let refTy = (expr.GetOperand(0).GetType().getOrThrow() as RefType).getOrThrow()
+                let arrayTy = (refTy.GetTypeArgsRef()[0] as RawArrayType).getOrThrow()
+                let valueTy = arrayTy.GetTypeArgsRef()[0]
+                auxInfo.add(if (isCType(valueTy)) { compiler.GetTypeIdx(valueTy) } else { 0xffffffff })
+            case IntrinsicKind.OBJECT_REFEQ => ()
+            case _ => ()
+        }
         if (kind == IntrinsicKind.VARRAY_GET) {
             context.definition.PushOp(OpCode.VARRAY_GET)
-            context.definition.PushCell(if (expr.GetNumOfOperands() > 0) { expr.GetNumOfOperands() - 1 } else { 0 })
+            context.definition.PushCell(expr.GetNumOfOperands() - 1)
             return
         }
-        let hasAuxType = BCHIRIntrinsic.IsArrayGetUnchecked(kind)
-        let opCode = IntrinsicOpCode(if (hasAuxType) { 1 } else { 0 }, withException)
+        let opCode = IntrinsicOpCode(auxInfo.size, withException)
         context.definition.PushOp(opCode)
         context.definition.PushCell(BCHIRIntrinsic.ToByteCodeKind(kind))
-        if (hasAuxType) {
-            context.definition.PushCell(IntrinsicAuxType(compiler, expr))
+        if (auxInfo.size > 0) {
+            context.definition.PushCell(auxInfo[0])
+            if (auxInfo.size > 1) {
+                context.definition.PushCell(auxInfo[1])
+            }
         }
     } else {
         context.definition.PushOp(OpCode.NOT_SUPPORTED)
@@ -39,21 +69,4 @@ private func IntrinsicOpCode(auxCount: Int64, withException: Bool): OpCode {
         return if (withException) { OpCode.INTRINSIC1_EXC } else { OpCode.INTRINSIC1 }
     }
     return if (withException) { OpCode.INTRINSIC2_EXC } else { OpCode.INTRINSIC2 }
-}
-
-private func IntrinsicAuxType(compiler: CHIR2BCHIR, expr: Expression): Int64 {
-    if (expr.GetNumOfOperands() > 0) {
-        if (let Some(baseTy) <- expr.GetOperand(0).GetType()) {
-            if (let Some(refTy) <- (baseTy as RefType)) {
-                if (!refTy.GetTypeArgsRef().isEmpty()) {
-                    if (let Some(rawArrayTy) <- (refTy.GetTypeArgsRef()[0] as RawArrayType)) {
-                        if (!rawArrayTy.GetTypeArgsRef().isEmpty()) {
-                            return compiler.GetTypeIdx(rawArrayTy.GetTypeArgsRef()[0])
-                        }
-                    }
-                }
-            }
-        }
-    }
-    return 0xffffffff
 }

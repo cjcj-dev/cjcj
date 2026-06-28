@@ -3,7 +3,13 @@ package cangjie_compiler::chir
 public class BCHIRIntrinsic {
     public static func ToByteCodeKind(kind: IntrinsicKind): Int64 {
         return match (kind) {
+            case IntrinsicKind.ARRAY_ACQUIRE_RAW_DATA => 5
+            case IntrinsicKind.ARRAY_BUILT_IN_COPY_TO => 7
+            case IntrinsicKind.ARRAY_GET => 8
+            case IntrinsicKind.ARRAY_SET => 9
             case IntrinsicKind.ARRAY_GET_UNCHECKED => 10
+            case IntrinsicKind.ARRAY_SET_UNCHECKED => 12
+            case IntrinsicKind.ARRAY_CLONE => 14
             case IntrinsicKind.OBJECT_REFEQ => 40
             case IntrinsicKind.RAW_ARRAY_REFEQ => 41
             case IntrinsicKind.FUNC_REFEQ => 42
@@ -21,10 +27,6 @@ public class BCHIRIntrinsic {
 
     public static func IsReferenceEquality(kind: Int64): Bool {
         return kind == 40 || kind == 41 || kind == 42
-    }
-
-    public static func IsArrayGetUnchecked(kind: IntrinsicKind): Bool {
-        return kind == IntrinsicKind.ARRAY_GET_UNCHECKED
     }
 
     public static func IsArrayGetUnchecked(kind: Int64): Bool {
