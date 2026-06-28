@@ -4,7 +4,8 @@ import std.collection.*
 
 public class CHIRContext {
     private var curPackage: Option<Package> = None
-    private let fileNameMap: HashMap<UInt32, String> = HashMap<UInt32, String>()
+    private var fileNameMap: HashMap<UInt32, String> = HashMap<UInt32, String>()
+    private var threadsNum: UIntNative = 1
     private let typeCache: HashMap<String, Type> = HashMap<String, Type>()
     private let allocatedValues: ArrayList<Value> = ArrayList<Value>()
     private let allocatedExpressions: ArrayList<Expression> = ArrayList<Expression>()
@@ -76,11 +77,19 @@ public class CHIRContext {
     }
 
     public func GetSourceFileName(fileId: UInt32): String {
-        return fileNameMap.get(fileId) ?? ""
+        return fileNameMap.get(fileId) ?? INVALID_NAME
     }
 
     public func GetFileNameMap(): HashMap<UInt32, String> {
         return fileNameMap
+    }
+
+    public func SetFileNameMap(fnMap: HashMap<UInt32, String>): Unit {
+        fileNameMap = fnMap
+    }
+
+    public func SetThreadNum(num: UIntNative): Unit {
+        threadsNum = num
     }
 
     public func GetInvalidTy(): Type { return invalidTy }
@@ -277,19 +286,10 @@ public class CHIRContext {
     }
 
     public func ToSelectorType(kind: TypeKind): Type {
-        if (kind == TypeKind.TYPE_BOOLEAN) {
-            return boolTy
+        return match (kind) {
+            case TypeKind.TYPE_UINT32 => uint32Ty
+            case _ => boolTy
         }
-        if (kind == TypeKind.TYPE_UINT8 || kind == TypeKind.TYPE_INT8) {
-            return uint8Ty
-        }
-        if (kind == TypeKind.TYPE_UINT16 || kind == TypeKind.TYPE_INT16) {
-            return uint16Ty
-        }
-        if (kind == TypeKind.TYPE_UINT32 || kind == TypeKind.TYPE_INT32) {
-            return uint32Ty
-        }
-        return uint64Ty
     }
 
     public func RegisterValue(value: Value): Unit {
