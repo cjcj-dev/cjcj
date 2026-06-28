@@ -1,6 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::utils.CJC_ASSERT
 
 public class BCHIRPrinter {
     private let bchir: BCHIR
@@ -347,7 +348,7 @@ private func DefaultFunctionKindCellName(cell: Int64): String {
         case 0 => "THROW_ARITHMETIC_EXCEPTION"
         case 1 => "THROW_OVERFLOW_EXCEPTION"
         case 2 => "THROW_INDEX_OUT_OF_BOUNDS_EXCEPTION"
-        case 3 => "THROW_NEGATIVE_ARRAY_SIZE_EXCEPTION"
+        case 3 => "THROW_NEGATIVA_ARRAY_SIZE_EXCEPTION"
         case 4 => "CALL_TO_STRING"
         case 5 => "THROW_ARITHMETIC_EXCEPTION_MSG"
         case 6 => "THROW_OUT_OF_MEMORY_ERROR"
@@ -356,6 +357,8 @@ private func DefaultFunctionKindCellName(cell: Int64): String {
         case 9 => "CALL_PRINT_STACK_TRACE"
         case 10 => "CALL_PRINT_STACK_TRACE_ERROR"
         case 11 => "MAIN"
-        case _ => "INVALID"
+        case _ =>
+            CJC_ASSERT(false)
+            ""
     }
 }
