@@ -2222,7 +2222,12 @@ public class FaithfulAST2CHIR {
         if (decl.TestAttr(AstAttribute.FOREIGN)) { target.EnableAttr(Attribute.FOREIGN) }
         if (decl.TestAttr(AstAttribute.IMPORTED)) { target.EnableAttr(Attribute.IMPORTED) }
         if (decl.TestAttr(AstAttribute.SRC_IMPORTED)) { target.EnableAttr(Attribute.SRC_CODE_IMPORTED) }
-        if (decl.TestAttr(AstAttribute.C)) { target.EnableAttr(Attribute.C) }
+        if (decl.TestAttr(AstAttribute.C)) {
+            target.EnableAttr(Attribute.C)
+            if (let Some(structDef) <- (target as StructDef)) {
+                structDef.SetCStruct(true)
+            }
+        }
         if (decl.TestAttr(AstAttribute.OPERATOR)) { target.EnableAttr(Attribute.OPERATOR) }
         if (decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) { target.EnableAttr(Attribute.GENERIC_INSTANTIATED) }
         if (decl.TestAttr(AstAttribute.IMPLICIT_ADD)) { target.EnableAttr(Attribute.IMPLICIT_ADD) }

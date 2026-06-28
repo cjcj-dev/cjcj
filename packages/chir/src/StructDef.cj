@@ -28,16 +28,11 @@ public class StructDef <: CustomTypeDef {
     }
 
     public func IsCStruct(): Bool {
-        return isC || TestAttr(Attribute.C)
+        return isC
     }
 
     public func SetCStruct(value: Bool): Unit {
         isC = value
-        if (value) {
-            EnableAttr(Attribute.C)
-        } else {
-            DisableAttr(Attribute.C)
-        }
     }
 
     public override func ToString(indent: Int64): String {
