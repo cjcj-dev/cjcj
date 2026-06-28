@@ -1,6 +1,6 @@
 package cangjie_compiler::chir
 
-import std.collection.*
+import cangjie_compiler::utils.{CJC_ASSERT, DynamicCast, StaticCast}
 
 public class OptFuncRetType {
     private let chirPackage: Package
@@ -11,60 +11,45 @@ public class OptFuncRetType {
         this.builder = builder
     }
 
-    public func Unit2Void(): Int64 {
-        var changed: Int64 = 0
-        for (fn in chirPackage.GetGlobalFunctions(includePureAbstract: true)) {
+    public func Unit2Void(): Unit {
+        for (fn in chirPackage.GetGlobalFunctions()) {
             if (!ReturnTypeShouldBeVoid(fn)) {
                 continue
             }
-            if (let Some(returnTy) <- fn.GetReturnType()) {
-                if (!returnTy.IsUnit()) {
-                    continue
-                }
-            } else {
-                continue
+            CJC_ASSERT(fn.GetReturnType().getOrThrow().IsUnit())
+            var oldRet: Option<LocalVar> = None
+            if (fn.IsFuncWithBody()) {
+                oldRet = fn.GetReturnValue()
+                CJC_ASSERT(oldRet.isSome())
             }
-            let oldRet: Option<LocalVar> = if (fn.IsFuncWithBody()) { fn.GetReturnValue() } else { None }
             fn.ReplaceReturnValue(None, builder)
-            changed++
             if (let Some(retValue) <- oldRet) {
                 RemoveOldRetValue(retValue)
             }
-            changed += UpdateCallSites(fn)
-        }
-        return changed
-    }
-
-    private func UpdateCallSites(fn: Function): Int64 {
-        var changed: Int64 = 0
-        let users = fn.GetUsers()
-        for (user in users) {
-            let kind = user.GetExprKind()
-            if ((kind == ExprKind.APPLY || kind == ExprKind.APPLY_WITH_EXCEPTION) &&
-                user.GetNumOfOperands() > 0 && user.GetOperand(0).nodeId == fn.nodeId) {
-                if (RewriteCallSite(user)) {
-                    changed++
+            for (user in fn.GetUsers()) {
+                if (let Some(apply) <- DynamicCast<Apply>(user)) {
+                    CJC_ASSERT(apply.GetCallee().nodeId == fn.nodeId)
+                    let funcCallContext = FuncCallContext(args: apply.GetArgs(),
+                        instTypeArgs: apply.GetInstantiatedTypeArgs(), thisType: apply.GetThisType())
+                    let newApply = builder.CreateApply(fn.GetReturnType().getOrThrow(), apply.GetCallee(),
+                        funcCallContext, apply.GetParentBlock().getOrThrow())
+                    newApply.SetDebugLocation(apply.GetDebugLocation())
+                    if (apply.IsSuperCall()) {
+                        newApply.SetSuperCall()
+                    }
+                    apply.ReplaceWith(newApply)
+                } else {
+                    let awe = StaticCast<ApplyWithException>(user)
+                    CJC_ASSERT(awe.GetCallee().nodeId == fn.nodeId)
+                    let funcCallContext = FuncCallContext(args: awe.GetArgs(),
+                        instTypeArgs: awe.GetInstantiatedTypeArgs(), thisType: awe.GetThisType())
+                    let newApply = builder.CreateApplyWithException(fn.GetReturnType().getOrThrow(), awe.GetCallee(),
+                        funcCallContext, awe.GetSuccessBlock(), awe.GetErrorBlock(), awe.GetParentBlock().getOrThrow())
+                    newApply.SetDebugLocation(awe.GetDebugLocation())
+                    awe.ReplaceWith(newApply)
                 }
             }
         }
-        return changed
-    }
-
-    private func RewriteCallSite(callExpr: Expression): Bool {
-        if (let Some(result) <- callExpr.GetResult()) {
-            if (!result.GetUsersRef().isEmpty()) {
-                result.SetType(builder.context.GetVoidTy())
-                return true
-            }
-        }
-        if (let Some(parentBlock) <- callExpr.GetParentBlock()) {
-            let operands = callExpr.GetOperands()
-            let newExpr = builder.CreateExpression(callExpr.GetExprKind(), None, operands, parentBlock)
-            newExpr.SetDebugLocation(callExpr.GetDebugLocation())
-            callExpr.ReplaceWith(newExpr)
-            return true
-        }
-        return false
     }
 }
 
@@ -76,19 +61,14 @@ private func RemoveOldRetValue(oldRet: LocalVar): Unit {
         }
     }
     for (user in users) {
-        if (user.GetNumOfOperands() >= 1) {
-            let storedValue = user.GetOperand(0)
-            if (let Some(unitLocal) <- storedValue.AsLocalVar()) {
-                if (let Some(unitExpr) <- unitLocal.GetExpr()) {
-                    if (unitExpr.IsConstant()) {
-                        unitExpr.RemoveSelfFromBlock()
-                    }
-                }
+        let store = StaticCast<Store>(user)
+        if (let Some(unitVal) <- DynamicCast<LocalVar>(store.GetValue())) {
+            let unitExpr = unitVal.GetExpr().getOrThrow()
+            if (unitExpr.IsConstant()) {
+                unitExpr.RemoveSelfFromBlock()
             }
         }
-        user.RemoveSelfFromBlock()
+        store.RemoveSelfFromBlock()
     }
-    if (let Some(oldRetExpr) <- oldRet.GetExpr()) {
-        oldRetExpr.RemoveSelfFromBlock()
-    }
+    oldRet.GetExpr().getOrThrow().RemoveSelfFromBlock()
 }
