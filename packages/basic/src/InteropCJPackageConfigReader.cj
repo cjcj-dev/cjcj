@@ -129,6 +129,12 @@ public class InteropCJPackageConfigReader {
             }
             if (isSectionHeader(line)) {
                 if (isPackageLambdaClassMappingsSection(line)) {
+                    if (let None <- currentPackage) {
+                        currentNestedSection = ""
+                        currentNestedTable = None
+                        currentSection = ""
+                        continue
+                    }
                     if (currentNestedSection != "lambda_patterns" || (let None <- currentNestedTable)) {
                         return false
                     }
@@ -153,7 +159,7 @@ public class InteropCJPackageConfigReader {
                 currentSection = "default"
                 continue
             }
-            if (line == "[[package]]" || line == "[package]") {
+            if (line == "[[package]]") {
                 if (!storePackage(currentPackage, pendingGenericTables)) {
                     return false
                 }
@@ -162,13 +168,34 @@ public class InteropCJPackageConfigReader {
                 currentSection = "package"
                 continue
             }
+            if (line == "[package]") {
+                if (!storePackage(currentPackage, pendingGenericTables)) {
+                    return false
+                }
+                pendingGenericTables.clear()
+                currentPackage = None
+                currentSection = ""
+                continue
+            }
             if (isPackageGenericObjectSection(line)) {
+                if (let None <- currentPackage) {
+                    currentNestedSection = ""
+                    currentNestedTable = None
+                    currentSection = ""
+                    continue
+                }
                 currentNestedSection = "generic_object_configuration"
                 currentNestedTable = HashMap<String, String>()
                 currentSection = "package"
                 continue
             }
             if (isPackageLambdaPatternSection(line)) {
+                if (let None <- currentPackage) {
+                    currentNestedSection = ""
+                    currentNestedTable = None
+                    currentSection = ""
+                    continue
+                }
                 currentNestedSection = "lambda_patterns"
                 currentNestedTable = HashMap<String, String>()
                 currentSection = "package"
@@ -306,11 +333,6 @@ public class InteropCJPackageConfigReader {
             appendStrings(pkg.interopCJExcludedApis, parseStringArray(value))
         } else if (key == "tuple_configuration") {
             appendStrings(pkg.interopTuples, parseStringArray(value))
-        } else if (key == "signature") {
-            let signature = parseString(value).trimAscii()
-            let params = parseSignatureParameterList(signature)
-            let retType = parseReturnType(signature)
-            pkg.lambdaPatterns.add(LambdaPattern(signature, params, retType))
         } else if (key == "generic_object_configuration") {
             appendGenericTables(pendingGenericTables, parseArrayOfTables(value))
         } else if (key == "lambda_patterns") {
@@ -826,6 +848,11 @@ private func processSymbolConfigurations(
             continue
         }
         if (let Some(rawSymbols) <- table.get("symbols")) {
+            let trimmedSymbols = rawSymbols.trimAscii()
+            if (trimmedSymbols.size < 2 || trimmedSymbols[0] != b'[' ||
+                trimmedSymbols[trimmedSymbols.size - 1] != b']') {
+                continue
+            }
             let anglePos = name.indexOf("<") ?? -1
             if (anglePos >= 0 && name.endsWith(">")) {
                 let outerType = name[0..anglePos]
@@ -872,12 +899,7 @@ private func parseClassMappings(value: String): Array<ClassMapping> {
 private func parseLambdaPatternTable(pkg: PackageConfig, table: HashMap<String, String>): Unit {
     if (let Some(rawSignature) <- table.get("signature")) {
         let signature = parseString(rawSignature)
-        let trimmedSignature = signature.trimAscii()
-        let lambdaPattern = LambdaPattern(
-            trimmedSignature,
-            parseSignatureParameterList(trimmedSignature),
-            parseReturnType(trimmedSignature)
-        )
+        let lambdaPattern = parseLambdaSignature(signature)
         if (let Some(rawClassMappings) <- table.get("class_mappings")) {
             for (classMapping in parseClassMappings(rawClassMappings)) {
                 lambdaPattern.classMappings.add(classMapping)
@@ -893,20 +915,36 @@ private func parseLambdaPatternsConfiguration(pkg: PackageConfig, value: String)
     }
 }
 
-private func parseSignatureParameterList(signature: String): Array<String> {
+private func parseLambdaSignature(signature: String): LambdaPattern {
     let trimmed = signature.trimAscii()
-    if (!trimmed.startsWith("(")) {
-        return Array<String>()
-    }
     let arrowPos = trimmed.indexOf("->") ?? -1
-    let end = trimmed.indexOf(")") ?? -1
-    if (arrowPos >= 0 && end >= arrowPos) {
+    if (arrowPos < 0) {
+        WriteError("Invalid lambda signature without ->.\n")
+    }
+    let closeParenPos = trimmed.indexOf(")") ?? -1
+    if (!trimmed.startsWith("(") || closeParenPos < 0) {
+        WriteError("Invalid lambda signature without ().\n")
+    }
+    if (closeParenPos < 0 || (arrowPos >= 0 && closeParenPos >= arrowPos)) {
+        WriteError("Invalid lambda signature, -> position is not right.\n")
+    }
+    let paramsEnd = if (closeParenPos >= 0) { closeParenPos } else { trimmed.size }
+    let paramsStr = if (trimmed.size > 1 && paramsEnd > 1) { trimmed[1..paramsEnd] } else { "" }
+    let returnStart = if (arrowPos >= 0) { arrowPos + 2 } else { 1 }
+    let returnTypeStr = if (returnStart <= trimmed.size) { trimmed[returnStart..] } else { "" }
+    let paramTypes = parseSignatureParameterList(paramsStr)
+    let returnType = returnTypeStr.trimAscii()
+    if (returnType.isEmpty()) {
+        WriteError("Invalid lambda signature, return type can not be empty.\n")
+    }
+    return LambdaPattern(trimmed, paramTypes, returnType)
+}
+
+private func parseSignatureParameterList(signature: String): Array<String> {
+    let paramsStr = signature.trimAscii()
+    if (paramsStr.isEmpty()) {
         return Array<String>()
     }
-    if (end <= 1) {
-        return Array<String>()
-    }
-    let paramsStr = trimmed[1..end]
     let parameters = ArrayList<String>()
     var currentParam = StringBuilder()
     var genericDepth: Int64 = 0
@@ -932,12 +970,4 @@ private func parseSignatureParameterList(signature: String): Array<String> {
         parameters.add(finalParam)
     }
     return parameters.toArray()
-}
-
-private func parseReturnType(signature: String): String {
-    let trimmed = signature.trimAscii()
-    if (let Some(pos) <- trimmed.indexOf("->")) {
-        return trimmed[pos + 2..].trimAscii()
-    }
-    return ""
 }
