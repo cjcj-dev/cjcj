@@ -286,7 +286,8 @@ public class MaybeUninitAnalysis {
             let location = store.GetOperand(1)
             if (let Some(index) <- allocateIdxMap.get(location.nodeId)) {
                 state.Kill(index)
-                state.RecordMaybeInitedPos(index, Int64(store.GetDebugLocation().line))
+                let debugLoc = store.GetDebugLocation()
+                state.RecordMaybeInitedPos(index, Int64(debugLoc.GetBeginPos().line))
             }
         }
     }
@@ -309,7 +310,8 @@ public class MaybeUninitAnalysis {
         }
         let stateIndex = memberIndex - ctorInitInfo.superMemberNums
         state.Kill(stateIndex)
-        state.RecordMaybeInitedPos(stateIndex, Int64(store.GetDebugLocation().line))
+        let debugLoc = store.GetDebugLocation()
+        state.RecordMaybeInitedPos(stateIndex, Int64(debugLoc.GetBeginPos().line))
     }
 
     private func HandleApplyExpr(state: MaybeUninitDomain, apply: Expression): Unit {

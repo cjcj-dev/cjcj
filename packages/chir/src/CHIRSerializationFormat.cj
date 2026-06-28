@@ -149,20 +149,34 @@ func CHIRBaseId(base: Base): String {
 
 func CHIRSerializeDebugLocation(loc: DebugLocation): String {
     let fields = ArrayList<String>()
-    fields.add(loc.fileId.toString())
-    fields.add(loc.line.toString())
-    fields.add(loc.column.toString())
-    fields.add(loc.length.toString())
+    let beginPos = loc.GetBeginPos()
+    let endPos = loc.GetEndPos()
+    fields.add(loc.GetAbsPath())
+    fields.add(loc.GetFileID().toString())
+    fields.add(beginPos.line.toString())
+    fields.add(beginPos.column.toString())
+    fields.add(endPos.line.toString())
+    fields.add(endPos.column.toString())
+    let scopeInfo = ArrayList<String>()
+    for (scope in loc.GetScopeInfo()) {
+        scopeInfo.add(scope.toString())
+    }
+    fields.add(CHIRWireJoinList(scopeInfo))
     return CHIRWireJoinFields(fields)
 }
 
 func CHIRParseDebugLocation(value: String): DebugLocation {
     let fields = CHIRWireSplitFields(value)
-    if (fields.size < 4) {
+    if (fields.size < 7) {
         return DebugLocation()
     }
-    return DebugLocation(CHIRSafeU32(fields[0]), CHIRSafeU32(fields[1]), CHIRSafeU32(fields[2]),
-        length: CHIRSafeU32(fields[3]))
+    let beginPos = Position(CHIRSafeU32(fields[2]), CHIRSafeU32(fields[3]))
+    let endPos = Position(CHIRSafeU32(fields[4]), CHIRSafeU32(fields[5]))
+    let scopeInfo = ArrayList<Int64>()
+    for (scope in CHIRWireSplitList(fields[6])) {
+        scopeInfo.add(CHIRSafeI64(scope))
+    }
+    return DebugLocation(fields[0], CHIRSafeU32(fields[1]), beginPos, endPos, scopeInfo: scopeInfo)
 }
 
 func CHIRSerializeAttributes(base: Base): String {
