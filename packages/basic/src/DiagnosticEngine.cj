@@ -183,6 +183,13 @@ public func MakeRange(begin: Position, end: Position): Range {
 }
 
 public func MakeRange(identifierPos: Position, identifier: String): Range {
+    var index: Int64 = 0
+    while (index < identifier.size) {
+        if (identifier[index] > UInt8(0x7f)) {
+            throw IllegalStateException("identifier character is not ASCII")
+        }
+        index++
+    }
     return MakeRange(identifierPos, identifierPos + identifier.size)
 }
 
@@ -805,6 +812,9 @@ public class DiagnosticBuilder <: Resource {
         diag.CheckRange(diagnostic.GetDiagCategory(), range)
         let errData = errorData[DiagKindRefactorIndex(diagnostic.rKind)]
         if (diagnostic.otherHints.size >= errData.otherHints.size) {
+            if (arguments.size > 1) {
+                throw IllegalStateException("diagnostic argument count does not match format placeholders")
+            }
             let text = if (arguments.isEmpty()) { "" } else { arguments[0] }
             diagnostic.otherHints.add(IntegratedString(range, text, OTHER_HINT_COLOR))
             return
