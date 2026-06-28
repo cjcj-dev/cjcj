@@ -5,6 +5,7 @@ import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::utils.AccessResultType as UtilsAccessResultType
 import cangjie_compiler::utils.CJC_ABORT
+import cangjie_compiler::utils.CJC_ASSERT
 import cangjie_compiler::utils.FileMode as UtilsFileMode
 import cangjie_compiler::utils.Out64
 import cangjie_compiler::utils.OverflowStrategy
@@ -21,6 +22,7 @@ private let CHIR_EXTENSION: String = "chir"
 private let ARCHIVE_EXTENSION: String = "a"
 private let OBJECT_EXTENSION: String = "o"
 private let COFF_OBJECT_EXTENSION: String = "obj"
+private let CANGJIE_VISIBLE_OPTIONS_ONLY: Bool = true
 
 private func emitOptionDiag(kind: BasicDiagKindRefactor): Unit {
     let diag = BasicDiagnosticEngine()
@@ -442,23 +444,11 @@ public open class GlobalOptions <: Option {
         }
         if (skipParsing) { return true }
         for (opt in delayed) {
-            if (!experimentalMode && !opt.info.BelongsGroup(Group.STABLE)) {
-                Errorln(opt.str + " is an experimental feature. \"--experimental\" option is required to enable experimental features.")
-                return false
-            }
-            if (!experimentalMode && OptionValueRequiresExperimental(opt)) {
-                Errorln(opt.str + " is an experimental feature. \"--experimental\" option is required to enable experimental features.")
-                return false
-            }
-            DeprecatedOptionCheck(opt)
-            if (let Some(optionSuccess) <- ParseOption(opt)) {
-                if (!optionSuccess) { return false }
-            } else {
-                return false
-            }
-            OccurrenceCheck(opt, argList)
+            if (!TryParseOption(opt, argList)) { return false }
         }
-        return ProcessInputs(argList.GetInputs()) && PerformPostActions()
+        if (!ProcessInputs(argList.GetInputs())) { return false }
+        if (!PerformPostActions()) { return false }
+        return true
     }
 
     protected open func ParseOption(arg: OptionArgInstance): CoreOption<Bool> {
@@ -467,14 +457,44 @@ public open class GlobalOptions <: Option {
         return Some(result.success)
     }
 
-    private func OptionValueRequiresExperimental(arg: OptionArgInstance): Bool {
-        for (optionValue in arg.info.values) {
-            if (optionValue.value == arg.value &&
-                optionValueBelongsBackend(optionValue.backends, GetOptionsBackend())) {
-                return !optionValueBelongsGroup(optionValue.groups, Group.STABLE)
+    private func ErrorExperimentalOption(argName: String): Unit {
+        Errorln(argName + " is an experimental feature. \"--experimental\" option is required to enable experimental features.")
+    }
+
+    private func TryParseOption(arg: OptionArgInstance, argList: ArgList): Bool {
+        if (CANGJIE_VISIBLE_OPTIONS_ONLY && !arg.info.BelongsGroup(Group.VISIBLE)) {
+            return false
+        }
+        if (!experimentalMode && !arg.info.BelongsGroup(Group.STABLE)) {
+            ErrorExperimentalOption(arg.str)
+            return false
+        }
+        if (!arg.info.values.isEmpty()) {
+            var matchedValue: CoreOption<OptionValue> = None
+            for (optionValue in arg.info.values) {
+                if (optionValue.value == arg.value &&
+                    optionValueBelongsBackend(optionValue.backends, GetOptionsBackend())) {
+                    matchedValue = Some(optionValue)
+                    break
+                }
+            }
+            if (let Some(optionValue) <- matchedValue) {
+                if (CANGJIE_VISIBLE_OPTIONS_ONLY && !optionValueBelongsGroup(optionValue.groups, Group.VISIBLE)) {
+                    Errorln("invalid value: '" + optionValue.value + "'")
+                    return false
+                }
+                if (!experimentalMode && !optionValueBelongsGroup(optionValue.groups, Group.STABLE)) {
+                    ErrorExperimentalOption(arg.str)
+                    return false
+                }
             }
         }
-        return false
+        DeprecatedOptionCheck(arg)
+        let maybeResult = ParseOption(arg)
+        CJC_ASSERT(maybeResult.isSome())
+        let optionSuccess = maybeResult.getOrThrow()
+        OccurrenceCheck(arg, argList)
+        return optionSuccess
     }
 
     private func DeprecatedOptionCheck(arg: OptionArgInstance): Unit {
@@ -666,7 +686,7 @@ public open class GlobalOptions <: Option {
         } else {
             compilationCachedPath = GetDirPath(output)
         }
-        if (compilationCachedPath.isEmpty()) { compilationCachedPath = "." }
+        CJC_ASSERT(!compilationCachedPath.isEmpty())
     }
 
     public func GetCacheRelativeFilePath(filePath: String): String {
