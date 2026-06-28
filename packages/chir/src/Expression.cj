@@ -1,7 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
-import cangjie_compiler::utils.OverflowStrategy
+import cangjie_compiler::utils.{OverflowStrategy, StaticCast}
 
 private var gLambdaClonedIdx: UInt64 = 0u64
 
@@ -440,30 +440,27 @@ public class Constant <: Expression {
     public func GetValue(): LiteralValue { return literal }
     public func GetBoolLitVal(): Bool {
         let boolLiteral = (GetValue() as BoolLiteral) ?? throw IllegalStateException("constant is not a bool literal")
-        return boolLiteral.value
+        return boolLiteral.GetVal()
     }
     public func GetFloatLitVal(): Float64 {
         let floatLiteral = (GetValue() as FloatLiteral) ?? throw IllegalStateException("constant is not a float literal")
-        return floatLiteral.value
+        return floatLiteral.GetVal()
     }
     public func GetRuneLitVal(): Rune {
         let runeLiteral = (GetValue() as RuneLiteral) ?? throw IllegalStateException("constant is not a rune literal")
-        return runeLiteral.value
+        return runeLiteral.GetVal()
     }
     public func GetSignedIntLitVal(): Int64 {
         let intLiteral = (GetValue() as IntLiteral) ?? throw IllegalStateException("constant is not an int literal")
-        return intLiteral.value
+        return intLiteral.GetSignedVal()
     }
     public func GetStringLitVal(): String {
         let stringLiteral = (GetValue() as StringLiteral) ?? throw IllegalStateException("constant is not a string literal")
-        return stringLiteral.value
+        return stringLiteral.GetVal()
     }
     public func GetUnsignedIntLitVal(): UInt64 {
         let intLiteral = (GetValue() as IntLiteral) ?? throw IllegalStateException("constant is not an int literal")
-        if (intLiteral.value >= 0) {
-            return UInt64(intLiteral.value)
-        }
-        return 0x8000000000000000u64 + UInt64(intLiteral.value - Int64.Min)
+        return intLiteral.GetUnsignedVal()
     }
     public func IsNullLit(): Bool { return literal.IsNullLit() }
     public func IsBoolLit(): Bool { return literal.IsBoolLit() }
@@ -474,9 +471,7 @@ public class Constant <: Expression {
         if (!IsIntLit()) {
             return false
         }
-        let intTy = (GetResult().getOrThrow().GetType().getOrThrow() as IntType) ??
-            throw IllegalStateException("int literal requires integer type")
-        return intTy.IsSigned()
+        return StaticCast<IntLiteral>(literal).IsSigned()
     }
     public func IsUnSignedIntLit(): Bool {
         if (!IsIntLit()) {
@@ -488,7 +483,7 @@ public class Constant <: Expression {
     public func IsUnitLit(): Bool { return literal.IsUnitLit() }
 
     public override func AddExtraComment(): String {
-        return literal.ToString()
+        return literal.ToString(0)
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {

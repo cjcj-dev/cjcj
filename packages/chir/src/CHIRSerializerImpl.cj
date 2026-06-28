@@ -465,15 +465,15 @@ class CHIRSerializerImpl {
             let literal = constant.literal
             fields.add(LiteralKindIndex(literal.literalKind).toString())
             if (let Some(boolLit) <- (literal as BoolLiteral)) {
-                fields.add(CHIRBoolToWire(boolLit.value))
+                fields.add(CHIRBoolToWire(boolLit.GetVal()))
             } else if (let Some(intLit) <- (literal as IntLiteral)) {
-                fields.add(intLit.value.toString())
+                fields.add(intLit.GetUnsignedVal().toString())
             } else if (let Some(floatLit) <- (literal as FloatLiteral)) {
-                fields.add(floatLit.value.toString())
+                fields.add(floatLit.GetVal().toString())
             } else if (let Some(runeLit) <- (literal as RuneLiteral)) {
-                fields.add(runeLit.value.toString())
+                fields.add(runeLit.GetVal().toString())
             } else if (let Some(stringLit) <- (literal as StringLiteral)) {
-                fields.add(stringLit.value)
+                fields.add(stringLit.GetVal())
             } else {
                 fields.add("")
             }

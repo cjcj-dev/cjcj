@@ -167,6 +167,7 @@ public class CHIRBuilder {
     }
 
     public func CreateConstant(resultTy: Type, literal: LiteralValue, parent: Block): Constant {
+        literal.SetType(resultTy)
         let expr = Constant(literal, parent)
         parent.AppendExpression(expr)
         context.RegisterExpression(expr)

@@ -1083,7 +1083,7 @@ class CHIRDeserializerImpl {
         let kind = CHIRSafeI64(CHIRFieldAt(fields, 0))
         return match (kind) {
             case 1 => BoolLiteral(CHIRWireToBool(CHIRFieldAt(fields, 1)))
-            case 2 => IntLiteral(CHIRSafeI64(CHIRFieldAt(fields, 1)))
+            case 2 => IntLiteral(CHIRSafeU64(CHIRFieldAt(fields, 1)))
             case 3 => FloatLiteral(Float64.parse(CHIRFieldAt(fields, 1)))
             case 4 => RuneLiteral(parseRune(CHIRFieldAt(fields, 1)))
             case 5 => StringLiteral(CHIRFieldAt(fields, 1))
