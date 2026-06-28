@@ -3,13 +3,14 @@ package cangjie_compiler::option
 import cangjie_compiler::basic.PrintCommandDesc as BasicPrintCommandDesc
 import cangjie_compiler::basic.PrintIndentOnly as BasicPrintIndentOnly
 import std.collection.*
+import std.core.Option as CoreOption
 
 private let OPTION_WIDTH: Int64 = 28
 
 // Mirrors the C++ build flag CANGJIE_VISIBLE_OPTIONS_ONLY, which defaults to ON
 // (CMakeLists.txt:52). When enabled, the option table only recognizes VISIBLE-group options
 // (src/Option/OptionTable.cpp:74-78). The reference cjc is built with this ON.
-private let VISIBLE_OPTIONS_ONLY: Bool = true
+private let CANGJIE_VISIBLE_OPTIONS_ONLY: Bool = true
 
 private func printIndentOnly(indent: Int64, numSpaces!: Int64 = 2): Unit {
     BasicPrintIndentOnly(UInt64(indent), numSpaces: UInt64(numSpaces))
@@ -32,6 +33,10 @@ private func containsGroupValue(values: Array<Group>, target: Group): Bool {
     }
     return false
 }
+
+public enum Visibility { | VISIBLE | INVISIBLE }
+
+public enum OptionType { | GENERAL | EXPERIMENTAL }
 
 public class OptionValue {
     public let value: String
@@ -57,6 +62,8 @@ public class OptionInfo {
     public let values: Array<OptionValue>
     public let occurrence: Occurrence
     public let help: String
+    public let visible: Visibility
+    public let optionType: OptionType
 
     public init(
         name: String,
@@ -67,7 +74,9 @@ public class OptionInfo {
         alias: String,
         values: Array<OptionValue>,
         occurrence: Occurrence,
-        help: String
+        help: String,
+        visible!: Visibility = Visibility.VISIBLE,
+        optionType!: OptionType = OptionType.GENERAL
     ) {
         this.name = name
         this.id = id
@@ -78,6 +87,8 @@ public class OptionInfo {
         this.values = values
         this.occurrence = occurrence
         this.help = help
+        this.visible = visible
+        this.optionType = optionType
     }
 
     public func GetID(): ID { return id }
@@ -189,37 +200,6 @@ private func containsID(values: ArrayList<ID>, target: ID): Bool {
     return false
 }
 
-public class OptionArgParseResult {
-    public let ok: Bool
-    public let arg: OptionArgInstance
-    public init(ok: Bool, arg: OptionArgInstance) {
-        this.ok = ok
-        this.arg = arg
-    }
-}
-
-public class OptionForwardInfo {
-    public let info: OptionInfo
-    public let name: String
-    public let needsSeparatedValue: Bool
-    public init(info: OptionInfo, name: String, needsSeparatedValue: Bool) {
-        this.info = info
-        this.name = name
-        this.needsSeparatedValue = needsSeparatedValue
-    }
-}
-
-private class ParsedArgumentName {
-    let name: String
-    let hasValue: Bool
-    let value: String
-    init(name: String, hasValue: Bool, value: String) {
-        this.name = name
-        this.hasValue = hasValue
-        this.value = value
-    }
-}
-
 public class OptionTable {
     public let optionInfos: Array<OptionInfo>
     private let frontendMode: Bool
@@ -233,11 +213,11 @@ public class OptionTable {
         enabledGroups = if (frontendMode) { [Group.GLOBAL, Group.FRONTEND] } else { [Group.GLOBAL, Group.DRIVER] }
     }
 
-    private func parseArgumentName(argStr: String): ParsedArgumentName {
+    private func ParseArgumentName(argStr: String): (String, CoreOption<String>) {
         if (let Some(pos) <- argStr.indexOf("=")) {
-            return ParsedArgumentName(argStr[0..pos], true, argStr[pos + 1..])
+            return (argStr[0..pos], Some(argStr[pos + 1..]))
         }
-        return ParsedArgumentName(argStr, false, "")
+        return (argStr, None)
     }
 
     private func belongsToBackend(objects: Array<Backend>): Bool {
@@ -256,7 +236,8 @@ public class OptionTable {
         return false
     }
 
-    private func shouldRecognize(argName: String, hasValue: Bool, info: OptionInfo): Bool {
+    private func ShouldArgumentBeRecognized(argName: String, hasValue: Bool, info: OptionInfo): Bool {
+        if (CANGJIE_VISIBLE_OPTIONS_ONLY && !info.BelongsGroup(Group.VISIBLE)) { return false }
         if (argName != info.name && argName != info.alias) { return false }
         if (!belongsToBackend(info.backends) || !belongsToGroup(info.groups)) { return false }
         if (info.kind == Kind.FLAG_WITH_ARG && hasValue) { return true }
@@ -270,14 +251,14 @@ public class OptionTable {
         return false
     }
 
-    private func parseOptionArg(argStr: String): OptionArgParseResult {
-        let parsed = parseArgumentName(argStr)
-        var argName = parsed.name
-        var value = parsed.value
+    public func ParseOptionArg(argStr: String): CoreOption<OptionArgInstance> {
+        let (parsedArgName, maybeValue) = ParseArgumentName(argStr)
+        var argName = parsedArgName
+        var value = maybeValue ?? ""
         var foundIndex: Int64 = -1
         var idx: Int64 = 0
         while (idx < optionInfos.size) {
-            if (shouldRecognize(argName, parsed.hasValue, optionInfos[idx])) {
+            if (ShouldArgumentBeRecognized(argName, maybeValue.isSome(), optionInfos[idx])) {
                 foundIndex = idx
                 break
             }
@@ -288,9 +269,14 @@ public class OptionTable {
             idx = 0
             while (idx < optionInfos.size) {
                 let info = optionInfos[idx]
+                if (CANGJIE_VISIBLE_OPTIONS_ONLY && !info.BelongsGroup(Group.VISIBLE)) {
+                    idx++
+                    continue
+                }
                 let aliasMatch = info.kind == Kind.SEPARATED && !info.alias.isEmpty() && StartsWith(argStr, info.alias)
                 let continuousMatch = info.kind == Kind.CONTINOUS && StartsWith(argStr, info.name)
-                if (belongsToBackend(info.backends) && belongsToGroup(info.groups) && (aliasMatch || continuousMatch)) {
+                let shouldArgumentBeRecognized = belongsToBackend(info.backends) && belongsToGroup(info.groups)
+                if (shouldArgumentBeRecognized && (aliasMatch || continuousMatch)) {
                     foundIndex = idx
                     joinedWithoutSpace = true
                     argName = if (info.kind == Kind.SEPARATED) { info.alias } else { info.name }
@@ -302,15 +288,15 @@ public class OptionTable {
         }
         if (foundIndex < 0) {
             Errorln("invalid option: '" + argName + "'.")
-            return OptionArgParseResult(false, OptionArgInstance(optionInfos[0], argName))
+            return None
         }
         let arg = OptionArgInstance(optionInfos[foundIndex], argName)
         arg.str = argStr
         arg.value = value
-        arg.hasJoinedValue = parsed.hasValue
+        arg.hasJoinedValue = maybeValue.isSome()
         if (!frontendMode && arg.info.BelongsGroup(Group.FRONTEND)) {
             Errorln("invalid option: '" + argName + "'.")
-            return OptionArgParseResult(false, arg)
+            return None
         }
         if (arg.hasJoinedValue || arg.info.GetKind() == Kind.CONTINOUS || joinedWithoutSpace) {
             if ((arg.hasJoinedValue || arg.info.GetKind() == Kind.CONTINOUS) && value.isEmpty() &&
@@ -319,69 +305,13 @@ public class OptionTable {
             }
             if (!checkValue(value, arg.info)) {
                 Errorln("invalid value: '" + value + "'")
-                return OptionArgParseResult(false, arg)
+                return None
             }
             arg.value = value
         }
         let partial = !arg.hasJoinedValue && arg.info.GetKind() == Kind.SEPARATED && !joinedWithoutSpace
         arg.argType = if (partial) { ArgType.PartiallyParsed } else { ArgType.FullyParsed }
-        return OptionArgParseResult(true, arg)
-    }
-
-    // Under CANGJIE_VISIBLE_OPTIONS_ONLY (default in the reference build), only VISIBLE-group
-    // options are recognized (src/Option/OptionTable.cpp:74-78).
-    private func isVisibleForForward(info: OptionInfo): Bool {
-        return !VISIBLE_OPTIONS_ONLY || info.BelongsGroup(Group.VISIBLE)
-    }
-
-    // Classify a single option string for the driver's group-based forwarding (see
-    // GlobalOptions::GenerateFrontendOptions, src/Option/Option.cpp:993-1021). Returns the
-    // matched OptionInfo together with the recognized spelling and whether it still needs a
-    // separated value token. No diagnostics are emitted and no input is consumed; the driver
-    // decides how to forward based on the result.
-    public func ClassifyOption(argStr: String): ?OptionForwardInfo {
-        let parsed = parseArgumentName(argStr)
-        var argName = parsed.name
-        var foundIndex: Int64 = -1
-        var idx: Int64 = 0
-        while (idx < optionInfos.size) {
-            if (isVisibleForForward(optionInfos[idx]) &&
-                shouldRecognize(argName, parsed.hasValue, optionInfos[idx])) {
-                foundIndex = idx
-                break
-            }
-            idx++
-        }
-        var joinedWithoutSpace = false
-        if (foundIndex < 0) {
-            idx = 0
-            while (idx < optionInfos.size) {
-                let info = optionInfos[idx]
-                let aliasMatch = info.kind == Kind.SEPARATED && !info.alias.isEmpty() && StartsWith(argStr, info.alias)
-                let continuousMatch = info.kind == Kind.CONTINOUS && StartsWith(argStr, info.name)
-                if (isVisibleForForward(info) && belongsToBackend(info.backends) && belongsToGroup(info.groups) &&
-                    (aliasMatch || continuousMatch)) {
-                    foundIndex = idx
-                    joinedWithoutSpace = true
-                    argName = if (info.kind == Kind.SEPARATED) { info.alias } else { info.name }
-                    break
-                }
-                idx++
-            }
-        }
-        if (foundIndex < 0) {
-            return None
-        }
-        let info = optionInfos[foundIndex]
-        // Mirror OptionTable::ParseOptionArg (src/Option/OptionTable.cpp:145): in driver mode a
-        // FRONTEND-group-only option is not recognized here.
-        if (!frontendMode && info.BelongsGroup(Group.FRONTEND)) {
-            return None
-        }
-        // A SEPARATED option needs a value token only when it was not given inline ("--opt=value")
-        // and not joined to an alias ("-Lfoo"); this matches ArgType::PartiallyParsed.
-        let needsSeparatedValue = info.kind == Kind.SEPARATED && !parsed.hasValue && !joinedWithoutSpace
-        return OptionForwardInfo(info, argName, needsSeparatedValue)
+        return Some(arg)
     }
 
     public func ParseArgs(argsStrs: Array<String>, argList: ArgList): Bool {
@@ -402,9 +332,9 @@ public class OptionTable {
                 Errorln("invalid option: '-'.")
                 return false
             }
-            let parsed = parseOptionArg(argStr)
-            if (!parsed.ok) { return false }
-            let arg = parsed.arg
+            let maybeArg = ParseOptionArg(argStr)
+            if (let None <- maybeArg) { return false }
+            let arg = maybeArg.getOrThrow()
             if (arg.argType == ArgType.PartiallyParsed) {
                 idx++
                 if (idx >= argsStrs.size) {
@@ -424,6 +354,30 @@ public class OptionTable {
         return true
     }
 
+    private func PrintInfo(info: OptionInfo, backend: Backend, showExperimental: Bool): Unit {
+        var name = info.name
+        if (!info.alias.isEmpty()) { name = info.alias + ", " + name }
+        if (info.kind == Kind.SEPARATED) { name += " <value>" }
+        else if (info.kind == Kind.CONTINOUS) { name += "<value>" }
+        var desc = info.help
+        if (!info.BelongsGroup(Group.STABLE)) { desc += " (Experimental)" }
+        if (name.size < OPTION_WIDTH) {
+            printCommandDesc(name, desc)
+        } else {
+            printCommandDesc(name, "")
+            printCommandDesc("", desc)
+        }
+        for (optionValue in info.values) {
+            if (CANGJIE_VISIBLE_OPTIONS_ONLY && !containsGroupValue(optionValue.groups, Group.VISIBLE)) { continue }
+            if (!containsBackendValue(optionValue.backends, backend)) { continue }
+            if (!containsGroupValue(optionValue.groups, Group.STABLE) && !showExperimental) { continue }
+            let valueName = "  <value>=" + optionValue.value
+            var valueHelp = "  " + optionValue.help
+            if (!containsGroupValue(optionValue.groups, Group.STABLE)) { valueHelp += " (Experimental)" }
+            printCommandDesc(valueName, valueHelp)
+        }
+    }
+
     public func Usage(backend: Backend, groups: Array<Group>, showExperimental!: Bool = false): Unit {
         if (optionInfos.isEmpty()) { return }
         Println("Usage:")
@@ -433,27 +387,10 @@ public class OptionTable {
         Println()
         Println("Options:")
         for (info in optionInfos) {
-            if (info.BelongsToAnyOfGroup(groups) && info.BelongsToBackend(backend)) {
-                var name = info.name
-                if (!info.alias.isEmpty()) { name = info.alias + ", " + name }
-                if (info.kind == Kind.SEPARATED) { name += " <value>" }
-                else if (info.kind == Kind.CONTINOUS) { name += "<value>" }
-                var desc = info.help
-                if (!info.BelongsGroup(Group.STABLE)) { desc += " (Experimental)" }
-                if (name.size < OPTION_WIDTH) {
-                    printCommandDesc(name, desc)
-                } else {
-                    printCommandDesc(name, "")
-                    printCommandDesc("", desc)
-                }
-                for (optionValue in info.values) {
-                    if (!containsBackendValue(optionValue.backends, backend)) { continue }
-                    if (!containsGroupValue(optionValue.groups, Group.STABLE) && !showExperimental) { continue }
-                    let valueName = "  <value>=" + optionValue.value
-                    var valueHelp = "  " + optionValue.help
-                    if (!containsGroupValue(optionValue.groups, Group.STABLE)) { valueHelp += " (Experimental)" }
-                    printCommandDesc(valueName, valueHelp)
-                }
+            var doPrint = true
+            if (CANGJIE_VISIBLE_OPTIONS_ONLY) { doPrint = info.BelongsGroup(Group.VISIBLE) }
+            if (doPrint && info.BelongsToAnyOfGroup(groups) && info.BelongsToBackend(backend)) {
+                PrintInfo(info, backend, showExperimental)
             }
         }
     }
