@@ -271,7 +271,7 @@ class CHIRDeserializerImpl {
             }
             let fields = CHIRWireSplitFields(item)
             let paramTy = CHIRParseType(CHIRFieldAt(fields, 3), builder, customDefs)
-            let param = builder.CreateParameter(paramTy, CHIRFieldAt(fields, 1), fn)
+            let param = builder.CreateParameter(paramTy, INVALID_LOCATION, fn)
             param.SetSrcCodeIdentifier(CHIRFieldAt(fields, 2))
             CHIRApplyAnnoInfo(param.GetAnnoInfo(), CHIRFieldAt(fields, 4))
             CHIRApplyBaseInfo(param, CHIRFieldAt(fields, 5), CHIRFieldAt(fields, 6), annotationText: CHIRFieldAt(fields, 7))

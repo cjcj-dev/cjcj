@@ -2067,7 +2067,7 @@ public class FaithfulAST2CHIR {
         let paramTys = funcTy.GetParamTypes()
         var paramIndex: Int64 = 0
         while (paramIndex < paramTys.size) {
-            let parameter = builder.CreateParameter(paramTys[paramIndex], "%arg${paramIndex}", fn)
+            let parameter = builder.CreateParameter(paramTys[paramIndex], INVALID_LOCATION, fn)
             parameter.SetSrcCodeIdentifier(if (paramIndex == 0 && HasImplicitThisParam(funcDecl)) {
                 "this"
             } else {

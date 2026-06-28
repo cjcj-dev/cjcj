@@ -2037,7 +2037,7 @@ public class Lambda <: Expression {
             let clonedBody = lambdaBody.Clone(builder, cloned)
             for (param in GetParams()) {
                 if (let Some(paramTy) <- param.GetType()) {
-                    let clonedParam = builder.CreateParameter(paramTy, param.GetIdentifier(), cloned)
+                    let clonedParam = builder.CreateParameter(paramTy, INVALID_LOCATION, cloned)
                     clonedParam.CopyBaseInfoFrom(param)
                     clonedParam.SetSrcCodeIdentifier(param.GetSrcCodeIdentifier())
                 }

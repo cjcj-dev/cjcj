@@ -126,7 +126,7 @@ public class BlockGroupCopyHelper {
     private func CloneLambdaParameters(oldLambda: Lambda, newLambda: Lambda): Unit {
         for (oldParam in oldLambda.GetParams()) {
             if (let Some(paramTy) <- oldParam.GetType()) {
-                let newParam = builder.CreateParameter(paramTy, oldParam.GetIdentifier(), newLambda)
+                let newParam = builder.CreateParameter(paramTy, INVALID_LOCATION, newLambda)
                 newParam.SetSrcCodeIdentifier(oldParam.GetSrcCodeIdentifier())
                 newParam.CopyBaseInfoFrom(oldParam)
             } else {

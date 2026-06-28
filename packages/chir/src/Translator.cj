@@ -1353,7 +1353,7 @@ public class Translator {
         let entry = builder.CreateBlock(lambdaBlockGroup)
         lambdaBlockGroup.SetEntryBlock(entry)
         for (paramTy in lambdaParamTypes) {
-            builder.CreateParameter(paramTy, "%${builder.context.GetAllNodesNum()}", lambda)
+            builder.CreateParameter(paramTy, INVALID_LOCATION, lambda)
         }
         let retVal = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(instFuncType.instRetTy),
             instFuncType.instRetTy, entry))
@@ -2206,7 +2206,7 @@ public class Translator {
         var idx: Int64 = 0
         for (param in params) {
             if (idx < paramTys.size) {
-                let chirParam = builder.CreateParameter(paramTys[idx], "%${builder.context.GetAllNodesNum()}", lambda)
+                let chirParam = builder.CreateParameter(paramTys[idx], INVALID_LOCATION, lambda)
                 chirParam.SetSrcCodeIdentifier(param.identifier.Val())
                 localValSymbolTable.Set(param, chirParam)
             }

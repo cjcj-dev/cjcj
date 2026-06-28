@@ -465,7 +465,7 @@ public class ClosureConversion {
         method.EnableAttr(Attribute.PUBLIC)
         method.EnableAttr(Attribute.VIRTUAL)
         for (paramTy in paramTypes) {
-            builder.CreateParameter(paramTy, "%p${method.GetNumOfParams()}", Some(method))
+            builder.CreateParameter(paramTy, INVALID_LOCATION, method)
         }
         classDef.AddMethod(method)
         return method
@@ -709,7 +709,7 @@ public class ClosureConversion {
         let methodTy = method.GetFuncType() ??
             throw IllegalStateException("ClosureConversion override method has no type")
         for (paramTy in methodTy.GetParamTypes()) {
-            builder.CreateParameter(paramTy, "%p${method.GetNumOfParams()}", Some(method))
+            builder.CreateParameter(paramTy, INVALID_LOCATION, method)
         }
         let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(methodRetTy), methodRetTy, entry))
         method.SetReturnValue(retSlot)
@@ -753,7 +753,7 @@ public class ClosureConversion {
         let methodTy = method.GetFuncType() ??
             throw IllegalStateException("ClosureConversion override method has no type")
         for (paramTy in methodTy.GetParamTypes()) {
-            builder.CreateParameter(paramTy, "%p${method.GetNumOfParams()}", Some(method))
+            builder.CreateParameter(paramTy, INVALID_LOCATION, method)
         }
         let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(retTy), retTy, entry))
         method.SetReturnValue(retSlot)
@@ -921,7 +921,7 @@ public class ClosureConversion {
         if (let Some(parentFunc) <- lambda.GetTopLevelFunc()) {
             globalFunc.InheritIDFromFunc(parentFunc)
         }
-        let thisParam = builder.CreateParameter(params[0], "$env", Some(globalFunc))
+        let thisParam = builder.CreateParameter(params[0], INVALID_LOCATION, globalFunc)
         thisParam.SetSrcCodeIdentifier("$env")
         for (param in lambda.GetParams()) {
             param.SetOwnerFunc(globalFunc)

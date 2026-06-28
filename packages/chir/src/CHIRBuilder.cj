@@ -5,6 +5,7 @@ import cangjie_compiler::utils.OverflowStrategy
 
 public class CHIRBuilder {
     public let context: CHIRContext
+    private var markAsCompileTimeValue: Bool = false
 
     public init(context: CHIRContext) {
         this.context = context
@@ -73,21 +74,60 @@ public class CHIRBuilder {
     }
 
     public func CreateBlock(parentGroup: BlockGroup): Block {
-        let owner = parentGroup.GetTopLevelFunc()
-        let id = if (let Some(fn) <- owner) { fn.GenerateBlockId() } else { UInt64(context.GetAllNodesNum()) }
-        return CreateBlock("#${id}", parentGroup)
+        let fn = parentGroup.GetTopLevelFunc() ??
+            throw IllegalArgumentException("block parent group has no top-level function")
+        let block = CreateBlock("#${fn.GenerateBlockId()}", parentGroup)
+        if (markAsCompileTimeValue) {
+            block.EnableAttr(Attribute.CONST)
+        }
+        return block
     }
 
-    public func CreateParameter(ty: Type, identifier: String, ownerFunc: Option<Function>): Parameter {
-        let param = Parameter(ty, identifier, ownerFunc)
+    public func SplitBlock(separator: Expression): (Block, Block) {
+        let block1 = separator.GetParentBlock() ??
+            throw IllegalArgumentException("split separator has no parent block")
+        let parentGroup = block1.GetParentBlockGroup() ??
+            throw IllegalArgumentException("split block has no parent block group")
+        let block2 = CreateBlock(parentGroup)
+        var needMove: Bool = false
+        for (expr in block1.GetExpressions()) {
+            if (refEq(expr, separator)) {
+                needMove = true
+                expr.RemoveSelfFromBlock()
+                CreateGoTo(block2, block1)
+                continue
+            }
+            if (needMove) {
+                expr.MoveTo(block2)
+            }
+        }
+        return (block1, block2)
+    }
+
+    public func CreateParameter(ty: Type, loc: DebugLocation, ownerFunc: Function): Parameter {
+        let param = Parameter(ty, "%${ownerFunc.GenerateLocalId()}", Some(ownerFunc))
+        param.EnableAttr(Attribute.READONLY)
+        param.SetDebugLocation(loc)
         context.RegisterValue(param)
         return param
     }
 
-    public func CreateParameter(ty: Type, identifier: String, ownerLambda: Lambda): Parameter {
-        let param = Parameter(ty, identifier, ownerLambda)
+    public func CreateParameter(ty: Type, loc: DebugLocation, ownerLambda: Lambda): Parameter {
+        let topFunc = ownerLambda.GetTopLevelFunc() ??
+            throw IllegalArgumentException("lambda parameter owner has no top-level function")
+        let param = Parameter(ty, "%${topFunc.GenerateLocalId()}", ownerLambda)
+        param.EnableAttr(Attribute.READONLY)
+        param.SetDebugLocation(loc)
         context.RegisterValue(param)
         return param
+    }
+
+    public func SetCompileTimeValueMark(val: Bool): Unit {
+        markAsCompileTimeValue = val
+    }
+
+    public func GetCompileTimeValueMark(): Bool {
+        return markAsCompileTimeValue
     }
 
     public func CreateLocalVar(ty: Type, identifier: String, expr: Option<Expression>): LocalVar {
