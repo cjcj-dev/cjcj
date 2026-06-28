@@ -59,9 +59,8 @@ public class MacroExpandExpr <: Expr {
     }
 
     public func GetLambda(i: Int64): Option<LambdaExpr> {
-        let idx = i + 1
-        if (invocation.IsIfAvailable() && idx < invocation.nodes.size) {
-            return invocation.nodes[idx] as LambdaExpr
+        if (invocation.IsIfAvailable() && invocation.nodes.size > i) {
+            return invocation.nodes[i + 1] as LambdaExpr
         }
         return None
     }
@@ -72,6 +71,10 @@ public class MacroExpandDecl <: Decl {
 
     public init() {
         super(ASTKind.MACRO_EXPAND_DECL)
+    }
+
+    public override func ToString(): String {
+        return "@" + identifier.Val()
     }
 }
 
