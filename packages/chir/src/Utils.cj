@@ -113,16 +113,6 @@ public func ReturnTypeShouldBeVoid(fn: Function): Bool {
     return fn.IsGVInit() || fn.IsFinalizer() || (fn.IsConstructor() && !fn.TestAttr(Attribute.STATIC))
 }
 
-public func IndentToString(indent: Int64): String {
-    var out = ""
-    var idx: Int64 = 0
-    while (idx < indent) {
-        out += " "
-        idx++
-    }
-    return out
-}
-
 public func JoinStrings(values: ArrayList<String>, delimiter: String): String {
     var out = ""
     var idx: Int64 = 0

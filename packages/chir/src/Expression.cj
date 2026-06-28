@@ -1,7 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
-import cangjie_compiler::utils.{OverflowStrategy, OverflowStrategyName}
+import cangjie_compiler::utils.OverflowStrategy
 
 private var gLambdaClonedIdx: UInt64 = 0u64
 
@@ -388,7 +388,7 @@ public class UnaryExpression <: Expression {
 
     public override func AddExtraComment(): String {
         if (overflowStrategy != OverflowStrategy.NA) {
-            return "Overflow: " + OverflowStrategyName(overflowStrategy)
+            return OverflowToString(overflowStrategy)
         }
         return ""
     }
@@ -415,7 +415,7 @@ public class BinaryExpression <: Expression {
 
     public override func AddExtraComment(): String {
         if (overflowStrategy != OverflowStrategy.NA) {
-            return "Overflow: " + OverflowStrategyName(overflowStrategy)
+            return OverflowToString(overflowStrategy)
         }
         return ""
     }
@@ -1066,7 +1066,7 @@ public class TypeCast <: Expression {
 
     public override func AddExtraComment(): String {
         if (overflowStrategy != OverflowStrategy.NA) {
-            return "Overflow: " + OverflowStrategyName(overflowStrategy)
+            return OverflowToString(overflowStrategy)
         }
         return ""
     }
