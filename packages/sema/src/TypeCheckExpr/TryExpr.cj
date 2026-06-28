@@ -369,7 +369,15 @@ private func ChkResourceSpec(typeManager: TypeManager, resource: VarDecl): Bool 
         }
     }
     if (let Some(initializer) <- resource.initializer) {
-        let initTy = SynExprShallow(typeManager, initializer)
+        let initTy = if (let Some(existingTy) <- initializer.GetTy()) {
+            if (Ty.IsTyCorrect(existingTy)) {
+                existingTy
+            } else {
+                SynExprShallow(typeManager, initializer)
+            }
+        } else {
+            SynExprShallow(typeManager, initializer)
+        }
         if (Ty.IsTyCorrect(initTy)) {
             let concreteInitTy = TcReplaceIdeal(typeManager, initializer)
             if (let Some(targetTy) <- declaredTy) {

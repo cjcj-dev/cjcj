@@ -728,7 +728,9 @@ private func SynRefExpr(typeManager: TypeManager, re: RefExpr): Ty {
 private func SynMemberAccess(typeManager: TypeManager, ma: MemberAccess): Ty {
     if (let Some(baseExpr) <- ma.baseExpr) {
         SetIsNotAlone(baseExpr)
-        let _ = SynExprShallow(typeManager, baseExpr)
+        if (!Ty.IsTyCorrect(baseExpr.GetTy())) {
+            let _ = SynExprShallow(typeManager, baseExpr)
+        }
         if (let Some(baseTy) <- baseExpr.GetTy()) {
             if (let Some(varrayTy) <- (baseTy as VArrayTy)) {
                 if (ma.field.Val() == "size") {

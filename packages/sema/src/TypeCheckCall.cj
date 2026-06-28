@@ -1072,31 +1072,389 @@ private func ApplyInstantiatedArgumentTypes(typeManager: TypeManager, ce: CallEx
     }
 }
 
-private func GenerateCallBaseTypeMapping(typeManager: TypeManager, ce: CallExpr): SubstPack {
-    let typeMapping = SubstPack()
-    if (let Some(base) <- ce.baseFunc) {
-        if (let Some(nameRef) <- (base as NameReferenceExpr)) {
-            if (!nameRef.instTys.isEmpty()) {
-                if (let Some(target) <- nameRef.GetTarget()) {
-                    GenerateTypeMapping(typeManager, typeMapping, GetRealTarget(target), nameRef.instTys)
+private func TypeCheckCallGenericListContains(values: ArrayList<GenericsTy>, ty: Ty): Bool {
+    for (value in values) {
+        if (SameTy(value, ty)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func TypeCheckCallCollectTypeArgTys(typeArgs: ArrayList<Type>): ArrayList<Ty> {
+    let out = ArrayList<Ty>()
+    for (typeArg in typeArgs) {
+        if (let Some(ty) <- typeArg.GetTy()) {
+            out.add(ty)
+        }
+    }
+    return out
+}
+
+private func ErasePromoteMappingForOmittedBaseTypeArgs(mapping: MultiTypeSubst, baseDecl: Decl,
+    baseTypeArgs: ArrayList<Type>): Unit {
+    if (let None <- baseDecl.GetTy()) {
+        return
+    }
+    let genericTys = GetAllGenericTys(baseDecl.GetTy().getOrThrow())
+    let definedTys = TypeCheckCallCollectTypeArgTys(baseTypeArgs)
+    for (entry in mapping.entries) {
+        var idx: Int64 = 0
+        while (idx < entry.tys.values.size) {
+            let mappedTy = entry.tys.values[idx]
+            if (TypeCheckCallGenericListContains(genericTys, mappedTy) && !TyListContains(definedTys, mappedTy)) {
+                entry.tys.values.remove(at: idx)
+            } else {
+                idx++
+            }
+        }
+    }
+}
+
+// Mirrors C++ TypeCheckCall.cpp:895-934.
+private func GenerateTypeMappingForBaseExpr(typeManager: TypeManager, baseExpr: Expr,
+    typeMapping: MultiTypeSubst): Unit {
+    let memberAccess = match (baseExpr as MemberAccess) {
+        case Some(value) => value
+        case None => return
+    }
+    let memberBase = match (memberAccess.baseExpr) {
+        case Some(value) => value
+        case None => return
+    }
+    let memberBaseTy = match (memberBase.GetTy()) {
+        case Some(value) => value
+        case None => return
+    }
+    if (!Ty.IsTyCorrect(memberBaseTy)) {
+        return
+    }
+    if (IsThisOrSuper(memberBase)) {
+        typeManager.GenerateGenericMapping(typeMapping, memberBaseTy)
+        return
+    }
+    let baseDeclOpt = GetRealTarget(memberBase.GetTarget())
+    if (let Some(baseDecl) <- baseDeclOpt) {
+        if (baseDecl.astKind == ASTKind.PACKAGE_DECL) {
+            return
+        }
+        if (let Some(maTarget) <- memberAccess.GetTarget()) {
+            if (let Some(outerDecl) <- maTarget.outerDecl) {
+                if (baseDecl.IsTypeDecl() || baseDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                    let outerTy = match (outerDecl.GetTy()) {
+                        case Some(value) => value
+                        case None => return
+                    }
+                    let promoteMapping = Promotion(typeManager).GetPromoteTypeMapping(memberBaseTy, outerTy)
+                    ErasePromoteMappingForOmittedBaseTypeArgs(promoteMapping, baseDecl, memberBase.GetTypeArgs())
+                    MergeMultiTypeSubsts(typeMapping, promoteMapping)
+                    return
                 }
             }
         }
-        typeMapping.Merge(GenerateGenericTypeMapping(typeManager, base))
-        if (let Some(baseTy) <- base.GetTy()) {
-            typeManager.GenerateGenericMapping(typeMapping, baseTy)
+    }
+    typeManager.GenerateGenericMapping(typeMapping, memberBaseTy)
+}
+
+// Mirrors C++ TypeCheckCall.cpp:938-965.
+private func GenerateTypeMappingByTyArgs(typeArgs: ArrayList<Type>, generic: Generic): TypeSubst {
+    let typeMapping = TypeSubst()
+    let typeArgsSize = typeArgs.size
+    if (generic.typeParameters.size != typeArgsSize) {
+        return typeMapping
+    }
+    for (idx in 0..typeArgsSize) {
+        let typeParam = generic.typeParameters[idx]
+        let paramTy = typeParam.GetTy() ?? continue
+        let genericTy = (paramTy as GenericsTy) ?? continue
+        var typeArgTy: Ty = TypeManager.GetInvalidTy()
+        if (let Some(value) <- typeArgs[idx].GetTy()) {
+            if (value.HasIntersectionTy()) {
+                continue
+            }
+            typeArgTy = value
+        }
+        if (Ty.IsTyCorrect(genericTy) && Ty.IsTyCorrect(typeArgTy)) {
+            typeMapping.Put(genericTy, typeArgTy)
         }
     }
     return typeMapping
+}
+
+private func GetEffectiveTypeArgsForCall(baseFunc: Expr, typeArgs: ArrayList<Type>): ArrayList<Type> {
+    if (let None <- (baseFunc as RefExpr)) {
+        return typeArgs
+    }
+    let ref = (baseFunc as RefExpr).getOrThrow()
+    if (!ref.compilerAddedTyArgs) {
+        return typeArgs
+    }
+    for (typeArg in typeArgs) {
+        if (Ty.IsTyCorrect(typeArg.GetTy()) && typeArg.TyKind() == TypeKind.TYPE_GENERICS) {
+            return ArrayList<Type>()
+        }
+    }
+    return typeArgs
+}
+
+// Mirrors C++ ExtraScopes.cpp:28-41.
+private func IsBaseTypeOmittedTypeArgs(memberAccess: MemberAccess): Bool {
+    let baseExpr = match (memberAccess.baseExpr) {
+        case Some(value) => value
+        case None => return false
+    }
+    let baseTarget = GetRealTarget(baseExpr.GetTarget())
+    let isGenericType = if (let Some(target) <- baseTarget) {
+        target.IsTypeDecl() && target.TestAttr(Attribute.GENERIC)
+    } else {
+        false
+    }
+    if (!isGenericType) {
+        return false
+    }
+    if (IsThisOrSuper(baseExpr)) {
+        return false
+    }
+    let nameReference = match (baseExpr as NameReferenceExpr) {
+        case Some(value) => value
+        case None => return false
+    }
+    return nameReference.instTys.isEmpty() && NeedFurtherInstantiation(baseExpr.GetTypeArgs())
+}
+
+// Mirrors C++ ExtraScopes.cpp:107-144.
+private func GenerateTypeMappingByCallContext(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ctx: ASTContext, fd: FuncDecl, ce: CallExpr, typeMapping: SubstPack): Bool {
+    let structDecl = match (fd.outerDecl) {
+        case Some(value) => value
+        case None => return false
+    }
+    let structTy = match (structDecl.GetTy()) {
+        case Some(value) => value
+        case None => return false
+    }
+    if (!Ty.IsTyCorrect(structTy)) {
+        return false
+    }
+    if (!structDecl.TestAttr(Attribute.GENERIC)) {
+        return true
+    }
+    let sym = match (TypeCheckCallGetCurStructSymbol(ctx, ce.scopeName)) {
+        case Some(value) => value
+        case None => return false
+    }
+    let symNode = match (sym.node) {
+        case Some(value) => value
+        case None => return false
+    }
+    let symTy = match (symNode.GetTy()) {
+        case Some(value) => value
+        case None => return false
+    }
+    let promotedTys = Promotion(typeManager).Promote(symTy, structTy)
+    var generated = false
+    for (promoteTy in promotedTys.values) {
+        if (!Ty.IsTyCorrect(promoteTy)) {
+            continue
+        }
+        let isConstraintFit = if (GetCurrentGeneric(fd, ce).isSome()) {
+            typeManager.CheckGenericDeclInstantiation(Some(structDecl), promoteTy.typeArgs)
+        } else {
+            CheckGenericDeclInstantiationForCall(typeManager, diag, structDecl, promoteTy.typeArgs, ce)
+        }
+        let invalidArgSize = structTy.typeArgs.size != promoteTy.typeArgs.size
+        if (!isConstraintFit || invalidArgSize) {
+            continue
+        }
+        GenerateTypeMapping(typeManager, typeMapping, structDecl, promoteTy.typeArgs)
+        generated = true
+    }
+    return generated
+}
+
+// Mirrors C++ ExtraScopes.cpp:147-204.
+private func GenerateExtendGenericTypeMapping(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ctx: ASTContext, fd: FuncDecl, ce: CallExpr, typeMapping: SubstPack): Bool {
+    let outerDecl = match (fd.outerDecl) {
+        case Some(value) => value
+        case None => return false
+    }
+    let extendDecl = match (outerDecl as ExtendDecl) {
+        case Some(value) => value
+        case None => return false
+    }
+    let extendedType = match (extendDecl.extendedType) {
+        case Some(value) => value
+        case None => return false
+    }
+    let extendedTy = match (extendedType.GetTy()) {
+        case Some(value) => value
+        case None => return false
+    }
+    if (!Ty.IsTyCorrect(extendedTy)) {
+        return false
+    }
+    let base = match (ce.baseFunc) {
+        case Some(value) => value
+        case None => return false
+    }
+    if (GetCurrentGeneric(fd, ce).isNone() && extendDecl.TestAttr(Attribute.GENERIC) &&
+        !base.GetTypeArgs().isEmpty()) {
+        if (let Some(diagValue) <- diag) {
+            DiagOld(diagValue, ce, BasicDiagKind.sema_non_generic_function_with_type_argument)
+        }
+        return false
+    }
+    if (base.astKind == ASTKind.REF_EXPR) {
+        if (!GenerateTypeMappingByCallContext(typeManager, diag, ctx, fd, ce, typeMapping)) {
+            return false
+        }
+    }
+    if (base.astKind != ASTKind.MEMBER_ACCESS) {
+        return true
+    }
+
+    let memberAccess = match (base as MemberAccess) {
+        case Some(value) => value
+        case None => return false
+    }
+    let memberBase = match (memberAccess.baseExpr) {
+        case Some(value) => value
+        case None => return false
+    }
+    let memberBaseTy = match (memberBase.GetTy()) {
+        case Some(value) => value
+        case None => return false
+    }
+    if (!Ty.IsTyCorrect(memberBaseTy)) {
+        return false
+    }
+
+    if (let Some(generic) <- extendDecl.generic) {
+        for (extGenParam in generic.typeParameters) {
+            if (let Some(paramTy) <- extGenParam.GetTy()) {
+                if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                    typeManager.MakeInstTyVar(typeMapping, genericTy)
+                }
+            }
+        }
+    }
+    if (IsBaseTypeOmittedTypeArgs(memberAccess)) {
+        return true
+    }
+    let instantiatedExtendedTy = typeManager.GetInstantiatedTy(extendedTy, typeMapping.u2i)
+    let promotedTys = Promotion(typeManager).Promote(memberBaseTy, instantiatedExtendedTy)
+    let promotedTy = if (promotedTys.values.isEmpty()) { TypeManager.GetInvalidTy() } else { promotedTys.values[0] }
+    if (!Ty.IsTyCorrect(promotedTy)) {
+        return false
+    }
+    let baseArgs = typeManager.GetTypeArgs(promotedTy)
+    if (extendDecl.TestAttr(Attribute.GENERIC) &&
+        !CheckGenericDeclInstantiationForCall(typeManager, diag, extendDecl, baseArgs, ce)) {
+        return false
+    }
+    GenerateTypeMapping(typeManager, typeMapping, extendDecl, baseArgs)
+    RelayMappingFromExtendToExtended(typeManager, typeMapping, extendDecl)
+    return true
+}
+
+private func TypeCheckCallIsTypeObjectCreation(fd: FuncDecl, ce: CallExpr): Bool {
+    let isTypeNameCall = ce.callKind == CallKind.CALL_OBJECT_CREATION || ce.callKind == CallKind.CALL_STRUCT_CREATION
+    return (isTypeNameCall && fd.TestAttr(Attribute.CONSTRUCTOR)) || fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)
+}
+
+private func TypeCheckCallHasUpperBoundMapping(memberAccess: MemberAccess, target: Decl): Bool {
+    for (entry in memberAccess.foundUpperBoundMap) {
+        if (SameDecl(entry[0], target) && !entry[1].isEmpty()) {
+            return true
+        }
+    }
+    return false
+}
+
+// Mirrors C++ TypeCheckUtil.cpp:382-392.
+private func IsGenericUpperBoundCall(expr: Expr, target: Decl): Bool {
+    let memberAccess = match (expr as MemberAccess) {
+        case Some(value) => value
+        case None => return false
+    }
+    let baseExpr = match (memberAccess.baseExpr) {
+        case Some(value) => value
+        case None => return false
+    }
+    let baseTy = match (baseExpr.GetTy()) {
+        case Some(value) => value
+        case None => return false
+    }
+    if (!baseTy.IsGeneric() || target.outerDecl.isNone()) {
+        return false
+    }
+    return TypeCheckCallHasUpperBoundMapping(memberAccess, target)
+}
+
+private func GenerateTypeMappingForUpperBounds(typeManager: TypeManager, memberAccess: MemberAccess,
+    target: Decl, typeMapping: SubstPack): Unit {
+    for (entry in memberAccess.foundUpperBoundMap) {
+        if (SameDecl(entry[0], target)) {
+            for (upper in entry[1]) {
+                typeManager.GenerateGenericMapping(typeMapping, upper)
+            }
+            return
+        }
+    }
+}
+
+private func GenerateCallBaseTypeMapping(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ctx: Option<ASTContext>, ce: CallExpr, fd: FuncDecl): Option<SubstPack> {
+    let typeMapping = SubstPack()
+    if (let Some(base) <- ce.baseFunc) {
+        let typeArgs = GetEffectiveTypeArgsForCall(base, base.GetTypeArgs())
+        let isInStructDecl = fd.outerDecl.isSome() && fd.outerDecl.getOrThrow().IsNominalDecl() &&
+            !TypeCheckCallIsTypeObjectCreation(fd, ce)
+        if (IsGenericUpperBoundCall(base, fd)) {
+            if (let Some(memberAccess) <- (base as MemberAccess)) {
+                GenerateTypeMappingForUpperBounds(typeManager, memberAccess, fd, typeMapping)
+            }
+        } else if (isInStructDecl && fd.outerDecl.getOrThrow().astKind == ASTKind.EXTEND_DECL) {
+            if (let Some(ctxValue) <- ctx) {
+                if (!GenerateExtendGenericTypeMapping(typeManager, diag, ctxValue, fd, ce, typeMapping)) {
+                    return None
+                }
+            } else {
+                return None
+            }
+        } else if (!GetCurrentGeneric(fd, ce).isSome() && !typeArgs.isEmpty()) {
+            if (let Some(diagValue) <- diag) {
+                DiagOld(diagValue, ce, BasicDiagKind.sema_non_generic_function_with_type_argument)
+            }
+            return None
+        } else if (let Some(_) <- (base as RefExpr)) {
+            if (isInStructDecl) {
+                if (let Some(ctxValue) <- ctx) {
+                    if (!GenerateTypeMappingByCallContext(typeManager, diag, ctxValue, fd, ce, typeMapping)) {
+                        return None
+                    }
+                } else {
+                    return None
+                }
+            }
+        } else if (let Some(_) <- (base as MemberAccess)) {
+            ReplaceTarget(base, Some(fd))
+            let baseTypeMapping = MultiTypeSubst()
+            GenerateTypeMappingForBaseExpr(typeManager, base, baseTypeMapping)
+            typeManager.PackMapping(typeMapping, baseTypeMapping)
+        }
+        if (let Some(generic) <- GetCurrentGeneric(fd, ce)) {
+            typeManager.PackMapping(typeMapping, GenerateTypeMappingByTyArgs(typeArgs, generic))
+        }
+    }
+    return Some(typeMapping)
 }
 
 private func HasRecordedCallTypeArgs(ce: CallExpr): Bool {
     if (let Some(base) <- ce.baseFunc) {
         if (!base.GetTypeArgs().isEmpty()) {
             return true
-        }
-        if (let Some(nameRef) <- (base as NameReferenceExpr)) {
-            return !nameRef.instTys.isEmpty()
         }
     }
     return false
@@ -1415,6 +1773,18 @@ private func TryUpdateEnumTyByTarget(ce: CallExpr, fd: FuncDecl, retTarget: Opti
             }
         }
     }
+}
+
+// Mirrors C++ TypeArgumentInference.cpp:541-555, adapted to selfhost's explicit SubstPack threading.
+private func GenerateTypeMappingForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ctx: Option<ASTContext>, ce: CallExpr, fd: FuncDecl, paramTys: ArrayList<Ty>,
+    inferenceFailure: Option<CallInferenceFailure>, target: Option<Ty>, argChecker: Option<CallArgChecker>): Option<SubstPack> {
+    TryUpdateEnumTyByTarget(ce, fd, target)
+    let typeMapping = GenerateCallBaseTypeMapping(typeManager, diag, ctx, ce, fd) ?? return None
+    if (!InferGenericCallTypeMapping(typeManager, ce, fd, paramTys, typeMapping, inferenceFailure, target, argChecker)) {
+        return None
+    }
+    return Some(typeMapping)
 }
 
 private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl, paramTys: ArrayList<Ty>,
@@ -1749,8 +2119,8 @@ private func CheckCandidateConstrains(typeManager: TypeManager, diag: Option<Bas
     return CheckInstantiatedCandidateGenericDecl(typeManager, diag, ce, fd, typeMapping)
 }
 
-private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr, fd: FuncDecl,
-    target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
+private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: Option<ASTContext>,
+    ce: CallExpr, fd: FuncDecl, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
     inferenceFailure!: Option<CallInferenceFailure> = None,
     declSynthesizer!: Option<CallDeclSynthesizer> = None): Option<FunctionMatchingUnit> {
     let wrongNormalArgSize = !fd.hasVariableLenArg && !IsPossibleVariadicFunction(fd, ce) && (if (let Some(params) <- BodyParamList(
@@ -1770,11 +2140,14 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     if (paramTyInArgOrder.size != ce.args.size) {
         return None
     }
-    TryUpdateEnumTyByTarget(ce, fd, target)
-    let typeMapping = GenerateCallBaseTypeMapping(typeManager, ce)
-    if (!InferGenericCallTypeMapping(typeManager, ce, fd, paramTyInArgOrder, typeMapping, inferenceFailure, target,
-        argChecker)) {
-        return None
+    let typeMapping = if (IsGenericCall(ctx, ce, fd)) {
+        match (GenerateTypeMappingForCall(typeManager, diag, ctx, ce, fd, paramTyInArgOrder, inferenceFailure, target,
+            argChecker)) {
+            case Some(value) => value
+            case None => return None
+        }
+    } else {
+        SubstPack()
     }
     let unit = FunctionMatchingUnit(fd, paramTyInArgOrder, typeMapping)
     unit.argNameValid = argNamesValid
@@ -1791,7 +2164,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
         return None
     }
     if (let Some(targetTy) <- target) {
-        let instRetTy = typeManager.ApplySubstPack(GetCallTy(typeManager, ce, fd), typeMapping)
+        let instRetTy = typeManager.ApplySubstPack(GetCallTy(typeManager, ctx, ce, fd), typeMapping)
         let normalizedRetTy = typeManager.SubstituteTypeAliasInTy(instRetTy)
         let normalizedTargetTy = typeManager.SubstituteTypeAliasInTy(targetTy)
         if (!instRetTy.HasIdealTy() && !typeManager.IsSubtype(normalizedRetTy, normalizedTargetTy)) {
@@ -1827,7 +2200,7 @@ private func UpdateCallTargets(ce: CallExpr, fd: FuncDecl): Unit {
     }
 }
 
-private func GetCallTy(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl): Ty {
+private func GetCallTy(typeManager: TypeManager, ctx: Option<ASTContext>, ce: CallExpr, fd: FuncDecl): Ty {
     if (let Some(fdTy) <- fd.GetTy()) {
         if (let Some(funcTy) <- (fdTy as FuncTy)) {
             let rawRet = funcTy.retTy
@@ -1844,6 +2217,20 @@ private func GetCallTy(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl): Ty
                         }
                     }
                 }
+                if (let Some(ctxValue) <- ctx) {
+                    if (let Some(sym) <- TypeCheckCallGetCurStructSymbol(ctxValue, ce.scopeName)) {
+                        if (let Some(symNode) <- sym.node) {
+                            if (let Some(symTy) <- symNode.GetTy()) {
+                                if (let Some(classTy) <- (symTy as ClassTy)) {
+                                    if (let Some(classDecl) <- classTy.decl) {
+                                        return typeManager.GetClassThisTy(classDecl, classTy.typeArgs.toArray())
+                                    }
+                                }
+                                return symTy
+                            }
+                        }
+                    }
+                }
             }
             return typeManager.SubstituteTypeAliasInTy(rawRet)
         }
@@ -1851,14 +2238,163 @@ private func GetCallTy(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl): Ty
     return TypeManager.GetInvalidTy()
 }
 
-private func IsGenericCallForUpdate(fd: FuncDecl, ce: CallExpr): Bool {
-    if (let Some(generic) <- GenericDeclForCall(fd)) {
-        return fd.TestAttr(Attribute.GENERIC) || !generic.GetGeneric().isNone()
+private func TypeCheckCallGetCurStructSymbol(ctx: ASTContext, scopeName: String): Option<Symbol> {
+    var scopeGateName = GetScopeGateName(scopeName)
+    while (!scopeGateName.isEmpty()) {
+        if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
+            if (let Some(node) <- symbol.node) {
+                if (node.IsNominalDecl()) {
+                    return Some(symbol)
+                }
+            }
+        }
+        scopeGateName = GetScopeGateName(scopeGateName)
     }
-    if (let Some(base) <- ce.baseFunc) {
-        return NeedFurtherInstantiation(base.GetTypeArgs())
+    return None
+}
+
+private func IsInGenericStructDecl(fd: FuncDecl): Bool {
+    if (let Some(outerDecl) <- fd.outerDecl) {
+        return outerDecl.IsNominalDecl() && outerDecl.GetGeneric().isSome()
     }
     return false
+}
+
+// Mirrors C++ TypeCheckCall.cpp:725-772.
+private func IsGenericCall(ctx: Option<ASTContext>, ce: CallExpr, fd: FuncDecl): Bool {
+    let fdHasGenericTy = if (let Some(fdTy) <- fd.GetTy()) { fdTy.HasGeneric() } else { false }
+    if (fd.TestAttr(Attribute.GENERIC) || fdHasGenericTy) {
+        return true
+    }
+    let baseFunc = match (ce.baseFunc) {
+        case Some(value) => value
+        case None => return false
+    }
+    if (!baseFunc.GetTypeArgs().isEmpty()) {
+        return true
+    }
+    if (IsSuperCall(ce)) {
+        if (let Some(body) <- fd.funcBody) {
+            if (let Some(parentClassLike) <- body.parentClassLike) {
+                if (parentClassLike.GetGeneric().isSome()) {
+                    return true
+                }
+            }
+        }
+    }
+    if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+        let baseExpr = match (memberAccess.baseExpr) {
+            case Some(value) => value
+            case None => return false
+        }
+        let baseType = match (baseExpr.GetTy()) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (!Ty.IsTyCorrect(baseType)) {
+            return false
+        }
+        if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(baseType))) {
+            if (decl.TestAttr(Attribute.GENERIC) &&
+                (decl.astKind != ASTKind.ENUM_DECL || fd.TestAttr(Attribute.ENUM_CONSTRUCTOR) ||
+                    fd.TestAttr(Attribute.STATIC))) {
+                return true
+            }
+        }
+        if (IsInGenericStructDecl(fd)) {
+            return true
+        }
+    }
+    if (let Some(_) <- (baseFunc as RefExpr)) {
+        if (let Some(ctxValue) <- ctx) {
+            let sym1 = TypeCheckCallGetCurStructSymbol(ctxValue, ce.scopeName)
+            let sym2 = TypeCheckCallGetCurStructSymbol(ctxValue, fd.scopeName)
+            if (let Some(sym2Value) <- sym2) {
+                let sameSymbol = if (let Some(sym1Value) <- sym1) { SameSymbol(sym1Value, sym2Value) } else { false }
+                if (!sameSymbol) {
+                    if (let Some(sym2Node) <- sym2Value.node) {
+                        if (let Some(sym2Ty) <- sym2Node.GetTy()) {
+                            if (Ty.IsTyCorrect(sym2Ty) && !sym2Ty.typeArgs.isEmpty()) {
+                                return true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return false
+}
+
+private func ReplaceIdealTypeInSubstPack(typeManager: TypeManager, maps: SubstPack): Unit {
+    for (entry in maps.inst.entries) {
+        let tys = entry.tys.Clone()
+        entry.tys.Clear()
+        for (ty in tys.values) {
+            entry.tys.Add(typeManager.ReplaceIdealTy(ty))
+        }
+    }
+}
+
+// Mirrors C++ TypeCheckCall.cpp:1363-1391.
+private func UpdateFuncGenericType(typeManager: TypeManager, ctx: Option<ASTContext>, unit: FunctionMatchingUnit,
+    ce: CallExpr): ArrayList<FuncDecl> {
+    let out = ArrayList<FuncDecl>()
+    let fdTy = match (unit.fd.GetTy()) {
+        case Some(value) => value
+        case None => return out
+    }
+    let funcTy = match (fdTy as FuncTy) {
+        case Some(value) => value
+        case None => return out
+    }
+    ReplaceIdealTypeInSubstPack(typeManager, unit.typeMapping)
+    let desugarArgs = match (ce.desugarArgs) {
+        case Some(value) => value
+        case None => return out
+    }
+    for (arg in desugarArgs) {
+        if (let Some(argExpr) <- arg.expr) {
+            if (let Some(argTy) <- argExpr.GetTy()) {
+                if (argTy.HasIdealTy()) {
+                    return out
+                }
+            }
+        }
+    }
+    if (let Some(base) <- ce.baseFunc) {
+        if (let Some(refExpr) <- (base as RefExpr)) {
+            if (let Some(parentTy) <- refExpr.matchedParentTy) {
+                refExpr.matchedParentTy = Some(typeManager.ApplySubstPack(parentTy, unit.typeMapping))
+            }
+        }
+        if (let Some(memberAccess) <- (base as MemberAccess)) {
+            if (let Some(parentTy) <- memberAccess.matchedParentTy) {
+                if (parentTy.HasGeneric()) {
+                    if (let Some(memberBase) <- memberAccess.baseExpr) {
+                        if (let Some(memberBaseTy) <- memberBase.GetTy()) {
+                            if (!memberBaseTy.IsGeneric()) {
+                                let promotedTys = Promotion(typeManager).Promote(memberBaseTy, parentTy)
+                                if (!promotedTys.values.isEmpty()) {
+                                    let updatedTy = promotedTys.values[0]
+                                    if (Ty.IsTyCorrect(updatedTy)) {
+                                        memberAccess.matchedParentTy = Some(updatedTy)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        base.SetTy(typeManager.ApplySubstPack(funcTy, unit.typeMapping))
+    }
+    let rawCallTy = GetCallTy(typeManager, ctx, ce, unit.fd)
+    let instCallTy = typeManager.ApplySubstPack(rawCallTy, unit.typeMapping)
+    ce.SetTy(instCallTy)
+    FillTypeArgumentsTy(typeManager, unit.fd, ce, unit.typeMapping)
+    out.add(unit.fd)
+    return out
 }
 
 private func CheckCallKind(diag: Option<BasicDiagnosticEngine>, ce: CallExpr, decl: Decl): Bool {
@@ -2003,7 +2539,7 @@ private func PostCheckCallExpr(typeManager: TypeManager, diag: Option<BasicDiagn
     return true
 }
 
-private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: Option<ASTContext>,
     candidates: ArrayList<FuncDecl>, ce: CallExpr, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
     inferenceFailure!: Option<CallInferenceFailure> = None,
     declSynthesizer!: Option<CallDeclSynthesizer> = None): ArrayList<FuncDecl> {
@@ -2011,7 +2547,7 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
     for (fd in candidates) {
         var checked: Option<FunctionMatchingUnit> = None
         try (ds = DiagSuppressor(diag)) {
-            checked = CheckCandidate(typeManager, diag, ce, fd, target, argChecker: argChecker,
+            checked = CheckCandidate(typeManager, diag, ctx, ce, fd, target, argChecker: argChecker,
                 inferenceFailure: inferenceFailure, declSynthesizer: declSynthesizer)
         }
         if (let Some(unit) <- checked) {
@@ -2060,12 +2596,13 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
         BuildDesugaredCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
         ApplyInstantiatedArgumentTypes(typeManager, ce, unit)
         if (let Some(fdTy) <- unit.fd.GetTy()) {
-            if (IsGenericCallForUpdate(unit.fd, ce)) {
-                ce.baseFunc.getOrThrow().SetTy(typeManager.ApplySubstPack(fdTy, unit.typeMapping))
-                ce.SetTy(typeManager.ApplySubstPack(GetCallTy(typeManager, ce, unit.fd), unit.typeMapping))
+            if (IsGenericCall(ctx, ce, unit.fd)) {
+                if (UpdateFuncGenericType(typeManager, ctx, unit, ce).isEmpty()) {
+                    return out
+                }
             } else {
                 ce.baseFunc.getOrThrow().SetTy(fdTy)
-                ce.SetTy(GetCallTy(typeManager, ce, unit.fd))
+                ce.SetTy(GetCallTy(typeManager, ctx, ce, unit.fd))
             }
         } else {
             ce.SetTy(TypeManager.GetInvalidTy())
@@ -2132,7 +2669,13 @@ private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagno
     }
     let paramTys = CheckCallArgs(None, typeManager, ce, funcTy).getOrThrow()
     let typeMapping = if (funcTy.HasGeneric()) {
-        GenerateCallBaseTypeMapping(typeManager, ce)
+        let mapping = SubstPack()
+        if (let Some(base) <- ce.baseFunc) {
+            let baseTypeMapping = MultiTypeSubst()
+            GenerateTypeMappingForBaseExpr(typeManager, base, baseTypeMapping)
+            typeManager.PackMapping(mapping, baseTypeMapping)
+        }
+        mapping
     } else {
         SubstPack()
     }
@@ -2265,7 +2808,8 @@ public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEn
 
 public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
     ce: CallExpr, argChecker: Option<CallArgChecker>, desugarChecker!: Option<CallDesugarChecker> = None,
-    clearInferredForTarget!: Bool = true, declSynthesizer!: Option<CallDeclSynthesizer> = None): Bool {
+    clearInferredForTarget!: Bool = true, declSynthesizer!: Option<CallDeclSynthesizer> = None,
+    ctx!: Option<ASTContext> = None): Bool {
     if (let Some(desugar) <- ce.desugarExpr) {
         if (Ty.IsTyCorrect(desugar.GetTy())) {
             ce.SetTy(desugar.GetTy().getOrThrow())
@@ -2322,7 +2866,7 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
         return false
     }
     let inferenceFailure = CallInferenceFailure()
-    let result = MatchFunctionForCall(typeManager, diag, candidates, ce, target, argChecker: argChecker,
+    let result = MatchFunctionForCall(typeManager, diag, ctx, candidates, ce, target, argChecker: argChecker,
         inferenceFailure: Some(inferenceFailure), declSynthesizer: declSynthesizer)
     ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy() ?? TypeManager.GetInvalidTy()))
     if (result.size == 1) {
@@ -2368,8 +2912,10 @@ public func SynCallExpr(typeManager: TypeManager, ce: CallExpr): Ty {
 }
 
 public func SynCallExprWithArgChecker(typeManager: TypeManager, ce: CallExpr, argChecker: Option<CallArgChecker>,
-    diag!: Option<BasicDiagnosticEngine> = None, declSynthesizer!: Option<CallDeclSynthesizer> = None): Ty {
-    if (ChkCallExprWithArgChecker(typeManager, diag, None, ce, argChecker, declSynthesizer: declSynthesizer)) {
+    diag!: Option<BasicDiagnosticEngine> = None, declSynthesizer!: Option<CallDeclSynthesizer> = None,
+    ctx!: Option<ASTContext> = None): Ty {
+    if (ChkCallExprWithArgChecker(typeManager, diag, None, ce, argChecker, declSynthesizer: declSynthesizer,
+        ctx: ctx)) {
         return ce.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return TypeManager.GetInvalidTy()

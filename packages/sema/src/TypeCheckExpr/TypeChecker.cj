@@ -2631,20 +2631,6 @@ public class TypeChecker {
         return ChkUnaryExpr(impl.typeManager, target, unaryExpr)
     }
 
-    private func SynthesizeIfChildren(ctx: ASTContext, ifExpr: IfExpr): Unit {
-        let conditionBindings = ArrayList<Decl>()
-        if (let Some(condExpr) <- ifExpr.condExpr) {
-            let _ = CheckConditionWithBindings(ctx, condExpr, conditionBindings, false)
-        }
-        if (let Some(thenBody) <- ifExpr.thenBody) {
-            let _ = SynthesizeBlock(ctx, thenBody)
-        }
-        RemovePatternBindings(ctx, conditionBindings)
-        if (let Some(elseBody) <- ifExpr.elseBody) {
-            let _ = Synthesize(ctx, elseBody)
-        }
-    }
-
     private func SynthesizedIfHasMissingElse(ifExpr: IfExpr): Bool {
         if (let None <- ifExpr.elseBody) {
             return true
@@ -2696,6 +2682,7 @@ public class TypeChecker {
             } else {
                 TypeManager.GetInvalidTy()
             }
+            ifExpr.SetTy(ifTy)
             return FinishSynthesize(ctx, ifExpr, ifTy)
         }
         if (let Some(elseBody2) <- ifExpr.elseBody) {
@@ -2704,7 +2691,9 @@ public class TypeChecker {
             isWellTyped = false
         }
         if (!isWellTyped) {
-            return FinishSynthesize(ctx, ifExpr, TypeManager.GetInvalidTy())
+            let invalidTy = TypeManager.GetInvalidTy()
+            ifExpr.SetTy(invalidTy)
+            return FinishSynthesize(ctx, ifExpr, invalidTy)
         }
         if (let Some(thenBody2) <- ifExpr.thenBody) {
             if (let Some(elseBody3) <- ifExpr.elseBody) {
@@ -2715,12 +2704,68 @@ public class TypeChecker {
                 thenBody2.SetTy(thenTy)
                 elseBody3.SetTy(elseTy)
                 if (pos == SynPos.UNUSED) {
-                    return FinishSynthesize(ctx, ifExpr, TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+                    let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+                    ifExpr.SetTy(unitTy)
+                    return FinishSynthesize(ctx, ifExpr, unitTy)
                 }
-                return FinishSynthesize(ctx, ifExpr, JoinSynthesizedIfBranchTys(thenTy, elseTy, ifExpr.curFile))
+                let joinedTy = JoinSynthesizedIfBranchTys(thenTy, elseTy, ifExpr.curFile)
+                ifExpr.SetTy(joinedTy)
+                return FinishSynthesize(ctx, ifExpr, joinedTy)
             }
         }
-        return FinishSynthesize(ctx, ifExpr, TypeManager.GetInvalidTy())
+        let invalidTy2 = TypeManager.GetInvalidTy()
+        ifExpr.SetTy(invalidTy2)
+        return FinishSynthesize(ctx, ifExpr, invalidTy2)
+    }
+
+    private func CheckIfExprNoElseWithTarget(ctx: ASTContext, target: Ty, ifExpr: IfExpr): Bool {
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        ifExpr.SetTy(unitTy)
+        var isWellTyped = true
+        if (let Some(thenBody) <- ifExpr.thenBody) {
+            isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, thenBody)) && isWellTyped
+        } else {
+            isWellTyped = false
+        }
+        if (let Some(elseBody) <- ifExpr.elseBody) {
+            isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, elseBody)) && isWellTyped
+        }
+        let targetMatched = impl.typeManager.IsSubtype(unitTy, target)
+        return isWellTyped && targetMatched
+    }
+
+    private func CheckIfExprWithTarget(ctx: ASTContext, target: Ty, ifExpr: IfExpr): Bool {
+        let conditionBindings = ArrayList<Decl>()
+        var isWellTyped = true
+        if (let Some(condExpr) <- ifExpr.condExpr) {
+            isWellTyped = CheckConditionWithBindings(ctx, condExpr, conditionBindings, false)
+        } else {
+            isWellTyped = false
+        }
+        if (SynthesizedIfHasMissingElse(ifExpr)) {
+            let branchOk = CheckIfExprNoElseWithTarget(ctx, target, ifExpr)
+            RemovePatternBindings(ctx, conditionBindings)
+            isWellTyped = branchOk && isWellTyped
+        } else {
+            if (let Some(thenBody) <- ifExpr.thenBody) {
+                isWellTyped = Check(ctx, target, thenBody) && isWellTyped
+            } else {
+                isWellTyped = false
+            }
+            RemovePatternBindings(ctx, conditionBindings)
+            if (let Some(elseBody) <- ifExpr.elseBody) {
+                isWellTyped = Check(ctx, target, elseBody) && isWellTyped
+            } else {
+                isWellTyped = false
+            }
+            if (isWellTyped) {
+                ifExpr.SetTy(target)
+            }
+        }
+        if (!isWellTyped) {
+            ifExpr.SetTy(TypeManager.GetInvalidTy())
+        }
+        return isWellTyped
     }
 
     private func SynthesizeMatchChildren(ctx: ASTContext, matchExpr: MatchExpr): Unit {
@@ -3443,7 +3488,7 @@ public class TypeChecker {
             SynthesizeCallChildren(ctx, callExpr)
             let callTy = SynCallExprWithArgChecker(impl.typeManager, callExpr,
                 Some({ target: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, target, arg) }), diag: impl.diag,
-                declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }))
+                declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }), ctx: Some(ctx))
             return FinishSynthesize(ctx, callExpr, callTy)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
@@ -3772,12 +3817,11 @@ public class TypeChecker {
                 Some({ paramTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, paramTy, arg) }),
                 desugarChecker: Some({ target2: Ty, expr2: Expr => Check(ctx, target2, expr2) }),
                 clearInferredForTarget: clearInferredCallTypes,
-                declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }))
+                declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }), ctx: Some(ctx))
             return FinishCheck(ctx, callExpr, ok)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
-            SynthesizeIfChildren(ctx, ifExpr)
-            return FinishCheck(ctx, ifExpr, ChkExprShallow(impl.typeManager, target, ifExpr, ctx: Some(ctx)))
+            return FinishCheck(ctx, ifExpr, CheckIfExprWithTarget(ctx, target, ifExpr))
         }
         if (let Some(matchExpr) <- (expr as MatchExpr)) {
             SynthesizeMatchChildren(ctx, matchExpr)
