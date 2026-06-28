@@ -75,7 +75,7 @@ public class CHIRBuilder {
     public func CreateBlock(parentGroup: BlockGroup): Block {
         let owner = parentGroup.GetTopLevelFunc()
         let id = if (let Some(fn) <- owner) { fn.GenerateBlockId() } else { UInt64(context.GetAllNodesNum()) }
-        return CreateBlock("bb${id}", parentGroup)
+        return CreateBlock("#${id}", parentGroup)
     }
 
     public func CreateParameter(ty: Type, identifier: String, ownerFunc: Option<Function>): Parameter {

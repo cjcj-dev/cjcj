@@ -950,8 +950,9 @@ public class Function <: GlobalValue {
     public func ClearParamDftValHostFunc(): Unit { paramDftValHostFunc = None }
 
     public func GenerateBlockId(): UInt64 {
+        let id = blockId
         blockId++
-        return blockId
+        return id
     }
 
     public func GenerateBlockGroupId(): UInt64 {
