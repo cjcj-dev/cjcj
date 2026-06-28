@@ -2,9 +2,11 @@ package cangjie_compiler::chir
 
 import std.collection.*
 import std.convert.*
+import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT}
 
 class CHIRDeserializerImpl {
     private let builder: CHIRBuilder
+    private let compilePlatform: Bool
     private let customDefs: HashMap<String, CustomTypeDef> = HashMap<String, CustomTypeDef>()
     private let customDefsById: HashMap<String, CustomTypeDef> = HashMap<String, CustomTypeDef>()
     private let valuesById: HashMap<String, Value> = HashMap<String, Value>()
@@ -18,8 +20,9 @@ class CHIRDeserializerImpl {
     private let sourceFileRecords: ArrayList<ArrayList<String>> = ArrayList<ArrayList<String>>()
     private var packageRecord: Option<ArrayList<String>> = None
 
-    public init(builder: CHIRBuilder) {
+    public init(builder: CHIRBuilder, compilePlatform!: Bool = false) {
         this.builder = builder
+        this.compilePlatform = compilePlatform
     }
 
     private func GetMangleNameFromIdentifier(identifier: String): String {
@@ -33,9 +36,6 @@ class CHIRDeserializerImpl {
         let lines = text.split("\n")
         if (lines.isEmpty()) {
             return builder.CreatePackage("<deserialized>")
-        }
-        if (lines[0] == CHIR_TEXT_HEADER_V1) {
-            return DeserializeV1(lines)
         }
         if (lines[0] != CHIR_TEXT_HEADER_V2) {
             let name = if (text.startsWith("package ")) { text[8..].split("\n")[0] } else { "<deserialized>" }
@@ -110,12 +110,48 @@ class CHIRDeserializerImpl {
             let scope = CHIRFieldAt(fields, 3)
             let packageName = CHIRFieldAt(fields, 4)
             let identifier = CHIRFieldAt(fields, 5)
-            let def = CHIRCreateDetachedCustomDef(kind, packageName, identifier, builder, customDefs)
-            customDefsById[id] = def
-            if (scope == "import") {
-                addImportedDef(pkg, def)
+            let def: CustomTypeDef = if (compilePlatform && kind == "enum") {
+                if (let Some(exist) <- pkg.TryGetEnumDef(identifier)) {
+                    exist.EnableAttr(Attribute.PREVIOUSLY_DESERIALIZED)
+                    exist
+                } else {
+                    CHIRCreateDetachedCustomDef(kind, packageName, identifier, builder, customDefs)
+                }
+            } else if (compilePlatform && kind == "struct") {
+                if (let Some(exist) <- pkg.TryGetStructDef(identifier)) {
+                    exist.EnableAttr(Attribute.PREVIOUSLY_DESERIALIZED)
+                    exist
+                } else {
+                    CHIRCreateDetachedCustomDef(kind, packageName, identifier, builder, customDefs)
+                }
+            } else if (compilePlatform && kind == "class") {
+                if (let Some(exist) <- pkg.TryGetClassDef(identifier)) {
+                    exist.EnableAttr(Attribute.PREVIOUSLY_DESERIALIZED)
+                    exist
+                } else {
+                    CHIRCreateDetachedCustomDef(kind, packageName, identifier, builder, customDefs)
+                }
+            } else if (compilePlatform) {
+                if (let Some(exist) <- pkg.TryGetExtendDef(identifier)) {
+                    exist.EnableAttr(Attribute.PREVIOUSLY_DESERIALIZED)
+                    exist
+                } else {
+                    CHIRCreateDetachedCustomDef(kind, packageName, identifier, builder, customDefs)
+                }
             } else {
-                addLocalDef(pkg, def)
+                CHIRCreateDetachedCustomDef(kind, packageName, identifier, builder, customDefs)
+            }
+            if (compilePlatform && !def.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) {
+                def.EnableAttr(Attribute.DESERIALIZED)
+            }
+            customDefs[CHIRCustomDefKey(kind, packageName, identifier)] = def
+            customDefsById[id] = def
+            if (!def.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) {
+                if (scope == "import") {
+                    addImportedDef(pkg, def)
+                } else {
+                    addLocalDef(pkg, def)
+                }
             }
         }
     }
@@ -146,20 +182,40 @@ class CHIRDeserializerImpl {
 
     private func createGlobalVars(pkg: Package): Unit {
         for (fields in globalRecords) {
-            let globalTy = CHIRParseType(CHIRFieldAt(fields, 6), builder, customDefs)
-            let ownerPackage = if (CHIRFieldAt(fields, 5).isEmpty()) { pkg.GetName() } else { CHIRFieldAt(fields, 5) }
-            let globalVar = builder.CreateGlobalVar(globalTy, GetMangleNameFromIdentifier(CHIRFieldAt(fields, 2)),
-                srcCodeIdentifier: CHIRFieldAt(fields, 3), rawMangledName: CHIRFieldAt(fields, 4),
-                packageName: ownerPackage)
-            CHIRApplyAnnoInfo(globalVar.GetAnnoInfo(), CHIRFieldAt(fields, 10))
-            CHIRApplyBaseInfo(globalVar, CHIRFieldAt(fields, 11), CHIRFieldAt(fields, 12), annotationText: CHIRFieldAt(fields, 13))
-            for (feature in CHIRWireSplitList(CHIRFieldAt(fields, 8))) {
-                if (!feature.isEmpty()) {
-                    globalVar.AddFeature(feature)
+            let identifier = CHIRFieldAt(fields, 2)
+            let globalVar: GlobalVar = if (compilePlatform) {
+                if (let Some(exist) <- pkg.TryGetGlobalVar(identifier)) {
+                    exist.EnableAttr(Attribute.PREVIOUSLY_DESERIALIZED)
+                    exist
+                } else {
+                    let globalTy = CHIRParseType(CHIRFieldAt(fields, 6), builder, customDefs)
+                    let ownerPackage = if (CHIRFieldAt(fields, 5).isEmpty()) { pkg.GetName() } else { CHIRFieldAt(fields, 5) }
+                    builder.CreateGlobalVar(globalTy, GetMangleNameFromIdentifier(identifier),
+                        srcCodeIdentifier: CHIRFieldAt(fields, 3), rawMangledName: CHIRFieldAt(fields, 4),
+                        packageName: ownerPackage)
                 }
+            } else {
+                let globalTy = CHIRParseType(CHIRFieldAt(fields, 6), builder, customDefs)
+                let ownerPackage = if (CHIRFieldAt(fields, 5).isEmpty()) { pkg.GetName() } else { CHIRFieldAt(fields, 5) }
+                builder.CreateGlobalVar(globalTy, GetMangleNameFromIdentifier(identifier),
+                    srcCodeIdentifier: CHIRFieldAt(fields, 3), rawMangledName: CHIRFieldAt(fields, 4),
+                    packageName: ownerPackage)
+            }
+            if (compilePlatform && !globalVar.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) {
+                globalVar.EnableAttr(Attribute.DESERIALIZED)
             }
             valuesById[CHIRFieldAt(fields, 1)] = globalVar
-            pkg.AddGlobalVar(globalVar)
+            if (!globalVar.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) {
+                CHIRApplyAnnoInfo(globalVar.GetAnnoInfo(), CHIRFieldAt(fields, 10))
+                CHIRApplyBaseInfo(globalVar, CHIRFieldAt(fields, 11), CHIRFieldAt(fields, 12),
+                    annotationText: CHIRFieldAt(fields, 13))
+                for (feature in CHIRWireSplitList(CHIRFieldAt(fields, 8))) {
+                    if (!feature.isEmpty()) {
+                        globalVar.AddFeature(feature)
+                    }
+                }
+                pkg.AddGlobalVar(globalVar)
+            }
         }
     }
 
@@ -172,24 +228,39 @@ class CHIRDeserializerImpl {
                 builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetInvalidTy())
             }
             let ownerPackage = if (CHIRFieldAt(fields, 5).isEmpty()) { pkg.GetName() } else { CHIRFieldAt(fields, 5) }
-            let fn = builder.CreateFunction(funcTy, GetMangleNameFromIdentifier(CHIRFieldAt(fields, 2)),
-                srcCodeIdentifier: CHIRFieldAt(fields, 3), rawMangledName: CHIRFieldAt(fields, 4),
-                packageName: ownerPackage)
-            fn.SetFuncKind(CHIRFuncKindFromIndex(CHIRSafeI64(CHIRFieldAt(fields, 6))))
-            CHIRApplyAnnoInfo(fn.GetAnnoInfo(), CHIRFieldAt(fields, 16))
-            CHIRApplyBaseInfo(fn, CHIRFieldAt(fields, 17), CHIRFieldAt(fields, 18), annotationText: CHIRFieldAt(fields, 19))
-            fn.SetPropLocation(CHIRParseDebugLocation(CHIRFieldAt(fields, 15)))
-            for (feature in CHIRWireSplitList(CHIRFieldAt(fields, 12))) {
-                if (!feature.isEmpty()) {
-                    fn.AddFeature(feature)
+            let identifier = CHIRFieldAt(fields, 2)
+            let fn: Function = if (compilePlatform) {
+                if (let Some(exist) <- pkg.TryGetGlobalFunc(identifier)) {
+                    exist.EnableAttr(Attribute.PREVIOUSLY_DESERIALIZED)
+                    exist
+                } else {
+                    builder.CreateFunction(funcTy, GetMangleNameFromIdentifier(identifier),
+                        srcCodeIdentifier: CHIRFieldAt(fields, 3), rawMangledName: CHIRFieldAt(fields, 4),
+                        packageName: ownerPackage)
                 }
+            } else {
+                builder.CreateFunction(funcTy, GetMangleNameFromIdentifier(identifier),
+                    srcCodeIdentifier: CHIRFieldAt(fields, 3), rawMangledName: CHIRFieldAt(fields, 4),
+                    packageName: ownerPackage)
+            }
+            if (compilePlatform && !fn.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) {
+                fn.EnableAttr(Attribute.DESERIALIZED)
             }
             valuesById[CHIRFieldAt(fields, 1)] = fn
-            createParameters(fn, CHIRFieldAt(fields, 8))
-            if (fn.GetParams().isEmpty()) {
-                synthesizeSignatureParameters(fn, funcTy)
+            if (!fn.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) {
+                fn.SetFuncKind(CHIRFuncKindFromIndex(CHIRSafeI64(CHIRFieldAt(fields, 6))))
+                CHIRApplyAnnoInfo(fn.GetAnnoInfo(), CHIRFieldAt(fields, 16))
+                CHIRApplyBaseInfo(fn, CHIRFieldAt(fields, 17), CHIRFieldAt(fields, 18),
+                    annotationText: CHIRFieldAt(fields, 19))
+                fn.SetPropLocation(CHIRParseDebugLocation(CHIRFieldAt(fields, 15)))
+                for (feature in CHIRWireSplitList(CHIRFieldAt(fields, 12))) {
+                    if (!feature.isEmpty()) {
+                        fn.AddFeature(feature)
+                    }
+                }
+                createParameters(fn, CHIRFieldAt(fields, 8))
+                pkg.AddGlobalFunc(fn)
             }
-            pkg.AddGlobalFunc(fn)
         }
     }
 
@@ -205,15 +276,6 @@ class CHIRDeserializerImpl {
             CHIRApplyAnnoInfo(param.GetAnnoInfo(), CHIRFieldAt(fields, 4))
             CHIRApplyBaseInfo(param, CHIRFieldAt(fields, 5), CHIRFieldAt(fields, 6), annotationText: CHIRFieldAt(fields, 7))
             valuesById[CHIRFieldAt(fields, 0)] = param
-        }
-    }
-
-    private func synthesizeSignatureParameters(fn: Function, funcTy: FuncType): Unit {
-        var index: Int64 = 0
-        for (paramTy in funcTy.GetParamTypes()) {
-            let param = builder.CreateParameter(paramTy, "%arg${index}", fn)
-            valuesById[CHIRValueId(param)] = param
-            index++
         }
     }
 
@@ -246,6 +308,9 @@ class CHIRDeserializerImpl {
     private func configureCustomDefs(): Unit {
         for (fields in customRecords) {
             let def = customDefsById.get(CHIRFieldAt(fields, 1)) ?? continue
+            if (def.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) {
+                continue
+            }
             CHIRApplyBaseInfo(def, CHIRFieldAt(fields, 14), CHIRFieldAt(fields, 15), annotationText: CHIRFieldAt(fields, 16))
             if (!CHIRFieldAt(fields, 17).isEmpty()) {
                 def.SetSrcCodeIdentifier(CHIRFieldAt(fields, 17))
@@ -271,6 +336,9 @@ class CHIRDeserializerImpl {
                     memberVar.loc = CHIRParseDebugLocation(CHIRFieldAt(memberFields, 6))
                 }
                 CHIRApplyAnnoInfo(memberVar.annoInfo, CHIRFieldAt(memberFields, 7))
+                if (compilePlatform) {
+                    memberVar.attributeInfo.Enable(Attribute.DESERIALIZED)
+                }
                 if (let Some(initValue) <- valuesById.get(CHIRFieldAt(memberFields, 8))) {
                     if (let Some(initFn) <- (initValue as Function)) {
                         memberVar.initializerFunc = initFn
@@ -354,6 +422,9 @@ class CHIRDeserializerImpl {
         for (fields in globalRecords) {
             if (let Some(value) <- valuesById.get(CHIRFieldAt(fields, 1))) {
                 if (let Some(globalVar) <- (value as GlobalVar)) {
+                    if (globalVar.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) {
+                        continue
+                    }
                     if (let Some(initValue) <- valuesById.get(CHIRFieldAt(fields, 7))) {
                         if (let Some(initFunc) <- (initValue as Function)) {
                             globalVar.SetInitFunc(initFunc)
@@ -370,6 +441,9 @@ class CHIRDeserializerImpl {
         for (fields in functionRecords) {
             if (let Some(value) <- valuesById.get(CHIRFieldAt(fields, 1))) {
                 if (let Some(fn) <- (value as Function)) {
+                    if (fn.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) {
+                        continue
+                    }
                     if (let Some(bodyValue) <- valuesById.get(CHIRFieldAt(fields, 9))) {
                         if (let Some(body) <- (bodyValue as BlockGroup)) {
                             fn.InitBody(body)
@@ -400,7 +474,8 @@ class CHIRDeserializerImpl {
                 if (let Some(block) <- (blockValue as Block)) {
                     let expr = createExpression(fields, block)
                     expressionsById[CHIRFieldAt(fields, 1)] = expr
-                    CHIRApplyBaseInfo(expr, CHIRFieldAt(fields, 11), CHIRFieldAt(fields, 12), annotationText: CHIRFieldAt(fields, 14))
+                    CHIRApplyBaseInfo(expr, CHIRFieldAt(fields, 11), CHIRFieldAt(fields, 12),
+                        annotationText: CHIRFieldAt(fields, 14))
                     if (let Some(result) <- expr.GetResult()) {
                         configureExpressionResult(result, fields)
                         valuesById[CHIRFieldAt(fields, 5)] = result
@@ -503,6 +578,12 @@ class CHIRDeserializerImpl {
         if (kind == ExprKind.GOTO && !successors.isEmpty()) {
             return builder.CreateGoTo(successors[0], block)
         }
+        if (kind == ExprKind.GOTO) {
+            CJC_ASSERT(operands.size == 1)
+            if (let Some(target) <- (operands[0] as Block)) {
+                return builder.CreateGoTo(target, block)
+            }
+        }
         if (kind == ExprKind.BRANCH && operands.size >= 1 && successors.size >= 2) {
             return builder.CreateBranch(operands[0], successors[0], successors[1], block)
         }
@@ -521,7 +602,68 @@ class CHIRDeserializerImpl {
             if (!successors.isEmpty()) {
                 return builder.CreateRaiseException(operands[0], successors[0], block)
             }
+            if (operands.size == 2) {
+                if (let Some(exceptionBlock) <- (operands[1] as Block)) {
+                    return builder.CreateRaiseException(operands[0], exceptionBlock, block)
+                }
+            }
             return builder.CreateRaiseException(operands[0], block)
+        }
+        if (kind == ExprKind.BOX) {
+            CJC_ASSERT(operands.size == 1)
+            return builder.CreateBox(resultTypeOrInvalid(resultTy), operands[0], block)
+        }
+        if (kind == ExprKind.GET_EXCEPTION) {
+            return builder.CreateGetException(resultTypeOrInvalid(resultTy), block)
+        }
+        if (kind == ExprKind.GET_RTTI) {
+            CJC_ASSERT(operands.size == 1)
+            return builder.CreateGetRTTI(resultTypeOrInvalid(resultTy), operands[0], block)
+        }
+        if (kind == ExprKind.LOAD) {
+            CJC_ASSERT(operands.size == 1)
+            return builder.CreateLoad(resultTypeOrInvalid(resultTy), operands[0], block)
+        }
+        if (kind == ExprKind.RAW_ARRAY_INIT_BY_VALUE) {
+            CJC_ASSERT(operands.size == 3)
+            return builder.CreateRawArrayInitByValue(resultTypeOrInvalid(resultTy), operands[0], operands[1],
+                operands[2], block)
+        }
+        if (kind == ExprKind.RAW_ARRAY_LITERAL_INIT) {
+            CJC_ASSERT(!operands.isEmpty())
+            return builder.CreateRawArrayLiteralInit(resultTypeOrInvalid(resultTy), operands[0], valuesAfterFirst(operands),
+                block)
+        }
+        if (kind == ExprKind.STORE) {
+            CJC_ASSERT(operands.size == 2)
+            return builder.CreateStore(operands[0], operands[1], block)
+        }
+        if (kind == ExprKind.TRANSFORM_TO_CONCRETE) {
+            CJC_ASSERT(operands.size == 1)
+            return builder.CreateTransformToConcrete(resultTypeOrInvalid(resultTy), operands[0], block)
+        }
+        if (kind == ExprKind.TRANSFORM_TO_GENERIC) {
+            CJC_ASSERT(operands.size == 1)
+            return builder.CreateTransformToGeneric(resultTypeOrInvalid(resultTy), operands[0], block)
+        }
+        if (kind == ExprKind.TUPLE) {
+            return builder.CreateTuple(resultTypeOrInvalid(resultTy), operands, block)
+        }
+        if (kind == ExprKind.UNBOX) {
+            CJC_ASSERT(operands.size == 1)
+            return builder.CreateUnBox(resultTypeOrInvalid(resultTy), operands[0], block)
+        }
+        if (kind == ExprKind.UNBOX_TO_REF) {
+            CJC_ASSERT(operands.size == 1)
+            return builder.CreateUnBoxToRef(resultTypeOrInvalid(resultTy), operands[0], block)
+        }
+        if (kind == ExprKind.VARRAY) {
+            CJC_ASSERT(!operands.isEmpty())
+            return builder.CreateVArray(resultTypeOrInvalid(resultTy), operands, block)
+        }
+        if (kind == ExprKind.VARRAY_BUILDER) {
+            CJC_ASSERT(operands.size == 3)
+            return builder.CreateVArrayBuilder(resultTypeOrInvalid(resultTy), operands[0], operands[1], operands[2], block)
         }
         if (ExprKindMajor(kind) == ExprMajorKind.UNARY_EXPR && operands.size >= 1) {
             if (let Some(ty) <- resultTy) {
@@ -533,7 +675,8 @@ class CHIRDeserializerImpl {
                 return builder.CreateBinaryExpression(kind, ty, operands[0], operands[1], block)
             }
         }
-        return createGenericExpression(kind, resultTy, operands, blockGroups, block)
+        CJC_ABORT()
+        throw IllegalStateException("unsupported CHIR expression")
     }
 
     private func createPayloadExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
@@ -887,15 +1030,6 @@ class CHIRDeserializerImpl {
         return expr
     }
 
-    private func createGenericExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
-        blockGroups: ArrayList<BlockGroup>, block: Block): Expression {
-        let expr = Expression(kind, operands, blockGroups, block)
-        block.AppendExpression(expr)
-        builder.context.RegisterExpression(expr)
-        attachResult(expr, resultTy)
-        return expr
-    }
-
     private func attachResult(expr: Expression, resultTy: Option<Type>): Unit {
         if (let Some(ty) <- resultTy) {
             builder.CreateLocalVar(ty, "%${builder.context.GetAllNodesNum()}", expr)
@@ -977,63 +1111,4 @@ class CHIRDeserializerImpl {
         return Rune.parse(value)
     }
 
-    private func DeserializeV1(lines: Array<String>): Package {
-        var pkg = builder.CreatePackage("<deserialized>")
-        var hasPackageLine = false
-        let v1Defs = HashMap<String, CustomTypeDef>()
-        for (line in lines) {
-            if (line.isEmpty() || line == CHIR_TEXT_HEADER_V1) {
-                continue
-            }
-            let parts = line.split("\t")
-            if (parts.isEmpty()) {
-                continue
-            }
-            if (parts[0] == "package" && parts.size >= 2) {
-                pkg = builder.CreatePackage(UnescapeV1Field(parts[1]))
-                hasPackageLine = true
-            } else if (parts[0] == "global" && parts.size >= 6) {
-                let ownerPackage = if (parts[4].isEmpty()) { pkg.GetName() } else { UnescapeV1Field(parts[4]) }
-                let globalVar = builder.CreateGlobalVar(CHIRParseType(UnescapeV1Field(parts[5]), builder, v1Defs),
-                    GetMangleNameFromIdentifier(UnescapeV1Field(parts[1])),
-                    srcCodeIdentifier: UnescapeV1Field(parts[2]), rawMangledName: UnescapeV1Field(parts[3]),
-                    packageName: ownerPackage)
-                pkg.AddGlobalVar(globalVar)
-            } else if (parts[0] == "function" && parts.size >= 8) {
-                let paramTypes = ParseV1TypeList(UnescapeV1Field(parts[7]), builder)
-                let returnTy = CHIRParseLegacyType(UnescapeV1Field(parts[6]), builder)
-                let ownerPackage = if (parts[4].isEmpty()) { pkg.GetName() } else { UnescapeV1Field(parts[4]) }
-                let funcTy = builder.context.GetFuncTy(paramTypes, returnTy)
-                let fn = builder.CreateFunction(funcTy, GetMangleNameFromIdentifier(UnescapeV1Field(parts[1])),
-                    srcCodeIdentifier: UnescapeV1Field(parts[2]), rawMangledName: UnescapeV1Field(parts[3]),
-                    packageName: ownerPackage)
-                fn.SetFuncKind(CHIRFuncKindFromIndex(Int64.parse(parts[5])))
-                var paramIndex: Int64 = 0
-                for (paramTy in paramTypes) {
-                    builder.CreateParameter(paramTy, "%arg${paramIndex}", fn)
-                    paramIndex++
-                }
-                pkg.AddGlobalFunc(fn)
-            }
-        }
-        if (!hasPackageLine) {
-            return builder.CreatePackage("<deserialized>")
-        }
-        return pkg
-    }
-}
-
-func ParseV1TypeList(text: String, builder: CHIRBuilder): ArrayList<Type> {
-    let out = ArrayList<Type>()
-    if (text.isEmpty()) {
-        return out
-    }
-    for (part in text.split(",")) {
-        out.add(CHIRParseLegacyType(part, builder))
-    }
-    return out
-}
-
-func UnescapeV1Field(text: String): String {
-    return text.replace("\\n", "\n").replace("\\t", "\t").replace("\\\\", "\\")
 }

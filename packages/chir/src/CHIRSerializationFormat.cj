@@ -3,7 +3,6 @@ package cangjie_compiler::chir
 import std.collection.*
 import std.convert.*
 
-let CHIR_TEXT_HEADER_V1: String = "CHIR-TEXT\t1"
 let CHIR_TEXT_HEADER_V2: String = "CHIR-TEXT\t2"
 let CHIR_FIELD_SEPARATOR: String = "|"
 let CHIR_LIST_SEPARATOR: String = ","
