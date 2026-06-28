@@ -108,6 +108,7 @@ public class TriggerPointSetter <: Resource {
     }
 }
 
+@When[!debug]
 public func InternalError(message: String): Unit {
     if (ICE.CanWriteOnceICEMessage()) {
         ICE.PrintVersionFromError()
@@ -120,6 +121,20 @@ public func InternalError(message: String): Unit {
         unsafe {
             _exit(Int32(ICE.EXIT_CODE))
         }
+    }
+}
+
+@When[debug]
+public func InternalError(message: String): Unit {
+    if (ICE.CanWriteOnceICEMessage()) {
+        ICE.PrintVersionFromError()
+        eprintln(ICE.MSG_PART_ONE + message + ICE.MSG_PART_TWO + ICE.GetTriggerPoint().toString())
+        let triggerPoint = ICE.GetTriggerPoint()
+        if (triggerPoint == ICE.LSP_TP || triggerPoint == ICE.UNITTEST_TP) {
+            return
+        }
+        ICE.RemoveTempFile()
+        CJC_ASSERT(false)
     }
 }
 
