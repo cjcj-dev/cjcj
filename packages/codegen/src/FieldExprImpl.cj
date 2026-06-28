@@ -176,6 +176,17 @@ private func GenerateDirectEnumField(irBuilder: IRBuilder2, base: Value,
             return Some(baseValue)
         }
     }
+    if (enumCGType.IsOptionLikeT() && path[0] == 0u64) {
+        return Some(GenerateOptionLikeTTag(irBuilder, enumTy, enumCGType, baseValue, name))
+    }
+    if (enumCGType.IsOptionLikeT() && path[0] == 1u64) {
+        let associatedValueType = expectedTy ?? (if (!enumTy.GetTypeArgs().isEmpty()) {
+            enumTy.GetTypeArgs()[0]
+        } else {
+            return Some(LLVMNullValue())
+        })
+        return Some(GenerateOptionLikeTAssociatedValue(irBuilder, enumTy, enumCGType, baseValue, associatedValueType))
+    }
     if (enumCGType.IsCommonEnum() && path[0] == 0u64) {
         let fieldTy = expectedTy ?? irBuilder.GetCGModule().GetCGContext().GetCHIRBuilder().context.GetUInt32Ty()
         let fieldLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), fieldTy).GetLLVMType()
@@ -185,6 +196,113 @@ private func GenerateDirectEnumField(irBuilder: IRBuilder2, base: Value,
         return Some(irBuilder.CreateLoad(fieldLLVMType, typedPayload, name: name))
     }
     return None
+}
+
+private func GenerateOptionLikeTTag(irBuilder: IRBuilder2, enumTy: EnumType, enumCGType: CGEnumType,
+    enumValue: LLVMValueRef, name: String): LLVMValueRef {
+    let i1Ty = unsafe { LLVMInt1TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let payload = irBuilder.GetPayloadFromObject(enumValue)
+    let blockNames = ArrayList<String>()
+    blockNames.add("ref")
+    blockNames.add("nonRef")
+    blockNames.add("end")
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(blockNames)
+    if (blocks.size < 3) {
+        return LLVMNullValue()
+    }
+    let typeArgs = enumTy.GetTypeArgs()
+    if (typeArgs.isEmpty()) {
+        return LLVMNullValue()
+    }
+    let isRef = irBuilder.CreateTypeInfoIsReferenceCall(typeArgs[0])
+    irBuilder.CreateCondBr(isRef, blocks[0], blocks[1])
+
+    irBuilder.SetInsertPoint(blocks[0])
+    let refRead = irBuilder.CallGCReadRef(enumValue, payload)
+    let refResult = CreateOptionLikeNullCheck(irBuilder, refRead, enumCGType.IsAntiOptionLike(), name + ".tag.ref")
+    irBuilder.CreateBr(blocks[2])
+
+    irBuilder.SetInsertPoint(blocks[1])
+    let payloadPtrTy = unsafe { LLVMPointerType(i1Ty, 1u32) }
+    let nonRefPayload = irBuilder.CreateBitCast(payload, payloadPtrTy, name: name + ".tag.addr")
+    let nonRefResult = irBuilder.CreateLoad(i1Ty, nonRefPayload, name: name + ".tag.nonref")
+    irBuilder.CreateBr(blocks[2])
+
+    irBuilder.SetInsertPoint(blocks[2])
+    let phi = irBuilder.CreatePHI(i1Ty, name: name + ".tag")
+    let values = ArrayList<LLVMValueRef>()
+    values.add(refResult)
+    values.add(nonRefResult)
+    let incomingBlocks = ArrayList<LLVMBasicBlockRef>()
+    incomingBlocks.add(blocks[0])
+    incomingBlocks.add(blocks[1])
+    irBuilder.AddIncoming(phi, values, incomingBlocks)
+    return phi
+}
+
+private func GenerateOptionLikeTAssociatedValue(irBuilder: IRBuilder2, enumTy: EnumType, enumCGType: CGEnumType,
+    enumValue: LLVMValueRef, associatedValueType: Type): LLVMValueRef {
+    let i8Ty = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let i8PtrTy = unsafe { LLVMPointerType(i8Ty, 1u32) }
+    let blockNames = ArrayList<String>()
+    blockNames.add("ref")
+    blockNames.add("nonRef")
+    blockNames.add("end")
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(blockNames)
+    if (blocks.size < 3) {
+        return LLVMNullValue()
+    }
+    let typeArgs = enumTy.GetTypeArgs()
+    if (typeArgs.isEmpty()) {
+        return LLVMNullValue()
+    }
+    let isRef = irBuilder.CreateTypeInfoIsReferenceCall(typeArgs[0])
+    irBuilder.CreateCondBr(isRef, blocks[0], blocks[1])
+
+    irBuilder.SetInsertPoint(blocks[0])
+    let payload = irBuilder.CreateBitCast(irBuilder.GetPayloadFromObject(enumValue), i8PtrTy)
+    let refResult = irBuilder.CallGCReadRef(enumValue, payload)
+    irBuilder.CreateBr(blocks[2])
+
+    irBuilder.SetInsertPoint(blocks[1])
+    let nonRefResult = GetOptionLikeNonRefAssociatedValue(irBuilder, enumCGType.GetOriginal(),
+        associatedValueType, enumValue)
+    irBuilder.CreateBr(blocks[2])
+
+    irBuilder.SetInsertPoint(blocks[2])
+    let phi = irBuilder.CreatePHI(i8PtrTy)
+    let values = ArrayList<LLVMValueRef>()
+    values.add(refResult)
+    values.add(nonRefResult)
+    let incomingBlocks = ArrayList<LLVMBasicBlockRef>()
+    incomingBlocks.add(blocks[0])
+    incomingBlocks.add(blocks[1])
+    irBuilder.AddIncoming(phi, values, incomingBlocks)
+    return phi
+}
+
+private func GetOptionLikeNonRefAssociatedValue(irBuilder: IRBuilder2, enumTy: Type,
+    associatedValueType: Type, enumValueWithTI: LLVMValueRef): LLVMValueRef {
+    let associatedValueTypeInfo = irBuilder.CreateTypeInfo(associatedValueType)
+    let associatedCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), associatedValueType)
+    let associatedValueTypeSize = irBuilder.GetLayoutSize32(associatedValueType, associatedCGType)
+    let nonRefResult = irBuilder.CallAllocaGenericWithTypeInfoAndSize(associatedValueType,
+        associatedValueTypeInfo, associatedValueTypeSize)
+    let enumTypeInfo = irBuilder.CreateTypeInfo(enumTy)
+    let associatedValOffset = irBuilder.CallGetFieldOffset(enumTypeInfo, 1u64, 8u64)
+    let indices = ArrayList<LLVMValueRef>()
+    indices.add(associatedValOffset)
+    let associatedValPtr = irBuilder.CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) },
+        enumValueWithTI, indices)
+    irBuilder.CallGCReadGeneric(nonRefResult, enumValueWithTI, associatedValPtr, associatedValueTypeSize)
+    return nonRefResult
+}
+
+private func CreateOptionLikeNullCheck(irBuilder: IRBuilder2, value: LLVMValueRef, isAntiOptionLike: Bool,
+    name: String): LLVMValueRef {
+    let nullValue = unsafe { LLVMConstNull(CGType.GetRefType(irBuilder.GetLLVMContext())) }
+    let predicate = if (isAntiOptionLike) { LLVMIntPredicate.NE } else { LLVMIntPredicate.EQ }
+    return irBuilder.CreateICmp(predicate, value, nullValue, name: name)
 }
 
 private func LoadObjectPayloadField(irBuilder: IRBuilder2, objectValue: LLVMValueRef, storageTy: Type,

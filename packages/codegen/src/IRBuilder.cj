@@ -1358,7 +1358,7 @@ public class IRBuilder2 <: Resource {
             GetLayoutSize32ForAllocaGeneric(cgTy, typeInfoValue))
     }
 
-    private func CallAllocaGenericWithTypeInfoAndSize(chirTy: Type, typeInfoValue: LLVMValueRef,
+    public func CallAllocaGenericWithTypeInfoAndSize(chirTy: Type, typeInfoValue: LLVMValueRef,
         size: LLVMValueRef): LLVMValueRef {
         let tyForInfo = chirTy.StripAllRefs()
         EnsureAllocaGenericLayoutMetadata(tyForInfo, typeInfoValue)
@@ -2657,7 +2657,7 @@ public class IRBuilder2 <: Resource {
         return !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12
     }
 
-    private func GetLayoutSize32(chirTy: Type, cgType: CGType): LLVMValueRef {
+    public func GetLayoutSize32(chirTy: Type, cgType: CGType): LLVMValueRef {
         let sizeValue = if (chirTy.StripAllRefs().IsClass()) {
             cgMod.GetTypeSize(cgType.GetLayoutType())
         } else if (let Some(staticSize) <- cgType.GetSize()) {
@@ -2923,7 +2923,7 @@ public class IRBuilder2 <: Resource {
         return CreateBitCast(slot, unsafe { LLVMPointerType(typeInfoPtrType, 0u32) }, name: "ti.args.raw")
     }
 
-    private func CreateTypeInfoIsReferenceCall(chirTy: Type): LLVMValueRef {
+    public func CreateTypeInfoIsReferenceCall(chirTy: Type): LLVMValueRef {
         let baseTy = chirTy.StripAllRefs()
         if (!baseTy.IsGeneric()) {
             return if (CGType.GetOrCreate(cgMod, baseTy).IsReference()) { GetTrue() } else { GetFalse() }
@@ -2932,7 +2932,7 @@ public class IRBuilder2 <: Resource {
         return CreateTypeInfoIsReferenceCall(typeInfoValue)
     }
 
-    private func CreateTypeInfoIsReferenceCall(typeInfoValue: LLVMValueRef): LLVMValueRef {
+    public func CreateTypeInfoIsReferenceCall(typeInfoValue: LLVMValueRef): LLVMValueRef {
         let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
         let args = ArrayList<LLVMValueRef>()
         args.add(CreateBitCast(typeInfoValue, i8PtrType, name: "isref.ti"))

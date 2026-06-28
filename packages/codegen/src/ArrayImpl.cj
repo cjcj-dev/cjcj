@@ -477,6 +477,9 @@ private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue, addr: C
                     let payload = irBuilder.GetPayloadFromObject(raw)
                     let payloadPtr = irBuilder.CreateBitCast(payload,
                         unsafe { LLVMPointerType(destCGType.GetLLVMType(), 1u32) }, name: "store.ref.payload")
+                    if (IsBareGCRefLLVMType(destCGType.GetLLVMType())) {
+                        return irBuilder.CallGCReadRef(raw, payloadPtr)
+                    }
                     return irBuilder.CreateLoad(destCGType.GetLLVMType(), payloadPtr, name: "store.ref.payload.value")
                 }
                 return irBuilder.CreateLoad(destCGType.GetLLVMType(), raw, name: "store.ref.value")
@@ -494,6 +497,9 @@ private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue, addr: C
 
 private func ShouldLoadInlineValueForAddressStore(valueCGType: CGType, destCGType: CGType): Bool {
     if (!valueCGType.IsReference() || destCGType.IsReference() || destCGType.GetSize().isNone()) {
+        return false
+    }
+    if (IsBareGCRefLLVMType(destCGType.GetLLVMType())) {
         return false
     }
     let valueElementCGType = valueCGType.GetPointerElementType() ?? return false

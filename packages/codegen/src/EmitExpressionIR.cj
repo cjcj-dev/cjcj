@@ -114,14 +114,40 @@ private func MaybeEmitRuntimePrint(cgMod: CGModule, irBuilder: IRBuilder2, chirE
 private func MapExpressionResult(cgMod: CGModule, irBuilder: IRBuilder2, chirExpr: Expression,
     rawRet: LLVMValueRef): Unit {
     if (let Some(resultValue) <- chirExpr.GetResult()) {
-        let resultType = if (let Some(valueType) <- resultValue.GetType()) {
+        var resultType = if (let Some(valueType) <- resultValue.GetType()) {
             cgMod.GetCGTypeForExpressionResult(valueType, chirExpr)
         } else {
             CGType(cgMod, cgMod.GetCGContext(), Type(TypeKind.TYPE_INVALID))
         }
+        if (let Some(valueType) <- resultValue.GetType()) {
+            if (ShouldUsePointerResultCGType(valueType, resultType, rawRet)) {
+                let rawRetTy = unsafe { LLVMTypeOf(rawRet) }
+                let addrspace = unsafe { LLVMGetPointerAddressSpace(rawRetTy) }
+                let refTy = cgMod.GetCGContext().GetCHIRBuilder().context.GetRefTy(valueType)
+                resultType = CGType.GetOrCreate(cgMod, refTy, extraInfo: TypeExtraInfo(addrspace))
+            }
+        }
         let sretResult = IsSRetResult(irBuilder, chirExpr, resultValue.nodeId)
         cgMod.SetOrUpdateMappedCGValue(resultValue, CGValue(rawRet, resultType, isSRetArg: sretResult))
     }
+}
+
+private func ShouldUsePointerResultCGType(valueType: Type, resultType: CGType, rawRet: LLVMValueRef): Bool {
+    if (valueType.IsRef() || valueType.IsGeneric()) {
+        return false
+    }
+    let rawRetTy = unsafe { LLVMTypeOf(rawRet) }
+    if (rawRetTy.isNull() || unsafe { LLVMGetTypeKind(rawRetTy) } != 12) {
+        return false
+    }
+    return !resultType.IsReference() && !IsOptionLikeRefCGType(resultType)
+}
+
+private func IsOptionLikeRefCGType(cgType: CGType): Bool {
+    if (let Some(enumCGType) <- (cgType as CGEnumType)) {
+        return enumCGType.IsOptionLikeRef()
+    }
+    return false
 }
 
 private func IsSRetResult(irBuilder: IRBuilder2, chirExpr: Expression, resultId: Int64): Bool {
