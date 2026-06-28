@@ -263,15 +263,28 @@ public open class Node <: Hashable & Equatable<Node> {
     }
 
     public func IsSamePackage(other: Node): Bool {
-        if (let Some(leftFile) <- curFile) {
-            if (let Some(rightFile) <- other.curFile) {
-                if (let Some(leftPkg) <- leftFile.curPackage) {
-                    if (let Some(rightPkg) <- rightFile.curPackage) {
-                        return leftPkg.fullPackageName == rightPkg.fullPackageName
-                    }
-                    return false
+        let otherFile = other.curFile
+        if (let None <- curFile) {
+            return true
+        }
+        if (let None <- otherFile) {
+            return true
+        }
+        if (let Some(file) <- curFile) {
+            if (let Some(rightFile) <- otherFile) {
+                let curPackage = file.curPackage
+                let otherPackage = rightFile.curPackage
+                if (let None <- curPackage) {
+                    return true
                 }
-                return false
+                if (let None <- otherPackage) {
+                    return true
+                }
+                if (let Some(leftPkg) <- curPackage) {
+                    if (let Some(rightPkg) <- otherPackage) {
+                        return refEq(leftPkg, rightPkg)
+                    }
+                }
             }
         }
         return true
@@ -408,6 +421,7 @@ public open class Node <: Hashable & Equatable<Node> {
         return INVALID_POSITION
     }
 
+    @OverflowWrapping
     public func GetDebugPos(curPos: Position): Position {
         var invocation = GetConstInvocation()
         if (let None <- invocation) {
@@ -427,11 +441,9 @@ public open class Node <: Hashable & Equatable<Node> {
                 return curPos
             }
         }
-        if (curPos.column < 0) {
-            return curPos
-        }
         if (let Some(value) <- invocation) {
-            if (let Some(pos) <- FindPositionByUInt64Key(value.macroDebugMap, UInt64(curPos.column))) {
+            let key = UInt64(UInt32(curPos.column))
+            if (let Some(pos) <- FindPositionByUInt64Key(value.macroDebugMap, key)) {
                 return pos
             }
         }
@@ -471,6 +483,10 @@ public class Modifier <: Node {
 
     public override func ToString(): String {
         return if (isExplicit) { TokenKindText(modifier) } else { "" }
+    }
+
+    public operator func <(right: Modifier): Bool {
+        return TokenKindIndex(modifier) < TokenKindIndex(right.modifier)
     }
 }
 
@@ -617,6 +633,10 @@ public class Annotation <: Node {
 
     public func EnableAllTargets(): Unit {
         this.target = 0xffffu16
+    }
+
+    public operator func <(right: Annotation): Bool {
+        return AnnotationKindIndex(kind) < AnnotationKindIndex(right.kind)
     }
 }
 
