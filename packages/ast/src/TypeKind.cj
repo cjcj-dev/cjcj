@@ -126,11 +126,7 @@ public func TypeKindName(kind: TypeKind): String {
         case TypeKind.TYPE_INTERFACE => "Interface"
         case TypeKind.TYPE => "TypeAlias"
         case TypeKind.TYPE_GENERICS => "Generic"
-        case TypeKind.TYPE_ANY => "Any"
-        case TypeKind.TYPE_INTERSECTION => "Intersection"
-        case TypeKind.TYPE_UNION => "Union"
-        case TypeKind.TYPE_QUEST => "Quest"
-        case TypeKind.TYPE_INITIAL => "Initial"
+        case _ => "UnknownType"
     }
 }
 
