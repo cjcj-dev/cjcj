@@ -9,9 +9,10 @@ import cangjie_compiler::option.BackendToString
 import cangjie_compiler::option.BackendType
 import cangjie_compiler::option.OSType
 import cangjie_compiler::option.TripleInfo
-import cangjie_compiler::option.TryParseUInt64
 import cangjie_compiler::utils.EraseIf as UtilsEraseIf
+import cangjie_compiler::utils.CJC_ASSERT
 import std.collection.*
+import std.convert.*
 
 let CJC_VERSION_LENGTH: Int64 = 6
 let BACKEND_STR: String = "backend"
@@ -566,11 +567,9 @@ private func GetVersionUInt(version: String): UInt64 {
             res += "0" + part
         }
     }
-    let parsed = TryParseUInt64(res)
-    if (parsed.hasValue) {
-        return parsed.value
-    }
-    return 0u64
+    let iRes = Int64.parse(res)
+    CJC_ASSERT(iRes >= 0)
+    return UInt64(iRes)
 }
 
 private func RefreshVersionStr(version: String): String {
