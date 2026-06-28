@@ -2,7 +2,7 @@ package cangjie_compiler::utils
 
 import std.fs.File
 
-public open class UserBase {
+public abstract class UserBase {
     protected var enable: Bool = false
     protected var packageName: String = ""
     protected var outputDir: String = ""
@@ -60,11 +60,7 @@ public open class UserBase {
         }
     }
 
-    protected open func GetSuffix(): String {
-        return ""
-    }
+    protected func GetSuffix(): String
 
-    protected open func GetJson(): String {
-        return ""
-    }
+    protected func GetJson(): String
 }
