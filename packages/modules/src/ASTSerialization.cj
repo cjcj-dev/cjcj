@@ -10,6 +10,7 @@ import cangjie_compiler::ast.FeaturesSet as ASTFeaturesSet
 import cangjie_compiler::ast.Identifier as ASTIdentifier
 import cangjie_compiler::ast.Modifier as ASTModifier
 import cangjie_compiler::basic.CANGJIE_VERSION
+import cangjie_compiler::basic.DiagKindRefactor
 import cangjie_compiler::lex.TokenKind
 import cangjie_compiler::lex.TokenKindIndex
 import cangjie_compiler::option.GlobalOptions
@@ -348,10 +349,16 @@ public class ASTLoader {
     public func PreloadCommonPartOfPackage(pkg: Package): Bool {
         if (let Some(commonPkg) <- LoadPackageDependencies()) {
             if (commonPkg.fullPackageName != pkg.fullPackageName) {
-                cjoManager.GetDiag().ReportError(
-                    "module_common_cjo_wrong_package",
-                    "common cjo package '${commonPkg.fullPackageName}' does not match expected '${pkg.fullPackageName}'"
-                )
+                var packageRange = MakeRange(commonPkg.begin, commonPkg.end)
+                if (packageRange.HasZero() && !commonPkg.files.isEmpty()) {
+                    let file = commonPkg.files[0]
+                    packageRange = MakeRange(file.begin, file.end)
+                }
+                cjoManager.GetDiag().DiagnoseRefactor(
+                    DiagKindRefactor.module_common_cjo_wrong_package,
+                    packageRange,
+                    arguments: [commonPkg.fullPackageName, pkg.fullPackageName]
+                ).Emit()
                 return false
             }
             ValidateCommonSpecificFeatureSetsRelations(commonPkg, pkg)
@@ -562,40 +569,54 @@ public class ASTLoader {
                 }
             }
             if (!extraFeatures.isEmpty()) {
-                cjoManager.GetDiag().ReportError(
-                    "feature_is_not_subset_of_child_set",
-                    "extra feature from common part file '${commonFile.filePath}': " +
-                        JoinStrings(extraFeatures, " "),
-                    range: MakeRange(commonFile.begin, commonFile.end)
+                let builder = cjoManager.GetDiag().DiagnoseRefactor(
+                    DiagKindRefactor.feature_is_not_subset_of_child_set,
+                    commonFile.begin,
+                    arguments: [commonPkg.fullPackageName, commonFile.filePath]
                 )
+                builder.AddNote("Extra feature from common part file: " + JoinStrings(extraFeatures, " "))
+                if (!specificPkg.files.isEmpty()) {
+                    let childFile = specificPkg.files[0]
+                    if (let Some(featureDirective) <- childFile.feature) {
+                        if (let Some(featuresSet) <- featureDirective.featuresSet) {
+                            builder.AddNote(MakeRange(featuresSet.begin, featuresSet.end),
+                                "Conflicting specific feature set:")
+                        } else {
+                            builder.AddNote(MakeRange(featureDirective.begin, featureDirective.end),
+                                "Conflicting specific feature set:")
+                        }
+                    }
+                }
+                builder.Emit()
             }
         }
     }
 
     private func ValidateCommonPartOptions(): Bool {
         if (!loadedHasOptions) {
-            cjoManager.GetDiag().ReportWarning(
-                "module_common_cjo_no_options",
-                "common cjo does not contain compilation options"
-            )
+            cjoManager.GetDiag().DiagnoseRefactor(
+                DiagKindRefactor.module_common_cjo_no_options,
+                DEFAULT_POSITION
+            ).Emit()
             return true
         }
         var ok = true
         if (loadedDebugOption != opts.enableCompileDebug) {
             let before = if (loadedDebugOption) { "enabled" } else { "disabled" }
             let after = if (opts.enableCompileDebug) { "enabled" } else { "disabled" }
-            cjoManager.GetDiag().ReportError(
-                "module_common_cjo_debug_mismatch",
-                "common cjo compile debug was ${before}, current compile debug is ${after}"
-            )
+            cjoManager.GetDiag().DiagnoseRefactor(
+                DiagKindRefactor.module_common_cjo_debug_mismatch,
+                DEFAULT_POSITION,
+                arguments: [before, after]
+            ).Emit()
             ok = false
         }
         if (loadedOptimizationLevel != opts.optimizationLevel) {
-            cjoManager.GetDiag().ReportError(
-                "module_common_cjo_opt_mismatch",
-                "common cjo optimization level was ${OptimizationLevelToString(loadedOptimizationLevel)}, " +
-                    "current optimization level is ${OptimizationLevelToString(opts.optimizationLevel)}"
-            )
+            cjoManager.GetDiag().DiagnoseRefactor(
+                DiagKindRefactor.module_common_cjo_opt_mismatch,
+                DEFAULT_POSITION,
+                arguments: [OptimizationLevelToString(loadedOptimizationLevel), OptimizationLevelToString(opts.optimizationLevel)]
+            ).Emit()
             ok = false
         }
         return ok

@@ -2,11 +2,13 @@ package cangjie_compiler::modules
 
 import std.collection.*
 import std.fs.exists
+import std.sort.*
+import cangjie_compiler::basic.{DiagHelp, DiagKindRefactor}
 import cangjie_compiler::lex.TokenKind
 import cangjie_compiler::lex.TokenKindIndex
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::option.OutputMode
-import cangjie_compiler::utils.STANDARD_LIBS
+import cangjie_compiler::utils.{CJC_ASSERT, InternalError, STANDARD_LIBS}
 
 public class ExternalLibCfg {
     public var name: String = ""
@@ -107,10 +109,6 @@ private class PackageSpecDiagRecord {
 
     public func Key(): String {
         return fullPackageName + "|" + GetAccessLevelStr(accessLevel)
-    }
-
-    public func DisplayText(): String {
-        return GetAccessLevelStr(accessLevel) + " package " + fullPackageName
     }
 }
 
@@ -429,10 +427,7 @@ public class ImportManager {
     }
 
     public func BuildIndex(cangjieModules: String, globalOptions: GlobalOptions, packages: ArrayList<Package>): Bool {
-        if (packages.isEmpty()) {
-            diag.ReportError("empty_package_set", "BuildIndex requires at least one package")
-            return false
-        }
+        CJC_ASSERT(!packages.isEmpty())
         let incrBuildIndex = HasBuildIndex()
         if (!incrBuildIndex) {
             cjoManager.UpdateSearchPath(cangjieModules)
@@ -554,7 +549,7 @@ public class ImportManager {
         }
         let cjoPath = cjoManager.GetPackageCjoPath(fullPackageName)
         if (cjoPath.isEmpty() || !cjoManager.LoadPackageHeader(fullPackageName, cjoPath)) {
-            diag.ReportError("bc_cjo_error", "cannot analyze standard package dependency '${fullPackageName}'")
+            diag.DiagnoseRefactor(DiagKindRefactor.bc_cjo_error, DEFAULT_POSITION, arguments: [fullPackageName]).Emit()
             return false
         }
         if (let Some(packageValue) <- cjoManager.GetPackage(fullPackageName)) {
@@ -580,7 +575,7 @@ public class ImportManager {
             if (!importSpec.IsImportMulti()) {
                 let pair = cjoManager.GetPackageCjo(importSpec)
                 if (pair[1].isEmpty()) {
-                    diag.ReportError("macro_file_import_resolution", "failed to resolve imports for macro file")
+                    InternalError("Failed to resolve imports for macro file")
                 }
                 if (!importSpec.IsImportAll() && !cjoManager.IsImportPackage(importSpec)) {
                     importSpec.content.isDecl = true
@@ -797,11 +792,11 @@ public class ImportManager {
             if (let Some(importPkg) <- cjoManager.GetPackage(fullPackageName)) {
                 if (!importPkg.TestAttr(Attribute.IMPORTED) && curPkg.TestAttr(Attribute.IMPORTED)) {
                     success = false
-                    diag.ReportError(
-                        "module_same_name_with_indirect_dependent_pkg",
-                        "failed to load dependent package '${fullPackageName}' for package '${curPkg.fullPackageName}', " +
-                            "which have same package name with source package"
-                    )
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.module_same_name_with_indirect_dependent_pkg,
+                        DEFAULT_POSITION,
+                        arguments: [fullPackageName, curPkg.fullPackageName]
+                    ).Emit()
                 } else {
                     success =
                         HandleParsedPackage(importPkg, cjoPath, !isMacroRelated || isVisibleImport, isRecursive) &&
@@ -900,12 +895,17 @@ public class ImportManager {
             return true
         }
         let kind = if (isMainPartPkgForTestPkg) {
-            "package_missed_cjo_main_pkg_part_for_test_pkg"
+            DiagKindRefactor.package_missed_cjo_main_pkg_part_for_test_pkg
         } else {
-            "package_search_error"
+            DiagKindRefactor.package_search_error
         }
-        diag.ReportError(kind, "cannot find package '${fullPackageName}'; " + NO_CJO_HELP_INFO,
-            range: GetPackageSearchErrorRange(importSpec, isRecursive))
+        let builder = diag.DiagnoseRefactor(
+            kind,
+            GetPackageSearchErrorRange(importSpec, isRecursive),
+            arguments: [fullPackageName]
+        )
+        builder.AddHelp(DiagHelp(NO_CJO_HELP_INFO))
+        builder.Emit()
         return false
     }
 
@@ -942,13 +942,18 @@ public class ImportManager {
                 let packageValue = packageOpt.getOrThrow()
                 let packageRange = GetPackageNameRange(importSpec)
                 if (fullPackageName != packageValue.fullPackageName) {
-                    diag.ReportError("package_import_inconsistent",
-                        "import resolved to '${packageValue.fullPackageName}', not '${fullPackageName}'",
-                        range: packageRange)
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.package_import_inconsistent,
+                        packageRange,
+                        arguments: [packageValue.fullPackageName, fullPackageName]
+                    ).Emit()
                     continue
                 } else if (fullPackageName == pkg.fullPackageName) {
-                    diag.ReportError("package_import_itself_illegal", "package '${fullPackageName}' imports itself",
-                        range: packageRange)
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.package_import_itself_illegal,
+                        packageRange,
+                        arguments: [fullPackageName]
+                    ).Emit()
                     continue
                 }
                 if (importSpec.TestAttr(Attribute.IMPLICIT_ADD)) {
@@ -958,28 +963,36 @@ public class ImportManager {
                 if ((SameAccessLevel(packageValue.accessible, AccessLevel.PROTECTED) && relation == PackageRelation.NONE) ||
                     (SameAccessLevel(packageValue.accessible, AccessLevel.INTERNAL) && relation != PackageRelation.CHILD &&
                         !IsSuperPackage(pkg.fullPackageName, fullPackageName))) {
-                    diag.ReportError("package_accessibility",
-                        "package '${fullPackageName}' is ${GetAccessLevelStr(packageValue)} and is not visible from '${pkg.fullPackageName}'",
-                        range: packageRange)
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.package_accessibility,
+                        packageRange,
+                        arguments: [fullPackageName, GetAccessLevelStr(packageValue), RelationToString(relation), pkg.fullPackageName]
+                    ).Emit()
                 } else if (importSpec.IsReExport() && !pkg.isMacroPackage && packageValue.isMacroPackage) {
-                    diag.ReportError("package_cannot_export_macro_package",
-                        "non-macro package cannot re-export a macro package", range: packageRange)
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.package_cannot_export_macro_package,
+                        packageRange
+                    ).Emit()
                 } else if (importSpec.IsImportAll()) {
                     continue
                 } else if (cjoManager.IsImportPackage(importSpec)) {
                     if (importSpec.IsReExport()) {
-                        diag.ReportError("package_re_export_package_name",
-                            "package '${fullPackageName}' cannot be re-exported by a ${GetAccessLevelStr(importSpec)} package-name import",
-                            range: packageRange)
+                        diag.DiagnoseRefactor(
+                            DiagKindRefactor.package_re_export_package_name,
+                            packageRange,
+                            arguments: [fullPackageName, GetAccessLevelStr(importSpec)]
+                        ).Emit()
                     }
                 } else {
                     let decls = cjoManager.GetPackageMembersByName(packageValue.fullPackageName, importSpec.content.identifier)
                     if (!HasVisibleDecl(decls, relation)) {
                         let im = importSpec.content
                         let nameRange = MakeRange(im.prefixPoses[0], im.identifierEnd)
-                        diag.ReportErrorWithFormatArguments("package_decl_not_find_in_package",
-                            "declaration '${importSpec.content.identifier}' was not found in package '${fullPackageName}'",
-                            nameRange, [im.identifier, fullPackageName])
+                        diag.DiagnoseRefactor(
+                            DiagKindRefactor.package_decl_not_find_in_package,
+                            nameRange,
+                            arguments: [im.identifier, fullPackageName]
+                        ).Emit()
                     }
                 }
             }
@@ -1078,21 +1091,23 @@ public class ImportManager {
                 return
             }
             if (file.features.isEmpty()) {
-                DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), referenceFeatures,
-                    referenceRange: referenceRange)
+                let builder = diag.DiagnoseRefactor(
+                    DiagKindRefactor.feature_null_declaration,
+                    MakeRange(file.begin, file.end)
+                )
+                builder.AddNote(referenceRange, "perhaps you meant these features")
+                builder.Emit()
                 reported++
                 continue
             }
             let currentFeatures = CollectUniqueFeatures(file)
             if ((hasNonProductFile && file.isProduct) || !SameFeatureSet(currentFeatures, referenceFeatures)) {
-                DiagForDifferentPackageFeatureConsistency(
-                    diag,
-                    MakeRange(file.begin, file.end),
-                    currentFeatures,
-                    referenceFeatures,
-                    hasNonProductFile,
-                    referenceRange: referenceRange
+                let builder = diag.DiagnoseRefactor(
+                    DiagKindRefactor.feature_different_consistency,
+                    MakeRange(file.begin, file.end)
                 )
+                builder.AddNote(referenceRange, "perhaps you meant these features")
+                builder.Emit()
                 reported++
             }
         }
@@ -1110,25 +1125,22 @@ public class ImportManager {
             return
         }
         let referenceFile = validation.referenceFile.getOrThrow()
-        let referenceFeatures = CollectFileFeatureNames(referenceFile)
-        let referenceRange = FeatureReferenceRange(referenceFile)
         var counter: Int64 = 0
         for (file in invalidFeatures) {
             if (counter >= 2) {
                 return
             }
             if (let None <- file.feature) {
-                DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), referenceFeatures,
-                    referenceRange: referenceRange)
+                let refFeature = referenceFile.feature.getOrThrow()
+                DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), refFeature)
             } else {
+                let featureDirective = file.feature.getOrThrow()
+                let refFeature = referenceFile.feature.getOrThrow()
                 DiagForDifferentPackageFeatureConsistency(
                     diag,
-                    FeatureDirectiveDiagRange(file, validation.hasAnnotation),
-                    CollectFileFeatureNames(file),
-                    referenceFeatures,
-                    validation.hasAnnotation,
-                    referenceRange: referenceRange,
-                    missingNonProductAnnotation: validation.hasAnnotation && FeatureAnnotationsEmpty(file)
+                    featureDirective,
+                    refFeature,
+                    validation.hasAnnotation
                 )
             }
             counter++
@@ -1244,36 +1256,6 @@ public class ImportManager {
             return file.isProduct && featureDirective.annotations.isEmpty()
         }
         return file.isProduct
-    }
-
-    private func FeatureDirectiveDiagRange(file: File, hasAnnotation: Bool): Range {
-        if (let Some(featureDirective) <- file.feature) {
-            if (hasAnnotation && featureDirective.annotations.isEmpty()) {
-                return MakeRange(featureDirective.featuresPos, "features")
-            }
-            if (let Some(set) <- featureDirective.featuresSet) {
-                return MakeRange(set.begin, set.end)
-            }
-            return MakeRange(featureDirective.begin, featureDirective.end)
-        }
-        return MakeRange(file.begin, file.end)
-    }
-
-    private func FeatureReferenceRange(file: File): Range {
-        if (let Some(featureDirective) <- file.feature) {
-            if (let Some(set) <- featureDirective.featuresSet) {
-                return MakeRange(set.begin, set.end)
-            }
-            return MakeRange(featureDirective.begin, featureDirective.end)
-        }
-        return MakeRange(file.begin, file.end)
-    }
-
-    private func FeatureAnnotationsEmpty(file: File): Bool {
-        if (let Some(featureDirective) <- file.feature) {
-            return featureDirective.annotations.isEmpty()
-        }
-        return true
     }
 
     private func AddImportedDeclsForSourcePackage(pkg: Package): Unit {
@@ -1484,7 +1466,11 @@ public class ImportManager {
         if (let None <- cjoManager.GetPackage(stdPkg)) {
             let cjoPath = cjoManager.GetPackageCjoPath(stdPkg)
             if (cjoPath.isEmpty()) {
-                diag.ReportError("package_search_error", "cannot find package '${stdPkg}'")
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.package_search_error,
+                    DEFAULT_POSITION,
+                    arguments: [stdPkg]
+                ).Emit()
                 return
             }
             if (!cjoManager.LoadPackageHeader(stdPkg, cjoPath)) {
@@ -1666,12 +1652,37 @@ public class ImportManager {
             let record = PackageSpecRecordForFile(pkg, file, hasExplicitPackageSpec)
             if (record.shouldCheckRoot && IsRootPackage(record) &&
                 !SameAccessLevel(record.accessLevel, AccessLevel.PUBLIC)) {
-                DiagRootPackageModifier(diag, record.fullPackageName, MakeRange(record.position, record.fullPackageName))
+                if (let Some(packageSpec) <- file.packageSpec) {
+                    DiagRootPackageModifier(diag, packageSpec)
+                }
             }
             AddPackageSpecRecord(records, record)
         }
         if (records.size > 1) {
-            DiagForDifferentPackageSpecRecords(records)
+            let packageNamePosMap = ArrayList<(String, String, Position, Bool)>()
+            for (record in records) {
+                packageNamePosMap.add((
+                    record.fullPackageName,
+                    GetAccessLevelStr(record.accessLevel),
+                    record.position,
+                    record.hasExplicitPackageSpec
+                ))
+            }
+            sort(packageNamePosMap, by: { left: (String, String, Position, Bool),
+                right: (String, String, Position, Bool) =>
+                if (left[0] < right[0]) {
+                    Ordering.LT
+                } else if (left[0] > right[0]) {
+                    Ordering.GT
+                } else if (left[1] < right[1]) {
+                    Ordering.LT
+                } else if (left[1] > right[1]) {
+                    Ordering.GT
+                } else {
+                    Ordering.EQ
+                }
+            }, stable: true)
+            DiagForDifferentPackageNames(diag, packageNamePosMap)
         }
     }
 
@@ -1755,39 +1766,6 @@ public class ImportManager {
             return packageSpec.packageName.Begin()
         }
         return packageSpec.begin
-    }
-
-    private func DiagForDifferentPackageSpecRecords(records: ArrayList<PackageSpecDiagRecord>): Unit {
-        let primary = SelectPrimaryPackageSpecRecord(records)
-        let names = ArrayList<String>()
-        for (record in records) {
-            names.add(record.DisplayText())
-        }
-        let notes = ArrayList<ModuleDiagnostic>()
-        var counter: Int64 = 0
-        for (record in records) {
-            if (counter >= 2) {
-                break
-            }
-            if (SamePosition(record.position, primary.position)) {
-                continue
-            }
-            notes.add(ModuleDiagnostic("package_name_inconsistent_other",
-                "another different package declaration '" + record.DisplayText() + "'",
-                MakeRange(record.position, record.fullPackageName), DiagnosticSeverity.NOTE))
-            counter++
-        }
-        diag.ReportErrorWithNotes("package_name_inconsistent", "source files declare different package names: " +
-            JoinStrings(names, ", "), MakeRange(primary.position, primary.fullPackageName), notes)
-    }
-
-    private func SelectPrimaryPackageSpecRecord(records: ArrayList<PackageSpecDiagRecord>): PackageSpecDiagRecord {
-        for (record in records) {
-            if (record.hasExplicitPackageSpec) {
-                return record
-            }
-        }
-        return records[0]
     }
 
     private func PackagePrefixSizeFromFullName(fullPackageName: String): Int64 {

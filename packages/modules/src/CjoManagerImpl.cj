@@ -3,6 +3,7 @@ package cangjie_compiler::modules
 import std.collection.*
 import std.fs.File as FSFile
 import std.fs.exists
+import cangjie_compiler::basic.DiagKindRefactor
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::option.OptimizationLevel
 import cangjie_compiler::option.enumIndex
@@ -280,7 +281,7 @@ public class CjoManagerImpl {
             return commonPartLoaders
         }
         if (globalOptions.commonPartCjos.isEmpty()) {
-            diag.ReportError("module_common_part_path_is_required", "common part cjo path is required")
+            diag.DiagnoseRefactor(DiagKindRefactor.module_common_part_path_is_required, DEFAULT_POSITION).Emit()
         }
         for (path in globalOptions.commonPartCjos) {
             let loaderOpt = ReadCjo(expectedName, path, cjoManager)
@@ -302,7 +303,11 @@ public class CjoManagerImpl {
         }
         if (cjoPath.isEmpty() || !exists(cjoPath)) {
             if (printErr) {
-                ReportReadCjoFailure(fullPackageName, cjoPath, "file does not exist")
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.module_read_file_to_buffer_failed,
+                    DEFAULT_POSITION,
+                    arguments: [cjoPath, "file does not exist"]
+                ).Emit()
                 return None
             }
             return Some(CreateASTLoader("".toArray(), fullPackageName, cjoManager))
@@ -312,18 +317,15 @@ public class CjoManagerImpl {
             return Some(CreateASTLoader(bytes, fullPackageName, cjoManager))
         } catch (e: Exception) {
             if (printErr) {
-                ReportReadCjoFailure(fullPackageName, cjoPath, e.message)
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.module_read_file_to_buffer_failed,
+                    DEFAULT_POSITION,
+                    arguments: [cjoPath, e.message]
+                ).Emit()
                 return None
             }
             return Some(CreateASTLoader("".toArray(), fullPackageName, cjoManager))
         }
-    }
-
-    private func ReportReadCjoFailure(fullPackageName: String, cjoPath: String, reason: String): Unit {
-        diag.ReportError(
-            "module_read_file_to_buffer_failed",
-            "cannot read serialized package '${fullPackageName}' from '${cjoPath}': ${reason}"
-        )
     }
 
     private func CreateASTLoader(data: Array<UInt8>, fullPackageName: String, cjoManager: CjoManager): ASTLoader {
