@@ -1,5 +1,6 @@
 package cangjie_compiler::ast
 
+import cangjie_compiler::utils.CJC_NULLPTR_CHECK
 import std.collection.*
 
 public class DeclHash {
@@ -72,17 +73,14 @@ public open class Decl <: Node {
     public func GetMemberDeclPtrs(): ArrayList<Decl> {
         let results = ArrayList<Decl>()
         if (let Some(classDecl) <- (this as ClassDecl)) {
-            if (let Some(body) <- classDecl.body) {
-                for (decl in body.decls) { results.add(decl) }
-            }
+            CJC_NULLPTR_CHECK(classDecl.body)
+            for (decl in classDecl.body.getOrThrow().decls) { results.add(decl) }
         } else if (let Some(interfaceDecl) <- (this as InterfaceDecl)) {
-            if (let Some(body) <- interfaceDecl.body) {
-                for (decl in body.decls) { results.add(decl) }
-            }
+            CJC_NULLPTR_CHECK(interfaceDecl.body)
+            for (decl in interfaceDecl.body.getOrThrow().decls) { results.add(decl) }
         } else if (let Some(structDecl) <- (this as StructDecl)) {
-            if (let Some(body) <- structDecl.body) {
-                for (decl in body.decls) { results.add(decl) }
-            }
+            CJC_NULLPTR_CHECK(structDecl.body)
+            for (decl in structDecl.body.getOrThrow().decls) { results.add(decl) }
         } else if (let Some(enumDecl) <- (this as EnumDecl)) {
             for (constructor in enumDecl.constructors) { results.add(constructor) }
             for (decl in enumDecl.members) { results.add(decl) }
@@ -373,15 +371,6 @@ private func isExtendMemberExported(decl: Decl, baseExported: Bool): Bool {
     return baseExported
 }
 
-private func hasFuncBodyBlock(body: Option<FuncBody>): Bool {
-    if (let Some(funcBody) <- body) {
-        if (let Some(_) <- funcBody.body) {
-            return true
-        }
-    }
-    return false
-}
-
 private func isOpenMemberDecl(decl: Decl, hasBodyOrAccessor: Bool): Bool {
     if (let Some(outer) <- decl.outerDecl) {
         if (!outer.IsOpen() || decl.TestAttr(Attribute.STATIC)) {
@@ -608,9 +597,8 @@ public class TypeAliasDecl <: Decl {
         if (let Some(value) <- generic) {
             out += value.ToString()
         }
-        if (let Some(value) <- typeNode) {
-            out += " = " + value.ToString()
-        }
+        CJC_NULLPTR_CHECK(typeNode)
+        out += " = " + typeNode.getOrThrow().ToString()
         return out
     }
 }
@@ -729,7 +717,23 @@ public class FuncDecl <: Decl {
     }
 
     public override func IsOpen(): Bool {
-        return isOpenMemberDecl(this, hasFuncBodyBlock(funcBody))
+        if (let Some(outer) <- outerDecl) {
+            if (!outer.IsOpen() || TestAttr(Attribute.STATIC)) {
+                return false
+            }
+        } else {
+            return false
+        }
+        if (TestAnyAttr(Attribute.OPEN, Attribute.ABSTRACT)) {
+            return true
+        }
+        if (TestAttr(Attribute.IMPORTED)) {
+            return false
+        }
+        if (let Some(_) <- funcBody.getOrThrow().body) {
+            return false
+        }
+        return true
     }
 
     public override func ToString(): String {
@@ -809,6 +813,7 @@ public class StructBody <: Node {
 
 public class StructDecl <: InheritableDecl {
     public var body: Option<StructBody> = None
+    private var hasConstOrFrozenInit: Option<Bool> = None
 
     public init() {
         super(ASTKind.STRUCT_DECL)
@@ -822,14 +827,20 @@ public class StructDecl <: InheritableDecl {
     }
 
     public func HasConstOrFrozenInit(): Bool {
-        if (let Some(value) <- body) {
-            for (decl in value.decls) {
-                if (decl.TestAttr(Attribute.CONSTRUCTOR) && (decl.IsConst() || decl.HasAnno(AnnotationKind.FROZEN))) {
-                    return true
-                }
+        if (let Some(value) <- hasConstOrFrozenInit) {
+            return value
+        }
+        CJC_NULLPTR_CHECK(body)
+        let decls = body.getOrThrow().decls
+        var has = false
+        for (decl in decls) {
+            if (decl.TestAttr(Attribute.CONSTRUCTOR) && (decl.IsConst() || decl.HasAnno(AnnotationKind.FROZEN))) {
+                has = true
+                break
             }
         }
-        return false
+        hasConstOrFrozenInit = has
+        return has
     }
 }
 
@@ -890,6 +901,7 @@ public class ClassBody <: Node {
 
 public class ClassDecl <: ClassLikeDecl {
     public var body: Option<ClassBody> = None
+    private var hasConstOrFrozenInit: Option<Bool> = None
 
     public init() {
         super(ASTKind.CLASS_DECL)
@@ -918,14 +930,20 @@ public class ClassDecl <: ClassLikeDecl {
     }
 
     public func HasConstOrFrozenInit(): Bool {
-        if (let Some(value) <- body) {
-            for (decl in value.decls) {
-                if (decl.TestAttr(Attribute.CONSTRUCTOR) && (decl.IsConst() || decl.HasAnno(AnnotationKind.FROZEN))) {
-                    return true
-                }
+        if (let Some(value) <- hasConstOrFrozenInit) {
+            return value
+        }
+        CJC_NULLPTR_CHECK(body)
+        let decls = body.getOrThrow().decls
+        var has = false
+        for (decl in decls) {
+            if (decl.TestAttr(Attribute.CONSTRUCTOR) && (decl.IsConst() || decl.HasAnno(AnnotationKind.FROZEN))) {
+                has = true
+                break
             }
         }
-        return false
+        hasConstOrFrozenInit = has
+        return has
     }
 }
 
