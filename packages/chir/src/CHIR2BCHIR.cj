@@ -1,8 +1,19 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::utils.{CJC_ASSERT, CORE_PACKAGE_NAME}
 
-private let CONST_EVAL_FUNCTIONS: Array<String> = [
+private let CONST_EXCEPTIONS: Array<String> = [
+    "@_CNat19ArithmeticExceptionE",
+    "@_CNat5ErrorE",
+    "@_CNat9ExceptionE",
+    "@_CNat24IllegalArgumentExceptionE",
+    "@_CNat25IndexOutOfBoundsExceptionE",
+    "@_CNat18NoneValueExceptionE",
+    "@_CNat17OverflowExceptionE",
+]
+
+private let CONST_FUNCTIONS: Array<String> = [
     "@_CNat19ArithmeticException6<init>Hv",
     "@_CNat19ArithmeticException6<init>HRNat6StringE",
     "@_CNat9Exception6<init>Hv",
@@ -36,40 +47,54 @@ public class CHIR2BCHIR {
         this.bchir = bchir
     }
 
-    public static func CompilePackage(chirPkg: Package, destBchir: BCHIR, forConstEval!: Bool = false): Unit {
+    public static func CompilePackage(chirPkg: Package, destBchir: BCHIR,
+        initFuncsForConstVar!: ArrayList<Function> = ArrayList<Function>(), forConstEval!: Bool = false): Unit {
         let compiler = CHIR2BCHIR(destBchir)
-        compiler.TranslatePackage(chirPkg, forConstEval: forConstEval)
+        compiler.TranslatePackage(chirPkg, initFuncsForConstVar: initFuncsForConstVar, forConstEval: forConstEval)
     }
 
-    public func TranslatePackage(chirPkg: Package, forConstEval!: Bool = false): Unit {
+    public func TranslatePackage(chirPkg: Package,
+        initFuncsForConstVar!: ArrayList<Function> = ArrayList<Function>(), forConstEval!: Bool = false): Unit {
         bchir.packageName = chirPkg.GetName()
-        if (chirPkg.GetName() == "std.core") {
+        if (chirPkg.GetName() == CORE_PACKAGE_NAME) {
             bchir.SetAsCore()
+            bchir.AddSClass("_CN8std$core6ObjectE", BCHIRSClassInfo())
         }
-        TranslateClassesLike(chirPkg)
+        TranslateClassesLike(chirPkg, forConstEval: forConstEval)
         TranslateGlobalVars(chirPkg, forConstEval: forConstEval)
         TranslateFunctions(chirPkg, forConstEval: forConstEval)
         if (let Some(initFunc) <- chirPkg.GetPackageInitFunc()) {
-            bchir.SetGlobalInitFunc(BCHIRMangledName(initFunc))
+            bchir.SetGlobalInitFunc(initFunc.GetIdentifierWithoutPrefix())
+        }
+        if (forConstEval) {
+            for (initFuncForConstVar in initFuncsForConstVar) {
+                bchir.initFuncsForConsts.add(initFuncForConstVar.GetIdentifierWithoutPrefix())
+            }
         }
         if (let Some(literalInitFunc) <- chirPkg.GetPackageLiteralInitFunc()) {
             bchir.SetGlobalInitLiteralFunc(BCHIRMangledName(literalInitFunc))
         }
     }
 
-    private func TranslateClassesLike(chirPkg: Package): Unit {
+    private func TranslateClassesLike(chirPkg: Package, forConstEval!: Bool): Unit {
         for (classDef in chirPkg.GetAllClassDef()) {
+            if (forConstEval && !classDef.IsInterface() && !IsConstClass(classDef)) {
+                continue
+            }
             let info = BCHIRSClassInfo()
             if (let Some(superClass) <- classDef.GetSuperClassDef()) {
                 info.superClasses.add(BCHIRMangledName(superClass))
             }
-            for (interfaceDef in classDef.GetImplementedInterfaceDefs()) {
-                info.superClasses.add(BCHIRMangledName(interfaceDef))
+            if (let Some(finalizer) <- classDef.GetFinalizer()) {
+                info.finalizer = finalizer.GetIdentifierWithoutPrefix()
             }
             CollectMethods(classDef, info)
             bchir.AddSClass(BCHIRMangledName(classDef), info)
         }
         for (structDef in chirPkg.GetAllStructDef()) {
+            if (forConstEval && !IsConstClass(structDef)) {
+                continue
+            }
             let info = BCHIRSClassInfo()
             CollectMethods(structDef, info)
             bchir.AddSClass(BCHIRMangledName(structDef), info)
@@ -80,12 +105,57 @@ public class CHIR2BCHIR {
             bchir.AddSClass(BCHIRMangledName(enumDef), info)
         }
         for (extendDef in chirPkg.GetAllExtendDef()) {
-            if (let Some(extendedTy) <- extendDef.extendedType) {
+            if (let Some(extendedDef) <- extendDef.GetExtendedCustomTypeDef()) {
+                if (forConstEval && !IsConstClass(extendedDef)) {
+                    continue
+                }
+                let name = BCHIRMangledName(extendedDef)
+                if (let Some(info) <- bchir.GetSClass(name)) {
+                    CollectMethods(extendDef, info)
+                } else {
+                    CJC_ASSERT(forConstEval)
+                    continue
+                }
+            } else if (let Some(extendedTy) <- extendDef.GetExtendedType()) {
+                CJC_ASSERT(extendedTy.IsPrimitive() || extendedTy.IsCString() || extendedTy.IsCPointer())
                 let name = extendedTy.ToString()
-                let info = bchir.GetSClass(name) ?? BCHIRSClassInfo()
-                CollectMethods(extendDef, info)
-                bchir.AddSClass(name, info)
+                if (let Some(info) <- bchir.GetSClass(name)) {
+                    CollectMethods(extendDef, info)
+                } else {
+                    let freshInfo = BCHIRSClassInfo()
+                    CollectMethods(extendDef, freshInfo)
+                    bchir.AddSClass(name, freshInfo)
+                }
+            } else {
+                CJC_ASSERT(false)
             }
+        }
+    }
+
+    private func IsConstClass(def: CustomTypeDef): Bool {
+        for (name in CONST_EXCEPTIONS) {
+            if (def.GetIdentifier() == name) {
+                return true
+            }
+        }
+        if (def.IsClassLike()) {
+            if (def.TestAttr(Attribute.COMPILER_ADD)) {
+                return true
+            }
+            let methods = def.GetMethods()
+            for (extendDef in def.GetExtends()) {
+                for (method in extendDef.GetMethods()) {
+                    methods.add(method)
+                }
+            }
+            for (method in methods) {
+                if (method.TestAttr(Attribute.CONST)) {
+                    return true
+                }
+            }
+            return methods.isEmpty()
+        } else {
+            return true
         }
     }
 
@@ -110,7 +180,14 @@ public class CHIR2BCHIR {
                 continue
             }
             let context = TranslateGlobalVar(globalVar, forConstEval: forConstEval)
-            bchir.AddGlobalVar(BCHIRMangledName(globalVar), context.definition)
+            let mangledName = globalVar.GetIdentifierWithoutPrefix()
+            if (mangledName == "$has_applied_pkg_init_func") {
+                let fixedMangledName = "$has_applied_pkg_init_func-" + bchir.packageName
+                bchir.RemoveGlobalVar(fixedMangledName)
+                bchir.AddGlobalVar(fixedMangledName, context.definition)
+            } else {
+                bchir.AddGlobalVar(mangledName, context.definition)
+            }
         }
         bchir.SetNumGlobalVars(chirPkg.GetGlobalVars().size)
     }
@@ -170,14 +247,15 @@ public class CHIR2BCHIR {
         if (function.IsCompileTimeValue()) {
             return true
         }
-        for (name in CONST_EVAL_FUNCTIONS) {
+        for (name in CONST_FUNCTIONS) {
             if (function.GetIdentifier() == name) {
                 return true
             }
         }
         if (bchir.IsCore()) {
+            let functionIdent = function.GetIdentifierWithoutPrefix()
             for (name in BCHIRDefaultFunctionMangledNames()) {
-                if (BCHIRMangledName(function) == name) {
+                if (functionIdent == name) {
                     return true
                 }
             }

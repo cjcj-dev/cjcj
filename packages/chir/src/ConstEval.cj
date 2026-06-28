@@ -23,10 +23,8 @@ public class ConstEvalPass {
     private func RunInterpreter(pkg: Package, bchirPackages: ArrayList<BCHIR>,
         initFuncsForConstVar: ArrayList<Function>): Unit {
         let packageBchir = BCHIR()
-        CHIR2BCHIR.CompilePackage(pkg, packageBchir, forConstEval: true)
-        for (fn in initFuncsForConstVar) {
-            packageBchir.initFuncsForConsts.add(BCHIRMangledName(fn))
-        }
+        CHIR2BCHIR.CompilePackage(pkg, packageBchir, initFuncsForConstVar: initFuncsForConstVar,
+            forConstEval: true)
         bchirPackages.add(packageBchir)
 
         let linker = BCHIRLinker()
