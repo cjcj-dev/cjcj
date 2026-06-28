@@ -407,7 +407,7 @@ private func parseCustomOptimization(opts: GlobalOptions, value: String): Action
 
 private func parseWarn(value: String, suppress: Bool): Bool {
     if (value == "all") {
-        BasicWarningOptionMgr.UpdateFlags(suppress)
+        BasicWarningOptionMgr.UpdateFlags(Array<Bool>(BasicWarnGroupIndex(BasicWarnGroup.NONE), repeat: suppress))
     } else if (value == "unused") {
         BasicWarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.UNUSED)), suppress)
     } else if (value == "unused-main") {

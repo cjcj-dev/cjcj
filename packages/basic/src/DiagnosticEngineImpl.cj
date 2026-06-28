@@ -247,7 +247,7 @@ public class DiagnosticEngineImpl {
         if (index < 0) {
             return false
         }
-        return WarningOptionMgr.IsSuppressed(UInt64(index))
+        return WarningOptionMgr.GetInstance().IsSuppressed(UInt64(index))
     }
 
     public func Prepare(): Unit {
