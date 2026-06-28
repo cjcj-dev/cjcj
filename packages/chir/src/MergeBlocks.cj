@@ -6,6 +6,9 @@ public class MergeBlocks {
     public func RunOnPackage(pkg: Package, enableCompileDebug!: Bool = false, enableCoverage!: Bool = false): Int64 {
         var merged: Int64 = 0
         for (fn in pkg.GetGlobalFuncsWithBody()) {
+            if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
+                continue
+            }
             merged += RunOnFunction(fn, enableCompileDebug: enableCompileDebug, enableCoverage: enableCoverage)
         }
         return merged
@@ -150,6 +153,9 @@ public class MergeBlocks {
     }
 
     private func SkipMergeBlock(block: Block, enableCompileDebug: Bool): Bool {
+        if (block.TestAttr(Attribute.UNREACHABLE)) {
+            return true
+        }
         if (!enableCompileDebug) {
             return false
         }
