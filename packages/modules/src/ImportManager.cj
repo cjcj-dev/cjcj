@@ -726,11 +726,21 @@ public class ImportManager {
                 }
             }
         }
-        cjoManager.LoadPackageDeclsOnDemand(packages)
+        LoadPackageDeclsOnDemand(packages)
         for (pkg in packages) {
             cjoManager.AddPackageDeclMap(pkg.fullPackageName)
         }
         return success
+    }
+
+    @When[backend == "cjnative"]
+    private func LoadPackageDeclsOnDemand(packages: ArrayList<Package>): Unit {
+        cjoManager.LoadPackageDeclsOnDemand(packages)
+    }
+
+    @When[backend != "cjnative"]
+    private func LoadPackageDeclsOnDemand(packages: ArrayList<Package>): Unit {
+        let _ = packages
     }
 
     private func LoadDependentPackageHeadersForLsp(pkg: Package): Bool {
