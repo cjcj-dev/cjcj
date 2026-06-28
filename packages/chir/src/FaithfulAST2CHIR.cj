@@ -6,6 +6,7 @@ import std.collection.*
 import cangjie_compiler::ast.ASTKind
 import cangjie_compiler::ast.ASTKindIndex
 import cangjie_compiler::ast.ASTKindName
+import cangjie_compiler::ast.AccessLevel as AstAccessLevel
 import cangjie_compiler::ast.ArrayExpr as AstArrayExpr
 import cangjie_compiler::ast.ArrayLit as AstArrayLit
 import cangjie_compiler::ast.Attribute as AstAttribute
@@ -39,6 +40,7 @@ import cangjie_compiler::ast.VarWithPatternDecl as AstVarWithPatternDecl
 import cangjie_compiler::ast.VisitAction as AstVisitAction
 import cangjie_compiler::ast.Walker as AstWalker
 import cangjie_compiler::ast.WildcardPattern as AstWildcardPattern
+import cangjie_compiler::ast.Position as AstPosition
 
 private class FaithfulInitFileVars {
     public let file: AstFile
@@ -348,6 +350,23 @@ private func FaithfulIsHashableFileName(fileName: String): Bool {
     return false
 }
 
+private func BuildPackageAccessLevel(level: AstAccessLevel): AccessLevel {
+    return match (level) {
+        case AstAccessLevel.INTERNAL => AccessLevel.INTERNAL
+        case AstAccessLevel.PROTECTED => AccessLevel.PROTECTED
+        case AstAccessLevel.PUBLIC => AccessLevel.PUBLIC
+        case AstAccessLevel.PRIVATE => throw IllegalArgumentException("invalid package access level")
+    }
+}
+
+private func TranslateLocationWithoutScope(context: CHIRContext, beginPos: AstPosition,
+    endPos: AstPosition): DebugLocation {
+    let fileId = UInt32(beginPos.fileID)
+    return DebugLocation(context.GetSourceFileName(fileId), fileId,
+        Position(UInt32(beginPos.line), UInt32(beginPos.column)),
+        Position(UInt32(endPos.line), UInt32(endPos.column)), scopeInfo: ArrayList<Int64>([0]))
+}
+
 public class FaithfulAST2CHIRBuilder {
     private var builder: Option<CHIRBuilder> = None
     private var chirType: Option<CHIRType> = None
@@ -436,6 +455,7 @@ public class FaithfulAST2CHIR {
 
     public func ToCHIRPackage(node: AstPackage): Bool {
         outputPackage = builder.CreatePackage(node.fullPackageName)
+        CurrentPackage().SetPackageAccessLevel(BuildPackageAccessLevel(node.accessible))
         CollectImportedDecls(node)
         CollectDeclsInCurPkg(node)
         CacheTopLevelDeclToGlobalSymbolTable()
@@ -1195,6 +1215,10 @@ public class FaithfulAST2CHIR {
         return IsSrcImportedDecl(decl) && !IsLocalVarDecl(decl)
     }
 
+    private func IsSymbolImportedDecl(decl: AstDecl): Bool {
+        return decl.TestAttr(AstAttribute.IMPORTED) && !IsSrcImportedDecl(decl)
+    }
+
     private func IsSrcImportedDecl(decl: AstDecl): Bool {
         if (!decl.TestAttr(AstAttribute.IMPORTED)) {
             return false
@@ -1318,7 +1342,7 @@ public class FaithfulAST2CHIR {
                 TranslateImportedFileLiteralInitializer(fileVars, initBlock)
                 continue
             }
-            if (IsImportedInitEntry(fileVars) && !IsSrcImportedDecl(fileVars.vars[0])) {
+            if (!fileVars.vars.isEmpty() && IsSymbolImportedDecl(fileVars.vars[0])) {
                 continue
             }
             let fileInit = if (suffix == "_literal") {
@@ -1394,6 +1418,9 @@ public class FaithfulAST2CHIR {
     private func UpdateImportsInit(importsInitFunc: Function, suffix: String): Unit {
         let block = DropExitNodeOfInitializer(importsInitFunc)
         for (importedPackage in DirectImportedPackages()) {
+            if (importedPackage.isMacroPackage) {
+                continue
+            }
             let pkgName = importedPackage.fullPackageName
             let fn = CreateEmptyGVInitFunc(PackageInitFuncName(pkgName, suffix), PackageInitFuncName(pkgName, suffix),
                 "", pkgName)
@@ -1442,7 +1469,7 @@ public class FaithfulAST2CHIR {
         if (fileVars.vars.isEmpty()) {
             return None
         }
-        if (IsImportedInitEntry(fileVars) && !IsSrcImportedDecl(fileVars.vars[0])) {
+        if (IsSymbolImportedDecl(fileVars.vars[0])) {
             return None
         }
         let initFuncs = ArrayList<Function>()
@@ -2052,9 +2079,13 @@ public class FaithfulAST2CHIR {
         let globalVar = builder.CreateGlobalVar(builder.context.GetRefTy(varTy), EffectiveMangledName(decl),
             srcCodeIdentifier: decl.identifier.Val(), rawMangledName: EffectiveRawMangledName(decl),
             packageName: EffectivePackageName(decl))
+        globalVar.SetDebugLocation(TranslateLocationWithoutScope(builder.context, decl.begin, decl.end))
         ApplyDeclAttrs(globalVar, decl)
         if (decl.IsConst()) {
             globalVar.EnableAttr(Attribute.CONST)
+        }
+        if (decl.TestAttr(AstAttribute.COMMON)) {
+            globalVar.EnableAttr(Attribute.COMMON)
         }
         globalCache.Set(decl, globalVar)
         AddGlobalVarToPackage(globalVar)
@@ -2065,28 +2096,35 @@ public class FaithfulAST2CHIR {
         let funcTy = fn.GetFuncType() ??
             throw IllegalStateException("faithful AST2CHIR function has no FuncType: ${fn.GetIdentifier()}")
         let paramTys = funcTy.GetParamTypes()
+        let paramLoc = ArrayList<DebugLocation>()
+        let paramSrcCodeIdentifiers = ArrayList<String>()
+        if (HasImplicitThisParam(funcDecl)) {
+            paramLoc.add(INVALID_LOCATION)
+            paramSrcCodeIdentifiers.add("this")
+        }
+        let body = funcDecl.funcBody ??
+            throw IllegalStateException("faithful AST2CHIR function has no body: ${fn.GetIdentifier()}")
+        if (body.paramLists.isEmpty()) {
+            throw IllegalStateException("faithful AST2CHIR function has no parameter list: ${fn.GetIdentifier()}")
+        }
+        for (param in body.paramLists[0].params) {
+            paramLoc.add(TranslateLocationWithoutScope(builder.context, param.begin, param.end))
+            paramSrcCodeIdentifiers.add(param.identifier.GetRawText())
+        }
+        if (paramTys.size != paramLoc.size || paramTys.size != paramSrcCodeIdentifiers.size) {
+            throw IllegalStateException("faithful AST2CHIR function parameter count mismatch: ${fn.GetIdentifier()}")
+        }
         var paramIndex: Int64 = 0
         while (paramIndex < paramTys.size) {
-            let parameter = builder.CreateParameter(paramTys[paramIndex], INVALID_LOCATION, fn)
-            parameter.SetSrcCodeIdentifier(if (paramIndex == 0 && HasImplicitThisParam(funcDecl)) {
-                "this"
-            } else {
-                ""
-            })
+            let parameter = builder.CreateParameter(paramTys[paramIndex], paramLoc[paramIndex], fn)
+            parameter.SetSrcCodeIdentifier(paramSrcCodeIdentifiers[paramIndex])
             paramIndex++
         }
-        if (let Some(body) <- funcDecl.funcBody) {
-            if (!body.paramLists.isEmpty()) {
-                let explicitParams = body.paramLists[0].params
-                let offset: Int64 = if (explicitParams.size < paramTys.size) { 1 } else { 0 }
-                var explicitIndex: Int64 = 0
-                for (param in explicitParams) {
-                    let parameter = fn.GetParam(explicitIndex + offset)
-                    parameter.SetSrcCodeIdentifier(param.identifier.Val())
-                    globalCache.Set(param, parameter)
-                    explicitIndex++
-                }
-            }
+        let offset: Int64 = if (HasImplicitThisParam(funcDecl)) { 1 } else { 0 }
+        var explicitIndex: Int64 = 0
+        for (param in body.paramLists[0].params) {
+            globalCache.Set(param, fn.GetParam(explicitIndex + offset))
+            explicitIndex++
         }
     }
 
