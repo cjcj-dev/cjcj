@@ -4,15 +4,13 @@ import std.collection.*
 import std.sort.*
 import std.sync.*
 
-private class QueuedTask {
+private struct Task {
     let fn: () -> Unit
     let priority: UInt64
-    let order: Int64
 
-    init(fn: () -> Unit, priority: UInt64, order: Int64) {
+    init(fn: () -> Unit, priority: UInt64) {
         this.fn = fn
         this.priority = priority
-        this.order = order
     }
 }
 
@@ -50,7 +48,7 @@ public class TaskResult<T> {
 }
 
 public class TaskQueue {
-    private let tasks = ArrayList<QueuedTask>()
+    private let tasks = ArrayList<Task>()
     private let threads = ArrayList<Future<Unit>>()
     private let mutex = Mutex()
     private var isStarted = false
@@ -63,14 +61,13 @@ public class TaskQueue {
     public func AddTask<T>(fn: () -> T, priority!: UInt64 = 0u64): TaskResult<T> {
         CJC_ASSERT_WITH_MSG(!isStarted, "Do not add new tasks while executing.")
         let result = TaskResult<T>()
-        let order = tasks.size
-        tasks.add(QueuedTask({ =>
+        tasks.add(Task({ =>
             try {
                 result.complete(fn())
             } catch (e: Exception) {
                 result.fail(e)
             }
-        }, priority, order))
+        }, priority))
         return result
     }
 
@@ -97,19 +94,16 @@ public class TaskQueue {
     }
 
     private func createThreads(): Unit {
-        if (isStarted) {
-            return
-        }
         isStarted = true
-        sort(tasks, by: { left: QueuedTask, right: QueuedTask =>
+        sort(tasks, by: { left: Task, right: Task =>
             if (left.priority > right.priority) {
                 Ordering.LT
             } else if (left.priority < right.priority) {
                 Ordering.GT
             } else {
-                left.order.compare(right.order)
+                Ordering.EQ
             }
-        }, stable: true)
+        })
         let fixedThreadsNum = if (tasks.size < threadsNum) { tasks.size } else { threadsNum }
         for (_ in 0..fixedThreadsNum) {
             threads.add(spawn {
@@ -118,22 +112,15 @@ public class TaskQueue {
         }
     }
 
-    private func popTask(): Option<QueuedTask> {
-        synchronized(mutex) {
-            if (tasks.isEmpty()) {
-                return None
-            }
-            let task = tasks[0]
-            tasks.remove(at: 0)
-            return task
-        }
-    }
-
     private func doTask(): Unit {
         while (true) {
-            let task = popTask()
-            if (let None <- task) {
-                return
+            var task: Option<Task> = None
+            synchronized(mutex) {
+                if (tasks.isEmpty()) {
+                    return
+                }
+                task = tasks[0]
+                tasks.remove(at: 0)
             }
             task.getOrThrow().fn()
         }
