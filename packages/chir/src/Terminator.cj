@@ -32,9 +32,7 @@ public open class Terminator <: Expression {
     }
 
     public func AddSuccessor(block: Block): Unit {
-        if (!ContainsBlock(successors, block)) {
-            successors.add(block)
-        }
+        successors.add(block)
         if (let Some(parentBlock) <- GetParentBlock()) {
             block.AddPredecessor(parentBlock)
         }
@@ -71,6 +69,14 @@ public open class Terminator <: Expression {
         }
     }
 
+    private func LetSuccessorsRemoveCurBlock(): Unit {
+        if (let Some(parentBlock) <- GetParentBlock()) {
+            for (successor in successors) {
+                successor.RemovePredecessor(parentBlock)
+            }
+        }
+    }
+
     public override func DetachFromBlockOnly(): Unit {
         if (let Some(parentBlock) <- GetParentBlock()) {
             for (successor in successors) {
@@ -78,6 +84,42 @@ public open class Terminator <: Expression {
             }
         }
         super.DetachFromBlockOnly()
+    }
+
+    public override func RemoveSelfFromBlock(): Unit {
+        LetSuccessorsRemoveCurBlock()
+        if (let Some(parentBlock) <- GetParentBlock()) {
+            parentBlock.RemoveExprOnly(this)
+            ClearParent()
+        }
+        EraseOperands()
+    }
+
+    public override func ReplaceWith(newExpr: Expression): Unit {
+        let newTerminator = newExpr as Terminator ??
+            throw IllegalArgumentException("new expression is not a terminator")
+        let newTerminatorHadParent = newTerminator.GetParentBlock().isSome()
+        if (let Some(newParent) <- newTerminator.GetParentBlock()) {
+            newParent.RemoveExprOnly(newTerminator)
+            newTerminator.ClearParent()
+        }
+        if (let Some(oldResult) <- GetResult()) {
+            let newResult = newTerminator.GetResult() ??
+                throw IllegalStateException("new terminator has no result")
+            for (user in oldResult.GetUsers()) {
+                user.ReplaceOperand(oldResult, newResult)
+            }
+        }
+        let oldParent = GetParentBlock() ??
+            throw IllegalStateException("terminator has no parent block")
+        RemoveSelfFromBlock()
+        if (newTerminatorHadParent) {
+            oldParent.GetExpressionsRef().add(newTerminator)
+            newTerminator.SetParent(oldParent)
+            newTerminator.SyncSuccessorPredecessors()
+        } else {
+            oldParent.AppendExpression(newTerminator)
+        }
     }
 
     public open override func AddExtraComment(): String {
@@ -511,7 +553,7 @@ public class IntOpWithException <: ExpressionWithException {
     }
 
     public func GetOpKindName(): String {
-        return ExprKindName(opKind)
+        return ExprKindName(opKind) + "WithException"
     }
 
     public func GetLHSOperand(): Value {
@@ -527,9 +569,7 @@ public class IntOpWithException <: ExpressionWithException {
 
     public func GetOverflowStrategy(): OverflowStrategy {
         if (opKind == ExprKind.DIV) {
-            if (overflowStrategy != OverflowStrategy.NA) {
-                return overflowStrategy
-            }
+            return overflowStrategy
         }
         return OverflowStrategy.THROWING
     }
@@ -572,12 +612,8 @@ public class IntOpWithException <: ExpressionWithException {
 }
 
 public class TypeCastWithException <: ExpressionWithException {
-    private var overflowStrategy: OverflowStrategy
-
-    public init(source: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>,
-        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
+    public init(source: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
         super(ExprKind.TYPECAST_WITH_EXCEPTION, MakeUnaryTermOperands(source), successBlock, errorBlock, parent)
-        this.overflowStrategy = overflowStrategy
     }
 
     public func GetSourceValue(): Value {
@@ -596,32 +632,12 @@ public class TypeCastWithException <: ExpressionWithException {
     }
 
     public func GetOverflowStrategy(): OverflowStrategy {
-        if (overflowStrategy == OverflowStrategy.NA) {
-            return OverflowStrategy.THROWING
-        }
-        return overflowStrategy
-    }
-
-    public func SetOverflowStrategy(strategy: OverflowStrategy): Unit {
-        overflowStrategy = strategy
-    }
-
-    public override func AddExtraComment(): String {
-        let base = super.AddExtraComment()
-        if (overflowStrategy == OverflowStrategy.NA) {
-            return base
-        }
-        let overflowText = "Overflow: " + OverflowStrategyName(overflowStrategy)
-        if (base.isEmpty()) {
-            return overflowText
-        }
-        return base + " " + overflowText
+        return OverflowStrategy.THROWING
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateTypeCastWithException(RequiredResultType(this), GetSourceValue(),
             GetSuccessBlock(), GetErrorBlock(), parent)
-        cloned.SetOverflowStrategy(overflowStrategy)
         return FinishExpressionClone(this, cloned)
     }
 }
