@@ -312,7 +312,7 @@ public class CallGraphAnalysis {
     private let onStack: HashMap<Int64, Bool> = HashMap<Int64, Bool>()
     private let sccNodeStack: ArrayList<CallGraphNode> = ArrayList<CallGraphNode>()
     private let currentSCC: ArrayList<CallGraphNode> = ArrayList<CallGraphNode>()
-    public let postOrderSCCFunctionlist: ArrayList<Function> = ArrayList<Function>()
+    public let postOrderSCCFunctionlist: ArrayList<Option<Function>> = ArrayList<Option<Function>>()
 
     public init() {}
 
@@ -442,9 +442,7 @@ public class CallGraphAnalysis {
             }
         }
         for (node in currentSCC) {
-            if (let Some(fn) <- node.GetFunction()) {
-                postOrderSCCFunctionlist.add(fn)
-            }
+            postOrderSCCFunctionlist.add(node.GetFunction())
         }
     }
 }
