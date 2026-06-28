@@ -1,8 +1,14 @@
 package cangjie_compiler::ast
 
+import cangjie_compiler::basic.SplitQualifiedName
+import cangjie_compiler::utils.CJC_ABORT
+import cangjie_compiler::utils.CJC_ASSERT
+import cangjie_compiler::utils.CJC_NULLPTR_CHECK
 import std.collection.*
 
 private var tmpVarIndex: UInt64 = 1u64
+
+public type FullPackageNameToPrefixPaths = HashMap<String, Array<String>>
 
 public func CopyNodeScopeInfo(ret: Option<Node>, source: Option<Node>): Unit {
     if (let Some(target) <- ret) {
@@ -86,21 +92,6 @@ private func setTyIfCorrect(node: Node, ty: Option<Ty>): Unit {
     }
 }
 
-private func splitQualifiedName(name: String): ArrayList<String> {
-    let out = ArrayList<String>()
-    var part = ""
-    for (byte in name.toArray()) {
-        if (byte == b'.') {
-            out.add(part)
-            part = ""
-        } else {
-            part += String.fromUtf8([byte])
-        }
-    }
-    out.add(part)
-    return out
-}
-
 private func makeReferenceType(name: String, args: ArrayList<Type>): RefType {
     let refType = RefType()
     refType.ref.identifier = SrcIdentifier(name)
@@ -127,7 +118,6 @@ public func CreateBoolLit(isTrue: Bool): LitConstExpr {
     let ret = LitConstExpr()
     ret.kind = LitConstKind.BOOL
     ret.stringValue = if (isTrue) { "true" } else { "false" }
-    ret.constNumValue.asBoolean = isTrue
     markCompilerAdd(ret)
     return ret
 }
@@ -233,7 +223,6 @@ public func CreateFuncParamForOptional(param: FuncParam): FuncParam {
     ret.begin = param.begin
     ret.end = param.end
     ret.typeNode = cloneTypeNode(param.typeNode)
-    ret.assignment = cloneExprNode(param.assignment)
     if (let Some(ty) <- param.GetTy()) {
         ret.SetTy(ty)
     }
@@ -254,7 +243,8 @@ public func CreateFuncParamList(params: ArrayList<FuncParam>): FuncParamList {
 }
 
 public func CreateRefTypeInCore(name: String): RefType {
-    let ret = CreateRefType(name)
+    let ret = RefType()
+    ret.ref.identifier = SrcIdentifier(name)
     ret.EnableAttr(Attribute.IN_CORE)
     return ret
 }
@@ -365,7 +355,11 @@ public func CreateRefType(typeDecl: InheritableDecl, instantTy: Option<Ty>): Ref
     let ret = RefType()
     ret.ref.identifier = typeDecl.identifier
     ret.ref.target = typeDecl
-    setTyIfCorrect(ret, instantTy)
+    if (let Some(ty) <- instantTy) {
+        ret.SetTy(ty)
+    } else if (let Some(ty) <- typeDecl.GetTy()) {
+        ret.SetTy(ty)
+    }
     markCompilerAdd(ret)
     return ret
 }
@@ -381,30 +375,36 @@ public func CreateRefType(name: String, begin: Position, end: Position): RefType
 public func CreateMemberAccess(expr: Expr, field: String): MemberAccess {
     let ret = MemberAccess()
     ret.field = SrcIdentifier(field)
+    markCompilerAdd(ret)
     ret.baseExpr = attachBlockAsDesugar(expr)
     if (let Some(base) <- ret.baseExpr) {
         CopyBasicInfo(base, ret)
+        if (!Ty.IsTyCorrect(base.GetTy())) {
+            return ret
+        }
         if (let Some(baseTy) <- base.GetTy()) {
             if (let Some(classTy) <- (baseTy as ClassTy)) {
-                if (let Some(classDecl) <- classTy.decl) {
-                    setMemberTargetFromClassHierarchy(ret, classDecl, field)
+                CJC_NULLPTR_CHECK(classTy.decl)
+                if (let Some(currentClass) <- classTy.decl) {
+                    setMemberTargetFromClassHierarchy(ret, currentClass, field)
                 }
-            } else if (let Some(structTy) <- (baseTy as StructTy)) {
-                if (let Some(structDecl) <- structTy.decl) {
-                    setMemberTargetFromDecls(ret, structDecl.GetMemberDeclPtrs(), field)
+            } else if (baseTy.IsNominal()) {
+                let decl = Ty.GetDeclOfTy(base.GetTy())
+                CJC_NULLPTR_CHECK(decl)
+                if (let Some(value) <- decl) {
+                    if (let Some(inheritableDecl) <- (value as InheritableDecl)) {
+                        setMemberTargetFromDecls(ret, inheritableDecl.GetMemberDeclPtrs(), field)
+                    } else {
+                        CJC_ABORT()
+                    }
                 }
-            } else if (let Some(interfaceTy) <- (baseTy as InterfaceTy)) {
-                if (let Some(interfaceDecl) <- interfaceTy.decl) {
-                    setMemberTargetFromDecls(ret, interfaceDecl.GetMemberDeclPtrs(), field)
-                }
-            } else if (let Some(enumTy) <- (baseTy as EnumTy)) {
-                if (let Some(enumDecl) <- enumTy.decl) {
-                    setMemberTargetFromDecls(ret, enumDecl.GetMemberDeclPtrs(), field)
-                }
+            } else if (baseTy.IsBuiltin()) {
+                ()
+            } else {
+                CJC_ABORT()
             }
         }
     }
-    markCompilerAdd(ret)
     return ret
 }
 
@@ -728,18 +728,18 @@ public func CreateVarDecl(varName: String, initializer: Option<Expr>, typeNode: 
 
 public func CreateTupleAccess(expr: Expr, index: UInt64): SubscriptExpr {
     let ret = SubscriptExpr()
-    ret.isTupleAccess = true
-    ret.baseExpr = expr
-    let lit = LitConstExpr(LitConstKind.INTEGER, "${index}")
-    lit.constNumValue.asInt.SetUint64(index)
-    ret.indexExprs.add(lit)
     if (let Some(exprTy) <- expr.GetTy()) {
         if (let Some(tupleTy) <- (exprTy as TupleTy)) {
-            if (index < UInt64(tupleTy.typeArgs.size)) {
-                ret.SetTy(tupleTy.typeArgs[Int64(index)])
-            }
+            ret.isTupleAccess = true
+            ret.SetTy(tupleTy.typeArgs[Int64(index)])
+            ret.baseExpr = expr
+            let lit = LitConstExpr(LitConstKind.INTEGER, "${index}")
+            lit.constNumValue.asInt.SetUint64(index)
+            ret.indexExprs.add(lit)
+            return ret
         }
     }
+    CJC_ABORT()
     return ret
 }
 
@@ -793,8 +793,14 @@ public func CreateImportSpec(fullPackageName: String): ImportSpec {
 }
 
 public func CreateImportSpec(fullPackageName: String, item: String, alias: String): ImportSpec {
+    return CreateImportSpec(fullPackageName, item, alias, FullPackageNameToPrefixPaths())
+}
+
+public func CreateImportSpec(fullPackageName: String, item: String, alias: String,
+    cache: FullPackageNameToPrefixPaths): ImportSpec {
     let ret = ImportSpec()
-    let names = splitQualifiedName(fullPackageName)
+    let names = cache.get(fullPackageName) ?? SplitQualifiedName(fullPackageName)
+    CJC_ASSERT(names.size >= 1 && !item.isEmpty())
     if (!alias.isEmpty()) {
         ret.content.kind = ImportKind.IMPORT_ALIAS
     } else if (item != "*") {
@@ -803,9 +809,7 @@ public func CreateImportSpec(fullPackageName: String, item: String, alias: Strin
         ret.content.kind = ImportKind.IMPORT_ALL
     }
     for (name in names) {
-        if (!name.isEmpty()) {
-            ret.content.prefixPaths.add(name)
-        }
+        ret.content.prefixPaths.add(name)
     }
     ret.content.identifier = Identifier(item, DEFAULT_POSITION, DEFAULT_POSITION)
     ret.content.aliasName = Identifier(alias, DEFAULT_POSITION, DEFAULT_POSITION)
