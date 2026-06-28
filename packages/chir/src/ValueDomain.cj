@@ -1,35 +1,46 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT}
 import std.collection.*
+import std.sync.*
 
 public class AbstractObject <: Value {
+    private static let ins = AbstractObject("TopObj")
+
     public init(identifier: String) {
         super(None, identifier, ValueKind.KIND_LOCALVAR)
     }
 
     public static func GetTopObjInstance(): AbstractObject {
-        return AbstractObject("TopObj")
+        return ins
     }
 
     public func IsTopObjInstance(): Bool {
-        return GetIdentifier() == "TopObj"
+        return refEq(this, GetTopObjInstance())
     }
 
     public func CloneObject(): AbstractObject {
+        if (IsTopObjInstance()) {
+            return GetTopObjInstance()
+        }
         return AbstractObject(GetIdentifier())
     }
 
     public override func ToString(indent: Int64): String {
-        return IndentToString(indent) + GetIdentifier()
+        let _ = indent
+        return GetIdentifier()
     }
 }
 
 public class Ref {
+    private static let ins = Ref("TopRef", false)
+
     private let isStaticRef: Bool
     private let uniqueID: String
     private let roots: ArrayList<Ref> = ArrayList<Ref>()
-    private let cacheKeys: ArrayList<String> = ArrayList<String>()
+    private let cacheKeys: ArrayList<Ref> = ArrayList<Ref>()
     private let cacheValues: ArrayList<Bool> = ArrayList<Bool>()
+    private let cacheMtx: Mutex = Mutex()
 
     public init(uniqueID: String, isStatic: Bool) {
         this.uniqueID = uniqueID
@@ -73,10 +84,21 @@ public class Ref {
     }
 
     public func CheckCache(ref: Ref): Option<Bool> {
-        let key = ref.GetUniqueID()
+        if (isStaticRef) {
+            synchronized(cacheMtx) {
+                var idx: Int64 = 0
+                while (idx < cacheKeys.size) {
+                    if (refEq(cacheKeys[idx], ref)) {
+                        return cacheValues[idx]
+                    }
+                    idx++
+                }
+            }
+            return None
+        }
         var idx: Int64 = 0
         while (idx < cacheKeys.size) {
-            if (cacheKeys[idx] == key) {
+            if (refEq(cacheKeys[idx], ref)) {
                 return cacheValues[idx]
             }
             idx++
@@ -85,25 +107,37 @@ public class Ref {
     }
 
     public func WriteCache(ref: Ref, result: Bool): Unit {
-        let key = ref.GetUniqueID()
+        if (isStaticRef) {
+            synchronized(cacheMtx) {
+                var idx: Int64 = 0
+                while (idx < cacheKeys.size) {
+                    if (refEq(cacheKeys[idx], ref)) {
+                        return
+                    }
+                    idx++
+                }
+                cacheKeys.add(ref)
+                cacheValues.add(result)
+            }
+            return
+        }
         var idx: Int64 = 0
         while (idx < cacheKeys.size) {
-            if (cacheKeys[idx] == key) {
-                cacheValues[idx] = result
+            if (refEq(cacheKeys[idx], ref)) {
                 return
             }
             idx++
         }
-        cacheKeys.add(key)
+        cacheKeys.add(ref)
         cacheValues.add(result)
     }
 
     public static func GetTopRefInstance(): Ref {
-        return Ref("TopRef", false)
+        return ins
     }
 
     public func IsTopRefInstance(): Bool {
-        return !isStaticRef && uniqueID == "TopRef"
+        return refEq(this, GetTopRefInstance())
     }
 
     private func AddRootSet(ref: Ref): Unit {
@@ -205,8 +239,8 @@ public class ValueDomain {
         if (IsVal() && rhs.IsVal()) {
             return JoinValue(rhs)
         }
-        SetSelfToBound(true)
-        return true
+        CJC_ABORT()
+        return false
     }
 
     public func SetSelfToBound(isTop: Bool): Unit {
@@ -216,9 +250,8 @@ public class ValueDomain {
     }
 
     public func SetSelfToTopRef(): Unit {
-        kind = ValueDomainKind.REF
+        CJC_ASSERT(kind == ValueDomainKind.REF)
         ref = Ref.GetTopRefInstance()
-        absVal = None
     }
 
     public func SetSelfToTopObj(): Unit {
@@ -227,42 +260,21 @@ public class ValueDomain {
         absVal = AbstractObject.GetTopObjInstance()
     }
 
-    public func IsSame(rhs: ValueDomain): Bool {
-        if (kind != rhs.kind) {
-            return false
-        }
-        if (kind == ValueDomainKind.REF) {
-            if (let Some(leftRef) <- ref) {
-                if (let Some(rightRef) <- rhs.ref) {
-                    return leftRef.GetUniqueID() == rightRef.GetUniqueID()
-                }
-            }
-            return false
-        }
-        if (kind == ValueDomainKind.VAL) {
-            if (let Some(leftObj) <- absVal) {
-                if (let Some(rightObj) <- rhs.absVal) {
-                    return leftObj.GetIdentifier() == rightObj.GetIdentifier()
-                }
-            }
-            return false
-        }
-        return true
-    }
-
     public func ToString(): String {
         return match (kind) {
             case ValueDomainKind.BOTTOM => "Bottom"
-            case ValueDomainKind.TOP => "Top"
+            case ValueDomainKind.TOP => "TOP"
             case ValueDomainKind.REF => if (let Some(refValue) <- ref) {
-                "Ref(" + refValue.GetUniqueID() + ")"
+                refValue.GetUniqueID()
             } else {
-                "Ref(<none>)"
+                CJC_ABORT()
+                ""
             }
             case ValueDomainKind.VAL => if (let Some(obj) <- absVal) {
-                "Val(" + obj.GetIdentifier() + ")"
+                obj.ToString(0)
             } else {
-                "Val(<none>)"
+                CJC_ABORT()
+                ""
             }
         }
     }
@@ -287,15 +299,17 @@ public class ValueDomain {
                     SetSelfToTopRef()
                     return true
                 }
-                if (leftRef.GetUniqueID() == rightRef.GetUniqueID()) {
+                if (refEq(leftRef, rightRef)) {
                     return false
                 }
                 SetSelfToTopRef()
                 return true
             }
+            CJC_ASSERT(false)
+            return false
         }
-        SetSelfToTopRef()
-        return true
+        CJC_ASSERT(false)
+        return false
     }
 
     private func JoinValue(rhs: ValueDomain): Bool {
@@ -322,7 +336,7 @@ public class ValueDomain {
 
 private func ContainsRoot(roots: ArrayList<Ref>, ref: Ref): Bool {
     for (root in roots) {
-        if (root.GetUniqueID() == ref.GetUniqueID()) {
+        if (refEq(root, ref)) {
             return true
         }
     }
@@ -330,6 +344,9 @@ private func ContainsRoot(roots: ArrayList<Ref>, ref: Ref): Bool {
 }
 
 private func RootsContainAll(roots: ArrayList<Ref>, subset: ArrayList<Ref>): Bool {
+    if (subset.size > roots.size) {
+        return false
+    }
     for (root in subset) {
         if (!ContainsRoot(roots, root)) {
             return false
