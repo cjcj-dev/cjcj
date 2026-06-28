@@ -1,18 +1,27 @@
 package cangjie_compiler::ast
 
 import cangjie_compiler::utils.{
-    GetRootPackageName, INTEROP_JAVA_LANG_PACKAGE, INTEROP_JOBJECT_NAME, INTEROPLIB_CFFI_JAVA_ENTITY,
-    JAVA_REF_GETTER_FUNC_NAME, SYNTHETIC_CLASS_SUFFIX
+    CJC_ASSERT, FloatFormat, GetRootPackageName, INTEROP_JAVA_LANG_PACKAGE, INTEROP_JOBJECT_NAME,
+    INTEROPLIB_CFFI_JAVA_ENTITY, JAVA_REF_GETTER_FUNC_NAME, Stold, SYNTHETIC_CLASS_SUFFIX
 }
 import std.collection.*
+import std.sort.*
 
 public func AddMacroAttr(node: Node): Unit {
     if (let Some(macroCall) <- node.curMacroCall) {
+        let invocation = macroCall.GetInvocation() ?? return
         let curFile = node.curFile
+        if (IsPureAnnotation(invocation)) {
+            let walker = Walker(node, visitPre: { curNode: Node =>
+                curNode.curFile = curFile
+                VisitAction.WALK_CHILDREN
+            })
+            walker.Walk()
+            return
+        }
         let walker = Walker(node, visitPre: { curNode: Node =>
             curNode.curMacroCall = macroCall
             curNode.curFile = curFile
-            curNode.EnableAttr(Attribute.MACRO_EXPANDED_NODE)
             VisitAction.WALK_CHILDREN
         })
         walker.Walk()
@@ -242,131 +251,77 @@ public func IsInDeclWithAttribute(decl: Decl, attr: Attribute): Bool {
 }
 
 public func InitializeLitConstValue(lce: LitConstExpr): Unit {
+    if (!Ty.IsTyCorrect(lce.GetTy())) {
+        return
+    }
     lce.isConst = true
-    let primitiveKind = getPrimitiveLiteralKind(lce)
-    if (lce.kind == LitConstKind.BOOL) {
-        lce.constNumValue.asBoolean = lce.stringValue == "true"
+    let lceTy = lce.GetTy() ?? return
+    let primitiveTyOpt = GetPrimitiveUpperBoundTy(lceTy)
+    if (let None <- primitiveTyOpt) {
         return
     }
-    if (lce.kind == LitConstKind.UNIT || lce.kind == LitConstKind.NONE) {
-        return
-    }
-    if (TypeKindInRange(primitiveKind, TypeKind.TYPE_INT8, TypeKind.TYPE_UINT_NATIVE) ||
-        primitiveKind == TypeKind.TYPE_IDEAL_INT || lce.kind == LitConstKind.RUNE_BYTE ||
-        lce.kind == LitConstKind.RUNE) {
-        let value = if ((lce.kind == LitConstKind.STRING || lce.kind == LitConstKind.RUNE_BYTE ||
-            lce.kind == LitConstKind.RUNE) && lce.codepoint.size == 1) {
+    let primitiveTy = primitiveTyOpt.getOrThrow()
+    if (primitiveTy.IsInteger()) {
+        let kind = if (primitiveTy.IsNative()) {
+            if (primitiveTy.kind == TypeKind.TYPE_INT_NATIVE) {
+                if (primitiveTy.bitness == 32u64) { TypeKind.TYPE_INT32 } else { TypeKind.TYPE_INT64 }
+            } else {
+                if (primitiveTy.bitness == 32u64) { TypeKind.TYPE_UINT32 } else { TypeKind.TYPE_UINT64 }
+            }
+        } else {
+            primitiveTy.kind
+        }
+        let stringVal = if (IsSingleByteStringLiteral(lce)) {
             "${lce.codepoint[0]}"
         } else {
             lce.stringValue
         }
-        lce.constNumValue.asInt.InitIntLiteral(value, primitiveKind)
+        lce.constNumValue.asInt.InitIntLiteral(stringVal, kind)
         return
     }
-    if (TypeKindInRange(primitiveKind, TypeKind.TYPE_FLOAT16, TypeKind.TYPE_IDEAL_FLOAT)) {
-        lce.constNumValue.asFloat.value = parseFloatLiteral(lce.stringValue)
-        lce.constNumValue.asFloat.flowStatus = FlowStatus.NORMAL
-    }
-}
-
-private func getPrimitiveLiteralKind(lce: LitConstExpr): TypeKind {
-    if (let Some(ty) <- lce.GetTy()) {
-        if (let Some(primitive) <- (ty as PrimitiveTy)) {
-            if (primitive.kind == TypeKind.TYPE_INT_NATIVE) {
-                return if (primitive.bitness == 32) { TypeKind.TYPE_INT32 } else { TypeKind.TYPE_INT64 }
-            }
-            if (primitive.kind == TypeKind.TYPE_UINT_NATIVE) {
-                return if (primitive.bitness == 32) { TypeKind.TYPE_UINT32 } else { TypeKind.TYPE_UINT64 }
-            }
-            return primitive.kind
-        }
-        if (let Some(genericTy) <- (ty as GenericsTy)) {
-            if (let Some(lower) <- genericTy.lowerBound) {
-                if (let Some(primitive) <- (lower as PrimitiveTy)) {
-                    return primitive.kind
-                }
+    if (primitiveTy.IsFloating()) {
+        let builder = StringBuilder()
+        for (byte in lce.stringValue.toArray()) {
+            if (byte != b'_') {
+                builder.append(String.fromUtf8([byte]))
             }
         }
+        let stringValue = builder.toString()
+        if (let Some(value) <- Stold(stringValue)) {
+            lce.constNumValue.asFloat.value = value
+        } else if (FloatFormat.IsUnderFlowFloat(stringValue)) {
+            lce.constNumValue.asFloat.flowStatus = FlowStatus.UNDER
+            lce.constNumValue.asFloat.value = 0.0
+        } else {
+            lce.constNumValue.asFloat.flowStatus = FlowStatus.OVER
+            let value = GetFloatTypeInfoByKind(TypeKind.TYPE_FLOAT64).inf >> 1u64
+            try (valuePtr = LibC.malloc<UInt64>().asResource()) {
+                unsafe { valuePtr.value.write(value) }
+                lce.constNumValue.asFloat.value = unsafe { CPointer<Float64>(valuePtr.value).read() }
+            }
+        }
+        return
     }
-    if (lce.kind == LitConstKind.BOOL) {
-        return TypeKind.TYPE_BOOLEAN
+    if (primitiveTy.IsBoolean()) {
+        lce.constNumValue.asBoolean = lce.stringValue == "true"
     }
-    if (lce.kind == LitConstKind.RUNE) {
-        return TypeKind.TYPE_RUNE
-    }
-    return lce.GetNumLitTypeKind()
 }
 
-private func parseFloatLiteral(value: String): Float64 {
-    let text = removeNumericSeparators(value)
-    var idx: Int64 = 0
-    var sign = 1.0
-    if (idx < text.size && text[idx] == b'-') {
-        sign = -1.0
-        idx++
-    } else if (idx < text.size && text[idx] == b'+') {
-        idx++
+private func GetPrimitiveUpperBoundTy(ty: Ty): Option<PrimitiveTy> {
+    if (let Some(primitive) <- (ty as PrimitiveTy)) {
+        return primitive
     }
-    var result = 0.0
-    while (idx < text.size && text[idx] >= b'0' && text[idx] <= b'9') {
-        result = result * 10.0 + Float64(text[idx] - b'0')
-        idx++
+    if (!ty.IsGeneric()) {
+        return None
     }
-    if (idx < text.size && text[idx] == b'.') {
-        idx++
-        var scale = 0.1
-        while (idx < text.size && text[idx] >= b'0' && text[idx] <= b'9') {
-            result += Float64(text[idx] - b'0') * scale
-            scale /= 10.0
-            idx++
+    if (let Some(genericTy) <- (ty as GenericsTy)) {
+        if (let Some(lowerBound) <- genericTy.lowerBound) {
+            if (let Some(primitive) <- (lowerBound as PrimitiveTy)) {
+                return primitive
+            }
         }
     }
-    if (idx < text.size && (text[idx] == b'e' || text[idx] == b'E')) {
-        idx++
-        var expSign: Int64 = 1
-        if (idx < text.size && text[idx] == b'-') {
-            expSign = -1
-            idx++
-        } else if (idx < text.size && text[idx] == b'+') {
-            idx++
-        }
-        var exp: Int64 = 0
-        while (idx < text.size && text[idx] >= b'0' && text[idx] <= b'9') {
-            exp = exp * 10 + Int64(text[idx] - b'0')
-            idx++
-        }
-        result *= pow10(exp * expSign)
-    }
-    return sign * result
-}
-
-private func removeNumericSeparators(value: String): String {
-    let out = StringBuilder()
-    for (byte in value.toArray()) {
-        if (byte == b'f' || byte == b'F' || byte == b'i' || byte == b'u' || byte == b'U') {
-            break
-        }
-        if (byte != b'_') {
-            out.append(String.fromUtf8([byte]))
-        }
-    }
-    return out.toString()
-}
-
-private func pow10(exp: Int64): Float64 {
-    var result = 1.0
-    if (exp >= 0) {
-        for (_ in 0..exp) {
-            result *= 10.0
-        }
-    } else {
-        var idx: Int64 = 0
-        while (idx < -exp) {
-            result /= 10.0
-            idx++
-        }
-    }
-    return result
+    return None
 }
 
 public func FlattenVarWithPatternDecl(vwpDecl: VarWithPatternDecl): ArrayList<Pattern> {
@@ -535,16 +490,21 @@ public func GetAttrByAccessLevel(level: AccessLevel): Attribute {
 }
 
 public func GetAccessLevelStr(node: Node): String {
-    return match (GetAccessLevel(node)) {
-        case AccessLevel.PRIVATE => "private"
-        case AccessLevel.INTERNAL => "internal"
-        case AccessLevel.PROTECTED => "protected"
-        case AccessLevel.PUBLIC => "public"
-    }
+    return GetAccessLevelStr(node, "")
 }
 
 public func GetAccessLevelStr(node: Node, surround: String): String {
-    let value = GetAccessLevelStr(node)
+    let value = if (node.TestAttr(Attribute.PRIVATE)) {
+        "private"
+    } else if (node.TestAttr(Attribute.INTERNAL)) {
+        "internal"
+    } else if (node.TestAttr(Attribute.PROTECTED)) {
+        "protected"
+    } else if (node.TestAttr(Attribute.PUBLIC)) {
+        "public"
+    } else {
+        "private"
+    }
     if (surround.isEmpty()) {
         return value
     }
@@ -555,8 +515,7 @@ public func GetAccessLevelStr(pkg: Package): String {
     return match (pkg.accessible) {
         case AccessLevel.INTERNAL => "internal"
         case AccessLevel.PROTECTED => "protected"
-        case AccessLevel.PRIVATE => "private"
-        case AccessLevel.PUBLIC => "public"
+        case _ => "public"
     }
 }
 
@@ -568,12 +527,46 @@ public func GetImportedItemFullName(content: ImportContent, commonPrefix!: Strin
     }
     builder.append(content.GetPrefixPath())
     if (content.kind == ImportKind.IMPORT_ALIAS || content.kind == ImportKind.IMPORT_SINGLE) {
-        if (!content.GetPrefixPath().isEmpty()) {
-            builder.append(".")
-        }
+        builder.append(".")
         builder.append(content.identifier.Val())
     }
     return builder.toString()
+}
+
+private func NeedPoint(str: String): Bool {
+    if (str.size == 0) {
+        return false
+    }
+    let byte = str[str.size - 1]
+    return (byte >= b'a' && byte <= b'z') || (byte >= b'A' && byte <= b'Z') || (byte >= b'0' && byte <= b'9')
+}
+
+public func ExtractArgumentsOfDeprecatedAnno(
+    annotation: Annotation,
+    message: Box<String>,
+    since: Box<String>,
+    strict: Box<Bool>
+): Unit {
+    for (arg in annotation.args) {
+        if (let Some(expr) <- arg.expr) {
+            if (let Some(lce) <- (expr as LitConstExpr)) {
+                if (arg.name.Empty() || arg.name == "message") {
+                    message.value = " " + lce.stringValue
+                } else if (arg.name == "since") {
+                    since.value = " since " + lce.stringValue
+                } else if (arg.name == "strict") {
+                    strict.value = lce.ToString() == "true"
+                }
+            }
+        }
+    }
+
+    if (NeedPoint(message.value)) {
+        message.value += "."
+    }
+    if (NeedPoint(since.value)) {
+        since.value += "."
+    }
 }
 
 public func IsCondition(expr: Expr): Bool {
@@ -783,11 +776,22 @@ public func GetVarsInitializationOrderWithPositions(parentDecl: Decl): ArrayList
             if (varDecl.TestAttr(Attribute.FROM_COMMON_PART)) {
                 commonDecls.add(VarDeclWithPosition(varDecl, fieldIdx))
             } else {
-                insertVarDeclByPosition(specificDecls, VarDeclWithPosition(varDecl, fieldIdx))
+                specificDecls.add(VarDeclWithPosition(varDecl, fieldIdx))
             }
             fieldIdx++
         }
     }
+    sort(specificDecls, by: { left: VarDeclWithPosition, right: VarDeclWithPosition =>
+        let leftDecl = left.decl.getOrThrow()
+        let rightDecl = right.decl.getOrThrow()
+        if (leftDecl.begin < rightDecl.begin) {
+            Ordering.LT
+        } else if (rightDecl.begin < leftDecl.begin) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    })
 
     let resultDecls = ArrayList<VarDeclWithPosition>()
     var specificIdx: Int64 = 0
@@ -799,16 +803,30 @@ public func GetVarsInitializationOrderWithPositions(parentDecl: Decl): ArrayList
                 if (!dep.TestAttr(Attribute.SPECIFIC)) {
                     continue
                 }
-                if (!containsDecl(emittedSpecificDeps, dep)) {
+                var inserted = true
+                for (wasSpecificVar in emittedSpecificDeps) {
+                    if (wasSpecificVar == dep) {
+                        inserted = false
+                        break
+                    }
+                }
+                if (inserted) {
                     emittedSpecificDeps.add(dep)
                     specificDeps.add(dep)
                 }
             }
         }
-        while (!specificDeps.isEmpty() && specificIdx < specificDecls.size) {
+        while (!specificDeps.isEmpty()) {
+            CJC_ASSERT(specificIdx < specificDecls.size)
             let candidate = specificDecls[specificIdx]
-            if (let Some(candidateDecl) <- candidate.decl) {
-                removeDeclIfPresent(specificDeps, candidateDecl)
+            let candidateDecl = candidate.decl.getOrThrow()
+            var depIdx: Int64 = 0
+            while (depIdx < specificDeps.size) {
+                if (specificDeps[depIdx] == candidateDecl) {
+                    specificDeps.remove(at: depIdx)
+                    break
+                }
+                depIdx++
             }
             resultDecls.add(candidate)
             specificIdx++
@@ -820,47 +838,6 @@ public func GetVarsInitializationOrderWithPositions(parentDecl: Decl): ArrayList
         specificIdx++
     }
     return resultDecls
-}
-
-private func insertVarDeclByPosition(values: ArrayList<VarDeclWithPosition>, item: VarDeclWithPosition): Unit {
-    if (let Some(itemDecl) <- item.decl) {
-        var idx: Int64 = 0
-        while (idx < values.size) {
-            if (let Some(existingDecl) <- values[idx].decl) {
-                if (itemDecl.begin < existingDecl.begin) {
-                    values.add(item, at: idx)
-                    return
-                }
-            }
-            idx++
-        }
-    }
-    values.add(item)
-}
-
-private func containsDecl(values: ArrayList<Decl>, decl: Decl): Bool {
-    for (value in values) {
-        if (sameDecl(value, decl)) {
-            return true
-        }
-    }
-    return false
-}
-
-private func removeDeclIfPresent(values: ArrayList<Decl>, decl: Decl): Unit {
-    var idx: Int64 = 0
-    while (idx < values.size) {
-        if (sameDecl(values[idx], decl)) {
-            values.remove(at: idx)
-            return
-        }
-        idx++
-    }
-}
-
-private func sameDecl(left: Decl, right: Decl): Bool {
-    return left.astKind == right.astKind && left.begin == right.begin && left.end == right.end &&
-        left.identifier == right.identifier && left.fullPackageName == right.fullPackageName
 }
 
 public func InsertPropGetterSignature(propDecl: PropDecl, attrToBeSet: Attribute): Unit {
@@ -967,7 +944,9 @@ private func makeMirrorPropFromVar(varDecl: VarDecl, attrToBeSet: Attribute): Pr
     }
     if (varDecl.isVar) {
         propNode.EnableAttr(Attribute.MUT)
-        propNode.modifiers.add(Modifier(TokenKind.MUT, varDecl.begin))
+        let `mut` = Modifier(TokenKind.MUT, varDecl.begin)
+        `mut`.curFile = varDecl.curFile
+        propNode.modifiers.add(`mut`)
     }
     propNode.outerDecl = varDecl.outerDecl
     InsertPropGetterSignature(propNode, attrToBeSet)
