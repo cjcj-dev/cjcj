@@ -4,7 +4,7 @@ import std.collection.*
 
 extend ParserImpl {
     public func ParseType(): Type {
-        var ty = ParsePrefixType()
+        let ty = ParsePrefixType()
         if (Seeing(TokenKind.ARROW)) {
             if (ty.astKind == ASTKind.FUNC_TYPE) {
                 diag.DiagnoseRefactor(
@@ -19,15 +19,6 @@ extend ParserImpl {
                     "function type parameters must be parenthesized before '->'")
                 ty.isBroken = true
             }
-        }
-        while (Skip(TokenKind.QUEST)) {
-            let opt = OptionType()
-            opt.componentType = ty
-            opt.questNum = 1u64
-            opt.questVector.add(lastToken.Begin())
-            opt.begin = ty.begin
-            opt.end = lastToken.End()
-            ty = opt
         }
         return ty
     }
@@ -51,19 +42,11 @@ extend ParserImpl {
                 }
             }
             let baseType = ParseBaseType()
-            skipNL = oldSkipNL
+            skipNL = true
             while (oldSkipNL && Skip(TokenKind.NL)) {}
             opt.componentType = baseType
             opt.end = baseType.end
             return opt
-        }
-        if (Skip(TokenKind.DOLLAR)) {
-            let ct = ConstantType()
-            ct.dollarPos = lastToken.Begin()
-            ct.begin = ct.dollarPos
-            ct.constantExpr = ParseExpr()
-            if (let Some(expr) <- ct.constantExpr) { ct.end = expr.end }
-            return ct
         }
         return ParseBaseType()
     }
@@ -87,7 +70,6 @@ extend ParserImpl {
             return ParseQualifiedType()
         }
         diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected type")
-        Next()
         return InvalidType(token.Begin())
     }
 
@@ -140,55 +122,68 @@ extend ParserImpl {
         return current
     }
 
-    public func ParseVarrayType(): VArrayType {
+    public func ParseVarrayType(): Type {
         let ret = VArrayType()
         let token = Expect(TokenKind.VARRAY, "expected 'VArray'")
         ret.varrayPos = token.Begin()
         ret.begin = token.Begin()
-        ret.leftAnglePos = Expect(TokenKind.LT, "expected '<' after VArray").Begin()
-        ret.typeArgument = ParseType()
+        if (!Skip(TokenKind.LT)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.EXPECTED_TOKEN,
+                token.End(),
+                "expected type parameters after 'VArray' keyword")
+            return InvalidType(Peek().Begin())
+        }
+        ret.leftAnglePos = lastToken.Begin()
+        let typeArgument = ParseType()
+        ret.typeArgument = typeArgument
+        if (typeArgument.IsInvalid()) {
+            return InvalidType(Peek().Begin())
+        }
         if (!Skip(TokenKind.COMMA)) {
             diag.DiagnoseRefactor(
                 DiagKindRefactor.EXPECTED_TOKEN,
                 Peek().Begin(),
                 "expected ',' and '$' size argument in VArray type")
-            ret.isBroken = true
+            ConsumeUntilAny([TokenKind.NL])
+            return InvalidType(Peek().Begin())
         } else {
-            if (let Some(argType) <- ret.typeArgument) {
-                argType.commaPos = lastToken.Begin()
-            }
-            let oldSkipNL = skipNL
+            typeArgument.commaPos = lastToken.Begin()
             skipNL = false
             if (!Skip(TokenKind.DOLLAR)) {
-                skipNL = oldSkipNL
                 diag.DiagnoseRefactor(
                     DiagKindRefactor.EXPECTED_TOKEN,
                     Peek().Begin(),
                     "expected '$' before VArray size literal")
-                ret.isBroken = true
-                ret.constantType = ParseType()
+                ConsumeUntilAny([TokenKind.NL])
+                return InvalidType(Peek().Begin())
             } else {
-                skipNL = oldSkipNL
                 let constType = ConstantType()
                 constType.dollarPos = lastToken.Begin()
                 constType.begin = constType.dollarPos
-                if (Seeing(TokenKind.INTEGER_LITERAL)) {
-                    constType.constantExpr = ParseLitConst()
-                    if (let Some(expr) <- constType.constantExpr) { constType.end = expr.end }
-                } else {
+                if (!Seeing(TokenKind.INTEGER_LITERAL)) {
                     diag.DiagnoseRefactor(
                         DiagKindRefactor.EXPECTED_TOKEN,
                         Peek().Begin(),
                         "expected integer literal after '$' in VArray type")
-                    constType.constantExpr = ParseExpr()
-                    constType.isBroken = true
-                    if (let Some(expr) <- constType.constantExpr) { constType.end = expr.end }
+                    ConsumeUntilAny([TokenKind.NL])
+                    return InvalidType(Peek().Begin())
                 }
+                skipNL = true
+                constType.constantExpr = ParseLitConst()
+                constType.end = Peek().End()
                 ret.constantType = constType
             }
         }
-        ret.rightAnglePos = Expect(TokenKind.GT, "expected '>' after VArray type").Begin()
-        ret.end = ret.rightAnglePos + 1
+        if (!Skip(TokenKind.GT)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.UNTERMINATED_DELIMITER,
+                ret.leftAnglePos,
+                "expected '>' after VArray type")
+            return InvalidType(Peek().Begin())
+        }
+        ret.rightAnglePos = lastToken.Begin()
+        ret.end = lastToken.End()
         return ret
     }
 
@@ -265,8 +260,7 @@ extend ParserImpl {
         types: ArrayList<Type>,
         leftParenPos: Position,
         rightParenPos: Position,
-        arrowPos: Position,
-        parseReturnType: Bool
+        arrowPos: Position
     ): FuncType {
         let funcTy = FuncType()
         funcTy.leftParenPos = leftParenPos
@@ -276,14 +270,9 @@ extend ParserImpl {
         for (typeNode in types) {
             funcTy.paramTypes.add(typeNode)
         }
-        if (parseReturnType) {
-            funcTy.retType = ParseType()
-            if (let Some(ret) <- funcTy.retType) {
-                funcTy.end = ret.end
-            }
-        } else {
-            funcTy.end = rightParenPos + 1
-            funcTy.isBroken = true
+        funcTy.retType = ParseType()
+        if (let Some(ret) <- funcTy.retType) {
+            funcTy.end = ret.end
         }
         return funcTy
     }
@@ -300,15 +289,22 @@ extend ParserImpl {
                 break
             }
         }
-        let right = Expect(TokenKind.RPAREN, "expected ')' after type").Begin()
         if (HasNamedTypeParameters(types) && HasUnnamedTypeParameters(types)) {
             diag.DiagnoseRefactor(
                 DiagKindRefactor.PARSE_ERROR,
                 left.Begin(),
                 "all function or tuple type parameters must either be named or unnamed")
         }
+        if (!Skip(TokenKind.RPAREN)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.UNTERMINATED_DELIMITER,
+                left.Begin(),
+                "expected ')' after type")
+            return InvalidType(Peek().Begin())
+        }
+        let right = lastToken.Begin()
         if (Skip(TokenKind.ARROW)) {
-            return MakeFuncType(types, left.Begin(), right, lastToken.Begin(), true)
+            return MakeFuncType(types, left.Begin(), right, lastToken.Begin())
         }
         if (types.size == 1) {
             let first = types[0]
@@ -333,6 +329,6 @@ extend ParserImpl {
             DiagKindRefactor.EXPECTED_TOKEN,
             right,
             "expected '->' in empty function type")
-        return MakeFuncType(types, left.Begin(), right, right, false)
+        return MakeFuncType(types, left.Begin(), right, right)
     }
 }
