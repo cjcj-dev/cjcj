@@ -123,12 +123,24 @@ public func Infoln(value: String): Unit {
     println(GREEN_INFO_MARK + value)
 }
 
+@When[debug]
 public func Debug(value: String): Unit {
     print(GREEN_DEBUG_MARK + value)
 }
 
+@When[!debug]
+public func Debug(value: String): Unit {
+    let _ = value
+}
+
+@When[debug]
 public func Debugln(value: String): Unit {
     println(GREEN_DEBUG_MARK + value)
+}
+
+@When[!debug]
+public func Debugln(value: String): Unit {
+    let _ = value
 }
 
 public func ErrorWithColor(color: DiagColor, content: String, isBright!: Bool = false): Unit {
