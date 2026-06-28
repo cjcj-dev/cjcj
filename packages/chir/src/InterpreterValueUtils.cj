@@ -1,5 +1,6 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::utils.CJC_ABORT
 import std.collection.*
 
 public class IValUtils {
@@ -57,24 +58,24 @@ public class IValUtils {
     }
 
     public static func PrimitiveOfType(ty: Type, raw: Int64): InterpreterValue {
-        return match (ty.GetTypeKind()) {
-            case TypeKind.TYPE_UINT8 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT8, raw)
-            case TypeKind.TYPE_UINT16 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT16, raw)
-            case TypeKind.TYPE_UINT32 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT32, raw)
-            case TypeKind.TYPE_UINT64 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT64, raw)
-            case TypeKind.TYPE_UINT_NATIVE => InterpreterValue.MakeUInt(InterpreterValueKind.IUINTNAT, raw)
-            case TypeKind.TYPE_INT8 => InterpreterValue.MakeInt(InterpreterValueKind.IINT8, raw)
-            case TypeKind.TYPE_INT16 => InterpreterValue.MakeInt(InterpreterValueKind.IINT16, raw)
-            case TypeKind.TYPE_INT32 => InterpreterValue.MakeInt(InterpreterValueKind.IINT32, raw)
-            case TypeKind.TYPE_INT64 => InterpreterValue.MakeInt(InterpreterValueKind.IINT64, raw)
-            case TypeKind.TYPE_INT_NATIVE => InterpreterValue.MakeInt(InterpreterValueKind.IINTNAT, raw)
-            case TypeKind.TYPE_FLOAT16 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT16, Float64(raw))
-            case TypeKind.TYPE_FLOAT32 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT32, Float64(raw))
-            case TypeKind.TYPE_FLOAT64 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT64, Float64(raw))
-            case TypeKind.TYPE_BOOLEAN => InterpreterValue.MakeBool(raw != 0)
-            case TypeKind.TYPE_UNIT => InterpreterValue.MakeUnit()
-            case _ => InterpreterValue.MakeInvalid()
+        match (ty.GetTypeKind()) {
+            case TypeKind.TYPE_UINT8 => return InterpreterValue.MakeUInt(InterpreterValueKind.IUINT8, raw)
+            case TypeKind.TYPE_UINT16 => return InterpreterValue.MakeUInt(InterpreterValueKind.IUINT16, raw)
+            case TypeKind.TYPE_UINT32 => return InterpreterValue.MakeUInt(InterpreterValueKind.IUINT32, raw)
+            case TypeKind.TYPE_ENUM | TypeKind.TYPE_UINT64 =>
+                return InterpreterValue.MakeUInt(InterpreterValueKind.IUINT64, raw)
+            case TypeKind.TYPE_UINT_NATIVE => return InterpreterValue.MakeUInt(InterpreterValueKind.IUINTNAT, raw)
+            case TypeKind.TYPE_INT8 => return InterpreterValue.MakeInt(InterpreterValueKind.IINT8, raw)
+            case TypeKind.TYPE_INT16 => return InterpreterValue.MakeInt(InterpreterValueKind.IINT16, raw)
+            case TypeKind.TYPE_INT32 => return InterpreterValue.MakeInt(InterpreterValueKind.IINT32, raw)
+            case TypeKind.TYPE_INT64 => return InterpreterValue.MakeInt(InterpreterValueKind.IINT64, raw)
+            case TypeKind.TYPE_INT_NATIVE => return InterpreterValue.MakeInt(InterpreterValueKind.IINTNAT, raw)
+            case TypeKind.TYPE_FLOAT16 => return InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT16, Float64(raw))
+            case TypeKind.TYPE_FLOAT32 => return InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT32, Float64(raw))
+            case TypeKind.TYPE_FLOAT64 => return InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT64, Float64(raw))
+            case _ => CJC_ABORT()
         }
+        return InterpreterValue.MakeNull()
     }
 
     public static func ToString(value: InterpreterValue): String {
