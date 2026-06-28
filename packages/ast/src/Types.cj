@@ -24,6 +24,24 @@ private func anyGeneric(values: ArrayList<Ty>): Bool {
     return false
 }
 
+private func IsJavaGeneric(gpd: GenericParamDecl): Bool {
+    if (let Some(outerDeclValue) <- gpd.outerDecl) {
+        if (let Some(_) <- HasJavaAttr(outerDeclValue)) {
+            return true
+        }
+        if (let Some(funcDeclValue) <- (outerDeclValue as FuncDecl)) {
+            if (let Some(funcBodyValue) <- funcDeclValue.funcBody) {
+                if (let Some(parentClassLikeValue) <- funcBodyValue.parentClassLike) {
+                    if (let Some(_) <- HasJavaAttr(parentClassLikeValue)) {
+                        return true
+                    }
+                }
+            }
+        }
+    }
+    return false
+}
+
 private func typeArgsString(values: ArrayList<Ty>, delimiter: String): String {
     let parts = ArrayList<String>()
     for (value in values) {
@@ -545,7 +563,7 @@ public open class Ty {
     }
 
     public func Contains(ty: Ty): Bool {
-        if (this.Hash() == ty.Hash() && this.String() == ty.String()) {
+        if (refEq(this, ty)) {
             return true
         }
         return anyChildTypeMatches(this, { child: Ty => child.Contains(ty) })
@@ -623,6 +641,10 @@ public open class Ty {
 
     public open func Hash(): Int64 {
         return hashCode()
+    }
+
+    public open operator func ==(right: Ty): Bool {
+        return refEq(this, right)
     }
 
     public func hashCode(): Int64 {
@@ -944,6 +966,23 @@ public class ArrayTy <: Ty {
         }
         return hashCombine(out, Int64(dims))
     }
+
+    public override operator func ==(right: Ty): Bool {
+        if (let Some(rightArray) <- (right as ArrayTy)) {
+            if (dims != rightArray.dims || typeArgs.size != rightArray.typeArgs.size) {
+                return false
+            }
+            var idx: Int64 = 0
+            while (idx < typeArgs.size) {
+                if (!refEq(typeArgs[idx], rightArray.typeArgs[idx])) {
+                    return false
+                }
+                idx++
+            }
+            return true
+        }
+        return false
+    }
 }
 
 public class VArrayTy <: Ty {
@@ -969,6 +1008,23 @@ public class VArrayTy <: Ty {
         }
         return hashCombine(out, size)
     }
+
+    public override operator func ==(right: Ty): Bool {
+        if (let Some(rightVArray) <- (right as VArrayTy)) {
+            if (size != rightVArray.size || typeArgs.size != rightVArray.typeArgs.size) {
+                return false
+            }
+            var idx: Int64 = 0
+            while (idx < typeArgs.size) {
+                if (!refEq(typeArgs[idx], rightVArray.typeArgs[idx])) {
+                    return false
+                }
+                idx++
+            }
+            return true
+        }
+        return false
+    }
 }
 
 public class PointerTy <: Ty {
@@ -990,6 +1046,23 @@ public class PointerTy <: Ty {
             out = hashCombine(out, typeArgs[0].Hash())
         }
         return out
+    }
+
+    public override operator func ==(right: Ty): Bool {
+        if (let Some(rightPointer) <- (right as PointerTy)) {
+            if (typeArgs.size != rightPointer.typeArgs.size) {
+                return false
+            }
+            var idx: Int64 = 0
+            while (idx < typeArgs.size) {
+                if (!refEq(typeArgs[idx], rightPointer.typeArgs[idx])) {
+                    return false
+                }
+                idx++
+            }
+            return true
+        }
+        return false
     }
 }
 
@@ -1026,6 +1099,23 @@ public class TupleTy <: Ty {
     public override func Hash(): Int64 {
         var out = hashCombine(TypeKindIndex(TypeKind.TYPE_TUPLE), boolHash(isClosureTy))
         return hashTypeArgs(out, typeArgs)
+    }
+
+    public override operator func ==(right: Ty): Bool {
+        if (let Some(rightTuple) <- (right as TupleTy)) {
+            if (isClosureTy != rightTuple.isClosureTy || typeArgs.size != rightTuple.typeArgs.size) {
+                return false
+            }
+            var idx: Int64 = 0
+            while (idx < typeArgs.size) {
+                if (!refEq(typeArgs[idx], rightTuple.typeArgs[idx])) {
+                    return false
+                }
+                idx++
+            }
+            return true
+        }
+        return false
     }
 }
 
@@ -1083,6 +1173,25 @@ public class FuncTy <: Ty {
         out = hashCombine(out, boolHash(noCast))
         return out
     }
+
+    public override operator func ==(right: Ty): Bool {
+        if (let Some(rightFunc) <- (right as FuncTy)) {
+            if (isC != rightFunc.isC || noCast != rightFunc.noCast ||
+                hasVariableLenArg != rightFunc.hasVariableLenArg || isClosureTy != rightFunc.isClosureTy ||
+                !refEq(retTy, rightFunc.retTy) || paramTys.size != rightFunc.paramTys.size) {
+                return false
+            }
+            var idx: Int64 = 0
+            while (idx < paramTys.size) {
+                if (!refEq(paramTys[idx], rightFunc.paramTys[idx])) {
+                    return false
+                }
+                idx++
+            }
+            return true
+        }
+        return false
+    }
 }
 
 public class UnionTy <: Ty {
@@ -1102,6 +1211,28 @@ public class UnionTy <: Ty {
     public override func Hash(): Int64 {
         return hashTypeArgs(TypeKindIndex(TypeKind.TYPE_UNION), tys)
     }
+
+    public override operator func ==(right: Ty): Bool {
+        if (let Some(rightUnion) <- (right as UnionTy)) {
+            if (tys.size != rightUnion.tys.size) {
+                return false
+            }
+            for (leftValue in tys) {
+                var found = false
+                for (rightValue in rightUnion.tys) {
+                    if (refEq(leftValue, rightValue)) {
+                        found = true
+                        break
+                    }
+                }
+                if (!found) {
+                    return false
+                }
+            }
+            return true
+        }
+        return false
+    }
 }
 
 public class IntersectionTy <: Ty {
@@ -1120,6 +1251,28 @@ public class IntersectionTy <: Ty {
 
     public override func Hash(): Int64 {
         return hashTypeArgs(TypeKindIndex(TypeKind.TYPE_INTERSECTION), tys)
+    }
+
+    public override operator func ==(right: Ty): Bool {
+        if (let Some(rightIntersection) <- (right as IntersectionTy)) {
+            if (tys.size != rightIntersection.tys.size) {
+                return false
+            }
+            for (leftValue in tys) {
+                var found = false
+                for (rightValue in rightIntersection.tys) {
+                    if (refEq(leftValue, rightValue)) {
+                        found = true
+                        break
+                    }
+                }
+                if (!found) {
+                    return false
+                }
+            }
+            return true
+        }
+        return false
     }
 }
 
@@ -1159,6 +1312,29 @@ public class InterfaceTy <: ClassLikeTy {
 
     public override func Hash(): Int64 {
         return hashNominalTy(TypeKind.TYPE_INTERFACE, name, typeArgs, interfaceDeclStableHash(declPtr))
+    }
+
+    public override operator func ==(right: Ty): Bool {
+        if (let Some(rightInterface) <- (right as InterfaceTy)) {
+            if (typeArgs.size != rightInterface.typeArgs.size || name != rightInterface.name) {
+                return false
+            }
+            var idx: Int64 = 0
+            while (idx < typeArgs.size) {
+                if (!refEq(typeArgs[idx], rightInterface.typeArgs[idx])) {
+                    return false
+                }
+                idx++
+            }
+            if (let Some(leftDecl) <- declPtr) {
+                if (let Some(rightDecl) <- rightInterface.declPtr) {
+                    return refEq(leftDecl, rightDecl)
+                }
+                return false
+            }
+            return rightInterface.declPtr.isNone()
+        }
+        return false
     }
 
     public func GetGenericTy(): Option<InterfaceTy> {
@@ -1235,6 +1411,32 @@ public open class ClassTy <: ClassLikeTy {
         let base = hashNominalTy(TypeKind.TYPE_CLASS, name, typeArgs, classDeclStableHash(declPtr))
         return hashCombine(base, 0)
     }
+
+    public open override operator func ==(right: Ty): Bool {
+        if ((right as ClassThisTy).isSome()) {
+            return false
+        }
+        if (let Some(rightClass) <- (right as ClassTy)) {
+            if (typeArgs.size != rightClass.typeArgs.size || name != rightClass.name) {
+                return false
+            }
+            var idx: Int64 = 0
+            while (idx < typeArgs.size) {
+                if (!refEq(typeArgs[idx], rightClass.typeArgs[idx])) {
+                    return false
+                }
+                idx++
+            }
+            if (let Some(leftDecl) <- declPtr) {
+                if (let Some(rightDecl) <- rightClass.declPtr) {
+                    return refEq(leftDecl, rightDecl)
+                }
+                return false
+            }
+            return rightClass.declPtr.isNone()
+        }
+        return false
+    }
 }
 
 public class ClassThisTy <: ClassTy {
@@ -1249,6 +1451,29 @@ public class ClassThisTy <: ClassTy {
     public override func Hash(): Int64 {
         let base = hashNominalTy(TypeKind.TYPE_CLASS, name, typeArgs, classDeclStableHash(declPtr))
         return hashCombine(base, 1)
+    }
+
+    public override operator func ==(right: Ty): Bool {
+        if (let Some(rightThis) <- (right as ClassThisTy)) {
+            if (typeArgs.size != rightThis.typeArgs.size || name != rightThis.name) {
+                return false
+            }
+            var idx: Int64 = 0
+            while (idx < typeArgs.size) {
+                if (!refEq(typeArgs[idx], rightThis.typeArgs[idx])) {
+                    return false
+                }
+                idx++
+            }
+            if (let Some(leftDecl) <- declPtr) {
+                if (let Some(rightDecl) <- rightThis.declPtr) {
+                    return refEq(leftDecl, rightDecl)
+                }
+                return false
+            }
+            return rightThis.declPtr.isNone()
+        }
+        return false
     }
 }
 
@@ -1273,6 +1498,29 @@ public class TypeAliasTy <: Ty {
     public override func Hash(): Int64 {
         return hashNominalTy(TypeKind.TYPE, name, typeArgs, typeAliasDeclStableHash(declPtr))
     }
+
+    public override operator func ==(right: Ty): Bool {
+        if (let Some(rightAlias) <- (right as TypeAliasTy)) {
+            if (typeArgs.size != rightAlias.typeArgs.size || name != rightAlias.name) {
+                return false
+            }
+            var idx: Int64 = 0
+            while (idx < typeArgs.size) {
+                if (!refEq(typeArgs[idx], rightAlias.typeArgs[idx])) {
+                    return false
+                }
+                idx++
+            }
+            if (let Some(leftDecl) <- declPtr) {
+                if (let Some(rightDecl) <- rightAlias.declPtr) {
+                    return refEq(leftDecl, rightDecl)
+                }
+                return false
+            }
+            return rightAlias.declPtr.isNone()
+        }
+        return false
+    }
 }
 
 public class GenericsTy <: Ty {
@@ -1288,6 +1536,7 @@ public class GenericsTy <: Ty {
         super(TypeKind.TYPE_GENERICS)
         this.name = name
         this.decl = decl
+        isEraseMode = IsJavaGeneric(decl)
         generic = true
     }
 
@@ -1303,6 +1552,19 @@ public class GenericsTy <: Ty {
             out = hashCombine(out, genericDecl.end.hashCode())
         }
         return out
+    }
+
+    public override operator func ==(right: Ty): Bool {
+        if (let Some(rightGeneric) <- (right as GenericsTy)) {
+            if (let Some(leftDecl) <- decl) {
+                if (let Some(rightDecl) <- rightGeneric.decl) {
+                    return refEq(leftDecl, rightDecl)
+                }
+                return false
+            }
+            return rightGeneric.decl.isNone()
+        }
+        return false
     }
 }
 
@@ -1357,6 +1619,32 @@ public open class EnumTy <: Ty {
         let base = hashNominalTy(TypeKind.TYPE_ENUM, name, typeArgs, enumDeclStableHash(declPtr))
         return hashCombine(base, 0)
     }
+
+    public open override operator func ==(right: Ty): Bool {
+        if ((right as RefEnumTy).isSome()) {
+            return false
+        }
+        if (let Some(rightEnum) <- (right as EnumTy)) {
+            if (typeArgs.size != rightEnum.typeArgs.size || name != rightEnum.name) {
+                return false
+            }
+            var idx: Int64 = 0
+            while (idx < typeArgs.size) {
+                if (!refEq(typeArgs[idx], rightEnum.typeArgs[idx])) {
+                    return false
+                }
+                idx++
+            }
+            if (let Some(leftDecl) <- declPtr) {
+                if (let Some(rightDecl) <- rightEnum.declPtr) {
+                    return refEq(leftDecl, rightDecl)
+                }
+                return false
+            }
+            return rightEnum.declPtr.isNone()
+        }
+        return false
+    }
 }
 
 public class RefEnumTy <: EnumTy {
@@ -1372,6 +1660,29 @@ public class RefEnumTy <: EnumTy {
     public override func Hash(): Int64 {
         let base = hashNominalTy(TypeKind.TYPE_ENUM, name, typeArgs, enumDeclStableHash(declPtr))
         return hashCombine(base, 1)
+    }
+
+    public override operator func ==(right: Ty): Bool {
+        if (let Some(rightRefEnum) <- (right as RefEnumTy)) {
+            if (typeArgs.size != rightRefEnum.typeArgs.size || name != rightRefEnum.name) {
+                return false
+            }
+            var idx: Int64 = 0
+            while (idx < typeArgs.size) {
+                if (!refEq(typeArgs[idx], rightRefEnum.typeArgs[idx])) {
+                    return false
+                }
+                idx++
+            }
+            if (let Some(leftDecl) <- declPtr) {
+                if (let Some(rightDecl) <- rightRefEnum.declPtr) {
+                    return refEq(leftDecl, rightDecl)
+                }
+                return false
+            }
+            return rightRefEnum.declPtr.isNone()
+        }
+        return false
     }
 }
 
@@ -1397,6 +1708,29 @@ public class StructTy <: Ty {
 
     public override func Hash(): Int64 {
         return hashNominalTy(TypeKind.TYPE_STRUCT, name, typeArgs, structDeclStableHash(declPtr))
+    }
+
+    public override operator func ==(right: Ty): Bool {
+        if (let Some(rightStruct) <- (right as StructTy)) {
+            if (typeArgs.size != rightStruct.typeArgs.size || name != rightStruct.name) {
+                return false
+            }
+            var idx: Int64 = 0
+            while (idx < typeArgs.size) {
+                if (!refEq(typeArgs[idx], rightStruct.typeArgs[idx])) {
+                    return false
+                }
+                idx++
+            }
+            if (let Some(leftDecl) <- declPtr) {
+                if (let Some(rightDecl) <- rightStruct.declPtr) {
+                    return refEq(leftDecl, rightDecl)
+                }
+                return false
+            }
+            return rightStruct.declPtr.isNone()
+        }
+        return false
     }
 
     public func GetGenericTy(): Option<StructTy> {
