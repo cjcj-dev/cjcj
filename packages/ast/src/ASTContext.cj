@@ -164,6 +164,20 @@ public class Candidate {
     public let tys: ArrayList<Ty> = ArrayList<Ty>()
     public var hasDecl: Bool = true
     public init() {}
+
+    public init(decls: ArrayList<Decl>) {
+        for (decl in decls) {
+            this.decls.add(decl)
+        }
+        hasDecl = true
+    }
+
+    public init(tys: ArrayList<Ty>) {
+        for (ty in tys) {
+            this.tys.add(ty)
+        }
+        hasDecl = false
+    }
 }
 
 private class OuterVarWithPatternDecl {
@@ -197,7 +211,8 @@ public class ASTContext {
     public let mem2Decls: HashMap<MemSig, ArrayList<Decl>> = HashMap<MemSig, ArrayList<Decl>>()
     public let subtypeDeclsMap: HashMap<Node, ArrayList<Decl>> = HashMap<Node, ArrayList<Decl>>()
     public let declMap: HashMap<Names, ArrayList<Decl>> = HashMap<Names, ArrayList<Decl>>()
-    public let enumConstructors: HashMap<String, ArrayList<Decl>> = HashMap<String, ArrayList<Decl>>()
+    public let enumConstructors: HashMap<String, HashMap<UInt64, ArrayList<Decl>>> =
+        HashMap<String, HashMap<UInt64, ArrayList<Decl>>>()
     private let varDeclToVarWithPatternDeclMap: ArrayList<OuterVarWithPatternDecl> = ArrayList<OuterVarWithPatternDecl>()
 
     public init(pkg: Package) {
@@ -334,7 +349,7 @@ public class ASTContext {
         if (let Some(values) <- declMap.get(names)) {
             var idx: Int64 = 0
             while (idx < values.size) {
-                if (SameDecl(values[idx], decl)) {
+                if (values[idx] == decl) {
                     values.remove(at: idx)
                 } else {
                     idx++
@@ -354,7 +369,7 @@ public class ASTContext {
         var idx: Int64 = 0
         while (idx < varDeclToVarWithPatternDeclMap.size) {
             let entry = varDeclToVarWithPatternDeclMap[idx]
-            if (SameDecl(entry.varDecl, vd)) {
+            if (entry.varDecl == vd) {
                 entry.patternDecl = vpd
                 return
             }
@@ -365,7 +380,7 @@ public class ASTContext {
 
     public func GetOuterVarDeclAbstract(vd: VarDecl): VarDeclAbstract {
         for (entry in varDeclToVarWithPatternDeclMap) {
-            if (SameDecl(entry.varDecl, vd)) {
+            if (entry.varDecl == vd) {
                 return entry.patternDecl
             }
         }
@@ -377,9 +392,10 @@ public class ASTContext {
     }
 
     public func FindEnumConstructor(name: String, argSize: UInt64): ArrayList<Decl> {
-        let key = enumConstructorKey(name, argSize)
-        if (let Some(values) <- enumConstructors.get(key)) {
-            return values
+        if (let Some(argSizeToDecls) <- enumConstructors.get(name)) {
+            if (let Some(values) <- argSizeToDecls.get(argSize)) {
+                return values
+            }
         }
         return ArrayList<Decl>()
     }
@@ -389,21 +405,16 @@ public class ASTContext {
         if (enableMacroInLsp && IsNodeInOriginalMacroCallNodes(decl)) {
             return
         }
-        let nameKey = name
-        if (!enumConstructors.contains(nameKey)) {
-            enumConstructors[nameKey] = ArrayList<Decl>()
+        if (!enumConstructors.contains(name)) {
+            enumConstructors[name] = HashMap<UInt64, ArrayList<Decl>>()
         }
-        let argKey = enumConstructorKey(name, argSize)
-        if (!enumConstructors.contains(argKey)) {
-            enumConstructors[argKey] = ArrayList<Decl>()
-        }
-        if (let Some(values) <- enumConstructors.get(argKey)) {
-            for (value in values) {
-                if (SameDecl(value, decl)) {
-                    return
-                }
+        if (let Some(argSizeToDecls) <- enumConstructors.get(name)) {
+            if (!argSizeToDecls.contains(argSize)) {
+                argSizeToDecls[argSize] = ArrayList<Decl>()
             }
-            values.add(decl)
+            if (let Some(values) <- argSizeToDecls.get(argSize)) {
+                values.add(decl)
+            }
         }
     }
 
@@ -414,7 +425,7 @@ public class ASTContext {
                     if (let Some(invocationDecl) <- med.invocation.decl) {
                         if (let Some(enumDecl) <- (invocationDecl as EnumDecl)) {
                             for (constructor in enumDecl.constructors) {
-                                if (SameDecl(constructor, decl)) {
+                                if (constructor == decl) {
                                     return true
                                 }
                             }
@@ -435,15 +446,6 @@ public class ASTContext {
         }
     }
 
-    public func AddSubtypeDecl(baseDecl: Decl, subtypeDecl: Decl): Unit {
-        if (!subtypeDeclsMap.contains(baseDecl)) {
-            subtypeDeclsMap[baseDecl] = ArrayList<Decl>()
-        }
-        if (let Some(values) <- subtypeDeclsMap.get(baseDecl)) {
-            addDeclUnique(values, subtypeDecl)
-        }
-    }
-
     public func Mem2Decls(memSig: MemSig): ArrayList<Decl> {
         let out = ArrayList<Decl>()
         if (let Some(values) <- mem2Decls.get(memSig)) {
@@ -459,13 +461,9 @@ public class ASTContext {
         return out
     }
 
-    private func enumConstructorKey(name: String, argSize: UInt64): String {
-        return name + "#${argSize}"
-    }
-
     private func addDeclUnique(values: ArrayList<Decl>, decl: Decl): Unit {
         for (value in values) {
-            if (SameDecl(value, decl)) {
+            if (value == decl) {
                 return
             }
         }
