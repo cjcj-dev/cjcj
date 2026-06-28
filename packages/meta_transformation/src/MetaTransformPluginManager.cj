@@ -3,6 +3,7 @@ package cangjie_compiler::meta_transformation
 import cangjie_compiler::chir.CHIRBuilder
 import cangjie_compiler::chir.Function as CHIRFunction
 import cangjie_compiler::chir.Package as CHIRPackage
+import cangjie_compiler::utils.{CJC_ASSERT, ProfileRecorder}
 import std.collection.*
 
 public struct MetaKind {
@@ -48,98 +49,51 @@ public class MetaTransformPluginManager<MetaKindT> {
 
 public type CHIRPluginManager = MetaTransformPluginManager<MetaKindCHIR>
 
-public struct CHIRMetaTransformRunResult {
-    public let hasPluginForCHIR: Bool
-    public let functionTransformRuns: Int64
-    public let packageTransformRuns: Int64
-
-    public init(hasPluginForCHIR: Bool, functionTransformRuns: Int64, packageTransformRuns: Int64) {
-        this.hasPluginForCHIR = hasPluginForCHIR
-        this.functionTransformRuns = functionTransformRuns
-        this.packageTransformRuns = packageTransformRuns
-    }
-}
-
-public struct CHIRMetaTransformExecutionResult {
-    public let succeed: Bool
-    public let hasPluginForCHIR: Bool
-    public let functionTransformRuns: Int64
-    public let packageTransformRuns: Int64
-
-    public init(
-        succeed: Bool,
-        hasPluginForCHIR: Bool,
-        functionTransformRuns: Int64,
-        packageTransformRuns: Int64
-    ) {
-        this.succeed = succeed
-        this.hasPluginForCHIR = hasPluginForCHIR
-        this.functionTransformRuns = functionTransformRuns
-        this.packageTransformRuns = packageTransformRuns
-    }
-
-    public init(succeed: Bool, runResult: CHIRMetaTransformRunResult) {
-        this.succeed = succeed
-        hasPluginForCHIR = runResult.hasPluginForCHIR
-        functionTransformRuns = runResult.functionTransformRuns
-        packageTransformRuns = runResult.packageTransformRuns
-    }
-}
-
-private class CHIRMetaTransformRunAccumulator {
-    public var hasPluginForCHIR: Bool = false
-    public var functionTransformRuns: Int64 = 0
-    public var packageTransformRuns: Int64 = 0
-
-    public init() {}
-}
-
-public func RunCHIRMetaTransforms(manager: CHIRPluginManager, chirPackage: CHIRPackage): CHIRMetaTransformRunResult {
-    let result = CHIRMetaTransformRunAccumulator()
+public func RunCHIRMetaTransforms(manager: CHIRPluginManager, chirPackage: CHIRPackage): Unit {
     manager.ForEachMetaTransformConcept({ mtc: MetaTransformConcept =>
-        if (mtc.IsForCHIR()) {
-            result.hasPluginForCHIR = true
-            if (mtc.IsForFunc()) {
-                if (let Some(functionTransform) <- (mtc as MetaTransform<CHIRFunction>)) {
-                    for (chirFunc in chirPackage.GetGlobalFuncsWithBody()) {
-                        functionTransform.Run(chirFunc)
-                        result.functionTransformRuns++
-                    }
-                } else {
-                    throw IllegalStateException("CHIR function meta transform has incompatible transform type")
-                }
-            } else if (mtc.IsForPackage()) {
-                if (let Some(packageTransform) <- (mtc as MetaTransform<CHIRPackage>)) {
-                    packageTransform.Run(chirPackage)
-                    result.packageTransformRuns++
-                } else {
-                    throw IllegalStateException("CHIR package meta transform has incompatible transform type")
+        if (!mtc.IsForCHIR()) {
+            return
+        }
+        if (mtc.IsForFunc()) {
+            if (let Some(functionTransform) <- (mtc as MetaTransform<CHIRFunction>)) {
+                for (chirFunc in chirPackage.GetGlobalFuncsWithBody()) {
+                    functionTransform.Run(chirFunc)
                 }
             } else {
-                throw IllegalStateException("unknown CHIR meta transform kind")
+                throw IllegalStateException("CHIR function meta transform has incompatible transform type")
             }
+        } else if (mtc.IsForPackage()) {
+            if (let Some(packageTransform) <- (mtc as MetaTransform<CHIRPackage>)) {
+                packageTransform.Run(chirPackage)
+            } else {
+                throw IllegalStateException("CHIR package meta transform has incompatible transform type")
+            }
+        } else {
+            CJC_ASSERT(false)
         }
     })
-    return CHIRMetaTransformRunResult(result.hasPluginForCHIR, result.functionTransformRuns, result.packageTransformRuns)
 }
 
 public func RunCHIRMetaTransforms(
     pluginBuilder: MetaTransformPluginBuilder,
     chirBuilder: CHIRBuilder,
     chirPackage: CHIRPackage
-): CHIRMetaTransformRunResult {
-    let chirPluginManager = pluginBuilder.BuildCHIRPluginManager(chirBuilder)
-    return RunCHIRMetaTransforms(chirPluginManager, chirPackage)
+): Unit {
+    try (recorder = ProfileRecorder("CHIR", "Plugin Execution")) {
+        let chirPluginManager = pluginBuilder.BuildCHIRPluginManager(chirBuilder)
+        RunCHIRMetaTransforms(chirPluginManager, chirPackage)
+    }
 }
 
 public func TryRunCHIRMetaTransforms(
     manager: CHIRPluginManager,
     chirPackage: CHIRPackage
-): CHIRMetaTransformExecutionResult {
+): Bool {
     try {
-        return CHIRMetaTransformExecutionResult(true, RunCHIRMetaTransforms(manager, chirPackage))
+        RunCHIRMetaTransforms(manager, chirPackage)
+        return true
     } catch (e: Exception) {
-        return CHIRMetaTransformExecutionResult(false, false, 0, 0)
+        return false
     }
 }
 
@@ -147,10 +101,11 @@ public func TryRunCHIRMetaTransforms(
     pluginBuilder: MetaTransformPluginBuilder,
     chirBuilder: CHIRBuilder,
     chirPackage: CHIRPackage
-): CHIRMetaTransformExecutionResult {
+): Bool {
     try {
-        return CHIRMetaTransformExecutionResult(true, RunCHIRMetaTransforms(pluginBuilder, chirBuilder, chirPackage))
+        RunCHIRMetaTransforms(pluginBuilder, chirBuilder, chirPackage)
+        return true
     } catch (e: Exception) {
-        return CHIRMetaTransformExecutionResult(false, false, 0, 0)
+        return false
     }
 }

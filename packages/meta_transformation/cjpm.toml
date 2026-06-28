@@ -16,3 +16,4 @@
 [dependencies]
   "cangjie_compiler::basic" = { path = "../basic" }
   "cangjie_compiler::chir" = { path = "../chir" }
+  "cangjie_compiler::utils" = { path = "../utils" }
