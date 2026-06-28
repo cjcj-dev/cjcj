@@ -141,44 +141,15 @@ public class Walker {
     }
 
     public func WalkChildren(curNode: Node): VisitAction {
-        // Base-class child walks (fire polymorphically via inheritance). These mirror the
-        // leading Is<Expr>/Is<Decl> handling in C++ Walker.cpp:60-75 plus the shared
-        // InheritableDecl / VarDeclAbstract / NameReferenceExpr fields that the C++ switch
-        // walks per-case. Kept as `as` checks because they are class-hierarchy (not exact-kind)
-        // predicates; there are only five, so the per-node cost is bounded.
+        // Base-class child walks mirror the leading Is<Expr>/Is<Decl> handling in C++ Walker.cpp:60-75.
         if (let Some(expr) <- (curNode as Expr)) {
             if (stopIf(walkExprOption(expr.desugarExpr))) { return VisitAction.STOP_NOW }
-        }
-
-        if (let Some(decl) <- (curNode as Decl)) {
-            for (modifier in decl.modifiers) {
-                if (stopIf(WalkNode(modifier))) { return VisitAction.STOP_NOW }
-            }
+        } else if (let Some(decl) <- (curNode as Decl)) {
             for (annotation in decl.annotations) {
                 if (stopIf(WalkNode(annotation))) { return VisitAction.STOP_NOW }
             }
             if (let Some(array) <- decl.annotationsArray) {
                 if (stopIf(WalkNode(array))) { return VisitAction.STOP_NOW }
-            }
-            if (let Some(generic) <- decl.GetGeneric()) {
-                if (stopIf(WalkNode(generic))) { return VisitAction.STOP_NOW }
-            }
-        }
-
-        if (let Some(inheritable) <- (curNode as InheritableDecl)) {
-            for (ty in inheritable.inheritedTypes) {
-                if (stopIf(WalkNode(ty))) { return VisitAction.STOP_NOW }
-            }
-        }
-
-        if (let Some(varDecl) <- (curNode as VarDeclAbstract)) {
-            if (stopIf(walkTypeOption(varDecl.typeNode))) { return VisitAction.STOP_NOW }
-            if (stopIf(walkExprOption(varDecl.initializer))) { return VisitAction.STOP_NOW }
-        }
-
-        if (let Some(nameRef) <- (curNode as NameReferenceExpr)) {
-            for (ty in nameRef.typeArguments) {
-                if (stopIf(WalkNode(ty))) { return VisitAction.STOP_NOW }
             }
         }
 
@@ -262,8 +233,11 @@ public class Walker {
                 }
             case ASTKind.ENUM_DECL =>
                 if (let Some(enumDecl) <- (curNode as EnumDecl)) {
-                    if (let Some(bodyScope) <- enumDecl.bodyScope) {
-                        if (stopIf(WalkNode(bodyScope))) { return VisitAction.STOP_NOW }
+                    if (let Some(generic) <- enumDecl.generic) {
+                        if (stopIf(WalkNode(generic))) { return VisitAction.STOP_NOW }
+                    }
+                    for (ty in enumDecl.inheritedTypes) {
+                        if (stopIf(WalkNode(ty))) { return VisitAction.STOP_NOW }
                     }
                     for (constructor in enumDecl.constructors) {
                         if (stopIf(WalkNode(constructor))) { return VisitAction.STOP_NOW }
@@ -274,6 +248,9 @@ public class Walker {
                 }
             case ASTKind.TYPE_ALIAS_DECL =>
                 if (let Some(typeAlias) <- (curNode as TypeAliasDecl)) {
+                    if (let Some(generic) <- typeAlias.generic) {
+                        if (stopIf(WalkNode(generic))) { return VisitAction.STOP_NOW }
+                    }
                     if (stopIf(walkTypeOption(typeAlias.typeNode))) { return VisitAction.STOP_NOW }
                 }
             case ASTKind.FUNC_PARAM_LIST =>
@@ -297,6 +274,7 @@ public class Walker {
                 }
             case ASTKind.FUNC_PARAM =>
                 if (let Some(funcParam) <- (curNode as FuncParam)) {
+                    if (stopIf(walkTypeOption(funcParam.typeNode))) { return VisitAction.STOP_NOW }
                     if (stopIf(walkExprOption(funcParam.assignment))) { return VisitAction.STOP_NOW }
                     if (let Some(desugarDecl) <- funcParam.desugarDecl) {
                         if (stopIf(WalkNode(desugarDecl))) { return VisitAction.STOP_NOW }
@@ -304,12 +282,18 @@ public class Walker {
                 }
             case ASTKind.FUNC_DECL =>
                 if (let Some(funcDecl) <- (curNode as FuncDecl)) {
+                    for (modifier in funcDecl.modifiers) {
+                        if (stopIf(WalkNode(modifier))) { return VisitAction.STOP_NOW }
+                    }
                     if (let Some(body) <- funcDecl.funcBody) {
                         if (stopIf(WalkNode(body))) { return VisitAction.STOP_NOW }
                     }
                 }
             case ASTKind.MACRO_DECL =>
                 if (let Some(macroDecl) <- (curNode as MacroDecl)) {
+                    for (modifier in macroDecl.modifiers) {
+                        if (stopIf(WalkNode(modifier))) { return VisitAction.STOP_NOW }
+                    }
                     if (let Some(desugarDecl) <- macroDecl.desugarDecl) {
                         if (stopIf(WalkNode(desugarDecl))) { return VisitAction.STOP_NOW }
                     } else if (let Some(body) <- macroDecl.funcBody) {
@@ -326,12 +310,19 @@ public class Walker {
                 }
             case ASTKind.PRIMARY_CTOR_DECL =>
                 if (let Some(primaryCtor) <- (curNode as PrimaryCtorDecl)) {
+                    for (modifier in primaryCtor.modifiers) {
+                        if (stopIf(WalkNode(modifier))) { return VisitAction.STOP_NOW }
+                    }
                     if (let Some(body) <- primaryCtor.funcBody) {
                         if (stopIf(WalkNode(body))) { return VisitAction.STOP_NOW }
                     }
                 }
             case ASTKind.PROP_DECL =>
                 if (let Some(propDecl) <- (curNode as PropDecl)) {
+                    for (modifier in propDecl.modifiers) {
+                        if (stopIf(WalkNode(modifier))) { return VisitAction.STOP_NOW }
+                    }
+                    if (stopIf(walkTypeOption(propDecl.typeNode))) { return VisitAction.STOP_NOW }
                     for (getter in propDecl.getters) {
                         if (stopIf(WalkNode(getter))) { return VisitAction.STOP_NOW }
                     }
@@ -342,6 +333,16 @@ public class Walker {
             case ASTKind.VAR_WITH_PATTERN_DECL =>
                 if (let Some(varWithPattern) <- (curNode as VarWithPatternDecl)) {
                     if (stopIf(walkPatternOption(varWithPattern.irrefutablePattern))) { return VisitAction.STOP_NOW }
+                    if (stopIf(walkTypeOption(varWithPattern.typeNode))) { return VisitAction.STOP_NOW }
+                    if (stopIf(walkExprOption(varWithPattern.initializer))) { return VisitAction.STOP_NOW }
+                }
+            case ASTKind.VAR_DECL =>
+                if (let Some(varDecl) <- (curNode as VarDecl)) {
+                    for (modifier in varDecl.modifiers) {
+                        if (stopIf(WalkNode(modifier))) { return VisitAction.STOP_NOW }
+                    }
+                    if (stopIf(walkTypeOption(varDecl.typeNode))) { return VisitAction.STOP_NOW }
+                    if (stopIf(walkExprOption(varDecl.initializer))) { return VisitAction.STOP_NOW }
                 }
             case ASTKind.CLASS_BODY =>
                 if (let Some(body) <- (curNode as ClassBody)) {
@@ -357,18 +358,45 @@ public class Walker {
                 }
             case ASTKind.CLASS_DECL =>
                 if (let Some(classDecl) <- (curNode as ClassDecl)) {
+                    for (modifier in classDecl.modifiers) {
+                        if (stopIf(WalkNode(modifier))) { return VisitAction.STOP_NOW }
+                    }
+                    if (let Some(generic) <- classDecl.generic) {
+                        if (stopIf(WalkNode(generic))) { return VisitAction.STOP_NOW }
+                    }
+                    for (ty in classDecl.inheritedTypes) {
+                        if (stopIf(WalkNode(ty))) { return VisitAction.STOP_NOW }
+                    }
                     if (let Some(body) <- classDecl.body) {
                         if (stopIf(WalkNode(body))) { return VisitAction.STOP_NOW }
                     }
                 }
             case ASTKind.STRUCT_DECL =>
                 if (let Some(structDecl) <- (curNode as StructDecl)) {
+                    for (modifier in structDecl.modifiers) {
+                        if (stopIf(WalkNode(modifier))) { return VisitAction.STOP_NOW }
+                    }
+                    if (let Some(generic) <- structDecl.generic) {
+                        if (stopIf(WalkNode(generic))) { return VisitAction.STOP_NOW }
+                    }
+                    for (ty in structDecl.inheritedTypes) {
+                        if (stopIf(WalkNode(ty))) { return VisitAction.STOP_NOW }
+                    }
                     if (let Some(body) <- structDecl.body) {
                         if (stopIf(WalkNode(body))) { return VisitAction.STOP_NOW }
                     }
                 }
             case ASTKind.INTERFACE_DECL =>
                 if (let Some(interfaceDecl) <- (curNode as InterfaceDecl)) {
+                    for (modifier in interfaceDecl.modifiers) {
+                        if (stopIf(WalkNode(modifier))) { return VisitAction.STOP_NOW }
+                    }
+                    if (let Some(generic) <- interfaceDecl.generic) {
+                        if (stopIf(WalkNode(generic))) { return VisitAction.STOP_NOW }
+                    }
+                    for (ty in interfaceDecl.inheritedTypes) {
+                        if (stopIf(WalkNode(ty))) { return VisitAction.STOP_NOW }
+                    }
                     if (let Some(body) <- interfaceDecl.body) {
                         if (stopIf(WalkNode(body))) { return VisitAction.STOP_NOW }
                     }
@@ -376,8 +404,11 @@ public class Walker {
             case ASTKind.EXTEND_DECL =>
                 if (let Some(extendDecl) <- (curNode as ExtendDecl)) {
                     if (stopIf(walkTypeOption(extendDecl.extendedType))) { return VisitAction.STOP_NOW }
-                    if (let Some(bodyScope) <- extendDecl.bodyScope) {
-                        if (stopIf(WalkNode(bodyScope))) { return VisitAction.STOP_NOW }
+                    for (ty in extendDecl.inheritedTypes) {
+                        if (stopIf(WalkNode(ty))) { return VisitAction.STOP_NOW }
+                    }
+                    if (let Some(generic) <- extendDecl.generic) {
+                        if (stopIf(WalkNode(generic))) { return VisitAction.STOP_NOW }
                     }
                     for (memberDecl in extendDecl.members) {
                         if (stopIf(WalkNode(memberDecl))) { return VisitAction.STOP_NOW }
@@ -395,7 +426,9 @@ public class Walker {
                     if (let Some(thenBody) <- ifExpr.thenBody) {
                         if (stopIf(WalkNode(thenBody))) { return VisitAction.STOP_NOW }
                     }
-                    if (stopIf(walkExprOption(ifExpr.elseBody))) { return VisitAction.STOP_NOW }
+                    if (ifExpr.hasElse) {
+                        if (stopIf(walkExprOption(ifExpr.elseBody))) { return VisitAction.STOP_NOW }
+                    }
                 }
             case ASTKind.LET_PATTERN_DESTRUCTOR =>
                 if (let Some(letPattern) <- (curNode as LetPatternDestructor)) {
@@ -429,12 +462,15 @@ public class Walker {
                 }
             case ASTKind.MATCH_EXPR =>
                 if (let Some(matchExpr) <- (curNode as MatchExpr)) {
-                    if (stopIf(walkExprOption(matchExpr.selector))) { return VisitAction.STOP_NOW }
-                    for (matchCase in matchExpr.matchCases) {
-                        if (stopIf(WalkNode(matchCase))) { return VisitAction.STOP_NOW }
-                    }
-                    for (other in matchExpr.matchCaseOthers) {
-                        if (stopIf(WalkNode(other))) { return VisitAction.STOP_NOW }
+                    if (matchExpr.matchMode) {
+                        if (stopIf(walkExprOption(matchExpr.selector))) { return VisitAction.STOP_NOW }
+                        for (matchCase in matchExpr.matchCases) {
+                            if (stopIf(WalkNode(matchCase))) { return VisitAction.STOP_NOW }
+                        }
+                    } else {
+                        for (other in matchExpr.matchCaseOthers) {
+                            if (stopIf(WalkNode(other))) { return VisitAction.STOP_NOW }
+                        }
                     }
                 }
             case ASTKind.TRY_EXPR =>
@@ -451,9 +487,6 @@ public class Walker {
                     for (blockValue in tryExpr.catchBlocks) {
                         if (stopIf(WalkNode(blockValue))) { return VisitAction.STOP_NOW }
                     }
-                    if (let Some(blockValue) <- tryExpr.finallyBlock) {
-                        if (stopIf(WalkNode(blockValue))) { return VisitAction.STOP_NOW }
-                    }
                     if (let None <- tryExpr.desugarExpr) {
                         for (handler in tryExpr.handlers) {
                             if (stopIf(walkPatternOption(handler.commandPattern))) { return VisitAction.STOP_NOW }
@@ -464,6 +497,9 @@ public class Walker {
                                 if (stopIf(WalkNode(lambda))) { return VisitAction.STOP_NOW }
                             }
                         }
+                    }
+                    if (let Some(blockValue) <- tryExpr.finallyBlock) {
+                        if (stopIf(WalkNode(blockValue))) { return VisitAction.STOP_NOW }
                     }
                     if (let Some(lambda) <- tryExpr.tryLambda) {
                         if (stopIf(WalkNode(lambda))) { return VisitAction.STOP_NOW }
@@ -542,6 +578,12 @@ public class Walker {
                     if (stopIf(walkExprOption(asExpr.leftExpr))) { return VisitAction.STOP_NOW }
                     if (stopIf(walkTypeOption(asExpr.asType))) { return VisitAction.STOP_NOW }
                 }
+            case ASTKind.BUILTIN_DECL =>
+                if (let Some(builtinDecl) <- (curNode as BuiltInDecl)) {
+                    if (let Some(generic) <- builtinDecl.generic) {
+                        if (stopIf(WalkNode(generic))) { return VisitAction.STOP_NOW }
+                    }
+                }
             case ASTKind.RANGE_EXPR =>
                 if (let Some(range) <- (curNode as RangeExpr)) {
                     if (stopIf(walkExprOption(range.startExpr))) { return VisitAction.STOP_NOW }
@@ -598,6 +640,15 @@ public class Walker {
             case ASTKind.MEMBER_ACCESS =>
                 if (let Some(member) <- (curNode as MemberAccess)) {
                     if (stopIf(walkExprOption(member.baseExpr))) { return VisitAction.STOP_NOW }
+                    for (ty in member.typeArguments) {
+                        if (stopIf(WalkNode(ty))) { return VisitAction.STOP_NOW }
+                    }
+                }
+            case ASTKind.REF_EXPR =>
+                if (let Some(refExpr) <- (curNode as RefExpr)) {
+                    for (ty in refExpr.typeArguments) {
+                        if (stopIf(WalkNode(ty))) { return VisitAction.STOP_NOW }
+                    }
                 }
             case ASTKind.PAREN_EXPR =>
                 if (let Some(parenExpr) <- (curNode as ParenExpr)) {
@@ -671,11 +722,11 @@ public class Walker {
                 }
             case ASTKind.SPAWN_EXPR =>
                 if (let Some(spawnExpr) <- (curNode as SpawnExpr)) {
+                    if (stopIf(walkExprOption(spawnExpr.arg))) { return VisitAction.STOP_NOW }
+                    if (stopIf(walkExprOption(spawnExpr.task))) { return VisitAction.STOP_NOW }
                     if (let Some(futureObj) <- spawnExpr.futureObj) {
                         if (stopIf(WalkNode(futureObj))) { return VisitAction.STOP_NOW }
                     }
-                    if (stopIf(walkExprOption(spawnExpr.task))) { return VisitAction.STOP_NOW }
-                    if (stopIf(walkExprOption(spawnExpr.arg))) { return VisitAction.STOP_NOW }
                 }
             case ASTKind.SYNCHRONIZED_EXPR =>
                 if (let Some(sync) <- (curNode as SynchronizedExpr)) {
@@ -705,10 +756,10 @@ public class Walker {
                 }
             case ASTKind.OPTION_TYPE =>
                 if (let Some(optionType) <- (curNode as OptionType)) {
-                    if (stopIf(walkTypeOption(optionType.componentType))) { return VisitAction.STOP_NOW }
                     if (let Some(desugarType) <- optionType.desugarType) {
                         if (stopIf(WalkNode(desugarType))) { return VisitAction.STOP_NOW }
                     }
+                    if (stopIf(walkTypeOption(optionType.componentType))) { return VisitAction.STOP_NOW }
                 }
             case ASTKind.CONSTANT_TYPE =>
                 if (let Some(constantType) <- (curNode as ConstantType)) {
@@ -809,41 +860,19 @@ public class Walker {
             case ASTKind.MACRO_EXPAND_EXPR =>
                 if (let Some(macroExpr) <- (curNode as MacroExpandExpr)) {
                     if (stopIf(walkMacroInvocation(macroExpr.invocation))) { return VisitAction.STOP_NOW }
-                    for (annotation in macroExpr.annotations) {
-                        if (stopIf(WalkNode(annotation))) { return VisitAction.STOP_NOW }
-                    }
-                    for (modifier in macroExpr.modifiers) {
-                        if (stopIf(WalkNode(modifier))) { return VisitAction.STOP_NOW }
-                    }
-                    for (node in macroExpr.invocation.nodes) {
-                        if (stopIf(WalkNode(node))) { return VisitAction.STOP_NOW }
-                    }
                 }
             case ASTKind.MACRO_EXPAND_DECL =>
                 if (let Some(macroDecl) <- (curNode as MacroExpandDecl)) {
                     if (stopIf(walkMacroInvocation(macroDecl.invocation))) { return VisitAction.STOP_NOW }
-                    for (node in macroDecl.invocation.nodes) {
-                        if (stopIf(WalkNode(node))) { return VisitAction.STOP_NOW }
-                    }
                 }
             case ASTKind.MACRO_EXPAND_PARAM =>
-                // MacroExpandParam <: FuncParam, so the former cascade fired the FuncParam block
-                // (assignment + desugarDecl) before the MacroExpandParam block. Preserve that
-                // exact order here so traversal stays byte-identical.
-                if (let Some(funcParam) <- (curNode as FuncParam)) {
-                    if (stopIf(walkExprOption(funcParam.assignment))) { return VisitAction.STOP_NOW }
-                    if (let Some(desugarDecl) <- funcParam.desugarDecl) {
-                        if (stopIf(WalkNode(desugarDecl))) { return VisitAction.STOP_NOW }
-                    }
-                }
                 if (let Some(macroParam) <- (curNode as MacroExpandParam)) {
                     if (stopIf(walkMacroInvocation(macroParam.invocation))) { return VisitAction.STOP_NOW }
-                    for (node in macroParam.invocation.nodes) {
-                        if (stopIf(WalkNode(node))) { return VisitAction.STOP_NOW }
-                    }
                 }
             case _ => ()
         }
         return VisitAction.WALK_CHILDREN
     }
 }
+
+public type ConstWalker = Walker
