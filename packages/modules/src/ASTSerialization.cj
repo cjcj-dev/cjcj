@@ -12,7 +12,6 @@ import cangjie_compiler::ast.Modifier as ASTModifier
 import cangjie_compiler::basic.CANGJIE_VERSION
 import cangjie_compiler::basic.DiagKindRefactor
 import cangjie_compiler::lex.TokenKind
-import cangjie_compiler::lex.TokenKindIndex
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::option.OptimizationLevel
 
@@ -144,92 +143,6 @@ public class ASTWriter {
         this.isChirNow = isChirNow
     }
 
-    public func SerializePackage(pkg: Package): String {
-        let lines = ArrayList<String>()
-        lines.add("CANGJIE-MODULES-AST|1")
-        lines.add("dep|" + EncodeField(packageDepInfo))
-        var typeIdx: Int64 = 0
-        while (typeIdx < savedTypes.size) {
-            let typeFields = ArrayList<String>()
-            typeFields.add("type")
-            typeFields.add((typeIdx + 1).toString())
-            typeFields.add(savedTypes[typeIdx])
-            lines.add(JoinFields(typeFields))
-            typeIdx++
-        }
-        let packageFields = ArrayList<String>()
-        packageFields.add("package")
-        packageFields.add(pkg.fullPackageName)
-        packageFields.add(BoolToWire(pkg.isMacroPackage))
-        packageFields.add(AccessLevelToWire(pkg.accessible))
-        packageFields.add(BoolToWire(serializingCommon))
-        packageFields.add(BoolToWire(debugOption))
-        packageFields.add(OptimizationLevelToString(optimizationLevel))
-        AppendNodeFields(packageFields, pkg)
-        lines.add(JoinFields(packageFields))
-        for (file in pkg.files) {
-            let fileFields = ArrayList<String>()
-            fileFields.add("file")
-            fileFields.add(file.fileName)
-            fileFields.add(file.filePath)
-            fileFields.add(file.fileHash.toString())
-            fileFields.add(JoinStringList(SerializedFeatureNames(file)))
-            fileFields.add(BoolToWire(SerializedFileIsProduct(file)))
-            AppendNodeFields(fileFields, file)
-            AppendPackageSpecFields(fileFields, file.packageSpec)
-            lines.add(JoinFields(fileFields))
-            for (importSpec in file.imports) {
-                let importFields = ArrayList<String>()
-                importFields.add("import")
-                importFields.add(ImportKindToWire(importSpec.content.kind))
-                importFields.add(JoinStringList(importSpec.content.prefixPaths))
-                importFields.add(importSpec.content.identifier)
-                importFields.add(importSpec.content.aliasName)
-                importFields.add(BoolToWire(importSpec.content.hasDoubleColon))
-                importFields.add(BoolToWire(importSpec.content.isDecl))
-                importFields.add(AccessLevelToWire(importSpec.accessLevel))
-                importFields.add(BoolToWire(importSpec.hasAccessModifier))
-                importFields.add(BoolToWire(importSpec.withImplicitExport))
-                AppendNodeFields(importFields, importSpec)
-                AppendNodeFields(importFields, importSpec.content)
-                importFields.add(JoinStringList(SerializedPositions(importSpec.content.prefixPoses)))
-                importFields.add(JoinStringList(SerializedPositions(importSpec.content.prefixDotPoses)))
-                AppendPositionFields(importFields, importSpec.content.identifierBegin)
-                AppendPositionFields(importFields, importSpec.content.identifierEnd)
-                lines.add(JoinFields(importFields))
-            }
-            for (decl in file.decls) {
-                AppendSerializedDecl(lines, "decl", decl)
-            }
-            for (decl in file.exportedInternalDecls) {
-                AppendSerializedDecl(lines, "internal-decl", decl)
-            }
-        }
-        return JoinStrings(lines, "\n") + "\n"
-    }
-
-    private func AppendSerializedDecl(lines: ArrayList<String>, recordKind: String, decl: Decl): Unit {
-        if (decl.doNotExport) {
-            return
-        }
-        let declFields = ArrayList<String>()
-        declFields.add(recordKind)
-        declFields.add(decl.identifier)
-        declFields.add(decl.fullPackageName)
-        declFields.add(AccessLevelToWire(GetAccessLevel(decl)))
-        declFields.add(BoolToWire(decl.doNotExport))
-        declFields.add(BoolToWire(decl.isFunction))
-        declFields.add(decl.rawMangleName)
-        declFields.add(decl.mangledName)
-        declFields.add(decl.begin.fileID.toString())
-        declFields.add(decl.begin.line.toString())
-        declFields.add(decl.begin.column.toString())
-        declFields.add(decl.end.fileID.toString())
-        declFields.add(decl.end.line.toString())
-        declFields.add(decl.end.column.toString())
-        declFields.add(JoinAttributes(decl.GetAttrs()))
-        lines.add(JoinFields(declFields))
-    }
 }
 
 public class ASTLoader {
@@ -704,21 +617,6 @@ private func SerializedFeatureNames(file: File): ArrayList<String> {
     return CloneStringArray(file.features)
 }
 
-private func SerializedPositions(positions: ArrayList<Position>): ArrayList<String> {
-    let out = ArrayList<String>()
-    for (pos in positions) {
-        out.add(pos.fileID.toString() + ":" + pos.line.toString() + ":" + pos.column.toString())
-    }
-    return out
-}
-
-private func SerializedFileIsProduct(file: File): Bool {
-    if (let Some(featureDirective) <- file.feature) {
-        return file.isProduct && featureDirective.annotations.isEmpty()
-    }
-    return file.isProduct
-}
-
 private func BuildFeatureDirectiveFromLegacyFields(file: File): Option<FeaturesDirective> {
     if (file.features.isEmpty()) {
         return None
@@ -744,34 +642,6 @@ private func BuildFeatureDirectiveFromLegacyFields(file: File): Option<FeaturesD
     }
     directive.featuresSet = Some(set)
     return Some(directive)
-}
-
-public func AppendNodeFields(fields: ArrayList<String>, node: Node): Unit {
-    fields.add(node.begin.fileID.toString())
-    fields.add(node.begin.line.toString())
-    fields.add(node.begin.column.toString())
-    fields.add(node.end.fileID.toString())
-    fields.add(node.end.line.toString())
-    fields.add(node.end.column.toString())
-    fields.add(JoinAttributes(node.GetAttrs()))
-}
-
-private func AppendPackageSpecFields(fields: ArrayList<String>, packageSpec: Option<PackageSpec>): Unit {
-    if (let None <- packageSpec) {
-        fields.add(BoolToWire(false))
-        return
-    }
-    let spec = packageSpec.getOrThrow()
-    fields.add(BoolToWire(true))
-    fields.add(AccessLevelToWire(PackageSpecAccessLevel(spec)))
-    fields.add(BoolToWire(spec.hasDoubleColon))
-    fields.add(JoinStringList(spec.prefixPaths))
-    fields.add(spec.packageName.Val())
-    fields.add(BoolToWire(spec.hasMacro))
-    AppendPositionFields(fields, spec.begin)
-    AppendPositionFields(fields, spec.end)
-    AppendPositionFields(fields, spec.packageName.Begin())
-    AppendPositionFields(fields, spec.packageName.End())
 }
 
 private func LoadPackageSpecFields(fields: ArrayList<String>, start: Int64): Option<PackageSpec> {
@@ -805,12 +675,6 @@ private func LoadPackageSpecFields(fields: ArrayList<String>, start: Int64): Opt
     return Some(spec)
 }
 
-private func AppendPositionFields(fields: ArrayList<String>, pos: Position): Unit {
-    fields.add(pos.fileID.toString())
-    fields.add(pos.line.toString())
-    fields.add(pos.column.toString())
-}
-
 private func ParsePositionFields(fields: ArrayList<String>, start: Int64): Position {
     return Position(
         ParseUInt64Field(fields[start]),
@@ -827,24 +691,11 @@ private func ParsePositionWire(value: String): Position {
     return Position(ParseUInt64Field(fields[0]), ParseInt64Field(fields[1]), ParseInt64Field(fields[2]))
 }
 
-private func PackageSpecAccessLevel(spec: PackageSpec): AccessLevel {
-    if (let Some(modifier) <- spec.modifier) {
-        if (SameTokenKind(modifier.modifier, TokenKind.PRIVATE)) { return AccessLevel.PRIVATE }
-        if (SameTokenKind(modifier.modifier, TokenKind.INTERNAL)) { return AccessLevel.INTERNAL }
-        if (SameTokenKind(modifier.modifier, TokenKind.PROTECTED)) { return AccessLevel.PROTECTED }
-    }
-    return AccessLevel.PUBLIC
-}
-
 private func TokenKindFromAccessLevel(level: AccessLevel): TokenKind {
     if (SameAccessLevel(level, AccessLevel.PRIVATE)) { return TokenKind.PRIVATE }
     if (SameAccessLevel(level, AccessLevel.INTERNAL)) { return TokenKind.INTERNAL }
     if (SameAccessLevel(level, AccessLevel.PROTECTED)) { return TokenKind.PROTECTED }
     return TokenKind.PUBLIC
-}
-
-private func SameTokenKind(left: TokenKind, right: TokenKind): Bool {
-    return TokenKindIndex(left) == TokenKindIndex(right)
 }
 
 public func LoadNodeFields(fields: ArrayList<String>, start: Int64, node: Node): Unit {
