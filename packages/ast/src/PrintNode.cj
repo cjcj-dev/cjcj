@@ -3,33 +3,10 @@ package cangjie_compiler::ast
 import cangjie_compiler::basic.StringConvertor
 import std.collection.*
 
-public class PrintNode {
-    public init() {}
-
-    public static func Print(node: Node, indent!: UInt64 = 0, addition!: String = ""): String {
-        let state = PrintState()
-        state.PrintAstNode(node, indent, addition)
-        return state.Result()
-    }
-
-    public static func PrintTy(ty: Ty): String {
-        return ty.String()
-    }
-
-    public static func PrintTy(ty: Option<Ty>): String {
-        if (let Some(value) <- ty) {
-            return value.String()
-        }
-        return "Invalid"
-    }
-}
-
-public func PrintASTNode(node: Node): String {
-    return PrintNode.Print(node)
-}
-
-public func PrintASTNode(node: Node, indent!: UInt64 = 0, addition!: String = ""): String {
-    return PrintNode.Print(node, indent: indent, addition: addition)
+public func PrintNode(node: Node, indent!: UInt64 = 0, addition!: String = ""): String {
+    let state = PrintState()
+    state.PrintAstNode(node, indent, addition)
+    return state.Result()
 }
 
 private class PrintState {
@@ -146,7 +123,6 @@ private class PrintState {
         if (let Some(optionType) <- (node as OptionType)) { printOptionType(optionType, indent); return }
         if (let Some(varrayType) <- (node as VArrayType)) { printVArrayType(varrayType, indent); return }
         if (let Some(qualifiedType) <- (node as QualifiedType)) { printQualifiedType(qualifiedType, indent); return }
-        if (let Some(constantType) <- (node as ConstantType)) { printConstantType(constantType, indent); return }
         if (let Some(genericConstraint) <- (node as GenericConstraint)) {
             printGenericConstraint(genericConstraint, indent)
             return
@@ -263,7 +239,7 @@ private class PrintState {
 
     private func printBasic(node: Node, indent: UInt64): Unit {
         let filePath = if (let Some(file) <- node.curFile) {
-            if (!file.filePath.isEmpty()) { file.filePath } else if (!file.fileName.isEmpty()) { file.fileName } else { "not in file" }
+            file.filePath
         } else {
             "not in file"
         }
@@ -272,11 +248,8 @@ private class PrintState {
         if (!node.scopeName.isEmpty()) {
             printLine(indent, "scopeName: " + quoteText(node.scopeName))
         }
-        if (node.scopeLevel != 0u32) {
-            printLine(indent, "scopeLevel: ${node.scopeLevel}")
-        }
         if (node.TyKind() != TypeKind.TYPE_INITIAL) {
-            printLine(indent, "ty: " + PrintNode.PrintTy(node.GetTy()))
+            printLine(indent, "ty: " + node.GetTy().getOrThrow().String())
         }
         let fullPackageName = node.GetFullPackageName()
         if (!fullPackageName.isEmpty() && fullPackageName != "default") {
@@ -285,9 +258,6 @@ private class PrintState {
         printLine(indent, "attributes: " + node.GetAttrs().ToString())
         if (!node.exportId.isEmpty()) {
             printLine(indent, "exportId: " + quoteText(node.exportId))
-        }
-        if (let Some(symbol) <- node.symbol) {
-            printLine(indent, "symbol: " + symbol.name + "@" + symbol.scopeName)
         }
         if (let Some(decl) <- (node as Decl)) {
             if (decl.linkage != Linkage.EXTERNAL) {
@@ -305,18 +275,12 @@ private class PrintState {
             if (let Some(outer) <- decl.outerDecl) {
                 printTarget(indent, outer, "outerDecl")
             }
-            if (decl.doNotExport) {
-                printLine(indent, "doNotExport: true")
-            }
         } else if (let Some(typeNode) <- (node as Type)) {
             if (let Some(aliasTy) <- typeNode.aliasTy) {
                 if (aliasTy.kind != TypeKind.TYPE_INITIAL) {
                     printLine(indent, "aliasTy: " + aliasTy.String())
                 }
             }
-        }
-        if (let Some(target) <- node.GetTarget()) {
-            printTarget(indent, target, "target")
         }
         if (!node.comments.IsEmpty()) {
             printLine(indent, "comments: " + node.comments.ToString())
@@ -507,6 +471,19 @@ private class PrintState {
     private func printFuncDecl(funcDecl: FuncDecl, indent: UInt64): Unit {
         open(indent, "FuncDecl: " + funcDecl.identifier.Val() + " " + funcDecl.identifier.Begin().ToString() + " " + funcDecl.identifier.End().ToString())
         printBasic(funcDecl, indent + 1u64)
+        if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+            match (funcDecl.constructorCall) {
+                case ConstructorCall.SUPER => if (let Some(callExpr) <-
+                    (funcDecl.funcBody.getOrThrow().body.getOrThrow().body[0] as CallExpr)) {
+                    if (callExpr.TestAttr(Attribute.COMPILER_ADD)) {
+                        printLine(indent + 1u64, "super: implicitSuper")
+                    } else {
+                        printLine(indent + 1u64, "super: explicitSuper")
+                    }
+                }
+                case _ => ()
+            }
+        }
         printAnnotations(funcDecl, indent + 1u64)
         printModifiers(funcDecl, indent)
         printFuncBodyOpt(funcDecl.funcBody, indent + 1u64, "")
@@ -1176,7 +1153,7 @@ private class PrintState {
     }
 
     private func printPrimitiveTypeExpr(expr: PrimitiveTypeExpr, indent: UInt64): Unit {
-        printLine(indent, "PrimitiveTypeExpr: " + PrintNode.PrintTy(expr.GetTy()))
+        printLine(indent, "PrimitiveTypeExpr: " + expr.GetTy().getOrThrow().String())
     }
 
     private func printSpawnExpr(expr: SpawnExpr, indent: UInt64): Unit {
@@ -1383,13 +1360,6 @@ private class PrintState {
         if (let Some(target) <- typeNode.target) {
             printTarget(indent + 1u64, target, "target")
         }
-        close(indent)
-    }
-
-    private func printConstantType(typeNode: ConstantType, indent: UInt64): Unit {
-        open(indent, "ConstantType")
-        printBasic(typeNode, indent + 1u64)
-        printExprOpt(typeNode.constantExpr, indent + 1u64, "constantExpr")
         close(indent)
     }
 
