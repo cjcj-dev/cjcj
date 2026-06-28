@@ -1,5 +1,6 @@
 package cangjie_compiler::ast
 
+import cangjie_compiler::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 import std.collection.*
 
 private func UnsetCallExprOfNode(expr: Expr): Unit {
@@ -21,46 +22,6 @@ private func TryRecoverFunctionCallExpr(base: Option<Expr>): Option<Expr> {
     return None
 }
 
-private func AddToTrash(owner: Node, expr: Expr): Unit {
-    if (let Some(file) <- owner.curFile) {
-        file.trashBin.add(expr)
-    }
-}
-
-private func ReplaceFuncArgs(target: ArrayList<FuncArg>, source: ArrayList<FuncArg>): Unit {
-    target.clear()
-    for (arg in source) {
-        target.add(arg)
-    }
-}
-
-private func EnsureFuncArg(target: ArrayList<FuncArg>, idx: Int64): FuncArg {
-    while (target.size <= idx) {
-        target.add(FuncArg())
-    }
-    return target[idx]
-}
-
-private func SetFuncArg(target: ArrayList<FuncArg>, idx: Int64, arg: FuncArg): Unit {
-    while (target.size <= idx) {
-        target.add(FuncArg())
-    }
-    let values = ArrayList<FuncArg>()
-    var curIdx: Int64 = 0
-    while (curIdx < target.size) {
-        if (curIdx == idx) {
-            values.add(arg)
-        } else {
-            values.add(target[curIdx])
-        }
-        curIdx++
-    }
-    target.clear()
-    for (value in values) {
-        target.add(value)
-    }
-}
-
 private func ReplaceIndexExprs(target: ArrayList<Expr>, args: ArrayList<FuncArg>, limit: Int64): Unit {
     target.clear()
     var idx: Int64 = 0
@@ -73,36 +34,39 @@ private func ReplaceIndexExprs(target: ArrayList<Expr>, args: ArrayList<FuncArg>
     }
 }
 
-private func FirstArgExpr(args: ArrayList<FuncArg>): Option<Expr> {
-    if (args.isEmpty()) {
-        return None
-    }
-    return args[0].expr
-}
-
-private func RecoverToPipelineExpr(be: BinaryExpr, callExpr: CallExpr): Unit {
-    be.rightExpr = TryRecoverFunctionCallExpr(callExpr.baseFunc)
-    if (let Some(right) <- be.rightExpr) {
-        UnsetCallExprOfNode(right)
-    }
-    be.leftExpr = FirstArgExpr(callExpr.args)
-    be.desugarExpr = None
-}
-
-private func RecoverToCompositionExpr(be: BinaryExpr, callExpr: CallExpr): Unit {
-    if (callExpr.args.size > 0) {
-        be.leftExpr = TryRecoverFunctionCallExpr(callExpr.args[0].expr)
-        if (let Some(left) <- be.leftExpr) {
-            UnsetCallExprOfNode(left)
+private func RecoverToPipelineExpr(be: BinaryExpr): Unit {
+    CJC_NULLPTR_CHECK(be.desugarExpr)
+    if (let Some(desugar) <- be.desugarExpr) {
+        CJC_ASSERT((desugar as CallExpr).isSome())
+        if (let Some(callExpr) <- (desugar as CallExpr)) {
+            be.rightExpr = TryRecoverFunctionCallExpr(callExpr.baseFunc)
+            if (let Some(right) <- be.rightExpr) {
+                UnsetCallExprOfNode(right)
+            }
+            CJC_ASSERT(callExpr.args.size == 1)
+            be.leftExpr = callExpr.args[0].expr
+            be.desugarExpr = None
         }
     }
-    if (callExpr.args.size > 1) {
-        be.rightExpr = TryRecoverFunctionCallExpr(callExpr.args[1].expr)
-        if (let Some(right) <- be.rightExpr) {
-            UnsetCallExprOfNode(right)
+}
+
+private func RecoverToCompositionExpr(be: BinaryExpr): Unit {
+    CJC_NULLPTR_CHECK(be.desugarExpr)
+    if (let Some(desugar) <- be.desugarExpr) {
+        CJC_ASSERT((desugar as CallExpr).isSome())
+        if (let Some(callExpr) <- (desugar as CallExpr)) {
+            CJC_ASSERT(callExpr.args.size == 2)
+            be.leftExpr = TryRecoverFunctionCallExpr(callExpr.args[0].expr)
+            if (let Some(left) <- be.leftExpr) {
+                UnsetCallExprOfNode(left)
+            }
+            be.rightExpr = TryRecoverFunctionCallExpr(callExpr.args[1].expr)
+            if (let Some(right) <- be.rightExpr) {
+                UnsetCallExprOfNode(right)
+            }
+            be.desugarExpr = None
         }
     }
-    be.desugarExpr = None
 }
 
 public func RecoverToSubscriptExpr(se: SubscriptExpr): Unit {
@@ -110,6 +74,7 @@ public func RecoverToSubscriptExpr(se: SubscriptExpr): Unit {
         if (let Some(callExpr) <- (desugar as CallExpr)) {
             RecoverToCallExpr(callExpr)
             if (let Some(baseFunc) <- callExpr.baseFunc) {
+                CJC_ASSERT((baseFunc as MemberAccess).isSome())
                 if (let Some(member) <- (baseFunc as MemberAccess)) {
                     se.baseExpr = member.baseExpr
                     ReplaceIndexExprs(se.indexExprs, callExpr.args, callExpr.args.size)
@@ -125,9 +90,11 @@ public func RecoverToSubscriptExpr(se: SubscriptExpr): Unit {
 
 public func RecoverToUnaryExpr(ue: UnaryExpr): Unit {
     if (let Some(desugar) <- ue.desugarExpr) {
+        CJC_ASSERT((desugar as CallExpr).isSome())
         if (let Some(callExpr) <- (desugar as CallExpr)) {
             RecoverToCallExpr(callExpr)
             if (let Some(baseFunc) <- callExpr.baseFunc) {
+                CJC_ASSERT((baseFunc as MemberAccess).isSome())
                 if (let Some(member) <- (baseFunc as MemberAccess)) {
                     ue.expr = member.baseExpr
                     if (let Some(expr) <- ue.expr) {
@@ -145,21 +112,25 @@ public func RecoverToBinaryExpr(be: BinaryExpr): Unit {
         if (let Some(callExpr) <- (desugar as CallExpr)) {
             RecoverToCallExpr(callExpr)
             if (be.op == TokenKind.PIPELINE) {
-                RecoverToPipelineExpr(be, callExpr)
+                RecoverToPipelineExpr(be)
                 return
             }
             if (be.op == TokenKind.COMPOSITION) {
-                RecoverToCompositionExpr(be, callExpr)
+                RecoverToCompositionExpr(be)
                 return
             }
             if (let Some(baseFunc) <- callExpr.baseFunc) {
+                CJC_ASSERT((baseFunc as MemberAccess).isSome())
                 if (let Some(member) <- (baseFunc as MemberAccess)) {
                     be.leftExpr = member.baseExpr
-                    be.rightExpr = FirstArgExpr(callExpr.args)
+                    be.rightExpr = callExpr.args[0].expr
                     if (let Some(left) <- be.leftExpr) {
                         UnsetCallExprOfNode(left)
                     }
-                    AddToTrash(be, desugar)
+                    CJC_NULLPTR_CHECK(be.curFile)
+                    if (let Some(file) <- be.curFile) {
+                        file.trashBin.add(desugar)
+                    }
                     be.desugarExpr = None
                 }
             }
@@ -172,27 +143,28 @@ public func RecoverToBinaryExpr(be: BinaryExpr): Unit {
 public func RecoverToAssignExpr(ae: AssignExpr): Unit {
     if (let Some(desugar) <- ae.desugarExpr) {
         if (let Some(callExpr) <- (desugar as CallExpr)) {
+            CJC_ASSERT(ae.leftValue.isSome())
             if (let Some(leftValue) <- ae.leftValue) {
                 if (let Some(subscript) <- (leftValue as SubscriptExpr)) {
                     RecoverToCallExpr(callExpr)
                     if (let Some(baseFunc) <- callExpr.baseFunc) {
+                        CJC_ASSERT((baseFunc as MemberAccess).isSome())
                         if (let Some(member) <- (baseFunc as MemberAccess)) {
                             subscript.baseExpr = member.baseExpr
+                            CJC_ASSERT(!callExpr.args.isEmpty())
                             let rightIdx = callExpr.args.size - 1
                             ReplaceIndexExprs(subscript.indexExprs, callExpr.args, rightIdx)
                             leftValue.curFile = ae.curFile
-                            if (rightIdx >= 0) {
-                                if (ae.isCompound) {
-                                    if (let Some(lastExpr) <- callExpr.args[rightIdx].expr) {
-                                        if (let Some(binary) <- (lastExpr as BinaryExpr)) {
-                                            ae.rightExpr = binary.rightExpr
-                                        } else {
-                                            ae.rightExpr = lastExpr
-                                        }
+                            if (ae.isCompound) {
+                                CJC_ASSERT(callExpr.args[rightIdx].expr.isSome())
+                                if (let Some(lastExpr) <- callExpr.args[rightIdx].expr) {
+                                    CJC_ASSERT((lastExpr as BinaryExpr).isSome())
+                                    if (let Some(binary) <- (lastExpr as BinaryExpr)) {
+                                        ae.rightExpr = binary.rightExpr
                                     }
-                                } else {
-                                    ae.rightExpr = callExpr.args[rightIdx].expr
                                 }
+                            } else {
+                                ae.rightExpr = callExpr.args[rightIdx].expr
                             }
                             if (let Some(base) <- subscript.baseExpr) {
                                 base.mapExpr = None
@@ -204,12 +176,15 @@ public func RecoverToAssignExpr(ae: AssignExpr): Unit {
                 }
             }
         } else if (let Some(assignExpr) <- (desugar as AssignExpr)) {
+            CJC_ASSERT(assignExpr.rightExpr.isSome())
             if (let Some(right) <- assignExpr.rightExpr) {
+                CJC_ASSERT((right as CallExpr).isSome())
                 if (let Some(callExpr) <- (right as CallExpr)) {
                     RecoverToCallExpr(callExpr)
                     ae.leftValue = assignExpr.leftValue
-                    ae.rightExpr = FirstArgExpr(callExpr.args)
+                    ae.rightExpr = callExpr.args[0].expr
                     ae.desugarExpr = None
+                    CJC_ASSERT(ae.leftValue.isSome())
                     if (let Some(leftValue) <- ae.leftValue) {
                         leftValue.mapExpr = None
                     }
@@ -237,6 +212,7 @@ public func RecoverJArrayCtorCall(ce: CallExpr): Unit {
 public func RecoverToCallExpr(ce: CallExpr): Unit {
     if (let Some(desugar) <- ce.desugarExpr) {
         if (let Some(nested) <- desugar.desugarExpr) {
+            CJC_ASSERT((desugar as CallExpr).isSome())
             if (let Some(desugarCallExpr) <- (desugar as CallExpr)) {
                 RecoverToCallExpr(desugarCallExpr)
                 ce.callKind = desugarCallExpr.callKind
@@ -251,8 +227,14 @@ public func RecoverToCallExpr(ce: CallExpr): Unit {
                 if (let Some(member) <- (baseFunc as MemberAccess)) {
                     if (member.field == "()") {
                         ce.baseFunc = member.baseExpr
-                        ReplaceFuncArgs(ce.args, callExpr.args)
-                        AddToTrash(ce, desugar)
+                        ce.args.clear()
+                        for (arg in callExpr.args) {
+                            ce.args.add(arg)
+                        }
+                        CJC_NULLPTR_CHECK(ce.curFile)
+                        if (let Some(file) <- ce.curFile) {
+                            file.trashBin.add(desugar)
+                        }
                         ce.desugarExpr = None
                     }
                 }
@@ -277,23 +259,25 @@ public func RecoverFromVariadicCallExpr(ce: CallExpr): Unit {
         if (let Some(callExpr) <- (desugar as CallExpr)) {
             ce.callKind = callExpr.callKind
             ce.baseFunc = callExpr.baseFunc
+            CJC_ASSERT(!callExpr.args.isEmpty())
             var idx: Int64 = 0
-            var arrayLitIdx: Int64 = -1
+            var arrayLitIdx: Int64 = 0
             var arraySize: Int64 = 0
             while (idx < callExpr.args.size) {
                 if (idx + 1 < callExpr.args.size && callExpr.args[idx + 1].name.Empty()) {
-                    SetFuncArg(ce.args, idx, callExpr.args[idx])
+                    ce.args[idx] = callExpr.args[idx]
                     idx++
                     continue
                 }
                 arrayLitIdx = idx
+                CJC_ASSERT(callExpr.args[arrayLitIdx].expr.isSome())
                 if (let Some(argExpr) <- callExpr.args[arrayLitIdx].expr) {
+                    CJC_ASSERT((argExpr as ArrayLit).isSome())
                     if (let Some(arrayLit) <- (argExpr as ArrayLit)) {
                         arraySize = arrayLit.children.size
                         var childIdx: Int64 = 0
                         while (childIdx < arraySize) {
-                            let destArg = EnsureFuncArg(ce.args, arrayLitIdx + childIdx)
-                            destArg.expr = arrayLit.children[childIdx]
+                            ce.args[arrayLitIdx + childIdx].expr = arrayLit.children[childIdx]
                             childIdx++
                         }
                     }
@@ -302,53 +286,13 @@ public func RecoverFromVariadicCallExpr(ce: CallExpr): Unit {
             }
             idx++
             while (idx < callExpr.args.size) {
+                CJC_ASSERT(idx + arraySize > 0)
                 let originIdx = (idx + arraySize) - 1
-                SetFuncArg(ce.args, originIdx, callExpr.args[idx])
+                CJC_ASSERT(originIdx < ce.args.size)
+                ce.args[originIdx] = callExpr.args[idx]
                 idx++
             }
             ce.desugarExpr = None
         }
     }
-}
-
-public class RecoverDesugar {
-    public init() {}
-
-    public static func Recover(root: Node): Unit {
-        let walker = Walker(root, visitPre: { node: Node =>
-            var handled = false
-            if (let Some(binary) <- (node as BinaryExpr)) {
-                RecoverToBinaryExpr(binary)
-                handled = true
-            }
-            if (let Some(unary) <- (node as UnaryExpr)) {
-                RecoverToUnaryExpr(unary)
-                handled = true
-            }
-            if (let Some(subscript) <- (node as SubscriptExpr)) {
-                RecoverToSubscriptExpr(subscript)
-                handled = true
-            }
-            if (let Some(assignExpr) <- (node as AssignExpr)) {
-                RecoverToAssignExpr(assignExpr)
-                handled = true
-            }
-            if (let Some(callExpr) <- (node as CallExpr)) {
-                RecoverToCallExpr(callExpr)
-                handled = true
-            }
-            if (let Some(expr) <- (node as Expr)) {
-                if (!handled) {
-                    expr.desugarExpr = None
-                }
-                expr.mapExpr = None
-            }
-            VisitAction.WALK_CHILDREN
-        })
-        walker.Walk()
-    }
-}
-
-public func RecoverDesugarExpr(root: Node): Unit {
-    RecoverDesugar.Recover(root)
 }
