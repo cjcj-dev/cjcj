@@ -16,9 +16,15 @@ public class FlatForInExpr {
     }
 
     public func RunOnFunc(fn: Function): Unit {
-        if (let Some(body) <- fn.GetBody()) {
-            RunOnBlockGroup(body)
+        let isCommonFunctionWithoutBody = fn.TestAttr(Attribute.COMMON) && fn.GetBody().isNone()
+        if (isCommonFunctionWithoutBody) {
+            return
         }
+        if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
+            return
+        }
+        RunOnBlockGroup(fn.GetBody() ??
+            throw IllegalStateException("faithful FlatForInExpr expected function body"))
     }
 
     private func RunOnBlockGroup(blockGroup: BlockGroup): Unit {
