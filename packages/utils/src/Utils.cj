@@ -3,6 +3,8 @@ package cangjie_compiler::utils
 import cangjie_compiler::basic.JoinStrings as BasicJoinStrings
 import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
 import cangjie_compiler::basic.SplitString as BasicSplitString
+import cangjie_compiler::basic.Errorln as Errorf
+import cangjie_compiler::basic.Infoln as Infof
 import std.collection.*
 import std.convert.*
 import std.fs.File
@@ -177,6 +179,10 @@ public func In<T>(element: T, values: HashSet<T>): Bool where T <: Hashable & Eq
 }
 
 public func In<T>(element: T, values: TreeSet<T>): Bool where T <: Comparable<T> {
+    return values.contains(element)
+}
+
+public func In<T>(element: T, values: PSet<T>): Bool where T <: Comparable<T> {
     return values.contains(element)
 }
 
@@ -573,6 +579,7 @@ public func GetApplicationPath(): Option<String> {
         }
         let length = unsafe { GetModuleFileNameA(CPointer<Unit>(), buffer.value, UInt32(FILE_PATH_MAX_LENGTH)) }
         if (length == 0u32) {
+            Errorf("Get path of cjc.exe failed.")
             return None
         }
         let bytes = ArrayList<UInt8>()
@@ -597,18 +604,20 @@ public func GetApplicationPath(argv0: String, environmentVars: HashMap<String, S
     } else {
         Array<String>()
     }
-    let found = FileUtil.FindProgramByName(argv0, paths)
-    if (found.isEmpty()) {
+    let exePath = FileUtil.GetAbsPath(FileUtil.FindProgramByName(argv0, paths))
+    if (let None <- exePath) {
+        Errorf("Get path of ${argv0} failed.")
         return None
     }
-    let exePath = FileUtil.GetAbsPath(found)
-    if (let Some(path) <- exePath) {
-        if (path.contains(":") || path.contains(";")) {
-            return None
-        }
-        return path
+    let path = exePath.getOrThrow()
+    let environmentPathsSpecialCharacters = ":;"
+    if (path.contains(":") || path.contains(";")) {
+        Errorf("Invalid cjc installation path: ${path}")
+        Infof("Do not install `cjc` under a path that contains the following characters: " +
+            environmentPathsSpecialCharacters)
+        return None
     }
-    return None
+    return path
 }
 
 public class Out64 {
