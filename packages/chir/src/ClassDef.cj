@@ -18,7 +18,7 @@ public class ClassDef <: CustomTypeDef {
         this.isClass = isClass
     }
 
-    public override func GetType(): Option<CustomType> {
+    public override func GetType(): Option<Type> {
         if (let Some(ty) <- classType) {
             return ty
         }

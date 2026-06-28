@@ -83,7 +83,7 @@ public open class CustomTypeDef <: Base {
     private let instanceVars: ArrayList<MemberVarInfo> = ArrayList<MemberVarInfo>()
     private let staticVars: ArrayList<GlobalVar> = ArrayList<GlobalVar>()
     private let methods: ArrayList<Function> = ArrayList<Function>()
-    private let implementedInterfaceTys: ArrayList<ClassType> = ArrayList<ClassType>()
+    protected let implementedInterfaceTys: ArrayList<ClassType> = ArrayList<ClassType>()
     private let extends: ArrayList<ExtendDef> = ArrayList<ExtendDef>()
     private var varInitializationFunc: Option<Function> = None
     private var annoInfo: AnnoInfo = AnnoInfo()
@@ -138,15 +138,18 @@ public open class CustomTypeDef <: Base {
         genericTypeParams.add(param)
     }
 
-    public open func GetType(): Option<CustomType> {
-        return customType
+    public open func GetType(): Option<Type> {
+        if (let Some(ty) <- customType) {
+            return ty
+        }
+        return None
     }
 
     public open func SetType(ty: CustomType): Unit {
         customType = ty
     }
 
-    public func GetGenericTypeParams(): ArrayList<GenericType> {
+    public open func GetGenericTypeParams(): ArrayList<GenericType> {
         let out = ArrayList<GenericType>()
         for (param in genericTypeParams) {
             out.add(param)

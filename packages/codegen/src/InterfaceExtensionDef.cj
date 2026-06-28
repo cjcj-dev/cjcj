@@ -18,6 +18,7 @@ import cangjie_compiler::chir.StructType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKindIndex
 import cangjie_compiler::mangle.GetTypeQualifiedName
+import cangjie_compiler::utils.StaticCast
 
 private let EXTENSION_DEFS_NAME: String = "NonExternalExtensionDefs"
 
@@ -54,6 +55,9 @@ public func GenerateInterfaceExtensionDefs(cgMod: CGModule): Unit {
 public func RedefineTypeInfosForCustomDefs(cgMod: CGModule): Unit {
     for (def in cgMod.GetCGContext().GetSubCHIRPackage().chirCustomDefs) {
         if (!IsCurrentPackageDef(cgMod, def)) {
+            continue
+        }
+        if (def.IsExtend()) {
             continue
         }
         if (def.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
@@ -277,7 +281,10 @@ private func SourceCustomType(customTy: CustomType): CustomType {
     if (def.IsGenericDef()) {
         return SourceCustomTypeForDef(def, customTy)
     }
-    return def.GetType() ?? customTy
+    if (let Some(defTy) <- def.GetType()) {
+        return StaticCast<CustomType>(defTy)
+    }
+    return customTy
 }
 
 private func SourceCustomTypeForDef(def: CustomTypeDef, fallback: CustomType): CustomType {
@@ -294,7 +301,10 @@ private func SourceCustomTypeForDef(def: CustomTypeDef, fallback: CustomType): C
     if (let Some(enumDef) <- (def as EnumDef)) {
         return EnumType(enumDef, genericArgs)
     }
-    return def.GetType() ?? fallback
+    if (let Some(defTy) <- def.GetType()) {
+        return StaticCast<CustomType>(defTy)
+    }
+    return fallback
 }
 
 private func SourceGenericTargetType(targetType: Type): Type {

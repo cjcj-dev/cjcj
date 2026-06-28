@@ -12,7 +12,7 @@ public class StructDef <: CustomTypeDef {
         super(packageName, identifier, srcCodeIdentifier, CustomDefKind.TYPE_STRUCT)
     }
 
-    public override func GetType(): Option<CustomType> {
+    public override func GetType(): Option<Type> {
         if (let Some(ty) <- structType) {
             return ty
         }

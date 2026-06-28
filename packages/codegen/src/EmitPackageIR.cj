@@ -3,6 +3,7 @@ package cangjie_compiler::codegen
 import std.collection.*
 import std.sort.*
 import cangjie_compiler::chir.Attribute
+import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.FuncKind
 import cangjie_compiler::chir.Function
@@ -14,6 +15,7 @@ import cangjie_compiler::mangle.SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION
 import cangjie_compiler::mangle.SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION
 import cangjie_compiler::mangle.SPECIAL_NAME_FOR_INIT_RESET_FUNCTION
 import cangjie_compiler::option.GlobalOptions
+import cangjie_compiler::utils.StaticCast
 
 private let CANGJIE_SDK_VERSION: String = "1.1.0-alpha.20260331010029"
 private let PKG_INIT_FUNC_METADATA: String = "pkg_init_func"
@@ -65,7 +67,8 @@ private func EmitTypeTemplatesForOwnedGenericCustomDefs(cgMod: CGModule): Unit {
         if (def.IsExtend() || !def.IsGenericDef()) {
             continue
         }
-        if (let Some(customTy) <- def.GetType()) {
+        if (let Some(defTy) <- def.GetType()) {
+            let customTy = StaticCast<CustomType>(defTy)
             EnsureSourceGenericTypeTemplate(cgMod, customTy)
         }
     }

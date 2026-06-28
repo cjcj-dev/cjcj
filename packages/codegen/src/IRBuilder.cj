@@ -19,7 +19,7 @@ import cangjie_compiler::chir.StringLiteral
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.VArrayType
-import cangjie_compiler::utils.{CORE_PACKAGE_NAME, STD_LIB_FUTURE}
+import cangjie_compiler::utils.{CORE_PACKAGE_NAME, STD_LIB_FUTURE, StaticCast}
 
 private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowException_msg"
 private let CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME: String = "rt$CreateArithmeticException_msg"
@@ -2877,7 +2877,10 @@ public class IRBuilder2 <: Resource {
     }
 
     private func IRBuilderSourceCustomType(customTy: CustomType): CustomType {
-        return customTy.GetCustomTypeDef().GetType() ?? customTy
+        if (let Some(defTy) <- customTy.GetCustomTypeDef().GetType()) {
+            return StaticCast<CustomType>(defTy)
+        }
+        return customTy
     }
 
     private func CallGetTypeInfoIntrinsic(args: ArrayList<LLVMValueRef>): LLVMValueRef {

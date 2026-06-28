@@ -22,7 +22,7 @@ import cangjie_compiler::chir.TypeKindIndex
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.VArrayType
 import cangjie_compiler::option.{ArchType, EnvironmentType}
-import cangjie_compiler::utils.{REF_PACKAGE_NAME, STD_LIB_WEAK_REF}
+import cangjie_compiler::utils.{REF_PACKAGE_NAME, STD_LIB_WEAK_REF, StaticCast}
 
 private let UG_CLASS_KIND: UInt64 = 128u64
 private let UG_INTERFACE_KIND: UInt64 = 129u64
@@ -1074,7 +1074,10 @@ private func SourceCustomType(customTy: CustomType): CustomType {
     if (def.IsGenericDef()) {
         return SourceCustomTypeForDef(def, customTy)
     }
-    return def.GetType() ?? customTy
+    if (let Some(defTy) <- def.GetType()) {
+        return StaticCast<CustomType>(defTy)
+    }
+    return customTy
 }
 
 private func SourceCustomTypeForDef(def: CustomTypeDef, fallback: CustomType): CustomType {
@@ -1091,7 +1094,10 @@ private func SourceCustomTypeForDef(def: CustomTypeDef, fallback: CustomType): C
     if (let Some(enumDef) <- (def as EnumDef)) {
         return EnumType(enumDef, genericArgs)
     }
-    return def.GetType() ?? fallback
+    if (let Some(defTy) <- def.GetType()) {
+        return StaticCast<CustomType>(defTy)
+    }
+    return fallback
 }
 
 private func TypeTemplateGenericParams(customTy: CustomType): ArrayList<GenericType> {
