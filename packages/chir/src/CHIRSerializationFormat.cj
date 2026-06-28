@@ -250,7 +250,6 @@ func CHIRKnownAttributes(): ArrayList<Attribute> {
     let attrs = ArrayList<Attribute>()
     attrs.add(Attribute.ABSTRACT)
     attrs.add(Attribute.ANNOTATION)
-    attrs.add(Attribute.BOXED)
     attrs.add(Attribute.BUILTIN)
     attrs.add(Attribute.C)
     attrs.add(Attribute.CFFI_WRAPPER)
@@ -282,7 +281,6 @@ func CHIRAttributeFromIndex(index: Int64): Attribute {
     return match (index) {
         case 0 => Attribute.ABSTRACT
         case 1 => Attribute.ANNOTATION
-        case 2 => Attribute.BOXED
         case 3 => Attribute.BUILTIN
         case 4 => Attribute.C
         case 5 => Attribute.CFFI_WRAPPER

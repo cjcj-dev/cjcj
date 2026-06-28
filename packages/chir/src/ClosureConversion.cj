@@ -111,7 +111,6 @@ public class ClosureConversion {
                 continue
             }
             let users = fn.GetUsers()
-            var converted = false
             for (user in users) {
                 if (IsCalleeOfApply(user, fn)) {
                     continue
@@ -122,10 +121,6 @@ public class ClosureConversion {
                 let autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(funcTy)
                 let autoEnvImplDef = GetOrCreateAutoEnvImplDef(fn, autoEnvBaseDef)
                 ReplaceUserPoint(fn, user, autoEnvImplDef)
-                converted = true
-            }
-            if (converted) {
-                fn.EnableAttr(Attribute.BOXED)
             }
         }
     }
@@ -1345,7 +1340,6 @@ public class ClosureConversion {
             user.ReplaceOperand(env, RequireResult(fieldRef))
         }
         envExpr.RemoveSelfFromBlock()
-        env.EnableAttr(Attribute.BOXED)
         return boxObj
     }
 
