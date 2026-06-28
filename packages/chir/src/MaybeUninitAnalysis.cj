@@ -181,9 +181,9 @@ public class MaybeUninitAnalysis {
         this.ctorInitInfo = ctorInitInfo
         var allocateIdx = ctorInitInfo.localMemberNums
         if (let Some(body) <- functionValue.GetBody()) {
-            SaveAllocateMap(body, allocateIdx, allocateIdxMap)
+            allocateIdx = SaveAllocateMap(body, allocateIdx, allocateIdxMap)
         }
-        domainSize = allocateIdx
+        domainSize = ctorInitInfo.localMemberNums + allocateIdx
         if (ctorInitInfo.superClassDef.isSome()) {
             domainSize++
         }
@@ -208,19 +208,20 @@ public class MaybeUninitAnalysis {
 
     public func PropagateExpressionEffect(state: MaybeUninitDomain, expression: Expression): Unit {
         let kind = expression.GetExprKind()
-        if (kind == ExprKind.ALLOCATE || kind == ExprKind.ALLOCATE_WITH_EXCEPTION) {
+        if (kind == ExprKind.ALLOCATE) {
             HandleAllocateExpr(state, expression)
         } else if (kind == ExprKind.STORE) {
             HandleStoreExpr(state, expression)
-        } else if (kind == ExprKind.STORE_ELEMENT_REF || kind == ExprKind.STORE_ELEMENT_BY_NAME) {
+        } else if (kind == ExprKind.STORE_ELEMENT_REF) {
             HandleStoreElemRefExpr(state, expression)
-        } else if (kind == ExprKind.APPLY || kind == ExprKind.APPLY_WITH_EXCEPTION) {
+        } else if (kind == ExprKind.APPLY) {
             HandleApplyExpr(state, expression)
         }
     }
 
     public func PropagateTerminatorEffect(state: MaybeUninitDomain, terminator: Terminator): Option<Block> {
-        PropagateExpressionEffect(state, terminator)
+        let _ = state
+        let _ = terminator
         return None
     }
 
@@ -291,70 +292,53 @@ public class MaybeUninitAnalysis {
     }
 
     private func HandleStoreElemRefExpr(state: MaybeUninitDomain, store: Expression): Unit {
-        if (let Some(memberIndex) <- IsInitialisingMemberVar(functionValue, store, ctorInitInfo)) {
-            if (memberIndex >= ctorInitInfo.superMemberNums) {
-                let stateIndex = memberIndex - ctorInitInfo.superMemberNums
-                state.Kill(stateIndex)
-                state.RecordMaybeInitedPos(stateIndex, Int64(store.GetDebugLocation().line))
-            }
+        let storeRef = (store as StoreElementRef) ??
+            throw IllegalStateException("MaybeUninitAnalysis expected StoreElementRef")
+        let parentFunc = storeRef.GetTopLevelFunc() ??
+            throw IllegalStateException("MaybeUninitAnalysis StoreElementRef has no top-level function")
+        let memberIdxOpt = IsInitialisingMemberVar(parentFunc, storeRef)
+        if (memberIdxOpt.isNone()) {
+            return
         }
+        let memberIndex = memberIdxOpt.getOrThrow()
+        if (memberIndex >= ctorInitInfo.superMemberNums + ctorInitInfo.localMemberNums) {
+            throw IllegalStateException("MaybeUninitAnalysis member index out of range")
+        }
+        if (memberIndex < ctorInitInfo.superMemberNums) {
+            return
+        }
+        let stateIndex = memberIndex - ctorInitInfo.superMemberNums
+        state.Kill(stateIndex)
+        state.RecordMaybeInitedPos(stateIndex, Int64(store.GetDebugLocation().line))
     }
 
     private func HandleApplyExpr(state: MaybeUninitDomain, apply: Expression): Unit {
         if (!functionValue.IsConstructor()) {
             return
         }
-        if (IsSuperConstructorCall(apply)) {
+        let applyExpr = (apply as Apply) ?? throw IllegalStateException("MaybeUninitAnalysis expected Apply")
+        if (applyExpr.IsSuperCall()) {
             state.Kill(domainSize - 1)
             return
         }
-        if (IsDelegatingConstructorCall(apply)) {
-            state.SetAllLocalMemberInited()
-            if (ctorInitInfo.superClassDef.isSome()) {
-                state.Kill(domainSize - 1)
-            }
-        }
-    }
-
-    private func IsSuperConstructorCall(apply: Expression): Bool {
-        if (ctorInitInfo.superClassDef.isNone() || apply.GetNumOfOperands() == 0) {
-            return false
-        }
-        if (let Some(callee) <- apply.GetOperand(0).AsFunction()) {
-            if (!callee.IsConstructor()) {
-                return false
-            }
-            if (let Some(parent) <- callee.GetParentCustomTypeDef()) {
-                if (let Some(superDef) <- ctorInitInfo.superClassDef) {
-                    return parent.nodeId == superDef.nodeId
+        let callee = applyExpr.GetCallee()
+        if (callee.IsFuncWithBody()) {
+            if (let Some(calleeFunc) <- callee.AsFunction()) {
+                let outerDefOpt = calleeFunc.GetOuterDeclaredOrExtendedDef()
+                let sameOuterDef = match ((outerDefOpt, ctorInitInfo.thisCustomDef)) {
+                    case (Some(left), Some(right)) => left.nodeId == right.nodeId
+                    case (None, None) => true
+                    case _ => false
                 }
-            }
-        }
-        return false
-    }
-
-    private func IsDelegatingConstructorCall(apply: Expression): Bool {
-        if (apply.GetNumOfOperands() == 0) {
-            return false
-        }
-        if (let Some(callee) <- apply.GetOperand(0).AsFunction()) {
-            if (!callee.IsConstructor() || !callee.IsFuncWithBody()) {
-                return false
-            }
-            if (let Some(thisDef) <- ctorInitInfo.thisCustomDef) {
-                if (let Some(parent) <- callee.GetParentCustomTypeDef()) {
-                    if (parent.nodeId != thisDef.nodeId) {
-                        return false
+                if (calleeFunc.IsConstructor() && sameOuterDef &&
+                    applyExpr.GetArgs()[0].nodeId == functionValue.GetParam(0).nodeId) {
+                    state.SetAllLocalMemberInited()
+                    if (ctorInitInfo.superClassDef.isSome()) {
+                        state.Kill(domainSize - 1)
                     }
-                } else {
-                    return false
                 }
             }
-            if (apply.GetNumOfOperands() > 1 && functionValue.GetNumOfParams() > 0) {
-                return apply.GetOperand(1).nodeId == functionValue.GetParam(0).nodeId
-            }
         }
-        return false
     }
 }
 
@@ -381,18 +365,6 @@ public func SaveAllocateMap(body: BlockGroup, allocateIdx: Int64, allocateIdxMap
     return nextIdx
 }
 
-public func IsInitialisingMemberVar(functionValue: Function, store: Expression,
-    ctorInitInfo: ConstructorInitInfo): Option<Int64> {
-    let parentFunction = GetParentFunctionForStore(functionValue, store)
-    if (let Some(storeRef) <- (store as StoreElementRef)) {
-        return IsInitialisingMemberVar(parentFunction, storeRef)
-    }
-    if (let Some(storeByName) <- (store as StoreElementByName)) {
-        return IsInitialisingMemberVarByName(parentFunction, storeByName, ctorInitInfo)
-    }
-    return None
-}
-
 public func IsInitialisingMemberVar(functionValue: Function, store: StoreElementRef): Option<Int64> {
     if (!IsConstructorOrInstanceVarInit(functionValue) || functionValue.GetNumOfParams() == 0) {
         return None
@@ -408,60 +380,8 @@ public func IsInitialisingMemberVar(functionValue: Function, store: StoreElement
     return Int64(path[0])
 }
 
-private func IsInitialisingMemberVarByName(functionValue: Function, store: StoreElementByName,
-    ctorInitInfo: ConstructorInitInfo): Option<Int64> {
-    if (!IsConstructorOrInstanceVarInit(functionValue) || functionValue.GetNumOfParams() == 0) {
-        return None
-    }
-    let location = store.GetLocation()
-    if (!location.IsParameter() || location.nodeId != functionValue.GetParam(0).nodeId) {
-        return None
-    }
-    let names = store.GetNames()
-    if (names.size != 1) {
-        return None
-    }
-    return ResolveMemberIndexFromName(names[0], ctorInitInfo)
-}
-
-private func GetParentFunctionForStore(functionValue: Function, store: Expression): Function {
-    if (let Some(parentFunc) <- store.GetTopLevelFunc()) {
-        return parentFunc
-    }
-    return functionValue
-}
-
 private func IsConstructorOrInstanceVarInit(functionValue: Function): Bool {
     return functionValue.IsConstructor() || functionValue.IsInstanceVarInit()
-}
-
-private func ResolveMemberIndexFromName(name: String, ctorInitInfo: ConstructorInitInfo): Option<Int64> {
-    if (let Some(def) <- ctorInitInfo.thisCustomDef) {
-        return ResolveMemberIndexFromDef(name, def)
-    }
-    if (let Some(superDef) <- ctorInitInfo.superClassDef) {
-        return ResolveMemberIndexFromDef(name, superDef)
-    }
-    return None
-}
-
-private func ResolveMemberIndexFromDef(name: String, def: CustomTypeDef): Option<Int64> {
-    let members = def.GetAllInstanceVars()
-    if (members.isEmpty()) {
-        return None
-    }
-    var idx = members.size - 1
-    while (idx >= 0) {
-        if (MemberNameMatches(members[idx], name)) {
-            return idx
-        }
-        idx--
-    }
-    return None
-}
-
-private func MemberNameMatches(member: MemberVarInfo, name: String): Bool {
-    return member.name == name || (!member.rawMangledName.isEmpty() && member.rawMangledName == name)
 }
 
 private func AddLineIfMissing(lines: ArrayList<Int64>, line: Int64): Unit {

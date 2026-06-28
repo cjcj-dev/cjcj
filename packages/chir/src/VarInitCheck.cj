@@ -518,11 +518,13 @@ private func ResolveStoreLocation(store: Expression): Option<Value> {
 private func ResolveStoreMemberIndex(
     fn: Function,
     store: Expression,
-    ctorInfo: ConstructorInitInfo,
+    _: ConstructorInitInfo,
     members: ArrayList<MemberVarInfo>
 ): Option<Int64> {
-    if (let Some(index) <- IsInitialisingMemberVar(fn, store, ctorInfo)) {
-        return index
+    if (let Some(storeRef) <- (store as StoreElementRef)) {
+        if (let Some(index) <- IsInitialisingMemberVar(fn, storeRef)) {
+            return index
+        }
     }
     return ResolveMemberIndexFromOperands(store, members, 2)
 }

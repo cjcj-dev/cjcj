@@ -209,9 +209,14 @@ public class MaybeInitAnalysis {
     }
 
     private func HandleStoreElemRefExpr(state: MaybeInitDomain, store: Expression): Unit {
-        if (let Some(memberIndex) <- IsInitialisingMemberVar(functionValue, store, ctorInitInfo)) {
-            if (memberIndex >= ctorInitInfo.superMemberNums) {
-                state.Gen(memberIndex - ctorInitInfo.superMemberNums)
+        if (let Some(storeRef) <- (store as StoreElementRef)) {
+            // modify by cjmp, adapt for var init func create: use the store's top-level func
+            let parentFunc = storeRef.GetTopLevelFunc() ??
+                throw IllegalStateException("MaybeInitAnalysis StoreElementRef has no top-level function")
+            if (let Some(memberIndex) <- IsInitialisingMemberVar(parentFunc, storeRef)) {
+                if (memberIndex >= ctorInitInfo.superMemberNums) {
+                    state.Gen(memberIndex - ctorInitInfo.superMemberNums)
+                }
             }
         }
     }
