@@ -1,5 +1,7 @@
 package cangjie_compiler::meta_transformation
 
+import cangjie_compiler::basic.CANGJIE_VERSION
+
 @When[os != "Windows"]
 private let DLOPEN_MODE: Int32 = 0x101
 
@@ -8,6 +10,7 @@ foreign {
     func dlopen(filename: CString, flag: Int32): CPointer<Unit>
     func dlsym(handle: CPointer<Unit>, symbol: CString): CPointer<Unit>
     func dlclose(handle: CPointer<Unit>): Int32
+    func strcmp(lhs: CString, rhs: CString): Int32
 }
 
 @When[os == "Windows"]
@@ -15,6 +18,7 @@ foreign {
     func LoadLibraryA(filename: CString): CPointer<Unit>
     func GetProcAddress(handle: CPointer<Unit>, symbol: CString): CPointer<Unit>
     func FreeLibrary(handle: CPointer<Unit>): Int32
+    func strcmp(lhs: CString, rhs: CString): Int32
 }
 
 @When[os != "Windows"]
@@ -72,16 +76,16 @@ private func LookupNativeSymbol(handle: CPointer<Unit>, name: String): CPointer<
 
 public class NativeMetaTransformPlugin {
     private let pluginPath: String
-    private let metaTransformPluginInfo: NativeMetaTransformPluginInfo
+    private let metaTransformPluginInfo: MetaTransformPluginInfo
     private var handle: CPointer<Unit>
 
     private init() {
         pluginPath = ""
-        metaTransformPluginInfo = NativeMetaTransformPluginInfo()
+        metaTransformPluginInfo = MetaTransformPluginInfo()
         handle = CPointer<Unit>()
     }
 
-    private init(pluginPath: String, metaTransformPluginInfo: NativeMetaTransformPluginInfo, handle: CPointer<Unit>) {
+    private init(pluginPath: String, metaTransformPluginInfo: MetaTransformPluginInfo, handle: CPointer<Unit>) {
         this.pluginPath = pluginPath
         this.metaTransformPluginInfo = metaTransformPluginInfo
         this.handle = handle
@@ -97,29 +101,32 @@ public class NativeMetaTransformPlugin {
             let _ = CloseNativeLibrary(handle)
             throw IllegalStateException("native MetaTransform plugin info symbol not found: " + path)
         }
-        let pluginInfo = GetNativeMetaTransformPluginInfo(symbol) ??
-            throw IllegalStateException("native MetaTransform plugin info symbol is null: " + path)
+        let getter = CFunc<() -> MetaTransformPluginInfo>(symbol)
+        let pluginInfo = unsafe { getter() }
         return NativeMetaTransformPlugin(path, pluginInfo, handle)
     }
 
     public func IsValid(): Bool {
-        return !pluginPath.isEmpty() && metaTransformPluginInfo.IsValid()
-    }
-
-    public func IsValidForVersion(version: String): Bool {
-        return !pluginPath.isEmpty() && metaTransformPluginInfo.IsValidForVersion(version)
+        if (pluginPath.isEmpty()) {
+            return false
+        }
+        var versionMatches = false
+        try (expectedVersion = unsafe { LibC.mallocCString(CANGJIE_VERSION) }.asResource()) {
+            versionMatches = unsafe { strcmp(metaTransformPluginInfo.cjcVersion, expectedVersion.value) } == 0
+        }
+        return versionMatches && !CPointer<Unit>(metaTransformPluginInfo.registerTo).isNull()
     }
 
     public func GetHandle(): CPointer<Unit> {
         return handle
     }
 
-    public func GetPluginInfo(): NativeMetaTransformPluginInfo {
+    public func GetPluginInfo(): MetaTransformPluginInfo {
         return metaTransformPluginInfo
     }
 
     public func RegisterCallbackTo(builder: NativeMetaTransformPluginBuilderRef): Unit {
-        metaTransformPluginInfo.RegisterTo(builder)
+        unsafe { metaTransformPluginInfo.registerTo(builder) }
     }
 
     public func Close(): Int64 {

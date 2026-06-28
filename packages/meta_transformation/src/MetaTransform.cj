@@ -1,23 +1,10 @@
 package cangjie_compiler::meta_transformation
 
-import cangjie_compiler::basic.CANGJIE_VERSION
-import cangjie_compiler::chir.CHIRBuilder
 import cangjie_compiler::chir.Function as CHIRFunction
 import cangjie_compiler::chir.Package as CHIRPackage
 import std.reflect.TypeInfo
 
-foreign {
-    func strcmp(lhs: CString, rhs: CString): Int32
-}
-
-public type MetaTransformRegisterCallback = (MetaTransformPluginBuilder) -> Unit
-public type MetaTransformPluginInfoGetter = () -> MetaTransformPluginInfo
 public type NativeMetaTransformPluginBuilderRef = CPointer<NativeMetaTransformPluginBuilder>
-public type NativeMetaTransformRegisterCallback = CFunc<(NativeMetaTransformPluginBuilderRef) -> Unit>
-public type NativeMetaTransformPluginInfoGetter = CFunc<() -> NativeMetaTransformPluginInfo>
-public type CHIRMetaTransformFactory = (CHIRBuilder) -> MetaTransformConcept
-public type CHIRFunctionMetaTransformFactory = (CHIRBuilder) -> CHIRFunctionMetaTransform
-public type CHIRPackageMetaTransformFactory = (CHIRBuilder) -> CHIRPackageMetaTransform
 
 public let META_TRANSFORM_PLUGIN_INFO_SYMBOL: String = "getMetaTransformPluginInfo"
 
@@ -113,23 +100,6 @@ public abstract class MetaTransform<DeclT> <: MetaTransformConcept & MetaTransfo
         super()
         kind = InferMetaTransformKind<DeclT>()
     }
-
-    protected init(kind: MetaTransformKind) {
-        super()
-        this.kind = kind
-    }
-}
-
-public abstract class CHIRFunctionMetaTransform <: MetaTransform<CHIRFunction> {
-    public init() {
-        super(MetaTransformKind.FOR_CHIR_FUNC)
-    }
-}
-
-public abstract class CHIRPackageMetaTransform <: MetaTransform<CHIRPackage> {
-    public init() {
-        super(MetaTransformKind.FOR_CHIR_PACKAGE)
-    }
 }
 
 @C
@@ -140,219 +110,17 @@ public struct NativeMetaTransformPluginBuilder {
 }
 
 @C
-public struct NativeMetaTransformPluginInfo {
+public struct MetaTransformPluginInfo {
     public let cjcVersion: CString
-    public let registerTo: NativeMetaTransformRegisterCallback
+    public let registerTo: CFunc<(NativeMetaTransformPluginBuilderRef) -> Unit>
 
     public init() {
         cjcVersion = CString(CPointer<UInt8>())
-        registerTo = NativeMetaTransformRegisterCallback(CPointer<Unit>())
+        registerTo = CFunc<(NativeMetaTransformPluginBuilderRef) -> Unit>(CPointer<Unit>())
     }
 
-    public init(cjcVersion: CString, registerTo: NativeMetaTransformRegisterCallback) {
+    public init(cjcVersion: CString, registerTo: CFunc<(NativeMetaTransformPluginBuilderRef) -> Unit>) {
         this.cjcVersion = cjcVersion
         this.registerTo = registerTo
     }
-
-    public func HasVersion(): Bool {
-        return !cjcVersion.isNull()
-    }
-
-    public func HasRegisterCallback(): Bool {
-        return !CPointer<Unit>(registerTo).isNull()
-    }
-
-    public func IsStructurallyValid(): Bool {
-        return HasVersion() && HasRegisterCallback()
-    }
-
-    public func VersionMatches(version: String): Bool {
-        if (!HasVersion()) {
-            return false
-        }
-        var matched = false
-        try (expectedVersion = unsafe { LibC.mallocCString(version) }.asResource()) {
-            matched = unsafe { strcmp(cjcVersion, expectedVersion.value) } == 0
-        } catch (e: Exception) {
-            matched = false
-        }
-        return matched
-    }
-
-    public func IsValidForVersion(version: String): Bool {
-        return VersionMatches(version) && HasRegisterCallback()
-    }
-
-    public func IsValid(): Bool {
-        return IsValidForVersion(CANGJIE_VERSION)
-    }
-
-    public func TryRegisterTo(builder: NativeMetaTransformPluginBuilderRef): Bool {
-        if (!IsStructurallyValid() || builder.isNull()) {
-            return false
-        }
-        unsafe { registerTo(builder) }
-        return true
-    }
-
-    public func RegisterTo(builder: NativeMetaTransformPluginBuilderRef): Unit {
-        if (!HasRegisterCallback()) {
-            throw IllegalStateException("native MetaTransform plugin info has no registration callback")
-        }
-        if (builder.isNull()) {
-            throw IllegalArgumentException("native MetaTransform plugin builder reference is null")
-        }
-        unsafe { registerTo(builder) }
-    }
-}
-
-public func GetNativeMetaTransformPluginInfo(symbol: CPointer<Unit>): Option<NativeMetaTransformPluginInfo> {
-    if (symbol.isNull()) {
-        return None
-    }
-    let getter = NativeMetaTransformPluginInfoGetter(symbol)
-    return Some(unsafe { getter() })
-}
-
-public struct MetaTransformPluginInfo {
-    public let cjcVersion: Option<String>
-    public let registerTo: Option<MetaTransformRegisterCallback>
-
-    public init() {
-        cjcVersion = None
-        registerTo = None
-    }
-
-    public init(cjcVersion: String, registerTo: MetaTransformRegisterCallback) {
-        this.cjcVersion = Some(cjcVersion)
-        this.registerTo = Some(registerTo)
-    }
-
-    public init(cjcVersion: String) {
-        this.cjcVersion = Some(cjcVersion)
-        this.registerTo = None
-    }
-
-    public init(cjcVersion: String, registerTo: Option<MetaTransformRegisterCallback>) {
-        this.cjcVersion = Some(cjcVersion)
-        this.registerTo = registerTo
-    }
-
-    public init(cjcVersion: Option<String>, registerTo: Option<MetaTransformRegisterCallback>) {
-        this.cjcVersion = cjcVersion
-        this.registerTo = registerTo
-    }
-
-    public func HasVersion(): Bool {
-        return cjcVersion.isSome()
-    }
-
-    public func HasRegisterCallback(): Bool {
-        return registerTo.isSome()
-    }
-
-    public func VersionMatches(version: String): Bool {
-        if (let Some(pluginVersion) <- cjcVersion) {
-            return pluginVersion == version
-        }
-        return false
-    }
-
-    public func IsValidForVersion(version: String): Bool {
-        return VersionMatches(version) && HasRegisterCallback()
-    }
-
-    public func IsValid(): Bool {
-        return IsValidForVersion(CANGJIE_VERSION)
-    }
-
-    public func TryRegisterTo(builder: MetaTransformPluginBuilder): Bool {
-        if (let Some(callback) <- registerTo) {
-            callback(builder)
-            return true
-        }
-        return false
-    }
-
-    public func RegisterTo(builder: MetaTransformPluginBuilder): Unit {
-        if (!TryRegisterTo(builder)) {
-            throw IllegalStateException("MetaTransform plugin info has no registration callback")
-        }
-    }
-}
-
-public func MakeCHIRPluginInfo<MT>(
-    cjcVersion: String,
-    factory: (CHIRBuilder) -> MT
-): MetaTransformPluginInfo where MT <: MetaTransformConcept {
-    return MetaTransformPluginInfo(cjcVersion, { builder: MetaTransformPluginBuilder =>
-        builder.RegisterCHIRPluginCallback({ manager: CHIRPluginManager, chirBuilder: CHIRBuilder =>
-            manager.AddMetaTransform(factory(chirBuilder))
-        })
-    })
-}
-
-public func MakeCHIRPluginInfo<MT>(factory: (CHIRBuilder) -> MT): MetaTransformPluginInfo
-    where MT <: MetaTransformConcept {
-    return MakeCHIRPluginInfo(CANGJIE_VERSION, factory)
-}
-
-public func MakeCHIRPluginInfoGetter<MT>(
-    cjcVersion: String,
-    factory: (CHIRBuilder) -> MT
-): MetaTransformPluginInfoGetter where MT <: MetaTransformConcept {
-    return { => MakeCHIRPluginInfo(cjcVersion, factory) }
-}
-
-public func MakeCHIRPluginInfoGetter<MT>(factory: (CHIRBuilder) -> MT): MetaTransformPluginInfoGetter
-    where MT <: MetaTransformConcept {
-    return MakeCHIRPluginInfoGetter(CANGJIE_VERSION, factory)
-}
-
-public func MakeCHIRFunctionPluginInfo<MT>(
-    cjcVersion: String,
-    factory: (CHIRBuilder) -> MT
-): MetaTransformPluginInfo where MT <: CHIRFunctionMetaTransform {
-    return MakeCHIRPluginInfo(cjcVersion, { builder: CHIRBuilder => factory(builder) })
-}
-
-public func MakeCHIRFunctionPluginInfo<MT>(factory: (CHIRBuilder) -> MT): MetaTransformPluginInfo
-    where MT <: CHIRFunctionMetaTransform {
-    return MakeCHIRFunctionPluginInfo(CANGJIE_VERSION, factory)
-}
-
-public func MakeCHIRFunctionPluginInfoGetter<MT>(
-    cjcVersion: String,
-    factory: (CHIRBuilder) -> MT
-): MetaTransformPluginInfoGetter where MT <: CHIRFunctionMetaTransform {
-    return { => MakeCHIRFunctionPluginInfo(cjcVersion, factory) }
-}
-
-public func MakeCHIRFunctionPluginInfoGetter<MT>(factory: (CHIRBuilder) -> MT): MetaTransformPluginInfoGetter
-    where MT <: CHIRFunctionMetaTransform {
-    return MakeCHIRFunctionPluginInfoGetter(CANGJIE_VERSION, factory)
-}
-
-public func MakeCHIRPackagePluginInfo<MT>(
-    cjcVersion: String,
-    factory: (CHIRBuilder) -> MT
-): MetaTransformPluginInfo where MT <: CHIRPackageMetaTransform {
-    return MakeCHIRPluginInfo(cjcVersion, { builder: CHIRBuilder => factory(builder) })
-}
-
-public func MakeCHIRPackagePluginInfo<MT>(factory: (CHIRBuilder) -> MT): MetaTransformPluginInfo
-    where MT <: CHIRPackageMetaTransform {
-    return MakeCHIRPackagePluginInfo(CANGJIE_VERSION, factory)
-}
-
-public func MakeCHIRPackagePluginInfoGetter<MT>(
-    cjcVersion: String,
-    factory: (CHIRBuilder) -> MT
-): MetaTransformPluginInfoGetter where MT <: CHIRPackageMetaTransform {
-    return { => MakeCHIRPackagePluginInfo(cjcVersion, factory) }
-}
-
-public func MakeCHIRPackagePluginInfoGetter<MT>(factory: (CHIRBuilder) -> MT): MetaTransformPluginInfoGetter
-    where MT <: CHIRPackageMetaTransform {
-    return MakeCHIRPackagePluginInfoGetter(CANGJIE_VERSION, factory)
 }
