@@ -220,29 +220,6 @@ public class FlatBufferBuilder {
         return buffer.toArray()
     }
 
-    public func SelfCheck(): Bool {
-        Clear()
-        let value = CreateString("ok")
-        StartTable(1)
-        AddOffset(0, value)
-        let root = EndTable()
-        let data = Finish(root, "CJOF")
-        if (data.size < 16 || data[4] != b'C' || data[5] != b'J' || data[6] != b'O' || data[7] != b'F') {
-            return false
-        }
-        let rootPos = ReadU32(data, 0)
-        let table = Int64(rootPos)
-        let vtable = table - ReadI32(data, table)
-        let slot = ReadU16(data, vtable + 4)
-        if (slot == 0u16) {
-            return false
-        }
-        let offPos = table + Int64(slot)
-        let strPos = offPos + Int64(ReadU32(data, offPos))
-        let len = ReadU32(data, strPos)
-        return len == 2u32 && data[strPos + 4] == b'o' && data[strPos + 5] == b'k'
-    }
-
     private func StartVector(elementSize: Int64, elementCount: Int64, alignment: Int64): Unit {
         Prep(4, elementSize * elementCount)
         Prep(alignment, elementSize * elementCount)
@@ -348,25 +325,4 @@ public class FlatBufferBuilder {
 private func AppendU16(out: ArrayList<UInt8>, value: UInt16): Unit {
     out.add(UInt8(value & 0xffu16))
     out.add(UInt8((value >> 8) & 0xffu16))
-}
-
-@OverflowWrapping
-private func ReadU16(data: Array<UInt8>, pos: Int64): UInt16 {
-    var out = UInt16(data[pos])
-    out = out | (UInt16(data[pos + 1]) << 8)
-    return out
-}
-
-@OverflowWrapping
-private func ReadU32(data: Array<UInt8>, pos: Int64): UInt32 {
-    var out = UInt32(data[pos])
-    out = out | (UInt32(data[pos + 1]) << 8)
-    out = out | (UInt32(data[pos + 2]) << 16)
-    out = out | (UInt32(data[pos + 3]) << 24)
-    return out
-}
-
-@OverflowWrapping
-private func ReadI32(data: Array<UInt8>, pos: Int64): Int64 {
-    return Int64(Int32(ReadU32(data, pos)))
 }
