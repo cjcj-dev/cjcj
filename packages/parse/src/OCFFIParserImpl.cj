@@ -31,19 +31,21 @@ public class OCFFIParserImpl {
                 continue
             }
             if (let Some(outer) <- fd.outerDecl) {
-                if (outer.astKind == ASTKind.CLASS_DECL && outer.TestAttr(Attribute.OBJ_C_MIRROR)) {
-                    if (!fd.TestAttr(Attribute.STATIC)) {
-                        DiagObjCInitFuncMustBeStatic(fd)
-                        fd.EnableAttr(Attribute.IS_BROKEN)
-                    }
-                    if (!fd.TestAttr(Attribute.IS_BROKEN)) {
-                        fd.EnableAttr(Attribute.OBJ_C_INIT)
-                    }
-                    continue
+                if (outer.astKind != ASTKind.CLASS_DECL || !outer.TestAttr(Attribute.OBJ_C_MIRROR)) {
+                    DiagObjCInitFuncMustBeInMirrorClass(fd)
+                    fd.EnableAttr(Attribute.IS_BROKEN)
                 }
+            } else {
+                DiagObjCInitFuncMustBeInMirrorClass(fd)
+                fd.EnableAttr(Attribute.IS_BROKEN)
             }
-            DiagObjCInitFuncMustBeInMirrorClass(fd)
-            fd.EnableAttr(Attribute.IS_BROKEN)
+            if (!fd.TestAttr(Attribute.STATIC)) {
+                DiagObjCInitFuncMustBeStatic(fd)
+                fd.EnableAttr(Attribute.IS_BROKEN)
+            }
+            if (!fd.TestAttr(Attribute.IS_BROKEN)) {
+                fd.EnableAttr(Attribute.OBJ_C_INIT)
+            }
         }
     }
 
