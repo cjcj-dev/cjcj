@@ -9,6 +9,7 @@ import cangjie_compiler::utils.IsDigit as UtilsIsDigit
 import cangjie_compiler::utils.IsXDigit as UtilsIsXDigit
 import cangjie_compiler::utils.IsXIDContinue as UtilsIsXIDContinue
 import cangjie_compiler::utils.NFC as UtilsNFC
+import cangjie_compiler::utils.CJC_ABORT
 import cangjie_compiler::utils.CJC_ASSERT
 import std.collection.*
 
@@ -418,6 +419,32 @@ public class LexerImpl {
         ehEnabled = enabled
     }
 
+    @When[os == "Windows"]
+    public func GetStrParts(t: Token): ArrayList<StringPart> {
+        CJC_ASSERT(t.kind == TokenKind.STRING_LITERAL || t.kind == TokenKind.MULTILINE_STRING)
+        if (let Some(parts) <- stringPartsMap.get(t)) {
+            return parts
+        }
+        if (!enableScan) {
+            let syntheticInput = if (t.kind == TokenKind.MULTILINE_STRING) {
+                "\"\"\"\r\n" + ProcessQuotaMarks(t.Value()) + "\"\"\""
+            } else {
+                "\"" + ProcessQuotaMarks(t.Value(), processSingle: true) + "\""
+            }
+            let tempLexer = LexerImpl(syntheticInput, diag, source, LexerConfig(posBase: t.Begin()))
+            tempLexer.Scan()
+            for ((token, parts) in tempLexer.stringPartsMap) {
+                stringPartsMap.add(token, parts)
+            }
+        }
+        if (let Some(parts) <- stringPartsMap.get(t)) {
+            return parts
+        }
+        CJC_ASSERT(false)
+        return ArrayList<StringPart>()
+    }
+
+    @When[os != "Windows"]
     public func GetStrParts(t: Token): ArrayList<StringPart> {
         CJC_ASSERT(t.kind == TokenKind.STRING_LITERAL || t.kind == TokenKind.MULTILINE_STRING)
         if (let Some(parts) <- stringPartsMap.get(t)) {
@@ -431,24 +458,15 @@ public class LexerImpl {
             }
             let tempLexer = LexerImpl(syntheticInput, diag, source, LexerConfig(posBase: t.Begin()))
             tempLexer.Scan()
-            stringPartsMap.add(t, tempLexer.TakeFirstStringParts())
+            for ((token, parts) in tempLexer.stringPartsMap) {
+                stringPartsMap.add(token, parts)
+            }
         }
         if (let Some(parts) <- stringPartsMap.get(t)) {
             return parts
         }
         CJC_ASSERT(false)
         return ArrayList<StringPart>()
-    }
-
-    private func TakeFirstStringParts(): ArrayList<StringPart> {
-        let ret = ArrayList<StringPart>()
-        for ((_, parts) in stringPartsMap) {
-            for (part in parts) {
-                ret.add(part)
-            }
-            return ret
-        }
-        return ret
     }
 
     public func GetTokens(): Array<Token> {
@@ -1109,7 +1127,7 @@ public class LexerImpl {
         builder.AddHint(reasonRange)
     }
 
-    private func DiagIllegalUnicodeAtCurrent(): Unit {
+    private func DiagIllegalUnicode(): Unit {
         let args = ConvertUnicode(currentChar)
         let builder = diag.DiagnoseRefactor(DiagKindRefactor.lex_illegal_unicode, GetPos(pCurrent), arguments: [args])
         builder.AddMainHintArguments([args])
@@ -1122,14 +1140,14 @@ public class LexerImpl {
         if (!decoded[2]) {
             currentChar = decoded[0]
             pNext = pCurrent + 1
-            DiagIllegalUnicodeAtCurrent()
+            DiagIllegalUnicode()
             success = false
             return false
         }
         currentChar = decoded[0]
         pNext = decoded[1]
         if (!isXIDContinue(currentChar)) {
-            DiagIllegalUnicodeAtCurrent()
+            DiagIllegalUnicode()
             success = false
             return false
         }
@@ -1669,6 +1687,33 @@ public class LexerImpl {
         return res
     }
 
+    private func ScanUnicodeIdentifierStart(resRef: Token, codePoint: Int64, pStart: Int64): Token {
+        var res = resRef
+        if (isCJXIDStart(codePoint)) {
+            return ScanIdentifierContinue(res, pStart)
+        }
+        if (codePoint > 127) {
+            let s = input[pStart..pCurrent]
+            currentChar = codePoint
+            if (isXIDContinue(codePoint)) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.lex_unrecognized_symbol,
+                    MakeRange(GetPos(pStart), GetPos(pCurrent)),
+                    arguments: [s]
+                )
+            } else {
+                DiagIllegalUnicode()
+            }
+            success = false
+            pNext = pCurrent
+            res.kind = TokenKind.ILLEGAL
+            res.SetValuePos(s, GetPos(pStart), GetPos(pNext))
+            return res
+        }
+        CJC_ABORT()
+        return res
+    }
+
     private func ScanIdentifierOrKeyword(resRef: Token, pStart: Int64): Token {
         var res = resRef
         if (isAsciiIdentifierStart(currentChar)) {
@@ -1676,16 +1721,7 @@ public class LexerImpl {
             res.kind = LookupKeyword(res.Value())
             return res
         }
-        if (isCJXIDStart(currentChar)) {
-            res = ScanIdentifierContinue(res, pStart)
-            return res
-        }
-        if (success) {
-            lexDiagnose(diag, DiagKindRefactor.lex_illegal_unicode, GetPos(pStart), ConvertCurrentChar())
-            success = false
-        }
-        res.SetValuePos(input[pStart..pNext], GetPos(pStart), GetPos(pNext))
-        res.kind = TokenKind.ILLEGAL
+        res = ScanUnicodeIdentifierStart(res, currentChar, pStart)
         return res
     }
 
@@ -1801,18 +1837,12 @@ public class LexerImpl {
     }
 
     private func DiagUnterminatedInterpolation(): Unit {
-        if (interpolations.isEmpty()) {
-            lexDiagnose(diag, DiagKindRefactor.lex_unterminated_interpolation, GetPos(pCurrent))
-            return
-        }
         let interpolation = interpolations[interpolations.size - 1]
         let builder = diag.DiagnoseRefactor(
             DiagKindRefactor.lex_unterminated_interpolation,
             MakeRange(GetPos(interpolation), GetPos(pCurrent) + 1)
         )
-        if (!stringStarts.isEmpty()) {
-            builder.AddHint(GetPos(stringStarts[stringStarts.size - 1][0]))
-        }
+        builder.AddHint(GetPos(stringStarts[stringStarts.size - 1][0]))
     }
 
     private func ProcessIllegalToken(needStringParts: Bool, multiLine: Bool, pStart: Int64, isJString!: Bool = false): Token {
@@ -1915,16 +1945,18 @@ public class LexerImpl {
     }
 
     private func ProcessInterpolationStringLiteralLineBreak(allowNewline: Bool): Bool {
-        if (IsCurrentCharLineTerminator() && allowNewline) {
-            return true
+        if (IsCurrentCharLineTerminator()) {
+            if (allowNewline) {
+                return true
+            }
         }
         if (success) {
-            let interpolation = if (interpolations.isEmpty()) { pCurrent } else { interpolations[interpolations.size - 1] }
+            let interpolation = interpolations[interpolations.size - 1]
             let builder = diag.DiagnoseRefactor(
                 DiagKindRefactor.lex_unterminated_interpolation,
                 MakeRange(GetPos(interpolation), GetPos(pCurrent) + 1)
             )
-            if (!allowNewline && currentChar != -1 && !stringStarts.isEmpty()) {
+            if (!allowNewline && currentChar != -1) {
                 builder.AddHint(GetPos(stringStarts[stringStarts.size - 1][0]))
             }
             success = false
