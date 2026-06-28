@@ -1,5 +1,7 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::utils.CJC_ASSERT
+
 public enum IntWidth {
     | I8 | I16 | I32 | I64
 }
@@ -127,13 +129,7 @@ public struct SInt {
     public func WidthBits(): Int64 { return IntWidthBits(width) }
 
     public func SVal(): Int64 {
-        if (!IsSignBitSet()) {
-            return value
-        }
-        if (width == IntWidth.I64) {
-            return value
-        }
-        return value - ModulusForWidth(width)
+        return GetSExtValue()
     }
 
     public func IsNeg(): Bool { return IsSignBitSet() }
@@ -153,6 +149,7 @@ public struct SInt {
     public func IsUMinValue(): Bool { return IsZero() }
     public func IsSMaxValue(): Bool { return value == SInt.SMaxValue(width).UVal() }
     public func IsSMinValue(): Bool { return value == SInt.SMinValue(width).UVal() }
+    public func IsSignMask(): Bool { return IsSMinValue() }
     public func IsOneBitSet(bit: Int64): Bool {
         return bit >= 0 && bit < WidthBits() && value == Pow2(bit)
     }
@@ -165,19 +162,11 @@ public struct SInt {
     }
 
     public func IsUIntN(bits: Int64): Bool {
-        if (bits >= WidthBits()) {
-            return true
-        }
-        return value >= 0 && value < Pow2(bits)
+        return ActiveBits() <= bits
     }
 
     public func IsSIntN(bits: Int64): Bool {
-        if (bits >= WidthBits()) {
-            return true
-        }
-        let signedValue = SVal()
-        let limit = Pow2(bits - 1)
-        return signedValue >= -limit && signedValue < limit
+        return SignificantBits() <= bits
     }
 
     @OverflowWrapping
@@ -194,6 +183,16 @@ public struct SInt {
     }
 
     public func ToBool(): Bool { return !IsZero() }
+
+    public func GetULimitedValue(maxv!: UInt64 = UInt64.Max): UInt64 {
+        let val = GetZExtValue()
+        return if (val > maxv) { maxv } else { val }
+    }
+
+    public func IsMask(bits: Int64): Bool {
+        CJC_ASSERT(bits >= 0 && bits <= 64)
+        return GetZExtValue() == (UInt64.Max >> UInt64(64 - bits))
+    }
 
     @OverflowWrapping
     public func Add(other: SInt): SInt { return SInt(width, value + other.value) }
@@ -289,10 +288,6 @@ public struct SInt {
         return width == other.width && value == other.value
     }
 
-    public static func IsSameValue(left: SInt, right: SInt): Bool {
-        return left.UVal() == right.UVal()
-    }
-
     public func Ult(other: SInt): Bool {
         if (width != other.width) {
             return false
@@ -352,8 +347,34 @@ public struct SInt {
         return if (left.Sle(right)) { right } else { left }
     }
 
+    public func Intersects(other: SInt): Bool {
+        CJC_ASSERT(width == other.width)
+        return (value & other.value) != 0
+    }
+
+    public func IsSubsetOf(other: SInt): Bool {
+        CJC_ASSERT(width == other.width)
+        return BitAnd(other.BitNot()).UVal() != 0
+    }
+
     public func Trunc(newWidth: IntWidth): SInt {
         return SInt(newWidth, value)
+    }
+
+    public func TruncUSat(newWidth: IntWidth): SInt {
+        CJC_ASSERT(IntWidthBits(newWidth) <= WidthBits())
+        if (IsUIntN(IntWidthBits(newWidth))) {
+            return Trunc(newWidth)
+        }
+        return SInt.UMaxValue(newWidth)
+    }
+
+    public func TruncSSat(newWidth: IntWidth): SInt {
+        CJC_ASSERT(IntWidthBits(newWidth) <= WidthBits())
+        if (IsSIntN(IntWidthBits(newWidth))) {
+            return Trunc(newWidth)
+        }
+        return if (IsNeg()) { SInt.SMinValue(newWidth) } else { SInt.SMaxValue(newWidth) }
     }
 
     public func ZExt(newWidth: IntWidth): SInt {
@@ -365,14 +386,47 @@ public struct SInt {
     }
 
     public func ActiveBits(): Int64 {
-        var bit = WidthBits() - 1
-        while (bit >= 0) {
-            if (At(bit)) {
-                return bit + 1
-            }
-            bit--
+        return WidthBits() - Clz()
+    }
+
+    public func SignificantBits(): Int64 {
+        return WidthBits() - GetNumSignBits() + 1
+    }
+
+    public func GetZExtValue(): UInt64 {
+        if (value >= 0) {
+            return UInt64(value)
         }
-        return 0
+        return 0x8000000000000000u64 + UInt64(value - Int64.Min)
+    }
+
+    public func GetSExtValue(): Int64 {
+        return SignExtend64(GetZExtValue(), UInt64(WidthBits()))
+    }
+
+    public func Clz(): Int64 {
+        return Clz(GetZExtValue(), width: WidthBits())
+    }
+
+    public func Clo(): Int64 {
+        return Clo(GetZExtValue(), width: WidthBits())
+    }
+
+    public func GetNumSignBits(): Int64 {
+        return if (IsNeg()) { Clo() } else { Clz() }
+    }
+
+    public func Ctz(): Int64 {
+        let count = Ctz(GetZExtValue())
+        return if (count < WidthBits()) { count } else { WidthBits() }
+    }
+
+    public func Cto(): Int64 {
+        return Cto(GetZExtValue())
+    }
+
+    public func Popcnt(): Int64 {
+        return Int64(Popcnt(GetZExtValue()))
     }
 
     public static func GetBitsSetFrom(width: IntWidth, lowBit: Int64): SInt {
@@ -426,6 +480,30 @@ public struct SInt {
         return (result, overflow)
     }
 
+    public func SShlOvf(count: SInt): (SInt, Bool) {
+        let countValue = count.GetULimitedValue()
+        var overflow = countValue >= UInt64(WidthBits())
+        if (overflow) {
+            return (SInt.Zero(width), overflow)
+        }
+        if (IsNonNeg()) {
+            overflow = countValue >= UInt64(Clz())
+        } else {
+            overflow = countValue >= UInt64(Clo())
+        }
+        return (Shl(Int64(countValue)), overflow)
+    }
+
+    public func UShlOvf(count: SInt): (SInt, Bool) {
+        let countValue = count.GetULimitedValue()
+        var overflow = countValue >= UInt64(WidthBits())
+        if (overflow) {
+            return (SInt.Zero(width), overflow)
+        }
+        overflow = countValue > UInt64(Clz())
+        return (Shl(Int64(countValue)), overflow)
+    }
+
     public func SMulOvf(rhs: SInt): (SInt, Bool) {
         let result = Mul(rhs)
         var overflow = false
@@ -474,6 +552,19 @@ public struct SInt {
             return SInt.SMaxValue(width)
         }
         return SDiv(rhs)
+    }
+
+    public func SShlSat(rhs: SInt): SInt {
+        let result = SShlOvf(rhs)
+        if (!result[1]) {
+            return result[0]
+        }
+        return if (IsNeg()) { SInt.SMinValue(width) } else { SInt.SMaxValue(width) }
+    }
+
+    public func UShlSat(rhs: SInt): SInt {
+        let result = UShlOvf(rhs)
+        return if (result[1]) { SInt.UMaxValue(width) } else { result[0] }
     }
 
     private func UDivRem(rhs: SInt): (SInt, SInt) {
