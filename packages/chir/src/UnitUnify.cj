@@ -43,11 +43,12 @@ public class UnitUnify {
                 if (!NeedUnify(expr)) {
                     changed += RunOnChildGroups(expr, unitOwner, state, isDebug)
                 } else {
-                    LoadOrCreateUnit(unitOwner, state)
+                    let parentGroup = expr.GetParentBlockGroup().getOrThrow()
+                    LoadOrCreateUnit(parentGroup, state)
                     if (let Some(unitExpr) <- state.unitConstant) {
                         if (let Some(unitResult) <- unitExpr.GetResult()) {
                             if (let Some(result) <- expr.GetResult()) {
-                                result.ReplaceWith(unitResult, expr.GetParentBlockGroup())
+                                result.ReplaceWith(unitResult, parentGroup)
                                 changed++
                                 if (isDebug) {
                                     println("[UnitUnify] unit unify " + expr.GetDebugLocation().ToString() + ".")
@@ -55,7 +56,7 @@ public class UnitUnify {
                             }
                         }
                     }
-                    changed += RunOnChildGroups(expr, unitOwner, state, isDebug)
+                    changed += RunOnChildGroups(expr, parentGroup, state, isDebug)
                 }
             }
         }
@@ -100,16 +101,9 @@ public class UnitUnify {
         if (state.unitConstant.isSome()) {
             return
         }
-        if (let Some(entryBlock) <- group.GetEntryBlock()) {
-            var oldFirst: Option<Expression> = None
-            if (entryBlock.GetExpressionsNum() > 0) {
-                oldFirst = entryBlock.GetExpressionByIdx(0)
-            }
-            let unitExpr = builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(), entryBlock)
-            if (let Some(firstExpr) <- oldFirst) {
-                unitExpr.MoveBefore(firstExpr)
-            }
-            state.unitConstant = unitExpr
-        }
+        let entryBlock = group.GetEntryBlock().getOrThrow()
+        let unitExpr = builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(), entryBlock)
+        unitExpr.MoveBefore(entryBlock.GetExpressionByIdx(0))
+        state.unitConstant = unitExpr
     }
 }
