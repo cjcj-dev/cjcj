@@ -153,19 +153,9 @@ public func WireToImportKind(value: String): ImportKind {
 }
 
 public func JoinAttributes(values: ArrayList<Attribute>): String {
-    let out = ArrayList<String>()
-    for (attr in values) {
-        out.add(AttributeToWire(attr))
-    }
-    return JoinStringList(out)
+    return SaveAttributes(values)
 }
 
 public func SplitAttributes(value: String): ArrayList<Attribute> {
-    let out = ArrayList<Attribute>()
-    for (item in SplitStringList(value)) {
-        if (let Some(attr) <- WireToAttribute(item)) {
-            out.add(attr)
-        }
-    }
-    return out
+    return GetAttributes(value)
 }

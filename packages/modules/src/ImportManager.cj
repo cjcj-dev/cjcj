@@ -1058,7 +1058,7 @@ public class ImportManager {
                     }
                 }
                 let sourceDecls = GetSourceDeclsForImportedName(pkg, name)
-                if (!IsAllFuncDecls(sourceDecls)) {
+                if (!IsAllFuncDecl(sourceDecls)) {
                     WarnUselessImport(diag, rangeValue, sourceDecls[0])
                 } else if (let Some(conflictRange) <- previousRange) {
                     WarnConflictImport(diag, name, rangeValue, conflictRange)
@@ -1363,13 +1363,13 @@ public class ImportManager {
             }
             isProduct = isProduct && IsProductFeatureFile(file)
         }
-        return "{\"package\":\"" + EscapeJson(pkg.fullPackageName) + "\"," +
-            "\"isMacro\":" + BoolToJson(pkg.isMacroPackage) + "," +
-            "\"accessLevel\":\"" + GetAccessLevelStr(pkg.accessible) + "\"," +
+        return "{\"package\":\"" + Jsonfy(pkg.fullPackageName) + "\"," +
+            "\"isMacro\":" + Jsonfy(pkg.isMacroPackage) + "," +
+            "\"accessLevel\":\"" + Jsonfy(pkg.accessible) + "\"," +
             "\"dependencies\":" + DependenciesToJson(dependencies, exportCJO) + "," +
             "\"std-dependencies\":" + StdDependenciesToJson(dependencies, pkg, exportCJO) + "," +
             "\"features\":" + FeatureSetToJson(features) + "," +
-            "\"product\":" + BoolToJson(isProduct) + "}"
+            "\"product\":" + Jsonfy(isProduct) + "}"
     }
 
     private func CreateDependencyInfoItem(longName: String, shortName: String): DependencyInfoItem {
@@ -1403,11 +1403,11 @@ public class ImportManager {
 
     private func DependencyItemToJson(item: DependencyInfoItem, exportCJO: Bool): String {
         SortImportSpecsByPosition(item.imports)
-        var value = "{\"package\":\"" + EscapeJson(item.packageName) + "\","
+        var value = "{\"package\":\"" + Jsonfy(item.packageName) + "\","
         if (!item.orPackage.isEmpty()) {
-            value += "\"orPackage\":\"" + EscapeJson(item.orPackage) + "\","
+            value += "\"orPackage\":\"" + Jsonfy(item.orPackage) + "\","
         }
-        value += "\"isStd\":" + BoolToJson(item.isStd) + ","
+        value += "\"isStd\":" + Jsonfy(item.isStd) + ","
         value += "\"imports\":" + ImportSpecsToJson(item.imports, exportCJO) + "}"
         return value
     }
@@ -1425,7 +1425,7 @@ public class ImportManager {
         if (let Some(curFileValue) <- importSpec.curFile) {
             fileName = if (exportCJO) { curFileValue.fileName } else { curFileValue.filePath }
         }
-        return "{\"file\":\"" + EscapeJson(fileName) + "\"," +
+        return "{\"file\":\"" + Jsonfy(fileName) + "\"," +
             "\"begin\":" + PositionToJson(importSpec.begin) + "," +
             "\"end\":" + PositionToJson(importSpec.end) + "}"
     }
@@ -1462,7 +1462,7 @@ public class ImportManager {
             } else {
                 "[]"
             }
-            stdItems.add("{\"" + EscapeJson(stdName) + "\":" + imports + "}")
+            stdItems.add("{\"" + Jsonfy(stdName) + "\":" + imports + "}")
         }
         return "[" + JoinStrings(stdItems, ",") + "]"
     }
@@ -1507,7 +1507,7 @@ public class ImportManager {
         let orderedFeatures = SortedStringSet(features)
         let featureItems = ArrayList<String>()
         for (feature in orderedFeatures) {
-            featureItems.add("\"" + EscapeJson(feature) + "\"")
+            featureItems.add("\"" + Jsonfy(feature) + "\"")
         }
         return "[" + JoinStrings(featureItems, ",") + "]"
     }
@@ -1608,15 +1608,6 @@ public class ImportManager {
             }
         }
         return out
-    }
-
-    private func IsAllFuncDecls(decls: ArrayList<Decl>): Bool {
-        for (decl in decls) {
-            if (!decl.isFunction) {
-                return false
-            }
-        }
-        return true
     }
 
     private func CollectUniqueFeatures(file: File): ArrayList<String> {

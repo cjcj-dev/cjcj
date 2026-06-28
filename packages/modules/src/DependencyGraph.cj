@@ -59,7 +59,7 @@ public class DependencyGraph {
     }
 
     public func GetAllDependencyPackageDecls(fullPackageName: String, includeMacroPkg: Bool): ArrayList<PackageDecl> {
-        let cacheKey = fullPackageName + "|" + BoolToJson(includeMacroPkg)
+        let cacheKey = fullPackageName + "|" + Jsonfy(includeMacroPkg)
         if (let Some(cached) <- cacheDependencyPackageDecls.get(cacheKey)) {
             return clonePackageDecls(cached)
         }
