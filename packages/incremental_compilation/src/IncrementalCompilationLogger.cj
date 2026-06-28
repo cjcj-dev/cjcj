@@ -1,5 +1,6 @@
 package cangjie_compiler::incremental_compilation
 
+import cangjie_compiler::utils.FileUtil
 import std.fs.File
 
 public enum WriteKind {
@@ -43,17 +44,25 @@ public class IncrementalCompilationLogger {
     }
 
     public func InitLogFile(logFilePath: String): Unit {
-        if (logFilePath.isEmpty() || !logFilePath.endsWith(".log")) {
+        if (logFilePath.isEmpty()) {
             return
         }
-        this.logFilePath = logFilePath
-        this.saveLogFile = true
-        this.writeKind = WriteKind.FILE
+        if (!FileUtil.HasExtension(logFilePath, "log")) {
+            return
+        }
+        let realDirPath = FileUtil.GetAbsPath(FileUtil.GetDirPath(logFilePath))
+        if (let None <- realDirPath) {
+            return
+        }
+        let fileNameWithExt = FileUtil.GetFileName(logFilePath)
+        let ret = FileUtil.JoinPath(realDirPath.getOrThrow(), fileNameWithExt)
         try {
-            File.writeTo(logFilePath, "".toArray())
+            File.writeTo(ret, "".toArray())
+            this.logFilePath = ret
+            this.writeKind = WriteKind.FILE
+            this.saveLogFile = true
         } catch (e: Exception) {
-            this.saveLogFile = false
-            this.writeKind = WriteKind.BUFF
+            return
         }
     }
 
@@ -82,6 +91,9 @@ public class IncrementalCompilationLogger {
     }
 
     public func WriteBuffToFile(): Unit {
+        if (writeKind != WriteKind.FILE) {
+            return
+        }
         if (!saveLogFile || logFilePath.isEmpty()) {
             return
         }
@@ -91,13 +103,5 @@ public class IncrementalCompilationLogger {
             saveLogFile = false
             writeKind = WriteKind.BUFF
         }
-    }
-
-    public func GetBufferedLog(): String {
-        return strStream.toString()
-    }
-
-    public func Clear(): Unit {
-        strStream = StringBuilder()
     }
 }
