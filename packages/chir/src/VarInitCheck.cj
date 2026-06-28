@@ -55,6 +55,9 @@ public class VarInitCheck {
         members: ArrayList<MemberVarInfo>,
         checkResult: CHIRCheckResult
     ): Unit {
+        if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
+            return
+        }
         if (fn.GetBody().isNone()) {
             return
         }
@@ -71,6 +74,9 @@ public class VarInitCheck {
         members: ArrayList<MemberVarInfo>,
         checkResult: CHIRCheckResult
     ): Unit {
+        if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
+            return
+        }
         if (fn.GetBody().isNone()) {
             return
         }
@@ -182,7 +188,7 @@ public class VarInitCheck {
                 return
             }
         }
-        if (kind == ExprKind.GET_ELEMENT_REF || kind == ExprKind.GET_ELEMENT_BY_NAME) {
+        if (kind == ExprKind.GET_ELEMENT_REF) {
             if (CheckGetElementRefToUninitedAllocation(state, expr, checkResult)) {
                 return
             }
@@ -192,9 +198,10 @@ public class VarInitCheck {
         }
         if (kind == ExprKind.LOAD) {
             CheckLoadToUninitedCustomDefMember(state, fn, expr, members, checkResult)
-        } else if (kind == ExprKind.STORE_ELEMENT_REF || kind == ExprKind.STORE_ELEMENT_BY_NAME) {
-            CheckStoreToUninitedCustomDefMember(state, fn, expr, members, checkResult)
-        } else if (kind == ExprKind.APPLY || kind == ExprKind.APPLY_WITH_EXCEPTION) {
+        } else if (kind == ExprKind.STORE_ELEMENT_REF) {
+            let storeRef = (expr as StoreElementRef).getOrThrow()
+            CheckStoreToUninitedCustomDefMember(state, fn, storeRef, members, checkResult)
+        } else if (kind == ExprKind.APPLY) {
             CheckMemberFuncCall(state, fn, expr, checkResult)
         }
     }
@@ -209,7 +216,11 @@ public class VarInitCheck {
         checkResult: CHIRCheckResult
     ): Unit {
         if (fn.IsConstructor() && term.GetExprKind() == ExprKind.EXIT) {
-            if (!IsBlockInBody(block, body)) {
+            if (let Some(parentGroup) <- block.GetParentBlockGroup()) {
+                if (parentGroup.nodeId != body.nodeId) {
+                    return
+                }
+            } else {
                 return
             }
             if (HasFuncCallWithNothingRetVal(block)) {
@@ -235,17 +246,18 @@ public class VarInitCheck {
     ): Unit {
         let kind = expr.GetExprKind()
         if (kind == ExprKind.STORE) {
-            if (let Some(targetVal) <- ResolveStoreLocation(expr)) {
-                if (targetVal.IsLocalVar() && targetVal.TestAttr(Attribute.READONLY)) {
-                    if (let Some(isInited) <- state.IsMaybeInitedAllocation(targetVal)) {
-                        if (isInited) {
-                            AddCannotAssignInitializedLetError(expr, fn, checkResult)
-                        }
+            let store = (expr as Store).getOrThrow()
+            let targetVal = store.GetLocation()
+            if (targetVal.IsLocalVar() && targetVal.TestAttr(Attribute.READONLY)) {
+                if (let Some(isInited) <- state.IsMaybeInitedAllocation(targetVal)) {
+                    if (isInited) {
+                        AddCannotAssignInitializedLetError(expr, fn, checkResult)
                     }
                 }
             }
-        } else if (kind == ExprKind.STORE_ELEMENT_REF || kind == ExprKind.STORE_ELEMENT_BY_NAME) {
-            CheckStoreToInitedCustomDefMember(state, fn, expr, members, checkResult)
+        } else if (kind == ExprKind.STORE_ELEMENT_REF) {
+            let storeRef = (expr as StoreElementRef).getOrThrow()
+            CheckStoreToInitedCustomDefMember(state, fn, storeRef, members, checkResult)
         }
     }
 
@@ -307,7 +319,7 @@ public class VarInitCheck {
         if (let Some(localVal) <- targetVal.AsLocalVar()) {
             if (let Some(targetExpr) <- localVal.GetExpr()) {
                 let thisArg = fn.GetParam(0)
-                if (let Some(index) <- ResolveGetElementRefViaDefMember(targetExpr, thisArg, members)) {
+                if (let Some(index) <- IsGetElemRefViaDefMember(targetExpr, thisArg)) {
                     CheckUninitedDefMember(state, load, members, index, false, checkResult)
                 }
             }
@@ -317,7 +329,7 @@ public class VarInitCheck {
     private func CheckStoreToUninitedCustomDefMember(
         state: MaybeUninitDomain,
         fn: Function,
-        store: Expression,
+        store: StoreElementRef,
         members: ArrayList<MemberVarInfo>,
         checkResult: CHIRCheckResult
     ): Unit {
@@ -325,19 +337,15 @@ public class VarInitCheck {
             return
         }
         let thisArg = fn.GetParam(0)
-        let ctorInfo = BuildConstructorContext(fn).ctorInitInfo
-        if (IsNestedStoreViaDefMember(store, thisArg)) {
-            if (let Some(index) <- ResolveStoreMemberIndex(fn, store, ctorInfo, members)) {
-                CheckUninitedDefMember(state, store, members, index, false, checkResult)
-            }
-        }
-        if (!IsClassMethod(fn)) {
+        if (let Some(index) <- IsStoreViaDefMember(store, thisArg, shouldBeNested: true)) {
+            CheckUninitedDefMember(state, store, members, index, false, checkResult)
             return
         }
-        if (StoreTouchesThis(store, thisArg)) {
-            if (let Some(index) <- ResolveStoreMemberIndex(fn, store, ctorInfo, members)) {
-                CheckUninitedDefMember(state, store, members, index, true, checkResult)
-            }
+        if (!fn.IsClassMethod()) {
+            return
+        }
+        if (let Some(index) <- IsStoreViaDefMember(store, thisArg)) {
+            CheckUninitedDefMember(state, store, members, index, true, checkResult)
         }
     }
 
@@ -358,7 +366,14 @@ public class VarInitCheck {
                 calleeFunc.TestAttr(Attribute.STATIC) || calleeFunc.IsInstanceVarInit()) {
                 return
             }
-            if (!SameParentDef(calleeFunc, initFunc)) {
+            let calleeOuterDef = calleeFunc.GetOuterDeclaredOrExtendedDef()
+            let initOuterDef = initFunc.GetOuterDeclaredOrExtendedDef()
+            let sameOuterDef = match ((calleeOuterDef, initOuterDef)) {
+                case (Some(left), Some(right)) => left.nodeId == right.nodeId
+                case (None, None) => true
+                case _ => false
+            }
+            if (!sameOuterDef) {
                 return
             }
             if (apply.GetNumOfOperands() <= 1) {
@@ -366,8 +381,15 @@ public class VarInitCheck {
             }
             let thisArg = initFunc.GetParam(0)
             let receiver = apply.GetOperand(1)
-            if (receiver.nodeId == thisArg.nodeId || IsLoadedFromThis(receiver, thisArg)) {
+            if (receiver.nodeId == thisArg.nodeId) {
                 RaiseIllegalMemberFunCallError(apply, calleeFunc, checkResult)
+            } else if (let Some(localVal) <- receiver.AsLocalVar()) {
+                if (let Some(argExpr) <- localVal.GetExpr()) {
+                    if (argExpr.GetExprKind() == ExprKind.LOAD && argExpr.GetNumOfOperands() > 0 &&
+                        argExpr.GetOperand(0).nodeId == thisArg.nodeId) {
+                        RaiseIllegalMemberFunCallError(apply, calleeFunc, checkResult)
+                    }
+                }
             }
         }
     }
@@ -379,17 +401,26 @@ public class VarInitCheck {
         uninitedMemberIdx: ArrayList<Int64>,
         checkResult: CHIRCheckResult
     ): Unit {
+        var allCommonNotDeserialized = true
         for (index in uninitedMemberIdx) {
-            if (index >= 0 && index < members.size) {
-                let memberName = members[index].name
-                var message = "in function ${fn.GetIdentifier()}, constructor exits before member `${memberName}` " +
-                    "is initialized"
-                let lines = state.GetMaybeInitedPos(index)
-                if (!lines.isEmpty()) {
-                    message += "; " + MaybeInitedPosNote(memberName, lines)
-                }
-                checkResult.AddError(message)
+            let member = members[index]
+            if (!(member.TestAttr(Attribute.COMMON) && !member.TestAttr(Attribute.DESERIALIZED))) {
+                allCommonNotDeserialized = false
+                break
             }
+        }
+        if (allCommonNotDeserialized) {
+            return
+        }
+        for (index in uninitedMemberIdx) {
+            let memberName = members[index].name
+            var message = "in function ${fn.GetIdentifier()}, constructor exits before member `${memberName}` " +
+                "is initialized"
+            let lines = state.GetMaybeInitedPos(index)
+            if (!lines.isEmpty()) {
+                message += "; " + MaybeInitedPosNote(memberName, lines)
+            }
+            checkResult.AddError(message)
         }
     }
 
@@ -419,22 +450,24 @@ public class VarInitCheck {
     private func CheckStoreToInitedCustomDefMember(
         state: MaybeInitDomain,
         fn: Function,
-        store: Expression,
+        store: StoreElementRef,
         members: ArrayList<MemberVarInfo>,
         checkResult: CHIRCheckResult
     ): Unit {
-        if (!fn.IsConstructor() || fn.GetNumOfParams() == 0) {
+        if (!fn.IsConstructor()) {
             return
         }
-        let ctorInfo = BuildConstructorContext(fn).ctorInitInfo
-        if (let Some(index) <- ResolveStoreMemberIndex(fn, store, ctorInfo, members)) {
-            if (index >= 0 && index < members.size && members[index].isReadOnly) {
+        let paths = store.GetPath()
+        if (store.GetLocation().nodeId == fn.GetParam(0).nodeId && paths.size == 1) {
+            let index = Int64(paths[0])
+            if (members[index].TestAttr(Attribute.READONLY)) {
                 match (state.IsMaybeInitedMember(index)) {
                     case MaybeInitMemberKind.SUPER_MEMBER => AddCannotAssignInitializedLetError(store, fn, checkResult)
                     case MaybeInitMemberKind.LOCAL_MEMBER => AddCannotAssignInitializedLetError(store, fn, checkResult)
                     case MaybeInitMemberKind.NA => return
                 }
             }
+            return
         }
     }
 
@@ -485,15 +518,6 @@ private func BuildConstructorContext(fn: Function): VarInitConstructorContext {
     return VarInitConstructorContext(ctorInfo, members)
 }
 
-private func CollectSuperMembers(classDef: ClassDef, members: ArrayList<MemberVarInfo>): Unit {
-    if (let Some(superDef) <- classDef.GetSuperClassDef()) {
-        CollectSuperMembers(superDef, members)
-    }
-    for (member in classDef.GetInstanceVars()) {
-        members.add(member)
-    }
-}
-
 private func HasFuncCallWithNothingRetVal(block: Block): Bool {
     for (expr in block.GetNonTerminatorExpressions()) {
         if (!expr.IsFuncCall()) {
@@ -508,182 +532,40 @@ private func HasFuncCallWithNothingRetVal(block: Block): Bool {
     return false
 }
 
-private func ResolveStoreLocation(store: Expression): Option<Value> {
-    if (store.GetNumOfOperands() >= 2) {
-        return store.GetOperand(1)
-    }
-    return None
-}
-
-private func ResolveStoreMemberIndex(
-    fn: Function,
-    store: Expression,
-    _: ConstructorInitInfo,
-    members: ArrayList<MemberVarInfo>
-): Option<Int64> {
-    if (let Some(storeRef) <- (store as StoreElementRef)) {
-        if (let Some(index) <- IsInitialisingMemberVar(fn, storeRef)) {
-            return index
-        }
-    }
-    return ResolveMemberIndexFromOperands(store, members, 2)
-}
-
-private func ResolveGetElementRefViaDefMember(
+private func IsGetElemRefViaDefMember(
     expr: Expression,
-    thisArg: Parameter,
-    members: ArrayList<MemberVarInfo>
+    thisArg: Parameter
 ): Option<Int64> {
-    let kind = expr.GetExprKind()
-    if (kind != ExprKind.GET_ELEMENT_REF && kind != ExprKind.GET_ELEMENT_BY_NAME) {
+    if (expr.GetExprKind() != ExprKind.GET_ELEMENT_REF) {
         return None
     }
-    if (expr.GetNumOfOperands() == 0) {
-        return None
-    }
-    let location = expr.GetOperand(0)
+    let getElemRef = (expr as GetElementRef).getOrThrow()
+    let location = getElemRef.GetLocation()
     if (location.nodeId == thisArg.nodeId) {
-        return ResolveMemberIndexFromOperands(expr, members, 1)
+        return Int64(getElemRef.GetPath()[0])
     }
     if (let Some(localVal) <- location.AsLocalVar()) {
         if (let Some(locationExpr) <- localVal.GetExpr()) {
-            return ResolveGetElementRefViaDefMember(locationExpr, thisArg, members)
+            return IsGetElemRefViaDefMember(locationExpr, thisArg)
         }
     }
     return None
 }
 
-private func ResolveMemberIndexFromOperands(
-    expr: Expression,
-    members: ArrayList<MemberVarInfo>,
-    startIndex: Int64
+private func IsStoreViaDefMember(
+    store: StoreElementRef,
+    thisArg: Parameter,
+    shouldBeNested!: Bool = false
 ): Option<Int64> {
-    var idx = startIndex
-    while (idx < expr.GetNumOfOperands()) {
-        if (let Some(memberIndex) <- ResolveMemberIndexFromValue(expr.GetOperand(idx), members)) {
-            return memberIndex
-        }
-        idx++
-    }
-    return None
-}
-
-private func ResolveMemberIndexFromValue(value: Value, members: ArrayList<MemberVarInfo>): Option<Int64> {
-    let srcName = value.GetSrcCodeIdentifier()
-    let identifier = value.GetIdentifierWithoutPrefix()
-    var idx: Int64 = 0
-    for (member in members) {
-        if ((!srcName.isEmpty() && srcName == member.name) || (!identifier.isEmpty() && identifier == member.name)) {
-            return idx
-        }
-        idx++
-    }
-    if (let Some(intLiteral) <- ExtractIntLiteral(value)) {
-        if (intLiteral >= 0 && intLiteral < members.size) {
-            return intLiteral
+    let location = store.GetLocation()
+    if (location.nodeId == thisArg.nodeId && (!shouldBeNested || store.GetPath().size > 1)) {
+        return Int64(store.GetPath()[0])
+    } else if (let Some(localVal) <- location.AsLocalVar()) {
+        if (let Some(expr) <- localVal.GetExpr()) {
+            return IsGetElemRefViaDefMember(expr, thisArg)
         }
     }
     return None
-}
-
-private func ExtractIntLiteral(value: Value): Option<Int64> {
-    if (let Some(localVal) <- value.AsLocalVar()) {
-        if (let Some(expr) <- localVal.GetExpr()) {
-            if (let Some(constant) <- (expr as Constant)) {
-                if (let Some(intLiteral) <- (constant.literal as IntLiteral)) {
-                    return intLiteral.value
-                }
-            }
-        }
-    }
-    return None
-}
-
-private func IsNestedStoreViaDefMember(store: Expression, thisArg: Parameter): Bool {
-    if (!StoreTouchesThis(store, thisArg)) {
-        return false
-    }
-    if (store.GetNumOfOperands() > 3) {
-        return true
-    }
-    var idx: Int64 = 0
-    while (idx < store.GetNumOfOperands()) {
-        if (IsGetElementRefDerivedFromThis(store.GetOperand(idx), thisArg)) {
-            return true
-        }
-        idx++
-    }
-    return false
-}
-
-private func StoreTouchesThis(store: Expression, thisArg: Parameter): Bool {
-    var idx: Int64 = 0
-    while (idx < store.GetNumOfOperands()) {
-        let operand = store.GetOperand(idx)
-        if (operand.nodeId == thisArg.nodeId || IsGetElementRefDerivedFromThis(operand, thisArg)) {
-            return true
-        }
-        idx++
-    }
-    return false
-}
-
-private func IsGetElementRefDerivedFromThis(value: Value, thisArg: Parameter): Bool {
-    if (let Some(localVal) <- value.AsLocalVar()) {
-        if (let Some(expr) <- localVal.GetExpr()) {
-            return IsGetElementRefExpressionDerivedFromThis(expr, thisArg)
-        }
-    }
-    return false
-}
-
-private func IsGetElementRefExpressionDerivedFromThis(expr: Expression, thisArg: Parameter): Bool {
-    let kind = expr.GetExprKind()
-    if (kind != ExprKind.GET_ELEMENT_REF && kind != ExprKind.GET_ELEMENT_BY_NAME) {
-        return false
-    }
-    if (expr.GetNumOfOperands() == 0) {
-        return false
-    }
-    let location = expr.GetOperand(0)
-    if (location.nodeId == thisArg.nodeId) {
-        return true
-    }
-    return IsGetElementRefDerivedFromThis(location, thisArg)
-}
-
-private func IsLoadedFromThis(value: Value, thisArg: Parameter): Bool {
-    if (let Some(localVal) <- value.AsLocalVar()) {
-        if (let Some(expr) <- localVal.GetExpr()) {
-            if (expr.GetExprKind() == ExprKind.LOAD && expr.GetNumOfOperands() > 0) {
-                return expr.GetOperand(0).nodeId == thisArg.nodeId
-            }
-        }
-    }
-    return false
-}
-
-private func SameParentDef(left: Function, right: Function): Bool {
-    if (let Some(leftParent) <- left.GetParentCustomTypeDef()) {
-        if (let Some(rightParent) <- right.GetParentCustomTypeDef()) {
-            return leftParent.nodeId == rightParent.nodeId
-        }
-    }
-    return false
-}
-
-private func IsClassMethod(fn: Function): Bool {
-    if (let Some(def) <- fn.GetParentCustomTypeDef()) {
-        return (def as ClassDef).isSome()
-    }
-    return false
-}
-
-private func IsBlockInBody(block: Block, body: BlockGroup): Bool {
-    if (let Some(parent) <- block.GetParentBlockGroup()) {
-        return parent.nodeId == body.nodeId
-    }
-    return false
 }
 
 private func AddUseBeforeInitError(
