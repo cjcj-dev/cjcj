@@ -1,5 +1,7 @@
 package cangjie_compiler::ast
 
+import cangjie_compiler::utils.CJC_ASSERT
+
 public let INVALID_IDENTIFIER: String = "<invalid>"
 
 public open class Identifier {
@@ -40,10 +42,8 @@ public open class Identifier {
     }
 
     public func Length(): Int64 {
-        if (beginPos.line == endPos.line) {
-            return endPos.column - beginPos.column
-        }
-        return v.size
+        CJC_ASSERT(beginPos.line == endPos.line)
+        return endPos.column - beginPos.column
     }
 
     public func ZeroPos(): Bool {
