@@ -1,5 +1,8 @@
 package cangjie_compiler::ast
 
+import cangjie_compiler::utils.CJC_ASSERT
+import cangjie_compiler::utils.CJC_NULLPTR_CHECK
+import cangjie_compiler::utils.Stoi
 import std.collection.*
 
 private func exprJoinExprs(values: ArrayList<Expr>, delimiter: String): String {
@@ -32,13 +35,6 @@ private func exprJoinFuncArgs(values: ArrayList<FuncArg>, delimiter: String): St
         parts.add(value.ToString())
     }
     return JoinStrings(parts, delimiter)
-}
-
-private func exprOptionString(value: Option<Expr>): String {
-    if (let Some(expr) <- value) {
-        return expr.ToString()
-    }
-    return ""
 }
 
 public open class Expr <: Node {
@@ -172,10 +168,10 @@ public class IfExpr <: Expr {
     }
 
     public override func ToString(): String {
-        var out = "if (" + exprOptionString(condExpr) + ") "
-        if (let Some(value) <- thenBody) {
-            out += value.ToString()
-        }
+        CJC_NULLPTR_CHECK(condExpr)
+        var out = "if (" + condExpr.getOrThrow().ToString() + ") "
+        CJC_NULLPTR_CHECK(thenBody)
+        out += thenBody.getOrThrow().ToString()
         if (let Some(value) <- elseBody) {
             out += " else " + value.ToString()
         }
@@ -204,7 +200,8 @@ public class LetPatternDestructor <: Expr {
         var out = "let "
         out += exprJoinPatterns(patterns, " | ")
         out += " <- "
-        out += exprOptionString(initializer)
+        CJC_NULLPTR_CHECK(initializer)
+        out += initializer.getOrThrow().ToString()
         return out
     }
 }
@@ -299,10 +296,8 @@ public class MatchCase <: Node {
         if (let Some(guardExpr) <- patternGuard) {
             out += " where " + guardExpr.ToString()
         }
-        out += " => "
-        if (let Some(block) <- exprOrDecls) {
-            out += block.ToString()
-        }
+        CJC_NULLPTR_CHECK(exprOrDecls)
+        out += " => " + exprOrDecls.getOrThrow().ToString()
         return out
     }
 }
@@ -324,11 +319,9 @@ public class MatchCaseOther <: Node {
     }
 
     public override func ToString(): String {
-        var out = "case " + exprOptionString(matchExpr) + " => "
-        if (let Some(block) <- exprOrDecls) {
-            out += block.ToString()
-        }
-        return out
+        CJC_NULLPTR_CHECK(matchExpr)
+        CJC_NULLPTR_CHECK(exprOrDecls)
+        return "case " + matchExpr.getOrThrow().ToString() + " => " + exprOrDecls.getOrThrow().ToString()
     }
 }
 
@@ -356,7 +349,8 @@ public class MatchExpr <: Expr {
     }
 
     public override func ToString(): String {
-        var out = "match (" + exprOptionString(selector) + ") {"
+        CJC_NULLPTR_CHECK(selector)
+        var out = "match (" + selector.getOrThrow().ToString() + ") {"
         for (matchCase in matchCases) {
             out += "\n" + matchCase.ToString()
         }
@@ -424,9 +418,8 @@ public class TryExpr <: Expr {
         if (!resourceSpec.isEmpty()) {
             out += "(" + exprJoinVarDecls(resourceSpec, ", ") + ") "
         }
-        if (let Some(block) <- tryBlock) {
-            out += block.ToString()
-        }
+        CJC_NULLPTR_CHECK(tryBlock)
+        out += tryBlock.getOrThrow().ToString()
         var catchIdx: Int64 = 0
         while (catchIdx < catchBlocks.size) {
             out += " catch("
@@ -465,7 +458,8 @@ public class ThrowExpr <: Expr {
     }
 
     public override func ToString(): String {
-        return "throw " + exprOptionString(expr)
+        CJC_NULLPTR_CHECK(expr)
+        return "throw " + expr.getOrThrow().ToString()
     }
 }
 
@@ -481,7 +475,8 @@ public class PerformExpr <: Expr {
     }
 
     public override func ToString(): String {
-        return "perform " + exprOptionString(expr)
+        CJC_NULLPTR_CHECK(expr)
+        return "perform " + expr.getOrThrow().ToString()
     }
 }
 
@@ -573,18 +568,15 @@ public class ForInExpr <: Expr {
     }
 
     public override func ToString(): String {
-        var out = "for ("
-        if (let Some(value) <- pattern) {
-            out += value.ToString()
-        }
-        out += " in " + exprOptionString(inExpression)
+        CJC_NULLPTR_CHECK(pattern)
+        CJC_NULLPTR_CHECK(inExpression)
+        var out = "for (" + pattern.getOrThrow().ToString() + " in " + inExpression.getOrThrow().ToString()
         if (let Some(value) <- patternGuard) {
             out += " where " + value.ToString()
         }
         out += ") "
-        if (let Some(value) <- body) {
-            out += value.ToString()
-        }
+        CJC_NULLPTR_CHECK(body)
+        out += body.getOrThrow().ToString()
         return out
     }
 }
@@ -606,11 +598,9 @@ public class WhileExpr <: Expr {
     }
 
     public override func ToString(): String {
-        return "while (" + exprOptionString(condExpr) + ") " + (if (let Some(value) <- body) {
-            value.ToString()
-        } else {
-            ""
-        })
+        CJC_NULLPTR_CHECK(condExpr)
+        CJC_NULLPTR_CHECK(body)
+        return "while (" + condExpr.getOrThrow().ToString() + ") " + body.getOrThrow().ToString()
     }
 }
 
@@ -631,8 +621,9 @@ public class DoWhileExpr <: Expr {
     }
 
     public override func ToString(): String {
-        let bodyText = if (let Some(value) <- body) { value.ToString() } else { "" }
-        return "do " + bodyText + " while (" + exprOptionString(condExpr) + ")"
+        CJC_NULLPTR_CHECK(body)
+        CJC_NULLPTR_CHECK(condExpr)
+        return "do " + body.getOrThrow().ToString() + " while (" + condExpr.getOrThrow().ToString() + ")"
     }
 }
 
@@ -732,8 +723,9 @@ public class IsExpr <: Expr {
     }
 
     public override func ToString(): String {
-        let typeText = if (let Some(value) <- isType) { value.ToString() } else { "" }
-        return exprOptionString(leftExpr) + " is " + typeText
+        CJC_ASSERT(leftExpr.isSome())
+        CJC_ASSERT(isType.isSome())
+        return leftExpr.getOrThrow().ToString() + " is " + isType.getOrThrow().ToString()
     }
 }
 
@@ -751,8 +743,9 @@ public class AsExpr <: Expr {
     }
 
     public override func ToString(): String {
-        let typeText = if (let Some(value) <- asType) { value.ToString() } else { "" }
-        return exprOptionString(leftExpr) + " as " + typeText
+        CJC_ASSERT(leftExpr.isSome())
+        CJC_ASSERT(asType.isSome())
+        return leftExpr.getOrThrow().ToString() + " as " + asType.getOrThrow().ToString()
     }
 }
 
@@ -939,25 +932,101 @@ public class LitConstExpr <: Expr {
     }
 
     public func GetNumLitTypeKind(): TypeKind {
+        var suffixWidth: Int64 = 0
         if (kind == LitConstKind.RUNE_BYTE) {
             return TypeKind.TYPE_UINT8
         }
         if (kind == LitConstKind.INTEGER) {
-            if (stringValue.endsWith("i8")) { return TypeKind.TYPE_INT8 }
-            if (stringValue.endsWith("i16")) { return TypeKind.TYPE_INT16 }
-            if (stringValue.endsWith("i32")) { return TypeKind.TYPE_INT32 }
-            if (stringValue.endsWith("i64")) { return TypeKind.TYPE_INT64 }
-            if (stringValue.endsWith("u8")) { return TypeKind.TYPE_UINT8 }
-            if (stringValue.endsWith("u16")) { return TypeKind.TYPE_UINT16 }
-            if (stringValue.endsWith("u32")) { return TypeKind.TYPE_UINT32 }
-            if (stringValue.endsWith("u64")) { return TypeKind.TYPE_UINT64 }
-            return TypeKind.TYPE_IDEAL_INT
+            var suffixStart = stringValue.size
+            var idx: Int64 = 0
+            while (idx < stringValue.size) {
+                let c = stringValue[idx]
+                if (c == b'i' || c == b'u') {
+                    suffixStart = idx
+                    break
+                }
+                idx++
+            }
+            let suffix = stringValue[suffixStart..]
+            if (suffix.isEmpty()) {
+                return TypeKind.TYPE_IDEAL_INT
+            } else {
+                if (let Some(suffixWid) <- Stoi(suffix[1..])) {
+                    suffixWidth = suffixWid
+                } else {
+                    return TypeKind.TYPE_INVALID
+                }
+                var suffixWidthValue = suffixWidth
+                var powerBase2: Int64 = 0
+                while (suffixWidthValue != 0 && suffixWidthValue % 2 == 0) {
+                    powerBase2++
+                    suffixWidthValue /= 2
+                }
+                let signedness = suffix[0]
+                if (signedness == b'i' || signedness == b'u') {
+                    let leastPowerBase2: Int64 = 3
+                    let tk = if (signedness == b'i') { TypeKind.TYPE_INT8 } else { TypeKind.TYPE_UINT8 }
+                    let typeKindIndex = powerBase2 - leastPowerBase2 + TypeKindIndex(tk)
+                    return match (typeKindIndex) {
+                        case 2 => TypeKind.TYPE_INT8
+                        case 3 => TypeKind.TYPE_INT16
+                        case 4 => TypeKind.TYPE_INT32
+                        case 5 => TypeKind.TYPE_INT64
+                        case 6 => TypeKind.TYPE_INT_NATIVE
+                        case 8 => TypeKind.TYPE_UINT8
+                        case 9 => TypeKind.TYPE_UINT16
+                        case 10 => TypeKind.TYPE_UINT32
+                        case 11 => TypeKind.TYPE_UINT64
+                        case 12 => TypeKind.TYPE_UINT_NATIVE
+                        case _ => TypeKind.TYPE_INVALID
+                    }
+                } else {
+                    return TypeKind.TYPE_INVALID
+                }
+            }
         }
         if (kind == LitConstKind.FLOAT) {
-            if (stringValue.endsWith("f16")) { return TypeKind.TYPE_FLOAT16 }
-            if (stringValue.endsWith("f32")) { return TypeKind.TYPE_FLOAT32 }
-            if (stringValue.endsWith("f64")) { return TypeKind.TYPE_FLOAT64 }
-            return TypeKind.TYPE_IDEAL_FLOAT
+            let isNegative = !stringValue.isEmpty() && stringValue[0] == b'-'
+            let prefixStart: Int64 = if (isNegative) { 1 } else { 0 }
+            let prefixEnd = if (stringValue.size < prefixStart + 2) { stringValue.size } else { prefixStart + 2 }
+            let prefix = stringValue[prefixStart..prefixEnd]
+            if (prefix == "0x" || prefix == "0X") {
+                return TypeKind.TYPE_IDEAL_FLOAT
+            }
+            var suffixStart = stringValue.size
+            var idx: Int64 = 0
+            while (idx < stringValue.size) {
+                if (stringValue[idx] == b'f') {
+                    suffixStart = idx
+                    break
+                }
+                idx++
+            }
+            let suffix = stringValue[suffixStart..]
+            if (suffix.isEmpty()) {
+                return TypeKind.TYPE_IDEAL_FLOAT
+            } else {
+                if (let Some(suffixWid) <- Stoi(suffix[1..])) {
+                    suffixWidth = suffixWid
+                } else {
+                    return TypeKind.TYPE_INVALID
+                }
+                var suffixWidthValue = suffixWidth
+                var powerBase2: Int64 = 0
+                while (suffixWidthValue != 0 && suffixWidthValue % 2 == 0) {
+                    powerBase2++
+                    suffixWidthValue /= 2
+                }
+                let leastPowerBase2: Int64 = 4
+                let typeKindIndex = powerBase2 - leastPowerBase2 + TypeKindIndex(TypeKind.TYPE_FLOAT16)
+                return match (typeKindIndex) {
+                    case 13 => TypeKind.TYPE_FLOAT16
+                    case 14 => TypeKind.TYPE_FLOAT32
+                    case 15 => TypeKind.TYPE_FLOAT64
+                    case 16 => TypeKind.TYPE_IDEAL_FLOAT
+                    case _ => TypeKind.TYPE_INVALID
+                }
+            }
         }
         return TypeKind.TYPE_INVALID
     }
@@ -1182,7 +1251,8 @@ public class ParenExpr <: Expr {
     }
 
     public override func ToString(): String {
-        return "(" + exprOptionString(expr) + ")"
+        CJC_ASSERT(expr.isSome())
+        return "(" + expr.getOrThrow().ToString() + ")"
     }
 }
 
@@ -1206,10 +1276,8 @@ public class LambdaExpr <: Expr {
     }
 
     public override func ToString(): String {
-        if (let Some(value) <- funcBody) {
-            return "{ " + value.ToString() + " }"
-        }
-        return "{  }"
+        CJC_NULLPTR_CHECK(funcBody)
+        return "{ " + funcBody.getOrThrow().ToString() + " }"
     }
 }
 
@@ -1228,7 +1296,8 @@ public class TrailingClosureExpr <: Expr {
     }
 
     public override func ToString(): String {
-        var out = exprOptionString(expr)
+        CJC_NULLPTR_CHECK(expr)
+        var out = expr.getOrThrow().ToString()
         if (let Some(value) <- lambda) {
             out += " " + value.ToString()
         }
@@ -1248,7 +1317,8 @@ public class OptionalExpr <: Expr {
     }
 
     public override func ToString(): String {
-        return exprOptionString(baseExpr) + "?"
+        CJC_ASSERT(baseExpr.isSome())
+        return baseExpr.getOrThrow().ToString() + "?"
     }
 }
 
@@ -1263,7 +1333,8 @@ public class OptionalChainExpr <: Expr {
     }
 
     public override func ToString(): String {
-        return exprOptionString(expr)
+        CJC_ASSERT(expr.isSome())
+        return expr.getOrThrow().ToString()
     }
 }
 
@@ -1328,11 +1399,6 @@ public class PointerExpr <: Expr {
                 pointee = Ty.ToString(semTy.typeArgs[0])
             }
         }
-        if (pointee.isEmpty()) {
-            if (let Some(value) <- typeNode) {
-                pointee = value.ToString()
-            }
-        }
         let argText = if (let Some(value) <- arg) { value.ToString() } else { "" }
         return "CPointer<" + pointee + ">(" + argText + ")"
     }
@@ -1367,8 +1433,9 @@ public class TypeConvExpr <: Expr {
     }
 
     public override func ToString(): String {
-        let typeText = if (let Some(value) <- typeNode) { value.ToString() } else { "" }
-        return typeText + "(" + exprOptionString(expr) + ")"
+        CJC_ASSERT(typeNode.isSome())
+        CJC_ASSERT(expr.isSome())
+        return typeNode.getOrThrow().ToString() + "(" + expr.getOrThrow().ToString() + ")"
     }
 }
 
@@ -1464,9 +1531,8 @@ public class SpawnExpr <: Expr {
         if (let Some(value) <- arg) {
             out += "(" + value.ToString() + ")"
         }
-        if (let Some(value) <- task) {
-            out += " " + value.ToString()
-        }
+        CJC_NULLPTR_CHECK(task)
+        out += " " + task.getOrThrow().ToString()
         return out
     }
 }
@@ -1487,7 +1553,8 @@ public class SynchronizedExpr <: Expr {
     }
 
     public override func ToString(): String {
-        let bodyText = if (let Some(value) <- body) { value.ToString() } else { "" }
-        return "synchronized (" + exprOptionString(mutex) + ") " + bodyText
+        CJC_NULLPTR_CHECK(mutex)
+        CJC_NULLPTR_CHECK(body)
+        return "synchronized (" + mutex.getOrThrow().ToString() + ") " + body.getOrThrow().ToString()
     }
 }
