@@ -1,5 +1,7 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::utils.CJC_ASSERT
+import cangjie_compiler::utils.StaticCast
 import std.collection.*
 
 private let TYPE_TARGET = "Type"
@@ -12,13 +14,6 @@ private let ENUM_CONSTRUCTOR_TARGET = "EnumConstructor"
 private let GLOBAL_FUNCTION_TARGET = "GlobalFunction"
 private let GLOBAL_VARIABLE_TARGET = "GlobalVariable"
 private let EXTENSION_TARGET = "Extension"
-
-private let TARGET_METADATA_KEYS: Array<String> = [
-    "AnnotationTargets",
-    "annotationTargets",
-    "targets",
-    "target"
-]
 
 private let CUSTOM_ANNO_METADATA_KEYS: Array<String> = [
     "customAnnotations",
@@ -57,36 +52,37 @@ public class AnnotationChecker {
     }
 
     private func CollectAnnotationTargets(): Unit {
-        annotationTargets.clear()
         for (def in pkg.GetAllClassDef()) {
-            if (!def.TestAttr(Attribute.ANNOTATION)) {
+            if (!def.IsAnnotation()) {
                 continue
             }
-            let targets = GetAnnotationTargetSet(def)
-            RegisterAnnotationTarget(def.GetSrcCodeIdentifier(), targets)
-            RegisterAnnotationTarget(def.GetIdentifier(), targets)
-            RegisterAnnotationTarget(def.GetFullName(), targets)
-        }
-    }
-
-    private func RegisterAnnotationTarget(name: String, targets: HashSet<String>): Unit {
-        if (name.isEmpty()) {
-            return
-        }
-        annotationTargets[name] = CopyStringSet(targets)
-        let shortName = ShortAnnotationName(name)
-        if (!shortName.isEmpty()) {
-            annotationTargets[shortName] = CopyStringSet(targets)
-        }
-    }
-
-    private func GetAnnotationTargetSet(def: ClassDef): HashSet<String> {
-        for (key in TARGET_METADATA_KEYS) {
-            if (let Some(rawTargets) <- def.GetAnnotation(key)) {
-                return ParseTargetSet(rawTargets)
+            let targets = def.GetAnnotationTargets()
+            if (targets.isEmpty()) {
+                annotationTargets[def.GetSrcCodeIdentifier()] = HashSet<String>()
+                continue
             }
+            let result = HashSet<String>()
+            for (target in targets) {
+                result.add(CalculateTarget(target))
+            }
+            annotationTargets[def.GetSrcCodeIdentifier()] = result
         }
-        return HashSet<String>()
+    }
+
+    private func CalculateTarget(globalVar: GlobalVar): String {
+        let users = globalVar.GetUsers()
+        CJC_ASSERT(users.size == 1)
+        let store = StaticCast<Store>(users[0])
+        let storeValue = store.GetValue()
+        let annotationKindDef = StaticCast<EnumType>(storeValue.GetType().getOrThrow()).GetEnumDef()
+        CJC_ASSERT(annotationKindDef.GetSrcCodeIdentifier() == "AnnotationKind")
+        CJC_ASSERT(annotationKindDef.GetPackageName() == "std.core")
+        let typecast = StaticCast<TypeCast>(StaticCast<LocalVar>(storeValue).GetExpr().getOrThrow())
+        let constExpr = StaticCast<Constant>(StaticCast<LocalVar>(typecast.GetSourceValue()).GetExpr().getOrThrow())
+        let constValue = constExpr.GetValue()
+        CJC_ASSERT(RequiredResultType(constExpr).GetTypeKind() == TypeKind.TYPE_UINT32)
+        let enumCtorIdx = StaticCast<IntLiteral>(constValue).value
+        return annotationKindDef.GetCtor(enumCtorIdx).name
     }
 
     private func CheckAnnotationTargets(result: CHIRCheckResult): Unit {
@@ -198,17 +194,6 @@ private func AddAnnotationIfMissing(values: ArrayList<String>, annotation: Strin
     values.add(annotation)
 }
 
-private func ParseTargetSet(rawTargets: String): HashSet<String> {
-    let out = HashSet<String>()
-    for (target in ParseStringList(rawTargets)) {
-        let normalized = NormalizeTargetName(target)
-        if (!normalized.isEmpty()) {
-            out.add(normalized)
-        }
-    }
-    return out
-}
-
 private func ParseStringList(rawValue: String): ArrayList<String> {
     let out = ArrayList<String>()
     var current = ""
@@ -249,21 +234,6 @@ private func NormalizeAnnotationName(annotation: String): String {
         name = name[0..parenIndex]
     }
     return name.trimAscii()
-}
-
-private func NormalizeTargetName(target: String): String {
-    let value = target.trimAscii()
-    if (value == "type") { return TYPE_TARGET }
-    if (value == "parameter") { return PARAMETER_TARGET }
-    if (value == "init") { return INIT_TARGET }
-    if (value == "memberProperty" || value == "member_property") { return MEMBER_PROPERTY_TARGET }
-    if (value == "memberFunction" || value == "member_function") { return MEMBER_FUNCTION_TARGET }
-    if (value == "memberVariable" || value == "member_variable") { return MEMBER_VARIABLE_TARGET }
-    if (value == "enumConstructor" || value == "enum_constructor") { return ENUM_CONSTRUCTOR_TARGET }
-    if (value == "globalFunction" || value == "global_function") { return GLOBAL_FUNCTION_TARGET }
-    if (value == "globalVariable" || value == "global_variable") { return GLOBAL_VARIABLE_TARGET }
-    if (value == "extension" || value == "extend") { return EXTENSION_TARGET }
-    return value
 }
 
 private func ShortAnnotationName(name: String): String {
