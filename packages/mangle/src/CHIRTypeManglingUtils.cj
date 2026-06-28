@@ -15,7 +15,7 @@ public let MANGLE_TUPLE_STR: String = "Tuple"
 public let MANGLE_BOX_STR: String = "Box"
 
 public func StripCangjiePrefix(identifier: String): String {
-    if (StartsWith(identifier, MANGLE_CANGJIE_PREFIX)) {
+    if (identifier.size >= MANGLE_PREFIX_LEN) {
         return identifier[MANGLE_PREFIX_LEN..]
     }
     return identifier
@@ -44,6 +44,12 @@ public func ManglePrimitive(kind: TypeKind): String {
         case TypeKind.TYPE_VOID => "u"
         case _ => ""
     }
+}
+
+func MangleArraySliceType(t: Type, genericsTypeStack: ArrayList<String>, useGenericName: Bool): String {
+    let typeArgs = t.GetTypeArgs()
+    return MANGLE_ARRAY_SLICE_PREFIX + MangleCHIRType(typeArgs[0], genericsTypeStack, useGenericName: useGenericName) +
+        MANGLE_SUFFIX
 }
 
 private func IdentifierForMangledCHIRType(def: CustomTypeDef): String {
