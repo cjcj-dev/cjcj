@@ -9,14 +9,14 @@ public func CHIR2BCHIRTranslateTerminatorExpression(compiler: CHIR2BCHIR, contex
         case ExprKind.GOTO => TranslateGotoTerminator(compiler, context, expr)
         case ExprKind.BRANCH => TranslateBranchTerminator(compiler, context, expr)
         case ExprKind.MULTIBRANCH => TranslateMultiBranchTerminator(compiler, context, expr)
-        case ExprKind.EXIT => TranslateExitTerminator(context, expr)
+        case ExprKind.EXIT => TranslateExitTerminator(compiler, context, expr)
         case ExprKind.RAISE_EXCEPTION => TranslateRaiseTerminator(compiler, context, expr)
         case ExprKind.APPLY_WITH_EXCEPTION => TranslateApplyWithExceptionTerminator(compiler, context, expr)
         case ExprKind.INVOKE_WITH_EXCEPTION => TranslateInvokeWithExceptionTerminator(compiler, context, expr)
+        case ExprKind.INVOKESTATIC_WITH_EXCEPTION => context.definition.PushOp(OpCode.ABORT)
         case ExprKind.INT_OP_WITH_EXCEPTION => TranslateIntOpWithExceptionTerminator(compiler, context, expr)
         case ExprKind.ALLOCATE_WITH_EXCEPTION => TranslateAllocateWithExceptionTerminator(compiler, context, expr)
-        case ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION => TranslateRawArrayAllocateWithExceptionTerminator(compiler, context, expr)
-        case _ => context.definition.PushOp(OpCode.NOT_SUPPORTED)
+        case _ => context.definition.PushOp(OpCode.ABORT)
     }
 }
 
@@ -98,8 +98,13 @@ private func TranslateMultiBranchTerminator(compiler: CHIR2BCHIR, context: CHIR2
     }
 }
 
-private func TranslateExitTerminator(context: CHIR2BCHIRContext, expr: Expression): Unit {
-    if (expr.GetNumOfOperands() == 0) {
+private func TranslateExitTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext, expr: Expression): Unit {
+    let topLevelFunc = expr.GetTopLevelFunc().getOrThrow()
+    if (let Some(ret) <- topLevelFunc.GetReturnValue()) {
+        context.definition.PushOp(OpCode.LVAR)
+        context.definition.PushCell(compiler.LVarId(context, ret))
+        context.definition.PushOp(OpCode.DEREF)
+    } else {
         context.definition.PushOp(OpCode.UNIT)
     }
     context.definition.PushOp(OpCode.RETURN)
@@ -123,13 +128,13 @@ private func TranslateApplyWithExceptionTerminator(compiler: CHIR2BCHIR, context
     expr: Expression): Unit {
     context.definition.PushOp(OpCode.APPLY_EXC)
     context.definition.PushCell(expr.GetNumOfOperands())
-    TranslateTryTerminatorJumps(compiler, context, expr)
+    TranslateTryTerminatorJumps(compiler, context, expr.AsTerminator().getOrThrow())
 }
 
 private func TranslateInvokeWithExceptionTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     TranslateInvokeExpression(context, expr, true)
-    TranslateTryTerminatorJumps(compiler, context, expr)
+    TranslateTryTerminatorJumps(compiler, context, expr.AsTerminator().getOrThrow())
 }
 
 private func TranslateIntOpWithExceptionTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
@@ -150,7 +155,7 @@ private func TranslateIntOpWithExceptionTerminator(compiler: CHIR2BCHIR, context
                 context.definition.PushCell(TypeKindIndex(TypeKind.TYPE_INVALID))
             }
         }
-        TranslateTryTerminatorJumps(compiler, context, expr)
+        TranslateTryTerminatorJumps(compiler, context, intOp)
     } else {
         context.definition.PushOp(OpCode.NOT_SUPPORTED)
     }
@@ -159,31 +164,15 @@ private func TranslateIntOpWithExceptionTerminator(compiler: CHIR2BCHIR, context
 private func TranslateAllocateWithExceptionTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     TranslateAllocateExpression(context, expr, true)
-    TranslateTryTerminatorJumps(compiler, context, expr)
+    TranslateTryTerminatorJumps(compiler, context, expr.AsTerminator().getOrThrow())
 }
 
-private func TranslateRawArrayAllocateWithExceptionTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
-    expr: Expression): Unit {
-    context.definition.PushOp(OpCode.ALLOCATE_RAW_ARRAY_EXC)
-    TranslateTryTerminatorJumps(compiler, context, expr)
-}
-
-private func TranslateTryTerminatorJumps(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext, expr: Expression): Unit {
-    if (let Some(term) <- expr.AsTerminator()) {
-        if (term.GetNumOfSuccessor() < 2) {
-            context.definition.PushCell(context.definition.NextIndex() + 1)
-            return
-        }
-        let exceptionPlaceholder = context.definition.NextIndex()
-        context.definition.PushCell(compiler.BlockIndex(context, term.GetSuccessor(1), exceptionPlaceholder))
-        if (let Some(result) <- expr.GetResult()) {
-            context.definition.PushOp(OpCode.LVAR_SET)
-            context.definition.PushCell(compiler.LVarId(context, result))
-        }
-        context.definition.PushOp(OpCode.JUMP)
-        let normalPlaceholder = context.definition.NextIndex()
-        context.definition.PushCell(compiler.BlockIndex(context, term.GetSuccessor(0), normalPlaceholder))
-    } else {
-        context.definition.PushCell(context.definition.NextIndex() + 1)
-    }
+private func TranslateTryTerminatorJumps(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext, expr: Terminator): Unit {
+    let exceptionPlaceholder = context.definition.NextIndex()
+    context.definition.PushCell(compiler.BlockIndex(context, expr.GetSuccessor(1), exceptionPlaceholder))
+    context.definition.PushOp(OpCode.LVAR_SET)
+    context.definition.PushCell(compiler.LVarId(context, expr.GetResult().getOrThrow()))
+    context.definition.PushOp(OpCode.JUMP)
+    let normalPlaceholder = context.definition.NextIndex()
+    context.definition.PushCell(compiler.BlockIndex(context, expr.GetSuccessor(0), normalPlaceholder))
 }
