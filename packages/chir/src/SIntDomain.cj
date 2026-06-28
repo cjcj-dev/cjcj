@@ -2,6 +2,7 @@ package cangjie_compiler::chir
 
 import cangjie_compiler::utils.OverflowStrategy
 import std.collection.*
+import std.sort.*
 
 public class SymbolicBound {
     public let symbol: Value
@@ -228,11 +229,29 @@ public class SIntDomain {
     }
 
     public func ToString(asUnsigned!: Bool = unsignedFlag, radix!: Radix = Radix.R10): String {
+        if (IsBottom()) {
+            return numeric.ToString(asUnsigned: asUnsigned, radix: radix)
+        }
         if (symbolics.isEmpty()) {
             return numeric.ToString(asUnsigned: asUnsigned, radix: radix)
         }
-        var out = "|" + numeric.ToString(asUnsigned: asUnsigned, radix: radix)
-        for (bound in symbolics) {
+        var out = "|"
+        if (numeric.IsNonTrivial()) {
+            out += numeric.ToString(asUnsigned: asUnsigned, radix: radix)
+        }
+        let sortedBounds = SymbolicBounds()
+        sort(sortedBounds, by: { left: SymbolicBound, right: SymbolicBound =>
+            let leftName = left.symbol.GetSrcCodeIdentifier()
+            let rightName = right.symbol.GetSrcCodeIdentifier()
+            if (leftName < rightName) {
+                Ordering.LT
+            } else if (leftName > rightName) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        })
+        for (bound in sortedBounds) {
             out += ";" + bound.ToString(asUnsigned: false, radix: radix)
         }
         return out + "|"
