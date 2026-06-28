@@ -159,11 +159,9 @@ private func flushPending(pending: ArrayList<(UInt8, UTF32)>, result: ArrayList<
     pending.clear()
 }
 
-private func canonicalDecomposeToUTF32(s: String): Option<Array<UTF32>> {
+private func canonicalDecomposeToUTF32(s: String): Array<UTF32> {
     let (status, codepoints) = ConvertUTF8ToUTF32(s.toArray())
-    if (status != ConversionResult.OK) {
-        return None
-    }
+    CJC_ASSERT(status == ConversionResult.OK)
     let raw = ArrayList<UTF32>()
     for (ch in codepoints) {
         appendCanonicalDecomposition(ch, raw)
@@ -212,18 +210,11 @@ public func NfcQuickCheck(s: String): NfcQcResult {
 
 public func CanonicalDecompose(s: String): String {
     let decomposed = canonicalDecomposeToUTF32(s)
-    if (let None <- decomposed) {
-        return s
-    }
-    return ConvertUTF32ToUTF8String(decomposed.getOrThrow()) ?? s
+    return ConvertUTF32ToUTF8String(decomposed) ?? s
 }
 
 public func CanonicalRecompose(s: String): String {
-    let maybeCodepoints = canonicalDecomposeToUTF32(s)
-    if (let None <- maybeCodepoints) {
-        return s
-    }
-    let codepoints = maybeCodepoints.getOrThrow()
+    let codepoints = canonicalDecomposeToUTF32(s)
     if (codepoints.isEmpty()) {
         return s
     }
