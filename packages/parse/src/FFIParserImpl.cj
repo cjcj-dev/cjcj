@@ -4,9 +4,21 @@ import std.collection.*
 
 public open class FFIParserImpl {
     public let parser: ParserImpl
+    private let jp: JFFIParserImpl
+    private let op: OCFFIParserImpl
 
     public init(parser: ParserImpl) {
         this.parser = parser
+        this.jp = JFFIParserImpl(parser)
+        this.op = OCFFIParserImpl(parser)
+    }
+
+    public func Java(): JFFIParserImpl {
+        return jp
+    }
+
+    public func ObjC(): OCFFIParserImpl {
+        return op
     }
 
     public func CheckInteropDecl(decl: Decl): Unit {
@@ -14,13 +26,13 @@ public open class FFIParserImpl {
         CheckAnnotationsConflict(decl.annotations, decl)
         CheckForeignNameAnnotation(decl)
         if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.INTERFACE_DECL) {
-            let java = JFFIParserImpl(parser)
-            let objc = OCFFIParserImpl(parser)
+            let java = Java()
+            let objc = ObjC()
             java.CheckClassLikeSignature(decl, decl.annotations)
             objc.CheckClassLikeSignature(decl, decl.annotations)
         }
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
-            let objc = OCFFIParserImpl(parser)
+            let objc = ObjC()
             objc.CheckMirrorSignature(funcDecl, funcDecl.annotations)
             objc.CheckInitAnnotation(funcDecl)
             objc.CheckOptionalAnnotation(funcDecl)
@@ -53,8 +65,8 @@ public open class FFIParserImpl {
     }
 
     public func CheckAnnotations(annos: ArrayList<Annotation>, scopeKind: ScopeKind, decl: Decl): Unit {
-        let java = JFFIParserImpl(parser)
-        let objc = OCFFIParserImpl(parser)
+        let java = Java()
+        let objc = ObjC()
         for (anno in annos) {
             if (anno.kind == AnnotationKind.JAVA_MIRROR || anno.kind == AnnotationKind.JAVA_IMPL) {
                 java.CheckAnnotationForDecl(anno, decl)
@@ -125,14 +137,14 @@ public open class FFIParserImpl {
     }
 
     public func CheckClassLikeSignature(decl: Decl, annos: ArrayList<Annotation>): Unit {
-        let java = JFFIParserImpl(parser)
-        let objc = OCFFIParserImpl(parser)
+        let java = Java()
+        let objc = ObjC()
         java.CheckClassLikeSignature(decl, annos)
         objc.CheckClassLikeSignature(decl, annos)
     }
 
     public func CheckFuncSignature(decl: FuncDecl, annos: ArrayList<Annotation>): Unit {
-        let objc = OCFFIParserImpl(parser)
+        let objc = ObjC()
         objc.CheckMirrorSignature(decl, annos)
     }
 
@@ -191,13 +203,13 @@ public func DiagConflictingAnnos(diag: DiagnosticEngine, first: Annotation, seco
 public func IsConflictedFFIAnnotation(kind: AnnotationKind): Bool {
     return kind == AnnotationKind.JAVA_MIRROR || kind == AnnotationKind.JAVA_IMPL ||
         kind == AnnotationKind.OBJ_C_IMPL || kind == AnnotationKind.OBJ_C_MIRROR ||
-        kind == AnnotationKind.C
+        kind == AnnotationKind.C || kind == AnnotationKind.JAVA
 }
 
 public func IsLitStringArg(arg: FuncArg): Bool {
     if (let Some(expr) <- arg.expr) {
         if (let Some(lit) <- (expr as LitConstExpr)) {
-            return lit.kind == LitConstKind.STRING || lit.kind == LitConstKind.JSTRING
+            return lit.kind == LitConstKind.STRING
         }
     }
     return false
