@@ -28,11 +28,9 @@ public func GenerateVArrayBuilderExpression(irBuilder: IRBuilder2, chirExpr: Exp
     if (let Some(varrayBuilder) <- (chirExpr as VArrayBuilder)) {
         if (let Some(varrayTy) <- (RequiredVArrayBuilderResultType(varrayBuilder) as VArrayType)) {
             if (IsVArrayBuilderInitedByItem(varrayBuilder)) {
-                if (let Some(item) <- varrayBuilder.GetItem()) {
-                    let varrayLen = irBuilder.GetCGModule().MaterializeValue(irBuilder, varrayBuilder.GetSize()).GetRawValue()
-                    let itemValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, item)
-                    return GenerateVArrayInitedByItem(irBuilder, varrayLen, itemValue, varrayTy)
-                }
+                let varrayLen = irBuilder.GetCGModule().MaterializeValue(irBuilder, varrayBuilder.GetSize()).GetRawValue()
+                let itemValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, varrayBuilder.GetItem())
+                return GenerateVArrayInitedByItem(irBuilder, varrayLen, itemValue, varrayTy)
             }
         }
     }
@@ -90,13 +88,8 @@ private func RequiredVArrayBuilderResultType(varrayBuilder: VArrayBuilder): Type
 }
 
 private func IsVArrayBuilderInitedByItem(varrayBuilder: VArrayBuilder): Bool {
-    if (varrayBuilder.GetItem().isNone()) {
-        return false
-    }
-    if (let Some(initFunc) <- varrayBuilder.GetInitFunc()) {
-        return IsConstantNullValue(initFunc) || !IsAutoEnvValue(initFunc)
-    }
-    return true
+    let initFunc = varrayBuilder.GetInitFunc()
+    return IsConstantNullValue(initFunc) || !IsAutoEnvValue(initFunc)
 }
 
 private func IsConstantNullValue(value: Value): Bool {

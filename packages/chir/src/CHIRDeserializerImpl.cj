@@ -576,8 +576,6 @@ class CHIRDeserializerImpl {
                 return builder.CreateGetElementRef(resultTypeOrInvalid(resultTy), operands[0],
                     CHIRParseUInt64List(CHIRFieldAt(payload, 1)), block)
             }
-            return builder.CreateDynamicElementRef(resultTypeOrInvalid(resultTy), operands[0],
-                valuesAfterFirst(operands), block)
         }
         if (kind == ExprKind.GET_ELEMENT_BY_NAME && !operands.isEmpty() && CHIRFieldAt(payload, 0) == "namePath") {
             return builder.CreateGetElementByName(resultTypeOrInvalid(resultTy), operands[0],

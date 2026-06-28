@@ -44,7 +44,7 @@ public open class Expression <: Base {
     public func IsConstant(): Bool { return kind == ExprKind.CONSTANT }
     public func IsDebug(): Bool { return kind == ExprKind.DEBUGEXPR }
     public func IsDynamicDispatch(): Bool { return kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC }
-    public func IsField(): Bool { return kind == ExprKind.FIELD || kind == ExprKind.FIELD_BY_NAME }
+    public func IsField(): Bool { return kind == ExprKind.FIELD }
     public func IsFuncCall(): Bool { return kind == ExprKind.APPLY || kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC }
     public func IsIntOpWithException(): Bool { return kind == ExprKind.INT_OP_WITH_EXCEPTION }
     public func IsInvoke(): Bool { return kind == ExprKind.INVOKE }
@@ -54,7 +54,7 @@ public open class Expression <: Base {
     public func IsLambda(): Bool { return kind == ExprKind.LAMBDA }
     public func IsLoad(): Bool { return kind == ExprKind.LOAD }
     public func IsTerminator(): Bool { return GetExprMajorKind() == ExprMajorKind.TERMINATOR }
-    public func IsTypeCast(): Bool { return kind == ExprKind.TYPECAST || kind == ExprKind.TYPECAST_WITH_EXCEPTION }
+    public func IsTypeCast(): Bool { return kind == ExprKind.TYPECAST }
     public func IsUnaryExpr(): Bool { return GetExprMajorKind() == ExprMajorKind.UNARY_EXPR }
 
     public func IsConstantNull(): Bool {
@@ -94,7 +94,7 @@ public open class Expression <: Base {
 
     public func HasExceptionBranch(): Bool {
         return kind == ExprKind.APPLY_WITH_EXCEPTION || kind == ExprKind.INVOKE_WITH_EXCEPTION ||
-            kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION || kind == ExprKind.RAISE_EXCEPTION ||
+            kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION ||
             kind == ExprKind.INT_OP_WITH_EXCEPTION || kind == ExprKind.SPAWN_WITH_EXCEPTION ||
             kind == ExprKind.TYPECAST_WITH_EXCEPTION || kind == ExprKind.INTRINSIC_WITH_EXCEPTION ||
             kind == ExprKind.ALLOCATE_WITH_EXCEPTION || kind == ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION
@@ -203,17 +203,33 @@ public open class Expression <: Base {
     }
 
     public open func ReplaceOperand(idx: Int64, newOperand: Value): Unit {
-        let old = operands[idx]
-        old.RemoveUserOnly(this)
+        let oldOperand = operands[idx]
+        if (oldOperand.nodeId == newOperand.nodeId) {
+            return
+        }
         operands[idx] = newOperand
         newOperand.AddUserOnly(this)
+        var needRemoveOldOpUser = true
+        for (operand in operands) {
+            if (operand.nodeId == oldOperand.nodeId) {
+                needRemoveOldOpUser = false
+            }
+        }
+        if (needRemoveOldOpUser) {
+            oldOperand.RemoveUserOnly(this)
+        }
     }
 
     public open func ReplaceOperand(oldOperand: Value, newOperand: Value): Unit {
+        if (oldOperand.nodeId == newOperand.nodeId) {
+            return
+        }
         var idx: Int64 = 0
         while (idx < operands.size) {
             if (operands[idx].nodeId == oldOperand.nodeId) {
-                ReplaceOperand(idx, newOperand)
+                operands[idx] = newOperand
+                newOperand.AddUserOnly(this)
+                oldOperand.RemoveUserOnly(this)
             }
             idx++
         }
@@ -419,18 +435,63 @@ public class Constant <: Expression {
         this.literal = literal
     }
 
+    public func GetValue(): LiteralValue { return literal }
+    public func GetBoolLitVal(): Bool {
+        let boolLiteral = (GetValue() as BoolLiteral) ?? throw IllegalStateException("constant is not a bool literal")
+        return boolLiteral.value
+    }
+    public func GetFloatLitVal(): Float64 {
+        let floatLiteral = (GetValue() as FloatLiteral) ?? throw IllegalStateException("constant is not a float literal")
+        return floatLiteral.value
+    }
+    public func GetRuneLitVal(): Rune {
+        let runeLiteral = (GetValue() as RuneLiteral) ?? throw IllegalStateException("constant is not a rune literal")
+        return runeLiteral.value
+    }
+    public func GetSignedIntLitVal(): Int64 {
+        let intLiteral = (GetValue() as IntLiteral) ?? throw IllegalStateException("constant is not an int literal")
+        return intLiteral.value
+    }
+    public func GetStringLitVal(): String {
+        let stringLiteral = (GetValue() as StringLiteral) ?? throw IllegalStateException("constant is not a string literal")
+        return stringLiteral.value
+    }
+    public func GetUnsignedIntLitVal(): UInt64 {
+        let intLiteral = (GetValue() as IntLiteral) ?? throw IllegalStateException("constant is not an int literal")
+        if (intLiteral.value >= 0) {
+            return UInt64(intLiteral.value)
+        }
+        return 0x8000000000000000u64 + UInt64(intLiteral.value - Int64.Min)
+    }
     public func IsNullLit(): Bool { return literal.IsNullLit() }
     public func IsBoolLit(): Bool { return literal.IsBoolLit() }
     public func IsIntLit(): Bool { return literal.IsIntLit() }
     public func IsFloatLit(): Bool { return literal.IsFloatLit() }
+    public func IsRuneLit(): Bool { return literal.IsRuneLit() }
+    public func IsSignedIntLit(): Bool {
+        if (!IsIntLit()) {
+            return false
+        }
+        let intTy = (RequiredResultType(this) as IntType) ??
+            throw IllegalStateException("int literal requires integer type")
+        return intTy.IsSigned()
+    }
+    public func IsUnSignedIntLit(): Bool {
+        if (!IsIntLit()) {
+            return false
+        }
+        return !IsSignedIntLit()
+    }
     public func IsStringLit(): Bool { return literal.IsStringLit() }
+    public func IsUnitLit(): Bool { return literal.IsUnitLit() }
 
     public override func AddExtraComment(): String {
         return literal.ToString()
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateConstant(RequiredResultType(this), literal, parent)
+        let litVal: LiteralValue = if (literal.IsNullLit()) { NullLiteral() } else { literal }
+        let cloned = builder.CreateConstant(RequiredResultType(this), litVal, parent)
         return FinishExpressionClone(this, cloned)
     }
 }
@@ -528,41 +589,6 @@ public class GetElementRef <: Expression {
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateGetElementRef(RequiredResultType(this), GetLocation(), GetPath(), parent)
-        return FinishExpressionClone(this, cloned)
-    }
-}
-
-// A GetElementRef whose indices are runtime Values rather than a compile-time static path. Operand 0
-// is the base (a Ref to an aggregate, e.g. a VArray slot); operands 1.. are the GEP indices. Reuses
-// ExprKind.GET_ELEMENT_REF so codegen routes it to GenerateGetElementRef, which already reads
-// operands 1.. as runtime GEP indices. Used by the real-body path to index Int64 arrays with a
-// runtime subscript (a[i]).
-public class DynamicElementRef <: Expression {
-    public init(base: Value, indices: ArrayList<Value>, parent: Option<Block>) {
-        super(ExprKind.GET_ELEMENT_REF, DynamicElementRef.MakeOperands(base, indices), parent)
-    }
-
-    private static func MakeOperands(base: Value, indices: ArrayList<Value>): ArrayList<Value> {
-        let out = ArrayList<Value>()
-        out.add(base)
-        for (idx in indices) {
-            out.add(idx)
-        }
-        return out
-    }
-
-    public func GetBase(): Value {
-        return GetOperand(0)
-    }
-
-    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let indices = ArrayList<Value>()
-        var i: Int64 = 1
-        while (i < GetNumOfOperands()) {
-            indices.add(GetOperand(i))
-            i++
-        }
-        let cloned = builder.CreateDynamicElementRef(RequiredResultType(this), GetBase(), indices, parent)
         return FinishExpressionClone(this, cloned)
     }
 }
@@ -1410,25 +1436,20 @@ public class `VArray` <: Expression {
 }
 
 public class VArrayBuilder <: Expression {
-    private var item: Option<Value> = None
-    private var initFunc: Option<Value> = None
-
-    public init(size: Value, item: Option<Value>, initFunc: Option<Value>, parent: Option<Block>) {
+    public init(size: Value, item: Value, initFunc: Value, parent: Option<Block>) {
         super(ExprKind.VARRAY_BUILDER, MakeVArrayBuilderOperands(size, item, initFunc), parent)
-        this.item = item
-        this.initFunc = initFunc
     }
 
     public func GetSize(): Value {
         return GetOperand(0)
     }
 
-    public func GetItem(): Option<Value> {
-        return item
+    public func GetItem(): Value {
+        return GetOperand(1)
     }
 
-    public func GetInitFunc(): Option<Value> {
-        return initFunc
+    public func GetInitFunc(): Value {
+        return GetOperand(2)
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
@@ -1557,10 +1578,16 @@ public class Spawn <: Expression {
     }
 
     public func GetFuture(): Value {
+        if (IsExecuteClosure()) {
+            throw IllegalStateException("spawn future is unavailable for execute closure")
+        }
         return GetOperand(0)
     }
 
     public func GetClosure(): Value {
+        if (!IsExecuteClosure()) {
+            throw IllegalStateException("spawn closure is unavailable without execute closure")
+        }
         return GetOperand(0)
     }
 
@@ -1688,9 +1715,37 @@ public class ForInRange <: ForIn {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let clonedGroups = CloneForInGroups(this, builder, parent)
+        let parentGroup = parent.GetParentBlockGroup() ??
+            throw IllegalArgumentException("for-in clone requires parent block group")
+        let newCond = if (let Some(ownerFunc) <- parentGroup.GetOwnerFunc()) {
+            GetCond().Clone(builder, ownerFunc)
+        } else {
+            let ownerExpr = parentGroup.GetOwnerExpression() ??
+                throw IllegalArgumentException("for-in clone requires an owner expression")
+            let parentLambda = (ownerExpr as Lambda) ??
+                throw IllegalArgumentException("for-in clone owner expression must be lambda")
+            GetCond().Clone(builder, parentLambda)
+        }
+        let newBody = if (let Some(ownerFunc) <- parentGroup.GetOwnerFunc()) {
+            GetBody().Clone(builder, ownerFunc)
+        } else {
+            let ownerExpr = parentGroup.GetOwnerExpression() ??
+                throw IllegalArgumentException("for-in clone requires an owner expression")
+            let parentLambda = (ownerExpr as Lambda) ??
+                throw IllegalArgumentException("for-in clone owner expression must be lambda")
+            GetBody().Clone(builder, parentLambda)
+        }
+        let newLatch = if (let Some(ownerFunc) <- parentGroup.GetOwnerFunc()) {
+            GetLatch().Clone(builder, ownerFunc)
+        } else {
+            let ownerExpr = parentGroup.GetOwnerExpression() ??
+                throw IllegalArgumentException("for-in clone requires an owner expression")
+            let parentLambda = (ownerExpr as Lambda) ??
+                throw IllegalArgumentException("for-in clone owner expression must be lambda")
+            GetLatch().Clone(builder, parentLambda)
+        }
         let cloned = builder.CreateForInRange(RequiredResultType(this), GetInductionVar(), GetLoopCondVar(), parent)
-        cloned.InitBlockGroups(clonedGroups.body, clonedGroups.latch, clonedGroups.cond)
+        cloned.InitBlockGroups(newBody, newLatch, newCond)
         return FinishExpressionClone(this, cloned)
     }
 }
@@ -1705,9 +1760,37 @@ public class ForInIter <: ForIn {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let clonedGroups = CloneForInGroups(this, builder, parent)
+        let parentGroup = parent.GetParentBlockGroup() ??
+            throw IllegalArgumentException("for-in clone requires parent block group")
+        let newCond = if (let Some(ownerFunc) <- parentGroup.GetOwnerFunc()) {
+            GetCond().Clone(builder, ownerFunc)
+        } else {
+            let ownerExpr = parentGroup.GetOwnerExpression() ??
+                throw IllegalArgumentException("for-in clone requires an owner expression")
+            let parentLambda = (ownerExpr as Lambda) ??
+                throw IllegalArgumentException("for-in clone owner expression must be lambda")
+            GetCond().Clone(builder, parentLambda)
+        }
+        let newBody = if (let Some(ownerFunc) <- parentGroup.GetOwnerFunc()) {
+            GetBody().Clone(builder, ownerFunc)
+        } else {
+            let ownerExpr = parentGroup.GetOwnerExpression() ??
+                throw IllegalArgumentException("for-in clone requires an owner expression")
+            let parentLambda = (ownerExpr as Lambda) ??
+                throw IllegalArgumentException("for-in clone owner expression must be lambda")
+            GetBody().Clone(builder, parentLambda)
+        }
+        let newLatch = if (let Some(ownerFunc) <- parentGroup.GetOwnerFunc()) {
+            GetLatch().Clone(builder, ownerFunc)
+        } else {
+            let ownerExpr = parentGroup.GetOwnerExpression() ??
+                throw IllegalArgumentException("for-in clone requires an owner expression")
+            let parentLambda = (ownerExpr as Lambda) ??
+                throw IllegalArgumentException("for-in clone owner expression must be lambda")
+            GetLatch().Clone(builder, parentLambda)
+        }
         let cloned = builder.CreateForInIter(RequiredResultType(this), GetInductionVar(), GetLoopCondVar(), parent)
-        cloned.InitBlockGroups(clonedGroups.body, clonedGroups.latch, clonedGroups.cond)
+        cloned.InitBlockGroups(newBody, newLatch, newCond)
         return FinishExpressionClone(this, cloned)
     }
 }
@@ -1722,10 +1805,38 @@ public class ForInClosedRange <: ForIn {
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let clonedGroups = CloneForInGroups(this, builder, parent)
+        let parentGroup = parent.GetParentBlockGroup() ??
+            throw IllegalArgumentException("for-in clone requires parent block group")
+        let newCond = if (let Some(ownerFunc) <- parentGroup.GetOwnerFunc()) {
+            GetCond().Clone(builder, ownerFunc)
+        } else {
+            let ownerExpr = parentGroup.GetOwnerExpression() ??
+                throw IllegalArgumentException("for-in clone requires an owner expression")
+            let parentLambda = (ownerExpr as Lambda) ??
+                throw IllegalArgumentException("for-in clone owner expression must be lambda")
+            GetCond().Clone(builder, parentLambda)
+        }
+        let newBody = if (let Some(ownerFunc) <- parentGroup.GetOwnerFunc()) {
+            GetBody().Clone(builder, ownerFunc)
+        } else {
+            let ownerExpr = parentGroup.GetOwnerExpression() ??
+                throw IllegalArgumentException("for-in clone requires an owner expression")
+            let parentLambda = (ownerExpr as Lambda) ??
+                throw IllegalArgumentException("for-in clone owner expression must be lambda")
+            GetBody().Clone(builder, parentLambda)
+        }
+        let newLatch = if (let Some(ownerFunc) <- parentGroup.GetOwnerFunc()) {
+            GetLatch().Clone(builder, ownerFunc)
+        } else {
+            let ownerExpr = parentGroup.GetOwnerExpression() ??
+                throw IllegalArgumentException("for-in clone requires an owner expression")
+            let parentLambda = (ownerExpr as Lambda) ??
+                throw IllegalArgumentException("for-in clone owner expression must be lambda")
+            GetLatch().Clone(builder, parentLambda)
+        }
         let cloned = builder.CreateForInClosedRange(RequiredResultType(this), GetInductionVar(), GetLoopCondVar(),
             parent)
-        cloned.InitBlockGroups(clonedGroups.body, clonedGroups.latch, clonedGroups.cond)
+        cloned.InitBlockGroups(newBody, newLatch, newCond)
         return FinishExpressionClone(this, cloned)
     }
 }
@@ -1941,18 +2052,6 @@ public class Lambda <: Expression {
     }
 }
 
-private struct ForInClonedGroups {
-    public let body: BlockGroup
-    public let latch: BlockGroup
-    public let cond: BlockGroup
-
-    public init(body: BlockGroup, latch: BlockGroup, cond: BlockGroup) {
-        this.body = body
-        this.latch = latch
-        this.cond = cond
-    }
-}
-
 private func MakeUnaryOperands(operand: Value): ArrayList<Value> {
     let ops = ArrayList<Value>()
     ops.add(operand)
@@ -1983,15 +2082,11 @@ private func MakeRawArrayLiteralOperands(rawArray: Value, elements: ArrayList<Va
     return ops
 }
 
-private func MakeVArrayBuilderOperands(size: Value, item: Option<Value>, initFunc: Option<Value>): ArrayList<Value> {
+private func MakeVArrayBuilderOperands(size: Value, item: Value, initFunc: Value): ArrayList<Value> {
     let ops = ArrayList<Value>()
     ops.add(size)
-    if (let Some(itemValue) <- item) {
-        ops.add(itemValue)
-    }
-    if (let Some(initValue) <- initFunc) {
-        ops.add(initValue)
-    }
+    ops.add(item)
+    ops.add(initFunc)
     return ops
 }
 
@@ -2007,31 +2102,6 @@ private func MakeForInExecutionOrder(first: BlockGroup, second: BlockGroup, thir
     groups.add(second)
     groups.add(third)
     return groups
-}
-
-private func CloneForInGroups(source: ForIn, builder: CHIRBuilder, parent: Block): ForInClonedGroups {
-    return ForInClonedGroups(
-        CloneBlockGroupForStructuredExpr(source.GetBody(), builder, parent),
-        CloneBlockGroupForStructuredExpr(source.GetLatch(), builder, parent),
-        CloneBlockGroupForStructuredExpr(source.GetCond(), builder, parent)
-    )
-}
-
-private func CloneBlockGroupForStructuredExpr(source: BlockGroup, builder: CHIRBuilder, parent: Block): BlockGroup {
-    if (let Some(parentGroup) <- parent.GetParentBlockGroup()) {
-        if (let Some(ownerFunc) <- parentGroup.GetOwnerFunc()) {
-            return source.Clone(builder, ownerFunc)
-        }
-        if (let Some(ownerExpr) <- parentGroup.GetOwnerExpression()) {
-            if (let Some(ownerLambda) <- (ownerExpr as Lambda)) {
-                return source.Clone(builder, ownerLambda)
-            }
-        }
-        if (let Some(topLevelFunc) <- parentGroup.GetTopLevelFunc()) {
-            return source.Clone(builder, topLevelFunc)
-        }
-    }
-    throw IllegalArgumentException("structured expression clone requires a function or lambda owner")
 }
 
 private func FindRetValueInBlockGroup(group: BlockGroup): Option<LocalVar> {
