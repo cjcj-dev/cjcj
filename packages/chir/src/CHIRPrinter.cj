@@ -1,17 +1,18 @@
 package cangjie_compiler::chir
 
+import std.fs.File
+
 public class CHIRPrinter {
-    public init() {}
-
-    public func PrintPackage(pkg: Package): String {
-        return pkg.ToString()
+    public static func PrintPackage(pkg: Package): Unit {
+        println(pkg.ToString())
     }
 
-    public func PrintFunction(fn: Function): String {
-        return fn.ToString(0)
-    }
-
-    public func PrintBlockGroup(group: BlockGroup): String {
-        return group.ToString(0)
+    public static func PrintPackage(pkg: Package, fullPath: String): Unit {
+        try {
+            File.appendTo(fullPath, (pkg.ToString() + "\n").toArray())
+        } catch (e: Exception) {
+            eprintln("open file: " + fullPath + " failed!")
+            return
+        }
     }
 }

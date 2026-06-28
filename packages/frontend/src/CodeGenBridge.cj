@@ -52,7 +52,7 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
         return None
     }
     if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
-        print(ChirCHIRPrinter().PrintPackage(lowered))
+        ChirCHIRPrinter.PrintPackage(lowered)
     }
     return Some(lowered)
 }
