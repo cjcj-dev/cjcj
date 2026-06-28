@@ -67,7 +67,6 @@ public open class Base {
     public func CopyBaseInfoFrom(other: Base): Unit {
         annotationMap.CopyFrom(other.GetAnno())
         loc = other.GetDebugLocation()
-        attributes.CopyFrom(other.GetAttributeInfo())
     }
 
     public func BaseCommentToString(): String {
