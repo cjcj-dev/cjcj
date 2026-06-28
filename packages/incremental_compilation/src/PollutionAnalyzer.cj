@@ -1,6 +1,7 @@
 package cangjie_compiler::incremental_compilation
 
 import std.collection.*
+import cangjie_compiler::utils.CJC_ABORT
 
 public enum UseIndex {
     | BODY
@@ -43,7 +44,8 @@ public class TypeMap {
         if (let Some(pos) <- mangled.indexOf("<:")) {
             return mangled[0..pos]
         }
-        return mangled
+        CJC_ABORT()
+        return ""
     }
 
     public func FindExtendedTypeByExtendDeclMangleName(mangle: String): Option<String> {
@@ -544,17 +546,46 @@ public class PollutionAnalyzer {
     }
 
     public func PollutionForAddedNonTypeDecl(decl: IncrDecl): Unit {
-        if (!decl.IsImported() || decl.hasBody || decl.hasInitializer || IsInDeclWithAttribute(decl,
-            IncrAttribute.GENERIC)) {
+        if (decl.IsImported()) {
+            var srcImported = false
+            if (decl.astKind == IncrDeclKind.VAR_DECL) {
+                if (decl.TestAttr(IncrAttribute.GLOBAL) && decl.hasInitializer) {
+                    srcImported = true
+                }
+            } else if (decl.astKind == IncrDeclKind.FUNC_DECL) {
+                if (decl.hasBody) {
+                    srcImported = true
+                }
+            }
+            let genericImported = IsInDeclWithAttribute(decl, IncrAttribute.GENERIC)
+            if (srcImported || genericImported) {
+                AddToPollutedDecls(decl)
+            }
+        } else {
             AddToPollutedDecls(decl)
         }
         PollutionForAddedNonTypeDeclImpl(decl)
     }
 
     public func PollutionForAddedNonTypeDeclImpl(decl: IncrDecl): Unit {
-        for (member in GetMembers(decl)) {
-            AddToPollutedDecls(member)
-            PollutionForAddedNonTypeDeclImpl(member)
+        if (decl.astKind == IncrDeclKind.PROP_DECL) {
+            for (getter in decl.getters) {
+                AddToPollutedDecls(getter)
+                PollutionForAddedNonTypeDeclImpl(getter)
+            }
+            for (setter in decl.setters) {
+                AddToPollutedDecls(setter)
+                PollutionForAddedNonTypeDeclImpl(setter)
+            }
+        }
+        if (decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL) {
+            for (variable in GetMembers(decl)) {
+                if (variable.astKind != IncrDeclKind.VAR_DECL) {
+                    continue
+                }
+                AddToPollutedDecls(variable)
+                PollutionForAddedNonTypeDeclImpl(variable)
+            }
         }
         PollutedUnqualifiedUses(decl)
         PollutedGlobalChangeToPackageQualifiedUses(decl)
