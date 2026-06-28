@@ -267,6 +267,14 @@ public open class Type {
         }
         return false
     }
+
+    public func VisitTypeRecursively(visitor: (Type) -> Bool): Unit {
+        if (visitor(this)) {
+            for (ty in argTys) {
+                ty.VisitTypeRecursively(visitor)
+            }
+        }
+    }
 }
 
 public open class BuiltinType <: Type {
