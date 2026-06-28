@@ -90,8 +90,7 @@ private func optionValues(name: String): Array<OptionValue> {
             value("staticlib", "emit static library", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE]),
             value("dylib", "emit dynamic library", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE]),
             value("chir", "emit partially compiled package", [Backend.CJNATIVE], [Group.VISIBLE]),
-            value("obj", "emit obj", [Backend.CJNATIVE], [Group.VISIBLE]),
-            value("hotreload", "emit dynamic library with hot reload supports", [Backend.CJNATIVE], [Group.VISIBLE])
+            value("obj", "emit obj", [Backend.CJNATIVE], [Group.VISIBLE])
         ]
     }
     if (name == "compile_target_list") {
