@@ -2,11 +2,17 @@ package cangjie_compiler::parse
 
 import std.collection.*
 import cangjie_compiler::ast.MacroExpandDecl as AstMacroExpandDecl
+import cangjie_compiler::ast.ExprKind as AstExprKind
 import cangjie_compiler::ast.FuncBody as AstFuncBody
 import cangjie_compiler::ast.FuncParam as AstFuncParam
 import cangjie_compiler::ast.FuncParamList as AstFuncParamList
 import cangjie_compiler::ast.MacroInvocation as AstMacroInvocation
 import cangjie_compiler::ast.VarDecl as AstVarDecl
+
+private let G_NO_NEED_SEMI_EXPR_LIST: Array<ASTKind> = [
+    ASTKind.THROW_EXPR, ASTKind.RETURN_EXPR, ASTKind.ASSIGN_EXPR, ASTKind.UNARY_EXPR, ASTKind.SPAWN_EXPR,
+    ASTKind.IF_EXPR, ASTKind.TRY_EXPR, ASTKind.FOR_IN_EXPR, ASTKind.WHILE_EXPR
+]
 
 extend ParserImpl {
     public func ParseExpr(): Expr {
@@ -17,19 +23,12 @@ extend ParserImpl {
         if (ExprKindEquals(ek, ExprKind.UNKNOWN_EXPR) && Seeing(TokenKind.LET)) {
             return ParseLetPattern(ek)
         }
-        if (ExprKindEquals(ek, ExprKind.INDEX_EXPR)) {
-            let ret = ParseIndexAccess()
-            if (!SeeingExprOperator()) {
-                CheckWildcardInExpr(ret)
-            }
-            if (SeeingFakeOperator()) {
-                DiagExpectedOperatorOrEnd()
-                ConsumeUntilAny([TokenKind.NL])
-            }
-            return ret
+        let ret = if (ExprKindEquals(ek, ExprKind.INDEX_EXPR)) {
+            ParseIndexAccess()
+        } else {
+            let left = ParseUnaryExpr(ek)
+            ParseExprRhs(0, left, ek)
         }
-        let left = ParseUnaryExpr(ek)
-        let ret = ParseExprRhs(0, left, ek)
         if (ExprKindEquals(ek, ExprKind.VAR_INIT) && IsAssignmentExpressionRoot(ret)) {
             diag.DiagnoseRefactor(
                 DiagKindRefactor.PARSE_ERROR,
@@ -41,6 +40,28 @@ extend ParserImpl {
             !ExprKindEquals(ek, ExprKind.EXPR_IN_IF_COND_TUPLE) &&
             !ExprKindEquals(ek, ExprKind.EXPR_IN_WHILE_COND_TUPLE)) {
             CheckWildcardInExpr(ret)
+        }
+        if (Seeing(TokenKind.SEMI) && !G_NO_NEED_SEMI_EXPR_LIST.contains(ret.astKind)) {
+            ret.hasSemi = true
+            ret.semiPos = Peek().Begin()
+        }
+        if (let Some(macroExpr) <- (ret as MacroExpandExpr)) {
+            macroExpr.invocation.exprKind = match (ek) {
+                case ExprKind.ALL => AstExprKind.ALL
+                case ExprKind.VAR_INIT => AstExprKind.VAR_INIT
+                case ExprKind.INDEX_EXPR => AstExprKind.INDEX_EXPR
+                case ExprKind.IF_COND_EXPR => AstExprKind.IF_COND_EXPR
+                case ExprKind.WHILE_COND_EXPR => AstExprKind.WHILE_COND_EXPR
+                case ExprKind.LET_PATTERN => AstExprKind.LET_PATTERN
+                case ExprKind.LEFT_EXPR => AstExprKind.LEFT_EXPR
+                case ExprKind.EXPR_IN_TUPLE => AstExprKind.EXPR_IN_TUPLE
+                case ExprKind.EXPR_IN_IF_COND_TUPLE => AstExprKind.EXPR_IN_IF_COND_TUPLE
+                case ExprKind.EXPR_IN_WHILE_COND_TUPLE => AstExprKind.EXPR_IN_WHILE_COND_TUPLE
+                case ExprKind.EXPR_IN_ARRAY => AstExprKind.EXPR_IN_ARRAY
+                case ExprKind.EXPR_IN_CALLSUFFIX => AstExprKind.EXPR_IN_CALLSUFFIX
+                case ExprKind.EXPR_IN_ANNOTATION => AstExprKind.EXPR_IN_ANNOTATION
+                case ExprKind.UNKNOWN_EXPR => AstExprKind.UNKNOWN_EXPR
+            }
         }
         if (SeeingFakeOperator()) {
             DiagExpectedOperatorOrEnd()
@@ -173,13 +194,11 @@ extend ParserImpl {
                 base = incOrDec
                 continue
             }
-            if (!newlineSkipped && Seeing(TokenKind.LCURL) && (base.astKind == ASTKind.CALL_EXPR ||
-                base.astKind == ASTKind.REF_EXPR || base.astKind == ASTKind.MEMBER_ACCESS ||
-                base.astKind == ASTKind.OPTIONAL_EXPR || base.astKind == ASTKind.ARRAY_EXPR ||
-                base.astKind == ASTKind.MACRO_EXPAND_EXPR)) {
+            if (!newlineSkipped && Seeing(TokenKind.LCURL)) {
                 let trailing = TrailingClosureExpr()
-                trailing.expr = base
                 trailing.lambda = ParseLambdaExprWithTrailingClosure()
+                CheckBaseOfTrailingClosureExpr(base)
+                trailing.expr = base
                 trailing.begin = base.begin
                 if (let Some(lambda) <- trailing.lambda) { trailing.end = lambda.end }
                 base = trailing
@@ -196,6 +215,32 @@ extend ParserImpl {
             base.hasQuestSuffix = true
         }
         return base
+    }
+
+    private func CheckBaseOfTrailingClosureExpr(baseExpr: Expr): Unit {
+        if (baseExpr.TestAttr(Attribute.IS_BROKEN)) {
+            return
+        }
+        if (![ASTKind.MACRO_EXPAND_EXPR, ASTKind.ARRAY_EXPR, ASTKind.OPTIONAL_EXPR, ASTKind.CALL_EXPR,
+            ASTKind.REF_EXPR, ASTKind.MEMBER_ACCESS].contains(baseExpr.astKind)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.PARSE_ERROR,
+                baseExpr.begin,
+                "trailing closure can only be used on function calls with function or variable names")
+        }
+        if (baseExpr.astKind == ASTKind.CALL_EXPR) {
+            let callExpr = (baseExpr as CallExpr).getOrThrow()
+            let baseFunc = callExpr.baseFunc.getOrThrow()
+            if (baseFunc.TestAttr(Attribute.IS_BROKEN)) {
+                return
+            }
+            if (![ASTKind.MEMBER_ACCESS, ASTKind.REF_EXPR, ASTKind.OPTIONAL_EXPR].contains(baseFunc.astKind)) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    baseExpr.begin,
+                    "trailing closure can only be used on function calls with function or variable names")
+            }
+        }
     }
 
     public func SeeingOptionalSuffix(): Bool {
@@ -1272,9 +1317,15 @@ extend ParserImpl {
         let token = Expect(TokenKind.SPAWN, "expected 'spawn'")
         ret.spawnPos = token.Begin()
         ret.begin = token.Begin()
-        if (Skip(TokenKind.LPAREN)) {
-            ret.leftParenPos = lastToken.Begin()
-            if (!Seeing(TokenKind.RPAREN)) {
+        if (Seeing(TokenKind.LPAREN)) {
+            if (newlineSkipped) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.PARSE_ERROR,
+                    firstNLPosition,
+                    "unexpected newlines between 'spawn' and the argument followed it")
+            }
+            if (Skip(TokenKind.LPAREN)) {
+                ret.leftParenPos = lastToken.Begin()
                 ret.arg = ParseExpr()
             }
             ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after spawn argument").Begin()
@@ -1284,7 +1335,7 @@ extend ParserImpl {
         } else if (Seeing(TokenKind.LCURL)) {
             ret.task = ParseLambdaExprWithTrailingClosure()
         } else {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected lambda block after spawn")
+            DiagExpectedExpression()
             let invalid = InvalidExpr(Peek().Begin())
             ret.task = invalid
             ret.isBroken = true
@@ -1292,6 +1343,18 @@ extend ParserImpl {
         if (let Some(task) <- ret.task) {
             if (task.astKind != ASTKind.LAMBDA_EXPR) {
                 ret.isBroken = true
+            }
+            if (let Some(lambda) <- (task as LambdaExpr)) {
+                let body = lambda.funcBody.getOrThrow()
+                if (!body.paramLists[0].params.isEmpty()) {
+                    let params = body.paramLists[0].params
+                    let argument = if (params.size == 1) { "argument" } else { "arguments" }
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.PARSE_ERROR,
+                        params[0].begin,
+                        "expected no ${argument} in lambda expression of spawn")
+                    ret.isBroken = true
+                }
             }
             ret.end = task.end
         }
