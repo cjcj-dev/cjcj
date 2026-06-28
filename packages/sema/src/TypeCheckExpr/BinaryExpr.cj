@@ -9,6 +9,9 @@ public func SelfhostPortStatus_TypeCheckExpr_BinaryExpr(): Bool {
     return true
 }
 
+public type BinaryOperandSynthesizer = (Expr) -> Ty
+public type BinaryOperandChecker = (Ty, Expr) -> Bool
+
 private func IsArithmeticOperator(op: TokenKind): Bool {
     return op == TokenKind.ADD || op == TokenKind.SUB || op == TokenKind.MUL ||
         op == TokenKind.DIV || op == TokenKind.EXP || op == TokenKind.MOD ||
@@ -86,6 +89,22 @@ private func ClearExprKeepTargets(expr: Expr): Unit {
     }
 }
 
+private func SynBinaryOperand(typeManager: TypeManager, expr: Expr,
+    synthesizer: Option<BinaryOperandSynthesizer>): Ty {
+    if (let Some(syn) <- synthesizer) {
+        return syn(expr)
+    }
+    return SynExprShallow(typeManager, expr)
+}
+
+private func ChkBinaryOperand(typeManager: TypeManager, target: Ty, expr: Expr,
+    ctx: Option<ASTContext>, checker: Option<BinaryOperandChecker>): Bool {
+    if (let Some(chk) <- checker) {
+        return chk(target, expr)
+    }
+    return ChkExprShallow(typeManager, target, expr, ctx: ctx)
+}
+
 private func PropagateBinaryDesugarTarget(be: BinaryExpr, desugar: Expr): Unit {
     if (let Some(callExpr) <- (desugar as CallExpr)) {
         if (let Some(resolved) <- callExpr.resolvedFunction) {
@@ -115,7 +134,8 @@ private func ShouldTryBinaryOverload(be: BinaryExpr): Bool {
 }
 
 private func CheckRightOperandFromLeft(typeManager: TypeManager, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Bool {
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Bool {
     if (be.op != TokenKind.EQUAL && be.op != TokenKind.NOTEQ) {
         return false
     }
@@ -124,7 +144,7 @@ private func CheckRightOperandFromLeft(typeManager: TypeManager, be: BinaryExpr,
     }
     let leftExpr = be.leftExpr.getOrThrow()
     let rightExpr = be.rightExpr.getOrThrow()
-    let leftTy = SynExprShallow(typeManager, leftExpr)
+    let leftTy = SynBinaryOperand(typeManager, leftExpr, synthesizer)
     if (!Ty.IsTyCorrect(leftTy)) {
         return false
     }
@@ -133,21 +153,22 @@ private func CheckRightOperandFromLeft(typeManager: TypeManager, be: BinaryExpr,
         return false
     }
     ClearExprKeepTargets(rightExpr)
-    if (ChkExprShallow(typeManager, targetLeft, rightExpr, ctx: ctx)) {
+    if (ChkBinaryOperand(typeManager, targetLeft, rightExpr, ctx, checker)) {
         return true
     }
     return false
 }
 
 private func BinaryOperandsReady(typeManager: TypeManager, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Bool {
-    if (CheckRightOperandFromLeft(typeManager, be, ctx: ctx)) {
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Bool {
+    if (CheckRightOperandFromLeft(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
         return true
     }
     if (let Some(leftExpr) <- be.leftExpr) {
         if (let Some(rightExpr) <- be.rightExpr) {
-            let leftTy = SynExprShallow(typeManager, leftExpr)
-            let rightTy = SynExprShallow(typeManager, rightExpr)
+            let leftTy = SynBinaryOperand(typeManager, leftExpr, synthesizer)
+            let rightTy = SynBinaryOperand(typeManager, rightExpr, synthesizer)
             if (Ty.IsTyCorrect(leftTy) && Ty.IsTyCorrect(rightTy)) {
                 let _ = TcReplaceIdeal(typeManager, leftExpr)
                 let _ = TcReplaceIdeal(typeManager, rightExpr)
@@ -159,13 +180,15 @@ private func BinaryOperandsReady(typeManager: TypeManager, be: BinaryExpr,
 }
 
 private func TrySynBinaryOverload(typeManager: TypeManager, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Option<Ty> {
-    if (!ShouldTryBinaryOverload(be) || !BinaryOperandsReady(typeManager, be, ctx: ctx)) {
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Option<Ty> {
+    if (!ShouldTryBinaryOverload(be) ||
+        !BinaryOperandsReady(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
         return None
     }
     DesugarOperatorOverloadExpr(be)
     if (let Some(desugar) <- be.desugarExpr) {
-        let desugarTy = SynExprShallow(typeManager, desugar)
+        let desugarTy = SynBinaryOperand(typeManager, desugar, synthesizer)
         if (Ty.IsTyCorrect(desugarTy)) {
             PropagateBinaryDesugarTarget(be, desugar)
             be.SetTy(desugarTy)
@@ -178,13 +201,15 @@ private func TrySynBinaryOverload(typeManager: TypeManager, be: BinaryExpr,
 }
 
 private func TryChkBinaryOverload(typeManager: TypeManager, target: Ty, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Bool {
-    if (!ShouldTryBinaryOverload(be) || !BinaryOperandsReady(typeManager, be, ctx: ctx)) {
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Bool {
+    if (!ShouldTryBinaryOverload(be) ||
+        !BinaryOperandsReady(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
         return false
     }
     DesugarOperatorOverloadExpr(be)
     if (let Some(desugar) <- be.desugarExpr) {
-        if (ChkExprShallow(typeManager, target, desugar, ctx: ctx)) {
+        if (ChkBinaryOperand(typeManager, target, desugar, ctx, checker)) {
             PropagateBinaryDesugarTarget(be, desugar)
             be.SetTy(TcTyOrInvalid(desugar))
             return true
@@ -412,26 +437,28 @@ private func BuiltinBinaryResultTy(op: TokenKind, operandTy: Ty, isArithmetic: B
 }
 
 private func SynBuiltinBinaryFromRight(typeManager: TypeManager, be: BinaryExpr,
-    isArithmetic: Bool, ctx!: Option<ASTContext> = None): Option<Ty> {
+    isArithmetic: Bool, ctx!: Option<ASTContext> = None,
+    synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Option<Ty> {
     if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
         be.SetTy(TypeManager.GetInvalidTy())
         return Some(TypeManager.GetInvalidTy())
     }
     let leftExpr = be.leftExpr.getOrThrow()
     let rightExpr = be.rightExpr.getOrThrow()
-    let rightTy = SynExprShallow(typeManager, rightExpr)
+    let rightTy = SynBinaryOperand(typeManager, rightExpr, synthesizer)
     if (!Ty.IsTyCorrect(rightTy)) {
         be.SetTy(TypeManager.GetInvalidTy())
         return None
     }
     let targetRight = Ty.GetPrimitiveUpperBound(TcReplaceIdeal(typeManager, rightExpr))
     if (!IsBinaryCandidateTy(be.op, targetRight)) {
-        let _ = SynExprShallow(typeManager, leftExpr)
+        let _ = SynBinaryOperand(typeManager, leftExpr, synthesizer)
         be.SetTy(TypeManager.GetInvalidTy())
         return Some(TypeManager.GetInvalidTy())
     }
     ClearExprKeepTargets(leftExpr)
-    if (ChkExprShallow(typeManager, targetRight, leftExpr, ctx: ctx)) {
+    if (ChkBinaryOperand(typeManager, targetRight, leftExpr, ctx, checker)) {
         let solvedRight = typeManager.TryGreedySubst(targetRight)
         rightExpr.SetTy(solvedRight)
         let resultTy = BuiltinBinaryResultTy(be.op, solvedRight, isArithmetic)
@@ -443,24 +470,26 @@ private func SynBuiltinBinaryFromRight(typeManager: TypeManager, be: BinaryExpr,
 }
 
 private func SynBuiltinBinaryFromLeft(typeManager: TypeManager, be: BinaryExpr,
-    isArithmetic: Bool, ctx!: Option<ASTContext> = None): Ty {
+    isArithmetic: Bool, ctx!: Option<ASTContext> = None,
+    synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Ty {
     if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
         return BinaryInvalid(be)
     }
     let leftExpr = be.leftExpr.getOrThrow()
     let rightExpr = be.rightExpr.getOrThrow()
-    let leftTy = SynExprShallow(typeManager, leftExpr)
+    let leftTy = SynBinaryOperand(typeManager, leftExpr, synthesizer)
     if (!Ty.IsTyCorrect(leftTy)) {
-        let _ = SynExprShallow(typeManager, rightExpr)
+        let _ = SynBinaryOperand(typeManager, rightExpr, synthesizer)
         return BinaryInvalid(be)
     }
     let targetLeft = Ty.GetPrimitiveUpperBound(TcReplaceIdeal(typeManager, leftExpr))
     if (!IsBinaryCandidateTy(be.op, targetLeft)) {
-        let _ = SynExprShallow(typeManager, rightExpr)
+        let _ = SynBinaryOperand(typeManager, rightExpr, synthesizer)
         return BinaryInvalid(be)
     }
     ClearExprKeepTargets(rightExpr)
-    if (ChkExprShallow(typeManager, targetLeft, rightExpr, ctx: ctx)) {
+    if (ChkBinaryOperand(typeManager, targetLeft, rightExpr, ctx, checker)) {
         let solvedLeft = typeManager.TryGreedySubst(targetLeft)
         leftExpr.SetTy(solvedLeft)
         let resultTy = BuiltinBinaryResultTy(be.op, solvedLeft, isArithmetic)
@@ -471,28 +500,33 @@ private func SynBuiltinBinaryFromLeft(typeManager: TypeManager, be: BinaryExpr,
 }
 
 private func SynArithmeticOrRelationalExpr(typeManager: TypeManager, be: BinaryExpr,
-    isArithmetic!: Bool = true, ctx!: Option<ASTContext> = None): Ty {
+    isArithmetic!: Bool = true, ctx!: Option<ASTContext> = None,
+    synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Ty {
     if (isArithmetic && be.op == TokenKind.EXP) {
-        if (let Some(tys) <- SynthesizeOperands(typeManager, be)) {
+        if (let Some(tys) <- SynthesizeOperands(typeManager, be, synthesizer: synthesizer)) {
             return SynExpoExpr(typeManager, be, tys[0], tys[1])
         }
         return BinaryInvalid(be)
     }
-    if (let Some(resultTy) <- SynBuiltinBinaryFromRight(typeManager, be, isArithmetic, ctx: ctx)) {
+    if (let Some(resultTy) <- SynBuiltinBinaryFromRight(typeManager, be, isArithmetic, ctx: ctx,
+        synthesizer: synthesizer, checker: checker)) {
         if (Ty.IsTyCorrect(resultTy)) {
             return resultTy
         }
         return BinaryInvalid(be)
     }
     ClearExprKeepTargets(be)
-    return SynBuiltinBinaryFromLeft(typeManager, be, isArithmetic, ctx: ctx)
+    return SynBuiltinBinaryFromLeft(typeManager, be, isArithmetic, ctx: ctx,
+        synthesizer: synthesizer, checker: checker)
 }
 
-private func SynthesizeOperands(typeManager: TypeManager, be: BinaryExpr): Option<(Ty, Ty)> {
+private func SynthesizeOperands(typeManager: TypeManager, be: BinaryExpr,
+    synthesizer!: Option<BinaryOperandSynthesizer> = None): Option<(Ty, Ty)> {
     if (let Some(leftExpr) <- be.leftExpr) {
         if (let Some(rightExpr) <- be.rightExpr) {
-            let leftTy = SynExprShallow(typeManager, leftExpr)
-            let rightTy = SynExprShallow(typeManager, rightExpr)
+            let leftTy = SynBinaryOperand(typeManager, leftExpr, synthesizer)
+            let rightTy = SynBinaryOperand(typeManager, rightExpr, synthesizer)
             if (Ty.IsTyCorrect(leftTy) && Ty.IsTyCorrect(rightTy)) {
                 return Some((TcReplaceIdeal(typeManager, leftExpr), TcReplaceIdeal(typeManager, rightExpr)))
             }
@@ -502,8 +536,10 @@ private func SynthesizeOperands(typeManager: TypeManager, be: BinaryExpr): Optio
 }
 
 private func SynArithmeticExpr(typeManager: TypeManager, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Ty {
-    return SynArithmeticOrRelationalExpr(typeManager, be, isArithmetic: true, ctx: ctx)
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Ty {
+    return SynArithmeticOrRelationalExpr(typeManager, be, isArithmetic: true, ctx: ctx,
+        synthesizer: synthesizer, checker: checker)
 }
 
 private func SynExpoExpr(typeManager: TypeManager, be: BinaryExpr, leftTy: Ty, rightTy: Ty): Ty {
@@ -523,8 +559,9 @@ private func SynExpoExpr(typeManager: TypeManager, be: BinaryExpr, leftTy: Ty, r
 }
 
 private func SynRelationalExpr(typeManager: TypeManager, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Ty {
-    if (let Some(tys) <- SynthesizeOperands(typeManager, be)) {
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Ty {
+    if (let Some(tys) <- SynthesizeOperands(typeManager, be, synthesizer: synthesizer)) {
         let leftTy = tys[0]
         let rightTy = tys[1]
         if (leftTy.IsTuple() || rightTy.IsTuple()) {
@@ -539,7 +576,8 @@ private func SynRelationalExpr(typeManager: TypeManager, be: BinaryExpr,
         }
     }
     ClearExprKeepTargets(be)
-    return SynArithmeticOrRelationalExpr(typeManager, be, isArithmetic: false, ctx: ctx)
+    return SynArithmeticOrRelationalExpr(typeManager, be, isArithmetic: false, ctx: ctx,
+        synthesizer: synthesizer, checker: checker)
 }
 
 private func HasSideEffect(expr: Expr): Bool {
@@ -635,15 +673,26 @@ private func CheckTupleCanEqual(typeManager: TypeManager, be: BinaryExpr, leftTy
     return false
 }
 
-private func SynLogicalExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
+private func SynLogicalExpr(typeManager: TypeManager, be: BinaryExpr,
+    checker!: Option<BinaryOperandChecker> = None): Ty {
     var ok = true
     if (let Some(leftExpr) <- be.leftExpr) {
-        ok = TcCheckCondition(typeManager, leftExpr) && ok
+        let leftOk = if (let Some(chk) <- checker) {
+            chk(TcBoolTy(), leftExpr)
+        } else {
+            TcCheckCondition(typeManager, leftExpr)
+        }
+        ok = leftOk && ok
     } else {
         ok = false
     }
     if (let Some(rightExpr) <- be.rightExpr) {
-        ok = TcCheckCondition(typeManager, rightExpr) && ok
+        let rightOk = if (let Some(chk2) <- checker) {
+            chk2(TcBoolTy(), rightExpr)
+        } else {
+            TcCheckCondition(typeManager, rightExpr)
+        }
+        ok = rightOk && ok
     } else {
         ok = false
     }
@@ -655,8 +704,9 @@ private func SynLogicalExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
     return BinaryInvalid(be)
 }
 
-private func SynShiftExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
-    if (let Some(tys) <- SynthesizeOperands(typeManager, be)) {
+private func SynShiftExpr(typeManager: TypeManager, be: BinaryExpr,
+    synthesizer!: Option<BinaryOperandSynthesizer> = None): Ty {
+    if (let Some(tys) <- SynthesizeOperands(typeManager, be, synthesizer: synthesizer)) {
         let leftTy = tys[0]
         let rightTy = tys[1]
         if ((leftTy.IsIntegerSubType() || leftTy.IsNothing()) && (rightTy.IsIntegerSubType() || rightTy.IsNothing())) {
@@ -667,8 +717,9 @@ private func SynShiftExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
     return BinaryInvalid(be)
 }
 
-private func SynPipelineExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
-    if (let Some(tys) <- SynthesizeOperands(typeManager, be)) {
+private func SynPipelineExpr(typeManager: TypeManager, be: BinaryExpr,
+    synthesizer!: Option<BinaryOperandSynthesizer> = None): Ty {
+    if (let Some(tys) <- SynthesizeOperands(typeManager, be, synthesizer: synthesizer)) {
         let leftTy = tys[0]
         let rightTy = tys[1]
         if (let Some(funcTy) <- (rightTy as FuncTy)) {
@@ -682,8 +733,9 @@ private func SynPipelineExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
     return BinaryInvalid(be)
 }
 
-private func SynCompositionExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
-    if (let Some(tys) <- SynthesizeOperands(typeManager, be)) {
+private func SynCompositionExpr(typeManager: TypeManager, be: BinaryExpr,
+    synthesizer!: Option<BinaryOperandSynthesizer> = None): Ty {
+    if (let Some(tys) <- SynthesizeOperands(typeManager, be, synthesizer: synthesizer)) {
         let leftTy = tys[0]
         let rightTy = tys[1]
         if (let Some(leftFunc) <- (leftTy as FuncTy)) {
@@ -701,16 +753,17 @@ private func SynCompositionExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
     return BinaryInvalid(be)
 }
 
-private func SynFlowExpr(typeManager: TypeManager, be: BinaryExpr): Ty {
+private func SynFlowExpr(typeManager: TypeManager, be: BinaryExpr,
+    synthesizer!: Option<BinaryOperandSynthesizer> = None): Ty {
     let desugarResult = TrySynFlowDesugar(typeManager, be)
     if (desugarResult[0]) {
         return desugarResult[1]
     }
     if (be.op == TokenKind.PIPELINE) {
-        return SynPipelineExpr(typeManager, be)
+        return SynPipelineExpr(typeManager, be, synthesizer: synthesizer)
     }
     if (be.op == TokenKind.COMPOSITION) {
-        return SynCompositionExpr(typeManager, be)
+        return SynCompositionExpr(typeManager, be, synthesizer: synthesizer)
     }
     return BinaryInvalid(be)
 }
@@ -739,9 +792,10 @@ private func ChkFlowExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr): 
 }
 
 private func SynCoalescingExpr(typeManager: TypeManager, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Ty {
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Ty {
     if (let Some(leftExpr) <- be.leftExpr) {
-        let leftTy = SynExprShallow(typeManager, leftExpr)
+        let leftTy = SynBinaryOperand(typeManager, leftExpr, synthesizer)
         if (!Ty.IsTyCorrect(leftTy)) {
             return BinaryInvalid(be)
         }
@@ -751,7 +805,7 @@ private func SynCoalescingExpr(typeManager: TypeManager, be: BinaryExpr,
         }
         let unboxedTy = concreteLeftTy.typeArgs[0]
         if (let Some(rightExpr) <- be.rightExpr) {
-            if (ChkExprShallow(typeManager, unboxedTy, rightExpr, ctx: ctx)) {
+            if (ChkBinaryOperand(typeManager, unboxedTy, rightExpr, ctx, checker)) {
                 be.SetTy(unboxedTy)
                 return unboxedTy
             }
@@ -761,9 +815,10 @@ private func SynCoalescingExpr(typeManager: TypeManager, be: BinaryExpr,
 }
 
 private func ChkCoalescingExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Bool {
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Bool {
     if (let Some(leftExpr) <- be.leftExpr) {
-        let leftTy = SynExprShallow(typeManager, leftExpr)
+        let leftTy = SynBinaryOperand(typeManager, leftExpr, synthesizer)
         if (!Ty.IsTyCorrect(leftTy)) {
             let _ = BinaryInvalid(be)
             return false
@@ -779,7 +834,7 @@ private func ChkCoalescingExpr(typeManager: TypeManager, target: Ty, be: BinaryE
             return false
         }
         if (let Some(rightExpr) <- be.rightExpr) {
-            if (ChkExprShallow(typeManager, target, rightExpr, ctx: ctx)) {
+            if (ChkBinaryOperand(typeManager, target, rightExpr, ctx, checker)) {
                 be.SetTy(target)
                 return true
             }
@@ -790,7 +845,7 @@ private func ChkCoalescingExpr(typeManager: TypeManager, target: Ty, be: BinaryE
 }
 
 private func ChkConcreteBinaryOperandPair(typeManager: TypeManager, candidateTy: Ty, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Bool {
+    ctx!: Option<ASTContext> = None, checker!: Option<BinaryOperandChecker> = None): Bool {
     if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
         return false
     }
@@ -798,8 +853,8 @@ private func ChkConcreteBinaryOperandPair(typeManager: TypeManager, candidateTy:
     let rightExpr = be.rightExpr.getOrThrow()
     ClearExprKeepTargets(leftExpr)
     ClearExprKeepTargets(rightExpr)
-    let leftOk = ChkExprShallow(typeManager, candidateTy, leftExpr, ctx: ctx)
-    let rightOk = ChkExprShallow(typeManager, candidateTy, rightExpr, ctx: ctx)
+    let leftOk = ChkBinaryOperand(typeManager, candidateTy, leftExpr, ctx, checker)
+    let rightOk = ChkBinaryOperand(typeManager, candidateTy, rightExpr, ctx, checker)
     if (leftOk && rightOk) {
         be.SetTy(candidateTy)
         return true
@@ -808,7 +863,7 @@ private func ChkConcreteBinaryOperandPair(typeManager: TypeManager, candidateTy:
 }
 
 private func ChkExpoExprWithTarget(typeManager: TypeManager, target: Ty, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Bool {
+    ctx!: Option<ASTContext> = None, checker!: Option<BinaryOperandChecker> = None): Bool {
     if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
         let _ = BinaryInvalid(be)
         return false
@@ -821,8 +876,8 @@ private func ChkExpoExprWithTarget(typeManager: TypeManager, target: Ty, be: Bin
     if (typeManager.IsSubtype(i64Ty, target)) {
         ClearExprKeepTargets(leftExpr)
         ClearExprKeepTargets(rightExpr)
-        let leftI64Ok = ChkExprShallow(typeManager, i64Ty, leftExpr, ctx: ctx)
-        let rightU64Ok = ChkExprShallow(typeManager, u64Ty, rightExpr, ctx: ctx)
+        let leftI64Ok = ChkBinaryOperand(typeManager, i64Ty, leftExpr, ctx, checker)
+        let rightU64Ok = ChkBinaryOperand(typeManager, u64Ty, rightExpr, ctx, checker)
         if (leftI64Ok && rightU64Ok) {
             be.SetTy(i64Ty)
             return true
@@ -831,21 +886,21 @@ private func ChkExpoExprWithTarget(typeManager: TypeManager, target: Ty, be: Bin
     if (typeManager.IsSubtype(f64Ty, target)) {
         ClearExprKeepTargets(leftExpr)
         ClearExprKeepTargets(rightExpr)
-        let leftF64Ok = ChkExprShallow(typeManager, f64Ty, leftExpr, ctx: ctx)
+        let leftF64Ok = ChkBinaryOperand(typeManager, f64Ty, leftExpr, ctx, checker)
         ClearExprKeepTargets(rightExpr)
-        let rightI64Ok = ChkExprShallow(typeManager, i64Ty, rightExpr, ctx: ctx)
+        let rightI64Ok = ChkBinaryOperand(typeManager, i64Ty, rightExpr, ctx, checker)
         ClearExprKeepTargets(rightExpr)
-        let rightF64Ok = ChkExprShallow(typeManager, f64Ty, rightExpr, ctx: ctx)
+        let rightF64Ok = ChkBinaryOperand(typeManager, f64Ty, rightExpr, ctx, checker)
         if (leftF64Ok && rightI64Ok && !rightF64Ok) {
             ClearExprKeepTargets(rightExpr)
-            if (ChkExprShallow(typeManager, i64Ty, rightExpr, ctx: ctx)) {
+            if (ChkBinaryOperand(typeManager, i64Ty, rightExpr, ctx, checker)) {
                 be.SetTy(f64Ty)
                 return true
             }
         }
         if (leftF64Ok && rightF64Ok && !rightI64Ok) {
             ClearExprKeepTargets(rightExpr)
-            if (ChkExprShallow(typeManager, f64Ty, rightExpr, ctx: ctx)) {
+            if (ChkBinaryOperand(typeManager, f64Ty, rightExpr, ctx, checker)) {
                 be.SetTy(f64Ty)
                 return true
             }
@@ -860,19 +915,19 @@ private func ChkExpoExprWithTarget(typeManager: TypeManager, target: Ty, be: Bin
 }
 
 private func ChkArithmeticExprBuiltin(typeManager: TypeManager, target: Ty, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Bool {
+    ctx!: Option<ASTContext> = None, checker!: Option<BinaryOperandChecker> = None): Bool {
     let targetTy = UnboxOptionType(target)
     if (!Ty.IsTyCorrect(targetTy)) {
         return false
     }
     if (be.op == TokenKind.EXP) {
-        return ChkExpoExprWithTarget(typeManager, targetTy, be, ctx: ctx)
+        return ChkExpoExprWithTarget(typeManager, targetTy, be, ctx: ctx, checker: checker)
     }
     let candidateKinds = GetConcreteBinaryCandidateKinds(be.op)
     for (kindValue in candidateKinds) {
         let candidateTy = TypeManager.GetPrimitiveTy(kindValue)
         if (typeManager.IsSubtype(candidateTy, targetTy) &&
-            ChkConcreteBinaryOperandPair(typeManager, candidateTy, be, ctx: ctx)) {
+            ChkConcreteBinaryOperandPair(typeManager, candidateTy, be, ctx: ctx, checker: checker)) {
             return true
         }
     }
@@ -886,11 +941,12 @@ private func TargetAcceptsBool(typeManager: TypeManager, target: Ty): Bool {
 }
 
 private func ChkRelationalExprBuiltin(typeManager: TypeManager, target: Ty, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Bool {
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Bool {
     if (!TargetAcceptsBool(typeManager, target)) {
         return false
     }
-    let relationTy = SynRelationalExpr(typeManager, be, ctx: ctx)
+    let relationTy = SynRelationalExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
     if (Ty.IsTyCorrect(relationTy) && relationTy.IsBoolean()) {
         return true
     }
@@ -899,7 +955,7 @@ private func ChkRelationalExprBuiltin(typeManager: TypeManager, target: Ty, be: 
 }
 
 private func ChkLogicalExprBuiltin(typeManager: TypeManager, target: Ty, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Bool {
+    ctx!: Option<ASTContext> = None, checker!: Option<BinaryOperandChecker> = None): Bool {
     if (!TargetAcceptsBool(typeManager, target)) {
         let _ = BinaryInvalid(be)
         return false
@@ -913,8 +969,8 @@ private func ChkLogicalExprBuiltin(typeManager: TypeManager, target: Ty, be: Bin
     let rightExpr = be.rightExpr.getOrThrow()
     ClearExprKeepTargets(leftExpr)
     ClearExprKeepTargets(rightExpr)
-    let leftOk = ChkExprShallow(typeManager, boolTy, leftExpr, ctx: ctx)
-    let rightOk = ChkExprShallow(typeManager, boolTy, rightExpr, ctx: ctx)
+    let leftOk = ChkBinaryOperand(typeManager, boolTy, leftExpr, ctx, checker)
+    let rightOk = ChkBinaryOperand(typeManager, boolTy, rightExpr, ctx, checker)
     if (leftOk && rightOk) {
         be.SetTy(boolTy)
         return true
@@ -924,7 +980,8 @@ private func ChkLogicalExprBuiltin(typeManager: TypeManager, target: Ty, be: Bin
 }
 
 private func ChkShiftExprBuiltin(typeManager: TypeManager, target: Ty, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Bool {
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Bool {
     if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
         let _ = BinaryInvalid(be)
         return false
@@ -933,9 +990,9 @@ private func ChkShiftExprBuiltin(typeManager: TypeManager, target: Ty, be: Binar
     let rightExpr = be.rightExpr.getOrThrow()
     ClearExprKeepTargets(leftExpr)
     ClearExprKeepTargets(rightExpr)
-    let leftOk = ChkExprShallow(typeManager, target, leftExpr, ctx: ctx)
+    let leftOk = ChkBinaryOperand(typeManager, target, leftExpr, ctx, checker)
     let leftTy = leftExpr.GetTy() ?? TypeManager.GetInvalidTy()
-    let rightTy = SynExprShallow(typeManager, rightExpr)
+    let rightTy = SynBinaryOperand(typeManager, rightExpr, synthesizer)
     if (!leftOk || !Ty.IsTyCorrect(rightTy)) {
         let _ = BinaryInvalid(be)
         return false
@@ -951,24 +1008,27 @@ private func ChkShiftExprBuiltin(typeManager: TypeManager, target: Ty, be: Binar
 }
 
 private func ChkBuiltinBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Bool {
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Bool {
     if (IsArithmeticOperator(be.op)) {
-        return ChkArithmeticExprBuiltin(typeManager, target, be, ctx: ctx)
+        return ChkArithmeticExprBuiltin(typeManager, target, be, ctx: ctx, checker: checker)
     }
     if (IsRelationalOperator(be.op)) {
-        return ChkRelationalExprBuiltin(typeManager, target, be, ctx: ctx)
+        return ChkRelationalExprBuiltin(typeManager, target, be, ctx: ctx,
+            synthesizer: synthesizer, checker: checker)
     }
     if (IsLogicalOperator(be.op)) {
-        return ChkLogicalExprBuiltin(typeManager, target, be, ctx: ctx)
+        return ChkLogicalExprBuiltin(typeManager, target, be, ctx: ctx, checker: checker)
     }
     if (IsShiftOperator(be.op)) {
-        return ChkShiftExprBuiltin(typeManager, target, be, ctx: ctx)
+        return ChkShiftExprBuiltin(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
     }
     return false
 }
 
 public func SynBinaryExpr(typeManager: TypeManager, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Ty {
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Ty {
     if (let Some(desugar) <- be.desugarExpr) {
         if (let Some(desugarTy) <- desugar.GetTy()) {
             PropagateBinaryDesugarTarget(be, desugar)
@@ -980,64 +1040,68 @@ public func SynBinaryExpr(typeManager: TypeManager, be: BinaryExpr,
         return BinaryInvalid(be)
     }
     if (IsLogicalOperator(be.op)) {
-        return SynLogicalExpr(typeManager, be)
+        return SynLogicalExpr(typeManager, be, checker: checker)
     }
     if (IsArithmeticOperator(be.op)) {
-        let builtinTy = SynArithmeticExpr(typeManager, be, ctx: ctx)
+        let builtinTy = SynArithmeticExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
         if (Ty.IsTyCorrect(builtinTy)) {
             return builtinTy
         }
-        if (let Some(overloadTy) <- TrySynBinaryOverload(typeManager, be, ctx: ctx)) {
+        if (let Some(overloadTy) <- TrySynBinaryOverload(typeManager, be, ctx: ctx,
+            synthesizer: synthesizer, checker: checker)) {
             return overloadTy
         }
         return BinaryInvalid(be)
     }
     if (IsRelationalOperator(be.op)) {
-        let builtinTy2 = SynRelationalExpr(typeManager, be, ctx: ctx)
+        let builtinTy2 = SynRelationalExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
         if (Ty.IsTyCorrect(builtinTy2)) {
             return builtinTy2
         }
-        if (let Some(overloadTy2) <- TrySynBinaryOverload(typeManager, be, ctx: ctx)) {
+        if (let Some(overloadTy2) <- TrySynBinaryOverload(typeManager, be, ctx: ctx,
+            synthesizer: synthesizer, checker: checker)) {
             return overloadTy2
         }
         return BinaryInvalid(be)
     }
     if (IsShiftOperator(be.op)) {
-        let builtinTy3 = SynShiftExpr(typeManager, be)
+        let builtinTy3 = SynShiftExpr(typeManager, be, synthesizer: synthesizer)
         if (Ty.IsTyCorrect(builtinTy3)) {
             return builtinTy3
         }
-        if (let Some(overloadTy3) <- TrySynBinaryOverload(typeManager, be, ctx: ctx)) {
+        if (let Some(overloadTy3) <- TrySynBinaryOverload(typeManager, be, ctx: ctx,
+            synthesizer: synthesizer, checker: checker)) {
             return overloadTy3
         }
         return BinaryInvalid(be)
     }
     if (be.op == TokenKind.COALESCING) {
-        return SynCoalescingExpr(typeManager, be, ctx: ctx)
+        return SynCoalescingExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
     }
     if (IsFlowOperator(be.op)) {
-        return SynFlowExpr(typeManager, be)
+        return SynFlowExpr(typeManager, be, synthesizer: synthesizer)
     }
     return BinaryInvalid(be)
 }
 
 public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None): Bool {
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None): Bool {
     if (be.op == TokenKind.COALESCING) {
-        return ChkCoalescingExpr(typeManager, target, be, ctx: ctx)
+        return ChkCoalescingExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
     }
     if (IsFlowOperator(be.op)) {
         return ChkFlowExpr(typeManager, target, be)
     }
-    if (ChkBuiltinBinaryExpr(typeManager, target, be, ctx: ctx)) {
+    if (ChkBuiltinBinaryExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
         return true
     }
     if (!HasTupleEqualityOperands(be)) {
         ClearExprKeepTargets(be)
     }
-    let actualTy = SynBinaryExpr(typeManager, be, ctx: ctx)
+    let actualTy = SynBinaryExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
     if (!Ty.IsTyCorrect(actualTy)) {
-        if (TryChkBinaryOverload(typeManager, target, be, ctx: ctx)) {
+        if (TryChkBinaryOverload(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
             return true
         }
         return false
@@ -1045,7 +1109,7 @@ public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     if (typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
         return true
     }
-    if (TryChkBinaryOverload(typeManager, target, be, ctx: ctx)) {
+    if (TryChkBinaryOverload(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
         return true
     }
     let _ = BinaryInvalid(be)

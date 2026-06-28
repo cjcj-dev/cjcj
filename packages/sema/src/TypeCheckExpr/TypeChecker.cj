@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
 import cangjie_compiler::basic.DiagKind as BasicDiagKind
+import cangjie_compiler::basic.DiagnosticCache
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::option.IsUnsafeBackend as OptionIsUnsafeBackend
@@ -3084,6 +3085,191 @@ public class TypeChecker {
         return ok
     }
 
+    private func IsNodeDesugared(node: Node): Bool {
+        if (let Some(expr) <- (node as Expr)) {
+            return expr.desugarExpr.isSome()
+        }
+        return false
+    }
+
+    private func GetDiagCacheKey(): Int64 {
+        if (let Some(diagValue) <- impl.diag) {
+            return DiagnosticCache.ExtractKey(diagValue)
+        }
+        return 0
+    }
+
+    private func GetCacheKeyForSyn(ctx: ASTContext, node: Node): CacheKey {
+        let target = ctx.targetTypeMap.get(node)
+        return CacheKey(target, IsNodeDesugared(node), GetDiagCacheKey())
+    }
+
+    private func GetCacheKeyForChk(ctx: ASTContext, node: Node, target: Ty): CacheKey {
+        return CacheKey(Some(target), IsNodeDesugared(node), GetDiagCacheKey())
+    }
+
+    private func GetTypeCheckCache(ctx: ASTContext, node: Node): TypeCheckCache {
+        if (let Some(cache) <- ctx.typeCheckCache.get(node)) {
+            return cache
+        }
+        let newCache = TypeCheckCache()
+        ctx.typeCheckCache[node] = newCache
+        return newCache
+    }
+
+    private func RestoreCached(ctx: ASTContext, node: Node, cache: CacheEntry,
+        recoverDiag!: Bool = true): Unit {
+        if (Ty.IsInitialTy(node.GetTy())) {
+            GetTypeCheckCache(ctx, node).lastKey = None
+        }
+        if (let Some(resultTy) <- cache.result) {
+            node.SetTy(resultTy)
+        } else {
+            node.SetTy(Ty.GetInitialTy())
+        }
+        RestoreTargets(node, cache.targets)
+        if (recoverDiag) {
+            if (let Some(diagValue) <- impl.diag) {
+                cache.diags.Restore(diagValue)
+            }
+        }
+    }
+
+    private func SynthesizeAndCache(ctx: ASTContext, pos: SynPos, expr: Expr, key: CacheKey): Ty {
+        let dc = DiagnosticCache()
+        if (let Some(diagValue) <- impl.diag) {
+            dc.ToExclude(diagValue)
+        }
+        let ret = Synthesize(ctx, pos, expr)
+        if (let Some(diagValue2) <- impl.diag) {
+            dc.BackUp(diagValue2)
+        }
+        let entry = CacheEntry()
+        entry.successful = Ty.IsTyCorrect(ret) && dc.NoError()
+        entry.result = Some(ret)
+        entry.diags = dc
+        entry.targets = CollectTargets(expr)
+        GetTypeCheckCache(ctx, expr).synCache[key] = entry
+        return ret
+    }
+
+    private func CheckAndCache(ctx: ASTContext, target: Ty, expr: Expr, key: CacheKey): Bool {
+        let dc = DiagnosticCache()
+        if (let Some(diagValue) <- impl.diag) {
+            dc.ToExclude(diagValue)
+        }
+        let ret = Check(ctx, target, expr)
+        if (let Some(diagValue2) <- impl.diag) {
+            dc.BackUp(diagValue2)
+        }
+        let entry = CacheEntry()
+        entry.successful = ret
+        entry.result = expr.GetTy()
+        entry.diags = dc
+        entry.targets = CollectTargets(expr)
+        GetTypeCheckCache(ctx, expr).chkCache[key] = entry
+        return ret
+    }
+
+    private func SynthesizeWithCache(ctx: ASTContext, pos: SynPos, expr: Expr): Ty {
+        if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
+            return Synthesize(ctx, pos, expr)
+        }
+        let key = GetCacheKeyForSyn(ctx, expr)
+        let nodeCache = GetTypeCheckCache(ctx, expr)
+        if (let Some(cache) <- nodeCache.synCache.get(key)) {
+            RestoreCached(ctx, expr, cache)
+            return cache.result ?? TypeManager.GetInvalidTy()
+        }
+        return SynthesizeAndCache(ctx, pos, expr, key)
+    }
+
+    private func CheckWithCache(ctx: ASTContext, target: Ty, expr: Expr): Bool {
+        if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
+            return Check(ctx, target, expr)
+        }
+        let key = GetCacheKeyForChk(ctx, expr, target)
+        let nodeCache = GetTypeCheckCache(ctx, expr)
+        if (let Some(cache) <- nodeCache.chkCache.get(key)) {
+            RestoreCached(ctx, expr, cache)
+            return cache.successful
+        }
+        return CheckAndCache(ctx, target, expr, key)
+    }
+
+    private func SynthesizeWithNegCache(ctx: ASTContext, pos: SynPos, expr: Expr): Ty {
+        if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
+            return Synthesize(ctx, pos, expr)
+        }
+        let key = GetCacheKeyForSyn(ctx, expr)
+        let nodeCache = GetTypeCheckCache(ctx, expr)
+        if (let Some(cache) <- nodeCache.synCache.get(key)) {
+            if (!cache.successful) {
+                RestoreCached(ctx, expr, cache)
+                return cache.result ?? TypeManager.GetInvalidTy()
+            }
+        }
+        return SynthesizeAndCache(ctx, pos, expr, key)
+    }
+
+    private func CheckWithNegCache(ctx: ASTContext, target: Ty, expr: Expr): Bool {
+        if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
+            return Check(ctx, target, expr)
+        }
+        let key = GetCacheKeyForChk(ctx, expr, target)
+        let nodeCache = GetTypeCheckCache(ctx, expr)
+        if (let Some(cache) <- nodeCache.chkCache.get(key)) {
+            if (!cache.successful) {
+                RestoreCached(ctx, expr, cache)
+                return false
+            }
+        }
+        return CheckAndCache(ctx, target, expr, key)
+    }
+
+    private func CheckWithEffectiveCache(ctx: ASTContext, target: Ty, expr: Expr,
+        recoverDiag: Bool): Bool {
+        if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
+            return Check(ctx, target, expr)
+        }
+        let key = GetCacheKeyForChk(ctx, expr, target)
+        if (!Ty.IsInitialTy(expr.GetTy())) {
+            let nodeCache = GetTypeCheckCache(ctx, expr)
+            if (let Some(lastKey) <- nodeCache.lastKey) {
+                if (lastKey == key) {
+                    if (let Some(cache) <- nodeCache.chkCache.get(key)) {
+                        RestoreCached(ctx, expr, cache, recoverDiag: recoverDiag)
+                        return cache.successful
+                    }
+                    return CheckAndCache(ctx, target, expr, key)
+                }
+            }
+        }
+        expr.Clear()
+        return CheckAndCache(ctx, target, expr, key)
+    }
+
+    private func SynthesizeWithEffectiveCache(ctx: ASTContext, pos: SynPos, expr: Expr,
+        recoverDiag: Bool): Ty {
+        if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
+            return Synthesize(ctx, pos, expr)
+        }
+        let key = GetCacheKeyForSyn(ctx, expr)
+        if (!Ty.IsInitialTy(expr.GetTy())) {
+            let nodeCache = GetTypeCheckCache(ctx, expr)
+            if (let Some(lastKey) <- nodeCache.lastKey) {
+                if (lastKey == key) {
+                    if (let Some(cache) <- nodeCache.synCache.get(key)) {
+                        RestoreCached(ctx, expr, cache, recoverDiag: recoverDiag)
+                        return cache.result ?? TypeManager.GetInvalidTy()
+                    }
+                    return SynthesizeAndCache(ctx, pos, expr, key)
+                }
+            }
+        }
+        return SynthesizeAndCache(ctx, pos, expr, key)
+    }
+
     private func LookupCoreTy(ctx: ASTContext, name: String): Option<Ty> {
         if (let Some(decl) <- lookupResolvedPackageDecl(ctx, "std.core", name)) {
             return decl.GetTy()
@@ -3293,7 +3479,9 @@ public class TypeChecker {
                 }
             }
             SynthesizeBinaryChildren(ctx, binaryExpr)
-            let binaryTy = SynBinaryExpr(impl.typeManager, binaryExpr, ctx: Some(ctx))
+            let binaryTy = SynBinaryExpr(impl.typeManager, binaryExpr, ctx: Some(ctx),
+                synthesizer: Some({ operand: Expr => SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand) }),
+                checker: Some({ targetTy: Ty, operand2: Expr => CheckWithNegCache(ctx, targetTy, operand2) }))
             if (Ty.IsTyCorrect(binaryTy)) {
                 return FinishSynthesize(ctx, binaryExpr, binaryTy)
             }
@@ -3436,10 +3624,10 @@ public class TypeChecker {
         let leftExpr = be.leftExpr.getOrThrow()
         let rightExpr = be.rightExpr.getOrThrow()
         var ok = true
-        if (!Check(ctx, boolTy, leftExpr)) {
+        if (!CheckWithNegCache(ctx, boolTy, leftExpr)) {
             ok = false
         }
-        if (!Check(ctx, boolTy, rightExpr)) {
+        if (!CheckWithNegCache(ctx, boolTy, rightExpr)) {
             ok = false
         }
         if (ok) {
@@ -3468,8 +3656,8 @@ public class TypeChecker {
             }
             typeCheckExprClearKeepTargets(leftExpr)
             typeCheckExprClearKeepTargets(rightExpr)
-            let leftOk = Check(ctx, candidateTy, leftExpr)
-            let rightOk = Check(ctx, candidateTy, rightExpr)
+            let leftOk = CheckWithNegCache(ctx, candidateTy, leftExpr)
+            let rightOk = CheckWithNegCache(ctx, candidateTy, rightExpr)
             if (leftOk && rightOk) {
                 be.SetTy(candidateTy)
                 return true
@@ -3485,17 +3673,9 @@ public class TypeChecker {
                 return impl.typeManager.CheckTypeCompatibility(target, desugarTy) != TypeCompatibility.INCOMPATIBLE
             }
         }
-        if (typeCheckExprIsArithmeticOperator(be.op) && CheckArithmeticBinaryExpr(ctx, target, be)) {
-            return true
-        }
-        if (typeCheckExprIsLogicalOperator(be.op)) {
-            return CheckLogicalBinaryExpr(ctx, target, be)
-        }
-        if (TryCheckBinaryOperatorOverload(ctx, target, be)) {
-            return true
-        }
-        let _ = Synthesize(ctx, be)
-        return ChkExprShallow(impl.typeManager, target, be, ctx: Some(ctx))
+        return ChkBinaryExpr(impl.typeManager, target, be, ctx: Some(ctx),
+            synthesizer: Some({ operand: Expr => SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand) }),
+            checker: Some({ targetTy: Ty, operand2: Expr => CheckWithNegCache(ctx, targetTy, operand2) }))
     }
 
     private func ShouldTryBinaryOperatorOverload(be: BinaryExpr): Bool {

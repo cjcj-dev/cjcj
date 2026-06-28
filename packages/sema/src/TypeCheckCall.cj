@@ -2009,8 +2009,12 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
     declSynthesizer!: Option<CallDeclSynthesizer> = None): ArrayList<FuncDecl> {
     let legals = ArrayList<FunctionMatchingUnit>()
     for (fd in candidates) {
-        if (let Some(unit) <- CheckCandidate(typeManager, diag, ce, fd, target, argChecker: argChecker,
-            inferenceFailure: inferenceFailure, declSynthesizer: declSynthesizer)) {
+        var checked: Option<FunctionMatchingUnit> = None
+        try (ds = DiagSuppressor(diag)) {
+            checked = CheckCandidate(typeManager, diag, ce, fd, target, argChecker: argChecker,
+                inferenceFailure: inferenceFailure, declSynthesizer: declSynthesizer)
+        }
+        if (let Some(unit) <- checked) {
             legals.add(unit)
         }
     }
