@@ -355,7 +355,6 @@ private func toParsedScopeKind(scope: ScopeKind): ParsedScopeKind {
         case ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM => ParsedScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM
         case ScopeKind.MAIN_BODY => ParsedScopeKind.MAIN_BODY
         case ScopeKind.UNKNOWN_SCOPE => ParsedScopeKind.UNKNOWN_SCOPE
-        case ScopeKind.UNKNOWN => ParsedScopeKind.UNKNOWN_SCOPE
     }
 }
 
@@ -377,7 +376,6 @@ private func toMacroScopeKind(scope: ParsedAstScopeKind): ScopeKind {
         case ParsedAstScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM => ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM
         case ParsedAstScopeKind.MAIN_BODY => ScopeKind.MAIN_BODY
         case ParsedAstScopeKind.UNKNOWN_SCOPE => ScopeKind.UNKNOWN_SCOPE
-        case ParsedAstScopeKind.UNKNOWN => ScopeKind.UNKNOWN_SCOPE
     }
 }
 
@@ -397,7 +395,6 @@ private func toMacroExprKind(kind: ParsedAstExprKind): ExprKind {
         case ParsedAstExprKind.EXPR_IN_CALLSUFFIX => ExprKind.EXPR_IN_CALLSUFFIX
         case ParsedAstExprKind.EXPR_IN_ANNOTATION => ExprKind.EXPR_IN_ANNOTATION
         case ParsedAstExprKind.UNKNOWN_EXPR => ExprKind.UNKNOWN_EXPR
-        case ParsedAstExprKind.UNKNOWN => ExprKind.UNKNOWN_EXPR
     }
 }
 

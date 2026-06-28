@@ -178,7 +178,6 @@ private func toEvaluationParsedScopeKind(scope: ScopeKind): EvalParsedScopeKind 
         case ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM => EvalParsedScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM
         case ScopeKind.MAIN_BODY => EvalParsedScopeKind.MAIN_BODY
         case ScopeKind.UNKNOWN_SCOPE => EvalParsedScopeKind.UNKNOWN_SCOPE
-        case ScopeKind.UNKNOWN => EvalParsedScopeKind.UNKNOWN_SCOPE
     }
 }
 

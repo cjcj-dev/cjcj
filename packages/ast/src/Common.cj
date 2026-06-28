@@ -1,8 +1,8 @@
 package cangjie_compiler::ast
 
 public import cangjie_compiler::basic.{
-    BEGIN_POSITION, DEFAULT_POSITION, INVALID_POSITION, Linkage, MacroCallDiagInfo, MakeRange, Position, PositionStatus,
-    Range
+    BEGIN_POSITION, ClassMapping, DEFAULT_POSITION, GenericTypeArguments, INVALID_POSITION, InteropCJGenericStrategyType,
+    InteropCJStrategy, LambdaPattern, Linkage, MacroCallDiagInfo, MakeRange, Position, PositionStatus, Range
 }
 public import cangjie_compiler::lex.{
     GetContextualKeyword, GetEscapeTokenKinds, IsContextualKeyword, IsExperimental, Len, StringPart, StringPartKind,
@@ -34,8 +34,6 @@ public enum ScopeKind {
     | PRIMARY_CONSTRUCTOR_FUNC_PARAM
     | MAIN_BODY
     | UNKNOWN_SCOPE
-    // Legacy self-host spelling kept equal to UNKNOWN_SCOPE for downstream callers.
-    | UNKNOWN
 }
 
 private func ScopeKindIndex(kind: ScopeKind): Int64 {
@@ -56,7 +54,6 @@ private func ScopeKindIndex(kind: ScopeKind): Int64 {
         case ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM => 13
         case ScopeKind.MAIN_BODY => 14
         case ScopeKind.UNKNOWN_SCOPE => 15
-        case ScopeKind.UNKNOWN => 15
     }
 }
 
@@ -85,8 +82,6 @@ public enum ExprKind {
     | EXPR_IN_CALLSUFFIX
     | EXPR_IN_ANNOTATION
     | UNKNOWN_EXPR
-    // Legacy self-host spelling kept equal to UNKNOWN_EXPR for downstream callers.
-    | UNKNOWN
 }
 
 private func ExprKindIndex(kind: ExprKind): Int64 {
@@ -105,7 +100,6 @@ private func ExprKindIndex(kind: ExprKind): Int64 {
         case ExprKind.EXPR_IN_CALLSUFFIX => 11
         case ExprKind.EXPR_IN_ANNOTATION => 12
         case ExprKind.UNKNOWN_EXPR => 13
-        case ExprKind.UNKNOWN => 13
     }
 }
 
@@ -117,28 +111,6 @@ extend ExprKind <: Equatable<ExprKind> {
     public operator func !=(right: ExprKind): Bool {
         return !(this == right)
     }
-}
-
-public enum InteropCJStrategy {
-    | FULL
-    | NONE
-    | UNKNOWN
-}
-
-public enum InteropCJGenericStrategyType {
-    | NONE
-    | PARTIAL
-    | UNKNOWN
-}
-
-public class GenericTypeArguments {
-    public let typeArguments: ArrayList<String> = ArrayList<String>()
-    public init() {}
-}
-
-public class LambdaPattern {
-    public var name: String = ""
-    public init() {}
 }
 
 public func EscapeToJsonString(input: String): String {
