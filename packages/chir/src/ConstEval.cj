@@ -39,8 +39,10 @@ public class ConstEvalPass {
         let interpreter = BCHIRInterpreter(linkedBchir)
         interpreter.SetGlobalVars(globalInitValues)
         let result = interpreter.Run(baseIndex: 0, expectsReturn: false)
-        if (result.kind == BCHIRResultKind.OK) {
-            ReplaceGlobalConstantInitializers(pkg, interpreter, linker)
+        match (result) {
+            case INotRun => ReplaceGlobalConstantInitializers(pkg, interpreter, linker)
+            case IException(_) => ()
+            case ISuccess(_) => ()
         }
     }
 

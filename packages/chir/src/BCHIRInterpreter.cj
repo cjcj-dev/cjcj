@@ -11,7 +11,7 @@ public class BCHIRInterpreter {
     private let interpStack: InterpreterStack = InterpreterStack()
     private let arena: InterpreterArena = InterpreterArena()
     private let env: InterpreterEnv
-    private var lastResult: BCHIRResult = BCHIRResult(BCHIRResultKind.UNSUPPORTED, message: "not run")
+    private var lastResult: IResult = INotRun
     private var currentException: Option<InterpreterValue> = None
 
     public init(bchir: BCHIR) {
@@ -19,7 +19,7 @@ public class BCHIRInterpreter {
         this.env = InterpreterEnv(bchir.GetNumGlobalVars())
     }
 
-    public func Run(baseIndex!: Int64 = 0, expectsReturn!: Bool = true): BCHIRResult {
+    public func Run(baseIndex!: Int64 = 0, expectsReturn!: Bool = true): IResult {
         interpStack.ArgsClear()
         currentException = None
         var pc = baseIndex
@@ -73,16 +73,16 @@ public class BCHIRInterpreter {
                     interpStack.ArgsPush(value)
                     pc += 1 + GetOpCodeArgSize(opCode)
                 } else {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid VARRAY_GET path"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
             } else if (opCode == OpCode.ALLOCATE_RAW_ARRAY || opCode == OpCode.ALLOCATE_RAW_ARRAY_EXC) {
                 let sizeValue = interpStack.ArgsPopIVal()
                 if (!sizeValue.IsIntLike()) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "raw array size is not an integer"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 let size = sizeValue.GetInt()
                 if (size < 0) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "negative raw array size"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 let items = ArrayList<InterpreterValue>()
                 items.add(InterpreterValue.MakeInt(InterpreterValueKind.IINT64, size))
@@ -99,12 +99,12 @@ public class BCHIRInterpreter {
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (opCode == OpCode.RAW_ARRAY_LITERAL_INIT) {
                 if (!RawArrayLiteralInit(code.Get(pc + 1))) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid raw array literal init"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 pc += 2
             } else if (opCode == OpCode.RAW_ARRAY_INIT_BY_VALUE) {
                 if (!RawArrayInitByValue()) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid raw array init by value"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 pc += 1
             } else if (opCode == OpCode.ALLOCATE_STRUCT || opCode == OpCode.ALLOCATE_STRUCT_EXC) {
@@ -142,13 +142,13 @@ public class BCHIRInterpreter {
             } else if (opCode == OpCode.LVAR_SET) {
                 let ok = env.SetLocal(code.Get(pc + 1), interpStack.ArgsPopIVal())
                 if (!ok) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid local variable index"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 pc += 2
             } else if (opCode == OpCode.GVAR_SET) {
                 let ok = env.SetGlobal(code.Get(pc + 1), interpStack.ArgsPopIVal())
                 if (!ok) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid global variable index"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 pc += 2
             } else if (opCode == OpCode.DROP) {
@@ -158,7 +158,7 @@ public class BCHIRInterpreter {
                 let pointer = interpStack.ArgsPopIVal()
                 let value = interpStack.ArgsPopIVal()
                 if (!StoreThroughPointer(pointer, value)) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid STORE target"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 pc += 1
             } else if (opCode == OpCode.JUMP) {
@@ -169,16 +169,15 @@ public class BCHIRInterpreter {
             } else if (opCode == OpCode.APPLY || opCode == OpCode.APPLY_EXC) {
                 let argCount = code.Get(pc + 1)
                 if (argCount <= 0 || interpStack.ArgsSize() < argCount) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid APPLY argument count"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 let functionValue = interpStack.ArgsGet(argCount, 0)
                 if (functionValue.kind != InterpreterValueKind.IFUNC) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "APPLY target is not a function"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 let targetFrame = CurrentFrameName(code, functionValue.GetFunctionIndex())
                 if (targetFrame == "linker_dummy_abort_function") {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP,
-                        message: "unresolved APPLY target from " + CurrentFrameName(code, pc)))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 interpStack.CtrlPush(ControlState(opCode, interpStack.ArgsSize() - argCount,
                     pc + 1 + GetOpCodeArgSize(opCode), env.GetBP()))
@@ -187,12 +186,12 @@ public class BCHIRInterpreter {
             } else if (opCode == OpCode.INVOKE || opCode == OpCode.INVOKE_EXC) {
                 let argCount = code.Get(pc + 1)
                 if (argCount <= 0 || interpStack.ArgsSize() < argCount) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid INVOKE argument count"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 let receiver = interpStack.ArgsGet(argCount, 0)
                 if (let Some(receiverObject) <- DereferencePointer(receiver)) {
                     if (receiverObject.kind != InterpreterValueKind.IOBJECT) {
-                        return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "INVOKE receiver is not an object"))
+                        return Finish(IException(InterpreterValue.MakeInvalid()))
                     }
                     if (let Some(functionIndex) <- FindMethod(receiverObject.GetClassId(), code.Get(pc + 2))) {
                         interpStack.CtrlPush(ControlState(opCode, interpStack.ArgsSize() - argCount,
@@ -200,16 +199,16 @@ public class BCHIRInterpreter {
                         env.StartStackFrame()
                         pc = functionIndex
                     } else {
-                        return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "method not found in vtable"))
+                        return Finish(IException(InterpreterValue.MakeInvalid()))
                     }
                 } else {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid INVOKE receiver"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
             } else if (opCode == OpCode.ASG) {
                 let pointer = interpStack.ArgsPopIVal()
                 let value = interpStack.ArgsPopIVal()
                 if (!StoreThroughPointer(pointer, value)) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid ASG target"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 interpStack.ArgsPush(InterpreterValue.MakeUnit())
                 pc += 1
@@ -218,12 +217,12 @@ public class BCHIRInterpreter {
                     interpStack.ArgsPush(value)
                     pc += 1
                 } else {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid DEREF target"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
             } else if (opCode == OpCode.GETREF) {
                 let target = interpStack.ArgsPopIVal()
                 if (target.kind != InterpreterValueKind.IPOINTER) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "GETREF target is not a pointer"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 interpStack.ArgsPush(PointerWithCodePath(target, pc + 2, code.Get(pc + 1)))
                 pc += 2 + code.Get(pc + 1)
@@ -231,11 +230,11 @@ public class BCHIRInterpreter {
                 let target = interpStack.ArgsPopIVal()
                 let value = interpStack.ArgsPopIVal()
                 if (target.kind != InterpreterValueKind.IPOINTER) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "STOREINREF target is not a pointer"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 let storePointer = PointerWithCodePath(target, pc + 2, code.Get(pc + 1))
                 if (!StoreThroughPointer(storePointer, value)) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid STOREINREF path"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 interpStack.ArgsPush(InterpreterValue.MakeUnit())
                 pc += 2 + code.Get(pc + 1)
@@ -244,14 +243,14 @@ public class BCHIRInterpreter {
                     interpStack.ArgsPush(fieldValue)
                     pc += 2
                 } else {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid FIELD path"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
             } else if (opCode == OpCode.FIELD_TPL) {
                 if (let Some(fieldValue) <- TuplePathValue(interpStack.ArgsPopIVal(), pc + 2, code.Get(pc + 1))) {
                     interpStack.ArgsPush(fieldValue)
                     pc += 2 + code.Get(pc + 1)
                 } else {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid FIELD_TPL path"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
             } else if (opCode == OpCode.BOX) {
                 let fields = ArrayList<InterpreterValue>()
@@ -263,12 +262,12 @@ public class BCHIRInterpreter {
                     interpStack.ArgsPush(value)
                     pc += 1
                 } else {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid UNBOX target"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
             } else if (opCode == OpCode.UNBOX_REF) {
                 let boxed = interpStack.ArgsPopIVal()
                 if (boxed.kind != InterpreterValueKind.IPOINTER) {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "UNBOX_REF target is not a pointer"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 let path = boxed.GetPointerPath()
                 path.add(0)
@@ -281,10 +280,10 @@ public class BCHIRInterpreter {
                         interpStack.ArgsPush(InterpreterValue.MakeBool(IsSubclass(value.GetClassId(), code.Get(pc + 1))))
                         pc += 2
                     } else {
-                        return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "INSTANCEOF target is not an object"))
+                        return Finish(IException(InterpreterValue.MakeInvalid()))
                     }
                 } else {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid INSTANCEOF target"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
             } else if (opCode == OpCode.TYPECAST || opCode == OpCode.TYPECAST_EXC) {
                 if (let Some(sourceKind) <- TypeKindFromCell(code.Get(pc + 1))) {
@@ -295,26 +294,26 @@ public class BCHIRInterpreter {
                                 interpStack.ArgsPush(casted)
                                 pc += 1 + GetOpCodeArgSize(opCode)
                             } else {
-                                return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid TYPECAST operand"))
+                                return Finish(IException(InterpreterValue.MakeInvalid()))
                             }
                         } else {
-                            return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid TYPECAST overflow strategy"))
+                            return Finish(IException(InterpreterValue.MakeInvalid()))
                         }
                     } else {
-                        return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid TYPECAST target type"))
+                        return Finish(IException(InterpreterValue.MakeInvalid()))
                     }
                 } else {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid TYPECAST source type"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
             } else if (opCode == OpCode.SWITCH) {
                 if (let Some(target) <- InterpretSwitch(pc)) {
                     pc = target
                 } else {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "invalid SWITCH selector or table"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
             } else if (opCode == OpCode.RAISE) {
                 currentException = interpStack.ArgsPopIVal()
-                return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "uncaught exception"))
+                return Finish(IException(InterpreterValue.MakeInvalid()))
             } else if (opCode == OpCode.RAISE_EXC) {
                 currentException = interpStack.ArgsPopIVal()
                 pc = code.Get(pc + 1)
@@ -324,7 +323,7 @@ public class BCHIRInterpreter {
                     currentException = None
                     pc += 1
                 } else {
-                    return Finish(BCHIRResult(BCHIRResultKind.TRAP, message: "GET_EXCEPTION without exception"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
             } else if (opCode == OpCode.INTRINSIC0 || opCode == OpCode.INTRINSIC0_EXC) {
                 let intrinsicKind = code.Get(pc + 1)
@@ -334,8 +333,7 @@ public class BCHIRInterpreter {
                     interpStack.ArgsPush(InterpreterValue.MakeBool(BCHIRIntrinsic.ReferenceEquals(left, right)))
                     pc += 1 + GetOpCodeArgSize(opCode)
                 } else {
-                    return Finish(BCHIRResult(BCHIRResultKind.UNSUPPORTED,
-                        message: "unsupported INTRINSIC0 kind ${intrinsicKind}"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
             } else if (opCode == OpCode.INTRINSIC1 || opCode == OpCode.INTRINSIC1_EXC) {
                 let intrinsicKind = code.Get(pc + 1)
@@ -344,27 +342,23 @@ public class BCHIRInterpreter {
                         interpStack.ArgsPush(value)
                         pc += 1 + GetOpCodeArgSize(opCode)
                     } else {
-                        return Finish(BCHIRResult(BCHIRResultKind.TRAP,
-                            message: "invalid ARRAY_GET_UNCHECKED intrinsic operands"))
+                        return Finish(IException(InterpreterValue.MakeInvalid()))
                     }
                 } else if (BCHIRIntrinsic.IsCanUseSIMD(intrinsicKind)) {
                     interpStack.ArgsRemove(1)
                     interpStack.ArgsPush(InterpreterValue.MakeBool(true))
                     pc += 1 + GetOpCodeArgSize(opCode)
                 } else {
-                    return Finish(BCHIRResult(BCHIRResultKind.UNSUPPORTED,
-                        message: "unsupported INTRINSIC1 kind ${intrinsicKind}"))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
             } else if (IsUnaryOp(opCode)) {
                 if (!EvaluateUnary(opCode)) {
-                    return Finish(BCHIRResult(BCHIRResultKind.UNSUPPORTED, message: "unsupported unary op " +
-                        GetOpCodeLabel(opCode)))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (IsBinaryOp(opCode)) {
                 if (!EvaluateBinary(opCode)) {
-                    return Finish(BCHIRResult(BCHIRResultKind.UNSUPPORTED, message: "unsupported binary op " +
-                        GetOpCodeLabel(opCode)))
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (opCode == OpCode.RETURN) {
@@ -376,29 +370,27 @@ public class BCHIRInterpreter {
                     pc = state.byteCodePtr
                 } else {
                     if (!expectsReturn) {
-                        return Finish(BCHIRResult(BCHIRResultKind.OK, value: UnitLiteral()))
+                        return Finish(INotRun)
                     }
                     return Finish(ValueToResult(returnValue))
                 }
             } else if (opCode == OpCode.EXIT) {
                 if (!expectsReturn || interpStack.ArgsSize() == 0) {
-                    return Finish(BCHIRResult(BCHIRResultKind.OK, value: UnitLiteral()))
+                    return Finish(INotRun)
                 }
                 return Finish(ValueToResult(interpStack.ArgsPopIVal()))
             } else if (opCode == OpCode.NOT_SUPPORTED) {
-                return Finish(BCHIRResult(BCHIRResultKind.UNSUPPORTED, message: "bytecode marked not supported"))
+                return Finish(IException(InterpreterValue.MakeInvalid()))
             } else if (opCode == OpCode.ABORT || opCode == OpCode.INVALID) {
-                return Finish(BCHIRResult(BCHIRResultKind.TRAP,
-                    message: "invalid bytecode operation at " + CurrentFrameName(code, pc)))
+                return Finish(IException(InterpreterValue.MakeInvalid()))
             } else {
-                return Finish(BCHIRResult(BCHIRResultKind.UNSUPPORTED, message: "unsupported bytecode op " +
-                    GetOpCodeLabel(opCode)))
+                return Finish(IException(InterpreterValue.MakeInvalid()))
             }
         }
         let result = if (expectsReturn && interpStack.ArgsSize() > 0) {
             ValueToResult(interpStack.ArgsPopIVal())
         } else {
-            BCHIRResult(BCHIRResultKind.OK, value: UnitLiteral())
+            INotRun
         }
         return Finish(result)
     }
@@ -429,11 +421,11 @@ public class BCHIRInterpreter {
         }
     }
 
-    public func GetLastResult(): BCHIRResult {
+    public func GetLastResult(): IResult {
         return lastResult
     }
 
-    private func Finish(result: BCHIRResult): BCHIRResult {
+    private func Finish(result: IResult): IResult {
         lastResult = result
         return result
     }
@@ -766,11 +758,8 @@ public class BCHIRInterpreter {
         return None
     }
 
-    private func ValueToResult(value: InterpreterValue): BCHIRResult {
-        if (let Some(literal) <- IValUtils.ToLiteral(value)) {
-            return BCHIRResult(BCHIRResultKind.OK, value: literal)
-        }
-        return BCHIRResult(BCHIRResultKind.UNSUPPORTED, message: "result is not a literal: " + IValUtils.ToString(value))
+    private func ValueToResult(value: InterpreterValue): IResult {
+        return ISuccess(value)
     }
 
     private func EvaluateUnary(opCode: OpCode): Bool {

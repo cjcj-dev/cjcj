@@ -140,11 +140,6 @@ public class CHIR2BCHIR {
                     TranslateLiteralValue(context, constant.literal)
                     return true
                 }
-                let eval = ConstEval()
-                if (let Some(literal) <- eval.EvaluateToLiteral(expr)) {
-                    TranslateLiteralValue(context, literal)
-                    return true
-                }
             }
         }
         if (let Some(globalVar) <- value.AsGlobalVar()) {

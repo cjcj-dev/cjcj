@@ -1,52 +1,13 @@
 package cangjie_compiler::chir
 
-public enum BCHIRResultKind {
-    | OK | TRAP | UNSUPPORTED
-}
-
-public func BCHIRResultKindIndex(kind: BCHIRResultKind): Int64 {
-    return match (kind) {
-        case BCHIRResultKind.OK => 0
-        case BCHIRResultKind.TRAP => 1
-        case BCHIRResultKind.UNSUPPORTED => 2
-    }
-}
-
-extend BCHIRResultKind <: Equatable<BCHIRResultKind> {
-    public operator func ==(right: BCHIRResultKind): Bool {
-        return BCHIRResultKindIndex(this) == BCHIRResultKindIndex(right)
-    }
-
-    public operator func !=(right: BCHIRResultKind): Bool {
-        return !(this == right)
-    }
-}
-
-public class BCHIRResult {
-    public let kind: BCHIRResultKind
-    public let value: Option<LiteralValue>
-    public let message: String
-
-    public init(kind: BCHIRResultKind, value!: Option<LiteralValue> = None, message!: String = "") {
-        this.kind = kind
-        this.value = value
-        this.message = message
-    }
-
-    public func IsOK(): Bool {
-        return kind == BCHIRResultKind.OK
-    }
+public enum IResult {
+    | INotRun
+    | IException(InterpreterValue)
+    | ISuccess(InterpreterValue)
 }
 
 public class ConstEval {
     public init() {}
-
-    public func Evaluate(expr: Expression): BCHIRResult {
-        if (let Some(literal) <- EvaluateToLiteral(expr)) {
-            return BCHIRResult(BCHIRResultKind.OK, value: literal)
-        }
-        return BCHIRResult(BCHIRResultKind.UNSUPPORTED, message: "unsupported CHIR expression " + expr.GetExprKindName())
-    }
 
     public func EvaluateToLiteral(expr: Expression): Option<LiteralValue> {
         if (let Some(constant) <- (expr as Constant)) {
