@@ -243,13 +243,11 @@ public class ReachingDefinitionAnalysis {
             HandleLoadExpr(state, expression)
         } else if (kind == ExprKind.GET_ELEMENT_REF) {
             HandleGetElemRefExpr(state, expression)
-        } else if (kind == ExprKind.STORE_ELEMENT_REF || kind == ExprKind.STORE_ELEMENT_BY_NAME) {
+        } else if (kind == ExprKind.STORE_ELEMENT_REF) {
             HandleStoreElemRefExpr(state, expression)
-        } else if (kind == ExprKind.APPLY || kind == ExprKind.APPLY_WITH_EXCEPTION ||
-            kind == ExprKind.INVOKE || kind == ExprKind.INVOKE_WITH_EXCEPTION ||
-            kind == ExprKind.INVOKESTATIC || kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION) {
+        } else if (kind == ExprKind.APPLY) {
             HandleApplyExpr(state, expression)
-        } else if (kind == ExprKind.INTRINSIC || kind == ExprKind.INTRINSIC_WITH_EXCEPTION) {
+        } else if (kind == ExprKind.INTRINSIC) {
             HandleIntrinsicExpr(state, expression)
         } else if (kind == ExprKind.LAMBDA) {
             HandleVarStateCapturedByLambda(state, expression)
@@ -257,7 +255,12 @@ public class ReachingDefinitionAnalysis {
     }
 
     public func PropagateTerminatorEffect(state: ReachingDefinitionDomain, terminator: Terminator): Option<Block> {
-        PropagateExpressionEffect(state, terminator)
+        let kind = terminator.GetExprKind()
+        if (kind == ExprKind.APPLY_WITH_EXCEPTION) {
+            HandleApplyExpr(state, terminator)
+        } else if (kind == ExprKind.INTRINSIC_WITH_EXCEPTION) {
+            HandleIntrinsicExpr(state, terminator)
+        }
         return None
     }
 
