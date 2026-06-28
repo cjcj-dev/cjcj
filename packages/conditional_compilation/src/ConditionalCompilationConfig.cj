@@ -1,6 +1,7 @@
 package cangjie_compiler::conditional_compilation
 
 import cangjie_compiler::basic.CANGJIE_VERSION
+import cangjie_compiler::basic.DEFAULT_POSITION
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.SplitLines
@@ -19,7 +20,7 @@ public class ConditionalCompilationConfig {
     public var debug: Bool = false
     public var test: Bool = false
     public let passedCondition: HashMap<String, String> = HashMap<String, String>()
-    public var diag: Option<BasicDiagnosticEngine> = None
+    public var diag: BasicDiagnosticEngine = BasicDiagnosticEngine()
 
     public init() {}
 
@@ -48,15 +49,14 @@ public class ConditionalCompilationConfig {
         if (!options.enableMacroInLSP) {
             return
         }
-        let reporter = ConditionalDiagnosticReporter(diag)
         if (!passedCondition.isEmpty()) {
             for ((key, _) in passedCondition) {
                 if (IsTargetCondition(key)) {
-                    reporter.DiagnoseDefault(BasicDiagKindRefactor.dirver_cfg_same_with_builtin)
+                    diag.DiagnoseRefactor(BasicDiagKindRefactor.dirver_cfg_same_with_builtin, DEFAULT_POSITION).Emit()
                 }
             }
             if (!options.passedWhenCfgPaths.isEmpty()) {
-                reporter.DiagnoseDefault(BasicDiagKindRefactor.driver_cfg_path_ignored)
+                diag.DiagnoseRefactor(BasicDiagKindRefactor.driver_cfg_path_ignored, DEFAULT_POSITION).Emit()
             }
             return
         }
@@ -65,10 +65,11 @@ public class ConditionalCompilationConfig {
         for (path in options.passedWhenCfgPaths) {
             let filePath = FileUtil.JoinPath(path, cfgFileName)
             if (!FileUtil.FileExist(filePath)) {
-                reporter.DiagnoseDefault(BasicDiagKindRefactor.driver_warning_no_such_file, args: [filePath])
+                diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.driver_warning_no_such_file, DEFAULT_POSITION, arguments: [filePath]).Emit()
                 continue
             }
-            let _ = SetupLSPConditionalCompilationCfgFromFile(filePath, passedCondition, reporter)
+            let _ = SetupLSPConditionalCompilationCfgFromFile(filePath, passedCondition, diag)
             return
         }
 
@@ -78,7 +79,7 @@ public class ConditionalCompilationConfig {
             FileUtil.JoinPath(options.packagePaths[0], cfgFileName)
         }
         if (FileUtil.FileExist(defaultCfgFilePath)) {
-            let _ = SetupLSPConditionalCompilationCfgFromFile(defaultCfgFilePath, passedCondition, reporter)
+            let _ = SetupLSPConditionalCompilationCfgFromFile(defaultCfgFilePath, passedCondition, diag)
         }
     }
 }
@@ -131,10 +132,10 @@ private func SeeingLSPTomlComment(line: String): Bool {
 private func ParseAndCheckLSPConditionVar(
     key: String,
     map: HashMap<String, String>,
-    reporter: ConditionalDiagnosticReporter
+    diag: BasicDiagnosticEngine
 ): Option<String> {
     if (!FileUtil.IsIdentifier(key)) {
-        reporter.DiagnoseDefault(BasicDiagKindRefactor.dirver_cfg_invaild_identifier)
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.dirver_cfg_invaild_identifier, DEFAULT_POSITION).Emit()
         return None
     }
     var normalizedKey = key
@@ -143,11 +144,11 @@ private func ParseAndCheckLSPConditionVar(
     }
     normalizedKey = UtilsNFC(normalizedKey)
     if (IsLSPCfgFileBuiltinCondition(normalizedKey)) {
-        reporter.DiagnoseDefault(BasicDiagKindRefactor.dirver_cfg_same_with_builtin)
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.dirver_cfg_same_with_builtin, DEFAULT_POSITION).Emit()
         return None
     }
     if (map.contains(normalizedKey)) {
-        reporter.DiagnoseDefault(BasicDiagKindRefactor.dirver_cfg_key_repeat)
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.dirver_cfg_key_repeat, DEFAULT_POSITION).Emit()
         return None
     }
     return normalizedKey
@@ -156,23 +157,23 @@ private func ParseAndCheckLSPConditionVar(
 private func ParseLSPConditionKeyValueLine(
     line: String,
     map: HashMap<String, String>,
-    reporter: ConditionalDiagnosticReporter
+    diag: BasicDiagnosticEngine
 ): Bool {
     let commentPos = FindLSPTomlComment(line)
     let processedLine = if (commentPos >= 0) { line[0..commentPos] } else { line }
     let kv = SplitString(processedLine, "=")
     if (kv.size != 2) {
-        reporter.DiagnoseDefault(BasicDiagKindRefactor.driver_cfg_toml_content_err)
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.driver_cfg_toml_content_err, DEFAULT_POSITION).Emit()
         return false
     }
     let key = kv[0].trimAscii()
     let quotedValue = kv[1].trimAscii()
     if (key.isEmpty() || quotedValue.size <= 2 || quotedValue[0] != b'"' ||
         quotedValue[quotedValue.size - 1] != b'"') {
-        reporter.DiagnoseDefault(BasicDiagKindRefactor.driver_cfg_toml_content_err)
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.driver_cfg_toml_content_err, DEFAULT_POSITION).Emit()
         return false
     }
-    if (let Some(normalizedKey) <- ParseAndCheckLSPConditionVar(key, map, reporter)) {
+    if (let Some(normalizedKey) <- ParseAndCheckLSPConditionVar(key, map, diag)) {
         let unquotedValue = quotedValue[1..quotedValue.size - 1].replace("\\\"", "\"")
         map.add(normalizedKey, unquotedValue)
         return true
@@ -183,7 +184,7 @@ private func ParseLSPConditionKeyValueLine(
 private func SetupLSPConditionalCompilationCfgFromFile(
     filePath: String,
     map: HashMap<String, String>,
-    reporter: ConditionalDiagnosticReporter
+    diag: BasicDiagnosticEngine
 ): Bool {
     let failReason = Box<String>("")
     if (let Some(content) <- FileUtil.ReadFileContent(filePath, failReason)) {
@@ -191,13 +192,14 @@ private func SetupLSPConditionalCompilationCfgFromFile(
             if (line.isEmpty() || SeeingLSPTomlComment(line)) {
                 continue
             }
-            if (!ParseLSPConditionKeyValueLine(line, map, reporter)) {
+            if (!ParseLSPConditionKeyValueLine(line, map, diag)) {
                 return false
             }
         }
         return true
     }
-    reporter.DiagnoseDefault(BasicDiagKindRefactor.driver_cfg_file_read_failed, args: [filePath, failReason.value])
+    diag.DiagnoseRefactor(
+        BasicDiagKindRefactor.driver_cfg_file_read_failed, DEFAULT_POSITION, arguments: [filePath, failReason.value]).Emit()
     return false
 }
 

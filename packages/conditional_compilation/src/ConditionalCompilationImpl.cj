@@ -2,6 +2,7 @@ package cangjie_compiler::conditional_compilation
 
 import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.SplitString
 import cangjie_compiler::option.BackendToString
@@ -47,7 +48,7 @@ class ConditionalCompilationImpl {
     private var cjcVersion: UInt64 = 0u64
     private var debug: Bool = false
     private var test: Bool = false
-    private let diag: ConditionalDiagnosticReporter
+    private let diag: BasicDiagnosticEngine
     private let passedCondition: HashMap<String, String> = HashMap<String, String>()
     private let builtinConditionCache: HashMap<String, String> = HashMap<String, String>()
     private let judgeConditionCache: HashMap<String, Bool> = HashMap<String, Bool>()
@@ -59,7 +60,7 @@ class ConditionalCompilationImpl {
         cjcVersion = GetVersionUInt(config.cjcVersion)
         debug = config.debug
         test = config.test
-        diag = ConditionalDiagnosticReporter(config.diag)
+        diag = config.diag
         for ((key, value) in config.passedCondition) {
             passedCondition.add(key, value)
         }
@@ -134,7 +135,8 @@ class ConditionalCompilationImpl {
         } else if (condition.astKind == ASTKind.PAREN_EXPR) {
             if (let Some(pe) <- (condition as ParenExpr)) { return CheckParenExpr(pe) }
         }
-        diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, condition.begin)
+        diag.DiagnoseRefactor(
+            BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, condition.begin).Emit()
         return false
     }
 
@@ -168,7 +170,8 @@ class ConditionalCompilationImpl {
         } else if (condition.astKind == ASTKind.PAREN_EXPR) {
             if (let Some(pe) <- (condition as ParenExpr)) { return EvalParenExpr(pe) }
         }
-        diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, condition.begin)
+        diag.DiagnoseRefactor(
+            BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, condition.begin).Emit()
         return false
     }
 
@@ -179,7 +182,7 @@ class ConditionalCompilationImpl {
         if (IsJudgeBinaryExpr(be.op) || IsRangeBinaryExpr(be.op)) {
             return EvalJudgeBinaryExpr(be)
         }
-        diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin)
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
         return false
     }
 
@@ -258,7 +261,7 @@ class ConditionalCompilationImpl {
                 }
             }
         }
-        diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin)
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
         return false
     }
 
@@ -266,7 +269,7 @@ class ConditionalCompilationImpl {
         if (let Some(expr) <- pe.expr) {
             return CheckConditionExpr(expr)
         }
-        diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, pe.begin)
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, pe.begin).Emit()
         return false
     }
 
@@ -295,23 +298,26 @@ class ConditionalCompilationImpl {
         if (let Some(left) <- be.leftExpr) {
             if (let Some(right) <- be.rightExpr) {
                 if (left.astKind != ASTKind.REF_EXPR) {
-                    diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin)
+                    diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
                     return false
                 }
                 if (right.astKind != ASTKind.LIT_CONST_EXPR) {
-                    diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_invalid_condition_value, right.begin)
+                    diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.conditional_compilation_invalid_condition_value, right.begin).Emit()
                     return false
                 }
                 if (let Some(lit) <- (right as LitConstExpr)) {
                     if (lit.kind != LitConstKind.STRING || lit.siExpr.isSome()) {
-                        diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_invalid_condition_value, right.begin)
+                        diag.DiagnoseRefactor(
+                            BasicDiagKindRefactor.conditional_compilation_invalid_condition_value, right.begin).Emit()
                         return false
                     }
                     return true
                 }
             }
         }
-        diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin)
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
         return false
     }
 
@@ -353,8 +359,10 @@ class ConditionalCompilationImpl {
             if (let Some(conditionExpr) <- (expr as RefExpr)) {
                 if (let Some(relatedInfo) <- GetDebugOrTestRelatedInfo(conditionExpr, ue.begin)) {
                     if (ue.op != TokenKind.NOT) {
-                        diag.DiagnoseWithNote(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr,
-                            ue.begin, "debug and test builtin conditions only support the logic ! operator")
+                        let builder = diag.DiagnoseRefactor(
+                            BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin)
+                        builder.AddNote("debug and test builtin conditions only support the logic ! operator")
+                        builder.Emit()
                         return None
                     }
                     return UnaryConditionInfo(relatedInfo)
@@ -362,14 +370,15 @@ class ConditionalCompilationImpl {
                 return None
             }
         }
-        diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin)
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin).Emit()
         return None
     }
 
     private func GetDebugOrTestRelatedInfo(re: RefExpr, diagnosePos: Position): Option<String> {
         let name = re.ref.identifier.Val()
         if (name != DEBUG_STR && name != TEST_STR) {
-            diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, diagnosePos)
+            diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, diagnosePos).Emit()
             return None
         }
         return GetRelatedInfo(name)
@@ -382,12 +391,13 @@ class ConditionalCompilationImpl {
             return false
         }
         if (!ConditionSupportsValue(conditionStr, right)) {
-            diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_not_support_builtin_value,
-                begin, args: [conditionStr, right, SupportedValuesText(conditionStr)])
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_not_support_builtin_value,
+                begin, arguments: [conditionStr, right, SupportedValuesText(conditionStr)]).Emit()
             return false
         }
         if (conditionStr == CJC_VERSION_STR && !IsCJCVersionLiteral(right)) {
-            diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_not_support_cjc_version_format, begin)
+            diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.conditional_compilation_not_support_cjc_version_format, begin).Emit()
             return false
         }
         return true
@@ -395,8 +405,8 @@ class ConditionalCompilationImpl {
 
     private func CheckConditionOp(be: BinaryExpr, conditionStr: String): Bool {
         if (!ConditionSupportsOp(conditionStr, be.op)) {
-            diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_not_support_op,
-                be.begin, args: [conditionStr, TokenKindText(be.op)])
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_not_support_op,
+                be.begin, arguments: [conditionStr, TokenKindText(be.op)]).Emit()
             return false
         }
         return true
@@ -506,7 +516,8 @@ class ConditionalCompilationImpl {
             if (let Some(condExpr) <- anno.condExpr) {
                 evalResult[0] = EvalCachedConditionExpr(condExpr)
             } else {
-                diag.Diagnose(BasicDiagKindRefactor.conditional_compilation_not_have_condition_expr, anno.begin)
+                diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.conditional_compilation_not_have_condition_expr, anno.begin).Emit()
             }
             return true
         })
