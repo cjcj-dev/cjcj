@@ -1,6 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::utils.CJC_ASSERT
 
 public class MemberVarInfo {
     public var name: String
@@ -186,9 +187,9 @@ public open class CustomTypeDef <: Base {
     }
 
     public func AddImplementedInterfaceTy(interfaceTy: ClassType): Unit {
-        if (!ContainsClassType(implementedInterfaceTys, interfaceTy)) {
-            implementedInterfaceTys.add(interfaceTy)
-        }
+        let interfaceDef = interfaceTy.GetClassDef()
+        CJC_ASSERT(interfaceDef.IsInterface())
+        implementedInterfaceTys.add(interfaceTy)
     }
 
     public open func GetImplementedInterfaceDefs(): ArrayList<ClassDef> {
@@ -212,6 +213,19 @@ public open class CustomTypeDef <: Base {
 
     public func GetImplementedInterfacesNum(): Int64 {
         return implementedInterfaceTys.size
+    }
+
+    public func GetSuperTypesInCurDef(): ArrayList<ClassType> {
+        let out = ArrayList<ClassType>()
+        if (let Some(classDef) <- (this as ClassDef)) {
+            if (let Some(superClassTy) <- classDef.GetSuperClassTy()) {
+                out.add(superClassTy)
+            }
+        }
+        for (interfaceTy in implementedInterfaceTys) {
+            out.add(interfaceTy)
+        }
+        return out
     }
 
     public func AddInstanceVar(info: MemberVarInfo): Unit {
@@ -270,10 +284,8 @@ public open class CustomTypeDef <: Base {
     }
 
     public func AddStaticMemberVar(variable: GlobalVar): Unit {
-        if (!ContainsGlobalVar(staticVars, variable)) {
-            staticVars.add(variable)
-            variable.SetOuterDeclaredOrExtendedDef(this)
-        }
+        staticVars.add(variable)
+        variable.SetOuterDeclaredOrExtendedDef(this)
     }
 
     public func GetStaticMemberVars(): ArrayList<GlobalVar> {
@@ -300,10 +312,8 @@ public open class CustomTypeDef <: Base {
     }
 
     public func AddMethod(method: Function): Unit {
-        if (!ContainsFunction(methods, method)) {
-            methods.add(method)
-            method.SetOuterDeclaredOrExtendedDef(this)
-        }
+        methods.add(method)
+        method.SetOuterDeclaredOrExtendedDef(this)
     }
 
     public func GetMethods(): ArrayList<Function> {
@@ -356,33 +366,6 @@ public open class CustomTypeDef <: Base {
     public func ToString(): String {
         return ToString(0)
     }
-}
-
-private func ContainsFunction(values: ArrayList<Function>, method: Function): Bool {
-    for (value in values) {
-        if (value.nodeId == method.nodeId) {
-            return true
-        }
-    }
-    return false
-}
-
-private func ContainsGlobalVar(values: ArrayList<GlobalVar>, variable: GlobalVar): Bool {
-    for (value in values) {
-        if (value.nodeId == variable.nodeId) {
-            return true
-        }
-    }
-    return false
-}
-
-private func ContainsClassType(values: ArrayList<ClassType>, classTy: ClassType): Bool {
-    for (value in values) {
-        if (value.GetClassDef().nodeId == classTy.GetClassDef().nodeId && value.ToString() == classTy.ToString()) {
-            return true
-        }
-    }
-    return false
 }
 
 private func ContainsClassDef(values: ArrayList<ClassDef>, classDef: ClassDef): Bool {
