@@ -44,7 +44,8 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
         case Some(value) => value
         case None => return None
     }
-    DeadCodeElimination().UnreachableBlockEliminationForPackage(lowered)
+    DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(lowered,
+        isDebug: instance.invocation.globalOptions.chirDebugOptimizer)
     let pluginResult = TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)
     if (!pluginResult.succeed) {
         instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)

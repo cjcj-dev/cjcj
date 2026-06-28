@@ -1,9 +1,14 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::utils.InternalError
 
 public class DeadCodeElimination {
-    public init() {}
+    private let builder: CHIRBuilder
+
+    public init(builder: CHIRBuilder) {
+        this.builder = builder
+    }
 
     public func RunOnPackage(pkg: Package): Int64 {
         var removed: Int64 = 0
@@ -25,16 +30,19 @@ public class DeadCodeElimination {
         return removed
     }
 
-    public func UnreachableBlockEliminationForPackage(pkg: Package): Unit {
-        for (fn in pkg.GetGlobalFuncsWithBody()) {
+    public func UnreachableBlockEliminationForPackage(pkg: Package, isDebug!: Bool = false): Unit {
+        for (fn in pkg.GetGlobalFunctionsRef()) {
+            if (fn.GetBody().isNone() || fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
+                continue
+            }
             if (let Some(body) <- fn.GetBody()) {
-                UnreachableBlockEliminationForFunc(body)
+                UnreachableBlockEliminationForFunc(body, isDebug: isDebug)
             }
         }
     }
 
-    public func UnreachableBlockEliminationForFunc(body: BlockGroup): Unit {
-        let entryBlock = body.GetEntryBlock() ?? return
+    public func UnreachableBlockEliminationForFunc(body: BlockGroup, isDebug!: Bool = false): Unit {
+        let entryBlock = body.GetEntryBlock().getOrThrow()
         let unreachable = body.GetBlocks()
         let workList = ArrayList<Block>()
         workList.add(entryBlock)
@@ -48,16 +56,32 @@ public class DeadCodeElimination {
             for (expr in block.GetExpressionsRef()) {
                 if (let Some(lambdaExpr) <- (expr as Lambda)) {
                     if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                        UnreachableBlockEliminationForFunc(lambdaBody)
+                        UnreachableBlockEliminationForFunc(lambdaBody, isDebug: isDebug)
                     }
                 }
             }
 
-            let terminator = block.GetTerminator() ??
-                throw IllegalStateException("reachable CHIR block has no terminator in unreachable block elimination")
+            let terminator = block.GetTerminator().getOrThrow()
+            var targetSucc: Option<Block> = None
+            if (let Some(branch) <- (terminator as Branch)) {
+                targetSucc = GetBranchTargetSucc(branch)
+            } else if (let Some(multiBranch) <- (terminator as MultiBranch)) {
+                targetSucc = GetMultiBranchTargetSucc(multiBranch)
+            }
+            if (let Some(target) <- targetSucc) {
+                let cond = terminator.GetOperand(0)
+                terminator.RemoveSelfFromBlock()
+                if (cond.IsLocalVar() && cond.GetUsersRef().isEmpty()) {
+                    let expr = (cond as LocalVar).getOrThrow().GetExpr().getOrThrow()
+                    expr.RemoveSelfFromBlock()
+                }
+                builder.CreateGoTo(target, block)
+            }
+
+            let updatedTerminator = block.GetTerminator().getOrThrow()
             var succIdx: Int64 = 0
-            while (succIdx < terminator.GetNumOfSuccessor()) {
-                let successor = terminator.GetSuccessor(succIdx)
+            while (succIdx < updatedTerminator.GetNumOfSuccessor()) {
+                let successor = updatedTerminator.GetSuccessor(succIdx)
                 if (RemoveBlockById(unreachable, successor.nodeId)) {
                     workList.add(successor)
                 }
@@ -67,6 +91,17 @@ public class DeadCodeElimination {
 
         for (block in unreachable) {
             block.RemoveSelfFromBlockGroup()
+        }
+    }
+
+    public func ClearUnreachableMarkBlock(pkg: Package): Unit {
+        for (fn in pkg.GetGlobalFunctionsRef()) {
+            if (fn.GetBody().isNone() || fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
+                continue
+            }
+            if (let Some(body) <- fn.GetBody()) {
+                ClearUnreachableMarkBlockForFunc(body)
+            }
         }
     }
 
@@ -122,4 +157,95 @@ public class DeadCodeElimination {
             kind == ExprKind.LT || kind == ExprKind.GT || kind == ExprKind.LE || kind == ExprKind.GE ||
             kind == ExprKind.EQUAL || kind == ExprKind.NOTEQUAL || kind == ExprKind.AND || kind == ExprKind.OR
     }
+
+    private func BreakBranchConnection(block: Block): Unit {
+        for (pred in block.GetPredecessors()) {
+            let predTerminator = pred.GetTerminator().getOrThrow()
+            if (predTerminator.GetExprKind() == ExprKind.BRANCH) {
+                let oprand = predTerminator.GetOperand(0)
+                let branch = (predTerminator as Branch).getOrThrow()
+                if (block.nodeId != branch.GetFalseBlock().nodeId) {
+                    InternalError("Unexpected branch connection")
+                }
+                let target = branch.GetTrueBlock()
+                branch.RemoveSelfFromBlock()
+                if (oprand.GetUsersRef().isEmpty()) {
+                    let expr = (oprand as LocalVar).getOrThrow().GetExpr().getOrThrow()
+                    expr.RemoveSelfFromBlock()
+                }
+                builder.CreateGoTo(target, pred)
+            } else {
+                let multi = (predTerminator as MultiBranch).getOrThrow()
+                if (block.nodeId != multi.GetDefaultBlock().nodeId) {
+                    InternalError("Unexpected multibranch connection")
+                }
+                multi.ReplaceSuccessor(0, multi.GetSuccessor(1))
+            }
+        }
+    }
+
+    private func ClearUnreachableMarkBlockForFunc(body: BlockGroup): Unit {
+        for (block in body.GetBlocks()) {
+            if (!block.TestAttr(Attribute.UNREACHABLE)) {
+                for (expr in block.GetExpressionsRef()) {
+                    if (let Some(lambdaExpr) <- (expr as Lambda)) {
+                        if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
+                            ClearUnreachableMarkBlockForFunc(lambdaBody)
+                        }
+                    }
+                }
+                continue
+            }
+            BreakBranchConnection(block)
+            block.RemoveSelfFromBlockGroup()
+        }
+    }
+}
+
+private func GetBranchTargetSucc(branch: Branch): Option<Block> {
+    if (!branch.GetCondition().IsLocalVar()) {
+        return None
+    }
+    let condExpr = (branch.GetCondition() as LocalVar).getOrThrow().GetExpr().getOrThrow()
+    if (condExpr.GetExprKind() != ExprKind.CONSTANT) {
+        return None
+    }
+    let constant = (condExpr as Constant).getOrThrow()
+    return if (constant.GetBoolLitVal()) { branch.GetTrueBlock() } else { branch.GetFalseBlock() }
+}
+
+private func GetMultiBranchTargetSucc(branch: MultiBranch): Option<Block> {
+    if (!branch.GetCondition().IsLocalVar()) {
+        return None
+    }
+    var condExpr = (branch.GetCondition() as LocalVar).getOrThrow().GetExpr().getOrThrow()
+    if (condExpr.GetExprKind() == ExprKind.TYPECAST) {
+        if (!condExpr.GetOperand(0).IsLocalVar()) {
+            return None
+        }
+        condExpr = (condExpr.GetOperand(0) as LocalVar).getOrThrow().GetExpr().getOrThrow()
+    }
+    if (condExpr.GetExprKind() != ExprKind.CONSTANT) {
+        return None
+    }
+    let constant = (condExpr as Constant).getOrThrow()
+    let condVal = if (constant.IsBoolLit()) {
+        if (constant.GetBoolLitVal()) { 1u64 } else { 0u64 }
+    } else if (constant.IsIntLit()) {
+        constant.GetUnsignedIntLitVal()
+    } else if (constant.IsRuneLit()) {
+        UInt64(UInt32(constant.GetRuneLitVal()))
+    } else {
+        InternalError("Unexpected const val kind")
+        0u64
+    }
+    let cases = branch.GetCaseVals()
+    var idx: Int64 = 0
+    while (idx < cases.size) {
+        if (condVal == cases[idx]) {
+            return branch.GetSuccessor(idx + 1)
+        }
+        idx++
+    }
+    return branch.GetDefaultBlock()
 }
