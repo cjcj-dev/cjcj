@@ -32,6 +32,7 @@ public struct HashID <: Hashable & Equatable<HashID> {
 
 public class Symbol {
     public var name: String = ""
+    public var id: Option<Symbol> = None
     public var node: Option<Node> = None
     public var scopeName: String = ""
     public var hashID: HashID = HashID()
@@ -61,6 +62,7 @@ public class Symbol {
 
     public init(fileHash: UInt64, name: String, node: Node, scopeLevel: UInt32, scopeName: String) {
         this.name = name
+        id = this
         this.node = node
         this.scopeLevel = scopeLevel
         this.scopeName = scopeName
