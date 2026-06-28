@@ -1,6 +1,5 @@
 package cangjie_compiler::conditional_compilation
 
-import cangjie_compiler::ast.Expr
 import cangjie_compiler::ast.File
 import cangjie_compiler::ast.Package
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
@@ -33,13 +32,5 @@ public class ConditionalCompilation {
     /// File entrance used by the package pass and by macro expansion.
     public func HandleFileConditionalCompilation(file: File): Unit {
         impl.HandleFileConditionalCompilation(file)
-    }
-
-    public func CheckConditionExpr(condition: Expr): Bool {
-        return impl.CheckConditionExpr(condition)
-    }
-
-    public func EvalConditionExpr(condition: Expr): Bool {
-        return impl.EvalCachedConditionExpr(condition)
     }
 }
