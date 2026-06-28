@@ -85,7 +85,7 @@ public class Package {
     public func GetGlobalVarsWithoutInit(): ArrayList<GlobalVar> {
         let out = ArrayList<GlobalVar>()
         for (item in globalVars) {
-            if (item.GetInitializerValue().isNone() && item.GetInitFunc().isNone() && !item.IsSrcCodeImported()) {
+            if (item.GetInitializerValue().isNone() && item.GetInitFunc().isNone()) {
                 out.add(item)
             }
         }
@@ -95,10 +95,13 @@ public class Package {
     public func GetGlobalVarsWithInit(includeSrcCodeImported!: Bool = true): ArrayList<GlobalVar> {
         let out = ArrayList<GlobalVar>()
         for (item in globalVars) {
-            if ((item.GetInitializerValue().isSome() || item.GetInitFunc().isSome()) &&
-                (includeSrcCodeImported || !item.IsSrcCodeImported())) {
-                out.add(item)
+            if (item.GetInitializerValue().isNone() && item.GetInitFunc().isNone()) {
+                continue
             }
+            if (!includeSrcCodeImported && item.IsSrcCodeImported()) {
+                continue
+            }
+            out.add(item)
         }
         return out
     }
@@ -255,8 +258,8 @@ public class Package {
     }
 
     public func GetAllCustomTypeDef(): ArrayList<CustomTypeDef> {
-        let out = GetCurPkgCustomTypeDef()
-        for (item in GetAllImportedCustomTypeDef()) {
+        let out = GetAllImportedCustomTypeDef()
+        for (item in GetCurPkgCustomTypeDef()) {
             out.add(item)
         }
         return out
