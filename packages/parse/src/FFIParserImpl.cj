@@ -2,6 +2,12 @@ package cangjie_compiler::parse
 
 import std.collection.*
 
+public let CONFLICTED_FFI_ANNOS: Array<AnnotationKind> = [
+    AnnotationKind.JAVA_MIRROR, AnnotationKind.JAVA_IMPL,
+    AnnotationKind.OBJ_C_IMPL, AnnotationKind.OBJ_C_MIRROR,
+    AnnotationKind.C, AnnotationKind.JAVA
+]
+
 public open class FFIParserImpl {
     public let parser: ParserImpl
     private let jp: JFFIParserImpl
@@ -45,7 +51,7 @@ public open class FFIParserImpl {
     public func CheckAnnotationsConflict(annos: ArrayList<Annotation>, decl: Decl): Unit {
         let candidates = ArrayList<Annotation>()
         for (anno in annos) {
-            if (IsConflictedFFIAnnotation(anno.kind)) {
+            if (CONFLICTED_FFI_ANNOS.contains(anno.kind)) {
                 candidates.add(anno)
             }
         }
@@ -198,12 +204,6 @@ public func DiagConflictingAnnos(diag: DiagnosticEngine, first: Annotation, seco
         DiagKindRefactor.CONFLICTING_MODIFIER,
         pos,
         "conflicting annotations @${first.identifier.Val()} and @${second.identifier.Val()} on ${onStr}")
-}
-
-public func IsConflictedFFIAnnotation(kind: AnnotationKind): Bool {
-    return kind == AnnotationKind.JAVA_MIRROR || kind == AnnotationKind.JAVA_IMPL ||
-        kind == AnnotationKind.OBJ_C_IMPL || kind == AnnotationKind.OBJ_C_MIRROR ||
-        kind == AnnotationKind.C || kind == AnnotationKind.JAVA
 }
 
 public func IsLitStringArg(arg: FuncArg): Bool {
