@@ -89,7 +89,6 @@ public class ASTTypeValidator {
             checkStatus.remove(at: checkStatus.size - 1)
         }
         if (!needCheck) {
-            popValidRangeIfCurrent(node)
             return VisitAction.WALK_CHILDREN
         }
         let valid = validateNode(node)
