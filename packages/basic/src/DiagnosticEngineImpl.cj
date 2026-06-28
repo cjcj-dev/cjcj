@@ -9,13 +9,13 @@ public class DiagnosticEngineImpl {
     private var warningPrintCount: UInt64 = 0
     private var errorByCategory: Array<UInt64> = [0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64]
     private var warningByCategory: Array<UInt64> = [0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64]
-    private var disableDiagDeep: Int64 = 0
-    private var enableDiagnose: Bool = true
+    var disableDiagDeep: Int64 = 0
+    var enableDiagnose: Bool = true
     private var disableWarning: Bool = false
     private var hardDisable: Bool = false
     private var handler: Option<DiagnosticHandler> = None
     private var maxNumOfDiags: Option<UInt64> = UInt64(DEFAULT_DIAG_NUM)
-    private let storedDiags: ArrayList<Diagnostic> = ArrayList<Diagnostic>()
+    let storedDiags: ArrayList<Diagnostic> = ArrayList<Diagnostic>()
     private var isEmitter: Bool = true
     private var isDumpErrCnt: Bool = true
     private var sourceManager: Option<SourceManager> = None
@@ -44,7 +44,7 @@ public class DiagnosticEngineImpl {
     public func SetSourceManager(sm: SourceManager): Unit { sourceManager = sm }
 
     public func GetSourceManager(): SourceManager {
-        return sourceManager ?? SourceManager()
+        return sourceManager ?? throw IllegalStateException("sourceManager is null")
     }
 
     public func FirstErrorCategory(): Option<DiagCategory> {
@@ -64,12 +64,6 @@ public class DiagnosticEngineImpl {
         for (diagnostic in value) {
             storedDiags.add(diagnostic)
         }
-    }
-
-    public func SetDisableDiagnoseState(enable: Bool, deep: Int64, stored: Array<Diagnostic>): Unit {
-        enableDiagnose = enable
-        disableDiagDeep = deep
-        SetStoredDiags(stored)
     }
 
     public func GetEnableDiagnose(): Bool {
@@ -137,15 +131,18 @@ public class DiagnosticEngineImpl {
         var index: Int64 = 0
         var formatPos = formatStr.indexOf("%")
         while (let Some(pos) <- formatPos) {
-            if (index >= diagnostic.args.size || pos + 1 >= formatStr.size) {
+            if (index >= diagnostic.args.size) {
                 break
+            }
+            if (pos + 1 >= formatStr.size) {
+                return
             }
             let argStr = getArgStr(formatStr[pos + 1], diagnostic.args, index, diagnostic)
             if (!argStr.isEmpty()) {
                 formatStr = formatStr[0..pos] + argStr + formatStr[pos + 2..]
                 formatPos = formatStr.indexOf("%", pos + argStr.size)
             } else {
-                formatPos = formatStr.indexOf("%", pos + 1)
+                formatPos = formatStr.indexOf("%", pos)
             }
             index++
         }
@@ -192,26 +189,6 @@ public class DiagnosticEngineImpl {
         }
         Errorln("%" + String.fromUtf8([formatChar]) + " is illegal format")
         return ""
-    }
-
-    public func FinishDiagnostic(diagnostic: Diagnostic): Unit {
-        if (!GetEnableDiagnose()) {
-            storedDiags.add(diagnostic)
-            return
-        }
-        if (!diagnostic.isRefactor) {
-            ConvertArgsToDiagMessage(diagnostic)
-            if (DiagFilter(diagnostic)) {
-                return
-            }
-            if (diagnostic.kind == DEFAULT_KIND) {
-                return
-            }
-        }
-        if (diagnostic.isInMacroCall) {
-            return
-        }
-        HandleDiagnostic(diagnostic)
     }
 
     public func HandleDiagnostic(diagnostic: Diagnostic): Unit {
@@ -462,22 +439,17 @@ public class DiagnosticEngineImpl {
 
     public func FindMacroCallInfo(pos: Position): Option<MacroCallDiagInfo> {
         let key = pos.Hash64()
-        var lower: Option<(UInt64, Option<MacroCallDiagInfo>)> = None
+        var lower: Option<MacroCallDiagInfo> = None
+        var found = false
+        var lowerKey: UInt64 = 0u64
         for ((entryKey, entryValue) in pos2MacroCallDiagInfoMap) {
-            if (entryKey >= key) {
-                if (let Some(current) <- lower) {
-                    if (entryKey < current[0]) {
-                        lower = (entryKey, entryValue)
-                    }
-                } else {
-                    lower = (entryKey, entryValue)
-                }
+            if (entryKey <= key && (!found || entryKey > lowerKey)) {
+                found = true
+                lowerKey = entryKey
+                lower = entryValue
             }
         }
-        if (let Some(entry) <- lower) {
-            return entry[1]
-        }
-        return None
+        return lower
     }
 
     public func RegisterMacroCallDiagInfo(info: MacroCallDiagInfo): Unit {

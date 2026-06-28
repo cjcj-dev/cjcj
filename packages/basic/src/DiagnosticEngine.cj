@@ -869,7 +869,29 @@ public class DiagnosticBuilder <: Resource {
             return
         }
         emitted = true
-        diag.FinishDiagnostic(diagnostic)
+        if (!diag.GetEnableDiagnose()) {
+            let consumed = diag.ConsumeStoredDiags()
+            let storedDiags = ArrayList<Diagnostic>()
+            for (storedDiag in consumed) {
+                storedDiags.add(storedDiag)
+            }
+            storedDiags.add(diagnostic)
+            diag.SetStoredDiags(storedDiags.toArray())
+            return
+        }
+        if (!diagnostic.isRefactor) {
+            diag.ConvertArgsToDiagMessage(diagnostic)
+            if (diag.DiagFilter(diagnostic)) {
+                return
+            }
+            if (diagnostic.kind == DEFAULT_KIND) {
+                return
+            }
+        }
+        if (diagnostic.isInMacroCall) {
+            return
+        }
+        diag.HandleDiagnostic(diagnostic)
     }
 
     public func close(): Unit {
@@ -933,20 +955,22 @@ public class DiagnosticCache {
 
 public class StashDisableDiagnoseStatus <: Resource {
     private let engine: DiagnosticEngine
-    private let savedEnableDiagnose: Bool
-    private let savedDisableDiagDeep: Int64
-    private let savedStoredDiags: Array<Diagnostic>
+    private let enableDiagnose: Bool
+    private let disableDiagDeep: Int64
+    private let storedDiags: Array<Diagnostic>
     private let hasTargetType: Bool
     private var closed: Bool = false
 
     public init(engine: DiagnosticEngine, hasTargetType!: Bool = false) {
         this.engine = engine
-        this.savedEnableDiagnose = engine.GetEnableDiagnose()
-        this.savedDisableDiagDeep = engine.GetDisableDiagDeep()
-        this.savedStoredDiags = engine.GetStoredDiags()
+        this.enableDiagnose = engine.impl.enableDiagnose
+        this.disableDiagDeep = engine.impl.disableDiagDeep
+        this.storedDiags = engine.impl.GetStoredDiags()
         this.hasTargetType = hasTargetType
         if (!hasTargetType) {
-            engine.SetDisableDiagnoseState(true, 0, Array<Diagnostic>())
+            engine.impl.enableDiagnose = true
+            engine.impl.disableDiagDeep = 0
+            engine.impl.storedDiags.clear()
         }
     }
 
@@ -956,16 +980,24 @@ public class StashDisableDiagnoseStatus <: Resource {
         }
         closed = true
         if (hasTargetType) {
-            let currentStored = engine.GetStoredDiags()
-            engine.SetDisableDiagnoseState(true, 0, Array<Diagnostic>())
-            for (diagnostic in currentStored) {
-                if (diagnostic.diagSeverity != DiagSeverity.DS_ERROR) {
-                    let builder = engine.Diagnose(diagnostic)
-                    builder.Emit()
+            engine.impl.enableDiagnose = true
+            engine.impl.disableDiagDeep = 0
+            var idx: Int64 = 0
+            while (idx < engine.impl.storedDiags.size) {
+                if (engine.impl.storedDiags[idx].diagSeverity == DiagSeverity.DS_ERROR) {
+                    engine.impl.storedDiags.remove(at: idx)
+                } else {
+                    idx++
                 }
             }
+            for (diagnostic in engine.impl.storedDiags) {
+                let builder = engine.Diagnose(diagnostic)
+                builder.Emit()
+            }
         }
-        engine.SetDisableDiagnoseState(savedEnableDiagnose, savedDisableDiagDeep, savedStoredDiags)
+        engine.impl.enableDiagnose = enableDiagnose
+        engine.impl.disableDiagDeep = disableDiagDeep
+        engine.impl.SetStoredDiags(storedDiags)
     }
 
     public func isClosed(): Bool {
@@ -1030,7 +1062,7 @@ private func convertOldDiagToNew(diagnostic: Diagnostic): Unit {
 }
 
 public class DiagnosticEngine {
-    private let impl: DiagnosticEngineImpl = DiagnosticEngineImpl()
+    let impl: DiagnosticEngineImpl = DiagnosticEngineImpl()
     public var ignoreScopeCheck: Bool = false
 
     public init() {
@@ -1049,9 +1081,6 @@ public class DiagnosticEngine {
     public func GetDisableDiagDeep(): Int64 { return impl.GetDisableDiagDeep() }
     public func GetStoredDiags(): Array<Diagnostic> { return impl.GetStoredDiags() }
     public func SetStoredDiags(value: Array<Diagnostic>): Unit { impl.SetStoredDiags(value) }
-    func SetDisableDiagnoseState(enable: Bool, deep: Int64, stored: Array<Diagnostic>): Unit {
-        impl.SetDisableDiagnoseState(enable, deep, stored)
-    }
     public func GetEnableDiagnose(): Bool { return impl.GetEnableDiagnose() }
     public func DisableDiagnose(): Array<Diagnostic> { return impl.DisableDiagnose() }
     public func EnableDiagnose(): Unit { impl.EnableDiagnose() }
@@ -1190,7 +1219,6 @@ public class DiagnosticEngine {
     }
 
     public func ConvertArgsToDiagMessage(diagnostic: Diagnostic): Unit { impl.ConvertArgsToDiagMessage(diagnostic) }
-    public func FinishDiagnostic(diagnostic: Diagnostic): Unit { impl.FinishDiagnostic(diagnostic) }
     public func AddMacroCallNote(diagnostic: Diagnostic, info: MacroCallDiagInfo, pos: Position): Unit {
         impl.AddMacroCallNote(diagnostic, info, pos)
     }
