@@ -1,29 +1,8 @@
 package cangjie_compiler::ast
 
-private func stripUnderscores(value: String): String {
-    let builder = StringBuilder()
-    for (byte in value.toArray()) {
-        if (byte != b'_') {
-            builder.append(String.fromUtf8([byte]))
-        }
-    }
-    return builder.toString()
-}
+import cangjie_compiler::utils.{Stoi, Stoll, Stoull}
 
-private func digitValue(byte: UInt8): Int64 {
-    if (byte >= b'0' && byte <= b'9') {
-        return Int64(byte - b'0')
-    }
-    if (byte >= b'a' && byte <= b'f') {
-        return Int64(byte - b'a') + 10
-    }
-    if (byte >= b'A' && byte <= b'F') {
-        return Int64(byte - b'A') + 10
-    }
-    return -1
-}
-
-private func escapeCharacterToInt(byte: UInt8): Int64 {
+private func EscapeCharacterToInt(byte: UInt8): Int64 {
     return match (byte) {
         case b't' => Int64(b'\t')
         case b'b' => Int64(b'\b')
@@ -39,53 +18,9 @@ private func escapeCharacterToInt(byte: UInt8): Int64 {
     }
 }
 
-private func indexOfByte(value: String, target: UInt8): Int64 {
-    var idx: Int64 = 0
-    while (idx < value.size) {
-        if (value[idx] == target) {
-            return idx
-        }
-        idx++
-    }
-    return -1
-}
-
-private func lastIndexOfByte(value: String, target: UInt8): Int64 {
-    if (value.isEmpty()) {
-        return -1
-    }
-    var idx = value.size - 1
-    while (idx >= 0) {
-        if (value[idx] == target) {
-            return idx
-        }
-        idx--
-    }
-    return -1
-}
-
-private func parseHexInt64(value: String): Int64 {
-    if (value.isEmpty()) {
-        return -1
-    }
-    var accum = 0u64
-    for (byte in value.toArray()) {
-        let digit = digitValue(byte)
-        if (digit < 0 || digit >= 16) {
-            return -1
-        }
-        let digitValue64 = UInt64(digit)
-        if (accum > (UInt64(Int64.Max) - digitValue64) / 16u64) {
-            return -1
-        }
-        accum = accum * 16u64 + digitValue64
-    }
-    return Int64(accum)
-}
-
-private func parseByteIntLitString(value: String): Int64 {
-    let startQuote = indexOfByte(value, b'\'')
-    let endQuote = lastIndexOfByte(value, b'\'')
+private func ParseByteIntLitString(value: String): Int64 {
+    let startQuote = value.indexOf("'") ?? -1
+    let endQuote = value.lastIndexOf("'") ?? -1
     if (startQuote < 0 || endQuote < 0 || endQuote - startQuote < 2) {
         return -1
     }
@@ -94,38 +29,60 @@ private func parseByteIntLitString(value: String): Int64 {
         return Int64(lit[0])
     }
     if (lit.size == 2 && lit[0] == b'\\') {
-        return escapeCharacterToInt(lit[1])
+        return EscapeCharacterToInt(lit[1])
     }
     if (lit.size > 2 && lit[1] == b'u') {
-        let lCurlPos = indexOfByte(value, b'{')
-        let rCurlPos = indexOfByte(value, b'}')
+        let lCurlPos = value.indexOf("{") ?? -1
+        let rCurlPos = value.indexOf("}") ?? -1
         if (lCurlPos < 0 || rCurlPos < 0 || rCurlPos - lCurlPos <= 1) {
             return -1
         }
-        return parseHexInt64(value[lCurlPos + 1..rCurlPos])
+        return Stoi(value[lCurlPos + 1..rCurlPos], base: 16) ?? -1
     }
     return -1
 }
 
-private func parseUnsignedWithLimit(value: String, base: Int64, limit: UInt64): (UInt64, Bool) {
-    if (value.isEmpty()) {
-        return (0u64, true)
+private func GetBaseAndPureStringValue(stringVal: String): (Int32, String) {
+    let baseLen: Int64 = 2
+    let binBase: Int32 = 2
+    let octBase: Int32 = 8
+    let hexBase: Int32 = 16
+    var base: Int32 = 10
+    var isNegNum = false
+    var prefix = ""
+    var stringValue = stringVal
+
+    if (stringValue[0] == b'-') {
+        stringValue = stringValue[1..]
+        isNegNum = true
     }
-    var accum = 0u64
-    var sawDigit = false
-    for (byte in value.toArray()) {
-        let digit = digitValue(byte)
-        if (digit < 0 || digit >= base) {
-            return if (sawDigit) { (accum, false) } else { (0u64, true) }
-        }
-        sawDigit = true
-        let digitValue64 = UInt64(digit)
-        if (accum > (limit - digitValue64) / UInt64(base)) {
-            return (0u64, true)
-        }
-        accum = accum * UInt64(base) + digitValue64
+
+    if (stringValue.size > baseLen) {
+        prefix = stringValue[0..baseLen].toAsciiLower()
     }
-    return (accum, false)
+
+    let builder = StringBuilder()
+    for (byte in stringValue.toArray()) {
+        if (byte != b'_') {
+            builder.append(String.fromUtf8([byte]))
+        }
+    }
+    stringValue = builder.toString()
+
+    if (prefix == "0b") {
+        stringValue = stringValue[baseLen..]
+        base = binBase
+    } else if (prefix == "0o") {
+        stringValue = stringValue[baseLen..]
+        base = octBase
+    } else if (prefix == "0x") {
+        stringValue = stringValue[baseLen..]
+        base = hexBase
+    }
+    if (isNegNum) {
+        stringValue = "-" + stringValue
+    }
+    return (base, stringValue)
 }
 
 private func hasIntegerLimit(kind: TypeKind): Bool {
@@ -273,12 +230,7 @@ public class IntLiteral {
         int64Val = other.int64Val
         uint64Val = other.uint64Val
         outOfRange = other.outOfRange
-        outOfMax = other.outOfMax
         literalType = other.literalType
-        sint64Val = other.sint64Val
-        suint64Val = other.suint64Val
-        wint64Val = other.wint64Val
-        wuint64Val = other.wuint64Val
     }
 
     public func Sign(): Int64 { return sign }
@@ -300,52 +252,37 @@ public class IntLiteral {
             return
         }
         literalType = kind
-        if (stringVal[0] == b'b') {
-            let byteValue = parseByteIntLitString(stringVal)
-            if (byteValue == -1) {
-                int64Val = 0
-                uint64Val = 0u64
-                outOfRange = true
-                return
-            }
-            int64Val = byteValue
-            uint64Val = UInt64(byteValue)
-            outOfRange = false
-            return
-        }
-        var value = stringVal
-        if (value[0] == b'-') {
+        if (stringVal[0] == b'-') {
             sign = -1
-            value = value[1..]
         }
-        var base: Int64 = 10
-        if (value.size > 2) {
-            let prefix = value[0..2]
-            if (prefix == "0b" || prefix == "0B") {
-                base = 2
-                value = value[2..]
-            } else if (prefix == "0o" || prefix == "0O") {
-                base = 8
-                value = value[2..]
-            } else if (prefix == "0x" || prefix == "0X") {
-                base = 16
-                value = value[2..]
-            }
-        }
-        value = stripUnderscores(value)
-        let (uintParsed, outOfUintRange) = parseUnsignedWithLimit(value, base, UInt64.Max)
-        uint64Val = uintParsed
 
-        let signedLimit = if (sign < 0) { UInt64(Int64.Max) + 1u64 } else { UInt64(Int64.Max) }
-        let (intParsed, outOfIntRange) = parseUnsignedWithLimit(value, base, signedLimit)
-        if (outOfIntRange) {
-            int64Val = 0
-        } else if (sign < 0 && intParsed == UInt64(Int64.Max) + 1u64) {
-            int64Val = Int64.Min
-        } else if (sign < 0) {
-            int64Val = -Int64(intParsed)
+        let (base, stringValue) = GetBaseAndPureStringValue(stringVal)
+
+        var outOfUintRange = false
+        var outOfIntRange = false
+
+        if (stringVal[0] == b'b') {
+            int64Val = ParseByteIntLitString(stringVal)
+            if (int64Val == -1) {
+                int64Val = 0
+                outOfIntRange = true
+                outOfUintRange = true
+            }
+            uint64Val = UInt64(int64Val)
         } else {
-            int64Val = Int64(intParsed)
+            if (let Some(ul) <- Stoull(stringValue, base: base)) {
+                uint64Val = ul
+            } else {
+                uint64Val = 0u64
+                outOfUintRange = true
+            }
+
+            if (let Some(il) <- Stoll(stringValue, base: base)) {
+                int64Val = il
+            } else {
+                int64Val = 0
+                outOfIntRange = true
+            }
         }
         outOfRange = if (sign == -1) { outOfIntRange } else { outOfUintRange }
     }
@@ -361,16 +298,22 @@ public class IntLiteral {
     }
 
     public func GreaterThanOrEqualBitLen(kind: TypeKind): Bool {
-        let bitLen = match (kind) {
-            case TypeKind.TYPE_INT8 => 8u64
-            case TypeKind.TYPE_UINT8 => 8u64
-            case TypeKind.TYPE_INT16 => 16u64
-            case TypeKind.TYPE_UINT16 => 16u64
-            case TypeKind.TYPE_INT32 => 32u64
-            case TypeKind.TYPE_UINT32 => 32u64
-            case _ => 64u64
+        let bitLen: Option<UInt64> = match (kind) {
+            case TypeKind.TYPE_INT8 => Some(8u64)
+            case TypeKind.TYPE_INT16 => Some(16u64)
+            case TypeKind.TYPE_INT32 => Some(32u64)
+            case TypeKind.TYPE_INT64 => Some(64u64)
+            case TypeKind.TYPE_UINT8 => Some(8u64)
+            case TypeKind.TYPE_UINT16 => Some(16u64)
+            case TypeKind.TYPE_UINT32 => Some(32u64)
+            case TypeKind.TYPE_UINT64 => Some(64u64)
+            case TypeKind.TYPE_IDEAL_INT => Some(64u64)
+            case _ => None
         }
-        return uint64Val >= bitLen
+        if (let Some(value) <- bitLen) {
+            return uint64Val >= value
+        }
+        return false
     }
 
     public func CalcWrappingAndSaturatingVal(): Unit {
@@ -421,5 +364,34 @@ public class IntLiteral {
 
     public func GetValue(): String {
         return if (IsUnsigned()) { "${uint64Val}" } else { "${int64Val}" }
+    }
+
+    @OverflowWrapping
+    private func QuickPow(inBase: UInt64, inExp: UInt64, maxVal: UInt64, overflow: Box<Bool>): UInt64 {
+        var res = 1u64
+        var base = inBase
+        var exp = inExp
+        var ov = false
+        while (exp != 0u64 && !overflow.value) {
+            if ((exp & 1u64) != 0u64) {
+                if (ov || (base != 0u64 && (maxVal / base < res))) {
+                    overflow.value = true
+                }
+                res *= base
+            }
+            if (!ov && (base != 0u64 && (maxVal / base < base))) {
+                ov = true
+            }
+            base *= base
+            exp = exp >> 1
+        }
+        return res
+    }
+
+    private func GetAbsValue(): UInt64 {
+        if (int64Val == Int64.Min) {
+            return UInt64(int64Val)
+        }
+        return if (sign == 1) { uint64Val } else { UInt64(-int64Val) }
     }
 }
