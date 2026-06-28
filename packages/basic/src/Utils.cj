@@ -193,6 +193,75 @@ public func GetLineTerminatorLength(bytes: Array<Byte>, index: Int64): UInt8 {
 }
 
 @When[os == "Windows"]
+foreign {
+    func GetModuleHandleA(moduleName: CString): CPointer<Unit>
+    func GetProcAddress(handle: CPointer<Unit>, symbol: CString): CPointer<Unit>
+}
+
+@When[os == "Windows"]
+@C
+private struct RTL_OSVERSIONINFOW {
+    var dwOSVersionInfoSize: UInt32
+    var dwMajorVersion: UInt32
+    var dwMinorVersion: UInt32
+    var dwBuildNumber: UInt32
+    var dwPlatformId: UInt32
+    var szCSDVersion: VArray<UInt16, $128>
+
+    init() {
+        dwOSVersionInfoSize = 0u32
+        dwMajorVersion = 0u32
+        dwMinorVersion = 0u32
+        dwBuildNumber = 0u32
+        dwPlatformId = 0u32
+        szCSDVersion = VArray<UInt16, $128>({ _: Int64 => 0u16 })
+    }
+}
+
+@When[os == "Windows"]
+private type RtlGetVersionPtr = CFunc<(CPointer<RTL_OSVERSIONINFOW>) -> Int32>
+
+@When[os == "Windows"]
+public struct WindowsOsVersion {
+    public let dwMajorVersion: UInt32
+    public let dwMinorVersion: UInt32
+    public let dwBuildNumber: UInt32
+    public let dwPlatformId: UInt32
+
+    public init(dwMajorVersion: UInt32, dwMinorVersion: UInt32, dwBuildNumber: UInt32, dwPlatformId: UInt32) {
+        this.dwMajorVersion = dwMajorVersion
+        this.dwMinorVersion = dwMinorVersion
+        this.dwBuildNumber = dwBuildNumber
+        this.dwPlatformId = dwPlatformId
+    }
+}
+
+@When[os == "Windows"]
+public func GetOSVersion(): WindowsOsVersion {
+    var result = WindowsOsVersion(0u32, 0u32, 0u32, 0u32)
+    try (ntdllName = unsafe { LibC.mallocCString("ntdll.dll") }.asResource(),
+        rtlGetVersionName = unsafe { LibC.mallocCString("RtlGetVersion") }.asResource(),
+        osVersionInfoPtr = LibC.malloc<RTL_OSVERSIONINFOW>().asResource()) {
+        let hMod = unsafe { GetModuleHandleA(ntdllName.value) }
+        unsafe { osVersionInfoPtr.value.write(RTL_OSVERSIONINFOW()) }
+        if (!hMod.isNull()) {
+            let rtlGetVersionSymbol = unsafe { GetProcAddress(hMod, rtlGetVersionName.value) }
+            if (!rtlGetVersionSymbol.isNull()) {
+                var osVersionInfo = unsafe { osVersionInfoPtr.value.read() }
+                osVersionInfo.dwOSVersionInfoSize = UInt32(sizeOf<RTL_OSVERSIONINFOW>())
+                unsafe { osVersionInfoPtr.value.write(osVersionInfo) }
+                let rtlGetVersion = RtlGetVersionPtr(rtlGetVersionSymbol)
+                unsafe { let _ = rtlGetVersion(osVersionInfoPtr.value) }
+            }
+        }
+        let osVersionInfo = unsafe { osVersionInfoPtr.value.read() }
+        result = WindowsOsVersion(osVersionInfo.dwMajorVersion, osVersionInfo.dwMinorVersion,
+            osVersionInfo.dwBuildNumber, osVersionInfo.dwPlatformId)
+    }
+    return result
+}
+
+@When[os == "Windows"]
 public func GetLineTerminator(): String {
     return "\r\n"
 }
