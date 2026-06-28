@@ -106,11 +106,8 @@ public class HashedASTWriter {
         }
         for (decl in writeOrder) {
             let cacheMangle = GetCacheWriteRawMangleName(decl)
-            if (!cacheMangle.isEmpty() && allAST.contains(cacheMangle)) {
-                order.add(cacheMangle)
-            } else if (!decl.rawMangleName.isEmpty() && allAST.contains(decl.rawMangleName)) {
-                order.add(decl.rawMangleName)
-            }
+            let _ = allAST[cacheMangle]
+            order.add(cacheMangle)
         }
     }
 
