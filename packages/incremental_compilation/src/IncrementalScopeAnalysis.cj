@@ -4,6 +4,7 @@ import std.collection.*
 import std.fs.File
 import std.fs.exists
 import cangjie_compiler::option.GlobalOptions
+import cangjie_compiler::utils.CJC_ABORT
 
 public class IncreResult {
     public var kind: IncreKind = IncreKind.INVALID
@@ -35,7 +36,7 @@ public class IncreResult {
             } else if (kind == IncreKind.NO_CHANGE) {
                 logger.LogLn("incremental compile result kind: no change")
             } else {
-                logger.LogLn("incremental compile result kind: invalid")
+                CJC_ABORT()
             }
             return
         }
@@ -140,10 +141,7 @@ public func DeleteRecompiledNodesInCHIROptEffectMap(recompiledNodes: HashSet<Inc
 public func IncrementalScopeAnalysis(args: IncrementalScopeAnalysisArgs): IncreResult {
     let cachedAstPath = args.op.GenerateCachedPathName(args.srcPackage.fullPackageName, CACHED_AST_EXTENSION)
     let serializedPath = args.op.GenerateCachedPathName(args.srcPackage.fullPackageName, SERIALIZED_FILE_EXTENSION)
-    var previousCacheOpt = args.cachedInfo
-    if (let None <- previousCacheOpt) {
-        previousCacheOpt = LoadCacheInfo(cachedAstPath, args.rawMangleName2DeclMap)
-    }
+    let previousCacheOpt = LoadCacheInfo(cachedAstPath, args.rawMangleName2DeclMap)
     if (let None <- previousCacheOpt) {
         return TerminateAnalysisAndRollback(CompilationCache(), args,
             "load cached info failed, roll back to full compilation")
@@ -247,17 +245,19 @@ private class ImportPackageWalker {
             }
             let walker = ImportPackageWalker()
             let decls = pkg.AllTopLevelDecls()
+            let collectedDecls = ArrayList<IncrDecl>()
             for (decl in decls) {
                 if (decl.rawMangleName.isEmpty()) {
-                    decl.rawMangleName = MangleDecl(decl)
+                    continue
                 }
                 walker.UpdateMangleName(decl)
                 walker.RegisterDeclAndMembers(decl, result.importedMangled2Decl)
+                collectedDecls.add(decl)
             }
-            for (decl in decls) {
+            for (decl in collectedDecls) {
                 walker.CollectSourceImportedDependencies(decl, result)
             }
-            for (decl in decls) {
+            for (decl in collectedDecls) {
                 result.importedASTCache[decl.rawMangleName] = walker.VisitTopLevel(decl, result.importedMangled2Decl)
                 walker.ResolveInheritedTypeDecls(decl, result.importedMangled2Decl)
                 result.importRelations.CollectImportedDeclExtraRelation(decl)
@@ -306,7 +306,7 @@ private class ImportPackageWalker {
         ReplaceTypeWithTyInMangleName(decl)
         for (member in GetMembers(decl)) {
             if (member.rawMangleName.isEmpty()) {
-                member.rawMangleName = MangleDecl(member)
+                continue
             }
             UpdateMangleName(member)
         }
@@ -317,6 +317,9 @@ private class ImportPackageWalker {
             map[decl.rawMangleName] = decl
         }
         for (member in GetMembers(decl)) {
+            if (member.rawMangleName.isEmpty()) {
+                continue
+            }
             RegisterDeclAndMembers(member, map)
         }
     }
@@ -330,6 +333,9 @@ private class ImportPackageWalker {
             }
         }
         for (member in GetMembers(decl)) {
+            if (member.rawMangleName.isEmpty()) {
+                continue
+            }
             ResolveInheritedTypeDecls(member, map)
         }
     }
@@ -346,6 +352,9 @@ private class ImportPackageWalker {
             }
         }
         for (member in GetMembers(decl)) {
+            if (member.rawMangleName.isEmpty()) {
+                continue
+            }
             CollectSourceImportedDependencies(member, result)
         }
     }
