@@ -163,6 +163,9 @@ extend ParserImpl {
 
     public func CheckImportSpec(imports: ArrayList<ImportSpec>): Unit {
         for (importSpec in imports) {
+            if (importSpec.TestAttr(Attribute.COMPILER_ADD)) {
+                continue
+            }
             let content = importSpec.content
             if (content.kind != ImportKind.IMPORT_MULTI) {
                 let fullPackageName = content.GetImportedPackageName()
@@ -223,6 +226,10 @@ extend ParserImpl {
             desugared.content.asPos = item.asPos
             desugared.content.aliasName = CloneIdentifier(item.aliasName)
             desugared.content.isBroken = item.isBroken || importSpec.content.hasBroken
+            // C++ ParseImports.cpp:164 EnableAttr(COMPILER_ADD, GetModifierAttr(...)); selfhost 无
+            // GetModifierAttr(modifier-derived attr 为独立既存 gap), 此处补 COMPILER_ADD 使 CheckImportSpec
+            // 的 desugared skip 生效, 避免对超长包名重复诊断。
+            desugared.EnableAttr(Attribute.COMPILER_ADD)
             imports.add(desugared)
         }
     }
@@ -283,7 +290,6 @@ extend ParserImpl {
                         DiagKindRefactor.PARSE_ERROR,
                         curIdent.Begin(),
                         "raw identifier '${curIdent.GetRawText()}' is not allowed as an organization name")
-                    MarkImportContentBroken(content)
                 }
             }
             if (!skipDoubleColon && !Skip(TokenKind.DOT)) {
@@ -291,6 +297,10 @@ extend ParserImpl {
             }
         }
         content.kind = if (curIdent.Val() == "*") { ImportKind.IMPORT_ALL } else { ImportKind.IMPORT_SINGLE }
+        if (lastToken.kind == TokenKind.PACKAGE_IDENTIFIER) {
+            DiagExpectedIdentifier(curIdent.Begin())
+            content.EnableAttr(Attribute.IS_BROKEN)
+        }
         content.identifier = curIdent
         content.end = curIdent.End()
         return true
