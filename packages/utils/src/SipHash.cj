@@ -77,30 +77,6 @@ foreign {
     func memcpy(dest: CPointer<UInt8>, src: CString, count: UIntNative): CPointer<UInt8>
 }
 
-private func cStringBytes(data: CString): Array<UInt8> {
-    CJC_ASSERT(!data.isNull())
-    let length = unsafe { strlen(data) }
-    if (length == 0) {
-        return Array<UInt8>()
-    }
-    let bytes = ArrayList<UInt8>()
-    try (buffer = LibC.malloc<UInt8>(count: Int64(length)).asResource()) {
-        if (buffer.value.isNull()) {
-            CJC_ABORT_WITH_MSG("failed to allocate CString buffer for SipHash")
-            return Array<UInt8>()
-        }
-        unsafe {
-            let _ = memcpy(buffer.value, data, length)
-        }
-        var idx: Int64 = 0
-        while (idx < Int64(length)) {
-            bytes.add(unsafe { (buffer.value + idx).read() })
-            idx++
-        }
-    }
-    return bytes.toArray()
-}
-
 public class SipHash {
     private static let k0: UInt64 = 0x00000000deadbeefu64
     private static let k1: UInt64 = 0x0000000012345678u64
@@ -110,7 +86,21 @@ public class SipHash {
     }
 
     public static func GetHashValue(data: CString): UInt64 {
-        return SipHash_2_4(cStringBytes(data))
+        let length = unsafe { strlen(data) }
+        let bytes = ArrayList<UInt8>()
+        if (length != 0) {
+            try (buffer = LibC.malloc<UInt8>(count: Int64(length)).asResource()) {
+                unsafe {
+                    let _ = memcpy(buffer.value, data, length)
+                }
+                var idx: Int64 = 0
+                while (idx < Int64(length)) {
+                    bytes.add(unsafe { (buffer.value + idx).read() })
+                    idx++
+                }
+            }
+        }
+        return SipHash_2_4(bytes.toArray())
     }
 
     public static func GetHashValue(data: Array<UInt8>): UInt64 {
