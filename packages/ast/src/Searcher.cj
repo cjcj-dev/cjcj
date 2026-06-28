@@ -1,5 +1,6 @@
 package cangjie_compiler::ast
 
+import cangjie_compiler::utils.{CJC_ASSERT, FileUtil}
 import std.collection.*
 
 public class TrieNode {
@@ -93,21 +94,25 @@ public class Trie {
 
     public func PrefixMatch(prefix: String): ArrayList<String> {
         let out = ArrayList<String>()
-        if (prefix.isEmpty()) {
-            collect(root, out)
+        let prefixRoot = GetPrefixRootNode(prefix)
+        if (let None <- prefixRoot) {
             return out
         }
+        collect(prefixRoot.getOrThrow(), out)
+        return out
+    }
+
+    public func GetPrefixRootNode(prefix: String): Option<TrieNode> {
         var node = root
         for (byte in prefix.toArray()) {
             let key = String.fromUtf8([byte])
             if (let Some(child) <- node.next.get(key)) {
                 node = child
             } else {
-                return out
+                return None
             }
         }
-        collect(node, out)
-        return out
+        return node
     }
 
     public func SuffixMatch(suffix: String): ArrayList<String> {
@@ -230,28 +235,17 @@ public class PosSearchApi {
         let posStr = PosToStr(pos)
         var node = FindCommonRootInPosTrie(posTrie, posStr)
         let out = ArrayList<Symbol>()
-        var close = isClose
+        let close = Box<Bool>(isClose)
         while (Int64(node.depth) > MAX_DIGITS_FILE) {
             if (Int64(node.depth) == GetMaxDigitsPostion()) {
+                CJC_ASSERT(node.next.isEmpty())
                 if (let Some(parent) <- node.parent) {
                     node = parent
                     continue
                 }
                 break
             }
-            let target = digitAt(posStr, node.depth)
-            var sawLowerBound = false
-            for ((key, child) in node.next) {
-                if (!(key < target)) {
-                    sawLowerBound = true
-                }
-                if (key < target || (close && key == target)) {
-                    addAllUnique(out, child.ids)
-                }
-            }
-            if (sawLowerBound) {
-                close = false
-            }
+            GetIDsLessThanPosOfDepth(node, posStr, out, close)
             if (let Some(parent) <- node.parent) {
                 node = parent
             } else {
@@ -259,6 +253,33 @@ public class PosSearchApi {
             }
         }
         return out
+    }
+
+    public static func GetIDsLessThanPosOfDepth(
+        n: TrieNode, posStr: String, ids: ArrayList<Symbol>, isClose: Box<Bool>): Unit {
+        let target = digitAt(posStr, n.depth)
+        var endIter = ""
+        var foundEndIter = false
+        for ((key, _) in n.next) {
+            if (!(key < target) && (!foundEndIter || key < endIter)) {
+                endIter = key
+                foundEndIter = true
+            }
+        }
+        var includeEndIter = false
+        if (foundEndIter) {
+            if (isClose.value) {
+                if (endIter == target) {
+                    includeEndIter = true
+                }
+                isClose.value = false
+            }
+        }
+        for ((key, child) in n.next) {
+            if (!foundEndIter || key < endIter || (includeEndIter && key == endIter)) {
+                addAllUnique(ids, child.ids)
+            }
+        }
     }
 
     private static func addUniqueSymbol(values: ArrayList<Symbol>, symbol: Symbol): Unit {
@@ -446,7 +467,7 @@ public class Searcher {
     private func NormalizeQuery(query: Query): String {
         var normalized = query.PrettyPrint()
         for (fileHash in query.fileHashes) {
-            normalized += "|fileHash:${fileHash}"
+            normalized += "|fileHash:" + FileUtil.GetShortHash(fileHash)
         }
         normalized += "|sort:desc"
         return normalized
@@ -563,7 +584,7 @@ public class Searcher {
         }
         let out = ArrayList<Symbol>()
         for (scopeName in ctx.invertedIndex.scopeNameTrie.PrefixMatch(query.value)) {
-            AddAllUnique(out, SymbolsForKey(ctx.invertedIndex.scopeNameIndexes, GetScopeNameWithoutTail(scopeName)))
+            AddAllUnique(out, SymbolsForKey(ctx.invertedIndex.scopeNameIndexes, scopeName))
         }
         return out
     }
