@@ -3709,7 +3709,7 @@ public class TypeChecker {
         if (!ShouldTryBinaryOperatorOverload(be)) {
             return false
         }
-        DesugarOperatorOverloadExpr(be)
+        DesugarOperatorOverloadExpr(be, ctx: Some(ctx))
         if (let Some(desugar) <- be.desugarExpr) {
             if (Check(ctx, target, desugar)) {
                 be.SetTy(desugar.GetTy() ?? TypeManager.GetInvalidTy())
@@ -3725,7 +3725,7 @@ public class TypeChecker {
         if (!ShouldTryBinaryOperatorOverload(be)) {
             return None
         }
-        DesugarOperatorOverloadExpr(be)
+        DesugarOperatorOverloadExpr(be, ctx: Some(ctx))
         if (let Some(desugar) <- be.desugarExpr) {
             let desugarTy = Synthesize(ctx, desugar)
             if (Ty.IsTyCorrect(desugarTy)) {

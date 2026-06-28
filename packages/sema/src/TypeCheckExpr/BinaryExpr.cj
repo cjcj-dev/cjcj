@@ -133,60 +133,14 @@ private func ShouldTryBinaryOverload(be: BinaryExpr): Bool {
     return IsOverloadableOperator(be.op) && !HasTupleEqualityOperands(be)
 }
 
-private func CheckRightOperandFromLeft(typeManager: TypeManager, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
-    checker!: Option<BinaryOperandChecker> = None): Bool {
-    if (be.op != TokenKind.EQUAL && be.op != TokenKind.NOTEQ) {
-        return false
-    }
-    if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
-        return false
-    }
-    let leftExpr = be.leftExpr.getOrThrow()
-    let rightExpr = be.rightExpr.getOrThrow()
-    let leftTy = SynBinaryOperand(typeManager, leftExpr, synthesizer)
-    if (!Ty.IsTyCorrect(leftTy)) {
-        return false
-    }
-    let targetLeft = TcReplaceIdeal(typeManager, leftExpr)
-    if (!Ty.IsTyCorrect(targetLeft)) {
-        return false
-    }
-    ClearExprKeepTargets(rightExpr)
-    if (ChkBinaryOperand(typeManager, targetLeft, rightExpr, ctx, checker)) {
-        return true
-    }
-    return false
-}
-
-private func BinaryOperandsReady(typeManager: TypeManager, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
-    checker!: Option<BinaryOperandChecker> = None): Bool {
-    if (CheckRightOperandFromLeft(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
-        return true
-    }
-    if (let Some(leftExpr) <- be.leftExpr) {
-        if (let Some(rightExpr) <- be.rightExpr) {
-            let leftTy = SynBinaryOperand(typeManager, leftExpr, synthesizer)
-            let rightTy = SynBinaryOperand(typeManager, rightExpr, synthesizer)
-            if (Ty.IsTyCorrect(leftTy) && Ty.IsTyCorrect(rightTy)) {
-                let _ = TcReplaceIdeal(typeManager, leftExpr)
-                let _ = TcReplaceIdeal(typeManager, rightExpr)
-                return true
-            }
-        }
-    }
-    return false
-}
-
 private func TrySynBinaryOverload(typeManager: TypeManager, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None): Option<Ty> {
-    if (!ShouldTryBinaryOverload(be) ||
-        !BinaryOperandsReady(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
+    let _ = checker
+    if (!ShouldTryBinaryOverload(be)) {
         return None
     }
-    DesugarOperatorOverloadExpr(be)
+    DesugarOperatorOverloadExpr(be, ctx: ctx)
     if (let Some(desugar) <- be.desugarExpr) {
         let desugarTy = SynBinaryOperand(typeManager, desugar, synthesizer)
         if (Ty.IsTyCorrect(desugarTy)) {
@@ -203,11 +157,11 @@ private func TrySynBinaryOverload(typeManager: TypeManager, be: BinaryExpr,
 private func TryChkBinaryOverload(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None): Bool {
-    if (!ShouldTryBinaryOverload(be) ||
-        !BinaryOperandsReady(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
+    let _ = synthesizer
+    if (!ShouldTryBinaryOverload(be)) {
         return false
     }
-    DesugarOperatorOverloadExpr(be)
+    DesugarOperatorOverloadExpr(be, ctx: ctx)
     if (let Some(desugar) <- be.desugarExpr) {
         if (ChkBinaryOperand(typeManager, target, desugar, ctx, checker)) {
             PropagateBinaryDesugarTarget(be, desugar)
@@ -575,7 +529,6 @@ private func SynRelationalExpr(typeManager: TypeManager, be: BinaryExpr,
             return BinaryInvalid(be)
         }
     }
-    ClearExprKeepTargets(be)
     return SynArithmeticOrRelationalExpr(typeManager, be, isArithmetic: false, ctx: ctx,
         synthesizer: synthesizer, checker: checker)
 }
@@ -1094,6 +1047,9 @@ public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
         return ChkFlowExpr(typeManager, target, be)
     }
     if (ChkBuiltinBinaryExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
+        return true
+    }
+    if (TryChkBinaryOverload(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
         return true
     }
     if (!HasTupleEqualityOperands(be)) {

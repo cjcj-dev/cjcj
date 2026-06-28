@@ -452,7 +452,7 @@ private func DesugarCompositionExpr(expr: BinaryExpr): Unit {
     }
 }
 
-public func DesugarOperatorOverloadExpr(expr: BinaryExpr): Unit {
+public func DesugarOperatorOverloadExpr(expr: BinaryExpr, ctx!: Option<ASTContext> = None): Unit {
     if (let Some(_) <- expr.desugarExpr) {
         return
     }
@@ -460,11 +460,23 @@ public func DesugarOperatorOverloadExpr(expr: BinaryExpr): Unit {
         if (let Some(right) <- expr.rightExpr) {
             let callExpr = CallExpr()
             CopyBasicInfo(expr, callExpr)
+            if (let Some(context) <- ctx) {
+                context.RemoveTypeCheckCache(callExpr)
+            }
             let callBase = CreateOperatorMemberAccess(expr, left, TokenKindLiteral(expr.op), expr.operatorPos)
+            if (let Some(context2) <- ctx) {
+                context2.RemoveTypeCheckCache(callBase)
+            }
             callExpr.baseFunc = callBase
             let arg = FuncArg()
             CopyBasicInfo(right, arg)
+            if (let Some(context3) <- ctx) {
+                context3.RemoveTypeCheckCache(arg)
+            }
             arg.expr = right
+            if (let Some(rightTy) <- right.GetTy()) {
+                arg.SetTy(rightTy)
+            }
             callExpr.args.add(arg)
             callExpr.sourceExpr = expr
             CopyUnsafeAttr(expr, callExpr)
