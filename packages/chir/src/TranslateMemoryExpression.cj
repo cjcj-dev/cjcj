@@ -1,5 +1,7 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::utils.CJC_ASSERT
+
 public func CHIR2BCHIRTranslateMemoryExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
     match (expr.GetExprKind()) {
         case ExprKind.ALLOCATE => TranslateAllocateExpression(context, expr, false)
@@ -7,13 +9,16 @@ public func CHIR2BCHIRTranslateMemoryExpression(context: CHIR2BCHIRContext, expr
         case ExprKind.STORE => context.definition.PushOp(OpCode.ASG)
         case ExprKind.GET_ELEMENT_REF => TranslateGetElementRef(context, expr)
         case ExprKind.STORE_ELEMENT_REF => TranslateStoreElementRef(context, expr)
-        case _ => context.definition.PushOp(OpCode.NOT_SUPPORTED)
+        case _ =>
+            CJC_ASSERT(false)
+            context.definition.PushOp(OpCode.ABORT)
     }
 }
 
 public func CHIR2BCHIRTranslateStructuredExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
     let _ = expr
-    context.definition.PushOp(OpCode.NOT_SUPPORTED)
+    CJC_ASSERT(false)
+    context.definition.PushOp(OpCode.ABORT)
 }
 
 public func TranslateAllocateExpression(context: CHIR2BCHIRContext, expr: Expression, withException: Bool): Unit {
