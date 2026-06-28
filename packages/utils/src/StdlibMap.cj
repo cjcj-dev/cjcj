@@ -1,31 +1,60 @@
 package cangjie_compiler::utils
 
-private let STANDARD_LIBS: Array<(String, String)> = [
-    ("std.core", "core"), ("std.binary", "binary"), ("std.io", "io"), ("std.math", "math"),
-    ("std.overflow", "overflow"), ("std.runtime", "runtime"), ("std.convert", "convert"),
-    ("std.random", "random"), ("std.collection", "collection"), ("std.unicode", "unicode"),
-    ("std.sort", "sort"), ("std.argopt", "argopt"), ("std.ast", "ast"), ("std.interop", "interop"),
-    ("std.time", "time"), ("std.sync", "sync"), ("std.collection.concurrent", "collection.concurrent"),
-    ("std.net", "net"), ("std.regex", "regex"), ("std.unittest.common", "unittest.common"),
-    ("std.unittest.prop_test", "unittest.prop_test"), ("std.unittest.diff", "unittest.diff"),
-    ("std.math.numeric", "math.numeric"), ("std.fs", "fs"),
-    ("std.unittest.mock.internal", "unittest.mock.internal"), ("std.unittest.mock", "unittest.mock"),
-    ("std.reflect", "reflect"), ("std.ref", "ref"), ("std.crypto", "crypto"),
-    ("std.crypto.digest", "crypto.digest"), ("std.crypto.cipher", "crypto.cipher"),
-    ("std.console", "console"), ("std.database", "database"), ("std.database.sql", "database.sql"),
-    ("std.posix", "posix"), ("std.process", "process"), ("std.env", "env"),
-    ("std.objectpool", "objectpool"), ("std.unittest", "unittest"), ("std.deriving.api", "deriving.api"),
-    ("std.deriving.resolve", "deriving.resolve"), ("std.deriving.impl", "deriving.impl"),
-    ("std.deriving.builtins", "deriving.builtins"), ("std.deriving", "deriving"),
-    ("std.unittest.testmacro", "unittest.testmacro"), ("std.unittest.mock.mockmacro", "unittest.mock.mockmacro"),
-    ("std", "std"), ("std.ffi.python", "ffi.python"), ("fuzz.fuzz", "fuzz")
-]
+import std.collection.*
 
-public func StandardLibName(fullPackageName: String): Option<String> {
-    for ((name, mapped) in STANDARD_LIBS) {
-        if (name == fullPackageName) {
-            return mapped
-        }
-    }
-    return None
-}
+public let GET_COMMAND_LINE_ARGS: String = "getCommandLineArgs"
+public let MODULE_SPLIT: String = "/"
+
+public let STANDARD_LIBS: HashMap<String, String> = { =>
+    let values = HashMap<String, String>()
+    values.add("std.core", "core")
+    values.add("std.binary", "binary")
+    values.add("std.io", "io")
+    values.add("std.math", "math")
+    values.add("std.overflow", "overflow")
+    values.add("std.runtime", "runtime")
+    values.add("std.convert", "convert")
+    values.add("std.random", "random")
+    values.add("std.collection", "collection")
+    values.add("std.unicode", "unicode")
+    values.add("std.sort", "sort")
+    values.add("std.argopt", "argopt")
+    values.add("std.ast", "ast")
+    values.add("std.interop", "interop")
+    values.add("std.time", "time")
+    values.add("std.sync", "sync")
+    values.add("std.collection.concurrent", "collection.concurrent")
+    values.add("std.net", "net")
+    values.add("std.regex", "regex")
+    values.add("std.unittest.common", "unittest.common")
+    values.add("std.unittest.prop_test", "unittest.prop_test")
+    values.add("std.unittest.diff", "unittest.diff")
+    values.add("std.math.numeric", "math.numeric")
+    values.add("std.fs", "fs")
+    values.add("std.unittest.mock.internal", "unittest.mock.internal")
+    values.add("std.unittest.mock", "unittest.mock")
+    values.add("std.reflect", "reflect")
+    values.add("std.ref", "ref")
+    values.add("std.crypto", "crypto")
+    values.add("std.crypto.digest", "crypto.digest")
+    values.add("std.crypto.cipher", "crypto.cipher")
+    values.add("std.console", "console")
+    values.add("std.database", "database")
+    values.add("std.database.sql", "database.sql")
+    values.add("std.posix", "posix")
+    values.add("std.process", "process")
+    values.add("std.env", "env")
+    values.add("std.objectpool", "objectpool")
+    values.add("std.unittest", "unittest")
+    values.add("std.deriving.api", "deriving.api")
+    values.add("std.deriving.resolve", "deriving.resolve")
+    values.add("std.deriving.impl", "deriving.impl")
+    values.add("std.deriving.builtins", "deriving.builtins")
+    values.add("std.deriving", "deriving")
+    values.add("std.unittest.testmacro", "unittest.testmacro")
+    values.add("std.unittest.mock.mockmacro", "unittest.mock.mockmacro")
+    values.add("std", "std")
+    values.add("std.ffi.python", "ffi.python")
+    values.add("fuzz.fuzz", "fuzz")
+    values
+}()

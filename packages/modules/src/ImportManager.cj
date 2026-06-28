@@ -6,6 +6,7 @@ import cangjie_compiler::lex.TokenKind
 import cangjie_compiler::lex.TokenKindIndex
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::option.OutputMode
+import cangjie_compiler::utils.STANDARD_LIBS
 
 public class ExternalLibCfg {
     public var name: String = ""
@@ -883,7 +884,7 @@ public class ImportManager {
             }
             return
         }
-        if (IsStandardLibraryPackage(fullPackageName) && !cjoPath.isEmpty() && exists(cjoPath)) {
+        if (STANDARD_LIBS.contains(fullPackageName) && !cjoPath.isEmpty() && exists(cjoPath)) {
             stdDepsMap[cjoPath] = StdDepEntry(depType, fullPackageName)
         }
     }
@@ -1381,10 +1382,10 @@ public class ImportManager {
 
     private func CreateDependencyInfoItem(longName: String, shortName: String): DependencyInfoItem {
         let item = DependencyInfoItem()
-        if (IsStandardLibraryPackage(longName)) {
+        if (STANDARD_LIBS.contains(longName)) {
             item.packageName = longName
             item.isStd = true
-        } else if (IsStandardLibraryPackage(shortName)) {
+        } else if (STANDARD_LIBS.contains(shortName)) {
             item.packageName = shortName
             item.isStd = true
         } else {
@@ -1450,9 +1451,7 @@ public class ImportManager {
         stdDependencies[CORE_PACKAGE_NAME] = HashSet<String>()
         if (exportCJO) {
             for (stdName in pkg.GetAllDependentStdPkgs()) {
-                if (IsStandardLibraryPackage(stdName)) {
-                    CollectStdDependency(stdDependencies, stdName)
-                }
+                CollectStdDependency(stdDependencies, stdName)
             }
         } else {
             for (dependencyName in dependencies.keys()) {

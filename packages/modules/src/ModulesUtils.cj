@@ -20,7 +20,6 @@ import cangjie_compiler::utils.AST_PACKAGE_NAME as UTILS_AST_PACKAGE_NAME
 import cangjie_compiler::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
 import cangjie_compiler::utils.DEFAULT_PACKAGE_NAME as UTILS_DEFAULT_PACKAGE_NAME
 import cangjie_compiler::utils.SYNC_PACKAGE_NAME as UTILS_SYNC_PACKAGE_NAME
-import cangjie_compiler::utils.StandardLibName
 
 public let SERIALIZED_FILE_EXTENSION: String = ".cjo"
 public let CJ_D_FILE_EXTENSION: String = ".cj.d"
@@ -33,10 +32,6 @@ public let ORG_NAME_SEPARATOR: String = "@"
 public let NO_CJO_HELP_INFO: String =
     "check if the .cjo file of the package exists in CANGJIE_PATH or CANGJIE_HOME, or use " +
     "'--import-path' to specify the .cjo file path"
-
-public func IsStandardLibraryPackage(fullPackageName: String): Bool {
-    return StandardLibName(fullPackageName).isSome()
-}
 
 public enum PackageRelation {
     | NONE

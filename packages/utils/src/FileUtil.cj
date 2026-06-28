@@ -970,7 +970,7 @@ public class FileUtil {
     }
 
     public static func ConvertPackageNameToLibCangjieBaseFormat(fullPackageName: String): String {
-        if (let Some(mapped) <- StandardLibName(fullPackageName)) {
+        if (let Some(mapped) <- STANDARD_LIBS.get(fullPackageName)) {
             let names = SplitQualifiedName(fullPackageName)
             if (names.size == 1) {
                 return "cangjie-" + mapped

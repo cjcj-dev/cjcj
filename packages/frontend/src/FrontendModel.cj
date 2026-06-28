@@ -14,7 +14,7 @@ import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::chir.CHIRContext as RealCHIRContext
 import cangjie_compiler::chir.Package as RealCHIRPackage
 import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.StandardLibName
+import cangjie_compiler::utils.STANDARD_LIBS
 import std.collection.*
 import std.sort.*
 
@@ -4491,7 +4491,7 @@ public class ImportManager {
             }
             return
         }
-        if (StandardLibName(fullPackageName).isSome() && !cjoPath.isEmpty() && FileUtil.FileExist(cjoPath)) {
+        if (STANDARD_LIBS.contains(fullPackageName) && !cjoPath.isEmpty() && FileUtil.FileExist(cjoPath)) {
             stdDepsMap[cjoPath] = StdDepEntry(depType, fullPackageName)
         }
     }
