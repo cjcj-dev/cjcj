@@ -1,29 +1,27 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::option.GlobalOptions
+import cangjie_compiler::utils.CJC_ASSERT
+import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.InternalError
 import std.collection.*
 
 public class ConstEvalPass {
-    public init() {}
+    private let builder: CHIRBuilder
+    private let opts: GlobalOptions
 
-    public static func HasConstGlobalVarInitFuncs(pkg: Package): Bool {
-        for (fn in pkg.GetGlobalFuncsWithBody()) {
-            if (ShouldEvaluateConstGlobalInit(fn)) {
-                return true
-            }
-        }
-        return false
+    public init(builder: CHIRBuilder, opts!: GlobalOptions = GlobalOptions()) {
+        this.builder = builder
+        this.opts = opts
     }
 
-    public func RunOnPackage(pkg: Package): Unit {
-        let initFuncsForConstVar = CollectConstGlobalVarInitFuncs(pkg)
-        if (initFuncsForConstVar.isEmpty()) {
-            return
-        }
-        RunInterpreter(pkg, initFuncsForConstVar)
+    public func RunOnPackage(pkg: Package, initFuncsForConstVar: ArrayList<Function>,
+        bchirPackages: ArrayList<BCHIR>): Unit {
+        RunInterpreter(pkg, bchirPackages, initFuncsForConstVar)
     }
 
-    private func RunInterpreter(pkg: Package, initFuncsForConstVar: ArrayList<Function>): Unit {
-        let bchirPackages = ArrayList<BCHIR>()
+    private func RunInterpreter(pkg: Package, bchirPackages: ArrayList<BCHIR>,
+        initFuncsForConstVar: ArrayList<Function>): Unit {
         let packageBchir = BCHIR()
         CHIR2BCHIR.CompilePackage(pkg, packageBchir, forConstEval: true)
         for (fn in initFuncsForConstVar) {
@@ -41,56 +39,42 @@ public class ConstEvalPass {
         let interpreter = BCHIRInterpreter(linkedBchir)
         interpreter.SetGlobalVars(globalInitValues)
         let result = interpreter.Run(baseIndex: 0, expectsReturn: false)
-        if (result.kind == BCHIRResultKind.TRAP || result.kind == BCHIRResultKind.UNSUPPORTED) {
-            let message = if (result.message.isEmpty()) { "no message" } else { result.message }
-            throw IllegalStateException("ConstEvalPass interpreter failed: " + message)
+        if (result.kind == BCHIRResultKind.OK) {
+            ReplaceGlobalConstantInitializers(pkg, interpreter, linker)
         }
-        ReplaceGlobalConstantInitializers(pkg, interpreter, linker)
-    }
-
-    private func CollectConstGlobalVarInitFuncs(pkg: Package): ArrayList<Function> {
-        let funcs = ArrayList<Function>()
-        for (fn in pkg.GetGlobalFuncsWithBody()) {
-            if (ShouldEvaluateConstGlobalInit(fn)) {
-                funcs.add(fn)
-            }
-        }
-        return funcs
-    }
-
-    private static func ShouldEvaluateConstGlobalInit(fn: Function): Bool {
-        return fn.IsGVInit() && fn.IsCompileTimeValue() &&
-            (!fn.TestAttr(Attribute.IMPORTED) || fn.IsSrcCodeImported())
     }
 
     // Mirrors CC src/CHIR/Interpreter/ConstEval.cpp:386-420.
     private func ReplaceGlobalConstantInitializers(pkg: Package, interpreter: BCHIRInterpreter,
         linker: BCHIRLinker): Unit {
-        let builder = CHIRBuilder(CHIRContext())
         builder.context.SetCurPackage(pkg)
-        let allFuncs = pkg.GetGlobalFunctions(includePureAbstract: true)
+        let allFuncs = pkg.GetGlobalFunctions()
         let newFuncs = ArrayList<Function>()
         for (fn in allFuncs) {
             if (fn.GetFuncKind() != FuncKind.GLOBALVAR_INIT || !fn.TestAttr(Attribute.CONST)) {
                 newFuncs.add(fn)
                 continue
             }
-            let rewrite = CreateNewInitializer(fn, interpreter, linker, pkg, builder)
-            if (rewrite.kind == ConstInitRewriteKind.FAILED) {
-                newFuncs.add(fn)
-            } else if (rewrite.kind == ConstInitRewriteKind.REMOVE) {
-                for (user in fn.GetUsers()) {
-                    user.RemoveSelfFromBlock()
-                }
-                fn.DestroySelf()
-            } else if (let Some(newBody) <- rewrite.body) {
-                let entry = newBody.GetEntryBlock() ??
-                    throw IllegalStateException("const-eval replacement body has no entry block")
-                builder.CreateExit(None, entry)
-                fn.ReplaceBody(newBody)
-                newFuncs.add(fn)
-            } else {
-                newFuncs.add(fn)
+            let optNewBody = CreateNewInitializer(fn, interpreter, linker, pkg)
+            if (opts.chirDebugOptimizer) {
+                PrintDebugMessage(fn.GetDebugLocation(), fn, optNewBody)
+            }
+            match (optNewBody) {
+                case None =>
+                    newFuncs.add(fn)
+                case Some(newBody) =>
+                    if (let None <- newBody) {
+                        for (user in fn.GetUsers()) {
+                            user.RemoveSelfFromBlock()
+                        }
+                        fn.DestroySelf()
+                    } else if (let Some(body) <- newBody) {
+                        let entry = body.GetEntryBlock() ??
+                            throw IllegalStateException("const-eval replacement body has no entry block")
+                        builder.CreateExit(None, entry)
+                        fn.ReplaceBody(body)
+                        newFuncs.add(fn)
+                    }
             }
         }
         pkg.SetAllGlobalFuncs(newFuncs)
@@ -98,9 +82,15 @@ public class ConstEvalPass {
 
     // Mirrors CC src/CHIR/Interpreter/ConstEval.cpp:424-470.
     private func CreateNewInitializer(oldInitializer: Function, interpreter: BCHIRInterpreter, linker: BCHIRLinker,
-        pkg: Package, builder: CHIRBuilder): ConstInitRewrite {
+        pkg: Package): Option<Option<BlockGroup>> {
         var newBody: Option<BlockGroup> = None
-        let body = oldInitializer.GetBody() ?? return ConstInitRewrite.Remove()
+        if (opts.enIncrementalCompilation) {
+            let created = builder.CreateBlockGroup(oldInitializer)
+            created.SetOwnerFunc(oldInitializer)
+            created.SetEntryBlock(builder.CreateBlock(created))
+            newBody = created
+        }
+        let body = oldInitializer.GetBody().getOrThrow()
         for (block in body.GetBlocks()) {
             for (expr in block.GetExpressions()) {
                 if (expr.GetExprKind() != ExprKind.STORE) {
@@ -116,17 +106,11 @@ public class ConstEvalPass {
                 }
                 let global = location.AsGlobalVar() ?? continue
                 let varId = linker.GetGVARId(global.GetIdentifierWithoutPrefix())
-                if (varId < 0) {
-                    return ConstInitRewrite.Failed("missing global id for " + global.GetIdentifierWithoutPrefix())
-                }
+                CJC_ASSERT(varId != -1)
                 let val = interpreter.PeekValueOfGlobal(varId)
-                let varRefType = global.GetType() ?? return ConstInitRewrite.Failed(
-                    "global has no type: " + global.GetIdentifierWithoutPrefix())
-                let refTy = varRefType as RefType
-                if (let None <- refTy) {
-                    return ConstInitRewrite.Failed("global type is not a ref: " + varRefType.ToString())
-                }
-                let varType = refTy.getOrThrow().GetBaseType()
+                let varRefType = global.GetType().getOrThrow()
+                CJC_ASSERT(varRefType.IsRef())
+                let varType = (varRefType as RefType).getOrThrow().GetBaseType()
                 let val2chir = IVal2CHIR(builder, interpreter, pkg)
                 if (let Some(constant) <- val2chir.TryConvertToConstant(varType, val, block)) {
                     if (!constant.IsConstantNull()) {
@@ -135,12 +119,6 @@ public class ConstEvalPass {
                             continue
                         }
                     }
-                }
-                if (varType.IsString()) {
-                    if (oldInitializer.GetIdentifier() == "@_CGVat6String5emptyHv") {
-                        return ConstInitRewrite.Remove()
-                    }
-                    return ConstInitRewrite.Failed("string global initializer kept for codegen")
                 }
                 if (let None <- newBody) {
                     let created = builder.CreateBlockGroup(oldInitializer)
@@ -152,60 +130,40 @@ public class ConstEvalPass {
                 let newBlock = targetBody.GetEntryBlock() ??
                     throw IllegalStateException("const-eval new initializer body has no entry block")
                 let constValue = val2chir.ConvertToChir(varType, val, newBlock) ??
-                    return ConstInitRewrite.Failed("cannot convert " + TypeKindName(varType.GetTypeKind()) +
-                        " from " + IValUtils.ToString(val))
+                    return None
                 builder.CreateStore(constValue, global, newBlock)
             }
         }
-        if (let Some(replacement) <- newBody) {
-            return ConstInitRewrite.Replace(replacement)
+        return Some(newBody)
+    }
+
+    private func PrintDebugMessage(loc: DebugLocation, oldInit: Function, newInit: Option<Option<BlockGroup>>): Unit {
+        let file = FileUtil.GetFileName(loc.GetAbsPath())
+        let beginPos = loc.GetBeginPos()
+        let endPos = loc.GetEndPos()
+        let begin = file + ":" + beginPos.line.toString() + ":" + beginPos.column.toString()
+        let end = file + ":" + endPos.line.toString() + ":" + endPos.column.toString()
+
+        match (newInit) {
+            case None =>
+                println("debug: consteval at " + begin + " - " + end + " function `" +
+                    oldInit.GetSrcCodeIdentifier() + "` not evaluated successfully.")
+            case Some(None) =>
+                println("debug: consteval at " + begin + " - " + end + " replaced initializer function `" +
+                    oldInit.GetSrcCodeIdentifier() + "` with initializer constant(s).")
+            case Some(Some(newBody)) =>
+                var oldExprs: Int64 = 0
+                for (block in oldInit.GetBody().getOrThrow().GetBlocks()) {
+                    oldExprs += block.GetExpressions().size
+                }
+                var newExprs: Int64 = 0
+                for (block in newBody.GetBlocks()) {
+                    newExprs += block.GetExpressions().size
+                }
+                println("debug: consteval at " + begin + " - " + end + " evaluated initializer function `" +
+                    oldInit.GetSrcCodeIdentifier() + "` of " + oldExprs.toString() + " expressions to one of " +
+                    newExprs.toString() + " expressions.")
         }
-        return ConstInitRewrite.Remove()
-    }
-}
-
-private enum ConstInitRewriteKind {
-    | FAILED | REMOVE | REPLACE
-}
-
-private func ConstInitRewriteKindIndex(kind: ConstInitRewriteKind): Int64 {
-    return match (kind) {
-        case ConstInitRewriteKind.FAILED => 0
-        case ConstInitRewriteKind.REMOVE => 1
-        case ConstInitRewriteKind.REPLACE => 2
-    }
-}
-
-extend ConstInitRewriteKind <: Equatable<ConstInitRewriteKind> {
-    public operator func ==(right: ConstInitRewriteKind): Bool {
-        return ConstInitRewriteKindIndex(this) == ConstInitRewriteKindIndex(right)
-    }
-
-    public operator func !=(right: ConstInitRewriteKind): Bool {
-        return !(this == right)
-    }
-}
-
-private class ConstInitRewrite {
-    public let kind: ConstInitRewriteKind
-    public let body: Option<BlockGroup>
-
-    private init(kind: ConstInitRewriteKind, body!: Option<BlockGroup> = None) {
-        this.kind = kind
-        this.body = body
-    }
-
-    public static func Failed(reason: String): ConstInitRewrite {
-        let _ = reason
-        return ConstInitRewrite(ConstInitRewriteKind.FAILED)
-    }
-
-    public static func Remove(): ConstInitRewrite {
-        return ConstInitRewrite(ConstInitRewriteKind.REMOVE)
-    }
-
-    public static func Replace(body: BlockGroup): ConstInitRewrite {
-        return ConstInitRewrite(ConstInitRewriteKind.REPLACE, body: body)
     }
 }
 
@@ -267,6 +225,12 @@ private class IVal2CHIR {
                 } else {
                     None
                 }
+            case TypeKind.TYPE_REFTYPE =>
+                if (let Some(refTy) <- (ty as RefType)) {
+                    ConvertRefToChir(refTy, val, parent)
+                } else {
+                    None
+                }
             case TypeKind.TYPE_UNIT =>
                 ExprResultAsValue(builder.CreateConstant(ty, UnitLiteral(), parent))
             case TypeKind.TYPE_VARRAY =>
@@ -275,14 +239,16 @@ private class IVal2CHIR {
                 } else {
                     None
                 }
-            case _ => None
+            case TypeKind.TYPE_CLASS | TypeKind.TYPE_FUNC | TypeKind.TYPE_GENERIC | TypeKind.TYPE_NOTHING |
+                TypeKind.TYPE_RAWARRAY | TypeKind.TYPE_CPOINTER | TypeKind.TYPE_CSTRING | TypeKind.TYPE_VOID |
+                TypeKind.TYPE_INVALID => None
+            case _ =>
+                InternalError("unsupported type kind")
+                None
         }
     }
 
     private func ConvertStringToChir(ty: Type, val: InterpreterValue, parent: Block): Option<Value> {
-        if (val.kind == InterpreterValueKind.ISTRING) {
-            return ExprResultAsValue(builder.CreateConstant(ty, StringLiteral(val.GetText()), parent))
-        }
         if (val.kind != InterpreterValueKind.ITUPLE) {
             return None
         }
@@ -417,6 +383,68 @@ private class IVal2CHIR {
             idx++
         }
         return ExprResultAsValue(builder.CreateTuple(ty, elements, parent))
+    }
+
+    private func ConvertRefToChir(ty: RefType, val: InterpreterValue, parent: Block): Option<Value> {
+        let referencedType = ty.GetBaseType()
+        let valContent = interpreter.DereferenceValue(val) ?? return None
+        return match (referencedType.GetTypeKind()) {
+            case TypeKind.TYPE_CLASS =>
+                if (valContent.kind != InterpreterValueKind.IOBJECT) {
+                    return None
+                }
+                var classType = (referencedType as ClassType).getOrThrow()
+                let classInfo = interpreter.GetBCHIR().GetClass(valContent.GetClassId()) ?? return None
+                let valClassName = classInfo.mangledName
+                var refType = ty
+                var needCast = false
+                if (valClassName != classType.GetClassDef().GetIdentifierWithoutPrefix()) {
+                    needCast = true
+                    classType = FindClassType(valClassName) ?? return None
+                    refType = builder.context.GetRefTy(classType)
+                }
+                let allocExpr = builder.CreateAllocate(refType, classType, parent)
+                let classVal = ExprResultAsValue(allocExpr) ?? return None
+                let members = classType.GetClassDef().GetAllInstanceVars()
+                let content = valContent.GetElementsRef()
+                CJC_ASSERT(members.size == content.size)
+                var idx: Int64 = 0
+                while (idx < members.size) {
+                    let memberVal = ConvertToChir(members[idx].ty, content[idx], parent) ?? return None
+                    let path = ArrayList<UInt64>()
+                    path.add(UInt64(idx))
+                    builder.CreateStoreElementRef(memberVal, classVal, path, parent)
+                    idx++
+                }
+                if (needCast) {
+                    return ExprResultAsValue(builder.CreateTypeCast(ty, classVal, parent))
+                }
+                Some(classVal)
+            case _ => None
+        }
+    }
+
+    private func FindClassType(mangledName: String): Option<ClassType> {
+        var resultClassDef: Option<ClassDef> = None
+        for (classDef in pkg.GetClasses()) {
+            if (mangledName == classDef.GetIdentifierWithoutPrefix()) {
+                resultClassDef = classDef
+                break
+            }
+        }
+        if (let None <- resultClassDef) {
+            for (classDef in pkg.GetImportedClasses()) {
+                if (mangledName == classDef.GetIdentifierWithoutPrefix()) {
+                    resultClassDef = classDef
+                    break
+                }
+            }
+        }
+        let classDef = resultClassDef ?? return None
+        if (!classDef.GetGenericTypeParams().isEmpty()) {
+            return None
+        }
+        return builder.context.GetClassTy(classDef, ArrayList<Type>())
     }
 
     private func ConvertArrayToChir(ty: VArrayType, val: InterpreterValue, parent: Block): Option<Value> {

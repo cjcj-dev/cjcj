@@ -1,5 +1,6 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::option.GlobalOptions
 import std.collection.*
 
 import cangjie_compiler::ast.ASTKind
@@ -384,6 +385,7 @@ public class FaithfulAST2CHIR {
     private let importedPackages: ArrayList<AstPackage>
     private let directImportedPackages: ArrayList<AstPackage>
     private let overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>>
+    private let opts: GlobalOptions
     private let chirWFC: Bool
     private let chirOptOverO2: Bool
     private var outputPackage: Option<Package> = None
@@ -415,17 +417,19 @@ public class FaithfulAST2CHIR {
     private let foreignFuncs: ArrayList<AstDecl> = ArrayList<AstDecl>()
     private let foreignFuncSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let packageInitializerBlocks: HashMap<Int64, Block> = HashMap<Int64, Block>()
+    private let initFuncsForConstVar: ArrayList<Function> = ArrayList<Function>()
 
     public init(builder: CHIRBuilder, chirType: CHIRType,
         importedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(),
         directImportedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(),
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None,
-        chirWFC!: Bool = false, chirOptOverO2!: Bool = false) {
+        opts!: GlobalOptions = GlobalOptions(), chirWFC!: Bool = false, chirOptOverO2!: Bool = false) {
         this.builder = builder
         this.chirType = chirType
         this.importedPackages = importedPkgs
         this.directImportedPackages = directImportedPkgs
         this.overrideSrcFuncResolver = overrideSrcFuncResolver
+        this.opts = opts
         this.chirWFC = chirWFC
         this.chirOptOverO2 = chirOptOverO2
     }
@@ -440,8 +444,9 @@ public class FaithfulAST2CHIR {
         SetInitFuncForStaticVar()
         UpdateMemberVarPath(builder).RunOnPackage(CurrentPackage())
         FlatForInExpr(builder).RunOnPackage(CurrentPackage())
-        if (!failure && ConstEvalPass.HasConstGlobalVarInitFuncs(CurrentPackage())) {
-            ConstEvalPass().RunOnPackage(CurrentPackage())
+        if (!failure && opts.IsConstEvalEnabled() && !opts.enIncrementalCompilation && opts.commonPartCjos.isEmpty()) {
+            let bchirPackages = ArrayList<BCHIR>()
+            ConstEvalPass(builder, opts: opts).RunOnPackage(CurrentPackage(), initFuncsForConstVar, bchirPackages)
         }
         if (chirWFC) {
             AST2CHIRCheck()
@@ -1547,6 +1552,9 @@ public class FaithfulAST2CHIR {
             EffectivePackageName(varDecl))
         if (varDecl.IsConst()) {
             initFn.EnableAttr(Attribute.CONST)
+            if (suffix != "$literal") {
+                initFuncsForConstVar.add(initFn)
+            }
         }
         let globalVar = RequireGlobalVar(globalCache.Get(varDecl))
         if (suffix != "$literal") {
@@ -1561,6 +1569,7 @@ public class FaithfulAST2CHIR {
             GlobalVarWithPatternInitSrcName(decl), EffectiveRawMangledName(decl), EffectivePackageName(decl))
         if (decl.IsConst()) {
             initFn.EnableAttr(Attribute.CONST)
+            initFuncsForConstVar.add(initFn)
         }
         let varDecls = ArrayList<AstVarDecl>()
         FlattenGlobalVarWithPatternDecl(RequirePattern(decl.irrefutablePattern, "global var-with-pattern pattern"),

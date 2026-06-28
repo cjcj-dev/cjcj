@@ -34,6 +34,7 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
                 case None => None
             }
         }),
+        opts: instance.invocation.globalOptions,
         chirWFC: instance.invocation.globalOptions.chirWFC,
         chirOptOverO2: instance.invocation.globalOptions.IsCHIROptimizationLevelOverO2())
     if (!ast2chir.ToCHIRPackage(pkg)) {
