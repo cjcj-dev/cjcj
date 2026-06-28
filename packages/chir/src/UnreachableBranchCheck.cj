@@ -34,7 +34,7 @@ public class UnreachableBranchCheck {
 
     public func RunOnPackage(pkg: Package, threadNum!: Int64 = 1): ArrayList<UnreachableBranchWarning> {
         let warnings = ArrayList<UnreachableBranchWarning>()
-        if (threadNum <= 1) {
+        if (threadNum == 1) {
             for (fn in pkg.GetGlobalFuncsWithBody()) {
                 for (warning in RunOnFunc(fn)) {
                     warnings.add(warning)
@@ -53,6 +53,9 @@ public class UnreachableBranchCheck {
     public func RunOnFunc(fn: Function): ArrayList<UnreachableBranchWarning> {
         let warnings = ArrayList<UnreachableBranchWarning>()
         if (fn.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+            return warnings
+        }
+        if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
             return warnings
         }
         if (let Some(body) <- fn.GetBody()) {
