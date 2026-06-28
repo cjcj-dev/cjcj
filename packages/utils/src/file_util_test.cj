@@ -224,7 +224,7 @@ class FileUtilTest {
 
     @TestCase
     func readUtf8WithSignature(): Unit {
-        let reason = FailureReason()
+        let reason = Box<String>("")
         let content = FileUtil.ReadFileContent(
             "/root/cj_build/cangjie_compiler/unittests/Utils/CangjieFiles/testpkg01.cj",
             reason
@@ -239,7 +239,7 @@ class FileUtilTest {
 
     @TestCase
     func readUtf8(): Unit {
-        let reason = FailureReason()
+        let reason = Box<String>("")
         let content = FileUtil.ReadFileContent(
             "/root/cj_build/cangjie_compiler/unittests/Utils/CangjieFiles/pkg01.cj",
             reason
@@ -254,7 +254,7 @@ class FileUtilTest {
 
     @TestCase
     func readEmptyFile(): Unit {
-        let reason = FailureReason()
+        let reason = Box<String>("")
         let content = FileUtil.ReadFileContent(
             "/root/cj_build/cangjie_compiler/unittests/Utils/CangjieFiles/emptyfile.cj",
             reason
@@ -300,7 +300,7 @@ class FileUtilTest {
 
     @TestCase
     func readBinaryFileToBuffer(): Unit {
-        let failedReason = FailureReason()
+        let failedReason = Box<String>("")
         let buffer = ArrayList<UInt8>()
         @Expect(FileUtil.ReadBinaryFileToBuffer("./no_such_file.txt", buffer, failedReason), false)
         @Expect(failedReason.value, "open file failed")
@@ -311,7 +311,7 @@ class FileUtilTest {
 
     @TestCase
     func readFileContent(): Unit {
-        let reason = FailureReason()
+        let reason = Box<String>("")
         let content = FileUtil.ReadFileContent("./no_such_file.txt", reason)
         expectNone<String>(content)
     }

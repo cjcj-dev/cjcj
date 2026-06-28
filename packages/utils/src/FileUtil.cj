@@ -1,5 +1,6 @@
 package cangjie_compiler::utils
 
+import cangjie_compiler::basic.Errorln
 import std.collection.*
 import std.fs.Directory as FSDirectory
 import std.fs.File
@@ -100,11 +101,6 @@ public struct Directory {
     }
 }
 
-public class FailureReason {
-    public var value: String = ""
-    public init() {}
-}
-
 @When[os == "Windows"]
 foreign {
     func _access(pathname: CString, mode: Int32): Int32
@@ -149,17 +145,16 @@ private let FILE_ATTRIBUTE_VIRTUAL: UInt32 = 0x10000u32
 private let INVALID_FILE_ATTRIBUTES: UInt32 = 0xffffffffu32
 
 @When[os == "Windows"]
-private func hasRejectedWindowsRemoveAttribute(attributes: UInt32): Bool {
-    return (attributes & FILE_ATTRIBUTE_READONLY) == 1u32 ||
-        (attributes & FILE_ATTRIBUTE_SYSTEM) == 1u32 ||
-        (attributes & FILE_ATTRIBUTE_DEVICE) == 1u32 ||
-        (attributes & FILE_ATTRIBUTE_VIRTUAL) == 1u32
-}
-
-@When[os == "Windows"]
 private func canRemovePath(path: String): Bool {
     let attributes = fileAttributes(path)
-    return attributes != INVALID_FILE_ATTRIBUTES && !hasRejectedWindowsRemoveAttribute(attributes)
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        return false
+    }
+    if ((attributes & FILE_ATTRIBUTE_READONLY) == 1u32 || (attributes & FILE_ATTRIBUTE_SYSTEM) == 1u32 ||
+        (attributes & FILE_ATTRIBUTE_DEVICE) == 1u32 || (attributes & FILE_ATTRIBUTE_VIRTUAL) == 1u32) {
+        return false
+    }
+    return true
 }
 
 @When[os != "Windows"]
@@ -444,6 +439,24 @@ private func isAbsolutePathAboveLengthLimit(path: String): Bool {
     return path.size > FILE_PATH_MAX_LENGTH
 }
 
+extend Option<String> {
+    public operator func |(function: (String) -> String): String {
+        if (let Some(value) <- this) {
+            return function(value)
+        }
+        Errorln("fail to invoke system api")
+        return ""
+    }
+
+    public operator func |(function: (String) -> Option<String>): Option<String> {
+        if (let Some(value) <- this) {
+            return function(value)
+        }
+        Errorln("fail to invoke system api")
+        return None
+    }
+}
+
 public class FileUtil {
     public static func CheckCommandLineInjection(cmd: String): Bool {
         for (byte in cmd.toArray()) {
@@ -637,7 +650,7 @@ public class FileUtil {
         }
     }
 
-    public static func ReadBinaryFileToBuffer(filePath: String, buffer: ArrayList<UInt8>, failedReason: FailureReason): Bool {
+    public static func ReadBinaryFileToBuffer(filePath: String, buffer: ArrayList<UInt8>, failedReason: Box<String>): Bool {
         let (ok, data, reason) = ReadBinaryFileToBuffer(filePath)
         if (ok) {
             buffer.clear()
@@ -688,7 +701,7 @@ public class FileUtil {
         }
     }
 
-    public static func ReadFileContent(filePath: String, failedReason: FailureReason): Option<String> {
+    public static func ReadFileContent(filePath: String, failedReason: Box<String>): Option<String> {
         if (!FileExist(filePath)) {
             failedReason.value = "file not exist"
             return None
@@ -737,6 +750,50 @@ public class FileUtil {
         }
     }
 
+    @When[os == "Windows"]
+    public static func GetRelativePath(basePath: String, path: String): Option<String> {
+        if (basePath.isEmpty() || path.isEmpty()) {
+            return None
+        }
+        var lastDelimPos: Int64 = 0
+        var pos: Int64 = 0
+        while (pos != basePath.size && pos != path.size && basePath[pos] == path[pos]) {
+            if (IsSlash(basePath[pos])) {
+                lastDelimPos = pos
+            }
+            pos++
+        }
+        if (lastDelimPos == 0 && !IsSlash(path[0])) {
+            return None
+        }
+        var parentCount: Int64 = 0
+        var idx = lastDelimPos + 1
+        while (idx < basePath.size) {
+            if (IsSlash(basePath[idx])) {
+                parentCount++
+            }
+            idx++
+        }
+        var suffixLength = (path.size - lastDelimPos) - 1
+        if (pos == path.size && !IsSlash(path[path.size - 1])) {
+            parentCount = if (parentCount == 0) { 0 } else { parentCount - 1 }
+            suffixLength = 0
+        }
+        let builder = StringBuilder()
+        if (parentCount == 0) {
+            builder.append("./")
+        } else {
+            for (_ in 0..parentCount) {
+                builder.append("../")
+            }
+        }
+        if (suffixLength > 0) {
+            builder.append(path[lastDelimPos + 1..lastDelimPos + 1 + suffixLength])
+        }
+        return Normalize(builder.toString())
+    }
+
+    @When[os != "Windows"]
     public static func GetRelativePath(basePath: String, path: String): Option<String> {
         if (basePath.isEmpty() || path.isEmpty()) {
             return None

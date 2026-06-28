@@ -7,7 +7,6 @@ import cangjie_compiler::basic.SplitLines as BasicSplitLines
 import cangjie_compiler::basic.Warningln as BasicWarningln
 import cangjie_compiler::utils.AccessResultType as UtilsAccessResultType
 import cangjie_compiler::utils.FILE_PATH_MAX_LENGTH as UTILS_FILE_PATH_MAX_LENGTH
-import cangjie_compiler::utils.FailureReason as UtilsFailureReason
 import cangjie_compiler::utils.FileMode as UtilsFileMode
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.SipHash
@@ -205,7 +204,7 @@ public func GetAllFilesUnderCurrentPath(
 }
 
 public func ReadTextFileWithReason(path: String): TextFileReadResult {
-    let failedReason = UtilsFailureReason()
+    let failedReason = Box<String>("")
     if (let Some(content) <- FileUtil.ReadFileContent(path, failedReason)) {
         return TextFileReadResult(MaybeString(content), failedReason.value)
     }

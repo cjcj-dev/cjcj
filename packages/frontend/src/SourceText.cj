@@ -7,7 +7,6 @@ import cangjie_compiler::lex.TokenKind as CangjieTokenKind
 import cangjie_compiler::lex.TokenKindLiteral
 import cangjie_compiler::lex.TokenKindValue
 import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.FailureReason
 import std.collection.*
 
 public func StableSourcePathHash(path: String): UInt64 {
@@ -86,7 +85,7 @@ private func LexTokenCategory(kind: CangjieTokenKind, value: String): FrontendTo
 }
 
 public func ReadFileContent(path: String): (Bool, String, String) {
-    let failedReason = FailureReason()
+    let failedReason = Box<String>("")
     let content = FileUtil.ReadFileContent(path, failedReason)
     if (let Some(text) <- content) {
         return (true, text, "")

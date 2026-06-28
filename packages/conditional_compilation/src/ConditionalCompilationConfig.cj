@@ -8,7 +8,6 @@ import cangjie_compiler::basic.SplitString
 import cangjie_compiler::option.BackendType
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::option.TripleInfo
-import cangjie_compiler::utils.FailureReason as UtilsFailureReason
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.NFC as UtilsNFC
 import std.collection.*
@@ -186,7 +185,7 @@ private func SetupLSPConditionalCompilationCfgFromFile(
     map: HashMap<String, String>,
     reporter: ConditionalDiagnosticReporter
 ): Bool {
-    let failReason = UtilsFailureReason()
+    let failReason = Box<String>("")
     if (let Some(content) <- FileUtil.ReadFileContent(filePath, failReason)) {
         for (line in SplitLines(content)) {
             if (line.isEmpty() || SeeingLSPTomlComment(line)) {

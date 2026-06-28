@@ -5,7 +5,6 @@ import std.env.*
 import std.fs.Directory as FSDirectory
 import std.fs.File
 public import cangjie_compiler::utils.{DIR_SEPARATOR, FileUtil, GenerateRandomHexString}
-import cangjie_compiler::utils.FailureReason as UtilsFailureReason
 
 
 public func SplitString(value: String, delimiter: String): Array<String> {
@@ -76,7 +75,7 @@ public func PrependToPaths(prefix: String, paths: Array<String>, quoted!: Bool =
 
 public func GetDarwinSDKVersion(sdkPath: String): Option<String> {
     let settingsPath = FileUtil.JoinPath(sdkPath, "SDKSettings.json")
-    let failureReason = UtilsFailureReason()
+    let failureReason = Box<String>("")
     if (let Some(content) <- FileUtil.ReadFileContent(settingsPath, failureReason)) {
         if (let Some(versionPos) <- content.indexOf("\"Version\"")) {
             let suffix = content[versionPos..]

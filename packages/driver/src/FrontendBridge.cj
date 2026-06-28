@@ -4,7 +4,6 @@ import std.collection.*
 import std.fs.Directory as FSDirectory
 import cangjie_compiler::frontend_tool.DriverOptions as FrontendToolDriverOptions
 import cangjie_compiler::frontend_tool.ExecuteFrontendWithResult
-import cangjie_compiler::utils.FailureReason as UtilsFailureReason
 
 public func ExecuteFrontendPhase(driver: Driver): Bool {
     if (!PrepareFrontendOutputs(driver.driverOptions)) {
@@ -36,7 +35,7 @@ private func SeedBuiltinDependenciesFromSources(driver: Driver): Unit {
     driver.driverOptions.directBuiltinDependencies.add("std.core")
     let seen = HashSet<String>()
     for (sourceFile in driver.driverOptions.srcFiles) {
-        let reason = UtilsFailureReason()
+        let reason = Box<String>("")
         match (FileUtil.ReadFileContent(sourceFile, reason)) {
             case Some(content) =>
                 for (line in content.split("\n")) {
