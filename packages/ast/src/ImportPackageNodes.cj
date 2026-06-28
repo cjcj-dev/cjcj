@@ -1,5 +1,6 @@
 package cangjie_compiler::ast
 
+import cangjie_compiler::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 import std.collection.*
 
 public class FeatureId <: Node {
@@ -147,15 +148,14 @@ public class ImportContent <: Node {
             idx++
         }
         if (kind != ImportKind.IMPORT_ALL && !isDecl) {
-            if (!builder.toString().isEmpty()) {
-                builder.append(".")
-            }
+            builder.append(".")
             builder.append(identifier.Val())
         }
         return builder.toString()
     }
 
     public func GetPossiblePackageNames(): ArrayList<String> {
+        CJC_ASSERT(kind != ImportKind.IMPORT_MULTI)
         let out = ArrayList<String>()
         if (prefixPaths.isEmpty()) {
             out.add(identifier.Val())
@@ -182,6 +182,10 @@ public class ImportContent <: Node {
         }
         if (hasDoubleColon && prefixPaths.size == 1) {
             out.add(prefix + "::" + identifier.Val())
+            return out
+        }
+        if (prefixPaths.isEmpty()) {
+            out.add(identifier.Val())
             return out
         }
         out.add(prefix + "." + identifier.Val())
@@ -332,10 +336,10 @@ public class File <: Node {
     public func GetFeatures(): ArrayList<String> {
         let out = ArrayList<String>()
         if (let Some(featureDirective) <- feature) {
-            if (let Some(set) <- featureDirective.featuresSet) {
-                for (featureId in set.content) {
-                    insertFeatureName(out, featureId.ToString())
-                }
+            CJC_NULLPTR_CHECK(featureDirective.featuresSet)
+            let set = featureDirective.featuresSet.getOrThrow()
+            for (featureId in set.content) {
+                insertFeatureName(out, featureId.ToString())
             }
         }
         return out
@@ -356,6 +360,16 @@ public class File <: Node {
             builder.append("\n")
         }
         return builder.toString()
+    }
+}
+
+extend File <: Equatable<File> {
+    public operator func ==(right: File): Bool {
+        return fileName == right.fileName && filePath == right.filePath && fileHash == right.fileHash
+    }
+
+    public operator func !=(right: File): Bool {
+        return !(this == right)
     }
 }
 
@@ -386,7 +400,6 @@ public class Package <: Node {
     public let files: ArrayList<File> = ArrayList<File>()
     public let genericInstantiatedDecls: ArrayList<Decl> = ArrayList<Decl>()
     public let srcImportedNonGenericDecls: ArrayList<Decl> = ArrayList<Decl>()
-    public let srcImportedNonGenericDeclKeys: HashSet<String> = HashSet<String>()
     public let inlineFuncDecls: ArrayList<FuncDecl> = ArrayList<FuncDecl>()
     public var accessible: AccessLevel = AccessLevel.PUBLIC
     public var hasSourceImportedDecl: Bool = false
@@ -397,6 +410,7 @@ public class Package <: Node {
     public var interopCJGenericTypeStrategy: InteropCJGenericStrategyType = InteropCJGenericStrategyType.NONE
     public let interopCJIncludedApis: ArrayList<String> = ArrayList<String>()
     public let interopCJExcludedApis: ArrayList<String> = ArrayList<String>()
+    public let allowedInteropCJGenericInstantiations: HashMap<String, HashMap<String, GenericTypeArguments>> = HashMap<String, HashMap<String, GenericTypeArguments>>()
     public let interopTuples: ArrayList<String> = ArrayList<String>()
     public var isInteropCJPackageConfig: Bool = false
     public let lambdaPatterns: ArrayList<LambdaPattern> = ArrayList<LambdaPattern>()
@@ -476,6 +490,6 @@ public class PackageDecl <: Decl {
     }
 
     public override func ToString(): String {
-        return fullPackageName
+        return identifier.Val()
     }
 }
