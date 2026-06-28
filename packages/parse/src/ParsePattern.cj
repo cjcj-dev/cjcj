@@ -76,26 +76,44 @@ extend ParserImpl {
     }
 
     public func ParseTypePatternOrVarOrEnumPattern(
-        _: ArrayList<Attribute>,
+        attributes: ArrayList<Attribute>,
         isVar: Bool,
         inDecl: Bool
     ): Pattern {
         let identifierToken = Peek()
         let identifier = ParseIdentifierFromToken(identifierToken)
+        let begin = identifierToken.Begin()
         Next()
         if (Skip(TokenKind.COLON)) {
             let typedPat = TypePattern()
             typedPat.colonPos = lastToken.Begin()
             typedPat.pattern = VarPattern(identifier, isVar)
             typedPat.typeNode = ParseType()
-            typedPat.begin = identifier.Begin()
+            typedPat.begin = begin
             typedPat.end = if (let Some(ty) <- typedPat.typeNode) { ty.end } else { identifier.End() }
             return typedPat
         }
         if (inDecl) {
-            return VarPattern(identifier, isVar)
+            return ParseVarPattern(attributes, identifier, begin, isVar)
         }
         return ParseVarOrEnumPattern(identifier)
+    }
+
+    public func ParseVarPattern(
+        attributes: ArrayList<Attribute>,
+        identifier: SrcIdentifier,
+        begin: Position,
+        isVar: Bool
+    ): VarPattern {
+        let ret = VarPattern(identifier, nodePos: begin)
+        let decl = ret.varDecl.getOrThrow()
+        decl.isVar = isVar
+        for (it in attributes) {
+            ret.EnableAttr(it)
+            decl.EnableAttr(it)
+        }
+        ret.end = decl.identifier.GetRawEndPos()
+        return ret
     }
 
     public func ParseVarOrEnumPattern(identifier: SrcIdentifier): VarOrEnumPattern {
