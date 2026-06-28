@@ -1,8 +1,11 @@
 package cangjie_compiler::parse
 
 import std.collection.*
+import cangjie_compiler::ast.AddMacroAttr
 import cangjie_compiler::ast.Identifier as AstIdentifier
 import cangjie_compiler::ast.ScopeKind as AstScopeKind
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 
 extend ParserImpl {
     private func IsMacroIdentifierStart(kind: TokenKind): Bool {
@@ -13,6 +16,16 @@ extend ParserImpl {
 
     private func IsBuiltinMacro(identifier: String): Bool {
         return identifier == "sourcePackage" || identifier == "sourceFile" || identifier == "sourceLine"
+    }
+
+    public func SeeingParamInMacroCallExpr(): Bool {
+        if (SeeingContextualKeyword() || Seeing(TokenKind.IDENTIFIER) || Seeing(TokenKind.WILDCARD)) {
+            let tokens = lexer.LookAheadSkipNL(1)
+            if (tokens[0].kind == TokenKind.COLON || tokens[0].kind == TokenKind.NOT) {
+                return true
+            }
+        }
+        return false
     }
 
     public func SeeingMacroCall(): Bool {
@@ -191,7 +204,7 @@ extend ParserImpl {
             kind == ASTKind.MAIN_DECL || kind == ASTKind.VAR_DECL || kind == ASTKind.ENUM_DECL ||
             kind == ASTKind.INTERFACE_DECL || kind == ASTKind.EXTEND_DECL || kind == ASTKind.PROP_DECL ||
             kind == ASTKind.PRIMARY_CTOR_DECL || kind == ASTKind.VAR_WITH_PATTERN_DECL ||
-            kind == ASTKind.MACRO_EXPAND_DECL || kind == ASTKind.FUNC_PARAM
+            kind == ASTKind.MACRO_EXPAND_DECL || kind == ASTKind.FUNC_PARAM || kind == ASTKind.MACRO_EXPAND_PARAM
     }
 
     private func ParseNodeToTokens(node: Node, beginToken: Token, tokens: ArrayList<Token>): Unit {
@@ -349,22 +362,58 @@ extend ParserImpl {
         }
         for (argToken in invocation.args) {
             invocation.macroCallDiagInfo.originPosMap.put(argToken.Begin().Hash32(), argToken.Begin())
+            if (argToken.kind == TokenKind.STRING_LITERAL || argToken.kind == TokenKind.MULTILINE_STRING) {
+                ParseInterplationString2OriginPosMap(argToken, invocation)
+            }
+        }
+    }
+
+    private func ParseInterplationString2OriginPosMap(strToken: Token, invocation: MacroInvocation): Unit {
+        let basicDiag = BasicDiagnosticEngine()
+        basicDiag.SetSourceManager(sourceManager)
+        let lexerForString = Lexer([strToken], basicDiag, sourceManager)
+        let strParts = lexerForString.GetStrParts(strToken)
+        for (strPart in strParts) {
+            if (strPart.strKind != StringPartKind.EXPR) {
+                continue
+            }
+            CJC_ASSERT(strPart.begin != INVALID_POSITION)
+            let lexerForExpr = Lexer(strPart.begin.fileID, strPart.value, basicDiag, sourceManager, strPart.begin)
+            let tokens = lexerForExpr.GetTokens()
+            CJC_ASSERT(!tokens.isEmpty())
+            var index: Int64 = 2
+            while (index < tokens.size - 1) {
+                var token = tokens[index]
+                if (token.kind != TokenKind.COMMENT) {
+                    var begin = token.Begin()
+                    begin.isCurFile = strToken.Begin().isCurFile
+                    token.SetValuePos(token.Value(), begin, token.End())
+                    invocation.macroCallDiagInfo.originPosMap.put(token.Begin().Hash32(), begin)
+                }
+                index++
+            }
         }
     }
 
     public func ParseNodes(scope: ScopeKind, currentMacroCall: Node): ArrayList<Node> {
-        let old = curMacroCall
+        currentFile = currentMacroCall.curFile
         curMacroCall = currentMacroCall
+        let invocation = currentMacroCall.GetConstInvocation()
+        CJC_NULLPTR_CHECK(invocation)
         let out = ArrayList<Node>()
         while (!Seeing(TokenKind.END)) {
-            if (ScopeKindEquals(scope, ScopeKind.FUNC_BODY)) {
-                out.add(ParseExprOrDecl(scope))
+            let node = if (ScopeKindEquals(scope, ScopeKind.FUNC_BODY)) {
+                ParseExprOrDecl(scope)
             } else {
-                out.add(ParseDecl(scope))
+                ParseDecl(scope)
             }
+            node.curFile = currentFile
+            node.curMacroCall = curMacroCall
+            AddMacroAttr(node)
+            out.add(node)
             SkipNLOrSemi()
         }
-        curMacroCall = old
+        AttachCommentToNodes(out)
         return out
     }
 }
