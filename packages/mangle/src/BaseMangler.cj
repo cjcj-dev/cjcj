@@ -1602,6 +1602,7 @@ public open class BaseMangler {
         throw IllegalArgumentException("Index of lambda is not found.")
     }
 
+    @When[backend == "cjnative"]
     private func GetSpecialFuncName(fd: MangleDecl): Option<String> {
         if (fd.fullPackageName != CORE_PACKAGE_NAME) {
             return None
@@ -1609,6 +1610,30 @@ public open class BaseMangler {
         return match (fd.identifier) {
             case "throwGlobalOutOfMemoryError" => "rt$ThrowGlobalOutOfMemoryError"
             case "throwStackOverflowError" => "rt$ThrowStackOverflowError"
+            case "throwOutOfMemoryError" => "rt$ThrowOutOfMemoryError"
+            case "throwImplicitException" => "rt$ThrowImplicitException"
+            case "throwArithmeticException" => "rt$ThrowArithmeticException"
+            case "throwArithmeticExceptionMsg" => "rt$ThrowArithmeticException_msg"
+            case "createArithmeticExceptionMsg" => "rt$CreateArithmeticException_msg"
+            case "createOverflowExceptionMsg" => "rt$CreateOverflowException_msg"
+            case "throwOverflowException" => "rt$ThrowOverflowException"
+            case "throwIndexOutOfBoundsException" => "rt$ThrowIndexOutOfBoundsException"
+            case "throwNegativeArraySizeException" => "rt$ThrowNegativeArraySizeException"
+            case "callToString" => "rt$CallToString"
+            case "checkIsError" => "rt$CheckIsError"
+            case "throwError" => "rt$ThrowError"
+            case "callPrintStackTrace" => "rt$CallPrintStackTrace"
+            case "callPrintStackTraceError" => "rt$CallPrintStackTraceError"
+            case _ => None
+        }
+    }
+
+    @When[backend != "cjnative"]
+    private func GetSpecialFuncName(fd: MangleDecl): Option<String> {
+        if (fd.fullPackageName != CORE_PACKAGE_NAME) {
+            return None
+        }
+        return match (fd.identifier) {
             case "throwOutOfMemoryError" => "rt$ThrowOutOfMemoryError"
             case "throwImplicitException" => "rt$ThrowImplicitException"
             case "throwArithmeticException" => "rt$ThrowArithmeticException"
