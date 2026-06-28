@@ -1,5 +1,7 @@
 package cangjie_compiler::ast
 
+import cangjie_compiler::utils.CJC_ASSERT
+import cangjie_compiler::utils.CJC_NULLPTR_CHECK
 import std.collection.*
 
 public open class Type <: Node {
@@ -78,11 +80,14 @@ public class RefType <: Type {
     }
 
     public func IsGenericThisType(): Bool {
-        if (ref.identifier != "This") {
-            return false
-        }
-        if (let Some(_) <- ref.target) {
-            return true
+        if (let Some(target) <- ref.target) {
+            if (let Some(classDecl) <- (target as ClassDecl)) {
+                if (let Some(generic) <- classDecl.generic) {
+                    if (!generic.typeParameters.isEmpty() && ref.identifier == "This") {
+                        return true
+                    }
+                }
+            }
         }
         return false
     }
@@ -166,7 +171,8 @@ public class ParenType <: Type {
     }
 
     public override func ToString(): String {
-        return "(" + (if (let Some(value) <- innerType) { value.ToString() } else { "" }) + ")"
+        CJC_ASSERT(innerType.isSome())
+        return "(" + innerType.getOrThrow().ToString() + ")"
     }
 }
 
@@ -204,7 +210,9 @@ public class QualifiedType <: Type {
     }
 
     public override func ToString(): String {
-        var out = if (let Some(value) <- baseType) { value.ToString() + "." } else { "" }
+        CJC_ASSERT(baseType.isSome())
+        var out = baseType.getOrThrow().ToString()
+        out += "."
         out += field.GetRawText()
         if (!typeArguments.isEmpty()) {
             let parts = ArrayList<String>()
@@ -241,8 +249,8 @@ public class OptionType <: Type {
             out += "?"
             idx++
         }
-        let component = if (let Some(value) <- componentType) { value.ToString() } else { "" }
-        return out + component
+        CJC_ASSERT(componentType.isSome())
+        return out + componentType.getOrThrow().ToString()
     }
 }
 
@@ -261,7 +269,8 @@ public class ConstantType <: Type {
     }
 
     public override func ToString(): String {
-        return "$" + (if (let Some(value) <- constantExpr) { value.ToString() } else { "" })
+        CJC_ASSERT(constantExpr.isSome())
+        return "$" + constantExpr.getOrThrow().ToString()
     }
 }
 
@@ -284,7 +293,8 @@ public class VArrayType <: Type {
     }
 
     public override func ToString(): String {
-        var out = "VArray<" + (if (let Some(value) <- typeArgument) { value.ToString() } else { "" })
+        CJC_ASSERT(typeArgument.isSome())
+        var out = "VArray<" + typeArgument.getOrThrow().ToString()
         if (let Some(value) <- constantType) {
             out += ", " + value.ToString()
         }
@@ -381,7 +391,8 @@ public class GenericConstraint <: Node {
         for (bound in upperBounds) {
             bounds.add(bound.ToString())
         }
-        let lhs = if (let Some(value) <- refType) { value.ToString() } else { "" }
+        CJC_NULLPTR_CHECK(refType)
+        let lhs = refType.getOrThrow().ToString()
         if (bounds.isEmpty()) {
             return lhs
         }
