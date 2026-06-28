@@ -1,5 +1,6 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::utils.{CJC_NULLPTR_CHECK, ProfileRecorder}
 import std.collection.*
 
 public class UpdateMemberVarPath {
@@ -10,11 +11,13 @@ public class UpdateMemberVarPath {
     }
 
     public func RunOnPackage(pkg: Package): Unit {
-        for (fn in pkg.GetGlobalFuncsWithBody()) {
-            if (let Some(body) <- fn.GetBody()) {
-                for (block in body.GetBlocks()) {
-                    for (expr in block.GetExpressions()) {
-                        UpdateExpression(expr)
+        try (recorder = ProfileRecorder("Canonicalization", "UpdateMemberVarPath")) {
+            for (fn in pkg.GetGlobalFuncsWithBody()) {
+                if (let Some(body) <- fn.GetBody()) {
+                    for (block in body.GetBlocks()) {
+                        for (expr in block.GetExpressions()) {
+                            UpdateExpression(expr)
+                        }
                     }
                 }
             }
@@ -33,76 +36,72 @@ public class UpdateMemberVarPath {
 
     private func UpdateToGetElementRef(expr: GetElementByName): Unit {
         let location = expr.GetLocation()
-        let customTy = CustomTypeFromValue(location) ?? return
-        let path = ChangeNameToPath(customTy, expr.GetNames()) ?? return
-        let parent = expr.GetParentBlock() ?? return
+        let locationType = (location.GetType().getOrThrow().StripAllRefs() as CustomType).getOrThrow()
+        let path = ChangeNameToPath(locationType, expr.GetNames())
+        let parent = expr.GetParentBlock().getOrThrow()
         let replacement = builder.CreateGetElementRef(RequiredResultType(expr), location, path, parent)
         replacement.CopyBaseInfoFrom(expr)
+        let rawResult = expr.GetResult().getOrThrow()
+        let replacementResult = replacement.GetResult().getOrThrow()
+        replacementResult.CopyBaseInfoFrom(rawResult)
+        replacementResult.AppendAttributeInfo(rawResult.GetAttributeInfo())
         expr.ReplaceWith(replacement)
     }
 
     private func UpdateToStoreElementRef(expr: StoreElementByName): Unit {
         let location = expr.GetLocation()
-        let customTy = CustomTypeFromValue(location) ?? return
-        let path = ChangeNameToPath(customTy, expr.GetNames()) ?? return
-        let parent = expr.GetParentBlock() ?? return
+        let locationType = (location.GetType().getOrThrow().StripAllRefs() as CustomType).getOrThrow()
+        let path = ChangeNameToPath(locationType, expr.GetNames())
+        let parent = expr.GetParentBlock().getOrThrow()
         let replacement = builder.CreateStoreElementRef(expr.GetValue(), location, path, parent)
         replacement.CopyBaseInfoFrom(expr)
+        let rawResult = expr.GetResult().getOrThrow()
+        let replacementResult = replacement.GetResult().getOrThrow()
+        replacementResult.CopyBaseInfoFrom(rawResult)
+        replacementResult.AppendAttributeInfo(rawResult.GetAttributeInfo())
         expr.ReplaceWith(replacement)
     }
 
     private func UpdateToField(expr: FieldByName): Unit {
         let base = expr.GetBase()
-        let customTy = CustomTypeFromValue(base) ?? return
-        let path = ChangeNameToPath(customTy, expr.GetNames()) ?? return
-        let parent = expr.GetParentBlock() ?? return
+        let locationType = (base.GetType().getOrThrow().StripAllRefs() as CustomType).getOrThrow()
+        let path = ChangeNameToPath(locationType, expr.GetNames())
+        let parent = expr.GetParentBlock().getOrThrow()
         let replacement = builder.CreateField(RequiredResultType(expr), base, path, parent)
         replacement.CopyBaseInfoFrom(expr)
+        let rawResult = expr.GetResult().getOrThrow()
+        let replacementResult = replacement.GetResult().getOrThrow()
+        replacementResult.CopyBaseInfoFrom(rawResult)
+        replacementResult.AppendAttributeInfo(rawResult.GetAttributeInfo())
         expr.ReplaceWith(replacement)
     }
 
-    private func ChangeNameToPath(rootType: CustomType, names: ArrayList<String>): Option<ArrayList<UInt64>> {
+    private func ChangeNameToPath(rootType: CustomType, names: ArrayList<String>): ArrayList<UInt64> {
         let path = ArrayList<UInt64>()
         var current: Option<CustomType> = rootType
         for (name in names) {
-            let baseType = current ?? return None
-            let indexAndType = GetIndexByName(baseType, name) ?? return None
-            path.add(UInt64(indexAndType.index))
-            current = indexAndType.memberType.StripAllRefs() as CustomType
+            CJC_NULLPTR_CHECK(current)
+            let baseType = current.getOrThrow()
+            let indexAndType = GetIndexByName(baseType, name)
+            path.add(indexAndType[1])
+            current = indexAndType[0].StripAllRefs() as CustomType
         }
-        return Some(path)
+        return path
     }
 
-    private func GetIndexByName(baseType: CustomType, name: String): Option<MemberPathIndex> {
-        let members = baseType.GetCustomTypeDef().GetAllInstanceVars()
-        let memberTypes = baseType.GetInstantiatedMemberTys()
-        var index = members.size - 1
-        while (index >= 0) {
-            if (members[index].name == name) {
-                if (index < memberTypes.size) {
-                    return Some(MemberPathIndex(index, memberTypes[index]))
-                }
-                return Some(MemberPathIndex(index, members[index].ty))
-            }
+    private func GetIndexByName(baseType: CustomType, name: String): (Type, UInt64) {
+        var memberVarInstType: Option<Type> = None
+        let allMemberVars = baseType.GetCustomTypeDef().GetAllInstanceVars()
+        let memberVarInstTypes = baseType.GetInstantiatedMemberTys()
+        var index = allMemberVars.size
+        while (index > 0) {
             index--
+            if (allMemberVars[index].name == name) {
+                memberVarInstType = memberVarInstTypes[index]
+                break
+            }
         }
-        return None
-    }
-
-    private func CustomTypeFromValue(value: Value): Option<CustomType> {
-        if (let Some(ty) <- value.GetType()) {
-            return ty.StripAllRefs() as CustomType
-        }
-        return None
-    }
-}
-
-private class MemberPathIndex {
-    public let index: Int64
-    public let memberType: Type
-
-    public init(index: Int64, memberType: Type) {
-        this.index = index
-        this.memberType = memberType
+        CJC_NULLPTR_CHECK(memberVarInstType)
+        return (memberVarInstType.getOrThrow(), UInt64(index))
     }
 }
