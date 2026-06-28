@@ -15,6 +15,17 @@ extend ParserImpl {
         return ahead[0].kind == TokenKind.IDENTIFIER && IsBuiltinAnnotation(moduleName, ahead[0].Value())
     }
 
+    public func SeeingAtWhen(): Bool {
+        if (!SeeingCombinator([TokenKind.AT, TokenKind.IDENTIFIER])) {
+            return false
+        }
+        let tokens = lexer.LookAheadSkipNL(1)
+        var token = tokens[0]
+        token.SetValue("When")
+        tokens[0] = token
+        return true
+    }
+
     public func SeeingAnnotationLambdaExpr(): Bool {
         return Seeing([TokenKind.AT, TokenKind.IDENTIFIER, TokenKind.LCURL]) && SeeingBuiltinAnnotation()
     }
@@ -245,7 +256,12 @@ extend ParserImpl {
                 } else {
                     diag.DiagnoseRefactor(DiagKindRefactor.INVALID_ANNOTATION, arg.begin, "@Deprecated argument must be a literal")
                     anno.isBroken = true
+                    return
                 }
+            } else {
+                diag.DiagnoseRefactor(DiagKindRefactor.INVALID_ANNOTATION, arg.begin, "@Deprecated argument must be a literal")
+                anno.isBroken = true
+                return
             }
         }
     }
