@@ -17,6 +17,9 @@ public class ConstPropagation {
     }
 
     public func RunOnFunction(fn: Function): Int64 {
+        if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
+            return 0
+        }
         if (let Some(body) <- fn.GetBody()) {
             return SimplifyBody(body)
         }
@@ -46,8 +49,6 @@ public class ConstPropagation {
             let expr = exprs[idx]
             if (TryRewriteConstantBranch(expr)) {
                 changed++
-            } else if (TryFoldToConstant(expr)) {
-                changed++
             } else if (TrySimplifyUnary(expr)) {
                 changed++
             } else if (TrySimplifyBinary(expr)) {
@@ -57,30 +58,6 @@ public class ConstPropagation {
             }
         }
         return changed
-    }
-
-    private func TryFoldToConstant(expr: Expression): Bool {
-        if (expr.IsConstant() || expr.IsTerminator() || expr.HasExceptionBranch()) {
-            return false
-        }
-        if (builder.isNone()) {
-            return false
-        }
-        if (let Some(foldedLiteral) <- constEval.EvaluateToLiteral(expr)) {
-            if (let Some(result) <- expr.GetResult()) {
-                if (let Some(resultTy) <- result.GetType()) {
-                    if (let Some(parentBlock) <- expr.GetParentBlock()) {
-                        if (let Some(chirBuilder) <- builder) {
-                            let newExpr = chirBuilder.CreateConstant(resultTy, foldedLiteral, parentBlock)
-                            newExpr.SetDebugLocation(expr.GetDebugLocation())
-                            expr.ReplaceWith(newExpr)
-                            return true
-                        }
-                    }
-                }
-            }
-        }
-        return false
     }
 
     private func TryRewriteConstantBranch(expr: Expression): Bool {
@@ -136,11 +113,11 @@ public class ConstPropagation {
         let lhs = expr.GetOperand(0)
         let rhs = expr.GetOperand(1)
         let kind = expr.GetExprKind()
-        if ((kind == ExprKind.ADD || kind == ExprKind.BITOR) && IsIntLiteral(lhs, 0)) {
+        if (kind == ExprKind.ADD && IsIntLiteral(lhs, 0)) {
             return ReplaceResultWithOperand(expr, rhs)
         }
         if ((kind == ExprKind.ADD || kind == ExprKind.SUB || kind == ExprKind.LSHIFT ||
-            kind == ExprKind.RSHIFT || kind == ExprKind.BITOR) && IsIntLiteral(rhs, 0)) {
+            kind == ExprKind.RSHIFT) && IsIntLiteral(rhs, 0)) {
             return ReplaceResultWithOperand(expr, lhs)
         }
         if (kind == ExprKind.MUL && IsIntLiteral(lhs, 1)) {
