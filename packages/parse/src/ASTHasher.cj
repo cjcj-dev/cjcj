@@ -1,6 +1,7 @@
 package cangjie_compiler::parse
 
 import std.collection.*
+import std.sort.*
 
 public class ASTHasher {
     public static func Init(_: GlobalOptions): Unit {}
@@ -47,8 +48,21 @@ public class ASTHasher {
     private static func HashDeclSig(decl: Decl): UInt64 {
         var acc = UInt64(ASTKindIndex(decl.astKind))
         acc = CombineHash(acc, UInt64(decl.identifier.GetRawText().hashCode()))
+        let modifierVec = ArrayList<TokenKind>()
         for (modifier in decl.modifiers) {
-            acc = CombineHash(acc, UInt64(ModifierKindIndexForHash(modifier.modifier)))
+            modifierVec.add(modifier.modifier)
+        }
+        sort(modifierVec, by: { left: TokenKind, right: TokenKind =>
+            if (TokenKindIndex(left) < TokenKindIndex(right)) {
+                Ordering.LT
+            } else if (TokenKindIndex(left) > TokenKindIndex(right)) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        }, stable: true)
+        for (modifier in modifierVec) {
+            acc = CombineHash(acc, UInt64(TokenKindIndex(modifier)))
         }
         for (rawAttr in decl.GetAttrs().GetRawAttrs()) {
             acc = CombineHash(acc, rawAttr)
@@ -68,8 +82,4 @@ public class ASTHasher {
         }
         return acc
     }
-}
-
-private func ModifierKindIndexForHash(kind: TokenKind): Int64 {
-    return if (kind == TokenKind.PUBLIC) { 0 } else if (kind == TokenKind.PRIVATE) { 1 } else { 2 }
 }
