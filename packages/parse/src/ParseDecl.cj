@@ -198,7 +198,9 @@ extend ParserImpl {
         let ahead = lexer.LookAheadSkipNL(32)
         var kind = Peek().kind
         var index: Int64 = 0
-        while (ModifierKindFromToken(kind).isSome()) {
+        while ((TokenKindIndex(kind) >= TokenKindIndex(TokenKind.STATIC) &&
+            TokenKindIndex(kind) <= TokenKindIndex(TokenKind.OPERATOR)) ||
+            kind == TokenKind.CONST || kind == TokenKind.COMMON || kind == TokenKind.SPECIFIC) {
             if (index >= ahead.size) {
                 return false
             }

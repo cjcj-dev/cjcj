@@ -33,36 +33,3 @@ public import cangjie_compiler::ast.{TypeKind, TypeKindFromName}
 public import cangjie_compiler::utils.OverflowStrategy
 
 public type AnnotationKind = AstAnnotationKind
-
-public enum ModifierKind {
-    | PUBLIC | PROTECTED | INTERNAL | PRIVATE | STATIC | ABSTRACT | OPEN | SEALED | OVERRIDE
-    | REDEF | FOREIGN | INOUT | MUT | UNSAFE | OPERATOR | CONST | COMMON | SPECIFIC
-}
-
-private func ModifierKindIndex(kind: ModifierKind): Int64 {
-    return match (kind) {
-        case ModifierKind.PUBLIC => 0
-        case ModifierKind.PROTECTED => 1
-        case ModifierKind.INTERNAL => 2
-        case ModifierKind.PRIVATE => 3
-        case ModifierKind.STATIC => 4
-        case ModifierKind.ABSTRACT => 5
-        case ModifierKind.OPEN => 6
-        case ModifierKind.SEALED => 7
-        case ModifierKind.OVERRIDE => 8
-        case ModifierKind.REDEF => 9
-        case ModifierKind.FOREIGN => 10
-        case ModifierKind.INOUT => 11
-        case ModifierKind.MUT => 12
-        case ModifierKind.UNSAFE => 13
-        case ModifierKind.OPERATOR => 14
-        case ModifierKind.CONST => 15
-        case ModifierKind.COMMON => 16
-        case ModifierKind.SPECIFIC => 17
-    }
-}
-
-extend ModifierKind <: Equatable<ModifierKind> {
-    public operator func ==(right: ModifierKind): Bool { return ModifierKindIndex(this) == ModifierKindIndex(right) }
-    public operator func !=(right: ModifierKind): Bool { return !(this == right) }
-}

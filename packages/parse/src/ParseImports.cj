@@ -124,13 +124,11 @@ extend ParserImpl {
     public func ParseImportSpec(annos: ArrayList<Annotation>): ImportSpec {
         let spec = ImportSpec()
         for (anno in annos) { spec.annotations.add(anno) }
-        let maybeModifier = ModifierKindFromToken(Peek().kind)
-        if (let Some(kind) <- maybeModifier) {
-            let tok = Peek()
-            if (kind == ModifierKind.PUBLIC || kind == ModifierKind.PROTECTED || kind == ModifierKind.INTERNAL || kind == ModifierKind.PRIVATE) {
-                spec.modifier = Modifier(tok.kind, tok.Begin())
-                Next()
-            }
+        if (SeeingAny([TokenKind.PUBLIC, TokenKind.PROTECTED, TokenKind.INTERNAL, TokenKind.PRIVATE])) {
+            Next()
+            let modifier = Modifier(lastToken.kind, lastToken.Begin())
+            modifier.end = lastToken.End()
+            spec.modifier = modifier
         }
         let importTok = Expect(TokenKind.IMPORT, "expected 'import'")
         spec.importPos = importTok.Begin()
