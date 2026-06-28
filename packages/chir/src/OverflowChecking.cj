@@ -79,31 +79,24 @@ public class OverflowChecker {
         return powerResult
     }
 
-    public static func IsSignedTypecastOverflow(
+    public static func IsTypecastOverflowForInt(
         value: Int64,
         targetKind: TypeKind,
         strategy: OverflowStrategy
     ): IntOverflowResult {
-        return IsSignedToSignedTypecastOverflow(value, targetKind, strategy)
-    }
-
-    public static func IsUnsignedTypecastOverflow(
-        value: UInt64,
-        targetKind: TypeKind,
-        strategy: OverflowStrategy
-    ): UIntOverflowResult {
-        return IsUnsignedToUnsignedTypecastOverflow(value, targetKind, strategy)
-    }
-
-    public static func IsSignedToSignedTypecastOverflow(
-        value: Int64,
-        targetKind: TypeKind,
-        strategy: OverflowStrategy
-    ): IntOverflowResult {
-        let width = SignedWidth(targetKind)
-        let minValue = SignedMin(width)
-        let maxValue = SignedMax(width)
-        let overflow = value < minValue || value > maxValue
+        let targetKindIndex = TypeKindIndex(targetKind)
+        let targetIsSigned = targetKindIndex >= TypeKindIndex(TypeKind.TYPE_INT8) &&
+            targetKindIndex <= TypeKindIndex(TypeKind.TYPE_INT_NATIVE)
+        let width = if (targetIsSigned) { SignedWidth(targetKind) } else { UnsignedWidth(targetKind) }
+        let minValue = if (targetIsSigned) { SignedMin(width) } else { 0 }
+        let maxValue = if (targetIsSigned) { SignedMax(width) } else { BitsToSigned(UnsignedMax(width), 64) }
+        let overflow = if (!targetIsSigned && value < 0) {
+            true
+        } else if (targetIsSigned) {
+            value > maxValue || value < minValue
+        } else {
+            UInt64(value) > UnsignedMax(width)
+        }
         if (overflow && strategy == OverflowStrategy.SATURATING) {
             return if (value < 0) {
                 IntOverflowResult(true, minValue)
@@ -111,53 +104,38 @@ public class OverflowChecker {
                 IntOverflowResult(true, maxValue)
             }
         }
-        return IntOverflowResult(overflow, NormalizeSigned(value, width))
-    }
-
-    public static func IsSignedToUnsignedTypecastOverflow(
-        value: Int64,
-        targetKind: TypeKind,
-        strategy: OverflowStrategy
-    ): UIntOverflowResult {
-        let width = UnsignedWidth(targetKind)
-        let maxValue = UnsignedMax(width)
-        let overflow = value < 0 || UInt64(value) > maxValue
-        if (overflow && strategy == OverflowStrategy.SATURATING) {
-            return if (value < 0) {
-                UIntOverflowResult(true, 0u64)
-            } else {
-                UIntOverflowResult(true, maxValue)
-            }
+        let result = if (targetIsSigned) {
+            NormalizeSigned(value, width)
+        } else {
+            BitsToSigned(NormalizeUnsigned(SignedToBits(value, 64), width), 64)
         }
-        return UIntOverflowResult(overflow, SignedToBits(value, width) & maxValue)
+        return IntOverflowResult(overflow, result)
     }
 
-    public static func IsUnsignedToSignedTypecastOverflow(
+    public static func IsTypecastOverflowForInt(
         value: UInt64,
         targetKind: TypeKind,
         strategy: OverflowStrategy
     ): IntOverflowResult {
-        let width = SignedWidth(targetKind)
-        let maxValue = SignedMax(width)
-        let overflow = value > UInt64(maxValue)
+        let targetKindIndex = TypeKindIndex(targetKind)
+        let targetIsSigned = targetKindIndex >= TypeKindIndex(TypeKind.TYPE_INT8) &&
+            targetKindIndex <= TypeKindIndex(TypeKind.TYPE_INT_NATIVE)
+        let width = if (targetIsSigned) { SignedWidth(targetKind) } else { UnsignedWidth(targetKind) }
+        let maxValue = if (targetIsSigned) { SignedMax(width) } else { BitsToSigned(UnsignedMax(width), 64) }
+        let overflow = if (targetIsSigned) {
+            value > UInt64(maxValue)
+        } else {
+            value > UnsignedMax(width)
+        }
         if (overflow && strategy == OverflowStrategy.SATURATING) {
             return IntOverflowResult(true, maxValue)
         }
-        return IntOverflowResult(overflow, BitsToSigned(value, width))
-    }
-
-    public static func IsUnsignedToUnsignedTypecastOverflow(
-        value: UInt64,
-        targetKind: TypeKind,
-        strategy: OverflowStrategy
-    ): UIntOverflowResult {
-        let width = UnsignedWidth(targetKind)
-        let maxValue = UnsignedMax(width)
-        let overflow = value > maxValue
-        if (overflow && strategy == OverflowStrategy.SATURATING) {
-            return UIntOverflowResult(true, maxValue)
+        let result = if (targetIsSigned) {
+            BitsToSigned(value, width)
+        } else {
+            BitsToSigned(NormalizeUnsigned(value, width), 64)
         }
-        return UIntOverflowResult(overflow, NormalizeUnsigned(value, width))
+        return IntOverflowResult(overflow, result)
     }
 }
 

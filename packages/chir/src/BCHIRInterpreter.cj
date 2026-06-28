@@ -1084,9 +1084,9 @@ private func CastIntegerToSigned(raw: Int64, sourceKind: TypeKind, targetKind: T
         if (raw < 0) {
             return None
         }
-        OverflowChecker.IsUnsignedToSignedTypecastOverflow(UInt64(raw), targetKind, strategy)
+        OverflowChecker.IsTypecastOverflowForInt(UInt64(raw), targetKind, strategy)
     } else {
-        OverflowChecker.IsSignedToSignedTypecastOverflow(raw, targetKind, strategy)
+        OverflowChecker.IsTypecastOverflowForInt(raw, targetKind, strategy)
     }
     if (result.isOverflow && strategy == OverflowStrategy.THROWING) {
         return None
@@ -1100,17 +1100,14 @@ private func CastIntegerToUnsigned(raw: Int64, sourceKind: TypeKind, targetKind:
         if (raw < 0) {
             return None
         }
-        OverflowChecker.IsUnsignedToUnsignedTypecastOverflow(UInt64(raw), targetKind, strategy)
+        OverflowChecker.IsTypecastOverflowForInt(UInt64(raw), targetKind, strategy)
     } else {
-        OverflowChecker.IsSignedToUnsignedTypecastOverflow(raw, targetKind, strategy)
+        OverflowChecker.IsTypecastOverflowForInt(raw, targetKind, strategy)
     }
     if (result.isOverflow && strategy == OverflowStrategy.THROWING) {
         return None
     }
-    if (result.value > UInt64(Int64.Max)) {
-        return None
-    }
-    return Int64(result.value)
+    return result.value
 }
 
 private func CastFloatToTypeKind(raw: Float64, targetKind: TypeKind): Option<InterpreterValue> {
