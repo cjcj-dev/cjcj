@@ -695,7 +695,7 @@ private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elemen
             }
         }
     }
-    if (ShouldUseObjectFieldWriteBarrier(baseValue, elementValue, elementPtr)) {
+    if (ShouldUseObjectFieldWriteBarrier(irBuilder, baseValue, elementValue, elementPtr)) {
         return irBuilder.CallGCWrite(rawElementValue, baseValue.GetRawValue(), elementPtr)
     }
     return irBuilder.CreateStore(rawElementValue, elementPtr)
@@ -778,18 +778,26 @@ private func StoreElementRawValue(irBuilder: IRBuilder2, value: CGValue): LLVMVa
     return raw
 }
 
-private func ShouldUseObjectFieldWriteBarrier(baseValue: CGValue, elementValue: CGValue,
+private func ShouldUseObjectFieldWriteBarrier(irBuilder: IRBuilder2, baseValue: CGValue, elementValue: CGValue,
     elementPtr: LLVMValueRef): Bool {
     if (!IsAddressSpacePointer(baseValue.GetRawValue(), 1u32) || !IsAddressSpacePointer(elementPtr, 1u32)) {
         return false
     }
     if (let Some(elementCGType) <- elementValue.GetCGType()) {
-        if (elementCGType.IsReference()) {
+        if (elementCGType.IsReference() || IsOptionLikeRefValue(irBuilder, elementCGType)) {
             return true
         }
         if (elementCGType.GetSize().isNone()) {
             return true
         }
+    }
+    return false
+}
+
+private func IsOptionLikeRefValue(irBuilder: IRBuilder2, elementCGType: CGType): Bool {
+    if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(),
+        elementCGType.GetOriginal().StripAllRefs()) as CGEnumType)) {
+        return enumCGType.IsOptionLikeRef()
     }
     return false
 }
