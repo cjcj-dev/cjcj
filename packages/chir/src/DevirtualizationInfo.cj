@@ -1,6 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::modules.{GetPackageRelation, PackageRelation}
 
 public enum DevirtualTyKind {
     | SUBTYPE_OF | EXACTLY
@@ -33,28 +34,6 @@ public class InheritanceInfo {
     }
 }
 
-private enum PackageRelationForAnalysis {
-    | NONE | CHILD | SAME_PACKAGE
-}
-
-private func PackageRelationForAnalysisIndex(relation: PackageRelationForAnalysis): Int64 {
-    return match (relation) {
-        case PackageRelationForAnalysis.NONE => 0
-        case PackageRelationForAnalysis.CHILD => 1
-        case PackageRelationForAnalysis.SAME_PACKAGE => 2
-    }
-}
-
-extend PackageRelationForAnalysis <: Equatable<PackageRelationForAnalysis> {
-    public operator func ==(right: PackageRelationForAnalysis): Bool {
-        return PackageRelationForAnalysisIndex(this) == PackageRelationForAnalysisIndex(right)
-    }
-
-    public operator func !=(right: PackageRelationForAnalysis): Bool {
-        return !(this == right)
-    }
-}
-
 public class DevirtualizationInfo {
     private let chirPackage: Package
     private let noSubPkg: Bool
@@ -76,6 +55,9 @@ public class DevirtualizationInfo {
             CollectReturnTypeMap(fn)
         }
         for (customDef in chirPackage.GetAllCustomTypeDef()) {
+            if (customDef.TestAttr(Attribute.SKIP_ANALYSIS)) {
+                continue
+            }
             if (ShouldSkipCustomTypeDef(customDef)) {
                 continue
             }
@@ -88,25 +70,27 @@ public class DevirtualizationInfo {
     }
 
     public func FreshRetMap(): Unit {
-        realRuntimeRetTyMap.clear()
         for (fn in chirPackage.GetGlobalFuncsWithBody()) {
             CollectReturnTypeMap(fn)
         }
     }
 
     public func CheckCustomTypeInternal(def: CustomTypeDef): Bool {
+        let relation = GetPackageRelation(def.GetPackageName(), chirPackage.GetName())
         if (def.TestAttr(Attribute.PUBLIC) || def.TestAttr(Attribute.PROTECTED)) {
             return false
         }
         if (def.TestAttr(Attribute.PRIVATE)) {
             return true
         }
-        let relation = GetPackageRelationForAnalysis(def.GetPackageName(), chirPackage.GetName())
-        if (relation != PackageRelationForAnalysis.CHILD && relation != PackageRelationForAnalysis.SAME_PACKAGE) {
-            return true
-        }
-        if (noSubPkg) {
-            return true
+        if (def.TestAttr(Attribute.INTERNAL)) {
+            if (relation != PackageRelation.CHILD && relation != PackageRelation.SAME_PACKAGE) {
+                return true
+            }
+            if (noSubPkg) {
+                return true
+            }
+            return false
         }
         return false
     }
@@ -384,18 +368,4 @@ private func ContainsInheritanceInfo(values: ArrayList<InheritanceInfo>, target:
         }
     }
     return false
-}
-
-private func GetPackageRelationForAnalysis(srcFullPkgName: String, targetFullPkgName: String):
-    PackageRelationForAnalysis {
-    if (srcFullPkgName == targetFullPkgName) {
-        return PackageRelationForAnalysis.SAME_PACKAGE
-    }
-    if (srcFullPkgName.isEmpty() || targetFullPkgName.isEmpty()) {
-        return PackageRelationForAnalysis.NONE
-    }
-    if (srcFullPkgName.startsWith(targetFullPkgName + ".")) {
-        return PackageRelationForAnalysis.CHILD
-    }
-    return PackageRelationForAnalysis.NONE
 }
