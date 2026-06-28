@@ -23,8 +23,8 @@ public class CHIRBuilder {
         return def
     }
 
-    public func CreateClassDef(packageName: String, identifier: String): ClassDef {
-        let def = ClassDef(packageName, identifier)
+    public func CreateClassDef(packageName: String, identifier: String, isClass!: Bool = true): ClassDef {
+        let def = ClassDef(packageName, identifier, isClass: isClass)
         context.RegisterClass(def)
         return def
     }

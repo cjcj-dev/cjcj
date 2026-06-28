@@ -4,17 +4,18 @@ import std.collection.*
 
 public class ClassDef <: CustomTypeDef {
     private var classType: Option<ClassType> = None
-    private var superClassDef: Option<ClassDef> = None
+    private var isClass: Bool = false
     private var superClassTy: Option<ClassType> = None
-    private let implementedInterfaceDefs: ArrayList<ClassDef> = ArrayList<ClassDef>()
     private var annotationTargets: Option<ArrayList<GlobalVar>> = None
 
-    public init(packageName: String, identifier: String) {
+    public init(packageName: String, identifier: String, isClass!: Bool = true) {
         super(packageName, identifier, identifier, CustomDefKind.TYPE_CLASS)
+        this.isClass = isClass
     }
 
-    public init(packageName: String, identifier: String, srcCodeIdentifier: String) {
+    public init(packageName: String, identifier: String, srcCodeIdentifier: String, isClass!: Bool = true) {
         super(packageName, identifier, srcCodeIdentifier, CustomDefKind.TYPE_CLASS)
+        this.isClass = isClass
     }
 
     public override func GetType(): Option<CustomType> {
@@ -34,6 +35,14 @@ public class ClassDef <: CustomTypeDef {
 
     public func IsAbstract(): Bool {
         return TestAttr(Attribute.ABSTRACT)
+    }
+
+    public override func IsInterface(): Bool {
+        return !isClass
+    }
+
+    public override func IsClass(): Bool {
+        return isClass
     }
 
     public func IsAnnotation(): Bool {
@@ -61,19 +70,19 @@ public class ClassDef <: CustomTypeDef {
         return out
     }
 
-    public func SetSuperClassDef(def: ClassDef): Unit {
-        superClassDef = def
-        let emptyArgs = ArrayList<Type>()
-        superClassTy = ClassType(def, emptyArgs)
+    public func GetSuperClassDef(): Option<ClassDef> {
+        if (let Some(ty) <- superClassTy) {
+            return ty.GetClassDef()
+        }
+        return None
     }
 
-    public func GetSuperClassDef(): Option<ClassDef> {
-        return superClassDef
+    public func HasSuperClass(): Bool {
+        return GetSuperClassDef().isSome()
     }
 
     public func SetSuperClassTy(ty: ClassType): Unit {
         superClassTy = ty
-        superClassDef = ty.GetClassDef()
     }
 
     public func GetSuperClassTy(): Option<ClassType> {
@@ -89,34 +98,29 @@ public class ClassDef <: CustomTypeDef {
         return None
     }
 
-    public func AddImplementedInterfaceDef(def: ClassDef): Unit {
-        if (!ContainsLocalClassDef(implementedInterfaceDefs, def)) {
-            implementedInterfaceDefs.add(def)
+    protected override func AddExtraComment(): String {
+        if (!IsAnnotation()) {
+            return ""
         }
-        let emptyArgs = ArrayList<Type>()
-        AddImplementedInterfaceTy(ClassType(def, emptyArgs))
-    }
-
-    public override func GetImplementedInterfaceDefs(): ArrayList<ClassDef> {
-        let out = super.GetImplementedInterfaceDefs()
-        for (def in implementedInterfaceDefs) {
-            if (!ContainsLocalClassDef(out, def)) {
-                out.add(def)
+        var targetStr = ""
+        if (let Some(targets) <- annotationTargets) {
+            if (targets.isEmpty()) {
+                targetStr = "[ALL]"
+            } else {
+                let targetValues = ArrayList<Value>()
+                for (target in targets) {
+                    targetValues.add(target)
+                }
+                targetStr = ValueIdVecToString("[", targetValues, "]")
             }
         }
-        return out
+        return "AnnoTargets: " + targetStr
     }
 
     public override func ToString(indent: Int64): String {
+        if (IsInterface()) {
+            return IndentToString(indent) + "interface " + GetFullName()
+        }
         return IndentToString(indent) + "class " + GetFullName()
     }
-}
-
-private func ContainsLocalClassDef(values: ArrayList<ClassDef>, classDef: ClassDef): Bool {
-    for (value in values) {
-        if (value.nodeId == classDef.nodeId) {
-            return true
-        }
-    }
-    return false
 }

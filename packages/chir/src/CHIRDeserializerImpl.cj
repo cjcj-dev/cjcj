@@ -350,20 +350,8 @@ class CHIRDeserializerImpl {
                 def.AddInstanceVar(memberVar)
             }
             if (let Some(classDef) <- (def as ClassDef)) {
-                if (let Some(superValue) <- customDefsById.get(CHIRFieldAt(fields, 10))) {
-                    if (let Some(superClass) <- (superValue as ClassDef)) {
-                        classDef.SetSuperClassDef(superClass)
-                    }
-                }
                 if (let Some(superTy) <- (CHIRParseType(CHIRFieldAt(fields, 23), builder, customDefs) as ClassType)) {
                     classDef.SetSuperClassTy(superTy)
-                }
-                for (interfaceId in CHIRWireSplitList(CHIRFieldAt(fields, 11))) {
-                    if (let Some(interfaceValue) <- customDefsById.get(interfaceId)) {
-                        if (let Some(interfaceClass) <- (interfaceValue as ClassDef)) {
-                            classDef.AddImplementedInterfaceDef(interfaceClass)
-                        }
-                    }
                 }
                 for (interfaceTyText in CHIRWireSplitList(CHIRFieldAt(fields, 22))) {
                     if (let Some(interfaceTy) <- (CHIRParseType(interfaceTyText, builder, customDefs) as ClassType)) {

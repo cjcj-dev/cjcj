@@ -816,7 +816,7 @@ public class FaithfulAST2CHIR {
                 customTypeDef = def
                 if (isImported) { CurrentPackage().AddImportedClass(def) } else { CurrentPackage().AddClass(def) }
             case ASTKind.INTERFACE_DECL =>
-                let def = builder.CreateClassDef(packageName, identifier)
+                let def = builder.CreateClassDef(packageName, identifier, isClass: false)
                 def.SetSrcCodeIdentifier(srcIdentifier)
                 def.EnableAttr(Attribute.ABSTRACT)
                 customTypeDef = def

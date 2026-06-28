@@ -162,12 +162,18 @@ public open class CustomTypeDef <: Base {
         return !genericTypeParams.isEmpty()
     }
 
-    public func IsClass(): Bool {
-        return customKind == CustomDefKind.TYPE_CLASS
+    public open func IsClass(): Bool {
+        if (!IsClassLike()) {
+            return false
+        }
+        if (let Some(classDef) <- (this as ClassDef)) {
+            return classDef.IsClass()
+        }
+        return false
     }
 
     public func IsClassLike(): Bool {
-        return IsClass()
+        return customKind == CustomDefKind.TYPE_CLASS
     }
 
     public func IsEnum(): Bool {
@@ -178,8 +184,14 @@ public open class CustomTypeDef <: Base {
         return customKind == CustomDefKind.TYPE_EXTEND
     }
 
-    public func IsInterface(): Bool {
-        return TestAttr(Attribute.ABSTRACT) && IsClassLike()
+    public open func IsInterface(): Bool {
+        if (!IsClassLike()) {
+            return false
+        }
+        if (let Some(classDef) <- (this as ClassDef)) {
+            return classDef.IsInterface()
+        }
+        return false
     }
 
     public func IsStruct(): Bool {
@@ -357,6 +369,10 @@ public open class CustomTypeDef <: Base {
 
     public func SetAnnoInfo(info: AnnoInfo): Unit {
         annoInfo = info
+    }
+
+    protected open func AddExtraComment(): String {
+        return ""
     }
 
     public open func ToString(indent: Int64): String {
