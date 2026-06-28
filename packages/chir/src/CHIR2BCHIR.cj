@@ -28,7 +28,7 @@ public class CHIR2BCHIRContext {
 }
 
 public class CHIR2BCHIR {
-    private let bchir: BCHIR
+    let bchir: BCHIR
     private let stringMemo: HashMap<String, Int64> = HashMap<String, Int64>()
     private let typeMemo: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
 
