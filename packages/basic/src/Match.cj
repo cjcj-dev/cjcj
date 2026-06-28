@@ -6,12 +6,8 @@ public class Matcher<T> {
     public init(node: T) {
         this.node = node
     }
-
-    public func value(): T {
-        return node
-    }
 }
 
-public func matchNode<T>(node: T): Matcher<T> {
+public func `match`<T>(node: T): Matcher<T> {
     return Matcher<T>(node)
 }
