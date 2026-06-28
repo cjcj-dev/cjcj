@@ -32,7 +32,10 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
         case ExprKind.BOX => TranslateBoxExpression(context, expr)
         case ExprKind.UNBOX => context.definition.PushOp(OpCode.UNBOX)
         case ExprKind.UNBOX_TO_REF => context.definition.PushOp(OpCode.UNBOX_REF)
-        case _ => context.definition.PushOp(OpCode.NOT_SUPPORTED)
+        case ExprKind.VARRAY_BUILDER | ExprKind.SPAWN | ExprKind.INVOKESTATIC | ExprKind.GET_RTTI |
+            ExprKind.GET_RTTI_STATIC | ExprKind.TRANSFORM_TO_CONCRETE | ExprKind.TRANSFORM_TO_GENERIC =>
+            context.definition.PushOp(OpCode.ABORT)
+        case _ => context.definition.PushOp(OpCode.ABORT)
     }
 }
 
@@ -122,10 +125,23 @@ public func TranslateTypecastExpression(context: CHIR2BCHIRContext, expr: Expres
 
 private func TranslateInstanceOfExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
     if (let Some(instanceOf) <- (expr as InstanceOf)) {
-        let opIndex = BCHIRPushOpWithName(context.definition, OpCode.INSTANCEOF,
-            BCHIRClassMangledNameForType(instanceOf.GetType().StripAllRefs()))
-        let _ = opIndex
+        let opIndex = context.definition.NextIndex()
+        context.definition.PushOp(OpCode.INSTANCEOF)
         context.definition.PushCell(0)
+        let testedTy = instanceOf.GetType()
+        if (testedTy.IsRef()) {
+            let refTy = (testedTy as RefType).getOrThrow()
+            let classTy = (refTy.GetBaseType() as ClassType).getOrThrow()
+            let classDef = classTy.GetClassDef()
+            context.definition.AddMangledNameAnnotation(opIndex, classDef.GetIdentifierWithoutPrefix())
+        } else if (testedTy.IsPrimitive()) {
+            let primitiveClassName = testedTy.ToString()
+            context.definition.AddMangledNameAnnotation(opIndex, primitiveClassName)
+        } else {
+            let customTy = (testedTy as CustomType).getOrThrow()
+            let customDef = customTy.GetCustomTypeDef()
+            context.definition.AddMangledNameAnnotation(opIndex, customDef.GetIdentifierWithoutPrefix())
+        }
     } else {
         context.definition.PushOp(OpCode.NOT_SUPPORTED)
     }
@@ -134,8 +150,20 @@ private func TranslateInstanceOfExpression(context: CHIR2BCHIRContext, expr: Exp
 private func TranslateBoxExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
     if (let Some(box) <- (expr as Box)) {
         if (let Some(sourceTy) <- box.GetSourceTy()) {
-            BCHIRPushOpWithName(context.definition, OpCode.BOX, BCHIRClassMangledNameForType(sourceTy.StripAllRefs()))
+            let opIndex = context.definition.NextIndex()
+            context.definition.PushOp(OpCode.BOX)
             context.definition.PushCell(0)
+            if (sourceTy.IsStruct()) {
+                let structTy = (sourceTy as StructType).getOrThrow()
+                let structDef = structTy.GetStructDef()
+                context.definition.AddMangledNameAnnotation(opIndex, structDef.GetIdentifierWithoutPrefix())
+            } else if (sourceTy.IsEnum()) {
+                let enumTy = (sourceTy as EnumType).getOrThrow()
+                let enumDef = enumTy.GetEnumDef()
+                context.definition.AddMangledNameAnnotation(opIndex, enumDef.GetIdentifierWithoutPrefix())
+            } else {
+                context.definition.AddMangledNameAnnotation(opIndex, sourceTy.ToString())
+            }
         } else {
             context.definition.PushOp(OpCode.NOT_SUPPORTED)
         }
