@@ -37,7 +37,17 @@ extend ParserImpl {
             Next()
             return
         }
+        if (SeeingAny([TokenKind.LSQUARE, TokenKind.RSQUARE])) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.lex_unknown_start_of_token,
+                slash.Begin(),
+                "unknown start of token: ${slash.Value()}")
+            tokens.add(slash)
+            Next()
+            return
+        }
         tokens.add(slash)
+        Next()
     }
 
     private func ParseQuoteDollarInterpolation(qe: QuoteExpr): Unit {
@@ -61,16 +71,31 @@ extend ParserImpl {
         let dollar = Expect(TokenKind.DOLLAR, "expected '$'")
         let dollarPos = dollar.Begin()
         let leftParen = Expect(TokenKind.LPAREN, "expected '(' after '$'")
-        let oldSkipNL = skipNL
         EnterQuoteInterpolateMod()
         skipNL = true
+        // 空 $() 时短路返回 InvalidExpr 而不进 ParseExpr→ParseAtom: selfhost ParseAtom 的 invalid
+        // 路径会 Next() 消费 RPAREN(C++ GetInvalidExprInAtom 不消费 lookahead), 不短路会吞掉右括号
+        // 导致 Expect(RPAREN) 失败+token 失同步。保留与 C++ ParseQuote.cpp:47 等价的同步语义。
         let parsedExpr = if (Seeing(TokenKind.RPAREN) || Seeing(TokenKind.END)) {
             diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected expression in quote interpolation")
             InvalidExpr(Peek().Begin())
         } else {
             ParseExpr()
         }
-        skipNL = oldSkipNL
+        CheckMacroExprRules(dollar, Token(TokenKind.DOT), parsedExpr)
+        skipNL = false
+        for (kind in [
+            ASTKind.INVALID_EXPR, ASTKind.RETURN_EXPR, ASTKind.WHILE_EXPR, ASTKind.DO_WHILE_EXPR,
+            ASTKind.FOR_IN_EXPR, ASTKind.THROW_EXPR, ASTKind.TRY_EXPR, ASTKind.JUMP_EXPR
+        ]) {
+            if (parsedExpr.astKind == kind) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.parse_invalid_quote_dollar_expr,
+                    dollar.Begin(),
+                    "invalid expression after the operator '$'")
+                break
+            }
+        }
         ExitQuoteInterpolateMod()
         let wrapper = ParenExpr()
         wrapper.expr = parsedExpr

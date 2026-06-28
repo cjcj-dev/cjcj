@@ -549,7 +549,7 @@ extend ParserImpl {
             "expected operator or end of expression, found '${Peek().Value()}'")
     }
 
-    private func CheckMacroExprRules(preT: Token, tok: Token, expr: Expr): Bool {
+    func CheckMacroExprRules(preT: Token, tok: Token, expr: Expr): Bool {
         if (let Some(macroExpr) <- (expr as MacroExpandExpr)) {
             if (!MacroInvocationHasExpandedDecl(macroExpr.invocation)) {
                 return true
