@@ -16,6 +16,11 @@ extend ParserImpl {
         if (enableAttachComment) {
             AttachCommentToFile(file)
         }
+        let comments = ArrayList<Token>()
+        for (comment in lexer.GetComments()) {
+            comments.add(comment)
+        }
+        commentsMap.Put(UInt32(file.begin.fileID), comments)
         return file
     }
 
