@@ -1714,28 +1714,30 @@ private class FrontendCjoFlatBufferWriter {
 
     // Mirrors ExprWriter.cpp:826-843 SaveExceptTypePattern.
     private func SaveExceptTypePattern(etp: ExceptTypePattern): FlatBufferOffset {
-        return SaveTypeListPattern(7u8, etp)
+        let patterns = ArrayList<FlatBufferOffset>()
+        patterns.add(SavePattern(etp.pattern.getOrThrow()))
+        let patternsVec = builder.CreateVectorOffsets(patterns)
+        let types = ArrayList<UInt32>()
+        types.add(SavePatternTy(etp))
+        for (typeNode in etp.types) {
+            types.add(SaveType(TypeNodeTyForSerialization(typeNode)))
+        }
+        let typesVec = builder.CreateVectorU32(types)
+        return SavePatternTable(7u8, etp, patterns: patternsVec, types: typesVec)
     }
 
     // Mirrors ExprWriter.cpp:846-863 SaveCommandTypePattern.
     private func SaveCommandTypePattern(ctp: CommandTypePattern): FlatBufferOffset {
-        return SaveTypeListPattern(8u8, ctp)
-    }
-
-    private func SaveTypeListPattern(kind: UInt8, pattern: TypeListPattern): FlatBufferOffset {
-        if (let None <- pattern.pattern) {
-            throw IllegalArgumentException("TypeListPattern without child pattern is not supported in faithful .cjo writer")
-        }
         let patterns = ArrayList<FlatBufferOffset>()
-        patterns.add(SavePattern(pattern.pattern.getOrThrow()))
+        patterns.add(SavePattern(ctp.pattern.getOrThrow()))
         let patternsVec = builder.CreateVectorOffsets(patterns)
         let types = ArrayList<UInt32>()
-        types.add(SavePatternTy(pattern))
-        for (typeNode in pattern.types) {
+        types.add(SavePatternTy(ctp))
+        for (typeNode in ctp.types) {
             types.add(SaveType(TypeNodeTyForSerialization(typeNode)))
         }
         let typesVec = builder.CreateVectorU32(types)
-        return SavePatternTable(kind, pattern, patterns: patternsVec, types: typesVec)
+        return SavePatternTable(8u8, ctp, patterns: patternsVec, types: typesVec)
     }
 
     private func SavePatternTypeVector(pattern: Pattern): FlatBufferOffset {

@@ -1289,28 +1289,6 @@ private func parsedEnumPatternConstructorName(parsedEnumPattern: ParsedEnumPatte
     return ""
 }
 
-private func fillTypeListPattern(
-    parsedPattern: ParsedPattern,
-    targetPattern: TypeListPattern,
-    fallbackFile: Option<File>
-): Unit {
-    if (let Some(parsedExceptPattern) <- (parsedPattern as ParsedExceptTypePattern)) {
-        if (let Some(innerPattern) <- parsedExceptPattern.pattern) {
-            targetPattern.pattern = Some(convertParsedPattern(innerPattern, fallbackFile))
-        }
-        for (patternType in parsedExceptPattern.types) {
-            targetPattern.types.add(convertParsedType(patternType, fallbackFile))
-        }
-    } else if (let Some(parsedCommandPattern) <- (parsedPattern as ParsedCommandTypePattern)) {
-        if (let Some(innerCommandPattern) <- parsedCommandPattern.pattern) {
-            targetPattern.pattern = Some(convertParsedPattern(innerCommandPattern, fallbackFile))
-        }
-        for (commandType in parsedCommandPattern.types) {
-            targetPattern.types.add(convertParsedType(commandType, fallbackFile))
-        }
-    }
-}
-
 private func convertParsedPattern(parsedPattern: ParsedPattern, fallbackFile: Option<File>): Pattern {
     if (let Some(parsedWildcardPattern) <- (parsedPattern as ParsedWildcardPattern)) {
         let targetWildcardPattern = WildcardPattern()
@@ -1376,13 +1354,23 @@ private func convertParsedPattern(parsedPattern: ParsedPattern, fallbackFile: Op
     if (let Some(parsedExceptPattern) <- (parsedPattern as ParsedExceptTypePattern)) {
         let targetExceptPattern = ExceptTypePattern()
         copyParsedNodeBase(parsedExceptPattern, targetExceptPattern, fallbackFile)
-        fillTypeListPattern(parsedExceptPattern, targetExceptPattern, fallbackFile)
+        if (let Some(innerPattern) <- parsedExceptPattern.pattern) {
+            targetExceptPattern.pattern = Some(convertParsedPattern(innerPattern, fallbackFile))
+        }
+        for (patternType in parsedExceptPattern.types) {
+            targetExceptPattern.types.add(convertParsedType(patternType, fallbackFile))
+        }
         return targetExceptPattern
     }
     if (let Some(parsedCommandPattern) <- (parsedPattern as ParsedCommandTypePattern)) {
         let targetCommandPattern = CommandTypePattern()
         copyParsedNodeBase(parsedCommandPattern, targetCommandPattern, fallbackFile)
-        fillTypeListPattern(parsedCommandPattern, targetCommandPattern, fallbackFile)
+        if (let Some(innerCommandPattern) <- parsedCommandPattern.pattern) {
+            targetCommandPattern.pattern = Some(convertParsedPattern(innerCommandPattern, fallbackFile))
+        }
+        for (commandType in parsedCommandPattern.types) {
+            targetCommandPattern.types.add(convertParsedType(commandType, fallbackFile))
+        }
         return targetCommandPattern
     }
     let targetPattern = Pattern()

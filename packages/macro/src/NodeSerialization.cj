@@ -127,10 +127,10 @@ public class NodeWriter {
                 SerializeTypeOptionForNodeWriter(this, typePattern.typeNode) + ")"
         }
         if (let Some(exceptTypePattern) <- (pattern as ExceptTypePattern)) {
-            return SerializeTypeListPattern("exceptTypePattern", exceptTypePattern)
+            return SerializeExceptTypePattern(exceptTypePattern)
         }
         if (let Some(commandTypePattern) <- (pattern as CommandTypePattern)) {
-            return SerializeTypeListPattern("commandTypePattern", commandTypePattern)
+            return SerializeCommandTypePattern(commandTypePattern)
         }
         return "pattern(" + ASTKindIndex(pattern.astKind).toString() + ")"
     }
@@ -172,8 +172,13 @@ public class NodeWriter {
         return builder.toString()
     }
 
-    private func SerializeTypeListPattern(kindName: String, pattern: TypeListPattern): String {
-        return kindName + "(pattern=" + SerializePatternOption(pattern.pattern) + ";types=" +
+    private func SerializeExceptTypePattern(pattern: ExceptTypePattern): String {
+        return "exceptTypePattern(pattern=" + SerializePatternOption(pattern.pattern) + ";types=" +
+            SerializeTypeVector(pattern.types) + ")"
+    }
+
+    private func SerializeCommandTypePattern(pattern: CommandTypePattern): String {
+        return "commandTypePattern(pattern=" + SerializePatternOption(pattern.pattern) + ";types=" +
             SerializeTypeVector(pattern.types) + ")"
     }
 

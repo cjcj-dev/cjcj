@@ -2873,17 +2873,6 @@ private class CjoSignatureMaterializer {
 
     private func LoadFlatExceptTypePattern(reader: CjoFlatBuffer, patternTable: Int64): ExceptTypePattern {
         let pattern = ExceptTypePattern()
-        LoadFlatTypeListPattern(reader, patternTable, pattern)
-        return pattern
-    }
-
-    private func LoadFlatCommandTypePattern(reader: CjoFlatBuffer, patternTable: Int64): CommandTypePattern {
-        let pattern = CommandTypePattern()
-        LoadFlatTypeListPattern(reader, patternTable, pattern)
-        return pattern
-    }
-
-    private func LoadFlatTypeListPattern(reader: CjoFlatBuffer, patternTable: Int64, pattern: TypeListPattern): Unit {
         let children = reader.VectorField(patternTable, 10)
         if (children >= 0 && reader.VectorLength(children) >= 1) {
             pattern.pattern = LoadFlatPattern(reader, reader.VectorOffsetElement(children, 0))
@@ -2899,6 +2888,27 @@ private class CjoSignatureMaterializer {
                 idx++
             }
         }
+        return pattern
+    }
+
+    private func LoadFlatCommandTypePattern(reader: CjoFlatBuffer, patternTable: Int64): CommandTypePattern {
+        let pattern = CommandTypePattern()
+        let children = reader.VectorField(patternTable, 10)
+        if (children >= 0 && reader.VectorLength(children) >= 1) {
+            pattern.pattern = LoadFlatPattern(reader, reader.VectorOffsetElement(children, 0))
+        }
+        let types = reader.VectorField(patternTable, 12)
+        if (types >= 0) {
+            var idx: Int64 = 1
+            let count = reader.VectorLength(types)
+            while (idx < count) {
+                if (let Some(ty) <- LoadFlatType(reader.VectorU32(types, idx))) {
+                    pattern.types.add(TypeNodeForTy(ty))
+                }
+                idx++
+            }
+        }
+        return pattern
     }
 
     private func LoadFlatChildPatterns(reader: CjoFlatBuffer, patternTable: Int64, out: ArrayList<Pattern>): Unit {

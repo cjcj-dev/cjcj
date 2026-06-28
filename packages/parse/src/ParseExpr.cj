@@ -1048,17 +1048,6 @@ extend ParserImpl {
         ret.handlers.add(handler)
     }
 
-    public func ParseTypeAlternatives(pattern: TypeListPattern): Unit {
-        pattern.types.add(ParseType())
-        while (Skip(TokenKind.BITOR)) {
-            pattern.bitOrPosVector.add(lastToken.Begin())
-            pattern.types.add(ParseType())
-        }
-        if (!pattern.types.isEmpty()) {
-            pattern.end = pattern.types[pattern.types.size - 1].end
-        }
-    }
-
     public func ParseExceptTypePattern(): Pattern {
         if (Skip(TokenKind.WILDCARD)) {
             let wildcard = WildcardPattern(lastToken.Begin())
@@ -1070,7 +1059,15 @@ extend ParserImpl {
             pattern.patternPos = wildcard.begin
             pattern.colonPos = lastToken.Begin()
             pattern.begin = wildcard.begin
-            ParseTypeAlternatives(pattern)
+            do {
+                if (lastToken.kind == TokenKind.BITOR) {
+                    pattern.bitOrPosVector.add(lastToken.Begin())
+                }
+                pattern.types.add(ParseType())
+            } while (Skip(TokenKind.BITOR))
+            if (!pattern.types.isEmpty()) {
+                pattern.end = pattern.types[pattern.types.size - 1].end
+            }
             return pattern
         }
         if (SeeingIdentifierLike()) {
@@ -1088,7 +1085,15 @@ extend ParserImpl {
                 diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected ':' in catch pattern")
                 pattern.isBroken = true
             }
-            ParseTypeAlternatives(pattern)
+            do {
+                if (lastToken.kind == TokenKind.BITOR) {
+                    pattern.bitOrPosVector.add(lastToken.Begin())
+                }
+                pattern.types.add(ParseType())
+            } while (Skip(TokenKind.BITOR))
+            if (!pattern.types.isEmpty()) {
+                pattern.end = pattern.types[pattern.types.size - 1].end
+            }
             return pattern
         }
         let token = Peek()
@@ -1109,7 +1114,15 @@ extend ParserImpl {
             pattern.patternPos = wildcard.begin
             pattern.colonPos = lastToken.Begin()
             pattern.begin = wildcard.begin
-            ParseTypeAlternatives(pattern)
+            do {
+                if (lastToken.kind == TokenKind.BITOR) {
+                    pattern.bitOrPosVector.add(lastToken.Begin())
+                }
+                pattern.types.add(ParseType())
+            } while (Skip(TokenKind.BITOR))
+            if (!pattern.types.isEmpty()) {
+                pattern.end = pattern.types[pattern.types.size - 1].end
+            }
             return pattern
         }
         if (SeeingIdentifierLike()) {
@@ -1127,7 +1140,15 @@ extend ParserImpl {
                 diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected ':' in handle pattern")
                 pattern.isBroken = true
             }
-            ParseTypeAlternatives(pattern)
+            do {
+                if (lastToken.kind == TokenKind.BITOR) {
+                    pattern.bitOrPosVector.add(lastToken.Begin())
+                }
+                pattern.types.add(ParseType())
+            } while (Skip(TokenKind.BITOR))
+            if (!pattern.types.isEmpty()) {
+                pattern.end = pattern.types[pattern.types.size - 1].end
+            }
             return pattern
         }
         let token = Peek()

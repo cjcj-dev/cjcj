@@ -8,7 +8,7 @@ public import cangjie_compiler::ast.{
 }
 public import cangjie_compiler::ast.{
     CommandTypePattern, ConstPattern, EnumPattern, ExceptTypePattern, InvalidPattern, Pattern, TuplePattern,
-    TypeListPattern, TypePattern, VarOrEnumPattern, VarPattern, WildcardPattern
+    TypePattern, VarOrEnumPattern, VarPattern, WildcardPattern
 }
 public import cangjie_compiler::ast.{
     ArrayExpr, ArrayLit, AssignExpr, AsExpr, BinaryExpr, Block, CallExpr, FuncArg, Expr, Handler, IfAvailableExpr,

@@ -1,6 +1,7 @@
 package cangjie_compiler::ast
 
 import std.collection.*
+import cangjie_compiler::utils.{CJC_ABORT, CJC_NULLPTR_CHECK}
 
 private func joinPatternStrings(values: ArrayList<Pattern>, delimiter: String): String {
     let parts = ArrayList<String>()
@@ -53,10 +54,8 @@ public class ConstPattern <: Pattern {
     }
 
     public override func ToString(): String {
-        if (let Some(value) <- literal) {
-            return value.ToString()
-        }
-        return ""
+        CJC_NULLPTR_CHECK(literal)
+        return literal.getOrThrow().ToString()
     }
 }
 
@@ -157,13 +156,13 @@ public class TypePattern <: Pattern {
     }
 
     public override func ToString(): String {
-        var out = if (let Some(value) <- pattern) { value.ToString() } else { "" }
-        if (let Some(value) <- typeNode) {
-            if (!out.isEmpty()) {
-                out += ": "
-            }
-            out += value.ToString()
+        CJC_NULLPTR_CHECK(pattern)
+        CJC_NULLPTR_CHECK(typeNode)
+        var out = pattern.getOrThrow().ToString()
+        if (!out.isEmpty()) {
+            out += ": "
         }
+        out += typeNode.getOrThrow().ToString()
         return out
     }
 }
@@ -183,19 +182,26 @@ public class EnumPattern <: Pattern {
     }
 
     public func GetIdentifier(): String {
-        if (let Some(expr) <- constructor) {
-            if (let Some(refExpr) <- (expr as RefExpr)) {
-                return refExpr.ref.identifier.Val()
-            }
-            if (let Some(member) <- (expr as MemberAccess)) {
-                return member.field.Val()
-            }
+        if (let None <- constructor) {
+            return ""
         }
-        return ""
+        let expr = constructor.getOrThrow()
+        match (expr.astKind) {
+            case ASTKind.REF_EXPR =>
+                let refExpr = (expr as RefExpr).getOrThrow()
+                return refExpr.ref.identifier.Val()
+            case ASTKind.MEMBER_ACCESS =>
+                let member = (expr as MemberAccess).getOrThrow()
+                return member.field.Val()
+            case _ =>
+                CJC_ABORT()
+                return ""
+        }
     }
 
     public override func ToString(): String {
-        var out = if (let Some(value) <- constructor) { value.ToString() } else { "" }
+        CJC_NULLPTR_CHECK(constructor)
+        var out = constructor.getOrThrow().ToString()
         if (!patterns.isEmpty()) {
             out += "(" + joinPatternStrings(patterns, ", ") + ")"
         }
@@ -220,17 +226,20 @@ public class VarOrEnumPattern <: Pattern {
     }
 }
 
-public open class TypeListPattern <: Pattern {
+public class ExceptTypePattern <: Pattern {
     public var pattern: Option<Pattern> = None
     public var patternPos: Position = INVALID_POSITION
     public var colonPos: Position = INVALID_POSITION
     public let types: ArrayList<Type> = ArrayList<Type>()
     public let bitOrPosVector: ArrayList<Position> = ArrayList<Position>()
 
-    public init(kind: ASTKind) { super(kind) }
+    public init() {
+        super(ASTKind.EXCEPT_TYPE_PATTERN)
+    }
 
     public override func ToString(): String {
-        var out = if (let Some(value) <- pattern) { value.ToString() } else { "" }
+        CJC_NULLPTR_CHECK(pattern)
+        var out = pattern.getOrThrow().ToString()
         if (!types.isEmpty()) {
             if (!out.isEmpty()) {
                 out += ": "
@@ -241,14 +250,26 @@ public open class TypeListPattern <: Pattern {
     }
 }
 
-public class ExceptTypePattern <: TypeListPattern {
-    public init() {
-        super(ASTKind.EXCEPT_TYPE_PATTERN)
-    }
-}
+public class CommandTypePattern <: Pattern {
+    public var pattern: Option<Pattern> = None
+    public var patternPos: Position = INVALID_POSITION
+    public var colonPos: Position = INVALID_POSITION
+    public let types: ArrayList<Type> = ArrayList<Type>()
+    public let bitOrPosVector: ArrayList<Position> = ArrayList<Position>()
 
-public class CommandTypePattern <: TypeListPattern {
     public init() {
         super(ASTKind.COMMAND_TYPE_PATTERN)
+    }
+
+    public override func ToString(): String {
+        CJC_NULLPTR_CHECK(pattern)
+        var out = pattern.getOrThrow().ToString()
+        if (!types.isEmpty()) {
+            if (!out.isEmpty()) {
+                out += ": "
+            }
+            out += joinPatternTypeStrings(types, " | ")
+        }
+        return out
     }
 }
