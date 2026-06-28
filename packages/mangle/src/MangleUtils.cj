@@ -1,8 +1,8 @@
 package cangjie_compiler::mangle
 
 import std.collection.*
-import std.convert.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::utils.Stoi
 
 public let MANGLE_CANGJIE_PREFIX: String = "_C"
 public let MANGLE_NESTED_PREFIX: String = "N"
@@ -70,9 +70,6 @@ public func MangleName(str: String): String {
 }
 
 public func ReplaceSubstring(str: String, from: String, to: String): String {
-    if (from.isEmpty()) {
-        return str
-    }
     var out = str
     var found = out.indexOf(from)
     while (let Some(pos) <- found) {
@@ -193,25 +190,14 @@ public func GetOptPkgName(pkgName: String): String {
     return MangleName(pkgName)
 }
 
-private func parseDecimal(decimal: String): Option<Int64> {
-    if (decimal.isEmpty()) {
-        return None
-    }
-    for (ch in decimal.toArray()) {
-        if (!IsDigit(ch)) {
-            return None
-        }
-    }
-    try {
-        return Int64.parse(decimal)
-    } catch (e: Exception) {
-        return None
-    }
-}
-
 public func DecimalToManglingNumber(decimal: String): String {
     let base62Chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-    if (let Some(parsed) <- parseDecimal(decimal)) {
+    for (ch in decimal.toArray()) {
+        if (!IsDigit(ch)) {
+            return ""
+        }
+    }
+    if (let Some(parsed) <- Stoi(decimal)) {
         var num = parsed - 1
         if (num < 0) {
             return MANGLE_WILDCARD_PREFIX
