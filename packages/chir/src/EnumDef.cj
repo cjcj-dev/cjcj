@@ -87,7 +87,8 @@ public class EnumDef <: CustomTypeDef {
 
     public func IsAllCtorsTrivial(): Bool {
         for (ctor in ctors) {
-            if (!ctor.payloadTypes.isEmpty()) {
+            let funcType = ctor.funcType ?? throw IllegalStateException("EnumCtorInfo requires FuncType")
+            if (funcType.GetParamTypes().size != 0) {
                 return false
             }
         }
