@@ -2,94 +2,96 @@ package cangjie_compiler::conditional_compilation
 
 import cangjie_compiler::ast.*
 
-private func EncodedField(value: String): String {
-    return value.size.toString() + ":" + value + ";"
+private func AppendCacheField(key: StringBuilder, field: String): Unit {
+    key.append(field)
+    key.append(String.fromUtf8([0u8]))
 }
 
-private func EncodedEnumField(value: Int64): String {
-    return value.toString() + ";"
+private func AppendEnumCacheField(key: StringBuilder, value: Int64): Unit {
+    key.append(value.toString())
+    key.append(String.fromUtf8([0u8]))
+}
+
+private func AppendEnumCacheField(key: StringBuilder, value: ASTKind): Unit {
+    AppendEnumCacheField(key, ASTKindIndex(value))
+}
+
+private func AppendEnumCacheField(key: StringBuilder, value: TokenKind): Unit {
+    AppendEnumCacheField(key, TokenKindIndex(value))
+}
+
+private func AppendEnumCacheField(key: StringBuilder, value: LitConstKind): Unit {
+    AppendEnumCacheField(key, LitConstKindIndex(value))
 }
 
 func MakeJudgeConditionCacheKey(condition: String, op: TokenKind, right: String): String {
-    return EncodedField(condition) + EncodedEnumField(TokenKindIndex(op)) + EncodedField(right)
-}
-
-private func LitConstKindCacheIndex(kind: LitConstKind): Int64 {
-    return match (kind) {
-        case LitConstKind.INTEGER => 0
-        case LitConstKind.RUNE_BYTE => 1
-        case LitConstKind.FLOAT => 2
-        case LitConstKind.RUNE => 3
-        case LitConstKind.STRING => 4
-        case LitConstKind.JSTRING => 5
-        case LitConstKind.BOOL => 6
-        case LitConstKind.UNIT => 7
-        case LitConstKind.NONE => 8
-    }
+    let key = StringBuilder()
+    key.append(condition)
+    key.append(String.fromUtf8([0u8]))
+    key.append(String.fromUtf8([UInt8(TokenKindIndex(op))]))
+    key.append(String.fromUtf8([0u8]))
+    key.append(right)
+    return key.toString()
 }
 
 func MakeConditionExprCacheKey(condition: Expr): Option<String> {
-    match (condition.astKind) {
-        case ASTKind.BINARY_EXPR | ASTKind.UNARY_EXPR | ASTKind.REF_EXPR | ASTKind.PAREN_EXPR =>
-            return AppendConditionExprCacheKey(condition)
-        case _ => return None
+    if (condition.astKind != ASTKind.BINARY_EXPR && condition.astKind != ASTKind.UNARY_EXPR &&
+        condition.astKind != ASTKind.REF_EXPR && condition.astKind != ASTKind.PAREN_EXPR) {
+        return None
     }
+    let key = StringBuilder()
+    if (!AppendConditionExprCacheKey(condition, key)) {
+        return None
+    }
+    return key.toString()
 }
 
-private func AppendConditionExprCacheKey(condition: Expr): Option<String> {
-    var key = EncodedEnumField(ASTKindIndex(condition.astKind))
+private func AppendConditionExprCacheKey(condition: Expr, key: StringBuilder): Bool {
+    AppendEnumCacheField(key, condition.astKind)
     if (condition.astKind == ASTKind.BINARY_EXPR) {
         if (let Some(be) <- (condition as BinaryExpr)) {
             if (let Some(left) <- be.leftExpr) {
                 if (let Some(right) <- be.rightExpr) {
-                    if (let Some(leftKey) <- AppendConditionExprCacheKey(left)) {
-                        if (let Some(rightKey) <- AppendConditionExprCacheKey(right)) {
-                            key += EncodedEnumField(TokenKindIndex(be.op)) + leftKey + rightKey
-                            return key
-                        }
-                    }
+                    AppendEnumCacheField(key, be.op)
+                    return AppendConditionExprCacheKey(left, key) && AppendConditionExprCacheKey(right, key)
                 }
             }
         }
-        return None
+        return false
     }
     if (condition.astKind == ASTKind.UNARY_EXPR) {
         if (let Some(ue) <- (condition as UnaryExpr)) {
             if (let Some(expr) <- ue.expr) {
-                if (let Some(exprKey) <- AppendConditionExprCacheKey(expr)) {
-                    key += EncodedEnumField(TokenKindIndex(ue.op)) + exprKey
-                    return key
-                }
+                AppendEnumCacheField(key, ue.op)
+                return AppendConditionExprCacheKey(expr, key)
             }
         }
-        return None
+        return false
     }
     if (condition.astKind == ASTKind.REF_EXPR) {
         if (let Some(re) <- (condition as RefExpr)) {
-            key += EncodedField(re.ref.identifier.Val())
-            return key
+            AppendCacheField(key, re.ref.identifier.Val())
+            return true
         }
-        return None
+        return false
     }
     if (condition.astKind == ASTKind.PAREN_EXPR) {
         if (let Some(pe) <- (condition as ParenExpr)) {
             if (let Some(expr) <- pe.expr) {
-                if (let Some(exprKey) <- AppendConditionExprCacheKey(expr)) {
-                    key += exprKey
-                    return key
-                }
+                return AppendConditionExprCacheKey(expr, key)
             }
         }
-        return None
+        return false
     }
     if (condition.astKind == ASTKind.LIT_CONST_EXPR) {
         if (let Some(lit) <- (condition as LitConstExpr)) {
-            let hasSIExpr = if (let Some(_) <- lit.siExpr) { "1" } else { "0" }
-            key += EncodedEnumField(LitConstKindCacheIndex(lit.kind)) + hasSIExpr + ";" +
-                EncodedField(lit.stringValue)
-            return key
+            AppendEnumCacheField(key, lit.kind)
+            key.append(if (let Some(_) <- lit.siExpr) { "1" } else { "0" })
+            key.append(String.fromUtf8([0u8]))
+            AppendCacheField(key, lit.stringValue)
+            return true
         }
-        return None
+        return false
     }
-    return None
+    return false
 }

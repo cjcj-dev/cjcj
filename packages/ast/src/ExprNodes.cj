@@ -853,7 +853,7 @@ public enum LitConstKind {
     | NONE
 }
 
-private func LitConstKindIndex(kind: LitConstKind): Int64 {
+public func LitConstKindIndex(kind: LitConstKind): Int64 {
     return match (kind) {
         case LitConstKind.INTEGER => 0
         case LitConstKind.RUNE_BYTE => 1
