@@ -1,19 +1,10 @@
 package cangjie_compiler::sema
 
 import std.collection.*
+import std.sort.*
 import cangjie_compiler::ast.*
-
-private func CollectTypeArgumentTys(refExpr: NameReferenceExpr): Option<ArrayList<Ty>> {
-    let typeArgs = ArrayList<Ty>()
-    for (typeArg in refExpr.typeArguments) {
-        if (let Some(typeArgTy) <- typeArg.GetTy()) {
-            typeArgs.add(typeArgTy)
-        } else {
-            return None
-        }
-    }
-    return typeArgs
-}
+import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
+import cangjie_compiler::basic.DiagKind as BasicDiagKind
 
 private func FirstVarDeclOrFirst(values: ArrayList<Decl>): Decl {
     for (decl in values) {
@@ -25,17 +16,17 @@ private func FirstVarDeclOrFirst(values: ArrayList<Decl>): Decl {
 }
 
 public class EnumSugarChecker {
-    private var typeManager: TypeManager
+    private var typeChecker: TypeCheckerImpl
     private var ctx: ASTContext
     private var refExpr: RefExpr
     private let enumSugarTargets: ArrayList<Decl> = ArrayList<Decl>()
     private var enumSugarTargetsFinder: EnumSugarTargetsFinder
 
-    public init(typeManager: TypeManager, ctx: ASTContext, refExpr: RefExpr) {
-        this.typeManager = typeManager
+    public init(typeChecker: TypeCheckerImpl, ctx: ASTContext, refExpr: RefExpr) {
+        this.typeChecker = typeChecker
         this.ctx = ctx
         this.refExpr = refExpr
-        this.enumSugarTargetsFinder = EnumSugarTargetsFinder(typeManager, ctx, refExpr)
+        this.enumSugarTargetsFinder = EnumSugarTargetsFinder(typeChecker.typeManager, ctx, refExpr)
     }
 
     public func Resolve(): (Bool, ArrayList<Decl>) {
@@ -50,9 +41,6 @@ public class EnumSugarChecker {
             return (true, ArrayList<Decl>())
         }
         let target = CheckEnumSugarTargets()
-        if (enumSugarTargets.isEmpty()) {
-            return (true, ArrayList<Decl>())
-        }
         ModifyTargetOfRef(refExpr, target, enumSugarTargets)
         return (true, CloneResolvedTargets())
     }
@@ -73,6 +61,24 @@ public class EnumSugarChecker {
             }
         }
         if (varDeclTargets.size > 1) {
+            if (let Some(diag) <- typeChecker.diag) {
+                let builder = diag.Diagnose(refExpr.begin, refExpr.end,
+                    BasicDiagKind.sema_multiple_constructor_in_enum,
+                    args: [BasicDiagArgument(varDeclTargets[0].identifier.Val())])
+                sort(varDeclTargets, by: { left: Decl, right: Decl =>
+                    if (left.begin < right.begin) {
+                        Ordering.LT
+                    } else if (left.begin > right.begin) {
+                        Ordering.GT
+                    } else {
+                        Ordering.EQ
+                    }
+                })
+                for (decl in varDeclTargets) {
+                    builder.AddNote(decl.begin, BasicDiagKind.sema_found_candidate_decl)
+                }
+                builder.Emit()
+            }
             refExpr.SetTy(TypeManager.GetInvalidTy())
             return false
         }
@@ -85,31 +91,27 @@ public class EnumSugarChecker {
                 enumSugarTargets.clear()
                 return
             }
-            if (let Some(typeArgs) <- CollectTypeArgumentTys(refExpr)) {
-                if (!typeManager.CheckGenericDeclInstantiation(enumDecl, typeArgs)) {
-                    enumSugarTargets.clear()
+            if (!typeChecker.CheckGenericDeclInstantiation(enumDecl, refExpr.GetTypeArgs(), refExpr)) {
+                enumSugarTargets.clear()
+                return
+            }
+            if (let Some(generic) <- enumDecl.generic) {
+                if (generic.typeParameters.size != refExpr.typeArguments.size) {
                     return
                 }
-                if (let Some(generic) <- enumDecl.generic) {
-                    if (generic.typeParameters.size != refExpr.typeArguments.size) {
-                        return
-                    }
-                    let typeMapping = TypeSubst()
-                    for (idx in 0..refExpr.typeArguments.size) {
-                        if (let Some(paramTy) <- generic.typeParameters[idx].GetTy()) {
-                            if (let Some(genericTy) <- (paramTy as GenericsTy)) {
-                                if (let Some(actualTy) <- refExpr.typeArguments[idx].GetTy()) {
-                                    typeMapping.Put(genericTy, actualTy)
-                                }
+                let typeMapping = TypeSubst()
+                for (idx in 0..refExpr.typeArguments.size) {
+                    if (let Some(paramTy) <- generic.typeParameters[idx].GetTy()) {
+                        if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                            if (let Some(actualTy) <- refExpr.typeArguments[idx].GetTy()) {
+                                typeMapping.Put(genericTy, actualTy)
                             }
                         }
                     }
-                    if (let Some(currentTy) <- refExpr.GetTy()) {
-                        refExpr.SetTy(typeManager.GetInstantiatedTy(currentTy, typeMapping))
-                    }
                 }
-            } else {
-                enumSugarTargets.clear()
+                if (let Some(currentTy) <- refExpr.GetTy()) {
+                    refExpr.SetTy(typeChecker.typeManager.GetInstantiatedTy(currentTy, typeMapping))
+                }
             }
         } else {
             enumSugarTargets.clear()
@@ -122,6 +124,11 @@ public class EnumSugarChecker {
                 if (enumSugarTargets[0].astKind == ASTKind.VAR_DECL) {
                     let referenceNeedTypeInfer = !ctx.HasTargetTy(refExpr) && !refExpr.isInFlowExpr
                     if (referenceNeedTypeInfer && refExpr.OuterArgSize() == 0) {
+                        if (let Some(diag) <- typeChecker.diag) {
+                            let builder = diag.Diagnose(refExpr.begin, refExpr.end,
+                                BasicDiagKind.sema_generic_type_without_type_argument)
+                            builder.Emit()
+                        }
                         enumSugarTargets.clear()
                     }
                 }

@@ -239,6 +239,19 @@ private func emitGenericConstraintMismatch(diag: Option<BasicDiagnosticEngine>, 
     }
 }
 
+private func getGenericConstraintDiagNode(checkNode: Node, typeNodes: ArrayList<Type>, instTy: Ty): Node {
+    for (typeNode in typeNodes) {
+        if (!typeNode.TestAttr(Attribute.COMPILER_ADD)) {
+            if (let Some(typeNodeTy) <- typeNode.GetTy()) {
+                if (SameTy(typeNodeTy, instTy)) {
+                    return typeNode
+                }
+            }
+        }
+    }
+    return checkNode
+}
+
 private func collectStaticMembers(decl: InheritableDecl, out: ArrayList<Decl>): Unit {
     for (member in decl.GetMemberDecls()) {
         if (member.IsFuncOrProp() && member.TestAttr(Attribute.STATIC)) {
@@ -663,6 +676,72 @@ extend TypeCheckerImpl {
     public func CheckGenericDeclInstantiation(decl: Decl, typeArgs: ArrayList<Ty>, checkNode: Node): Bool {
         let declOpt: Option<Decl> = decl
         return CheckGenericDeclInstantiation(declOpt, typeArgs, checkNode)
+    }
+
+    public func CheckGenericDeclInstantiation(decl: Decl, typeNodes: ArrayList<Type>, checkNode: Node): Bool {
+        let typeArgs = ArrayList<Ty>()
+        for (typeNode in typeNodes) {
+            if (let Some(ty) <- typeNode.GetTy()) {
+                typeArgs.add(ty)
+            } else {
+                emitGenericArgumentNoMatch(diag, checkNode)
+                return false
+            }
+        }
+        if (!Ty.IsTyCorrect(decl.GetTy())) {
+            return false
+        }
+        let genericParams = GetDeclTypeParams(decl)
+        if (typeArgs.isEmpty() || genericParams.size != typeArgs.size) {
+            emitGenericArgumentNoMatch(diag, checkNode)
+            return false
+        }
+        let genericDecl = decl.GetGeneric()
+        if (let None <- genericDecl) {
+            return true
+        }
+        let instantiateMap = TypeSubst()
+        if (let Some(memberAccess) <- (checkNode as MemberAccess)) {
+            mergeTypeSubst(instantiateMap, generateTypeMappingForMemberAccess(typeManager, memberAccess, decl))
+        }
+        mergeTypeSubst(instantiateMap, GenerateTypeMapping(decl, typeArgs))
+        for (constraint in genericDecl.getOrThrow().genericConstraints) {
+            if (let None <- constraint.refType) {
+                return false
+            }
+            let refType = constraint.refType.getOrThrow()
+            if (!Ty.IsTyCorrect(refType.GetTy())) {
+                return false
+            }
+            let instTy = typeManager.GetInstantiatedTy(refType.GetTy().getOrThrow(), instantiateMap)
+            if (!Ty.IsTyCorrect(instTy)) {
+                return false
+            }
+            if (let Some(genTy) <- (instTy as GenericsTy)) {
+                if (!genTy.isUpperBoundLegal) {
+                    continue
+                }
+            }
+            for (upperBound in constraint.upperBounds) {
+                if (!Ty.IsTyCorrect(upperBound.GetTy())) {
+                    return false
+                }
+                let upperBoundTy = typeManager.GetInstantiatedTy(upperBound.GetTy().getOrThrow(), instantiateMap)
+                if (!Ty.IsTyCorrect(upperBoundTy)) {
+                    return false
+                }
+                let sameTyButCType = SameTy(instTy, upperBoundTy) && instTy.IsCType()
+                if (!typeManager.IsSubtype(instTy, upperBoundTy, implicitBoxed: true, allowOptionBox: false) ||
+                    sameTyButCType) {
+                    if (let Some(declTy) <- decl.GetTy()) {
+                        let diagNode = getGenericConstraintDiagNode(checkNode, typeNodes, instTy)
+                        emitGenericConstraintMismatch(diag, diagNode, declTy, instTy, upperBoundTy, constraint)
+                    }
+                    return false
+                }
+            }
+        }
+        return true
     }
 
     public func CheckGenericExpr(expr: Expr): Unit {

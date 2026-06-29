@@ -3995,18 +3995,17 @@ public class TypeChecker {
             }
         }
         if (!refExpr.TestAttr(Attribute.MACRO_INVOKE_BODY) && typeCheckExprAllMacroFuncDecls(targets)) {
-            let checker = EnumSugarChecker(impl.typeManager, ctx, refExpr)
+            let checker = EnumSugarChecker(impl, ctx, refExpr)
             let (resolved, resolvedTargets) = checker.Resolve()
             if (resolved) {
-                targets.clear()
-                for (target in resolvedTargets) {
-                    targets.add(target)
-                }
-                if (targets.isEmpty()) {
+                if (resolvedTargets.isEmpty()) {
                     refExpr.SetTy(TypeManager.GetInvalidTy())
-                    refExpr.ref.targets.clear()
-                    return
                 }
+                return
+            }
+            targets.clear()
+            for (target in resolvedTargets) {
+                targets.add(target)
             }
         }
         if (targets.isEmpty()) {

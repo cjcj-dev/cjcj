@@ -427,7 +427,3 @@ public func DesugarTryWithResourcesExpr(typeManager: TypeManager, pkg: Package, 
         tryExpr.finallyBlock = None
     }
 }
-
-public func SelfhostPortStatus_Desugar_AfterTypeCheck_TryExpr(): Bool {
-    return true
-}

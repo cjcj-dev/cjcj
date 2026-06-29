@@ -212,7 +212,3 @@ public func GetSemanticUsage(typeManager: TypeManager, pkgs: ArrayList<Package>)
     let collector = SemanticUsageCollector(typeManager, pkgs)
     return collector.CollectInfoUsages()
 }
-
-public func SelfhostPortStatus_Desugar_AfterTypeCheck_SemanticUsageCollector(): Bool {
-    return false
-}
