@@ -4,6 +4,8 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.Position as BasicPosition
+import cangjie_compiler::basic.Range as BasicRange
 
 public type ConstPatternExprChecker = (Ty, Expr) -> Bool
 
@@ -593,7 +595,8 @@ public func ChkConstPattern(typeManager: TypeManager, ctx: ASTContext, target: T
     return ChkOpOverloadForConstPattern(typeManager, ctx, target, pattern, exprChecker: exprChecker)
 }
 
-public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty, pattern: TypePattern): Bool {
+public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty, pattern: TypePattern,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- pattern.pattern) {
         return InvalidPatternTy(pattern)
     }
@@ -613,10 +616,16 @@ public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
         pattern.needRuntimeTypeCheck = IsNeedRuntimeCheckForPattern(typeManager, target, patternTy)
         pattern.matchBeforeRuntime = false
         if (IsSubtypeBoxed(typeManager, target, patternTy)) {
-            pattern.EnableAttr(Attribute.UNREACHABLE)
+            if (let Some(diagValue) <- diag) {
+                let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_unreachable_pattern,
+                    BasicRange(BasicPosition(pattern.begin.fileID, pattern.begin.line, pattern.begin.column),
+                        BasicPosition(pattern.end.fileID, pattern.end.line, pattern.end.column)))
+                builder.AddNote("the selector is of type '" + target.String() +
+                    "', which is not a subtype of '" + patternTy.String())
+            }
         }
     }
-    if (!ChkPattern(typeManager, ctx, patternTy, pattern.pattern.getOrThrow())) {
+    if (!ChkPattern(typeManager, ctx, patternTy, pattern.pattern.getOrThrow(), diag: diag)) {
         return InvalidPatternTy(pattern)
     }
     pattern.SetTy(patternTy)
@@ -652,14 +661,15 @@ public func ChkVarPattern(ctx: ASTContext, target: Ty, pattern: VarPattern): Boo
 
 public func IsFuncTyEnumPatternMatched(typeManager: TypeManager, ctx: ASTContext,
     target: Ty, funcTy: FuncTy, pattern: EnumPattern,
-    exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
+    exprChecker!: Option<ConstPatternExprChecker> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (funcTy.paramTys.size != pattern.patterns.size) {
         return false
     }
     var idx: Int64 = 0
     while (idx < pattern.patterns.size) {
         if (!ChkPattern(typeManager, ctx, funcTy.paramTys[idx], pattern.patterns[idx],
-            exprChecker: exprChecker)) {
+            exprChecker: exprChecker, diag: diag)) {
             return false
         }
         idx++
@@ -668,7 +678,8 @@ public func IsFuncTyEnumPatternMatched(typeManager: TypeManager, ctx: ASTContext
 }
 
 public func ChkEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty, pattern: EnumPattern,
-    exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
+    exprChecker!: Option<ConstPatternExprChecker> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     var mayMatch = false
     let maybeInferred = typeManager.TryGreedySubst(target)
     if (let Some(enumTy) <- (maybeInferred as EnumTy)) {
@@ -705,7 +716,7 @@ public func ChkEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
             }
             if (let Some(funcTy) <- ((constructor.GetTy() ?? TypeManager.GetInvalidTy()) as FuncTy)) {
                 if (IsFuncTyEnumPatternMatched(typeManager, ctx, target, funcTy, pattern,
-                    exprChecker: exprChecker)) {
+                    exprChecker: exprChecker, diag: diag)) {
                     pattern.SetTy(funcTy.retTy)
                     return true
                 }
@@ -744,9 +755,10 @@ private func VarOrEnumPatternToVarPattern(pattern: VarOrEnumPattern): VarPattern
 }
 
 public func ChkVarOrEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
-    pattern: VarOrEnumPattern, exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
+    pattern: VarOrEnumPattern, exprChecker!: Option<ConstPatternExprChecker> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let Some(inner) <- pattern.pattern) {
-        if (!ChkPattern(typeManager, ctx, target, inner, exprChecker: exprChecker)) {
+        if (!ChkPattern(typeManager, ctx, target, inner, exprChecker: exprChecker, diag: diag)) {
             return InvalidPatternTy(pattern)
         }
         pattern.SetTy(target)
@@ -755,7 +767,7 @@ public func ChkVarOrEnumPattern(typeManager: TypeManager, ctx: ASTContext, targe
     if (ctx.IsEnumConstructor(pattern.identifier.Val())) {
         let enumPattern = VarOrEnumPatternToEnumPattern(pattern)
         pattern.pattern = enumPattern
-        if (!ChkPattern(typeManager, ctx, target, enumPattern, exprChecker: exprChecker)) {
+        if (!ChkPattern(typeManager, ctx, target, enumPattern, exprChecker: exprChecker, diag: diag)) {
             return InvalidPatternTy(pattern)
         }
         if (let Some(constructor) <- enumPattern.constructor) {
@@ -767,7 +779,7 @@ public func ChkVarOrEnumPattern(typeManager: TypeManager, ctx: ASTContext, targe
         if (let Some(varDecl) <- varPattern.varDecl) {
             ctx.AddDeclName(Names(pattern.identifier.Val(), varDecl.scopeName), varDecl)
         }
-        if (!ChkPattern(typeManager, ctx, target, varPattern, exprChecker: exprChecker)) {
+        if (!ChkPattern(typeManager, ctx, target, varPattern, exprChecker: exprChecker, diag: diag)) {
             if (let Some(varDecl) <- varPattern.varDecl) {
                 ctx.RemoveDeclByName(Names(pattern.identifier.Val(), varDecl.scopeName), varDecl)
             }
@@ -780,7 +792,8 @@ public func ChkVarOrEnumPattern(typeManager: TypeManager, ctx: ASTContext, targe
 
 public func ChkTuplePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
     pattern: TuplePattern, isPatternInMatch!: Bool = true,
-    exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
+    exprChecker!: Option<ConstPatternExprChecker> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let _ = isPatternInMatch
     if (let Some(tupleTy) <- (target as TupleTy)) {
         if (tupleTy.typeArgs.size != pattern.patterns.size) {
@@ -789,7 +802,7 @@ public func ChkTuplePattern(typeManager: TypeManager, ctx: ASTContext, target: T
         var idx: Int64 = 0
         while (idx < pattern.patterns.size) {
             if (!ChkPattern(typeManager, ctx, tupleTy.typeArgs[idx], pattern.patterns[idx],
-                exprChecker: exprChecker)) {
+                exprChecker: exprChecker, diag: diag)) {
                 return InvalidPatternTy(pattern)
             }
             idx++
@@ -801,7 +814,8 @@ public func ChkTuplePattern(typeManager: TypeManager, ctx: ASTContext, target: T
 }
 
 public func ChkPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
-    pattern: Pattern, isPatternInMatch!: Bool = true, exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
+    pattern: Pattern, isPatternInMatch!: Bool = true, exprChecker!: Option<ConstPatternExprChecker> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let Some(wildcard) <- (pattern as WildcardPattern)) {
         return ChkWildcardPattern(target, wildcard)
     }
@@ -809,27 +823,27 @@ public func ChkPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
         return ChkConstPattern(typeManager, ctx, target, constPattern, exprChecker: exprChecker)
     }
     if (let Some(typePattern) <- (pattern as TypePattern)) {
-        return ChkTypePattern(typeManager, ctx, target, typePattern)
+        return ChkTypePattern(typeManager, ctx, target, typePattern, diag: diag)
     }
     if (let Some(varPattern) <- (pattern as VarPattern)) {
         return ChkVarPattern(ctx, target, varPattern)
     }
     if (let Some(enumPattern) <- (pattern as EnumPattern)) {
-        return ChkEnumPattern(typeManager, ctx, target, enumPattern, exprChecker: exprChecker)
+        return ChkEnumPattern(typeManager, ctx, target, enumPattern, exprChecker: exprChecker, diag: diag)
     }
     if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
-        return ChkVarOrEnumPattern(typeManager, ctx, target, varOrEnum, exprChecker: exprChecker)
+        return ChkVarOrEnumPattern(typeManager, ctx, target, varOrEnum, exprChecker: exprChecker, diag: diag)
     }
     if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
         return ChkTuplePattern(typeManager, ctx, target, tuplePattern, isPatternInMatch: isPatternInMatch,
-            exprChecker: exprChecker)
+            exprChecker: exprChecker, diag: diag)
     }
     return InvalidPatternTy(pattern)
 }
 
 public func ChkPatternWithDiag(diag: BasicDiagnosticEngine, typeManager: TypeManager, ctx: ASTContext,
     target: Ty, pattern: Pattern, isPatternInMatch!: Bool = true): Bool {
-    let ok = ChkPattern(typeManager, ctx, target, pattern, isPatternInMatch: isPatternInMatch)
+    let ok = ChkPattern(typeManager, ctx, target, pattern, isPatternInMatch: isPatternInMatch, diag: Some(diag))
     if (!ok && pattern.ShouldDiagnose()) {
         SemaDiag(diag, BasicDiagKindRefactor.sema_mismatched_types, pattern)
     }
@@ -873,8 +887,4 @@ public func IsIrrefutablePattern(pattern: Pattern): Bool {
         return Ty.IsTyCorrect(pattern.GetTy())
     }
     return false
-}
-
-public func SelfhostPortStatus_TypeCheckPattern(): Bool {
-    return true
 }

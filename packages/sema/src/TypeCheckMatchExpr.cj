@@ -207,7 +207,8 @@ public func ChkMatchCasePatterns(typeManager: TypeManager, ctx: ASTContext, targ
     }
     var ok = true
     for (pattern in mc.patterns) {
-        if (!ChkPattern(typeManager, ctx, target, pattern, isPatternInMatch: true, exprChecker: exprChecker)) {
+        if (!ChkPattern(typeManager, ctx, target, pattern, isPatternInMatch: true, exprChecker: exprChecker,
+            diag: diag)) {
             ok = false
         }
     }

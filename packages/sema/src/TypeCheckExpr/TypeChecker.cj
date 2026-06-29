@@ -1868,7 +1868,8 @@ public class TypeChecker {
         }
         if (let Some(pattern) <- vpd.irrefutablePattern) {
             if (Ty.IsTyCorrect(declTy)) {
-                let ok = ChkPattern(impl.typeManager, ctx, declTy, pattern, isPatternInMatch: false)
+                let ok = ChkPattern(impl.typeManager, ctx, declTy, pattern, isPatternInMatch: false,
+                    diag: impl.diag)
                 if (ok && IsIrrefutablePattern(pattern)) {
                     BindPatternBindings(ctx, pattern)
                 }
@@ -2626,6 +2627,7 @@ public class TypeChecker {
         var subpatternsGood = true
         for (pattern in letPattern.patterns) {
             subpatternsGood = ChkPattern(impl.typeManager, ctx, selectorTy, pattern, isPatternInMatch: false,
+                diag: impl.diag,
                 exprChecker: Some({ target: Ty, expr: Expr =>
                     Check(ctx, target, expr)
                 })) && subpatternsGood
@@ -2992,7 +2994,8 @@ public class TypeChecker {
             isWellTyped = false
         }
         if (let Some(pattern) <- forInExpr.pattern) {
-            let patternOk = ChkPattern(impl.typeManager, ctx, inPatternTy, pattern, isPatternInMatch: false)
+            let patternOk = ChkPattern(impl.typeManager, ctx, inPatternTy, pattern, isPatternInMatch: false,
+                diag: impl.diag)
             isWellTyped = patternOk && isWellTyped
             if (patternOk) {
                 CollectPatternBinding(pattern, boundDecls)
@@ -3043,7 +3046,8 @@ public class TypeChecker {
             }
             if (let Some(pattern) <- forInExpr.pattern) {
                 if (Ty.IsTyCorrect(elementTy)) {
-                    let _ = ChkPattern(impl.typeManager, ctx, elementTy, pattern, isPatternInMatch: false)
+                    let _ = ChkPattern(impl.typeManager, ctx, elementTy, pattern, isPatternInMatch: false,
+                        diag: impl.diag)
                     CollectPatternBinding(pattern, boundDecls)
                     for (decl in boundDecls) {
                         BindLocalDeclIfAbsent(ctx, decl)
@@ -3409,7 +3413,7 @@ public class TypeChecker {
             }
             if (let Some(inner) <- exceptPattern.pattern) {
                 let target = CatchPatternBindingTargetTy(ctx, exceptPattern)
-                let _ = ChkPattern(impl.typeManager, ctx, target, inner, isPatternInMatch: false)
+                let _ = ChkPattern(impl.typeManager, ctx, target, inner, isPatternInMatch: false, diag: impl.diag)
             }
             return
         }
@@ -3420,7 +3424,7 @@ public class TypeChecker {
             }
         }
         let catchTarget = LookupCoreTy(ctx, "Exception") ?? impl.typeManager.GetAnyTy()
-        let _ = ChkPattern(impl.typeManager, ctx, catchTarget, pattern, isPatternInMatch: false)
+        let _ = ChkPattern(impl.typeManager, ctx, catchTarget, pattern, isPatternInMatch: false, diag: impl.diag)
     }
 
     private func CatchPatternBindingTargetTy(ctx: ASTContext, pattern: ExceptTypePattern): Ty {
