@@ -280,11 +280,6 @@ private func byteSwapUTF32(value: UTF32): UTF32 {
         ((value & 0x00ff0000u32) >> 8) | ((value & 0xff000000u32) >> 24)
 }
 
-private func loadNativeUTF32(bytes: Array<UTF8>, start: Int64): UTF32 {
-    return UInt32(bytes[start]) | (UInt32(bytes[start + 1]) << 8) |
-        (UInt32(bytes[start + 2]) << 16) | (UInt32(bytes[start + 3]) << 24)
-}
-
 private func normalizedUTF32Scalars(src: Array<UTF32>): Array<UTF32> {
     if (src.isEmpty()) {
         return src
@@ -332,10 +327,21 @@ public func ConvertUTF32ToUTF8String(src: Array<UTF8>): Option<String> {
         return ""
     }
     let scalars = ArrayList<UTF32>()
-    var index: Int64 = 0
-    while (index < src.size) {
-        scalars.add(loadNativeUTF32(src, index))
-        index += 4
+    try (buffer = LibC.malloc<UTF8>(count: src.size).asResource()) {
+        CJC_ASSERT(!buffer.value.isNull())
+        unsafe {
+            var byteIndex: Int64 = 0
+            while (byteIndex < src.size) {
+                (buffer.value + byteIndex).write(src[byteIndex])
+                byteIndex++
+            }
+            let scalarPtr = CPointer<UTF32>(buffer.value)
+            var scalarIndex: Int64 = 0
+            while (scalarIndex < src.size / 4) {
+                scalars.add((scalarPtr + scalarIndex).read())
+                scalarIndex++
+            }
+        }
     }
     return convertUTF32ScalarsToUTF8String(normalizedUTF32Scalars(scalars.toArray()))
 }
