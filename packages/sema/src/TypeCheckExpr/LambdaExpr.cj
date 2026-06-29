@@ -4,10 +4,6 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 
-public func SelfhostPortStatus_TypeCheckExpr_LambdaExpr(): Bool {
-    return true
-}
-
 private func LambdaInvalid(le: LambdaExpr): Ty {
     return TcInvalid(le)
 }
