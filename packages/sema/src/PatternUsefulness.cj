@@ -7,6 +7,7 @@ import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT}
 
 private func ToBasicPosition(pos: Position): BasicPosition {
     return BasicPosition(pos.fileID, pos.line, pos.column)
@@ -503,36 +504,32 @@ private class PatternStack {
 
     public func Specialize(ctor: PatternCtor): PatternStack {
         let newStack = ArrayList<DestructedPattern>()
-        if (!stack.isEmpty()) {
-            var idx: Int64 = 0
-            while (idx < stack.size - 1) {
-                newStack.add(stack[idx])
-                idx++
-            }
-            let headSub = Head().Specialize(ctor)
-            var subIdx = headSub.size - 1
-            while (subIdx >= 0) {
-                newStack.add(headSub[subIdx])
-                subIdx--
-            }
+        var idx: Int64 = 0
+        while (idx < stack.size - 1) {
+            newStack.add(stack[idx])
+            idx++
+        }
+        let headSub = Head().Specialize(ctor)
+        var subIdx = headSub.size - 1
+        while (subIdx >= 0) {
+            newStack.add(headSub[subIdx])
+            subIdx--
         }
         return PatternStack(newStack)
     }
 
     public func Apply(ctor: PatternCtor, ty: Ty): PatternStack {
         let subPatterns = ArrayList<DestructedPattern>()
+        CJC_ASSERT(Size() >= ctor.arity)
         var taken: Int64 = 0
         var readIdx = stack.size - 1
-        while (taken < ctor.arity && readIdx >= 0) {
+        while (taken < ctor.arity) {
             subPatterns.add(stack[readIdx])
             readIdx--
             taken++
         }
         let newStack = ArrayList<DestructedPattern>()
-        var keepCount = stack.size - ctor.arity
-        if (keepCount < 0) {
-            keepCount = 0
-        }
+        let keepCount = stack.size - ctor.arity
         var idx: Int64 = 0
         while (idx < keepCount) {
             newStack.add(stack[idx])
@@ -543,10 +540,9 @@ private class PatternStack {
     }
 
     public func ExpandOr(): ArrayList<PatternStack> {
+        CJC_ASSERT(!stack.isEmpty())
+        CJC_ASSERT(Head().ctor.kind == PatternCtorKind.OR)
         let results = ArrayList<PatternStack>()
-        if (IsEmpty() || Head().ctor.kind != PatternCtorKind.OR) {
-            return results
-        }
         for (newHead in Head().subPatterns) {
             let newStack = ArrayList<DestructedPattern>()
             var idx: Int64 = 0
@@ -604,7 +600,8 @@ private class PatternMatrix {
     public func Specialize(typeManager: TypeManager, ctor: PatternCtor): PatternMatrix {
         let newMatrix = PatternMatrix()
         for (row in rows) {
-            if (!row.IsEmpty() && ctor.IsCoveredBy(typeManager, row.Head().ctor)) {
+            CJC_ASSERT(!row.IsEmpty())
+            if (ctor.IsCoveredBy(typeManager, row.Head().ctor)) {
                 newMatrix.rows.add(row.Specialize(ctor))
             }
         }
@@ -922,6 +919,7 @@ public func CheckMatchExprHasSelectorExhaustivenessAndReachability(
     let checker = UsefulnessChecker(diag, typeManager)
     for (mc in me.matchCases) {
         if (mc.patterns.isEmpty()) {
+            CJC_ABORT()
             continue
         }
         for (pattern in mc.patterns) {
@@ -952,13 +950,8 @@ public func CheckMatchExprHasSelectorExhaustivenessAndReachability(
         MakeBasicRange(selector.begin, selector.end))
     builder.AddMainHintArguments([selectorTy.String()])
     for (witness in witnesses) {
-        if (witness.Size() == 1) {
-            builder.AddNote(witness.Head().ToString() + " is not covered")
-        }
+        CJC_ASSERT(witness.Size() == 1)
+        builder.AddNote(witness.Head().ToString() + " is not covered")
     }
     return false
-}
-
-public func SelfhostPortStatus_PatternUsefulness(): Bool {
-    return true
 }
