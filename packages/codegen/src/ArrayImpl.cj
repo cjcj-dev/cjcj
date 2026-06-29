@@ -14,6 +14,7 @@ import cangjie_compiler::chir.StoreElementByName
 import cangjie_compiler::chir.StoreElementRef
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
+import cangjie_compiler::utils.CJC_ASSERT
 
 private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
 private let LLVM_ARRAY_TYPE_KIND: Int32 = 11
@@ -626,6 +627,8 @@ public func GenerateGetElementRef(irBuilder: IRBuilder2, chirExpr: Expression): 
 public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(storeElementRef) <- (chirExpr as StoreElementRef)) {
         let path = storeElementRef.GetPath()
+        let locationTy = storeElementRef.GetLocation().GetType()
+        CJC_ASSERT(locationTy.isSome() && locationTy.getOrThrow().IsRef() && !path.isEmpty())
         if (path.isEmpty()) {
             return LLVMNullValue()
         }
@@ -635,7 +638,6 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
         let storeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeElementRef.GetValue())
         let storePlace = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeElementRef.GetLocation())
         let storeIndices = BuildStaticElementIndices(irBuilder, path)
-        let locationTy = storeElementRef.GetLocation().GetType()
         let storeAddr = if (let Some(knownLocationTy) <- locationTy) {
             CreateElementAddressWithKnownBaseType(irBuilder, storePlace, storeIndices, knownLocationTy, "store.elem.addr")
         } else {
