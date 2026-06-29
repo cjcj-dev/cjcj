@@ -3,6 +3,7 @@ package cangjie_compiler::sema.Desugar.AfterTypeCheck
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
+import cangjie_compiler::utils.CJC_ASSERT
 
 private let CORE_PACKAGE_NAME: String = "std.core"
 private let AST_PACKAGE_NAME: String = "std.ast"
@@ -150,7 +151,7 @@ private func CreatePosArg(kind: TypeKind, value: Int64): FuncArg {
     return CreateFuncArg(CreateLitConstExpr(LitConstKind.INTEGER, "${value}", ty))
 }
 
-public func DesugarTokenCallExpr(expr: CallExpr): Unit {
+public func DesugarTokenCallExpr(ctx: ASTContext, expr: CallExpr, synthesizer: (ASTContext, SynPos, Node) -> Ty): Unit {
     if (!IsStdAstTokenCall(expr)) {
         return
     }
@@ -172,11 +173,10 @@ public func DesugarTokenCallExpr(expr: CallExpr): Unit {
         refreshExpr.begin = expr.begin
         refreshExpr.end = expr.end
         let refreshCall = CreateCallExpr(refreshExpr, args)
-        if (let Some(ty) <- expr.GetTy()) {
-            refreshCall.SetTy(ty)
-        }
         CopyBasicInfo(expr, refreshCall)
         AddCurFile(refreshCall, file: expr.curFile)
+        let updateTy = synthesizer(ctx, SynPos.EXPR_ARG, refreshCall)
+        CJC_ASSERT(Ty.IsTyCorrect(Some(updateTy)))
         expr.desugarExpr = refreshCall
     }
 }

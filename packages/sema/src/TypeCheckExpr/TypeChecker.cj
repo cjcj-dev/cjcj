@@ -10,6 +10,7 @@ import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::option.IsUnsafeBackend as OptionIsUnsafeBackend
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.*
+import cangjie_compiler::sema.Desugar.AfterTypeCheck.*
 import cangjie_compiler::sema.FFI.*
 import cangjie_compiler::sema.InheritanceChecker.*
 import cangjie_compiler::sema.LegalityOfUsage.*
@@ -1243,7 +1244,9 @@ public class TypeChecker {
     private func SynthesizeWithoutRecover(ctx: ASTContext, pos: SynPos, node: Node): Ty {
         ctx.ClearTypeCheckCache(node)
         ctx.SkipSynForCorrectTyRec(node)
-        return SynthesizeNode(ctx, pos, node)
+        let ret = SynthesizeNode(ctx, pos, node)
+        DesugarForPropDecl(impl.typeManager, node)
+        return ret
     }
 
     private func SynthesizeNode(ctx: ASTContext, node: Node): Ty {

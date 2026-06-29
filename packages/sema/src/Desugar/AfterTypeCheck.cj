@@ -29,7 +29,11 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
             case ASTKind.CALL_EXPR =>
                 if (let Some(callExpr) <- (node as CallExpr)) {
                     DesugarIntrinsicCallExpr(callExpr)
-                    DesugarTokenCallExpr(callExpr)
+                    if (let Some(ctx) <- context) {
+                        if (let Some(synthesize) <- synthesizer) {
+                            DesugarTokenCallExpr(ctx, callExpr, synthesize)
+                        }
+                    }
                 }
             case ASTKind.BINARY_EXPR =>
                 if (let Some(binaryExpr) <- (node as BinaryExpr)) {

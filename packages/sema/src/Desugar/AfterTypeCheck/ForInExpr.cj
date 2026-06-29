@@ -983,7 +983,7 @@ public func ReArrangeForInExpr(typeManager: TypeManager, forInExpr: ForInExpr,
             if (inTy.IsString()) {
                 ReArrangeForInStringExpr(typeManager, forInExpr, context, synthesizer)
             } else {
-                DesugarForInExpr(typeManager, forInExpr, context: context, synthesizer: synthesizer)
+                DesugarForInExpr(typeManager, forInExpr, context: context, synthesizer: synthesizer, diag: diag)
             }
         }
     }
@@ -991,8 +991,10 @@ public func ReArrangeForInExpr(typeManager: TypeManager, forInExpr: ForInExpr,
 
 public func DesugarForInExpr(typeManager: TypeManager, forInExpr: ForInExpr,
     context!: Option<ASTContext> = None,
-    synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None): Unit {
-    if (!Ty.IsTyCorrect(forInExpr.GetTy())) {
+    synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Unit {
+    if (!Ty.IsTyCorrect(forInExpr.GetTy()) ||
+        (if (let Some(diagEngine) <- diag) { diagEngine.GetErrorCount() != 0u64 } else { false })) {
         return
     }
     if (let Some(_) <- forInExpr.desugarExpr) {
@@ -1019,8 +1021,4 @@ public func DesugarForInExpr(typeManager: TypeManager, forInExpr: ForInExpr,
             }
         }
     }
-}
-
-public func SelfhostPortStatus_Desugar_AfterTypeCheck_ForInExpr(): Bool {
-    return true
 }
