@@ -423,7 +423,3 @@ public func CheckLegalityOfUsage(pkg: Package): LegalityOfUsageResult {
     AppendSubscriptIssues(result.subscriptLegalityIssues, CheckSubscriptLegality(pkg))
     return result
 }
-
-public func SelfhostPortStatus_LegalityOfUsage_LegalityOfUsage(): Bool {
-    return true
-}

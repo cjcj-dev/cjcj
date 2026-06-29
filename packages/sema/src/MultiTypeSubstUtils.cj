@@ -2,6 +2,7 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::utils.CJC_NULLPTR_CHECK
 
 private func containsTy(values: ArrayList<Ty>, ty: Ty): Bool {
     for (value in values) {
@@ -272,17 +273,11 @@ private func genericParamType(param: GenericParamDecl): Option<GenericsTy> {
 public func MultiTypeSubstToTypeSubst(mts: MultiTypeSubst): TypeSubst {
     let out = TypeSubst()
     for (entry in mts.entries) {
-        if (entry.tys.values.isEmpty()) {
-            continue
-        }
         var chosen = entry.tys.values[0]
         if (entry.tys.values.size > 1) {
-            for (candidate in entry.tys.values) {
-                if (!SameTy(candidate, entry.tyVar)) {
-                    chosen = candidate
-                    break
-                }
-            }
+            let candidates = entry.tys.Clone()
+            let _ = candidates.Remove(entry.tyVar)
+            chosen = candidates.values[0]
         }
         out.Put(entry.tyVar, chosen)
     }
@@ -291,27 +286,17 @@ public func MultiTypeSubstToTypeSubst(mts: MultiTypeSubst): TypeSubst {
 
 public func GetDeclTypeParams(decl: Decl): ArrayList<Ty> {
     let out = ArrayList<Ty>()
-    if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-        if (let Some(declTy) <- decl.GetTy()) {
-            for (typeArg in declTy.typeArgs) {
-                out.add(typeArg)
-            }
-            return out
+    if (let Some(_) <- (decl as ExtendDecl)) {
+        CJC_NULLPTR_CHECK(decl.GetTy())
+        for (typeArg in decl.GetTy().getOrThrow().typeArgs) {
+            out.add(typeArg)
         }
-        if (let Some(extendedType) <- extendDecl.extendedType) {
-            if (let Some(extendedTy) <- extendedType.GetTy()) {
-                for (typeArg in extendedTy.typeArgs) {
-                    out.add(typeArg)
-                }
-                return out
-            }
-        }
+        return out
     }
     if (let Some(generic) <- decl.GetGeneric()) {
         for (param in generic.typeParameters) {
-            if (let Some(paramTy) <- param.GetTy()) {
-                out.add(paramTy)
-            }
+            CJC_NULLPTR_CHECK(param.GetTy())
+            out.add(param.GetTy().getOrThrow())
         }
     }
     return out

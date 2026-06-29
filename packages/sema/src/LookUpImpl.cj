@@ -973,7 +973,3 @@ public func ExtendFieldLookup(typeManager: TypeManager, file: File, ty: Option<T
     }
     return results
 }
-
-public func SelfhostPortStatus_LookUpImpl(): Bool {
-    return true
-}
