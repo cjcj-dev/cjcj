@@ -197,13 +197,17 @@ private func TypeCheckReferenceFilterShadowedFuncs(tm: TypeManager, targets: Arr
     }
 }
 
-private func TypeCheckReferenceFilterMacroFuncTargets(expr: Expr, targets: ArrayList<Decl>): Unit {
-    if (expr.TestAttr(Attribute.MACRO_INVOKE_BODY)) {
-        return
-    }
+private func TypeCheckReferenceFilterMacroFuncTargets(curFuncBody: Option<FuncBody>, targets: ArrayList<Decl>): Unit {
     var idx: Int64 = 0
     while (idx < targets.size) {
-        if (targets[idx].TestAttr(Attribute.MACRO_FUNC)) {
+        var removeTarget = false
+        if (let None <- curFuncBody) {
+            removeTarget = targets[idx].TestAttr(Attribute.MACRO_FUNC)
+        } else {
+            let funcBody = curFuncBody.getOrThrow()
+            removeTarget = !funcBody.TestAttr(Attribute.MACRO_INVOKE_BODY) && targets[idx].TestAttr(Attribute.MACRO_FUNC)
+        }
+        if (removeTarget) {
             targets.remove(at: idx)
         } else {
             idx++
@@ -211,8 +215,17 @@ private func TypeCheckReferenceFilterMacroFuncTargets(expr: Expr, targets: Array
     }
 }
 
-private func TypeCheckReferenceFilterCandidatesForRef(tm: TypeManager, expr: Expr, targets: ArrayList<Decl>): Unit {
-    TypeCheckReferenceFilterMacroFuncTargets(expr, targets)
+private func TypeCheckReferenceFilterCandidatesForRef(
+    tm: TypeManager,
+    ctx: ASTContext,
+    re: RefExpr,
+    targets: ArrayList<Decl>
+): Unit {
+    let curFuncBody = TypeCheckReferenceGetCurFuncBody(ctx, re.scopeName)
+    TypeCheckReferenceFilterMacroFuncTargets(curFuncBody, targets)
+    if (let Some(outerDecl) <- TypeCheckReferenceGetCurInheritableDecl(ctx, re.scopeName)) {
+        let _ = TypeCheckReferenceFilterTargetsInExtend(tm, re, outerDecl.GetTy(), targets)
+    }
     TypeCheckReferenceFilterShadowedFuncs(tm, targets)
 }
 
@@ -809,7 +822,7 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
     targets: ArrayList<Decl>
 ): Bool {
     TypeCheckReferenceRemoveDuplicateTargets(tm, targets)
-    TypeCheckReferenceFilterCandidatesForRef(tm, re, targets)
+    TypeCheckReferenceFilterCandidatesForRef(tm, ctx, re, targets)
     if (targets.isEmpty()) {
         let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_undeclared_identifier,
             TypeCheckReferenceRange(re),
@@ -824,9 +837,6 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
         targets.clear()
         return false
     }
-    if (!TypeCheckReferenceFilterTargetsInExtend(tm, re, re.GetTy(), targets)) {
-        return false
-    }
     if (!TypeCheckReferenceCheckAmbiguousImportedNonFuncs(diag, re, targets, re.ref.identifier.Val())) {
         return false
     }
@@ -838,10 +848,11 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
     if (let Some(_) <- re.callOrPattern) {
         hasCallOrPattern = true
     }
-    let hasTarget = ctx.HasTargetTy(re) || re.isInFlowExpr || hasCallOrPattern
-    if (!hasTarget && re.isAlone) {
+    let hasTargetTy = ctx.HasTargetTy(re) || re.isInFlowExpr
+    if (!hasTargetTy && re.isAlone) {
         return TypeCheckReferenceFilterTargetsForFuncReference(diag, re, targets)
     }
+    let hasTarget = hasTargetTy || hasCallOrPattern
     if (targets.isEmpty()) {
         return false
     }
@@ -878,7 +889,6 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
         return false
     }
     TypeCheckReferenceRemoveDuplicateTargets(tm, targets)
-    TypeCheckReferenceFilterCandidatesForRef(tm, ma, targets)
     var baseTy: Option<Ty> = None
     if (let Some(baseExpr) <- ma.baseExpr) {
         baseTy = baseExpr.GetTy()
@@ -891,14 +901,20 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
         !TypeCheckReferenceFilterInvalidEnumTargets(diag, ma, targets)) {
         return false
     }
+    if (targets.isEmpty()) {
+        TypeCheckReferenceDiagMemberAccessNotFound(diag, ma)
+        return false
+    }
     var hasCallOrPattern = false
     if (let Some(_) <- ma.callOrPattern) {
         hasCallOrPattern = true
     }
-    let hasTarget = ctx.HasTargetTy(ma) || ma.isInFlowExpr || hasCallOrPattern
-    let referenceNeedTypeInfer = ((!hasTarget && (ma.isAlone || !hasCallOrPattern)) ||
-        (!targets.isEmpty() && targets[0].astKind != ASTKind.FUNC_DECL &&
-            !targets[0].TestAttr(Attribute.ENUM_CONSTRUCTOR))) && !ma.isPattern
+    let hasTargetTy = ctx.HasTargetTy(ma)
+    let referenceNeedTypeInfer = (
+        ((!hasTargetTy && (ma.isAlone || !hasCallOrPattern)) ||
+            (!targets.isEmpty() && targets[0].astKind != ASTKind.FUNC_DECL &&
+                !targets[0].TestAttr(Attribute.ENUM_CONSTRUCTOR))) &&
+        !ma.isInFlowExpr && !ma.isPattern)
     if (referenceNeedTypeInfer) {
         if (let Some(baseExpr) <- ma.baseExpr) {
             if (let Some(targetOfBase) <- baseExpr.GetTarget()) {
@@ -914,6 +930,7 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
     if (targets.isEmpty()) {
         return false
     }
+    let hasTarget = hasTargetTy || ma.isInFlowExpr || hasCallOrPattern
     return TypeCheckReferenceCheckForQuestFuncRetType(diag, targets[0], ma, hasTarget)
 }
 
@@ -2418,8 +2435,4 @@ public func TypeCheckReferenceCheckUsageOfDeprecated(
         return VisitAction.KEEP_DECISION
     })
     let _ = walker.Walk()
-}
-
-public func SelfhostPortStatus_TypeCheckReference(): Bool {
-    return true
 }
