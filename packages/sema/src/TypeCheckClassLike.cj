@@ -8,6 +8,9 @@ import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::modules.ImportManager
+import cangjie_compiler::utils.{CJC_ASSERT, INTEROP_JAVA_LANG_PACKAGE, INTEROP_JOBJECT_NAME, OBJ_C_ID_IDENT,
+    OBJ_C_LANG_PACKAGE_IDENT}
 
 private func TypeCheckClassLikeRange(node: Node): BasicRange {
     var rangeEnd = node.end
@@ -253,12 +256,62 @@ public func TypeCheckClassLikeHasSuperClass(diag: BasicDiagnosticEngine, classDe
     return result.hasSuperClass
 }
 
+public func AddJObjectSuperClassJavaInterop(
+    importManager: ImportManager,
+    diag: BasicDiagnosticEngine,
+    ctx: ASTContext,
+    classDecl: ClassDecl
+): Bool {
+    if (ctx.fullPackageName == INTEROP_JAVA_LANG_PACKAGE && classDecl.identifier.Val() == INTEROP_JOBJECT_NAME) {
+        return false
+    }
+    if (let Some(objectDecl) <- importManager.GetImportedDecl(INTEROP_JAVA_LANG_PACKAGE, INTEROP_JOBJECT_NAME)) {
+        CJC_ASSERT(objectDecl.astKind == ASTKind.CLASS_DECL)
+        let classObject = (objectDecl as ClassDecl).getOrThrow()
+        let typeNode = CreateRefType(classObject)
+        typeNode.curFile = classDecl.curFile
+        classDecl.inheritedTypes.add(typeNode, at: 0)
+        classDecl.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
+    } else {
+        let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_member_not_imported,
+            classDecl.identifier.Begin(), arguments: [INTEROP_JAVA_LANG_PACKAGE + "." + INTEROP_JOBJECT_NAME])
+        builder.Emit()
+    }
+    return true
+}
+
+public func AddObjCIdSuperInterfaceObjCInterop(
+    importManager: ImportManager,
+    diag: BasicDiagnosticEngine,
+    ctx: ASTContext,
+    classLikeDecl: ClassLikeDecl
+): Unit {
+    if (ctx.fullPackageName == OBJ_C_LANG_PACKAGE_IDENT && classLikeDecl.identifier.Val() == OBJ_C_ID_IDENT) {
+        return
+    }
+    if (let Some(idDecl) <- importManager.GetImportedDecl(OBJ_C_LANG_PACKAGE_IDENT, OBJ_C_ID_IDENT)) {
+        CJC_ASSERT(idDecl.astKind == ASTKind.INTERFACE_DECL)
+        let idInterface = (idDecl as InterfaceDecl).getOrThrow()
+        let typeNode = CreateRefType(idInterface)
+        typeNode.curFile = classLikeDecl.curFile
+        classLikeDecl.inheritedTypes.add(typeNode)
+    } else {
+        let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_member_not_imported,
+            classLikeDecl.identifier.Begin(), arguments: [OBJ_C_LANG_PACKAGE_IDENT + "." + OBJ_C_ID_IDENT])
+        builder.Emit()
+    }
+}
+
 public func TypeCheckClassLikeCheckClassInheritedTypes(
     diag: BasicDiagnosticEngine,
+    tm: TypeManager,
     classDecl: ClassDecl
 ): Bool {
     var valid = true
     for (inheritedType in classDecl.inheritedTypes) {
+        if (!TypeCheckTypeCheckReferenceTypeLegality(diag, tm, inheritedType)) {
+            valid = false
+        }
         if (!TypeCheckClassLikeCheckSealedInheritance(diag, classDecl, inheritedType)) {
             valid = false
         }
@@ -271,10 +324,14 @@ public func TypeCheckClassLikeCheckClassInheritedTypes(
 
 public func TypeCheckClassLikeCheckInterfaceInheritedTypes(
     diag: BasicDiagnosticEngine,
+    tm: TypeManager,
     interfaceDecl: InterfaceDecl
 ): Bool {
     var valid = true
     for (interfaceType in interfaceDecl.inheritedTypes) {
+        if (!TypeCheckTypeCheckReferenceTypeLegality(diag, tm, interfaceType)) {
+            valid = false
+        }
         var hasInterfaceTy = false
         if (let Some(rawTy) <- interfaceType.GetTy()) {
             if (let Some(interfaceTy) <- (rawTy as InterfaceTy)) {
@@ -310,8 +367,4 @@ public func TypeCheckClassLikeCheckNominalAnnotationRules(
         }
     }
     return valid
-}
-
-public func SelfhostPortStatus_TypeCheckClassLike(): Bool {
-    return true
 }
