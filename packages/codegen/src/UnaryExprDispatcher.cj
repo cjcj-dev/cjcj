@@ -25,6 +25,6 @@ public func HandleUnaryExpression(irBuilder: IRBuilder2, chirExpr: CHIRUnaryExpr
             }
         }
     }
-    return irBuilder.CreateUnaryTypedWithResult(chirExpr.unaryExpr.GetExprKind(), cgValue.GetRawValue(),
-        operandType, resultType, name: chirExpr.unaryExpr.GetExprKindName())
+    return irBuilder.CreateUnaryTyped(chirExpr.unaryExpr.GetExprKind(), cgValue.GetRawValue(),
+        operandType, name: chirExpr.unaryExpr.GetExprKindName())
 }

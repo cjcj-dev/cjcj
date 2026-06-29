@@ -15,7 +15,7 @@ import cangjie_compiler::mangle.SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION
 import cangjie_compiler::mangle.SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION
 import cangjie_compiler::mangle.SPECIAL_NAME_FOR_INIT_RESET_FUNCTION
 import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::utils.StaticCast
+import cangjie_compiler::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, StaticCast}
 
 private let CANGJIE_SDK_VERSION: String = "1.1.0-alpha.20260331010029"
 private let PKG_INIT_FUNC_METADATA: String = "pkg_init_func"
@@ -48,6 +48,7 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         if (subPackage.mainModule && options.CompileExecutable()) {
             EmitCJSDKVersion(cgMod)
             EmitMainFunctionIR(cgMod)
+            RegisterExceptionRaiser(cgMod)
             CreatePackageInitResetFunction(cgMod)
             SpecifyPackageInitFunc(cgMod)
         }
@@ -250,7 +251,7 @@ private func CreateCJEntryTryScope(cgMod: CGModule, irBuilder: IRBuilder2, zero:
 }
 
 private func CreateUnwindBlockForTryCatchWrapper(cgMod: CGModule, irBuilder: IRBuilder2, i32Type: LLVMTypeRef): Unit {
-    let landingPad = irBuilder.CreateLandingPad(0u32)
+    let landingPad = irBuilder.CreateLandingPad(CGType.GetLandingPadType(cgMod.GetLLVMContext()), 0u32)
     irBuilder.AddLandingPadCatchAllClause(landingPad)
     let exceptionWrapper = irBuilder.CallExceptionIntrinsicGetExceptionValue()
     let exceptionValue = irBuilder.CallPostThrowExceptionIntrinsic(exceptionWrapper)
@@ -303,7 +304,7 @@ private func CreateUnwindBlockForTryCatchWrapper(cgMod: CGModule, irBuilder: IRB
     let _ = irBuilder.CreateRet(unsafe { LLVMConstInt(i32Type, 1u64, 0) })
 
     irBuilder.SetInsertPoint(rethrowBb)
-    let landingPad1 = irBuilder.CreateLandingPad(0u32)
+    let landingPad1 = irBuilder.CreateLandingPad(CGType.GetLandingPadType(cgMod.GetLLVMContext()), 0u32)
     irBuilder.AddLandingPadCatchAllClause(landingPad1)
     irBuilder.CreateExecAtExitCallbacksCall()
     let _ = irBuilder.CreateRet(unsafe { LLVMConstInt(i32Type, 1u64, 0) })
@@ -325,6 +326,33 @@ private func CreatePrintStackTraceCall(cgMod: CGModule, irBuilder: IRBuilder2, e
             let args = ArrayList<CGValue>()
             args.add(CGValue(exceptionValue, CGType.GetOrCreate(cgMod, paramRefTy)))
             let _ = irBuilder.CreateCallOrInvoke(cgFuncType, callee, args)
+        }
+    }
+}
+
+private func RegisterExceptionRaiser(cgMod: CGModule): Unit {
+    if (cgMod.GetCGContext().GetCurrentPkgName() == CORE_PACKAGE_NAME) {
+        let moduleHandle = cgMod.GetLLVMModule().getOrThrow()
+        let chirPkgInitFunc = cgMod.GetCGContext().GetCHIRPackage().GetPackageInitFunc().getOrThrow()
+        let pkgInitFuncName = chirPkgInitFunc.GetIdentifierWithoutPrefix()
+        let llvmPkgInitFunc = GetNamedFunction(moduleHandle, pkgInitFuncName)
+        let entryBlock = unsafe { LLVMGetEntryBasicBlock(llvmPkgInitFunc) }
+        let terminator = unsafe { LLVMGetBasicBlockTerminator(entryBlock) }
+        CJC_ASSERT(!terminator.isNull())
+        let registerBlock = unsafe { LLVMGetSuccessor(terminator, 1u32) }
+        CJC_ASSERT(!registerBlock.isNull())
+        let registerTerminator = unsafe { LLVMGetBasicBlockTerminator(registerBlock) }
+        try (irBuilder = IRBuilder2(cgMod)) {
+            irBuilder.SetInsertPointBefore(registerTerminator)
+            let int8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(cgMod.GetLLVMContext().raw), 0u32) }
+            let chirFunc = cgMod.GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(
+                "rt$ThrowImplicitException").getOrThrow()
+            let rawFunc = cgMod.GetOrInsertCGFunction(chirFunc).GetRawFunction()
+            let param = irBuilder.CreateBitCast(rawFunc, int8PtrType)
+            let args = ArrayList<LLVMValueRef>()
+            args.add(param)
+            let _ = irBuilder.CreateIntrinsicCallNoInvoke("llvm.cj.register.implicit.exception.raisers",
+                ArrayList<LLVMTypeRef>(), args)
         }
     }
 }

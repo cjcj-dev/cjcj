@@ -1,41 +1,179 @@
 package cangjie_compiler::frontend
 
+import cangjie_compiler::basic.{PrintIndent, PrintIndentOnly, PrintNoSplit, Println}
+import cangjie_compiler::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 import std.collection.*
-import std.sort.*
 
-public func PrintSymbolTable(ci: CompilerInstance): Unit {
-    let packages = ArrayList<Symbol>()
-    let file2nodesMap = HashMap<String, (File, ArrayList<Node>)>()
-    for (srcPkg in ci.GetSourcePackages()) {
-        if (let Some(ctx) <- ci.GetASTContextByPackage(srcPkg)) {
-            var fileOpt: Option<File> = None
-            for (sym in ctx.symbolTable) {
-                AddSymbolToInfo(packages, file2nodesMap, fileOpt, sym)
-                if (let Some(node) <- sym.node) {
-                    if (let Some(fileNode) <- (node as File)) {
-                        fileOpt = Some(fileNode)
-                    }
-                }
-            }
-        }
-    }
-    let builder = StringBuilder()
-    builder.append("{\n")
-    builder.append("  \"packages\": [\n")
-    appendPackages(builder, packages)
-    builder.append("  ],\n")
-    builder.append("  \"files\": [\n")
-    appendFiles(builder, file2nodesMap)
-    builder.append("  ]\n")
-    builder.append("}")
-    println(builder.toString())
+private let ONE_INDENT: UInt64 = 1u64
+private let TWO_INDENT: UInt64 = 2u64
+private let THREE_INDENT: UInt64 = 3u64
+private let FOUR_INDENT: UInt64 = 4u64
+private let FIVE_INDENT: UInt64 = 5u64
+
+private func PrintIndentNoSplitNoEndl(indent: UInt64, value: String): Unit {
+    PrintIndentOnly(indent)
+    PrintNoSplit(value)
 }
 
-private func AddSymbolToInfo(packages: ArrayList<Symbol>, file2nodesMap: HashMap<String, (File, ArrayList<Node>)>,
-    fileOpt: Option<File>, symbol: Symbol): Unit {
-    if (let None <- symbol.node) {
+private func PrintIndentNoSplit(indent: UInt64, value: String): Unit {
+    PrintIndentNoSplitNoEndl(indent, value)
+    Println()
+}
+
+private func PrintPackage(symbol: Symbol): Unit {
+    PrintIndent(TWO_INDENT, "{")
+    PrintIndentNoSplit(THREE_INDENT, "\"name\": \"" + symbol.name + "\",")
+    PrintIndent(THREE_INDENT, "\"files\": [")
+    CJC_NULLPTR_CHECK(symbol.node)
+    let node = symbol.node.getOrThrow()
+    CJC_ASSERT(node.astKind == ASTKind.PACKAGE)
+    let pkg = (node as Package).getOrThrow()
+    var idx: Int64 = 0
+    PrintIndentNoSplitNoEndl(FOUR_INDENT, "\"" + pkg.files[idx].filePath + "\"")
+    idx++
+    while (idx < pkg.files.size) {
+        Println(value: ",")
+        PrintIndentNoSplitNoEndl(FOUR_INDENT, "\"" + pkg.files[idx].filePath + "\"")
+        idx++
+    }
+    Println()
+    PrintIndent(THREE_INDENT, "]")
+    PrintIndentNoSplitNoEndl(TWO_INDENT, "}")
+}
+
+private func PrintPackages(packages: ArrayList<Symbol>): Unit {
+    if (packages.isEmpty()) {
         return
     }
+    let packageNames = HashSet<String>()
+    var idx: Int64 = 0
+    packageNames.add(packages[idx].name)
+    PrintPackage(packages[idx])
+    idx++
+    while (idx < packages.size) {
+        let symbol = packages[idx]
+        if (!packageNames.contains(symbol.name)) {
+            packageNames.add(symbol.name)
+            Println(value: ",")
+            PrintPackage(symbol)
+        }
+        idx++
+    }
+    Println()
+}
+
+private func PrintPosition(indent: UInt64, pos: Position, name: String, hasComma: Bool): Unit {
+    PrintIndentNoSplit(indent, "\"" + name + "\": {")
+    PrintIndentNoSplit(indent + ONE_INDENT, "\"line\": " + pos.line.toString() + ",")
+    PrintIndent(indent + ONE_INDENT, "\"column\":" + pos.column.toString())
+    PrintIndentNoSplit(indent, "}" + if (hasComma) { "," } else { "" })
+}
+
+private func PrintPackageSpecPart(packageSpec: PackageSpec): Unit {
+    PrintIndentNoSplit(FIVE_INDENT, "\"packageName\": \"" + packageSpec.packageName.Val() + "\",")
+    PrintPosition(FIVE_INDENT, packageSpec.macroPos, "macroPos", true)
+    PrintPosition(FIVE_INDENT, packageSpec.packagePos, "packagePos", true)
+    PrintPosition(FIVE_INDENT, packageSpec.packageName.Begin(), "packageNamePos", true)
+}
+
+private func PrintImportSpecPart(importSpec: ImportSpec): Unit {
+    PrintPosition(FIVE_INDENT, importSpec.importPos, "importPos", true)
+    PrintIndentNoSplit(FIVE_INDENT, "\"packageName\": \"" + GetImportedItemFullName(importSpec.content) + "\",")
+    PrintPosition(FIVE_INDENT, importSpec.content.begin, "packageNamePos", true)
+    if (importSpec.IsImportAlias()) {
+        PrintPosition(FIVE_INDENT, importSpec.content.asPos, "asPos", true)
+        PrintIndentNoSplit(FIVE_INDENT, "\"asIdentifier\": \"" + importSpec.content.aliasName.Val() + "\",")
+        PrintPosition(FIVE_INDENT, importSpec.content.aliasName.Begin(), "asIdentifierPos", true)
+    }
+}
+
+private func PrintDeclPart(decl: Decl): Unit {
+    PrintIndentNoSplit(FIVE_INDENT, "\"identifier\": \"" + decl.identifier.Val() + "\",")
+    PrintPosition(FIVE_INDENT, decl.identifier.Begin(), "identifierPos", true)
+}
+
+private func PrintNode(node: Node): Unit {
+    if (node.TestAttr(Attribute.COMPILER_ADD)) {
+        return
+    }
+    PrintIndent(FOUR_INDENT, "{")
+    PrintIndentNoSplit(FIVE_INDENT, "\"astKind\": \"" + ASTKindName(node.astKind) + "\",")
+    let symbolName = if (let Some(symbol) <- node.symbol) { symbol.name } else { "" }
+    PrintIndentNoSplit(FIVE_INDENT, "\"name\": \"" + symbolName + "\",")
+    if (let Some(packageSpec) <- (node as PackageSpec)) {
+        PrintPackageSpecPart(packageSpec)
+    } else if (let Some(importSpec) <- (node as ImportSpec)) {
+        PrintImportSpecPart(importSpec)
+    } else if (let Some(decl) <- (node as Decl)) {
+        PrintDeclPart(decl)
+    }
+    PrintPosition(FIVE_INDENT, node.begin, "begin", true)
+    PrintPosition(FIVE_INDENT, node.end, "end", false)
+    PrintIndentNoSplitNoEndl(FOUR_INDENT, "}")
+}
+
+private func PrintFile(file: File, nodes: ArrayList<Node>): Unit {
+    PrintIndent(TWO_INDENT, "{")
+    PrintIndentNoSplit(THREE_INDENT, "\"path\": \"" + file.filePath + "\",")
+    PrintIndentNoSplit(THREE_INDENT, "\"symbols\": [")
+    if (!nodes.isEmpty()) {
+        var idx: Int64 = 0
+        PrintNode(nodes[idx])
+        idx++
+        while (idx < nodes.size) {
+            Println(value: ",")
+            PrintNode(nodes[idx])
+            idx++
+        }
+        Println()
+    }
+    PrintIndentNoSplit(THREE_INDENT, "]")
+    PrintIndentNoSplitNoEndl(TWO_INDENT, "}")
+}
+
+private func PrintFiles(file2nodesMap: HashMap<Node, ArrayList<Node>>): Unit {
+    if (file2nodesMap.isEmpty()) {
+        return
+    }
+    var emitted: Int64 = 0
+    for ((fileKey, nodes) in file2nodesMap) {
+        if (emitted > 0) {
+            Println(value: ",")
+        }
+        PrintFile((fileKey as File).getOrThrow(), nodes)
+        emitted++
+    }
+    Println()
+}
+
+private func HandleFileNode(file2nodesMap: HashMap<Node, ArrayList<Node>>, symbol: Symbol, node: Node): Unit {
+    if (node.astKind != ASTKind.FILE) {
+        return
+    }
+    if (let Some(nodeSymbol) <- node.symbol) {
+        if (refEq(symbol, nodeSymbol)) {
+            return
+        }
+    }
+    let file = (node as File).getOrThrow()
+    let fileKey: Node = file
+    if (file2nodesMap.get(fileKey).isNone()) {
+        file2nodesMap.add(fileKey, ArrayList<Node>())
+    }
+    let nodes = file2nodesMap.get(fileKey).getOrThrow()
+    if (let Some(packageSpec) <- file.packageSpec) {
+        nodes.add(packageSpec)
+    }
+    for (importSpec in file.imports) {
+        if (importSpec.importPos.line != 0) {
+            nodes.add(importSpec)
+        }
+    }
+}
+
+private func AddSymbolToInfo(packages: ArrayList<Symbol>, file2nodesMap: HashMap<Node, ArrayList<Node>>,
+    fileOpt: Box<Option<File>>, symbol: Symbol): Unit {
+    CJC_NULLPTR_CHECK(symbol.node)
     let node = symbol.node.getOrThrow()
     if (node.TestAttr(Attribute.COMPILER_ADD)) {
         return
@@ -44,169 +182,40 @@ private func AddSymbolToInfo(packages: ArrayList<Symbol>, file2nodesMap: HashMap
         packages.add(symbol)
         return
     }
-    var currentFileOpt = fileOpt
-    if (let Some(fileNode) <- (node as File)) {
-        currentFileOpt = Some(fileNode)
+    if (node.astKind == ASTKind.FILE) {
+        fileOpt.value = (node as File).getOrThrow()
     }
-    if (let Some(fileNode) <- currentFileOpt) {
-        addNodeForFile(file2nodesMap, fileNode, node)
-    }
-}
-
-private func addNodeForFile(file2nodesMap: HashMap<String, (File, ArrayList<Node>)>, file: File, node: Node): Unit {
-    if (let Some(pair) <- file2nodesMap.get(file.filePath)) {
-        pair[1].add(node)
+    CJC_ASSERT(fileOpt.value.isSome())
+    let file = fileOpt.value.getOrThrow()
+    let fileKey: Node = file
+    if (let Some(nodes) <- file2nodesMap.get(fileKey)) {
+        nodes.add(node)
     } else {
         let nodes = ArrayList<Node>()
         nodes.add(node)
-        file2nodesMap.add(file.filePath, (file, nodes))
+        file2nodesMap.add(fileKey, nodes)
     }
+    HandleFileNode(file2nodesMap, symbol, node)
 }
 
-private func appendPackages(builder: StringBuilder, packages: ArrayList<Symbol>): Unit {
-    let seen = HashSet<String>()
-    var emitted: Int64 = 0
-    for (symbol in packages) {
-        if (seen.contains(symbol.name)) {
-            continue
-        }
-        seen.add(symbol.name)
-        if (emitted > 0) {
-            builder.append(",\n")
-        }
-        appendPackage(builder, symbol)
-        emitted++
-    }
-    if (emitted > 0) {
-        builder.append("\n")
-    }
-}
-
-private func appendPackage(builder: StringBuilder, symbol: Symbol): Unit {
-    builder.append("    {\n")
-    builder.append("      \"name\": \"" + EscapeJson(symbol.name) + "\",\n")
-    builder.append("      \"files\": [")
-    if (let Some(node) <- symbol.node) {
-        if (let Some(pkg) <- (node as Package)) {
-            var idx: Int64 = 0
-            while (idx < pkg.files.size) {
-                if (idx > 0) {
-                    builder.append(", ")
-                }
-                builder.append("\"" + EscapeJson(pkg.files[idx].filePath) + "\"")
-                idx++
-            }
+public func PrintSymbolTable(ci: CompilerInstance): Unit {
+    let packages = ArrayList<Symbol>()
+    let file2nodesMap = HashMap<Node, ArrayList<Node>>()
+    for (srcPkg in ci.GetSourcePackages()) {
+        let ctxOpt = ci.GetASTContextByPackage(srcPkg)
+        CJC_NULLPTR_CHECK(ctxOpt)
+        let ctx = ctxOpt.getOrThrow()
+        let fileOpt = Box<Option<File>>(None)
+        for (sym in ctx.symbolTable) {
+            AddSymbolToInfo(packages, file2nodesMap, fileOpt, sym)
         }
     }
-    builder.append("]\n")
-    builder.append("    }")
-}
-
-private func appendFiles(builder: StringBuilder, file2nodesMap: HashMap<String, (File, ArrayList<Node>)>): Unit {
-    let keys = ArrayList<String>()
-    for ((key, _) in file2nodesMap) {
-        keys.add(key)
-    }
-    sort(keys, by: { left: String, right: String =>
-        if (left < right) {
-            Ordering.LT
-        } else if (left > right) {
-            Ordering.GT
-        } else {
-            Ordering.EQ
-        }
-    })
-    var emitted: Int64 = 0
-    for (key in keys) {
-        if (let Some(pair) <- file2nodesMap.get(key)) {
-            if (emitted > 0) {
-                builder.append(",\n")
-            }
-            appendFile(builder, pair[0], pair[1])
-            emitted++
-        }
-    }
-    if (emitted > 0) {
-        builder.append("\n")
-    }
-}
-
-private func appendFile(builder: StringBuilder, file: File, nodes: ArrayList<Node>): Unit {
-    builder.append("    {\n")
-    builder.append("      \"path\": \"" + EscapeJson(file.filePath) + "\",\n")
-    builder.append("      \"symbols\": [")
-    if (!nodes.isEmpty()) {
-        builder.append("\n")
-        var idx: Int64 = 0
-        while (idx < nodes.size) {
-            if (idx > 0) {
-                builder.append(",\n")
-            }
-            appendNode(builder, nodes[idx])
-            idx++
-        }
-        builder.append("\n      ")
-    }
-    builder.append("]\n")
-    builder.append("    }")
-}
-
-private func appendNode(builder: StringBuilder, node: Node): Unit {
-    if (node.TestAttr(Attribute.COMPILER_ADD)) {
-        return
-    }
-    builder.append("        {\n")
-    builder.append("          \"astKind\": \"" + ASTKindName(node.astKind) + "\",\n")
-    builder.append("          \"name\": \"" + EscapeJson(SymbolName(node.symbol)) + "\",\n")
-    if (let Some(packageSpec) <- (node as PackageSpec)) {
-        appendPackageSpecPart(builder, packageSpec)
-    } else if (let Some(importSpec) <- (node as ImportSpec)) {
-        appendImportSpecPart(builder, importSpec)
-    } else if (let Some(decl) <- (node as Decl)) {
-        appendDeclPart(builder, decl)
-    }
-    appendPosition(builder, node.begin, "begin", true)
-    appendPosition(builder, node.end, "end", false)
-    builder.append("        }")
-}
-
-private func appendPackageSpecPart(builder: StringBuilder, packageSpec: PackageSpec): Unit {
-    builder.append("          \"packageName\": \"" + EscapeJson(packageSpec.packageName.Val()) + "\",\n")
-    appendPosition(builder, packageSpec.macroPos, "macroPos", true)
-    appendPosition(builder, packageSpec.packagePos, "packagePos", true)
-    appendPosition(builder, packageSpec.packageName.Begin(), "packageNamePos", true)
-}
-
-private func appendImportSpecPart(builder: StringBuilder, importSpec: ImportSpec): Unit {
-    appendPosition(builder, importSpec.importPos, "importPos", true)
-    builder.append("          \"packageName\": \"" + EscapeJson(GetImportedItemFullName(importSpec.content)) + "\",\n")
-    appendPosition(builder, importSpec.content.begin, "packageNamePos", true)
-    if (importSpec.IsImportAlias()) {
-        appendPosition(builder, importSpec.content.asPos, "asPos", true)
-        builder.append("          \"asIdentifier\": \"" + EscapeJson(importSpec.content.aliasName.Val()) + "\",\n")
-        appendPosition(builder, importSpec.content.aliasName.Begin(), "asIdentifierPos", true)
-    }
-}
-
-private func appendDeclPart(builder: StringBuilder, decl: Decl): Unit {
-    builder.append("          \"identifier\": \"" + EscapeJson(decl.identifier.Val()) + "\",\n")
-    appendPosition(builder, decl.identifier.Begin(), "identifierPos", true)
-}
-
-private func appendPosition(builder: StringBuilder, pos: Position, name: String, hasComma: Bool): Unit {
-    builder.append("          \"" + name + "\": {\n")
-    builder.append("            \"line\": " + pos.line.toString() + ",\n")
-    builder.append("            \"column\": " + pos.column.toString() + "\n")
-    builder.append("          }")
-    if (hasComma) {
-        builder.append(",")
-    }
-    builder.append("\n")
-}
-
-private func SymbolName(symbol: Option<Symbol>): String {
-    if (let Some(value) <- symbol) {
-        return value.name
-    }
-    return ""
+    Println(value: "{")
+    PrintIndent(ONE_INDENT, "\"packages\": [")
+    PrintPackages(packages)
+    PrintIndent(ONE_INDENT, "],")
+    PrintIndent(ONE_INDENT, "\"files\": [")
+    PrintFiles(file2nodesMap)
+    PrintIndent(ONE_INDENT, "]")
+    Println(value: "}")
 }

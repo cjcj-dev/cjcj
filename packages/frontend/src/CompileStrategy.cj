@@ -8,6 +8,7 @@ import cangjie_compiler::parse.DiagSeverity as ParseDiagSeverity
 import cangjie_compiler::parse.Parser as RealParser
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagSeverity as BasicDiagSeverity
+import cangjie_compiler::basic.GetHash
 import cangjie_compiler::utils.FileUtil
 import std.collection.*
 import std.sort.*
@@ -265,7 +266,7 @@ private class FullCompileStrategyImpl {
         let realFile = parser.ParseTopLevel()
         realFile.filePath = NormalizePath(filePath)
         realFile.fileName = GetFileName(realFile.filePath)
-        realFile.fileHash = StableSourcePathHash(realFile.filePath)
+        realFile.fileHash = GetHash(realFile.filePath)
         realFile.begin = Position(fileID, 1, 1)
         realFile.end = s.ci.GetSourceManager().GetSource(fileID).GetEndPos()
         realFile.curPackage = Some(pkg)

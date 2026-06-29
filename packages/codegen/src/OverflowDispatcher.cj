@@ -106,8 +106,7 @@ private func GenerateOverflowIncOrDec(irBuilder: IRBuilder2, strategy: OverflowS
 public func GenerateOverflowUnary(irBuilder: IRBuilder2, strategy: OverflowStrategy, kind: ExprKind,
     operand: Value, operandValue: LLVMValueRef, resultType: Option<Type>): LLVMValueRef {
     if (strategy == OverflowStrategy.WRAPPING) {
-        return irBuilder.CreateUnaryTypedWithResult(kind, operandValue, operand.GetType(), resultType,
-            name: ExprKindNameForIR(kind))
+        return irBuilder.CreateUnaryTyped(kind, operandValue, operand.GetType(), name: ExprKindNameForIR(kind))
     }
     if (strategy == OverflowStrategy.SATURATING) {
         let saturated = GenerateSaturatingUnaryIntOp(irBuilder, kind, operand, operandValue)
@@ -141,8 +140,7 @@ private func GenerateThrowingUnaryIntOp(irBuilder: IRBuilder2, kind: ExprKind, o
     if (kind == ExprKind.NEG) {
         return GenerateCheckedOverflowUnary(irBuilder, kind, operand, operandValue, resultType)
     }
-    return irBuilder.CreateUnaryTypedWithResult(kind, operandValue, operand.GetType(), resultType,
-        name: ExprKindNameForIR(kind))
+    return irBuilder.CreateUnaryTyped(kind, operandValue, operand.GetType(), name: ExprKindNameForIR(kind))
 }
 
 private func GenerateWrappingBinaryIntOp(irBuilder: IRBuilder2, kind: ExprKind, lhs: Value, rhs: Value,
@@ -186,8 +184,7 @@ private func GenerateCheckedOverflowBinary(irBuilder: IRBuilder2, kind: ExprKind
 private func GenerateCheckedOverflowUnary(irBuilder: IRBuilder2, kind: ExprKind, operand: Value,
     operandValue: LLVMValueRef, resultType: Option<Type>): LLVMValueRef {
     if (kind != ExprKind.NEG) {
-        return irBuilder.CreateUnaryTypedWithResult(kind, operandValue, operand.GetType(), resultType,
-            name: ExprKindNameForIR(kind))
+        return irBuilder.CreateUnaryTyped(kind, operandValue, operand.GetType(), name: ExprKindNameForIR(kind))
     }
     let zeroValue = unsafe { LLVMConstInt(LLVMTypeOf(operandValue), 0u64, 0) }
     return GenerateCheckedOverflowBinary(irBuilder, ExprKind.SUB, operand, zeroValue, operandValue, resultType)

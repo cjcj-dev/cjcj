@@ -2,11 +2,9 @@ package cangjie_compiler::frontend
 
 import std.collection.*
 
-public open class FrontendObserver {
+public abstract class FrontendObserver {
     public init() {}
-    public open func ParsedAST(instance: CompilerInstance): Unit {
-        let _ = instance
-    }
+    public func ParsedAST(instance: CompilerInstance): Unit
 }
 
 public class MultiFrontendObserver <: FrontendObserver {

@@ -1,13 +1,16 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
+import cangjie_compiler::chir.LocalVar
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
 import cangjie_compiler::mangle.GetCustomTypeIdentifier
+import cangjie_compiler::utils.CJC_ASSERT
 
 public enum CGTypeKind {
     | OTHERS
@@ -68,6 +71,18 @@ public func ContainsGenericType(ty: Type): Bool {
     }
     for (argTy in ty.GetTypeArgs()) {
         if (ContainsGenericType(argTy)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func HasGenericTypeArg(ty: Type): Bool {
+    if (ty.IsGeneric() || ty.IsThis()) {
+        return true
+    }
+    for (argTy in ty.GetTypeArgs()) {
+        if (HasGenericTypeArg(argTy)) {
             return true
         }
     }
@@ -183,7 +198,29 @@ public open class CGType {
     public func IsCGRef(): Bool { return cgTypeKind == CGTypeKind.CG_REF }
     public func IsCGFunction(): Bool { return cgTypeKind == CGTypeKind.CG_FUNCTION }
     public func IsCGTI(): Bool { return cgTypeKind == CGTypeKind.CG_TI }
-    public func IsLoadablePtrType(): Bool { return IsPointerType() && !IsRefType() && !IsFuncPtrType() && !IsVArrayType() }
+    public func IsLoadablePtrType(): Bool {
+        if (!IsPointerType()) {
+            return false
+        }
+        if (chirType.IsCPointer() || chirType.IsCString()) {
+            return IsLoadableCPointer()
+        }
+        if (IsFuncPtrType()) {
+            return false
+        }
+        if (IsStructPtrType() || IsRefType() || IsVArrayPtrType()) {
+            return false
+        }
+        return true
+    }
+    public func IsLoadableCPointer(): Bool {
+        let rawTy = GetLLVMType()
+        return !rawTy.isNull() && IsPointerType() && GetPointerElementType().getOrThrow().IsPointerType()
+    }
+    public func IsVArrayPtrType(): Bool {
+        return IsPointerType() &&
+            unsafe { LLVMGetTypeKind(GetPointerElementType().getOrThrow().GetLLVMType()) } == 11
+    }
     public func GetAddrspace(): UInt32 { return addrspace }
     public func GetSize(): Option<Int64> { Complete(); return size }
     public func GetAlign(): Option<Int64> { Complete(); return align }
@@ -246,13 +283,20 @@ public open class CGType {
     protected open func CalculateSizeAndAlign(): Unit { size = None; align = None }
 
     public static func GetCGGenericKind(chirType: Type): CGGenericKind {
-        if (chirType.IsGenericRelated()) {
+        let hasGenericTypeArg = HasGenericTypeArg(chirType)
+        if (hasGenericTypeArg) {
             return CGGenericKind.DYNAMIC_GI
-        }
-        if (chirType.GetTypeArgs().isEmpty()) {
+        } else if (chirType.GetTypeArgs().isEmpty()) {
+            if (let Some(customTy) <- (chirType as CustomType)) {
+                if (!customTy.GetGenericArgs().isEmpty()) {
+                    CJC_ASSERT(customTy.GetCustomTypeDef().TestAttr(Attribute.GENERIC_INSTANTIATED))
+                    return CGGenericKind.STATIC_GI
+                }
+            }
             return CGGenericKind.CONCRETE
+        } else {
+            return CGGenericKind.STATIC_GI
         }
-        return CGGenericKind.STATIC_GI
     }
 
     public static func GetOrCreate(cgModule: CGModule, chirTy: Type, extraInfo!: TypeExtraInfo = TypeExtraInfo()): CGType {
@@ -261,18 +305,35 @@ public open class CGType {
 
     public static func GetOrCreateWithNode(cgModule: CGModule, chirNode: Value, allowBasePtr!: Bool = true,
         forWrapper!: Bool = false): CGType {
-        let chirTy = if (let Some(valueTy) <- chirNode.GetType()) {
+        let functionNode = chirNode as Function
+        let chirTy = if (let Some(fn) <- functionNode) {
+            if (let Some(overrideTy) <- fn.GetOverrideSrcFuncType()) {
+                overrideTy
+            } else {
+                fn.GetType().getOrThrow()
+            }
+        } else if (let Some(valueTy) <- chirNode.GetType()) {
             valueTy
         } else {
             throw IllegalArgumentException("CHIR value has no type: " + chirNode.GetIdentifierWithoutPrefix())
         }
-        if (let Some(functionNode) <- (chirNode as Function)) {
-            let typeExtra = TypeExtraInfo()
-            typeExtra.allowBasePtr = allowBasePtr
+        var cgType: CGType
+        if ((chirNode as LocalVar).isSome()) {
+            cgType = CGTypeMgr.GetConcreteCGTypeFor(cgModule, chirTy,
+                extraInfo: TypeExtraInfo(0u32, true, false, false, ArrayList<Type>()))
+        } else if (let Some(fn) <- functionNode) {
+            let typeExtra = TypeExtraInfo(0u32, false, false, allowBasePtr, ArrayList<Type>())
             typeExtra.forWrapper = forWrapper
-            return CGTypeMgr.GetConcreteCGTypeFor(cgModule, chirTy, extraInfo: typeExtra, chirFunc: functionNode)
+            for (genericTy in fn.GetGenericTypeParams()) {
+                typeExtra.instantiatedParamTypes.add(genericTy)
+            }
+            cgType = CGTypeMgr.GetConcreteCGTypeFor(cgModule, chirTy, extraInfo: typeExtra, chirFunc: fn)
+        } else {
+            return CGType.GetOrCreate(cgModule, chirTy)
         }
-        return CGType.GetOrCreate(cgModule, chirTy)
+        cgType.llvmType = cgType.GenLLVMType()
+        let _ = cgType.GetContainedTypes()
+        return cgType
     }
 
     public static func GetUnitType(context: LLVMContextHandle): LLVMTypeRef {
@@ -284,6 +345,10 @@ public open class CGType {
 
     public static func GetRefType(context: LLVMContextHandle): LLVMTypeRef {
         return unsafe { LLVMPointerType(LLVMInt8TypeInContext(context.raw), 1u32) }
+    }
+
+    public static func GetLandingPadType(context: LLVMContextHandle): LLVMTypeRef {
+        return unsafe { LLVMTokenTypeInContext(context.raw) }
     }
 
     public static func GetArrayBaseType(cgCtx: CGContext): LLVMTypeRef {

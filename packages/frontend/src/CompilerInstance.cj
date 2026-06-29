@@ -12,6 +12,9 @@ import cangjie_compiler::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeCheck
 import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
 import cangjie_compiler::meta_transformation.NativeMetaTransformPlugin
 import cangjie_compiler::option.OutputMode
+import cangjie_compiler::lex.Lexer as CangjieLexer
+import cangjie_compiler::lex.TokenKind as CangjieTokenKind
+import cangjie_compiler::lex.TokenKindValue
 import cangjie_compiler::utils.FileUtil
 import std.collection.*
 
@@ -565,21 +568,21 @@ public class CompilerInstance {
                 continue
             }
             let fileID = GetSourceManager().AddSource(GetAbsPath(filePath) ?? filePath, readResult[1])
-            let lexer = FrontendLexer(fileID, readResult[1], diag, GetSourceManager())
+            let lexer = CangjieLexer(fileID, readResult[1], diag.AsBasicDiagnosticEngine(), GetSourceManager())
             while (true) {
                 let tok = lexer.Next()
-                if (tok.kind == FrontendTokenKind.END) {
+                if (tok.kind == CangjieTokenKind.END) {
                     break
                 }
                 let position = "<" + filePath + ":" + tok.Begin().line.toString() + ":" +
                     tok.Begin().column.toString() + ">"
-                if (tok.kind == FrontendTokenKind.NL) {
-                    println((if (tok.value == "\n") { "\\n" } else { "\\r\\n" }) + " " +
-                        tok.KindName() + " " + position)
-                } else if (tok.kind == FrontendTokenKind.COMMENT) {
-                    println(tok.KindName() + " " + position)
+                if (tok.kind == CangjieTokenKind.NL) {
+                    println((if (tok.equalsValue("\n")) { "\\n" } else { "\\r\\n" }) + " " +
+                        TokenKindValue(tok.kind) + " " + position)
+                } else if (tok.kind == CangjieTokenKind.COMMENT) {
+                    println(TokenKindValue(tok.kind) + " " + position)
                 } else {
-                    println(tok.value + " " + tok.KindName() + " " + position)
+                    println(tok.Value() + " " + TokenKindValue(tok.kind) + " " + position)
                 }
             }
         }

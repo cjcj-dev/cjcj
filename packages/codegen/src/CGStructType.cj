@@ -42,29 +42,12 @@ public class CGStructType <: CGCustomType {
     }
 
     protected override func CalculateSizeAndAlign(): Unit {
-        if (chirType.IsString()) {
-            if (let Some(rawLayout) <- layoutType) {
-                size = Int64(cgMod.GetTypeSize(rawLayout))
-                align = Int64(cgMod.GetABITypeAlignment(rawLayout))
+        if (let Some(rawTy) <- llvmType) {
+            if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 10) {
+                size = Int64(cgMod.GetTypeSize(rawTy))
+                align = Int64(cgMod.GetABITypeAlignment(rawTy))
             }
-            return
         }
-        var total: Int64 = 0
-        var maxAlign: Int64 = 1
-        for (fieldCGType in GetContainedTypes()) {
-            let fieldAlign = if (let Some(value) <- fieldCGType.GetAlign()) { value } else { 1 }
-            let fieldSize = if (let Some(value) <- fieldCGType.GetSize()) { value } else { 0 }
-            if (total % fieldAlign != 0) {
-                total += fieldAlign - (total % fieldAlign)
-            }
-            total += fieldSize
-            if (fieldAlign > maxAlign) { maxAlign = fieldAlign }
-        }
-        if (total % maxAlign != 0) {
-            total += maxAlign - (total % maxAlign)
-        }
-        size = total
-        align = maxAlign
     }
 }
 

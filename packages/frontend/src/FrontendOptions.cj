@@ -13,10 +13,6 @@ public open class GlobalOptions <: OptionBaseGlobalOptions {
     public init() {
         super()
     }
-
-    public func GetDefaultPackageName(): String {
-        return if (moduleName.isEmpty()) { DEFAULT_PACKAGE_NAME } else { moduleName }
-    }
 }
 
 public enum DumpAction {
@@ -84,10 +80,6 @@ public class FrontendOptions <: GlobalOptions {
         }
         if (id == OptionID.COMPILE_CJD) {
             compileCjd = true
-            return Some(true)
-        }
-        if (id == OptionID.MODULE_NAME) {
-            moduleName = arg.value
             return Some(true)
         }
         return super.ParseOption(arg)

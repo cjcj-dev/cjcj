@@ -752,16 +752,6 @@ public class IRBuilder2 <: Resource {
 
     public func CreateBinaryTyped(kind: ExprKind, left: LLVMValueRef, right: LLVMValueRef,
         operandType: Option<Type>, resultType: Option<Type>, name!: String = ""): LLVMValueRef {
-        // String concatenation: an ADD whose result is a CString (i8*) is `a + b` over String values.
-        // Lower it to a runtime concat (libc strlen/malloc/strcpy/strcat) producing a fresh i8*,
-        // rather than an integer add on the pointers.
-        if (kind == ExprKind.ADD) {
-            if (let Some(rt) <- resultType) {
-                if (rt.IsCString()) {
-                    return EmitCStringConcat(cgMod, builder.raw, GetLLVMContext().raw, left, right)
-                }
-            }
-        }
         var result = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             let compareType = if (operandType.isSome()) { operandType } else { resultType }
@@ -821,25 +811,6 @@ public class IRBuilder2 <: Resource {
         return CreateUnaryTyped(kind, value, None, name: name)
     }
 
-    // Unary lowering with an optional result type. A unary whose result is a CString (i8*) is the
-    // real-body string-interpolation conversion marker: stringify the operand into a runtime C-string.
-    // The operand's LLVM type selects the conversion -- i1 -> "true"/"false", any other integer ->
-    // its decimal text (snprintf). For every other result type this is an ordinary unary op.
-    public func CreateUnaryTypedWithResult(kind: ExprKind, value: LLVMValueRef, operandType: Option<Type>,
-        resultType: Option<Type>, name!: String = ""): LLVMValueRef {
-        if (let Some(rt) <- resultType) {
-            if (rt.IsCString()) {
-                let valueType = unsafe { LLVMTypeOf(value) }
-                // An i1 operand stringifies to "true"/"false"; any other integer to its decimal text.
-                if (unsafe { LLVMGetTypeKind(valueType) } == 8 && unsafe { LLVMGetIntTypeWidth(valueType) } == 1u32) {
-                    return EmitBoolToCString(cgMod, builder.raw, GetLLVMContext().raw, value)
-                }
-                return EmitIntToCString(cgMod, builder.raw, GetLLVMContext().raw, value)
-            }
-        }
-        return CreateUnaryTyped(kind, value, operandType, name: name)
-    }
-
     public func CreateUnaryTyped(kind: ExprKind, value: LLVMValueRef, operandType: Option<Type>, name!: String = ""): LLVMValueRef {
         var result = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
@@ -878,15 +849,7 @@ public class IRBuilder2 <: Resource {
             return unsafe { LLVMConstInt(runeTy, UInt64(UInt32(runeLiteral.value)), 0) }
         }
         if (let Some(stringLiteral) <- (literal as StringLiteral)) {
-            if (resultType.IsString()) {
-                return CreateStringLiteral(stringLiteral.value)
-            }
-            if (resultType.IsCString()) {
-                // A CString value is an i8* pointer to a NUL-terminated C-string. Materialize it as
-                // the first-byte pointer of a private constant global rather than an inline [N x i8]
-                // array, so it round-trips through CString-typed slots and feeds runtime concat/print.
-                return EmitCStringLiteralPointer(cgMod, builder.raw, GetLLVMContext().raw, stringLiteral.value)
-            }
+            return CreateStringLiteral(stringLiteral.value)
         }
         return CreateNullValue(resultType)
     }
