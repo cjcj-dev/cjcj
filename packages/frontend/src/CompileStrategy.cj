@@ -129,7 +129,7 @@ private class FullCompileStrategyImpl {
         let moduleSrcPath = s.ci.invocation.globalOptions.moduleSrcPath
         let includeFileSet = HashSet<String>()
         for (srcPath in s.ci.invocation.globalOptions.srcFiles) {
-            includeFileSet.add(NormalizePath(srcPath))
+            includeFileSet.add(srcPath)
         }
         for (srcDir in s.ci.srcDirs) {
             let allSrcFiles = ArrayList<String>()
@@ -144,7 +144,7 @@ private class FullCompileStrategyImpl {
                 shouldSkipRegularFiles: compileTestsOnly)
             for (srcFile in files) {
                 let filename = JoinPath(srcDir, srcFile)
-                if (includeFileSet.isEmpty() || includeFileSet.contains(NormalizePath(filename))) {
+                if (includeFileSet.isEmpty() || includeFileSet.contains(filename)) {
                     allSrcFiles.add(filename)
                 }
             }
@@ -241,22 +241,16 @@ private class FullCompileStrategyImpl {
             return
         }
         if (let Some(packageSpec) <- pkg.files[0].packageSpec) {
-            pkg.isMacroPackage = packageSpec.hasMacro
-            pkg.fullPackageName = packageSpec.GetPackageName()
             for (file in pkg.files) {
                 if (let Some(filePackageSpec) <- file.packageSpec) {
-                    if (filePackageSpec.hasMacro != pkg.isMacroPackage) {
+                    if (filePackageSpec.hasMacro != packageSpec.hasMacro) {
                         s.ci.diag.Diagnose(DiagCategory.PARSE, filePackageSpec.begin,
                             "package name inconsistent with macro package marker")
                         return
                     }
-                    if (filePackageSpec.GetPackageName() != pkg.fullPackageName) {
-                        s.ci.diag.Diagnose(DiagCategory.PARSE, filePackageSpec.begin,
-                            "package name inconsistent with first source file")
-                        return
-                    }
                 }
             }
+            pkg.isMacroPackage = packageSpec.hasMacro
         }
     }
 

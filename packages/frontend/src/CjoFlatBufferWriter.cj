@@ -669,20 +669,49 @@ private class FrontendCjoFlatBufferWriter {
     // Mirrors ASTWriter.cpp:312-348 ShouldExportSource(VarDecl) for the cases handled by this writer:
     // local non-global variables without outerDecl, plus public global/member const variables.
     private func ShouldExportVarSource(varDecl: VarDecl): Bool {
-        if (varDecl.initializer.isNone() || varDecl.TestAttr(Attribute.IMPORTED)) {
+        if (!Ty.IsTyCorrect(varDecl.GetTy()) || varDecl.initializer.isNone() ||
+            varDecl.TestAttr(Attribute.IMPORTED)) {
             return false
         }
         if (varDecl.IsCommonMatchedWithSpecific()) {
             return false
         }
-        if (!varDecl.TestAttr(Attribute.GLOBAL) && varDecl.outerDecl.isNone()) {
+        if (!varDecl.TestAttr(Attribute.GLOBAL) &&
+            (varDecl.outerDecl.isNone() || IsInstMemberVarInGenericDecl(varDecl))) {
             return true
+        }
+        if (let Some(outer) <- varDecl.outerDecl) {
+            if (outer.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+                return false
+            }
         }
         let isExternal = varDecl.linkage != Linkage.INTERNAL || varDecl.IsExportedDecl()
         let isGlobalVar = varDecl.TestAttr(Attribute.GLOBAL)
         let isMemberVar = varDecl.TestAttr(Attribute.IN_CLASSLIKE) || varDecl.TestAttr(Attribute.IN_STRUCT)
         let isConstGlobalOrMemberVar = varDecl.isConst && (isGlobalVar || isMemberVar)
-        return isExternal && isConstGlobalOrMemberVar
+        if (isExternal && (isConstGlobalOrMemberVar || IsMemberVarShouldBeSrcExported(varDecl))) {
+            var callee: Option<Decl> = None
+            if (let Some(callExpr) <- (varDecl.initializer.getOrThrow() as CallExpr)) {
+                callee = GetCallee(callExpr)
+            }
+            let isCallInstantiatedFunc = if (let Some(calleeDecl) <- callee) {
+                IsInDeclWithAttribute(calleeDecl, Attribute.GENERIC_INSTANTIATED)
+            } else {
+                false
+            }
+            if (!isCallInstantiatedFunc) {
+                return true
+            }
+        }
+        return false
+    }
+
+    // Mirrors ASTWriter.cpp:307-310 GetCallee.
+    private func GetCallee(ce: CallExpr): Option<Decl> {
+        if (let Some(resolved) <- ce.resolvedFunction) {
+            return resolved
+        }
+        return ce.baseFunc.getOrThrow().GetTarget()
     }
 
     // Only get desugared expression. 'ParenExpr' is just a wrapper which can be ignored.
@@ -738,6 +767,9 @@ private class FrontendCjoFlatBufferWriter {
     // (no SaveUnsupportExpr diagnostic stub yet);
     // they are added in later cuts.
     private func SaveExprByKind(realExpr: Expr): FlatBufferOffset {
+        if (let Some(pte) <- (realExpr as PrimitiveTypeExpr)) {
+            return SavePrimitiveTypeExpr(pte)
+        }
         if (let Some(we) <- (realExpr as WildcardExpr)) {
             return SaveWildcardExpr(we)
         }
@@ -749,6 +781,9 @@ private class FrontendCjoFlatBufferWriter {
         }
         if (let Some(ue) <- (realExpr as UnaryExpr)) {
             return SaveUnaryExpr(ue)
+        }
+        if (let Some(ide) <- (realExpr as IncOrDecExpr)) {
+            return SaveIncOrDecExpr(ide)
         }
         if (let Some(be) <- (realExpr as BinaryExpr)) {
             return SaveBinaryExpr(be)
@@ -795,6 +830,9 @@ private class FrontendCjoFlatBufferWriter {
         if (let Some(fie) <- (realExpr as ForInExpr)) {
             return SaveForInExpr(fie)
         }
+        if (let Some(ae2) <- (realExpr as ArrayExpr)) {
+            return SaveArrayExpr(ae2)
+        }
         if (let Some(al) <- (realExpr as ArrayLit)) {
             return SaveArrayLit(al)
         }
@@ -816,8 +854,25 @@ private class FrontendCjoFlatBufferWriter {
         if (let Some(lce) <- (realExpr as LitConstExpr)) {
             return SaveLitConstExpr(lce)
         }
+        if (let Some(pe2) <- (realExpr as PerformExpr)) {
+            return SavePerformExpr(pe2)
+        }
         throw IllegalArgumentException(
             "not yet ported in faithful .cjo writer: SaveExpr for unsupported AST expr kind")
+    }
+
+    // Mirrors ExprWriter.cpp:97-103 SaveExpression(PrimitiveTypeExpr). It carries only basic Expr fields.
+    private func SavePrimitiveTypeExpr(pte: PrimitiveTypeExpr): FlatBufferOffset {
+        let begin = PositionBytes(pte.begin)
+        let end = PositionBytes(pte.end)
+        let typeIndex = SaveExprType(pte)
+        builder.StartTable(9)
+        builder.AddU32(5, typeIndex)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_PrimitiveTypeExpr is index 2 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 2u16)
+        return builder.EndTable()
     }
 
     // Mirrors ExprWriter.cpp:320-332 SaveExpression(PointerExpr): optional operand 0 is
@@ -940,6 +995,31 @@ private class FrontendCjoFlatBufferWriter {
         return builder.EndTable()
     }
 
+    // Mirrors ExprWriter.cpp:218-230 SaveExpression(IncOrDecExpr): operand 0 is expr and IncOrDecInfo
+    // carries only OP_KIND_MAP.at(ide.op). ExprInfo_IncOrDecInfo's union tag value is 4.
+    private func SaveIncOrDecExpr(ide: IncOrDecExpr): FlatBufferOffset {
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(ide.expr.getOrThrow()))
+        let operandsVec = builder.CreateVectorU32(operands)
+        builder.StartTable(1)
+        builder.AddU8(0, OperatorKindToFlat(ide.op))
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(ide.begin)
+        let end = PositionBytes(ide.end)
+        let typeIndex = SaveExprType(ide)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        builder.AddU8(7, 4u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_IncOrDecExpr is index 9 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 9u16)
+        return builder.EndTable()
+    }
+
     // Mirrors ExprWriter.cpp:427-441 SaveExpression(IfExpr): operands are condExpr, thenBody, and
     // elseBody-or-INVALID_FORMAT_INDEX. There is no IfExprInfo table in ModuleFormat.fbs.
     private func SaveIfExpr(ie: IfExpr): FlatBufferOffset {
@@ -988,6 +1068,25 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddStruct(2, end, 4)
         builder.AddStruct(1, begin, 4)
         builder.AddU16(0, 17u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:360-370 SaveExpression(PerformExpr): operand 0 is the performed expr.
+    private func SavePerformExpr(pe: PerformExpr): FlatBufferOffset {
+        let operands = ArrayList<UInt32>()
+        operands.add(SaveExpr(pe.expr.getOrThrow()))
+        let operandsVec = builder.CreateVectorU32(operands)
+
+        let begin = PositionBytes(pe.begin)
+        let end = PositionBytes(pe.end)
+        let typeIndex = SaveExprType(pe)
+        builder.StartTable(9)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_PerformExpr is index 37 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 37u16)
         return builder.EndTable()
     }
 
@@ -1462,6 +1561,35 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddStruct(1, begin, 4)
         // ExprKind_SubscriptExpr is index 12 of enum ExprKind (ModuleFormat.fbs:333-373).
         builder.AddU16(0, 12u16)
+        return builder.EndTable()
+    }
+
+    // Mirrors ExprWriter.cpp:302-317 SaveExpression(ArrayExpr): operands are FuncArg wrapper indexes,
+    // ArrayInfo carries initFunc and isValueArray.
+    private func SaveArrayExpr(ae: ArrayExpr): FlatBufferOffset {
+        let operands = ArrayList<UInt32>()
+        for (arg in ae.args) {
+            operands.add(SaveFuncArg(arg))
+        }
+        let operandsVec = builder.CreateVectorU32(operands)
+        let initFunc = if (let Some(decl) <- ae.initFunc) { CreateFullIdForDecl(decl) } else { CreateInvalidFullId() }
+        builder.StartTable(2)
+        builder.AddBool(1, ae.isValueArray)
+        builder.AddOffset(0, initFunc)
+        let info = builder.EndTable()
+
+        let begin = PositionBytes(ae.begin)
+        let end = PositionBytes(ae.end)
+        let typeIndex = SaveExprType(ae)
+        builder.StartTable(9)
+        builder.AddOffset(8, info)
+        builder.AddU8(7, 9u8)
+        builder.AddU32(5, typeIndex)
+        builder.AddOffset(4, operandsVec)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        // ExprKind_ArrayExpr is index 14 of enum ExprKind (ModuleFormat.fbs:333-373).
+        builder.AddU16(0, 14u16)
         return builder.EndTable()
     }
 

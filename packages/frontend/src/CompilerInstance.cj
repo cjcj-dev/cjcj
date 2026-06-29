@@ -631,14 +631,6 @@ public class CompilerInstance {
     }
 
     public func PerformResultsSaving(): Bool {
-        if (srcPkgs.isEmpty()) {
-            return true
-        }
-        let pkg = srcPkgs[0]
-        let path = invocation.globalOptions.GenerateCachedPathName(pkg.fullPackageName, ".frontend.json")
-        if (!WriteFileContent(path, RenderFrontendResultsJson(this))) {
-            diag.Warn(DiagCategory.OTHER, DEFAULT_POSITION, "failed to write frontend results: " + path)
-        }
         return true
     }
 
@@ -1180,61 +1172,6 @@ public class CompilerInstance {
             collectCHIRDeclSummary(chirPkg, member)
         }
     }
-}
-
-private func RenderFrontendResultsJson(ci: CompilerInstance): String {
-    let builder = StringBuilder()
-    builder.append("{\n")
-    builder.append("  \"compileArgs\": \"" + EscapeJson(ci.cachedInfo.compileArgs) + "\",\n")
-    builder.append("  \"diagnostics\": {\n")
-    builder.append("    \"errors\": " + ci.diag.GetErrorCount().toString() + ",\n")
-    builder.append("    \"warnings\": " + ci.diag.GetWarningCount().toString() + "\n")
-    builder.append("  },\n")
-    builder.append("  \"sourcePackages\": [")
-    let pkgs = ci.GetSourcePackages()
-    var pkgIdx: Int64 = 0
-    while (pkgIdx < pkgs.size) {
-        if (pkgIdx > 0) {
-            builder.append(", ")
-        }
-        builder.append("\"" + EscapeJson(pkgs[pkgIdx].fullPackageName) + "\"")
-        pkgIdx++
-    }
-    builder.append("],\n")
-    builder.append("  \"cache\": {\n")
-    builder.append("    \"files\": ")
-    appendStringArrayJson(builder, ci.cachedInfo.fileSummaries)
-    builder.append(",\n")
-    builder.append("    \"decls\": ")
-    appendStringArrayJson(builder, ci.cachedInfo.declSummaries)
-    builder.append("\n")
-    builder.append("  },\n")
-    builder.append("  \"chirPackages\": [")
-    let chirPkgs = ci.GetAllCHIRPackages()
-    var chirIdx: Int64 = 0
-    while (chirIdx < chirPkgs.size) {
-        if (chirIdx > 0) {
-            builder.append(", ")
-        }
-        builder.append("\"" + EscapeJson(chirPkgs[chirIdx].name) + "\"")
-        chirIdx++
-    }
-    builder.append("]\n")
-    builder.append("}\n")
-    return builder.toString()
-}
-
-private func appendStringArrayJson(builder: StringBuilder, values: ArrayList<String>): Unit {
-    builder.append("[")
-    var idx: Int64 = 0
-    while (idx < values.size) {
-        if (idx > 0) {
-            builder.append(", ")
-        }
-        builder.append("\"" + EscapeJson(values[idx]) + "\"")
-        idx++
-    }
-    builder.append("]")
 }
 
 private func appendGenericParamList(builder: StringBuilder, values: ArrayList<GenericParamDecl>): Unit {
