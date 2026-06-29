@@ -19,14 +19,6 @@ private func contextPackage(ctx: ASTContext): Option<Package> {
     return ctx.curPackage
 }
 
-private class TypeCheckerBoolBox {
-    public var value: Bool
-
-    public init(value: Bool) {
-        this.value = value
-    }
-}
-
 private func scopeNameOf(node: Node): String {
     return if (node.scopeName.isEmpty()) { TOPLEVEL_SCOPE_NAME } else { node.scopeName }
 }
@@ -516,8 +508,12 @@ public class TypeChecker {
 
     private func AddDefaultFunctionForDecl(decl: Decl): Unit {
         if (let Some(structDecl) <- (decl as StructDecl)) {
-            AddDefaultCtorIfNeeded(structDecl)
             if (let Some(body) <- structDecl.body) {
+                if (body.TestAttr(Attribute.IS_BROKEN)) {
+                    return
+                }
+                AddDefaultCtorIfNeeded(structDecl)
+                AddSetterGetterInProp(structDecl)
                 for (member in body.decls) {
                     AddDefaultFunctionForDecl(member)
                 }
@@ -525,8 +521,12 @@ public class TypeChecker {
             return
         }
         if (let Some(classDecl) <- (decl as ClassDecl)) {
-            AddDefaultCtorIfNeeded(classDecl)
             if (let Some(body) <- classDecl.body) {
+                if (body.TestAttr(Attribute.IS_BROKEN)) {
+                    return
+                }
+                AddDefaultCtorIfNeeded(classDecl)
+                AddSetterGetterInProp(classDecl)
                 for (member in body.decls) {
                     AddDefaultFunctionForDecl(member)
                 }
@@ -535,6 +535,10 @@ public class TypeChecker {
         }
         if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
             if (let Some(body) <- interfaceDecl.body) {
+                if (body.TestAttr(Attribute.IS_BROKEN)) {
+                    return
+                }
+                AddSetterGetterInProp(interfaceDecl)
                 for (member in body.decls) {
                     AddDefaultFunctionForDecl(member)
                 }
@@ -542,12 +546,14 @@ public class TypeChecker {
             return
         }
         if (let Some(enumDecl) <- (decl as EnumDecl)) {
+            AddSetterGetterInProp(enumDecl)
             for (member in enumDecl.members) {
                 AddDefaultFunctionForDecl(member)
             }
             return
         }
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            AddSetterGetterInProp(extendDecl)
             for (member in extendDecl.members) {
                 AddDefaultFunctionForDecl(member)
             }
@@ -686,6 +692,55 @@ public class TypeChecker {
                 firstParam.typeNode = ASTCloner.Clone(typeNode) as Type
             }
             AddUnitType(setter)
+        }
+    }
+
+    private func AddSetterGetterInProp(cld: InheritableDecl): Unit {
+        for (member in cld.GetMemberDeclPtrs()) {
+            if (member.astKind != ASTKind.PROP_DECL || member.TestAttr(Attribute.IMPORTED) ||
+                member.TestAttr(Attribute.FROM_COMMON_PART)) {
+                continue
+            }
+            if (!member.TestAttr(Attribute.ABSTRACT) && !IsCommonWithoutDefault(member)) {
+                continue
+            }
+            let propDecl = (member as PropDecl).getOrThrow()
+            let getter = FuncDecl()
+            getter.propDecl = Some(propDecl)
+            getter.identifier = SrcIdentifier("get")
+            getter.isGetter = true
+            getter.CloneAttrs(propDecl)
+            getter.DisableAttr(Attribute.MUT)
+            getter.EnableAttr(Attribute.IMPLICIT_ADD)
+            getter.EnableAttr(Attribute.COMPILER_ADD)
+            if (cld.astKind == ASTKind.INTERFACE_DECL) {
+                getter.EnableAttr(Attribute.PUBLIC)
+            }
+            let getFuncParamList = FuncParamList()
+            let getFuncBody = FuncBody()
+            getFuncBody.paramLists.add(getFuncParamList)
+            getter.funcBody = Some(getFuncBody)
+            propDecl.getters.add(getter)
+            if (!propDecl.isVar) {
+                continue
+            }
+            let setter = FuncDecl()
+            setter.propDecl = Some(propDecl)
+            setter.isSetter = true
+            setter.identifier = SrcIdentifier("set")
+            setter.CloneAttrs(propDecl)
+            setter.DisableAttr(Attribute.MUT)
+            setter.EnableAttr(Attribute.IMPLICIT_ADD)
+            if (cld.astKind == ASTKind.INTERFACE_DECL) {
+                setter.EnableAttr(Attribute.PUBLIC)
+            }
+            let setFuncParamList = FuncParamList()
+            let param = CreateFuncParam("set")
+            setFuncParamList.params.add(param)
+            let setFuncBody = FuncBody()
+            setFuncBody.paramLists.add(setFuncParamList)
+            setter.funcBody = Some(setFuncBody)
+            propDecl.setters.add(setter)
         }
     }
 
@@ -1023,7 +1078,7 @@ public class TypeChecker {
         PerformRecursiveTypesElimination(recursivePkgs, impl.typeManager)
         let implicitUsedDecls = GetImplicitUsedCoreDecls()
         let activePkgs = ArrayList<Package>()
-        let hasProgramEntry = TypeCheckerBoolBox(false)
+        var hasProgramEntry = false
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
                 activePkgs.add(pkg)
@@ -1046,17 +1101,26 @@ public class TypeChecker {
                     }), diag: impl.diag)
                 DesugarAfterInstantiation(impl.typeManager, recursivePkgs, pkg,
                     implicitUsedDecls: Some(implicitUsedDecls))
-                IterateToplevelDecls(pkg, { decl: Decl =>
-                    if (let Some(mainDecl) <- (decl as MainDecl)) {
-                        if (let Some(_) <- mainDecl.desugarDecl) {
-                            hasProgramEntry.value = true
+                for (file in pkg.files) {
+                    for (decl in file.decls) {
+                        if (let Some(mainDecl) <- (decl as MainDecl)) {
+                            if (let Some(_) <- mainDecl.desugarDecl) {
+                                hasProgramEntry = true
+                            }
                         }
                     }
-                })
+                    for (decl2 in file.exportedInternalDecls) {
+                        if (let Some(mainDecl2) <- (decl2 as MainDecl)) {
+                            if (let Some(_) <- mainDecl2.desugarDecl) {
+                                hasProgramEntry = true
+                            }
+                        }
+                    }
+                }
             }
         }
         substituteImportedTypeAliasTy(impl.typeManager, recursivePkgs)
-        CheckWhetherHasProgramEntry(hasProgramEntry.value)
+        CheckWhetherHasProgramEntry(hasProgramEntry)
     }
 
     private func CheckWhetherHasProgramEntry(hasProgramEntry: Bool): Unit {
@@ -3797,6 +3861,9 @@ public class TypeChecker {
         if (expr.TestAttr(Attribute.IS_BROKEN)) {
             expr.SetTy(TypeManager.GetInvalidTy())
             typeCheckExprClearTargetType(ctx, expr)
+            return false
+        }
+        if (target.HasQuestTy() && !IsQuestableNode(expr)) {
             return false
         }
         if (let Some(lambda) <- (expr as LambdaExpr)) {
