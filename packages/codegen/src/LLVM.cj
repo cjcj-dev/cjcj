@@ -186,6 +186,7 @@ foreign {
     func LLVMGetStructName(structTy: LLVMTypeRef): CString
     func LLVMStructSetBody(structTy: LLVMTypeRef, elementTypes: CPointer<LLVMTypeRef>, elementCount: UInt32,
         packed: Int32): Unit
+    func LLVMIsLiteralStruct(structTy: LLVMTypeRef): Int32
     func LLVMFunctionType(returnType: LLVMTypeRef, paramTypes: CPointer<LLVMTypeRef>, paramCount: UInt32, isVarArg: Int32): LLVMTypeRef
     func LLVMGetTypeKind(valueType: LLVMTypeRef): Int32
     func LLVMCountStructElementTypes(structTy: LLVMTypeRef): UInt32

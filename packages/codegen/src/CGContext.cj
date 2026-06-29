@@ -288,7 +288,10 @@ public class CGContext {
 
     public func GetOrCreateCGType(cgMod: CGModule, chirTy: Type, extraInfo: TypeExtraInfo): CGType {
         if (let Some(cached) <- impl.FindCGType(extraInfo, chirTy)) {
-            return cached
+            let cachedType = if (let Some(rawType) <- cached.llvmType) { rawType } else { LLVMNullType() }
+            if (!IsLitStructPtrType(cachedType)) {
+                return cached
+            }
         }
         let created = CGTypeMgr.GetConcreteCGTypeFor(cgMod, chirTy, extraInfo: extraInfo)
         impl.SetCGType(extraInfo, chirTy, created)

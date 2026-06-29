@@ -57,6 +57,15 @@ public func SetStructTypeBody(structType: LLVMTypeRef, body: ArrayList<LLVMTypeR
     }
 }
 
+public func IsLitStructPtrType(llvmType: LLVMTypeRef): Bool {
+    if (llvmType.isNull() || unsafe { LLVMGetTypeKind(llvmType) } != 12) {
+        return false
+    }
+    let elementType = unsafe { LLVMGetElementType(llvmType) }
+    return !elementType.isNull() && unsafe { LLVMGetTypeKind(elementType) } == 10 &&
+        unsafe { LLVMIsLiteralStruct(elementType) } != 0
+}
+
 public func MangleName(value: String): String {
     return value.size.toString() + value
 }
