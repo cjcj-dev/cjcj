@@ -103,7 +103,7 @@ public class Driver {
         if (driverOptions.frontendOutputFiles.isEmpty() && driverOptions.inputObjs.isEmpty()) {
             return true
         }
-        if (driverOptions.IsEmitCHIREnable()) {
+        if (driverOptions.IsEmitCHIREnable() || driverOptions.outputMode == OutputMode.CHIR) {
             return true
         }
         return InvokeCompileToolchain()
