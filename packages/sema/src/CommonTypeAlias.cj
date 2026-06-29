@@ -2,6 +2,7 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::utils.{CJC_ASSERT, PData, VersionID}
 
 public enum BlameStyle {
     | ARGUMENT
@@ -69,23 +70,54 @@ public func BlameStyleToString(style: BlameStyle): String {
     }
 }
 
+public type TyVars = ArrayList<GenericsTy>
+
 public class TySet {
     public let values: ArrayList<Ty> = ArrayList<Ty>()
+    private let log: ArrayList<ArrayList<(Bool, Ty)>> = ArrayList<ArrayList<(Bool, Ty)>>()
+    private let stashes: ArrayList<ArrayList<ArrayList<(Bool, Ty)>>> =
+        ArrayList<ArrayList<ArrayList<(Bool, Ty)>>>()
 
-    public init() {}
+    public init() {
+        commit()
+    }
 
     public init(values: Array<Ty>) {
         for (ty in values) {
-            Add(ty)
+            if (!Contains(ty)) {
+                this.values.add(ty)
+            }
+        }
+        commit()
+    }
+
+    public init(other: TySet) {
+        for (ty in other.values) {
+            values.add(ty)
+        }
+        for (entries in other.log) {
+            let cloned = ArrayList<(Bool, Ty)>()
+            for (entry in entries) {
+                cloned.add(entry)
+            }
+            log.add(cloned)
+        }
+        for (stashGroup in other.stashes) {
+            let clonedGroup = ArrayList<ArrayList<(Bool, Ty)>>()
+            for (stash in stashGroup) {
+                let cloned = ArrayList<(Bool, Ty)>()
+                for (entry in stash) {
+                    cloned.add(entry)
+                }
+                clonedGroup.add(cloned)
+            }
+            stashes.add(clonedGroup)
         }
     }
 
     public func Add(ty: Ty): Bool {
-        if (Contains(ty)) {
-            return false
-        }
-        values.add(ty)
-        return true
+        checkIn(ty)
+        return insert(ty)
     }
 
     public func AddAll(other: TySet): Unit {
@@ -104,15 +136,8 @@ public class TySet {
     }
 
     public func Remove(ty: Ty): Bool {
-        var idx: Int64 = 0
-        while (idx < values.size) {
-            if (SameTy(values[idx], ty)) {
-                values.remove(at: idx)
-                return true
-            }
-            idx++
-        }
-        return false
+        checkOut(ty)
+        return erase(ty)
     }
 
     public func IsEmpty(): Bool {
@@ -125,14 +150,13 @@ public class TySet {
 
     public func Clear(): Unit {
         values.clear()
+        log.clear()
+        stashes.clear()
+        commit()
     }
 
     public func Clone(): TySet {
-        let out = TySet()
-        for (ty in values) {
-            out.Add(ty)
-        }
-        return out
+        return TySet(this)
     }
 
     public func ToString(): String {
@@ -142,6 +166,151 @@ public class TySet {
         }
         return "{" + JoinStrings(parts, ", ") + "}"
     }
+
+    public func softClear(): Unit {
+        let oldValues = ArrayList<Ty>()
+        for (value in values) {
+            oldValues.add(value)
+        }
+        for (value in oldValues) {
+            Remove(value)
+        }
+    }
+
+    public func commit(): Unit {
+        log.add(ArrayList<(Bool, Ty)>())
+        stashes.add(ArrayList<ArrayList<(Bool, Ty)>>())
+    }
+
+    public func reset(): Unit {
+        CJC_ASSERT(!log.isEmpty())
+        let last = log[log.size - 1]
+        var idx = last.size - 1
+        while (idx >= 0) {
+            resetOne(last[idx])
+            idx--
+        }
+        last.clear()
+    }
+
+    public func stash(): VersionID {
+        CJC_ASSERT(!stashes.isEmpty())
+        let lastLog = log[log.size - 1]
+        let currentStashes = stashes[stashes.size - 1]
+        let cloned = ArrayList<(Bool, Ty)>()
+        for (entry in lastLog) {
+            cloned.add(entry)
+        }
+        currentStashes.add(cloned)
+        reset()
+        return currentStashes.size
+    }
+
+    public func apply(version: VersionID): Unit {
+        if (version == 0) {
+            return
+        }
+        let versionRaw = version - 1
+        let currentStashes = stashes[stashes.size - 1]
+        CJC_ASSERT(currentStashes.size > versionRaw)
+        for (entry in currentStashes[versionRaw]) {
+            applyOne(entry)
+        }
+    }
+
+    public func resetSoft(): Unit {
+        if (log.size > 1) {
+            stashes.remove(at: stashes.size - 1)
+            let newLast = log[log.size - 2]
+            for (entry in log[log.size - 1]) {
+                newLast.add(entry)
+            }
+            log.remove(at: log.size - 1)
+        } else {
+            stashes[stashes.size - 1].clear()
+        }
+    }
+
+    public func diff(): Bool {
+        return log[log.size - 1].isEmpty()
+    }
+
+    private func insert(value: Ty): Bool {
+        if (Contains(value)) {
+            return false
+        }
+        values.add(value)
+        return true
+    }
+
+    private func erase(value: Ty): Bool {
+        var idx: Int64 = 0
+        while (idx < values.size) {
+            if (SameTy(values[idx], value)) {
+                values.remove(at: idx)
+                return true
+            }
+            idx++
+        }
+        return false
+    }
+
+    private func resetOne(entry: (Bool, Ty)): Unit {
+        if (entry[0]) {
+            erase(entry[1])
+        } else {
+            insert(entry[1])
+        }
+    }
+
+    private func applyOne(entry: (Bool, Ty)): Unit {
+        if (entry[0]) {
+            insert(entry[1])
+        } else {
+            erase(entry[1])
+        }
+    }
+
+    private func checkIn(value: Ty): Unit {
+        if (!Contains(value)) {
+            log[log.size - 1].add((true, value))
+        }
+    }
+
+    private func checkOut(value: Ty): Unit {
+        if (Contains(value)) {
+            log[log.size - 1].add((false, value))
+        }
+    }
+}
+
+public type LowerBounds = TySet
+public type UpperBounds = TySet
+
+private func AddTyVarUnique(values: TyVars, tyVar: GenericsTy): Bool {
+    for (value in values) {
+        if (SameTy(value, tyVar)) {
+            return false
+        }
+    }
+    values.add(tyVar)
+    return true
+}
+
+public func StaticToTyVars<T>(tys: ArrayList<T>): TyVars where T <: Ty {
+    let ret = TyVars()
+    for (ty in tys) {
+        let _ = AddTyVarUnique(ret, (ty as GenericsTy).getOrThrow())
+    }
+    return ret
+}
+
+public func StaticToTyVars(tys: TySet): TyVars {
+    let ret = TyVars()
+    for (ty in tys.values) {
+        let _ = AddTyVarUnique(ret, (ty as GenericsTy).getOrThrow())
+    }
+    return ret
 }
 
 public class BlameSet {
@@ -150,6 +319,18 @@ public class BlameSet {
     public init() {}
 
     public func Add(blame: Blame): Unit {
+        var idx: Int64 = 0
+        while (idx < values.size) {
+            if (values[idx].Less(blame)) {
+                idx++
+                continue
+            }
+            if (!blame.Less(values[idx])) {
+                return
+            }
+            values.add(blame, at: idx)
+            return
+        }
         values.add(blame)
     }
 
@@ -323,6 +504,72 @@ public class SubstPack {
     }
 }
 
+public func StableTyCmp(ty1: Option<Ty>, ty2: Option<Ty>): Bool {
+    return CompTyByNames(ty1, ty2)
+}
+
+public func StableTyCmp(ty1: Ty, ty2: Ty): Bool {
+    return StableTyCmp(Some(ty1), Some(ty2))
+}
+
+public class StableTys {
+    public let values: ArrayList<Ty> = ArrayList<Ty>()
+
+    public init() {}
+
+    public init(tys: TySet) {
+        for (ty in tys.values) {
+            Add(ty)
+        }
+    }
+
+    public func Add(ty: Ty): Bool {
+        var idx: Int64 = 0
+        while (idx < values.size) {
+            if (StableTyCmp(values[idx], ty)) {
+                idx++
+                continue
+            }
+            if (!StableTyCmp(ty, values[idx])) {
+                return false
+            }
+            values.add(ty, at: idx)
+            return true
+        }
+        values.add(ty)
+        return true
+    }
+}
+
+public class StableTyVars {
+    public let values: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
+
+    public init() {}
+
+    public init(tys: TyVars) {
+        for (ty in tys) {
+            Add(ty)
+        }
+    }
+
+    public func Add(ty: GenericsTy): Bool {
+        var idx: Int64 = 0
+        while (idx < values.size) {
+            if (StableTyCmp(values[idx], ty)) {
+                idx++
+                continue
+            }
+            if (!StableTyCmp(ty, values[idx])) {
+                return false
+            }
+            values.add(ty, at: idx)
+            return true
+        }
+        values.add(ty)
+        return true
+    }
+}
+
 public class ConstraintEntry {
     public var tyVar: GenericsTy
     public var bounds: TyVarBounds
@@ -394,6 +641,86 @@ public class ErrOrSubst {
             return true
         }
         return false
+    }
+}
+
+public type CstVersionID = ArrayList<(GenericsTy, (VersionID, VersionID, VersionID, VersionID))>
+
+extend PData {
+    public static func CommitScope(data: Constraint): ConstraintPDataCommitScope {
+        return ConstraintPDataCommitScope(data)
+    }
+
+    public static func Commit(data: Constraint): Unit {
+        for (entry in data.entries) {
+            entry.bounds.lbs.commit()
+            entry.bounds.ubs.commit()
+            entry.bounds.sum.commit()
+            entry.bounds.eq.commit()
+        }
+    }
+
+    public static func Reset(data: Constraint): Unit {
+        for (entry in data.entries) {
+            entry.bounds.lbs.reset()
+            entry.bounds.ubs.reset()
+            entry.bounds.sum.reset()
+            entry.bounds.eq.reset()
+        }
+    }
+
+    public static func Stash(data: Constraint): CstVersionID {
+        let ver = CstVersionID()
+        for (entry in data.entries) {
+            let id1 = entry.bounds.lbs.stash()
+            let id2 = entry.bounds.ubs.stash()
+            let id3 = entry.bounds.sum.stash()
+            let id4 = entry.bounds.eq.stash()
+            ver.add((entry.tyVar, (id1, id2, id3, id4)))
+        }
+        return ver
+    }
+
+    public static func Apply(data: Constraint, version: CstVersionID): Unit {
+        for (entry in version) {
+            let bounds = data.GetOrCreate(entry[0])
+            let ids = entry[1]
+            bounds.lbs.apply(ids[0])
+            bounds.ubs.apply(ids[1])
+            bounds.sum.apply(ids[2])
+            bounds.eq.apply(ids[3])
+        }
+    }
+
+    public static func ResetSoft(data: Constraint): Unit {
+        for (entry in data.entries) {
+            entry.bounds.lbs.resetSoft()
+            entry.bounds.ubs.resetSoft()
+            entry.bounds.sum.resetSoft()
+            entry.bounds.eq.resetSoft()
+        }
+    }
+}
+
+public class ConstraintPDataCommitScope <: Resource {
+    private let data: Constraint
+    private var closed: Bool = false
+
+    public init(data: Constraint) {
+        this.data = data
+        PData.Commit(data)
+    }
+
+    public func close(): Unit {
+        if (closed) {
+            return
+        }
+        PData.ResetSoft(data)
+        closed = true
+    }
+
+    public func isClosed(): Bool {
+        return closed
     }
 }
 

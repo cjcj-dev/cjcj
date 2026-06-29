@@ -402,9 +402,13 @@ private class ExternalLinkageAnalyzer {
             }
             return VisitAction.WALK_CHILDREN
         }
-        if (let Some(target) <- curNode.GetTarget()) {
-            SetTargetLinkage(target)
+        let target = curNode.GetTarget()
+        let realTarget = GetRealTarget(target)
+        if (let None <- realTarget) {
+            return VisitAction.WALK_CHILDREN
         }
+        SetTargetLinkage(target.getOrThrow())
+        SetTargetLinkage(realTarget.getOrThrow())
         return VisitAction.WALK_CHILDREN
     }
 

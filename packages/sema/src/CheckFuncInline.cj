@@ -202,18 +202,10 @@ public func IsInlineFunction(fd: FuncDecl): Bool {
 }
 
 private func CheckDefaultParameterFunctionIsInline(fd: FuncDecl): Unit {
-    if (let Some(body) <- fd.funcBody) {
-        if (body.paramLists.isEmpty()) {
-            return
-        }
-        for (param in body.paramLists[0].params) {
-            if (let Some(desugarDecl) <- param.desugarDecl) {
-                if (let Some(owner) <- desugarDecl.ownerFunc) {
-                    desugarDecl.isInline = owner.isInline
-                } else {
-                    desugarDecl.isInline = fd.isInline
-                }
-            }
+    let params = fd.funcBody.getOrThrow().paramLists[0].params
+    for (param in params) {
+        if (let Some(desugarDecl) <- param.desugarDecl) {
+            desugarDecl.isInline = desugarDecl.ownerFunc.getOrThrow().isInline
         }
     }
 }
@@ -258,14 +250,20 @@ private func RemoveImportedInlineFunctionDecls(pkgs: ArrayList<Package>): ArrayL
     return out
 }
 
-private func ComesAfter(left: FuncDecl, right: FuncDecl): Bool {
-    if (right.begin < left.begin) {
+private func CompNodeByPos(n1: Option<Node>, n2: Option<Node>): Bool {
+    if (let Some(left) <- n1) {
+        if (let Some(right) <- n2) {
+            return left.begin.fileID < right.begin.fileID ||
+                (left.begin.fileID == right.begin.fileID && left.begin < right.begin) ||
+                (left.begin.fileID == right.begin.fileID && left.begin == right.begin &&
+                    left.objectId < right.objectId)
+        }
+        return false
+    }
+    if (let Some(_) <- n2) {
         return true
     }
-    if (left.begin == right.begin && right.end < left.end) {
-        return true
-    }
-    return left.begin == right.begin && left.end == right.end && left.identifier.Val() > right.identifier.Val()
+    return false
 }
 
 private func SortInlineFuncDecls(values: ArrayList<FuncDecl>): Unit {
@@ -273,7 +271,7 @@ private func SortInlineFuncDecls(values: ArrayList<FuncDecl>): Unit {
     while (idx < values.size) {
         let current = values[idx]
         var prev = idx - 1
-        while (prev >= 0 && ComesAfter(values[prev], current)) {
+        while (prev >= 0 && CompNodeByPos(Some(current), Some(values[prev]))) {
             values[prev + 1] = values[prev]
             prev--
         }
