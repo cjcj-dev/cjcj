@@ -125,24 +125,25 @@ public class ExtendBoxMarker {
         if (let Some(base) <- callExpr.baseFunc) {
             if (let Some(baseTy) <- base.GetTy()) {
                 if (let Some(funcTy) <- (baseTy as FuncTy)) {
-                    checkCallArgs(callExpr, callExpr.args, funcTy)
+                    let argsToCheck = if (let Some(desugarArgs) <- callExpr.desugarArgs) {
+                        desugarArgs
+                    } else {
+                        callExpr.args
+                    }
+                    var count: Int64 = 0
+                    while (count < argsToCheck.size && count < funcTy.paramTys.size) {
+                        if (let Some(argExpr) <- argsToCheck[count].expr) {
+                            if (NeedAutoBox(argExpr.GetTy(), Some(funcTy.paramTys[count]))) {
+                                callExpr.EnableAttr(Attribute.NEED_AUTO_BOX)
+                            }
+                        }
+                        count++
+                    }
                     return VisitAction.WALK_CHILDREN
                 }
             }
         }
         return VisitAction.WALK_CHILDREN
-    }
-
-    private func checkCallArgs(callExpr: CallExpr, args: ArrayList<FuncArg>, funcTy: FuncTy): Unit {
-        var count: Int64 = 0
-        while (count < args.size && count < funcTy.paramTys.size) {
-            if (let Some(argExpr) <- args[count].expr) {
-                if (NeedAutoBox(argExpr.GetTy(), Some(funcTy.paramTys[count]))) {
-                    callExpr.EnableAttr(Attribute.NEED_AUTO_BOX)
-                }
-            }
-            count++
-        }
     }
 
     private func MarkBoxPointHandleIfExpr(ifExpr: IfExpr): VisitAction {
@@ -161,8 +162,6 @@ public class ExtendBoxMarker {
                         if (let Some(elseExpr) <- ifExpr.elseBody) {
                             if (let Some(block) <- (elseExpr as Block)) {
                                 CheckBlockNeedBox(block, ifTy, ifExpr)
-                            } else if (NeedAutoBox(elseExpr.GetTy(), Some(ifTy))) {
-                                ifExpr.EnableAttr(Attribute.NEED_AUTO_BOX)
                             }
                         }
                     }
@@ -258,29 +257,58 @@ public class ExtendBoxMarker {
             return VisitAction.WALK_CHILDREN
         }
         if (let Some(arrayTy) <- arrayExpr.GetTy()) {
-            if (arrayTy.typeArgs.size == 1) {
-                let elemTy = arrayTy.typeArgs[0]
-                if (arrayExpr.isValueArray) {
-                    if (let Some(argExpr) <- arrayExpr.args[0].expr) {
-                        if (NeedAutoBox(argExpr.GetTy(), Some(elemTy))) {
-                            arrayExpr.EnableAttr(Attribute.NEED_AUTO_BOX)
-                        }
+            let initFuncOpt = arrayExpr.initFunc
+            match (initFuncOpt) {
+                case Some(initFuncForName) =>
+                    if (initFuncForName.identifier != "arrayInitByCollection") {
+                        return VisitAction.WALK_CHILDREN
                     }
-                } else if (let None <- arrayExpr.initFunc) {
-                    if (arrayExpr.args.size > 1) {
-                        if (let Some(argExpr) <- arrayExpr.args[1].expr) {
-                            if (NeedAutoBox(argExpr.GetTy(), Some(elemTy))) {
-                                arrayExpr.EnableAttr(Attribute.NEED_AUTO_BOX)
-                            }
-                        }
-                    }
-                } else {
-                    if (let Some(argExpr) <- arrayExpr.args[0].expr) {
-                        if (NeedAutoBox(argExpr.GetTy(), Some(elemTy))) {
-                            arrayExpr.EnableAttr(Attribute.NEED_AUTO_BOX)
-                        }
+                case None => ()
+            }
+            let typeArgs = typeManager.GetTypeArgs(arrayTy)
+            if (arrayExpr.isValueArray) {
+                if (let Some(argExpr) <- arrayExpr.args[0].expr) {
+                    if (NeedAutoBox(argExpr.GetTy(), Some(typeArgs[0]))) {
+                        arrayExpr.EnableAttr(Attribute.NEED_AUTO_BOX)
                     }
                 }
+                return VisitAction.WALK_CHILDREN
+            }
+            match (initFuncOpt) {
+                case None =>
+                    if (let Some(argExpr) <- arrayExpr.args[1].expr) {
+                        if (NeedAutoBox(argExpr.GetTy(), Some(typeArgs[0]))) {
+                            arrayExpr.EnableAttr(Attribute.NEED_AUTO_BOX)
+                        }
+                    }
+                    return VisitAction.WALK_CHILDREN
+                case Some(initFuncForCollection) =>
+                    if (let None <- initFuncForCollection.GetTy()) {
+                        return VisitAction.WALK_CHILDREN
+                    }
+                    let initFuncTy = initFuncForCollection.GetTy().getOrThrow()
+                    let rawInitFuncTy = match (initFuncTy as FuncTy) {
+                        case Some(value) => value
+                        case None => return VisitAction.WALK_CHILDREN
+                    }
+                    if (rawInitFuncTy.paramTys.size != 2) {
+                        return VisitAction.WALK_CHILDREN
+                    }
+                    let initGeneric = match (initFuncForCollection.GetGeneric()) {
+                        case Some(value) => value
+                        case None => return VisitAction.WALK_CHILDREN
+                    }
+                    if (initGeneric.typeParameters.size != typeArgs.size) {
+                        return VisitAction.WALK_CHILDREN
+                    }
+                    let typeMapping = GenerateTypeMapping(initFuncForCollection, typeArgs)
+                    let instantiatedInitFuncTy =
+                        (typeManager.GetInstantiatedTy(rawInitFuncTy, typeMapping) as FuncTy).getOrThrow()
+                    if (let Some(argExpr) <- arrayExpr.args[0].expr) {
+                        if (NeedAutoBox(argExpr.GetTy(), Some(instantiatedInitFuncTy.paramTys[1]))) {
+                            arrayExpr.EnableAttr(Attribute.NEED_AUTO_BOX)
+                        }
+                    }
             }
         }
         return VisitAction.WALK_CHILDREN
@@ -387,8 +415,4 @@ public class ExtendBoxMarker {
 
 public func MarkExtendBox(typeManager: TypeManager, root: Node): Unit {
     ExtendBoxMarker.Mark(typeManager, root)
-}
-
-public func SelfhostPortStatus_ExtendBoxMarker(): Bool {
-    return true
 }
