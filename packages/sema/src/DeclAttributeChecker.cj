@@ -159,6 +159,9 @@ private class DeclAttributeCheckerImpl {
     }
 
     private func CheckStructAttribute(structDecl: StructDecl): Unit {
+        if (let None <- structDecl.body) {
+            return
+        }
         SetCommonAttributes(structDecl)
         if (let Some(body) <- structDecl.body) {
             for (member in body.decls) {
@@ -554,8 +557,4 @@ public func CheckDeclAttributesForDecl(
     let issues = ArrayList<DeclAttributeIssue>()
     DeclAttributeCheckerImpl(opts, decl, issues).Check()
     return CloneDeclAttributeIssues(issues)
-}
-
-public func SelfhostPortStatus_DeclAttributeChecker(): Bool {
-    return true
 }
