@@ -137,8 +137,11 @@ private func getTopLevelFuncDecls(pkg: Package, out: ArrayList<FuncDecl>): Unit 
 }
 
 private func containsFunc(funcs: ArrayList<FuncDecl>, fd: FuncDecl): Bool {
+    if (funcs.isEmpty()) {
+        return false
+    }
     for (item in funcs) {
-        if (item.identifier == fd.identifier && item.fullPackageName == fd.fullPackageName) {
+        if (refEq(item, fd)) {
             return true
         }
     }
@@ -155,8 +158,7 @@ private func findModifier(decl: Decl, target: String): Bool {
 }
 
 private func findMacro(med: MacroExpandDecl, target: String): Bool {
-    if (med.identifier == target || med.invocation.macroCallDiagInfo.identifier == target ||
-        med.invocation.macroCallDiagInfo.fullName == target) {
+    if (med.identifier == target) {
         return true
     }
     if (let Some(innerDecl) <- med.invocation.decl) {
@@ -165,6 +167,18 @@ private func findMacro(med: MacroExpandDecl, target: String): Bool {
         }
     }
     return false
+}
+
+private func getMacroDecl(med: MacroExpandDecl, target: String): MacroExpandDecl {
+    if (med.identifier == target || med.invocation.decl.isNone()) {
+        return med
+    }
+    if (let Some(innerDecl) <- med.invocation.decl) {
+        if (let Some(nextMed) <- (innerDecl as MacroExpandDecl)) {
+            return getMacroDecl(nextMed, target)
+        }
+    }
+    return med
 }
 
 private func getDeclFromMacro(med: MacroExpandDecl, expectedKind: ASTKind): Option<Decl> {
@@ -202,7 +216,7 @@ private func isUnitFunction(fd: FuncDecl): Bool {
         if (let Some(primitiveType) <- (retType as PrimitiveType)) {
             return TypeKindEquals(primitiveType.kind, TypeKind.TYPE_UNIT)
         }
-        return retType.name == "Unit"
+        return false
     }
     return true
 }
@@ -283,6 +297,13 @@ public class TestEntryConstructor {
 
     public static func ConstructTestSuite(moduleName: String, srcPkgs: ArrayList<Package>,
         importedPkgs: ArrayList<PackageDecl>, compileTestsOnly: Bool, mockEnabled: Bool): Unit {
+        let currentPkg = srcPkgs[srcPkgs.size - 1]
+        let importedMainPartPkgForTestPkg: Option<Package> = if (compileTestsOnly &&
+            isTestPackageName(currentPkg.fullPackageName)) {
+            FindMainPartPkgForTestPkg(currentPkg, importedPkgs)
+        } else {
+            None
+        }
         let testMod = TestModule(moduleName)
         for (pkg in srcPkgs) {
             let testPkg = TestPackage(pkg.fullPackageName)
@@ -292,17 +313,15 @@ public class TestEntryConstructor {
             }
             testMod.testPackages.add(testPkg)
         }
-        if (!srcPkgs.isEmpty() && compileTestsOnly && isTestPackageName(srcPkgs[srcPkgs.size - 1].fullPackageName)) {
-            if (let Some(mainPartPkg) <- FindMainPartPkgForTestPkg(srcPkgs[srcPkgs.size - 1], importedPkgs)) {
-                let mainTestPkg = TestPackage(mainPartPkg.fullPackageName)
-                let mainFuncs = getTestSuiteRegisterFunctions(mainPartPkg)
-                for (mainFuncDecl in mainFuncs) {
-                    mainTestPkg.testRegisterFunctions.add(mainFuncDecl)
-                }
-                testMod.testPackages.add(mainTestPkg)
+        if (let Some(mainPartPkg) <- importedMainPartPkgForTestPkg) {
+            let mainTestPkg = TestPackage(mainPartPkg.fullPackageName)
+            let mainFuncs = getTestSuiteRegisterFunctions(mainPartPkg)
+            for (mainFuncDecl in mainFuncs) {
+                mainTestPkg.testRegisterFunctions.add(mainFuncDecl)
             }
+            testMod.testPackages.add(mainTestPkg)
         }
-        if (srcPkgs.isEmpty() || srcPkgs[0].files.isEmpty()) {
+        if (srcPkgs[0].files.isEmpty()) {
             return
         }
         ConstructTestImports(srcPkgs[0], testMod)
@@ -348,38 +367,45 @@ public class TestEntryConstructor {
     }
 
     private func CheckClassWithMacro(med: MacroExpandDecl): Unit {
-        if (!findMacro(med, "Test") && !findMacro(med, "TestCase")) {
+        if ((!findMacro(med, "Test") && !findMacro(med, "TestCase")) || med.invocation.decl.isNone()) {
             return
         }
         if (let Some(classDecl) <- getClassFromMacro(med)) {
             if (findMacro(med, "Test") && findModifier(classDecl, "foreign")) {
-                diag.Diagnose(med.begin, "@Test modified foreign class")
+                diag.Diagnose(getMacroDecl(med, "Test").begin, DiagKind.macro_using_error,
+                    args: [DiagArgument("@Test modified foreign class")]).Emit()
             }
             if (findMacro(med, "TestCase") && findModifier(classDecl, "foreign")) {
-                diag.Diagnose(med.begin, "@TestCase modified foreign class")
+                diag.Diagnose(getMacroDecl(med, "TestCase").begin, DiagKind.macro_using_error,
+                    args: [DiagArgument("@TestCase modified foreign class")]).Emit()
             }
             if (findMacro(med, "Test") && !hasParameterlessConstructor(classDecl)) {
-                diag.Diagnose(med.begin, "Class modified by @Test must contain a parameterless construction.")
+                diag.Diagnose(getMacroDecl(med, "Test").begin, DiagKind.macro_using_error,
+                    args: [DiagArgument("Class modified by @Test must contain a parameterless construction.")]).Emit()
             }
         }
     }
 
     private func CheckFunctionWithAtTest(med: MacroExpandDecl, funcs: ArrayList<FuncDecl>, macroName: String): Unit {
-        if (!findMacro(med, macroName)) {
+        if (!findMacro(med, macroName) || med.invocation.decl.isNone()) {
             return
         }
         if (let Some(fd) <- getFuncFromMacro(med)) {
             if (macroName == "Test" && !containsFunc(funcs, fd)) {
-                diag.Diagnose(med.begin, "@" + macroName + " modified function is not top level")
+                diag.Diagnose(getMacroDecl(med, macroName).begin, DiagKind.macro_using_error,
+                    args: [DiagArgument("@" + macroName + " modified function is not top level")]).Emit()
             }
             if (macroName == "TestCase" && containsFunc(funcs, fd)) {
-                diag.Diagnose(med.begin, "@" + macroName + " modified top level function")
+                diag.Diagnose(getMacroDecl(med, macroName).begin, DiagKind.macro_using_error,
+                    args: [DiagArgument("@" + macroName + " modified top level function")]).Emit()
             }
             if (!isUnitFunction(fd)) {
-                diag.Diagnose(med.begin, "@" + macroName + " modified function type is not ()->Unit")
+                diag.Diagnose(getMacroDecl(med, macroName).begin, DiagKind.macro_using_error,
+                    args: [DiagArgument("@" + macroName + " modified function type is not ()->Unit")]).Emit()
             }
             if (findModifier(fd, "foreign")) {
-                diag.Diagnose(med.begin, "@" + macroName + " modified foreign function")
+                diag.Diagnose(getMacroDecl(med, macroName).begin, DiagKind.macro_using_error,
+                    args: [DiagArgument("@" + macroName + " modified foreign function")]).Emit()
             }
         }
     }
