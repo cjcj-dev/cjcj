@@ -1122,7 +1122,7 @@ private func ErasePromoteMappingForOmittedBaseTypeArgs(mapping: MultiTypeSubst, 
 }
 
 // Mirrors C++ ExtraScopes.cpp:237-293.
-private func GenerateTypeMappingForBaseExpr(typeManager: TypeManager, baseExpr: Expr,
+func GenerateTypeMappingForBaseExpr(typeManager: TypeManager, baseExpr: Expr,
     typeMapping: SubstPack): Unit {
     let memberAccess = match (baseExpr as MemberAccess) {
         case Some(value) => value

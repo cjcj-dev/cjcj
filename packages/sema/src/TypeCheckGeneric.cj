@@ -429,17 +429,7 @@ public func GenerateGenericTypeMapping(typeManager: TypeManager, expr: Expr): Su
                 return typeMapping
             }
         }
-        if (let Some(baseExpr) <- memberAccess.baseExpr) {
-            if (let Some(baseTy) <- baseExpr.GetTy()) {
-                typeManager.GenerateGenericMapping(typeMapping, baseTy)
-            }
-        }
-    } else if (let Some(refExpr) <- (expr as RefExpr)) {
-        if (!refExpr.instTys.isEmpty()) {
-            if (let Some(target) <- refExpr.GetTarget()) {
-                GenerateTypeMapping(typeManager, typeMapping, GetRealTarget(target), refExpr.instTys)
-            }
-        }
+        GenerateTypeMappingForBaseExpr(typeManager, memberAccess, typeMapping)
     }
     return typeMapping
 }
@@ -765,7 +755,19 @@ extend TypeCheckerImpl {
     }
 
     public func GenerateGenericTypeMapping(ctx: ASTContext, expr: Expr): SubstPack {
-        let _ = ctx
-        return GenerateGenericTypeMapping(typeManager, expr)
+        let typeMapping = GenerateGenericTypeMapping(typeManager, expr)
+        if (let Some(refExpr) <- (expr as RefExpr)) {
+            if (let Some(symbol) <- GetCurStructSymbol(ctx, refExpr.scopeName)) {
+                if (let Some(node) <- symbol.node) {
+                    if (node.IsNominalDecl()) {
+                        if (!Ty.IsTyCorrect(node.GetTy())) {
+                            return typeMapping
+                        }
+                        typeManager.GenerateGenericMapping(typeMapping, node.GetTy().getOrThrow())
+                    }
+                }
+            }
+        }
+        return typeMapping
     }
 }
