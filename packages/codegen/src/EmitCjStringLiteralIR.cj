@@ -2,18 +2,9 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import std.sort.*
+import cangjie_compiler::option.OSType
 
 private let RAW_ARRAY_UINT8_KIND: UInt64 = 130u64
-
-private func CompareRawStringContent(left: String, right: String): Ordering {
-    if (left < right) {
-        return Ordering.LT
-    }
-    if (left > right) {
-        return Ordering.GT
-    }
-    return Ordering.EQ
-}
 
 private func NamedGlobalExists(moduleHandle: LLVMModuleHandle, globalName: String): Bool {
     var result = LLVMNullValue()
@@ -119,8 +110,15 @@ private func BuildPackedRawStringData(cjStrings: HashMap<String, String>,
     for (content in uniqueContents) {
         sortedContents.add(content)
     }
-    sort(sortedContents, by: { left: String, right: String => CompareRawStringContent(left, right) },
-        stable: true)
+    sort(sortedContents, by: { left: String, right: String =>
+        if (left < right) {
+            Ordering.LT
+        } else if (left > right) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    }, stable: true)
 
     var rawData = ""
     var contentIdx = sortedContents.size - 1
@@ -179,10 +177,15 @@ private func GetReadOnlyArrayKlassInfo(cgMod: CGModule, moduleHandle: LLVMModule
     let globalValue = GetOrInsertGlobal(moduleHandle, name, typeInfoType)
     unsafe {
         LLVMSetInitializer(globalValue, ConstStruct(typeInfoType, typeInfoValues))
-        LLVMSetLinkage(globalValue, LLVMLinkageValue(LLVMLinkage.Internal))
+        if (cgMod.GetCGContext().GetCompileOptions().target.os != OSType.WINDOWS) {
+            LLVMSetLinkage(globalValue, LLVMLinkageValue(LLVMLinkage.LinkOnceODR))
+        }
     }
-    let _ = CGArrayType.GenerateArrayLayoutTypeInfo(cgMod.GetCGContext(), ARRAY_LAYOUT_PREFIX + "UInt8",
+    AddLinkageTypeMetadata(globalValue, LLVMLinkage.Internal, false)
+    let layoutType = CGArrayType.GenerateArrayLayoutTypeInfo(cgMod.GetCGContext(), ARRAY_LAYOUT_PREFIX + "UInt8",
         unsafe { LLVMInt8TypeInContext(cgMod.GetLLVMContext().raw) })
+    let layoutName = LLVMCStringToString(unsafe { LLVMGetStructName(layoutType) }) ?? ""
+    LLVMSetGlobalStringMetadata(contextHandle, globalValue, GC_TYPE_META_NAME, layoutName)
     return globalValue
 }
 
