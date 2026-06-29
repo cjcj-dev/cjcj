@@ -467,6 +467,48 @@ public class StructInheritanceChecker {
         return true
     }
 
+    @When[backend == "cjnative"]
+    public func Check(): Unit {
+        if (pkg.TestAnyAttr(Attribute.IMPORTED, Attribute.TOOL_ADD)) {
+            return
+        }
+        let nominalDecls = ArrayList<InheritableDecl>()
+        let extendDecls = ArrayList<ExtendDecl>()
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (!NeedCheck(node)) {
+                return VisitAction.WALK_CHILDREN
+            }
+            if (node.TestAttr(Attribute.IS_BROKEN) || !Ty.IsTyCorrect(node.GetTy())) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (let Some(inheritable) <- (node as InheritableDecl)) {
+                if (let Some(extendDecl) <- (node as ExtendDecl)) {
+                    if (IsExtendVisibleInCurpkg(extendDecl)) {
+                        extendDecls.add(extendDecl)
+                    }
+                } else {
+                    nominalDecls.add(inheritable)
+                }
+            }
+            return VisitAction.SKIP_CHILDREN
+        })
+        walker.Walk()
+        for (decl in GetAllNeedCheckExtended()) {
+            if (!decl.TestAttr(Attribute.IS_BROKEN) && Ty.IsTyCorrect(decl.GetTy()) && IsExtendVisibleInCurpkg(decl)) {
+                extendDecls.add(decl)
+            }
+        }
+        for (decl in nominalDecls) {
+            CheckMembersWithInheritedDecls(decl)
+        }
+        for (decl in extendDecls) {
+            CheckMembersWithInheritedDecls(decl)
+        }
+        CheckAllUpperBoundsConfliction()
+        CheckInstDupFuncsInNominalDecls(this)
+    }
+
+    @When[backend != "cjnative"]
     public func Check(): Unit {
         if (pkg.TestAnyAttr(Attribute.IMPORTED, Attribute.TOOL_ADD)) {
             return
@@ -494,12 +536,6 @@ public class StructInheritanceChecker {
         walker.Walk()
         for (decl in nominalDecls) {
             CheckMembersWithInheritedDecls(decl)
-        }
-        for (decl in GetAllNeedCheckExtended()) {
-            if (!HasExtend(extendDecls, decl) && !decl.TestAttr(Attribute.IS_BROKEN) &&
-                Ty.IsTyCorrect(decl.GetTy()) && IsExtendVisibleInCurpkg(decl)) {
-                extendDecls.add(decl)
-            }
         }
         for (decl in extendDecls) {
             CheckMembersWithInheritedDecls(decl)
@@ -863,6 +899,7 @@ public class StructInheritanceChecker {
         }
     }
 
+    @When[backend == "cjnative"]
     private func GetAllNeedCheckExtended(): ArrayList<ExtendDecl> {
         let out = ArrayList<ExtendDecl>()
         let extendedDecls = ArrayList<InheritableDecl>()
@@ -1463,6 +1500,7 @@ public class StructInheritanceChecker {
         }
     }
 
+    @When[backend == "cjnative"]
     private func DiagnoseForInheritedInterfaces(interfaceSig: MemberSignature, implDecls: MemberMap): Unit {
         if (let Some(interfaceDecl) <- interfaceSig.decl) {
             for (child in implDecls.Get(interfaceDecl.identifier.Val())) {
@@ -1477,6 +1515,32 @@ public class StructInheritanceChecker {
                     } else if (interfaceDecl.IsFunc()) {
                         if (CheckImplementationRelation(interfaceSig, child)) {
                             CheckIncompleteOverrideOrImplOfExtend(interfaceSig, child)
+                            CheckInheritanceForInterface(interfaceSig, child)
+                            CheckMutModifierCompatible(interfaceSig, childDecl)
+                        }
+                    }
+                }
+            }
+            if (interfaceDecl.TestAttr(Attribute.DEFAULT)) {
+                interfaceDecl.EnableAttr(Attribute.INTERFACE_IMPL)
+            }
+        }
+    }
+
+    @When[backend != "cjnative"]
+    private func DiagnoseForInheritedInterfaces(interfaceSig: MemberSignature, implDecls: MemberMap): Unit {
+        if (let Some(interfaceDecl) <- interfaceSig.decl) {
+            for (child in implDecls.Get(interfaceDecl.identifier.Val())) {
+                if (let Some(childDecl) <- child.decl) {
+                    CheckSameNameInheritanceInfo(interfaceSig, childDecl)
+                    if (childDecl.astKind != interfaceDecl.astKind) {
+                        continue
+                    }
+                    if (interfaceDecl.astKind == ASTKind.PROP_DECL) {
+                        CheckInheritanceForInterface(interfaceSig, child)
+                        CheckPropertyInheritance(interfaceSig, childDecl)
+                    } else if (interfaceDecl.IsFunc()) {
+                        if (CheckImplementationRelation(interfaceSig, child)) {
                             CheckInheritanceForInterface(interfaceSig, child)
                             CheckMutModifierCompatible(interfaceSig, childDecl)
                         }
