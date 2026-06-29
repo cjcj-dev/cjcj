@@ -161,9 +161,6 @@ public func TypeCheckTypeCheckOptionType(
     if (let Some(desugar) <- optionType.desugarType) {
         return TypeCheckTypeCheckReferenceTypeLegality(diag, tm, desugar)
     }
-    if (let Some(component) <- optionType.componentType) {
-        return TypeCheckTypeCheckReferenceTypeLegality(diag, tm, component)
-    }
     return true
 }
 
@@ -533,9 +530,5 @@ public func TypeCheckTypeCheckCFuncReturnType(diag: BasicDiagnosticEngine, typeN
         builder.Emit()
         return false
     }
-    return true
-}
-
-public func SelfhostPortStatus_TypeCheckType(): Bool {
     return true
 }
