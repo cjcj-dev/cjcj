@@ -555,7 +555,7 @@ public func ChkMatchExprWithDiag(diag: BasicDiagnosticEngine, typeManager: TypeM
     target: Ty, me: MatchExpr): Bool {
     let ok = ChkMatchExpr(typeManager, ctx, target, me, diag: diag)
     if (!ok && me.ShouldDiagnose()) {
-        SemaDiag(diag, BasicDiagKindRefactor.sema_mismatched_types, me)
+        DiagMismatchedTypesWithFoundTy(diag, me, target.String(), Ty.ToString(me.GetTy()))
     }
     return ok
 }

@@ -562,7 +562,10 @@ public func ChkPointerExpr(typeManager: TypeManager, target: Ty, pointerExpr: Po
     }
     if (!targetTy.IsInvalid() && typeManager.CheckTypeCompatibility(targetTy, pointerTy) == TypeCompatibility.INCOMPATIBLE) {
         if (let Some(diagValue) <- diag) {
-            SemaDiag(diagValue, BasicDiagKindRefactor.sema_mismatched_types, pointerExpr)
+            let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_mismatched_types,
+                MakeRange(pointerExpr.begin, pointerExpr.end))
+            builder.AddMainHintArguments([target.String(), pointerTy.String()])
+            builder.Emit()
         }
         pointerExpr.SetTy(TypeManager.GetInvalidTy())
         return false

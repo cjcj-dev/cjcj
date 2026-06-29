@@ -291,7 +291,3 @@ public func DesugarMacroDecl(file: File): Unit {
         idx++
     }
 }
-
-public func SelfhostPortStatus_Desugar_DesugarMacro(): Bool {
-    return false
-}

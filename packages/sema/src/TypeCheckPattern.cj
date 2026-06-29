@@ -849,7 +849,7 @@ public func ChkPatternWithDiag(diag: BasicDiagnosticEngine, typeManager: TypeMan
     target: Ty, pattern: Pattern, isPatternInMatch!: Bool = true): Bool {
     let ok = ChkPattern(typeManager, ctx, target, pattern, isPatternInMatch: isPatternInMatch, diag: Some(diag))
     if (!ok && pattern.ShouldDiagnose()) {
-        SemaDiag(diag, BasicDiagKindRefactor.sema_mismatched_types, pattern)
+        DiagMismatchedTypesWithFoundTy(diag, pattern, target.String(), Ty.ToString(pattern.GetTy()))
     }
     return ok
 }

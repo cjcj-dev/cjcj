@@ -11,7 +11,7 @@ private func NeedBoxOption(typeManager: TypeManager, child: Ty, target: Ty): Boo
     if (Ty.IsInitialTy(Some(child)) || Ty.IsInitialTy(Some(target))) {
         return false
     }
-    if (typeManager.CheckTypeCompatibility(target, child, implicitBoxed: false,
+    if (typeManager.CheckTypeCompatibility(child, target, implicitBoxed: false,
         isGeneric: target.IsGeneric()) != TypeCompatibility.INCOMPATIBLE) {
         return false
     }
@@ -362,8 +362,4 @@ public func AddOptionBox(typeManager: TypeManager, pkg: Package): Unit {
         VisitAction.WALK_CHILDREN
     })
     let _ = walker.Walk()
-}
-
-public func SelfhostPortStatus_Desugar_AutoBoxing(): Bool {
-    return true
 }

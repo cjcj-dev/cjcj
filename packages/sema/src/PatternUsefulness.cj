@@ -806,7 +806,9 @@ private class UsefulnessChecker {
         if (!totalWitnesses.isEmpty()) {
             for (unreachable in unreachables) {
                 unreachable.EnableAttr(Attribute.UNREACHABLE)
-                SemaDiag(diag, BasicDiagKindRefactor.sema_unreachable_pattern, unreachable)
+                let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unreachable_pattern,
+                    MakeBasicRange(unreachable.begin, unreachable.end))
+                builder.Emit()
             }
         }
         return totalWitnesses
