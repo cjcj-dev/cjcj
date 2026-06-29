@@ -2,6 +2,7 @@ package cangjie_compiler::chir
 
 import std.collection.*
 
+import cangjie_compiler::basic.Linkage as BasicLinkage
 import cangjie_compiler::ast.ASTKind
 import cangjie_compiler::ast.IsValidCFuncConstructorCall
 import cangjie_compiler::ast.BuiltInDecl
@@ -678,6 +679,11 @@ public class Translator {
         if (let Some(astTy) <- structDecl.GetTy()) {
             def.SetType(RequireStructType(chirTy.TranslateType(astTy)))
         }
+        def.SetLinkTypeInfo(if (structDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) {
+            BasicLinkage.INTERNAL
+        } else {
+            structDecl.linkage
+        })
         SetImplementedInterfaces(def, structDecl)
         for (member in structDecl.GetMemberDeclPtrs()) {
             TranslateMemberDecl(def, member)
@@ -704,6 +710,15 @@ public class Translator {
         if (let Some(astTy) <- enumDecl.GetTy()) {
             def.SetType(RequireEnumType(chirTy.TranslateType(astTy)))
         }
+        var enumTiLinkage = if (enumDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) {
+            BasicLinkage.INTERNAL
+        } else {
+            enumDecl.linkage
+        }
+        if (enumTiLinkage == BasicLinkage.INTERNAL) {
+            enumTiLinkage = BasicLinkage.LINKONCE_ODR
+        }
+        def.SetLinkTypeInfo(enumTiLinkage)
         SetImplementedInterfaces(def, enumDecl)
         for (ctor in enumDecl.constructors) {
             let payloadTypes = ArrayList<Type>()
@@ -2074,6 +2089,17 @@ public class Translator {
             let classTy = UnwrapClassType(chirTy.TranslateType(astTy))
             def.SetType(classTy)
         }
+        let isImportedInstantiated = decl.TestAttr(AstAttribute.IMPORTED) &&
+            decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)
+        var tiLinkage = if (isImportedInstantiated) {
+            BasicLinkage.INTERNAL
+        } else {
+            decl.linkage
+        }
+        if (tiLinkage == BasicLinkage.INTERNAL) {
+            tiLinkage = BasicLinkage.LINKONCE_ODR
+        }
+        def.SetLinkTypeInfo(tiLinkage)
         SetClassSuperClass(def, decl)
         SetImplementedInterfaces(def, decl)
         for (member in decl.GetMemberDeclPtrs()) {

@@ -1,6 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::basic.Linkage as BasicLinkage
 import cangjie_compiler::utils.CJC_ASSERT
 
 public class MemberVarInfo {
@@ -362,6 +363,10 @@ public open class CustomTypeDef <: Base {
         genericDecl = decl
     }
 
+    public func SetLinkTypeInfo(linkType: BasicLinkage): Unit {
+        SetAnnotation("LinkTypeInfo", LinkTypeInfoToString(linkType))
+    }
+
     public func CanBeInherited(): Bool {
         return IsInterface() || TestAttr(Attribute.VIRTUAL) || TestAttr(Attribute.ABSTRACT)
     }
@@ -394,4 +399,15 @@ private func ContainsClassDef(values: ArrayList<ClassDef>, classDef: ClassDef): 
         }
     }
     return false
+}
+
+private func LinkTypeInfoToString(linkType: BasicLinkage): String {
+    let linkToString = match (linkType) {
+        case BasicLinkage.EXTERNAL => "external"
+        case BasicLinkage.WEAK_ODR => "weak_odr"
+        case BasicLinkage.INTERNAL => "internal"
+        case BasicLinkage.LINKONCE_ODR => "linkonce_odr"
+        case BasicLinkage.EXTERNAL_WEAK => "external_weak"
+    }
+    return "linkType: " + linkToString
 }
