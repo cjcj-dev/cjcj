@@ -2,12 +2,9 @@ package cangjie_compiler::sema.TypeCheckExpr
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.*
-
-public func SelfhostPortStatus_TypeCheckExpr_BinaryExpr(): Bool {
-    return true
-}
 
 public type BinaryOperandSynthesizer = (Expr) -> Ty
 public type BinaryOperandChecker = (Ty, Expr) -> Bool
@@ -86,6 +83,199 @@ private func ClearExprKeepTargets(expr: Expr): Unit {
     expr.Clear()
     for (snapshot in snapshots) {
         snapshot.Restore()
+    }
+}
+
+private func GetChildBinaryExpr(child: Expr): Option<BinaryExpr> {
+    if (let Some(binary) <- (child as BinaryExpr)) {
+        if (let None <- binary.desugarExpr) {
+            return Some(binary)
+        }
+    }
+    if (let Some(parenExpr) <- (child as ParenExpr)) {
+        if (let Some(innerExpr) <- parenExpr.expr) {
+            if (let Some(innerBinary) <- (innerExpr as BinaryExpr)) {
+                if (let None <- innerBinary.desugarExpr) {
+                    return Some(innerBinary)
+                }
+            }
+        }
+    }
+    return None
+}
+
+private func HasInvalidChild(be: BinaryExpr): Bool {
+    let stack = ArrayList<Node>()
+    stack.add(be)
+    while (!stack.isEmpty()) {
+        let current = stack[stack.size - 1]
+        stack.remove(at: stack.size - 1)
+        if (let Some(expr) <- (current as Expr)) {
+            if (let Some(desugar) <- expr.desugarExpr) {
+                stack.add(desugar)
+                continue
+            }
+        }
+        if (current.TestAnyAttr(Attribute.IS_BROKEN, Attribute.HAS_BROKEN)) {
+            return true
+        }
+        if (let Some(expr2) <- (current as Expr)) {
+            if (expr2.IsReferenceExpr() && !Ty.IsInitialTy(expr2.GetTy())) {
+                if ((let None <- expr2.GetTarget()) && !Ty.IsTyCorrect(expr2.GetTy())) {
+                    return true
+                }
+                continue
+            }
+        }
+        let children = current.Children()
+        var idx = children.size
+        while (idx > 0) {
+            idx--
+            stack.add(children[idx])
+        }
+    }
+    return false
+}
+
+private func MarkOutermostBinaryExpr(setOutermost: Bool, node: Node): Unit {
+    let shouldMark = Box<Bool>(setOutermost)
+    let walker = Walker(node, visitPre: { current: Node =>
+        if (let Some(binary) <- (current as BinaryExpr)) {
+            if (shouldMark.value) {
+                binary.EnableAttr(Attribute.IS_OUTERMOST)
+            }
+            if (let Some(leftExpr) <- binary.leftExpr) {
+                MarkOutermostBinaryExpr(false, leftExpr)
+            }
+            if (let Some(rightExpr) <- binary.rightExpr) {
+                MarkOutermostBinaryExpr(false, rightExpr)
+            }
+            shouldMark.value = true
+            return VisitAction.SKIP_CHILDREN
+        } else if (let Some(parenExpr) <- (current as ParenExpr)) {
+            if (let Some(innerExpr) <- parenExpr.expr) {
+                MarkOutermostBinaryExpr(shouldMark.value, innerExpr)
+            }
+            return VisitAction.SKIP_CHILDREN
+        } else {
+            shouldMark.value = true
+        }
+        return VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
+}
+
+public func MarkOutermostBinaryExpressions(pkg: Package): Unit {
+    MarkOutermostBinaryExpr(true, pkg)
+}
+
+private func SynBinaryLeafs(typeManager: TypeManager, be: BinaryExpr,
+    synthesizer: Option<BinaryOperandSynthesizer>): Unit {
+    let stack = ArrayList<Node>()
+    stack.add(be)
+    while (!stack.isEmpty()) {
+        let current = stack[stack.size - 1]
+        stack.remove(at: stack.size - 1)
+        if (let Some(expr) <- (current as Expr)) {
+            if (let Some(desugar) <- expr.desugarExpr) {
+                stack.add(desugar)
+                continue
+            }
+        }
+        if (current.TestAnyAttr(Attribute.IS_BROKEN, Attribute.HAS_BROKEN) || (let Some(_) <- (current as Pattern))) {
+            continue
+        }
+        var skipChildren = false
+        if (let Some(callExpr) <- (current as CallExpr)) {
+            if (let Some(baseFunc) <- callExpr.baseFunc) {
+                SetIsNotAlone(baseFunc)
+                if (let Some(nameRef) <- (baseFunc as NameReferenceExpr)) {
+                    nameRef.callOrPattern = Some(callExpr)
+                }
+            }
+        } else if (let Some(memberAccess) <- (current as MemberAccess)) {
+            if (!IsFieldOperator(memberAccess.field.Val())) {
+                let _ = SynBinaryOperand(typeManager, memberAccess, synthesizer)
+                skipChildren = true
+            }
+        } else if (let Some(refExpr) <- (current as RefExpr)) {
+            let _ = SynBinaryOperand(typeManager, refExpr, synthesizer)
+        }
+        if (!skipChildren) {
+            let children = current.Children()
+            var idx = children.size
+            while (idx > 0) {
+                idx--
+                stack.add(children[idx])
+            }
+        }
+    }
+}
+
+private func DiagnoseForBinaryExpr(typeManager: TypeManager, be: BinaryExpr,
+    synthesizer: Option<BinaryOperandSynthesizer>, diag: Option<BasicDiagnosticEngine>): Unit {
+    let pivotStack = ArrayList<BinaryExpr>()
+    pivotStack.add(be)
+    while (true) {
+        let pivot = pivotStack[pivotStack.size - 1]
+        if (Ty.IsTyCorrect(pivot.GetTy()) || !pivot.ShouldDiagnose(allowCompilerAdd: true)) {
+            return
+        }
+        if ((let None <- pivot.leftExpr) || (let None <- pivot.rightExpr)) {
+            return
+        }
+        let leftExpr = pivot.leftExpr.getOrThrow()
+        let rightExpr = pivot.rightExpr.getOrThrow()
+        if (Ty.IsInitialTy(leftExpr.GetTy())) {
+            try (ds = DiagSuppressor(diag)) {
+                let _ = SynBinaryOperand(typeManager, leftExpr, synthesizer)
+            }
+        }
+        if (!Ty.IsTyCorrect(leftExpr.GetTy())) {
+            if (let Some(newPivot) <- GetChildBinaryExpr(leftExpr)) {
+                pivotStack.add(newPivot)
+                continue
+            }
+            if (!Ty.IsTyCorrect(SynBinaryOperand(typeManager, leftExpr, synthesizer))) {
+                let _ = SynBinaryOperand(typeManager, rightExpr, synthesizer)
+                return
+            }
+        }
+        if (Ty.IsInitialTy(rightExpr.GetTy())) {
+            try (ds2 = DiagSuppressor(diag)) {
+                let _ = SynBinaryOperand(typeManager, rightExpr, synthesizer)
+            }
+        }
+        if (!Ty.IsTyCorrect(rightExpr.GetTy())) {
+            if (let Some(newPivot2) <- GetChildBinaryExpr(rightExpr)) {
+                pivotStack.add(newPivot2)
+                continue
+            }
+            if (!Ty.IsTyCorrect(SynBinaryOperand(typeManager, rightExpr, synthesizer))) {
+                return
+            }
+        }
+        break
+    }
+    while (pivotStack.size > 1) {
+        let pivot = pivotStack[pivotStack.size - 1]
+        pivotStack.remove(at: pivotStack.size - 1)
+        if (!Ty.IsTyCorrect(SynBinaryOperand(typeManager, pivot, synthesizer))) {
+            return
+        }
+    }
+    let finalPivot = pivotStack[pivotStack.size - 1]
+    if ((let None <- finalPivot.leftExpr) || (let None <- finalPivot.rightExpr)) {
+        return
+    }
+    let finalLeft = finalPivot.leftExpr.getOrThrow()
+    let finalRight = finalPivot.rightExpr.getOrThrow()
+    let _ = SynBinaryOperand(typeManager, finalLeft, synthesizer)
+    let _ = SynBinaryOperand(typeManager, finalRight, synthesizer)
+    if (ReplaceIdealTy(typeManager, finalLeft) && ReplaceIdealTy(typeManager, finalRight)) {
+        if (let Some(diagValue) <- diag) {
+            DiagInvalidBinaryExpr(diagValue, finalPivot)
+        }
     }
 }
 
@@ -981,7 +1171,7 @@ private func ChkBuiltinBinaryExpr(typeManager: TypeManager, target: Ty, be: Bina
 
 public func SynBinaryExpr(typeManager: TypeManager, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
-    checker!: Option<BinaryOperandChecker> = None): Ty {
+    checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (let Some(desugar) <- be.desugarExpr) {
         if (let Some(desugarTy) <- desugar.GetTy()) {
             PropagateBinaryDesugarTarget(be, desugar)
@@ -993,53 +1183,94 @@ public func SynBinaryExpr(typeManager: TypeManager, be: BinaryExpr,
         return BinaryInvalid(be)
     }
     if (IsLogicalOperator(be.op)) {
-        return SynLogicalExpr(typeManager, be, checker: checker)
-    }
-    if (IsArithmeticOperator(be.op)) {
+        let logicalTy = SynLogicalExpr(typeManager, be, checker: checker)
+        if (Ty.IsTyCorrect(logicalTy)) {
+            return logicalTy
+        }
+        if (be.TestAttr(Attribute.IS_OUTERMOST)) {
+            SynBinaryLeafs(typeManager, be, synthesizer)
+        }
+        if (HasInvalidChild(be)) {
+            if (be.TestAttr(Attribute.IS_OUTERMOST)) {
+                DiagnoseForBinaryExpr(typeManager, be, synthesizer, diag)
+            }
+            be.SetTy(TypeManager.GetInvalidTy())
+            return be.GetTy() ?? TypeManager.GetInvalidTy()
+        }
+    } else if (IsArithmeticOperator(be.op)) {
         let builtinTy = SynArithmeticExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
         if (Ty.IsTyCorrect(builtinTy)) {
             return builtinTy
+        }
+        if (be.TestAttr(Attribute.IS_OUTERMOST)) {
+            SynBinaryLeafs(typeManager, be, synthesizer)
+        }
+        if (HasInvalidChild(be)) {
+            if (be.TestAttr(Attribute.IS_OUTERMOST)) {
+                DiagnoseForBinaryExpr(typeManager, be, synthesizer, diag)
+            }
+            be.SetTy(TypeManager.GetInvalidTy())
+            return be.GetTy() ?? TypeManager.GetInvalidTy()
         }
         if (let Some(overloadTy) <- TrySynBinaryOverload(typeManager, be, ctx: ctx,
             synthesizer: synthesizer, checker: checker)) {
             return overloadTy
         }
-        return BinaryInvalid(be)
-    }
-    if (IsRelationalOperator(be.op)) {
+    } else if (IsRelationalOperator(be.op)) {
         let builtinTy2 = SynRelationalExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
         if (Ty.IsTyCorrect(builtinTy2)) {
             return builtinTy2
+        }
+        if (be.TestAttr(Attribute.IS_OUTERMOST)) {
+            SynBinaryLeafs(typeManager, be, synthesizer)
+        }
+        if (HasInvalidChild(be)) {
+            if (be.TestAttr(Attribute.IS_OUTERMOST)) {
+                DiagnoseForBinaryExpr(typeManager, be, synthesizer, diag)
+            }
+            be.SetTy(TypeManager.GetInvalidTy())
+            return be.GetTy() ?? TypeManager.GetInvalidTy()
         }
         if (let Some(overloadTy2) <- TrySynBinaryOverload(typeManager, be, ctx: ctx,
             synthesizer: synthesizer, checker: checker)) {
             return overloadTy2
         }
-        return BinaryInvalid(be)
-    }
-    if (IsShiftOperator(be.op)) {
+    } else if (IsShiftOperator(be.op)) {
         let builtinTy3 = SynShiftExpr(typeManager, be, synthesizer: synthesizer)
         if (Ty.IsTyCorrect(builtinTy3)) {
             return builtinTy3
+        }
+        if (be.TestAttr(Attribute.IS_OUTERMOST)) {
+            SynBinaryLeafs(typeManager, be, synthesizer)
+        }
+        if (HasInvalidChild(be)) {
+            if (be.TestAttr(Attribute.IS_OUTERMOST)) {
+                DiagnoseForBinaryExpr(typeManager, be, synthesizer, diag)
+            }
+            be.SetTy(TypeManager.GetInvalidTy())
+            return be.GetTy() ?? TypeManager.GetInvalidTy()
         }
         if (let Some(overloadTy3) <- TrySynBinaryOverload(typeManager, be, ctx: ctx,
             synthesizer: synthesizer, checker: checker)) {
             return overloadTy3
         }
-        return BinaryInvalid(be)
-    }
-    if (be.op == TokenKind.COALESCING) {
+    } else if (be.op == TokenKind.COALESCING) {
         return SynCoalescingExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
-    }
-    if (IsFlowOperator(be.op)) {
+    } else if (IsFlowOperator(be.op)) {
         return SynFlowExpr(typeManager, be, synthesizer: synthesizer)
+    } else {
+        be.SetTy(TypeManager.GetInvalidTy())
     }
-    return BinaryInvalid(be)
+    if (be.TestAttr(Attribute.IS_OUTERMOST)) {
+        SynBinaryLeafs(typeManager, be, synthesizer)
+    }
+    DiagnoseForBinaryExpr(typeManager, be, synthesizer, diag)
+    return be.GetTy() ?? TypeManager.GetInvalidTy()
 }
 
 public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
-    checker!: Option<BinaryOperandChecker> = None): Bool {
+    checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (be.op == TokenKind.COALESCING) {
         return ChkCoalescingExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
     }
@@ -1055,7 +1286,7 @@ public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     if (!HasTupleEqualityOperands(be)) {
         ClearExprKeepTargets(be)
     }
-    let actualTy = SynBinaryExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
+    let actualTy = SynBinaryExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker, diag: diag)
     if (!Ty.IsTyCorrect(actualTy)) {
         if (TryChkBinaryOverload(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
             return true
@@ -1067,6 +1298,9 @@ public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     }
     if (TryChkBinaryOverload(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
         return true
+    }
+    if (be.TestAttr(Attribute.IS_OUTERMOST)) {
+        SynBinaryLeafs(typeManager, be, synthesizer)
     }
     let _ = BinaryInvalid(be)
     return false

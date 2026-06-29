@@ -499,6 +499,7 @@ public class TypeChecker {
         AddDefaultFunction(pkg)
         AddDefaultParamFunctions(pkg)
         Collector().BuildSymbolTable(ctx, pkg, buildTrie: false)
+        MarkOutermostBinaryExpressions(pkg)
         impl.WarmupCache(ctx)
     }
 
@@ -3526,7 +3527,8 @@ public class TypeChecker {
             SynthesizeBinaryChildren(ctx, binaryExpr)
             let binaryTy = SynBinaryExpr(impl.typeManager, binaryExpr, ctx: Some(ctx),
                 synthesizer: Some({ operand: Expr => SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand) }),
-                checker: Some({ targetTy: Ty, operand2: Expr => CheckWithNegCache(ctx, targetTy, operand2) }))
+                checker: Some({ targetTy: Ty, operand2: Expr => CheckWithNegCache(ctx, targetTy, operand2) }),
+                diag: impl.diag)
             if (Ty.IsTyCorrect(binaryTy)) {
                 return FinishSynthesize(ctx, binaryExpr, binaryTy)
             }
@@ -3720,7 +3722,8 @@ public class TypeChecker {
         }
         return ChkBinaryExpr(impl.typeManager, target, be, ctx: Some(ctx),
             synthesizer: Some({ operand: Expr => SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand) }),
-            checker: Some({ targetTy: Ty, operand2: Expr => CheckWithNegCache(ctx, targetTy, operand2) }))
+            checker: Some({ targetTy: Ty, operand2: Expr => CheckWithNegCache(ctx, targetTy, operand2) }),
+            diag: impl.diag)
     }
 
     private func ShouldTryBinaryOperatorOverload(be: BinaryExpr): Bool {
