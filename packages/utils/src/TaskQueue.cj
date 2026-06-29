@@ -12,6 +12,10 @@ private struct Task {
         this.fn = fn
         this.priority = priority
     }
+
+    public operator func <(other: Task): Bool {
+        return priority < other.priority
+    }
 }
 
 public class TaskResult<T> {
@@ -58,6 +62,10 @@ public class TaskQueue {
         this.threadsNum = if (threadsNum > 0) { threadsNum } else { 1 }
     }
 
+    ~init() {
+        threads.clear()
+    }
+
     public func AddTask<T>(fn: () -> T, priority!: UInt64 = 0u64): TaskResult<T> {
         CJC_ASSERT_WITH_MSG(!isStarted, "Do not add new tasks while executing.")
         let result = TaskResult<T>()
@@ -96,9 +104,9 @@ public class TaskQueue {
     private func createThreads(): Unit {
         isStarted = true
         sort(tasks, by: { left: Task, right: Task =>
-            if (left.priority > right.priority) {
+            if (right < left) {
                 Ordering.LT
-            } else if (left.priority < right.priority) {
+            } else if (left < right) {
                 Ordering.GT
             } else {
                 Ordering.EQ
