@@ -201,7 +201,3 @@ public func DesugarDeclsForPackage(pkg: Package, enableCoverage: Bool): Unit {
     })
     let _ = walker.Walk()
 }
-
-public func SelfhostPortStatus_Desugar_AfterTypeCheck_Package(): Bool {
-    return true
-}
