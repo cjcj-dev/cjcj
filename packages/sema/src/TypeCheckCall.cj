@@ -689,17 +689,27 @@ private func FilterExtendImplAbstractFunc(typeManager: TypeManager, candidates: 
     return out
 }
 
-private func FilterCandidates(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
-    inCandidates: ArrayList<FuncDecl>): ArrayList<FuncDecl> {
-    let validShape = ArrayList<FuncDecl>()
-    for (fd in inCandidates) {
-        if (let Some(params) <- BodyParamList(fd)) {
-            if (!params.params.isEmpty() || ce.args.isEmpty()) {
-                validShape.add(fd)
-            }
-        }
+private func FilterCandidates(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: Option<ASTContext>,
+    ce: CallExpr, inCandidates: ArrayList<FuncDecl>): ArrayList<FuncDecl> {
+    let visibleCandidates = ArrayList<FuncDecl>()
+    let baseFunc = match (ce.baseFunc) {
+        case Some(value) => value
+        case None => return visibleCandidates
     }
-    let argFiltered = FilterIncompatibleCandidatesForCall(diag, ce, validShape)
+    var curStructSymbol: Option<Symbol> = None
+    if (let Some(ctxValue) <- ctx) {
+        curStructSymbol = GetCurStructSymbol(ctxValue, baseFunc.scopeName)
+    }
+    for (fd in inCandidates) {
+        if (let None <- BodyParamList(fd)) {
+            continue
+        }
+        if (!IsLegalAccess(typeManager, curStructSymbol, fd, baseFunc)) {
+            continue
+        }
+        visibleCandidates.add(fd)
+    }
+    let argFiltered = FilterIncompatibleCandidatesForCall(diag, ce, visibleCandidates)
     let typeFiltered = ArrayList<FuncDecl>()
     for (fd in argFiltered) {
         if (FuncParamTysValid(fd)) {
@@ -2872,7 +2882,7 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
         return true
     }
     let candidatesBefore = CollectCallBaseFuncCandidates(ce)
-    let candidates = FilterCandidates(typeManager, diag, ce, candidatesBefore)
+    let candidates = FilterCandidates(typeManager, diag, ctx, ce, candidatesBefore)
     if (let None <- ResolveDeclForCallBase(ce, candidatesBefore)) {
         return CheckNonNormalCall(typeManager, diag, target, ce, argChecker: argChecker)
     }
