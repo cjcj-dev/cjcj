@@ -30,18 +30,6 @@ private func ReplaceManglePrefixWith(mangledName: String, newPrefix: String): St
     throw IllegalArgumentException("Mangle name has no _C prefix to be replaced: " + mangledName)
 }
 
-private func FunctionIdentifierForPrefix(function: Function): String {
-    let identifier = function.GetIdentifier()
-    if (StartsWith(identifier, MANGLE_CANGJIE_PREFIX)) {
-        return identifier
-    }
-    let withoutPrefix = function.GetIdentifierWithoutPrefix()
-    if (StartsWith(withoutPrefix, MANGLE_CANGJIE_PREFIX)) {
-        return withoutPrefix
-    }
-    return identifier
-}
-
 private func CustomTypeDefIdentifierWithoutPrefix(def: CustomTypeDef): String {
     let identifier = def.GetIdentifier()
     if (identifier.isEmpty()) {
@@ -73,7 +61,7 @@ private func sortedMangledClassTypes(types: ArrayList<ClassType>, genericsTypeSt
 public func GenerateVirtualFuncMangleName(rawFunc: Function, customTypeDef: CustomTypeDef,
     parentTy: ClassType, isVirtual: Bool): String {
     let prefix = if (isVirtual) { MANGLE_VIRTUAL_PREFIX } else { MANGLE_MUTABLE_PREFIX }
-    var out = ReplaceManglePrefixWith(FunctionIdentifierForPrefix(rawFunc), prefix)
+    var out = ReplaceManglePrefixWith(rawFunc.GetIdentifierWithoutPrefix(), prefix)
     let customTyGenericTypeStack = ArrayList<String>()
     for (genericType in customTypeDef.genericTypeParams) {
         customTyGenericTypeStack.add(genericType.GetSrcCodeIdentifier())
@@ -149,7 +137,7 @@ public func GenerateInstantiatedBaseClassMangleName(funcType: FuncType): String 
 }
 
 public func GenerateGlobalImplClassMangleName(function: Function): String {
-    return ReplaceManglePrefixWith(FunctionIdentifierForPrefix(function), MANGLE_CLOSURE_FUNC_PREFIX)
+    return ReplaceManglePrefixWith(function.GetIdentifierWithoutPrefix(), MANGLE_CLOSURE_FUNC_PREFIX)
 }
 
 public func GenerateLambdaImplClassMangleName(function: Lambda, count: Int64): String {
@@ -170,12 +158,12 @@ public func GenerateInstantiatedAbstractFuncMangleName(def: ClassDef): String {
 }
 
 public func GenerateGenericOverrideFuncMangleName(function: Function): String {
-    return ReplaceManglePrefixWith(FunctionIdentifierForPrefix(function), MANGLE_CHIR_FUNC_PREFIX) +
+    return ReplaceManglePrefixWith(function.GetIdentifierWithoutPrefix(), MANGLE_CHIR_FUNC_PREFIX) +
         MANGLE_CHIR_GENERIC_SUFFIX
 }
 
 public func GenerateInstOverrideFuncMangleName(function: Function): String {
-    return ReplaceManglePrefixWith(FunctionIdentifierForPrefix(function), MANGLE_CHIR_FUNC_PREFIX) +
+    return ReplaceManglePrefixWith(function.GetIdentifierWithoutPrefix(), MANGLE_CHIR_FUNC_PREFIX) +
         MANGLE_ABSTRACT_INST_PREFIX
 }
 
