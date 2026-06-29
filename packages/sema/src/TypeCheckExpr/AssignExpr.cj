@@ -4,10 +4,6 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.*
 
-public func SelfhostPortStatus_TypeCheckExpr_AssignExpr(): Bool {
-    return true
-}
-
 public type AssignRightChecker = (Ty, Expr) -> Bool
 
 private func AssignInvalid(ae: AssignExpr): Ty {
@@ -285,7 +281,14 @@ public func SynAssignExpr(typeManager: TypeManager, ae: AssignExpr,
     if (!IsAssignableExpr(leftExpr)) {
         return AssignInvalid(ae)
     }
-    if (!CheckAssignRight(typeManager, concreteLeftTy, ae, rightChecker)) {
+    if (!ae.isCompound && leftExpr.TyKind() == TypeKind.TYPE_RUNE && IsSingleRuneStringLiteral(rightExpr)) {
+        rightExpr.SetTy(leftTy)
+    } else if (!ae.isCompound && leftExpr.TyKind() == TypeKind.TYPE_UINT8 && IsSingleByteStringLiteral(rightExpr)) {
+        rightExpr.SetTy(leftTy)
+        if (let Some(lit) <- (rightExpr as LitConstExpr)) {
+            let _ = ChkLitConstExprRange(lit)
+        }
+    } else if (!CheckAssignRight(typeManager, concreteLeftTy, ae, rightChecker)) {
         return AssignInvalid(ae)
     }
     if (!IsShiftAssignValid(ae, concreteLeftTy)) {

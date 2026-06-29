@@ -4,10 +4,6 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Plugin.*
 
-public func SelfhostPortStatus_TypeCheckExpr_IfAvailableExpr(): Bool {
-    return true
-}
-
 private let LEVEL_IDENTIFIER: String = "level"
 private let SYSCAP_IDENTIFIER: String = "syscap"
 

@@ -3,10 +3,6 @@ package cangjie_compiler::sema
 import std.collection.*
 import cangjie_compiler::ast.*
 
-public func SelfhostPortStatus_TypeCheckExpr(): Bool {
-    return true
-}
-
 public func CheckOptionBox(typeManager: TypeManager, target: Ty, ty: Ty): Bool {
     if (typeManager.IsSubtype(ty, target)) {
         return true
