@@ -33,11 +33,7 @@ public class CodeGenBlockScope <: Resource {
         if (closed) {
             return
         }
-        if (oldBlock.isNull()) {
-            irBuilder.ClearInsertionPoint()
-        } else {
-            irBuilder.SetInsertPoint(oldBlock)
-        }
+        irBuilder.SetInsertPoint(oldBlock)
         closed = true
     }
 

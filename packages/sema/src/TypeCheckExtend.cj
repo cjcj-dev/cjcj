@@ -1038,7 +1038,3 @@ private func TypeCheckExtendIsIndexAssignmentOperator(funcDecl: FuncDecl): Bool 
     }
     return false
 }
-
-public func SelfhostPortStatus_TypeCheckExtend(): Bool {
-    return true
-}

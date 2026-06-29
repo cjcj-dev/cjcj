@@ -12,6 +12,8 @@ private func IsOverflowOp(op: TokenKind): Bool {
         case TokenKind.DIV => true
         case TokenKind.MOD => true
         case TokenKind.EXP => true
+        case TokenKind.INCR => true
+        case TokenKind.DECR => true
         case TokenKind.ADD_ASSIGN => true
         case TokenKind.SUB_ASSIGN => true
         case TokenKind.MUL_ASSIGN => true
@@ -40,16 +42,15 @@ private func SetIncOrDecOverflowExpr(expr: IncOrDecExpr): Unit {
     if (!IsOverflowOp(expr.op)) {
         return
     }
-    if (!IsIntegerTy(expr.GetTy())) {
+    if (let None <- expr.expr) {
         return
     }
-    if (let Some(target) <- expr.expr) {
-        if (!IsIntegerTy(target.GetTy())) {
-            return
-        }
-        target.EnableAttr(Attribute.NUMERIC_OVERFLOW)
-        target.overflowStrategy = expr.overflowStrategy
+    let target = expr.expr.getOrThrow()
+    if (!IsIntegerTy(target.GetTy())) {
+        return
     }
+    target.EnableAttr(Attribute.NUMERIC_OVERFLOW)
+    target.overflowStrategy = expr.overflowStrategy
     expr.EnableAttr(Attribute.NUMERIC_OVERFLOW)
 }
 

@@ -3669,11 +3669,9 @@ public class TypeChecker {
                 diag: impl.diag))
         }
         if (let Some(typeConv) <- (expr as TypeConvExpr)) {
-            SynthesizeTypeNode(ctx, typeConv.typeNode)
-            if (let Some(innerExpr) <- typeConv.expr) {
-                let _ = Synthesize(ctx, innerExpr)
-            }
-            return FinishSynthesize(ctx, typeConv, SynExprShallow(impl.typeManager, typeConv, diag: impl.diag))
+            return FinishSynthesize(ctx, typeConv, SynTypeConvExpr(impl.typeManager, typeConv,
+                synthesizer: Some({ innerExpr: Expr => Synthesize(ctx, SynPos.EXPR_ARG, innerExpr) }),
+                diag: impl.diag))
         }
         if (let Some(isExpr) <- (expr as IsExpr)) {
             SynthesizeTypeNode(ctx, isExpr.isType)
@@ -4032,6 +4030,11 @@ public class TypeChecker {
         if (let Some(tryExpr) <- (expr as TryExpr)) {
             SynthesizeTryExprChildren(ctx, tryExpr)
             return FinishCheck(ctx, tryExpr, ChkTryExpr(impl.typeManager, target, tryExpr))
+        }
+        if (let Some(typeConv) <- (expr as TypeConvExpr)) {
+            return FinishCheck(ctx, typeConv, ChkTypeConvExpr(impl.typeManager, target, typeConv,
+                synthesizer: Some({ innerExpr: Expr => Synthesize(ctx, SynPos.EXPR_ARG, innerExpr) }),
+                diag: impl.diag))
         }
         if (let Some(syncExpr) <- (expr as SynchronizedExpr)) {
             var lockTy: Option<Ty> = None
