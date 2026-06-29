@@ -46,6 +46,25 @@ public func OPTSetNewPassManagerOptions(setOptionHandler: (String) -> Unit, driv
     SetOptionIf(setOptionHandler, !driverOptions.optPassOptions.isEmpty(), "-" + driverOptions.optPassOptions)
 }
 
+func OPTSetCodeLayoutObfuscationOptions(setOptionHandler: (String) -> Unit, driverOptions: DriverOptions): Unit {
+    setOptionHandler("--obf-layout=true")
+    if (let Some(value) <- driverOptions.layoutObfInputSymMappingFiles) {
+        setOptionHandler("-obf-input-symbol-mapping-files=" + value)
+    }
+    if (let Some(value) <- driverOptions.layoutObfOutputSymMappingFile) {
+        setOptionHandler("-obf-output-symbol-mapping-file=" + value)
+    }
+    if (let Some(value) <- driverOptions.layoutObfUserMappingFile) {
+        setOptionHandler("-obf-apply-symbol-mapping=" + value)
+    }
+    if (let Some(value) <- driverOptions.layoutObfSymPrefix) {
+        setOptionHandler("-obf-sym-prefix=" + value)
+    }
+    setOptionHandler("-obf-export-symbol=" + if (driverOptions.enableObfExportSyms ?? true) { "true" } else { "false" })
+    setOptionHandler("-obf-line-number=" + if (driverOptions.enableObfLineNumber ?? false) { "true" } else { "false" })
+    setOptionHandler("-obf-source-path=" + if (driverOptions.enableObfSourcePath ?? true) { "true" } else { "false" })
+}
+
 public func OPTSetCodeObfuscationOptions(setOptionHandler: (String) -> Unit, driverOptions: DriverOptions): Unit {
     let obfString = driverOptions.enableStringObfuscation ?? false
     let obfConst = driverOptions.enableConstObfuscation ?? false
@@ -59,22 +78,7 @@ public func OPTSetCodeObfuscationOptions(setOptionHandler: (String) -> Unit, dri
         enabled = true
     }
     if (obfLayout) {
-        setOptionHandler("--obf-layout=true")
-        if (let Some(value) <- driverOptions.layoutObfInputSymMappingFiles) {
-            setOptionHandler("-obf-input-symbol-mapping-files=" + value)
-        }
-        if (let Some(value) <- driverOptions.layoutObfOutputSymMappingFile) {
-            setOptionHandler("-obf-output-symbol-mapping-file=" + value)
-        }
-        if (let Some(value) <- driverOptions.layoutObfUserMappingFile) {
-            setOptionHandler("-obf-apply-symbol-mapping=" + value)
-        }
-        if (let Some(value) <- driverOptions.layoutObfSymPrefix) {
-            setOptionHandler("-obf-sym-prefix=" + value)
-        }
-        setOptionHandler("-obf-export-symbol=" + if (driverOptions.enableObfExportSyms ?? true) { "true" } else { "false" })
-        setOptionHandler("-obf-line-number=" + if (driverOptions.enableObfLineNumber ?? false) { "true" } else { "false" })
-        setOptionHandler("-obf-source-path=" + if (driverOptions.enableObfSourcePath ?? true) { "true" } else { "false" })
+        OPTSetCodeLayoutObfuscationOptions(setOptionHandler, driverOptions)
         enabled = true
     }
     if (obfFlatten || obfBogus) {
