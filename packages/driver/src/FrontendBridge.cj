@@ -12,9 +12,10 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
     if (HasFrontendSourceInput(driver.driverOptions)) {
         SeedBuiltinDependenciesFromSources(driver)
     }
-    let frontendArgs = driver.driverOptions.GenerateFrontendOptions()
+    let frontendOptions = driver.driverOptions.GenerateFrontendOptions()
+    let frontendArgs = BuildFrontendArgumentVector(driver.cangjieHome, frontendOptions)
     if (driver.driverOptions.enableVerbose) {
-        PrintFrontendCommand(driver.cangjieHome, frontendArgs)
+        PrintFrontendCommand(driver.cangjieHome, frontendOptions)
     }
     let result = ExecuteFrontendWithResult(driver.executableName, frontendArgs,
         driver.driverOptions.environment.allVariables)
@@ -29,6 +30,20 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
         return false
     }
     return PublishFrontendCjoOutputs(driver.driverOptions)
+}
+
+private func GetFrontendExecutablePath(cangjieHome: String): String {
+    let exeExtension = if (HostOS() == OSType.WINDOWS) { ".exe" } else { "" }
+    return FileUtil.JoinPath(FileUtil.JoinPath(cangjieHome, "bin"), "cjc-frontend" + exeExtension)
+}
+
+private func BuildFrontendArgumentVector(cangjieHome: String, options: Array<String>): Array<String> {
+    let args = ArrayList<String>()
+    args.add(GetFrontendExecutablePath(cangjieHome))
+    for (option in options) {
+        args.add(option)
+    }
+    return args.toArray()
 }
 
 private func SeedBuiltinDependenciesFromSources(driver: Driver): Unit {
@@ -233,10 +248,8 @@ private func ApplyFrontendOutputs(opts: DriverOptions, frontendOpts: FrontendToo
 }
 
 private func PrintFrontendCommand(cangjieHome: String, args: Array<String>): Unit {
-    let exeExtension = if (HostOS() == OSType.WINDOWS) { ".exe" } else { "" }
-    let frontendPath = FileUtil.JoinPath(FileUtil.JoinPath(cangjieHome, "bin"), "cjc-frontend" + exeExtension)
     let builder = StringBuilder()
-    builder.append(GetCommandLineArgumentQuoted(frontendPath))
+    builder.append(GetCommandLineArgumentQuoted(GetFrontendExecutablePath(cangjieHome)))
     for (arg in args) {
         builder.append(" ")
         builder.append(GetCommandLineArgumentQuoted(arg))

@@ -13,6 +13,7 @@ import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::chir.CHIRContext as RealCHIRContext
 import cangjie_compiler::chir.Package as RealCHIRPackage
+public import cangjie_compiler::mangle.BaseMangler
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.STANDARD_LIBS
 import std.collection.*
@@ -116,88 +117,6 @@ private func frontendDiagnosticColor(severity: DiagSeverity): DiagColor {
         case DiagSeverity.DS_WARNING => DiagColor.YELLOW
         case DiagSeverity.DS_NOTE => DiagColor.BLUE
         case DiagSeverity.DS_HINT => DiagColor.GREEN
-    }
-}
-
-public enum FrontendTokenKind {
-    | IDENTIFIER
-    | KEYWORD
-    | INTEGER_LITERAL
-    | FLOAT_LITERAL
-    | STRING_LITERAL
-    | BOOL_LITERAL
-    | COMMENT
-    | NL
-    | OPERATOR
-    | END
-}
-
-private func FrontendTokenKindIndex(kind: FrontendTokenKind): Int64 {
-    return match (kind) {
-        case FrontendTokenKind.IDENTIFIER => 0
-        case FrontendTokenKind.KEYWORD => 1
-        case FrontendTokenKind.INTEGER_LITERAL => 2
-        case FrontendTokenKind.FLOAT_LITERAL => 3
-        case FrontendTokenKind.STRING_LITERAL => 4
-        case FrontendTokenKind.BOOL_LITERAL => 5
-        case FrontendTokenKind.COMMENT => 6
-        case FrontendTokenKind.NL => 7
-        case FrontendTokenKind.OPERATOR => 8
-        case FrontendTokenKind.END => 9
-    }
-}
-
-extend FrontendTokenKind <: Equatable<FrontendTokenKind> {
-    public operator func ==(rhs: FrontendTokenKind): Bool {
-        return FrontendTokenKindIndex(this) == FrontendTokenKindIndex(rhs)
-    }
-
-    public operator func !=(rhs: FrontendTokenKind): Bool {
-        return !(this == rhs)
-    }
-}
-
-public func FrontendTokenKindName(kind: FrontendTokenKind): String {
-    return match (kind) {
-        case FrontendTokenKind.IDENTIFIER => "IDENTIFIER"
-        case FrontendTokenKind.KEYWORD => "KEYWORD"
-        case FrontendTokenKind.INTEGER_LITERAL => "INTEGER_LITERAL"
-        case FrontendTokenKind.FLOAT_LITERAL => "FLOAT_LITERAL"
-        case FrontendTokenKind.STRING_LITERAL => "STRING_LITERAL"
-        case FrontendTokenKind.BOOL_LITERAL => "BOOL_LITERAL"
-        case FrontendTokenKind.COMMENT => "COMMENT"
-        case FrontendTokenKind.NL => "NL"
-        case FrontendTokenKind.OPERATOR => "OPERATOR"
-        case FrontendTokenKind.END => "END"
-    }
-}
-
-public class FrontendToken {
-    private var beginPos: Position
-    private var endPos: Position
-    public var kind: FrontendTokenKind
-    public var value: String
-    private var rawKindName: String = ""
-
-    public init(kind: FrontendTokenKind, value: String, begin: Position, end: Position,
-        rawKindName!: String = "") {
-        this.kind = kind
-        this.value = value
-        this.rawKindName = rawKindName
-        beginPos = begin
-        endPos = end
-    }
-
-    public func Begin(): Position {
-        return beginPos
-    }
-
-    public func End(): Position {
-        return endPos
-    }
-
-    public func KindName(): String {
-        return if (rawKindName.isEmpty()) { FrontendTokenKindName(kind) } else { rawKindName }
     }
 }
 
@@ -4644,16 +4563,6 @@ public class TestManager {
 public class GenericInstantiationManager {
     public init(instance: CompilerInstance) {
         let _ = instance
-    }
-}
-
-public class BaseMangler {
-    public var lambdaCounter: Int64 = 0
-    public init() {}
-
-    public func Mangle(decl: Decl, prefix!: String = ""): String {
-        let pkgPrefix = if (decl.fullPackageName.isEmpty()) { "" } else { decl.fullPackageName + "." }
-        return "_C" + (pkgPrefix + prefix + decl.identifier.Val()).replace(".", "_").replace("::", "_")
     }
 }
 
