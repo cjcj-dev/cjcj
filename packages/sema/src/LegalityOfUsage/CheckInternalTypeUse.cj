@@ -60,19 +60,6 @@ private func FindInaccessibleTypeInArgs(typeValue: Ty, srcLevel: AccessLevel): O
             }
         }
     }
-    if (let Some(unionTy) <- (typeValue as UnionTy)) {
-        for (item in unionTy.tys) {
-            if (let Some(decl) <- FindInaccessibleType(item, srcLevel)) {
-                return decl
-            }
-        }
-    } else if (let Some(intersectionTy) <- (typeValue as IntersectionTy)) {
-        for (item in intersectionTy.tys) {
-            if (let Some(decl) <- FindInaccessibleType(item, srcLevel)) {
-                return decl
-            }
-        }
-    }
     return None
 }
 

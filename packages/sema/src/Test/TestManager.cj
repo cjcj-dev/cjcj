@@ -204,7 +204,3 @@ public class TestManager {
         return TEST_COMPILATION_OPTION
     }
 }
-
-public func SelfhostPortStatus_Test_TestManager(): Bool {
-    return true
-}

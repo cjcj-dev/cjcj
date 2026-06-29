@@ -276,14 +276,13 @@ public class TyVarConstraintGraph {
         let newIndegree = ArrayList<TyVarIndegreeEntry>()
         for (entry in indegree) {
             if (let Some(tyVar) <- SubstituteTyVar(typeManager, entry.tyVar, subst)) {
-                var merged = false
+                var hasEntry = false
                 for (newEntry in newIndegree) {
                     if (SameTy(newEntry.tyVar, tyVar)) {
-                        newEntry.degree += entry.degree
-                        merged = true
+                        hasEntry = true
                     }
                 }
-                if (!merged) {
+                if (!hasEntry) {
                     newIndegree.add(TyVarIndegreeEntry(tyVar, entry.degree))
                 }
             }
@@ -296,19 +295,13 @@ public class TyVarConstraintGraph {
         let newEdges = ArrayList<TyVarEdgeEntry>()
         for (entry in edges) {
             if (let Some(tyVar) <- SubstituteTyVar(typeManager, entry.tyVar, subst)) {
-                var targetEntry: Option<TyVarEdgeEntry> = None
+                var hasEntry = false
                 for (existing in newEdges) {
                     if (SameTy(existing.tyVar, tyVar)) {
-                        targetEntry = existing
+                        hasEntry = true
                     }
                 }
-                if (let Some(realEntry) <- targetEntry) {
-                    for (out in entry.outs) {
-                        if (let Some(newOut) <- SubstituteTyVar(typeManager, out, subst)) {
-                            let _ = AddTyVar(realEntry.outs, newOut)
-                        }
-                    }
-                } else {
+                if (!hasEntry) {
                     let created = TyVarEdgeEntry(tyVar)
                     for (out in entry.outs) {
                         if (let Some(newOut) <- SubstituteTyVar(typeManager, out, subst)) {
@@ -326,10 +319,6 @@ public class TyVarConstraintGraph {
 
         ApplyTypeSubstForTyVarList(usedTyVars, subst)
         ApplyTypeSubstForTyVarList(solvedTyVars, subst)
-        isVisited.clear()
-        for (tyVar in usedTyVars) {
-            SetVisited(tyVar, ContainsTyVar(solvedTyVars, tyVar))
-        }
     }
 
     private func ApplyTypeSubstForTyVarList(values: ArrayList<GenericsTy>, subst: TypeSubst): Unit {
