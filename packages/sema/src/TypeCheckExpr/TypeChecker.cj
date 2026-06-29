@@ -2076,7 +2076,8 @@ public class TypeChecker {
     private func SynthesizeAndReplaceIdealTy(ctx: ASTContext, pos: SynPos, node: Node): Bool {
         var valid = false
         try (ds = DiagSuppressor(impl.diag)) {
-            valid = Ty.IsTyCorrect(SynthesizeNode(ctx, pos, node)) && ReplaceIdealTy(impl.typeManager, node) &&
+            valid = Ty.IsTyCorrect(SynthesizeNode(ctx, pos, node)) &&
+                ReplaceIdealTy(impl.typeManager, node, diag: impl.diag) &&
                 !ds.HasError()
             ds.ReportDiag()
         }
@@ -2102,7 +2103,7 @@ public class TypeChecker {
 
     private func CheckBlock(ctx: ASTContext, target: Ty, block: Block): Bool {
         if (block.body.isEmpty()) {
-            return ChkBlock(impl.typeManager, target, block)
+            return ChkBlock(impl.typeManager, target, block, diag: impl.diag)
         }
         MarkUnsafeBlockChildren(block)
         let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
@@ -2463,11 +2464,13 @@ public class TypeChecker {
                 }
             } else {
                 let exprTy = Synthesize(ctx, innerExpr)
-                isWellTyped = Ty.IsTyCorrect(exprTy) && ReplaceIdealTy(impl.typeManager, innerExpr) && isWellTyped
+                isWellTyped = Ty.IsTyCorrect(exprTy) &&
+                    ReplaceIdealTy(impl.typeManager, innerExpr, diag: impl.diag) && isWellTyped
             }
         } else {
             let exprTy2 = Synthesize(ctx, innerExpr)
-            isWellTyped = Ty.IsTyCorrect(exprTy2) && ReplaceIdealTy(impl.typeManager, innerExpr) && isWellTyped
+            isWellTyped = Ty.IsTyCorrect(exprTy2) &&
+                ReplaceIdealTy(impl.typeManager, innerExpr, diag: impl.diag) && isWellTyped
         }
         replaceReturnClassThisOutsideClass(re, innerExpr)
         if (!isWellTyped && NeedCheckBodyReturn(fb)) {
@@ -2764,8 +2767,8 @@ public class TypeChecker {
         }
         if (let Some(thenBody2) <- ifExpr.thenBody) {
             if (let Some(elseBody3) <- ifExpr.elseBody) {
-                let _ = ReplaceIdealTy(impl.typeManager, thenBody2)
-                let _ = ReplaceIdealTy(impl.typeManager, elseBody3)
+                let _ = ReplaceIdealTy(impl.typeManager, thenBody2, diag: impl.diag)
+                let _ = ReplaceIdealTy(impl.typeManager, elseBody3, diag: impl.diag)
                 let thenTy = impl.typeManager.GetThisRealTy(thenBody2.GetTy() ?? TypeManager.GetInvalidTy())
                 let elseTy = impl.typeManager.GetThisRealTy(elseBody3.GetTy() ?? TypeManager.GetInvalidTy())
                 thenBody2.SetTy(thenTy)
@@ -2977,7 +2980,8 @@ public class TypeChecker {
         let boundDecls = ArrayList<Decl>()
         if (let Some(inExpression) <- forInExpr.inExpression) {
             let inTy = Synthesize(ctx, inExpression)
-            isWellTyped = Ty.IsTyCorrect(inTy) && ReplaceIdealTy(impl.typeManager, inExpression) && isWellTyped
+            isWellTyped = Ty.IsTyCorrect(inTy) &&
+                ReplaceIdealTy(impl.typeManager, inExpression, diag: impl.diag) && isWellTyped
             if (let Some(realInTy) <- inExpression.GetTy()) {
                 let iterableTy = GetForInIterableTy(ctx, realInTy)
                 if (Ty.IsTyCorrect(iterableTy) && !iterableTy.typeArgs.isEmpty()) {
@@ -3104,7 +3108,7 @@ public class TypeChecker {
                 ResolveRefExpr(ctx, refExpr)
             }
         }
-        let ty = SynNameReferenceExpr(impl.typeManager, nameRef)
+        let ty = SynNameReferenceExpr(impl.typeManager, nameRef, diag: impl.diag)
         return ty
     }
 
@@ -3170,7 +3174,7 @@ public class TypeChecker {
         let walker = Walker(expr, visitPost: { node: Node =>
             if (let Some(innerExpr) <- (node as Expr)) {
                 if (Ty.IsInitialTy(innerExpr.GetTy()) || !Ty.IsTyCorrect(innerExpr.GetTy())) {
-                    let _ = SynExprShallow(impl.typeManager, innerExpr)
+                    let _ = SynExprShallow(impl.typeManager, innerExpr, diag: impl.diag)
                 }
             }
             VisitAction.WALK_CHILDREN
@@ -3578,7 +3582,7 @@ public class TypeChecker {
         }
         if (expr.IsLoopExpr()) {
             SynthesizeLoopChildren(ctx, expr)
-            return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr))
+            return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr, diag: impl.diag))
         }
         if (let Some(returnExpr) <- (expr as ReturnExpr)) {
             if (let Some(fb) <- currentFuncBody) {
@@ -3628,14 +3632,14 @@ public class TypeChecker {
             if (let Some(innerExpr) <- typeConv.expr) {
                 let _ = Synthesize(ctx, innerExpr)
             }
-            return FinishSynthesize(ctx, typeConv, SynExprShallow(impl.typeManager, typeConv))
+            return FinishSynthesize(ctx, typeConv, SynExprShallow(impl.typeManager, typeConv, diag: impl.diag))
         }
         if (let Some(isExpr) <- (expr as IsExpr)) {
             SynthesizeTypeNode(ctx, isExpr.isType)
             if (let Some(leftExpr) <- isExpr.leftExpr) {
                 let _ = Synthesize(ctx, leftExpr)
             }
-            return FinishSynthesize(ctx, isExpr, SynExprShallow(impl.typeManager, isExpr))
+            return FinishSynthesize(ctx, isExpr, SynExprShallow(impl.typeManager, isExpr, diag: impl.diag))
         }
         if (let Some(asExpr) <- (expr as AsExpr)) {
             SynthesizeTypeNode(ctx, asExpr.asType)
@@ -3665,7 +3669,8 @@ public class TypeChecker {
                     stringTy = stringDecl.GetTy()
                 }
                 return FinishSynthesize(ctx, lit,
-                    SynLitConstExpr(lit, stringTy: stringTy, typeManager: Some(impl.typeManager), ctx: Some(ctx)))
+                    SynLitConstExpr(lit, stringTy: stringTy, typeManager: Some(impl.typeManager), ctx: Some(ctx),
+                        diag: impl.diag))
             }
         }
         SynthesizeNodeChildren(ctx, expr)
@@ -3687,7 +3692,7 @@ public class TypeChecker {
         if (let Some(spawnExpr) <- (expr as SpawnExpr)) {
             return SynthesizeSpawnExpr(ctx, spawnExpr)
         }
-        return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr))
+        return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr, diag: impl.diag))
     }
 
     private func SynthesizeLogicalBinaryExpr(ctx: ASTContext, be: BinaryExpr): Ty {
@@ -3881,7 +3886,7 @@ public class TypeChecker {
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
             typeCheckExprPutTargetType(ctx, nameRef, target)
             let _ = Synthesize(ctx, nameRef)
-            let ok = ChkNameReferenceExpr(impl.typeManager, target, nameRef)
+            let ok = ChkNameReferenceExpr(impl.typeManager, target, nameRef, diag: impl.diag)
             return FinishCheck(ctx, expr, ok)
         }
         if (let Some(callExpr) <- (expr as CallExpr)) {
@@ -3909,14 +3914,17 @@ public class TypeChecker {
         }
         if (let Some(forInExpr) <- (expr as ForInExpr)) {
             let _ = SynthesizeForInExpr(ctx, forInExpr)
-            return FinishCheck(ctx, forInExpr, ChkExprShallow(impl.typeManager, target, forInExpr, ctx: Some(ctx)))
+            return FinishCheck(ctx, forInExpr, ChkExprShallow(impl.typeManager, target, forInExpr, ctx: Some(ctx),
+                diag: impl.diag))
         }
         if (expr.IsLoopExpr()) {
             SynthesizeLoopChildren(ctx, expr)
-            return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx)))
+            return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx),
+                diag: impl.diag))
         }
         if (let Some(lit) <- (expr as LitConstExpr)) {
-            return FinishCheck(ctx, lit, ChkLitConstExpr(impl.typeManager, target, lit, ctx: Some(ctx)))
+            return FinishCheck(ctx, lit, ChkLitConstExpr(impl.typeManager, target, lit, ctx: Some(ctx),
+                diag: impl.diag))
         }
         if (let Some(arrayLit) <- (expr as ArrayLit)) {
             return FinishCheck(ctx, arrayLit, CheckArrayLit(ctx, target, arrayLit))
@@ -3938,7 +3946,8 @@ public class TypeChecker {
         }
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
             let _ = SynthesizeNameReference(ctx, nameRef)
-            return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx)))
+            return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx),
+                diag: impl.diag))
         }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             let throwTy = SynthesizeThrowExpr(ctx, throwExpr)
@@ -3967,7 +3976,8 @@ public class TypeChecker {
             return FinishCheck(ctx, asExpr, ChkAsExpr(impl.typeManager, target, asExpr, LookupCoreEnumDecl(ctx, "Option")))
         }
         let _ = Synthesize(ctx, expr)
-        return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx)))
+        return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx),
+            diag: impl.diag))
     }
 
     private func ResolveRefExpr(ctx: ASTContext, refExpr: RefExpr): Unit {

@@ -44,7 +44,8 @@ private func ConstPatternDefaultLiteralTy(lit: LitConstExpr): Ty {
     }
 }
 
-private func CheckConstPatternIntegerLiteral(target: Ty, lit: LitConstExpr): Bool {
+private func CheckConstPatternIntegerLiteral(target: Ty, lit: LitConstExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let suffixKind = lit.GetNumLitTypeKind()
     if (suffixKind == TypeKind.TYPE_INVALID) {
         lit.SetTy(TypeManager.GetInvalidTy())
@@ -52,13 +53,14 @@ private func CheckConstPatternIntegerLiteral(target: Ty, lit: LitConstExpr): Boo
     }
     if (target.IsIntegerSubType() && (suffixKind == target.kind || suffixKind == TypeKind.TYPE_IDEAL_INT)) {
         lit.SetTy(target)
-        return ChkLitConstExprRange(lit)
+        return ChkLitConstExprRange(lit, diag: diag)
     }
     lit.SetTy(ConstPatternDefaultLiteralTy(lit))
     return true
 }
 
-private func CheckConstPatternFloatLiteral(target: Ty, lit: LitConstExpr): Bool {
+private func CheckConstPatternFloatLiteral(target: Ty, lit: LitConstExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let suffixKind = lit.GetNumLitTypeKind()
     if (suffixKind == TypeKind.TYPE_INVALID) {
         lit.SetTy(TypeManager.GetInvalidTy())
@@ -66,13 +68,14 @@ private func CheckConstPatternFloatLiteral(target: Ty, lit: LitConstExpr): Bool 
     }
     if (target.IsFloatingSubType() && (suffixKind == target.kind || suffixKind == TypeKind.TYPE_IDEAL_FLOAT)) {
         lit.SetTy(target)
-        return ChkLitConstExprRange(lit)
+        return ChkLitConstExprRange(lit, diag: diag)
     }
     lit.SetTy(ConstPatternDefaultLiteralTy(lit))
     return true
 }
 
-private func CheckConstPatternLiteral(target: Ty, lit: LitConstExpr): Bool {
+private func CheckConstPatternLiteral(target: Ty, lit: LitConstExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     return match (lit.kind) {
         case LitConstKind.BOOL =>
             if (target.IsBooleanSubType()) {
@@ -88,9 +91,9 @@ private func CheckConstPatternLiteral(target: Ty, lit: LitConstExpr): Bool {
                 lit.SetTy(ConstPatternDefaultLiteralTy(lit))
             }
             true
-        case LitConstKind.INTEGER => CheckConstPatternIntegerLiteral(target, lit)
-        case LitConstKind.RUNE_BYTE => CheckConstPatternIntegerLiteral(target, lit)
-        case LitConstKind.FLOAT => CheckConstPatternFloatLiteral(target, lit)
+        case LitConstKind.INTEGER => CheckConstPatternIntegerLiteral(target, lit, diag: diag)
+        case LitConstKind.RUNE_BYTE => CheckConstPatternIntegerLiteral(target, lit, diag: diag)
+        case LitConstKind.FLOAT => CheckConstPatternFloatLiteral(target, lit, diag: diag)
         case LitConstKind.RUNE =>
             if (target.IsRune()) {
                 lit.SetTy(target)
@@ -549,7 +552,8 @@ public func ChkWildcardPattern(target: Ty, pattern: WildcardPattern): Bool {
 }
 
 public func ChkConstPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty, pattern: ConstPattern,
-    exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
+    exprChecker!: Option<ConstPatternExprChecker> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- pattern.literal) {
         return InvalidPatternTy(pattern)
     }
@@ -561,14 +565,14 @@ public func ChkConstPattern(typeManager: TypeManager, ctx: ASTContext, target: T
         } else if (target.kind == TypeKind.TYPE_UINT8 && IsSingleByteStringLiteral(literal)) {
             lit.SetTy(target)
             pattern.SetTy(target)
-            if (!ChkLitConstExprRange(lit)) {
+            if (!ChkLitConstExprRange(lit, diag: diag)) {
                 return InvalidPatternTy(pattern)
             }
         } else if (let Some(checker) <- exprChecker) {
             if (!checker(target, lit)) {
                 return InvalidPatternTy(pattern)
             }
-        } else if (!CheckConstPatternLiteral(target, lit)) {
+        } else if (!CheckConstPatternLiteral(target, lit, diag: diag)) {
             return InvalidPatternTy(pattern)
         }
     } else if (let Some(checker) <- exprChecker) {
@@ -820,7 +824,7 @@ public func ChkPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
         return ChkWildcardPattern(target, wildcard)
     }
     if (let Some(constPattern) <- (pattern as ConstPattern)) {
-        return ChkConstPattern(typeManager, ctx, target, constPattern, exprChecker: exprChecker)
+        return ChkConstPattern(typeManager, ctx, target, constPattern, exprChecker: exprChecker, diag: diag)
     }
     if (let Some(typePattern) <- (pattern as TypePattern)) {
         return ChkTypePattern(typeManager, ctx, target, typePattern, diag: diag)

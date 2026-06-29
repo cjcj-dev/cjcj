@@ -1,6 +1,7 @@
 package cangjie_compiler::sema.TypeCheckExpr
 
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::sema.*
 
 private func InvalidLitConstExpr(lce: LitConstExpr): Ty {
@@ -279,7 +280,8 @@ public func ChkLitConstExprOfTypeString(typeManager: TypeManager, target: Ty, lc
 }
 
 public func ChkLitConstExpr(typeManager: TypeManager, target: Ty, lce: LitConstExpr,
-    stringTy!: Option<Ty> = None, ctx!: Option<ASTContext> = None): Bool {
+    stringTy!: Option<Ty> = None, ctx!: Option<ASTContext> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let isWellTyped = match (lce.kind) {
         case LitConstKind.BOOL => ChkLitConstExprOfTypeBool(typeManager, target, lce)
         case LitConstKind.UNIT => ChkLitConstExprOfTypeUnit(typeManager, target, lce)
@@ -295,15 +297,16 @@ public func ChkLitConstExpr(typeManager: TypeManager, target: Ty, lce: LitConstE
         return false
     }
     return match (lce.kind) {
-        case LitConstKind.INTEGER => ChkLitConstExprRange(lce)
-        case LitConstKind.RUNE_BYTE => ChkLitConstExprRange(lce)
-        case LitConstKind.FLOAT => ChkLitConstExprRange(lce)
+        case LitConstKind.INTEGER => ChkLitConstExprRange(lce, diag: diag)
+        case LitConstKind.RUNE_BYTE => ChkLitConstExprRange(lce, diag: diag)
+        case LitConstKind.FLOAT => ChkLitConstExprRange(lce, diag: diag)
         case _ => true
     }
 }
 
 public func SynLitConstExpr(lce: LitConstExpr, stringTy!: Option<Ty> = None,
-    typeManager!: Option<TypeManager> = None, ctx!: Option<ASTContext> = None): Ty {
+    typeManager!: Option<TypeManager> = None, ctx!: Option<ASTContext> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
     let synTy = match (lce.kind) {
         case LitConstKind.BOOL => TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
         case LitConstKind.UNIT => TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
@@ -319,7 +322,7 @@ public func SynLitConstExpr(lce: LitConstExpr, stringTy!: Option<Ty> = None,
         lce.SetTy(synTy)
     }
     if (lce.kind == LitConstKind.INTEGER || lce.kind == LitConstKind.RUNE_BYTE || lce.kind == LitConstKind.FLOAT) {
-        let _ = ChkLitConstExprRange(lce)
+        let _ = ChkLitConstExprRange(lce, diag: diag)
     }
     return lce.GetTy() ?? TypeManager.GetInvalidTy()
 }

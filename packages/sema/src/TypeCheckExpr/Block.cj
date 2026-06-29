@@ -1,6 +1,7 @@
 package cangjie_compiler::sema.TypeCheckExpr
 
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::sema.*
 
 private func UnitTy(): Ty {
@@ -28,11 +29,12 @@ private func LastNodeForCheck(b: Block): Option<Node> {
     return None
 }
 
-private func ReplaceCorrectIdealTy(typeManager: TypeManager, node: Node): Bool {
-    return Ty.IsTyCorrect(node.GetTy()) && ReplaceIdealTy(typeManager, node)
+private func ReplaceCorrectIdealTy(typeManager: TypeManager, node: Node,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    return Ty.IsTyCorrect(node.GetTy()) && ReplaceIdealTy(typeManager, node, diag: diag)
 }
 
-public func SynBlock(typeManager: TypeManager, b: Block): Ty {
+public func SynBlock(typeManager: TypeManager, b: Block, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (b.body.isEmpty()) {
         let unitTy = UnitTy()
         b.SetTy(unitTy)
@@ -40,7 +42,7 @@ public func SynBlock(typeManager: TypeManager, b: Block): Ty {
     }
     var existInvalid = false
     for (node in b.body) {
-        if (!ReplaceCorrectIdealTy(typeManager, node)) {
+        if (!ReplaceCorrectIdealTy(typeManager, node, diag: diag)) {
             existInvalid = true
         }
     }
@@ -61,7 +63,8 @@ public func SynBlock(typeManager: TypeManager, b: Block): Ty {
     return InvalidBlock(b)
 }
 
-public func ChkBlock(typeManager: TypeManager, target: Ty, b: Block): Bool {
+public func ChkBlock(typeManager: TypeManager, target: Ty, b: Block,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let unitTy = UnitTy()
     if (b.body.isEmpty()) {
         b.SetTy(unitTy)
@@ -71,7 +74,7 @@ public func ChkBlock(typeManager: TypeManager, target: Ty, b: Block): Bool {
     var isWellTyped = true
     if (b.body.size > 1) {
         for (idx in 0..b.body.size - 1) {
-            if (!ReplaceCorrectIdealTy(typeManager, b.body[idx])) {
+            if (!ReplaceCorrectIdealTy(typeManager, b.body[idx], diag: diag)) {
                 isWellTyped = false
             }
         }
@@ -80,7 +83,7 @@ public func ChkBlock(typeManager: TypeManager, target: Ty, b: Block): Bool {
     if (let Some(lastNode) <- LastNodeForCheck(b)) {
         if (lastNode.IsDecl()) {
             let typeMatched = typeManager.IsSubtype(unitTy, target)
-            isWellTyped = ReplaceCorrectIdealTy(typeManager, lastNode) && typeMatched && isWellTyped
+            isWellTyped = ReplaceCorrectIdealTy(typeManager, lastNode, diag: diag) && typeMatched && isWellTyped
             if (isWellTyped) {
                 b.SetTy(unitTy)
                 return true
@@ -89,7 +92,7 @@ public func ChkBlock(typeManager: TypeManager, target: Ty, b: Block): Bool {
             return false
         }
         if (let Some(lastExpr) <- (lastNode as Expr)) {
-            let checked = ChkExprShallow(typeManager, target, lastExpr)
+            let checked = ChkExprShallow(typeManager, target, lastExpr, diag: diag)
             if (isWellTyped && checked) {
                 if (let Some(lastTy) <- lastExpr.GetTy()) {
                     b.SetTy(lastTy)

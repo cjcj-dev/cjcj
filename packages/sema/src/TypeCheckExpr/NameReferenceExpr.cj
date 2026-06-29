@@ -2,6 +2,7 @@ package cangjie_compiler::sema.TypeCheckExpr
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::sema.*
 
 func TcUnitTy(): Ty {
@@ -492,7 +493,8 @@ private func sameImportedAwareDecl(left: Decl, right: Decl): Bool {
     return SameDecl(left, right)
 }
 
-private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAccess, baseTy: Ty): Unit {
+private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAccess, baseTy: Ty,
+    diag!: Option<BasicDiagnosticEngine> = None): Unit {
     if ((let Some(_) <- ma.target) || !ma.targets.isEmpty() || !Ty.IsTyCorrect(baseTy)) {
         return
     }
@@ -501,7 +503,7 @@ private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAcc
         return
     }
     if (baseTy.IsIdeal()) {
-        PopulateIdealMemberAccessTargets(typeManager, ma, baseTy)
+        PopulateIdealMemberAccessTargets(typeManager, ma, baseTy, diag: diag)
         return
     }
     let info = LookupInfo(baseTy: Some(baseTy), file: ma.curFile)
@@ -516,7 +518,8 @@ private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAcc
     }
 }
 
-private func PopulateIdealMemberAccessTargets(typeManager: TypeManager, ma: MemberAccess, baseTy: Ty): Unit {
+private func PopulateIdealMemberAccessTargets(typeManager: TypeManager, ma: MemberAccess, baseTy: Ty,
+    diag!: Option<BasicDiagnosticEngine> = None): Unit {
     let candidates = ArrayList<Decl>()
     let targetTys = ArrayList<Ty>()
     if (let Some(file) <- ma.curFile) {
@@ -532,9 +535,9 @@ private func PopulateIdealMemberAccessTargets(typeManager: TypeManager, ma: Memb
     }
     if (candidates.size > 1) {
         if (let Some(baseExpr) <- ma.baseExpr) {
-            let _ = ReplaceIdealTy(typeManager, baseExpr)
+            let _ = ReplaceIdealTy(typeManager, baseExpr, diag: diag)
             if (let Some(replacedTy) <- baseExpr.GetTy()) {
-                PopulateMemberAccessTargets(typeManager, ma, replacedTy)
+                PopulateMemberAccessTargets(typeManager, ma, replacedTy, diag: diag)
             }
         }
         return
@@ -600,7 +603,8 @@ private func AddUpperBoundTargetMap(ma: MemberAccess, target: Decl, upperBound: 
     ma.foundUpperBoundMap.add((target, uppers))
 }
 
-public func SynExprShallow(typeManager: TypeManager, expr: Expr): Ty {
+public func SynExprShallow(typeManager: TypeManager, expr: Expr,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (let Some(desugar) <- expr.desugarExpr) {
         if (let Some(desugarTy) <- desugar.GetTy()) {
             expr.SetTy(desugarTy)
@@ -612,13 +616,13 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr): Ty {
         expr.SetTy(ty)
         return ty
     }
-    if (let Some(value) <- (expr as LitConstExpr)) { return SynLitConstExpr(value) }
+    if (let Some(value) <- (expr as LitConstExpr)) { return SynLitConstExpr(value, diag: diag) }
     if (let Some(value) <- (expr as ParenExpr)) { return SynParenExpr(typeManager, value) }
     if (let Some(value) <- (expr as TupleLit)) { return SynTupleLit(typeManager, value) }
     if (let Some(value) <- (expr as CallExpr)) { return SynCallExprShallow(typeManager, value) }
-    if (let Some(value) <- (expr as Block)) { return SynBlock(typeManager, value) }
+    if (let Some(value) <- (expr as Block)) { return SynBlock(typeManager, value, diag: diag) }
     if (let Some(value) <- (expr as UnaryExpr)) { return SynUnaryExpr(typeManager, value) }
-    if (let Some(value) <- (expr as BinaryExpr)) { return SynBinaryExpr(typeManager, value) }
+    if (let Some(value) <- (expr as BinaryExpr)) { return SynBinaryExpr(typeManager, value, diag: diag) }
     if (let Some(value) <- (expr as AssignExpr)) { return SynAssignExpr(typeManager, value) }
     if (let Some(value) <- (expr as IfExpr)) { return SynIfExpr(typeManager, value) }
     if (let Some(value) <- (expr as WhileExpr)) { return SynWhileExpr(typeManager, value) }
@@ -642,7 +646,7 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr): Ty {
     if (let Some(value) <- (expr as TypeConvExpr)) { return SynTypeConvExpr(typeManager, value) }
     if (let Some(value) <- (expr as SpawnExpr)) { return SynSpawnExpr(typeManager, value) }
     if (let Some(value) <- (expr as SynchronizedExpr)) { return SynSyncExpr(typeManager, value) }
-    if (let Some(value) <- (expr as NameReferenceExpr)) { return SynNameReferenceExpr(typeManager, value) }
+    if (let Some(value) <- (expr as NameReferenceExpr)) { return SynNameReferenceExpr(typeManager, value, diag: diag) }
     if (let Some(existingTy) <- expr.GetTy()) {
         if (Ty.IsTyCorrect(existingTy)) {
             return existingTy
@@ -652,17 +656,17 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr): Ty {
 }
 
 public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
-    ctx!: Option<ASTContext> = None): Bool {
+    ctx!: Option<ASTContext> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let Some(realCtx) <- ctx) {
         typeCheckExprPutTargetType(realCtx, expr, target)
     }
-    if (let Some(value) <- (expr as LitConstExpr)) { return ChkLitConstExpr(typeManager, target, value) }
+    if (let Some(value) <- (expr as LitConstExpr)) { return ChkLitConstExpr(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as ParenExpr)) { return ChkParenExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as TupleLit)) { return ChkTupleLit(typeManager, target, value) }
     if (let Some(value) <- (expr as CallExpr)) { return ChkCallExprShallow(typeManager, target, value) }
-    if (let Some(value) <- (expr as Block)) { return ChkBlock(typeManager, target, value) }
+    if (let Some(value) <- (expr as Block)) { return ChkBlock(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as UnaryExpr)) { return ChkUnaryExpr(typeManager, target, value) }
-    if (let Some(value) <- (expr as BinaryExpr)) { return ChkBinaryExpr(typeManager, target, value, ctx: ctx) }
+    if (let Some(value) <- (expr as BinaryExpr)) { return ChkBinaryExpr(typeManager, target, value, ctx: ctx, diag: diag) }
     if (let Some(value) <- (expr as AssignExpr)) { return ChkAssignExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as IfExpr)) { return ChkIfExpr(typeManager, target, value, ctx: ctx) }
     if (let Some(value) <- (expr as WhileExpr)) { return ChkWhileExpr(typeManager, target, value) }
@@ -687,8 +691,10 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
         return Ty.IsTyCorrect(syncTy) &&
             typeManager.CheckTypeCompatibility(target, syncTy) != TypeCompatibility.INCOMPATIBLE
     }
-    if (let Some(value) <- (expr as NameReferenceExpr)) { return ChkNameReferenceExpr(typeManager, target, value) }
-    let actualTy = SynExprShallow(typeManager, expr)
+    if (let Some(value) <- (expr as NameReferenceExpr)) {
+        return ChkNameReferenceExpr(typeManager, target, value, diag: diag)
+    }
+    let actualTy = SynExprShallow(typeManager, expr, diag: diag)
     if (Ty.IsTyCorrect(actualTy) && typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
         return true
     }
@@ -721,11 +727,12 @@ private func SynRefExpr(typeManager: TypeManager, re: RefExpr): Ty {
     return TcInvalid(re)
 }
 
-private func SynMemberAccess(typeManager: TypeManager, ma: MemberAccess): Ty {
+private func SynMemberAccess(typeManager: TypeManager, ma: MemberAccess,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (let Some(baseExpr) <- ma.baseExpr) {
         SetIsNotAlone(baseExpr)
         if (!Ty.IsTyCorrect(baseExpr.GetTy())) {
-            let _ = SynExprShallow(typeManager, baseExpr)
+            let _ = SynExprShallow(typeManager, baseExpr, diag: diag)
         }
         if (let Some(baseTy) <- baseExpr.GetTy()) {
             if (let Some(varrayTy) <- (baseTy as VArrayTy)) {
@@ -736,7 +743,7 @@ private func SynMemberAccess(typeManager: TypeManager, ma: MemberAccess): Ty {
                     return sizeTy
                 }
             }
-            PopulateMemberAccessTargets(typeManager, ma, baseTy)
+            PopulateMemberAccessTargets(typeManager, ma, baseTy, diag: diag)
         }
     }
     var targetOpt = ma.target
@@ -776,7 +783,8 @@ private func ApplyExplicitGenericArgs(typeManager: TypeManager, nre: NameReferen
     return fallback
 }
 
-public func SynNameReferenceExpr(typeManager: TypeManager, nre: NameReferenceExpr): Ty {
+public func SynNameReferenceExpr(typeManager: TypeManager, nre: NameReferenceExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
     for (typeArg in nre.GetTypeArgs()) {
         if (let Some(typeArgTy) <- typeArg.GetTy()) {
             if (!containsTy(nre.instTys, typeArgTy)) {
@@ -788,7 +796,7 @@ public func SynNameReferenceExpr(typeManager: TypeManager, nre: NameReferenceExp
         return ApplyExplicitGenericArgs(typeManager, nre, SynRefExpr(typeManager, refExpr))
     }
     if (let Some(memberAccess) <- (nre as MemberAccess)) {
-        return ApplyExplicitGenericArgs(typeManager, nre, SynMemberAccess(typeManager, memberAccess))
+        return ApplyExplicitGenericArgs(typeManager, nre, SynMemberAccess(typeManager, memberAccess, diag: diag))
     }
     if (Ty.IsTyCorrect(nre.GetTy())) {
         return TcTyOrInvalid(nre)
@@ -846,8 +854,9 @@ private func InstantiateEnumConstructorRefFromTarget(
     return actualTy
 }
 
-public func ChkNameReferenceExpr(typeManager: TypeManager, target: Ty, nre: NameReferenceExpr): Bool {
-    var actualTy = SynNameReferenceExpr(typeManager, nre)
+public func ChkNameReferenceExpr(typeManager: TypeManager, target: Ty, nre: NameReferenceExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    var actualTy = SynNameReferenceExpr(typeManager, nre, diag: diag)
     if (!Ty.IsTyCorrect(actualTy)) {
         return false
     }

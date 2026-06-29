@@ -7,6 +7,7 @@ import cangjie_compiler::sema.InheritanceChecker.*
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::utils.CJC_ASSERT_WITH_MSG
 
 private func ToBasicPosition(pos: Position): BasicPosition {
     return BasicPosition(pos.fileID, pos.line, pos.column)
@@ -48,20 +49,13 @@ private func IsPrimaryConstructor(funcDecl: FuncDecl): Bool {
     return funcDecl.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)
 }
 
-private func FunctionReturnTy(funcDecl: FuncDecl): Option<Ty> {
-    if (let Some(ty) <- funcDecl.GetTy()) {
-        if (let Some(funcTy) <- (ty as FuncTy)) {
-            return Some(funcTy.retTy)
-        }
-    }
-    if (let Some(body) <- funcDecl.funcBody) {
-        if (let Some(ty) <- body.GetTy()) {
-            if (let Some(funcTy) <- (ty as FuncTy)) {
-                return Some(funcTy.retTy)
-            }
-        }
-    }
-    return None
+private func CheckFuncReturnType(ty: Option<Ty>): Ty {
+    CJC_ASSERT_WITH_MSG(ty.isSome(), "Function should be already resolved")
+    let value = ty.getOrThrow()
+    CJC_ASSERT_WITH_MSG(value.IsFunc(), "Function's type should be a FuncTy")
+    let funcTy = (value as FuncTy).getOrThrow()
+    CJC_ASSERT_WITH_MSG(!Ty.IsInitialTy(funcTy.retTy), "Function's return type should be already resolved")
+    return funcTy.retTy
 }
 
 private func DeclInfo(decl: Decl): String {
@@ -142,7 +136,6 @@ private func MatchNominativeDecl(checker: MPTypeCheckerImpl, commonDecl: Decl, s
                     NodeRange(specificDecl),
                     arguments: [DeclKindToString(commonDecl), DeclKindToString(specificDecl)])
                 builder.Emit()
-                return false
             }
         }
     }
@@ -1075,25 +1068,25 @@ extend MPTypeCheckerImpl {
     }
 
     public func CheckMatchedFunctionReturnTypes(specificFunc: FuncDecl, commonFunc: FuncDecl): Unit {
-        if (let Some(commonRetTy) <- FunctionReturnTy(commonFunc)) {
-            if (let Some(specificRetTy) <- FunctionReturnTy(specificFunc)) {
-                var expectedTy = commonRetTy
-                let genericTyMap = TypeSubst()
-                MapCJMPGenericTypeArgs(genericTyMap, commonFunc, specificFunc)
-                if (!genericTyMap.IsEmpty()) {
-                    expectedTy = typeManager.GetInstantiatedTy(commonRetTy, genericTyMap)
-                }
-                if (typeManager.IsTyEqual(specificRetTy, expectedTy) ||
-                    typeManager.IsSubtype(specificRetTy, expectedTy)) {
-                    return
-                }
-                let builder = diag.DiagnoseRefactor(
-                    BasicDiagKindRefactor.sema_return_type_incompatible,
-                    NodeRange(specificFunc),
-                    arguments: [specificFunc.identifier.Val()])
-                builder.Emit()
-            }
+        let commonType = commonFunc.funcBody.getOrThrow().GetTy()
+        let specificType = specificFunc.funcBody.getOrThrow().GetTy()
+        let commonRetTy = CheckFuncReturnType(commonType)
+        let specificRetTy = CheckFuncReturnType(specificType)
+        if (commonRetTy == specificRetTy) {
+            return
         }
+        if (typeManager.IsSubtype(specificRetTy, commonRetTy)) {
+            return
+        }
+        commonFunc.specificImplementation = None
+        if (!MatchCJMPFunction(specificFunc, commonFunc)) {
+            let builder = diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.sema_return_type_incompatible,
+                NodeRange(specificFunc),
+                arguments: [specificFunc.identifier.Val()])
+            builder.Emit()
+        }
+        commonFunc.specificImplementation = specificFunc
     }
 
     public func CheckMatchedVariableTypes(specificVar: VarDecl, commonVar: VarDecl): Unit {
@@ -1161,8 +1154,4 @@ extend MPTypeCheckerImpl {
         })
         let _ = walker.Walk()
     }
-}
-
-public func SelfhostPortStatus_CJMP_CheckCJMP(): Bool {
-    return true
 }

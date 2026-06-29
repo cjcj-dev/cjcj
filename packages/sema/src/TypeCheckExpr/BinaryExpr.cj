@@ -272,7 +272,7 @@ private func DiagnoseForBinaryExpr(typeManager: TypeManager, be: BinaryExpr,
     let finalRight = finalPivot.rightExpr.getOrThrow()
     let _ = SynBinaryOperand(typeManager, finalLeft, synthesizer)
     let _ = SynBinaryOperand(typeManager, finalRight, synthesizer)
-    if (ReplaceIdealTy(typeManager, finalLeft) && ReplaceIdealTy(typeManager, finalRight)) {
+    if (ReplaceIdealTy(typeManager, finalLeft, diag: diag) && ReplaceIdealTy(typeManager, finalRight, diag: diag)) {
         if (let Some(diagValue) <- diag) {
             DiagInvalidBinaryExpr(diagValue, finalPivot)
         }
