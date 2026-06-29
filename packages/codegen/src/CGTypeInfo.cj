@@ -55,22 +55,6 @@ public func GetOrInsertCodeGenGlobal(cgMod: CGModule, globalName: String, global
     return LLVMNullValue()
 }
 
-// Mirror C++ llvm::Module::getNamedGlobal: return the existing global with this name, or None if it
-// has not been inserted yet. Used by the generic-typeinfo creators to short-circuit recursion when
-// the in-progress global has already been declared (but not yet initialized).
-public func GetNamedCodeGenGlobal(cgMod: CGModule, globalName: String): Option<LLVMValueRef> {
-    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
-        var result = LLVMNullValue()
-        try (nameCString = unsafe { LibC.mallocCString(globalName) }.asResource()) {
-            result = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
-        }
-        if (!result.isNull()) {
-            return result
-        }
-    }
-    return None
-}
-
 public func GetOrCreateTypeInfoGlobal(cgMod: CGModule, chirTy: Type, genericKind: CGGenericKind): LLVMValueRef {
     let typeInfo = DeclareTypeInfoGlobal(cgMod, chirTy, genericKind)
     DefineTypeInfoGlobalIfNeeded(cgMod, chirTy, typeInfo)
@@ -116,12 +100,13 @@ public func GetOrCreateGenericTypeInfoGlobal(cgMod: CGModule, chirTy: Type): LLV
     let genericTy = (chirTy as GenericType) ?? throw IllegalArgumentException("expected generic type info")
     let typeInfoTy = GetOrCreateGenericTypeInfoType(cgMod.GetLLVMContext())
     let typeInfoName = GenericTypeInfoName(cgMod, genericTy) + ".ti"
-    // Mirror C++ CGGenericType::GetOrCreateTypeInfo (CGGenericType.cpp:58-60): if the global already
-    // exists (even just declared, before its initializer is set) return it. This caches the global
-    // BEFORE generating its upper bounds, so a re-entrant lookup during F-bounded upper-bound
-    // generation reuses the in-progress global instead of recursing forever.
-    if (let Some(found) <- GetNamedCodeGenGlobal(cgMod, typeInfoName)) {
-        return found
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        try (nameCString = unsafe { LibC.mallocCString(typeInfoName) }.asResource()) {
+            let found = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+            if (!found.isNull()) {
+                return found
+            }
+        }
     }
     let typeInfo = GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoTy)
     if (typeInfo.isNull()) {
@@ -149,14 +134,16 @@ public func GetOrCreateGenericCustomTypeInfoGlobal(cgMod: CGModule, chirTy: Type
     let customTy = (chirTy as CustomType) ?? throw IllegalArgumentException("expected generic custom type info")
     let typeInfoTy = GetOrCreateGenericCustomTypeInfoType(cgMod.GetLLVMContext())
     let qualifiedName = GenericCustomTypeInfoName(cgMod, customTy)
-    // Mirror C++ CGType::GetOrCreateGenericCustomTypeInfo (CGType.cpp:1046-1048): if the global already
-    // exists (even just declared, before its initializer is set) return it. This caches the global
-    // BEFORE generating its type args, so a re-entrant lookup during F-bounded type-arg generation
-    // reuses the in-progress global instead of recursing forever.
-    if (let Some(found) <- GetNamedCodeGenGlobal(cgMod, qualifiedName + ".ti")) {
-        return found
+    let typeInfoName = qualifiedName + ".ti"
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        try (nameCString = unsafe { LibC.mallocCString(typeInfoName) }.asResource()) {
+            let found = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+            if (!found.isNull()) {
+                return found
+            }
+        }
     }
-    let typeInfo = GetOrInsertCodeGenGlobal(cgMod, qualifiedName + ".ti", typeInfoTy)
+    let typeInfo = GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoTy)
     if (typeInfo.isNull()) {
         return typeInfo
     }
@@ -1530,12 +1517,17 @@ private func GenerateExtensionDefPtrOfTypeInfo(cgMod: CGModule, chirTy: Type,
     if (let Some(startIdx) <- cgMod.GetExtensionDefStart(chirTy)) {
         let defs = cgMod.GetNonExternalExtensionDefs()
         if (!defs.isEmpty()) {
-            if (let Some(table) <- GetNamedCodeGenGlobal(cgMod, "NonExternalExtensionDefs")) {
-                let arrayType = unsafe { LLVMGlobalGetValueType(table) }
-                let i32Type = unsafe { LLVMInt32TypeInContext(cgMod.GetLLVMContext().raw) }
-                let zero = unsafe { LLVMConstInt(i32Type, 0u64, 0) }
-                let index = unsafe { LLVMConstInt(i32Type, UInt64(startIdx), 0) }
-                return TypeInfoConstInBoundsGEP2(arrayType, table, zero, index)
+            if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+                try (nameCString = unsafe { LibC.mallocCString("NonExternalExtensionDefs") }.asResource()) {
+                    let table = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+                    if (!table.isNull()) {
+                        let arrayType = unsafe { LLVMGlobalGetValueType(table) }
+                        let i32Type = unsafe { LLVMInt32TypeInContext(cgMod.GetLLVMContext().raw) }
+                        let zero = unsafe { LLVMConstInt(i32Type, 0u64, 0) }
+                        let index = unsafe { LLVMConstInt(i32Type, UInt64(startIdx), 0) }
+                        return TypeInfoConstInBoundsGEP2(arrayType, table, zero, index)
+                    }
+                }
             }
         }
     }
