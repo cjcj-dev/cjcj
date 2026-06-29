@@ -4,13 +4,12 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 import cangjie_compiler::basic.LambdaPattern as BasicLambdaPattern
+import cangjie_compiler::mangle.BaseMangler
+import cangjie_compiler::modules.ImportManager
 import cangjie_compiler::option.GetFileName as OptionGetFileName
 import cangjie_compiler::option.IsDir as OptionIsDir
 import cangjie_compiler::sema.TypeManager
-
-foreign {
-    func abort(): Unit
-}
+import cangjie_compiler::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK}
 
 public let NSSTRING_CLASS_IDENT: String = "NSString"
 public let NSOBJECT_CLASS_IDENT: String = "NSObject"
@@ -47,18 +46,6 @@ extend ArrayOperationKind <: Equatable<ArrayOperationKind> {
 
     public operator func !=(right: ArrayOperationKind): Bool {
         return !(this == right)
-    }
-}
-
-private func AbortForInvalidArrayOperation(): Unit {
-    unsafe {
-        abort()
-    }
-}
-
-private func AssertArrayOperationPrecondition(condition: Bool): Unit {
-    if (!condition) {
-        AbortForInvalidArrayOperation()
     }
 }
 
@@ -175,6 +162,98 @@ public func CreateFuncType(ty: FuncTy): FuncType {
     return typeNode
 }
 
+public func WithinFile<T>(node: T, curFile: Option<File>): T where T <: Node {
+    CJC_NULLPTR_CHECK(curFile)
+    node.curFile = curFile
+    return node
+}
+
+public func WithinFile<T>(node: T, curFile: File): T where T <: Node {
+    return WithinFile<T>(node, Some(curFile))
+}
+
+private func WrapArg(funcArgs: ArrayList<FuncArg>, e: FuncArg): Unit {
+    funcArgs.add(e)
+}
+
+private func WrapArg(funcArgs: ArrayList<FuncArg>, e: Expr): Unit {
+    funcArgs.add(CreateFuncArg(e))
+}
+
+public func CreateCall(fd: Option<FuncDecl>, curFile: Option<File>,
+    args!: ArrayList<FuncArg> = ArrayList<FuncArg>()): Option<CallExpr> {
+    if (let None <- fd) {
+        return None
+    }
+
+    let funcDecl = fd.getOrThrow()
+    let funcTy = (funcDecl.GetTy().getOrThrow() as FuncTy).getOrThrow()
+    return CreateCallExpr(WithinFile<RefExpr>(CreateRefExpr(funcDecl), curFile), args, fd, funcTy.retTy,
+        CallKind.CALL_DECLARED_FUNCTION)
+}
+
+public func CreateCall(fd: FuncDecl, curFile: File,
+    args!: ArrayList<FuncArg> = ArrayList<FuncArg>()): CallExpr {
+    return CreateCall(Some(fd), Some(curFile), args: args).getOrThrow()
+}
+
+public func CreateCall(fd: FuncDecl, curFile: File, arg: Expr): CallExpr {
+    let funcArgs = ArrayList<FuncArg>()
+    WrapArg(funcArgs, arg)
+    return CreateCall(fd, curFile, args: funcArgs)
+}
+
+public func CreateCall(fd: FuncDecl, curFile: File, arg: FuncArg): CallExpr {
+    let funcArgs = ArrayList<FuncArg>()
+    WrapArg(funcArgs, arg)
+    return CreateCall(fd, curFile, args: funcArgs)
+}
+
+public func CreateCall(fd: FuncDecl, curFile: File, first: Expr, second: Expr): CallExpr {
+    let funcArgs = ArrayList<FuncArg>()
+    WrapArg(funcArgs, first)
+    WrapArg(funcArgs, second)
+    return CreateCall(fd, curFile, args: funcArgs)
+}
+
+public func CreateCall(fd: FuncDecl, curFile: File, first: Expr, second: Expr, third: Expr): CallExpr {
+    let funcArgs = ArrayList<FuncArg>()
+    WrapArg(funcArgs, first)
+    WrapArg(funcArgs, second)
+    WrapArg(funcArgs, third)
+    return CreateCall(fd, curFile, args: funcArgs)
+}
+
+public func CreateMemberCall(receiver: Option<Expr>, fd: Option<FuncDecl>,
+    args!: ArrayList<FuncArg> = ArrayList<FuncArg>()): Option<CallExpr> {
+    CJC_NULLPTR_CHECK(receiver)
+    CJC_NULLPTR_CHECK(fd)
+    let funcDecl = fd.getOrThrow()
+    let funcTy = (funcDecl.GetTy().getOrThrow() as FuncTy).getOrThrow()
+    let memberAccess = CreateMemberAccess(receiver.getOrThrow(), funcDecl)
+    if (let Some(baseExpr) <- memberAccess.baseExpr) {
+        CopyBasicInfo(baseExpr, memberAccess)
+    }
+    return CreateCallExpr(memberAccess, args, fd, funcTy.retTy, CallKind.CALL_DECLARED_FUNCTION)
+}
+
+public func CreateMemberCall(receiver: Expr, fd: FuncDecl,
+    args!: ArrayList<FuncArg> = ArrayList<FuncArg>()): CallExpr {
+    return CreateMemberCall(Some(receiver), Some(fd), args: args).getOrThrow()
+}
+
+public func CreateMemberCall(receiver: Expr, fd: FuncDecl, arg: Expr): CallExpr {
+    let funcArgs = ArrayList<FuncArg>()
+    WrapArg(funcArgs, arg)
+    return CreateMemberCall(receiver, fd, args: funcArgs)
+}
+
+public func CreateMemberCall(receiver: Expr, fd: FuncDecl, arg: FuncArg): CallExpr {
+    let funcArgs = ArrayList<FuncArg>()
+    WrapArg(funcArgs, arg)
+    return CreateMemberCall(receiver, fd, args: funcArgs)
+}
+
 public func CreateBoolMatch(selector: Expr, trueBranch: Expr, falseBranch: Expr, ty: Ty): Expr {
     let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
     let truePattern = ConstPattern()
@@ -193,10 +272,16 @@ public func CreateBoolMatch(selector: Expr, trueBranch: Expr, falseBranch: Expr,
     return matchExpr
 }
 
+public func GetStringDecl(importManager: ImportManager): StructDecl {
+    let decl = importManager.GetCoreDecl(STD_LIB_STRING_IDENT)
+    CJC_NULLPTR_CHECK(decl)
+    return (decl.getOrThrow() as StructDecl).getOrThrow()
+}
+
 private func LambdaParamTys(params: ArrayList<FuncParam>): ArrayList<Ty> {
     let paramTys = ArrayList<Ty>()
     for (param in params) {
-        paramTys.add(param.GetTy() ?? TypeManager.GetInvalidTy())
+        paramTys.add(param.GetTy().getOrThrow())
     }
     return paramTys
 }
@@ -206,48 +291,37 @@ private func BuildReturningLambdaBody(nodes: ArrayList<Node>, retTy: Ty): (Array
     for (idx in 0..nodes.size - 1) {
         bodyNodes.add(nodes[idx])
     }
-    if (let Some(lastExpr) <- (nodes[nodes.size - 1] as Expr)) {
-        var retValue = lastExpr
-        if (let Some(cloned) <- (ASTCloner.Clone(lastExpr) as Expr)) {
-            retValue = cloned
-        }
-        let unsafeNodes = ArrayList<Node>()
-        unsafeNodes.add(retValue)
-        let unsafeBlock = CreateBlock(unsafeNodes, retTy)
-        unsafeBlock.EnableAttr(Attribute.UNSAFE)
-        return (bodyNodes, unsafeBlock)
+    CJC_ASSERT((nodes[nodes.size - 1] as Expr).isSome())
+    let lastExpr = (nodes[nodes.size - 1] as Expr).getOrThrow()
+    var retValue = lastExpr
+    if (let Some(cloned) <- (ASTCloner.Clone(lastExpr) as Expr)) {
+        retValue = cloned
     }
-    return (bodyNodes, CreateUnitExpr(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
+    let unsafeNodes = ArrayList<Node>()
+    unsafeNodes.add(retValue)
+    let unsafeBlock = CreateBlock(unsafeNodes, retTy)
+    unsafeBlock.EnableAttr(Attribute.UNSAFE)
+    return (bodyNodes, unsafeBlock)
 }
 
 public func WrapReturningLambdaCall(typeManager: TypeManager, nodes: ArrayList<Node>): CallExpr {
-    let retTy = if (nodes.isEmpty()) {
-        TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
-    } else {
-        nodes[nodes.size - 1].GetTy() ?? TypeManager.GetInvalidTy()
-    }
+    CJC_ASSERT_WITH_MSG(!nodes.isEmpty(), "cannot create lambda with empty body")
+    let retTy = nodes[nodes.size - 1].GetTy().getOrThrow()
     let lambda = WrapReturningLambdaExpr(typeManager, nodes)
     return CreateCallExpr(lambda, ArrayList<FuncArg>(), None, retTy, CallKind.CALL_INVALID)
 }
 
 public func WrapReturningLambdaExpr(typeManager: TypeManager, nodes: ArrayList<Node>,
     lambdaParams!: ArrayList<FuncParam> = ArrayList<FuncParam>()): LambdaExpr {
-    let retTy = if (nodes.isEmpty()) {
-        TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
-    } else {
-        nodes[nodes.size - 1].GetTy() ?? TypeManager.GetInvalidTy()
-    }
+    CJC_ASSERT(!nodes.isEmpty())
+    let retTy = nodes[nodes.size - 1].GetTy().getOrThrow()
     let paramTys = LambdaParamTys(lambdaParams)
     let paramLists = ArrayList<FuncParamList>()
     paramLists.add(CreateFuncParamList(lambdaParams))
     let lambdaTy = typeManager.GetFunctionTy(paramTys.toArray(), retTy)
-    let curFile: Option<File> = if (nodes.isEmpty()) { None } else { nodes[0].curFile }
+    let curFile: Option<File> = nodes[0].curFile
 
-    let bodyParts = if (nodes.isEmpty()) {
-        (ArrayList<Node>(), CreateUnitExpr(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
-    } else {
-        BuildReturningLambdaBody(nodes, retTy)
-    }
+    let bodyParts = BuildReturningLambdaBody(nodes, retTy)
     let body = CreateBlock(bodyParts[0], retTy)
     let funcBody = CreateFuncBody(paramLists, None, body, lambdaTy)
     let retExpr = CreateReturnExpr(bodyParts[1], funcBody)
@@ -258,7 +332,6 @@ public func WrapReturningLambdaExpr(typeManager: TypeManager, nodes: ArrayList<N
     let lambda = CreateLambdaExpr(funcBody)
     lambda.curFile = curFile
     lambda.SetTy(lambdaTy)
-    AddCurFile(lambda, file: curFile)
     return lambda
 }
 
@@ -287,47 +360,31 @@ public func IsJArray(ty: Ty): Bool {
     return false
 }
 
-public func TryGetArrayOperationKind(decl: Decl): Option<ArrayOperationKind> {
+public func GetArrayOperationKind(decl: Decl): ArrayOperationKind {
+    CJC_ASSERT(IsJArray(decl.outerDecl.getOrThrow()))
     if (let Some(propDecl) <- (decl as PropDecl)) {
         if (propDecl.identifier.Val() == ARRAY_LENGTH_IDENT) {
-            return Some(ArrayOperationKind.GET_LENGTH)
+            return ArrayOperationKind.GET_LENGTH
         }
     }
     if (let Some(funcDecl) <- (decl as FuncDecl)) {
         let funcName = funcDecl.identifier.Val()
         if (funcName == ARRAY_SUBSCRIPT_IDENT) {
-            if (let Some(body) <- funcDecl.funcBody) {
-                if (!body.paramLists.isEmpty()) {
-                    let paramsNumber = body.paramLists[0].params.size
-                    if (paramsNumber == 1) {
-                        return Some(ArrayOperationKind.GET)
-                    }
-                    if (paramsNumber == 2) {
-                        return Some(ArrayOperationKind.SET)
-                    }
-                }
+            let paramsNumber = funcDecl.funcBody.getOrThrow().paramLists[0].params.size
+            if (paramsNumber == 1) {
+                return ArrayOperationKind.GET
+            } else if (paramsNumber == 2) {
+                return ArrayOperationKind.SET
             }
         }
         if (funcName == JAVA_ARRAY_GET_FOR_REF_TYPES) {
-            return Some(ArrayOperationKind.GET)
+            return ArrayOperationKind.GET
         }
         if (funcName == JAVA_ARRAY_SET_FOR_REF_TYPES) {
-            return Some(ArrayOperationKind.SET)
+            return ArrayOperationKind.SET
         }
     }
-    return None
-}
-
-public func GetArrayOperationKind(decl: Decl): ArrayOperationKind {
-    if (let Some(outer) <- decl.outerDecl) {
-        AssertArrayOperationPrecondition(IsJArray(outer))
-    } else {
-        AssertArrayOperationPrecondition(false)
-    }
-    if (let Some(kind) <- TryGetArrayOperationKind(decl)) {
-        return kind
-    }
-    AbortForInvalidArrayOperation()
+    CJC_ABORT()
     return ArrayOperationKind.GET
 }
 
@@ -457,6 +514,22 @@ public func IsObjCGeneratedMember(target: Decl): Bool {
     return false
 }
 
+public func GetMangledMethodName(mangler: BaseMangler, params: ArrayList<FuncParam>, methodName: String,
+    typeManager: TypeManager, genericConfig!: Option<GenericConfigInfo> = None): String {
+    var name = methodName
+    for (param in params) {
+        let rawParamTy = param.GetTy().getOrThrow()
+        var paramTy = rawParamTy
+        if (let Some(config) <- genericConfig) {
+            if (rawParamTy.HasGeneric()) {
+                paramTy = GetGenericInstTy(config, rawParamTy, typeManager)
+            }
+        }
+        name += mangler.MangleAstSemanticType(paramTy).replace(".", "_")
+    }
+    return name
+}
+
 public func IsCJMappingGeneric(decl: Decl): Bool {
     if (let Some(classDecl) <- (decl as ClassDecl)) {
         if (!classDecl.TestAnyAttr(Attribute.ABSTRACT, Attribute.OPEN)) {
@@ -497,34 +570,58 @@ public func JoinVector(values: ArrayList<String>, delimiter: String): String {
     return builder.toString()
 }
 
-public func GetActualTypeKind(configType: String): TypeKind {
-    return match (configType) {
-        case "Int" => TypeKind.TYPE_INT64
-        case "Int8" => TypeKind.TYPE_INT8
-        case "Int16" => TypeKind.TYPE_INT16
-        case "Int32" => TypeKind.TYPE_INT32
-        case "Int64" => TypeKind.TYPE_INT64
-        case "IntNative" => TypeKind.TYPE_INT_NATIVE
-        case "UInt8" => TypeKind.TYPE_UINT8
-        case "UInt16" => TypeKind.TYPE_UINT16
-        case "UInt32" => TypeKind.TYPE_UINT32
-        case "UInt64" => TypeKind.TYPE_UINT64
-        case "UIntNative" => TypeKind.TYPE_UINT_NATIVE
-        case "Float16" => TypeKind.TYPE_FLOAT16
-        case "Float32" => TypeKind.TYPE_FLOAT32
-        case "Float64" => TypeKind.TYPE_FLOAT64
-        case "Bool" => TypeKind.TYPE_BOOLEAN
-        case "Boolean" => TypeKind.TYPE_BOOLEAN
-        case "Unit" => TypeKind.TYPE_UNIT
-        case _ => TypeKind.TYPE_INVALID
+public func InitGenericConfigs(file: File, decl: Decl, genericConfigs: ArrayList<GenericConfigInfo>,
+    isGenericGlueCode: Box<Bool>): Unit {
+    let curPackage = file.curPackage.getOrThrow()
+    for ((declSymbolName, innerMap) in curPackage.allowedInteropCJGenericInstantiations) {
+        if (declSymbolName != decl.identifier.Val()) {
+            continue
+        }
+        for ((typeStr, args) in innerMap) {
+            let funcNames = args.symbols
+            let actualTypes = SplitAndTrim(typeStr)
+            let instTypes = ArrayList<(String, String)>()
+            let typeArgs = decl.GetTy().getOrThrow().typeArgs
+            for (idx in 0..typeArgs.size) {
+                instTypes.add((typeArgs[idx].name, actualTypes[idx]))
+            }
+            let declName = decl.identifier.Val()
+            let declWInstStr = declName + JoinVector(actualTypes, "")
+            genericConfigs.add(GenericConfigInfo(declName, declWInstStr, instTypes, funcNames))
+            if (!isGenericGlueCode.value) {
+                isGenericGlueCode.value = true
+            }
+        }
     }
+}
+
+public func GetActualTypeKind(configType: String): TypeKind {
+    let typeKind: Option<TypeKind> = match (configType) {
+        case "Int" => Some(TypeKind.TYPE_INT64)
+        case "Int8" => Some(TypeKind.TYPE_INT8)
+        case "Int16" => Some(TypeKind.TYPE_INT16)
+        case "Int32" => Some(TypeKind.TYPE_INT32)
+        case "Int64" => Some(TypeKind.TYPE_INT64)
+        case "IntNative" => Some(TypeKind.TYPE_INT_NATIVE)
+        case "UInt8" => Some(TypeKind.TYPE_UINT8)
+        case "UInt16" => Some(TypeKind.TYPE_UINT16)
+        case "UInt32" => Some(TypeKind.TYPE_UINT32)
+        case "UInt64" => Some(TypeKind.TYPE_UINT64)
+        case "UIntNative" => Some(TypeKind.TYPE_UINT_NATIVE)
+        case "Float16" => Some(TypeKind.TYPE_FLOAT16)
+        case "Float32" => Some(TypeKind.TYPE_FLOAT32)
+        case "Float64" => Some(TypeKind.TYPE_FLOAT64)
+        case "Bool" => Some(TypeKind.TYPE_BOOLEAN)
+        case "Boolean" => Some(TypeKind.TYPE_BOOLEAN)
+        case "Unit" => Some(TypeKind.TYPE_UNIT)
+        case _ => None
+    }
+    CJC_ASSERT(typeKind.isSome())
+    return typeKind.getOrThrow()
 }
 
 public func GetTyByName(typeName: String): Ty {
     let typeKind = GetActualTypeKind(typeName)
-    if (typeKind == TypeKind.TYPE_INVALID) {
-        return TypeManager.GetInvalidTy()
-    }
     return TypeManager.GetPrimitiveTy(typeKind)
 }
 
@@ -538,9 +635,6 @@ public func GetPrimitiveType(typeName: String, typeKind: TypeKind): PrimitiveTyp
 
 public func GetTypeByName(typeName: String): Type {
     let typeKind = GetActualTypeKind(typeName)
-    if (typeKind == TypeKind.TYPE_INVALID) {
-        return InvalidType(INVALID_POSITION)
-    }
     return GetPrimitiveType(typeName, typeKind)
 }
 
@@ -716,13 +810,11 @@ public func GetArgsAndRetGenericActualTyVector(config: GenericConfigInfo, ctor: 
 }
 
 public func GetInstantyForGenericTy(decl: Decl, actualTyArgMap: HashMap<String, Ty>,
-    typeManager: TypeManager): Ty {
+    typeManager: TypeManager): Option<Ty> {
     let actualTypeArgs = ArrayList<Ty>()
-    if (let Some(declTy) <- decl.GetTy()) {
-        for (typeArg in declTy.typeArgs) {
-            if (let Some(actualTy) <- actualTyArgMap.get(typeArg.name)) {
-                actualTypeArgs.add(actualTy)
-            }
+    for (typeArg in decl.GetTy().getOrThrow().typeArgs) {
+        if (let Some(actualTy) <- actualTyArgMap.get(typeArg.name)) {
+            actualTypeArgs.add(actualTy)
         }
     }
     if (let Some(classDecl) <- (decl as ClassDecl)) {
@@ -737,7 +829,17 @@ public func GetInstantyForGenericTy(decl: Decl, actualTyArgMap: HashMap<String, 
     if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
         return typeManager.GetInterfaceTy(interfaceDecl, actualTypeArgs.toArray())
     }
-    return decl.GetTy() ?? TypeManager.GetInvalidTy()
+    return None
+}
+
+public func GetExceptionDecl(importManager: ImportManager): ClassDecl {
+    let exceptionDecl = importManager.GetCoreDecl("Exception")
+    CJC_NULLPTR_CHECK(exceptionDecl)
+    let exceptionClassDecl = exceptionDecl.getOrThrow() as ClassDecl
+    if (let None <- exceptionClassDecl) {
+        CJC_ABORT_WITH_MSG("'Exception' declaration expected to be 'ClassDecl'")
+    }
+    return exceptionClassDecl.getOrThrow()
 }
 
 public func IsGenericParam(ty: Ty, decl: Decl, config: GenericConfigInfo): Bool {
@@ -852,8 +954,4 @@ public func AreParamTypeKindsValid(fd: FuncDecl, typeKinds: ArrayList<TypeKind>)
         return true
     }
     return false
-}
-
-public func SelfhostPortStatus_NativeFFI_Utils(): Bool {
-    return true
 }

@@ -16,5 +16,7 @@
 [dependencies]
   "cangjie_compiler::ast" = { path = "../ast" }
   "cangjie_compiler::basic" = { path = "../basic" }
+  "cangjie_compiler::mangle" = { path = "../mangle" }
   "cangjie_compiler::modules" = { path = "../modules" }
   "cangjie_compiler::option" = { path = "../option" }
+  "cangjie_compiler::utils" = { path = "../utils" }
