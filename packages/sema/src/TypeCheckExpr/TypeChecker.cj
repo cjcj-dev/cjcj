@@ -3762,7 +3762,11 @@ public class TypeChecker {
             if (let Some(rangeDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "Range")) {
                 rangeStruct = rangeDecl as StructDecl
             }
-            return FinishSynthesize(ctx, rangeExpr, SynRangeExpr(impl.typeManager, rangeExpr, rangeDecl: rangeStruct))
+            return FinishSynthesize(ctx, rangeExpr, SynRangeExpr(impl.typeManager, rangeExpr, rangeDecl: rangeStruct,
+                ctx: Some(ctx), checker: Some({ targetTy: Ty, child: Expr => Check(ctx, targetTy, child) }),
+                checkGenericDeclInstantiation: Some({ decl: Option<Decl>, typeArgs: ArrayList<Ty>, node: Node =>
+                    impl.CheckGenericDeclInstantiation(decl, typeArgs, node)
+                }), diag: impl.diag))
         }
         if (let Some(arrayLit) <- (expr as ArrayLit)) {
             var arrayStruct: Option<StructDecl> = None
@@ -4003,6 +4007,18 @@ public class TypeChecker {
             let _ = SynthesizeForInExpr(ctx, forInExpr)
             return FinishCheck(ctx, forInExpr, ChkExprShallow(impl.typeManager, target, forInExpr, ctx: Some(ctx),
                 diag: impl.diag))
+        }
+        if (let Some(rangeExpr) <- (expr as RangeExpr)) {
+            var rangeStruct: Option<StructDecl> = None
+            if (let Some(rangeDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "Range")) {
+                rangeStruct = rangeDecl as StructDecl
+            }
+            return FinishCheck(ctx, rangeExpr, ChkRangeExpr(impl.typeManager, target, rangeExpr,
+                rangeDecl: rangeStruct, ctx: Some(ctx),
+                checker: Some({ targetTy: Ty, child: Expr => Check(ctx, targetTy, child) }),
+                checkGenericDeclInstantiation: Some({ decl: Option<Decl>, typeArgs: ArrayList<Ty>, node: Node =>
+                    impl.CheckGenericDeclInstantiation(decl, typeArgs, node)
+                }), diag: impl.diag))
         }
         if (expr.IsLoopExpr()) {
             SynthesizeLoopChildren(ctx, expr)
