@@ -357,7 +357,14 @@ public class TypeManager {
     }
 
     public static func IsCoreFutureType(ty: Ty): Bool {
-        return ty.name == FUTURE_TYPE_NAME && (ty.IsClass() || ty.IsInterface() || ty.IsStruct())
+        if (!ty.IsClass()) {
+            return false
+        }
+        if (let Some(declPtr) <- Ty.GetDeclPtrOfTy(Some(ty))) {
+            return declPtr.identifier == FUTURE_TYPE_NAME && declPtr.fullPackageName == "std.core" &&
+                ty.typeArgs.size == 1
+        }
+        return false
     }
 
     public func GetGenericsTy(gpd: GenericParamDecl): GenericsTy {
@@ -1189,6 +1196,13 @@ public class TypeManager {
                 return true
             }
             let genericParamTys = GetDeclTypeParams(decl)
+            if (let Some(genericDecl) <- decl.GetGeneric()) {
+                for (constraint in genericDecl.genericConstraints) {
+                    if (let None <- constraint.refType) {
+                        return false
+                    }
+                }
+            }
             if (genericParamTys.size != typeArgs.size) {
                 return false
             }
@@ -1406,11 +1420,23 @@ public class TypeManager {
     }
 
     public func ReplaceIdealTy(ty: Ty): Ty {
+        if (!Ty.IsTyCorrect(ty)) {
+            return ty
+        }
         if (ty.kind == TypeKind.TYPE_IDEAL_INT) {
             return GetPrimitiveTy(TypeKind.TYPE_INT64)
         }
         if (ty.kind == TypeKind.TYPE_IDEAL_FLOAT) {
             return GetPrimitiveTy(TypeKind.TYPE_FLOAT64)
+        }
+        if (ty.kind == TypeKind.TYPE_CLASS || ty.kind == TypeKind.TYPE_INTERFACE ||
+            ty.kind == TypeKind.TYPE_ENUM || ty.kind == TypeKind.TYPE_ARRAY ||
+            ty.kind == TypeKind.TYPE_POINTER || ty.kind == TypeKind.TYPE_TUPLE) {
+            var idx: Int64 = 0
+            while (idx < ty.typeArgs.size) {
+                ty.typeArgs[idx] = ReplaceIdealTy(ty.typeArgs[idx])
+                idx++
+            }
         }
         return ty
     }

@@ -197,9 +197,10 @@ public func IsOverloadableOperator(op: TokenKind): Bool {
     return op == TokenKind.ADD || op == TokenKind.BITAND || op == TokenKind.BITOR ||
         op == TokenKind.BITXOR || op == TokenKind.DIV || op == TokenKind.EQUAL ||
         op == TokenKind.EXP || op == TokenKind.GE || op == TokenKind.GT ||
-        op == TokenKind.LE || op == TokenKind.LSHIFT || op == TokenKind.LT ||
-        op == TokenKind.MOD || op == TokenKind.MUL || op == TokenKind.NOT ||
-        op == TokenKind.NOTEQ || op == TokenKind.RSHIFT || op == TokenKind.SUB
+        op == TokenKind.LE || op == TokenKind.LSHIFT || op == TokenKind.LSQUARE ||
+        op == TokenKind.LT || op == TokenKind.MOD || op == TokenKind.MUL ||
+        op == TokenKind.NOT || op == TokenKind.NOTEQ || op == TokenKind.RSHIFT ||
+        op == TokenKind.SUB
 }
 
 public func CanSkipDiag(node: Node): Bool {
@@ -329,15 +330,15 @@ public func DeclKindToString(decl: Decl): String {
 
 public func GetTypesStr(decls: ArrayList<Decl>): String {
     let seen = HashSet<String>()
-    let parts = ArrayList<String>()
+    var res = ""
     for (decl in decls) {
-        let text = DeclKindToString(decl)
+        let text = ASTKindName(decl.astKind)
         if (!seen.contains(text)) {
             seen.add(text)
-            parts.add(text)
+            res += text + " "
         }
     }
-    return JoinStrings(parts, " ")
+    return res
 }
 
 private func FindValidPropAccessor(classDecl: ClassDecl, isGetter: Bool, name: String): Option<FuncDecl> {
@@ -409,6 +410,14 @@ public func UnboxOptionType(ty: Ty): Ty {
         }
     }
     return current
+}
+
+public func GetFullInheritedTy(`extend`: ExtendDecl): String {
+    var fullType = PosSearchApi.PosToStr(`extend`.begin)
+    for (interfaceType in `extend`.inheritedTypes) {
+        fullType += interfaceType.GetTy().getOrThrow().String()
+    }
+    return fullType
 }
 
 public func GetFuncTargets(node: Node): ArrayList<FuncDecl> {
@@ -619,8 +628,4 @@ private func HasJavaAttr(fd: FuncDecl): Bool {
 private func TypeCheckUtilDeclKey(decl: Decl): String {
     return "${ASTKindIndex(decl.astKind)}:${decl.fullPackageName}:${decl.identifier.Val()}:" +
         "${decl.begin.ToString()}:${decl.end.ToString()}"
-}
-
-public func SelfhostPortStatus_TypeCheckUtil(): Bool {
-    return true
 }
