@@ -639,7 +639,7 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
     if (let Some(value) <- (expr as OptionalChainExpr)) { return SynOptionalChainExpr(typeManager, value) }
     if (let Some(value) <- (expr as ReturnExpr)) { return SynReturnExpr(typeManager, value) }
     if (let Some(value) <- (expr as JumpExpr)) { return SynLoopControlExpr(value) }
-    if (let Some(value) <- (expr as ThrowExpr)) { return SynThrowExpr(typeManager, value) }
+    if (let Some(value) <- (expr as ThrowExpr)) { return SynThrowExpr(typeManager, value, diag: diag) }
     if (let Some(value) <- (expr as PerformExpr)) { return SynPerformExpr(typeManager, value) }
     if (let Some(value) <- (expr as ResumeExpr)) { return SynResumeExpr(typeManager, value) }
     if (let Some(value) <- (expr as QuoteExpr)) { return SynQuoteExpr(value) }
@@ -662,7 +662,7 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     }
     if (let Some(value) <- (expr as LitConstExpr)) { return ChkLitConstExpr(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as ParenExpr)) { return ChkParenExpr(typeManager, target, value) }
-    if (let Some(value) <- (expr as TupleLit)) { return ChkTupleLit(typeManager, target, value) }
+    if (let Some(value) <- (expr as TupleLit)) { return ChkTupleLit(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as CallExpr)) { return ChkCallExprShallow(typeManager, target, value) }
     if (let Some(value) <- (expr as Block)) { return ChkBlock(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as UnaryExpr)) { return ChkUnaryExpr(typeManager, target, value) }

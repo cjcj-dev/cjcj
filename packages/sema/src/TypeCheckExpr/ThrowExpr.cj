@@ -1,6 +1,8 @@
 package cangjie_compiler::sema.TypeCheckExpr
 
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagKind as BasicDiagKind
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::sema.*
 
 private let CORE_PACKAGE_NAME: String = "std.core"
@@ -46,37 +48,6 @@ private func isCoreThrowableTy(typeManager: TypeManager, ty: Ty): Bool {
     return false
 }
 
-private func constructorCallObjectTy(expr: Expr): Option<Ty> {
-    if (let Some(callExpr) <- (expr as CallExpr)) {
-        var target: Option<FuncDecl> = callExpr.resolvedFunction
-        if (let None <- target) {
-            if (let Some(baseFunc) <- callExpr.baseFunc) {
-                if (let Some(baseTarget) <- baseFunc.GetTarget()) {
-                    target = baseTarget as FuncDecl
-                }
-            }
-        }
-        if (let Some(funcDecl) <- target) {
-            if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
-                if (let Some(outerDecl) <- funcDecl.outerDecl) {
-                    return outerDecl.GetTy()
-                }
-            }
-        }
-    }
-    return None
-}
-
-private func effectiveThrowOperandTy(expr: Expr, exprTy: Ty): Ty {
-    if (let Some(objectTy) <- constructorCallObjectTy(expr)) {
-        if (exprTy.IsUnit() || !isCoreThrowableTy(TypeManager(), exprTy)) {
-            expr.SetTy(objectTy)
-            return objectTy
-        }
-    }
-    return exprTy
-}
-
 private func isThrowableClassOrGeneric(typeManager: TypeManager, exprTy: Ty, exceptionTy: Option<Ty>, errorTy: Option<Ty>): Bool {
     if (!exprTy.IsClass() && !exprTy.IsGeneric()) {
         return false
@@ -98,20 +69,24 @@ private func isThrowableClassOrGeneric(typeManager: TypeManager, exprTy: Ty, exc
 }
 
 public func SynThrowExpr(typeManager: TypeManager, te: ThrowExpr,
-    exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None): Ty {
+    exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
     let nothingTy = TypeManager.GetNothingTy()
     te.SetTy(nothingTy)
     if (let Some(innerExpr) <- te.expr) {
         if (let Some(exprTy) <- innerExpr.GetTy()) {
-            let thrownTy = effectiveThrowOperandTy(innerExpr, exprTy)
-            if (thrownTy.HasInvalidTy()) {
+            if (exprTy.HasInvalidTy()) {
                 return TypeManager.GetInvalidTy()
             }
             if (isFreshResourceException(innerExpr, exprTy) ||
-                isThrowableClassOrGeneric(typeManager, thrownTy, exceptionTy, errorTy)) {
+                isThrowableClassOrGeneric(typeManager, exprTy, exceptionTy, errorTy)) {
                 return nothingTy
             }
         }
+    }
+    if (let Some(diagValue) <- diag) {
+        let builder = diagValue.Diagnose(te.begin, te.end, BasicDiagKind.sema_throw_expr_with_wrong_type)
+        builder.Emit()
     }
     let invalidTy = TypeManager.GetInvalidTy()
     te.SetTy(invalidTy)
