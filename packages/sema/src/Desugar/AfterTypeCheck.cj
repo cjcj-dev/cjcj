@@ -82,7 +82,3 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
     let _ = walker.Walk()
     AddOptionBox(typeManager, pkg)
 }
-
-public func SelfhostPortStatus_Desugar_AfterTypeCheck(): Bool {
-    return false
-}

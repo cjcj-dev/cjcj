@@ -981,36 +981,6 @@ private func AddFrameStartResult(typeManager: TypeManager, tryExpr: TryExpr, fra
     return false
 }
 
-private func CanDesugarTryToFrame(pkg: Package, tryExpr: TryExpr): Bool {
-    if (let None <- tryExpr.tryLambda) {
-        return false
-    }
-    if ((let None <- FindEffectClassDecl(pkg, CLASS_HANDLER_FRAME)) ||
-        (let None <- FindEffectClassDecl(pkg, CLASS_IMMEDIATE_FRAME)) ||
-        (let None <- FindEffectClassDecl(pkg, CLASS_FRAME_EXCEPTION_WRAPPER)) ||
-        (let None <- FindEffectClassDecl(pkg, CLASS_FRAME_ERROR_WRAPPER)) ||
-        (let None <- FindEffectClassDecl(pkg, CLASS_EARLY_RETURN)) ||
-        (let None <- FindEffectEnumDecl(pkg, IMMEDIATE_HANDLER_RETURN_NAME)) ||
-        (let None <- FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME)) ||
-        (let None <- FindCoreClassDecl(pkg, CLASS_ERROR_NAME))) {
-        return false
-    }
-    for (handler in tryExpr.handlers) {
-        if ((let None <- handler.commandPattern) || (let None <- handler.desugaredLambda) ||
-            (let None <- handler.commandResultTy)) {
-            return false
-        }
-        if (let None <- (handler.commandPattern.getOrThrow() as CommandTypePattern)) {
-            return false
-        }
-        let commandPattern = (handler.commandPattern.getOrThrow() as CommandTypePattern).getOrThrow()
-        if (commandPattern.types.size != 1 || (let None <- commandPattern.types[0].GetTy())) {
-            return false
-        }
-    }
-    return true
-}
-
 private func ClearOriginalTryHandleSurface(tryExpr: TryExpr): Unit {
     tryExpr.tryBlock = None
     tryExpr.catchPatterns.clear()
@@ -1025,9 +995,6 @@ public func DesugarTryToFrame(typeManager: TypeManager, pkg: Package, tryExpr: T
         return
     }
     if (let Some(_) <- tryExpr.desugarExpr) {
-        return
-    }
-    if (!CanDesugarTryToFrame(pkg, tryExpr)) {
         return
     }
     let nodes = ArrayList<Node>()
@@ -1049,8 +1016,4 @@ public func DesugarTryToFrame(typeManager: TypeManager, pkg: Package, tryExpr: T
     AddCurFile(resultBlock, file: tryExpr.curFile)
     tryExpr.desugarExpr = resultBlock
     ClearOriginalTryHandleSurface(tryExpr)
-}
-
-public func SelfhostPortStatus_Desugar_AfterTypeCheck_EffectHandlers(): Bool {
-    return false
 }

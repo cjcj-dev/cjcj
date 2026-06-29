@@ -573,8 +573,6 @@ public class ConstEvaluationChecker {
                 if (let Some(throwExpr) <- (expr as ThrowExpr)) { ChkOptionalExpr(throwExpr.expr, isWeak) } else { false }
             case ASTKind.PERFORM_EXPR =>
                 if (let Some(perform) <- (expr as PerformExpr)) { ChkOptionalExpr(perform.expr, isWeak) } else { false }
-            case ASTKind.RESUME_EXPR =>
-                if (let Some(resume) <- (expr as ResumeExpr)) { ChkResumeExpr(resume, isWeak) } else { false }
             case ASTKind.PAREN_EXPR =>
                 if (let Some(paren) <- (expr as ParenExpr)) { ChkOptionalExpr(paren.expr, isWeak) } else { false }
             case ASTKind.UNARY_EXPR =>
@@ -865,17 +863,8 @@ public class ConstEvaluationChecker {
         return false
     }
 
-    private func ChkResumeExpr(resume: ResumeExpr, isWeak: Bool): Bool {
-        var result = ChkOptionalExpr(resume.withExpr, isWeak)
-        result = ChkOptionalExpr(resume.throwingExpr, isWeak) && result
-        return result
-    }
 }
 
 public func CheckConstEvaluation(pkg: Package): ArrayList<ConstEvaluationIssue> {
     return ConstEvaluationChecker().Check(pkg)
-}
-
-public func SelfhostPortStatus_ConstEvaluationChecker(): Bool {
-    return true
 }
