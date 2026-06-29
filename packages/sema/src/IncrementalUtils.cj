@@ -2,6 +2,8 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::mangle.ASTMangler
+import cangjie_compiler::utils.CJC_ASSERT
 
 public class SemanticInfo {
     public let usedMangles: HashSet<String> = HashSet<String>()
@@ -117,7 +119,11 @@ public func HandleCtorForIncr(pkg: Package, mangledName2DeclMap: HashMap<String,
 }
 
 public func GetTypeRawMangleName(ty: Ty): String {
-    return ty.String()
+    if (let Some(boxDecl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
+        return boxDecl.rawMangleName
+    }
+    CJC_ASSERT(ty.IsBuiltin())
+    return ASTMangler.MangleBuiltinType(Ty.KindName(ty.kind))
 }
 
 public func CollectCompilerAddedDeclUsage(pkg: Package, usageCache: SemanticInfo): Unit {

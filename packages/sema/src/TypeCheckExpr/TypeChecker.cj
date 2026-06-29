@@ -1046,7 +1046,11 @@ public class TypeChecker {
         }
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
-                PreCheckAnnoForFFI(pkg)
+                if (let Some(diagValue) <- impl.diag) {
+                    PreCheckAnnoForFFI(pkg, diagValue)
+                } else {
+                    PreCheckAnnoForFFI(pkg)
+                }
                 let _ = PreCheckPackage(ctx, pkg, typeManager: impl.typeManager)
                 let _ = CheckDeclAttributesForPackage(pkg, opts: GlobalOptions())
             }

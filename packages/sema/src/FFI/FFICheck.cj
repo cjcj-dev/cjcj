@@ -1,6 +1,7 @@
 package cangjie_compiler::sema.FFI
 
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 
 public func GetDefaultABI(): Attribute {
     return Attribute.C
@@ -27,18 +28,14 @@ public func SetForeignABIAttr(decl: Decl): Unit {
 }
 
 public func PreCheckAnnoForCFFI(decl: Decl): Unit {
-    if (HasAnnotationNamed(decl, "C") || HasAnnotationNamed(decl, "CallingConv")) {
-        decl.EnableAttr(Attribute.C)
-    }
-    if (let Some(funcDecl) <- (decl as FuncDecl)) {
-        if (decl.TestAttr(Attribute.FOREIGN)) {
-            decl.EnableAttr(Attribute.NO_MANGLE)
-            funcDecl.linkage = Linkage.INTERNAL
-        }
-    }
+    PreCheckAnnoForCFFI(decl, BasicDiagnosticEngine())
 }
 
 public func PreCheckAnnoForFFI(root: Node): Unit {
+    PreCheckAnnoForFFI(root, BasicDiagnosticEngine())
+}
+
+public func PreCheckAnnoForFFI(root: Node, diag: BasicDiagnosticEngine): Unit {
     if (root.TestAttr(Attribute.IMPORTED)) {
         return
     }
@@ -46,7 +43,7 @@ public func PreCheckAnnoForFFI(root: Node): Unit {
         if (curNode.IsDecl()) {
             if (let Some(decl) <- (curNode as Decl)) {
                 SetForeignABIAttr(decl)
-                PreCheckAnnoForCFFI(decl)
+                PreCheckAnnoForCFFI(decl, diag)
             }
         }
         VisitAction.WALK_CHILDREN

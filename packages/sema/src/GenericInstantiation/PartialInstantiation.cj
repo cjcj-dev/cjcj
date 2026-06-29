@@ -7,6 +7,7 @@ import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::option.OptimizationLevel
 import cangjie_compiler::option.OutputMode
 import cangjie_compiler::option.enumIndex
+import cangjie_compiler::utils.CJC_ASSERT
 
 private var currentOptLevel: OptimizationLevel = OptimizationLevel.O0
 private var currentOutputMode: OutputMode = OutputMode.EXECUTABLE
@@ -23,18 +24,6 @@ private class InstantiationPair {
 
 private let ins2generic: ArrayList<InstantiationPair> = ArrayList<InstantiationPair>()
 private let generic2ins: ArrayList<InstantiationPair> = ArrayList<InstantiationPair>()
-
-private func findGeneralDecl(instantiatedDecl: Decl): Option<Decl> {
-    if (let Some(genericDecl) <- instantiatedDecl.genericDecl) {
-        return genericDecl
-    }
-    for (entry in ins2generic) {
-        if (SameDecl(entry.instantiatedDecl, instantiatedDecl)) {
-            return entry.genericDecl
-        }
-    }
-    return None
-}
 
 private func hasInstantiation(genericDecl: Decl, instantiatedDecl: Decl): Bool {
     for (entry in generic2ins) {
@@ -314,9 +303,18 @@ public class PartialInstantiation {
     }
 
     public static func GetGeneralDecl(clonedDecl: Decl): Decl {
-        if (let Some(generalDecl) <- findGeneralDecl(clonedDecl)) {
-            return generalDecl
+        if (let Some(genericDecl) <- clonedDecl.genericDecl) {
+            return genericDecl
         }
+        if (clonedDecl.TestAttr(Attribute.GENERATED_TO_MOCK)) {
+            return clonedDecl
+        }
+        for (entry in ins2generic) {
+            if (SameDecl(entry.instantiatedDecl, clonedDecl)) {
+                return entry.genericDecl
+            }
+        }
+        CJC_ASSERT(false)
         return clonedDecl
     }
 
