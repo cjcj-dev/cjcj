@@ -114,12 +114,20 @@ public class TypeExtraInfo {
         }
     }
 
-    public func Key(): String {
-        var out = "${addrspace}:${isMethod}:${isStaticMethod}:${allowBasePtr}:${forWrapper}"
-        for (ty in instantiatedParamTypes) {
-            out += ":" + ty.ToString()
+    public operator func ==(rhs: TypeExtraInfo): Bool {
+        if (instantiatedParamTypes.size != rhs.instantiatedParamTypes.size || addrspace != rhs.addrspace ||
+            isMethod != rhs.isMethod || isStaticMethod != rhs.isStaticMethod || allowBasePtr != rhs.allowBasePtr ||
+            forWrapper != rhs.forWrapper) {
+            return false
         }
-        return out
+        var idx: Int64 = 0
+        while (idx < instantiatedParamTypes.size) {
+            if (!refEq(instantiatedParamTypes[idx], rhs.instantiatedParamTypes[idx])) {
+                return false
+            }
+            idx++
+        }
+        return true
     }
 }
 

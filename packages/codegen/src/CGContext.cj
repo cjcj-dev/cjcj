@@ -287,12 +287,11 @@ public class CGContext {
     }
 
     public func GetOrCreateCGType(cgMod: CGModule, chirTy: Type, extraInfo: TypeExtraInfo): CGType {
-        let key = extraInfo.Key() + "|" + chirTy.ToString()
-        if (let Some(cached) <- impl.FindCGType(key)) {
+        if (let Some(cached) <- impl.FindCGType(extraInfo, chirTy)) {
             return cached
         }
         let created = CGTypeMgr.GetConcreteCGTypeFor(cgMod, chirTy, extraInfo: extraInfo)
-        impl.SetCGType(key, created)
+        impl.SetCGType(extraInfo, chirTy, created)
         created.Complete()
         return created
     }
