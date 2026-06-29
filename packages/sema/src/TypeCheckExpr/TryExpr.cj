@@ -2,17 +2,15 @@ package cangjie_compiler::sema.TypeCheckExpr
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
+import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.MakeRange as BasicMakeRange
 import cangjie_compiler::sema.*
 
-private let EFFECT_PACKAGE_NAME: String = "stdx.effect"
 private let CORE_PACKAGE_NAME: String = "std.core"
-private let COMMAND_TYPE_NAME: String = "Command"
 private let RESOURCE_TYPE_NAME: String = "Resource"
-private let CLASS_EXCEPTION_NAME: String = "Exception"
-private let CLASS_ERROR_NAME: String = "Error"
 
 private func TryInvalid(te: TryExpr): Ty {
     return TcInvalid(te)
@@ -32,47 +30,6 @@ private func JoinTryTy(typeManager: TypeManager, currentTy: Ty, branchTy: Ty, cu
     tys.Add(currentTy)
     tys.Add(branchTy)
     return JoinAsVisibleTy(typeManager, tys, curFile: curFile)
-}
-
-private func IsCommandTy(ty: Ty): Bool {
-    if (ty.typeArgs.size != 1) {
-        return false
-    }
-    if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
-        if (!decl.fullPackageName.isEmpty()) {
-            return decl.fullPackageName == EFFECT_PACKAGE_NAME && decl.identifier.Val() == COMMAND_TYPE_NAME
-        }
-    }
-    return ty.name == COMMAND_TYPE_NAME
-}
-
-private func PromotedCommandTy(typeManager: TypeManager, ty: Ty): Option<Ty> {
-    if (!Ty.IsTyCorrect(ty) || ty.IsNothing()) {
-        return None
-    }
-    if (IsCommandTy(ty)) {
-        return Some(ty)
-    }
-    if (let Some(genericTy) <- (ty as GenericsTy)) {
-        for (upperTy in genericTy.upperBounds) {
-            if (let Some(promotedUpper) <- PromotedCommandTy(typeManager, upperTy)) {
-                return Some(promotedUpper)
-            }
-        }
-    }
-    for (superTy in typeManager.GetAllSuperTys(ty).values) {
-        if (IsCommandTy(superTy)) {
-            return Some(superTy)
-        }
-    }
-    return None
-}
-
-private func CommandPayloadTy(typeManager: TypeManager, ty: Ty): Option<Ty> {
-    if (let Some(commandTy) <- PromotedCommandTy(typeManager, ty)) {
-        return Some(commandTy.typeArgs[0])
-    }
-    return None
 }
 
 private func IsCoreNamedTy(ty: Ty, name: String): Bool {
@@ -106,143 +63,228 @@ private func IsResourceTy(typeManager: TypeManager, ty: Ty): Bool {
     return false
 }
 
-private func IsIncludedType(typeManager: TypeManager, included: ArrayList<Ty>, candidate: Ty): Bool {
-    for (includedTy in included) {
-        if (SameTy(candidate, includedTy) || typeManager.IsSubtype(candidate, includedTy)) {
-            return true
-        }
-    }
-    return false
-}
-
-private func AddIncludedType(typeManager: TypeManager, included: ArrayList<Ty>, candidate: Ty): Bool {
-    if (IsIncludedType(typeManager, included, candidate)) {
-        return true
-    }
-    included.add(candidate)
-    return true
-}
-
-private func CheckCommandPattern(typeManager: TypeManager, handler: Handler, commandPattern: CommandTypePattern,
-    included: ArrayList<Ty>): Bool {
-    if (commandPattern.types.size != 1) {
-        commandPattern.SetTy(TypeManager.GetInvalidTy())
-        return false
-    }
-    if (let None <- commandPattern.types[0].GetTy()) {
-        commandPattern.SetTy(TypeManager.GetInvalidTy())
-        return false
-    }
-    let commandTy = commandPattern.types[0].GetTy().getOrThrow()
-    commandPattern.SetTy(commandTy)
-    var ok = AddIncludedType(typeManager, included, commandTy)
-    if (let Some(payloadTy) <- CommandPayloadTy(typeManager, commandTy)) {
-        handler.commandResultTy = payloadTy
-    } else {
-        ok = false
-    }
-    if (let Some(innerPattern) <- commandPattern.pattern) {
-        ok = TcPatternCheck(typeManager, commandTy, innerPattern) && ok
-    }
-    if (!ok) {
-        commandPattern.SetTy(TypeManager.GetInvalidTy())
-    }
-    return ok
-}
-
-private func CheckWildcardCatchPattern(typeManager: TypeManager, pattern: WildcardPattern,
-    included: ArrayList<Ty>): Bool {
-    let wildcardTy = typeManager.GetAnyTy()
-    pattern.SetTy(wildcardTy)
-    if (!AddIncludedType(typeManager, included, wildcardTy)) {
-        pattern.SetTy(TypeManager.GetInvalidTy())
-        return false
-    }
-    return true
-}
-
-private func IsThrowableCatchTy(typeManager: TypeManager, ty: Ty): Bool {
-    if (!Ty.IsTyCorrect(ty) || ty.IsNothing()) {
-        return false
-    }
-    if (IsCoreNamedTy(ty, CLASS_EXCEPTION_NAME) || IsCoreNamedTy(ty, CLASS_ERROR_NAME)) {
-        return true
-    }
-    if (let Some(genericTy) <- (ty as GenericsTy)) {
-        for (upperTy in genericTy.upperBounds) {
-            if (IsThrowableCatchTy(typeManager, upperTy)) {
-                return true
+private func ChkTryWildcardPattern(target: Ty, pattern: WildcardPattern, included: ArrayList<Ty>,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    pattern.SetTy(target)
+    if ((target as ClassTy).isSome()) {
+        for (includedTy in included) {
+            if (refEq(includedTy, target)) {
+                if (let Some(diagValue) <- diag) {
+                    let builder = diagValue.Diagnose(pattern.begin, pattern.end,
+                        BasicDiagKind.sema_useless_exception_type)
+                    builder.Emit()
+                }
+                break
             }
         }
     }
-    for (superTy in typeManager.GetAllSuperTys(ty).values) {
-        if (IsCoreNamedTy(superTy, CLASS_EXCEPTION_NAME) || IsCoreNamedTy(superTy, CLASS_ERROR_NAME)) {
-            return true
-        }
-    }
-    return false
+    return true
 }
 
-private func CheckExceptTypePattern(typeManager: TypeManager, exceptPattern: ExceptTypePattern,
-    included: ArrayList<Ty>): Bool {
-    var ok = true
-    var joinedTy: Ty = TypeManager.GetNothingTy()
+private func ChkExceptTypePattern(typeManager: TypeManager, exceptPattern: ExceptTypePattern,
+    included: ArrayList<Ty>, exceptionTy: Option<Ty>, errorTy: Option<Ty>,
+    diag!: Option<BasicDiagnosticEngine> = None,
+    patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Bool {
+    var result = true
+    let typeTys = ArrayList<Ty>()
+    let foundClass = exceptionTy.isSome() && errorTy.isSome()
     for (typeNode in exceptPattern.types) {
-        if (let Some(typeTy) <- typeNode.GetTy()) {
-            if (IsThrowableCatchTy(typeManager, typeTy)) {
-                if (AddIncludedType(typeManager, included, typeTy)) {
-                    joinedTy = JoinTryTy(typeManager, joinedTy, typeTy, typeNode.curFile)
-                    ok = Ty.IsTyCorrect(joinedTy) && ok
-                } else {
-                    ok = false
-                }
+        let typeTy = typeNode.GetTy() ?? TypeManager.GetInvalidTy()
+        if (!foundClass || typeTy.IsNothing() ||
+            !((if (let Some(coreExceptionTy) <- exceptionTy) {
+                typeManager.IsSubtype(typeTy, coreExceptionTy)
             } else {
-                ok = false
+                false
+            }) || (if (let Some(coreErrorTy) <- errorTy) {
+                typeManager.IsSubtype(typeTy, coreErrorTy)
+            } else {
+                false
+            }))) {
+            if (let Some(diagValue) <- diag) {
+                let builder = diagValue.Diagnose(typeNode.begin, typeNode.end,
+                    BasicDiagKind.sema_except_catch_type_error)
+                builder.Emit()
+            }
+            result = false
+            continue
+        }
+        var includedBySubtype = false
+        for (includedTy in included) {
+            if (typeManager.IsSubtype(typeTy, includedTy)) {
+                includedBySubtype = true
+                break
+            }
+        }
+        if (includedBySubtype) {
+            if (let Some(diagValue2) <- diag) {
+                let builder2 = diagValue2.Diagnose(typeNode.begin, typeNode.end,
+                    BasicDiagKind.sema_useless_exception_type)
+                builder2.Emit()
             }
         } else {
-            ok = false
+            included.add(typeTy)
+        }
+        var alreadyInTypeTys = false
+        for (existingTy in typeTys) {
+            if (refEq(existingTy, typeTy)) {
+                alreadyInTypeTys = true
+                break
+            }
+        }
+        if (!alreadyInTypeTys) {
+            typeTys.add(typeTy)
         }
     }
-    if (!ok || exceptPattern.types.isEmpty()) {
+    if (!result || typeTys.isEmpty()) {
         exceptPattern.SetTy(TypeManager.GetInvalidTy())
         return false
     }
+    var joinedTy: Ty = TypeManager.GetNothingTy()
+    for (typeTy2 in typeTys) {
+        joinedTy = JoinTryTy(typeManager, joinedTy, typeTy2, exceptPattern.curFile)
+    }
     exceptPattern.SetTy(joinedTy)
+    if (!Ty.IsTyCorrect(joinedTy)) {
+        if (let Some(diagValue3) <- diag) {
+            let builder3 = diagValue3.Diagnose(exceptPattern.begin, exceptPattern.end,
+                BasicDiagKind.sema_type_incompatible, args: [BasicDiagArgument("pattern")])
+            builder3.Emit()
+        }
+        return false
+    }
     if (let Some(innerPattern) <- exceptPattern.pattern) {
-        ok = TcPatternCheck(typeManager, joinedTy, innerPattern) && ok
+        return if (let Some(checker) <- patternChecker) {
+            checker(joinedTy, innerPattern)
+        } else {
+            TcPatternCheck(typeManager, joinedTy, innerPattern)
+        }
     }
-    if (!ok) {
-        exceptPattern.SetTy(TypeManager.GetInvalidTy())
-    }
-    return ok
+    return true
 }
 
-private func ChkTryExprCatchPatterns(typeManager: TypeManager, te: TryExpr): Bool {
-    var ok = true
+private func ChkCommandTypePattern(typeManager: TypeManager, commandPattern: CommandTypePattern,
+    included: ArrayList<Ty>, commandTy: Option<Ty>,
+    diag!: Option<BasicDiagnosticEngine> = None): Option<Ty> {
+    if (commandPattern.types.size != 1) {
+        commandPattern.SetTy(TypeManager.GetInvalidTy())
+        return None
+    }
+    if (let None <- commandTy) {
+        if (let Some(diagValue) <- diag) {
+            let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_command_handle_type_error,
+                BasicMakeRange(commandPattern.types[0].begin, commandPattern.types[0].end))
+            builder.Emit()
+        }
+        return None
+    }
+    let cmdTypePat = commandPattern.types[0]
+    let cmdTypePatTy = cmdTypePat.GetTy() ?? TypeManager.GetInvalidTy()
+    let promotedTys = Promotion(typeManager).Promote(cmdTypePatTy, commandTy.getOrThrow())
+    if (cmdTypePatTy.IsNothing() || promotedTys.IsEmpty()) {
+        if (let Some(diagValue2) <- diag) {
+            let builder2 = diagValue2.DiagnoseRefactor(BasicDiagKindRefactor.sema_command_handle_type_error,
+                BasicMakeRange(cmdTypePat.begin, cmdTypePat.end))
+            builder2.Emit()
+        }
+        commandPattern.SetTy(TypeManager.GetInvalidTy())
+        return None
+    }
+    for (includedTy in included) {
+        if (typeManager.IsSubtype(cmdTypePatTy, includedTy)) {
+            if (let Some(diagValue3) <- diag) {
+                let builder3 = diagValue3.DiagnoseRefactor(BasicDiagKindRefactor.sema_useless_command_type,
+                    BasicMakeRange(cmdTypePat.begin, cmdTypePat.end))
+                builder3.Emit()
+            }
+            commandPattern.SetTy(cmdTypePatTy)
+            return Some(promotedTys.values[0])
+        }
+    }
+    included.add(cmdTypePatTy)
+    commandPattern.SetTy(cmdTypePatTy)
+    return Some(promotedTys.values[0])
+}
+
+private func ChkHandlePatterns(typeManager: TypeManager, handler: Handler, included: ArrayList<Ty>,
+    commandTy: Option<Ty>, diag!: Option<BasicDiagnosticEngine> = None,
+    patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Bool {
+    if (let None <- handler.commandPattern) {
+        return false
+    }
+    let commandPattern = handler.commandPattern.getOrThrow()
+    if (let None <- (commandPattern as CommandTypePattern)) {
+        return false
+    }
+    let commandTypePattern = (commandPattern as CommandTypePattern).getOrThrow()
+    let maybeCommandTyAsCommand = ChkCommandTypePattern(typeManager, commandTypePattern, included, commandTy, diag: diag)
+    if (let None <- maybeCommandTyAsCommand) {
+        return false
+    }
+    let commandTyAsCommand = maybeCommandTyAsCommand.getOrThrow()
+    if (commandTyAsCommand.typeArgs.isEmpty()) {
+        return false
+    }
+    handler.commandResultTy = commandTyAsCommand.typeArgs[0]
+    if (let Some(innerPattern) <- commandTypePattern.pattern) {
+        let targetTy = commandTypePattern.GetTy() ?? TypeManager.GetInvalidTy()
+        return if (let Some(checker) <- patternChecker) {
+            checker(targetTy, innerPattern)
+        } else {
+            TcPatternCheck(typeManager, targetTy, innerPattern)
+        }
+    }
+    return true
+}
+
+private func ChkTryExprCatchPatterns(typeManager: TypeManager, te: TryExpr,
+    exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None,
+    diag!: Option<BasicDiagnosticEngine> = None,
+    patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Bool {
     let includedCatchTys = ArrayList<Ty>()
     for (pattern in te.catchPatterns) {
         if (let Some(wildcardPattern) <- (pattern as WildcardPattern)) {
-            ok = CheckWildcardCatchPattern(typeManager, wildcardPattern, includedCatchTys) && ok
+            if (let None <- exceptionTy) {
+                return false
+            }
+            if (!ChkTryWildcardPattern(exceptionTy.getOrThrow(), wildcardPattern, includedCatchTys, diag: diag)) {
+                return false
+            }
+            includedCatchTys.add(exceptionTy.getOrThrow())
         } else if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
-            ok = CheckExceptTypePattern(typeManager, exceptPattern, includedCatchTys) && ok
+            if (!ChkExceptTypePattern(typeManager, exceptPattern, includedCatchTys, exceptionTy, errorTy,
+                diag: diag, patternChecker: patternChecker)) {
+                return false
+            }
         } else {
             pattern.SetTy(TypeManager.GetInvalidTy())
-            ok = false
+            return false
         }
     }
+    return true
+}
+
+private func ChkTryExprHandlePatterns(typeManager: TypeManager, te: TryExpr, commandTy!: Option<Ty> = None,
+    diag!: Option<BasicDiagnosticEngine> = None,
+    patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Bool {
     let includedCommandTys = ArrayList<Ty>()
     for (handler in te.handlers) {
         if (let Some(commandPattern) <- handler.commandPattern) {
-            if (let Some(commandTypePattern) <- (commandPattern as CommandTypePattern)) {
-                ok = CheckCommandPattern(typeManager, handler, commandTypePattern, includedCommandTys) && ok
+            if (let Some(_) <- (commandPattern as CommandTypePattern)) {
+                if (handler.desugaredLambda.isNone()) {
+                    continue
+                }
+                if (!ChkHandlePatterns(typeManager, handler, includedCommandTys, commandTy,
+                    diag: diag, patternChecker: patternChecker)) {
+                    return false
+                }
             } else {
-                ok = false
+                continue
             }
         } else {
-            ok = false
+            continue
         }
     }
-    return ok
+    return true
 }
 
 private func ValidateBlockInTryHandle(block: Block, diag!: Option<BasicDiagnosticEngine> = None): Bool {
@@ -401,7 +443,9 @@ private func ChkResourceSpec(typeManager: TypeManager, resource: VarDecl): Bool 
 }
 
 private func SynTryWithResourcesExpr(typeManager: TypeManager, te: TryExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None,
+    diag!: Option<BasicDiagnosticEngine> = None,
+    patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Ty {
     var ok = true
     for (resource in te.resourceSpec) {
         ok = ChkResourceSpec(typeManager, resource) && ok
@@ -411,7 +455,8 @@ private func SynTryWithResourcesExpr(typeManager: TypeManager, te: TryExpr,
     } else {
         ok = false
     }
-    ok = ChkTryExprCatchPatterns(typeManager, te) && ok
+    ok = ChkTryExprCatchPatterns(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
+        diag: diag, patternChecker: patternChecker) && ok
     for (catchBlock in te.catchBlocks) {
         ok = Ty.IsTyCorrect(SynBlock(typeManager, catchBlock)) && ok
     }
@@ -425,8 +470,12 @@ private func SynTryWithResourcesExpr(typeManager: TypeManager, te: TryExpr,
 }
 
 private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, baseTy: Ty,
-    diag!: Option<BasicDiagnosticEngine> = None): Option<Ty> {
-    var ok = ChkTryExprCatchPatterns(typeManager, te)
+    exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None, commandTy!: Option<Ty> = None,
+    diag!: Option<BasicDiagnosticEngine> = None,
+    patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Option<Ty> {
+    var ok = ChkTryExprCatchPatterns(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
+        diag: diag, patternChecker: patternChecker) &&
+        ChkTryExprHandlePatterns(typeManager, te, commandTy: commandTy, diag: diag, patternChecker: patternChecker)
     var joinedTy = baseTy
     if (!te.handlers.isEmpty()) {
         if (let Some(tryBlock) <- te.tryBlock) {
@@ -474,9 +523,12 @@ private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, 
 }
 
 public func SynTryExpr(typeManager: TypeManager, te: TryExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None, commandTy!: Option<Ty> = None,
+    diag!: Option<BasicDiagnosticEngine> = None,
+    patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Ty {
     if (!te.resourceSpec.isEmpty()) {
-        return SynTryWithResourcesExpr(typeManager, te, diag: diag)
+        return SynTryWithResourcesExpr(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
+            diag: diag, patternChecker: patternChecker)
     }
     var ok = true
     var baseTy: Ty = TypeManager.GetNothingTy()
@@ -493,7 +545,8 @@ public func SynTryExpr(typeManager: TypeManager, te: TryExpr,
     } else {
         ok = false
     }
-    if (let Some(joinedTy) <- SynTryExprCatchesAndHandles(typeManager, te, baseTy, diag: diag)) {
+    if (let Some(joinedTy) <- SynTryExprCatchesAndHandles(typeManager, te, baseTy, exceptionTy: exceptionTy,
+        errorTy: errorTy, commandTy: commandTy, diag: diag, patternChecker: patternChecker)) {
         ok = ChkTryExprFinallyBlock(typeManager, te, diag: diag) && ok
         if (ok) {
             te.SetTy(joinedTy)
@@ -504,8 +557,12 @@ public func SynTryExpr(typeManager: TypeManager, te: TryExpr,
 }
 
 private func ChkTryExprCatchesAndHandles(typeManager: TypeManager, target: Ty, te: TryExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
-    var ok = ChkTryExprCatchPatterns(typeManager, te)
+    exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None, commandTy!: Option<Ty> = None,
+    diag!: Option<BasicDiagnosticEngine> = None,
+    patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Bool {
+    var ok = ChkTryExprCatchPatterns(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
+        diag: diag, patternChecker: patternChecker) &&
+        ChkTryExprHandlePatterns(typeManager, te, commandTy: commandTy, diag: diag, patternChecker: patternChecker)
     for (catchBlock in te.catchBlocks) {
         if (!te.handlers.isEmpty()) {
             ok = ValidateBlockInTryHandle(catchBlock, diag: diag) && ok
@@ -529,9 +586,12 @@ private func ChkTryExprCatchesAndHandles(typeManager: TypeManager, target: Ty, t
 }
 
 public func ChkTryExpr(typeManager: TypeManager, target: Ty, te: TryExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None, commandTy!: Option<Ty> = None,
+    diag!: Option<BasicDiagnosticEngine> = None,
+    patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Bool {
     if (!te.resourceSpec.isEmpty()) {
-        let actualTy = SynTryWithResourcesExpr(typeManager, te, diag: diag)
+        let actualTy = SynTryWithResourcesExpr(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
+            diag: diag, patternChecker: patternChecker)
         if (Ty.IsTyCorrect(actualTy) &&
             typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
             return true
@@ -557,7 +617,8 @@ public func ChkTryExpr(typeManager: TypeManager, target: Ty, te: TryExpr,
     } else {
         ok = false
     }
-    ok = ChkTryExprCatchesAndHandles(typeManager, target, te, diag: diag) && ok
+    ok = ChkTryExprCatchesAndHandles(typeManager, target, te, exceptionTy: exceptionTy, errorTy: errorTy,
+        commandTy: commandTy, diag: diag, patternChecker: patternChecker) && ok
     ok = ChkTryExprFinallyBlock(typeManager, te, diag: diag) && ok
     if (ok) {
         te.SetTy(target)

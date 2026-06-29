@@ -3454,6 +3454,29 @@ public class TypeChecker {
             }
             return
         }
+        if (let Some(commandPattern) <- (pattern as CommandTypePattern)) {
+            for (typeNode in commandPattern.types) {
+                SynthesizeTypeNode(ctx, Some(typeNode))
+            }
+            if (let Some(innerCommandPattern) <- commandPattern.pattern) {
+                let commandTarget = if (let Some(patternTy) <- commandPattern.GetTy()) {
+                    if (Ty.IsTyCorrect(patternTy)) {
+                        patternTy
+                    } else if (!commandPattern.types.isEmpty()) {
+                        commandPattern.types[0].GetTy() ?? TypeManager.GetInvalidTy()
+                    } else {
+                        TypeManager.GetInvalidTy()
+                    }
+                } else if (!commandPattern.types.isEmpty()) {
+                    commandPattern.types[0].GetTy() ?? TypeManager.GetInvalidTy()
+                } else {
+                    TypeManager.GetInvalidTy()
+                }
+                let _ = ChkPattern(impl.typeManager, ctx, commandTarget, innerCommandPattern,
+                    isPatternInMatch: false, diag: impl.diag)
+            }
+            return
+        }
         if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
             if (let Some(inner2) <- varOrEnum.pattern) {
                 SynthesizeTryCatchPatternTypes(ctx, inner2)
@@ -3526,7 +3549,17 @@ public class TypeChecker {
 
     private func SynthesizeTryExpr(ctx: ASTContext, tryExpr: TryExpr): Ty {
         SynthesizeTryExprChildren(ctx, tryExpr)
-        return FinishSynthesize(ctx, tryExpr, SynTryExpr(impl.typeManager, tryExpr, diag: impl.diag))
+        let commandTy: Option<Ty> = if (let Some(commandDecl) <- lookupResolvedPackageDecl(ctx, "stdx.effect", "Command")) {
+            commandDecl.GetTy()
+        } else {
+            None
+        }
+        return FinishSynthesize(ctx, tryExpr, SynTryExpr(impl.typeManager, tryExpr,
+            exceptionTy: LookupCoreTy(ctx, "Exception"), errorTy: LookupCoreTy(ctx, "Error"),
+            commandTy: commandTy, diag: impl.diag,
+            patternChecker: Some({ targetTy: Ty, pattern: Pattern =>
+                ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false, diag: impl.diag)
+            })))
     }
 
     private func CheckArrayLit(ctx: ASTContext, target: Ty, arrayLit: ArrayLit): Bool {
@@ -4029,7 +4062,17 @@ public class TypeChecker {
         }
         if (let Some(tryExpr) <- (expr as TryExpr)) {
             SynthesizeTryExprChildren(ctx, tryExpr)
-            return FinishCheck(ctx, tryExpr, ChkTryExpr(impl.typeManager, target, tryExpr, diag: impl.diag))
+            let commandTy: Option<Ty> = if (let Some(commandDecl) <- lookupResolvedPackageDecl(ctx, "stdx.effect", "Command")) {
+                commandDecl.GetTy()
+            } else {
+                None
+            }
+            return FinishCheck(ctx, tryExpr, ChkTryExpr(impl.typeManager, target, tryExpr,
+                exceptionTy: LookupCoreTy(ctx, "Exception"), errorTy: LookupCoreTy(ctx, "Error"),
+                commandTy: commandTy, diag: impl.diag,
+                patternChecker: Some({ targetTy: Ty, pattern: Pattern =>
+                    ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false, diag: impl.diag)
+                })))
         }
         if (let Some(typeConv) <- (expr as TypeConvExpr)) {
             return FinishCheck(ctx, typeConv, ChkTypeConvExpr(impl.typeManager, target, typeConv,
