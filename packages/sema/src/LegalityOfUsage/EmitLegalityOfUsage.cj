@@ -193,7 +193,3 @@ public func EmitLegalityOfUsage(diag: BasicDiagnosticEngine, result: LegalityOfU
         EmitSubscriptLegalityIssue(diag, issue)
     }
 }
-
-public func SelfhostPortStatus_LegalityOfUsage_EmitLegalityOfUsage(): Bool {
-    return true
-}
