@@ -1,53 +1,70 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.Type
+import cangjie_compiler::mangle.GetTypeQualifiedName
+import cangjie_compiler::utils.StaticCast
 
 public class CGTupleType <: CGType {
-    private let extraInfo: TypeExtraInfo
-
-    public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type, extraInfo: TypeExtraInfo) {
+    public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type, _: TypeExtraInfo) {
         super(cgMod, cgCtx, chirType)
-        this.extraInfo = extraInfo
     }
 
     protected override func GenLLVMType(): LLVMTypeRef {
-        let typeName = STRUCT_TYPE_PREFIX + chirType.ToString()
-        let tupleLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), typeName)
-        layoutType = tupleLayout
-        if (!cgCtx.IsGeneratedStructType(typeName)) {
-            let fieldTypes = ArrayList<LLVMTypeRef>()
-            for (fieldTy in chirType.GetTypeArgs()) {
-                fieldTypes.add(CGType.GetOrCreate(cgMod, fieldTy, extraInfo: extraInfo).GetLLVMType())
-            }
-            SetStructTypeBody(tupleLayout, fieldTypes)
-            cgCtx.AddGeneratedStructType(typeName)
+        let tupleType = StaticCast<TupleType>(chirType)
+        if (!IsSized(cgMod, tupleType)) {
+            return unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
         }
+        let typeName = GetTypeQualifiedName(tupleType)
+        var tupleLayout = LLVMNullType()
+        try (nameCString = unsafe { LibC.mallocCString(typeName) }.asResource()) {
+            tupleLayout = unsafe { LLVMGetTypeByName2(cgCtx.GetLLVMContext().raw, nameCString.value) }
+            if (!tupleLayout.isNull() && cgCtx.IsGeneratedStructType(typeName)) {
+                layoutType = tupleLayout
+                return tupleLayout
+            }
+            // Mirror C++ CGTupleType.cpp:50: only create when no same-named struct exists yet;
+            // an existing-but-not-generated struct is reused (not recreated/renamed).
+            if (tupleLayout.isNull()) {
+                tupleLayout = unsafe { LLVMStructCreateNamed(cgCtx.GetLLVMContext().raw, nameCString.value) }
+            }
+        }
+        layoutType = tupleLayout
+        cgCtx.AddGeneratedStructType(typeName)
+        let fieldTypes = ArrayList<LLVMTypeRef>()
+        for (fieldTy in tupleType.GetTypeArgs()) {
+            fieldTypes.add(CGType.GetOrCreate(cgMod, fieldTy).GetLLVMType())
+        }
+        SetStructTypeBody(tupleLayout, fieldTypes)
         return tupleLayout
     }
 
     protected override func GenContainedCGTypes(): Unit {
-        for (fieldTy in chirType.GetTypeArgs()) {
-            containedCGTypes.add(CGType.GetOrCreate(cgMod, fieldTy, extraInfo: extraInfo))
+        let tupleType = StaticCast<TupleType>(chirType)
+        for (fieldTy in tupleType.GetTypeArgs()) {
+            containedCGTypes.add(CGType.GetOrCreate(cgMod, fieldTy))
         }
     }
 
     protected override func CalculateSizeAndAlign(): Unit {
-        var total: Int64 = 0
-        var maxAlign: Int64 = 1
-        for (fieldCGType in GetContainedTypes()) {
-            let fieldAlign = if (let Some(value) <- fieldCGType.GetAlign()) { value } else { 1 }
-            let fieldSize = if (let Some(value) <- fieldCGType.GetSize()) { value } else { 0 }
-            if (total % fieldAlign != 0) {
-                total += fieldAlign - (total % fieldAlign)
-            }
-            total += fieldSize
-            if (fieldAlign > maxAlign) { maxAlign = fieldAlign }
+        let rawType = llvmType.getOrThrow()
+        if (unsafe { LLVMGetTypeKind(rawType) } == 10) {
+            size = Int64(cgMod.GetTypeSize(rawType))
+            align = Int64(cgMod.GetABITypeAlignment(rawType))
         }
-        if (total % maxAlign != 0) {
-            total += maxAlign - (total % maxAlign)
-        }
-        size = total
-        align = maxAlign
     }
+}
+
+private func IsSized(cgMod: CGModule, chirType: TupleType): Bool {
+    let memberVars = chirType.GetTypeArgs()
+    for (memberVar in memberVars) {
+        if (memberVar.IsRef() || memberVar.IsCPointer() || memberVar.IsCFunc()) {
+            continue
+        }
+        if (CGType.GetOrCreate(cgMod, memberVar).GetSize().isNone()) {
+            return false
+        }
+    }
+    return true
 }
