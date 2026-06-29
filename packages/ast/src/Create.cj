@@ -507,17 +507,9 @@ public func CreateLitConstExpr(kind: LitConstKind, value: String, ty: Ty, needTo
     ret.SetTy(ty)
     InitializeLitConstValue(ret)
     if (needToMakeRef) {
-        if (let Some(classTy) <- (ty as ClassTy)) {
-            if (let Some(decl) <- classTy.decl) {
-                ret.ref = CreateRefType(decl)
-            }
-        } else if (let Some(structTy) <- (ty as StructTy)) {
-            if (let Some(decl) <- structTy.decl) {
-                ret.ref = CreateRefType(decl)
-            }
-        } else if (let Some(enumTy) <- (ty as EnumTy)) {
-            if (let Some(decl) <- enumTy.decl) {
-                ret.ref = CreateRefType(decl)
+        if (let Some(decl) <- Ty.GetDeclOfTy(ty)) {
+            if (let Some(inheritableDecl) <- (decl as InheritableDecl)) {
+                ret.ref = CreateRefType(inheritableDecl)
             }
         }
     }
