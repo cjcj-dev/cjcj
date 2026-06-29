@@ -1,6 +1,7 @@
 package cangjie_compiler::driver
 
 import std.collection.*
+import cangjie_compiler::utils.CJC_ASSERT_WITH_MSG
 
 public class CJNATIVEBackend <: Backend {
     private var optPath: String = ""
@@ -55,12 +56,6 @@ public class CJNATIVEBackend <: Backend {
                 "third_party/llvm/bin"))
         }
         cjnativeBinSearchPaths.add(FileUtil.JoinPath(driver.cangjieHome, "third_party/llvm/bin"))
-        for (path in driverOptions.toolChainPaths) {
-            cjnativeBinSearchPaths.add(path)
-        }
-        for (path in driverOptions.environment.paths) {
-            cjnativeBinSearchPaths.add(path)
-        }
         optPath = FileUtil.FindProgramByName(ToolName(ToolID.OPT), cjnativeBinSearchPaths.toArray())
         if (optPath.isEmpty()) {
             eprintln("error: not found `opt` in the Cangjie installation, CANGJIE_HOME")
@@ -78,6 +73,8 @@ public class CJNATIVEBackend <: Backend {
     }
 
     protected override func ProcessGeneration(): Bool {
+        CJC_ASSERT_WITH_MSG(!(driverOptions.frontendOutputFiles.isEmpty() && driverOptions.inputObjs.isEmpty()),
+            "non-compiled file found!")
         let bitCodeFiles = GetFrontendOutputs()
         if (driverOptions.incrementalCompileNoChange) {
             return ProcessGenerationOfIncrementalNoChangeCompile(bitCodeFiles)
@@ -153,9 +150,27 @@ public class CJNATIVEBackend <: Backend {
         let batch = ArrayList<Tool>()
         for (objFile in objFiles) {
             let srcFile = objFile.filePath
-            let destFile = driverOptions.GetHashedObjFileName(FileUtil.GetFileNameWithoutExtension(srcFile)) + ObjSuffix(driverOptions.target.os)
-            if ((driverOptions.aggressiveParallelCompile ?? 1) > 1 && IsParallelCompileObjFile(srcFile)) {
-                continue
+            let destFile = driverOptions.GetHashedObjFileName(FileUtil.GetFileNameWithoutExtension(srcFile)) + ".o"
+            if ((driverOptions.aggressiveParallelCompile ?? 1) > 1) {
+                let isParallelCompileObjFile = { =>
+                    let fileName = FileUtil.GetFileNameWithoutExtension(srcFile)
+                    let extension = FileUtil.GetFileExtension(srcFile)
+                    if (let Some(posOfHyphen) <- fileName.indexOf("-")) {
+                        let parallelId = fileName[0..posOfHyphen]
+                        var hasNonDigit = false
+                        for (byte in parallelId.toArray()) {
+                            if (byte < b'0' || byte > b'9') {
+                                hasNonDigit = true
+                            }
+                        }
+                        extension == "o" && !hasNonDigit
+                    } else {
+                        false
+                    }
+                }
+                if (isParallelCompileObjFile()) {
+                    continue
+                }
             }
             let tool = Tool("CacheCopy", ToolType.INTERNAL_IMPLEMENTED, driverOptions.environment.allVariables)
             tool.AppendArg(srcFile)
@@ -197,7 +212,7 @@ public class CJNATIVEBackend <: Backend {
             return false
         }
         for (file in tempBitCodeFiles) {
-            let objFile = driverOptions.GetHashedObjFileName(file.fileName) + ObjSuffix(driverOptions.target.os)
+            let objFile = driverOptions.GetHashedObjFileName(file.fileName) + ".o"
             if (!FileUtil.FileExist(objFile)) {
                 eprintln("error: The cache directory is incomplete.")
                 return false
@@ -278,25 +293,4 @@ public class CJNATIVEBackend <: Backend {
         backendCmds.add(batch)
         return outputFiles
     }
-}
-
-private func IsParallelCompileObjFile(srcFile: String): Bool {
-    let fileName = FileUtil.GetFileNameWithoutExtension(srcFile)
-    let extension = FileUtil.GetFileExtension(srcFile)
-    if (extension != "o" && extension != "obj") {
-        return false
-    }
-    if (let Some(pos) <- fileName.indexOf("-")) {
-        let parallelId = fileName[0..pos]
-        if (parallelId.isEmpty()) {
-            return false
-        }
-        for (byte in parallelId.toArray()) {
-            if (byte < b'0' || byte > b'9') {
-                return false
-            }
-        }
-        return true
-    }
-    return false
 }
