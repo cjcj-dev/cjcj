@@ -668,7 +668,7 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     if (let Some(value) <- (expr as UnaryExpr)) { return ChkUnaryExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as BinaryExpr)) { return ChkBinaryExpr(typeManager, target, value, ctx: ctx, diag: diag) }
     if (let Some(value) <- (expr as AssignExpr)) { return ChkAssignExpr(typeManager, target, value) }
-    if (let Some(value) <- (expr as IfExpr)) { return ChkIfExpr(typeManager, target, value, ctx: ctx) }
+    if (let Some(value) <- (expr as IfExpr)) { return ChkIfExpr(typeManager, target, value, ctx: ctx, diag: diag) }
     if (let Some(value) <- (expr as WhileExpr)) { return ChkWhileExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as DoWhileExpr)) { return ChkDoWhileExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as ForInExpr)) { return ChkForInExpr(typeManager, target, value) }

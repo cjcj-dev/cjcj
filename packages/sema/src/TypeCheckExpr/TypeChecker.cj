@@ -2135,6 +2135,12 @@ public class TypeChecker {
                     block.SetTy(unitTy)
                     return true
                 }
+                if (!typeMatched) {
+                    if (let Some(diagValue) <- impl.diag) {
+                        DiagMismatchedTypesWithFoundTy(diagValue, nodeForCheck, target, unitTy,
+                            note: "definitions and declarations are always of type 'Unit'")
+                    }
+                }
             } else {
                 if (let Some(lastExpr) <- (nodeForCheck as Expr)) {
                     let checked = Check(ctx, target, lastExpr)
@@ -2805,6 +2811,12 @@ public class TypeChecker {
             isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, elseBody)) && isWellTyped
         }
         let targetMatched = impl.typeManager.IsSubtype(unitTy, target)
+        if (isWellTyped && !targetMatched) {
+            if (let Some(diagValue) <- impl.diag) {
+                DiagMismatchedTypesWithFoundTy(diagValue, ifExpr, target, unitTy,
+                    note: "the type of an 'if' expression without an 'else' branch is always 'Unit'")
+            }
+        }
         return isWellTyped && targetMatched
     }
 
@@ -3021,7 +3033,7 @@ public class TypeChecker {
             }
         }
         if (let Some(body) <- forInExpr.body) {
-            isWellTyped = Ty.IsTyCorrect(SynthesizeBlock(ctx, body)) && isWellTyped
+            isWellTyped = Ty.IsTyCorrect(SynthesizeBlock(ctx, SynPos.UNUSED, body)) && isWellTyped
         } else {
             isWellTyped = false
         }
@@ -3048,8 +3060,10 @@ public class TypeChecker {
             if (let Some(inExpression) <- forInExpr.inExpression) {
                 let _ = Synthesize(ctx, inExpression)
                 if (Ty.IsTyCorrect(inExpression.GetTy())) {
-                    elementTy = ForInIterableElementTy(impl.typeManager, inExpression.curFile,
-                        TcReplaceIdeal(impl.typeManager, inExpression))
+                    let iterableTy = GetForInIterableTy(ctx, TcReplaceIdeal(impl.typeManager, inExpression))
+                    if (Ty.IsTyCorrect(iterableTy) && !iterableTy.typeArgs.isEmpty()) {
+                        elementTy = iterableTy.typeArgs[0]
+                    }
                 }
             }
             if (let Some(pattern) <- forInExpr.pattern) {
@@ -3066,7 +3080,7 @@ public class TypeChecker {
                 let _ = Synthesize(ctx, patternGuard)
             }
             if (let Some(body) <- forInExpr.body) {
-                let _ = SynthesizeBlock(ctx, body)
+                let _ = SynthesizeBlock(ctx, SynPos.UNUSED, body)
             }
             RemovePatternBindings(ctx, boundDecls)
             return
@@ -3077,14 +3091,14 @@ public class TypeChecker {
                 let _ = CheckConditionWithBindings(ctx, condExpr, conditionBindings, false)
             }
             if (let Some(body2) <- whileExpr.body) {
-                let _ = SynthesizeBlock(ctx, body2)
+                let _ = SynthesizeBlock(ctx, SynPos.UNUSED, body2)
             }
             RemovePatternBindings(ctx, conditionBindings)
             return
         }
         if (let Some(doWhileExpr) <- (loopExpr as DoWhileExpr)) {
             if (let Some(body3) <- doWhileExpr.body) {
-                let _ = SynthesizeBlock(ctx, body3)
+                let _ = SynthesizeBlock(ctx, SynPos.UNUSED, body3)
             }
             if (let Some(condExpr2) <- doWhileExpr.condExpr) {
                 let _ = Synthesize(ctx, condExpr2)

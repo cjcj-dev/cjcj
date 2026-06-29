@@ -1,11 +1,8 @@
 package cangjie_compiler::sema.TypeCheckExpr
 
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::sema.*
-
-public func SelfhostPortStatus_TypeCheckExpr_IfExpr(): Bool {
-    return true
-}
 
 private func IfInvalid(ie: IfExpr): Ty {
     return TcInvalid(ie)
@@ -39,27 +36,21 @@ private func JoinIfBranchTys(typeManager: TypeManager, thenTy: Ty, elseTy: Ty, c
     return JoinAsVisibleTy(typeManager, tys, curFile: curFile)
 }
 
-private func SynIfBranches(typeManager: TypeManager, ie: IfExpr): Bool {
-    var ok = true
-    if (let Some(thenBody) <- ie.thenBody) {
-        ok = Ty.IsTyCorrect(SynBlock(typeManager, thenBody)) && ok
-    } else {
-        ok = false
-    }
-    if (let Some(elseExpr) <- ie.elseBody) {
-        ok = Ty.IsTyCorrect(SynExprShallow(typeManager, elseExpr)) && ok
-    }
-    return ok
-}
-
-public func SynIfExpr(typeManager: TypeManager, ie: IfExpr): Ty {
+public func SynIfExpr(typeManager: TypeManager, ie: IfExpr, pos!: SynPos = SynPos.NONE): Ty {
     var ok = true
     if (let Some(condExpr) <- ie.condExpr) {
         ok = TcCheckCondition(typeManager, condExpr) && ok
     } else {
         ok = false
     }
-    ok = SynIfBranches(typeManager, ie) && ok
+    if (let Some(thenBody) <- ie.thenBody) {
+        ok = Ty.IsTyCorrect(SynBlock(typeManager, thenBody, pos: SynPos.EXPR_ARG)) && ok
+    } else {
+        ok = false
+    }
+    if (let Some(elseExpr) <- ie.elseBody) {
+        ok = Ty.IsTyCorrect(SynExprShallow(typeManager, elseExpr)) && ok
+    }
     if (!ok) {
         return IfInvalid(ie)
     }
@@ -74,6 +65,11 @@ public func SynIfExpr(typeManager: TypeManager, ie: IfExpr): Ty {
             let elseTy = typeManager.GetThisRealTy(TcReplaceIdeal(typeManager, elseExpr))
             thenBody.SetTy(thenTy)
             elseExpr.SetTy(elseTy)
+            if (pos == SynPos.UNUSED) {
+                let unitTy2 = TcUnitTy()
+                ie.SetTy(unitTy2)
+                return unitTy2
+            }
             let joinedTy = JoinIfBranchTys(typeManager, thenTy, elseTy, ie.curFile)
             if (Ty.IsTyCorrect(joinedTy)) {
                 ie.SetTy(joinedTy)
@@ -85,19 +81,25 @@ public func SynIfExpr(typeManager: TypeManager, ie: IfExpr): Ty {
 }
 
 private func ChkIfExprNoElse(typeManager: TypeManager, target: Ty, ie: IfExpr,
-    ctx!: Option<ASTContext> = None): Bool {
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let unitTy = TcUnitTy()
     var ok = true
     if (let Some(thenBody) <- ie.thenBody) {
-        ok = Ty.IsTyCorrect(SynBlock(typeManager, thenBody)) && ok
+        ok = Ty.IsTyCorrect(SynBlock(typeManager, thenBody, pos: SynPos.EXPR_ARG)) && ok
     } else {
         ok = false
     }
     if (let Some(elseExpr) <- ie.elseBody) {
-        ok = ChkExprShallow(typeManager, unitTy, elseExpr, ctx: ctx) && ok
+        ok = Ty.IsTyCorrect(SynExprShallow(typeManager, elseExpr)) && ok
     }
-    ok = typeManager.CheckTypeCompatibility(target, unitTy) != TypeCompatibility.INCOMPATIBLE && ok
-    if (ok) {
+    let targetMatched = typeManager.IsSubtype(unitTy, target)
+    if (ok && !targetMatched) {
+        if (let Some(diagValue) <- diag) {
+            DiagMismatchedTypesWithFoundTy(diagValue, ie, target, unitTy,
+                note: "the type of an 'if' expression without an 'else' branch is always 'Unit'")
+        }
+    }
+    if (ok && targetMatched) {
         ie.SetTy(unitTy)
         return true
     }
@@ -127,7 +129,7 @@ private func ChkIfExprTwoBranches(typeManager: TypeManager, target: Ty, ie: IfEx
 }
 
 public func ChkIfExpr(typeManager: TypeManager, target: Ty, ie: IfExpr,
-    ctx!: Option<ASTContext> = None): Bool {
+    ctx!: Option<ASTContext> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     var ok = true
     if (let Some(condExpr) <- ie.condExpr) {
         ok = TcCheckCondition(typeManager, condExpr) && ok
@@ -135,7 +137,7 @@ public func ChkIfExpr(typeManager: TypeManager, target: Ty, ie: IfExpr,
         ok = false
     }
     if (IsIfExprWithoutElse(ie)) {
-        ok = ChkIfExprNoElse(typeManager, target, ie, ctx: ctx) && ok
+        ok = ChkIfExprNoElse(typeManager, target, ie, diag: diag) && ok
     } else {
         ok = ChkIfExprTwoBranches(typeManager, target, ie, ctx: ctx) && ok
     }

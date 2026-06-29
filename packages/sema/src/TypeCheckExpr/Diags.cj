@@ -150,6 +150,44 @@ public func DiagInvalidUnaryExprWithTarget(diag: BasicDiagnosticEngine, ue: Unar
     }
 }
 
+private func DeclIdentifierRange(decl: Decl): BasicRange {
+    let identifier = decl.identifier.Val()
+    if (identifier.isEmpty()) {
+        return NodeRange(decl)
+    }
+    return TokenRange(decl.identifier.Begin(), identifier)
+}
+
+public func DiagMismatchedTypesWithFoundTy(
+    diag: BasicDiagnosticEngine,
+    node: Node,
+    expected: Ty,
+    found: Ty,
+    note!: String = ""
+): Unit {
+    if (!node.ShouldDiagnose(allowCompilerAdd: true)) {
+        return
+    }
+    var expectedStr = expected.String()
+    var foundStr = found.String()
+    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mismatched_types, NodeRange(node))
+    if (expectedStr == foundStr) {
+        if (let Some(expectedDecl) <- Ty.GetDeclPtrOfTy(Some(expected))) {
+            expectedStr += "' in '" + expectedDecl.fullPackageName
+            builder.AddNote(DeclIdentifierRange(expectedDecl), "'" + expectedStr + "'")
+        }
+        if (let Some(foundDecl) <- Ty.GetDeclPtrOfTy(Some(found))) {
+            foundStr += "' in '" + foundDecl.fullPackageName
+            builder.AddNote(DeclIdentifierRange(foundDecl), "'" + foundStr + "'")
+        }
+    }
+    builder.AddMainHintArguments([expectedStr, foundStr])
+    if (!note.isEmpty()) {
+        builder.AddNote(note)
+    }
+    builder.Emit()
+}
+
 public func DiagInvalidSubscriptExpr(
     diag: BasicDiagnosticEngine,
     se: SubscriptExpr,

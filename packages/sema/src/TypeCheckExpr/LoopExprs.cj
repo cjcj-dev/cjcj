@@ -4,21 +4,8 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 
-public func SelfhostPortStatus_TypeCheckExpr_LoopExprs(): Bool {
-    return true
-}
-
 private func LoopInvalid(expr: Expr): Ty {
     return TcInvalid(expr)
-}
-
-private func SynLoopBody(typeManager: TypeManager, body: Block): Bool {
-    let bodyTy = SynBlock(typeManager, body)
-    if (Ty.IsTyCorrect(bodyTy)) {
-        body.SetTy(TcUnitTy())
-        return true
-    }
-    return false
 }
 
 private func IterablePayload(ty: Ty): Option<Ty> {
@@ -206,7 +193,12 @@ public func SynWhileExpr(typeManager: TypeManager, we: WhileExpr): Ty {
         ok = false
     }
     if (let Some(body) <- we.body) {
-        ok = SynLoopBody(typeManager, body) && ok
+        let bodyTy = SynBlock(typeManager, body, pos: SynPos.UNUSED)
+        if (Ty.IsTyCorrect(bodyTy)) {
+            body.SetTy(TcUnitTy())
+        } else {
+            ok = false
+        }
     } else {
         ok = false
     }
@@ -231,7 +223,12 @@ public func ChkWhileExpr(typeManager: TypeManager, target: Ty, we: WhileExpr): B
 public func SynDoWhileExpr(typeManager: TypeManager, dwe: DoWhileExpr): Ty {
     var ok = true
     if (let Some(body) <- dwe.body) {
-        ok = SynLoopBody(typeManager, body) && ok
+        let bodyTy = SynBlock(typeManager, body, pos: SynPos.UNUSED)
+        if (Ty.IsTyCorrect(bodyTy)) {
+            body.SetTy(TcUnitTy())
+        } else {
+            ok = false
+        }
     } else {
         ok = false
     }
@@ -282,7 +279,12 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr): Ty {
         ok = TcCheckCondition(typeManager, patternGuard) && ok
     }
     if (let Some(body) <- fie.body) {
-        ok = SynLoopBody(typeManager, body) && ok
+        let bodyTy = SynBlock(typeManager, body, pos: SynPos.UNUSED)
+        if (Ty.IsTyCorrect(bodyTy)) {
+            body.SetTy(TcUnitTy())
+        } else {
+            ok = false
+        }
     } else {
         ok = false
     }
