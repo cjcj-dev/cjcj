@@ -417,7 +417,3 @@ public func ReportUnusedImports(pkg: Package, diag: BasicDiagnosticEngine): Arra
     }
     return result
 }
-
-public func SelfhostPortStatus_CheckUnusedImportImpl(): Bool {
-    return true
-}
