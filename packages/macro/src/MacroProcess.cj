@@ -241,30 +241,30 @@ public func RefreshTokensPosMap(node: Node, sm: SourceManager, ci: CompilerInsta
         if (invocation.newTokens.isEmpty()) {
             return
         }
-        var allCurFile = true
+        var hasNonCurFile = false
         for (token in invocation.newTokens) {
             if (!IsCurFile(sm, token, fileID: node.begin.fileID)) {
-                allCurFile = false
+                hasNonCurFile = true
                 break
             }
         }
-        invocation.macroCallDiagInfo.isCurFile = allCurFile
-        invocation.macroCallDiagInfo.mcBegin = if (let Some(file) <- node.curFile) {
-            file.macroCallPosBase
-        } else {
-            node.begin
+        if (!hasNonCurFile) {
+            invocation.macroCallDiagInfo.isCurFile = true
         }
+        invocation.macroCallDiagInfo.mcBegin = node.curFile.getOrThrow().macroCallPosBase
         let tokens = GetTokensFromString(invocation.newTokensStr, ci.diag, pos: invocation.macroCallDiagInfo.mcBegin)
-        if (!tokens.isEmpty()) {
-            invocation.macroCallDiagInfo.mcEnd = tokens[tokens.size - 1].End()
+        if (tokens.isEmpty()) {
+            return
         }
+        invocation.macroCallDiagInfo.mcEnd = tokens[tokens.size - 1].End()
         if (tokens.size != invocation.newTokens.size) {
             reportMappingFailedDiag(invocation.newTokens, tokens, node.begin, ci)
             return
         }
-        if (!ci.invocation.globalOptions.enableMacroDebug) {
-            RefreshNewTokensPos(node, sm, ci)
+        if (ci.invocation.globalOptions.enableMacroDebug) {
+            return
         }
+        RefreshNewTokensPos(node, sm, ci)
         var idx: Int64 = 0
         while (idx < tokens.size && idx < invocation.newTokens.size) {
             if (tokens[idx].kind != TokenKind.COMMENT) {
@@ -278,8 +278,6 @@ public func RefreshTokensPosMap(node: Node, sm: SourceManager, ci: CompilerInsta
             }
             idx++
         }
-        invocation.macroCallDiagInfo.isForLSP = ci.invocation.globalOptions.enableMacroInLSP
-        syncMacroCallDiagInfo(node, invocation)
     }
 }
 
@@ -295,25 +293,18 @@ private func macroCallSucceededForPackage(call: MacroCall, ci: CompilerInstance)
     return !isPureCustomAnnotation(call.RequireInvocation(), ci)
 }
 
-private func sourceEndPosition(sm: SourceManager, fileID: UInt64): Position {
-    let source = sm.GetSource(fileID)
-    if (source.fileID == fileID) {
-        return source.GetEndPos()
-    }
-    return Position(fileID, 1, 1)
-}
-
-private func appendOriginalSource(sm: SourceManager, path: String, begin: Position, end: Position): Unit {
+private func appendOriginalSource(sm: SourceManager, path: String, begin: Position, end: Position,
+    isCjmpFile: Bool): Unit {
     let content = sm.GetContentBetween(begin, end)
     if (!content.isEmpty()) {
-        let _ = sm.AppendSource(path, content)
+        let _ = sm.AppendSource(path, content, isCjmpFile: isCjmpFile)
     }
 }
 
-private func appendMacroAnnotations(sm: SourceManager, path: String, node: Node): Unit {
+private func appendMacroAnnotations(sm: SourceManager, path: String, node: Node, isCjmpFile: Bool): Unit {
     if (let Some(decl) <- (node as MacroExpandDecl)) {
         for (anno in decl.annotations) {
-            appendOriginalSource(sm, path, anno.begin, anno.end)
+            appendOriginalSource(sm, path, anno.begin, anno.end, isCjmpFile)
         }
     }
 }
@@ -339,22 +330,24 @@ private func removeMacroCallFile(path: String): Unit {
 
 private func generateMacroCallFile(file: File, nodes: ArrayList<Node>, ci: CompilerInstance): Unit {
     let sm = ci.GetSourceManager()
+    let isCjmpFile = ci.invocation.globalOptions.IsCompilingCJMPSpecific()
     let path = file.macroCallFilePath
     let fileID = sm.AddSource(path, "")
     var curFilePosBase = file.begin
     for (node in nodes) {
         if (let Some(invocation) <- node.GetInvocation()) {
-            appendOriginalSource(sm, path, curFilePosBase, node.begin)
+            appendOriginalSource(sm, path, curFilePosBase, node.begin, isCjmpFile)
             curFilePosBase = node.end
-            file.macroCallPosBase = sourceEndPosition(sm, fileID)
-            appendMacroAnnotations(sm, path, node)
-            let _ = sm.AppendSource(path, invocation.newTokensStr)
+            file.macroCallPosBase = sm.GetSource(fileID).GetEndPos()
+            appendMacroAnnotations(sm, path, node, isCjmpFile)
+            let _ = sm.AppendSource(path, invocation.newTokensStr, isCjmpFile: isCjmpFile)
             RefreshTokensPosMap(node, sm, ci)
             invocation.macroCallDiagInfo.isForLSP = ci.invocation.globalOptions.enableMacroInLSP
             syncMacroCallDiagInfo(node, invocation)
         }
     }
-    appendOriginalSource(sm, path, curFilePosBase, file.end)
+    let content = sm.GetContentBetween(curFilePosBase.fileID, curFilePosBase, file.end)
+    let _ = sm.AppendSource(path, content, isCjmpFile: isCjmpFile)
     if (ci.invocation.globalOptions.enableMacroInLSP || ci.invocation.globalOptions.enableMacroDebug) {
         let source = sm.GetSource(fileID)
         if (!writeStringToFile(path, source.buffer)) {
@@ -420,10 +413,20 @@ public func ProcessPackageMacros(expansion: MacroExpansion, pkg: Package): Unit 
 
 public func ProcessMacroCallList(expansion: MacroExpansion, macCalls: ArrayList<MacroCall>): Unit {
     for (call in macCalls) {
-        if (!macroCallHasExpandedTokens(call)) {
+        if (let None <- call.GetInvocation()) {
+            continue
+        }
+        let invocation = call.RequireInvocation()
+        if (MacroExpandFailed(invocation.newTokens) || call.status == MacroEvalStatus.FAIL) {
             continue
         }
         if (let Some(node) <- call.GetNode()) {
+            if (let None <- node.curFile) {
+                continue
+            }
+            if (invocation.newTokens.isEmpty()) {
+                continue
+            }
             RefreshNewTokensPos(node, expansion.ci.GetSourceManager(), expansion.ci)
         }
     }

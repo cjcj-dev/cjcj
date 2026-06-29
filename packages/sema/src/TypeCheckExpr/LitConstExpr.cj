@@ -1,7 +1,11 @@
 package cangjie_compiler::sema.TypeCheckExpr
 
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
+import cangjie_compiler::basic.DiagKind as BasicDiagKind
+import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.MakeRange as BasicMakeRange
 import cangjie_compiler::sema.*
 
 private func InvalidLitConstExpr(lce: LitConstExpr): Ty {
@@ -192,7 +196,72 @@ private func SetStringLiteralRef(lce: LitConstExpr, ty: Ty): Unit {
 }
 
 public func SynLitConstStringExpr(lce: LitConstExpr, stringTy!: Option<Ty> = None,
-    typeManager!: Option<TypeManager> = None, ctx!: Option<ASTContext> = None): Ty {
+    toStringTy!: Option<Ty> = None, typeManager!: Option<TypeManager> = None, ctx!: Option<ASTContext> = None,
+    synthesizer!: Option<(Block) -> Ty> = None, checker!: Option<(Ty, Expr) -> Bool> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    if (let Some(siExpr) <- lce.siExpr) {
+        let stringDeclTy = if (let Some(ty) <- stringTy) {
+            if (Ty.IsTyCorrect(ty)) {
+                ty
+            } else {
+                return InvalidLitConstExpr(lce)
+            }
+        } else {
+            return InvalidLitConstExpr(lce)
+        }
+        let toStringInterfaceTy = if (let Some(ty2) <- toStringTy) {
+            if (Ty.IsTyCorrect(ty2)) {
+                ty2
+            } else {
+                return InvalidLitConstExpr(lce)
+            }
+        } else {
+            return InvalidLitConstExpr(lce)
+        }
+        let tm = typeManager ?? return InvalidLitConstExpr(lce)
+        let synthesizeBlock = synthesizer ?? return InvalidLitConstExpr(lce)
+        let checkExpr = checker ?? return InvalidLitConstExpr(lce)
+        var isWellTyped = true
+        for (partExpr in siExpr.strPartExprs) {
+            if (let None <- (partExpr as InterpolationExpr)) {
+                isWellTyped = checkExpr(stringDeclTy, partExpr) && isWellTyped
+                continue
+            }
+            let interpolationExpr = (partExpr as InterpolationExpr).getOrThrow()
+            let block = interpolationExpr.block.getOrThrow()
+            block.SetTy(synthesizeBlock(block))
+            let blockTy = block.GetTy() ?? TypeManager.GetInvalidTy()
+            if (!tm.IsSubtype(blockTy, toStringInterfaceTy)) {
+                if (Ty.IsTyCorrect(blockTy)) {
+                    if (let Some(diagValue) <- diag) {
+                        let builder = diagValue.Diagnose(block.begin, block.end,
+                            BasicDiagKind.sema_invalid_string_implementation,
+                            args: [BasicDiagArgument(blockTy.String())])
+                        builder.Emit()
+                    }
+                }
+                isWellTyped = false
+            } else if (blockTy.IsNothing()) {
+                if (let Some(diagValue2) <- diag) {
+                    let builder2 = diagValue2.DiagnoseRefactor(BasicDiagKindRefactor.sema_undeclared_identifier,
+                        BasicMakeRange(block.begin, block.end), arguments: ["toString"])
+                    builder2.Emit()
+                }
+                isWellTyped = false
+            }
+            if (!isWellTyped) {
+                block.SetTy(TypeManager.GetInvalidTy())
+            }
+            interpolationExpr.SetTy(block.GetTy() ?? TypeManager.GetInvalidTy())
+        }
+        if (!isWellTyped) {
+            lce.SetTy(TypeManager.GetInvalidTy())
+            return lce.GetTy() ?? TypeManager.GetInvalidTy()
+        }
+        siExpr.SetTy(stringDeclTy)
+        lce.SetTy(stringDeclTy)
+        return lce.GetTy() ?? TypeManager.GetInvalidTy()
+    }
     if (let Some(ty) <- stringTy) {
         if (Ty.IsTyCorrect(ty)) {
             lce.SetTy(ty)
@@ -222,65 +291,29 @@ public func SynLitConstStringExpr(lce: LitConstExpr, stringTy!: Option<Ty> = Non
     return InvalidLitConstExpr(lce)
 }
 
-private func InterpolationPartsAreWellTyped(typeManager: TypeManager, stringTy: Ty, lce: LitConstExpr): Bool {
-    if (let Some(siExpr) <- lce.siExpr) {
-        var isWellTyped = true
-        for (partExpr in siExpr.strPartExprs) {
-            if (let Some(interpolationExpr) <- (partExpr as InterpolationExpr)) {
-                if (let Some(block) <- interpolationExpr.block) {
-                    if (!Ty.IsTyCorrect(block.GetTy())) {
-                        interpolationExpr.SetTy(TypeManager.GetInvalidTy())
-                        isWellTyped = false
-                    } else if (let Some(blockTy) <- block.GetTy()) {
-                        interpolationExpr.SetTy(blockTy)
-                    }
-                } else {
-                    interpolationExpr.SetTy(TypeManager.GetInvalidTy())
-                    isWellTyped = false
-                }
-            } else if (let Some(partLit) <- (partExpr as LitConstExpr)) {
-                if (partLit.kind == LitConstKind.STRING || partLit.kind == LitConstKind.JSTRING) {
-                    partLit.SetTy(stringTy)
-                } else if (!ChkLitConstExprOfTypeString(typeManager, stringTy, partLit, stringTy: Some(stringTy))) {
-                    isWellTyped = false
-                }
-            } else if (let Some(partTy) <- partExpr.GetTy()) {
-                if (typeManager.CheckTypeCompatibility(stringTy, partTy) == TypeCompatibility.INCOMPATIBLE) {
-                    partExpr.SetTy(TypeManager.GetInvalidTy())
-                    isWellTyped = false
-                }
-            } else {
-                partExpr.SetTy(TypeManager.GetInvalidTy())
-                isWellTyped = false
-            }
-        }
-        if (isWellTyped) {
-            siExpr.SetTy(stringTy)
-        }
-        return isWellTyped
-    }
-    return true
-}
-
 public func ChkLitConstExprOfTypeString(typeManager: TypeManager, target: Ty, lce: LitConstExpr,
-    stringTy!: Option<Ty> = None, ctx!: Option<ASTContext> = None): Bool {
-    let actualTy = SynLitConstStringExpr(lce, stringTy: stringTy, typeManager: Some(typeManager), ctx: ctx)
-    if (!Ty.IsTyCorrect(actualTy)) {
-        return false
-    }
-    if (!InterpolationPartsAreWellTyped(typeManager, actualTy, lce)) {
-        let _ = InvalidLitConstExpr(lce)
-        return false
-    }
-    let isWellTyped = IsSameOrBoxable(typeManager, actualTy, target) || target.IsAny()
-    if (!isWellTyped) {
-        lce.SetTy(TypeManager.GetInvalidTy())
+    stringTy!: Option<Ty> = None, toStringTy!: Option<Ty> = None, ctx!: Option<ASTContext> = None,
+    synthesizer!: Option<(Block) -> Ty> = None, checker!: Option<(Ty, Expr) -> Bool> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    let actualTy = SynLitConstStringExpr(lce, stringTy: stringTy, toStringTy: toStringTy,
+        typeManager: Some(typeManager), ctx: ctx, synthesizer: synthesizer, checker: checker, diag: diag)
+    let isWellTyped = typeManager.IsLitBoxableType(actualTy, target) || target.IsAny()
+    if (!isWellTyped && !CanSkipDiag(lce)) {
+        if (let Some(diagValue) <- diag) {
+            let found = match (lce.stringKind) {
+                case StringKind.JSTRING => "JString"
+                case _ => "Struct-String"
+            }
+            DiagMismatchedTypesWithFoundTy(diagValue, lce, target.String(), found)
+        }
     }
     return isWellTyped
 }
 
 public func ChkLitConstExpr(typeManager: TypeManager, target: Ty, lce: LitConstExpr,
     stringTy!: Option<Ty> = None, ctx!: Option<ASTContext> = None,
+    toStringTy!: Option<Ty> = None, synthesizer!: Option<(Block) -> Ty> = None,
+    checker!: Option<(Ty, Expr) -> Bool> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let isWellTyped = match (lce.kind) {
         case LitConstKind.BOOL => ChkLitConstExprOfTypeBool(typeManager, target, lce)
@@ -289,8 +322,10 @@ public func ChkLitConstExpr(typeManager: TypeManager, target: Ty, lce: LitConstE
         case LitConstKind.RUNE_BYTE => ChkLitConstExprOfTypeInteger(typeManager, target, lce)
         case LitConstKind.FLOAT => ChkLitConstExprOfTypeFloat(typeManager, target, lce)
         case LitConstKind.RUNE => ChkLitConstExprOfTypeChar(typeManager, target, lce)
-        case LitConstKind.STRING => ChkLitConstExprOfTypeString(typeManager, target, lce, stringTy: stringTy, ctx: ctx)
-        case LitConstKind.JSTRING => ChkLitConstExprOfTypeString(typeManager, target, lce, stringTy: stringTy, ctx: ctx)
+        case LitConstKind.STRING => ChkLitConstExprOfTypeString(typeManager, target, lce, stringTy: stringTy,
+            toStringTy: toStringTy, ctx: ctx, synthesizer: synthesizer, checker: checker, diag: diag)
+        case LitConstKind.JSTRING => ChkLitConstExprOfTypeString(typeManager, target, lce, stringTy: stringTy,
+            toStringTy: toStringTy, ctx: ctx, synthesizer: synthesizer, checker: checker, diag: diag)
         case LitConstKind.NONE => false
     }
     if (!isWellTyped) {
@@ -305,7 +340,8 @@ public func ChkLitConstExpr(typeManager: TypeManager, target: Ty, lce: LitConstE
 }
 
 public func SynLitConstExpr(lce: LitConstExpr, stringTy!: Option<Ty> = None,
-    typeManager!: Option<TypeManager> = None, ctx!: Option<ASTContext> = None,
+    toStringTy!: Option<Ty> = None, typeManager!: Option<TypeManager> = None, ctx!: Option<ASTContext> = None,
+    synthesizer!: Option<(Block) -> Ty> = None, checker!: Option<(Ty, Expr) -> Bool> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Ty {
     let synTy = match (lce.kind) {
         case LitConstKind.BOOL => TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
@@ -314,8 +350,10 @@ public func SynLitConstExpr(lce: LitConstExpr, stringTy!: Option<Ty> = None,
         case LitConstKind.RUNE_BYTE => TypeManager.GetPrimitiveTy(lce.GetNumLitTypeKind())
         case LitConstKind.FLOAT => TypeManager.GetPrimitiveTy(lce.GetNumLitTypeKind())
         case LitConstKind.RUNE => TypeManager.GetPrimitiveTy(TypeKind.TYPE_RUNE)
-        case LitConstKind.STRING => SynLitConstStringExpr(lce, stringTy: stringTy, typeManager: typeManager, ctx: ctx)
-        case LitConstKind.JSTRING => SynLitConstStringExpr(lce, stringTy: stringTy, typeManager: typeManager, ctx: ctx)
+        case LitConstKind.STRING => SynLitConstStringExpr(lce, stringTy: stringTy, toStringTy: toStringTy,
+            typeManager: typeManager, ctx: ctx, synthesizer: synthesizer, checker: checker, diag: diag)
+        case LitConstKind.JSTRING => SynLitConstStringExpr(lce, stringTy: stringTy, toStringTy: toStringTy,
+            typeManager: typeManager, ctx: ctx, synthesizer: synthesizer, checker: checker, diag: diag)
         case LitConstKind.NONE => TypeManager.GetInvalidTy()
     }
     if (lce.kind != LitConstKind.STRING && lce.kind != LitConstKind.JSTRING) {

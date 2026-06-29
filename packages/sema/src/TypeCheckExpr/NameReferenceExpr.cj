@@ -635,7 +635,12 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
     if (let Some(value) <- (expr as RangeExpr)) { return SynRangeExpr(typeManager, value) }
     if (let Some(value) <- (expr as IsExpr)) { return SynIsExpr(typeManager, value) }
     if (let Some(value) <- (expr as AsExpr)) { return SynAsExpr(typeManager, value, None) }
-    if (let Some(value) <- (expr as IncOrDecExpr)) { return SynIncOrDecExpr(value) }
+    if (let Some(value) <- (expr as IncOrDecExpr)) {
+        return SynIncOrDecExpr(value,
+            { operand: Expr => SynExprShallow(typeManager, operand, diag: diag) },
+            { desugar: Expr => SynExprShallow(typeManager, desugar, diag: diag) },
+            diag: diag)
+    }
     if (let Some(value) <- (expr as OptionalChainExpr)) { return SynOptionalChainExpr(typeManager, value) }
     if (let Some(value) <- (expr as ReturnExpr)) { return SynReturnExpr(typeManager, value) }
     if (let Some(value) <- (expr as JumpExpr)) { return SynLoopControlExpr(value) }
@@ -679,7 +684,12 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     if (let Some(value) <- (expr as RangeExpr)) { return ChkRangeExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as IsExpr)) { return ChkIsExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as AsExpr)) { return ChkAsExpr(typeManager, target, value, None) }
-    if (let Some(value) <- (expr as IncOrDecExpr)) { return ChkIncOrDecExpr(typeManager, target, value) }
+    if (let Some(value) <- (expr as IncOrDecExpr)) {
+        return ChkIncOrDecExpr(typeManager, target, value,
+            { operand: Expr => SynExprShallow(typeManager, operand, diag: diag) },
+            { desugar: Expr => SynExprShallow(typeManager, desugar, diag: diag) },
+            diag: diag)
+    }
     if (let Some(value) <- (expr as OptionalChainExpr)) { return ChkOptionalChainExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as ReturnExpr)) { return ChkReturnExpr(typeManager, value) }
     if (let Some(value) <- (expr as JumpExpr)) { return ChkLoopControlExpr(value) }

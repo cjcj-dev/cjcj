@@ -1700,20 +1700,13 @@ public class TypeChecker {
     }
 
     private func SynthesizePropDecl(ctx: ASTContext, pd: PropDecl): Ty {
-        if (pd.TestAttr(Attribute.IS_CHECK_VISITED)) {
-            if (Ty.IsInitialTy(pd.GetTy())) {
-                pd.SetTy(TypeManager.GetInvalidTy())
-            }
-            return pd.GetTy() ?? TypeManager.GetInvalidTy()
-        }
-        pd.EnableAttr(Attribute.IS_CHECK_VISITED)
-        let propTy = PreparePropDeclSignature(ctx, pd)
-        for (getter in pd.getters) {
-            let _ = SynthesizeDecl(ctx, getter)
-        }
-        for (setter in pd.setters) {
-            let _ = SynthesizeDecl(ctx, setter)
-        }
+        let propTy = CheckPropDecl(pd,
+            { typeNode: Type =>
+                SynthesizeTypeNode(ctx, Some(typeNode))
+                typeNode.GetTy() ?? TypeManager.GetInvalidTy()
+            },
+            { decl: Decl => SynthesizeDecl(ctx, decl) },
+            diag: impl.diag)
         BindLocalDeclIfNeeded(ctx, pd)
         return propTy
     }
@@ -1761,6 +1754,15 @@ public class TypeChecker {
                 }
             }
             let declTy = TypeCheckDeclSynchronizeTypeAndInitializer(impl.typeManager, vd)
+            if (let Some(varDecl) <- (vd as VarDecl)) {
+                if (let Some(initializer) <- varDecl.initializer) {
+                    if (!Ty.IsInitialTy(initializer.GetTy())) {
+                        if (let Some(diagValue) <- impl.diag) {
+                            CheckStaticVarAccessNonStatic(diagValue, varDecl)
+                        }
+                    }
+                }
+            }
             BindLocalDeclIfNeeded(ctx, decl)
             return declTy
         }
@@ -1830,14 +1832,15 @@ public class TypeChecker {
         if (let Some(enumDecl) <- (decl as EnumDecl)) {
             let _ = EnsureEnumDeclTy(enumDecl)
             TypeCheckDeclInsertEnumConstructors(ctx, enumDecl)
-            for (inheritedType in enumDecl.inheritedTypes) {
-                impl.SetTypeTy(ctx, inheritedType)
-            }
             for (constructor in enumDecl.constructors) {
                 let _ = PrepareEnumConstructorSignature(ctx, enumDecl, constructor)
             }
-            SynthesizeDeclList(ctx, enumDecl.members)
-            return tyOrInvalid(enumDecl)
+            return CheckEnumDecl(impl.diag.getOrThrow(), impl.typeManager, enumDecl,
+                { typeNode: Type =>
+                    SynthesizeTypeNode(ctx, Some(typeNode))
+                    typeNode.GetTy() ?? TypeManager.GetInvalidTy()
+                },
+                { member: Decl => SynthesizeDecl(ctx, member) })
         }
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
             SynthesizeTypeNode(ctx, extendDecl.extendedType)
@@ -3561,6 +3564,12 @@ public class TypeChecker {
         if (impl.typeManager.GetUnsolvedTyVars().isEmpty() && ctx.IsSynSkippedForCorrectTy(expr)) {
             return expr.GetTy() ?? TypeManager.GetInvalidTy()
         }
+        if (let Some(incOrDec) <- (expr as IncOrDecExpr)) {
+            return FinishSynthesize(ctx, incOrDec, SynIncOrDecExpr(incOrDec,
+                { leftValue: Expr => Synthesize(ctx, SynPos.LEFT_VALUE, leftValue) },
+                { desugar: Expr => Synthesize(ctx, SynPos.UNUSED, desugar) },
+                diag: impl.diag))
+        }
         if (let Some(syncExpr) <- (expr as SynchronizedExpr)) {
             var lockTy: Option<Ty> = None
             if (let Some(lockDecl) <- lookupResolvedPackageDecl(ctx, "std.sync", "Lock")) {
@@ -3704,8 +3713,15 @@ public class TypeChecker {
                 if (let Some(stringDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "String")) {
                     stringTy = stringDecl.GetTy()
                 }
+                var toStringTy: Option<Ty> = None
+                if (let Some(toStringDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "ToString")) {
+                    toStringTy = toStringDecl.GetTy()
+                }
                 return FinishSynthesize(ctx, lit,
-                    SynLitConstExpr(lit, stringTy: stringTy, typeManager: Some(impl.typeManager), ctx: Some(ctx),
+                    SynLitConstExpr(lit, stringTy: stringTy, toStringTy: toStringTy,
+                        typeManager: Some(impl.typeManager), ctx: Some(ctx),
+                        synthesizer: Some({ block: Block => Synthesize(ctx, SynPos.EXPR_ARG, block) }),
+                        checker: Some({ targetTy: Ty, partExpr: Expr => Check(ctx, targetTy, partExpr) }),
                         diag: impl.diag))
             }
         }
@@ -3963,7 +3979,20 @@ public class TypeChecker {
                 diag: impl.diag))
         }
         if (let Some(lit) <- (expr as LitConstExpr)) {
-            return FinishCheck(ctx, lit, ChkLitConstExpr(impl.typeManager, target, lit, ctx: Some(ctx),
+            var stringTy: Option<Ty> = None
+            var toStringTy: Option<Ty> = None
+            if (isStringLiteral(lit)) {
+                if (let Some(stringDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "String")) {
+                    stringTy = stringDecl.GetTy()
+                }
+                if (let Some(toStringDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "ToString")) {
+                    toStringTy = toStringDecl.GetTy()
+                }
+            }
+            return FinishCheck(ctx, lit, ChkLitConstExpr(impl.typeManager, target, lit, stringTy: stringTy,
+                toStringTy: toStringTy, ctx: Some(ctx),
+                synthesizer: Some({ block: Block => Synthesize(ctx, SynPos.EXPR_ARG, block) }),
+                checker: Some({ targetTy: Ty, partExpr: Expr => Check(ctx, targetTy, partExpr) }),
                 diag: impl.diag))
         }
         if (let Some(arrayLit) <- (expr as ArrayLit)) {
@@ -3974,6 +4003,12 @@ public class TypeChecker {
         }
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
             return FinishCheck(ctx, binaryExpr, CheckBinaryExpr(ctx, target, binaryExpr))
+        }
+        if (let Some(incOrDec) <- (expr as IncOrDecExpr)) {
+            return FinishCheck(ctx, incOrDec, ChkIncOrDecExpr(impl.typeManager, target, incOrDec,
+                { leftValue: Expr => Synthesize(ctx, SynPos.LEFT_VALUE, leftValue) },
+                { desugar: Expr => Synthesize(ctx, SynPos.UNUSED, desugar) },
+                diag: impl.diag))
         }
         if (let Some(unaryExpr) <- (expr as UnaryExpr)) {
             return FinishCheck(ctx, unaryExpr, CheckUnaryExprWithTarget(ctx, target, unaryExpr))

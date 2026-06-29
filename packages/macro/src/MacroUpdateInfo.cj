@@ -4,8 +4,8 @@ import std.collection.*
 
 private func markInvocationParent(macroNode: Node, parent: Node): Unit {
     if (let Some(invocation) <- macroNode.GetInvocation()) {
-        invocation.parent = Some(parent)
         if (invocation.newTokens.isEmpty()) {
+            invocation.parent = Some(parent)
             invocation.newTokens.add(Token(TokenKind.ILLEGAL, ""))
         }
     }
@@ -303,28 +303,24 @@ public func UpdateMacroInfo(node: Node, collector: MacroCollector): Unit {
         updateExprField(parenExpr.expr, parenExpr, ExprFieldKind.PAREN_EXPR_VALUE, collector)
     } else if (let Some(unaryExpr) <- (node as UnaryExpr)) {
         updateExprField(unaryExpr.expr, unaryExpr, ExprFieldKind.UNARY_EXPR_VALUE, collector)
-    } else if (let Some(incOrDecExpr) <- (node as IncOrDecExpr)) {
-        updateExprField(incOrDecExpr.expr, incOrDecExpr, ExprFieldKind.INC_OR_DEC_EXPR_VALUE, collector)
     } else if (let Some(typeConvExpr) <- (node as TypeConvExpr)) {
         updateExprField(typeConvExpr.expr, typeConvExpr, ExprFieldKind.TYPE_CONV_EXPR_VALUE, collector)
     } else if (let Some(subscriptExpr) <- (node as SubscriptExpr)) {
         updateExprField(subscriptExpr.baseExpr, subscriptExpr, ExprFieldKind.SUBSCRIPT_BASE_EXPR, collector)
         updateExprContainer(subscriptExpr.indexExprs, subscriptExpr, collector)
-    } else if (let Some(optionalExpr) <- (node as OptionalExpr)) {
-        updateExprField(optionalExpr.baseExpr, optionalExpr, ExprFieldKind.OPTIONAL_BASE_EXPR, collector)
-    } else if (let Some(optionalChainExpr) <- (node as OptionalChainExpr)) {
-        updateExprField(optionalChainExpr.expr, optionalChainExpr, ExprFieldKind.OPTIONAL_CHAIN_EXPR_VALUE, collector)
     } else if (let Some(letPatternExpr) <- (node as LetPatternDestructor)) {
         updateExprField(letPatternExpr.initializer, letPatternExpr, ExprFieldKind.LET_PATTERN_INITIALIZER, collector)
     } else if (let Some(binary) <- (node as BinaryExpr)) {
         if (ASTKindEquals(binary.astKind, ASTKind.ASSIGN_EXPR)) {
             updateExprField(binary.rightExpr, binary, ExprFieldKind.ASSIGN_RIGHT_EXPR, collector)
         } else {
-            updateExprField(binary.leftExpr, binary, ExprFieldKind.BINARY_LEFT_EXPR, collector)
             updateExprField(binary.rightExpr, binary, ExprFieldKind.BINARY_RIGHT_EXPR, collector)
+            updateExprField(binary.leftExpr, binary, ExprFieldKind.BINARY_LEFT_EXPR, collector)
         }
-    } else if (let Some(exprList) <- (node as ExprListExpr)) {
-        updateExprContainer(exprList.children, exprList, collector)
+    } else if (let Some(arrayLit) <- (node as ArrayLit)) {
+        updateExprContainer(arrayLit.children, arrayLit, collector)
+    } else if (let Some(tupleLit) <- (node as TupleLit)) {
+        updateExprContainer(tupleLit.children, tupleLit, collector)
     } else if (let Some(quoteExpr) <- (node as QuoteExpr)) {
         updateExprContainer(quoteExpr.exprs, quoteExpr, collector)
     } else if (let Some(matchExpr) <- (node as MatchExpr)) {

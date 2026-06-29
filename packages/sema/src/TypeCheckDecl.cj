@@ -184,8 +184,12 @@ public func TypeCheckDeclBuildImportedEnumConstructorMap(
     enableMacroInLsp!: Bool = false
 ): Unit {
     let visited = ArrayList<EnumDecl>()
-    for (fileHash in ctx.resolvedImportedDeclsMap.keys()) {
-        if (let Some(fileMap) <- ctx.resolvedImportedDeclsMap.get(fileHash)) {
+    if (let Some(pkg) <- ctx.curPackage) {
+        for (file in pkg.files) {
+            if (let None <- ctx.resolvedImportedDeclsMap.get(file.fileHash)) {
+                continue
+            }
+            let fileMap = ctx.resolvedImportedDeclsMap.get(file.fileHash).getOrThrow()
             for (name in fileMap.keys()) {
                 if (let Some(decls) <- fileMap.get(name)) {
                     for (decl in decls) {
@@ -248,6 +252,94 @@ public func TypeCheckDeclCheckEntryFunc(diag: BasicDiagnosticEngine, fd: FuncDec
         }
     }
     return true
+}
+
+public func CheckStaticVarAccessNonStatic(diag: BasicDiagnosticEngine, vd: VarDecl): Unit {
+    if (!vd.TestAttr(Attribute.STATIC)) {
+        return
+    }
+    if (let None <- vd.initializer) {
+        return
+    }
+    let walker = Walker(vd.initializer.getOrThrow(), visitPre: { node: Node =>
+        if (let Some(refExpr) <- (node as RefExpr)) {
+            if (let None <- refExpr.GetTarget()) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            let target = refExpr.GetTarget().getOrThrow()
+            if (target.astKind == ASTKind.FUNC_DECL) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            var hasOuterDecl = false
+            if (let Some(_) <- target.outerDecl) {
+                hasOuterDecl = true
+            }
+            let invalidAccess = !refExpr.TestAttr(Attribute.COMPILER_ADD) && !target.IsStaticOrGlobal() &&
+                !target.IsTypeDecl() && !target.TestAttr(Attribute.CONSTRUCTOR) &&
+                !target.TestAttr(Attribute.ENUM_CONSTRUCTOR) && hasOuterDecl
+            if (invalidAccess) {
+                TypeCheckDeclEmitDiag(diag, vd, BasicDiagKind.sema_static_variable_cannot_access_non_static_member,
+                    args: [BasicDiagArgument(refExpr.ref.identifier.Val())])
+            }
+        } else if (node.astKind == ASTKind.MEMBER_ACCESS || node.astKind == ASTKind.FUNC_BODY) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    walker.Walk()
+}
+
+public func CheckPropDecl(pd: PropDecl, typeSynthesizer: (Type) -> Ty, declSynthesizer: (Decl) -> Ty,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    if (pd.TestAttr(Attribute.IS_CHECK_VISITED)) {
+        return pd.GetTy() ?? TypeManager.GetInvalidTy()
+    }
+    pd.EnableAttr(Attribute.IS_CHECK_VISITED)
+    let redefModifier = FindModifier(pd, TokenKind.REDEF)
+    let staticModifier = FindModifier(pd, TokenKind.STATIC)
+    if (let Some(modifier) <- redefModifier) {
+        if (let None <- staticModifier) {
+            if (let Some(diagValue) <- diag) {
+                TypeCheckDeclEmitDiag(diagValue, modifier, BasicDiagKind.sema_redef_modify_static_func,
+                    args: [BasicDiagArgument("property")])
+            }
+            pd.SetTy(TypeManager.GetInvalidTy())
+        }
+    }
+    let typeNode = pd.typeNode.getOrThrow()
+    let _ = typeSynthesizer(typeNode)
+    pd.SetTy(typeNode.GetTy() ?? TypeManager.GetInvalidTy())
+    for (getter in pd.getters) {
+        if (let Some(body) <- getter.funcBody) {
+            if (!body.paramLists.isEmpty()) {
+                if (!body.paramLists[0].params.isEmpty()) {
+                    if (let Some(diagValue2) <- diag) {
+                        TypeCheckDeclEmitDiag(diagValue2, getter, BasicDiagKind.sema_cannot_have_parameter,
+                            args: [BasicDiagArgument("getter")])
+                    }
+                }
+                if (body.paramLists.size > 1) {
+                    if (let Some(diagValue3) <- diag) {
+                        TypeCheckDeclEmitDiag(diagValue3, getter, BasicDiagKind.sema_cannot_currying,
+                            args: [BasicDiagArgument("getter")])
+                    }
+                }
+            }
+        }
+        let _ = declSynthesizer(getter)
+    }
+    for (setter in pd.setters) {
+        if (let Some(body2) <- setter.funcBody) {
+            if (body2.paramLists.size > 1) {
+                if (let Some(diagValue4) <- diag) {
+                    TypeCheckDeclEmitDiag(diagValue4, setter, BasicDiagKind.sema_cannot_currying,
+                        args: [BasicDiagArgument("setter")])
+                }
+            }
+        }
+        let _ = declSynthesizer(setter)
+    }
+    return pd.GetTy() ?? TypeManager.GetInvalidTy()
 }
 
 public func TypeCheckDeclIsUnaryOverloadOperator(op: TokenKind): Bool {
@@ -411,6 +503,9 @@ public func TypeCheckDeclSynchronizeTypeAndInitializer(
                     initializer.SetTy(typeTy)
                 } else if (typeTy.kind == TypeKind.TYPE_UINT8 && IsSingleByteStringLiteral(initializer)) {
                     initializer.SetTy(typeTy)
+                    if (let Some(lit) <- (initializer as LitConstExpr)) {
+                        let _ = ChkLitConstExprRange(lit, diag: diag)
+                    }
                 }
             }
             return typeTy
@@ -454,7 +549,7 @@ public func TypeCheckDeclSetEnumElementTy(
     if (!constructor.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
         return constructor.GetTy() ?? TypeManager.GetInvalidTy()
     }
-    if (Ty.IsTyCorrect(constructor.GetTy()) && EnumConstructorTyMatchesOuter(constructor)) {
+    if (Ty.IsTyCorrect(constructor.GetTy())) {
         return constructor.GetTy().getOrThrow()
     }
     if (constructor.astKind == ASTKind.VAR_DECL) {
@@ -475,22 +570,6 @@ public func TypeCheckDeclSetEnumElementTy(
     }
     constructor.SetTy(TypeManager.GetInvalidTy())
     return TypeManager.GetInvalidTy()
-}
-
-private func EnumConstructorTyMatchesOuter(constructor: Decl): Bool {
-    let outerTy = if (let Some(outer) <- constructor.outerDecl) {
-        outer.GetTy() ?? return true
-    } else {
-        return true
-    }
-    if (let Some(funcDecl) <- (constructor as FuncDecl)) {
-        if (let Some(declTy) <- funcDecl.GetTy()) {
-            if (let Some(funcTy) <- (declTy as FuncTy)) {
-                return SameTy(funcTy.retTy, outerTy)
-            }
-        }
-    }
-    return true
 }
 
 private func TypeCheckDeclCheckEnumFuncDeclIsCStructParam(diag: BasicDiagnosticEngine, funcDecl: FuncDecl): Unit {
@@ -572,6 +651,48 @@ public func TypeCheckDeclSetEnumElementTyForFunc(
         }
     }
     return ctorTy
+}
+
+public func CheckEnumDecl(diag: BasicDiagnosticEngine, tm: TypeManager, enumDecl: EnumDecl,
+    typeSynthesizer: (Type) -> Ty, declSynthesizer: (Decl) -> Ty): Ty {
+    if (enumDecl.TestAttr(Attribute.IS_CHECK_VISITED)) {
+        return enumDecl.GetTy() ?? TypeManager.GetInvalidTy()
+    }
+    enumDecl.EnableAttr(Attribute.IS_CHECK_VISITED)
+    for (interfaceType in enumDecl.inheritedTypes) {
+        let _ = typeSynthesizer(interfaceType)
+    }
+    let _ = TypeCheckDeclCheckEnumInheritedTypes(diag, enumDecl)
+    for (constructor in enumDecl.constructors) {
+        let _ = TypeCheckAnnotationCheckAnnotations(diag, tm, constructor)
+        let walker = Walker(constructor, visitPre: { node: Node =>
+            if (let Some(typeNode) <- (node as Type)) {
+                let _ = typeSynthesizer(typeNode)
+                return VisitAction.SKIP_CHILDREN
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        walker.Walk()
+    }
+    for (member in enumDecl.members) {
+        if (let Some(funcDecl) <- (member as FuncDecl)) {
+            let _ = declSynthesizer(funcDecl)
+        } else if (let Some(propDecl) <- (member as PropDecl)) {
+            let _ = declSynthesizer(propDecl)
+            if (propDecl.isVar) {
+                let range = if (let Some(modifier) <- FindModifier(propDecl, TokenKind.MUT)) {
+                    MakeRange(modifier.begin, modifier.end)
+                } else {
+                    TypeCheckDeclIdentifierRange(propDecl)
+                }
+                let builder = diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_immutable_type_illegal_property,
+                    range)
+                builder.Emit()
+            }
+        }
+    }
+    return enumDecl.GetTy() ?? TypeManager.GetInvalidTy()
 }
 
 public func TypeCheckDeclGetUnusedTysInTypeAlias(tad: TypeAliasDecl): ArrayList<Ty> {
@@ -780,8 +901,4 @@ public func TypeCheckDeclCheckStructInheritedTypes(diag: BasicDiagnosticEngine, 
         }
     }
     return valid
-}
-
-public func SelfhostPortStatus_TypeCheckDecl(): Bool {
-    return true
 }
