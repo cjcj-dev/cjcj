@@ -21,7 +21,3 @@ public func EndInstCtxScope(scope: InstCtxScope): Unit {
 public func SetInstCtxRefDecl(scope: InstCtxScope, decl: Decl, instTy: Ty): Unit {
     scope.SetRefDecl(decl, instTy)
 }
-
-public func SelfhostPortStatus_ExtraScopes(): Bool {
-    return true
-}
