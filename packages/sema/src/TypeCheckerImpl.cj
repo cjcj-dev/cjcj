@@ -128,24 +128,32 @@ public class TypeCheckerImpl {
     }
 
     public func GetToplevelDecls(ctx: ASTContext): ArrayList<Symbol> {
-        return GetToplevelDeclSymbols(ctx)
+        let query = CompoundQuery(QueryKind.AND)
+        query.children.add(ScopeLevelQuery(0u32))
+        query.children.add(ASTKindQuery("decl", matchKind: MatchKind.SUFFIX))
+        return ctx.searcher.Search(ctx, query, order: SearchOrder.POS_ASC)
     }
 
     public func GetAllDecls(ctx: ASTContext): ArrayList<Symbol> {
-        return GetAllDeclSymbols(ctx)
+        return ctx.searcher.Search(ctx, ASTKindQuery("decl", matchKind: MatchKind.SUFFIX),
+            order: SearchOrder.POS_ASC)
     }
 
     public func GetGenericCandidates(ctx: ASTContext): ArrayList<Symbol> {
-        return GetGenericCandidateSymbols(ctx)
+        return ctx.searcher.Search(ctx,
+            "ast_kind : class_decl || ast_kind : interface_decl || ast_kind : struct_decl || ast_kind : enum_decl || " +
+            "ast_kind : func_decl || ast_kind : extend_decl || ast_kind : builtin_decl", order: SearchOrder.POS_ASC)
     }
 
     public func GetAllStructDecls(ctx: ASTContext): ArrayList<Symbol> {
-        return GetAllStructDeclSymbols(ctx)
+        return ctx.searcher.Search(ctx,
+            "ast_kind : class_decl || ast_kind : interface_decl || ast_kind : struct_decl || ast_kind : enum_decl || " +
+            "ast_kind : extend_decl", order: SearchOrder.POS_ASC)
     }
 
     public func GetSymsByASTKind(ctx: ASTContext, astKind: ASTKind,
-        order!: SearchOrder = SearchOrder.POS_ASC): ArrayList<Symbol> {
-        return GetSymbolsByASTKind(ctx, astKind, order: order)
+        order!: SearchOrder = SearchOrder.POS_DESC): ArrayList<Symbol> {
+        return ctx.searcher.Search(ctx, ASTKindQuery(astKind), order: order)
     }
 
     public func Lookup(ctx: ASTContext, name: String, scopeName: String, node: Node,

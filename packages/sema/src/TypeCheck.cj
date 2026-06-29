@@ -831,7 +831,11 @@ public func ResolveNames(typeManager: TypeManager, ctx: ASTContext): Unit {
         }
         return
     }
-    for (symbol in GetToplevelDeclSymbols(ctx)) {
+    let query = CompoundQuery(QueryKind.AND)
+    query.children.add(ScopeLevelQuery(0u32))
+    query.children.add(ASTKindQuery("decl", matchKind: MatchKind.SUFFIX))
+    let symbols = ctx.searcher.Search(ctx, query, order: SearchOrder.POS_ASC)
+    for (symbol in symbols) {
         if (let Some(node) <- symbol.node) {
             let walker = Walker(node, visitPre: resolveSingleType)
             let _ = walker.Walk()

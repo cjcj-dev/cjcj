@@ -385,37 +385,61 @@ public class Sort {
     }
 }
 
+public enum SearchOrder {
+    | POS_ASC
+    | POS_DESC
+}
+
+private func SearchOrderIndex(order: SearchOrder): Int64 {
+    return match (order) {
+        case SearchOrder.POS_ASC => 0
+        case SearchOrder.POS_DESC => 1
+    }
+}
+
+extend SearchOrder <: Equatable<SearchOrder> {
+    public operator func ==(right: SearchOrder): Bool {
+        return SearchOrderIndex(this) == SearchOrderIndex(right)
+    }
+
+    public operator func !=(right: SearchOrder): Bool {
+        return !(this == right)
+    }
+}
+
 public class Searcher {
     private let cache: HashMap<String, ArrayList<Symbol>> = HashMap<String, ArrayList<Symbol>>()
 
     public init() {}
 
-    public func Search(ctx: ASTContext, query: String): ArrayList<Symbol> {
+    public func Search(ctx: ASTContext, query: String, order!: SearchOrder = SearchOrder.POS_DESC): ArrayList<Symbol> {
         let parsed = ParseQuery(query)
-        return Search(ctx, parsed)
+        return Search(ctx, parsed, order: order)
     }
 
-    public func Search(ctx: ASTContext, query: String, fileHashes: HashSet<UInt64>): ArrayList<Symbol> {
+    public func Search(ctx: ASTContext, query: String, fileHashes: HashSet<UInt64>,
+        order!: SearchOrder = SearchOrder.POS_DESC): ArrayList<Symbol> {
         let parsed = ParseQuery(query)
         parsed.AddFileHashes(fileHashes)
-        return Search(ctx, parsed)
+        return Search(ctx, parsed, order: order)
     }
 
-    public func Search(ctx: ASTContext, query: String, fileHashes: ArrayList<UInt64>): ArrayList<Symbol> {
+    public func Search(ctx: ASTContext, query: String, fileHashes: ArrayList<UInt64>,
+        order!: SearchOrder = SearchOrder.POS_DESC): ArrayList<Symbol> {
         let parsed = ParseQuery(query)
         for (fileHash in fileHashes) {
             parsed.AddFileHash(fileHash)
         }
-        return Search(ctx, parsed)
+        return Search(ctx, parsed, order: order)
     }
 
-    public func Search(ctx: ASTContext, query: Query): ArrayList<Symbol> {
-        let key = NormalizeQuery(query)
+    public func Search(ctx: ASTContext, query: Query, order!: SearchOrder = SearchOrder.POS_DESC): ArrayList<Symbol> {
+        let key = NormalizeQuery(query, order: order)
         if (let Some(values) <- cache.get(key)) {
             return FilterCachedSearchResult(values, query)
         }
         let ids = PerformSearch(ctx, query)
-        let out = FilterAndSortSearchResult(ids, query)
+        let out = FilterAndSortSearchResult(ids, query, order: order)
         cache[key] = out
         return out
     }
@@ -464,12 +488,16 @@ public class Searcher {
         return out
     }
 
-    private func NormalizeQuery(query: Query): String {
+    private func NormalizeQuery(query: Query, order!: SearchOrder = SearchOrder.POS_DESC): String {
         var normalized = query.PrettyPrint()
         for (fileHash in query.fileHashes) {
             normalized += "|fileHash:" + FileUtil.GetShortHash(fileHash)
         }
-        normalized += "|sort:desc"
+        if (order == SearchOrder.POS_ASC) {
+            normalized += "|sort:asc"
+        } else {
+            normalized += "|sort:desc"
+        }
         return normalized
     }
 
@@ -486,11 +514,12 @@ public class Searcher {
         return out
     }
 
-    private func FilterAndSortSearchResult(ids: ArrayList<Symbol>, query: Query): ArrayList<Symbol> {
+    private func FilterAndSortSearchResult(ids: ArrayList<Symbol>, query: Query,
+        order!: SearchOrder = SearchOrder.POS_DESC): ArrayList<Symbol> {
         let out = ArrayList<Symbol>()
         for (symbol in ids) {
             if (!symbol.invertedIndexBeenDeleted && InFiles(query, symbol)) {
-                insertByPosition(out, symbol)
+                insertByPosition(out, symbol, order: order)
             }
         }
         return out
@@ -786,10 +815,18 @@ public class Searcher {
         out.add(value)
     }
 
-    private func insertByPosition(out: ArrayList<Symbol>, symbol: Symbol): Unit {
+    private func symbolBefore(left: Symbol, right: Symbol, order: SearchOrder): Bool {
+        if (order == SearchOrder.POS_ASC) {
+            return Sort.PosAsc(left, right)
+        }
+        return Sort.PosDesc(left, right)
+    }
+
+    private func insertByPosition(out: ArrayList<Symbol>, symbol: Symbol,
+        order!: SearchOrder = SearchOrder.POS_DESC): Unit {
         var idx: Int64 = 0
         while (idx < out.size) {
-            if (Sort.PosDesc(symbol, out[idx])) {
+            if (symbolBefore(symbol, out[idx], order)) {
                 out.add(symbol, at: idx)
                 return
             }

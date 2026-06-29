@@ -6,6 +6,7 @@ import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::utils.FileUtil
 
 private let PRECHECK_CORE_PACKAGE_NAME: String = "std.core"
 private let PRECHECK_OBJECT_NAME: String = "Object"
@@ -457,6 +458,43 @@ public func CheckRedefinition(
     let syms = ArrayList<Symbol>()
     preCheckCollectRedefinitionSymbols(pkg, syms, enableMacroInLSP)
     preCheckCheckRedefinitionInDeclHelper(ctx, diag, syms)
+    CheckConflictDeclWithSubPackage(pkg, diag)
+}
+
+private func CheckConflictDeclWithSubPackage(pkg: Package, diag: BasicDiagnosticEngine): Unit {
+    if (pkg.files.isEmpty()) {
+        return
+    }
+    let subPkgNames = HashSet<String>()
+    for (directory in FileUtil.GetDirectories(FileUtil.GetDirPath(pkg.files[0].filePath))) {
+        subPkgNames.add(directory.name)
+    }
+    let toplevelDecls = ArrayList<Decl>()
+    IterateToplevelDecls(pkg, { decl: Decl =>
+        if (decl.TestAttr(Attribute.IS_BROKEN)) {
+            return
+        }
+        if (let Some(vpd) <- (decl as VarWithPatternDecl)) {
+            for (pattern in FlattenVarWithPatternDecl(vpd)) {
+                if (let Some(varPattern) <- (pattern as VarPattern)) {
+                    if (let Some(varDecl) <- varPattern.varDecl) {
+                        toplevelDecls.add(varDecl)
+                    }
+                }
+            }
+        } else {
+            toplevelDecls.add(decl)
+        }
+    })
+    for (decl in toplevelDecls) {
+        if (subPkgNames.contains(decl.identifier.Val())) {
+            let fullSubName = pkg.fullPackageName + "." + decl.identifier.Val()
+            let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_conflict_with_sub_package,
+                MakeRange(decl.identifier.Begin(), decl.identifier.End()),
+                arguments: [decl.identifier.Val(), fullSubName])
+            builder.Emit()
+        }
+    }
 }
 
 private func collectDeclForAssumption(decl: Decl, out: ArrayList<Decl>): Unit {
@@ -601,7 +639,8 @@ private func preCheckAddObjectSuperClass(ctx: ASTContext, pkg: Package, classDec
 }
 
 private func addSuperClassObjectForClassDecl(ctx: ASTContext, pkg: Package): Unit {
-    for (sym in GetSymbolsByASTKind(ctx, ASTKind.CLASS_DECL)) {
+    let syms = ctx.searcher.Search(ctx, ASTKindQuery(ASTKind.CLASS_DECL), order: SearchOrder.POS_ASC)
+    for (sym in syms) {
         let node = sym.node ?? continue
         let classDecl = (node as ClassDecl) ?? continue
         if (preCheckHasSuperClass(classDecl)) {

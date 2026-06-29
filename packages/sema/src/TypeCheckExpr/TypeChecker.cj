@@ -997,7 +997,7 @@ public class TypeChecker {
 
     private func BuildCurrentPackageExtendMap(ctx: ASTContext): Unit {
         let extends = ArrayList<ExtendDecl>()
-        for (sym in impl.GetSymsByASTKind(ctx, ASTKind.EXTEND_DECL)) {
+        for (sym in impl.GetSymsByASTKind(ctx, ASTKind.EXTEND_DECL, order: SearchOrder.POS_ASC)) {
             if (let Some(node) <- sym.node) {
                 if (let Some(extendDecl) <- (node as ExtendDecl)) {
                     StampCurrentExtendPackage(ctx, extendDecl)
