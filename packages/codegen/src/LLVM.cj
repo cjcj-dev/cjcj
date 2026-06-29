@@ -225,6 +225,8 @@ foreign {
     func LLVMGlobalSetMetadata(global: LLVMValueRef, kind: UInt32, metadata: LLVMMetadataRef): Unit
     func LLVMGlobalEraseMetadata(global: LLVMValueRef, kind: UInt32): Unit
     func LLVMGlobalClearMetadata(global: LLVMValueRef): Unit
+    func LLVMGlobalObjectAddStringAttribute(gv: LLVMValueRef, k: CString, kLen: UInt32, v: CString,
+        vLen: UInt32): Unit
     func LLVMCountParams(fn: LLVMValueRef): UInt32
     func LLVMGetParam(fn: LLVMValueRef, index: UInt32): LLVMValueRef
     func LLVMHasPersonalityFn(fn: LLVMValueRef): Int32

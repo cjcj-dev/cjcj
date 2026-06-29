@@ -177,6 +177,7 @@ private func GetReadOnlyArrayKlassInfo(cgMod: CGModule, moduleHandle: LLVMModule
     let globalValue = GetOrInsertGlobal(moduleHandle, name, typeInfoType)
     unsafe {
         LLVMSetInitializer(globalValue, ConstStruct(typeInfoType, typeInfoValues))
+        addAttribute(globalValue, GC_KLASS_ATTR)
         if (cgMod.GetCGContext().GetCompileOptions().target.os != OSType.WINDOWS) {
             LLVMSetLinkage(globalValue, LLVMLinkageValue(LLVMLinkage.LinkOnceODR))
         }
@@ -218,6 +219,7 @@ private func CreateRawArrayGlobal(cgMod: CGModule, moduleHandle: LLVMModuleHandl
     unsafe {
         LLVMSetInitializer(rawDataGlobal, rawArrayData)
         LLVMSetGlobalConstant(rawDataGlobal, 1)
+        addAttribute(rawDataGlobal, CJSTRING_DATA_ATTR)
         LLVMSetLinkage(rawDataGlobal, LLVMLinkageValue(LLVMLinkage.Private))
     }
     return rawDataGlobal

@@ -234,6 +234,16 @@ public func AddFnStringAttr(fn: LLVMValueRef, attrName: String, attrValue!: Stri
     AddStringAttributeAtIndex(fn, UInt32.Max, attrName, attrValue: attrValue)
 }
 
+public func addAttribute(gv: LLVMValueRef, name: String, value!: String = ""): Unit {
+    try (nameCString = unsafe { LibC.mallocCString(name) }.asResource(),
+        valueCString = unsafe { LibC.mallocCString(value) }.asResource()) {
+        unsafe {
+            LLVMGlobalObjectAddStringAttribute(gv, nameCString.value, UInt32(name.toArray().size),
+                valueCString.value, UInt32(value.toArray().size))
+        }
+    }
+}
+
 public func RemoveParamAttr(callBase: LLVMValueRef, paramIdx: UInt32, attrName: String): Unit {
     RemoveAttributeAtIndex(callBase, paramIdx + 1u32, attrName)
 }
