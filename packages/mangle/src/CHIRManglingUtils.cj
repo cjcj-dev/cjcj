@@ -30,53 +30,36 @@ private func ReplaceManglePrefixWith(mangledName: String, newPrefix: String): St
     throw IllegalArgumentException("Mangle name has no _C prefix to be replaced: " + mangledName)
 }
 
-private func CustomTypeDefIdentifierWithoutPrefix(def: CustomTypeDef): String {
-    let identifier = def.GetIdentifier()
-    if (identifier.isEmpty()) {
-        throw IllegalArgumentException("Custom type identifier has no prefix to strip.")
-    }
-    if (StartsWith(identifier, MANGLE_AT_PREFIX)) {
-        return identifier[MANGLE_CHAR_LEN..]
-    }
-    return identifier
-}
-
-private func sortedMangledClassTypes(types: ArrayList<ClassType>, genericsTypeStack: ArrayList<String>): ArrayList<String> {
-    let values = ArrayList<String>()
-    for (ty in types) {
-        values.add(MangleCHIRType(ty, genericsTypeStack))
-    }
-    sort(values, by: { left: String, right: String =>
-        if (left < right) {
-            Ordering.LT
-        } else if (left > right) {
-            Ordering.GT
-        } else {
-            Ordering.EQ
-        }
-    }, stable: true)
-    return values
-}
-
 public func GenerateVirtualFuncMangleName(rawFunc: Function, customTypeDef: CustomTypeDef,
     parentTy: ClassType, isVirtual: Bool): String {
     let prefix = if (isVirtual) { MANGLE_VIRTUAL_PREFIX } else { MANGLE_MUTABLE_PREFIX }
     var out = ReplaceManglePrefixWith(rawFunc.GetIdentifierWithoutPrefix(), prefix)
     let customTyGenericTypeStack = ArrayList<String>()
-    for (genericType in customTypeDef.genericTypeParams) {
+    for (genericType in customTypeDef.GetGenericTypeParams()) {
         customTyGenericTypeStack.add(genericType.GetSrcCodeIdentifier())
     }
-    if (let Some(extendDef) <- (customTypeDef as ExtendDef)) {
-        if (let Some(extendedType) <- extendDef.extendedType) {
-            out += MANGLE_CHIR_EXTEND_PREFIX + MangleCHIRType(extendedType, customTyGenericTypeStack)
+    if (customTypeDef.IsExtend()) {
+        out += MANGLE_CHIR_EXTEND_PREFIX + MangleCHIRType(customTypeDef.GetType().getOrThrow(),
+            customTyGenericTypeStack)
+        let implementTypes = ArrayList<String>()
+        for (ty in customTypeDef.GetImplementedInterfaceTys()) {
+            implementTypes.add(MangleCHIRType(ty, customTyGenericTypeStack))
         }
-        for (implementType in sortedMangledClassTypes(customTypeDef.GetImplementedInterfaceTys(),
-            customTyGenericTypeStack)) {
+        sort(implementTypes, by: { left: String, right: String =>
+            if (left < right) {
+                Ordering.LT
+            } else if (left > right) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        }, stable: true)
+        for (implementType in implementTypes) {
             out += implementType
         }
         out += "${customTypeDef.GetPackageName().size}" + customTypeDef.GetPackageName()
     } else {
-        out += MANGLE_DOLLAR_PREFIX + ReplaceManglePrefixWith(CustomTypeDefIdentifierWithoutPrefix(customTypeDef), "")
+        out += MANGLE_DOLLAR_PREFIX + ReplaceManglePrefixWith(customTypeDef.GetIdentifierWithoutPrefix(), "")
     }
     out += MANGLE_DOLLAR_PREFIX + MangleCHIRType(parentTy, customTyGenericTypeStack)
     return out
@@ -107,16 +90,14 @@ public func OverflowStrategyToString(ovf: OverflowStrategy): String {
     }
 }
 
-private func OverflowOperatorMangleCode(name: String): String {
-    if (let Some(op) <- OperatorTypeMangle(name)) {
-        return op
-    }
-    throw IllegalArgumentException("Unsupported name for overflow operator mangling: " + name)
-}
-
 public func GenerateOverflowOperatorFuncMangleName(name: String, ovf: OverflowStrategy, isBinary: Bool,
     typeInfo: BuiltinType): String {
-    var out = MANGLE_OPERATOR_PREFIX + OverflowStrategyToString(ovf) + OverflowOperatorMangleCode(name)
+    var out = MANGLE_OPERATOR_PREFIX + OverflowStrategyToString(ovf)
+    if (let Some(op) <- OperatorTypeMangle(name)) {
+        out += op
+    } else {
+        throw IllegalArgumentException("Unsupported name for overflow operator mangling: " + name)
+    }
     out += MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleCHIRType(typeInfo)
     if (isBinary) {
         out += MangleCHIRType(typeInfo)
@@ -146,7 +127,7 @@ public func GenerateLambdaImplClassMangleName(function: Lambda, count: Int64): S
 }
 
 public func GenerateWrapperClassMangleName(def: ClassDef): String {
-    return MANGLE_CLOSURE_WRAPPER_PREFIX + CustomTypeDefIdentifierWithoutPrefix(def)
+    return MANGLE_CLOSURE_WRAPPER_PREFIX + def.GetIdentifierWithoutPrefix()
 }
 
 public func GenerateGenericAbstractFuncMangleName(def: ClassDef): String {
@@ -168,9 +149,9 @@ public func GenerateInstOverrideFuncMangleName(function: Function): String {
 }
 
 public func GenerateWrapperClassGenericOverrideFuncMangleName(def: ClassDef): String {
-    return MANGLE_CHIR_FUNC_PREFIX + CustomTypeDefIdentifierWithoutPrefix(def) + MANGLE_CHIR_GENERIC_SUFFIX
+    return MANGLE_CHIR_FUNC_PREFIX + def.GetIdentifierWithoutPrefix() + MANGLE_CHIR_GENERIC_SUFFIX
 }
 
 public func GenerateWrapperClassInstOverrideFuncMangleName(def: ClassDef): String {
-    return MANGLE_CHIR_FUNC_PREFIX + CustomTypeDefIdentifierWithoutPrefix(def) + MANGLE_ABSTRACT_INST_PREFIX
+    return MANGLE_CHIR_FUNC_PREFIX + def.GetIdentifierWithoutPrefix() + MANGLE_ABSTRACT_INST_PREFIX
 }
