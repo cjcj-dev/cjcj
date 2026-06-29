@@ -11,11 +11,9 @@ import cangjie_compiler::sema.Desugar.DesugarBeforeTypeCheck as FaithfulDesugarB
 import cangjie_compiler::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
 import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
 import cangjie_compiler::meta_transformation.NativeMetaTransformPlugin
-import cangjie_compiler::option.OutputMode
 import cangjie_compiler::lex.Lexer as CangjieLexer
 import cangjie_compiler::lex.TokenKind as CangjieTokenKind
 import cangjie_compiler::lex.TokenKindValue
-import cangjie_compiler::utils.FileUtil
 import std.collection.*
 
 private class PendingMangledDecl {
@@ -612,21 +610,6 @@ public class CompilerInstance {
     }
 
     public func PerformCjoSaving(): Bool {
-        if (invocation.globalOptions.outputMode != OutputMode.STATIC_LIB &&
-            invocation.globalOptions.outputMode != OutputMode.SHARED_LIB) {
-            return true
-        }
-        if (srcPkgs.isEmpty()) {
-            return true
-        }
-        let pkg = srcPkgs[0]
-        let path = invocation.globalOptions.GenerateCachedPathName(pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
-        let packageDepInfo = if (depPackageInfo.isEmpty()) { "" } else { depPackageInfo[0] }
-        let data = SerializePackageToCjoFlatBuffer(pkg, packageDepInfo, invocation.globalOptions.enableCompileDebug,
-            invocation.globalOptions.optimizationLevel)
-        if (!FileUtil.WriteBufferToASTFile(path, data)) {
-            diag.Warn(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "failed to write CJO: " + path)
-        }
         return true
     }
 
