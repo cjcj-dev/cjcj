@@ -3,31 +3,126 @@ package cangjie_compiler::sema
 import std.collection.*
 import cangjie_compiler::ast.*
 
+private func WalkMacroCall(macrocall: Node, decl: Decl): Unit {
+    let walker = Walker(decl, visitPre: { curNode: Node =>
+        curNode.isInMacroCall = true
+        curNode.curMacroCall = macrocall
+        VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
+}
+
 public class Collector {
     public let decls: ArrayList<Decl> = ArrayList<Decl>()
     private let scopeManager: ScopeManager = ScopeManager()
+    private var enableMacroInLsp: Bool = false
 
-    public init() {}
+    public init(enableMacroInLsp!: Bool = false) {
+        this.enableMacroInLsp = enableMacroInLsp
+    }
 
     public func BuildSymbolTable(ctx: ASTContext, pkg: Package, buildTrie!: Bool = true): Unit {
         ctx.curPackage = pkg
         ctx.fullPackageName = pkg.fullPackageName
+        UpdatePosLimit(pkg)
         scopeManager.Reset()
         ctx.currentScopeLevel = 0u32
         ctx.currentMaxDepth = 0u32
         ctx.currentScopeName = TOPLEVEL_SCOPE_NAME
         AssignPackageScopes(ctx, pkg)
         let collector = this
+        let walkerBox = Box<Option<Walker>>(None)
         let walker = Walker(pkg, visitPre: { node: Node =>
+            if (node.IsExpr()) {
+                if (let Some(file) <- node.curFile) {
+                    if (file.TestAttr(Attribute.FROM_COMMON_PART)) {
+                        return VisitAction.SKIP_CHILDREN
+                    }
+                }
+            }
+            if (let Some(expr) <- (node as Expr)) {
+                if (expr.astKind != ASTKind.FOR_IN_EXPR && expr.astKind != ASTKind.SYNCHRONIZED_EXPR) {
+                    if (let Some(desugarExpr) <- expr.desugarExpr) {
+                        if (let Some(currentWalker) <- walkerBox.value) {
+                            let action = currentWalker.WalkNode(desugarExpr)
+                            if (action == VisitAction.STOP_NOW) {
+                                return action
+                            }
+                        }
+                    }
+                }
+            }
             if (let Some(lce) <- (node as LitConstExpr)) {
-                collector.CollectLitConstExpr(ctx, lce, buildTrie: buildTrie)
+                collector.CollectLitConstExpr(ctx, lce, walker: walkerBox.value, buildTrie: buildTrie)
+            } else if (let Some(macroDecl) <- (node as MacroExpandDecl)) {
+                if (let Some(currentWalker) <- walkerBox.value) {
+                    for (annotation in macroDecl.annotations) {
+                        let action = currentWalker.WalkNode(annotation)
+                        if (action == VisitAction.STOP_NOW) {
+                            return action
+                        }
+                    }
+                }
+                collector.AddSymbol(ctx, node, buildTrie: buildTrie)
+                collector.CollectMacroExpandDecl(macroDecl)
+            } else if (let Some(macroExpr) <- (node as MacroExpandExpr)) {
+                collector.AddSymbol(ctx, node, buildTrie: buildTrie)
+                collector.CollectMacroExpandExpr(macroExpr)
+            } else if (let Some(macroParam) <- (node as MacroExpandParam)) {
+                collector.AddSymbol(ctx, node, buildTrie: buildTrie)
+                collector.CollectMacroExpandParam(macroParam)
             } else {
                 collector.AddSymbol(ctx, node, buildTrie: buildTrie)
             }
             VisitAction.WALK_CHILDREN
-        })
+        }, visitPost: { node: Node =>
+            if (collector.enableMacroInLsp) {
+                if (let Some(file) <- (node as File)) {
+                    if (let Some(currentWalker) <- walkerBox.value) {
+                        for (macroCall in file.originalMacroCallNodes) {
+                            let action = currentWalker.WalkNode(macroCall)
+                            if (action == VisitAction.STOP_NOW) {
+                                return action
+                            }
+                            AddCurFile(macroCall, file: file)
+                        }
+                    }
+                }
+            }
+            VisitAction.KEEP_DECISION
+        }, walkExprDesugar: false)
+        walkerBox.value = Some(walker)
         let _ = walker.Walk()
         ctx.searcher.InvalidateCache()
+    }
+
+    public func UpdatePosLimit(pkg: Package): Unit {
+        let fileIdMax = Box<UInt64>(0u64)
+        let lineNumMax = Box<Int64>(0)
+        let columnNumMax = Box<Int64>(0)
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (node.begin.fileID > fileIdMax.value) {
+                fileIdMax.value = node.begin.fileID
+            }
+            if (node.end.fileID > fileIdMax.value) {
+                fileIdMax.value = node.end.fileID
+            }
+            if (node.begin.line > lineNumMax.value) {
+                lineNumMax.value = node.begin.line
+            }
+            if (node.end.line > lineNumMax.value) {
+                lineNumMax.value = node.end.line
+            }
+            if (node.begin.column > columnNumMax.value) {
+                columnNumMax.value = node.begin.column
+            }
+            if (node.end.column > columnNumMax.value) {
+                columnNumMax.value = node.end.column
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+        PosSearchApi.UpdatePosLimit(fileIdMax.value, lineNumMax.value, columnNumMax.value)
     }
 
     public func Collect(pkg: Package): Unit {
@@ -81,7 +176,8 @@ public class Collector {
         ctx.invertedIndex.Index(symbol, withTrie: buildTrie)
     }
 
-    private func CollectLitConstExpr(ctx: ASTContext, lce: LitConstExpr, buildTrie!: Bool = true): Unit {
+    private func CollectLitConstExpr(ctx: ASTContext, lce: LitConstExpr, walker!: Option<Walker> = None,
+        buildTrie!: Bool = true): Unit {
         if (let Some(refName) <- StringLiteralRefName(lce.kind)) {
             if (let None <- lce.ref) {
                 let refType = RefType()
@@ -93,7 +189,30 @@ public class Collector {
                 AddSymbol(ctx, refType, buildTrie: buildTrie)
             }
         }
+        if (let Some(siExpr) <- lce.siExpr) {
+            if (let Some(currentWalker) <- walker) {
+                let _ = currentWalker.WalkNode(siExpr)
+            }
+        }
         AddSymbol(ctx, lce, buildTrie: buildTrie)
+    }
+
+    private func CollectMacroExpandDecl(med: MacroExpandDecl): Unit {
+        if (let Some(decl) <- med.invocation.decl) {
+            WalkMacroCall(med, decl)
+        }
+    }
+
+    private func CollectMacroExpandExpr(mee: MacroExpandExpr): Unit {
+        if (let Some(decl) <- mee.invocation.decl) {
+            WalkMacroCall(mee, decl)
+        }
+    }
+
+    private func CollectMacroExpandParam(mep: MacroExpandParam): Unit {
+        if (let Some(decl) <- mep.invocation.decl) {
+            WalkMacroCall(mep, decl)
+        }
     }
 
     private func StringLiteralRefName(kind: LitConstKind): Option<String> {
@@ -134,6 +253,13 @@ public class Collector {
         while (idx < file.decls.size) {
             AssignNode(ctx, file.decls[idx])
             idx++
+        }
+        if (enableMacroInLsp) {
+            scopeManager.InitializeScope(ctx)
+            for (macroCall in file.originalMacroCallNodes) {
+                AssignNode(ctx, macroCall)
+            }
+            scopeManager.FinalizeScope(ctx)
         }
     }
 
@@ -638,6 +764,36 @@ public class Collector {
     }
 
     private func AssignDispatchedNode(ctx: ASTContext, node: Node): Bool {
+        if (let Some(macroDecl) <- (node as MacroExpandDecl)) {
+            for (annotation in macroDecl.annotations) {
+                AssignNode(ctx, annotation)
+            }
+            SetCurrentScope(ctx, macroDecl)
+            if (let Some(decl) <- macroDecl.invocation.decl) {
+                scopeManager.InitializeScope(ctx)
+                AssignNode(ctx, decl)
+                scopeManager.FinalizeScope(ctx)
+            }
+            return true
+        }
+        if (let Some(macroExpr) <- (node as MacroExpandExpr)) {
+            SetCurrentScope(ctx, macroExpr)
+            if (let Some(decl) <- macroExpr.invocation.decl) {
+                scopeManager.InitializeScope(ctx)
+                AssignNode(ctx, decl)
+                scopeManager.FinalizeScope(ctx)
+            }
+            return true
+        }
+        if (let Some(macroParam) <- (node as MacroExpandParam)) {
+            SetCurrentScope(ctx, macroParam)
+            if (let Some(decl) <- macroParam.invocation.decl) {
+                scopeManager.InitializeScope(ctx)
+                AssignNode(ctx, decl)
+                scopeManager.FinalizeScope(ctx)
+            }
+            return true
+        }
         if (let Some(classDecl) <- (node as ClassDecl)) {
             AssignClassDecl(ctx, classDecl)
             return true
@@ -750,6 +906,15 @@ public class Collector {
         }
         if (let Some(file) <- (node as File)) {
             return if (!file.fileName.isEmpty()) { file.fileName } else { file.filePath }
+        }
+        if (let Some(macroDecl) <- (node as MacroExpandDecl)) {
+            return macroDecl.invocation.macroCallDiagInfo.fullName
+        }
+        if (let Some(macroExpr) <- (node as MacroExpandExpr)) {
+            return macroExpr.invocation.macroCallDiagInfo.fullName
+        }
+        if (let Some(macroParam) <- (node as MacroExpandParam)) {
+            return macroParam.invocation.macroCallDiagInfo.fullName
         }
         if (let Some(decl) <- (node as Decl)) {
             return decl.identifier.Val()

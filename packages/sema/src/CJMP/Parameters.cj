@@ -7,16 +7,7 @@ import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
-
-foreign {
-    func abort(): Unit
-}
-
-private func AbortCJMPDefaultArgumentPropagation(): Unit {
-    unsafe {
-        abort()
-    }
-}
+import cangjie_compiler::utils.CJC_ASSERT_WITH_MSG
 
 private func ToBasicPosition(pos: Position): BasicPosition {
     return BasicPosition(pos.fileID, pos.line, pos.column)
@@ -43,31 +34,18 @@ private func HasDefaultArgument(param: FuncParam): Bool {
 }
 
 private func CloneDefaultArgument(from: FuncParam, to: FuncParam, toFunc: FuncDecl): Unit {
-    if (to.desugarDecl.isSome() || to.assignment.isSome()) {
-        AbortCJMPDefaultArgumentPropagation()
-        return
-    }
-    if (let None <- from.desugarDecl) {
-        AbortCJMPDefaultArgumentPropagation()
-        return
-    }
+    CJC_ASSERT_WITH_MSG(to.desugarDecl.isNone(), "The specific decl shouldn't have desugarDecl")
+    CJC_ASSERT_WITH_MSG(to.assignment.isNone(), "The specific decl shouldn't have assignment expression")
+    CJC_ASSERT_WITH_MSG(from.desugarDecl.isSome(), "The common decl must have desugarDecl")
     let defaultDecl = from.desugarDecl.getOrThrow()
-    if (let Some(clonedDecl) <- (ASTCloner.Clone(defaultDecl) as FuncDecl)) {
-        clonedDecl.begin = defaultDecl.begin
-        clonedDecl.end = defaultDecl.end
-        clonedDecl.outerDecl = toFunc.outerDecl
-        to.desugarDecl = clonedDecl
-    } else {
-        AbortCJMPDefaultArgumentPropagation()
-        return
-    }
+    let clonedDecl = (ASTCloner.Clone(defaultDecl) as FuncDecl).getOrThrow()
+    clonedDecl.begin = defaultDecl.begin
+    clonedDecl.end = defaultDecl.end
+    clonedDecl.outerDecl = toFunc.outerDecl
+    to.desugarDecl = clonedDecl
     if (let Some(assignment) <- from.assignment) {
-        if (let Some(clonedAssignment) <- (ASTCloner.Clone(assignment) as Expr)) {
-            to.assignment = clonedAssignment
-        } else {
-            AbortCJMPDefaultArgumentPropagation()
-            return
-        }
+        let clonedAssignment = (ASTCloner.Clone(assignment) as Expr).getOrThrow()
+        to.assignment = clonedAssignment
     }
     to.EnableAttr(Attribute.HAS_INITIAL)
 }
@@ -196,10 +174,8 @@ extend MPTypeCheckerImpl {
 
     public func PropagateDefaultArguments(commonParams: FuncParamList, specificParams: FuncParamList,
         specificFunc: FuncDecl): Unit {
-        if (commonParams.params.size != specificParams.params.size) {
-            AbortCJMPDefaultArgumentPropagation()
-            return
-        }
+        CJC_ASSERT_WITH_MSG(commonParams.params.size == specificParams.params.size,
+            "Matched param lists must have the same size")
         for (idx in 0..commonParams.params.size) {
             let specificParam = specificParams.params[idx]
             if (!specificParam.isNamedParam) {

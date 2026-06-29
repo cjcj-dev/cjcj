@@ -44,21 +44,24 @@ public class Walker {
     private var id: UInt32 = 0u32
     private var visitPre: Option<(Node) -> VisitAction> = None
     private var visitPost: Option<(Node) -> VisitAction> = None
+    private var walkExprDesugar: Bool = true
 
     public init(node: Node, visitPre!: Option<(Node) -> VisitAction> = None,
-        visitPost!: Option<(Node) -> VisitAction> = None) {
+        visitPost!: Option<(Node) -> VisitAction> = None, walkExprDesugar!: Bool = true) {
         root = node
         id = GetNextWalkerID()
         this.visitPre = visitPre
         this.visitPost = visitPost
+        this.walkExprDesugar = walkExprDesugar
     }
 
     public init(node: Node, walkerID: UInt32, visitPre!: Option<(Node) -> VisitAction> = None,
-        visitPost!: Option<(Node) -> VisitAction> = None) {
+        visitPost!: Option<(Node) -> VisitAction> = None, walkExprDesugar!: Bool = true) {
         root = node
         id = walkerID
         this.visitPre = visitPre
         this.visitPost = visitPost
+        this.walkExprDesugar = walkExprDesugar
     }
 
     public func Walk(): VisitAction {
@@ -142,7 +145,7 @@ public class Walker {
 
     public func WalkChildren(curNode: Node): VisitAction {
         // Base-class child walks mirror the leading Is<Expr>/Is<Decl> handling in C++ Walker.cpp:60-75.
-        if (let Some(expr) <- (curNode as Expr)) {
+        if (walkExprDesugar && (let Some(expr) <- (curNode as Expr))) {
             if (stopIf(walkExprOption(expr.desugarExpr))) { return VisitAction.STOP_NOW }
         } else if (let Some(decl) <- (curNode as Decl)) {
             for (annotation in decl.annotations) {

@@ -491,7 +491,8 @@ public class TypeChecker {
         AddCurFile(pkg)
         AddDefaultFunction(pkg)
         AddDefaultParamFunctions(pkg)
-        Collector().BuildSymbolTable(ctx, pkg, buildTrie: false)
+        let enableMacroInLSP = if (let Some(instance) <- ci) { instance.globalOptions.enableMacroInLSP } else { false }
+        Collector(enableMacroInLsp: enableMacroInLSP).BuildSymbolTable(ctx, pkg, buildTrie: false)
         MarkOutermostBinaryExpressions(pkg)
         impl.WarmupCache(ctx)
     }

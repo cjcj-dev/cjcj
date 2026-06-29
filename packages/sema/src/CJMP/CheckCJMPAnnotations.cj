@@ -304,7 +304,3 @@ extend MPTypeCheckerImpl {
         PropagateAttributeAnnotations(common, specific)
     }
 }
-
-public func SelfhostPortStatus_CJMP_CheckCJMPAnnotations(): Bool {
-    return true
-}
