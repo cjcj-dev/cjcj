@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.AfterTypeCheck.IsNeedRuntimeCheck
+import cangjie_compiler::utils.CJC_ASSERT
 
 private class GenericInstantiationRecord {
     public var genericDecl: Decl
@@ -272,14 +273,12 @@ private func HasJavaTargetAttr(target: Decl): Bool {
 
 public class GenericInstantiationManagerImpl {
     private var ci: CompilerInstance
-    private var context: GenericInstantiationContext
     private let instantiations: ArrayList<GenericInstantiationRecord> = ArrayList<GenericInstantiationRecord>()
     private let structContext: ArrayList<Decl> = ArrayList<Decl>()
     private let usedSrcImportedDecls: ArrayList<Decl> = ArrayList<Decl>()
 
     public init(ci: CompilerInstance) {
         this.ci = ci
-        context = GenericInstantiationContext(ci.typeManager)
         SetOptLevel(ci.globalOptions)
     }
 
@@ -340,7 +339,6 @@ public class GenericInstantiationManagerImpl {
         instantiations.clear()
         structContext.clear()
         usedSrcImportedDecls.clear()
-        context.Clear()
         PartialInstantiation.ResetGlobalMap()
     }
 
@@ -368,7 +366,11 @@ public class GenericInstantiationManagerImpl {
     }
 
     public func ConstructGenericInfo(decl: Decl, instTys: ArrayList<Ty>): GenericInfo {
-        return context.ConstructGenericInfo(decl, instTys)
+        CJC_ASSERT(decl.TestAttr(Attribute.GENERIC))
+        let gTyToTyMap = GenerateTypeMapping(decl, instTys)
+        CJC_ASSERT(!gTyToTyMap.IsEmpty())
+        let genericInfo = GenericInfo(Some(decl), gTyToTyMap)
+        return genericInfo
     }
 
     public func FindInCache(info: GenericInfo): Option<Decl> {

@@ -128,7 +128,7 @@ private func RefineEnumSugarTargetTy(typeManager: TypeManager, targetTy: Ty, tar
                     }
                 }
             }
-            if (targetEnumTy.IsCoreOptionType() && targetEnumTy.typeArgs.size == 1) {
+            if (targetEnumTy.IsCoreOptionType()) {
                 currentTy = targetEnumTy.typeArgs[0]
             } else {
                 return None

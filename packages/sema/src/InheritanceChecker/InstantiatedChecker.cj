@@ -129,6 +129,14 @@ private func AddVisibleExtendForInstantiation(
         return
     }
     if (IsVisibleGenericExtendForInstantiation(checker, extendDecl, instTys)) {
+        var idx: Int64 = 0
+        while (idx < out.size) {
+            if (InheritanceDeclLessByPosition(extendDecl, out[idx])) {
+                out.add(extendDecl, at: idx)
+                return
+            }
+            idx++
+        }
         out.add(extendDecl)
     }
 }
@@ -144,11 +152,6 @@ private func GetVisibleExtendsForInstantiation(
     }
     if (let Some(declTy) <- decl.GetTy()) {
         for (extendDecl in checker.typeManager.GetAllExtendsByTy(declTy)) {
-            AddVisibleExtendForInstantiation(checker, out, extendDecl, instTys)
-        }
-    }
-    if (let Some(inheritable) <- (decl as InheritableDecl)) {
-        for (extendDecl in checker.typeManager.GetDeclExtends(inheritable)) {
             AddVisibleExtendForInstantiation(checker, out, extendDecl, instTys)
         }
     }
@@ -596,8 +599,4 @@ func DiagnoseForInstantiatedMemberImpl(
             }
         }
     }
-}
-
-public func SelfhostPortStatus_InheritanceChecker_InstantiatedChecker(): Bool {
-    return true
 }
