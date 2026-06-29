@@ -2350,28 +2350,26 @@ public class TypeChecker {
         return None
     }
 
-    private func DiagnoseNoCoreObjectForSpawn(expr: SpawnExpr): Unit {
-        if (let Some(diagValue) <- impl.diag) {
-            let builder = diagValue.Diagnose(expr.begin, expr.end, BasicDiagKind.sema_no_core_object)
-            builder.Emit()
-        }
-    }
-
     private func SynthesizeSpawnExpr(ctx: ASTContext, expr: SpawnExpr): Ty {
+        var isWellTyped = true
         if (let Some(arg) <- expr.arg) {
             let _ = Synthesize(ctx, arg)
+            isWellTyped = CheckSpawnArgValid(impl.typeManager, arg,
+                threadContextTy: LookupCoreThreadContextTyForSpawn(ctx), diag: impl.diag) && isWellTyped
         }
         if (let Some(task) <- expr.task) {
-            let _ = Synthesize(ctx, task)
+            let taskTy = Synthesize(ctx, task)
+            isWellTyped = (Ty.IsTyCorrect(taskTy) && taskTy.IsFunc()) && isWellTyped
+        } else {
+            isWellTyped = false
         }
-        let futureClass = LookupCoreFutureForSpawn(ctx)
-        if (let None <- futureClass) {
-            DiagnoseNoCoreObjectForSpawn(expr)
+        if (!isWellTyped) {
             expr.SetTy(TypeManager.GetInvalidTy())
             return TypeManager.GetInvalidTy()
         }
+        let futureClass = LookupCoreFutureForSpawn(ctx)
         let spawnTy = SynSpawnExpr(impl.typeManager, expr, futureClass: futureClass,
-            threadContextTy: LookupCoreThreadContextTyForSpawn(ctx))
+            threadContextTy: LookupCoreThreadContextTyForSpawn(ctx), diag: impl.diag)
         return FinishSynthesize(ctx, expr, spawnTy)
     }
 
@@ -2400,7 +2398,7 @@ public class TypeChecker {
             if (let Some(arg) <- expr.arg) {
                 let _ = Synthesize(ctx, arg)
                 isWellTyped = CheckSpawnArgValid(impl.typeManager, arg,
-                    threadContextTy: LookupCoreThreadContextTyForSpawn(ctx)) && isWellTyped
+                    threadContextTy: LookupCoreThreadContextTyForSpawn(ctx), diag: impl.diag) && isWellTyped
             }
             if (let Some(task) <- expr.task) {
                 let funcTy = impl.typeManager.GetFunctionTy(Array<Ty>(), fuTy.typeArgs[0])
@@ -2414,6 +2412,16 @@ public class TypeChecker {
             }
             expr.SetTy(fuTy)
             return true
+        }
+        if (!TypeManager.IsCoreFutureType(target)) {
+            if (let None <- LookupCoreFutureForSpawn(ctx)) {
+                if (let Some(diagValue) <- impl.diag) {
+                    let builder = diagValue.Diagnose(expr.begin, expr.end, BasicDiagKind.sema_no_core_object)
+                    builder.Emit()
+                }
+                expr.SetTy(TypeManager.GetInvalidTy())
+                return false
+            }
         }
         let synTy = SynthesizeSpawnExpr(ctx, expr)
         if (Ty.IsTyCorrect(synTy) &&
@@ -3549,6 +3557,17 @@ public class TypeChecker {
         if (impl.typeManager.GetUnsolvedTyVars().isEmpty() && ctx.IsSynSkippedForCorrectTy(expr)) {
             return expr.GetTy() ?? TypeManager.GetInvalidTy()
         }
+        if (let Some(syncExpr) <- (expr as SynchronizedExpr)) {
+            var lockTy: Option<Ty> = None
+            if (let Some(lockDecl) <- lookupResolvedPackageDecl(ctx, "std.sync", "Lock")) {
+                lockTy = lockDecl.GetTy()
+            }
+            return FinishSynthesize(ctx, syncExpr, SynSyncExpr(impl.typeManager, syncExpr, lockTy: lockTy,
+                diag: impl.diag,
+                checker: Some({ targetTy: Ty, mutexExpr: Expr => Check(ctx, targetTy, mutexExpr) }),
+                synthesizer: Some({ node: Node => SynthesizeNode(ctx, SynPos.EXPR_ARG, node) }),
+                trySynthesizer: Some({ tryExpr: TryExpr => Synthesize(ctx, tryExpr) })))
+        }
         if (let Some(desugar) <- expr.desugarExpr) {
             let _ = Synthesize(ctx, pos, desugar)
         }
@@ -3628,6 +3647,13 @@ public class TypeChecker {
         }
         if (let Some(tryExpr) <- (expr as TryExpr)) {
             return SynthesizeTryExpr(ctx, tryExpr)
+        }
+        if (let Some(resumeExpr) <- (expr as ResumeExpr)) {
+            return FinishSynthesize(ctx, resumeExpr, SynResumeExpr(impl.typeManager, resumeExpr,
+                exceptionTy: LookupCoreTy(ctx, "Exception"), errorTy: LookupCoreTy(ctx, "Error"),
+                synthesizer: Some({ innerExpr: Expr => Synthesize(ctx, SynPos.EXPR_ARG, innerExpr) }),
+                checker: Some({ targetTy: Ty, innerExpr2: Expr => Check(ctx, targetTy, innerExpr2) }),
+                diag: impl.diag))
         }
         if (let Some(typeConv) <- (expr as TypeConvExpr)) {
             SynthesizeTypeNode(ctx, typeConv.typeNode)
@@ -3967,6 +3993,17 @@ public class TypeChecker {
         if (let Some(tryExpr) <- (expr as TryExpr)) {
             SynthesizeTryExprChildren(ctx, tryExpr)
             return FinishCheck(ctx, tryExpr, ChkTryExpr(impl.typeManager, target, tryExpr))
+        }
+        if (let Some(syncExpr) <- (expr as SynchronizedExpr)) {
+            var lockTy: Option<Ty> = None
+            if (let Some(lockDecl) <- lookupResolvedPackageDecl(ctx, "std.sync", "Lock")) {
+                lockTy = lockDecl.GetTy()
+            }
+            return FinishCheck(ctx, syncExpr, ChkSyncExpr(impl.typeManager, syncExpr, lockTy: lockTy,
+                targetTy: Some(target), diag: impl.diag,
+                checker: Some({ targetTy2: Ty, mutexExpr: Expr => Check(ctx, targetTy2, mutexExpr) }),
+                synthesizer: Some({ node: Node => SynthesizeNode(ctx, SynPos.EXPR_ARG, node) }),
+                tryChecker: Some({ targetTy3: Ty, tryExpr2: TryExpr => Check(ctx, targetTy3, tryExpr2) })))
         }
         if (let Some(arrayExpr) <- (expr as ArrayExpr)) {
             SynthesizeTypeNode(ctx, arrayExpr.typeNode)
