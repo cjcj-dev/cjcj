@@ -32,10 +32,6 @@ private class BoolBox {
 
 private let inoutUseCache: ArrayList<InoutUseCacheEntry> = ArrayList<InoutUseCacheEntry>()
 
-private enum TypeCheckAccessScopeSymbolKind {
-    | FUNC_LIKE
-}
-
 public func MaybeStruct(ty: Ty): Bool {
     if (!Ty.IsTyCorrect(ty)) {
         return false
@@ -134,78 +130,6 @@ private func TypeCheckAccessDeclIdentifierRange(decl: Decl): BasicRange {
         return TypeCheckAccessRange(decl)
     }
     return MakeRange(decl.identifier.Begin(), decl.identifier.End())
-}
-
-private func TypeCheckAccessSymbolSatisfies(kind: TypeCheckAccessScopeSymbolKind, symbol: Symbol): Bool {
-    if (let None <- symbol.node) {
-        return false
-    }
-    let node = symbol.node.getOrThrow()
-    return match (kind) {
-        case TypeCheckAccessScopeSymbolKind.FUNC_LIKE => node.IsFuncLike()
-    }
-}
-
-private func TypeCheckAccessGetCurSymbolByKind(
-    ctx: ASTContext,
-    kind: TypeCheckAccessScopeSymbolKind,
-    scopeName: String
-): Option<Symbol> {
-    var scopeGateName = GetScopeGateName(scopeName)
-    while (!scopeGateName.isEmpty()) {
-        if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
-            if (TypeCheckAccessSymbolSatisfies(kind, symbol)) {
-                return Some(symbol)
-            }
-        }
-        scopeGateName = GetScopeGateName(scopeGateName)
-    }
-    return None
-}
-
-private func TypeCheckAccessGetOutMostSymbol(
-    ctx: ASTContext,
-    kind: TypeCheckAccessScopeSymbolKind,
-    scopeName: String
-): Option<Symbol> {
-    var currentOpt = TypeCheckAccessGetCurSymbolByKind(ctx, kind, scopeName)
-    var insideOpt = currentOpt
-    while (let Some(current) <- currentOpt) {
-        if (current.scopeName.isEmpty()) {
-            break
-        }
-        insideOpt = Some(current)
-        let nextOpt = TypeCheckAccessGetCurSymbolByKind(ctx, kind, current.scopeName)
-        if (let Some(nextSymbol) <- nextOpt) {
-            if (SameSymbol(current, nextSymbol)) {
-                break
-            }
-        }
-        currentOpt = nextOpt
-    }
-    return insideOpt
-}
-
-private func TypeCheckAccessGetCurOuterDeclOfScopeLevel(
-    ctx: ASTContext,
-    checkNode: Node,
-    scopeLevel: UInt32
-): Option<Symbol> {
-    if (checkNode.scopeLevel < scopeLevel) {
-        return None
-    }
-    var scopeGateName = GetScopeGateName(checkNode.scopeName)
-    while (!scopeGateName.isEmpty()) {
-        if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
-            if (symbol.scopeLevel == scopeLevel) {
-                return Some(symbol)
-            }
-            scopeGateName = GetScopeGateName(symbol.scopeName)
-        } else {
-            return None
-        }
-    }
-    return None
 }
 
 public func SearchTargetDeclForProtectMember(typeManager: TypeManager, curComposite: Node,
@@ -591,12 +515,10 @@ private func CheckMutationInStruct(diag: BasicDiagnosticEngine, ctx: ASTContext,
     if (target.astKind != ASTKind.VAR_DECL || target.TestAttr(Attribute.STATIC)) {
         return
     }
-    if (let None <- TypeCheckAccessGetOutMostSymbol(
-        ctx, TypeCheckAccessScopeSymbolKind.FUNC_LIKE, expr.scopeName)) {
+    if (let None <- ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC_LIKE, expr.scopeName)) {
         return
     }
-    let outFuncSymbol = TypeCheckAccessGetOutMostSymbol(
-        ctx, TypeCheckAccessScopeSymbolKind.FUNC_LIKE, expr.scopeName).getOrThrow()
+    let outFuncSymbol = ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC_LIKE, expr.scopeName).getOrThrow()
     if (let None <- outFuncSymbol.node) {
         return
     }
@@ -604,10 +526,10 @@ private func CheckMutationInStruct(diag: BasicDiagnosticEngine, ctx: ASTContext,
     if (outFuncNode.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.MUT)) {
         return
     }
-    if (let None <- TypeCheckAccessGetCurOuterDeclOfScopeLevel(ctx, expr, 0u32)) {
+    if (let None <- ScopeManager.GetCurOuterDeclOfScopeLevelX(ctx, expr, 0u32)) {
         return
     }
-    let outDeclSymbol = TypeCheckAccessGetCurOuterDeclOfScopeLevel(ctx, expr, 0u32).getOrThrow()
+    let outDeclSymbol = ScopeManager.GetCurOuterDeclOfScopeLevelX(ctx, expr, 0u32).getOrThrow()
     if (let None <- outDeclSymbol.node) {
         return
     }

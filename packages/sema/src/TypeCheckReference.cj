@@ -327,69 +327,8 @@ private func TypeCheckReferenceNeedPoint(str: String): Bool {
     return (last >= b'a' && last <= b'z') || (last >= b'A' && last <= b'Z') || (last >= b'0' && last <= b'9')
 }
 
-private enum TypeCheckReferenceScopeSymbolKind {
-    | FUNC
-    | FUNC_LIKE
-    | STRUCT
-    | TOPLEVEL
-}
-
-private func TypeCheckReferenceSymbolSatisfies(kind: TypeCheckReferenceScopeSymbolKind, symbol: Symbol): Bool {
-    if (let None <- symbol.node) {
-        return false
-    }
-    let node = symbol.node.getOrThrow()
-    return match (kind) {
-        case TypeCheckReferenceScopeSymbolKind.FUNC => node.IsFunc()
-        case TypeCheckReferenceScopeSymbolKind.FUNC_LIKE => node.IsFuncLike()
-        case TypeCheckReferenceScopeSymbolKind.STRUCT => node.IsNominalDecl()
-        case TypeCheckReferenceScopeSymbolKind.TOPLEVEL => symbol.scopeLevel == 0u32
-    }
-}
-
-private func TypeCheckReferenceGetCurSymbolByKind(
-    ctx: ASTContext,
-    kind: TypeCheckReferenceScopeSymbolKind,
-    scopeName: String
-): Option<Symbol> {
-    var scopeGateName = GetScopeGateName(scopeName)
-    while (!scopeGateName.isEmpty()) {
-        if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
-            if (TypeCheckReferenceSymbolSatisfies(kind, symbol)) {
-                return Some(symbol)
-            }
-        }
-        scopeGateName = GetScopeGateName(scopeGateName)
-    }
-    return None
-}
-
-private func TypeCheckReferenceGetOutMostSymbol(
-    ctx: ASTContext,
-    kind: TypeCheckReferenceScopeSymbolKind,
-    scopeName: String
-): Option<Symbol> {
-    var currentOpt = TypeCheckReferenceGetCurSymbolByKind(ctx, kind, scopeName)
-    var insideOpt = currentOpt
-    while (let Some(current) <- currentOpt) {
-        if (current.scopeName.isEmpty()) {
-            break
-        }
-        insideOpt = Some(current)
-        let nextOpt = TypeCheckReferenceGetCurSymbolByKind(ctx, kind, current.scopeName)
-        if (let Some(nextSymbol) <- nextOpt) {
-            if (SameSymbol(current, nextSymbol)) {
-                break
-            }
-        }
-        currentOpt = nextOpt
-    }
-    return insideOpt
-}
-
 private func TypeCheckReferenceGetCurInheritableDecl(ctx: ASTContext, scopeName: String): Option<InheritableDecl> {
-    if (let Some(symbol) <- TypeCheckReferenceGetCurSymbolByKind(
-        ctx, TypeCheckReferenceScopeSymbolKind.STRUCT, scopeName)) {
+    if (let Some(symbol) <- ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, scopeName)) {
         if (let Some(node) <- symbol.node) {
             if (let Some(decl) <- (node as InheritableDecl)) {
                 return Some(decl)
@@ -419,8 +358,7 @@ private func TypeCheckReferenceGetFuncBodyOfNode(node: Node): Option<FuncBody> {
 }
 
 private func TypeCheckReferenceGetCurFuncBody(ctx: ASTContext, scopeName: String): Option<FuncBody> {
-    if (let Some(symbol) <- TypeCheckReferenceGetCurSymbolByKind(
-        ctx, TypeCheckReferenceScopeSymbolKind.FUNC_LIKE, scopeName)) {
+    if (let Some(symbol) <- ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, scopeName)) {
         if (let Some(node) <- symbol.node) {
             return TypeCheckReferenceGetFuncBodyOfNode(node)
         }
@@ -428,31 +366,8 @@ private func TypeCheckReferenceGetCurFuncBody(ctx: ASTContext, scopeName: String
     return None
 }
 
-private func TypeCheckReferenceGetCurOuterDeclOfScopeLevel(
-    ctx: ASTContext,
-    checkNode: Node,
-    scopeLevel: UInt32
-): Option<Symbol> {
-    if (checkNode.scopeLevel < scopeLevel) {
-        return None
-    }
-    var scopeGateName = GetScopeGateName(checkNode.scopeName)
-    while (!scopeGateName.isEmpty()) {
-        if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
-            if (symbol.scopeLevel == scopeLevel) {
-                return Some(symbol)
-            }
-            scopeGateName = GetScopeGateName(symbol.scopeName)
-        } else {
-            return None
-        }
-    }
-    return None
-}
-
 private func TypeCheckReferenceIsInCFunc(ctx: ASTContext, re: RefExpr): Bool {
-    var symbolOpt = TypeCheckReferenceGetCurSymbolByKind(
-        ctx, TypeCheckReferenceScopeSymbolKind.FUNC_LIKE, re.scopeName)
+    var symbolOpt = ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, re.scopeName)
     while (let Some(symbol) <- symbolOpt) {
         if (let Some(node) <- symbol.node) {
             if (let Some(lambdaExpr) <- (node as LambdaExpr)) {
@@ -466,14 +381,7 @@ private func TypeCheckReferenceIsInCFunc(ctx: ASTContext, re: RefExpr): Bool {
         if (symbol.scopeName.isEmpty()) {
             break
         }
-        let nextOpt = TypeCheckReferenceGetCurSymbolByKind(
-            ctx, TypeCheckReferenceScopeSymbolKind.FUNC_LIKE, symbol.scopeName)
-        if (let Some(nextSymbol) <- nextOpt) {
-            if (SameSymbol(symbol, nextSymbol)) {
-                break
-            }
-        }
-        symbolOpt = nextOpt
+        symbolOpt = ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, symbol.scopeName)
     }
     return false
 }
@@ -490,12 +398,10 @@ private func TypeCheckReferenceCheckMutationInStruct(
     if (target.astKind != ASTKind.VAR_DECL || target.TestAttr(Attribute.STATIC)) {
         return
     }
-    if (let None <- TypeCheckReferenceGetOutMostSymbol(
-        ctx, TypeCheckReferenceScopeSymbolKind.FUNC_LIKE, expr.scopeName)) {
+    if (let None <- ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC_LIKE, expr.scopeName)) {
         return
     }
-    let outFuncSymbol = TypeCheckReferenceGetOutMostSymbol(
-        ctx, TypeCheckReferenceScopeSymbolKind.FUNC_LIKE, expr.scopeName).getOrThrow()
+    let outFuncSymbol = ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC_LIKE, expr.scopeName).getOrThrow()
     if (let None <- outFuncSymbol.node) {
         return
     }
@@ -503,10 +409,10 @@ private func TypeCheckReferenceCheckMutationInStruct(
     if (outFuncNode.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.MUT)) {
         return
     }
-    if (let None <- TypeCheckReferenceGetCurOuterDeclOfScopeLevel(ctx, expr, 0u32)) {
+    if (let None <- ScopeManager.GetCurOuterDeclOfScopeLevelX(ctx, expr, 0u32)) {
         return
     }
-    let outDeclSymbol = TypeCheckReferenceGetCurOuterDeclOfScopeLevel(ctx, expr, 0u32).getOrThrow()
+    let outDeclSymbol = ScopeManager.GetCurOuterDeclOfScopeLevelX(ctx, expr, 0u32).getOrThrow()
     if (let None <- outDeclSymbol.node) {
         return
     }
@@ -1229,8 +1135,7 @@ private func TypeCheckReferenceCheckUsageOfThis(
         }
     }
 
-    let outMostFuncSymbolOpt = TypeCheckReferenceGetOutMostSymbol(
-        ctx, TypeCheckReferenceScopeSymbolKind.FUNC_LIKE, re.scopeName)
+    let outMostFuncSymbolOpt = ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC_LIKE, re.scopeName)
     var outMostFuncOpt: Option<FuncDecl> = None
     if (let Some(outMostFuncSymbol) <- outMostFuncSymbolOpt) {
         if (let Some(outMostNode) <- outMostFuncSymbol.node) {
@@ -1474,18 +1379,14 @@ private func TypeCheckReferenceCheckIllegalMemberHelper(
     if (!isInstanceMember) {
         return
     }
-    if (let None <- TypeCheckReferenceGetCurSymbolByKind(
-        ctx, TypeCheckReferenceScopeSymbolKind.STRUCT, nre.scopeName)) {
+    if (let None <- ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, nre.scopeName)) {
         return
     }
-    if (let None <- TypeCheckReferenceGetCurSymbolByKind(
-        ctx, TypeCheckReferenceScopeSymbolKind.STRUCT, target.scopeName)) {
+    if (let None <- ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, target.scopeName)) {
         return
     }
-    let exprStruct = TypeCheckReferenceGetCurSymbolByKind(
-        ctx, TypeCheckReferenceScopeSymbolKind.STRUCT, nre.scopeName).getOrThrow()
-    let declStruct = TypeCheckReferenceGetCurSymbolByKind(
-        ctx, TypeCheckReferenceScopeSymbolKind.STRUCT, target.scopeName).getOrThrow()
+    let exprStruct = ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, nre.scopeName).getOrThrow()
+    let declStruct = ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, target.scopeName).getOrThrow()
     if (SameSymbol(exprStruct, declStruct) && reportThis) {
         TypeCheckReferenceEmitCtorIllegalMemberDiagnostic(
             diag,

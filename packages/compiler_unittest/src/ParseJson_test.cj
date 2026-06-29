@@ -5,7 +5,7 @@ import std.unittest.testmacro.*
 import cangjie_compiler::sema.Plugin.*
 
 private func Parse(json: String): JsonObject {
-    return ParseJsonObject(JsonCursor(), json.toArray())
+    return ParseJsonObject(json.toArray())
 }
 
 @Test

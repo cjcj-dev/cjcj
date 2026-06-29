@@ -39,14 +39,6 @@ extend StringMod <: Equatable<StringMod> {
     }
 }
 
-public class JsonCursor {
-    public var pos: Int64
-
-    public init(pos!: Int64 = 0) {
-        this.pos = pos
-    }
-}
-
 private func CountBackslashesBefore(pos: Int64, input: Array<UInt8>): Int64 {
     var count: Int64 = 0
     var cur = pos
@@ -77,43 +69,43 @@ private func AppendEscapedByte(builder: StringBuilder, byte: UInt8): Unit {
     }
 }
 
-public func ParseJsonString(cursor: JsonCursor, input: Array<UInt8>): String {
-    if (cursor.pos >= input.size || !IsNonEscapedChar(cursor.pos, input, b'"')) {
+public func ParseJsonString(pos: Array<Int64>, input: Array<UInt8>): String {
+    if (pos[0] >= input.size || !IsNonEscapedChar(pos[0], input, b'"')) {
         return ""
     }
-    cursor.pos++
+    pos[0] = pos[0] + 1
     let result = StringBuilder()
-    while (cursor.pos < input.size && !IsNonEscapedChar(cursor.pos, input, b'"')) {
-        if (input[cursor.pos] == b'\\' && cursor.pos + 1 < input.size) {
-            cursor.pos++
-            AppendEscapedByte(result, input[cursor.pos])
+    while (pos[0] < input.size && !IsNonEscapedChar(pos[0], input, b'"')) {
+        if (input[pos[0]] == b'\\' && pos[0] + 1 < input.size) {
+            pos[0] = pos[0] + 1
+            AppendEscapedByte(result, input[pos[0]])
         } else {
-            result.append(String.fromUtf8([input[cursor.pos]]))
+            result.append(String.fromUtf8([input[pos[0]]]))
         }
-        cursor.pos++
+        pos[0] = pos[0] + 1
     }
     return result.toString()
 }
 
-public func ParseJsonNumber(cursor: JsonCursor, input: Array<UInt8>): UInt64 {
-    if (cursor.pos >= input.size || input[cursor.pos] < b'0' || input[cursor.pos] > b'9') {
+public func ParseJsonNumber(pos: Array<Int64>, input: Array<UInt8>): UInt64 {
+    if (pos[0] >= input.size || input[pos[0]] < b'0' || input[pos[0]] > b'9') {
         return 0u64
     }
     var value: UInt64 = 0u64
     var overflow = false
     var parsed = false
-    while (cursor.pos < input.size && input[cursor.pos] >= b'0' && input[cursor.pos] <= b'9') {
-        let digit = UInt64(input[cursor.pos] - b'0')
+    while (pos[0] < input.size && input[pos[0]] >= b'0' && input[pos[0]] <= b'9') {
+        let digit = UInt64(input[pos[0]] - b'0')
         if (value > UInt64.Max / 10u64 || (value == UInt64.Max / 10u64 && digit > UInt64.Max % 10u64)) {
             overflow = true
         } else if (!overflow) {
             value = value * 10u64 + digit
         }
         parsed = true
-        cursor.pos++
+        pos[0] = pos[0] + 1
     }
     if (parsed) {
-        cursor.pos--
+        pos[0] = pos[0] - 1
     }
     return if (overflow) { 0u64 } else { value }
 }
@@ -125,86 +117,88 @@ private func LastPair(root: JsonObject): JsonPair {
     return root.pairs[root.pairs.size - 1]
 }
 
-public func ParseJsonArray(cursor: JsonCursor, input: Array<UInt8>, value: JsonPair): Unit {
-    if (cursor.pos >= input.size || !IsNonEscapedChar(cursor.pos, input, b'[')) {
+public func ParseJsonArray(pos: Array<Int64>, input: Array<UInt8>, value: Option<JsonPair>): Unit {
+    if (pos[0] >= input.size || !IsNonEscapedChar(pos[0], input, b'[') || (let None <- value)) {
         return
     }
-    cursor.pos++
-    while (cursor.pos < input.size) {
-        if (input[cursor.pos] == b' ' || input[cursor.pos] == b'\n') {
-            cursor.pos++
+    let valuePair = value.getOrThrow()
+    pos[0] = pos[0] + 1
+    while (pos[0] < input.size) {
+        if (input[pos[0]] == b' ' || input[pos[0]] == b'\n') {
+            pos[0] = pos[0] + 1
             continue
         }
-        if (IsNonEscapedChar(cursor.pos, input, b'"')) {
-            value.valueStr.add(ParseJsonString(cursor, input))
+        if (IsNonEscapedChar(pos[0], input, b'"')) {
+            valuePair.valueStr.add(ParseJsonString(pos, input))
         }
-        if (IsNonEscapedChar(cursor.pos, input, b'{')) {
-            value.valueObj.add(ParseJsonObject(cursor, input))
+        if (IsNonEscapedChar(pos[0], input, b'{')) {
+            valuePair.valueObj.add(ParseJsonObject(pos, input))
         }
-        if (IsNonEscapedChar(cursor.pos, input, b']')) {
+        if (IsNonEscapedChar(pos[0], input, b']')) {
             return
         }
-        cursor.pos++
+        pos[0] = pos[0] + 1
     }
 }
 
-public func ParseJsonObject(cursor: JsonCursor, input: Array<UInt8>): JsonObject {
-    if (cursor.pos >= input.size || !IsNonEscapedChar(cursor.pos, input, b'{')) {
+public func ParseJsonObject(pos: Array<Int64>, input: Array<UInt8>): JsonObject {
+    if (pos[0] >= input.size || !IsNonEscapedChar(pos[0], input, b'{')) {
         return JsonObject()
     }
-    cursor.pos++
+    pos[0] = pos[0] + 1
     let ret = JsonObject()
     var mode = StringMod.KEY
-    while (cursor.pos < input.size) {
-        if (input[cursor.pos] == b' ' || input[cursor.pos] == b'\n') {
-            cursor.pos++
+    while (pos[0] < input.size) {
+        if (input[pos[0]] == b' ' || input[pos[0]] == b'\n') {
+            pos[0] = pos[0] + 1
             continue
         }
-        if (IsNonEscapedChar(cursor.pos, input, b'}')) {
+        if (IsNonEscapedChar(pos[0], input, b'}')) {
             return ret
         }
-        if (IsNonEscapedChar(cursor.pos, input, b':')) {
+        if (IsNonEscapedChar(pos[0], input, b':')) {
             mode = StringMod.VALUE
             if (ret.pairs.isEmpty()) {
                 ret.pairs.add(JsonPair())
             }
         }
-        if (IsNonEscapedChar(cursor.pos, input, b',')) {
+        if (IsNonEscapedChar(pos[0], input, b',')) {
             mode = StringMod.KEY
         }
-        if (IsNonEscapedChar(cursor.pos, input, b'"')) {
+        if (IsNonEscapedChar(pos[0], input, b'"')) {
             if (mode == StringMod.KEY) {
                 ret.pairs.add(JsonPair())
-                LastPair(ret).key = ParseJsonString(cursor, input)
+                LastPair(ret).key = ParseJsonString(pos, input)
             } else {
-                LastPair(ret).valueStr.add(ParseJsonString(cursor, input))
+                LastPair(ret).valueStr.add(ParseJsonString(pos, input))
             }
         }
-        if (cursor.pos < input.size && input[cursor.pos] >= b'0' && input[cursor.pos] <= b'9') {
+        if (pos[0] < input.size && input[pos[0]] >= b'0' && input[pos[0]] <= b'9') {
             if (mode != StringMod.VALUE) {
                 return JsonObject()
             }
-            LastPair(ret).valueNum.add(ParseJsonNumber(cursor, input))
+            LastPair(ret).valueNum.add(ParseJsonNumber(pos, input))
         }
-        if (IsNonEscapedChar(cursor.pos, input, b'{')) {
+        if (IsNonEscapedChar(pos[0], input, b'{')) {
             if (mode != StringMod.VALUE) {
                 return JsonObject()
             }
-            LastPair(ret).valueObj.add(ParseJsonObject(cursor, input))
+            LastPair(ret).valueObj.add(ParseJsonObject(pos, input))
         }
-        if (IsNonEscapedChar(cursor.pos, input, b'[')) {
+        if (IsNonEscapedChar(pos[0], input, b'[')) {
             if (mode != StringMod.VALUE) {
                 return JsonObject()
             }
-            ParseJsonArray(cursor, input, LastPair(ret))
+            ParseJsonArray(pos, input, Some(LastPair(ret)))
         }
-        cursor.pos++
+        pos[0] = pos[0] + 1
     }
     return ret
 }
 
 public func ParseJsonObject(input: Array<UInt8>): JsonObject {
-    return ParseJsonObject(JsonCursor(), input)
+    let pos: Array<Int64> = [0]
+    return ParseJsonObject(pos, input)
 }
 
 public func ParseJsonObject(input: String): JsonObject {

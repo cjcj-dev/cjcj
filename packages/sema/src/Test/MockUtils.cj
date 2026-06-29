@@ -529,7 +529,3 @@ public func GetVarDeclSetterAccessorKind(varDecl: Decl): AccessorKind {
 public func GetVarDeclGetterAccessorKind(varDecl: Decl): AccessorKind {
     return GetVarDeclAccessorKinds(varDecl)[0]
 }
-
-public func SelfhostPortStatus_Test_MockUtils(): Bool {
-    return true
-}

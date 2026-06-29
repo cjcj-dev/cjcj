@@ -3,6 +3,13 @@ package cangjie_compiler::sema
 import std.collection.*
 import cangjie_compiler::ast.*
 
+public enum SymbolKind {
+    | FUNC
+    | FUNC_LIKE
+    | STRUCT
+    | TOPLEVEL
+}
+
 public class ScopeManager {
     private let chars: Array<String> = [
         "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
@@ -66,6 +73,103 @@ public class ScopeManager {
         }
     }
 
+    public static func GetOutMostSymbol(ctx: ASTContext, symbolKind: SymbolKind, scopeName: String): Option<Symbol> {
+        var curFuncSym = GetCurSymbolByKind(symbolKind, ctx, scopeName)
+        var insideFuncSym = curFuncSym
+        while (let Some(current) <- curFuncSym) {
+            if (current.scopeName.isEmpty()) {
+                break
+            }
+            insideFuncSym = Some(current)
+            curFuncSym = GetCurSymbolByKind(symbolKind, ctx, current.scopeName)
+        }
+        return insideFuncSym
+    }
+
+    public static func GetRefLoopSymbol(ctx: ASTContext, self: Node): Option<Symbol> {
+        return GetCurSatisfiedSymbol(ctx, self.scopeName,
+            { sym: Symbol => IsRefLoopSymbol(sym, self) },
+            { sym: Symbol =>
+                let node = sym.node.getOrThrow()
+                node.astKind == ASTKind.FUNC_BODY
+            }
+        )
+    }
+
+    public static func GetCurSymbolByKind(
+        symbolKind: SymbolKind,
+        ctx: ASTContext,
+        scopeName: String
+    ): Option<Symbol> {
+        let finder: (Symbol) -> Bool = match (symbolKind) {
+            case SymbolKind.STRUCT => { sym: Symbol =>
+                let node = sym.node.getOrThrow()
+                node.IsNominalDecl()
+            }
+            case SymbolKind.FUNC => { sym: Symbol =>
+                let node = sym.node.getOrThrow()
+                node.IsFunc()
+            }
+            case SymbolKind.FUNC_LIKE => { sym: Symbol =>
+                let node = sym.node.getOrThrow()
+                node.IsFuncLike()
+            }
+            case SymbolKind.TOPLEVEL => { sym: Symbol => sym.scopeLevel == 0u32 }
+        }
+        return GetCurSatisfiedSymbolUntilTopLevel(ctx, scopeName, finder)
+    }
+
+    public static func GetCurSatisfiedSymbol(
+        ctx: ASTContext,
+        scopeName: String,
+        satisfy: (Symbol) -> Bool,
+        fail: (Symbol) -> Bool
+    ): Option<Symbol> {
+        var scopeGateName = GetScopeGateName(scopeName)
+        while (!scopeGateName.isEmpty()) {
+            if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
+                if (fail(symbol)) {
+                    return None
+                }
+                if (satisfy(symbol)) {
+                    return Some(symbol)
+                }
+            }
+            scopeGateName = GetScopeGateName(scopeGateName)
+        }
+        return None
+    }
+
+    public static func GetCurSatisfiedSymbolUntilTopLevel(
+        ctx: ASTContext,
+        scopeName: String,
+        satisfy: (Symbol) -> Bool
+    ): Option<Symbol> {
+        return GetCurSatisfiedSymbol(ctx, scopeName, satisfy, { _: Symbol => false })
+    }
+
+    public static func GetCurOuterDeclOfScopeLevelX(
+        ctx: ASTContext,
+        checkNode: Node,
+        scopeLevel: UInt32
+    ): Option<Symbol> {
+        if (checkNode.scopeLevel < scopeLevel) {
+            return None
+        }
+        var scopeGateName = GetScopeGateName(checkNode.scopeName)
+        while (true) {
+            if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
+                if (symbol.scopeLevel == scopeLevel) {
+                    return Some(symbol)
+                }
+                scopeGateName = GetScopeGateName(symbol.scopeName)
+            } else {
+                return None
+            }
+        }
+        return None
+    }
+
     private func GetLayerName(layerIndex: Int64, split: String): String {
         if (layerIndex == 0) {
             return TOPLEVEL_SCOPE_NAME
@@ -103,7 +207,7 @@ public class ScopeManager {
 }
 
 private func SameScopeNode(left: Node, right: Node): Bool {
-    return left.astKind == right.astKind && left.begin == right.begin && left.end == right.end
+    return left == right
 }
 
 private func ScopeContainsJump(root: Option<Expr>, self: Node): Bool {
@@ -146,19 +250,5 @@ private func IsRefLoopSymbol(symbol: Symbol, self: Node): Bool {
 }
 
 public func GetRefLoopSymbol(ctx: ASTContext, self: Node): Option<Symbol> {
-    var scopeGateName = GetScopeGateName(self.scopeName)
-    while (!scopeGateName.isEmpty()) {
-        if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
-            if (IsRefLoopSymbol(symbol, self)) {
-                return Some(symbol)
-            }
-            if (let Some(node) <- symbol.node) {
-                if (node.astKind == ASTKind.FUNC_BODY) {
-                    return None
-                }
-            }
-        }
-        scopeGateName = GetScopeGateName(scopeGateName)
-    }
-    return None
+    return ScopeManager.GetRefLoopSymbol(ctx, self)
 }
