@@ -128,7 +128,7 @@ private func ParseBitcodePackageName(sourceName: String): Option<String> {
     }
     let ordinal = sourceName[0..idx]
     try {
-        let _ = UInt64.parse(ordinal)
+        let _ = UInt32.parse(ordinal)
     } catch (e: Exception) {
         return None
     }
