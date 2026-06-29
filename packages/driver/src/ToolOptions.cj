@@ -3,6 +3,8 @@ package cangjie_compiler::driver
 import std.collection.*
 
 public let OPTIMIZATION_LEVEL_TO_BACKEND_OPTION: Array<String> = ["-O0", "-O1", "-O2", "-O3", "-Os", "-Oz"]
+public type SetFuncType = (String) -> Unit
+public type ToolOptionType = (SetFuncType, DriverOptions) -> Unit
 
 private func backendOptimizationOption(level: OptimizationLevel): String {
     return OPTIMIZATION_LEVEL_TO_BACKEND_OPTION[OptimizationLevelIndex(level)]
@@ -195,7 +197,7 @@ public func LLDSetLTOOptions(setOptionHandler: (String) -> Unit, driverOptions: 
     if (driverOptions.IsFullLTOEnabled()) {
         setOptionHandler("--mllvm")
         setOptionHandler("--cangjie-full-lto")
-    } else if (driverOptions.IsLTOEnabled()) {
+    } else {
         let normalizedPath = FileUtil.NormalizePath(driverOptions.compilationCachedPath)
         if (let Some(absolutePath) <- FileUtil.GetAbsPath(normalizedPath)) {
             setOptionHandler("--thinlto-cache-dir=" + FileUtil.TransferEscapeBacktick(absolutePath))
@@ -231,5 +233,16 @@ public func LLDSetPgoOptions(setOptionHandler: (String) -> Unit, driverOptions: 
     if (driverOptions.enablePgoInstrUse) {
         setOptionHandler("-cj-pgo-kind=pgo-instr-use-pipeline")
         setOptionHandler("-cj-profile-file=" + driverOptions.pgoProfileFile)
+    }
+}
+
+public func SetOptions(setOptionHandler: SetFuncType, driverOptions: DriverOptions, typeFunc: ToolOptionType): Unit {
+    typeFunc(setOptionHandler, driverOptions)
+}
+
+public func SetOptions(setOptionHandler: SetFuncType, driverOptions: DriverOptions,
+    typeFuncs: ArrayList<ToolOptionType>): Unit {
+    for (typefunc in typeFuncs) {
+        typefunc(setOptionHandler, driverOptions)
     }
 }
