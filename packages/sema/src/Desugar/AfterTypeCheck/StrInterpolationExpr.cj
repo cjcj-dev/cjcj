@@ -3,6 +3,7 @@ package cangjie_compiler::sema.Desugar.AfterTypeCheck
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
+import cangjie_compiler::utils.CJC_ASSERT
 
 private let CORE_PACKAGE_NAME: String = "std.core"
 private let STRING_BUILDER_NAME: String = "StringBuilder"
@@ -102,18 +103,11 @@ private func EstimateStringLength(siExpr: StrInterpolationExpr): Int64 {
     return size
 }
 
-private func IsSameAppendParamTy(left: Ty, right: Ty): Bool {
-    return SameTy(left, right) || (left.IsString() && right.IsString())
-}
-
-private func MatchFuncBySingleParamTy(candidates: ArrayList<Decl>, paramTy: Ty): Option<Decl> {
+private func MatchAppendFuncByParamTy(candidates: ArrayList<Decl>, paramTy: Ty): Option<Decl> {
     for (candidate in candidates) {
         if (let Some(candidateTy) <- candidate.GetTy()) {
             if (let Some(funcTy) <- (candidateTy as FuncTy)) {
-                if (funcTy.paramTys.size == 1 && IsSameAppendParamTy(funcTy.paramTys[0], paramTy)) {
-                    return candidate
-                }
-                if (funcTy.paramTys.size == 2 && IsSameAppendParamTy(funcTy.paramTys[1], paramTy)) {
+                if (funcTy.paramTys.size == 1 && refEq(funcTy.paramTys[0], paramTy)) {
                     return candidate
                 }
             }
@@ -201,73 +195,61 @@ private func CreateAppendCall(typeManager: TypeManager, pkg: Package, litConstEx
     var appendDecl: Option<Decl> = None
     let appendArgs = ArrayList<FuncArg>()
     if (let Some(interpolation) <- (partExpr as InterpolationExpr)) {
-        if (let Some(block) <- interpolation.block) {
-            if (let Some(blockTy) <- block.GetTy()) {
-                appendDecl = MatchFuncBySingleParamTy(appendDecls, blockTy)
-                if (let Some(_) <- appendDecl) {
-                    appendArgs.add(CreateFuncArg(block))
-                } else {
-                    if (let Some(file) <- partExpr.curFile) {
-                        var found = MatchToStringImpl(typeManager, pkg, file, blockTy, context: context)
-                        if (found.isEmpty()) {
-                            if (let Some(toStringInterface) <- FindPackageDecl(pkg, CORE_PACKAGE_NAME,
-                                TO_STRING_INTERFACE_NAME, context: context)) {
-                                found = FieldLookup(typeManager, Some(toStringInterface), TO_STRING_NAME,
-                                    info: LookupInfo(file: partExpr.curFile))
-                            }
-                        }
-                        if (found.size == 1) {
-                            let toStringDecl = found[0]
-                            let toStringFunc = CreateMemberAccess(block, toStringDecl)
-                            toStringFunc.target = toStringDecl
-                            toStringFunc.targets.add(toStringDecl)
-                            CopyBasicInfo(block, toStringFunc)
-                            let toStringCall = CreateCallExpr(toStringFunc, ArrayList<FuncArg>(),
-                                AsFuncDecl(Some(toStringDecl)), FuncRetTy(toStringDecl), CallKind.CALL_DECLARED_FUNCTION)
-                            if (let Some(retTy) <- FuncRetTy(toStringDecl)) {
-                                toStringCall.SetTy(retTy)
-                                appendDecl = MatchFuncBySingleParamTy(appendDecls, retTy)
-                            }
-                            appendArgs.add(CreateFuncArg(toStringCall))
-                        }
-                    }
-                }
+        CJC_ASSERT(interpolation.block.isSome())
+        let block = interpolation.block.getOrThrow()
+        CJC_ASSERT(Ty.IsTyCorrect(block.GetTy()))
+        let blockTy = block.GetTy().getOrThrow()
+        appendDecl = MatchAppendFuncByParamTy(appendDecls, blockTy)
+        if (let Some(_) <- appendDecl) {
+            appendArgs.add(CreateFuncArg(block))
+            interpolation.block = None
+        } else {
+            CJC_ASSERT(partExpr.curFile.isSome())
+            let file = partExpr.curFile.getOrThrow()
+            var found = MatchToStringImpl(typeManager, pkg, file, blockTy, context: context)
+            if (found.isEmpty()) {
+                let toStringInterface = FindPackageDecl(pkg, CORE_PACKAGE_NAME,
+                    TO_STRING_INTERFACE_NAME, context: context)
+                CJC_ASSERT(toStringInterface.isSome())
+                found = FieldLookup(typeManager, Some(toStringInterface.getOrThrow()), TO_STRING_NAME,
+                    info: LookupInfo(file: partExpr.curFile))
             }
+            CJC_ASSERT(found.size == 1)
+            let toStringDecl = found[0]
+            let toStringFunc = CreateMemberAccess(block, toStringDecl)
+            interpolation.block = None
+            toStringFunc.target = toStringDecl
+            toStringFunc.targets.add(toStringDecl)
+            CopyBasicInfo(block, toStringFunc)
+            let toStringCall = CreateCallExpr(toStringFunc, ArrayList<FuncArg>(),
+                AsFuncDecl(Some(toStringDecl)), FuncRetTy(toStringDecl), CallKind.CALL_DECLARED_FUNCTION)
+            let retTy = FuncRetTy(toStringDecl).getOrThrow()
+            toStringCall.SetTy(retTy)
+            appendDecl = MatchAppendFuncByParamTy(appendDecls, retTy)
+            appendArgs.add(CreateFuncArg(toStringCall))
         }
     } else if (let Some(lit) <- (partExpr as LitConstExpr)) {
-        if (lit.stringValue.isEmpty()) {
+        if (lit.rawString.isEmpty()) {
             return None
         }
-        var litTyOpt = lit.GetTy()
-        if (let None <- litTyOpt) {
-            litTyOpt = litConstExpr.GetTy()
-        } else if (let Some(litTy) <- litTyOpt) {
-            if (!Ty.IsTyCorrect(litTy)) {
-                litTyOpt = litConstExpr.GetTy()
-            }
-        }
-        if (let Some(litTy) <- litTyOpt) {
-            appendDecl = MatchFuncBySingleParamTy(appendDecls, litTy)
-        }
+        let litTy = lit.GetTy().getOrThrow()
+        appendDecl = MatchAppendFuncByParamTy(appendDecls, litTy)
         if (let Some(cloned) <- CloneExpr(lit)) {
-            if (let Some(litTy) <- litTyOpt) {
-                cloned.SetTy(litTy)
-            }
+            cloned.SetTy(litTy)
             appendArgs.add(CreateFuncArg(cloned))
         }
     }
-    if (let Some(realAppendDecl) <- appendDecl) {
-        let appendFunc = CreateMemberAccess(CreateRefExpr(sbItem, partExpr), realAppendDecl)
-        appendFunc.target = realAppendDecl
-        appendFunc.targets.add(realAppendDecl)
-        CopyBasicInfo(partExpr, appendFunc)
-        let appendCall = CreateCallExpr(appendFunc, appendArgs, AsFuncDecl(Some(realAppendDecl)),
-            Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)), CallKind.CALL_DECLARED_FUNCTION)
-        appendCall.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
-        AddCurFile(appendCall, file: litConstExpr.curFile)
-        return appendCall
-    }
-    return None
+    CJC_ASSERT(appendDecl.isSome())
+    let realAppendDecl = appendDecl.getOrThrow()
+    let appendFunc = CreateMemberAccess(CreateRefExpr(sbItem, partExpr), realAppendDecl)
+    appendFunc.target = realAppendDecl
+    appendFunc.targets.add(realAppendDecl)
+    CopyBasicInfo(partExpr, appendFunc)
+    let appendCall = CreateCallExpr(appendFunc, appendArgs, AsFuncDecl(Some(realAppendDecl)),
+        Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)), CallKind.CALL_DECLARED_FUNCTION)
+    appendCall.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+    AddCurFile(appendCall, file: litConstExpr.curFile)
+    return appendCall
 }
 
 public func DesugarStrInterpolationExpr(typeManager: TypeManager, pkg: Package, litConstExpr: LitConstExpr,
@@ -348,8 +330,4 @@ public func DesugarStrInterpolationExpr(typeManager: TypeManager, pkg: Package, 
         AddCurFile(block, file: litConstExpr.curFile)
         litConstExpr.desugarExpr = block
     }
-}
-
-public func SelfhostPortStatus_Desugar_AfterTypeCheck_StrInterpolationExpr(): Bool {
-    return true
 }

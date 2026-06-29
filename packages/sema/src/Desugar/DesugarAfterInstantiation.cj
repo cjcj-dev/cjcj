@@ -229,14 +229,6 @@ private func DesugarAfterInstantiationCore(pkg: Package, exportForTest: Bool, en
     }
 }
 
-public func DesugarAfterInstantiation(pkg: Package, exportForTest!: Bool = false,
-    enableCoverage!: Bool = false): Unit {
-    if (pkg.files.isEmpty()) {
-        return
-    }
-    DesugarAfterInstantiationCore(pkg, exportForTest, enableCoverage)
-}
-
 public func DesugarAfterInstantiation(typeManager: TypeManager, importedPkgs: ArrayList<PackageDecl>, pkg: Package,
     exportForTest!: Bool = false, enableCoverage!: Bool = false,
     implicitUsedDecls!: Option<ArrayList<Decl>> = None): Unit {
@@ -248,8 +240,4 @@ public func DesugarAfterInstantiation(typeManager: TypeManager, importedPkgs: Ar
     if (let Some(decls) <- implicitUsedDecls) {
         MarkUsedPackageInFile(typeManager, pkg, decls)
     }
-}
-
-public func SelfhostPortStatus_Desugar_DesugarAfterInstantiation(): Bool {
-    return false
 }

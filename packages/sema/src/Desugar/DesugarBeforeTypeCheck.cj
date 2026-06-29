@@ -3,6 +3,7 @@ package cangjie_compiler::sema.Desugar
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.Plugin.*
+import cangjie_compiler::utils.CJC_ASSERT
 
 private let V_COMPILER: String = "v-compiler"
 private let OPTION_VALUE_CTOR: String = "Some"
@@ -104,15 +105,6 @@ private func ParseCompatibleSDKVersion(value: String): APILevelVersion {
     return APILevelVersion()
 }
 
-private func CloneArgExpr(iae: IfAvailableExpr): Option<Expr> {
-    if (let Some(arg) <- iae.GetArg()) {
-        if (let Some(expr) <- arg.expr) {
-            return CloneExpr(expr)
-        }
-    }
-    return None
-}
-
 private func CreateSDKApiVersionCheck(iae: IfAvailableExpr, levelExpr: Expr, levelExprBase: Expr): Expr {
     let memberAccess = CreateMemberAccess(CreateRefExpr(DEVICE_INFO), SDK_API_VERSION)
     if (let Some(baseExpr) <- memberAccess.baseExpr) {
@@ -194,9 +186,12 @@ private func DesugarIfAvailableSyscapCondition(iae: IfAvailableExpr): Expr {
     let canIUseRef = CreateRefExpr(CANIUSE_IDENTIFIER)
     CopyBasicInfo(iae, canIUseRef)
     let args = ArrayList<FuncArg>()
-    if (let Some(clonedArg) <- CloneArgExpr(iae)) {
-        args.add(CreateFuncArg(clonedArg))
-    }
+    CJC_ASSERT(iae.GetArg().isSome())
+    let arg = iae.GetArg().getOrThrow()
+    CJC_ASSERT(arg.expr.isSome())
+    let argExpr = arg.expr.getOrThrow()
+    arg.expr = None
+    args.add(CreateFuncArg(argExpr))
     let condition = CreateCallExpr(canIUseRef, args)
     AddCurFile(condition, file: iae.curFile)
     CopyBasicInfo(iae, condition)
@@ -259,7 +254,9 @@ private func DesugarSynchronizedExpr(expr: SynchronizedExpr): Unit {
             let nodes = ArrayList<Node>()
             let mtxVar = CreateVarDecl(".mtx", mutexClone, None)
             nodes.add(mtxVar)
-            let lockAccess = CreateMemberAccess(CreateRefExpr(mtxVar), "lock")
+            let mtxRef = CreateRefExpr(".mtx")
+            mtxRef.EnableAttr(Attribute.COMPILER_ADD)
+            let lockAccess = CreateMemberAccess(mtxRef, "lock")
             CopyBasicInfo(mutex, lockAccess)
             nodes.add(CreateCallExpr(lockAccess, ArrayList<FuncArg>()))
             let tryExpr = TryExpr()
@@ -271,7 +268,9 @@ private func DesugarSynchronizedExpr(expr: SynchronizedExpr): Unit {
                 tryExpr.tryBlock = Block()
             }
             tryExpr.finallyPos = expr.end
-            let unlockAccess = CreateMemberAccess(CreateRefExpr(mtxVar), "unlock")
+            let mtxRef2 = CreateRefExpr(".mtx")
+            mtxRef2.EnableAttr(Attribute.COMPILER_ADD)
+            let unlockAccess = CreateMemberAccess(mtxRef2, "unlock")
             CopyBasicInfo(mutex, unlockAccess)
             let finallyNodes = ArrayList<Node>()
             finallyNodes.add(CreateCallExpr(unlockAccess, ArrayList<FuncArg>()))
@@ -281,7 +280,6 @@ private func DesugarSynchronizedExpr(expr: SynchronizedExpr): Unit {
             let block = CreateBlock(nodes)
             AddCurFile(block, file: expr.curFile)
             expr.desugarExpr = block
-            expr.mutex = None
             expr.body = None
         }
     }
@@ -773,8 +771,4 @@ public func DesugarBeforeTypeCheck(root: Node, desugarMacrocall!: Bool = false,
     compatibleSDKVersion!: String = ""): Unit {
     let discardedHelper = DiscardedHelper()
     WalkBeforeTypeCheck(root, desugarMacrocall, compatibleSDKVersion, discardedHelper)
-}
-
-public func SelfhostPortStatus_Desugar_DesugarBeforeTypeCheck(): Bool {
-    return true
 }
