@@ -1,6 +1,7 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::basic.Linkage
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.BooleanType
 import cangjie_compiler::chir.BoxType
@@ -21,7 +22,7 @@ import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKindIndex
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.VArrayType
-import cangjie_compiler::option.{ArchType, EnvironmentType}
+import cangjie_compiler::option.{ArchType, EnvironmentType, OSType}
 import cangjie_compiler::utils.{REF_PACKAGE_NAME, STD_LIB_WEAK_REF, StaticCast}
 
 private let UG_CLASS_KIND: UInt64 = 128u64
@@ -328,7 +329,7 @@ public func RedefineTypeInfoGlobal(cgMod: CGModule, chirTy: Type): Unit {
         let initializer = BuildConcreteTypeInfoInitializer(cgMod, moduleHandle, chirTy, typeInfoTy)
         unsafe {
             LLVMSetInitializer(typeInfo, initializer)
-            SetConcreteTypeInfoLinkage(typeInfo, chirTy)
+            SetConcreteTypeInfoLinkage(cgMod, typeInfo, chirTy)
         }
         LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), typeInfo, GC_TYPE_META_NAME,
             GetLayoutMetadataName(cgMod, chirTy))
@@ -375,7 +376,7 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
         let initializer = BuildConcreteTypeInfoInitializer(cgMod, moduleHandle, chirTy, typeInfoTy)
         unsafe {
             LLVMSetInitializer(typeInfo, initializer)
-            SetConcreteTypeInfoLinkage(typeInfo, chirTy)
+            SetConcreteTypeInfoLinkage(cgMod, typeInfo, chirTy)
         }
         LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), typeInfo, GC_TYPE_META_NAME,
             GetLayoutMetadataName(cgMod, chirTy))
@@ -404,21 +405,42 @@ private func OwnsCustomDeclTypeInfo(cgMod: CGModule, chirTy: Type): Bool {
     return true
 }
 
-private func SetConcreteTypeInfoLinkage(typeInfo: LLVMValueRef, chirTy: Type): Unit {
-    // Mirror C++ AST2CHIR LinkTypeInfo (TranslateClassDecl.cpp:57-71 / TranslateEnumDecl.cpp:48-54):
-    // exported (public/protected) type infos keep External linkage, but a non-exported type info would be
-    // INTERNAL, which is invisible across object files. Since a package is compiled into several object
-    // files, the type info of a non-exported class/enum is emitted into one object file yet referenced from
-    // the others, leaving `<pkg>:<Type>.ti` cross-object references unresolved at link. Promote the INTERNAL
-    // case to LINKONCE_ODR so the type info stays visible and ODR-mergeable across the linked binary
-    // (visibility / .cjo export are unchanged). Generic instantiations are already LINKONCE_ODR.
-    let linkage = if (chirTy.GetTypeArgs().isEmpty()) {
+private func SetConcreteTypeInfoLinkage(cgMod: CGModule, typeInfo: LLVMValueRef, chirTy: Type): Unit {
+    if (CGType.GetCGGenericKind(chirTy) == CGGenericKind.STATIC_GI) {
+        let staticGILinkage = if (cgMod.GetCGContext().GetCompileOptions().target.os == OSType.WINDOWS) {
+            LLVMLinkage.Internal
+        } else {
+            LLVMLinkage.LinkOnceODR
+        }
+        unsafe {
+            LLVMSetLinkage(typeInfo, LLVMLinkageValue(staticGILinkage))
+            LLVMSetGlobalConstant(typeInfo, 0)
+        }
+        return
+    }
+    if (let Some(customTy) <- (chirTy as CustomType)) {
+        if (let Some(linkTypeInfo) <- customTy.GetCustomTypeDef().GetAnnotation("LinkTypeInfo")) {
+            let chirLinkage = match (linkTypeInfo) {
+                case "linkType: weak_odr" => Linkage.WEAK_ODR
+                case "linkType: external" => Linkage.EXTERNAL
+                case "linkType: internal" => Linkage.INTERNAL
+                case "linkType: linkonce_odr" => Linkage.LINKONCE_ODR
+                case "linkType: external_weak" => Linkage.EXTERNAL_WEAK
+                case _ => throw IllegalArgumentException("unexpected LinkTypeInfo annotation: " + linkTypeInfo)
+            }
+            AddLinkageTypeMetadata(typeInfo, CHIRLinkage2LLVMLinkage(chirLinkage),
+                cgMod.GetCGContext().IsCGParallelEnabled())
+            unsafe { LLVMSetGlobalConstant(typeInfo, 0) }
+            return
+        }
+    }
+    let fallbackLinkage = if (chirTy.GetTypeArgs().isEmpty()) {
         if (ShouldExportTypeInfo(chirTy)) { LLVMLinkage.External } else { LLVMLinkage.LinkOnceODR }
     } else {
         LLVMLinkage.LinkOnceODR
     }
     unsafe {
-        LLVMSetLinkage(typeInfo, LLVMLinkageValue(linkage))
+        LLVMSetLinkage(typeInfo, LLVMLinkageValue(fallbackLinkage))
         LLVMSetGlobalConstant(typeInfo, 0)
     }
 }
