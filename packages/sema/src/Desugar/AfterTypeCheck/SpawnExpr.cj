@@ -3,6 +3,7 @@ package cangjie_compiler::sema.Desugar.AfterTypeCheck
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
+import cangjie_compiler::utils.CJC_ASSERT
 
 private let FUTURE_OBJECT_NAME: String = "futureObj"
 private let FUTURE_CLASS_NAME: String = "Future"
@@ -23,17 +24,6 @@ private func FindSingleConstructor(decl: ClassDecl): Option<FuncDecl> {
     return found
 }
 
-private func FindMemberFunction(decl: ClassLikeDecl, name: String): Option<FuncDecl> {
-    for (member in decl.GetMemberDecls()) {
-        if (member.identifier.Val() == name) {
-            if (let Some(funcDecl) <- (member as FuncDecl)) {
-                return funcDecl
-            }
-        }
-    }
-    return None
-}
-
 private func CloneExpr(expr: Expr): Option<Expr> {
     return ASTCloner.Clone(expr) as Expr
 }
@@ -52,28 +42,28 @@ public func DesugarSpawnArgExpr(typeManager: TypeManager, expr: SpawnExpr): Unit
             }
             if (let Some(classLikeTy) <- (argTy as ClassLikeTy)) {
                 if (let Some(commonDecl) <- classLikeTy.commonDecl) {
-                    if (let Some(method) <- FindMemberFunction(commonDecl, GET_SCHEDULER_HANDLE)) {
-                        let retTy = typeManager.GetPointerTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
-                        let funcTy = typeManager.GetFunctionTy(ArrayList<Ty>().toArray(), retTy)
-                        if (let Some(methodTy) <- method.GetTy()) {
-                            if (!methodTy.IsFunc() || !typeManager.IsSubtype(methodTy, funcTy)) {
-                                return
-                            }
-                        } else {
-                            return
-                        }
-                        if (let Some(clonedArg) <- CloneExpr(arg)) {
-                            let memberAccess = CreateMemberAccess(clonedArg, method)
-                            CopyBasicInfo(arg, memberAccess)
-                            let callArgs = ArrayList<FuncArg>()
-                            let callExpr = CreateCallExpr(memberAccess, callArgs)
-                            CopyBasicInfo(arg, callExpr)
-                            callExpr.callKind = CallKind.CALL_DECLARED_FUNCTION
-                            callExpr.resolvedFunction = method
-                            callExpr.SetTy(retTy)
-                            AddCurFile(callExpr, file: expr.curFile)
-                            arg.desugarExpr = callExpr
-                        }
+                    let decls = FieldLookup(typeManager, Some(commonDecl), GET_SCHEDULER_HANDLE,
+                        info: LookupInfo(file: expr.curFile))
+                    CJC_ASSERT(decls.size == 1)
+                    let decl = decls[0]
+                    CJC_ASSERT((decl as FuncDecl).isSome())
+                    let method = (decl as FuncDecl).getOrThrow()
+                    let retTy = typeManager.GetPointerTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+                    let funcTy = typeManager.GetFunctionTy(ArrayList<Ty>().toArray(), retTy)
+                    let methodTy = decl.GetTy() ?? TypeManager.GetInvalidTy()
+                    CJC_ASSERT(Ty.IsTyCorrect(decl.GetTy()) && methodTy.IsFunc() &&
+                        typeManager.IsSubtype(methodTy, funcTy))
+                    if (let Some(clonedArg) <- CloneExpr(arg)) {
+                        let memberAccess = CreateMemberAccess(clonedArg, GET_SCHEDULER_HANDLE)
+                        CopyBasicInfo(arg, memberAccess)
+                        let callArgs = ArrayList<FuncArg>()
+                        let callExpr = CreateCallExpr(memberAccess, callArgs)
+                        CopyBasicInfo(arg, callExpr)
+                        callExpr.callKind = CallKind.CALL_DECLARED_FUNCTION
+                        callExpr.resolvedFunction = method
+                        callExpr.SetTy(retTy)
+                        AddCurFile(callExpr, file: expr.curFile)
+                        arg.desugarExpr = callExpr
                     }
                 }
             }

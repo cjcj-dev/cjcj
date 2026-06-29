@@ -63,6 +63,60 @@ private func GetArrayElementTy(typeManager: TypeManager, arrayTy: ArrayTy): Ty {
     return typeManager.GetArrayTy(arrayTy.typeArgs[0], arrayTy.dims - 1u64)
 }
 
+private func DesugarPointerCall(typeManager: TypeManager, ce: CallExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Option<PointerExpr> {
+    if (let Some(existing) <- ce.desugarExpr) {
+        return existing as PointerExpr
+    }
+    let baseFunc = ce.baseFunc ?? return None
+    let baseFuncTy = if (let Some(baseTy) <- baseFunc.GetTy()) {
+        typeManager.SubstituteTypeAliasInTy(baseTy)
+    } else {
+        return None
+    }
+    let typeNode = Type()
+    let typeArgs = baseFuncTy.typeArgs
+    let baseArgs = ArrayList<Type>()
+    for (baseArg in baseFunc.GetTypeArgs()) {
+        if (let Some(argTy) <- baseArg.GetTy()) {
+            if (let Some(intersectionTy) <- (argTy as IntersectionTy)) {
+                if (intersectionTy.tys.isEmpty()) {
+                    continue
+                }
+            }
+        }
+        baseArgs.add(baseArg)
+    }
+    let usefulTypeArg = !typeArgs.isEmpty() && (!typeArgs[0].IsGeneric() || !baseArgs.isEmpty())
+    let argTy = if (usefulTypeArg) {
+        typeArgs[0]
+    } else if (!baseArgs.isEmpty()) {
+        baseArgs[0].GetTy() ?? TypeManager.GetInvalidTy()
+    } else {
+        TypeManager.GetInvalidTy()
+    }
+    typeNode.SetTy(typeManager.GetPointerTy(argTy))
+
+    let pointerExpr = PointerExpr()
+    pointerExpr.typeNode = typeNode
+    if (!ce.args.isEmpty()) {
+        pointerExpr.arg = ce.args[0]
+    }
+    if (ce.args.size > 1) {
+        if (let Some(diagValue) <- diag) {
+            DiagOld(diagValue, ce, BasicDiagKind.sema_pointer_too_much_argument)
+        }
+    }
+    ce.args.clear()
+    pointerExpr.scopeName = ce.scopeName
+    pointerExpr.sourceExpr = ce
+    pointerExpr.begin = ce.begin
+    pointerExpr.end = ce.end
+    AddCurFile(pointerExpr, file: ce.curFile)
+    ce.desugarExpr = pointerExpr
+    return Some(pointerExpr)
+}
+
 private func IsCollectionInterfaceTy(ty: Ty): Bool {
     if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
         if (interfaceTy.typeArgs.size != 1) {
@@ -644,26 +698,24 @@ public func ChkPointerCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
     if (!IsCallOfBuiltInType(ce, TypeKind.TYPE_POINTER)) {
         return false
     }
-    if (ce.args.size > 1) {
-        if (let Some(diagValue) <- diag) {
-            DiagOld(diagValue, ce, BasicDiagKind.sema_pointer_too_much_argument)
-        }
+    let pointerExpr = DesugarPointerCall(typeManager, ce, diag: diag)
+    if (let None <- pointerExpr) {
+        return false
     }
-    let pointerExpr = PointerExpr()
-    pointerExpr.typeNode = TypeNodeFromCallBase(ce)
-    if (!ce.args.isEmpty()) {
-        pointerExpr.arg = ce.args[0]
-    }
+    let actualPointerExpr = pointerExpr.getOrThrow()
     let ok = if (target.IsInvalid()) {
-        Ty.IsTyCorrect(SynPointerExpr(typeManager, pointerExpr, diag: diag))
+        Ty.IsTyCorrect(SynPointerExpr(typeManager, actualPointerExpr, diag: diag))
     } else {
-        ChkPointerExpr(typeManager, target, pointerExpr, diag: diag)
+        ChkPointerExpr(typeManager, target, actualPointerExpr, diag: diag)
     }
     if (ok) {
-        ce.desugarExpr = pointerExpr
-        ce.SetTy(pointerExpr.GetTy() ?? TypeManager.GetInvalidTy())
+        ce.SetTy(actualPointerExpr.GetTy() ?? TypeManager.GetInvalidTy())
         return true
     }
+    if (let Some(arg) <- actualPointerExpr.arg) {
+        ce.args.add(arg)
+    }
+    ce.desugarExpr = None
     ce.SetTy(TypeManager.GetInvalidTy())
     return false
 }

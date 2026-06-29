@@ -377,7 +377,7 @@ private func MoveSubscriptIndicesIntoArgs(callExpr: CallExpr, subscript: Subscri
 }
 
 private func CreateArgumentForCompoundAssignOverload(ae: AssignExpr, createdCall: CallExpr,
-    basePtr: Expr): Option<Expr> {
+    basePtr: Expr, indexPtrs: ArrayList<Expr>): Option<Expr> {
     if (let Some(right) <- ae.rightExpr) {
         if (let Some(clonedCall) <- CloneExpr(createdCall)) {
             if (let Some(clonedCallExpr) <- (clonedCall as CallExpr)) {
@@ -388,10 +388,16 @@ private func CreateArgumentForCompoundAssignOverload(ae: AssignExpr, createdCall
                         }
                     }
                 }
+                var idx: Int64 = 0
+                while (idx < indexPtrs.size) {
+                    clonedCallExpr.args[idx].expr.getOrThrow().mapExpr = indexPtrs[idx]
+                    idx++
+                }
             }
             let binaryExpr = BinaryExpr()
             CopyBasicInfo(ae, binaryExpr)
             binaryExpr.leftExpr = clonedCall
+            binaryExpr.leftExpr.getOrThrow().sourceExpr = ae
             binaryExpr.rightExpr = right
             binaryExpr.op = GetCompoundAssignBaseOp(ae.op)
             binaryExpr.operatorPos = ae.assignPos
@@ -527,6 +533,10 @@ public func DesugarSubscriptOverloadExpr(expr: AssignExpr): Unit {
         if (let Some(subscript) <- (left as SubscriptExpr)) {
             if (let Some(baseExpr) <- subscript.baseExpr) {
                 let basePtr = baseExpr
+                let indexPtrs = ArrayList<Expr>()
+                for (indexExpr in subscript.indexExprs) {
+                    indexPtrs.add(indexExpr)
+                }
                 let callExpr = CallExpr()
                 CopyBasicInfo(expr, callExpr)
                 let callBase = CreateOperatorMemberAccess(expr, baseExpr, SUBSCRIPT_OPERATOR_NAME, subscript.leftParenPos)
@@ -539,7 +549,7 @@ public func DesugarSubscriptOverloadExpr(expr: AssignExpr): Unit {
                 let valueArg = FuncArg()
                 valueArg.name = SrcIdentifier(VARIADIC_VALUE_NAME)
                 let valueExpr = if (expr.isCompound) {
-                    CreateArgumentForCompoundAssignOverload(expr, callExpr, basePtr)
+                    CreateArgumentForCompoundAssignOverload(expr, callExpr, basePtr, indexPtrs)
                 } else {
                     expr.rightExpr
                 }
@@ -783,8 +793,4 @@ public func DesugarInTypeCheck(root: Node): Unit {
         VisitAction.WALK_CHILDREN
     })
     let _ = walker.Walk()
-}
-
-public func SelfhostPortStatus_Desugar_DesugarInTypeCheck(): Bool {
-    return false
 }
