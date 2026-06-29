@@ -2,7 +2,9 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.CustomType
+import cangjie_compiler::chir.StructType
 import cangjie_compiler::chir.Type
+import cangjie_compiler::utils.StaticCast
 
 public class CGStructType <: CGCustomType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type) {
@@ -23,8 +25,9 @@ public class CGStructType <: CGCustomType {
         llvmType = structLayout
         if (!cgCtx.IsGeneratedStructType(layoutName)) {
             cgCtx.AddGeneratedStructType(layoutName)
+            let structType = StaticCast<StructType>(chirType)
             let fieldTypes = ArrayList<LLVMTypeRef>()
-            for (fieldTy in GetInstanceFieldTypes(cgMod, chirType)) {
+            for (fieldTy in structType.GetInstantiatedMemberTys()) {
                 fieldTypes.add(CGType.GetOrCreate(cgMod, fieldTy).GetLLVMType())
             }
             SetStructTypeBody(structLayout, fieldTypes)
@@ -36,7 +39,8 @@ public class CGStructType <: CGCustomType {
         if (chirType.IsString()) {
             return
         }
-        for (fieldTy in GetInstanceFieldTypes(cgMod, chirType)) {
+        let structType = StaticCast<StructType>(chirType)
+        for (fieldTy in structType.GetInstantiatedMemberTys()) {
             containedCGTypes.add(CGType.GetOrCreate(cgMod, fieldTy))
         }
     }
