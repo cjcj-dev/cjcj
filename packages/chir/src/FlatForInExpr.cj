@@ -123,10 +123,14 @@ public class FlatForInExpr {
             throw IllegalStateException("faithful FlatForInExpr parent block has no block group")
         let newSuc = builder.CreateBlock(parentGroup)
         let exprs = parentBlock.GetExpressions()
+        let mv = ArrayList<Expression>()
         var idx = exprIndex + 1
         while (idx < exprs.size) {
-            exprs[idx].MoveTo(newSuc)
+            mv.add(exprs[idx])
             idx++
+        }
+        for (expr in mv) {
+            expr.MoveTo(newSuc)
         }
         return newSuc
     }
