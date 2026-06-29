@@ -1,13 +1,13 @@
 package cangjie_compiler::driver
 
-import cangjie_compiler::utils.Directory
+import cangjie_compiler::utils.{CJC_ASSERT, Directory}
 import std.collection.*
 import std.convert.*
 
 public struct GCCVersion {
-    public let major: UInt8
-    public let minor: UInt8
-    public let build: UInt8
+    public var major: UInt8
+    public var minor: UInt8
+    public var build: UInt8
 
     public init(major!: UInt8 = 0u8, minor!: UInt8 = 0u8, build!: UInt8 = 0u8) {
         this.major = major
@@ -48,6 +48,9 @@ public class GCCPathScanner {
     }
 
     public func Scan(): Option<GCCPath> {
+        if (searchPaths.isEmpty()) {
+            return None
+        }
         var selectedPath = ""
         var selectedVersion = GCCVersion()
         for (dirPrefix in searchPaths) {
@@ -81,26 +84,80 @@ public class GCCPathScanner {
     }
 
     public static func StrToGCCVersion(versionStr: String): Option<GCCVersion> {
-        if (versionStr.isEmpty()) { return None }
-        let parts = SplitString(versionStr, ".")
-        if (parts.size > 3) { return None }
-        let nums = ArrayList<UInt8>()
-        for (part in parts) {
-            if (part.isEmpty()) { return None }
-            for (byte in part.toArray()) {
-                if (byte < b'0' || byte > b'9') { return None }
-            }
-            if (let Some(parsed) <- TryParseGCCVersionPart(part)) {
-                if (parsed > 255u64) { return None }
-                nums.add(UInt8(parsed))
-            } else {
+        let hasInvalidDigits = { c: UInt8 => c < b'0' || c > b'9' }
+
+        var ver = GCCVersion()
+        let majorEndIndexOpt = versionStr.indexOf(".")
+        if (let Some(majorEndIndexFound) <- majorEndIndexOpt) {
+            if (majorEndIndexFound == 0) {
                 return None
             }
         }
-        while (nums.size < 3) {
-            nums.add(0u8)
+        var majorEndIndex = majorEndIndexOpt ?? versionStr.size
+        var invalidMajorVer = false
+        for (byte in versionStr[0..majorEndIndex].toArray()) {
+            if (hasInvalidDigits(byte)) {
+                invalidMajorVer = true
+                break
+            }
         }
-        return GCCVersion(major: nums[0], minor: nums[1], build: nums[2])
+        if (invalidMajorVer) {
+            return None
+        }
+        let majorVer = UInt64.parse(versionStr[0..majorEndIndex])
+        CJC_ASSERT(majorVer >= 0u64 && majorVer <= 255u64)
+        ver.major = UInt8(majorVer)
+
+        if (majorEndIndex == versionStr.size) {
+            return ver
+        }
+
+        let minorEndIndexOpt = versionStr.indexOf(".", majorEndIndex + 1)
+        if (let Some(minorEndIndexFound) <- minorEndIndexOpt) {
+            if (minorEndIndexFound == majorEndIndex + 1) {
+                return None
+            }
+        }
+
+        var minorEndIndex = minorEndIndexOpt ?? versionStr.size
+        var invalidMinorVer = false
+        for (byte in versionStr[majorEndIndex + 1..minorEndIndex].toArray()) {
+            if (hasInvalidDigits(byte)) {
+                invalidMinorVer = true
+                break
+            }
+        }
+        if (invalidMinorVer) {
+            return None
+        }
+
+        let minorVer = UInt64.parse(versionStr[majorEndIndex + 1..minorEndIndex])
+        CJC_ASSERT(minorVer >= 0u64 && minorVer <= 255u64)
+        ver.minor = UInt8(minorVer)
+
+        if (minorEndIndex == versionStr.size) {
+            return ver
+        }
+
+        if (versionStr.size == minorEndIndex + 1) {
+            return None
+        }
+
+        var invalidBuildVer = false
+        for (byte in versionStr[minorEndIndex + 1..].toArray()) {
+            if (hasInvalidDigits(byte)) {
+                invalidBuildVer = true
+                break
+            }
+        }
+        if (invalidBuildVer) {
+            return None
+        }
+
+        let buildVer = UInt64.parse(versionStr[minorEndIndex + 1..])
+        CJC_ASSERT(buildVer >= 0u64 && buildVer <= 255u64)
+        ver.build = UInt8(buildVer)
+        return ver
     }
 
     private func AllForFilesExist(path: String): Bool {
@@ -110,14 +167,6 @@ public class GCCPathScanner {
             }
         }
         return true
-    }
-}
-
-private func TryParseGCCVersionPart(value: String): Option<UInt64> {
-    try {
-        return UInt64.parse(value)
-    } catch (e: Exception) {
-        return None
     }
 }
 
