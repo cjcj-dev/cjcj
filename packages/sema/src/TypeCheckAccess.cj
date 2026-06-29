@@ -2,61 +2,22 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
+import cangjie_compiler::basic.DiagKind as BasicDiagKind
+import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::modules.GetMainPartPkgNameForTestPkg as ModulesGetMainPartPkgNameForTestPkg
 import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
 import cangjie_compiler::modules.IsTestPackage as ModulesIsTestPackage
 import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
 
-public enum TypeAccessIssueKind {
-    | INVALID_ACCESS_CONTROL
-    | INVALID_FUNCTION_ACCESS
-    | IMMUTABLE_ACCESS_MUT_FUNC
-    | INOUT_MODIFY_HEAP_VARIABLE
-    | USE_MUTABLE_FUNC_ALONE
-    | CANNOT_MODIFY_STRUCT_VAR
-}
-
-private func TypeAccessIssueKindIndex(kind: TypeAccessIssueKind): Int64 {
-    return match (kind) {
-        case TypeAccessIssueKind.INVALID_ACCESS_CONTROL => 0
-        case TypeAccessIssueKind.INVALID_FUNCTION_ACCESS => 1
-        case TypeAccessIssueKind.IMMUTABLE_ACCESS_MUT_FUNC => 2
-        case TypeAccessIssueKind.INOUT_MODIFY_HEAP_VARIABLE => 3
-        case TypeAccessIssueKind.USE_MUTABLE_FUNC_ALONE => 4
-        case TypeAccessIssueKind.CANNOT_MODIFY_STRUCT_VAR => 5
-    }
-}
-
-extend TypeAccessIssueKind <: Equatable<TypeAccessIssueKind> {
-    public operator func ==(right: TypeAccessIssueKind): Bool {
-        return TypeAccessIssueKindIndex(this) == TypeAccessIssueKindIndex(right)
-    }
-
-    public operator func !=(right: TypeAccessIssueKind): Bool {
-        return !(this == right)
-    }
-}
-
-public class TypeAccessIssue {
-    public var kind: TypeAccessIssueKind
-    public var node: Node
-    public var target: Option<Decl>
-    public var message: String
-
-    public init(kind: TypeAccessIssueKind, node: Node, target: Option<Decl>, message: String) {
-        this.kind = kind
-        this.node = node
-        this.target = target
-        this.message = message
-    }
-}
-
 private class InoutUseCacheEntry {
-    public var declKey: String
+    public var decl: Decl
     public var value: Bool
 
-    public init(declKey: String, value: Bool) {
-        this.declKey = declKey
+    public init(decl: Decl, value: Bool) {
+        this.decl = decl
         this.value = value
     }
 }
@@ -70,6 +31,10 @@ private class BoolBox {
 }
 
 private let inoutUseCache: ArrayList<InoutUseCacheEntry> = ArrayList<InoutUseCacheEntry>()
+
+private enum TypeCheckAccessScopeSymbolKind {
+    | FUNC_LIKE
+}
 
 public func MaybeStruct(ty: Ty): Bool {
     if (!Ty.IsTyCorrect(ty)) {
@@ -123,6 +88,122 @@ public func GetCurStructSymbol(ctx: ASTContext, scopeName: String): Option<Symbo
             }
         }
         scopeGateName = GetScopeGateName(scopeGateName)
+    }
+    return None
+}
+
+private func TypeCheckAccessRange(node: Node): BasicRange {
+    var rangeEnd = node.end
+    if (node.begin.fileID != node.end.fileID) {
+        rangeEnd = node.begin + 1
+    }
+    return MakeRange(node.begin, rangeEnd)
+}
+
+private func TypeCheckAccessDeclIdentifierRange(decl: Decl): BasicRange {
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+            if (let Some(outerDecl) <- funcDecl.outerDecl) {
+                if (funcDecl.identifier.Begin().IsZero()) {
+                    return MakeRange(outerDecl.identifier.Begin(), outerDecl.identifier.End())
+                }
+                if (funcDecl.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
+                    return MakeRange(funcDecl.identifier.Begin(), outerDecl.identifier.End())
+                }
+            }
+            return MakeRange(funcDecl.identifier.Begin(), funcDecl.identifier.End())
+        }
+        if (funcDecl.isGetter || funcDecl.isSetter) {
+            return MakeRange(funcDecl.identifier.Begin(), funcDecl.identifier.Begin() + 3)
+        }
+    }
+    if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+        if (extendDecl.TestAttr(Attribute.FROM_COMMON_PART)) {
+            return MakeRange(extendDecl.begin, extendDecl.end)
+        }
+        if (let Some(extendedType) <- extendDecl.extendedType) {
+            return MakeRange(extendedType.begin, extendedType.end)
+        }
+    }
+    if (let Some(vpd) <- (decl as VarWithPatternDecl)) {
+        if (let Some(pattern) <- vpd.irrefutablePattern) {
+            return MakeRange(pattern.begin, pattern.end)
+        }
+    }
+    if (decl.identifier.Begin().IsZero()) {
+        return TypeCheckAccessRange(decl)
+    }
+    return MakeRange(decl.identifier.Begin(), decl.identifier.End())
+}
+
+private func TypeCheckAccessSymbolSatisfies(kind: TypeCheckAccessScopeSymbolKind, symbol: Symbol): Bool {
+    if (let None <- symbol.node) {
+        return false
+    }
+    let node = symbol.node.getOrThrow()
+    return match (kind) {
+        case TypeCheckAccessScopeSymbolKind.FUNC_LIKE => node.IsFuncLike()
+    }
+}
+
+private func TypeCheckAccessGetCurSymbolByKind(
+    ctx: ASTContext,
+    kind: TypeCheckAccessScopeSymbolKind,
+    scopeName: String
+): Option<Symbol> {
+    var scopeGateName = GetScopeGateName(scopeName)
+    while (!scopeGateName.isEmpty()) {
+        if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
+            if (TypeCheckAccessSymbolSatisfies(kind, symbol)) {
+                return Some(symbol)
+            }
+        }
+        scopeGateName = GetScopeGateName(scopeGateName)
+    }
+    return None
+}
+
+private func TypeCheckAccessGetOutMostSymbol(
+    ctx: ASTContext,
+    kind: TypeCheckAccessScopeSymbolKind,
+    scopeName: String
+): Option<Symbol> {
+    var currentOpt = TypeCheckAccessGetCurSymbolByKind(ctx, kind, scopeName)
+    var insideOpt = currentOpt
+    while (let Some(current) <- currentOpt) {
+        if (current.scopeName.isEmpty()) {
+            break
+        }
+        insideOpt = Some(current)
+        let nextOpt = TypeCheckAccessGetCurSymbolByKind(ctx, kind, current.scopeName)
+        if (let Some(nextSymbol) <- nextOpt) {
+            if (SameSymbol(current, nextSymbol)) {
+                break
+            }
+        }
+        currentOpt = nextOpt
+    }
+    return insideOpt
+}
+
+private func TypeCheckAccessGetCurOuterDeclOfScopeLevel(
+    ctx: ASTContext,
+    checkNode: Node,
+    scopeLevel: UInt32
+): Option<Symbol> {
+    if (checkNode.scopeLevel < scopeLevel) {
+        return None
+    }
+    var scopeGateName = GetScopeGateName(checkNode.scopeName)
+    while (!scopeGateName.isEmpty()) {
+        if (let Some(symbol) <- GetScopeGate(ctx, scopeGateName)) {
+            if (symbol.scopeLevel == scopeLevel) {
+                return Some(symbol)
+            }
+            scopeGateName = GetScopeGateName(symbol.scopeName)
+        } else {
+            return None
+        }
     }
     return None
 }
@@ -441,44 +522,37 @@ public func GetAccessibleDecl(typeManager: TypeManager, ctx: ASTContext, accessS
     return Some(accessible[0])
 }
 
-public func CheckFuncAccessControl(typeManager: TypeManager, ctx: ASTContext, accessSite: Expr,
-    targets: ArrayList<Decl>): (Option<Decl>, Option<TypeAccessIssue>) {
+public func CheckFuncAccessControl(diag: BasicDiagnosticEngine, typeManager: TypeManager, ctx: ASTContext, accessSite: Expr,
+    targets: ArrayList<Decl>): Option<Decl> {
     let accessibleDecl = GetAccessibleDecl(typeManager, ctx, accessSite, targets)
     if (let Some(_) <- accessibleDecl) {
-        return (accessibleDecl, None)
+        return accessibleDecl
     }
     if (!targets.isEmpty() && targets[0].astKind == ASTKind.FUNC_DECL) {
-        return (
-            None,
-            Some(TypeAccessIssue(
-                TypeAccessIssueKind.INVALID_FUNCTION_ACCESS,
-                accessSite,
-                Some(targets[0]),
-                "function '${targets[0].identifier.Val()}' is not accessible"
-            ))
-        )
+        let builder = diag.Diagnose(accessSite.begin, accessSite.end,
+            BasicDiagKind.sema_invalid_access_function,
+            args: [BasicDiagArgument(targets[0].identifier.Val())])
+        builder.Emit()
     }
-    return (None, None)
+    return None
 }
 
-public func CheckNonFuncAccessControl(typeManager: TypeManager, ctx: ASTContext, accessSite: Expr,
-    target: Decl): Option<TypeAccessIssue> {
+public func CheckNonFuncAccessControl(diag: BasicDiagnosticEngine, typeManager: TypeManager, ctx: ASTContext,
+    accessSite: Expr, target: Decl): Bool {
     let sym = GetCurStructSymbol(ctx, accessSite.scopeName)
     if (IsLegalAccess(typeManager, sym, target, accessSite)) {
-        return None
+        return true
     }
-    return Some(TypeAccessIssue(
-        TypeAccessIssueKind.INVALID_ACCESS_CONTROL,
-        accessSite,
-        Some(target),
-        "declaration '${target.identifier.Val()}' is not accessible"
-    ))
+    let builder = diag.Diagnose(accessSite.begin, accessSite.end,
+        BasicDiagKind.sema_invalid_access_control,
+        args: [BasicDiagArgument(target.identifier.Val())])
+    builder.Emit()
+    return false
 }
 
 public func CheckIfUseInout(decl: FuncDecl): Bool {
-    let key = AccessDeclKey(decl)
     for (entry in inoutUseCache) {
-        if (entry.declKey == key) {
+        if (entry.decl == decl) {
             return entry.value
         }
     }
@@ -505,24 +579,103 @@ public func CheckIfUseInout(decl: FuncDecl): Bool {
         })
         let _ = walker.Walk()
     }
-    inoutUseCache.add(InoutUseCacheEntry(key, result.value))
+    inoutUseCache.add(InoutUseCacheEntry(decl, result.value))
     return result.value
 }
 
-public func CheckLetInstanceAccessMutableFunc(memberAccess: MemberAccess, target: Decl): ArrayList<TypeAccessIssue> {
-    let issues = ArrayList<TypeAccessIssue>()
+private func CheckMutationInStruct(diag: BasicDiagnosticEngine, ctx: ASTContext, expr: Expr): Unit {
+    if (let None <- expr.GetTarget()) {
+        return
+    }
+    let target = expr.GetTarget().getOrThrow()
+    if (target.astKind != ASTKind.VAR_DECL || target.TestAttr(Attribute.STATIC)) {
+        return
+    }
+    if (let None <- TypeCheckAccessGetOutMostSymbol(
+        ctx, TypeCheckAccessScopeSymbolKind.FUNC_LIKE, expr.scopeName)) {
+        return
+    }
+    let outFuncSymbol = TypeCheckAccessGetOutMostSymbol(
+        ctx, TypeCheckAccessScopeSymbolKind.FUNC_LIKE, expr.scopeName).getOrThrow()
+    if (let None <- outFuncSymbol.node) {
+        return
+    }
+    let outFuncNode = outFuncSymbol.node.getOrThrow()
+    if (outFuncNode.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.MUT)) {
+        return
+    }
+    if (let None <- TypeCheckAccessGetCurOuterDeclOfScopeLevel(ctx, expr, 0u32)) {
+        return
+    }
+    let outDeclSymbol = TypeCheckAccessGetCurOuterDeclOfScopeLevel(ctx, expr, 0u32).getOrThrow()
+    if (let None <- outDeclSymbol.node) {
+        return
+    }
+    let outDeclNode = outDeclSymbol.node.getOrThrow()
+    if (let Some(outDeclTy) <- outDeclNode.GetTy()) {
+        if (Ty.IsTyCorrect(outDeclTy) && outDeclTy.IsStruct()) {
+            if (let Some(structTy) <- (outDeclTy as StructTy)) {
+                if (let Some(structDecl) <- structTy.declPtr) {
+                    CheckMutationInStructNonMut(diag, structDecl, expr)
+                }
+            }
+        }
+    }
+}
+
+private func DiagImmutableAccessMutableFunc(diag: BasicDiagnosticEngine, outerMa: MemberAccess, ma: MemberAccess): Unit {
+    if (let None <- ma.baseExpr) {
+        return
+    }
+    let maBaseExpr = ma.baseExpr.getOrThrow()
+    let builder = diag.DiagnoseRefactor(
+        BasicDiagKindRefactor.sema_immutable_access_mutable_func,
+        MakeRange(maBaseExpr.begin, maBaseExpr.end))
+    let mutFuncPos = outerMa.GetFieldPos()
+    if (!mutFuncPos.IsZero() && !IsFieldOperator(ma.field.Val())) {
+        builder.AddHint(MakeRange(mutFuncPos, outerMa.field.Val()), arguments: ["is a mutable function"])
+    }
+    if (let Some(maBaseTarget) <- maBaseExpr.GetTarget()) {
+        if (let Some(varDecl) <- (maBaseTarget as VarDecl)) {
+            if (!varDecl.isVar && !varDecl.identifier.ZeroPos()) {
+                let letOrConst = if (varDecl.IsConst()) { "const" } else { "let" }
+                builder.AddNote(
+                    MakeRange(varDecl.identifier.Begin(), varDecl.identifier.End()),
+                    "'" + varDecl.identifier.Val() + "' is a variable declared with '" + letOrConst + "'")
+            } else if (let Some(propDecl) <- (varDecl as PropDecl)) {
+                if (propDecl.getters.size == 1 && !propDecl.getters[0].begin.IsZero()) {
+                    let getter = propDecl.getters[0]
+                    let getterRange = if (!getter.identifier.Begin().IsZero() && !getter.identifier.End().IsZero()) {
+                        MakeRange(getter.identifier.Begin(), getter.identifier.End())
+                    } else {
+                        MakeRange(getter.begin, getter.end)
+                    }
+                    builder.AddNote(getterRange, "property getter returns immutable value")
+                }
+            }
+        }
+    }
+    builder.Emit()
+}
+
+public func CheckLetInstanceAccessMutableFunc(
+    diag: BasicDiagnosticEngine,
+    ctx: ASTContext,
+    memberAccess: MemberAccess,
+    target: Decl
+): Unit {
     if (!target.TestAttr(Attribute.MUT) || target.astKind != ASTKind.FUNC_DECL) {
-        return issues
+        return
     }
     if (let None <- memberAccess.baseExpr) {
-        return issues
+        return
     }
     let baseExpr = memberAccess.baseExpr.getOrThrow()
     if (let None <- baseExpr.GetTy()) {
-        return issues
+        return
     }
     if (!MaybeStruct(baseExpr.GetTy().getOrThrow())) {
-        return issues
+        return
     }
 
     let useInout = if (let Some(funcDecl) <- (target as FuncDecl)) { CheckIfUseInout(funcDecl) } else { false }
@@ -535,12 +688,10 @@ public func CheckLetInstanceAccessMutableFunc(memberAccess: MemberAccess, target
         if (useInout) {
             if (let Some(baseTy) <- currentBase.GetTy()) {
                 if (baseTy.IsClassLike()) {
-                    issues.add(TypeAccessIssue(
-                        TypeAccessIssueKind.INOUT_MODIFY_HEAP_VARIABLE,
-                        currentBase,
-                        currentBase.GetTarget(),
-                        "inout argument may modify a heap variable through '${currentBase.ToString()}'"
-                    ))
+                    let builder = diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.sema_inout_modify_heap_variable,
+                        MakeRange(currentBase.begin, currentBase.end))
+                    builder.Emit()
                 }
             }
         }
@@ -548,31 +699,39 @@ public func CheckLetInstanceAccessMutableFunc(memberAccess: MemberAccess, target
         if (let Some(baseTarget) <- currentBase.GetTarget()) {
             if (let Some(varDecl) <- (baseTarget as VarDecl)) {
                 let immutableAccessMutableFunc = (varDecl.astKind == ASTKind.PROP_DECL || !varDecl.isVar) &&
-                    (if (let Some(varTy) <- varDecl.GetTy()) { !varTy.IsClassLike() } else { false })
+                    (if (let Some(varTy) <- varDecl.GetTy()) { Ty.IsTyCorrect(varTy) && !varTy.IsClassLike() } else { false })
                 if (immutableAccessMutableFunc) {
-                    issues.add(TypeAccessIssue(
-                        TypeAccessIssueKind.IMMUTABLE_ACCESS_MUT_FUNC,
-                        memberAccess,
-                        Some(target),
-                        "immutable value '${varDecl.identifier.Val()}' cannot access mutable function '${target.identifier.Val()}'"
-                    ))
-                    return issues
+                    DiagImmutableAccessMutableFunc(diag, memberAccess, current)
+                    return
                 }
             }
         }
 
         if (let Some(nextMember) <- (currentBase as MemberAccess)) {
             currentMember = Some(nextMember)
+        } else if (currentBase.astKind == ASTKind.REF_EXPR) {
+            if (useInout) {
+                if (let Some(refTarget) <- currentBase.GetTarget()) {
+                    if (let Some(varDecl) <- (refTarget as VarDecl)) {
+                        if (let Some(outerDecl) <- varDecl.outerDecl) {
+                            if (let Some(outerTy) <- outerDecl.GetTy()) {
+                                if (outerTy.IsClassLike()) {
+                                    let builder = diag.DiagnoseRefactor(
+                                        BasicDiagKindRefactor.sema_inout_modify_heap_variable,
+                                        MakeRange(currentBase.begin, currentBase.end))
+                                    builder.Emit()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            currentMember = None
         } else {
             if (let Some(baseTy) <- currentBase.GetTy()) {
-                if (!baseTy.IsClassLike() && currentBase.astKind != ASTKind.REF_EXPR) {
-                    issues.add(TypeAccessIssue(
-                        TypeAccessIssueKind.IMMUTABLE_ACCESS_MUT_FUNC,
-                        memberAccess,
-                        Some(target),
-                        "non-reference value cannot access mutable function '${target.identifier.Val()}'"
-                    ))
-                    return issues
+                if (Ty.IsTyCorrect(baseTy) && !baseTy.IsClassLike()) {
+                    DiagImmutableAccessMutableFunc(diag, memberAccess, current)
+                    return
                 }
             }
             currentMember = None
@@ -580,34 +739,44 @@ public func CheckLetInstanceAccessMutableFunc(memberAccess: MemberAccess, target
     }
 
     if (let None <- memberAccess.callOrPattern) {
-        issues.add(TypeAccessIssue(
-            TypeAccessIssueKind.USE_MUTABLE_FUNC_ALONE,
-            memberAccess,
-            Some(target),
-            "mutable function '${target.identifier.Val()}' must be called immediately"
-        ))
+        let range = if (memberAccess.field.ZeroPos()) {
+            MakeRange(memberAccess.begin, memberAccess.end)
+        } else {
+            MakeRange(memberAccess.field.Begin(), memberAccess.field.End())
+        }
+        let builder = diag.DiagnoseRefactor(
+            BasicDiagKindRefactor.sema_use_mutable_func_alone,
+            range,
+            arguments: [memberAccess.field.Val()])
+        builder.AddNote(
+            TypeCheckAccessDeclIdentifierRange(target),
+            "'" + target.identifier.Val() + "' is a mutable funciton")
+        builder.Emit()
+    } else {
+        if (let Some(baseExpr) <- memberAccess.baseExpr) {
+            CheckMutationInStruct(diag, ctx, baseExpr)
+        }
     }
-    return issues
 }
 
-public func CheckMutationInStructNonMut(structDecl: StructDecl, expr: Expr): ArrayList<TypeAccessIssue> {
-    let issues = ArrayList<TypeAccessIssue>()
+public func CheckMutationInStructNonMut(diag: BasicDiagnosticEngine, structDecl: StructDecl, expr: Expr): Unit {
     let forbiddenVars = CollectStructValueVars(structDecl)
     if (forbiddenVars.isEmpty()) {
-        return issues
+        return
     }
     var current: Option<Expr> = Some(expr)
     while (let Some(currentExpr) <- current) {
-        if (let Some(target) <- currentExpr.GetTarget()) {
-            if (ContainsDeclKey(forbiddenVars, target)) {
-                issues.add(TypeAccessIssue(
-                    TypeAccessIssueKind.CANNOT_MODIFY_STRUCT_VAR,
-                    expr,
-                    Some(target),
-                    "cannot modify non-static value member '${target.identifier.Val()}' in a non-mut function"
-                ))
-                return issues
+        if (let Some(refExpr) <- (currentExpr as RefExpr)) {
+            if (let Some(target) <- refExpr.GetTarget()) {
+                if (ContainsDeclKey(forbiddenVars, target)) {
+                    let builder = diag.Diagnose(expr.begin, expr.end,
+                        BasicDiagKind.sema_cannot_modify_var,
+                        args: [BasicDiagArgument(target.identifier.Val())])
+                    builder.Emit()
+                    return
+                }
             }
+            return
         }
         if (let Some(memberAccess) <- (currentExpr as MemberAccess)) {
             if (let Some(baseExpr) <- memberAccess.baseExpr) {
@@ -616,13 +785,25 @@ public func CheckMutationInStructNonMut(structDecl: StructDecl, expr: Expr): Arr
                         break
                     }
                 }
+                if (let Some(refExpr) <- (baseExpr as RefExpr)) {
+                    if (refExpr.isThis) {
+                        if (let Some(target) <- memberAccess.GetTarget()) {
+                            if (ContainsDeclKey(forbiddenVars, target)) {
+                                let builder = diag.Diagnose(expr.begin, expr.end,
+                                    BasicDiagKind.sema_cannot_modify_var,
+                                    args: [BasicDiagArgument(target.identifier.Val())])
+                                builder.Emit()
+                                return
+                            }
+                        }
+                    }
+                }
                 current = Some(baseExpr)
                 continue
             }
         }
         current = None
     }
-    return issues
 }
 
 private func InoutExprTouchesReceiver(expr: Expr, decl: FuncDecl): Bool {
@@ -631,7 +812,7 @@ private func InoutExprTouchesReceiver(expr: Expr, decl: FuncDecl): Bool {
         if (let Some(target) <- currentExpr.GetTarget()) {
             if (let Some(targetOuter) <- target.outerDecl) {
                 if (let Some(declOuter) <- decl.outerDecl) {
-                    if (AccessDeclKey(targetOuter) == AccessDeclKey(declOuter)) {
+                    if (targetOuter == declOuter) {
                         return true
                     }
                 }
@@ -664,17 +845,17 @@ private func PeelParenExpr(expr: Expr): Expr {
     return current
 }
 
-private func CollectStructValueVars(structDecl: StructDecl): HashSet<String> {
-    let out = HashSet<String>()
+private func CollectStructValueVars(structDecl: StructDecl): HashSet<Node> {
+    let out = HashSet<Node>()
     if (let Some(body) <- structDecl.body) {
         for (decl in body.decls) {
             if (let Some(varDecl) <- (decl as VarDecl)) {
-                if (!varDecl.TestAttr(Attribute.STATIC)) {
-                    if (let Some(varTy) <- varDecl.GetTy()) {
-                        if (!varTy.IsArray()) {
-                            out.add(AccessDeclKey(varDecl))
-                        }
-                    }
+                if (!varDecl.TestAttr(Attribute.STATIC) && (if (let Some(varTy) <- varDecl.GetTy()) {
+                    Ty.IsTyCorrect(varTy) && !varTy.IsArray()
+                } else {
+                    false
+                })) {
+                    out.add(varDecl)
                 }
             }
         }
@@ -682,8 +863,8 @@ private func CollectStructValueVars(structDecl: StructDecl): HashSet<String> {
     return out
 }
 
-private func ContainsDeclKey(keys: HashSet<String>, decl: Decl): Bool {
-    return keys.contains(AccessDeclKey(decl))
+private func ContainsDeclKey(keys: HashSet<Node>, decl: Decl): Bool {
+    return keys.contains(decl)
 }
 
 private func IsSameFile(accessSite: Node, target: Decl): Bool {
@@ -693,11 +874,6 @@ private func IsSameFile(accessSite: Node, target: Decl): Bool {
         }
     }
     return false
-}
-
-private func AccessDeclKey(decl: Decl): String {
-    return "${ASTKindIndex(decl.astKind)}:${decl.fullPackageName}:${decl.identifier.Val()}:" +
-        "${decl.begin.ToString()}:${decl.end.ToString()}"
 }
 
 public func SelfhostPortStatus_TypeCheckAccess(): Bool {

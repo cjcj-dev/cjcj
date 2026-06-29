@@ -515,23 +515,7 @@ private func TypeCheckReferenceCheckMutationInStruct(
         if (Ty.IsTyCorrect(outDeclTy) && outDeclTy.IsStruct()) {
             if (let Some(structTy) <- (outDeclTy as StructTy)) {
                 if (let Some(structDecl) <- structTy.declPtr) {
-                    for (issue in CheckMutationInStructNonMut(structDecl, expr)) {
-                        if (issue.kind == TypeAccessIssueKind.CANNOT_MODIFY_STRUCT_VAR) {
-                            let targetName = if (let Some(issueTarget) <- issue.target) {
-                                issueTarget.identifier.Val()
-                            } else {
-                                target.identifier.Val()
-                            }
-                            let builder = diag.Diagnose(
-                                issue.node.begin,
-                                issue.node.end,
-                                BasicDiagKind.sema_cannot_modify_var,
-                                args: [BasicDiagArgument(targetName)])
-                            builder.Emit()
-                        } else {
-                            TypeCheckReferenceEmitAccessIssue(diag, issue)
-                        }
-                    }
+                    CheckMutationInStructNonMut(diag, structDecl, expr)
                 }
             }
         }
@@ -968,36 +952,6 @@ private func TypeCheckReferenceEmitRefNotType(
     builder.Emit()
 }
 
-private func TypeCheckReferenceEmitAccessIssue(
-    diag: BasicDiagnosticEngine,
-    issue: TypeAccessIssue
-): Unit {
-    let targetName = if (let Some(target) <- issue.target) { target.identifier.Val() } else { "" }
-    if (issue.kind == TypeAccessIssueKind.INVALID_ACCESS_CONTROL) {
-        let builder = diag.Diagnose(issue.node.begin, issue.node.end,
-            BasicDiagKind.sema_invalid_access_control,
-            args: [BasicDiagArgument(targetName)])
-        builder.Emit()
-    } else if (issue.kind == TypeAccessIssueKind.INVALID_FUNCTION_ACCESS) {
-        let builder = diag.Diagnose(issue.node.begin, issue.node.end,
-            BasicDiagKind.sema_invalid_access_function,
-            args: [BasicDiagArgument(targetName)])
-        builder.Emit()
-    } else if (issue.kind == TypeAccessIssueKind.IMMUTABLE_ACCESS_MUT_FUNC ||
-        issue.kind == TypeAccessIssueKind.INOUT_MODIFY_HEAP_VARIABLE) {
-        let builder = diag.DiagnoseRefactor(
-            BasicDiagKindRefactor.sema_immutable_access_mutable_func,
-            TypeCheckReferenceRange(issue.node))
-        builder.Emit()
-    } else if (issue.kind == TypeAccessIssueKind.USE_MUTABLE_FUNC_ALONE) {
-        let builder = diag.DiagnoseRefactor(
-            BasicDiagKindRefactor.sema_use_mutable_func_alone,
-            TypeCheckReferenceRange(issue.node),
-            arguments: [targetName])
-        builder.Emit()
-    }
-}
-
 private func TypeCheckReferenceIsNamespaceMemberAccessLegal(
     diag: BasicDiagnosticEngine,
     ma: MemberAccess,
@@ -1062,14 +1016,12 @@ public func TypeCheckReferenceCheckStaticMemberAccessLegality(
 
 public func TypeCheckReferenceCheckInstanceMemberAccessLegality(
     diag: BasicDiagnosticEngine,
+    ctx: ASTContext,
     ma: MemberAccess,
     target: Decl
 ): Bool {
     var valid = true
-    for (issue in CheckLetInstanceAccessMutableFunc(ma, target)) {
-        TypeCheckReferenceEmitAccessIssue(diag, issue)
-        valid = false
-    }
+    CheckLetInstanceAccessMutableFunc(diag, ctx, ma, target)
     if (let Some(baseExpr) <- ma.baseExpr) {
         if (let Some(refExpr) <- (baseExpr as RefExpr)) {
             if (refExpr.isSuper && target.TestAttr(Attribute.ABSTRACT)) {
@@ -1117,9 +1069,7 @@ public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
         if (ma.isAlone) {
             let candidates = ArrayList<Decl>()
             candidates.add(decl)
-            let (_, issue) = CheckFuncAccessControl(tm, ctx, ma, candidates)
-            if (let Some(accessIssue) <- issue) {
-                TypeCheckReferenceEmitAccessIssue(diag, accessIssue)
+            if (let None <- CheckFuncAccessControl(diag, tm, ctx, ma, candidates)) {
                 valid = false
             }
             if (decl.TestAttr(Attribute.UNSAFE) && !ma.isInFlowExpr) {
@@ -1130,8 +1080,7 @@ public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
                 valid = false
             }
         }
-    } else if (let Some(issue) <- CheckNonFuncAccessControl(tm, ctx, ma, decl)) {
-        TypeCheckReferenceEmitAccessIssue(diag, issue)
+    } else if (!CheckNonFuncAccessControl(diag, tm, ctx, ma, decl)) {
         valid = false
     }
 
@@ -1147,7 +1096,7 @@ public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
         if (!TypeCheckReferenceCheckStaticMemberAccessLegality(diag, ma, decl)) {
             valid = false
         }
-    } else if (!TypeCheckReferenceCheckInstanceMemberAccessLegality(diag, ma, decl)) {
+    } else if (!TypeCheckReferenceCheckInstanceMemberAccessLegality(diag, ctx, ma, decl)) {
         valid = false
     }
     return valid
@@ -1200,9 +1149,7 @@ public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
     if (decl.IsFunc()) {
         if (re.isAlone) {
             let candidates = TypeCheckReferenceCopyTargetsOrSingle(re.ref.targets, decl)
-            let (_, issue) = CheckFuncAccessControl(tm, ctx, re, candidates)
-            if (let Some(accessIssue) <- issue) {
-                TypeCheckReferenceEmitAccessIssue(diag, accessIssue)
+            if (let None <- CheckFuncAccessControl(diag, tm, ctx, re, candidates)) {
                 valid = false
             }
             if (decl.TestAttr(Attribute.UNSAFE) && !re.isInFlowExpr) {
@@ -1213,8 +1160,7 @@ public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
                 valid = false
             }
         }
-    } else if (let Some(issue) <- CheckNonFuncAccessControl(tm, ctx, re, decl)) {
-        TypeCheckReferenceEmitAccessIssue(diag, issue)
+    } else if (!CheckNonFuncAccessControl(diag, tm, ctx, re, decl)) {
         valid = false
     }
     if (re.isAlone && decl.IsTypeDecl()) {
