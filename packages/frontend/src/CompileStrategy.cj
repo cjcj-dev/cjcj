@@ -2,6 +2,7 @@ package cangjie_compiler::frontend
 
 import cangjie_compiler::ast.AddCurFile
 import cangjie_compiler::ast.TokenKind
+import cangjie_compiler::basic.InteropCJPackageConfigReader
 import cangjie_compiler::conditional_compilation.ConditionalCompilation
 import cangjie_compiler::parse.DiagnosticEngine as ParseDiagnosticEngine
 import cangjie_compiler::parse.DiagSeverity as ParseDiagSeverity
@@ -10,6 +11,7 @@ import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagSeverity as BasicDiagSeverity
 import cangjie_compiler::basic.GetHash
 import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.ProfileRecorder
 import std.collection.*
 import std.sort.*
 
@@ -64,6 +66,18 @@ public open class CompileStrategy {
 
     public func DesugarAfterSema(): Unit {
         ()
+    }
+
+    public func InteropConfigTomlCheck(): Unit {
+        try (recorder = ProfileRecorder("Semantic", "InteropConfigTomlCheck")) {
+            let packagesFullConfig = InteropCJPackageConfigReader()
+            if (ci.invocation.globalOptions.enableInteropCJMapping &&
+                ci.invocation.globalOptions.interopCJPackageConfigPath != "./" &&
+                !packagesFullConfig.Parse(ci.invocation.globalOptions.interopCJPackageConfigPath)) {
+                ci.diag.DiagnoseRefactor(DiagKindRefactor.sema_cj_mapping_generic_method_not_get_instance_config,
+                    DEFAULT_POSITION, arguments: [ci.invocation.globalOptions.interopCJPackageConfigPath])
+            }
+        }
     }
 
     public func ImportPackages(): Bool {
@@ -182,8 +196,8 @@ private class FullCompileStrategyImpl {
             for (filePath in parseFiles) {
                 let readResult = ReadFileContent(filePath)
                 if (!readResult[0]) {
-                    s.ci.diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
-                        "failed to read source file '" + filePath + "': " + readResult[2])
+                    s.ci.diag.DiagnoseRefactor(DiagKindRefactor.module_read_file_to_buffer_failed,
+                        DEFAULT_POSITION, arguments: [filePath, readResult[2]])
                     success = false
                     continue
                 }
@@ -244,8 +258,8 @@ private class FullCompileStrategyImpl {
             for (file in pkg.files) {
                 if (let Some(filePackageSpec) <- file.packageSpec) {
                     if (filePackageSpec.hasMacro != packageSpec.hasMacro) {
-                        s.ci.diag.Diagnose(DiagCategory.PARSE, filePackageSpec.begin,
-                            "package name inconsistent with macro package marker")
+                        s.ci.diag.DiagnoseRefactor(DiagKindRefactor.package_name_inconsistent_with_macro,
+                            filePackageSpec.begin)
                         return
                     }
                 }
@@ -321,8 +335,6 @@ private class FullCompileStrategyImpl {
                     pkg.accessible = AccessLevel.PROTECTED
                 } else if (modifier.modifier == TokenKind.INTERNAL) {
                     pkg.accessible = AccessLevel.INTERNAL
-                } else if (modifier.modifier == TokenKind.PRIVATE) {
-                    pkg.accessible = AccessLevel.PRIVATE
                 } else {
                     pkg.accessible = AccessLevel.PUBLIC
                 }
