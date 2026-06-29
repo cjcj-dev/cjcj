@@ -1,5 +1,6 @@
 package cangjie_compiler::macro_pkg
 
+import cangjie_compiler::basic.Errorln
 import std.collection.*
 
 private func appendUInt16(out: ArrayList<UInt8>, value: UInt16): Unit {
@@ -19,20 +20,12 @@ private func appendInt32(out: ArrayList<UInt8>, value: Int64): Unit {
 }
 
 private func readUInt16(bytes: ArrayList<UInt8>, cursor: Box<Int64>): UInt16 {
-    if (cursor.value + 1 >= bytes.size) {
-        cursor.value = bytes.size
-        return 0u16
-    }
     let raw = UInt16(bytes[cursor.value]) | (UInt16(bytes[cursor.value + 1]) << 8)
     cursor.value += 2
     return raw
 }
 
 private func readUInt32(bytes: ArrayList<UInt8>, cursor: Box<Int64>): UInt32 {
-    if (cursor.value + 3 >= bytes.size) {
-        cursor.value = bytes.size
-        return 0u32
-    }
     let b0 = UInt32(bytes[cursor.value])
     let b1 = UInt32(bytes[cursor.value + 1]) << 8
     let b2 = UInt32(bytes[cursor.value + 2]) << 16
@@ -87,7 +80,7 @@ private func readInt32(bytes: ArrayList<UInt8>, cursor: Box<Int64>): Int64 {
 private func readString(bytes: ArrayList<UInt8>, cursor: Box<Int64>, len: Int64): String {
     let builder = StringBuilder()
     var idx: Int64 = 0
-    while (idx < len && cursor.value < bytes.size) {
+    while (idx < len) {
         let byte = bytes[cursor.value]
         if (byte == 0u8) {
             builder.append("\\0")
@@ -176,13 +169,10 @@ public class TokenSerialization {
 
     public static func GetTokensFromBytes(bytes: ArrayList<UInt8>): ArrayList<Token> {
         let out = ArrayList<Token>()
-        if (bytes.isEmpty()) {
-            return out
-        }
         let cursor = Box<Int64>(0)
         let count = readUInt32(bytes, cursor)
         var idx: UInt32 = 0u32
-        while (idx < count && cursor.value < bytes.size) {
+        while (idx < count) {
             let kind = tokenKindFromIndex(readUInt16(bytes, cursor))
             let strLen = Int64(readUInt32(bytes, cursor))
             let value = readString(bytes, cursor, strLen)
@@ -244,16 +234,33 @@ public class TokenSerialization {
         return out
     }
 
-    public static func GetTokensBytesWithHead(tokens: ArrayList<Token>): ArrayList<UInt8> {
-        let payload = GetTokensBytes(tokens)
-        if (payload.isEmpty()) {
-            return ArrayList<UInt8>()
+    public static func GetTokensBytesWithHead(tokens: ArrayList<Token>): CPointer<UInt8> {
+        if (tokens.isEmpty()) {
+            return CPointer<UInt8>()
         }
-        let out = ArrayList<UInt8>()
-        appendUInt32(out, UInt32(payload.size + 4))
-        for (byte in payload) {
-            out.add(byte)
+        let tokensBytes = GetTokensBytes(tokens)
+        let bufferSize = tokensBytes.size + 4
+        if (bufferSize == 0 || bufferSize > 4294967295) {
+            Errorln("Memory Allocated Size is Not Valid.")
+            return CPointer<UInt8>()
         }
-        return out
+        let rawPtr = LibC.malloc<UInt8>(count: bufferSize)
+        if (rawPtr.isNull()) {
+            Errorln("Memory Allocation Failed.")
+            return rawPtr
+        }
+        let head = UInt32(bufferSize)
+        unsafe {
+            (rawPtr + 0).write(UInt8(UInt64(head) & 0xff))
+            (rawPtr + 1).write(UInt8((UInt64(head) >> 8) & 0xff))
+            (rawPtr + 2).write(UInt8((UInt64(head) >> 16) & 0xff))
+            (rawPtr + 3).write(UInt8((UInt64(head) >> 24) & 0xff))
+            var idx: Int64 = 0
+            while (idx < tokensBytes.size) {
+                (rawPtr + 4 + idx).write(tokensBytes[idx])
+                idx++
+            }
+        }
+        return rawPtr
     }
 }
