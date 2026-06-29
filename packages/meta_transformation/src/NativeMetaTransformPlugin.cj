@@ -1,15 +1,19 @@
 package cangjie_compiler::meta_transformation
 
-import cangjie_compiler::basic.CANGJIE_VERSION
+import cangjie_compiler::basic.{CANGJIE_VERSION, Errorln}
 
-@When[os != "Windows"]
-private let DLOPEN_MODE: Int32 = 0x101
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
+private let RTLD_NOW: Int32 = 0x2
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
+private let RTLD_LOCAL: Int32 = 0x0
 
-@When[os != "Windows"]
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
 foreign {
     func dlopen(filename: CString, flag: Int32): CPointer<Unit>
     func dlsym(handle: CPointer<Unit>, symbol: CString): CPointer<Unit>
     func dlclose(handle: CPointer<Unit>): Int32
+    func realpath(path: CString, resolvedPath: CString): CString
+    func free(ptr: CString): Unit
     func strcmp(lhs: CString, rhs: CString): Int32
 }
 
@@ -21,9 +25,20 @@ foreign {
     func strcmp(lhs: CString, rhs: CString): Int32
 }
 
-@When[os != "Windows"]
-private func OpenNativeLibrary(path: CString): CPointer<Unit> {
-    return unsafe { dlopen(path, DLOPEN_MODE) }
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
+private func OpenNativeLibrary(path: String, pathCString: CString): CPointer<Unit> {
+    var handle = CPointer<Unit>()
+    let realpathRes = unsafe { realpath(pathCString, CString(CPointer<UInt8>())) }
+    if (realpathRes.isNull()) {
+        Errorln("could not get realpath of library: " + path)
+        return handle
+    }
+    handle = unsafe { dlopen(realpathRes, RTLD_NOW | RTLD_LOCAL) }
+    unsafe { free(realpathRes) }
+    if (handle.isNull()) {
+        Errorln("could not load the dynamic library: " + path)
+    }
+    return handle
 }
 
 @When[os == "Windows"]
@@ -31,7 +46,7 @@ private func OpenNativeLibrary(path: CString): CPointer<Unit> {
     return unsafe { LoadLibraryA(path) }
 }
 
-@When[os != "Windows"]
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
 private func GetNativeSymbol(handle: CPointer<Unit>, name: CString): CPointer<Unit> {
     return unsafe { dlsym(handle, name) }
 }
@@ -41,7 +56,7 @@ private func GetNativeSymbol(handle: CPointer<Unit>, name: CString): CPointer<Un
     return unsafe { GetProcAddress(handle, name) }
 }
 
-@When[os != "Windows"]
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
 private func CloseNativeLibrary(handle: CPointer<Unit>): Int64 {
     return Int64(unsafe { dlclose(handle) })
 }
@@ -51,6 +66,18 @@ private func CloseNativeLibrary(handle: CPointer<Unit>): Int64 {
     return Int64(unsafe { FreeLibrary(handle) })
 }
 
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
+private func LoadNativeLibrary(path: String): CPointer<Unit> {
+    var result = CPointer<Unit>()
+    try (pathCString = unsafe { LibC.mallocCString(path) }.asResource()) {
+        result = OpenNativeLibrary(path, pathCString.value)
+    } catch (e: Exception) {
+        result = CPointer<Unit>()
+    }
+    return result
+}
+
+@When[os == "Windows"]
 private func LoadNativeLibrary(path: String): CPointer<Unit> {
     var result = CPointer<Unit>()
     try (pathCString = unsafe { LibC.mallocCString(path) }.asResource()) {
