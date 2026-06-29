@@ -2648,6 +2648,13 @@ private class FrontendCjoFlatBufferWriter {
             if (value.TestAttr(attr)) {
                 return true
             }
+            if (let Some(funcDecl) <- (value as FuncDecl)) {
+                if (let Some(ownerFunc) <- funcDecl.ownerFunc) {
+                    if (ownerFunc.TestAttr(attr)) {
+                        return true
+                    }
+                }
+            }
             current = value.outerDecl
         }
         return false
