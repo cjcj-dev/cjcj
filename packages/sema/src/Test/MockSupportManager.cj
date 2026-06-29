@@ -300,7 +300,3 @@ public class MockSupportManager {
         }
     }
 }
-
-public func SelfhostPortStatus_Test_MockSupportManager(): Bool {
-    return true
-}

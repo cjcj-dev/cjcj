@@ -2,30 +2,24 @@ package cangjie_compiler::sema.Test
 
 import std.collection.*
 import cangjie_compiler::ast.*
-import cangjie_compiler::basic.SourceManager
+import cangjie_compiler::mangle.{BaseMangler, MangleAstAdapter, ManglerContext}
+import cangjie_compiler::utils.CJC_ASSERT_WITH_MSG
 
 public class MockContext {
-    public let manglerCtxs: HashSet<String> = HashSet<String>()
+    public let mangler: BaseMangler = BaseMangler()
+    private let manglerCtxs: HashMap<String, ManglerContext> = HashMap<String, ManglerContext>()
 
     public init() {}
 
-    public func PrepareManglerContext(pkg: Package): Unit {
-        let pkgName = ReduceUnitTestPackageName(pkg.fullPackageName)
-        if (manglerCtxs.contains(pkgName)) {
-            return
+    ~init() {
+        for ((pkgName, _) in manglerCtxs) {
+            mangler.manglerCtxTable.remove(pkgName)
         }
-        manglerCtxs.add(pkgName)
     }
 
-    public func Clear(): Unit {
-        manglerCtxs.clear()
+    public func PrepareManglerContext(pkg: Package): Unit {
+        let pkgName = ManglerContext.ReduceUnitTestPackageName(pkg.fullPackageName)
+        CJC_ASSERT_WITH_MSG(!manglerCtxs.contains(pkgName), "Prepare each package only once")
+        manglerCtxs[pkgName] = mangler.PrepareContextForPackage(MangleAstAdapter().ConvertPackage(pkg))
     }
-}
-
-public func ReduceUnitTestPackageName(pkgName: String): String {
-    let suffix = SourceManager.testPkgSuffix
-    if (pkgName.endsWith(suffix)) {
-        return pkgName[0..pkgName.size - suffix.size]
-    }
-    return pkgName
 }
