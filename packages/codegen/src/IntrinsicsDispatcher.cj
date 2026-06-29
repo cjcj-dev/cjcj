@@ -38,11 +38,8 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
         return UnitOrNull(irBuilder, resultType)
     }
     if (kind == IntrinsicKind.BEGIN_CATCH) {
-        if (!args.isEmpty()) {
-            let exceptionValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0])
-            return irBuilder.CallPostThrowExceptionIntrinsic(exceptionValue.GetRawValue())
-        }
-        return irBuilder.CallExceptionIntrinsicGetExceptionValue()
+        let exceptionValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0])
+        return irBuilder.CallPostThrowExceptionIntrinsic(exceptionValue.GetRawValue())
     }
     if (kind == IntrinsicKind.OBJECT_REFEQ || kind == IntrinsicKind.RAW_ARRAY_REFEQ ||
         kind == IntrinsicKind.FUNC_REFEQ) {
@@ -135,7 +132,7 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
         if (!args.isEmpty()) {
             let rawArg = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
             let nullValue = unsafe { LLVMConstNull(LLVMTypeOf(rawArg)) }
-            return irBuilder.CreateICmp(LLVMIntPredicate.EQ, rawArg, nullValue, name: "is.null")
+            return irBuilder.CreateICmp(LLVMIntPredicate.NE, rawArg, nullValue, name: "is.null")
         }
         return LLVMNullValue()
     }
@@ -200,7 +197,10 @@ private func GenerateArraySyscall(irBuilder: IRBuilder2, kind: IntrinsicKind, ar
                 let elementValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[1]).GetRawValue()
                 let sizeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[2]).GetRawValue()
                 let _ = irBuilder.CallArrayInit(arrayValue, sizeValue, elementValue, rawArrayTy)
-                return UnitOrTypedNull(irBuilder, resultType)
+                if (let Some(resultTy) <- resultType) {
+                    return irBuilder.CreateNullValue(resultTy)
+                }
+                return LLVMNullValue()
             }
         }
         return LLVMNullValue()
@@ -248,7 +248,10 @@ private func GenerateArrayCopyTo(irBuilder: IRBuilder2, args: ArrayList<Value>,
         let dstStart = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[3]).GetRawValue()
         let copyLen = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[4]).GetRawValue()
         let _ = irBuilder.CallArrayIntrinsicCopyTo(rawArrayTy, srcArray, dstArray, srcStart, dstStart, copyLen)
-        return UnitOrTypedNull(irBuilder, resultType)
+        if (let Some(resultTy) <- resultType) {
+            return irBuilder.CreateNullValue(resultTy)
+        }
+        return LLVMNullValue()
     }
     return LLVMNullValue()
 }

@@ -50,7 +50,10 @@ public class CGArrayType <: CGType {
     }
 
     protected override func CalculateSizeAndAlign(): Unit {
-        size = 8
-        align = 8
+        if (layoutType.isSome()) {
+            let rawArrayTy = (chirType as RawArrayType) ?? throw IllegalArgumentException("expected raw array type")
+            size = CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType()).GetSize()
+            align = 1
+        }
     }
 }

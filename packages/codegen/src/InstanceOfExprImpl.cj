@@ -11,7 +11,8 @@ private let UG_TUPLE_KIND: UInt64 = 21u64
 
 public func GenerateInstanceOf(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(instanceOf) <- (chirExpr as InstanceOf)) {
-        let targetTypeInfo = CreateTypeInfoAsI8PtrForInstanceOf(irBuilder, instanceOf.GetType())
+        let targetTypeInfo = irBuilder.CreateBitCast(irBuilder.CreateTypeInfo(instanceOf.GetType()),
+            I8PtrType(irBuilder), name: "ti.i8")
         let objectTy = if (let Some(operandTy) <- instanceOf.GetObject().GetType()) {
             operandTy.StripAllRefs()
         } else {
@@ -26,13 +27,15 @@ public func GenerateInstanceOf(irBuilder: IRBuilder2, chirExpr: Expression): LLV
         }
         if (objectTy.IsTuple()) {
             let instanceTypeInfo = if (CGType.GetOrCreate(irBuilder.GetCGModule(), objectTy).GetSize().isSome()) {
-                CreateTypeInfoAsI8PtrForInstanceOf(irBuilder, objectTy)
+                irBuilder.CreateBitCast(irBuilder.CreateTypeInfo(objectTy), I8PtrType(irBuilder), name: "ti.i8")
             } else {
                 unsafe { LLVMConstNull(I8PtrType(irBuilder)) }
             }
             return CallIsTupleTypeOf(irBuilder, objectVal, instanceTypeInfo, targetTypeInfo)
         }
-        return CallIsSubtype(irBuilder, CreateTypeInfoAsI8PtrForInstanceOf(irBuilder, objectTy), targetTypeInfo)
+        return CallIsSubtype(irBuilder,
+            irBuilder.CreateBitCast(irBuilder.CreateTypeInfo(objectTy), I8PtrType(irBuilder), name: "ti.i8"),
+            targetTypeInfo)
     }
     return LLVMNullValue()
 }
@@ -90,11 +93,6 @@ private func GetTypeKindFromTypeInfo(irBuilder: IRBuilder2, typeInfo: LLVMValueR
     let typeKindPtr = irBuilder.CreateStructGEP(typeInfoType, typedTypeInfo, 1u32, name: "ti.kind.ptr")
     return irBuilder.CreateLoad(unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }, typeKindPtr,
         name: "ti.kind")
-}
-
-private func CreateTypeInfoAsI8PtrForInstanceOf(irBuilder: IRBuilder2, ty: Type): LLVMValueRef {
-    return irBuilder.CreateBitCast(CGType.GetOrCreate(irBuilder.GetCGModule(),
-        ty.StripAllRefs()).GetOrCreateTypeInfo(), I8PtrType(irBuilder), name: "ti.i8")
 }
 
 private func CallIsSubtype(irBuilder: IRBuilder2, instanceTypeInfo: LLVMValueRef,

@@ -24,10 +24,6 @@ public enum LLVMCodeGenFileType {
     | AssemblyFile | ObjectFile
 }
 
-public enum LLVMGlobalISelAbortMode {
-    | GlobalISelAbortEnable | GlobalISelAbortDisable | GlobalISelAbortDisableWithDiag
-}
-
 public enum LLVMTargetArch {
     | ARM | AArch64 | X86
 }
@@ -72,14 +68,6 @@ public func LLVMCodeGenFileTypeValue(fileType: LLVMCodeGenFileType): Int32 {
     }
 }
 
-public func LLVMGlobalISelAbortModeValue(mode: LLVMGlobalISelAbortMode): Int32 {
-    return match (mode) {
-        case LLVMGlobalISelAbortMode.GlobalISelAbortEnable => 0
-        case LLVMGlobalISelAbortMode.GlobalISelAbortDisable => 1
-        case LLVMGlobalISelAbortMode.GlobalISelAbortDisableWithDiag => 2
-    }
-}
-
 foreign {
     func LLVMInitializeARMTargetInfo(): Unit
     func LLVMInitializeARMTarget(): Unit
@@ -120,10 +108,6 @@ foreign {
     func LLVMGetTargetMachineFeatureString(targetMachine: LLVMTargetMachineRef): CString
     func LLVMCreateTargetDataLayout(targetMachine: LLVMTargetMachineRef): LLVMTargetDataRef
     func LLVMSetTargetMachineAsmVerbosity(targetMachine: LLVMTargetMachineRef, verboseAsm: Int32): Unit
-    func LLVMSetTargetMachineFastISel(targetMachine: LLVMTargetMachineRef, enable: Int32): Unit
-    func LLVMSetTargetMachineGlobalISel(targetMachine: LLVMTargetMachineRef, enable: Int32): Unit
-    func LLVMSetTargetMachineGlobalISelAbort(targetMachine: LLVMTargetMachineRef, mode: Int32): Unit
-    func LLVMSetTargetMachineMachineOutliner(targetMachine: LLVMTargetMachineRef, enable: Int32): Unit
     func LLVMTargetMachineEmitToFile(targetMachine: LLVMTargetMachineRef, module: LLVMModuleRef, filename: CString,
         codegen: Int32, outMessage: CPointer<CString>): Int32
     func LLVMTargetMachineEmitToMemoryBuffer(targetMachine: LLVMTargetMachineRef, module: LLVMModuleRef,
@@ -409,30 +393,6 @@ public class LLVMTargetMachineHandle <: Resource {
     public func SetAsmVerbosity(verboseAsm: Bool): Unit {
         if (!raw.isNull()) {
             unsafe { LLVMSetTargetMachineAsmVerbosity(raw, if (verboseAsm) { 1 } else { 0 }) }
-        }
-    }
-
-    public func SetFastISel(enable: Bool): Unit {
-        if (!raw.isNull()) {
-            let _ = enable
-        }
-    }
-
-    public func SetGlobalISel(enable: Bool): Unit {
-        if (!raw.isNull()) {
-            let _ = enable
-        }
-    }
-
-    public func SetGlobalISelAbort(mode: LLVMGlobalISelAbortMode): Unit {
-        if (!raw.isNull()) {
-            let _ = mode
-        }
-    }
-
-    public func SetMachineOutliner(enable: Bool): Unit {
-        if (!raw.isNull()) {
-            let _ = enable
         }
     }
 
