@@ -10,6 +10,9 @@ import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::option.BackendType as OptionBackendType
+import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
+import cangjie_compiler::option.IsUnsafeBackend as OptionIsUnsafeBackend
 
 private let CFUNC_NAME: String = "CFunc"
 
@@ -140,6 +143,26 @@ private func IsZeroSizedTyImpl(ty: Ty, visited: ArrayList<Ty>): Bool {
 
 public func IsZeroSizedTy(ty: Ty): Bool {
     return IsZeroSizedTyImpl(ty, ArrayList<Ty>())
+}
+
+public func IsInCFunc(ctx: ASTContext, refExpr: RefExpr): Bool {
+    var symbolOpt = ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, refExpr.scopeName)
+    while (let Some(symbol) <- symbolOpt) {
+        if (symbol.scopeName.isEmpty()) {
+            return false
+        }
+        if (let Some(node) <- symbol.node) {
+            if (let Some(lambdaExpr) <- (node as LambdaExpr)) {
+                if (let Some(lambdaTy) <- lambdaExpr.GetTy()) {
+                    if (Ty.IsTyCorrect(lambdaTy) && lambdaTy.IsCFunc()) {
+                        return true
+                    }
+                }
+            }
+        }
+        symbolOpt = ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, symbol.scopeName)
+    }
+    return false
 }
 
 public func CheckAnnoC(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
@@ -353,8 +376,8 @@ public func CheckCFuncSignature(body: FuncBody, diag: BasicDiagnosticEngine): Un
     }
 }
 
-public func CheckInvalidRefInCFunc(refExpr: RefExpr, target: Decl, diag: BasicDiagnosticEngine): Unit {
-    if (target.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.ENUM_CONSTRUCTOR)) {
+public func CheckInvalidRefInCFunc(ctx: ASTContext, refExpr: RefExpr, target: Decl, diag: BasicDiagnosticEngine): Unit {
+    if (!IsInCFunc(ctx, refExpr) || target.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.ENUM_CONSTRUCTOR)) {
         return
     }
     if (IsNonStaticMember(target)) {
@@ -366,7 +389,10 @@ public func CheckInvalidRefInCFunc(refExpr: RefExpr, target: Decl, diag: BasicDi
     }
 }
 
-public func CheckInvalidThisOrSuperInCFunc(refExpr: RefExpr, diag: BasicDiagnosticEngine): Unit {
+public func CheckInvalidRefInCFunc(ctx: ASTContext, refExpr: RefExpr, diag: BasicDiagnosticEngine): Unit {
+    if (!IsInCFunc(ctx, refExpr)) {
+        return
+    }
     if (refExpr.isThis) {
         EmitLegacy(
             diag,
@@ -424,7 +450,14 @@ public func CheckCTypeMember(decl: Decl, diag: BasicDiagnosticEngine): Unit {
     }
 }
 
-public func CheckUnsafeInvoke(call: CallExpr, diag: BasicDiagnosticEngine): Unit {
+public func CheckUnsafeInvoke(
+    call: CallExpr,
+    diag: BasicDiagnosticEngine,
+    backendType!: OptionBackendType = OptionGlobalOptions().backend
+): Unit {
+    if (!OptionIsUnsafeBackend(backendType)) {
+        return
+    }
     if (let Some(resolved) <- call.resolvedFunction) {
         if (!Ty.IsTyCorrect(resolved.GetTy())) {
             return
@@ -439,10 +472,14 @@ public func CheckUnsafeInvoke(call: CallExpr, diag: BasicDiagnosticEngine): Unit
     }
 }
 
-public func CheckLegalityOfUnsafeAndInout(root: Node, diag: BasicDiagnosticEngine): Unit {
+public func CheckLegalityOfUnsafeAndInout(
+    root: Node,
+    diag: BasicDiagnosticEngine,
+    backendType!: OptionBackendType = OptionGlobalOptions().backend
+): Unit {
     let walker = Walker(root, visitPre: { node: Node =>
         if (let Some(call) <- (node as CallExpr)) {
-            CheckUnsafeInvoke(call, diag)
+            CheckUnsafeInvoke(call, diag, backendType: backendType)
         } else if (let Some(arg) <- (node as FuncArg)) {
             if (IsInoutZeroSizedArg(arg)) {
                 EmitRefactor(
@@ -455,8 +492,4 @@ public func CheckLegalityOfUnsafeAndInout(root: Node, diag: BasicDiagnosticEngin
         return VisitAction.WALK_CHILDREN
     })
     let _ = walker.Walk()
-}
-
-public func SelfhostPortStatus_FFI_CFFICheck(): Bool {
-    return true
 }
