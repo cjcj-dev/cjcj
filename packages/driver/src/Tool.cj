@@ -14,13 +14,13 @@ public func MakeSingleToolBatch(tool: Tool): ToolBatch {
 @When[os == "macOS"]
 private let DYNAMIC_LIBRARY_PATH_ENV: String = "DYLD_LIBRARY_PATH"
 
-@When[os != "macOS"]
+@When[os != "macOS" && os != "Windows"]
 private let DYNAMIC_LIBRARY_PATH_ENV: String = "LD_LIBRARY_PATH"
 
 @When[os == "macOS"]
 private let DYNAMIC_PRELOAD_ENV: String = "DYLD_INSERT_LIBRARIES"
 
-@When[os != "macOS"]
+@When[os != "macOS" && os != "Windows"]
 private let DYNAMIC_PRELOAD_ENV: String = "LD_PRELOAD"
 
 @When[os != "Windows"]
@@ -200,7 +200,27 @@ public class Tool {
         return GenerateCommand()
     }
 
+    @When[os == "Windows"]
     private func GenerateCommand(): String {
+        let argBuilder = StringBuilder()
+        for (arg in args) {
+            argBuilder.append(FileUtil.GetQuoted(arg))
+            argBuilder.append(" ")
+        }
+        let builder = StringBuilder()
+        builder.append(FileUtil.GetQuoted(name))
+        builder.append(" ")
+        builder.append(argBuilder.toString())
+        return "\"" + builder.toString() + "\""
+    }
+
+    @When[os != "Windows"]
+    private func GenerateCommand(): String {
+        let argBuilder = StringBuilder()
+        for (arg in args) {
+            argBuilder.append(GetSingleQuoted(arg))
+            argBuilder.append(" ")
+        }
         let builder = StringBuilder()
         if (!ldLibraryPath.isEmpty()) {
             builder.append(DYNAMIC_LIBRARY_PATH_ENV)
@@ -211,10 +231,8 @@ public class Tool {
             builder.append(" ")
         }
         builder.append(GetSingleQuoted(name))
-        for (arg in args) {
-            builder.append(" ")
-            builder.append(GetSingleQuoted(arg))
-        }
+        builder.append(" ")
+        builder.append(argBuilder.toString())
         return builder.toString()
     }
 
@@ -229,6 +247,7 @@ public class Tool {
         return false
     }
 
+    @When[os != "Windows"]
     public func BuildEnvironmentVector(): Array<String> {
         let environment = ArrayList<String>()
         if (!ldLibraryPath.isEmpty()) {
@@ -298,6 +317,7 @@ public class Tool {
     }
 }
 
+@When[os != "Windows"]
 private func IsBlockedEnvironmentVariable(key: String): Bool {
     return key == DYNAMIC_LIBRARY_PATH_ENV || key == DYNAMIC_PRELOAD_ENV || key == "LD_AUDIT" ||
         key == "LD_DEBUG" || key == "LD_PROFILE" || key == "LD_TRACE_LOADED_OBJECTS" ||
