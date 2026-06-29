@@ -5,10 +5,6 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.*
 
-public func SelfhostPortStatus_TypeCheckExpr_SubscriptExpr(): Bool {
-    return true
-}
-
 private func SubscriptInvalid(se: SubscriptExpr): Ty {
     return TcInvalid(se)
 }

@@ -3590,6 +3590,10 @@ public class TypeChecker {
             }
             return FinishSynthesize(ctx, returnExpr, SynthesizeReturnExpr(ctx, returnExpr))
         }
+        if (let Some(parenExpr) <- (expr as ParenExpr)) {
+            return FinishSynthesize(ctx, parenExpr, SynParenExpr(impl.typeManager, parenExpr,
+                synthesizer: Some({ innerExpr: Expr => Synthesize(ctx, pos, innerExpr) })))
+        }
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
             if (typeCheckExprIsLogicalOperator(binaryExpr.op)) {
                 if (let None <- binaryExpr.desugarExpr) {
@@ -3647,6 +3651,10 @@ public class TypeChecker {
                 let _ = Synthesize(ctx, leftExpr2)
             }
             return FinishSynthesize(ctx, asExpr, SynAsExpr(impl.typeManager, asExpr, LookupCoreEnumDecl(ctx, "Option")))
+        }
+        if (let Some(optionalChain) <- (expr as OptionalChainExpr)) {
+            return FinishSynthesize(ctx, optionalChain, SynOptionalChainExpr(impl.typeManager, optionalChain,
+                synthesizer: Some({ innerExpr: Expr => Synthesize(ctx, pos, innerExpr) })))
         }
         if (let Some(arrayExpr) <- (expr as ArrayExpr)) {
             SynthesizeTypeNode(ctx, arrayExpr.typeNode)
@@ -3909,6 +3917,10 @@ public class TypeChecker {
                     Check(ctx, target2, expr)
                 })))
         }
+        if (let Some(parenExpr) <- (expr as ParenExpr)) {
+            return FinishCheck(ctx, parenExpr, ChkParenExpr(impl.typeManager, target, parenExpr,
+                checker: Some({ targetTy: Ty, innerExpr: Expr => Check(ctx, targetTy, innerExpr) })))
+        }
         if (let Some(jumpExpr) <- (expr as JumpExpr)) {
             return FinishCheck(ctx, jumpExpr, ChkLoopControlExpr(ctx, jumpExpr))
         }
@@ -3974,6 +3986,11 @@ public class TypeChecker {
                 let _ = Synthesize(ctx, leftExpr)
             }
             return FinishCheck(ctx, asExpr, ChkAsExpr(impl.typeManager, target, asExpr, LookupCoreEnumDecl(ctx, "Option")))
+        }
+        if (let Some(optionalChain) <- (expr as OptionalChainExpr)) {
+            return FinishCheck(ctx, optionalChain, ChkOptionalChainExpr(impl.typeManager, target, optionalChain,
+                synthesizer: Some({ innerExpr: Expr => Synthesize(ctx, SynPos.EXPR_ARG, innerExpr) }),
+                diag: impl.diag))
         }
         let _ = Synthesize(ctx, expr)
         return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx),
