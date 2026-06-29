@@ -1,6 +1,6 @@
 package cangjie_compiler::chir
 
-import cangjie_compiler::utils.OverflowStrategy
+import cangjie_compiler::utils.{CJC_ABORT, OverflowStrategy}
 import std.collection.*
 
 private let RANGE_ANALYSIS_MAX_INQUEUE_TIMES: Int64 = 4
@@ -493,8 +493,12 @@ public class RangeAnalysis {
                 SetResultToTop(state, expression)
             }
             case ExprMajorKind.OTHERS => HandleOthersExpr(state, expression)
-            case ExprMajorKind.TERMINATOR => return
-            case ExprMajorKind.STRUCTURED_CTRL_FLOW_EXPR => return
+            case ExprMajorKind.TERMINATOR =>
+                CJC_ABORT()
+                return
+            case ExprMajorKind.STRUCTURED_CTRL_FLOW_EXPR =>
+                CJC_ABORT()
+                return
         }
     }
 
@@ -633,6 +637,9 @@ public class RangeAnalysis {
         if (kind == ExprKind.BRANCH) {
             return HandleBranchTerminator(state, terminator)
         }
+        if (kind == ExprKind.MULTIBRANCH) {
+            return HandleMultiBranchTerminator(state, (terminator as MultiBranch).getOrThrow())
+        }
         if (kind == ExprKind.TYPECAST_WITH_EXCEPTION) {
             HandleTypeCastExpression(state, terminator)
             return None
@@ -655,6 +662,24 @@ public class RangeAnalysis {
             return None
         }
         return if (condVal.IsTrue()) { successors[0] } else { successors[1] }
+    }
+
+    public func HandleMultiBranchTerminator(state: RangeDomain, multi: MultiBranch): Option<Block> {
+        let cond = multi.GetCondition()
+        let condVal = RangeAnalysis.GetSIntDomainFromState(state, cond)
+        if (!condVal.IsSingleValue()) {
+            return None
+        }
+        let value = UInt64(condVal.NumericBound().Lower().UVal())
+        let cases = multi.GetCaseVals()
+        var idx: Int64 = 0
+        while (idx < cases.size) {
+            if (value == cases[idx]) {
+                return multi.GetSuccessor(idx + 1)
+            }
+            idx++
+        }
+        return multi.GetDefaultBlock()
     }
 
     private func FindInqueueIndex(block: Block): Option<Int64> {
