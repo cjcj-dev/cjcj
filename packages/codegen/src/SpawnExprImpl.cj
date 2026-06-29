@@ -124,6 +124,7 @@ private func GenerateCheckSpawnResult(irBuilder: IRBuilder2, result: LLVMValueRe
     irBuilder.CreateCondBr(failed, blocks[0], blocks[1])
     irBuilder.SetInsertPoint(blocks[0])
     irBuilder.CreateSpawnException()
+    irBuilder.CreateUnreachable()
     irBuilder.SetInsertPoint(blocks[1])
 }
 

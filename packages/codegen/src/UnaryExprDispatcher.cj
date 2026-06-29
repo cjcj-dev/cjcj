@@ -4,7 +4,19 @@ import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::utils.OverflowStrategy
 
 public func HandleNegExpression(irBuilder: IRBuilder2, value: LLVMValueRef): LLVMValueRef {
-    return irBuilder.CreateUnary(ExprKind.NEG, value, name: "neg")
+    let valueType = unsafe { LLVMTypeOf(value) }
+    let valueTypeKind = if (valueType.isNull()) { 0i32 } else { unsafe { LLVMGetTypeKind(valueType) } }
+    let isFloatingPoint = (valueTypeKind >= 1i32 && valueTypeKind <= 6i32) || valueTypeKind == 18i32
+    let name = if (isFloatingPoint) { "FNeg" } else { "Neg" }
+    var result = LLVMNullValue()
+    try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+        result = if (isFloatingPoint) {
+            unsafe { LLVMBuildFNeg(irBuilder.GetBuilder().raw, value, nameCString.value) }
+        } else {
+            unsafe { LLVMBuildNeg(irBuilder.GetBuilder().raw, value, nameCString.value) }
+        }
+    }
+    return result
 }
 
 public func HandleUnaryExpression(irBuilder: IRBuilder2, chirExpr: CHIRUnaryExprWrapper): LLVMValueRef {

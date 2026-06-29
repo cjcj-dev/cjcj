@@ -2074,6 +2074,13 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateUnreachable(): LLVMValueRef {
+        let currentBlock = GetInsertBlock()
+        if (currentBlock.isNull()) {
+            return LLVMNullValue()
+        }
+        if (!unsafe { LLVMGetBasicBlockTerminator(currentBlock) }.isNull()) {
+            return LLVMNullValue()
+        }
         return unsafe { LLVMBuildUnreachable(builder.raw) }
     }
 

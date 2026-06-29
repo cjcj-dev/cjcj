@@ -85,9 +85,8 @@ private func GenerateRTTIExpression(irBuilder: IRBuilder2, chirExpr: Expression)
     let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())
     if (let Some(getRTTI) <- (chirExpr as GetRTTI)) {
         let objectValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, getRTTI.GetOperand()).GetRawValue()
-        let typeInfoSlotType = unsafe { LLVMPointerType(typeInfoPtrType, 1u32) }
-        let typeInfoSlot = irBuilder.CreateBitCast(objectValue, typeInfoSlotType, name: "obj.ti.slot")
-        return irBuilder.CreateLoad(typeInfoPtrType, typeInfoSlot, name: "ti")
+        let typeInfo = irBuilder.GetTypeInfoFromObject(objectValue)
+        return irBuilder.CreateBitCast(typeInfo, typeInfoPtrType)
     }
     if (let Some(getRTTIStatic) <- (chirExpr as GetRTTIStatic)) {
         return irBuilder.CreateBitCast(CGType.GetOrCreate(irBuilder.GetCGModule(),

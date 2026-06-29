@@ -286,6 +286,7 @@ private func HandleRaiseException(irBuilder: IRBuilder2, chirExpr: Expression): 
     } else {
         irBuilder.CallExceptionIntrinsicThrow(exceptionValue.GetRawValue())
     }
+    irBuilder.CreateUnreachable()
     return LLVMNullValue()
 }
 

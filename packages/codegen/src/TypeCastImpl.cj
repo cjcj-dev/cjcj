@@ -74,10 +74,32 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
 }
 
 private func EmitUnBoxExpression(irBuilder: IRBuilder2, unboxExpr: UnBox): LLVMValueRef {
-    let sourceCGValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, unboxExpr.GetSourceValue())
+    let sourceValue = unboxExpr.GetSourceValue()
+    let sourceCGValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, sourceValue)
     let sourceRawValue = sourceCGValue.GetRawValue()
     let targetTy = unboxExpr.GetTargetTy() ?? return sourceRawValue
     let targetCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy)
+    if (let Some(topLevelFunc) <- unboxExpr.GetTopLevelFunc()) {
+        if (let Some(srcFuncType) <- topLevelFunc.GetOverrideSrcFuncType()) {
+            if (sourceValue.IsParameter()) {
+                if (let Some(sourceTy) <- unboxExpr.GetSourceTy()) {
+                    if (DeRef(sourceTy).IsBox()) {
+                        var idx: Int64 = 0
+                        while (idx < topLevelFunc.GetNumOfParams()) {
+                            if (sourceValue == topLevelFunc.GetParam(idx)) {
+                                let cgParamType = CGType.GetOrCreate(irBuilder.GetCGModule(), srcFuncType.GetParamType(idx))
+                                if (cgParamType.GetSize().isSome()) {
+                                    return sourceRawValue
+                                }
+                                break
+                            }
+                            idx++
+                        }
+                    }
+                }
+            }
+        }
+    }
     if (targetCGType.IsReference()) {
         return sourceRawValue
     }
