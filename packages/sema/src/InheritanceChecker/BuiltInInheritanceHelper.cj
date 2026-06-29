@@ -260,7 +260,3 @@ func CreateBuiltInBinaryOperatorFunc(
     AddCurFile(fd, file: ed.curFile)
     ed.members.add(fd)
 }
-
-public func SelfhostPortStatus_InheritanceChecker_BuiltInInheritanceHelper(): Bool {
-    return true
-}
