@@ -47,9 +47,6 @@ public func FindLSPBaseName(expr: Expr): String {
     if (let Some(trailingClosure) <- (expr as TrailingClosureExpr)) {
         return FindBaseNameFromOption(trailingClosure.expr)
     }
-    if (let Some(parenExpr) <- (expr as ParenExpr)) {
-        return FindBaseNameFromOption(parenExpr.expr)
-    }
     if (let Some(arrayLit) <- (expr as ArrayLit)) {
         let parts = ArrayList<String>()
         for (child in arrayLit.children) {
@@ -110,10 +107,6 @@ public func SetLSPReferenceScopeName(expr: Expr, scopeName: String): Unit {
         SetScopeForOption(trailingClosure.expr, scopeName)
         return
     }
-    if (let Some(parenExpr) <- (expr as ParenExpr)) {
-        SetScopeForOption(parenExpr.expr, scopeName)
-        return
-    }
     if (let Some(arrayLit) <- (expr as ArrayLit)) {
         arrayLit.scopeName = scopeName
         for (child in arrayLit.children) {
@@ -151,8 +144,4 @@ public func GetLSPRelativePos(ctx: ASTContext, scopeName: String, baseName: Stri
         }
     }
     return pos
-}
-
-public func SelfhostPortStatus_TypeCheckForLSP(): Bool {
-    return true
 }

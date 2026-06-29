@@ -2313,11 +2313,14 @@ public class TypeManager {
     }
 
     public func TryGreedySubst(ty: Ty): Ty {
-        if (let Some(gen) <- (ty as GenericsTy)) {
-            let bounds = constraints.GetOrCreate(gen)
-            if (bounds.eq.Size() == 1) {
-                return bounds.eq.values[0]
+        if (Ty.IsTyCorrect(ty) && ty.HasPlaceholder()) {
+            let subst = TypeSubst()
+            for (entry in constraints.entries) {
+                if (!entry.bounds.eq.IsEmpty()) {
+                    subst.Put(entry.tyVar, entry.bounds.eq.values[0])
+                }
             }
+            return GetInstantiatedTy(ty, subst)
         }
         return ty
     }

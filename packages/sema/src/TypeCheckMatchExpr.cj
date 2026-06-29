@@ -372,6 +372,13 @@ public func SynNormalMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
     if (!ok) {
         return InvalidMatchTy(me)
     }
+    if (selector.GetTy().getOrThrow().HasPlaceholder()) {
+        selector.SetTy(typeManager.TryGreedySubst(selector.GetTy().getOrThrow()))
+        for (mc in me.matchCases) {
+            let _ = ChkMatchCasePatterns(typeManager, ctx, selector.GetTy().getOrThrow(), mc, diag: diag,
+                exprChecker: exprChecker)
+        }
+    }
     let joinedTy = JoinCaseTys(typeManager, caseTys, me.curFile)
     me.SetTy(joinedTy)
     if (SugarKindEq(me.sugarKind, SugarKind.NO_SUGAR)) {
@@ -556,8 +563,4 @@ public func ChkMatchExprWithDiag(diag: BasicDiagnosticEngine, typeManager: TypeM
 public func SynMatchExprWithDiag(diag: BasicDiagnosticEngine, typeManager: TypeManager,
     ctx: ASTContext, me: MatchExpr): Ty {
     return SynMatchExpr(typeManager, ctx, me, diag: diag)
-}
-
-public func SelfhostPortStatus_TypeCheckMatchExpr(): Bool {
-    return true
 }
