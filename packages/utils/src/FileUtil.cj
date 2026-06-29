@@ -111,9 +111,118 @@ foreign {
     func GetLastError(): UInt32
 }
 
+@When[os == "Linux"]
+@C
+struct Timespec {
+    var tv_sec: Int64
+    var tv_nsec: Int64
+
+    init() {
+        tv_sec = 0
+        tv_nsec = 0
+    }
+}
+
+@When[os == "Linux"]
+@C
+struct Stat {
+    var st_dev: UInt64
+    var st_ino: UInt64
+    var st_nlink: UInt64
+    var st_mode: UInt32
+    var st_uid: UInt32
+    var st_gid: UInt32
+    var __pad0: Int32
+    var st_rdev: UInt64
+    var st_size: Int64
+    var st_blksize: Int64
+    var st_blocks: Int64
+    var st_atim: Timespec
+    var st_mtim: Timespec
+    var st_ctim: Timespec
+    var __glibc_reserved: VArray<Int64, $3>
+
+    init() {
+        st_dev = 0u64
+        st_ino = 0u64
+        st_nlink = 0u64
+        st_mode = 0u32
+        st_uid = 0u32
+        st_gid = 0u32
+        __pad0 = 0
+        st_rdev = 0u64
+        st_size = 0
+        st_blksize = 0
+        st_blocks = 0
+        st_atim = Timespec()
+        st_mtim = Timespec()
+        st_ctim = Timespec()
+        __glibc_reserved = VArray<Int64, $3>({ _: Int64 => 0 })
+    }
+}
+
+@When[os == "macOS"]
+@C
+struct Timespec {
+    var tv_sec: Int64
+    var tv_nsec: Int64
+
+    init() {
+        tv_sec = 0
+        tv_nsec = 0
+    }
+}
+
+@When[os == "macOS"]
+@C
+struct Stat {
+    var st_dev: Int32
+    var st_mode: UInt16
+    var st_nlink: UInt16
+    var st_ino: UInt64
+    var st_uid: UInt32
+    var st_gid: UInt32
+    var st_rdev: Int32
+    var st_atimespec: Timespec
+    var st_mtimespec: Timespec
+    var st_ctimespec: Timespec
+    var st_birthtimespec: Timespec
+    var st_size: Int64
+    var st_blocks: Int64
+    var st_blksize: Int32
+    var st_flags: UInt32
+    var st_gen: UInt32
+    var st_lspare: Int32
+    var st_qspare: VArray<Int64, $2>
+
+    init() {
+        st_dev = 0
+        st_mode = 0u16
+        st_nlink = 0u16
+        st_ino = 0u64
+        st_uid = 0u32
+        st_gid = 0u32
+        st_rdev = 0
+        st_atimespec = Timespec()
+        st_mtimespec = Timespec()
+        st_ctimespec = Timespec()
+        st_birthtimespec = Timespec()
+        st_size = 0
+        st_blocks = 0
+        st_blksize = 0
+        st_flags = 0u32
+        st_gen = 0u32
+        st_lspare = 0
+        st_qspare = VArray<Int64, $2>({ _: Int64 => 0 })
+    }
+}
+
 @When[os != "Windows"]
 foreign {
     func access(pathname: CString, mode: Int32): Int32
+    func stat(pathname: CString, statbuf: CPointer<Stat>): Int32
+    func opendir(dirname: CString): CPointer<Unit>
+    func closedir(dirp: CPointer<Unit>): Int32
 }
 
 @When[os == "Linux"]
@@ -133,6 +242,9 @@ private let FILE_ATTRIBUTE_HIDDEN: UInt32 = 0x2u32
 private let FILE_ATTRIBUTE_READONLY: UInt32 = 0x1u32
 
 @When[os == "Windows"]
+private let FILE_ATTRIBUTE_DIRECTORY: UInt32 = 0x10u32
+
+@When[os == "Windows"]
 private let FILE_ATTRIBUTE_SYSTEM: UInt32 = 0x4u32
 
 @When[os == "Windows"]
@@ -143,6 +255,17 @@ private let FILE_ATTRIBUTE_VIRTUAL: UInt32 = 0x10000u32
 
 @When[os == "Windows"]
 private let INVALID_FILE_ATTRIBUTES: UInt32 = 0xffffffffu32
+
+@When[os != "Windows"]
+private let S_IFMT: UInt32 = 0xf000u32
+
+@When[os != "Windows"]
+private let S_IFDIR: UInt32 = 0x4000u32
+
+@When[os != "Windows"]
+private func S_ISDIR(mode: UInt32): Bool {
+    return (mode & S_IFMT) == S_IFDIR
+}
 
 @When[os == "Windows"]
 private func canRemovePath(path: String): Bool {
@@ -597,12 +720,85 @@ public class FileUtil {
         return builder.toString()
     }
 
+    @When[os == "Windows"]
     public static func IsDir(filePath: String): Bool {
-        try {
-            return FileInfo(filePath).isDirectory()
+        let dwAttr = fileAttributes(filePath)
+        if (dwAttr == INVALID_FILE_ATTRIBUTES) {
+            return false
+        }
+        return (dwAttr & FILE_ATTRIBUTE_DIRECTORY) != 0u32
+    }
+
+    @When[os == "Linux"]
+    public static func IsDir(filePath: String): Bool {
+        let noPermission = match (AccessWithResult(filePath, FileMode.FM_READ)) {
+            case AccessResultType.NO_PERMISSION => true
+            case _ => false
+        }
+        if (noPermission) {
+            try (cPath = unsafe { LibC.mallocCString(filePath) }.asResource(),
+                statbuf = LibC.malloc<Stat>().asResource()) {
+                if (cPath.value.isNull() || statbuf.value.isNull()) {
+                    return false
+                }
+                unsafe { statbuf.value.write(Stat()) }
+                if (unsafe { stat(cPath.value, statbuf.value) } != 0) {
+                    return false
+                }
+                return S_ISDIR(unsafe { statbuf.value.read().st_mode })
+            } catch (e: Exception) {
+                return false
+            }
+        }
+        try (cPath = unsafe { LibC.mallocCString(filePath) }.asResource()) {
+            if (cPath.value.isNull()) {
+                return false
+            }
+            let dp = unsafe { opendir(cPath.value) }
+            if (!dp.isNull()) {
+                let _ = unsafe { closedir(dp) }
+                return true
+            }
         } catch (e: Exception) {
             return false
         }
+        return false
+    }
+
+    @When[os == "macOS"]
+    public static func IsDir(filePath: String): Bool {
+        let noPermission = match (AccessWithResult(filePath, FileMode.FM_READ)) {
+            case AccessResultType.NO_PERMISSION => true
+            case _ => false
+        }
+        if (noPermission) {
+            try (cPath = unsafe { LibC.mallocCString(filePath) }.asResource(),
+                statbuf = LibC.malloc<Stat>().asResource()) {
+                if (cPath.value.isNull() || statbuf.value.isNull()) {
+                    return false
+                }
+                unsafe { statbuf.value.write(Stat()) }
+                if (unsafe { stat(cPath.value, statbuf.value) } != 0) {
+                    return false
+                }
+                return S_ISDIR(UInt32(unsafe { statbuf.value.read().st_mode }))
+            } catch (e: Exception) {
+                return false
+            }
+        }
+        try (cPath = unsafe { LibC.mallocCString(filePath) }.asResource()) {
+            if (cPath.value.isNull()) {
+                return false
+            }
+            let dp = unsafe { opendir(cPath.value) }
+            if (!dp.isNull()) {
+                let _ = unsafe { closedir(dp) }
+                return true
+            }
+        } catch (e: Exception) {
+            return false
+        }
+        return false
     }
 
     public static func IsAbsolutePath(filePath: String): Bool {
