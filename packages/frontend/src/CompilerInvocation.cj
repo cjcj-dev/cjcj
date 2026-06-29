@@ -2,21 +2,6 @@ package cangjie_compiler::frontend
 
 import std.collection.*
 
-@When[os == "Windows"]
-private func FrontendRuntimeLibraryName(): String {
-    return "libcangjie-runtime.dll"
-}
-
-@When[os == "macOS"]
-private func FrontendRuntimeLibraryName(): String {
-    return "libcangjie-runtime.dylib"
-}
-
-@When[os != "Windows" && os != "macOS"]
-private func FrontendRuntimeLibraryName(): String {
-    return "libcangjie-runtime.so"
-}
-
 public class CompilerInvocation {
     public var globalOptions: GlobalOptions = GlobalOptions()
     public let frontendOptions: FrontendOptions = FrontendOptions()
@@ -43,7 +28,12 @@ public class CompilerInvocation {
     }
 
     public func GetRuntimeLibPath(relativePath!: String = "../runtime/lib"): String {
-        let runtimeLib = FrontendRuntimeLibraryName()
+        @When[os == "Windows"]
+        let runtimeLib = "libcangjie-runtime.dll"
+        @When[os == "macOS"]
+        let runtimeLib = "libcangjie-runtime.dylib"
+        @When[os != "Windows" && os != "macOS"]
+        let runtimeLib = "libcangjie-runtime.so"
         let exePath = globalOptions.executablePath
         let hostPathName = globalOptions.GetCangjieLibHostPathName()
         let basePath = JoinPath(GetDirPath(exePath), relativePath)
