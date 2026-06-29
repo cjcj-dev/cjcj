@@ -8,10 +8,7 @@ public class IOS_CJNATIVE <: Darwin_CJNATIVE {
     }
 
     protected override func AddSystemLibraryPaths(): Unit {
-        if (driverOptions.IsCrossCompiling() && driverOptions.customizedSysroot) {
-            AddLibraryPaths(ComputeLibPaths())
-        }
-        AddLibraryPaths(driverOptions.environment.libraryPaths)
+        super.AddSystemLibraryPaths()
     }
 
     protected override func GenerateLinkingTool(

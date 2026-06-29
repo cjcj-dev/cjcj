@@ -6,6 +6,7 @@ import cangjie_compiler::option.BackendToString as OptionBackendToString
 import cangjie_compiler::option.GetDefaultOutputNameLength
 import cangjie_compiler::option.GetHardwareConcurrency
 import cangjie_compiler::utils.{AccessResultType, FILE_PATH_MAX_LENGTH, FileMode}
+import cangjie_compiler::utils.Semaphore as UtilsSemaphore
 
 public let OBFUCATION_LEVEL_MIN: Int64 = 1
 public let OBFUCATION_LEVEL_MAX: Int64 = 9
@@ -880,6 +881,7 @@ public class DriverOptions {
             aggressiveParallelCompile = 1
         } else if (let None <- aggressiveParallelCompile) {
             if (optimizationLevel == OptimizationLevel.O0 || aggressiveParallelCompileWithoutArg) {
+                UtilsSemaphore.Get().SetCount(Int64(jobsValue + 2u64))
                 aggressiveParallelCompile = Int64(jobsValue)
             } else {
                 aggressiveParallelCompile = 1

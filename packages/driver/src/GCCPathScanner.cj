@@ -1,5 +1,6 @@
 package cangjie_compiler::driver
 
+import cangjie_compiler::utils.Directory
 import std.collection.*
 import std.convert.*
 
@@ -51,16 +52,12 @@ public class GCCPathScanner {
         var selectedVersion = GCCVersion()
         for (dirPrefix in searchPaths) {
             let gccDirName = FileUtil.JoinPath(dirPrefix, "gcc")
-            for (directory in FileUtil.GetDirectories(gccDirName)) {
-                if (!IsCompatibleTripleName(tripleTarget, directory.name)) {
-                    continue
-                }
-                for (subDirectory in FileUtil.GetDirectories(directory.path)) {
-                    if (let Some(version) <- GCCPathScanner.StrToGCCVersion(subDirectory.name)) {
-                        if (selectedVersion < version && AllForFilesExist(subDirectory.path)) {
-                            selectedPath = subDirectory.path
-                            selectedVersion = version
-                        }
+            let directories = GCCPathScanner.GetAllMatchingSubDirectories(tripleTarget, FileUtil.GetDirectories(gccDirName))
+            for (directory in directories) {
+                if (let Some(version) <- GCCPathScanner.StrToGCCVersion(directory.name)) {
+                    if (selectedVersion < version && AllForFilesExist(directory.path)) {
+                        selectedPath = directory.path
+                        selectedVersion = version
                     }
                 }
             }
@@ -69,6 +66,18 @@ public class GCCPathScanner {
             return None
         }
         return GCCPath(selectedPath, selectedVersion)
+    }
+
+    private static func GetAllMatchingSubDirectories(target: TripleInfo, directories: Array<Directory>): ArrayList<Directory> {
+        let possibleDirectories = ArrayList<Directory>()
+        for (directory in directories) {
+            if (IsCompatiableTripleName(target, directory.name) || IsPossibleMatchingTripleName(target, directory.name)) {
+                for (subDirectory in FileUtil.GetDirectories(directory.path)) {
+                    possibleDirectories.add(subDirectory)
+                }
+            }
+        }
+        return possibleDirectories
     }
 
     public static func StrToGCCVersion(versionStr: String): Option<GCCVersion> {
@@ -112,32 +121,25 @@ private func TryParseGCCVersionPart(value: String): Option<UInt64> {
     }
 }
 
-private func IsCompatibleTripleName(info: TripleInfo, name: String): Bool {
-    if (name == info.ToFullTripleString()) { return true }
-    let arch = info.ArchToString()
-    if (info.os == OSType.LINUX && info.env == EnvironmentType.GNU) {
+private func IsCompatiableTripleName(info: TripleInfo, name: String): Bool {
+    if (info.os == OSType.LINUX && info.env == EnvironmentType.GNU && info.vendor == Vendor.UNKNOWN) {
+        let arch = info.ArchToString()
         return name == arch + "-linux-gnu" || name == arch + "-pc-linux-gnu" ||
             name == arch + "-suse-linux" || name == arch + "-redhat-linux" ||
-            name == arch + "-openEuler-linux"
+            name == arch + "-openEuler-linux" || name == info.ToFullTripleString()
     }
-    if (info.os == OSType.WINDOWS) {
-        return name == "x86_64-w64-mingw32"
+    let tripleName = info.ToFullTripleString()
+    if (tripleName == "x86_64-unknown-windows-gnu") {
+        return name == tripleName || name == "x86_64-w64-mingw32"
     }
     return false
 }
 
 public func IsPossibleMatchingTripleName(info: TripleInfo, name: String): Bool {
-    if (IsCompatibleTripleName(info, name)) {
-        return true
-    }
-    if (!name.contains(info.ArchToString())) {
-        return false
-    }
-    if (info.os == OSType.LINUX && !name.contains("linux")) {
-        return false
-    }
-    if (info.os == OSType.WINDOWS && !name.contains("mingw") && !name.contains("windows")) {
-        return false
-    }
+    let parts = SplitString(name, "-")
+    if (parts.size != 3 && parts.size != 4) { return false }
+    if (parts[0] != info.ArchToString()) { return false }
+    if (parts[parts.size - 2] != info.OSToString()) { return false }
+    if (parts[parts.size - 1] != info.EnvironmentToString()) { return false }
     return true
 }
