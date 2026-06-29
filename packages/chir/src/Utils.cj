@@ -109,6 +109,14 @@ public func IsGetOrThrowFunction(expr: Expression): Bool {
     return false
 }
 
+public func CheckCustomTypeDefIsExpected(def: CustomTypeDef, packageName: String, defSrcCodeName: String): Bool {
+    var pkgName = def.GetPackageName()
+    if (let Some(genericDecl) <- def.GetGenericDecl()) {
+        pkgName = genericDecl.GetPackageName()
+    }
+    return pkgName == packageName && def.GetSrcCodeIdentifier() == defSrcCodeName
+}
+
 public func ReturnTypeShouldBeVoid(fn: Function): Bool {
     return fn.IsGVInit() || fn.IsFinalizer() || (fn.IsConstructor() && !fn.TestAttr(Attribute.STATIC))
 }

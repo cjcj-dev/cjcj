@@ -413,6 +413,26 @@ public open class CGType {
         return unsafe { LLVMPointerType(CGType.GetOrCreateTypeInfoType(context), 0u32) }
     }
 
+    public static func GetClassTTExtTypeVer1(context: LLVMContextHandle): LLVMTypeRef {
+        let name = "ext_class_type_ver_1"
+        var result = LLVMNullType()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { LLVMGetTypeByName2(context.raw, nameCString.value) }
+        }
+        if (!result.isNull()) {
+            return result
+        }
+        result = GetOrCreateNamedStructType(context, name)
+        let i8Ty = unsafe { LLVMInt8TypeInContext(context.raw) }
+        let body = ArrayList<LLVMTypeRef>()
+        body.add(unsafe { LLVMPointerType(i8Ty, 0u32) })
+        body.add(unsafe { LLVMInt16TypeInContext(context.raw) })
+        body.add(unsafe { LLVMInt32TypeInContext(context.raw) })
+        body.add(i8Ty)
+        SetStructTypeBody(result, body)
+        return result
+    }
+
     public static func GetOrCreateTypeTemplateType(context: LLVMContextHandle): LLVMTypeRef {
         let result = GetOrCreateNamedStructType(context, "TypeTemplate")
         let i8Ty = unsafe { LLVMInt8TypeInContext(context.raw) }

@@ -1,12 +1,17 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.Attribute
+import cangjie_compiler::chir.CheckCustomTypeDefIsExpected
+import cangjie_compiler::chir.ClassDef
+import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
 import cangjie_compiler::mangle.MANGLE_NESTED_PREFIX
 import cangjie_compiler::mangle.MANGLE_SUFFIX
-import cangjie_compiler::utils.HashString64
+import cangjie_compiler::utils.{CORE_PACKAGE_NAME, HashString64, STD_LIB_FUTURE, STD_LIB_MONITOR, STD_LIB_MUTEX,
+    STD_LIB_WAIT_QUEUE, SYNC_PACKAGE_NAME}
 
 public func GetCodeGenGlobalName(value: Value): String {
     return value.GetIdentifierWithoutPrefix()
@@ -148,6 +153,24 @@ public func IsDynamicClassRef(chirTy: Type): Bool {
     }
     let baseTy = typeArgs[0]
     return baseTy.IsClass() && CGType.GetCGGenericKind(baseTy) == CGGenericKind.DYNAMIC_GI
+}
+
+public func IsModifiableClass(chirTy: Type): Bool {
+    if (!chirTy.IsClass()) {
+        return false
+    }
+    let classDef = (chirTy as ClassType).getOrThrow().GetClassDef()
+    return classDef.IsClass() && !classDef.TestAttr(Attribute.COMPILER_ADD) && !classDef.TestAttr(Attribute.VIRTUAL)
+}
+
+public func IsCoreFutureClass(classDef: ClassDef): Bool {
+    return CheckCustomTypeDefIsExpected(classDef, CORE_PACKAGE_NAME, STD_LIB_FUTURE)
+}
+
+public func IsSyncRelatedClass(classDef: ClassDef): Bool {
+    return CheckCustomTypeDefIsExpected(classDef, SYNC_PACKAGE_NAME, STD_LIB_MONITOR) ||
+        CheckCustomTypeDefIsExpected(classDef, SYNC_PACKAGE_NAME, STD_LIB_MUTEX) ||
+        CheckCustomTypeDefIsExpected(classDef, SYNC_PACKAGE_NAME, STD_LIB_WAIT_QUEUE)
 }
 
 public func IsVArrayRef(chirTy: Type): Bool {
