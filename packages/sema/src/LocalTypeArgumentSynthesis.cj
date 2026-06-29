@@ -757,7 +757,7 @@ public class LocalTypeArgumentSynthesis {
                 let ubTy = if (argVar.upperBounds.size == 1) {
                     argVar.upperBounds[0]
                 } else {
-                    tyMgr.GetIntersectionTy(CopyTypeArgs(argVar.upperBounds))
+                    tyMgr.GetIntersectionTy(argVar.upperBounds.toArray())
                 }
                 return UnifyOne(Tracked(ubTy, blames: argTTy.blames), paramTTy)
             }
@@ -1350,7 +1350,7 @@ public class LocalTypeArgumentSynthesis {
     private func normalizeInferredTy(ty: Ty): Ty {
         if (let Some(thisTy) <- (ty as ClassThisTy)) {
             if (let Some(decl) <- thisTy.declPtr) {
-                return tyMgr.GetClassTy(decl, CopyTypeArgs(thisTy.typeArgs))
+                return tyMgr.GetClassTy(decl, thisTy.typeArgs.toArray())
             }
         }
         return ty

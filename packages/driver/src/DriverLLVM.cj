@@ -2,6 +2,7 @@ package cangjie_compiler::driver
 
 import std.collection.*
 import std.convert.*
+import cangjie_compiler::basic.DiagKindRefactor
 
 private type DriverLLVMContextRef = CPointer<Unit>
 private type DriverLLVMModuleRef = CPointer<Unit>
@@ -16,6 +17,7 @@ foreign {
         outMessage: CPointer<CString>
     ): Int32
     func LLVMDisposeMemoryBuffer(memBuf: DriverLLVMMemoryBufferRef): Unit
+    func LLVMDisposeMessage(message: CString): Unit
     func LLVMParseBitcodeInContext2(
         context: DriverLLVMContextRef,
         memBuf: DriverLLVMMemoryBufferRef,
@@ -24,73 +26,47 @@ foreign {
     func LLVMDisposeModule(module: DriverLLVMModuleRef): Unit
     func LLVMGetSourceFileName(module: DriverLLVMModuleRef, len: CPointer<UIntNative>): CString
     func memcpy(dest: CPointer<UInt8>, src: CString, count: UIntNative): CPointer<UInt8>
+    func strlen(str: CString): UIntNative
 }
 
-public enum BitcodePackageNameError {
-    | OPEN_FAILED
-    | PARSE_FAILED
-    | INVALID_PACKAGE_NAME
-}
-
-private func BitcodePackageNameErrorIndex(err: BitcodePackageNameError): Int64 {
-    return match (err) {
-        case BitcodePackageNameError.OPEN_FAILED => 0
-        case BitcodePackageNameError.PARSE_FAILED => 1
-        case BitcodePackageNameError.INVALID_PACKAGE_NAME => 2
+public func ExtractBitcodePackageNameFromLLVM(bcPath: String): (Bool, String, DiagKindRefactor, String) {
+    let (openSuccess, openMessage, sourceName) = ReadBitcodeSourceFileName(bcPath)
+    if (!openSuccess) {
+        return (false, "", DiagKindRefactor.bc_file_open_failed, openMessage)
     }
-}
-
-extend BitcodePackageNameError <: Equatable<BitcodePackageNameError> {
-    public operator func ==(right: BitcodePackageNameError): Bool {
-        return BitcodePackageNameErrorIndex(this) == BitcodePackageNameErrorIndex(right)
-    }
-
-    public operator func !=(right: BitcodePackageNameError): Bool {
-        return !(this == right)
-    }
-}
-
-public class BitcodePackageNameResult {
-    public let ok: Bool
-    public let packageName: String
-    public let error: BitcodePackageNameError
-
-    public init(packageName: String) {
-        ok = true
-        this.packageName = packageName
-        error = BitcodePackageNameError.OPEN_FAILED
-    }
-
-    public init(error: BitcodePackageNameError) {
-        ok = false
-        packageName = ""
-        this.error = error
-    }
-}
-
-public func ExtractBitcodePackageNameFromLLVM(bcPath: String): BitcodePackageNameResult {
-    if (!FileUtil.FileExist(bcPath) || FileUtil.IsDir(bcPath)) {
-        return BitcodePackageNameResult(BitcodePackageNameError.OPEN_FAILED)
-    }
-    let sourceName = ReadBitcodeSourceFileName(bcPath)
     if (let None <- sourceName) {
-        return BitcodePackageNameResult(BitcodePackageNameError.PARSE_FAILED)
+        return (false, "", DiagKindRefactor.bc_parse_failed, "")
     }
     if (let Some(name) <- ParseBitcodePackageName(sourceName.getOrThrow())) {
-        return BitcodePackageNameResult(name)
+        return (true, name, DiagKindRefactor.bc_file_open_failed, "")
     }
-    return BitcodePackageNameResult(BitcodePackageNameError.INVALID_PACKAGE_NAME)
+    return (false, "", DiagKindRefactor.bc_invalid_package_name, "")
 }
 
-private func ReadBitcodeSourceFileName(bcPath: String): Option<String> {
+private func ReadBitcodeSourceFileName(bcPath: String): (Bool, String, Option<String>) {
     var sourceName: Option<String> = None
     try (pathCString = unsafe { LibC.mallocCString(bcPath) }.asResource()) {
-        try (memBufPtr = LibC.malloc<DriverLLVMMemoryBufferRef>().asResource()) {
+        try (memBufPtr = LibC.malloc<DriverLLVMMemoryBufferRef>().asResource(),
+            outMessage = LibC.malloc<CString>().asResource()) {
+            unsafe {
+                memBufPtr.value.write(CPointer<Unit>())
+                outMessage.value.write(CString(CPointer<UInt8>()))
+            }
             let opened = unsafe {
-                LLVMCreateMemoryBufferWithContentsOfFile(pathCString.value, memBufPtr.value, CPointer<CString>())
+                LLVMCreateMemoryBufferWithContentsOfFile(pathCString.value, memBufPtr.value, outMessage.value)
             }
             if (opened != 0) {
-                return None
+                let rawMessage = unsafe { outMessage.value.read() }
+                var message = ""
+                if (!rawMessage.isNull()) {
+                    message = CStringToString(rawMessage, unsafe { strlen(rawMessage) }) ?? ""
+                    unsafe { LLVMDisposeMessage(rawMessage) }
+                }
+                return (false, message, None)
+            }
+            let successMessage = unsafe { outMessage.value.read() }
+            if (!successMessage.isNull()) {
+                unsafe { LLVMDisposeMessage(successMessage) }
             }
             let memBuf = unsafe { memBufPtr.value.read() }
             let context = unsafe { LLVMContextCreate() }
@@ -112,9 +88,9 @@ private func ReadBitcodeSourceFileName(bcPath: String): Option<String> {
             }
         }
     } catch (e: Exception) {
-        return None
+        return (true, "", None)
     }
-    return sourceName
+    return (true, "", sourceName)
 }
 
 private func CStringToString(raw: CString, len: UIntNative): Option<String> {

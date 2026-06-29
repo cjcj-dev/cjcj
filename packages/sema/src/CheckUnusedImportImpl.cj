@@ -70,7 +70,7 @@ private class CheckUnusedImportImpl {
     private func CollectNeedCheckImports(): Unit {
         for (file in pkg.files) {
             for (importSpec in file.imports) {
-                if (importSpec.TestAttr(Attribute.IMPLICIT_ADD) || importSpec.TestAttr(Attribute.COMPILER_ADD)) {
+                if (importSpec.TestAttr(Attribute.IMPLICIT_ADD)) {
                     continue
                 }
                 if (importSpec.begin.IsZero() || importSpec.end.IsZero()) {
@@ -177,9 +177,10 @@ private class CheckUnusedImportImpl {
     }
 
     private func AddUsedPackage(node: Node): Unit {
-        if (let Some(target) <- node.GetTarget()) {
-            AddUsedTarget(node, target)
+        if (let None <- node.GetTarget()) {
+            return
         }
+        AddUsedTarget(node, node.GetTarget().getOrThrow())
         for (target in node.GetTargets()) {
             AddUsedTarget(node, target)
         }
@@ -359,9 +360,8 @@ private func GetFilePackageMap(
 }
 
 private func ContainsUsedTarget(targets: ArrayList<UsedImportTarget>, identifier: String, decl: Decl): Bool {
-    let key = UnusedImportDeclKey(decl)
     for (target in targets) {
-        if (target.identifier == identifier && UnusedImportDeclKey(target.target) == key) {
+        if (target.identifier == identifier && refEq(target.target, decl)) {
             return true
         }
     }
@@ -390,11 +390,6 @@ private func IsPackageDeclFor(decl: Decl, packageName: String): Bool {
 
 private func FileKey(file: File): String {
     return "${file.fileHash}:${file.indexOfPackage}:${file.filePath}:${file.fileName}"
-}
-
-private func UnusedImportDeclKey(decl: Decl): String {
-    return "${ASTKindIndex(decl.astKind)}:${decl.fullPackageName}:${decl.identifier.Val()}:" +
-        "${decl.begin.ToString()}:${decl.end.ToString()}"
 }
 
 private func CloneFindings(values: ArrayList<UnusedImportFinding>): ArrayList<UnusedImportFinding> {

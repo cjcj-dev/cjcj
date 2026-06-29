@@ -371,7 +371,7 @@ private func checkAndUpdateDeclTyWithNewTy(decl: Decl, specifiedTy: EnumTy, type
             for (elemTy in tupleTy.typeArgs) {
                 if (SameTy(elemTy, specifiedTy)) {
                     if (let Some(enumDecl) <- specifiedTy.declPtr) {
-                        let newTy = typeManager.GetRefEnumTy(enumDecl, CopyTypeArgs(specifiedTy.typeArgs))
+                        let newTy = typeManager.GetRefEnumTy(enumDecl, specifiedTy.typeArgs.toArray())
                         specifiedTy.hasCorrespondRefEnumTy = true
                         newTy.decl = specifiedTy.decl
                         vec.add(newTy)
@@ -385,7 +385,7 @@ private func checkAndUpdateDeclTyWithNewTy(decl: Decl, specifiedTy: EnumTy, type
             decl.SetTy(typeManager.GetTupleTy(vec.toArray()))
         } else if (SameTy(declTy, specifiedTy)) {
             if (let Some(enumDecl) <- specifiedTy.declPtr) {
-                let newTy = typeManager.GetRefEnumTy(enumDecl, CopyTypeArgs(specifiedTy.typeArgs))
+                let newTy = typeManager.GetRefEnumTy(enumDecl, specifiedTy.typeArgs.toArray())
                 specifiedTy.hasCorrespondRefEnumTy = true
                 newTy.decl = specifiedTy.decl
                 decl.SetTy(newTy)

@@ -2,11 +2,10 @@ package cangjie_compiler::sema.TypeCheckExpr
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.MakeRange as BasicMakeRange
 import cangjie_compiler::sema.*
-
-public func SelfhostPortStatus_TypeCheckExpr_TryExpr(): Bool {
-    return true
-}
 
 private let EFFECT_PACKAGE_NAME: String = "stdx.effect"
 private let CORE_PACKAGE_NAME: String = "std.core"
@@ -246,32 +245,7 @@ private func ChkTryExprCatchPatterns(typeManager: TypeManager, te: TryExpr): Boo
     return ok
 }
 
-private class TryHandleValidationState {
-    public var hasReturn: Bool = false
-    public init() {}
-}
-
-private class TryHandleResumeBinder {
-    private let handler: Handler
-
-    public init(handler: Handler) {
-        this.handler = handler
-    }
-
-    public func Visit(node: Node): VisitAction {
-        if (let Some(resumeExpr) <- (node as ResumeExpr)) {
-            resumeExpr.enclosing = handler
-            return VisitAction.WALK_CHILDREN
-        }
-        if (let Some(_) <- (node as FuncBody)) {
-            return VisitAction.SKIP_CHILDREN
-        }
-        return VisitAction.WALK_CHILDREN
-    }
-}
-
-private func ValidateBlockInTryHandle(block: Block): Bool {
-    let state = TryHandleValidationState()
+private func ValidateBlockInTryHandle(block: Block, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let walker = Walker(block, visitPre: { node: Node =>
         if (let Some(_) <- (node as FuncBody)) {
             return VisitAction.SKIP_CHILDREN
@@ -284,43 +258,51 @@ private func ValidateBlockInTryHandle(block: Block): Bool {
             }
         }
         if (let Some(_) <- (node as ReturnExpr)) {
-            state.hasReturn = true
+            if (let Some(diagValue) <- diag) {
+                let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_return_in_try_handle_block,
+                    BasicMakeRange(node.begin, node.end))
+                builder.Emit()
+            }
             return VisitAction.STOP_NOW
         }
         VisitAction.WALK_CHILDREN
     })
-    let _ = walker.Walk()
-    return !state.hasReturn
+    return walker.Walk() != VisitAction.STOP_NOW
 }
 
-private func BindResumeInTryHandle(handler: Handler): Unit {
-    let binder = TryHandleResumeBinder(handler)
-    if (let Some(lambda) <- handler.desugaredLambda) {
-        if (let Some(funcBody) <- lambda.funcBody) {
-            if (let Some(body) <- funcBody.body) {
-                let lambdaWalker = Walker(body, visitPre: { node: Node => binder.Visit(node) })
-                let _ = lambdaWalker.Walk()
-            }
-        }
-    }
-    if (let Some(block) <- handler.block) {
-        let blockWalker = Walker(block, visitPre: { node: Node => binder.Visit(node) })
-        let _ = blockWalker.Walk()
-    }
-}
-
-private func ValidateHandler(handler: Handler): Bool {
+private func ValidateHandler(handler: Handler, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- handler.block) {
         return false
     }
     let block = handler.block.getOrThrow()
-    if (!ValidateBlockInTryHandle(block)) {
+    if (!ValidateBlockInTryHandle(block, diag: diag)) {
         return false
     }
     if (let None <- handler.desugaredLambda) {
         return false
     }
-    BindResumeInTryHandle(handler)
+    let bind = { node: Node =>
+        if (let Some(resumeExpr) <- (node as ResumeExpr)) {
+            resumeExpr.enclosing = handler
+            return VisitAction.WALK_CHILDREN
+        }
+        if (let Some(_) <- (node as FuncBody)) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        VisitAction.WALK_CHILDREN
+    }
+    if (let Some(lambda) <- handler.desugaredLambda) {
+        if (let Some(funcBody) <- lambda.funcBody) {
+            if (let Some(body) <- funcBody.body) {
+                let lambdaWalker = Walker(body, visitPre: bind)
+                let _ = lambdaWalker.Walk()
+            }
+        }
+    }
+    if (let Some(blockValue) <- handler.block) {
+        let blockWalker = Walker(blockValue, visitPre: bind)
+        let _ = blockWalker.Walk()
+    }
     return true
 }
 
@@ -340,19 +322,30 @@ private func HandlerPatternTy(typeManager: TypeManager, handler: Handler): Ty {
     return typeManager.GetAnyTy()
 }
 
-private func ChkTryExprFinallyBlock(typeManager: TypeManager, te: TryExpr): Bool {
+private func ChkTryExprFinallyBlock(typeManager: TypeManager, te: TryExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let Some(finallyBlock) <- te.finallyBlock) {
-        let finallyTy = SynBlock(typeManager, finallyBlock)
-        if (Ty.IsTyCorrect(finallyTy)) {
-            finallyBlock.SetTy(TcUnitTy())
-            if (let Some(finallyLambda) <- te.finallyLambda) {
-                let finallyLamTy = typeManager.GetFunctionTy(Array<Ty>(), TcUnitTy())
-                return ChkLamExpr(typeManager, finallyLamTy, finallyLambda)
+        var isWellTyped = true
+        if (te.isDesugaredFromSyncBlock) {
+            try (ds = DiagSuppressor(diag)) {
+                if (Ty.IsTyCorrect(SynBlock(typeManager, finallyBlock, pos: SynPos.UNUSED))) {
+                    ds.ReportDiag()
+                } else {
+                    isWellTyped = false
+                }
             }
-            return true
+        } else {
+            isWellTyped = Ty.IsTyCorrect(SynBlock(typeManager, finallyBlock, pos: SynPos.UNUSED, diag: diag)) &&
+                isWellTyped
+            if (!te.handlers.isEmpty()) {
+                if (let Some(finallyLambda) <- te.finallyLambda) {
+                    let finallyLamTy = typeManager.GetFunctionTy(Array<Ty>(), TcUnitTy())
+                    isWellTyped = ChkLamExpr(typeManager, finallyLamTy, finallyLambda) && isWellTyped
+                }
+            }
         }
-        finallyBlock.SetTy(TypeManager.GetInvalidTy())
-        return false
+        finallyBlock.SetTy(if (isWellTyped) { TcUnitTy() } else { TypeManager.GetInvalidTy() })
+        return isWellTyped
     }
     return true
 }
@@ -407,7 +400,8 @@ private func ChkResourceSpec(typeManager: TypeManager, resource: VarDecl): Bool 
     return ok
 }
 
-private func SynTryWithResourcesExpr(typeManager: TypeManager, te: TryExpr): Ty {
+private func SynTryWithResourcesExpr(typeManager: TypeManager, te: TryExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
     var ok = true
     for (resource in te.resourceSpec) {
         ok = ChkResourceSpec(typeManager, resource) && ok
@@ -421,7 +415,7 @@ private func SynTryWithResourcesExpr(typeManager: TypeManager, te: TryExpr): Ty 
     for (catchBlock in te.catchBlocks) {
         ok = Ty.IsTyCorrect(SynBlock(typeManager, catchBlock)) && ok
     }
-    ok = ChkTryExprFinallyBlock(typeManager, te) && ok
+    ok = ChkTryExprFinallyBlock(typeManager, te, diag: diag) && ok
     if (ok) {
         let unitTy = TcUnitTy()
         te.SetTy(unitTy)
@@ -430,19 +424,20 @@ private func SynTryWithResourcesExpr(typeManager: TypeManager, te: TryExpr): Ty 
     return TryInvalid(te)
 }
 
-private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, baseTy: Ty): Option<Ty> {
+private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, baseTy: Ty,
+    diag!: Option<BasicDiagnosticEngine> = None): Option<Ty> {
     var ok = ChkTryExprCatchPatterns(typeManager, te)
     var joinedTy = baseTy
     if (!te.handlers.isEmpty()) {
         if (let Some(tryBlock) <- te.tryBlock) {
-            ok = ValidateBlockInTryHandle(tryBlock) && ok
+            ok = ValidateBlockInTryHandle(tryBlock, diag: diag) && ok
         } else {
             ok = false
         }
     }
     for (catchBlock in te.catchBlocks) {
         if (!te.handlers.isEmpty()) {
-            ok = ValidateBlockInTryHandle(catchBlock) && ok
+            ok = ValidateBlockInTryHandle(catchBlock, diag: diag) && ok
         }
         let catchTy = SynBlock(typeManager, catchBlock)
         if (Ty.IsTyCorrect(catchTy)) {
@@ -453,7 +448,7 @@ private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, 
         }
     }
     for (handler in te.handlers) {
-        if (!ValidateHandler(handler)) {
+        if (!ValidateHandler(handler, diag: diag)) {
             ok = false
         } else if (let Some(block) <- handler.block) {
             let handlerTy = SynBlock(typeManager, block)
@@ -478,9 +473,10 @@ private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, 
     return None
 }
 
-public func SynTryExpr(typeManager: TypeManager, te: TryExpr): Ty {
+public func SynTryExpr(typeManager: TypeManager, te: TryExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (!te.resourceSpec.isEmpty()) {
-        return SynTryWithResourcesExpr(typeManager, te)
+        return SynTryWithResourcesExpr(typeManager, te, diag: diag)
     }
     var ok = true
     var baseTy: Ty = TypeManager.GetNothingTy()
@@ -497,8 +493,8 @@ public func SynTryExpr(typeManager: TypeManager, te: TryExpr): Ty {
     } else {
         ok = false
     }
-    if (let Some(joinedTy) <- SynTryExprCatchesAndHandles(typeManager, te, baseTy)) {
-        ok = ChkTryExprFinallyBlock(typeManager, te) && ok
+    if (let Some(joinedTy) <- SynTryExprCatchesAndHandles(typeManager, te, baseTy, diag: diag)) {
+        ok = ChkTryExprFinallyBlock(typeManager, te, diag: diag) && ok
         if (ok) {
             te.SetTy(joinedTy)
             return joinedTy
@@ -507,16 +503,17 @@ public func SynTryExpr(typeManager: TypeManager, te: TryExpr): Ty {
     return TryInvalid(te)
 }
 
-private func ChkTryExprCatchesAndHandles(typeManager: TypeManager, target: Ty, te: TryExpr): Bool {
+private func ChkTryExprCatchesAndHandles(typeManager: TypeManager, target: Ty, te: TryExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     var ok = ChkTryExprCatchPatterns(typeManager, te)
     for (catchBlock in te.catchBlocks) {
         if (!te.handlers.isEmpty()) {
-            ok = ValidateBlockInTryHandle(catchBlock) && ok
+            ok = ValidateBlockInTryHandle(catchBlock, diag: diag) && ok
         }
         ok = ChkBlock(typeManager, target, catchBlock) && ok
     }
     for (handler in te.handlers) {
-        if (!ValidateHandler(handler)) {
+        if (!ValidateHandler(handler, diag: diag)) {
             ok = false
         } else if (let Some(block) <- handler.block) {
             ok = ChkBlock(typeManager, target, block) && ok
@@ -531,9 +528,10 @@ private func ChkTryExprCatchesAndHandles(typeManager: TypeManager, target: Ty, t
     return ok
 }
 
-public func ChkTryExpr(typeManager: TypeManager, target: Ty, te: TryExpr): Bool {
+public func ChkTryExpr(typeManager: TypeManager, target: Ty, te: TryExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (!te.resourceSpec.isEmpty()) {
-        let actualTy = SynTryWithResourcesExpr(typeManager, te)
+        let actualTy = SynTryWithResourcesExpr(typeManager, te, diag: diag)
         if (Ty.IsTyCorrect(actualTy) &&
             typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
             return true
@@ -544,7 +542,7 @@ public func ChkTryExpr(typeManager: TypeManager, target: Ty, te: TryExpr): Bool 
     var ok = true
     if (!te.handlers.isEmpty()) {
         if (let Some(tryBlock) <- te.tryBlock) {
-            ok = ValidateBlockInTryHandle(tryBlock) && ok
+            ok = ValidateBlockInTryHandle(tryBlock, diag: diag) && ok
         }
         let tryLambdaTy = typeManager.GetFunctionTy(Array<Ty>(), target)
         if (let Some(lambda) <- te.tryLambda) {
@@ -559,8 +557,8 @@ public func ChkTryExpr(typeManager: TypeManager, target: Ty, te: TryExpr): Bool 
     } else {
         ok = false
     }
-    ok = ChkTryExprCatchesAndHandles(typeManager, target, te) && ok
-    ok = ChkTryExprFinallyBlock(typeManager, te) && ok
+    ok = ChkTryExprCatchesAndHandles(typeManager, target, te, diag: diag) && ok
+    ok = ChkTryExprFinallyBlock(typeManager, te, diag: diag) && ok
     if (ok) {
         te.SetTy(target)
         return true

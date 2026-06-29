@@ -5,26 +5,24 @@ import cangjie_compiler::chir.Type
 
 public class CGBoxType <: CGType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type) {
-        super(cgMod, cgCtx, chirType)
+        super(cgMod, cgCtx, chirType, cgTypeKind: CGTypeKind.CG_REF)
     }
 
     protected override func GenLLVMType(): LLVMTypeRef {
-        let payloadTy = if (let Some(boxTy) <- (chirType as BoxType)) {
-            CGType.GetOrCreate(cgMod, boxTy.GetBaseType()).GetLLVMType()
-        } else {
-            unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
+        if (let Some(existingType) <- llvmType) {
+            return existingType
         }
-        return unsafe { LLVMPointerType(payloadTy, 1u32) }
+        return unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
     }
 
     protected override func GenContainedCGTypes(): Unit {
-        if (let Some(boxTy) <- (chirType as BoxType)) {
-            containedCGTypes.add(CGType.GetOrCreate(cgMod, boxTy.GetBaseType()))
-        }
+        let boxTy = (chirType as BoxType).getOrThrow()
+        containedCGTypes.add(CGType.GetOrCreate(cgMod, boxTy.GetBaseType()))
     }
 
     protected override func CalculateSizeAndAlign(): Unit {
-        size = 8
-        align = 8
+        let rawType = GetLLVMType()
+        size = Int64(cgMod.GetTypeSize(rawType))
+        align = Int64(cgMod.GetABITypeAlignment(rawType))
     }
 }

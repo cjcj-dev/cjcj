@@ -150,9 +150,8 @@ private func IsSuperCall(ce: CallExpr): Bool {
 }
 
 private func ContainsFuncDecl(decls: ArrayList<FuncDecl>, candidate: FuncDecl): Bool {
-    let candidateKey = DeclIdentity(candidate)
     for (decl in decls) {
-        if (DeclIdentity(decl) == candidateKey) {
+        if (refEq(decl, candidate)) {
             return true
         }
     }
@@ -591,7 +590,7 @@ private func CheckAndObtainTypeMappingBetweenInterfaceAndExtend(typeManager: Typ
         if (let Some(inheritedTy) <- inheritedType.GetTy()) {
             if (let Some(interfaceTy) <- (inheritedTy as InterfaceTy)) {
                 if (let Some(declPtr) <- interfaceTy.declPtr) {
-                    if (DeclIdentity(declPtr) != DeclIdentity(interfaceDecl)) {
+                    if (!refEq(declPtr, interfaceDecl)) {
                         continue
                     }
                     let maps = SubstPack()
@@ -604,16 +603,6 @@ private func CheckAndObtainTypeMappingBetweenInterfaceAndExtend(typeManager: Typ
         }
     }
     return None
-}
-
-private func ContainsDeclIdentity(values: ArrayList<FuncDecl>, candidate: FuncDecl): Bool {
-    let candidateKey = DeclIdentity(candidate)
-    for (value in values) {
-        if (DeclIdentity(value) == candidateKey) {
-            return true
-        }
-    }
-    return false
 }
 
 private func IsInterfaceAbstractImplementedByExtend(typeManager: TypeManager, interfaceFunc: FuncDecl,
@@ -672,7 +661,7 @@ private func FilterExtendImplAbstractFunc(typeManager: TypeManager, candidates: 
             if (fd2.outerDecl.getOrThrow().astKind != ASTKind.EXTEND_DECL) {
                 continue
             }
-            if (IsInterfaceAbstractImplementedByExtend(typeManager, fd1, fd2) && !ContainsDeclIdentity(implemented, fd1)) {
+            if (IsInterfaceAbstractImplementedByExtend(typeManager, fd1, fd2) && !ContainsFuncDecl(implemented, fd1)) {
                 implemented.add(fd1)
             }
         }
@@ -682,7 +671,7 @@ private func FilterExtendImplAbstractFunc(typeManager: TypeManager, candidates: 
     }
     let out = ArrayList<FuncDecl>()
     for (fd in candidates) {
-        if (!ContainsDeclIdentity(implemented, fd)) {
+        if (!ContainsFuncDecl(implemented, fd)) {
             out.add(fd)
         }
     }

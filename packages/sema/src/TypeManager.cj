@@ -2642,10 +2642,10 @@ public class TypeManager {
     private func isClassLikeSubtype(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Bool {
         if (let Some(thisTyOfLeaf) <- (leaf as ClassThisTy)) {
             if (let Some(leafDecl) <- thisTyOfLeaf.declPtr) {
-                let leafClassTy = GetClassTy(leafDecl, CopyTypeArgs(thisTyOfLeaf.typeArgs))
+                let leafClassTy = GetClassTy(leafDecl, thisTyOfLeaf.typeArgs.toArray())
                 if (let Some(thisTyOfRoot) <- (root as ClassThisTy)) {
                     if (let Some(rootDecl) <- thisTyOfRoot.declPtr) {
-                        return IsSubtype(leafClassTy, GetClassTy(rootDecl, CopyTypeArgs(thisTyOfRoot.typeArgs)))
+                        return IsSubtype(leafClassTy, GetClassTy(rootDecl, thisTyOfRoot.typeArgs.toArray()))
                     }
                 }
                 return IsSubtype(leafClassTy, root, implicitBoxed: implicitBoxed, allowOptionBox: allowOptionBox)

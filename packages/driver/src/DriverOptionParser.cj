@@ -2,75 +2,33 @@ package cangjie_compiler::driver
 
 import std.collection.*
 import std.convert.*
-import cangjie_compiler::option.{ArgList, ArgType, CreateOptionTable, Group, ID, Kind, OptionTable}
-
-private class ParseCursor {
-    let args: Array<String>
-    var index: Int64 = 1
-
-    init(args: Array<String>) {
-        this.args = args
-    }
-
-    func hasNext(): Bool { return index < args.size }
-
-    func current(): String { return args[index] }
-
-    func orderIndex(): UInt64 { return UInt64(index - 1) }
-
-    func advance(): Unit { index++ }
-
-    func takeValue(optionName: String): Option<String> {
-        if (index + 1 >= args.size) {
-            eprintln("error: missing value for ${optionName}")
-            return None
-        }
-        index += 1
-        return args[index]
-    }
-
-    func takeOptionalValue(): Option<String> {
-        if (index + 1 >= args.size) {
-            return None
-        }
-        let candidate = args[index + 1]
-        if (candidate.startsWith("-")) {
-            return None
-        }
-        index += 1
-        return Some(args[index])
-    }
+import cangjie_compiler::option.{
+    ArgInstanceType, ArgList, CreateOptionTable, GetHardwareConcurrency, Group, ID, Kind, OptionArgInstance, OptionTable
 }
+import cangjie_compiler::utils.Semaphore as UtilsSemaphore
+
+private let g_driverOptionTable: OptionTable = CreateOptionTable(frontendMode: false)
 
 public func ParseDriverArgs(opts: DriverOptions, arguments: Array<String>): Bool {
-    let cursor = ParseCursor(ReorderWarningArgs(arguments))
+    let argList = ArgList()
+    if (!g_driverOptionTable.ParseArgs(ReorderWarningArgs(arguments), argList)) {
+        return false
+    }
     var ok = true
-    while (cursor.hasNext()) {
-        let arg = cursor.current()
-        if (arg == "--") {
-            cursor.advance()
-            while (cursor.hasNext()) {
-                let classified = ClassifyInput(opts, cursor.current(), cursor.orderIndex())
-                ok = ok && classified
-                if (IsFrontendInput(cursor.current())) {
-                    opts.frontendForwardArgs.add(cursor.current())
-                }
-                cursor.advance()
-            }
-            break
-        }
-        if (arg.startsWith("-")) {
-            let parsed = ParseOption(opts, cursor, arg)
+    var orderIndex = 0u64
+    for (entry in argList.entries) {
+        if (entry.argInstanceType == ArgInstanceType.Option) {
+            let parsed = ParseOption(opts, argList.optionArgs[entry.index], orderIndex)
             ok = ok && parsed
-            cursor.advance()
-            continue
+        } else {
+            let input = argList.inputArgs[entry.index].value
+            let classified = ClassifyInput(opts, input, orderIndex)
+            ok = ok && classified
+            if (IsFrontendInput(input)) {
+                opts.frontendForwardArgs.add(input)
+            }
         }
-        let classified = ClassifyInput(opts, arg, cursor.orderIndex())
-        ok = ok && classified
-        if (IsFrontendInput(arg)) {
-            opts.frontendForwardArgs.add(arg)
-        }
-        cursor.advance()
+        orderIndex += 1u64
     }
     return ok
 }
@@ -124,21 +82,6 @@ private func ReorderWarningArgs(arguments: Array<String>): Array<String> {
     return reordered.toArray()
 }
 
-private func optionValueInline(arg: String, optionName: String): Option<String> {
-    let prefix = optionName + "="
-    if (arg.startsWith(prefix)) {
-        return arg[prefix.size..]
-    }
-    return None
-}
-
-private func readOptionValue(cursor: ParseCursor, arg: String, longName: String): Option<String> {
-    if (let Some(value) <- optionValueInline(arg, longName)) {
-        return value
-    }
-    return cursor.takeValue(longName)
-}
-
 private func addFrontendFlag(opts: DriverOptions, spelling: String): Unit {
     opts.frontendForwardArgs.add(spelling)
 }
@@ -150,19 +93,6 @@ private func addFrontendJoined(opts: DriverOptions, spelling: String, value: Str
 private func addFrontendSeparated(opts: DriverOptions, spelling: String, value: String): Unit {
     opts.frontendForwardArgs.add(spelling)
     opts.frontendForwardArgs.add(value)
-}
-
-private func setPackageSourcePath(opts: DriverOptions, value: String): Unit {
-    opts.moduleSrcPath = value
-    addFrontendSeparated(opts, "--module-src-path", value)
-}
-
-private func canonicalSpelling(arg: String, shortName: String, longName: String): String {
-    return if (arg == shortName || arg.startsWith(shortName) && !shortName.isEmpty() && !shortName.startsWith("--")) {
-        shortName
-    } else {
-        longName
-    }
 }
 
 private func TryParseInt64(value: String): Option<Int64> {
@@ -189,16 +119,37 @@ private func ParseSanitizer(opts: DriverOptions, value: String): Bool {
     return false
 }
 
-private func ParseJobsValue(value: String): Option<UInt64> {
-    if (let Some(parsed) <- TryParseUInt64(value)) {
-        if (parsed >= 1u64) {
-            return parsed
+private func ParseJobsValue(optionName: String, value: String): Option<UInt64> {
+    let maxLen: Int64 = 9
+    if (value.isEmpty()) {
+        eprintln("'" + optionName + "' requires a non-empty value.")
+        return None
+    }
+    for (byte in value.toArray()) {
+        if (byte < b'0' || byte > b'9') {
+            eprintln("'" + optionName + "' only accepts a positive integer number as value.")
+            return None
         }
+    }
+    if (value.size > maxLen) {
+        eprintln("'" + optionName + "' gets an invalid number input.")
+        return None
+    }
+    if (let Some(parsed) <- TryParseUInt64(value)) {
+        if (parsed < 1u64) {
+            eprintln("warning: '" + optionName + "' value must be greater than 0, the compiler will use 1 as the value.")
+            return 1u64
+        }
+        let threadNum = GetHardwareConcurrency()
+        if (parsed > threadNum) { return threadNum }
+        return parsed
     }
     return None
 }
 
-private func ParseOption(opts: DriverOptions, cursor: ParseCursor, arg: String): Bool {
+private func ParseOption(opts: DriverOptions, optionArg: OptionArgInstance, optionIndex: UInt64): Bool {
+    let arg = optionArg.name
+    let value = optionArg.value
     if (arg == "-h" || arg == "--help") { opts.showUsage = true; return true }
     if (arg == "-v" || arg == "--version") { opts.printVersionOnly = true; return true }
     if (arg == "-V" || arg == "--verbose") { opts.enableVerbose = true; addFrontendFlag(opts, arg); return true }
@@ -217,14 +168,9 @@ private func ParseOption(opts: DriverOptions, cursor: ParseCursor, arg: String):
         addFrontendFlag(opts, arg)
         return true
     }
-    if (arg == "-p" || arg == "--package" || arg.startsWith("--package=")) {
+    if (arg == "-p" || arg == "--package") {
         opts.compilePackage = true
-        addFrontendFlag(opts, "--package")
-        if (let Some(inlinePackagePath) <- optionValueInline(arg, "--package")) {
-            setPackageSourcePath(opts, inlinePackagePath)
-        } else if (let Some(separatedPackagePath) <- cursor.takeOptionalValue()) {
-            setPackageSourcePath(opts, separatedPackagePath)
-        }
+        addFrontendFlag(opts, arg)
         return true
     }
     if (arg == "--no-sub-pkg") { opts.noSubPkg = true; addFrontendFlag(opts, arg); return true }
@@ -252,7 +198,7 @@ private func ParseOption(opts: DriverOptions, cursor: ParseCursor, arg: String):
         return true
     }
     if (arg == "--emit-chir") {
-        opts.emitCHIRPhase = "opt"
+        opts.emitCHIRPhase = if (value.isEmpty()) { "opt" } else { value }
         addFrontendFlag(opts, arg)
         return true
     }
@@ -266,22 +212,26 @@ private func ParseOption(opts: DriverOptions, cursor: ParseCursor, arg: String):
     if (arg == "--no-gc-sections") { opts.enableGcSections = false; return true }
     if (arg == "--discard-eh-frame") { opts.discardEhFrame = true; return true }
     if (arg == "--compile-as-exe") { opts.enableCompileAsExe = true; return true }
-    if (ParseOptimization(opts, arg)) { return true }
-    if (ParseWarningFlag(opts, cursor, arg)) { return true }
-    if (ParseObfuscationFlag(opts, cursor, arg)) { return true }
-    return ParseOptionWithValue(opts, cursor, arg)
+    if (ParseOptimization(opts, optionArg)) { return true }
+    if (ParseWarningFlag(opts, optionArg)) { return true }
+    if (ParseObfuscationFlag(opts, arg)) { return true }
+    return ParseOptionWithValue(opts, optionArg, optionIndex)
 }
 
-private func ParseOptimization(opts: DriverOptions, arg: String): Bool {
+private func ParseOptimization(opts: DriverOptions, optionArg: OptionArgInstance): Bool {
+    let arg = optionArg.name
+    let value = optionArg.value
     if (arg == "-O0") { addFrontendFlag(opts, arg); return opts.SetOptimizationLevel(OptimizationLevel.O0) }
-    if (arg == "-O" || arg == "-O1") { addFrontendFlag(opts, arg); return opts.SetOptimizationLevel(OptimizationLevel.O1) }
+    if ((arg == "-O" && value.isEmpty()) || arg == "-O1") {
+        addFrontendFlag(opts, arg)
+        return opts.SetOptimizationLevel(OptimizationLevel.O1)
+    }
     if (arg == "-O2") { addFrontendFlag(opts, arg); return opts.SetOptimizationLevel(OptimizationLevel.O2) }
     if (arg == "-O3") { addFrontendFlag(opts, arg); return opts.SetOptimizationLevel(OptimizationLevel.O3) }
     if (arg == "-Os") { addFrontendFlag(opts, arg); return opts.SetOptimizationLevel(OptimizationLevel.Os) }
     if (arg == "-Oz") { addFrontendFlag(opts, arg); return opts.SetOptimizationLevel(OptimizationLevel.Oz) }
-    if (arg.startsWith("-O") && arg.size > 2) {
-        let raw = arg[2..]
-        if (let Some(parsed) <- TryParseInt64(raw)) {
+    if (arg == "-O" && !value.isEmpty()) {
+        if (let Some(parsed) <- TryParseInt64(value)) {
             addFrontendFlag(opts, arg)
             if (parsed <= 0) { return opts.SetOptimizationLevel(OptimizationLevel.O0) }
             if (parsed == 1) { return opts.SetOptimizationLevel(OptimizationLevel.O1) }
@@ -292,34 +242,19 @@ private func ParseOptimization(opts: DriverOptions, arg: String): Bool {
     return false
 }
 
-private func ParseWarningFlag(opts: DriverOptions, cursor: ParseCursor, arg: String): Bool {
-    if (arg == "-Woff" || arg == "--warn-off" || arg.startsWith("--warn-off=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--warn-off")) {
-            addFrontendSeparated(opts, if (arg == "-Woff") { "-Woff" } else { "--warn-off" }, value)
-            return true
-        }
-        return false
-    }
-    if (arg == "-Won" || arg == "--warn-on" || arg.startsWith("--warn-on=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--warn-on")) {
-            addFrontendSeparated(opts, if (arg == "-Won") { "-Won" } else { "--warn-on" }, value)
-            return true
-        }
-        return false
-    }
-    if (arg.startsWith("-Woff") && arg.size > 5) {
-        addFrontendSeparated(opts, "-Woff", arg[5..])
+private func ParseWarningFlag(opts: DriverOptions, optionArg: OptionArgInstance): Bool {
+    if (optionArg.info.GetID() == ID.WARN_OFF) {
+        addFrontendSeparated(opts, optionArg.name, optionArg.value)
         return true
     }
-    if (arg.startsWith("-Won") && arg.size > 4) {
-        addFrontendSeparated(opts, "-Won", arg[4..])
+    if (optionArg.info.GetID() == ID.WARN_ON) {
+        addFrontendSeparated(opts, optionArg.name, optionArg.value)
         return true
     }
     return false
 }
 
-private func ParseObfuscationFlag(opts: DriverOptions, cursor: ParseCursor, arg: String): Bool {
-    let _ = cursor
+private func ParseObfuscationFlag(opts: DriverOptions, arg: String): Bool {
     if (arg == "--fobf-string") { opts.enableStringObfuscation = true; return true }
     if (arg == "--fno-obf-string") { opts.enableStringObfuscation = false; return true }
     if (arg == "--fobf-const") { opts.enableConstObfuscation = true; return true }
@@ -340,416 +275,242 @@ private func ParseObfuscationFlag(opts: DriverOptions, cursor: ParseCursor, arg:
     return false
 }
 
-private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg: String): Bool {
-    let optionIndex = cursor.orderIndex()
-    if (arg.startsWith("-o") && arg.size > 2) {
-        opts.output = arg[2..]
+private func ParseOptionWithValue(opts: DriverOptions, optionArg: OptionArgInstance, optionIndex: UInt64): Bool {
+    let arg = optionArg.name
+    let value = optionArg.value
+    if (arg == "-o" || arg == "--output") { opts.output = value; return true }
+    if (arg == "--output-dir") {
+        opts.outputDir = value
+        addFrontendSeparated(opts, arg, value)
         return true
     }
-    if (arg == "-o" || arg == "--output" || arg.startsWith("--output=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--output")) { opts.output = value; return true }
-        return false
-    }
-    if (arg == "--output-dir" || arg.startsWith("--output-dir=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--output-dir")) {
-            opts.outputDir = value
-            addFrontendSeparated(opts, "--output-dir", value)
-            return true
-        }
-        return false
-    }
-    if (arg == "--deserialize-chir-and-dump" || arg.startsWith("--deserialize-chir-and-dump=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--deserialize-chir-and-dump")) {
-            opts.frontendOnlyAction = true
-            addFrontendSeparated(opts, "--deserialize-chir-and-dump", value)
-            return true
-        }
-        return false
-    }
-    if (arg == "--module-name" || arg.startsWith("--module-name=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--module-name")) {
-            opts.moduleName = value
-            addFrontendSeparated(opts, "--module-name", value)
-            return true
-        }
-        return false
-    }
-    if (arg == "--module-src-path" || arg.startsWith("--module-src-path=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--module-src-path")) {
-            opts.moduleSrcPath = value
-            addFrontendSeparated(opts, "--module-src-path", value)
-            return true
-        }
-        return false
-    }
-    if (arg.startsWith("-B") && arg.size > 2) {
-        if (let Some(path) <- opts.CheckDirectoryPath(arg[2..])) { opts.toolChainPaths.add(path) }
+    if (arg == "--deserialize-chir-and-dump") {
+        opts.frontendOnlyAction = true
+        addFrontendSeparated(opts, arg, value)
         return true
     }
-    if (arg == "-B" || arg == "--toolchain" || arg.startsWith("--toolchain=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--toolchain")) {
-            if (let Some(path) <- opts.CheckDirectoryPath(value)) { opts.toolChainPaths.add(path) }
-            return true
-        }
-        return false
-    }
-    if (arg == "-L" || arg == "--library-path" || arg.startsWith("--library-path=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--library-path")) {
-            if (let Some(path) <- opts.CheckDirectoryPath(value)) { opts.librarySearchPaths.add(path) }
-            return true
-        }
-        return false
-    }
-    if (arg.startsWith("-L") && arg.size > 2) {
-        if (let Some(path) <- opts.CheckDirectoryPath(arg[2..])) { opts.librarySearchPaths.add(path) }
+    if (arg == "--module-name") {
+        opts.moduleName = value
+        addFrontendSeparated(opts, arg, value)
         return true
     }
-    if (arg == "-l" || arg == "--library" || arg.startsWith("--library=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--library")) {
-            opts.libraries.add(value)
-            opts.orderedLibraries.add(OrderedInput("-l" + value, optionIndex))
-            return true
-        }
-        return false
+    if (arg == "--module-src-path") {
+        opts.moduleSrcPath = value
+        addFrontendSeparated(opts, arg, value)
+        return true
     }
-    if (arg.startsWith("-l") && arg.size > 2) {
-        let value = arg[2..]
+    if (arg == "-B" || arg == "--toolchain") {
+        if (let Some(path) <- opts.CheckDirectoryPath(value)) { opts.toolChainPaths.add(path) }
+        return true
+    }
+    if (arg == "-L" || arg == "--library-path") {
+        if (let Some(path) <- opts.CheckDirectoryPath(value)) { opts.librarySearchPaths.add(path) }
+        return true
+    }
+    if (arg == "-l" || arg == "--library") {
         opts.libraries.add(value)
         opts.orderedLibraries.add(OrderedInput("-l" + value, optionIndex))
         return true
     }
-    if (arg == "--link-option" || arg.startsWith("--link-option=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--link-option")) {
-            opts.linkOption.add(value)
-            opts.orderedLinkOptions.add(OrderedInput(value, optionIndex))
+    if (arg == "--link-option") {
+        opts.linkOption.add(value)
+        opts.orderedLinkOptions.add(OrderedInput(value, optionIndex))
+        return true
+    }
+    if (arg == "--link-options") {
+        opts.linkOptions.add(value)
+        opts.orderedLinkOptionGroups.add(OrderedInput(value, optionIndex))
+        return true
+    }
+    if (arg == "--target") {
+        if (let Some(triple) <- TryParseTriple(value)) {
+            opts.target = triple
+            addFrontendSeparated(opts, arg, value)
             return true
         }
+        eprintln("error: unsupported target triple '${value}'")
         return false
     }
-    if (arg == "--link-options" || arg.startsWith("--link-options=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--link-options")) {
-            opts.linkOptions.add(value)
-            opts.orderedLinkOptionGroups.add(OrderedInput(value, optionIndex))
+    if (arg == "--target-cpu") { opts.targetCPU = value; return true }
+    if (arg == "--sysroot") {
+        if (let Some(path) <- opts.CheckDirectoryPath(value)) {
+            opts.sysroot = path
+            opts.customizedSysroot = true
+        }
+        return true
+    }
+    if (arg == "--save-temps") { opts.saveTemps = true; opts.tempFolderPath = value; return true }
+    if (arg == "--diagnostic-format") {
+        if (value != "json" && value != "noColor" && value != "default") {
+            eprintln("error: unsupported --diagnostic-format value '${value}'")
+            return false
+        }
+        opts.diagFormat = value
+        addFrontendSeparated(opts, arg, value)
+        return true
+    }
+    if (arg == "--error-count-limit") {
+        if (value == "all") {
+            opts.errorCountLimit = UInt64.Max
+            addFrontendSeparated(opts, arg, value)
             return true
         }
-        return false
-    }
-    if (arg == "--target" || arg.startsWith("--target=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--target")) {
-            if (let Some(triple) <- TryParseTriple(value)) {
-                opts.target = triple
-                addFrontendSeparated(opts, "--target", value)
-                return true
-            }
-            eprintln("error: unsupported target triple '${value}'")
-        }
-        return false
-    }
-    if (arg == "--target-cpu" || arg.startsWith("--target-cpu=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--target-cpu")) { opts.targetCPU = value; return true }
-        return false
-    }
-    if (arg == "--sysroot" || arg.startsWith("--sysroot=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--sysroot")) {
-            if (let Some(path) <- opts.CheckDirectoryPath(value)) {
-                opts.sysroot = path
-                opts.customizedSysroot = true
-            }
+        if (let Some(parsed) <- TryParseUInt64(value)) {
+            opts.errorCountLimit = parsed
+            addFrontendSeparated(opts, arg, value)
             return true
         }
+        eprintln("error: invalid value for --error-count-limit: ${value}")
         return false
     }
-    if (arg == "--save-temps" || arg.startsWith("--save-temps=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--save-temps")) { opts.saveTemps = true; opts.tempFolderPath = value; return true }
+    if (arg == "--lto") {
+        if (value == "full") { opts.ltoMod = LTOMode.FULL_LTO; return true }
+        if (value == "thin") { opts.ltoMod = LTOMode.THIN_LTO; return true }
+        eprintln("error: unsupported --lto value '${value}'")
         return false
     }
-    if (arg == "--diagnostic-format" || arg.startsWith("--diagnostic-format=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--diagnostic-format")) {
-            if (value != "json" && value != "noColor" && value != "default") {
-                eprintln("error: unsupported --diagnostic-format value '${value}'")
-                return false
-            }
-            opts.diagFormat = value
-            addFrontendSeparated(opts, "--diagnostic-format", value)
-            return true
+    if (arg == "--output-type") {
+        if (!ParseOutputType(opts, value)) { return false }
+        addFrontendSeparated(opts, arg, value)
+        return true
+    }
+    if (arg == "--compile-target") { return ParseCompileTarget(opts, value) }
+    if (arg == "--opt-options") { opts.optArg = value; return true }
+    if (arg == "--llc-options") { opts.llcArg = value; return true }
+    if (arg == "--opt-pass-options") {
+        opts.optPassOptions = value
+        addFrontendSeparated(opts, arg, value)
+        return true
+    }
+    if (arg == "--sanitize") {
+        if (!ParseSanitizer(opts, value)) { return false }
+        addFrontendSeparated(opts, arg, value)
+        return true
+    }
+    if (arg == "--stack-trace-format") {
+        if (value != "default" && value != "simple" && value != "all") {
+            eprintln("error: unsupported --stack-trace-format value '${value}'")
+            return false
         }
-        return false
+        opts.stackTraceFormat = "--stack-trace-format=" + value
+        return true
     }
-    if (arg == "--error-count-limit" || arg.startsWith("--error-count-limit=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--error-count-limit")) {
-            if (value == "all") {
-                opts.errorCountLimit = UInt64.Max
-                addFrontendSeparated(opts, "--error-count-limit", value)
-                return true
-            }
-            if (let Some(parsed) <- TryParseUInt64(value)) {
-                opts.errorCountLimit = parsed
-                addFrontendSeparated(opts, "--error-count-limit", value)
-                return true
-            }
-            eprintln("error: invalid value for --error-count-limit: ${value}")
-        }
-        return false
-    }
-    if (arg == "--lto" || arg.startsWith("--lto=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--lto")) {
-            if (value == "full") { opts.ltoMod = LTOMode.FULL_LTO; return true }
-            if (value == "thin") { opts.ltoMod = LTOMode.THIN_LTO; return true }
-            eprintln("error: unsupported --lto value '${value}'")
-        }
-        return false
-    }
-    if (arg == "--output-type" || arg.startsWith("--output-type=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--output-type")) {
-            if (!ParseOutputType(opts, value)) { return false }
-            addFrontendSeparated(opts, "--output-type", value)
-            return true
-        }
-        return false
-    }
-    if (arg.startsWith("--emit-chir=")) {
-        if (let Some(value) <- optionValueInline(arg, "--emit-chir")) {
-            if (value.isEmpty() || value == "opt" || value == "raw") {
-                opts.emitCHIRPhase = if (value.isEmpty()) { "opt" } else { value }
-                addFrontendJoined(opts, "--emit-chir", value)
-                return true
-            }
-            eprintln("error: unsupported --emit-chir value '${value}'")
-        }
-        return false
-    }
-    if (arg == "--compile-target" || arg.startsWith("--compile-target=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--compile-target")) { return ParseCompileTarget(opts, value) }
-        return false
-    }
-    if (arg == "--opt-options" || arg.startsWith("--opt-options=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--opt-options")) { opts.optArg = value; return true }
-        return false
-    }
-    if (arg == "--llc-options" || arg.startsWith("--llc-options=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--llc-options")) { opts.llcArg = value; return true }
-        return false
-    }
-    if (arg == "--opt-pass-options" || arg.startsWith("--opt-pass-options=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--opt-pass-options")) {
-            opts.optPassOptions = value
-            addFrontendSeparated(opts, "--opt-pass-options", value)
-            return true
-        }
-        return false
-    }
-    if (arg == "--sanitize" || arg.startsWith("--sanitize=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--sanitize")) {
-            if (!ParseSanitizer(opts, value)) { return false }
-            addFrontendSeparated(opts, "--sanitize", value)
-            return true
-        }
-        return false
-    }
-    if (arg == "--stack-trace-format" || arg.startsWith("--stack-trace-format=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--stack-trace-format")) {
-            if (value != "default" && value != "simple" && value != "all") {
-                eprintln("error: unsupported --stack-trace-format value '${value}'")
-                return false
-            }
-            opts.stackTraceFormat = "--stack-trace-format=" + value
-            return true
-        }
-        return false
-    }
-    if (arg == "--lto-keep-pkg-visibility" || arg.startsWith("--lto-keep-pkg-visibility=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--lto-keep-pkg-visibility")) {
-            if (value.isEmpty()) {
-                opts.ltoHideAllPkgs = true
-            } else {
-                for (rawPkg in SplitString(value, ",")) {
-                    let pkg = rawPkg.trimAscii()
-                    if (!pkg.isEmpty()) {
-                        opts.ltoVisiblePkgs.add(pkg)
-                    }
-                }
-            }
-            return true
-        }
-        return false
-    }
-    if (arg == "--pgo-instr-gen" || arg.startsWith("--pgo-instr-gen=")) {
-        opts.enablePgoInstrGen = true
-        if (arg.startsWith("--pgo-instr-gen=")) {
-            if (let Some(value) <- optionValueInline(arg, "--pgo-instr-gen")) {
-                opts.pgoProfileFile = value
+    if (arg == "--lto-keep-pkg-visibility") {
+        if (value.isEmpty()) {
+            opts.ltoHideAllPkgs = true
+        } else {
+            for (rawPkg in SplitString(value, ",")) {
+                let pkg = rawPkg.trimAscii()
+                if (!pkg.isEmpty()) { opts.ltoVisiblePkgs.add(pkg) }
             }
         }
         return true
     }
-    if (arg == "--pgo-instr-use" || arg.startsWith("--pgo-instr-use=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--pgo-instr-use")) {
-            opts.enablePgoInstrUse = true
-            opts.pgoProfileFile = value
+    if (arg == "--pgo-instr-gen") {
+        opts.enablePgoInstrGen = true
+        if (!value.isEmpty()) { opts.pgoProfileFile = value }
+        return true
+    }
+    if (arg == "--pgo-instr-use") {
+        opts.enablePgoInstrUse = true
+        opts.pgoProfileFile = value
+        return true
+    }
+    if (arg == "--backend") {
+        if (value != "llvm") {
+            eprintln("error: unsupported --backend value '${value}'")
+            return false
+        }
+        opts.backend = BackendType.CJNATIVE
+        addFrontendSeparated(opts, arg, value)
+        return true
+    }
+    if (arg == "--import-path") { addFrontendSeparated(opts, arg, value); return true }
+    if (arg == "--plugin") { addFrontendSeparated(opts, arg, value); return true }
+    if (arg == "--common-part-cjo") {
+        if (let Some(path) <- opts.ValidateInputFilePath(value)) {
+            opts.commonPartCjos.add(path)
+            addFrontendSeparated(opts, arg, path)
             return true
         }
         return false
     }
-    if (arg == "--backend" || arg.startsWith("--backend=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--backend")) {
-            if (value != "llvm") {
-                eprintln("error: unsupported --backend value '${value}'")
-                return false
-            }
-            opts.backend = BackendType.CJNATIVE
-            addFrontendSeparated(opts, "--backend", value)
+    if (arg == "--common-part-chir") {
+        if (let Some(path) <- opts.ValidateInputFilePath(value)) {
+            opts.commonPartChirs.add(path)
+            addFrontendSeparated(opts, arg, path)
             return true
         }
         return false
     }
-    if (arg == "--import-path" || arg.startsWith("--import-path=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--import-path")) {
-            addFrontendSeparated(opts, "--import-path", value)
-            return true
-        }
-        return false
+    if (arg == "--cfg") { addFrontendSeparated(opts, arg, value); return true }
+    if (arg == "--cangjie-home") {
+        opts.cangjieHome = value
+        addFrontendSeparated(opts, arg, value)
+        return true
     }
-    if (arg == "--plugin" || arg.startsWith("--plugin=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--plugin")) {
-            addFrontendSeparated(opts, "--plugin", value)
-            return true
-        }
-        return false
-    }
-    if (arg == "--common-part-cjo" || arg.startsWith("--common-part-cjo=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--common-part-cjo")) {
-            if (let Some(path) <- opts.ValidateInputFilePath(value)) {
-                opts.commonPartCjos.add(path)
-                addFrontendSeparated(opts, "--common-part-cjo", path)
-                return true
-            }
-        }
-        return false
-    }
-    if (arg == "--common-part-chir" || arg.startsWith("--common-part-chir=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--common-part-chir")) {
-            if (let Some(path) <- opts.ValidateInputFilePath(value)) {
-                opts.commonPartChirs.add(path)
-                addFrontendSeparated(opts, "--common-part-chir", path)
-                return true
-            }
-        }
-        return false
-    }
-    if (arg == "--cfg" || arg.startsWith("--cfg=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--cfg")) {
-            addFrontendSeparated(opts, "--cfg", value)
-            return true
-        }
-        return false
-    }
-    if (arg == "--cangjie-home" || arg.startsWith("--cangjie-home=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--cangjie-home")) {
-            opts.cangjieHome = value
-            addFrontendSeparated(opts, "--cangjie-home", value)
-            return true
-        }
-        return false
-    }
-    if (arg.startsWith("-j") && arg.size > 2) {
-        let value = arg[2..]
-        if (let Some(parsed) <- ParseJobsValue(value)) {
+    if (arg == "-j" || arg == "--jobs") {
+        if (let Some(parsed) <- ParseJobsValue(arg, value)) {
             opts.jobs = parsed
-            addFrontendSeparated(opts, "-j", value)
+            addFrontendSeparated(opts, arg, value)
             return true
         }
-        eprintln("error: --jobs expects a positive integer")
         return false
     }
-    if (arg == "-j" || arg == "--jobs" || arg.startsWith("--jobs=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--jobs")) {
-            if (let Some(parsed) <- ParseJobsValue(value)) {
-                opts.jobs = parsed
-                addFrontendSeparated(opts, canonicalSpelling(arg, "-j", "--jobs"), value)
-                return true
-            }
-            eprintln("error: --jobs expects a positive integer")
-        }
-        return false
-    }
-    if (arg == "--aggressive-parallel-compile" || arg == "--apc" ||
-        arg.startsWith("--aggressive-parallel-compile=") || arg.startsWith("--apc=")) {
-        let optionName = if (arg.startsWith("--apc")) { "--apc" } else { "--aggressive-parallel-compile" }
-        if (arg == "--aggressive-parallel-compile" || arg == "--apc") {
+    if (arg == "--aggressive-parallel-compile" || arg == "--apc") {
+        if (value.isEmpty()) {
             opts.aggressiveParallelCompileWithoutArg = true
-            addFrontendFlag(opts, optionName)
+            addFrontendFlag(opts, arg)
             return true
         }
-        if (let Some(value) <- optionValueInline(arg, optionName)) {
-            if (let Some(parsed) <- ParseJobsValue(value)) {
-                opts.aggressiveParallelCompile = Int64(parsed)
-                addFrontendJoined(opts, optionName, value)
-                return true
-            }
-        }
-        eprintln("error: --aggressive-parallel-compile expects a positive integer")
-        return false
-    }
-    if (arg == "--int-overflow" || arg.startsWith("--int-overflow=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--int-overflow")) {
-            if (value != "throwing" && value != "wrapping" && value != "saturating") {
-                eprintln("error: unsupported --int-overflow value '${value}'")
-                return false
-            }
-            addFrontendSeparated(opts, "--int-overflow", value)
+        if (let Some(parsed) <- ParseJobsValue(arg, value)) {
+            opts.aggressiveParallelCompile = Int64(parsed)
+            UtilsSemaphore.Get().SetCount(Int64(parsed + 2u64))
+            addFrontendJoined(opts, arg, value)
             return true
         }
         return false
     }
-    if (arg == "--obf-level" || arg.startsWith("--obf-level=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--obf-level")) {
-            if (let Some(parsed) <- TryParseInt64(value)) {
-                if (parsed >= OBFUCATION_LEVEL_MIN && parsed <= OBFUCATION_LEVEL_MAX) {
-                    opts.obfuscationLevel = parsed
-                    return true
-                }
-            }
-            eprintln("error: --obf-level expects an integer in [1, 9].")
+    if (arg == "--int-overflow") {
+        if (value != "throwing" && value != "wrapping" && value != "saturating") {
+            eprintln("error: unsupported --int-overflow value '${value}'")
+            return false
         }
-        return false
+        addFrontendSeparated(opts, arg, value)
+        return true
     }
-    if (arg == "--obf-seed" || arg.startsWith("--obf-seed=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--obf-seed")) {
-            if (let Some(parsed) <- TryParseInt64(value)) { opts.obfuscationSeed = parsed; return true }
-        }
-        return false
-    }
-    if (arg == "--obf-sym-input-mapping" || arg.startsWith("--obf-sym-input-mapping=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--obf-sym-input-mapping")) { opts.layoutObfInputSymMappingFiles = value; return true }
-        return false
-    }
-    if (arg == "--obf-sym-output-mapping" || arg.startsWith("--obf-sym-output-mapping=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--obf-sym-output-mapping")) { opts.layoutObfOutputSymMappingFile = value; return true }
-        return false
-    }
-    if (arg == "--obf-apply-mapping-file" || arg.startsWith("--obf-apply-mapping-file=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--obf-apply-mapping-file")) {
-            if (let Some(path) <- opts.ValidateInputFilePath(value)) {
-                opts.layoutObfUserMappingFile = path
+    if (arg == "--obf-level") {
+        if (let Some(parsed) <- TryParseInt64(value)) {
+            if (parsed >= OBFUCATION_LEVEL_MIN && parsed <= OBFUCATION_LEVEL_MAX) {
+                opts.obfuscationLevel = parsed
                 return true
             }
         }
+        eprintln("error: --obf-level expects an integer in [1, 9].")
         return false
     }
-    if (arg == "--obf-sym-prefix" || arg.startsWith("--obf-sym-prefix=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--obf-sym-prefix")) { opts.layoutObfSymPrefix = value; return true }
+    if (arg == "--obf-seed") {
+        if (let Some(parsed) <- TryParseInt64(value)) { opts.obfuscationSeed = parsed; return true }
         return false
     }
-    if (arg == "--obf-config" || arg.startsWith("--obf-config=")) {
-        if (let Some(value) <- readOptionValue(cursor, arg, "--obf-config")) {
-            if (let Some(path) <- opts.ValidateInputFilePath(value)) {
-                opts.obfuscationConfigFile = path
-                return true
-            }
+    if (arg == "--obf-sym-input-mapping") { opts.layoutObfInputSymMappingFiles = value; return true }
+    if (arg == "--obf-sym-output-mapping") { opts.layoutObfOutputSymMappingFile = value; return true }
+    if (arg == "--obf-apply-mapping-file") {
+        if (let Some(path) <- opts.ValidateInputFilePath(value)) {
+            opts.layoutObfUserMappingFile = path
+            return true
         }
         return false
     }
-    return ForwardNonDriverOption(opts, cursor, arg)
+    if (arg == "--obf-sym-prefix") { opts.layoutObfSymPrefix = value; return true }
+    if (arg == "--obf-config") {
+        if (let Some(path) <- opts.ValidateInputFilePath(value)) {
+            opts.obfuscationConfigFile = path
+            return true
+        }
+        return false
+    }
+    return ForwardNonDriverOption(opts, optionArg)
 }
 
 // Group-based auto-forward, mirroring C++ GlobalOptions::GenerateFrontendOptions
@@ -758,12 +519,8 @@ private func ParseOptionWithValue(opts: DriverOptions, cursor: ParseCursor, arg:
 // cjc-frontend, instead of being rejected by the hand-written allowlist. The driver-mode table
 // (src/Option/OptionTable.cpp:145) rejects FRONTEND-group-only options, so passing one still
 // produces C++'s "invalid option" diagnostic.
-private let g_driverOptionTable: OptionTable = CreateOptionTable(frontendMode: false)
 
-private func ForwardNonDriverOption(opts: DriverOptions, cursor: ParseCursor, arg: String): Bool {
-    let maybeArg = g_driverOptionTable.ParseOptionArg(arg)
-    if (let None <- maybeArg) { return false }
-    let optArg = maybeArg.getOrThrow()
+private func ForwardNonDriverOption(opts: DriverOptions, optArg: OptionArgInstance): Bool {
     let info = optArg.info
     // OUTPUT_FILE and DRIVER-group options are consumed by the driver, never forwarded
     // (src/Option/Option.cpp:1004-1009). The hand-written parser above already handles all
@@ -772,21 +529,11 @@ private func ForwardNonDriverOption(opts: DriverOptions, cursor: ParseCursor, ar
     if (info.GetID() != ID.OUTPUT_FILE && !info.BelongsGroup(Group.DRIVER)) {
         opts.frontendForwardArgs.add(optArg.name)
         if (info.GetKind() == Kind.SEPARATED) {
-            if (optArg.argType == ArgType.PartiallyParsed) {
-                match (cursor.takeValue(optArg.name)) {
-                    case Some(value) =>
-                        let argList = ArgList()
-                        if (!g_driverOptionTable.ParseArgs(["cjc", arg, value], argList)) { return false }
-                        opts.frontendForwardArgs.add(value)
-                    case None => return false
-                }
-            } else {
-                opts.frontendForwardArgs.add(optArg.value)
-            }
+            opts.frontendForwardArgs.add(optArg.value)
         }
         return true
     }
-    eprintln("error: unrecognized driver option '${arg}'")
+    eprintln("error: unrecognized driver option '${optArg.str}'")
     return false
 }
 

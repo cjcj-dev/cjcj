@@ -244,7 +244,7 @@ private func IsNeedRuntimeCheckForPattern(typeManager: TypeManager, srcTy: Ty, t
     if (IsFinalRuntimeTy(srcTy) && IsFinalRuntimeTy(targetTy)) {
         if (let Some(srcDecl) <- RuntimeDeclOfTy(srcTy)) {
             if (let Some(targetDecl) <- RuntimeDeclOfTy(targetTy)) {
-                return DeclIdentity(srcDecl) == DeclIdentity(targetDecl)
+                return refEq(srcDecl, targetDecl)
             }
             return false
         }

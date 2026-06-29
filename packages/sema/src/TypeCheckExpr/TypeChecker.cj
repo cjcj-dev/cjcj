@@ -3526,7 +3526,7 @@ public class TypeChecker {
 
     private func SynthesizeTryExpr(ctx: ASTContext, tryExpr: TryExpr): Ty {
         SynthesizeTryExprChildren(ctx, tryExpr)
-        return FinishSynthesize(ctx, tryExpr, SynTryExpr(impl.typeManager, tryExpr))
+        return FinishSynthesize(ctx, tryExpr, SynTryExpr(impl.typeManager, tryExpr, diag: impl.diag))
     }
 
     private func CheckArrayLit(ctx: ASTContext, target: Ty, arrayLit: ArrayLit): Bool {
@@ -4029,7 +4029,7 @@ public class TypeChecker {
         }
         if (let Some(tryExpr) <- (expr as TryExpr)) {
             SynthesizeTryExprChildren(ctx, tryExpr)
-            return FinishCheck(ctx, tryExpr, ChkTryExpr(impl.typeManager, target, tryExpr))
+            return FinishCheck(ctx, tryExpr, ChkTryExpr(impl.typeManager, target, tryExpr, diag: impl.diag))
         }
         if (let Some(typeConv) <- (expr as TypeConvExpr)) {
             return FinishCheck(ctx, typeConv, ChkTypeConvExpr(impl.typeManager, target, typeConv,

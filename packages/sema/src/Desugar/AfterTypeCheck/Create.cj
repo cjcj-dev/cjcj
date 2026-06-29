@@ -49,7 +49,7 @@ public func IsNeedRuntimeCheck(typeManager: TypeManager, srcTy: Ty, targetTy: Ty
     if (isFinalRuntimeTy(srcTy) && isFinalRuntimeTy(targetTy)) {
         if (let Some(srcDecl) <- declOfTy(srcTy)) {
             if (let Some(targetDecl) <- declOfTy(targetTy)) {
-                return DeclIdentity(srcDecl) == DeclIdentity(targetDecl)
+                return refEq(srcDecl, targetDecl)
             }
             return false
         }
