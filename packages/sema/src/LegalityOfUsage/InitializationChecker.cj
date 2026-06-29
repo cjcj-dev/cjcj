@@ -2,6 +2,7 @@ package cangjie_compiler::sema.LegalityOfUsage
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::sema.*
 
 public enum InitializationIssueKind {
@@ -246,6 +247,40 @@ private func NotAssignableVariable(vd: VarDecl, inInitFunction: Bool): Bool {
 
 private func CanSkipInitCheck(node: Node): Bool {
     return node.TestAnyAttr(Attribute.IMPORTED, Attribute.FOREIGN, Attribute.ENUM_CONSTRUCTOR)
+}
+
+private func IsAssignLetDefinedOuterLoop(ctx: ASTContext, vd: VarDecl, curExpr: Expr): Bool {
+    if (vd.isVar) {
+        return false
+    }
+    if (let Some(assign) <- (curExpr as AssignExpr)) {
+        if (!vd.TestAttr(Attribute.INITIALIZED)) {
+            if (assign.isCompound) {
+                return false
+            }
+            let occurredInRight = InitBoolBox(false)
+            let walker = Walker(assign.rightExpr.getOrThrow(), visitPre: { node: Node =>
+                if (let Some(target) <- node.GetTarget()) {
+                    if (target == vd) {
+                        occurredInRight.value = true
+                        return VisitAction.STOP_NOW
+                    }
+                }
+                VisitAction.WALK_CHILDREN
+            })
+            walker.Walk()
+            if (occurredInRight.value) {
+                return false
+            }
+        }
+    }
+    if (let Some(outerLoop) <- GetRefLoopSymbol(ctx, curExpr)) {
+        let loopNode = outerLoop.node.getOrThrow()
+        if (loopNode.begin > vd.begin) {
+            return true
+        }
+    }
+    return false
 }
 
 private func IsOtherInit(call: ConstructorCall): Bool {
@@ -598,6 +633,8 @@ private func IsInitializedMemberAccess(member: MemberAccess): Bool {
 }
 
 public class InitializationChecker {
+    private let ctx: ASTContext
+    private let opts: OptionGlobalOptions
     private let issues: ArrayList<InitializationIssue> = ArrayList<InitializationIssue>()
     private var currentInitializingVarDependencies: Option<ArrayList<Decl>> = None
     private let currentFuncBodies: ArrayList<FuncBody> = ArrayList<FuncBody>()
@@ -607,7 +644,10 @@ public class InitializationChecker {
     private var optionalCtxDepth: Int64 = 0
     private var tryDepth: Int64 = 0
 
-    public init() {}
+    public init(ctx: ASTContext, opts!: OptionGlobalOptions = OptionGlobalOptions()) {
+        this.ctx = ctx
+        this.opts = opts
+    }
 
     public func Check(root: Node): ArrayList<InitializationIssue> {
         CheckInitialization(root)
@@ -823,9 +863,10 @@ public class InitializationChecker {
             }
         }
         for (member in staticMembers) {
-            if (!member.TestAnyAttr(Attribute.INITIALIZED, Attribute.TOOL_ADD, Attribute.COMMON)) {
-                AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, member, target: member)
+            if (member.TestAnyAttr(Attribute.INITIALIZED, Attribute.TOOL_ADD, Attribute.COMMON) || opts.compileCjd) {
+                continue
             }
+            AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, member, target: member)
         }
     }
 
@@ -959,7 +1000,8 @@ public class InitializationChecker {
         if (let Some(refExpr) <- (expr as RefExpr)) {
             if (let Some(target) <- refExpr.GetTarget()) {
                 if (let Some(varDecl) <- (target as VarDecl)) {
-                    if (NotAssignableVariable(varDecl, inInitFunction)) {
+                    if (NotAssignableVariable(varDecl, inInitFunction) ||
+                        IsAssignLetDefinedOuterLoop(ctx, varDecl, assignOrInc)) {
                         AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignOrInc, target: varDecl)
                     }
                 }
@@ -2110,6 +2152,9 @@ public class InitializationChecker {
         if (let None <- fd.funcBody) {
             return
         }
+        if (opts.compileCjd) {
+            return
+        }
         if (IsOtherInit(fd.constructorCall)) {
             for (decl in uninitNonFuncDecls) {
                 decl.EnableAttr(Attribute.INITIALIZED)
@@ -2218,8 +2263,12 @@ public class InitializationChecker {
     }
 }
 
-public func CheckInitialization(root: Node): ArrayList<InitializationIssue> {
-    return InitializationChecker().Check(root)
+public func CheckInitialization(
+    ctx: ASTContext,
+    root: Node,
+    opts!: OptionGlobalOptions = OptionGlobalOptions()
+): ArrayList<InitializationIssue> {
+    return InitializationChecker(ctx, opts: opts).Check(root)
 }
 
 public func SelfhostPortStatus_LegalityOfUsage_InitializationChecker(): Bool {

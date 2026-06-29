@@ -1100,7 +1100,7 @@ public class TypeChecker {
                 SetConstructorCalls(pkg)
                 // Check legality of usage after sema type completed.
                 // Mirrors C++ TypeChecker.cpp:2053 (CheckLegalityOfUsage).
-                RunLegalityOfUsageCheck(pkg)
+                RunLegalityOfUsageCheck(ctx, pkg)
                 PerformDesugarAfterTypeCheck(impl.typeManager, pkg, context: Some(ctx), options: GlobalOptions(),
                     synthesizer: Some({ synCtx: ASTContext, pos: SynPos, node: Node =>
                         SynthesizeWithoutRecover(synCtx, pos, node)
@@ -1183,9 +1183,9 @@ public class TypeChecker {
         }
     }
 
-    private func RunLegalityOfUsageCheck(pkg: Package): Unit {
+    private func RunLegalityOfUsageCheck(ctx: ASTContext, pkg: Package): Unit {
         if (let Some(diagValue) <- impl.diag) {
-            let result = CheckLegalityOfUsage(pkg)
+            let result = CheckLegalityOfUsage(ctx, pkg, opts: GlobalOptions())
             EmitLegalityOfUsage(diagValue, result)
         }
     }

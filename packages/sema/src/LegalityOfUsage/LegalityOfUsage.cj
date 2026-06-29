@@ -2,6 +2,7 @@ package cangjie_compiler::sema.LegalityOfUsage
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::sema.*
 
 private class BoolBox {
@@ -413,11 +414,15 @@ public func CheckSubscriptLegality(root: Node): ArrayList<SubscriptLegalityIssue
     return out
 }
 
-public func CheckLegalityOfUsage(pkg: Package): LegalityOfUsageResult {
+public func CheckLegalityOfUsage(
+    ctx: ASTContext,
+    pkg: Package,
+    opts!: OptionGlobalOptions = OptionGlobalOptions()
+): LegalityOfUsageResult {
     SetAllFuncBodyCaptureKinds(pkg)
     let result = LegalityOfUsageResult()
     AppendStaticMemberGenericIssues(result.staticMemberGenericIssues, CheckStaticMembersWithGeneric(pkg))
-    AppendInitializationIssues(result.initializationIssues, CheckInitialization(pkg))
+    AppendInitializationIssues(result.initializationIssues, CheckInitialization(ctx, pkg, opts: opts))
     AppendGlobalIssues(result.globalVarInitializationIssues, CheckGlobalVarInitialization(pkg))
     AppendAccessIssues(result.accessLevelViolations, CheckAccessLevelValidity(pkg))
     AppendSubscriptIssues(result.subscriptLegalityIssues, CheckSubscriptLegality(pkg))
