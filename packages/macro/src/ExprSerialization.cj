@@ -307,8 +307,19 @@ public func SerializeMatchExprForNodeWriter(writer: NodeWriter, matchExpr: Match
 }
 
 public func SerializeMatchCaseForNodeWriter(writer: NodeWriter, matchCase: MatchCase): String {
-    return "case(guard=" + SerializeExprOptionForNodeWriter(writer, matchCase.patternGuard) + ";body=" +
-        SerializeBlockOptionForNodeWriter(writer, matchCase.exprOrDecls) + ")"
+    let builder = StringBuilder()
+    builder.append("case(patterns=[")
+    var patternIdx: Int64 = 0
+    while (patternIdx < matchCase.patterns.size) {
+        if (patternIdx > 0) {
+            builder.append(",")
+        }
+        builder.append(writer.SerializePattern(matchCase.patterns[patternIdx]))
+        patternIdx++
+    }
+    builder.append("];guard=" + SerializeExprOptionForNodeWriter(writer, matchCase.patternGuard) + ";body=" +
+        SerializeBlockOptionForNodeWriter(writer, matchCase.exprOrDecls) + ")")
+    return builder.toString()
 }
 
 public func SerializeMatchCaseOtherForNodeWriter(writer: NodeWriter, caseOther: MatchCaseOther): String {
