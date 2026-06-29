@@ -76,6 +76,11 @@ public func DeclareTypeInfoGlobal(cgMod: CGModule, chirTy: Type, genericKind: CG
     }
     cgMod.GetCGContext().AddCodeGenAddedFuncsOrVars(chirTy, typeInfoName)
     let typeInfo = GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoTy)
+    if (genericKind == CGGenericKind.STATIC_GI || genericKind == CGGenericKind.CONCRETE) {
+        if (!IsModifiableClass(chirTy)) {
+            addAttribute(typeInfo, NOT_MODIFIABLE_CLASS_ATTR)
+        }
+    }
     if (chirTy.IsPrimitive() || chirTy.IsVoid() || chirTy.IsCString() || chirTy.IsCPointer()) {
         // C++ attaches the GC-layout metadata from the CGType's layout struct name (CGType::GenTypeInfo,
         // CGType.cpp:623/634): primitives/void/CString use "<type>.Type"; every CPointer<T> shares the
@@ -124,6 +129,7 @@ public func GetOrCreateGenericTypeInfoGlobal(cgMod: CGModule, chirTy: Type): LLV
         unsafe {
             LLVMSetInitializer(typeInfo, TypeInfoConstStruct(typeInfoTy, values))
             LLVMSetLinkage(typeInfo, LLVMLinkageValue(LLVMLinkage.Private))
+            addAttribute(typeInfo, GENERIC_TYPEINFO_ATTR)
             LLVMSetGlobalConstant(typeInfo, 0)
         }
     }
@@ -575,6 +581,7 @@ public func EnsureSourceGenericTypeTemplate(cgMod: CGModule, customTy: CustomTyp
                 LLVMSetInitializer(typeTemplate,
                     BuildSourceGenericTypeTemplateInitializer(cgMod, moduleHandle, sourceTy, typeTemplateTy,
                         typeTemplateName))
+                addAttribute(typeTemplate, TYPE_TEMPLATE_ATTR)
                 AddLinkageTypeMetadata(typeTemplate, TypeTemplateLinkage(),
                     cgMod.GetCGContext().IsCGParallelEnabled())
                 LLVMSetGlobalConstant(typeTemplate, 0)
@@ -603,6 +610,7 @@ public func RefreshSourceGenericTypeTemplateInitializer(cgMod: CGModule, customT
             LLVMSetInitializer(typeTemplate,
                 BuildSourceGenericTypeTemplateInitializer(cgMod, moduleHandle, sourceTy, typeTemplateTy,
                     typeTemplateName))
+            addAttribute(typeTemplate, TYPE_TEMPLATE_ATTR)
             AddLinkageTypeMetadata(typeTemplate, TypeTemplateLinkage(),
                 cgMod.GetCGContext().IsCGParallelEnabled())
             LLVMSetGlobalConstant(typeTemplate, 0)
@@ -1169,6 +1177,7 @@ private func GenerateTypeArgsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoN
         unsafe {
             LLVMSetInitializer(typeArgsGlobal, ConstArray(typeInfoPtrType, values))
             LLVMSetLinkage(typeArgsGlobal, LLVMLinkageValue(LLVMLinkage.Private))
+            addAttribute(typeArgsGlobal, CJTI_TYPE_ARGS_ATTR)
             LLVMSetGlobalConstant(typeArgsGlobal, 1)
         }
     }
@@ -1193,6 +1202,7 @@ private func GenerateFieldsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoNam
         unsafe {
             LLVMSetInitializer(fieldsGlobal, ConstArray(typeInfoPtrType, fieldInfos))
             LLVMSetLinkage(fieldsGlobal, LLVMLinkageValue(LLVMLinkage.Private))
+            addAttribute(fieldsGlobal, CJTI_FIELDS_ATTR)
             LLVMSetGlobalConstant(fieldsGlobal, 1)
         }
     }
@@ -1220,6 +1230,7 @@ private func GenerateOffsetsOfTypeInfo(cgMod: CGModule, chirTy: Type, cgType: CG
         unsafe {
             LLVMSetInitializer(offsetsGlobal, ConstArray(i32Type, offsets))
             LLVMSetLinkage(offsetsGlobal, LLVMLinkageValue(LLVMLinkage.Private))
+            addAttribute(offsetsGlobal, CJTI_OFFSETS_ATTR)
             LLVMSetGlobalConstant(offsetsGlobal, 1)
         }
     }
