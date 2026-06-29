@@ -1,6 +1,6 @@
 package cangjie_compiler::macro_pkg
 
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.GetLineTerminator
 import cangjie_compiler::lex.Lexer as RealLexer
 import std.collection.*
 
@@ -148,7 +148,7 @@ public func ProcessQuotaMarks(value: String): String {
 }
 
 private func getMultiStringValue(token: Token): String {
-    return "\"\"\"\n" + ProcessQuotaMarks(token.Value()) + "\"\"\""
+    return "\"\"\"" + GetLineTerminator() + ProcessQuotaMarks(token.Value()) + "\"\"\""
 }
 
 private func getMultiRawStringValue(token: Token): String {
@@ -240,7 +240,7 @@ public func LineToString(line: ArrayList<Token>): String {
         } else if (token.kind == TokenKind.MULTILINE_RAW_STRING) {
             builder.append(getMultiRawStringValue(token) + blank)
         } else if (token.kind == TokenKind.NL) {
-            builder.append("\n")
+            builder.append(GetLineTerminator())
         } else {
             builder.append(token.Value() + blank)
         }
@@ -282,27 +282,16 @@ public func IsIdentifierOrContextualKeyword(kind: TokenKind): Bool {
         kind == TokenKind.MAIN || kind == TokenKind.MACRO || kind == TokenKind.QUOTE
 }
 
-private func appendLexerDiagnostics(fromDiag: BasicDiagnosticEngine, toDiag: DiagnosticEngine): Unit {
-    for (diagnostic in fromDiag.GetStoredDiags()) {
-        let builder = toDiag.Diagnose(diagnostic)
-        builder.Emit()
-    }
-}
-
 public func GetTokensFromString(source: String, diag: DiagnosticEngine, pos!: Position = INVALID_POSITION): ArrayList<Token> {
     let out = ArrayList<Token>()
-    let basicDiag = BasicDiagnosticEngine()
-    basicDiag.SetSourceManager(diag.GetSourceManager())
-    let _ = basicDiag.DisableDiagnose()
     let tokens = if (pos == INVALID_POSITION) {
-        RealLexer(source, basicDiag, diag.GetSourceManager()).GetTokens()
+        RealLexer(source, diag, diag.GetSourceManager()).GetTokens()
     } else {
-        RealLexer(pos.fileID, source, basicDiag, diag.GetSourceManager(), pos).GetTokens()
+        RealLexer(pos.fileID, source, diag, diag.GetSourceManager(), pos).GetTokens()
     }
     for (token in tokens) {
         out.add(token)
     }
-    appendLexerDiagnostics(basicDiag, diag)
     return out
 }
 

@@ -22,11 +22,15 @@ extend MacroCall {
         let handle = OpenSymbolTable(libPath)
         if (!handle.opened) {
             status = MacroEvalStatus.FAIL
+            if (let Some(instance) <- ci) {
+                instance.diag.Diagnose(DiagKind.can_not_open_macro_library,
+                    args: [DiagArgument(libPath)]).Emit()
+            }
             return false
         }
         let method = GetMethodPointer(handle, methodName)
+        SetOpenedLibHandles(handle)
         if (!method.isNull()) {
-            SetOpenedLibHandles(handle)
             invokeFuncName = methodName
             invokeFunc = method
             return true

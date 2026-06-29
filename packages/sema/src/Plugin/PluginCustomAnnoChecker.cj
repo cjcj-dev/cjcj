@@ -5,15 +5,20 @@ import std.sort.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.DEFAULT_POSITION as BasicDefaultPosition
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::sema.TypeManager
+import cangjie_compiler::utils.FileUtil
 
 private let PKG_NAME_OHOS_LABELS: String = "ohos.labels"
 private let APILEVEL_ANNO_NAME: String = "APILevel"
 private let SINCE_IDENTIFIER: String = "since"
 private let LEVEL_IDENTIFIER: String = "level"
 private let SYSCAP_IDENTIFIER: String = "syscap"
+private let CFG_PARAM_LEVEL_NAME: String = "APILevel_level"
+private let CFG_PARAM_SYSCAP_NAME: String = "APILevel_syscap"
 private let HIDE_ANNO_NAME: String = "Hide"
 private let HIDE_ARG_NAME: String = "isChecked"
 private let APILEVEL_MAJOR_MIN: UInt64 = 1u64
@@ -283,6 +288,7 @@ private class PluginAnnoCacheEntry {
 public class PluginCustomAnnoChecker {
     private var diag: BasicDiagnosticEngine
     private var typeManager: Option<TypeManager> = None
+    private var globalOptions: OptionGlobalOptions = OptionGlobalOptions()
     private var curModuleName: String = ""
     private let levelCache: ArrayList<PluginAnnoCacheEntry> = ArrayList<PluginAnnoCacheEntry>()
     private var globalLevel: APILevelVersion = APILevelVersion()
@@ -293,15 +299,31 @@ public class PluginCustomAnnoChecker {
 
     public init() {
         diag = BasicDiagnosticEngine()
+        ParseOption()
     }
 
     public init(diag: BasicDiagnosticEngine) {
         this.diag = diag
+        ParseOption()
+    }
+
+    public init(diag: BasicDiagnosticEngine, globalOptions: OptionGlobalOptions) {
+        this.diag = diag
+        this.globalOptions = globalOptions
+        ParseOption()
     }
 
     public init(diag: BasicDiagnosticEngine, typeManager: TypeManager) {
         this.diag = diag
         this.typeManager = typeManager
+        ParseOption()
+    }
+
+    public init(diag: BasicDiagnosticEngine, typeManager: TypeManager, globalOptions: OptionGlobalOptions) {
+        this.diag = diag
+        this.typeManager = typeManager
+        this.globalOptions = globalOptions
+        ParseOption()
     }
 
     public func SetTypeManager(typeManager: TypeManager): Unit {
@@ -423,19 +445,113 @@ public class PluginCustomAnnoChecker {
         return macroName == APILEVEL_ANNO_NAME || macroName == HIDE_ANNO_NAME
     }
 
-    public func SetAvailabilityOptions(level: APILevelVersion, unionSyscaps: HashSet<String>,
-        intersectionSyscaps: HashSet<String>): Unit {
-        globalLevel = level
-        optionWithLevel = !level.IsZero()
-        unionSet.clear()
-        intersectionSet.clear()
-        for (syscap in unionSyscaps) {
-            unionSet.add(syscap)
+    private func ParseOption(): Unit {
+        let options = globalOptions
+        if (let Some(levelValue) <- options.passedWhenKeyValue.get(CFG_PARAM_LEVEL_NAME)) {
+            if (levelValue == "0") {
+                globalLevel = APILevelVersion()
+                optionWithLevel = false
+            } else {
+                if (let Some(parsedLevel) <- APILevelVersion.ParseChecked(
+                    levelValue, APILevelParseRule.MAJOR_OR_TRIPLE)) {
+                    globalLevel = parsedLevel
+                    optionWithLevel = !globalLevel.IsZero()
+                } else {
+                    let builder = diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.sema_apilevel_invalid_version_format,
+                        BasicDefaultPosition,
+                        arguments: [levelValue])
+                    builder.Emit()
+                    return
+                }
+            }
         }
-        for (syscap in intersectionSyscaps) {
-            intersectionSet.add(syscap)
+        if (let Some(syscapsCfgPath) <- options.passedWhenKeyValue.get(CFG_PARAM_SYSCAP_NAME)) {
+            let (_, jsonContent, failedReason) = FileUtil.ReadBinaryFileToBuffer(syscapsCfgPath)
+            if (!failedReason.isEmpty()) {
+                let builder = diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.module_read_file_to_buffer_failed,
+                    BasicDefaultPosition,
+                    arguments: [syscapsCfgPath, failedReason])
+                builder.Emit()
+                return
+            }
+            optionWithSyscap = ParseJsonFile(jsonContent)
         }
-        optionWithSyscap = !unionSet.isEmpty() || !intersectionSet.isEmpty()
+    }
+
+    private func ParseJsonFile(input: Array<UInt8>): Bool {
+        var rootStartPos = input.size
+        for (idx in 0..input.size) {
+            if (input[idx] == b'{') {
+                rootStartPos = idx
+                break
+            }
+        }
+        let rootPos: Array<Int64> = [rootStartPos]
+        let root = ParseJsonObject(rootPos, input)
+        let deviceSysCapObj = GetJsonObject(root, "deviceSysCap", 0)
+        if (let None <- deviceSysCapObj) {
+            return false
+        }
+        let dev2SyscapsMap = HashMap<String, HashSet<String>>()
+        for (subObj in deviceSysCapObj.getOrThrow().pairs) {
+            let syscapsOneDev = HashSet<String>()
+            for (path in subObj.valueStr) {
+                let (ok, buffer, failedReason) = FileUtil.ReadBinaryFileToBuffer(path)
+                if (!ok || !failedReason.isEmpty()) {
+                    let builder = diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.module_read_file_to_buffer_failed,
+                        BasicDefaultPosition,
+                        arguments: [path, failedReason])
+                    builder.Emit()
+                    return false
+                }
+                var oneDeviceStartPos = buffer.size
+                for (bufferIdx in 0..buffer.size) {
+                    if (buffer[bufferIdx] == b'{') {
+                        oneDeviceStartPos = bufferIdx
+                        break
+                    }
+                }
+                let oneDevicePos: Array<Int64> = [oneDeviceStartPos]
+                let rootOneDevice = ParseJsonObject(oneDevicePos, buffer)
+                let curSyscaps = GetJsonString(rootOneDevice, "SysCaps")
+                for (syscap in curSyscaps) {
+                    syscapsOneDev.add(syscap)
+                }
+            }
+            if (!dev2SyscapsMap.contains(subObj.key)) {
+                dev2SyscapsMap[subObj.key] = syscapsOneDev
+            }
+        }
+        var lastSyscap: Option<HashSet<String>> = None
+        for (devName in dev2SyscapsMap.keys()) {
+            let curSyscaps = dev2SyscapsMap[devName]
+            let intersection = HashSet<String>()
+            if (let Some(previousSyscap) <- lastSyscap) {
+                for (syscap in previousSyscap) {
+                    if (curSyscaps.contains(syscap)) {
+                        intersection.add(syscap)
+                    }
+                }
+            } else {
+                for (syscap in curSyscaps) {
+                    intersection.add(syscap)
+                }
+            }
+            lastSyscap = Some(intersection)
+            for (syscap in curSyscaps) {
+                unionSet.add(syscap)
+            }
+        }
+        if (let Some(finalSyscap) <- lastSyscap) {
+            intersectionSet.clear()
+            for (syscap in finalSyscap) {
+                intersectionSet.add(syscap)
+            }
+        }
+        return true
     }
 
     public func CheckLevel(target: Decl, scopeAnnoInfo: PluginCustomAnnoInfo, node: Node,
@@ -501,7 +617,7 @@ public class PluginCustomAnnoChecker {
         let targetAnnoInfo = PluginCustomAnnoInfo(since: APILevelVersion(), syscap: "", hasHideAnno: None)
         Parse(target, targetAnnoInfo)
         if (let Some(hasHide) <- targetAnnoInfo.hasHideAnno) {
-            if (hasHide && !curModuleName.isEmpty() && curModuleName != GetModuleName(target.GetFullPackageName())) {
+            if (hasHide && curModuleName != GetModuleName(target.GetFullPackageName())) {
                 if (reportDiag && !message.isEmpty()) {
                     Emit(diag, BasicDiagKindRefactor.sema_undeclared_identifier, node, args: [message])
                 }
@@ -992,8 +1108,4 @@ public class BoolBox {
     public init(value: Bool) {
         this.value = value
     }
-}
-
-public func SelfhostPortStatus_Plugin_PluginCustomAnnoChecker(): Bool {
-    return true
 }
