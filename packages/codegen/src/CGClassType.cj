@@ -14,6 +14,10 @@ public class CGClassType <: CGCustomType {
     public func GetNumOfAllFields(): Int64 { return numOfAllFields }
 
     protected override func GenLLVMType(): LLVMTypeRef {
+        let i8Type = unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
+        if (!IsSized()) {
+            return i8Type
+        }
         let layoutName = GetClassObjLayoutName(chirType.ToString())
         let layout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
         layoutType = layout
@@ -21,8 +25,7 @@ public class CGClassType <: CGCustomType {
             cgCtx.AddGeneratedStructType(layoutName)
             let fieldTypes = ArrayList<LLVMTypeRef>()
             if (IsAutoEnvType(chirType)) {
-                let i8Ty = unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
-                let i8PtrTy = unsafe { LLVMPointerType(i8Ty, 0u32) }
+                let i8PtrTy = unsafe { LLVMPointerType(i8Type, 0u32) }
                 fieldTypes.add(i8PtrTy)
                 fieldTypes.add(i8PtrTy)
             }
@@ -33,7 +36,7 @@ public class CGClassType <: CGCustomType {
             }
             SetStructTypeBody(layout, fieldTypes)
         }
-        return unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
+        return i8Type
     }
 
     protected override func GenContainedCGTypes(): Unit {

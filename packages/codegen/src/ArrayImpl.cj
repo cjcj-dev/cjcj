@@ -76,8 +76,11 @@ private func TryLoadGenericClassFieldWithReadBarrier(irBuilder: IRBuilder2,
     }
     let resultTy = loadExpr.GetResultType() ?? (fieldTy ?? return None)
     let elementType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
-    let fieldAddr = CreateGenericClassElementAddress(irBuilder, baseValue.GetRawValue(),
-        baseCGType.GetOriginal(), fieldPath) ?? return None
+    let actualPath = fieldPath ?? return None
+    if (actualPath.isEmpty()) {
+        return None
+    }
+    let fieldAddr = irBuilder.CreateGEP(baseValue, actualPath, name: "field.addr").GetRawValue()
     return Some(irBuilder.LoadGenericFieldValue(baseValue.GetRawValue(), fieldAddr, elementType,
         baseCGType.GetOriginal(), fieldTy))
 }
@@ -109,31 +112,16 @@ private func TryLoadClassFieldWithReadBarrier(irBuilder: IRBuilder2, loadExpr: E
         return None
     }
     if (IsGenericField(fieldTy)) {
-        let genericAddr = CreateGenericClassElementAddress(irBuilder, baseValue.GetRawValue(),
-            baseCGType.GetOriginal(), fieldPath) ?? addr.GetRawValue()
+        let actualPath = fieldPath ?? return None
+        if (actualPath.isEmpty()) {
+            return None
+        }
+        let genericAddr = irBuilder.CreateGEP(baseValue, actualPath, name: "field.addr").GetRawValue()
         return Some(irBuilder.LoadGenericFieldValue(baseValue.GetRawValue(), genericAddr, elementType,
             baseCGType.GetOriginal(), fieldTy))
     }
     let raw = irBuilder.CallGCReadRef(baseValue.GetRawValue(), addr.GetRawValue())
     return Some(irBuilder.CreateBitCast(raw, elementType.GetLLVMType(), name: "load.gcread.cast"))
-}
-
-private func CreateGenericClassElementAddress(irBuilder: IRBuilder2, baseObject: LLVMValueRef, baseTy: Type,
-    path: Option<ArrayList<UInt64>>): Option<LLVMValueRef> {
-    let actualPath = path ?? return None
-    if (actualPath.isEmpty()) {
-        return None
-    }
-    let typeInfo = irBuilder.CreateTypeInfo(baseTy.StripAllRefs())
-    let offset = irBuilder.CallGetFieldOffset(typeInfo, actualPath[0], 0u64)
-    let payloadOffset = unsafe {
-        LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), 8u64, 0)
-    }
-    let fullOffset = irBuilder.CreateBinary(ExprKind.ADD, offset, payloadOffset)
-    let indices = ArrayList<LLVMValueRef>()
-    indices.add(fullOffset)
-    return Some(irBuilder.CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) },
-        baseObject, indices, name: "field.addr"))
 }
 
 private func ResolveLoadBaseAndFieldType(base: Value, path: Option<ArrayList<UInt64>>): (Value, Option<Type>) {
@@ -616,9 +604,26 @@ public func GenerateGetElementRef(irBuilder: IRBuilder2, chirExpr: Expression): 
         return LLVMNullValue()
     }
     let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+    if (let Some(staticElementRef) <- (chirExpr as GetElementRef)) {
+        let path = staticElementRef.GetPath()
+        if (path.isEmpty()) {
+            return LLVMNullValue()
+        }
+        return irBuilder.CreateGEP(baseValue, path, name: "gep").GetRawValue()
+    }
+    if (let Some(elementByName) <- (chirExpr as GetElementByName)) {
+        if (let Some(locationTy) <- elementByName.GetLocation().GetType()) {
+            if (let Some(path) <- ResolveElementPathByNames(locationTy, elementByName.GetNames())) {
+                if (path.isEmpty()) {
+                    return LLVMNullValue()
+                }
+                return irBuilder.CreateGEP(baseValue, path, name: "gep").GetRawValue()
+            }
+        }
+        return LLVMNullValue()
+    }
     let indices = BuildElementIndices(irBuilder, chirExpr)
-    if (indices.isEmpty() &&
-        (chirExpr.GetExprKind() == ExprKind.GET_ELEMENT_REF || chirExpr.GetExprKind() == ExprKind.GET_ELEMENT_BY_NAME)) {
+    if (indices.isEmpty()) {
         return LLVMNullValue()
     }
     return CreateElementAddress(irBuilder, baseValue, indices, "gep")
@@ -637,12 +642,7 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
         }
         let storeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeElementRef.GetValue())
         let storePlace = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeElementRef.GetLocation())
-        let storeIndices = BuildStaticElementIndices(irBuilder, path)
-        let storeAddr = if (let Some(knownLocationTy) <- locationTy) {
-            CreateElementAddressWithKnownBaseType(irBuilder, storePlace, storeIndices, knownLocationTy, "store.elem.addr")
-        } else {
-            CreateElementAddress(irBuilder, storePlace, storeIndices, "store.elem.addr")
-        }
+        let storeAddr = irBuilder.CreateGEP(storePlace, path, name: "store.elem.addr").GetRawValue()
         if (storeAddr.isNull()) {
             return LLVMNullValue()
         }
@@ -661,9 +661,7 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
                 }
                 let byNameValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeByName.GetValue())
                 let byNamePlace = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeByName.GetLocation())
-                let byNameIndices = BuildStaticElementIndices(irBuilder, path)
-                let byNameAddr = CreateElementAddressWithKnownBaseType(irBuilder, byNamePlace, byNameIndices,
-                    locationTy, "store.elem.addr")
+                let byNameAddr = irBuilder.CreateGEP(byNamePlace, path, name: "store.elem.addr").GetRawValue()
                 if (byNameAddr.isNull()) {
                     return LLVMNullValue()
                 }
@@ -990,19 +988,6 @@ private func CreateElementAddress(irBuilder: IRBuilder2, baseValue: CGValue, ind
         return irBuilder.CreateGEP(baseType.GetLLVMType(), baseValue.GetRawValue(), indices, name: name)
     }
     return LLVMNullValue()
-}
-
-private func CreateElementAddressWithKnownBaseType(irBuilder: IRBuilder2, baseValue: CGValue,
-    indices: ArrayList<LLVMValueRef>, baseTy: Type, name: String): LLVMValueRef {
-    let strippedBaseTy = baseTy.StripAllRefs()
-    if (!IsPointerLLVMValue(baseValue.GetRawValue()) &&
-        (strippedBaseTy.IsStruct() || strippedBaseTy.IsTuple() || strippedBaseTy.IsVArray())) {
-        let baseCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), strippedBaseTy)
-        let baseSlot = irBuilder.CreateEntryAlloca(baseCGType, name: name + ".base")
-        irBuilder.CreateStore(baseValue.GetRawValue(), baseSlot)
-        return irBuilder.CreateGEP(baseCGType.GetLLVMType(), baseSlot, indices, name: name)
-    }
-    return CreateElementAddress(irBuilder, baseValue, indices, name)
 }
 
 private func AdjustAutoEnvClassFieldIndices(baseTy: Type, indices: ArrayList<LLVMValueRef>): ArrayList<LLVMValueRef> {

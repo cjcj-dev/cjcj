@@ -19,6 +19,7 @@ import cangjie_compiler::chir.StringLiteral
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.VArrayType
+import cangjie_compiler::option.ArchType
 import cangjie_compiler::utils.{CORE_PACKAGE_NAME, STD_LIB_FUTURE, StaticCast}
 
 private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowException_msg"
@@ -100,6 +101,18 @@ public class IRBuilder2 <: Resource {
     public func GetCGContext(): CGContext { return cgMod.GetCGContext() }
     public func GetLLVMContext(): LLVMContextHandle { return cgMod.GetLLVMContext() }
     public func GetBuilder(): LLVMBuilderHandle { return builder }
+
+    public func GetPtrSize(): UInt64 {
+        return if (GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) { 4u64 } else { 8u64 }
+    }
+
+    public func GetPayloadOffset(): UInt64 {
+        return if (GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) {
+            GetPtrSize() + 4u64
+        } else {
+            GetPtrSize()
+        }
+    }
 
     public func close(): Unit {
         if (closed) {
@@ -1754,6 +1767,102 @@ public class IRBuilder2 <: Resource {
         }
         PropagateBasePtr(pointer, result)
         return result
+    }
+
+    public func CreateGEP(cgVal: CGValue, idxList: ArrayList<UInt64>, name!: String = ""): CGValue {
+        var ret = cgVal.GetRawValue()
+        let pointerCGType = cgVal.GetCGType() ?? throw IllegalArgumentException("expected CGValue with CGType")
+        var eleType = pointerCGType.GetPointerElementType() ?? throw IllegalArgumentException("expected pointer CGType")
+        var basePtr = GetTrackedBasePtr(ret)
+        var hasSkippedTypeInfo = basePtr.isSome() && !eleType.IsReference()
+        let retType = unsafe { LLVMTypeOf(ret) }
+        if (basePtr.isNone() && eleType.GetSize().isNone() && !retType.isNull() &&
+            unsafe { LLVMGetTypeKind(retType) } == LLVM_POINTER_TYPE_KIND &&
+            unsafe { LLVMGetPointerAddressSpace(retType) } == 1u32) {
+            basePtr = Some(ret)
+        }
+        for (idx in idxList) {
+            if (eleType.IsReference() || eleType.IsOptionLikeRef()) {
+                basePtr = Some(ret)
+            }
+            let offsetForAutoEnv = if (IsAutoEnvType(eleType.GetOriginal())) { 2u64 } else { 0u64 }
+            if (chirExpr.isSome() && eleType.GetSize().isNone()) {
+                let typeInfo = CreateTypeInfo(eleType.GetOriginal())
+                let preOffset = if (eleType.GetOriginal().IsRawArray()) { 8u64 } else { 0u64 }
+                var offset = CallGetFieldOffset(typeInfo, idx + offsetForAutoEnv, preOffset)
+                var skipPayloadOffset = false
+                if (let Some(currentFunction) <- cgFunction) {
+                    let rawFunction = currentFunction.GetRawFunction()
+                    if (HasAttributeAtIndex(rawFunction, UInt32.Max, HAS_WITH_TI_WRAPPER_ATTR) ||
+                        HasAttributeAtIndex(rawFunction, UInt32.Max, THIS_PARAM_HAS_BP)) {
+                        if (let Some(currentExpr) <- chirExpr) {
+                            if (let Some(topLevelFunc) <- currentExpr.GetTopLevelFunc()) {
+                                if (topLevelFunc.GetNumOfParams() > 0) {
+                                    if (let Some(thisParam) <- cgMod.GetMappedValue(topLevelFunc.GetParam(0))) {
+                                        let rawThisParam = thisParam.GetRawValue()
+                                        skipPayloadOffset = !rawThisParam.isNull() &&
+                                            rawThisParam.toUIntNative() == ret.toUIntNative()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (!skipPayloadOffset && !hasSkippedTypeInfo) {
+                    let payloadOffset = unsafe {
+                        LLVMConstInt(LLVMTypeOf(offset), GetPayloadOffset(), 0)
+                    }
+                    offset = CreateBinary(ExprKind.ADD, offset, payloadOffset)
+                    hasSkippedTypeInfo = true
+                }
+                let indices = ArrayList<LLVMValueRef>()
+                indices.add(offset)
+                ret = CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }, ret, indices,
+                    name: name)
+            } else if (let Some(classCGType) <- (eleType as CGClassType)) {
+                ret = GetPayloadFromObject(ret)
+                let layoutType = classCGType.GetLayoutType()
+                ret = CreateBitCast(ret, unsafe { LLVMPointerType(layoutType, 1u32) }, name: name + ".payload")
+                ret = CreateStructGEP(layoutType, ret, UInt32(idx + offsetForAutoEnv), name: name)
+            } else if (let Some(arrayCGType) <- (eleType as CGArrayType)) {
+                let rawArrayTy = (arrayCGType.GetOriginal() as RawArrayType) ??
+                    throw IllegalArgumentException("expected raw array type")
+                ret = GetArrayElementAddr(rawArrayTy, ret, GetInt64(Int64(idx)), false)
+            } else {
+                let retRawType = unsafe { LLVMTypeOf(ret) }
+                let retAddrspace = if (!retRawType.isNull() &&
+                    unsafe { LLVMGetTypeKind(retRawType) } == LLVM_POINTER_TYPE_KIND) {
+                    unsafe { LLVMGetPointerAddressSpace(retRawType) }
+                } else {
+                    0u32
+                }
+                ret = CreateBitCast(ret, unsafe { LLVMPointerType(eleType.GetLLVMType(), retAddrspace) },
+                    name: name + ".base")
+                ret = CreateStructGEP(eleType.GetLLVMType(), ret, UInt32(idx), name: name)
+            }
+            if (let Some(arrayCGTypeForUpdate) <- (eleType as CGArrayType)) {
+                eleType = arrayCGTypeForUpdate.GetElementCGType() ??
+                    throw IllegalArgumentException("expected array element CGType")
+            } else {
+                eleType = eleType.GetContainedTypeAt(idx + offsetForAutoEnv)
+                if (!eleType.GetOriginal().IsGeneric()) {
+                    let retRawType = unsafe { LLVMTypeOf(ret) }
+                    let retAddrspace = if (!retRawType.isNull() &&
+                        unsafe { LLVMGetTypeKind(retRawType) } == LLVM_POINTER_TYPE_KIND) {
+                        unsafe { LLVMGetPointerAddressSpace(retRawType) }
+                    } else {
+                        0u32
+                    }
+                    ret = CreateBitCast(ret, unsafe { LLVMPointerType(eleType.GetLLVMType(), retAddrspace) },
+                        name: name + ".cast")
+                }
+            }
+            if (let Some(trackedBase) <- basePtr) {
+                TrackBasePtr(ret, trackedBase)
+            }
+        }
+        let refTy = GetCGContext().GetCHIRBuilder().context.GetRefTy(eleType.GetOriginal())
+        return CGValue(ret, CGType.GetOrCreate(cgMod, refTy))
     }
 
     public func GetPayloadFromObject(objectValue: LLVMValueRef): LLVMValueRef {

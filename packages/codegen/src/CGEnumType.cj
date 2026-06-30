@@ -118,7 +118,7 @@ public class CGEnumType <: CGCustomType {
         return cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF
     }
 
-    public func IsOptionLikeRef(): Bool {
+    public override func IsOptionLikeRef(): Bool {
         EnsureClassified()
         return cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF
     }

@@ -201,6 +201,12 @@ public open class CGType {
     public func IsStructPtrType(): Bool { return IsPointerType() && !GetContainedTypes().isEmpty() && GetContainedTypes()[0].IsStructType() }
     public func IsRefType(): Bool { return cgTypeKind == CGTypeKind.CG_REF }
     public func IsReference(): Bool { return chirType.IsReferenceType() || chirType.IsRef() }
+    public open func IsOptionLikeRef(): Bool {
+        if (let Some(enumCGType) <- (this as CGEnumType)) {
+            return enumCGType.IsOptionLikeRef()
+        }
+        return false
+    }
     public func IsFuncPtrType(): Bool { return chirType.IsFunc() }
     public func IsCGEnum(): Bool { return cgTypeKind == CGTypeKind.CG_ENUM }
     public func IsCGRef(): Bool { return cgTypeKind == CGTypeKind.CG_REF }
@@ -247,11 +253,21 @@ public open class CGType {
     }
 
     public func GetPointerElementType(): Option<CGType> {
+        if (chirType.IsGeneric()) {
+            return Some(this)
+        }
         let contained = GetContainedTypes()
         if (contained.isEmpty()) {
             return None
         }
         return contained[0]
+    }
+
+    public func GetContainedTypeAt(idx: UInt64): CGType {
+        let contained = GetContainedTypes()
+        let index = Int64(idx)
+        CJC_ASSERT(index >= 0 && index < contained.size)
+        return contained[index]
     }
 
     public func GetOrCreateTypeInfo(): LLVMValueRef {
