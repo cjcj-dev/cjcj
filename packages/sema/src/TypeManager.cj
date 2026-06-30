@@ -1,6 +1,7 @@
 package cangjie_compiler::sema
 
 import std.collection.*
+import std.sort.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
 import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
@@ -1429,6 +1430,46 @@ public class TypeManager {
             out += ":" + funcTy.isC.toString()
             out += ":" + funcTy.hasVariableLenArg.toString()
             out += ":" + funcTy.noCast.toString()
+            return out
+        }
+        if (let Some(unionTy) <- (ty as UnionTy)) {
+            let memberIds = ArrayList<Int64>()
+            for (memberTy in unionTy.tys) {
+                memberIds.add(memberTy.objectId)
+            }
+            sort(memberIds, by: { left: Int64, right: Int64 =>
+                if (left < right) {
+                    Ordering.LT
+                } else if (left > right) {
+                    Ordering.GT
+                } else {
+                    Ordering.EQ
+                }
+            }, stable: true)
+            var out = "union:" + TypeKindIndex(TypeKind.TYPE_UNION).toString()
+            for (memberId in memberIds) {
+                out += ":" + memberId.toString()
+            }
+            return out
+        }
+        if (let Some(intersectionTy) <- (ty as IntersectionTy)) {
+            let memberIds = ArrayList<Int64>()
+            for (memberTy in intersectionTy.tys) {
+                memberIds.add(memberTy.objectId)
+            }
+            sort(memberIds, by: { left: Int64, right: Int64 =>
+                if (left < right) {
+                    Ordering.LT
+                } else if (left > right) {
+                    Ordering.GT
+                } else {
+                    Ordering.EQ
+                }
+            }, stable: true)
+            var out = "intersection:" + TypeKindIndex(TypeKind.TYPE_INTERSECTION).toString()
+            for (memberId in memberIds) {
+                out += ":" + memberId.toString()
+            }
             return out
         }
         return ty.Hash().toString() + ":" + ty.String()
