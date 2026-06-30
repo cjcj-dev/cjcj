@@ -1296,6 +1296,12 @@ public class TypeManager {
     }
 
     private func typeManagerTyKey(ty: Ty): String {
+        if (let Some(genericTy) <- (ty as GenericsTy)) {
+            if (let Some(genericDecl) <- genericTy.decl) {
+                return genericDecl.objectId.toString()
+            }
+            return genericTy.Hash().toString()
+        }
         return ty.Hash().toString() + ":" + ty.String()
     }
 

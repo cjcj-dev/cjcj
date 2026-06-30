@@ -1549,11 +1549,9 @@ public class GenericsTy <: Ty {
     }
 
     public override func Hash(): Int64 {
-        var out = TypeKindIndex(TypeKind.TYPE_GENERICS)
+        var out = 0
         if (let Some(genericDecl) <- decl) {
-            out = hashCombine(out, genericDecl.identifier.Val().hashCode())
-            out = hashCombine(out, genericDecl.begin.hashCode())
-            out = hashCombine(out, genericDecl.end.hashCode())
+            out = hashCombine(out, genericDecl.objectId)
         }
         return out
     }
