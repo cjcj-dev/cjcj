@@ -8,14 +8,18 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 CPP="${CANGJIE_CPP_SRC:-/root/cj_build/cangjie_compiler}"
 LLVM_SRC_INC="$CPP/third_party/llvm-project/llvm/include"
 LLVM_GEN_INC="$CPP/build/build/third_party/llvm/include"
+FLATBUFFERS_INC="$CPP/build/build/include"
+SCHEMA_GEN_INC="$CPP/build/build/schema"
 
 [ -d "$LLVM_SRC_INC" ] || { echo "ERR: LLVM source headers not found: $LLVM_SRC_INC" >&2; exit 1; }
 [ -d "$LLVM_GEN_INC" ] || { echo "ERR: LLVM generated headers not found: $LLVM_GEN_INC" >&2; exit 1; }
+[ -d "$FLATBUFFERS_INC" ] || { echo "ERR: flatbuffers headers not found: $FLATBUFFERS_INC" >&2; exit 1; }
+[ -d "$SCHEMA_GEN_INC/flatbuffers" ] || { echo "ERR: schema headers not found: $SCHEMA_GEN_INC/flatbuffers" >&2; exit 1; }
 
 # -fno-rtti / -fno-exceptions to match the LLVM build ABI.
 clang++ -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
   -c "$HERE/cjselfhost_llvmshim.cpp" -o "$HERE/cjselfhost_llvmshim.o" \
-  -I"$LLVM_SRC_INC" -I"$LLVM_GEN_INC"
+  -I"$LLVM_SRC_INC" -I"$LLVM_GEN_INC" -I"$FLATBUFFERS_INC" -I"$SCHEMA_GEN_INC"
 
 echo "built: $HERE/cjselfhost_llvmshim.o"
 nm -C "$HERE/cjselfhost_llvmshim.o" | grep -E ' T (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost)' || true

@@ -29,7 +29,12 @@
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
 
+#include "flatbuffers/ModuleFormat_generated.h"
+
 using namespace llvm;
+
+constexpr int CJOF_FB_MAX_DEPTH = 128;
+constexpr int CJOF_FB_MAX_TABLES = 2000000;
 
 namespace {
 struct LLVMSelfhostLoopInfoState {
@@ -140,4 +145,13 @@ extern "C" LLVMUseRef LLVMSelfhostGetNextUse(LLVMUseRef UseRef)
 extern "C" LLVMValueRef LLVMSelfhostGetUserInstruction(LLVMUseRef UseRef)
 {
     return wrap(dyn_cast<Instruction>(unwrap(UseRef)->getUser()));
+}
+
+extern "C" int CJOFVerifyPackageBuffer(const unsigned char *Data, size_t Size)
+{
+    if (Data == nullptr) {
+        return 0;
+    }
+    flatbuffers::Verifier verifier(Data, Size, CJOF_FB_MAX_DEPTH, CJOF_FB_MAX_TABLES);
+    return PackageFormat::VerifyPackageBuffer(verifier) ? 1 : 0;
 }

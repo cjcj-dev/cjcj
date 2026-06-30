@@ -1,8 +1,8 @@
 package cangjie_compiler::frontend
 
 public import cangjie_compiler::basic.{
-    BEGIN_POSITION, DEFAULT_POSITION, INVALID_POSITION, DiagCategory, DiagColor, DiagKindRefactor, DiagSeverity,
-    IntegratedString, MakeRange, Position, PositionStatus, Range, Source, SourceManager
+    BEGIN_POSITION, CANGJIE_VERSION, DEFAULT_POSITION, INVALID_POSITION, DiagCategory, DiagColor, DiagKindRefactor,
+    DiagSeverity, IntegratedString, MakeRange, Position, PositionStatus, Range, Source, SourceManager
 }
 public import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
@@ -20,6 +20,10 @@ import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.STANDARD_LIBS
 import std.collection.*
 import std.sort.*
+
+foreign {
+    func CJOFVerifyPackageBuffer(data: CPointer<UInt8>, size: UIntNative): Int32
+}
 
 public class DiagnosticEngine {
     private let impl: BasicDiagnosticEngine = BasicDiagnosticEngine()
@@ -588,6 +592,28 @@ private class CjoFlatBuffer {
             return ""
         }
         return String.fromUtf8(data[start..start + len])
+    }
+
+    public func VerifyPackageBuffer(): Bool {
+        if (data.isEmpty()) {
+            return false
+        }
+        var result = false
+        try (buffer = LibC.malloc<UInt8>(count: data.size).asResource()) {
+            if (!buffer.value.isNull()) {
+                var idx: Int64 = 0
+                unsafe {
+                    while (idx < data.size) {
+                        (buffer.value + idx).write(data[idx])
+                        idx++
+                    }
+                    result = CJOFVerifyPackageBuffer(buffer.value, UIntNative(data.size)) != 0
+                }
+            }
+        } catch (e: Exception) {
+            result = false
+        }
+        return result
     }
 
     public func Indirect(pos: Int64): Int64 {
@@ -3706,7 +3732,19 @@ public class ImportManager {
 
     public func GeneratePkgDepInfoByCjo(path: String): ArrayList<String> {
         let out = ArrayList<String>()
-        out.add("{\"inputCjo\":\"" + EscapeJson(path) + "\",\"deps\":[]}")
+        let (ok, data, reason) = FileUtil.ReadBinaryFileToBuffer(path)
+        if (!ok) {
+            diag.DiagnoseRefactor(DiagKindRefactor.module_read_file_to_buffer_failed, DEFAULT_POSITION,
+                arguments: [path, reason])
+            return out
+        }
+        if (!VerifySerializedPackageData(data, "")) {
+            return out
+        }
+        let depInfo = ReadSerializedPackageDepInfo(data)
+        if (!depInfo.isEmpty()) {
+            out.add(depInfo)
+        }
         return out
     }
 
@@ -3820,6 +3858,9 @@ public class ImportManager {
         let (ok, data, _) = FileUtil.ReadBinaryFileToBuffer(cjoPath)
         if (!ok) {
             diag.DiagnoseRefactor(DiagKindRefactor.bc_cjo_error, DEFAULT_POSITION, arguments: [fullPackageName])
+            return false
+        }
+        if (!VerifySerializedPackageData(data, fullPackageName)) {
             return false
         }
         depPkgCjdPaths[fullPackageName] = cjoPath
@@ -4322,6 +4363,10 @@ public class ImportManager {
                 "failed to load imported package '${fullPackageName}' from '${cjoPath}': ${reason}")
             return false
         }
+        if (!VerifySerializedPackageData(data, fullPackageName)) {
+            loadingPackages.remove(fullPackageName)
+            return false
+        }
         if (!LoadSerializedImportDependencies(data, fullPackageName)) {
             loadingPackages.remove(fullPackageName)
             return false
@@ -4362,6 +4407,25 @@ public class ImportManager {
             filesByIndex[1u32] = file
         }
         return (pkg.files[0], filesByIndex)
+    }
+
+    private func VerifySerializedPackageData(data: Array<UInt8>, importedPackageName: String): Bool {
+        let reader = CjoFlatBuffer(data)
+        if (!reader.VerifyPackageBuffer()) {
+            diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed, DEFAULT_POSITION,
+                arguments: ["ast", importedPackageName, CANGJIE_VERSION])
+            return false
+        }
+        return true
+    }
+
+    private func ReadSerializedPackageDepInfo(data: Array<UInt8>): String {
+        let reader = CjoFlatBuffer(data)
+        let root = reader.RootTable()
+        if (root < 0) {
+            return ""
+        }
+        return reader.StringField(root, 10)
     }
 
     private func CreateImportedCjoFile(pkg: Package, path: String, fileID: UInt64): File {
