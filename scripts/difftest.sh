@@ -18,19 +18,22 @@ if [ "${1:-}" = "--one" ]; then
   WORK=$(mktemp -d)
   trap 'rm -rf "$WORK"' EXIT
   cd "$WORK" || exit 1   # isolate per-worker CWD so concurrent cjc runs don't race on a shared .cached dir
-  # reference
-  if "$REF" "$f" -o "$WORK/$name.ref" >/dev/null 2>&1; then
-    rout=$("$WORK/$name.ref" 2>/dev/null); rexit=$?
+  # reference (timeout-guarded so a runaway compile/binary can't hang the whole gate)
+  if timeout 180 "$REF" "$f" -o "$WORK/$name.ref" >/dev/null 2>&1; then
+    rout=$(timeout 30 "$WORK/$name.ref" 2>/dev/null); rexit=$?
   else rout="<REF-COMPILE-FAIL>"; rexit=-1; fi
-  # selfhost
+  # selfhost (capture compile exit; 124 = timeout, e.g. non-terminating instantiation)
   slog="$WORK/$name.slog"
-  if "$SELF" "$f" -o "$WORK/$name.self" --set-runtime-rpath >"$slog" 2>&1; then
-    sout=$("$WORK/$name.self" 2>/dev/null); sexit=$?
+  timeout 180 "$SELF" "$f" -o "$WORK/$name.self" --set-runtime-rpath >"$slog" 2>&1; cexit=$?
+  if [ "$cexit" = 0 ]; then
+    sout=$(timeout 30 "$WORK/$name.self" 2>/dev/null); sexit=$?
     if [ "$sout" = "$rout" ] && [ "$sexit" = "$rexit" ]; then
       printf 'PASS\t%s\texit=%s\n' "$name" "$sexit"
     else
       printf 'MISMATCH\t%s\tself(exit=%s out=%q) ref(exit=%s out=%q)\n' "$name" "$sexit" "${sout:0:30}" "$rexit" "${rout:0:30}"
     fi
+  elif [ "$cexit" = 124 ]; then
+    printf 'FAIL\t%s\t%s\n' "$name" "<COMPILE-TIMEOUT-180s>"
   else
     r=$(grep -hoiE "not yet ported[^\"]*|globalCache miss|unsupported AST type kind[^\"]*|unsupported construct[^\"]*|should have result|Out of memory|does not match pointee|IllegalState[A-Za-z]*|IllegalArgument[A-Za-z]*|no Sema target|no resolvedFunction|you should set a return value" "$slog" 2>/dev/null | head -1)
     [ -z "$r" ] && r=$(grep -iE "error|exception" "$slog" 2>/dev/null | head -1 | cut -c1-60)
