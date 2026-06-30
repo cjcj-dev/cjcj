@@ -734,6 +734,9 @@ private class CjoSignatureMaterializer {
     private let flatNominalKinds: HashMap<String, UInt8> = HashMap<String, UInt8>()
     private let flatTypeCache: HashMap<UInt32, Ty> = HashMap<UInt32, Ty>()
     private let flatGenericParamDecls: HashMap<UInt32, GenericParamDecl> = HashMap<UInt32, GenericParamDecl>()
+    private let allLoadedDecls: HashMap<UInt32, Decl> = HashMap<UInt32, Decl>()
+    private let allLoadedExprs: HashMap<UInt32, Expr> = HashMap<UInt32, Expr>()
+    private let allDummyExprs: HashSet<Node> = HashSet<Node>()
 
     public init(packageName: String, pkg: Package, filesByIndex: HashMap<UInt32, File>,
         idToFileMap: HashMap<UInt64, File>, importedPackages: ArrayList<Package>, typeManager: FaithfulSemaTypeManager) {
@@ -746,9 +749,21 @@ private class CjoSignatureMaterializer {
     }
 
     public func Materialize(data: Array<UInt8>): Unit {
+        MaterializeHeader(data)
+        LoadPackageDecls()
+        LoadRefs()
+    }
+
+    private func MaterializeHeader(data: Array<UInt8>): Unit {
         LoadSerializedDeclRecords(data)
         MaterializeSerializedImports()
+    }
+
+    private func LoadPackageDecls(): Unit {
         MaterializeSerializedDecls()
+    }
+
+    private func LoadRefs(): Unit {
         MaterializeSerializedInheritedTypes()
     }
 
@@ -762,6 +777,9 @@ private class CjoSignatureMaterializer {
         flatNominalKinds.clear()
         flatTypeCache.clear()
         flatGenericParamDecls.clear()
+        allLoadedDecls.clear()
+        allLoadedExprs.clear()
+        allDummyExprs.clear()
         let reader = flat.getOrThrow()
         let root = reader.RootTable()
         if (root < 0 || reader.StringField(root, 8) != packageName) {
@@ -1520,6 +1538,9 @@ private class CjoSignatureMaterializer {
         let reader = flat.getOrThrow()
         let decl = CreateFlatDeclShell(reader, record)
         record.decl = Some(decl)
+        if (record.kind != 0u16 && !allLoadedDecls.contains(record.index)) {
+            allLoadedDecls.add(record.index, decl)
+        }
         ApplyFlatDeclBasicInfo(reader, record, decl)
         if (let Some(gpd) <- (decl as GenericParamDecl)) {
             gpd.SetTy(typeManager.GetGenericsTy(gpd))
@@ -1763,6 +1784,7 @@ private class CjoSignatureMaterializer {
         if (let Some(expr) <- loaded) {
             if (let Some(block) <- (expr as Block)) {
                 let dummy = RefExpr()
+                allDummyExprs.add(dummy)
                 dummy.EnableAttr(Attribute.COMPILER_ADD)
                 if (let Some(ty) <- block.GetTy()) {
                     dummy.SetTy(ty)
@@ -1794,92 +1816,95 @@ private class CjoSignatureMaterializer {
         // Expr field 0 (slot 4) = kind.
         let kind = reader.U16Field(exprTable, 4, 0u16)
         if (kind == FLAT_EXPR_KIND_WILDCARD) {
-            return Some(LoadFlatWildcardExpr(reader, exprTable))
+            return Some(LoadFlatWildcardExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_PRIMITIVE_TYPE) {
-            return Some(LoadFlatPrimitiveTypeExpr(reader, exprTable))
+            return Some(LoadFlatPrimitiveTypeExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_LIT_CONST) {
-            return Some(LoadFlatLitConstExpr(reader, exprTable))
+            return Some(LoadFlatLitConstExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_MEMBER_ACCESS) {
-            return Some(LoadFlatMemberAccess(reader, exprTable))
+            return Some(LoadFlatMemberAccess(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_REF_EXPR) {
-            return Some(LoadFlatRefExpr(reader, exprTable))
+            return Some(LoadFlatRefExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_UNARY) {
-            return Some(LoadFlatUnaryExpr(reader, exprTable))
+            return Some(LoadFlatUnaryExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_INC_OR_DEC) {
-            return Some(LoadFlatIncOrDecExpr(reader, exprTable))
+            return Some(LoadFlatIncOrDecExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_BINARY) {
-            return Some(LoadFlatBinaryExpr(reader, exprTable))
+            return Some(LoadFlatBinaryExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_SUBSCRIPT) {
-            return Some(LoadFlatSubscriptExpr(reader, exprTable))
+            return Some(LoadFlatSubscriptExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_ASSIGN) {
-            return Some(LoadFlatAssignExpr(reader, exprTable))
+            return Some(LoadFlatAssignExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_ARRAY_EXPR) {
-            return Some(LoadFlatArrayExpr(reader, exprTable))
+            return Some(LoadFlatArrayExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_POINTER_EXPR) {
-            return Some(LoadFlatPointerExpr(reader, exprTable))
+            return Some(LoadFlatPointerExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_JUMP) {
-            return Some(LoadFlatJumpExpr(reader, exprTable))
+            return Some(LoadFlatJumpExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_TYPE_CONV) {
-            return Some(LoadFlatTypeConvExpr(reader, exprTable))
+            return Some(LoadFlatTypeConvExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_THROW) {
-            return Some(LoadFlatThrowExpr(reader, exprTable))
+            return Some(LoadFlatThrowExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_PERFORM) {
-            return Some(LoadFlatPerformExpr(reader, exprTable))
+            return Some(LoadFlatPerformExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_RESUME) {
-            return Some(LoadFlatResumeExpr(reader, exprTable))
+            return Some(LoadFlatResumeExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_SPAWN) {
-            return Some(LoadFlatSpawnExpr(reader, exprTable))
+            return Some(LoadFlatSpawnExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_TRY) {
-            return Some(LoadFlatTryExpr(reader, exprTable))
+            return Some(LoadFlatTryExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_IF) {
-            return Some(LoadFlatIfExpr(reader, exprTable))
+            return Some(LoadFlatIfExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_WHILE) {
-            return Some(LoadFlatWhileExpr(reader, exprTable))
+            return Some(LoadFlatWhileExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_DO_WHILE) {
-            return Some(LoadFlatDoWhileExpr(reader, exprTable))
+            return Some(LoadFlatDoWhileExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_ARRAY_LIT) {
-            return Some(LoadFlatArrayLit(reader, exprTable))
+            return Some(LoadFlatArrayLit(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_TUPLE_LIT) {
-            return Some(LoadFlatTupleLit(reader, exprTable))
+            return Some(LoadFlatTupleLit(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_MATCH) {
-            return Some(LoadFlatMatchExpr(reader, exprTable))
+            return Some(LoadFlatMatchExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_LET_PATTERN_DESTRUCTOR) {
-            return Some(LoadFlatLetPatternDestructor(reader, exprTable))
+            return Some(LoadFlatLetPatternDestructor(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_FOR_IN) {
-            return Some(LoadFlatForInExpr(reader, exprTable))
+            return Some(LoadFlatForInExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_LAMBDA) {
-            return Some(LoadFlatLambdaExpr(reader, exprTable))
+            return Some(LoadFlatLambdaExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_CALL) {
             // Mirrors ExprLoader.cpp:92-115 LoadCallExpr and ExprLoader.cpp:516-531 LoadFuncArg.
             let ce = CallExpr()
+            if (!allLoadedExprs.contains(exprIndex)) {
+                allLoadedExprs.add(exprIndex, ce)
+            }
             LoadFlatExprBasicInfo(reader, exprTable, ce)
             let operands = reader.VectorField(exprTable, 12)
             if (operands < 0 || reader.VectorLength(operands) < 1) {
@@ -1940,10 +1965,10 @@ private class CjoSignatureMaterializer {
             return Some(ce)
         }
         if (kind == FLAT_EXPR_KIND_RETURN) {
-            return Some(LoadFlatReturnExpr(reader, exprTable))
+            return Some(LoadFlatReturnExpr(reader, exprTable, exprIndex))
         }
         if (kind == FLAT_EXPR_KIND_BLOCK) {
-            return Some(LoadFlatBlock(reader, exprTable))
+            return Some(LoadFlatBlock(reader, exprTable, exprIndex))
         }
         return None
     }
@@ -1951,8 +1976,11 @@ private class CjoSignatureMaterializer {
     // Mirrors ExprLoader.cpp:348-358 LoadLambdaExpr: LambdaInfo owns a nested FuncBody and
     // supportMock restores Attribute.MOCK_SUPPORTED. LoadFuncBody is called with C++ defaults
     // (isInline=false, isConst=true), so the lambda body is imported when source is present.
-    private func LoadFlatLambdaExpr(reader: CjoFlatBuffer, exprTable: Int64): LambdaExpr {
+    private func LoadFlatLambdaExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): LambdaExpr {
         let le = LambdaExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, le)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, le)
         let infoTable = reader.OffsetField(exprTable, 20)
         if (infoTable >= 0) {
@@ -1969,8 +1997,11 @@ private class CjoSignatureMaterializer {
     }
 
     // Mirrors ExprLoader.cpp:33-37 LoadWildcardExpr. WildcardExpr has no extra ExprInfo table.
-    private func LoadFlatWildcardExpr(reader: CjoFlatBuffer, exprTable: Int64): WildcardExpr {
+    private func LoadFlatWildcardExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): WildcardExpr {
         let we = WildcardExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, we)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, we)
         we.EnableAttr(Attribute.IMPORTED)
         return we
@@ -1979,18 +2010,25 @@ private class CjoSignatureMaterializer {
     // Mirrors ExprLoader.cpp:39-48 LoadPrimitiveTypeExpr. The serialized Expr.type field points to
     // the PackageFormat::Type; the type kind is recovered through the same primitive type map used by
     // LoadFlatType.
-    private func LoadFlatPrimitiveTypeExpr(reader: CjoFlatBuffer, exprTable: Int64): PrimitiveTypeExpr {
+    private func LoadFlatPrimitiveTypeExpr(reader: CjoFlatBuffer, exprTable: Int64,
+        exprIndex: UInt32): PrimitiveTypeExpr {
         let ty = LoadFlatType(reader.U32Field(exprTable, 14, 0u32))
         let kind = if (let Some(value) <- ty) { value.kind } else { TypeKind.TYPE_INVALID }
         let pte = PrimitiveTypeExpr(kind)
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, pte)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, pte)
         pte.EnableAttr(Attribute.IMPORTED)
         return pte
     }
 
     // Mirrors ExprLoader.cpp:58-66 LoadJumpExpr. JumpInfo carries only isBreak.
-    private func LoadFlatJumpExpr(reader: CjoFlatBuffer, exprTable: Int64): JumpExpr {
+    private func LoadFlatJumpExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): JumpExpr {
         let je = JumpExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, je)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, je)
         let infoTable = reader.OffsetField(exprTable, 20)
         if (infoTable >= 0) {
@@ -2002,8 +2040,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:130-138 LoadIncOrDecExpr. Operand 0 is expr; IncOrDecInfo field 0
     // (slot 4) is the OperatorKind encoded through OP_KIND_RMAP.
-    private func LoadFlatIncOrDecExpr(reader: CjoFlatBuffer, exprTable: Int64): IncOrDecExpr {
+    private func LoadFlatIncOrDecExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): IncOrDecExpr {
         let ide = IncOrDecExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, ide)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, ide)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
@@ -2018,8 +2059,11 @@ private class CjoSignatureMaterializer {
     }
 
     // Mirrors ExprLoader.cpp:220-227 LoadTypeConvExpr. Operand 0 is the converted expr.
-    private func LoadFlatTypeConvExpr(reader: CjoFlatBuffer, exprTable: Int64): TypeConvExpr {
+    private func LoadFlatTypeConvExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): TypeConvExpr {
         let tce = TypeConvExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, tce)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, tce)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
@@ -2030,8 +2074,11 @@ private class CjoSignatureMaterializer {
     }
 
     // Mirrors ExprLoader.cpp:228-233 LoadThrowExpr. Operand 0 is the thrown expr.
-    private func LoadFlatThrowExpr(reader: CjoFlatBuffer, exprTable: Int64): ThrowExpr {
+    private func LoadFlatThrowExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): ThrowExpr {
         let te = ThrowExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, te)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, te)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
@@ -2042,8 +2089,11 @@ private class CjoSignatureMaterializer {
     }
 
     // Mirrors ExprLoader.cpp:236-241 LoadPerformExpr. Operand 0 is the performed expr.
-    private func LoadFlatPerformExpr(reader: CjoFlatBuffer, exprTable: Int64): PerformExpr {
+    private func LoadFlatPerformExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): PerformExpr {
         let pe = PerformExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, pe)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, pe)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
@@ -2055,8 +2105,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:244-247 LoadResumeExpr. The serialized package format carries no
     // additional ResumeExpr fields in this loader path.
-    private func LoadFlatResumeExpr(reader: CjoFlatBuffer, exprTable: Int64): ResumeExpr {
+    private func LoadFlatResumeExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): ResumeExpr {
         let re = ResumeExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, re)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, re)
         re.EnableAttr(Attribute.IMPORTED)
         return re
@@ -2064,8 +2117,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:250-262 LoadSpawnExpr. Operand 0 is the optional thread-context arg;
     // SpawnInfo.future is a local VarDecl FullId.
-    private func LoadFlatSpawnExpr(reader: CjoFlatBuffer, exprTable: Int64): SpawnExpr {
+    private func LoadFlatSpawnExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): SpawnExpr {
         let se = SpawnExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, se)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, se)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) > 0) {
@@ -2083,8 +2139,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:198-208 LoadArrayExpr and ReferenceLoader.cpp:622-630 for optional
     // ArrayInfo.initFunc on non-VArray array constructor expressions.
-    private func LoadFlatArrayExpr(reader: CjoFlatBuffer, exprTable: Int64): ArrayExpr {
+    private func LoadFlatArrayExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): ArrayExpr {
         let ae = ArrayExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, ae)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, ae)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0) {
@@ -2111,8 +2170,11 @@ private class CjoSignatureMaterializer {
     }
 
     // Mirrors ExprLoader.cpp:211-217 LoadPointerExpr. Optional operand 0 is a FuncArg wrapper.
-    private func LoadFlatPointerExpr(reader: CjoFlatBuffer, exprTable: Int64): PointerExpr {
+    private func LoadFlatPointerExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): PointerExpr {
         let pe = PointerExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, pe)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, pe)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) == 1) {
@@ -2125,8 +2187,11 @@ private class CjoSignatureMaterializer {
     // Mirrors ExprLoader.cpp:303-327 LoadTryExpr and ReferenceLoader.cpp:676-682. Operands are
     // tryBlock, zero or more catch blocks, then finallyBlock-or-0; TryInfo owns catch patterns and
     // resource VarDecl FullIds (ModuleFormat.fbs:486-489).
-    private func LoadFlatTryExpr(reader: CjoFlatBuffer, exprTable: Int64): TryExpr {
+    private func LoadFlatTryExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): TryExpr {
         let te = TryExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, te)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, te)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
@@ -2182,8 +2247,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:285-300 LoadIfExpr. Operands are condExpr, thenBody, elseBody; hasElse
     // and isElseIf are recovered from the loaded else node rather than serialized as fields.
-    private func LoadFlatIfExpr(reader: CjoFlatBuffer, exprTable: Int64): IfExpr {
+    private func LoadFlatIfExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): IfExpr {
         let ie = IfExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, ie)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, ie)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 2) {
@@ -2199,6 +2267,7 @@ private class CjoSignatureMaterializer {
         if (let Some(elseExpr) <- ie.elseBody) {
             ie.isElseIf = elseExpr.astKind == ASTKind.IF_EXPR
             if (let Some(desugar) <- elseExpr.desugarExpr) {
+                allDummyExprs.remove(elseExpr)
                 ie.elseBody = Some(desugar)
             }
         }
@@ -2208,8 +2277,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:330-337 LoadWhileExpr. Operands are condExpr then body; the body is
     // loaded raw as Block, matching C++ LoadExpr<Block>.
-    private func LoadFlatWhileExpr(reader: CjoFlatBuffer, exprTable: Int64): WhileExpr {
+    private func LoadFlatWhileExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): WhileExpr {
         let we = WhileExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, we)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, we)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) == 2) {
@@ -2224,8 +2296,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:339-346 LoadDoWhileExpr. Operands are body then condExpr; the body is
     // loaded raw as Block, matching C++ LoadExpr<Block>.
-    private func LoadFlatDoWhileExpr(reader: CjoFlatBuffer, exprTable: Int64): DoWhileExpr {
+    private func LoadFlatDoWhileExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): DoWhileExpr {
         let dwe = DoWhileExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, dwe)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, dwe)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) == 2) {
@@ -2240,8 +2315,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:383-402 LoadMatchExpr. MatchInfo.matchMode decides whether operands are
     // selector + MatchCase indexes or MatchCaseOther indexes.
-    private func LoadFlatMatchExpr(reader: CjoFlatBuffer, exprTable: Int64): MatchExpr {
+    private func LoadFlatMatchExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): MatchExpr {
         let me = MatchExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, me)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, me)
         let infoTable = reader.OffsetField(exprTable, 20)
         if (infoTable >= 0) {
@@ -2334,8 +2412,12 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:404-414 LoadLetPatternDestructor plus ReferenceLoader.cpp:717-724:
     // the selfhost loader restores expr and pattern tys eagerly instead of in a later refs pass.
-    private func LoadFlatLetPatternDestructor(reader: CjoFlatBuffer, exprTable: Int64): LetPatternDestructor {
+    private func LoadFlatLetPatternDestructor(reader: CjoFlatBuffer, exprTable: Int64,
+        exprIndex: UInt32): LetPatternDestructor {
         let lpd = LetPatternDestructor()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, lpd)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, lpd)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
@@ -2361,8 +2443,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:460-475 LoadForInExpr. Desugared for-in variants have non-invalid
     // ForInKind and load operand 0 as a raw Block, matching C++ LoadExpr<Block>.
-    private func LoadFlatForInExpr(reader: CjoFlatBuffer, exprTable: Int64): ForInExpr {
+    private func LoadFlatForInExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): ForInExpr {
         let fie = ForInExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, fie)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, fie)
         let infoTable = reader.OffsetField(exprTable, 20)
         if (infoTable >= 0) {
@@ -2409,8 +2494,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:118-127 LoadUnaryExpr. Operand 0 is expr; UnaryInfo field 0 (slot 4)
     // is the OperatorKind encoded through OP_KIND_RMAP.
-    private func LoadFlatUnaryExpr(reader: CjoFlatBuffer, exprTable: Int64): UnaryExpr {
+    private func LoadFlatUnaryExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): UnaryExpr {
         let ue = UnaryExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, ue)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, ue)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
@@ -2426,8 +2514,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:154-163 LoadBinaryExpr. Operands are left then right; BinaryInfo field
     // 0 (slot 4) is the OperatorKind encoded through OP_KIND_RMAP.
-    private func LoadFlatBinaryExpr(reader: CjoFlatBuffer, exprTable: Int64): BinaryExpr {
+    private func LoadFlatBinaryExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): BinaryExpr {
         let be = BinaryExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, be)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, be)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 2) {
@@ -2444,8 +2535,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:166-183 LoadSubscriptExpr. Operand 0 is baseExpr; remaining operands are
     // indexExprs. SubscriptInfo.isTupleAccess is restored from ModuleFormat.fbs:477-479.
-    private func LoadFlatSubscriptExpr(reader: CjoFlatBuffer, exprTable: Int64): SubscriptExpr {
+    private func LoadFlatSubscriptExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): SubscriptExpr {
         let se = SubscriptExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, se)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, se)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) > 1) {
@@ -2474,8 +2568,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:186-195 LoadAssignExpr. Operands are leftValue then rightExpr; AssignInfo
     // restores op and isCompound through OP_KIND_RMAP.
-    private func LoadFlatAssignExpr(reader: CjoFlatBuffer, exprTable: Int64): AssignExpr {
+    private func LoadFlatAssignExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): AssignExpr {
         let ae = AssignExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, ae)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, ae)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 2) {
@@ -2493,8 +2590,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:265-272 LoadArrayLit for children and ReferenceLoader.cpp:612-620 for
     // ArrayInfo.initFunc on non-VArray literals.
-    private func LoadFlatArrayLit(reader: CjoFlatBuffer, exprTable: Int64): ArrayLit {
+    private func LoadFlatArrayLit(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): ArrayLit {
         let al = ArrayLit()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, al)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, al)
         LoadFlatExprOperands(reader, exprTable, al.children)
         if (al.TyKind() != TypeKind.TYPE_VARRAY) {
@@ -2510,8 +2610,11 @@ private class CjoSignatureMaterializer {
     }
 
     // Mirrors ExprLoader.cpp:275-282 LoadTupleLit. Operands are tuple element expressions.
-    private func LoadFlatTupleLit(reader: CjoFlatBuffer, exprTable: Int64): TupleLit {
+    private func LoadFlatTupleLit(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): TupleLit {
         let tl = TupleLit()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, tl)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, tl)
         LoadFlatExprOperands(reader, exprTable, tl.children)
         tl.EnableAttr(Attribute.IMPORTED)
@@ -2535,8 +2638,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:67-79 LoadMemberAccess, plus ReferenceLoader.cpp:586-600 deferred
     // reference restoration for target, instTys, and matchedParentTy.
-    private func LoadFlatMemberAccess(reader: CjoFlatBuffer, exprTable: Int64): MemberAccess {
+    private func LoadFlatMemberAccess(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): MemberAccess {
         let ma = MemberAccess()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, ma)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, ma)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
@@ -2559,8 +2665,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:81-90 LoadRefExpr, plus ReferenceLoader.cpp:586-610 deferred
     // reference restoration for target, instTys, and matchedParentTy.
-    private func LoadFlatRefExpr(reader: CjoFlatBuffer, exprTable: Int64): RefExpr {
+    private func LoadFlatRefExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): RefExpr {
         let re = RefExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, re)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, re)
         let infoTable = reader.OffsetField(exprTable, 20)
         if (infoTable >= 0) {
@@ -2652,8 +2761,11 @@ private class CjoSignatureMaterializer {
     }
 
     // Mirrors ExprLoader.cpp:50-56 LoadReturnExpr. Operand 0 = return value sub-expr.
-    private func LoadFlatReturnExpr(reader: CjoFlatBuffer, exprTable: Int64): ReturnExpr {
+    private func LoadFlatReturnExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): ReturnExpr {
         let re = ReturnExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, re)
+        }
         // Expr field 5 (slot 14) = type index.
         if (let Some(ty) <- LoadFlatType(reader.U32Field(exprTable, 14, 0u32))) {
             re.SetTy(ty)
@@ -2669,8 +2781,11 @@ private class CjoSignatureMaterializer {
 
     // Mirrors ExprLoader.cpp:361-381 LoadBlock + BlockInfo (fbs:483-485). operands[i] is an Expr when
     // BlockInfo.isExpr[i] is true, else a Decl; the trailing isExpr entry is the 'unsafe' flag.
-    private func LoadFlatBlock(reader: CjoFlatBuffer, exprTable: Int64): Block {
+    private func LoadFlatBlock(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): Block {
         let block = Block()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, block)
+        }
         if (let Some(ty) <- LoadFlatType(reader.U32Field(exprTable, 14, 0u32))) {
             block.SetTy(ty)
         }
@@ -2707,10 +2822,13 @@ private class CjoSignatureMaterializer {
     }
 
     // Mirrors ExprLoader.cpp:141-152 LoadLitConstExpr + LitConstInfo (fbs:446-450).
-    private func LoadFlatLitConstExpr(reader: CjoFlatBuffer, exprTable: Int64): LitConstExpr {
+    private func LoadFlatLitConstExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): LitConstExpr {
         // Expr field 7 (slot 18) = info_type, field 8 (slot 20) = info (LitConstInfo table).
         let infoTable = reader.OffsetField(exprTable, 20)
         let lce = LitConstExpr()
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, lce)
+        }
         LoadFlatExprBasicInfo(reader, exprTable, lce)
         if (infoTable >= 0) {
             // LitConstInfo field 0 (slot 4) strValue, 1 (slot 6) constKind, 2 (slot 8) strKind.
