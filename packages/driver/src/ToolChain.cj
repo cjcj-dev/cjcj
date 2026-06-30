@@ -444,32 +444,13 @@ public open class ToolChain {
     }
 
     protected open func ComputeLibPaths(): ArrayList<String> {
-        let paths = ArrayList<String>()
-        let archFolder = GetArchFolderName(driverOptions.target.arch)
-        paths.add(FileUtil.JoinPath(driver.cangjieHome, "lib"))
-        paths.add(FileUtil.JoinPath(driver.cangjieHome, "lib/" + archFolder))
-        paths.add(FileUtil.JoinPath(driverOptions.sysroot, "lib"))
-        paths.add(FileUtil.JoinPath(driverOptions.sysroot, "usr/lib"))
-        for (path in driverOptions.environment.libraryPaths) {
-            paths.add(path)
-        }
-        for (path in driverOptions.librarySearchPaths) {
-            paths.add(path)
-        }
-        return paths
+        return ArrayList<String>()
     }
 
     protected open func ComputeBinPaths(): ArrayList<String> {
         let paths = ArrayList<String>()
-        for (path in driverOptions.toolChainPaths) {
-            paths.add(path)
-        }
-        paths.add(FileUtil.JoinPath(driver.cangjieHome, "third_party/llvm/bin"))
         paths.add(FileUtil.JoinPath(driverOptions.sysroot, "bin"))
         paths.add(FileUtil.JoinPath(driverOptions.sysroot, "usr/bin"))
-        for (path in driverOptions.environment.paths) {
-            paths.add(path)
-        }
         return paths
     }
 
@@ -500,17 +481,31 @@ public open class ToolChain {
     protected func FindCangjieLLVMToolPath(toolName: String): String {
         let paths = ArrayList<String>()
         paths.add(FileUtil.JoinPath(driver.cangjieHome, "third_party/llvm/bin"))
+        let toolPath = FindToolPath(toolName, paths)
+        if (toolPath.isEmpty()) {
+            eprintln("error: not found `" + toolName + "` in search paths. Your Cangjie installation might be broken.")
+        }
+        return toolPath
+    }
+
+    protected func FindUserToolPath(toolName: String): String {
+        let paths = ArrayList<String>()
         for (path in driverOptions.toolChainPaths) {
             paths.add(path)
+        }
+        if (driverOptions.customizedSysroot) {
+            for (path in ComputeBinPaths()) {
+                paths.add(path)
+            }
         }
         for (path in driverOptions.environment.paths) {
             paths.add(path)
         }
-        return FindToolPath(toolName, paths)
-    }
-
-    protected func FindUserToolPath(toolName: String): String {
-        return FindToolPath(toolName, ComputeBinPaths())
+        let toolPath = FindToolPath(toolName, paths)
+        if (toolPath.isEmpty()) {
+            eprintln("error: not found `" + toolName + "` in search paths. You may add search path by `-B` option.")
+        }
+        return toolPath
     }
 
     protected open func GetClangRTProfileLibraryName(): String {

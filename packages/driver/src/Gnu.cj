@@ -64,12 +64,11 @@ public open class Gnu <: ToolChain {
         let toolPrefix = if (driverOptions.IsCrossCompiling()) { driverOptions.target.GetEffectiveTripleString() + "-" } else { "" }
         arPath = FindUserToolPath(toolPrefix + ToolName(ToolID.AR))
         if (arPath.isEmpty()) {
-            eprintln("error: not found `ar` in search paths. You may add search path by `-B` option.")
             return false
         }
         objcopyPath = FindCangjieLLVMToolPath(ToolName(ToolID.LLVM_OBJCOPY))
         if (objcopyPath.isEmpty()) {
-            objcopyPath = FindUserToolPath(toolPrefix + ToolName(ToolID.OBJCOPY))
+            return false
         }
         if (driverOptions.IsLTOEnabled() || driverOptions.EnableHwAsan()) {
             ldPath = FindCangjieLLVMToolPath(ToolName(ToolID.LLD))
@@ -77,7 +76,6 @@ public open class Gnu <: ToolChain {
             ldPath = FindUserToolPath(toolPrefix + ToolName(ToolID.LD))
         }
         if (ldPath.isEmpty()) {
-            eprintln("error: not found linker in search paths. You may add search path by `-B` option.")
             return false
         }
         return true
@@ -161,7 +159,7 @@ public open class Gnu <: ToolChain {
             return true
         }
         let dirPath = FileUtil.GetDirPath(modules[0].filePath)
-        let outputFile = FileUtil.JoinPath(dirPath, pkgName + ObjSuffix(driverOptions.target.os))
+        let outputFile = FileUtil.JoinPath(dirPath, pkgName + ".o")
         if (!(modules.size == 1 && modules[0].filePath == outputFile)) {
             let tool = Tool(ldPath, ToolType.BACKEND, driverOptions.environment.allVariables)
             tool.AppendArg("-o")
@@ -198,7 +196,7 @@ public open class Gnu <: ToolChain {
         processedObjFiles.add(TempFileInfo(fileName: FileUtil.GetFileNameWithoutExtension(outputFile),
             filePath: outputFile, rawPath: outputFile, isFrontendOutput: true))
         if ((driverOptions.aggressiveParallelCompile ?? 1) > 1) {
-            let destFile = driverOptions.GetHashedObjFileNameForPackage(pkgName, pkgName) + ObjSuffix(driverOptions.target.os)
+            let destFile = driverOptions.GetHashedObjFileNameForPackage(pkgName, pkgName) + ".o"
             let cacheCopyTool = Tool("CacheCopy", ToolType.INTERNAL_IMPLEMENTED, driverOptions.environment.allVariables)
             cacheCopyTool.AppendArg(outputFile)
             cacheCopyTool.AppendArg(destFile)
@@ -281,28 +279,9 @@ public open class Gnu <: ToolChain {
         gccLibPath: String,
         gccCrtFilePair: (String, String)
     ): Unit {
+        let _ = objFiles
         let _ = gccLibPath
         let _ = gccCrtFilePair
-        let tool = Tool(ldPath, ToolType.BACKEND, driverOptions.environment.allVariables)
-        tool.AppendArg("-o")
-        tool.AppendArg(GetOutputFileInfo(objFiles).filePath)
-        if (driverOptions.outputMode == OutputMode.SHARED_LIB) {
-            tool.AppendArg("-shared")
-        }
-        if (driverOptions.outputMode == OutputMode.EXECUTABLE) {
-            tool.AppendArg("-pie")
-        }
-        tool.AppendArgIf(driverOptions.stripSymbolTable, "-s")
-        tool.AppendArg("-m")
-        tool.AppendArg(GetEmulation())
-        tool.AppendArg("--hash-style=both")
-        tool.AppendArgIf(driverOptions.enableGcSections, "-gc-sections")
-        HandleLibrarySearchPaths(tool)
-        SortInputlibraryFileAndAppend(tool, objFiles)
-        GenerateLinkOptionsOfBuiltinLibs(tool)
-        GenerateLinkOptions(tool)
-        GenerateRuntimePath(tool)
-        backendCmds.add(MakeSingleToolBatch(tool))
     }
 
     protected open func HandleLibrarySearchPaths(tool: Tool): Unit {
@@ -468,21 +447,7 @@ public open class Gnu <: ToolChain {
     }
 
     protected open func GenerateLinkOptions(tool: Tool): Unit {
-        if (driverOptions.linkStatic) {
-            tool.AppendArg("-l:libcangjie-runtime.a")
-            tool.AppendArg("-l:libcangjie-thread.a")
-            tool.AppendArg("-l:libboundscheck-static.a")
-            tool.AppendArg("-lstdc++")
-            tool.AppendArg("-lpthread")
-            tool.AppendArg("-ldl")
-            tool.AppendArg("-lm")
-            tool.AppendArg("-lc")
-        } else {
-            tool.AppendArg("-l:libcangjie-runtime.so")
-            tool.AppendArg("-lboundscheck")
-            tool.AppendArg("-lm")
-            tool.AppendArg("-lc")
-        }
+        let _ = tool
     }
 
     protected open func GetEmulation(): String {
