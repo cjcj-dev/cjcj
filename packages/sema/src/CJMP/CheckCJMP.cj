@@ -148,8 +148,10 @@ private func IsInstanceVar(decl: Decl): Bool {
 
 private func UpdateVarDependencies(decl: Decl): Unit {
     for (idx in 0..decl.dependencies.size) {
-        if (let Some(specificImpl) <- decl.dependencies[idx].specificImplementation) {
-            decl.dependencies[idx] = specificImpl
+        if (let Some(dep) <- decl.dependencies[idx]) {
+            if (let Some(specificImpl) <- dep.specificImplementation) {
+                decl.dependencies[idx] = Some(specificImpl)
+            }
         }
     }
 }

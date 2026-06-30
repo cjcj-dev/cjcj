@@ -799,20 +799,22 @@ public func GetVarsInitializationOrderWithPositions(parentDecl: Decl): ArrayList
     for (common in commonDecls) {
         let specificDeps = ArrayList<Decl>()
         if (let Some(commonDecl) <- common.decl) {
-            for (dep in commonDecl.dependencies) {
-                if (!dep.TestAttr(Attribute.SPECIFIC)) {
-                    continue
-                }
-                var inserted = true
-                for (wasSpecificVar in emittedSpecificDeps) {
-                    if (wasSpecificVar == dep) {
-                        inserted = false
-                        break
+            for (depOpt in commonDecl.dependencies) {
+                if (let Some(dep) <- depOpt) {
+                    if (!dep.TestAttr(Attribute.SPECIFIC)) {
+                        continue
                     }
-                }
-                if (inserted) {
-                    emittedSpecificDeps.add(dep)
-                    specificDeps.add(dep)
+                    var inserted = true
+                    for (wasSpecificVar in emittedSpecificDeps) {
+                        if (wasSpecificVar == dep) {
+                            inserted = false
+                            break
+                        }
+                    }
+                    if (inserted) {
+                        emittedSpecificDeps.add(dep)
+                        specificDeps.add(dep)
+                    }
                 }
             }
         }

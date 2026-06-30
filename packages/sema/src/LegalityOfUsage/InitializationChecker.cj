@@ -981,8 +981,17 @@ public class InitializationChecker {
             vd.EnableAttr(Attribute.INITIALIZED)
             if (let Some(deps) <- currentInitializingVarDependencies) {
                 for (dep in deps) {
-                    if (!ContainsInitDecl(vd.dependencies, dep)) {
-                        vd.dependencies.add(dep)
+                    var foundDependency = false
+                    for (existingDependency in vd.dependencies) {
+                        if (let Some(existingDecl) <- existingDependency) {
+                            if (SameDecl(existingDecl, dep)) {
+                                foundDependency = true
+                                break
+                            }
+                        }
+                    }
+                    if (!foundDependency) {
+                        vd.dependencies.add(Some(dep))
                     }
                 }
                 currentInitializingVarDependencies = None

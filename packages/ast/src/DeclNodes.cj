@@ -33,7 +33,7 @@ public open class Decl <: Node {
     public var doNotExport: Bool = false
     public var isUsedImports: Bool = false
     public var specificImplementation: Option<Decl> = None
-    public let dependencies: ArrayList<Decl> = ArrayList<Decl>()
+    public let dependencies: ArrayList<Option<Decl>> = ArrayList<Option<Decl>>()
     public var checkFlag: InheritanceVisitStatus = InheritanceVisitStatus.UNVISITED
     public var captureIndex: UInt64 = 0
 

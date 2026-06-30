@@ -442,32 +442,6 @@ public class ImportedDeclGroup {
     }
 }
 
-private class ParsedText {
-    public var ok: Bool = false
-    public var text: String = ""
-    public var next: Int64 = 0
-
-    public init() {}
-
-    public init(ok: Bool, text: String, next: Int64) {
-        this.ok = ok
-        this.text = text
-        this.next = next
-    }
-}
-
-private class ParsedGenericArity {
-    public var ok: Bool = false
-    public var arity: Int64 = 0
-    public var next: Int64 = 0
-
-    public init(ok: Bool, arity: Int64, next: Int64) {
-        this.ok = ok
-        this.arity = arity
-        this.next = next
-    }
-}
-
 private class CjoFlatBuffer {
     private let data: Array<UInt8>
 
@@ -726,6 +700,9 @@ private class CjoSignatureMaterializer {
     private let filesByIndex: HashMap<UInt32, File>
     private let idToFileMap: HashMap<UInt64, File>
     private let importedPackages: ArrayList<Package>
+    private let packageDecls: HashMap<String, PackageDecl>
+    private let exportIdDeclMaps: HashMap<String, HashMap<String, Decl>>
+    private let diag: DiagnosticEngine
     private var flat: Option<CjoFlatBuffer> = None
     private var flatAllDecls: Int64 = -1
     private var flatAllTypes: Int64 = -1
@@ -743,19 +720,30 @@ private class CjoSignatureMaterializer {
     private let importSrcCode: Bool
     private let deserializingCommon: Bool
     private let canInline: Bool
+    private let isLoadCache: Bool
 
     public init(packageName: String, pkg: Package, filesByIndex: HashMap<UInt32, File>,
-        idToFileMap: HashMap<UInt64, File>, importedPackages: ArrayList<Package>, typeManager: FaithfulSemaTypeManager,
-        importSrcCode!: Bool = true, deserializingCommon!: Bool = false, canInline!: Bool = false) {
+        idToFileMap: HashMap<UInt64, File>, importedPackages: ArrayList<Package>,
+        packageDecls: HashMap<String, PackageDecl>, exportIdDeclMaps: HashMap<String, HashMap<String, Decl>>,
+        diag: DiagnosticEngine, typeManager: FaithfulSemaTypeManager,
+        importSrcCode!: Bool = true, deserializingCommon!: Bool = false, canInline!: Bool = false,
+        isLoadCache!: Bool = false) {
         this.packageName = packageName
         this.pkg = pkg
         this.filesByIndex = filesByIndex
         this.idToFileMap = idToFileMap
         this.importedPackages = importedPackages
+        this.packageDecls = packageDecls
+        this.exportIdDeclMaps = exportIdDeclMaps
+        this.diag = diag
         this.typeManager = typeManager
         this.importSrcCode = importSrcCode
         this.deserializingCommon = deserializingCommon
         this.canInline = canInline
+        this.isLoadCache = isLoadCache
+        if (!this.exportIdDeclMaps.contains(packageName)) {
+            this.exportIdDeclMaps[packageName] = HashMap<String, Decl>()
+        }
     }
 
     public func Materialize(data: Array<UInt8>): Unit {
@@ -774,7 +762,506 @@ private class CjoSignatureMaterializer {
     }
 
     private func LoadRefs(): Unit {
-        MaterializeSerializedInheritedTypes()
+        if ((let None <- flat) || flatAllDecls < 0) {
+            return
+        }
+        let reader = flat.getOrThrow()
+        for ((index, decl) in allLoadedDecls) {
+            if (let Some(record) <- flatDecls.get(index)) {
+                LoadFlatDeclRefs(reader, record, decl)
+                LoadFlatDeclDependencies(reader, record, decl)
+            }
+        }
+        for ((index2, expr) in allLoadedExprs) {
+            let exprTable = FlatExprTable(reader, index2)
+            if (exprTable >= 0) {
+                LoadFlatExprRefs(reader, exprTable, expr)
+            }
+        }
+        for (dummy in allDummyExprs) {
+            let dummyExpr = (dummy as Expr).getOrThrow()
+            let desugar = dummyExpr.desugarExpr.getOrThrow()
+            if (let Some(ty) <- desugar.GetTy()) {
+                dummyExpr.SetTy(ty)
+            }
+        }
+        for ((_, expr2) in allLoadedExprs) {
+            PostLoadFlatReference(expr2)
+        }
+    }
+
+    private func LoadFlatDeclRefs(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
+        decl.SetTy(LoadFlatTypeOrInvalid(record.typeIndex))
+        if (!Ty.IsTyCorrect(decl.GetTy()) && isLoadCache) {
+            return
+        }
+        LoadFlatGenericConstraintsRef(reader, record, decl.GetGeneric())
+        LoadFlatAnnotationBaseExprs(reader, record, decl)
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            LoadFlatFuncDeclRefs(reader, record, funcDecl)
+        } else if (let Some(structDecl) <- (decl as StructDecl)) {
+            LoadFlatInheritableDeclRefs(reader, record, structDecl)
+        } else if (let Some(enumDecl) <- (decl as EnumDecl)) {
+            LoadFlatInheritableDeclRefs(reader, record, enumDecl)
+        } else if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+            LoadFlatInheritableDeclRefs(reader, record, interfaceDecl)
+        } else if (let Some(classDecl) <- (decl as ClassDecl)) {
+            LoadFlatInheritableDeclRefs(reader, record, classDecl)
+        } else if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            LoadFlatInheritableDeclRefs(reader, record, extendDecl)
+            if (let Some(ty2) <- extendDecl.GetTy()) {
+                extendDecl.extendedType = Some(UpdateFlatTypeNode(extendDecl.extendedType, TypeNodeForTy(ty2)))
+            }
+        } else if (let Some(aliasDecl) <- (decl as TypeAliasDecl)) {
+            LoadFlatTypeAliasDeclRef(reader, record, aliasDecl)
+        } else if (let Some(varWithPattern) <- (decl as VarWithPatternDecl)) {
+            let infoTable = reader.OffsetField(record.table, 38)
+            if (infoTable < 0) {
+                throw IllegalStateException("FlatBuffer VarWithPatternDecl has no VarWithPatternInfo")
+            }
+            if (let Some(pattern) <- varWithPattern.irrefutablePattern) {
+                LoadFlatPatternRefs(reader, reader.OffsetField(infoTable, 8), pattern)
+            } else {
+                throw IllegalStateException("FlatBuffer VarWithPatternDecl irrefutablePattern is missing")
+            }
+        } else if (let Some(varDecl) <- (decl as VarDeclAbstract)) {
+            if (varDecl.typeNode.isNone()) {
+                if (let Some(varTy) <- decl.GetTy()) {
+                    if (varTy.HasAliasTy() || varTy.IsFunc()) {
+                        varDecl.typeNode = Some(TypeNodeForTy(varTy))
+                    }
+                }
+            }
+        }
+        if (decl.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+            decl.genericDecl = ResolveFlatFullId(reader, reader.OffsetField(record.table, 10))
+        }
+    }
+
+    private func LoadFlatFuncDeclRefs(reader: CjoFlatBuffer, record: CjoFlatDecl, funcDecl: FuncDecl): Unit {
+        if (let None <- funcDecl.funcBody) {
+            throw IllegalStateException("FlatBuffer FuncDecl has no loaded FuncBody")
+        }
+        let body = funcDecl.funcBody.getOrThrow()
+        let nonGenericCtor = funcDecl.TestAttr(Attribute.CONSTRUCTOR) && body.body.isNone()
+        if (!nonGenericCtor) {
+            let infoTable = reader.OffsetField(record.table, 38)
+            if (infoTable < 0) {
+                throw IllegalStateException("FlatBuffer FuncDecl has no FuncInfo")
+            }
+            let bodyTable = reader.OffsetField(infoTable, 4)
+            if (bodyTable < 0) {
+                throw IllegalStateException("FlatBuffer FuncDecl has no FuncBody")
+            }
+            body.retType = Some(UpdateFlatTypeNode(body.retType,
+                TypeNodeForTy(LoadFlatTypeOrInvalid(reader.U32Field(bodyTable, 6, 0u32)))))
+        }
+        body.SetTy(funcDecl.GetTy() ?? FaithfulSemaTypeManager.GetInvalidTy())
+    }
+
+    private func LoadFlatInheritableDeclRefs(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: InheritableDecl): Unit {
+        for (member in decl.GetMemberDeclPtrs()) {
+            SetFlatMemberDeclReference(member, decl)
+        }
+        if (!decl.toBeCompiled) {
+            MaterializeFlatInheritedTypes(reader, record)
+        }
+    }
+
+    private func SetFlatMemberDeclReference(member: Decl, parentDecl: Decl): Unit {
+        var parentTypeDecl = parentDecl
+        if (let Some(extendDecl) <- (parentDecl as ExtendDecl)) {
+            if (let Some(extendedDecl) <- Ty.GetDeclPtrOfTy(extendDecl.GetTy())) {
+                parentTypeDecl = extendedDecl
+            }
+        }
+        if (let Some(propDecl) <- (member as PropDecl)) {
+            for (getter in propDecl.getters) {
+                SetFlatFuncParentReference(getter, parentTypeDecl)
+            }
+            for (setter in propDecl.setters) {
+                SetFlatFuncParentReference(setter, parentTypeDecl)
+            }
+        } else if (let Some(funcDecl) <- (member as FuncDecl)) {
+            SetFlatFuncParentReference(funcDecl, parentTypeDecl)
+            if (let None <- funcDecl.funcBody) {
+                throw IllegalStateException("FlatBuffer member FuncDecl has no loaded FuncBody")
+            }
+            let body = funcDecl.funcBody.getOrThrow()
+            if (!body.paramLists.isEmpty()) {
+                for (param in body.paramLists[0].params) {
+                    if (let Some(desugar) <- param.desugarDecl) {
+                        SetFlatFuncParentReference(desugar, parentTypeDecl)
+                    }
+                }
+            }
+        }
+    }
+
+    private func LoadFlatTypeAliasDeclRef(reader: CjoFlatBuffer, record: CjoFlatDecl, aliasDecl: TypeAliasDecl): Unit {
+        let infoTable = reader.OffsetField(record.table, 38)
+        if (infoTable < 0) {
+            throw IllegalStateException("FlatBuffer TypeAliasDecl has no AliasInfo")
+        }
+        aliasDecl.typeNode = Some(UpdateFlatTypeNode(aliasDecl.typeNode,
+            TypeNodeForTy(LoadFlatTypeOrInvalid(reader.U32Field(infoTable, 4, 0u32)))))
+    }
+
+    private func LoadFlatDeclDependencies(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
+        let rawDeps = reader.VectorField(record.table, 40)
+        if (deserializingCommon && rawDeps >= 0) {
+            var idx: Int64 = 0
+            let count = reader.VectorLength(rawDeps)
+            while (idx < count) {
+                decl.dependencies.add(ResolveFlatFullId(reader, reader.VectorOffsetElement(rawDeps, idx)))
+                idx++
+            }
+        }
+    }
+
+    private func LoadFlatGenericConstraintsRef(reader: CjoFlatBuffer, record: CjoFlatDecl,
+        generic: Option<Generic>): Unit {
+        if (let None <- generic) {
+            return
+        }
+        let genericValue = generic.getOrThrow()
+        if (genericValue.TestAttr(Attribute.INCRE_COMPILE)) {
+            return
+        }
+        let genericTable = reader.OffsetField(record.table, 12)
+        if (genericTable < 0) {
+            return
+        }
+        LoadFlatGenericConstraints(reader, genericTable, genericValue)
+    }
+
+    private func LoadFlatAnnotationBaseExprs(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
+        let annos = reader.VectorField(record.table, 24)
+        if (annos < 0) {
+            return
+        }
+        var idx: Int64 = 0
+        let count = reader.VectorLength(annos)
+        if (count != decl.annotations.size) {
+            throw IllegalStateException("FlatBuffer annotations do not match loaded annotations")
+        }
+        while (idx < count) {
+            LoadFlatAnnotationBaseExpr(reader, reader.VectorOffsetElement(annos, idx), decl.annotations[idx])
+            idx++
+        }
+    }
+
+    private func LoadFlatAnnotationBaseExpr(reader: CjoFlatBuffer, annoTable: Int64, annotation: Annotation): Unit {
+        if (annotation.kind != AstAnnotationKind.CUSTOM) {
+            return
+        }
+        if (let Some(targetCtr) <- ResolveFlatFullId(reader, reader.OffsetField(annoTable, 10))) {
+            let refExpr = RefExpr()
+            refExpr.ref.target = Some(targetCtr)
+            refExpr.ref.identifier = targetCtr.identifier
+            if (let Some(ty) <- targetCtr.GetTy()) {
+                refExpr.SetTy(ty)
+            }
+            annotation.baseExpr = Some(refExpr)
+        }
+    }
+
+    private func LoadFlatExprRefs(reader: CjoFlatBuffer, exprTable: Int64, expr: Expr): Unit {
+        expr.SetTy(LoadFlatTypeOrInvalid(reader.U32Field(exprTable, 14, 0u32)))
+        expr.mapExpr = allLoadedExprs.get(reader.U32Field(exprTable, 10, 0u32))
+        if (let Some(member) <- (expr as MemberAccess)) {
+            let infoTable = reader.OffsetField(exprTable, 20)
+            if (infoTable < 0) {
+                throw IllegalStateException("FlatBuffer MemberAccess has no ReferenceInfo")
+            }
+            member.target = LoadFlatReferenceTarget(reader, infoTable)
+            LoadFlatReferenceInfo(reader, infoTable, member)
+        } else if (let Some(refExpr) <- (expr as RefExpr)) {
+            let infoTable2 = reader.OffsetField(exprTable, 20)
+            if (infoTable2 < 0) {
+                throw IllegalStateException("FlatBuffer RefExpr has no ReferenceInfo")
+            }
+            refExpr.ref.target = LoadFlatReferenceTarget(reader, infoTable2)
+            LoadFlatReferenceInfo(reader, infoTable2, refExpr)
+        } else if (let Some(arrayLit) <- (expr as ArrayLit)) {
+            if (expr.TyKind() != TypeKind.TYPE_VARRAY) {
+                let infoTable3 = reader.OffsetField(exprTable, 20)
+                if (infoTable3 < 0) {
+                    throw IllegalStateException("FlatBuffer ArrayLit has no ArrayInfo")
+                }
+                if (let Some(initDecl) <- ResolveFlatFullId(reader, reader.OffsetField(infoTable3, 4))) {
+                    arrayLit.initFunc = initDecl as FuncDecl
+                }
+                if (let None <- arrayLit.initFunc) {
+                    throw IllegalStateException("FlatBuffer ArrayLit initFunc is missing")
+                }
+            }
+        } else if (let Some(arrayExpr) <- (expr as ArrayExpr)) {
+            if (expr.TyKind() != TypeKind.TYPE_VARRAY) {
+                let infoTable4 = reader.OffsetField(exprTable, 20)
+                if (infoTable4 < 0) {
+                    throw IllegalStateException("FlatBuffer ArrayExpr has no ArrayInfo")
+                }
+                if (let Some(initDecl2) <- ResolveFlatFullId(reader, reader.OffsetField(infoTable4, 4))) {
+                    arrayExpr.initFunc = initDecl2 as FuncDecl
+                }
+            }
+        } else if (let Some(lambda) <- (expr as LambdaExpr)) {
+            if (let Some(body) <- lambda.funcBody) {
+                body.SetTy(expr.GetTy() ?? FaithfulSemaTypeManager.GetInvalidTy())
+            }
+        } else if (let Some(litConst) <- (expr as LitConstExpr)) {
+            let litTy = expr.GetTy() ?? FaithfulSemaTypeManager.GetInvalidTy()
+            if (litTy.IsString()) {
+                litConst.ref = TypeNodeForTy(litTy) as RefType
+            }
+            InitializeLitConstValue(litConst)
+        } else if (let Some(jump) <- (expr as JumpExpr)) {
+            jump.refLoop = jump.mapExpr
+        }
+        LoadFlatSubNodeRefs(reader, exprTable, expr)
+    }
+
+    private func LoadFlatSubNodeRefs(reader: CjoFlatBuffer, exprTable: Int64, expr: Expr): Unit {
+        if (let Some(call) <- (expr as CallExpr)) {
+            let operands = reader.VectorField(exprTable, 12)
+            if (operands < 0 || reader.VectorLength(operands) - 1 != call.args.size) {
+                throw IllegalStateException("FlatBuffer CallExpr operands do not match loaded args")
+            }
+            var idx: Int64 = 1
+            let count = reader.VectorLength(operands)
+            while (idx < count) {
+                let index = reader.VectorU32(operands, idx)
+                if (index == 0u32) {
+                    throw IllegalStateException("FlatBuffer CallExpr arg operand is invalid")
+                }
+                let argTable = FlatExprTable(reader, index)
+                if (argTable < 0) {
+                    throw IllegalStateException("FlatBuffer CallExpr arg table is missing")
+                }
+                let argTy = LoadFlatTypeOrInvalid(reader.U32Field(argTable, 14, 0u32))
+                let arg = call.args[idx - 1]
+                arg.SetTy(argTy)
+                if (arg.TestAttr(Attribute.HAS_INITIAL)) {
+                    if (let Some(argExpr) <- arg.expr) {
+                        argExpr.SetTy(arg.GetTy() ?? FaithfulSemaTypeManager.GetInvalidTy())
+                    }
+                }
+                idx++
+            }
+        } else if (let Some(tryExpr) <- (expr as TryExpr)) {
+            let infoTable = reader.OffsetField(exprTable, 20)
+            if (infoTable < 0) {
+                throw IllegalStateException("FlatBuffer TryExpr has no TryInfo")
+            }
+            let patterns = reader.VectorField(infoTable, 6)
+            if (patterns < 0 || reader.VectorLength(patterns) != tryExpr.catchPatterns.size) {
+                throw IllegalStateException("FlatBuffer TryExpr patterns do not match loaded catch patterns")
+            }
+            var patternIdx: Int64 = 0
+            let patternCount = reader.VectorLength(patterns)
+            while (patternIdx < patternCount) {
+                LoadFlatPatternRefs(reader, reader.VectorOffsetElement(patterns, patternIdx),
+                    tryExpr.catchPatterns[patternIdx])
+                patternIdx++
+            }
+        } else if (let Some(matchExpr) <- (expr as MatchExpr)) {
+            let operands = reader.VectorField(exprTable, 12)
+            if (operands < 0) {
+                throw IllegalStateException("FlatBuffer MatchExpr has no operands")
+            }
+            if (matchExpr.matchMode) {
+                if (reader.VectorLength(operands) - 1 != matchExpr.matchCases.size) {
+                    throw IllegalStateException("FlatBuffer MatchExpr cases do not match loaded match cases")
+                }
+                let selector = matchExpr.selector.getOrThrow()
+                var idx2: Int64 = 1
+                let count2 = reader.VectorLength(operands)
+                while (idx2 < count2) {
+                    LoadFlatMatchCaseRef(reader, reader.VectorU32(operands, idx2),
+                        matchExpr.matchCases[idx2 - 1], selector)
+                    idx2++
+                }
+            } else {
+                if (reader.VectorLength(operands) != matchExpr.matchCaseOthers.size) {
+                    throw IllegalStateException("FlatBuffer MatchExpr other cases do not match loaded match cases")
+                }
+                var idx3: Int64 = 0
+                let count3 = reader.VectorLength(operands)
+                while (idx3 < count3) {
+                    let mcTable = FlatExprTable(reader, reader.VectorU32(operands, idx3))
+                    if (mcTable < 0) {
+                        throw IllegalStateException("FlatBuffer MatchCaseOther table is missing")
+                    }
+                    matchExpr.matchCaseOthers[idx3].SetTy(
+                        LoadFlatTypeOrInvalid(reader.U32Field(mcTable, 14, 0u32)))
+                    idx3++
+                }
+            }
+        } else if (let Some(forIn) <- (expr as ForInExpr)) {
+            let infoTable2 = reader.OffsetField(exprTable, 20)
+            if (infoTable2 < 0) {
+                throw IllegalStateException("FlatBuffer ForInExpr has no ForInInfo")
+            }
+            if (let Some(pattern) <- forIn.pattern) {
+                LoadFlatPatternRefs(reader, reader.OffsetField(infoTable2, 4), pattern)
+            } else {
+                throw IllegalStateException("FlatBuffer ForInExpr pattern is missing")
+            }
+        }
+        LoadFlatSubNodeRefs2(reader, exprTable, expr)
+    }
+
+    private func LoadFlatSubNodeRefs2(reader: CjoFlatBuffer, exprTable: Int64, expr: Expr): Unit {
+        if (let Some(letPattern) <- (expr as LetPatternDestructor)) {
+            let infoTable = reader.OffsetField(exprTable, 20)
+            if (infoTable < 0) {
+                throw IllegalStateException("FlatBuffer LetPatternDestructor has no info")
+            }
+            let patterns = reader.VectorField(infoTable, 4)
+            if (patterns < 0 || reader.VectorLength(patterns) != letPattern.patterns.size) {
+                throw IllegalStateException("FlatBuffer LetPatternDestructor patterns do not match loaded patterns")
+            }
+            var idx: Int64 = 0
+            let count = reader.VectorLength(patterns)
+            while (idx < count) {
+                LoadFlatPatternRefs(reader, reader.VectorOffsetElement(patterns, idx), letPattern.patterns[idx])
+                idx++
+            }
+            let operands = reader.VectorField(exprTable, 12)
+            if (operands < 0 || reader.VectorLength(operands) < 1) {
+                throw IllegalStateException("FlatBuffer LetPatternDestructor initializer operand is missing")
+            }
+            let initTable = FlatExprTable(reader, reader.VectorU32(operands, 0))
+            if (initTable < 0) {
+                throw IllegalStateException("FlatBuffer LetPatternDestructor initializer table is missing")
+            }
+            if (let Some(initializer) <- letPattern.initializer) {
+                initializer.SetTy(LoadFlatTypeOrInvalid(reader.U32Field(initTable, 14, 0u32)))
+            } else {
+                throw IllegalStateException("FlatBuffer LetPatternDestructor initializer is missing")
+            }
+        }
+    }
+
+    private func LoadFlatMatchCaseRef(reader: CjoFlatBuffer, index: UInt32, matchCase: MatchCase,
+        selector: Expr): Unit {
+        let mcTable = FlatExprTable(reader, index)
+        if (mcTable < 0) {
+            throw IllegalStateException("FlatBuffer MatchCase table is missing")
+        }
+        matchCase.SetTy(LoadFlatTypeOrInvalid(reader.U32Field(mcTable, 14, 0u32)))
+        let infoTable = reader.OffsetField(mcTable, 20)
+        if (infoTable < 0) {
+            throw IllegalStateException("FlatBuffer MatchCase has no info")
+        }
+        let patterns = reader.VectorField(infoTable, 4)
+        if (patterns < 0 || reader.VectorLength(patterns) != matchCase.patterns.size) {
+            throw IllegalStateException("FlatBuffer MatchCase patterns do not match loaded patterns")
+        }
+        var idx: Int64 = 0
+        let count = reader.VectorLength(patterns)
+        while (idx < count) {
+            LoadFlatPatternRefs(reader, reader.VectorOffsetElement(patterns, idx), matchCase.patterns[idx])
+            matchCase.patterns[idx].ctxExpr = Some(selector)
+            idx++
+        }
+    }
+
+    private func LoadFlatPatternRefs(reader: CjoFlatBuffer, patternTable: Int64, pattern: Pattern): Unit {
+        if (patternTable < 0) {
+            throw IllegalStateException("FlatBuffer Pattern table is missing")
+        }
+        let types = reader.VectorField(patternTable, 12)
+        if (types < 0 || reader.VectorLength(types) < 1) {
+            throw IllegalStateException("FlatBuffer Pattern has no type")
+        }
+        pattern.SetTy(LoadFlatTypeOrInvalid(reader.VectorU32(types, 0)))
+        let kind = reader.U8Field(patternTable, 4, 0u8)
+        if (kind == FLAT_PATTERN_KIND_TUPLE) {
+            let tuplePattern = (pattern as TuplePattern).getOrThrow()
+            let children = reader.VectorField(patternTable, 10)
+            if (children < 0 || reader.VectorLength(children) != tuplePattern.patterns.size) {
+                throw IllegalStateException("FlatBuffer TuplePattern children do not match loaded patterns")
+            }
+            var idx: Int64 = 0
+            let count = reader.VectorLength(children)
+            while (idx < count) {
+                LoadFlatPatternRefs(reader, reader.VectorOffsetElement(children, idx), tuplePattern.patterns[idx])
+                idx++
+            }
+        } else if (kind == FLAT_PATTERN_KIND_TYPE) {
+            let typePattern = (pattern as TypePattern).getOrThrow()
+            let children2 = reader.VectorField(patternTable, 10)
+            if (children2 < 0 || reader.VectorLength(children2) < 1) {
+                throw IllegalStateException("FlatBuffer TypePattern child is missing")
+            }
+            LoadFlatPatternRefs(reader, reader.VectorOffsetElement(children2, 0),
+                typePattern.pattern.getOrThrow())
+            typePattern.typeNode = Some(UpdateFlatTypeNode(typePattern.typeNode,
+                TypeNodeForTy(pattern.GetTy() ?? FaithfulSemaTypeManager.GetInvalidTy())))
+        } else if (kind == FLAT_PATTERN_KIND_ENUM) {
+            let enumPattern = (pattern as EnumPattern).getOrThrow()
+            let children3 = reader.VectorField(patternTable, 10)
+            if (children3 < 0 || reader.VectorLength(children3) != enumPattern.patterns.size) {
+                throw IllegalStateException("FlatBuffer EnumPattern children do not match loaded patterns")
+            }
+            var idx2: Int64 = 0
+            let count2 = reader.VectorLength(children3)
+            while (idx2 < count2) {
+                LoadFlatPatternRefs(reader, reader.VectorOffsetElement(children3, idx2), enumPattern.patterns[idx2])
+                idx2++
+            }
+        } else if (kind == FLAT_PATTERN_KIND_EXCEPT_TYPE) {
+            let exceptPattern = (pattern as ExceptTypePattern).getOrThrow()
+            let children4 = reader.VectorField(patternTable, 10)
+            if (children4 < 0 || reader.VectorLength(children4) < 1) {
+                throw IllegalStateException("FlatBuffer ExceptTypePattern child is missing")
+            }
+            LoadFlatPatternRefs(reader, reader.VectorOffsetElement(children4, 0),
+                exceptPattern.pattern.getOrThrow())
+            exceptPattern.types.clear()
+            var idx3: Int64 = 1
+            let count3 = reader.VectorLength(types)
+            while (idx3 < count3) {
+                exceptPattern.types.add(TypeNodeForTy(LoadFlatTypeOrInvalid(reader.VectorU32(types, idx3))))
+                idx3++
+            }
+        } else if (kind == FLAT_PATTERN_KIND_COMMAND_TYPE) {
+            let commandPattern = (pattern as CommandTypePattern).getOrThrow()
+            let children5 = reader.VectorField(patternTable, 10)
+            if (children5 < 0 || reader.VectorLength(children5) < 1) {
+                throw IllegalStateException("FlatBuffer CommandTypePattern child is missing")
+            }
+            LoadFlatPatternRefs(reader, reader.VectorOffsetElement(children5, 0),
+                commandPattern.pattern.getOrThrow())
+            commandPattern.types.clear()
+            var idx4: Int64 = 1
+            let count4 = reader.VectorLength(types)
+            while (idx4 < count4) {
+                commandPattern.types.add(TypeNodeForTy(LoadFlatTypeOrInvalid(reader.VectorU32(types, idx4))))
+                idx4++
+            }
+        }
+    }
+
+    private func PostLoadFlatReference(expr: Expr): Unit {
+        if (let Some(call) <- (expr as CallExpr)) {
+            let base = call.baseFunc.getOrThrow()
+            if (let Some(target) <- base.GetTarget()) {
+                call.resolvedFunction = target as FuncDecl
+            }
+        } else if (let Some(arrayExpr) <- (expr as ArrayExpr)) {
+            for (arg in arrayExpr.args) {
+                let argExpr = arg.expr.getOrThrow()
+                arg.SetTy(argExpr.GetTy() ?? FaithfulSemaTypeManager.GetInvalidTy())
+            }
+        } else if (let Some(pointerExpr) <- (expr as PointerExpr)) {
+            if (let Some(arg) <- pointerExpr.arg) {
+                let argExpr = arg.expr.getOrThrow()
+                arg.SetTy(argExpr.GetTy() ?? FaithfulSemaTypeManager.GetInvalidTy())
+            }
+        }
     }
 
     private func LoadSerializedDeclRecords(data: Array<UInt8>): Unit {
@@ -964,6 +1451,14 @@ private class CjoSignatureMaterializer {
         let reader = flat.getOrThrow()
         let declCount = reader.VectorLength(flatAllDecls)
         var idx: Int64 = 0
+        while (idx < declCount) {
+            let formatIndex = UInt32(idx + 1)
+            if (let Some(record) <- flatDecls.get(formatIndex)) {
+                let _ = EnsureFlatDecl(record)
+            }
+            idx++
+        }
+        idx = 0
         while (idx < declCount) {
             let formatIndex = UInt32(idx + 1)
             if (let Some(record) <- flatDecls.get(formatIndex)) {
@@ -1405,7 +1900,6 @@ private class CjoSignatureMaterializer {
             }
             idx++
         }
-        LoadFlatGenericConstraints(reader, genericTable, generic)
         if (!generic.typeParameters.isEmpty()) {
             decl.EnableAttr(Attribute.GENERIC)
             if (let Some(funcDecl) <- (decl as FuncDecl)) {
@@ -1570,15 +2064,19 @@ private class CjoSignatureMaterializer {
         if (let Some(gpd) <- (decl as GenericParamDecl)) {
             gpd.SetTy(typeManager.GetGenericsTy(gpd))
             flatGenericParamDecls[record.index] = gpd
+            if (!gpd.exportId.isEmpty()) {
+                AddFlatDeclToImportedPackage(gpd)
+            }
             return Some(gpd)
+        }
+        if (ShouldAddFlatDeclToImportedPackage(record.kind)) {
+            AddFlatDeclToImportedPackage(decl)
         }
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             LoadFlatFuncDeclAdvancedInfo(reader, record, funcDecl)
-            LoadFlatDeclType(record, funcDecl)
             return Some(funcDecl)
         }
         SetFlatGeneric(reader, record, decl)
-        LoadFlatDeclType(record, decl)
         if (record.kind == 5u16) {
             if (let Some(varDecl) <- (decl as VarDecl)) {
                 LoadFlatVarInfo(reader, record, varDecl)
@@ -1595,9 +2093,6 @@ private class CjoSignatureMaterializer {
         if (let Some(propDecl) <- (decl as PropDecl)) {
             LoadFlatPropInfo(reader, record, propDecl)
         }
-        if (let Some(aliasDecl) <- (decl as TypeAliasDecl)) {
-            LoadFlatTypeAliasInfo(reader, record, aliasDecl)
-        }
         if (let Some(enumDecl) <- (decl as EnumDecl)) {
             LoadFlatEnumInfo(reader, record, enumDecl)
         }
@@ -1605,37 +2100,6 @@ private class CjoSignatureMaterializer {
             LoadFlatBodyMembers(reader, record, inheritable)
         }
         return Some(decl)
-    }
-
-    private func LoadFlatDeclType(record: CjoFlatDecl, decl: Decl): Unit {
-        if (record.typeIndex == 0u32) {
-            if (let Some(nominalKind) <- FlatNominalKind(record.kind)) {
-                SetNominalTy(decl)
-            }
-            return
-        }
-        if (let Some(ty) <- LoadFlatType(record.typeIndex)) {
-            decl.SetTy(ty)
-            if (let Some(varDecl) <- (decl as VarDeclAbstract)) {
-                varDecl.typeNode = Some(TypeNodeForTy(ty))
-            }
-            if (let Some(aliasDecl) <- (decl as TypeAliasDecl)) {
-                aliasDecl.typeNode = Some(TypeNodeForTy(ty))
-            }
-            if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-                extendDecl.extendedType = Some(TypeNodeForTy(ty))
-            }
-            if (let Some(funcDecl) <- (decl as FuncDecl)) {
-                if (let Some(body) <- funcDecl.funcBody) {
-                    body.SetTy(ty)
-                    if (let Some(funcTy) <- (ty as FuncTy)) {
-                        body.retType = Some(TypeNodeForTy(funcTy.retTy))
-                    }
-                }
-            }
-        } else if (let Some(_) <- FlatNominalKind(record.kind)) {
-            SetNominalTy(decl)
-        }
     }
 
     private func LoadFlatFuncDeclAdvancedInfo(reader: CjoFlatBuffer, record: CjoFlatDecl, funcDecl: FuncDecl): Unit {
@@ -1686,10 +2150,6 @@ private class CjoSignatureMaterializer {
                 }
             }
         }
-        if (let Some(funcTy) <- FlatFuncTypeFromBody(reader, bodyTable, body)) {
-            body.SetTy(funcTy)
-            funcDecl.SetTy(funcTy)
-        }
     }
 
     // Loads FuncBody.body (fbs FuncBody field 2 / slot 8 = body expr index), gated by the current
@@ -1700,9 +2160,6 @@ private class CjoSignatureMaterializer {
         isInline: Bool, isConst: Bool): FuncBody {
         let body = FuncBody()
         LoadFlatFuncParamLists(reader, bodyTable, body)
-        if (let Some(retTy) <- LoadFlatType(reader.U32Field(bodyTable, 6, 0u32))) {
-            body.retType = Some(TypeNodeForTy(retTy))
-        }
         body.captureKind = FlatCaptureKind(reader.U8Field(bodyTable, 12, 0u8))
         if (let Some(fd) <- funcDecl) {
             body.funcDecl = Some(fd)
@@ -1786,18 +2243,6 @@ private class CjoSignatureMaterializer {
         return list
     }
 
-    private func FlatFuncTypeFromBody(reader: CjoFlatBuffer, bodyTable: Int64, body: FuncBody): Option<FuncTy> {
-        let params = ArrayList<Ty>()
-        if (!body.paramLists.isEmpty()) {
-            for (param in body.paramLists[0].params) {
-                params.add(param.GetTy() ?? FaithfulSemaTypeManager.GetInvalidTy())
-            }
-        }
-        let retTy = LoadFlatType(reader.U32Field(bodyTable, 6, 0u32)) ??
-            FaithfulSemaTypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
-        return Some(typeManager.GetFunctionTy(params.toArray(), retTy))
-    }
-
     private func LoadFlatVarInfo(reader: CjoFlatBuffer, record: CjoFlatDecl, varDecl: VarDecl): Unit {
         let infoTable = reader.OffsetField(record.table, 38)
         if (infoTable < 0) {
@@ -1816,6 +2261,9 @@ private class CjoSignatureMaterializer {
         if (varDecl.initializer.isSome() && IsGlobalOrMember(varDecl)) {
             importNonGenericSrcFuncDecls.add(varDecl)
             varDecl.EnableAttr(Attribute.SRC_IMPORTED)
+        }
+        if (IsGlobalOrMember(varDecl)) {
+            AddFlatDeclToImportedPackage(varDecl)
         }
     }
 
@@ -2057,15 +2505,28 @@ private class CjoSignatureMaterializer {
     // LoadFlatType.
     private func LoadFlatPrimitiveTypeExpr(reader: CjoFlatBuffer, exprTable: Int64,
         exprIndex: UInt32): PrimitiveTypeExpr {
-        let ty = LoadFlatType(reader.U32Field(exprTable, 14, 0u32))
-        let kind = if (let Some(value) <- ty) { value.kind } else { TypeKind.TYPE_INVALID }
-        let pte = PrimitiveTypeExpr(kind)
+        let pte = PrimitiveTypeExpr(FlatPrimitiveExprKind(reader, reader.U32Field(exprTable, 14, 0u32)))
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, pte)
         }
         LoadFlatExprBasicInfo(reader, exprTable, pte)
         pte.EnableAttr(Attribute.IMPORTED)
         return pte
+    }
+
+    private func FlatPrimitiveExprKind(reader: CjoFlatBuffer, typeIndex: UInt32): TypeKind {
+        if (typeIndex == 0u32 || flatAllTypes < 0) {
+            return TypeKind.TYPE_INVALID
+        }
+        let idx = Int64(typeIndex) - 1
+        if (idx < 0 || idx >= reader.VectorLength(flatAllTypes)) {
+            return TypeKind.TYPE_INVALID
+        }
+        let typeTable = reader.VectorOffsetElement(flatAllTypes, idx)
+        if (typeTable < 0) {
+            return TypeKind.TYPE_INVALID
+        }
+        return FlatPrimitiveTypeKind(reader.U16Field(typeTable, 4, 1u16)) ?? TypeKind.TYPE_INVALID
     }
 
     // Mirrors ExprLoader.cpp:58-66 LoadJumpExpr. JumpInfo carries only isBreak.
@@ -2174,7 +2635,7 @@ private class CjoSignatureMaterializer {
         }
         let infoTable = reader.OffsetField(exprTable, 20)
         if (infoTable >= 0) {
-            if (let Some(decl) <- ResolveFlatFullId(reader, reader.OffsetField(infoTable, 4))) {
+            if (let Some(decl) <- LoadFlatLocalDeclFromFullId(reader, reader.OffsetField(infoTable, 4))) {
                 se.futureObj = decl as VarDecl
             }
         }
@@ -2204,11 +2665,6 @@ private class CjoSignatureMaterializer {
         let infoTable = reader.OffsetField(exprTable, 20)
         if (infoTable >= 0) {
             ae.isValueArray = reader.U8Field(infoTable, 6, 0u8) != 0u8
-            if (ae.TyKind() != TypeKind.TYPE_VARRAY) {
-                if (let Some(initDecl) <- ResolveFlatFullId(reader, reader.OffsetField(infoTable, 4))) {
-                    ae.initFunc = initDecl as FuncDecl
-                }
-            }
         }
         ae.EnableAttr(Attribute.IMPORTED)
         return ae
@@ -2265,7 +2721,7 @@ private class CjoSignatureMaterializer {
                 var resourceIdx: Int64 = 0
                 let resourceCount = reader.VectorLength(resources)
                 while (resourceIdx < resourceCount) {
-                    if (let Some(resourceDecl) <- ResolveFlatFullId(reader,
+                    if (let Some(resourceDecl) <- LoadFlatLocalDeclFromFullId(reader,
                         reader.VectorOffsetElement(resources, resourceIdx))) {
                         if (let Some(varDecl) <- (resourceDecl as VarDecl)) {
                             te.resourceSpec.add(varDecl)
@@ -2642,14 +3098,6 @@ private class CjoSignatureMaterializer {
         }
         LoadFlatExprBasicInfo(reader, exprTable, al)
         LoadFlatExprOperands(reader, exprTable, al.children)
-        if (al.TyKind() != TypeKind.TYPE_VARRAY) {
-            let infoTable = reader.OffsetField(exprTable, 20)
-            if (infoTable >= 0) {
-                if (let Some(initDecl) <- ResolveFlatFullId(reader, reader.OffsetField(infoTable, 4))) {
-                    al.initFunc = initDecl as FuncDecl
-                }
-            }
-        }
         al.EnableAttr(Attribute.IMPORTED)
         return al
     }
@@ -2701,8 +3149,6 @@ private class CjoSignatureMaterializer {
         let infoTable = reader.OffsetField(exprTable, 20)
         if (infoTable >= 0) {
             ma.field = SrcIdentifier(reader.StringField(infoTable, 4))
-            LoadFlatReferenceInfo(reader, infoTable, ma)
-            ma.target = LoadFlatReferenceTarget(reader, infoTable)
         }
         ma.EnableAttr(Attribute.IMPORTED)
         return ma
@@ -2722,8 +3168,6 @@ private class CjoSignatureMaterializer {
             re.ref.identifier = SrcIdentifier(name)
             re.isThis = name == "this"
             re.isSuper = name == "super"
-            LoadFlatReferenceInfo(reader, infoTable, re)
-            re.ref.target = LoadFlatReferenceTarget(reader, infoTable)
         }
         re.EnableAttr(Attribute.IMPORTED)
         return re
@@ -2736,9 +3180,6 @@ private class CjoSignatureMaterializer {
     private func LoadFlatNodeBasicInfo(reader: CjoFlatBuffer, exprTable: Int64, node: Node): Unit {
         node.begin = LoadFlatPosition(reader, reader.TableField(exprTable, 6))
         node.end = LoadFlatPosition(reader, reader.TableField(exprTable, 8))
-        if (let Some(ty) <- LoadFlatType(reader.U32Field(exprTable, 14, 0u32))) {
-            node.SetTy(ty)
-        }
     }
 
     private func FlatExprTable(reader: CjoFlatBuffer, exprIndex: UInt32): Int64 {
@@ -2788,15 +3229,14 @@ private class CjoSignatureMaterializer {
 
     private func LoadFlatReferenceInfo(reader: CjoFlatBuffer, infoTable: Int64, expr: NameReferenceExpr): Unit {
         let instTys = reader.VectorField(infoTable, 8)
-        if (instTys >= 0) {
-            var idx: Int64 = 0
-            let count = reader.VectorLength(instTys)
-            while (idx < count) {
-                if (let Some(ty) <- LoadFlatType(reader.VectorU32(instTys, idx))) {
-                    expr.instTys.add(ty)
-                }
-                idx++
-            }
+        if (instTys < 0) {
+            throw IllegalStateException("FlatBuffer ReferenceInfo has no instTys")
+        }
+        var idx: Int64 = 0
+        let count = reader.VectorLength(instTys)
+        while (idx < count) {
+            expr.instTys.add(LoadFlatTypeOrInvalid(reader.VectorU32(instTys, idx)))
+            idx++
         }
         expr.matchedParentTy = LoadFlatType(reader.U32Field(infoTable, 10, 0u32))
     }
@@ -2810,10 +3250,6 @@ private class CjoSignatureMaterializer {
         let re = ReturnExpr()
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, re)
-        }
-        // Expr field 5 (slot 14) = type index.
-        if (let Some(ty) <- LoadFlatType(reader.U32Field(exprTable, 14, 0u32))) {
-            re.SetTy(ty)
         }
         // Expr field 4 (slot 12) = operands (uint32 vector of sub-expr indices).
         let operands = reader.VectorField(exprTable, 12)
@@ -2830,9 +3266,6 @@ private class CjoSignatureMaterializer {
         let block = Block()
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, block)
-        }
-        if (let Some(ty) <- LoadFlatType(reader.U32Field(exprTable, 14, 0u32))) {
-            block.SetTy(ty)
         }
         // Expr field 8 (slot 20) = info (BlockInfo); BlockInfo field 0 (slot 4) = isExpr bool vector.
         let infoTable = reader.OffsetField(exprTable, 20)
@@ -2882,19 +3315,12 @@ private class CjoSignatureMaterializer {
             lce.stringKind = FlatToStringKind(reader.U8Field(infoTable, 8, 0u8))
         }
         lce.rawString = lce.stringValue
-        // Expr field 5 (slot 14) = type index.
-        let typeIndex = reader.U32Field(exprTable, 14, 0u32)
-        if (let Some(ty) <- LoadFlatType(typeIndex)) {
-            lce.SetTy(ty)
-        }
         // ExprLoader.cpp:148-150: compute codepoints for RUNE/STRING literals.
         if (lce.kind == LitConstKind.RUNE || lce.kind == LitConstKind.STRING) {
             for (point in StringConvertor.UTF8ToCodepoint(lce.stringValue)) {
                 lce.codepoint.add(point)
             }
         }
-        // C++ ReferenceLoader.cpp initializes imported literal payloads after type/reference restoration.
-        InitializeLitConstValue(lce)
         lce.EnableAttr(Attribute.IMPORTED)
         return lce
     }
@@ -2939,38 +3365,9 @@ private class CjoSignatureMaterializer {
         } else {
             return None
         }
-        LoadFlatPatternTy(reader, patternTable, pattern)
         pattern.begin = LoadFlatPosition(reader, reader.TableField(patternTable, 6))
         pattern.end = LoadFlatPosition(reader, reader.TableField(patternTable, 8))
-        SyncFlatVarPatternDeclTy(pattern)
-        if (let Some(typePattern) <- (pattern as TypePattern)) {
-            if (let Some(ty) <- typePattern.GetTy()) {
-                typePattern.typeNode = Some(TypeNodeForTy(ty))
-            }
-        }
         return Some(pattern)
-    }
-
-    private func LoadFlatPatternTy(reader: CjoFlatBuffer, patternTable: Int64, pattern: Pattern): Unit {
-        let types = reader.VectorField(patternTable, 12)
-        if (types >= 0 && reader.VectorLength(types) >= 1) {
-            if (let Some(ty) <- LoadFlatType(reader.VectorU32(types, 0))) {
-                pattern.SetTy(ty)
-            }
-        }
-    }
-
-    private func SyncFlatVarPatternDeclTy(pattern: Pattern): Unit {
-        if (let Some(varPattern) <- (pattern as VarPattern)) {
-            if (let Some(varDecl) <- varPattern.varDecl) {
-                if (!Ty.IsTyCorrect(varDecl.GetTy())) {
-                    if (let Some(ty) <- varPattern.GetTy()) {
-                        varDecl.SetTy(ty)
-                        varDecl.typeNode = Some(TypeNodeForTy(ty))
-                    }
-                }
-            }
-        }
     }
 
     private func LoadFlatConstPattern(reader: CjoFlatBuffer, patternTable: Int64): ConstPattern {
@@ -3032,17 +3429,6 @@ private class CjoSignatureMaterializer {
         if (children >= 0 && reader.VectorLength(children) >= 1) {
             pattern.pattern = LoadFlatPattern(reader, reader.VectorOffsetElement(children, 0))
         }
-        let types = reader.VectorField(patternTable, 12)
-        if (types >= 0) {
-            var idx: Int64 = 1
-            let count = reader.VectorLength(types)
-            while (idx < count) {
-                if (let Some(ty) <- LoadFlatType(reader.VectorU32(types, idx))) {
-                    pattern.types.add(TypeNodeForTy(ty))
-                }
-                idx++
-            }
-        }
         return pattern
     }
 
@@ -3051,17 +3437,6 @@ private class CjoSignatureMaterializer {
         let children = reader.VectorField(patternTable, 10)
         if (children >= 0 && reader.VectorLength(children) >= 1) {
             pattern.pattern = LoadFlatPattern(reader, reader.VectorOffsetElement(children, 0))
-        }
-        let types = reader.VectorField(patternTable, 12)
-        if (types >= 0) {
-            var idx: Int64 = 1
-            let count = reader.VectorLength(types)
-            while (idx < count) {
-                if (let Some(ty) <- LoadFlatType(reader.VectorU32(types, idx))) {
-                    pattern.types.add(TypeNodeForTy(ty))
-                }
-                idx++
-            }
         }
         return pattern
     }
@@ -3126,16 +3501,6 @@ private class CjoSignatureMaterializer {
                 }
             }
             idx++
-        }
-    }
-
-    private func LoadFlatTypeAliasInfo(reader: CjoFlatBuffer, record: CjoFlatDecl, aliasDecl: TypeAliasDecl): Unit {
-        let infoTable = reader.OffsetField(record.table, 38)
-        if (infoTable < 0) {
-            return
-        }
-        if (let Some(aliasedTy) <- LoadFlatType(reader.U32Field(infoTable, 4, 0u32))) {
-            aliasDecl.typeNode = Some(TypeNodeForTy(aliasedTy))
         }
     }
 
@@ -3407,6 +3772,10 @@ private class CjoSignatureMaterializer {
         return loaded
     }
 
+    private func LoadFlatTypeOrInvalid(index: UInt32): Ty {
+        return LoadFlatType(index) ?? FaithfulSemaTypeManager.GetInvalidTy()
+    }
+
     private func CreateFlatType(reader: CjoFlatBuffer, typeTable: Int64): Option<Ty> {
         let kind = reader.U16Field(typeTable, 4, 1u16)
         let typeArgs = LoadFlatTypeArgs(reader, typeTable)
@@ -3574,20 +3943,29 @@ private class CjoSignatureMaterializer {
             return None
         }
         if (id.pkgId == -2) {
-            if (let Some(record) <- flatDecls.get(id.index)) {
-                if (!record.fullPackageName.isEmpty() && record.fullPackageName != packageName) {
-                    if (let Some(found) <- FindImportedDeclByExportId(record.fullPackageName, record.exportId)) {
-                        return Some(found)
-                    }
-                }
-                return EnsureFlatDecl(record)
-            }
-            return None
+            return allLoadedDecls.get(id.index)
         }
         if (id.pkgId == -3) {
-            return None
+            return FindImportedPackageDecl(id.decl)
         }
         return ResolveImportedFullId(id)
+    }
+
+    private func LoadFlatLocalDeclFromFullId(reader: CjoFlatBuffer, fullIdTable: Int64): Option<Decl> {
+        if (fullIdTable < 0) {
+            return None
+        }
+        let id = ReadFlatFullId(reader, fullIdTable)
+        if (id.pkgId != -2 || id.index == 0u32) {
+            return None
+        }
+        if (let Some(loaded) <- allLoadedDecls.get(id.index)) {
+            return Some(loaded)
+        }
+        if (let Some(record) <- flatDecls.get(id.index)) {
+            return EnsureFlatDecl(record)
+        }
+        return None
     }
 
     private func ReadFlatFullId(reader: CjoFlatBuffer, fullIdTable: Int64): CjoFullId {
@@ -3612,64 +3990,39 @@ private class CjoSignatureMaterializer {
             return None
         }
         if (!id.decl.isEmpty()) {
-            if (let Some(found) <- FindImportedDeclByExportId(packageName, id.decl)) {
-                return Some(found)
+            if (let Some(exportIdDeclMap) <- exportIdDeclMaps.get(packageName)) {
+                if (let Some(found) <- exportIdDeclMap.get(id.decl)) {
+                    return Some(found)
+                }
             }
+        }
+        if (!HasPackageDecl(packageName) && !isLoadCache) {
+            diag.DiagnoseRefactor(DiagKindRefactor.package_invalid_cjo_dependency, DEFAULT_POSITION,
+                arguments: [this.packageName, packageName])
         }
         return None
     }
 
-    private func FindImportedDeclByExportId(fullPackageName: String, exportId: String): Option<Decl> {
-        for (importedPackage in importedPackages) {
-            if (importedPackage.fullPackageName != fullPackageName) {
-                continue
-            }
-            for (importedFile in importedPackage.files) {
-                for (decl in importedFile.decls) {
-                    if (decl.exportId == exportId || decl.rawMangleName == exportId || decl.mangledName == exportId) {
-                        return Some(decl)
-                    }
+    private func FindImportedPackageDecl(fullPackageName: String): Option<Decl> {
+        if (let Some(existing) <- packageDecls.get(fullPackageName)) {
+            return Some(existing)
+        }
+        var packageValue: Option<Package> = None
+        if (fullPackageName == packageName) {
+            packageValue = Some(pkg)
+        }
+        if (let None <- packageValue) {
+            for (importedPackage in importedPackages) {
+                if (importedPackage.fullPackageName == fullPackageName) {
+                    packageValue = Some(importedPackage)
+                    break
                 }
             }
         }
-        let parsedPackage = ParseLengthText(exportId, 0)
-        if (!parsedPackage.ok || parsedPackage.text != fullPackageName) {
-            return None
-        }
-        let parsedName = ParseLengthText(exportId, parsedPackage.next)
-        if (!parsedName.ok || parsedName.text.isEmpty()) {
-            return None
-        }
-        var pos = parsedName.next
-        let genericArity = ParseGenericArity(exportId, pos)
-        if (genericArity.ok) {
-            pos = genericArity.next
-        }
-        let arity = genericArity.arity
-        for (importedPackage in importedPackages) {
-            if (importedPackage.fullPackageName != fullPackageName) {
-                continue
-            }
-            for (importedFile in importedPackage.files) {
-                for (decl in importedFile.decls) {
-                    if (decl.identifier.Val() == parsedName.text && decl.IsNominalDecl() &&
-                        ImportedGenericArityMatches(decl, arity)) {
-                        return Some(decl)
-                    }
-                }
-            }
-        }
-        return None
-    }
-
-    private func ImportedGenericArityMatches(decl: Decl, genericArity: Int64): Bool {
-        if (genericArity <= 0) {
-            return true
-        }
-        if (let Some(generic) <- decl.generic) {
-            return generic.typeParameters.size == genericArity
-        }
-        return false
+        let targetPackage = packageValue ?? return None
+        let packageDecl = PackageDecl(targetPackage)
+        packageDecls[fullPackageName] = packageDecl
+        return Some(packageDecl)
     }
 
     private func FlatPrimitiveTypeKind(kind: UInt16): Option<TypeKind> {
@@ -3691,6 +4044,66 @@ private class CjoSignatureMaterializer {
         if (kind == 16u16) { return Some(TypeKind.TYPE_NOTHING) }
         if (kind == 17u16) { return Some(TypeKind.TYPE_BOOLEAN) }
         return None
+    }
+
+    private func ShouldAddFlatDeclToImportedPackage(kind: UInt16): Bool {
+        return kind == 1u16 || kind == 2u16 || kind == 3u16 || kind == 8u16 || kind == 9u16 ||
+            kind == 10u16 || kind == 11u16 || kind == 13u16
+    }
+
+    private func AddFlatDeclToImportedPackage(decl: Decl): Unit {
+        if (decl.astKind == ASTKind.EXTEND_DECL) {
+            return
+        }
+        let exportIdDeclMap = GetCurrentExportIdDeclMap()
+        if (decl.exportId.isEmpty()) {
+            let identifier = decl.identifier.Val()
+            if (!exportIdDeclMap.contains(identifier)) {
+                exportIdDeclMap[identifier] = decl
+            }
+            return
+        }
+        if (let None <- exportIdDeclMap.get(decl.exportId)) {
+            exportIdDeclMap[decl.exportId] = decl
+            return
+        }
+        let existingDecl = exportIdDeclMap.get(decl.exportId).getOrThrow()
+        var reportError = existingDecl != decl && importSrcCode
+        if (decl.TestAttr(Attribute.FROM_COMMON_PART)) {
+            reportError = false
+            if (FlatDeclaredInDifferentFiles(decl, existingDecl)) {
+                return
+            }
+            decl.EnableAttr(Attribute.ALREADY_LOADED)
+        }
+        if (reportError) {
+            throw IllegalStateException("Found same exportID when import a package.")
+        }
+    }
+
+    private func GetCurrentExportIdDeclMap(): HashMap<String, Decl> {
+        if (let Some(existingMap) <- exportIdDeclMaps.get(packageName)) {
+            return existingMap
+        }
+        let createdMap = HashMap<String, Decl>()
+        exportIdDeclMaps[packageName] = createdMap
+        return createdMap
+    }
+
+    private func FlatDeclaredInDifferentFiles(left: Decl, right: Decl): Bool {
+        if (let Some(leftFile) <- left.curFile) {
+            if (let Some(rightFile) <- right.curFile) {
+                return leftFile.objectId != rightFile.objectId
+            }
+        }
+        return false
+    }
+
+    private func HasPackageDecl(fullPackageName: String): Bool {
+        if (packageDecls.contains(fullPackageName) || fullPackageName == packageName) {
+            return true
+        }
+        return FindImportedPackage(fullPackageName).isSome()
     }
 
     private func SetNominalTy(decl: Decl): Unit {
@@ -3744,56 +4157,102 @@ private class CjoSignatureMaterializer {
     }
 
     private func TypeNodeForTy(ty: Ty): Type {
-        if (let Some(primitiveTy) <- (ty as PrimitiveTy)) {
-            let primitive = PrimitiveType(primitiveTy.kind)
+        var hasTypeAlias = false
+        if (TypeKindIndex(ty.kind) <= TypeKindIndex(TypeKind.TYPE_BOOLEAN) && ty.kind != TypeKind.TYPE_NOTHING) {
+            let primitive = PrimitiveType()
+            primitive.str = ty.String()
+            primitive.kind = ty.kind
             primitive.SetTy(ty)
+            MarkFlatWrappedType(primitive)
             return primitive
+        } else if (let Some(funcTy) <- (ty as FuncTy)) {
+            let funcType = FuncType()
+            for (paramTy in funcTy.paramTys) {
+                let paramType = TypeNodeForTy(paramTy)
+                funcType.paramTypes.add(paramType)
+                hasTypeAlias = hasTypeAlias || !Ty.IsInitialTy(paramType.aliasTy)
+            }
+            funcType.SetTy(ty)
+            let retType = TypeNodeForTy(funcTy.retTy)
+            funcType.retType = Some(retType)
+            hasTypeAlias = hasTypeAlias || !Ty.IsInitialTy(retType.aliasTy)
+            MarkFlatWrappedType(funcType)
+            if (hasTypeAlias) {
+                funcType.aliasTy = ty
+            }
+            return funcType
+        } else if (let Some(tupleTy) <- (ty as TupleTy)) {
+            let tupleType = TupleType()
+            for (argTy in tupleTy.typeArgs) {
+                let fieldType = TypeNodeForTy(argTy)
+                tupleType.fieldTypes.add(fieldType)
+                hasTypeAlias = hasTypeAlias || !Ty.IsInitialTy(fieldType.aliasTy)
+            }
+            tupleType.SetTy(ty)
+            MarkFlatWrappedType(tupleType)
+            if (hasTypeAlias) {
+                tupleType.aliasTy = ty
+            }
+            return tupleType
         }
+        return RefTypeForTy(ty)
+    }
+
+    private func RefTypeForTy(ty: Ty): RefType {
+        if (!CanWrapFlatRefType(ty.kind)) {
+            throw IllegalStateException("FlatBuffer cannot wrap semantic type as RefType: ${ty.String()}")
+        }
+        var hasTypeAlias = ty.kind == TypeKind.TYPE
         let refType = RefType(ty.name)
+        for (argTy in ty.typeArgs) {
+            let typeArg = TypeNodeForTy(argTy)
+            refType.typeArguments.add(typeArg)
+            hasTypeAlias = hasTypeAlias || !Ty.IsInitialTy(typeArg.aliasTy)
+        }
         refType.SetTy(ty)
         if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
             refType.ref.target = decl
+            if ((ty as ClassThisTy).isSome()) {
+                refType.ref.identifier = SrcIdentifier("This")
+            } else {
+                refType.ref.identifier = decl.identifier
+            }
         }
+        if (hasTypeAlias) {
+            refType.aliasTy = ty
+        }
+        MarkFlatWrappedType(refType)
         return refType
     }
 
-    private func ParseGenericArity(signature: String, start: Int64): ParsedGenericArity {
-        if (start >= signature.size || signature[start] != b'<') {
-            return ParsedGenericArity(false, 0, start)
-        }
-        var pos = start + 1
-        var value: Int64 = 0
-        var hasDigit = false
-        while (pos < signature.size && signature[pos] >= b'0' && signature[pos] <= b'9') {
-            value = value * 10 + Int64(signature[pos] - b'0')
-            hasDigit = true
-            pos++
-        }
-        if (!hasDigit || pos >= signature.size || signature[pos] != b'>') {
-            return ParsedGenericArity(false, 0, start)
-        }
-        return ParsedGenericArity(true, value, pos + 1)
+    private func CanWrapFlatRefType(kind: TypeKind): Bool {
+        return kind == TypeKind.TYPE_ENUM || kind == TypeKind.TYPE_STRUCT || kind == TypeKind.TYPE_ARRAY ||
+            kind == TypeKind.TYPE_VARRAY || kind == TypeKind.TYPE_POINTER || kind == TypeKind.TYPE_CSTRING ||
+            kind == TypeKind.TYPE_CLASS || kind == TypeKind.TYPE_INTERFACE || kind == TypeKind.TYPE ||
+            kind == TypeKind.TYPE_GENERICS || kind == TypeKind.TYPE_NOTHING || kind == TypeKind.TYPE_INVALID
     }
 
-    private func ParseLengthText(signature: String, start: Int64): ParsedText {
-        var pos = start
-        var len: Int64 = 0
-        var hasDigit = false
-        while (pos < signature.size && signature[pos] >= b'0' && signature[pos] <= b'9') {
-            if (len > signature.size) {
-                return ParsedText(false, "", start)
-            }
-            len = len * 10 + Int64(signature[pos] - b'0')
-            if (len > signature.size) {
-                return ParsedText(false, "", start)
-            }
-            hasDigit = true
-            pos++
+    private func MarkFlatWrappedType(typeNode: Type): Unit {
+        typeNode.EnableAttr(Attribute.IMPORTED)
+        typeNode.EnableAttr(Attribute.COMPILER_ADD)
+        typeNode.EnableAttr(Attribute.IS_CHECK_VISITED)
+    }
+
+    private func UpdateFlatTypeNode(astType: Option<Type>, loadedType: Type): Type {
+        if (let None <- astType) {
+            return loadedType
         }
-        if (!hasDigit || len < 0 || pos + len > signature.size) {
-            return ParsedText(false, "", start)
+        let existing = astType.getOrThrow()
+        if (Ty.IsTyCorrect(loadedType.GetTy())) {
+            existing.SetTy(loadedType.GetTy().getOrThrow())
+            existing.EnableAttr(Attribute.IS_CHECK_VISITED)
+            if (let Some(refType) <- (existing as RefType)) {
+                refType.ref.target = loadedType.GetTarget()
+            } else if (let Some(qualifiedType) <- (existing as QualifiedType)) {
+                qualifiedType.target = loadedType.GetTarget()
+            }
         }
-        return ParsedText(true, signature[pos..pos + len], pos + len)
+        return existing
     }
 
     private func RootPackageName(fullPackageName: String): String {
@@ -3873,6 +4332,9 @@ public class ImportManager {
     private let typeManager: FaithfulSemaTypeManager
     private let searchPath: ArrayList<String> = ArrayList<String>()
     private let importedPackages: ArrayList<Package> = ArrayList<Package>()
+    private let packageDecls: HashMap<String, PackageDecl> = HashMap<String, PackageDecl>()
+    private let exportIdDeclMaps: HashMap<String, HashMap<String, Decl>> =
+        HashMap<String, HashMap<String, Decl>>()
     private let depPkgCjdPaths: HashMap<String, String> = HashMap<String, String>()
     private let stdDepsMap: HashMap<String, StdDepEntry> = HashMap<String, StdDepEntry>()
     private let directDependencies: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
@@ -3952,6 +4414,8 @@ public class ImportManager {
             AppendSearchPath(path)
         }
         importedPackages.clear()
+        packageDecls.clear()
+        exportIdDeclMaps.clear()
         depPkgCjdPaths.clear()
         stdDepsMap.clear()
         directDependencies.clear()
@@ -4577,7 +5041,7 @@ public class ImportManager {
         pkg.EnableAttr(Attribute.IMPORTED)
         let (filesByIndex, idToFileMap) = MaterializeCjoFiles(data, pkg)
         let materializer = CjoSignatureMaterializer(fullPackageName, pkg, filesByIndex, idToFileMap, importedPackages,
-            typeManager, canInline: canInlineImportedSource)
+            packageDecls, exportIdDeclMaps, diag, typeManager, canInline: canInlineImportedSource)
         materializer.Materialize(data)
         AddImportedPackageIfMissing(pkg)
         loadingPackages.remove(fullPackageName)
