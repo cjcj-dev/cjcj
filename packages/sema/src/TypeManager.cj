@@ -5,6 +5,7 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
 import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
 import cangjie_compiler::modules.SplitQualifiedName as ModulesSplitQualifiedName
+import cangjie_compiler::utils.CJC_ASSERT
 
 public enum TypeCompatibility {
     | INCOMPATIBLE
@@ -250,11 +251,37 @@ private class TyVarScopeDepthEntry {
 }
 
 public class TypeManager {
+    private static let theInvalidTy: InvalidTy = InvalidTy()
+    private static let theAnyTy: AnyTy = AnyTy()
+    private static let theQuestTy: QuestTy = QuestTy()
+    private static let theCStringTy: CStringTy = CStringTy()
+    private static let primitiveTys: Array<PrimitiveTy> = [
+        PrimitiveTy(TypeKind.TYPE_UNIT),
+        PrimitiveTy(TypeKind.TYPE_INT8),
+        PrimitiveTy(TypeKind.TYPE_INT16),
+        PrimitiveTy(TypeKind.TYPE_INT32),
+        PrimitiveTy(TypeKind.TYPE_INT64),
+        PrimitiveTy(TypeKind.TYPE_INT_NATIVE),
+        PrimitiveTy(TypeKind.TYPE_IDEAL_INT),
+        PrimitiveTy(TypeKind.TYPE_UINT8),
+        PrimitiveTy(TypeKind.TYPE_UINT16),
+        PrimitiveTy(TypeKind.TYPE_UINT32),
+        PrimitiveTy(TypeKind.TYPE_UINT64),
+        PrimitiveTy(TypeKind.TYPE_UINT_NATIVE),
+        PrimitiveTy(TypeKind.TYPE_FLOAT16),
+        PrimitiveTy(TypeKind.TYPE_FLOAT32),
+        PrimitiveTy(TypeKind.TYPE_FLOAT64),
+        PrimitiveTy(TypeKind.TYPE_IDEAL_FLOAT),
+        PrimitiveTy(TypeKind.TYPE_RUNE),
+        NothingTy(),
+        PrimitiveTy(TypeKind.TYPE_BOOLEAN),
+    ]
+
     public let constraints: Constraint = Constraint()
     public let builtinTyToExtendMap: ArrayList<TyExtendsEntry> = ArrayList<TyExtendsEntry>()
     public let declToExtendMap: ArrayList<DeclExtendsEntry> = ArrayList<DeclExtendsEntry>()
 
-    private var anyTy: Ty = AnyTy()
+    private var anyTy: Ty = theAnyTy
     private var ctypeTy: Option<Ty> = None
     private let overrideCache: ArrayList<OverrideCacheEntry> = ArrayList<OverrideCacheEntry>()
     private let topOverrideMap: ArrayList<TopOverrideEntry> = ArrayList<TopOverrideEntry>()
@@ -323,30 +350,32 @@ public class TypeManager {
     }
 
     public static func GetPrimitiveTy(kind: TypeKind): PrimitiveTy {
-        if (kind == TypeKind.TYPE_NOTHING) {
-            return NothingTy()
-        }
-        return PrimitiveTy(kind)
+        let validParam = TypeKindIndex(kind) >= TypeKindIndex(TypeKind.TYPE_UNIT) &&
+            TypeKindIndex(kind) <= TypeKindIndex(TypeKind.TYPE_BOOLEAN)
+        CJC_ASSERT(validParam)
+        let index = if (validParam) { TypeKindIndex(kind) - TypeKindIndex(TypeKind.TYPE_UNIT) } else { 0 }
+        CJC_ASSERT(index < primitiveTys.size)
+        return primitiveTys[index]
     }
 
     public static func GetInvalidTy(): InvalidTy {
-        return InvalidTy()
+        return theInvalidTy
     }
 
     public static func GetNothingTy(): PrimitiveTy {
-        return NothingTy()
+        return GetPrimitiveTy(TypeKind.TYPE_NOTHING)
     }
 
     public static func GetQuestTy(): QuestTy {
-        return QuestTy()
+        return theQuestTy
     }
 
     public static func GetCStringTy(): CStringTy {
-        return CStringTy()
+        return theCStringTy
     }
 
     public static func GetBoolTy(): PrimitiveTy {
-        return PrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        return GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
     }
 
     public static func GetNonNullTy(ty: Ty): Ty {
@@ -428,7 +457,7 @@ public class TypeManager {
     }
 
     public func GetArrayTy(): ArrayTy {
-        return ArrayTy(GetInvalidTy(), 1u64)
+        return GetArrayTy(GetInvalidTy(), 1u64)
     }
 
     public func GetClassTy(cd: ClassDecl, typeArgs: Array<Ty>): ClassTy {

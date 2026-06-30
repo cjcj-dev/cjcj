@@ -275,8 +275,10 @@ private func hashNominalTy(kind: TypeKind, name: String, typeArgs: ArrayList<Ty>
 }
 
 public open class Ty {
+    private static var nextObjectId: Int64 = 1
     private static let initialTy: Ty = InitialTy()
 
+    public let objectId: Int64
     public let kind: TypeKind
     public var name: String = ""
     public let typeArgs: ArrayList<Ty> = ArrayList<Ty>()
@@ -285,6 +287,8 @@ public open class Ty {
     protected var generic: Bool = false
 
     public init(kind: TypeKind) {
+        objectId = nextObjectId
+        nextObjectId++
         this.kind = kind
     }
 
