@@ -457,7 +457,7 @@ public class ImportManager {
             ResolveImports(pkg)
         }
         for (pd in GetAllImportedPackages()) {
-            if (pd.srcPackage.hasSourceImportedDecl && !ContainsPackage(packages, pd.srcPackage)) {
+            if (pd.srcPackage.hasSourceImportedDecl) {
                 packages.add(pd.srcPackage)
             }
         }

@@ -13,6 +13,8 @@ import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::chir.CHIRContext as RealCHIRContext
 import cangjie_compiler::chir.Package as RealCHIRPackage
+import cangjie_compiler::option.OptimizationLevel
+import cangjie_compiler::option.enumIndex
 public import cangjie_compiler::mangle.BaseMangler
 import cangjie_compiler::sema.GenericInstantiation.GenericInstantiationManagerImpl as RealGenericInstantiationManagerImpl
 import cangjie_compiler::sema.TypeManager as FaithfulSemaTypeManager
@@ -737,15 +739,23 @@ private class CjoSignatureMaterializer {
     private let allLoadedDecls: HashMap<UInt32, Decl> = HashMap<UInt32, Decl>()
     private let allLoadedExprs: HashMap<UInt32, Expr> = HashMap<UInt32, Expr>()
     private let allDummyExprs: HashSet<Node> = HashSet<Node>()
+    private let importNonGenericSrcFuncDecls: ArrayList<Decl> = ArrayList<Decl>()
+    private let importSrcCode: Bool
+    private let deserializingCommon: Bool
+    private let canInline: Bool
 
     public init(packageName: String, pkg: Package, filesByIndex: HashMap<UInt32, File>,
-        idToFileMap: HashMap<UInt64, File>, importedPackages: ArrayList<Package>, typeManager: FaithfulSemaTypeManager) {
+        idToFileMap: HashMap<UInt64, File>, importedPackages: ArrayList<Package>, typeManager: FaithfulSemaTypeManager,
+        importSrcCode!: Bool = true, deserializingCommon!: Bool = false, canInline!: Bool = false) {
         this.packageName = packageName
         this.pkg = pkg
         this.filesByIndex = filesByIndex
         this.idToFileMap = idToFileMap
         this.importedPackages = importedPackages
         this.typeManager = typeManager
+        this.importSrcCode = importSrcCode
+        this.deserializingCommon = deserializingCommon
+        this.canInline = canInline
     }
 
     public func Materialize(data: Array<UInt8>): Unit {
@@ -780,6 +790,7 @@ private class CjoSignatureMaterializer {
         allLoadedDecls.clear()
         allLoadedExprs.clear()
         allDummyExprs.clear()
+        importNonGenericSrcFuncDecls.clear()
         let reader = flat.getOrThrow()
         let root = reader.RootTable()
         if (root < 0 || reader.StringField(root, 8) != packageName) {
@@ -964,11 +975,13 @@ private class CjoSignatureMaterializer {
             }
             idx++
         }
+        FinalizeSourceImportedDecls()
     }
 
     private func AddFlatTopLevelDecl(decl: Decl): Unit {
         let targetFile = decl.curFile ??
             throw IllegalStateException("imported decl '${decl.identifier.Val()}' has no current file")
+        AddCurFile(decl, file: Some(targetFile))
         if (decl.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
             pkg.genericInstantiatedDecls.add(decl)
             return
@@ -978,6 +991,19 @@ private class CjoSignatureMaterializer {
             return
         }
         targetFile.exportedInternalDecls.add(decl)
+    }
+
+    private func FinalizeSourceImportedDecls(): Unit {
+        pkg.srcImportedNonGenericDecls.clear()
+        for (decl in importNonGenericSrcFuncDecls) {
+            if (!IsInDeclWithAttribute(decl, Attribute.GENERIC)) {
+                pkg.srcImportedNonGenericDecls.add(decl)
+            }
+        }
+        if (!deserializingCommon) {
+            pkg.hasSourceImportedDecl = !allLoadedExprs.isEmpty() || pkg.TestAttr(Attribute.TOOL_ADD)
+        }
+        AddCurFile(pkg)
     }
 
     private func CreateFlatDeclShell(reader: CjoFlatBuffer, record: CjoFlatDecl): Decl {
@@ -1273,7 +1299,6 @@ private class CjoSignatureMaterializer {
     private func MarkFlatImportedDecl(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
         decl.curFile = Some(FileByFlatIndex(FlatDeclFileIndex(reader, record)))
         decl.EnableAttr(Attribute.IMPORTED)
-        decl.EnableAttr(Attribute.SRC_IMPORTED)
     }
 
     private func FileByFlatIndex(index: UInt32): File {
@@ -1621,7 +1646,7 @@ private class CjoSignatureMaterializer {
         funcDecl.overflowStrategy = FlatOverflowStrategy(reader.U8Field(infoTable, 6, 0u8))
         funcDecl.op = FlatOperatorKind(reader.U8Field(infoTable, 8, 0u8))
         funcDecl.isConst = reader.U8Field(infoTable, 12, 0u8) != 0u8
-        funcDecl.isInline = reader.U8Field(infoTable, 14, 0u8) != 0u8
+        funcDecl.isInline = (reader.U8Field(infoTable, 14, 0u8) != 0u8) && canInline
         funcDecl.isFastNative = reader.U8Field(infoTable, 16, 0u8) != 0u8
         // Mirror ASTLoader.cpp:810-811: derive isFrozen from the loaded @Frozen annotation
         // (annotations are loaded in ApplyFlatDeclBasicInfo, which runs before this).
@@ -1630,9 +1655,17 @@ private class CjoSignatureMaterializer {
         if (bodyTable < 0) {
             throw IllegalStateException("FlatBuffer FuncDecl '${record.identifier}' has no FuncBody")
         }
-        let body = LoadFlatFuncBody(reader, bodyTable, Some(funcDecl), funcDecl.isInline, funcDecl.isConst)
+        let body = LoadFlatFuncBody(reader, bodyTable, Some(funcDecl), funcDecl.isInline, true)
         body.funcDecl = Some(funcDecl)
         funcDecl.funcBody = Some(body)
+        SetFlatGeneric(reader, record, funcDecl)
+        if (importSrcCode && body.body.isSome()) {
+            if (body.generic.isNone() && IsGlobalOrMember(funcDecl)) {
+                importNonGenericSrcFuncDecls.add(funcDecl)
+            }
+            funcDecl.EnableAttr(Attribute.SRC_IMPORTED)
+        }
+        SetOuterFunctionDecl(funcDecl)
         // Update param functions' references: set ownerFunc on each param's desugar (default-param)
         // function, for top-level AND member funcs. Mirrors C++ ASTLoader.cpp:829-833 — without this
         // a top-level imported generic func's default-param desugar (e.g. y.1 <T$0,P$1>) has no
@@ -1642,15 +1675,21 @@ private class CjoSignatureMaterializer {
             for (param in body.paramLists[0].params) {
                 if (let Some(desugar) <- param.desugarDecl) {
                     desugar.ownerFunc = Some(funcDecl)
+                    desugar.isFrozen = funcDecl.isFrozen
+                    if (importSrcCode && !funcDecl.TestAttr(Attribute.GENERIC) && IsGlobalOrMember(funcDecl)) {
+                        if (let Some(desugarBody) <- desugar.funcBody) {
+                            if (desugarBody.body.isSome()) {
+                                importNonGenericSrcFuncDecls.add(desugar)
+                            }
+                        }
+                    }
                 }
             }
         }
-        SetFlatGeneric(reader, record, funcDecl)
         if (let Some(funcTy) <- FlatFuncTypeFromBody(reader, bodyTable, body)) {
             body.SetTy(funcTy)
             funcDecl.SetTy(funcTy)
         }
-        SetOuterFunctionDecl(funcDecl)
     }
 
     // Loads FuncBody.body (fbs FuncBody field 2 / slot 8 = body expr index), gated by the current
@@ -1677,7 +1716,7 @@ private class CjoSignatureMaterializer {
         body: FuncBody): Unit {
         let always = reader.U8Field(bodyTable, 10, 0u8) != 0u8
         let shouldImportBody = always || isInline || isConst
-        if (!shouldImportBody) {
+        if (!importSrcCode || !shouldImportBody) {
             return
         }
         // FuncBody field 2 (slot 8) = body expr index.
@@ -1769,8 +1808,14 @@ private class CjoSignatureMaterializer {
         varDecl.isMemberParam = reader.U8Field(infoTable, 8, 0u8) != 0u8
         // VarInfo field 3 (vtable slot 10) = initializer expr index. Mirrors ASTLoader.cpp:719-720.
         let initIndex = reader.U32Field(infoTable, 10, 0u32)
-        if (let Some(initializer) <- LoadFlatExpr(reader, initIndex)) {
-            varDecl.initializer = Some(initializer)
+        if ((importSrcCode && !varDecl.TestAttr(Attribute.COMMON)) || deserializingCommon) {
+            if (let Some(initializer) <- LoadFlatExpr(reader, initIndex)) {
+                varDecl.initializer = Some(initializer)
+            }
+        }
+        if (varDecl.initializer.isSome() && IsGlobalOrMember(varDecl)) {
+            importNonGenericSrcFuncDecls.add(varDecl)
+            varDecl.EnableAttr(Attribute.SRC_IMPORTED)
         }
     }
 
@@ -3837,6 +3882,7 @@ public class ImportManager {
     private let packageMembers: HashMap<String, HashMap<String, ArrayList<Decl>>> =
         HashMap<String, HashMap<String, ArrayList<Decl>>>()
     private let packageMembersVisited: HashSet<String> = HashSet<String>()
+    private var canInlineImportedSource: Bool = false
 
     public init(diag: DiagnosticEngine, typeManager: FaithfulSemaTypeManager) {
         this.diag = diag
@@ -3901,6 +3947,7 @@ public class ImportManager {
 
     public func BuildIndex(cangjieModules: String, opts: GlobalOptions, pkgs: ArrayList<Package>): Bool {
         UpdateSearchPath(cangjieModules)
+        canInlineImportedSource = CanInlineImportedSource(opts)
         for (path in opts.importPaths) {
             AppendSearchPath(path)
         }
@@ -4528,10 +4575,9 @@ public class ImportManager {
         }
         let pkg = CreatePackage(fullPackageName)
         pkg.EnableAttr(Attribute.IMPORTED)
-        pkg.hasSourceImportedDecl = true
         let (filesByIndex, idToFileMap) = MaterializeCjoFiles(data, pkg)
         let materializer = CjoSignatureMaterializer(fullPackageName, pkg, filesByIndex, idToFileMap, importedPackages,
-            typeManager)
+            typeManager, canInline: canInlineImportedSource)
         materializer.Materialize(data)
         AddImportedPackageIfMissing(pkg)
         loadingPackages.remove(fullPackageName)
@@ -4568,6 +4614,11 @@ public class ImportManager {
             return false
         }
         return true
+    }
+
+    private func CanInlineImportedSource(opts: GlobalOptions): Bool {
+        return opts.chirLLVM && enumIndex(opts.optimizationLevel) > enumIndex(OptimizationLevel.O1) &&
+            !opts.enableCompileTest && !opts.enableHotReload
     }
 
     private func ReadSerializedPackageDepInfo(data: Array<UInt8>): String {
