@@ -2322,10 +2322,15 @@ public class Translator {
         }
         let inductiveVar = Translator.TranslateASTNode(inExpression.body[0], this) ??
             throw IllegalStateException("faithful AST2CHIR for-in range induction var produced no value")
+        inductiveVar.AsLocalVar().getOrThrow().GetExpr().getOrThrow().SetGeneratedFromForIn(true)
         let stopExprVar = Translator.TranslateASTNode(inExpression.body[1], this) ??
             throw IllegalStateException("faithful AST2CHIR for-in range stop var produced no value")
+        if (let Some(stopLocalVar) <- stopExprVar.AsLocalVar()) {
+            stopLocalVar.GetExpr().getOrThrow().SetGeneratedFromForIn(true)
+        }
         let condition = Translator.TranslateASTNode(inExpression.body[3], this) ??
             throw IllegalStateException("faithful AST2CHIR for-in range condition produced no value")
+        condition.AsLocalVar().getOrThrow().GetExpr().getOrThrow().SetGeneratedFromForIn(true)
         let recordBlock = CurrentBlock()
         let parentGroup = RequireParentBlockGroup(recordBlock, "for-in range")
         let forInEntryBlock = builder.CreateBlock(parentGroup)
@@ -2342,7 +2347,8 @@ public class Translator {
         builder.CreateGoTo(endBlock, forInEntryBlock)
         currentBlock = endBlock
         UpdateDelayExitSignalInForInEnd()
-        builder.CreateBranch(condition, forInEntryBlock, CurrentBlock(), recordBlock)
+        let rangeEndBranch = builder.CreateBranch(condition, forInEntryBlock, CurrentBlock(), recordBlock)
+        rangeEndBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         return None
     }
 
@@ -2355,9 +2361,12 @@ public class Translator {
         let indexDecl = RequireBodyVarDecl(inExpression, 0, "for-in string induction var")
         let endDecl = RequireBodyVarDecl(inExpression, 2, "for-in string end var")
         let inductiveVar = GetSymbolTable(indexDecl)
+        inductiveVar.AsLocalVar().getOrThrow().GetExpr().getOrThrow().SetGeneratedFromForIn(true)
         let stringSize = GetDerefedValue(GetSymbolTable(endDecl))
-        let condition = RequireResult(builder.CreateBinaryExpression(ExprKind.LT, builder.context.GetBoolTy(),
-            GetDerefedValue(inductiveVar), stringSize, CurrentBlock()))
+        let conditionExpr = builder.CreateBinaryExpression(ExprKind.LT, builder.context.GetBoolTy(),
+            GetDerefedValue(inductiveVar), stringSize, CurrentBlock())
+        conditionExpr.SetGeneratedFromForIn(true)
+        let condition = RequireResult(conditionExpr)
         let recordBlock = CurrentBlock()
         let parentGroup = RequireParentBlockGroup(recordBlock, "for-in string")
         let forInEntryBlock = builder.CreateBlock(parentGroup)
@@ -2374,7 +2383,8 @@ public class Translator {
         builder.CreateGoTo(endBlock, forInEntryBlock)
         currentBlock = endBlock
         UpdateDelayExitSignalInForInEnd()
-        builder.CreateBranch(condition, forInEntryBlock, CurrentBlock(), recordBlock)
+        let stringEndBranch = builder.CreateBranch(condition, forInEntryBlock, CurrentBlock(), recordBlock)
+        stringEndBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         return None
     }
 
@@ -2429,7 +2439,8 @@ public class Translator {
         let parentGroup = RequireParentBlockGroup(CurrentBlock(), "for-in closed range")
         let preCondTrueBlock = builder.CreateBlock(parentGroup)
         let preCondFalseBlock = builder.CreateBlock(parentGroup)
-        builder.CreateBranch(preCond, preCondTrueBlock, preCondFalseBlock, CurrentBlock())
+        let preCondBranch = builder.CreateBranch(preCond, preCondTrueBlock, preCondFalseBlock, CurrentBlock())
+        preCondBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
 
         currentBlock = preCondTrueBlock
         let iterVar = CreateClosedRangeIterVar(expr, beginValue)
@@ -2469,7 +2480,9 @@ public class Translator {
         forIn.InitBlockGroups(bodyBlockGroup, latchBlockGroup, condBlockGroup)
         bodyBlockGroup.SetEntryBlock(builder.CreateBlock(bodyBlockGroup))
         latchBlockGroup.SetEntryBlock(builder.CreateBlock(latchBlockGroup))
-        condBlockGroup.SetEntryBlock(builder.CreateBlock(condBlockGroup))
+        let condEntryBlock = builder.CreateBlock(condBlockGroup)
+        condEntryBlock.SetGeneratedFromForIn(true)
+        condBlockGroup.SetEntryBlock(condEntryBlock)
         return forIn
     }
 
@@ -2484,7 +2497,9 @@ public class Translator {
         forIn.InitBlockGroups(bodyBlockGroup, latchBlockGroup, condBlockGroup)
         bodyBlockGroup.SetEntryBlock(builder.CreateBlock(bodyBlockGroup))
         latchBlockGroup.SetEntryBlock(builder.CreateBlock(latchBlockGroup))
-        condBlockGroup.SetEntryBlock(builder.CreateBlock(condBlockGroup))
+        let condEntryBlock = builder.CreateBlock(condBlockGroup)
+        condEntryBlock.SetGeneratedFromForIn(true)
+        condBlockGroup.SetEntryBlock(condEntryBlock)
         return forIn
     }
 
@@ -2596,7 +2611,9 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR for-in latch has no entry block")
         let trueBlock = builder.CreateBlock(forIn.GetLatch())
         let falseBlock = builder.CreateBlock(forIn.GetLatch())
-        builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock, CurrentBlock())
+        let delayExitBranch = builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock,
+            CurrentBlock())
+        delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
         builder.CreateExit(None, CurrentBlock())
         currentBlock = falseBlock
@@ -2613,15 +2630,21 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR for-in string latch has no entry block")
         let trueBlock = builder.CreateBlock(forIn.GetLatch())
         let falseBlock = builder.CreateBlock(forIn.GetLatch())
-        builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock, CurrentBlock())
+        let delayExitBranch = builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock,
+            CurrentBlock())
+        delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
         builder.CreateExit(None, CurrentBlock())
         currentBlock = falseBlock
         let inductiveValue = GetDerefedValue(inductiveVar)
         let inductiveTy = inductiveValue.GetType() ?? RequireRefBaseType(inductiveVar)
-        let one = RequireResult(builder.CreateConstant(inductiveTy, IntLiteral(1), CurrentBlock()))
-        let plusOne = RequireResult(builder.CreateBinaryExpression(ExprKind.ADD, inductiveTy, inductiveValue,
-            one, CurrentBlock()))
+        let oneExpr = builder.CreateConstant(inductiveTy, IntLiteral(1), CurrentBlock())
+        oneExpr.SetGeneratedFromForIn(true)
+        let one = RequireResult(oneExpr)
+        let plusOneExpr = builder.CreateBinaryExpression(ExprKind.ADD, inductiveTy, inductiveValue, one,
+            CurrentBlock())
+        plusOneExpr.SetGeneratedFromForIn(true)
+        let plusOne = RequireResult(plusOneExpr)
         builder.CreateStore(plusOne, inductiveVar, CurrentBlock())
         builder.CreateExit(None, CurrentBlock())
         blockGroupStack.remove(at: blockGroupStack.size - 1)
@@ -2634,14 +2657,17 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR for-in closed range latch has no entry block")
         let trueBlock = builder.CreateBlock(forIn.GetLatch())
         let falseBlock = builder.CreateBlock(forIn.GetLatch())
-        builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock, CurrentBlock())
+        let delayExitBranch = builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock,
+            CurrentBlock())
+        delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
         builder.CreateExit(None, CurrentBlock())
         currentBlock = falseBlock
         let updateBlock = builder.CreateBlock(forIn.GetLatch())
         let exitBlock = builder.CreateBlock(forIn.GetLatch())
         let condValue = RequireResult(builder.CreateLoad(builder.context.GetBoolTy(), condVar, CurrentBlock()))
-        builder.CreateBranch(condValue, updateBlock, exitBlock, CurrentBlock())
+        let condBranch = builder.CreateBranch(condValue, updateBlock, exitBlock, CurrentBlock())
+        condBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = updateBlock
         let iterTy = iterValue.GetType() ?? RequireRefBaseType(iterVar)
         let one = RequireResult(builder.CreateConstant(iterTy, IntLiteral(1), CurrentBlock()))
@@ -2660,7 +2686,9 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR for-in iterator latch has no entry block")
         let trueBlock = builder.CreateBlock(forIn.GetLatch())
         let falseBlock = builder.CreateBlock(forIn.GetLatch())
-        builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock, CurrentBlock())
+        let delayExitBranch = builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock,
+            CurrentBlock())
+        delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
         builder.CreateExit(None, CurrentBlock())
         currentBlock = falseBlock
@@ -2731,11 +2759,14 @@ public class Translator {
     private func TranslateForInCondControlFlow(condVar: Value): Unit {
         let trueBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "for-in cond control"))
         let falseBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "for-in cond control"))
-        builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock, CurrentBlock())
+        let delayExitBranch = builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock,
+            CurrentBlock())
+        delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
         DecreaseDelayExitSignal()
-        let constantFalse = RequireResult(builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(false),
-            CurrentBlock()))
+        let constantFalseExpr = builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(false), CurrentBlock())
+        constantFalseExpr.SetGeneratedFromForIn(true)
+        let constantFalse = RequireResult(constantFalseExpr)
         builder.CreateStore(constantFalse, condVar, CurrentBlock())
         builder.CreateExit(None, CurrentBlock())
         currentBlock = falseBlock
@@ -2745,7 +2776,9 @@ public class Translator {
         let parentGroup = RequireParentBlockGroup(CurrentBlock(), "for-in end")
         let trueBlock = builder.CreateBlock(parentGroup)
         let falseBlock = builder.CreateBlock(parentGroup)
-        builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock, CurrentBlock())
+        let delayExitBranch = builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock,
+            CurrentBlock())
+        delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
         DecreaseDelayExitSignal()
         builder.CreateExit(None, CurrentBlock())
@@ -2753,10 +2786,13 @@ public class Translator {
     }
 
     private func InitializeForInCondVar(): Value {
-        let condVar = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetBoolTy()),
-            builder.context.GetBoolTy(), CurrentBlock()))
-        let constantTrue = RequireResult(builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(true),
-            CurrentBlock()))
+        let condVarExpr = builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetBoolTy()),
+            builder.context.GetBoolTy(), CurrentBlock())
+        condVarExpr.SetGeneratedFromForIn(true)
+        let condVar = RequireResult(condVarExpr)
+        let constantTrueExpr = builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(true), CurrentBlock())
+        constantTrueExpr.SetGeneratedFromForIn(true)
+        let constantTrue = RequireResult(constantTrueExpr)
         builder.CreateStore(constantTrue, condVar, CurrentBlock())
         return condVar
     }
@@ -2765,27 +2801,38 @@ public class Translator {
         if (delayExitSignal.isSome()) {
             return
         }
-        let signal = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetInt64Ty()),
-            builder.context.GetInt64Ty(), CurrentBlock()))
+        let signalExpr = builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetInt64Ty()),
+            builder.context.GetInt64Ty(), CurrentBlock())
+        signalExpr.SetGeneratedFromForIn(true)
+        let signal = RequireResult(signalExpr)
         delayExitSignal = signal
         let zero = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock()))
         builder.CreateStore(zero, signal, CurrentBlock())
     }
 
     private func DelayExitSignalGreaterThanZero(): Value {
-        let signalValue = RequireResult(builder.CreateLoad(builder.context.GetInt64Ty(), RequireDelayExitSignal(),
-            CurrentBlock()))
+        let signalLoad = builder.CreateLoad(builder.context.GetInt64Ty(), RequireDelayExitSignal(), CurrentBlock())
+        signalLoad.SetGeneratedFromForIn(true)
+        let signalValue = RequireResult(signalLoad)
         let zero = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock()))
-        return RequireResult(builder.CreateBinaryExpression(ExprKind.GT, builder.context.GetBoolTy(), signalValue,
-            zero, CurrentBlock()))
+        let isNeedExit = builder.CreateBinaryExpression(ExprKind.GT, builder.context.GetBoolTy(), signalValue, zero,
+            CurrentBlock())
+        isNeedExit.SetGeneratedFromForIn(true)
+        return RequireResult(isNeedExit)
     }
 
     private func DecreaseDelayExitSignal(): Unit {
         let signal = RequireDelayExitSignal()
-        let signalValue = RequireResult(builder.CreateLoad(builder.context.GetInt64Ty(), signal, CurrentBlock()))
-        let one = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(1), CurrentBlock()))
-        let decreased = RequireResult(builder.CreateBinaryExpression(ExprKind.SUB, builder.context.GetInt64Ty(),
-            signalValue, one, CurrentBlock()))
+        let signalLoad = builder.CreateLoad(builder.context.GetInt64Ty(), signal, CurrentBlock())
+        signalLoad.SetGeneratedFromForIn(true)
+        let signalValue = RequireResult(signalLoad)
+        let oneExpr = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(1), CurrentBlock())
+        oneExpr.SetGeneratedFromForIn(true)
+        let one = RequireResult(oneExpr)
+        let decreasedExpr = builder.CreateBinaryExpression(ExprKind.SUB, builder.context.GetInt64Ty(), signalValue,
+            one, CurrentBlock())
+        decreasedExpr.SetGeneratedFromForIn(true)
+        let decreased = RequireResult(decreasedExpr)
         builder.CreateStore(decreased, signal, CurrentBlock())
     }
 
@@ -3047,7 +3094,9 @@ public class Translator {
         let _ = expr
         let iterTy = beginValue.GetType() ??
             throw IllegalStateException("faithful AST2CHIR closed range begin value has no type")
-        let iterVar = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(iterTy), iterTy, CurrentBlock()))
+        let iterVarExpr = builder.CreateAllocate(builder.context.GetRefTy(iterTy), iterTy, CurrentBlock())
+        iterVarExpr.SetGeneratedFromForIn(true)
+        let iterVar = RequireResult(iterVarExpr)
         builder.CreateStore(beginValue, iterVar, CurrentBlock())
         return iterVar
     }

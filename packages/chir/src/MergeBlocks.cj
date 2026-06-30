@@ -1,36 +1,81 @@
 package cangjie_compiler::chir
 
+import std.collection.*
+import cangjie_compiler::utils.CJC_ASSERT
+
+private func CopyBlock(builder: CHIRBuilder, block: Block): Block {
+    let blockGroup = block.GetParentBlockGroup() ??
+        throw IllegalStateException("MergeBlocks CopyBlock expected parent block group")
+    let copiedBlock = builder.CreateBlock(blockGroup)
+    let replaceTable = ArrayList<(Value, Value)>()
+    let exprs = block.GetExpressions()
+    var idx: Int64 = 0
+    while (idx < exprs.size) {
+        let expr = exprs[idx]
+        let cloned = expr.Clone(builder, copiedBlock)
+        for ((oldValue, newValue) in replaceTable) {
+            cloned.ReplaceOperand(oldValue, newValue)
+        }
+        if (idx + 1 != exprs.size) {
+            replaceTable.add((expr.GetResult().getOrThrow(), cloned.GetResult().getOrThrow()))
+        }
+        idx++
+    }
+    return copiedBlock
+}
+
+private func MergeForInCondBlock(builder: CHIRBuilder, block: Block): Unit {
+    let oldPreds = block.GetPredecessors()
+    CJC_ASSERT(!oldPreds.isEmpty())
+    var idx: Int64 = 0
+    while (idx < oldPreds.size - 1) {
+        let copiedBlock = CopyBlock(builder, block)
+        let pred = oldPreds[idx]
+        pred.GetTerminator().getOrThrow().ReplaceSuccessor(block, copiedBlock)
+        idx++
+    }
+    block.RemoveGeneratedFromForIn()
+}
+
 public class MergeBlocks {
     public init() {}
 
-    public func RunOnPackage(pkg: Package, enableCompileDebug!: Bool = false, enableCoverage!: Bool = false): Int64 {
+    public func RunOnPackage(pkg: Package, builder: CHIRBuilder, enableCompileDebug!: Bool = false,
+        enableCoverage!: Bool = false): Int64 {
         var merged: Int64 = 0
         for (fn in pkg.GetGlobalFuncsWithBody()) {
             if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
                 continue
             }
-            merged += RunOnFunction(fn, enableCompileDebug: enableCompileDebug, enableCoverage: enableCoverage)
+            merged += RunOnFunction(fn, builder, enableCompileDebug: enableCompileDebug, enableCoverage: enableCoverage)
         }
         return merged
     }
 
-    public func RunOnFunction(fn: Function, enableCompileDebug!: Bool = false, enableCoverage!: Bool = false): Int64 {
+    public func RunOnFunction(fn: Function, builder: CHIRBuilder, enableCompileDebug!: Bool = false,
+        enableCoverage!: Bool = false): Int64 {
         if (let Some(body) <- fn.GetBody()) {
-            return RunOnBody(body, enableCompileDebug: enableCompileDebug, enableCoverage: enableCoverage)
+            return RunOnBody(body, builder, enableCompileDebug: enableCompileDebug, enableCoverage: enableCoverage)
         }
         return 0
     }
 
-    public func RunOnBody(body: BlockGroup, enableCompileDebug!: Bool = false, enableCoverage!: Bool = false): Int64 {
+    public func RunOnBody(body: BlockGroup, builder: CHIRBuilder, enableCompileDebug!: Bool = false,
+        enableCoverage!: Bool = false): Int64 {
         var merged: Int64 = 0
         var changed = true
         while (changed) {
             changed = false
             let blocks = body.GetBlocks()
             for (block in blocks) {
-                merged += RunOnNestedLambdas(block, enableCompileDebug: enableCompileDebug,
+                merged += RunOnNestedLambdas(block, builder, enableCompileDebug: enableCompileDebug,
                     enableCoverage: enableCoverage)
-                if (CanMergeIntoPredecessor(block, enableCompileDebug, enableCoverage)) {
+                if (block.GetGeneratedFromForIn()) {
+                    MergeForInCondBlock(builder, block)
+                    merged++
+                    changed = true
+                    break
+                } else if (CanMergeIntoPredecessor(block, enableCompileDebug, enableCoverage)) {
                     if (MergeIntoPredecessor(block)) {
                         merged++
                         changed = true
@@ -49,13 +94,13 @@ public class MergeBlocks {
         return merged
     }
 
-    private func RunOnNestedLambdas(block: Block, enableCompileDebug!: Bool = false,
+    private func RunOnNestedLambdas(block: Block, builder: CHIRBuilder, enableCompileDebug!: Bool = false,
         enableCoverage!: Bool = false): Int64 {
         var merged: Int64 = 0
         for (expr in block.GetExpressionsRef()) {
             if (let Some(lambdaExpr) <- (expr as Lambda)) {
                 if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                    merged += RunOnBody(lambdaBody, enableCompileDebug: enableCompileDebug,
+                    merged += RunOnBody(lambdaBody, builder, enableCompileDebug: enableCompileDebug,
                         enableCoverage: enableCoverage)
                 }
             }

@@ -2,6 +2,30 @@ package cangjie_compiler::chir
 
 import std.collection.*
 
+public class GeneratedFromForIn {
+    private let value: Bool
+
+    public init() {
+        value = false
+    }
+
+    public init(input: Bool) {
+        value = input || !input
+    }
+
+    public func Clone(): GeneratedFromForIn {
+        return GeneratedFromForIn()
+    }
+
+    public func ToString(): String {
+        return "// generated-from-forin "
+    }
+
+    public static func Extract(label: GeneratedFromForIn): Bool {
+        return label.value
+    }
+}
+
 public class AnnotationMap {
     private let values: HashMap<String, String> = HashMap<String, String>()
 

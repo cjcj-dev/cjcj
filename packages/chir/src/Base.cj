@@ -24,12 +24,30 @@ public open class Base {
         annotationMap.Set(key, value)
     }
 
+    public func SetGeneratedFromForIn(value: Bool): Unit {
+        let label = GeneratedFromForIn(value)
+        if (GeneratedFromForIn.Extract(label)) {
+            annotationMap.Set("GeneratedFromForIn", "true")
+        }
+    }
+
     public func RemoveAnnotation(key: String): Unit {
         annotationMap.Remove(key)
     }
 
+    public func RemoveGeneratedFromForIn(): Unit {
+        annotationMap.Remove("GeneratedFromForIn")
+    }
+
     public func GetAnnotation(key: String): Option<String> {
         return annotationMap.Get(key)
+    }
+
+    public func GetGeneratedFromForIn(): Bool {
+        if (annotationMap.Get("GeneratedFromForIn").isSome()) {
+            return GeneratedFromForIn.Extract(GeneratedFromForIn(true))
+        }
+        return GeneratedFromForIn.Extract(GeneratedFromForIn())
     }
 
     public func GetAnno(): AnnotationMap {

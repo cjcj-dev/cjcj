@@ -1,11 +1,15 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::option.{GlobalOptions, OptimizationFlag}
+
 public class ConstPropagation {
     private let builder: Option<CHIRBuilder>
     private let constEval: ConstEval = ConstEval()
+    private let opts: GlobalOptions
 
-    public init(builder!: Option<CHIRBuilder> = None) {
+    public init(builder!: Option<CHIRBuilder> = None, opts!: GlobalOptions = GlobalOptions()) {
         this.builder = builder
+        this.opts = opts
     }
 
     public func RunOnPackage(pkg: Package): Int64 {
@@ -47,7 +51,9 @@ public class ConstPropagation {
         var idx: Int64 = 0
         while (idx < exprs.size) {
             let expr = exprs[idx]
-            if (TryRewriteConstantBranch(expr)) {
+            if (SkipCP(expr)) {
+                idx++
+            } else if (TryRewriteConstantBranch(expr)) {
                 changed++
             } else if (TrySimplifyUnary(expr)) {
                 changed++
@@ -58,6 +64,24 @@ public class ConstPropagation {
             }
         }
         return changed
+    }
+
+    private func SkipCP(expr: Expression): Bool {
+        if (!opts.IsOptimizationExisted(OptimizationFlag.CONST_PROPAGATION)) {
+            if (expr.GetGeneratedFromForIn()) {
+                return false
+            }
+            if (let Some(branch) <- (expr as Branch)) {
+                return branch.GetSourceExpr() != SourceExpr.FOR_IN_EXPR
+            }
+            if (let Some(load) <- (expr as Load)) {
+                if (let Some(alloc) <- load.GetLocation().AsLocalVar()) {
+                    return !alloc.GetExpr().getOrThrow().GetGeneratedFromForIn()
+                }
+            }
+            return true
+        }
+        return false
     }
 
     private func TryRewriteConstantBranch(expr: Expression): Bool {

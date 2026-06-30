@@ -107,6 +107,7 @@ public class FlatForInExpr {
         let parentGroup = expr.GetParentBlockGroup() ??
             throw IllegalStateException("faithful FlatForInExpr expected parent block group")
         let latchEntryBlock = builder.CreateBlock(parentGroup)
+        latchEntryBlock.SetGeneratedFromForIn(true)
         ReplaceExitWithGoto(expr.GetCond(), latchEntryBlock)
         let condValueExpr = builder.CreateLoad(builder.context.GetBoolTy(), expr.GetLoopCondVar(), latchEntryBlock)
         let condValue = condValueExpr.GetResult() ??

@@ -6,10 +6,12 @@ import cangjie_compiler::chir.CHIRBuilder as ChirBuilder
 import cangjie_compiler::chir.CHIRPrinter as ChirCHIRPrinter
 import cangjie_compiler::chir.CHIRType
 import cangjie_compiler::chir.CHIRTypeCache
+import cangjie_compiler::chir.ConstPropagation
 import cangjie_compiler::chir.DeadCodeElimination
 import cangjie_compiler::chir.FaithfulAST2CHIR
 import cangjie_compiler::chir.FuncKind as ChirFuncKind
 import cangjie_compiler::chir.Function as ChirFunction
+import cangjie_compiler::chir.MergeBlocks
 import cangjie_compiler::chir.OptFuncRetType
 import cangjie_compiler::chir.Package as RealCHIRPackage
 import cangjie_compiler::chir.RedundantGetOrThrowElimination
@@ -49,8 +51,7 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
         case Some(value) => value
         case None => return None
     }
-    DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(lowered,
-        isDebug: instance.invocation.globalOptions.chirDebugOptimizer)
+    RulesChecking(lowered, builder, instance.invocation.globalOptions)
     RunOptimizationPass(lowered, builder, instance.invocation.globalOptions)
     if (!TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)) {
         instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
@@ -60,6 +61,15 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
         ChirCHIRPrinter.PrintPackage(lowered)
     }
     return Some(lowered)
+}
+
+private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions): Unit {
+    MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
+        enableCoverage: options.enableCoverage)
+    ConstPropagation(builder: Some(builder), opts: options).RunOnPackage(pkg)
+    DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(pkg, isDebug: options.chirDebugOptimizer)
+    MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
+        enableCoverage: options.enableCoverage)
 }
 
 private func RunOptimizationPass(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions): Unit {
