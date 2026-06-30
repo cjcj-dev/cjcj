@@ -205,7 +205,7 @@ private func anyChildTypeMatches(ty: Ty, pred: (Ty) -> Bool): Bool {
 }
 
 private func sameGenericArg(left: Ty, right: Ty): Bool {
-    return left.Hash() == right.Hash() && left.String() == right.String()
+    return left.objectId == right.objectId
 }
 
 private func containsGenericArg(values: ArrayList<Ty>, ty: Ty): Bool {

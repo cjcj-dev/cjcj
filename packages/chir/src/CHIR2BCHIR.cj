@@ -363,7 +363,7 @@ public class CHIR2BCHIR {
     }
 
     public func GetTypeIdx(ty: Type): Int64 {
-        let key = ty.Hash()
+        let key = ty.objectId
         if (let Some(index) <- typeMemo.get(key)) {
             return index
         }

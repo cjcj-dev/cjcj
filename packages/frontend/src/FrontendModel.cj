@@ -15,6 +15,7 @@ import cangjie_compiler::chir.CHIRContext as RealCHIRContext
 import cangjie_compiler::chir.Package as RealCHIRPackage
 public import cangjie_compiler::mangle.BaseMangler
 import cangjie_compiler::sema.GenericInstantiation.GenericInstantiationManagerImpl as RealGenericInstantiationManagerImpl
+import cangjie_compiler::sema.TypeManager as FaithfulSemaTypeManager
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.STANDARD_LIBS
 import std.collection.*
@@ -408,8 +409,17 @@ public class SrcCodeCacheInfo {
 }
 
 public class TypeManager {
+    private let impl: FaithfulSemaTypeManager = FaithfulSemaTypeManager()
+
     public init() {}
-    public func ReleasePostSemaCaches(): Unit {}
+
+    public func AsFaithfulSemaTypeManager(): FaithfulSemaTypeManager {
+        return impl
+    }
+
+    public func ReleasePostSemaCaches(): Unit {
+        impl.ReleasePostSemaCaches()
+    }
 }
 
 public class ImportedDeclGroup {
@@ -697,18 +707,20 @@ private class CjoSignatureMaterializer {
     private var flatAllTypes: Int64 = -1
     private var flatAllExprs: Int64 = -1
     private var flatImports: Int64 = -1
+    private let typeManager: FaithfulSemaTypeManager
     private let flatDecls: HashMap<UInt32, CjoFlatDecl> = HashMap<UInt32, CjoFlatDecl>()
     private let flatNominalKinds: HashMap<String, UInt8> = HashMap<String, UInt8>()
     private let flatTypeCache: HashMap<UInt32, Ty> = HashMap<UInt32, Ty>()
     private let flatGenericParamDecls: HashMap<UInt32, GenericParamDecl> = HashMap<UInt32, GenericParamDecl>()
 
     public init(packageName: String, pkg: Package, fallbackFile: File, filesByIndex: HashMap<UInt32, File>,
-        importedPackages: ArrayList<Package>) {
+        importedPackages: ArrayList<Package>, typeManager: FaithfulSemaTypeManager) {
         this.packageName = packageName
         this.pkg = pkg
         this.fallbackFile = fallbackFile
         this.filesByIndex = filesByIndex
         this.importedPackages = importedPackages
+        this.typeManager = typeManager
     }
 
     public func Materialize(data: Array<UInt8>): Unit {
@@ -1451,7 +1463,7 @@ private class CjoSignatureMaterializer {
         record.decl = Some(decl)
         ApplyFlatDeclBasicInfo(reader, record, decl)
         if (let Some(gpd) <- (decl as GenericParamDecl)) {
-            gpd.SetTy(GenericsTy(gpd.identifier.Val(), gpd))
+            gpd.SetTy(typeManager.GetGenericsTy(gpd))
             flatGenericParamDecls[record.index] = gpd
             return Some(gpd)
         }
@@ -1493,7 +1505,7 @@ private class CjoSignatureMaterializer {
     private func LoadFlatDeclType(record: CjoFlatDecl, decl: Decl): Unit {
         if (record.typeIndex == 0u32) {
             if (let Some(nominalKind) <- FlatNominalKind(record.kind)) {
-                SetNominalTy(decl, record.identifier)
+                SetNominalTy(decl)
             }
             return
         }
@@ -1517,7 +1529,7 @@ private class CjoSignatureMaterializer {
                 }
             }
         } else if (let Some(_) <- FlatNominalKind(record.kind)) {
-            SetNominalTy(decl, record.identifier)
+            SetNominalTy(decl)
         }
     }
 
@@ -1659,11 +1671,12 @@ private class CjoSignatureMaterializer {
         let params = ArrayList<Ty>()
         if (!body.paramLists.isEmpty()) {
             for (param in body.paramLists[0].params) {
-                params.add(param.GetTy() ?? InvalidTy())
+                params.add(param.GetTy() ?? FaithfulSemaTypeManager.GetInvalidTy())
             }
         }
-        let retTy = LoadFlatType(reader.U32Field(bodyTable, 6, 0u32)) ?? PrimitiveTy(TypeKind.TYPE_UNIT)
-        return Some(FuncTy(params.toArray(), retTy))
+        let retTy = LoadFlatType(reader.U32Field(bodyTable, 6, 0u32)) ??
+            FaithfulSemaTypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        return Some(typeManager.GetFunctionTy(params.toArray(), retTy))
     }
 
     private func LoadFlatVarInfo(reader: CjoFlatBuffer, record: CjoFlatDecl, varDecl: VarDecl): Unit {
@@ -3163,7 +3176,7 @@ private class CjoSignatureMaterializer {
                 }
                 return Some(genericTy)
             }
-            return Some(InvalidTy())
+            return Some(FaithfulSemaTypeManager.GetInvalidTy())
         }
         let loaded = CreateFlatType(reader, typeTable)
         if (let Some(ty) <- loaded) {
@@ -3176,43 +3189,44 @@ private class CjoSignatureMaterializer {
         let kind = reader.U16Field(typeTable, 4, 1u16)
         let typeArgs = LoadFlatTypeArgs(reader, typeTable)
         if (let Some(primitiveKind) <- FlatPrimitiveTypeKind(kind)) {
-            return Some(PrimitiveTy(primitiveKind))
+            return Some(FaithfulSemaTypeManager.GetPrimitiveTy(primitiveKind))
         }
         if (kind == 18u16) {
-            return Some(TupleTy(typeArgs.toArray()))
+            return Some(typeManager.GetTupleTy(typeArgs.toArray()))
         }
         if (kind == 20u16) {
             let infoTable = reader.OffsetField(typeTable, 10)
             let retTy = if (infoTable >= 0) {
-                LoadFlatType(reader.U32Field(infoTable, 4, 0u32)) ?? PrimitiveTy(TypeKind.TYPE_UNIT)
+                LoadFlatType(reader.U32Field(infoTable, 4, 0u32)) ??
+                    FaithfulSemaTypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
             } else {
-                PrimitiveTy(TypeKind.TYPE_UNIT)
+                FaithfulSemaTypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
             }
             let cfg = FuncTyConfig()
             if (infoTable >= 0) {
                 cfg.isC = reader.U8Field(infoTable, 6, 0u8) != 0u8
                 cfg.hasVariableLenArg = reader.U8Field(infoTable, 8, 0u8) != 0u8
             }
-            return Some(FuncTy(typeArgs.toArray(), retTy, cfg: cfg))
+            return Some(typeManager.GetFunctionTy(typeArgs.toArray(), retTy, cfg: cfg))
         }
         if (kind == 22u16) {
-            let elemTy = if (typeArgs.isEmpty()) { AnyTy() } else { typeArgs[0] }
+            let elemTy = if (typeArgs.isEmpty()) { typeManager.GetAnyTy() } else { typeArgs[0] }
             let infoTable2 = reader.OffsetField(typeTable, 10)
             let dims = if (infoTable2 >= 0) { UInt64(reader.I64Field(infoTable2, 4, 1)) } else { 1u64 }
-            return Some(ArrayTy(elemTy, dims))
+            return Some(typeManager.GetArrayTy(elemTy, dims))
         }
         if (kind == 23u16) {
-            let elemTy2 = if (typeArgs.isEmpty()) { AnyTy() } else { typeArgs[0] }
+            let elemTy2 = if (typeArgs.isEmpty()) { typeManager.GetAnyTy() } else { typeArgs[0] }
             let infoTable3 = reader.OffsetField(typeTable, 10)
             let size = if (infoTable3 >= 0) { reader.I64Field(infoTable3, 4, 0) } else { 0 }
-            return Some(VArrayTy(elemTy2, size))
+            return Some(typeManager.GetVArrayTy(elemTy2, size))
         }
         if (kind == 24u16) {
-            let elemTy3 = if (typeArgs.isEmpty()) { AnyTy() } else { typeArgs[0] }
-            return Some(PointerTy(elemTy3))
+            let elemTy3 = if (typeArgs.isEmpty()) { typeManager.GetAnyTy() } else { typeArgs[0] }
+            return Some(typeManager.GetPointerTy(elemTy3))
         }
         if (kind == 25u16) {
-            return Some(CStringTy())
+            return Some(FaithfulSemaTypeManager.GetCStringTy())
         }
         if (kind == 29u16) {
             return LoadFlatGenericTy(reader, typeTable)
@@ -3220,7 +3234,7 @@ private class CjoSignatureMaterializer {
         if (kind == 19u16 || kind == 21u16 || kind == 26u16 || kind == 27u16 || kind == 28u16) {
             return LoadFlatCompositeTy(reader, typeTable, kind, typeArgs)
         }
-        return Some(InvalidTy())
+        return Some(FaithfulSemaTypeManager.GetInvalidTy())
     }
 
     private func LoadFlatTypeArgs(reader: CjoFlatBuffer, typeTable: Int64): ArrayList<Ty> {
@@ -3244,31 +3258,36 @@ private class CjoSignatureMaterializer {
         typeArgs: ArrayList<Ty>): Option<Ty> {
         let declOpt = LoadFlatTypeDecl(reader, typeTable)
         if (let None <- declOpt) {
-            return Some(InvalidTy())
+            return Some(FaithfulSemaTypeManager.GetInvalidTy())
         }
         let decl = declOpt.getOrThrow()
         if (kind == 19u16) {
             if (let Some(enumDecl) <- (decl as EnumDecl)) {
-                return Some(EnumTy(enumDecl.identifier.Val(), enumDecl, typeArgs.toArray()))
+                return Some(typeManager.GetEnumTy(enumDecl, typeArgs: typeArgs.toArray()))
             }
         } else if (kind == 21u16) {
             if (let Some(structDecl) <- (decl as StructDecl)) {
-                return Some(StructTy(structDecl.identifier.Val(), structDecl, typeArgs.toArray()))
+                return Some(typeManager.GetStructTy(structDecl, typeArgs.toArray()))
             }
         } else if (kind == 26u16) {
             if (let Some(classDecl) <- (decl as ClassDecl)) {
-                return Some(ClassTy(classDecl.identifier.Val(), classDecl, typeArgs.toArray()))
+                let infoTable = reader.OffsetField(typeTable, 10)
+                let isThisTy = infoTable >= 0 && reader.U8Field(infoTable, 6, 0u8) != 0u8
+                if (isThisTy) {
+                    return Some(typeManager.GetClassThisTy(classDecl, typeArgs.toArray()))
+                }
+                return Some(typeManager.GetClassTy(classDecl, typeArgs.toArray()))
             }
         } else if (kind == 27u16) {
             if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
-                return Some(InterfaceTy(interfaceDecl.identifier.Val(), interfaceDecl, typeArgs.toArray()))
+                return Some(typeManager.GetInterfaceTy(interfaceDecl, typeArgs.toArray()))
             }
         } else if (kind == 28u16) {
             if (let Some(aliasDecl) <- (decl as TypeAliasDecl)) {
-                return Some(TypeAliasTy(aliasDecl.identifier.Val(), aliasDecl, typeArgs.toArray()))
+                return Some(typeManager.GetTypeAliasTy(aliasDecl, typeArgs.toArray()))
             }
         }
-        return Some(InvalidTy())
+        return Some(FaithfulSemaTypeManager.GetInvalidTy())
     }
 
     private func LoadFlatTypeDecl(reader: CjoFlatBuffer, typeTable: Int64): Option<Decl> {
@@ -3284,14 +3303,14 @@ private class CjoSignatureMaterializer {
         let declOpt = LoadFlatTypeDecl(reader, typeTable)
         if (let Some(decl) <- declOpt) {
             if (let Some(paramDecl) <- (decl as GenericParamDecl)) {
-                let ty = paramDecl.GetTy() ?? GenericsTy(paramDecl.identifier.Val(), paramDecl)
+                let ty = paramDecl.GetTy() ?? typeManager.GetGenericsTy(paramDecl)
                 if (let None <- paramDecl.GetTy()) {
                     paramDecl.SetTy(ty)
                 }
                 return Some(ty)
             }
         }
-        return Some(InvalidTy())
+        return Some(FaithfulSemaTypeManager.GetInvalidTy())
     }
 
     private func LoadFlatGenericUpperBounds(reader: CjoFlatBuffer, typeTable: Int64, genericTy: GenericsTy): Unit {
@@ -3452,7 +3471,7 @@ private class CjoSignatureMaterializer {
         return None
     }
 
-    private func SetNominalTy(decl: Decl, name: String): Unit {
+    private func SetNominalTy(decl: Decl): Unit {
         let typeArgs = ArrayList<Ty>()
         if (let Some(generic) <- decl.generic) {
             for (param in generic.typeParameters) {
@@ -3462,13 +3481,13 @@ private class CjoSignatureMaterializer {
             }
         }
         if (let Some(structDecl) <- (decl as StructDecl)) {
-            structDecl.SetTy(StructTy(name, structDecl, typeArgs.toArray()))
+            structDecl.SetTy(typeManager.GetStructTy(structDecl, typeArgs.toArray()))
         } else if (let Some(classDecl) <- (decl as ClassDecl)) {
-            classDecl.SetTy(ClassTy(name, classDecl, typeArgs.toArray()))
+            classDecl.SetTy(typeManager.GetClassTy(classDecl, typeArgs.toArray()))
         } else if (let Some(enumDecl) <- (decl as EnumDecl)) {
-            enumDecl.SetTy(EnumTy(name, enumDecl, typeArgs.toArray()))
+            enumDecl.SetTy(typeManager.GetEnumTy(enumDecl, typeArgs: typeArgs.toArray()))
         } else if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
-            interfaceDecl.SetTy(InterfaceTy(name, interfaceDecl, typeArgs.toArray()))
+            interfaceDecl.SetTy(typeManager.GetInterfaceTy(interfaceDecl, typeArgs.toArray()))
         }
     }
 
@@ -3629,6 +3648,7 @@ private class StdDepEntry {
 
 public class ImportManager {
     private let diag: DiagnosticEngine
+    private let typeManager: FaithfulSemaTypeManager
     private let searchPath: ArrayList<String> = ArrayList<String>()
     private let importedPackages: ArrayList<Package> = ArrayList<Package>()
     private let depPkgCjdPaths: HashMap<String, String> = HashMap<String, String>()
@@ -3641,8 +3661,9 @@ public class ImportManager {
         HashMap<String, HashMap<String, ArrayList<Decl>>>()
     private let packageMembersVisited: HashSet<String> = HashSet<String>()
 
-    public init(diag: DiagnosticEngine) {
+    public init(diag: DiagnosticEngine, typeManager: FaithfulSemaTypeManager) {
         this.diag = diag
+        this.typeManager = typeManager
     }
 
     public func UpdateSearchPath(cangjieModules: String): Unit {
@@ -4313,7 +4334,8 @@ public class ImportManager {
         pkg.EnableAttr(Attribute.IMPORTED)
         pkg.hasSourceImportedDecl = true
         let (fallbackFile, filesByIndex) = MaterializeCjoFiles(data, pkg, cjoPath)
-        let materializer = CjoSignatureMaterializer(fullPackageName, pkg, fallbackFile, filesByIndex, importedPackages)
+        let materializer = CjoSignatureMaterializer(fullPackageName, pkg, fallbackFile, filesByIndex, importedPackages,
+            typeManager)
         materializer.Materialize(data)
         AddImportedPackageIfMissing(pkg)
         loadingPackages.remove(fullPackageName)

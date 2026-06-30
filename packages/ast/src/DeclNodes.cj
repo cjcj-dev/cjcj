@@ -282,19 +282,7 @@ private func insertInterfaceTyByName(values: ArrayList<InterfaceTy>, ty: Interfa
 }
 
 private func sameInterfaceTy(left: InterfaceTy, right: InterfaceTy): Bool {
-    if (left.String() != right.String() || left.Hash() != right.Hash()) {
-        return false
-    }
-    if (let Some(leftDecl) <- left.declPtr) {
-        if (let Some(rightDecl) <- right.declPtr) {
-            return SameDecl(leftDecl, rightDecl)
-        }
-        return false
-    }
-    if (let Some(_) <- right.declPtr) {
-        return false
-    }
-    return true
+    return left.objectId == right.objectId
 }
 
 private func sameInterfaceTyForStableOrder(left: InterfaceTy, right: InterfaceTy): Bool {

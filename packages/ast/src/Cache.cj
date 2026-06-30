@@ -50,7 +50,7 @@ public class CacheKey <: Hashable & Equatable<CacheKey> {
             out = out ^ 0x9e3779b9
         }
         if (let Some(value) <- target) {
-            out = out ^ value.Hash()
+            out = out ^ value.objectId.hashCode()
         }
         return out
     }
@@ -58,7 +58,7 @@ public class CacheKey <: Hashable & Equatable<CacheKey> {
     private func sameTy(left: Option<Ty>, right: Option<Ty>): Bool {
         if (let Some(l) <- left) {
             if (let Some(r) <- right) {
-                return l.Hash() == r.Hash() && l.String() == r.String()
+                return l.objectId == r.objectId
             }
             return false
         }

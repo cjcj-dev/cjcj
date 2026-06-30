@@ -139,11 +139,11 @@ public class ImportManager {
     private let importedDeclsMap: HashMap<String, ArrayList<Decl>> = HashMap<String, ArrayList<Decl>>()
     private let stdDepsMap: HashMap<String, StdDepEntry> = HashMap<String, StdDepEntry>()
     private let directMacroDeps: HashMap<String, Package> = HashMap<String, Package>()
-    private let declsImportedByNodeMap: HashMap<String, HashMap<String, ArrayList<ImportSpec>>> =
-        HashMap<String, HashMap<String, ArrayList<ImportSpec>>>()
+    private let declsImportedByNodeMap: HashMap<String, HashMap<Int64, ArrayList<ImportSpec>>> =
+        HashMap<String, HashMap<Int64, ArrayList<ImportSpec>>>()
     private let fileUsedMacroDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
-    private let declToTypeAlias: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
+    private let declToTypeAlias: HashMap<Int64, HashSet<String>> = HashMap<Int64, HashSet<String>>()
     private let astWriters: HashMap<String, ASTWriter> = HashMap<String, ASTWriter>()
     private var importSrcCode: Bool = true
     private var cjoManager: CjoManager
@@ -307,12 +307,12 @@ public class ImportManager {
         return ret
     }
 
-    public func GetImportsOfDecl(fullPackageName: String): HashMap<String, ArrayList<ImportSpec>> {
-        let out = HashMap<String, ArrayList<ImportSpec>>()
+    public func GetImportsOfDecl(fullPackageName: String): HashMap<Int64, ArrayList<ImportSpec>> {
+        let out = HashMap<Int64, ArrayList<ImportSpec>>()
         if (let Some(declImportMap) <- declsImportedByNodeMap.get(fullPackageName)) {
-            for (declKey in declImportMap.keys()) {
-                if (let Some(imports) <- declImportMap.get(declKey)) {
-                    out[declKey] = CloneImportSpecArray(imports)
+            for (declId in declImportMap.keys()) {
+                if (let Some(imports) <- declImportMap.get(declId)) {
+                    out[declId] = CloneImportSpecArray(imports)
                 }
             }
         }
@@ -1576,9 +1576,9 @@ public class ImportManager {
 
     private func RecordImportOfDecl(fullPackageName: String, decl: Decl, importSpec: ImportSpec): Unit {
         if (!declsImportedByNodeMap.contains(fullPackageName)) {
-            declsImportedByNodeMap[fullPackageName] = HashMap<String, ArrayList<ImportSpec>>()
+            declsImportedByNodeMap[fullPackageName] = HashMap<Int64, ArrayList<ImportSpec>>()
         }
-        let key = decl.fullPackageName + "." + decl.identifier
+        let key = decl.objectId
         if (let Some(map) <- declsImportedByNodeMap.get(fullPackageName)) {
             if (!map.contains(key)) {
                 map[key] = ArrayList<ImportSpec>()
@@ -1970,8 +1970,8 @@ public class ImportManager {
         return false
     }
 
-    private func DeclAliasKey(decl: Decl): String {
-        return decl.fullPackageName + "." + decl.identifier
+    private func DeclAliasKey(decl: Decl): Int64 {
+        return decl.objectId
     }
 
     private func ContainsPackage(values: ArrayList<Package>, pkg: Package): Bool {

@@ -245,18 +245,31 @@ public func MakeRange(identifierPos: Position, identifier: String): Range {
     return BasicMakeRange(identifierPos, identifier)
 }
 
+private class ModulesObjectIdAllocator {
+    private static var nextId: Int64 = 1
+
+    public static func Next(): Int64 {
+        let out = nextId
+        nextId++
+        return out
+    }
+}
+
 public open class Node {
     public var begin: Position = INVALID_POSITION
     public var end: Position = INVALID_POSITION
     public var curFile: Option<File> = None
+    public let objectId: Int64
     public let astKind: ASTKind
     private let attrs: ArrayList<Attribute> = ArrayList<Attribute>()
 
     public init() {
+        objectId = ModulesObjectIdAllocator.Next()
         astKind = ASTKind.NODE
     }
 
     public init(kind: ASTKind) {
+        objectId = ModulesObjectIdAllocator.Next()
         astKind = kind
     }
 
@@ -908,8 +921,7 @@ public func AddDeclUnique(values: ArrayList<Decl>, decl: Decl): Unit {
 }
 
 public func SameDecl(left: Decl, right: Decl): Bool {
-    return left.identifier == right.identifier && left.fullPackageName == right.fullPackageName &&
-        left.begin == right.begin && left.end == right.end
+    return left.objectId == right.objectId
 }
 
 public func CloneDeclArray(values: ArrayList<Decl>): ArrayList<Decl> {

@@ -4,14 +4,12 @@ import std.collection.*
 
 import cangjie_compiler::ast.Ty as AstTy
 import cangjie_compiler::ast.TypeKind as AstTypeKind
-import cangjie_compiler::ast.ASTKindIndex as AstKindIndex
 import cangjie_compiler::ast.TupleTy as AstTupleTy
 import cangjie_compiler::ast.FuncTy as AstFuncTy
 import cangjie_compiler::ast.ArrayTy as AstArrayTy
 import cangjie_compiler::ast.VArrayTy as AstVArrayTy
 import cangjie_compiler::ast.PointerTy as AstPointerTy
 import cangjie_compiler::ast.Decl as AstDecl
-import cangjie_compiler::ast.Attribute as AstAttribute
 import cangjie_compiler::ast.ClassDecl as AstClassDecl
 import cangjie_compiler::ast.StructDecl as AstStructDecl
 import cangjie_compiler::ast.InterfaceDecl as AstInterfaceDecl
@@ -46,186 +44,44 @@ public class CHIRNominalCacheEntry {
 public class CHIRTypeCache {
     public let typeMap: ArrayList<CHIRTypeCacheEntry> = ArrayList<CHIRTypeCacheEntry>()
     public let globalNominalCache: ArrayList<CHIRNominalCacheEntry> = ArrayList<CHIRNominalCacheEntry>()
+    private let typeIndex: HashMap<Int64, CHIRTypeCacheEntry> = HashMap<Int64, CHIRTypeCacheEntry>()
+    private let nominalIndex: HashMap<Int64, CHIRNominalCacheEntry> = HashMap<Int64, CHIRNominalCacheEntry>()
 
     public init() {}
 
     public func TryGetType(ty: AstTy): Option<Type> {
-        for (entry in typeMap) {
-            if (SameAstTy(entry.astTy, ty)) {
-                return entry.chirTy
-            }
+        if (let Some(entry) <- typeIndex.get(ty.objectId)) {
+            return entry.chirTy
         }
         return None
     }
 
     public func SetType(ty: AstTy, chirTy: Type): Unit {
-        for (entry in typeMap) {
-            if (SameAstTy(entry.astTy, ty)) {
-                entry.chirTy = chirTy
-                return
-            }
+        if (let Some(entry) <- typeIndex.get(ty.objectId)) {
+            entry.chirTy = chirTy
+            return
         }
-        typeMap.add(CHIRTypeCacheEntry(ty, chirTy))
+        let entry = CHIRTypeCacheEntry(ty, chirTy)
+        typeIndex[ty.objectId] = entry
+        typeMap.add(entry)
     }
 
     public func TryGetNominal(decl: AstDecl): Option<CustomTypeDef> {
-        for (entry in globalNominalCache) {
-            if (SameAstDecl(entry.decl, decl)) {
-                return entry.def
-            }
+        if (let Some(entry) <- nominalIndex.get(decl.objectId)) {
+            return entry.def
         }
         return None
     }
 
     public func SetNominal(decl: AstDecl, def: CustomTypeDef): Unit {
-        for (entry in globalNominalCache) {
-            if (SameAstDecl(entry.decl, decl)) {
-                entry.def = def
-                return
-            }
+        if (let Some(entry) <- nominalIndex.get(decl.objectId)) {
+            entry.def = def
+            return
         }
-        globalNominalCache.add(CHIRNominalCacheEntry(decl, def))
+        let entry = CHIRNominalCacheEntry(decl, def)
+        nominalIndex[decl.objectId] = entry
+        globalNominalCache.add(entry)
     }
-}
-
-private func SameAstTy(left: AstTy, right: AstTy): Bool {
-    if (left.kind != right.kind || left.name != right.name) {
-        return false
-    }
-    if (let Some(leftFunc) <- (left as AstFuncTy)) {
-        if (let Some(rightFunc) <- (right as AstFuncTy)) {
-            return leftFunc.isC == rightFunc.isC && leftFunc.isClosureTy == rightFunc.isClosureTy &&
-                leftFunc.hasVariableLenArg == rightFunc.hasVariableLenArg && leftFunc.noCast == rightFunc.noCast &&
-                SameAstTy(leftFunc.retTy, rightFunc.retTy) && SameAstTyList(leftFunc.paramTys, rightFunc.paramTys)
-        }
-        return false
-    }
-    if (let Some(leftTuple) <- (left as AstTupleTy)) {
-        if (let Some(rightTuple) <- (right as AstTupleTy)) {
-            return leftTuple.isClosureTy == rightTuple.isClosureTy && SameAstTyList(leftTuple.typeArgs,
-                rightTuple.typeArgs)
-        }
-        return false
-    }
-    if (let Some(leftArray) <- (left as AstArrayTy)) {
-        if (let Some(rightArray) <- (right as AstArrayTy)) {
-            return leftArray.dims == rightArray.dims && SameAstTyList(leftArray.typeArgs, rightArray.typeArgs)
-        }
-        return false
-    }
-    if (let Some(leftVArray) <- (left as AstVArrayTy)) {
-        if (let Some(rightVArray) <- (right as AstVArrayTy)) {
-            return leftVArray.size == rightVArray.size && SameAstTyList(leftVArray.typeArgs, rightVArray.typeArgs)
-        }
-        return false
-    }
-    if ((left as AstPointerTy).isSome() || (right as AstPointerTy).isSome()) {
-        return (left as AstPointerTy).isSome() && (right as AstPointerTy).isSome() &&
-            SameAstTyList(left.typeArgs, right.typeArgs)
-    }
-    if (let Some(leftStruct) <- (left as AstStructTy)) {
-        if (let Some(rightStruct) <- (right as AstStructTy)) {
-            return SameAstStructDeclOption(leftStruct.declPtr, rightStruct.declPtr) &&
-                SameAstTyList(leftStruct.typeArgs, rightStruct.typeArgs)
-        }
-        return false
-    }
-    if (let Some(leftClass) <- (left as AstClassTy)) {
-        if (let Some(rightClass) <- (right as AstClassTy)) {
-            return left.String() == right.String() && SameAstClassDeclOption(leftClass.declPtr, rightClass.declPtr) &&
-                SameAstTyList(leftClass.typeArgs, rightClass.typeArgs)
-        }
-        return false
-    }
-    if (let Some(leftInterface) <- (left as AstInterfaceTy)) {
-        if (let Some(rightInterface) <- (right as AstInterfaceTy)) {
-            return SameAstInterfaceDeclOption(leftInterface.declPtr, rightInterface.declPtr) &&
-                SameAstTyList(leftInterface.typeArgs, rightInterface.typeArgs)
-        }
-        return false
-    }
-    if (let Some(leftEnum) <- (left as AstEnumTy)) {
-        if (let Some(rightEnum) <- (right as AstEnumTy)) {
-            return left.String() == right.String() && SameAstEnumDeclOption(leftEnum.declPtr, rightEnum.declPtr) &&
-                SameAstTyList(leftEnum.typeArgs, rightEnum.typeArgs)
-        }
-        return false
-    }
-    if (let Some(leftGeneric) <- (left as AstGenericsTy)) {
-        if (let Some(rightGeneric) <- (right as AstGenericsTy)) {
-            return leftGeneric.name == rightGeneric.name && SameAstGenericDeclOption(leftGeneric.decl, rightGeneric.decl)
-        }
-        return false
-    }
-    return SameAstTyList(left.typeArgs, right.typeArgs)
-}
-
-private func SameAstTyList(left: ArrayList<AstTy>, right: ArrayList<AstTy>): Bool {
-    if (left.size != right.size) {
-        return false
-    }
-    var idx: Int64 = 0
-    while (idx < left.size) {
-        if (!SameAstTy(left[idx], right[idx])) {
-            return false
-        }
-        idx++
-    }
-    return true
-}
-
-private func SameAstStructDeclOption(left: Option<AstStructDecl>, right: Option<AstStructDecl>): Bool {
-    if (let Some(leftDecl) <- left) {
-        if (let Some(rightDecl) <- right) { return SameAstDecl(leftDecl, rightDecl) }
-        return false
-    }
-    return right.isNone()
-}
-
-private func SameAstClassDeclOption(left: Option<AstClassDecl>, right: Option<AstClassDecl>): Bool {
-    if (let Some(leftDecl) <- left) {
-        if (let Some(rightDecl) <- right) { return SameAstDecl(leftDecl, rightDecl) }
-        return false
-    }
-    return right.isNone()
-}
-
-private func SameAstInterfaceDeclOption(left: Option<AstInterfaceDecl>, right: Option<AstInterfaceDecl>): Bool {
-    if (let Some(leftDecl) <- left) {
-        if (let Some(rightDecl) <- right) { return SameAstDecl(leftDecl, rightDecl) }
-        return false
-    }
-    return right.isNone()
-}
-
-private func SameAstEnumDeclOption(left: Option<AstEnumDecl>, right: Option<AstEnumDecl>): Bool {
-    if (let Some(leftDecl) <- left) {
-        if (let Some(rightDecl) <- right) { return SameAstDecl(leftDecl, rightDecl) }
-        return false
-    }
-    return right.isNone()
-}
-
-private func SameAstGenericDeclOption(left: Option<AstGenericParamDecl>, right: Option<AstGenericParamDecl>): Bool {
-    if (let Some(leftDecl) <- left) {
-        if (let Some(rightDecl) <- right) { return SameAstDecl(leftDecl, rightDecl) }
-        return false
-    }
-    return right.isNone()
-}
-
-private func SameAstDecl(left: AstDecl, right: AstDecl): Bool {
-    if (left.TestAttr(AstAttribute.IMPORTED) && right.TestAttr(AstAttribute.IMPORTED)) {
-        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
-            return left.rawMangleName == right.rawMangleName
-        }
-        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
-            return left.mangledName == right.mangledName
-        }
-    }
-    return AstKindIndex(left.astKind) == AstKindIndex(right.astKind) && left.identifier.Val() == right.identifier.Val() &&
-        left.fullPackageName == right.fullPackageName && left.begin.hashCode() == right.begin.hashCode() &&
-        left.end.hashCode() == right.end.hashCode()
 }
 
 public class CHIRType {

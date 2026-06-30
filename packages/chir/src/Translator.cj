@@ -261,12 +261,7 @@ private func FaithfulLocalAstDeclHash(decl: AstDecl): Int64 {
             return FaithfulLocalAstDeclHashCombine(31, decl.mangledName.hashCode())
         }
     }
-    var out = ASTKindIndex(decl.astKind)
-    out = FaithfulLocalAstDeclHashCombine(out, decl.identifier.Val().hashCode())
-    out = FaithfulLocalAstDeclHashCombine(out, decl.fullPackageName.hashCode())
-    out = FaithfulLocalAstDeclHashCombine(out, decl.begin.hashCode())
-    out = FaithfulLocalAstDeclHashCombine(out, decl.end.hashCode())
-    return out
+    return decl.objectId
 }
 
 private func FaithfulLocalDefaultParamFunctionIdentity(decl: AstDecl): Option<String> {
@@ -299,11 +294,10 @@ private func SameFaithfulLocalAstDecl(left: AstDecl, right: AstDecl): Bool {
             return left.mangledName == right.mangledName
         }
     }
-    // Non-imported local decls are matched by OBJECT IDENTITY, faithfully mirroring C++'s
+    // Non-imported local decls are matched by stable object identity, faithfully mirroring C++'s
     // pointer-keyed AST2CHIRNodeMap (AST2CHIRNodeMap.h:66). A structural key wrongly merges distinct
-    // COMPILER_ADD desugar temporaries sharing an identifier and a (0,0,0) position; the structural
-    // hash above is retained only for bucketing.
-    return refEq(left, right)
+    // COMPILER_ADD desugar temporaries sharing an identifier and a (0,0,0) position.
+    return left.objectId == right.objectId
 }
 
 private class FaithfulLocalValueEntry {
@@ -3938,9 +3932,7 @@ public class Translator {
                 return left.mangledName == right.mangledName
             }
         }
-        return ASTKindIndex(left.astKind) == ASTKindIndex(right.astKind) &&
-            left.identifier.Val() == right.identifier.Val() && left.fullPackageName == right.fullPackageName &&
-            left.begin.hashCode() == right.begin.hashCode() && left.end.hashCode() == right.end.hashCode()
+        return left.objectId == right.objectId
     }
 
     private func TranslateVArrayExpr(expr: AstArrayExpr, arrayTy: VArrayType): Value {

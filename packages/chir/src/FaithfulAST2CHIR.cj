@@ -203,12 +203,7 @@ private func FaithfulInitDeclHash(decl: AstDecl): Int64 {
             return FaithfulInitHashCombine(31, decl.mangledName.hashCode())
         }
     }
-    var out = ASTKindIndex(decl.astKind)
-    out = FaithfulInitHashCombine(out, decl.identifier.Val().hashCode())
-    out = FaithfulInitHashCombine(out, decl.fullPackageName.hashCode())
-    out = FaithfulInitHashCombine(out, decl.begin.hashCode())
-    out = FaithfulInitHashCombine(out, decl.end.hashCode())
-    return out
+    return decl.objectId
 }
 
 private func FaithfulInitSameDecl(left: AstDecl, right: AstDecl): Bool {
@@ -229,9 +224,7 @@ private func FaithfulInitSameDecl(left: AstDecl, right: AstDecl): Bool {
             return left.mangledName == right.mangledName
         }
     }
-    return ASTKindIndex(left.astKind) == ASTKindIndex(right.astKind) &&
-        left.identifier.Val() == right.identifier.Val() && left.fullPackageName == right.fullPackageName &&
-        left.begin.hashCode() == right.begin.hashCode() && left.end.hashCode() == right.end.hashCode()
+    return left.objectId == right.objectId
 }
 
 private func FaithfulInitDefaultParamDeclIdentity(decl: AstDecl): Option<String> {

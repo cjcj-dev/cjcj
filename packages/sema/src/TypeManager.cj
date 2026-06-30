@@ -298,12 +298,12 @@ public class TypeManager {
     private let allocatedClassLikeTys: ArrayList<Ty> = ArrayList<Ty>()
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
     private let tyVarScopes: ArrayList<TyVarScope> = ArrayList<TyVarScope>()
-    private let tyVarScopeDepth: HashMap<String, Int64> = HashMap<String, Int64>()
+    private let tyVarScopeDepth: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     private let instCtxScopes: ArrayList<InstCtxScope> = ArrayList<InstCtxScope>()
     private var nextUniqId: UInt64 = 0u64
     private let resolvedImportedDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
-    private let declToTypeAlias: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
+    private let declToTypeAlias: HashMap<Int64, HashSet<String>> = HashMap<Int64, HashSet<String>>()
     public var compileTestsOnly: Bool = false
 
     public init() {
@@ -346,8 +346,8 @@ public class TypeManager {
         }
     }
 
-    private func DeclAliasKey(decl: Decl): String {
-        return decl.fullPackageName + "." + decl.identifier.Val()
+    private func DeclAliasKey(decl: Decl): Int64 {
+        return decl.objectId
     }
 
     public static func GetPrimitiveTy(kind: TypeKind): PrimitiveTy {
@@ -1301,7 +1301,7 @@ public class TypeManager {
             if (let Some(genericDecl) <- genericTy.decl) {
                 return genericDecl.objectId.toString()
             }
-            return genericTy.Hash().toString()
+            return genericTy.objectId.toString()
         }
         if (let Some(classThisTy) <- (ty as ClassThisTy)) {
             var out = "nominal:" + TypeKindIndex(TypeKind.TYPE_CLASS).toString() + ":1:" + classThisTy.name
@@ -1472,11 +1472,11 @@ public class TypeManager {
             }
             return out
         }
-        return ty.Hash().toString() + ":" + ty.String()
+        return ty.objectId.toString()
     }
 
-    private func hasVisitedGenericMappingTy(visited: HashSet<String>, ty: Ty): Bool {
-        return visited.contains(typeManagerTyKey(ty))
+    private func hasVisitedGenericMappingTy(visited: HashSet<Int64>, ty: Ty): Bool {
+        return visited.contains(ty.objectId)
     }
 
     private func isInheritableTypeForGenericMapping(ty: Ty): Bool {
@@ -1489,18 +1489,18 @@ public class TypeManager {
         return false
     }
 
-    private func generateGenericMappingVisit(m: MultiTypeSubst, baseType: Ty, visited: HashSet<String>): Unit {
+    private func generateGenericMappingVisit(m: MultiTypeSubst, baseType: Ty, visited: HashSet<Int64>): Unit {
         if (!Ty.IsTyCorrect(baseType) || hasVisitedGenericMappingTy(visited, baseType)) {
             return
         }
-        visited.add(typeManagerTyKey(baseType))
+        visited.add(baseType.objectId)
         generateExtendGenericMappingVisit(m, baseType, visited)
         if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(baseType))) {
             generateStructDeclGenericMappingVisit(m, decl, baseType, visited)
         }
     }
 
-    private func generateExtendGenericMappingVisit(m: MultiTypeSubst, baseType: Ty, visited: HashSet<String>): Unit {
+    private func generateExtendGenericMappingVisit(m: MultiTypeSubst, baseType: Ty, visited: HashSet<Int64>): Unit {
         if (!Ty.IsTyCorrect(baseType)) {
             return
         }
@@ -1510,7 +1510,7 @@ public class TypeManager {
     }
 
     private func generateStructDeclGenericMappingVisit(m: MultiTypeSubst, decl: InheritableDecl, targetTy: Ty,
-        visited: HashSet<String>): Unit {
+        visited: HashSet<Int64>): Unit {
         if (!Ty.IsTyCorrect(targetTy)) {
             return
         }
@@ -1524,18 +1524,18 @@ public class TypeManager {
         }
     }
 
-    private func generateGenericMappingVisit(m: SubstPack, baseType: Ty, visited: HashSet<String>, contextual: Bool): Unit {
+    private func generateGenericMappingVisit(m: SubstPack, baseType: Ty, visited: HashSet<Int64>, contextual: Bool): Unit {
         if (!Ty.IsTyCorrect(baseType) || hasVisitedGenericMappingTy(visited, baseType)) {
             return
         }
-        visited.add(typeManagerTyKey(baseType))
+        visited.add(baseType.objectId)
         generateExtendGenericMappingVisit(m, baseType, visited, contextual)
         if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(baseType))) {
             generateStructDeclGenericMappingVisit(m, decl, baseType, visited, contextual)
         }
     }
 
-    private func generateExtendGenericMappingVisit(m: SubstPack, baseType: Ty, visited: HashSet<String>,
+    private func generateExtendGenericMappingVisit(m: SubstPack, baseType: Ty, visited: HashSet<Int64>,
         contextual: Bool): Unit {
         if (!Ty.IsTyCorrect(baseType)) {
             return
@@ -1546,7 +1546,7 @@ public class TypeManager {
     }
 
     private func generateStructDeclGenericMappingVisit(m: SubstPack, decl: InheritableDecl, targetTy: Ty,
-        visited: HashSet<String>, contextual: Bool): Unit {
+        visited: HashSet<Int64>, contextual: Bool): Unit {
         if (!Ty.IsTyCorrect(targetTy)) {
             return
         }
@@ -1569,17 +1569,17 @@ public class TypeManager {
     }
 
     public func GenerateStructDeclGenericMapping(m: MultiTypeSubst, decl: InheritableDecl, targetTy: Ty): Unit {
-        let visited = HashSet<String>()
+        let visited = HashSet<Int64>()
         generateStructDeclGenericMappingVisit(m, decl, targetTy, visited)
     }
 
     public func GenerateGenericMapping(m: MultiTypeSubst, baseType: Ty): Unit {
-        let visited = HashSet<String>()
+        let visited = HashSet<Int64>()
         generateGenericMappingVisit(m, baseType, visited)
     }
 
     public func GenerateGenericMapping(m: SubstPack, baseType: Ty): Unit {
-        let visited = HashSet<String>()
+        let visited = HashSet<Int64>()
         generateGenericMappingVisit(m, baseType, visited, true)
     }
 
@@ -2375,18 +2375,18 @@ public class TypeManager {
     }
 
     private func putTyVarScopeDepth(tyVar: GenericsTy, depth: Int64): Unit {
-        tyVarScopeDepth[typeManagerTyKey(tyVar)] = depth
+        tyVarScopeDepth[tyVar.objectId] = depth
     }
 
     private func removeTyVarScopeDepth(tyVar: GenericsTy): Unit {
-        let key = typeManagerTyKey(tyVar)
+        let key = tyVar.objectId
         if (tyVarScopeDepth.contains(key)) {
             tyVarScopeDepth.remove(key)
         }
     }
 
     private func findTyVarScopeDepth(tyVar: GenericsTy): Option<Int64> {
-        let key = typeManagerTyKey(tyVar)
+        let key = tyVar.objectId
         if (let Some(depth) <- tyVarScopeDepth.get(key)) {
             return depth
         }

@@ -486,6 +486,5 @@ public func SameSymbol(left: Symbol, right: Symbol): Bool {
 }
 
 public func SameDecl(left: Decl, right: Decl): Bool {
-    return left.astKind == right.astKind && left.begin == right.begin && left.end == right.end &&
-        left.identifier == right.identifier && left.fullPackageName == right.fullPackageName
+    return left.objectId == right.objectId
 }

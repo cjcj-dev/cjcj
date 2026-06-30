@@ -29,12 +29,7 @@ private func FaithfulAstDeclHash(decl: AstDecl): Int64 {
             return FaithfulAstDeclHashCombine(31, decl.mangledName.hashCode())
         }
     }
-    var out = ASTKindIndex(decl.astKind)
-    out = FaithfulAstDeclHashCombine(out, decl.identifier.Val().hashCode())
-    out = FaithfulAstDeclHashCombine(out, decl.fullPackageName.hashCode())
-    out = FaithfulAstDeclHashCombine(out, decl.begin.hashCode())
-    out = FaithfulAstDeclHashCombine(out, decl.end.hashCode())
-    return out
+    return decl.objectId
 }
 
 private func DefaultParamFunctionIdentity(decl: AstDecl): Option<String> {
@@ -67,12 +62,12 @@ private func SameFaithfulAstDecl(left: AstDecl, right: AstDecl): Bool {
             return left.mangledName == right.mangledName
         }
     }
-    // Non-imported decls are matched by OBJECT IDENTITY, faithfully mirroring C++ AST2CHIRNodeMap's
+    // Non-imported decls are matched by stable object identity, faithfully mirroring C++ AST2CHIRNodeMap's
     // std::unordered_map<const AST::Node*, T*> (include/cangjie/CHIR/AST2CHIR/AST2CHIRNodeMap.h:66).
     // A structural (kind+name+position) key wrongly merges distinct COMPILER_ADD desugar temporaries
     // that share an identifier and a (0,0,0) position (e.g. the `v-compiler` temps from `as`-cast
-    // desugar), corrupting the value table. The structural hash above is retained only for bucketing.
-    return refEq(left, right)
+    // desugar), corrupting the value table.
+    return left.objectId == right.objectId
 }
 
 public class FaithfulAST2CHIRNodeMapEntry {

@@ -168,7 +168,7 @@ public class CompilerInstance {
     public init(invocation: CompilerInvocation, diag: DiagnosticEngine) {
         this.invocation = invocation
         this.diag = diag
-        importManager = ImportManager(diag)
+        importManager = ImportManager(diag, typeManager.AsFaithfulSemaTypeManager())
         packageManager = PackageManager(importManager)
         compileStrategy = Some(FullCompileStrategy(this))
         chirData.InitData(fileNameMap, Int64(invocation.globalOptions.GetJobs()))
@@ -462,6 +462,7 @@ public class CompilerInstance {
             FaithfulDesugarBeforeTypeCheck(pkg)
         }
         let semaInstance = FaithfulSemaCompilerInstance()
+        semaInstance.typeManager = typeManager.AsFaithfulSemaTypeManager()
         semaInstance.globalOptions = invocation.globalOptions
         semaInstance.frontendDumpActionIsTypeCheck = invocation.frontendOptions.dumpAction == DumpAction.TYPE_CHECK
         semaInstance.diag = Some(diag.AsBasicDiagnosticEngine())

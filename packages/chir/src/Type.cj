@@ -4,10 +4,15 @@ import std.collection.*
 import std.sort.*
 
 public open class Type {
+    private static var nextObjectId: Int64 = 1
+
+    public let objectId: Int64
     public let kind: TypeKind
     public let argTys: ArrayList<Type> = ArrayList<Type>()
 
     public init(kind: TypeKind) {
+        objectId = nextObjectId
+        nextObjectId++
         this.kind = kind
     }
 

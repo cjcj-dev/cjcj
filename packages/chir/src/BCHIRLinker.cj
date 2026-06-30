@@ -433,12 +433,12 @@ public class BCHIRLinker {
     private func UnlinkedTypesToLinkedTypes(types: ArrayList<Type>): ArrayList<Int64> {
         let out = ArrayList<Int64>()
         for (ty in types) {
-            let hash = ty.Hash()
-            if (let Some(index) <- typeIds.get(hash)) {
+            let key = ty.objectId
+            if (let Some(index) <- typeIds.get(key)) {
                 out.add(index)
             } else {
                 let next = topBchir.AddType(ty)
-                typeIds[hash] = next
+                typeIds[key] = next
                 out.add(next)
             }
         }
