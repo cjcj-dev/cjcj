@@ -578,10 +578,6 @@ private class CjoFlatBuffer {
         return ReadI32(pos)
     }
 
-    public func U8At(pos: Int64): UInt8 {
-        return if (IsInBounds(pos, 1)) { data[pos] } else { 0u8 }
-    }
-
     public func StringAt(pos: Int64): String {
         if (!IsInBounds(pos, 4)) {
             return ""
@@ -725,8 +721,8 @@ private class CjoFullId {
 private class CjoSignatureMaterializer {
     private let packageName: String
     private let pkg: Package
-    private let fallbackFile: File
     private let filesByIndex: HashMap<UInt32, File>
+    private let idToFileMap: HashMap<UInt64, File>
     private let importedPackages: ArrayList<Package>
     private var flat: Option<CjoFlatBuffer> = None
     private var flatAllDecls: Int64 = -1
@@ -739,12 +735,12 @@ private class CjoSignatureMaterializer {
     private let flatTypeCache: HashMap<UInt32, Ty> = HashMap<UInt32, Ty>()
     private let flatGenericParamDecls: HashMap<UInt32, GenericParamDecl> = HashMap<UInt32, GenericParamDecl>()
 
-    public init(packageName: String, pkg: Package, fallbackFile: File, filesByIndex: HashMap<UInt32, File>,
-        importedPackages: ArrayList<Package>, typeManager: FaithfulSemaTypeManager) {
+    public init(packageName: String, pkg: Package, filesByIndex: HashMap<UInt32, File>,
+        idToFileMap: HashMap<UInt64, File>, importedPackages: ArrayList<Package>, typeManager: FaithfulSemaTypeManager) {
         this.packageName = packageName
         this.pkg = pkg
-        this.fallbackFile = fallbackFile
         this.filesByIndex = filesByIndex
+        this.idToFileMap = idToFileMap
         this.importedPackages = importedPackages
         this.typeManager = typeManager
     }
@@ -953,11 +949,12 @@ private class CjoSignatureMaterializer {
     }
 
     private func AddFlatTopLevelDecl(decl: Decl): Unit {
+        let targetFile = decl.curFile ??
+            throw IllegalStateException("imported decl '${decl.identifier.Val()}' has no current file")
         if (decl.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
             pkg.genericInstantiatedDecls.add(decl)
             return
         }
-        let targetFile = decl.curFile ?? fallbackFile
         if (decl.IsExportedDecl() || decl.TestAttr(Attribute.FROM_COMMON_PART)) {
             targetFile.decls.add(decl)
             return
@@ -1262,7 +1259,8 @@ private class CjoSignatureMaterializer {
     }
 
     private func FileByFlatIndex(index: UInt32): File {
-        return filesByIndex.get(index) ?? fallbackFile
+        return filesByIndex.get(index) ??
+            throw IllegalStateException("FlatBuffer file index ${index} is not registered for package '${packageName}'")
     }
 
     private func FlatDeclFileIndex(reader: CjoFlatBuffer, record: CjoFlatDecl): UInt32 {
@@ -1272,17 +1270,52 @@ private class CjoSignatureMaterializer {
 
     private func LoadFlatPosition(reader: CjoFlatBuffer, posTable: Int64): Position {
         if (posTable < 0) {
-            return INVALID_POSITION
+            throw IllegalStateException("FlatBuffer Position is null")
         }
         let fileIndex = reader.U32At(posTable)
+        let pkgIndex = reader.U32At(posTable + 4)
         let line = reader.I32At(posTable + 8)
         let column = reader.I32At(posTable + 12)
-        let fileID = if (fileIndex == 0u32) { 0u64 } else { FileByFlatIndex(fileIndex).begin.fileID }
-        var pos = Position(fileID, line, column)
-        if (reader.U8At(posTable + 16) != 0u8) {
-            pos.Mark(PositionStatus.IGNORE)
+        let fileID = if (pkgIndex == 0u32) {
+            if (fileIndex == 0u32) { 0u64 } else { FileByFlatIndex(fileIndex).begin.fileID }
+        } else {
+            if (let Some(importedFile) <- ImportedFileByFlatPosition(reader, pkgIndex, fileIndex)) {
+                let importedFileID = importedFile.begin.fileID
+                if (!idToFileMap.contains(importedFileID)) {
+                    idToFileMap[importedFileID] = importedFile
+                }
+                importedFileID
+            } else {
+                0u64
+            }
         }
-        return pos
+        return Position(fileID, line, column)
+    }
+
+    private func ImportedFileByFlatPosition(reader: CjoFlatBuffer, pkgIndex: UInt32, fileIndex: UInt32): Option<File> {
+        let importOffset = Int64(pkgIndex) - 1
+        if (flatImports < 0 || importOffset < 0 || importOffset >= reader.VectorLength(flatImports)) {
+            throw IllegalStateException("FlatBuffer package index ${pkgIndex} is not registered for package '${packageName}'")
+        }
+        let fullPackageName = reader.StringAt(reader.VectorOffsetElement(flatImports, importOffset))
+        let importedPackage = FindImportedPackage(fullPackageName)
+        if (let None <- importedPackage) {
+            return None
+        }
+        let imported = importedPackage.getOrThrow()
+        if (Int64(fileIndex) >= imported.files.size) {
+            throw IllegalStateException("FlatBuffer file index ${fileIndex} is out of range for package '${fullPackageName}'")
+        }
+        return Some(imported.files[Int64(fileIndex)])
+    }
+
+    private func FindImportedPackage(fullPackageName: String): Option<Package> {
+        for (importedPackage in importedPackages) {
+            if (importedPackage.fullPackageName == fullPackageName) {
+                return Some(importedPackage)
+            }
+        }
+        return None
     }
 
     private func FlatBuiltInType(reader: CjoFlatBuffer, record: CjoFlatDecl): BuiltInType {
@@ -4378,8 +4411,8 @@ public class ImportManager {
         let pkg = CreatePackage(fullPackageName)
         pkg.EnableAttr(Attribute.IMPORTED)
         pkg.hasSourceImportedDecl = true
-        let (fallbackFile, filesByIndex) = MaterializeCjoFiles(data, pkg, cjoPath)
-        let materializer = CjoSignatureMaterializer(fullPackageName, pkg, fallbackFile, filesByIndex, importedPackages,
+        let (filesByIndex, idToFileMap) = MaterializeCjoFiles(data, pkg)
+        let materializer = CjoSignatureMaterializer(fullPackageName, pkg, filesByIndex, idToFileMap, importedPackages,
             typeManager)
         materializer.Materialize(data)
         AddImportedPackageIfMissing(pkg)
@@ -4387,8 +4420,9 @@ public class ImportManager {
         return true
     }
 
-    private func MaterializeCjoFiles(data: Array<UInt8>, pkg: Package, cjoPath: String): (File, HashMap<UInt32, File>) {
+    private func MaterializeCjoFiles(data: Array<UInt8>, pkg: Package): (HashMap<UInt32, File>, HashMap<UInt64, File>) {
         let filesByIndex = HashMap<UInt32, File>()
+        let idToFileMap = HashMap<UInt64, File>()
         let reader = CjoFlatBuffer(data)
         let root = reader.RootTable()
         let filesVec = if (root >= 0) { reader.VectorField(root, 14) } else { -1 }
@@ -4396,17 +4430,16 @@ public class ImportManager {
             var idx: Int64 = 0
             while (idx < reader.VectorLength(filesVec)) {
                 let storedPath = reader.StringAt(reader.VectorOffsetElement(filesVec, idx))
-                let file = CreateImportedCjoFile(pkg, if (storedPath.isEmpty()) { cjoPath } else { storedPath },
-                    UInt64(idx + 1))
+                let fileID = diag.GetSourceManager().AddSource(storedPath, "", packageName: Some(pkg.fullPackageName))
+                let file = CreateImportedCjoFile(pkg, fileID)
                 filesByIndex[UInt32(idx + 1)] = file
+                if (!idToFileMap.contains(fileID)) {
+                    idToFileMap[fileID] = file
+                }
                 idx++
             }
         }
-        if (pkg.files.isEmpty()) {
-            let file = CreateImportedCjoFile(pkg, cjoPath, 1u64)
-            filesByIndex[1u32] = file
-        }
-        return (pkg.files[0], filesByIndex)
+        return (filesByIndex, idToFileMap)
     }
 
     private func VerifySerializedPackageData(data: Array<UInt8>, importedPackageName: String): Bool {
@@ -4428,11 +4461,14 @@ public class ImportManager {
         return reader.StringField(root, 10)
     }
 
-    private func CreateImportedCjoFile(pkg: Package, path: String, fileID: UInt64): File {
-        let file = CreateFile(path)
-        file.fileName = FileUtil.GetFileName(path)
-        file.begin = Position(fileID, 1, 1)
-        file.end = Position(fileID, 1, 1)
+    private func CreateImportedCjoFile(pkg: Package, fileID: UInt64): File {
+        let source = diag.GetSourceManager().GetSource(fileID)
+        let file = CreateFile(source.path)
+        file.fileName = FileUtil.GetFileName(source.path)
+        file.filePath = source.path
+        file.fileHash = source.fileHash
+        file.begin.fileID = fileID
+        file.curFile = Some(file)
         file.curPackage = Some(pkg)
         pkg.files.add(file)
         return file
