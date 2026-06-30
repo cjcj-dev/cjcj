@@ -395,8 +395,18 @@ public class CompilerInstance {
         if (let None <- gim) {
             gim = Some(GenericInstantiationManager(this))
         }
-        for (pkg in srcPkgs) {
-            collectGenericInstantiations(pkg)
+        if (!invocation.globalOptions.enIncrementalCompilation) {
+            if (let Some(genericInstantiationManager) <- gim) {
+                genericInstantiationManager.ResetGenericInstantiationStage()
+                var resetGlobalState = true
+                for (pkg in srcPkgs) {
+                    genericInstantiationManager.GenericInstantiatePackage(pkg, resetGlobalState: resetGlobalState)
+                    resetGlobalState = false
+                    if (diag.GetErrorCount() != 0) {
+                        return false
+                    }
+                }
+            }
         }
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "genericinst")
@@ -1086,52 +1096,6 @@ public class CompilerInstance {
             appendGenericParamList(builder, generic.typeParameters)
         }
         return builder.toString()
-    }
-
-    private func collectGenericInstantiations(pkg: Package): Unit {
-        let seen = HashSet<String>()
-        for (existing in pkg.genericInstantiatedDecls) {
-            seen.add(genericDeclKey(pkg.fullPackageName, existing))
-        }
-        for (file in pkg.files) {
-            for (decl in file.decls) {
-                collectGenericDecl(pkg, decl, seen)
-            }
-        }
-    }
-
-    private func collectGenericDecl(pkg: Package, decl: Decl, seen: HashSet<String>): Unit {
-        if (declHasGenericShape(decl)) {
-            let key = genericDeclKey(pkg.fullPackageName, decl)
-            if (!seen.contains(key)) {
-                seen.add(key)
-                pkg.genericInstantiatedDecls.add(decl)
-            }
-        }
-        for (member in decl.GetMemberDecls()) {
-            collectGenericDecl(pkg, member, seen)
-        }
-    }
-
-    private func declHasGenericShape(decl: Decl): Bool {
-        if (let Some(generic) <- decl.generic) {
-            if (!generic.typeParameters.isEmpty()) {
-                return true
-            }
-        }
-        if (let Some(funcDecl) <- (decl as FuncDecl)) {
-            if (let Some(body) <- funcDecl.funcBody) {
-                if (let Some(generic) <- body.generic) {
-                    return !generic.typeParameters.isEmpty()
-                }
-            }
-        }
-        return false
-    }
-
-    private func genericDeclKey(pkgName: String, decl: Decl): String {
-        return pkgName + "|" + ASTKindName(decl.astKind) + "|" + decl.identifier.Val() + "|" +
-            decl.begin.line.toString() + ":" + decl.begin.column.toString()
     }
 
     private func collectCHIRDeclSummary(chirPkg: CHIRPackage, decl: Decl): Unit {

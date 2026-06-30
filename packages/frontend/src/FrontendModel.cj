@@ -14,6 +14,7 @@ import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::chir.CHIRContext as RealCHIRContext
 import cangjie_compiler::chir.Package as RealCHIRPackage
 public import cangjie_compiler::mangle.BaseMangler
+import cangjie_compiler::sema.GenericInstantiation.GenericInstantiationManagerImpl as RealGenericInstantiationManagerImpl
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.STANDARD_LIBS
 import std.collection.*
@@ -4561,8 +4562,18 @@ public class TestManager {
 }
 
 public class GenericInstantiationManager {
+    private let impl: RealGenericInstantiationManagerImpl
+
     public init(instance: CompilerInstance) {
-        let _ = instance
+        impl = RealGenericInstantiationManagerImpl(instance.faithfulSemaInstance.getOrThrow())
+    }
+
+    public func GenericInstantiatePackage(pkg: Package, resetGlobalState!: Bool = true): Unit {
+        impl.GenericInstantiatePackage(pkg, resetGlobalState: resetGlobalState)
+    }
+
+    public func ResetGenericInstantiationStage(): Unit {
+        impl.ResetGenericInstantiationStage()
     }
 }
 

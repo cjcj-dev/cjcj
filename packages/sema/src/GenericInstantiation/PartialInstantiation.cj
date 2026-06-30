@@ -40,7 +40,6 @@ private func registerInstantiation(genericDecl: Decl, instantiatedDecl: Decl): U
     }
     generic2ins.add(InstantiationPair(genericDecl, instantiatedDecl))
     ins2generic.add(InstantiationPair(genericDecl, instantiatedDecl))
-    instantiatedDecl.genericDecl = genericDecl
 }
 
 public func SetOptLevel(opts: OptionGlobalOptions): Unit {
