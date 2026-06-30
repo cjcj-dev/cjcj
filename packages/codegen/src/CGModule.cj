@@ -562,6 +562,12 @@ public class CGModule {
             } else {
                 GetCGTypeForValue(param)
             }
+            if (chirFunc.IsConstructor() && idx == 0) {
+                AddParamAttr(cgFunc.GetRawFunction(), UInt32(idx), "noalias")
+            }
+            if (paramCGType.IsStructPtrType() || paramCGType.IsVArrayPtrType()) {
+                AddParamAttr(cgFunc.GetRawFunction(), UInt32(idx), "noalias")
+            }
             SetOrUpdateMappedCGValue(param, CGValue(rawArg, paramCGType))
             idx++
         }

@@ -10,6 +10,7 @@ import cangjie_compiler::chir.DeadCodeElimination
 import cangjie_compiler::chir.FaithfulAST2CHIR
 import cangjie_compiler::chir.FuncKind as ChirFuncKind
 import cangjie_compiler::chir.Function as ChirFunction
+import cangjie_compiler::chir.OptFuncRetType
 import cangjie_compiler::chir.Package as RealCHIRPackage
 import cangjie_compiler::ast.Package as RealASTPackage
 import cangjie_compiler::codegen.CHIRData as CodegenCHIRData
@@ -44,6 +45,7 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
         case Some(value) => value
         case None => return None
     }
+    OptFuncRetType(lowered, builder).Unit2Void()
     DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(lowered,
         isDebug: instance.invocation.globalOptions.chirDebugOptimizer)
     if (!TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)) {

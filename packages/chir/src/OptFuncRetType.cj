@@ -27,6 +27,9 @@ public class OptFuncRetType {
                 RemoveOldRetValue(retValue)
             }
             for (user in fn.GetUsers()) {
+                if (user.GetParentBlock().isNone()) {
+                    continue
+                }
                 if (let Some(apply) <- DynamicCast<Apply>(user)) {
                     CJC_ASSERT(apply.GetCallee().nodeId == fn.nodeId)
                     let funcCallContext = FuncCallContext(args: apply.GetArgs(),
