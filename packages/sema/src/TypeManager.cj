@@ -1302,6 +1302,135 @@ public class TypeManager {
             }
             return genericTy.Hash().toString()
         }
+        if (let Some(classThisTy) <- (ty as ClassThisTy)) {
+            var out = "nominal:" + TypeKindIndex(TypeKind.TYPE_CLASS).toString() + ":1:" + classThisTy.name
+            for (typeArg in classThisTy.typeArgs) {
+                out += ":" + typeArg.objectId.toString()
+            }
+            if (let Some(decl) <- classThisTy.declPtr) {
+                out += ":" + decl.objectId.toString()
+            } else {
+                out += ":0"
+            }
+            return out
+        }
+        if (let Some(classTy) <- (ty as ClassTy)) {
+            var out = "nominal:" + TypeKindIndex(TypeKind.TYPE_CLASS).toString() + ":0:" + classTy.name
+            for (typeArg in classTy.typeArgs) {
+                out += ":" + typeArg.objectId.toString()
+            }
+            if (let Some(decl) <- classTy.declPtr) {
+                out += ":" + decl.objectId.toString()
+            } else {
+                out += ":0"
+            }
+            return out
+        }
+        if (let Some(refEnumTy) <- (ty as RefEnumTy)) {
+            var out = "nominal:" + TypeKindIndex(TypeKind.TYPE_ENUM).toString() + ":1:" + refEnumTy.name
+            for (typeArg in refEnumTy.typeArgs) {
+                out += ":" + typeArg.objectId.toString()
+            }
+            if (let Some(decl) <- refEnumTy.declPtr) {
+                out += ":" + decl.objectId.toString()
+            } else {
+                out += ":0"
+            }
+            return out
+        }
+        if (let Some(enumTy) <- (ty as EnumTy)) {
+            var out = "nominal:" + TypeKindIndex(TypeKind.TYPE_ENUM).toString() + ":0:" + enumTy.name
+            for (typeArg in enumTy.typeArgs) {
+                out += ":" + typeArg.objectId.toString()
+            }
+            if (let Some(decl) <- enumTy.declPtr) {
+                out += ":" + decl.objectId.toString()
+            } else {
+                out += ":0"
+            }
+            return out
+        }
+        if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+            var out = "nominal:" + TypeKindIndex(TypeKind.TYPE_INTERFACE).toString() + ":" + interfaceTy.name
+            for (typeArg in interfaceTy.typeArgs) {
+                out += ":" + typeArg.objectId.toString()
+            }
+            if (let Some(decl) <- interfaceTy.declPtr) {
+                out += ":" + decl.objectId.toString()
+            } else {
+                out += ":0"
+            }
+            return out
+        }
+        if (let Some(structTy) <- (ty as StructTy)) {
+            var out = "nominal:" + TypeKindIndex(TypeKind.TYPE_STRUCT).toString() + ":" + structTy.name
+            for (typeArg in structTy.typeArgs) {
+                out += ":" + typeArg.objectId.toString()
+            }
+            if (let Some(decl) <- structTy.declPtr) {
+                out += ":" + decl.objectId.toString()
+            } else {
+                out += ":0"
+            }
+            return out
+        }
+        if (let Some(typeAliasTy) <- (ty as TypeAliasTy)) {
+            var out = "nominal:" + TypeKindIndex(TypeKind.TYPE).toString() + ":" + typeAliasTy.name
+            for (typeArg in typeAliasTy.typeArgs) {
+                out += ":" + typeArg.objectId.toString()
+            }
+            if (let Some(decl) <- typeAliasTy.declPtr) {
+                out += ":" + decl.objectId.toString()
+            } else {
+                out += ":0"
+            }
+            return out
+        }
+        if (let Some(arrayTy) <- (ty as ArrayTy)) {
+            var out = "compound:" + TypeKindIndex(TypeKind.TYPE_ARRAY).toString()
+            if (!arrayTy.typeArgs.isEmpty()) {
+                out += ":" + arrayTy.typeArgs[0].objectId.toString()
+            } else {
+                out += ":0"
+            }
+            return out + ":" + arrayTy.dims.toString()
+        }
+        if (let Some(varrayTy) <- (ty as VArrayTy)) {
+            var out = "compound:" + TypeKindIndex(TypeKind.TYPE_VARRAY).toString()
+            if (!varrayTy.typeArgs.isEmpty()) {
+                out += ":" + varrayTy.typeArgs[0].objectId.toString()
+            } else {
+                out += ":0"
+            }
+            return out + ":" + varrayTy.size.toString()
+        }
+        if (let Some(pointerTy) <- (ty as PointerTy)) {
+            var out = "compound:" + TypeKindIndex(TypeKind.TYPE_POINTER).toString()
+            if (!pointerTy.typeArgs.isEmpty()) {
+                out += ":" + pointerTy.typeArgs[0].objectId.toString()
+            } else {
+                out += ":0"
+            }
+            return out
+        }
+        if (let Some(tupleTy) <- (ty as TupleTy)) {
+            var out = "compound:" + TypeKindIndex(TypeKind.TYPE_TUPLE).toString() + ":" + tupleTy.isClosureTy.toString()
+            for (typeArg in tupleTy.typeArgs) {
+                out += ":" + typeArg.objectId.toString()
+            }
+            return out
+        }
+        if (let Some(funcTy) <- (ty as FuncTy)) {
+            var out = "compound:" + TypeKindIndex(TypeKind.TYPE_FUNC).toString() + ":" + funcTy.retTy.objectId.toString()
+            for (paramTy in funcTy.paramTys) {
+                out += ":" + paramTy.objectId.toString()
+            }
+            out += ":" + funcTy.isClosureTy.toString()
+            out += ":" + funcTy.isC.toString()
+            out += ":" + funcTy.hasVariableLenArg.toString()
+            out += ":" + funcTy.noCast.toString()
+            return out
+        }
         return ty.Hash().toString() + ":" + ty.String()
     }
 
