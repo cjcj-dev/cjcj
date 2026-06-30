@@ -14,6 +14,8 @@ public type LLVMNamedMDNodeRef = CPointer<Unit>
 public type LLVMAttributeRef = CPointer<Unit>
 public type LLVMUseRef = CPointer<Unit>
 public type LLVMDIBuilderRef = CPointer<Unit>
+public type LLVMSelfhostLoopInfoRef = CPointer<Unit>
+public type LLVMSelfhostLoopRef = CPointer<Unit>
 
 @When[os != "Windows"]
 foreign {
@@ -249,6 +251,22 @@ foreign {
     func LLVMGetInstructionParent(inst: LLVMValueRef): LLVMBasicBlockRef
     func LLVMGetInstructionOpcode(inst: LLVMValueRef): Int32
     func LLVMGetFirstUse(value: LLVMValueRef): LLVMUseRef
+    func LLVMSelfhostGetNearestCommonAncestorOfBasicBlocks(basicBlocks: CPointer<LLVMBasicBlockRef>,
+        count: UInt32): LLVMBasicBlockRef
+    func LLVMSelfhostCreateLoopInfo(fn: LLVMValueRef): LLVMSelfhostLoopInfoRef
+    func LLVMSelfhostDisposeLoopInfo(loopInfo: LLVMSelfhostLoopInfoRef): Unit
+    func LLVMSelfhostLoopInfoGetLoopFor(loopInfo: LLVMSelfhostLoopInfoRef,
+        block: LLVMBasicBlockRef): LLVMSelfhostLoopRef
+    func LLVMSelfhostLoopGetOutermostLoop(loopRef: LLVMSelfhostLoopRef): LLVMSelfhostLoopRef
+    func LLVMSelfhostLoopGetHeader(loopRef: LLVMSelfhostLoopRef): LLVMBasicBlockRef
+    func LLVMSelfhostLoopContainsBasicBlock(loopRef: LLVMSelfhostLoopRef, block: LLVMBasicBlockRef): Int32
+    func LLVMSelfhostGetBasicBlockPredecessorCount(block: LLVMBasicBlockRef): UInt32
+    func LLVMSelfhostGetBasicBlockPredecessors(block: LLVMBasicBlockRef,
+        predecessors: CPointer<LLVMBasicBlockRef>): Unit
+    func LLVMSelfhostInstructionComesBefore(inst: LLVMValueRef, other: LLVMValueRef): Int32
+    func LLVMSelfhostGetFirstUse(value: LLVMValueRef): LLVMUseRef
+    func LLVMSelfhostGetNextUse(useRef: LLVMUseRef): LLVMUseRef
+    func LLVMSelfhostGetUserInstruction(useRef: LLVMUseRef): LLVMValueRef
     func LLVMInstructionEraseFromParent(inst: LLVMValueRef): Unit
     func LLVMMoveBasicBlockAfter(block: LLVMBasicBlockRef, movePos: LLVMBasicBlockRef): Unit
     func LLVMConstNull(valueType: LLVMTypeRef): LLVMValueRef
@@ -445,7 +463,10 @@ public func LLVMNullBasicBlock(): LLVMBasicBlockRef { return CPointer<Unit>() }
 public func LLVMNullBuilder(): LLVMBuilderRef { return CPointer<Unit>() }
 public func LLVMNullMetadata(): LLVMMetadataRef { return CPointer<Unit>() }
 public func LLVMNullAttribute(): LLVMAttributeRef { return CPointer<Unit>() }
+public func LLVMNullUse(): LLVMUseRef { return CPointer<Unit>() }
 public func LLVMNullDIBuilder(): LLVMDIBuilderRef { return CPointer<Unit>() }
+public func LLVMSelfhostNullLoopInfo(): LLVMSelfhostLoopInfoRef { return CPointer<Unit>() }
+public func LLVMSelfhostNullLoop(): LLVMSelfhostLoopRef { return CPointer<Unit>() }
 
 public func LLVMCStringToString(raw: CString): Option<String> {
     if (raw.isNull()) {

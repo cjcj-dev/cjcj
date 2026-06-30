@@ -18,4 +18,4 @@ clang++ -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
   -I"$LLVM_SRC_INC" -I"$LLVM_GEN_INC"
 
 echo "built: $HERE/cjselfhost_llvmshim.o"
-nm -C "$HERE/cjselfhost_llvmshim.o" | grep -E ' T ' | grep -i shim || true
+nm -C "$HERE/cjselfhost_llvmshim.o" | grep -E ' T (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost)' || true

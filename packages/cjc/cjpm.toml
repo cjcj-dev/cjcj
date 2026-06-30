@@ -10,7 +10,7 @@
   output-type = "executable"
   compile-option = ""
   override-compile-option = ""
-  link-option = "/root/cj_build/cangjie_compiler_selfhost/runtime_shim/cjselfhost_llvmshim.o /root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029/third_party/llvm/lib/libLLVM-15.so -rpath /root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029/third_party/llvm/lib"
+  link-option = "/root/cj_build/wt/fix_llvmshim_domloop/runtime_shim/cjselfhost_llvmshim.o /root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029/third_party/llvm/lib/libLLVM-15.so -lstdc++ -rpath /root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029/third_party/llvm/lib"
   package-configuration = {}
 
 [dependencies]
