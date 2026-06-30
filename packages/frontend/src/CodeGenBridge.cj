@@ -12,6 +12,10 @@ import cangjie_compiler::chir.FuncKind as ChirFuncKind
 import cangjie_compiler::chir.Function as ChirFunction
 import cangjie_compiler::chir.OptFuncRetType
 import cangjie_compiler::chir.Package as RealCHIRPackage
+import cangjie_compiler::chir.RedundantGetOrThrowElimination
+import cangjie_compiler::chir.RedundantLoadElimination
+import cangjie_compiler::chir.UnitUnify
+import cangjie_compiler::chir.UselessAllocateElimination
 import cangjie_compiler::ast.Package as RealASTPackage
 import cangjie_compiler::codegen.CHIRData as CodegenCHIRData
 import cangjie_compiler::codegen.ClearPackageModules
@@ -45,9 +49,9 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
         case Some(value) => value
         case None => return None
     }
-    OptFuncRetType(lowered, builder).Unit2Void()
     DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(lowered,
         isDebug: instance.invocation.globalOptions.chirDebugOptimizer)
+    RunOptimizationPass(lowered, builder, instance.invocation.globalOptions)
     if (!TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)) {
         instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
         return None
@@ -56,6 +60,17 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
         ChirCHIRPrinter.PrintPackage(lowered)
     }
     return Some(lowered)
+}
+
+private func RunOptimizationPass(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions): Unit {
+    OptFuncRetType(pkg, builder).Unit2Void()
+    // C++ 此处有 RunArrayListConstStartOpt，selfhost 未移植，待补。
+    UnitUnify(builder).RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
+    // C++ 此处有 CollectDevirtualizationInfo / RunFunctionInline，selfhost 未移植，待补。
+    RedundantLoadElimination().RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
+    RedundantGetOrThrowElimination().RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
+    // C++ 此处有 RunRangePropagation，selfhost 未移植，待补。
+    UselessAllocateElimination.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
 }
 
 public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool {
