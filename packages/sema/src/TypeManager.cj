@@ -343,6 +343,13 @@ public class TypeManager {
         }
         if (let Some(values) <- declToTypeAlias.get(key)) {
             values.add(alias)
+            // Mirror C++ ImportManager.cpp:1146-1148: when the imported name differs from the
+            // decl's own identifier, record BOTH so cross-package extend-member visibility
+            // (IsDeclAccessible's type-alias fallback) can resolve via the decl's real name.
+            let ident = decl.identifier.Val()
+            if (ident != alias) {
+                values.add(ident)
+            }
         }
     }
 
