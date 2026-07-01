@@ -289,8 +289,24 @@ public open class CGType {
         }
         let declaredInfo = DeclareTypeInfoGlobal(cgMod, chirType, cgGenericKind)
         typeInfo = declaredInfo
-        DefineTypeInfoGlobalIfNeeded(cgMod, chirType, declaredInfo)
+        // Faithful to C++ CGType::GetOrCreateTypeInfo (CGType.cpp:254-256): queue the concrete
+        // definition instead of defining it inline. Inline definition recurses through
+        // BuildConcreteTypeInfoInitializer -> fields/type-args -> GetOrCreateTypeInfo, and because the
+        // initializer (hence the LLVMIsDeclaration guard) is only set AFTER that recursion, a recursive
+        // type never terminates. Deferring to CGModule.GenTypeInfo()'s drain defines each type to
+        // completion before the next, so cyclic references hit the already-defined guard.
+        if (unsafe { LLVMIsDeclaration(declaredInfo) } != 0) {
+            cgMod.DelayGenTypeInfo(this)
+        }
         return declaredInfo
+    }
+
+    // Mirror C++ CGType::GenTypeInfo (CGType.cpp:616): define this type's concrete TypeInfo global.
+    // Invoked from CGModule.GenTypeInfo()'s drain loop.
+    public func GenTypeInfo(): Unit {
+        if (let Some(ti) <- typeInfo) {
+            DefineTypeInfoGlobalIfNeeded(cgMod, chirType, ti)
+        }
     }
 
     public func GetOrCreateTypeTemplate(): LLVMValueRef {

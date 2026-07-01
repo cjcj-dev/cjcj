@@ -89,6 +89,10 @@ public class CGModule {
     // only blocks genuine self-recursion, matching C++'s per-type cache (CGType.cpp:165-173).
     private let enumClassificationStack: HashSet<String> = HashSet<String>()
     private var diBuilder: Option<DIBuilder> = None
+    // Faithful to C++ CGModule::delayGenTypeInfo (CGModule.h:316): concrete TypeInfo definitions are
+    // queued here and drained iteratively by GenTypeInfo() rather than defined recursively inline, so a
+    // recursive type (a field/type-arg referencing the type being defined) does not infinitely recurse.
+    private let delayGenTypeInfo: ArrayList<CGType> = ArrayList<CGType>()
 
     public init(subCHIRPackage: SubCHIRPackage, cgPkgCtx: CGPkgContext) {
         cgCtx = CGContext(subCHIRPackage, cgPkgCtx)
@@ -103,6 +107,22 @@ public class CGModule {
 
     public func GetCGContext(): CGContext { return cgCtx }
     public func GetLLVMContext(): LLVMContextHandle { return cgCtx.GetLLVMContext() }
+
+    // Mirror C++ CGModule::DelayGenTypeInfo (CGModule.h:287): queue a CGType whose TypeInfo global has
+    // been declared but not yet defined.
+    public func DelayGenTypeInfo(cgType: CGType): Unit {
+        delayGenTypeInfo.add(cgType)
+    }
+
+    // Mirror C++ CGModule::GenTypeInfo (CGModule.cpp:124-130): drain the delayed-TypeInfo stack,
+    // defining each queued type. Draining a type may enqueue further types (its fields/type args); the
+    // loop runs until the stack is empty. LIFO to match C++ std::stack ordering.
+    public func GenTypeInfo(): Unit {
+        while (!delayGenTypeInfo.isEmpty()) {
+            let cgType = delayGenTypeInfo.remove(at: delayGenTypeInfo.size - 1)
+            cgType.GenTypeInfo()
+        }
+    }
 
     public func OwnsCustomTypeDef(def: CustomTypeDef): Bool {
         return cgCtx.GetSubCHIRPackage().OwnsCustomDef(def)

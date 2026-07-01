@@ -57,6 +57,9 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         RedefineTypeInfosForCustomDefs(cgMod)
         let keepTypesFunc = KeepSomeTypesManually(cgMod)
         EmitStaticGenericTIsAndLLVMUsed(cgMod, keepTypesFunc)
+        // Mirror C++ EmitPackageIR.cpp:372 cgMod.GenTypeInfo(): drain the delayed concrete-TypeInfo
+        // definitions (queued by CGType.GetOrCreateTypeInfo) before optimization.
+        cgMod.GenTypeInfo()
         cgMod.Opt()
         cgMod.EraseUselessInstsAndDeclarations()
     }
