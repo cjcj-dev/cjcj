@@ -2823,8 +2823,9 @@ public func ChkCallExprWithDiag(typeManager: TypeManager, diag: BasicDiagnosticE
     return ChkCallExpr(typeManager, Some(diag), target, ce)
 }
 
-public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>, ce: CallExpr): Bool {
-    return ChkCallExprWithArgChecker(typeManager, diag, target, ce, None)
+public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>, ce: CallExpr,
+    ctx!: Option<ASTContext> = None): Bool {
+    return ChkCallExprWithArgChecker(typeManager, diag, target, ce, None, ctx: ctx)
 }
 
 public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
@@ -2930,8 +2931,8 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
     return false
 }
 
-public func SynCallExpr(typeManager: TypeManager, ce: CallExpr): Ty {
-    if (ChkCallExpr(typeManager, None, None, ce)) {
+public func SynCallExpr(typeManager: TypeManager, ce: CallExpr, ctx!: Option<ASTContext> = None): Ty {
+    if (ChkCallExpr(typeManager, None, None, ce, ctx: ctx)) {
         return ce.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return TypeManager.GetInvalidTy()

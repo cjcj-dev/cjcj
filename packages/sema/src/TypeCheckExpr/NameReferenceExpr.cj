@@ -446,23 +446,23 @@ private func SynCallChildren(typeManager: TypeManager, ce: CallExpr): Bool {
     return ok
 }
 
-private func SynCallExprShallow(typeManager: TypeManager, ce: CallExpr): Ty {
+private func SynCallExprShallow(typeManager: TypeManager, ce: CallExpr, ctx!: Option<ASTContext> = None): Ty {
     if (!SynCallChildren(typeManager, ce)) {
         return TcInvalid(ce)
     }
-    let callTy = SynCallExpr(typeManager, ce)
+    let callTy = SynCallExpr(typeManager, ce, ctx: ctx)
     if (Ty.IsTyCorrect(callTy)) {
         return callTy
     }
     return TcInvalid(ce)
 }
 
-private func ChkCallExprShallow(typeManager: TypeManager, target: Ty, ce: CallExpr): Bool {
+private func ChkCallExprShallow(typeManager: TypeManager, target: Ty, ce: CallExpr, ctx!: Option<ASTContext> = None): Bool {
     if (!SynCallChildren(typeManager, ce)) {
         let _ = TcInvalid(ce)
         return false
     }
-    if (ChkCallExpr(typeManager, None, Some(target), ce)) {
+    if (ChkCallExpr(typeManager, None, Some(target), ce, ctx: ctx)) {
         return true
     }
     if (Ty.IsTyCorrect(ce.GetTy())) {
@@ -604,7 +604,7 @@ private func AddUpperBoundTargetMap(ma: MemberAccess, target: Decl, upperBound: 
 }
 
 public func SynExprShallow(typeManager: TypeManager, expr: Expr,
-    diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    diag!: Option<BasicDiagnosticEngine> = None, ctx!: Option<ASTContext> = None): Ty {
     if (let Some(desugar) <- expr.desugarExpr) {
         if (let Some(desugarTy) <- desugar.GetTy()) {
             expr.SetTy(desugarTy)
@@ -619,7 +619,7 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
     if (let Some(value) <- (expr as LitConstExpr)) { return SynLitConstExpr(value, diag: diag) }
     if (let Some(value) <- (expr as ParenExpr)) { return SynParenExpr(typeManager, value) }
     if (let Some(value) <- (expr as TupleLit)) { return SynTupleLit(typeManager, value) }
-    if (let Some(value) <- (expr as CallExpr)) { return SynCallExprShallow(typeManager, value) }
+    if (let Some(value) <- (expr as CallExpr)) { return SynCallExprShallow(typeManager, value, ctx: ctx) }
     if (let Some(value) <- (expr as Block)) { return SynBlock(typeManager, value, diag: diag) }
     if (let Some(value) <- (expr as UnaryExpr)) { return SynUnaryExpr(typeManager, value) }
     if (let Some(value) <- (expr as BinaryExpr)) { return SynBinaryExpr(typeManager, value, diag: diag) }
@@ -668,7 +668,7 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     if (let Some(value) <- (expr as LitConstExpr)) { return ChkLitConstExpr(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as ParenExpr)) { return ChkParenExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as TupleLit)) { return ChkTupleLit(typeManager, target, value, diag: diag) }
-    if (let Some(value) <- (expr as CallExpr)) { return ChkCallExprShallow(typeManager, target, value) }
+    if (let Some(value) <- (expr as CallExpr)) { return ChkCallExprShallow(typeManager, target, value, ctx: ctx) }
     if (let Some(value) <- (expr as Block)) { return ChkBlock(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as UnaryExpr)) { return ChkUnaryExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as BinaryExpr)) { return ChkBinaryExpr(typeManager, target, value, ctx: ctx, diag: diag) }
@@ -680,7 +680,7 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     if (let Some(value) <- (expr as LambdaExpr)) { return ChkLamExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as TryExpr)) { return ChkTryExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as IfAvailableExpr)) { return ChkIfAvailableExpr(typeManager, target, value) }
-    if (let Some(value) <- (expr as SubscriptExpr)) { return ChkSubscriptExpr(typeManager, target, value) }
+    if (let Some(value) <- (expr as SubscriptExpr)) { return ChkSubscriptExpr(typeManager, target, value, ctx: ctx) }
     if (let Some(value) <- (expr as RangeExpr)) { return ChkRangeExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as IsExpr)) { return ChkIsExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as AsExpr)) { return ChkAsExpr(typeManager, target, value, None) }

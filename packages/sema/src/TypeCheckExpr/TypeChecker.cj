@@ -3672,7 +3672,7 @@ public class TypeChecker {
         }
         if (let Some(subscript) <- (expr as SubscriptExpr)) {
             SynthesizeSubscriptChildren(ctx, subscript)
-            return FinishSynthesize(ctx, subscript, SynSubscriptExpr(impl.typeManager, subscript))
+            return FinishSynthesize(ctx, subscript, SynSubscriptExpr(impl.typeManager, subscript, ctx: Some(ctx)))
         }
         if (let Some(assign) <- (expr as AssignExpr)) {
             SynthesizeAssignChildren(ctx, assign)

@@ -132,9 +132,10 @@ private func ChkSubscriptOverload(typeManager: TypeManager, target: Option<Ty>, 
     return false
 }
 
-public func ChkSubscriptExpr(typeManager: TypeManager, target: Ty, se: SubscriptExpr): Bool {
+public func ChkSubscriptExpr(typeManager: TypeManager, target: Ty, se: SubscriptExpr,
+    ctx!: Option<ASTContext> = None): Bool {
     if (let Some(desugar) <- se.desugarExpr) {
-        if (ChkExprShallow(typeManager, target, desugar)) {
+        if (ChkExprShallow(typeManager, target, desugar, ctx: ctx)) {
             PropagateSubscriptDesugarTarget(se, desugar)
             se.SetTy(TcTyOrInvalid(desugar))
             return true
@@ -150,7 +151,7 @@ public func ChkSubscriptExpr(typeManager: TypeManager, target: Ty, se: Subscript
     }
     let baseExpr = se.baseExpr.getOrThrow()
     SetIsNotAlone(baseExpr)
-    let baseTy = SynExprShallow(typeManager, baseExpr)
+    let baseTy = SynExprShallow(typeManager, baseExpr, ctx: ctx)
     if (!Ty.IsTyCorrect(baseTy) || !SynIndexExprs(typeManager, se)) {
         let _ = SubscriptInvalid(se)
         return false
@@ -164,9 +165,9 @@ public func ChkSubscriptExpr(typeManager: TypeManager, target: Ty, se: Subscript
     return ChkSubscriptOverload(typeManager, Some(target), se)
 }
 
-public func SynSubscriptExpr(typeManager: TypeManager, se: SubscriptExpr): Ty {
+public func SynSubscriptExpr(typeManager: TypeManager, se: SubscriptExpr, ctx!: Option<ASTContext> = None): Ty {
     if (let Some(desugar) <- se.desugarExpr) {
-        let desugarTy = SynExprShallow(typeManager, desugar)
+        let desugarTy = SynExprShallow(typeManager, desugar, ctx: ctx)
         if (Ty.IsTyCorrect(desugarTy)) {
             PropagateSubscriptDesugarTarget(se, desugar)
             se.SetTy(desugarTy)
@@ -181,7 +182,7 @@ public func SynSubscriptExpr(typeManager: TypeManager, se: SubscriptExpr): Ty {
     }
     let baseExpr = se.baseExpr.getOrThrow()
     SetIsNotAlone(baseExpr)
-    let baseTy = SynExprShallow(typeManager, baseExpr)
+    let baseTy = SynExprShallow(typeManager, baseExpr, ctx: ctx)
     if (!Ty.IsTyCorrect(baseTy) || !SynIndexExprs(typeManager, se)) {
         return SubscriptInvalid(se)
     }
