@@ -353,6 +353,96 @@ private func TypeCheckTypeGetAliasTargetTy(
     return Some(tm.SubstituteTypeAliasInTy(aliasBody.GetTy().getOrThrow(), typeMapping: typeMapping))
 }
 
+// Mirrors C++ GetLastTypeAliasTargetVisit (src/Sema/TypeCheckUtil.cpp:890): walk a type-alias
+// chain (type A = B; type B = ArrayList<Int64>) down to the innermost alias whose body is a
+// non-alias type, so its type-argument Type nodes can be read.
+private func TypeCheckTypeGetLastAliasTargetVisit(decl: TypeAliasDecl, visited: HashSet<Int64>): TypeAliasDecl {
+    if (visited.contains(decl.objectId)) {
+        return decl
+    }
+    visited.add(decl.objectId)
+    if (let Some(typeNode) <- decl.typeNode) {
+        if (let Some(realTarget) <- typeNode.GetTarget()) {
+            if (let Some(innerAlias) <- (realTarget as TypeAliasDecl)) {
+                if (innerAlias.typeNode.isSome()) {
+                    return TypeCheckTypeGetLastAliasTargetVisit(innerAlias, visited)
+                }
+            }
+        }
+    }
+    return decl
+}
+
+// Mirrors C++ HandleAlias (src/Sema/TypeCheckExpr.cpp:340-365), reached on the call-base
+// candidate path via the Expr overload GetRealTarget(Expr*,Decl*) (TypeCheckExpr.cpp:255) from
+// GetCallBaseCandidates (TypeCheckCall.cpp:2314). The self-hosted port only ported the type side
+// of alias-arg handling (TypeCheckType), never the expression side, so a call base RefExpr whose
+// target is a type alias to a generic instantiated type (e.g. `type Foo = ArrayList<Int64>;
+// Foo()`) never received the alias's concrete type arguments; the constructor's type parameters
+// then stayed unbound and the result Ty became Invalid (reaching CHIR and throwing).
+//
+// When the alias use has no explicit type arguments, inject the alias's concrete type arguments
+// onto the base RefExpr's typeArguments (marked compiler-added, mirroring compilerAddedTyArgs) so
+// the ordinary generic-constructor instantiation path binds them.
+public func HandleAliasOnCallBase(tm: TypeManager, ce: CallExpr): Unit {
+    let base = match (ce.baseFunc) {
+        case Some(v) => v
+        case None => return
+    }
+    let refExpr = match (base as NameReferenceExpr) {
+        case Some(v) => v
+        case None => return
+    }
+    // Only inject when the alias use itself carries no explicit type arguments (the failing case).
+    if (!refExpr.typeArguments.isEmpty()) {
+        return
+    }
+    let target = match (refExpr.GetTarget()) {
+        case Some(v) => v
+        case None => return
+    }
+    let aliasDecl = match (target as TypeAliasDecl) {
+        case Some(v) => v
+        case None => return
+    }
+    if (aliasDecl.typeNode.isNone()) {
+        return
+    }
+    let aliasTargetTy = match (TypeCheckTypeGetAliasTargetTy(tm, aliasDecl, refExpr.typeArguments)) {
+        case Some(v) => v
+        case None => return
+    }
+    if (aliasTargetTy.typeArgs.isEmpty()) {
+        return
+    }
+    let innerAlias = TypeCheckTypeGetLastAliasTargetVisit(aliasDecl, HashSet<Int64>())
+    let body = match (innerAlias.typeNode) {
+        case Some(v) => v
+        case None => return
+    }
+    let bodyArgs = body.GetTypeArgs()
+    if (bodyArgs.size != aliasTargetTy.typeArgs.size) {
+        return
+    }
+    let newArgs = ArrayList<Type>()
+    var idx = 0
+    while (idx < bodyArgs.size) {
+        match (ASTCloner.Clone(bodyArgs[idx]) as Type) {
+            case Some(cloned) =>
+                cloned.SetTy(aliasTargetTy.typeArgs[idx])
+                cloned.EnableAttr(Attribute.COMPILER_ADD)
+                newArgs.add(cloned)
+            case None => return
+        }
+        idx++
+    }
+    for (arg in newArgs) {
+        refExpr.typeArguments.add(arg)
+    }
+    let _ = UpdateInstTysWithTypeArgs(refExpr)
+    refExpr.compilerAddedTyArgs = true
+}
+
 public func TypeCheckTypeCheckRefType(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,

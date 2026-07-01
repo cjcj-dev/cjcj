@@ -2870,6 +2870,11 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
         ce.callKind = CallKind.CALL_BUILTIN_FUNCTION
         return true
     }
+    // Mirror C++ GetCallBaseCandidates (TypeCheckCall.cpp:2314): resolving the call-base target
+    // runs HandleAlias, which injects a type alias's concrete type arguments onto the base RefExpr
+    // so the ordinary generic-constructor instantiation path can bind them. The self-hosted port
+    // did this only on the type side; do it here for the expression/call side.
+    HandleAliasOnCallBase(typeManager, ce)
     let candidatesBefore = CollectCallBaseFuncCandidates(ce)
     let candidates = FilterCandidates(typeManager, diag, ctx, ce, candidatesBefore)
     if (let None <- ResolveDeclForCallBase(ce, candidatesBefore)) {
