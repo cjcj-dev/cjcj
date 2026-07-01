@@ -976,23 +976,14 @@ public class TypeChecker {
     private func SeedImportedExtendMaps(ctx: ASTContext): Unit {
         let extends = ArrayList<ExtendDecl>()
         for (packageDecl in ctx.packageDecls) {
-            for (file in packageDecl.srcPackage.files) {
-                for (decl in file.decls) {
-                    if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-                        extends.add(extendDecl)
-                    }
-                }
-                for (decl in file.exportedInternalDecls) {
-                    if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-                        extends.add(extendDecl)
-                    }
-                }
+            if (!packageDecl.srcPackage.TestAttr(Attribute.IMPORTED)) {
+                continue
             }
-            for (decl in packageDecl.srcPackage.genericInstantiatedDecls) {
+            IterateToplevelDecls(packageDecl.srcPackage, { decl: Decl =>
                 if (let Some(extendDecl) <- (decl as ExtendDecl)) {
                     extends.add(extendDecl)
                 }
-            }
+            })
         }
         TypeCheckExtendUpdateExtendMap(impl.typeManager, extends)
     }

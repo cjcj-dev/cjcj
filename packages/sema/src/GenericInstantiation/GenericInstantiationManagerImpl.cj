@@ -276,6 +276,8 @@ public class GenericInstantiationManagerImpl {
     private let instantiations: ArrayList<GenericInstantiationRecord> = ArrayList<GenericInstantiationRecord>()
     private let structContext: ArrayList<Decl> = ArrayList<Decl>()
     private let usedSrcImportedDecls: ArrayList<Decl> = ArrayList<Decl>()
+    private let instantiationWalkerID: UInt32 = GetNextWalkerID()
+    private let rearrangeWalkerID: UInt32 = GetNextWalkerID()
 
     public init(ci: CompilerInstance) {
         this.ci = ci
@@ -456,7 +458,7 @@ public class GenericInstantiationManagerImpl {
     }
 
     private func InstantiateReferencedGenericsInNode(root: Node, pkg: Package): Unit {
-        let walker = Walker(root, visitPre: { node: Node =>
+        let walker = Walker(root, instantiationWalkerID, visitPre: { node: Node =>
             CheckNodeInstantiation(node, pkg)
         }, visitPost: { node: Node =>
             PopStructContext(node)
@@ -794,7 +796,7 @@ public class GenericInstantiationManagerImpl {
     }
 
     private func RearrangeReferencesInNode(root: Node, pkg: Package): Unit {
-        let walker = Walker(root, visitPre: { node: Node =>
+        let walker = Walker(root, rearrangeWalkerID, visitPre: { node: Node =>
             CheckNodeRearrangement(node, pkg)
         }, visitPost: { node: Node =>
             PopStructContext(node)

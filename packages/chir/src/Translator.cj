@@ -433,7 +433,18 @@ public class Translator {
     }
 
     public static func TranslateASTNode(node: AstNode, trans: Translator): Option<Value> {
+        var base = node
         let nodePtr = GetDesugaredExpr(node)
+        if (let Some(expr) <- (nodePtr as AstExpr)) {
+            if (let Some(mapExpr) <- expr.mapExpr) {
+                base = mapExpr
+            }
+        }
+        if (let Some(baseExpr) <- (base as AstExpr)) {
+            if (let Some(value) <- trans.TryGetExprValue(baseExpr)) {
+                return value
+            }
+        }
         return match (nodePtr.astKind) {
             case ASTKind.MAIN_DECL => trans.Visit(RequireNodeAsMainDecl(nodePtr))
             case ASTKind.FUNC_DECL => trans.Visit(RequireNodeAsFuncDecl(nodePtr))

@@ -1576,7 +1576,7 @@ private class CjoSignatureMaterializer {
         decl.toBeCompiled = false
         ApplyFlatAttributes(reader, record, decl)
         ApplyFlatAnnotations(reader, record, decl)
-        MarkFlatImportedDecl(reader, record, decl)
+        MarkFlatImportedDecl(decl)
         ApplyFlatDeclHash(reader, record, decl)
     }
 
@@ -1792,19 +1792,18 @@ private class CjoSignatureMaterializer {
         }
     }
 
-    private func MarkFlatImportedDecl(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
-        decl.curFile = Some(FileByFlatIndex(FlatDeclFileIndex(reader, record)))
+    private func MarkFlatImportedDecl(decl: Decl): Unit {
+        if (let Some(file) <- idToFileMap.get(decl.begin.fileID)) {
+            decl.curFile = Some(file)
+        } else if (decl.begin.fileID == 0u64 && !pkg.files.isEmpty()) {
+            decl.curFile = Some(pkg.files[0])
+        }
         decl.EnableAttr(Attribute.IMPORTED)
     }
 
     private func FileByFlatIndex(index: UInt32): File {
         return filesByIndex.get(index) ??
             throw IllegalStateException("FlatBuffer file index ${index} is not registered for package '${packageName}'")
-    }
-
-    private func FlatDeclFileIndex(reader: CjoFlatBuffer, record: CjoFlatDecl): UInt32 {
-        let beginPos = reader.TableField(record.table, 14)
-        return if (beginPos >= 0) { reader.U32At(beginPos) } else { 0u32 }
     }
 
     private func LoadFlatPosition(reader: CjoFlatBuffer, posTable: Int64): Position {
@@ -4347,6 +4346,9 @@ public class ImportManager {
         HashMap<String, HashMap<String, ArrayList<Decl>>>()
     private let packageMembersVisited: HashSet<String> = HashSet<String>()
     private let typeAliasCache: HashMap<Int64, Ty> = HashMap<Int64, Ty>()
+    private let importedDeclsMap: HashMap<String, ArrayList<Decl>> = HashMap<String, ArrayList<Decl>>()
+    private let fileImportedDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
+        HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
     private var canInlineImportedSource: Bool = false
 
     public init(diag: DiagnosticEngine, typeManager: FaithfulSemaTypeManager, globalOptions: GlobalOptions) {
@@ -4428,6 +4430,8 @@ public class ImportManager {
         sourcePackagesForMembers.clear()
         packageMembers.clear()
         packageMembersVisited.clear()
+        importedDeclsMap.clear()
+        fileImportedDeclsMap.clear()
         let sourcePackages = HashSet<String>()
         for (pkg in pkgs) {
             if (pkg.fullPackageName.isEmpty()) {
@@ -4465,6 +4469,9 @@ public class ImportManager {
         SubstituteImportedTypeAliasTy(pkgs, opts)
         for (pkg in pkgs) {
             RebuildPackageMembers(pkg.fullPackageName)
+        }
+        for (pkg in pkgs) {
+            AddImportedDeclsForSourcePackage(pkg)
         }
         CheckImports(pkgs)
         return diag.GetErrorCount() == 0
@@ -4540,9 +4547,16 @@ public class ImportManager {
 
     public func GetImportedDecls(file: File): ArrayList<ImportedDeclGroup> {
         let out = ArrayList<ImportedDeclGroup>()
-        if (let Some(pkg) <- file.curPackage) {
-            for (importSpec in file.imports) {
-                CollectDeclsFromImport(pkg.fullPackageName, importSpec, out)
+        for (name in importedDeclsMap.keys()) {
+            if (let Some(decls) <- importedDeclsMap.get(name)) {
+                out.add(ImportedDeclGroup(name, decls))
+            }
+        }
+        if (let Some(fileMap) <- fileImportedDeclsMap.get(file.fileHash)) {
+            for (name in fileMap.keys()) {
+                if (let Some(decls) <- fileMap.get(name)) {
+                    out.add(ImportedDeclGroup(name, decls))
+                }
             }
         }
         return out
@@ -4591,8 +4605,8 @@ public class ImportManager {
         return None
     }
 
-    private func CollectDeclsFromImport(srcFullPackageName: String, importSpec: ImportSpec,
-        out: ArrayList<ImportedDeclGroup>): Unit {
+    private func CollectDeclsFromImportToMap(srcFullPackageName: String, importSpec: ImportSpec,
+        targetMap: HashMap<String, ArrayList<Decl>>): Unit {
         if (importSpec.IsImportMulti()) {
             return
         }
@@ -4602,13 +4616,15 @@ public class ImportManager {
         }
         if (let Some(pkg) <- GetPackage(targetPackageName)) {
             BuildPackageMembers(targetPackageName)
+            let relation = GetFrontendPackageRelation(srcFullPackageName, targetPackageName)
+            let importLevel = GetAccessLevel(importSpec)
             if (importSpec.IsImportAll()) {
                 if (let Some(members) <- packageMembers.get(targetPackageName)) {
                     for (name in members.keys()) {
                         if (let Some(decls) <- members.get(name)) {
                             for (decl in decls) {
-                                if (IsDeclVisibleFrom(srcFullPackageName, decl)) {
-                                    AddImportedDeclGroupValue(out, name, decl)
+                                if (IsVisibleImportedDecl(importLevel, relation, decl)) {
+                                    PutImportedDecl(targetMap, name, decl)
                                 }
                             }
                         }
@@ -4620,7 +4636,7 @@ public class ImportManager {
                 } else {
                     LastPackageName(targetPackageName)
                 }
-                AddImportedDeclGroupValue(out, importedName, PackageDecl(pkg))
+                PutImportedDecl(targetMap, importedName, PackageDecl(pkg))
             } else {
                 let importedName = if (importSpec.IsImportAlias()) {
                     importSpec.content.aliasName.Val()
@@ -4630,14 +4646,35 @@ public class ImportManager {
                 if (let Some(members) <- packageMembers.get(targetPackageName)) {
                     if (let Some(decls) <- members.get(importSpec.content.identifier.Val())) {
                         for (decl in decls) {
-                            if (IsDeclVisibleFrom(srcFullPackageName, decl)) {
-                                AddImportedDeclGroupValue(out, importedName, decl)
+                            if (IsVisibleImportedDecl(importLevel, relation, decl)) {
+                                PutImportedDecl(targetMap, importedName, decl)
                             }
                         }
                     }
                 }
+                importSpec.content.isDecl = true
             }
         }
+    }
+
+    private func AddImportedDeclsForSourcePackage(pkg: Package): Unit {
+        for (file in pkg.files) {
+            for (importSpec in file.imports) {
+                let declMap = if (importSpec.IsReExport()) {
+                    importedDeclsMap
+                } else {
+                    GetFileImportedDeclMap(file.fileHash)
+                }
+                CollectDeclsFromImportToMap(pkg.fullPackageName, importSpec, declMap)
+            }
+        }
+    }
+
+    private func GetFileImportedDeclMap(fileHash: UInt64): HashMap<String, ArrayList<Decl>> {
+        if (!fileImportedDeclsMap.contains(fileHash)) {
+            fileImportedDeclsMap[fileHash] = HashMap<String, ArrayList<Decl>>()
+        }
+        return fileImportedDeclsMap.get(fileHash).getOrThrow()
     }
 
     private func IsPackageImport(importSpec: ImportSpec, targetPackageName: String): Bool {
@@ -4652,20 +4689,8 @@ public class ImportManager {
         return false
     }
 
-    private func IsDeclVisibleFrom(srcFullPackageName: String, decl: Decl): Bool {
-        if (decl.TestAttr(Attribute.PUBLIC)) {
-            return true
-        }
-        if (decl.fullPackageName == srcFullPackageName) {
-            return true
-        }
-        if (decl.TestAttr(Attribute.INTERNAL)) {
-            return RootPackageName(decl.fullPackageName) == RootPackageName(srcFullPackageName)
-        }
-        if (decl.TestAttr(Attribute.PROTECTED)) {
-            return RootPackageName(decl.fullPackageName) == RootPackageName(srcFullPackageName)
-        }
-        return false
+    private func IsVisibleImportedDecl(importLevel: AccessLevel, relation: FrontendPackageRelation, decl: Decl): Bool {
+        return IsFrontendCompatibleAccessLevel(importLevel, GetAccessLevel(decl)) && IsFrontendVisible(decl, relation)
     }
 
     private func IsFrontendVisible(node: Node, relation: FrontendPackageRelation): Bool {
@@ -4676,7 +4701,7 @@ public class ImportManager {
     }
 
     private func IsFrontendCompatibleAccessLevel(srcLevel: AccessLevel, refLevel: AccessLevel): Bool {
-        return FrontendAccessLevelIndex(srcLevel) >= FrontendAccessLevelIndex(refLevel)
+        return FrontendAccessLevelIndex(srcLevel) <= FrontendAccessLevelIndex(refLevel)
     }
 
     private func FrontendAccessLevelIndex(level: AccessLevel): Int64 {
@@ -4727,18 +4752,6 @@ public class ImportManager {
         if (let Some(values) <- map.get(name)) {
             AddDeclIfMissing(values, decl)
         }
-    }
-
-    private func AddImportedDeclGroupValue(groups: ArrayList<ImportedDeclGroup>, name: String, decl: Decl): Unit {
-        for (group in groups) {
-            if (group.name == name) {
-                AddDeclIfMissing(group.decls, decl)
-                return
-            }
-        }
-        let decls = ArrayList<Decl>()
-        decls.add(decl)
-        groups.add(ImportedDeclGroup(name, decls))
     }
 
     private func AddDeclIfMissing(values: ArrayList<Decl>, decl: Decl): Unit {
@@ -4826,14 +4839,6 @@ public class ImportManager {
             return fullPackageName
         }
         return parts[parts.size - 1]
-    }
-
-    private func RootPackageName(fullPackageName: String): String {
-        let parts = SplitQualifiedName(fullPackageName)
-        if (parts.isEmpty()) {
-            return fullPackageName
-        }
-        return parts[0]
     }
 
     private func SplitQualifiedName(fullPackageName: String): ArrayList<String> {

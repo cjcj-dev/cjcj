@@ -12,23 +12,15 @@ import cangjie_compiler::utils.CJC_ASSERT
 private var currentOptLevel: OptimizationLevel = OptimizationLevel.O0
 private var currentOutputMode: OutputMode = OutputMode.EXECUTABLE
 
-private class InstantiationPair {
-    public var genericDecl: Decl
-    public var instantiatedDecl: Decl
-
-    public init(genericDecl: Decl, instantiatedDecl: Decl) {
-        this.genericDecl = genericDecl
-        this.instantiatedDecl = instantiatedDecl
-    }
-}
-
-private let ins2generic: ArrayList<InstantiationPair> = ArrayList<InstantiationPair>()
-private let generic2ins: ArrayList<InstantiationPair> = ArrayList<InstantiationPair>()
+private let ins2generic: HashMap<Int64, Decl> = HashMap<Int64, Decl>()
+private let generic2ins: HashMap<Int64, ArrayList<Decl>> = HashMap<Int64, ArrayList<Decl>>()
 
 private func hasInstantiation(genericDecl: Decl, instantiatedDecl: Decl): Bool {
-    for (entry in generic2ins) {
-        if (SameDecl(entry.genericDecl, genericDecl) && SameDecl(entry.instantiatedDecl, instantiatedDecl)) {
-            return true
+    if (let Some(values) <- generic2ins.get(genericDecl.objectId)) {
+        for (value in values) {
+            if (SameDecl(value, instantiatedDecl)) {
+                return true
+            }
         }
     }
     return false
@@ -38,8 +30,14 @@ private func registerInstantiation(genericDecl: Decl, instantiatedDecl: Decl): U
     if (hasInstantiation(genericDecl, instantiatedDecl)) {
         return
     }
-    generic2ins.add(InstantiationPair(genericDecl, instantiatedDecl))
-    ins2generic.add(InstantiationPair(genericDecl, instantiatedDecl))
+    let genericKey = genericDecl.objectId
+    if (!generic2ins.contains(genericKey)) {
+        generic2ins[genericKey] = ArrayList<Decl>()
+    }
+    if (let Some(values) <- generic2ins.get(genericKey)) {
+        values.add(instantiatedDecl)
+    }
+    ins2generic[instantiatedDecl.objectId] = genericDecl
 }
 
 public func SetOptLevel(opts: OptionGlobalOptions): Unit {
@@ -105,17 +103,17 @@ public func RequireInstantiation(decl: Decl): Bool {
     return decl.HasAnno(AstAnnotationKind.FROZEN)
 }
 
-private func collectDeclPair(source: Node, target: Node, pairs: ArrayList<InstantiationPair>): Unit {
+private func collectDeclPair(source: Node, target: Node, pairs: ArrayList<(Decl, Decl)>): Unit {
     if (let Some(sourceDecl) <- (source as Decl)) {
         if (let Some(targetDecl) <- (target as Decl)) {
             targetDecl.genericDecl = sourceDecl
-            pairs.add(InstantiationPair(sourceDecl, targetDecl))
+            pairs.add((sourceDecl, targetDecl))
         }
     }
 }
 
 private func InstantiationVisitFunc(source: Node, target: Node, visitor: (Node, Node) -> Unit,
-    pairs: ArrayList<InstantiationPair>): Unit {
+    pairs: ArrayList<(Decl, Decl)>): Unit {
     collectDeclPair(source, target, pairs)
     visitor(source, target)
 }
@@ -229,17 +227,17 @@ private func isReachableDecl(decls: ArrayList<Decl>, decl: Decl): Bool {
     return false
 }
 
-private func RegisterReachableDeclPairs(root: Node, pairs: ArrayList<InstantiationPair>): Unit {
+private func RegisterReachableDeclPairs(root: Node, pairs: ArrayList<(Decl, Decl)>): Unit {
     let reachableDecls = collectReachableDecls(root)
     for (pair in pairs) {
-        if (isReachableDecl(reachableDecls, pair.instantiatedDecl)) {
-            registerInstantiation(pair.genericDecl, pair.instantiatedDecl)
+        if (isReachableDecl(reachableDecls, pair[1])) {
+            registerInstantiation(pair[0], pair[1])
         }
     }
 }
 
 private func clonedGenericDecl(generic: Generic, visitor: (Node, Node) -> Unit): Generic {
-    let pairs = ArrayList<InstantiationPair>()
+    let pairs = ArrayList<(Decl, Decl)>()
     if (let Some(cloned) <- (ASTCloner.Clone(generic, { source: Node, target: Node =>
         InstantiationVisitFunc(source, target, visitor, pairs)
     }) as Generic)) {
@@ -251,7 +249,7 @@ private func clonedGenericDecl(generic: Generic, visitor: (Node, Node) -> Unit):
 }
 
 private func clonedNode(node: Node, visitor: (Node, Node) -> Unit): Node {
-    let pairs = ArrayList<InstantiationPair>()
+    let pairs = ArrayList<(Decl, Decl)>()
     let cloned = ASTCloner.Clone(node, { source: Node, target: Node =>
         InstantiationVisitFunc(source, target, visitor, pairs)
     })
@@ -308,10 +306,8 @@ public class PartialInstantiation {
         if (clonedDecl.TestAttr(Attribute.GENERATED_TO_MOCK)) {
             return clonedDecl
         }
-        for (entry in ins2generic) {
-            if (SameDecl(entry.instantiatedDecl, clonedDecl)) {
-                return entry.genericDecl
-            }
+        if (let Some(genericDecl) <- ins2generic.get(clonedDecl.objectId)) {
+            return genericDecl
         }
         CJC_ASSERT(false)
         return clonedDecl
@@ -319,9 +315,9 @@ public class PartialInstantiation {
 
     public static func GetInstantiatedDecl(genericDecl: Decl): ArrayList<Decl> {
         let out = ArrayList<Decl>()
-        for (entry in generic2ins) {
-            if (SameDecl(entry.genericDecl, genericDecl)) {
-                out.add(entry.instantiatedDecl)
+        if (let Some(values) <- generic2ins.get(genericDecl.objectId)) {
+            for (value in values) {
+                out.add(value)
             }
         }
         return out
