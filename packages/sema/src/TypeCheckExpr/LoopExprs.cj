@@ -185,10 +185,10 @@ private func ForInBuiltinElementTy(inTy: Ty): Ty {
     return TypeManager.GetInvalidTy()
 }
 
-public func SynWhileExpr(typeManager: TypeManager, we: WhileExpr): Ty {
+public func SynWhileExpr(typeManager: TypeManager, we: WhileExpr, ctx!: Option<ASTContext> = None): Ty {
     var ok = true
     if (let Some(condExpr) <- we.condExpr) {
-        ok = TcCheckCondition(typeManager, condExpr) && ok
+        ok = TcCheckCondition(typeManager, condExpr, ctx: ctx) && ok
     } else {
         ok = false
     }
@@ -210,8 +210,8 @@ public func SynWhileExpr(typeManager: TypeManager, we: WhileExpr): Ty {
     return LoopInvalid(we)
 }
 
-public func ChkWhileExpr(typeManager: TypeManager, target: Ty, we: WhileExpr): Bool {
-    let actualTy = SynWhileExpr(typeManager, we)
+public func ChkWhileExpr(typeManager: TypeManager, target: Ty, we: WhileExpr, ctx!: Option<ASTContext> = None): Bool {
+    let actualTy = SynWhileExpr(typeManager, we, ctx: ctx)
     if (Ty.IsTyCorrect(actualTy) &&
         typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
         return true
@@ -220,7 +220,7 @@ public func ChkWhileExpr(typeManager: TypeManager, target: Ty, we: WhileExpr): B
     return false
 }
 
-public func SynDoWhileExpr(typeManager: TypeManager, dwe: DoWhileExpr): Ty {
+public func SynDoWhileExpr(typeManager: TypeManager, dwe: DoWhileExpr, ctx!: Option<ASTContext> = None): Ty {
     var ok = true
     if (let Some(body) <- dwe.body) {
         let bodyTy = SynBlock(typeManager, body, pos: SynPos.UNUSED)
@@ -233,7 +233,7 @@ public func SynDoWhileExpr(typeManager: TypeManager, dwe: DoWhileExpr): Ty {
         ok = false
     }
     if (let Some(condExpr) <- dwe.condExpr) {
-        ok = TcCheckCondition(typeManager, condExpr) && ok
+        ok = TcCheckCondition(typeManager, condExpr, ctx: ctx) && ok
     } else {
         ok = false
     }
@@ -245,8 +245,8 @@ public func SynDoWhileExpr(typeManager: TypeManager, dwe: DoWhileExpr): Ty {
     return LoopInvalid(dwe)
 }
 
-public func ChkDoWhileExpr(typeManager: TypeManager, target: Ty, dwe: DoWhileExpr): Bool {
-    let actualTy = SynDoWhileExpr(typeManager, dwe)
+public func ChkDoWhileExpr(typeManager: TypeManager, target: Ty, dwe: DoWhileExpr, ctx!: Option<ASTContext> = None): Bool {
+    let actualTy = SynDoWhileExpr(typeManager, dwe, ctx: ctx)
     if (Ty.IsTyCorrect(actualTy) &&
         typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
         return true
@@ -255,11 +255,11 @@ public func ChkDoWhileExpr(typeManager: TypeManager, target: Ty, dwe: DoWhileExp
     return false
 }
 
-public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr): Ty {
+public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr, ctx!: Option<ASTContext> = None): Ty {
     var ok = true
     var elementTy: Ty = TypeManager.GetInvalidTy()
     if (let Some(inExpression) <- fie.inExpression) {
-        let inTy = SynExprShallow(typeManager, inExpression)
+        let inTy = SynExprShallow(typeManager, inExpression, ctx: ctx)
         if (Ty.IsTyCorrect(inTy)) {
             elementTy = ForInIterableElementTy(typeManager, inExpression.curFile,
                 TcReplaceIdeal(typeManager, inExpression))
@@ -276,7 +276,7 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr): Ty {
         ok = false
     }
     if (let Some(patternGuard) <- fie.patternGuard) {
-        ok = TcCheckCondition(typeManager, patternGuard) && ok
+        ok = TcCheckCondition(typeManager, patternGuard, ctx: ctx) && ok
     }
     if (let Some(body) <- fie.body) {
         let bodyTy = SynBlock(typeManager, body, pos: SynPos.UNUSED)
@@ -299,8 +299,8 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr): Ty {
     return LoopInvalid(fie)
 }
 
-public func ChkForInExpr(typeManager: TypeManager, target: Ty, fie: ForInExpr): Bool {
-    let actualTy = SynForInExpr(typeManager, fie)
+public func ChkForInExpr(typeManager: TypeManager, target: Ty, fie: ForInExpr, ctx!: Option<ASTContext> = None): Bool {
+    let actualTy = SynForInExpr(typeManager, fie, ctx: ctx)
     if (Ty.IsTyCorrect(actualTy) &&
         typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
         return true

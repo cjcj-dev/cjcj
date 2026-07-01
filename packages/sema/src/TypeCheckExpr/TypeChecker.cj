@@ -3636,7 +3636,7 @@ public class TypeChecker {
         }
         if (expr.IsLoopExpr()) {
             SynthesizeLoopChildren(ctx, expr)
-            return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr, diag: impl.diag))
+            return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr, ctx: Some(ctx), diag: impl.diag))
         }
         if (let Some(returnExpr) <- (expr as ReturnExpr)) {
             if (let Some(fb) <- currentFuncBody) {

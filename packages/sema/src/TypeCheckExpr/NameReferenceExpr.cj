@@ -369,10 +369,10 @@ private func SynLetPatternDestructorCondition(typeManager: TypeManager, letDestr
 }
 
 private func TcCheckConditionInternal(typeManager: TypeManager, expr: Expr,
-    suppressIntroducingVariableError: Bool): Bool {
+    suppressIntroducingVariableError: Bool, ctx!: Option<ASTContext> = None): Bool {
     if (let Some(parenExpr) <- (expr as ParenExpr)) {
         if (let Some(innerExpr) <- parenExpr.expr) {
-            let ok = TcCheckConditionInternal(typeManager, innerExpr, suppressIntroducingVariableError)
+            let ok = TcCheckConditionInternal(typeManager, innerExpr, suppressIntroducingVariableError, ctx: ctx)
             parenExpr.SetTy(TcTyOrInvalid(innerExpr))
             return ok
         }
@@ -391,12 +391,12 @@ private func TcCheckConditionInternal(typeManager: TypeManager, expr: Expr,
             }
             var ok = true
             if (let Some(leftExpr) <- binaryExpr.leftExpr) {
-                ok = TcCheckConditionInternal(typeManager, leftExpr, suppressChildren) && ok
+                ok = TcCheckConditionInternal(typeManager, leftExpr, suppressChildren, ctx: ctx) && ok
             } else {
                 ok = false
             }
             if (let Some(rightExpr) <- binaryExpr.rightExpr) {
-                ok = TcCheckConditionInternal(typeManager, rightExpr, suppressChildren) && ok
+                ok = TcCheckConditionInternal(typeManager, rightExpr, suppressChildren, ctx: ctx) && ok
             } else {
                 ok = false
             }
@@ -408,11 +408,11 @@ private func TcCheckConditionInternal(typeManager: TypeManager, expr: Expr,
             return false
         }
     }
-    return ChkExprShallow(typeManager, TcBoolTy(), expr)
+    return ChkExprShallow(typeManager, TcBoolTy(), expr, ctx: ctx)
 }
 
-func TcCheckCondition(typeManager: TypeManager, expr: Expr): Bool {
-    return TcCheckConditionInternal(typeManager, expr, false)
+func TcCheckCondition(typeManager: TypeManager, expr: Expr, ctx!: Option<ASTContext> = None): Bool {
+    return TcCheckConditionInternal(typeManager, expr, false, ctx: ctx)
 }
 
 private func SynCallArg(typeManager: TypeManager, arg: FuncArg): Bool {
@@ -622,12 +622,15 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
     if (let Some(value) <- (expr as CallExpr)) { return SynCallExprShallow(typeManager, value, ctx: ctx) }
     if (let Some(value) <- (expr as Block)) { return SynBlock(typeManager, value, diag: diag) }
     if (let Some(value) <- (expr as UnaryExpr)) { return SynUnaryExpr(typeManager, value) }
-    if (let Some(value) <- (expr as BinaryExpr)) { return SynBinaryExpr(typeManager, value, diag: diag) }
+    if (let Some(value) <- (expr as BinaryExpr)) {
+        return SynBinaryExpr(typeManager, value, ctx: ctx,
+            synthesizer: Some({ operand: Expr => SynExprShallow(typeManager, operand, ctx: ctx) }), diag: diag)
+    }
     if (let Some(value) <- (expr as AssignExpr)) { return SynAssignExpr(typeManager, value) }
     if (let Some(value) <- (expr as IfExpr)) { return SynIfExpr(typeManager, value) }
-    if (let Some(value) <- (expr as WhileExpr)) { return SynWhileExpr(typeManager, value) }
-    if (let Some(value) <- (expr as DoWhileExpr)) { return SynDoWhileExpr(typeManager, value) }
-    if (let Some(value) <- (expr as ForInExpr)) { return SynForInExpr(typeManager, value) }
+    if (let Some(value) <- (expr as WhileExpr)) { return SynWhileExpr(typeManager, value, ctx: ctx) }
+    if (let Some(value) <- (expr as DoWhileExpr)) { return SynDoWhileExpr(typeManager, value, ctx: ctx) }
+    if (let Some(value) <- (expr as ForInExpr)) { return SynForInExpr(typeManager, value, ctx: ctx) }
     if (let Some(value) <- (expr as LambdaExpr)) { return SynLamExpr(typeManager, value) }
     if (let Some(value) <- (expr as TryExpr)) { return SynTryExpr(typeManager, value) }
     if (let Some(value) <- (expr as IfAvailableExpr)) { return SynIfAvailableExpr(typeManager, value) }
@@ -671,12 +674,15 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     if (let Some(value) <- (expr as CallExpr)) { return ChkCallExprShallow(typeManager, target, value, ctx: ctx) }
     if (let Some(value) <- (expr as Block)) { return ChkBlock(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as UnaryExpr)) { return ChkUnaryExpr(typeManager, target, value) }
-    if (let Some(value) <- (expr as BinaryExpr)) { return ChkBinaryExpr(typeManager, target, value, ctx: ctx, diag: diag) }
+    if (let Some(value) <- (expr as BinaryExpr)) {
+        return ChkBinaryExpr(typeManager, target, value, ctx: ctx,
+            synthesizer: Some({ operand: Expr => SynExprShallow(typeManager, operand, ctx: ctx) }), diag: diag)
+    }
     if (let Some(value) <- (expr as AssignExpr)) { return ChkAssignExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as IfExpr)) { return ChkIfExpr(typeManager, target, value, ctx: ctx, diag: diag) }
-    if (let Some(value) <- (expr as WhileExpr)) { return ChkWhileExpr(typeManager, target, value) }
-    if (let Some(value) <- (expr as DoWhileExpr)) { return ChkDoWhileExpr(typeManager, target, value) }
-    if (let Some(value) <- (expr as ForInExpr)) { return ChkForInExpr(typeManager, target, value) }
+    if (let Some(value) <- (expr as WhileExpr)) { return ChkWhileExpr(typeManager, target, value, ctx: ctx) }
+    if (let Some(value) <- (expr as DoWhileExpr)) { return ChkDoWhileExpr(typeManager, target, value, ctx: ctx) }
+    if (let Some(value) <- (expr as ForInExpr)) { return ChkForInExpr(typeManager, target, value, ctx: ctx) }
     if (let Some(value) <- (expr as LambdaExpr)) { return ChkLamExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as TryExpr)) { return ChkTryExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as IfAvailableExpr)) { return ChkIfAvailableExpr(typeManager, target, value) }
