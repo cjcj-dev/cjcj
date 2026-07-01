@@ -19,6 +19,7 @@ public import cangjie_compiler::mangle.BaseMangler
 import cangjie_compiler::sema.GenericInstantiation.GenericInstantiationManagerImpl as RealGenericInstantiationManagerImpl
 import cangjie_compiler::sema.TypeManager as FaithfulSemaTypeManager
 import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.ProfileRecorder
 import cangjie_compiler::utils.STANDARD_LIBS
 import std.collection.*
 import std.sort.*
@@ -4330,6 +4331,7 @@ private class StdDepEntry {
 public class ImportManager {
     private let diag: DiagnosticEngine
     private let typeManager: FaithfulSemaTypeManager
+    private let globalOptions: GlobalOptions
     private let searchPath: ArrayList<String> = ArrayList<String>()
     private let importedPackages: ArrayList<Package> = ArrayList<Package>()
     private let packageDecls: HashMap<String, PackageDecl> = HashMap<String, PackageDecl>()
@@ -4344,11 +4346,13 @@ public class ImportManager {
     private let packageMembers: HashMap<String, HashMap<String, ArrayList<Decl>>> =
         HashMap<String, HashMap<String, ArrayList<Decl>>>()
     private let packageMembersVisited: HashSet<String> = HashSet<String>()
+    private let typeAliasCache: HashMap<Int64, Ty> = HashMap<Int64, Ty>()
     private var canInlineImportedSource: Bool = false
 
-    public init(diag: DiagnosticEngine, typeManager: FaithfulSemaTypeManager) {
+    public init(diag: DiagnosticEngine, typeManager: FaithfulSemaTypeManager, globalOptions: GlobalOptions) {
         this.diag = diag
         this.typeManager = typeManager
+        this.globalOptions = globalOptions
     }
 
     public func UpdateSearchPath(cangjieModules: String): Unit {
@@ -4458,6 +4462,7 @@ public class ImportManager {
         if (!LoadResolvedImportedPackages()) {
             return false
         }
+        SubstituteImportedTypeAliasTy(pkgs, opts)
         for (pkg in pkgs) {
             RebuildPackageMembers(pkg.fullPackageName)
         }
@@ -4755,6 +4760,64 @@ public class ImportManager {
             }
         }
         return SameDecl(left, right)
+    }
+
+    private func ReplaceTypeAliasInNode(node: Node): Unit {
+        let walker = Walker(node, visitPre: { current: Node =>
+            if (current.astKind == ASTKind.TYPE_ALIAS_DECL) {
+                return VisitAction.WALK_CHILDREN
+            }
+            if (!Ty.IsTyCorrect(current.GetTy())) {
+                return VisitAction.WALK_CHILDREN
+            }
+            let key = current.GetTy().getOrThrow()
+            if (!key.HasAliasTy()) {
+                return VisitAction.WALK_CHILDREN
+            }
+            if (let Some(cached) <- typeAliasCache.get(key.objectId)) {
+                current.SetTy(cached)
+            } else {
+                current.SetTy(typeManager.SubstituteTypeAliasInTy(key))
+                typeAliasCache[key.objectId] = current.GetTy().getOrThrow()
+            }
+            return VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+    }
+
+    private func SubstituteImportedTypeAliasTy(srcPackages: ArrayList<Package>, opts: GlobalOptions): Unit {
+        try (recorder = ProfileRecorder("LoadPackageDeclsOnDemand", "SubstituteImportedTypeAliasTy")) {
+            for (pkg in importedPackages) {
+                SubstituteImportedTypeAliasTyInPackage(pkg, srcPackages, opts)
+            }
+            for (pkg2 in sourcePackagesForMembers) {
+                SubstituteImportedTypeAliasTyInPackage(pkg2, srcPackages, opts)
+            }
+            typeAliasCache.clear()
+        }
+    }
+
+    private func SubstituteImportedTypeAliasTyInPackage(
+        pkg: Package,
+        srcPackages: ArrayList<Package>,
+        opts: GlobalOptions
+    ): Unit {
+        var isSrcPackage = false
+        for (srcPackage in srcPackages) {
+            if (srcPackage.fullPackageName == pkg.fullPackageName) {
+                isSrcPackage = true
+                break
+            }
+        }
+        if (isSrcPackage && opts.commonPartCjos.isEmpty()) {
+            return
+        }
+        for (file in pkg.files) {
+            if (isSrcPackage && !file.TestAttr(Attribute.FROM_COMMON_PART)) {
+                continue
+            }
+            ReplaceTypeAliasInNode(file)
+        }
     }
 
     private func LastPackageName(fullPackageName: String): String {

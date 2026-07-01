@@ -168,7 +168,8 @@ public class CompilerInstance {
     public init(invocation: CompilerInvocation, diag: DiagnosticEngine) {
         this.invocation = invocation
         this.diag = diag
-        importManager = ImportManager(diag, typeManager.AsFaithfulSemaTypeManager())
+        let faithfulTypeManager = typeManager.AsFaithfulSemaTypeManager()
+        importManager = ImportManager(diag, faithfulTypeManager, invocation.globalOptions)
         packageManager = PackageManager(importManager)
         compileStrategy = Some(FullCompileStrategy(this))
         chirData.InitData(fileNameMap, Int64(invocation.globalOptions.GetJobs()))
