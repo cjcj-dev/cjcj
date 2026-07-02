@@ -7,6 +7,7 @@ import cangjie_compiler::basic.Linkage
 import cangjie_compiler::mangle.BaseMangler as RealBaseMangler
 import cangjie_compiler::modules.{FlatBufferBuilder, FlatBufferOffset}
 import cangjie_compiler::option.OptimizationLevel
+import cangjie_compiler::sema.TypeManager as FaithfulSemaTypeManager
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.MAIN_INVOKE
 
@@ -33,6 +34,7 @@ private class FrontendCjoFlatBufferWriter {
     private let optimizationLevel: OptimizationLevel
     private let saveFileWithAbsPath: Bool
     private let mangler: RealBaseMangler = RealBaseMangler()
+    private let typeManager: FaithfulSemaTypeManager = FaithfulSemaTypeManager()
 
     private var currentPackageName: String = ""
     private let packageNameToIndex: HashMap<String, UInt32> = HashMap<String, UInt32>()
@@ -401,10 +403,10 @@ private class FrontendCjoFlatBufferWriter {
                     if (let Some(funcTy) <- (declTy as FuncTy)) {
                         funcTy.retTy
                     } else {
-                        PrimitiveTy(TypeKind.TYPE_UNIT)
+                        FaithfulSemaTypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
                     }
                 } else {
-                    PrimitiveTy(TypeKind.TYPE_UNIT)
+                    FaithfulSemaTypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
                 }
                 let cfg = FuncTyConfig()
                 if (let Some(declTy2) <- funcDecl.GetTy()) {
@@ -415,7 +417,7 @@ private class FrontendCjoFlatBufferWriter {
                         cfg.noCast = funcTy2.noCast
                     }
                 }
-                return Some(FuncTy(params.toArray(), retTy, cfg: cfg))
+                return Some(typeManager.GetFunctionTy(params.toArray(), retTy, cfg: cfg))
             }
         }
         return funcDecl.GetTy()
@@ -440,7 +442,7 @@ private class FrontendCjoFlatBufferWriter {
             let retTy = if (let Some(retType) <- funcType.retType) {
                 TypeNodeTyForSerialization(retType)
             } else {
-                PrimitiveTy(TypeKind.TYPE_UNIT)
+                FaithfulSemaTypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
             }
             let cfg = FuncTyConfig()
             cfg.isC = funcType.isC
@@ -451,7 +453,7 @@ private class FrontendCjoFlatBufferWriter {
                     cfg.noCast = funcTy.noCast
                 }
             }
-            return FuncTy(params.toArray(), retTy, cfg: cfg)
+            return typeManager.GetFunctionTy(params.toArray(), retTy, cfg: cfg)
         }
         if (let Some(tupleType) <- (typeNode as TupleType)) {
             let elems = ArrayList<Ty>()
@@ -460,16 +462,16 @@ private class FrontendCjoFlatBufferWriter {
             }
             if (let Some(typeTy2) <- tupleType.GetTy()) {
                 if (let Some(tupleTy) <- (typeTy2 as TupleTy)) {
-                    return TupleTy(elems.toArray(), isClosureTy: tupleTy.isClosureTy)
+                    return typeManager.GetTupleTy(elems.toArray(), isClosureTy: tupleTy.isClosureTy)
                 }
             }
-            return TupleTy(elems.toArray())
+            return typeManager.GetTupleTy(elems.toArray())
         }
         if (let Some(varrayType) <- (typeNode as VArrayType)) {
             if (let Some(argType) <- varrayType.typeArgument) {
                 if (let Some(typeTy3) <- varrayType.GetTy()) {
                     if (let Some(varrayTy) <- (typeTy3 as VArrayTy)) {
-                        return VArrayTy(TypeNodeTyForSerialization(argType), varrayTy.size)
+                        return typeManager.GetVArrayTy(TypeNodeTyForSerialization(argType), varrayTy.size)
                     }
                 }
             }
@@ -618,7 +620,7 @@ private class FrontendCjoFlatBufferWriter {
                     return SaveType(funcTy.retTy)
                 }
             }
-            return SaveType(PrimitiveTy(TypeKind.TYPE_UNIT))
+            return SaveType(FaithfulSemaTypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
         }
         return 0u32
     }
