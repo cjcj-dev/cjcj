@@ -14,6 +14,8 @@
 //         GC_KLASS_ATTR = "CFileKlass"  (src/CodeGen/Utils/Constants.h:35)
 //   CGFunction::AddZeroInitForStructWithRefField support:
 //         src/CodeGen/CGFunction.cpp:262-274, 329-350.
+//   CGCFFI ABI classifier support:
+//         src/CodeGen/CJNative/CJNativeCGCFFI.cpp:542  type.getPrimitiveSizeInBits()
 
 #include <llvm-c/Core.h>
 
@@ -121,6 +123,11 @@ extern "C" void LLVMSelfhostGetBasicBlockPredecessors(LLVMBasicBlockRef BB, LLVM
 extern "C" int LLVMSelfhostInstructionComesBefore(LLVMValueRef Inst, LLVMValueRef Other)
 {
     return unwrap<Instruction>(Inst)->comesBefore(unwrap<Instruction>(Other)) ? 1 : 0;
+}
+
+extern "C" uint64_t LLVMSelfhostGetPrimitiveSizeInBits(LLVMTypeRef Ty)
+{
+    return unwrap<Type>(Ty)->getPrimitiveSizeInBits().getFixedSize();
 }
 
 extern "C" LLVMUseRef LLVMSelfhostGetFirstUse(LLVMValueRef Val)

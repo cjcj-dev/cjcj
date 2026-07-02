@@ -10,8 +10,9 @@ import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
 import cangjie_compiler::mangle.MANGLE_NESTED_PREFIX
 import cangjie_compiler::mangle.MANGLE_SUFFIX
-import cangjie_compiler::utils.{CORE_PACKAGE_NAME, HashString64, STD_LIB_FUTURE, STD_LIB_MONITOR, STD_LIB_MUTEX,
-    STD_LIB_WAIT_QUEUE, SYNC_PACKAGE_NAME}
+import cangjie_compiler::option.OSType
+import cangjie_compiler::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, HashString64, STD_LIB_FUTURE, STD_LIB_MONITOR,
+    STD_LIB_MUTEX, STD_LIB_WAIT_QUEUE, SYNC_PACKAGE_NAME}
 
 public func GetCodeGenGlobalName(value: Value): String {
     return value.GetIdentifierWithoutPrefix()
@@ -57,13 +58,88 @@ public func SetStructTypeBody(structType: LLVMTypeRef, body: ArrayList<LLVMTypeR
     }
 }
 
+public func GetPointerElementType(llvmType: LLVMTypeRef): LLVMTypeRef {
+    return unsafe { LLVMGetElementType(llvmType) }
+}
+
+public func IsStructPtrType(llvmType: LLVMTypeRef): Bool {
+    if (llvmType.isNull() || unsafe { LLVMGetTypeKind(llvmType) } != 12) {
+        return false
+    }
+    let elementType = GetPointerElementType(llvmType)
+    return !elementType.isNull() && unsafe { LLVMGetTypeKind(elementType) } == 10
+}
+
 public func IsLitStructPtrType(llvmType: LLVMTypeRef): Bool {
     if (llvmType.isNull() || unsafe { LLVMGetTypeKind(llvmType) } != 12) {
         return false
     }
-    let elementType = unsafe { LLVMGetElementType(llvmType) }
+    let elementType = GetPointerElementType(llvmType)
     return !elementType.isNull() && unsafe { LLVMGetTypeKind(elementType) } == 10 &&
         unsafe { LLVMIsLiteralStruct(elementType) } != 0
+}
+
+public func AlignedUpTo(offset: UInt64, align: UInt64): UInt64 {
+    CJC_ASSERT(align != 0u64)
+    return ((offset + align - 1u64) / align) * align
+}
+
+public func AlignedUpTo(cgMod: CGModule, offset: UInt64, llvmType: LLVMTypeRef): UInt64 {
+    return AlignedUpTo(offset, UInt64(cgMod.GetABITypeAlignment(llvmType)))
+}
+
+public func GetTypeSize(cgMod: CGModule, llvmType: LLVMTypeRef): UInt64 {
+    return cgMod.GetTypeSize(llvmType)
+}
+
+public func GetTypeSize(cgMod: CGModule, chirTy: Type): UInt64 {
+    if (chirTy.IsUnit() || chirTy.IsNothing()) {
+        return 0u64
+    }
+    return GetTypeSize(cgMod, CGType.GetOrCreate(cgMod, chirTy).GetLLVMType())
+}
+
+public func GetTypeAlignment(cgMod: CGModule, llvmType: LLVMTypeRef): UInt64 {
+    return UInt64(cgMod.GetABITypeAlignment(llvmType))
+}
+
+public func GetTypeAlignment(cgMod: CGModule, chirTy: Type): UInt64 {
+    if (chirTy.IsUnit() || chirTy.IsNothing()) {
+        return 1u64
+    }
+    return GetTypeAlignment(cgMod, CGType.GetOrCreate(cgMod, chirTy).GetLLVMType())
+}
+
+public func IsZeroSizedTypeInC(cgMod: CGModule, chirTy: Type): Bool {
+    if (chirTy.IsRef()) {
+        let typeArgs = chirTy.GetTypeArgs()
+        if (!typeArgs.isEmpty()) {
+            return IsZeroSizedTypeInC(cgMod, typeArgs[0])
+        }
+    }
+    return chirTy.IsUnit() || chirTy.IsNothing() ||
+        (cgMod.GetCGContext().GetCompileOptions().target.os != OSType.WINDOWS &&
+            GetTypeSize(cgMod, chirTy) == 0u64)
+}
+
+public func FixedCGTypeOfFuncArg(cgMod: CGModule, chirFuncArg: Value, llvmValue: LLVMValueRef): CGType {
+    let chirFuncArgType = chirFuncArg.GetType().getOrThrow()
+    var cgType = CGType.GetOrCreate(cgMod, chirFuncArgType)
+    let byRef = chirFuncArgType.IsStruct() || chirFuncArgType.IsTuple() || chirFuncArgType.IsVArray() ||
+        chirFuncArgType.IsUnit() || chirFuncArgType.IsNothing() ||
+        (chirFuncArgType.IsEnum() && (CGType.GetOrCreate(cgMod, chirFuncArgType) as CGEnumType).getOrThrow().PassByReference())
+    if (byRef) {
+        let rawType = unsafe { LLVMTypeOf(llvmValue) }
+        let addrspace = if (!rawType.isNull() && unsafe { LLVMGetTypeKind(rawType) } == 12) {
+            unsafe { LLVMGetPointerAddressSpace(rawType) }
+        } else {
+            0u32
+        }
+        let refType = cgMod.GetCGContext().GetCHIRBuilder().context.GetRefTy(chirFuncArgType)
+        cgType = CGType.GetOrCreate(cgMod, refType, extraInfo: TypeExtraInfo(addrspace))
+    }
+    cgMod.SetOrUpdateMappedCGValue(chirFuncArg, CGValue(llvmValue, cgType))
+    return cgType
 }
 
 public func MangleName(value: String): String {

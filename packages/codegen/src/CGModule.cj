@@ -18,6 +18,7 @@ import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
 import cangjie_compiler::option.ArchType
 import cangjie_compiler::option.EnvironmentType
+import cangjie_compiler::option.OSType
 import cangjie_compiler::option.TripleInfo
 
 private let CJ_PERSONALITY_FUNC_NAME: String = "__cj_personality_v0$"
@@ -82,6 +83,8 @@ public class CGModule {
     private let extensionDefStartIndices: HashMap<String, Int64> = HashMap<String, Int64>()
     private let extensionDefInterfaces: HashMap<String, ArrayList<MTableInterfaceInfo>> =
         HashMap<String, ArrayList<MTableInterfaceInfo>>()
+    private var cffi: Option<CGCFFI> = None
+    private let ghostCFuncArgValues: ArrayList<CGValue> = ArrayList<CGValue>()
     // Keyed on the SPECIFIC instantiated enum type (ToString), not the shared generic EnumDef
     // nodeId: all Option<X> instantiations share one EnumDef, so a nodeId key falsely blocks
     // classifying Option<Int> while Option<String> is mid-classification, leaving cgEnumTypeKind
@@ -103,10 +106,17 @@ public class CGModule {
         moduleHandle.SetDataLayout(CGModule.GetDataLayoutString(cgCtx.GetCompileOptions().target))
         moduleHandle.SetTargetTriple(CGModule.GetTargetTripleString(cgCtx.GetCompileOptions().target))
         InitDebugInfo()
+        cffi = CreateCGCFFI()
     }
 
     public func GetCGContext(): CGContext { return cgCtx }
     public func GetLLVMContext(): LLVMContextHandle { return cgCtx.GetLLVMContext() }
+    public func GetCGCFFI(): CGCFFI { return cffi.getOrThrow() }
+    public func CreateGhostCFuncArgValue(llvmValue: LLVMValueRef, ty: CGType): CGValue {
+        let value = CGValue(llvmValue, ty)
+        ghostCFuncArgValues.add(value)
+        return value
+    }
 
     // Mirror C++ CGModule::DelayGenTypeInfo (CGModule.h:287): queue a CGType whose TypeInfo global has
     // been declared but not yet defined.
@@ -168,6 +178,8 @@ public class CGModule {
         nonExternalExtensionDefs.clear()
         extensionDefStartIndices.clear()
         extensionDefInterfaces.clear()
+        cffi = None
+        ghostCFuncArgValues.clear()
         enumClassificationStack.clear()
         cgCtx.Clear()
         cgCtx.GetLLVMContext().close()
@@ -179,7 +191,21 @@ public class CGModule {
             return functions[name]
         }
         let cgFuncType = CGType.GetOrCreateWithNode(this, chirValue, allowBasePtr: true, forWrapper: forWrapper)
-        let functionType = if (let Some(functionCGType) <- (cgFuncType as CGFunctionType)) {
+        let functionType = if (let Some(chirType) <- chirValue.GetType()) {
+            if (let Some(funcTy) <- (chirType as FuncType)) {
+                if (funcTy.IsCFunc()) {
+                    GetCGCFFI().GetCFuncType(funcTy)
+                } else if (let Some(functionCGType) <- (cgFuncType as CGFunctionType)) {
+                    functionCGType.GetLLVMFunctionType()
+                } else {
+                    cgFuncType.GetLLVMType()
+                }
+            } else if (let Some(functionCGType) <- (cgFuncType as CGFunctionType)) {
+                functionCGType.GetLLVMFunctionType()
+            } else {
+                cgFuncType.GetLLVMType()
+            }
+        } else if (let Some(functionCGType) <- (cgFuncType as CGFunctionType)) {
             functionCGType.GetLLVMFunctionType()
         } else {
             cgFuncType.GetLLVMType()
@@ -410,7 +436,8 @@ public class CGModule {
             if (let Some(chirType) <- chirValue.GetType()) {
                 if (let Some(funcType) <- (chirType as FuncType)) {
                     if (funcType.IsCFunc()) {
-                        SetZExtAttrForCFunc(rawFunction, functionCGType.GetLLVMFunctionType())
+                        GetCGCFFI().AddFunctionAttr(funcType, rawFunction)
+                        return
                     }
                 }
             }
@@ -567,6 +594,14 @@ public class CGModule {
 
     public func MapFunctionParameters(chirFunc: Function, cgFunc: CGFunction): Unit {
         MaybeAttachExceptionPersonality(cgFunc.GetRawFunction(), chirFunc)
+        if (let Some(chirTy) <- chirFunc.GetType()) {
+            if (let Some(funcTy) <- (chirTy as FuncType)) {
+                if (funcTy.IsCFunc()) {
+                    MapCFuncParameters(chirFunc, cgFunc, funcTy)
+                    return
+                }
+            }
+        }
         var idx: Int64 = 0
         while (idx < chirFunc.GetNumOfParams()) {
             let param = chirFunc.GetParam(idx)
@@ -591,6 +626,69 @@ public class CGModule {
             SetOrUpdateMappedCGValue(param, CGValue(rawArg, paramCGType))
             idx++
         }
+    }
+
+    private func MapCFuncParameters(chirFunc: Function, cgFunc: CGFunction, chirFuncTy: FuncType): Unit {
+        if (chirFunc.GetNumOfParams() == 0) {
+            return
+        }
+        var builder: Option<IRBuilder2> = None
+        var llvmArgIdx: UInt32 = 0u32
+        if (HasAttributeAtIndex(cgFunc.GetRawFunction(), 1u32, "sret")) {
+            llvmArgIdx++
+        }
+        var chirArgIdx: Int64 = 0
+        while (chirArgIdx < chirFunc.GetNumOfParams()) {
+            let chirFuncArg = chirFunc.GetParam(chirArgIdx)
+            let chirFuncArgTy = chirFuncArg.GetType().getOrThrow()
+            var llvmValue = LLVMNullValue()
+            if (IsZeroSizedTypeInC(this, chirFuncArgTy)) {
+                let localBuilder = InitCFuncParamBuilder(builder, chirFunc, cgFunc)
+                builder = localBuilder
+                llvmValue = localBuilder.CreateEntryAlloca(CGType.GetOrCreate(this, chirFuncArgTy))
+            } else {
+                llvmValue = unsafe { LLVMGetParam(cgFunc.GetRawFunction(), llvmArgIdx) }
+                let argIt = LLVMFuncArgIt(cgFunc.GetRawFunction(), llvmArgIdx)
+                if (GetCGCFFI().NeedProcessParam(chirFuncTy, chirArgIdx)) {
+                    let localBuilder = InitCFuncParamBuilder(builder, chirFunc, cgFunc)
+                    builder = localBuilder
+                    llvmValue = ProcessCFuncParamOnDemand(chirFuncArgTy, argIt, localBuilder)
+                    llvmArgIdx = argIt.idx
+                }
+                llvmArgIdx++
+            }
+            FixedCGTypeOfFuncArg(this, chirFuncArg, llvmValue)
+            chirArgIdx++
+        }
+        if (let Some(localBuilder) <- builder) {
+            localBuilder.close()
+        }
+    }
+
+    private func InitCFuncParamBuilder(builder: Option<IRBuilder2>, chirFunc: Function,
+        cgFunc: CGFunction): IRBuilder2 {
+        if (let Some(existing) <- builder) {
+            return existing
+        }
+        let created = IRBuilder2(this)
+        created.SetInsertCGFunction(cgFunc)
+        let chirEntryBB = chirFunc.GetEntryBlock().getOrThrow()
+        let entryBB = created.CreateBasicBlockAtEnd(cgFunc.GetRawFunction(),
+            "entry:" + chirEntryBB.GetIdentifierWithoutPrefix())
+        created.SetInsertPoint(entryBB)
+        SetOrUpdateMappedBB(chirEntryBB, entryBB)
+        return created
+    }
+
+    private func ProcessCFuncParamOnDemand(chirParamTy: Type, arg: LLVMFuncArgIt,
+        builder: IRBuilder2): LLVMValueRef {
+        let cgType = CGType.GetOrCreate(this, chirParamTy)
+        if (chirParamTy.IsVArray()) {
+            return builder.CreateBitCast(arg.GetValue(), unsafe { LLVMPointerType(cgType.GetLLVMType(), 0u32) })
+        }
+        let place = builder.CreateEntryAlloca(cgType)
+        GetCGCFFI().ProcessParam(chirParamTy, arg, place, builder)
+        return place
     }
 
     public func EraseUselessInstsAndDeclarations(): Unit {
@@ -797,6 +895,34 @@ public class CGModule {
 
     public func IsEnumClassificationActive(typeKey: String): Bool {
         return enumClassificationStack.contains(typeKey)
+    }
+
+    private func CreateCGCFFI(): CGCFFI {
+        let target = cgCtx.GetCompileOptions().target
+        if (target.os == OSType.WINDOWS && target.arch == ArchType.X86_64) {
+            return WindowsAmd64CJNativeCGCFFI(this)
+        } else if ((target.os == OSType.LINUX || target.os == OSType.DARWIN) && target.arch == ArchType.X86_64) {
+            return LinuxAmd64CJNativeCGCFFI(this)
+        } else if (target.arch == ArchType.AARCH64 && target.os == OSType.LINUX) {
+            return LinuxAarch64CJNativeCGCFFI(this)
+        } else if (target.arch == ArchType.AARCH64 && target.os == OSType.DARWIN) {
+            return CreateAppleAArch64CGCFFI()
+        } else if (target.arch == ArchType.AARCH64 && target.os == OSType.IOS) {
+            return CreateAppleAArch64CGCFFI()
+        } else if (target.arch == ArchType.ARM32) {
+            return LinuxOhosArm32CJNativeCGCFFI(this)
+        }
+        return LinuxAmd64CJNativeCGCFFI(this)
+    }
+
+    @When[os == "macOS"]
+    private func CreateAppleAArch64CGCFFI(): CGCFFI {
+        return MacAArch64CJNativeCGCFFI(this)
+    }
+
+    @When[os != "macOS"]
+    private func CreateAppleAArch64CGCFFI(): CGCFFI {
+        return LinuxAmd64CJNativeCGCFFI(this)
     }
 
     public static func GetDataLayoutString(target: TripleInfo): String {

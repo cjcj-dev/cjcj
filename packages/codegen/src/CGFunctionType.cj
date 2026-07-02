@@ -97,6 +97,11 @@ public class CGFunctionType <: CGType {
 
     public func GetLLVMFunctionType(): LLVMTypeRef {
         Complete()
+        if (let Some(funcTy) <- (chirType as FuncType)) {
+            if (funcTy.IsCFunc()) {
+                return cgMod.GetCGCFFI().GetCFuncType(funcTy)
+            }
+        }
         if (let Some(rawFunctionTy) <- llvmFunctionType) {
             return rawFunctionTy
         }
@@ -105,6 +110,18 @@ public class CGFunctionType <: CGType {
 
     protected override func GenLLVMType(): LLVMTypeRef {
         let funcTy = (chirType as FuncType).getOrThrow()
+        if (funcTy.IsCFunc()) {
+            llvmType = unsafe {
+                LLVMPointerType(LLVMStructTypeInContext(cgCtx.GetLLVMContext().raw, CPointer<LLVMTypeRef>(), 0u32, 0),
+                    0u32)
+            }
+            let rawCFuncType = cgMod.GetCGCFFI().GetCFuncType(funcTy)
+            if (!rawCFuncType.isNull()) {
+                llvmFunctionType = rawCFuncType
+                llvmType = unsafe { LLVMPointerType(rawCFuncType, 0u32) }
+            }
+            return llvmType.getOrThrow()
+        }
         let retCGType = CGType.GetOrCreate(cgMod, funcTy.GetReturnType())
         let retTy = funcTy.GetReturnType()
         hasSRet = !IsVoidLikeReturn(retTy) && ShouldUseSRet(retTy, retCGType)

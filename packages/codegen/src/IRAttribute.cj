@@ -264,6 +264,42 @@ public func AddSRetAttribute(value: LLVMValueRef, sretType: LLVMTypeRef): Unit {
     AddTypeAttributeAtIndex(value, 1u32, "sret", sretType)
 }
 
+public func AddByValAttribute(value: LLVMValueRef, byValType: LLVMTypeRef, align!: UInt64 = 8u64): Unit {
+    AddByValAttribute(value, 0u32, byValType, align: align)
+}
+
+public func AddByValAttribute(value: LLVMValueRef, paramIdx: UInt32, byValType: LLVMTypeRef,
+    align!: UInt64 = 8u64): Unit {
+    if (value.isNull() || byValType.isNull()) {
+        return
+    }
+    let idx = paramIdx + 1u32
+    if (IsLLVMFunction(value) && HasAttributeAtIndex(value, idx, "byval")) {
+        return
+    }
+    let attrKind = GetAttributeKind("byval")
+    let attrContext = GetLLVMValueContext(value)
+    if (attrKind == 0u32 || attrContext.isNull()) {
+        return
+    }
+    let attr = unsafe { LLVMCreateTypeAttribute(attrContext, attrKind, byValType) }
+    if (IsLLVMFunction(value)) {
+        unsafe { LLVMAddAttributeAtIndex(value, idx, attr) }
+    } else {
+        unsafe { LLVMAddCallSiteAttribute(value, idx, attr) }
+    }
+    let alignKind = GetAttributeKind("align")
+    if (alignKind == 0u32) {
+        return
+    }
+    let alignAttr = unsafe { LLVMCreateEnumAttribute(attrContext, alignKind, align) }
+    if (IsLLVMFunction(value)) {
+        unsafe { LLVMAddAttributeAtIndex(value, idx, alignAttr) }
+    } else {
+        unsafe { LLVMAddCallSiteAttribute(value, idx, alignAttr) }
+    }
+}
+
 public func AddNoAliasAttribute(value: LLVMValueRef): Unit {
     AddAttributeAtIndex(value, 1u32, "noalias")
 }

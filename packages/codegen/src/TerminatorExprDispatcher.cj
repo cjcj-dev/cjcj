@@ -210,6 +210,18 @@ private func CreateRetFromFunctionReturnSlot(irBuilder: IRBuilder2, parentFunc: 
             if (retTy.IsRawArray() && IsRawArrayReturnValue(retValue)) {
                 return irBuilder.CreateRet(retAddr.GetRawValue())
             }
+            if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
+                if (HasAttributeAtIndex(cgFunc.GetRawFunction(), UInt32.Max, CFUNC_ATTR)) {
+                    let functionType = cgFunc.GetCGFunctionType().getOrThrow().GetLLVMFunctionType()
+                    let llvmRetType = unsafe { LLVMGetReturnType(functionType) }
+                    if (!llvmRetType.isNull() && unsafe { LLVMGetTypeKind(llvmRetType) } == 0) {
+                        return irBuilder.CreateRetVoid()
+                    }
+                    let retVal = irBuilder.GetCGModule().GetCGCFFI().ProcessRetValue(llvmRetType,
+                        retAddr.GetRawValue(), irBuilder)
+                    return irBuilder.CreateRet(retVal)
+                }
+            }
             if (let Some(slotType) <- retAddr.GetCGType()) {
                 if (let Some(elementType) <- slotType.GetPointerElementType()) {
                     if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {

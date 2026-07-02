@@ -175,12 +175,16 @@ foreign {
     func LLVMInt16TypeInContext(context: LLVMContextRef): LLVMTypeRef
     func LLVMInt32TypeInContext(context: LLVMContextRef): LLVMTypeRef
     func LLVMInt64TypeInContext(context: LLVMContextRef): LLVMTypeRef
+    func LLVMIntTypeInContext(context: LLVMContextRef, numBits: UInt32): LLVMTypeRef
     func LLVMHalfTypeInContext(context: LLVMContextRef): LLVMTypeRef
     func LLVMFloatTypeInContext(context: LLVMContextRef): LLVMTypeRef
     func LLVMDoubleTypeInContext(context: LLVMContextRef): LLVMTypeRef
+    func LLVMX86FP80TypeInContext(context: LLVMContextRef): LLVMTypeRef
+    func LLVMFP128TypeInContext(context: LLVMContextRef): LLVMTypeRef
     func LLVMTokenTypeInContext(context: LLVMContextRef): LLVMTypeRef
     func LLVMPointerType(elementType: LLVMTypeRef, addressSpace: UInt32): LLVMTypeRef
     func LLVMArrayType(elementType: LLVMTypeRef, elementCount: UInt32): LLVMTypeRef
+    func LLVMVectorType(elementType: LLVMTypeRef, elementCount: UInt32): LLVMTypeRef
     func LLVMStructTypeInContext(context: LLVMContextRef, elementTypes: CPointer<LLVMTypeRef>,
         elementCount: UInt32, packed: Int32): LLVMTypeRef
     func LLVMGetTypeByName2(context: LLVMContextRef, name: CString): LLVMTypeRef
@@ -189,10 +193,12 @@ foreign {
     func LLVMStructSetBody(structTy: LLVMTypeRef, elementTypes: CPointer<LLVMTypeRef>, elementCount: UInt32,
         packed: Int32): Unit
     func LLVMIsLiteralStruct(structTy: LLVMTypeRef): Int32
+    func LLVMTypeIsSized(ty: LLVMTypeRef): Int32
     func LLVMFunctionType(returnType: LLVMTypeRef, paramTypes: CPointer<LLVMTypeRef>, paramCount: UInt32, isVarArg: Int32): LLVMTypeRef
     func LLVMGetTypeKind(valueType: LLVMTypeRef): Int32
     func LLVMCountStructElementTypes(structTy: LLVMTypeRef): UInt32
     func LLVMGetStructElementTypes(structTy: LLVMTypeRef, dest: CPointer<LLVMTypeRef>): Unit
+    func LLVMGetArrayLength(arrayTy: LLVMTypeRef): UInt32
     func LLVMGetReturnType(functionType: LLVMTypeRef): LLVMTypeRef
     func LLVMCountParamTypes(functionType: LLVMTypeRef): UInt32
     func LLVMGetParamTypes(functionType: LLVMTypeRef, dest: CPointer<LLVMTypeRef>): Unit
@@ -264,6 +270,7 @@ foreign {
     func LLVMSelfhostGetBasicBlockPredecessors(block: LLVMBasicBlockRef,
         predecessors: CPointer<LLVMBasicBlockRef>): Unit
     func LLVMSelfhostInstructionComesBefore(inst: LLVMValueRef, other: LLVMValueRef): Int32
+    func LLVMSelfhostGetPrimitiveSizeInBits(ty: LLVMTypeRef): UInt64
     func LLVMSelfhostGetFirstUse(value: LLVMValueRef): LLVMUseRef
     func LLVMSelfhostGetNextUse(useRef: LLVMUseRef): LLVMUseRef
     func LLVMSelfhostGetUserInstruction(useRef: LLVMUseRef): LLVMValueRef
