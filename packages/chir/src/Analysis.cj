@@ -9,6 +9,8 @@ public abstract class AbstractDomain<Domain> {
 
     protected init() {}
 
+    public func Clone(): Domain
+
     public open func Join(rhs: Domain): Bool {
         let _ = rhs
         return false
@@ -85,11 +87,11 @@ public abstract class Analysis<Domain> where Domain <: AbstractDomain<Domain> {
         return false
     }
 
-    public static func GetAnalysisName(): String {
+    public open func GetAnalysisName(): String {
         return name
     }
 
-    public static func GetBlockLimit(): Option<UInt32> {
+    public open func GetBlockLimit(): Option<UInt32> {
         return blockLimit
     }
 

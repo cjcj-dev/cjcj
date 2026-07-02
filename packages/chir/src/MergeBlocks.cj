@@ -3,6 +3,15 @@ package cangjie_compiler::chir
 import std.collection.*
 import cangjie_compiler::utils.CJC_ASSERT
 
+extend SkipKind {
+    operator func &(right: SkipKind): SkipKind {
+        if (this != SkipKind.NO_SKIP) {
+            return this
+        }
+        return right
+    }
+}
+
 private func CopyBlock(builder: CHIRBuilder, block: Block): Block {
     let blockGroup = block.GetParentBlockGroup() ??
         throw IllegalStateException("MergeBlocks CopyBlock expected parent block group")
@@ -143,15 +152,19 @@ public class MergeBlocks {
         }
         let pred = preds[0]
         if (let Some(predTerm) <- pred.GetTerminator()) {
+            var appendSkipCheck = pred.GetSkipCheck() & predTerm.GetSkipCheck()
             predTerm.RemoveSelfFromBlock()
+            for (expr in block.GetExpressions()) {
+                expr.MoveTo(pred)
+            }
+            appendSkipCheck = appendSkipCheck & block.GetSkipCheck()
+            block.RemoveSelfFromBlockGroup()
+            if (appendSkipCheck != SkipKind.NO_SKIP) {
+                pred.SetSkipCheck(appendSkipCheck)
+            }
         } else {
             return false
         }
-        let movingExprs = block.GetExpressions()
-        for (expr in movingExprs) {
-            expr.MoveTo(pred)
-        }
-        block.RemoveSelfFromBlockGroup()
         return true
     }
 
@@ -188,6 +201,10 @@ public class MergeBlocks {
                 if (let Some(predTerm) <- pred.GetTerminator()) {
                     target.SetDebugLocation(block.GetDebugLocation())
                     predTerm.ReplaceSuccessor(block, target)
+                    let skip = predTerm.GetSkipCheck() & block.GetSkipCheck()
+                    if (skip != SkipKind.NO_SKIP) {
+                        predTerm.SetSkipCheck(skip)
+                    }
                 }
             }
             term.RemoveSelfFromBlock()

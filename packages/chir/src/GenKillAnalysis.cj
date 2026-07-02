@@ -23,11 +23,12 @@ extend AnalysisKind <: Equatable<AnalysisKind> {
     }
 }
 
-public open class GenKillDomain {
+public abstract class GenKillDomain<Domain> <: AbstractDomain<Domain> {
     private var reachable: Bool = false
     private let states: ArrayList<Bool> = ArrayList<Bool>()
 
     public init(domainSize: Int64) {
+        super()
         var idx: Int64 = 0
         while (idx < domainSize) {
             states.add(false)
@@ -41,9 +42,10 @@ public open class GenKillDomain {
 
     public func SetReachable(value: Bool): Unit {
         reachable = value
+        kind = if (value) { ReachableKind.REACHABLE } else { ReachableKind.UNREACHABLE }
     }
 
-    public func IsBottom(): Bool {
+    public override func IsBottom(): Bool {
         return !reachable
     }
 
@@ -51,7 +53,7 @@ public open class GenKillDomain {
         return states.size
     }
 
-    public func JoinStates(rhs: GenKillDomain, kind: AnalysisKind): Bool {
+    public func JoinStates(rhs: GenKillDomain<Domain>, kind: AnalysisKind): Bool {
         if (!rhs.reachable) {
             return false
         }
@@ -70,8 +72,9 @@ public open class GenKillDomain {
         return changed
     }
 
-    public func CopyBaseFrom(rhs: GenKillDomain): Unit {
+    public func CopyBaseFrom(rhs: GenKillDomain<Domain>): Unit {
         reachable = rhs.reachable
+        kind = rhs.kind
         states.clear()
         for (state in rhs.states) {
             states.add(state)
@@ -119,7 +122,7 @@ public open class GenKillDomain {
         return false
     }
 
-    public func ToString(): String {
+    public override func ToString(): String {
         if (!reachable) {
             return "Unreachable"
         }

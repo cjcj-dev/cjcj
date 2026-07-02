@@ -1,7 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
-import cangjie_compiler::utils.STATIC_INIT_FUNC
+import cangjie_compiler::utils.{STATIC_INIT_FUNC, TaskQueue, TaskResult}
 
 private class VarInitConstructorContext {
     public let ctorInitInfo: ConstructorInitInfo
@@ -16,11 +16,42 @@ private class VarInitConstructorContext {
 public class VarInitCheck {
     public init() {}
 
-    public func RunOnPackage(pkg: Package): CHIRCheckResult {
+    public func RunOnPackage(pkg: Package, threadNum!: Int64 = 1): CHIRCheckResult {
         let checkResult = CHIRCheckResult()
+        let funcs = ArrayList<Function>()
         for (fn in pkg.GetGlobalFuncsWithBody()) {
             if (ShouldCheckFunction(fn)) {
+                funcs.add(fn)
+            }
+        }
+        if (funcs.isEmpty()) {
+            return checkResult
+        }
+        if (threadNum == 1) {
+            for (fn in funcs) {
                 RunOnFunc(fn, checkResult)
+            }
+            return checkResult
+        }
+        let taskQueue = TaskQueue(threadNum)
+        let taskResults = ArrayList<TaskResult<CHIRCheckResult>>()
+        for (fn in funcs) {
+            taskResults.add(taskQueue.AddTask<CHIRCheckResult>({ =>
+                RunOnFunc(fn)
+            }))
+        }
+        taskQueue.RunAndWaitForAllTasksCompleted()
+        for (taskResult in taskResults) {
+            let fnResult = taskResult.get()
+            var idx: Int64 = 0
+            while (idx < fnResult.errors.size) {
+                checkResult.AddError(fnResult.errors[idx])
+                if (idx < fnResult.notes.size) {
+                    for (note in fnResult.notes[idx]) {
+                        checkResult.AddNote(note)
+                    }
+                }
+                idx++
             }
         }
         return checkResult
@@ -46,7 +77,7 @@ public class VarInitCheck {
         if (fn.GetIdentifier().contains("$Mocked")) {
             return false
         }
-        return fn.GetFuncKind() != FuncKind.INSTANCEVAR_INIT
+        return fn.GetFuncKind() != FuncKind.INSTANCEVAR_INIT && fn.GetSkipCheck() != SkipKind.SKIP_VIC
     }
 
     private func UseBeforeInitCheck(
@@ -62,10 +93,56 @@ public class VarInitCheck {
             return
         }
         let analysis = MaybeUninitAnalysis(fn, ctorInitInfo)
-        let analysisResult = analysis.Run()
-        if (let Some(body) <- fn.GetBody()) {
-            VisitMaybeUninitBody(fn, body, analysis, analysisResult, members, checkResult)
+        let engine = Engine<MaybeUninitDomain>(fn, analysis)
+        let result = engine.IterateToFixpoint() ??
+            throw IllegalStateException("VarInitCheck UseBeforeInitCheck expected analysis result")
+        let callStack = ArrayList<Function>()
+        callStack.add(fn)
+        let actionBeforeVisitExpr = { state: MaybeUninitDomain, expr: Expression, idx: Int64 =>
+            let _ = idx
+            if (expr.GetExprKind() == ExprKind.APPLY) {
+                if (let Some(varInitFunc) <- TryGetInstanceVarInitFromApply(expr)) {
+                    callStack.add(varInitFunc)
+                }
+            }
+            let initialFunc = callStack[0]
+            let curFunc = callStack[callStack.size - 1]
+            if (expr.GetExprKind() == ExprKind.LOAD) {
+                if (CheckLoadToUninitedAllocation(state, (expr as Load).getOrThrow(), checkResult)) {
+                    return
+                }
+            }
+            if (expr.GetExprKind() == ExprKind.GET_ELEMENT_REF) {
+                if (CheckGetElementRefToUninitedAllocation(state, (expr as GetElementRef).getOrThrow(), checkResult)) {
+                    return
+                }
+            }
+            if (!initialFunc.IsConstructor()) {
+                return
+            }
+            if (expr.GetExprKind() == ExprKind.LOAD) {
+                CheckLoadToUninitedCustomDefMember(state, curFunc, (expr as Load).getOrThrow(), members, checkResult)
+            } else if (expr.GetExprKind() == ExprKind.STORE_ELEMENT_REF) {
+                CheckStoreToUninitedCustomDefMember(
+                    state, curFunc, (expr as StoreElementRef).getOrThrow(), members, checkResult)
+            } else if (expr.GetExprKind() == ExprKind.APPLY) {
+                CheckMemberFuncCall(state, curFunc, expr, checkResult)
+            }
         }
+        let actionAfterVisitExpr = { state: MaybeUninitDomain, expr: Expression, idx: Int64 =>
+            let _ = state
+            let _ = idx
+            if (expr.GetExprKind() == ExprKind.APPLY) {
+                if (TryGetInstanceVarInitFromApply(expr).isSome()) {
+                    callStack.remove(at: callStack.size - 1)
+                }
+            }
+        }
+        let actionOnTerminator = { state: MaybeUninitDomain, term: Terminator, targetSucc: Option<Block> =>
+            let _ = targetSucc
+            CheckMaybeUninitTerminator(fn, term, state, members, checkResult)
+        }
+        result.VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator)
     }
 
     private func ReassignInitedLetVarCheck(
@@ -81,149 +158,42 @@ public class VarInitCheck {
             return
         }
         let analysis = MaybeInitAnalysis(fn, ctorInitInfo)
-        let analysisResult = analysis.Run()
-        if (let Some(body) <- fn.GetBody()) {
-            VisitMaybeInitBody(fn, body, analysis, analysisResult, members, checkResult)
+        let engine = Engine<MaybeInitDomain>(fn, analysis)
+        let result = engine.IterateToFixpoint() ??
+            throw IllegalStateException("VarInitCheck ReassignInitedLetVarCheck expected analysis result")
+        let actionBeforeVisitExpr = { state: MaybeInitDomain, expr: Expression, idx: Int64 =>
+            let _ = idx
+            CheckMaybeInitExpression(fn, expr, state, members, checkResult)
         }
-    }
-
-    private func VisitMaybeUninitBody(
-        fn: Function,
-        body: BlockGroup,
-        analysis: MaybeUninitAnalysis,
-        analysisResult: MaybeUninitResult,
-        members: ArrayList<MemberVarInfo>,
-        checkResult: CHIRCheckResult
-    ): Unit {
-        for (block in body.GetBlocksRef()) {
-            if (let Some(entryState) <- analysisResult.GetEntryState(block)) {
-                let state = entryState
-                for (expr in block.GetExpressionsRef()) {
-                    if (let Some(term) <- expr.AsTerminator()) {
-                        CheckMaybeUninitTerminator(fn, body, block, term, state, members, checkResult)
-                        analysis.PropagateTerminatorEffect(state, term)
-                    } else {
-                        CheckMaybeUninitExpression(fn, expr, state, members, checkResult)
-                        analysis.PropagateExpressionEffect(state, expr)
-                    }
-                }
-            }
+        let actionAfterVisitExpr = { state: MaybeInitDomain, expr: Expression, idx: Int64 =>
+            let _ = state
+            let _ = expr
+            let _ = idx
         }
-        VisitNestedMaybeUninitBodies(fn, body, analysis, analysisResult, members, checkResult)
-    }
-
-    private func VisitNestedMaybeUninitBodies(
-        fn: Function,
-        body: BlockGroup,
-        analysis: MaybeUninitAnalysis,
-        analysisResult: MaybeUninitResult,
-        members: ArrayList<MemberVarInfo>,
-        checkResult: CHIRCheckResult
-    ): Unit {
-        for (block in body.GetBlocksRef()) {
-            for (expr in block.GetExpressionsRef()) {
-                if (let Some(lambdaExpr) <- (expr as Lambda)) {
-                    if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                        VisitMaybeUninitBody(fn, lambdaBody, analysis, analysisResult, members, checkResult)
-                    }
-                }
-            }
+        let actionOnTerminator = { state: MaybeInitDomain, term: Terminator, targetSucc: Option<Block> =>
+            let _ = state
+            let _ = term
+            let _ = targetSucc
         }
-    }
-
-    private func VisitMaybeInitBody(
-        fn: Function,
-        body: BlockGroup,
-        analysis: MaybeInitAnalysis,
-        analysisResult: MaybeInitResult,
-        members: ArrayList<MemberVarInfo>,
-        checkResult: CHIRCheckResult
-    ): Unit {
-        for (block in body.GetBlocksRef()) {
-            if (let Some(entryState) <- analysisResult.GetEntryState(block)) {
-                let state = entryState
-                for (expr in block.GetExpressionsRef()) {
-                    if (let Some(term) <- expr.AsTerminator()) {
-                        CheckMaybeInitExpression(fn, term, state, members, checkResult)
-                        analysis.PropagateTerminatorEffect(state, term)
-                    } else {
-                        CheckMaybeInitExpression(fn, expr, state, members, checkResult)
-                        analysis.PropagateExpressionEffect(state, expr)
-                    }
-                }
-            }
-        }
-        VisitNestedMaybeInitBodies(fn, body, analysis, analysisResult, members, checkResult)
-    }
-
-    private func VisitNestedMaybeInitBodies(
-        fn: Function,
-        body: BlockGroup,
-        analysis: MaybeInitAnalysis,
-        analysisResult: MaybeInitResult,
-        members: ArrayList<MemberVarInfo>,
-        checkResult: CHIRCheckResult
-    ): Unit {
-        for (block in body.GetBlocksRef()) {
-            for (expr in block.GetExpressionsRef()) {
-                if (let Some(lambdaExpr) <- (expr as Lambda)) {
-                    if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                        VisitMaybeInitBody(fn, lambdaBody, analysis, analysisResult, members, checkResult)
-                    }
-                }
-            }
-        }
-    }
-
-    private func CheckMaybeUninitExpression(
-        fn: Function,
-        expr: Expression,
-        state: MaybeUninitDomain,
-        members: ArrayList<MemberVarInfo>,
-        checkResult: CHIRCheckResult
-    ): Unit {
-        let kind = expr.GetExprKind()
-        if (kind == ExprKind.LOAD) {
-            if (CheckLoadToUninitedAllocation(state, expr, checkResult)) {
-                return
-            }
-        }
-        if (kind == ExprKind.GET_ELEMENT_REF) {
-            if (CheckGetElementRefToUninitedAllocation(state, expr, checkResult)) {
-                return
-            }
-        }
-        if (!fn.IsConstructor()) {
-            return
-        }
-        if (kind == ExprKind.LOAD) {
-            CheckLoadToUninitedCustomDefMember(state, fn, expr, members, checkResult)
-        } else if (kind == ExprKind.STORE_ELEMENT_REF) {
-            let storeRef = (expr as StoreElementRef).getOrThrow()
-            CheckStoreToUninitedCustomDefMember(state, fn, storeRef, members, checkResult)
-        } else if (kind == ExprKind.APPLY) {
-            CheckMemberFuncCall(state, fn, expr, checkResult)
-        }
+        result.VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator)
     }
 
     private func CheckMaybeUninitTerminator(
         fn: Function,
-        body: BlockGroup,
-        block: Block,
         term: Terminator,
         state: MaybeUninitDomain,
         members: ArrayList<MemberVarInfo>,
         checkResult: CHIRCheckResult
     ): Unit {
         if (fn.IsConstructor() && term.GetExprKind() == ExprKind.EXIT) {
-            if (let Some(parentGroup) <- block.GetParentBlockGroup()) {
-                if (parentGroup.nodeId != body.nodeId) {
-                    return
-                }
-            } else {
-                return
-            }
-            if (HasFuncCallWithNothingRetVal(block)) {
+            let parentBlock = term.GetParentBlock() ??
+                throw IllegalStateException("VarInitCheck terminator expected parent block")
+            let isForInGeneratedExit = term.GetSkipCheck() == SkipKind.SKIP_FORIN_EXIT
+            let parentGroup = parentBlock.GetParentBlockGroup() ??
+                throw IllegalStateException("VarInitCheck terminator parent block expected parent group")
+            let body = fn.GetBody() ?? throw IllegalStateException("VarInitCheck expected function body")
+            let isExitForLocalFunc = !refEq(parentGroup, body)
+            if (isForInGeneratedExit || isExitForLocalFunc || HasFuncCallWithNothingRetVal(parentBlock)) {
                 return
             }
             let uninitedMembers = state.GetMaybeUninitedLocalMembers()
@@ -263,16 +233,13 @@ public class VarInitCheck {
 
     private func CheckLoadToUninitedAllocation(
         state: MaybeUninitDomain,
-        load: Expression,
+        load: Load,
         checkResult: CHIRCheckResult
     ): Bool {
-        if (load.GetNumOfOperands() == 0) {
-            return false
-        }
-        let targetVal = load.GetOperand(0)
+        let targetVal = load.GetLocation()
         if (let Some(isUninited) <- state.IsMaybeUninitedAllocation(targetVal)) {
             if (isUninited) {
-                AddUseBeforeInitError(load, ValueDisplayName(targetVal), state.GetMaybeInitedPos(targetVal),
+                AddUseBeforeInitError(load, targetVal.GetSrcCodeIdentifier(), state.GetMaybeInitedPos(targetVal),
                     checkResult)
                 return true
             }
@@ -282,22 +249,17 @@ public class VarInitCheck {
 
     private func CheckGetElementRefToUninitedAllocation(
         state: MaybeUninitDomain,
-        getElementRef: Expression,
+        getElementRef: GetElementRef,
         checkResult: CHIRCheckResult
     ): Bool {
-        if (getElementRef.GetNumOfOperands() == 0) {
+        let targetVal = getElementRef.GetLocation()
+        let originalTy = targetVal.GetType().getOrThrow().StripAllRefs()
+        if (!originalTy.IsStruct() && !originalTy.IsEnum()) {
             return false
-        }
-        let targetVal = getElementRef.GetOperand(0)
-        if (let Some(targetTy) <- targetVal.GetType()) {
-            let originalTy = targetTy.StripAllRefs()
-            if (!originalTy.IsStruct() && !originalTy.IsEnum()) {
-                return false
-            }
         }
         if (let Some(isUninited) <- state.IsMaybeUninitedAllocation(targetVal)) {
             if (isUninited) {
-                AddUseBeforeInitError(getElementRef, ValueDisplayName(targetVal), state.GetMaybeInitedPos(targetVal),
+                AddUseBeforeInitError(getElementRef, targetVal.GetSrcCodeIdentifier(), state.GetMaybeInitedPos(targetVal),
                     checkResult)
                 return true
             }
@@ -308,14 +270,11 @@ public class VarInitCheck {
     private func CheckLoadToUninitedCustomDefMember(
         state: MaybeUninitDomain,
         fn: Function,
-        load: Expression,
+        load: Load,
         members: ArrayList<MemberVarInfo>,
         checkResult: CHIRCheckResult
     ): Unit {
-        if (fn.GetNumOfParams() == 0 || load.GetNumOfOperands() == 0) {
-            return
-        }
-        let targetVal = load.GetOperand(0)
+        let targetVal = load.GetLocation()
         if (let Some(localVal) <- targetVal.AsLocalVar()) {
             if (let Some(targetExpr) <- localVal.GetExpr()) {
                 let thisArg = fn.GetParam(0)
@@ -333,9 +292,6 @@ public class VarInitCheck {
         members: ArrayList<MemberVarInfo>,
         checkResult: CHIRCheckResult
     ): Unit {
-        if (fn.GetNumOfParams() == 0) {
-            return
-        }
         let thisArg = fn.GetParam(0)
         if (let Some(index) <- IsStoreViaDefMember(store, thisArg, shouldBeNested: true)) {
             CheckUninitedDefMember(state, store, members, index, false, checkResult)
@@ -355,38 +311,37 @@ public class VarInitCheck {
         apply: Expression,
         checkResult: CHIRCheckResult
     ): Unit {
-        if (apply.GetNumOfOperands() == 0 || initFunc.GetNumOfParams() == 0) {
+        let callee = if (apply.GetExprKind() == ExprKind.APPLY) {
+            (apply as Apply).getOrThrow().GetCallee()
+        } else {
+            (apply as ApplyWithException).getOrThrow().GetCallee()
+        }
+        if (!callee.IsFuncWithBody()) {
             return
         }
-        if (state.GetMaybeUninitedLocalMembers().isEmpty()) {
-            return
+        let calleeFunc = callee.AsFunction().getOrThrow()
+        let calleeOuterDef = calleeFunc.GetOuterDeclaredOrExtendedDef()
+        let initOuterDef = initFunc.GetOuterDeclaredOrExtendedDef()
+        let sameOuterDef = match ((calleeOuterDef, initOuterDef)) {
+            case (Some(left), Some(right)) => refEq(left, right)
+            case (None, None) => true
+            case _ => false
         }
-        if (let Some(calleeFunc) <- apply.GetOperand(0).AsFunction()) {
-            if (!calleeFunc.IsFuncWithBody() || calleeFunc.IsConstructor() ||
-                calleeFunc.TestAttr(Attribute.STATIC) || calleeFunc.IsInstanceVarInit()) {
-                return
-            }
-            let calleeOuterDef = calleeFunc.GetOuterDeclaredOrExtendedDef()
-            let initOuterDef = initFunc.GetOuterDeclaredOrExtendedDef()
-            let sameOuterDef = match ((calleeOuterDef, initOuterDef)) {
-                case (Some(left), Some(right)) => left.nodeId == right.nodeId
-                case (None, None) => true
-                case _ => false
-            }
-            if (!sameOuterDef) {
-                return
-            }
-            if (apply.GetNumOfOperands() <= 1) {
-                return
+        if (sameOuterDef && !calleeFunc.IsConstructor() && !calleeFunc.TestAttr(Attribute.STATIC) &&
+            !state.GetMaybeUninitedLocalMembers().isEmpty() && !calleeFunc.IsInstanceVarInit()) {
+            let args = if (apply.GetExprKind() == ExprKind.APPLY) {
+                (apply as Apply).getOrThrow().GetArgs()
+            } else {
+                (apply as ApplyWithException).getOrThrow().GetArgs()
             }
             let thisArg = initFunc.GetParam(0)
-            let receiver = apply.GetOperand(1)
-            if (receiver.nodeId == thisArg.nodeId) {
+            let receiver = args[0]
+            if (refEq(receiver, thisArg)) {
                 RaiseIllegalMemberFunCallError(apply, calleeFunc, checkResult)
             } else if (let Some(localVal) <- receiver.AsLocalVar()) {
                 if (let Some(argExpr) <- localVal.GetExpr()) {
-                    if (argExpr.GetExprKind() == ExprKind.LOAD && argExpr.GetNumOfOperands() > 0 &&
-                        argExpr.GetOperand(0).nodeId == thisArg.nodeId) {
+                    if (argExpr.GetExprKind() == ExprKind.LOAD &&
+                        refEq((argExpr as Load).getOrThrow().GetLocation(), thisArg)) {
                         RaiseIllegalMemberFunCallError(apply, calleeFunc, checkResult)
                     }
                 }
@@ -412,15 +367,12 @@ public class VarInitCheck {
         if (allCommonNotDeserialized) {
             return
         }
+        checkResult.AddError("not all the member variables are initialized in this constructor")
         for (index in uninitedMemberIdx) {
-            let memberName = members[index].name
-            var message = "in function ${fn.GetIdentifier()}, constructor exits before member `${memberName}` " +
-                "is initialized"
-            let lines = state.GetMaybeInitedPos(index)
-            if (!lines.isEmpty()) {
-                message += "; " + MaybeInitedPosNote(memberName, lines)
-            }
-            checkResult.AddError(message)
+            let identifier = members[index].name
+            checkResult.AddNote("in line ${members[index].loc.GetBeginPos().line}, variable '${identifier}' " +
+                "need to be initialized")
+            AddMaybeInitedPosNote(checkResult, identifier, state.GetMaybeInitedPos(index))
         }
     }
 
@@ -432,13 +384,9 @@ public class VarInitCheck {
         onlyCheckSuper: Bool,
         checkResult: CHIRCheckResult
     ): Unit {
-        if (index < 0 || index >= members.size) {
-            return
-        }
         match (state.IsMaybeUninitedMember(index)) {
             case MaybeUninitMemberKind.SUPER_MEMBER =>
-                checkResult.AddError("illegal usage of super member `${members[index].name}` at " +
-                    VarInitExprLocation(expr))
+                checkResult.AddError("super member '${members[index].name}' is not allowed to be used before calling super()")
             case MaybeUninitMemberKind.LOCAL_MEMBER =>
                 if (!onlyCheckSuper) {
                     AddUseBeforeInitError(expr, members[index].name, state.GetMaybeInitedPos(index), checkResult)
@@ -458,7 +406,7 @@ public class VarInitCheck {
             return
         }
         let paths = store.GetPath()
-        if (store.GetLocation().nodeId == fn.GetParam(0).nodeId && paths.size == 1) {
+        if (refEq(store.GetLocation(), fn.GetParam(0)) && paths.size == 1) {
             let index = Int64(paths[0])
             if (members[index].TestAttr(Attribute.READONLY)) {
                 match (state.IsMaybeInitedMember(index)) {
@@ -477,15 +425,11 @@ public class VarInitCheck {
         checkResult: CHIRCheckResult
     ): Unit {
         var identifier = memberFunc.GetSrcCodeIdentifier()
-        if (identifier.isEmpty()) {
-            identifier = memberFunc.GetIdentifierWithoutPrefix()
-        }
         let calleeKind = memberFunc.GetFuncKind()
-        if ((calleeKind == FuncKind.GETTER || calleeKind == FuncKind.SETTER) && identifier.size > 4) {
-            identifier = identifier[1..identifier.size - 4]
+        if (calleeKind == FuncKind.GETTER || calleeKind == FuncKind.SETTER) {
+            identifier = identifier[1..identifier.size - 3]
         }
-        checkResult.AddError("illegal member call `${identifier}` before all members are initialized at " +
-            VarInitExprLocation(apply))
+        checkResult.AddError("'${identifier}' is not allowed to be accessed before all member variables are initialized")
     }
 }
 
@@ -495,7 +439,7 @@ private func BuildConstructorContext(fn: Function): VarInitConstructorContext {
     if (!fn.IsConstructor()) {
         return VarInitConstructorContext(ctorInfo, members)
     }
-    if (let Some(customDef) <- fn.GetParentCustomTypeDef()) {
+    if (let Some(customDef) <- fn.GetOuterDeclaredOrExtendedDef()) {
         ctorInfo.thisCustomDef = customDef
         if (let Some(classDef) <- (customDef as ClassDef)) {
             if (let Some(superDef) <- classDef.GetSuperClassDef()) {
@@ -523,10 +467,9 @@ private func HasFuncCallWithNothingRetVal(block: Block): Bool {
         if (!expr.IsFuncCall()) {
             continue
         }
-        if (let Some(resultTy) <- expr.GetResultType()) {
-            if (resultTy.StripAllRefs().IsNothing()) {
-                return true
-            }
+        let resultTy = expr.GetResultType().getOrThrow()
+        if (resultTy.StripAllRefs().IsNothing()) {
+            return true
         }
     }
     return false
@@ -541,7 +484,7 @@ private func IsGetElemRefViaDefMember(
     }
     let getElemRef = (expr as GetElementRef).getOrThrow()
     let location = getElemRef.GetLocation()
-    if (location.nodeId == thisArg.nodeId) {
+    if (refEq(location, thisArg)) {
         return Int64(getElemRef.GetPath()[0])
     }
     if (let Some(localVal) <- location.AsLocalVar()) {
@@ -558,7 +501,7 @@ private func IsStoreViaDefMember(
     shouldBeNested!: Bool = false
 ): Option<Int64> {
     let location = store.GetLocation()
-    if (location.nodeId == thisArg.nodeId && (!shouldBeNested || store.GetPath().size > 1)) {
+    if (refEq(location, thisArg) && (!shouldBeNested || store.GetPath().size > 1)) {
         return Int64(store.GetPath()[0])
     } else if (let Some(localVal) <- location.AsLocalVar()) {
         if (let Some(expr) <- localVal.GetExpr()) {
@@ -571,14 +514,11 @@ private func IsStoreViaDefMember(
 private func AddUseBeforeInitError(
     expr: Expression,
     identifier: String,
-    maybeInitedPos: ArrayList<Int64>,
+    maybeInitedPos: TreeSet<Int64>,
     checkResult: CHIRCheckResult
 ): Unit {
-    var message = "value `${identifier}` used before initialization at " + VarInitExprLocation(expr)
-    if (!maybeInitedPos.isEmpty()) {
-        message += "; " + MaybeInitedPosNote(identifier, maybeInitedPos)
-    }
-    checkResult.AddError(message)
+    checkResult.AddError("variable '${identifier}' is used before initialization")
+    AddMaybeInitedPosNote(checkResult, identifier, maybeInitedPos)
 }
 
 private func AddCannotAssignInitializedLetError(
@@ -586,31 +526,21 @@ private func AddCannotAssignInitializedLetError(
     fn: Function,
     checkResult: CHIRCheckResult
 ): Unit {
-    checkResult.AddError("in function ${fn.GetIdentifier()}, cannot assign initialized let variable at " +
-        VarInitExprLocation(expr))
+    checkResult.AddError("cannot assign to value which is an initialized 'let' constant")
 }
 
-private func MaybeInitedPosNote(identifier: String, maybeInitedPos: ArrayList<Int64>): String {
-    let lines = ArrayList<String>()
-    for (line in maybeInitedPos) {
-        lines.add("${line}")
+private func AddMaybeInitedPosNote(
+    builder: CHIRCheckResult,
+    identifier: String,
+    maybeInitedPos: TreeSet<Int64>
+): Unit {
+    if (maybeInitedPos.isEmpty()) {
+        return
     }
-    return "variable `${identifier}` is assigned in line " + JoinStrings(lines, ", ") +
-        ", but these assignments might not execute at runtime"
-}
-
-private func ValueDisplayName(value: Value): String {
-    let srcName = value.GetSrcCodeIdentifier()
-    if (!srcName.isEmpty()) {
-        return srcName
+    var message = "we detected variable '${identifier}' is assigned in line "
+    for (pos in maybeInitedPos) {
+        message += "${pos}, "
     }
-    return value.GetIdentifierWithoutPrefix()
-}
-
-private func VarInitExprLocation(expr: Expression): String {
-    let loc = expr.GetDebugLocation().ToString()
-    if (loc.isEmpty()) {
-        return "<unknown>"
-    }
-    return loc
+    message += "but in runtime, these codes might not be executed."
+    builder.AddNote(message)
 }

@@ -23,10 +23,10 @@ public enum MaybeUninitMemberKind {
     | SUPER_MEMBER | LOCAL_MEMBER | NA
 }
 
-public class MaybeUninitDomain <: GenKillDomain {
+public class MaybeUninitDomain <: GenKillDomain<MaybeUninitDomain> {
     private let ctorInitInfo: ConstructorInitInfo
     private let allocateIdxMap: HashMap<Int64, Int64>
-    private let maybeInitedPos: ArrayList<ArrayList<Int64>> = ArrayList<ArrayList<Int64>>()
+    let maybeInitedPos: ArrayList<TreeSet<Int64>> = ArrayList<TreeSet<Int64>>()
 
     public init(domainSize: Int64, ctorInitInfo: ConstructorInitInfo, allocateIdxMap: HashMap<Int64, Int64>) {
         super(domainSize)
@@ -34,12 +34,12 @@ public class MaybeUninitDomain <: GenKillDomain {
         this.allocateIdxMap = allocateIdxMap
         var idx: Int64 = 0
         while (idx < domainSize) {
-            maybeInitedPos.add(ArrayList<Int64>())
+            maybeInitedPos.add(TreeSet<Int64>())
             idx++
         }
     }
 
-    public func Clone(): MaybeUninitDomain {
+    public override func Clone(): MaybeUninitDomain {
         let out = MaybeUninitDomain(Size(), ctorInitInfo, allocateIdxMap)
         out.CopyFrom(this)
         return out
@@ -49,7 +49,7 @@ public class MaybeUninitDomain <: GenKillDomain {
         CopyBaseFrom(rhs)
         maybeInitedPos.clear()
         for (positions in rhs.maybeInitedPos) {
-            let copied = ArrayList<Int64>()
+            let copied = TreeSet<Int64>()
             for (line in positions) {
                 copied.add(line)
             }
@@ -57,11 +57,11 @@ public class MaybeUninitDomain <: GenKillDomain {
         }
     }
 
-    public func Join(rhs: MaybeUninitDomain): Bool {
+    public override func Join(rhs: MaybeUninitDomain): Bool {
         var idx: Int64 = 0
-        while (idx < maybeInitedPos.size && idx < rhs.maybeInitedPos.size) {
+        while (idx < maybeInitedPos.size) {
             for (line in rhs.maybeInitedPos[idx]) {
-                AddLineIfMissing(maybeInitedPos[idx], line)
+                maybeInitedPos[idx].add(line)
             }
             idx++
         }
@@ -75,11 +75,10 @@ public class MaybeUninitDomain <: GenKillDomain {
         return None
     }
 
-    public func GetMaybeInitedPos(location: Value): ArrayList<Int64> {
-        if (let Some(idx) <- allocateIdxMap.get(location.nodeId)) {
-            return CopyIntListAt(idx)
-        }
-        return ArrayList<Int64>()
+    public func GetMaybeInitedPos(location: Value): TreeSet<Int64> {
+        let idx = allocateIdxMap.get(location.nodeId) ??
+            throw IllegalStateException("MaybeUninitDomain expected allocation index")
+        return maybeInitedPos[idx]
     }
 
     public func IsMaybeUninitedMember(memberIndex: Int64): MaybeUninitMemberKind {
@@ -91,14 +90,14 @@ public class MaybeUninitDomain <: GenKillDomain {
             let localIndex = memberIndex - ctorInitInfo.superMemberNums
             return if (IsTrueAt(localIndex)) { MaybeUninitMemberKind.LOCAL_MEMBER } else { MaybeUninitMemberKind.NA }
         }
-        return MaybeUninitMemberKind.NA
+        throw IllegalStateException("MaybeUninitDomain member index out of range")
     }
 
-    public func GetMaybeInitedPos(memberIndex: Int64): ArrayList<Int64> {
+    public func GetMaybeInitedPos(memberIndex: Int64): TreeSet<Int64> {
         if (memberIndex < ctorInitInfo.superMemberNums) {
-            return ArrayList<Int64>()
+            throw IllegalStateException("MaybeUninitDomain expected local member index")
         }
-        return CopyIntListAt(memberIndex - ctorInitInfo.superMemberNums)
+        return maybeInitedPos[memberIndex - ctorInitInfo.superMemberNums]
     }
 
     public func GetMaybeUninitedLocalMembers(): ArrayList<Int64> {
@@ -121,62 +120,16 @@ public class MaybeUninitDomain <: GenKillDomain {
         }
     }
 
-    public func RecordMaybeInitedPos(index: Int64, line: Int64): Unit {
-        if (index >= 0 && index < maybeInitedPos.size && line > 0) {
-            AddLineIfMissing(maybeInitedPos[index], line)
-        }
-    }
-
-    private func CopyIntListAt(index: Int64): ArrayList<Int64> {
-        let out = ArrayList<Int64>()
-        if (index >= 0 && index < maybeInitedPos.size) {
-            for (line in maybeInitedPos[index]) {
-                out.add(line)
-            }
-        }
-        return out
-    }
 }
 
-public class MaybeUninitResult {
-    public let functionValue: Function
-    private let entryStates: HashMap<Int64, MaybeUninitDomain> = HashMap<Int64, MaybeUninitDomain>()
-    private let exitStates: HashMap<Int64, MaybeUninitDomain> = HashMap<Int64, MaybeUninitDomain>()
-
-    public init(functionValue: Function) {
-        this.functionValue = functionValue
-    }
-
-    public func GetEntryState(block: Block): Option<MaybeUninitDomain> {
-        if (let Some(state) <- entryStates.get(block.nodeId)) {
-            return state.Clone()
-        }
-        return None
-    }
-
-    public func GetExitState(block: Block): Option<MaybeUninitDomain> {
-        if (let Some(state) <- exitStates.get(block.nodeId)) {
-            return state.Clone()
-        }
-        return None
-    }
-
-    public func SetEntryState(block: Block, state: MaybeUninitDomain): Unit {
-        entryStates[block.nodeId] = state.Clone()
-    }
-
-    public func SetExitState(block: Block, state: MaybeUninitDomain): Unit {
-        exitStates[block.nodeId] = state.Clone()
-    }
-}
-
-public class MaybeUninitAnalysis {
+public class MaybeUninitAnalysis <: Analysis<MaybeUninitDomain> {
     private let functionValue: Function
     private let ctorInitInfo: ConstructorInitInfo
     private let allocateIdxMap: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     private var domainSize: Int64 = 0
 
     public init(functionValue: Function, ctorInitInfo: ConstructorInitInfo) {
+        super(functionValue)
         this.functionValue = functionValue
         this.ctorInitInfo = ctorInitInfo
         var allocateIdx = ctorInitInfo.localMemberNums
@@ -189,24 +142,16 @@ public class MaybeUninitAnalysis {
         }
     }
 
-    public func Bottom(): MaybeUninitDomain {
+    public override func Bottom(): MaybeUninitDomain {
         return MaybeUninitDomain(domainSize, ctorInitInfo, allocateIdxMap)
     }
 
-    public func Run(): MaybeUninitResult {
-        let result = MaybeUninitResult(functionValue)
-        if (let Some(body) <- functionValue.GetBody()) {
-            RunOnBody(body, result)
-        }
-        return result
-    }
-
-    public func InitializeFuncEntryState(state: MaybeUninitDomain): Unit {
+    public override func InitializeFuncEntryState(state: MaybeUninitDomain): Unit {
         state.SetReachable(true)
         state.GenAll()
     }
 
-    public func PropagateExpressionEffect(state: MaybeUninitDomain, expression: Expression): Unit {
+    public override func PropagateExpressionEffect(state: MaybeUninitDomain, expression: Expression): Unit {
         let kind = expression.GetExprKind()
         if (kind == ExprKind.ALLOCATE) {
             HandleAllocateExpr(state, expression)
@@ -219,76 +164,27 @@ public class MaybeUninitAnalysis {
         }
     }
 
-    public func PropagateTerminatorEffect(state: MaybeUninitDomain, terminator: Terminator): Option<Block> {
+    public override func PropagateTerminatorEffect(state: MaybeUninitDomain, terminator: Terminator): Option<Block> {
         let _ = state
         let _ = terminator
         return None
     }
 
-    public func GetDomainSize(): Int64 {
-        return domainSize
-    }
-
-    public func GetAllocateIndex(location: Value): Option<Int64> {
-        return allocateIdxMap.get(location.nodeId)
-    }
-
-    private func RunOnBody(body: BlockGroup, result: MaybeUninitResult): Unit {
-        if (let Some(entryBlock) <- body.GetEntryBlock()) {
-            let entryState = Bottom()
-            InitializeFuncEntryState(entryState)
-            result.SetEntryState(entryBlock, entryState)
-            let worklist = ArrayList<Block>()
-            worklist.add(entryBlock)
-            var worklistIdx: Int64 = 0
-            while (worklistIdx < worklist.size) {
-                let block = worklist[worklistIdx]
-                worklistIdx++
-                let state = if (let Some(existing) <- result.GetEntryState(block)) { existing } else { Bottom() }
-                for (expr in block.GetExpressionsRef()) {
-                    if (let Some(term) <- expr.AsTerminator()) {
-                        PropagateTerminatorEffect(state, term)
-                    } else {
-                        PropagateExpressionEffect(state, expr)
-                    }
-                }
-                result.SetExitState(block, state)
-                for (successor in block.GetSuccessors()) {
-                    let successorState = if (let Some(oldState) <- result.GetEntryState(successor)) { oldState } else { Bottom() }
-                    if (successorState.Join(state)) {
-                        result.SetEntryState(successor, successorState)
-                        worklist.add(successor)
-                    }
-                }
-            }
-        }
-        for (block in body.GetBlocksRef()) {
-            for (expr in block.GetExpressionsRef()) {
-                if (let Some(lambdaExpr) <- (expr as Lambda)) {
-                    if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                        RunOnBody(lambdaBody, result)
-                    }
-                }
-            }
-        }
-    }
-
     private func HandleAllocateExpr(state: MaybeUninitDomain, allocate: Expression): Unit {
-        if (let Some(result) <- allocate.GetResult()) {
-            if (let Some(index) <- allocateIdxMap.get(result.nodeId)) {
-                state.Gen(index)
-            }
+        let allocateExpr = (allocate as Allocate) ?? throw IllegalStateException("MaybeUninitAnalysis expected Allocate")
+        let result = allocateExpr.GetResult() ?? throw IllegalStateException("MaybeUninitAnalysis Allocate has no result")
+        if (let Some(index) <- allocateIdxMap.get(result.nodeId)) {
+            state.Gen(index)
         }
     }
 
     private func HandleStoreExpr(state: MaybeUninitDomain, store: Expression): Unit {
-        if (store.GetNumOfOperands() >= 2) {
-            let location = store.GetOperand(1)
-            if (let Some(index) <- allocateIdxMap.get(location.nodeId)) {
-                state.Kill(index)
-                let debugLoc = store.GetDebugLocation()
-                state.RecordMaybeInitedPos(index, Int64(debugLoc.GetBeginPos().line))
-            }
+        let storeExpr = (store as Store) ?? throw IllegalStateException("MaybeUninitAnalysis expected Store")
+        let location = storeExpr.GetLocation()
+        if (let Some(index) <- allocateIdxMap.get(location.nodeId)) {
+            state.Kill(index)
+            let debugLoc = store.GetDebugLocation()
+            state.maybeInitedPos[index].add(Int64(debugLoc.GetBeginPos().line))
         }
     }
 
@@ -311,7 +207,7 @@ public class MaybeUninitAnalysis {
         let stateIndex = memberIndex - ctorInitInfo.superMemberNums
         state.Kill(stateIndex)
         let debugLoc = store.GetDebugLocation()
-        state.RecordMaybeInitedPos(stateIndex, Int64(debugLoc.GetBeginPos().line))
+        state.maybeInitedPos[stateIndex].add(Int64(debugLoc.GetBeginPos().line))
     }
 
     private func HandleApplyExpr(state: MaybeUninitDomain, apply: Expression): Unit {
@@ -328,7 +224,7 @@ public class MaybeUninitAnalysis {
             if (let Some(calleeFunc) <- callee.AsFunction()) {
                 let outerDefOpt = calleeFunc.GetOuterDeclaredOrExtendedDef()
                 let sameOuterDef = match ((outerDefOpt, ctorInitInfo.thisCustomDef)) {
-                    case (Some(left), Some(right)) => left.nodeId == right.nodeId
+                    case (Some(left), Some(right)) => refEq(left, right)
                     case (None, None) => true
                     case _ => false
                 }
@@ -365,32 +261,4 @@ public func SaveAllocateMap(body: BlockGroup, allocateIdx: Int64, allocateIdxMap
         }
     }
     return nextIdx
-}
-
-public func IsInitialisingMemberVar(functionValue: Function, store: StoreElementRef): Option<Int64> {
-    if (!IsConstructorOrInstanceVarInit(functionValue) || functionValue.GetNumOfParams() == 0) {
-        return None
-    }
-    let location = store.GetLocation()
-    if (!location.IsParameter() || location.nodeId != functionValue.GetParam(0).nodeId) {
-        return None
-    }
-    let path = store.GetPath()
-    if (path.size != 1 || path[0] > 9223372036854775807u64) {
-        return None
-    }
-    return Int64(path[0])
-}
-
-private func IsConstructorOrInstanceVarInit(functionValue: Function): Bool {
-    return functionValue.IsConstructor() || functionValue.IsInstanceVarInit()
-}
-
-private func AddLineIfMissing(lines: ArrayList<Int64>, line: Int64): Unit {
-    for (existing in lines) {
-        if (existing == line) {
-            return
-        }
-    }
-    lines.add(line)
 }

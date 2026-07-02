@@ -26,6 +26,67 @@ public class GeneratedFromForIn {
     }
 }
 
+public enum SkipKind {
+    | NO_SKIP | SKIP_DCE_WARNING | SKIP_FORIN_EXIT | SKIP_VIC
+}
+
+public func SkipKindIndex(kind: SkipKind): Int64 {
+    return match (kind) {
+        case SkipKind.NO_SKIP => 0
+        case SkipKind.SKIP_DCE_WARNING => 1
+        case SkipKind.SKIP_FORIN_EXIT => 2
+        case SkipKind.SKIP_VIC => 3
+    }
+}
+
+extend SkipKind <: Equatable<SkipKind> {
+    public operator func ==(right: SkipKind): Bool {
+        return SkipKindIndex(this) == SkipKindIndex(right)
+    }
+
+    public operator func !=(right: SkipKind): Bool {
+        return !(this == right)
+    }
+}
+
+public class SkipCheck {
+    private let kind: SkipKind
+
+    public init() {
+        kind = SkipKind.NO_SKIP
+    }
+
+    public init(kind: SkipKind) {
+        this.kind = kind
+    }
+
+    public func Clone(): SkipCheck {
+        return SkipCheck(kind)
+    }
+
+    public func ToString(): String {
+        return match (kind) {
+            case SkipKind.SKIP_DCE_WARNING => "skip: dce warning"
+            case SkipKind.SKIP_FORIN_EXIT => "skip: for-in exit"
+            case SkipKind.SKIP_VIC => "skip: vic"
+            case SkipKind.NO_SKIP => ""
+        }
+    }
+
+    public static func Extract(label: SkipCheck): SkipKind {
+        return label.kind
+    }
+}
+
+private func SkipKindFromAnnotationValue(value: String): SkipKind {
+    return match (value) {
+        case "1" => SkipKind.SKIP_DCE_WARNING
+        case "2" => SkipKind.SKIP_FORIN_EXIT
+        case "3" => SkipKind.SKIP_VIC
+        case _ => SkipKind.NO_SKIP
+    }
+}
+
 public class AnnotationMap {
     private let values: HashMap<String, String> = HashMap<String, String>()
 
@@ -64,7 +125,14 @@ public class AnnotationMap {
         }
         let parts = ArrayList<String>()
         for ((key, value) in values) {
-            parts.add("${IndentToString(indent)}@${key}(${value})")
+            if (key == "SkipCheck") {
+                let text = SkipCheck(SkipKindFromAnnotationValue(value)).ToString()
+                if (!text.isEmpty()) {
+                    parts.add("${IndentToString(indent)}${text}")
+                }
+            } else {
+                parts.add("${IndentToString(indent)}@${key}(${value})")
+            }
         }
         return JoinStrings(parts, "\n")
     }

@@ -159,14 +159,87 @@ public func IsApplyToLambda(expr: Expression): Option<Lambda> {
         return None
     }
     if (expr.GetNumOfOperands() == 0) {
-        return None
+        throw IllegalStateException("IsApplyToLambda expected at least one operand")
     }
     if (let Some(callee) <- expr.GetOperand(0).AsLocalVar()) {
-        if (let Some(calleeExpr) <- callee.GetExpr()) {
-            return calleeExpr as Lambda
+        let calleeExpr = callee.GetExpr() ??
+            throw IllegalStateException("IsApplyToLambda expected callee expression")
+        return calleeExpr as Lambda
+    }
+    return None
+}
+
+public func IsInitialisingMemberVar(functionValue: Function, store: StoreElementRef): Option<Int64> {
+    let location = store.GetLocation()
+    if ((functionValue.IsConstructor() || functionValue.GetFuncKind() == FuncKind.INSTANCEVAR_INIT) &&
+        location.IsParameter()) {
+        let paths = store.GetPath()
+        if (refEq(location, functionValue.GetParam(0)) && paths.size == 1) {
+            return Int64(paths[0])
         }
     }
     return None
+}
+
+public func TryGetInstanceVarInitFromApply(expr: Expression): Option<Function> {
+    if (expr.GetExprKind() == ExprKind.APPLY) {
+        if (let Some(applyExpr) <- (expr as Apply)) {
+            let callee = applyExpr.GetCallee()
+            if (callee.IsFuncWithBody()) {
+                if (let Some(fn) <- callee.AsFunction()) {
+                    if (fn.IsInstanceVarInit()) {
+                        return fn
+                    }
+                }
+            }
+        }
+    }
+    return None
+}
+
+private class VisitStackElem {
+    public let block: Block
+    public let successors: ArrayList<Block>
+
+    public init(block: Block, successors: ArrayList<Block>) {
+        this.block = block
+        this.successors = successors
+    }
+}
+
+public func TopologicalSort(entryBlock: Block): ArrayList<Block> {
+    let result = ArrayList<Block>()
+    let visited = ArrayList<Int64>()
+    let visitStack = ArrayList<VisitStackElem>()
+    visited.add(entryBlock.nodeId)
+    visitStack.add(VisitStackElem(entryBlock, entryBlock.GetSuccessors()))
+
+    while (!visitStack.isEmpty()) {
+        while (!visitStack[visitStack.size - 1].successors.isEmpty()) {
+            let top = visitStack[visitStack.size - 1]
+            let lastSuccessor = top.successors[top.successors.size - 1]
+            top.successors.remove(at: top.successors.size - 1)
+            var hasVisited = false
+            for (id in visited) {
+                if (id == lastSuccessor.nodeId) {
+                    hasVisited = true
+                    break
+                }
+            }
+            if (!hasVisited) {
+                visited.add(lastSuccessor.nodeId)
+                visitStack.add(VisitStackElem(lastSuccessor, lastSuccessor.GetSuccessors()))
+            }
+        }
+
+        var shouldContinue = true
+        while (shouldContinue && !visitStack.isEmpty()) {
+            result.add(visitStack[visitStack.size - 1].block, at: 0)
+            visitStack.remove(at: visitStack.size - 1)
+            shouldContinue = !visitStack.isEmpty() && visitStack[visitStack.size - 1].successors.isEmpty()
+        }
+    }
+    return result
 }
 
 public func GetLambdaCapturedVarsRecursively(lambda: Lambda): ArrayList<Value> {
@@ -207,8 +280,8 @@ private func VisitLambdaBodyForCapturedVars(body: BlockGroup, capturedVars: Arra
         for (expr in block.GetExpressionsRef()) {
             if (let Some(appliedLambda) <- IsApplyToLambda(expr)) {
                 CollectLambdaCapturedVarsRecursively(appliedLambda, capturedVars, visitedLambdas)
-            } else if (let Some(nestedLambda) <- (expr as Lambda)) {
-                CollectLambdaCapturedVarsRecursively(nestedLambda, capturedVars, visitedLambdas)
+            } else if ((expr as Lambda).isSome()) {
+                continue
             } else {
                 for (group in expr.GetBlockGroups()) {
                     VisitLambdaBodyForCapturedVars(group, capturedVars, visitedLambdas)

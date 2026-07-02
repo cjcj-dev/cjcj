@@ -35,19 +35,39 @@ extend CHIRCheckerRule <: Equatable<CHIRCheckerRule> {
 public class CHIRCheckResult {
     public var ok: Bool = true
     public let errors: ArrayList<String> = ArrayList<String>()
+    public let notes: ArrayList<ArrayList<String>> = ArrayList<ArrayList<String>>()
 
     public init() {}
 
     public func AddError(message: String): Unit {
         ok = false
         errors.add(message)
+        notes.add(ArrayList<String>())
+    }
+
+    public func AddNote(message: String): Unit {
+        if (errors.isEmpty()) {
+            throw IllegalStateException("CHIRCheckResult AddNote expected primary diagnostic")
+        }
+        notes[notes.size - 1].add(message)
     }
 
     public func ToString(): String {
         if (ok) {
             return "ok"
         }
-        return JoinStrings(errors, "\n")
+        let lines = ArrayList<String>()
+        var idx: Int64 = 0
+        while (idx < errors.size) {
+            lines.add(errors[idx])
+            if (idx < notes.size) {
+                for (note in notes[idx]) {
+                    lines.add(note)
+                }
+            }
+            idx++
+        }
+        return JoinStrings(lines, "\n")
     }
 }
 

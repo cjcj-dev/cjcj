@@ -31,12 +31,25 @@ public open class Base {
         }
     }
 
+    public func SetSkipCheck(kind: SkipKind): Unit {
+        let label = SkipCheck(kind)
+        if (SkipCheck.Extract(label) == SkipKind.NO_SKIP) {
+            annotationMap.Remove("SkipCheck")
+        } else {
+            annotationMap.Set("SkipCheck", SkipKindIndex(SkipCheck.Extract(label)).toString())
+        }
+    }
+
     public func RemoveAnnotation(key: String): Unit {
         annotationMap.Remove(key)
     }
 
     public func RemoveGeneratedFromForIn(): Unit {
         annotationMap.Remove("GeneratedFromForIn")
+    }
+
+    public func RemoveSkipCheck(): Unit {
+        annotationMap.Remove("SkipCheck")
     }
 
     public func GetAnnotation(key: String): Option<String> {
@@ -48,6 +61,18 @@ public open class Base {
             return GeneratedFromForIn.Extract(GeneratedFromForIn(true))
         }
         return GeneratedFromForIn.Extract(GeneratedFromForIn())
+    }
+
+    public func GetSkipCheck(): SkipKind {
+        if (let Some(value) <- annotationMap.Get("SkipCheck")) {
+            return match (value) {
+                case "1" => SkipKind.SKIP_DCE_WARNING
+                case "2" => SkipKind.SKIP_FORIN_EXIT
+                case "3" => SkipKind.SKIP_VIC
+                case _ => SkipKind.NO_SKIP
+            }
+        }
+        return SkipKind.NO_SKIP
     }
 
     public func GetAnno(): AnnotationMap {

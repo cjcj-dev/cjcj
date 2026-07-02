@@ -6,7 +6,7 @@ public enum MaybeInitMemberKind {
     | SUPER_MEMBER | LOCAL_MEMBER | NA
 }
 
-public class MaybeInitDomain <: GenKillDomain {
+public class MaybeInitDomain <: GenKillDomain<MaybeInitDomain> {
     private let ctorInitInfo: ConstructorInitInfo
     private let allocateIdxMap: HashMap<Int64, Int64>
 
@@ -16,7 +16,7 @@ public class MaybeInitDomain <: GenKillDomain {
         this.allocateIdxMap = allocateIdxMap
     }
 
-    public func Clone(): MaybeInitDomain {
+    public override func Clone(): MaybeInitDomain {
         let out = MaybeInitDomain(Size(), ctorInitInfo, allocateIdxMap)
         out.CopyFrom(this)
         return out
@@ -26,7 +26,7 @@ public class MaybeInitDomain <: GenKillDomain {
         CopyBaseFrom(rhs)
     }
 
-    public func Join(rhs: MaybeInitDomain): Bool {
+    public override func Join(rhs: MaybeInitDomain): Bool {
         return JoinStates(rhs, AnalysisKind.MAYBE)
     }
 
@@ -58,45 +58,14 @@ public class MaybeInitDomain <: GenKillDomain {
     }
 }
 
-public class MaybeInitResult {
-    public let functionValue: Function
-    private let entryStates: HashMap<Int64, MaybeInitDomain> = HashMap<Int64, MaybeInitDomain>()
-    private let exitStates: HashMap<Int64, MaybeInitDomain> = HashMap<Int64, MaybeInitDomain>()
-
-    public init(functionValue: Function) {
-        this.functionValue = functionValue
-    }
-
-    public func GetEntryState(block: Block): Option<MaybeInitDomain> {
-        if (let Some(state) <- entryStates.get(block.nodeId)) {
-            return state.Clone()
-        }
-        return None
-    }
-
-    public func GetExitState(block: Block): Option<MaybeInitDomain> {
-        if (let Some(state) <- exitStates.get(block.nodeId)) {
-            return state.Clone()
-        }
-        return None
-    }
-
-    public func SetEntryState(block: Block, state: MaybeInitDomain): Unit {
-        entryStates[block.nodeId] = state.Clone()
-    }
-
-    public func SetExitState(block: Block, state: MaybeInitDomain): Unit {
-        exitStates[block.nodeId] = state.Clone()
-    }
-}
-
-public class MaybeInitAnalysis {
+public class MaybeInitAnalysis <: Analysis<MaybeInitDomain> {
     private let functionValue: Function
     private let ctorInitInfo: ConstructorInitInfo
     private let allocateIdxMap: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     private var domainSize: Int64 = 0
 
     public init(functionValue: Function, ctorInitInfo: ConstructorInitInfo) {
+        super(functionValue)
         this.functionValue = functionValue
         this.ctorInitInfo = ctorInitInfo
         var allocateIdx = ctorInitInfo.localMemberNums
@@ -109,23 +78,15 @@ public class MaybeInitAnalysis {
         }
     }
 
-    public func Bottom(): MaybeInitDomain {
+    public override func Bottom(): MaybeInitDomain {
         return MaybeInitDomain(domainSize, ctorInitInfo, allocateIdxMap)
     }
 
-    public func Run(): MaybeInitResult {
-        let result = MaybeInitResult(functionValue)
-        if (let Some(body) <- functionValue.GetBody()) {
-            RunOnBody(body, result)
-        }
-        return result
-    }
-
-    public func InitializeFuncEntryState(state: MaybeInitDomain): Unit {
+    public override func InitializeFuncEntryState(state: MaybeInitDomain): Unit {
         state.SetReachable(true)
     }
 
-    public func PropagateExpressionEffect(state: MaybeInitDomain, expression: Expression): Unit {
+    public override func PropagateExpressionEffect(state: MaybeInitDomain, expression: Expression): Unit {
         let kind = expression.GetExprKind()
         if (kind == ExprKind.ALLOCATE) {
             HandleAllocateExpr(state, expression)
@@ -138,58 +99,10 @@ public class MaybeInitAnalysis {
         }
     }
 
-    public func PropagateTerminatorEffect(state: MaybeInitDomain, terminator: Terminator): Option<Block> {
+    public override func PropagateTerminatorEffect(state: MaybeInitDomain, terminator: Terminator): Option<Block> {
         let _ = state
         let _ = terminator
         return None
-    }
-
-    public func GetDomainSize(): Int64 {
-        return domainSize
-    }
-
-    public func GetAllocateIndex(location: Value): Option<Int64> {
-        return allocateIdxMap.get(location.nodeId)
-    }
-
-    private func RunOnBody(body: BlockGroup, result: MaybeInitResult): Unit {
-        if (let Some(entryBlock) <- body.GetEntryBlock()) {
-            let entryState = Bottom()
-            InitializeFuncEntryState(entryState)
-            result.SetEntryState(entryBlock, entryState)
-            let worklist = ArrayList<Block>()
-            worklist.add(entryBlock)
-            var worklistIdx: Int64 = 0
-            while (worklistIdx < worklist.size) {
-                let block = worklist[worklistIdx]
-                worklistIdx++
-                let state = if (let Some(existing) <- result.GetEntryState(block)) { existing } else { Bottom() }
-                for (expr in block.GetExpressionsRef()) {
-                    if (let Some(term) <- expr.AsTerminator()) {
-                        PropagateTerminatorEffect(state, term)
-                    } else {
-                        PropagateExpressionEffect(state, expr)
-                    }
-                }
-                result.SetExitState(block, state)
-                for (successor in block.GetSuccessors()) {
-                    let successorState = if (let Some(oldState) <- result.GetEntryState(successor)) { oldState } else { Bottom() }
-                    if (successorState.Join(state)) {
-                        result.SetEntryState(successor, successorState)
-                        worklist.add(successor)
-                    }
-                }
-            }
-        }
-        for (block in body.GetBlocksRef()) {
-            for (expr in block.GetExpressionsRef()) {
-                if (let Some(lambdaExpr) <- (expr as Lambda)) {
-                    if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                        RunOnBody(lambdaBody, result)
-                    }
-                }
-            }
-        }
     }
 
     private func HandleAllocateExpr(state: MaybeInitDomain, allocate: Expression): Unit {
@@ -242,7 +155,7 @@ public class MaybeInitAnalysis {
             if (let Some(calleeFunc) <- callee.AsFunction()) {
                 let outerDefOpt = calleeFunc.GetOuterDeclaredOrExtendedDef()
                 let sameOuterDef = match ((outerDefOpt, ctorInitInfo.thisCustomDef)) {
-                    case (Some(left), Some(right)) => left.nodeId == right.nodeId
+                    case (Some(left), Some(right)) => refEq(left, right)
                     case (None, None) => true
                     case _ => false
                 }

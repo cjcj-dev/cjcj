@@ -2457,6 +2457,7 @@ public class Translator {
         UpdateDelayExitSignalInForInEnd()
         let rangeEndBranch = builder.CreateBranch(condition, forInEntryBlock, CurrentBlock(), recordBlock)
         rangeEndBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
+        CurrentBlock().SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         return None
     }
 
@@ -2473,6 +2474,7 @@ public class Translator {
         let stringSize = GetDerefedValue(GetSymbolTable(endDecl))
         let conditionExpr = builder.CreateBinaryExpression(ExprKind.LT, builder.context.GetBoolTy(),
             GetDerefedValue(inductiveVar), stringSize, CurrentBlock())
+        conditionExpr.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         conditionExpr.SetGeneratedFromForIn(true)
         let condition = RequireResult(conditionExpr)
         let recordBlock = CurrentBlock()
@@ -2492,6 +2494,7 @@ public class Translator {
         currentBlock = endBlock
         UpdateDelayExitSignalInForInEnd()
         let stringEndBranch = builder.CreateBranch(condition, forInEntryBlock, CurrentBlock(), recordBlock)
+        stringEndBranch.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         stringEndBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         return None
     }
@@ -2547,6 +2550,7 @@ public class Translator {
         let parentGroup = RequireParentBlockGroup(CurrentBlock(), "for-in closed range")
         let preCondTrueBlock = builder.CreateBlock(parentGroup)
         let preCondFalseBlock = builder.CreateBlock(parentGroup)
+        preCondFalseBlock.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         let preCondBranch = builder.CreateBranch(preCond, preCondTrueBlock, preCondFalseBlock, CurrentBlock())
         preCondBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
 
@@ -2767,14 +2771,18 @@ public class Translator {
         let falseBlock = builder.CreateBlock(forIn.GetLatch())
         let delayExitBranch = builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock,
             CurrentBlock())
+        delayExitBranch.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
-        builder.CreateExit(None, CurrentBlock())
+        let delayExit = builder.CreateExit(None, CurrentBlock())
+        delayExit.SetSkipCheck(SkipKind.SKIP_FORIN_EXIT)
         currentBlock = falseBlock
         let updateBlock = builder.CreateBlock(forIn.GetLatch())
         let exitBlock = builder.CreateBlock(forIn.GetLatch())
         let condValue = RequireResult(builder.CreateLoad(builder.context.GetBoolTy(), condVar, CurrentBlock()))
         let condBranch = builder.CreateBranch(condValue, updateBlock, exitBlock, CurrentBlock())
+        updateBlock.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+        condBranch.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         condBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = updateBlock
         let iterTy = iterValue.GetType() ?? RequireRefBaseType(iterVar)
@@ -2889,7 +2897,8 @@ public class Translator {
         delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
         DecreaseDelayExitSignal()
-        builder.CreateExit(None, CurrentBlock())
+        let forInExit = builder.CreateExit(None, CurrentBlock())
+        forInExit.SetSkipCheck(SkipKind.SKIP_FORIN_EXIT)
         currentBlock = falseBlock
     }
 
@@ -2925,6 +2934,7 @@ public class Translator {
         let zero = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock()))
         let isNeedExit = builder.CreateBinaryExpression(ExprKind.GT, builder.context.GetBoolTy(), signalValue, zero,
             CurrentBlock())
+        isNeedExit.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         isNeedExit.SetGeneratedFromForIn(true)
         return RequireResult(isNeedExit)
     }
