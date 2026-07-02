@@ -174,6 +174,15 @@ public class Collector {
         node.symbol = Some(symbol)
         ctx.symbolTable.add(symbol)
         ctx.invertedIndex.Index(symbol, withTrie: buildTrie)
+        if (let Some(enumDecl) <- (node as EnumDecl)) {
+            if (let Some(bodyScope) <- enumDecl.bodyScope) {
+                AddSymbol(ctx, bodyScope, buildTrie: buildTrie)
+            }
+        } else if (let Some(extendDecl) <- (node as ExtendDecl)) {
+            if (let Some(bodyScope) <- extendDecl.bodyScope) {
+                AddSymbol(ctx, bodyScope, buildTrie: buildTrie)
+            }
+        }
     }
 
     private func CollectLitConstExpr(ctx: ASTContext, lce: LitConstExpr, walker!: Option<Walker> = None,
