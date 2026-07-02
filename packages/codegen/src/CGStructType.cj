@@ -1,9 +1,9 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.StructType
 import cangjie_compiler::chir.Type
+import cangjie_compiler::mangle.GetTypeQualifiedName
 import cangjie_compiler::utils.StaticCast
 
 public class CGStructType <: CGCustomType {
@@ -18,14 +18,22 @@ public class CGStructType <: CGCustomType {
             llvmType = stringLayout
             return stringLayout
         }
-        let layoutKeyTy = GetStructLayoutKeyType(cgMod, chirType)
-        let layoutName = STRUCT_TYPE_PREFIX + layoutKeyTy.ToString()
+        let structType = StaticCast<StructType>(chirType)
+        var layoutName = STRUCT_TYPE_PREFIX
+        if (let Some(defTy) <- structType.GetStructDef().GetType()) {
+            if (chirType.objectId != defTy.objectId && CGType.GetOrCreate(cgMod, defTy).GetSize().isSome()) {
+                layoutName += GetTypeQualifiedName(defTy)
+            } else {
+                layoutName += GetTypeQualifiedName(structType)
+            }
+        } else {
+            layoutName += GetTypeQualifiedName(structType)
+        }
         let structLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
         layoutType = structLayout
         llvmType = structLayout
         if (!cgCtx.IsGeneratedStructType(layoutName)) {
             cgCtx.AddGeneratedStructType(layoutName)
-            let structType = StaticCast<StructType>(chirType)
             let fieldTypes = ArrayList<LLVMTypeRef>()
             for (fieldTy in structType.GetInstantiatedMemberTys()) {
                 fieldTypes.add(CGType.GetOrCreate(cgMod, fieldTy).GetLLVMType())
@@ -53,17 +61,4 @@ public class CGStructType <: CGCustomType {
             }
         }
     }
-}
-
-private func GetStructLayoutKeyType(cgMod: CGModule, chirTy: Type): Type {
-    if (let Some(customTy) <- (chirTy as CustomType)) {
-        if (let Some(defTy) <- customTy.GetCustomTypeDef().GetType()) {
-            if (!chirTy.IsEqual(defTy)) {
-                if (CGType.GetOrCreate(cgMod, defTy).GetSize().isSome()) {
-                    return defTy
-                }
-            }
-        }
-    }
-    return chirTy
 }
