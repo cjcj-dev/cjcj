@@ -358,6 +358,9 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     private func SaveDeclType(decl: Decl): UInt32 {
+        if (let Some(aliasTy) <- typeManager.ObtainsAliasType(Some(decl))) {
+            return SaveType(aliasTy)
+        }
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             if (let Some(ty) <- FuncDeclTypeForSerialization(funcDecl)) {
                 return SaveType(ty)
@@ -365,17 +368,17 @@ private class FrontendCjoFlatBufferWriter {
         }
         if (let Some(param) <- (decl as FuncParam)) {
             if (let Some(typeNode) <- param.typeNode) {
-                return SaveType(TypeNodeTyForSerialization(typeNode))
+                return SaveType(typeManager.ObtainsAliasType(Some(typeNode)) ?? TypeNodeTyForSerialization(typeNode))
             }
         }
         if (let Some(varDecl) <- (decl as VarDeclAbstract)) {
             if (let Some(typeNode2) <- varDecl.typeNode) {
-                return SaveType(TypeNodeTyForSerialization(typeNode2))
+                return SaveType(typeManager.ObtainsAliasType(Some(typeNode2)) ?? TypeNodeTyForSerialization(typeNode2))
             }
         }
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
             if (let Some(extendedType) <- extendDecl.extendedType) {
-                return SaveType(TypeNodeTyForSerialization(extendedType))
+                return SaveType(typeManager.ObtainsAliasType(Some(extendedType)) ?? TypeNodeTyForSerialization(extendedType))
             }
         }
         if (let Some(ty) <- decl.GetTy()) {
@@ -612,7 +615,7 @@ private class FrontendCjoFlatBufferWriter {
 
     private func SaveFuncReturnType(funcDecl: Option<FuncDecl>, body: FuncBody): UInt32 {
         if (let Some(retType) <- body.retType) {
-            return SaveType(TypeNodeTyForSerialization(retType))
+            return SaveType(typeManager.ObtainsAliasType(Some(retType)) ?? TypeNodeTyForSerialization(retType))
         }
         if (let Some(fd) <- funcDecl) {
             if (let Some(declTy) <- fd.GetTy()) {
@@ -1850,7 +1853,7 @@ private class FrontendCjoFlatBufferWriter {
         let types = ArrayList<UInt32>()
         types.add(SavePatternTy(etp))
         for (typeNode in etp.types) {
-            types.add(SaveType(TypeNodeTyForSerialization(typeNode)))
+            types.add(SaveType(typeManager.ObtainsAliasType(Some(typeNode)) ?? TypeNodeTyForSerialization(typeNode)))
         }
         let typesVec = builder.CreateVectorU32(types)
         return SavePatternTable(7u8, etp, patterns: patternsVec, types: typesVec)
@@ -1864,7 +1867,7 @@ private class FrontendCjoFlatBufferWriter {
         let types = ArrayList<UInt32>()
         types.add(SavePatternTy(ctp))
         for (typeNode in ctp.types) {
-            types.add(SaveType(TypeNodeTyForSerialization(typeNode)))
+            types.add(SaveType(typeManager.ObtainsAliasType(Some(typeNode)) ?? TypeNodeTyForSerialization(typeNode)))
         }
         let typesVec = builder.CreateVectorU32(types)
         return SavePatternTable(8u8, ctp, patterns: patternsVec, types: typesVec)
@@ -2229,7 +2232,7 @@ private class FrontendCjoFlatBufferWriter {
 
     private func SaveTypeAliasInfo(typeAliasDecl: TypeAliasDecl): FlatBufferOffset {
         let aliasedTy = if (let Some(typeNode) <- typeAliasDecl.typeNode) {
-            SaveType(TypeNodeTyForSerialization(typeNode))
+            SaveType(typeManager.ObtainsAliasType(Some(typeNode)) ?? TypeNodeTyForSerialization(typeNode))
         } else {
             throw IllegalArgumentException("not yet serialized in faithful .cjo writer: type alias without target type")
         }
@@ -2242,7 +2245,8 @@ private class FrontendCjoFlatBufferWriter {
     private func SaveInheritedTypes(decl: InheritableDecl): FlatBufferOffset {
         let types = ArrayList<UInt32>()
         for (inheritedType in decl.inheritedTypes) {
-            types.add(SaveType(TypeNodeTyForSerialization(inheritedType)))
+            types.add(SaveType(typeManager.ObtainsAliasType(Some(inheritedType)) ??
+                TypeNodeTyForSerialization(inheritedType)))
         }
         return builder.CreateVectorU32(types)
     }
@@ -2340,7 +2344,7 @@ private class FrontendCjoFlatBufferWriter {
     private func SaveGenericConstraint(constraint: GenericConstraint): FlatBufferOffset {
         let uppers = ArrayList<UInt32>()
         for (upper in constraint.upperBounds) {
-            uppers.add(SaveType(TypeNodeTyForSerialization(upper)))
+            uppers.add(SaveType(typeManager.ObtainsAliasType(Some(upper)) ?? TypeNodeTyForSerialization(upper)))
         }
         let upperVec = builder.CreateVectorU32(uppers)
         let typeIndex = if (let Some(refType) <- constraint.refType) {
