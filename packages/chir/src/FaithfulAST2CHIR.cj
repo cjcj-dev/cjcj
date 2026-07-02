@@ -2962,6 +2962,10 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreateGlobalVarSignature(decls: ArrayList<AstDecl>, isLocalConst!: Bool = false): Unit {
+        // GAP_TODO: annotated-decl factory metadata remains unported; C++ CreateAnnoFactoryFuncSig
+        // invokes TranslateAnnotationsArraySig/Body and TranslateCustomAnnoInstanceSig
+        // (TranslateAnnotation.cpp:34-88,175-236; AST2CHIR.cpp:217,230; ASTPackage2CHIR.cpp:1024).
+        // Until that root is ported, AnnoInfo.mangledName keeps the C++ default "none".
         for (decl in decls) {
             if (let Some(varDecl) <- (decl as AstVarDecl)) {
                 let _ = CreateAndCacheGlobalVar(varDecl, isLocalConst: isLocalConst)

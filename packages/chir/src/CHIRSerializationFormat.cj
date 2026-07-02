@@ -479,15 +479,43 @@ func CHIRSourceExprFromIndex(index: Int64): SourceExpr {
 }
 
 func CHIRSerializeAnnoInfo(info: AnnoInfo): String {
-    return CHIRWireJoinList(info.GetAnnotations())
+    let fields = ArrayList<String>()
+    fields.add(info.GetAnnoFactoryFuncMangledName())
+    let instances = ArrayList<String>()
+    for (instance in info.GetCustomAnnoInstances()) {
+        let instanceFields = ArrayList<String>()
+        instanceFields.add(instance.GetAnnoClassName())
+        instanceFields.add(CHIRWireJoinList(instance.GetArgValues()))
+        instanceFields.add(CHIRSerializeDebugLocation(instance.GetDebugLocation()))
+        instances.add(CHIRWireJoinFields(instanceFields))
+    }
+    fields.add(CHIRWireJoinList(instances))
+    return CHIRWireJoinFields(fields)
 }
 
 func CHIRApplyAnnoInfo(info: AnnoInfo, value: String): Unit {
     info.Clear()
-    for (annotation in CHIRWireSplitList(value)) {
-        if (!annotation.isEmpty()) {
-            info.Add(annotation)
+    if (value.isEmpty()) {
+        return
+    }
+    let fields = CHIRWireSplitFields(value)
+    if (fields.size < 2) {
+        for (annotation in CHIRWireSplitList(value)) {
+            if (!annotation.isEmpty()) {
+                info.Add(annotation)
+            }
         }
+        return
+    }
+    info.mangledName = fields[0]
+    for (instanceText in CHIRWireSplitList(fields[1])) {
+        if (instanceText.isEmpty()) {
+            continue
+        }
+        let instanceFields = CHIRWireSplitFields(instanceText)
+        let argValues = CHIRWireSplitList(CHIRFieldAt(instanceFields, 1))
+        let loc = CHIRParseDebugLocation(CHIRFieldAt(instanceFields, 2))
+        info.annoInstances.add(CustomAnnoInstance(CHIRFieldAt(instanceFields, 0), argValues, loc))
     }
 }
 

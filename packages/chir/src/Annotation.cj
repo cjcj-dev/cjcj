@@ -195,35 +195,109 @@ public class AnnotationMap {
     }
 }
 
+public class CustomAnnoInstance {
+    private let annoClassName: String
+    private let argValues: ArrayList<String> = ArrayList<String>()
+    private let loc: DebugLocation
+
+    public init(className: String, argValues: ArrayList<String>, loc: DebugLocation) {
+        annoClassName = className
+        for (argValue in argValues) {
+            this.argValues.add(argValue)
+        }
+        this.loc = loc
+    }
+
+    public func ToString(indent: Int64): String {
+        var out = IndentToString(indent) + "@" + annoClassName
+        let argStr = JoinStrings(argValues, ", ")
+        if (!argStr.isEmpty()) {
+            out += "[" + argStr + "]"
+        }
+        out += CommentToString(loc.ToString())
+        return out
+    }
+
+    public func Dump(): Unit {
+        println(ToString(0))
+    }
+
+    public func GetAnnoClassName(): String {
+        return annoClassName
+    }
+
+    public func GetArgValues(): ArrayList<String> {
+        let out = ArrayList<String>()
+        for (argValue in argValues) {
+            out.add(argValue)
+        }
+        return out
+    }
+
+    public func GetDebugLocation(): DebugLocation {
+        return loc
+    }
+}
+
 public class AnnoInfo {
-    private let customAnnotations: ArrayList<String> = ArrayList<String>()
+    var mangledName: String = "none"
+    let annoInstances: ArrayList<CustomAnnoInstance> = ArrayList<CustomAnnoInstance>()
 
     public init() {}
 
+    public init(funcName: String, instances: ArrayList<CustomAnnoInstance>) {
+        mangledName = funcName
+        for (instance in instances) {
+            annoInstances.add(instance)
+        }
+    }
+
     public func Add(annotation: String): Unit {
-        customAnnotations.add(annotation)
+        annoInstances.add(CustomAnnoInstance(annotation, ArrayList<String>(), DebugLocation()))
     }
 
     public func Clear(): Unit {
-        customAnnotations.clear()
+        mangledName = "none"
+        annoInstances.clear()
+    }
+
+    public func IsAvailable(): Bool {
+        return mangledName != "none"
     }
 
     public func GetAnnotations(): ArrayList<String> {
         let out = ArrayList<String>()
-        for (annotation in customAnnotations) {
-            out.add(annotation)
+        for (instance in annoInstances) {
+            out.add(instance.GetAnnoClassName())
         }
         return out
     }
 
     public func ToString(indent!: Int64 = 0): String {
-        if (customAnnotations.isEmpty()) {
+        if (!IsAvailable()) {
             return ""
         }
         let lines = ArrayList<String>()
-        for (annotation in customAnnotations) {
-            lines.add("${IndentToString(indent)}@${annotation}")
+        lines.add("${IndentToString(indent)}@AnnoFactoryFunc: ${mangledName}")
+        for (instance in annoInstances) {
+            lines.add(instance.ToString(indent))
         }
         return JoinStrings(lines, "\n")
+    }
+
+    public func Dump(): Unit {
+        println(ToString())
+    }
+
+    public func GetAnnoFactoryFuncMangledName(): String {
+        return mangledName
+    }
+
+    public func GetCustomAnnoInstances(): ArrayList<CustomAnnoInstance> {
+        let out = ArrayList<CustomAnnoInstance>()
+        for (instance in annoInstances) {
+            out.add(instance)
+        }
+        return out
     }
 }
