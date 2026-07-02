@@ -2,10 +2,12 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.CHIRBuilder
+import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.Package
 import cangjie_compiler::chir.Type
 import cangjie_compiler::option.GlobalOptions
+import cangjie_compiler::utils.{CJC_ASSERT, DynamicCast}
 
 public class CallBaseToReplaceInfo {
     public let callWithoutTI: LLVMValueRef
@@ -287,14 +289,21 @@ public class CGContext {
     }
 
     public func GetOrCreateCGType(cgMod: CGModule, chirTy: Type, extraInfo: TypeExtraInfo): CGType {
-        if (let Some(cached) <- impl.FindCGType(extraInfo, chirTy)) {
+        var normalizedTy = chirTy
+        let classTyOpt = DynamicCast<ClassType>(normalizedTy)
+        if (classTyOpt.isSome() && IsAutoEnvInstBaseType(normalizedTy)) {
+            let classTy = classTyOpt.getOrThrow()
+            normalizedTy = classTy.GetSuperClassTy(builder: Some(cgMod.GetCGContext().GetCHIRBuilder())).getOrThrow()
+            CJC_ASSERT(IsAutoEnvBaseType(normalizedTy) && !normalizedTy.GetTypeArgs().isEmpty())
+        }
+        if (let Some(cached) <- impl.FindCGType(extraInfo, normalizedTy)) {
             let cachedType = if (let Some(rawType) <- cached.llvmType) { rawType } else { LLVMNullType() }
             if (!IsLitStructPtrType(cachedType)) {
                 return cached
             }
         }
-        let created = CGTypeMgr.GetConcreteCGTypeFor(cgMod, chirTy, extraInfo: extraInfo)
-        impl.SetCGType(extraInfo, chirTy, created)
+        let created = CGTypeMgr.GetConcreteCGTypeFor(cgMod, normalizedTy, extraInfo: extraInfo)
+        impl.SetCGType(extraInfo, normalizedTy, created)
         created.Complete()
         return created
     }
