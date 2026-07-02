@@ -4,6 +4,7 @@ import std.collection.*
 
 class CHIRSerializerImpl {
     private let serializedBlockGroups: HashSet<Int64> = HashSet<Int64>()
+    private let serializedLiteralValues: HashSet<Int64> = HashSet<Int64>()
 
     public init() {}
 
@@ -25,6 +26,18 @@ class CHIRSerializerImpl {
         appendCustomDefs(lines, "local", pkg.GetStructs(), pkg.GetClasses(), pkg.GetEnums(), pkg.GetExtends())
         appendCustomDefs(lines, "import", pkg.GetImportedStructs(), pkg.GetImportedClasses(), pkg.GetImportedEnums(),
             pkg.GetImportedExtends())
+        if (let Some(chirContext) <- context) {
+            for (value in chirContext.GetAllocatedValues()) {
+                if (let Some(literal) <- (value as LiteralValue)) {
+                    Dispatch(lines, literal)
+                }
+            }
+        }
+        for (globalVar in pkg.GetGlobalVars()) {
+            if (let Some(literal) <- globalVar.GetInitializer()) {
+                Dispatch(lines, literal)
+            }
+        }
         for (globalVar in pkg.GetGlobalVars()) {
             appendGlobalVar(lines, globalVar)
         }
@@ -125,6 +138,42 @@ class CHIRSerializerImpl {
         fields.add(if (let Some(structDef) <- (def as StructDef)) { CHIRBoolToWire(structDef.IsCStruct()) } else { "" })
         fields.add(if (let Some(enumDef) <- (def as EnumDef)) { CHIRBoolToWire(!enumDef.IsExhaustive()) } else { "" })
         fields.add(SerializeVTable(def.GetDefVTable()))
+        lines.add(CHIRWireJoinFields(fields))
+    }
+
+    private func Dispatch(lines: ArrayList<String>, literal: LiteralValue): Unit {
+        if (serializedLiteralValues.contains(literal.nodeId)) {
+            return
+        }
+        serializedLiteralValues.add(literal.nodeId)
+        Serialize(lines, literal)
+    }
+
+    private func Serialize(lines: ArrayList<String>, literal: LiteralValue): Unit {
+        let fields = CHIRLineFields("literal")
+        fields.add(CHIRValueId(literal))
+        fields.add(if (let Some(ty) <- literal.GetType()) { CHIRSerializeType(ty) } else { "" })
+        fields.add(LiteralKindIndex(literal.literalKind).toString())
+        var payload = ""
+        if (let Some(boolLit) <- (literal as BoolLiteral)) {
+            payload = CHIRBoolToWire(boolLit.GetVal())
+        }
+        if (let Some(intLit) <- (literal as IntLiteral)) {
+            payload = intLit.GetUnsignedVal().toString()
+        }
+        if (let Some(floatLit) <- (literal as FloatLiteral)) {
+            payload = floatLit.GetVal().toString()
+        }
+        if (let Some(runeLit) <- (literal as RuneLiteral)) {
+            payload = runeLit.GetVal().toString()
+        }
+        if (let Some(stringLit) <- (literal as StringLiteral)) {
+            payload = stringLit.GetVal()
+        }
+        fields.add(payload)
+        fields.add(CHIRSerializeDebugLocation(literal.GetDebugLocation()))
+        fields.add(CHIRSerializeAttributes(literal))
+        fields.add(CHIRSerializeBaseAnnotations(literal))
         lines.add(CHIRWireJoinFields(fields))
     }
 

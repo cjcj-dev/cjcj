@@ -136,6 +136,12 @@ public class CHIRBuilder {
         return local
     }
 
+    public func CreateLiteralValue<T>(literal: T, resultTy: Type): T where T <: LiteralValue {
+        literal.SetType(resultTy)
+        context.RegisterValue(literal)
+        return literal
+    }
+
     public func CreateExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
         parent: Block): Expression {
         let expr = Expression(kind, operands, parent)

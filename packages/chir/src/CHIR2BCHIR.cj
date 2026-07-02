@@ -194,37 +194,19 @@ public class CHIR2BCHIR {
 
     private func TranslateGlobalVar(globalVar: GlobalVar, forConstEval!: Bool): CHIR2BCHIRContext {
         let context = CHIR2BCHIRContext()
-        if (let Some(initValue) <- globalVar.GetInitializerValue()) {
-            if (!TranslateInitializerValue(context, initValue)) {
-                context.definition.PushOp(OpCode.NULLPTR)
-            }
+        if (let Some(initValue) <- globalVar.GetInitializer()) {
+            TranslateLiteralValue(context, initValue)
         } else {
+            let initFunc = globalVar.GetInitFunc() ??
+                throw IllegalStateException("global var without literal initializer requires init function: " +
+                    globalVar.GetIdentifierWithoutPrefix())
             let placeholder = context.definition.NextIndex()
             context.definition.PushOp(OpCode.NULLPTR)
             if (forConstEval) {
-                if (let Some(initFunc) <- globalVar.GetInitFunc()) {
-                    context.definition.AddMangledNameAnnotation(placeholder, BCHIRMangledName(initFunc))
-                }
+                context.definition.AddMangledNameAnnotation(placeholder, BCHIRMangledName(initFunc))
             }
         }
         return context
-    }
-
-    private func TranslateInitializerValue(context: CHIR2BCHIRContext, value: Value): Bool {
-        if (let Some(local) <- value.AsLocalVar()) {
-            if (let Some(expr) <- local.GetExpr()) {
-                if (let Some(constant) <- (expr as Constant)) {
-                    TranslateLiteralValue(context, constant.literal)
-                    return true
-                }
-            }
-        }
-        if (let Some(globalVar) <- value.AsGlobalVar()) {
-            if (let Some(nested) <- globalVar.GetInitializerValue()) {
-                return TranslateInitializerValue(context, nested)
-            }
-        }
-        return false
     }
 
     private func TranslateFunctions(chirPkg: Package, forConstEval!: Bool): Unit {

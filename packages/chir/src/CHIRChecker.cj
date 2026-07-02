@@ -198,9 +198,21 @@ public class CHIRChecker {
             globalVar.TestAttr(Attribute.IMPORTED)) {
             shouldHaveInitializer = false
         }
-        if (shouldHaveInitializer && globalVar.GetInitializerValue().isNone() && globalVar.GetInitFunc().isNone()) {
-            result.AddError("global var ${globalVar.GetIdentifier()} should be initialized by literal or function, " +
-                "it must have one of them.")
+        if (shouldHaveInitializer) {
+            let initByFunc = globalVar.GetInitFunc().isSome()
+            let initByLiteral = globalVar.GetInitializer().isSome()
+            let errMsg = "global var ${globalVar.GetIdentifier()} should be initialized by literal or function, "
+            var hint = ""
+            if (initByFunc && initByLiteral) {
+                hint = "can't be both."
+            } else if (!initByFunc && !initByLiteral) {
+                if (!globalVar.TestAttr(Attribute.COMMON)) {
+                    hint = "it must have one of them."
+                }
+            }
+            if (!hint.isEmpty()) {
+                result.AddError(errMsg)
+            }
         }
         if (!globalVar.TestAttr(Attribute.IMPLICIT_ADD) && globalVar.GetSrcCodeIdentifier().isEmpty()) {
             result.AddError("global var ${globalVar.GetIdentifier()} doesn't have src code identifier.")

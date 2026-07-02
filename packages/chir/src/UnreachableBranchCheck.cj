@@ -159,8 +159,10 @@ public class UnreachableBranchCheck {
             }
         }
         if (let Some(globalVar) <- value.AsGlobalVar()) {
-            if (let Some(initValue) <- globalVar.GetInitializerValue()) {
-                return EvaluateBoolValue(initValue)
+            if (let Some(initValue) <- globalVar.GetInitializer()) {
+                if (let Some(boolLiteral) <- (initValue as BoolLiteral)) {
+                    return boolLiteral.value
+                }
             }
         }
         return None
@@ -179,8 +181,12 @@ public class UnreachableBranchCheck {
             }
         }
         if (let Some(globalVar) <- value.AsGlobalVar()) {
-            if (let Some(initValue) <- globalVar.GetInitializerValue()) {
-                return EvaluateUIntValue(initValue)
+            if (let Some(initValue) <- globalVar.GetInitializer()) {
+                if (let Some(intLiteral) <- (initValue as IntLiteral)) {
+                    if (intLiteral.value >= 0) {
+                        return UInt64(intLiteral.value)
+                    }
+                }
             }
         }
         return None

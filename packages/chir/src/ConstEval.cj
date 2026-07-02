@@ -114,10 +114,8 @@ public class ConstEvalPass {
                 let val2chir = IVal2CHIR(builder, interpreter, pkg)
                 if (let Some(constant) <- val2chir.TryConvertToConstant(varType, val, block)) {
                     if (!constant.IsConstantNull()) {
-                        if (let Some(result) <- constant.GetResult()) {
-                            global.SetInitializerValue(result)
-                            continue
-                        }
+                        global.SetInitializer(constant.GetValue())
+                        continue
                     }
                 }
                 if (let None <- newBody) {

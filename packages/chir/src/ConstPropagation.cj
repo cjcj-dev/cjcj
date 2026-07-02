@@ -189,9 +189,9 @@ public class ConstPropagation {
             }
         }
         if (let Some(globalVar) <- value.AsGlobalVar()) {
-            if (let Some(initValue) <- globalVar.GetInitializerValue()) {
-                if (initValue.nodeId != value.nodeId) {
-                    return BoolLiteralValue(initValue)
+            if (let Some(initValue) <- globalVar.GetInitializer()) {
+                if (let Some(boolLiteral) <- (initValue as BoolLiteral)) {
+                    return boolLiteral.value
                 }
             }
         }

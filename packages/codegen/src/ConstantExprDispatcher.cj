@@ -11,5 +11,5 @@ public func HandleConstantExpression(irBuilder: IRBuilder2, chirConst: Constant)
 }
 
 public func HandleLiteralValue(irBuilder: IRBuilder2, chirLiteral: LiteralValue): LLVMValueRef {
-    return irBuilder.CreateDefaultLiteralValue(chirLiteral)
+    return irBuilder.CreateLiteralValue(chirLiteral, chirLiteral.GetType().getOrThrow())
 }

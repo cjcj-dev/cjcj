@@ -29,8 +29,8 @@ public class ConstEval {
             }
         }
         if (let Some(globalVar) <- value.AsGlobalVar()) {
-            if (let Some(initValue) <- globalVar.GetInitializerValue()) {
-                return EvaluateValue(initValue)
+            if (let Some(initValue) <- globalVar.GetInitializer()) {
+                return initValue
             }
         }
         return None

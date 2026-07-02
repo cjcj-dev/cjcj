@@ -21,7 +21,7 @@ import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.VArrayType
 import cangjie_compiler::option.{ArchType, EnvironmentType, OptimizationLevel}
-import cangjie_compiler::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, STD_LIB_FUTURE, StaticCast}
+import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, CORE_PACKAGE_NAME, STD_LIB_FUTURE, StaticCast}
 
 private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowException_msg"
 private let CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME: String = "rt$CreateArithmeticException_msg"
@@ -904,6 +904,12 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateLiteralValue(literal: LiteralValue, resultType: Type): LLVMValueRef {
+        if (literal.IsUnitLit()) {
+            return cgMod.GenerateUnitTypeValue()
+        }
+        if (literal.IsNullLit()) {
+            return CreateNullValue(resultType)
+        }
         if (let Some(boolLiteral) <- (literal as BoolLiteral)) {
             return if (boolLiteral.value) { GetTrue() } else { GetFalse() }
         }
@@ -922,7 +928,8 @@ public class IRBuilder2 <: Resource {
         if (let Some(stringLiteral) <- (literal as StringLiteral)) {
             return CreateStringLiteral(stringLiteral.value)
         }
-        return CreateNullValue(resultType)
+        CJC_ABORT()
+        return LLVMNullValue()
     }
 
     public func CreateDefaultLiteralValue(literal: LiteralValue): LLVMValueRef {

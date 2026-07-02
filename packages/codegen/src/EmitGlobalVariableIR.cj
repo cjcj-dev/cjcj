@@ -3,6 +3,7 @@ package cangjie_compiler::codegen
 import cangjie_compiler::chir.GlobalVar
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.Linkage
+import cangjie_compiler::chir.StringLiteral
 import cangjie_compiler::mangle.MangleCHIRType
 
 private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
@@ -27,10 +28,17 @@ private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
         if (preferredAlignment != 0u32) {
             unsafe { LLVMSetAlignment(rawGlobal, preferredAlignment) }
         }
-        if (let Some(initializer) <- chirGV.GetInitializerValue()) {
+        if (let Some(initializer) <- chirGV.GetInitializer()) {
             let builder = IRBuilder2(cgMod)
-            let initValue = cgMod.MaterializeValue(builder, initializer)
-            unsafe { LLVMSetInitializer(rawGlobal, initValue.GetRawValue()) }
+            let literalValue = HandleLiteralValue(builder, initializer)
+            if (initializer.GetType().getOrThrow().IsString()) {
+                let stringLiteral = (initializer as StringLiteral) ??
+                    throw IllegalStateException("string literal global initializer expected StringLiteral")
+                cgMod.GetCGContext().AddCJString(
+                    LLVMCStringToString(unsafe { LLVMGetValueName(rawGlobal) }) ?? "", stringLiteral.value)
+            } else {
+                unsafe { LLVMSetInitializer(rawGlobal, literalValue) }
+            }
         } else if (chirGV.GetInitFunc().isSome()) {
             let globalType = globalValue.GetCGType() ??
                 throw IllegalStateException("global variable emission produced no CG type: " +

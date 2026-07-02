@@ -867,8 +867,7 @@ public open class GlobalValue <: Value {
 }
 
 public class GlobalVar <: GlobalValue {
-    private var initializerValue: Option<Value> = None
-    private var initFunc: Option<Function> = None
+    private var initializer: Option<Value> = None
 
     public init(ty: Type, identifier: String, srcCodeIdentifier: String, rawMangledName: String, packageName: String) {
         super(ValueKind.KIND_GLOBALVAR, ty, identifier, srcCodeIdentifier, rawMangledName, packageName)
@@ -877,48 +876,47 @@ public class GlobalVar <: GlobalValue {
     public override func AsGlobalVar(): Option<GlobalVar> { return this }
 
     public override func IsSrcCodeImported(): Bool {
-        return TestAttr(Attribute.IMPORTED) && (initializerValue.isSome() || initFunc.isSome())
+        return TestAttr(Attribute.IMPORTED) && initializer.isSome()
     }
 
     public func IsLocalConst(): Bool {
         return TestAttr(Attribute.CONST) && TestAttr(Attribute.COMPILER_ADD)
     }
 
-    public func SetInitializerValue(value: Value): Unit {
-        initializerValue = value
-        initFunc = None
-    }
-
-    public func ClearInitializerValue(): Unit {
-        initializerValue = None
-    }
-
     public func GetInitializerValue(): Option<Value> {
-        return initializerValue
+        return initializer
+    }
+
+    public func SetInitializer(value: LiteralValue): Unit {
+        initializer = value
+    }
+
+    public func GetInitializer(): Option<LiteralValue> {
+        if (let Some(value) <- initializer) {
+            return value as LiteralValue
+        }
+        return None
     }
 
     public func SetInitFunc(value: Function): Unit {
-        initFunc = value
-        initializerValue = None
-    }
-
-    public func ClearInitFunc(): Unit {
-        initFunc = None
+        initializer = value
     }
 
     public func DestroyInitializer(): Unit {
-        if (let Some(fn) <- initFunc) {
+        if (let Some(fn) <- GetInitFunc()) {
             for (user in fn.GetUsers()) {
                 user.RemoveSelfFromBlock()
             }
             fn.DestroySelf()
         }
-        initializerValue = None
-        initFunc = None
+        initializer = None
     }
 
     public func GetInitFunc(): Option<Function> {
-        return initFunc
+        if (let Some(value) <- initializer) {
+            return value as Function
+        }
+        return None
     }
 
     public override func DestroySelf(): Unit {
@@ -936,9 +934,9 @@ public class GlobalVar <: GlobalValue {
     public override func ToString(indent: Int64): String {
         let typeText = if (let Some(valueTy) <- GetType()) { valueTy.ToString() } else { "<none>" }
         var out = IndentToString(indent) + GetAttributeInfo().ToString() + "global " + GetIdentifier() + ": " + typeText
-        if (let Some(initValue) <- initializerValue) {
-            out += " = " + initValue.GetIdentifier()
-        } else if (let Some(fn) <- initFunc) {
+        if (let Some(initValue) <- GetInitializer()) {
+            out += " = " + initValue.ToString(0)
+        } else if (let Some(fn) <- GetInitFunc()) {
             out += " = " + fn.GetIdentifier() + "()"
         }
         return out

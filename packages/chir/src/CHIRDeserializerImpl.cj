@@ -12,6 +12,7 @@ class CHIRDeserializerImpl {
     private let valuesById: HashMap<String, Value> = HashMap<String, Value>()
     private let expressionsById: HashMap<String, Expression> = HashMap<String, Expression>()
     private let customRecords: ArrayList<ArrayList<String>> = ArrayList<ArrayList<String>>()
+    private let literalRecords: ArrayList<ArrayList<String>> = ArrayList<ArrayList<String>>()
     private let globalRecords: ArrayList<ArrayList<String>> = ArrayList<ArrayList<String>>()
     private let functionRecords: ArrayList<ArrayList<String>> = ArrayList<ArrayList<String>>()
     private let blockGroupRecords: ArrayList<ArrayList<String>> = ArrayList<ArrayList<String>>()
@@ -47,6 +48,13 @@ class CHIRDeserializerImpl {
         createCustomDefs(pkg)
         createGlobalVars(pkg)
         createFunctions(pkg)
+        for (fields in literalRecords) {
+            let literalTy = CHIRParseType(CHIRFieldAt(fields, 2), builder, customDefs)
+            let literal = Deserialize(literalTy, fields)
+            CHIRApplyBaseInfo(literal, CHIRFieldAt(fields, 5), CHIRFieldAt(fields, 6),
+                annotationText: CHIRFieldAt(fields, 7))
+            valuesById[CHIRFieldAt(fields, 1)] = literal
+        }
         createBlockGroupsAndBlocks()
         configureCustomDefs()
         configureGlobalsAndFunctions()
@@ -73,6 +81,7 @@ class CHIRDeserializerImpl {
             match (fields[0]) {
                 case "package" => packageRecord = fields
                 case "custom" => customRecords.add(fields)
+                case "literal" => literalRecords.add(fields)
                 case "global" => globalRecords.add(fields)
                 case "function" => functionRecords.add(fields)
                 case "blockGroup" => blockGroupRecords.add(fields)
@@ -439,6 +448,22 @@ class CHIRDeserializerImpl {
         }
     }
 
+    private func Deserialize(literalTy: Type, fields: ArrayList<String>): LiteralValue {
+        let value = CHIRFieldAt(fields, 4)
+        return match (CHIRSafeI64(CHIRFieldAt(fields, 3))) {
+            case 0 => builder.CreateLiteralValue(NullLiteral(), literalTy)
+            case 1 => builder.CreateLiteralValue(BoolLiteral(CHIRWireToBool(value)), literalTy)
+            case 2 => builder.CreateLiteralValue(IntLiteral(CHIRSafeU64(value)), literalTy)
+            case 3 => builder.CreateLiteralValue(FloatLiteral(Float64.parse(value)), literalTy)
+            case 4 => builder.CreateLiteralValue(RuneLiteral(parseRune(value)), literalTy)
+            case 5 => builder.CreateLiteralValue(StringLiteral(value), literalTy)
+            case 6 => builder.CreateLiteralValue(UnitLiteral(), literalTy)
+            case _ =>
+                CJC_ABORT()
+                builder.CreateLiteralValue(NullLiteral(), literalTy)
+        }
+    }
+
     private func configureGlobalsAndFunctions(): Unit {
         for (fields in globalRecords) {
             if (let Some(value) <- valuesById.get(CHIRFieldAt(fields, 1))) {
@@ -449,8 +474,8 @@ class CHIRDeserializerImpl {
                     if (let Some(initValue) <- valuesById.get(CHIRFieldAt(fields, 7))) {
                         if (let Some(initFunc) <- (initValue as Function)) {
                             globalVar.SetInitFunc(initFunc)
-                        } else {
-                            globalVar.SetInitializerValue(initValue)
+                        } else if (let Some(literal) <- (initValue as LiteralValue)) {
+                            globalVar.SetInitializer(literal)
                         }
                     }
                     if (let Some(parentDef) <- customDefsById.get(CHIRFieldAt(fields, 9))) {

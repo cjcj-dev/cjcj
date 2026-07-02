@@ -2,6 +2,7 @@ package cangjie_compiler::chir
 
 import cangjie_compiler::option.GlobalOptions
 import std.collection.*
+import std.convert.*
 
 import cangjie_compiler::ast.ASTKind
 import cangjie_compiler::ast.ASTKindIndex
@@ -42,7 +43,7 @@ import cangjie_compiler::ast.Walker as AstWalker
 import cangjie_compiler::ast.WildcardPattern as AstWildcardPattern
 import cangjie_compiler::ast.Position as AstPosition
 import cangjie_compiler::ast.IsStaticInitializer as AstIsStaticInitializer
-import cangjie_compiler::utils.{MAIN_INVOKE, STATIC_INIT_VAR}
+import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, STATIC_INIT_VAR}
 
 private class FaithfulInitFileVars {
     public let file: AstFile
@@ -2051,7 +2052,7 @@ public class FaithfulAST2CHIR {
             "$has_applied_pkg_init_func"
         } else {
             "has_invoked_pkg_init_literal"
-        }, entry)
+        })
         let flagRef = RequireResult(builder.CreateLoad(boolTy, initFlag, entry))
         let body = packageInit.GetBody() ??
             throw IllegalStateException("faithful AST2CHIR package init function has no body")
@@ -2065,7 +2066,7 @@ public class FaithfulAST2CHIR {
         return packageInit
     }
 
-    private func CreatePackageInitOnceFlag(name: String, constantBlock: Block): GlobalVar {
+    private func CreatePackageInitOnceFlag(name: String): GlobalVar {
         let pkg = CurrentPackage()
         if (let Some(existing) <- pkg.TryGetGlobalVar(GLOBAL_VALUE_PREFIX + name)) {
             return existing
@@ -2077,11 +2078,7 @@ public class FaithfulAST2CHIR {
         initFlag.EnableAttr(Attribute.COMPILER_ADD)
         initFlag.EnableAttr(Attribute.INITIALIZER)
         initFlag.EnableAttr(Attribute.NO_DEBUG_INFO)
-        let falseConst = builder.CreateConstant(boolTy, BoolLiteral(false), constantBlock)
-        if (let Some(initValue) <- falseConst.GetResult()) {
-            initFlag.SetInitializerValue(initValue)
-        }
-        falseConst.DetachFromBlockOnly()
+        initFlag.SetInitializer(builder.CreateLiteralValue(BoolLiteral(false), boolTy))
         AddGlobalVarToPackage(initFlag)
         return initFlag
     }
@@ -2301,31 +2298,24 @@ public class FaithfulAST2CHIR {
     }
 
     private func SetLiteralInitializer(varDecl: AstVarDecl): Unit {
-        let litExpr = (RequireExpr(varDecl.initializer, "literal global initializer") as AstLitConstExpr) ??
-            throw IllegalStateException("faithful AST2CHIR literal global initializer expected LitConstExpr")
-        let globalVar = RequireGlobalVar(globalCache.Get(varDecl))
-        let initFn = CreateEmptyGVInitFunc(GlobalVarInitFuncName(varDecl),
-            "gv$_" + varDecl.identifier.Val() + "$const", EffectiveRawMangledName(varDecl),
-            EffectivePackageName(varDecl))
-        if (varDecl.IsConst()) {
-            initFn.EnableAttr(Attribute.CONST)
-        }
-        let entry = RequireEntryBlock(initFn)
-        let literal = TranslateLiteralValue(litExpr)
-        let constant = builder.CreateConstant(chirType.TranslateType(RequireAstTy(varDecl)), literal, entry)
-        if (let Some(result) <- constant.GetResult()) {
-            globalVar.SetInitializerValue(result)
-        }
-        if (entry.GetTerminator().isNone()) {
-            builder.CreateExit(None, entry)
-        }
+        let _ = NeedVarLiteralInitFunc(varDecl)
     }
 
     private func NeedVarLiteralInitFunc(varDecl: AstVarDecl): Bool {
-        if (!varDecl.isVar || varDecl.initializer.isNone()) {
+        if (varDecl.initializer.isNone() || NeedInitGlobalVarByInitFunc(varDecl)) {
             return false
         }
-        return !NeedInitGlobalVarByInitFunc(varDecl)
+        if (varDecl.TestAttr(AstAttribute.COMMON) && varDecl.specificImplementation.isSome()) {
+            return false
+        }
+        let litExpr = (RequireExpr(varDecl.initializer, "literal global initializer") as AstLitConstExpr) ??
+            throw IllegalStateException("faithful AST2CHIR literal global initializer expected LitConstExpr")
+        let globalVar = RequireGlobalVar(globalCache.Get(varDecl))
+        globalVar.SetInitializer(TranslateLitConstant(litExpr, RequireAstTy(litExpr)))
+        if (!varDecl.isVar) {
+            return false
+        }
+        return true
     }
 
     private func NeedInitGlobalVarByInitFunc(varDecl: AstVarDecl): Bool {
@@ -2385,6 +2375,37 @@ public class FaithfulAST2CHIR {
             case AstTypeKind.TYPE_STRUCT => StringLiteral(expr.stringValue)
             case _ =>
                 throw IllegalArgumentException("not yet ported in faithful AST2CHIR: literal type")
+        }
+    }
+
+    private func TranslateLitConstant(expr: AstLitConstExpr, realTy: AstTy): LiteralValue {
+        let chirTyToTrans = chirType.TranslateType(realTy)
+        return match (realTy.kind) {
+            case AstTypeKind.TYPE_FLOAT16 | AstTypeKind.TYPE_FLOAT64 | AstTypeKind.TYPE_IDEAL_FLOAT =>
+                builder.CreateLiteralValue(FloatLiteral(expr.constNumValue.asFloat.value), chirTyToTrans)
+            case AstTypeKind.TYPE_FLOAT32 =>
+                builder.CreateLiteralValue(
+                    FloatLiteral(Float64(Float32(Float64.parse(expr.stringValue.replace("_", ""))))), chirTyToTrans)
+            case AstTypeKind.TYPE_UINT8 | AstTypeKind.TYPE_UINT16 | AstTypeKind.TYPE_UINT32 |
+                AstTypeKind.TYPE_UINT64 | AstTypeKind.TYPE_UINT_NATIVE =>
+                builder.CreateLiteralValue(
+                    IntLiteral(UInt64LiteralBitsToInt64(expr.constNumValue.asInt.Uint64())), chirTyToTrans)
+            case AstTypeKind.TYPE_INT8 | AstTypeKind.TYPE_INT16 | AstTypeKind.TYPE_INT32 |
+                AstTypeKind.TYPE_INT64 | AstTypeKind.TYPE_INT_NATIVE | AstTypeKind.TYPE_IDEAL_INT =>
+                builder.CreateLiteralValue(IntLiteral(expr.constNumValue.asInt.`Int64`()), chirTyToTrans)
+            case AstTypeKind.TYPE_RUNE =>
+                builder.CreateLiteralValue(RuneLiteral(Rune(expr.codepoint[0])), chirTyToTrans)
+            case AstTypeKind.TYPE_BOOLEAN =>
+                builder.CreateLiteralValue(BoolLiteral(expr.stringValue == "true"), chirTyToTrans)
+            case AstTypeKind.TYPE_STRUCT =>
+                CJC_ASSERT(expr.kind == AstLitConstKind.STRING)
+                builder.CreateLiteralValue(StringLiteral(expr.stringValue), chirTyToTrans)
+            case AstTypeKind.TYPE_UNIT =>
+                CJC_ABORT()
+                builder.CreateLiteralValue(UnitLiteral(), chirTyToTrans)
+            case _ =>
+                CJC_ABORT()
+                builder.CreateLiteralValue(UnitLiteral(), chirTyToTrans)
         }
     }
 
