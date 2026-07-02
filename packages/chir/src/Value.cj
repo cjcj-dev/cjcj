@@ -396,7 +396,6 @@ public class Block <: Value {
         if (!hasExpression) {
             exprs.add(expression)
         }
-        expression.ConnectOperandsAndGroups()
         expression.SetParent(this)
         if (let Some(term) <- expression.AsTerminator()) {
             term.SyncSuccessorPredecessors()
@@ -413,7 +412,6 @@ public class Block <: Value {
             idx++
         }
         exprs.add(expr, at: 0)
-        expr.ConnectOperandsAndGroups()
         expr.SetParent(this)
     }
 

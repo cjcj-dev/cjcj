@@ -297,6 +297,7 @@ public class CHIRContext {
     }
 
     public func RegisterExpression(expr: Expression): Unit {
+        expr.ConnectOperandsAndGroups()
         allocatedExpressions.add(expr)
     }
 
