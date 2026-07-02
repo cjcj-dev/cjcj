@@ -403,6 +403,39 @@ class CHIRDeserializerImpl {
             if (let Some(genericDecl) <- customDefsById.get(CHIRFieldAt(fields, 21))) {
                 def.SetGenericDecl(genericDecl)
             }
+            let vtableInDef = VTableInDef()
+            for (item in CHIRWireSplitList(CHIRFieldAt(fields, 26))) {
+                if (item.isEmpty()) {
+                    continue
+                }
+                let vtableFields = CHIRWireSplitFields(item)
+                if (let Some(srcParentTy) <- (CHIRParseType(CHIRFieldAt(vtableFields, 0), builder, customDefs) as ClassType)) {
+                    let virtualMethods = ArrayList<VirtualMethodInfo>()
+                    for (methodItem in CHIRWireSplitList(CHIRFieldAt(vtableFields, 1))) {
+                        if (methodItem.isEmpty()) {
+                            continue
+                        }
+                        let methodFields = CHIRWireSplitFields(methodItem)
+                        let condition = FuncSigInfo(parseFuncTypeOrDefault(CHIRFieldAt(methodFields, 1)),
+                            funcName: CHIRFieldAt(methodFields, 0),
+                            genericTypeParams: CHIRParseGenericTypeList(CHIRFieldAt(methodFields, 2), builder, customDefs))
+                        let funcPtr: Option<Function> = if (let Some(fnValue) <- valuesById.get(CHIRFieldAt(methodFields, 3))) {
+                            fnValue as Function
+                        } else {
+                            None
+                        }
+                        let attributeInfo = AttributeInfo()
+                        CHIRApplyAttributeInfo(attributeInfo, CHIRFieldAt(methodFields, 4))
+                        let originalType = parseFuncTypeOrDefault(CHIRFieldAt(methodFields, 5))
+                        let parentType = CHIRParseType(CHIRFieldAt(methodFields, 6), builder, customDefs)
+                        let returnType = CHIRParseType(CHIRFieldAt(methodFields, 7), builder, customDefs)
+                        virtualMethods.add(VirtualMethodInfo(condition, funcPtr, attributeInfo, originalType, parentType,
+                            returnType))
+                    }
+                    vtableInDef.AddNewItemToTypeVTable(srcParentTy, virtualMethods)
+                }
+            }
+            def.SetVTable(vtableInDef)
         }
     }
 
@@ -449,6 +482,16 @@ class CHIRDeserializerImpl {
                     if (let Some(hostValue) <- valuesById.get(CHIRFieldAt(fields, 14))) {
                         if (let Some(hostFn) <- (hostValue as Function)) {
                             fn.SetParamDftValHostFunc(hostFn)
+                        }
+                    }
+                    if (let Some(rawValue) <- valuesById.get(CHIRFieldAt(fields, 20))) {
+                        if (let Some(rawFn) <- (rawValue as Function)) {
+                            fn.SetWrappedRawMethod(rawFn)
+                        }
+                    }
+                    if (!CHIRFieldAt(fields, 21).isEmpty()) {
+                        if (let Some(srcFuncTy) <- (CHIRParseType(CHIRFieldAt(fields, 21), builder, customDefs) as FuncType)) {
+                            fn.SetOverrideSrcFuncType(srcFuncTy)
                         }
                     }
                 }

@@ -124,6 +124,7 @@ class CHIRSerializerImpl {
         fields.add(serializeSuperClassType(def))
         fields.add(if (let Some(structDef) <- (def as StructDef)) { CHIRBoolToWire(structDef.IsCStruct()) } else { "" })
         fields.add(if (let Some(enumDef) <- (def as EnumDef)) { CHIRBoolToWire(!enumDef.IsExhaustive()) } else { "" })
+        fields.add(SerializeVTable(def.GetDefVTable()))
         lines.add(CHIRWireJoinFields(fields))
     }
 
@@ -172,6 +173,12 @@ class CHIRSerializerImpl {
         fields.add(CHIRSerializeDebugLocation(fn.GetDebugLocation()))
         fields.add(CHIRSerializeAttributes(fn))
         fields.add(CHIRSerializeBaseAnnotations(fn))
+        fields.add(if (let Some(rawMethod) <- fn.GetWrappedRawMethod()) {
+            if (rawMethod.GetBody().isSome()) { CHIRValueId(rawMethod) } else { "" }
+        } else {
+            ""
+        })
+        fields.add(if (let Some(funcTy) <- fn.GetOverrideSrcFuncType()) { CHIRSerializeType(funcTy) } else { "" })
         lines.add(CHIRWireJoinFields(fields))
     }
 
@@ -278,6 +285,31 @@ class CHIRSerializerImpl {
         let out = ArrayList<String>()
         for (value in values) {
             out.add(CHIRValueId(value))
+        }
+        return CHIRWireJoinList(out)
+    }
+
+    private func SerializeVTable(vtable: VTableInDef): String {
+        let out = ArrayList<String>()
+        for (vtableInType in vtable.GetTypeVTables()) {
+            let srcParentType = vtableInType.GetSrcParentType() ?? continue
+            let fields = ArrayList<String>()
+            fields.add(CHIRSerializeType(srcParentType))
+            let virtualMethods = ArrayList<String>()
+            for (info in vtableInType.GetVirtualMethods()) {
+                let methodFields = ArrayList<String>()
+                methodFields.add(info.GetMethodName())
+                methodFields.add(CHIRSerializeType(info.GetMethodSigType()))
+                methodFields.add(CHIRSerializeGenericTypeList(info.GetGenericTypeParams()))
+                methodFields.add(if (let Some(fn) <- info.GetVirtualMethod()) { CHIRValueId(fn) } else { "" })
+                methodFields.add(CHIRSerializeAttributeInfo(info.GetAttributeInfo()))
+                methodFields.add(CHIRSerializeType(info.GetOriginalFuncType()))
+                methodFields.add(CHIRSerializeType(info.GetInstParentType()))
+                methodFields.add(CHIRSerializeType(info.GetMethodInstRetType()))
+                virtualMethods.add(CHIRWireJoinFields(methodFields))
+            }
+            fields.add(CHIRWireJoinList(virtualMethods))
+            out.add(CHIRWireJoinFields(fields))
         }
         return CHIRWireJoinList(out)
     }

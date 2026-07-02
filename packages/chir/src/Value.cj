@@ -951,6 +951,7 @@ public class Function <: GlobalValue {
     private let params: ArrayList<Parameter> = ArrayList<Parameter>()
     private let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
     private var returnValue: Option<LocalVar> = None
+    private var wrappedRawMethod: Option<Function> = None
     private var overrideSrcFuncType: Option<FuncType> = None
     private var genericDecl: Option<Function> = None
     private var paramDftValHostFunc: Option<Function> = None
@@ -1120,6 +1121,10 @@ public class Function <: GlobalValue {
     public func GetOverrideSrcFuncType(): Option<FuncType> { return overrideSrcFuncType }
     public func SetOverrideSrcFuncType(funcTy: FuncType): Unit { overrideSrcFuncType = funcTy }
     public func ClearOverrideSrcFuncType(): Unit { overrideSrcFuncType = None }
+
+    public func GetWrappedRawMethod(): Option<Function> { return wrappedRawMethod }
+    public func SetWrappedRawMethod(method: Function): Unit { wrappedRawMethod = method }
+    public func ClearWrappedRawMethod(): Unit { wrappedRawMethod = None }
 
     public func GetBody(): Option<BlockGroup> { return body }
 
@@ -1337,6 +1342,18 @@ public class Function <: GlobalValue {
         let typeText = if (let Some(valueTy) <- GetType()) { valueTy.ToString() } else { "<none>" }
         var out = IndentToString(indent) + GetAttributeInfo().ToString() + "func " + GetIdentifier() +
             " [" + FuncKindName(funcKind) + "]: " + typeText
+        let comments = ArrayList<String>()
+        if (let Some(rawMethod) <- wrappedRawMethod) {
+            if (rawMethod.GetBody().isSome()) {
+                comments.add("wrapped raw method: " + rawMethod.GetIdentifier())
+            }
+        }
+        if (let Some(funcTy) <- overrideSrcFuncType) {
+            comments.add("OverrideSrcFuncType: " + funcTy.ToString())
+        }
+        if (!comments.isEmpty()) {
+            out += " // " + JoinStrings(comments, ", ")
+        }
         if (!params.isEmpty()) {
             let paramTexts = ArrayList<String>()
             for (param in params) {
