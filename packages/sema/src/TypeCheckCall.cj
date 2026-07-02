@@ -1147,9 +1147,6 @@ private func ApplyInstantiatedArgumentTypes(typeManager: TypeManager, ce: CallEx
         if (Ty.IsTyCorrect(instParamTy) && rawParamTy.HasGeneric()) {
             let arg = ce.args[idx]
             arg.SetTy(instParamTy)
-            if (let Some(argExpr) <- arg.expr) {
-                argExpr.SetTy(instParamTy)
-            }
         }
         idx++
     }
