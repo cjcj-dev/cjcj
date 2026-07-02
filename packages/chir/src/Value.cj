@@ -284,6 +284,17 @@ public class LocalVar <: Value {
         return super.GetDebugLocation()
     }
 
+    public func GetDebugExpr(): Option<Debug> {
+        var idx = GetUsersRef().size - 1
+        while (idx >= 0) {
+            if (let Some(debugExpr) <- (GetUsersRef()[idx] as Debug)) {
+                return debugExpr
+            }
+            idx--
+        }
+        return None
+    }
+
     public func IsRetValue(): Bool {
         return isRetValue
     }
