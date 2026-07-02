@@ -3059,59 +3059,6 @@ public class TypeChecker {
         return ty
     }
 
-    private func SynthesizeLoopChildren(ctx: ASTContext, loopExpr: Expr): Unit {
-        if (let Some(forInExpr) <- (loopExpr as ForInExpr)) {
-            let boundDecls = ArrayList<Decl>()
-            var elementTy: Ty = TypeManager.GetInvalidTy()
-            if (let Some(inExpression) <- forInExpr.inExpression) {
-                let _ = Synthesize(ctx, inExpression)
-                if (Ty.IsTyCorrect(inExpression.GetTy())) {
-                    let iterableTy = GetForInIterableTy(ctx, TcReplaceIdeal(impl.typeManager, inExpression))
-                    if (Ty.IsTyCorrect(iterableTy) && !iterableTy.typeArgs.isEmpty()) {
-                        elementTy = iterableTy.typeArgs[0]
-                    }
-                }
-            }
-            if (let Some(pattern) <- forInExpr.pattern) {
-                if (Ty.IsTyCorrect(elementTy)) {
-                    let _ = ChkPattern(impl.typeManager, ctx, elementTy, pattern, isPatternInMatch: false,
-                        diag: impl.diag)
-                    CollectPatternBinding(pattern, boundDecls)
-                    for (decl in boundDecls) {
-                        BindLocalDeclIfAbsent(ctx, decl)
-                    }
-                }
-            }
-            if (let Some(patternGuard) <- forInExpr.patternGuard) {
-                let _ = Synthesize(ctx, patternGuard)
-            }
-            if (let Some(body) <- forInExpr.body) {
-                let _ = SynthesizeBlock(ctx, SynPos.UNUSED, body)
-            }
-            RemovePatternBindings(ctx, boundDecls)
-            return
-        }
-        if (let Some(whileExpr) <- (loopExpr as WhileExpr)) {
-            let conditionBindings = ArrayList<Decl>()
-            if (let Some(condExpr) <- whileExpr.condExpr) {
-                let _ = CheckConditionWithBindings(ctx, condExpr, conditionBindings, false)
-            }
-            if (let Some(body2) <- whileExpr.body) {
-                let _ = SynthesizeBlock(ctx, SynPos.UNUSED, body2)
-            }
-            RemovePatternBindings(ctx, conditionBindings)
-            return
-        }
-        if (let Some(doWhileExpr) <- (loopExpr as DoWhileExpr)) {
-            if (let Some(body3) <- doWhileExpr.body) {
-                let _ = SynthesizeBlock(ctx, SynPos.UNUSED, body3)
-            }
-            if (let Some(condExpr2) <- doWhileExpr.condExpr) {
-                let _ = Synthesize(ctx, condExpr2)
-            }
-        }
-    }
-
     private func SynthesizeNameReference(ctx: ASTContext, nameRef: NameReferenceExpr): Ty {
         if (impl.typeManager.GetUnsolvedTyVars().isEmpty() && ctx.IsSynSkippedForCorrectTy(nameRef)) {
             return nameRef.GetTy() ?? TypeManager.GetInvalidTy()
@@ -3639,9 +3586,37 @@ public class TypeChecker {
         if (let Some(forInExpr) <- (expr as ForInExpr)) {
             return FinishSynthesize(ctx, forInExpr, SynthesizeForInExpr(ctx, forInExpr))
         }
-        if (expr.IsLoopExpr()) {
-            SynthesizeLoopChildren(ctx, expr)
-            return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr, ctx: Some(ctx), diag: impl.diag))
+        if (let Some(whileExpr) <- (expr as WhileExpr)) {
+            let conditionBindings = ArrayList<Decl>()
+            var isWellTyped = true
+            isWellTyped = CheckConditionWithBindings(ctx, whileExpr.condExpr.getOrThrow(),
+                conditionBindings, false) && isWellTyped
+            isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, whileExpr.body.getOrThrow())) &&
+                isWellTyped
+            RemovePatternBindings(ctx, conditionBindings)
+            let whileTy = if (isWellTyped) {
+                TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+            } else {
+                TypeManager.GetInvalidTy()
+            }
+            whileExpr.SetTy(whileTy)
+            return FinishSynthesize(ctx, whileExpr, whileTy)
+        }
+        if (let Some(doWhileExpr) <- (expr as DoWhileExpr)) {
+            var isWellTyped2 = true
+            isWellTyped2 = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, doWhileExpr.body.getOrThrow())) &&
+                isWellTyped2
+            let conditionBindings2 = ArrayList<Decl>()
+            isWellTyped2 = CheckConditionWithBindings(ctx, doWhileExpr.condExpr.getOrThrow(),
+                conditionBindings2, false) && isWellTyped2
+            RemovePatternBindings(ctx, conditionBindings2)
+            let doWhileTy = if (isWellTyped2) {
+                TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+            } else {
+                TypeManager.GetInvalidTy()
+            }
+            doWhileExpr.SetTy(doWhileTy)
+            return FinishSynthesize(ctx, doWhileExpr, doWhileTy)
         }
         if (let Some(returnExpr) <- (expr as ReturnExpr)) {
             if (let Some(fb) <- currentFuncBody) {
@@ -4005,6 +3980,28 @@ public class TypeChecker {
             return FinishCheck(ctx, forInExpr, ChkExprShallow(impl.typeManager, target, forInExpr, ctx: Some(ctx),
                 diag: impl.diag))
         }
+        if (let Some(whileExpr) <- (expr as WhileExpr)) {
+            let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+            var isWellTyped = impl.typeManager.IsSubtype(unitTy, target)
+            if (!isWellTyped) {
+                if (let Some(diagValue) <- impl.diag) {
+                    DiagMismatchedTypesWithFoundTy(diagValue, whileExpr, target, unitTy)
+                }
+            }
+            isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, whileExpr)) && isWellTyped
+            return FinishCheck(ctx, whileExpr, isWellTyped)
+        }
+        if (let Some(doWhileExpr) <- (expr as DoWhileExpr)) {
+            let unitTy2 = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+            var isWellTyped2 = impl.typeManager.IsSubtype(unitTy2, target)
+            if (!isWellTyped2) {
+                if (let Some(diagValue2) <- impl.diag) {
+                    DiagMismatchedTypesWithFoundTy(diagValue2, doWhileExpr, target, unitTy2)
+                }
+            }
+            isWellTyped2 = Ty.IsTyCorrect(Synthesize(ctx, doWhileExpr)) && isWellTyped2
+            return FinishCheck(ctx, doWhileExpr, isWellTyped2)
+        }
         if (let Some(rangeExpr) <- (expr as RangeExpr)) {
             var rangeStruct: Option<StructDecl> = None
             if (let Some(rangeDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "Range")) {
@@ -4016,11 +4013,6 @@ public class TypeChecker {
                 checkGenericDeclInstantiation: Some({ decl: Option<Decl>, typeArgs: ArrayList<Ty>, node: Node =>
                     impl.CheckGenericDeclInstantiation(decl, typeArgs, node)
                 }), diag: impl.diag))
-        }
-        if (expr.IsLoopExpr()) {
-            SynthesizeLoopChildren(ctx, expr)
-            return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx),
-                diag: impl.diag))
         }
         if (let Some(lit) <- (expr as LitConstExpr)) {
             var stringTy: Option<Ty> = None
