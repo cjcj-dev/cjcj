@@ -1,8 +1,12 @@
 package cangjie_compiler::sema
 
 import std.collection.*
+import std.sort.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::utils.PData
+import cangjie_compiler::basic.Diagnostic as BasicDiagnostic
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.DiagSeverity as BasicDiagSeverity
 import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
@@ -14,9 +18,12 @@ public type CallDesugarChecker = (Ty, Expr) -> Bool
 public type CallDeclSynthesizer = (FuncDecl) -> Bool
 
 private class FunctionMatchingUnit {
+    public var id: Int64 = -1
     public var fd: FuncDecl
     public var tysInArgOrder: ArrayList<Ty>
     public var typeMapping: SubstPack
+    public var diags: Array<BasicDiagnostic> = Array<BasicDiagnostic>()
+    public var ver: CstVersionID = CstVersionID()
     public var matchedArgs: UInt32 = 0u32
     public var argNameValid: Bool = true
 
@@ -790,6 +797,138 @@ private func FilterCandidates(typeManager: TypeManager, diag: Option<BasicDiagno
         }
     }
     return FilterExtendImplAbstractFunc(typeManager, FilterShadowedFunc(typeFiltered))
+}
+
+private func CalculateEnumCtorScopeLevel(ctx: ASTContext, ce: CallExpr, fd: FuncDecl): Int64 {
+    if (fd.TestAttr(Attribute.IMPORTED)) {
+        return 0
+    }
+    if (IsNode1ScopeVisibleForNode2(fd, ce)) {
+        return Int64(fd.scopeLevel)
+    }
+    let symOfCurStruct = ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, ce.symbol.getOrThrow().scopeName)
+    if (let Some(symbol) <- symOfCurStruct) {
+        if (let Some(symbolNode) <- symbol.node) {
+            if (symbolNode.astKind == ASTKind.EXTEND_DECL) {
+                let extendDecl = (symbolNode as ExtendDecl).getOrThrow()
+                if (let Some(extendedType) <- extendDecl.extendedType) {
+                    if (let Some(outer) <- fd.outerDecl) {
+                        if (let Some(declPtr) <- Ty.GetDeclPtrOfTy(extendedType.GetTy())) {
+                            if (refEq(declPtr, outer)) {
+                                return Int64(fd.scopeLevel)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return 0
+}
+
+private func GetOrderedCandidates(ctx: Option<ASTContext>, ce: CallExpr, candidates: ArrayList<FuncDecl>,
+    fdScopeLevelMap: HashMap<Node, Int64>): ArrayList<FuncDecl> {
+    let reExportAndCurrentPkgFuncTargets = ArrayList<FuncDecl>()
+    let importedFuncTargets = ArrayList<FuncDecl>()
+    for (funcDecl in candidates) {
+        if (funcDecl.isReExportedOrRenamed) {
+            reExportAndCurrentPkgFuncTargets.add(funcDecl)
+        } else {
+            importedFuncTargets.add(funcDecl)
+        }
+    }
+    let scopeCal: (FuncDecl, Bool) -> Int64 = { fd: FuncDecl, reExport: Bool =>
+        if (!fd.IsSamePackage(ce) && fd.TestAttr(Attribute.GLOBAL) &&
+            ((let None <- fd.outerDecl) || fd.TestAttr(Attribute.ENUM_CONSTRUCTOR))) {
+            return if (reExport) { 0 } else { -1 }
+        }
+        if (fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            return CalculateEnumCtorScopeLevel(ctx.getOrThrow(), ce, fd)
+        }
+        return Int64(fd.scopeLevel)
+    }
+    let reExportScopeLevelCompare: (FuncDecl, FuncDecl) -> Ordering = { fd1: FuncDecl, fd2: FuncDecl =>
+        let scopeLevel1 = scopeCal(fd1, true)
+        fdScopeLevelMap[fd1] = scopeLevel1
+        let scopeLevel2 = scopeCal(fd2, true)
+        fdScopeLevelMap[fd2] = scopeLevel2
+        if (scopeLevel1 > scopeLevel2) {
+            Ordering.LT
+        } else if (scopeLevel1 < scopeLevel2) {
+            Ordering.GT
+        } else if (fd1.begin.fileID < fd2.begin.fileID) {
+            Ordering.LT
+        } else if (fd1.begin.fileID > fd2.begin.fileID) {
+            Ordering.GT
+        } else if (fd1.begin < fd2.begin) {
+            Ordering.LT
+        } else if (fd2.begin < fd1.begin) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    }
+    let importedScopeLevelCompare: (FuncDecl, FuncDecl) -> Ordering = { fd1: FuncDecl, fd2: FuncDecl =>
+        let scopeLevel1 = scopeCal(fd1, false)
+        fdScopeLevelMap[fd1] = scopeLevel1
+        let scopeLevel2 = scopeCal(fd2, false)
+        fdScopeLevelMap[fd2] = scopeLevel2
+        if (scopeLevel1 > scopeLevel2) {
+            Ordering.LT
+        } else if (scopeLevel1 < scopeLevel2) {
+            Ordering.GT
+        } else if (fd1.begin.fileID < fd2.begin.fileID) {
+            Ordering.LT
+        } else if (fd1.begin.fileID > fd2.begin.fileID) {
+            Ordering.GT
+        } else if (fd1.begin < fd2.begin) {
+            Ordering.LT
+        } else if (fd2.begin < fd1.begin) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    }
+    let reExportSize = reExportAndCurrentPkgFuncTargets.size
+    sort(reExportAndCurrentPkgFuncTargets, by: reExportScopeLevelCompare, stable: false)
+    if (importedFuncTargets.size != 1) {
+        sort(importedFuncTargets, by: importedScopeLevelCompare, stable: false)
+    } else {
+        fdScopeLevelMap[importedFuncTargets[0]] = if (importedFuncTargets[0].TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            0
+        } else {
+            -1
+        }
+    }
+    let orderedCandidates = ArrayList<FuncDecl>()
+    var reExportIdx: Int64 = 0
+    var importedIdx: Int64 = 0
+    while (reExportIdx < reExportSize && importedIdx < importedFuncTargets.size) {
+        let reExportFunc = reExportAndCurrentPkgFuncTargets[reExportIdx]
+        let importedFunc = importedFuncTargets[importedIdx]
+        if (!fdScopeLevelMap.contains(reExportFunc)) {
+            fdScopeLevelMap[reExportFunc] = 0
+        }
+        if (!fdScopeLevelMap.contains(importedFunc)) {
+            fdScopeLevelMap[importedFunc] = 0
+        }
+        if (fdScopeLevelMap.get(importedFunc).getOrThrow() > fdScopeLevelMap.get(reExportFunc).getOrThrow()) {
+            orderedCandidates.add(importedFunc)
+            importedIdx++
+        } else {
+            orderedCandidates.add(reExportFunc)
+            reExportIdx++
+        }
+    }
+    while (reExportIdx < reExportSize) {
+        orderedCandidates.add(reExportAndCurrentPkgFuncTargets[reExportIdx])
+        reExportIdx++
+    }
+    while (importedIdx < importedFuncTargets.size) {
+        orderedCandidates.add(importedFuncTargets[importedIdx])
+        importedIdx++
+    }
+    return orderedCandidates
 }
 
 private func CompareParamTys(typeManager: TypeManager, leftTys: ArrayList<Ty>, rightTys: ArrayList<Ty>): Bool {
@@ -2635,53 +2774,25 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
     inferenceFailure!: Option<CallInferenceFailure> = None,
     declSynthesizer!: Option<CallDeclSynthesizer> = None): ArrayList<FuncDecl> {
     let legals = ArrayList<FunctionMatchingUnit>()
-    for (fd in candidates) {
+    if (candidates.size == 1) {
         var checked: Option<FunctionMatchingUnit> = None
         try (ds = DiagSuppressor(diag)) {
-            checked = CheckCandidate(typeManager, diag, ctx, ce, fd, target, argChecker: argChecker,
+            checked = CheckCandidate(typeManager, diag, ctx, ce, candidates[0], target, argChecker: argChecker,
                 inferenceFailure: inferenceFailure, declSynthesizer: declSynthesizer)
         }
-        if (let Some(unit) <- checked) {
-            legals.add(unit)
-        }
-    }
-    let out = ArrayList<FuncDecl>()
-    if (legals.isEmpty()) {
-        return out
-    }
-    var selected: Option<FunctionMatchingUnit> = None
-    if (legals.size == 1) {
-        selected = Some(legals[0])
-    } else {
-        var hasEnumCtor = false
-        for (unit in legals) {
-            if (unit.fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
-                hasEnumCtor = true
-                out.add(unit.fd)
-            }
-        }
-        if (hasEnumCtor) {
+        let out = ArrayList<FuncDecl>()
+        if (let None <- checked) {
             return out
         }
-        let resolved = ResolveOverload(typeManager, legals, ce)
-        if (resolved.size == 1) {
-            selected = Some(legals[resolved[0]])
-        } else {
-            for (unit in legals) {
-                out.add(unit.fd)
-            }
-            return out
-        }
-    }
-    if (let Some(unit) <- selected) {
+        let unit = checked.getOrThrow()
         if (let Some(checker) <- argChecker) {
-            var idx: Int64 = 0
-            while (idx < ce.args.size && idx < unit.tysInArgOrder.size) {
-                let paramTy = typeManager.ApplySubstPack(unit.tysInArgOrder[idx], unit.typeMapping)
-                if (!checker(paramTy, ce.args[idx])) {
+            var argIdx: Int64 = 0
+            while (argIdx < ce.args.size && argIdx < unit.tysInArgOrder.size) {
+                let paramTy = typeManager.ApplySubstPack(unit.tysInArgOrder[argIdx], unit.typeMapping)
+                if (!checker(paramTy, ce.args[argIdx])) {
                     return out
                 }
-                idx++
+                argIdx++
             }
         }
         BuildDesugaredCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
@@ -2703,8 +2814,128 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
         if (PostCheckCallExpr(typeManager, diag, ce, unit)) {
             out.add(unit.fd)
         }
+        return out
     }
-    return out
+    let fdScopeLevelMap = HashMap<Node, Int64>()
+    let orderedCandidates = GetOrderedCandidates(ctx, ce, candidates, fdScopeLevelMap)
+    var preScopeLevel: Int64 = 0
+    if (!orderedCandidates.isEmpty()) {
+        if (!fdScopeLevelMap.contains(orderedCandidates[0])) {
+            fdScopeLevelMap[orderedCandidates[0]] = 0
+        }
+        preScopeLevel = fdScopeLevelMap.get(orderedCandidates[0]).getOrThrow()
+    }
+    try (cs = PData.CommitScope(typeManager.constraints)) {
+        var candidateIdx: Int64 = 0
+        while (candidateIdx < orderedCandidates.size) {
+            let fd = orderedCandidates[candidateIdx]
+            if (!fdScopeLevelMap.contains(fd)) {
+                fdScopeLevelMap[fd] = 0
+            }
+            let curScopeLevel = fdScopeLevelMap.get(fd).getOrThrow()
+            if (curScopeLevel != preScopeLevel && !legals.isEmpty()) {
+                break
+            }
+            var checked: Option<FunctionMatchingUnit> = None
+            var suppressedDiags: Array<BasicDiagnostic> = Array<BasicDiagnostic>()
+            try (ds = DiagSuppressor(diag)) {
+                checked = CheckCandidate(typeManager, diag, ctx, ce, fd, target, argChecker: argChecker,
+                    inferenceFailure: inferenceFailure, declSynthesizer: declSynthesizer)
+                suppressedDiags = ds.GetSuppressedDiag()
+            }
+            if (let None <- checked) {
+                PData.Reset(typeManager.constraints)
+                candidateIdx++
+                continue
+            }
+            let unit = checked.getOrThrow()
+            if (!legals.isEmpty() && legals[legals.size - 1].id == candidateIdx) {
+                PData.Reset(typeManager.constraints)
+                candidateIdx++
+                continue
+            }
+            unit.diags = suppressedDiags
+            unit.ver = PData.Stash(typeManager.constraints)
+            unit.id = candidateIdx
+            preScopeLevel = curScopeLevel
+            legals.add(unit)
+            candidateIdx++
+        }
+        let out = ArrayList<FuncDecl>()
+        if (legals.isEmpty()) {
+            return out
+        }
+        var selected: Option<FunctionMatchingUnit> = None
+        if (legals.size == 1) {
+            selected = Some(legals[0])
+        } else {
+            var hasEnumCtor = false
+            for (unit in legals) {
+                if (unit.fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                    hasEnumCtor = true
+                    out.add(unit.fd)
+                }
+            }
+            if (hasEnumCtor) {
+                return out
+            }
+            let resolved = ResolveOverload(typeManager, legals, ce)
+            if (resolved.size == 1) {
+                selected = Some(legals[resolved[0]])
+            } else {
+                for (unit in legals) {
+                    out.add(unit.fd)
+                }
+                return out
+            }
+        }
+        if (let Some(unit) <- selected) {
+            PData.Apply(typeManager.constraints, unit.ver)
+            var funcHasError = false
+            if (let Some(diagValue) <- diag) {
+                for (funcDiag in unit.diags) {
+                    if (funcDiag.diagSeverity == BasicDiagSeverity.DS_ERROR) {
+                        funcHasError = true
+                    }
+                    diagValue.Diagnose(funcDiag).Emit()
+                }
+            }
+            if (funcHasError) {
+                return out
+            }
+            if (let Some(checker) <- argChecker) {
+                var argIdx: Int64 = 0
+                while (argIdx < ce.args.size && argIdx < unit.tysInArgOrder.size) {
+                    let paramTy = typeManager.ApplySubstPack(unit.tysInArgOrder[argIdx], unit.typeMapping)
+                    if (!checker(paramTy, ce.args[argIdx])) {
+                        return out
+                    }
+                    argIdx++
+                }
+            }
+            BuildDesugaredCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
+            if (let Some(fdTy) <- unit.fd.GetTy()) {
+                if (IsGenericCall(ctx, ce, unit.fd)) {
+                    if (UpdateFuncGenericType(typeManager, ctx, unit, ce).isEmpty()) {
+                        return out
+                    }
+                } else {
+                    ce.baseFunc.getOrThrow().SetTy(fdTy)
+                    ce.SetTy(GetCallTy(typeManager, ctx, ce, unit.fd))
+                }
+            } else {
+                ce.SetTy(TypeManager.GetInvalidTy())
+            }
+            ce.resolvedFunction = Some(unit.fd)
+            UpdateCallTargets(ce, unit.fd)
+            FillTypeArgumentsTy(typeManager, unit.fd, ce, unit.typeMapping)
+            if (PostCheckCallExpr(typeManager, diag, ce, unit)) {
+                out.add(unit.fd)
+            }
+        }
+        return out
+    }
+    return ArrayList<FuncDecl>()
 }
 
 private func CheckCallArgs(diag: Option<BasicDiagnosticEngine>, typeManager: TypeManager, ce: CallExpr, funcTy: FuncTy): Option<ArrayList<Ty>> {

@@ -207,6 +207,12 @@ public func CanSkipDiag(node: Node): Bool {
     return !Ty.IsTyCorrect(node.GetTy())
 }
 
+public func IsNode1ScopeVisibleForNode2(node1: Node, node2: Node): Bool {
+    let scopeName1 = GetScopeNameWithoutTail(node1.scopeName)
+    let scopeName2 = GetScopeNameWithoutTail(node2.scopeName)
+    return scopeName2.startsWith(scopeName1)
+}
+
 public func IsFieldOperator(field: String): Bool {
     return field == "@" || field == "." || field == "[]" || field == "()" || field == "++" ||
         field == "--" || field == "?" || field == "!" || field == "-" || field == "**" ||
