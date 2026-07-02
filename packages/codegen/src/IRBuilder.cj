@@ -11,6 +11,7 @@ import cangjie_compiler::chir.FloatLiteral
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GenericType
+import cangjie_compiler::chir.GetMethodIdxInAutoEnvObject
 import cangjie_compiler::chir.IntLiteral
 import cangjie_compiler::chir.LiteralValue
 import cangjie_compiler::chir.RawArrayType
@@ -20,7 +21,7 @@ import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.VArrayType
 import cangjie_compiler::option.ArchType
-import cangjie_compiler::utils.{CORE_PACKAGE_NAME, STD_LIB_FUTURE, StaticCast}
+import cangjie_compiler::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, STD_LIB_FUTURE, StaticCast}
 
 private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowException_msg"
 private let CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME: String = "rt$CreateArithmeticException_msg"
@@ -2028,6 +2029,116 @@ public class IRBuilder2 <: Resource {
             gepIndices.add(index)
         }
         return CreateInBoundsGEP(arrayType, pointer, gepIndices, name: name)
+    }
+
+    public func VArrayInitedByLambda(varrayLen: LLVMValueRef, autoEnv: CGValue,
+        vArrayType: VArrayType): LLVMValueRef {
+        let autoEnvCGType = autoEnv.GetCGType().getOrThrow()
+        let autoEnvClassTy = (autoEnvCGType.GetOriginal().StripAllRefs() as ClassType).getOrThrow()
+        let autoEnvClsDef = autoEnvClassTy.GetClassDef()
+        let methods = autoEnvClsDef.GetMethods()
+        CJC_ASSERT(methods.size == 1)
+        let abstractMethod = methods[methods.size - 1]
+        let abstractMethodIdx = GetMethodIdxInAutoEnvObject(abstractMethod.GetSrcCodeIdentifier())
+        let initFuncCGType = (CGType.GetOrCreate(cgMod, abstractMethod.GetType().getOrThrow(),
+            extraInfo: TypeExtraInfo(0u32, true, false, true, ArrayList<Type>())) as CGFunctionType).getOrThrow()
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let autoEnvPayload = GetPayloadFromObject(autoEnv.GetRawValue())
+        let autoEnvPayloadPtr = CreateBitCast(autoEnvPayload, unsafe { LLVMPointerType(i8PtrType, 1u32) })
+        let funcPtrIndices = ArrayList<LLVMValueRef>()
+        funcPtrIndices.add(unsafe {
+            LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), abstractMethodIdx, 0)
+        })
+        var initFuncPtr = CreateGEP(i8PtrType, autoEnvPayloadPtr, funcPtrIndices, name: "virtualFPtr")
+        initFuncPtr = CreateLoad(i8PtrType, initFuncPtr)
+        initFuncPtr = CreateBitCast(initFuncPtr, unsafe { LLVMPointerType(initFuncCGType.GetLLVMFunctionType(), 0u32) })
+
+        let arrayCGType = CGType.GetOrCreate(cgMod, vArrayType)
+        let varrPtr = CreateEntryAlloca(arrayCGType, name: "varray.initialized.by.lambda")
+        let blockNames = ArrayList<String>()
+        blockNames.add(GenNameForBB("varr.init.start"))
+        blockNames.add(GenNameForBB("varr.init.body"))
+        blockNames.add(GenNameForBB("varr.init.end"))
+        let blocks = CreateAndInsertBasicBlocks(blockNames)
+        let startBB = blocks[0]
+        let bodyBB = blocks[1]
+        let endBB = blocks[2]
+        CreateBr(startBB)
+
+        SetInsertPoint(startBB)
+        let indexCGType = CGType.GetOrCreate(cgMod, GetCGContext().GetCHIRBuilder().context.GetInt64Ty())
+        let iterator = CreateEntryAlloca(indexCGType, name: "iterator")
+        CreateStore(GetInt64(0), iterator)
+        CreateBr(bodyBB)
+
+        SetInsertPoint(bodyBB)
+        let index = CreateLoad(indexCGType.GetLLVMType(), iterator)
+        let cgValueOfIdx = CGValue(index, indexCGType)
+        let args = ArrayList<CGValue>()
+        args.add(autoEnv)
+        args.add(cgValueOfIdx)
+        let value = CreateCallOrInvoke(initFuncCGType, initFuncPtr, args)
+        let elemType = vArrayType.GetElementType()
+        let elemCGType = CGType.GetOrCreate(cgMod, elemType)
+        let elemRefType = GetCGContext().GetCHIRBuilder().context.GetRefTy(elemType)
+        let elemPtrCGType = CGType.GetOrCreate(cgMod, elemRefType)
+        let elemIndices = ArrayList<LLVMValueRef>()
+        elemIndices.add(GetInt64(0))
+        elemIndices.add(index)
+        let elemPtr = CreateGEP(arrayCGType.GetLLVMType(), varrPtr, elemIndices, name: "varr.idx")
+        if (elemCGType.IsVArrayType() || elemCGType.IsStructType()) {
+            CreateStore(CGValue(value, elemPtrCGType), CGValue(elemPtr, elemPtrCGType))
+        } else {
+            CreateStore(CGValue(value, elemCGType), CGValue(elemPtr, elemPtrCGType))
+        }
+
+        let incremented = CreateBinary(ExprKind.ADD, index, GetInt64(1), name: "iterator.next")
+        CreateStore(incremented, iterator)
+        let cmpResult = CreateICmp(LLVMIntPredicate.SLT, incremented, varrayLen, name: "iterator.size.cmp")
+        CreateCondBr(cmpResult, bodyBB, endBB)
+
+        SetInsertPoint(endBB)
+        return varrPtr
+    }
+
+    public func VArrayInitedByItem(varrayLen: LLVMValueRef, cgVal: CGValue, vArrayType: Type): LLVMValueRef {
+        let arrayCGType = CGType.GetOrCreate(cgMod, vArrayType)
+        let arrayType = arrayCGType.GetLLVMType()
+        let varrPtr = CreateEntryAlloca(arrayCGType, name: "varray.initialized.by.item")
+        let blockNames = ArrayList<String>()
+        blockNames.add(GenNameForBB("varr.init.start"))
+        blockNames.add(GenNameForBB("varr.init.body"))
+        blockNames.add(GenNameForBB("varr.init.end"))
+        let blocks = CreateAndInsertBasicBlocks(blockNames)
+        let startBB = blocks[0]
+        let bodyBB = blocks[1]
+        let endBB = blocks[2]
+        CreateBr(startBB)
+
+        SetInsertPoint(startBB)
+        let indexCGType = CGType.GetOrCreate(cgMod, GetCGContext().GetCHIRBuilder().context.GetInt64Ty())
+        let iterator = CreateEntryAlloca(indexCGType, name: "iterator")
+        CreateStore(GetInt64(0), iterator)
+        CreateBr(bodyBB)
+
+        SetInsertPoint(bodyBB)
+        let index = CreateLoad(indexCGType.GetLLVMType(), iterator)
+        let elemIndices = ArrayList<LLVMValueRef>()
+        elemIndices.add(GetInt64(0))
+        elemIndices.add(index)
+        let elemPtr = CreateGEP(arrayType, varrPtr, elemIndices, name: "varr.idx")
+        let vArrayTypeValue = (vArrayType as VArrayType).getOrThrow()
+        let elementRefTy = GetCGContext().GetCHIRBuilder().context.GetRefTy(vArrayTypeValue.GetElementType())
+        let elementPtrCGType = CGType.GetOrCreate(cgMod, elementRefTy)
+        CreateStore(cgVal, CGValue(elemPtr, elementPtrCGType))
+        let incremented = CreateBinary(ExprKind.ADD, index, GetInt64(1), name: "iterator.next")
+        CreateStore(incremented, iterator)
+        let cmpResult = CreateICmp(LLVMIntPredicate.SLT, incremented, varrayLen, name: "iterator.size.cmp")
+        CreateCondBr(cmpResult, bodyBB, endBB)
+
+        SetInsertPoint(endBB)
+        return varrPtr
     }
 
     public func CreatePHI(valueType: LLVMTypeRef, name!: String = ""): LLVMValueRef {

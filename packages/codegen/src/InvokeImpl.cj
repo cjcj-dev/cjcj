@@ -13,6 +13,7 @@ import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.FuncKind
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.GenericType
+import cangjie_compiler::chir.GetMethodIdxInAutoEnvObject
 import cangjie_compiler::chir.Invoke
 import cangjie_compiler::chir.InvokeStatic
 import cangjie_compiler::chir.InvokeStaticWithException
@@ -24,8 +25,6 @@ import cangjie_compiler::chir.Value
 private let GET_VTABLE_FUNC_INTRINSIC_NAME: String = "llvm.cj.get.vtable.func"
 private let GET_MTABLE_FUNC_INTRINSIC_NAME: String = "llvm.cj.get.mtable.func"
 private let GET_METHOD_OUTERTYPE_INTRINSIC_NAME: String = "llvm.cj.get.method.outertype"
-private let GENERIC_VIRTUAL_FUNC: String = "$GenericVirtualFunc"
-private let INST_VIRTUAL_FUNC: String = "$InstVirtualFunc"
 
 private class ClassVTable {
     public let parentDef: ClassDef
@@ -225,7 +224,9 @@ private func BuildVirtualCallee(irBuilder: IRBuilder2, objectValue: CGValue, own
         let typedPayload = irBuilder.CreateBitCast(payload, unsafe { LLVMPointerType(i8PtrType, 1u32) },
             name: "invoke.autoenv.payload")
         let indices = ArrayList<LLVMValueRef>()
-        indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(llvmContext), AutoEnvMethodIndex(methodName), 0) })
+        indices.add(unsafe {
+            LLVMConstInt(LLVMInt32TypeInContext(llvmContext), GetMethodIdxInAutoEnvObject(methodName), 0)
+        })
         let slot = irBuilder.CreateGEP(i8PtrType, typedPayload, indices, name: "invoke.autoenv.fn.addr")
         let rawCallee = irBuilder.CreateLoad(i8PtrType, slot, name: "invoke.autoenv.fn")
         return (irBuilder.CreateBitCast(rawCallee,
@@ -279,16 +280,6 @@ private func IsAutoEnvObjectValue(objectValue: CGValue): Bool {
         return IsAutoEnvType(cgType.GetOriginal())
     }
     return false
-}
-
-private func AutoEnvMethodIndex(methodName: String): UInt64 {
-    if (methodName == GENERIC_VIRTUAL_FUNC) {
-        return 0u64
-    }
-    if (methodName == INST_VIRTUAL_FUNC) {
-        return 1u64
-    }
-    throw IllegalArgumentException("unexpected AutoEnv method: " + methodName)
 }
 
 private func VTableSizeOf(ownerTy: Type): Int64 {

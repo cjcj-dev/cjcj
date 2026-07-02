@@ -1,6 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::utils.CJC_ABORT
 
 public let ANY_TYPE: String = "ANY_TYPE"
 public let NOT_CARE: String = "NOT_CARE"
@@ -119,6 +120,18 @@ public func CheckCustomTypeDefIsExpected(def: CustomTypeDef, packageName: String
 
 public func ReturnTypeShouldBeVoid(fn: Function): Bool {
     return fn.IsGVInit() || fn.IsFinalizer() || (fn.IsConstructor() && !fn.TestAttr(Attribute.STATIC))
+}
+
+public func GetMethodIdxInAutoEnvObject(methodName: String): UInt64 {
+    var methodIdx = 0u64
+    if (methodName == "$GenericVirtualFunc") {
+        methodIdx = 0u64
+    } else if (methodName == "$InstVirtualFunc") {
+        methodIdx = 1u64
+    } else {
+        CJC_ABORT()
+    }
+    return methodIdx
 }
 
 public func JoinStrings(values: ArrayList<String>, delimiter: String): String {
