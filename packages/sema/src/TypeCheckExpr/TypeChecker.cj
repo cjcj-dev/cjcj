@@ -3697,6 +3697,11 @@ public class TypeChecker {
         }
         if (let Some(arrayExpr) <- (expr as ArrayExpr)) {
             SynthesizeTypeNode(ctx, arrayExpr.typeNode)
+            if (arrayExpr.isValueArray) {
+                return FinishSynthesize(ctx, arrayExpr, SynVArrayExpr(impl.typeManager, arrayExpr,
+                    checker: Some({ target: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, target, arg) }),
+                    diag: impl.diag))
+            }
             for (arg in arrayExpr.args) {
                 let _ = SynthesizeFuncArg(ctx, arg)
             }
@@ -4097,6 +4102,11 @@ public class TypeChecker {
         }
         if (let Some(arrayExpr) <- (expr as ArrayExpr)) {
             SynthesizeTypeNode(ctx, arrayExpr.typeNode)
+            if (arrayExpr.isValueArray) {
+                return FinishCheck(ctx, arrayExpr, ChkVArrayExpr(impl.typeManager, target, arrayExpr,
+                    checker: Some({ targetTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, targetTy, arg) }),
+                    diag: impl.diag))
+            }
             for (arg in arrayExpr.args) {
                 let _ = SynthesizeFuncArg(ctx, arg)
             }

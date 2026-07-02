@@ -2916,7 +2916,7 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
         }
     }
     if (let None <- ce.baseFunc) {
-        return ChkBuiltinCall(typeManager, target ?? TypeManager.GetInvalidTy(), ce)
+        return ChkBuiltinCall(typeManager, target ?? TypeManager.GetInvalidTy(), ce, diag: diag, checker: argChecker)
     }
     let prevCheckTrue = ce.callKind != CallKind.CALL_INVALID && Ty.IsTyCorrect(ce.GetTy()) &&
         typeManager.GetUnsolvedTyVars().isEmpty()
@@ -2934,7 +2934,7 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
         }
     }
     ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy() ?? TypeManager.GetInvalidTy()))
-    if (ChkBuiltinCall(typeManager, target ?? TypeManager.GetInvalidTy(), ce)) {
+    if (ChkBuiltinCall(typeManager, target ?? TypeManager.GetInvalidTy(), ce, diag: diag, checker: argChecker)) {
         ce.callKind = CallKind.CALL_BUILTIN_FUNCTION
         return true
     }

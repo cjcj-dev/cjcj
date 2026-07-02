@@ -482,8 +482,14 @@ public func SynArrayExpr(typeManager: TypeManager, arrayExpr: ArrayExpr,
     return InvalidExprTy(arrayExpr)
 }
 
-public func ChkVArrayArg(typeManager: TypeManager, arrayExpr: ArrayExpr): Bool {
+public func ChkVArrayArg(typeManager: TypeManager, arrayExpr: ArrayExpr,
+    checker!: Option<CallArgChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (arrayExpr.args.size != 1) {
+        if (let Some(diagValue) <- diag) {
+            let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_varray_args_number_mismatch,
+                MakeRange(arrayExpr.leftParenPos, arrayExpr.rightParenPos + 1))
+            builder.Emit()
+        }
         return false
     }
     if (let None <- arrayExpr.typeNode) {
@@ -493,45 +499,86 @@ public func ChkVArrayArg(typeManager: TypeManager, arrayExpr: ArrayExpr): Bool {
         if (varrayTy.typeArgs.isEmpty()) {
             return false
         }
-        let argTy = FuncArgTy(arrayExpr.args[0])
+        let arg = arrayExpr.args[0]
+        var ret = false
         if (arrayExpr.args[0].name.Empty()) {
             let sizeTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
             let expected = typeManager.GetFunctionTy([sizeTy], varrayTy.typeArgs[0])
-            return typeManager.CheckTypeCompatibility(expected, argTy) != TypeCompatibility.INCOMPATIBLE
+            if (let Some(check) <- checker) {
+                ret = check(expected, arg)
+            } else {
+                let argTy = FuncArgTy(arg)
+                ret = typeManager.CheckTypeCompatibility(expected, argTy) != TypeCompatibility.INCOMPATIBLE
+            }
+        } else {
+            if (arg.name.Val() != "repeat") {
+                if (let Some(diagValue) <- diag) {
+                    let builder = diagValue.Diagnose(ToBasicPosition(arg.begin), ToBasicPosition(arg.end),
+                        BasicDiagKind.sema_unknown_named_argument, args: [BasicDiagArgument(arg.name.Val())])
+                    builder.AddNote("expect the name of the named parameter is 'item'")
+                    builder.Emit()
+                }
+                return false
+            }
+            if (let Some(check) <- checker) {
+                ret = check(varrayTy.typeArgs[0], arg)
+            } else {
+                let argTy = FuncArgTy(arg)
+                ret = typeManager.CheckTypeCompatibility(varrayTy.typeArgs[0], argTy) !=
+                    TypeCompatibility.INCOMPATIBLE
+            }
         }
-        if (arrayExpr.args[0].name.Val() != "repeat") {
-            return false
+        if (Ty.IsTyCorrect(arrayExpr.GetTy()) && !Ty.IsTyCorrect(arrayExpr.typeNode.getOrThrow().GetTy())) {
+            arrayExpr.typeNode.getOrThrow().SetTy(arrayExpr.GetTy().getOrThrow())
         }
-        return typeManager.CheckTypeCompatibility(varrayTy.typeArgs[0], argTy) != TypeCompatibility.INCOMPATIBLE
+        return ret
     }
     return false
 }
 
-public func ChkVArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr): Bool {
+public func ChkVArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr,
+    checker!: Option<CallArgChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- arrayExpr.typeNode) {
         return false
     }
     let targetTy = UnboxOptionType(target)
     let arrayTy = arrayExpr.typeNode.getOrThrow().GetTy() ?? TypeManager.GetInvalidTy()
-    if (let None <- (arrayTy as VArrayTy)) {
-        return false
-    }
-    arrayExpr.SetTy(arrayTy)
-    if (!ChkVArrayArg(typeManager, arrayExpr)) {
-        return false
-    }
-    if (!targetTy.IsInvalid() && typeManager.CheckTypeCompatibility(targetTy, arrayTy) == TypeCompatibility.INCOMPATIBLE) {
+    if (!Ty.IsTyCorrect(arrayTy) || (let None <- (arrayTy as VArrayTy))) {
         arrayExpr.SetTy(TypeManager.GetInvalidTy())
         return false
     }
+    if (!ChkVArrayArg(typeManager, arrayExpr, checker: checker, diag: diag)) {
+        arrayExpr.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+    if (!typeManager.IsSubtype(arrayTy, targetTy)) {
+        if (let Some(diagValue) <- diag) {
+            let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_mismatched_types,
+                MakeRange(arrayExpr.begin, arrayExpr.end))
+            builder.AddMainHintArguments([targetTy.String(), arrayTy.String()])
+            builder.Emit()
+        }
+        arrayExpr.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+    arrayExpr.SetTy(arrayTy)
     return true
 }
 
-public func SynVArrayExpr(typeManager: TypeManager, arrayExpr: ArrayExpr): Ty {
-    if (ChkVArrayExpr(typeManager, TypeManager.GetInvalidTy(), arrayExpr)) {
-        return arrayExpr.GetTy() ?? TypeManager.GetInvalidTy()
+public func SynVArrayExpr(typeManager: TypeManager, arrayExpr: ArrayExpr,
+    checker!: Option<CallArgChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    if (let None <- arrayExpr.typeNode) {
+        return InvalidExprTy(arrayExpr)
     }
-    return InvalidExprTy(arrayExpr)
+    let arrayTy = arrayExpr.typeNode.getOrThrow().GetTy() ?? TypeManager.GetInvalidTy()
+    if (!Ty.IsTyCorrect(arrayTy) || (let None <- (arrayTy as VArrayTy))) {
+        return InvalidExprTy(arrayExpr)
+    }
+    arrayExpr.SetTy(arrayTy)
+    if (!ChkVArrayArg(typeManager, arrayExpr, checker: checker, diag: diag)) {
+        return InvalidExprTy(arrayExpr)
+    }
+    return arrayExpr.GetTy() ?? TypeManager.GetInvalidTy()
 }
 
 private func CanInferPointerTyFromTarget(pointerTy: Ty, targetTy: Ty): Bool {
@@ -696,7 +743,8 @@ public func ChkArrayCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
     return false
 }
 
-public func ChkVArrayCall(typeManager: TypeManager, target: Ty, ce: CallExpr): Bool {
+public func ChkVArrayCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
+    checker!: Option<CallArgChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (!IsCallOfBuiltInType(ce, TypeKind.TYPE_VARRAY)) {
         return false
     }
@@ -706,9 +754,9 @@ public func ChkVArrayCall(typeManager: TypeManager, target: Ty, ce: CallExpr): B
         arrayExpr.args.add(arg)
     }
     let ok = if (target.IsInvalid()) {
-        Ty.IsTyCorrect(SynVArrayExpr(typeManager, arrayExpr))
+        Ty.IsTyCorrect(SynVArrayExpr(typeManager, arrayExpr, checker: checker, diag: diag))
     } else {
-        ChkVArrayExpr(typeManager, target, arrayExpr)
+        ChkVArrayExpr(typeManager, target, arrayExpr, checker: checker, diag: diag)
     }
     if (ok) {
         ce.desugarExpr = arrayExpr
@@ -776,7 +824,7 @@ public func ChkCFuncCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
 }
 
 public func ChkBuiltinCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    diag!: Option<BasicDiagnosticEngine> = None, checker!: Option<CallArgChecker> = None): Bool {
     if (ChkPointerCall(typeManager, target, ce, diag: diag)) {
         return true
     }
@@ -786,7 +834,7 @@ public func ChkBuiltinCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
     if (ChkArrayCall(typeManager, target, ce, diag: diag)) {
         return true
     }
-    if (ChkVArrayCall(typeManager, target, ce)) {
+    if (ChkVArrayCall(typeManager, target, ce, checker: checker, diag: diag)) {
         return true
     }
     if (ChkCFuncCall(typeManager, target, ce, diag: diag)) {
