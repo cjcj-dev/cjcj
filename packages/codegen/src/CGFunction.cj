@@ -51,6 +51,7 @@ public class CGFunction <: CGValue {
     public func Opt(): Unit {
         let rawFunction = GetRawFunction()
         CGFunction.RemoveUnreachableBlocks(rawFunction)
+        CGFunction.EraseReplaceableAlloca(cgMod, rawFunction)
         CGFunction.AddZeroInitForStructWithRefField(cgMod, rawFunction)
     }
 
@@ -182,6 +183,57 @@ public class CGFunction <: CGValue {
 
     public static func HasNoUse(value: LLVMValueRef): Bool {
         return unsafe { LLVMGetFirstUse(value) }.isNull()
+    }
+
+    public static func EraseReplaceableAlloca(cgMod: CGModule, function: LLVMValueRef): Unit {
+        if (cgMod.GetCGContext().GetCompileOptions().enableCompileDebug || function.isNull() ||
+            unsafe { LLVMIsDeclaration(function) } != 0) {
+            return
+        }
+        let entryBlock = unsafe { LLVMGetEntryBasicBlock(function) }
+        if (entryBlock.isNull()) {
+            return
+        }
+        let unnamedAllocas = ArrayList<LLVMValueRef>()
+        var inst = unsafe { LLVMGetFirstInstruction(entryBlock) }
+        while (!inst.isNull()) {
+            if (unsafe { LLVMGetInstructionOpcode(inst) } == LLVM_ALLOCA_OPCODE) {
+                let instType = unsafe { LLVMTypeOf(inst) }
+                if (IsStructPtrType(instType)) {
+                    let elementType = GetPointerElementType(instType)
+                    let typeName = LLVMCStringToString(unsafe { LLVMGetStructName(elementType) }) ?? ""
+                    if (typeName == UNIT_TYPE_STR) {
+                        unnamedAllocas.add(inst)
+                    }
+                }
+            }
+            inst = unsafe { LLVMGetNextInstruction(inst) }
+        }
+        CGFunction.EraseReplaceableInsts(function, unnamedAllocas)
+    }
+
+    private static func EraseReplaceableInsts(function: LLVMValueRef, insts: ArrayList<LLVMValueRef>): Unit {
+        if (insts.size <= 1) {
+            return
+        }
+        let specificInst = insts[0]
+        let entryBlock = unsafe { LLVMGetEntryBasicBlock(function) }
+        let firstInst = unsafe { LLVMGetFirstInstruction(entryBlock) }
+        unsafe { LLVMSelfhostInstructionMoveBefore(specificInst, firstInst) }
+
+        var replaceIdx: Int64 = 1
+        while (replaceIdx < insts.size) {
+            unsafe { LLVMReplaceAllUsesWith(insts[replaceIdx], specificInst) }
+            replaceIdx++
+        }
+        var eraseIdx: Int64 = 1
+        while (eraseIdx < insts.size) {
+            unsafe { LLVMInstructionEraseFromParent(insts[eraseIdx]) }
+            eraseIdx++
+        }
+        if (CGFunction.HasNoUse(specificInst)) {
+            unsafe { LLVMInstructionEraseFromParent(specificInst) }
+        }
     }
 
     public static func AddZeroInitForStructWithRefField(cgMod: CGModule, function: LLVMValueRef): Unit {

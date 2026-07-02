@@ -17,16 +17,6 @@ public func GenerateAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMV
             return obj
         }
     }
-    if (IsGenericSRetReturnSlot(irBuilder, chirExpr)) {
-        if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
-            let bodyBlock = irBuilder.CreateAndInsertBasicBlock("sret.entry")
-            if (!bodyBlock.isNull()) {
-                irBuilder.CreateBr(bodyBlock)
-                irBuilder.SetInsertPoint(bodyBlock)
-            }
-            return unsafe { LLVMGetParam(cgFunc.GetRawFunction(), 0u32) }
-        }
-    }
     if (let Some(resultTy) <- chirExpr.GetResultType()) {
         let cgType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
         // Allocate yields a Ref<T> (a pointer to T). The stack slot must hold a T, so the alloca's
@@ -39,21 +29,6 @@ public func GenerateAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMV
         return irBuilder.CreateEntryAlloca(cgType, name: "alloca")
     }
     return LLVMNullValue()
-}
-
-private func IsGenericSRetReturnSlot(irBuilder: IRBuilder2, chirExpr: Expression): Bool {
-    let resultValue = chirExpr.GetResult() ?? return false
-    let cgFunc = irBuilder.GetInsertCGFunction() ?? return false
-    if (!cgFunc.IsSRet()) {
-        return false
-    }
-    let topLevelFunc = chirExpr.GetTopLevelFunc() ?? return false
-    let returnValue = topLevelFunc.GetReturnValue() ?? return false
-    if (returnValue.nodeId != resultValue.nodeId) {
-        return false
-    }
-    let returnTy = topLevelFunc.GetReturnType() ?? return false
-    return returnTy.IsGeneric()
 }
 
 private func InitializeAutoEnvCallableAbi(irBuilder: IRBuilder2, obj: LLVMValueRef, allocatedTy: Type): Unit {

@@ -14,6 +14,8 @@
 //         GC_KLASS_ATTR = "CFileKlass"  (src/CodeGen/Utils/Constants.h:35)
 //   CGFunction::AddZeroInitForStructWithRefField support:
 //         src/CodeGen/CGFunction.cpp:262-274, 329-350.
+//   CGFunction::EraseReplaceableAlloca support:
+//         src/CodeGen/CGFunction.cpp:252  specificInst->moveBefore(&entryBB.front())
 //   CGCFFI ABI classifier support:
 //         src/CodeGen/CJNative/CJNativeCGCFFI.cpp:542  type.getPrimitiveSizeInBits()
 
@@ -123,6 +125,11 @@ extern "C" void LLVMSelfhostGetBasicBlockPredecessors(LLVMBasicBlockRef BB, LLVM
 extern "C" int LLVMSelfhostInstructionComesBefore(LLVMValueRef Inst, LLVMValueRef Other)
 {
     return unwrap<Instruction>(Inst)->comesBefore(unwrap<Instruction>(Other)) ? 1 : 0;
+}
+
+extern "C" void LLVMSelfhostInstructionMoveBefore(LLVMValueRef Inst, LLVMValueRef Other)
+{
+    unwrap<Instruction>(Inst)->moveBefore(unwrap<Instruction>(Other));
 }
 
 extern "C" uint64_t LLVMSelfhostGetPrimitiveSizeInBits(LLVMTypeRef Ty)

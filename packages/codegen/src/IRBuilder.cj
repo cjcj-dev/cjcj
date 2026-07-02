@@ -1428,6 +1428,9 @@ public class IRBuilder2 <: Resource {
                 return LoadSRetPayloadValue(retValue, resultCGType)
             }
         }
+        if (returnTy.IsUnit()) {
+            return cgMod.GenerateUnitTypeValue()
+        }
         if (!returnTy.IsUnit() && !returnTy.IsNothing() && !returnTy.IsVoid() && returnCGType.GetSize().isSome() &&
             !returnCGType.IsReference()) {
             return CreateLoad(returnCGType.GetLLVMType(), retValue, name: "sret.value")

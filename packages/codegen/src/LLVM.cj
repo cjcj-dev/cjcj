@@ -270,10 +270,12 @@ foreign {
     func LLVMSelfhostGetBasicBlockPredecessors(block: LLVMBasicBlockRef,
         predecessors: CPointer<LLVMBasicBlockRef>): Unit
     func LLVMSelfhostInstructionComesBefore(inst: LLVMValueRef, other: LLVMValueRef): Int32
+    func LLVMSelfhostInstructionMoveBefore(inst: LLVMValueRef, other: LLVMValueRef): Unit
     func LLVMSelfhostGetPrimitiveSizeInBits(ty: LLVMTypeRef): UInt64
     func LLVMSelfhostGetFirstUse(value: LLVMValueRef): LLVMUseRef
     func LLVMSelfhostGetNextUse(useRef: LLVMUseRef): LLVMUseRef
     func LLVMSelfhostGetUserInstruction(useRef: LLVMUseRef): LLVMValueRef
+    func LLVMReplaceAllUsesWith(oldValue: LLVMValueRef, newValue: LLVMValueRef): Unit
     func LLVMInstructionEraseFromParent(inst: LLVMValueRef): Unit
     func LLVMMoveBasicBlockAfter(block: LLVMBasicBlockRef, movePos: LLVMBasicBlockRef): Unit
     func LLVMConstNull(valueType: LLVMTypeRef): LLVMValueRef
