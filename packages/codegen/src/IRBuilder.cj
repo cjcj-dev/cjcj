@@ -3778,7 +3778,7 @@ public class IRBuilder2 <: Resource {
         return customTy
     }
 
-    private func CallGetTypeInfoIntrinsic(args: ArrayList<LLVMValueRef>): LLVMValueRef {
+    public func CallGetTypeInfoIntrinsic(args: ArrayList<LLVMValueRef>): LLVMValueRef {
         let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
         let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
         let i8PtrPtrType = unsafe { LLVMPointerType(i8PtrType, 0u32) }

@@ -23,7 +23,7 @@ import cangjie_compiler::chir.TypeKindIndex
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.VArrayType
 import cangjie_compiler::option.{ArchType, EnvironmentType, OSType}
-import cangjie_compiler::utils.{REF_PACKAGE_NAME, STD_LIB_WEAK_REF, StaticCast}
+import cangjie_compiler::utils.{CJC_ASSERT, REF_PACKAGE_NAME, STD_LIB_WEAK_REF, StaticCast}
 
 private let UG_CLASS_KIND: UInt64 = 128u64
 private let UG_INTERFACE_KIND: UInt64 = 129u64
@@ -679,15 +679,46 @@ private func GenerateFieldsFnsOfTypeTemplate(cgMod: CGModule, customTy: CustomTy
             idx.toString(), fieldTypes[idx], genericParams))
         idx++
     }
-    let fieldFnPtrType = unsafe { LLVMTypeOf(fieldFns[0]) }
-    let arrayType = unsafe { LLVMArrayType(fieldFnPtrType, UInt32(fieldFns.size)) }
-    let fieldFnsGlobal = GetOrInsertCodeGenGlobal(cgMod, typeTemplateName + ".fieldTiFns", arrayType)
+    return GenFieldsFnsOfTypeTemplate(cgMod, typeTemplateName, fieldFns)
+}
+
+public func GenFieldsFnsOfTypeTemplate(cgMod: CGModule, funcPrefixName: String,
+    fieldsFn: ArrayList<LLVMValueRef>): LLVMValueRef {
+    let fieldNum = fieldsFn.size
+    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(cgMod.GetLLVMContext().raw), 0u32) }
+    CJC_ASSERT(fieldNum > 0)
+    let fieldFnPtrType = unsafe { LLVMTypeOf(fieldsFn[0]) }
+    let arrayType = unsafe { LLVMArrayType(fieldFnPtrType, UInt32(fieldNum)) }
+    let globalArray = GetOrInsertCodeGenGlobal(cgMod, funcPrefixName + ".fieldTiFns", arrayType)
     unsafe {
-        LLVMSetInitializer(fieldFnsGlobal, ConstArray(fieldFnPtrType, fieldFns))
-        LLVMSetLinkage(fieldFnsGlobal, LLVMLinkageValue(LLVMLinkage.Private))
-        LLVMSetGlobalConstant(fieldFnsGlobal, 0)
+        LLVMSetLinkage(globalArray, LLVMLinkageValue(LLVMLinkage.Private))
+        LLVMSetInitializer(globalArray, ConstArray(fieldFnPtrType, fieldsFn))
     }
-    return unsafe { LLVMConstBitCast(fieldFnsGlobal, i8PtrType) }
+    addAttribute(globalArray, CJTT_FIELDS_FNS_ATTR)
+    return unsafe { LLVMConstBitCast(globalArray, i8PtrType) }
+}
+
+public func GenFieldsFnsOfTypeTemplate(cgMod: CGModule, funcPrefixName: String, fieldTypes: ArrayList<Type>,
+    genericParamIndicesMap: ArrayList<GenericType>): LLVMValueRef {
+    let fieldNum = fieldTypes.size
+    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(cgMod.GetLLVMContext().raw), 0u32) }
+    if (fieldNum == 0) {
+        return unsafe { LLVMConstNull(i8PtrType) }
+    }
+    let typeInfoType = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
+    let argTypes = ArrayList<LLVMTypeRef>()
+    argTypes.add(unsafe { LLVMInt32TypeInContext(cgMod.GetLLVMContext().raw) })
+    argTypes.add(unsafe { LLVMPointerType(LLVMPointerType(typeInfoType, 0u32), 0u32) })
+    let fieldFn = BuildTypeInfoFunctionType(i8PtrType, argTypes)
+    let initializers = ArrayList<LLVMValueRef>()
+    var idx: Int64 = 0
+    for (fieldType in fieldTypes) {
+        let fieldName = idx.toString()
+        let funcName = funcPrefixName + ".fieldTiFn." + fieldName
+        initializers.add(GenerateTypeTemplateTypeInfoFn(cgMod, fieldFn, funcName, fieldType, genericParamIndicesMap))
+        idx++
+    }
+    return GenFieldsFnsOfTypeTemplate(cgMod, funcPrefixName, initializers)
 }
 
 private func GenerateSuperFnOfTypeTemplate(cgMod: CGModule, customTy: CustomType, typeTemplateName: String,

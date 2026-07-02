@@ -2,11 +2,13 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.Attribute
+import cangjie_compiler::chir.CHIRBuilder
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.LocalVar
+import cangjie_compiler::chir.RefType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
@@ -445,6 +447,10 @@ public open class CGType {
 
     public static func GetCodeGenFunctionType(_: LLVMContextHandle, retType: LLVMTypeRef): LLVMTypeRef {
         return unsafe { LLVMFunctionType(retType, CPointer<LLVMTypeRef>(), 0u32, 0) }
+    }
+
+    public static func GetRefTypeOfCHIRInt8(chirBuilder: CHIRBuilder): RefType {
+        return chirBuilder.context.GetRefTy(chirBuilder.context.GetInt8Ty())
     }
 
     public static func GetOrCreateTypeInfoType(context: LLVMContextHandle): LLVMTypeRef {

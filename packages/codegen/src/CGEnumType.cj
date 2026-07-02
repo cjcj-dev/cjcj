@@ -167,6 +167,76 @@ public class CGEnumType <: CGCustomType {
         return sizeOfConstructorUnion
     }
 
+    public func GenFieldsFnsOfTypeTemplateForOptionLikeT(cgMod: CGModule, funcPrefixName: String): LLVMValueRef {
+        let llvmCtx = cgMod.GetLLVMContext()
+        let i8Type = unsafe { LLVMInt8TypeInContext(llvmCtx.raw) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let moduleHandle = cgMod.GetLLVMModule() ?? return unsafe { LLVMConstNull(i8PtrType) }
+        try (fieldFnsName = unsafe { LibC.mallocCString(funcPrefixName + ".fieldTiFns") }.asResource()) {
+            let existing = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, fieldFnsName.value) }
+            if (!existing.isNull() && unsafe { LLVMIsDeclaration(existing) } == 0) {
+                return unsafe { LLVMConstBitCast(existing, i8PtrType) }
+            }
+        }
+        let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(llvmCtx)
+        let argTypes = ArrayList<LLVMTypeRef>()
+        argTypes.add(unsafe { LLVMInt32TypeInContext(llvmCtx.raw) })
+        argTypes.add(unsafe { LLVMPointerType(typeInfoPtrType, 0u32) })
+        var fieldFnType = LLVMNullType()
+        try (argTypePtr = LibC.malloc<LLVMTypeRef>(count: argTypes.size).asResource()) {
+            var idx: Int64 = 0
+            while (idx < argTypes.size) {
+                unsafe { (argTypePtr.value + idx).write(argTypes[idx]) }
+                idx++
+            }
+            fieldFnType = unsafe { LLVMFunctionType(i8PtrType, argTypePtr.value, UInt32(argTypes.size), 0) }
+        }
+
+        var getTiFn1 = LLVMNullValue()
+        try (funcName = unsafe { LibC.mallocCString(funcPrefixName + ".fieldTiFn.0") }.asResource()) {
+            getTiFn1 = unsafe { LLVMAddFunction(moduleHandle.raw, funcName.value, fieldFnType) }
+        }
+        unsafe {
+            LLVMSetLinkage(getTiFn1, LLVMLinkageValue(LLVMLinkage.Private))
+            LLVMSetUnnamedAddress(getTiFn1, LLVMUnnamedAddrValue(LLVMUnnamedAddr.GlobalUnnamedAddr))
+        }
+        AddFnAttr(getTiFn1, "native-interface-fn")
+
+        var getTiFn2 = LLVMNullValue()
+        try (funcName = unsafe { LibC.mallocCString(funcPrefixName + ".fieldTiFn.1") }.asResource()) {
+            getTiFn2 = unsafe { LLVMAddFunction(moduleHandle.raw, funcName.value, fieldFnType) }
+        }
+        unsafe {
+            LLVMSetLinkage(getTiFn2, LLVMLinkageValue(LLVMLinkage.Private))
+            LLVMSetUnnamedAddress(getTiFn2, LLVMUnnamedAddrValue(LLVMUnnamedAddr.GlobalUnnamedAddr))
+        }
+        AddFnAttr(getTiFn2, "native-interface-fn")
+
+        try (irBuilder = IRBuilder2(cgMod)) {
+            let entryBB1 = irBuilder.CreateEntryBasicBlock(getTiFn1, "entry")
+            irBuilder.SetInsertPoint(entryBB1)
+            let ti1 = irBuilder.CreateLoad(typeInfoPtrType, unsafe { LLVMGetParam(getTiFn1, 1u32) })
+            let isRef = irBuilder.CreateTypeInfoIsReferenceCall(ti1)
+            let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>(["ref", "nonRef"]))
+            irBuilder.CreateCondBr(isRef, blocks[0], blocks[1])
+            irBuilder.SetInsertPoint(blocks[0])
+            let unitTypeInfo = CGType.GetOrCreate(cgMod,
+                cgMod.GetCGContext().GetCHIRBuilder().context.GetUnitTy()).GetOrCreateTypeInfo()
+            irBuilder.CreateRet(irBuilder.CreateBitCast(unitTypeInfo, i8PtrType))
+            irBuilder.SetInsertPoint(blocks[1])
+            let boolTypeInfo = CGType.GetOrCreate(cgMod,
+                cgMod.GetCGContext().GetCHIRBuilder().context.GetBoolTy()).GetOrCreateTypeInfo()
+            irBuilder.CreateRet(irBuilder.CreateBitCast(boolTypeInfo, i8PtrType))
+
+            let entryBB2 = irBuilder.CreateEntryBasicBlock(getTiFn2, "entry")
+            irBuilder.SetInsertPoint(entryBB2)
+            let ti2 = irBuilder.CreateLoad(typeInfoPtrType, unsafe { LLVMGetParam(getTiFn2, 1u32) })
+            irBuilder.CreateRet(irBuilder.CreateBitCast(ti2, i8PtrType))
+        }
+
+        return GenFieldsFnsOfTypeTemplate(cgMod, funcPrefixName, ArrayList<LLVMValueRef>([getTiFn1, getTiFn2]))
+    }
+
     public static func NeedAndroidArm32AlignedEnumLayout(target: TripleInfo): Bool {
         return target.arch == ArchType.ARM32 && target.env == EnvironmentType.ANDROID
     }

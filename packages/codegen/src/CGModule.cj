@@ -147,6 +147,35 @@ public class CGModule {
         return module
     }
 
+    public func GenerateTypeNameConstantString(typeMangledName: String, isWeakODR: Bool,
+        qualifiedName!: String = ""): LLVMValueRef {
+        let context = GetLLVMContext().raw
+        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(context), 0u32) }
+        let moduleHandle = module ?? return unsafe { LLVMConstNull(i8PtrType) }
+        let value = if (!qualifiedName.isEmpty()) { qualifiedName } else { typeMangledName }
+        var strConstant = LLVMNullValue()
+        try (valueCString = unsafe { LibC.mallocCString(value) }.asResource()) {
+            strConstant = unsafe { LLVMConstStringInContext(context, valueCString.value, UInt32(value.size), 0) }
+        }
+        let globalName = typeMangledName + ".name"
+        var klassName = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(globalName) }.asResource()) {
+            klassName = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+            if (klassName.isNull()) {
+                klassName = unsafe { LLVMAddGlobal(moduleHandle.raw, LLVMTypeOf(strConstant), nameCString.value) }
+            }
+        }
+        unsafe {
+            LLVMSetInitializer(klassName, strConstant)
+            LLVMSetAlignment(klassName, 1u32)
+            LLVMSetGlobalConstant(klassName, 1)
+            LLVMSetUnnamedAddress(klassName, LLVMUnnamedAddrValue(LLVMUnnamedAddr.GlobalUnnamedAddr))
+        }
+        addAttribute(klassName, CJTYPE_NAME_ATTR)
+        AddLinkageTypeMetadata(klassName, if (isWeakODR) { LLVMLinkage.WeakODR } else { LLVMLinkage.Private }, false)
+        return unsafe { LLVMConstBitCast(klassName, i8PtrType) }
+    }
+
     public func GetEnumCaseClassName(chirEnumType: EnumType, ctorIndex: Int64): String {
         let enumDef = chirEnumType.GetEnumDef()
         var name = enumDef.GetPackageName() + ":" + enumDef.GetSrcCodeIdentifier() + ":" + ctorIndex.toString()
@@ -170,7 +199,7 @@ public class CGModule {
                 global = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
                 if (global.isNull()) {
                     global = unsafe { LLVMAddGlobal(moduleHandle.raw, globalType, nameCString.value) }
-                    throw IllegalStateException("GAP_TODO EnumCtorTIOrTTGenerator CGModule.cpp:566")
+                    EnumCtorTIOrTTGenerator(this, chirEnumType, ctorIndex).Emit()
                 }
             }
             return global

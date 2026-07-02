@@ -42,6 +42,28 @@ public func GetOrCreateNamedStructType(context: LLVMContextHandle, name: String)
     return result
 }
 
+public func GetLLVMStructType(cgMod: CGModule, elementTypes: ArrayList<Type>, name: String): LLVMTypeRef {
+    let cgCtx = cgMod.GetCGContext()
+    let llvmCtx = cgMod.GetLLVMContext()
+    var layoutType = LLVMNullType()
+    try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+        layoutType = unsafe { LLVMGetTypeByName2(llvmCtx.raw, nameCString.value) }
+    }
+    if (!layoutType.isNull() && cgCtx.IsGeneratedStructType(name)) {
+        return layoutType
+    }
+    if (layoutType.isNull()) {
+        layoutType = GetOrCreateNamedStructType(llvmCtx, name)
+    }
+    cgCtx.AddGeneratedStructType(name)
+    let elemTypes = ArrayList<LLVMTypeRef>()
+    for (elemType in elementTypes) {
+        elemTypes.add(CGType.GetOrCreate(cgMod, elemType).GetLLVMType())
+    }
+    SetStructTypeBody(layoutType, elemTypes)
+    return layoutType
+}
+
 public func SetStructTypeBody(structType: LLVMTypeRef, body: ArrayList<LLVMTypeRef>): Unit {
     if (structType.isNull()) {
         return
