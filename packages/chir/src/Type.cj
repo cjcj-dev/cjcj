@@ -281,6 +281,190 @@ public open class Type {
             }
         }
     }
+
+    public func IsAutoEnv(): Bool {
+        if (!IsClass()) {
+            return false
+        }
+        let classTy = (this as ClassType).getOrThrow()
+        return classTy.GetClassDef().GetAnnotation("IsAutoEnvClass").isSome()
+    }
+
+    public func IsAutoEnvBase(): Bool {
+        if (!IsClass()) {
+            return false
+        }
+        let classTy = (this as ClassType).getOrThrow()
+        let classDef = classTy.GetClassDef()
+        return classDef.GetAnnotation("IsAutoEnvClass").isSome() && classDef.TestAttr(Attribute.ABSTRACT)
+    }
+
+    public func IsAutoEnvInstBase(): Bool {
+        return IsAutoEnvBase() && argTys.isEmpty()
+    }
+
+    public func IsAutoEnvGenericBase(): Bool {
+        return IsAutoEnvBase() && !argTys.isEmpty()
+    }
+
+    public func CalculateGenericTyMapping(targetTy: Type): (Bool, HashMap<Int64, Type>) {
+        let replaceTable = HashMap<Int64, Type>()
+        let res = CalculateGenericTyMappingImpl(targetTy, this, replaceTable)
+        return (res, replaceTable)
+    }
+
+    public func IsEqualOrSubTypeOf(parentType: Type, builder: CHIRBuilder,
+        visited!: Option<HashSet<String>> = None): Bool {
+        let activeVisited = match (visited) {
+            case Some(values) => values
+            case None => HashSet<String>()
+        }
+        let pairKey = objectId.toString() + ":" + parentType.objectId.toString()
+        if (activeVisited.contains(pairKey)) {
+            return false
+        }
+        activeVisited.add(pairKey)
+
+        if (IsRef() && parentType.IsRef()) {
+            let subBaseType = (this as RefType).getOrThrow().GetBaseType()
+            let parentBaseType = (parentType as RefType).getOrThrow().GetBaseType()
+            return subBaseType.IsEqualOrSubTypeOf(parentBaseType, builder, visited: activeVisited)
+        }
+
+        let thisDeref = StripAllRefs()
+        let parentDeref = parentType.StripAllRefs()
+        if ((IsRef() || parentType.IsRef()) && thisDeref.IsEqual(parentDeref)) {
+            return false
+        }
+        if (thisDeref.IsEqual(parentDeref) || thisDeref.IsNothing() || parentDeref.IsAny()) {
+            return true
+        }
+        if (thisDeref.IsInvalid() || parentDeref.IsInvalid() || parentDeref.IsGeneric()) {
+            return false
+        }
+        if (parentDeref.IsCType()) {
+            return SatisfyCType()
+        }
+        if (thisDeref.IsGeneric()) {
+            let genericTy = (thisDeref as GenericType).getOrThrow()
+            for (upperBound in genericTy.GetUpperBounds()) {
+                if (!upperBound.StripAllRefs().IsEqualOrSubTypeOf(parentDeref, builder, visited: activeVisited)) {
+                    return false
+                }
+            }
+            return true
+        }
+        if (thisDeref.IsTuple()) {
+            if (!parentDeref.IsTuple()) {
+                return false
+            }
+            return TupleTypeIsEqualOrSub((thisDeref as TupleType).getOrThrow(),
+                (parentDeref as TupleType).getOrThrow(), builder)
+        }
+        if (thisDeref.IsFunc()) {
+            if (!parentDeref.IsFunc()) {
+                return false
+            }
+            return FuncTypeIsEqualOrSub((thisDeref as FuncType).getOrThrow(),
+                (parentDeref as FuncType).getOrThrow(), builder)
+        }
+        if (thisDeref.IsAutoEnv()) {
+            if (!parentDeref.IsAutoEnv()) {
+                return false
+            }
+            return ClosureTypeIsEqualOrSub((thisDeref as ClassType).getOrThrow(),
+                (parentDeref as ClassType).getOrThrow(), builder)
+        }
+
+        let allParents = ArrayList<ClassType>()
+        if (let Some(builtinType) <- (thisDeref as BuiltinType)) {
+            for (parent in builtinType.GetSuperTypesRecusively(builder, Some(activeVisited))) {
+                allParents.add(parent)
+            }
+        } else if (let Some(customType) <- (thisDeref as CustomType)) {
+            for (parent in customType.GetSuperTypesRecusively(builder, Some(activeVisited))) {
+                allParents.add(parent)
+            }
+        }
+        for (parent in allParents) {
+            if (parent.IsEqual(parentDeref)) {
+                return true
+            }
+            let mapping = parentDeref.CalculateGenericTyMapping(parent)
+            if (mapping[0]) {
+                return true
+            }
+        }
+        return false
+    }
+
+    public func IsEqualOrInstantiatedTypeOf(genericRelatedType: Type, builder: CHIRBuilder,
+        visited!: Option<HashSet<String>> = None): Bool {
+        if (IsEqual(genericRelatedType)) {
+            return true
+        }
+        let res = genericRelatedType.CalculateGenericTyMapping(this)
+        if (!res[0]) {
+            return false
+        }
+        for ((genericId, instTy) in res[1]) {
+            let genericTys = ArrayList<GenericType>()
+            genericRelatedType.VisitTypeRecursively({ ty: Type =>
+                if (let Some(curGenericTy) <- (ty as GenericType)) {
+                    if (curGenericTy.objectId == genericId) {
+                        genericTys.add(curGenericTy)
+                        return false
+                    }
+                }
+                return true
+            })
+            if (genericTys.isEmpty()) {
+                throw IllegalStateException("generic type from CalculateGenericTyMapping is missing")
+            }
+            let typeParam = genericTys[0]
+            if (!instTy.SatisfyGenericConstraints(typeParam, builder, res[1], visited: visited)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    public func SatisfyGenericConstraints(genericType: GenericType, builder: CHIRBuilder,
+        instMap: HashMap<Int64, Type>, visited!: Option<HashSet<String>> = None): Bool {
+        for (upperBound in genericType.GetUpperBounds()) {
+            let visited2 = HashSet<String>()
+            if (let Some(values) <- visited) {
+                for (value in values) {
+                    visited2.add(value)
+                }
+            }
+            let instUpperBound = ReplaceRawGenericArgType(upperBound, instMap)
+            if (!IsEqualOrSubTypeOf(instUpperBound, builder, visited: visited2)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    public open func GetExtends(): ArrayList<ExtendDef> {
+        throw IllegalStateException("Type.GetExtends is unsupported for " + ToString())
+    }
+
+    public open func GetExtends(builder: CHIRBuilder): ArrayList<ExtendDef> {
+        let _ = builder
+        return GetExtends()
+    }
+
+    public open func GetSuperTypesRecusively(builder: CHIRBuilder,
+        visited: Option<HashSet<String>>): ArrayList<ClassType> {
+        let _ = builder
+        let _ = visited
+        throw IllegalStateException("Type.GetSuperTypesRecusively is unsupported for " + ToString())
+    }
+
+    public func GetSuperTypesRecusively(builder: CHIRBuilder): ArrayList<ClassType> {
+        return GetSuperTypesRecusively(builder, None)
+    }
 }
 
 public open class BuiltinType <: Type {
@@ -294,12 +478,38 @@ public open class BuiltinType <: Type {
         extends.add(extendDef)
     }
 
-    public func GetExtends(): ArrayList<ExtendDef> {
+    public open override func GetExtends(): ArrayList<ExtendDef> {
         let out = ArrayList<ExtendDef>()
         for (extendDef in extends) {
             out.add(extendDef)
         }
         return out
+    }
+
+    public open override func GetExtends(builder: CHIRBuilder): ArrayList<ExtendDef> {
+        let _ = builder
+        return GetExtends()
+    }
+
+    public override func GetSuperTypesRecusively(builder: CHIRBuilder,
+        visited: Option<HashSet<String>>): ArrayList<ClassType> {
+        let inheritanceList = ArrayList<ClassType>()
+        for (extendDef in GetExtends(builder)) {
+            let visited2 = HashSet<String>()
+            if (let Some(values) <- visited) {
+                for (value in values) {
+                    visited2.add(value)
+                }
+            }
+            let extendedType = extendDef.GetExtendedType().getOrThrow()
+            if (!IsEqualOrInstantiatedTypeOf(extendedType, builder, visited: visited2)) {
+                continue
+            }
+            for (interfaceTy in extendDef.GetImplementedInterfaceTys()) {
+                GetAllInstantiatedParentType(interfaceTy, builder, inheritanceList, visited: visited)
+            }
+        }
+        return inheritanceList
     }
 }
 
@@ -544,6 +754,20 @@ public class CPointerType <: BuiltinType {
         return argTys[0]
     }
 
+    public override func GetExtends(): ArrayList<ExtendDef> {
+        if (!GetElementType().IsUnit()) {
+            throw IllegalStateException("CPointerType.GetExtends needs CHIRBuilder")
+        }
+        return super.GetExtends()
+    }
+
+    public override func GetExtends(builder: CHIRBuilder): ArrayList<ExtendDef> {
+        if (!GetElementType().IsUnit()) {
+            return builder.context.GetCPointerTy(builder.context.GetUnitTy()).GetExtends(builder)
+        }
+        return super.GetExtends(builder)
+    }
+
     public override func ToString(): String {
         return "CPointer<${GetElementType().ToString()}>"
     }
@@ -699,6 +923,8 @@ public class ThisType <: Type {
 
 public open class CustomType <: Type {
     public let def: CustomTypeDef
+    private let implementedInterfaceTys: ArrayList<ClassType> = ArrayList<ClassType>()
+    private var hasSetSuperInterface: Bool = false
 
     public init(kind: TypeKind, def: CustomTypeDef, typeArgs: ArrayList<Type>) {
         super(kind)
@@ -714,6 +940,84 @@ public open class CustomType <: Type {
 
     public func GetGenericArgs(): ArrayList<Type> {
         return argTys.clone()
+    }
+
+    public override func GetExtends(): ArrayList<ExtendDef> {
+        return GetCustomTypeDef().GetExtends()
+    }
+
+    public override func GetExtends(builder: CHIRBuilder): ArrayList<ExtendDef> {
+        let _ = builder
+        return GetExtends()
+    }
+
+    public override func GetSuperTypesRecusively(builder: CHIRBuilder,
+        visited: Option<HashSet<String>>): ArrayList<ClassType> {
+        let inheritanceList = ArrayList<ClassType>()
+        for (interfaceTy in GetImplementedInterfaceTys(builder, visited: visited)) {
+            GetAllInstantiatedParentType(interfaceTy, builder, inheritanceList, visited: visited)
+        }
+        if (let Some(classTy) <- (this as ClassType)) {
+            if (let Some(superClass) <- classTy.GetSuperClassTy(builder: builder)) {
+                GetAllInstantiatedParentType(superClass, builder, inheritanceList, visited: visited)
+            }
+        }
+        return inheritanceList
+    }
+
+    public func CalculateExtendImplementedInterfaceTys(builder: CHIRBuilder,
+        visited!: Option<HashSet<String>> = None): ArrayList<ClassType> {
+        let allParents = ArrayList<ClassType>()
+        for (extendDef in def.GetExtends()) {
+            let visited2 = HashSet<String>()
+            if (let Some(values) <- visited) {
+                for (value in values) {
+                    visited2.add(value)
+                }
+            }
+            let extendedType = extendDef.GetExtendedType().getOrThrow()
+            if (!IsEqualOrInstantiatedTypeOf(extendedType, builder, visited: visited2)) {
+                continue
+            }
+            let res = extendedType.CalculateGenericTyMapping(this)
+            CJC_ASSERT(res[0])
+            for (parent in extendDef.GetImplementedInterfaceTys()) {
+                allParents.add((ReplaceRawGenericArgType(parent, res[1]) as ClassType).getOrThrow())
+            }
+        }
+        return allParents
+    }
+
+    public func CalculateImplementedInterfaceTys(builder: CHIRBuilder,
+        visited!: Option<HashSet<String>> = None): ArrayList<ClassType> {
+        let genericTypes = def.GetGenericTypeParams()
+        if (!genericTypes.isEmpty()) {
+            CJC_ASSERT(argTys.size == genericTypes.size)
+        }
+        let instSuperInterfaceTys = CalculateExtendImplementedInterfaceTys(builder, visited: visited)
+        let replaceTable = HashMap<Int64, Type>()
+        var typeIdx: Int64 = 0
+        while (typeIdx < genericTypes.size) {
+            replaceTable[genericTypes[typeIdx].objectId] = argTys[typeIdx]
+            typeIdx++
+        }
+        for (ty in def.GetImplementedInterfaceTys()) {
+            instSuperInterfaceTys.add((ReplaceRawGenericArgType(ty, replaceTable) as ClassType).getOrThrow())
+        }
+        return instSuperInterfaceTys
+    }
+
+    public func GetImplementedInterfaceTys(builder: CHIRBuilder,
+        visited!: Option<HashSet<String>> = None): ArrayList<ClassType> {
+        if (hasSetSuperInterface) {
+            return implementedInterfaceTys.clone()
+        }
+        implementedInterfaceTys.clear()
+        for (interfaceTy in CalculateImplementedInterfaceTys(builder, visited: visited)) {
+            implementedInterfaceTys.add(interfaceTy)
+        }
+        hasSetSuperInterface = true
+        return implementedInterfaceTys.clone()
     }
 
     public func GetInstMap(instMap: HashMap<Int64, Type>): Unit {
@@ -811,6 +1115,144 @@ public open class CustomType <: Type {
         }
         return def.GetIdentifier() + "<" + JoinStrings(args, ",") + ">"
     }
+}
+
+private func CalculateGenericTyMappingImpl(instType: Type, genericType: Type,
+    replaceTable: HashMap<Int64, Type>): Bool {
+    if (let Some(genericTy) <- (genericType as GenericType)) {
+        if (let Some(storedType) <- replaceTable.get(genericTy.objectId)) {
+            return storedType.IsEqual(instType)
+        }
+        replaceTable[genericTy.objectId] = instType
+        return true
+    }
+    if (instType.IsEqual(genericType)) {
+        return true
+    }
+    if (instType.GetTypeKind() != genericType.GetTypeKind()) {
+        return false
+    }
+    if (let Some(instCustomType) <- (instType as CustomType)) {
+        let genericCustomType = (genericType as CustomType).getOrThrow()
+        if (instCustomType.GetCustomTypeDef().nodeId != genericCustomType.GetCustomTypeDef().nodeId) {
+            return false
+        }
+    }
+    let instTypeArgs = instType.GetTypeArgs()
+    let genericTypeArgs = genericType.GetTypeArgs()
+    if (instTypeArgs.size != genericTypeArgs.size) {
+        return false
+    }
+    var argIdx: Int64 = 0
+    while (argIdx < instTypeArgs.size) {
+        if (!CalculateGenericTyMappingImpl(instTypeArgs[argIdx], genericTypeArgs[argIdx], replaceTable)) {
+            return false
+        }
+        argIdx++
+    }
+    return true
+}
+
+private func TupleTypeIsEqualOrSub(subType: TupleType, parentType: TupleType, builder: CHIRBuilder): Bool {
+    let thisTupleArgs = subType.GetTypeArgs()
+    let parentTupleArgs = parentType.GetTypeArgs()
+    if (thisTupleArgs.size != parentTupleArgs.size) {
+        return false
+    }
+    var argIdx: Int64 = 0
+    while (argIdx < thisTupleArgs.size) {
+        if (!thisTupleArgs[argIdx].IsEqualOrSubTypeOf(parentTupleArgs[argIdx], builder)) {
+            return false
+        }
+        argIdx++
+    }
+    return true
+}
+
+private func FuncTypeIsEqualOrSub(subType: FuncType, parentType: FuncType, builder: CHIRBuilder): Bool {
+    if (subType.IsCFunc() != parentType.IsCFunc()) {
+        return false
+    }
+    if (subType.HasVarArg() != parentType.HasVarArg()) {
+        return false
+    }
+    let thisParamTypes = subType.GetParamTypes()
+    let parentParamTypes = parentType.GetParamTypes()
+    if (thisParamTypes.size != parentParamTypes.size) {
+        return false
+    }
+    var paramIdx: Int64 = 0
+    while (paramIdx < thisParamTypes.size) {
+        if (!parentParamTypes[paramIdx].IsEqualOrSubTypeOf(thisParamTypes[paramIdx], builder)) {
+            return false
+        }
+        paramIdx++
+    }
+    return subType.GetReturnType().IsEqualOrSubTypeOf(parentType.GetReturnType(), builder)
+}
+
+private func GetAutoEnvGenericBase(classTy: ClassType, builder: CHIRBuilder): ClassType {
+    CJC_ASSERT(classTy.IsAutoEnv())
+    if (classTy.IsAutoEnvGenericBase()) {
+        return classTy
+    }
+    return GetAutoEnvGenericBase(classTy.GetSuperClassTy(builder: builder).getOrThrow(), builder)
+}
+
+private func ConvertClosureTypeToFuncType(closureType: ClassType, builder: CHIRBuilder): FuncType {
+    let typeArgs = GetAutoEnvGenericBase(closureType, builder).GetGenericArgs()
+    CJC_ASSERT(!typeArgs.isEmpty())
+    let retType = typeArgs[typeArgs.size - 1]
+    typeArgs.remove(at: typeArgs.size - 1)
+    return builder.context.GetFuncTy(typeArgs, retType)
+}
+
+private func ClosureTypeIsEqualOrSub(subType: ClassType, parentType: ClassType, builder: CHIRBuilder): Bool {
+    let subFuncType = ConvertClosureTypeToFuncType(subType, builder)
+    let parentFuncType = ConvertClosureTypeToFuncType(parentType, builder)
+    return FuncTypeIsEqualOrSub(subFuncType, parentFuncType, builder)
+}
+
+public func GetAllInstantiatedParentType(cur: ClassType, builder: CHIRBuilder, parents: ArrayList<ClassType>,
+    visited!: Option<HashSet<String>> = None): Unit {
+    for (parent in parents) {
+        if (parent.IsEqual(cur)) {
+            return
+        }
+    }
+    for (extendDef in cur.GetCustomTypeDef().GetExtends()) {
+        let extendedType = extendDef.GetExtendedType().getOrThrow()
+        if (!cur.IsEqualOrInstantiatedTypeOf(extendedType, builder, visited: visited)) {
+            continue
+        }
+        let res = extendedType.CalculateGenericTyMapping(cur)
+        for (interfaceTy in extendDef.GetImplementedInterfaceTys()) {
+            let extendParents = ArrayList<ClassType>()
+            GetAllInstantiatedParentType(interfaceTy, builder, extendParents, visited: visited)
+            var parentIdx: Int64 = 0
+            while (parentIdx < extendParents.size) {
+                let instParent = (ReplaceRawGenericArgType(extendParents[parentIdx], res[1]) as ClassType).getOrThrow()
+                var found = false
+                for (parent in parents) {
+                    if (parent.IsEqual(instParent)) {
+                        found = true
+                        break
+                    }
+                }
+                if (!found) {
+                    parents.add(instParent)
+                }
+                parentIdx++
+            }
+        }
+    }
+    for (interfaceTy in cur.GetImplementedInterfaceTys(builder, visited: visited)) {
+        GetAllInstantiatedParentType(interfaceTy, builder, parents, visited: visited)
+    }
+    if (let Some(superClassTy) <- cur.GetSuperClassTy(builder: builder)) {
+        GetAllInstantiatedParentType(superClassTy, builder, parents, visited: visited)
+    }
+    parents.add(cur)
 }
 
 public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type>): Type {
@@ -956,6 +1398,9 @@ public class StructType <: CustomType {
 }
 
 public class ClassType <: CustomType {
+    private var superClassTy: Option<ClassType> = None
+    private var hasSetSuperClass: Bool = false
+
     public init(def: ClassDef, typeArgs: ArrayList<Type>) {
         super(TypeKind.TYPE_CLASS, def, typeArgs)
     }
@@ -967,8 +1412,34 @@ public class ClassType <: CustomType {
         throw IllegalStateException("ClassType does not reference a ClassDef")
     }
 
-    public func GetSuperClassTy(builder!: Option<CHIRBuilder> = None): Option<ClassType> {
+    public func CalculateSuperClassTy(builder: CHIRBuilder): Option<ClassType> {
+        let genericTypes = def.GetGenericTypeParams()
+        if (!genericTypes.isEmpty()) {
+            CJC_ASSERT(argTys.size == genericTypes.size)
+        }
+        let replaceTable = HashMap<Int64, Type>()
+        var typeIdx: Int64 = 0
+        while (typeIdx < genericTypes.size) {
+            replaceTable[genericTypes[typeIdx].objectId] = argTys[typeIdx]
+            typeIdx++
+        }
+        if (let Some(superTy) <- GetClassDef().GetSuperClassTy()) {
+            let _ = builder
+            return (ReplaceRawGenericArgType(superTy, replaceTable) as ClassType).getOrThrow()
+        }
         let _ = builder
+        return None
+    }
+
+    public func GetSuperClassTy(builder!: Option<CHIRBuilder> = None): Option<ClassType> {
+        if (hasSetSuperClass) {
+            return superClassTy
+        }
+        if (let Some(chirBuilder) <- builder) {
+            superClassTy = CalculateSuperClassTy(chirBuilder)
+            hasSetSuperClass = true
+            return superClassTy
+        }
         return GetClassDef().GetSuperClassTy()
     }
 }

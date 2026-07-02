@@ -2,6 +2,7 @@ package cangjie_compiler::chir
 
 import std.collection.*
 
+import cangjie_compiler::utils.CJC_ASSERT
 import cangjie_compiler::basic.Linkage as BasicLinkage
 import cangjie_compiler::ast.ASTKind
 import cangjie_compiler::ast.IsValidCFuncConstructorCall
@@ -1492,10 +1493,9 @@ public class Translator {
         isStatic: Bool, funcInstTypeArgs: ArrayList<Type>): Option<Value> {
         if (let Some(genericType) <- (thisType as GenericType)) {
             for (upperBound in genericType.GetUpperBounds()) {
-                if (let Some(found) <- GetWrapperFuncFromMemberAccess(upperBound.StripAllRefs(), funcName,
-                    instFuncType, isStatic, funcInstTypeArgs)) {
-                    return found
-                }
+                let upperClassType = ((upperBound as RefType).getOrThrow().GetBaseType() as ClassType).getOrThrow()
+                return GetWrapperFuncFromMemberAccess(upperClassType, funcName, instFuncType, isStatic,
+                    funcInstTypeArgs)
             }
             return None
         }
@@ -1503,9 +1503,24 @@ public class Translator {
             return GetExpectedFuncFromCustomType(customTy, funcName, instFuncType, true, funcInstTypeArgs)
         }
         if (let Some(builtinTy) <- (thisType as BuiltinType)) {
-            for (extendDef in builtinTy.GetExtends()) {
+            for (extendDef in builtinTy.GetExtends(builder)) {
+                let replaceTable = HashMap<Int64, Type>()
+                let classInstArgs = builtinTy.GetTypeArgs()
+                let classGenericArgs = extendDef.GetExtendedType().getOrThrow().GetTypeArgs()
+                if (classInstArgs.size != classGenericArgs.size) {
+                    throw IllegalStateException("faithful AST2CHIR member wrapper extend generic size mismatch")
+                }
+                var typeIdx: Int64 = 0
+                while (typeIdx < classInstArgs.size) {
+                    if (let Some(genericTy) <- (classGenericArgs[typeIdx] as GenericType)) {
+                        if (!replaceTable.contains(genericTy.objectId)) {
+                            replaceTable[genericTy.objectId] = classInstArgs[typeIdx]
+                        }
+                    }
+                    typeIdx++
+                }
                 if (let Some(found) <- GetExpectedFuncFromDef(extendDef, funcName, instFuncType, true,
-                    ArrayList<GenericType>(), ArrayList<Type>(), funcInstTypeArgs)) {
+                    replaceTable, funcInstTypeArgs)) {
                     return found
                 }
             }
@@ -1515,21 +1530,29 @@ public class Translator {
 
     private func GetExpectedFuncFromCustomType(customTy: CustomType, funcName: String, instFuncType: FuncType,
         isStatic: Bool, funcInstTypeArgs: ArrayList<Type>): Option<Value> {
-        let genericParams = customTy.GetCustomTypeDef().GetGenericTypeParams()
-        let replacements = customTy.GetGenericArgs()
+        let replaceTable = HashMap<Int64, Type>()
+        let classInstArgs = customTy.GetTypeArgs()
+        let classGenericArgs = customTy.GetCustomTypeDef().GetGenericTypeParams()
+        if (!classGenericArgs.isEmpty()) {
+            CJC_ASSERT(classInstArgs.size == classGenericArgs.size)
+        }
+        var classArgIdx: Int64 = 0
+        while (classArgIdx < classGenericArgs.size) {
+            replaceTable[classGenericArgs[classArgIdx].objectId] = classInstArgs[classArgIdx]
+            classArgIdx++
+        }
         if (let Some(found) <- GetExpectedFuncFromDef(customTy.GetCustomTypeDef(), funcName, instFuncType, isStatic,
-            genericParams, replacements, funcInstTypeArgs)) {
+            replaceTable, funcInstTypeArgs)) {
             return found
         }
         for (extendDef in customTy.GetCustomTypeDef().GetExtends()) {
-            let localParams = CopyGenericTypeList(genericParams)
-            let localReplacements = replacements.clone()
-            if (!CollectGenericReplacementsForMemberWrapper(extendDef.GetExtendedType(), customTy, localParams,
-                localReplacements)) {
+            let matchResult = CollectReplaceTableForExtendedType(extendDef.GetExtendedType().getOrThrow(), customTy,
+                replaceTable)
+            if (!matchResult) {
                 continue
             }
             if (let Some(found) <- GetExpectedFuncFromDef(extendDef, funcName, instFuncType, isStatic,
-                localParams, localReplacements, funcInstTypeArgs)) {
+                replaceTable, funcInstTypeArgs)) {
                 return found
             }
         }
@@ -1547,119 +1570,199 @@ public class Translator {
                 return found
             }
         }
-        return None
-    }
-
-    private func GetExpectedFuncFromDef(def: CustomTypeDef, funcName: String, instFuncType: FuncType, isStatic: Bool,
-        genericParams: ArrayList<GenericType>, replacements: ArrayList<Type>,
-        funcInstTypeArgs: ArrayList<Type>): Option<Value> {
-        let instParamTys = instFuncType.GetParamTypes()
-        if (!isStatic) {
-            if (instParamTys.isEmpty()) {
-                return None
-            }
-            instParamTys.remove(at: 0)
-        }
-        for (method in def.GetMethods()) {
-            if (isStatic != method.TestAttr(Attribute.STATIC)) {
-                continue
-            }
-            var methodName = method.GetSrcCodeIdentifier()
-            if (methodName.isEmpty()) {
-                methodName = method.GetIdentifierWithoutPrefix()
-            }
-            if (methodName != funcName) {
-                continue
-            }
-            let methodTy = RequireFuncType(method.GetType() ??
-                throw IllegalStateException("faithful AST2CHIR member method has no CHIR type"))
-            let methodParamTys = methodTy.GetParamTypes()
-            if (!method.TestAttr(Attribute.STATIC)) {
-                if (methodParamTys.isEmpty()) {
-                    continue
+        for (extendDef in customTy.GetCustomTypeDef().GetExtends()) {
+            for (ty in extendDef.GetImplementedInterfaceTys()) {
+                let superInterfaceTy = ReplaceRawGenericArgType(ty, replaceTable)
+                if (let Some(classTy) <- (superInterfaceTy as ClassType)) {
+                    if (let Some(found) <- GetExpectedFuncFromCustomType(classTy, funcName, instFuncType, isStatic,
+                        funcInstTypeArgs)) {
+                        return found
+                    }
                 }
-                methodParamTys.remove(at: 0)
-            }
-            if (methodParamTys.size != instParamTys.size) {
-                continue
-            }
-            let localParams = CopyGenericTypeList(genericParams)
-            let localReplacements = replacements.clone()
-            let methodGenericParams = method.GetGenericTypeParams()
-            if (methodGenericParams.size != funcInstTypeArgs.size) {
-                continue
-            }
-            var genericIdx: Int64 = 0
-            while (genericIdx < methodGenericParams.size) {
-                localParams.add(methodGenericParams[genericIdx])
-                localReplacements.add(funcInstTypeArgs[genericIdx])
-                genericIdx++
-            }
-            var matched = true
-            var idx: Int64 = 0
-            while (idx < methodParamTys.size && idx < instParamTys.size) {
-                let instTy = SubstituteGenericType(methodParamTys[idx], localParams, localReplacements)
-                if (!instParamTys[idx].IsGeneric() && !instTy.IsEqual(instParamTys[idx])) {
-                    matched = false
-                    break
-                }
-                idx++
-            }
-            if (matched) {
-                return method
             }
         }
         return None
     }
 
-    private func CollectGenericReplacementsForMemberWrapper(patternOpt: Option<Type>, actual: Type,
-        genericParams: ArrayList<GenericType>, replacements: ArrayList<Type>): Bool {
-        let pattern = patternOpt ?? return false
-        return CollectGenericReplacementsForMemberWrapper(pattern.StripAllRefs(), actual.StripAllRefs(), genericParams,
-            replacements)
+    private func GetExpectedFuncFromDef(def: CustomTypeDef, funcName: String, instFuncType: FuncType, isStatic: Bool,
+        replaceTable: HashMap<Int64, Type>, funcInstTypeArgs: ArrayList<Type>): Option<Function> {
+        if (let Some(found) <- def.GetExpectedFunc(funcName, instFuncType, isStatic, replaceTable, funcInstTypeArgs,
+            builder, false)) {
+            return found
+        }
+        return None
     }
 
-    private func CollectGenericReplacementsForMemberWrapper(pattern: Type, actual: Type,
-        genericParams: ArrayList<GenericType>, replacements: ArrayList<Type>): Bool {
-        if (let Some(genericTy) <- (pattern as GenericType)) {
-            genericParams.add(genericTy)
-            replacements.add(actual)
-            return true
+    private func GetExactParentType(fuzzyParentType: Type, resolvedFunction: AstFuncDecl, funcType: FuncType,
+        funcInstTypeArgs: ArrayList<Type>, checkAbstractMethod: Bool): Option<Type> {
+        if (fuzzyParentType.IsNothing()) {
+            return fuzzyParentType
         }
-        if (let Some(patternCustom) <- (pattern as CustomType)) {
-            if (let Some(actualCustom) <- (actual as CustomType)) {
-                if (patternCustom.GetCustomTypeDef().nodeId != actualCustom.GetCustomTypeDef().nodeId) {
-                    return false
-                }
-                return CollectGenericReplacementListsForMemberWrapper(patternCustom.GetGenericArgs(),
-                    actualCustom.GetGenericArgs(), genericParams, replacements)
+        let outerDecl = resolvedFunction.outerDecl.getOrThrow()
+        if (outerDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) {
+            let parentTy = if (outerDecl.astKind == ASTKind.EXTEND_DECL) {
+                let extendDecl = (outerDecl as AstExtendDecl).getOrThrow()
+                let extendedType = extendDecl.extendedType.getOrThrow()
+                chirTy.TranslateType(RequireAstTy(extendedType))
+            } else {
+                chirTy.TranslateType(RequireAstTy(outerDecl))
             }
-            return false
+            return parentTy.StripAllRefs()
         }
-        return pattern.IsEqual(actual)
+        let funcName = resolvedFunction.identifier.Val()
+        let isStatic = resolvedFunction.TestAttr(AstAttribute.STATIC)
+        if (let Some(genericTy) <- (fuzzyParentType as GenericType)) {
+            for (upperBound in genericTy.GetUpperBounds()) {
+                let upperClassType = ((upperBound as RefType).getOrThrow().GetBaseType() as ClassType).getOrThrow()
+                if (let Some(exactParentType) <- GetExactParentType(upperClassType, resolvedFunction, funcType,
+                    funcInstTypeArgs, checkAbstractMethod)) {
+                    return exactParentType
+                }
+            }
+            return None
+        }
+        if (let Some(customTy) <- (fuzzyParentType as CustomType)) {
+            return GetExactParentType(customTy, funcName, funcType, isStatic, funcInstTypeArgs, checkAbstractMethod)
+        }
+        let classInstArgs = fuzzyParentType.GetTypeArgs()
+        let extendDefs = fuzzyParentType.GetExtends(builder)
+        CJC_ASSERT(!extendDefs.isEmpty())
+        let replaceTable = HashMap<Int64, Type>()
+        for (extendDef in extendDefs) {
+            let classGenericArgs = extendDef.GetExtendedType().getOrThrow().GetTypeArgs()
+            CJC_ASSERT(classInstArgs.size == classGenericArgs.size)
+            var typeIdx: Int64 = 0
+            while (typeIdx < classInstArgs.size) {
+                if (let Some(genericTy) <- (classGenericArgs[typeIdx] as GenericType)) {
+                    if (!replaceTable.contains(genericTy.objectId)) {
+                        replaceTable[genericTy.objectId] = classInstArgs[typeIdx]
+                    }
+                }
+                typeIdx++
+            }
+            if (let Some(found) <- GetExpectedFuncFromDef(extendDef, funcName, funcType, isStatic, replaceTable,
+                funcInstTypeArgs)) {
+                if (found.GetWrappedRawMethod().isNone()) {
+                    return ReplaceRawGenericArgType(extendDef.GetExtendedType().getOrThrow(), replaceTable)
+                }
+            }
+        }
+        for (extendDef in extendDefs) {
+            for (ty in extendDef.GetImplementedInterfaceTys()) {
+                if (let Some(customTy) <- (ty as CustomType)) {
+                    if (let Some(exactParentType) <- GetExactParentType(customTy, funcName, funcType, isStatic,
+                        funcInstTypeArgs, checkAbstractMethod)) {
+                        return exactParentType
+                    }
+                }
+            }
+        }
+        return None
     }
 
-    private func CollectGenericReplacementListsForMemberWrapper(patterns: ArrayList<Type>, actuals: ArrayList<Type>,
-        genericParams: ArrayList<GenericType>, replacements: ArrayList<Type>): Bool {
-        if (patterns.size != actuals.size) {
+    private func GetExactParentType(customTy: CustomType, funcName: String, funcType: FuncType, isStatic: Bool,
+        funcInstTypeArgs: ArrayList<Type>, checkAbstractMethod: Bool): Option<Type> {
+        let replaceTable = HashMap<Int64, Type>()
+        let classInstArgs = customTy.GetTypeArgs()
+        let classGenericArgs = customTy.GetCustomTypeDef().GetGenericTypeParams()
+        if (!classGenericArgs.isEmpty()) {
+            CJC_ASSERT(classInstArgs.size == classGenericArgs.size)
+        }
+        var classArgIdx: Int64 = 0
+        while (classArgIdx < classGenericArgs.size) {
+            replaceTable[classGenericArgs[classArgIdx].objectId] = classInstArgs[classArgIdx]
+            classArgIdx++
+        }
+        if (GetExpectedFuncFromDef(customTy.GetCustomTypeDef(), funcName, funcType, isStatic, replaceTable,
+            funcInstTypeArgs).isSome()) {
+            return customTy
+        }
+        for (extendDef in customTy.GetCustomTypeDef().GetExtends()) {
+            let matchResult = CollectReplaceTableForExtendedType(extendDef.GetExtendedType().getOrThrow(), customTy,
+                replaceTable)
+            if (!matchResult) {
+                continue
+            }
+            if (GetExpectedFuncFromDef(extendDef, funcName, funcType, isStatic, replaceTable, funcInstTypeArgs).isSome()) {
+                return ReplaceRawGenericArgType(extendDef.GetExtendedType().getOrThrow(), replaceTable)
+            }
+        }
+        if (let Some(classTy) <- (customTy as ClassType)) {
+            if (let Some(superTy) <- classTy.GetClassDef().GetSuperClassTy()) {
+                let superClassTy = ReplaceRawGenericArgType(superTy, replaceTable)
+                if (let Some(superCustomTy) <- (superClassTy as CustomType)) {
+                    if (let Some(exactParentType) <- GetExactParentType(superCustomTy, funcName, funcType, isStatic,
+                        funcInstTypeArgs, checkAbstractMethod)) {
+                        return exactParentType
+                    }
+                }
+            }
+        }
+        for (ty in customTy.GetCustomTypeDef().GetImplementedInterfaceTys()) {
+            let superInterfaceTy = ReplaceRawGenericArgType(ty, replaceTable)
+            if (let Some(superCustomTy) <- (superInterfaceTy as CustomType)) {
+                if (let Some(exactParentType) <- GetExactParentType(superCustomTy, funcName, funcType, isStatic,
+                    funcInstTypeArgs, checkAbstractMethod)) {
+                    return exactParentType
+                }
+            }
+        }
+        for (extendDef in customTy.GetCustomTypeDef().GetExtends()) {
+            for (ty in extendDef.GetImplementedInterfaceTys()) {
+                let superInterfaceTy = ReplaceRawGenericArgType(ty, replaceTable)
+                if (let Some(superCustomTy) <- (superInterfaceTy as CustomType)) {
+                    if (let Some(exactParentType) <- GetExactParentType(superCustomTy, funcName, funcType, isStatic,
+                        funcInstTypeArgs, checkAbstractMethod)) {
+                        return exactParentType
+                    }
+                }
+            }
+        }
+        return None
+    }
+
+    private func CollectReplaceTableForExtendedType(extendedType: Type, instCustomType: Type,
+        replaceTable: HashMap<Int64, Type>): Bool {
+        let instTypeArgs = instCustomType.GetTypeArgs()
+        let genericTypeArgs = extendedType.GetTypeArgs()
+        if (instTypeArgs.size != genericTypeArgs.size) {
             return false
         }
         var idx: Int64 = 0
-        while (idx < patterns.size) {
-            if (!CollectGenericReplacementsForMemberWrapper(patterns[idx], actuals[idx], genericParams, replacements)) {
-                return false
+        while (idx < genericTypeArgs.size) {
+            if (let Some(genericTy) <- (genericTypeArgs[idx] as GenericType)) {
+                if (let Some(storedTy) <- replaceTable.get(genericTy.objectId)) {
+                    if (!storedTy.IsEqual(instTypeArgs[idx])) {
+                        return false
+                    }
+                } else {
+                    replaceTable[genericTy.objectId] = instTypeArgs[idx]
+                }
+            } else {
+                let genericArgTy = genericTypeArgs[idx] as CustomType
+                let instArgTy = instTypeArgs[idx] as CustomType
+                if (genericArgTy.isSome() && instArgTy.isNone()) {
+                    return false
+                }
+                if (genericArgTy.isNone() && instArgTy.isSome()) {
+                    return false
+                }
+                if (let Some(genericCustomTy) <- genericArgTy) {
+                    if (let Some(instCustomTy) <- instArgTy) {
+                        if (genericCustomTy.GetCustomTypeDef().nodeId != instCustomTy.GetCustomTypeDef().nodeId) {
+                            return false
+                        }
+                    }
+                }
+                let matchResult = CollectReplaceTableForExtendedType(genericTypeArgs[idx], instTypeArgs[idx],
+                    replaceTable)
+                if (!matchResult) {
+                    return false
+                }
             }
             idx++
         }
         return true
-    }
-
-    private func CopyGenericTypeList(values: ArrayList<GenericType>): ArrayList<GenericType> {
-        let out = ArrayList<GenericType>()
-        for (value in values) {
-            out.add(value)
-        }
-        return out
     }
 
     private static func CanTranslateExprAsLeftValue(expr: AstExpr): Bool {
@@ -4042,8 +4145,9 @@ public class Translator {
             instTypeArgs.add(rawArrayTy.GetElementType())
         }
         let initFnTy = builder.context.GetFuncTy(TypesFromValues(args), arrayTy)
+        let exactParentTy = GetExactParentType(arrayTy.StripAllRefs(), initFunc, initFnTy, instTypeArgs, false)
         let _ = CreateApplyMaybeWithException(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
-            FuncCallContext(args: args, instTypeArgs: instTypeArgs))
+            FuncCallContext(args: args, instTypeArgs: instTypeArgs, thisType: exactParentTy))
         return rawArrayRef
     }
 
@@ -4066,8 +4170,9 @@ public class Translator {
             }
         }
         let initFnTy = builder.context.GetFuncTy(TypesFromValues(args), arrayTy)
+        let exactParentTy = GetExactParentType(arrayTy.StripAllRefs(), initFunc, initFnTy, instTypeArgs, false)
         let _ = CreateApplyMaybeWithException(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
-            FuncCallContext(args: args, instTypeArgs: instTypeArgs))
+            FuncCallContext(args: args, instTypeArgs: instTypeArgs, thisType: exactParentTy))
         return rawArrayRef
     }
 

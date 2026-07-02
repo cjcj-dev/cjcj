@@ -712,6 +712,115 @@ public open class CustomTypeDef <: Base {
         }
     }
 
+    public func GetExpectedFunc(funcName: String, funcType: FuncType, isStatic: Bool,
+        replaceTable: HashMap<Int64, Type>, funcInstTypeArgs: ArrayList<Type>, builder: CHIRBuilder,
+        checkAbstractMethod: Bool): Option<Function> {
+        CJC_ASSERT(!funcName.isEmpty())
+        let instParamTys = funcType.GetParamTypes()
+        if (!isStatic) {
+            CJC_ASSERT(!instParamTys.isEmpty())
+            instParamTys.remove(at: 0)
+        }
+        var foundFunc: Option<Function> = None
+        for (method in methods) {
+            if (isStatic != method.TestAttr(Attribute.STATIC)) {
+                continue
+            }
+            var methodName = method.GetSrcCodeIdentifier()
+            if (let Some(rawMethod) <- method.GetWrappedRawMethod()) {
+                methodName = rawMethod.GetSrcCodeIdentifier()
+            }
+            if (methodName != funcName) {
+                continue
+            }
+            let originalFuncParamTys = method.GetFuncType().getOrThrow().GetParamTypes()
+            if (!method.TestAttr(Attribute.STATIC)) {
+                CJC_ASSERT(!originalFuncParamTys.isEmpty())
+                originalFuncParamTys.remove(at: 0)
+            }
+            if (originalFuncParamTys.size != instParamTys.size) {
+                continue
+            }
+            let genericTypeParams = method.GetGenericTypeParams()
+            if (genericTypeParams.size != funcInstTypeArgs.size) {
+                continue
+            }
+            let localReplaceTable = HashMap<Int64, Type>()
+            for ((key, value) in replaceTable) {
+                localReplaceTable[key] = value
+            }
+            var genericIdx: Int64 = 0
+            while (genericIdx < genericTypeParams.size) {
+                localReplaceTable[genericTypeParams[genericIdx].objectId] = funcInstTypeArgs[genericIdx]
+                genericIdx++
+            }
+            var matched = true
+            var paramIdx: Int64 = 0
+            while (paramIdx < originalFuncParamTys.size) {
+                let instType = ReplaceRawGenericArgType(originalFuncParamTys[paramIdx], localReplaceTable)
+                if (!instParamTys[paramIdx].IsGeneric() && !instType.IsEqual(instParamTys[paramIdx])) {
+                    matched = false
+                    break
+                }
+                paramIdx++
+            }
+            if (matched) {
+                if (let Some(rawFunc) <- method.GetWrappedRawMethod()) {
+                    if (let Some(rawParent) <- rawFunc.GetParentCustomTypeDef()) {
+                        if (rawParent.nodeId == nodeId) {
+                            foundFunc = rawFunc
+                        } else {
+                            foundFunc = method
+                        }
+                    } else {
+                        foundFunc = method
+                    }
+                } else {
+                    foundFunc = method
+                }
+                break
+            }
+        }
+        let result = foundFunc ?? return None
+        if (!checkAbstractMethod && result.TestAttr(Attribute.ABSTRACT)) {
+            return None
+        }
+        let _ = builder
+        return result
+    }
+
+    public func GetFuncIndexInVTable(funcCallType: FuncCallType, replaceTable: HashMap<Int64, Type>,
+        builder: CHIRBuilder): ArrayList<VTableSearchRes> {
+        let res = ArrayList<VTableSearchRes>()
+        let candidateTypes = ArrayList<FuncType>()
+        for (vtableIt in vtable.GetTypeVTables()) {
+            var methodIdx: Int64 = 0
+            while (methodIdx < vtableIt.GetMethodNum()) {
+                let funcInfo = vtableIt.GetVirtualMethods()[methodIdx]
+                if (funcInfo.FuncSigIsMatched(funcCallType, replaceTable, builder)) {
+                    let originalParentType = vtableIt.GetSrcParentType().getOrThrow()
+                    let instSrcParentTy = ReplaceRawGenericArgType(originalParentType, replaceTable)
+                    let item = VTableSearchRes()
+                    item.instSrcParentType = (instSrcParentTy as ClassType).getOrThrow()
+                    item.halfInstSrcParentType = originalParentType
+                    item.originalFuncType = funcInfo.GetOriginalFuncType()
+                    item.instance = funcInfo.GetVirtualMethod()
+                    item.originalDef = this
+                    for (genericParam in funcInfo.GetGenericTypeParams()) {
+                        item.genericTypeParams.add(genericParam)
+                    }
+                    item.attr = funcInfo.GetAttributeInfo()
+                    item.offset = UInt64(methodIdx)
+                    res.add(item)
+                    let instTy = ReplaceRawGenericArgType(funcInfo.GetCondition().funcType, replaceTable)
+                    candidateTypes.add((instTy as FuncType).getOrThrow())
+                }
+                methodIdx++
+            }
+        }
+        return GetWellMatchingResults(res, candidateTypes, builder)
+    }
+
     public func GetGenericDecl(): Option<CustomTypeDef> {
         return genericDecl
     }
@@ -781,6 +890,192 @@ public open class CustomTypeDef <: Base {
     }
 }
 
+private func GetWellMatchingResults(candidateRes: ArrayList<VTableSearchRes>, candidateTypes: ArrayList<FuncType>,
+    builder: CHIRBuilder): ArrayList<VTableSearchRes> {
+    if (candidateRes.size <= 1) {
+        return candidateRes.clone()
+    }
+    CJC_ASSERT(candidateRes.size == candidateTypes.size)
+    let candidateNum = candidateTypes.size
+    let targetMark = ArrayList<Bool>()
+    var markIdx: Int64 = 0
+    while (markIdx < candidateNum) {
+        targetMark.add(true)
+        markIdx++
+    }
+    var idx: Int64 = 0
+    while (idx < candidateNum) {
+        if (!targetMark[idx]) {
+            idx++
+            continue
+        }
+        var nextIdx = idx + 1
+        while (nextIdx < candidateNum) {
+            if (!targetMark[nextIdx]) {
+                nextIdx++
+                continue
+            }
+            let iToJ = candidateTypes[idx].IsEqualOrInstantiatedTypeOf(candidateTypes[nextIdx], builder)
+            let jToI = candidateTypes[nextIdx].IsEqualOrInstantiatedTypeOf(candidateTypes[idx], builder)
+            if (iToJ && !jToI) {
+                targetMark[nextIdx] = false
+            } else if (!iToJ && jToI) {
+                targetMark[idx] = false
+                break
+            }
+            nextIdx++
+        }
+        idx++
+    }
+    let result = ArrayList<VTableSearchRes>()
+    let instances = HashSet<Int64>()
+    var resIdx: Int64 = 0
+    while (resIdx < candidateNum) {
+        if (targetMark[resIdx]) {
+            result.add(candidateRes[resIdx])
+            if (let Some(fn) <- candidateRes[resIdx].instance) {
+                instances.add(fn.nodeId)
+            } else {
+                instances.add(0)
+            }
+        }
+        resIdx++
+    }
+    CJC_ASSERT(!result.isEmpty())
+    CJC_ASSERT(instances.size == 1)
+    return result
+}
+
+private func CollectGenericReplaceTable(mayBeGeneric: Type, instType: Type,
+    replaceTable: HashMap<Int64, Type>): Unit {
+    if (let Some(genericType) <- (mayBeGeneric as GenericType)) {
+        if (!replaceTable.contains(genericType.objectId)) {
+            replaceTable[genericType.objectId] = instType
+        }
+    } else {
+        let genericTypeArgs = mayBeGeneric.GetTypeArgs()
+        let instTypeArgs = instType.GetTypeArgs()
+        if (genericTypeArgs.size != instTypeArgs.size) {
+            return
+        }
+        var typeIdx: Int64 = 0
+        while (typeIdx < genericTypeArgs.size) {
+            CollectGenericReplaceTable(genericTypeArgs[typeIdx], instTypeArgs[typeIdx], replaceTable)
+            typeIdx++
+        }
+    }
+}
+
+public func GetFuncIndexInVTable(root: Type, funcCallType: FuncCallType,
+    builder: CHIRBuilder): ArrayList<VTableSearchRes> {
+    var result = ArrayList<VTableSearchRes>()
+    if (let Some(genericTy) <- (root as GenericType)) {
+        let upperBounds = genericTy.GetUpperBounds()
+        CJC_ASSERT(!upperBounds.isEmpty())
+        for (upperBound in upperBounds) {
+            let upperClassType = ((upperBound as RefType).getOrThrow().GetBaseType() as ClassType).getOrThrow()
+            result = GetFuncIndexInVTable(upperClassType, funcCallType, builder)
+            if (!result.isEmpty()) {
+                break
+            }
+        }
+    } else if (let Some(customTy) <- (root as CustomType)) {
+        let replaceTable = HashMap<Int64, Type>()
+        let classInstArgs = customTy.GetTypeArgs()
+        let classGenericArgs = customTy.GetCustomTypeDef().GetGenericTypeParams()
+        if (!classGenericArgs.isEmpty()) {
+            CJC_ASSERT(classInstArgs.size == classGenericArgs.size)
+        }
+        var genericIdx: Int64 = 0
+        while (genericIdx < classGenericArgs.size) {
+            replaceTable[classGenericArgs[genericIdx].objectId] = classInstArgs[genericIdx]
+            genericIdx++
+        }
+        result = customTy.GetCustomTypeDef().GetFuncIndexInVTable(funcCallType, replaceTable, builder)
+        if (!result.isEmpty()) {
+            return result
+        }
+        for (extendDef in customTy.GetCustomTypeDef().GetExtends()) {
+            replaceTable.clear()
+            let extendedTyGenericArgs = extendDef.GetExtendedType().getOrThrow().GetTypeArgs()
+            CJC_ASSERT(classInstArgs.size == extendedTyGenericArgs.size)
+            var typeIdx: Int64 = 0
+            while (typeIdx < classInstArgs.size) {
+                CollectGenericReplaceTable(extendedTyGenericArgs[typeIdx], classInstArgs[typeIdx], replaceTable)
+                typeIdx++
+            }
+            result = extendDef.GetFuncIndexInVTable(funcCallType, replaceTable, builder)
+            if (!result.isEmpty()) {
+                return result
+            }
+        }
+    } else {
+        let empty = HashMap<Int64, Type>()
+        let extendDefs = root.GetExtends(builder)
+        CJC_ASSERT(!extendDefs.isEmpty())
+        for (extendDef in extendDefs) {
+            result = extendDef.GetFuncIndexInVTable(funcCallType, empty, builder)
+            if (!result.isEmpty()) {
+                break
+            }
+        }
+    }
+    return result
+}
+
+public func TypeIsMatched(type1: Type, type2: Type): Bool {
+    if (type1.GetTypeKind() != type2.GetTypeKind()) {
+        return false
+    }
+    let typeArgs1 = type1.GetTypeArgs()
+    let typeArgs2 = type2.GetTypeArgs()
+    if (typeArgs1.size != typeArgs2.size) {
+        return false
+    }
+    var typeIdx: Int64 = 0
+    while (typeIdx < typeArgs1.size) {
+        if (!TypeIsMatched(typeArgs1[typeIdx], typeArgs2[typeIdx])) {
+            return false
+        }
+        typeIdx++
+    }
+    return true
+}
+
+public func VirMethodTypeIsMatched(type1: FuncType, type2: FuncType): Bool {
+    let type1ParamTypes = type1.GetParamTypes()
+    let type2ParamTypes = type2.GetParamTypes()
+    if (type1ParamTypes.size != type2ParamTypes.size) {
+        return false
+    }
+    var paramIdx: Int64 = 0
+    while (paramIdx < type1ParamTypes.size) {
+        if (!VirMethodParamTypeIsMatched(type1ParamTypes[paramIdx], type2ParamTypes[paramIdx])) {
+            return false
+        }
+        paramIdx++
+    }
+    return VirMethodReturnTypeIsMatched(type1.GetReturnType(), type2.GetReturnType())
+}
+
+public func VirMethodParamTypeIsMatched(type1: Type, type2: Type): Bool {
+    if ((type1.IsGeneric() || type1.IsRef() || type1.IsCJFunc()) &&
+        (type2.IsGeneric() || type2.IsRef() || type2.IsCJFunc())) {
+        return true
+    }
+    return TypeIsMatched(type1, type2)
+}
+
+public func VirMethodReturnTypeIsMatched(type1: Type, type2: Type): Bool {
+    if (type1.IsGeneric() && type2.IsGeneric()) {
+        return true
+    }
+    if ((type1.IsRef() || type1.IsCJFunc()) && (type2.IsRef() || type2.IsCJFunc())) {
+        return true
+    }
+    return TypeIsMatched(type1, type2)
+}
+
 private func ContainsClassDef(values: ArrayList<ClassDef>, classDef: ClassDef): Bool {
     for (value in values) {
         if (value.nodeId == classDef.nodeId) {
@@ -802,7 +1097,7 @@ private func LinkTypeInfoToString(linkType: BasicLinkage): String {
 }
 
 private func ParamTypeIsEquivalent(paramType: Type, argType: Type): Bool {
-    if (paramType.objectId == argType.objectId) {
+    if (paramType.IsEqual(argType)) {
         return true
     }
     if (argType.IsNothing()) {
@@ -823,7 +1118,7 @@ private func IsBoxRefTypeOf(ty: Type, baseType: Type): Bool {
     if (!boxType.IsBox()) {
         return false
     }
-    return (boxType as BoxType).getOrThrow().GetBaseType().objectId == baseType.objectId
+    return (boxType as BoxType).getOrThrow().GetBaseType().IsEqual(baseType)
 }
 
 private func MeetAutoEnvBase(subType: Type, superType: Type): Bool {
@@ -833,7 +1128,7 @@ private func MeetAutoEnvBase(subType: Type, superType: Type): Bool {
     let subClassTy = (subType as ClassType) ?? return false
     let superClassTy = (superType as ClassType) ?? return false
     let subSuperTy = subClassTy.GetClassDef().GetSuperClassTy() ?? return false
-    return subSuperTy.objectId == superClassTy.objectId
+    return subSuperTy.IsEqual(superClassTy)
 }
 
 private func IsAutoEnvInstBase(ty: Type): Bool {

@@ -1,7 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
-import cangjie_compiler::utils.{OverflowStrategy, OverflowStrategyName}
+import cangjie_compiler::utils.{CJC_ASSERT, OverflowStrategy, OverflowStrategyName}
 
 public open class Terminator <: Expression {
     private let successors: ArrayList<Block> = ArrayList<Block>()
@@ -442,21 +442,59 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
         return virtualMethodOffset
     }
 
+    public func GetVirtualMethodInfo(builder: CHIRBuilder): ArrayList<VTableSearchRes> {
+        var thisTypeDeref = (GetThisType() ??
+            throw IllegalStateException("dynamic dispatch with exception thisType is missing")).StripAllRefs()
+        if (thisTypeDeref.IsThis()) {
+            thisTypeDeref = GetTopLevelFunc().getOrThrow().GetParentCustomTypeDef().getOrThrow().GetType().getOrThrow()
+        }
+        let instParamTypes = ArrayList<Type>()
+        for (arg in GetArgs()) {
+            instParamTypes.add(arg.GetType().getOrThrow())
+        }
+        if (!IsInvokeStaticBase()) {
+            instParamTypes.remove(at: 0)
+        }
+        let instFuncType = builder.context.GetFuncTy(instParamTypes, builder.context.GetUnitTy())
+        let funcCallType = FuncCallType(instFuncType, funcName: virMethodCtx.funcName,
+            genericTypeArgs: GetInstantiatedTypeArgs())
+        let res = GetFuncIndexInVTable(thisTypeDeref, funcCallType, builder)
+        CJC_ASSERT(!res.isEmpty())
+        return res
+    }
+
     public func GetVirtualMethodOffset(builder: CHIRBuilder): UInt64 {
-        let _ = builder
         if (let Some(offset) <- virtualMethodOffset) {
             return offset
         }
-        throw IllegalStateException("virtual method offset is not available")
+        return GetVirtualMethodInfo(builder)[0].offset
     }
 
     public func GetInstSrcParentCustomTypeOfMethod(builder: CHIRBuilder): ClassType {
-        let _ = builder
+        let virtualOffset = GetVirtualMethodOffset().getOrThrow()
+        for (res in GetVirtualMethodInfo(builder)) {
+            if (res.offset == virtualOffset) {
+                let instSrcParentType = res.instSrcParentType.getOrThrow()
+                let def = instSrcParentType.GetClassDef()
+                let defType = (def.GetType().getOrThrow() as ClassType).getOrThrow()
+                let parentFuncInfo = def.GetDefVTable().GetExpectedTypeVTable(defType)
+                let originalType = parentFuncInfo.GetVirtualMethods()[Int64(res.offset)].GetOriginalFuncType()
+                if (VirMethodTypeIsMatched(originalType, GetMethodType())) {
+                    return instSrcParentType
+                }
+            }
+        }
         throw IllegalStateException("instantiated source parent custom type of virtual method is not available")
     }
 
     public func GetVirtualMethodAttr(builder: CHIRBuilder): AttributeInfo {
-        let _ = builder
+        let virtualOffset = GetVirtualMethodOffset().getOrThrow()
+        for (res in GetVirtualMethodInfo(builder)) {
+            if (res.offset == virtualOffset) {
+                let _ = res.instSrcParentType.getOrThrow()
+                return res.attr
+            }
+        }
         throw IllegalStateException("virtual method attribute is not available")
     }
 
