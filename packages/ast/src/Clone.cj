@@ -61,9 +61,7 @@ public func CopyBasicInfo(source: Node, target: Node): Unit {
 func CopyNodeField(source: Node, target: Node): Unit {
     target.begin = source.begin
     target.end = source.end
-    if (let Some(ty) <- source.GetTy()) {
-        target.SetTy(ty)
-    }
+    target.SetTy(source.GetTy().getOrThrow())
     target.curMacroCall = source.curMacroCall
     target.isInMacroCall = source.isInMacroCall
     target.comments = cloneCommentGroups(source.comments)
@@ -92,160 +90,165 @@ public func CloneMacroInvocation(source: MacroInvocation): MacroInvocation {
 }
 
 public func CloneGeneric(source: Generic): Generic {
-    if (let Some(cloned) <- (ASTCloner.Clone(source) as Generic)) {
-        return cloned
-    }
-    return Generic()
+    return CloneGeneric(source, DefaultVisitFunc)
 }
 
 public func CloneGeneric(source: Generic, visitFunc: (Node, Node) -> Unit): Generic {
-    if (let Some(cloned) <- (ASTCloner.Clone(source, visitFunc) as Generic)) {
-        return cloned
+    let target = Generic()
+    for (typeParameter in source.typeParameters) {
+        if (let Some(cloned) <- (ASTCloner.Clone(typeParameter, visitFunc) as GenericParamDecl)) {
+            target.typeParameters.add(cloned)
+        }
     }
-    return Generic()
+    for (genericConstraint in source.genericConstraints) {
+        if (let Some(cloned) <- (ASTCloner.Clone(genericConstraint, visitFunc) as GenericConstraint)) {
+            target.genericConstraints.add(cloned)
+        }
+    }
+    target.leftAnglePos = source.leftAnglePos
+    target.rightAnglePos = source.rightAnglePos
+    return target
 }
 
 public class ASTCloner {
-    private static var cloneDepth: Int64 = 0
-    private static var targetAddr2targetAddr: ArrayList<(Node, (Node) -> Unit)> = ArrayList<(Node, (Node) -> Unit)>()
-    private static var source2cloned: HashMap<Node, Node> = HashMap<Node, Node>()
-    private static var visitor: (Node, Node) -> Unit = DefaultVisitFunc
+    private var targetAddr2targetAddr: ArrayList<(Node, (Node) -> Unit)> = ArrayList<(Node, (Node) -> Unit)>()
+    private var source2cloned: HashMap<Node, Node> = HashMap<Node, Node>()
 
     public init() {}
 
     public static func Clone(node: Node): Node {
-        return CloneWithRearrange(node, DefaultVisitFunc)
+        return ASTCloner().CloneWithRearrange(node, DefaultVisitFunc)
     }
 
     public static func Clone(node: Node, visitFunc: (Node, Node) -> Unit): Node {
-        return CloneWithRearrange(node, visitFunc)
+        return ASTCloner().CloneWithRearrange(node, visitFunc)
     }
 
-    private static func TargetAddrMapInsert(from: Option<Node>, target: (Node) -> Unit): Unit {
+    private func TargetAddrMapInsert(from: Option<Node>, target: (Node) -> Unit): Unit {
         if (let Some(value) <- from) {
             targetAddr2targetAddr.add((value, target))
         }
     }
 
-    private static func TargetAddrMapInsert(from: Option<Decl>, target: (Decl) -> Unit): Unit {
+    private func TargetAddrMapInsert(from: Option<Decl>, target: (Decl) -> Unit): Unit {
         if (let Some(value) <- from) {
             targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as Decl).getOrThrow()) }))
         }
     }
 
-    private static func TargetAddrMapInsert(from: Decl, target: (Decl) -> Unit): Unit {
+    private func TargetAddrMapInsert(from: Decl, target: (Decl) -> Unit): Unit {
         targetAddr2targetAddr.add((from, { cloned: Node => target((cloned as Decl).getOrThrow()) }))
     }
 
-    private static func TargetAddrMapInsert(from: Option<FuncDecl>, target: (FuncDecl) -> Unit): Unit {
+    private func TargetAddrMapInsert(from: Option<FuncDecl>, target: (FuncDecl) -> Unit): Unit {
         if (let Some(value) <- from) {
             targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as FuncDecl).getOrThrow()) }))
         }
     }
 
-    private static func TargetAddrMapInsert(from: Option<PropDecl>, target: (PropDecl) -> Unit): Unit {
+    private func TargetAddrMapInsert(from: Option<PropDecl>, target: (PropDecl) -> Unit): Unit {
         if (let Some(value) <- from) {
             targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as PropDecl).getOrThrow()) }))
         }
     }
 
-    private static func TargetAddrMapInsert(from: Option<Expr>, target: (Expr) -> Unit): Unit {
+    private func TargetAddrMapInsert(from: Option<Expr>, target: (Expr) -> Unit): Unit {
         if (let Some(value) <- from) {
             targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as Expr).getOrThrow()) }))
         }
     }
 
-    private static func TargetAddrMapInsert(from: Option<Pattern>, target: (Pattern) -> Unit): Unit {
+    private func TargetAddrMapInsert(from: Option<Pattern>, target: (Pattern) -> Unit): Unit {
         if (let Some(value) <- from) {
             targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as Pattern).getOrThrow()) }))
         }
     }
 
-    private static func TargetAddrMapInsert(from: Option<FuncBody>, target: (FuncBody) -> Unit): Unit {
+    private func TargetAddrMapInsert(from: Option<FuncBody>, target: (FuncBody) -> Unit): Unit {
         if (let Some(value) <- from) {
             targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as FuncBody).getOrThrow()) }))
         }
     }
 
-    private static func TargetAddrMapInsert(from: Option<ClassLikeDecl>, target: (ClassLikeDecl) -> Unit): Unit {
+    private func TargetAddrMapInsert(from: Option<ClassLikeDecl>, target: (ClassLikeDecl) -> Unit): Unit {
         if (let Some(value) <- from) {
             targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as ClassLikeDecl).getOrThrow()) }))
         }
     }
 
-    private static func TargetAddrMapInsert(from: Option<StructDecl>, target: (StructDecl) -> Unit): Unit {
+    private func TargetAddrMapInsert(from: Option<StructDecl>, target: (StructDecl) -> Unit): Unit {
         if (let Some(value) <- from) {
             targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as StructDecl).getOrThrow()) }))
         }
     }
 
-    private static func TargetAddrMapInsert(from: Option<EnumDecl>, target: (EnumDecl) -> Unit): Unit {
+    private func TargetAddrMapInsert(from: Option<EnumDecl>, target: (EnumDecl) -> Unit): Unit {
         if (let Some(value) <- from) {
             targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as EnumDecl).getOrThrow()) }))
         }
     }
 
-    private static func CloneWithRearrange(node: Node, visitFunc: (Node, Node) -> Unit): Node {
-        let isRoot = cloneDepth == 0
-        if (isRoot) {
-            targetAddr2targetAddr.clear()
-            source2cloned.clear()
-            visitor = visitFunc
-        }
-        cloneDepth++
+    private static func CloneNode(node: Node, visitFunc: (Node, Node) -> Unit): Node {
         let target = makeNode(node)
         CopyNodeField(node, target)
-        copyCommon(node, target)
-        copySpecific(node, target)
-        if (let Some(sourceDecl) <- (node as Decl)) {
-            if (let Some(targetDecl) <- (target as Decl)) {
-                source2cloned[sourceDecl] = targetDecl
-                TargetAddrMapInsert(sourceDecl.outerDecl, { value: Decl => targetDecl.outerDecl = value })
-                TargetAddrMapInsert(sourceDecl.genericDecl, { value: Decl => targetDecl.genericDecl = value })
+        copyCommon(node, target, visitFunc)
+        copySpecific(node, target, visitFunc)
+        visitFunc(node, target)
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private func CloneWithRearrange(node: Node, visitFunc: (Node, Node) -> Unit): Node {
+        let collectMap = { from: Node, target: Node =>
+            if (let Some(sourceDecl) <- (from as Decl)) {
+                if (let Some(targetDecl) <- (target as Decl)) {
+                    source2cloned[sourceDecl] = targetDecl
+                    TargetAddrMapInsert(sourceDecl.outerDecl, { value: Decl => targetDecl.outerDecl = value })
+                    TargetAddrMapInsert(sourceDecl.genericDecl, { value: Decl => targetDecl.genericDecl = value })
+                }
             }
-        }
-        if (let Some(sourceExpr) <- (node as Expr)) {
-            if (let Some(targetExpr) <- (target as Expr)) {
-                source2cloned[sourceExpr] = targetExpr
-                TargetAddrMapInsert(sourceExpr.sourceExpr, { value: Expr => targetExpr.sourceExpr = value })
-                TargetAddrMapInsert(sourceExpr.mapExpr, { value: Expr => targetExpr.mapExpr = value })
+            if (let Some(sourceExpr) <- (from as Expr)) {
+                if (let Some(targetExpr) <- (target as Expr)) {
+                    source2cloned[sourceExpr] = targetExpr
+                    TargetAddrMapInsert(sourceExpr.sourceExpr, { value: Expr => targetExpr.sourceExpr = value })
+                    TargetAddrMapInsert(sourceExpr.mapExpr, { value: Expr => targetExpr.mapExpr = value })
+                }
             }
-        }
-        if (let Some(sourceBody) <- (node as FuncBody)) {
-            if (let Some(targetBody) <- (target as FuncBody)) {
-                source2cloned[sourceBody] = targetBody
-                TargetAddrMapInsert(sourceBody.funcDecl, { value: FuncDecl => targetBody.funcDecl = value })
-                TargetAddrMapInsert(sourceBody.outerFunc, { value: FuncBody => targetBody.outerFunc = value })
-                TargetAddrMapInsert(sourceBody.parentClassLike,
-                    { value: ClassLikeDecl => targetBody.parentClassLike = value })
-                TargetAddrMapInsert(sourceBody.parentStruct, { value: StructDecl => targetBody.parentStruct = value })
-                TargetAddrMapInsert(sourceBody.parentEnum, { value: EnumDecl => targetBody.parentEnum = value })
+            if (let Some(sourceBody) <- (from as FuncBody)) {
+                if (let Some(targetBody) <- (target as FuncBody)) {
+                    source2cloned[sourceBody] = targetBody
+                    TargetAddrMapInsert(sourceBody.funcDecl, { value: FuncDecl => targetBody.funcDecl = value })
+                    TargetAddrMapInsert(sourceBody.outerFunc, { value: FuncBody => targetBody.outerFunc = value })
+                    TargetAddrMapInsert(sourceBody.parentClassLike,
+                        { value: ClassLikeDecl => targetBody.parentClassLike = value })
+                    TargetAddrMapInsert(sourceBody.parentStruct, { value: StructDecl => targetBody.parentStruct = value })
+                    TargetAddrMapInsert(sourceBody.parentEnum, { value: EnumDecl => targetBody.parentEnum = value })
+                }
             }
-        }
-        if (let Some(sourcePattern) <- (node as Pattern)) {
-            if (let Some(targetPattern) <- (target as Pattern)) {
-                source2cloned[sourcePattern] = targetPattern
-                TargetAddrMapInsert(sourcePattern.ctxExpr, { value: Expr => targetPattern.ctxExpr = value })
+            if (let Some(sourcePattern) <- (from as Pattern)) {
+                if (let Some(targetPattern) <- (target as Pattern)) {
+                    source2cloned[sourcePattern] = targetPattern
+                    TargetAddrMapInsert(sourcePattern.ctxExpr, { value: Expr => targetPattern.ctxExpr = value })
+                }
             }
-        }
-        match (node.astKind) {
-            case ASTKind.REF_EXPR =>
-                let sourceRefExpr = (node as RefExpr).getOrThrow()
+            match (from.astKind) {
+                case ASTKind.REF_EXPR =>
+                let sourceRefExpr = (from as RefExpr).getOrThrow()
                 let targetRefExpr = (target as RefExpr).getOrThrow()
                 TargetAddrMapInsert(sourceRefExpr.ref.target, { value: Decl => targetRefExpr.ref.target = value })
                 TargetAddrMapInsert(sourceRefExpr.callOrPattern,
                     { value: Node => targetRefExpr.callOrPattern = value })
             case ASTKind.ARRAY_EXPR =>
-                let sourceArrayExpr = (node as ArrayExpr).getOrThrow()
+                let sourceArrayExpr = (from as ArrayExpr).getOrThrow()
                 let targetArrayExpr = (target as ArrayExpr).getOrThrow()
                 TargetAddrMapInsert(sourceArrayExpr.initFunc,
                     { value: FuncDecl => targetArrayExpr.initFunc = value })
             case ASTKind.ARRAY_LIT =>
-                let sourceArrayLit = (node as ArrayLit).getOrThrow()
+                let sourceArrayLit = (from as ArrayLit).getOrThrow()
                 let targetArrayLit = (target as ArrayLit).getOrThrow()
                 TargetAddrMapInsert(sourceArrayLit.initFunc, { value: FuncDecl => targetArrayLit.initFunc = value })
             case ASTKind.MEMBER_ACCESS =>
-                let sourceMember = (node as MemberAccess).getOrThrow()
+                let sourceMember = (from as MemberAccess).getOrThrow()
                 if (let Some(baseExpr) <- sourceMember.baseExpr) {
                     if (let Some(refExpr) <- (baseExpr as RefExpr)) {
                         if (refExpr.isThis) {
@@ -265,12 +268,12 @@ public class ASTCloner {
                     }
                 }
             case ASTKind.FOR_IN_EXPR =>
-                let sourceForIn = (node as ForInExpr).getOrThrow()
+                let sourceForIn = (from as ForInExpr).getOrThrow()
                 let targetForIn = (target as ForInExpr).getOrThrow()
                 TargetAddrMapInsert(sourceForIn.patternInDesugarExpr,
                     { value: Pattern => targetForIn.patternInDesugarExpr = value })
             case ASTKind.CALL_EXPR =>
-                let sourceCall = (node as CallExpr).getOrThrow()
+                let sourceCall = (from as CallExpr).getOrThrow()
                 var targetNeedsRearrange = true
                 if (let Some(baseFunc) <- sourceCall.baseFunc) {
                     if (let Some(member) <- (baseFunc as MemberAccess)) {
@@ -288,93 +291,91 @@ public class ASTCloner {
                         { value: FuncDecl => targetCall.resolvedFunction = value })
                 }
             case ASTKind.RETURN_EXPR =>
-                let sourceReturn = (node as ReturnExpr).getOrThrow()
+                let sourceReturn = (from as ReturnExpr).getOrThrow()
                 let targetReturn = (target as ReturnExpr).getOrThrow()
                 TargetAddrMapInsert(sourceReturn.refFuncBody,
                     { value: FuncBody => targetReturn.refFuncBody = value })
             case ASTKind.JUMP_EXPR =>
-                let sourceJump = (node as JumpExpr).getOrThrow()
+                let sourceJump = (from as JumpExpr).getOrThrow()
                 let targetJump = (target as JumpExpr).getOrThrow()
                 TargetAddrMapInsert(sourceJump.refLoop, { value: Expr => targetJump.refLoop = value })
             case ASTKind.REF_TYPE =>
-                let sourceRefType = (node as RefType).getOrThrow()
+                let sourceRefType = (from as RefType).getOrThrow()
                 let targetRefType = (target as RefType).getOrThrow()
                 TargetAddrMapInsert(sourceRefType.ref.target, { value: Decl => targetRefType.ref.target = value })
             case ASTKind.QUALIFIED_TYPE =>
-                let sourceQualified = (node as QualifiedType).getOrThrow()
+                let sourceQualified = (from as QualifiedType).getOrThrow()
                 let targetQualified = (target as QualifiedType).getOrThrow()
                 TargetAddrMapInsert(sourceQualified.target, { value: Decl => targetQualified.target = value })
             case ASTKind.FUNC_DECL =>
-                let sourceFuncDecl = (node as FuncDecl).getOrThrow()
+                let sourceFuncDecl = (from as FuncDecl).getOrThrow()
                 let targetFuncDecl = (target as FuncDecl).getOrThrow()
                 TargetAddrMapInsert(sourceFuncDecl.ownerFunc,
                     { value: FuncDecl => targetFuncDecl.ownerFunc = value })
                 TargetAddrMapInsert(sourceFuncDecl.propDecl, { value: PropDecl => targetFuncDecl.propDecl = value })
             case ASTKind.VAR_DECL =>
-                let sourceVarDecl = (node as VarDecl).getOrThrow()
+                let sourceVarDecl = (from as VarDecl).getOrThrow()
                 let targetVarDecl = (target as VarDecl).getOrThrow()
                 TargetAddrMapInsert(sourceVarDecl.parentPattern,
                     { value: Pattern => targetVarDecl.parentPattern = value })
             case _ => ()
         }
-        visitor(node, target)
-        cloneDepth--
-        if (isRoot) {
-            for ((source, targetAddr) in targetAddr2targetAddr) {
-                if (let Some(cloned) <- source2cloned.get(source)) {
-                    targetAddr(cloned)
-                }
+            visitFunc(from, target)
+        }
+        let targetNode = ASTCloner.CloneNode(node, collectMap)
+        for ((source, targetAddr) in targetAddr2targetAddr) {
+            if (let Some(cloned) <- source2cloned.get(source)) {
+                targetAddr(cloned)
             }
-            visitor = DefaultVisitFunc
         }
-        return target
+        return targetNode
     }
 
-    private static func cloneExpr(node: Option<Expr>): Option<Expr> {
+    private static func cloneExpr(node: Option<Expr>, visitFunc: (Node, Node) -> Unit): Option<Expr> {
         if (let Some(value) <- node) {
-            return Clone(value) as Expr
-        }
-        return None
-    }
-
-    private static func cloneType(node: Option<Type>): Option<Type> {
-        if (let Some(value) <- node) {
-            return Clone(value) as Type
+            return CloneNode(value, visitFunc) as Expr
         }
         return None
     }
 
-    private static func clonePattern(node: Option<Pattern>): Option<Pattern> {
+    private static func cloneType(node: Option<Type>, visitFunc: (Node, Node) -> Unit): Option<Type> {
         if (let Some(value) <- node) {
-            return Clone(value) as Pattern
+            return CloneNode(value, visitFunc) as Type
         }
         return None
     }
 
-    private static func cloneBlock(node: Option<Block>): Option<Block> {
+    private static func clonePattern(node: Option<Pattern>, visitFunc: (Node, Node) -> Unit): Option<Pattern> {
         if (let Some(value) <- node) {
-            return Clone(value) as Block
+            return CloneNode(value, visitFunc) as Pattern
         }
         return None
     }
 
-    private static func cloneFuncBody(node: Option<FuncBody>): Option<FuncBody> {
+    private static func cloneBlock(node: Option<Block>, visitFunc: (Node, Node) -> Unit): Option<Block> {
         if (let Some(value) <- node) {
-            return Clone(value) as FuncBody
+            return CloneNode(value, visitFunc) as Block
         }
         return None
     }
 
-    private static func cloneRefType(node: Option<RefType>): Option<RefType> {
+    private static func cloneFuncBody(node: Option<FuncBody>, visitFunc: (Node, Node) -> Unit): Option<FuncBody> {
         if (let Some(value) <- node) {
-            return Clone(value) as RefType
+            return CloneNode(value, visitFunc) as FuncBody
         }
         return None
     }
 
-    private static func cloneFuncArg(node: Option<FuncArg>): Option<FuncArg> {
+    private static func cloneRefType(node: Option<RefType>, visitFunc: (Node, Node) -> Unit): Option<RefType> {
         if (let Some(value) <- node) {
-            return Clone(value) as FuncArg
+            return CloneNode(value, visitFunc) as RefType
+        }
+        return None
+    }
+
+    private static func cloneFuncArg(node: Option<FuncArg>, visitFunc: (Node, Node) -> Unit): Option<FuncArg> {
+        if (let Some(value) <- node) {
+            return CloneNode(value, visitFunc) as FuncArg
         }
         return None
     }
@@ -493,10 +494,10 @@ public class ASTCloner {
         }
     }
 
-    private static func copyCommon(source: Node, target: Node): Unit {
+    private static func copyCommon(source: Node, target: Node, visitFunc: (Node, Node) -> Unit): Unit {
         if (let Some(sourceExpr) <- (source as Expr)) {
             if (let Some(targetExpr) <- (target as Expr)) {
-                targetExpr.desugarExpr = cloneExpr(sourceExpr.desugarExpr)
+                targetExpr.desugarExpr = cloneExpr(sourceExpr.desugarExpr, visitFunc)
                 targetExpr.sourceExpr = sourceExpr.sourceExpr
                 targetExpr.mapExpr = sourceExpr.mapExpr
                 targetExpr.semiPos = sourceExpr.semiPos
@@ -516,16 +517,20 @@ public class ASTCloner {
         if (let Some(sourceDecl) <- (source as Decl)) {
             if (let Some(targetDecl) <- (target as Decl)) {
                 for (modifier in sourceDecl.modifiers) {
-                    if (let Some(cloned) <- (Clone(modifier) as Modifier)) { targetDecl.modifiers.add(cloned) }
+                    if (let Some(cloned) <- (CloneNode(modifier, visitFunc) as Modifier)) { targetDecl.modifiers.add(cloned) }
                 }
                 for (annotation in sourceDecl.annotations) {
-                    if (let Some(cloned) <- (Clone(annotation) as Annotation)) { targetDecl.annotations.add(cloned) }
+                    if (let Some(cloned) <- (CloneNode(annotation, visitFunc) as Annotation)) { targetDecl.annotations.add(cloned) }
                 }
                 if (let Some(array) <- sourceDecl.annotationsArray) {
-                    targetDecl.annotationsArray = Clone(array) as ArrayLit
+                    targetDecl.annotationsArray = CloneNode(array, visitFunc) as ArrayLit
                 }
                 targetDecl.identifier = cloneSrcIdentifier(sourceDecl.identifier)
-                targetDecl.generic = if (let Some(generic) <- sourceDecl.generic) { Clone(generic) as Generic } else { None }
+                targetDecl.generic = if (let Some(generic) <- sourceDecl.generic) {
+                    CloneGeneric(generic, visitFunc)
+                } else {
+                    None
+                }
                 targetDecl.identifierForLsp = sourceDecl.identifierForLsp
                 targetDecl.keywordPos = sourceDecl.keywordPos
                 targetDecl.rawMangleName = sourceDecl.rawMangleName
@@ -565,16 +570,16 @@ public class ASTCloner {
         }
     }
 
-    private static func copySpecific(source: Node, target: Node): Unit {
-        copyImportAndPackage(source, target)
-        copyDecl(source, target)
-        copyPattern(source, target)
-        copyType(source, target)
-        copyExpr(source, target)
-        copyMacro(source, target)
+    private static func copySpecific(source: Node, target: Node, visitFunc: (Node, Node) -> Unit): Unit {
+        copyImportAndPackage(source, target, visitFunc)
+        copyDecl(source, target, visitFunc)
+        copyPattern(source, target, visitFunc)
+        copyType(source, target, visitFunc)
+        copyExpr(source, target, visitFunc)
+        copyMacro(source, target, visitFunc)
     }
 
-    private static func copyImportAndPackage(source: Node, target: Node): Unit {
+    private static func copyImportAndPackage(source: Node, target: Node, visitFunc: (Node, Node) -> Unit): Unit {
         if (let Some(src) <- (source as FeatureId)) {
             if (let Some(dst) <- (target as FeatureId)) {
                 for (id in src.identifiers) { dst.identifiers.add(cloneIdentifier(id)) }
@@ -584,15 +589,15 @@ public class ASTCloner {
         if (let Some(src) <- (source as FeaturesSet)) {
             if (let Some(dst) <- (target as FeaturesSet)) {
                 dst.lCurlPos = src.lCurlPos
-                for (item in src.content) { if (let Some(cloned) <- (Clone(item) as FeatureId)) { dst.content.add(cloned) } }
+                for (item in src.content) { if (let Some(cloned) <- (CloneNode(item, visitFunc) as FeatureId)) { dst.content.add(cloned) } }
                 for (pos in src.commaPoses) { dst.commaPoses.add(pos) }
                 dst.rCurlPos = src.rCurlPos
             }
         }
         if (let Some(src) <- (source as FeaturesDirective)) {
             if (let Some(dst) <- (target as FeaturesDirective)) {
-                for (annotation in src.annotations) { if (let Some(cloned) <- (Clone(annotation) as Annotation)) { dst.annotations.add(cloned) } }
-                dst.featuresSet = if (let Some(set) <- src.featuresSet) { Clone(set) as FeaturesSet } else { None }
+                for (annotation in src.annotations) { if (let Some(cloned) <- (CloneNode(annotation, visitFunc) as Annotation)) { dst.annotations.add(cloned) } }
+                dst.featuresSet = if (let Some(set) <- src.featuresSet) { CloneNode(set, visitFunc) as FeaturesSet } else { None }
                 dst.featuresPos = src.featuresPos
             }
         }
@@ -607,7 +612,7 @@ public class ASTCloner {
                 dst.asPos = src.asPos
                 dst.aliasName = cloneIdentifier(src.aliasName)
                 dst.leftCurlPos = src.leftCurlPos
-                for (item in src.items) { if (let Some(cloned) <- (Clone(item) as ImportContent)) { dst.items.add(cloned) } }
+                for (item in src.items) { if (let Some(cloned) <- (CloneNode(item, visitFunc) as ImportContent)) { dst.items.add(cloned) } }
                 for (pos in src.commaPoses) { dst.commaPoses.add(pos) }
                 dst.rightCurlPos = src.rightCurlPos
                 dst.isDecl = src.isDecl
@@ -615,16 +620,16 @@ public class ASTCloner {
         }
         if (let Some(src) <- (source as ImportSpec)) {
             if (let Some(dst) <- (target as ImportSpec)) {
-                dst.modifier = if (let Some(modifier) <- src.modifier) { Clone(modifier) as Modifier } else { None }
+                dst.modifier = if (let Some(modifier) <- src.modifier) { CloneNode(modifier, visitFunc) as Modifier } else { None }
                 dst.importPos = src.importPos
-                if (let Some(content) <- (Clone(src.content) as ImportContent)) { dst.content = content }
-                for (annotation in src.annotations) { if (let Some(cloned) <- (Clone(annotation) as Annotation)) { dst.annotations.add(cloned) } }
+                if (let Some(content) <- (CloneNode(src.content, visitFunc) as ImportContent)) { dst.content = content }
+                for (annotation in src.annotations) { if (let Some(cloned) <- (CloneNode(annotation, visitFunc) as Annotation)) { dst.annotations.add(cloned) } }
                 dst.withImplicitExport = src.withImplicitExport
             }
         }
         if (let Some(src) <- (source as PackageSpec)) {
             if (let Some(dst) <- (target as PackageSpec)) {
-                dst.modifier = if (let Some(modifier) <- src.modifier) { Clone(modifier) as Modifier } else { None }
+                dst.modifier = if (let Some(modifier) <- src.modifier) { CloneNode(modifier, visitFunc) as Modifier } else { None }
                 dst.macroPos = src.macroPos
                 dst.packagePos = src.packagePos
                 dst.hasDoubleColon = src.hasDoubleColon
@@ -642,18 +647,18 @@ public class ASTCloner {
                 dst.fileName = src.fileName
                 dst.filePath = src.filePath
                 dst.fileHash = src.fileHash
-                dst.feature = if (let Some(feature) <- src.feature) { Clone(feature) as FeaturesDirective } else { None }
-                dst.packageSpec = if (let Some(pkgSpec) <- src.packageSpec) { Clone(pkgSpec) as PackageSpec } else { None }
-                for (importSpec in src.imports) { if (let Some(cloned) <- (Clone(importSpec) as ImportSpec)) { dst.imports.add(cloned) } }
-                for (decl in src.decls) { if (let Some(cloned) <- (Clone(decl) as Decl)) { dst.decls.add(cloned) } }
-                for (node in src.trashBin) { dst.trashBin.add(Clone(node)) }
+                dst.feature = if (let Some(feature) <- src.feature) { CloneNode(feature, visitFunc) as FeaturesDirective } else { None }
+                dst.packageSpec = if (let Some(pkgSpec) <- src.packageSpec) { CloneNode(pkgSpec, visitFunc) as PackageSpec } else { None }
+                for (importSpec in src.imports) { if (let Some(cloned) <- (CloneNode(importSpec, visitFunc) as ImportSpec)) { dst.imports.add(cloned) } }
+                for (decl in src.decls) { if (let Some(cloned) <- (CloneNode(decl, visitFunc) as Decl)) { dst.decls.add(cloned) } }
+                for (node in src.trashBin) { dst.trashBin.add(CloneNode(node, visitFunc)) }
                 dst.curPackage = src.curPackage
                 dst.indexOfPackage = src.indexOfPackage
                 dst.hasMacro = src.hasMacro
                 dst.macroCallFilePath = src.macroCallFilePath
                 dst.macroCallPosBase = src.macroCallPosBase
-                for (node in src.originalMacroCallNodes) { dst.originalMacroCallNodes.add(Clone(node)) }
-                for (decl in src.exportedInternalDecls) { if (let Some(cloned) <- (Clone(decl) as Decl)) { dst.exportedInternalDecls.add(cloned) } }
+                for (node in src.originalMacroCallNodes) { dst.originalMacroCallNodes.add(CloneNode(node, visitFunc)) }
+                for (decl in src.exportedInternalDecls) { if (let Some(cloned) <- (CloneNode(decl, visitFunc) as Decl)) { dst.exportedInternalDecls.add(cloned) } }
                 dst.isCommon = src.isCommon
                 dst.isSpecific = src.isSpecific
             }
@@ -661,8 +666,8 @@ public class ASTCloner {
         if (let Some(src) <- (source as Package)) {
             if (let Some(dst) <- (target as Package)) {
                 dst.fullPackageName = src.fullPackageName
-                for (file in src.files) { if (let Some(cloned) <- (Clone(file) as File)) { dst.files.add(cloned) } }
-                for (decl in src.genericInstantiatedDecls) { if (let Some(cloned) <- (Clone(decl) as Decl)) { dst.genericInstantiatedDecls.add(cloned) } }
+                for (file in src.files) { if (let Some(cloned) <- (CloneNode(file, visitFunc) as File)) { dst.files.add(cloned) } }
+                for (decl in src.genericInstantiatedDecls) { if (let Some(cloned) <- (CloneNode(decl, visitFunc) as Decl)) { dst.genericInstantiatedDecls.add(cloned) } }
                 for (decl in src.srcImportedNonGenericDecls) { dst.srcImportedNonGenericDecls.add(decl) }
                 for (decl in src.inlineFuncDecls) { dst.inlineFuncDecls.add(decl) }
                 dst.accessible = src.accessible
@@ -708,11 +713,11 @@ public class ASTCloner {
         }
     }
 
-    private static func copyDecl(source: Node, target: Node): Unit {
+    private static func copyDecl(source: Node, target: Node, visitFunc: (Node, Node) -> Unit): Unit {
         if (let Some(src) <- (source as InheritableDecl)) {
             if (let Some(dst) <- (target as InheritableDecl)) {
                 dst.upperBoundPos = src.upperBoundPos
-                for (ty in src.inheritedTypes) { if (let Some(cloned) <- (Clone(ty) as Type)) { dst.inheritedTypes.add(cloned) } }
+                for (ty in src.inheritedTypes) { if (let Some(cloned) <- (CloneNode(ty, visitFunc) as Type)) { dst.inheritedTypes.add(cloned) } }
             }
         }
         if (let Some(src) <- (source as BuiltInDecl)) {
@@ -723,9 +728,9 @@ public class ASTCloner {
         }
         if (let Some(src) <- (source as VarDeclAbstract)) {
             if (let Some(dst) <- (target as VarDeclAbstract)) {
-                dst.typeNode = cloneType(src.typeNode)
+                dst.typeNode = cloneType(src.typeNode, visitFunc)
                 dst.colonPos = src.colonPos
-                dst.initializer = cloneExpr(src.initializer)
+                dst.initializer = cloneExpr(src.initializer, visitFunc)
                 dst.assignPos = src.assignPos
                 dst.isVar = src.isVar
                 dst.isConst = src.isConst
@@ -740,14 +745,14 @@ public class ASTCloner {
             }
         }
         if (let Some(src) <- (source as VarWithPatternDecl)) {
-            if (let Some(dst) <- (target as VarWithPatternDecl)) { dst.irrefutablePattern = clonePattern(src.irrefutablePattern) }
+            if (let Some(dst) <- (target as VarWithPatternDecl)) { dst.irrefutablePattern = clonePattern(src.irrefutablePattern, visitFunc) }
         }
         if (let Some(src) <- (source as FuncParam)) {
             if (let Some(dst) <- (target as FuncParam)) {
                 dst.notMarkPos = src.notMarkPos
-                dst.assignment = cloneExpr(src.assignment)
+                dst.assignment = cloneExpr(src.assignment, visitFunc)
                 dst.commaPos = src.commaPos
-                dst.desugarDecl = if (let Some(decl) <- src.desugarDecl) { Clone(decl) as FuncDecl } else { None }
+                dst.desugarDecl = if (let Some(decl) <- src.desugarDecl) { CloneNode(decl, visitFunc) as FuncDecl } else { None }
                 dst.isNamedParam = src.isNamedParam
                 dst.hasLetOrVar = src.hasLetOrVar
             }
@@ -755,10 +760,10 @@ public class ASTCloner {
         if (let Some(src) <- (source as EnumDecl)) {
             if (let Some(dst) <- (target as EnumDecl)) {
                 dst.leftCurlPos = src.leftCurlPos
-                dst.bodyScope = if (let Some(bodyScope) <- src.bodyScope) { Clone(bodyScope) as DummyBody } else { None }
-                for (decl in src.constructors) { if (let Some(cloned) <- (Clone(decl) as Decl)) { dst.constructors.add(cloned) } }
+                dst.bodyScope = if (let Some(bodyScope) <- src.bodyScope) { CloneNode(bodyScope, visitFunc) as DummyBody } else { None }
+                for (decl in src.constructors) { if (let Some(cloned) <- (CloneNode(decl, visitFunc) as Decl)) { dst.constructors.add(cloned) } }
                 for (pos in src.bitOrPosVector) { dst.bitOrPosVector.add(pos) }
-                for (decl in src.members) { if (let Some(cloned) <- (Clone(decl) as Decl)) { dst.members.add(cloned) } }
+                for (decl in src.members) { if (let Some(cloned) <- (CloneNode(decl, visitFunc) as Decl)) { dst.members.add(cloned) } }
                 dst.rightCurlPos = src.rightCurlPos
                 dst.hasArguments = src.hasArguments
                 dst.hasEllipsis = src.hasEllipsis
@@ -768,13 +773,13 @@ public class ASTCloner {
         if (let Some(src) <- (source as TypeAliasDecl)) {
             if (let Some(dst) <- (target as TypeAliasDecl)) {
                 dst.assignPos = src.assignPos
-                dst.typeNode = cloneType(src.typeNode)
+                dst.typeNode = cloneType(src.typeNode, visitFunc)
             }
         }
         if (let Some(src) <- (source as FuncParamList)) {
             if (let Some(dst) <- (target as FuncParamList)) {
                 dst.leftParenPos = src.leftParenPos
-                for (param in src.params) { if (let Some(cloned) <- (Clone(param) as FuncParam)) { dst.params.add(cloned) } }
+                for (param in src.params) { if (let Some(cloned) <- (CloneNode(param, visitFunc) as FuncParam)) { dst.params.add(cloned) } }
                 dst.rightParenPos = src.rightParenPos
                 dst.variadicArgIndex = src.variadicArgIndex
                 dst.hasVariableLenArg = src.hasVariableLenArg
@@ -782,12 +787,16 @@ public class ASTCloner {
         }
         if (let Some(src) <- (source as FuncBody)) {
             if (let Some(dst) <- (target as FuncBody)) {
-                for (params in src.paramLists) { if (let Some(cloned) <- (Clone(params) as FuncParamList)) { dst.paramLists.add(cloned) } }
+                for (params in src.paramLists) { if (let Some(cloned) <- (CloneNode(params, visitFunc) as FuncParamList)) { dst.paramLists.add(cloned) } }
                 dst.doubleArrowPos = src.doubleArrowPos
                 dst.colonPos = src.colonPos
-                dst.retType = cloneType(src.retType)
-                dst.body = cloneBlock(src.body)
-                dst.generic = if (let Some(generic) <- src.generic) { Clone(generic) as Generic } else { None }
+                dst.retType = cloneType(src.retType, visitFunc)
+                dst.body = cloneBlock(src.body, visitFunc)
+                dst.generic = if (let Some(generic) <- src.generic) {
+                    CloneGeneric(generic, visitFunc)
+                } else {
+                    None
+                }
                 dst.funcDecl = src.funcDecl
                 for (captured in src.capturedVars) { dst.capturedVars.add(captured) }
                 dst.outerFunc = src.outerFunc
@@ -801,7 +810,7 @@ public class ASTCloner {
             if (let Some(dst) <- (target as FuncDecl)) {
                 dst.leftParenPos = src.leftParenPos
                 dst.rightParenPos = src.rightParenPos
-                dst.funcBody = cloneFuncBody(src.funcBody)
+                dst.funcBody = cloneFuncBody(src.funcBody, visitFunc)
                 if (let Some(body) <- dst.funcBody) { body.funcDecl = dst }
                 dst.ownerFunc = src.ownerFunc
                 dst.propDecl = src.propDecl
@@ -821,21 +830,21 @@ public class ASTCloner {
         }
         if (let Some(src) <- (source as MacroDecl)) {
             if (let Some(dst) <- (target as MacroDecl)) {
-                dst.funcBody = cloneFuncBody(src.funcBody)
-                dst.desugarDecl = if (let Some(decl) <- src.desugarDecl) { Clone(decl) as FuncDecl } else { None }
+                dst.funcBody = cloneFuncBody(src.funcBody, visitFunc)
+                dst.desugarDecl = if (let Some(decl) <- src.desugarDecl) { CloneNode(decl, visitFunc) as FuncDecl } else { None }
             }
         }
         if (let Some(src) <- (source as MainDecl)) {
             if (let Some(dst) <- (target as MainDecl)) {
-                dst.funcBody = cloneFuncBody(src.funcBody)
-                dst.desugarDecl = if (let Some(decl) <- src.desugarDecl) { Clone(decl) as FuncDecl } else { None }
+                dst.funcBody = cloneFuncBody(src.funcBody, visitFunc)
+                dst.desugarDecl = if (let Some(decl) <- src.desugarDecl) { CloneNode(decl, visitFunc) as FuncDecl } else { None }
                 dst.overflowStrategy = src.overflowStrategy
                 dst.isFastNative = src.isFastNative
             }
         }
         if (let Some(src) <- (source as PrimaryCtorDecl)) {
             if (let Some(dst) <- (target as PrimaryCtorDecl)) {
-                dst.funcBody = cloneFuncBody(src.funcBody)
+                dst.funcBody = cloneFuncBody(src.funcBody, visitFunc)
                 dst.overflowStrategy = src.overflowStrategy
                 dst.hasVariableLenArg = src.hasVariableLenArg
                 dst.isFastNative = src.isFastNative
@@ -845,94 +854,94 @@ public class ASTCloner {
         if (let Some(src) <- (source as PropDecl)) {
             if (let Some(dst) <- (target as PropDecl)) {
                 dst.leftCurlPos = src.leftCurlPos
-                for (getter in src.getters) { if (let Some(cloned) <- (Clone(getter) as FuncDecl)) { dst.getters.add(cloned) } }
-                for (setter in src.setters) { if (let Some(cloned) <- (Clone(setter) as FuncDecl)) { dst.setters.add(cloned) } }
+                for (getter in src.getters) { if (let Some(cloned) <- (CloneNode(getter, visitFunc) as FuncDecl)) { dst.getters.add(cloned) } }
+                for (setter in src.setters) { if (let Some(cloned) <- (CloneNode(setter, visitFunc) as FuncDecl)) { dst.setters.add(cloned) } }
                 dst.rightCurlPos = src.rightCurlPos
             }
         }
         if (let Some(src) <- (source as StructBody)) {
             if (let Some(dst) <- (target as StructBody)) {
                 dst.leftCurlPos = src.leftCurlPos
-                for (decl in src.decls) { if (let Some(cloned) <- (Clone(decl) as Decl)) { dst.decls.add(cloned) } }
+                for (decl in src.decls) { if (let Some(cloned) <- (CloneNode(decl, visitFunc) as Decl)) { dst.decls.add(cloned) } }
                 dst.rightCurlPos = src.rightCurlPos
             }
         }
         if (let Some(src) <- (source as StructDecl)) {
-            if (let Some(dst) <- (target as StructDecl)) { dst.body = if (let Some(body) <- src.body) { Clone(body) as StructBody } else { None } }
+            if (let Some(dst) <- (target as StructDecl)) { dst.body = if (let Some(body) <- src.body) { CloneNode(body, visitFunc) as StructBody } else { None } }
         }
         if (let Some(src) <- (source as InterfaceBody)) {
             if (let Some(dst) <- (target as InterfaceBody)) {
                 dst.leftCurlPos = src.leftCurlPos
-                for (decl in src.decls) { if (let Some(cloned) <- (Clone(decl) as Decl)) { dst.decls.add(cloned) } }
+                for (decl in src.decls) { if (let Some(cloned) <- (CloneNode(decl, visitFunc) as Decl)) { dst.decls.add(cloned) } }
                 dst.rightCurlPos = src.rightCurlPos
             }
         }
         if (let Some(src) <- (source as ClassLikeDecl)) {
             if (let Some(dst) <- (target as ClassLikeDecl)) {
-                for (decl in src.subDecls) { if (let Some(cloned) <- (Clone(decl) as Decl)) { dst.subDecls.add(cloned) } }
+                for (decl in src.subDecls) { if (let Some(cloned) <- (CloneNode(decl, visitFunc) as Decl)) { dst.subDecls.add(cloned) } }
             }
         }
         if (let Some(src) <- (source as InterfaceDecl)) {
-            if (let Some(dst) <- (target as InterfaceDecl)) { dst.body = if (let Some(body) <- src.body) { Clone(body) as InterfaceBody } else { None } }
+            if (let Some(dst) <- (target as InterfaceDecl)) { dst.body = if (let Some(body) <- src.body) { CloneNode(body, visitFunc) as InterfaceBody } else { None } }
         }
         if (let Some(src) <- (source as ClassBody)) {
             if (let Some(dst) <- (target as ClassBody)) {
                 dst.leftCurlPos = src.leftCurlPos
-                for (decl in src.decls) { if (let Some(cloned) <- (Clone(decl) as Decl)) { dst.decls.add(cloned) } }
+                for (decl in src.decls) { if (let Some(cloned) <- (CloneNode(decl, visitFunc) as Decl)) { dst.decls.add(cloned) } }
                 dst.rightCurlPos = src.rightCurlPos
             }
         }
         if (let Some(src) <- (source as ClassDecl)) {
-            if (let Some(dst) <- (target as ClassDecl)) { dst.body = if (let Some(body) <- src.body) { Clone(body) as ClassBody } else { None } }
+            if (let Some(dst) <- (target as ClassDecl)) { dst.body = if (let Some(body) <- src.body) { CloneNode(body, visitFunc) as ClassBody } else { None } }
         }
         if (let Some(src) <- (source as ExtendDecl)) {
             if (let Some(dst) <- (target as ExtendDecl)) {
-                dst.extendedType = cloneType(src.extendedType)
+                dst.extendedType = cloneType(src.extendedType, visitFunc)
                 dst.wherePos = src.wherePos
-                dst.bodyScope = if (let Some(bodyScope) <- src.bodyScope) { Clone(bodyScope) as DummyBody } else { None }
+                dst.bodyScope = if (let Some(bodyScope) <- src.bodyScope) { CloneNode(bodyScope, visitFunc) as DummyBody } else { None }
                 dst.leftCurlPos = src.leftCurlPos
-                for (decl in src.members) { if (let Some(cloned) <- (Clone(decl) as Decl)) { dst.members.add(cloned) } }
+                for (decl in src.members) { if (let Some(cloned) <- (CloneNode(decl, visitFunc) as Decl)) { dst.members.add(cloned) } }
                 dst.rightCurlPos = src.rightCurlPos
             }
         }
     }
 
-    private static func copyPattern(source: Node, target: Node): Unit {
+    private static func copyPattern(source: Node, target: Node, visitFunc: (Node, Node) -> Unit): Unit {
         if (let Some(src) <- (source as ConstPattern)) {
             if (let Some(dst) <- (target as ConstPattern)) {
-                dst.literal = cloneExpr(src.literal)
-                dst.operatorCallExpr = if (let Some(call) <- src.operatorCallExpr) { Clone(call) as CallExpr } else { None }
+                dst.literal = cloneExpr(src.literal, visitFunc)
+                dst.operatorCallExpr = if (let Some(call) <- src.operatorCallExpr) { CloneNode(call, visitFunc) as CallExpr } else { None }
             }
         }
         if (let Some(src) <- (source as VarPattern)) {
             if (let Some(dst) <- (target as VarPattern)) {
-                dst.varDecl = if (let Some(decl) <- src.varDecl) { Clone(decl) as VarDecl } else { None }
-                dst.desugarExpr = cloneExpr(src.desugarExpr)
+                dst.varDecl = if (let Some(decl) <- src.varDecl) { CloneNode(decl, visitFunc) as VarDecl } else { None }
+                dst.desugarExpr = cloneExpr(src.desugarExpr, visitFunc)
             }
         }
         if (let Some(src) <- (source as TuplePattern)) {
             if (let Some(dst) <- (target as TuplePattern)) {
                 dst.leftBracePos = src.leftBracePos
-                for (pattern in src.patterns) { if (let Some(cloned) <- (Clone(pattern) as Pattern)) { dst.patterns.add(cloned) } }
+                for (pattern in src.patterns) { if (let Some(cloned) <- (CloneNode(pattern, visitFunc) as Pattern)) { dst.patterns.add(cloned) } }
                 for (pos in src.commaPosVector) { dst.commaPosVector.add(pos) }
                 dst.rightBracePos = src.rightBracePos
             }
         }
         if (let Some(src) <- (source as TypePattern)) {
             if (let Some(dst) <- (target as TypePattern)) {
-                dst.pattern = clonePattern(src.pattern)
+                dst.pattern = clonePattern(src.pattern, visitFunc)
                 dst.colonPos = src.colonPos
-                dst.typeNode = cloneType(src.typeNode)
-                dst.desugarExpr = cloneExpr(src.desugarExpr)
-                dst.desugarVarPattern = if (let Some(pattern) <- src.desugarVarPattern) { Clone(pattern) as VarPattern } else { None }
+                dst.typeNode = cloneType(src.typeNode, visitFunc)
+                dst.desugarExpr = cloneExpr(src.desugarExpr, visitFunc)
+                dst.desugarVarPattern = if (let Some(pattern) <- src.desugarVarPattern) { CloneNode(pattern, visitFunc) as VarPattern } else { None }
                 dst.needRuntimeTypeCheck = src.needRuntimeTypeCheck
                 dst.matchBeforeRuntime = src.matchBeforeRuntime
             }
         }
         if (let Some(src) <- (source as EnumPattern)) {
             if (let Some(dst) <- (target as EnumPattern)) {
-                dst.constructor = cloneExpr(src.constructor)
-                for (pattern in src.patterns) { if (let Some(cloned) <- (Clone(pattern) as Pattern)) { dst.patterns.add(cloned) } }
+                dst.constructor = cloneExpr(src.constructor, visitFunc)
+                for (pattern in src.patterns) { if (let Some(cloned) <- (CloneNode(pattern, visitFunc) as Pattern)) { dst.patterns.add(cloned) } }
                 dst.leftParenPos = src.leftParenPos
                 for (pos in src.commaPosVector) { dst.commaPosVector.add(pos) }
                 dst.rightParenPos = src.rightParenPos
@@ -941,35 +950,35 @@ public class ASTCloner {
         if (let Some(src) <- (source as VarOrEnumPattern)) {
             if (let Some(dst) <- (target as VarOrEnumPattern)) {
                 dst.identifier = cloneSrcIdentifier(src.identifier)
-                dst.pattern = clonePattern(src.pattern)
+                dst.pattern = clonePattern(src.pattern, visitFunc)
             }
         }
         if (let Some(src) <- (source as ExceptTypePattern)) {
             if (let Some(dst) <- (target as ExceptTypePattern)) {
-                dst.pattern = clonePattern(src.pattern)
+                dst.pattern = clonePattern(src.pattern, visitFunc)
                 dst.patternPos = src.patternPos
                 dst.colonPos = src.colonPos
-                for (ty in src.types) { if (let Some(cloned) <- (Clone(ty) as Type)) { dst.types.add(cloned) } }
+                for (ty in src.types) { if (let Some(cloned) <- (CloneNode(ty, visitFunc) as Type)) { dst.types.add(cloned) } }
                 for (pos in src.bitOrPosVector) { dst.bitOrPosVector.add(pos) }
             }
         }
         if (let Some(src) <- (source as CommandTypePattern)) {
             if (let Some(dst) <- (target as CommandTypePattern)) {
-                dst.pattern = clonePattern(src.pattern)
+                dst.pattern = clonePattern(src.pattern, visitFunc)
                 dst.patternPos = src.patternPos
                 dst.colonPos = src.colonPos
-                for (ty in src.types) { if (let Some(cloned) <- (Clone(ty) as Type)) { dst.types.add(cloned) } }
+                for (ty in src.types) { if (let Some(cloned) <- (CloneNode(ty, visitFunc) as Type)) { dst.types.add(cloned) } }
                 for (pos in src.bitOrPosVector) { dst.bitOrPosVector.add(pos) }
             }
         }
     }
 
-    private static func copyType(source: Node, target: Node): Unit {
+    private static func copyType(source: Node, target: Node, visitFunc: (Node, Node) -> Unit): Unit {
         if (let Some(src) <- (source as RefType)) {
             if (let Some(dst) <- (target as RefType)) {
                 dst.ref = cloneReference(src.ref)
                 dst.leftAnglePos = src.leftAnglePos
-                for (ty in src.typeArguments) { if (let Some(cloned) <- (Clone(ty) as Type)) { dst.typeArguments.add(cloned) } }
+                for (ty in src.typeArguments) { if (let Some(cloned) <- (CloneNode(ty, visitFunc) as Type)) { dst.typeArguments.add(cloned) } }
                 dst.rightAnglePos = src.rightAnglePos
             }
         }
@@ -982,32 +991,32 @@ public class ASTCloner {
         if (let Some(src) <- (source as ParenType)) {
             if (let Some(dst) <- (target as ParenType)) {
                 dst.leftParenPos = src.leftParenPos
-                dst.innerType = cloneType(src.innerType)
+                dst.innerType = cloneType(src.innerType, visitFunc)
                 dst.rightParenPos = src.rightParenPos
             }
         }
         if (let Some(src) <- (source as QualifiedType)) {
             if (let Some(dst) <- (target as QualifiedType)) {
-                dst.baseType = cloneType(src.baseType)
+                dst.baseType = cloneType(src.baseType, visitFunc)
                 dst.dotPos = src.dotPos
                 dst.field = cloneSrcIdentifier(src.field)
                 dst.leftAnglePos = src.leftAnglePos
-                for (ty in src.typeArguments) { if (let Some(cloned) <- (Clone(ty) as Type)) { dst.typeArguments.add(cloned) } }
+                for (ty in src.typeArguments) { if (let Some(cloned) <- (CloneNode(ty, visitFunc) as Type)) { dst.typeArguments.add(cloned) } }
                 dst.rightAnglePos = src.rightAnglePos
                 dst.target = src.target
             }
         }
         if (let Some(src) <- (source as OptionType)) {
             if (let Some(dst) <- (target as OptionType)) {
-                dst.componentType = cloneType(src.componentType)
+                dst.componentType = cloneType(src.componentType, visitFunc)
                 dst.questNum = src.questNum
                 for (pos in src.questVector) { dst.questVector.add(pos) }
-                dst.desugarType = cloneRefType(src.desugarType)
+                dst.desugarType = cloneRefType(src.desugarType, visitFunc)
             }
         }
         if (let Some(src) <- (source as ConstantType)) {
             if (let Some(dst) <- (target as ConstantType)) {
-                dst.constantExpr = cloneExpr(src.constantExpr)
+                dst.constantExpr = cloneExpr(src.constantExpr, visitFunc)
                 dst.dollarPos = src.dollarPos
             }
         }
@@ -1015,18 +1024,18 @@ public class ASTCloner {
             if (let Some(dst) <- (target as VArrayType)) {
                 dst.varrayPos = src.varrayPos
                 dst.leftAnglePos = src.leftAnglePos
-                dst.typeArgument = cloneType(src.typeArgument)
-                dst.constantType = cloneType(src.constantType)
+                dst.typeArgument = cloneType(src.typeArgument, visitFunc)
+                dst.constantType = cloneType(src.constantType, visitFunc)
                 dst.rightAnglePos = src.rightAnglePos
             }
         }
         if (let Some(src) <- (source as FuncType)) {
             if (let Some(dst) <- (target as FuncType)) {
                 dst.leftParenPos = src.leftParenPos
-                for (ty in src.paramTypes) { if (let Some(cloned) <- (Clone(ty) as Type)) { dst.paramTypes.add(cloned) } }
+                for (ty in src.paramTypes) { if (let Some(cloned) <- (CloneNode(ty, visitFunc) as Type)) { dst.paramTypes.add(cloned) } }
                 dst.rightParenPos = src.rightParenPos
                 dst.arrowPos = src.arrowPos
-                dst.retType = cloneType(src.retType)
+                dst.retType = cloneType(src.retType, visitFunc)
                 dst.isC = src.isC
             }
         }
@@ -1034,17 +1043,17 @@ public class ASTCloner {
             if (let Some(dst) <- (target as TupleType)) {
                 dst.leftParenPos = src.leftParenPos
                 dst.rightParenPos = src.rightParenPos
-                for (ty in src.fieldTypes) { if (let Some(cloned) <- (Clone(ty) as Type)) { dst.fieldTypes.add(cloned) } }
+                for (ty in src.fieldTypes) { if (let Some(cloned) <- (CloneNode(ty, visitFunc) as Type)) { dst.fieldTypes.add(cloned) } }
                 for (pos in src.commaPosVector) { dst.commaPosVector.add(pos) }
             }
         }
         if (let Some(src) <- (source as GenericConstraint)) {
             if (let Some(dst) <- (target as GenericConstraint)) {
                 dst.wherePos = src.wherePos
-                dst.refType = cloneRefType(src.refType)
+                dst.refType = cloneRefType(src.refType, visitFunc)
                 dst.operatorPos = src.operatorPos
                 for (pos in src.bitAndPos) { dst.bitAndPos.add(pos) }
-                for (ty in src.upperBounds) { if (let Some(cloned) <- (Clone(ty) as Type)) { dst.upperBounds.add(cloned) } }
+                for (ty in src.upperBounds) { if (let Some(cloned) <- (CloneNode(ty, visitFunc) as Type)) { dst.upperBounds.add(cloned) } }
                 dst.commaPos = src.commaPos
                 dst.isImplicitlyIntroduced = src.isImplicitlyIntroduced
             }
@@ -1052,9 +1061,9 @@ public class ASTCloner {
         if (let Some(src) <- (source as Generic)) {
             if (let Some(dst) <- (target as Generic)) {
                 dst.leftAnglePos = src.leftAnglePos
-                for (param in src.typeParameters) { if (let Some(cloned) <- (Clone(param) as GenericParamDecl)) { dst.typeParameters.add(cloned) } }
+                for (param in src.typeParameters) { if (let Some(cloned) <- (CloneNode(param, visitFunc) as GenericParamDecl)) { dst.typeParameters.add(cloned) } }
                 dst.rightAnglePos = src.rightAnglePos
-                for (constraint in src.genericConstraints) { if (let Some(cloned) <- (Clone(constraint) as GenericConstraint)) { dst.genericConstraints.add(cloned) } }
+                for (constraint in src.genericConstraints) { if (let Some(cloned) <- (CloneNode(constraint, visitFunc) as GenericConstraint)) { dst.genericConstraints.add(cloned) } }
             }
         }
     }
@@ -1067,11 +1076,11 @@ public class ASTCloner {
         return target
     }
 
-    private static func copyExpr(source: Node, target: Node): Unit {
+    private static func copyExpr(source: Node, target: Node, visitFunc: (Node, Node) -> Unit): Unit {
         if (let Some(src) <- (source as Block)) {
             if (let Some(dst) <- (target as Block)) {
                 dst.leftCurlPos = src.leftCurlPos
-                for (node in src.body) { dst.body.add(Clone(node)) }
+                for (node in src.body) { dst.body.add(CloneNode(node, visitFunc)) }
                 dst.rightCurlPos = src.rightCurlPos
                 dst.unsafePos = src.unsafePos
             }
@@ -1080,11 +1089,11 @@ public class ASTCloner {
             if (let Some(dst) <- (target as IfExpr)) {
                 dst.ifPos = src.ifPos
                 dst.leftParenPos = src.leftParenPos
-                dst.condExpr = cloneExpr(src.condExpr)
+                dst.condExpr = cloneExpr(src.condExpr, visitFunc)
                 dst.rightParenPos = src.rightParenPos
-                dst.thenBody = cloneBlock(src.thenBody)
+                dst.thenBody = cloneBlock(src.thenBody, visitFunc)
                 dst.elsePos = src.elsePos
-                dst.elseBody = cloneExpr(src.elseBody)
+                dst.elseBody = cloneExpr(src.elseBody, visitFunc)
                 dst.isElseIf = src.isElseIf
                 dst.hasElse = src.hasElse
                 dst.sugarKind = src.sugarKind
@@ -1092,10 +1101,10 @@ public class ASTCloner {
         }
         if (let Some(src) <- (source as LetPatternDestructor)) {
             if (let Some(dst) <- (target as LetPatternDestructor)) {
-                for (pattern in src.patterns) { if (let Some(cloned) <- (Clone(pattern) as Pattern)) { dst.patterns.add(cloned) } }
+                for (pattern in src.patterns) { if (let Some(cloned) <- (CloneNode(pattern, visitFunc) as Pattern)) { dst.patterns.add(cloned) } }
                 for (pos in src.orPos) { dst.orPos.add(pos) }
                 dst.backarrowPos = src.backarrowPos
-                dst.initializer = cloneExpr(src.initializer)
+                dst.initializer = cloneExpr(src.initializer, visitFunc)
             }
         }
         if (let Some(src) <- (source as TokenPart)) {
@@ -1106,24 +1115,24 @@ public class ASTCloner {
                 dst.quotePos = src.quotePos
                 dst.leftParenPos = src.leftParenPos
                 dst.rightParenPos = src.rightParenPos
-                for (expr in src.exprs) { if (let Some(cloned) <- (Clone(expr) as Expr)) { dst.exprs.add(cloned) } }
+                for (expr in src.exprs) { if (let Some(cloned) <- (CloneNode(expr, visitFunc) as Expr)) { dst.exprs.add(cloned) } }
             }
         }
         if (let Some(src) <- (source as MatchCase)) {
             if (let Some(dst) <- (target as MatchCase)) {
-                for (pattern in src.patterns) { if (let Some(cloned) <- (Clone(pattern) as Pattern)) { dst.patterns.add(cloned) } }
+                for (pattern in src.patterns) { if (let Some(cloned) <- (CloneNode(pattern, visitFunc) as Pattern)) { dst.patterns.add(cloned) } }
                 for (pos in src.bitOrPosVector) { dst.bitOrPosVector.add(pos) }
-                dst.patternGuard = cloneExpr(src.patternGuard)
+                dst.patternGuard = cloneExpr(src.patternGuard, visitFunc)
                 dst.wherePos = src.wherePos
                 dst.arrowPos = src.arrowPos
-                dst.exprOrDecls = cloneBlock(src.exprOrDecls)
+                dst.exprOrDecls = cloneBlock(src.exprOrDecls, visitFunc)
             }
         }
         if (let Some(src) <- (source as MatchCaseOther)) {
             if (let Some(dst) <- (target as MatchCaseOther)) {
-                dst.matchExpr = cloneExpr(src.matchExpr)
+                dst.matchExpr = cloneExpr(src.matchExpr, visitFunc)
                 dst.arrowPos = src.arrowPos
-                dst.exprOrDecls = cloneBlock(src.exprOrDecls)
+                dst.exprOrDecls = cloneBlock(src.exprOrDecls, visitFunc)
             }
         }
         if (let Some(src) <- (source as MatchExpr)) {
@@ -1131,100 +1140,100 @@ public class ASTCloner {
                 dst.sugarKind = src.sugarKind
                 dst.matchMode = src.matchMode
                 dst.leftParenPos = src.leftParenPos
-                dst.selector = cloneExpr(src.selector)
+                dst.selector = cloneExpr(src.selector, visitFunc)
                 dst.rightParenPos = src.rightParenPos
                 dst.leftCurlPos = src.leftCurlPos
-                for (matchCase in src.matchCases) { if (let Some(cloned) <- (Clone(matchCase) as MatchCase)) { dst.matchCases.add(cloned) } }
-                for (other in src.matchCaseOthers) { if (let Some(cloned) <- (Clone(other) as MatchCaseOther)) { dst.matchCaseOthers.add(cloned) } }
+                for (matchCase in src.matchCases) { if (let Some(cloned) <- (CloneNode(matchCase, visitFunc) as MatchCase)) { dst.matchCases.add(cloned) } }
+                for (other in src.matchCaseOthers) { if (let Some(cloned) <- (CloneNode(other, visitFunc) as MatchCaseOther)) { dst.matchCaseOthers.add(cloned) } }
                 dst.rightCurlPos = src.rightCurlPos
             }
         }
-        copyControlExpr(source, target)
-        copyOperatorExpr(source, target)
-        copyLiteralAndCallExpr(source, target)
-        copyReferenceExpr(source, target)
+        copyControlExpr(source, target, visitFunc)
+        copyOperatorExpr(source, target, visitFunc)
+        copyLiteralAndCallExpr(source, target, visitFunc)
+        copyReferenceExpr(source, target, visitFunc)
     }
 
-    private static func copyControlExpr(source: Node, target: Node): Unit {
+    private static func copyControlExpr(source: Node, target: Node, visitFunc: (Node, Node) -> Unit): Unit {
         if (let Some(src) <- (source as TryExpr)) {
             if (let Some(dst) <- (target as TryExpr)) {
                 dst.tryPos = src.tryPos
                 dst.lParen = src.lParen
-                for (decl in src.resourceSpec) { if (let Some(cloned) <- (Clone(decl) as VarDecl)) { dst.resourceSpec.add(cloned) } }
+                for (decl in src.resourceSpec) { if (let Some(cloned) <- (CloneNode(decl, visitFunc) as VarDecl)) { dst.resourceSpec.add(cloned) } }
                 for (pos in src.resourceSpecCommaPos) { dst.resourceSpecCommaPos.add(pos) }
                 dst.rParen = src.rParen
-                dst.tryBlock = cloneBlock(src.tryBlock)
+                dst.tryBlock = cloneBlock(src.tryBlock, visitFunc)
                 for (pos in src.catchPosVector) { dst.catchPosVector.add(pos) }
                 for (pos in src.catchLParenPosVector) { dst.catchLParenPosVector.add(pos) }
                 for (pos in src.catchRParenPosVector) { dst.catchRParenPosVector.add(pos) }
-                for (block in src.catchBlocks) { if (let Some(cloned) <- (Clone(block) as Block)) { dst.catchBlocks.add(cloned) } }
-                for (pattern in src.catchPatterns) { if (let Some(cloned) <- (Clone(pattern) as Pattern)) { dst.catchPatterns.add(cloned) } }
+                for (block in src.catchBlocks) { if (let Some(cloned) <- (CloneNode(block, visitFunc) as Block)) { dst.catchBlocks.add(cloned) } }
+                for (pattern in src.catchPatterns) { if (let Some(cloned) <- (CloneNode(pattern, visitFunc) as Pattern)) { dst.catchPatterns.add(cloned) } }
                 dst.finallyPos = src.finallyPos
-                dst.finallyBlock = cloneBlock(src.finallyBlock)
-                for (handler in src.handlers) { dst.handlers.add(cloneHandler(handler)) }
+                dst.finallyBlock = cloneBlock(src.finallyBlock, visitFunc)
+                for (handler in src.handlers) { dst.handlers.add(cloneHandler(handler, visitFunc)) }
                 dst.isIllegalResourceSpec = src.isIllegalResourceSpec
                 dst.isDesugaredFromTryWithResources = src.isDesugaredFromTryWithResources
                 dst.isDesugaredFromSyncBlock = src.isDesugaredFromSyncBlock
-                dst.tryLambda = if (let Some(lambda) <- src.tryLambda) { Clone(lambda) as LambdaExpr } else { None }
-                dst.finallyLambda = if (let Some(lambda) <- src.finallyLambda) { Clone(lambda) as LambdaExpr } else { None }
+                dst.tryLambda = if (let Some(lambda) <- src.tryLambda) { CloneNode(lambda, visitFunc) as LambdaExpr } else { None }
+                dst.finallyLambda = if (let Some(lambda) <- src.finallyLambda) { CloneNode(lambda, visitFunc) as LambdaExpr } else { None }
             }
         }
-        if (let Some(src) <- (source as ThrowExpr)) { if (let Some(dst) <- (target as ThrowExpr)) { dst.throwPos = src.throwPos; dst.expr = cloneExpr(src.expr) } }
-        if (let Some(src) <- (source as PerformExpr)) { if (let Some(dst) <- (target as PerformExpr)) { dst.performPos = src.performPos; dst.expr = cloneExpr(src.expr) } }
+        if (let Some(src) <- (source as ThrowExpr)) { if (let Some(dst) <- (target as ThrowExpr)) { dst.throwPos = src.throwPos; dst.expr = cloneExpr(src.expr, visitFunc) } }
+        if (let Some(src) <- (source as PerformExpr)) { if (let Some(dst) <- (target as PerformExpr)) { dst.performPos = src.performPos; dst.expr = cloneExpr(src.expr, visitFunc) } }
         if (let Some(src) <- (source as ResumeExpr)) {
             if (let Some(dst) <- (target as ResumeExpr)) {
                 dst.resumePos = src.resumePos
                 dst.withPos = src.withPos
-                dst.withExpr = cloneExpr(src.withExpr)
+                dst.withExpr = cloneExpr(src.withExpr, visitFunc)
                 dst.throwingPos = src.throwingPos
-                dst.throwingExpr = cloneExpr(src.throwingExpr)
+                dst.throwingExpr = cloneExpr(src.throwingExpr, visitFunc)
                 dst.enclosing = src.enclosing
             }
         }
-        if (let Some(src) <- (source as ReturnExpr)) { if (let Some(dst) <- (target as ReturnExpr)) { dst.returnPos = src.returnPos; dst.expr = cloneExpr(src.expr); dst.refFuncBody = src.refFuncBody } }
+        if (let Some(src) <- (source as ReturnExpr)) { if (let Some(dst) <- (target as ReturnExpr)) { dst.returnPos = src.returnPos; dst.expr = cloneExpr(src.expr, visitFunc); dst.refFuncBody = src.refFuncBody } }
         if (let Some(src) <- (source as JumpExpr)) { if (let Some(dst) <- (target as JumpExpr)) { dst.refLoop = src.refLoop; dst.isBreak = src.isBreak } }
         if (let Some(src) <- (source as ForInExpr)) {
             if (let Some(dst) <- (target as ForInExpr)) {
                 dst.leftParenPos = src.leftParenPos
-                dst.pattern = clonePattern(src.pattern)
+                dst.pattern = clonePattern(src.pattern, visitFunc)
                 dst.patternInDesugarExpr = src.patternInDesugarExpr
                 dst.inPos = src.inPos
-                dst.inExpression = cloneExpr(src.inExpression)
+                dst.inExpression = cloneExpr(src.inExpression, visitFunc)
                 dst.rightParenPos = src.rightParenPos
                 dst.wherePos = src.wherePos
-                dst.patternGuard = cloneExpr(src.patternGuard)
-                dst.body = cloneBlock(src.body)
+                dst.patternGuard = cloneExpr(src.patternGuard, visitFunc)
+                dst.body = cloneBlock(src.body, visitFunc)
                 dst.forInKind = src.forInKind
             }
         }
-        if (let Some(src) <- (source as WhileExpr)) { if (let Some(dst) <- (target as WhileExpr)) { dst.whilePos = src.whilePos; dst.leftParenPos = src.leftParenPos; dst.condExpr = cloneExpr(src.condExpr); dst.rightParenPos = src.rightParenPos; dst.body = cloneBlock(src.body); dst.sugarKind = src.sugarKind } }
-        if (let Some(src) <- (source as DoWhileExpr)) { if (let Some(dst) <- (target as DoWhileExpr)) { dst.doPos = src.doPos; dst.body = cloneBlock(src.body); dst.whilePos = src.whilePos; dst.leftParenPos = src.leftParenPos; dst.condExpr = cloneExpr(src.condExpr); dst.rightParenPos = src.rightParenPos } }
+        if (let Some(src) <- (source as WhileExpr)) { if (let Some(dst) <- (target as WhileExpr)) { dst.whilePos = src.whilePos; dst.leftParenPos = src.leftParenPos; dst.condExpr = cloneExpr(src.condExpr, visitFunc); dst.rightParenPos = src.rightParenPos; dst.body = cloneBlock(src.body, visitFunc); dst.sugarKind = src.sugarKind } }
+        if (let Some(src) <- (source as DoWhileExpr)) { if (let Some(dst) <- (target as DoWhileExpr)) { dst.doPos = src.doPos; dst.body = cloneBlock(src.body, visitFunc); dst.whilePos = src.whilePos; dst.leftParenPos = src.leftParenPos; dst.condExpr = cloneExpr(src.condExpr, visitFunc); dst.rightParenPos = src.rightParenPos } }
     }
 
-    private static func cloneHandler(source: Handler): Handler {
+    private static func cloneHandler(source: Handler, visitFunc: (Node, Node) -> Unit): Handler {
         let target = Handler()
         target.pos = source.pos
-        target.commandPattern = clonePattern(source.commandPattern)
-        target.block = cloneBlock(source.block)
-        target.desugaredLambda = if (let Some(lambda) <- source.desugaredLambda) { Clone(lambda) as LambdaExpr } else { None }
+        target.commandPattern = clonePattern(source.commandPattern, visitFunc)
+        target.block = cloneBlock(source.block, visitFunc)
+        target.desugaredLambda = if (let Some(lambda) <- source.desugaredLambda) { CloneNode(lambda, visitFunc) as LambdaExpr } else { None }
         target.commandResultTy = source.commandResultTy
         return target
     }
 
-    private static func copyOperatorExpr(source: Node, target: Node): Unit {
+    private static func copyOperatorExpr(source: Node, target: Node, visitFunc: (Node, Node) -> Unit): Unit {
         if (let Some(src) <- (source as OverloadableExpr)) { if (let Some(dst) <- (target as OverloadableExpr)) { dst.op = src.op } }
-        if (let Some(src) <- (source as AssignExpr)) { if (let Some(dst) <- (target as AssignExpr)) { dst.leftValue = cloneExpr(src.leftValue); dst.assignPos = src.assignPos; dst.rightExpr = cloneExpr(src.rightExpr); dst.isCompound = src.isCompound } }
-        if (let Some(src) <- (source as IncOrDecExpr)) { if (let Some(dst) <- (target as IncOrDecExpr)) { dst.operatorPos = src.operatorPos; dst.expr = cloneExpr(src.expr) } }
-        if (let Some(src) <- (source as UnaryExpr)) { if (let Some(dst) <- (target as UnaryExpr)) { dst.expr = cloneExpr(src.expr); dst.operatorPos = src.operatorPos } }
-        if (let Some(src) <- (source as BinaryExpr)) { if (let Some(dst) <- (target as BinaryExpr)) { dst.leftExpr = cloneExpr(src.leftExpr); dst.rightExpr = cloneExpr(src.rightExpr); dst.operatorPos = src.operatorPos } }
-        if (let Some(src) <- (source as IsExpr)) { if (let Some(dst) <- (target as IsExpr)) { dst.leftExpr = cloneExpr(src.leftExpr); dst.isType = cloneType(src.isType); dst.isPos = src.isPos } }
-        if (let Some(src) <- (source as AsExpr)) { if (let Some(dst) <- (target as AsExpr)) { dst.leftExpr = cloneExpr(src.leftExpr); dst.asType = cloneType(src.asType); dst.asPos = src.asPos } }
-        if (let Some(src) <- (source as RangeExpr)) { if (let Some(dst) <- (target as RangeExpr)) { dst.startExpr = cloneExpr(src.startExpr); dst.rangePos = src.rangePos; dst.stopExpr = cloneExpr(src.stopExpr); dst.colonPos = src.colonPos; dst.stepExpr = cloneExpr(src.stepExpr); dst.decl = src.decl; dst.isClosed = src.isClosed } }
+        if (let Some(src) <- (source as AssignExpr)) { if (let Some(dst) <- (target as AssignExpr)) { dst.leftValue = cloneExpr(src.leftValue, visitFunc); dst.assignPos = src.assignPos; dst.rightExpr = cloneExpr(src.rightExpr, visitFunc); dst.isCompound = src.isCompound } }
+        if (let Some(src) <- (source as IncOrDecExpr)) { if (let Some(dst) <- (target as IncOrDecExpr)) { dst.operatorPos = src.operatorPos; dst.expr = cloneExpr(src.expr, visitFunc) } }
+        if (let Some(src) <- (source as UnaryExpr)) { if (let Some(dst) <- (target as UnaryExpr)) { dst.expr = cloneExpr(src.expr, visitFunc); dst.operatorPos = src.operatorPos } }
+        if (let Some(src) <- (source as BinaryExpr)) { if (let Some(dst) <- (target as BinaryExpr)) { dst.leftExpr = cloneExpr(src.leftExpr, visitFunc); dst.rightExpr = cloneExpr(src.rightExpr, visitFunc); dst.operatorPos = src.operatorPos } }
+        if (let Some(src) <- (source as IsExpr)) { if (let Some(dst) <- (target as IsExpr)) { dst.leftExpr = cloneExpr(src.leftExpr, visitFunc); dst.isType = cloneType(src.isType, visitFunc); dst.isPos = src.isPos } }
+        if (let Some(src) <- (source as AsExpr)) { if (let Some(dst) <- (target as AsExpr)) { dst.leftExpr = cloneExpr(src.leftExpr, visitFunc); dst.asType = cloneType(src.asType, visitFunc); dst.asPos = src.asPos } }
+        if (let Some(src) <- (source as RangeExpr)) { if (let Some(dst) <- (target as RangeExpr)) { dst.startExpr = cloneExpr(src.startExpr, visitFunc); dst.rangePos = src.rangePos; dst.stopExpr = cloneExpr(src.stopExpr, visitFunc); dst.colonPos = src.colonPos; dst.stepExpr = cloneExpr(src.stepExpr, visitFunc); dst.decl = src.decl; dst.isClosed = src.isClosed } }
         if (let Some(src) <- (source as SubscriptExpr)) {
             if (let Some(dst) <- (target as SubscriptExpr)) {
-                dst.baseExpr = cloneExpr(src.baseExpr)
+                dst.baseExpr = cloneExpr(src.baseExpr, visitFunc)
                 dst.leftParenPos = src.leftParenPos
-                for (expr in src.indexExprs) { if (let Some(cloned) <- (Clone(expr) as Expr)) { dst.indexExprs.add(cloned) } }
+                for (expr in src.indexExprs) { if (let Some(cloned) <- (CloneNode(expr, visitFunc) as Expr)) { dst.indexExprs.add(cloned) } }
                 for (pos in src.commaPos) { dst.commaPos.add(pos) }
                 dst.rightParenPos = src.rightParenPos
                 dst.isTupleAccess = src.isTupleAccess
@@ -1232,20 +1241,20 @@ public class ASTCloner {
         }
     }
 
-    private static func copyLiteralAndCallExpr(source: Node, target: Node): Unit {
-        if (let Some(src) <- (source as InterpolationExpr)) { if (let Some(dst) <- (target as InterpolationExpr)) { dst.rawString = src.rawString; dst.dollarPos = src.dollarPos; dst.block = cloneBlock(src.block) } }
+    private static func copyLiteralAndCallExpr(source: Node, target: Node, visitFunc: (Node, Node) -> Unit): Unit {
+        if (let Some(src) <- (source as InterpolationExpr)) { if (let Some(dst) <- (target as InterpolationExpr)) { dst.rawString = src.rawString; dst.dollarPos = src.dollarPos; dst.block = cloneBlock(src.block, visitFunc) } }
         if (let Some(src) <- (source as StrInterpolationExpr)) {
             if (let Some(dst) <- (target as StrInterpolationExpr)) {
                 dst.rawString = src.rawString
                 for (part in src.strParts) { dst.strParts.add(part) }
-                for (expr in src.strPartExprs) { if (let Some(cloned) <- (Clone(expr) as Expr)) { dst.strPartExprs.add(cloned) } }
+                for (expr in src.strPartExprs) { if (let Some(cloned) <- (CloneNode(expr, visitFunc) as Expr)) { dst.strPartExprs.add(cloned) } }
             }
         }
         if (let Some(src) <- (source as LitConstExpr)) {
             if (let Some(dst) <- (target as LitConstExpr)) {
-                dst.ref = cloneRefType(src.ref)
+                dst.ref = cloneRefType(src.ref, visitFunc)
                 dst.rawString = src.rawString
-                dst.siExpr = if (let Some(expr) <- src.siExpr) { Clone(expr) as StrInterpolationExpr } else { None }
+                dst.siExpr = if (let Some(expr) <- src.siExpr) { CloneNode(expr, visitFunc) as StrInterpolationExpr } else { None }
                 dst.stringValue = src.stringValue
                 for (code in src.codepoint) { dst.codepoint.add(code) }
                 dst.kind = src.kind
@@ -1258,7 +1267,7 @@ public class ASTCloner {
             if (let Some(dst) <- (target as FuncArg)) {
                 dst.name = cloneSrcIdentifier(src.name)
                 dst.colonPos = src.colonPos
-                dst.expr = cloneExpr(src.expr)
+                dst.expr = cloneExpr(src.expr, visitFunc)
                 dst.commaPos = src.commaPos
                 dst.withInout = src.withInout
                 dst.inoutPos = src.inoutPos
@@ -1266,7 +1275,7 @@ public class ASTCloner {
         }
         if (let Some(src) <- (source as CallExpr)) {
             if (let Some(dst) <- (target as CallExpr)) {
-                dst.baseFunc = cloneExpr(src.baseFunc)
+                dst.baseFunc = cloneExpr(src.baseFunc, visitFunc)
                 if (let Some(baseFunc) <- dst.baseFunc) {
                     if (let Some(member) <- (baseFunc as MemberAccess)) {
                         member.callOrPattern = dst
@@ -1275,7 +1284,7 @@ public class ASTCloner {
                 dst.leftParenPos = src.leftParenPos
                 let cloneTable = HashMap<Node, FuncArg>()
                 for (arg in src.args) {
-                    if (let Some(cloned) <- (Clone(arg) as FuncArg)) {
+                    if (let Some(cloned) <- (CloneNode(arg, visitFunc) as FuncArg)) {
                         dst.args.add(cloned)
                         cloneTable[arg] = cloned
                     }
@@ -1285,7 +1294,7 @@ public class ASTCloner {
                 dst.callKind = src.callKind
                 if (let Some(sourceDesugarArgs) <- src.desugarArgs) {
                     for (arg in src.defaultArgs) {
-                        if (let Some(cloned) <- (Clone(arg) as FuncArg)) {
+                        if (let Some(cloned) <- (CloneNode(arg, visitFunc) as FuncArg)) {
                             dst.defaultArgs.add(cloned)
                             cloneTable[arg] = cloned
                         }
@@ -1302,11 +1311,11 @@ public class ASTCloner {
         }
     }
 
-    private static func copyReferenceExpr(source: Node, target: Node): Unit {
+    private static func copyReferenceExpr(source: Node, target: Node, visitFunc: (Node, Node) -> Unit): Unit {
         if (let Some(src) <- (source as NameReferenceExpr)) {
             if (let Some(dst) <- (target as NameReferenceExpr)) {
                 dst.leftAnglePos = src.leftAnglePos
-                for (ty in src.typeArguments) { if (let Some(cloned) <- (Clone(ty) as Type)) { dst.typeArguments.add(cloned) } }
+                for (ty in src.typeArguments) { if (let Some(cloned) <- (CloneNode(ty, visitFunc) as Type)) { dst.typeArguments.add(cloned) } }
                 dst.rightAnglePos = src.rightAnglePos
                 for (ty in src.instTys) { dst.instTys.add(ty) }
                 dst.callOrPattern = src.callOrPattern
@@ -1318,7 +1327,7 @@ public class ASTCloner {
         }
         if (let Some(src) <- (source as MemberAccess)) {
             if (let Some(dst) <- (target as MemberAccess)) {
-                dst.baseExpr = cloneExpr(src.baseExpr)
+                dst.baseExpr = cloneExpr(src.baseExpr, visitFunc)
                 dst.dotPos = src.dotPos
                 dst.field = cloneSrcIdentifier(src.field)
                 for (decl in src.targets) { dst.targets.add(decl) }
@@ -1328,49 +1337,49 @@ public class ASTCloner {
                 dst.isPattern = src.isPattern
             }
         }
-        if (let Some(src) <- (source as ParenExpr)) { if (let Some(dst) <- (target as ParenExpr)) { dst.leftParenPos = src.leftParenPos; dst.expr = cloneExpr(src.expr); dst.rightParenPos = src.rightParenPos } }
-        if (let Some(src) <- (source as LambdaExpr)) { if (let Some(dst) <- (target as LambdaExpr)) { dst.funcBody = cloneFuncBody(src.funcBody); dst.mangledName = src.mangledName } }
+        if (let Some(src) <- (source as ParenExpr)) { if (let Some(dst) <- (target as ParenExpr)) { dst.leftParenPos = src.leftParenPos; dst.expr = cloneExpr(src.expr, visitFunc); dst.rightParenPos = src.rightParenPos } }
+        if (let Some(src) <- (source as LambdaExpr)) { if (let Some(dst) <- (target as LambdaExpr)) { dst.funcBody = cloneFuncBody(src.funcBody, visitFunc); dst.mangledName = src.mangledName } }
         if (let Some(src) <- (source as IfAvailableExpr)) {
             if (let Some(dst) <- (target as IfAvailableExpr)) {
                 if (let Some(arg) <- src.GetArg()) {
-                    if (let Some(cloned) <- (Clone(arg) as FuncArg)) {
+                    if (let Some(cloned) <- (CloneNode(arg, visitFunc) as FuncArg)) {
                         dst.SetArg(cloned)
                     }
                 }
                 if (let Some(lambda) <- src.GetLambda1()) {
-                    if (let Some(cloned) <- (Clone(lambda) as LambdaExpr)) {
+                    if (let Some(cloned) <- (CloneNode(lambda, visitFunc) as LambdaExpr)) {
                         dst.SetLambda1(cloned)
                     }
                 }
                 if (let Some(lambda) <- src.GetLambda2()) {
-                    if (let Some(cloned) <- (Clone(lambda) as LambdaExpr)) {
+                    if (let Some(cloned) <- (CloneNode(lambda, visitFunc) as LambdaExpr)) {
                         dst.SetLambda2(cloned)
                     }
                 }
             }
         }
-        if (let Some(src) <- (source as TrailingClosureExpr)) { if (let Some(dst) <- (target as TrailingClosureExpr)) { dst.leftLambda = src.leftLambda; dst.expr = cloneExpr(src.expr); dst.lambda = if (let Some(lambda) <- src.lambda) { Clone(lambda) as LambdaExpr } else { None }; dst.rightLambda = src.rightLambda } }
-        if (let Some(src) <- (source as OptionalExpr)) { if (let Some(dst) <- (target as OptionalExpr)) { dst.baseExpr = cloneExpr(src.baseExpr); dst.questPos = src.questPos } }
-        if (let Some(src) <- (source as OptionalChainExpr)) { if (let Some(dst) <- (target as OptionalChainExpr)) { dst.expr = cloneExpr(src.expr) } }
-        if (let Some(src) <- (source as ArrayLit)) { if (let Some(dst) <- (target as ArrayLit)) { dst.leftSquarePos = src.leftSquarePos; for (expr in src.children) { if (let Some(cloned) <- (Clone(expr) as Expr)) { dst.children.add(cloned) } }; for (pos in src.commaPosVector) { dst.commaPosVector.add(pos) }; dst.rightSquarePos = src.rightSquarePos; dst.initFunc = src.initFunc } }
-        if (let Some(src) <- (source as ArrayExpr)) { if (let Some(dst) <- (target as ArrayExpr)) { dst.typeNode = cloneType(src.typeNode); dst.leftParenPos = src.leftParenPos; for (arg in src.args) { if (let Some(cloned) <- (Clone(arg) as FuncArg)) { dst.args.add(cloned) } }; for (pos in src.commaPosVector) { dst.commaPosVector.add(pos) }; dst.rightParenPos = src.rightParenPos; dst.initFunc = src.initFunc; dst.isValueArray = src.isValueArray } }
-        if (let Some(src) <- (source as PointerExpr)) { if (let Some(dst) <- (target as PointerExpr)) { dst.typeNode = cloneType(src.typeNode); dst.arg = cloneFuncArg(src.arg) } }
-        if (let Some(src) <- (source as TupleLit)) { if (let Some(dst) <- (target as TupleLit)) { dst.leftParenPos = src.leftParenPos; for (expr in src.children) { if (let Some(cloned) <- (Clone(expr) as Expr)) { dst.children.add(cloned) } }; for (pos in src.commaPosVector) { dst.commaPosVector.add(pos) }; dst.rightParenPos = src.rightParenPos } }
-        if (let Some(src) <- (source as TypeConvExpr)) { if (let Some(dst) <- (target as TypeConvExpr)) { dst.typeNode = cloneType(src.typeNode); dst.leftParenPos = src.leftParenPos; dst.expr = cloneExpr(src.expr); dst.rightParenPos = src.rightParenPos } }
+        if (let Some(src) <- (source as TrailingClosureExpr)) { if (let Some(dst) <- (target as TrailingClosureExpr)) { dst.leftLambda = src.leftLambda; dst.expr = cloneExpr(src.expr, visitFunc); dst.lambda = if (let Some(lambda) <- src.lambda) { CloneNode(lambda, visitFunc) as LambdaExpr } else { None }; dst.rightLambda = src.rightLambda } }
+        if (let Some(src) <- (source as OptionalExpr)) { if (let Some(dst) <- (target as OptionalExpr)) { dst.baseExpr = cloneExpr(src.baseExpr, visitFunc); dst.questPos = src.questPos } }
+        if (let Some(src) <- (source as OptionalChainExpr)) { if (let Some(dst) <- (target as OptionalChainExpr)) { dst.expr = cloneExpr(src.expr, visitFunc) } }
+        if (let Some(src) <- (source as ArrayLit)) { if (let Some(dst) <- (target as ArrayLit)) { dst.leftSquarePos = src.leftSquarePos; for (expr in src.children) { if (let Some(cloned) <- (CloneNode(expr, visitFunc) as Expr)) { dst.children.add(cloned) } }; for (pos in src.commaPosVector) { dst.commaPosVector.add(pos) }; dst.rightSquarePos = src.rightSquarePos; dst.initFunc = src.initFunc } }
+        if (let Some(src) <- (source as ArrayExpr)) { if (let Some(dst) <- (target as ArrayExpr)) { dst.typeNode = cloneType(src.typeNode, visitFunc); dst.leftParenPos = src.leftParenPos; for (arg in src.args) { if (let Some(cloned) <- (CloneNode(arg, visitFunc) as FuncArg)) { dst.args.add(cloned) } }; for (pos in src.commaPosVector) { dst.commaPosVector.add(pos) }; dst.rightParenPos = src.rightParenPos; dst.initFunc = src.initFunc; dst.isValueArray = src.isValueArray } }
+        if (let Some(src) <- (source as PointerExpr)) { if (let Some(dst) <- (target as PointerExpr)) { dst.typeNode = cloneType(src.typeNode, visitFunc); dst.arg = cloneFuncArg(src.arg, visitFunc) } }
+        if (let Some(src) <- (source as TupleLit)) { if (let Some(dst) <- (target as TupleLit)) { dst.leftParenPos = src.leftParenPos; for (expr in src.children) { if (let Some(cloned) <- (CloneNode(expr, visitFunc) as Expr)) { dst.children.add(cloned) } }; for (pos in src.commaPosVector) { dst.commaPosVector.add(pos) }; dst.rightParenPos = src.rightParenPos } }
+        if (let Some(src) <- (source as TypeConvExpr)) { if (let Some(dst) <- (target as TypeConvExpr)) { dst.typeNode = cloneType(src.typeNode, visitFunc); dst.leftParenPos = src.leftParenPos; dst.expr = cloneExpr(src.expr, visitFunc); dst.rightParenPos = src.rightParenPos } }
         if (let Some(src) <- (source as RefExpr)) { if (let Some(dst) <- (target as RefExpr)) { dst.ref = cloneReference(src.ref); dst.isThis = src.isThis; dst.isSuper = src.isSuper; dst.isQuoteDollar = src.isQuoteDollar } }
         if (let Some(src) <- (source as PrimitiveTypeExpr)) { if (let Some(dst) <- (target as PrimitiveTypeExpr)) { dst.typeKind = src.typeKind } }
         if (let Some(src) <- (source as InvalidExpr)) { if (let Some(dst) <- (target as InvalidExpr)) { dst.value = src.value } }
-        if (let Some(src) <- (source as SpawnExpr)) { if (let Some(dst) <- (target as SpawnExpr)) { dst.spawnPos = src.spawnPos; dst.futureObj = if (let Some(decl) <- src.futureObj) { Clone(decl) as VarDecl } else { None }; dst.task = cloneExpr(src.task); dst.arg = cloneExpr(src.arg); dst.leftParenPos = src.leftParenPos; dst.rightParenPos = src.rightParenPos } }
-        if (let Some(src) <- (source as SynchronizedExpr)) { if (let Some(dst) <- (target as SynchronizedExpr)) { dst.syncPos = src.syncPos; dst.leftParenPos = src.leftParenPos; dst.mutex = cloneExpr(src.mutex); dst.rightParenPos = src.rightParenPos; dst.body = cloneBlock(src.body) } }
+        if (let Some(src) <- (source as SpawnExpr)) { if (let Some(dst) <- (target as SpawnExpr)) { dst.spawnPos = src.spawnPos; dst.futureObj = if (let Some(decl) <- src.futureObj) { CloneNode(decl, visitFunc) as VarDecl } else { None }; dst.task = cloneExpr(src.task, visitFunc); dst.arg = cloneExpr(src.arg, visitFunc); dst.leftParenPos = src.leftParenPos; dst.rightParenPos = src.rightParenPos } }
+        if (let Some(src) <- (source as SynchronizedExpr)) { if (let Some(dst) <- (target as SynchronizedExpr)) { dst.syncPos = src.syncPos; dst.leftParenPos = src.leftParenPos; dst.mutex = cloneExpr(src.mutex, visitFunc); dst.rightParenPos = src.rightParenPos; dst.body = cloneBlock(src.body, visitFunc) } }
     }
 
-    private static func copyMacro(source: Node, target: Node): Unit {
+    private static func copyMacro(source: Node, target: Node, visitFunc: (Node, Node) -> Unit): Unit {
         if (let Some(src) <- (source as MacroExpandExpr)) {
             if (let Some(dst) <- (target as MacroExpandExpr)) {
                 dst.invocation = CloneMacroInvocation(src.invocation)
                 dst.identifier = cloneIdentifier(src.identifier)
-                for (annotation in src.annotations) { if (let Some(cloned) <- (Clone(annotation) as Annotation)) { dst.annotations.add(cloned) } }
-                for (modifier in src.modifiers) { if (let Some(cloned) <- (Clone(modifier) as Modifier)) { dst.modifiers.add(cloned) } }
+                for (annotation in src.annotations) { if (let Some(cloned) <- (CloneNode(annotation, visitFunc) as Annotation)) { dst.annotations.add(cloned) } }
+                for (modifier in src.modifiers) { if (let Some(cloned) <- (CloneNode(modifier, visitFunc) as Modifier)) { dst.modifiers.add(cloned) } }
             }
         }
         if (let Some(src) <- (source as MacroExpandDecl)) {
@@ -1391,16 +1400,16 @@ public class ASTCloner {
                 dst.kind = src.kind
                 dst.identifier = cloneIdentifier(src.identifier)
                 dst.lsquarePos = src.lsquarePos
-                for (arg in src.args) { if (let Some(cloned) <- (Clone(arg) as FuncArg)) { dst.args.add(cloned) } }
+                for (arg in src.args) { if (let Some(cloned) <- (CloneNode(arg, visitFunc) as FuncArg)) { dst.args.add(cloned) } }
                 dst.rsquarePos = src.rsquarePos
                 dst.overflowStrategy = src.overflowStrategy
                 for (token in src.attrs) { dst.attrs.add(token) }
                 for (pos in src.attrCommas) { dst.attrCommas.add(pos) }
                 dst.definedPackage = src.definedPackage
-                dst.condExpr = cloneExpr(src.condExpr)
+                dst.condExpr = cloneExpr(src.condExpr, visitFunc)
                 dst.target = src.target
                 dst.runtimeVisible = src.runtimeVisible
-                dst.baseExpr = cloneExpr(src.baseExpr)
+                dst.baseExpr = cloneExpr(src.baseExpr, visitFunc)
             }
         }
     }
