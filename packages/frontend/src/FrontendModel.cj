@@ -2,7 +2,7 @@ package cangjie_compiler::frontend
 
 public import cangjie_compiler::basic.{
     BEGIN_POSITION, CANGJIE_VERSION, DEFAULT_POSITION, INVALID_POSITION, DiagCategory, DiagColor, DiagKindRefactor,
-    DiagSeverity, IntegratedString, MakeRange, Position, PositionStatus, Range, Source, SourceManager
+    DiagHelp, DiagSeverity, IntegratedString, MakeRange, Position, PositionStatus, Range, Source, SourceManager
 }
 public import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
@@ -4327,6 +4327,10 @@ private class StdDepEntry {
     }
 }
 
+private const NO_CJO_HELP_INFO: String =
+    "check if the .cjo file of the package exists in CANGJIE_PATH or CANGJIE_HOME, or use " +
+    "'--import-path' to specify the .cjo file path"
+
 public class ImportManager {
     private let diag: DiagnosticEngine
     private let typeManager: FaithfulSemaTypeManager
@@ -4714,14 +4718,24 @@ public class ImportManager {
     }
 
     private func GetFrontendPackageRelation(srcFullPkgName: String, targetFullPkgName: String): FrontendPackageRelation {
-        if (srcFullPkgName == targetFullPkgName) {
+        let pureSrcFullPackageName = if (IsTestPackage(srcFullPkgName)) {
+            GetMainPartPkgNameForTestPkg(srcFullPkgName)
+        } else {
+            srcFullPkgName
+        }
+        let pureTargetFullPackageName = if (IsTestPackage(targetFullPkgName)) {
+            GetMainPartPkgNameForTestPkg(targetFullPkgName)
+        } else {
+            targetFullPkgName
+        }
+        if (pureSrcFullPackageName == pureTargetFullPackageName) {
             return FrontendPackageRelation.SAME_PACKAGE
         }
-        if (srcFullPkgName.isEmpty() || targetFullPkgName.isEmpty()) {
+        if (pureSrcFullPackageName.isEmpty() || pureTargetFullPackageName.isEmpty()) {
             return FrontendPackageRelation.NONE
         }
-        let srcPath = SplitQualifiedName(srcFullPkgName)
-        let targetPath = SplitQualifiedName(targetFullPkgName)
+        let srcPath = SplitQualifiedName(pureSrcFullPackageName)
+        let targetPath = SplitQualifiedName(pureTargetFullPackageName)
         if (targetPath.size < srcPath.size && StartsWithPath(srcPath, targetPath)) {
             return FrontendPackageRelation.CHILD
         }
@@ -4729,6 +4743,34 @@ public class ImportManager {
             return FrontendPackageRelation.SAME_MODULE
         }
         return FrontendPackageRelation.NONE
+    }
+
+    private func IsSuperPackage(srcFullPackageName: String, targetFullPackageName: String): Bool {
+        let pureSrcFullPackageName = if (IsTestPackage(srcFullPackageName)) {
+            GetMainPartPkgNameForTestPkg(srcFullPackageName)
+        } else {
+            srcFullPackageName
+        }
+        let pureTargetFullPackageName = if (IsTestPackage(targetFullPackageName)) {
+            GetMainPartPkgNameForTestPkg(targetFullPackageName)
+        } else {
+            targetFullPackageName
+        }
+        if (!pureTargetFullPackageName.startsWith(pureSrcFullPackageName)) {
+            return false
+        }
+        let srcNames = SplitQualifiedName(pureSrcFullPackageName)
+        let targetNames = SplitQualifiedName(pureTargetFullPackageName)
+        return srcNames.size + 1 == targetNames.size
+    }
+
+    private func RelationToString(relation: FrontendPackageRelation): String {
+        return match (relation) {
+            case FrontendPackageRelation.NONE => "irrelevant"
+            case FrontendPackageRelation.CHILD => "child"
+            case FrontendPackageRelation.SAME_MODULE => "same module"
+            case FrontendPackageRelation.SAME_PACKAGE => "same package"
+        }
     }
 
     private func StartsWithPath(source: ArrayList<String>, prefix: ArrayList<String>): Bool {
@@ -4893,12 +4935,53 @@ public class ImportManager {
                     if (let None <- packageOpt) {
                         continue
                     }
-                    if (importSpec.TestAttr(Attribute.IMPLICIT_ADD) || importSpec.IsImportAll() ||
-                        IsPackageImportForCheck(importSpec, fullPackageName, sourcePackages)) {
+                    let packageValue = packageOpt.getOrThrow()
+                    let packageRange = GetPackageNameRange(importSpec)
+                    if (fullPackageName != packageValue.fullPackageName) {
+                        diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
+                            DiagKindRefactor.package_import_inconsistent,
+                            packageRange,
+                            arguments: [packageValue.fullPackageName, fullPackageName]).Emit()
+                        continue
+                    } else if (fullPackageName == pkg.fullPackageName) {
+                        diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
+                            DiagKindRefactor.package_import_itself_illegal,
+                            packageRange,
+                            arguments: [fullPackageName]).Emit()
                         continue
                     }
-                    let packageValue = packageOpt.getOrThrow()
-                    if (!HasVisibleImportedDecl(pkg.fullPackageName, packageValue, importSpec.content.identifier.Val())) {
+                    if (importSpec.TestAttr(Attribute.IMPLICIT_ADD)) {
+                        continue
+                    }
+                    let relation = GetFrontendPackageRelation(pkg.fullPackageName, fullPackageName)
+                    if ((FrontendAccessLevelIndex(packageValue.accessible) ==
+                            FrontendAccessLevelIndex(AccessLevel.PROTECTED) &&
+                            relation == FrontendPackageRelation.NONE) ||
+                        (FrontendAccessLevelIndex(packageValue.accessible) ==
+                            FrontendAccessLevelIndex(AccessLevel.INTERNAL) &&
+                            relation != FrontendPackageRelation.CHILD &&
+                            !IsSuperPackage(pkg.fullPackageName, fullPackageName))) {
+                        diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
+                            DiagKindRefactor.package_accessibility,
+                            packageRange,
+                            arguments: [fullPackageName, GetAccessLevelStr(packageValue), RelationToString(relation),
+                                pkg.fullPackageName]).Emit()
+                    } else if (importSpec.IsReExport() && !pkg.isMacroPackage && packageValue.isMacroPackage) {
+                        diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
+                            DiagKindRefactor.package_cannot_export_macro_package,
+                            packageRange).Emit()
+                        continue
+                    } else if (importSpec.IsImportAll()) {
+                        continue
+                    } else if (IsPackageImportForCheck(importSpec, fullPackageName, sourcePackages)) {
+                        if (importSpec.IsReExport()) {
+                            diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
+                                DiagKindRefactor.package_re_export_package_name,
+                                packageRange,
+                                arguments: [fullPackageName, GetAccessLevelStr(importSpec)]).Emit()
+                        }
+                        continue
+                    } else if (!HasVisibleImportedDecl(pkg.fullPackageName, packageValue, importSpec.content.identifier.Val())) {
                         let im = importSpec.content
                         let nameRange = MakeRange(im.prefixPoses[0], im.identifier.End())
                         diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
@@ -5249,6 +5332,50 @@ public class ImportManager {
         }
     }
 
+    private func CheckCjoPathLegality(
+        importSpec: ImportSpec,
+        cjoPath: String,
+        fullPackageName: String,
+        isRecursive: Bool,
+        isMainPartPkgForTestPkg: Bool
+    ): Bool {
+        if (!cjoPath.isEmpty()) {
+            return true
+        }
+        let kind = if (isMainPartPkgForTestPkg) {
+            DiagKindRefactor.package_missed_cjo_main_pkg_part_for_test_pkg
+        } else {
+            DiagKindRefactor.package_search_error
+        }
+        let range = if (isRecursive) {
+            MakeRange(importSpec.begin, importSpec.begin + 1)
+        } else {
+            GetPackageNameRange(importSpec)
+        }
+        let builder = diag.AsBasicDiagnosticEngine().DiagnoseRefactor(kind, range, arguments: [fullPackageName])
+        builder.AddHelp(DiagHelp(NO_CJO_HELP_INFO))
+        builder.Emit()
+        return false
+    }
+
+    private func GetPackageNameRange(importSpec: ImportSpec): BasicRange {
+        let im = importSpec.content
+        if (importSpec.TestAttr(Attribute.IMPLICIT_ADD)) {
+            return MakeRange(DEFAULT_POSITION, im.identifier.Val())
+        }
+        if (IsPackageImportForCheck(importSpec, im.GetImportedPackageNameWithIsDecl(), sourcePackagesForMembers)) {
+            if (im.prefixPoses.isEmpty()) {
+                return MakeRange(im.identifier.Begin(), im.identifier.End())
+            }
+            return MakeRange(im.prefixPoses[0], im.identifier.End())
+        }
+        if (im.prefixPoses.isEmpty() || im.prefixPaths.isEmpty()) {
+            return MakeRange(im.identifier.Begin(), im.identifier.End())
+        }
+        return MakeRange(im.prefixPoses[0],
+            im.prefixPoses[im.prefixPoses.size - 1] + im.prefixPaths[im.prefixPaths.size - 1].size)
+    }
+
     private func CollectDirectDependencyNames(pkg: Package, sourcePackages: HashSet<String>): HashSet<String> {
         let deps = HashSet<String>()
         for (dep in CollectDirectDependencyNamesInOrder(pkg, sourcePackages)) {
@@ -5262,10 +5389,19 @@ public class ImportManager {
         let seen = HashSet<String>()
         for (file in pkg.files) {
             for (importSpec in file.imports) {
+                if (importSpec.IsImportMulti() || !importSpec.withImplicitExport) {
+                    continue
+                }
                 let depName = NormalizeImportedPackageName(importSpec.content, sourcePackages)
                 if (!depName.isEmpty() && depName != pkg.fullPackageName && !seen.contains(depName)) {
                     seen.add(depName)
                     deps.add(depName)
+                }
+                if (!depName.isEmpty() && !sourcePackages.contains(depName) && (let None <- GetPackage(depName))) {
+                    let cjoPath = FileUtil.FindSerializationFile(depName, ".cjo", searchPath.toArray())
+                    let isMainPartPkgForTestPkg = globalOptions.compileTestsOnly && IsTestPackage(pkg.fullPackageName) &&
+                        GetMainPartPkgNameForTestPkg(pkg.fullPackageName) == depName
+                    let _ = CheckCjoPathLegality(importSpec, cjoPath, depName, false, isMainPartPkgForTestPkg)
                 }
             }
         }
@@ -5309,6 +5445,14 @@ public class ImportManager {
             }
         }
         return content.GetImportedPackageName()
+    }
+
+    private func IsTestPackage(pkgName: String): Bool {
+        return pkgName.size >= 5 && pkgName[pkgName.size - 5..pkgName.size] == "$test"
+    }
+
+    private func GetMainPartPkgNameForTestPkg(testPkgName: String): String {
+        return testPkgName[0..testPkgName.size - 5]
     }
 }
 
