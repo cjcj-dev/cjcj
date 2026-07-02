@@ -5606,6 +5606,38 @@ public class Translator {
             }
             return FaithfulLeftValueInfo(base, path)
         }
+        var memberBaseTy = (baseTy.StripAllRefs() as CustomType) ??
+            throw IllegalStateException("faithful AST2CHIR member base is not custom type: ${baseTy.ToString()}")
+        var memberTy: Option<Type> = None
+        var pathIndex: Int64 = 0
+        while (pathIndex < path.size) {
+            let name = path[pathIndex]
+            let allMemberVars = memberBaseTy.GetCustomTypeDef().GetAllInstanceVars()
+            let memberVarInstTypes = memberBaseTy.GetInstantiatedMemberTys()
+            var memberIndex = allMemberVars.size
+            memberTy = None
+            while (memberIndex > 0) {
+                memberIndex--
+                if (allMemberVars[memberIndex].name == name) {
+                    memberTy = memberVarInstTypes[memberIndex]
+                    break
+                }
+            }
+            let currentMemberTy = memberTy.getOrThrow()
+            if (currentMemberTy.IsReferenceTypeWithRefDims(1)) {
+                break
+            }
+            pathIndex++
+            if (pathIndex < path.size) {
+                memberBaseTy = (currentMemberTy.StripAllRefs() as CustomType) ??
+                    throw IllegalStateException("faithful AST2CHIR member path is not custom type: ${currentMemberTy.ToString()}")
+            }
+        }
+        let pathMemberTy = memberTy.getOrThrow()
+        if (!pathMemberTy.IsReferenceTypeWithRefDims(1) &&
+            (baseTy.IsReferenceTypeWithRefDims(1) || baseTy.IsValueOrGenericTypeWithRefDims(1))) {
+            return FaithfulLeftValueInfo(base, path)
+        }
         let loaded = LoadLeftValue(info, chirTy.TranslateType(RequireAstTy(baseExpr))) ??
             throw IllegalStateException("faithful AST2CHIR member base produced no value")
         path.clear()

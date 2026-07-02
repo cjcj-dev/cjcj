@@ -84,7 +84,7 @@ public class UpdateMemberVarPath {
             let baseType = current.getOrThrow()
             let indexAndType = GetIndexByName(baseType, name)
             path.add(indexAndType[1])
-            current = indexAndType[0].StripAllRefs() as CustomType
+            current = indexAndType[0] as CustomType
         }
         return path
     }

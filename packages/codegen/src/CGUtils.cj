@@ -6,6 +6,7 @@ import cangjie_compiler::chir.CheckCustomTypeDefIsExpected
 import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CustomType
+import cangjie_compiler::chir.Parameter
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
 import cangjie_compiler::mangle.MANGLE_NESTED_PREFIX
@@ -172,6 +173,21 @@ public func GetConstantArrayName(value: String): String {
 
 public func DeRef(chirTy: Type): Type {
     return chirTy.StripAllRefs()
+}
+
+public func IsThisArgOfStructMethod(chirValue: Value): Bool {
+    if (!chirValue.IsParameter()) {
+        return false
+    }
+    let chirParam = (chirValue as Parameter) ?? return false
+    let chirFunc = chirParam.GetTopLevelFunc() ?? return false
+    if (chirFunc.GetNumOfParams() == 0 || chirFunc.GetParam(0) != chirParam) {
+        return false
+    }
+    if (chirFunc.TestAttr(Attribute.STATIC) || !chirFunc.IsStructMethod()) {
+        return false
+    }
+    return true
 }
 
 public func IsAutoEnvType(chirTy: Type): Bool {

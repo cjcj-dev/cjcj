@@ -1692,6 +1692,44 @@ public class IRBuilder2 <: Resource {
         return call
     }
 
+    public func CallGCWriteAgg(structType: LLVMTypeRef, args: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(args.size == 4)
+        let sizeValue = args[3]
+        let sizeType = unsafe { LLVMTypeOf(sizeValue) }
+        if (!sizeType.isNull() && unsafe { LLVMGetTypeKind(sizeType) } == 8 &&
+            unsafe { LLVMIsAInstruction(sizeValue) }.isNull() && unsafe { LLVMIsAArgument(sizeValue) }.isNull() &&
+            unsafe { LLVMConstIntGetZExtValue(sizeValue) } == 0u64) {
+            return LLVMNullValue()
+        }
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let destPtrTy = unsafe { LLVMPointerType(i8Type, 1u32) }
+        let sourceRawTy = unsafe { LLVMTypeOf(args[2]) }
+        let sourceAddrSpace = if (!sourceRawTy.isNull() && unsafe { LLVMGetTypeKind(sourceRawTy) } == 12) {
+            unsafe { LLVMGetPointerAddressSpace(sourceRawTy) }
+        } else {
+            0u32
+        }
+        let sourcePtrTy = unsafe { LLVMPointerType(i8Type, sourceAddrSpace) }
+        let i64Type = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
+        let overloadedTypes = ArrayList<LLVMTypeRef>()
+        overloadedTypes.add(sourcePtrTy)
+        overloadedTypes.add(i64Type)
+        let fixedArgs = ArrayList<LLVMValueRef>()
+        fixedArgs.add(CreatePointerCast(args[0], CGType.GetRefType(GetLLVMContext()), name: "gcwrite.agg.base"))
+        fixedArgs.add(CreatePointerCast(args[1], destPtrTy, name: "gcwrite.agg.dest"))
+        fixedArgs.add(CreatePointerCast(args[2], sourcePtrTy, name: "gcwrite.agg.source"))
+        fixedArgs.add(CreateZExtOrTrunc(sizeValue, i64Type, name: "gcwrite.agg.size"))
+        let call = CreateIntrinsicCallNoInvoke("llvm.cj.gcwrite.struct", overloadedTypes, fixedArgs)
+        let aggTypeName = if (!structType.isNull() && unsafe { LLVMGetTypeKind(structType) } == LLVM_STRUCT_TYPE_KIND) {
+            LLVMCStringToString(unsafe { LLVMGetStructName(structType) }) ?? ""
+        } else {
+            ""
+        }
+        let metadata = LLVMCreateMDTupleFromString(GetLLVMContext(), aggTypeName)
+        LLVMSetInstructionMetadata(GetLLVMContext(), call, "AggType", metadata)
+        return call
+    }
+
     public func CallGCReadStruct(dest: LLVMValueRef, baseObject: LLVMValueRef, source: LLVMValueRef,
         size: LLVMValueRef, aggTypeName: String): LLVMValueRef {
         let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
@@ -2202,6 +2240,19 @@ public class IRBuilder2 <: Resource {
             result = unsafe { LLVMBuildZExt(builder.raw, value, destType, nameCString.value) }
         }
         return result
+    }
+
+    public func CreateZExtOrTrunc(value: LLVMValueRef, destType: LLVMTypeRef, name!: String = "zextortrunc"): LLVMValueRef {
+        let valueType = unsafe { LLVMTypeOf(value) }
+        let valueWidth = unsafe { LLVMGetIntTypeWidth(valueType) }
+        let destWidth = unsafe { LLVMGetIntTypeWidth(destType) }
+        if (valueWidth == destWidth) {
+            return value
+        }
+        if (valueWidth < destWidth) {
+            return CreateZExt(value, destType, name: name)
+        }
+        return CreateTrunc(value, destType, name: name)
     }
 
     public func CreateSExt(value: LLVMValueRef, destType: LLVMTypeRef, name!: String = "sext"): LLVMValueRef {
@@ -2761,6 +2812,20 @@ public class IRBuilder2 <: Resource {
             return CreatePointerCast(objectValue,
                 unsafe { LLVMPointerType(classCGType.GetLLVMType(), 1u32) },
                 name: "class.alloc.cast")
+        }
+        return objectValue
+    }
+
+    public func CallClassIntrinsicAlloc(parameters: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(parameters.size == 2)
+        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreateBitCast(parameters[0], i8PtrType, name: "class.ti"))
+        args.add(parameters[1])
+        let objectValue = CreateIntrinsicCall(MALLOC_OBJECT_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
+            name: "class.alloc")
+        if (!objectValue.isNull()) {
+            AddRetAttr(objectValue, "noalias")
         }
         return objectValue
     }

@@ -1,6 +1,7 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Box as ChirBox
 import cangjie_compiler::chir.EnumType
@@ -632,25 +633,39 @@ public func GenerateGetElementRef(irBuilder: IRBuilder2, chirExpr: Expression): 
 public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(storeElementRef) <- (chirExpr as StoreElementRef)) {
         let path = storeElementRef.GetPath()
-        let locationTy = storeElementRef.GetLocation().GetType()
-        CJC_ASSERT(locationTy.isSome() && locationTy.getOrThrow().IsRef() && !path.isEmpty())
-        if (path.isEmpty()) {
+        let rhs = storeElementRef.GetValue()
+        let lhs = storeElementRef.GetLocation()
+        let locationTy = lhs.GetType().getOrThrow()
+        CJC_ASSERT(locationTy.IsRef() && !path.isEmpty())
+        let storeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, rhs)
+        let storePlace = irBuilder.GetCGModule().MaterializeValue(irBuilder, lhs)
+        let srcCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rhs.GetType().getOrThrow())
+        if (srcCGType.GetSize().isNone() && IsThisArgOfStructMethod(rhs)) {
+            let typeInfoOfSrc = irBuilder.CreateTypeInfo(srcCGType.GetOriginal())
+            let size = irBuilder.GetLayoutSize32(srcCGType.GetOriginal(), srcCGType)
+            let parameters = ArrayList<LLVMValueRef>()
+            parameters.add(typeInfoOfSrc)
+            parameters.add(size)
+            let tmp = irBuilder.CallClassIntrinsicAlloc(parameters)
+            let payloadPtr = irBuilder.GetPayloadFromObject(tmp)
+            if (irBuilder.IsLLVMTypeContainsRef(srcCGType.GetLLVMType())) {
+                let args = ArrayList<LLVMValueRef>()
+                args.add(tmp)
+                args.add(payloadPtr)
+                args.add(storeValue.GetRawValue())
+                args.add(size)
+                return irBuilder.CallGCWriteAgg(srcCGType.GetLayoutType(), args)
+            }
+            return irBuilder.CreateMemCpy(payloadPtr, 0u32, storeValue.GetRawValue(), 0u32, size)
+        }
+        if (ShouldSkipNoOpStore(rhs, lhs)) {
             return LLVMNullValue()
         }
-        if (ShouldSkipNoOpStore(storeElementRef.GetValue(), storeElementRef.GetLocation())) {
-            return LLVMNullValue()
-        }
-        let storeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeElementRef.GetValue())
-        let storePlace = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeElementRef.GetLocation())
         let storeAddr = irBuilder.CreateGEP(storePlace, path, name: "store.elem.addr").GetRawValue()
-        if (storeAddr.isNull()) {
-            return LLVMNullValue()
+        if (rhs.TestAttr(Attribute.FOREIGN)) {
+            AddFnAttr(storeValue.GetRawValue(), CJ2C_ATTR)
         }
-        let fieldTy: Option<Type> = if (let Some(knownLocationTy) <- locationTy) {
-            ResolveElementTypeByPath(knownLocationTy, path)
-        } else {
-            None
-        }
+        let fieldTy = ResolveElementTypeByPath(locationTy, path)
         return StoreElementValue(irBuilder, storePlace, storeValue, storeAddr, fieldTy)
     }
     if (let Some(storeByName) <- (chirExpr as StoreElementByName)) {
