@@ -40,6 +40,11 @@ public open class Base {
         }
     }
 
+    public func SetNeverOverflowInfo(value: Bool): Unit {
+        let label = NeverOverflowInfo(value)
+        annotationMap.Set("NeverOverflowInfo", if (NeverOverflowInfo.Extract(label)) { "true" } else { "false" })
+    }
+
     public func RemoveAnnotation(key: String): Unit {
         annotationMap.Remove(key)
     }
@@ -73,6 +78,13 @@ public open class Base {
             }
         }
         return SkipKind.NO_SKIP
+    }
+
+    public func GetNeverOverflowInfo(): Bool {
+        if (let Some(value) <- annotationMap.Get("NeverOverflowInfo")) {
+            return NeverOverflowInfo.Extract(NeverOverflowInfo(value == "true"))
+        }
+        return NeverOverflowInfo.Extract(NeverOverflowInfo())
     }
 
     public func GetAnno(): AnnotationMap {

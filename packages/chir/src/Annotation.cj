@@ -2,6 +2,8 @@ package cangjie_compiler::chir
 
 import std.collection.*
 
+// GAP_TODO: MarkExpressionAsMustNotOverflow ConstAnalysis.h:243 producer absent.
+
 public class GeneratedFromForIn {
     private let value: Bool
 
@@ -78,6 +80,31 @@ public class SkipCheck {
     }
 }
 
+public class NeverOverflowInfo {
+    private let neverOverflowInfo: Bool
+
+    public init() {
+        neverOverflowInfo = false
+    }
+
+    public init(value: Bool) {
+        neverOverflowInfo = value
+    }
+
+    public func Clone(): NeverOverflowInfo {
+        return NeverOverflowInfo(neverOverflowInfo)
+    }
+
+    public func ToString(): String {
+        let str = if (neverOverflowInfo) { "true" } else { "false" }
+        return "NeverOverflowInfo: " + str
+    }
+
+    public static func Extract(info: NeverOverflowInfo): Bool {
+        return info.neverOverflowInfo
+    }
+}
+
 private func SkipKindFromAnnotationValue(value: String): SkipKind {
     return match (value) {
         case "1" => SkipKind.SKIP_DCE_WARNING
@@ -130,6 +157,9 @@ public class AnnotationMap {
                 if (!text.isEmpty()) {
                     parts.add("${IndentToString(indent)}${text}")
                 }
+            } else if (key == "NeverOverflowInfo") {
+                let neverOverflowText = NeverOverflowInfo(value == "true").ToString()
+                parts.add("${IndentToString(indent)}${neverOverflowText}")
             } else {
                 parts.add("${IndentToString(indent)}@${key}(${value})")
             }

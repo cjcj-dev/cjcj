@@ -1,7 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
-import cangjie_compiler::utils.InternalError
+import cangjie_compiler::utils.{CJC_ABORT, InternalError, OverflowStrategy}
 
 public class DeadCodeElimination {
     private let builder: CHIRBuilder
@@ -136,7 +136,7 @@ public class DeadCodeElimination {
         var idx: Int64 = 0
         while (idx < exprs.size) {
             let expr = exprs[idx]
-            if (CanRemove(expr)) {
+            if (CheckUselessExpr(expr)) {
                 expr.RemoveSelfFromBlock()
                 removed++
             } else {
@@ -146,33 +146,45 @@ public class DeadCodeElimination {
         return removed
     }
 
-    private func CanRemove(expr: Expression): Bool {
-        if (expr.IsTerminator() || expr.HasExceptionBranch()) {
+    private func CheckUselessExpr(expr: Expression, isReportWarning!: Bool = false): Bool {
+        if (let Some(result) <- expr.GetResult()) {
+            if (!result.GetUsersRef().isEmpty()) {
+                return false
+            }
+        }
+        if (expr.GetExprKind() == ExprKind.INT_OP_WITH_EXCEPTION && expr.GetNeverOverflowInfo() && isReportWarning) {
+            return true
+        }
+        if (expr.IsTerminator()) {
             return false
         }
-        if (let Some(result) <- expr.GetResult()) {
-            return result.GetUsersRef().isEmpty() && IsRemovableUnusedExpression(expr)
+        if (expr.GetNeverOverflowInfo()) {
+            return true
         }
-        return false
-    }
-
-    private func IsRemovableUnusedExpression(expr: Expression): Bool {
         let kind = expr.GetExprKind()
         match (expr.GetExprMajorKind()) {
-            case ExprMajorKind.UNARY_EXPR => return kind == ExprKind.NOT || kind == ExprKind.BITNOT
-            case ExprMajorKind.BINARY_EXPR => return IsRemovableBinaryExpression(kind)
+            case ExprMajorKind.UNARY_EXPR =>
+                let unary = (expr as UnaryExpression).getOrThrow()
+                return kind != ExprKind.NEG || unary.GetOverflowStrategy() != OverflowStrategy.THROWING
+            case ExprMajorKind.BINARY_EXPR =>
+                if (kind == ExprKind.MOD || kind == ExprKind.DIV || kind == ExprKind.LSHIFT ||
+                    kind == ExprKind.RSHIFT) {
+                    return false
+                }
+                let kindIndex = ExprKindIndex(kind)
+                if (kindIndex >= ExprKindIndex(ExprKind.ADD) && kindIndex <= ExprKindIndex(ExprKind.EXP)) {
+                    let binary = (expr as BinaryExpression).getOrThrow()
+                    return binary.GetOverflowStrategy() != OverflowStrategy.THROWING
+                }
+                return true
             case ExprMajorKind.MEMORY_EXPR => return kind == ExprKind.LOAD || kind == ExprKind.GET_ELEMENT_REF
             case ExprMajorKind.STRUCTURED_CTRL_FLOW_EXPR => return kind == ExprKind.LAMBDA
             case ExprMajorKind.OTHERS => return kind == ExprKind.CONSTANT || kind == ExprKind.TUPLE ||
-                kind == ExprKind.FIELD || kind == ExprKind.FIELD_BY_NAME || kind == ExprKind.VARRAY
-            case _ => return false
+                kind == ExprKind.FIELD || kind == ExprKind.VARRAY
+            case _ =>
+                CJC_ABORT()
+                return false
         }
-    }
-
-    private func IsRemovableBinaryExpression(kind: ExprKind): Bool {
-        return kind == ExprKind.BITAND || kind == ExprKind.BITOR || kind == ExprKind.BITXOR ||
-            kind == ExprKind.LT || kind == ExprKind.GT || kind == ExprKind.LE || kind == ExprKind.GE ||
-            kind == ExprKind.EQUAL || kind == ExprKind.NOTEQUAL || kind == ExprKind.AND || kind == ExprKind.OR
     }
 
     private func BreakBranchConnection(block: Block): Unit {
