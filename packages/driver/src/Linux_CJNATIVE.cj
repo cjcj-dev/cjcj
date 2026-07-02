@@ -124,24 +124,22 @@ public open class Linux_CJNATIVE <: Gnu {
     }
 
     protected func GenerateLinkOptionsForLTO(tool: Tool): Unit {
-        LLDSetLTOOptimizationLevelOptions({ option: String => tool.AppendArg(option) }, driverOptions)
-        LLDSetLTOOptions({ option: String => tool.AppendArg(option) }, driverOptions)
+        let setOptionHandler = { option: String => tool.AppendArg(option) }
+        let setOptionsPass = ArrayList<ToolOptionType>()
+        setOptionsPass.add(LLDSetLTOOptimizationLevelOptions)
+        setOptionsPass.add(LLDSetLTOOptions)
+        SetOptions(setOptionHandler, driverOptions, setOptionsPass)
 
         var passesCollector = "--lto-newpm-passes="
         let passItems = ArrayList<String>()
-        OPTSetNewPassManagerOptions({ option: String =>
-            if (option.startsWith("-")) {
-                passItems.add(option[1..])
-            } else {
-                passItems.add(option)
-            }
-        }, driverOptions)
+        let handler = { option: String => passItems.add(option[1..]) }
+        SetOptions(handler, driverOptions, OPTSetNewPassManagerOptions)
         var passIndex: Int64 = 0
         while (passIndex < passItems.size) {
-            if (passIndex > 0) {
+            passesCollector += passItems[passIndex]
+            if (passIndex != passItems.size - 1) {
                 passesCollector += ","
             }
-            passesCollector += passItems[passIndex]
             passIndex++
         }
         tool.AppendArg(passesCollector)
@@ -154,11 +152,13 @@ public open class Linux_CJNATIVE <: Gnu {
                 tool.AppendArg(option)
             }
         }
-        OPTSetOptions(setCompositeOption, driverOptions)
-        OPTSetCodeObfuscationOptions(setCompositeOption, driverOptions)
-        OPTSetTransparentOptions(setCompositeOption, driverOptions)
-        LLDSetPgoOptions(setCompositeOption, driverOptions)
-        LLCSetOptions(setCompositeOption, driverOptions)
-        LLCSetTransparentOptions(setCompositeOption, driverOptions)
+        let setCompositeOptionsPass = ArrayList<ToolOptionType>()
+        setCompositeOptionsPass.add(OPTSetOptions)
+        setCompositeOptionsPass.add(OPTSetCodeObfuscationOptions)
+        setCompositeOptionsPass.add(OPTSetTransparentOptions)
+        setCompositeOptionsPass.add(LLDSetPgoOptions)
+        setCompositeOptionsPass.add(LLCSetOptions)
+        setCompositeOptionsPass.add(LLCSetTransparentOptions)
+        SetOptions(setCompositeOption, driverOptions, setCompositeOptionsPass)
     }
 }
