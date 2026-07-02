@@ -237,9 +237,6 @@ private func PackageNameForQualifiedName(def: CustomTypeDef): String {
 
 public func GetTypeQualifiedNameOfCustomType(typeInfo: CustomType, forNameFieldOfTi!: Bool = false): String {
     let def = typeInfo.GetCustomTypeDef()
-    if (def.GetAnnotation("IsAutoEnvInstBase").isSome()) {
-        throw IllegalArgumentException("AutoEnv instantiated base type is unexpected in qualified name")
-    }
     if (def.GetAnnotation("IsAutoEnvGenericBase").isSome()) {
         let typeArgs = typeInfo.GetGenericArgs()
         if (typeArgs.isEmpty()) {
