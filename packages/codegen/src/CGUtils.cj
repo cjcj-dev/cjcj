@@ -79,6 +79,10 @@ public func IsLitStructPtrType(llvmType: LLVMTypeRef): Bool {
         unsafe { LLVMIsLiteralStruct(elementType) } != 0
 }
 
+public func IsCommonStruct(chirTy: Type): Bool {
+    return chirTy.IsStruct() && !chirTy.IsCPointer() && !chirTy.IsCString()
+}
+
 public func AlignedUpTo(offset: UInt64, align: UInt64): UInt64 {
     CJC_ASSERT(align != 0u64)
     return ((offset + align - 1u64) / align) * align
