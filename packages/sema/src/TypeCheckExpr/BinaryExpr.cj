@@ -583,7 +583,7 @@ private func BuiltinBinaryResultTy(op: TokenKind, operandTy: Ty, isArithmetic: B
 private func SynBuiltinBinaryFromRight(typeManager: TypeManager, be: BinaryExpr,
     isArithmetic: Bool, ctx!: Option<ASTContext> = None,
     synthesizer!: Option<BinaryOperandSynthesizer> = None,
-    checker!: Option<BinaryOperandChecker> = None): Option<Ty> {
+    checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Option<Ty> {
     if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
         be.SetTy(TypeManager.GetInvalidTy())
         return Some(TypeManager.GetInvalidTy())
@@ -601,13 +601,16 @@ private func SynBuiltinBinaryFromRight(typeManager: TypeManager, be: BinaryExpr,
         be.SetTy(TypeManager.GetInvalidTy())
         return Some(TypeManager.GetInvalidTy())
     }
-    ClearExprKeepTargets(leftExpr)
-    if (ChkBinaryOperand(typeManager, targetRight, leftExpr, ctx, checker)) {
-        let solvedRight = typeManager.TryGreedySubst(targetRight)
-        rightExpr.SetTy(solvedRight)
-        let resultTy = BuiltinBinaryResultTy(be.op, solvedRight, isArithmetic)
-        be.SetTy(resultTy)
-        return Some(resultTy)
+    try (ds = DiagSuppressor(diag)) {
+        ClearExprKeepTargets(leftExpr)
+        if (ChkBinaryOperand(typeManager, targetRight, leftExpr, ctx, checker)) {
+            ds.ReportDiag()
+            let solvedRight = typeManager.TryGreedySubst(targetRight)
+            rightExpr.SetTy(solvedRight)
+            let resultTy = BuiltinBinaryResultTy(be.op, solvedRight, isArithmetic)
+            be.SetTy(resultTy)
+            return Some(resultTy)
+        }
     }
     be.SetTy(TypeManager.GetInvalidTy())
     return None
@@ -616,7 +619,7 @@ private func SynBuiltinBinaryFromRight(typeManager: TypeManager, be: BinaryExpr,
 private func SynBuiltinBinaryFromLeft(typeManager: TypeManager, be: BinaryExpr,
     isArithmetic: Bool, ctx!: Option<ASTContext> = None,
     synthesizer!: Option<BinaryOperandSynthesizer> = None,
-    checker!: Option<BinaryOperandChecker> = None): Ty {
+    checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
         return BinaryInvalid(be)
     }
@@ -632,13 +635,16 @@ private func SynBuiltinBinaryFromLeft(typeManager: TypeManager, be: BinaryExpr,
         let _ = SynBinaryOperand(typeManager, rightExpr, synthesizer)
         return BinaryInvalid(be)
     }
-    ClearExprKeepTargets(rightExpr)
-    if (ChkBinaryOperand(typeManager, targetLeft, rightExpr, ctx, checker)) {
-        let solvedLeft = typeManager.TryGreedySubst(targetLeft)
-        leftExpr.SetTy(solvedLeft)
-        let resultTy = BuiltinBinaryResultTy(be.op, solvedLeft, isArithmetic)
-        be.SetTy(resultTy)
-        return resultTy
+    try (ds = DiagSuppressor(diag)) {
+        ClearExprKeepTargets(rightExpr)
+        if (ChkBinaryOperand(typeManager, targetLeft, rightExpr, ctx, checker)) {
+            ds.ReportDiag()
+            let solvedLeft = typeManager.TryGreedySubst(targetLeft)
+            leftExpr.SetTy(solvedLeft)
+            let resultTy = BuiltinBinaryResultTy(be.op, solvedLeft, isArithmetic)
+            be.SetTy(resultTy)
+            return resultTy
+        }
     }
     return BinaryInvalid(be)
 }
@@ -646,7 +652,7 @@ private func SynBuiltinBinaryFromLeft(typeManager: TypeManager, be: BinaryExpr,
 private func SynArithmeticOrRelationalExpr(typeManager: TypeManager, be: BinaryExpr,
     isArithmetic!: Bool = true, ctx!: Option<ASTContext> = None,
     synthesizer!: Option<BinaryOperandSynthesizer> = None,
-    checker!: Option<BinaryOperandChecker> = None): Ty {
+    checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (isArithmetic && be.op == TokenKind.EXP) {
         if (let Some(tys) <- SynthesizeOperands(typeManager, be, synthesizer: synthesizer)) {
             return SynExpoExpr(typeManager, be, tys[0], tys[1])
@@ -654,7 +660,7 @@ private func SynArithmeticOrRelationalExpr(typeManager: TypeManager, be: BinaryE
         return BinaryInvalid(be)
     }
     if (let Some(resultTy) <- SynBuiltinBinaryFromRight(typeManager, be, isArithmetic, ctx: ctx,
-        synthesizer: synthesizer, checker: checker)) {
+        synthesizer: synthesizer, checker: checker, diag: diag)) {
         if (Ty.IsTyCorrect(resultTy)) {
             return resultTy
         }
@@ -662,7 +668,7 @@ private func SynArithmeticOrRelationalExpr(typeManager: TypeManager, be: BinaryE
     }
     ClearExprKeepTargets(be)
     return SynBuiltinBinaryFromLeft(typeManager, be, isArithmetic, ctx: ctx,
-        synthesizer: synthesizer, checker: checker)
+        synthesizer: synthesizer, checker: checker, diag: diag)
 }
 
 private func SynthesizeOperands(typeManager: TypeManager, be: BinaryExpr,
@@ -681,9 +687,9 @@ private func SynthesizeOperands(typeManager: TypeManager, be: BinaryExpr,
 
 private func SynArithmeticExpr(typeManager: TypeManager, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
-    checker!: Option<BinaryOperandChecker> = None): Ty {
+    checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     return SynArithmeticOrRelationalExpr(typeManager, be, isArithmetic: true, ctx: ctx,
-        synthesizer: synthesizer, checker: checker)
+        synthesizer: synthesizer, checker: checker, diag: diag)
 }
 
 private func SynExpoExpr(typeManager: TypeManager, be: BinaryExpr, leftTy: Ty, rightTy: Ty): Ty {
@@ -704,7 +710,7 @@ private func SynExpoExpr(typeManager: TypeManager, be: BinaryExpr, leftTy: Ty, r
 
 private func SynRelationalExpr(typeManager: TypeManager, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
-    checker!: Option<BinaryOperandChecker> = None): Ty {
+    checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (let Some(tys) <- SynthesizeOperands(typeManager, be, synthesizer: synthesizer)) {
         let leftTy = tys[0]
         let rightTy = tys[1]
@@ -720,7 +726,7 @@ private func SynRelationalExpr(typeManager: TypeManager, be: BinaryExpr,
         }
     }
     return SynArithmeticOrRelationalExpr(typeManager, be, isArithmetic: false, ctx: ctx,
-        synthesizer: synthesizer, checker: checker)
+        synthesizer: synthesizer, checker: checker, diag: diag)
 }
 
 private func HasSideEffect(expr: Expr): Bool {
@@ -1198,7 +1204,8 @@ public func SynBinaryExpr(typeManager: TypeManager, be: BinaryExpr,
             return be.GetTy() ?? TypeManager.GetInvalidTy()
         }
     } else if (IsArithmeticOperator(be.op)) {
-        let builtinTy = SynArithmeticExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
+        let builtinTy = SynArithmeticExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker,
+            diag: diag)
         if (Ty.IsTyCorrect(builtinTy)) {
             return builtinTy
         }
@@ -1217,7 +1224,8 @@ public func SynBinaryExpr(typeManager: TypeManager, be: BinaryExpr,
             return overloadTy
         }
     } else if (IsRelationalOperator(be.op)) {
-        let builtinTy2 = SynRelationalExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
+        let builtinTy2 = SynRelationalExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker,
+            diag: diag)
         if (Ty.IsTyCorrect(builtinTy2)) {
             return builtinTy2
         }
