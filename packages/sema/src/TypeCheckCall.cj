@@ -453,6 +453,90 @@ private func CheckArgsOrder(diag: Option<BasicDiagnosticEngine>, ce: CallExpr): 
     return true
 }
 
+// Mirror C++ IsPossibleVariadicFunction(candidates, ce) (TypeCheckCall.cpp:443): the call may target a
+// variadic function if any candidate is itself a possible variadic match for this call.
+private func IsPossibleVariadicFunctionInList(candidates: ArrayList<FuncDecl>, ce: CallExpr): Bool {
+    for (fd in candidates) {
+        if (IsPossibleVariadicFunction(fd, ce)) {
+            return true
+        }
+    }
+    return false
+}
+
+// Mirror C++ FuncDeclsGroupByFixedPositionalArity (TypeCheckCall.cpp:530): group the variadic-capable
+// candidates by their fixed positional arity (positional param count minus the trailing variadic array
+// param). Uses an ordered TreeMap so group iteration order is deterministic (bcgate parity).
+private func FuncDeclsGroupByFixedPositionalArity(candidates: ArrayList<FuncDecl>,
+    ce: CallExpr): TreeMap<Int64, ArrayList<FuncDecl>> {
+    let groups = TreeMap<Int64, ArrayList<FuncDecl>>()
+    for (fd in candidates) {
+        if (!IsPossibleVariadicFunction(fd, ce)) {
+            continue
+        }
+        let fixedPositionalArity = GetPositionalParamSize(fd) - 1
+        if (let Some(group) <- groups.get(fixedPositionalArity)) {
+            group.add(fd)
+        } else {
+            let group = ArrayList<FuncDecl>()
+            group.add(fd)
+            groups.add(fixedPositionalArity, group)
+        }
+    }
+    return groups
+}
+
+// Mirror C++ ChkVariadicCallExpr (TypeCheckCall.cpp:3333): when normal candidate matching fails and the
+// call may target a variadic function, desugar the trailing arguments into an Array literal (grouped by
+// fixed positional arity) and retry MatchFunctionForCall on the desugared call. On success, propagate
+// the desugared call's resolved type/function back onto the original call.
+// `variadicDesugar` is DesugarVariadicCallExpr, threaded in as a callback from the ctx-aware dispatch
+// (sema.TypeCheckExpr subpackage) because this main-sema package cannot import sema.Desugar directly.
+private func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ctx: Option<ASTContext>, target: Option<Ty>, ce: CallExpr, candidates: ArrayList<FuncDecl>,
+    variadicDesugar: (CallExpr, Int64) -> Unit, argChecker!: Option<CallArgChecker> = None): Bool {
+    if (!CheckArgsOrder(diag, ce)) {
+        return false
+    }
+    let results = ArrayList<FuncDecl>()
+    let groups = FuncDeclsGroupByFixedPositionalArity(candidates, ce)
+    for ((fixedPositionalArity, group) in groups) {
+        variadicDesugar(ce, fixedPositionalArity)
+        try (ds = DiagSuppressor(diag)) {
+            if (let Some(desugar) <- ce.desugarExpr) {
+                if (let Some(desugarCall) <- (desugar as CallExpr)) {
+                    let matchResults = MatchFunctionForCall(typeManager, diag, ctx, group, desugarCall, target,
+                        argChecker: argChecker)
+                    if (matchResults.size == 1) {
+                        results.add(matchResults[0])
+                    }
+                }
+            }
+        }
+        RecoverFromVariadicCallExpr(ce)
+    }
+    if (results.size == 1) {
+        let fixedPositionalArity = GetPositionalParamSize(results[0]) - 1
+        variadicDesugar(ce, fixedPositionalArity)
+        if (let Some(desugar) <- ce.desugarExpr) {
+            if (let Some(desugarCall) <- (desugar as CallExpr)) {
+                let matchResults = MatchFunctionForCall(typeManager, diag, ctx, results, desugarCall, target,
+                    argChecker: argChecker)
+                if (matchResults.size == 1) {
+                    ce.SetTy(desugarCall.GetTy() ?? TypeManager.GetInvalidTy())
+                    ce.resolvedFunction = desugarCall.resolvedFunction
+                    return true
+                }
+            }
+        }
+        RecoverFromVariadicCallExpr(ce)
+    } else if (results.size > 1) {
+        DiagnoseForCall(diag, candidates, results, ce, results[0])
+    }
+    ce.callKind = CallKind.CALL_INVALID
+    return false
+}
+
 private func SyntaxFilterCandidates(ce: CallExpr, candidates: ArrayList<FuncDecl>): ArrayList<FuncDecl> {
     let definitelyMismatched = ArrayList<FuncDecl>()
     let mismatched = ArrayList<FuncDecl>()
@@ -2824,14 +2908,14 @@ public func ChkCallExprWithDiag(typeManager: TypeManager, diag: BasicDiagnosticE
 }
 
 public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>, ce: CallExpr,
-    ctx!: Option<ASTContext> = None): Bool {
-    return ChkCallExprWithArgChecker(typeManager, diag, target, ce, None, ctx: ctx)
+    ctx!: Option<ASTContext> = None, variadicDesugar!: Option<(CallExpr, Int64) -> Unit> = None): Bool {
+    return ChkCallExprWithArgChecker(typeManager, diag, target, ce, None, ctx: ctx, variadicDesugar: variadicDesugar)
 }
 
 public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
     ce: CallExpr, argChecker: Option<CallArgChecker>, desugarChecker!: Option<CallDesugarChecker> = None,
     clearInferredForTarget!: Bool = true, declSynthesizer!: Option<CallDeclSynthesizer> = None,
-    ctx!: Option<ASTContext> = None): Bool {
+    ctx!: Option<ASTContext> = None, variadicDesugar!: Option<(CallExpr, Int64) -> Unit> = None): Bool {
     if (let Some(desugar) <- ce.desugarExpr) {
         if (Ty.IsTyCorrect(desugar.GetTy())) {
             ce.SetTy(desugar.GetTy().getOrThrow())
@@ -2899,6 +2983,20 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
     if (result.size == 1) {
         return true
     }
+    // Mirror C++ TypeCheckCall.cpp:3254-3256: when normal matching fails and the call may target a
+    // variadic function, clear the base's type and retry via the variadic desugaring path.
+    if (let Some(desugarVariadic) <- variadicDesugar) {
+        if (IsPossibleVariadicFunctionInList(candidates, ce)) {
+            if (let Some(baseFunc) <- ce.baseFunc) {
+                baseFunc.SetTy(TypeManager.GetInvalidTy())
+            }
+            if (result.isEmpty() &&
+                ChkVariadicCallExpr(typeManager, diag, ctx, target, ce, candidates, desugarVariadic,
+                    argChecker: argChecker)) {
+                return true
+            }
+        }
+    }
     if (result.isEmpty() && !candidatesBefore.isEmpty()) {
         if (inferenceFailure.failed) {
             DiagnoseForCallInference(diag, ce)
@@ -2940,9 +3038,9 @@ public func SynCallExpr(typeManager: TypeManager, ce: CallExpr, ctx!: Option<AST
 
 public func SynCallExprWithArgChecker(typeManager: TypeManager, ce: CallExpr, argChecker: Option<CallArgChecker>,
     diag!: Option<BasicDiagnosticEngine> = None, declSynthesizer!: Option<CallDeclSynthesizer> = None,
-    ctx!: Option<ASTContext> = None): Ty {
+    ctx!: Option<ASTContext> = None, variadicDesugar!: Option<(CallExpr, Int64) -> Unit> = None): Ty {
     if (ChkCallExprWithArgChecker(typeManager, diag, None, ce, argChecker, declSynthesizer: declSynthesizer,
-        ctx: ctx)) {
+        ctx: ctx, variadicDesugar: variadicDesugar)) {
         return ce.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return TypeManager.GetInvalidTy()

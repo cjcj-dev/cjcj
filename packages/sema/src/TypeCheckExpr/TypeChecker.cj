@@ -3615,7 +3615,8 @@ public class TypeChecker {
             SynthesizeCallChildren(ctx, callExpr)
             let callTy = SynCallExprWithArgChecker(impl.typeManager, callExpr,
                 Some({ target: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, target, arg) }), diag: impl.diag,
-                declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }), ctx: Some(ctx))
+                declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }), ctx: Some(ctx),
+                variadicDesugar: Some({ vce: CallExpr, arity: Int64 => DesugarVariadicCallExpr(vce, arity) }))
             return FinishSynthesize(ctx, callExpr, callTy)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
@@ -3974,7 +3975,8 @@ public class TypeChecker {
                 Some({ paramTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, paramTy, arg) }),
                 desugarChecker: Some({ target2: Ty, expr2: Expr => Check(ctx, target2, expr2) }),
                 clearInferredForTarget: clearInferredCallTypes,
-                declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }), ctx: Some(ctx))
+                declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }), ctx: Some(ctx),
+                variadicDesugar: Some({ vce: CallExpr, arity: Int64 => DesugarVariadicCallExpr(vce, arity) }))
             return FinishCheck(ctx, callExpr, ok)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {

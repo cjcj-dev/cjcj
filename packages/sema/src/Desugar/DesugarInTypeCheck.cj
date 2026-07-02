@@ -675,7 +675,10 @@ public func DesugarVariadicCallExpr(expr: CallExpr, fixedPositionalArity: Int64)
             callExpr.args.add(expr.args[idx])
             idx++
         }
-        expr.args.clear()
+        // Faithful to C++ DesugarVariadicCallExpr (DesugarInTypeCheck.cpp:513): the original arguments are
+        // moved into the desugared call (std::move), which preserves ce.args' SIZE. Do NOT clear here -
+        // RecoverFromVariadicCallExpr (RecoverDesugar.cj:257) assigns back into ce.args[idx] by index and
+        // requires those slots to still exist.
         CopyUnsafeAttr(expr, callExpr)
         AddCurFile(callExpr, file: expr.curFile)
         expr.desugarExpr = callExpr
