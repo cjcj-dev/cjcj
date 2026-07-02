@@ -97,7 +97,7 @@ public class IRBuilder2 <: Resource {
     private let builder: LLVMBuilderHandle
     private var chirExpr: Option<CHIRExprWrapper> = None
     private var cgFunction: Option<CGFunction> = None
-    private let basePtrs: HashMap<String, LLVMValueRef> = HashMap<String, LLVMValueRef>()
+    private let basePtrs: HashMap<UIntNative, LLVMValueRef> = HashMap<UIntNative, LLVMValueRef>()
     private var closed: Bool = false
 
     public init(cgMod: CGModule) {
@@ -614,25 +614,22 @@ public class IRBuilder2 <: Resource {
         return !value.isNull() && !unsafe { LLVMIsAArgument(value) }.isNull()
     }
 
-    private func GetLLVMValueKey(value: LLVMValueRef): Option<String> {
-        if (value.isNull()) {
-            return None
-        }
-        let name = LLVMCStringToString(unsafe { LLVMGetValueName(value) }) ?? ""
-        if (name.isEmpty()) {
-            return None
-        }
-        return Some(name)
-    }
-
     private func TrackBasePtr(value: LLVMValueRef, baseObject: LLVMValueRef): Unit {
-        if (let Some(key) <- GetLLVMValueKey(value)) {
-            basePtrs[key] = baseObject
+        if (value.isNull()) {
+            return
         }
+        basePtrs[value.toUIntNative()] = baseObject
+        GetCGContext().SetBasePtr(value, baseObject)
     }
 
     public func GetTrackedBasePtr(value: LLVMValueRef): Option<LLVMValueRef> {
-        let key = GetLLVMValueKey(value) ?? return None
+        if (value.isNull()) {
+            return None
+        }
+        if (let Some(basePtr) <- GetCGContext().GetBasePtrOf(value)) {
+            return basePtr
+        }
+        let key = value.toUIntNative()
         if (basePtrs.contains(key)) {
             return basePtrs[key]
         }

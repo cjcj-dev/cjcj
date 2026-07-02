@@ -117,6 +117,14 @@ public class CGContext {
     public func IsCGParallelEnabled(): Bool { return cgPkgContext.IsCGParallelEnabled() }
     public func IsLineInfoEnabled(): Bool { return cgPkgContext.IsLineInfoEnabled() }
 
+    public func SetBasePtr(value: LLVMValueRef, basePtr: LLVMValueRef): Unit {
+        impl.SetBasePtr(value, basePtr)
+    }
+
+    public func GetBasePtrOf(value: LLVMValueRef): Option<LLVMValueRef> {
+        return impl.GetBasePtr(value)
+    }
+
     public func GetImplicitUsedFunc(funcMangledName: String): Option<Function> {
         return cgPkgContext.GetImplicitUsedFunc(funcMangledName)
     }

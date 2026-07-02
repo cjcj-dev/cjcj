@@ -7,7 +7,7 @@ public class CGContextImpl {
     private let cgTypePool: ArrayList<CGType> = ArrayList<CGType>()
     private let chirType2CGTypeMap: ArrayList<(TypeExtraInfo, ArrayList<(Type, CGType)>)> =
         ArrayList<(TypeExtraInfo, ArrayList<(Type, CGType)>)>()
-    private let valueAndBasePtrMap: HashMap<String, LLVMValueRef> = HashMap<String, LLVMValueRef>()
+    private let valueAndBasePtrMap: HashMap<UIntNative, LLVMValueRef> = HashMap<UIntNative, LLVMValueRef>()
     private let nullableReferences: HashSet<UIntNative> = HashSet<UIntNative>()
 
     public init() {}
@@ -59,11 +59,12 @@ public class CGContextImpl {
         chirType2CGTypeMap.add((keyExtraInfo, cache))
     }
 
-    public func SetBasePtr(key: String, value: LLVMValueRef): Unit {
-        valueAndBasePtrMap[key] = value
+    public func SetBasePtr(value: LLVMValueRef, basePtr: LLVMValueRef): Unit {
+        valueAndBasePtrMap[value.toUIntNative()] = basePtr
     }
 
-    public func GetBasePtr(key: String): Option<LLVMValueRef> {
+    public func GetBasePtr(value: LLVMValueRef): Option<LLVMValueRef> {
+        let key = value.toUIntNative()
         if (valueAndBasePtrMap.contains(key)) {
             return valueAndBasePtrMap[key]
         }
