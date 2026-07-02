@@ -55,11 +55,11 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         InitializeCjStringLiteral(cgMod)
         GenerateInterfaceExtensionDefs(cgMod)
         RedefineTypeInfosForCustomDefs(cgMod)
-        let keepTypesFunc = KeepSomeTypesManually(cgMod)
-        EmitStaticGenericTIsAndLLVMUsed(cgMod, keepTypesFunc)
         // Mirror C++ EmitPackageIR.cpp:372 cgMod.GenTypeInfo(): drain the delayed concrete-TypeInfo
         // definitions (queued by CGType.GetOrCreateTypeInfo) before optimization.
         cgMod.GenTypeInfo()
+        let keepTypesFunc = KeepSomeTypesManually(cgMod)
+        EmitStaticGenericTIsAndLLVMUsed(cgMod, keepTypesFunc)
         cgMod.Opt()
         cgMod.EraseUselessInstsAndDeclarations()
     }
@@ -753,7 +753,7 @@ private func KeepSomeTypesManually(cgMod: CGModule): LLVMValueRef {
             for (structTypeName in cgMod.GetCGContext().GetGeneratedStructType()) {
                 try (typeName = unsafe { LibC.mallocCString(structTypeName) }.asResource()) {
                     let structType = unsafe { LLVMGetTypeByName2(llvmContext, typeName.value) }
-                    if (!structType.isNull()) {
+                    if (!structType.isNull() && unsafe { LLVMTypeIsSized(structType) } != 0) {
                         let _ = unsafe { LLVMBuildAlloca(builder, structType, allocaName.value) }
                     }
                 }

@@ -327,6 +327,15 @@ public open class CGType {
     // Invoked from CGModule.GenTypeInfo()'s drain loop.
     public func GenTypeInfo(): Unit {
         if (let Some(ti) <- typeInfo) {
+            if (let Some(rawLayout) <- layoutType) {
+                let structName = LLVMCStringToString(unsafe { LLVMGetStructName(rawLayout) }) ?? ""
+                if (!structName.isEmpty()) {
+                    if (LLVMGetInstructionMetadata(cgMod.GetLLVMContext(), ti, GC_TYPE_META_NAME).isNone()) {
+                        LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), ti, GC_TYPE_META_NAME, structName)
+                    }
+                    cgCtx.AddGeneratedStructType(structName)
+                }
+            }
             DefineTypeInfoGlobalIfNeeded(cgMod, chirType, ti)
         }
     }

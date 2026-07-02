@@ -8,6 +8,14 @@ import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GlobalVar
 import cangjie_compiler::utils.REFLECT_PACKAGE_NAME
 
+private var counter: Int64 = 0
+
+private func GetSubCHIRPackageIdx(splitNum: Int64): Int64 {
+    let idx = counter % splitNum
+    counter++
+    return idx
+}
+
 public class SubCHIRPackage {
     public var mainModule: Bool = false
     public var subCHIRPackageIdx: Int64 = 0
@@ -22,6 +30,7 @@ public class SubCHIRPackage {
 
     public init(splitNum: Int64) {
         this.splitNum = splitNum
+        subCHIRPackageIdx = GetSubCHIRPackageIdx(splitNum)
     }
 
     public func Clear(): Unit {
@@ -147,7 +156,6 @@ public class CHIRSplitter {
         var idx: Int64 = 0
         while (idx < splitNum) {
             let subPackage = SubCHIRPackage(splitNum)
-            subPackage.subCHIRPackageIdx = idx
             packages.add(subPackage)
             idx++
         }
@@ -223,6 +231,18 @@ public class CHIRSplitter {
         SplitSpecialFuncs(packages, packageInitFunc, literalInitFunc, toAnyFuncs)
         SplitNormalFuncs(packages, normalFuncs)
         SplitForeigns(packages)
+        let orderedPackages = ArrayList<SubCHIRPackage>()
+        for (subPackage in packages) {
+            orderedPackages.add(subPackage)
+        }
+        for (subPackage in packages) {
+            orderedPackages[subPackage.subCHIRPackageIdx] = subPackage
+        }
+        var packageIdx: Int64 = 0
+        while (packageIdx < packages.size) {
+            packages[packageIdx] = orderedPackages[packageIdx]
+            packageIdx++
+        }
     }
 
     private func SameFunction(fn: Function, other: Option<Function>): Bool {

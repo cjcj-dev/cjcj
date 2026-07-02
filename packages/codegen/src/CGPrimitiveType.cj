@@ -52,10 +52,13 @@ public class CGPrimitiveType <: CGType {
                 generated = CGType.GetUnitType(cgCtx.GetLLVMContext())
             case TypeKind.TYPE_VOID =>
                 generated = unsafe { LLVMVoidTypeInContext(context) }
-                let voidLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), UNIT_TYPE_STR)
-                if (!cgCtx.IsGeneratedStructType(UNIT_TYPE_STR)) {
-                    SetStructTypeBody(voidLayout, ArrayList<LLVMTypeRef>())
-                    cgCtx.AddGeneratedStructType(UNIT_TYPE_STR)
+                var voidLayout = LLVMNullType()
+                try (layoutNameCString = unsafe { LibC.mallocCString(UNIT_TYPE_STR) }.asResource()) {
+                    voidLayout = unsafe { LLVMGetTypeByName2(context, layoutNameCString.value) }
+                    if (voidLayout.isNull()) {
+                        voidLayout = unsafe { LLVMStructCreateNamed(context, layoutNameCString.value) }
+                        SetStructTypeBody(voidLayout, ArrayList<LLVMTypeRef>())
+                    }
                 }
                 layoutType = voidLayout
                 return generated
@@ -64,14 +67,17 @@ public class CGPrimitiveType <: CGType {
                 return LLVMNullType()
         }
         let layoutName = chirType.ToString() + ".Type"
-        let layout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
-        if (!cgCtx.IsGeneratedStructType(layoutName)) {
-            let body = ArrayList<LLVMTypeRef>()
-            if (!chirType.IsUnit()) {
-                body.add(generated)
+        var layout = LLVMNullType()
+        try (layoutNameCString = unsafe { LibC.mallocCString(layoutName) }.asResource()) {
+            layout = unsafe { LLVMGetTypeByName2(context, layoutNameCString.value) }
+            if (layout.isNull()) {
+                layout = unsafe { LLVMStructCreateNamed(context, layoutNameCString.value) }
+                let body = ArrayList<LLVMTypeRef>()
+                if (!chirType.IsUnit()) {
+                    body.add(generated)
+                }
+                SetStructTypeBody(layout, body)
             }
-            SetStructTypeBody(layout, body)
-            cgCtx.AddGeneratedStructType(layoutName)
         }
         layoutType = layout
         return generated

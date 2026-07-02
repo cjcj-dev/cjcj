@@ -67,7 +67,7 @@ public class CGContext {
     private let llvmContext: LLVMContextHandle
     private let impl: CGContextImpl = CGContextImpl()
     private let unwindBlockStack: ArrayList<LLVMBasicBlockRef> = ArrayList<LLVMBasicBlockRef>()
-    private let generatedStructType: HashSet<String> = HashSet<String>()
+    private let generatedStructType: TreeSet<String> = TreeSet<String>()
     private let globalsOfCompileUnit: HashSet<String> = HashSet<String>()
     private let staticGINames: HashSet<String> = HashSet<String>()
     private let reflectGeneratedStaticGINames: ArrayList<String> = ArrayList<String>()
@@ -181,12 +181,11 @@ public class CGContext {
     }
 
     public func AddGeneratedStructType(structTypeName: String): Unit {
-        if (!structTypeName.isEmpty()) {
-            generatedStructType.add(structTypeName)
-        }
+        CJC_ASSERT(!structTypeName.isEmpty())
+        generatedStructType.add(structTypeName)
     }
 
-    public func GetGeneratedStructType(): HashSet<String> {
+    public func GetGeneratedStructType(): TreeSet<String> {
         return generatedStructType
     }
 
