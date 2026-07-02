@@ -38,14 +38,14 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
         return UnitOrNull(irBuilder, resultType)
     }
     if (kind == IntrinsicKind.BEGIN_CATCH) {
-        let exceptionValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0])
+        let exceptionValue = irBuilder.GetCGModule().GetMappedCGValue(args[0])
         return irBuilder.CallPostThrowExceptionIntrinsic(exceptionValue.GetRawValue())
     }
     if (kind == IntrinsicKind.OBJECT_REFEQ || kind == IntrinsicKind.RAW_ARRAY_REFEQ ||
         kind == IntrinsicKind.FUNC_REFEQ) {
         if (args.size >= 2) {
-            let lhs = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
-            let rhs = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[1]).GetRawValue()
+            let lhs = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
+            let rhs = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
             return irBuilder.CreateICmp(LLVMIntPredicate.EQ, lhs, rhs, name: "refeq")
         }
         return LLVMNullValue()
@@ -83,7 +83,7 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     if (kind == IntrinsicKind.CPOINTER_INIT1 || kind == IntrinsicKind.CSTRING_INIT ||
         kind == IntrinsicKind.CSTRING_CONVERT_CSTR_TO_PTR) {
         if (!args.isEmpty()) {
-            let rawArg = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
+            let rawArg = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
             if (let Some(resultTy) <- resultType) {
                 let resultLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType()
                 return CastPointerLikeIfNeeded(irBuilder, rawArg, resultLLVMType)
@@ -94,7 +94,7 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     }
     if (kind == IntrinsicKind.CPOINTER_GET_POINTER_ADDRESS) {
         if (!args.isEmpty()) {
-            let pointerValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
+            let pointerValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
             if (let Some(resultTy) <- resultType) {
                 return irBuilder.CreatePtrToInt(pointerValue,
                     CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType(), name: "ptr.addr")
@@ -113,7 +113,7 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     }
     if (kind == IntrinsicKind.BIT_CAST) {
         if (!args.isEmpty() && resultType.isSome()) {
-            let rawArg = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
+            let rawArg = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
             if (let Some(resultTy) <- resultType) {
                 return irBuilder.CreateBitCast(rawArg, CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType())
             }
@@ -122,7 +122,7 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     }
     if (kind == IntrinsicKind.INOUT_PARAM) {
         if (!args.isEmpty()) {
-            let rawArg = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
+            let rawArg = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
             return CastPointerLikeIfNeeded(irBuilder, rawArg,
                 unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) })
         }
@@ -130,7 +130,7 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     }
     if (kind == IntrinsicKind.IS_NULL) {
         if (!args.isEmpty()) {
-            let rawArg = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
+            let rawArg = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
             let nullValue = unsafe { LLVMConstNull(LLVMTypeOf(rawArg)) }
             return irBuilder.CreateICmp(LLVMIntPredicate.NE, rawArg, nullValue, name: "is.null")
         }
@@ -180,12 +180,12 @@ private func GenerateArraySyscall(irBuilder: IRBuilder2, kind: IntrinsicKind, ar
         return GenerateArrayCopyTo(irBuilder, args, resultType)
     }
     if (kind == IntrinsicKind.ARRAY_SIZE) {
-        let arrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
+        let arrayValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
         return irBuilder.CallArrayIntrinsicGetSize(arrayValue)
     }
     if (kind == IntrinsicKind.ARRAY_CLONE) {
         if (let Some(rawArrayTy) <- GetRawArrayTypeFromArrayArg(args[0])) {
-            let arrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
+            let arrayValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
             return irBuilder.CallArrayIntrinsicCopy(rawArrayTy, arrayValue)
         }
         return LLVMNullValue()
@@ -193,9 +193,9 @@ private func GenerateArraySyscall(irBuilder: IRBuilder2, kind: IntrinsicKind, ar
     if (kind == IntrinsicKind.ARRAY_INIT) {
         if (args.size == 3) {
             if (let Some(rawArrayTy) <- GetRawArrayTypeFromArrayArg(args[0])) {
-                let arrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
-                let elementValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[1]).GetRawValue()
-                let sizeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[2]).GetRawValue()
+                let arrayValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
+                let elementValue = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
+                let sizeValue = irBuilder.GetCGModule().GetMappedCGValue(args[2]).GetRawValue()
                 let _ = irBuilder.CallArrayInit(arrayValue, sizeValue, elementValue, rawArrayTy)
                 if (let Some(resultTy) <- resultType) {
                     return irBuilder.CreateNullValue(resultTy)
@@ -213,10 +213,10 @@ private func GenerateArrayIndex(irBuilder: IRBuilder2, args: ArrayList<Value>, i
         return LLVMNullValue()
     }
     if (let Some(rawArrayTy) <- GetRawArrayTypeFromArrayArg(args[0])) {
-        let arrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
-        let indexValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[1]).GetRawValue()
+        let arrayValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
+        let indexValue = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
         if (args.size >= 3) {
-            let elementValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[2])
+            let elementValue = irBuilder.GetCGModule().GetMappedCGValue(args[2])
             return irBuilder.CallArrayIntrinsicSet(rawArrayTy, arrayValue, indexValue, elementValue, isChecked)
         }
         return irBuilder.CallArrayIntrinsicGet(rawArrayTy, arrayValue, indexValue, isChecked)
@@ -229,8 +229,8 @@ private func GenerateArrayGetElemRef(irBuilder: IRBuilder2, args: ArrayList<Valu
         return LLVMNullValue()
     }
     if (let Some(rawArrayTy) <- GetRawArrayTypeFromArrayArg(args[0])) {
-        let arrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
-        let indexValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[1]).GetRawValue()
+        let arrayValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
+        let indexValue = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
         return irBuilder.GetArrayElementAddr(rawArrayTy, arrayValue, indexValue, false)
     }
     return LLVMNullValue()
@@ -242,11 +242,11 @@ private func GenerateArrayCopyTo(irBuilder: IRBuilder2, args: ArrayList<Value>,
         return LLVMNullValue()
     }
     if (let Some(rawArrayTy) <- GetRawArrayTypeFromArrayArg(args[0])) {
-        let srcArray = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
-        let dstArray = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[1]).GetRawValue()
-        let srcStart = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[2]).GetRawValue()
-        let dstStart = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[3]).GetRawValue()
-        let copyLen = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[4]).GetRawValue()
+        let srcArray = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
+        let dstArray = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
+        let srcStart = irBuilder.GetCGModule().GetMappedCGValue(args[2]).GetRawValue()
+        let dstStart = irBuilder.GetCGModule().GetMappedCGValue(args[3]).GetRawValue()
+        let copyLen = irBuilder.GetCGModule().GetMappedCGValue(args[4]).GetRawValue()
         let _ = irBuilder.CallArrayIntrinsicCopyTo(rawArrayTy, srcArray, dstArray, srcStart, dstStart, copyLen)
         if (let Some(resultTy) <- resultType) {
             return irBuilder.CreateNullValue(resultTy)
@@ -276,8 +276,8 @@ private func GenerateCPointerAdd(irBuilder: IRBuilder2, args: ArrayList<Value>,
     if (args.size < 2 || resultType.isNone()) {
         return LLVMNullValue()
     }
-    let pointerValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
-    let offsetValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[1]).GetRawValue()
+    let pointerValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
+    let offsetValue = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
     if (let Some(resultTy) <- resultType) {
         let elemSize = ElementSizeOfPointerLike(irBuilder, resultTy)
         let ptrAsInt = irBuilder.CreatePtrToInt(pointerValue, unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) },
@@ -311,8 +311,8 @@ private func GenerateCPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>,
     if (args.size < 2 || resultType.isNone()) {
         return LLVMNullValue()
     }
-    let pointerValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
-    let indexValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[1]).GetRawValue()
+    let pointerValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
+    let indexValue = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
     if (let Some(resultTy) <- resultType) {
         let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
         let typedPtr = irBuilder.CreatePointerCast(pointerValue,
@@ -329,9 +329,9 @@ private func GenerateCPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>
     if (args.size < 3) {
         return LLVMNullValue()
     }
-    let pointerValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
-    let indexValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[1]).GetRawValue()
-    let value = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[2])
+    let pointerValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
+    let indexValue = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
+    let value = irBuilder.GetCGModule().GetMappedCGValue(args[2])
     if (let Some(valueTy) <- args[2].GetType()) {
         let valueCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), valueTy)
         let typedPtr = irBuilder.CreatePointerCast(pointerValue,

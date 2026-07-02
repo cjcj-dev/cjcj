@@ -16,7 +16,7 @@ public func GenerateVArrayExpression(irBuilder: IRBuilder2, chirExpr: Expression
         let elements = ArrayList<LLVMValueRef>()
         var idx: Int64 = 0
         while (idx < chirExpr.GetNumOfOperands()) {
-            elements.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(idx)).GetRawValue())
+            elements.add(irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(idx)).GetRawValue())
             idx++
         }
         return irBuilder.CreateAggregateValue(resultCGType.GetLLVMType(), elements, name: "varray")
@@ -28,14 +28,14 @@ public func GenerateVArrayBuilderExpression(irBuilder: IRBuilder2, chirExpr: Exp
     if (let Some(varrayBuilder) <- (chirExpr as VArrayBuilder)) {
         let varrayTy = (RequiredVArrayBuilderResultType(varrayBuilder) as VArrayType).getOrThrow()
         let cgMod = irBuilder.GetCGModule()
-        let varrayLen = cgMod.MaterializeValue(irBuilder, varrayBuilder.GetSize()).GetRawValue()
+        let varrayLen = cgMod.GetMappedCGValue(varrayBuilder.GetSize()).GetRawValue()
         if (!IsVArrayBuilderInitedByItem(varrayBuilder)) {
             let autoEnvType = varrayBuilder.GetInitFunc().GetType().getOrThrow().StripAllRefs()
             CJC_ASSERT(IsAutoEnvBaseType(autoEnvType))
-            let autoEnvOfInitFunc = cgMod.MaterializeValue(irBuilder, varrayBuilder.GetInitFunc())
+            let autoEnvOfInitFunc = cgMod.GetMappedCGValue(varrayBuilder.GetInitFunc())
             return irBuilder.VArrayInitedByLambda(varrayLen, autoEnvOfInitFunc, varrayTy)
         } else {
-            let itemValue = cgMod.MaterializeValue(irBuilder, varrayBuilder.GetItem())
+            let itemValue = cgMod.GetMappedCGValue(varrayBuilder.GetItem())
             return irBuilder.VArrayInitedByItem(varrayLen, itemValue, varrayTy)
         }
     }

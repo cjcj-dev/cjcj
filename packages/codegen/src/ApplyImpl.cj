@@ -63,7 +63,7 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
     isMethodType!: Bool, isStaticMethodType!: Bool, thisType!: Option<Type>,
     instTypeArgs!: ArrayList<Type> = ArrayList<Type>()): LLVMValueRef {
     let cgMod = irBuilder.GetCGModule()
-    let calleeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, callee)
+    let calleeValue = irBuilder.GetCGModule().GetMappedCGValue(callee)
     if (let Some(chirFuncTy) <- (callee.GetType().getOrThrow() as FuncType)) {
         if (chirFuncTy.IsCFunc()) {
             return HandleApplyCFunc(cgMod, irBuilder, callee, calleeValue, args, chirFuncTy)
@@ -71,7 +71,7 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
     }
     let argValues = ArrayList<CGValue>()
     for (arg in args) {
-        argValues.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, arg))
+        argValues.add(irBuilder.GetCGModule().GetMappedCGValue(arg))
     }
     let methodTypeInfoArg = BuildApplyMethodTypeInfoArg(irBuilder, callee, thisType, argValues)
     if (let Some(instFuncTy) <- callType) {
@@ -450,7 +450,7 @@ private func HandleApplyCFunc(cgMod: CGModule, irBuilder: IRBuilder2, callee: Va
         if (IsZeroSizedTypeInC(cgMod, argTy)) {
             continue
         }
-        args.add(cgMod.MaterializeValue(irBuilder, arg))
+        args.add(cgMod.GetMappedCGValue(arg))
     }
     let processedArgs = HandleForeignFuncCall(cgMod, irBuilder, args, funcTy)
     let cffi = cgMod.GetCGCFFI()

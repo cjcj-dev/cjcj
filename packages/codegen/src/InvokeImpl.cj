@@ -189,7 +189,7 @@ private func GenerateVirtualApply(irBuilder: IRBuilder2, ownerTy: Type, methodNa
     }
     let argValues = ArrayList<CGValue>()
     for (arg in args) {
-        argValues.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, arg))
+        argValues.add(irBuilder.GetCGModule().GetMappedCGValue(arg))
     }
     let virtualOwnerTy = InstantiateVirtualOwnerType(ownerTy, callee, methodType)
     let (introTy, methodIndex) = ResolveVirtualMethod(virtualOwnerTy, methodName, callee, virtualMethodOffset)

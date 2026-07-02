@@ -8,8 +8,8 @@ public func GenerateArithmeticOperation(irBuilder: IRBuilder2, chirExpr: CHIRBin
     }
     let leftOperand = chirExpr.binaryExpr.GetOperand(0)
     let rightOperand = chirExpr.binaryExpr.GetOperand(1)
-    let leftValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, leftOperand)
-    let rightValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, rightOperand)
+    let leftValue = irBuilder.GetCGModule().GetMappedCGValue(leftOperand)
+    let rightValue = irBuilder.GetCGModule().GetMappedCGValue(rightOperand)
     var rightRawValue = rightValue.GetRawValue()
     let operandType = leftOperand.GetType()
     let resultType = chirExpr.binaryExpr.GetResultType()

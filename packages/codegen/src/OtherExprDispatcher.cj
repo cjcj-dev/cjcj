@@ -84,7 +84,7 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
 private func GenerateRTTIExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())
     if (let Some(getRTTI) <- (chirExpr as GetRTTI)) {
-        let objectValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, getRTTI.GetOperand()).GetRawValue()
+        let objectValue = irBuilder.GetCGModule().GetMappedCGValue(getRTTI.GetOperand()).GetRawValue()
         let typeInfo = irBuilder.GetTypeInfoFromObject(objectValue)
         return irBuilder.CreateBitCast(typeInfo, typeInfoPtrType)
     }

@@ -12,7 +12,6 @@ import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.GlobalVar
-import cangjie_compiler::chir.LocalVar
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
@@ -20,6 +19,7 @@ import cangjie_compiler::option.ArchType
 import cangjie_compiler::option.EnvironmentType
 import cangjie_compiler::option.OSType
 import cangjie_compiler::option.TripleInfo
+import cangjie_compiler::utils.CJC_ASSERT_WITH_MSG
 
 private let CJ_PERSONALITY_FUNC_NAME: String = "__cj_personality_v0$"
 
@@ -538,7 +538,7 @@ public class CGModule {
         localValueMapping.remove(chirValue)
     }
 
-    public func MaterializeValue(irBuilder: IRBuilder2, chirValue: Value): CGValue {
+    public func GetMappedCGValue(chirValue: Value): CGValue {
         if (let Some(mappedValue) <- GetMappedValue(chirValue)) {
             return mappedValue
         }
@@ -548,17 +548,8 @@ public class CGModule {
         if (let Some(globalValue) <- (chirValue as GlobalVar)) {
             return GetOrInsertGlobalVariable(globalValue)
         }
-        if (let Some(localValue) <- (chirValue as LocalVar)) {
-            if (let Some(ownerExpr) <- localValue.GetExpr()) {
-                let emitted = DispatchExpression(irBuilder, ownerExpr)
-                let cgValue = CGValue(emitted, GetCGTypeForLocalExpressionValue(localValue, ownerExpr))
-                SetOrUpdateMappedCGValue(localValue, cgValue)
-                return cgValue
-            }
-        }
-        let fallback = CGValue(LLVMNullValue(), GetCGTypeForValue(chirValue))
-        SetOrUpdateMappedCGValue(chirValue, fallback)
-        return fallback
+        CJC_ASSERT_WITH_MSG(false, "Should not reach here: value not dominate all uses in CHIR.")
+        throw IllegalStateException("Should not reach here: value not dominate all uses in CHIR.")
     }
 
     public func GetCGTypeForExpressionResult(valueType: Type, ownerExpr: Expression): CGType {
@@ -975,11 +966,6 @@ public class CGModule {
             return CGType.GetOrCreate(this, valueType)
         }
         return CGType(this, cgCtx, Type(TypeKind.TYPE_INVALID))
-    }
-
-    private func GetCGTypeForLocalExpressionValue(localValue: LocalVar, ownerExpr: Expression): CGType {
-        let valueType = localValue.GetType() ?? return GetCGTypeForValue(localValue)
-        return GetCGTypeForExpressionResult(valueType, ownerExpr)
     }
 
     private func ShouldUseRefCGTypeForTupleExpressionResult(valueType: Type): Bool {

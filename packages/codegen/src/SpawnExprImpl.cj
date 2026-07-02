@@ -59,7 +59,7 @@ private func GenerateSpawn(irBuilder: IRBuilder2, spawnInfo: SpawnInfo): LLVMVal
 }
 
 private func GenerateSpawnWithExecuteFuture(irBuilder: IRBuilder2, spawnInfo: SpawnInfo): LLVMValueRef {
-    let futureObj = irBuilder.GetCGModule().MaterializeValue(irBuilder, spawnInfo.futureValue)
+    let futureObj = irBuilder.GetCGModule().GetMappedCGValue(spawnInfo.futureValue)
     let threadCtx = MaterializeSpawnArg(irBuilder, spawnInfo.spawnArg)
     if (let Some(executeMethod) <- FindFutureExecuteMethod(spawnInfo.futureValue)) {
         let cgFunc = irBuilder.GetCGModule().GetOrInsertCGFunction(executeMethod)
@@ -72,7 +72,7 @@ private func GenerateSpawnWithExecuteFuture(irBuilder: IRBuilder2, spawnInfo: Sp
 }
 
 private func GenerateSpawnWithExecuteClosure(irBuilder: IRBuilder2, spawnInfo: SpawnInfo): LLVMValueRef {
-    let closureObj = irBuilder.GetCGModule().MaterializeValue(irBuilder, spawnInfo.futureValue)
+    let closureObj = irBuilder.GetCGModule().GetMappedCGValue(spawnInfo.futureValue)
     let threadCtx = MaterializeSpawnArg(irBuilder, spawnInfo.spawnArg)
     if (let Some(executeClosureFunc) <- spawnInfo.executeClosure) {
         let cgFunc = irBuilder.GetCGModule().GetOrInsertCGFunction(executeClosureFunc)
@@ -89,7 +89,7 @@ private func GenerateSpawnWithExecuteClosure(irBuilder: IRBuilder2, spawnInfo: S
 
 private func MaterializeSpawnArg(irBuilder: IRBuilder2, spawnArg: Option<Value>): Option<CGValue> {
     if (let Some(arg) <- spawnArg) {
-        return Some(irBuilder.GetCGModule().MaterializeValue(irBuilder, arg))
+        return Some(irBuilder.GetCGModule().GetMappedCGValue(arg))
     }
     return None
 }

@@ -17,8 +17,8 @@ public func GenerateBooleanOperation(irBuilder: IRBuilder2, chirExpr: CHIRBinary
             return irBuilder.GetFalse()
         }
     }
-    let leftValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, leftOperand)
-    let rightValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, rightOperand)
+    let leftValue = irBuilder.GetCGModule().GetMappedCGValue(leftOperand)
+    let rightValue = irBuilder.GetCGModule().GetMappedCGValue(rightOperand)
     var rightRawValue = rightValue.GetRawValue()
     if (let Some(leftTy) <- leftOperand.GetType()) {
         if (let Some(rightTy) <- rightOperand.GetType()) {

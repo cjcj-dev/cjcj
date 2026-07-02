@@ -27,13 +27,13 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
     }
     if (kind == ExprKind.BRANCH) {
         if (let Some(branch) <- (chirExpr as Branch)) {
-            let branchCond = irBuilder.GetCGModule().MaterializeValue(irBuilder, branch.GetCondition())
+            let branchCond = irBuilder.GetCGModule().GetMappedCGValue(branch.GetCondition())
             return irBuilder.CreateCondBr(branchCond.GetRawValue(), GetOrCreateTerminatorDest(irBuilder,
                 branch.GetTrueBlock()), GetOrCreateTerminatorDest(irBuilder, branch.GetFalseBlock()))
         }
         let successors = GetTerminatorSuccessors(chirExpr)
         if (chirExpr.GetNumOfOperands() > 0 && successors.size >= 2) {
-            let condValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+            let condValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0))
             return irBuilder.CreateCondBr(condValue.GetRawValue(), GetOrCreateTerminatorDest(irBuilder, successors[0]),
                 GetOrCreateTerminatorDest(irBuilder, successors[1]))
         }
@@ -111,7 +111,7 @@ private func CreateDirectRet(irBuilder: IRBuilder2, chirExpr: Expression): LLVMV
             return irBuilder.CreateRetVoid()
         }
     }
-    let directRetValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+    let directRetValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0))
     if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
         if (cgFunc.IsSRet()) {
             let sretArg = unsafe { LLVMGetParam(cgFunc.GetRawFunction(), 0u32) }
@@ -206,7 +206,7 @@ private func CreateRetFromFunctionReturnSlot(irBuilder: IRBuilder2, parentFunc: 
             return irBuilder.CreateRetVoid()
         }
         if (let Some(retValue) <- parentFunc.GetReturnValue()) {
-            let retAddr = irBuilder.GetCGModule().MaterializeValue(irBuilder, retValue)
+            let retAddr = irBuilder.GetCGModule().GetMappedCGValue(retValue)
             if (retTy.IsRawArray() && IsRawArrayReturnValue(retValue)) {
                 return irBuilder.CreateRet(retAddr.GetRawValue())
             }
@@ -268,7 +268,7 @@ private func HandleMultiBranchTerminator(irBuilder: IRBuilder2, multiBranch: Mul
     if (multiBranch.GetNumOfSuccessor() == 0) {
         return LLVMNullValue()
     }
-    let condValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, multiBranch.GetCondition()).GetRawValue()
+    let condValue = irBuilder.GetCGModule().GetMappedCGValue(multiBranch.GetCondition()).GetRawValue()
     let defaultDest = GetOrCreateTerminatorDest(irBuilder, multiBranch.GetDefaultBlock())
     let caseValues = multiBranch.GetCaseVals()
     let caseCountHint = UInt32(caseValues.size)
@@ -289,7 +289,7 @@ private func HandleRaiseException(irBuilder: IRBuilder2, chirExpr: Expression): 
         return irBuilder.CreateUnreachable()
     }
     let successors = GetTerminatorSuccessors(chirExpr)
-    let exceptionValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+    let exceptionValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0))
     if (!successors.isEmpty()) {
         let unwindDest = GetOrCreateTerminatorDest(irBuilder, successors[0])
         try (scope = CodeGenUnwindBlockScope(irBuilder.GetCGModule(), unwindDest)) {

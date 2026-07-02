@@ -50,7 +50,7 @@ private func GenerateNativeTuple(irBuilder: IRBuilder2, chirExpr: Expression, re
     var idx: Int64 = 0
     while (idx < chirExpr.GetNumOfOperands()) {
         let operand = chirExpr.GetOperand(idx)
-        let operandValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, operand)
+        let operandValue = irBuilder.GetCGModule().GetMappedCGValue(operand)
         if (idx < containedTypes.size) {
             let fieldTy = containedTypes[idx].GetOriginal()
             let fieldPtr = irBuilder.CreateStructGEP(resultCGType.GetLLVMType(), resultValue, UInt32(idx),
@@ -78,7 +78,7 @@ private func GenerateNativeStruct(irBuilder: IRBuilder2, chirExpr: Expression, _
     let containedTypes = resultCGType.GetContainedTypes()
     var idx: Int64 = 0
     while (idx < chirExpr.GetNumOfOperands()) {
-        let operandValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(idx))
+        let operandValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(idx))
         if (idx < containedTypes.size) {
             let fieldTy = containedTypes[idx].GetOriginal()
             let fieldPtr = irBuilder.CreateStructGEP(resultCGType.GetLLVMType(), resultValue, UInt32(idx),
@@ -97,7 +97,7 @@ private func GenerateAssociatedNonRefEnum(irBuilder: IRBuilder2, chirExpr: Expre
     let containedTypes = enumCGType.GetContainedTypes()
     var idx: Int64 = 0
     while (idx < chirExpr.GetNumOfOperands()) {
-        let operandValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(idx))
+        let operandValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(idx))
         if (idx < containedTypes.size) {
             let fieldTy = containedTypes[idx].GetOriginal()
             let fieldPtr = irBuilder.CreateStructGEP(enumCGType.GetLLVMType(), enumValue, UInt32(idx),
@@ -117,7 +117,7 @@ private func GenerateAggregateValue(irBuilder: IRBuilder2, chirExpr: Expression,
     var idx: Int64 = 0
     while (idx < chirExpr.GetNumOfOperands()) {
         let operand = chirExpr.GetOperand(idx)
-        let operandValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, operand)
+        let operandValue = irBuilder.GetCGModule().GetMappedCGValue(operand)
         var rawValue = operandValue.GetRawValue()
         if (idx < containedTypes.size) {
             let storageTy = containedTypes[idx].GetOriginal()
@@ -156,7 +156,7 @@ private func GenerateCommonEnum(irBuilder: IRBuilder2, chirExpr: Expression): LL
     idx = 0
     while (idx < chirExpr.GetNumOfOperands()) {
         let operand = chirExpr.GetOperand(idx)
-        var rawValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, operand).GetRawValue()
+        var rawValue = irBuilder.GetCGModule().GetMappedCGValue(operand).GetRawValue()
         if (idx < containedTypes.size) {
             let storageFieldTy = containedTypes[idx].GetOriginal()
             if (let Some(sourceTy) <- operand.GetType()) {
@@ -278,7 +278,7 @@ private func GenerateOptionLikeTEnum(irBuilder: IRBuilder2, chirExpr: Expression
 
     irBuilder.SetInsertPoint(blocks[0])
     if (hasAssociatedValue) {
-        let associatedValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(1))
+        let associatedValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(1))
         irBuilder.CallGCWrite(associatedValue.GetRawValue(), enumValue, castedPayload)
     } else {
         irBuilder.CallGCWrite(unsafe { LLVMConstNull(i8PtrTy) }, enumValue, castedPayload)
@@ -286,7 +286,7 @@ private func GenerateOptionLikeTEnum(irBuilder: IRBuilder2, chirExpr: Expression
     irBuilder.CreateBr(blocks[2])
 
     irBuilder.SetInsertPoint(blocks[1])
-    let selectorValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0)).GetRawValue()
+    let selectorValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0)).GetRawValue()
     let selectorPtr = irBuilder.CreateBitCast(payload, unsafe { LLVMPointerType(i1Ty, 1u32) })
     irBuilder.CreateStore(selectorValue, selectorPtr)
     if (hasAssociatedValue) {
@@ -294,7 +294,7 @@ private func GenerateOptionLikeTEnum(irBuilder: IRBuilder2, chirExpr: Expression
         let indices = ArrayList<LLVMValueRef>()
         indices.add(associatedOffset)
         let associatedPtr = irBuilder.CreateInBoundsGEP(i8Ty, castedPayload, indices)
-        let associatedValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(1))
+        let associatedValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(1))
         let associatedCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), associatedType)
         let associatedTypeSize = irBuilder.GetLayoutSize32(associatedType, associatedCGType)
         irBuilder.CallGCWriteGeneric(enumValue, associatedPtr, associatedValue.GetRawValue(), associatedTypeSize)
@@ -310,7 +310,7 @@ private func GenerateOptionLikeRefEnum(irBuilder: IRBuilder2, chirExpr: Expressi
         return unsafe { LLVMConstNull(CGType.GetRefType(irBuilder.GetLLVMContext())) }
     }
     let associatedOperand = chirExpr.GetOperand(1)
-    return irBuilder.GetCGModule().MaterializeValue(irBuilder, associatedOperand).GetRawValue()
+    return irBuilder.GetCGModule().GetMappedCGValue(associatedOperand).GetRawValue()
 }
 
 private func GenerateOptionLikeNonRefEnum(irBuilder: IRBuilder2, chirExpr: Expression, resultTy: Type,
@@ -319,7 +319,7 @@ private func GenerateOptionLikeNonRefEnum(irBuilder: IRBuilder2, chirExpr: Expre
     if (enumCGType.GetSize().isSome()) {
         let enumValue = irBuilder.CreateEntryAlloca(enumCGType, name: "enum.val")
         if (chirExpr.GetNumOfOperands() > 0) {
-            let selectorValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+            let selectorValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0))
             let selectorTy = chirExpr.GetOperand(0).GetType() ??
                 irBuilder.GetCGContext().GetCHIRBuilder().context.GetBoolTy()
             let selectorPtr = irBuilder.CreateStructGEP(enumCGType.GetLLVMType(), enumValue, 0u32)
@@ -328,7 +328,7 @@ private func GenerateOptionLikeNonRefEnum(irBuilder: IRBuilder2, chirExpr: Expre
         }
         let associatedValueType = enumCGType.GetAssociatedValueTypeOfOptionLike() ?? return enumValue
         let recordValue = if (hasAssociatedValue) {
-            irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(1))
+            irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(1))
         } else {
             CGValue(irBuilder.CreateNullValue(associatedValueType),
                 CGType.GetOrCreate(irBuilder.GetCGModule(), associatedValueType))
@@ -342,7 +342,7 @@ private func GenerateOptionLikeNonRefEnum(irBuilder: IRBuilder2, chirExpr: Expre
     let enumValue = irBuilder.CallAllocaGeneric(enumType)
     let payload = irBuilder.GetPayloadFromObject(enumValue)
     if (chirExpr.GetNumOfOperands() > 0) {
-        let selectorValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0)).GetRawValue()
+        let selectorValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0)).GetRawValue()
         let selectorPtr = irBuilder.CreateBitCast(payload,
             unsafe { LLVMPointerType(LLVMInt1TypeInContext(irBuilder.GetLLVMContext().raw), 1u32) })
         irBuilder.CreateStore(selectorValue, selectorPtr)
@@ -354,7 +354,7 @@ private func GenerateOptionLikeNonRefEnum(irBuilder: IRBuilder2, chirExpr: Expre
         let i8Type = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
         let i8PtrType = unsafe { LLVMPointerType(i8Type, 1u32) }
         let associatedPtr = irBuilder.CreateGEP(i8Type, irBuilder.CreateBitCast(payload, i8PtrType), indices)
-        let associatedValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(1))
+        let associatedValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(1))
         let associatedType = chirExpr.GetOperand(1).GetType() ?? return enumValue
         let associatedCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), associatedType)
         irBuilder.CallGCWriteGeneric(enumValue, associatedPtr, associatedValue.GetRawValue(),

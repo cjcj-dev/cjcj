@@ -28,7 +28,7 @@ public func GenerateLoad(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValue
     if (let Some(genericFieldLoad) <- TryLoadGenericClassFieldWithReadBarrier(irBuilder, chirExpr)) {
         return genericFieldLoad
     }
-    let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+    let addr = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0))
     if (let Some(addrType) <- addr.GetCGType()) {
         if (let Some(pointerElementType) <- addrType.GetPointerElementType()) {
             if (let Some(readBarrier) <- TryGenerateGCReadForLoad(irBuilder, chirExpr, pointerElementType, addr)) {
@@ -68,7 +68,7 @@ private func TryLoadGenericClassFieldWithReadBarrier(irBuilder: IRBuilder2,
     if (!IsGenericField(fieldTy)) {
         return None
     }
-    let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base)
+    let baseValue = irBuilder.GetCGModule().GetMappedCGValue(base)
     let baseCGType = baseValue.GetCGType() ?? return None
     if (!baseCGType.GetOriginal().StripAllRefs().IsClass() ||
         !IsAddressSpacePointer(baseValue.GetRawValue(), 1u32)) {
@@ -103,7 +103,7 @@ private func TryLoadClassFieldWithReadBarrier(irBuilder: IRBuilder2, loadExpr: E
     } else {
         return None
     }
-    let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base)
+    let baseValue = irBuilder.GetCGModule().GetMappedCGValue(base)
     let baseCGType = baseValue.GetCGType() ?? return None
     if (!baseCGType.GetOriginal().StripAllRefs().IsClass()) {
         return None
@@ -168,7 +168,7 @@ private func TryGenerateGCReadForLoad(irBuilder: IRBuilder2, chirExpr: Expressio
                 if (let Some(baseTy) <- base.GetType()) {
                     if (IsManagedObjectElementBase(baseTy) &&
                         IsManagedReferenceField(irBuilder, ResolveElementTypeByPath(baseTy, getElementRef.GetPath()))) {
-                        let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base)
+                        let baseValue = irBuilder.GetCGModule().GetMappedCGValue(base)
                         return Some(irBuilder.CallGCReadRef(baseValue.GetRawValue(), addr.GetRawValue()))
                     }
                 }
@@ -197,7 +197,7 @@ public func GenerateRawArrayAllocate(irBuilder: IRBuilder2, chirExpr: Expression
     }
     if (let Some(resultTy) <- chirExpr.GetResultType()) {
         if (let Some(rawArrayTy) <- FindRawArrayType(resultTy)) {
-            let lengthValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0)).GetRawValue()
+            let lengthValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0)).GetRawValue()
             return GenerateCheckedRawArrayAllocate(irBuilder, rawArrayTy, lengthValue)
         }
     }
@@ -208,12 +208,12 @@ public func GenerateRawArrayLiteralInit(irBuilder: IRBuilder2, chirExpr: Express
     if (chirExpr.GetNumOfOperands() == 0) {
         return LLVMNullValue()
     }
-    let rawArrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+    let rawArrayValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0))
     if (let Some(rawArrayTy) <- GetRawArrayType(rawArrayValue)) {
         let elementCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rawArrayTy.GetElementType())
         var elementIdx: Int64 = 1
         while (elementIdx < chirExpr.GetNumOfOperands()) {
-            let elementValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(elementIdx))
+            let elementValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(elementIdx))
             let indexValue = unsafe {
                 LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(elementIdx - 1), 0)
             }
@@ -230,10 +230,10 @@ public func GenerateRawArrayInitByValue(irBuilder: IRBuilder2, chirExpr: Express
     if (chirExpr.GetNumOfOperands() < 3) {
         return LLVMNullValue()
     }
-    let rawArrayValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+    let rawArrayValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0))
     if (let Some(rawArrayTy) <- GetRawArrayType(rawArrayValue)) {
-        let sizeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(1)).GetRawValue()
-        let initValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(2)).GetRawValue()
+        let sizeValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(1)).GetRawValue()
+        let initValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(2)).GetRawValue()
         GenerateRawArrayFillLoop(irBuilder, rawArrayValue, rawArrayTy, sizeValue, initValue)
         return rawArrayValue.GetRawValue()
     }
@@ -348,8 +348,8 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     if (ShouldSkipNoOpStore(valueOperand, addrOperand)) {
         return LLVMNullValue()
     }
-    let value = irBuilder.GetCGModule().MaterializeValue(irBuilder, valueOperand)
-    let addr = irBuilder.GetCGModule().MaterializeValue(irBuilder, addrOperand)
+    let value = irBuilder.GetCGModule().GetMappedCGValue(valueOperand)
+    let addr = irBuilder.GetCGModule().GetMappedCGValue(addrOperand)
     if (let Some(boxRetStore) <- TryGenerateBoxRetValueStore(irBuilder, chirExpr, valueOperand, addrOperand, value, addr)) {
         return boxRetStore
     }
@@ -385,8 +385,7 @@ private func TryGenerateBoxRetValueStore(irBuilder: IRBuilder2, chirExpr: Expres
         if (let Some(valueLocal) <- (valueOperand as LocalVar)) {
             if (let Some(ownerExpr) <- valueLocal.GetExpr()) {
                 if (let Some(boxExpr) <- (ownerExpr as ChirBox)) {
-                    valueToStore = irBuilder.GetCGModule().MaterializeValue(irBuilder,
-                        boxExpr.GetSourceValue()).GetRawValue()
+                    valueToStore = irBuilder.GetCGModule().GetMappedCGValue(boxExpr.GetSourceValue()).GetRawValue()
                 }
             }
         }
@@ -631,7 +630,7 @@ public func GenerateGetElementRef(irBuilder: IRBuilder2, chirExpr: Expression): 
     if (chirExpr.GetNumOfOperands() == 0) {
         return LLVMNullValue()
     }
-    let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(0))
+    let baseValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0))
     if (let Some(staticElementRef) <- (chirExpr as GetElementRef)) {
         let path = staticElementRef.GetPath()
         if (path.isEmpty()) {
@@ -664,8 +663,8 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
         let lhs = storeElementRef.GetLocation()
         let locationTy = lhs.GetType().getOrThrow()
         CJC_ASSERT(locationTy.IsRef() && !path.isEmpty())
-        let storeValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, rhs)
-        let storePlace = irBuilder.GetCGModule().MaterializeValue(irBuilder, lhs)
+        let storeValue = irBuilder.GetCGModule().GetMappedCGValue(rhs)
+        let storePlace = irBuilder.GetCGModule().GetMappedCGValue(lhs)
         let srcCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rhs.GetType().getOrThrow())
         if (srcCGType.GetSize().isNone() && IsThisArgOfStructMethod(rhs)) {
             let typeInfoOfSrc = irBuilder.CreateTypeInfo(srcCGType.GetOriginal())
@@ -701,8 +700,8 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
                 if (ShouldSkipNoOpStore(storeByName.GetValue(), storeByName.GetLocation())) {
                     return LLVMNullValue()
                 }
-                let byNameValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeByName.GetValue())
-                let byNamePlace = irBuilder.GetCGModule().MaterializeValue(irBuilder, storeByName.GetLocation())
+                let byNameValue = irBuilder.GetCGModule().GetMappedCGValue(storeByName.GetValue())
+                let byNamePlace = irBuilder.GetCGModule().GetMappedCGValue(storeByName.GetLocation())
                 let byNameAddr = irBuilder.CreateGEP(byNamePlace, path, name: "store.elem.addr").GetRawValue()
                 if (byNameAddr.isNull()) {
                     return LLVMNullValue()
@@ -963,7 +962,7 @@ private func BuildElementIndices(irBuilder: IRBuilder2, chirExpr: Expression): A
     let dynamicIndices = ArrayList<LLVMValueRef>()
     var idx: Int64 = 1
     while (idx < chirExpr.GetNumOfOperands()) {
-        dynamicIndices.add(irBuilder.GetCGModule().MaterializeValue(irBuilder, chirExpr.GetOperand(idx)).GetRawValue())
+        dynamicIndices.add(irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(idx)).GetRawValue())
         idx++
     }
     return dynamicIndices

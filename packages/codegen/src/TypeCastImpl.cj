@@ -32,7 +32,7 @@ public func EmitTypeCastExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         return EmitTransformToGenericExpression(irBuilder, transformExpr2)
     }
     let sourceOperand = chirExpr.GetOperand(0)
-    let sourceCGValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, sourceOperand)
+    let sourceCGValue = irBuilder.GetCGModule().GetMappedCGValue(sourceOperand)
     let sourceValue = sourceCGValue.GetRawValue()
     if (let Some(targetTy) <- chirExpr.GetResultType()) {
         let targetLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType()
@@ -52,7 +52,7 @@ public func EmitTypeCastExpression(irBuilder: IRBuilder2, chirExpr: Expression):
 
 private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMValueRef {
     let sourceValue = boxExpr.GetSourceValue()
-    let sourceCGValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, sourceValue)
+    let sourceCGValue = irBuilder.GetCGModule().GetMappedCGValue(sourceValue)
     let sourceRawValue = sourceCGValue.GetRawValue()
     let sourceTy = boxExpr.GetSourceTy() ?? return sourceRawValue
     if (sourceTy.IsUnit() || sourceTy.IsVoid() || sourceTy.IsNothing()) {
@@ -75,7 +75,7 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
 
 private func EmitUnBoxExpression(irBuilder: IRBuilder2, unboxExpr: UnBox): LLVMValueRef {
     let sourceValue = unboxExpr.GetSourceValue()
-    let sourceCGValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, sourceValue)
+    let sourceCGValue = irBuilder.GetCGModule().GetMappedCGValue(sourceValue)
     let sourceRawValue = sourceCGValue.GetRawValue()
     let targetTy = unboxExpr.GetTargetTy() ?? return sourceRawValue
     let targetCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy)
@@ -116,7 +116,7 @@ private func EmitUnBoxExpression(irBuilder: IRBuilder2, unboxExpr: UnBox): LLVMV
 }
 
 private func EmitUnBoxToRefExpression(irBuilder: IRBuilder2, unboxExpr: UnBoxToRef): LLVMValueRef {
-    let sourceCGValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, unboxExpr.GetSourceValue())
+    let sourceCGValue = irBuilder.GetCGModule().GetMappedCGValue(unboxExpr.GetSourceValue())
     let sourceRawValue = sourceCGValue.GetRawValue()
     let targetTy = unboxExpr.GetTargetTy() ?? return sourceRawValue
     let derefTargetTy = targetTy.StripAllRefs()
@@ -129,7 +129,7 @@ private func EmitUnBoxToRefExpression(irBuilder: IRBuilder2, unboxExpr: UnBoxToR
 
 private func EmitTransformToGenericExpression(irBuilder: IRBuilder2, transformExpr: TransformToGeneric): LLVMValueRef {
     let sourceValue = transformExpr.GetSourceValue()
-    let sourceCGValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, sourceValue)
+    let sourceCGValue = irBuilder.GetCGModule().GetMappedCGValue(sourceValue)
     let targetTy = transformExpr.GetTargetTy() ?? return sourceCGValue.GetRawValue()
     let sourceTy = transformExpr.GetSourceTy() ?? return sourceCGValue.GetRawValue()
     return CastValueToType(irBuilder, sourceCGValue.GetRawValue(), sourceTy, targetTy,
@@ -138,7 +138,7 @@ private func EmitTransformToGenericExpression(irBuilder: IRBuilder2, transformEx
 
 private func EmitTransformToConcreteExpression(irBuilder: IRBuilder2,
     transformExpr: TransformToConcrete): LLVMValueRef {
-    let sourceCGValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, transformExpr.GetSourceValue())
+    let sourceCGValue = irBuilder.GetCGModule().GetMappedCGValue(transformExpr.GetSourceValue())
     let sourceRawValue = sourceCGValue.GetRawValue()
     let targetTy = transformExpr.GetTargetTy() ?? return sourceRawValue
     let targetCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy)

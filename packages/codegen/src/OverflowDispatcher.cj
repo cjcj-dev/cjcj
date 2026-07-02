@@ -21,9 +21,9 @@ private class OverflowIntrinsicInfo {
 public func GenerateIntOpWithException(irBuilder: IRBuilder2, expr: IntOpWithException): LLVMValueRef {
     let kind = expr.GetOpKind()
     let lhs = expr.GetLHSOperand()
-    let lhsValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, lhs)
+    let lhsValue = irBuilder.GetCGModule().GetMappedCGValue(lhs)
     if (let Some(rhs) <- expr.GetRHSOperand()) {
-        let rhsValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, rhs)
+        let rhsValue = irBuilder.GetCGModule().GetMappedCGValue(rhs)
         return GenerateThrowingBinaryIntOp(irBuilder, kind, lhs, rhs, lhsValue.GetRawValue(), rhsValue.GetRawValue(),
             expr.GetResultType())
     }
@@ -52,7 +52,7 @@ public func GenerateOverflowIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind
             if (args.size != 1) {
                 return LLVMNullValue()
             }
-            let argValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, args[0]).GetRawValue()
+            let argValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
             return GenerateOverflowUnary(irBuilder, strategy, exprKind, args[0], argValue, resultType)
         }
         if (args.size < 2) {
@@ -69,8 +69,8 @@ public func IsOverflowIntrinsic(kind: IntrinsicKind): Bool {
 
 public func GenerateOverflowBinary(irBuilder: IRBuilder2, strategy: OverflowStrategy, kind: ExprKind,
     lhs: Value, rhs: Value, resultType: Option<Type>): LLVMValueRef {
-    let lhsValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, lhs).GetRawValue()
-    let rhsValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, rhs).GetRawValue()
+    let lhsValue = irBuilder.GetCGModule().GetMappedCGValue(lhs).GetRawValue()
+    let rhsValue = irBuilder.GetCGModule().GetMappedCGValue(rhs).GetRawValue()
     if (strategy == OverflowStrategy.WRAPPING) {
         return GenerateWrappingBinaryIntOp(irBuilder, kind, lhs, rhs, lhsValue, rhsValue, resultType)
     }
@@ -88,7 +88,7 @@ public func GenerateOverflowBinary(irBuilder: IRBuilder2, strategy: OverflowStra
 
 private func GenerateOverflowIncOrDec(irBuilder: IRBuilder2, strategy: OverflowStrategy, kind: ExprKind,
     value: Value, resultType: Option<Type>): LLVMValueRef {
-    let valueRef = irBuilder.GetCGModule().MaterializeValue(irBuilder, value).GetRawValue()
+    let valueRef = irBuilder.GetCGModule().GetMappedCGValue(value).GetRawValue()
     let oneValue = unsafe { LLVMConstInt(LLVMTypeOf(valueRef), 1u64, 0) }
     if (strategy == OverflowStrategy.WRAPPING) {
         return irBuilder.CreateBinaryTyped(kind, valueRef, oneValue, value.GetType(), resultType,

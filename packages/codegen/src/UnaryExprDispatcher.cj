@@ -24,7 +24,7 @@ public func HandleUnaryExpression(irBuilder: IRBuilder2, chirExpr: CHIRUnaryExpr
         return LLVMNullValue()
     }
     let operand = chirExpr.unaryExpr.GetOperand(0)
-    let cgValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, operand)
+    let cgValue = irBuilder.GetCGModule().GetMappedCGValue(operand)
     let operandType = operand.GetType()
     let resultType = chirExpr.unaryExpr.GetResultType()
     let overflowStrategy = chirExpr.unaryExpr.GetOverflowStrategy()

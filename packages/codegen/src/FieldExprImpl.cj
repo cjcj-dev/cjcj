@@ -37,7 +37,7 @@ private func GenerateFieldByPath(irBuilder: IRBuilder2, base: Value,
     if (let Some(enumField) <- GenerateEnumFieldByPath(irBuilder, base, path, name, expectedTy)) {
         return enumField
     }
-    let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base)
+    let baseValue = irBuilder.GetCGModule().GetMappedCGValue(base)
     if (let Some(baseCGType) <- baseValue.GetCGType()) {
         if (baseCGType.IsPointerType()) {
             if (let Some(elementType) <- baseCGType.GetPointerElementType()) {
@@ -93,7 +93,7 @@ private func GenerateEnumTupleCastField(irBuilder: IRBuilder2, base: Value,
     if (!sourceTy.StripAllRefs().IsEnum() || !targetTy.IsTuple()) {
         return None
     }
-    let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base).GetRawValue()
+    let baseValue = irBuilder.GetCGModule().GetMappedCGValue(base).GetRawValue()
     if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), sourceTy.StripAllRefs()) as CGEnumType)) {
         if (enumCGType.IsAllAssociatedValuesAreNonRef() || enumCGType.IsOptionLikeNonRef()) {
             var extracted = LoadPointerBackedEnumAggregateIfNeeded(irBuilder, baseValue, enumCGType)
@@ -123,7 +123,7 @@ private func GenerateDirectEnumField(irBuilder: IRBuilder2, base: Value,
     let baseTy = base.GetType() ?? return None
     let enumTy = (baseTy.StripAllRefs() as EnumType) ?? return None
     let enumCGType = (CGType.GetOrCreate(irBuilder.GetCGModule(), enumTy) as CGEnumType) ?? return None
-    let baseValue = irBuilder.GetCGModule().MaterializeValue(irBuilder, base).GetRawValue()
+    let baseValue = irBuilder.GetCGModule().GetMappedCGValue(base).GetRawValue()
     if (enumCGType.IsOptionLikeRef()) {
         if (path[0] == 0u64) {
             let nullValue = unsafe { LLVMConstNull(unsafe { LLVMTypeOf(baseValue) }) }

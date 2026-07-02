@@ -18,7 +18,7 @@ public func GenerateInstanceOf(irBuilder: IRBuilder2, chirExpr: Expression): LLV
         } else {
             return LLVMNullValue()
         }
-        let objectVal = irBuilder.GetCGModule().MaterializeValue(irBuilder, instanceOf.GetObject()).GetRawValue()
+        let objectVal = irBuilder.GetCGModule().GetMappedCGValue(instanceOf.GetObject()).GetRawValue()
         if (objectTy.IsAny() || objectTy.IsGeneric()) {
             return GenerateAnyOrGenericInstanceOf(irBuilder, objectVal, targetTypeInfo)
         }
