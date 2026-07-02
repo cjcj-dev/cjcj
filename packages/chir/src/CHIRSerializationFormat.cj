@@ -248,64 +248,110 @@ func CHIRApplyBaseAnnotations(base: Base, value: String): Unit {
 
 func CHIRKnownAttributes(): ArrayList<Attribute> {
     let attrs = ArrayList<Attribute>()
+    attrs.add(Attribute.STATIC)
+    attrs.add(Attribute.PUBLIC)
+    attrs.add(Attribute.PRIVATE)
+    attrs.add(Attribute.PROTECTED)
     attrs.add(Attribute.ABSTRACT)
+    attrs.add(Attribute.VIRTUAL)
+    attrs.add(Attribute.OVERRIDE)
+    attrs.add(Attribute.REDEF)
+    attrs.add(Attribute.SEALED)
+    attrs.add(Attribute.FOREIGN)
+    attrs.add(Attribute.MUT)
+    attrs.add(Attribute.FINAL)
+    attrs.add(Attribute.OPERATOR)
+    attrs.add(Attribute.READONLY)
+    attrs.add(Attribute.CONST)
+    attrs.add(Attribute.IMPORTED)
+    attrs.add(Attribute.GENERIC_INSTANTIATED)
+    attrs.add(Attribute.NO_DEBUG_INFO)
+    attrs.add(Attribute.GENERIC)
+    attrs.add(Attribute.INTERNAL)
+    attrs.add(Attribute.COMPILER_ADD)
+    attrs.add(Attribute.NO_REFLECT_INFO)
+    attrs.add(Attribute.NO_INLINE)
+    attrs.add(Attribute.NON_RECOMPILE)
+    attrs.add(Attribute.UNREACHABLE)
+    attrs.add(Attribute.NO_SIDE_EFFECT)
+    attrs.add(Attribute.COMMON)
+    attrs.add(Attribute.SPECIFIC)
+    attrs.add(Attribute.SKIP_ANALYSIS)
+    attrs.add(Attribute.DESERIALIZED)
+    attrs.add(Attribute.INITIALIZER)
+    attrs.add(Attribute.UNSAFE)
+    attrs.add(Attribute.JAVA_MIRROR)
+    attrs.add(Attribute.JAVA_IMPL)
+    attrs.add(Attribute.OBJ_C_MIRROR)
+    attrs.add(Attribute.HAS_INITED_FIELD)
+    attrs.add(Attribute.JAVA_HAS_DEFAULT)
+    attrs.add(Attribute.PREVIOUSLY_DESERIALIZED)
     attrs.add(Attribute.ANNOTATION)
     attrs.add(Attribute.BUILTIN)
     attrs.add(Attribute.C)
     attrs.add(Attribute.CFFI_WRAPPER)
     attrs.add(Attribute.COMPILE_TIME_VALUE)
-    attrs.add(Attribute.CONST)
     attrs.add(Attribute.EXTERN)
     attrs.add(Attribute.FAST_NATIVE)
-    attrs.add(Attribute.FOREIGN)
-    attrs.add(Attribute.GENERIC_INSTANTIATED)
     attrs.add(Attribute.IMPLICIT_ADD)
-    attrs.add(Attribute.IMPORTED)
     attrs.add(Attribute.INLINED)
-    attrs.add(Attribute.MUT)
-    attrs.add(Attribute.NO_SIDE_EFFECT)
-    attrs.add(Attribute.OPERATOR)
-    attrs.add(Attribute.PREVIOUSLY_DESERIALIZED)
-    attrs.add(Attribute.PRIVATE)
-    attrs.add(Attribute.PROTECTED)
-    attrs.add(Attribute.PUBLIC)
-    attrs.add(Attribute.READONLY)
-    attrs.add(Attribute.STATIC)
     attrs.add(Attribute.SRC_CODE_IMPORTED)
     attrs.add(Attribute.THIN)
-    attrs.add(Attribute.VIRTUAL)
     return attrs
 }
 
 func CHIRAttributeFromIndex(index: Int64): Attribute {
     return match (index) {
-        case 0 => Attribute.ABSTRACT
-        case 1 => Attribute.ANNOTATION
-        case 3 => Attribute.BUILTIN
-        case 4 => Attribute.C
-        case 5 => Attribute.CFFI_WRAPPER
-        case 6 => Attribute.COMPILE_TIME_VALUE
-        case 7 => Attribute.CONST
-        case 8 => Attribute.EXTERN
-        case 9 => Attribute.FAST_NATIVE
-        case 10 => Attribute.FOREIGN
-        case 11 => Attribute.GENERIC_INSTANTIATED
-        case 12 => Attribute.IMPLICIT_ADD
-        case 13 => Attribute.IMPORTED
-        case 14 => Attribute.INLINED
-        case 15 => Attribute.MUT
-        case 16 => Attribute.NO_SIDE_EFFECT
-        case 17 => Attribute.OPERATOR
-        case 18 => Attribute.PREVIOUSLY_DESERIALIZED
-        case 19 => Attribute.PRIVATE
-        case 20 => Attribute.PROTECTED
-        case 21 => Attribute.PUBLIC
-        case 22 => Attribute.READONLY
-        case 23 => Attribute.STATIC
-        case 24 => Attribute.SRC_CODE_IMPORTED
-        case 25 => Attribute.THIN
-        case 26 => Attribute.VIRTUAL
-        case _ => Attribute.THIN
+        case 0 => Attribute.STATIC
+        case 1 => Attribute.PUBLIC
+        case 2 => Attribute.PRIVATE
+        case 3 => Attribute.PROTECTED
+        case 4 => Attribute.ABSTRACT
+        case 5 => Attribute.VIRTUAL
+        case 6 => Attribute.OVERRIDE
+        case 7 => Attribute.REDEF
+        case 8 => Attribute.SEALED
+        case 9 => Attribute.FOREIGN
+        case 10 => Attribute.MUT
+        case 11 => Attribute.FINAL
+        case 12 => Attribute.OPERATOR
+        case 13 => Attribute.READONLY
+        case 14 => Attribute.CONST
+        case 15 => Attribute.IMPORTED
+        case 16 => Attribute.GENERIC_INSTANTIATED
+        case 17 => Attribute.NO_DEBUG_INFO
+        case 18 => Attribute.GENERIC
+        case 19 => Attribute.INTERNAL
+        case 20 => Attribute.COMPILER_ADD
+        case 21 => Attribute.NO_REFLECT_INFO
+        case 22 => Attribute.NO_INLINE
+        case 23 => Attribute.NON_RECOMPILE
+        case 24 => Attribute.UNREACHABLE
+        case 25 => Attribute.NO_SIDE_EFFECT
+        case 26 => Attribute.COMMON
+        case 27 => Attribute.SPECIFIC
+        case 28 => Attribute.SKIP_ANALYSIS
+        case 29 => Attribute.DESERIALIZED
+        case 30 => Attribute.INITIALIZER
+        case 31 => Attribute.UNSAFE
+        case 32 => Attribute.JAVA_MIRROR
+        case 33 => Attribute.JAVA_IMPL
+        case 34 => Attribute.OBJ_C_MIRROR
+        case 35 => Attribute.HAS_INITED_FIELD
+        case 36 => Attribute.JAVA_HAS_DEFAULT
+        case 37 => Attribute.PREVIOUSLY_DESERIALIZED
+        case 64 => Attribute.ANNOTATION
+        case 66 => Attribute.BUILTIN
+        case 67 => Attribute.C
+        case 68 => Attribute.CFFI_WRAPPER
+        case 69 => Attribute.COMPILE_TIME_VALUE
+        case 70 => Attribute.EXTERN
+        case 71 => Attribute.FAST_NATIVE
+        case 72 => Attribute.IMPLICIT_ADD
+        case 73 => Attribute.INLINED
+        case 74 => Attribute.SRC_CODE_IMPORTED
+        case 75 => Attribute.THIN
+        case _ => throw IllegalArgumentException("invalid CHIR attribute index")
     }
 }
 
