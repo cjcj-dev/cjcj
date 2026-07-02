@@ -63,6 +63,19 @@ private func GetArrayElementTy(typeManager: TypeManager, arrayTy: ArrayTy): Ty {
     return typeManager.GetArrayTy(arrayTy.typeArgs[0], arrayTy.dims - 1u64)
 }
 
+private func GetArrayTypeByInterface(typeManager: TypeManager, arrayStruct: Option<StructDecl>,
+    interfaceTy: Ty): Ty {
+    let invalid = TypeManager.GetInvalidTy()
+    if (let None <- arrayStruct) {
+        return invalid
+    }
+    let arrTys = Promotion(typeManager).Downgrade(arrayStruct.getOrThrow().GetTy().getOrThrow(), interfaceTy)
+    if (arrTys.values.isEmpty()) {
+        return invalid
+    }
+    return arrTys.values[0]
+}
+
 private func DesugarPointerCall(typeManager: TypeManager, ce: CallExpr,
     diag!: Option<BasicDiagnosticEngine> = None): Option<PointerExpr> {
     if (let Some(existing) <- ce.desugarExpr) {
@@ -275,10 +288,20 @@ public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit, arrayStruc
     return resultTy
 }
 
-public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit): Bool {
-    let targetTy = UnboxOptionType(target)
-    if (!Ty.IsTyCorrect(targetTy) || (!targetTy.IsArray() && !targetTy.IsStructArray() && !targetTy.IsInterface() &&
-        (let None <- (targetTy as VArrayTy)))) {
+public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit,
+    arrayStruct!: Option<StructDecl> = None): Bool {
+    var targetTy = UnboxOptionType(target)
+    arrayLit.SetTy(TypeManager.GetInvalidTy())
+    if (targetTy.IsInterface()) {
+        targetTy = GetArrayTypeByInterface(typeManager, arrayStruct, targetTy)
+        if (targetTy.IsInvalid()) {
+            if (arrayLit.children.isEmpty()) {
+                return false
+            }
+            let synTy = SynArrayLit(typeManager, arrayLit, arrayStruct)
+            return typeManager.IsSubtype(synTy, target)
+        }
+    } else if (!Ty.IsTyCorrect(targetTy) || (!targetTy.IsStructArray() && (let None <- (targetTy as VArrayTy)))) {
         arrayLit.SetTy(TypeManager.GetInvalidTy())
         return false
     }

@@ -1139,19 +1139,6 @@ private func BuildDesugaredCallArgs(typeManager: TypeManager, fd: FuncDecl, ce: 
     ce.desugarArgs = Some(desugarArgs)
 }
 
-private func ApplyInstantiatedArgumentTypes(typeManager: TypeManager, ce: CallExpr, unit: FunctionMatchingUnit): Unit {
-    var idx: Int64 = 0
-    while (idx < ce.args.size && idx < unit.tysInArgOrder.size) {
-        let rawParamTy = unit.tysInArgOrder[idx]
-        let instParamTy = typeManager.ApplySubstPack(rawParamTy, unit.typeMapping)
-        if (Ty.IsTyCorrect(instParamTy) && rawParamTy.HasGeneric()) {
-            let arg = ce.args[idx]
-            arg.SetTy(instParamTy)
-        }
-        idx++
-    }
-}
-
 private func TypeCheckCallGenericListContains(values: ArrayList<GenericsTy>, ty: Ty): Bool {
     for (value in values) {
         if (SameTy(value, ty)) {
@@ -2698,7 +2685,6 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
             }
         }
         BuildDesugaredCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
-        ApplyInstantiatedArgumentTypes(typeManager, ce, unit)
         if (let Some(fdTy) <- unit.fd.GetTy()) {
             if (IsGenericCall(ctx, ce, unit.fd)) {
                 if (UpdateFuncGenericType(typeManager, ctx, unit, ce).isEmpty()) {

@@ -3555,6 +3555,10 @@ public class TypeChecker {
 
     private func CheckArrayLit(ctx: ASTContext, target: Ty, arrayLit: ArrayLit): Bool {
         let targetTy = UnboxOptionType(target)
+        var arrayStruct: Option<StructDecl> = None
+        if (let Some(arrayDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "Array")) {
+            arrayStruct = arrayDecl as StructDecl
+        }
         var matched = true
         if (targetTy.typeArgs.size >= 1) {
             let elemTy = targetTy.typeArgs[0]
@@ -3565,7 +3569,7 @@ public class TypeChecker {
                 }
             }
         }
-        if (!ChkArrayLit(impl.typeManager, target, arrayLit)) {
+        if (!ChkArrayLit(impl.typeManager, target, arrayLit, arrayStruct: arrayStruct)) {
             matched = false
         }
         return matched
