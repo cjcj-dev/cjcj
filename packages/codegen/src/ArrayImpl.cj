@@ -454,7 +454,7 @@ private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue, addr: C
     }
     if (let Some(valueCGType) <- value.GetCGType()) {
         let valueTy = valueCGType.GetOriginal().StripAllRefs()
-        if (!valueCGType.IsReference() && (valueTy.IsStruct() || valueTy.IsTuple() || valueTy.IsVArray())) {
+        if (!valueCGType.GetOriginal().IsRef() && (valueTy.IsStruct() || valueTy.IsTuple() || valueTy.IsVArray())) {
             return irBuilder.CreateLoad(valueCGType.GetLLVMType(), raw, name: "store.value")
         }
     }
@@ -486,7 +486,7 @@ private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue, addr: C
 }
 
 private func ShouldLoadInlineValueForAddressStore(valueCGType: CGType, destCGType: CGType): Bool {
-    if (!valueCGType.IsReference() || destCGType.IsReference() || destCGType.GetSize().isNone()) {
+    if (!valueCGType.GetOriginal().IsRef() || destCGType.IsReference() || destCGType.GetSize().isNone()) {
         return false
     }
     if (IsBareGCRefLLVMType(destCGType.GetLLVMType())) {

@@ -7,6 +7,7 @@ import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.LocalVar
+import cangjie_compiler::chir.RefType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
@@ -202,7 +203,13 @@ public open class CGType {
     public func IsStructPtrType(): Bool { return IsPointerType() && !GetContainedTypes().isEmpty() && GetContainedTypes()[0].IsStructType() }
     public func IsRefType(): Bool { return cgTypeKind == CGTypeKind.CG_REF }
     public func IsReference(): Bool {
-        if (chirType.IsReferenceType() || chirType.IsRef()) {
+        if (let Some(refTy) <- (chirType as RefType)) {
+            let baseType = refTy.GetBaseType()
+            if (baseType.IsClass() || baseType.IsRawArray() || baseType.IsBox()) {
+                return true
+            }
+        }
+        if (chirType.IsBox() || chirType.IsClass() || chirType.IsRawArray()) {
             return true
         }
         if (chirType.IsEnum()) {
