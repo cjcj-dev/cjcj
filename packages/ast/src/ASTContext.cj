@@ -472,8 +472,10 @@ public class ASTContext {
 }
 
 public func SameSymbol(left: Symbol, right: Symbol): Bool {
-    if (left.hashID == right.hashID && (left.hashID.hash64 != 0u64 || left.hashID.fieldID != 0u32)) {
-        return true
+    let leftHasHashID = left.hashID.hash64 != 0u64 || left.hashID.fieldID != 0u32
+    let rightHasHashID = right.hashID.hash64 != 0u64 || right.hashID.fieldID != 0u32
+    if (leftHasHashID || rightHasHashID) {
+        return leftHasHashID && rightHasHashID && left.hashID == right.hashID
     }
     if (let Some(leftNode) <- left.node) {
         if (let Some(rightNode) <- right.node) {
