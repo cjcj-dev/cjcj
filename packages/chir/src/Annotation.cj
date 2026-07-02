@@ -114,6 +114,33 @@ private func SkipKindFromAnnotationValue(value: String): SkipKind {
     }
 }
 
+public class EnumCaseIndex {
+    private let index: Option<Int64>
+
+    public init() {
+        index = None
+    }
+
+    public init(input: Option<Int64>) {
+        index = input
+    }
+
+    public func Clone(): EnumCaseIndex {
+        return EnumCaseIndex(index)
+    }
+
+    public func ToString(): String {
+        if (let Some(value) <- index) {
+            return "EnumCaseIndex: " + value.toString()
+        }
+        return "EnumCaseIndex: "
+    }
+
+    public static func Extract(label: EnumCaseIndex): Option<Int64> {
+        return label.index
+    }
+}
+
 public class AnnotationMap {
     private let values: HashMap<String, String> = HashMap<String, String>()
 

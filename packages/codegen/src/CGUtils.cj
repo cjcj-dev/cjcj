@@ -6,6 +6,7 @@ import cangjie_compiler::chir.CheckCustomTypeDefIsExpected
 import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CustomType
+import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.Parameter
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
@@ -173,6 +174,36 @@ public func GetConstantArrayName(value: String): String {
 
 public func DeRef(chirTy: Type): Type {
     return chirTy.StripAllRefs()
+}
+
+private func GetGenericArgsFromCHIRTypeHelper(chirTy: Type, path: ArrayList<Int64>,
+    result: ArrayList<GenericTypeAndPath>): Unit {
+    let baseType = DeRef(chirTy)
+    if (let Some(genericType) <- (baseType as GenericType)) {
+        result.add(GenericTypeAndPath(genericType, path))
+    }
+    let args = baseType.GetTypeArgs()
+    var index: Int64 = 0
+    while (index < args.size) {
+        let newPath = path.clone()
+        newPath.add(index)
+        GetGenericArgsFromCHIRTypeHelper(args[index], newPath, result)
+        index++
+    }
+}
+
+public func GetGenericArgsFromCHIRType(chirTy: Type): ArrayList<GenericTypeAndPath> {
+    let result = ArrayList<GenericTypeAndPath>()
+    GetGenericArgsFromCHIRTypeHelper(chirTy, ArrayList<Int64>(), result)
+    return result
+}
+
+public func GetTypeInnerType(chirTy: Type, gtAndPath: GenericTypeAndPath): Type {
+    var result = DeRef(chirTy)
+    for (path in gtAndPath.GetPath()) {
+        result = DeRef(result.GetTypeArgs()[path])
+    }
+    return result
 }
 
 public func IsThisArgOfStructMethod(chirValue: Value): Bool {

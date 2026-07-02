@@ -80,6 +80,8 @@ public class CGContext {
     private var cjStringType: LLVMTypeRef = LLVMNullType()
 
     public var debugValue: LLVMValueRef = LLVMNullValue()
+    public let genericParamsSizeBlockLevelCacheMap: HashMap<UIntNative, HashMap<UIntNative, LLVMValueRef>> =
+        HashMap<UIntNative, HashMap<UIntNative, LLVMValueRef>>()
 
     public init(subCHIRPackage: SubCHIRPackage, cgPkgContext: CGPkgContext) {
         this.subCHIRPackage = subCHIRPackage
@@ -100,6 +102,7 @@ public class CGContext {
         llvmUsedGVs.clear()
         callBasesToReplace.clear()
         dependentPartialOrderOfTypes.clear()
+        genericParamsSizeBlockLevelCacheMap.clear()
         subCHIRPackage.Clear()
     }
 
@@ -191,6 +194,10 @@ public class CGContext {
 
     public func IsGeneratedStructType(structTypeName: String): Bool {
         return generatedStructType.contains(structTypeName)
+    }
+
+    public func AddNullableReference(value: LLVMValueRef): Unit {
+        impl.AddNullableReference(value)
     }
 
     public func AddGlobalsOfCompileUnit(globalsName: String): Unit {

@@ -1141,7 +1141,10 @@ public class TypeCast <: Expression {
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateTypeCast(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent,
             overflowStrategy: GetOverflowStrategy())
-        cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
+        let resultValue = GetResult().getOrThrow()
+        let clonedResult = cloned.GetResult().getOrThrow()
+        clonedResult.AppendAttributeInfo(resultValue.GetAttributeInfo())
+        clonedResult.SetEnumCaseIndex(resultValue.GetEnumCaseIndex())
         return cloned
     }
 }

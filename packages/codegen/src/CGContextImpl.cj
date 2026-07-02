@@ -8,7 +8,7 @@ public class CGContextImpl {
     private let chirType2CGTypeMap: ArrayList<(TypeExtraInfo, ArrayList<(Type, CGType)>)> =
         ArrayList<(TypeExtraInfo, ArrayList<(Type, CGType)>)>()
     private let valueAndBasePtrMap: HashMap<String, LLVMValueRef> = HashMap<String, LLVMValueRef>()
-    private let nullableReferences: HashSet<String> = HashSet<String>()
+    private let nullableReferences: HashSet<UIntNative> = HashSet<UIntNative>()
 
     public init() {}
 
@@ -70,7 +70,7 @@ public class CGContextImpl {
         return None
     }
 
-    public func AddNullableReference(key: String): Unit {
-        nullableReferences.add(key)
+    public func AddNullableReference(value: LLVMValueRef): Unit {
+        nullableReferences.add(value.toUIntNative())
     }
 }

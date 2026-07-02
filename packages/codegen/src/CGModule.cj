@@ -15,6 +15,7 @@ import cangjie_compiler::chir.GlobalVar
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
+import cangjie_compiler::mangle.GetTypeArgsQualifiedName
 import cangjie_compiler::option.ArchType
 import cangjie_compiler::option.EnvironmentType
 import cangjie_compiler::option.OSType
@@ -144,6 +145,37 @@ public class CGModule {
 
     public func GetLLVMModule(): Option<LLVMModuleHandle> {
         return module
+    }
+
+    public func GetEnumCaseClassName(chirEnumType: EnumType, ctorIndex: Int64): String {
+        let enumDef = chirEnumType.GetEnumDef()
+        var name = enumDef.GetPackageName() + ":" + enumDef.GetSrcCodeIdentifier() + ":" + ctorIndex.toString()
+        if (!CGType.GetOrCreate(this, chirEnumType).IsDynamicGI() && !chirEnumType.GetTypeArgs().isEmpty()) {
+            name += "<" + GetTypeArgsQualifiedName(chirEnumType.GetTypeArgs()) + ">"
+        }
+        return name
+    }
+
+    public func GetOrCreateEnumCtorTIOrTT(chirEnumType: EnumType, ctorIndex: Int64): LLVMValueRef {
+        let isTT = CGType.GetOrCreate(this, chirEnumType).IsDynamicGI()
+        let className = GetEnumCaseClassName(chirEnumType, ctorIndex) + if (isTT) { ".tt" } else { ".ti" }
+        let globalType = if (isTT) {
+            CGType.GetOrCreateTypeTemplateType(cgCtx.GetLLVMContext())
+        } else {
+            CGType.GetOrCreateTypeInfoType(cgCtx.GetLLVMContext())
+        }
+        if (let Some(moduleHandle) <- module) {
+            var global = LLVMNullValue()
+            try (nameCString = unsafe { LibC.mallocCString(className) }.asResource()) {
+                global = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+                if (global.isNull()) {
+                    global = unsafe { LLVMAddGlobal(moduleHandle.raw, globalType, nameCString.value) }
+                    throw IllegalStateException("GAP_TODO EnumCtorTIOrTTGenerator CGModule.cpp:566")
+                }
+            }
+            return global
+        }
+        return LLVMNullValue()
     }
 
     public func ReleaseLLVMModule(): Option<LLVMModuleHandle> {

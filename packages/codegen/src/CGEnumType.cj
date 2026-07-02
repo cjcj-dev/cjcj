@@ -14,10 +14,20 @@ import cangjie_compiler::chir.StructType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.VArrayType
-import cangjie_compiler::option.{ArchType, EnvironmentType}
+import cangjie_compiler::mangle.GetTypeQualifiedName
+import cangjie_compiler::option.{ArchType, EnvironmentType, TripleInfo}
+import cangjie_compiler::utils.CJC_ASSERT
 
 private let LLVM_POINTER_TYPE_KIND: Int32 = 12
 private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
+
+public class AssociatedNonRefLayout {
+    public let offsets: ArrayList<UInt32> = ArrayList<UInt32>()
+    public var size: UInt32 = 0u32
+    public var align: UInt32 = 1u32
+
+    public init() {}
+}
 
 public enum CGEnumTypeKind {
     | UNKNOWN
@@ -157,52 +167,247 @@ public class CGEnumType <: CGCustomType {
         return sizeOfConstructorUnion
     }
 
+    public static func NeedAndroidArm32AlignedEnumLayout(target: TripleInfo): Bool {
+        return target.arch == ArchType.ARM32 && target.env == EnvironmentType.ANDROID
+    }
+
+    public static func GetAndroidArm32AssociatedNonRefLayoutType(cgMod: CGModule,
+        fieldTypes: ArrayList<Type>): LLVMTypeRef {
+        if (fieldTypes.isEmpty()) {
+            return unsafe { LLVMStructTypeInContext(cgMod.GetLLVMContext().raw, CPointer<LLVMTypeRef>(), 0u32, 0) }
+        }
+        let llvmFieldTypes = ArrayList<LLVMTypeRef>()
+        for (fieldType in fieldTypes) {
+            llvmFieldTypes.add(CGType.GetOrCreate(cgMod, DeRef(fieldType)).GetLLVMType())
+        }
+        var result = LLVMNullType()
+        try (typePtr = LibC.malloc<LLVMTypeRef>(count: llvmFieldTypes.size).asResource()) {
+            var idx: Int64 = 0
+            while (idx < llvmFieldTypes.size) {
+                unsafe { (typePtr.value + idx).write(llvmFieldTypes[idx]) }
+                idx++
+            }
+            result = unsafe {
+                LLVMStructTypeInContext(cgMod.GetLLVMContext().raw, typePtr.value, UInt32(llvmFieldTypes.size), 0)
+            }
+        }
+        return result
+    }
+
+    public static func ComputeAssociatedNonRefLayout(cgMod: CGModule,
+        fieldTypes: ArrayList<Type>): AssociatedNonRefLayout {
+        return if (CGEnumType.NeedAndroidArm32AlignedEnumLayout(cgMod.GetCGContext().GetCompileOptions().target)) {
+            ComputeAndroidArm32StructAssociatedNonRefLayout(cgMod, fieldTypes)
+        } else {
+            ComputeDefaultAssociatedNonRefLayout(cgMod, fieldTypes)
+        }
+    }
+
+    private static func ComputeDefaultAssociatedNonRefLayout(cgMod: CGModule,
+        fieldTypes: ArrayList<Type>): AssociatedNonRefLayout {
+        let resultLayout = AssociatedNonRefLayout()
+        var currentOffset: UInt32 = 0u32
+        for (fieldType in fieldTypes) {
+            resultLayout.offsets.add(currentOffset)
+            let fieldCGType = CGType.GetOrCreate(cgMod, DeRef(fieldType))
+            let fieldSize = fieldCGType.GetSize()
+            CJC_ASSERT(fieldSize.isSome())
+            currentOffset += UInt32(fieldSize.getOrThrow())
+        }
+        resultLayout.size = currentOffset
+        resultLayout.align = 1u32
+        return resultLayout
+    }
+
+    private static func ComputeAndroidArm32StructAssociatedNonRefLayout(cgMod: CGModule,
+        fieldTypes: ArrayList<Type>): AssociatedNonRefLayout {
+        let resultLayout = AssociatedNonRefLayout()
+        let modelLayoutType = CGEnumType.GetAndroidArm32AssociatedNonRefLayoutType(cgMod, fieldTypes)
+        resultLayout.size = UInt32(cgMod.GetTypeSize(modelLayoutType))
+        resultLayout.align = cgMod.GetABITypeAlignment(modelLayoutType)
+        var idx: Int64 = 0
+        while (idx < fieldTypes.size) {
+            resultLayout.offsets.add(UInt32(cgMod.GetOffsetOfElement(modelLayoutType, UInt32(idx))))
+            idx++
+        }
+        return resultLayout
+    }
+
     protected override func GenLLVMType(): LLVMTypeRef {
         EnsureClassified()
+        if (llvmType.isSome()) {
+            return llvmType.getOrThrow()
+        }
+        if (cgEnumTypeKind == CGEnumTypeKind.NON_EXHAUSTIVE_UNASSOCIATED ||
+            cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED) {
+            return GenTrivialLLVMType()
+        }
+        if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_NONREF) {
+            return GenAssociatedNonRefEnumLLVMType()
+        }
         if (cgEnumTypeKind == CGEnumTypeKind.NON_EXHAUSTIVE_ASSOCIATED ||
             cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_OTHER) {
-            let layoutName = STRUCT_TYPE_PREFIX + chirType.ToString()
-            let enumLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
-            layoutType = enumLayout
-            let refType = CGType.GetRefType(cgCtx.GetLLVMContext())
-            llvmType = refType
-            if (!cgCtx.IsGeneratedStructType(layoutName)) {
-                let body = ArrayList<LLVMTypeRef>()
-                body.add(CGType.GetRefType(cgCtx.GetLLVMContext()))
-                SetStructTypeBody(enumLayout, body)
-                cgCtx.AddGeneratedStructType(layoutName)
-            }
-            return refType
+            return GenCommonEnumLLVMType()
         }
         if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T) {
-            let i8Ty = unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
-            llvmType = i8Ty
-            return i8Ty
+            return unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
         }
         if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF) {
-            let layoutName = STRUCT_TYPE_PREFIX + chirType.ToString()
-            let enumLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
-            layoutType = enumLayout
-            let refTy = CGType.GetRefType(cgCtx.GetLLVMContext())
-            llvmType = refTy
-            if (!cgCtx.IsGeneratedStructType(layoutName)) {
-                let body = ArrayList<LLVMTypeRef>()
-                body.add(refTy)
-                body.add(unsafe { LLVMArrayType(LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw), 0u32) })
-                SetStructTypeBody(enumLayout, body)
-                cgCtx.AddGeneratedStructType(layoutName)
-            }
-            return refTy
+            return GenOptionLikeRefLLVMType()
         }
-        let layoutName = STRUCT_TYPE_PREFIX + chirType.ToString()
-        let enumLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
+        if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF) {
+            return GenOptionLikeNonRefLLVMType()
+        }
+        if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ZERO_SIZE) {
+            return GenZeroSizeEnumLLVMType()
+        }
+        CJC_ASSERT(false)
+        return LLVMNullType()
+    }
+
+    private func GetEnumTypeName(): String {
+        let enumTy = (chirType as EnumType).getOrThrow()
+        if (cgEnumTypeKind == CGEnumTypeKind.NON_EXHAUSTIVE_UNASSOCIATED ||
+            cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED) {
+            return ENUM_TYPE_PREFIX + "Trivial"
+        }
+        if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T) {
+            return ENUM_TYPE_PREFIX + enumTy.GetEnumDef().GetIdentifierWithoutPrefix() + "<T>"
+        }
+        if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF) {
+            return ENUM_TYPE_PREFIX + "OptionLike.Ref"
+        }
+        if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF ||
+            cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_NONREF) {
+            return ENUM_TYPE_PREFIX + GetTypeQualifiedName(enumTy)
+        }
+        if (cgEnumTypeKind == CGEnumTypeKind.NON_EXHAUSTIVE_ASSOCIATED ||
+            cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_OTHER) {
+            return ENUM_TYPE_PREFIX + "Common"
+        }
+        if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ZERO_SIZE) {
+            return ENUM_TYPE_PREFIX + "Empty"
+        }
+        CJC_ASSERT(false)
+        return ""
+    }
+
+    private func GenTrivialLLVMType(): LLVMTypeRef {
+        let typeName = GetEnumTypeName()
+        var enumLayout = LLVMNullType()
+        try (nameCString = unsafe { LibC.mallocCString(typeName) }.asResource()) {
+            enumLayout = unsafe { LLVMGetTypeByName2(cgCtx.GetLLVMContext().raw, nameCString.value) }
+            if (enumLayout.isNull()) {
+                enumLayout = unsafe { LLVMStructCreateNamed(cgCtx.GetLLVMContext().raw, nameCString.value) }
+                let body = ArrayList<LLVMTypeRef>()
+                body.add(unsafe { LLVMInt32TypeInContext(cgCtx.GetLLVMContext().raw) })
+                SetStructTypeBody(enumLayout, body)
+            }
+        }
+        layoutType = enumLayout
+        return unsafe { LLVMInt32TypeInContext(cgCtx.GetLLVMContext().raw) }
+    }
+
+    private func GenCommonEnumLLVMType(): LLVMTypeRef {
+        let typeName = GetEnumTypeName()
+        var enumLayout = LLVMNullType()
+        try (nameCString = unsafe { LibC.mallocCString(typeName) }.asResource()) {
+            enumLayout = unsafe { LLVMGetTypeByName2(cgCtx.GetLLVMContext().raw, nameCString.value) }
+            if (enumLayout.isNull()) {
+                enumLayout = unsafe { LLVMStructCreateNamed(cgCtx.GetLLVMContext().raw, nameCString.value) }
+                let body = ArrayList<LLVMTypeRef>()
+                body.add(unsafe { LLVMPointerType(LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw), 1u32) })
+                SetStructTypeBody(enumLayout, body)
+            }
+        }
+        layoutType = enumLayout
+        return CGType.GetRefType(cgCtx.GetLLVMContext())
+    }
+
+    private func GenZeroSizeEnumLLVMType(): LLVMTypeRef {
+        let typeName = GetEnumTypeName()
+        var enumLayout = LLVMNullType()
+        try (nameCString = unsafe { LibC.mallocCString(typeName) }.asResource()) {
+            enumLayout = unsafe { LLVMGetTypeByName2(cgCtx.GetLLVMContext().raw, nameCString.value) }
+            if (enumLayout.isNull()) {
+                enumLayout = unsafe { LLVMStructCreateNamed(cgCtx.GetLLVMContext().raw, nameCString.value) }
+                SetStructTypeBody(enumLayout, ArrayList<LLVMTypeRef>())
+            }
+        }
+        layoutType = enumLayout
+        return enumLayout
+    }
+
+    private func GenOptionLikeRefLLVMType(): LLVMTypeRef {
+        let typeName = GetEnumTypeName()
+        var enumLayout = LLVMNullType()
+        try (nameCString = unsafe { LibC.mallocCString(typeName) }.asResource()) {
+            enumLayout = unsafe { LLVMGetTypeByName2(cgCtx.GetLLVMContext().raw, nameCString.value) }
+            if (enumLayout.isNull()) {
+                enumLayout = unsafe { LLVMStructCreateNamed(cgCtx.GetLLVMContext().raw, nameCString.value) }
+                let i8Ty = unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
+                let body = ArrayList<LLVMTypeRef>()
+                body.add(unsafe { LLVMPointerType(i8Ty, 1u32) })
+                body.add(unsafe { LLVMArrayType(i8Ty, 0u32) })
+                SetStructTypeBody(enumLayout, body)
+            }
+        }
+        layoutType = enumLayout
+        cgCtx.AddGeneratedStructType(typeName)
+        return CGType.GetRefType(cgCtx.GetLLVMContext())
+    }
+
+    private func GenOptionLikeNonRefLLVMType(): LLVMTypeRef {
+        let elemCGType = CGType.GetOrCreate(cgMod, optionLikeAssociatedValueType.getOrThrow())
+        if (elemCGType.GetSize().isNone()) {
+            return unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
+        }
+        let enumTypeName = GetEnumTypeName()
+        var enumLayout = LLVMNullType()
+        try (nameCString = unsafe { LibC.mallocCString(enumTypeName) }.asResource()) {
+            enumLayout = unsafe { LLVMGetTypeByName2(cgCtx.GetLLVMContext().raw, nameCString.value) }
+            if (!enumLayout.isNull() && cgCtx.IsGeneratedStructType(enumTypeName)) {
+                layoutType = enumLayout
+                llvmType = enumLayout
+                return enumLayout
+            }
+            if (enumLayout.isNull()) {
+                enumLayout = unsafe { LLVMStructCreateNamed(cgCtx.GetLLVMContext().raw, nameCString.value) }
+            }
+        }
         layoutType = enumLayout
         llvmType = enumLayout
-        if (!cgCtx.IsGeneratedStructType(layoutName)) {
-            cgCtx.AddGeneratedStructType(layoutName)
-            SetStructTypeBody(enumLayout, BuildEnumFieldTypes())
-        }
+        cgCtx.AddGeneratedStructType(enumTypeName)
+        let elemTypes = ArrayList<LLVMTypeRef>()
+        elemTypes.add(unsafe { LLVMInt1TypeInContext(cgCtx.GetLLVMContext().raw) })
+        elemTypes.add(elemCGType.GetLLVMType())
+        SetStructTypeBody(enumLayout, elemTypes)
         return enumLayout
+    }
+
+    private func GenAssociatedNonRefEnumLLVMType(): LLVMTypeRef {
+        CJC_ASSERT(sizeOfConstructorUnion.isSome())
+        let layoutSize = 4u32 + UInt32(sizeOfConstructorUnion.getOrThrow())
+        let rawLLVMType = unsafe { LLVMArrayType(LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw), layoutSize) }
+        llvmType = rawLLVMType
+        let enumTypeName = GetEnumTypeName()
+        var enumLayout = LLVMNullType()
+        try (nameCString = unsafe { LibC.mallocCString(enumTypeName) }.asResource()) {
+            enumLayout = unsafe { LLVMGetTypeByName2(cgCtx.GetLLVMContext().raw, nameCString.value) }
+            if (!enumLayout.isNull() && cgCtx.IsGeneratedStructType(enumTypeName)) {
+                layoutType = enumLayout
+                return rawLLVMType
+            }
+            if (enumLayout.isNull()) {
+                enumLayout = unsafe { LLVMStructCreateNamed(cgCtx.GetLLVMContext().raw, nameCString.value) }
+            }
+        }
+        layoutType = enumLayout
+        cgCtx.AddGeneratedStructType(enumTypeName)
+        let body = ArrayList<LLVMTypeRef>()
+        body.add(rawLLVMType)
+        SetStructTypeBody(enumLayout, body)
+        return rawLLVMType
     }
 
     protected override func GenContainedCGTypes(): Unit {
@@ -214,6 +419,9 @@ public class CGEnumType <: CGCustomType {
             containedCGTypes.add(CGType.GetOrCreate(cgMod, cgCtx.GetCHIRBuilder().context.GetInt32Ty()))
             return
         }
+        if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_NONREF) {
+            return
+        }
         if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T) {
             return
         }
@@ -223,24 +431,44 @@ public class CGEnumType <: CGCustomType {
             }
             return
         }
-        let selectorTy = if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF) {
-            cgCtx.GetCHIRBuilder().context.GetBoolTy()
-        } else {
-            cgCtx.GetCHIRBuilder().context.GetUInt32Ty()
+        if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF) {
+            containedCGTypes.add(CGType.GetOrCreate(cgMod, cgCtx.GetCHIRBuilder().context.GetBoolTy()))
+            containedCGTypes.add(CGType.GetOrCreate(cgMod, optionLikeAssociatedValueType.getOrThrow()))
+            return
         }
-        containedCGTypes.add(CGType.GetOrCreate(cgMod, selectorTy))
-        for (fieldTy in BuildEnumPayloadFieldTypes()) {
-            containedCGTypes.add(CGType.GetOrCreate(cgMod, fieldTy))
-        }
+        CJC_ASSERT(false)
     }
 
     protected override func CalculateSizeAndAlign(): Unit {
+        if (cgEnumTypeKind == CGEnumTypeKind.NON_EXHAUSTIVE_UNASSOCIATED ||
+            cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED) {
+            let rawTy = llvmType.getOrThrow()
+            size = Int64(cgMod.GetTypeSize(rawTy))
+            align = size
+            return
+        }
         if (cgEnumTypeKind == CGEnumTypeKind.NON_EXHAUSTIVE_ASSOCIATED ||
             cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_OTHER ||
             cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF) {
-            let rawTy = GetLLVMType()
+            let rawTy = llvmType.getOrThrow()
             size = Int64(cgMod.GetTypeSize(rawTy))
             align = Int64(cgMod.GetABITypeAlignment(rawTy))
+            return
+        }
+        if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_NONREF) {
+            CJC_ASSERT(sizeOfConstructorUnion.isSome())
+            size = 4 + sizeOfConstructorUnion.getOrThrow()
+            align = if (CGEnumType.NeedAndroidArm32AlignedEnumLayout(cgCtx.GetCompileOptions().target)) { 4 } else { 1 }
+            return
+        }
+        if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF) {
+            if (let Some(rawLayout) <- layoutType) {
+                size = Int64(cgMod.GetTypeSize(rawLayout))
+                align = Int64(cgMod.GetABITypeAlignment(rawLayout))
+            } else {
+                size = None
+                align = None
+            }
             return
         }
         if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T) {
@@ -248,27 +476,12 @@ public class CGEnumType <: CGCustomType {
             align = None
             return
         }
-        if (ContainsGenericType(chirType)) {
-            size = None
-            align = None
+        if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ZERO_SIZE) {
+            size = 0
+            align = 1
             return
         }
-        var total: Int64 = 0
-        var maxAlign: Int64 = 1
-        for (fieldCGType in GetContainedTypes()) {
-            let fieldAlign = if (let Some(value) <- fieldCGType.GetAlign()) { value } else { 1 }
-            let fieldSize = if (let Some(value) <- fieldCGType.GetSize()) { value } else { 0 }
-            if (total % fieldAlign != 0) {
-                total += fieldAlign - (total % fieldAlign)
-            }
-            total += fieldSize
-            if (fieldAlign > maxAlign) { maxAlign = fieldAlign }
-        }
-        if (total % maxAlign != 0) {
-            total += maxAlign - (total % maxAlign)
-        }
-        size = total
-        align = maxAlign
+        CJC_ASSERT(false)
     }
 
     private func ClassifyEnumType(): CGEnumTypeKind {
@@ -421,7 +634,7 @@ public class CGEnumType <: CGCustomType {
     }
 
     private func TryComputeConstructorUnionSize(paramTypes: ArrayList<Type>): Option<Int64> {
-        return if (NeedAndroidArm32AlignedEnumLayout()) {
+        return if (CGEnumType.NeedAndroidArm32AlignedEnumLayout(cgMod.GetCGContext().GetCompileOptions().target)) {
             TryComputeAndroidArm32StructConstructorUnionSize(paramTypes)
         } else {
             TryComputeDefaultConstructorUnionSize(paramTypes)
@@ -447,43 +660,13 @@ public class CGEnumType <: CGCustomType {
         let fullFieldTypes = ArrayList<Type>()
         fullFieldTypes.add(cgCtx.GetCHIRBuilder().context.GetInt32Ty())
         for (paramTy in paramTypes) {
-            if (ContainsActiveEnumType(paramTy)) {
-                return None
-            }
             if (CGType.GetOrCreate(cgMod, paramTy).GetSize().isNone()) {
                 return None
             }
             fullFieldTypes.add(paramTy)
         }
-        let fieldLLVMTypes = ArrayList<LLVMTypeRef>()
-        for (fieldTy in fullFieldTypes) {
-            fieldLLVMTypes.add(CGType.GetOrCreate(cgMod, fieldTy.StripAllRefs()).GetLLVMType())
-        }
-        let layoutType = CreateAnonymousStructType(fieldLLVMTypes)
-        return Some(Int64(cgMod.GetTypeSize(layoutType)) - 4)
-    }
-
-    private func CreateAnonymousStructType(fieldLLVMTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {
-        if (fieldLLVMTypes.isEmpty()) {
-            return unsafe { LLVMStructTypeInContext(cgCtx.GetLLVMContext().raw, CPointer<LLVMTypeRef>(), 0u32, 0) }
-        }
-        var result = LLVMNullType()
-        try (typePtr = LibC.malloc<LLVMTypeRef>(count: fieldLLVMTypes.size).asResource()) {
-            var idx: Int64 = 0
-            while (idx < fieldLLVMTypes.size) {
-                unsafe { (typePtr.value + idx).write(fieldLLVMTypes[idx]) }
-                idx++
-            }
-            result = unsafe {
-                LLVMStructTypeInContext(cgCtx.GetLLVMContext().raw, typePtr.value, UInt32(fieldLLVMTypes.size), 0)
-            }
-        }
-        return result
-    }
-
-    private func NeedAndroidArm32AlignedEnumLayout(): Bool {
-        let target = cgCtx.GetCompileOptions().target
-        return target.arch == ArchType.ARM32 && target.env == EnvironmentType.ANDROID
+        let fullLayout = CGEnumType.ComputeAssociatedNonRefLayout(cgMod, fullFieldTypes)
+        return Some(Int64(fullLayout.size) - 4)
     }
 
     private func ContainsActiveEnumType(ty: Type): Bool {
@@ -507,45 +690,6 @@ public class CGEnumType <: CGCustomType {
             return ContainsActiveEnumType(funcTy.GetReturnType())
         }
         return false
-    }
-
-    private func BuildEnumFieldTypes(): ArrayList<LLVMTypeRef> {
-        let out = ArrayList<LLVMTypeRef>()
-        let selectorTy = if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF) {
-            cgCtx.GetCHIRBuilder().context.GetBoolTy()
-        } else {
-            cgCtx.GetCHIRBuilder().context.GetUInt32Ty()
-        }
-        out.add(CGType.GetOrCreate(cgMod, selectorTy).GetLLVMType())
-        for (fieldTy in BuildEnumPayloadFieldTypes()) {
-            out.add(CGType.GetOrCreate(cgMod, fieldTy).GetLLVMType())
-        }
-        return out
-    }
-
-    private func BuildEnumPayloadFieldTypes(): ArrayList<Type> {
-        let out = ArrayList<Type>()
-        if (cgEnumTypeKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF) {
-            if (let Some(associatedTy) <- optionLikeAssociatedValueType) {
-                out.add(associatedTy)
-            }
-            return out
-        }
-        if (let Some(enumTy) <- (chirType as EnumType)) {
-            for (ctor in enumTy.GetEnumDef().GetCtors()) {
-                var idx: Int64 = 0
-                for (payloadTy in ctor.payloadTypes) {
-                    let instantiatedPayloadTy = InstantiateEnumPayloadType(enumTy, payloadTy)
-                    if (idx >= out.size) {
-                        out.add(instantiatedPayloadTy)
-                    } else if (!out[idx].IsEqual(instantiatedPayloadTy)) {
-                        out[idx] = PickEnumPayloadStorageType(out[idx], instantiatedPayloadTy)
-                    }
-                    idx++
-                }
-            }
-        }
-        return out
     }
 
     private func InstantiateEnumPayloadType(enumTy: EnumType, payloadTy: Type): Type {
@@ -613,18 +757,4 @@ public class CGEnumType <: CGCustomType {
         return out
     }
 
-    private func PickEnumPayloadStorageType(left: Type, right: Type): Type {
-        if (left.IsEqual(right)) {
-            return left
-        }
-        if (left.IsRef() && right.IsRef()) {
-            return left
-        }
-        if (left.IsRef() || right.IsRef()) {
-            return cgCtx.GetCHIRBuilder().context.GetUInt64Ty()
-        }
-        let leftSize = CGType.GetOrCreate(cgMod, left).GetSize() ?? 0
-        let rightSize = CGType.GetOrCreate(cgMod, right).GetSize() ?? 0
-        return if (leftSize >= rightSize) { left } else { right }
-    }
 }

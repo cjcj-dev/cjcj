@@ -6,7 +6,10 @@ import cangjie_compiler::chir.BoxType
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CPointerType
 import cangjie_compiler::chir.CustomType
+import cangjie_compiler::chir.EnumType
+import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.ExprKind
+import cangjie_compiler::chir.Field
 import cangjie_compiler::chir.FloatLiteral
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
@@ -14,11 +17,14 @@ import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.GetMethodIdxInAutoEnvObject
 import cangjie_compiler::chir.IntLiteral
 import cangjie_compiler::chir.LiteralValue
+import cangjie_compiler::chir.Load
+import cangjie_compiler::chir.LocalVar
 import cangjie_compiler::chir.RawArrayType
 import cangjie_compiler::chir.RuneLiteral
 import cangjie_compiler::chir.StringLiteral
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.Type
+import cangjie_compiler::chir.TypeCast
 import cangjie_compiler::chir.VArrayType
 import cangjie_compiler::option.{ArchType, EnvironmentType, OptimizationLevel}
 import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, CORE_PACKAGE_NAME, STD_LIB_FUTURE, StaticCast}
@@ -48,10 +54,13 @@ private let MALLOC_OBJECT_INTRINSIC_NAME: String = "llvm.cj.malloc.object"
 private let CJ_MEMSET_INTRINSIC_NAME: String = "llvm.cj.memset"
 private let GCWRITE_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.ref"
 private let GCREAD_STATIC_REF_INTRINSIC_NAME: String = "llvm.cj.gcread.static.ref"
+private let GCREAD_STATIC_STRUCT_INTRINSIC_NAME: String = "llvm.cj.gcread.static.struct"
 private let GCWRITE_STATIC_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.static.ref"
 private let NEW_CJ_THREAD_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThread"
 private let NEW_CJ_THREAD_NO_RETURN_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThreadNoReturn"
 private let MIN_ANDROID_ARM32_ENUM_ALIGN: UInt32 = 4u32
+private let LLVM_INTEGER_TYPE_KIND: Int32 = 8
+private let LLVM_FUNCTION_TYPE_KIND: Int32 = 9
 private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
 private let LLVM_ARRAY_TYPE_KIND: Int32 = 11
 private let LLVM_POINTER_TYPE_KIND: Int32 = 12
@@ -67,6 +76,20 @@ private func SignedInt64Bits(value: Int64): UInt64 {
         return UInt64(value)
     }
     return 0x8000000000000000u64 + UInt64(value - Int64.Min)
+}
+
+private func IsLoadExprForAllocatedGenericRef(chirExpression: Expression): Bool {
+    if (chirExpression.GetExprKind() != ExprKind.LOAD) {
+        return false
+    }
+    let loadExpression = (chirExpression as Load).getOrThrow()
+    let location = loadExpression.GetLocation()
+    if (!location.IsLocalVar() || !IsGenericRef(location.GetType().getOrThrow())) {
+        return false
+    }
+    let locationExpr = (location as LocalVar).getOrThrow().GetExpr().getOrThrow()
+    let locationExprKind = locationExpr.GetExprKind()
+    return locationExprKind == ExprKind.ALLOCATE || locationExprKind == ExprKind.ALLOCATE_WITH_EXCEPTION
 }
 
 public class IRBuilder2 <: Resource {
@@ -135,6 +158,10 @@ public class IRBuilder2 <: Resource {
 
     public func GetFalse(): LLVMValueRef {
         return unsafe { LLVMConstInt(LLVMInt1TypeInContext(GetLLVMContext().raw), 0u64, 0) }
+    }
+
+    public func GetInt32(value: Int64): LLVMValueRef {
+        return unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), SignedInt64Bits(value), 1) }
     }
 
     public func GetInt64(value: Int64): LLVMValueRef {
@@ -242,23 +269,168 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateLoad(elementType: LLVMTypeRef, addr: LLVMValueRef, name!: String = ""): LLVMValueRef {
-        var result = LLVMNullValue()
-        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
-            result = unsafe { LLVMBuildLoad2(builder.raw, elementType, addr, nameCString.value) }
+        let buildLoad = { rawElementType: LLVMTypeRef, rawAddr: LLVMValueRef, rawName: String =>
+            var loadResult = LLVMNullValue()
+            try (nameCString = unsafe { LibC.mallocCString(rawName) }.asResource()) {
+                loadResult = unsafe { LLVMBuildLoad2(builder.raw, rawElementType, rawAddr, nameCString.value) }
+            }
+            loadResult
         }
-        return result
-    }
-
-    public func CreateInvariantLoad(elementType: LLVMTypeRef, addr: LLVMValueRef,
-        name!: String = ""): LLVMValueRef {
-        let result = CreateLoad(elementType, addr, name: name)
-        let metadata = LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>())
-        LLVMSetInstructionMetadata(GetLLVMContext(), result, "invariant.load", metadata)
-        return result
+        if (IsGlobalVariableBasePtr(addr) && IsLLVMTypeContainsRef(elementType)) {
+            if (unsafe { LLVMGetTypeKind(elementType) } == LLVM_STRUCT_TYPE_KIND) {
+                let tempVal = CreateEntryAlloca(elementType)
+                let size = unsafe {
+                    LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(elementType), 0)
+                }
+                CallGCReadStaticAgg(elementType, ArrayList<LLVMValueRef>([tempVal, addr, size]))
+                return tempVal
+            }
+            return CallGCReadStaticRef(addr)
+        }
+        if (unsafe { LLVMGetTypeKind(elementType) } == LLVM_STRUCT_TYPE_KIND) {
+            let structName = LLVMCStringToString(unsafe { LLVMGetStructName(elementType) }) ?? ""
+            if (structName == UNIT_TYPE_STR) {
+                return cgMod.GenerateUnitTypeValue()
+            }
+            let tempVal = CreateEntryAlloca(elementType)
+            let sizeInBytes = cgMod.GetTypeSize(elementType)
+            let size = unsafe {
+                LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), sizeInBytes, 0)
+            }
+            if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
+                if (IsLLVMTypeContainsRef(elementType)) {
+                    CallGCReadAgg(elementType, ArrayList<LLVMValueRef>([tempVal, baseObject, addr, size]))
+                    return tempVal
+                }
+            }
+            if (sizeInBytes != 0u64) {
+                let align = cgMod.GetABITypeAlignment(elementType)
+                CreateMemCpy(tempVal, align, addr, align, size)
+            }
+            return tempVal
+        }
+        if (unsafe { LLVMGetTypeKind(elementType) } == LLVM_ARRAY_TYPE_KIND) {
+            let tempVal = CreateEntryAlloca(elementType)
+            let size = unsafe {
+                LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(elementType), 0)
+            }
+            let align = cgMod.GetABITypeAlignment(elementType)
+            CreateMemCpy(tempVal, align, addr, align, size)
+            return tempVal
+        }
+        if (unsafe { LLVMGetTypeKind(elementType) } == LLVM_FUNCTION_TYPE_KIND) {
+            return addr
+        }
+        if (let Some(currentExpr) <- chirExpr) {
+            let expr = currentExpr.GetExpression()
+            let exprKind = expr.GetExprKind()
+            if (exprKind == ExprKind.INTRINSIC || exprKind == ExprKind.LOAD || exprKind == ExprKind.FIELD) {
+                let elemCHIRType = expr.GetResult().getOrThrow().GetType().getOrThrow()
+                let baseElemTy = DeRef(elemCHIRType)
+                if (baseElemTy.IsGeneric()) {
+                    if (IsLoadExprForAllocatedGenericRef(expr)) {
+                        return buildLoad(elementType, addr, name)
+                    }
+                    let blocks = CreateAndInsertBasicBlocks(ArrayList<String>(
+                        ["handle_load_ref", "handle_load_non_ref", "load_exit"]))
+                    if (blocks.size == 3) {
+                        let typeInfo = CreateTypeInfo(baseElemTy)
+                        CreateCondBr(CreateTypeInfoIsReferenceCall(baseElemTy), blocks[0], blocks[1])
+                        SetInsertPoint(blocks[0])
+                        let refVal = if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
+                            CallGCRead(ArrayList<LLVMValueRef>([baseObject, addr]))
+                        } else {
+                            let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 1u32) }
+                            let addrSpace = GetPointerAddressSpace(addr) ?? 0u32
+                            let addrFixedType = unsafe { LLVMPointerType(i8PtrTy, addrSpace) }
+                            let castedAddr = CreateBitCast(addr, addrFixedType)
+                            buildLoad(i8PtrTy, castedAddr, "")
+                        }
+                        CreateBr(blocks[2])
+                        SetInsertPoint(blocks[1])
+                        let typeInfoSize = GetLayoutSize_32(baseElemTy)
+                        let valueVal = CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfo, typeInfoSize]))
+                        if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
+                            CallGCReadGeneric(valueVal, baseObject, addr, typeInfoSize)
+                        } else {
+                            let addrType = unsafe { LLVMTypeOf(addr) }
+                            let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+                            if (addrType.toUIntNative() == i8PtrTy.toUIntNative()) {
+                                CallGCWriteGenericPayload(valueVal, addr, typeInfoSize)
+                            } else {
+                                let i8PtrTy1 = unsafe {
+                                    LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 1u32)
+                                }
+                                CallIntrinsicAssignGeneric(ArrayList<LLVMValueRef>(
+                                    [valueVal, buildLoad(i8PtrTy1, addr, ""), typeInfo]))
+                            }
+                        }
+                        CreateBr(blocks[2])
+                        SetInsertPoint(blocks[2])
+                        let phi = CreatePHI(elementType)
+                        AddIncoming(phi, ArrayList<LLVMValueRef>([refVal, valueVal]),
+                            ArrayList<LLVMBasicBlockRef>([blocks[0], blocks[1]]))
+                        return phi
+                    }
+                } else if (CGType.GetOrCreate(cgMod, elemCHIRType).GetSize().isNone()) {
+                    let typeInfoOfElement = CreateTypeInfo(elemCHIRType)
+                    let typeInfoSize = GetSizeFromTypeInfo(typeInfoOfElement)
+                    let valueVal = CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>(
+                        [typeInfoOfElement, typeInfoSize]))
+                    if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
+                        CallGCReadGeneric(valueVal, baseObject, addr, typeInfoSize)
+                    } else {
+                        let addrType = unsafe { LLVMTypeOf(addr) }
+                        let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+                        if (addrType.toUIntNative() == i8PtrTy.toUIntNative()) {
+                            CallGCWriteGenericPayload(valueVal, addr, typeInfoSize)
+                        } else {
+                            let i8PtrTy1 = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 1u32) }
+                            CallIntrinsicAssignGeneric(ArrayList<LLVMValueRef>(
+                                [valueVal, buildLoad(i8PtrTy1, addr, ""), typeInfoOfElement]))
+                        }
+                    }
+                    return valueVal
+                }
+            }
+        }
+        if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
+            if (elementType.toUIntNative() == CGType.GetRefType(GetLLVMContext()).toUIntNative()) {
+                return CallGCRead(ArrayList<LLVMValueRef>([baseObject, addr]))
+            }
+        }
+        return buildLoad(elementType, addr, name)
     }
 
     public func CreateLoad(cgVal: CGValue, name!: String = ""): LLVMValueRef {
-        return CreateLoad(cgVal.GetLLVMType(), cgVal.GetRawValue(), name: name)
+        let pointerCGType = cgVal.GetCGType().getOrThrow()
+        let elementCGType = pointerCGType.GetPointerElementType().getOrThrow()
+        let elementType = elementCGType.GetLLVMType()
+        let originalType = elementCGType.GetOriginal()
+        if (elementCGType.GetSize().isNone() && !originalType.IsGeneric()) {
+            let typeInfo = CreateTypeInfo(originalType)
+            let payloadSize = GetLayoutSize32(originalType, elementCGType)
+            let tempVal = CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfo, payloadSize]))
+            let basePtr = GetTrackedManagedBase(cgVal.GetRawValue())
+            let addrSpace = GetPointerAddressSpace(cgVal.GetRawValue()) ?? 0u32
+            if (basePtr.isNone()) {
+                if (addrSpace == 1u32) {
+                    CallIntrinsicAssignGeneric(ArrayList<LLVMValueRef>([tempVal, cgVal.GetRawValue(), typeInfo]))
+                } else {
+                    CallGCWriteGenericPayload(tempVal, cgVal.GetRawValue(), payloadSize)
+                }
+            } else {
+                CJC_ASSERT(addrSpace == 1u32)
+                CallGCReadGeneric(tempVal, basePtr.getOrThrow(), cgVal.GetRawValue(), payloadSize)
+            }
+            return tempVal
+        }
+        let loaded = CreateLoad(elementType, cgVal.GetRawValue(), name: name)
+        if (originalType.IsEnum()) {
+            LLVMSetInstructionMetadata(GetLLVMContext(), loaded, "untrusted_ref",
+                LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>()))
+        }
+        return loaded
     }
 
     public func CreateStore(value: LLVMValueRef, addr: LLVMValueRef): LLVMValueRef {
@@ -285,52 +457,6 @@ public class IRBuilder2 <: Resource {
 
     public func IsGlobalVariableBasePtr(value: LLVMValueRef): Bool {
         return !value.isNull() && !unsafe { LLVMIsAGlobalVariable(value) }.isNull()
-    }
-
-    public func StoreGenericSRetReturnValue(value: LLVMValueRef, sretArg: LLVMValueRef, retTy: Type): LLVMValueRef {
-        let typeInfo = GetTypeInfoFromObject(value)
-        return StoreGenericSRetReturnValueWithTypeInfo(value, sretArg, retTy, typeInfo)
-    }
-
-    public func StoreGenericSRetReturnValueWithTypeInfo(value: LLVMValueRef, sretArg: LLVMValueRef, retTy: Type,
-        typeInfo: LLVMValueRef): LLVMValueRef {
-        let blockNames = ArrayList<String>()
-        blockNames.add("handle_store_ref")
-        blockNames.add("handle_store_non_ref")
-        blockNames.add("store_exit")
-        let blocks = CreateAndInsertBasicBlocks(blockNames)
-        if (blocks.size < 3) {
-            return LLVMNullValue()
-        }
-        let refType = CGType.GetRefType(GetLLVMContext())
-        let sretArgType = unsafe { LLVMTypeOf(sretArg) }
-        let sretArgAddrspace = if (!sretArgType.isNull() &&
-            unsafe { LLVMGetTypeKind(sretArgType) } == LLVM_POINTER_TYPE_KIND) {
-            unsafe { LLVMGetPointerAddressSpace(sretArgType) }
-        } else {
-            0u32
-        }
-        let destAddr = CreateBitCast(sretArg, unsafe { LLVMPointerType(refType, sretArgAddrspace) },
-            name: "generic.store.ref.dest")
-        CreateCondBr(CreateTypeInfoIsReferenceCall(typeInfo), blocks[0], blocks[1])
-
-        SetInsertPoint(blocks[0])
-        CreateStore(value, destAddr)
-        CreateBr(blocks[2])
-
-        SetInsertPoint(blocks[1])
-        let dest = if (IsLLVMArgument(sretArg)) {
-            CreateLoad(refType, destAddr, name: "generic.store.sret")
-        } else {
-            let tmp = CallAllocaGenericWithTypeInfo(retTy, typeInfo)
-            CreateStore(tmp, destAddr)
-            tmp
-        }
-        CallAssignGeneric(dest, value, typeInfo)
-        CreateBr(blocks[2])
-
-        SetInsertPoint(blocks[2])
-        return LLVMNullValue()
     }
 
     public func TryCreateGenericStore(value: CGValue, dest: CGValue, boxType!: Option<Type> = None): Option<LLVMValueRef> {
@@ -1412,6 +1538,16 @@ public class IRBuilder2 <: Resource {
             name: "sret.generic")
     }
 
+    public func CallIntrinsicAllocaGeneric(parameters: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(parameters.size == 2)
+        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreateBitCast(parameters[0], i8PtrType, name: "alloca.generic.ti"))
+        args.add(parameters[1])
+        return CreateIntrinsicCall(ALLOCA_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
+            name: "sret.generic")
+    }
+
     private func GetLayoutSize32ForAllocaGeneric(cgTy: CGType, typeInfoValue: LLVMValueRef): LLVMValueRef {
         if (let Some(staticSize) <- cgTy.GetSize()) {
             return unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(staticSize), 0) }
@@ -1648,10 +1784,16 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CallAssignGeneric(dest: LLVMValueRef, source: LLVMValueRef, typeInfo: LLVMValueRef): LLVMValueRef {
+        return CallIntrinsicAssignGeneric(ArrayList<LLVMValueRef>([dest, source, typeInfo]))
+    }
+
+    public func CallIntrinsicAssignGeneric(parameters: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(parameters.size == 3)
         let args = ArrayList<LLVMValueRef>()
-        args.add(dest)
-        args.add(source)
-        args.add(CreateBitCast(typeInfo, unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) },
+        args.add(parameters[0])
+        args.add(parameters[1])
+        args.add(CreateBitCast(parameters[2],
+            unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) },
             name: "assign.generic.ti"))
         return CreateIntrinsicCall(ASSIGN_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
@@ -1714,10 +1856,37 @@ public class IRBuilder2 <: Resource {
         return CreateIntrinsicCallNoInvoke("llvm.cj.gcread.ref", ArrayList<LLVMTypeRef>(), args, name: "gcread.ref")
     }
 
+    public func CallGCRead(args: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(args.size == 2)
+        return CallGCReadRef(args[0], args[1])
+    }
+
     public func CallGCReadStaticRef(place: LLVMValueRef): LLVMValueRef {
         let args = ArrayList<LLVMValueRef>()
         args.add(place)
         return CreateIntrinsicCallNoInvoke(GCREAD_STATIC_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+    }
+
+    public func CallGCReadStaticAgg(structType: LLVMTypeRef, args: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(args.size == 3)
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let i64Type = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
+        let overloadedTypes = ArrayList<LLVMTypeRef>()
+        overloadedTypes.add(i64Type)
+        let fixedArgs = ArrayList<LLVMValueRef>()
+        fixedArgs.add(CreatePointerCast(args[0], i8PtrType, name: "gcread.static.agg.dest"))
+        fixedArgs.add(CreatePointerCast(args[1], i8PtrType, name: "gcread.static.agg.source"))
+        fixedArgs.add(CreateZExtOrTrunc(args[2], i64Type, name: "gcread.static.agg.size"))
+        let call = CreateIntrinsicCallNoInvoke(GCREAD_STATIC_STRUCT_INTRINSIC_NAME, overloadedTypes, fixedArgs)
+        let aggTypeName = if (!structType.isNull() && unsafe { LLVMGetTypeKind(structType) } == LLVM_STRUCT_TYPE_KIND) {
+            LLVMCStringToString(unsafe { LLVMGetStructName(structType) }) ?? ""
+        } else {
+            ""
+        }
+        let metadata = LLVMCreateMDTupleFromString(GetLLVMContext(), aggTypeName)
+        LLVMSetInstructionMetadata(GetLLVMContext(), call, "AggType", metadata)
+        return call
     }
 
     public func CallGCReadGeneric(dest: LLVMValueRef, baseObject: LLVMValueRef, source: LLVMValueRef,
@@ -1734,12 +1903,27 @@ public class IRBuilder2 <: Resource {
 
     public func CallGetFieldOffset(typeInfo: LLVMValueRef, index: UInt64, preOffset: UInt64): LLVMValueRef {
         let args = ArrayList<LLVMValueRef>()
-        args.add(CreatePointerCast(typeInfo,
-            unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) },
-            name: "field.offset.ti"))
+        args.add(typeInfo)
         args.add(unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), index, 0) })
         args.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), preOffset, 0) })
-        return CreateIntrinsicCall(GET_FIELD_OFFSET_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+        return CallIntrinsicGetFieldOffset(args)
+    }
+
+    public func CallIntrinsicGetFieldOffset(parameters: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(parameters.size == 2 || parameters.size == 3)
+        CJC_ASSERT(unsafe { LLVMGetTypeKind(LLVMTypeOf(parameters[1])) } == LLVM_INTEGER_TYPE_KIND &&
+            unsafe { LLVMGetIntTypeWidth(LLVMTypeOf(parameters[1])) } == 64u32)
+        let fixedArgs = ArrayList<LLVMValueRef>()
+        fixedArgs.add(CreatePointerCast(parameters[0],
+            unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) },
+            name: "field.offset.ti"))
+        fixedArgs.add(parameters[1])
+        if (parameters.size == 2) {
+            fixedArgs.add(GetInt32(0))
+        } else {
+            fixedArgs.add(parameters[2])
+        }
+        return CreateIntrinsicCall(GET_FIELD_OFFSET_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), fixedArgs)
     }
 
     public func CallGCWriteStruct(baseObject: LLVMValueRef, dest: LLVMValueRef, source: LLVMValueRef,
@@ -1826,6 +2010,43 @@ public class IRBuilder2 <: Resource {
         args.add(CreatePointerCast(source, sourcePtrTy, name: "gcread.struct.source"))
         args.add(size)
         let call = CreateIntrinsicCallNoInvoke("llvm.cj.gcread.struct", overloadedTypes, args)
+        let metadata = LLVMCreateMDTupleFromString(GetLLVMContext(), aggTypeName)
+        LLVMSetInstructionMetadata(GetLLVMContext(), call, "AggType", metadata)
+        return call
+    }
+
+    public func CallGCReadAgg(structType: LLVMTypeRef, args: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(args.size == 4)
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let destRawTy = unsafe { LLVMTypeOf(args[0]) }
+        let destAddrSpace = if (!destRawTy.isNull() && unsafe { LLVMGetTypeKind(destRawTy) } == LLVM_POINTER_TYPE_KIND) {
+            unsafe { LLVMGetPointerAddressSpace(destRawTy) }
+        } else {
+            0u32
+        }
+        let destPtrTy = unsafe { LLVMPointerType(i8Type, destAddrSpace) }
+        let sourceRawTy = unsafe { LLVMTypeOf(args[2]) }
+        let sourceAddrSpace = if (!sourceRawTy.isNull() &&
+            unsafe { LLVMGetTypeKind(sourceRawTy) } == LLVM_POINTER_TYPE_KIND) {
+            unsafe { LLVMGetPointerAddressSpace(sourceRawTy) }
+        } else {
+            0u32
+        }
+        let sourcePtrTy = unsafe { LLVMPointerType(i8Type, sourceAddrSpace) }
+        let i64Type = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
+        let overloadedTypes = ArrayList<LLVMTypeRef>()
+        overloadedTypes.add(i64Type)
+        let fixedArgs = ArrayList<LLVMValueRef>()
+        fixedArgs.add(CreatePointerCast(args[0], destPtrTy, name: "gcread.agg.dest"))
+        fixedArgs.add(CreatePointerCast(args[1], CGType.GetRefType(GetLLVMContext()), name: "gcread.agg.base"))
+        fixedArgs.add(CreatePointerCast(args[2], sourcePtrTy, name: "gcread.agg.source"))
+        fixedArgs.add(CreateZExtOrTrunc(args[3], i64Type, name: "gcread.agg.size"))
+        let call = CreateIntrinsicCallNoInvoke("llvm.cj.gcread.struct", overloadedTypes, fixedArgs)
+        let aggTypeName = if (!structType.isNull() && unsafe { LLVMGetTypeKind(structType) } == LLVM_STRUCT_TYPE_KIND) {
+            LLVMCStringToString(unsafe { LLVMGetStructName(structType) }) ?? ""
+        } else {
+            ""
+        }
         let metadata = LLVMCreateMDTupleFromString(GetLLVMContext(), aggTypeName)
         LLVMSetInstructionMetadata(GetLLVMContext(), call, "AggType", metadata)
         return call
@@ -1988,6 +2209,277 @@ public class IRBuilder2 <: Resource {
         let indices = ArrayList<LLVMValueRef>()
         indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), 1u64, 0) })
         return CreateGEP(i8PtrType, objectSlot, indices, name: "obj.payload")
+    }
+
+    public func CallIntrinsicNull(): LLVMValueRef {
+        return unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) }
+    }
+
+    public func CallIntrinsicIsNull(value: LLVMValueRef): LLVMValueRef {
+        return CreateICmp(LLVMIntPredicate.EQ, value, CallIntrinsicNull())
+    }
+
+    public func CallIntrinsicIsNonNull(value: LLVMValueRef): LLVMValueRef {
+        return CreateICmp(LLVMIntPredicate.NE, value, CallIntrinsicNull())
+    }
+
+    public func CreateConstGEP1_32(elementType: LLVMTypeRef, pointer: LLVMValueRef, index: UInt32,
+        name!: String = ""): LLVMValueRef {
+        return CreateGEP(elementType, pointer,
+            ArrayList<LLVMValueRef>([unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw),
+                UInt64(index), 0) }]), name: name)
+    }
+
+    public func CreateEnumGEP(field: Field): LLVMValueRef {
+        CJC_ASSERT(field.GetPath().size == 1)
+        if (field.GetPath()[0] == 0u64) {
+            return GetEnumTag(field)
+        }
+        let resultValue = GetEnumAssociatedValue(field)
+        if (let Some(enumCGType) <- (CGType.GetOrCreate(cgMod,
+            field.GetResult().getOrThrow().GetType().getOrThrow()) as CGEnumType)) {
+            if (enumCGType.IsOptionLikeRef()) {
+                LLVMSetInstructionMetadata(GetLLVMContext(), resultValue, "untrusted_ref",
+                    LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>()))
+            }
+        }
+        return resultValue
+    }
+
+    public func GetEnumTag(field: Field): LLVMValueRef {
+        let cgEnum = cgMod.GetMappedValue(field.GetBase()).getOrThrow()
+        CJC_ASSERT(field.GetBase().GetType().getOrThrow().IsEnum())
+        let enumValue = cgEnum.GetRawValue()
+        let chirType = (field.GetBase().GetType().getOrThrow() as EnumType).getOrThrow()
+        let cgEnumType = (CGType.GetOrCreate(cgMod, chirType) as CGEnumType).getOrThrow()
+        let enumKind = cgEnumType.GetCGEnumTypeKind()
+        if (enumKind == CGEnumTypeKind.NON_EXHAUSTIVE_UNASSOCIATED ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED) {
+            return enumValue
+        }
+        if (enumKind == CGEnumTypeKind.NON_EXHAUSTIVE_ASSOCIATED ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_OTHER) {
+            let payload = GetPayloadFromObject(enumValue)
+            let tagType = CGType.GetOrCreate(cgMod, field.GetResult().getOrThrow().GetType().getOrThrow()).GetLLVMType()
+            return CreateLoad(tagType, CreateBitCast(payload, unsafe { LLVMPointerType(tagType, 1u32) }))
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_NONREF) {
+            let tagType = CGType.GetOrCreate(cgMod, field.GetResult().getOrThrow().GetType().getOrThrow()).GetLLVMType()
+            return CreateLoad(tagType, CreateBitCast(enumValue, unsafe { LLVMPointerType(tagType, 0u32) }))
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T) {
+            let i1Type = unsafe { LLVMInt1TypeInContext(GetLLVMContext().raw) }
+            let payload = GetPayloadFromObject(enumValue)
+            let blocks = CreateAndInsertBasicBlocks(ArrayList<String>(["ref", "nonRef", "end"]))
+            if (blocks.size != 3) {
+                return LLVMNullValue()
+            }
+            CreateCondBr(CreateTypeInfoIsReferenceCall(chirType.GetTypeArgs()[0]), blocks[0], blocks[1])
+            SetInsertPoint(blocks[0])
+            let refPayload = CallGCRead(ArrayList<LLVMValueRef>([enumValue, payload]))
+            let refResult = if (cgEnumType.IsAntiOptionLike()) {
+                CallIntrinsicIsNonNull(refPayload)
+            } else {
+                CallIntrinsicIsNull(refPayload)
+            }
+            CreateBr(blocks[2])
+            SetInsertPoint(blocks[1])
+            let nonRefResult = CreateLoad(i1Type, CreateBitCast(payload, unsafe { LLVMPointerType(i1Type, 1u32) }))
+            CreateBr(blocks[2])
+            SetInsertPoint(blocks[2])
+            let phi = CreatePHI(i1Type)
+            AddIncoming(phi, ArrayList<LLVMValueRef>([refResult, nonRefResult]),
+                ArrayList<LLVMBasicBlockRef>([blocks[0], blocks[1]]))
+            return phi
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF) {
+            return if (cgEnumType.IsAntiOptionLike()) {
+                CallIntrinsicIsNonNull(cgEnum.GetRawValue())
+            } else {
+                CallIntrinsicIsNull(cgEnum.GetRawValue())
+            }
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF) {
+            let i1Type = unsafe { LLVMInt1TypeInContext(GetLLVMContext().raw) }
+            if (cgEnumType.GetSize().isSome()) {
+                let enumType = cgEnumType.GetLLVMType()
+                let addrSpace = GetPointerAddressSpace(enumValue) ?? 0u32
+                let casted = CreateBitCast(enumValue, unsafe { LLVMPointerType(enumType, addrSpace) })
+                return CreateLoad(i1Type, CreateStructGEP(enumType, casted, 0u32))
+            }
+            let casted = CreateBitCast(GetPayloadFromObject(enumValue), unsafe { LLVMPointerType(i1Type, 1u32) })
+            return CreateLoad(i1Type, casted)
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ZERO_SIZE) {
+            return GetInt32(0)
+        }
+        CJC_ASSERT(false)
+        return LLVMNullValue()
+    }
+
+    private func GetOptionLikeNonRefAssociatedValue(enumType: Type, associatedValueType: Type,
+        enumValueWithTI: LLVMValueRef): LLVMValueRef {
+        let associatedValueTypeTI = CreateTypeInfo(associatedValueType)
+        let sizeOfAssociatedValueType = GetLayoutSize_32(associatedValueType)
+        let nonRefResult = CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>(
+            [associatedValueTypeTI, sizeOfAssociatedValueType]))
+        let typeInfo = CreateTypeInfo(enumType)
+        let associatedValOffset = CallIntrinsicGetFieldOffset(ArrayList<LLVMValueRef>(
+            [typeInfo, GetInt64(1), GetInt32(8)]))
+        let associatedValPtr = CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) },
+            enumValueWithTI, ArrayList<LLVMValueRef>([associatedValOffset]))
+        CallGCReadGeneric(nonRefResult, enumValueWithTI, associatedValPtr, sizeOfAssociatedValueType)
+        return nonRefResult
+    }
+
+    private func GetCommonEnumAssociatedValue(field: Field, cgEnum: CGValue): LLVMValueRef {
+        let elemTypes = ArrayList<LLVMTypeRef>()
+        var isSized = true
+        let args = field.GetBase().GetType().getOrThrow().GetTypeArgs()
+        var argIdx: Int64 = 0
+        while (argIdx < args.size) {
+            let cgType = CGType.GetOrCreate(cgMod, args[argIdx])
+            if (cgType.GetSize().isSome()) {
+                elemTypes.add(cgType.GetLLVMType())
+            } else {
+                isSized = false
+                break
+            }
+            argIdx++
+        }
+        let enumVal = cgEnum.GetRawValue()
+        let associatedValIdx = UInt32(field.GetPath()[0])
+        if (isSized) {
+            let layoutType = CreateAnonymousStructType(elemTypes)
+            let castedEnumValPtr = CreateBitCast(GetPayloadFromObject(enumVal),
+                unsafe { LLVMPointerType(layoutType, 1u32) })
+            let fieldPtr = CreateStructGEP(layoutType, castedEnumValPtr, associatedValIdx)
+            TrackBasePtr(fieldPtr, enumVal)
+            return CreateLoad(elemTypes[Int64(associatedValIdx)], fieldPtr)
+        }
+        let typeCastExpr = ((field.GetBase() as LocalVar).getOrThrow().GetExpr().getOrThrow() as TypeCast).getOrThrow()
+        let chirEnumType = (typeCastExpr.GetSourceTy().getOrThrow() as EnumType).getOrThrow()
+        CJC_ASSERT(typeCastExpr.GetResult().getOrThrow().GetEnumCaseIndex().isSome())
+        let typeArgs = ArrayList<Type>()
+        for (typeArg in GetGenericArgsFromCHIRType(chirEnumType.GetEnumDef().GetType().getOrThrow())) {
+            typeArgs.add(GetTypeInnerType(typeCastExpr.GetSourceValue().GetType().getOrThrow(), typeArg))
+        }
+        let fieldType = field.GetResult().getOrThrow().GetType().getOrThrow()
+        let fieldAddrType = CGType.GetOrCreate(cgMod, GetCGContext().GetCHIRBuilder().context.GetRefTy(fieldType))
+        let enumCaseTT = cgMod.GetOrCreateEnumCtorTIOrTT(chirEnumType,
+            typeCastExpr.GetResult().getOrThrow().GetEnumCaseIndex().getOrThrow())
+        let enumCaseTI = CallGetTypeInfoIntrinsic(ArrayList<LLVMValueRef>(
+            [enumCaseTT, GetInt32(typeArgs.size), CreateTypeInfoArray(typeArgs)]))
+        var fieldOffset = CallIntrinsicGetFieldOffset(ArrayList<LLVMValueRef>(
+            [enumCaseTI, GetInt64(Int64(associatedValIdx))]))
+        fieldOffset = CreateBinary(ExprKind.ADD, fieldOffset,
+            unsafe { LLVMConstInt(LLVMTypeOf(fieldOffset), GetPayloadOffset(), 0) })
+        var fieldAddr = CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) },
+            enumVal, ArrayList<LLVMValueRef>([fieldOffset]))
+        if (!fieldType.IsGeneric()) {
+            let fieldCGType = CGType.GetOrCreate(cgMod, fieldType)
+            let addrSpace = GetPointerAddressSpace(fieldAddr) ?? 0u32
+            fieldAddr = CreateBitCast(fieldAddr, unsafe { LLVMPointerType(fieldCGType.GetLLVMType(), addrSpace) })
+        }
+        TrackBasePtr(fieldAddr, enumVal)
+        return CreateLoad(CGValue(fieldAddr, fieldAddrType))
+    }
+
+    private func GetZeroSizeEnumAssociatedValue(field: Field, cgEnum: CGValue): LLVMValueRef {
+        let fieldType = field.GetResult().getOrThrow().GetType().getOrThrow()
+        let fieldAddrType = CGType.GetOrCreate(cgMod, GetCGContext().GetCHIRBuilder().context.GetRefTy(fieldType))
+        return CreateLoad(CGValue(cgEnum.GetRawValue(), fieldAddrType))
+    }
+
+    private func GetAssociatedNonRefEnumAssociatedValue(field: Field, cgEnum: CGValue): LLVMValueRef {
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let associatedValIdx = UInt32(field.GetPath()[0])
+        let args = field.GetBase().GetType().getOrThrow().GetTypeArgs()
+        CJC_ASSERT(Int64(associatedValIdx) < args.size)
+        let fieldTypes = ArrayList<Type>()
+        for (arg in args) {
+            fieldTypes.add(arg)
+        }
+        let fieldPtr = if (CGEnumType.NeedAndroidArm32AlignedEnumLayout(GetCGContext().GetCompileOptions().target)) {
+            let layoutType = CGEnumType.GetAndroidArm32AssociatedNonRefLayoutType(cgMod, fieldTypes)
+            let casted = CreateBitCast(cgEnum.GetRawValue(), unsafe { LLVMPointerType(layoutType, 0u32) })
+            CreateStructGEP(layoutType, casted, associatedValIdx, name: "enum.field.ptr")
+        } else {
+            let layout = CGEnumType.ComputeAssociatedNonRefLayout(cgMod, fieldTypes)
+            let casted = CreateBitCast(cgEnum.GetRawValue(), unsafe { LLVMPointerType(i8Type, 0u32) })
+            CreateConstGEP1_32(i8Type, casted, layout.offsets[Int64(associatedValIdx)], name: "enum.field.ptr")
+        }
+        let retLLVMType = CGType.GetOrCreate(cgMod, field.GetResult().getOrThrow().GetType().getOrThrow()).GetLLVMType()
+        return CreateLoad(retLLVMType, CreateBitCast(fieldPtr, unsafe { LLVMPointerType(retLLVMType, 0u32) }))
+    }
+
+    public func GetEnumAssociatedValue(field: Field): LLVMValueRef {
+        CJC_ASSERT(field.GetBase().IsLocalVar())
+        let typeCast = ((field.GetBase() as LocalVar).getOrThrow().GetExpr().getOrThrow() as TypeCast).getOrThrow()
+        let cgEnumType = (CGType.GetOrCreate(cgMod,
+            typeCast.GetSourceValue().GetType().getOrThrow()) as CGEnumType).getOrThrow()
+        let cgEnum = cgMod.GetMappedValue(field.GetBase()).getOrThrow()
+        CJC_ASSERT(field.GetPath().size == 1)
+        let index = field.GetPath()[0]
+        let enumKind = cgEnumType.GetCGEnumTypeKind()
+        if (enumKind == CGEnumTypeKind.NON_EXHAUSTIVE_ASSOCIATED ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_OTHER) {
+            return GetCommonEnumAssociatedValue(field, cgEnum)
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ZERO_SIZE) {
+            return GetZeroSizeEnumAssociatedValue(field, cgEnum)
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_NONREF) {
+            return GetAssociatedNonRefEnumAssociatedValue(field, cgEnum)
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T) {
+            CJC_ASSERT(index == 1u64)
+            let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 1u32) }
+            let blocks = CreateAndInsertBasicBlocks(ArrayList<String>(["ref", "nonRef", "end"]))
+            if (blocks.size != 3) {
+                return LLVMNullValue()
+            }
+            CreateCondBr(CreateTypeInfoIsReferenceCall(cgEnumType.GetOriginal().GetTypeArgs()[0]),
+                blocks[0], blocks[1])
+            SetInsertPoint(blocks[0])
+            let enumValue = cgEnum.GetRawValue()
+            let payload = CreateBitCast(GetPayloadFromObject(enumValue), i8PtrType)
+            let refResult = CallGCRead(ArrayList<LLVMValueRef>([enumValue, payload]))
+            CreateBr(blocks[2])
+            SetInsertPoint(blocks[1])
+            let associatedValueType = field.GetResult().getOrThrow().GetType().getOrThrow()
+            let nonRefResult = GetOptionLikeNonRefAssociatedValue(cgEnum.GetCGType().getOrThrow().GetOriginal(),
+                associatedValueType, enumValue)
+            CreateBr(blocks[2])
+            SetInsertPoint(blocks[2])
+            let phi = CreatePHI(i8PtrType)
+            AddIncoming(phi, ArrayList<LLVMValueRef>([refResult, nonRefResult]),
+                ArrayList<LLVMBasicBlockRef>([blocks[0], blocks[1]]))
+            return phi
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF) {
+            CJC_ASSERT(index == 1u64)
+            let value = cgEnum.GetRawValue()
+            cgMod.GetCGContext().AddNullableReference(value)
+            return value
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF) {
+            CJC_ASSERT(index == 1u64)
+            if (cgEnumType.GetSize().isSome()) {
+                let enumVal = cgEnum.GetRawValue()
+                let enumType = cgEnumType.GetLLVMType()
+                let addrSpace = GetPointerAddressSpace(enumVal) ?? 0u32
+                let casted = CreateBitCast(enumVal, unsafe { LLVMPointerType(enumType, addrSpace) })
+                let associatedLLVMType = CGType.GetOrCreate(cgMod,
+                    field.GetResult().getOrThrow().GetType().getOrThrow()).GetLLVMType()
+                return CreateLoad(associatedLLVMType, CreateStructGEP(enumType, casted, 1u32))
+            }
+            let associatedValueType = field.GetResult().getOrThrow().GetType().getOrThrow()
+            return GetOptionLikeNonRefAssociatedValue(cgEnum.GetCGType().getOrThrow().GetOriginal(),
+                associatedValueType, cgEnum.GetRawValue())
+        }
+        CJC_ASSERT(false)
+        return LLVMNullValue()
     }
 
     public func CallArrayIntrinsicGetSize(array: LLVMValueRef): LLVMValueRef {
@@ -2999,6 +3491,45 @@ public class IRBuilder2 <: Resource {
         return unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), sizeValue, 0) }
     }
 
+    public func GetLayoutSize_32(chirTy: Type): LLVMValueRef {
+        let baseType = DeRef(chirTy)
+        let cgType = CGType.GetOrCreate(cgMod, baseType)
+        if (let Some(staticSize) <- cgType.GetSize()) {
+            return unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(staticSize), 0) }
+        }
+        return GetSizeFromTypeInfo(CreateTypeInfo(baseType))
+    }
+
+    public func GetSizeFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {
+        let currentBlock = GetInsertBlock()
+        let blockKey = currentBlock.toUIntNative()
+        let typeInfoKey = typeInfo.toUIntNative()
+        let cacheMap = GetCGContext().genericParamsSizeBlockLevelCacheMap
+        if (cacheMap.contains(blockKey)) {
+            let blockCacheMap = cacheMap[blockKey]
+            if (blockCacheMap.contains(typeInfoKey)) {
+                return blockCacheMap[typeInfoKey]
+            }
+        }
+        let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
+        let typeInfoPtrType = unsafe { LLVMPointerType(typeInfoType, 0u32) }
+        let ptr = CreateStructGEP(typeInfoType, CreateBitCast(typeInfo, typeInfoPtrType), 4u32,
+            name: "ti.size")
+        var sizeValue = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
+            sizeValue = unsafe {
+                LLVMBuildLoad2(builder.raw, LLVMInt32TypeInContext(GetLLVMContext().raw), ptr, nameCString.value)
+            }
+        }
+        LLVMSetInstructionMetadata(GetLLVMContext(), sizeValue, "invariant.load",
+            LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>()))
+        if (!cacheMap.contains(blockKey)) {
+            cacheMap[blockKey] = HashMap<UIntNative, LLVMValueRef>()
+        }
+        cacheMap[blockKey][typeInfoKey] = sizeValue
+        return sizeValue
+    }
+
     public func GetSize32(chirTy: Type, cgType: CGType): LLVMValueRef {
         let baseTy = chirTy.StripAllRefs()
         if (baseTy.IsGeneric()) {
@@ -3092,7 +3623,10 @@ public class IRBuilder2 <: Resource {
             typedTypeInfo = unsafe { LLVMBuildBitCast(builder.raw, typeInfo, typeInfoPtrType, typedTypeInfoName.value) }
         }
         let typeArgsPtr = CreateStructGEP(typeInfoType, typedTypeInfo, 12u32, name: "ti.typeArgs")
-        let typeArgsRaw = CreateLoad(i8PtrType, typeArgsPtr)
+        var typeArgsRaw = LLVMNullValue()
+        try (typeArgsName = unsafe { LibC.mallocCString("") }.asResource()) {
+            typeArgsRaw = unsafe { LLVMBuildLoad2(builder.raw, i8PtrType, typeArgsPtr, typeArgsName.value) }
+        }
         let metadata = LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>())
         LLVMSetInstructionMetadata(GetLLVMContext(), typeArgsRaw, "invariant.load", metadata)
         var typedTypeArgs = LLVMNullValue()
@@ -3110,7 +3644,13 @@ public class IRBuilder2 <: Resource {
         let indices = ArrayList<LLVMValueRef>()
         indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(index), 0) })
         let typeInfoSlot = CreateInBoundsGEP(typeInfoPtrType, tiArray, indices)
-        return CreateInvariantLoad(typeInfoPtrType, typeInfoSlot, name: name)
+        var typeInfo = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            typeInfo = unsafe { LLVMBuildLoad2(builder.raw, typeInfoPtrType, typeInfoSlot, nameCString.value) }
+        }
+        let metadata = LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>())
+        LLVMSetInstructionMetadata(GetLLVMContext(), typeInfo, "invariant.load", metadata)
+        return typeInfo
     }
 
     public func GetTypeInfoFromTiArrayPlain(tiArray: LLVMValueRef, index: Int64, name!: String = ""): LLVMValueRef {
@@ -3127,14 +3667,26 @@ public class IRBuilder2 <: Resource {
         let indices = ArrayList<LLVMValueRef>()
         indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(index), 0) })
         let typeInfoSlot = CreateInBoundsGEP(typeInfoPtrType, typeArgs, indices, name: "ti.arg")
-        return CreateInvariantLoad(typeInfoPtrType, typeInfoSlot, name: "ti.arg")
+        var argTypeInfo = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString("ti.arg") }.asResource()) {
+            argTypeInfo = unsafe { LLVMBuildLoad2(builder.raw, typeInfoPtrType, typeInfoSlot, nameCString.value) }
+        }
+        let metadata = LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>())
+        LLVMSetInstructionMetadata(GetLLVMContext(), argTypeInfo, "invariant.load", metadata)
+        return argTypeInfo
     }
 
     public func GetTypeInfoFromObject(obj: LLVMValueRef): LLVMValueRef {
         let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
         let typeInfoSlotType = unsafe { LLVMPointerType(typeInfoPtrType, 1u32) }
         let typeInfoSlot = CreateBitCast(obj, typeInfoSlotType, name: "obj.ti.slot")
-        return CreateInvariantLoad(typeInfoPtrType, typeInfoSlot, name: "ti")
+        var typeInfo = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString("ti") }.asResource()) {
+            typeInfo = unsafe { LLVMBuildLoad2(builder.raw, typeInfoPtrType, typeInfoSlot, nameCString.value) }
+        }
+        let metadata = LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>())
+        LLVMSetInstructionMetadata(GetLLVMContext(), typeInfo, "invariant.load", metadata)
+        return typeInfo
     }
 
     private func CreateGenericRuntimeTypeInfo(chirTy: Type): LLVMValueRef {

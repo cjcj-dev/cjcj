@@ -230,6 +230,7 @@ func CHIRApplyBaseAnnotations(base: Base, value: String): Unit {
     if (value.isEmpty()) {
         return
     }
+    // GAP_TODO(CHIRDeserializer.cpp:1315): selfhost text CHIR has no flatbuffer annotation switch.
     base.GetAnno().Clear()
     for (rawLine in value.split("\n")) {
         let line = rawLine

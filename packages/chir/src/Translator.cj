@@ -4131,18 +4131,7 @@ public class Translator {
     }
 
     private func EnumPatternPayloadSelector(value: Value, pattern: AstEnumPattern): Value {
-        if (IsOptionLikeEnumConstructor(RequireEnumPatternConstructor(pattern))) {
-            return value
-        }
         return CastEnumValueToConstructorTupleType(value, pattern)
-    }
-
-    private func IsOptionLikeEnumConstructor(constructor: AstDecl): Bool {
-        let outer = constructor.outerDecl ??
-            throw IllegalStateException("faithful AST2CHIR enum constructor has no outer enum")
-        let enumDecl = (outer as AstEnumDecl) ??
-            throw IllegalStateException("faithful AST2CHIR enum constructor outer is not enum")
-        return IsOptionLikeEnumDecl(enumDecl)
     }
 
     private func CastEnumValueToConstructorTupleType(value: Value, pattern: AstEnumPattern): Value {
@@ -4152,7 +4141,9 @@ public class Translator {
         for (payloadTy in EnumPatternPayloadTypes(pattern)) {
             fieldTys.add(payloadTy)
         }
-        return CastValueIfNeeded(value, builder.context.GetTupleTy(fieldTys))
+        let resultValue = CastValueIfNeeded(value, builder.context.GetTupleTy(fieldTys))
+        resultValue.SetEnumCaseIndex(Some(GetEnumCtorId(constructor)))
+        return resultValue
     }
 
     private func GetEnumTagValue(pattern: AstEnumPattern, selector: Value): Value {

@@ -94,20 +94,44 @@ private func GenerateNativeStruct(irBuilder: IRBuilder2, chirExpr: Expression, _
 private func GenerateAssociatedNonRefEnum(irBuilder: IRBuilder2, chirExpr: Expression,
     enumCGType: CGEnumType): LLVMValueRef {
     let enumValue = irBuilder.CreateEntryAlloca(enumCGType, name: "enum.val")
-    let containedTypes = enumCGType.GetContainedTypes()
+    let i8Type = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let casted = irBuilder.CreateBitCast(enumValue, unsafe { LLVMPointerType(i8Type, 0u32) })
+    let fieldTypes = CollectAssociatedNonRefFieldTypes(chirExpr)
+    let useStructGEP = CGEnumType.NeedAndroidArm32AlignedEnumLayout(
+        irBuilder.GetCGContext().GetCompileOptions().target)
+    var layoutType = LLVMNullType()
+    var castedStruct = LLVMNullValue()
+    if (useStructGEP) {
+        layoutType = CGEnumType.GetAndroidArm32AssociatedNonRefLayoutType(irBuilder.GetCGModule(), fieldTypes)
+        castedStruct = irBuilder.CreateBitCast(enumValue, unsafe { LLVMPointerType(layoutType, 0u32) })
+    }
+    let layout = CGEnumType.ComputeAssociatedNonRefLayout(irBuilder.GetCGModule(), fieldTypes)
     var idx: Int64 = 0
     while (idx < chirExpr.GetNumOfOperands()) {
-        let operandValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(idx))
-        if (idx < containedTypes.size) {
-            let fieldTy = containedTypes[idx].GetOriginal()
-            let fieldPtr = irBuilder.CreateStructGEP(enumCGType.GetLLVMType(), enumValue, UInt32(idx),
-                name: "enum.field")
-            let fieldAddr = CGValue(fieldPtr, GetRefCGType(irBuilder, fieldTy))
-            CreateTypedStoreForAddress(irBuilder, operandValue, fieldAddr)
+        let field = chirExpr.GetOperand(idx)
+        let fieldCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), field.GetType().getOrThrow())
+        let destPtr = if (useStructGEP) {
+            irBuilder.CreateStructGEP(layoutType, castedStruct, UInt32(idx))
+        } else {
+            irBuilder.CreateConstGEP1_32(i8Type, casted, layout.offsets[idx])
         }
+        let castedDestPtr = irBuilder.CreateBitCast(destPtr,
+            unsafe { LLVMPointerType(fieldCGType.GetLLVMType(), 0u32) })
+        let fieldValue = irBuilder.GetCGModule().GetMappedCGValue(field)
+        irBuilder.CreateStore(fieldValue.GetRawValue(), castedDestPtr, field.GetType().getOrThrow())
         idx++
     }
     return enumValue
+}
+
+private func CollectAssociatedNonRefFieldTypes(chirExpr: Expression): ArrayList<Type> {
+    let fieldTypes = ArrayList<Type>()
+    var idx: Int64 = 0
+    while (idx < chirExpr.GetNumOfOperands()) {
+        fieldTypes.add(chirExpr.GetOperand(idx).GetType().getOrThrow())
+        idx++
+    }
+    return fieldTypes
 }
 
 private func GenerateAggregateValue(irBuilder: IRBuilder2, chirExpr: Expression, resultCGType: CGType):

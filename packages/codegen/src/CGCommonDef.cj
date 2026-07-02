@@ -103,6 +103,10 @@ public class GenericTypeAndPath {
             this.path.add(value)
         }
     }
+
+    public func GetPath(): ArrayList<Int64> {
+        return path.clone()
+    }
 }
 
 public func IsCHIRWrapper(chirFuncName: String): Bool {

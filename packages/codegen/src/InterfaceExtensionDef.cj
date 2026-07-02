@@ -831,13 +831,10 @@ private func EmitExpectedSlotWrapperReturn(irBuilder: IRBuilder2, wrapper: LLVMV
         }
         let returnSlot = unsafe { LLVMGetParam(wrapper, 0u32) }
         if (expectedRetTy.IsGeneric() && methodRetTy.IsGeneric()) {
-            if (let Some(typeInfo) <- methodReturnTypeInfo) {
-                irBuilder.StoreGenericSRetReturnValueWithTypeInfo(result, returnSlot, expectedRetTy, typeInfo)
-            } else {
-                irBuilder.StoreGenericSRetReturnValue(result, returnSlot, expectedRetTy)
-            }
-            irBuilder.CreateRetVoid()
-            return
+            let _ = methodReturnTypeInfo
+            let _ = result
+            let _ = returnSlot
+            throw IllegalStateException("GAP_TODO InterfaceExtensionDef.cj:833 generic expected slot return")
         }
         irBuilder.CreateStore(ConvertReturnForExpectedSlot(irBuilder, result, methodRetTy, expectedRetTy), returnSlot)
         irBuilder.CreateRetVoid()

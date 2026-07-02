@@ -1,5 +1,7 @@
 package cangjie_compiler::chir
 
+import std.convert.*
+
 private class BaseIdAllocator {
     private static var nextId: Int64 = 1
 
@@ -45,6 +47,15 @@ public open class Base {
         annotationMap.Set("NeverOverflowInfo", if (NeverOverflowInfo.Extract(label)) { "true" } else { "false" })
     }
 
+    public func SetEnumCaseIndex(value: Option<Int64>): Unit {
+        let label = EnumCaseIndex(value)
+        if (let Some(index) <- EnumCaseIndex.Extract(label)) {
+            annotationMap.Set("EnumCaseIndex", index.toString())
+        } else {
+            annotationMap.Remove("EnumCaseIndex")
+        }
+    }
+
     public func RemoveAnnotation(key: String): Unit {
         annotationMap.Remove(key)
     }
@@ -85,6 +96,13 @@ public open class Base {
             return NeverOverflowInfo.Extract(NeverOverflowInfo(value == "true"))
         }
         return NeverOverflowInfo.Extract(NeverOverflowInfo())
+    }
+
+    public func GetEnumCaseIndex(): Option<Int64> {
+        if (let Some(raw) <- annotationMap.Get("EnumCaseIndex")) {
+            return Int64.parse(raw)
+        }
+        return EnumCaseIndex.Extract(EnumCaseIndex())
     }
 
     public func GetAnno(): AnnotationMap {
