@@ -9,6 +9,7 @@ import cangjie_compiler::ast.ASTKindIndex
 import cangjie_compiler::ast.ASTKindName
 import cangjie_compiler::ast.AccessLevel as AstAccessLevel
 import cangjie_compiler::ast.ArrayExpr as AstArrayExpr
+import cangjie_compiler::ast.AttributePack as AstAttributePack
 import cangjie_compiler::ast.ArrayLit as AstArrayLit
 import cangjie_compiler::ast.Attribute as AstAttribute
 import cangjie_compiler::ast.CallExpr as AstCallExpr
@@ -43,6 +44,8 @@ import cangjie_compiler::ast.Walker as AstWalker
 import cangjie_compiler::ast.WildcardPattern as AstWildcardPattern
 import cangjie_compiler::ast.Position as AstPosition
 import cangjie_compiler::ast.IsStaticInitializer as AstIsStaticInitializer
+import cangjie_compiler::ast.IsImpl as AstIsImpl
+import cangjie_compiler::ast.IsMirror as AstIsMirror
 import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, ProfileRecorder, STATIC_INIT_VAR}
 
 private class FaithfulInitFileVars {
@@ -851,6 +854,47 @@ private func FaithfulIsHashableFileName(fileName: String): Bool {
         }
     }
     return false
+}
+
+private func BuildAttr(attrs: AstAttributePack): AttributeInfo {
+    let attrInfo = AttributeInfo()
+    if (attrs.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) { attrInfo.Enable(Attribute.GENERIC_INSTANTIATED) }
+    if (attrs.TestAttr(AstAttribute.STATIC)) { attrInfo.Enable(Attribute.STATIC) }
+    if (attrs.TestAttr(AstAttribute.FOREIGN)) { attrInfo.Enable(Attribute.FOREIGN) }
+    if (attrs.TestAttr(AstAttribute.MUT)) { attrInfo.Enable(Attribute.MUT) }
+    if (attrs.TestAttr(AstAttribute.INTERNAL)) { attrInfo.Enable(Attribute.INTERNAL) }
+    if (attrs.TestAttr(AstAttribute.PUBLIC)) { attrInfo.Enable(Attribute.PUBLIC) }
+    if (attrs.TestAttr(AstAttribute.PRIVATE)) { attrInfo.Enable(Attribute.PRIVATE) }
+    if (attrs.TestAttr(AstAttribute.PROTECTED)) { attrInfo.Enable(Attribute.PROTECTED) }
+    if (attrs.TestAttr(AstAttribute.ABSTRACT)) { attrInfo.Enable(Attribute.ABSTRACT) }
+    if (attrs.TestAttr(AstAttribute.OPEN)) { attrInfo.Enable(Attribute.VIRTUAL) }
+    if (attrs.TestAttr(AstAttribute.OVERRIDE)) { attrInfo.Enable(Attribute.OVERRIDE) }
+    if (attrs.TestAttr(AstAttribute.REDEF)) { attrInfo.Enable(Attribute.REDEF) }
+    if (attrs.TestAttr(AstAttribute.SEALED)) { attrInfo.Enable(Attribute.SEALED) }
+    if (attrs.TestAttr(AstAttribute.OPERATOR)) { attrInfo.Enable(Attribute.OPERATOR) }
+    if (attrs.TestAttr(AstAttribute.COMPILER_ADD)) { attrInfo.Enable(Attribute.COMPILER_ADD) }
+    if (attrs.TestAttr(AstAttribute.IMPLICIT_ADD)) { attrInfo.Enable(Attribute.NO_DEBUG_INFO) }
+    if (attrs.TestAttr(AstAttribute.GENERIC)) { attrInfo.Enable(Attribute.GENERIC) }
+    if (attrs.TestAttr(AstAttribute.IMPORTED)) { attrInfo.Enable(Attribute.IMPORTED) }
+    if (attrs.TestAttr(AstAttribute.NO_REFLECT_INFO)) { attrInfo.Enable(Attribute.NO_REFLECT_INFO) }
+    if (attrs.TestAttr(AstAttribute.COMMON)) { attrInfo.Enable(Attribute.COMMON) }
+    if (attrs.TestAttr(AstAttribute.SPECIFIC)) { attrInfo.Enable(Attribute.SPECIFIC) }
+    if (attrs.TestAttr(AstAttribute.JAVA_MIRROR)) { attrInfo.Enable(Attribute.JAVA_MIRROR) }
+    if (attrs.TestAttr(AstAttribute.OBJ_C_MIRROR)) { attrInfo.Enable(Attribute.OBJ_C_MIRROR) }
+    if (attrs.TestAttr(AstAttribute.HAS_INITED_FIELD)) { attrInfo.Enable(Attribute.HAS_INITED_FIELD) }
+    if (attrs.TestAttr(AstAttribute.UNSAFE)) { attrInfo.Enable(Attribute.UNSAFE) }
+    return attrInfo
+}
+
+private func BuildVarDeclAttr(decl: AstVarDecl): AttributeInfo {
+    let attrInfo = BuildAttr(decl.GetAttrs())
+    if (!decl.isVar) {
+        attrInfo.Enable(Attribute.READONLY)
+    }
+    if (decl.IsConst()) {
+        attrInfo.Enable(Attribute.CONST)
+    }
+    return attrInfo
 }
 
 private func BuildPackageAccessLevel(level: AstAccessLevel): AccessLevel {
@@ -2982,6 +3026,9 @@ public class FaithfulAST2CHIR {
             packageName: EffectivePackageName(varDecl))
         globalVar.EnableAttr(Attribute.IMPORTED)
         ApplyDeclAttrs(globalVar, varDecl)
+        if (varDecl.IsConst()) {
+            globalVar.EnableAttr(Attribute.CONST)
+        }
         globalCache.Set(varDecl, globalVar)
         AddGlobalVarToPackage(globalVar)
     }
@@ -3037,7 +3084,7 @@ public class FaithfulAST2CHIR {
             srcCodeIdentifier: decl.identifier.Val(), rawMangledName: EffectiveRawMangledName(decl),
             packageName: EffectivePackageName(decl))
         globalVar.SetDebugLocation(TranslateLocationWithoutScope(builder.context, decl.begin, decl.end))
-        ApplyDeclAttrs(globalVar, decl)
+        globalVar.AppendAttributeInfo(BuildVarDeclAttr(decl))
         if (isLocalConst) {
             globalVar.EnableAttr(Attribute.COMPILER_ADD)
         }
@@ -3209,26 +3256,19 @@ public class FaithfulAST2CHIR {
     }
 
     private func ApplyDeclAttrs(target: Base, decl: AstDecl): Unit {
-        if (decl.TestAttr(AstAttribute.PUBLIC)) { target.EnableAttr(Attribute.PUBLIC) }
-        if (decl.TestAttr(AstAttribute.PROTECTED)) { target.EnableAttr(Attribute.PROTECTED) }
-        if (decl.TestAttr(AstAttribute.PRIVATE)) { target.EnableAttr(Attribute.PRIVATE) }
-        if (decl.TestAttr(AstAttribute.STATIC)) { target.EnableAttr(Attribute.STATIC) }
-        if (decl.TestAttr(AstAttribute.MUT)) { target.EnableAttr(Attribute.MUT) }
-        if (decl.IsConst()) { target.EnableAttr(Attribute.CONST) }
-        if (decl.TestAttr(AstAttribute.ABSTRACT)) { target.EnableAttr(Attribute.ABSTRACT) }
-        if (decl.TestAttr(AstAttribute.OPEN)) { target.EnableAttr(Attribute.VIRTUAL) }
-        if (decl.TestAttr(AstAttribute.FOREIGN)) { target.EnableAttr(Attribute.FOREIGN) }
-        if (decl.TestAttr(AstAttribute.IMPORTED)) { target.EnableAttr(Attribute.IMPORTED) }
-        if (decl.TestAttr(AstAttribute.SRC_IMPORTED)) { target.EnableAttr(Attribute.SRC_CODE_IMPORTED) }
+        target.AppendAttributeInfo(BuildAttr(decl.GetAttrs()))
         if (decl.TestAttr(AstAttribute.C)) {
-            target.EnableAttr(Attribute.C)
             if (let Some(structDef) <- (target as StructDef)) {
                 structDef.SetCStruct(true)
             }
         }
-        if (decl.TestAttr(AstAttribute.OPERATOR)) { target.EnableAttr(Attribute.OPERATOR) }
-        if (decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) { target.EnableAttr(Attribute.GENERIC_INSTANTIATED) }
-        if (decl.TestAttr(AstAttribute.IMPLICIT_ADD)) { target.EnableAttr(Attribute.IMPLICIT_ADD) }
+        if (let Some(customTypeDef) <- (target as CustomTypeDef)) {
+            if (AstIsImpl(decl)) {
+                customTypeDef.EnableAttr(Attribute.JAVA_IMPL)
+            } else if (AstIsMirror(decl)) {
+                customTypeDef.EnableAttr(Attribute.JAVA_MIRROR)
+            }
+        }
     }
 
     private func EffectiveMangledName(decl: AstDecl): String {
