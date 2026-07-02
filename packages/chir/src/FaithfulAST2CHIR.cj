@@ -43,7 +43,7 @@ import cangjie_compiler::ast.Walker as AstWalker
 import cangjie_compiler::ast.WildcardPattern as AstWildcardPattern
 import cangjie_compiler::ast.Position as AstPosition
 import cangjie_compiler::ast.IsStaticInitializer as AstIsStaticInitializer
-import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, STATIC_INIT_VAR}
+import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, ProfileRecorder, STATIC_INIT_VAR}
 
 private class FaithfulInitFileVars {
     public let file: AstFile
@@ -1488,6 +1488,38 @@ public class FaithfulAST2CHIR {
         TranslateVecDecl(genericNominalDecls, trans)
         TranslateVecDecl(nominalDecls, trans)
         TranslateVecDecl(importedGenericInstantiatedNominalDecls, trans)
+        SetExtendInfo()
+    }
+
+    private func SetExtendInfo(): Unit {
+        try (recorder = ProfileRecorder("TranslateNominalDecls", "SetExtendInfo")) {
+            for (customDef in CurrentPackage().GetAllCustomTypeDef()) {
+                if (customDef.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+                    continue
+                }
+                let extendDef = customDef as ExtendDef
+                if (let None <- extendDef) {
+                    continue
+                }
+                let ext = extendDef.getOrThrow()
+                let extendedType = ext.GetExtendedType().getOrThrow()
+                if (let Some(builtinType) <- (extendedType as BuiltinType)) {
+                    GetBuiltinTypeWithVTable(builtinType, builder).AddExtend(ext)
+                } else {
+                    let customType = (extendedType as CustomType).getOrThrow()
+                    let customTypeDef = customType.GetCustomTypeDef()
+                    CJC_ASSERT(customTypeDef.GetCustomKind() != CustomDefKind.TYPE_EXTEND)
+                    customTypeDef.AddExtend(ext)
+                }
+            }
+        }
+    }
+
+    private func GetBuiltinTypeWithVTable(builtinType: BuiltinType, builder: CHIRBuilder): BuiltinType {
+        if (builtinType.IsCPointer()) {
+            return builder.context.GetCPointerTy(builder.context.GetUnitTy())
+        }
+        return builtinType
     }
 
     private func TranslateOtherTopLevelDecls(node: AstPackage): Unit {
