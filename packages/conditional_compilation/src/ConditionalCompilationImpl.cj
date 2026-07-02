@@ -9,8 +9,7 @@ import cangjie_compiler::option.BackendToString
 import cangjie_compiler::option.BackendType
 import cangjie_compiler::option.OSType
 import cangjie_compiler::option.TripleInfo
-import cangjie_compiler::utils.EraseIf as UtilsEraseIf
-import cangjie_compiler::utils.CJC_ASSERT
+import cangjie_compiler::utils.{CJC_ASSERT, DynamicCast, EraseIf as UtilsEraseIf}
 import std.collection.*
 import std.convert.*
 
@@ -127,18 +126,20 @@ class ConditionalCompilationImpl {
     }
 
     public func CheckConditionExpr(condition: Expr): Bool {
-        if (condition.astKind == ASTKind.BINARY_EXPR) {
-            if (let Some(be) <- (condition as BinaryExpr)) { return CheckBinaryExpr(be) }
-        } else if (condition.astKind == ASTKind.UNARY_EXPR) {
-            if (let Some(ue) <- (condition as UnaryExpr)) { return CheckUnaryExpr(ue) }
-        } else if (condition.astKind == ASTKind.REF_EXPR) {
-            if (let Some(re) <- (condition as RefExpr)) { return CheckRefExpr(re) }
-        } else if (condition.astKind == ASTKind.PAREN_EXPR) {
-            if (let Some(pe) <- (condition as ParenExpr)) { return CheckParenExpr(pe) }
+        match (condition.astKind) {
+            case ASTKind.BINARY_EXPR =>
+                return CheckBinaryExpr((condition as BinaryExpr).getOrThrow())
+            case ASTKind.UNARY_EXPR =>
+                return CheckUnaryExpr((condition as UnaryExpr).getOrThrow())
+            case ASTKind.REF_EXPR =>
+                return CheckRefExpr((condition as RefExpr).getOrThrow())
+            case ASTKind.PAREN_EXPR =>
+                return CheckParenExpr((condition as ParenExpr).getOrThrow())
+            case _ =>
+                diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, condition.begin).Emit()
+                return false
         }
-        diag.DiagnoseRefactor(
-            BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, condition.begin).Emit()
-        return false
     }
 
     public func EvalCachedConditionExpr(condition: Expr): Bool {
@@ -162,18 +163,20 @@ class ConditionalCompilationImpl {
     }
 
     private func EvalConditionExpr(condition: Expr): Bool {
-        if (condition.astKind == ASTKind.BINARY_EXPR) {
-            if (let Some(be) <- (condition as BinaryExpr)) { return EvalBinaryExpr(be) }
-        } else if (condition.astKind == ASTKind.UNARY_EXPR) {
-            if (let Some(ue) <- (condition as UnaryExpr)) { return EvalUnaryExpr(ue) }
-        } else if (condition.astKind == ASTKind.REF_EXPR) {
-            if (let Some(re) <- (condition as RefExpr)) { return EvalRefExpr(re) }
-        } else if (condition.astKind == ASTKind.PAREN_EXPR) {
-            if (let Some(pe) <- (condition as ParenExpr)) { return EvalParenExpr(pe) }
+        match (condition.astKind) {
+            case ASTKind.BINARY_EXPR =>
+                return EvalBinaryExpr((condition as BinaryExpr).getOrThrow())
+            case ASTKind.UNARY_EXPR =>
+                return EvalUnaryExpr((condition as UnaryExpr).getOrThrow())
+            case ASTKind.REF_EXPR =>
+                return EvalRefExpr((condition as RefExpr).getOrThrow())
+            case ASTKind.PAREN_EXPR =>
+                return EvalParenExpr((condition as ParenExpr).getOrThrow())
+            case _ =>
+                diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, condition.begin).Emit()
+                return false
         }
-        diag.DiagnoseRefactor(
-            BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, condition.begin).Emit()
-        return false
     }
 
     private func EvalBinaryExpr(be: BinaryExpr): Bool {
@@ -188,15 +191,11 @@ class ConditionalCompilationImpl {
     }
 
     private func EvalLogicBinaryExpr(be: BinaryExpr): Bool {
-        if (let Some(left) <- be.leftExpr) {
-            if (let Some(right) <- be.rightExpr) {
-                if (be.op == TokenKind.AND) {
-                    return EvalConditionExpr(left) && EvalConditionExpr(right)
-                }
-                return EvalConditionExpr(left) || EvalConditionExpr(right)
-            }
+        if (be.op == TokenKind.AND) {
+            return EvalConditionExpr(be.leftExpr.getOrThrow()) && EvalConditionExpr(be.rightExpr.getOrThrow())
+        } else {
+            return EvalConditionExpr(be.leftExpr.getOrThrow()) || EvalConditionExpr(be.rightExpr.getOrThrow())
         }
-        return false
     }
 
     private func EvalJudgeBinaryExpr(be: BinaryExpr): Bool {
@@ -250,17 +249,17 @@ class ConditionalCompilationImpl {
     }
 
     private func CheckBinaryExpr(be: BinaryExpr): Bool {
-        if (let Some(left) <- be.leftExpr) {
-            if (let Some(right) <- be.rightExpr) {
-                if (IsLogicBinaryExpr(be.op)) {
-                    let leftValid = CheckConditionExpr(left)
-                    let rightValid = CheckConditionExpr(right)
-                    return leftValid && rightValid
-                }
-                if (IsJudgeBinaryExpr(be.op) || IsRangeBinaryExpr(be.op)) {
-                    return CheckJudgeConditionExpr(be)
-                }
-            }
+        if (be.leftExpr.isNone() || be.rightExpr.isNone()) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
+            return false
+        }
+        if (IsLogicBinaryExpr(be.op)) {
+            let leftValid = CheckConditionExpr(be.leftExpr.getOrThrow())
+            let rightValid = CheckConditionExpr(be.rightExpr.getOrThrow())
+            return leftValid && rightValid
+        }
+        if (IsJudgeBinaryExpr(be.op) || IsRangeBinaryExpr(be.op)) {
+            return CheckJudgeConditionExpr(be)
         }
         diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
         return false
@@ -296,45 +295,36 @@ class ConditionalCompilationImpl {
     }
 
     private func CheckJudgeBinaryExpr(be: BinaryExpr): Bool {
-        if (let Some(left) <- be.leftExpr) {
-            if (let Some(right) <- be.rightExpr) {
-                if (left.astKind != ASTKind.REF_EXPR) {
-                    diag.DiagnoseRefactor(
-                        BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
-                    return false
-                }
-                if (right.astKind != ASTKind.LIT_CONST_EXPR) {
-                    diag.DiagnoseRefactor(
-                        BasicDiagKindRefactor.conditional_compilation_invalid_condition_value, right.begin).Emit()
-                    return false
-                }
-                if (let Some(lit) <- (right as LitConstExpr)) {
-                    if (lit.kind != LitConstKind.STRING || lit.siExpr.isSome()) {
-                        diag.DiagnoseRefactor(
-                            BasicDiagKindRefactor.conditional_compilation_invalid_condition_value, right.begin).Emit()
-                        return false
-                    }
-                    return true
-                }
-            }
+        if (be.leftExpr.isNone() || be.rightExpr.isNone()) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
+            return false
         }
-        diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
-        return false
+        let left = be.leftExpr.getOrThrow()
+        let right = be.rightExpr.getOrThrow()
+        if (left.astKind != ASTKind.REF_EXPR) {
+            diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
+            return false
+        }
+        if (right.astKind != ASTKind.LIT_CONST_EXPR) {
+            diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.conditional_compilation_invalid_condition_value, right.begin).Emit()
+            return false
+        }
+        let lit = (right as LitConstExpr).getOrThrow()
+        if (lit.kind != LitConstKind.STRING || lit.siExpr.isSome()) {
+            diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.conditional_compilation_invalid_condition_value, right.begin).Emit()
+            return false
+        }
+        return true
     }
 
     private func GetJudgeConditionInfo(be: BinaryExpr): JudgeConditionInfo {
-        var conditionStr = ""
-        var rightValue = ""
-        if (let Some(left) <- be.leftExpr) {
-            if (let Some(refExpr) <- (left as RefExpr)) {
-                conditionStr = refExpr.ref.identifier.Val()
-            }
-        }
-        if (let Some(right) <- be.rightExpr) {
-            if (let Some(lit) <- (right as LitConstExpr)) {
-                rightValue = lit.stringValue
-            }
-        }
+        let right = (be.rightExpr.getOrThrow() as LitConstExpr).getOrThrow()
+        let left = (be.leftExpr.getOrThrow() as RefExpr).getOrThrow()
+        let conditionStr = left.ref.identifier.Val()
+        let rightValue = right.stringValue
         return JudgeConditionInfo(conditionStr, rightValue, GetRelatedInfo(conditionStr))
     }
 
@@ -356,20 +346,22 @@ class ConditionalCompilationImpl {
     }
 
     private func CheckAndGetUnaryConditionInfo(ue: UnaryExpr): Option<UnaryConditionInfo> {
-        if (let Some(expr) <- ue.expr) {
-            if (let Some(conditionExpr) <- (expr as RefExpr)) {
-                if (let Some(relatedInfo) <- GetDebugOrTestRelatedInfo(conditionExpr, ue.begin)) {
-                    if (ue.op != TokenKind.NOT) {
-                        let builder = diag.DiagnoseRefactor(
-                            BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin)
-                        builder.AddNote("debug and test builtin conditions only support the logic ! operator")
-                        builder.Emit()
-                        return None
-                    }
-                    return UnaryConditionInfo(relatedInfo)
+        if (ue.expr.isNone() || ue.expr.getOrThrow().astKind != ASTKind.REF_EXPR) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin).Emit()
+            return None
+        }
+        if (let Some(conditionExpr) <- (ue.expr.getOrThrow() as RefExpr)) {
+            if (let Some(relatedInfo) <- GetDebugOrTestRelatedInfo(conditionExpr, ue.begin)) {
+                if (ue.op != TokenKind.NOT) {
+                    let builder = diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin)
+                    builder.AddNote("debug and test builtin conditions only support the logic ! operator")
+                    builder.Emit()
+                    return None
                 }
-                return None
+                return UnaryConditionInfo(relatedInfo)
             }
+            return None
         }
         diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin).Emit()
         return None
@@ -433,84 +425,97 @@ class ConditionalCompilationImpl {
     }
 
     public func HandleFileConditionalCompilation(file: File): Unit {
+        let pred = { node: Node =>
+            if (let Some(decl) <- DynamicCast<Decl>(node)) {
+                return EvalNodeCondition(decl)
+            } else if (let Some(importSpec) <- DynamicCast<ImportSpec>(node)) {
+                return EvalNodeCondition(importSpec)
+            } else if (let Some(macroExpr) <- DynamicCast<MacroExpandExpr>(node)) {
+                return EvalNodeCondition(macroExpr)
+            }
+            return true
+        }
         let action = { curNode: Node =>
-            if (curNode.astKind == ASTKind.FILE) {
-                if (let Some(fileNode) <- (curNode as File)) {
-                    EraseConditionalIf<ImportSpec>(fileNode.imports, { node => !EvalImportSpecCondition(node) })
-                    EraseConditionalIf<Decl>(fileNode.decls, { node => !EvalDeclCondition(node) })
-                }
-            } else if (curNode.astKind == ASTKind.INTERFACE_BODY) {
-                if (let Some(body) <- (curNode as InterfaceBody)) {
-                    EraseConditionalIf<Decl>(body.decls, { node => !EvalDeclCondition(node) })
-                }
-            } else if (curNode.astKind == ASTKind.CLASS_BODY) {
-                if (let Some(body) <- (curNode as ClassBody)) {
-                    EraseConditionalIf<Decl>(body.decls, { node => !EvalDeclCondition(node) })
-                }
-            } else if (curNode.astKind == ASTKind.STRUCT_BODY) {
-                if (let Some(body) <- (curNode as StructBody)) {
-                    EraseConditionalIf<Decl>(body.decls, { node => !EvalDeclCondition(node) })
-                }
-            } else if (curNode.astKind == ASTKind.ENUM_DECL) {
-                if (let Some(enumDecl) <- (curNode as EnumDecl)) {
-                    EraseConditionalIf<Decl>(enumDecl.members, { node => !EvalDeclCondition(node) })
-                    EraseConditionalIf<Decl>(enumDecl.constructors, { node => !EvalDeclCondition(node) })
-                }
-            } else if (curNode.astKind == ASTKind.EXTEND_DECL) {
-                if (let Some(extendDecl) <- (curNode as ExtendDecl)) {
-                    EraseConditionalIf<Decl>(extendDecl.members, { node => !EvalDeclCondition(node) })
-                }
-            } else if (curNode.astKind == ASTKind.PROP_DECL) {
-                if (let Some(propDecl) <- (curNode as PropDecl)) {
-                    EraseConditionalIf<FuncDecl>(propDecl.setters, { node => !EvalDeclCondition(node) })
-                    EraseConditionalIf<FuncDecl>(propDecl.getters, { node => !EvalDeclCondition(node) })
-                }
-            } else if (curNode.astKind == ASTKind.FUNC_PARAM_LIST) {
-                if (let Some(paramList) <- (curNode as FuncParamList)) {
-                    EraseConditionalIf<FuncParam>(paramList.params, { node => !EvalDeclCondition(node) })
-                }
-            } else if (curNode.astKind == ASTKind.BLOCK) {
-                if (let Some(block) <- (curNode as Block)) {
-                    EraseConditionalIf<Node>(block.body, { node => !EvalBlockNodeCondition(node) })
-                }
-            } else if (curNode.astKind == ASTKind.MACRO_EXPAND_DECL ||
-                curNode.astKind == ASTKind.MACRO_EXPAND_EXPR || curNode.astKind == ASTKind.MACRO_EXPAND_PARAM) {
-                return VisitAction.SKIP_CHILDREN
+            match (curNode.astKind) {
+                case ASTKind.FILE =>
+                    let fileNode = (curNode as File).getOrThrow()
+                    EraseConditionalIf<ImportSpec>(fileNode.imports, { node => !pred(node) })
+                    EraseConditionalIf<Decl>(fileNode.decls, { node => !pred(node) })
+                case ASTKind.INTERFACE_BODY =>
+                    let body = (curNode as InterfaceBody).getOrThrow()
+                    EraseConditionalIf<Decl>(body.decls, { node => !pred(node) })
+                case ASTKind.CLASS_BODY =>
+                    let body = (curNode as ClassBody).getOrThrow()
+                    EraseConditionalIf<Decl>(body.decls, { node => !pred(node) })
+                case ASTKind.STRUCT_BODY =>
+                    let body = (curNode as StructBody).getOrThrow()
+                    EraseConditionalIf<Decl>(body.decls, { node => !pred(node) })
+                case ASTKind.ENUM_DECL =>
+                    let enumDecl = (curNode as EnumDecl).getOrThrow()
+                    EraseConditionalIf<Decl>(enumDecl.members, { node => !pred(node) })
+                    EraseConditionalIf<Decl>(enumDecl.constructors, { node => !pred(node) })
+                case ASTKind.EXTEND_DECL =>
+                    let extendDecl = (curNode as ExtendDecl).getOrThrow()
+                    EraseConditionalIf<Decl>(extendDecl.members, { node => !pred(node) })
+                case ASTKind.PROP_DECL =>
+                    let propDecl = (curNode as PropDecl).getOrThrow()
+                    EraseConditionalIf<FuncDecl>(propDecl.setters, { node => !pred(node) })
+                    EraseConditionalIf<FuncDecl>(propDecl.getters, { node => !pred(node) })
+                case ASTKind.FUNC_PARAM_LIST =>
+                    let paramList = (curNode as FuncParamList).getOrThrow()
+                    EraseConditionalIf<FuncParam>(paramList.params, { node => !pred(node) })
+                case ASTKind.BLOCK =>
+                    let block = (curNode as Block).getOrThrow()
+                    EraseConditionalIf<Node>(block.body, { node => !pred(node) })
+                case ASTKind.MACRO_EXPAND_DECL | ASTKind.MACRO_EXPAND_EXPR | ASTKind.MACRO_EXPAND_PARAM =>
+                    return VisitAction.SKIP_CHILDREN
+                case _ => ()
             }
             return VisitAction.WALK_CHILDREN
         }
         Walker(file, visitPre: action).Walk()
     }
 
-    private func EvalDeclCondition(node: Decl): Bool {
-        return EvalAnnotations(node.annotations)
-    }
-
-    private func EvalImportSpecCondition(node: ImportSpec): Bool {
-        return EvalAnnotations(node.annotations)
-    }
-
-    private func EvalMacroExpandExprCondition(node: MacroExpandExpr): Bool {
-        return EvalAnnotations(node.annotations)
-    }
-
-    private func EvalBlockNodeCondition(node: Node): Bool {
-        if (let Some(decl) <- (node as Decl)) {
-            return EvalDeclCondition(decl)
-        }
-        if (let Some(importSpec) <- (node as ImportSpec)) {
-            return EvalImportSpecCondition(importSpec)
-        }
-        if (let Some(macroExpr) <- (node as MacroExpandExpr)) {
-            return EvalMacroExpandExprCondition(macroExpr)
-        }
-        return true
-    }
-
-    private func EvalAnnotations(annotations: ArrayList<Annotation>): Bool {
+    private func EvalNodeCondition(node: Decl): Bool {
         let evalResult = ArrayList<Bool>()
         evalResult.add(true)
-        UtilsEraseIf<Annotation>(annotations, { anno: Annotation =>
+        UtilsEraseIf<Annotation>(node.annotations, { anno: Annotation =>
+            if (anno.kind != AstAnnotationKind.WHEN) {
+                return false
+            }
+            if (let Some(condExpr) <- anno.condExpr) {
+                evalResult[0] = EvalCachedConditionExpr(condExpr)
+            } else {
+                diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.conditional_compilation_not_have_condition_expr, anno.begin).Emit()
+            }
+            return true
+        })
+        return evalResult[0]
+    }
+
+    private func EvalNodeCondition(node: ImportSpec): Bool {
+        let evalResult = ArrayList<Bool>()
+        evalResult.add(true)
+        UtilsEraseIf<Annotation>(node.annotations, { anno: Annotation =>
+            if (anno.kind != AstAnnotationKind.WHEN) {
+                return false
+            }
+            if (let Some(condExpr) <- anno.condExpr) {
+                evalResult[0] = EvalCachedConditionExpr(condExpr)
+            } else {
+                diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.conditional_compilation_not_have_condition_expr, anno.begin).Emit()
+            }
+            return true
+        })
+        return evalResult[0]
+    }
+
+    private func EvalNodeCondition(node: MacroExpandExpr): Bool {
+        let evalResult = ArrayList<Bool>()
+        evalResult.add(true)
+        UtilsEraseIf<Annotation>(node.annotations, { anno: Annotation =>
             if (anno.kind != AstAnnotationKind.WHEN) {
                 return false
             }
