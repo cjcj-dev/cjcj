@@ -5578,10 +5578,37 @@ public class Translator {
         }
         if (let Some(varDecl) <- (target as AstVarDecl)) {
             if (let Some(baseExpr) <- member.baseExpr) {
-                let baseInfo = NormalizeMemberBaseLeftValue(TranslateExprAsLeftValue(baseExpr), baseExpr)
+                let targetBaseAstTy = RequireAstTy(varDecl.outerDecl ??
+                    throw IllegalStateException("faithful AST2CHIR member target has no outer declaration"))
+                let baseInfo = NormalizeMemberBaseLeftValue(TranslateExprAsLeftValue(baseExpr), baseExpr,
+                    targetBaseAstTy)
                 let path = CopyStringList(baseInfo.path)
                 path.add(varDecl.identifier.Val())
-                return FaithfulLeftValueInfo(baseInfo.base, path)
+                if (!baseInfo.path.isEmpty()) {
+                    return FaithfulLeftValueInfo(baseInfo.base, path)
+                }
+                let baseValueTy = baseInfo.base.GetType() ??
+                    throw IllegalStateException("faithful AST2CHIR member base has no type: ${baseInfo.base.GetIdentifier()}")
+                var baseValRefDims = baseValueTy.GetRefDims()
+                let strippedBaseValueTy = baseValueTy.StripAllRefs()
+                let instMap = HashMap<Int64, Type>()
+                if (let Some(baseValCustomTy) <- (strippedBaseValueTy as CustomType)) {
+                    baseValCustomTy.GetInstMap(instMap)
+                } else if (let Some(baseValGenericTy) <- (strippedBaseValueTy as GenericType)) {
+                    baseValGenericTy.GetInstMap(instMap)
+                }
+                var targetBaseTy = chirTy.TranslateType(targetBaseAstTy)
+                if (targetBaseTy.GetRefDims() > baseValRefDims) {
+                    baseValRefDims = targetBaseTy.GetRefDims()
+                }
+                targetBaseTy = ReplaceRawGenericArgType(targetBaseTy.StripAllRefs(), instMap)
+                var refIdx: Int64 = 0
+                while (refIdx < baseValRefDims) {
+                    targetBaseTy = builder.context.GetRefTy(targetBaseTy)
+                    refIdx++
+                }
+                let castedBase = CastValueIfNeeded(baseInfo.base, targetBaseTy)
+                return FaithfulLeftValueInfo(castedBase, path)
             }
             return TranslateInstanceFieldRefAsLeftValue(varDecl)
         }
@@ -5594,7 +5621,8 @@ public class Translator {
         return FaithfulLeftValueInfo(GetCurrentThisObject(), path)
     }
 
-    private func NormalizeMemberBaseLeftValue(info: FaithfulLeftValueInfo, baseExpr: AstExpr): FaithfulLeftValueInfo {
+    private func NormalizeMemberBaseLeftValue(info: FaithfulLeftValueInfo, baseExpr: AstExpr,
+        targetBaseAstTy: AstTy): FaithfulLeftValueInfo {
         var base = info.base
         var path = CopyStringList(info.path)
         let baseTy = base.GetType() ??
@@ -5613,13 +5641,14 @@ public class Translator {
         while (pathIndex < path.size) {
             let name = path[pathIndex]
             let allMemberVars = memberBaseTy.GetCustomTypeDef().GetAllInstanceVars()
-            let memberVarInstTypes = memberBaseTy.GetInstantiatedMemberTys()
+            let instMap = HashMap<Int64, Type>()
+            memberBaseTy.GetInstMap(instMap)
             var memberIndex = allMemberVars.size
             memberTy = None
             while (memberIndex > 0) {
                 memberIndex--
                 if (allMemberVars[memberIndex].name == name) {
-                    memberTy = memberVarInstTypes[memberIndex]
+                    memberTy = ReplaceRawGenericArgType(allMemberVars[memberIndex].ty, instMap)
                     break
                 }
             }
@@ -5634,6 +5663,52 @@ public class Translator {
             }
         }
         let pathMemberTy = memberTy.getOrThrow()
+        let baseExprTy = RequireAstTy(baseExpr)
+        if (baseExprTy.IsClassLike() || baseExprTy.IsGeneric()) {
+            var baseLeftValue = base
+            var baseLeftValueTy = baseTy
+            if (baseLeftValueTy.IsReferenceTypeWithRefDims(CLASS_REF_DIM)) {
+                baseLeftValueTy = RequireRefBaseType(baseLeftValue)
+                baseLeftValue = RequireResult(builder.CreateLoad(baseLeftValueTy, baseLeftValue, CurrentBlock()))
+            }
+
+            var baseVal: Option<Value> = None
+            if (baseLeftValueTy.IsReferenceTypeWithRefDims(1) ||
+                baseLeftValueTy.IsValueOrGenericTypeWithRefDims(1)) {
+                let memberRefTy = builder.context.GetRefTy(pathMemberTy)
+                let getMemberRef = RequireResult(builder.CreateGetElementByName(memberRefTy, baseLeftValue, path,
+                    CurrentBlock()))
+                baseVal = RequireResult(builder.CreateLoad(pathMemberTy, getMemberRef, CurrentBlock()))
+            } else if (baseLeftValueTy.IsValueOrGenericTypeWithRefDims(0)) {
+                baseVal = RequireResult(builder.CreateFieldByName(pathMemberTy, baseLeftValue, path, CurrentBlock()))
+            }
+
+            let concreteBaseVal = baseVal ??
+                throw IllegalStateException("faithful AST2CHIR unsupported member base type: ${baseLeftValueTy.ToString()}")
+            let concreteBaseValTy = concreteBaseVal.GetType() ??
+                throw IllegalStateException("faithful AST2CHIR member base value has no type: ${concreteBaseVal.GetIdentifier()}")
+            var baseValRefDims = concreteBaseValTy.GetRefDims()
+            let strippedBaseValTy = concreteBaseValTy.StripAllRefs()
+            let instMap = HashMap<Int64, Type>()
+            if (let Some(baseValCustomTy) <- (strippedBaseValTy as CustomType)) {
+                baseValCustomTy.GetInstMap(instMap)
+            } else if (let Some(baseValGenericTy) <- (strippedBaseValTy as GenericType)) {
+                baseValGenericTy.GetInstMap(instMap)
+            }
+            var targetBaseTy = chirTy.TranslateType(targetBaseAstTy)
+            if (targetBaseTy.GetRefDims() > baseValRefDims) {
+                baseValRefDims = targetBaseTy.GetRefDims()
+            }
+            targetBaseTy = ReplaceRawGenericArgType(targetBaseTy.StripAllRefs(), instMap)
+            var refIdx: Int64 = 0
+            while (refIdx < baseValRefDims) {
+                targetBaseTy = builder.context.GetRefTy(targetBaseTy)
+                refIdx++
+            }
+            let castedBaseVal = CastValueIfNeeded(concreteBaseVal, targetBaseTy)
+            path.clear()
+            return FaithfulLeftValueInfo(castedBaseVal, path)
+        }
         if (!pathMemberTy.IsReferenceTypeWithRefDims(1) &&
             (baseTy.IsReferenceTypeWithRefDims(1) || baseTy.IsValueOrGenericTypeWithRefDims(1))) {
             return FaithfulLeftValueInfo(base, path)

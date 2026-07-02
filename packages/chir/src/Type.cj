@@ -1,5 +1,6 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::utils.CJC_ASSERT
 import std.collection.*
 import std.sort.*
 
@@ -652,6 +653,13 @@ public class GenericType <: Type {
         }, stable: true)
     }
 
+    public func GetInstMap(instMap: HashMap<Int64, Type>): Unit {
+        for (upperBound in upperBounds) {
+            let upperBoundCustomType = (upperBound.StripAllRefs() as CustomType).getOrThrow()
+            upperBoundCustomType.GetInstMap(instMap)
+        }
+    }
+
     public override func ToString(): String {
         return "Generic-" + name
     }
@@ -708,6 +716,66 @@ public open class CustomType <: Type {
         return argTys.clone()
     }
 
+    public func GetInstMap(instMap: HashMap<Int64, Type>): Unit {
+        let customTypeDef = GetCustomTypeDef()
+        let customTypeDefGenericParams = customTypeDef.GetGenericTypeParams()
+        let customTypeGenericArgs = GetGenericArgs()
+        if (!customTypeDefGenericParams.isEmpty()) {
+            CJC_ASSERT(customTypeDefGenericParams.size == customTypeGenericArgs.size)
+        }
+        var paramIdx: Int64 = 0
+        while (paramIdx < customTypeDefGenericParams.size) {
+            let genericParam = customTypeDefGenericParams[paramIdx]
+            if (!instMap.contains(genericParam.objectId)) {
+                instMap[genericParam.objectId] = customTypeGenericArgs[paramIdx]
+            }
+            paramIdx++
+        }
+
+        for (parentInterfaceTy in customTypeDef.GetImplementedInterfaceTys()) {
+            let parentInterfaceDef = parentInterfaceTy.GetCustomTypeDef()
+            let parentInterfaceDefGenericParams = parentInterfaceDef.GetGenericTypeParams()
+            let instParentInterfaceTy =
+                (ReplaceRawGenericArgType(parentInterfaceTy, instMap) as ClassType).getOrThrow()
+            let parentInterfaceTypeGenericArgs = instParentInterfaceTy.GetGenericArgs()
+            if (!customTypeDefGenericParams.isEmpty()) {
+                CJC_ASSERT(parentInterfaceDefGenericParams.size == parentInterfaceTypeGenericArgs.size)
+            }
+            var interfaceIdx: Int64 = 0
+            while (interfaceIdx < parentInterfaceDefGenericParams.size) {
+                let interfaceGenericParam = parentInterfaceDefGenericParams[interfaceIdx]
+                if (!instMap.contains(interfaceGenericParam.objectId)) {
+                    instMap[interfaceGenericParam.objectId] = parentInterfaceTypeGenericArgs[interfaceIdx]
+                }
+                interfaceIdx++
+            }
+            parentInterfaceTy.GetInstMap(instMap)
+        }
+
+        if (let Some(classTy) <- (this as ClassType)) {
+            let classTypeDef = classTy.GetClassDef()
+            if (let Some(parentClassTy) <- classTypeDef.GetSuperClassTy()) {
+                let parentClassDef = parentClassTy.GetCustomTypeDef()
+                let parentClassDefGenericParams = parentClassDef.GetGenericTypeParams()
+                let instParentClassTy =
+                    (ReplaceRawGenericArgType(parentClassTy, instMap) as ClassType).getOrThrow()
+                let parentClassTypeGenericArgs = instParentClassTy.GetGenericArgs()
+                if (!parentClassDefGenericParams.isEmpty()) {
+                    CJC_ASSERT(parentClassDefGenericParams.size == parentClassTypeGenericArgs.size)
+                }
+                var classIdx: Int64 = 0
+                while (classIdx < parentClassDefGenericParams.size) {
+                    let classGenericParam = parentClassDefGenericParams[classIdx]
+                    if (!instMap.contains(classGenericParam.objectId)) {
+                        instMap[classGenericParam.objectId] = parentClassTypeGenericArgs[classIdx]
+                    }
+                    classIdx++
+                }
+                parentClassTy.GetInstMap(instMap)
+            }
+        }
+    }
+
     public func GetInstantiatedMemberTys(): ArrayList<Type> {
         let out = ArrayList<Type>()
         if (let Some(classTy) <- (this as ClassType)) {
@@ -743,6 +811,71 @@ public open class CustomType <: Type {
         }
         return def.GetIdentifier() + "<" + JoinStrings(args, ",") + ">"
     }
+}
+
+public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type>): Type {
+    if (replaceTable.isEmpty()) {
+        return ty
+    }
+    if (let Some(genericTy) <- (ty as GenericType)) {
+        if (let Some(instTy) <- replaceTable.get(genericTy.objectId)) {
+            return instTy
+        }
+        return ty
+    }
+    if (let Some(refTy) <- (ty as RefType)) {
+        return RefType(ReplaceRawGenericArgType(refTy.GetBaseType(), replaceTable))
+    }
+    if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
+        return RawArrayType(ReplaceRawGenericArgType(rawArrayTy.GetElementType(), replaceTable),
+            dims: rawArrayTy.GetDims())
+    }
+    if (let Some(varrayTy) <- (ty as VArrayType)) {
+        return VArrayType(ReplaceRawGenericArgType(varrayTy.GetElementType(), replaceTable), varrayTy.size)
+    }
+    if (let Some(pointerTy) <- (ty as CPointerType)) {
+        return CPointerType(ReplaceRawGenericArgType(pointerTy.GetElementType(), replaceTable))
+    }
+    if (let Some(boxTy) <- (ty as BoxType)) {
+        return BoxType(ReplaceRawGenericArgType(boxTy.GetBaseType(), replaceTable))
+    }
+    if (let Some(tupleTy) <- (ty as TupleType)) {
+        let args = ArrayList<Type>()
+        for (arg in tupleTy.GetTypeArgs()) {
+            args.add(ReplaceRawGenericArgType(arg, replaceTable))
+        }
+        return TupleType(args)
+    }
+    if (let Some(funcTy) <- (ty as FuncType)) {
+        let params = ArrayList<Type>()
+        for (param in funcTy.GetParamTypes()) {
+            params.add(ReplaceRawGenericArgType(param, replaceTable))
+        }
+        let retTy = ReplaceRawGenericArgType(funcTy.GetReturnType(), replaceTable)
+        return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+    }
+    if (let Some(structTy) <- (ty as StructType)) {
+        let args = ArrayList<Type>()
+        for (arg in structTy.GetGenericArgs()) {
+            args.add(ReplaceRawGenericArgType(arg, replaceTable))
+        }
+        return StructType(structTy.GetStructDef(), args)
+    }
+    if (let Some(classTy) <- (ty as ClassType)) {
+        let args = ArrayList<Type>()
+        for (arg in classTy.GetGenericArgs()) {
+            args.add(ReplaceRawGenericArgType(arg, replaceTable))
+        }
+        return ClassType(classTy.GetClassDef(), args)
+    }
+    if (let Some(enumTy) <- (ty as EnumType)) {
+        let args = ArrayList<Type>()
+        for (arg in enumTy.GetGenericArgs()) {
+            args.add(ReplaceRawGenericArgType(arg, replaceTable))
+        }
+        return EnumType(enumTy.GetEnumDef(), args)
+    }
+    return ty
 }
 
 private func ReplaceRawGenericArgType(ty: Type, genericParams: ArrayList<GenericType>,
