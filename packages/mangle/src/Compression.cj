@@ -1,7 +1,7 @@
 package cangjie_compiler::mangle
 
 import std.collection.*
-import std.convert.*
+import cangjie_compiler::utils.{CJC_ASSERT, Stoi}
 
 public enum EntityType {
     | NAME
@@ -202,17 +202,15 @@ public class IntRef {
 }
 
 private func CompressionDecimalToManglingNumber(decimal: String): String {
+    CJC_ASSERT(!decimal.isEmpty())
     let base62Chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-    if (decimal.isEmpty()) {
-        return ""
-    }
     for (ch in decimal.toArray()) {
         if (!IsDigit(ch)) {
             return ""
         }
     }
-    try {
-        var num = Int64.parse(decimal) - 1
+    if (let Some(parsed) <- Stoi(decimal)) {
+        var num = parsed - 1
         if (num < 0) {
             return MANGLE_WILDCARD_PREFIX
         }
@@ -223,16 +221,15 @@ private func CompressionDecimalToManglingNumber(decimal: String): String {
             num /= base62Chars.size
         }
         return base62 + MANGLE_WILDCARD_PREFIX
-    } catch (e: Exception) {
-        return ""
     }
+    return ""
 }
 
 private func forwardCompressed(mangled: String, idx: Int64, state: ParseState): Int64 {
     if (idx >= mangled.size) {
         return idx
     }
-    if (mangled[idx] == b'Y') {
+    if (mangled[idx] == MANGLE_COMPRESSED_PREFIX[0]) {
         state.isCompressed = true
         return ForwardNumber(mangled, idx: idx + MANGLE_CHAR_LEN)
     }
@@ -321,19 +318,17 @@ public func ForwardName(mangled: String, state: ParseState, idx!: Int64 = 0): In
     if (!IsDigit(mangled[cIdx])) {
         return cIdx
     }
-    if (mangled[cIdx] == b'0') {
+    if (mangled[cIdx] == MANGLE_ANONYMOUS_VARIABLE_PREFIX[0]) {
         return idx + MANGLE_CHAR_LEN
     }
     var numberLen: Int64 = 0
     while (idx + numberLen < mangled.size && IsDigit(mangled[idx + numberLen])) {
         numberLen++
     }
-    try {
-        let number = Int64.parse(mangled[idx..idx + numberLen])
+    if (let Some(number) <- Stoi(mangled[idx..idx + numberLen])) {
         return idx + numberLen + number
-    } catch (e: Exception) {
-        return idx
     }
+    return idx
 }
 
 public func ForwardNumber(mangled: String, idx!: Int64 = 0): Int64 {
