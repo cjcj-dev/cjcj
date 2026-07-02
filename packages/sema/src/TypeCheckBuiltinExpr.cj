@@ -7,6 +7,7 @@ import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
 import cangjie_compiler::basic.Position as BasicPosition
+import cangjie_compiler::utils.CSTRING_NAME
 
 private func ToBasicPosition(pos: Position): BasicPosition {
     return BasicPosition(pos.fileID, pos.line, pos.column)
@@ -76,30 +77,47 @@ private func GetArrayTypeByInterface(typeManager: TypeManager, arrayStruct: Opti
     return arrTys.values[0]
 }
 
-private func DesugarPointerCall(typeManager: TypeManager, ce: CallExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Option<PointerExpr> {
-    if (let Some(existing) <- ce.desugarExpr) {
-        return existing as PointerExpr
+private func IgnoreEmptyIntersection(baseArgs: ArrayList<Type>): Unit {
+    var idx: Int64 = 0
+    while (idx < baseArgs.size) {
+        let isEmpty = if (let Some(argTy) <- baseArgs[idx].GetTy()) {
+            if (let Some(intersectionTy) <- (argTy as IntersectionTy)) {
+                intersectionTy.tys.isEmpty()
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+        if (isEmpty) {
+            baseArgs.remove(at: idx)
+        } else {
+            idx++
+        }
     }
-    let baseFunc = ce.baseFunc ?? return None
+}
+
+private func DesugarPointerCall(typeManager: TypeManager, ctx: Option<ASTContext>, ce: CallExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Unit {
+    let pointerExpr = PointerExpr()
+    let typeNode = Type()
+    pointerExpr.typeNode = typeNode
+    if (let Some(context) <- ctx) {
+        context.RemoveTypeCheckCache(pointerExpr)
+        context.RemoveTypeCheckCache(typeNode)
+    }
+    let baseFunc = ce.baseFunc.getOrThrow()
     let baseFuncTy = if (let Some(baseTy) <- baseFunc.GetTy()) {
         typeManager.SubstituteTypeAliasInTy(baseTy)
     } else {
-        return None
+        TypeManager.GetInvalidTy()
     }
-    let typeNode = Type()
     let typeArgs = baseFuncTy.typeArgs
     let baseArgs = ArrayList<Type>()
     for (baseArg in baseFunc.GetTypeArgs()) {
-        if (let Some(argTy) <- baseArg.GetTy()) {
-            if (let Some(intersectionTy) <- (argTy as IntersectionTy)) {
-                if (intersectionTy.tys.isEmpty()) {
-                    continue
-                }
-            }
-        }
         baseArgs.add(baseArg)
     }
+    IgnoreEmptyIntersection(baseArgs)
     let usefulTypeArg = !typeArgs.isEmpty() && (!typeArgs[0].IsGeneric() || !baseArgs.isEmpty())
     let argTy = if (usefulTypeArg) {
         typeArgs[0]
@@ -110,8 +128,6 @@ private func DesugarPointerCall(typeManager: TypeManager, ce: CallExpr,
     }
     typeNode.SetTy(typeManager.GetPointerTy(argTy))
 
-    let pointerExpr = PointerExpr()
-    pointerExpr.typeNode = typeNode
     if (!ce.args.isEmpty()) {
         pointerExpr.arg = ce.args[0]
     }
@@ -125,9 +141,63 @@ private func DesugarPointerCall(typeManager: TypeManager, ce: CallExpr,
     pointerExpr.sourceExpr = ce
     pointerExpr.begin = ce.begin
     pointerExpr.end = ce.end
-    AddCurFile(pointerExpr, file: ce.curFile)
     ce.desugarExpr = pointerExpr
-    return Some(pointerExpr)
+    AddCurFile(ce, file: ce.curFile)
+}
+
+private func DesugarArrayCall(typeManager: TypeManager, ctx: Option<ASTContext>, ce: CallExpr): Unit {
+    let arrayExpr = ArrayExpr()
+    let typeNode = Type()
+    arrayExpr.typeNode = typeNode
+    if (let Some(context) <- ctx) {
+        context.RemoveTypeCheckCache(arrayExpr)
+        context.RemoveTypeCheckCache(typeNode)
+    }
+    let baseFunc = ce.baseFunc.getOrThrow()
+    let baseFuncTy = if (let Some(baseTy) <- baseFunc.GetTy()) {
+        typeManager.SubstituteTypeAliasInTy(baseTy)
+    } else {
+        TypeManager.GetInvalidTy()
+    }
+    let typeArgs = typeManager.GetTypeArgs(baseFuncTy)
+    let baseArgs = ArrayList<Type>()
+    for (baseArg in baseFunc.GetTypeArgs()) {
+        baseArgs.add(baseArg)
+    }
+    IgnoreEmptyIntersection(baseArgs)
+    if (let Some(varrTy) <- (baseFuncTy as VArrayTy)) {
+        var argTy: Ty = TypeManager.GetInvalidTy()
+        if (!typeArgs.isEmpty()) {
+            argTy = typeArgs[0]
+        }
+        if (typeArgs[0].IsGeneric() && !baseArgs.isEmpty()) {
+            argTy = baseArgs[0].GetTy() ?? TypeManager.GetInvalidTy()
+        }
+        typeNode.SetTy(typeManager.GetVArrayTy(argTy, varrTy.size))
+        arrayExpr.isValueArray = true
+    } else {
+        let usefulTypeArg = !typeArgs.isEmpty() && (!typeArgs[0].IsGeneric() || !baseArgs.isEmpty())
+        if (usefulTypeArg) {
+            typeNode.SetTy(typeManager.GetArrayTy(typeArgs[0], 1u64))
+        } else {
+            let argTy = if (!baseArgs.isEmpty()) {
+                baseArgs[0].GetTy() ?? TypeManager.GetInvalidTy()
+            } else {
+                TypeManager.GetInvalidTy()
+            }
+            typeNode.SetTy(typeManager.GetArrayTy(argTy, 1u64))
+        }
+    }
+    for (arg in ce.args) {
+        arrayExpr.args.add(arg)
+    }
+    ce.args.clear()
+    arrayExpr.scopeName = ce.scopeName
+    arrayExpr.sourceExpr = ce
+    arrayExpr.begin = ce.begin
+    arrayExpr.end = ce.end
+    ce.desugarExpr = arrayExpr
+    AddCurFile(ce, file: ce.curFile)
 }
 
 private func IsCollectionInterfaceTy(ty: Ty): Bool {
@@ -581,71 +651,80 @@ public func SynVArrayExpr(typeManager: TypeManager, arrayExpr: ArrayExpr,
     return arrayExpr.GetTy() ?? TypeManager.GetInvalidTy()
 }
 
-private func CanInferPointerTyFromTarget(pointerTy: Ty, targetTy: Ty): Bool {
-    if (!targetTy.IsPointer() || targetTy.typeArgs.isEmpty() || !Ty.IsTyCorrect(targetTy.typeArgs[0])) {
-        return false
-    }
-    if (!pointerTy.IsPointer() || pointerTy.typeArgs.isEmpty()) {
-        return false
-    }
-    return !Ty.IsTyCorrect(pointerTy.typeArgs[0]) || pointerTy.HasGeneric()
-}
-
 public func ChkPointerExpr(typeManager: TypeManager, target: Ty, pointerExpr: PointerExpr,
+    typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None,
+    argSynthesizer!: Option<(FuncArg) -> Ty> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- pointerExpr.typeNode) {
         return false
     }
+    var ret = true
     let targetTy = UnboxOptionType(target)
     let pointerTypeNode = pointerExpr.typeNode.getOrThrow()
-    var pointerTy = pointerTypeNode.GetTy() ?? TypeManager.GetInvalidTy()
-    if (CanInferPointerTyFromTarget(pointerTy, targetTy)) {
-        pointerTy = targetTy
-        pointerTypeNode.SetTy(pointerTy)
+    if (!targetTy.typeArgs.isEmpty() && Ty.IsTyCorrect(targetTy.typeArgs[0]) &&
+        (!Ty.IsTyCorrect(pointerTypeNode.GetTy().getOrThrow().typeArgs[0]) ||
+            pointerTypeNode.GetTy().getOrThrow().HasGeneric())) {
+        pointerTypeNode.SetTy(targetTy)
     }
-    if (!pointerTy.IsPointer()) {
-        if (!Ty.IsTyCorrect(pointerTy)) {
-            if (let Some(diagValue) <- diag) {
-                DiagOld(diagValue, pointerExpr, BasicDiagKind.sema_pointer_unknow_generic_type)
-            }
+    if (Ty.IsTyCorrect(targetTy)) {
+        if (let Some(check) <- typeChecker) {
+            ret = check(targetTy, pointerTypeNode)
+        } else {
+            ret = typeManager.IsSubtype(pointerTypeNode.GetTy() ?? TypeManager.GetInvalidTy(), targetTy)
         }
-        pointerExpr.SetTy(TypeManager.GetInvalidTy())
-        return false
+    } else if (let Some(synthesize) <- typeSynthesizer) {
+        pointerTypeNode.SetTy(synthesize(pointerTypeNode))
     }
-    pointerExpr.SetTy(pointerTy)
+    pointerExpr.SetTy(pointerTypeNode.GetTy() ?? TypeManager.GetInvalidTy())
+    if (!Ty.IsTyCorrect(pointerExpr.GetTy())) {
+        if (let Some(diagValue) <- diag) {
+            DiagOld(diagValue, pointerExpr, BasicDiagKind.sema_pointer_unknow_generic_type)
+        }
+        return false
+    } else if (!ret) {
+        if (let Some(diagValue2) <- diag) {
+            DiagMismatchedTypesWithFoundTy(diagValue2, pointerExpr.sourceExpr.getOrThrow(), targetTy,
+                pointerExpr.GetTy().getOrThrow())
+        }
+    }
     if (let Some(arg) <- pointerExpr.arg) {
-        let argTy = FuncArgTy(arg)
-        if (!argTy.IsPointer() && !argTy.IsCFunc()) {
+        let argTy = if (let Some(synthesizeArg) <- argSynthesizer) {
+            synthesizeArg(arg)
+        } else {
+            FuncArgTy(arg)
+        }
+        if (!Ty.IsTyCorrect(argTy) || (!argTy.IsPointer() && !argTy.IsCFunc())) {
             if (let Some(diagValue) <- diag) {
-                DiagOld(diagValue, pointerExpr, BasicDiagKind.sema_pointer_single_element_type_error)
+                if (!CanSkipDiag(arg)) {
+                    DiagOld(diagValue, pointerExpr, BasicDiagKind.sema_pointer_single_element_type_error)
+                }
             }
-            pointerExpr.SetTy(TypeManager.GetInvalidTy())
             return false
         }
         if (!arg.name.Empty()) {
             if (let Some(diagValue) <- diag) {
                 DiagOldStrings(diagValue, arg, BasicDiagKind.sema_unknown_named_argument, [arg.name.Val()])
             }
-            pointerExpr.SetTy(TypeManager.GetInvalidTy())
             return false
         }
     }
-    if (!targetTy.IsInvalid() && typeManager.CheckTypeCompatibility(targetTy, pointerTy) == TypeCompatibility.INCOMPATIBLE) {
+    if (Ty.IsTyCorrect(targetTy) && !typeManager.IsSubtype(pointerExpr.GetTy().getOrThrow(), targetTy)) {
         if (let Some(diagValue) <- diag) {
             let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_mismatched_types,
                 MakeRange(pointerExpr.begin, pointerExpr.end))
-            builder.AddMainHintArguments([target.String(), pointerTy.String()])
+            builder.AddMainHintArguments([target.String(), Ty.ToString(pointerExpr.GetTy())])
             builder.Emit()
         }
-        pointerExpr.SetTy(TypeManager.GetInvalidTy())
         return false
     }
-    return true
+    return ret
 }
 
 public func SynPointerExpr(typeManager: TypeManager, pointerExpr: PointerExpr,
+    typeSynthesizer!: Option<(Type) -> Ty> = None, argSynthesizer!: Option<(FuncArg) -> Ty> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Ty {
-    if (ChkPointerExpr(typeManager, TypeManager.GetInvalidTy(), pointerExpr, diag: diag)) {
+    if (ChkPointerExpr(typeManager, TypeManager.GetInvalidTy(), pointerExpr, typeSynthesizer: typeSynthesizer,
+        argSynthesizer: argSynthesizer, diag: diag)) {
         return pointerExpr.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return InvalidExprTy(pointerExpr)
@@ -697,21 +776,33 @@ public func SynCFuncCall(typeManager: TypeManager, ce: CallExpr,
     return false
 }
 
-public func ChkCStringCall(typeManager: TypeManager, target: Ty, ce: CallExpr): Bool {
+public func ChkCStringCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
+    checker!: Option<CallArgChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (!IsCallOfBuiltInType(ce, TypeKind.TYPE_CSTRING)) {
         return false
     }
     let cptrTy = typeManager.GetPointerTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT8))
     if (ce.args.size != 1) {
+        if (let Some(diagValue) <- diag) {
+            DiagWrongNumberOfArguments(diagValue, ce, [cptrTy])
+        }
         ce.SetTy(TypeManager.GetInvalidTy())
         return false
     }
-    if (typeManager.CheckTypeCompatibility(cptrTy, FuncArgTy(ce.args[0])) == TypeCompatibility.INCOMPATIBLE) {
+    let argOk = if (let Some(check) <- checker) {
+        check(cptrTy, ce.args[0])
+    } else {
+        typeManager.CheckTypeCompatibility(cptrTy, FuncArgTy(ce.args[0])) != TypeCompatibility.INCOMPATIBLE
+    }
+    if (!argOk) {
         ce.SetTy(TypeManager.GetInvalidTy())
         return false
     }
     let targetTy = UnboxOptionType(target)
-    if (Ty.IsTyCorrect(targetTy) && !targetTy.IsCString() && !targetTy.IsCType() && !targetTy.IsInvalid()) {
+    if (Ty.IsTyCorrect(targetTy) && !targetTy.IsCString() && !targetTy.IsCType()) {
+        if (let Some(diagValue2) <- diag) {
+            DiagMismatchedTypesWithFoundTy(diagValue2, ce, target.String(), CSTRING_NAME)
+        }
         ce.SetTy(TypeManager.GetInvalidTy())
         return false
     }
@@ -719,79 +810,81 @@ public func ChkCStringCall(typeManager: TypeManager, target: Ty, ce: CallExpr): 
     return true
 }
 
-public func ChkArrayCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
+public func ChkArrayCall(typeManager: TypeManager, ctx: Option<ASTContext>, target: Ty, ce: CallExpr,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (!IsCallOfBuiltInType(ce, TypeKind.TYPE_ARRAY)) {
+        ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy() ?? TypeManager.GetInvalidTy()))
         return false
     }
-    let arrayExpr = ArrayExpr()
-    arrayExpr.typeNode = TypeNodeFromCallBase(ce)
-    for (arg in ce.args) {
-        arrayExpr.args.add(arg)
-    }
-    let ok = if (target.IsInvalid()) {
-        Ty.IsTyCorrect(SynArrayExpr(typeManager, arrayExpr, diag: diag))
+    var resultTy: Ty = TypeManager.GetInvalidTy()
+    DesugarArrayCall(typeManager, ctx, ce)
+    let arrayExpr = (ce.desugarExpr.getOrThrow() as ArrayExpr).getOrThrow()
+    let ret = if (target.IsInvalid()) {
+        resultTy = SynArrayExpr(typeManager, arrayExpr, diag: diag)
+        Ty.IsTyCorrect(resultTy)
     } else {
-        ChkArrayExpr(typeManager, target, arrayExpr, diag: diag)
+        let checked = ChkArrayExpr(typeManager, target, arrayExpr, diag: diag)
+        resultTy = arrayExpr.GetTy() ?? TypeManager.GetInvalidTy()
+        checked
     }
-    if (ok) {
-        ce.desugarExpr = arrayExpr
-        ce.SetTy(arrayExpr.GetTy() ?? TypeManager.GetInvalidTy())
-        return true
+    if (!ret) {
+        RecoverCallFromArrayExpr(ce)
     }
-    ce.SetTy(TypeManager.GetInvalidTy())
-    return false
+    ce.SetTy(resultTy)
+    return ret
 }
 
-public func ChkVArrayCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
+public func ChkVArrayCall(typeManager: TypeManager, ctx: Option<ASTContext>, target: Ty, ce: CallExpr,
     checker!: Option<CallArgChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (!IsCallOfBuiltInType(ce, TypeKind.TYPE_VARRAY)) {
         return false
     }
-    let arrayExpr = ArrayExpr()
-    arrayExpr.typeNode = TypeNodeFromCallBase(ce)
-    for (arg in ce.args) {
-        arrayExpr.args.add(arg)
-    }
-    let ok = if (target.IsInvalid()) {
-        Ty.IsTyCorrect(SynVArrayExpr(typeManager, arrayExpr, checker: checker, diag: diag))
+    var resultTy: Ty = TypeManager.GetInvalidTy()
+    DesugarArrayCall(typeManager, ctx, ce)
+    let arrayExpr = (ce.desugarExpr.getOrThrow() as ArrayExpr).getOrThrow()
+    let ret = if (target.IsInvalid()) {
+        resultTy = SynVArrayExpr(typeManager, arrayExpr, checker: checker, diag: diag)
+        Ty.IsTyCorrect(resultTy)
     } else {
-        ChkVArrayExpr(typeManager, target, arrayExpr, checker: checker, diag: diag)
+        let checked = ChkVArrayExpr(typeManager, target, arrayExpr, checker: checker, diag: diag)
+        resultTy = arrayExpr.GetTy() ?? TypeManager.GetInvalidTy()
+        checked
     }
-    if (ok) {
-        ce.desugarExpr = arrayExpr
-        ce.SetTy(arrayExpr.GetTy() ?? TypeManager.GetInvalidTy())
-        return true
+    if (!ret) {
+        RecoverCallFromArrayExpr(ce)
     }
-    ce.SetTy(TypeManager.GetInvalidTy())
-    return false
+    ce.SetTy(resultTy)
+    return ret
 }
 
-public func ChkPointerCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
+public func ChkPointerCall(typeManager: TypeManager, ctx: Option<ASTContext>, target: Ty, ce: CallExpr,
+    typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None,
+    argSynthesizer!: Option<(FuncArg) -> Ty> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (!IsCallOfBuiltInType(ce, TypeKind.TYPE_POINTER)) {
         return false
     }
-    let pointerExpr = DesugarPointerCall(typeManager, ce, diag: diag)
-    if (let None <- pointerExpr) {
-        return false
-    }
-    let actualPointerExpr = pointerExpr.getOrThrow()
-    let ok = if (target.IsInvalid()) {
-        Ty.IsTyCorrect(SynPointerExpr(typeManager, actualPointerExpr, diag: diag))
+    var resultTy: Ty = TypeManager.GetInvalidTy()
+    DesugarPointerCall(typeManager, ctx, ce, diag: diag)
+    let pointerExpr = (ce.desugarExpr.getOrThrow() as PointerExpr).getOrThrow()
+    let ret = if (target.IsInvalid()) {
+        resultTy = SynPointerExpr(typeManager, pointerExpr, typeSynthesizer: typeSynthesizer,
+            argSynthesizer: argSynthesizer, diag: diag)
+        Ty.IsTyCorrect(resultTy)
     } else {
-        ChkPointerExpr(typeManager, target, actualPointerExpr, diag: diag)
+        let checked = ChkPointerExpr(typeManager, target, pointerExpr, typeChecker: typeChecker,
+            argSynthesizer: argSynthesizer, diag: diag)
+        resultTy = pointerExpr.GetTy() ?? TypeManager.GetInvalidTy()
+        checked
     }
-    if (ok) {
-        ce.SetTy(actualPointerExpr.GetTy() ?? TypeManager.GetInvalidTy())
-        return true
+    if (!ret) {
+        if (let Some(arg) <- pointerExpr.arg) {
+            ce.args.add(arg)
+        }
+        ce.desugarExpr = None
     }
-    if (let Some(arg) <- actualPointerExpr.arg) {
-        ce.args.add(arg)
-    }
-    ce.desugarExpr = None
-    ce.SetTy(TypeManager.GetInvalidTy())
-    return false
+    ce.SetTy(resultTy)
+    return ret
 }
 
 public func ChkCFuncCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
@@ -823,42 +916,27 @@ public func ChkCFuncCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
     return ok
 }
 
-public func ChkBuiltinCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
-    diag!: Option<BasicDiagnosticEngine> = None, checker!: Option<CallArgChecker> = None): Bool {
-    if (ChkPointerCall(typeManager, target, ce, diag: diag)) {
+public func ChkBuiltinCall(typeManager: TypeManager, ctx: Option<ASTContext>, target: Ty, ce: CallExpr,
+    diag!: Option<BasicDiagnosticEngine> = None, checker!: Option<CallArgChecker> = None,
+    typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None,
+    argSynthesizer!: Option<(FuncArg) -> Ty> = None): Bool {
+    if (ChkPointerCall(typeManager, ctx, target, ce, typeChecker: typeChecker,
+        typeSynthesizer: typeSynthesizer, argSynthesizer: argSynthesizer, diag: diag)) {
         return true
     }
-    if (ChkCStringCall(typeManager, target, ce)) {
+    if (ChkCStringCall(typeManager, target, ce, checker: checker, diag: diag)) {
         return true
     }
-    if (ChkArrayCall(typeManager, target, ce, diag: diag)) {
+    if (ChkArrayCall(typeManager, ctx, target, ce, diag: diag)) {
         return true
     }
-    if (ChkVArrayCall(typeManager, target, ce, checker: checker, diag: diag)) {
+    if (ChkVArrayCall(typeManager, ctx, target, ce, checker: checker, diag: diag)) {
         return true
     }
     if (ChkCFuncCall(typeManager, target, ce, diag: diag)) {
         return true
     }
     return false
-}
-
-private func TypeNodeFromCallBase(ce: CallExpr): Option<Type> {
-    if (let None <- ce.baseFunc) {
-        return None
-    }
-    let typeNode = RefType()
-    let base = ce.baseFunc.getOrThrow()
-    if (let Some(ty) <- base.GetTy()) {
-        typeNode.SetTy(ty)
-    } else if (let Some(target) <- base.GetTarget()) {
-        if (let Some(targetTy) <- target.GetTy()) {
-            typeNode.SetTy(targetTy)
-        }
-    }
-    typeNode.begin = base.begin
-    typeNode.end = base.end
-    return typeNode
 }
 
 private func JoinCaseTysForBuiltin(typeManager: TypeManager, tys: ArrayList<Ty>, curFile: Option<File>): Ty {

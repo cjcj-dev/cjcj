@@ -3129,7 +3129,9 @@ public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEn
 public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
     ce: CallExpr, argChecker: Option<CallArgChecker>, desugarChecker!: Option<CallDesugarChecker> = None,
     clearInferredForTarget!: Bool = true, declSynthesizer!: Option<CallDeclSynthesizer> = None,
-    ctx!: Option<ASTContext> = None, variadicDesugar!: Option<(CallExpr, Int64) -> Unit> = None): Bool {
+    ctx!: Option<ASTContext> = None, variadicDesugar!: Option<(CallExpr, Int64) -> Unit> = None,
+    typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None,
+    argSynthesizer!: Option<(FuncArg) -> Ty> = None): Bool {
     if (let Some(desugar) <- ce.desugarExpr) {
         if (Ty.IsTyCorrect(desugar.GetTy())) {
             ce.SetTy(desugar.GetTy().getOrThrow())
@@ -3147,7 +3149,9 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
         }
     }
     if (let None <- ce.baseFunc) {
-        return ChkBuiltinCall(typeManager, target ?? TypeManager.GetInvalidTy(), ce, diag: diag, checker: argChecker)
+        return ChkBuiltinCall(typeManager, ctx, target ?? TypeManager.GetInvalidTy(), ce, diag: diag,
+            checker: argChecker, typeChecker: typeChecker, typeSynthesizer: typeSynthesizer,
+            argSynthesizer: argSynthesizer)
     }
     let prevCheckTrue = ce.callKind != CallKind.CALL_INVALID && Ty.IsTyCorrect(ce.GetTy()) &&
         typeManager.GetUnsolvedTyVars().isEmpty()
@@ -3165,7 +3169,8 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
         }
     }
     ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy() ?? TypeManager.GetInvalidTy()))
-    if (ChkBuiltinCall(typeManager, target ?? TypeManager.GetInvalidTy(), ce, diag: diag, checker: argChecker)) {
+    if (ChkBuiltinCall(typeManager, ctx, target ?? TypeManager.GetInvalidTy(), ce, diag: diag, checker: argChecker,
+        typeChecker: typeChecker, typeSynthesizer: typeSynthesizer, argSynthesizer: argSynthesizer)) {
         ce.callKind = CallKind.CALL_BUILTIN_FUNCTION
         return true
     }
@@ -3252,9 +3257,12 @@ public func SynCallExpr(typeManager: TypeManager, ce: CallExpr, ctx!: Option<AST
 
 public func SynCallExprWithArgChecker(typeManager: TypeManager, ce: CallExpr, argChecker: Option<CallArgChecker>,
     diag!: Option<BasicDiagnosticEngine> = None, declSynthesizer!: Option<CallDeclSynthesizer> = None,
-    ctx!: Option<ASTContext> = None, variadicDesugar!: Option<(CallExpr, Int64) -> Unit> = None): Ty {
+    ctx!: Option<ASTContext> = None, variadicDesugar!: Option<(CallExpr, Int64) -> Unit> = None,
+    typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None,
+    argSynthesizer!: Option<(FuncArg) -> Ty> = None): Ty {
     if (ChkCallExprWithArgChecker(typeManager, diag, None, ce, argChecker, declSynthesizer: declSynthesizer,
-        ctx: ctx, variadicDesugar: variadicDesugar)) {
+        ctx: ctx, variadicDesugar: variadicDesugar, typeChecker: typeChecker,
+        typeSynthesizer: typeSynthesizer, argSynthesizer: argSynthesizer)) {
         return ce.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return TypeManager.GetInvalidTy()

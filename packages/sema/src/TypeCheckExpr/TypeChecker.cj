@@ -3625,7 +3625,30 @@ public class TypeChecker {
             let callTy = SynCallExprWithArgChecker(impl.typeManager, callExpr,
                 Some({ target: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, target, arg) }), diag: impl.diag,
                 declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }), ctx: Some(ctx),
-                variadicDesugar: Some({ vce: CallExpr, arity: Int64 => DesugarVariadicCallExpr(vce, arity) }))
+                variadicDesugar: Some({ vce: CallExpr, arity: Int64 => DesugarVariadicCallExpr(vce, arity) }),
+                typeChecker: Some({ targetTy: Ty, typeNode: Type =>
+                    if (!Ty.IsTyCorrect(targetTy)) {
+                        typeNode.SetTy(TypeManager.GetInvalidTy())
+                        false
+                    } else {
+                        typeCheckExprPutTargetType(ctx, typeNode, targetTy)
+                        let checkRet = if (typeNode.TestAttr(Attribute.IS_BROKEN)) {
+                            typeNode.SetTy(TypeManager.GetInvalidTy())
+                            false
+                        } else if (targetTy.HasQuestTy() && !IsQuestableNode(typeNode)) {
+                            false
+                        } else {
+                            let _ = SynthesizeNode(ctx, SynPos.NONE, typeNode)
+                            let _ = ReplaceIdealTy(impl.typeManager, typeNode, diag: impl.diag)
+                            impl.typeManager.IsSubtype(typeNode.GetTy() ?? TypeManager.GetInvalidTy(), targetTy)
+                        }
+                        typeCheckExprClearTargetType(ctx, typeNode)
+                        typeNode.SetTy(impl.typeManager.TryGreedySubst(typeNode.GetTy() ?? TypeManager.GetInvalidTy()))
+                        checkRet
+                    }
+                }),
+                typeSynthesizer: Some({ typeNode: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode) }),
+                argSynthesizer: Some({ arg: FuncArg => SynthesizeFuncArg(ctx, arg) }))
             return FinishSynthesize(ctx, callExpr, callTy)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
@@ -3766,11 +3789,9 @@ public class TypeChecker {
             return FinishSynthesize(ctx, arrayExpr, SynArrayExpr(impl.typeManager, arrayExpr, diag: impl.diag))
         }
         if (let Some(pointerExpr) <- (expr as PointerExpr)) {
-            SynthesizeTypeNode(ctx, pointerExpr.typeNode)
-            if (let Some(arg2) <- pointerExpr.arg) {
-                let _ = SynthesizeFuncArg(ctx, arg2)
-            }
-            return FinishSynthesize(ctx, pointerExpr, SynPointerExpr(impl.typeManager, pointerExpr, diag: impl.diag))
+            return FinishSynthesize(ctx, pointerExpr, SynPointerExpr(impl.typeManager, pointerExpr,
+                typeSynthesizer: Some({ typeNode: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode) }),
+                argSynthesizer: Some({ arg: FuncArg => SynthesizeFuncArg(ctx, arg) }), diag: impl.diag))
         }
         if (isStringLiteral(expr)) {
             if (let Some(lit) <- (expr as LitConstExpr)) {
@@ -4018,7 +4039,30 @@ public class TypeChecker {
                 desugarChecker: Some({ target2: Ty, expr2: Expr => Check(ctx, target2, expr2) }),
                 clearInferredForTarget: clearInferredCallTypes,
                 declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }), ctx: Some(ctx),
-                variadicDesugar: Some({ vce: CallExpr, arity: Int64 => DesugarVariadicCallExpr(vce, arity) }))
+                variadicDesugar: Some({ vce: CallExpr, arity: Int64 => DesugarVariadicCallExpr(vce, arity) }),
+                typeChecker: Some({ targetTy: Ty, typeNode: Type =>
+                    if (!Ty.IsTyCorrect(targetTy)) {
+                        typeNode.SetTy(TypeManager.GetInvalidTy())
+                        false
+                    } else {
+                        typeCheckExprPutTargetType(ctx, typeNode, targetTy)
+                        let checkRet = if (typeNode.TestAttr(Attribute.IS_BROKEN)) {
+                            typeNode.SetTy(TypeManager.GetInvalidTy())
+                            false
+                        } else if (targetTy.HasQuestTy() && !IsQuestableNode(typeNode)) {
+                            false
+                        } else {
+                            let _ = SynthesizeNode(ctx, SynPos.NONE, typeNode)
+                            let _ = ReplaceIdealTy(impl.typeManager, typeNode, diag: impl.diag)
+                            impl.typeManager.IsSubtype(typeNode.GetTy() ?? TypeManager.GetInvalidTy(), targetTy)
+                        }
+                        typeCheckExprClearTargetType(ctx, typeNode)
+                        typeNode.SetTy(impl.typeManager.TryGreedySubst(typeNode.GetTy() ?? TypeManager.GetInvalidTy()))
+                        checkRet
+                    }
+                }),
+                typeSynthesizer: Some({ typeNode: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode) }),
+                argSynthesizer: Some({ arg: FuncArg => SynthesizeFuncArg(ctx, arg) }))
             return FinishCheck(ctx, callExpr, ok)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
@@ -4169,6 +4213,30 @@ public class TypeChecker {
                 let _ = SynthesizeFuncArg(ctx, arg)
             }
             return FinishCheck(ctx, arrayExpr, ChkArrayExpr(impl.typeManager, target, arrayExpr, diag: impl.diag))
+        }
+        if (let Some(pointerExpr) <- (expr as PointerExpr)) {
+            return FinishCheck(ctx, pointerExpr, ChkPointerExpr(impl.typeManager, target, pointerExpr,
+                typeChecker: Some({ targetTy: Ty, typeNode: Type =>
+                    if (!Ty.IsTyCorrect(targetTy)) {
+                        typeNode.SetTy(TypeManager.GetInvalidTy())
+                        false
+                    } else {
+                        typeCheckExprPutTargetType(ctx, typeNode, targetTy)
+                        let checkRet = if (typeNode.TestAttr(Attribute.IS_BROKEN)) {
+                            typeNode.SetTy(TypeManager.GetInvalidTy())
+                            false
+                        } else if (targetTy.HasQuestTy() && !IsQuestableNode(typeNode)) {
+                            false
+                        } else {
+                            let _ = SynthesizeNode(ctx, SynPos.NONE, typeNode)
+                            let _ = ReplaceIdealTy(impl.typeManager, typeNode, diag: impl.diag)
+                            impl.typeManager.IsSubtype(typeNode.GetTy() ?? TypeManager.GetInvalidTy(), targetTy)
+                        }
+                        typeCheckExprClearTargetType(ctx, typeNode)
+                        typeNode.SetTy(impl.typeManager.TryGreedySubst(typeNode.GetTy() ?? TypeManager.GetInvalidTy()))
+                        checkRet
+                    }
+                }), argSynthesizer: Some({ arg: FuncArg => SynthesizeFuncArg(ctx, arg) }), diag: impl.diag))
         }
         if (let Some(spawnExpr) <- (expr as SpawnExpr)) {
             return FinishCheck(ctx, spawnExpr, CheckSpawnExprWithTarget(ctx, target, spawnExpr))

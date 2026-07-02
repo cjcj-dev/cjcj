@@ -1,10 +1,81 @@
 package cangjie_compiler::sema
 
+import std.collection.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::ast.*
 import cangjie_compiler::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
+
+private func GetParamsType(typeList: Array<Option<Ty>>): String {
+    let result = StringBuilder()
+    result.append("(")
+    var idx: Int64 = 0
+    while (idx < typeList.size) {
+        let tyName = if (let Some(ty) <- typeList[idx]) {
+            ty.String()
+        } else {
+            "UnknownType"
+        }
+        result.append(tyName)
+        if (idx + 1 < typeList.size) {
+            result.append(", ")
+        }
+        idx++
+    }
+    result.append(")")
+    return result.toString()
+}
+
+private func DiagWrongNumberOfArgumentsCommon(diag: BasicDiagnosticEngine, ce: CallExpr,
+    paramTys: Array<Option<Ty>>, fd: Option<FuncDecl>): Unit {
+    let expectedNum = paramTys.size
+    let foundNum = ce.args.size
+    CJC_ASSERT(expectedNum != foundNum)
+    let symptom = if (expectedNum > foundNum) {
+        if (expectedNum - foundNum == 1) { "missing argument" } else { "missing arguments" }
+    } else {
+        if (foundNum - expectedNum == 1) { "extra argument given" } else { "extra arguments given" }
+    }
+    let lst = GetParamsType(paramTys)
+    let expected = expectedNum.toString() + (if (expectedNum == 1) { " argument" } else { " arguments" })
+    let parenPosExist = !ce.leftParenPos.IsZero() && !ce.rightParenPos.IsZero()
+    let beginPos = if (parenPosExist) { ce.leftParenPos } else { ce.begin }
+    let lastArgAfterParen = !ce.args.isEmpty() && ce.args[ce.args.size - 1].end > ce.rightParenPos
+    let endPos = if (parenPosExist) {
+        if (lastArgAfterParen) { ce.args[ce.args.size - 1].end } else { ce.rightParenPos + 1 }
+    } else {
+        ce.end
+    }
+    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_wrong_number_of_arguments,
+        MakeRange(beginPos, endPos), arguments: [symptom, lst])
+    builder.AddMainHintArguments([expected, foundNum.toString()])
+    if (let Some(funcDecl) <- fd) {
+        if (funcDecl.ShouldDiagnose()) {
+            builder.AddNote(MakeRange(funcDecl.identifier.Begin(), funcDecl.identifier.End()), "found candidate")
+        }
+    } else if (let Some(baseFunc) <- ce.baseFunc) {
+        if (let Some(target) <- baseFunc.GetTarget()) {
+            if (let Some(varDecl) <- (target as VarDecl)) {
+                if (varDecl.ShouldDiagnose()) {
+                    builder.AddNote(MakeRange(varDecl.identifier.Begin(), varDecl.identifier.End()), "found candidate")
+                }
+            }
+        }
+    }
+    builder.Emit()
+}
+
+public func DiagWrongNumberOfArguments(diag: BasicDiagnosticEngine, ce: CallExpr, paramTys: Array<Ty>): Unit {
+    if (!ce.ShouldDiagnose(allowCompilerAdd: true)) {
+        return
+    }
+    let optionParamTys = ArrayList<Option<Ty>>()
+    for (paramTy in paramTys) {
+        optionParamTys.add(Some(paramTy))
+    }
+    DiagWrongNumberOfArgumentsCommon(diag, ce, optionParamTys.toArray(), None)
+}
 
 public func MakeRangeForDeclIdentifier(decl: Decl): BasicRange {
     if (let Some(funcDecl) <- (decl as FuncDecl)) {
