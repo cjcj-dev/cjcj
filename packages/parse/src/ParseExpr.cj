@@ -818,6 +818,8 @@ extend ParserImpl {
             return InvalidExpr(unsafeToken.Begin())
         }
         let block = ParseBlock(ScopeKind.FUNC_BODY)
+        block.EnableAttr(Attribute.UNSAFE)
+        SetUnsafe(block)
         block.unsafePos = unsafeToken.Begin()
         block.begin = unsafeToken.Begin()
         return block

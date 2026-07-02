@@ -1,6 +1,10 @@
 package cangjie_compiler::parse
 
 import std.collection.*
+import cangjie_compiler::ast.OverloadableExpr as AstOverloadableExpr
+import cangjie_compiler::ast.VisitAction
+import cangjie_compiler::ast.Walker
+import cangjie_compiler::option.IsUnsafeBackend as OptionIsUnsafeBackend
 
 extend ParserImpl {
     public func SeeingCombinator(kinds: Array<TokenKind>): Bool {
@@ -421,6 +425,32 @@ extend ParserImpl {
         if (!annos.isEmpty() && (decl.begin.IsZero() || annos[0].begin < decl.begin)) {
             decl.begin = annos[0].begin
         }
+    }
+
+    func SetUnsafe(node: Node, modifiers!: ArrayList<Modifier> = ArrayList<Modifier>()): Unit {
+        var unsafeModifier: Option<Modifier> = None
+        for (modifier in modifiers) {
+            if (modifier.modifier == TokenKind.UNSAFE) {
+                unsafeModifier = modifier
+                break
+            }
+        }
+        if (!OptionIsUnsafeBackend(compileOptions.backend)) {
+            if (let Some(modifierValue) <- unsafeModifier) {
+                DiagUnsafeWillBeIgnored(modifierValue)
+                return
+            }
+        }
+        let walker = Walker(node, visitPre: { current: Node =>
+            if (let Some(_) <- (current as CallExpr)) {
+                current.EnableAttr(Attribute.UNSAFE)
+            }
+            if (let Some(expr) <- (current as AstOverloadableExpr)) {
+                expr.EnableAttr(Attribute.UNSAFE)
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
     }
 
     public func AtTerminator(): Bool {

@@ -533,6 +533,9 @@ extend ParserImpl {
         ret.funcBody = body
         ret.end = body.end
         ret.identifier = SrcIdentifier("main", "main", ret.keywordPos, ret.keywordPos + 4, false)
+        if (ret.TestAttr(Attribute.UNSAFE)) {
+            SetUnsafe(ret, modifiers: modifiers)
+        }
         return ret
     }
 
@@ -562,6 +565,9 @@ extend ParserImpl {
         }
         CheckVariableParams(ret)
         ret.end = body.end
+        if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
+            SetUnsafe(ret, modifiers: modifiers)
+        }
     }
 
     private func CheckVariableParams(decl: FuncDecl): Unit {
@@ -940,6 +946,9 @@ extend ParserImpl {
         decl.begin = if (decl.begin.IsZero()) { key.Begin() } else { decl.begin }
         ParseTypeAndExpr(decl)
         CheckVarDeclShape(decl, modifiers, scopeKind, key)
+        if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
+            SetUnsafe(decl, modifiers: modifiers)
+        }
         return decl
     }
 
@@ -973,6 +982,9 @@ extend ParserImpl {
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
         CheckVarDeclShape(decl, modifiers, scopeKind, key)
+        if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
+            SetUnsafe(decl, modifiers: modifiers)
+        }
         return decl
     }
 
@@ -1432,6 +1444,9 @@ extend ParserImpl {
                 ret.EnableAttr(Attribute.IS_BROKEN)
             }
             ret.end = body.end
+        }
+        if (HasModifierToken(modifiers, TokenKind.UNSAFE)) {
+            SetUnsafe(ret, modifiers: modifiers)
         }
         return ret
     }

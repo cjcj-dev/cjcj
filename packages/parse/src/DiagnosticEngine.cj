@@ -22,7 +22,7 @@ extend DiagSeverity <: Equatable<DiagSeverity> {
 public enum DiagKindRefactor {
     | PARSE_ERROR | EXPECTED_TOKEN | EXPECTED_IDENTIFIER | UNEXPECTED_TOKEN | UNTERMINATED_DELIMITER
     | INVALID_MODIFIER | DUPLICATED_MODIFIER | CONFLICTING_MODIFIER | INVALID_ANNOTATION
-    | lex_unknown_start_of_token | parse_invalid_quote_dollar_expr
+    | lex_unknown_start_of_token | parse_invalid_quote_dollar_expr | parse_unsafe_will_be_ignored
 }
 
 public class Diagnostic {
@@ -55,6 +55,8 @@ public class DiagnosticBuilder {
             emitted = true
         }
     }
+
+    public func AddMainHintArguments(_: String): Unit {}
 
     public func close(): Unit {
         Emit()

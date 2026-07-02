@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
 import cangjie_compiler::basic.DiagKind as BasicDiagKind
+import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticCache
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
@@ -3077,10 +3078,50 @@ public class TypeChecker {
                 typeCheckExprCheckThisOrSuper(impl.typeManager, ctx, refExpr, currentFuncBody)
             } else {
                 ResolveRefExpr(ctx, refExpr)
+                if (let Some(target) <- refExpr.ref.target) {
+                    if (let Some(cfunc) <- (target as BuiltInDecl)) {
+                        if (cfunc.IsType(BuiltInType.CFUNC)) {
+                            InferCFuncExpr(ctx, refExpr)
+                            return refExpr.GetTy() ?? TypeManager.GetInvalidTy()
+                        }
+                    }
+                }
             }
         }
         let ty = SynNameReferenceExpr(impl.typeManager, nameRef, diag: impl.diag)
         return ty
+    }
+
+    private func InferCFuncExpr(ctx: ASTContext, re: RefExpr): Unit {
+        if (re.typeArguments.size != 1) {
+            if (let Some(diagValue) <- impl.diag) {
+                diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_generic_argument_no_match, re.begin)
+            }
+            re.SetTy(TypeManager.GetInvalidTy())
+            return
+        }
+        let typeArgument = re.typeArguments[0]
+        let funcType = match (typeArgument as FuncType) {
+            case Some(value) => value
+            case None =>
+                if (let Some(diagValue) <- impl.diag) {
+                    let _ = diagValue.Diagnose(typeArgument.begin, typeArgument.end, BasicDiagKind.sema_cfunc_type)
+                }
+                re.SetTy(TypeManager.GetInvalidTy())
+                return
+        }
+        let paramTys = ArrayList<Ty>()
+        for (paramType in funcType.paramTypes) {
+            paramType.SetTy(GetTyFromASTType(impl.typeManager, ctx, paramType))
+            paramTys.add(paramType.GetTy() ?? TypeManager.GetInvalidTy())
+        }
+        let retType = funcType.retType.getOrThrow()
+        retType.SetTy(GetTyFromASTType(impl.typeManager, ctx, retType))
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let resTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), retType.GetTy() ?? TypeManager.GetInvalidTy(),
+            cfg: cfg)
+        re.SetTy(resTy)
     }
 
     private func ResolvePrimitiveStaticMemberAccess(ctx: ASTContext, memberAccess: MemberAccess): Unit {
