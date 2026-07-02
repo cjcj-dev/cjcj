@@ -2835,10 +2835,22 @@ public class IRBuilder2 <: Resource {
         let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
         let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
         let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
-        let typedTypeInfo = CreateBitCast(typeInfo, typeInfoPtrType, name: "ti.typed")
+        var typedTypeInfo = LLVMNullValue()
+        try (typedTypeInfoName = unsafe { LibC.mallocCString("") }.asResource()) {
+            typedTypeInfo = unsafe { LLVMBuildBitCast(builder.raw, typeInfo, typeInfoPtrType, typedTypeInfoName.value) }
+        }
         let typeArgsPtr = CreateStructGEP(typeInfoType, typedTypeInfo, 12u32, name: "ti.typeArgs")
-        let typeArgsRaw = CreateInvariantLoad(i8PtrType, typeArgsPtr, name: "ti.typeArgs")
-        return CreateBitCast(typeArgsRaw, unsafe { LLVMPointerType(typeInfoPtrType, 0u32) }, name: "ti.typeArgs.typed")
+        let typeArgsRaw = CreateLoad(i8PtrType, typeArgsPtr)
+        let metadata = LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>())
+        LLVMSetInstructionMetadata(GetLLVMContext(), typeArgsRaw, "invariant.load", metadata)
+        var typedTypeArgs = LLVMNullValue()
+        try (typedTypeArgsName = unsafe { LibC.mallocCString("") }.asResource()) {
+            typedTypeArgs = unsafe {
+                LLVMBuildBitCast(builder.raw, typeArgsRaw, unsafe { LLVMPointerType(typeInfoPtrType, 0u32) },
+                    typedTypeArgsName.value)
+            }
+        }
+        return typedTypeArgs
     }
 
     public func GetTypeInfoFromTiArray(tiArray: LLVMValueRef, index: Int64, name!: String = ""): LLVMValueRef {

@@ -996,8 +996,11 @@ private func GetOrCreateOuterTypeInfoFn(cgMod: CGModule, extendDefName: String, 
     let targetTypeInfo = unsafe { LLVMGetParam(fn, 0u32) }
     let strippedParentType = parentType.StripAllRefs()
     let typeInfo = if (strippedParentType.IsGenericRelated()) {
+        entry.SetInsertPointForPreparingTypeInfo()
+        let targetTypeArgs = entry.GetTypeArgsFromTypeInfo(targetTypeInfo)
+        entry.SetInsertPoint(block)
         CreateTypeInfoForCallbackBody(cgMod, entry, block, strippedParentType, RuntimeGenericParams(targetType),
-            entry.GetTypeArgsFromTypeInfo(targetTypeInfo))
+            targetTypeArgs)
     } else {
         CGType.GetOrCreate(cgMod, strippedParentType).GetOrCreateTypeInfo()
     }
