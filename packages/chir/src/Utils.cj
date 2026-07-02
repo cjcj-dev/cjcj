@@ -1,7 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
-import cangjie_compiler::utils.CJC_ABORT
+import cangjie_compiler::utils.{CJC_ABORT, FileUtil}
 
 public let ANY_TYPE: String = "ANY_TYPE"
 public let NOT_CARE: String = "NOT_CARE"
@@ -108,6 +108,12 @@ public func IsGetOrThrowFunction(expr: Expression): Bool {
         return IsExpectedFunction(callee, getOrThrowInfo)
     }
     return false
+}
+
+public func ToPosInfo(loc: DebugLocation, isPrintFileName!: Bool = false): String {
+    let beginPos = loc.GetBeginPos()
+    let fileName = if (isPrintFileName) { FileUtil.GetFileName(loc.GetAbsPath()) + "," } else { "" }
+    return " at [" + fileName + beginPos.line.toString() + "," + beginPos.column.toString() + "]"
 }
 
 public func CheckCustomTypeDefIsExpected(def: CustomTypeDef, packageName: String, defSrcCodeName: String): Bool {

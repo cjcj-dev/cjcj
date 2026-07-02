@@ -27,7 +27,7 @@ public class UselessAllocateElimination {
                 }
                 let result = allocate.GetResult().getOrThrow()
                 if (let Some(retValue) <- fn.GetReturnValue()) {
-                    if (retValue.nodeId == result.nodeId) {
+                    if (refEq(retValue, result)) {
                         continue
                     }
                 }
@@ -55,7 +55,7 @@ public class UselessAllocateElimination {
                     }
                     if (isDebug && !allocate.GetDebugLocation().GetBeginPos().IsZero()) {
                         println("[UselessAllocateElimination] Allocate" +
-                            allocate.GetDebugLocation().ToString() + " and its users have been deleted")
+                            ToPosInfo(allocate.GetDebugLocation()) + " and its users have been deleted")
                     }
                 }
             }
