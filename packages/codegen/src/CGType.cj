@@ -5,6 +5,7 @@ import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
+import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.LocalVar
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
@@ -200,7 +201,22 @@ public open class CGType {
     }
     public func IsStructPtrType(): Bool { return IsPointerType() && !GetContainedTypes().isEmpty() && GetContainedTypes()[0].IsStructType() }
     public func IsRefType(): Bool { return cgTypeKind == CGTypeKind.CG_REF }
-    public func IsReference(): Bool { return chirType.IsReferenceType() || chirType.IsRef() }
+    public func IsReference(): Bool {
+        if (chirType.IsReferenceType() || chirType.IsRef()) {
+            return true
+        }
+        if (chirType.IsEnum()) {
+            return if (let Some(enumCGType) <- (this as CGEnumType)) { enumCGType.IsCommonEnum() } else { false }
+        }
+        if (let Some(genericTy) <- (chirType as GenericType)) {
+            for (upperBound in genericTy.GetUpperBounds()) {
+                if (CGType.GetOrCreate(cgMod, upperBound).IsReference()) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
     public open func IsOptionLikeRef(): Bool {
         if (let Some(enumCGType) <- (this as CGEnumType)) {
             return enumCGType.IsOptionLikeRef()
