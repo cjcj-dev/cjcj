@@ -208,6 +208,8 @@ public class ASTContext {
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
     public let resolvedPackageMemberDeclsMap: HashMap<String, HashMap<String, ArrayList<Decl>>> =
         HashMap<String, HashMap<String, ArrayList<Decl>>>()
+    public let resolvedImplicitPackageMemberDeclsMap: HashMap<String, HashMap<String, Decl>> =
+        HashMap<String, HashMap<String, Decl>>()
     public let mem2Decls: HashMap<MemSig, ArrayList<Decl>> = HashMap<MemSig, ArrayList<Decl>>()
     public let subtypeDeclsMap: HashMap<Node, ArrayList<Decl>> = HashMap<Node, ArrayList<Decl>>()
     public let declMap: HashMap<Names, ArrayList<Decl>> = HashMap<Names, ArrayList<Decl>>()

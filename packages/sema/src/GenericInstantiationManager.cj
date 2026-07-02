@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
+import cangjie_compiler::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
 
 public class CompilerInstance {
     public var typeManager: TypeManager = TypeManager()
@@ -16,6 +17,8 @@ public class CompilerInstance {
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
     public let resolvedPackageMemberDeclsMap: HashMap<String, HashMap<String, ArrayList<Decl>>> =
         HashMap<String, HashMap<String, ArrayList<Decl>>>()
+    public let resolvedImplicitPackageMemberDeclsMap: HashMap<String, HashMap<String, Decl>> =
+        HashMap<String, HashMap<String, Decl>>()
     public init() {}
 
     public func AddResolvedImportedDecls(fileHash: UInt64, name: String, decls: ArrayList<Decl>): Unit {
@@ -34,6 +37,15 @@ public class CompilerInstance {
         }
         if (let Some(packageMap) <- resolvedPackageMemberDeclsMap.get(packageName)) {
             AddDeclsToNamedMap(packageMap, name, decls)
+        }
+    }
+
+    public func AddResolvedImplicitPackageMemberDecl(packageName: String, name: String, decl: Decl): Unit {
+        if (!resolvedImplicitPackageMemberDeclsMap.contains(packageName)) {
+            resolvedImplicitPackageMemberDeclsMap[packageName] = HashMap<String, Decl>()
+        }
+        if (let Some(packageMap) <- resolvedImplicitPackageMemberDeclsMap.get(packageName)) {
+            packageMap[name] = decl
         }
     }
 
@@ -69,6 +81,24 @@ public class CompilerInstance {
         }
         return SameDecl(left, right)
     }
+}
+
+public func GetImportedDecl(ctx: ASTContext, fullPackageName: String, name: String): Option<Decl> {
+    if (let Some(packageMap) <- ctx.resolvedPackageMemberDeclsMap.get(fullPackageName)) {
+        if (let Some(decls) <- packageMap.get(name)) {
+            if (!decls.isEmpty()) {
+                return Some(decls[0])
+            }
+        }
+    }
+    if (let Some(implicitPackageMap) <- ctx.resolvedImplicitPackageMemberDeclsMap.get(fullPackageName)) {
+        return implicitPackageMap.get(name)
+    }
+    return None
+}
+
+public func GetCoreDecl(ctx: ASTContext, name: String): Option<Decl> {
+    return GetImportedDecl(ctx, UTILS_CORE_PACKAGE_NAME, name)
 }
 
 public class GenericInfo {

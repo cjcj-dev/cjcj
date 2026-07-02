@@ -937,6 +937,7 @@ public class TypeChecker {
         ctx.packageDecls.clear()
         ctx.resolvedImportedDeclsMap.clear()
         ctx.resolvedPackageMemberDeclsMap.clear()
+        ctx.resolvedImplicitPackageMemberDeclsMap.clear()
         if (let Some(instance) <- ci) {
             for (packageDecl in instance.packageDecls) {
                 ctx.packageDecls.add(packageDecl)
@@ -969,6 +970,18 @@ public class TypeChecker {
                         }
                     }
                     ctx.resolvedPackageMemberDeclsMap[packageName] = ctxPackageMap
+                }
+            }
+            for (implicitPackageName in instance.resolvedImplicitPackageMemberDeclsMap.keys()) {
+                if (let Some(implicitPackageMap) <- instance.resolvedImplicitPackageMemberDeclsMap.get(
+                    implicitPackageName)) {
+                    let ctxImplicitPackageMap = HashMap<String, Decl>()
+                    for (name in implicitPackageMap.keys()) {
+                        if (let Some(decl) <- implicitPackageMap.get(name)) {
+                            ctxImplicitPackageMap[name] = decl
+                        }
+                    }
+                    ctx.resolvedImplicitPackageMemberDeclsMap[implicitPackageName] = ctxImplicitPackageMap
                 }
             }
         }
@@ -2984,15 +2997,19 @@ public class TypeChecker {
         if (inTy.IsNothing()) {
             return TypeManager.GetInvalidTy()
         }
-        let iterableTy = LookupCoreTy(ctx, "Iterable") ?? return TypeManager.GetInvalidTy()
+        let iterableDecl = GetCoreDecl(ctx, "Iterable")
         if (let Some(genericTy) <- (inTy as GenericsTy)) {
             if (genericTy.isPlaceholder) {
+                let iterableTy = iterableDecl.getOrThrow().GetTy().getOrThrow()
                 return impl.typeManager.ConstrainByCtor(genericTy, iterableTy) ?? TypeManager.GetInvalidTy()
             }
         }
-        let promotedTys = Promotion(impl.typeManager).Promote(inTy, iterableTy)
-        if (!promotedTys.values.isEmpty()) {
-            return promotedTys.values[0]
+        if (let Some(interfaceDecl) <- iterableDecl) {
+            let interfaceTy = interfaceDecl.GetTy().getOrThrow()
+            let promotedTys = Promotion(impl.typeManager).Promote(inTy, interfaceTy)
+            if (!promotedTys.values.isEmpty()) {
+                return promotedTys.values[0]
+            }
         }
         return TypeManager.GetInvalidTy()
     }
@@ -3002,7 +3019,7 @@ public class TypeChecker {
         var inPatternTy: Ty = TypeManager.GetInvalidTy()
         let boundDecls = ArrayList<Decl>()
         if (let Some(inExpression) <- forInExpr.inExpression) {
-            let inTy = Synthesize(ctx, inExpression)
+            let inTy = Synthesize(ctx, SynPos.EXPR_ARG, inExpression)
             isWellTyped = Ty.IsTyCorrect(inTy) &&
                 ReplaceIdealTy(impl.typeManager, inExpression, diag: impl.diag) && isWellTyped
             if (let Some(realInTy) <- inExpression.GetTy()) {
@@ -3418,14 +3435,14 @@ public class TypeChecker {
     }
 
     private func LookupCoreTy(ctx: ASTContext, name: String): Option<Ty> {
-        if (let Some(decl) <- lookupResolvedPackageDecl(ctx, "std.core", name)) {
+        if (let Some(decl) <- GetCoreDecl(ctx, name)) {
             return decl.GetTy()
         }
         return None
     }
 
     private func LookupCoreEnumDecl(ctx: ASTContext, name: String): Option<EnumDecl> {
-        if (let Some(decl) <- lookupResolvedPackageDecl(ctx, "std.core", name)) {
+        if (let Some(decl) <- GetCoreDecl(ctx, name)) {
             return decl as EnumDecl
         }
         return None
@@ -4083,9 +4100,15 @@ public class TypeChecker {
             return FinishCheck(ctx, jumpExpr, ChkLoopControlExpr(ctx, jumpExpr))
         }
         if (let Some(forInExpr) <- (expr as ForInExpr)) {
-            let _ = SynthesizeForInExpr(ctx, forInExpr)
-            return FinishCheck(ctx, forInExpr, ChkExprShallow(impl.typeManager, target, forInExpr, ctx: Some(ctx),
-                diag: impl.diag))
+            let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+            var isWellTyped = impl.typeManager.IsSubtype(unitTy, target)
+            if (!isWellTyped) {
+                if (let Some(diagValue) <- impl.diag) {
+                    DiagMismatchedTypesWithFoundTy(diagValue, forInExpr, target, unitTy)
+                }
+            }
+            isWellTyped = Ty.IsTyCorrect(SynthesizeForInExpr(ctx, forInExpr)) && isWellTyped
+            return FinishCheck(ctx, forInExpr, isWellTyped)
         }
         if (let Some(whileExpr) <- (expr as WhileExpr)) {
             let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)

@@ -498,6 +498,16 @@ public class CompilerInstance {
                 }
             }
         }
+        for (implicitPackage in importManager.GetAllImportedPackages()) {
+            for (file in implicitPackage.files) {
+                for (decl in file.exportedInternalDecls) {
+                    if (decl.TestAttr(Attribute.IMPLICIT_USED)) {
+                        semaInstance.AddResolvedImplicitPackageMemberDecl(implicitPackage.fullPackageName,
+                            decl.identifier.Val(), decl)
+                    }
+                }
+            }
+        }
     }
 
     public func GenerateCHIRForPkg(pkg: Package): Bool {

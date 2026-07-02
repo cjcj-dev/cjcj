@@ -630,7 +630,12 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
     if (let Some(value) <- (expr as IfExpr)) { return SynIfExpr(typeManager, value) }
     if (let Some(value) <- (expr as WhileExpr)) { return SynWhileExpr(typeManager, value, ctx: ctx) }
     if (let Some(value) <- (expr as DoWhileExpr)) { return SynDoWhileExpr(typeManager, value, ctx: ctx) }
-    if (let Some(value) <- (expr as ForInExpr)) { return SynForInExpr(typeManager, value, ctx: ctx) }
+    if (let Some(value) <- (expr as ForInExpr)) {
+        if (let Some(realCtx) <- ctx) {
+            return SynForInExpr(typeManager, value, realCtx, diag: diag)
+        }
+        return TcInvalid(value)
+    }
     if (let Some(value) <- (expr as LambdaExpr)) { return SynLamExpr(typeManager, value) }
     if (let Some(value) <- (expr as TryExpr)) { return SynTryExpr(typeManager, value) }
     if (let Some(value) <- (expr as IfAvailableExpr)) { return SynIfAvailableExpr(typeManager, value) }
@@ -682,7 +687,13 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     if (let Some(value) <- (expr as IfExpr)) { return ChkIfExpr(typeManager, target, value, ctx: ctx, diag: diag) }
     if (let Some(value) <- (expr as WhileExpr)) { return ChkWhileExpr(typeManager, target, value, ctx: ctx) }
     if (let Some(value) <- (expr as DoWhileExpr)) { return ChkDoWhileExpr(typeManager, target, value, ctx: ctx) }
-    if (let Some(value) <- (expr as ForInExpr)) { return ChkForInExpr(typeManager, target, value, ctx: ctx) }
+    if (let Some(value) <- (expr as ForInExpr)) {
+        if (let Some(realCtx) <- ctx) {
+            return ChkForInExpr(typeManager, target, value, realCtx, diag: diag)
+        }
+        let _ = TcInvalid(value)
+        return false
+    }
     if (let Some(value) <- (expr as LambdaExpr)) { return ChkLamExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as TryExpr)) { return ChkTryExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as IfAvailableExpr)) { return ChkIfAvailableExpr(typeManager, target, value) }

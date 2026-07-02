@@ -2,185 +2,35 @@ package cangjie_compiler::sema.TypeCheckExpr
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
+import cangjie_compiler::basic.DiagKind as BasicDiagKind
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::sema.*
+import cangjie_compiler::utils.CJC_ASSERT
 
 private func LoopInvalid(expr: Expr): Ty {
     return TcInvalid(expr)
 }
 
-private func IterablePayload(ty: Ty): Option<Ty> {
-    if (ty.name == "Iterable" && ty.typeArgs.size == 1) {
-        return Some(ty.typeArgs[0])
-    }
-    return None
-}
-
-private func PromotedIterableElementTy(typeManager: TypeManager, inTy: Ty): Option<Ty> {
-    if (let Some(payload) <- IterablePayload(inTy)) {
-        return Some(payload)
-    }
-    if (let Some(genericTy) <- (inTy as GenericsTy)) {
-        for (upperTy in genericTy.upperBounds) {
-            if (let Some(payloadFromUpper) <- PromotedIterableElementTy(typeManager, upperTy)) {
-                return Some(payloadFromUpper)
-            }
-        }
-    }
-    for (superTy in typeManager.GetAllSuperTys(inTy).values) {
-        if (let Some(payload) <- IterablePayload(superTy)) {
-            return Some(payload)
-        }
-    }
-    return None
-}
-
-private let ITERATOR_METHOD_NAME: String = "iterator"
-private let NEXT_METHOD_NAME: String = "next"
-
-private func SameLookupDecl(left: Decl, right: Decl): Bool {
-    if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
-        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
-            return left.rawMangleName == right.rawMangleName
-        }
-        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
-            return left.mangledName == right.mangledName
-        }
-    }
-    return SameDecl(left, right)
-}
-
-private func AddLookupDeclUnique(out: ArrayList<Decl>, decl: Decl): Unit {
-    for (value in out) {
-        if (SameLookupDecl(value, decl)) {
-            return
-        }
-    }
-    out.add(decl)
-}
-
-private func LookupProtocolMember(typeManager: TypeManager, file: Option<File>, baseTy: Ty,
-    name: String): ArrayList<Decl> {
-    let out = ArrayList<Decl>()
-    let info = LookupInfo(baseTy: Some(baseTy), file: file)
-    for (decl in FieldLookup(typeManager, Ty.GetDeclPtrOfTy(Some(baseTy)), name, info: info)) {
-        AddLookupDeclUnique(out, decl)
-    }
-    if (let Some(fileValue) <- file) {
-        for (decl2 in ExtendFieldLookup(typeManager, fileValue, Some(baseTy), name)) {
-            AddLookupDeclUnique(out, decl2)
-        }
-    }
-    return out
-}
-
-private func ProtocolFuncRetTy(decl: Decl): Option<Ty> {
-    if (let Some(rawTy) <- decl.GetTy()) {
-        if (let Some(funcTy) <- (rawTy as FuncTy)) {
-            return Some(funcTy.retTy)
-        }
-    }
-    return None
-}
-
-private func GenericReceiverTyOf(decl: Decl): Option<Ty> {
-    if (let Some(outer) <- decl.outerDecl) {
-        if (let Some(extendDecl) <- (outer as ExtendDecl)) {
-            return extendDecl.GetTy()
-        }
-        return outer.GetTy()
-    }
-    return None
-}
-
-private func InstantiatedProtocolFuncTy(typeManager: TypeManager, decl: Decl, baseTy: Ty): Option<FuncTy> {
-    if (let Some(rawTy) <- decl.GetTy()) {
-        if (let Some(funcTy) <- (rawTy as FuncTy)) {
-            let typeMapping = GenerateTypeMappingByTy(GenericReceiverTyOf(decl), Some(baseTy))
-            if (!typeMapping.IsEmpty()) {
-                if (let Some(instFuncTy) <- (typeManager.GetInstantiatedTy(funcTy, typeMapping) as FuncTy)) {
-                    return Some(instFuncTy)
-                }
-            }
-            return Some(funcTy)
-        }
-    }
-    return None
-}
-
-private func NoArgProtocolMemberRetTy(typeManager: TypeManager, file: Option<File>, baseTy: Ty,
-    name: String): Option<Ty> {
-    for (decl in LookupProtocolMember(typeManager, file, baseTy, name)) {
-        match (decl as FuncDecl) {
-            case Some(_) =>
-                match (InstantiatedProtocolFuncTy(typeManager, decl, baseTy)) {
-                    case Some(funcTy) =>
-                        if (funcTy.paramTys.size == 0) {
-                            return Some(funcTy.retTy)
-                        }
-                    case None =>
-                        match (ProtocolFuncRetTy(decl)) {
-                            case Some(retTy) => return Some(retTy)
-                            case None => ()
-                        }
-                }
-            case None => ()
-        }
-    }
-    return None
-}
-
-private func IteratorProtocolElementTy(typeManager: TypeManager, file: Option<File>, inTy: Ty): Option<Ty> {
-    let iteratorTy = match (NoArgProtocolMemberRetTy(typeManager, file, inTy, ITERATOR_METHOD_NAME)) {
-        case Some(value) => value
-        case None => return None
-    }
-    let nextRetTy = match (NoArgProtocolMemberRetTy(typeManager, file, iteratorTy, NEXT_METHOD_NAME)) {
-        case Some(value2) => value2
-        case None => return None
-    }
-    if (nextRetTy.IsCoreOptionType() && nextRetTy.typeArgs.size == 1) {
-        return Some(nextRetTy.typeArgs[0])
-    }
-    return None
-}
-
-public func ForInIterableElementTy(typeManager: TypeManager, file: Option<File>, inTy: Ty): Ty {
-    if (inTy.IsNothing()) {
+private func GetIterableTy(typeManager: TypeManager, ctx: ASTContext, ty: Ty): Ty {
+    if (ty.IsNothing()) {
         return TypeManager.GetInvalidTy()
     }
-    if (let Some(elemTy) <- PromotedIterableElementTy(typeManager, inTy)) {
-        return elemTy
-    }
-    if (let Some(iteratorElemTy) <- IteratorProtocolElementTy(typeManager, file, inTy)) {
-        return iteratorElemTy
-    }
-    return ForInBuiltinElementTy(inTy)
-}
-
-public func ForInIterableElementTy(typeManager: TypeManager, inTy: Ty): Ty {
-    return ForInIterableElementTy(typeManager, None, inTy)
-}
-
-private func ForInBuiltinElementTy(inTy: Ty): Ty {
-    if (inTy.IsNothing()) {
-        return TypeManager.GetInvalidTy()
-    }
-    if (inTy.IsArray() && inTy.typeArgs.size == 1) {
-        return inTy.typeArgs[0]
-    }
-    if (inTy.IsStructArray() && inTy.typeArgs.size == 1) {
-        return inTy.typeArgs[0]
-    }
-    if (inTy.IsRange() && inTy.typeArgs.size == 1) {
-        return inTy.typeArgs[0]
-    }
-    if (let Some(varrayTy) <- (inTy as VArrayTy)) {
-        if (varrayTy.typeArgs.size == 1) {
-            return varrayTy.typeArgs[0]
+    let iterableInterface = GetCoreDecl(ctx, "Iterable")
+    if (let Some(genTy) <- (ty as GenericsTy)) {
+        if (genTy.isPlaceholder) {
+            let iterableTy = iterableInterface.getOrThrow().GetTy().getOrThrow()
+            return typeManager.ConstrainByCtor(genTy, iterableTy) ?? TypeManager.GetInvalidTy()
         }
     }
-    if (inTy.IsString()) {
-        return TypeManager.GetPrimitiveTy(TypeKind.TYPE_RUNE)
+    if (let Some(iterableDecl) <- iterableInterface) {
+        let iterableTy = iterableDecl.GetTy().getOrThrow()
+        let promotedTys = Promotion(typeManager).Promote(ty, iterableTy)
+        CJC_ASSERT(promotedTys.values.size <= 1)
+        if (promotedTys.values.isEmpty()) {
+            return TypeManager.GetInvalidTy()
+        }
+        return promotedTys.values[0]
     }
     return TypeManager.GetInvalidTy()
 }
@@ -255,31 +105,74 @@ public func ChkDoWhileExpr(typeManager: TypeManager, target: Ty, dwe: DoWhileExp
     return false
 }
 
-public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr, ctx!: Option<ASTContext> = None): Ty {
+public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr, ctx: ASTContext,
+    synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None,
+    checker!: Option<(ASTContext, Ty, Expr) -> Bool> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
     var ok = true
     var elementTy: Ty = TypeManager.GetInvalidTy()
     if (let Some(inExpression) <- fie.inExpression) {
-        let inTy = SynExprShallow(typeManager, inExpression, ctx: ctx)
-        if (Ty.IsTyCorrect(inTy)) {
-            elementTy = ForInIterableElementTy(typeManager, inExpression.curFile,
-                TcReplaceIdeal(typeManager, inExpression))
-            ok = Ty.IsTyCorrect(elementTy) && ok
+        let inTy = if (let Some(realSynthesizer) <- synthesizer) {
+            realSynthesizer(ctx, SynPos.EXPR_ARG, inExpression)
+        } else {
+            SynExprShallow(typeManager, inExpression, ctx: Some(ctx), diag: diag)
+        }
+        ok = Ty.IsTyCorrect(inTy) && ReplaceIdealTy(typeManager, inExpression, diag: diag) && ok
+        if (let Some(realInTy) <- inExpression.GetTy()) {
+            let iterableTy = GetIterableTy(typeManager, ctx, realInTy)
+            if (Ty.IsTyCorrect(iterableTy)) {
+                CJC_ASSERT(!iterableTy.typeArgs.isEmpty())
+                elementTy = iterableTy.typeArgs[0]
+            } else {
+                ok = false
+                if (!CanSkipDiag(inExpression)) {
+                    if (let Some(diagValue) <- diag) {
+                        diagValue.Diagnose(inExpression.begin, inExpression.end,
+                            BasicDiagKind.sema_expr_in_forin_must_has_iterator,
+                            args: [BasicDiagArgument(Ty.ToString(inExpression.GetTy()))]).Emit()
+                    }
+                }
+            }
         } else {
             ok = false
+            if (!CanSkipDiag(inExpression)) {
+                if (let Some(diagValue2) <- diag) {
+                    diagValue2.Diagnose(inExpression.begin, inExpression.end,
+                        BasicDiagKind.sema_expr_in_forin_must_has_iterator,
+                        args: [BasicDiagArgument(Ty.ToString(inExpression.GetTy()))]).Emit()
+                }
+            }
         }
     } else {
         ok = false
     }
     if (let Some(pattern) <- fie.pattern) {
-        ok = TcPatternCheck(typeManager, elementTy, pattern) && ok
+        ok = ChkPattern(typeManager, ctx, elementTy, pattern, isPatternInMatch: false, diag: diag) && ok
     } else {
         ok = false
     }
     if (let Some(patternGuard) <- fie.patternGuard) {
-        ok = TcCheckCondition(typeManager, patternGuard, ctx: ctx) && ok
+        let guardOk = if (let Some(realChecker) <- checker) {
+            realChecker(ctx, TcBoolTy(), patternGuard)
+        } else {
+            ChkExprShallow(typeManager, TcBoolTy(), patternGuard, ctx: Some(ctx), diag: diag)
+        }
+        if (!guardOk) {
+            ok = false
+            if (!CanSkipDiag(patternGuard)) {
+                if (let Some(diagValue3) <- diag) {
+                    diagValue3.Diagnose(patternGuard.begin, patternGuard.end,
+                        BasicDiagKind.sema_wrong_forin_guard).Emit()
+                }
+            }
+        }
     }
     if (let Some(body) <- fie.body) {
-        let bodyTy = SynBlock(typeManager, body, pos: SynPos.UNUSED)
+        let bodyTy = if (let Some(realSynthesizer2) <- synthesizer) {
+            realSynthesizer2(ctx, SynPos.UNUSED, body)
+        } else {
+            SynBlock(typeManager, body, pos: SynPos.UNUSED, diag: diag)
+        }
         if (Ty.IsTyCorrect(bodyTy)) {
             body.SetTy(TcUnitTy())
         } else {
@@ -289,7 +182,13 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr, ctx!: Option<
         ok = false
     }
     if (let Some(pattern) <- fie.pattern) {
-        ok = IsIrrefutablePattern(pattern) && ok
+        if (!IsIrrefutablePattern(pattern)) {
+            ok = false
+            if (let Some(diagValue4) <- diag) {
+                diagValue4.Diagnose(fie.begin, fie.end,
+                    BasicDiagKind.sema_forin_pattern_must_be_irrefutable).Emit()
+            }
+        }
     }
     if (ok) {
         let unitTy = TcUnitTy()
@@ -299,12 +198,20 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr, ctx!: Option<
     return LoopInvalid(fie)
 }
 
-public func ChkForInExpr(typeManager: TypeManager, target: Ty, fie: ForInExpr, ctx!: Option<ASTContext> = None): Bool {
-    let actualTy = SynForInExpr(typeManager, fie, ctx: ctx)
-    if (Ty.IsTyCorrect(actualTy) &&
-        typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
-        return true
+public func ChkForInExpr(typeManager: TypeManager, target: Ty, fie: ForInExpr, ctx: ASTContext,
+    synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None,
+    checker!: Option<(ASTContext, Ty, Expr) -> Bool> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    var isWellTyped = typeManager.IsSubtype(TcUnitTy(), target)
+    if (!isWellTyped) {
+        if (let Some(diagValue) <- diag) {
+            DiagMismatchedTypesWithFoundTy(diagValue, fie, target, TcUnitTy())
+        }
     }
-    let _ = LoopInvalid(fie)
-    return false
+    isWellTyped = Ty.IsTyCorrect(SynForInExpr(typeManager, fie, ctx, synthesizer: synthesizer,
+        checker: checker, diag: diag)) && isWellTyped
+    if (!isWellTyped) {
+        let _ = LoopInvalid(fie)
+    }
+    return isWellTyped
 }
