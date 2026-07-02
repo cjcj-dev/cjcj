@@ -20,7 +20,7 @@ import cangjie_compiler::chir.StringLiteral
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.VArrayType
-import cangjie_compiler::option.ArchType
+import cangjie_compiler::option.{ArchType, EnvironmentType, OptimizationLevel}
 import cangjie_compiler::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, STD_LIB_FUTURE, StaticCast}
 
 private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowException_msg"
@@ -43,6 +43,7 @@ private let IS_REFERENCE_INTRINSIC_NAME: String = "llvm.cj.is.reference"
 private let GET_FIELD_OFFSET_INTRINSIC_NAME: String = "llvm.cj.get.field.offset"
 private let GCREAD_GENERIC_INTRINSIC_NAME: String = "llvm.cj.gcread.generic"
 private let GCWRITE_GENERIC_INTRINSIC_NAME: String = "llvm.cj.gcwrite.generic"
+private let GCWRITE_GENERIC_PAYLOAD_INTRINSIC_NAME: String = "llvm.cj.gcwrite.generic.payload"
 private let MALLOC_OBJECT_INTRINSIC_NAME: String = "llvm.cj.malloc.object"
 private let CJ_MEMSET_INTRINSIC_NAME: String = "llvm.cj.memset"
 private let GCWRITE_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.ref"
@@ -50,6 +51,7 @@ private let GCREAD_STATIC_REF_INTRINSIC_NAME: String = "llvm.cj.gcread.static.re
 private let GCWRITE_STATIC_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.static.ref"
 private let NEW_CJ_THREAD_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThread"
 private let NEW_CJ_THREAD_NO_RETURN_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThreadNoReturn"
+private let MIN_ANDROID_ARM32_ENUM_ALIGN: UInt32 = 4u32
 private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
 private let LLVM_ARRAY_TYPE_KIND: Int32 = 11
 private let LLVM_POINTER_TYPE_KIND: Int32 = 12
@@ -177,8 +179,48 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateEntryAlloca(cgType: CGType, name!: String = ""): LLVMValueRef {
-        let allocatedType = cgType.GetLLVMType()
-        return CreateEntryAlloca(allocatedType, name: name)
+        if (cgType.GetSize().isSome()) {
+            let allocatedType = if (let Some(functionCGType) <- (cgType as CGFunctionType)) {
+                unsafe { LLVMPointerType(functionCGType.GetLLVMFunctionType(), 0u32) }
+            } else {
+                cgType.GetLLVMType()
+            }
+            let allocaInst = CreateEntryAlloca(allocatedType, name: name)
+            let options = cgMod.GetCGContext().GetCompileOptions()
+            let isOptionLikeNonRef = if (let Some(enumCGType) <- (cgType as CGEnumType)) {
+                enumCGType.IsOptionLikeNonRef()
+            } else {
+                false
+            }
+            let isAllAssociatedValuesAreNonRef = if (let Some(enumCGType) <- (cgType as CGEnumType)) {
+                enumCGType.IsAllAssociatedValuesAreNonRef()
+            } else {
+                false
+            }
+            if ((unsafe { LLVMGetTypeKind(allocatedType) } == LLVM_STRUCT_TYPE_KIND && options.enableCompileDebug &&
+                options.optimizationLevel == OptimizationLevel.O0) || (options.cjdbMode && isOptionLikeNonRef)) {
+                CreateCJMemsetStructWith0(allocaInst, allocatedType)
+            }
+            let target = GetCGContext().GetCompileOptions().target
+            if (target.arch == ArchType.ARM32 && target.env == EnvironmentType.ANDROID &&
+                isAllAssociatedValuesAreNonRef) {
+                unsafe { LLVMSetAlignment(allocaInst, MIN_ANDROID_ARM32_ENUM_ALIGN) }
+            }
+            return allocaInst
+        }
+
+        if (cgType.GetOriginal().IsGeneric()) {
+            let refType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 1u32) }
+            return CreateEntryAlloca(refType, name: name)
+        }
+
+        let typeInfoValue = CreateTypeInfo(cgType.GetOriginal())
+        let size = GetLayoutSize32(cgType.GetOriginal(), cgType)
+        var allocaInst = LLVMNullValue()
+        try (debugLocGuard = TemporarilySetDebugLocInThisScope(this, LLVMNullMetadata())) {
+            allocaInst = CallAllocaGenericWithTypeInfoAndSize(cgType.GetOriginal(), typeInfoValue, size)
+        }
+        return allocaInst
     }
 
     public func CreateAnonymousStructType(elementTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {
@@ -260,15 +302,30 @@ public class IRBuilder2 <: Resource {
         if (blocks.size < 3) {
             return LLVMNullValue()
         }
+        let refType = CGType.GetRefType(GetLLVMContext())
+        let sretArgType = unsafe { LLVMTypeOf(sretArg) }
+        let sretArgAddrspace = if (!sretArgType.isNull() &&
+            unsafe { LLVMGetTypeKind(sretArgType) } == LLVM_POINTER_TYPE_KIND) {
+            unsafe { LLVMGetPointerAddressSpace(sretArgType) }
+        } else {
+            0u32
+        }
+        let destAddr = CreateBitCast(sretArg, unsafe { LLVMPointerType(refType, sretArgAddrspace) },
+            name: "generic.store.ref.dest")
         CreateCondBr(CreateTypeInfoIsReferenceCall(typeInfo), blocks[0], blocks[1])
 
         SetInsertPoint(blocks[0])
-        CreateStore(value, sretArg)
+        CreateStore(value, destAddr)
         CreateBr(blocks[2])
 
         SetInsertPoint(blocks[1])
-        let returnCGType = CGType.GetOrCreate(cgMod, retTy)
-        let dest = CreateLoad(returnCGType.GetLLVMType(), sretArg, name: "generic.store.sret")
+        let dest = if (IsLLVMArgument(sretArg)) {
+            CreateLoad(refType, destAddr, name: "generic.store.sret")
+        } else {
+            let tmp = CallAllocaGenericWithTypeInfo(retTy, typeInfo)
+            CreateStore(tmp, destAddr)
+            tmp
+        }
         CallAssignGeneric(dest, value, typeInfo)
         CreateBr(blocks[2])
 
@@ -1267,7 +1324,7 @@ public class IRBuilder2 <: Resource {
             return CreateSRetGeneric(returnCGType, genericResultTy, sretTypeInfoArg, name: name)
         }
         if (returnTy.IsGeneric()) {
-            let slot = CreateEntryAlloca(returnCGType.GetLLVMType(), name: name)
+            let slot = CreateEntryAlloca(returnCGType, name: name)
             CreateStore(unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) }, slot)
             let resultCGType = CGType.GetOrCreate(cgMod, resultTy)
             if (!resultCGType.IsReference()) {
@@ -1300,7 +1357,7 @@ public class IRBuilder2 <: Resource {
 
     private func CreateSRetGeneric(returnCGType: CGType, resultTy: Type, sretTypeInfoArg: Option<LLVMValueRef>,
         name!: String = "sret"): LLVMValueRef {
-        let slot = CreateEntryAlloca(returnCGType.GetLLVMType(), name: name)
+        let slot = CreateEntryAlloca(returnCGType, name: name)
         CreateStore(unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) }, slot)
         let typeInfo = if (let Some(overrideTypeInfo) <- sretTypeInfoArg) {
             overrideTypeInfo
@@ -1630,6 +1687,15 @@ public class IRBuilder2 <: Resource {
         args.add(source)
         args.add(size)
         return CreateIntrinsicCallNoInvoke(GCWRITE_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+    }
+
+    public func CallGCWriteGenericPayload(dest: LLVMValueRef, source: LLVMValueRef,
+        size: LLVMValueRef): LLVMValueRef {
+        let args = ArrayList<LLVMValueRef>()
+        args.add(dest)
+        args.add(source)
+        args.add(size)
+        return CreateIntrinsicCallNoInvoke(GCWRITE_GENERIC_PAYLOAD_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
     public func CallGCReadRef(baseObject: LLVMValueRef, place: LLVMValueRef): LLVMValueRef {

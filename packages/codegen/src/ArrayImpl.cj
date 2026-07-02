@@ -405,6 +405,34 @@ public func CreateTypedStoreForAddress(irBuilder: IRBuilder2, value: CGValue, ad
     if (let Some(memberStore) <- irBuilder.TryCreateManagedMemberStore(value, addr)) {
         return memberStore
     }
+    if (let Some(valueCGType) <- value.GetCGType()) {
+        let addrCGType = addr.GetCGType().getOrThrow()
+        let destCGType = addrCGType.GetPointerElementType().getOrThrow()
+        if (!destCGType.GetOriginal().IsRef() && valueCGType.GetOriginal().IsRef()) {
+            let valueElementCGType = valueCGType.GetPointerElementType().getOrThrow()
+            if (valueElementCGType.GetSize().isSome()) {
+                if (destCGType.GetSize().isNone()) {
+                    let dataPtr = irBuilder.GetPayloadFromObject(addr.GetRawValue())
+                    let size = irBuilder.GetLayoutSize32(valueCGType.GetOriginal(), valueCGType)
+                    let args = ArrayList<LLVMValueRef>()
+                    args.add(addr.GetRawValue())
+                    args.add(dataPtr)
+                    args.add(value.GetRawValue())
+                    args.add(size)
+                    return irBuilder.CallGCWriteAgg(valueCGType.GetLayoutType(), args)
+                }
+            } else {
+                CJC_ASSERT(destCGType.GetSize().isNone())
+                if (IsAddressSpacePointer(addr.GetRawValue(), 1u32) &&
+                    IsAddressSpacePointer(value.GetRawValue(), 0u32)) {
+                    let size = irBuilder.GetSize32(valueCGType.GetOriginal(), valueCGType)
+                    return irBuilder.CallGCWriteGenericPayload(addr.GetRawValue(), value.GetRawValue(), size)
+                }
+                let typeInfo = irBuilder.CreateTypeInfo(boxType ?? valueCGType.GetOriginal())
+                return irBuilder.CallAssignGeneric(addr.GetRawValue(), value.GetRawValue(), typeInfo)
+            }
+        }
+    }
     if (let Some(structPtrStore) <- TryStoreStructPtrValueForAddress(irBuilder, value, addr)) {
         return structPtrStore
     }
