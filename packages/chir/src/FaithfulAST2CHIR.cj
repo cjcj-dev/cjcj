@@ -1401,6 +1401,7 @@ public class FaithfulAST2CHIR {
         let pkg = CurrentPackage()
         let importsInit = CreateEmptyGVInitFunc(PackageInitFuncName(pkg.GetName(), suffix + "_importsInit"),
             PackageInitFuncName(pkg.GetName(), suffix + "_importsInit"), "", pkg.GetName())
+        importsInit.SetLinkage(Linkage.INTERNAL)
         let entry = RequireEntryBlock(importsInit)
         if (entry.GetTerminator().isNone()) {
             builder.CreateExit(None, entry)
@@ -1415,8 +1416,17 @@ public class FaithfulAST2CHIR {
                 continue
             }
             let pkgName = importedPackage.fullPackageName
-            let fn = CreateEmptyGVInitFunc(PackageInitFuncName(pkgName, suffix), PackageInitFuncName(pkgName, suffix),
-                "", pkgName)
+            let initFuncName = PackageInitFuncName(pkgName, suffix)
+            if (opts.IsCompilingCJMPSpecific()) {
+                if (let Some(existing) <- CurrentPackage().TryGetGlobalFunc(GLOBAL_VALUE_PREFIX + initFuncName)) {
+                    if (existing.TestAttr(Attribute.DESERIALIZED) ||
+                        existing.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) {
+                        continue
+                    }
+                }
+            }
+            let fn = CreateEmptyGVInitFunc(initFuncName, initFuncName, "", pkgName)
+            fn.EnableAttr(Attribute.INITIALIZER)
             fn.EnableAttr(Attribute.IMPORTED)
             fn.EnableAttr(Attribute.PUBLIC)
             let entry = RequireEntryBlock(fn)
@@ -1730,40 +1740,8 @@ public class FaithfulAST2CHIR {
             throw IllegalStateException("faithful AST2CHIR expected expression result")
     }
 
-    private func ImportedPackageNames(): ArrayList<String> {
-        let names = ArrayList<String>()
-        CollectImportedPackageNames(importedGlobalAndStaticVars, names)
-        CollectImportedPackageNames(importedGlobalAndMemberFuncs, names)
-        CollectImportedPackageNames(importedNominalDecls, names)
-        CollectImportedPackageNames(importedGenericInstantiatedNominalDecls, names)
-        return names
-    }
-
     private func DirectImportedPackages(): ArrayList<AstPackage> {
-        if (!directImportedPackages.isEmpty()) {
-            return directImportedPackages
-        }
-        let names = ImportedPackageNames()
-        let out = ArrayList<AstPackage>()
-        for (name in names) {
-            for (pkg in importedPackages) {
-                if (pkg.fullPackageName == name) {
-                    out.add(pkg)
-                    break
-                }
-            }
-        }
-        return out
-    }
-
-    private func CollectImportedPackageNames(decls: ArrayList<AstDecl>, names: ArrayList<String>): Unit {
-        for (decl in decls) {
-            let packageName = EffectivePackageName(decl)
-            if (!packageName.isEmpty() && packageName != CurrentPackage().GetName() &&
-                !ContainsString(names, packageName)) {
-                names.add(packageName)
-            }
-        }
+        return directImportedPackages
     }
 
     private func PackageInitFuncName(pkgName: String, suffix: String): String {
@@ -2640,15 +2618,6 @@ public class FaithfulAST2CHIR {
     private static func SameAstFile(left: AstFile, right: AstFile): Bool {
         return left.fileName == right.fileName && left.begin.hashCode() == right.begin.hashCode() &&
             left.end.hashCode() == right.end.hashCode()
-    }
-
-    private static func ContainsString(values: ArrayList<String>, value: String): Bool {
-        for (item in values) {
-            if (item == value) {
-                return true
-            }
-        }
-        return false
     }
 
 }
