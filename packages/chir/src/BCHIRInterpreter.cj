@@ -379,9 +379,11 @@ public class BCHIRInterpreter {
                     return Finish(INotRun)
                 }
                 return Finish(ValueToResult(interpStack.ArgsPopIVal()))
+            } else if (opCode == OpCode.SYSCALL || opCode == OpCode.CAPPLY || opCode == OpCode.ABORT) {
+                return Finish(IException(InterpreterValue.MakeInvalid()))
             } else if (opCode == OpCode.NOT_SUPPORTED) {
                 return Finish(IException(InterpreterValue.MakeInvalid()))
-            } else if (opCode == OpCode.ABORT || opCode == OpCode.INVALID) {
+            } else if (opCode == OpCode.INVALID) {
                 return Finish(IException(InterpreterValue.MakeInvalid()))
             } else {
                 return Finish(IException(InterpreterValue.MakeInvalid()))
@@ -720,42 +722,98 @@ public class BCHIRInterpreter {
 
     private func InterpretSwitch(switchPc: Int64): Option<Int64> {
         let selector = interpStack.ArgsPopIVal()
-        if (let Some(selectorValue) <- SwitchSelectorToInt(selector)) {
-            let code = bchir.GetLinkedByteCode()
-            let caseCount = code.Get(switchPc + 2)
-            if (caseCount < 0) {
-                return None
-            }
-            let caseStart = switchPc + 3
-            let defaultTargetIndex = caseStart + caseCount * 2
-            let targetStart = defaultTargetIndex + 1
-            var left: Int64 = 0
-            var right = caseCount
-            while (left < right) {
-                let mid = (left + right) / 2
-                let caseValue = code.Get8Bytes(caseStart + mid * 2)
-                if (caseValue < selectorValue) {
-                    left = mid + 1
+        if (let Some(selectorKind) <- TypeKindFromCell(bchir.GetLinkedByteCode().Get(switchPc + 1))) {
+            return match (selectorKind) {
+                case TypeKind.TYPE_UINT8 => if (selector.kind == InterpreterValueKind.IUINT8) {
+                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
                 } else {
-                    right = mid
+                    None
                 }
+                case TypeKind.TYPE_UINT16 => if (selector.kind == InterpreterValueKind.IUINT16) {
+                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                } else {
+                    None
+                }
+                case TypeKind.TYPE_UINT32 => if (selector.kind == InterpreterValueKind.IUINT32) {
+                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                } else {
+                    None
+                }
+                case TypeKind.TYPE_UINT64 => if (selector.kind == InterpreterValueKind.IUINT64) {
+                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                } else {
+                    None
+                }
+                case TypeKind.TYPE_UINT_NATIVE => if (selector.kind == InterpreterValueKind.IUINTNAT) {
+                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                } else {
+                    None
+                }
+                case TypeKind.TYPE_INT8 => if (selector.kind == InterpreterValueKind.IINT8) {
+                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                } else {
+                    None
+                }
+                case TypeKind.TYPE_INT16 => if (selector.kind == InterpreterValueKind.IINT16) {
+                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                } else {
+                    None
+                }
+                case TypeKind.TYPE_INT32 => if (selector.kind == InterpreterValueKind.IINT32) {
+                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                } else {
+                    None
+                }
+                case TypeKind.TYPE_INT64 => if (selector.kind == InterpreterValueKind.IINT64) {
+                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                } else {
+                    None
+                }
+                case TypeKind.TYPE_INT_NATIVE => if (selector.kind == InterpreterValueKind.IINTNAT) {
+                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                } else {
+                    None
+                }
+                case TypeKind.TYPE_RUNE => if (selector.kind == InterpreterValueKind.IRUNE) {
+                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                } else {
+                    None
+                }
+                case TypeKind.TYPE_BOOLEAN => if (selector.kind == InterpreterValueKind.IBOOL) {
+                    InterpretSwitchWithType(switchPc, if (selector.GetBool()) { 1 } else { 0 })
+                } else {
+                    None
+                }
+                case _ => None
             }
-            if (left < caseCount && code.Get8Bytes(caseStart + left * 2) == selectorValue) {
-                return code.Get(targetStart + left)
-            }
-            return code.Get(defaultTargetIndex)
         }
         return None
     }
 
-    private func SwitchSelectorToInt(value: InterpreterValue): Option<Int64> {
-        if (value.IsIntLike() || value.kind == InterpreterValueKind.IRUNE) {
-            return value.GetInt()
+    private func InterpretSwitchWithType(switchPc: Int64, realValue: Int64): Option<Int64> {
+        let code = bchir.GetLinkedByteCode()
+        let caseCount = code.Get(switchPc + 2)
+        if (caseCount < 0) {
+            return None
         }
-        if (value.kind == InterpreterValueKind.IBOOL) {
-            return if (value.GetBool()) { 1 } else { 0 }
+        let caseStart = switchPc + 3
+        let defaultTargetIndex = caseStart + caseCount * 2
+        let targetStart = defaultTargetIndex + 1
+        var left: Int64 = 0
+        var right = caseCount
+        while (left < right) {
+            let mid = (left + right) / 2
+            let caseValue = code.Get8Bytes(caseStart + mid * 2)
+            if (caseValue < realValue) {
+                left = mid + 1
+            } else {
+                right = mid
+            }
         }
-        return None
+        if (left < caseCount && code.Get8Bytes(caseStart + left * 2) == realValue) {
+            return code.Get(targetStart + left)
+        }
+        return code.Get(defaultTargetIndex)
     }
 
     private func ValueToResult(value: InterpreterValue): IResult {
