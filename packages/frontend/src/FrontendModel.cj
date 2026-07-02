@@ -854,8 +854,10 @@ private class CjoSignatureMaterializer {
             if (bodyTable < 0) {
                 throw IllegalStateException("FlatBuffer FuncDecl has no FuncBody")
             }
-            body.retType = Some(UpdateFlatTypeNode(body.retType,
-                TypeNodeForTy(LoadFlatTypeOrInvalid(reader.U32Field(bodyTable, 6, 0u32)))))
+            let retTypeIndex = reader.U32Field(bodyTable, 6, 0u32)
+            if (retTypeIndex != 0u32) {
+                body.retType = Some(UpdateFlatTypeNode(body.retType, TypeNodeForTy(LoadFlatTypeOrInvalid(retTypeIndex))))
+            }
         }
         body.SetTy(funcDecl.GetTy() ?? FaithfulSemaTypeManager.GetInvalidTy())
     }
@@ -969,6 +971,7 @@ private class CjoSignatureMaterializer {
 
     private func LoadFlatExprRefs(reader: CjoFlatBuffer, exprTable: Int64, expr: Expr): Unit {
         expr.SetTy(LoadFlatTypeOrInvalid(reader.U32Field(exprTable, 14, 0u32)))
+        expr.overflowStrategy = FlatOverflowStrategy(reader.U8Field(exprTable, 16, 0u8))
         expr.mapExpr = allLoadedExprs.get(reader.U32Field(exprTable, 10, 0u32))
         if (let Some(member) <- (expr as MemberAccess)) {
             let infoTable = reader.OffsetField(exprTable, 20)
@@ -2463,7 +2466,19 @@ private class CjoSignatureMaterializer {
         if (kind == FLAT_EXPR_KIND_BLOCK) {
             return Some(LoadFlatBlock(reader, exprTable, exprIndex))
         }
-        return None
+        return Some(LoadFlatInvalidExpr(reader, exprTable, exprIndex))
+    }
+
+    // Mirrors ExprLoader.cpp:25-31 LoadInvalidExpr, used when Expr.kind has no registered loader.
+    private func LoadFlatInvalidExpr(reader: CjoFlatBuffer, exprTable: Int64, exprIndex: UInt32): InvalidExpr {
+        diag.DiagnoseRefactor(DiagKindRefactor.package_unsupported_load, DEFAULT_POSITION,
+            arguments: ["expression"])
+        let invalidExpr = InvalidExpr(INVALID_POSITION)
+        if (!allLoadedExprs.contains(exprIndex)) {
+            allLoadedExprs.add(exprIndex, invalidExpr)
+        }
+        LoadFlatExprBasicInfo(reader, exprTable, invalidExpr)
+        return invalidExpr
     }
 
     // Mirrors ExprLoader.cpp:348-358 LoadLambdaExpr: LambdaInfo owns a nested FuncBody and
@@ -4354,6 +4369,7 @@ public class ImportManager {
     private let fileImportedDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
     private var canInlineImportedSource: Bool = false
+    private var importSrcCode: Bool = true
 
     public init(diag: DiagnosticEngine, typeManager: FaithfulSemaTypeManager, globalOptions: GlobalOptions) {
         this.diag = diag
@@ -4487,7 +4503,10 @@ public class ImportManager {
 
     public func DeleteASTLoaders(): Unit {}
     public func ClearPackageBCHIRCache(): Unit {}
-    public func IsSourceCodeImported(): Bool { return true }
+    public func SetSourceCodeImportStatus(shouldImport: Bool): Unit {
+        importSrcCode = shouldImport
+    }
+    public func IsSourceCodeImported(): Bool { return importSrcCode }
 
     public func GetAllImportedPackages(): ArrayList<Package> {
         return importedPackages
@@ -5192,7 +5211,8 @@ public class ImportManager {
         pkg.EnableAttr(Attribute.IMPORTED)
         let (filesByIndex, idToFileMap) = MaterializeCjoFiles(data, pkg)
         let materializer = CjoSignatureMaterializer(fullPackageName, pkg, filesByIndex, idToFileMap, importedPackages,
-            packageDecls, exportIdDeclMaps, diag, typeManager, canInline: canInlineImportedSource)
+            packageDecls, exportIdDeclMaps, diag, typeManager, importSrcCode: importSrcCode,
+            canInline: canInlineImportedSource)
         materializer.Materialize(data)
         AddImportedPackageIfMissing(pkg)
         loadingPackages.remove(fullPackageName)

@@ -165,7 +165,9 @@ public open class DefaultCompilerInstance {
         let depInfos = core.importManager.GeneratePkgDepInfo(pkgs)
         let packageDepInfo = if (depInfos.isEmpty()) { "" } else { depInfos[0] }
         let data = SerializePackageToCjoFlatBuffer(pkg, packageDepInfo, invocation.globalOptions.enableCompileDebug,
-            invocation.globalOptions.optimizationLevel)
+            invocation.globalOptions.optimizationLevel, diag: Some(diag),
+            serializingCommon: invocation.globalOptions.outputMode == OutputMode.CHIR,
+            exportContent: core.importManager.IsSourceCodeImported(), exportFuncBody: true)
         if (!FileUtil.WriteBufferToASTFile(cjoPath, data)) {
             diag.Warn(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "failed to write CJO: " + cjoPath)
             return false

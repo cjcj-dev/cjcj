@@ -2,14 +2,14 @@ package cangjie_compiler::frontend
 
 import std.collection.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::basic.CANGJIE_VERSION
+import cangjie_compiler::basic.{CANGJIE_VERSION, DiagKindRefactor, MakeRange}
 import cangjie_compiler::basic.Linkage
 import cangjie_compiler::mangle.BaseMangler as RealBaseMangler
 import cangjie_compiler::modules.{FlatBufferBuilder, FlatBufferOffset}
 import cangjie_compiler::option.OptimizationLevel
 import cangjie_compiler::sema.TypeManager as FaithfulSemaTypeManager
 import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.MAIN_INVOKE
+import cangjie_compiler::utils.{MAIN_INVOKE, STATIC_INIT_FUNC}
 
 private let CJO_FILE_IDENTIFIER: String = "CJOF"
 private let INVALID_PACKAGE_INDEX: Int64 = -1
@@ -20,10 +20,15 @@ public func SerializePackageToCjoFlatBuffer(
     packageDepInfo: String,
     debug: Bool,
     optimizationLevel: OptimizationLevel,
-    saveFileWithAbsPath!: Bool = false
+    saveFileWithAbsPath!: Bool = false,
+    diag!: Option<DiagnosticEngine> = None,
+    serializingCommon!: Bool = false,
+    exportContent!: Bool = true,
+    exportFuncBody!: Bool = true
 ): Array<UInt8> {
     let writer = FrontendCjoFlatBufferWriter(packageDepInfo, debug, optimizationLevel,
-        saveFileWithAbsPath: saveFileWithAbsPath)
+        saveFileWithAbsPath: saveFileWithAbsPath, diag: diag, serializingCommon: serializingCommon,
+        exportContent: exportContent, exportFuncBody: exportFuncBody)
     return writer.Write(pkg)
 }
 
@@ -33,6 +38,10 @@ private class FrontendCjoFlatBufferWriter {
     private let debugOption: Bool
     private let optimizationLevel: OptimizationLevel
     private let saveFileWithAbsPath: Bool
+    private let diag: Option<DiagnosticEngine>
+    private var serializingCommon: Bool
+    private let exportContent: Bool
+    private let exportFuncBody: Bool
     private let mangler: RealBaseMangler = RealBaseMangler()
     private let typeManager: FaithfulSemaTypeManager = FaithfulSemaTypeManager()
 
@@ -62,17 +71,33 @@ private class FrontendCjoFlatBufferWriter {
         packageDepInfo: String,
         debug: Bool,
         optimizationLevel: OptimizationLevel,
-        saveFileWithAbsPath!: Bool
+        saveFileWithAbsPath!: Bool,
+        diag!: Option<DiagnosticEngine>,
+        serializingCommon!: Bool,
+        exportContent!: Bool,
+        exportFuncBody!: Bool
     ) {
         this.packageDepInfo = packageDepInfo
         this.debugOption = debug
         this.optimizationLevel = optimizationLevel
         this.saveFileWithAbsPath = saveFileWithAbsPath
+        this.diag = diag
+        this.serializingCommon = serializingCommon
+        this.exportContent = exportContent
+        this.exportFuncBody = exportFuncBody
     }
 
     public func Write(pkg: Package): Array<UInt8> {
         builder.Clear()
         currentPackageName = pkg.fullPackageName
+        for (file in pkg.files) {
+            if (let Some(packageSpec) <- file.packageSpec) {
+                if (packageSpec.hasCommon) {
+                    serializingCommon = true
+                    break
+                }
+            }
+        }
         SaveFiles(pkg)
         SaveTopLevelDecls(pkg)
 
@@ -123,7 +148,7 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     private func StoredFilePath(pkg: Package, file: File): String {
-        if (saveFileWithAbsPath || file.filePath.isEmpty()) {
+        if (saveFileWithAbsPath || serializingCommon || file.filePath.isEmpty()) {
             return file.filePath
         }
         return FileUtil.JoinPath(pkg.fullPackageName, FileUtil.GetFileName(file.filePath))
@@ -498,6 +523,9 @@ private class FrontendCjoFlatBufferWriter {
         if (let Some(varDecl) <- (decl as VarDecl)) {
             return SaveVarInfo(varDecl)
         }
+        if (let Some(varWithPattern) <- (decl as VarWithPatternDecl)) {
+            return SaveVarWithPatternInfo(varWithPattern)
+        }
         if (let Some(classDecl) <- (decl as ClassDecl)) {
             return SaveClassInfo(classDecl)
         }
@@ -515,6 +543,9 @@ private class FrontendCjoFlatBufferWriter {
         }
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
             return SaveExtendInfo(extendDecl)
+        }
+        if (let Some(builtInDecl) <- (decl as BuiltInDecl)) {
+            return SaveBuiltInInfo(builtInDecl)
         }
         if ((decl as GenericParamDecl).isSome()) {
             return 0u32
@@ -560,18 +591,21 @@ private class FrontendCjoFlatBufferWriter {
             paramLists.add(SaveFuncParamList(funcDecl, paramList))
         }
         let paramListsVec = builder.CreateVectorOffsets(paramLists)
-        let retType = SaveFuncReturnType(funcDecl, body)
-        // Mirror ASTWriter.cpp:1383-1389 SaveFuncBody body gating:
-        //   shouldExportBody = config.exportContent && exportFuncBody && (!fd || CanBeSrcExported(fd) || isGenericCJMP)
-        //   validBody = shouldExportBody && Ty::IsTyCorrect(funcBody.GetTy()) && funcBody.body
-        // The selfhost .cjo writer always serialises content (config.exportContent), so the gate
-        // reduces to (!funcDecl || CanBeSrcExported(funcDecl)) && IsTyCorrect(body ty) && body present.
-        // isGenericCJMP (IsGenericInCommonSerialization, cjmp common side) is not modelled in this slice.
-        // The whole body-expr subtree is serialised here (FlatBuffer table discipline: child expr
-        // offsets are built/closed BEFORE the FuncBody table is opened below).
+        let retType = SaveFuncReturnType(body)
+        if (let Some(frozenFd) <- funcDecl) {
+            if (let Some(outer) <- frozenFd.outerDecl) {
+                if (let Some(outerFunc) <- (outer as FuncDecl)) {
+                    frozenFd.isFrozen = outerFunc.isFrozen
+                }
+            }
+        }
+        // Mirror ASTWriter.cpp:1383-1389 SaveFuncBody body gating. The whole body-expr
+        // subtree is serialized before the FuncBody table is opened below.
         var bodyIdx = 0u32
         var captureKind = 0u8
-        let shouldExportBody = if (let Some(fd3) <- funcDecl) { CanBeSrcExported(fd3) } else { true }
+        let isGenericCJMP = if (let Some(fd4) <- funcDecl) { IsGenericInCommonSerialization(fd4) } else { false }
+        let shouldExportBody = exportContent && exportFuncBody &&
+            (if (let Some(fd3) <- funcDecl) { CanBeSrcExported(fd3) || isGenericCJMP } else { true })
         let validBody = shouldExportBody && Ty.IsTyCorrect(body.GetTy()) && body.body.isSome()
         if (validBody) {
             bodyIdx = SaveExpr(body.body.getOrThrow())
@@ -583,6 +617,24 @@ private class FrontendCjoFlatBufferWriter {
         builder.AddU32(1, retType)
         builder.AddOffset(0, paramListsVec)
         return builder.EndTable()
+    }
+
+    private func IsGenericInCommonSerialization(decl: Decl): Bool {
+        var shouldSerialize = false
+        if (serializingCommon) {
+            if (let Some(outer) <- decl.outerDecl) {
+                shouldSerialize = outer.TestAttr(Attribute.GENERIC)
+            }
+        }
+        if (shouldSerialize) {
+            if (let Some(fd) <- (decl as FuncDecl)) {
+                if (fd.TestAttr(Attribute.STATIC) && fd.TestAttr(Attribute.CONSTRUCTOR) &&
+                    fd.identifier.Val() == STATIC_INIT_FUNC) {
+                    shouldSerialize = false
+                }
+            }
+        }
+        return shouldSerialize
     }
 
     private func SaveFuncParamList(funcDecl: Option<FuncDecl>, paramList: FuncParamList): FlatBufferOffset {
@@ -613,17 +665,9 @@ private class FrontendCjoFlatBufferWriter {
         return builder.EndTable()
     }
 
-    private func SaveFuncReturnType(funcDecl: Option<FuncDecl>, body: FuncBody): UInt32 {
+    private func SaveFuncReturnType(body: FuncBody): UInt32 {
         if (let Some(retType) <- body.retType) {
             return SaveType(typeManager.ObtainsAliasType(Some(retType)) ?? TypeNodeTyForSerialization(retType))
-        }
-        if (let Some(fd) <- funcDecl) {
-            if (let Some(declTy) <- fd.GetTy()) {
-                if (let Some(funcTy) <- (declTy as FuncTy)) {
-                    return SaveType(funcTy.retTy)
-                }
-            }
-            return SaveType(FaithfulSemaTypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
         }
         return 0u32
     }
@@ -669,6 +713,27 @@ private class FrontendCjoFlatBufferWriter {
             return SaveExpr(initializer)
         }
         return 0u32
+    }
+
+    // Mirrors ASTWriter.cpp:1331-1341 SaveVarWithPatternDecl. This decl is only stored as a local
+    // child under expression exporting; its initializer and irrefutable pattern are always emitted.
+    private func SaveVarWithPatternInfo(vpd: VarWithPatternDecl): FlatBufferOffset {
+        if (let None <- vpd.initializer) {
+            throw IllegalArgumentException(
+                "VarWithPatternDecl without initializer is not supported in faithful .cjo writer")
+        }
+        if (let None <- vpd.irrefutablePattern) {
+            throw IllegalArgumentException(
+                "VarWithPatternDecl without irrefutablePattern is not supported in faithful .cjo writer")
+        }
+        let initializer = SaveExpr(vpd.initializer.getOrThrow())
+        let pattern = SavePattern(vpd.irrefutablePattern.getOrThrow())
+        builder.StartTable(4)
+        builder.AddU32(3, initializer)
+        builder.AddOffset(2, pattern)
+        builder.AddBool(1, vpd.isConst)
+        builder.AddBool(0, vpd.isVar)
+        return builder.EndTable()
     }
 
     // Mirrors ASTWriter.cpp:312-348 ShouldExportSource(VarDecl) for the cases handled by this writer:
@@ -760,7 +825,7 @@ private class FrontendCjoFlatBufferWriter {
         allExprs.add(0u32)
         savedExprKeys.add(realExpr)
         savedExprIndexes.add(exprIndex)
-        let offset = SaveExprByKind(realExpr)
+        let offset = SaveExprByKind(realExpr, expr.overflowStrategy)
         // Overwrite the slot with the actual expr.
         allExprs[Int64(exprIndex) - 1] = offset
         return exprIndex
@@ -769,9 +834,8 @@ private class FrontendCjoFlatBufferWriter {
     // Per-kind dispatch. Bounded faithful slice: RefExpr, MemberAccess, CallExpr, UnaryExpr,
     // BinaryExpr, SubscriptExpr, AssignExpr, JumpExpr, PointerExpr, TypeConvExpr, ThrowExpr, SpawnExpr, TryExpr, WhileExpr, DoWhileExpr,
     // MatchExpr, ForInExpr, IfExpr, Block, ReturnExpr, LitConstExpr, ArrayLit, TupleLit. Other kinds throw
-    // (no SaveUnsupportExpr diagnostic stub yet);
-    // they are added in later cuts.
-    private func SaveExprByKind(realExpr: Expr): FlatBufferOffset {
+    // a package_unsupport_save diagnostic through SaveUnsupportExpr.
+    private func SaveExprByKind(realExpr: Expr, overflowStrategy: OverflowStrategy): FlatBufferOffset {
         if (let Some(pte) <- (realExpr as PrimitiveTypeExpr)) {
             return SavePrimitiveTypeExpr(pte)
         }
@@ -862,8 +926,33 @@ private class FrontendCjoFlatBufferWriter {
         if (let Some(pe2) <- (realExpr as PerformExpr)) {
             return SavePerformExpr(pe2)
         }
-        throw IllegalArgumentException(
-            "not yet ported in faithful .cjo writer: SaveExpr for unsupported AST expr kind")
+        return SaveUnsupportExpr(realExpr, overflowStrategy)
+    }
+
+    // Mirrors ExprWriter.cpp:87-95 SaveUnsupportExpr: diagnose the unsupported expression and
+    // finish a PackageFormat::Expr with SaveBasicNodeInfo fields, leaving kind as the schema default.
+    private func SaveUnsupportExpr(expr: Expr, overflowStrategy: OverflowStrategy): FlatBufferOffset {
+        if (let Some(writerDiag) <- diag) {
+            writerDiag.AsBasicDiagnosticEngine().DiagnoseRefactor(DiagKindRefactor.package_unsupport_save,
+                MakeRange(expr.begin, expr.end), arguments: ["expression", ASTKindName(expr.astKind)]).Emit()
+        }
+        let begin = PositionBytes(expr.begin)
+        let end = PositionBytes(expr.end)
+        let typeIndex = SaveExprType(expr)
+        let mapExprIndex = if (let Some(jump) <- (expr as JumpExpr)) {
+            if (let Some(refLoop) <- jump.refLoop) { SaveExpr(refLoop) } else { 0u32 }
+        } else if (let Some(mapExpr) <- expr.mapExpr) {
+            SaveExpr(mapExpr)
+        } else {
+            0u32
+        }
+        builder.StartTable(9)
+        builder.AddU8(6, OverflowPolicyToFlat(overflowStrategy))
+        builder.AddU32(5, typeIndex)
+        builder.AddU32(3, mapExprIndex)
+        builder.AddStruct(2, end, 4)
+        builder.AddStruct(1, begin, 4)
+        return builder.EndTable()
     }
 
     // Mirrors ExprWriter.cpp:97-103 SaveExpression(PrimitiveTypeExpr). It carries only basic Expr fields.
@@ -2242,6 +2331,13 @@ private class FrontendCjoFlatBufferWriter {
         return builder.EndTable()
     }
 
+    // Mirrors ASTWriter.cpp:1562-1574 SaveBuiltInDecl and Mapping.h:20-24 BUILTIN_TYPE.
+    private func SaveBuiltInInfo(builtInDecl: BuiltInDecl): FlatBufferOffset {
+        builder.StartTable(1)
+        builder.AddU8(0, BuiltInTypeToFlat(builtInDecl.builtinType))
+        return builder.EndTable()
+    }
+
     private func SaveInheritedTypes(decl: InheritableDecl): FlatBufferOffset {
         let types = ArrayList<UInt32>()
         for (inheritedType in decl.inheritedTypes) {
@@ -2795,10 +2891,12 @@ private func DeclKindToFlat(decl: Decl): UInt16 {
     if ((decl as FuncParam).isSome()) { return 7u16 }
     if ((decl as GenericParamDecl).isSome()) { return 12u16 }
     if ((decl as VarDecl).isSome()) { return 5u16 }
+    if ((decl as VarWithPatternDecl).isSome()) { return 6u16 }
     if ((decl as StructDecl).isSome()) { return 8u16 }
     if ((decl as EnumDecl).isSome()) { return 9u16 }
     if ((decl as ExtendDecl).isSome()) { return 10u16 }
     if ((decl as TypeAliasDecl).isSome()) { return 11u16 }
+    if ((decl as BuiltInDecl).isSome()) { return 13u16 }
     return 0u16
 }
 
@@ -2812,8 +2910,20 @@ private func DeclInfoTypeToFlat(decl: Decl): UInt8 {
     if ((decl as FuncDecl).isSome()) { return 10u8 }
     if ((decl as FuncParam).isSome()) { return 9u8 }
     if ((decl as VarDecl).isSome()) { return 7u8 }
+    if ((decl as VarWithPatternDecl).isSome()) { return 8u8 }
+    if ((decl as BuiltInDecl).isSome()) { return 11u8 }
     if ((decl as TypeAliasDecl).isSome()) { return 12u8 }
     return 0u8
+}
+
+private func BuiltInTypeToFlat(kind: BuiltInType): UInt8 {
+    return match (kind) {
+        case BuiltInType.ARRAY => 0u8
+        case BuiltInType.VARRAY => 1u8
+        case BuiltInType.POINTER => 2u8
+        case BuiltInType.CSTRING => 3u8
+        case BuiltInType.CFUNC => 4u8
+    }
 }
 
 private func TypeKindToFlat(kind: TypeKind): UInt16 {
