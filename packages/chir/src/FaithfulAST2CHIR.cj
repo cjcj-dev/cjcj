@@ -41,6 +41,8 @@ import cangjie_compiler::ast.VisitAction as AstVisitAction
 import cangjie_compiler::ast.Walker as AstWalker
 import cangjie_compiler::ast.WildcardPattern as AstWildcardPattern
 import cangjie_compiler::ast.Position as AstPosition
+import cangjie_compiler::ast.IsStaticInitializer as AstIsStaticInitializer
+import cangjie_compiler::utils.{MAIN_INVOKE, STATIC_INIT_VAR}
 
 private class FaithfulInitFileVars {
     public let file: AstFile
@@ -48,6 +50,90 @@ private class FaithfulInitFileVars {
 
     public init(file: AstFile) {
         this.file = file
+    }
+}
+
+private class ElementList {
+    public let stableOrderValue: ArrayList<AstDecl> = ArrayList<AstDecl>()
+    private let randomOrderValue: FaithfulInitDeclSet = FaithfulInitDeclSet()
+
+    public init() {}
+
+    public func AddElement(element: AstDecl): Unit {
+        if (!randomOrderValue.Add(element)) {
+            return
+        }
+        stableOrderValue.add(element)
+    }
+
+    public func AddElements(elements: ArrayList<AstDecl>): Unit {
+        for (element in elements) {
+            AddElement(element)
+        }
+    }
+
+    public func HasElement(element: AstDecl): Bool {
+        return randomOrderValue.Contains(element)
+    }
+}
+
+private class StaticInitInfo {
+    public let staticInitFunc: AstFuncDecl
+    public let staticInitVar: Option<AstDecl>
+    public let vars: ArrayList<AstDecl>
+
+    public init(staticInitFunc: AstFuncDecl, staticInitVar: Option<AstDecl>, vars: ArrayList<AstDecl>) {
+        this.staticInitFunc = staticInitFunc
+        this.staticInitVar = staticInitVar
+        this.vars = vars
+    }
+}
+
+private class StaticInitInfoEntry {
+    public let decl: AstDecl
+    public let info: StaticInitInfo
+
+    public init(decl: AstDecl, info: StaticInitInfo) {
+        this.decl = decl
+        this.info = info
+    }
+}
+
+private class StaticInitInfoMap {
+    private let buckets: HashMap<Int64, ArrayList<StaticInitInfoEntry>> =
+        HashMap<Int64, ArrayList<StaticInitInfoEntry>>()
+
+    public init() {}
+
+    public func Set(decl: AstDecl, info: StaticInitInfo): Unit {
+        let key = FaithfulInitDeclHash(decl)
+        if (let Some(bucket) <- buckets.get(key)) {
+            var idx: Int64 = 0
+            while (idx < bucket.size) {
+                if (FaithfulInitSameDecl(bucket[idx].decl, decl)) {
+                    bucket[idx] = StaticInitInfoEntry(decl, info)
+                    return
+                }
+                idx++
+            }
+            bucket.add(StaticInitInfoEntry(decl, info))
+            return
+        }
+        let bucket = ArrayList<StaticInitInfoEntry>()
+        bucket.add(StaticInitInfoEntry(decl, info))
+        buckets[key] = bucket
+    }
+
+    public func Get(decl: AstDecl): Option<StaticInitInfo> {
+        let key = FaithfulInitDeclHash(decl)
+        if (let Some(bucket) <- buckets.get(key)) {
+            for (entry in bucket) {
+                if (FaithfulInitSameDecl(entry.decl, decl)) {
+                    return entry.info
+                }
+            }
+        }
+        return None
     }
 }
 
@@ -139,6 +225,429 @@ private class FaithfulInitDepsMap {
         }
         return None
     }
+}
+
+private class DeclDepMap {
+    public let stableOrderValue: ArrayList<FaithfulInitDepsEntry> = ArrayList<FaithfulInitDepsEntry>()
+    private let randomOrderValue: FaithfulInitDepsMap = FaithfulInitDepsMap()
+
+    public init() {}
+
+    public func AddDeps(root: AstDecl, deps: ArrayList<AstDecl>): Unit {
+        if (randomOrderValue.Get(root).isSome()) {
+            return
+        }
+        let copiedDeps = ArrayList<AstDecl>()
+        for (dep in deps) {
+            copiedDeps.add(dep)
+        }
+        randomOrderValue.Add(root, copiedDeps)
+        stableOrderValue.add(FaithfulInitDepsEntry(root, copiedDeps))
+    }
+
+    public func AddDep(root: AstDecl, dep: AstDecl): Unit {
+        let deps = if (let Some(existing) <- randomOrderValue.Get(root)) {
+            existing
+        } else {
+            let createdDeps = ArrayList<AstDecl>()
+            randomOrderValue.Add(root, createdDeps)
+            stableOrderValue.add(FaithfulInitDepsEntry(root, createdDeps))
+            createdDeps
+        }
+        for (existing in deps) {
+            if (FaithfulInitSameDecl(existing, dep)) {
+                return
+            }
+        }
+        deps.add(dep)
+    }
+
+    public func GetDep(root: AstDecl): ArrayList<AstDecl> {
+        return randomOrderValue.Get(root) ?? ArrayList<AstDecl>()
+    }
+
+    public func Contains(root: AstDecl): Bool {
+        return randomOrderValue.Get(root).isSome()
+    }
+}
+
+private class FileDepMapEntry {
+    public let file: AstFile
+    public let deps: ArrayList<AstFile>
+
+    public init(file: AstFile, deps: ArrayList<AstFile>) {
+        this.file = file
+        this.deps = deps
+    }
+}
+
+private class FileDepMap {
+    public let stableOrderValue: ArrayList<FileDepMapEntry> = ArrayList<FileDepMapEntry>()
+    private let randomOrderValue: HashMap<Int64, ArrayList<AstFile>> = HashMap<Int64, ArrayList<AstFile>>()
+
+    public init() {}
+
+    public func InitDeps(root: AstFile): Unit {
+        if (Contains(root)) {
+            return
+        }
+        let deps = ArrayList<AstFile>()
+        randomOrderValue[root.objectId] = deps
+        stableOrderValue.add(FileDepMapEntry(root, deps))
+    }
+
+    public func AddDep(root: AstFile, dep: AstFile): Unit {
+        let deps = if (let Some(existing) <- randomOrderValue.get(root.objectId)) {
+            existing
+        } else {
+            let createdDeps = ArrayList<AstFile>()
+            randomOrderValue[root.objectId] = createdDeps
+            createdDeps
+        }
+        for (existing in deps) {
+            if (existing.objectId == dep.objectId) {
+                return
+            }
+        }
+        deps.add(dep)
+        for (entry in stableOrderValue) {
+            if (entry.file.objectId == root.objectId) {
+                entry.deps.add(dep)
+                return
+            }
+        }
+    }
+
+    public func GetDep(root: AstFile): ArrayList<AstFile> {
+        return randomOrderValue.get(root.objectId) ?? ArrayList<AstFile>()
+    }
+
+    public func Contains(root: AstFile): Bool {
+        return randomOrderValue.contains(root.objectId)
+    }
+}
+
+private class DepsUnit<T> where T <: AstNode {
+    public let element: T
+    public let depsUnits: ArrayList<DepsUnit<T>> = ArrayList<DepsUnit<T>>()
+    public let userUnits: ArrayList<DepsUnit<T>> = ArrayList<DepsUnit<T>>()
+    public let circularDepElements: ArrayList<T> = ArrayList<T>()
+    public var disc: Int64 = -1
+    public var low: Int64 = -1
+    public var stackMember: Bool = false
+
+    public init(element: T) {
+        this.element = element
+    }
+
+    public func AddDeps(unit: DepsUnit<T>): Unit {
+        for (existing in depsUnits) {
+            if (existing.element.objectId == unit.element.objectId) {
+                return
+            }
+        }
+        depsUnits.add(unit)
+    }
+
+    public func AddUsers(unit: DepsUnit<T>): Unit {
+        for (existing in userUnits) {
+            if (existing.element.objectId == unit.element.objectId) {
+                return
+            }
+        }
+        userUnits.add(unit)
+    }
+}
+
+private abstract class TarjanSort<T> where T <: AstNode {
+    protected let newSccUnits: ArrayList<DepsUnit<T>> = ArrayList<DepsUnit<T>>()
+    protected let diagUnits: ArrayList<DepsUnit<T>> = ArrayList<DepsUnit<T>>()
+    protected let units: ArrayList<DepsUnit<T>> = ArrayList<DepsUnit<T>>()
+    private let visitedUnits: ArrayList<DepsUnit<T>> = ArrayList<DepsUnit<T>>()
+    private let node2SccUnitMap: ArrayList<DepsUnit<T>> = ArrayList<DepsUnit<T>>()
+
+    public init() {}
+
+    public func InitDependency(rawElements: ArrayList<T>, dependencyMap: FileDepMap): Unit {
+        for (element in rawElements) {
+            let unit = DepsUnit<T>(element)
+            units.add(unit)
+        }
+        for (element in rawElements) {
+            let varUnit = GetUnit(element)
+            for (dep in dependencyMap.GetDep((element as AstFile).getOrThrow())) {
+                let tempUnit = GetUnit((dep as T).getOrThrow())
+                varUnit.depsUnits.add(tempUnit)
+                tempUnit.userUnits.add(varUnit)
+            }
+        }
+    }
+
+    public func InitDependency(rawElements: ArrayList<AstDecl>, dependencyMap: DeclDepMap): Unit {
+        for (element in rawElements) {
+            let unit = DepsUnit<T>((element as T).getOrThrow())
+            units.add(unit)
+        }
+        for (element in rawElements) {
+            let varUnit = GetUnit((element as T).getOrThrow())
+            for (dep in dependencyMap.GetDep(element)) {
+                let tempUnit = GetUnit((dep as T).getOrThrow())
+                varUnit.depsUnits.add(tempUnit)
+                tempUnit.userUnits.add(varUnit)
+            }
+        }
+    }
+
+    public func DoTarjanSort(): Unit {
+        let stack = ArrayList<DepsUnit<T>>()
+        var index: Int64 = 1
+        for (unit in units) {
+            if (!ContainsUnit(visitedUnits, unit)) {
+                TarjanSortImpl(unit, index, stack)
+            }
+        }
+    }
+
+    public func TarjanSortImpl(unit: DepsUnit<T>, index: Int64, stack: ArrayList<DepsUnit<T>>): Int64 {
+        var nextIndex = index
+        unit.disc = nextIndex
+        unit.low = nextIndex
+        nextIndex++
+        stack.add(unit)
+        unit.stackMember = true
+        visitedUnits.add(unit)
+
+        for (dep in unit.depsUnits) {
+            if (dep.disc == -1) {
+                nextIndex = TarjanSortImpl(dep, nextIndex, stack)
+                unit.low = MinInt64(unit.low, dep.low)
+            } else {
+                if (dep.stackMember) {
+                    unit.low = MinInt64(unit.low, dep.disc)
+                }
+            }
+        }
+
+        if (unit.disc == unit.low) {
+            diagUnits.add(unit)
+            let newSccUnit = DepsUnit<T>(unit.element)
+            SetSccUnit(unit.element, newSccUnit)
+            newSccUnit.circularDepElements.add(unit.element)
+            while (stack[stack.size - 1].element.objectId != unit.element.objectId) {
+                let topUnit = stack[stack.size - 1]
+                topUnit.stackMember = false
+                diagUnits.add(topUnit)
+                SetSccUnit(topUnit.element, newSccUnit)
+                newSccUnit.circularDepElements.add(topUnit.element)
+                stack.remove(at: stack.size - 1)
+            }
+            let topUnit = stack[stack.size - 1]
+            topUnit.stackMember = false
+            stack.remove(at: stack.size - 1)
+            DetectCircularDep()
+            newSccUnits.add(newSccUnit)
+        }
+        diagUnits.clear()
+        return nextIndex
+    }
+
+    public func UpdateSccUnit(dependencyMap: FileDepMap): Unit {
+        for (unit in newSccUnits) {
+            UpdateSccUnitDeps(unit, dependencyMap)
+        }
+    }
+
+    public func UpdateSccUnit(dependencyMap: DeclDepMap): Unit {
+        for (unit in newSccUnits) {
+            UpdateSccUnitDeps(unit, dependencyMap)
+        }
+    }
+
+    public func UpdateSccUnitDeps(unit: DepsUnit<T>, dependencyMap: FileDepMap): Unit {
+        let cirElements = unit.circularDepElements
+        for (element in cirElements) {
+            for (dep in dependencyMap.GetDep((element as AstFile).getOrThrow())) {
+                let typedDep = (dep as T).getOrThrow()
+                if (!ContainsElement(cirElements, typedDep)) {
+                    let depScc = GetSccUnit(typedDep)
+                    unit.AddDeps(depScc)
+                    depScc.AddUsers(unit)
+                }
+            }
+        }
+    }
+
+    public func UpdateSccUnitDeps(unit: DepsUnit<T>, dependencyMap: DeclDepMap): Unit {
+        let cirElements = unit.circularDepElements
+        for (element in cirElements) {
+            for (dep in dependencyMap.GetDep((element as AstDecl).getOrThrow())) {
+                let typedDep = (dep as T).getOrThrow()
+                if (!ContainsElement(cirElements, typedDep)) {
+                    let depScc = GetSccUnit(typedDep)
+                    unit.AddDeps(depScc)
+                    depScc.AddUsers(unit)
+                }
+            }
+        }
+    }
+
+    public func GetOrderElement(): ArrayList<T> {
+        let sortedNodes = ArrayList<T>()
+        let freeNodes = ArrayList<DepsUnit<T>>()
+        for (unit in newSccUnits) {
+            if (unit.depsUnits.isEmpty()) {
+                freeNodes.add(unit)
+            }
+        }
+        while (!freeNodes.isEmpty()) {
+            let curFreeUnit = freeNodes[freeNodes.size - 1]
+            freeNodes.remove(at: freeNodes.size - 1)
+            for (element in curFreeUnit.circularDepElements) {
+                sortedNodes.add(element)
+            }
+            for (unit in curFreeUnit.userUnits) {
+                var idx: Int64 = 0
+                var erased = false
+                while (idx < unit.depsUnits.size) {
+                    if (unit.depsUnits[idx].element.objectId == curFreeUnit.element.objectId) {
+                        unit.depsUnits.remove(at: idx)
+                        erased = true
+                        break
+                    }
+                    idx++
+                }
+                if (!erased) {
+                    continue
+                }
+                if (unit.depsUnits.isEmpty()) {
+                    freeNodes.add(unit)
+                }
+            }
+        }
+        visitedUnits.clear()
+        node2SccUnitMap.clear()
+        newSccUnits.clear()
+        return sortedNodes
+    }
+
+    public func DetectCircularDep(): Unit
+    public func GetEleStr(element: T): String
+
+    private func GetUnit(element: T): DepsUnit<T> {
+        for (unit in units) {
+            if (unit.element.objectId == element.objectId) {
+                return unit
+            }
+        }
+        throw IllegalStateException("TarjanSort missing unit: " + GetEleStr(element))
+    }
+
+    private func SetSccUnit(element: T, unit: DepsUnit<T>): Unit {
+        var idx: Int64 = 0
+        while (idx < node2SccUnitMap.size) {
+            if (node2SccUnitMap[idx].element.objectId == element.objectId) {
+                node2SccUnitMap[idx] = unit
+                return
+            }
+            idx++
+        }
+        node2SccUnitMap.add(unit)
+    }
+
+    private func GetSccUnit(element: T): DepsUnit<T> {
+        for (unit in node2SccUnitMap) {
+            for (item in unit.circularDepElements) {
+                if (item.objectId == element.objectId) {
+                    return unit
+                }
+            }
+        }
+        throw IllegalStateException("TarjanSort missing SCC unit: " + GetEleStr(element))
+    }
+
+    private func ContainsUnit(values: ArrayList<DepsUnit<T>>, unit: DepsUnit<T>): Bool {
+        for (value in values) {
+            if (value.element.objectId == unit.element.objectId) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func ContainsElement(values: ArrayList<T>, element: T): Bool {
+        for (value in values) {
+            if (value.objectId == element.objectId) {
+                return true
+            }
+        }
+        return false
+    }
+}
+
+private class FileCirDepsChecker <: TarjanSort<AstFile> {
+    public var hasCircularDependency: Bool = false
+    private let diagLog: ArrayList<String>
+
+    public init(diagLog: ArrayList<String>) {
+        super()
+        this.diagLog = diagLog
+    }
+
+    public func InitFileDep(depMap: FileDepMap): Unit {
+        let files = ArrayList<AstFile>()
+        for (dep in depMap.stableOrderValue) {
+            files.add(dep.file)
+        }
+        InitDependency(files, depMap)
+    }
+
+    public override func DetectCircularDep(): Unit {
+        if (diagUnits.size <= 1) {
+            return
+        }
+        hasCircularDependency = true
+    }
+
+    public override func GetEleStr(node: AstFile): String {
+        return node.fileName
+    }
+}
+
+private class VarCirDepsChecker <: TarjanSort<AstDecl> {
+    public var hasCircularDependency: Bool = false
+
+    public init() {
+        super()
+    }
+
+    public override func DetectCircularDep(): Unit {
+        if (diagUnits.size <= 1) {
+            return
+        }
+        var hasVar = false
+        for (unit in diagUnits) {
+            if (IsVar(unit.element)) {
+                hasVar = true
+                break
+            }
+        }
+        if (!hasVar) {
+            return
+        }
+        hasCircularDependency = true
+    }
+
+    public override func GetEleStr(decl: AstDecl): String {
+        return decl.identifier.Val()
+    }
+
+    private func IsVar(decl: AstDecl): Bool {
+        return decl.astKind == ASTKind.VAR_DECL || decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL
+    }
+}
+
+private func MinInt64(left: Int64, right: Int64): Int64 {
+    return if (left < right) { left } else { right }
 }
 
 private class FaithfulInitDeclOwnerEntry {
@@ -422,6 +931,8 @@ public class FaithfulAST2CHIR {
     private let globalAndStaticVarSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let globalAndMemberFuncs: ArrayList<AstDecl> = ArrayList<AstDecl>()
     private let globalAndMemberFuncSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
+    private let varsInitedByStaticInitFunc: FaithfulInitDeclSet = FaithfulInitDeclSet()
+    private let staticInitFuncInfoMap: StaticInitInfoMap = StaticInitInfoMap()
     private let nominalDecls: ArrayList<AstDecl> = ArrayList<AstDecl>()
     private let nominalDeclSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let genericNominalDecls: ArrayList<AstDecl> = ArrayList<AstDecl>()
@@ -995,85 +1506,264 @@ public class FaithfulAST2CHIR {
     }
 
     private func GlobalDeclAnalysis(): ArrayList<FaithfulInitFileVars> {
-        let sortedVars = SortGlobalAndStaticVarsByDependency()
-        return GroupInitOrderByFile(sortedVars)
+        let funcsAndVars = ElementList()
+        let fileAndVarMap = ArrayList<FaithfulInitFileVars>()
+        CollectStaticInitFuncInfo()
+        CollectFuncsAndVars(funcsAndVars, fileAndVarMap)
+
+        let nodesWithDeps = ElementList()
+        for (element in funcsAndVars.stableOrderValue) {
+            nodesWithDeps.AddElement(element)
+        }
+        return Run(nodesWithDeps, fileAndVarMap, funcsAndVars)
     }
 
-    private func SortGlobalAndStaticVarsByDependency(): ArrayList<AstDecl> {
-        let globalVarSet = BuildDeclSet(globalAndStaticVars)
-        let candidateSet = FaithfulInitDeclSet()
-        for (decl in globalAndStaticVars) {
-            candidateSet.Add(decl)
-        }
-        for (decl in globalAndMemberFuncs) {
-            candidateSet.Add(decl)
-        }
-        let patternOwnerMap = BuildPatternDependencyOwnerMap()
-        let directDepsMap = PrecomputeDirectDependencies(candidateSet, globalVarSet, patternOwnerMap)
-        let sorted = ArrayList<AstDecl>()
-        let sortedSet = FaithfulInitDeclSet()
-        let visitingStack = ArrayList<AstDecl>()
-        let visitingSet = FaithfulInitDeclSet()
-        let visitedSet = FaithfulInitDeclSet()
-        for (decl in globalAndStaticVars) {
-            VisitVarForInitOrder(decl, visitingStack, visitingSet, visitedSet, sorted, sortedSet, directDepsMap,
-                candidateSet, globalVarSet)
-        }
-        return sorted
-    }
-
-    private func VisitVarForInitOrder(decl: AstDecl, visitingStack: ArrayList<AstDecl>,
-        visitingSet: FaithfulInitDeclSet, visitedSet: FaithfulInitDeclSet, sorted: ArrayList<AstDecl>,
-        sortedSet: FaithfulInitDeclSet, directDepsMap: FaithfulInitDepsMap, candidateSet: FaithfulInitDeclSet,
-        globalVarSet: FaithfulInitDeclSet): Unit {
-        if (visitedSet.Contains(decl)) {
-            return
-        }
-        if (visitingSet.Contains(decl)) {
-            return
-        }
-        visitingStack.add(decl)
-        visitingSet.Add(decl)
-        let seenFuncs = FaithfulInitDeclSet()
-        VisitDepsForInitOrder(decl, visitingStack, visitingSet, visitedSet, sorted, sortedSet, directDepsMap,
-            candidateSet, globalVarSet, seenFuncs)
-        visitingStack.remove(at: visitingStack.size - 1)
-        visitingSet.Remove(decl)
-        visitedSet.Add(decl)
-        if (sortedSet.Add(decl)) {
-            sorted.add(decl)
-        }
-    }
-
-    private func VisitDepsForInitOrder(root: AstDecl, visitingStack: ArrayList<AstDecl>,
-        visitingSet: FaithfulInitDeclSet, visitedSet: FaithfulInitDeclSet, sorted: ArrayList<AstDecl>,
-        sortedSet: FaithfulInitDeclSet, directDepsMap: FaithfulInitDepsMap, candidateSet: FaithfulInitDeclSet,
-        globalVarSet: FaithfulInitDeclSet, seenFuncs: FaithfulInitDeclSet): Unit {
-        if (let Some(directDeps) <- directDepsMap.Get(root)) {
-            for (dep in directDeps) {
-                if (globalVarSet.Contains(dep)) {
-                    VisitVarForInitOrder(dep, visitingStack, visitingSet, visitedSet, sorted, sortedSet, directDepsMap,
-                        candidateSet, globalVarSet)
-                } else if (candidateSet.Contains(dep)) {
-                    if (seenFuncs.Add(dep)) {
-                        VisitDepsForInitOrder(dep, visitingStack, visitingSet, visitedSet, sorted, sortedSet,
-                            directDepsMap, candidateSet, globalVarSet, seenFuncs)
+    private func CollectStaticInitFuncInfo(): Unit {
+        for (funcDecl in globalAndMemberFuncs) {
+            if (!AstIsStaticInitializer(funcDecl)) {
+                continue
+            }
+            let staticVars = ArrayList<AstDecl>()
+            var staticInitVar: Option<AstDecl> = None
+            let outerDecl = funcDecl.outerDecl.getOrThrow()
+            for (member in outerDecl.GetMemberDecls()) {
+                if (let Some(memberVar) <- (member as AstVarDecl)) {
+                    if (!memberVar.TestAttr(AstAttribute.STATIC)) {
+                        continue
                     }
+                    if (memberVar.identifier.Val() == STATIC_INIT_VAR) {
+                        staticInitVar = memberVar
+                        continue
+                    }
+                    if (memberVar.initializer.isSome()) {
+                        continue
+                    }
+                    staticVars.add(memberVar)
+                    varsInitedByStaticInitFunc.Add(memberVar)
                 }
+            }
+            staticInitFuncInfoMap.Set(outerDecl, StaticInitInfo(RequireFuncDecl(funcDecl), staticInitVar, staticVars))
+        }
+    }
+
+    private func CollectFuncsAndVars(funcsAndVars: ElementList,
+        fileAndVarMap: ArrayList<FaithfulInitFileVars>): Unit {
+        for (varDecl in globalAndStaticVars) {
+            if (varDecl.TestAttr(AstAttribute.STATIC) && varDecl.identifier.Val() != STATIC_INIT_VAR) {
+                let fromCommon = varDecl.TestAttr(AstAttribute.FROM_COMMON_PART)
+                let initedInStaticInit = varsInitedByStaticInitFunc.Contains(varDecl)
+                if (!fromCommon && initedInStaticInit) {
+                    continue
+                }
+            }
+            funcsAndVars.AddElement(varDecl)
+            let file = varDecl.curFile.getOrThrow()
+            let entry = if (let Some(existing) <- FindInitEntryForFile(fileAndVarMap, file)) {
+                existing
+            } else {
+                let createdEntry = FaithfulInitFileVars(file)
+                fileAndVarMap.add(createdEntry)
+                createdEntry
+            }
+            entry.vars.add(varDecl)
+        }
+        for (funcDecl in globalAndMemberFuncs) {
+            if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY) || funcDecl.identifier.Val() == MAIN_INVOKE) {
+                continue
+            }
+            funcsAndVars.AddElement(funcDecl)
+        }
+    }
+
+    private func Run(nodesWithDeps: ElementList, fileAndVarMap: ArrayList<FaithfulInitFileVars>,
+        funcsAndVars: ElementList): ArrayList<FaithfulInitFileVars> {
+        let orderedFiles = SortGlobalVarDep(nodesWithDeps, fileAndVarMap, funcsAndVars)
+        if (failure) {
+            return ArrayList<FaithfulInitFileVars>()
+        }
+        let initOrder = ArrayList<FaithfulInitFileVars>()
+        for (file in orderedFiles) {
+            let entry = FaithfulInitFileVars(file)
+            if (let Some(varsInFile) <- FindInitEntryForFile(fileAndVarMap, file)) {
+                for (varDecl in varsInFile.vars) {
+                    entry.vars.add(varDecl)
+                }
+            }
+            initOrder.add(entry)
+        }
+        return SortLocalConstVarDep(initOrder, funcsAndVars)
+    }
+
+    private func SortGlobalVarDep(nodesWithDeps: ElementList, fileAndVarMap: ArrayList<FaithfulInitFileVars>,
+        funcsAndVars: ElementList): ArrayList<AstFile> {
+        let _ = fileAndVarMap
+        let funcsAndVarsDepMap = DeclDepMap()
+        AnalysisDependency(nodesWithDeps, funcsAndVarsDepMap, funcsAndVars)
+
+        let fileDependencyMap = FileDepMap()
+        for (decl in funcsAndVars.stableOrderValue) {
+            let file = decl.curFile.getOrThrow()
+            if (!fileDependencyMap.Contains(file)) {
+                fileDependencyMap.InitDeps(file)
+            }
+        }
+        let var2varDepsInFile = DeclDepMap()
+        AnalysisFileDependency(funcsAndVarsDepMap, fileDependencyMap, var2varDepsInFile)
+
+        let fileChecker = FileCirDepsChecker(ArrayList<String>())
+        fileChecker.InitFileDep(fileDependencyMap)
+        fileChecker.DoTarjanSort()
+        fileChecker.UpdateSccUnit(fileDependencyMap)
+        let sortedFiles = fileChecker.GetOrderElement()
+        if (fileChecker.hasCircularDependency) {
+            failure = true
+            failureReason = "chir file might circular dependency"
+            return ArrayList<AstFile>()
+        }
+        return sortedFiles
+    }
+
+    private func AnalysisDependency(nodesWithDeps: ElementList, funcsAndVarsDepMap: DeclDepMap,
+        funcsAndVars: ElementList): Unit {
+        let globalVarSet = BuildDeclSet(globalAndStaticVars)
+        let candidateSet = BuildDeclSet(funcsAndVars.stableOrderValue)
+        let patternOwnerMap = BuildPatternDependencyOwnerMap()
+        for (node in nodesWithDeps.stableOrderValue) {
+            if (let Some(varDecl) <- (node as AstVarDecl)) {
+                if (varDecl.TestAttr(AstAttribute.STATIC) && !varDecl.TestAttr(AstAttribute.DEFAULT)) {
+                    continue
+                }
+            }
+            funcsAndVarsDepMap.AddDeps(node, CollectDirectDependencies(node, candidateSet, globalVarSet, patternOwnerMap))
+        }
+    }
+
+    private func AnalysisFileDependency(funcsAndVarsDepMap: DeclDepMap, fileDependencyMap: FileDepMap,
+        var2varDepsInFile: DeclDepMap): Unit {
+        for (element in funcsAndVarsDepMap.stableOrderValue) {
+            let srcDecl = element.decl
+            if (srcDecl.astKind != ASTKind.VAR_DECL && srcDecl.astKind != ASTKind.VAR_WITH_PATTERN_DECL) {
+                continue
+            }
+            let visited = FaithfulInitDeclSet()
+            AnalysisFileDependencyImpl(srcDecl, srcDecl, visited, funcsAndVarsDepMap, fileDependencyMap,
+                var2varDepsInFile)
+        }
+    }
+
+    private func AnalysisFileDependencyImpl(rootDecl: AstDecl, curDecl: AstDecl, visited: FaithfulInitDeclSet,
+        funcsAndVarsDepMap: DeclDepMap, fileDependencyMap: FileDepMap, var2varDepsInFile: DeclDepMap): Unit {
+        if (!funcsAndVarsDepMap.Contains(curDecl)) {
+            if (!curDecl.TestAttr(AstAttribute.SRC_IMPORTED)) {
+                throw IllegalStateException("faithful GlobalDeclAnalysis expected source imported decl")
+            }
+            return
+        }
+        let directDepsOfCurDecl = funcsAndVarsDepMap.GetDep(curDecl)
+        for (dep in directDepsOfCurDecl) {
+            if (visited.Contains(dep)) {
+                continue
+            }
+            visited.Add(dep)
+            if (dep.astKind == ASTKind.VAR_DECL || dep.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
+                let rootFile = rootDecl.curFile.getOrThrow()
+                let depFile = dep.curFile.getOrThrow()
+                if (rootFile.objectId == depFile.objectId) {
+                    var2varDepsInFile.AddDep(rootDecl, dep)
+                } else {
+                    fileDependencyMap.AddDep(rootFile, depFile)
+                }
+            } else {
+                AnalysisFileDependencyImpl(rootDecl, dep, visited, funcsAndVarsDepMap, fileDependencyMap,
+                    var2varDepsInFile)
             }
         }
     }
 
-    private func PrecomputeDirectDependencies(candidateSet: FaithfulInitDeclSet, globalVarSet: FaithfulInitDeclSet,
-        patternOwnerMap: FaithfulInitDeclOwnerMap): FaithfulInitDepsMap {
-        let depsMap = FaithfulInitDepsMap()
-        for (decl in globalAndStaticVars) {
-            depsMap.Add(decl, CollectDirectDependencies(decl, candidateSet, globalVarSet, patternOwnerMap))
+    private func SortLocalConstVarDep(initOrder: ArrayList<FaithfulInitFileVars>,
+        funcsAndVars: ElementList): ArrayList<FaithfulInitFileVars> {
+        let globalVarsAndLocalConstVars = ArrayList<AstDecl>()
+        for (element in funcsAndVars.stableOrderValue) {
+            if (element.astKind == ASTKind.VAR_DECL || element.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
+                globalVarsAndLocalConstVars.add(element)
+            }
         }
-        for (decl in globalAndMemberFuncs) {
-            depsMap.Add(decl, CollectDirectDependencies(decl, candidateSet, globalVarSet, patternOwnerMap))
+        if (globalVarsAndLocalConstVars.isEmpty()) {
+            return initOrder
         }
-        return depsMap
+
+        let globalVarsAndLocalConstVarsDepMap = DeclDepMap()
+        AnalysisGlobalVarsAndLocalConstVarsDependency(initOrder, globalVarsAndLocalConstVarsDepMap)
+
+        let varDepsChecker = VarCirDepsChecker()
+        varDepsChecker.InitDependency(globalVarsAndLocalConstVars, globalVarsAndLocalConstVarsDepMap)
+        varDepsChecker.DoTarjanSort()
+        varDepsChecker.UpdateSccUnit(globalVarsAndLocalConstVarsDepMap)
+        let sortedVars = varDepsChecker.GetOrderElement()
+        if (varDepsChecker.hasCircularDependency) {
+            return initOrder
+        }
+        return MergeLocalConstVarInitOrder(initOrder, sortedVars)
+    }
+
+    private func AnalysisGlobalVarsAndLocalConstVarsDependency(initOrder: ArrayList<FaithfulInitFileVars>,
+        globalVarsAndLocalConstVarsDepMap: DeclDepMap): Unit {
+        var previous: Option<AstDecl> = None
+        for (element in initOrder) {
+            for (globalVar in element.vars) {
+                if (let Some(previousVar) <- previous) {
+                    globalVarsAndLocalConstVarsDepMap.AddDep(globalVar, previousVar)
+                }
+                previous = globalVar
+            }
+        }
+    }
+
+    private func MergeLocalConstVarInitOrder(initOrder: ArrayList<FaithfulInitFileVars>,
+        sortedVars: ArrayList<AstDecl>): ArrayList<FaithfulInitFileVars> {
+        let finalInitOrder = ArrayList<FaithfulInitFileVars>()
+        var sortedIdx: Int64 = 0
+        for (pair in initOrder) {
+            let fileEntry = FaithfulInitFileVars(pair.file)
+            if (pair.vars.isEmpty()) {
+                finalInitOrder.add(fileEntry)
+                continue
+            }
+
+            var originalIdx: Int64 = 0
+            while (sortedIdx < sortedVars.size) {
+                if (FaithfulInitSameDecl(pair.vars[originalIdx], sortedVars[sortedIdx])) {
+                    originalIdx++
+                }
+                fileEntry.vars.add(sortedVars[sortedIdx])
+                sortedIdx++
+                if (originalIdx == pair.vars.size) {
+                    break
+                }
+            }
+            while (originalIdx < pair.vars.size) {
+                fileEntry.vars.add(pair.vars[originalIdx])
+                originalIdx++
+            }
+            finalInitOrder.add(fileEntry)
+        }
+        if (sortedIdx < sortedVars.size) {
+            if (finalInitOrder.isEmpty()) {
+                let fileEntry = FaithfulInitFileVars(sortedVars[sortedIdx].curFile.getOrThrow())
+                while (sortedIdx < sortedVars.size) {
+                    fileEntry.vars.add(sortedVars[sortedIdx])
+                    sortedIdx++
+                }
+                finalInitOrder.add(fileEntry)
+            } else {
+                let fileEntry = finalInitOrder[finalInitOrder.size - 1]
+                while (sortedIdx < sortedVars.size) {
+                    fileEntry.vars.add(sortedVars[sortedIdx])
+                    sortedIdx++
+                }
+            }
+        }
+        return finalInitOrder
     }
 
     private func CollectDirectDependencies(root: AstDecl, candidateSet: FaithfulInitDeclSet,
@@ -1172,12 +1862,29 @@ public class FaithfulAST2CHIR {
     private func AddDependency(dep: AstDecl, dependencies: ArrayList<AstDecl>, dependencySet: FaithfulInitDeclSet,
         candidateSet: FaithfulInitDeclSet, globalVarSet: FaithfulInitDeclSet,
         patternOwnerMap: FaithfulInitDeclOwnerMap): Unit {
+        if (let Some(varDecl) <- (dep as AstVarDecl)) {
+            if (varDecl.TestAttr(AstAttribute.STATIC) && varDecl.initializer.isNone()) {
+                if (let Some(outerDecl) <- varDecl.outerDecl) {
+                    if (let Some(info) <- staticInitFuncInfoMap.Get(outerDecl)) {
+                        let staticInitVar = info.staticInitVar ??
+                            throw IllegalStateException("faithful GlobalDeclAnalysis missing static init var")
+                        AddDependencyImpl(staticInitVar, dependencies, dependencySet)
+                        return
+                    }
+                }
+            }
+        }
         let resolvedDep = ResolveVarWithPatternDependency(dep, globalVarSet, patternOwnerMap)
         if (!IsFuncOrVarCandidate(resolvedDep, candidateSet)) {
             return
         }
-        if (dependencySet.Add(resolvedDep)) {
-            dependencies.add(resolvedDep)
+        AddDependencyImpl(resolvedDep, dependencies, dependencySet)
+    }
+
+    private func AddDependencyImpl(depDecl: AstDecl, dependencies: ArrayList<AstDecl>,
+        dependencySet: FaithfulInitDeclSet): Unit {
+        if (dependencySet.Add(depDecl)) {
+            dependencies.add(depDecl)
         }
     }
 
@@ -1293,27 +2000,6 @@ public class FaithfulAST2CHIR {
         return false
     }
 
-    private func GroupInitOrderByFile(sortedVars: ArrayList<AstDecl>): ArrayList<FaithfulInitFileVars> {
-        let order = ArrayList<FaithfulInitFileVars>()
-        for (file in pkgFiles) {
-            let entry = FaithfulInitFileVars(file)
-            order.add(entry)
-        }
-        for (decl in sortedVars) {
-            if (let Some(file) <- decl.curFile) {
-                let entry = if (let Some(existing) <- FindInitEntryForFile(order, file)) {
-                    existing
-                } else {
-                    let newEntry = FaithfulInitFileVars(file)
-                    order.add(newEntry)
-                    newEntry
-                }
-                entry.vars.add(decl)
-            }
-        }
-        return order
-    }
-
     private func CreatePackageInit(nodeInitOrder!: ArrayList<FaithfulInitFileVars>, suffix!: String): Unit {
         let pkg = CurrentPackage()
         let packageInit = GeneratePackageInitBase(suffix)
@@ -1331,6 +2017,9 @@ public class FaithfulAST2CHIR {
             AddGenericInstantiatedInit(initBlock)
         }
         for (fileVars in nodeInitOrder) {
+            if (fileVars.vars.isEmpty()) {
+                continue
+            }
             if (suffix == "_literal" && IsImportedInitEntry(fileVars)) {
                 TranslateImportedFileLiteralInitializer(fileVars, initBlock)
                 continue
