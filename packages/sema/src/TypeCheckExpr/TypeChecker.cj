@@ -3089,6 +3089,23 @@ public class TypeChecker {
             }
         }
         let ty = SynNameReferenceExpr(impl.typeManager, nameRef, diag: impl.diag)
+        if (Ty.IsTyCorrect(ty)) {
+            let typeMapping = impl.GenerateGenericTypeMapping(ctx, nameRef)
+            let tys = impl.typeManager.ApplySubstPackNonUniq(ty, typeMapping, ignoreUnsolved: true)
+            if (let Some(targetForMapping) <- nameRef.GetTarget()) {
+                let isFuncTarget = if (let Some(_) <- (targetForMapping as FuncDecl)) { true } else { false }
+                if (tys.values.size != 1 && isFuncTarget && !ctx.HasTargetTy(nameRef)) {
+                    if (let Some(diagValue) <- impl.diag) {
+                        let builder = diagValue.Diagnose(nameRef.begin, nameRef.end,
+                            BasicDiagKind.sema_ambiguous_func_ref,
+                            args: [BasicDiagArgument(targetForMapping.identifier.Val())])
+                        builder.Emit()
+                    }
+                }
+            }
+            nameRef.SetTy(tys.values[0])
+            return tys.values[0]
+        }
         return ty
     }
 
