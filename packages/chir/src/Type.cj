@@ -4,6 +4,53 @@ import cangjie_compiler::utils.CJC_ASSERT
 import std.collection.*
 import std.sort.*
 
+@OverflowWrapping
+func HashCombine(seed: Int64, value: Int64): Int64 {
+    return seed ^ (value + 0x9e3779b9 + (seed << 6) + (seed >> 2))
+}
+
+func HashValue(seed: Int64, value: Int64): Int64 {
+    return HashCombine(seed, value)
+}
+
+func HashValue(seed: Int64, value: UInt64): Int64 {
+    return HashCombine(seed, value.hashCode())
+}
+
+func HashValue(seed: Int64, value: Bool): Int64 {
+    return HashCombine(seed, if (value) { 1 } else { 0 })
+}
+
+func HashValue(seed: Int64, value: String): Int64 {
+    return HashCombine(seed, value.hashCode())
+}
+
+func HashValue(seed: Int64, value: TypeKind): Int64 {
+    return HashCombine(seed, TypeKindIndex(value))
+}
+
+func HashArgTypes(argTys: ArrayList<Type>): Int64 {
+    var hashVal: Int64 = 0
+    for (argTy in argTys) {
+        hashVal = HashCombine(hashVal, argTy.objectId)
+    }
+    return hashVal
+}
+
+func TypeArgsAreEqual(left: ArrayList<Type>, right: ArrayList<Type>): Bool {
+    if (left.size != right.size) {
+        return false
+    }
+    var idx: Int64 = 0
+    while (idx < left.size) {
+        if (!refEq(left[idx], right[idx])) {
+            return false
+        }
+        idx++
+    }
+    return true
+}
+
 public open class Type {
     private static var nextObjectId: Int64 = 1
 
@@ -255,11 +302,13 @@ public open class Type {
     }
 
     public open func Hash(): Int64 {
-        return ToString().hashCode()
+        var hashVal = HashArgTypes(argTys)
+        hashVal = HashValue(hashVal, kind)
+        return hashVal
     }
 
     public open func IsEqual(other: Type): Bool {
-        return ToString() == other.ToString()
+        return kind == other.kind && TypeArgsAreEqual(argTys, other.argTys)
     }
 
     public func IsGenericRelated(): Bool {
@@ -678,6 +727,22 @@ public class FuncType <: Type {
         let funcText = "(" + JoinStrings(params, ", ") + ") -> " + GetReturnType().ToSrcCodeString()
         return if (isCFunc) { "CFunc<" + funcText + ">" } else { funcText }
     }
+
+    public override func Hash(): Int64 {
+        var hashVal = HashArgTypes(argTys)
+        hashVal = HashValue(hashVal, isCFunc)
+        hashVal = HashValue(hashVal, hasVarArg)
+        hashVal = HashValue(hashVal, kind)
+        return hashVal
+    }
+
+    public override func IsEqual(other: Type): Bool {
+        if (let Some(funcTy) <- (other as FuncType)) {
+            return TypeArgsAreEqual(argTys, funcTy.argTys) && isCFunc == funcTy.IsCFunc() &&
+                hasVarArg == funcTy.HasVarArg()
+        }
+        return false
+    }
 }
 
 public class RawArrayType <: BuiltinType {
@@ -720,6 +785,20 @@ public class RawArrayType <: BuiltinType {
         }
         return prefix + GetElementType().ToSrcCodeString() + suffix
     }
+
+    public override func Hash(): Int64 {
+        var hashVal = HashArgTypes(argTys)
+        hashVal = HashValue(hashVal, dims)
+        hashVal = HashValue(hashVal, kind)
+        return hashVal
+    }
+
+    public override func IsEqual(other: Type): Bool {
+        if (let Some(rawArrayTy) <- (other as RawArrayType)) {
+            return TypeArgsAreEqual(argTys, rawArrayTy.argTys) && dims == rawArrayTy.GetDims()
+        }
+        return false
+    }
 }
 
 public class VArrayType <: BuiltinType {
@@ -741,6 +820,20 @@ public class VArrayType <: BuiltinType {
 
     public override func ToSrcCodeString(): String {
         return "VArray<" + GetElementType().ToSrcCodeString() + ", $" + "${size}" + ">"
+    }
+
+    public override func Hash(): Int64 {
+        var hashVal = HashArgTypes(argTys)
+        hashVal = HashValue(hashVal, size)
+        hashVal = HashValue(hashVal, kind)
+        return hashVal
+    }
+
+    public override func IsEqual(other: Type): Bool {
+        if (let Some(varrayTy) <- (other as VArrayType)) {
+            return TypeArgsAreEqual(argTys, varrayTy.argTys) && size == varrayTy.size
+        }
+        return false
     }
 }
 
@@ -893,7 +986,9 @@ public class GenericType <: Type {
     }
 
     public override func Hash(): Int64 {
-        return name.hashCode()
+        var hashVal: Int64 = 0
+        hashVal = HashValue(hashVal, name)
+        return hashVal
     }
 
     public override func IsEqual(other: Type): Bool {
@@ -905,19 +1000,16 @@ public class GenericType <: Type {
 }
 
 public class ThisType <: Type {
-    public let name: String
-
-    public init(name!: String = "This") {
+    public init() {
         super(TypeKind.TYPE_THIS)
-        this.name = name
     }
 
     public override func ToString(): String {
-        return name
+        return "This"
     }
 
     public override func ToSrcCodeString(): String {
-        return name
+        return "This"
     }
 }
 
@@ -1114,6 +1206,19 @@ public open class CustomType <: Type {
             return def.GetIdentifier()
         }
         return def.GetIdentifier() + "<" + JoinStrings(args, ",") + ">"
+    }
+
+    public override func Hash(): Int64 {
+        var hashVal = HashArgTypes(argTys)
+        hashVal = HashValue(hashVal, def.nodeId)
+        return hashVal
+    }
+
+    public override func IsEqual(other: Type): Bool {
+        if (let Some(customTy) <- (other as CustomType)) {
+            return TypeArgsAreEqual(argTys, customTy.argTys) && refEq(def, customTy.def)
+        }
+        return false
     }
 }
 

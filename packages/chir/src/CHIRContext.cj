@@ -1,12 +1,37 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import std.sync.*
+
+private func TypePtrHash(ptr: Option<Type>): Int64 {
+    if (let Some(ty) <- ptr) {
+        return ty.Hash()
+    }
+    return 0
+}
+
+private func TypePtrEqual(ptr1: Option<Type>, ptr2: Option<Type>): Bool {
+    if (let None <- ptr1) {
+        if (let None <- ptr2) {
+            return true
+        }
+        return false
+    }
+    if (let Some(ty1) <- ptr1) {
+        if (let Some(ty2) <- ptr2) {
+            return ty1.IsEqual(ty2)
+        }
+    }
+    return false
+}
 
 public class CHIRContext {
     private var curPackage: Option<Package> = None
     private var fileNameMap: HashMap<UInt32, String> = HashMap<UInt32, String>()
     private var threadsNum: UIntNative = 1
-    private let typeCache: HashMap<String, Type> = HashMap<String, Type>()
+    private static let dynamicAllocatedTysMtx: Mutex = Mutex()
+    private let constAllocatedTys: HashMap<Int64, ArrayList<Type>> = HashMap<Int64, ArrayList<Type>>()
+    private let dynamicAllocatedTys: HashMap<Int64, ArrayList<Type>> = HashMap<Int64, ArrayList<Type>>()
     private let allocatedValues: ArrayList<Value> = ArrayList<Value>()
     private let allocatedExpressions: ArrayList<Expression> = ArrayList<Expression>()
     private let allocatedStructs: ArrayList<StructDef> = ArrayList<StructDef>()
@@ -61,7 +86,69 @@ public class CHIRContext {
     }
 
     private func RegisterBuiltin(ty: Type): Unit {
-        typeCache[ty.ToString()] = ty
+        let _ = GetType(TypePtrHash(Some(ty)), { allocatedTy: Type =>
+            TypePtrEqual(Some(allocatedTy), Some(ty))
+        }, { => ty })
+    }
+
+    private func GetType(hashValue: Int64, typeEqual: (Type) -> Bool, createType: () -> Type): Type {
+        if (let Some(bucket) <- constAllocatedTys.get(hashValue)) {
+            for (allocatedTy in bucket) {
+                if (typeEqual(allocatedTy)) {
+                    return allocatedTy
+                }
+            }
+        }
+        synchronized(CHIRContext.dynamicAllocatedTysMtx) {
+            if (let Some(bucket) <- dynamicAllocatedTys.get(hashValue)) {
+                for (allocatedTy in bucket) {
+                    if (typeEqual(allocatedTy)) {
+                        return allocatedTy
+                    }
+                }
+            }
+            let ty = createType()
+            let tyHash = TypePtrHash(Some(ty))
+            if (let Some(bucket) <- dynamicAllocatedTys.get(tyHash)) {
+                bucket.add(ty)
+            } else {
+                let bucket = ArrayList<Type>()
+                bucket.add(ty)
+                dynamicAllocatedTys[tyHash] = bucket
+            }
+            return ty
+        }
+        throw IllegalStateException("unreachable CHIRContext.GetType")
+    }
+
+    public func MergeTypes(): Unit {
+        // GAP_TODO: C++ CHIR.cpp:520/:564 and include/cangjie/Utils/ParallelUtil.h:71
+        // merge per-thread CHIRBuilder contexts after parallel translation/optimization.
+        // Selfhost currently has a single CHIRContext and no corresponding sub-builder merge points.
+        synchronized(CHIRContext.dynamicAllocatedTysMtx) {
+            for ((_, bucket) in dynamicAllocatedTys) {
+                for (ty in bucket) {
+                    let tyHash = TypePtrHash(Some(ty))
+                    if (let Some(constBucket) <- constAllocatedTys.get(tyHash)) {
+                        var found = false
+                        for (allocatedTy in constBucket) {
+                            if (TypePtrEqual(Some(allocatedTy), Some(ty))) {
+                                found = true
+                                break
+                            }
+                        }
+                        if (!found) {
+                            constBucket.add(ty)
+                        }
+                    } else {
+                        let constBucket = ArrayList<Type>()
+                        constBucket.add(ty)
+                        constAllocatedTys[tyHash] = constBucket
+                    }
+                }
+            }
+            dynamicAllocatedTys.clear()
+        }
     }
 
     public func GetCurPackage(): Option<Package> {
@@ -146,88 +233,113 @@ public class CHIRContext {
     }
 
     public func GetTupleTy(fieldTys: ArrayList<Type>): TupleType {
-        let key = "tuple:" + TypeVecToString("", fieldTys, "", delimiter: ",")
-        if (let Some(cached) <- typeCache.get(key)) {
-            if (let Some(found) <- (cached as TupleType)) {
-                return found
+        var hashValue = HashArgTypes(fieldTys)
+        hashValue = HashValue(hashValue, TypeKind.TYPE_TUPLE)
+        let ty = GetType(hashValue, { allocatedTy: Type =>
+            if (let Some(tupleTy) <- (allocatedTy as TupleType)) {
+                return TypeArgsAreEqual(tupleTy.argTys, fieldTys)
             }
-        }
-        let ty = TupleType(fieldTys)
-        typeCache[key] = ty
-        return ty
+            return false
+        }, { => TupleType(fieldTys) })
+        return (ty as TupleType).getOrThrow()
     }
 
     public func GetFuncTy(paramTys: ArrayList<Type>, retTy: Type, hasVarLenParam!: Bool = false,
         isCFunc!: Bool = false): FuncType {
-        let key = "func:${hasVarLenParam}:${isCFunc}:" + TypeVecToString("", paramTys, "", delimiter: ",") + "->" + retTy.ToString()
-        if (let Some(cached) <- typeCache.get(key)) {
-            if (let Some(found) <- (cached as FuncType)) {
-                return found
+        let argTys = paramTys.clone()
+        argTys.add(retTy)
+        var hashValue = HashArgTypes(argTys)
+        hashValue = HashValue(hashValue, isCFunc)
+        hashValue = HashValue(hashValue, hasVarLenParam)
+        hashValue = HashValue(hashValue, TypeKind.TYPE_FUNC)
+        let ty = GetType(hashValue, { allocatedTy: Type =>
+            if (let Some(funcTy) <- (allocatedTy as FuncType)) {
+                return TypeArgsAreEqual(funcTy.argTys, argTys) && funcTy.IsCFunc() == isCFunc &&
+                    funcTy.HasVarArg() == hasVarLenParam
             }
-        }
-        let ty = FuncType(paramTys, retTy, hasVarLenParam: hasVarLenParam, isCFunc: isCFunc)
-        typeCache[key] = ty
-        return ty
+            return false
+        }, { => FuncType(paramTys, retTy, hasVarLenParam: hasVarLenParam, isCFunc: isCFunc) })
+        return (ty as FuncType).getOrThrow()
     }
 
     public func GetRawArrayTy(elementTy: Type, dims!: UInt64 = 1u64): RawArrayType {
-        let key = "rawarray:${dims}:" + elementTy.ToString()
-        if (let Some(cached) <- typeCache.get(key)) {
-            if (let Some(found) <- (cached as RawArrayType)) {
-                return found
+        let argTys = ArrayList<Type>()
+        argTys.add(elementTy)
+        var hashValue = HashArgTypes(argTys)
+        hashValue = HashValue(hashValue, dims)
+        hashValue = HashValue(hashValue, TypeKind.TYPE_RAWARRAY)
+        let ty = GetType(hashValue, { allocatedTy: Type =>
+            if (let Some(rawArrayTy) <- (allocatedTy as RawArrayType)) {
+                return TypeArgsAreEqual(rawArrayTy.argTys, argTys) && rawArrayTy.GetDims() == dims
             }
-        }
-        let ty = RawArrayType(elementTy, dims: dims)
-        typeCache[key] = ty
-        return ty
+            return false
+        }, { => RawArrayType(elementTy, dims: dims) })
+        return (ty as RawArrayType).getOrThrow()
     }
 
     public func GetCPointerTy(elementTy: Type): CPointerType {
-        let key = "cpointer:" + elementTy.ToString()
-        if (let Some(cached) <- typeCache.get(key)) {
-            if (let Some(found) <- (cached as CPointerType)) {
-                return found
+        let argTys = ArrayList<Type>()
+        argTys.add(elementTy)
+        var hashValue = HashArgTypes(argTys)
+        hashValue = HashValue(hashValue, TypeKind.TYPE_CPOINTER)
+        let ty = GetType(hashValue, { allocatedTy: Type =>
+            if (let Some(pointerTy) <- (allocatedTy as CPointerType)) {
+                return TypeArgsAreEqual(pointerTy.argTys, argTys)
             }
-        }
-        let ty = CPointerType(elementTy)
-        typeCache[key] = ty
-        return ty
+            return false
+        }, { => CPointerType(elementTy) })
+        return (ty as CPointerType).getOrThrow()
     }
 
     public func GetVArrayTy(elementTy: Type, size: UInt64): VArrayType {
-        let key = "varray:${size}:" + elementTy.ToString()
-        if (let Some(cached) <- typeCache.get(key)) {
-            if (let Some(found) <- (cached as VArrayType)) {
-                return found
+        let argTys = ArrayList<Type>()
+        argTys.add(elementTy)
+        var hashValue = HashArgTypes(argTys)
+        hashValue = HashValue(hashValue, size)
+        hashValue = HashValue(hashValue, TypeKind.TYPE_VARRAY)
+        let ty = GetType(hashValue, { allocatedTy: Type =>
+            if (let Some(varrayTy) <- (allocatedTy as VArrayType)) {
+                return TypeArgsAreEqual(varrayTy.argTys, argTys) && varrayTy.size == size
             }
-        }
-        let ty = VArrayType(elementTy, size)
-        typeCache[key] = ty
-        return ty
+            return false
+        }, { => VArrayType(elementTy, size) })
+        return (ty as VArrayType).getOrThrow()
     }
 
     public func GetRefTy(baseTy: Type): RefType {
-        let key = "ref:" + baseTy.ToString()
-        if (let Some(cached) <- typeCache.get(key)) {
-            if (let Some(found) <- (cached as RefType)) {
-                return found
+        let argTys = ArrayList<Type>()
+        argTys.add(baseTy)
+        var hashValue = HashArgTypes(argTys)
+        hashValue = HashValue(hashValue, TypeKind.TYPE_REFTYPE)
+        let ty = GetType(hashValue, { allocatedTy: Type =>
+            if (let Some(refTy) <- (allocatedTy as RefType)) {
+                return TypeArgsAreEqual(refTy.argTys, argTys)
             }
-        }
-        let ty = RefType(baseTy)
-        typeCache[key] = ty
-        return ty
+            return false
+        }, { => RefType(baseTy) })
+        return (ty as RefType).getOrThrow()
     }
 
     public func GetBoxTy(baseTy: Type): BoxType {
-        let key = "box:" + baseTy.ToString()
-        if (let Some(cached) <- typeCache.get(key)) {
-            if (let Some(found) <- (cached as BoxType)) {
-                return found
+        let argTys = ArrayList<Type>()
+        argTys.add(baseTy)
+        var hashValue = HashArgTypes(argTys)
+        hashValue = HashValue(hashValue, TypeKind.TYPE_BOXTYPE)
+        let ty = GetType(hashValue, { allocatedTy: Type =>
+            if (let Some(boxTy) <- (allocatedTy as BoxType)) {
+                return TypeArgsAreEqual(boxTy.argTys, argTys)
             }
-        }
-        let ty = BoxType(baseTy)
-        typeCache[key] = ty
-        return ty
+            return false
+        }, { => BoxType(baseTy) })
+        return (ty as BoxType).getOrThrow()
+    }
+
+    public func GetThisTy(): ThisType {
+        let hashValue = HashValue(HashArgTypes(ArrayList<Type>()), TypeKind.TYPE_THIS)
+        let ty = GetType(hashValue, { allocatedTy: Type =>
+            return allocatedTy.IsThis()
+        }, { => ThisType() })
+        return (ty as ThisType).getOrThrow()
     }
 
     public func GetGenericTy(name: String): GenericType {
@@ -235,54 +347,63 @@ public class CHIRContext {
     }
 
     public func GetGenericTy(name: String, srcCodeIdentifier: String): GenericType {
-        let key = "generic:" + name
-        if (let Some(cached) <- typeCache.get(key)) {
-            if (let Some(found) <- (cached as GenericType)) {
-                return found
+        var hashValue: Int64 = 0
+        hashValue = HashValue(hashValue, name)
+        let ty = GetType(hashValue, { allocatedTy: Type =>
+            if (let Some(genericTy) <- (allocatedTy as GenericType)) {
+                return genericTy.GetIdentifier() == name
             }
-        }
-        let ty = GenericType(name, srcCodeIdentifier)
-        typeCache[key] = ty
-        return ty
+            return false
+        }, { => GenericType(name, srcCodeIdentifier) })
+        return (ty as GenericType).getOrThrow()
     }
 
     public func GetStructTy(def: StructDef, args: ArrayList<Type>): StructType {
-        let key = "struct:" + def.GetFullName() + "<" + TypeVecToString("", args, "", delimiter: ",") + ">"
-        if (let Some(cached) <- typeCache.get(key)) {
-            if (let Some(found) <- (cached as StructType)) {
-                return found
+        var hashValue = HashArgTypes(args)
+        hashValue = HashValue(hashValue, def.nodeId)
+        let ty = GetType(hashValue, { allocatedTy: Type =>
+            if (let Some(structTy) <- (allocatedTy as StructType)) {
+                return TypeArgsAreEqual(structTy.argTys, args) && refEq(structTy.GetStructDef(), def)
             }
-        }
-        let ty = StructType(def, args)
-        def.SetType(ty)
-        typeCache[key] = ty
-        return ty
+            return false
+        }, { =>
+            let structTy = StructType(def, args)
+            def.SetType(structTy)
+            structTy
+        })
+        return (ty as StructType).getOrThrow()
     }
 
     public func GetClassTy(def: ClassDef, args: ArrayList<Type>): ClassType {
-        let key = "class:" + def.GetFullName() + "<" + TypeVecToString("", args, "", delimiter: ",") + ">"
-        if (let Some(cached) <- typeCache.get(key)) {
-            if (let Some(found) <- (cached as ClassType)) {
-                return found
+        var hashValue = HashArgTypes(args)
+        hashValue = HashValue(hashValue, def.nodeId)
+        let ty = GetType(hashValue, { allocatedTy: Type =>
+            if (let Some(classTy) <- (allocatedTy as ClassType)) {
+                return TypeArgsAreEqual(classTy.argTys, args) && refEq(classTy.GetClassDef(), def)
             }
-        }
-        let ty = ClassType(def, args)
-        def.SetType(ty)
-        typeCache[key] = ty
-        return ty
+            return false
+        }, { =>
+            let classTy = ClassType(def, args)
+            def.SetType(classTy)
+            classTy
+        })
+        return (ty as ClassType).getOrThrow()
     }
 
     public func GetEnumTy(def: EnumDef, args: ArrayList<Type>): EnumType {
-        let key = "enum:" + def.GetFullName() + "<" + TypeVecToString("", args, "", delimiter: ",") + ">"
-        if (let Some(cached) <- typeCache.get(key)) {
-            if (let Some(found) <- (cached as EnumType)) {
-                return found
+        var hashValue = HashArgTypes(args)
+        hashValue = HashValue(hashValue, def.nodeId)
+        let ty = GetType(hashValue, { allocatedTy: Type =>
+            if (let Some(enumTy) <- (allocatedTy as EnumType)) {
+                return TypeArgsAreEqual(enumTy.argTys, args) && refEq(enumTy.GetEnumDef(), def)
             }
-        }
-        let ty = EnumType(def, args)
-        def.SetType(ty)
-        typeCache[key] = ty
-        return ty
+            return false
+        }, { =>
+            let enumTy = EnumType(def, args)
+            def.SetType(enumTy)
+            enumTy
+        })
+        return (ty as EnumType).getOrThrow()
     }
 
     public func ToSelectorType(kind: TypeKind): Type {
@@ -326,7 +447,11 @@ public class CHIRContext {
     }
 
     public func GetTypesNum(): Int64 {
-        return typeCache.size
+        var count: Int64 = 0
+        for ((_, bucket) in dynamicAllocatedTys) {
+            count += bucket.size
+        }
+        return count
     }
 
     public func GetAllNodesNum(): Int64 {

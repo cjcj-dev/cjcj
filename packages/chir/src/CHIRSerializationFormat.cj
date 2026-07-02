@@ -517,9 +517,9 @@ func CHIRSerializeType(ty: Type): String {
         return CHIRWireJoinFields(fields)
     }
     if (let Some(thisTy) <- (ty as ThisType)) {
+        let _ = thisTy
         let fields = ArrayList<String>()
         fields.add("this")
-        fields.add(thisTy.name)
         return CHIRWireJoinFields(fields)
     }
     if (let Some(customTy) <- (ty as CustomType)) {
@@ -560,7 +560,7 @@ func CHIRParseType(value: String, builder: CHIRBuilder, customDefs: HashMap<Stri
         case "ref" => builder.context.GetRefTy(CHIRParseType(CHIRFieldAt(fields, 1), builder, customDefs))
         case "box" => builder.context.GetBoxTy(CHIRParseType(CHIRFieldAt(fields, 1), builder, customDefs))
         case "generic" => CHIRParseGenericType(fields, builder, customDefs)
-        case "this" => ThisType(name: CHIRFieldAt(fields, 1))
+        case "this" => builder.context.GetThisTy()
         case "struct" => CHIRParseCustomType(fields, builder, customDefs)
         case "class" => CHIRParseCustomType(fields, builder, customDefs)
         case "enum" => CHIRParseCustomType(fields, builder, customDefs)
@@ -578,8 +578,7 @@ func CHIRParseFuncType(fields: ArrayList<String>, builder: CHIRBuilder,
 
 func CHIRParseGenericType(fields: ArrayList<String>, builder: CHIRBuilder,
     customDefs: HashMap<String, CustomTypeDef>): GenericType {
-    let genericTy = builder.context.GetGenericTy(CHIRFieldAt(fields, 1))
-    genericTy.SetSrcCodeIdentifier(CHIRFieldAt(fields, 2))
+    let genericTy = builder.context.GetGenericTy(CHIRFieldAt(fields, 1), CHIRFieldAt(fields, 2))
     let bounds = CHIRParseTypeList(CHIRFieldAt(fields, 3), builder, customDefs)
     if (!bounds.isEmpty()) {
         genericTy.SetUpperBounds(bounds)

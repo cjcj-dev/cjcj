@@ -1164,7 +1164,7 @@ public class ClosureConversion {
             }
         }
         if (NeedAddThisType(srcFunc)) {
-            autoEnvInstTypeArgs.add(ThisType(), at: 0)
+            autoEnvInstTypeArgs.add(builder.context.GetThisTy(), at: 0)
         }
         if (autoEnvImplType.GetGenericArgs().size != autoEnvInstTypeArgs.size) {
             return autoEnvImplType
