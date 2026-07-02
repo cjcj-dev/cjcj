@@ -202,7 +202,13 @@ public open class CGType {
     public func IsStructPtrType(): Bool { return IsPointerType() && !GetContainedTypes().isEmpty() && GetContainedTypes()[0].IsStructType() }
     public func IsRefType(): Bool { return cgTypeKind == CGTypeKind.CG_REF }
     public func IsReference(): Bool {
-        if (chirType.IsReferenceType() || chirType.IsRef()) {
+        if (chirType.IsRef()) {
+            let baseType = chirType.GetTypeArgs()[0]
+            if (baseType.IsClass() || baseType.IsRawArray() || baseType.IsBox()) {
+                return true
+            }
+        }
+        if (chirType.IsBox() || chirType.IsClass() || chirType.IsRawArray()) {
             return true
         }
         if (chirType.IsEnum()) {

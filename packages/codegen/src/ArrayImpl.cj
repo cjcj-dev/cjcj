@@ -4,7 +4,6 @@ import std.collection.*
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Box as ChirBox
-import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.GetElementByName
@@ -454,7 +453,7 @@ private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue, addr: C
     }
     if (let Some(valueCGType) <- value.GetCGType()) {
         let valueTy = valueCGType.GetOriginal().StripAllRefs()
-        if (!valueCGType.IsReference() && (valueTy.IsStruct() || valueTy.IsTuple() || valueTy.IsVArray())) {
+        if (!valueCGType.GetOriginal().IsRef() && (valueTy.IsStruct() || valueTy.IsTuple() || valueTy.IsVArray())) {
             return irBuilder.CreateLoad(valueCGType.GetLLVMType(), raw, name: "store.value")
         }
     }
@@ -486,7 +485,7 @@ private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue, addr: C
 }
 
 private func ShouldLoadInlineValueForAddressStore(valueCGType: CGType, destCGType: CGType): Bool {
-    if (!valueCGType.IsReference() || destCGType.IsReference() || destCGType.GetSize().isNone()) {
+    if (!valueCGType.GetOriginal().IsRef() || destCGType.GetOriginal().IsRef() || destCGType.GetSize().isNone()) {
         return false
     }
     if (IsBareGCRefLLVMType(destCGType.GetLLVMType())) {
@@ -742,13 +741,9 @@ private func IsGenericField(fieldTy: Option<Type>): Bool {
 
 private func IsAggregateFieldType(irBuilder: IRBuilder2, fieldTy: Type): Bool {
     let stripped = fieldTy.StripAllRefs()
-    if (stripped.IsStruct() || stripped.IsTuple() || stripped.IsVArray()) {
+    let fieldCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), stripped)
+    if (fieldCGType.IsStructType() || fieldCGType.IsVArrayType()) {
         return true
-    }
-    if (let Some(enumTy) <- (stripped as EnumType)) {
-        if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), enumTy) as CGEnumType)) {
-            return enumCGType.IsOptionLikeNonRef()
-        }
     }
     return false
 }
