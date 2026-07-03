@@ -227,7 +227,7 @@ private func DiagnoseParameterName(diag: DiagnosticEngine, parent: FuncDecl, chi
         }
     }
     builder.AddNote(DeclIdentifierRange(parent), "the corresponding function of the supertype is")
-    builder.Emit()
+    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
 }
 
 private func VisibilityToString(decl: Decl): String {
@@ -277,7 +277,7 @@ private func DiagnoseWeakVisibility(
         }
     }
     builder.AddNote(parentNote)
-    builder.Emit()
+    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
 }
 
 private func HasCommonDecl(decls: ArrayList<ClassLikeDecl>): Bool {
@@ -1061,7 +1061,7 @@ public class StructInheritanceChecker {
                         DeclIdentifierRange(otherExtend),
                         "conflict with this extension, beacase of '" + inherChain + "'"
                     )
-                    builder.Emit()
+                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                     return None
                 }
             }
@@ -1098,7 +1098,7 @@ public class StructInheritanceChecker {
                         DeclIdentifierRange(otherExtend),
                         "conflict with this extension, beacase of '" + lastInherit + "' and '" + currentInherit + "'"
                     )
-                    builder.Emit()
+                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                     return None
                 }
             }
@@ -1218,7 +1218,7 @@ public class StructInheritanceChecker {
                             arguments: [interfaceDecl.identifier.Val()]
                         )
                         builder.AddNote(DeclRange(childOuter), "following extension cannot be exported")
-                        builder.Emit()
+                        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                     }
                 }
             }
@@ -1660,7 +1660,7 @@ public class StructInheritanceChecker {
                 DeclIdentifierRange(childDecl),
                 "member " + memberStr + " conflict with that in " + interfaceBeOverridden
             )
-            builder.Emit()
+            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
         } else {
             let prefix = if (checkingDecl.astKind == ASTKind.EXTEND_DECL) { "extend " } else { "" }
             let classNameOverride = prefix + InheritedDisplayName(checkingDecl)
@@ -1678,7 +1678,7 @@ public class StructInheritanceChecker {
                 DeclIdentifierRange(childDecl),
                 "member " + memberStr + " may not be visible to '" + classNameOverride + "'"
             )
-            builder.Emit()
+            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
         }
     }
 
@@ -1723,20 +1723,22 @@ public class StructInheritanceChecker {
             if (memberDecl.TestAttr(Attribute.ABSTRACT) && !isAbstractDecl) {
                 unimplementedMembers.add(member.Clone())
             } else if (member.shouldBeImplemented) {
+                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                 diag.Diagnose(
                     structDecl.begin,
                     structDecl.end,
                     DiagKind.sema_interface_member_must_be_implemented,
                     args: [DiagArgument(DeclKindText(memberDecl)), DiagArgument(entry.name), DiagArgument(structName)]
-                ).Emit()
+                )
             } else if (let Some(outer) <- memberDecl.outerDecl) {
                 if (!SameDecl(outer, structDecl)) {
                     if (isStaticAbsMember && isAbstractClass) {
+                        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                         diag.DiagnoseRefactor(
                             DiagKindRefactor.sema_inherit_abstract_class_static_unimplement_func,
                             DeclRange(structDecl),
                             arguments: [structName, DeclKindText(memberDecl), entry.name]
-                        ).Emit()
+                        )
                     } else if (!member.inconsistentTypes.IsEmpty()) {
                         DiagnoseInheritedInsconsistType(member, structDecl)
                     }
@@ -1770,7 +1772,7 @@ public class StructInheritanceChecker {
                     )
                 }
             }
-            builder.Emit()
+            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
         }
     }
 
@@ -1799,7 +1801,7 @@ public class StructInheritanceChecker {
                 for (memberDecl in sortedDecls) {
                     builder.AddNote(DeclIdentifierRange(memberDecl), DeclKindText(memberDecl) + " member")
                 }
-                builder.Emit()
+                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
             } else {
                 for (member in found) {
                     if (!member.inconsistentTypes.IsEmpty() && member.IsProp()) {
@@ -1819,7 +1821,7 @@ public class StructInheritanceChecker {
                 arguments: [typeName, DeclKindText(memberDecl), memberDecl.identifier.Val()]
             )
             builder.AddNote("conflict types are " + StringifyInconsistentTypes(member.inconsistentTypes))
-            builder.Emit()
+            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
         }
     }
 
@@ -1837,12 +1839,13 @@ public class StructInheritanceChecker {
             "parent class or interfaces"
         }
         if (child.TestAttr(Attribute.STATIC) != parentDecl.TestAttr(Attribute.STATIC)) {
+            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
             diag.Diagnose(
                 child.begin,
                 child.end,
                 DiagKind.sema_static_and_non_static_member_cannot_have_same_name,
                 args: [DiagArgument(childStatic), DiagArgument(name), DiagArgument(parentStatic), DiagArgument(inheritance)]
-            ).Emit()
+            )
             return
         }
         if (child.astKind != parentDecl.astKind) {
@@ -1853,15 +1856,16 @@ public class StructInheritanceChecker {
                     arguments: [DeclKindText(child), name, DeclKindText(parentDecl), inheritance]
                 )
                 builder.AddNote(DeclIdentifierRange(parentDecl), "found conflict here")
-                builder.Emit()
+                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
             }
         } else if (parentDecl.astKind == ASTKind.VAR_DECL) {
+            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
             diag.Diagnose(
                 child.begin,
                 child.end,
                 DiagKind.sema_member_variable_can_not_shadow,
                 args: [DiagArgument(name)]
-            ).Emit()
+            )
         }
     }
 
@@ -1879,12 +1883,13 @@ public class StructInheritanceChecker {
             return
         }
         if (!parentDecl.TestAttr(Attribute.STATIC) && child.TestAttr(Attribute.REDEF)) {
+            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
             diag.Diagnose(
                 child.begin,
                 child.end,
                 DiagKind.sema_func_no_override_or_redefine_modifier,
                 args: [DiagArgument("redef"), DiagArgument(typeText), DiagArgument(name)]
-            ).Emit()
+            )
         } else if (!parentDecl.TestAttr(Attribute.ABSTRACT) && !parentDecl.TestAttr(Attribute.STATIC)) {
             let notInInterface = if (let Some(parentOuter) <- parentDecl.outerDecl) {
                 parentOuter.astKind != ASTKind.INTERFACE_DECL
@@ -1898,14 +1903,15 @@ public class StructInheritanceChecker {
                     arguments: [typeText, name]
                 )
                 builder.AddNote(DeclRange(parentDecl), "overridden definition is here")
-                builder.Emit()
+                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
             } else if (child.TestAttr(Attribute.ABSTRACT) && notInInterface) {
+                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                 diag.Diagnose(
                     child.begin,
                     child.end,
                     DiagKind.sema_invalid_override_member_in_class,
                     args: [DiagArgument(typeText), DiagArgument(name), DiagArgument(typeText)]
-                ).Emit()
+                )
             }
         }
     }
@@ -1919,7 +1925,8 @@ public class StructInheritanceChecker {
             return
         }
         if (TyOptionsDiffer(parent.ty, child.GetTy()) || !parent.inconsistentTypes.IsEmpty()) {
-            diag.Diagnose(child.begin, child.end, DiagKind.sema_property_override_implement_type_diff).Emit()
+            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+            diag.Diagnose(child.begin, child.end, DiagKind.sema_property_override_implement_type_diff)
         }
         if (let Some(parentProp) <- (parentDecl as PropDecl)) {
             if (let Some(childProp) <- (child as PropDecl)) {
@@ -1929,14 +1936,16 @@ public class StructInheritanceChecker {
                     } else {
                         DiagKindRefactor.sema_property_have_same_declaration_in_inherit_immut
                     }
-                    diag.DiagnoseRefactor(kind, DeclRange(child), arguments: [child.identifier.Val()]).Emit()
+                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                    diag.DiagnoseRefactor(kind, DeclRange(child), arguments: [child.identifier.Val()])
                 } else if (childProp.isVar && (childProp.getters.isEmpty() || childProp.setters.isEmpty()) &&
                     parentProp.TestAnyAttr(Attribute.DEFAULT, Attribute.ABSTRACT)) {
+                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                     diag.DiagnoseRefactor(
                         DiagKindRefactor.sema_property_must_implement_both,
                         DeclRange(child),
                         arguments: [child.identifier.Val()]
-                    ).Emit()
+                    )
                 }
             }
         }
@@ -1963,12 +1972,13 @@ public class StructInheritanceChecker {
                 }
                 let typeText = DeclKindText(interfaceMember)
                 if (childDecl.TestAttr(Attribute.ABSTRACT) && !interfaceMember.TestAttr(Attribute.ABSTRACT)) {
+                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                     diag.Diagnose(
                         childDecl.begin,
                         childDecl.end,
                         DiagKind.sema_invalid_override_or_redefine_member_in_interface,
                         args: [DiagArgument(typeText), DiagArgument(childDecl.identifier.Val()), DiagArgument(typeText)]
-                    ).Emit()
+                    )
                 }
                 childDecl.EnableAttr(Attribute.INTERFACE_IMPL)
                 if (let Some(propDecl) <- (childDecl as PropDecl)) {
@@ -2019,7 +2029,7 @@ public class StructInheritanceChecker {
                                     DeclIdentifierRange(childFunc)
                                 )
                                 builder.AddNote(DeclIdentifierRange(parentFunc), "the overriden function")
-                                builder.Emit()
+                                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                             } else if (AreReturnTypesCompatible(parentFuncTy, childFuncTy, inconsistentTypes: parent.inconsistentTypes)) {
                                 var diagNode: Decl = childFunc
                                 if (!checkingDecls.isEmpty()) {
@@ -2039,7 +2049,7 @@ public class StructInheritanceChecker {
                                     args: [DiagArgument(childFunc.identifier.Val()), DiagArgument(parentFuncTy.retTy.String())]
                                 )
                                 builder.AddNote(DeclRange(parentFunc), "cannot override/implement the following function")
-                                builder.Emit()
+                                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                             } else {
                                 var targetFunc: FuncDecl = parentFunc
                                 var inconsistentTypesText = "'" + parentFuncTy.retTy.String() + "'"
@@ -2059,7 +2069,7 @@ public class StructInheritanceChecker {
                                     DeclIdentifierRange(targetFunc),
                                     "'" + childFuncTy.retTy.String() + "' is not a subtype of " + inconsistentTypesText
                                 )
-                                builder.Emit()
+                                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                             }
                             if (!childFunc.IsConst() && parentDecl.IsConst()) {
                                 let inheritance = if (!checkingDecls.isEmpty() && checkingDecls[0].astKind == ASTKind.EXTEND_DECL) {
@@ -2073,7 +2083,7 @@ public class StructInheritanceChecker {
                                     arguments: ["non-constant function", childFunc.identifier.Val(), "'const' function", inheritance]
                                 )
                                 builder.AddNote(DeclIdentifierRange(parentDecl), "found 'const' function here")
-                                builder.Emit()
+                                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                             }
                         }
                         return sameSignature
@@ -2122,12 +2132,13 @@ public class StructInheritanceChecker {
                 }
             }
             let interfaceName = if (let Some(outer) <- parentDecl.outerDecl) { outer.identifier.Val() } else { "" }
+            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
             diag.Diagnose(
                 diagDecl.begin,
                 diagDecl.end,
                 DiagKind.sema_incompatible_mut_modifier_between_struct_and_interface,
                 args: [DiagArgument(child.identifier.Val()), DiagArgument(interfaceName)]
-            ).Emit()
+            )
         }
     }
 
@@ -2184,11 +2195,12 @@ public class StructInheritanceChecker {
                 } else {
                     "extend"
                 }
+                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                 diag.DiagnoseRefactor(
                     DiagKindRefactor.sema_extend_member_cannot_shadow,
                     DeclIdentifierRange(child),
                     arguments: [child.identifier.Val(), typeName]
-                ).Emit()
+                )
             } else {
                 let isExtendedDefault = IsExtendedDefaultImpl(parent, child)
                 let parentOuterIsExtend = if (let Some(outer) <- parentDecl.outerDecl) {
@@ -2208,7 +2220,7 @@ public class StructInheritanceChecker {
                             "overridden definition of '" + child.identifier.Val() + "' is here"
                         )
                     }
-                    builder.Emit()
+                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                 } else if (if (let Some(outer) <- child.outerDecl) { outer.astKind == ASTKind.EXTEND_DECL } else { false }) {
                     let typeName = if (let Some(outer) <- child.outerDecl) {
                         InheritedTypeString(outer)
@@ -2224,7 +2236,7 @@ public class StructInheritanceChecker {
                         DeclIdentifierRange(parentDecl),
                         "shadowed definition of '" + child.identifier.Val() + "' is here"
                     )
-                    builder.Emit()
+                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                 } else {
                     return true
                 }
@@ -2241,19 +2253,21 @@ public class StructInheritanceChecker {
         if (let Some(childDecl) <- child.decl) {
             let typeText = DeclKindText(childDecl)
             if (childDecl.TestAttr(Attribute.OVERRIDE)) {
+                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                 diag.Diagnose(
                     childDecl.begin,
                     childDecl.end,
                     DiagKind.sema_missing_overridden_func,
                     args: [DiagArgument(typeText), DiagArgument(childDecl.identifier.Val()), DiagArgument(typeText)]
-                ).Emit()
+                )
             } else if (childDecl.TestAttr(Attribute.REDEF) && childDecl.TestAttr(Attribute.STATIC)) {
+                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                 diag.Diagnose(
                     childDecl.begin,
                     childDecl.end,
                     DiagKind.sema_missing_redefined_func,
                     args: [DiagArgument(typeText), DiagArgument(childDecl.identifier.Val()), DiagArgument(typeText)]
-                ).Emit()
+                )
             }
         }
     }

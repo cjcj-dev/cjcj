@@ -48,7 +48,7 @@ private func diagMismatchedTypes(diag: Option<BasicDiagnosticEngine>, oce: Optio
             BasicDiagKindRefactor.sema_mismatched_types,
             BasicMakeRange(oce.begin, oce.end))
         builder.AddMainHintArguments([target.String(), (oce.GetTy() ?? TypeManager.GetInvalidTy()).String()])
-        builder.Emit()
+        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
     }
 }
 

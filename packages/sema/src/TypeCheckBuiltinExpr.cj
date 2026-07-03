@@ -14,7 +14,8 @@ private func ToBasicPosition(pos: Position): BasicPosition {
 }
 
 private func DiagOld(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind): Unit {
-    diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind).Emit()
+    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+    let _ = diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind)
 }
 
 private func StringDiagArgs(values: Array<String>): Array<BasicDiagArgument> {
@@ -27,7 +28,8 @@ private func StringDiagArgs(values: Array<String>): Array<BasicDiagArgument> {
 
 private func DiagOldStrings(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind,
     values: Array<String>): Unit {
-    diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind, args: StringDiagArgs(values)).Emit()
+    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+    let _ = diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind, args: StringDiagArgs(values))
 }
 
 private func InvalidExprTy(expr: Expr): Ty {

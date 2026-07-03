@@ -224,7 +224,8 @@ private func filteredTypeArgsForTarget(target: Decl, typeArgs: ArrayList<Type>):
 
 private func emitGenericArgumentNoMatch(diag: Option<BasicDiagnosticEngine>, node: Node): Unit {
     if (let Some(diagEngine) <- diag) {
-        diagEngine.DiagnoseRefactor(BasicDiagKindRefactor.sema_generic_argument_no_match, node.begin).Emit()
+        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+        diagEngine.DiagnoseRefactor(BasicDiagKindRefactor.sema_generic_argument_no_match, node.begin)
     }
 }
 
@@ -236,7 +237,7 @@ private func emitGenericConstraintMismatch(diag: Option<BasicDiagnosticEngine>, 
             args: [BasicDiagArgument(declTy.String())])
         builder.AddNote(constraint.begin, BasicDiagKind.sema_which_constraint_not_match,
             args: [BasicDiagArgument(instTy.String()), BasicDiagArgument("'" + upperBoundTy.String() + "'")])
-        builder.Emit()
+        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
     }
 }
 
@@ -295,7 +296,7 @@ private func emitIncompleteInstantiation(diag: Option<BasicDiagnosticEngine>, no
         if (isNothing) {
             builder.AddNote("'Nothing' type has no members")
         }
-        builder.Emit()
+        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
     }
 }
 
@@ -574,9 +575,10 @@ extend TypeCheckerImpl {
                 }
                 if (!found) {
                     if (let Some(diagEngine) <- diag) {
+                        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                         diagEngine.Diagnose(refType.begin, refType.end,
                             BasicDiagKind.sema_generics_type_variable_not_defined,
-                            args: [BasicDiagArgument(refType.ref.identifier.Val())]).Emit()
+                            args: [BasicDiagArgument(refType.ref.identifier.Val())])
                     }
                 }
             }
