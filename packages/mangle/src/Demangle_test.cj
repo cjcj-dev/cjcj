@@ -19,4 +19,10 @@ public class DemangleTest {
         let result3 = demangler3.DemanglePackageName()
         @Expect(result3.pkgName, "abc::xyz")
     }
+
+    @TestCase
+    public func GetIdentifier(): Unit {
+        let info = DemangleInfo("<init>", DemanglerTypeKind.NAME)
+        @Expect(info.GetIdentifier(), "init")
+    }
 }

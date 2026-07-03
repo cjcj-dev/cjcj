@@ -216,6 +216,12 @@ class DemangleInfo {
         this.isValid = pIsValid
     }
 
+    private func MatchSuffix(pattern: String, len: Int64): Bool {
+        let index = if (demangled.size > len) { demangled.size - len } else { 0 }
+        let suffix = demangled[index..demangled.size]
+        return suffix == pattern
+    }
+
     func GetFullName(scopeRes: String): String {
         return GetFullName(scopeRes, 0)
     }
@@ -304,7 +310,7 @@ class DemangleInfo {
 
     func GetIdentifier(): String {
         if (!demangled.isEmpty() && demangled[0] == b'<' && EndsWith(demangled, ">")) {
-            return demangled[1..demangled.size - 2]
+            return demangled[1..demangled.size - 1]
         }
         return demangled
     }
