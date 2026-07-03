@@ -861,22 +861,81 @@ extend ParserImpl {
         return ParseBlock(ScopeKind.UNKNOWN_SCOPE)
     }
 
-    public func ParseBlock(scopeKind: ScopeKind): Block {
-        let block = Block()
-        let left = Expect(TokenKind.LCURL, "expected '{'")
-        block.leftCurlPos = left.Begin()
-        block.begin = left.Begin()
-        try (cs = ChainScope(this, block)) {
-            SkipNLOrSemi()
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
-                let node = ParseExprOrDecl(scopeKind)
-                block.body.add(node)
-                SkipNLOrSemi()
+    public func ParseExpressionOrDeclarations(scopeKind: ScopeKind): Block {
+        let result = Block()
+        result.begin = lastToken.Begin()
+        result.leftCurlPos = lastToken.Begin()
+        try (cs = ChainScope(this, result)) {
+            SkipBlank(TokenKind.SEMI)
+            while (true) {
+                let hasNLorSEMI = SkipNLOrSemi()
+                if (Skip(TokenKind.RCURL)) {
+                    result.rightCurlPos = lastToken.Begin()
+                    break
+                }
+                if (DetectPrematureEnd()) {
+                    var resPos = result.begin
+                    let toLambdaLen: Int64 = 3
+                    if (chainedAST.size >= toLambdaLen &&
+                        chainedAST[chainedAST.size - toLambdaLen].astKind == ASTKind.LAMBDA_EXPR) {
+                        let le = (chainedAST[chainedAST.size - toLambdaLen] as LambdaExpr).getOrThrow()
+                        resPos = le.begin
+                    }
+                    DiagExpectedRightDelimiter("{", resPos)
+                    break
+                }
+                if (!result.body.isEmpty() && !hasNLorSEMI) {
+                    if (DiagForBlock(result)) {
+                        result.end = lookahead.End()
+                        return result
+                    }
+                    ConsumeUntilDeclOrNL(TokenKind.RCURL)
+                    SkipBlank(TokenKind.NL)
+                }
+                if (SeeingMacroCallDecl() || SeeingDecl() || SeeingExpr()) {
+                    let node = ParseExprOrDecl(scopeKind)
+                    result.body.add(node)
+                } else {
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_expr_or_decl_in, lookahead,
+                        ConvertToken(lookahead)).Emit()
+                    ConsumeUntilAny([TokenKind.RCURL, TokenKind.NL], targetTokenConsumed: false)
+                }
             }
-            block.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after block").Begin()
-            block.end = block.rightCurlPos + 1
+            if (Seeing(TokenKind.SEMI)) {
+                result.hasSemi = true
+                result.semiPos = lookahead.Begin()
+            }
+            result.end = lastToken.End()
         }
-        return block
+        return result
+    }
+
+    public func DiagForBlock(block: Block): Bool {
+        if (SeeingAny([TokenKind.RPAREN, TokenKind.RSQUARE, TokenKind.GT])) {
+            if (CanMatchBracketInStack()) {
+                DiagExpectedRightDelimiter("{", block.begin)
+                return true
+            } else {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_unmatched_right_delimiter, lookahead,
+                    lookahead.Value()).Emit()
+            }
+        } else {
+            DiagExpectSemiOrNewline()
+        }
+        return false
+    }
+
+    public func ParseBlock(scopeKind: ScopeKind): Block {
+        if (!Skip(TokenKind.LCURL)) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, lookahead,
+                ConvertToken(lookahead)).Emit()
+            let block = Block()
+            block.begin = lookahead.Begin()
+            block.end = lookahead.Begin()
+            block.isBroken = true
+            return block
+        }
+        return ParseExpressionOrDeclarations(scopeKind)
     }
 
     public func ParseExprOrDecl(scopeKind: ScopeKind): Node {
@@ -1530,17 +1589,8 @@ extend ParserImpl {
                     }
                     body.begin = lastToken.Begin()
                     body.paramLists.add(paramList)
-                    let block = Block()
+                    let block = ParseExpressionOrDeclarations(ScopeKind.FUNC_BODY)
                     block.leftCurlPos = lambda.begin
-                    block.begin = lambda.begin
-                    try (blockScope = ChainScope(this, block)) {
-                        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
-                            block.body.add(ParseExprOrDecl(ScopeKind.FUNC_BODY))
-                            SkipNLOrSemi()
-                        }
-                        block.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after lambda").Begin()
-                        block.end = block.rightCurlPos + 1
-                    }
                     body.body = Some(block)
                     body.end = block.end
                     lambda.funcBody = Some(body)

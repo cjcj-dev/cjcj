@@ -281,6 +281,46 @@ extend ParserImpl {
         return false
     }
 
+    public func SeeingSoftKeyword(): Bool {
+        return Peek().kind == TokenKind.FEATURES
+    }
+
+    public func SeeingExpr(): Bool {
+        let exprFirstTokens: Array<TokenKind> = [
+            TokenKind.SUB,
+            TokenKind.NOT,
+            TokenKind.IF,
+            TokenKind.MATCH,
+            TokenKind.QUOTE,
+            TokenKind.TRY,
+            TokenKind.THROW,
+            TokenKind.PERFORM,
+            TokenKind.RESUME,
+            TokenKind.RETURN,
+            TokenKind.CONTINUE,
+            TokenKind.BREAK,
+            TokenKind.FOR,
+            TokenKind.WHILE,
+            TokenKind.DO,
+            TokenKind.SPAWN,
+            TokenKind.SYNCHRONIZED,
+            TokenKind.LPAREN,
+            TokenKind.LCURL,
+            TokenKind.LSQUARE,
+            TokenKind.THIS,
+            TokenKind.SUPER,
+            TokenKind.IDENTIFIER,
+            TokenKind.UNSAFE,
+            TokenKind.WILDCARD,
+            TokenKind.VARRAY,
+        ]
+        if (SeeingAny(exprFirstTokens)) {
+            return true
+        }
+        return SeeingLiteral() || SeeingPrimitiveTypeAndLParen() || SeeingPrimitiveTypeAndDot() ||
+            SeeingMacroCall() || SeeingBuiltinAnnotation() || SeeingSoftKeyword()
+    }
+
     public func SeeingBackarrow(): Bool {
         return Seeing(TokenKind.BACKARROW) || SeeingCombinator([TokenKind.LT, TokenKind.SUB])
     }
