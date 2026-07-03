@@ -987,6 +987,150 @@ extend ParserImpl {
         builder.AddHint(MakeRange(token.Begin(), token.End()))
         builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:1285 DiagUnexpectedWhere chainedAST")
     }
+
+    public func DiagDuplicatedIntrinsicFunc(decl: Decl, prev: Decl): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_duplicated_intrinsic_function, decl,
+            decl.identifier.Val())
+        builder.AddHint(MakeRange(prev.begin, prev.end))
+    }
+
+    public func DiagDeclCannotInheritTheirSelf(decl: InheritableDecl, rt: RefType): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_decl_cannot_inherit_their_self, rt,
+            rt.ref.identifier.Val())
+        builder.AddHint(MakeRange(decl.identifier.Begin(), decl.identifier.End()), arguments: [rt.ref.identifier.Val()])
+    }
+
+    public func DiagDuplicatedModifier(mod: Modifier, pre: Modifier): Unit {
+        let modStr = TokenKindLiteral(mod.modifier)
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_duplicate_modifier, mod, modStr)
+        builder.AddHint(MakeRange(pre.begin, pre.end))
+    }
+
+    public func DiagUnexpectedColonInRange(re: RangeExpr): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_colon_in_range, lookahead)
+        builder.AddHint(MakeRange(re.begin, re.end))
+        builder.AddNote("range expression in index access cannot have step if it is without start or end")
+    }
+
+    public func DiagDuplicatedAttiValue(attr: String, pos: Position, pre: Position): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_duplicated_attr_value, MakeRange(pos, attr), attr)
+        builder.AddHint(MakeRange(pre, attr))
+    }
+
+    public func DiagDuplicatedItem(
+        name: String,
+        sourceName: String,
+        errPos: Position,
+        prePos: Position,
+        attachment: String
+    ): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_duplicated_item, MakeRange(errPos, sourceName),
+            name, sourceName, attachment)
+        builder.AddMainHintArguments(name)
+        builder.AddHint(MakeRange(prePos, sourceName))
+    }
+
+    public func DiagUnrecognizedAttrInAnno(
+        anno: Annotation,
+        attrName: String,
+        pos: Position,
+        acs: ArrayList<String>
+    ): Unit {
+        var str = ""
+        if (!acs.isEmpty()) {
+            str = "'" + acs[0] + "'"
+            var idx: Int64 = 1
+            while (idx < acs.size) {
+                let temp = if (idx == acs.size - 1) { " or " } else { ", " }
+                str += temp + "'" + acs[idx] + "'"
+                idx++
+            }
+        }
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unrecognized_attr_in_anno,
+            MakeRange(pos, attrName), attrName, anno.identifier.Val())
+        builder.AddHint(MakeRange(anno.begin, anno.end))
+        if (acs.isEmpty()) {
+            builder.AddNote(
+                "GAP_TODO: requires faithful port of ParserDiag.cpp:1380 DiagUnrecognizedAttrInAnno accepted attributes")
+        } else {
+            builder.AddNote("annotation '@" + anno.identifier.Val() + "' only accept " + str + " as attribute")
+        }
+    }
+
+    public func DiagDuplicatedAnno(anno: Annotation, pre: Annotation): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_duplicated_annotation, anno,
+            "@" + anno.identifier.Val())
+        builder.AddHint(MakeRange(pre.begin, pre.end))
+    }
+
+    public func DiagExpectedLsquareAfter(node: Node, aName: String, note: String): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_lsquare_after, lookahead, aName,
+            ConvertToken(lookahead))
+        builder.AddNote(note)
+        builder.AddHint(MakeRange(node.begin, node.end))
+    }
+
+    public func DiagUnrecognizedExprInWhen(expr: Expr, when: Annotation): Unit {
+        let str = sourceManager.GetContentBetween(expr.begin.fileID, expr.begin, expr.end)
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unrecognized_expression_in_when, expr, str)
+        builder.AddHint(MakeRange(when.begin, when.end))
+        builder.AddNote("annotation '@When' can only support unary, binary and ref expression")
+    }
+
+    public func DiagDeprecatedArgumentNotLitConst(node: Node): Unit {
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_arguments_must_be_lit_const_expr, node)
+    }
+
+    public func DiagDeprecatedArgumentDuplicated(node: Node, parameterName: String): Unit {
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_argument_duplication, node, parameterName)
+    }
+
+    public func DiagDeprecatedWrongArgumentType(node: Node, paramName: String, expectedType: String): Unit {
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_wrong_argument, node, paramName, expectedType)
+    }
+
+    public func DiagDeprecatedUnknownArgument(arg: Node, name: String): Unit {
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_unknown_argument, arg, name)
+    }
+
+    public func DiagDeprecatedEmptyStringArgument(node: Node, paramName: String): Unit {
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_empty_string_argument, node, paramName)
+    }
+
+    public func DiagUnexpectedTypeIn(ty: Type, inPos: Position, inStr: String, noteStr: String): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_type_in, ty, inStr)
+        builder.AddHint(MakeRange(inPos, inStr), arguments: [inStr])
+        builder.AddNote(noteStr)
+    }
+
+    public func DiagImportingByPackageNameIsNotSupported(expectPos: Position): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_importing_by_package_name_is_not_supported,
+            expectPos)
+        builder.AddNote("importing by package name is not supported.")
+    }
+
+    public func DiagVArrayTypeArgMismatch(range: BasicRange, note: String): Unit {
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_varray_type_args_mismatch, range, note)
+        ConsumeUntil(TokenKind.NL)
+    }
+
+    public func DiagRedundantModifiers(modifier: Modifier): Unit {
+        let modStr = TokenKindLiteral(modifier.modifier)
+        let modRange = MakeRange(modifier.begin, modifier.begin + modStr.size)
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_redundant_modifier, modRange, modStr)
+        builder.AddMainHintArguments("interface member", modStr)
+        builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:1553 DiagRedundantModifiers chainedAST")
+    }
+
+    public func DiagRedundantModifiers(lowerModifier: Modifier, higherModifier: Modifier): Unit {
+        let resStr = TokenKindLiteral(lowerModifier.modifier)
+        let tarStr = TokenKindLiteral(higherModifier.modifier)
+        let resRange = MakeRange(lowerModifier.begin, lowerModifier.begin + resStr.size)
+        let tarRange = MakeRange(higherModifier.begin, higherModifier.begin + tarStr.size)
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_redundant_modifier, resRange, resStr)
+        builder.AddMainHintArguments("'" + tarStr + "'", resStr)
+        builder.AddHint(tarRange)
+    }
 }
 
 private func PrepareExpectNoModifierArg(mod: Modifier): Array<String> {
