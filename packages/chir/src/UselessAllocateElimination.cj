@@ -12,8 +12,7 @@ public class UselessAllocateElimination {
     }
 
     private static func RunOnFunc(fn: Function, isDebug: Bool): Unit {
-        let body = fn.GetBody().getOrThrow()
-        for (block in body.GetBlocks()) {
+        for (block in fn.GetBody().getOrThrow().GetBlocks()) {
             let exprs = block.GetExpressions()
             for (expr in exprs) {
                 if (expr.GetExprKind() != ExprKind.ALLOCATE) {
