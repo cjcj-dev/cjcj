@@ -2309,15 +2309,17 @@ public class FaithfulAST2CHIR {
                     }
                 }
             }
-            let fn = CreateEmptyGVInitFunc(initFuncName, initFuncName, "", pkgName)
-            fn.EnableAttr(Attribute.INITIALIZER)
+            let initFuncTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetUnitTy())
+            let attrs = AttributeInfo()
+            attrs.Enable(Attribute.INITIALIZER)
+            let fn = builder.CreateFunction(initFuncTy, initFuncName,
+                srcCodeIdentifier: initFuncName, rawMangledName: "", packageName: pkgName)
             fn.EnableAttr(Attribute.IMPORTED)
+            fn.AppendAttributeInfo(attrs)
+            fn.SetFuncKind(FuncKind.GLOBALVAR_INIT)
             fn.EnableAttr(Attribute.PUBLIC)
-            let entry = RequireEntryBlock(fn)
-            if (entry.GetTerminator().isNone()) {
-                builder.CreateExit(None, entry)
-            }
-            InsertInitializerIntoBlock(fn, block)
+            AddFunctionToPackage(fn)
+            InsertInitializerIntoPackageInitializer(fn, importsInitFunc)
         }
         if (block.GetTerminator().isNone()) {
             builder.CreateExit(None, block)
