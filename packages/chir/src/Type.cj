@@ -3,6 +3,7 @@ package cangjie_compiler::chir
 import cangjie_compiler::utils.CJC_ASSERT
 import std.collection.*
 import std.sort.*
+import std.sync.AtomicInt64
 
 @OverflowWrapping
 func HashCombine(seed: Int64, value: Int64): Int64 {
@@ -52,15 +53,14 @@ func TypeArgsAreEqual(left: ArrayList<Type>, right: ArrayList<Type>): Bool {
 }
 
 public open class Type {
-    private static var nextObjectId: Int64 = 1
+    private static let nextObjectId = AtomicInt64(1)
 
     public let objectId: Int64
     public let kind: TypeKind
     public let argTys: ArrayList<Type> = ArrayList<Type>()
 
     public init(kind: TypeKind) {
-        objectId = nextObjectId
-        nextObjectId++
+        objectId = nextObjectId.fetchAdd(1)
         this.kind = kind
     }
 

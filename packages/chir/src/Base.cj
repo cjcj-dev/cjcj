@@ -1,14 +1,13 @@
 package cangjie_compiler::chir
 
 import std.convert.*
+import std.sync.AtomicInt64
 
 private class BaseIdAllocator {
-    private static var nextId: Int64 = 1
+    private static let nextId = AtomicInt64(1)
 
     public static func Next(): Int64 {
-        let out = nextId
-        nextId++
-        return out
+        return nextId.fetchAdd(1)
     }
 }
 

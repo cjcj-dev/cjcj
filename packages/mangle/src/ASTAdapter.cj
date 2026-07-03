@@ -2,6 +2,7 @@ package cangjie_compiler::mangle
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import std.sync.AtomicInt64
 
 private class AstDeclPair {
     public var source: Decl
@@ -81,12 +82,10 @@ private func CopyParamAttributes(source: FuncParam, target: MangleFuncParam): Un
 }
 
 private class MangleAdapterIdAllocator {
-    private static var nextId: Int64 = 0
+    private static let nextId = AtomicInt64(0)
 
     public static func Next(): Int64 {
-        let out = nextId
-        nextId++
-        return out
+        return nextId.fetchAdd(1)
     }
 }
 

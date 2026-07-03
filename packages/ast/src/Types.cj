@@ -1,6 +1,7 @@
 package cangjie_compiler::ast
 
 import std.collection.*
+import std.sync.AtomicInt64
 
 private let CORE_PACKAGE_NAME: String = "std.core"
 private let STD_LIB_OPTION: String = "Option"
@@ -275,7 +276,7 @@ private func hashNominalTy(kind: TypeKind, name: String, typeArgs: ArrayList<Ty>
 }
 
 public open class Ty {
-    private static var nextObjectId: Int64 = 1
+    private static let nextObjectId = AtomicInt64(1)
     private static let initialTy: Ty = InitialTy()
 
     public let objectId: Int64
@@ -287,8 +288,7 @@ public open class Ty {
     protected var generic: Bool = false
 
     public init(kind: TypeKind) {
-        objectId = nextObjectId
-        nextObjectId++
+        objectId = nextObjectId.fetchAdd(1)
         this.kind = kind
     }
 

@@ -2,6 +2,7 @@ package cangjie_compiler::modules
 
 import std.collection.*
 import std.convert.*
+import std.sync.AtomicInt64
 import cangjie_compiler::ast.AccessLevel as ASTAccessLevel
 import cangjie_compiler::ast.ASTKind
 import cangjie_compiler::ast.Attribute as ASTAttribute
@@ -246,12 +247,10 @@ public func MakeRange(identifierPos: Position, identifier: String): Range {
 }
 
 private class ModulesObjectIdAllocator {
-    private static var nextId: Int64 = 1
+    private static let nextId = AtomicInt64(1)
 
     public static func Next(): Int64 {
-        let out = nextId
-        nextId++
-        return out
+        return nextId.fetchAdd(1)
     }
 }
 

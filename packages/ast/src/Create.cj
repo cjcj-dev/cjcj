@@ -5,8 +5,9 @@ import cangjie_compiler::utils.CJC_ABORT
 import cangjie_compiler::utils.CJC_ASSERT
 import cangjie_compiler::utils.CJC_NULLPTR_CHECK
 import std.collection.*
+import std.sync.AtomicUInt32
 
-private var tmpVarIndex: UInt64 = 1u64
+private let tmpVarIndex = AtomicUInt32(1u32)
 
 public type FullPackageNameToPrefixPaths = HashMap<String, Array<String>>
 
@@ -254,8 +255,7 @@ public func CreateTmpVarDecl(): VarDecl {
 }
 
 public func CreateTmpVarDecl(typeNode: Option<Type>, initializer: Option<Expr>): VarDecl {
-    let name = "$tmp${tmpVarIndex}"
-    tmpVarIndex++
+    let name = "$tmp${tmpVarIndex.fetchAdd(1u32)}"
     return CreateVarDecl(name, cloneExprNode(initializer), cloneTypeNode(typeNode))
 }
 

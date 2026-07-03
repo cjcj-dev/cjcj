@@ -2,8 +2,9 @@ package cangjie_compiler::chir
 
 import std.collection.*
 import cangjie_compiler::utils.{CJC_ASSERT, OverflowStrategy, StaticCast}
+import std.sync.AtomicInt64
 
-private var gLambdaClonedIdx: UInt64 = 0u64
+private let gLambdaClonedIdx = AtomicInt64(0)
 
 public open class Expression <: Base {
     private let kind: ExprKind
@@ -2115,8 +2116,7 @@ public class Lambda <: Expression {
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let lambdaFuncTy = funcTy ?? throw IllegalArgumentException("lambda clone requires a function type")
-        let newIdentifier = identifier + "." + gLambdaClonedIdx.toString()
-        gLambdaClonedIdx++
+        let newIdentifier = identifier + "." + gLambdaClonedIdx.fetchAdd(1).toString()
         let cloned = builder.CreateLambda(GetResult().getOrThrow().GetType().getOrThrow(), lambdaFuncTy, parent, isLocalFunc: IsLocalFunc(),
             identifier: newIdentifier, srcCodeIdentifier: GetSrcCodeIdentifier(),
             genericTypeParams: GetGenericTypeParams())

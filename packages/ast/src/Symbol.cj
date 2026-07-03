@@ -1,6 +1,7 @@
 package cangjie_compiler::ast
 
 import std.collection.*
+import std.sync.AtomicUInt32
 
 public struct HashID <: Hashable & Equatable<HashID> {
     public var hash64: UInt64 = 0
@@ -76,18 +77,18 @@ public class Symbol {
 }
 
 public class SymbolApi {
-    private static var ids: UInt32 = UInt32.Max
+    private static let ids = AtomicUInt32(UInt32.Max)
 
     public init() {}
 
     @OverflowWrapping
     public static func NextHashID(fileHash: UInt64): HashID {
-        ids++
-        return HashID(fileHash, ids)
+        let fieldID = ids.fetchAdd(1u32) + 1u32
+        return HashID(fileHash, fieldID)
     }
 
     public static func ResetID(): Unit {
-        ids = UInt32.Max
+        ids.store(UInt32.Max)
     }
 
     public static func GetName(symbol: Option<Symbol>): String {
