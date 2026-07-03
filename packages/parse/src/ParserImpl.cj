@@ -142,7 +142,12 @@ public class ParserImpl {
     }
 
     public func Next(): Unit {
-        lastToken = lookahead
+        if (lookahead.kind != TokenKind.COMMENT && lookahead.kind != TokenKind.END) {
+            lastToken = lookahead
+            if (lookahead.kind != TokenKind.NL) {
+                lastNoneNLToken = lookahead
+            }
+        }
         deadlocked = false
         var token = lexer.Next()
         RecordTokenLines(token)
@@ -182,8 +187,8 @@ public class ParserImpl {
                 }
             }
         }
-        if (lastToken.kind != TokenKind.NL && lastToken.kind != TokenKind.COMMENT && lastToken.kind != TokenKind.SENTINEL) {
-            lastNoneNLToken = lastToken
+        if (token.kind == TokenKind.END && !lastToken.Begin().IsZero()) {
+            token.SetValuePos(token.Value(), lastToken.End(), lastToken.End())
         }
         lookahead = token
     }

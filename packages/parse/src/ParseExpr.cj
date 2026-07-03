@@ -8,6 +8,7 @@ import cangjie_compiler::ast.FuncParam as AstFuncParam
 import cangjie_compiler::ast.FuncParamList as AstFuncParamList
 import cangjie_compiler::ast.MacroInvocation as AstMacroInvocation
 import cangjie_compiler::ast.VarDecl as AstVarDecl
+import cangjie_compiler::utils.IF_AVAILABLE
 
 private let G_NO_NEED_SEMI_EXPR_LIST: Array<ASTKind> = [
     ASTKind.THROW_EXPR, ASTKind.RETURN_EXPR, ASTKind.ASSIGN_EXPR, ASTKind.UNARY_EXPR, ASTKind.SPAWN_EXPR,
@@ -942,14 +943,52 @@ extend ParserImpl {
         if (SeeingKeywordAndOperater()) {
             return ParseExpr()
         }
-        if (CheckIfSeeingDecl(scopeKind)) {
+        if (SeeingMacroCall()) {
+            if (curMacroCall.isSome() || enableCustomAnno) {
+                return ParseDecl(scopeKind)
+            }
+            return ParseExpr()
+        } else if (SeeingMacroCallDecl()) {
             return ParseDecl(scopeKind)
+        } else if (CheckIfSeeingDecl(scopeKind)) {
+            return ParseDecl(scopeKind)
+        } else if (SeeingExpr()) {
+            return ParseExpr()
         }
-        return ParseExpr()
+        return InvalidExpr(Peek().Begin())
     }
 
     public func CheckIfSeeingDecl(scopeKind: ScopeKind): Bool {
-        return SeeingDeclInScope(scopeKind) || SeeingImport()
+        if (SeeingIfAvailable()) {
+            return false
+        }
+        return SeeingDecl() || SeeingMacroCallDecl() || SeeingIllegalDeclInBlock() ||
+            SeeingPrimaryCtorDecl(scopeKind) || SeeingEnumConstructor(scopeKind)
+    }
+
+    public func SeeingIfAvailable(): Bool {
+        if (!Seeing(TokenKind.AT)) {
+            return false
+        }
+        let tokens = lexer.LookAheadSkipNL(1)
+        return !tokens.isEmpty() && tokens[0].kind == TokenKind.IDENTIFIER && tokens[0].Value() == IF_AVAILABLE
+    }
+
+    public func SeeingPrimaryCtorDecl(scopeKind: ScopeKind): Bool {
+        if (!ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY) && !ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY)) {
+            return false
+        }
+        return Seeing(TokenKind.INIT) || SeeingPrimaryIdentifier()
+    }
+
+    public func SeeingEnumConstructor(scopeKind: ScopeKind): Bool {
+        return (Seeing(TokenKind.IDENTIFIER) || SeeingContextualKeyword()) &&
+            (ScopeKindEquals(scopeKind, ScopeKind.ENUM_BODY) || ScopeKindEquals(scopeKind, ScopeKind.ENUM_CONSTRUCTOR))
+    }
+
+    public func SeeingIllegalDeclInBlock(): Bool {
+        return SeeingAny([TokenKind.CLASS, TokenKind.INIT, TokenKind.INTERFACE, TokenKind.EXTEND, TokenKind.STRUCT,
+            TokenKind.PROP]) || SeeingImport()
     }
 
     public func ParseIfExpr(): IfExpr {

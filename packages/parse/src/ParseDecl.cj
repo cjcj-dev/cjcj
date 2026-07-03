@@ -72,6 +72,7 @@ extend ParserImpl {
             ParseAnnotations(annos)
             ParseTopLevelDecl(file, annos)
             annos.clear()
+            bracketsStack.clear()
             topLevelCount++
         }
     }
