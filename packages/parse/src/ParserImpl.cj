@@ -233,10 +233,13 @@ public class ParserImpl {
         return found
     }
 
-    public func Expect(kind: TokenKind, message: String): Token {
+    public func Expect(kind: TokenKind, _: String): Token {
         let token = Peek()
         if (!Skip(kind)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), message)
+            let expectStr = "'" + TokenKindLiteral(kind) + "'"
+            let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_character, lookahead, expectStr,
+                ConvertToken(lookahead))
+            builder.AddMainHintArguments(expectStr)
         }
         return token
     }

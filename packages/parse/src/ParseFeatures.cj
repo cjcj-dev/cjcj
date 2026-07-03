@@ -11,10 +11,7 @@ extend ParserImpl {
         directive.end = token.End()
         for (anno in annos) {
             if (anno.kind != AnnotationKind.NON_PRODUCT) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    anno.begin,
-                    "unexpected annotation '${anno.identifier.Val()}' on features directive")
+                DiagUnexpectedAnnoOn(anno, directive.featuresPos, anno.identifier.Val(), "features")
                 directive.isBroken = true
             }
             directive.annotations.add(anno)
@@ -35,7 +32,7 @@ extend ParserImpl {
         features.featuresSet = set
         var isBroken = false
         if (!Skip(TokenKind.LCURL)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, lastToken.End(), "expected '{' after features")
+            DiagExpectCharacter(lastToken.End(), "{")
             isBroken = true
         } else {
             set.lCurlPos = lastToken.Begin()
@@ -43,8 +40,11 @@ extend ParserImpl {
         }
         ParseFeaturesSet(set)
         if (!Skip(TokenKind.RCURL)) {
-            let pos = if (!set.lCurlPos.IsZero()) { set.lCurlPos } else { lastToken.End() }
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, pos, "expected '}' after features")
+            if (!set.lCurlPos.IsZero()) {
+                DiagExpectedRightDelimiter("{", set.lCurlPos)
+            } else {
+                DiagExpectCharacter(lastToken.End(), "}")
+            }
             isBroken = true
         } else {
             set.rCurlPos = lastToken.Begin()
@@ -64,10 +64,7 @@ extend ParserImpl {
             }
             if (Seeing(TokenKind.IDENTIFIER)) {
                 if (lastToken.kind == TokenKind.IDENTIFIER) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        lastToken.End(),
-                        "expected '.' or ',' in features directive")
+                    DiagExpectCharacter(lastToken.End(), "'.' or ','")
                     ConsumeUntilAny([TokenKind.NL, TokenKind.COMMA, TokenKind.RCURL], targetTokenConsumed: false)
                     isBroken = true
                 } else {
@@ -77,10 +74,7 @@ extend ParserImpl {
                     features.commaPoses.add(lastToken.Begin())
                 }
             } else {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    Peek().Begin(),
-                    "expected feature identifier")
+                DiagExpectedIdentifier(MakeRange(lastToken.Begin(), lastToken.End()), "an identifier", "after this", false)
                 ConsumeUntilAny([TokenKind.NL, TokenKind.COMMA, TokenKind.RCURL], targetTokenConsumed: false)
                 isBroken = true
             }
@@ -106,10 +100,7 @@ extend ParserImpl {
                 let identifier = ParseIdentifierFromToken(token)
                 content.identifiers.add(identifier)
                 if (identifier.IsRaw()) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        token.Begin(),
-                        "raw identifier '${token.Value()}' is not allowed in features directive")
+                    DiagRawIdentifierNotAllowed(token.Value())
                     isBroken = true
                 }
             } else {
@@ -124,10 +115,7 @@ extend ParserImpl {
             }
         }
         if (lastToken.kind != TokenKind.IDENTIFIER) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                lastToken.Begin(),
-                "expected identifier in features directive")
+            DiagExpectedIdentifier(MakeRange(content.begin, content.end), "an identifier", "after this", false)
             isBroken = true
         }
         if (isBroken) {

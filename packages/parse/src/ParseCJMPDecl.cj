@@ -1,5 +1,6 @@
 package cangjie_compiler::parse
 
+import cangjie_compiler::ast.IsStaticInitializer
 import cangjie_compiler::option.OutputModeIndex as OptionOutputModeIndex
 import std.collection.*
 
@@ -26,10 +27,11 @@ public class MPParserImpl {
         var ok = true
         for (modifier in modifiers) {
             if (HasCJMPModifiers(modifier) && !CompilePlatform() && !CompileCommon()) {
-                parser.diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    modifier.begin,
-                    "unexpected CJMP modifier '${modifier.ToString()}' outside common/platform compilation")
+                if (let Some(file) <- parser.currentFile) {
+                    parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_cjmp_decl, file)
+                } else {
+                    parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_cjmp_decl, modifier)
+                }
                 ok = false
             }
         }
@@ -86,10 +88,11 @@ public class MPParserImpl {
         }
         if (!hasCtor) {
             let declType = if (decl.astKind == ASTKind.CLASS_DECL) { "class" } else { "struct" }
-            parser.diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                decl.identifier.Begin(),
-                "common ${declType} '${decl.identifier.Val()}' must declare a constructor")
+            parser.ParseDiagnoseRefactor(
+                DiagKindRefactor.parse_cjmp_in_common_ctor_required,
+                MakeRange(decl.identifier.Begin(), decl.identifier.End()),
+                declType,
+                decl.identifier.Val())
         }
     }
 
@@ -97,21 +100,24 @@ public class MPParserImpl {
         var ok = true
         if (decl.IsCommonOrSpecific()) {
             let kind = if (decl.TestAttr(Attribute.COMMON)) { "common" } else { "specific" }
-            if (decl.TestAttr(Attribute.GENERIC) && decl.HasAnno(AnnotationKind.FROZEN)) {
-                parser.diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    decl.identifier.Begin(),
-                    "${kind} generic declaration '${decl.identifier.Val()}' cannot use @Frozen")
-                decl.EnableAttr(Attribute.IS_BROKEN)
-                ok = false
+            if (decl.TestAttr(Attribute.GENERIC) && !CheckGenericDeclFrozen(decl, parser)) {
+                return false
             }
             if (decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL && decl.TestAttr(Attribute.COMMON)) {
-                parser.diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    decl.begin,
-                    "common modifier is not allowed on pattern variable declarations")
-                decl.EnableAttr(Attribute.IS_BROKEN)
-                ok = false
+                if (let Some(varDecl) <- (decl as VarWithPatternDecl)) {
+                    if (let Some(pattern) <- varDecl.irrefutablePattern) {
+                        parser.ParseDiagnoseRefactor(
+                            DiagKindRefactor.parse_cjmp_pattern_decl,
+                            pattern,
+                            GetDiagKind(pattern),
+                            kind)
+                    }
+                }
+                return false
+            }
+            if (IsStaticInitializer(decl)) {
+                parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_cjmp_static_init, decl, kind)
+                return false
             }
         }
         for (member in decl.GetMemberDecls()) {
@@ -140,20 +146,21 @@ public class MPParserImpl {
         }
         for (member in decl.GetMemberDecls()) {
             if (!HasDefault(member)) {
-                parser.diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    member.begin,
-                    "specific interface member '${member.identifier.Val()}' in '${decl.identifier.Val()}' must have an implementation")
+                parser.ParseDiagnoseRefactor(
+                    DiagKindRefactor.parse_specific_member_must_have_implementation,
+                    member,
+                    member.identifier.Val(),
+                    decl.identifier.Val())
                 member.EnableAttr(Attribute.IS_BROKEN)
             }
         }
     }
 
     private func DiagOuterDeclMissMatch(node: Decl, p0: String, p1: String, p2: String, p3: String): Unit {
-        parser.diag.DiagnoseRefactor(
-            DiagKindRefactor.parse_diag_error,
-            node.begin,
-            "${p0} is marked ${p1}, but enclosing ${p2} is not marked ${p3}")
+        parser.ParseDiagnoseRefactor(
+            DiagKindRefactor.parse_cjmp_outdecl_miss_match,
+            node,
+            arguments: [p0, p1, p2, p3])
         node.EnableAttr(Attribute.IS_BROKEN)
     }
 
@@ -170,6 +177,24 @@ public class MPParserImpl {
         }
         return false
     }
+}
+
+private func CheckGenericDeclFrozen(decl: Decl, parser: ParserImpl): Bool {
+    if (decl.HasAnno(AnnotationKind.FROZEN)) {
+        var reportAt: Node = decl
+        for (anno in decl.annotations) {
+            if (anno.kind == AnnotationKind.FROZEN) {
+                reportAt = anno
+                break
+            }
+        }
+        parser.ParseDiagnoseRefactor(
+            DiagKindRefactor.sema_common_generic_frozen_not_supported,
+            reportAt,
+            decl.identifier.Val())
+        return false
+    }
+    return true
 }
 
 private func HasDefault(decl: Decl): Bool {
@@ -215,7 +240,7 @@ private func IsCJMPAggregateDecl(decl: Decl): Bool {
         decl.astKind == ASTKind.EXTEND_DECL
 }
 
-private func GetDiagKind(node: Decl): String {
+private func GetDiagKind(node: Node): String {
     if (node.astKind == ASTKind.FUNC_DECL && node.TestAttr(Attribute.CONSTRUCTOR)) {
         return "constructor"
     }
@@ -230,6 +255,10 @@ private func GetDiagKind(node: Decl): String {
         case ASTKind.ENUM_DECL => "enum"
         case ASTKind.PROP_DECL => "property"
         case ASTKind.EXTEND_DECL => "extend"
+        case ASTKind.ENUM_PATTERN => "enum"
+        case ASTKind.TUPLE_PATTERN => "tuple"
+        case ASTKind.WILDCARD_PATTERN => "wildcard"
+        case ASTKind.FUNC_PARAM => "parameter"
         case ASTKind.TYPE_ALIAS_DECL => "type"
         case ASTKind.MACRO_EXPAND_DECL => "macro_expand_decl"
         case _ => "declaration"

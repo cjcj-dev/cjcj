@@ -23,7 +23,7 @@ extend ParserImpl {
             return attrs
         }
         if (IsScopeRulesEmpty(defKind, scopeKind)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, modifiers[0].begin, "modifier is not allowed here")
+            DiagIllegalModifierInScope(modifiers[0])
             return attrs
         }
         if (!MPParserImpl(this).CheckCJMPModifiers(modifiers)) {
@@ -32,7 +32,7 @@ extend ParserImpl {
         let validModifiers = ArrayList<Modifier>()
         for (modifier in modifiers) {
             if (!IsModifierAllowed(defKind, scopeKind, modifier.modifier)) {
-                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, modifier.begin, "modifier is not allowed here")
+                DiagIllegalModifierInScope(modifier)
                 if (let Some(attr) <- GetAttributeByModifier(modifier.modifier)) {
                     AddAttrIfAbsent(attrs, attr)
                 }
@@ -44,7 +44,7 @@ extend ParserImpl {
                 if (other.begin < modifier.begin) {
                     for (conflict in conflicts.data) {
                         if (other.modifier == conflict) {
-                            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, modifier.begin, "conflicting modifier")
+                            DiagConflictedModifier(other, modifier)
                             hasCollision = true
                             RemoveModifierKind(validModifiers, conflict)
                         }
@@ -85,24 +85,22 @@ extend ParserImpl {
             let conflicts = GetWarningConflicts(defKind, scopeKind, modifier.modifier)
             for (higher in conflicts.data) {
                 if (higher == TokenKind.ILLEGAL) {
-                    diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_warning, modifier.begin, "redundant modifier")
+                    DiagRedundantModifiers(modifier)
                     break
                 }
-                if (HasModifierKind(modifiers, higher)) {
-                    diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_warning, modifier.begin, "redundant modifier")
+                var foundHigher: Option<Modifier> = None
+                for (candidate in modifiers) {
+                    if (candidate.modifier == higher) {
+                        foundHigher = candidate
+                        break
+                    }
+                }
+                if (let Some(higherModifier) <- foundHigher) {
+                    DiagRedundantModifiers(modifier, higherModifier)
                     break
                 }
             }
         }
-    }
-
-    private func HasModifierKind(modifiers: ArrayList<Modifier>, kind: TokenKind): Bool {
-        for (modifier in modifiers) {
-            if (modifier.modifier == kind) {
-                return true
-            }
-        }
-        return false
     }
 
     private func RemoveModifierKind(modifiers: ArrayList<Modifier>, kind: TokenKind): Unit {

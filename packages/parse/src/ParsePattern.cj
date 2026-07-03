@@ -31,7 +31,7 @@ extend ParserImpl {
             return ParseTypePatternOrVarOrEnumPattern(attributes, isVar, inDecl)
         }
         let token = Peek()
-        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected pattern")
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_pattern, token, ConvertToken(token))
         Next()
         return InvalidPattern(token.Begin())
     }
@@ -194,10 +194,7 @@ extend ParserImpl {
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
             tuple.patterns.add(ParsePattern(attributes, isVar, inDecl))
             if (Seeing(TokenKind.BITOR)) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    Peek().Begin(),
-                    "or-patterns are not allowed inside tuple patterns")
+                DiagOrPattern()
                 ConsumeUntilAny([TokenKind.COMMA, TokenKind.RPAREN], targetTokenConsumed: false)
             }
             if (Skip(TokenKind.COMMA)) {
@@ -215,10 +212,7 @@ extend ParserImpl {
                 }
             }
             if (!hasBrokenChild) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    tuple.leftParenPos,
-                    "expected ')' after tuple pattern")
+                DiagExpectedRightDelimiter("(", tuple.begin)
             }
             tuple.rightParenPos = lastToken.Begin()
         } else {
@@ -227,10 +221,7 @@ extend ParserImpl {
         tuple.rightBracePos = tuple.rightParenPos
         tuple.end = lastToken.End()
         if (!isEnumPatternParams && tuple.patterns.size == 1) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                tuple.begin,
-                "tuple pattern must contain at least two fields")
+            DiagExpectedMoreFieldInTuplePattern()
         }
         return tuple
     }

@@ -293,9 +293,13 @@ extend ParserImpl {
             Next()
             return ParseIdentifierFromToken(token)
         }
+        var pos = INVALID_POSITION
+        if (!node.isBroken) {
+            pos = lastToken.Begin()
+            DiagExpectedIdentifierWithNode(node)
+        }
         node.isBroken = true
-        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected identifier")
-        return SrcIdentifier("", "", token.Begin(), token.Begin(), false)
+        return SrcIdentifier("", "", pos, pos, false)
     }
 
     public func ParseOptionalGeneric(): Option<Generic> {
@@ -336,7 +340,7 @@ extend ParserImpl {
             let refTy = ParseRefType(true)
             constraint.refType = refTy
             if (!Skip(TokenKind.UPPERBOUND)) {
-                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected '<:' in generic constraint")
+                DiagExpectCharacter("'<:'")
             } else {
                 constraint.operatorPos = lastToken.Begin()
             }
@@ -360,11 +364,8 @@ extend ParserImpl {
         for (constraint in out) {
             if (let Some(refTy) <- constraint.refType) {
                 let typeName = refTy.ref.identifier.Val()
-                if (posRecord.contains(typeName)) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        refTy.begin,
-                        "duplicated type name '${typeName}' in generic constrain")
+                if (let Some(prePos) <- posRecord.get(typeName)) {
+                    DiagDuplicatedItem("type name", typeName, refTy.begin, prePos, " in generic constrain")
                 } else {
                     posRecord.add(typeName, refTy.begin)
                 }
