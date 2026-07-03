@@ -3,7 +3,6 @@ package cangjie_compiler::sema.Desugar
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::sema.*
 
 private let COMPOSITION_FUNC_NAME: String = "composition"
 private let CALL_OPERATOR_NAME: String = "()"
@@ -116,39 +115,6 @@ private func MoveArgsInto(target: ArrayList<FuncArg>, source: ArrayList<FuncArg>
         target.add(arg)
     }
     source.clear()
-}
-
-private func FilterAliasTypeArgs(args: ArrayList<Type>): ArrayList<Type> {
-    let out = ArrayList<Type>()
-    for (arg in args) {
-        if (let Some(argTy) <- arg.GetTy()) {
-            if (let Some(intersectionTy) <- (argTy as IntersectionTy)) {
-                if (intersectionTy.tys.isEmpty()) {
-                    continue
-                }
-            }
-        }
-        out.add(arg)
-    }
-    return out
-}
-
-private func FirstTypeArgOrInvalid(baseArgs: ArrayList<Type>): Ty {
-    if (!baseArgs.isEmpty()) {
-        if (let Some(ty) <- baseArgs[0].GetTy()) {
-            return ty
-        }
-    }
-    return TypeManager.GetInvalidTy()
-}
-
-private func GetBuiltinCtorBaseTy(typeManager: TypeManager, callExpr: CallExpr): Option<Ty> {
-    if (let Some(baseFunc) <- callExpr.baseFunc) {
-        if (let Some(baseTy) <- baseFunc.GetTy()) {
-            return typeManager.SubstituteTypeAliasInTy(baseTy)
-        }
-    }
-    return None
 }
 
 private func AppendDeclToClassOrStructBody(decl: Decl, member: Decl): Unit {
@@ -682,71 +648,6 @@ public func DesugarVariadicCallExpr(expr: CallExpr, fixedPositionalArity: Int64)
         CopyUnsafeAttr(expr, callExpr)
         AddCurFile(callExpr, file: expr.curFile)
         expr.desugarExpr = callExpr
-    }
-}
-
-public func DesugarPointerCall(typeManager: TypeManager, expr: CallExpr): Unit {
-    if (let Some(_) <- expr.desugarExpr) {
-        return
-    }
-    if (let Some(baseFunc) <- expr.baseFunc) {
-        if (let Some(baseFuncTy) <- GetBuiltinCtorBaseTy(typeManager, expr)) {
-            let typeNode = Type()
-            let typeArgs = baseFuncTy.typeArgs
-            let baseArgs = FilterAliasTypeArgs(baseFunc.GetTypeArgs())
-            let usefulTypeArg = !typeArgs.isEmpty() && (!typeArgs[0].IsGeneric() || !baseArgs.isEmpty())
-            let argTy = if (usefulTypeArg) { typeArgs[0] } else { FirstTypeArgOrInvalid(baseArgs) }
-            typeNode.SetTy(typeManager.GetPointerTy(argTy))
-
-            let pointerExpr = PointerExpr()
-            pointerExpr.typeNode = typeNode
-            if (!expr.args.isEmpty()) {
-                pointerExpr.arg = expr.args[0]
-            }
-            expr.args.clear()
-            pointerExpr.scopeName = expr.scopeName
-            pointerExpr.sourceExpr = expr
-            pointerExpr.begin = expr.begin
-            pointerExpr.end = expr.end
-            AddCurFile(pointerExpr, file: expr.curFile)
-            expr.desugarExpr = pointerExpr
-        }
-    }
-}
-
-public func DesugarArrayCall(typeManager: TypeManager, expr: CallExpr): Unit {
-    if (let Some(_) <- expr.desugarExpr) {
-        return
-    }
-    if (let Some(baseFunc) <- expr.baseFunc) {
-        if (let Some(baseFuncTy) <- GetBuiltinCtorBaseTy(typeManager, expr)) {
-            let typeNode = Type()
-            let typeArgs = typeManager.GetTypeArgs(baseFuncTy)
-            let baseArgs = FilterAliasTypeArgs(baseFunc.GetTypeArgs())
-            if (let Some(varrayTy) <- (baseFuncTy as VArrayTy)) {
-                var argTy = if (!typeArgs.isEmpty()) { typeArgs[0] } else { TypeManager.GetInvalidTy() }
-                if (!typeArgs.isEmpty() && typeArgs[0].IsGeneric() && !baseArgs.isEmpty()) {
-                    argTy = FirstTypeArgOrInvalid(baseArgs)
-                }
-                typeNode.SetTy(typeManager.GetVArrayTy(argTy, varrayTy.size))
-            } else {
-                let usefulTypeArg = !typeArgs.isEmpty() && (!typeArgs[0].IsGeneric() || !baseArgs.isEmpty())
-                let argTy = if (usefulTypeArg) { typeArgs[0] } else { FirstTypeArgOrInvalid(baseArgs) }
-                typeNode.SetTy(typeManager.GetArrayTy(argTy, 1u64))
-            }
-            let arrayExpr = ArrayExpr()
-            arrayExpr.typeNode = typeNode
-            if (let Some(_) <- (baseFuncTy as VArrayTy)) {
-                arrayExpr.isValueArray = true
-            }
-            MoveArgsInto(arrayExpr.args, expr.args)
-            arrayExpr.scopeName = expr.scopeName
-            arrayExpr.sourceExpr = expr
-            arrayExpr.begin = expr.begin
-            arrayExpr.end = expr.end
-            AddCurFile(arrayExpr, file: expr.curFile)
-            expr.desugarExpr = arrayExpr
-        }
     }
 }
 
