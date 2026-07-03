@@ -6,7 +6,169 @@ import cangjie_compiler::ast.VisitAction
 import cangjie_compiler::ast.Walker
 import cangjie_compiler::option.IsUnsafeBackend as OptionIsUnsafeBackend
 
+func LookupMatchingOpenBracket(kind: TokenKind): TokenKind {
+    if (kind == TokenKind.RCURL) {
+        return TokenKind.LCURL
+    }
+    if (kind == TokenKind.RSQUARE) {
+        return TokenKind.LSQUARE
+    }
+    if (kind == TokenKind.RPAREN) {
+        return TokenKind.LPAREN
+    }
+    return TokenKind.ILLEGAL
+}
+
 extend ParserImpl {
+    public func CanMatchBracketInStack(): Bool {
+        let matchingBracket = LookupMatchingOpenBracket(lookahead.kind)
+        if (matchingBracket != TokenKind.ILLEGAL) {
+            var bracketIndex: Int64 = 0
+            while (bracketIndex < bracketsStack.size && bracketsStack[bracketIndex] != matchingBracket) {
+                bracketIndex++
+            }
+            if (bracketIndex == bracketsStack.size) {
+                return false
+            } else {
+                while (bracketsStack.size > bracketIndex) {
+                    bracketsStack.remove(at: bracketIndex)
+                }
+            }
+            return true
+        }
+        return false
+    }
+
+    public func SkipPairedBrackets(): Unit {
+        if (Seeing(TokenKind.LPAREN)) {
+            Next()
+            ConsumeUntil(TokenKind.RPAREN, targetTokenConsumed: false)
+        } else if (Seeing(TokenKind.LCURL)) {
+            Next()
+            ConsumeUntil(TokenKind.RCURL, targetTokenConsumed: false)
+        } else if (Seeing(TokenKind.LSQUARE)) {
+            Next()
+            ConsumeUntil(TokenKind.RSQUARE, targetTokenConsumed: false)
+        }
+    }
+
+    public func ConsumeUntilDecl(): Unit {
+        ConsumeUntilDecl(TokenKind.SENTINEL)
+    }
+
+    public func ConsumeUntilDecl(kind: TokenKind): Unit {
+        while (!SeeingDecl() && !SeeingMacroCallDecl() && !Seeing(kind)) {
+            if (Seeing(TokenKind.END)) {
+                break
+            }
+            SkipPairedBrackets()
+            Next()
+        }
+    }
+
+    public func ConsumeCommon(flag: Bool): (Bool, Bool) {
+        var resultFlag = flag
+        if (Seeing(TokenKind.NL)) {
+            resultFlag = true
+        }
+        if (Seeing(TokenKind.END)) {
+            return (false, resultFlag)
+        }
+        SkipPairedBrackets()
+        skipNL = false
+        Next()
+        return (true, resultFlag)
+    }
+
+    public func TargetTokenConsumedControl(flag: Bool, targetTokenConsumed: Bool): Unit {
+        var resultFlag = flag
+        if (Seeing(TokenKind.NL)) {
+            resultFlag = true
+            Next()
+        } else if (targetTokenConsumed) {
+            Next()
+        }
+        if (resultFlag) {
+            newlineSkipped = true
+        }
+        skipNL = true
+    }
+
+    public func ConsumeUntil(kind: TokenKind, targetTokenConsumed!: Bool = true): Unit {
+        skipNL = false
+        var flag = false
+        while (!Seeing(kind)) {
+            let consumeResult = ConsumeCommon(flag)
+            flag = consumeResult[1]
+            if (!consumeResult[0]) {
+                break
+            }
+        }
+        if (targetTokenConsumed) {
+            if (Seeing(TokenKind.NL)) {
+                flag = true
+            }
+            Next()
+        }
+        if (flag) {
+            newlineSkipped = true
+        }
+        skipNL = true
+    }
+
+    public func ConsumeUntilAny(kinds: Array<TokenKind>, targetTokenConsumed!: Bool = true): Unit {
+        skipNL = false
+        var flag = false
+        while (true) {
+            var matched = false
+            for (kind in kinds) {
+                if (Seeing(kind)) {
+                    matched = true
+                    break
+                }
+            }
+            if (matched) {
+                break
+            }
+            let consumeResult = ConsumeCommon(flag)
+            flag = consumeResult[1]
+            if (!consumeResult[0]) {
+                break
+            }
+        }
+        TargetTokenConsumedControl(flag, targetTokenConsumed)
+    }
+
+    public func ConsumeUntilDeclOrNL(): Unit {
+        ConsumeUntilDeclOrNL(TokenKind.SENTINEL)
+    }
+
+    public func ConsumeUntilDeclOrNL(kind: TokenKind): Unit {
+        skipNL = false
+        var flag = false
+        while (!Seeing(TokenKind.NL) && !SeeingDecl() && !SeeingMacroCallDecl() && !Seeing(kind)) {
+            let consumeResult = ConsumeCommon(flag)
+            flag = consumeResult[1]
+            if (!consumeResult[0]) {
+                break
+            }
+        }
+        if (flag) {
+            newlineSkipped = true
+        }
+        skipNL = true
+    }
+
+    public func DetectPrematureEnd(): Bool {
+        if (deadlocked || Seeing(TokenKind.END)) {
+            Next()
+            return true
+        } else {
+            deadlocked = true
+            return false
+        }
+    }
+
     public func SeeingCombinator(kinds: Array<TokenKind>): Bool {
         if (kinds.isEmpty() || !Seeing(kinds, skipNewline: false)) {
             return false

@@ -17,6 +17,7 @@ public class ParserImpl {
     public var newlineSkipped: Bool = true
     public var skipNL: Bool = true
     public var firstNLPosition: Position = DEFAULT_POSITION
+    public var deadlocked: Bool = false
     public var enableCustomAnno: Bool = false
     public var forImport: Bool = false
     public var inForeignBlock: Bool = false
@@ -32,6 +33,7 @@ public class ParserImpl {
     public var compileOptions: GlobalOptions = GlobalOptions()
     public let commentsMap: TokenVecMap = TokenVecMap()
     public let chainedAST: ArrayList<Node> = ArrayList<Node>()
+    public let bracketsStack: ArrayList<TokenKind> = ArrayList<TokenKind>()
 
     public init(fileID: UInt64, input: String, diag: BasicDiagnosticEngine, sm: SourceManager, attachComment: Bool, parsingDeclFiles: Bool) {
         this.diag = diag
@@ -141,16 +143,44 @@ public class ParserImpl {
 
     public func Next(): Unit {
         lastToken = lookahead
+        deadlocked = false
         var token = lexer.Next()
         RecordTokenLines(token)
+        if (token.kind == TokenKind.LCURL || token.kind == TokenKind.LPAREN ||
+            token.kind == TokenKind.LSQUARE) {
+            bracketsStack.add(token.kind)
+        }
+        var matchingBracket = LookupMatchingOpenBracket(token.kind)
+        if (matchingBracket != TokenKind.ILLEGAL && !bracketsStack.isEmpty() &&
+            matchingBracket == bracketsStack[bracketsStack.size - 1]) {
+            bracketsStack.remove(at: bracketsStack.size - 1)
+        }
         newlineSkipped = false
+        var firstNLFlag = true
+        if (token.kind == TokenKind.NL) {
+            newlineSkipped = true
+            firstNLPosition = token.Begin()
+            firstNLFlag = false
+        }
         while (token.kind == TokenKind.COMMENT || (skipNL && token.kind == TokenKind.NL)) {
-            if (token.kind == TokenKind.NL) {
-                newlineSkipped = true
-                firstNLPosition = token.Begin()
-            }
             token = lexer.Next()
             RecordTokenLines(token)
+            if (token.kind == TokenKind.LCURL || token.kind == TokenKind.LPAREN ||
+                token.kind == TokenKind.LSQUARE) {
+                bracketsStack.add(token.kind)
+            }
+            matchingBracket = LookupMatchingOpenBracket(token.kind)
+            if (matchingBracket != TokenKind.ILLEGAL && !bracketsStack.isEmpty() &&
+                matchingBracket == bracketsStack[bracketsStack.size - 1]) {
+                bracketsStack.remove(at: bracketsStack.size - 1)
+            }
+            if (token.kind == TokenKind.NL) {
+                newlineSkipped = true
+                if (firstNLFlag) {
+                    firstNLPosition = token.Begin()
+                    firstNLFlag = false
+                }
+            }
         }
         if (lastToken.kind != TokenKind.NL && lastToken.kind != TokenKind.COMMENT && lastToken.kind != TokenKind.SENTINEL) {
             lastNoneNLToken = lastToken
@@ -244,44 +274,6 @@ public class ParserImpl {
             builder.Emit()
         }
         return token
-    }
-
-    public func ConsumeUntil(kind: TokenKind): Unit {
-        while (!Seeing(TokenKind.END) && !Seeing(kind)) {
-            Next()
-        }
-        if (Seeing(kind)) {
-            Next()
-        }
-    }
-
-    public func ConsumeUntilAny(kinds: Array<TokenKind>, targetTokenConsumed!: Bool = true): Unit {
-        skipNL = false
-        var consumedNewline = false
-        while (!Seeing(TokenKind.END)) {
-            var matched = false
-            for (kind in kinds) {
-                if (Seeing(kind)) {
-                    matched = true
-                    break
-                }
-            }
-            if (matched) {
-                if (Seeing(TokenKind.NL)) {
-                    consumedNewline = true
-                    Next()
-                } else if (targetTokenConsumed) {
-                    Next()
-                }
-                if (consumedNewline) {
-                    newlineSkipped = true
-                }
-                skipNL = true
-                return
-            }
-            Next()
-        }
-        skipNL = true
     }
 
     public func ParseDiagnoseRefactor(
