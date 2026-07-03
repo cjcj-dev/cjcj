@@ -65,7 +65,7 @@ extend ParserImpl {
         if (Seeing(TokenKind.QUOTE)) { return ParseQuoteExpr() }
         if (SeeingMacroCall() || SeeingBuiltinAnnotation()) { return ParseMacroExprOrLambdaExpr() }
         let token = Peek()
-        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected expression")
+        DiagExpectedExpression()
         Next()
         return InvalidExpr(token.Begin())
     }
@@ -123,7 +123,7 @@ extend ParserImpl {
         let literalToken = Peek()
         if (literalToken.kind != TokenKind.INTEGER_LITERAL && literalToken.kind != TokenKind.FLOAT_LITERAL &&
             literalToken.kind != TokenKind.RUNE_BYTE_LITERAL) {
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, literalToken.Begin(), "expected numeric literal after '-'")
+            DiagExpectedLiteral(subToken.Begin())
             return InvalidExpr(subToken.Begin())
         }
         let kind = if (literalToken.kind == TokenKind.FLOAT_LITERAL) {
@@ -217,7 +217,11 @@ extend ParserImpl {
         ret.isValueArray = true
         if (!Skip(TokenKind.LPAREN)) {
             if (!Seeing(TokenKind.LCURL)) {
-                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected '(' or trailing lambda after VArray type")
+                if (let Some(ty) <- ret.typeNode) {
+                    if (!ty.isBroken) {
+                        ParseDiagnoseRefactor(DiagKindRefactor.parse_varray_with_paren, ty.end)
+                    }
+                }
                 ret.isBroken = true
             }
             if (let Some(ty) <- ret.typeNode) { ret.end = ty.end }
