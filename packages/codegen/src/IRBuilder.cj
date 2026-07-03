@@ -3315,6 +3315,7 @@ public class IRBuilder2 <: Resource {
         if (arrayValue.isNull()) {
             return LLVMNullValue()
         }
+        AddRetAttr(arrayValue, "noalias")
         return arrayValue
     }
 
