@@ -46,6 +46,7 @@ import cangjie_compiler::ast.Position as AstPosition
 import cangjie_compiler::ast.IsStaticInitializer as AstIsStaticInitializer
 import cangjie_compiler::ast.IsImpl as AstIsImpl
 import cangjie_compiler::ast.IsMirror as AstIsMirror
+import cangjie_compiler::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
 import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, ProfileRecorder, STATIC_INIT_VAR}
 
 private class FaithfulInitFileVars {
@@ -1019,8 +1020,20 @@ public class FaithfulAST2CHIR {
         TranslateNominalDecls(node)
         TranslateOtherTopLevelDecls(node)
         SetInitFuncForStaticVar(initOrder)
-        UpdateMemberVarPath(builder).RunOnPackage(CurrentPackage())
         FlatForInExpr(builder).RunOnPackage(CurrentPackage())
+        try (recorder = ProfileRecorder("Canonicalization", "GenerateVTable")) {
+            let allDefs = CurrentPackage().GetAllCustomTypeDef()
+            let generator = GenerateVTable(CurrentPackage(), allDefs, builder, opts, "GenerateVTable")
+            generator.CreateVTable()
+            generator.UpdateOperatorVirFunc()
+            generator.CreateVirtualFuncWrapper(IncreKind.INVALID, CompilationCache(), VirtualWrapperDepMap(),
+                VirtualWrapperDepMap())
+            generator.SetSrcFuncType()
+            generator.CreateMutFuncWrapper()
+            generator.UpdateFuncCall()
+        }
+        UpdateMemberVarPath(builder).RunOnPackage(CurrentPackage())
+        NoSideEffectMarker().RunOnPackage(CurrentPackage())
         if (!failure && opts.IsConstEvalEnabled() && !opts.enIncrementalCompilation && opts.commonPartCjos.isEmpty()) {
             let bchirPackages = ArrayList<BCHIR>()
             ConstEvalPass(builder, opts: opts).RunOnPackage(CurrentPackage(), initFuncsForConstVar, bchirPackages)
