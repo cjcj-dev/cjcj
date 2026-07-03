@@ -3,7 +3,7 @@ package cangjie_compiler::chir
 import cangjie_compiler::utils.CJC_ASSERT
 import std.collection.*
 import std.sort.*
-import std.sync.AtomicInt64
+import std.sync.*
 
 @OverflowWrapping
 func HashCombine(seed: Int64, value: Int64): Int64 {
@@ -1017,6 +1017,7 @@ public open class CustomType <: Type {
     public let def: CustomTypeDef
     private let implementedInterfaceTys: ArrayList<ClassType> = ArrayList<ClassType>()
     private var hasSetSuperInterface: Bool = false
+    private let setSuperInterfaceMtx: Mutex = Mutex()
 
     public init(kind: TypeKind, def: CustomTypeDef, typeArgs: ArrayList<Type>) {
         super(kind)
@@ -1101,15 +1102,20 @@ public open class CustomType <: Type {
 
     public func GetImplementedInterfaceTys(builder: CHIRBuilder,
         visited!: Option<HashSet<String>> = None): ArrayList<ClassType> {
-        if (hasSetSuperInterface) {
-            return implementedInterfaceTys.clone()
+        var result = ArrayList<ClassType>()
+        synchronized(setSuperInterfaceMtx) {
+            if (hasSetSuperInterface) {
+                result = implementedInterfaceTys.clone()
+            } else {
+                implementedInterfaceTys.clear()
+                for (interfaceTy in CalculateImplementedInterfaceTys(builder, visited: visited)) {
+                    implementedInterfaceTys.add(interfaceTy)
+                }
+                hasSetSuperInterface = true
+                result = implementedInterfaceTys.clone()
+            }
         }
-        implementedInterfaceTys.clear()
-        for (interfaceTy in CalculateImplementedInterfaceTys(builder, visited: visited)) {
-            implementedInterfaceTys.add(interfaceTy)
-        }
-        hasSetSuperInterface = true
-        return implementedInterfaceTys.clone()
+        return result
     }
 
     public func GetInstMap(instMap: HashMap<Int64, Type>): Unit {
@@ -1576,6 +1582,7 @@ public class StructType <: CustomType {
 public class ClassType <: CustomType {
     private var superClassTy: Option<ClassType> = None
     private var hasSetSuperClass: Bool = false
+    private let setSuperClassMtx: Mutex = Mutex()
 
     public init(def: ClassDef, typeArgs: ArrayList<Type>) {
         super(TypeKind.TYPE_CLASS, def, typeArgs)
@@ -1600,23 +1607,25 @@ public class ClassType <: CustomType {
             typeIdx++
         }
         if (let Some(superTy) <- GetClassDef().GetSuperClassTy()) {
-            let _ = builder
-            return (ReplaceRawGenericArgType(superTy, replaceTable) as ClassType).getOrThrow()
+            return (ReplaceRawGenericArgType(superTy, replaceTable, builder) as ClassType).getOrThrow()
         }
-        let _ = builder
         return None
     }
 
     public func GetSuperClassTy(builder!: Option<CHIRBuilder> = None): Option<ClassType> {
-        if (hasSetSuperClass) {
-            return superClassTy
+        var result: Option<ClassType> = None
+        synchronized(setSuperClassMtx) {
+            if (hasSetSuperClass) {
+                result = superClassTy
+            } else if (let Some(chirBuilder) <- builder) {
+                superClassTy = CalculateSuperClassTy(chirBuilder)
+                hasSetSuperClass = true
+                result = superClassTy
+            } else {
+                result = GetClassDef().GetSuperClassTy()
+            }
         }
-        if (let Some(chirBuilder) <- builder) {
-            superClassTy = CalculateSuperClassTy(chirBuilder)
-            hasSetSuperClass = true
-            return superClassTy
-        }
-        return GetClassDef().GetSuperClassTy()
+        return result
     }
 }
 
