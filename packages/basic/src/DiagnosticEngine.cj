@@ -756,6 +756,8 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
             return
         }
         WriteError(DiagnosticJsonFormatter.AssembleDiagnosticJsonString(diagsJsonBuff.toArray(), diagNumJsonBuff))
+        diagsJsonBuff.clear()
+        diagNumJsonBuff = ""
     }
 
     private func removeCategory(cate: DiagCategory): Unit {

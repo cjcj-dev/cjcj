@@ -329,6 +329,7 @@ public class DiagnosticEngineImpl {
         if (let Some(activeHandler) <- handler) {
             if (IsCompilerDiagnosticHandlerKind(activeHandler.GetKind()) && activeHandler.IsJsonFormat()) {
                 activeHandler.CacheTheCountInJsonFormat()
+                activeHandler.EmitDiagnosesInJson()
                 return
             }
         }
