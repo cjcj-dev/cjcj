@@ -1,11 +1,12 @@
 package cangjie_compiler::parse
 
+import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.DiagnosticBuilder as BasicDiagnosticBuilder
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import std.collection.*
 
 public class ParserImpl {
-    public let diag: DiagnosticEngine
-    private let lexerDiag: BasicDiagnosticEngine = BasicDiagnosticEngine()
+    public let diag: BasicDiagnosticEngine
     public let sourceManager: SourceManager
     public let lexer: Lexer
     private let tokenLines: HashSet<Int64> = HashSet<Int64>()
@@ -30,31 +31,31 @@ public class ParserImpl {
     public var compileOptions: GlobalOptions = GlobalOptions()
     public let commentsMap: TokenVecMap = TokenVecMap()
 
-    public init(fileID: UInt64, input: String, diag: DiagnosticEngine, sm: SourceManager, attachComment: Bool, parsingDeclFiles: Bool) {
+    public init(fileID: UInt64, input: String, diag: BasicDiagnosticEngine, sm: SourceManager, attachComment: Bool, parsingDeclFiles: Bool) {
         this.diag = diag
         this.sourceManager = sm
-        this.lexerDiag.SetSourceManager(sm)
-        this.lexer = Lexer(fileID, input, lexerDiag, sm, cts: attachComment)
+        this.diag.SetSourceManager(sm)
+        this.lexer = Lexer(fileID, input, diag, sm, cts: attachComment)
         this.enableAttachComment = attachComment
         this.parseDeclFile = parsingDeclFiles
         Init()
     }
 
-    public init(input: String, diag: DiagnosticEngine, sm: SourceManager, pos: Position, attachComment: Bool, parsingDeclFiles: Bool) {
+    public init(input: String, diag: BasicDiagnosticEngine, sm: SourceManager, pos: Position, attachComment: Bool, parsingDeclFiles: Bool) {
         this.diag = diag
         this.sourceManager = sm
-        this.lexerDiag.SetSourceManager(sm)
-        this.lexer = Lexer(input, lexerDiag, sm, pos, cts: attachComment)
+        this.diag.SetSourceManager(sm)
+        this.lexer = Lexer(input, diag, sm, pos, cts: attachComment)
         this.enableAttachComment = attachComment
         this.parseDeclFile = parsingDeclFiles
         Init()
     }
 
-    public init(inputTokens: Array<Token>, diag: DiagnosticEngine, sm: SourceManager, attachComment: Bool, parsingDeclFiles: Bool) {
+    public init(inputTokens: Array<Token>, diag: BasicDiagnosticEngine, sm: SourceManager, attachComment: Bool, parsingDeclFiles: Bool) {
         this.diag = diag
         this.sourceManager = sm
-        this.lexerDiag.SetSourceManager(sm)
-        this.lexer = Lexer(inputTokens, lexerDiag, sm, cts: attachComment)
+        this.diag.SetSourceManager(sm)
+        this.lexer = Lexer(inputTokens, diag, sm, cts: attachComment)
         this.enableAttachComment = attachComment
         this.parseDeclFile = parsingDeclFiles
         Init()
@@ -111,16 +112,13 @@ public class ParserImpl {
         enableEH = opts.enableEH
     }
 
-    public func GetDiagnosticEngine(): DiagnosticEngine {
+    public func GetDiagnosticEngine(): BasicDiagnosticEngine {
         return diag
     }
 
-    // Lexer shares a basic DiagnosticEngine (faithful to C++ ParserImpl, where the
-    // lexer is constructed with the parser's `diag`; see src/Parse/ParserImpl.cpp:206).
-    // Expose it so callers can forward the lexer's refactor diagnostics (full table
-    // kind/range/hints) rather than dropping them on the floor.
+    // Lexer and parser share one basic DiagnosticEngine, matching C++ ParserImpl.
     public func GetLexerDiagnosticEngine(): BasicDiagnosticEngine {
-        return lexerDiag
+        return diag
     }
 
     public func Peek(): Token {
@@ -280,8 +278,77 @@ public class ParserImpl {
         skipNL = true
     }
 
-    public func ParseDiagnoseRefactor(kind: DiagKindRefactor, pos: Position, message: String): DiagnosticBuilder {
-        return diag.DiagnoseRefactor(kind, pos, message)
+    private func MakeParseDiagnosticNode(begin: Position, end: Position): Node {
+        let node = Node()
+        node.begin = begin
+        node.end = end
+        if (let Some(macroCall) <- curMacroCall) {
+            node.curMacroCall = macroCall
+        }
+        return node
+    }
+
+    private func DiagnoseRefactorForNode(
+        kind: BasicDiagKindRefactor,
+        node: Node,
+        pos: Position,
+        arguments: Array<String>
+    ): BasicDiagnosticBuilder {
+        if (let Some(macroCall) <- node.curMacroCall) {
+            if (let Some(invocation) <- macroCall.GetConstInvocation()) {
+                return diag.DiagnoseRefactor(kind, invocation.macroCallDiagInfo, pos, formatArgs: arguments)
+            }
+        }
+        return diag.DiagnoseRefactor(kind, pos, arguments: arguments)
+    }
+
+    private func DiagnoseRefactorForNode(
+        kind: BasicDiagKindRefactor,
+        node: Node,
+        range: Range,
+        arguments: Array<String>
+    ): BasicDiagnosticBuilder {
+        if (let Some(macroCall) <- node.curMacroCall) {
+            if (let Some(invocation) <- macroCall.GetConstInvocation()) {
+                return diag.DiagnoseRefactor(kind, invocation.macroCallDiagInfo, range, formatArgs: arguments)
+            }
+        }
+        return diag.DiagnoseRefactor(kind, range, arguments: arguments)
+    }
+
+    public func ParseDiagnoseRefactor(
+        kind: BasicDiagKindRefactor,
+        pos: Position,
+        arguments!: Array<String> = Array<String>()
+    ): BasicDiagnosticBuilder {
+        let node = MakeParseDiagnosticNode(pos, pos + 1)
+        return DiagnoseRefactorForNode(kind, node, pos, arguments)
+    }
+
+    public func ParseDiagnoseRefactor(
+        kind: BasicDiagKindRefactor,
+        range: Range,
+        arguments!: Array<String> = Array<String>()
+    ): BasicDiagnosticBuilder {
+        let node = MakeParseDiagnosticNode(range.begin, range.end)
+        return DiagnoseRefactorForNode(kind, node, range, arguments)
+    }
+
+    public func ParseDiagnoseRefactor(
+        kind: BasicDiagKindRefactor,
+        token: Token,
+        arguments!: Array<String> = Array<String>()
+    ): BasicDiagnosticBuilder {
+        let node = MakeParseDiagnosticNode(token.Begin(), token.End())
+        return DiagnoseRefactorForNode(kind, node, MakeRange(token.Begin(), token.End()), arguments)
+    }
+
+    public func ParseDiagnoseRefactor(
+        kind: BasicDiagKindRefactor,
+        node: Node,
+        arguments!: Array<String> = Array<String>()
+    ): BasicDiagnosticBuilder {
+        return DiagnoseRefactorForNode(kind, node, MakeRange(node.GetBegin(), node.GetEnd()), arguments)
     }
 }
 

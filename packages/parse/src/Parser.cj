@@ -1,20 +1,22 @@
 package cangjie_compiler::parse
 
+import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.DiagnosticBuilder as BasicDiagnosticBuilder
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import std.collection.*
 
 public class Parser {
     private let impl: ParserImpl
 
-    public init(fileID: UInt64, input: String, diag: DiagnosticEngine, sm: SourceManager, attachComment!: Bool = false, parseDeclFile!: Bool = false) {
+    public init(fileID: UInt64, input: String, diag: BasicDiagnosticEngine, sm: SourceManager, attachComment!: Bool = false, parseDeclFile!: Bool = false) {
         impl = ParserImpl(fileID, input, diag, sm, attachComment, parseDeclFile)
     }
 
-    public init(input: String, diag: DiagnosticEngine, sm: SourceManager, pos!: Position = Position(0, 1, 1), attachComment!: Bool = false, parseDeclFile!: Bool = false) {
+    public init(input: String, diag: BasicDiagnosticEngine, sm: SourceManager, pos!: Position = Position(0, 1, 1), attachComment!: Bool = false, parseDeclFile!: Bool = false) {
         impl = ParserImpl(input, diag, sm, pos, attachComment, parseDeclFile)
     }
 
-    public init(inputTokens: Array<Token>, diag: DiagnosticEngine, sm: SourceManager, attachComment!: Bool = false, parseDeclFile!: Bool = false) {
+    public init(inputTokens: Array<Token>, diag: BasicDiagnosticEngine, sm: SourceManager, attachComment!: Bool = false, parseDeclFile!: Bool = false) {
         impl = ParserImpl(inputTokens, diag, sm, attachComment, parseDeclFile)
     }
 
@@ -73,9 +75,23 @@ public class Parser {
     }
 
     public func SetCompileOptions(opts: GlobalOptions): Unit { impl.SetCompileOptions(opts) }
-    public func GetDiagnosticEngine(): DiagnosticEngine { return impl.GetDiagnosticEngine() }
+    public func GetDiagnosticEngine(): BasicDiagnosticEngine { return impl.GetDiagnosticEngine() }
     public func GetLexerDiagnosticEngine(): BasicDiagnosticEngine { return impl.GetLexerDiagnosticEngine() }
     public func GetCommentsMap(): TokenVecMap { return impl.commentsMap }
+    public func ParseDiagnoseRefactor(
+        kind: BasicDiagKindRefactor,
+        pos: Position,
+        arguments!: Array<String> = Array<String>()
+    ): BasicDiagnosticBuilder {
+        return impl.ParseDiagnoseRefactor(kind, pos, arguments: arguments)
+    }
+    public func ParseDiagnoseRefactor(
+        kind: BasicDiagKindRefactor,
+        range: Range,
+        arguments!: Array<String> = Array<String>()
+    ): BasicDiagnosticBuilder {
+        return impl.ParseDiagnoseRefactor(kind, range, arguments: arguments)
+    }
 
     public func Skip(kind: TokenKind): Bool { return impl.Skip(kind) }
     public func Peek(): Token { return impl.Peek() }
