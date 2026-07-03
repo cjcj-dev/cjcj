@@ -626,6 +626,7 @@ public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
                         BasicPosition(pattern.end.fileID, pattern.end.line, pattern.end.column)))
                 builder.AddNote("the selector is of type '" + target.String() +
                     "', which is not a subtype of '" + patternTy.String())
+                builder.Emit()
             }
         }
     }

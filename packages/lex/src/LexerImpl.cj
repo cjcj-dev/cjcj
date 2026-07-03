@@ -817,6 +817,7 @@ public class LexerImpl {
             let args = ConvertUnicode(ch)
             let builder = diag.DiagnoseRefactor(DiagKindRefactor.lex_unsecure_unicode, GetPos(pCurrent), arguments: [args])
             builder.AddMainHintArguments([args])
+            builder.Emit()
             success = false
         }
     }
@@ -1048,6 +1049,7 @@ public class LexerImpl {
         let hexadecimalHelp = DiagHelp("if you expect a hexadecimal fraction, could use hexadecimal prefix")
         hexadecimalHelp.AddSubstitution(reasonRange, "0x")
         builder.AddHelp(hexadecimalHelp)
+        builder.Emit()
     }
 
     private func DiagExpectedDigit(base: UInt8): Unit {
@@ -1057,6 +1059,7 @@ public class LexerImpl {
             arguments: [name, ConvertCurrentChar()]
         )
         builder.AddMainHintArguments([name])
+        builder.Emit()
     }
 
     private func DiagUnexpectedDigit(base: Int64, reasonPoint: Int64): Unit {
@@ -1079,6 +1082,7 @@ public class LexerImpl {
             builder.AddHint(MakeRange(GetPos(reasonPoint), GetPos(pCurrent)), arguments: ["the default base is decimal"])
         }
         builder.AddNote(name + " may only contain digit within " + DigitRangeText(rangePrefix))
+        builder.Emit()
     }
 
     private func DiagUnexpectedExponentPart(exp: UInt8, prefix: UInt8, reasonPoint: Int64): Unit {
@@ -1091,6 +1095,7 @@ public class LexerImpl {
             )
             builder.AddHint(reasonRange, arguments: ["of this " + prefixName + " prefix"])
             builder.AddNote("only decimal or hexadecimal number can support exponent part")
+            builder.Emit()
             return
         }
         if (exp == b'e' && prefix == b'x') {
@@ -1103,6 +1108,7 @@ public class LexerImpl {
             let help = DiagHelp("could try to modify it to hexadecimal exponent type")
             help.AddSubstitution(GetPos(pCurrent), "p")
             builder.AddHelp(help)
+            builder.Emit()
             return
         }
         if (exp == b'p' && prefix == b'd') {
@@ -1115,6 +1121,7 @@ public class LexerImpl {
             let help = DiagHelp("could try to modify it to " + prefixName + " exponent type")
             help.AddSubstitution(GetPos(pCurrent), "e")
             builder.AddHelp(help)
+            builder.Emit()
         }
     }
 
@@ -1125,12 +1132,14 @@ public class LexerImpl {
             DiagKindRefactor.lex_expected_exponent_part, GetPos(pCurrent), arguments: [input[start..pCurrent]]
         )
         builder.AddHint(reasonRange)
+        builder.Emit()
     }
 
     private func DiagIllegalUnicode(): Unit {
         let args = ConvertUnicode(currentChar)
         let builder = diag.DiagnoseRefactor(DiagKindRefactor.lex_illegal_unicode, GetPos(pCurrent), arguments: [args])
         builder.AddMainHintArguments([args])
+        builder.Emit()
     }
 
     private func TryConsumeIdentifierUTF8Char(): Bool {
@@ -1180,6 +1189,7 @@ public class LexerImpl {
         )
         builder.AddHint(GetPos(pStart + 2))
         builder.AddNote("unicode escape may contain 8 hexadecimal digits at most")
+        builder.Emit()
     }
 
     private func DiagExpectedRightBracketOrHexadecimal(pStart: Int64): Unit {
@@ -1189,6 +1199,7 @@ public class LexerImpl {
         )
         builder.AddHint(MakeRange(GetPos(pStart), GetPos(pStart + 2)))
         builder.AddNote("unicode escape may only contain hexadecimal digits")
+        builder.Emit()
     }
 
     private func ProcessUnicodeEscape(): Unit {
@@ -1202,6 +1213,7 @@ public class LexerImpl {
                     DiagKindRefactor.lex_expected_left_bracket, GetPos(pCurrent), arguments: [ConvertCurrentChar()]
                 )
                 builder.AddHint(MakeRange(GetPos(pCurrent - 2), GetPos(pCurrent)))
+                builder.Emit()
                 success = false
             }
             return
@@ -1278,6 +1290,7 @@ public class LexerImpl {
             builder.AddHint(GetPos(pStart), arguments: [target])
         }
         builder.AddNote(EscapeNote(target, isByteLiteral))
+        builder.Emit()
     }
 
     private func ProcessEscape(pStart: Int64, isInString: Bool, isByteLiteral: Bool): Unit {
@@ -1376,6 +1389,7 @@ public class LexerImpl {
             builder.AddNote(
                 "integer literal type suffix can only be 'u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64'"
             )
+            builder.Emit()
             success = false
             tokenKind = TokenKind.ILLEGAL
         }
@@ -1397,6 +1411,7 @@ public class LexerImpl {
                 arguments: ["f" + suffix]
             )
             builder.AddNote("float literal type suffix can only be 'f16', 'f32', 'f64'")
+            builder.Emit()
             success = false
             tokenKind = TokenKind.ILLEGAL
         }
@@ -1634,6 +1649,7 @@ public class LexerImpl {
                 arguments: [args]
             )
             builder.AddMainHintArguments([args])
+            builder.Emit()
         }
         Back()
     }
@@ -1700,7 +1716,7 @@ public class LexerImpl {
                     DiagKindRefactor.lex_unrecognized_symbol,
                     MakeRange(GetPos(pStart), GetPos(pCurrent)),
                     arguments: [s]
-                )
+                ).Emit()
             } else {
                 DiagIllegalUnicode()
             }
@@ -1778,6 +1794,7 @@ public class LexerImpl {
                     DiagKindRefactor.lex_expected_back_quote, GetPos(pCurrent), arguments: [ConvertCurrentChar()]
                 )
                 builder.AddHint(GetPos(pStart))
+                builder.Emit()
                 success = false
             } else if (success) {
                 lexDiagnose(diag, DiagKindRefactor.lex_expected_identifier, GetPos(pCurrent), ConvertCurrentChar())
@@ -1806,6 +1823,7 @@ public class LexerImpl {
         if (!isMatchEnd && !isJString) {
             builder.AddNote("consider using multi-line string if you intended to include '\\n' in string")
         }
+        builder.Emit()
     }
 
     private func DiagUnterminatedMultiLineString(pStart: Int64): Unit {
@@ -1820,6 +1838,7 @@ public class LexerImpl {
                 builder.AddHint(MakeRange(GetPos(interpolation), GetPos(interpolation + 2)))
             }
         }
+        builder.Emit()
     }
 
     private func DiagUnterminatedRawString(pStart: Int64): Unit {
@@ -1834,6 +1853,7 @@ public class LexerImpl {
                 builder.AddHint(MakeRange(GetPos(interpolation), GetPos(interpolation + 2)))
             }
         }
+        builder.Emit()
     }
 
     private func DiagUnterminatedInterpolation(): Unit {
@@ -1843,6 +1863,7 @@ public class LexerImpl {
             MakeRange(GetPos(interpolation), GetPos(pCurrent) + 1)
         )
         builder.AddHint(GetPos(stringStarts[stringStarts.size - 1][0]))
+        builder.Emit()
     }
 
     private func ProcessIllegalToken(needStringParts: Bool, multiLine: Bool, pStart: Int64, isJString!: Bool = false): Token {
@@ -1959,6 +1980,7 @@ public class LexerImpl {
             if (!allowNewline && currentChar != -1) {
                 builder.AddHint(GetPos(stringStarts[stringStarts.size - 1][0]))
             }
+            builder.Emit()
             success = false
         }
         return false
@@ -2038,6 +2060,7 @@ public class LexerImpl {
         } else if (success) {
             let builder = diag.DiagnoseRefactor(DiagKindRefactor.lex_multiline_string_start_from_newline, GetPos(pNext))
             builder.AddHint(MakeRange(GetPos(pStart), GetPos(pNext)))
+            builder.Emit()
             success = false
         }
         var begin = pStart + beginOffset
@@ -2096,6 +2119,7 @@ public class LexerImpl {
                     arguments: [ConvertCurrentChar()]
                 )
                 builder.AddHint(MakeRange(GetPos(pStart), GetPos(pCurrent)))
+                builder.Emit()
                 success = false
             }
             return (Token(TokenKind.MULTILINE_RAW_STRING, "", pos, GetPos(pCurrent)), false)
@@ -2192,6 +2216,7 @@ public class LexerImpl {
         let help = DiagHelp("if you intended to write a string literal, use '\"'")
         help.AddSubstitution(range, "\"" + inner + "\"")
         builder.AddHelp(help)
+        builder.Emit()
     }
 
     private func ProcessIllegalCharValue(pStart: Int64, beginOffset: Int64): (Token, Bool) {
@@ -2251,6 +2276,7 @@ public class LexerImpl {
         let hintPos = GetPos(pStart)
         builder.AddHint(MakeRange(hintPos, hintPos + 2), arguments: [str])
         builder.AddNote("character in " + str + " must be ASCII")
+        builder.Emit()
     }
 
     private func ScanByteUInt8(pStart: Int64): Token {
@@ -2556,6 +2582,7 @@ public class LexerImpl {
         let arg = ConvertCurrentChar()
         let builder = diag.DiagnoseRefactor(DiagKindRefactor.lex_unknown_start_of_token, curPos, arguments: [arg])
         builder.AddMainHintArguments([arg])
+        builder.Emit()
     }
 
     private func DiagUnexpectedDollarIdentifier(t: Token): Unit {
@@ -2567,11 +2594,13 @@ public class LexerImpl {
         )
         if (foundWildcard) {
             builder.diagnostic.mainHint.str = "expected a Unicode XID_Continue after underscore"
+            builder.Emit()
             return
         }
         let help = DiagHelp("you could escape keyword as identifier using '`'")
         help.AddSubstitution(MakeRange(t.Begin(), t.End()), "`" + t.Value() + "`")
         builder.AddHelp(help)
+        builder.Emit()
     }
 
     private func ScanSymbol(pStart: Int64): Token {

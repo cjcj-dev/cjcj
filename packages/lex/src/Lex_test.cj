@@ -506,7 +506,7 @@ buasd
         let tok = lexer.Next()
         @Expect(tok.End(), Position(1, 1, 4))
         let localDiag = DiagnosticEngine()
-        localDiag.DiagnoseRefactor(DiagKindRefactor.parse_this_type_not_allow, tok.Begin())
+        localDiag.DiagnoseRefactor(DiagKindRefactor.parse_this_type_not_allow, tok.Begin()).Emit()
     }
 
     @TestCase

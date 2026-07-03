@@ -224,7 +224,7 @@ private func filteredTypeArgsForTarget(target: Decl, typeArgs: ArrayList<Type>):
 
 private func emitGenericArgumentNoMatch(diag: Option<BasicDiagnosticEngine>, node: Node): Unit {
     if (let Some(diagEngine) <- diag) {
-        diagEngine.DiagnoseRefactor(BasicDiagKindRefactor.sema_generic_argument_no_match, node.begin)
+        diagEngine.DiagnoseRefactor(BasicDiagKindRefactor.sema_generic_argument_no_match, node.begin).Emit()
     }
 }
 
@@ -236,6 +236,7 @@ private func emitGenericConstraintMismatch(diag: Option<BasicDiagnosticEngine>, 
             args: [BasicDiagArgument(declTy.String())])
         builder.AddNote(constraint.begin, BasicDiagKind.sema_which_constraint_not_match,
             args: [BasicDiagArgument(instTy.String()), BasicDiagArgument("'" + upperBoundTy.String() + "'")])
+        builder.Emit()
     }
 }
 
@@ -294,6 +295,7 @@ private func emitIncompleteInstantiation(diag: Option<BasicDiagnosticEngine>, no
         if (isNothing) {
             builder.AddNote("'Nothing' type has no members")
         }
+        builder.Emit()
     }
 }
 
@@ -574,7 +576,7 @@ extend TypeCheckerImpl {
                     if (let Some(diagEngine) <- diag) {
                         diagEngine.Diagnose(refType.begin, refType.end,
                             BasicDiagKind.sema_generics_type_variable_not_defined,
-                            args: [BasicDiagArgument(refType.ref.identifier.Val())])
+                            args: [BasicDiagArgument(refType.ref.identifier.Val())]).Emit()
                     }
                 }
             }

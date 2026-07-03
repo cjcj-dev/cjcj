@@ -938,8 +938,8 @@ public func CheckMatchExprHasSelectorExhaustivenessAndReachability(
             }
         } else {
             mc.EnableAttr(Attribute.UNREACHABLE)
-            let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unreachable_pattern,
-                MatchCasePatternRange(mc))
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unreachable_pattern,
+                MatchCasePatternRange(mc)).Emit()
         }
     }
     let stack = PatternStack(DestructedPattern(PatternCtor.Wildcard(),
@@ -955,5 +955,6 @@ public func CheckMatchExprHasSelectorExhaustivenessAndReachability(
         CJC_ASSERT(witness.Size() == 1)
         builder.AddNote(witness.Head().ToString() + " is not covered")
     }
+    builder.Emit()
     return false
 }

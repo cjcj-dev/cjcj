@@ -80,5 +80,6 @@ class ShowColorTest {
         @Expect(enableColorOut.startsWith("\u{1b}[31m"), true)
         let disableColorOut = DiagnosticEmitter(builder.diagnostic, true, true, sm).Render()
         @Expect(disableColorOut.contains("\u{1b}[31m"), false)
+        builder.Emit()
     }
 }

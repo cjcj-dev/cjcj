@@ -48,6 +48,7 @@ private func diagMismatchedTypes(diag: Option<BasicDiagnosticEngine>, oce: Optio
             BasicDiagKindRefactor.sema_mismatched_types,
             BasicMakeRange(oce.begin, oce.end))
         builder.AddMainHintArguments([target.String(), (oce.GetTy() ?? TypeManager.GetInvalidTy()).String()])
+        builder.Emit()
     }
 }
 

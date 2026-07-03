@@ -126,7 +126,7 @@ func IsBuiltInOperatorFuncInExtend(
                                             DiagKindRefactor.sema_return_type_incompatible,
                                             fd.begin,
                                             arguments: [fd.identifier.Val()]
-                                        )
+                                        ).Emit()
                                     }
                                     return true
                                 } else if (realFuncTy.paramTys.isEmpty()) {
@@ -142,7 +142,7 @@ func IsBuiltInOperatorFuncInExtend(
                                             DiagKindRefactor.sema_return_type_incompatible,
                                             fd.begin,
                                             arguments: [fd.identifier.Val()]
-                                        )
+                                        ).Emit()
                                     }
                                     return true
                                 }

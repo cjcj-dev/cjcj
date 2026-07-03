@@ -3181,7 +3181,7 @@ public class TypeChecker {
     private func InferCFuncExpr(ctx: ASTContext, re: RefExpr): Unit {
         if (re.typeArguments.size != 1) {
             if (let Some(diagValue) <- impl.diag) {
-                diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_generic_argument_no_match, re.begin)
+                diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_generic_argument_no_match, re.begin).Emit()
             }
             re.SetTy(TypeManager.GetInvalidTy())
             return
@@ -3191,7 +3191,7 @@ public class TypeChecker {
             case Some(value) => value
             case None =>
                 if (let Some(diagValue) <- impl.diag) {
-                    let _ = diagValue.Diagnose(typeArgument.begin, typeArgument.end, BasicDiagKind.sema_cfunc_type)
+                    diagValue.Diagnose(typeArgument.begin, typeArgument.end, BasicDiagKind.sema_cfunc_type).Emit()
                 }
                 re.SetTy(TypeManager.GetInvalidTy())
                 return

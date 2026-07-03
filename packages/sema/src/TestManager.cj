@@ -331,11 +331,11 @@ public class TestManager {
             if (let Some(funcDecl) <- (node as FuncDecl)) {
                 if (funcDecl.TestAttr(Attribute.CONTAINS_MOCK_CREATION_CALL) && IsGenericFuncDecl(funcDecl) &&
                     !funcDecl.HasAnno(AstAnnotationKind.FROZEN)) {
-                    let _ = diag.DiagnoseRefactor(
+                    diag.DiagnoseRefactor(
                         BasicDiagKindRefactor.sema_mock_frozen_required,
                         funcDecl.begin,
                         arguments: [funcDecl.identifier.Val()]
-                    )
+                    ).Emit()
                 }
             }
             return VisitAction.WALK_CHILDREN
@@ -387,7 +387,7 @@ public class TestManager {
                 if (baseTy.typeArgs.size > 1) {
                     let typeArgument = baseTy.typeArgs[1]
                     if (!typeArgument.IsClass() && !typeArgument.IsInterface()) {
-                        let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_unsupported_type, callExpr.begin)
+                        diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_unsupported_type, callExpr.begin).Emit()
                         callExpr.EnableAttr(Attribute.IS_BROKEN)
                         return VisitAction.SKIP_CHILDREN
                     }
@@ -398,11 +398,11 @@ public class TestManager {
             }
         }
         if (!testEnabled) {
-            let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_not_in_test_mode, callExpr.begin,
-                arguments: ["--test"])
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_not_in_test_mode, callExpr.begin,
+                arguments: ["--test"]).Emit()
         } else if (mockMode != MockMode.RUNTIME_ERROR) {
-            let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_disabled, callExpr.begin,
-                arguments: ["--mock=on"])
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_disabled, callExpr.begin,
+                arguments: ["--mock=on"]).Emit()
         }
         callExpr.EnableAttr(Attribute.IS_BROKEN)
         return VisitAction.WALK_CHILDREN
@@ -413,11 +413,11 @@ public class TestManager {
             if (pkg.fullPackageName != importedPkg.srcPackage.fullPackageName &&
                 importedPkg.srcPackage.TestAttr(Attribute.MOCK_SUPPORTED) &&
                 !pkg.TestAttr(Attribute.MOCK_SUPPORTED)) {
-                let _ = diag.DiagnoseRefactor(
+                diag.DiagnoseRefactor(
                     BasicDiagKindRefactor.package_mocking_support_inconsistency,
                     BasicDefaultPosition,
                     arguments: [importedPkg.srcPackage.fullPackageName, "--mock=on"]
-                )
+                ).Emit()
             }
         }
     }

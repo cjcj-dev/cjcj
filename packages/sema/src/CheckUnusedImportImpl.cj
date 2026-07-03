@@ -496,7 +496,7 @@ public func ReportUnusedImports(pkg: Package, diag: BasicDiagnosticEngine): Arra
     for (finding in result) {
         let range = BasicMakeRange(ToBasicPosition(finding.begin), ToBasicPosition(finding.end))
         let args: Array<String> = [finding.content]
-        diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unused_import, range, arguments: args)
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unused_import, range, arguments: args).Emit()
     }
     return result
 }
@@ -506,7 +506,7 @@ public func ReportUnusedImports(ctx: ASTContext, pkg: Package, diag: BasicDiagno
     for (finding in result) {
         let range = BasicMakeRange(ToBasicPosition(finding.begin), ToBasicPosition(finding.end))
         let args: Array<String> = [finding.content]
-        diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unused_import, range, arguments: args)
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unused_import, range, arguments: args).Emit()
     }
     return result
 }

@@ -112,7 +112,7 @@ public func CheckGenericTypeBoundsMapped(
             child.end,
             DiagKind.sema_generic_member_type_argument_different,
             args: [DiagArgument(child.identifier.Val())]
-        )
+        ).Emit()
         return
     }
     let childGeneric = child.GetGeneric()
@@ -188,6 +188,7 @@ public func CheckGenericTypeBoundsMapped(
             let range = MakeRange(diagNode.begin, diagNode.end)
             let builder = diag.DiagnoseRefactor(DiagKindRefactor.sema_generic_constraint_not_looser, range)
             builder.AddNote("parent constraint is " + parentConstraints)
+            builder.Emit()
         }
     }
 }

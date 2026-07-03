@@ -14,7 +14,7 @@ private func ToBasicPosition(pos: Position): BasicPosition {
 }
 
 private func DiagOld(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind): Unit {
-    let _ = diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind)
+    diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind).Emit()
 }
 
 private func StringDiagArgs(values: Array<String>): Array<BasicDiagArgument> {
@@ -27,7 +27,7 @@ private func StringDiagArgs(values: Array<String>): Array<BasicDiagArgument> {
 
 private func DiagOldStrings(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind,
     values: Array<String>): Unit {
-    let _ = diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind, args: StringDiagArgs(values))
+    diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind, args: StringDiagArgs(values)).Emit()
 }
 
 private func InvalidExprTy(expr: Expr): Ty {
