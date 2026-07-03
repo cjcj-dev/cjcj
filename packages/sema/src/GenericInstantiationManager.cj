@@ -117,7 +117,7 @@ public class CompilerInstance {
 }
 
 public func GetImportedDecl(ctx: ASTContext, fullPackageName: String, name: String): Option<Decl> {
-    if (let Some(packageMap) <- ctx.resolvedPackageMemberDeclsMap.get(fullPackageName)) {
+    if (let Some(packageMap) <- ctx.resolvedCjoPackageMemberDeclsMap.get(fullPackageName)) {
         if (let Some(decls) <- packageMap.get(name)) {
             if (!decls.isEmpty()) {
                 return Some(decls[0])
