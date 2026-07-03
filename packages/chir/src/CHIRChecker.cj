@@ -264,6 +264,9 @@ public class CHIRChecker {
             result.AddError("we need to set package name in func ${fn.GetIdentifier()}.")
             return false
         }
+        if (!CheckOriginalLambdaInfo(fn, result)) {
+            return false
+        }
         return true
     }
 
@@ -288,6 +291,9 @@ public class CHIRChecker {
                 if (funcTy.IsCFunc()) {
                     return CheckCFuncType(funcTy, lambdaOpt, topLevelFunc, result)
                 }
+                if (lambdaOpt.isNone() && !CheckLiftedLambdaType(topLevelFunc, result)) {
+                    return false
+                }
                 if (lambdaOpt.isNone()) {
                     CheckRetureTypeIfIsVoid(topLevelFunc, funcTy, result)
                 }
@@ -301,6 +307,58 @@ public class CHIRChecker {
             }
         }
         return false
+    }
+
+    private func CheckOriginalLambdaInfo(fn: Function, result: CHIRCheckResult): Bool {
+        if (!fn.IsLambda()) {
+            return true
+        }
+        var res = true
+        if (fn.GetOriginalLambdaType().isNone()) {
+            result.AddError("func ${fn.GetIdentifier()} is lifted lambda, original lambda type should be set.")
+            res = false
+        }
+        let originalTypeParams = fn.GetOriginalGenericTypeParamsRef()
+        let curTypeParams = fn.GetGenericTypeParams()
+        if (originalTypeParams.size > curTypeParams.size) {
+            result.AddError("func ${fn.GetIdentifier()} is lifted lambda, original lambda generic type params' size is " +
+                "${originalTypeParams.size}, current func's generic type params' size is ${curTypeParams.size}, " +
+                "original size should be equal or less than current size.")
+            res = false
+        }
+        return res
+    }
+
+    private func CheckLiftedLambdaType(fn: Function, result: CHIRCheckResult): Bool {
+        if (!fn.IsLambda()) {
+            return true
+        }
+
+        let funcTy = fn.GetFuncType().getOrThrow()
+        var errMsg = "func ${fn.GetIdentifier()} is lifted lambda, its first parameter type should be Class-Env&, " +
+            "but now func type is ${funcTy.ToString()}."
+        let paramTypes = funcTy.GetParamTypes()
+        if (paramTypes.isEmpty()) {
+            result.AddError(errMsg)
+            return false
+        }
+        let firstParamType = paramTypes[0] as RefType
+        if (firstParamType.isNone()) {
+            result.AddError(errMsg)
+            return false
+        }
+        let firstParamTypeDeref = firstParamType.getOrThrow().GetBaseType()
+        if (!firstParamTypeDeref.IsAutoEnv()) {
+            result.AddError(errMsg)
+            return false
+        }
+        if (firstParamTypeDeref.IsAutoEnvBase()) {
+            errMsg = "func ${fn.GetIdentifier()} is lifted lambda, its first parameter type should be Class-Env&, " +
+                "but now it's Class-EnvBase&."
+            result.AddError(errMsg)
+            return false
+        }
+        return true
     }
 
     private func CheckCFuncType(funcTy: FuncType, lambdaOpt: Option<Lambda>, topLevelFunc: Function,
@@ -501,6 +559,7 @@ public class CHIRChecker {
         CheckCustomType(def, result)
         CheckInstanceMemberVar(def, result)
         CheckStaticMemberVar(def, result)
+        // GAP_TODO: port C++ CHIRChecker::CheckVTable after the vtable subsystem lands.
         for (method in def.GetMethods()) {
             CheckParentCustomTypeDef(method, def, true, result)
         }
@@ -1188,8 +1247,12 @@ public class CHIRChecker {
                 CheckUnitResult(expr, topLevelFunc, result)
             case ExprKind.TUPLE => CheckTuple(expr, topLevelFunc, result)
             case ExprKind.VARRAY => CheckVArray(expr, topLevelFunc, result)
-            case ExprKind.FIELD | ExprKind.FIELD_BY_NAME | ExprKind.GET_EXCEPTION =>
+            case ExprKind.FIELD | ExprKind.GET_EXCEPTION =>
                 CheckHaveResult(expr, topLevelFunc, result)
+            case ExprKind.FIELD_BY_NAME =>
+                if (let Some(fieldByNameExpr) <- (expr as FieldByName)) {
+                    CheckFieldByName(fieldByNameExpr, topLevelFunc, result)
+                }
             case ExprKind.APPLY =>
                 if (let Some(applyExpr) <- (expr as Apply)) {
                     CheckApply(applyExpr, topLevelFunc, result)
@@ -1209,9 +1272,13 @@ public class CHIRChecker {
                 ExprKind.TRANSFORM_TO_CONCRETE | ExprKind.UNBOX_TO_REF =>
                 CheckOperandNumEqual(1, expr, topLevelFunc, result)
                 CheckHaveResult(expr, topLevelFunc, result)
-            case ExprKind.RAW_ARRAY_ALLOCATE | ExprKind.RAW_ARRAY_INIT_BY_VALUE | ExprKind.VARRAY_BUILDER |
-                ExprKind.SPAWN | ExprKind.GET_RTTI | ExprKind.GET_RTTI_STATIC =>
+            case ExprKind.RAW_ARRAY_ALLOCATE | ExprKind.RAW_ARRAY_INIT_BY_VALUE | ExprKind.SPAWN |
+                ExprKind.GET_RTTI | ExprKind.GET_RTTI_STATIC =>
                 CheckHaveResult(expr, topLevelFunc, result)
+            case ExprKind.VARRAY_BUILDER =>
+                if (let Some(varrayBuilderExpr) <- (expr as VArrayBuilder)) {
+                    CheckVArrayBuilder(varrayBuilderExpr, topLevelFunc, result)
+                }
             case ExprKind.INTRINSIC =>
                 if (let Some(intrinsicExpr) <- (expr as Intrinsic)) {
                     CheckIntrinsic(intrinsicExpr, topLevelFunc, result)
@@ -1405,6 +1472,38 @@ public class CHIRChecker {
             } else {
                 TypeCheckResultError(expr, "VArray", topLevelFunc, result)
             }
+        }
+    }
+
+    private func CheckFieldByName(expr: FieldByName, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `${CHIRCheckerExpressionString(expr)}`, " +
+            "you should convert this expression to `Field`.")
+    }
+
+    private func CheckVArrayBuilder(expr: VArrayBuilder, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!CheckOperandNumEqual(3, expr, topLevelFunc, result)) {
+            return
+        }
+        let resultValue = expr.GetResult().getOrThrow()
+        if (!resultValue.GetType().getOrThrow().IsVArray()) {
+            TypeCheckError(expr, resultValue, "VArray", topLevelFunc, result)
+        }
+        let size = expr.GetSize()
+        if (size.GetType().getOrThrow().GetTypeKind() != TypeKind.TYPE_INT64) {
+            TypeCheckError(expr, size, "Int64", topLevelFunc, result)
+        }
+        let item = ConvertToNullLiteral(expr.GetItem())
+        let initFunc = ConvertToNullLiteral(expr.GetInitFunc())
+        if (item.isNone() && initFunc.isNone()) {
+            result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `${CHIRCheckerExpressionString(expr)}`, " +
+                "one of item and init func should be null.")
+        } else if (item.isSome() && initFunc.isSome()) {
+            result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `${CHIRCheckerExpressionString(expr)}`, " +
+                "item and init func can't be both null.")
+        }
+        let funcType = expr.GetInitFunc().GetType().getOrThrow()
+        if (!IsFuncTypeOrClosureBaseRefType(funcType)) {
+            TypeCheckError(expr, expr.GetInitFunc(), "Function type or closure ref", topLevelFunc, result)
         }
     }
 
@@ -2432,6 +2531,30 @@ private func CHIRCheckerTypeIsExpected(srcType: Type, dstType: Type): Bool {
         return false
     }
     return srcType.ToString() == dstType.ToString()
+}
+
+private func IsFuncTypeOrClosureBaseRefType(ty: Type): Bool {
+    if (ty.IsFunc()) {
+        return true
+    }
+    if (let Some(refTy) <- (ty as RefType)) {
+        return refTy.GetBaseType().IsAutoEnvBase()
+    }
+    return false
+}
+
+private func ConvertToNullLiteral(value: Value): Option<NullLiteral> {
+    if (value.GetType().getOrThrow().IsNothing()) {
+        return None
+    }
+    if (let Some(localVar) <- value.AsLocalVar()) {
+        if (let Some(ownerExpr) <- localVar.GetExpr()) {
+            if (let Some(constExpr) <- (ownerExpr as Constant)) {
+                return constExpr.GetValue() as NullLiteral
+            }
+        }
+    }
+    return None
 }
 
 private func CHIRCheckerIsEnumSelectorType(ty: Type): Bool {
