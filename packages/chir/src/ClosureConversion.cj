@@ -1,6 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::basic.Linkage as BasicLinkage
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::utils.ProfileRecorder
 
@@ -436,11 +437,10 @@ public class ClosureConversion {
         let classArgs = TypesFromGenerics(classDef.GetGenericTypeParams())
         let classTy = builder.context.GetClassTy(classDef, classArgs)
         classDef.SetType(classTy)
-        MarkAutoEnvClass(classDef)
+        SetAutoEnvBaseDefAttr(classDef)
+        classDef.EnableAttr(Attribute.GENERIC)
         classDef.SetAnnotation(CC_AUTO_ENV_BASE_ANNOTATION, "true")
         classDef.SetAnnotation(CC_AUTO_ENV_GENERIC_BASE_ANNOTATION, "true")
-        classDef.EnableAttr(Attribute.ABSTRACT)
-        classDef.EnableAttr(Attribute.PUBLIC)
         AddClassToPackage(classDef)
         CreateVirtualFuncInAutoEnvBaseDef(classDef, GENERIC_VIRTUAL_FUNC, paramsAndRet)
         genericAutoEnvBaseDefs[className] = classDef
@@ -456,11 +456,9 @@ public class ClosureConversion {
         let classTy = builder.context.GetClassTy(classDef, ArrayList<Type>())
         classDef.SetType(classTy)
         classDef.SetSuperClassTy(builder.context.GetClassTy(superClass, funcTy.GetTypeArgs()))
-        MarkAutoEnvClass(classDef)
+        SetAutoEnvBaseDefAttr(classDef)
         classDef.SetAnnotation(CC_AUTO_ENV_BASE_ANNOTATION, "true")
         classDef.SetAnnotation(CC_AUTO_ENV_INST_BASE_ANNOTATION, "true")
-        classDef.EnableAttr(Attribute.ABSTRACT)
-        classDef.EnableAttr(Attribute.PUBLIC)
         AddClassToPackage(classDef)
         CreateVirtualFuncInAutoEnvBaseDef(classDef, INST_VIRTUAL_FUNC, funcTy.GetTypeArgs())
         instAutoEnvBaseDefs[className] = classDef
@@ -485,9 +483,11 @@ public class ClosureConversion {
             genericTypeParams: ArrayList<GenericType>())
         method.EnableAttr(Attribute.ABSTRACT)
         method.EnableAttr(Attribute.PUBLIC)
-        method.EnableAttr(Attribute.VIRTUAL)
-        for (paramTy in paramTypes) {
-            builder.CreateParameter(paramTy, INVALID_LOCATION, method)
+        method.EnableAttr(Attribute.NO_DEBUG_INFO)
+        var paramIdx: Int64 = 0
+        while (paramIdx + 1 < paramsAndRetType.size) {
+            builder.CreateParameter(paramTypes[paramIdx], INVALID_LOCATION, method)
+            paramIdx++
         }
         classDef.AddMethod(method)
         return method
@@ -565,9 +565,8 @@ public class ClosureConversion {
             }
         }
         classDef.SetSuperClassTy(builder.context.GetClassTy(superClassDef, superArgs))
-        MarkAutoEnvClass(classDef)
+        SetAutoEnvImplDefAttr(classDef)
         classDef.SetAnnotation(CC_AUTO_ENV_IMPL_ANNOTATION, "true")
-        classDef.EnableAttr(Attribute.PUBLIC)
         AddClassToPackage(classDef)
         return classDef
     }
@@ -603,7 +602,7 @@ public class ClosureConversion {
         let methodTy = builder.context.GetFuncTy(params, boxedRetTy)
         let method = CreateCCFunction(methodTy, GenericOverrideFuncName(srcFunc), GENERIC_VIRTUAL_FUNC,
             genericTypeParams: ArrayList<GenericType>())
-        SetMemberMethodAttr(method)
+        SetMemberMethodAttr(method, srcFunc.TestAttr(Attribute.CONST))
         classDef.AddMethod(method)
         CreateGenericOverrideMethodBody(method, srcFunc, boxedRetTy, genericMap)
         return method
@@ -629,7 +628,7 @@ public class ClosureConversion {
         let methodTy = builder.context.GetFuncTy(params, retTy)
         let method = CreateCCFunction(methodTy, InstOverrideFuncName(srcFunc), INST_VIRTUAL_FUNC,
             genericTypeParams: ArrayList<GenericType>())
-        SetMemberMethodAttr(method)
+        SetMemberMethodAttr(method, srcFunc.TestAttr(Attribute.CONST))
         classDef.AddMethod(method)
         CreateOverrideMethodBody(method, srcFunc, retTy, genericMap, directParamsStart: 0)
         return Some(method)
@@ -1710,9 +1709,16 @@ public class ClosureConversion {
         return fn
     }
 
-    private func SetMemberMethodAttr(fn: Function): Unit {
+    private func SetMemberMethodAttr(fn: Function, isConst: Bool): Unit {
+        fn.EnableAttr(Attribute.COMPILER_ADD)
+        fn.EnableAttr(Attribute.NO_REFLECT_INFO)
+        fn.EnableAttr(Attribute.INTERNAL)
         fn.EnableAttr(Attribute.PUBLIC)
-        fn.EnableAttr(Attribute.VIRTUAL)
+        fn.EnableAttr(Attribute.NO_DEBUG_INFO)
+        fn.SetLinkTypeInfo(BasicLinkage.INTERNAL)
+        if (isConst) {
+            fn.EnableAttr(Attribute.CONST)
+        }
     }
 
     private func SetObjectSuperClass(classDef: ClassDef): Unit {
@@ -1723,6 +1729,18 @@ public class ClosureConversion {
 
     private func MarkAutoEnvClass(classDef: ClassDef): Unit {
         classDef.SetAnnotation(CC_AUTO_ENV_CLASS_ANNOTATION, "true")
+    }
+
+    private func SetAutoEnvImplDefAttr(classDef: ClassDef): Unit {
+        classDef.EnableAttr(Attribute.COMPILER_ADD)
+        classDef.EnableAttr(Attribute.NO_REFLECT_INFO)
+        MarkAutoEnvClass(classDef)
+        classDef.SetLinkTypeInfo(BasicLinkage.INTERNAL)
+    }
+
+    private func SetAutoEnvBaseDefAttr(classDef: ClassDef): Unit {
+        SetAutoEnvImplDefAttr(classDef)
+        classDef.EnableAttr(Attribute.ABSTRACT)
     }
 
     private func AddClassToPackage(classDef: ClassDef): Unit {
