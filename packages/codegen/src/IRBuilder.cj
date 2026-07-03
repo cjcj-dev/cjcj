@@ -1262,6 +1262,15 @@ public class IRBuilder2 <: Resource {
         sretTypeInfoArg: Option<LLVMValueRef>,
         name!: String = ""): ArrayList<LLVMValueRef> {
         let callArgs = ArrayList<LLVMValueRef>()
+        var applyExprWrapper: Option<CHIRApplyWrapper> = None
+        if (let Some(exprWrapper) <- chirExpr) {
+            let currentExpression = exprWrapper.GetExpression()
+            if (let Some(applyExpr) <- (currentExpression as Apply)) {
+                applyExprWrapper = Some(CHIRApplyWrapper(applyExpr))
+            } else if (let Some(applyWithExceptionExpr) <- (currentExpression as ApplyWithException)) {
+                applyExprWrapper = Some(CHIRApplyWrapper(applyWithExceptionExpr))
+            }
+        }
         if (calleeType.HasSRet()) {
             if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
                 let retCGType = CGType.GetOrCreate(cgMod, funcType.GetReturnType())
@@ -1273,7 +1282,15 @@ public class IRBuilder2 <: Resource {
             var idx: Int64 = 0
             for (arg in args) {
                 let fixedArg = if (idx < paramTys.size) {
-                    FixFuncArg(arg, calleeType.GetParamType(idx), name: name)
+                    let paramType = calleeType.GetParamType(idx)
+                    let isThis = idx == 0 && applyExprWrapper.isSome() &&
+                        applyExprWrapper.getOrThrow().IsCalleeStructInstanceMethod()
+                    var llvmVal = if (isThis) {
+                        DoSimpleCast(arg, paramType, name)
+                    } else {
+                        FixFuncArg(arg, paramType, name: name)
+                    }
+                    llvmVal
                 } else {
                     arg.GetRawValue()
                 }
