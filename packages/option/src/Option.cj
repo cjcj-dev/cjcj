@@ -829,6 +829,38 @@ public open class GlobalOptions <: Option {
         return absPath
     }
 
+    public static func ValidateInputFilePath(
+        path: String,
+        notFoundError: BasicDiagKindRefactor,
+        diag: BasicDiagnosticEngine
+    ): MaybeString {
+        if (IsPathAboveLengthLimit(path)) {
+            diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.driver_path_exceeds_length_limit,
+                BasicDefaultPosition,
+                path,
+                FILE_PATH_MAX_LENGTH.toString()).Emit()
+            return MaybeString()
+        }
+        if (!FileExist(path)) {
+            diag.DiagnoseRefactor(notFoundError, BasicDefaultPosition, path).Emit()
+            return MaybeString()
+        }
+        if (!CanAccessFile(path, UtilsFileMode.FM_READ)) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.permission_denied, BasicDefaultPosition, path).Emit()
+            return MaybeString()
+        }
+        if (IsDir(path)) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.not_a_file, BasicDefaultPosition, path).Emit()
+            return MaybeString()
+        }
+        let absPath = GetAbsPath(path)
+        if (!absPath.hasValue) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.invalid_path, BasicDefaultPosition, path).Emit()
+        }
+        return absPath
+    }
+
     public static func ParseIntOptionValue(
         arg: OptionArgInstance,
         from!: Int64 = -2147483648,
