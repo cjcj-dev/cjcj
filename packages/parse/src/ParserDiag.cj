@@ -781,6 +781,212 @@ extend ParserImpl {
             exprName + " expression can only accept constant, wildcard, binding, tuple and enum pattern")
         builder.AddNote(note)
     }
+
+    public func DiagExpectedLeftParenAfter(pos: Position, str: String): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_paren_after, lookahead, str,
+            ConvertToken(lookahead))
+        builder.AddHint(MakeRange(pos, str))
+    }
+
+    public func DiagMatchCaseExpectedExprOrDecl(): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_expr_or_decl_in, lookahead,
+            ConvertToken(lookahead))
+        DiagMatchCase(builder)
+    }
+
+    public func DiagMatchCaseBodyCannotBeEmpty(pos: Position): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_case_body_cannot_be_empty, pos)
+        DiagMatchCase(builder)
+    }
+
+    public func DiagMatchCase(builder: DiagnosticBuilder): Unit {
+        builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:1045 DiagMatchCase chainedAST")
+    }
+
+    public func DiagExpectedCatchOrHandleOrFinallyAfterTry(te: TryExpr): Unit {
+        let diagKind = if (enableEH) {
+            DiagKindRefactor.parse_expected_catch_or_handle_or_finally_in_try
+        } else {
+            DiagKindRefactor.parse_expected_catch_or_finally_in_try
+        }
+        let builder = ParseDiagnoseRefactor(diagKind, lookahead, ConvertToken(lookahead))
+        if (let Some(tryBlock) <- te.tryBlock) {
+            builder.AddHint(MakeRange(te.begin, tryBlock.end))
+        } else {
+            builder.AddHint(MakeRange(te.begin, te.end))
+            builder.AddNote(
+                "GAP_TODO: requires faithful port of ParserDiag.cpp:1062 DiagExpectedCatchOrHandleOrFinallyAfterTry tryBlock")
+        }
+    }
+
+    public func DiagExpectedSelectorOrMatchExprBody(pos: Position): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_selector_or_match_expression_body, lookahead,
+            ConvertToken(lookahead))
+        builder.AddHint(MakeRange(pos, "match"))
+    }
+
+    public func DiagRedefinedResourceName(cur: (String, Position), pre: (String, Position)): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_redefined_resource_name,
+            MakeRange(cur[1], cur[0]), cur[0])
+        builder.AddHint(MakeRange(pre[1], pre[0]))
+    }
+
+    public func DiagExpectedNoArgumentsInSpawn(params: ArrayList<FuncParam>, pos: Position): Unit {
+        let arg = if (params.size == 1) { "argument" } else { "arguments" }
+        let diagRange = if (params.isEmpty()) {
+            MakeRange(pos, pos + "spawn".size)
+        } else {
+            MakeRange(params[0].begin, params[params.size - 1].end)
+        }
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_no_arguments_in_spawn, diagRange, arg)
+        builder.AddMainHintArguments(arg)
+        builder.AddHint(MakeRange(pos, "spawn"))
+        if (params.isEmpty()) {
+            builder.AddNote(
+                "GAP_TODO: requires faithful port of ParserDiag.cpp:1085 DiagExpectedNoArgumentsInSpawn params")
+        }
+    }
+
+    public func DiagExpectCharacter(expectStr: String, noteStr!: String = ""): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_character, lookahead, expectStr,
+            ConvertToken(lookahead))
+        builder.AddMainHintArguments(expectStr)
+        if (!noteStr.isEmpty()) {
+            builder.AddNote(noteStr)
+        }
+    }
+
+    public func DiagExpectCharacter(pos: Position, expectStr: String, noteStr!: String = ""): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_character, pos, expectStr,
+            ConvertToken(lookahead))
+        builder.AddMainHintArguments(expectStr)
+        if (!noteStr.isEmpty()) {
+            builder.AddNote(noteStr)
+        }
+    }
+
+    public func DiagExpectSemiOrNewline(): Unit {
+        DiagExpectCharacter("';' or '<NL>'")
+    }
+
+    public func DiagRedundantArrowAfterFunc(ty: Type): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_redundant_arrow_after_func_type, lookahead)
+        builder.AddHint(MakeRange(ty.begin, ty.end), arguments: ["function type"])
+    }
+
+    public func DiagInvalidOverloadedOperator(): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_overloaded_operator, lookahead,
+            ConvertToken(lookahead))
+        let note = SubDiagnostic("only operator '+', '-', ... can be overloaded")
+        builder.AddNote(note)
+    }
+
+    public func DiagAndSuggestKeywordForExpectedDeclaration(
+        keywords: ArrayList<String>,
+        minLevDis: UInt64,
+        scopeKind: ScopeKind
+    ): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_decl, lookahead, ConvertToken(lookahead))
+        if (scopeKind == ScopeKind.TOPLEVEL) {
+            let note = SubDiagnostic("only declarations or macro expressions can be used in the top-level")
+            builder.AddNote(note)
+        }
+        if (Seeing(TokenKind.IDENTIFIER)) {
+            let ident = lookahead.Value()
+            for (keyword in keywords) {
+                if (LevenshteinDistance(ident, keyword) <= minLevDis) {
+                    builder.AddHelp(DiagHelp("did you mean '" + keyword + "'?"))
+                    break
+                }
+            }
+        }
+    }
+
+    public func DiagConstVariableExpectedInitializer(vd: Decl): Unit {
+        if (parseDeclFile) {
+            return
+        }
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_const_expected_initializer, vd.end)
+        builder.AddHint(MakeRange(vd.begin, vd.end))
+    }
+
+    public func DiagConstVariableExpectedStatic(key: Token): Unit {
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_static_for_const_member_var, key)
+    }
+
+    public func DiagExpectedOneOfTypeOrInitializer(vd: Decl, str: String): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_one_of_type_or_initializer, vd.end, str)
+        builder.AddHint(MakeRange(vd.begin, vd.end))
+    }
+
+    public func DiagExpectedTypeOrInitializerInPattern(vd: Decl): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_type_or_init_in_pattern, vd.end)
+        builder.AddHint(MakeRange(vd.begin, vd.end))
+    }
+
+    public func DiagExpectedInitializerForToplevelVar(vd: Decl): Unit {
+        if (parseDeclFile) {
+            return
+        }
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_var_must_be_initialized, vd.end)
+        builder.AddHint(MakeRange(vd.begin, vd.end))
+    }
+
+    public func DiagExpectedIdentifierOrPattern(isVar: Bool, pos: Position, isConst: Bool): Unit {
+        if (isConst) {
+            let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_one_of_identifier_or_pattern,
+                lookahead, "const", ConvertToken(lookahead))
+            builder.AddHint(MakeRange(pos, "const"))
+            return
+        }
+        let s = if (isVar) { "var" } else { "let" }
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_one_of_identifier_or_pattern,
+            lookahead, s, ConvertToken(lookahead))
+        builder.AddHint(MakeRange(pos, s))
+        if (IsKeyWord(lookahead)) {
+            let helpMes = "escape the keyword `" + lookahead.Value() + "` to use it as an identifier"
+            let help = DiagHelp(helpMes)
+            help.AddSubstitution(MakeRange(lookahead.Begin(), lookahead.End()), "`" + lookahead.Value() + "`")
+            builder.AddHelp(help)
+        }
+    }
+
+    public func DiagExpectedGetOrSetInProp(pos: Position): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_get_or_set_in_prop, lookahead,
+            ConvertToken(lookahead))
+        builder.AddHint(MakeRange(pos, "prop"))
+    }
+
+    public func DiagDuplicatedGetOrSet(node: Node, pd: PropDecl): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_duplicated_get_or_set, lookahead,
+            lookahead.Value())
+        builder.AddMainHintArguments(lookahead.Value())
+        builder.AddHint(MakeRange(node.begin, node.end))
+        builder.AddHint(MakeRange(pd.begin, "prop"))
+    }
+
+    public func DiagUnknownPrimaryConstructor(str: String): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_decl, lookahead, ConvertToken(lookahead))
+        builder.AddHelp(DiagHelp("probably you want a primary constructor name: '" + str + "'"))
+    }
+
+    public func DiagExpectedName(str: String, afterName: String): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_name, lookahead, str + " name",
+            afterName, ConvertToken(lookahead))
+        builder.AddMainHintArguments(str + " name")
+    }
+
+    public func DiagGetOrSetCannotBeGeneric(str: String, ge: Generic): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_getter_setter_cannot_be_generic, ge, str)
+        builder.AddNote(
+            "GAP_TODO: requires faithful port of ParserDiag.cpp:1265 DiagGetOrSetCannotBeGeneric chainedAST")
+    }
+
+    public func DiagUnexpectedWhere(token: Token): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_where, token)
+        builder.AddHint(MakeRange(token.Begin(), token.End()))
+        builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:1285 DiagUnexpectedWhere chainedAST")
+    }
 }
 
 private func PrepareExpectNoModifierArg(mod: Modifier): Array<String> {
