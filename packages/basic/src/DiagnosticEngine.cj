@@ -834,6 +834,18 @@ public class DiagnosticBuilder <: Resource {
         diagnostic.mainHint.str = Diagnostic.InsertArguments(diagnostic.mainHint.str, arguments)
     }
 
+    public func AddMainHintArguments(argument: String): Unit {
+        AddMainHintArguments([argument])
+    }
+
+    public func AddMainHintArguments(arg0: String, arg1: String): Unit {
+        AddMainHintArguments([arg0, arg1])
+    }
+
+    public func AddMainHintArguments(arg0: String, arg1: String, arg2: String): Unit {
+        AddMainHintArguments([arg0, arg1, arg2])
+    }
+
     public func AddNote(sub: SubDiagnostic): Unit {
         diag.CheckRange(diagnostic.GetDiagCategory(), sub.mainHint.range)
         for (hint in sub.otherHints) {
@@ -1176,6 +1188,24 @@ public class DiagnosticEngine {
         return DiagnosticBuilder(this, Diagnostic(true, range, kind, arguments: arguments))
     }
 
+    public func DiagnoseRefactor(kind: DiagKindRefactor, pos: Position, argument: String): DiagnosticBuilder {
+        return DiagnoseRefactor(kind, pos, arguments: [argument])
+    }
+
+    public func DiagnoseRefactor(kind: DiagKindRefactor, pos: Position, arg0: String, arg1: String): DiagnosticBuilder {
+        return DiagnoseRefactor(kind, pos, arguments: [arg0, arg1])
+    }
+
+    public func DiagnoseRefactor(
+        kind: DiagKindRefactor,
+        pos: Position,
+        arg0: String,
+        arg1: String,
+        arg2: String
+    ): DiagnosticBuilder {
+        return DiagnoseRefactor(kind, pos, arguments: [arg0, arg1, arg2])
+    }
+
     public func DiagnoseRefactor(
         kind: DiagKindRefactor,
         range: Range,
@@ -1188,12 +1218,48 @@ public class DiagnosticEngine {
         return DiagnosticBuilder(this, Diagnostic(true, range, kind, arguments: arguments))
     }
 
+    public func DiagnoseRefactor(kind: DiagKindRefactor, range: Range, argument: String): DiagnosticBuilder {
+        return DiagnoseRefactor(kind, range, arguments: [argument])
+    }
+
+    public func DiagnoseRefactor(kind: DiagKindRefactor, range: Range, arg0: String, arg1: String): DiagnosticBuilder {
+        return DiagnoseRefactor(kind, range, arguments: [arg0, arg1])
+    }
+
+    public func DiagnoseRefactor(
+        kind: DiagKindRefactor,
+        range: Range,
+        arg0: String,
+        arg1: String,
+        arg2: String
+    ): DiagnosticBuilder {
+        return DiagnoseRefactor(kind, range, arguments: [arg0, arg1, arg2])
+    }
+
     public func DiagnoseRefactor(
         kind: DiagKindRefactor,
         token: Token,
         arguments!: Array<String> = Array<String>()
     ): DiagnosticBuilder {
         return DiagnosticBuilder(this, Diagnostic(true, MakeRange(token.Begin(), token.End()), kind, arguments: arguments))
+    }
+
+    public func DiagnoseRefactor(kind: DiagKindRefactor, token: Token, argument: String): DiagnosticBuilder {
+        return DiagnoseRefactor(kind, token, arguments: [argument])
+    }
+
+    public func DiagnoseRefactor(kind: DiagKindRefactor, token: Token, arg0: String, arg1: String): DiagnosticBuilder {
+        return DiagnoseRefactor(kind, token, arguments: [arg0, arg1])
+    }
+
+    public func DiagnoseRefactor(
+        kind: DiagKindRefactor,
+        token: Token,
+        arg0: String,
+        arg1: String,
+        arg2: String
+    ): DiagnosticBuilder {
+        return DiagnoseRefactor(kind, token, arguments: [arg0, arg1, arg2])
     }
 
     public func DiagnoseRefactor(

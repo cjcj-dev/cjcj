@@ -27,7 +27,7 @@ public class MPParserImpl {
         for (modifier in modifiers) {
             if (HasCJMPModifiers(modifier) && !CompilePlatform() && !CompileCommon()) {
                 parser.diag.DiagnoseRefactor(
-                    DiagKindRefactor.INVALID_MODIFIER,
+                    DiagKindRefactor.parse_diag_error,
                     modifier.begin,
                     "unexpected CJMP modifier '${modifier.ToString()}' outside common/platform compilation")
                 ok = false
@@ -87,7 +87,7 @@ public class MPParserImpl {
         if (!hasCtor) {
             let declType = if (decl.astKind == ASTKind.CLASS_DECL) { "class" } else { "struct" }
             parser.diag.DiagnoseRefactor(
-                DiagKindRefactor.PARSE_ERROR,
+                DiagKindRefactor.parse_diag_error,
                 decl.identifier.Begin(),
                 "common ${declType} '${decl.identifier.Val()}' must declare a constructor")
         }
@@ -99,7 +99,7 @@ public class MPParserImpl {
             let kind = if (decl.TestAttr(Attribute.COMMON)) { "common" } else { "specific" }
             if (decl.TestAttr(Attribute.GENERIC) && decl.HasAnno(AnnotationKind.FROZEN)) {
                 parser.diag.DiagnoseRefactor(
-                    DiagKindRefactor.INVALID_ANNOTATION,
+                    DiagKindRefactor.parse_diag_error,
                     decl.identifier.Begin(),
                     "${kind} generic declaration '${decl.identifier.Val()}' cannot use @Frozen")
                 decl.EnableAttr(Attribute.IS_BROKEN)
@@ -107,7 +107,7 @@ public class MPParserImpl {
             }
             if (decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL && decl.TestAttr(Attribute.COMMON)) {
                 parser.diag.DiagnoseRefactor(
-                    DiagKindRefactor.INVALID_MODIFIER,
+                    DiagKindRefactor.parse_diag_error,
                     decl.begin,
                     "common modifier is not allowed on pattern variable declarations")
                 decl.EnableAttr(Attribute.IS_BROKEN)
@@ -141,7 +141,7 @@ public class MPParserImpl {
         for (member in decl.GetMemberDecls()) {
             if (!HasDefault(member)) {
                 parser.diag.DiagnoseRefactor(
-                    DiagKindRefactor.PARSE_ERROR,
+                    DiagKindRefactor.parse_diag_error,
                     member.begin,
                     "specific interface member '${member.identifier.Val()}' in '${decl.identifier.Val()}' must have an implementation")
                 member.EnableAttr(Attribute.IS_BROKEN)
@@ -151,7 +151,7 @@ public class MPParserImpl {
 
     private func DiagOuterDeclMissMatch(node: Decl, p0: String, p1: String, p2: String, p3: String): Unit {
         parser.diag.DiagnoseRefactor(
-            DiagKindRefactor.INVALID_MODIFIER,
+            DiagKindRefactor.parse_diag_error,
             node.begin,
             "${p0} is marked ${p1}, but enclosing ${p2} is not marked ${p3}")
         node.EnableAttr(Attribute.IS_BROKEN)

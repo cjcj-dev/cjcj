@@ -234,13 +234,7 @@ private func refTypeName(typeNode: Type): String {
 }
 
 private func countErrors(diag: DiagnosticEngine): Int64 {
-    var count: Int64 = 0
-    for (diagnostic in diag.Diagnostics()) {
-        if (diagnostic.severity == DiagSeverity.ERROR) {
-            count++
-        }
-    }
-    return count
+    return Int64(diag.GetErrorCount())
 }
 
 private func callDepth(expr: Expr): Int64 {

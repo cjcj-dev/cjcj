@@ -77,7 +77,7 @@ extend ParserImpl {
         // 路径会 Next() 消费 RPAREN(C++ GetInvalidExprInAtom 不消费 lookahead), 不短路会吞掉右括号
         // 导致 Expect(RPAREN) 失败+token 失同步。保留与 C++ ParseQuote.cpp:47 等价的同步语义。
         let parsedExpr = if (Seeing(TokenKind.RPAREN) || Seeing(TokenKind.END)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected expression in quote interpolation")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected expression in quote interpolation")
             InvalidExpr(Peek().Begin())
         } else {
             ParseExpr()
@@ -138,7 +138,7 @@ extend ParserImpl {
                 depth++
             } else if (Seeing(TokenKind.DOLLAR)) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.EXPECTED_TOKEN,
+                    DiagKindRefactor.parse_diag_error,
                     Peek().Begin(),
                     "expected escaped dollar token or quote interpolation")
             }
@@ -160,7 +160,7 @@ extend ParserImpl {
         ret.begin = token.Begin()
         ret.quotePos = token.Begin()
         if (newlineSkipped || Seeing(TokenKind.NL)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.UNEXPECTED_TOKEN, token.End(), "unexpected line break after quote")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.End(), "unexpected line break after quote")
             ret.isBroken = true
         }
         SkipBlank(TokenKind.NL)
@@ -169,7 +169,7 @@ extend ParserImpl {
             ParseQuoteTokens(ret)
             ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after quote expression").Begin()
         } else {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '(' after quote")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected '(' after quote")
             ret.isBroken = true
         }
         ret.end = lastToken.End()

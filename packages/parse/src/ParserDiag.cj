@@ -4,15 +4,15 @@ import cangjie_compiler::option.BackendToString as OptionBackendToString
 
 extend ParserImpl {
     public func DiagExpectedIdentifier(pos: Position): Unit {
-        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_IDENTIFIER, pos, "expected identifier")
+        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, pos, "expected identifier")
     }
 
     public func DiagExpectedExpression(): Unit {
-        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected expression")
+        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected expression")
     }
 
     public func DiagExpectedDeclaration(_: ScopeKind): Unit {
-        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected declaration")
+        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected declaration")
     }
 
     public func DiagUnsafeWillBeIgnored(mod: Modifier): Unit {
@@ -29,44 +29,48 @@ extend ParserImpl {
         let builder = diag.DiagnoseRefactor(
             DiagKindRefactor.parse_missing_body,
             pos,
-            "body of ${bodyName} is missing")
+            bodyName)
         builder.AddMainHintArguments(str)
     }
 
     public func DiagNamedParameterAfterUnnamed(param: FuncParam, pre: FuncParam): Unit {
-        let _ = pre
-        diag.DiagnoseRefactor(
+        let builder = ParseDiagnoseRefactor(
             DiagKindRefactor.parse_named_parameter_after_unnamed,
-            param.begin,
-            "unnamed parameters must come before named parameters")
+            param)
+        builder.AddHint(MakeRange(pre.begin, pre.end))
     }
 
     public func DiagMemberParameterAfterRegular(param: FuncParam, pre: FuncParam): Unit {
-        let _ = pre
-        diag.DiagnoseRefactor(
+        let builder = ParseDiagnoseRefactor(
             DiagKindRefactor.parse_member_parameter_after_regular,
-            param.begin,
-            "regular parameters must come before member variable parameters")
+            param)
+        builder.AddHint(MakeRange(pre.begin, pre.end))
     }
 
     public func DiagExpectNoModifier(mod: Modifier): Unit {
         diag.DiagnoseRefactor(
-            DiagKindRefactor.parse_expected_no_modifier,
+            DiagKindRefactor.parse_diag_error,
             mod.begin,
             "expected no modifier here")
     }
 
     public func DiagUnExpectedModifierOnDeclaration(decl: Decl): Unit {
-        diag.DiagnoseRefactor(
-            DiagKindRefactor.parse_unexpected_const_modifier_on_variable,
-            decl.begin,
-            "unexpected modifier 'const' on var or let variable")
+        for (modifier in decl.modifiers) {
+            if (modifier.modifier == TokenKind.CONST) {
+                let builder = diag.DiagnoseRefactor(
+                    DiagKindRefactor.parse_unexpected_const_modifier_on_variable,
+                    MakeRange(modifier.begin, modifier.end))
+                builder.AddHint(MakeRange(decl.keywordPos, decl.keywordPos + 3))
+                return
+            }
+        }
+        diag.DiagnoseRefactor(DiagKindRefactor.parse_unexpected_const_modifier_on_variable, decl.begin)
     }
 
     public func DiagDeprecatedInvalidTarget(node: Node, invalidTarget: String): Unit {
         diag.DiagnoseRefactor(
             DiagKindRefactor.parse_deprecated_invalid_target,
             node.begin,
-            "${invalidTarget} can not be target of @Deprecated")
+            invalidTarget)
     }
 }

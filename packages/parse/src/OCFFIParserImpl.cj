@@ -157,7 +157,7 @@ public class OCFFIParserImpl {
             return
         }
         decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.diag.DiagnoseRefactor(DiagKindRefactor.INVALID_ANNOTATION, anno.begin, "@ObjCMirror target is invalid")
+        parser.diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, anno.begin, "@ObjCMirror target is invalid")
     }
 
     private func CheckImplAnnoTarget(anno: Annotation, decl: Decl): Unit {
@@ -165,7 +165,7 @@ public class OCFFIParserImpl {
             return
         }
         decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.diag.DiagnoseRefactor(DiagKindRefactor.INVALID_ANNOTATION, anno.begin, "@ObjCImpl can only be applied to classes and interfaces")
+        parser.diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, anno.begin, "@ObjCImpl can only be applied to classes and interfaces")
     }
 
     private func CheckInitAnnoTarget(anno: Annotation, decl: Decl): Unit {
@@ -173,7 +173,7 @@ public class OCFFIParserImpl {
             return
         }
         decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.diag.DiagnoseRefactor(DiagKindRefactor.INVALID_ANNOTATION, anno.begin, "@ObjCInit can only be applied to functions")
+        parser.diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, anno.begin, "@ObjCInit can only be applied to functions")
     }
 
     private func CheckOptionalAnnoTarget(anno: Annotation, decl: Decl): Unit {
@@ -181,7 +181,7 @@ public class OCFFIParserImpl {
             return
         }
         decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.diag.DiagnoseRefactor(DiagKindRefactor.INVALID_ANNOTATION, anno.begin, "@ObjCOptional can only be applied to functions")
+        parser.diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, anno.begin, "@ObjCOptional can only be applied to functions")
     }
 
     private func DiagObjCMirrorCannotBeSealed(node: Node): Unit { Emit(node, "@ObjCMirror declaration cannot be sealed") }
@@ -190,7 +190,7 @@ public class OCFFIParserImpl {
     private func DiagObjCImplCannotBeSealed(node: Node): Unit { Emit(node, "@ObjCImpl declaration cannot be sealed") }
 
     private func Emit(node: Node, message: String): Unit {
-        parser.diag.DiagnoseRefactor(DiagKindRefactor.INVALID_ANNOTATION, node.begin, message)
+        parser.diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, node.begin, message)
     }
 }
 

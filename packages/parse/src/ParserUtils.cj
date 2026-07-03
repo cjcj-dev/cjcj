@@ -294,7 +294,7 @@ extend ParserImpl {
             return ParseIdentifierFromToken(token)
         }
         node.isBroken = true
-        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_IDENTIFIER, token.Begin(), "expected identifier")
+        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected identifier")
         return SrcIdentifier("", "", token.Begin(), token.Begin(), false)
     }
 
@@ -336,7 +336,7 @@ extend ParserImpl {
             let refTy = ParseRefType(true)
             constraint.refType = refTy
             if (!Skip(TokenKind.UPPERBOUND)) {
-                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '<:' in generic constraint")
+                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected '<:' in generic constraint")
             } else {
                 constraint.operatorPos = lastToken.Begin()
             }
@@ -362,7 +362,7 @@ extend ParserImpl {
                 let typeName = refTy.ref.identifier.Val()
                 if (posRecord.contains(typeName)) {
                     diag.DiagnoseRefactor(
-                        DiagKindRefactor.PARSE_ERROR,
+                        DiagKindRefactor.parse_diag_error,
                         refTy.begin,
                         "duplicated type name '${typeName}' in generic constrain")
                 } else {

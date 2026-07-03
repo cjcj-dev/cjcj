@@ -31,7 +31,7 @@ extend ParserImpl {
             return ParseTypePatternOrVarOrEnumPattern(attributes, isVar, inDecl)
         }
         let token = Peek()
-        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected pattern")
+        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected pattern")
         Next()
         return InvalidPattern(token.Begin())
     }
@@ -195,7 +195,7 @@ extend ParserImpl {
             tuple.patterns.add(ParsePattern(attributes, isVar, inDecl))
             if (Seeing(TokenKind.BITOR)) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.PARSE_ERROR,
+                    DiagKindRefactor.parse_diag_error,
                     Peek().Begin(),
                     "or-patterns are not allowed inside tuple patterns")
                 ConsumeUntilAny([TokenKind.COMMA, TokenKind.RPAREN], targetTokenConsumed: false)
@@ -216,7 +216,7 @@ extend ParserImpl {
             }
             if (!hasBrokenChild) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.UNTERMINATED_DELIMITER,
+                    DiagKindRefactor.parse_diag_error,
                     tuple.leftParenPos,
                     "expected ')' after tuple pattern")
             }
@@ -228,7 +228,7 @@ extend ParserImpl {
         tuple.end = lastToken.End()
         if (!isEnumPatternParams && tuple.patterns.size == 1) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.PARSE_ERROR,
+                DiagKindRefactor.parse_diag_error,
                 tuple.begin,
                 "tuple pattern must contain at least two fields")
         }

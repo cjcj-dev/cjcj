@@ -101,7 +101,7 @@ public open class FFIParserImpl {
         if (decl.astKind != ASTKind.FUNC_DECL && decl.astKind != ASTKind.PROP_DECL && decl.astKind != ASTKind.VAR_DECL) {
             decl.EnableAttr(Attribute.IS_BROKEN)
             parser.diag.DiagnoseRefactor(
-                DiagKindRefactor.INVALID_ANNOTATION,
+                DiagKindRefactor.parse_diag_error,
                 decl.begin,
                 "@ForeignName is only valid on functions, properties, and variables")
             return
@@ -114,7 +114,7 @@ public open class FFIParserImpl {
         }
         decl.EnableAttr(Attribute.IS_BROKEN)
         parser.diag.DiagnoseRefactor(
-            DiagKindRefactor.INVALID_ANNOTATION,
+            DiagKindRefactor.parse_diag_error,
             decl.begin,
             "@ForeignName can only be used on a member of a Java or Objective-C mirror declaration")
     }
@@ -126,7 +126,7 @@ public open class FFIParserImpl {
         if (anno.args.size > 1 || !IsLitStringArg(anno.args[0])) {
             decl.EnableAttr(Attribute.IS_BROKEN)
             parser.diag.DiagnoseRefactor(
-                DiagKindRefactor.INVALID_ANNOTATION,
+                DiagKindRefactor.parse_diag_error,
                 anno.begin,
                 "${annotationName} expects zero arguments or one string literal argument")
         }
@@ -136,7 +136,7 @@ public open class FFIParserImpl {
         if (!anno.args.isEmpty()) {
             decl.EnableAttr(Attribute.IS_BROKEN)
             parser.diag.DiagnoseRefactor(
-                DiagKindRefactor.INVALID_ANNOTATION,
+                DiagKindRefactor.parse_diag_error,
                 anno.begin,
                 "${annotationName} does not take arguments")
         }
@@ -158,7 +158,7 @@ public open class FFIParserImpl {
         if (anno.args.size != 1 || !IsLitStringArg(anno.args[0])) {
             decl.EnableAttr(Attribute.IS_BROKEN)
             parser.diag.DiagnoseRefactor(
-                DiagKindRefactor.INVALID_ANNOTATION,
+                DiagKindRefactor.parse_diag_error,
                 anno.begin,
                 "@ForeignName expects one string literal argument")
         }
@@ -171,7 +171,7 @@ public open class FFIParserImpl {
         }
         decl.EnableAttr(Attribute.IS_BROKEN)
         parser.diag.DiagnoseRefactor(
-            DiagKindRefactor.INVALID_ANNOTATION,
+            DiagKindRefactor.parse_diag_error,
             anno.begin,
             "@ForeignName cannot be applied to ${decl.identifier.Val()}")
     }
@@ -180,7 +180,7 @@ public open class FFIParserImpl {
         if (anno.args.size != 1 || !IsLitStringArg(anno.args[0]) || !anno.args[0].name.Empty()) {
             decl.EnableAttr(Attribute.IS_BROKEN)
             parser.diag.DiagnoseRefactor(
-                DiagKindRefactor.INVALID_ANNOTATION,
+                DiagKindRefactor.parse_diag_error,
                 anno.begin,
                 "@" + anno.identifier.Val() + " expects one unnamed string literal argument")
         }
@@ -192,7 +192,7 @@ public open class FFIParserImpl {
         }
         decl.EnableAttr(Attribute.IS_BROKEN)
         parser.diag.DiagnoseRefactor(
-            DiagKindRefactor.INVALID_ANNOTATION,
+            DiagKindRefactor.parse_diag_error,
             anno.begin,
             "@" + anno.identifier.Val() + " can only be applied to properties")
     }
@@ -201,7 +201,7 @@ public open class FFIParserImpl {
 public func DiagConflictingAnnos(diag: DiagnosticEngine, first: Annotation, second: Annotation, onStr: String): Unit {
     let pos = if (first.begin < second.begin) { first.begin } else { second.begin }
     diag.DiagnoseRefactor(
-        DiagKindRefactor.CONFLICTING_MODIFIER,
+        DiagKindRefactor.parse_diag_error,
         pos,
         "conflicting annotations @${first.identifier.Val()} and @${second.identifier.Val()} on ${onStr}")
 }

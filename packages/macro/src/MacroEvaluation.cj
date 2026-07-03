@@ -1,9 +1,9 @@
 package cangjie_compiler::macro_pkg
 
 import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
+import cangjie_compiler::basic.DiagCategory as EvalParsedDiagCategory
+import cangjie_compiler::basic.DiagnosticEngine as EvalParsedDiagnosticEngine
 import cangjie_compiler::lex.{Lexer as RealLexer, StringPartKind}
-import cangjie_compiler::parse.DiagSeverity as EvalParsedDiagSeverity
-import cangjie_compiler::parse.DiagnosticEngine as EvalParsedDiagnosticEngine
 import cangjie_compiler::parse.File as EvalParsedFile
 import cangjie_compiler::parse.IsBuiltinAnnotation as ParseIsBuiltinAnnotation
 import cangjie_compiler::parse.PackageSpec as EvalParsedPackageSpec
@@ -446,12 +446,11 @@ private func refreshTokensPosForMacroArgCheck(inputTokens: ArrayList<Token>, pos
 }
 
 private func forwardEvaluationParserDiagnostics(parserDiag: EvalParsedDiagnosticEngine, diag: DiagnosticEngine): Unit {
-    for (diagnostic in parserDiag.Diagnostics()) {
-        if (diagnostic.severity == EvalParsedDiagSeverity.WARNING) {
-            diag.Warn(MakeRange(diagnostic.pos, diagnostic.pos), diagnostic.message)
-        } else {
-            diag.Diagnose(diagnostic.pos, diagnostic.message)
-        }
+    for (diagnostic in parserDiag.GetCategoryDiagnostic(EvalParsedDiagCategory.LEX)) {
+        diag.HandleDiagnostic(diagnostic)
+    }
+    for (diagnostic in parserDiag.GetCategoryDiagnostic(EvalParsedDiagCategory.PARSE)) {
+        diag.HandleDiagnostic(diagnostic)
     }
 }
 
@@ -472,7 +471,7 @@ private func checkMacroCallArgs(macCall: MacroCall, diag: DiagnosticEngine, comp
         parser.SetCurFile(makeEvaluationParsedFile(macroFile))
     }
     let _ = parser.ParseDecl(toEvaluationParsedScopeKind(invocation.scopeKind))
-    let hasParseError = parserDiag.HasError()
+    let hasParseError = parserDiag.GetErrorCount() > 0u64
     forwardEvaluationParserDiagnostics(parserDiag, diag)
     if (hasParseError) {
         macCall.status = MacroEvalStatus.FAIL

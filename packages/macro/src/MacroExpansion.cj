@@ -7,6 +7,8 @@ import cangjie_compiler::ast.ExprKind as ParsedAstExprKind
 import cangjie_compiler::ast.Node as ParsedAstNode
 import cangjie_compiler::ast.ScopeKind as ParsedAstScopeKind
 import cangjie_compiler::ast.VarDecl as ParsedAstVarDecl
+import cangjie_compiler::basic.DiagCategory as ParsedDiagCategory
+import cangjie_compiler::basic.DiagnosticEngine as ParsedDiagnosticEngine
 import cangjie_compiler::parse.Annotation as ParsedAnnotation
 import cangjie_compiler::parse.ArrayExpr as ParsedArrayExpr
 import cangjie_compiler::parse.ArrayLit as ParsedArrayLit
@@ -20,8 +22,6 @@ import cangjie_compiler::parse.CommandTypePattern as ParsedCommandTypePattern
 import cangjie_compiler::parse.ConstantType as ParsedConstantType
 import cangjie_compiler::parse.ConstPattern as ParsedConstPattern
 import cangjie_compiler::parse.Decl as ParsedDecl
-import cangjie_compiler::parse.DiagSeverity as ParsedDiagSeverity
-import cangjie_compiler::parse.DiagnosticEngine as ParsedDiagnosticEngine
 import cangjie_compiler::parse.Expr as ParsedExpr
 import cangjie_compiler::parse.EnumDecl as ParsedEnumDecl
 import cangjie_compiler::parse.EnumPattern as ParsedEnumPattern
@@ -260,8 +260,9 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall,
         toParsedScopeKind(macroNode.RequireInvocation().scopeKind)
     }
     let parsedNodes = generatedParser.ParseNodes(parsedScope, parsedCurrentMacroCall)
+    let hasParseError = parserDiag.GetErrorCount() > 0u64
     forwardParserDiagnostics(parserDiag, ci.diag)
-    if (parserDiag.HasError()) {
+    if (hasParseError) {
         out.add(makeInvalidGeneratedNode(tokens))
         return out
     }
@@ -328,12 +329,11 @@ private func makeInvalidGeneratedNode(tokens: ArrayList<Token>): Node {
 }
 
 private func forwardParserDiagnostics(parserDiag: ParsedDiagnosticEngine, diag: DiagnosticEngine): Unit {
-    for (diagnostic in parserDiag.Diagnostics()) {
-        if (diagnostic.severity == ParsedDiagSeverity.WARNING) {
-            diag.Warn(MakeRange(diagnostic.pos, diagnostic.pos), diagnostic.message)
-        } else {
-            diag.Diagnose(diagnostic.pos, diagnostic.message)
-        }
+    for (diagnostic in parserDiag.GetCategoryDiagnostic(ParsedDiagCategory.LEX)) {
+        diag.HandleDiagnostic(diagnostic)
+    }
+    for (diagnostic in parserDiag.GetCategoryDiagnostic(ParsedDiagCategory.PARSE)) {
+        diag.HandleDiagnostic(diagnostic)
     }
 }
 

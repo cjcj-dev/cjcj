@@ -3,6 +3,7 @@ package cangjie_compiler::parse
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticBuilder as BasicDiagnosticBuilder
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.Range as BasicRange
 import std.collection.*
 
 public class ParserImpl {
@@ -235,7 +236,7 @@ public class ParserImpl {
     public func Expect(kind: TokenKind, message: String): Token {
         let token = Peek()
         if (!Skip(kind)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), message)
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), message)
         }
         return token
     }
@@ -278,21 +279,11 @@ public class ParserImpl {
         skipNL = true
     }
 
-    private func MakeParseDiagnosticNode(begin: Position, end: Position): Node {
-        let node = Node()
-        node.begin = begin
-        node.end = end
-        if (let Some(macroCall) <- curMacroCall) {
-            node.curMacroCall = macroCall
-        }
-        return node
-    }
-
-    private func DiagnoseRefactorForNode(
+    public func ParseDiagnoseRefactor(
         kind: BasicDiagKindRefactor,
         node: Node,
         pos: Position,
-        arguments: Array<String>
+        arguments!: Array<String> = Array<String>()
     ): BasicDiagnosticBuilder {
         if (let Some(macroCall) <- node.curMacroCall) {
             if (let Some(invocation) <- macroCall.GetConstInvocation()) {
@@ -302,11 +293,11 @@ public class ParserImpl {
         return diag.DiagnoseRefactor(kind, pos, arguments: arguments)
     }
 
-    private func DiagnoseRefactorForNode(
+    public func ParseDiagnoseRefactor(
         kind: BasicDiagKindRefactor,
         node: Node,
-        range: Range,
-        arguments: Array<String>
+        range: BasicRange,
+        arguments!: Array<String> = Array<String>()
     ): BasicDiagnosticBuilder {
         if (let Some(macroCall) <- node.curMacroCall) {
             if (let Some(invocation) <- macroCall.GetConstInvocation()) {
@@ -321,17 +312,73 @@ public class ParserImpl {
         pos: Position,
         arguments!: Array<String> = Array<String>()
     ): BasicDiagnosticBuilder {
-        let node = MakeParseDiagnosticNode(pos, pos + 1)
-        return DiagnoseRefactorForNode(kind, node, pos, arguments)
+        let node = Node()
+        node.begin = pos
+        node.end = pos + 1
+        if (let Some(macroCall) <- curMacroCall) {
+            node.curMacroCall = macroCall
+        }
+        return ParseDiagnoseRefactor(kind, node, pos, arguments: arguments)
+    }
+
+    public func ParseDiagnoseRefactor(kind: BasicDiagKindRefactor, pos: Position, argument: String): BasicDiagnosticBuilder {
+        return ParseDiagnoseRefactor(kind, pos, arguments: [argument])
     }
 
     public func ParseDiagnoseRefactor(
         kind: BasicDiagKindRefactor,
-        range: Range,
+        pos: Position,
+        arg0: String,
+        arg1: String
+    ): BasicDiagnosticBuilder {
+        return ParseDiagnoseRefactor(kind, pos, arguments: [arg0, arg1])
+    }
+
+    public func ParseDiagnoseRefactor(
+        kind: BasicDiagKindRefactor,
+        pos: Position,
+        arg0: String,
+        arg1: String,
+        arg2: String
+    ): BasicDiagnosticBuilder {
+        return ParseDiagnoseRefactor(kind, pos, arguments: [arg0, arg1, arg2])
+    }
+
+    public func ParseDiagnoseRefactor(
+        kind: BasicDiagKindRefactor,
+        range: BasicRange,
         arguments!: Array<String> = Array<String>()
     ): BasicDiagnosticBuilder {
-        let node = MakeParseDiagnosticNode(range.begin, range.end)
-        return DiagnoseRefactorForNode(kind, node, range, arguments)
+        let node = Node()
+        node.begin = range.begin
+        node.end = range.end
+        if (let Some(macroCall) <- curMacroCall) {
+            node.curMacroCall = macroCall
+        }
+        return ParseDiagnoseRefactor(kind, node, range, arguments: arguments)
+    }
+
+    public func ParseDiagnoseRefactor(kind: BasicDiagKindRefactor, range: BasicRange, argument: String): BasicDiagnosticBuilder {
+        return ParseDiagnoseRefactor(kind, range, arguments: [argument])
+    }
+
+    public func ParseDiagnoseRefactor(
+        kind: BasicDiagKindRefactor,
+        range: BasicRange,
+        arg0: String,
+        arg1: String
+    ): BasicDiagnosticBuilder {
+        return ParseDiagnoseRefactor(kind, range, arguments: [arg0, arg1])
+    }
+
+    public func ParseDiagnoseRefactor(
+        kind: BasicDiagKindRefactor,
+        range: BasicRange,
+        arg0: String,
+        arg1: String,
+        arg2: String
+    ): BasicDiagnosticBuilder {
+        return ParseDiagnoseRefactor(kind, range, arguments: [arg0, arg1, arg2])
     }
 
     public func ParseDiagnoseRefactor(
@@ -339,8 +386,36 @@ public class ParserImpl {
         token: Token,
         arguments!: Array<String> = Array<String>()
     ): BasicDiagnosticBuilder {
-        let node = MakeParseDiagnosticNode(token.Begin(), token.End())
-        return DiagnoseRefactorForNode(kind, node, MakeRange(token.Begin(), token.End()), arguments)
+        let node = Node()
+        node.begin = token.Begin()
+        node.end = token.End()
+        if (let Some(macroCall) <- curMacroCall) {
+            node.curMacroCall = macroCall
+        }
+        return ParseDiagnoseRefactor(kind, node, MakeRange(token.Begin(), token.End()), arguments: arguments)
+    }
+
+    public func ParseDiagnoseRefactor(kind: BasicDiagKindRefactor, token: Token, argument: String): BasicDiagnosticBuilder {
+        return ParseDiagnoseRefactor(kind, token, arguments: [argument])
+    }
+
+    public func ParseDiagnoseRefactor(
+        kind: BasicDiagKindRefactor,
+        token: Token,
+        arg0: String,
+        arg1: String
+    ): BasicDiagnosticBuilder {
+        return ParseDiagnoseRefactor(kind, token, arguments: [arg0, arg1])
+    }
+
+    public func ParseDiagnoseRefactor(
+        kind: BasicDiagKindRefactor,
+        token: Token,
+        arg0: String,
+        arg1: String,
+        arg2: String
+    ): BasicDiagnosticBuilder {
+        return ParseDiagnoseRefactor(kind, token, arguments: [arg0, arg1, arg2])
     }
 
     public func ParseDiagnoseRefactor(
@@ -348,7 +423,30 @@ public class ParserImpl {
         node: Node,
         arguments!: Array<String> = Array<String>()
     ): BasicDiagnosticBuilder {
-        return DiagnoseRefactorForNode(kind, node, MakeRange(node.GetBegin(), node.GetEnd()), arguments)
+        return ParseDiagnoseRefactor(kind, node, MakeRange(node.GetBegin(), node.GetEnd()), arguments: arguments)
+    }
+
+    public func ParseDiagnoseRefactor(kind: BasicDiagKindRefactor, node: Node, argument: String): BasicDiagnosticBuilder {
+        return ParseDiagnoseRefactor(kind, node, arguments: [argument])
+    }
+
+    public func ParseDiagnoseRefactor(
+        kind: BasicDiagKindRefactor,
+        node: Node,
+        arg0: String,
+        arg1: String
+    ): BasicDiagnosticBuilder {
+        return ParseDiagnoseRefactor(kind, node, arguments: [arg0, arg1])
+    }
+
+    public func ParseDiagnoseRefactor(
+        kind: BasicDiagKindRefactor,
+        node: Node,
+        arg0: String,
+        arg1: String,
+        arg2: String
+    ): BasicDiagnosticBuilder {
+        return ParseDiagnoseRefactor(kind, node, arguments: [arg0, arg1, arg2])
     }
 }
 

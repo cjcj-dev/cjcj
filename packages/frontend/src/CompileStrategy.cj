@@ -4,11 +4,7 @@ import cangjie_compiler::ast.AddCurFile
 import cangjie_compiler::ast.TokenKind
 import cangjie_compiler::basic.InteropCJPackageConfigReader
 import cangjie_compiler::conditional_compilation.ConditionalCompilation
-import cangjie_compiler::parse.DiagnosticEngine as ParseDiagnosticEngine
-import cangjie_compiler::parse.DiagSeverity as ParseDiagSeverity
 import cangjie_compiler::parse.Parser as RealParser
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.DiagSeverity as BasicDiagSeverity
 import cangjie_compiler::basic.GetHash
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.ProfileRecorder
@@ -269,7 +265,8 @@ private class FullCompileStrategyImpl {
     }
 
     private func parseRealSourceIntoPackage(pkg: Package, filePath: String, fileID: UInt64, sourceCode: String): Bool {
-        let parseDiag = ParseDiagnosticEngine()
+        let parseDiag = s.ci.diag.AsBasicDiagnosticEngine()
+        let errorCountBefore = s.ci.diag.GetErrorCount()
         let parser = RealParser(fileID, sourceCode, parseDiag, s.ci.GetSourceManager())
         let realFile = parser.ParseTopLevel()
         realFile.filePath = NormalizePath(filePath)
@@ -283,45 +280,7 @@ private class FullCompileStrategyImpl {
         if (pkg.files.size == 1) {
             initializePackageInfoFromFirstFile(pkg)
         }
-        // Forward the parser's actual diagnostics into the real engine instead of
-        // collapsing every parse failure into one generic message. Faithful to C++,
-        // where ParserImpl writes directly into the shared DiagnosticEngine (lexer
-        // and parser share it; src/Parse/ParserImpl.cpp:206), so each error keeps its
-        // own message, position and severity.
-        let lexerError = forwardLexerDiagnostics(parser.GetLexerDiagnosticEngine(), s.ci.diag)
-        let parseError = forwardParseDiagnostics(parseDiag, s.ci.diag)
-        if (lexerError || parseError) {
-            return false
-        }
-        return true
-    }
-
-    private func forwardLexerDiagnostics(lexerDiag: BasicDiagnosticEngine, dst: DiagnosticEngine): Bool {
-        // The lexer emits refactor diagnostics carrying full table kind/range/hints.
-        // Re-handle them on the real engine so they are categorized and emitted.
-        var hadError = false
-        for (diagnostic in lexerDiag.GetCategoryDiagnostic(DiagCategory.LEX)) {
-            if (diagnostic.diagSeverity == BasicDiagSeverity.DS_ERROR) {
-                hadError = true
-            }
-            dst.HandleDiagnostic(diagnostic)
-        }
-        return hadError
-    }
-
-    private func forwardParseDiagnostics(parseDiag: ParseDiagnosticEngine, dst: DiagnosticEngine): Bool {
-        var hadError = false
-        for (diagnostic in parseDiag.Diagnostics()) {
-            if (diagnostic.severity == ParseDiagSeverity.WARNING) {
-                dst.Warn(DiagCategory.PARSE, diagnostic.pos, diagnostic.message)
-            } else if (diagnostic.severity == ParseDiagSeverity.NOTE) {
-                dst.Note(DiagCategory.PARSE, diagnostic.pos, diagnostic.message)
-            } else {
-                dst.Diagnose(DiagCategory.PARSE, diagnostic.pos, diagnostic.message)
-                hadError = true
-            }
-        }
-        return hadError
+        return s.ci.diag.GetErrorCount() == errorCountBefore
     }
 
     private func initializePackageInfoFromFirstFile(pkg: Package): Unit {

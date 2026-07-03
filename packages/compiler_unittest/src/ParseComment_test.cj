@@ -4,7 +4,6 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::frontend.CompileStage
 import cangjie_compiler::parse.Parser
 import cangjie_compiler::parse.DiagnosticEngine as ParseDiagnosticEngine
-import cangjie_compiler::parse.DiagSeverity
 import cangjie_compiler::parse.Position
 import cangjie_compiler::parse.SourceManager
 import std.collection.*
@@ -1055,12 +1054,7 @@ func foo() {
         let sm = SourceManager()
         let parser = Parser(code, diag, sm, pos: Position(0, 1, 1), attachComment: true)
         let file = parser.ParseTopLevel()
-        var errCount: Int64 = 0
-        for (diagnostic in diag.Diagnostics()) {
-            if (diagnostic.severity == DiagSeverity.ERROR) {
-                errCount++
-            }
-        }
+        let errCount = Int64(diag.GetErrorCount())
         @Expect(errCount, 0)
         let foo = (file.decls[0] as FuncDecl).getOrThrow()
         let block = foo.funcBody.getOrThrow().body.getOrThrow()

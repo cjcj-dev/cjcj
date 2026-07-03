@@ -31,7 +31,7 @@ extend ParserImpl {
         }
         if (ExprKindEquals(ek, ExprKind.VAR_INIT) && IsAssignmentExpressionRoot(ret)) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.PARSE_ERROR,
+                DiagKindRefactor.parse_diag_error,
                 ret.begin,
                 "assignment expression cannot be used as a variable initializer")
             ret.isBroken = true
@@ -77,7 +77,7 @@ extend ParserImpl {
     public func ParseUnaryExpr(ek: ExprKind): Expr {
         if (Seeing([TokenKind.SUB, TokenKind.NL], skipNewline: false) ||
             Seeing([TokenKind.NOT, TokenKind.NL], skipNewline: false)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected expression without newline after unary operator")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected expression without newline after unary operator")
             return InvalidExpr(Peek().Begin())
         }
         if (Seeing(TokenKind.NOT) || Seeing(TokenKind.ADD) || Seeing(TokenKind.SUB) || Seeing(TokenKind.BITNOT)) {
@@ -131,7 +131,7 @@ extend ParserImpl {
                 base = ParseQuestSuffixExpr(base)
                 hasQuestSuffix = true
             } else if (Seeing(TokenKind.QUEST) && !SeeingCombinator([TokenKind.QUEST, TokenKind.QUEST])) {
-                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '.', '(', '[', '{', or '?' after '?'")
+                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected '.', '(', '[', '{', or '?' after '?'")
                 Next()
                 break
             }
@@ -224,7 +224,7 @@ extend ParserImpl {
         if (![ASTKind.MACRO_EXPAND_EXPR, ASTKind.ARRAY_EXPR, ASTKind.OPTIONAL_EXPR, ASTKind.CALL_EXPR,
             ASTKind.REF_EXPR, ASTKind.MEMBER_ACCESS].contains(baseExpr.astKind)) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.PARSE_ERROR,
+                DiagKindRefactor.parse_diag_error,
                 baseExpr.begin,
                 "trailing closure can only be used on function calls with function or variable names")
         }
@@ -236,7 +236,7 @@ extend ParserImpl {
             }
             if (![ASTKind.MEMBER_ACCESS, ASTKind.REF_EXPR, ASTKind.OPTIONAL_EXPR].contains(baseFunc.astKind)) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.PARSE_ERROR,
+                    DiagKindRefactor.parse_diag_error,
                     baseExpr.begin,
                     "trailing closure can only be used on function calls with function or variable names")
             }
@@ -420,7 +420,7 @@ extend ParserImpl {
     private func ParseIndexAccess(): Expr {
         if (IsAssignment(Peek().kind)) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.EXPECTED_TOKEN,
+                DiagKindRefactor.parse_diag_error,
                 Peek().Begin(),
                 "expected expression in index access")
             ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RSQUARE], targetTokenConsumed: false)
@@ -451,7 +451,7 @@ extend ParserImpl {
         }
         if (ret.isClosed && ret.stopExpr.isNone()) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.EXPECTED_TOKEN,
+                DiagKindRefactor.parse_diag_error,
                 lastToken.End(),
                 "expected expression after closed range operator in index access")
             ret.isBroken = true
@@ -459,7 +459,7 @@ extend ParserImpl {
         if (Seeing(TokenKind.COLON)) {
             if (!hasFirstExpr || ret.stopExpr.isNone()) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.PARSE_ERROR,
+                    DiagKindRefactor.parse_diag_error,
                     Peek().Begin(),
                     "range expression in index access cannot have step if it is without start or end")
                 ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RSQUARE], targetTokenConsumed: false)
@@ -544,7 +544,7 @@ extend ParserImpl {
 
     private func DiagExpectedOperatorOrEnd(): Unit {
         diag.DiagnoseRefactor(
-            DiagKindRefactor.PARSE_ERROR,
+            DiagKindRefactor.parse_diag_error,
             Peek().Begin(),
             "expected operator or end of expression, found '${Peek().Value()}'")
     }
@@ -556,14 +556,14 @@ extend ParserImpl {
             }
             if (!preT.Begin().IsZero() && !expr.isBroken) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.PARSE_ERROR,
+                    DiagKindRefactor.parse_diag_error,
                     expr.begin,
                     "macro expansion after '${preT.Value()}' must produce an expression")
                 return false
             }
             if (!expr.isBroken) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.PARSE_ERROR,
+                    DiagKindRefactor.parse_diag_error,
                     tok.Begin(),
                     "unrecognized token '${tok.Value()}' after macro expansion")
             }
@@ -617,7 +617,7 @@ extend ParserImpl {
     private func DiagNoneAssociativeOp(preT: Token, tok: Token): Unit {
         if (let Some(name) <- NoneAssociativeName(tok.kind)) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.PARSE_ERROR,
+                DiagKindRefactor.parse_diag_error,
                 tok.Begin(),
                 "chained ${name} operators are not associative after '${preT.Value()}'")
         }
@@ -630,7 +630,7 @@ extend ParserImpl {
         }
         if (base.astKind == ASTKind.TUPLE_LIT && tok.kind != TokenKind.ASSIGN) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.PARSE_ERROR,
+                DiagKindRefactor.parse_diag_error,
                 tok.Begin(),
                 "tuple literal cannot be used with operator '${tok.Value()}'")
         }
@@ -657,7 +657,7 @@ extend ParserImpl {
                     targetTokenConsumed: false)
             }
             diag.DiagnoseRefactor(
-                DiagKindRefactor.PARSE_ERROR,
+                DiagKindRefactor.parse_diag_error,
                 node.begin,
                 "expected expression, found wildcard")
             node.isBroken = true
@@ -684,7 +684,7 @@ extend ParserImpl {
 
     private func DiagInvalidLeftHandExpr(expr: Expr, tok: Token): Unit {
         diag.DiagnoseRefactor(
-            DiagKindRefactor.PARSE_ERROR,
+            DiagKindRefactor.parse_diag_error,
             expr.begin,
             "invalid left-hand side of assignment before '${tok.Value()}'")
     }
@@ -768,7 +768,7 @@ extend ParserImpl {
             ret.patterns.add(ParsePattern())
         }
         if (!SkipBackarrow()) {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '<-' in ${conditionName} condition")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected '<-' in ${conditionName} condition")
             ConsumeUntilAny([TokenKind.AND, TokenKind.OR, TokenKind.RPAREN, TokenKind.LET, TokenKind.BACKARROW], targetTokenConsumed: false)
             let invalid = InvalidExpr(Peek().Begin())
             ret.backarrowPos = Peek().Begin()
@@ -779,7 +779,7 @@ extend ParserImpl {
         }
         ret.backarrowPos = lastToken.Begin()
         if (AtTerminator()) {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected expression after '<-'")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected expression after '<-'")
             let invalid = InvalidExpr(Peek().Begin())
             ret.initializer = invalid
             ret.end = invalid.end
@@ -814,7 +814,7 @@ extend ParserImpl {
     public func ParseUnsafeBlock(): Expr {
         let unsafeToken = Expect(TokenKind.UNSAFE, "expected 'unsafe'")
         if (!Seeing(TokenKind.LCURL)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected block after unsafe")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected block after unsafe")
             return InvalidExpr(unsafeToken.Begin())
         }
         let block = ParseBlock(ScopeKind.FUNC_BODY)
@@ -919,7 +919,7 @@ extend ParserImpl {
                 matchCase.patternGuard = ParseExpr()
             }
             if (!SkipDoubleArrow()) {
-                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '=>' after match case")
+                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected '=>' after match case")
             }
             matchCase.arrowPos = lastToken.Begin()
             let block = Block()
@@ -945,7 +945,7 @@ extend ParserImpl {
         SkipNLOrSemi()
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
             if (!Skip(TokenKind.CASE)) {
-                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected 'case'")
+                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected 'case'")
                 Next()
                 SkipNLOrSemi()
                 continue
@@ -958,7 +958,7 @@ extend ParserImpl {
                 matchCase.matchExpr = ParseExpr()
             }
             if (!SkipDoubleArrow()) {
-                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '=>' after match case")
+                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected '=>' after match case")
             }
             matchCase.arrowPos = lastToken.Begin()
             let block = Block()
@@ -987,7 +987,7 @@ extend ParserImpl {
         } else if (Seeing(TokenKind.LPAREN)) {
             ParseTryWithResource(ret, ScopeKind.FUNC_BODY)
         } else {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected try block or resource specification")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected try block or resource specification")
             ret.isBroken = true
         }
         while (Seeing(TokenKind.HANDLE) || Seeing(TokenKind.CATCH)) {
@@ -1028,7 +1028,7 @@ extend ParserImpl {
             decl.begin = decl.identifier.Begin()
             for (name in resourceNames) {
                 if (name == decl.identifier.Val()) {
-                    diag.DiagnoseRefactor(DiagKindRefactor.PARSE_ERROR, decl.identifier.Begin(), "redefined resource name '${decl.identifier.Val()}'")
+                    diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, decl.identifier.Begin(), "redefined resource name '${decl.identifier.Val()}'")
                 }
             }
             resourceNames.add(decl.identifier.Val())
@@ -1040,7 +1040,7 @@ extend ParserImpl {
                 decl.assignPos = lastToken.Begin()
                 decl.initializer = ParseExpr(ExprKind.VAR_INIT)
             } else {
-                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected assignment in try resource")
+                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected assignment in try resource")
             }
             decl.end = if (let Some(expr) <- decl.initializer) {
                 expr.end
@@ -1066,14 +1066,14 @@ extend ParserImpl {
         if (Skip(TokenKind.LPAREN)) {
             ret.catchLParenPosVector.add(lastToken.Begin())
         } else {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '(' after catch")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected '(' after catch")
             ret.isBroken = true
         }
         ret.catchPatterns.add(ParseExceptTypePattern())
         if (Skip(TokenKind.RPAREN)) {
             ret.catchRParenPosVector.add(lastToken.Begin())
         } else {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected ')' after catch pattern")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected ')' after catch pattern")
             ret.isBroken = true
         }
         ret.catchBlocks.add(ParseBlock(ScopeKind.FUNC_BODY))
@@ -1083,12 +1083,12 @@ extend ParserImpl {
         let handler = Handler()
         handler.pos = lastToken.Begin()
         if (!Skip(TokenKind.LPAREN)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected '(' after handle")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected '(' after handle")
             ret.isBroken = true
         }
         handler.commandPattern = ParseCommandTypePattern()
         if (!Skip(TokenKind.RPAREN)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected ')' after handle pattern")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected ')' after handle pattern")
             ret.isBroken = true
         }
         handler.block = ParseBlock(ScopeKind.FUNC_BODY)
@@ -1129,7 +1129,7 @@ extend ParserImpl {
             if (Skip(TokenKind.COLON)) {
                 pattern.colonPos = lastToken.Begin()
             } else {
-                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected ':' in catch pattern")
+                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected ':' in catch pattern")
                 pattern.isBroken = true
             }
             do {
@@ -1144,7 +1144,7 @@ extend ParserImpl {
             return pattern
         }
         let token = Peek()
-        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected wildcard or exception pattern")
+        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected wildcard or exception pattern")
         Next()
         return InvalidPattern(token.Begin())
     }
@@ -1153,7 +1153,7 @@ extend ParserImpl {
         if (Skip(TokenKind.WILDCARD)) {
             let wildcard = WildcardPattern(lastToken.Begin())
             if (!Skip(TokenKind.COLON)) {
-                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected ':' in handle pattern")
+                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected ':' in handle pattern")
                 return InvalidPattern(wildcard.begin)
             }
             let pattern = CommandTypePattern()
@@ -1184,7 +1184,7 @@ extend ParserImpl {
             if (Skip(TokenKind.COLON)) {
                 pattern.colonPos = lastToken.Begin()
             } else {
-                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(), "expected ':' in handle pattern")
+                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected ':' in handle pattern")
                 pattern.isBroken = true
             }
             do {
@@ -1199,7 +1199,7 @@ extend ParserImpl {
             return pattern
         }
         let token = Peek()
-        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected wildcard or handle pattern")
+        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected wildcard or handle pattern")
         Next()
         return InvalidPattern(token.Begin())
     }
@@ -1322,7 +1322,7 @@ extend ParserImpl {
         if (Seeing(TokenKind.LPAREN)) {
             if (newlineSkipped) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.PARSE_ERROR,
+                    DiagKindRefactor.parse_diag_error,
                     firstNLPosition,
                     "unexpected newlines between 'spawn' and the argument followed it")
             }
@@ -1352,7 +1352,7 @@ extend ParserImpl {
                     let params = body.paramLists[0].params
                     let argument = if (params.size == 1) { "argument" } else { "arguments" }
                     diag.DiagnoseRefactor(
-                        DiagKindRefactor.PARSE_ERROR,
+                        DiagKindRefactor.parse_diag_error,
                         params[0].begin,
                         "expected no ${argument} in lambda expression of spawn")
                     ret.isBroken = true
@@ -1444,7 +1444,7 @@ extend ParserImpl {
             let paramList = ParseFuncParamListInLambdaExpr()
             if (!paramList.params.isEmpty() && !SkipDoubleArrow()) {
                 if (!lambda.TestAttr(Attribute.HAS_BROKEN)) {
-                    diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(),
+                    diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(),
                         "expected '=>' in lambda expression")
                 }
                 ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.DOUBLE_ARROW, TokenKind.RCURL],
@@ -1461,7 +1461,7 @@ extend ParserImpl {
                         Seeing([TokenKind.WILDCARD, TokenKind.COMMA]) ||
                         SeeingTokenAndCombinator(TokenKind.WILDCARD, [TokenKind.ASSIGN, TokenKind.GT])
                     if (!hasDoubleArrow && !hasWildcard) {
-                        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, Peek().Begin(),
+                        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(),
                             "expected '=>' in lambda expression")
                     }
                 }
@@ -1509,7 +1509,7 @@ extend ParserImpl {
             }
             if (hasSubCondition && binary.op != TokenKind.AND && binary.op != TokenKind.OR) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.PARSE_ERROR,
+                    DiagKindRefactor.parse_diag_error,
                     binary.operatorPos,
                     "let-pattern conditions can only be combined with '&&' or '||'")
                 binary.isBroken = true

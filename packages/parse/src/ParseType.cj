@@ -8,13 +8,13 @@ extend ParserImpl {
         if (Seeing(TokenKind.ARROW)) {
             if (ty.astKind == ASTKind.FUNC_TYPE) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.EXPECTED_TOKEN,
+                    DiagKindRefactor.parse_diag_error,
                     Peek().Begin(),
                     "unexpected extra '->' after function type")
                 ConsumeUntilAny([TokenKind.RCURL, TokenKind.NL], targetTokenConsumed: false)
             } else {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.EXPECTED_TOKEN,
+                    DiagKindRefactor.parse_diag_error,
                     Peek().Begin(),
                     "function type parameters must be parenthesized before '->'")
                 ty.isBroken = true
@@ -35,7 +35,7 @@ extend ParserImpl {
                 opt.end = lastToken.End()
                 if (Seeing(TokenKind.NL)) {
                     diag.DiagnoseRefactor(
-                        DiagKindRefactor.UNEXPECTED_TOKEN,
+                        DiagKindRefactor.parse_diag_error,
                         Peek().Begin(),
                         "newline is not allowed between '?' and type")
                     SkipBlank(TokenKind.NL)
@@ -69,7 +69,7 @@ extend ParserImpl {
         if (SeeingIdentifierLike()) {
             return ParseQualifiedType()
         }
-        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected type")
+        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected type")
         return InvalidType(token.Begin())
     }
 
@@ -129,7 +129,7 @@ extend ParserImpl {
         ret.begin = token.Begin()
         if (!Skip(TokenKind.LT)) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.EXPECTED_TOKEN,
+                DiagKindRefactor.parse_diag_error,
                 token.End(),
                 "expected type parameters after 'VArray' keyword")
             return InvalidType(Peek().Begin())
@@ -142,7 +142,7 @@ extend ParserImpl {
         }
         if (!Skip(TokenKind.COMMA)) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.EXPECTED_TOKEN,
+                DiagKindRefactor.parse_diag_error,
                 Peek().Begin(),
                 "expected ',' and '$' size argument in VArray type")
             ConsumeUntilAny([TokenKind.NL])
@@ -152,7 +152,7 @@ extend ParserImpl {
             skipNL = false
             if (!Skip(TokenKind.DOLLAR)) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.EXPECTED_TOKEN,
+                    DiagKindRefactor.parse_diag_error,
                     Peek().Begin(),
                     "expected '$' before VArray size literal")
                 ConsumeUntilAny([TokenKind.NL])
@@ -163,7 +163,7 @@ extend ParserImpl {
                 constType.begin = constType.dollarPos
                 if (!Seeing(TokenKind.INTEGER_LITERAL)) {
                     diag.DiagnoseRefactor(
-                        DiagKindRefactor.EXPECTED_TOKEN,
+                        DiagKindRefactor.parse_diag_error,
                         Peek().Begin(),
                         "expected integer literal after '$' in VArray type")
                     ConsumeUntilAny([TokenKind.NL])
@@ -177,7 +177,7 @@ extend ParserImpl {
         }
         if (!Skip(TokenKind.GT)) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.UNTERMINATED_DELIMITER,
+                DiagKindRefactor.parse_diag_error,
                 ret.leftAnglePos,
                 "expected '>' after VArray type")
             return InvalidType(Peek().Begin())
@@ -197,7 +197,7 @@ extend ParserImpl {
             parameterName = ParseIdentifierFromToken(nameToken)
             if (typeNameMap.contains(parameterName.Val())) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.PARSE_ERROR,
+                    DiagKindRefactor.parse_diag_error,
                     parameterName.Begin(),
                     "duplicate type parameter name '${parameterName.Val()}'")
             } else {
@@ -291,13 +291,13 @@ extend ParserImpl {
         }
         if (HasNamedTypeParameters(types) && HasUnnamedTypeParameters(types)) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.PARSE_ERROR,
+                DiagKindRefactor.parse_diag_error,
                 left.Begin(),
                 "all function or tuple type parameters must either be named or unnamed")
         }
         if (!Skip(TokenKind.RPAREN)) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.UNTERMINATED_DELIMITER,
+                DiagKindRefactor.parse_diag_error,
                 left.Begin(),
                 "expected ')' after type")
             return InvalidType(Peek().Begin())
@@ -310,7 +310,7 @@ extend ParserImpl {
             let first = types[0]
             if (!first.typeParameterName.isEmpty()) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.PARSE_ERROR,
+                    DiagKindRefactor.parse_diag_error,
                     first.begin,
                     "only tuple and function types can use type parameter names")
             }
@@ -326,7 +326,7 @@ extend ParserImpl {
             return MakeTupleType(types, left.Begin(), right)
         }
         diag.DiagnoseRefactor(
-            DiagKindRefactor.EXPECTED_TOKEN,
+            DiagKindRefactor.parse_diag_error,
             right,
             "expected '->' in empty function type")
         return MakeFuncType(types, left.Begin(), right, right)

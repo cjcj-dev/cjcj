@@ -12,7 +12,7 @@ extend ParserImpl {
         for (anno in annos) {
             if (anno.kind != AnnotationKind.NON_PRODUCT) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.INVALID_ANNOTATION,
+                    DiagKindRefactor.parse_diag_error,
                     anno.begin,
                     "unexpected annotation '${anno.identifier.Val()}' on features directive")
                 directive.isBroken = true
@@ -35,7 +35,7 @@ extend ParserImpl {
         features.featuresSet = set
         var isBroken = false
         if (!Skip(TokenKind.LCURL)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, lastToken.End(), "expected '{' after features")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, lastToken.End(), "expected '{' after features")
             isBroken = true
         } else {
             set.lCurlPos = lastToken.Begin()
@@ -44,7 +44,7 @@ extend ParserImpl {
         ParseFeaturesSet(set)
         if (!Skip(TokenKind.RCURL)) {
             let pos = if (!set.lCurlPos.IsZero()) { set.lCurlPos } else { lastToken.End() }
-            diag.DiagnoseRefactor(DiagKindRefactor.UNTERMINATED_DELIMITER, pos, "expected '}' after features")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, pos, "expected '}' after features")
             isBroken = true
         } else {
             set.rCurlPos = lastToken.Begin()
@@ -65,7 +65,7 @@ extend ParserImpl {
             if (Seeing(TokenKind.IDENTIFIER)) {
                 if (lastToken.kind == TokenKind.IDENTIFIER) {
                     diag.DiagnoseRefactor(
-                        DiagKindRefactor.EXPECTED_TOKEN,
+                        DiagKindRefactor.parse_diag_error,
                         lastToken.End(),
                         "expected '.' or ',' in features directive")
                     ConsumeUntilAny([TokenKind.NL, TokenKind.COMMA, TokenKind.RCURL], targetTokenConsumed: false)
@@ -78,7 +78,7 @@ extend ParserImpl {
                 }
             } else {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.EXPECTED_IDENTIFIER,
+                    DiagKindRefactor.parse_diag_error,
                     Peek().Begin(),
                     "expected feature identifier")
                 ConsumeUntilAny([TokenKind.NL, TokenKind.COMMA, TokenKind.RCURL], targetTokenConsumed: false)
@@ -107,7 +107,7 @@ extend ParserImpl {
                 content.identifiers.add(identifier)
                 if (identifier.IsRaw()) {
                     diag.DiagnoseRefactor(
-                        DiagKindRefactor.INVALID_ANNOTATION,
+                        DiagKindRefactor.parse_diag_error,
                         token.Begin(),
                         "raw identifier '${token.Value()}' is not allowed in features directive")
                     isBroken = true
@@ -125,7 +125,7 @@ extend ParserImpl {
         }
         if (lastToken.kind != TokenKind.IDENTIFIER) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.EXPECTED_IDENTIFIER,
+                DiagKindRefactor.parse_diag_error,
                 lastToken.Begin(),
                 "expected identifier in features directive")
             isBroken = true

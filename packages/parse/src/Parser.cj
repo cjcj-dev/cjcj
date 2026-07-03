@@ -3,6 +3,7 @@ package cangjie_compiler::parse
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticBuilder as BasicDiagnosticBuilder
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.Range as BasicRange
 import std.collection.*
 
 public class Parser {
@@ -87,7 +88,7 @@ public class Parser {
     }
     public func ParseDiagnoseRefactor(
         kind: BasicDiagKindRefactor,
-        range: Range,
+        range: BasicRange,
         arguments!: Array<String> = Array<String>()
     ): BasicDiagnosticBuilder {
         return impl.ParseDiagnoseRefactor(kind, range, arguments: arguments)

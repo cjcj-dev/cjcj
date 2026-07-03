@@ -23,7 +23,7 @@ extend ParserImpl {
             return attrs
         }
         if (IsScopeRulesEmpty(defKind, scopeKind)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.INVALID_MODIFIER, modifiers[0].begin, "modifier is not allowed here")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, modifiers[0].begin, "modifier is not allowed here")
             return attrs
         }
         if (!MPParserImpl(this).CheckCJMPModifiers(modifiers)) {
@@ -32,7 +32,7 @@ extend ParserImpl {
         let validModifiers = ArrayList<Modifier>()
         for (modifier in modifiers) {
             if (!IsModifierAllowed(defKind, scopeKind, modifier.modifier)) {
-                diag.DiagnoseRefactor(DiagKindRefactor.INVALID_MODIFIER, modifier.begin, "modifier is not allowed here")
+                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, modifier.begin, "modifier is not allowed here")
                 if (let Some(attr) <- GetAttributeByModifier(modifier.modifier)) {
                     AddAttrIfAbsent(attrs, attr)
                 }
@@ -44,7 +44,7 @@ extend ParserImpl {
                 if (other.begin < modifier.begin) {
                     for (conflict in conflicts.data) {
                         if (other.modifier == conflict) {
-                            diag.DiagnoseRefactor(DiagKindRefactor.CONFLICTING_MODIFIER, modifier.begin, "conflicting modifier")
+                            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, modifier.begin, "conflicting modifier")
                             hasCollision = true
                             RemoveModifierKind(validModifiers, conflict)
                         }
@@ -85,11 +85,11 @@ extend ParserImpl {
             let conflicts = GetWarningConflicts(defKind, scopeKind, modifier.modifier)
             for (higher in conflicts.data) {
                 if (higher == TokenKind.ILLEGAL) {
-                    diag.Warning(DiagKindRefactor.INVALID_MODIFIER, modifier.begin, "redundant modifier")
+                    diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_warning, modifier.begin, "redundant modifier")
                     break
                 }
                 if (HasModifierKind(modifiers, higher)) {
-                    diag.Warning(DiagKindRefactor.CONFLICTING_MODIFIER, modifier.begin, "redundant modifier")
+                    diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_warning, modifier.begin, "redundant modifier")
                     break
                 }
             }

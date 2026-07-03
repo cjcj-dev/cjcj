@@ -15,7 +15,11 @@ extend ParserImpl {
             modifier.curFile = currentFile
             for (existing in modifiers) {
                 if (existing.modifier == token.kind) {
-                    diag.DiagnoseRefactor(DiagKindRefactor.DUPLICATED_MODIFIER, token.Begin(), "duplicated modifier '${token.Value()}'")
+                    let builder = diag.DiagnoseRefactor(
+                        DiagKindRefactor.parse_duplicate_modifier,
+                        token.Begin(),
+                        token.Value())
+                    builder.AddHint(MakeRange(existing.begin, existing.end))
                 }
             }
             modifiers.add(modifier)

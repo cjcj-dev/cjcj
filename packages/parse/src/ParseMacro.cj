@@ -77,13 +77,13 @@ extend ParserImpl {
         }
         if (SeeingBuiltinAnnotation()) {
             let token = Peek()
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected lambda expression after builtin annotation")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected lambda expression after builtin annotation")
             Next()
             return InvalidExpr(token.Begin())
         }
         if (!SeeingMacroCall()) {
             let token = Peek()
-            diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, token.Begin(), "expected macro call")
+            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected macro call")
             Next()
             return InvalidExpr(token.Begin())
         }
@@ -170,7 +170,7 @@ extend ParserImpl {
         if (Skip(TokenKind.LSQUARE)) {
             if (IsBuiltinMacro(invocation.macroCallDiagInfo.identifier)) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.INVALID_ANNOTATION,
+                    DiagKindRefactor.parse_diag_error,
                     lastToken.Begin(),
                     "builtin macro call cannot have attribute arguments")
             }
@@ -238,7 +238,7 @@ extend ParserImpl {
             return
         }
         diag.DiagnoseRefactor(
-            DiagKindRefactor.EXPECTED_TOKEN,
+            DiagKindRefactor.parse_diag_error,
             parsedDecl.begin,
             "illegal macro input without parentheses")
     }
@@ -307,7 +307,7 @@ extend ParserImpl {
             if (Skip(TokenKind.AT_EXCL)) {
                 invocation.isCompileTimeVisible = true
             } else {
-                diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, atToken.Begin(), "expected '@' before macro call")
+                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, atToken.Begin(), "expected '@' before macro call")
                 node.isBroken = true
                 return false
             }
@@ -316,7 +316,7 @@ extend ParserImpl {
         invocation.macroCallDiagInfo.macroCallBegin = atToken.Begin()
         if (newlineSkipped) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.UNEXPECTED_TOKEN,
+                DiagKindRefactor.parse_diag_error,
                 atToken.Begin(),
                 "unexpected newline between '@' and macro call name")
         }
@@ -348,7 +348,7 @@ extend ParserImpl {
             return ParseIdentifierFromToken(token)
         }
         node.isBroken = true
-        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_IDENTIFIER, token.Begin(), "expected macro call identifier")
+        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected macro call identifier")
         return SrcIdentifier("", "", token.Begin(), token.Begin(), false)
     }
 
@@ -392,7 +392,7 @@ extend ParserImpl {
         } else {
             "illegal macro input arguments"
         }
-        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_TOKEN, tokenPos, message)
+        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, tokenPos, message)
         return false
     }
 

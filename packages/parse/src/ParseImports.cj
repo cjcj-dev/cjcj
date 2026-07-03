@@ -54,7 +54,7 @@ extend ParserImpl {
             if (curIdent.IsRaw()) {
                 pkg.isBroken = true
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.PARSE_ERROR,
+                    DiagKindRefactor.parse_diag_error,
                     curIdent.Begin(),
                     "raw identifier '${curIdent.GetRawText()}' is not allowed in package name")
                 ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
@@ -78,7 +78,7 @@ extend ParserImpl {
         if (!pkg.isBroken && fullPackageName.size > PACKAGE_NAME_LEN_LIMIT) {
             let start = if (!pkg.prefixPoses.isEmpty()) { pkg.prefixPoses[0] } else { pkg.packagePos }
             diag.DiagnoseRefactor(
-                DiagKindRefactor.PARSE_ERROR,
+                DiagKindRefactor.parse_diag_error,
                 start,
                 "package name length ${fullPackageName.size} exceeds limit ${PACKAGE_NAME_LEN_LIMIT}")
             pkg.isBroken = true
@@ -112,7 +112,7 @@ extend ParserImpl {
                 }
                 if (!Skip(TokenKind.SEMI)) {
                     diag.DiagnoseRefactor(
-                        DiagKindRefactor.EXPECTED_TOKEN,
+                        DiagKindRefactor.parse_diag_error,
                         Peek().Begin(),
                         "expected ';' or newline after import")
                     ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI])
@@ -144,7 +144,7 @@ extend ParserImpl {
         for (anno in annos) {
             if (anno.kind != AnnotationKind.WHEN) {
                 diag.DiagnoseRefactor(
-                    DiagKindRefactor.INVALID_ANNOTATION,
+                    DiagKindRefactor.parse_diag_error,
                     anno.begin,
                     "unexpected annotation '${anno.identifier.Val()}' on import")
                 anno.isBroken = true
@@ -172,7 +172,7 @@ extend ParserImpl {
                 if (!content.isBroken && fullPackageName.size > PACKAGE_NAME_LEN_LIMIT) {
                     let start = ImportContentBeginPosition(content)
                     diag.DiagnoseRefactor(
-                        DiagKindRefactor.PARSE_ERROR,
+                        DiagKindRefactor.parse_diag_error,
                         start,
                         "import package name length ${fullPackageName.size} exceeds limit ${PACKAGE_NAME_LEN_LIMIT}")
                     MarkImportContentBroken(content)
@@ -190,7 +190,7 @@ extend ParserImpl {
                         ImportContentBeginPosition(item)
                     }
                     diag.DiagnoseRefactor(
-                        DiagKindRefactor.PARSE_ERROR,
+                        DiagKindRefactor.parse_diag_error,
                         start,
                         "import package name length ${fullPackageName.size} exceeds limit ${PACKAGE_NAME_LEN_LIMIT}")
                     MarkImportContentBroken(item)
@@ -285,7 +285,7 @@ extend ParserImpl {
                 skipDoubleColon = true
                 if (curIdent.IsRaw() && !content.isBroken) {
                     diag.DiagnoseRefactor(
-                        DiagKindRefactor.PARSE_ERROR,
+                        DiagKindRefactor.parse_diag_error,
                         curIdent.Begin(),
                         "raw identifier '${curIdent.GetRawText()}' is not allowed as an organization name")
                 }
@@ -320,7 +320,7 @@ extend ParserImpl {
                 }
                 if (!skippedComma) {
                     diag.DiagnoseRefactor(
-                        DiagKindRefactor.EXPECTED_TOKEN,
+                        DiagKindRefactor.parse_diag_error,
                         lastToken.End(),
                         "expected ',' in import list")
                     MarkImportContentBroken(content)
@@ -342,7 +342,7 @@ extend ParserImpl {
         }
         if (lastToken.kind != TokenKind.RCURL && !Skip(TokenKind.RCURL)) {
             diag.DiagnoseRefactor(
-                DiagKindRefactor.UNTERMINATED_DELIMITER,
+                DiagKindRefactor.parse_diag_error,
                 content.leftCurlPos,
                 "expected '}' after import list")
             MarkImportContentBroken(content)
@@ -386,7 +386,7 @@ extend ParserImpl {
             return ParseIdentifierFromToken(token)
         }
         node.isBroken = true
-        diag.DiagnoseRefactor(DiagKindRefactor.EXPECTED_IDENTIFIER, token.Begin(), "expected package identifier")
+        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected package identifier")
         return SrcIdentifier("", "", token.Begin(), token.Begin(), false)
     }
 }
