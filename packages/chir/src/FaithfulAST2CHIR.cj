@@ -2914,7 +2914,6 @@ public class FaithfulAST2CHIR {
         AttachFunctionGenericParams(funcDecl, fn)
         ApplyDeclAttrs(fn, funcDecl)
         ApplyFuncKind(fn, funcDecl)
-        SetOverrideSrcFuncType(funcDecl, fn)
         if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) {
             fn.SetFuncKind(FuncKind.MAIN_ENTRY)
         }
@@ -2939,18 +2938,9 @@ public class FaithfulAST2CHIR {
         fn.EnableAttr(Attribute.IMPORTED)
         ApplyDeclAttrs(fn, funcDecl)
         ApplyFuncKind(fn, funcDecl)
-        SetOverrideSrcFuncType(funcDecl, fn)
         TranslateFuncParams(funcDecl, fn)
         globalCache.Set(funcDecl, fn)
         AddFunctionToPackage(fn)
-    }
-
-    private func SetOverrideSrcFuncType(funcDecl: AstFuncDecl, fn: Function): Unit {
-        let resolver = overrideSrcFuncResolver ?? return
-        let overrideSrcFuncDecl = resolver(funcDecl) ?? return
-        let overrideSrcFuncTy = AdjustFuncType(overrideSrcFuncDecl,
-            RequireFuncType(chirType.TranslateType(RequireAstTy(overrideSrcFuncDecl))))
-        fn.SetOverrideSrcFuncType(overrideSrcFuncTy)
     }
 
     private func CreateImportedValueSignatureAndSetGlobalCache(varDecl: AstVarDecl): Unit {

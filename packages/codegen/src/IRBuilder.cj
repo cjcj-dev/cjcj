@@ -474,6 +474,15 @@ public class IRBuilder2 <: Resource {
         let typeInfoTy = boxType ?? destTy
         let typeInfo = CreateTypeInfo(typeInfoTy)
         let managedBase = GetTrackedManagedBase(rawDest)
+        let i8PtrTy1 = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 1u32) }
+        let rawDestType = unsafe { LLVMTypeOf(rawDest) }
+        let rawDestAddrSpace = if (!rawDestType.isNull() && unsafe { LLVMGetTypeKind(rawDestType) } == LLVM_POINTER_TYPE_KIND) {
+            unsafe { LLVMGetPointerAddressSpace(rawDestType) }
+        } else {
+            0u32
+        }
+        let genericDest = CreateBitCast(rawDest, unsafe { LLVMPointerType(i8PtrTy1, rawDestAddrSpace) },
+            name: "generic.store.dest")
         let genericSize = if (managedBase.isSome()) { GetSize32(typeInfoTy, valueCGType) } else { LLVMNullValue() }
         let blockNames = ArrayList<String>()
         blockNames.add("handle_store_ref")
@@ -489,7 +498,7 @@ public class IRBuilder2 <: Resource {
         if (let Some(baseObject) <- managedBase) {
             CallGCWrite(rawValue, baseObject, rawDest)
         } else {
-            CreateStore(rawValue, CastStoreSlotForValue(rawDest, rawValue, "generic.store.ref.dest"))
+            CreateStore(rawValue, genericDest)
         }
         CreateBr(blocks[2])
 
@@ -501,7 +510,7 @@ public class IRBuilder2 <: Resource {
                 CreateLoad(destElementCGType.GetLLVMType(), rawDest, name: "generic.store.sret")
             } else {
                 let tmp = CallAllocaGenericWithTypeInfo(typeInfoTy, typeInfo)
-                CreateStore(tmp, CastStoreSlotForValue(rawDest, tmp, "generic.store.dest"))
+                CreateStore(tmp, genericDest)
                 tmp
             }
             CallAssignGeneric(destStorage, rawValue, typeInfo)
@@ -597,17 +606,6 @@ public class IRBuilder2 <: Resource {
             idx++
         }
         return None
-    }
-
-    private func CastStoreSlotForValue(slot: LLVMValueRef, value: LLVMValueRef, name: String): LLVMValueRef {
-        let slotTy = unsafe { LLVMTypeOf(slot) }
-        let valueTy = unsafe { LLVMTypeOf(value) }
-        if (slotTy.isNull() || valueTy.isNull() || unsafe { LLVMGetTypeKind(slotTy) } != 12) {
-            return slot
-        }
-        let slotAddrSpace = unsafe { LLVMGetPointerAddressSpace(slotTy) }
-        let typedSlotTy = unsafe { LLVMPointerType(valueTy, slotAddrSpace) }
-        return CreateBitCast(slot, typedSlotTy, name: name)
     }
 
     private func IsLLVMArgument(value: LLVMValueRef): Bool {
