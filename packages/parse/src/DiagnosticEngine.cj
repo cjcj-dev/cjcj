@@ -23,6 +23,11 @@ public enum DiagKindRefactor {
     | PARSE_ERROR | EXPECTED_TOKEN | EXPECTED_IDENTIFIER | UNEXPECTED_TOKEN | UNTERMINATED_DELIMITER
     | INVALID_MODIFIER | DUPLICATED_MODIFIER | CONFLICTING_MODIFIER | INVALID_ANNOTATION
     | lex_unknown_start_of_token | parse_invalid_quote_dollar_expr | parse_unsafe_will_be_ignored
+    | parse_named_parameter_after_unnamed | parse_member_parameter_after_regular
+    | parse_expected_no_modifier | parse_unexpected_const_modifier_on_variable | parse_deprecated_invalid_target
+    | parse_intrinsic_function_must_be_toplevel | parse_intrinsic_function_cannot_have_body | parse_missing_body
+    | parse_foreign_func_should_not_be_generic | parse_foreign_func_must_declare_return_type
+    | parse_foreign_function_with_body
 }
 
 public class Diagnostic {

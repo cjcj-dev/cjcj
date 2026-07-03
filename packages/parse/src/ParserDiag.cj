@@ -20,4 +20,53 @@ extend ParserImpl {
         let builder = diag.DiagnoseRefactor(DiagKindRefactor.parse_unsafe_will_be_ignored, mod.begin, backend)
         builder.AddMainHintArguments(backend)
     }
+
+    public func DiagMissingBody(str: String, name: String, pos: Position): Unit {
+        if (parseDeclFile) {
+            return
+        }
+        let bodyName = if (name.isEmpty()) { str } else { str + name }
+        let builder = diag.DiagnoseRefactor(
+            DiagKindRefactor.parse_missing_body,
+            pos,
+            "body of ${bodyName} is missing")
+        builder.AddMainHintArguments(str)
+    }
+
+    public func DiagNamedParameterAfterUnnamed(param: FuncParam, pre: FuncParam): Unit {
+        let _ = pre
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.parse_named_parameter_after_unnamed,
+            param.begin,
+            "unnamed parameters must come before named parameters")
+    }
+
+    public func DiagMemberParameterAfterRegular(param: FuncParam, pre: FuncParam): Unit {
+        let _ = pre
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.parse_member_parameter_after_regular,
+            param.begin,
+            "regular parameters must come before member variable parameters")
+    }
+
+    public func DiagExpectNoModifier(mod: Modifier): Unit {
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.parse_expected_no_modifier,
+            mod.begin,
+            "expected no modifier here")
+    }
+
+    public func DiagUnExpectedModifierOnDeclaration(decl: Decl): Unit {
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.parse_unexpected_const_modifier_on_variable,
+            decl.begin,
+            "unexpected modifier 'const' on var or let variable")
+    }
+
+    public func DiagDeprecatedInvalidTarget(node: Node, invalidTarget: String): Unit {
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.parse_deprecated_invalid_target,
+            node.begin,
+            "${invalidTarget} can not be target of @Deprecated")
+    }
 }

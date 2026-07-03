@@ -98,6 +98,29 @@ extend ParserImpl {
         return expr
     }
 
+    public func ParseMacroCall(scopeKind: ScopeKind): MacroExpandParam {
+        CJC_ASSERT(SeeingMacroCallDecl())
+        let macroCall = MacroExpandParam()
+        if (let Some(file) <- currentFile) {
+            macroCall.curFile = file
+            file.hasMacro = true
+        }
+        macroCall.begin = Peek().Begin()
+        ParseMacroInvocation(scopeKind, ArrayList<Modifier>(), macroCall.invocation)
+        macroCall.identifier = SrcIdentifier(
+            macroCall.invocation.macroCallDiagInfo.identifier,
+            macroCall.invocation.macroCallDiagInfo.identifier,
+            macroCall.invocation.macroNamePos,
+            macroCall.invocation.macroNamePos + macroCall.invocation.macroCallDiagInfo.identifier.size,
+            false)
+        macroCall.end = if (let Some(inputDecl) <- macroCall.invocation.decl) { inputDecl.end } else { lastToken.End() }
+        if (ScopeKindEquals(scopeKind, ScopeKind.ENUM_CONSTRUCTOR) &&
+            (macroCall.invocation.hasParenthesis || macroCall.invocation.decl.isSome())) {
+            macroCall.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
+        }
+        return macroCall
+    }
+
     private func ToAstScopeKind(kind: ScopeKind): AstScopeKind {
         return match (kind) {
             case ScopeKind.TOPLEVEL => AstScopeKind.TOPLEVEL
@@ -138,7 +161,7 @@ extend ParserImpl {
         return decl
     }
 
-    public func ParseMacroInvocation(scopeKind: ScopeKind, _: ArrayList<Modifier>, invocation: MacroInvocation): Unit {
+    public func ParseMacroInvocation(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, invocation: MacroInvocation): Unit {
         if (!ParseMacroCallIdentifier(invocation, Node())) {
             invocation.macroCallDiagInfo.macroCallEnd = lastToken.End()
             return
@@ -166,7 +189,7 @@ extend ParserImpl {
             invocation.hasParenthesis = true
             SyncMacroArgTokens(invocation)
         } else {
-            invocation.hasParenthesis = false
+            ParseMacroCallArgsWithoutParen(scopeKind, modifiers, invocation)
         }
         if (!curPrimaryDeclIdent.isEmpty()) {
             invocation.outerDeclIdent = curPrimaryDeclIdent
@@ -180,9 +203,30 @@ extend ParserImpl {
         modifiers: ArrayList<Modifier>,
         invocation: MacroInvocation
     ): Unit {
+        ParseMacroCallDeclInput(scopeKind, modifiers, invocation)
+        invocation.hasParenthesis = false
+    }
+
+    private func ParseMacroCallDeclInput(
+        scopeKind: ScopeKind,
+        modifiers: ArrayList<Modifier>,
+        invocation: MacroInvocation
+    ): Unit {
         let beginToken = Peek()
         let collectStarted = lexer.StartCollectTokens()
-        let parsedDecl = ParseDecl(scopeKind, modifiers, ArrayList<Annotation>())
+        var parsedDecl: Decl = InvalidDecl(beginToken.Begin())
+        if (invocation.isFuncParam || SeeingParamInMacroCallExpr() ||
+            ScopeKindEquals(scopeKind, ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM)) {
+            let scope = if (ScopeKindEquals(scopeKind, ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM)) {
+                ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS
+            } else {
+                scopeKind
+            }
+            let parsedParam = ParseParamInParamList(scope, None, None)
+            parsedDecl = parsedParam[0]
+        } else {
+            parsedDecl = ParseDecl(scopeKind, modifiers, ArrayList<Annotation>())
+        }
         lexer.StopCollectTokens(collectStarted)
         if (IsValidMacroInputDeclKind(parsedDecl.astKind)) {
             ParseNodeToTokens(parsedDecl, beginToken, invocation.args)

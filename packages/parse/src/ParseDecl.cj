@@ -2,6 +2,7 @@ package cangjie_compiler::parse
 
 import cangjie_compiler::ast.ASTCloner
 import cangjie_compiler::ast.Node
+import cangjie_compiler::ast.SortModifierByPos
 import cangjie_compiler::ast.VisitAction
 import cangjie_compiler::ast.Walker
 import std.collection.*
@@ -563,14 +564,129 @@ extend ParserImpl {
         }
         let body = ParseFuncBody(scopeKind)
         ret.funcBody = body
-        if (let Some(_) <- body.generic) {
-            ret.EnableAttr(Attribute.GENERIC)
-        }
-        CheckVariableParams(ret)
-        ret.end = body.end
         if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
             SetUnsafe(ret, modifiers: modifiers)
         }
+        CheckFuncBody(scopeKind, ret)
+        ret.end = body.end
+    }
+
+    private func CheckFuncBody(scopeKind: ScopeKind, decl: FuncDecl): Unit {
+        if (let Some(funcBody) <- decl.funcBody) {
+            if (let Some(_) <- funcBody.generic) {
+                decl.EnableAttr(Attribute.GENERIC)
+            }
+        }
+        if (decl.TestAttr(Attribute.INTRINSIC)) {
+            if (!ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) && !ScopeKindEquals(scopeKind, ScopeKind.UNKNOWN_SCOPE)) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.parse_intrinsic_function_must_be_toplevel,
+                    decl.begin,
+                    "intrinsic function must be top-level")
+            }
+            if (let Some(funcBody) <- decl.funcBody) {
+                if (let Some(block) <- funcBody.body) {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.parse_intrinsic_function_cannot_have_body,
+                        block.begin,
+                        "intrinsic function cannot have body")
+                }
+            }
+        }
+
+        let inClassLikeScope = ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) ||
+            ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)
+        if (let Some(funcBody) <- decl.funcBody) {
+            if ((let None <- funcBody.body) && !parseDeclFile &&
+                !ScopeKindEquals(scopeKind, ScopeKind.UNKNOWN_SCOPE) &&
+                !decl.TestAnyAttr(Attribute.FOREIGN, Attribute.INTRINSIC, Attribute.OBJ_C_MIRROR)) {
+                if (CanBeAbstract(decl, scopeKind)) {
+                    decl.EnableAttr(Attribute.ABSTRACT)
+                } else if (!funcBody.TestAttr(Attribute.HAS_BROKEN) && !inClassLikeScope &&
+                    !decl.TestAttr(Attribute.COMMON)) {
+                    DiagMissingBody(
+                        "function",
+                        if (!decl.identifier.Valid()) { "" } else { " '${decl.identifier.Val()}'" },
+                        lastToken.End())
+                }
+            }
+        }
+
+        if (decl.TestAnyAttr(Attribute.FOREIGN)) {
+            let funcBody = decl.funcBody.getOrThrow()
+            if (decl.TestAttr(Attribute.GENERIC)) {
+                if (let Some(generic) <- funcBody.generic) {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.parse_foreign_func_should_not_be_generic,
+                        generic.begin,
+                        "foreign function cannot be generic")
+                } else {
+                    diag.DiagnoseRefactor(
+                        DiagKindRefactor.parse_foreign_func_should_not_be_generic,
+                        decl.begin,
+                        "foreign function cannot be generic")
+                }
+                decl.EnableAttr(Attribute.IS_BROKEN)
+            }
+            if (let None <- funcBody.retType) {
+                var foreignPos = decl.keywordPos
+                for (modifier in decl.modifiers) {
+                    if (modifier.modifier == TokenKind.FOREIGN) {
+                        foreignPos = modifier.begin
+                        break
+                    }
+                }
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.parse_foreign_func_must_declare_return_type,
+                    foreignPos,
+                    "foreign function must declare return type")
+                decl.EnableAttr(Attribute.IS_BROKEN)
+            }
+            if (let Some(block) <- funcBody.body) {
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.parse_foreign_function_with_body,
+                    block.begin,
+                    "foreign function cannot have body")
+                decl.EnableAttr(Attribute.IS_BROKEN)
+            }
+        }
+        CheckVariableParams(decl)
+    }
+
+    private func CanBeAbstract(decl: Decl, scopeKind: ScopeKind): Bool {
+        match (decl.astKind) {
+            case ASTKind.FUNC_DECL =>
+                if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                    if (let Some(funcBody) <- funcDecl.funcBody) {
+                        if (let Some(_) <- funcBody.body) {
+                            return false
+                        }
+                    }
+                }
+            case ASTKind.PROP_DECL =>
+                if (let Some(propDecl) <- (decl as PropDecl)) {
+                    if (!propDecl.getters.isEmpty() || !propDecl.setters.isEmpty()) {
+                        return false
+                    }
+                }
+            case ASTKind.PRIMARY_CTOR_DECL =>
+                if (let Some(primaryCtor) <- (decl as PrimaryCtorDecl)) {
+                    if (primaryCtor.funcBody.isNone()) {
+                        let primaryCtorBody = primaryCtor.funcBody.getOrThrow()
+                        if (let Some(_) <- primaryCtorBody.body) {
+                            return false
+                        }
+                    }
+                }
+            case _ => ()
+        }
+        if (ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) {
+            return true
+        }
+        if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) && !decl.TestAttr(Attribute.COMMON)) {
+            return true
+        }
+        return false
     }
 
     private func CheckVariableParams(decl: FuncDecl): Unit {
@@ -728,31 +844,10 @@ extend ParserImpl {
         var namedParameter: Option<FuncParam> = None
         var memberParameter: Option<FuncParam> = None
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-            let param = ParseFuncParam(scopeKind)
-            if (let Some(firstNamed) <- namedParameter) {
-                if (!param.isNamedParam) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.PARSE_ERROR,
-                        param.begin,
-                        "unnamed parameter cannot appear after named parameter '${firstNamed.identifier.Val()}'")
-                    param.EnableAttr(Attribute.IS_BROKEN)
-                }
-            }
-            if (let Some(firstMember) <- memberParameter) {
-                if (!param.isMemberParam) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.PARSE_ERROR,
-                        param.begin,
-                        "regular parameter cannot appear after member parameter '${firstMember.identifier.Val()}'")
-                    param.EnableAttr(Attribute.IS_BROKEN)
-                }
-            }
-            if (param.isNamedParam && namedParameter.isNone()) {
-                namedParameter = param
-            }
-            if (param.isMemberParam && memberParameter.isNone()) {
-                memberParameter = param
-            }
+            let parsed = ParseParamInParamList(scopeKind, namedParameter, memberParameter)
+            let param = parsed[0]
+            namedParameter = parsed[1]
+            memberParameter = parsed[2]
             if (param.identifier.Val() == "...") {
                 list.hasVariableLenArg = true
                 list.variadicArgIndex = UInt64(list.params.size)
@@ -886,6 +981,42 @@ extend ParserImpl {
             param.identifier.End()
         }
         return param
+    }
+
+    public func ParseParamInParamList(
+        scopeKind: ScopeKind,
+        meetNamedParameter: Option<FuncParam>,
+        meetMemberParams: Option<FuncParam>
+    ): (FuncParam, Option<FuncParam>, Option<FuncParam>) {
+        if (SeeingMacroCallDecl() && !enableCustomAnno) {
+            return (ParseMacroCall(scopeKind), meetNamedParameter, meetMemberParams)
+        }
+        let param = ParseFuncParam(scopeKind)
+        if (let Some(firstNamed) <- meetNamedParameter) {
+            if (!param.isNamedParam) {
+                DiagNamedParameterAfterUnnamed(param, firstNamed)
+            }
+        }
+        if (let Some(firstMember) <- meetMemberParams) {
+            if (!param.isMemberParam) {
+                DiagMemberParameterAfterRegular(param, firstMember)
+            }
+        }
+        var namedParameter = meetNamedParameter
+        var memberParameter = meetMemberParams
+        if (param.isNamedParam && namedParameter.isNone()) {
+            namedParameter = param
+        }
+        if (param.isMemberParam && memberParameter.isNone()) {
+            memberParameter = param
+        }
+        CheckModifierInParamList(scopeKind, param.modifiers, param.isMemberParam, param)
+        if (Seeing(TokenKind.COMMA)) {
+            param.commaPos = Peek().Begin()
+        }
+        SetDeclBeginPos(param)
+        CheckDeprecationOfFuncParam(param)
+        return (param, namedParameter, memberParameter)
     }
 
     public func ParseVarOrLet(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Decl {
@@ -1503,6 +1634,54 @@ extend ParserImpl {
             ret.end = body.end
         }
         return ret
+    }
+
+    private func SetDeclBeginPos(decl: Decl): Unit {
+        if (decl.modifiers.isEmpty()) {
+            return
+        }
+        let modifiers = SortModifierByPos(decl.modifiers)
+        var index: Int64 = 0
+        if (inForeignBlock) {
+            while (index < modifiers.size && modifiers[index].modifier != TokenKind.FOREIGN) {
+                index++
+            }
+            if (index < modifiers.size) {
+                index++
+            }
+        }
+        if (index < modifiers.size) {
+            decl.begin = modifiers[index].begin
+        }
+    }
+
+    private func CheckModifierInParamList(
+        scopeKind: ScopeKind,
+        modifiers: ArrayList<Modifier>,
+        isMember: Bool,
+        fp: FuncParam
+    ): Unit {
+        if (modifiers.isEmpty()) {
+            return
+        }
+        if (!isMember) {
+            if (!fp.TestAttr(Attribute.HAS_BROKEN)) {
+                DiagExpectNoModifier(modifiers[0])
+            }
+        } else {
+            if (HasModifierToken(modifiers, TokenKind.CONST)) {
+                DiagUnExpectedModifierOnDeclaration(fp)
+            }
+            EnableModifierAttrs(fp, CheckDeclModifiers(modifiers, scopeKind, DefKind.VARIABLE))
+        }
+    }
+
+    private func CheckDeprecationOfFuncParam(param: FuncParam): Unit {
+        for (anno in param.annotations) {
+            if (anno.kind == AnnotationKind.DEPRECATED && !param.isNamedParam) {
+                DiagDeprecatedInvalidTarget(anno, "Not named parameter")
+            }
+        }
     }
 
     private func EnableModifierAttrs(decl: Decl, attrs: ArrayList<Attribute>): Unit {
