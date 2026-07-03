@@ -15,6 +15,8 @@ import cangjie_compiler::mangle.MangleCHIRType
 import cangjie_compiler::option.{ArchType, OSType}
 import cangjie_compiler::utils.CJC_ASSERT
 
+private let LLVM_POINTER_TYPE_KIND: Int32 = 12
+
 public func EmitCallLikeExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(applyExpr) <- (chirExpr as Apply)) {
         return GenerateApply(irBuilder, applyExpr.GetCallee(), applyExpr.GetArgs(),
@@ -92,8 +94,24 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
     }
     if (let Some(cgFunctionValue) <- (calleeValue as CGFunction)) {
         if (let Some(cgFuncTy) <- cgFunctionValue.GetCGFunctionType()) {
-            let rawFunction = SelectImportedGenericStructCtorEntry(irBuilder, callee, cgFunctionValue, cgFuncTy)
-            return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(cgFuncTy, rawFunction,
+            var selectedFuncTy = cgFuncTy
+            var rawFunction = SelectImportedGenericStructCtorEntry(irBuilder, callee, cgFunctionValue, cgFuncTy)
+            var funcPtrType = unsafe { LLVMPointerType(cgFuncTy.GetLLVMFunctionType(), 0u32) }
+            if (!callee.TestAttr(Attribute.STATIC) && !argValues.isEmpty() && IsStructOrExtendMethod(callee)) {
+                let firstArgType = unsafe { LLVMTypeOf(argValues[0].GetRawValue()) }
+                if (!firstArgType.isNull() && unsafe { LLVMGetTypeKind(firstArgType) } == LLVM_POINTER_TYPE_KIND &&
+                    unsafe { LLVMGetPointerAddressSpace(firstArgType) } == 1u32 &&
+                    cgMod.GetCGContext().GetBasePtrOf(argValues[0].GetRawValue()).isNone()) {
+                    let wrapper = cgFunctionValue.GetWrapperFunction()
+                    CJC_ASSERT(!wrapper.isNull())
+                    selectedFuncTy = (CGType.GetOrCreateWithNode(cgMod, callee,
+                        allowBasePtr: false) as CGFunctionType).getOrThrow()
+                    funcPtrType = unsafe { LLVMTypeOf(wrapper) }
+                    rawFunction = wrapper
+                }
+            }
+            let castedCallee = irBuilder.CreateBitCast(rawFunction, funcPtrType, name: "call.callee")
+            return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(selectedFuncTy, castedCallee,
                 argValues, methodTypeInfoArg, instTypeArgs, name: "call")
         }
         return irBuilder.CreateCallOrInvoke(cgFunctionValue, args: argValues, name: "call")

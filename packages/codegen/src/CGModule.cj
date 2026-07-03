@@ -283,6 +283,18 @@ public class CGModule {
         } else {
             LLVMNullValue()
         }
+        if (forWrapper) {
+            AddFnAttr(rawFunction, "wrapper")
+        }
+        if (chirValue.TestAttr(Attribute.NO_INLINE)) {
+            AddFnAttr(rawFunction, "noinline")
+        }
+        if (let Some(functionCGType) <- (cgFuncType as CGFunctionType)) {
+            if (functionCGType.HasBasePtr()) {
+                AddFnStringAttr(rawFunction, STRUCT_MUT_FUNC_ATTR)
+                AddFnStringAttr(rawFunction, THIS_PARAM_HAS_BP)
+            }
+        }
         let cgFunc = CGFunction(rawFunction, cgFuncType, chirValue, this)
         AddGenericParamMappings(rawFunction, cgFunc, chirValue, cgFuncType)
         ApplyFunctionABIAttributes(rawFunction, chirValue, cgFuncType)
@@ -629,7 +641,10 @@ public class CGModule {
 
     public func GetMappedBB(chirBlock: Block): Option<LLVMBasicBlockRef> {
         if (basicBlocks.contains(chirBlock.nodeId)) {
-            return basicBlocks[chirBlock.nodeId]
+            let mappedBlock = basicBlocks[chirBlock.nodeId]
+            if (!mappedBlock.isNull()) {
+                return mappedBlock
+            }
         }
         return None
     }

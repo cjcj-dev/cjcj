@@ -33,6 +33,7 @@ public enum LLVMLinkage {
     | Internal
     | Private
     | ExternalWeak
+    | Common
 }
 
 public enum LLVMUnnamedAddr {
@@ -67,6 +68,7 @@ public func LLVMLinkageValue(linkage: LLVMLinkage): Int32 {
         case LLVMLinkage.Internal => 8
         case LLVMLinkage.Private => 9
         case LLVMLinkage.ExternalWeak => 12
+        case LLVMLinkage.Common => 14
     }
 }
 
@@ -200,6 +202,7 @@ foreign {
     func LLVMGetStructElementTypes(structTy: LLVMTypeRef, dest: CPointer<LLVMTypeRef>): Unit
     func LLVMGetArrayLength(arrayTy: LLVMTypeRef): UInt32
     func LLVMGetReturnType(functionType: LLVMTypeRef): LLVMTypeRef
+    func LLVMIsFunctionVarArg(functionType: LLVMTypeRef): Int32
     func LLVMCountParamTypes(functionType: LLVMTypeRef): UInt32
     func LLVMGetParamTypes(functionType: LLVMTypeRef, dest: CPointer<LLVMTypeRef>): Unit
 
@@ -222,6 +225,7 @@ foreign {
     func LLVMDeleteGlobal(global: LLVMValueRef): Unit
     func LLVMGetGlobalParent(global: LLVMValueRef): LLVMModuleRef
     func LLVMGetValueName(value: LLVMValueRef): CString
+    func LLVMSetValueName2(value: LLVMValueRef, name: CString, nameLen: UIntNative): Unit
     func LLVMGetLinkage(global: LLVMValueRef): Int32
     func LLVMSetLinkage(global: LLVMValueRef, linkage: Int32): Unit
     func LLVMSetUnnamedAddress(global: LLVMValueRef, unnamedAddr: Int32): Unit
@@ -337,6 +341,8 @@ foreign {
         numCases: UInt32): LLVMValueRef
     func LLVMAddCase(switchValue: LLVMValueRef, onValue: LLVMValueRef, dest: LLVMBasicBlockRef): Unit
     func LLVMBuildAlloca(builder: LLVMBuilderRef, valueType: LLVMTypeRef, name: CString): LLVMValueRef
+    func LLVMBuildArrayAlloca(builder: LLVMBuilderRef, valueType: LLVMTypeRef, value: LLVMValueRef,
+        name: CString): LLVMValueRef
     func LLVMBuildLoad2(builder: LLVMBuilderRef, valueType: LLVMTypeRef, pointer: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildStore(builder: LLVMBuilderRef, value: LLVMValueRef, pointer: LLVMValueRef): LLVMValueRef
     func LLVMBuildMemSet(builder: LLVMBuilderRef, pointer: LLVMValueRef, value: LLVMValueRef, len: LLVMValueRef,

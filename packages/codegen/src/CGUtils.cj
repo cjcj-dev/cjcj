@@ -6,6 +6,8 @@ import cangjie_compiler::chir.CheckCustomTypeDefIsExpected
 import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CustomType
+import cangjie_compiler::chir.ExtendDef
+import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.Parameter
 import cangjie_compiler::chir.Type
@@ -105,6 +107,19 @@ public func IsLitStructPtrType(llvmType: LLVMTypeRef): Bool {
 
 public func IsCommonStruct(chirTy: Type): Bool {
     return chirTy.IsStruct() && !chirTy.IsCPointer() && !chirTy.IsCString()
+}
+
+public func IsStructOrExtendMethod(value: Value): Bool {
+    let functionValue = (value as Function) ?? return false
+    let declaredParent = functionValue.GetParentCustomTypeDef() ?? return false
+    if (declaredParent.IsStruct()) {
+        return true
+    } else if (let Some(extendDef) <- (declaredParent as ExtendDef)) {
+        if (let Some(extendedTy) <- extendDef.GetExtendedType()) {
+            return extendedTy.IsStruct()
+        }
+    }
+    return false
 }
 
 public func AlignedUpTo(offset: UInt64, align: UInt64): UInt64 {
