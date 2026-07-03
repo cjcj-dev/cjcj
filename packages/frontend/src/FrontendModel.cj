@@ -755,11 +755,12 @@ private class CjoSignatureMaterializer {
     }
 
     public func LoadPackageDependencies(data: Array<UInt8>): Bool {
-        MaterializeHeader(data)
+        PreLoadImportedPackageNode(data)
         return flatAllTypes >= 0 && flatAllDecls >= 0
     }
 
     public func LoadPackageDecls(): Unit {
+        LoadSerializedDeclRecords()
         MaterializeSerializedDecls()
     }
 
@@ -813,9 +814,50 @@ private class CjoSignatureMaterializer {
         return dep
     }
 
-    private func MaterializeHeader(data: Array<UInt8>): Unit {
-        LoadSerializedDeclRecords(data)
+    private func PreLoadImportedPackageNode(data: Array<UInt8>): Unit {
+        flat = Some(CjoFlatBuffer(data))
+        flatAllDecls = -1
+        flatAllTypes = -1
+        flatAllExprs = -1
+        flatImports = -1
+        flatDecls.clear()
+        flatNominalKinds.clear()
+        flatTypeCache.clear()
+        flatGenericParamDecls.clear()
+        allLoadedDecls.clear()
+        allLoadedExprs.clear()
+        allDummyExprs.clear()
+        importNonGenericSrcFuncDecls.clear()
+        let reader = flat.getOrThrow()
+        let root = reader.RootTable()
+        if (root < 0 || reader.StringField(root, 8) != packageName) {
+            return
+        }
+        pkg.isMacroPackage = reader.U8Field(root, 26, 0u8) != 0u8
+        let packageAccess = reader.U8Field(root, 28, 0u8)
+        pkg.accessible = if (packageAccess == 0u8) {
+            AccessLevel.PUBLIC
+        } else if (packageAccess == 1u8) {
+            AccessLevel.PROTECTED
+        } else {
+            AccessLevel.INTERNAL
+        }
+        flatAllTypes = reader.VectorField(root, 18)
+        flatAllDecls = reader.VectorField(root, 20)
+        flatAllExprs = reader.VectorField(root, 22)
+        flatImports = reader.VectorField(root, 12)
         MaterializeSerializedImports()
+        let dependentStdPkgs = reader.VectorField(root, 34)
+        if (dependentStdPkgs >= 0) {
+            var depIdx: Int64 = 0
+            while (depIdx < reader.VectorLength(dependentStdPkgs)) {
+                let depStdPkg = reader.StringAt(reader.VectorOffsetElement(dependentStdPkgs, depIdx))
+                if (!depStdPkg.isEmpty()) {
+                    pkg.AddDependentStdPkg(depStdPkg)
+                }
+                depIdx++
+            }
+        }
     }
 
     private func LoadFlatDeclRefs(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
@@ -1295,12 +1337,7 @@ private class CjoSignatureMaterializer {
         }
     }
 
-    private func LoadSerializedDeclRecords(data: Array<UInt8>): Unit {
-        flat = Some(CjoFlatBuffer(data))
-        flatAllDecls = -1
-        flatAllTypes = -1
-        flatAllExprs = -1
-        flatImports = -1
+    private func LoadSerializedDeclRecords(): Unit {
         flatDecls.clear()
         flatNominalKinds.clear()
         flatTypeCache.clear()
@@ -1314,30 +1351,6 @@ private class CjoSignatureMaterializer {
         if (root < 0 || reader.StringField(root, 8) != packageName) {
             return
         }
-        pkg.isMacroPackage = reader.U8Field(root, 26, 0u8) != 0u8
-        let packageAccess = reader.U8Field(root, 28, 0u8)
-        pkg.accessible = if (packageAccess == 0u8) {
-            AccessLevel.PUBLIC
-        } else if (packageAccess == 1u8) {
-            AccessLevel.PROTECTED
-        } else {
-            AccessLevel.INTERNAL
-        }
-        let dependentStdPkgs = reader.VectorField(root, 34)
-        if (dependentStdPkgs >= 0) {
-            var depIdx: Int64 = 0
-            while (depIdx < reader.VectorLength(dependentStdPkgs)) {
-                let depStdPkg = reader.StringAt(reader.VectorOffsetElement(dependentStdPkgs, depIdx))
-                if (!depStdPkg.isEmpty()) {
-                    pkg.AddDependentStdPkg(depStdPkg)
-                }
-                depIdx++
-            }
-        }
-        flatAllTypes = reader.VectorField(root, 18)
-        flatAllDecls = reader.VectorField(root, 20)
-        flatAllExprs = reader.VectorField(root, 22)
-        flatImports = reader.VectorField(root, 12)
         if (flatAllTypes < 0 || flatAllDecls < 0) {
             return
         }
