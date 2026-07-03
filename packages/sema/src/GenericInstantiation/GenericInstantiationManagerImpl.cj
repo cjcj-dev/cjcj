@@ -1136,8 +1136,31 @@ public class GenericInstantiationManagerImpl {
             if (ignoredInstantiationKind(target) || !RequireInstantiation(target)) {
                 return
             }
-            let instTys = GetInstTysForRefExpr(refExpr, target)
-            refExpr.ref.target = FindInstantiatedTarget(target, refExpr.GetTy(), instTys, refExpr.matchedParentTy, pkg)
+            var baseTy = refExpr.GetTy()
+            let instTys = ArrayList<Ty>()
+            if (refExpr.isThis || refExpr.isSuper) {
+                for (arg in copyTypeArgs(baseTy)) {
+                    instTys.add(arg)
+                }
+            } else {
+                for (arg in refExpr.instTys) {
+                    instTys.add(arg)
+                }
+            }
+            if (IsClassOrEnumConstructor(target)) {
+                if (let Some(currentBaseTy) <- baseTy) {
+                    baseTy = if (let Some(funcTy) <- (currentBaseTy as FuncTy)) { Some(funcTy.retTy) } else { baseTy }
+                    instTys.clear()
+                    for (arg in baseTy.getOrThrow().typeArgs) {
+                        instTys.add(arg)
+                    }
+                }
+            } else if (!structContext.isEmpty()) {
+                if (let Some(structDecl) <- GetStructDeclByContext()) {
+                    baseTy = GetDeclTy(structDecl)
+                }
+            }
+            refExpr.ref.target = FindInstantiatedTarget(target, baseTy, instTys, refExpr.matchedParentTy, pkg)
             ClearInstTysIfNeeded(refExpr)
         }
     }
@@ -1153,8 +1176,20 @@ public class GenericInstantiationManagerImpl {
             if (ignoredInstantiationKind(target)) {
                 return
             }
-            let baseTy = GetMemberBaseTy(memberAccess)
-            let instTys = GetInstTysForMemberAccess(memberAccess, target, baseTy)
+            var baseTy = GetMemberBaseTy(memberAccess)
+            let instTys = ArrayList<Ty>()
+            for (arg in memberAccess.instTys) {
+                instTys.add(arg)
+            }
+            if (IsClassOrEnumConstructor(target)) {
+                if (let Some(currentBaseTy) <- baseTy) {
+                    baseTy = if (let Some(funcTy) <- (currentBaseTy as FuncTy)) { Some(funcTy.retTy) } else { baseTy }
+                    instTys.clear()
+                    for (arg in baseTy.getOrThrow().typeArgs) {
+                        instTys.add(arg)
+                    }
+                }
+            }
             memberAccess.target = FindInstantiatedTarget(target, baseTy, instTys, memberAccess.matchedParentTy, pkg)
             ClearInstTysIfNeeded(memberAccess)
         }
@@ -1286,45 +1321,6 @@ public class GenericInstantiationManagerImpl {
                 }
             }
         }
-    }
-
-    private func GetInstTysForRefExpr(refExpr: RefExpr, target: Decl): ArrayList<Ty> {
-        let instTys = ArrayList<Ty>()
-        for (ty in refExpr.instTys) {
-            instTys.add(ty)
-        }
-        if (refExpr.isThis || refExpr.isSuper || IsClassOrEnumConstructor(target)) {
-            instTys.clear()
-            if (let Some(refTy) <- refExpr.GetTy()) {
-                let baseTy = if (let Some(funcTy) <- (refTy as FuncTy)) { funcTy.retTy } else { refTy }
-                for (arg in baseTy.typeArgs) {
-                    instTys.add(arg)
-                }
-            }
-        }
-        return instTys
-    }
-
-    private func GetInstTysForMemberAccess(memberAccess: MemberAccess, target: Decl, baseTy: Option<Ty>):
-        ArrayList<Ty> {
-        let instTys = ArrayList<Ty>()
-        for (ty in memberAccess.instTys) {
-            instTys.add(ty)
-        }
-        if (IsClassOrEnumConstructor(target)) {
-            instTys.clear()
-            if (let Some(ty) <- memberAccess.GetTy()) {
-                let resultTy = if (let Some(funcTy) <- (ty as FuncTy)) { funcTy.retTy } else { ty }
-                for (arg in resultTy.typeArgs) {
-                    instTys.add(arg)
-                }
-            } else if (let Some(ty) <- baseTy) {
-                for (arg in ty.typeArgs) {
-                    instTys.add(arg)
-                }
-            }
-        }
-        return instTys
     }
 
     private func GetMemberBaseTy(memberAccess: MemberAccess): Option<Ty> {
