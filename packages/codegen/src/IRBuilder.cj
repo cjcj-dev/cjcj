@@ -3217,6 +3217,26 @@ public class IRBuilder2 <: Resource {
         return CreateIntrinsicCallNoInvoke("llvm.cj.get.vtable.func", ArrayList<LLVMTypeRef>(), args)
     }
 
+    public func CallIntrinsicMTable(parameters: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(parameters.size == 3)
+        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreateBitCast(parameters[0], i8PtrType))
+        args.add(CreateBitCast(parameters[1], i8PtrType))
+        args.add(parameters[2])
+        return CreateIntrinsicCallNoInvoke("llvm.cj.get.mtable.func", ArrayList<LLVMTypeRef>(), args)
+    }
+
+    public func CallIntrinsicMethodOuterType(parameters: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(parameters.size == 3)
+        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreateBitCast(parameters[0], i8PtrType))
+        args.add(CreateBitCast(parameters[1], i8PtrType))
+        args.add(parameters[2])
+        return CreateIntrinsicCallNoInvoke("llvm.cj.get.method.outertype", ArrayList<LLVMTypeRef>(), args)
+    }
+
     public func CreateNegativeArraySizeException(): Unit {
         let helperType = MakeFunctionType(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, ArrayList<LLVMTypeRef>())
         let helper = if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(THROW_NEGATIVE_ARRAY_SIZE_EXCEPTION_FUNC_NAME)) {

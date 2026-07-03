@@ -29,6 +29,27 @@ public func GenNameForBB(name: String, extraInfo!: UInt64 = 0u64): String {
     return name
 }
 
+public func UnwindGenericRelateType(llvmCtx: LLVMContextHandle, ty: Type): ArrayList<LLVMMetadataRef> {
+    let tyArgMeta = ArrayList<LLVMMetadataRef>()
+    if (ty.IsGeneric()) {
+        return tyArgMeta
+    }
+    let typeArgs = ty.GetTypeArgs()
+    if (!typeArgs.isEmpty()) {
+        tyArgMeta.add(LLVMCreateMDString(llvmCtx, CGType.GetNameOfTypeTemplateGV(ty)))
+        let tyArg = typeArgs[0]
+        if (tyArg.IsValueType()) {
+            tyArgMeta.add(LLVMCreateMDString(llvmCtx, CGType.GetNameOfTypeInfoGV(tyArg)))
+        } else {
+            let nestedTyArgMeta = UnwindGenericRelateType(llvmCtx, tyArg.StripAllRefs())
+            if (!nestedTyArgMeta.isEmpty()) {
+                tyArgMeta.add(LLVMCreateMDTuple(llvmCtx, nestedTyArgMeta))
+            }
+        }
+    }
+    return tyArgMeta
+}
+
 public func GetClassObjLayoutName(className: String): String {
     return "ObjLayout." + className
 }
