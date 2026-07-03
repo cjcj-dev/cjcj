@@ -4887,7 +4887,11 @@ public class ImportManager {
     public func IsSourceCodeImported(): Bool { return importSrcCode }
 
     public func GetAllImportedPackages(): ArrayList<Package> {
-        return importedPackages
+        let out = ArrayList<Package>()
+        for (pkgDecl in GetAllPackageDecls()) {
+            out.add(pkgDecl.srcPackage)
+        }
+        return out
     }
 
     private func GetAllPackageDecls(includeMacroPkg!: Bool = false): ArrayList<PackageDecl> {
