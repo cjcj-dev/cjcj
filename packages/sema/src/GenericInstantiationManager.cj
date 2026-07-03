@@ -19,6 +19,13 @@ public class CompilerInstance {
         HashMap<String, HashMap<String, ArrayList<Decl>>>()
     public let resolvedImplicitPackageMemberDeclsMap: HashMap<String, HashMap<String, Decl>> =
         HashMap<String, HashMap<String, Decl>>()
+    public let resolvedImportPackageNameMap: HashMap<Node, (String, Bool)> =
+        HashMap<Node, (String, Bool)>()
+    public let resolvedPackageDeclMap: HashMap<String, PackageDecl> = HashMap<String, PackageDecl>()
+    public let resolvedCjoPackageMemberDeclsMap: HashMap<String, HashMap<String, ArrayList<Decl>>> =
+        HashMap<String, HashMap<String, ArrayList<Decl>>>()
+    public let resolvedUsedMacroDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
+        HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
     public init() {}
 
     public func AddResolvedImportedDecls(fileHash: UInt64, name: String, decls: ArrayList<Decl>): Unit {
@@ -46,6 +53,32 @@ public class CompilerInstance {
         }
         if (let Some(packageMap) <- resolvedImplicitPackageMemberDeclsMap.get(packageName)) {
             packageMap[name] = decl
+        }
+    }
+
+    public func AddResolvedImportPackageName(importSpec: ImportSpec, packageName: String, isImportPackage: Bool): Unit {
+        resolvedImportPackageNameMap[importSpec] = (packageName, isImportPackage)
+    }
+
+    public func AddResolvedPackageDecl(packageName: String, packageDecl: PackageDecl): Unit {
+        resolvedPackageDeclMap[packageName] = packageDecl
+    }
+
+    public func AddResolvedCjoPackageMemberDecls(packageName: String, name: String, decls: ArrayList<Decl>): Unit {
+        if (!resolvedCjoPackageMemberDeclsMap.contains(packageName)) {
+            resolvedCjoPackageMemberDeclsMap[packageName] = HashMap<String, ArrayList<Decl>>()
+        }
+        if (let Some(packageMap) <- resolvedCjoPackageMemberDeclsMap.get(packageName)) {
+            AddDeclsToNamedMap(packageMap, name, decls)
+        }
+    }
+
+    public func AddResolvedUsedMacroDecls(fileIndex: UInt64, packageName: String, decls: ArrayList<Decl>): Unit {
+        if (!resolvedUsedMacroDeclsMap.contains(fileIndex)) {
+            resolvedUsedMacroDeclsMap[fileIndex] = HashMap<String, ArrayList<Decl>>()
+        }
+        if (let Some(fileMap) <- resolvedUsedMacroDeclsMap.get(fileIndex)) {
+            AddDeclsToNamedMap(fileMap, packageName, decls)
         }
     }
 

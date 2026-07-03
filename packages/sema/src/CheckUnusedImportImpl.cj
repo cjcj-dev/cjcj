@@ -33,19 +33,21 @@ public class UnusedImportFinding {
 
 private class CheckUnusedImportImpl {
     private var pkg: Package
+    private var ctx: Option<ASTContext> = None
     private let usedPackageInAST: HashMap<String, ArrayList<UsedImportTarget>> =
         HashMap<String, ArrayList<UsedImportTarget>>()
-    private let usedPackageInFile: HashMap<String, HashMap<String, ArrayList<UsedImportTarget>>> =
-        HashMap<String, HashMap<String, ArrayList<UsedImportTarget>>>()
+    private let usedPackageInFile: HashMap<Node, HashMap<String, ArrayList<UsedImportTarget>>> =
+        HashMap<Node, HashMap<String, ArrayList<UsedImportTarget>>>()
     private let cacheUsedPackageInAST: HashMap<String, ArrayList<UsedImportTarget>> =
         HashMap<String, ArrayList<UsedImportTarget>>()
-    private let cacheUsedPackageInFile: HashMap<String, HashMap<String, ArrayList<UsedImportTarget>>> =
-        HashMap<String, HashMap<String, ArrayList<UsedImportTarget>>>()
+    private let cacheUsedPackageInFile: HashMap<Node, HashMap<String, ArrayList<UsedImportTarget>>> =
+        HashMap<Node, HashMap<String, ArrayList<UsedImportTarget>>>()
     private let needCheckImport: ArrayList<ImportSpec> = ArrayList<ImportSpec>()
     private let findings: ArrayList<UnusedImportFinding> = ArrayList<UnusedImportFinding>()
 
-    public init(pkg: Package) {
+    public init(pkg: Package, ctx!: Option<ASTContext> = None) {
         this.pkg = pkg
+        this.ctx = ctx
     }
 
     public func Check(): ArrayList<UnusedImportFinding> {
@@ -90,7 +92,7 @@ private class CheckUnusedImportImpl {
     }
 
     private func IsImportContentUsed(importSpec: ImportSpec): Bool {
-        let packageName = GetPackageNameByImport(importSpec)
+        let packageName = GetPackageNameByImport(ctx, importSpec)
         if (packageName.isEmpty()) {
             return false
         }
@@ -102,47 +104,107 @@ private class CheckUnusedImportImpl {
         }
 
         let cacheUsedPackage = GetCacheUsedPackageMap(importSpec)
+        let declsMap = GetPackageMembers(ctx, packageName)
         if (importSpec.IsImportAll()) {
-            return CheckImportAllUsed(importSpec, packageName, usedPackage, cacheUsedPackage)
+            if (CheckImportAllUsed(importSpec, packageName, usedPackage, cacheUsedPackage, declsMap)) {
+                return true
+            }
+        } else if (importSpec.content.isDecl) {
+            if (CheckDeclImportUsed(importSpec, packageName, usedPackage, cacheUsedPackage, declsMap)) {
+                return true
+            }
+        } else {
+            if (CheckPackageImportUsed(importSpec, packageName, usedDecls)) {
+                return true
+            }
         }
-        if (importSpec.content.isDecl) {
-            return CheckDeclImportUsed(importSpec, packageName, usedPackage, cacheUsedPackage)
+
+        if (let Some(packageValue) <- GetPackage(ctx, packageName)) {
+            if (packageValue.isMacroPackage) {
+                return IsImportContentUsedInMacro(importSpec, packageName, declsMap)
+            }
         }
-        return CheckPackageImportUsed(importSpec, packageName, usedDecls)
+        return false
+    }
+
+    private func IsImportContentUsedInMacro(
+        importSpec: ImportSpec,
+        packageName: String,
+        declsMap: HashMap<String, ArrayList<Decl>>
+    ): Bool {
+        let file = importSpec.curFile.getOrThrow()
+        let usedMacroInFile = GetUsedMacroDecls(ctx, file)
+
+        if (importSpec.IsImportAll() || !importSpec.content.isDecl) {
+            if (!GetDeclsFromMap(usedMacroInFile, packageName).isEmpty()) {
+                return true
+            }
+            for (name in declsMap.keys()) {
+                if (let Some(decls) <- declsMap.get(name)) {
+                    for (decl in decls) {
+                        if (ContainsDecl(GetDeclsFromMap(usedMacroInFile, decl.GetFullPackageName()), decl)) {
+                            let fileMap = GetFilePackageMap(cacheUsedPackageInFile, file)
+                            AddTargetToMap(fileMap, packageName, decl.identifier.Val(), decl)
+                            return true
+                        }
+                    }
+                }
+            }
+        } else {
+            let decls = declsMap.get(importSpec.content.identifier.Val()) ?? return false
+            for (decl in decls) {
+                if (ContainsDecl(GetDeclsFromMap(usedMacroInFile, decl.GetFullPackageName()), decl)) {
+                    let fileMap = GetFilePackageMap(cacheUsedPackageInFile, file)
+                    AddTargetToMap(fileMap, packageName, decl.identifier.Val(), decl)
+                    return true
+                }
+            }
+        }
+
+        return false
     }
 
     private func CheckImportAllUsed(
         importSpec: ImportSpec,
         packageName: String,
         usedPackage: HashMap<String, ArrayList<UsedImportTarget>>,
-        cacheUsedPackage: HashMap<String, ArrayList<UsedImportTarget>>
+        cacheUsedPackage: HashMap<String, ArrayList<UsedImportTarget>>,
+        declsMap: HashMap<String, ArrayList<Decl>>
     ): Bool {
         if (!GetPackageTargets(cacheUsedPackage, packageName).isEmpty()) {
             return true
         }
-        let usedDecls = GetPackageTargets(usedPackage, packageName)
-        if (usedDecls.isEmpty()) {
-            return false
+        for (name in declsMap.keys()) {
+            if (let Some(decls) <- declsMap.get(name)) {
+                for (decl in decls) {
+                    let usedDecls = GetPackageTargets(usedPackage, decl.GetFullPackageName())
+                    if (ContainsUsedTarget(usedDecls, decl.identifier.Val(), decl)) {
+                        UpdateCacheForDecl(importSpec, packageName, decl.identifier.Val(), decl)
+                        return true
+                    }
+                }
+            }
         }
-        let first = usedDecls[0]
-        UpdateCacheForDecl(importSpec, packageName, first.identifier, first.target)
-        return true
+        return false
     }
 
     private func CheckDeclImportUsed(
         importSpec: ImportSpec,
         packageName: String,
         usedPackage: HashMap<String, ArrayList<UsedImportTarget>>,
-        cacheUsedPackage: HashMap<String, ArrayList<UsedImportTarget>>
+        cacheUsedPackage: HashMap<String, ArrayList<UsedImportTarget>>,
+        declsMap: HashMap<String, ArrayList<Decl>>
     ): Bool {
         let identifier = GetImportedDeclVisibleName(importSpec)
         let importedName = importSpec.content.identifier.Val()
-        if (ContainsTargetByImportedOrVisibleName(GetPackageTargets(cacheUsedPackage, packageName), identifier, importedName)) {
-            return true
-        }
-        for (target in GetPackageTargets(usedPackage, packageName)) {
-            if (target.identifier == identifier || target.target.identifier.Val() == importedName) {
-                UpdateCacheForDecl(importSpec, packageName, identifier, target.target)
+        let decls = declsMap.get(importedName) ?? return false
+        for (decl in decls) {
+            if (ContainsUsedTarget(GetPackageTargets(cacheUsedPackage, packageName), identifier, decl)) {
+                return true
+            }
+            let usedDecls = GetPackageTargets(usedPackage, decl.GetFullPackageName())
+            if (ContainsUsedTarget(usedDecls, identifier, decl)) {
+                UpdateCacheForDecl(importSpec, packageName, identifier, decl)
                 return true
             }
         }
@@ -155,12 +217,8 @@ private class CheckUnusedImportImpl {
         usedDecls: ArrayList<UsedImportTarget>
     ): Bool {
         let identifier = GetImportedDeclVisibleName(importSpec)
-        for (target in usedDecls) {
-            if (target.identifier == identifier && IsPackageDeclFor(target.target, packageName)) {
-                return true
-            }
-        }
-        return false
+        let packageDecl = GetPackageDecl(ctx, packageName) ?? return false
+        return ContainsUsedTarget(usedDecls, identifier, packageDecl)
     }
 
     private func UpdateCacheForDecl(
@@ -194,10 +252,6 @@ private class CheckUnusedImportImpl {
 
     private func AddUsedTargetWithIdentifier(node: Node, identifier: String, target: Decl): Unit {
         let packageName = target.GetFullPackageName()
-        if (packageName.isEmpty()) {
-            return
-        }
-
         AddTargetToMap(usedPackageInAST, packageName, identifier, target)
         if (let Some(outerDecl) <- target.outerDecl) {
             AddTargetToMap(usedPackageInAST, packageName, outerDecl.identifier.Val(), outerDecl)
@@ -289,11 +343,45 @@ private func IsInternalImportNeedExport(importSpec: ImportSpec): Bool {
     return false
 }
 
-private func GetPackageNameByImport(importSpec: ImportSpec): String {
-    if (importSpec.content.isDecl && !importSpec.content.GetPrefixPath().isEmpty()) {
-        return importSpec.content.GetPrefixPath()
+private func GetPackageNameByImport(ctx: Option<ASTContext>, importSpec: ImportSpec): String {
+    if (let Some(context) <- ctx) {
+        if (let Some(packageNamePair) <- context.resolvedImportPackageNameMap.get(importSpec)) {
+            return packageNamePair[0]
+        }
     }
-    return importSpec.content.GetImportedPackageName()
+    return ""
+}
+
+private func GetPackageMembers(ctx: Option<ASTContext>, packageName: String): HashMap<String, ArrayList<Decl>> {
+    if (let Some(context) <- ctx) {
+        if (let Some(declsMap) <- context.resolvedCjoPackageMemberDeclsMap.get(packageName)) {
+            return declsMap
+        }
+    }
+    return HashMap<String, ArrayList<Decl>>()
+}
+
+private func GetPackageDecl(ctx: Option<ASTContext>, packageName: String): Option<PackageDecl> {
+    if (let Some(context) <- ctx) {
+        return context.resolvedPackageDeclMap.get(packageName)
+    }
+    return None
+}
+
+private func GetPackage(ctx: Option<ASTContext>, packageName: String): Option<Package> {
+    if (let Some(packageDecl) <- GetPackageDecl(ctx, packageName)) {
+        return Some(packageDecl.srcPackage)
+    }
+    return None
+}
+
+private func GetUsedMacroDecls(ctx: Option<ASTContext>, file: File): HashMap<String, ArrayList<Decl>> {
+    if (let Some(context) <- ctx) {
+        if (let Some(usedMacroDecls) <- context.resolvedUsedMacroDeclsMap.get(file.indexOfPackage)) {
+            return usedMacroDecls
+        }
+    }
+    return HashMap<String, ArrayList<Decl>>()
 }
 
 private func GetImportedDeclVisibleName(importSpec: ImportSpec): String {
@@ -319,9 +407,6 @@ private func AddTargetToMap(
     identifier: String,
     target: Decl
 ): Unit {
-    if (packageName.isEmpty()) {
-        return
-    }
     let targets = GetOrCreatePackageTargets(usedMap, packageName)
     if (!ContainsUsedTarget(targets, identifier, target)) {
         targets.add(UsedImportTarget(identifier, target))
@@ -348,15 +433,24 @@ private func GetPackageTargets(
     return ArrayList<UsedImportTarget>()
 }
 
+private func GetDeclsFromMap(
+    declMap: HashMap<String, ArrayList<Decl>>,
+    packageName: String
+): ArrayList<Decl> {
+    if (let Some(decls) <- declMap.get(packageName)) {
+        return decls
+    }
+    return ArrayList<Decl>()
+}
+
 private func GetFilePackageMap(
-    fileMaps: HashMap<String, HashMap<String, ArrayList<UsedImportTarget>>>,
+    fileMaps: HashMap<Node, HashMap<String, ArrayList<UsedImportTarget>>>,
     file: File
 ): HashMap<String, ArrayList<UsedImportTarget>> {
-    let key = FileKey(file)
-    if (!fileMaps.contains(key)) {
-        fileMaps[key] = HashMap<String, ArrayList<UsedImportTarget>>()
+    if (!fileMaps.contains(file)) {
+        fileMaps[file] = HashMap<String, ArrayList<UsedImportTarget>>()
     }
-    return fileMaps.get(key).getOrThrow()
+    return fileMaps.get(file).getOrThrow()
 }
 
 private func ContainsUsedTarget(targets: ArrayList<UsedImportTarget>, identifier: String, decl: Decl): Bool {
@@ -368,28 +462,13 @@ private func ContainsUsedTarget(targets: ArrayList<UsedImportTarget>, identifier
     return false
 }
 
-private func ContainsTargetByImportedOrVisibleName(
-    targets: ArrayList<UsedImportTarget>,
-    visibleName: String,
-    importedName: String
-): Bool {
-    for (target in targets) {
-        if (target.identifier == visibleName || target.target.identifier.Val() == importedName) {
+private func ContainsDecl(decls: ArrayList<Decl>, decl: Decl): Bool {
+    for (value in decls) {
+        if (refEq(value, decl)) {
             return true
         }
     }
     return false
-}
-
-private func IsPackageDeclFor(decl: Decl, packageName: String): Bool {
-    if (let Some(packageDecl) <- (decl as PackageDecl)) {
-        return packageDecl.fullPackageName == packageName
-    }
-    return false
-}
-
-private func FileKey(file: File): String {
-    return "${file.fileHash}:${file.indexOfPackage}:${file.filePath}:${file.fileName}"
 }
 
 private func CloneFindings(values: ArrayList<UnusedImportFinding>): ArrayList<UnusedImportFinding> {
@@ -408,8 +487,22 @@ public func CollectUnusedImports(pkg: Package): ArrayList<UnusedImportFinding> {
     return CheckUnusedImportImpl(pkg).Check()
 }
 
+public func CollectUnusedImports(ctx: ASTContext, pkg: Package): ArrayList<UnusedImportFinding> {
+    return CheckUnusedImportImpl(pkg, ctx: Some(ctx)).Check()
+}
+
 public func ReportUnusedImports(pkg: Package, diag: BasicDiagnosticEngine): ArrayList<UnusedImportFinding> {
     let result = CollectUnusedImports(pkg)
+    for (finding in result) {
+        let range = BasicMakeRange(ToBasicPosition(finding.begin), ToBasicPosition(finding.end))
+        let args: Array<String> = [finding.content]
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unused_import, range, arguments: args)
+    }
+    return result
+}
+
+public func ReportUnusedImports(ctx: ASTContext, pkg: Package, diag: BasicDiagnosticEngine): ArrayList<UnusedImportFinding> {
+    let result = CollectUnusedImports(ctx, pkg)
     for (finding in result) {
         let range = BasicMakeRange(ToBasicPosition(finding.begin), ToBasicPosition(finding.end))
         let args: Array<String> = [finding.content]

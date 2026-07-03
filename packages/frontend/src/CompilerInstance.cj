@@ -470,9 +470,6 @@ public class CompilerInstance {
         for (pkg in srcPkgs) {
             semaInstance.sourcePackages.add(pkg)
         }
-        for (importedPackage in importManager.GetAllImportedPackages()) {
-            semaInstance.packageDecls.add(RealASTPackageDecl(importedPackage))
-        }
         SeedFaithfulSemaResolvedImports(semaInstance)
         let checker = FaithfulSemaTypeChecker(Some(semaInstance))
         checker.TypeCheckForPackages(pkgs)
@@ -482,9 +479,53 @@ public class CompilerInstance {
 
     private func SeedFaithfulSemaResolvedImports(semaInstance: FaithfulSemaCompilerInstance): Unit {
         for (pkg in srcPkgs) {
+            if (let Some(packageDecl) <- importManager.GetPackageDecl(pkg.fullPackageName)) {
+                semaInstance.AddResolvedPackageDecl(pkg.fullPackageName, packageDecl)
+            }
+        }
+        for (importedPackage in importManager.GetAllImportedPackages()) {
+            if (let Some(packageDecl) <- importManager.GetPackageDecl(importedPackage.fullPackageName)) {
+                semaInstance.packageDecls.add(packageDecl)
+                semaInstance.AddResolvedPackageDecl(importedPackage.fullPackageName, packageDecl)
+            } else {
+                let packageDecl = RealASTPackageDecl(importedPackage)
+                semaInstance.packageDecls.add(packageDecl)
+                semaInstance.AddResolvedPackageDecl(importedPackage.fullPackageName, packageDecl)
+            }
+        }
+        for (pkg in srcPkgs) {
             for (file in pkg.files) {
+                for (importSpec in file.imports) {
+                    let packageName = importManager.GetPackageNameByImport(importSpec)
+                    if (!packageName.isEmpty()) {
+                        semaInstance.AddResolvedImportPackageName(importSpec, packageName,
+                            importManager.IsImportPackage(importSpec))
+                    }
+                }
                 for (group in importManager.GetImportedDecls(file)) {
                     semaInstance.AddResolvedImportedDecls(file.fileHash, group.name, group.decls)
+                }
+                let usedMacroDeclsMap = importManager.GetUsedMacroDecls(file)
+                for (macroPackageName in usedMacroDeclsMap.keys()) {
+                    if (let Some(decls) <- usedMacroDeclsMap.get(macroPackageName)) {
+                        semaInstance.AddResolvedUsedMacroDecls(file.indexOfPackage, macroPackageName, decls)
+                    }
+                }
+            }
+        }
+        for (srcPkg in srcPkgs) {
+            let members = importManager.GetPackageMembers(srcPkg.fullPackageName)
+            for (name in members.keys()) {
+                if (let Some(decls) <- members.get(name)) {
+                    semaInstance.AddResolvedCjoPackageMemberDecls(srcPkg.fullPackageName, name, decls)
+                }
+            }
+        }
+        for (importedPackage in importManager.GetAllImportedPackages()) {
+            let members = importManager.GetPackageMembers(importedPackage.fullPackageName)
+            for (name in members.keys()) {
+                if (let Some(decls) <- members.get(name)) {
+                    semaInstance.AddResolvedCjoPackageMemberDecls(importedPackage.fullPackageName, name, decls)
                 }
             }
         }

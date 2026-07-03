@@ -210,6 +210,13 @@ public class ASTContext {
         HashMap<String, HashMap<String, ArrayList<Decl>>>()
     public let resolvedImplicitPackageMemberDeclsMap: HashMap<String, HashMap<String, Decl>> =
         HashMap<String, HashMap<String, Decl>>()
+    public let resolvedImportPackageNameMap: HashMap<Node, (String, Bool)> =
+        HashMap<Node, (String, Bool)>()
+    public let resolvedPackageDeclMap: HashMap<String, PackageDecl> = HashMap<String, PackageDecl>()
+    public let resolvedCjoPackageMemberDeclsMap: HashMap<String, HashMap<String, ArrayList<Decl>>> =
+        HashMap<String, HashMap<String, ArrayList<Decl>>>()
+    public let resolvedUsedMacroDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
+        HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
     public let mem2Decls: HashMap<MemSig, ArrayList<Decl>> = HashMap<MemSig, ArrayList<Decl>>()
     public let subtypeDeclsMap: HashMap<Node, ArrayList<Decl>> = HashMap<Node, ArrayList<Decl>>()
     public let declMap: HashMap<Names, ArrayList<Decl>> = HashMap<Names, ArrayList<Decl>>()

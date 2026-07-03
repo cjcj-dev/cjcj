@@ -459,6 +459,10 @@ public class TypeChecker {
         return CollectUnusedImports(pkg)
     }
 
+    public func CheckUnusedImportSpec(ctx: ASTContext, pkg: Package): ArrayList<UnusedImportFinding> {
+        return CollectUnusedImports(ctx, pkg)
+    }
+
     public func CheckAllDeclAttributes(pkg: Package): ArrayList<DeclAttributeIssue> {
         return CheckDeclAttributesForPackage(pkg, opts: GlobalOptions())
     }
@@ -938,6 +942,10 @@ public class TypeChecker {
         ctx.resolvedImportedDeclsMap.clear()
         ctx.resolvedPackageMemberDeclsMap.clear()
         ctx.resolvedImplicitPackageMemberDeclsMap.clear()
+        ctx.resolvedImportPackageNameMap.clear()
+        ctx.resolvedPackageDeclMap.clear()
+        ctx.resolvedCjoPackageMemberDeclsMap.clear()
+        ctx.resolvedUsedMacroDeclsMap.clear()
         if (let Some(instance) <- ci) {
             for (packageDecl in instance.packageDecls) {
                 ctx.packageDecls.add(packageDecl)
@@ -982,6 +990,46 @@ public class TypeChecker {
                         }
                     }
                     ctx.resolvedImplicitPackageMemberDeclsMap[implicitPackageName] = ctxImplicitPackageMap
+                }
+            }
+            for (importSpec in instance.resolvedImportPackageNameMap.keys()) {
+                if (let Some(packageNamePair) <- instance.resolvedImportPackageNameMap.get(importSpec)) {
+                    ctx.resolvedImportPackageNameMap[importSpec] = packageNamePair
+                }
+            }
+            for (packageDeclName in instance.resolvedPackageDeclMap.keys()) {
+                if (let Some(packageDecl) <- instance.resolvedPackageDeclMap.get(packageDeclName)) {
+                    ctx.resolvedPackageDeclMap[packageDeclName] = packageDecl
+                }
+            }
+            for (cjoPackageName in instance.resolvedCjoPackageMemberDeclsMap.keys()) {
+                if (let Some(packageMap) <- instance.resolvedCjoPackageMemberDeclsMap.get(cjoPackageName)) {
+                    let ctxPackageMap = HashMap<String, ArrayList<Decl>>()
+                    for (name in packageMap.keys()) {
+                        if (let Some(decls) <- packageMap.get(name)) {
+                            let copiedDecls = ArrayList<Decl>()
+                            for (decl in decls) {
+                                copiedDecls.add(decl)
+                            }
+                            ctxPackageMap[name] = copiedDecls
+                        }
+                    }
+                    ctx.resolvedCjoPackageMemberDeclsMap[cjoPackageName] = ctxPackageMap
+                }
+            }
+            for (fileIndex in instance.resolvedUsedMacroDeclsMap.keys()) {
+                if (let Some(usedMacroDeclMap) <- instance.resolvedUsedMacroDeclsMap.get(fileIndex)) {
+                    let ctxUsedMacroDeclMap = HashMap<String, ArrayList<Decl>>()
+                    for (packageName in usedMacroDeclMap.keys()) {
+                        if (let Some(decls) <- usedMacroDeclMap.get(packageName)) {
+                            let copiedDecls = ArrayList<Decl>()
+                            for (decl in decls) {
+                                copiedDecls.add(decl)
+                            }
+                            ctxUsedMacroDeclMap[packageName] = copiedDecls
+                        }
+                    }
+                    ctx.resolvedUsedMacroDeclsMap[fileIndex] = ctxUsedMacroDeclMap
                 }
             }
         }
@@ -1099,7 +1147,11 @@ public class TypeChecker {
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
                 SetOverflowStrategyForPkg(pkg)
-                let _ = CollectUnusedImports(pkg)
+                if (let Some(diagValue) <- impl.diag) {
+                    let _ = ReportUnusedImports(ctx, pkg, diagValue)
+                } else {
+                    let _ = CollectUnusedImports(ctx, pkg)
+                }
                 let _ = CheckConstEvaluation(pkg)
                 RunInheritanceCheck(pkg)
                 SetConstructorCalls(pkg)
