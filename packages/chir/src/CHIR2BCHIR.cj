@@ -304,35 +304,50 @@ public class CHIR2BCHIR {
     public func TranslateLiteralValue(context: CHIR2BCHIRContext, literal: LiteralValue): Unit {
         if (let Some(boolLiteral) <- (literal as BoolLiteral)) {
             context.definition.PushOp(OpCode.BOOL)
-            context.definition.PushCell(if (boolLiteral.value) { 1 } else { 0 })
-        } else if (let Some(intLiteral) <- (literal as IntLiteral)) {
-            let opCode = BCHIRPrimitiveTypeKindToOpCode(LiteralIntType())
-            context.definition.PushOp(if (opCode == OpCode.INVALID) { OpCode.INT64 } else { opCode })
-            if (BCHIRIsWideIntegerOp(opCode) || opCode == OpCode.INVALID) {
-                context.definition.Push8Bytes(intLiteral.value)
-            } else {
-                context.definition.PushCell(intLiteral.value)
-            }
+            context.definition.PushCell(if (boolLiteral.GetVal()) { 1 } else { 0 })
         } else if (let Some(floatLiteral) <- (literal as FloatLiteral)) {
-            context.definition.PushOp(OpCode.FLOAT64)
-            context.definition.Push8Bytes(Int64(floatLiteral.value))
-        } else if (let Some(runeLiteral) <- (literal as RuneLiteral)) {
-            context.definition.PushOp(OpCode.RUNE)
-            context.definition.PushCell(Int64(UInt32(runeLiteral.value)))
-        } else if (let Some(stringLiteral) <- (literal as StringLiteral)) {
-            context.definition.PushOp(OpCode.STRING)
-            context.definition.PushCell(GetStringIdx(stringLiteral.value))
+            TranslateFloatValue(context, floatLiteral)
+        } else if (let Some(intLiteral) <- (literal as IntLiteral)) {
+            TranslateIntValue(context, intLiteral)
         } else if (literal.IsNullLit()) {
             context.definition.PushOp(OpCode.NULLPTR)
+        } else if (let Some(runeLiteral) <- (literal as RuneLiteral)) {
+            context.definition.PushOp(OpCode.RUNE)
+            context.definition.PushCell(Int64(UInt32(runeLiteral.GetVal())))
+        } else if (let Some(stringLiteral) <- (literal as StringLiteral)) {
+            context.definition.PushOp(OpCode.STRING)
+            context.definition.PushCell(GetStringIdx(stringLiteral.GetVal()))
         } else if (literal.IsUnitLit()) {
             context.definition.PushOp(OpCode.UNIT)
         } else {
-            context.definition.PushOp(OpCode.NOT_SUPPORTED)
+            CJC_ASSERT(false)
         }
     }
 
-    private func LiteralIntType(): TypeKind {
-        return TypeKind.TYPE_INT64
+    private func TranslateIntValue(context: CHIR2BCHIRContext, value: IntLiteral): Unit {
+        let typeKind = value.GetType().getOrThrow().GetTypeKind()
+        let opCode = BCHIRPrimitiveTypeKindToOpCode(typeKind)
+        CJC_ASSERT(opCode != OpCode.INVALID)
+        context.definition.PushOp(opCode)
+        if (typeKind == TypeKind.TYPE_INT64 || typeKind == TypeKind.TYPE_UINT64 ||
+            typeKind == TypeKind.TYPE_INT_NATIVE || typeKind == TypeKind.TYPE_UINT_NATIVE) {
+            context.definition.Push8Bytes(BCHIRCellFromUInt64(value.GetUnsignedVal()))
+        } else {
+            context.definition.PushCell(Int64(value.GetUnsignedVal() & 0xffffffffu64))
+        }
+    }
+
+    private func TranslateFloatValue(context: CHIR2BCHIRContext, value: FloatLiteral): Unit {
+        let typeKind = value.GetType().getOrThrow().GetTypeKind()
+        let opCode = BCHIRPrimitiveTypeKindToOpCode(typeKind)
+        CJC_ASSERT(opCode != OpCode.INVALID)
+        context.definition.PushOp(opCode)
+        if (typeKind == TypeKind.TYPE_FLOAT64) {
+            context.definition.Push8Bytes(BCHIRCellFromUInt64(value.GetVal().toBits()))
+        } else {
+            let floatValue = Float32(value.GetVal())
+            context.definition.PushCell(Int64(floatValue.toBits()))
+        }
     }
 
     public func GetStringIdx(value: String): Int64 {
@@ -351,6 +366,36 @@ public class CHIR2BCHIR {
         }
         let next = bchir.AddType(ty)
         typeMemo[key] = next
+        match (ty.GetTypeKind()) {
+            case TypeKind.TYPE_INT8 | TypeKind.TYPE_INT16 | TypeKind.TYPE_INT32 | TypeKind.TYPE_INT64 |
+                TypeKind.TYPE_INT_NATIVE | TypeKind.TYPE_UINT8 | TypeKind.TYPE_UINT16 | TypeKind.TYPE_UINT32 |
+                TypeKind.TYPE_UINT64 | TypeKind.TYPE_UINT_NATIVE | TypeKind.TYPE_FLOAT16 |
+                TypeKind.TYPE_FLOAT32 | TypeKind.TYPE_FLOAT64 | TypeKind.TYPE_BOOLEAN | TypeKind.TYPE_RUNE |
+                TypeKind.TYPE_NOTHING | TypeKind.TYPE_CSTRING | TypeKind.TYPE_ENUM | TypeKind.TYPE_STRUCT |
+                TypeKind.TYPE_UNIT => ()
+            case TypeKind.TYPE_CPOINTER =>
+                let cPointerTy = (ty as CPointerType).getOrThrow()
+                let _ = GetTypeIdx(cPointerTy.GetElementType())
+            case TypeKind.TYPE_TUPLE =>
+                let tupleTy = (ty as TupleType).getOrThrow()
+                for (elementTy in tupleTy.GetTypeArgs()) {
+                    let _ = GetTypeIdx(elementTy)
+                }
+            case TypeKind.TYPE_FUNC =>
+                let funcTy = (ty as FuncType).getOrThrow()
+                for (paramTy in funcTy.GetParamTypes()) {
+                    let _ = GetTypeIdx(paramTy)
+                }
+                let _ = GetTypeIdx(funcTy.GetReturnType())
+            case TypeKind.TYPE_RAWARRAY =>
+                let rawArrayTy = (ty as RawArrayType).getOrThrow()
+                let _ = GetTypeIdx(rawArrayTy.GetElementType())
+            case TypeKind.TYPE_REFTYPE =>
+                let refTy = (ty as RefType).getOrThrow()
+                let _ = GetTypeIdx(refTy.GetBaseType())
+            case TypeKind.TYPE_CLASS => ()
+            case _ => ()
+        }
         return next
     }
 
