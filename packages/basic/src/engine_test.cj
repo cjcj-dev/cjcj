@@ -22,6 +22,7 @@ private class LSPDiagnosticHandlerTest <: DiagnosticHandler {
 
 @Test
 class EngineTest {
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/EngineTest.cpp:72 TEST(EngineTest, Register1)
     @TestCase
     func register1(): Unit {
         let diag = DiagnosticEngine()
@@ -30,6 +31,7 @@ class EngineTest {
         @Expect(diag.GetErrorCount(), 0u64)
     }
 
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/EngineTest.cpp:99 TEST(EngineTest, HandlerFilter)
     @TestCase
     func handlerFilter(): Unit {
         let diag = DiagnosticEngine()
@@ -48,6 +50,21 @@ class EngineTest {
         @Expect(diag.GetErrorCount(), 2u64)
     }
 
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/EngineTest.cpp:316 TEST(EngineTest, OldDiagKindDefGuard)
+    @TestCase
+    func oldDiagKindDefGuard(): Unit {
+        @Expect(DiagKindIndex(DiagKind.chir_diag_end), 15)
+        @Expect(DiagKindIndex(DiagKind.macro_expand_diag_end), 57)
+        @Expect(DiagKindIndex(DiagKind.sema_diag_end), 287)
+    }
+
+    // See compiler_unittest/src/PortDeferred.cj for apiTest, apiTest2, apiTest4, and the Windows ShowColorTest branch.
+}
+
+@When[os != "Windows"]
+@Test
+class ShowColorTest {
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/EngineTest.cpp:270 #ifdef __unix__ TEST(EngineTest, ShowColorTest)
     @TestCase
     func showColorTest(): Unit {
         let sm = SourceManager()
@@ -64,17 +81,4 @@ class EngineTest {
         let disableColorOut = DiagnosticEmitter(builder.diagnostic, true, true, sm).Render()
         @Expect(disableColorOut.contains("\u{1b}[31m"), false)
     }
-
-    @TestCase
-    func oldDiagKindDefGuard(): Unit {
-        @Expect(DiagKindIndex(DiagKind.chir_diag_end), 15)
-        @Expect(DiagKindIndex(DiagKind.macro_expand_diag_end), 57)
-        @Expect(DiagKindIndex(DiagKind.sema_diag_end), 287)
-    }
-
-    // PORT-DEFERRED: Handle1 depends on the parser/lexer packages, but package basic cannot depend on
-    // parse/lex without creating a package cycle in this workspace. ErrorMessageTest.MassageTest is ported
-    // in compiler_unittest/ErrorMessage_test.cj.
-    // PORT-DEFERRED: apiTest, apiTest2, and apiTest4 exercise the old C++ emitter/node overload surface.
-    // The selfhost DiagnosticEmitter renders to String and has no AST Node overload equivalent in basic.
 }

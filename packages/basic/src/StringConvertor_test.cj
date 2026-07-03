@@ -5,6 +5,7 @@ import std.unittest.*
 @When[os == "Windows"]
 import std.unittest.testmacro.*
 
+// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/StringConvertorTest.cpp:15 namespace test data
 @When[os == "Windows"]
 private let g_gbkCharArray: Array<UInt8> = [176u8, 162u8, 203u8, 174u8]
 @When[os == "Windows"]
@@ -26,6 +27,7 @@ private let g_gbkMixedInvalid: Array<UInt8> = [b'T', b'e', b's', b't', 0x81u8, 0
 @When[os == "Windows"]
 @Test
 class StringConvertorTest {
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/StringConvertorTest.cpp:30 TEST(StringConvertorTest, GetStringEncoding)
     @TestCase
     func GetStringEncoding(): Unit {
         let gbkString = String.fromUtf8(g_gbkCharArray)
@@ -38,6 +40,7 @@ class StringConvertorTest {
         @Expect(StringConvertor.GetStringEncoding(error2String), StrEncoding.UNKNOWN)
     }
 
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/StringConvertorTest.cpp:42 TEST(StringConvertorTest, GBKToUTF8)
     @TestCase
     func GBKToUTF8(): Unit {
         let gbkString = String.fromUtf8(g_gbkCharArray)
@@ -47,6 +50,7 @@ class StringConvertorTest {
         @Expect(str.getOrThrow(), utf8String)
     }
 
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/StringConvertorTest.cpp:51 TEST(StringConvertorTest, UTF8ToGBK)
     @TestCase
     func UTF8ToGBK(): Unit {
         let gbkString = String.fromUtf8(g_gbkCharArray)
@@ -56,6 +60,7 @@ class StringConvertorTest {
         @Expect(str.getOrThrow(), gbkString)
     }
 
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/StringConvertorTest.cpp:60 TEST(StringConvertorTest, NormalizeStringToUTF8)
     @TestCase
     func NormalizeStringToUTF8(): Unit {
         let gbkString = String.fromUtf8(g_gbkCharArray)
@@ -69,6 +74,7 @@ class StringConvertorTest {
         @Expect(str.getOrThrow(), utf8String)
     }
 
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/StringConvertorTest.cpp:73 TEST(StringConvertorTest, NormalizeStringToGBK)
     @TestCase
     func NormalizeStringToGBK(): Unit {
         let gbkString = String.fromUtf8(g_gbkCharArray)
@@ -82,6 +88,7 @@ class StringConvertorTest {
         @Expect(str.getOrThrow(), gbkString)
     }
 
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/StringConvertorTest.cpp:86 TEST(StringConvertorTest, IsGBK)
     @TestCase
     func IsGBK(): Unit {
         let validGBK = String.fromUtf8(g_gbkValidWith0xF7)

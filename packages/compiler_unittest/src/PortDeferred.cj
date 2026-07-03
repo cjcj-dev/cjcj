@@ -1,5 +1,11 @@
 package cangjie_compiler::compiler_unittest
 
+// PORT-DEFERRED: Basic/ErrorMessageTest.MassageTest requires C++ ParserImpl::ParseExpressionOrDeclarations recovery and ParserImpl::DiagForBlock from /root/cj_build/cangjie_compiler/src/Parse/Parser.cpp:581 and /root/cj_build/cangjie_compiler/src/Parse/Parser.cpp:630; the selfhost parser recovery/diagnostic block facility is not ported, and packages/parse/src is out of this task scope.
+// PORT-DEFERRED: Basic/EngineTest.apiTest requires C++ DiagnosticEmitterImpl collected multi-line source layout from /root/cj_build/cangjie_compiler/src/Basic/DiagnosticEmitter.cpp:384, :591, and :846 plus CollectedInfo from /root/cj_build/cangjie_compiler/src/Basic/DiagnosticEmitterImpl.h:35; selfhost DiagnosticEmitter lacks that faithful combined-source emitter.
+// PORT-DEFERRED: Basic/EngineTest.apiTest2 requires C++ DiagnosticEmitterImpl collected same-line hint layout from /root/cj_build/cangjie_compiler/src/Basic/DiagnosticEmitter.cpp:384, :591, and :846 plus CollectedInfo from /root/cj_build/cangjie_compiler/src/Basic/DiagnosticEmitterImpl.h:35; selfhost DiagnosticEmitter lacks that faithful combined-source emitter.
+// PORT-DEFERRED: Basic/EngineTest.apiTest4 requires C++ DiagnosticEngine AST::Node overloads from /root/cj_build/cangjie_compiler/include/cangjie/Basic/DiagnosticEngine.h:850, :866, :939, :951, :965, and :978; package basic has no selfhost AST::Node diagnostic overload surface without depending on ast.
+// PORT-DEFERRED: Basic/EngineTest.ShowColorTest Windows branch requires C++ Utils::GetOSVersion from /root/cj_build/cangjie_compiler/src/Basic/Utils.cpp:137 and /root/cj_build/cangjie_compiler/include/cangjie/Basic/Utils.h:52; package basic cannot depend on selfhost package utils without a dependency cycle.
+
 // PORT-DEFERRED: Sema/TypeCheckerTest.DISABLED_TypecheckTest requires the old C++ TestCompilerInstance fixture.
 // PORT-DEFERRED: Sema/TypeCheckerTest.DISABLED_MacroDeclTest requires macro fixture setup not exposed by the selfhost harness.
 // PORT-DEFERRED: Sema/TypeCheckerTest.DISABLED_MacroCallInLSPTest requires LSP macro-call fixture state not exposed by the selfhost harness.
