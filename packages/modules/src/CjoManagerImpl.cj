@@ -4,6 +4,7 @@ import std.collection.*
 import std.fs.File as FSFile
 import std.fs.exists
 import cangjie_compiler::basic.DiagKindRefactor
+import cangjie_compiler::basic.FaithfulUnorderedMap
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::option.OptimizationLevel
 import cangjie_compiler::option.enumIndex
@@ -111,7 +112,7 @@ public class CjoManagerImpl {
     private let diag: DiagnosticEngine
     private let globalOptions: GlobalOptions
     private var importSrcCode: Bool
-    private let packageNameMap: HashMap<String, CjoPackageInfo> = HashMap<String, CjoPackageInfo>()
+    private let packageNameMap: FaithfulUnorderedMap<CjoPackageInfo> = FaithfulUnorderedMap<CjoPackageInfo>()
     private let cjoFileCacheMap: HashMap<String, CjoCacheInfo> = HashMap<String, CjoCacheInfo>()
     private let importedPackageNameMap: HashMap<String, (String, Bool)> = HashMap<String, (String, Bool)>()
     private let visitedPkgs: HashSet<String> = HashSet<String>()
@@ -143,7 +144,7 @@ public class CjoManagerImpl {
         importSrcCode = enable
     }
 
-    public func GetPackageNameMap(): HashMap<String, CjoPackageInfo> {
+    public func GetPackageNameMap(): FaithfulUnorderedMap<CjoPackageInfo> {
         return packageNameMap
     }
 
@@ -152,7 +153,7 @@ public class CjoManagerImpl {
     }
 
     public func AddPackageInfo(fullPackageName: String, info: CjoPackageInfo): Unit {
-        packageNameMap[fullPackageName] = info
+        packageNameMap.add(fullPackageName, info)
     }
 
     public func RemovePackageInfo(fullPackageName: String): Unit {

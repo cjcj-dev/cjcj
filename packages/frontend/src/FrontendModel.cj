@@ -10,6 +10,7 @@ import cangjie_compiler::basic.StringConvertor
 import cangjie_compiler::basic.Diagnostic as BasicDiagnostic
 import cangjie_compiler::basic.DiagFormat as BasicDiagFormat
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.FaithfulUnorderedMap
 import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::chir.CHIRContext as RealCHIRContext
 import cangjie_compiler::chir.Package as RealCHIRPackage
@@ -4679,7 +4680,7 @@ public class ImportManager {
         HashMap<String, HashMap<String, Decl>>()
     private let depPkgCjdPaths: HashMap<String, String> = HashMap<String, String>()
     private let stdDepsMap: HashMap<String, StdDepEntry> = HashMap<String, StdDepEntry>()
-    private let packageNameMap: HashMap<String, CjoPackageInfo> = HashMap<String, CjoPackageInfo>()
+    private let packageNameMap: FaithfulUnorderedMap<CjoPackageInfo> = FaithfulUnorderedMap<CjoPackageInfo>()
     private var dependencyGraph: Option<DependencyGraph> = None
     private let loadingPackages: HashSet<String> = HashSet<String>()
     private let loadedPackages: HashSet<String> = HashSet<String>()
@@ -4913,7 +4914,7 @@ public class ImportManager {
 
     private func AddSourcePackage(pkg: Package): Unit {
         let info = CjoPackageInfo(pkg)
-        packageNameMap[pkg.fullPackageName] = info
+        packageNameMap.add(pkg.fullPackageName, info)
         packageDecls[pkg.fullPackageName] = info.pkgDecl
     }
 
@@ -5781,7 +5782,7 @@ public class ImportManager {
 
     private func AddImportedPackageIfMissing(pkg: Package): Unit {
         let info = CjoPackageInfo(pkg)
-        packageNameMap[pkg.fullPackageName] = info
+        packageNameMap.add(pkg.fullPackageName, info)
         packageDecls[pkg.fullPackageName] = info.pkgDecl
         for (existing in importedPackages) {
             if (existing.fullPackageName == pkg.fullPackageName) {
@@ -6061,7 +6062,7 @@ public class ImportManager {
             return false
         }
         let info = CjoPackageInfo(pkg, materializer)
-        packageNameMap[fullPackageName] = info
+        packageNameMap.add(fullPackageName, info)
         packageDecls[fullPackageName] = info.pkgDecl
         importedPackages.add(pkg)
         loadingPackages.remove(fullPackageName)
