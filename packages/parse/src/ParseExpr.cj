@@ -64,7 +64,7 @@ extend ParserImpl {
             }
         }
         if (SeeingFakeOperator()) {
-            DiagExpectedOperatorOrEnd()
+            DiagExpecetedOpeOrEnd()
             ConsumeUntilAny([TokenKind.NL])
         }
         return ret
@@ -542,30 +542,17 @@ extend ParserImpl {
         return Seeing(TokenKind.COLON)
     }
 
-    private func DiagExpectedOperatorOrEnd(): Unit {
-        diag.DiagnoseRefactor(
-            DiagKindRefactor.parse_diag_error,
-            Peek().Begin(),
-            "expected operator or end of expression, found '${Peek().Value()}'")
-    }
-
     func CheckMacroExprRules(preT: Token, tok: Token, expr: Expr): Bool {
         if (let Some(macroExpr) <- (expr as MacroExpandExpr)) {
             if (!MacroInvocationHasExpandedDecl(macroExpr.invocation)) {
                 return true
             }
             if (!preT.Begin().IsZero() && !expr.isBroken) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    expr.begin,
-                    "macro expansion after '${preT.Value()}' must produce an expression")
+                DiagInvalidMacroExpandExpr(preT, macroExpr)
                 return false
             }
             if (!expr.isBroken) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    tok.Begin(),
-                    "unrecognized token '${tok.Value()}' after macro expansion")
+                DiagUnrecognizedNodeAfterMacro(tok, macroExpr)
             }
             return false
         }
@@ -612,15 +599,6 @@ extend ParserImpl {
             return "comparison"
         }
         return None
-    }
-
-    private func DiagNoneAssociativeOp(preT: Token, tok: Token): Unit {
-        if (let Some(name) <- NoneAssociativeName(tok.kind)) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                tok.Begin(),
-                "chained ${name} operators are not associative after '${preT.Value()}'")
-        }
     }
 
     private func CheckLeftExpression(base: Expr, tok: Token): Unit {
@@ -680,13 +658,6 @@ extend ParserImpl {
             }
         }
         return false
-    }
-
-    private func DiagInvalidLeftHandExpr(expr: Expr, tok: Token): Unit {
-        diag.DiagnoseRefactor(
-            DiagKindRefactor.parse_diag_error,
-            expr.begin,
-            "invalid left-hand side of assignment before '${tok.Value()}'")
     }
 
     private func IsLeftValueExpression(expr: Expr, tok: Token): Bool {

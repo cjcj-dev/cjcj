@@ -469,6 +469,318 @@ extend ParserImpl {
         }
         ParseDiagnoseRefactor(DiagKindRefactor.parse_annotation_no_arguments, diagNode, annotationName)
     }
+
+    public func DiagIllegalModifierInScope(mod: Modifier): Unit {
+        let modStr = TokenKindLiteral(mod.modifier)
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_illegal_modifier_in_scope, mod, modStr,
+            "declaration", "")
+        builder.AddHint(MakeRange(mod.begin, mod.end), arguments: ["unexpected modifier"])
+        builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:504 DiagIllegalModifierInScope chainedAST")
+    }
+
+    public func DiagConflictedModifier(resMod: Modifier, tarMod: Modifier): Unit {
+        let resStr = TokenKindLiteral(resMod.modifier)
+        let tarStr = TokenKindLiteral(tarMod.modifier)
+        let tarRange = MakeRange(tarMod.begin, tarMod.begin + tarStr.size)
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_conflict_modifier, tarRange, tarStr, resStr,
+            "declaration")
+        builder.AddHint(MakeRange(resMod.begin, resMod.begin + resStr.size))
+        builder.AddHint(MakeRange(tarMod.begin, tarMod.end), arguments: ["declaration"])
+        builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:559 DiagConflictedModifier chainedAST")
+    }
+
+    public func GetSingleLineContent(begin: Position, end: Position): String {
+        if (begin.line == end.line) {
+            return sourceManager.GetContentBetween(begin.fileID, begin, end)
+        }
+        return sourceManager.GetContentBetween(begin.fileID, begin, Position(begin.fileID, begin.line, Int64.Max))
+    }
+
+    public func DiagExpectNoModifierBefore(mod: Modifier, str: String): Unit {
+        let modStr = TokenKindLiteral(mod.modifier)
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_no_modifier,
+            MakeRange(mod.begin, mod.end), str, modStr)
+        let tokens = lexer.LookAheadSkipNL(1)
+        let endPos = if (tokens.isEmpty()) { lookahead.End() } else { tokens[0].End() }
+        builder.AddHint(MakeRange(lookahead.Begin(), endPos), arguments: [str])
+    }
+
+    public func DiagUnexpectedWhenON(annos: ArrayList<Annotation>): Unit {
+        for (anno in annos) {
+            if (anno.kind == AnnotationKind.WHEN) {
+                DiagUnexpectedAnnoOn(anno, lookahead.Begin(), anno.identifier.Val(), lookahead.Value())
+                return
+            }
+        }
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_anno_on, lookahead, "@When",
+            lookahead.Value())
+        builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:642 DiagUnexpectedWhenON annotation lookup")
+    }
+
+    public func DiagUnexpectedDeclInScope(sk: ScopeKind): Unit {
+        let scopeInfo = SCOPE_TO_DECL(sk)
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_declaration_in_scope, lookahead,
+            "declaration", scopeInfo[1])
+        builder.AddMainHintArguments("declaration in " + scopeInfo[1])
+        builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:717 DiagUnexpectedDeclInScope chainedAST")
+    }
+
+    public func DiagExpectedMoreFieldInTuplePattern(): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_tuple_pattern_expected_more_field, lookahead)
+        builder.AddNote(
+            "GAP_TODO: requires faithful port of ParserDiag.cpp:748 DiagExpectedMoreFieldInTuplePattern chainedAST")
+    }
+
+    public func DiagExpectedTypeNameAfterAs(tok: Token): Unit {
+        if (tok.kind != TokenKind.AS && tok.kind != TokenKind.IS) {
+            return
+        }
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_type, lookahead, ConvertToken(tok),
+            ConvertToken(lookahead))
+        builder.AddHint(MakeRange(tok.Begin(), tok.End()), arguments: [ConvertToken(tok)])
+    }
+
+    public func DiagExpectedTypeName(): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_type, lookahead, ConvertToken(lastToken),
+            ConvertToken(lookahead))
+        builder.AddHint(MakeRange(lastToken.Begin(), lastToken.End()), arguments: [ConvertToken(lastToken)])
+    }
+
+    public func DiagInvalidLeftHandExpr(expr: Expr, tok: Token): Unit {
+        if (expr.TestAttr(Attribute.IS_BROKEN)) {
+            return
+        }
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_left_hand_expr, tok, tok.Value())
+        builder.AddHint(MakeRange(expr.begin, expr.end))
+    }
+
+    public func IsNoneAssociative(tok: Token): Bool {
+        let prec = Precedence(tok.kind)
+        return prec == Precedence(TokenKind.ASSIGN) || prec == Precedence(TokenKind.RANGEOP) ||
+            prec == Precedence(TokenKind.EQUAL) || prec == Precedence(TokenKind.LT)
+    }
+
+    public func DiagNoneAssociativeOp(preT: Token, tok: Token): Unit {
+        let prec = Precedence(tok.kind)
+        var name = ""
+        if (prec == Precedence(TokenKind.ASSIGN)) {
+            name = "assignment"
+        } else if (prec == Precedence(TokenKind.RANGEOP)) {
+            name = "range"
+        } else if (prec == Precedence(TokenKind.EQUAL)) {
+            name = "equality"
+        } else if (prec == Precedence(TokenKind.LT)) {
+            name = "comparison"
+        }
+        if (!name.isEmpty()) {
+            let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_chained_none_associative, tok, name)
+            builder.AddHint(MakeRange(preT.Begin(), preT.End()))
+        }
+    }
+
+    public func DiagInvalidInheritType(ty: Type): Unit {
+        let typeName = sourceManager.GetContentBetween(ty.begin.fileID, ty.begin, ty.end)
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_super_declaration, ty, typeName)
+        builder.AddNote("only class types and interface types can be subtyped")
+    }
+
+    public func DiagExpectedRightDelimiter(del: String, pos: Position): Unit {
+        let builder = if (lookahead.kind == TokenKind.NL) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_right_delimiter, lastToken, del)
+        } else {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_right_delimiter, lastToken.End(), del)
+        }
+        let expected = match (del) {
+            case "{" => "}"
+            case "(" => ")"
+            case "[" => "]"
+            case "<" => ">"
+            case _ => del
+        }
+        builder.AddMainHintArguments(expected)
+        builder.AddHint(pos, arguments: [del])
+    }
+
+    public func DiagInvalidIncreExpr(expr: Expr): Unit {
+        let name = if (lookahead.kind == TokenKind.INCR) { "increment" } else { "decrement" }
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_incre_expr, lookahead, name)
+        builder.AddHint(MakeRange(expr.begin, expr.end))
+    }
+
+    public func DiagInvalidMacroExpandExpr(tok: Token, expr: MacroExpandExpr): Unit {
+        if (let Some(decl) <- expr.invocation.decl) {
+            let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_expression, decl, ConvertToken(tok),
+                "a declaration")
+            builder.AddHint(MakeRange(tok.Begin(), tok.End()))
+            return
+        }
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_expression, expr, ConvertToken(tok),
+            "a declaration")
+        builder.AddHint(MakeRange(tok.Begin(), tok.End()))
+        builder.AddNote(
+            "GAP_TODO: requires faithful port of ParserDiag.cpp:855 DiagInvalidMacroExpandExpr invocation.decl")
+    }
+
+    public func DiagUnrecognizedNodeAfterMacro(tok: Token, expr: MacroExpandExpr): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unrecognized_token_after_macro_node, tok,
+            ConvertToken(tok))
+        if (let Some(decl) <- expr.invocation.decl) {
+            builder.AddHint(MakeRange(decl.begin, decl.end))
+            return
+        }
+        builder.AddNote(
+            "GAP_TODO: requires faithful port of ParserDiag.cpp:862 DiagUnrecognizedNodeAfterMacro invocation.decl")
+    }
+
+    public func DiagChainedAsExpr(expr: Expr, tok: Token): Unit {
+        var pos = DEFAULT_POSITION
+        if (let Some(asExpr) <- (expr as AsExpr)) {
+            pos = asExpr.asPos
+        }
+        if (let Some(isExpr) <- (expr as IsExpr)) {
+            pos = isExpr.isPos
+        }
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_chained_none_associative, tok, "`is` and `as`")
+        builder.AddHint(MakeRange(pos, pos + "is".size))
+    }
+
+    public func DiagExpecetedOpeOrEnd(): Unit {
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_operator_or_end, lookahead, ConvertToken(lookahead))
+    }
+
+    public func DiagExpectedNoNewLine(): Unit {
+        let old = skipNL
+        skipNL = false
+        Next()
+        let newline = Peek()
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_no_newline_after, newline,
+            ConvertToken(lastToken))
+        builder.AddHint(MakeRange(lastToken.Begin(), lastToken.End()), arguments: [ConvertToken(lastToken)])
+        skipNL = old
+    }
+
+    public func DiagCannotHaveAssignmentInInit(expr: Expr): Unit {
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_cannot_have_assi_in_init, expr)
+    }
+
+    public func DiagOrPattern(): Unit {
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_illegal_or_pattern, lookahead.Begin())
+    }
+
+    public func DiagDeclarationInMacroPackage(decl: Decl): Unit {
+        let typeKeyword = KIND_TO_STR(decl.astKind)[0]
+        var publicRange = MakeRange(decl.begin, decl.begin)
+        var foundPublic = false
+        for (modifier in decl.modifiers) {
+            if (modifier.modifier == TokenKind.PUBLIC) {
+                publicRange = MakeRange(modifier.begin, modifier.begin + "public".size)
+                foundPublic = true
+                break
+            }
+        }
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_macro_decl_in_macro_package,
+            publicRange, typeKeyword)
+        if (let Some(file) <- currentFile) {
+            if (let Some(pkg) <- file.packageSpec) {
+                builder.AddHint(MakeRange(pkg.macroPos, pkg.packagePos + "package".size))
+            } else {
+                builder.AddNote(
+                    "GAP_TODO: requires faithful port of ParserDiag.cpp:912 DiagDeclarationInMacroPackage package")
+            }
+        } else {
+            builder.AddNote(
+                "GAP_TODO: requires faithful port of ParserDiag.cpp:912 DiagDeclarationInMacroPackage currentFile")
+        }
+        if (!foundPublic) {
+            builder.AddNote(
+                "GAP_TODO: requires faithful port of ParserDiag.cpp:912 DiagDeclarationInMacroPackage public modifier")
+        }
+        let note = SubDiagnostic(
+            "Declarations in 'macro package' cannot be accessed in other packages, except macro declarations.")
+        builder.AddNote(note)
+    }
+
+    public func DiagExpectPublicBeforeMacroCall(md: MacroDecl): Unit {
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_public_before_macro_decl,
+            MakeRange(md.keywordPos, md.keywordPos + "macro".size))
+    }
+
+    public func DiagExpectMacroParamType(ty: Type): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_macro_illegal_ret_type, ty)
+        builder.AddMainHintArguments(ConvertToken(lastToken))
+    }
+
+    public func DiagMacroUnexpectNamedParam(param: FuncParam): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_macro_illegal_named_param,
+            MakeRange(param.notMarkPos, param.notMarkPos + 1))
+        builder.AddHint(MakeRange(param.begin, param.identifier.Begin()), arguments: [param.identifier.Val()])
+    }
+
+    public func DiagIllegalFunc(funcDecl: FuncDecl): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_illegal_function_name,
+            MakeRange(funcDecl.identifier.Begin(), funcDecl.identifier.End()))
+        builder.AddHint(MakeRange(funcDecl.keywordPos, funcDecl.keywordPos + "func".size))
+    }
+
+    public func DiagParseExpectedParenthis(postType: Type): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_parentheses, lastToken)
+        let help = DiagHelp("should be surrounded by '(' and ')'")
+        help.AddSubstitution(MakeRange(postType.begin, postType.end), "(" + lastToken.Value() + ")")
+        builder.AddHelp(help)
+    }
+
+    public func DiagParseIllegalDeclarationPattern(decl: VarWithPatternDecl, scopeKind: ScopeKind): Unit {
+        var patternTypeStr = ""
+        if (let Some(pattern) <- decl.irrefutablePattern) {
+            if (pattern.astKind == ASTKind.ENUM_PATTERN) {
+                patternTypeStr = "enum"
+            } else if (pattern.astKind == ASTKind.TUPLE_PATTERN) {
+                patternTypeStr = "tuple"
+            } else if (pattern.astKind == ASTKind.WILDCARD_PATTERN) {
+                patternTypeStr = "wildcard"
+            }
+            let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_illegal_declaration_pattern, pattern,
+                patternTypeStr)
+            if (scopeKind == ScopeKind.CLASS_BODY) {
+                builder.AddNote(
+                    "GAP_TODO: requires faithful port of ParserDiag.cpp:963 DiagParseIllegalDeclarationPattern class chainedAST")
+            } else if (scopeKind == ScopeKind.STRUCT_BODY) {
+                builder.AddNote(
+                    "GAP_TODO: requires faithful port of ParserDiag.cpp:963 DiagParseIllegalDeclarationPattern struct chainedAST")
+            }
+        }
+    }
+
+    public func DiagThisTypeNotAllow(): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_this_type_not_allow, lookahead)
+        let note = SubDiagnostic("'This' type can only be used as the return type of an instance member function in class")
+        builder.AddNote(note)
+    }
+
+    public func DiagInvalidUnicodeScalar(startPos: Position, str: String): Unit {
+        let prefixSize = "\\u{".size
+        let pos = startPos + prefixSize + 1
+        let endPos = startPos + str.size
+        let args = "0x" + str[prefixSize..(str.size - 1)]
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_unicode_scalar, MakeRange(pos, endPos), args)
+        builder.AddHint(MakeRange(startPos + 1, startPos + prefixSize + 1))
+        builder.AddHint(MakeRange(startPos + str.size, startPos + str.size + 1))
+        let note = SubDiagnostic("the valid range of code point is '0x0 ~ 0x7fffffff'")
+        builder.AddNote(note)
+    }
+
+    public func DiagExpectedLiteral(subPos: Position): Unit {
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_literal, lookahead, ConvertToken(lookahead))
+        builder.AddHint(subPos)
+    }
+
+    public func DiagTypePatternInLetCondExpr(pat: Pattern, ek: ExprKind): Unit {
+        let exprName = if (ek == ExprKind.WHILE_COND_EXPR) { "while-let" } else { "if-let" }
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_type_pattern_in_let_cond, pat, exprName)
+        let note = SubDiagnostic(
+            exprName + " expression can only accept constant, wildcard, binding, tuple and enum pattern")
+        builder.AddNote(note)
+    }
 }
 
 private func PrepareExpectNoModifierArg(mod: Modifier): Array<String> {
