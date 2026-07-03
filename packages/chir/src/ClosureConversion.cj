@@ -1,6 +1,8 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::option.GlobalOptions
+import cangjie_compiler::utils.ProfileRecorder
 
 private let GENERIC_VIRTUAL_FUNC: String = "$GenericVirtualFunc"
 private let INST_VIRTUAL_FUNC: String = "$InstVirtualFunc"
@@ -19,17 +21,20 @@ private let CC_AUTO_ENV_IMPL_ANNOTATION: String = "IsAutoEnvImpl"
 
 public class ClosureConversion {
     private let builder: CHIRBuilder
+    private let opts: GlobalOptions
     private var pkg: Option<Package> = None
     private let genericAutoEnvBaseDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
     private let instAutoEnvBaseDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
+    private let instAutoEnvWrapperDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
     private let autoEnvImplDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
     private let boxClassMap: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
     private let convertedCache: HashMap<Int64, Function> = HashMap<Int64, Function>()
     private let duplicateLambdaName: HashMap<String, Int64> = HashMap<String, Int64>()
     private let typeConvertMap: HashMap<String, Type> = HashMap<String, Type>()
 
-    public init(builder: CHIRBuilder) {
+    public init(builder: CHIRBuilder, opts!: GlobalOptions = GlobalOptions()) {
         this.builder = builder
+        this.opts = opts
     }
 
     public func RunOnPackage(pkg: Package): Unit {
@@ -39,6 +44,7 @@ public class ClosureConversion {
         ConvertGlobalFunctions(pkg)
         LiftType(pkg)
         ConvertExpressions(pkg)
+        CreateVTableForAutoEnvDef()
     }
 
     private func CurrentPackage(): Package {
@@ -69,6 +75,27 @@ public class ClosureConversion {
                     }
                 }
             }
+        }
+    }
+
+    private func CreateVTableForAutoEnvDef(): Unit {
+        try (recorder = ProfileRecorder("ClosureConversion", "CreateVTableForAutoEnvDef")) {
+            let defs = ArrayList<CustomTypeDef>()
+            for ((_, genericDef) in genericAutoEnvBaseDefs) {
+                defs.add(genericDef)
+            }
+            for ((_, instDef) in instAutoEnvBaseDefs) {
+                defs.add(instDef)
+            }
+            for ((_, wrapperDef) in instAutoEnvWrapperDefs) {
+                defs.add(wrapperDef)
+            }
+            for ((_, implDef) in autoEnvImplDefs) {
+                defs.add(implDef)
+            }
+            let generator = GenerateVTable(CurrentPackage(), defs, builder, opts, "CreateVTableForAutoEnvDef")
+            generator.CreateVTable()
+            generator.SetSrcFuncType()
         }
     }
 
