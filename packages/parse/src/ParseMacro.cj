@@ -76,20 +76,13 @@ extend ParserImpl {
             return ParseAnnotationLambdaExpr()
         }
         if (SeeingBuiltinAnnotation()) {
-            let token = Peek()
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected lambda expression after builtin annotation")
-            Next()
-            return InvalidExpr(token.Begin())
+            DiagExpectedExpression()
+            return InvalidExpr(lastToken.End())
         }
-        if (!SeeingMacroCall()) {
-            let token = Peek()
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected macro call")
-            Next()
-            return InvalidExpr(token.Begin())
-        }
+        CJC_ASSERT(SeeingMacroCall())
         let expr = MacroExpandExpr()
         expr.begin = Peek().Begin()
-        ParseMacroInvocation(ScopeKind.FUNC_BODY, ArrayList<Modifier>(), expr.invocation)
+        ParseMacroInvocation(ScopeKind.FUNC_BODY, ArrayList<Modifier>(), expr.invocation, expr)
         expr.identifier = AstIdentifier(
             expr.invocation.macroCallDiagInfo.identifier,
             expr.invocation.macroNamePos,
@@ -106,7 +99,7 @@ extend ParserImpl {
             file.hasMacro = true
         }
         macroCall.begin = Peek().Begin()
-        ParseMacroInvocation(scopeKind, ArrayList<Modifier>(), macroCall.invocation)
+        ParseMacroInvocation(scopeKind, ArrayList<Modifier>(), macroCall.invocation, macroCall)
         macroCall.identifier = SrcIdentifier(
             macroCall.invocation.macroCallDiagInfo.identifier,
             macroCall.invocation.macroCallDiagInfo.identifier,
@@ -146,7 +139,7 @@ extend ParserImpl {
         let decl = MacroExpandDecl()
         ApplyModifiersAndAnnotations(decl, modifiers, annos)
         decl.begin = if (decl.begin.IsZero()) { Peek().Begin() } else { decl.begin }
-        ParseMacroInvocation(scopeKind, modifiers, decl.invocation)
+        ParseMacroInvocation(scopeKind, modifiers, decl.invocation, decl)
         if (!decl.invocation.hasParenthesis && decl.invocation.decl.isNone() &&
             (SeeingDeclInScope(scopeKind) || SeeingMacroCallDecl())) {
             ParseMacroCallArgsWithoutParen(scopeKind, modifiers, decl.invocation)
@@ -161,18 +154,23 @@ extend ParserImpl {
         return decl
     }
 
-    public func ParseMacroInvocation(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, invocation: MacroInvocation): Unit {
-        if (!ParseMacroCallIdentifier(invocation, Node())) {
+    public func ParseMacroInvocation(
+        scopeKind: ScopeKind,
+        modifiers: ArrayList<Modifier>,
+        invocation: MacroInvocation,
+        node: Node
+    ): Unit {
+        if (!ParseMacroCallIdentifier(invocation, node)) {
             invocation.macroCallDiagInfo.macroCallEnd = lastToken.End()
             return
         }
 
         if (Skip(TokenKind.LSQUARE)) {
             if (IsBuiltinMacro(invocation.macroCallDiagInfo.identifier)) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    lastToken.Begin(),
-                    "builtin macro call cannot have attribute arguments")
+                ParseDiagnoseRefactor(
+                    DiagKindRefactor.parse_macro_call_illegal_with_builtin,
+                    lookahead,
+                    invocation.macroCallDiagInfo.identifier)
             }
             invocation.hasAttr = true
             ParseMacroCallAttr(invocation)
@@ -237,10 +235,7 @@ extend ParserImpl {
             PopulateMacroOriginPositions(invocation)
             return
         }
-        diag.DiagnoseRefactor(
-            DiagKindRefactor.parse_diag_error,
-            parsedDecl.begin,
-            "illegal macro input without parentheses")
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_illegal_macro_expand_input_args_without_paren, parsedDecl.begin)
     }
 
     private func IsValidMacroInputDeclKind(kind: ASTKind): Bool {
@@ -304,21 +299,16 @@ extend ParserImpl {
     private func ParseMacroCallIdentifier(invocation: MacroInvocation, node: Node): Bool {
         let atToken = Peek()
         if (!Skip(TokenKind.AT)) {
-            if (Skip(TokenKind.AT_EXCL)) {
-                invocation.isCompileTimeVisible = true
-            } else {
-                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, atToken.Begin(), "expected '@' before macro call")
-                node.isBroken = true
-                return false
-            }
+            Skip(TokenKind.AT_EXCL)
+            invocation.isCompileTimeVisible = true
         }
         invocation.atPos = atToken.Begin()
         invocation.macroCallDiagInfo.macroCallBegin = atToken.Begin()
         if (newlineSkipped) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
+            ParseDiagnoseRefactor(
+                DiagKindRefactor.parse_unexpected_newline_between_at_and_mc,
                 atToken.Begin(),
-                "unexpected newline between '@' and macro call name")
+                Peek().Value())
         }
         var currentPart = ExpectMacroIdentifierPart(node)
         if (currentPart.Empty()) {
@@ -348,7 +338,7 @@ extend ParserImpl {
             return ParseIdentifierFromToken(token)
         }
         node.isBroken = true
-        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected macro call identifier")
+        DiagExpectedIdentifierWithNode(node)
         return SrcIdentifier("", "", token.Begin(), token.Begin(), false)
     }
 
@@ -383,16 +373,16 @@ extend ParserImpl {
             tokens.add(Token(atToken.kind, atToken.Value(), atToken.Begin(), atToken.End()))
             return true
         }
-        let tokenPos = Peek().Begin()
+        let token = Peek()
         while (SeeingAny([TokenKind.LSQUARE, TokenKind.LPAREN, TokenKind.DOT])) {
             Next()
         }
-        let message = if (isAttr) {
-            "illegal macro attribute arguments"
+        let diagKind = if (isAttr) {
+            DiagKindRefactor.parse_illegal_macro_expand_attr_args
         } else {
-            "illegal macro input arguments"
+            DiagKindRefactor.parse_illegal_macro_expand_input_args
         }
-        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, tokenPos, message)
+        ParseDiagnoseRefactor(diagKind, token)
         return false
     }
 
