@@ -2,6 +2,7 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.Attribute
+import cangjie_compiler::chir.Constant
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Box as ChirBox
 import cangjie_compiler::chir.Expression
@@ -197,7 +198,18 @@ public func GenerateRawArrayAllocate(irBuilder: IRBuilder2, chirExpr: Expression
     }
     if (let Some(resultTy) <- chirExpr.GetResultType()) {
         if (let Some(rawArrayTy) <- FindRawArrayType(resultTy)) {
-            let lengthValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0)).GetRawValue()
+            let length = chirExpr.GetOperand(0)
+            let lengthValue = irBuilder.GetCGModule().GetMappedCGValue(length).GetRawValue()
+            if (let Some(lengthLocal) <- (length as LocalVar)) {
+                if (let Some(lengthExpr) <- lengthLocal.GetExpr()) {
+                    if (lengthExpr.IsConstant()) {
+                        let constExpr = (lengthExpr as Constant).getOrThrow()
+                        if (constExpr.GetSignedIntLitVal() >= 0) {
+                            return irBuilder.AllocateArray(rawArrayTy, lengthValue)
+                        }
+                    }
+                }
+            }
             return GenerateCheckedRawArrayAllocate(irBuilder, rawArrayTy, lengthValue)
         }
     }
@@ -242,22 +254,16 @@ public func GenerateRawArrayInitByValue(irBuilder: IRBuilder2, chirExpr: Express
 
 private func GenerateCheckedRawArrayAllocate(irBuilder: IRBuilder2, rawArrayTy: RawArrayType,
     lengthValue: LLVMValueRef): LLVMValueRef {
-    let currentBlock = irBuilder.GetInsertBlock()
-    if (currentBlock.isNull()) {
-        return irBuilder.AllocateArray(rawArrayTy, lengthValue)
-    }
-    let parentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
-    if (parentFunction.isNull()) {
-        return irBuilder.AllocateArray(rawArrayTy, lengthValue)
-    }
-    let throwBlock = irBuilder.CreateEntryBasicBlock(parentFunction, "arr.alloc.throw")
-    unsafe { LLVMMoveBasicBlockAfter(throwBlock, currentBlock) }
-    let bodyBlock = irBuilder.CreateEntryBasicBlock(parentFunction, "arr.alloc.body")
-    unsafe { LLVMMoveBasicBlockAfter(bodyBlock, throwBlock) }
-    let zeroValue = unsafe { LLVMConstInt(LLVMTypeOf(lengthValue), 0u64, 1) }
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>(
+        [GenNameForBB("arr.alloc.throw"), GenNameForBB("arr.alloc.body")]))
+    CJC_ASSERT(blocks.size == 2)
+    let throwBlock = blocks[0]
+    let bodyBlock = blocks[1]
+    let zeroValue = unsafe { LLVMConstInt(LLVMTypeOf(lengthValue), 0u64, 0) }
     let isValidLength = irBuilder.CreateICmp(LLVMIntPredicate.SGE, lengthValue, zeroValue,
         name: "arr.alloc.size.valid")
-    irBuilder.CreateCondBr(isValidLength, bodyBlock, throwBlock)
+    let expectedValidLength = irBuilder.GenerateCallExpectFunction(isValidLength, irBuilder.GetTrue())
+    irBuilder.CreateCondBr(expectedValidLength, bodyBlock, throwBlock)
 
     irBuilder.SetInsertPoint(throwBlock)
     irBuilder.CreateNegativeArraySizeException()
