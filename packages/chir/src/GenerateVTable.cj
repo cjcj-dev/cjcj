@@ -1447,11 +1447,15 @@ public class GenerateVTable {
                 }
             } else {
                 let taskQueue = TaskQueue(Int64(threadNum))
+                let vtableGeneratorList = ArrayList<VTableGenerator>()
                 for (customDef in candidateDefs) {
                     let vtableGenerator = VTableGenerator(builder)
-                    taskQueue.AddTask<Unit>({ =>
-                        vtableGenerator.GenerateVTable(customDef)
-                    })
+                    vtableGeneratorList.add(vtableGenerator)
+                    { generatorPtr: VTableGenerator, customDefPtr: CustomTypeDef =>
+                        taskQueue.AddTask<Unit>({ =>
+                            generatorPtr.GenerateVTable(customDefPtr)
+                        })
+                    }(vtableGenerator, customDef)
                 }
                 taskQueue.RunAndWaitForAllTasksCompleted()
             }
