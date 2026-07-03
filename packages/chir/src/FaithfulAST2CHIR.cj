@@ -2350,12 +2350,10 @@ public class FaithfulAST2CHIR {
             }
             let pkgName = importedPackage.fullPackageName
             let initFuncName = PackageInitFuncName(pkgName, suffix)
-            if (opts.IsCompilingCJMPSpecific()) {
-                if (let Some(existing) <- CurrentPackage().TryGetGlobalFunc(GLOBAL_VALUE_PREFIX + initFuncName)) {
-                    if (existing.TestAttr(Attribute.DESERIALIZED) ||
-                        existing.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) {
-                        continue
-                    }
+            if (let Some(existing) <- CurrentPackage().TryGetGlobalFunc(GLOBAL_VALUE_PREFIX + initFuncName)) {
+                if (existing.TestAttr(Attribute.DESERIALIZED) ||
+                    existing.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) {
+                    continue
                 }
             }
             let initFuncTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetUnitTy())
