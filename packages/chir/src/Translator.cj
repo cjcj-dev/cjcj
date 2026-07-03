@@ -792,6 +792,14 @@ public class Translator {
             TranslateMemberDecl(def, member)
         }
         SetImplementedInterfaces(def, extendDecl)
+        if (extendDecl.TestAttr(AstAttribute.GENERIC)) {
+            let genericDecl = extendDecl.GetGeneric().getOrThrow()
+            for (genericTy in genericDecl.typeParameters) {
+                if (let Some(paramTy) <- genericTy.GetTy()) {
+                    chirTy.FillGenericArgType((paramTy as AstGenericsTy).getOrThrow())
+                }
+            }
+        }
         return None
     }
 
@@ -4897,10 +4905,12 @@ public class Translator {
         let callee = globalSymbolTable.Get(calleeDecl)
         var thisType: Option<Type> = None
         var dispatchReceiverType: Option<Type> = None
+        var funcCallThisType: Option<Type> = None
         var thisObj: Option<Value> = None
         if (!calleeDecl.TestAttr(AstAttribute.STATIC)) {
             let rawObj = TranslateThisObjectForMemberFuncCall(expr, calleeDecl)
             dispatchReceiverType = rawObj.GetType()
+            funcCallThisType = rawObj.GetType()
             let obj = CoerceThisObjectForCallee(calleeDecl, callee, rawObj)
             thisObj = obj
             thisType = obj.GetType()
@@ -4939,9 +4949,10 @@ public class Translator {
             }
             let obj = thisObj ?? throw IllegalStateException("faithful AST2CHIR virtual member call has no this object")
             let objTy = thisType ?? throw IllegalStateException("faithful AST2CHIR virtual member call this has no type")
+            let callThisTy = funcCallThisType ?? objTy
             let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
             let invokeCtx = InvokeCallContext(obj, FuncCallContext(args: argValues,
-                instTypeArgs: instTypeArgs, thisType: objTy),
+                instTypeArgs: instTypeArgs, thisType: callThisTy),
                 FuncSigInfo(BuildMethodFuncTypeForMemberAccess(calleeDecl), funcName: calleeDecl.identifier.Val()))
             return CreateInvokeMaybeWithException(resultTy, invokeCtx)
         }
@@ -4949,8 +4960,12 @@ public class Translator {
             argValues.add(obj, at: 0)
         }
         let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
+        let applyThisType = match (funcCallThisType) {
+            case Some(value) => Some(value)
+            case None => thisType
+        }
         return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
-            instTypeArgs: instTypeArgs, thisType: thisType))
+            instTypeArgs: instTypeArgs, thisType: applyThisType))
     }
 
     private func TranslateFuncInstArgs(expr: AstCallExpr, calleeDecl: AstFuncDecl): ArrayList<Type> {

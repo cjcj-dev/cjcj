@@ -1375,6 +1375,9 @@ public class FaithfulAST2CHIR {
         ApplyDeclAttrs(customTypeDef, decl)
         MaybeSetCoreBuiltinClassTy(customTypeDef)
         chirType.SetGlobalNominalCache(decl, customTypeDef)
+        if (decl.astKind == ASTKind.EXTEND_DECL) {
+            AttachCustomTypeGenericParams(decl)
+        }
     }
 
     private func MaybeSetCoreBuiltinClassTy(def: CustomTypeDef): Unit {

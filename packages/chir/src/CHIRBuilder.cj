@@ -18,25 +18,25 @@ public class CHIRBuilder {
     }
 
     public func CreateStructDef(packageName: String, identifier: String): StructDef {
-        let def = StructDef(packageName, identifier)
+        let def = StructDef(packageName, "_" + identifier)
         context.RegisterStruct(def)
         return def
     }
 
     public func CreateClassDef(packageName: String, identifier: String, isClass!: Bool = true): ClassDef {
-        let def = ClassDef(packageName, identifier, isClass: isClass)
+        let def = ClassDef(packageName, "_" + identifier, isClass: isClass)
         context.RegisterClass(def)
         return def
     }
 
     public func CreateEnumDef(packageName: String, identifier: String): EnumDef {
-        let def = EnumDef(packageName, identifier)
+        let def = EnumDef(packageName, "_" + identifier)
         context.RegisterEnum(def)
         return def
     }
 
     public func CreateExtendDef(packageName: String, identifier: String): ExtendDef {
-        let def = ExtendDef(packageName, identifier)
+        let def = ExtendDef(packageName, "_" + identifier)
         context.RegisterExtend(def)
         return def
     }

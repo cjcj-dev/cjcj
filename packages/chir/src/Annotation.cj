@@ -1,5 +1,6 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::basic.Linkage as BasicLinkage
 import std.collection.*
 
 // GAP_TODO: MarkExpressionAsMustNotOverflow ConstAnalysis.h:243 producer absent.
@@ -25,6 +26,48 @@ public class GeneratedFromForIn {
 
     public static func Extract(label: GeneratedFromForIn): Bool {
         return label.value
+    }
+}
+
+public class LinkTypeInfo {
+    private let linkType: BasicLinkage
+
+    public init() {
+        linkType = BasicLinkage.EXTERNAL
+    }
+
+    public init(linkType: BasicLinkage) {
+        this.linkType = linkType
+    }
+
+    public static func Extract(info: LinkTypeInfo): BasicLinkage {
+        return info.linkType
+    }
+
+    public static func Extract(info: String): BasicLinkage {
+        match (info) {
+            case "linkType: external" => return BasicLinkage.EXTERNAL
+            case "linkType: weak_odr" => return BasicLinkage.WEAK_ODR
+            case "linkType: internal" => return BasicLinkage.INTERNAL
+            case "linkType: linkonce_odr" => return BasicLinkage.LINKONCE_ODR
+            case "linkType: external_weak" => return BasicLinkage.EXTERNAL_WEAK
+            case _ => return BasicLinkage.EXTERNAL
+        }
+    }
+
+    public func Clone(): LinkTypeInfo {
+        return LinkTypeInfo(linkType)
+    }
+
+    public func ToString(): String {
+        let linkToString = match (linkType) {
+            case BasicLinkage.EXTERNAL => "external"
+            case BasicLinkage.WEAK_ODR => "weak_odr"
+            case BasicLinkage.INTERNAL => "internal"
+            case BasicLinkage.LINKONCE_ODR => "linkonce_odr"
+            case BasicLinkage.EXTERNAL_WEAK => "external_weak"
+        }
+        return "linkType: " + linkToString
     }
 }
 

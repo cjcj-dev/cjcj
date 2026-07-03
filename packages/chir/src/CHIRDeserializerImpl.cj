@@ -519,6 +519,11 @@ class CHIRDeserializerImpl {
                             fn.SetOverrideSrcFuncType(srcFuncTy)
                         }
                     }
+                    if (!CHIRFieldAt(fields, 22).isEmpty()) {
+                        fn.SetLinkTypeInfo(LinkTypeInfo.Extract(CHIRFieldAt(fields, 22)))
+                    } else if (let Some(linkText) <- fn.GetAnnotation("LinkTypeInfo")) {
+                        fn.SetLinkTypeInfo(LinkTypeInfo.Extract(linkText))
+                    }
                 }
             }
         }
