@@ -275,6 +275,17 @@ foreign {
         predecessors: CPointer<LLVMBasicBlockRef>): Unit
     func LLVMSelfhostInstructionComesBefore(inst: LLVMValueRef, other: LLVMValueRef): Int32
     func LLVMSelfhostInstructionMoveBefore(inst: LLVMValueRef, other: LLVMValueRef): Unit
+    func LLVMSelfhostIsCallInst(inst: LLVMValueRef): Int32
+    func LLVMSelfhostIsInvokeInst(inst: LLVMValueRef): Int32
+    func LLVMSelfhostCallBaseHasStructRetAttr(callBase: LLVMValueRef): Int32
+    func LLVMSelfhostCallBaseArgSize(callBase: LLVMValueRef): UInt32
+    func LLVMSelfhostCallBaseGetArgOperand(callBase: LLVMValueRef, index: UInt32): LLVMValueRef
+    func LLVMSelfhostCallBaseGetStructRetAttr(callBase: LLVMValueRef): LLVMAttributeRef
+    func LLVMSelfhostCallBaseAddAttributeAtIndex(callBase: LLVMValueRef, index: UInt32,
+        attr: LLVMAttributeRef): Unit
+    func LLVMSelfhostInvokeGetNormalDest(invokeInst: LLVMValueRef): LLVMBasicBlockRef
+    func LLVMSelfhostInvokeGetUnwindDest(invokeInst: LLVMValueRef): LLVMBasicBlockRef
+    func LLVMSelfhostBasicBlockGetFirstInsertionPoint(block: LLVMBasicBlockRef): LLVMValueRef
     func LLVMSelfhostGetPrimitiveSizeInBits(ty: LLVMTypeRef): UInt64
     func LLVMSelfhostGetFirstUse(value: LLVMValueRef): LLVMUseRef
     func LLVMSelfhostGetNextUse(useRef: LLVMUseRef): LLVMUseRef

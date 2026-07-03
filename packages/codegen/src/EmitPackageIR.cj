@@ -61,6 +61,7 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         // Mirror C++ EmitPackageIR.cpp:372 cgMod.GenTypeInfo(): drain the delayed concrete-TypeInfo
         // definitions (queued by CGType.GetOrCreateTypeInfo) before optimization.
         cgMod.GenTypeInfo()
+        ReplaceFunction(cgMod)
         let keepTypesFunc = KeepSomeTypesManually(cgMod)
         EmitStaticGenericTIsAndLLVMUsed(cgMod, keepTypesFunc)
         cgMod.Opt()
@@ -69,6 +70,112 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         cgMod.EraseUselessInstsAndDeclarations()
     }
     return cgPkgContext.ReleaseLLVMModules()
+}
+
+private func ReplaceFunction(cgMod: CGModule): Unit {
+    if (!cgMod.GetCGContext().GetCompileOptions().enableCompileDebug) {
+        return
+    }
+
+    try (irBuilder = IRBuilder2(cgMod)) {
+        let callBasesToReplace = cgMod.GetCGContext().GetCallBasesToReplace()
+        for (item in callBasesToReplace) {
+            irBuilder.SetInsertCGFunction(item.cgFuncCaller)
+            let oldCall = item.callWithoutTI
+            irBuilder.SetInsertPointBefore(oldCall)
+            let hasSRet = unsafe { LLVMSelfhostCallBaseHasStructRetAttr(oldCall) } != 0
+            let thisParamOffset: Int64 = if (hasSRet) { 1 } else { 0 }
+            let thisParamWithoutTI = unsafe { LLVMSelfhostCallBaseGetArgOperand(oldCall, UInt32(thisParamOffset)) }
+            let argsVal = ArrayList<LLVMValueRef>()
+            let argCount = unsafe { LLVMSelfhostCallBaseArgSize(oldCall) }
+            var argIdx: UInt32 = 0u32
+            while (argIdx < argCount) {
+                argsVal.add(unsafe { LLVMSelfhostCallBaseGetArgOperand(oldCall, argIdx) })
+                argIdx++
+            }
+            var basePtr = LLVMNullValue()
+            if (item.isCalleeMutOrCtor) {
+                let basePtrIndex = thisParamOffset + 1
+                basePtr = argsVal[basePtrIndex]
+                argsVal.remove(at: basePtrIndex)
+            }
+
+            let thisCHIRType = DeRef(item.thisParamType)
+            let blockKey = irBuilder.GetInsertBlock().toUIntNative()
+            let sizeCacheMap = cgMod.GetCGContext().genericParamsSizeBlockLevelCacheMap
+            if (!sizeCacheMap.contains(blockKey)) {
+                sizeCacheMap[blockKey] = HashMap<UIntNative, LLVMValueRef>()
+            }
+            sizeCacheMap[blockKey].clear()
+            let thisParamTypeInfo = irBuilder.CreateTypeInfo(thisCHIRType)
+            let size32 = irBuilder.GetLayoutSize_32(thisCHIRType)
+            let size64 = irBuilder.CreateSExt(size32, unsafe { LLVMInt64TypeInContext(cgMod.GetLLVMContext().raw) })
+            let thisParamWithTI = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>(
+                [thisParamTypeInfo, size32]))
+            argsVal[thisParamOffset] = thisParamWithTI
+
+            let payloadPtr = irBuilder.GetPayloadFromObject(thisParamWithTI)
+            let thisLLVMType = CGType.GetOrCreate(cgMod, thisCHIRType).GetLLVMType()
+            if (irBuilder.IsLLVMTypeContainsRef(thisLLVMType)) {
+                if (item.isCalleeMutOrCtor) {
+                    let load = irBuilder.CreateEntryAlloca(thisLLVMType)
+                    let _ = irBuilder.CreateCJMemsetStructWith0(load, thisLLVMType)
+                    irBuilder.CallGCReadAgg(thisLLVMType, ArrayList<LLVMValueRef>(
+                        [load, basePtr, thisParamWithoutTI, size64]))
+                    irBuilder.CallGCWriteAgg(thisLLVMType, ArrayList<LLVMValueRef>(
+                        [thisParamWithTI, payloadPtr, load, size64]))
+                } else {
+                    irBuilder.CallGCWriteAgg(thisLLVMType, ArrayList<LLVMValueRef>(
+                        [thisParamWithTI, payloadPtr, thisParamWithoutTI, size64]))
+                }
+            } else {
+                irBuilder.CreateMemCpy(payloadPtr, 0u32, thisParamWithoutTI, 0u32, size32)
+            }
+
+            let callee = item.cgFuncCallee.GetWrapperFunction()
+            CJC_ASSERT(!callee.isNull())
+            let calleeType = unsafe { LLVMGlobalGetValueType(callee) }
+            var newCall = LLVMNullValue()
+            if (unsafe { LLVMSelfhostIsCallInst(oldCall) } != 0) {
+                newCall = irBuilder.CreateCall(callee, calleeType, argsVal)
+                irBuilder.SetInsertPointBefore(unsafe { LLVMGetNextInstruction(oldCall) })
+            } else if (unsafe { LLVMSelfhostIsInvokeInst(oldCall) } != 0) {
+                let normalDest = unsafe { LLVMSelfhostInvokeGetNormalDest(oldCall) }
+                let unwindDest = unsafe { LLVMSelfhostInvokeGetUnwindDest(oldCall) }
+                newCall = irBuilder.CreateInvoke(callee, calleeType, normalDest, unwindDest, argsVal)
+                let firstInsertionPoint = unsafe { LLVMSelfhostBasicBlockGetFirstInsertionPoint(normalDest) }
+                if (firstInsertionPoint.isNull()) {
+                    irBuilder.SetInsertPoint(normalDest)
+                } else {
+                    irBuilder.SetInsertPointBefore(firstInsertionPoint)
+                }
+            }
+            CJC_ASSERT(!newCall.isNull())
+            if (hasSRet) {
+                let sretAttr = unsafe { LLVMSelfhostCallBaseGetStructRetAttr(oldCall) }
+                unsafe { LLVMSelfhostCallBaseAddAttributeAtIndex(newCall, 1u32, sretAttr) }
+                AddAttributeAtIndex(newCall, 1u32, "noalias")
+            }
+            unsafe {
+                LLVMReplaceAllUsesWith(oldCall, newCall)
+                LLVMInstructionEraseFromParent(oldCall)
+            }
+
+            if (!item.isCalleeMutOrCtor) {
+                continue
+            }
+            if (irBuilder.IsLLVMTypeContainsRef(thisLLVMType)) {
+                let load = irBuilder.CreateEntryAlloca(thisLLVMType)
+                let _ = irBuilder.CreateCJMemsetStructWith0(load, thisLLVMType)
+                irBuilder.CallGCReadAgg(thisLLVMType, ArrayList<LLVMValueRef>(
+                    [load, thisParamWithTI, payloadPtr, size64]))
+                irBuilder.CallGCWriteAgg(thisLLVMType, ArrayList<LLVMValueRef>(
+                    [basePtr, thisParamWithoutTI, load, size64]))
+            } else {
+                irBuilder.CreateMemCpy(thisParamWithoutTI, 0u32, payloadPtr, 0u32, size32)
+            }
+        }
+    }
 }
 
 private func EmitTIOrTTForCustomDefs(cgMod: CGModule): Unit {

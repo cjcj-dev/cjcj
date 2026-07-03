@@ -1,6 +1,8 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.Apply
+import cangjie_compiler::chir.ApplyWithException
 import cangjie_compiler::chir.BoolLiteral
 import cangjie_compiler::chir.BoxType
 import cangjie_compiler::chir.ClassType
@@ -1182,6 +1184,22 @@ public class IRBuilder2 <: Resource {
                 name
             }
             let callBase = CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), llvmCallArgs, name: callName)
+            if (!unsafe { LLVMIsAFunction(callee) }.isNull() &&
+                HasAttributeAtIndex(callee, UInt32.Max, HAS_WITH_TI_WRAPPER_ATTR)) {
+                let currentExpression = chirExpr.getOrThrow().GetExpression()
+                var applyExprWrapper: Option<CHIRApplyWrapper> = None
+                if (let Some(applyExpr) <- (currentExpression as Apply)) {
+                    applyExprWrapper = Some(CHIRApplyWrapper(applyExpr))
+                } else if (let Some(applyWithExceptionExpr) <- (currentExpression as ApplyWithException)) {
+                    applyExprWrapper = Some(CHIRApplyWrapper(applyWithExceptionExpr))
+                }
+                let applyWrapper = applyExprWrapper.getOrThrow()
+                let caller = cgMod.GetOrInsertCGFunction(applyWrapper.GetTopLevelFunc().getOrThrow())
+                let calleeFunc = cgMod.GetOrInsertCGFunction(applyWrapper.GetCallee())
+                let thisParamType = applyWrapper.GetThisParam().getOrThrow().GetType().getOrThrow()
+                cgMod.GetCGContext().AddCallBaseToReplace(CallBaseToReplaceInfo(callBase, caller, calleeFunc,
+                    thisParamType, applyWrapper.IsCalleeStructMutOrCtorMethod()))
+            }
             if (funcType.IsCFunc()) {
                 SetZExtAttrForCFunc(callBase, calleeType.GetLLVMFunctionType())
             }

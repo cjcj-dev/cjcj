@@ -15,16 +15,16 @@ import cangjie_compiler::utils.{CJC_ASSERT, DynamicCast}
 
 public class CallBaseToReplaceInfo {
     public let callWithoutTI: LLVMValueRef
-    public let callerName: String
-    public let calleeName: String
+    public let cgFuncCaller: CGFunction
+    public let cgFuncCallee: CGFunction
     public let thisParamType: Type
     public let isCalleeMutOrCtor: Bool
 
-    public init(callWithoutTI: LLVMValueRef, callerName: String, calleeName: String, thisParamType: Type,
+    public init(callWithoutTI: LLVMValueRef, cgFuncCaller: CGFunction, cgFuncCallee: CGFunction, thisParamType: Type,
         isCalleeMutOrCtor: Bool) {
         this.callWithoutTI = callWithoutTI
-        this.callerName = callerName
-        this.calleeName = calleeName
+        this.cgFuncCaller = cgFuncCaller
+        this.cgFuncCallee = cgFuncCallee
         this.thisParamType = thisParamType
         this.isCalleeMutOrCtor = isCalleeMutOrCtor
     }

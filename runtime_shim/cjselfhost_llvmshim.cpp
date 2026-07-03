@@ -18,6 +18,8 @@
 //         src/CodeGen/CGFunction.cpp:252  specificInst->moveBefore(&entryBB.front())
 //   CGCFFI ABI classifier support:
 //         src/CodeGen/CJNative/CJNativeCGCFFI.cpp:542  type.getPrimitiveSizeInBits()
+//   With-TypeInfo wrapper rewrite support:
+//         src/CodeGen/CJNative/EmitPackageIR.cpp:526-616  llvm::CallBase/InvokeInst APIs.
 
 #include <llvm-c/Core.h>
 
@@ -28,7 +30,9 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Use.h"
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
@@ -130,6 +134,61 @@ extern "C" int LLVMSelfhostInstructionComesBefore(LLVMValueRef Inst, LLVMValueRe
 extern "C" void LLVMSelfhostInstructionMoveBefore(LLVMValueRef Inst, LLVMValueRef Other)
 {
     unwrap<Instruction>(Inst)->moveBefore(unwrap<Instruction>(Other));
+}
+
+extern "C" int LLVMSelfhostIsCallInst(LLVMValueRef Inst)
+{
+    return isa<CallInst>(unwrap<Value>(Inst)) ? 1 : 0;
+}
+
+extern "C" int LLVMSelfhostIsInvokeInst(LLVMValueRef Inst)
+{
+    return isa<InvokeInst>(unwrap<Value>(Inst)) ? 1 : 0;
+}
+
+extern "C" int LLVMSelfhostCallBaseHasStructRetAttr(LLVMValueRef Call)
+{
+    return unwrap<CallBase>(Call)->hasStructRetAttr() ? 1 : 0;
+}
+
+extern "C" unsigned LLVMSelfhostCallBaseArgSize(LLVMValueRef Call)
+{
+    return unwrap<CallBase>(Call)->arg_size();
+}
+
+extern "C" LLVMValueRef LLVMSelfhostCallBaseGetArgOperand(LLVMValueRef Call, unsigned Index)
+{
+    return wrap(unwrap<CallBase>(Call)->getArgOperand(Index));
+}
+
+extern "C" LLVMAttributeRef LLVMSelfhostCallBaseGetStructRetAttr(LLVMValueRef Call)
+{
+    return wrap(unwrap<CallBase>(Call)->getAttributeAtIndex(AttributeList::FirstArgIndex, Attribute::StructRet));
+}
+
+extern "C" void LLVMSelfhostCallBaseAddAttributeAtIndex(LLVMValueRef Call, unsigned Index, LLVMAttributeRef Attr)
+{
+    unwrap<CallBase>(Call)->addAttributeAtIndex(Index, unwrap(Attr));
+}
+
+extern "C" LLVMBasicBlockRef LLVMSelfhostInvokeGetNormalDest(LLVMValueRef Inst)
+{
+    return wrap(cast<InvokeInst>(unwrap<Value>(Inst))->getNormalDest());
+}
+
+extern "C" LLVMBasicBlockRef LLVMSelfhostInvokeGetUnwindDest(LLVMValueRef Inst)
+{
+    return wrap(cast<InvokeInst>(unwrap<Value>(Inst))->getUnwindDest());
+}
+
+extern "C" LLVMValueRef LLVMSelfhostBasicBlockGetFirstInsertionPoint(LLVMBasicBlockRef BB)
+{
+    BasicBlock *block = unwrap(BB);
+    auto insertPoint = block->getFirstInsertionPt();
+    if (insertPoint == block->end()) {
+        return nullptr;
+    }
+    return wrap(&*insertPoint);
 }
 
 extern "C" uint64_t LLVMSelfhostGetPrimitiveSizeInBits(LLVMTypeRef Ty)
