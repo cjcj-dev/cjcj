@@ -735,9 +735,10 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
 
 private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elementValue: CGValue,
     elementPtr: LLVMValueRef, fieldTy: Option<Type>): LLVMValueRef {
+    let baseObject = irBuilder.GetTrackedManagedBase(elementPtr) ?? baseValue.GetRawValue()
     if (let Some(baseType) <- baseValue.GetCGType()) {
         if (IsManagedObjectElementBase(baseType.GetOriginal()) && IsGenericField(fieldTy)) {
-            return irBuilder.StoreGenericMemberValue(baseValue.GetRawValue(), elementPtr, elementValue,
+            return irBuilder.StoreGenericMemberValue(baseObject, elementPtr, elementValue,
                 baseType.GetOriginal(), fieldTy)
         }
     }
@@ -757,12 +758,12 @@ private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elemen
         }
         if (IsManagedObjectElementBase(baseType.GetOriginal())) {
             if (IsManagedReferenceField(irBuilder, fieldTy)) {
-                return irBuilder.CallGCWrite(rawElementValue, baseValue.GetRawValue(), elementPtr)
+                return irBuilder.CallGCWrite(rawElementValue, baseObject, elementPtr)
             }
         }
     }
     if (ShouldUseObjectFieldWriteBarrier(irBuilder, baseValue, elementValue, elementPtr)) {
-        return irBuilder.CallGCWrite(rawElementValue, baseValue.GetRawValue(), elementPtr)
+        return irBuilder.CallGCWrite(rawElementValue, baseObject, elementPtr)
     }
     return irBuilder.CreateStore(rawElementValue, elementPtr)
 }
@@ -820,7 +821,8 @@ private func StoreAggregateElementValue(irBuilder: IRBuilder2, baseValue: CGValu
             AggregateLLVMTypeName(fieldCGType))
     }
     if (IsAddressSpacePointer(elementPtr, 1u32) && irBuilder.IsLLVMTypeContainsRef(fieldCGType.GetLLVMType())) {
-        return irBuilder.CallGCWriteStruct(baseValue.GetRawValue(), elementPtr, source, fieldSizeValue,
+        let baseObject = irBuilder.GetTrackedManagedBase(elementPtr) ?? baseValue.GetRawValue()
+        return irBuilder.CallGCWriteStruct(baseObject, elementPtr, source, fieldSizeValue,
             fieldCGType.GetOriginal().ToString())
     }
     return irBuilder.CreateMemCpy(elementPtr, align, source, align, fieldSizeValue)
