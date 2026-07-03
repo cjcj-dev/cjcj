@@ -1,6 +1,9 @@
 package cangjie_compiler::parse
 
 import cangjie_compiler::ast.ASTCloner
+import cangjie_compiler::ast.Node
+import cangjie_compiler::ast.VisitAction
+import cangjie_compiler::ast.Walker
 import std.collection.*
 
 extend ParserImpl {
@@ -969,6 +972,13 @@ extend ParserImpl {
         decl.isConst = isConst
         decl.begin = if (decl.begin.IsZero()) { key.Begin() } else { decl.begin }
         ParseTypeAndExpr(decl)
+        if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+            let setGlobalAttr = { node: Node =>
+                node.EnableAttr(Attribute.GLOBAL)
+                VisitAction.WALK_CHILDREN
+            }
+            Walker(pattern, visitPre: setGlobalAttr).Walk()
+        }
         if (decl.end.IsZero()) {
             decl.end = pattern.end
         }

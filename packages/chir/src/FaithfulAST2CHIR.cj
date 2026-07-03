@@ -54,7 +54,7 @@ private class FaithfulInitFileVars {
     }
 }
 
-private class ElementList {
+public class ElementList {
     public let stableOrderValue: ArrayList<AstDecl> = ArrayList<AstDecl>()
     private let randomOrderValue: FaithfulInitDeclSet = FaithfulInitDeclSet()
 
@@ -940,6 +940,8 @@ public class FaithfulAST2CHIR {
     private let genericNominalDeclSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let foreignFuncs: ArrayList<AstDecl> = ArrayList<AstDecl>()
     private let foreignFuncSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
+    private var localConstVars: ElementList = ElementList()
+    private let localConstFuncs: ElementList = ElementList()
     private let packageInitializerBlocks: HashMap<Int64, Block> = HashMap<Int64, Block>()
     private let initFuncsForConstVar: ArrayList<Function> = ArrayList<Function>()
 
@@ -963,6 +965,7 @@ public class FaithfulAST2CHIR {
         CurrentPackage().SetPackageAccessLevel(BuildPackageAccessLevel(node.accessible))
         CollectImportedDecls(node)
         CollectDeclsInCurPkg(node)
+        CollectLocalConstFuncAndVars(node)
         CacheTopLevelDeclToGlobalSymbolTable()
         TranslateNominalDecls(node)
         TranslateOtherTopLevelDecls(node)
@@ -1304,6 +1307,10 @@ public class FaithfulAST2CHIR {
             }
         }
         CreateGlobalVarSignature(globalAndStaticVars)
+        CreateGlobalVarSignature(localConstVars.stableOrderValue, isLocalConst: true)
+        for (decl in localConstFuncs.stableOrderValue) {
+            CreateFuncSignatureAndSetGlobalCache(RequireFuncDecl(decl))
+        }
     }
 
     private func CacheCustomTypeDefToGlobalSymbolTable(): Unit {
@@ -1479,7 +1486,40 @@ public class FaithfulAST2CHIR {
         let _ = node
         let trans = CreateTranslator()
         TranslateVecDecl(globalAndMemberFuncs, trans)
+        TranslateVecDecl(localConstFuncs.stableOrderValue, CreateTranslator())
         TranslateVecDecl(globalAndStaticVars, trans)
+        SetCompileTimeValueFlag()
+    }
+
+    private func SetCompileTimeValueFlag(): Unit {
+        for (fn in CurrentPackage().GetGlobalFuncsWithBody()) {
+            if (fn.TestAttr(Attribute.CONST)) {
+                SetCompileTimeValueFlagRecursively(fn)
+            }
+        }
+    }
+
+    private func SetCompileTimeValueFlagRecursively(initFunc: Function): Unit {
+        if (let Some(body) <- initFunc.GetBody()) {
+            SetCompileTimeValueFlagRecursively(body)
+        }
+    }
+
+    private func SetCompileTimeValueFlagRecursively(body: BlockGroup): Unit {
+        for (block in body.GetBlocksRef()) {
+            for (expr in block.GetExpressionsRef()) {
+                if (let Some(lambda) <- (expr as Lambda)) {
+                    lambda.SetCompileTimeValue()
+                    if (let Some(lambdaBody) <- lambda.GetBody()) {
+                        SetCompileTimeValueFlagRecursively(lambdaBody)
+                    }
+                } else {
+                    for (blockGroup in expr.GetBlockGroups()) {
+                        SetCompileTimeValueFlagRecursively(blockGroup)
+                    }
+                }
+            }
+        }
     }
 
     private func SetInitFuncForStaticVar(): Unit {
@@ -1503,7 +1543,8 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreateTranslator(): Translator {
-        return Translator(builder, chirType, globalCache, overrideSrcFuncResolver: overrideSrcFuncResolver)
+        return Translator(builder, chirType, globalCache, localConstVars: localConstVars, localConstFuncs: localConstFuncs,
+            overrideSrcFuncResolver: overrideSrcFuncResolver)
     }
 
     private func GlobalDeclAnalysis(): ArrayList<FaithfulInitFileVars> {
@@ -1576,6 +1617,159 @@ public class FaithfulAST2CHIR {
         }
     }
 
+    private func ShouldSkipSelf(funcDecl: AstFuncDecl, funcStack: Int64): Bool {
+        if (funcDecl.ownerFunc.isSome() && funcStack == 1) {
+            return true
+        }
+        if (funcDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) {
+            let genericDecl = funcDecl.genericDecl ??
+                throw IllegalStateException("faithful CollectLocalConstDecl generic instantiated func has no generic decl")
+            let genericFunc = (genericDecl as AstFuncDecl) ??
+                throw IllegalStateException("faithful CollectLocalConstDecl generic decl is not FuncDecl")
+            if (!localConstFuncs.HasElement(genericFunc)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func ShouldSkipChildren(funcDecl: AstFuncDecl): Bool {
+        if (let Some(outerDecl) <- funcDecl.outerDecl) {
+            if (outerDecl.IsNominalDecl()) {
+                return true
+            }
+        }
+        if (funcDecl.TestAttr(AstAttribute.GENERIC)) {
+            return true
+        }
+        if (let Some(outerDecl) <- funcDecl.outerDecl) {
+            if (outerDecl.TestAttr(AstAttribute.GENERIC)) {
+                return true
+            }
+        }
+        if (funcDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED) && IsLocalFunc(funcDecl)) {
+            return true
+        }
+        return false
+    }
+
+    private func GetOuterDecl(decl: AstDecl): Option<AstDecl> {
+        if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+            if (let Some(ownerFunc) <- funcDecl.ownerFunc) {
+                return ownerFunc.outerDecl
+            }
+        }
+        return decl.outerDecl
+    }
+
+    private func IsLocalFunc(funcDecl: AstFuncDecl): Bool {
+        if (let Some(outerDecl) <- GetOuterDecl(funcDecl)) {
+            return outerDecl.astKind == ASTKind.FUNC_DECL || outerDecl.astKind == ASTKind.VAR_DECL
+        }
+        return false
+    }
+
+    private func CollectLocalConstDecl(decls: ArrayList<AstDecl>, rootIsGlobalDecl: Bool): Unit {
+        let funcStack = ArrayList<Int64>()
+        funcStack.add(0)
+        let preVisit = { node: AstNode =>
+            if (let Some(funcDecl) <- (node as AstFuncDecl)) {
+                if (ShouldSkipSelf(funcDecl, funcStack[0])) {
+                    funcStack[0]++
+                    return AstVisitAction.SKIP_CHILDREN
+                }
+            }
+            if (funcStack[0] != 0) {
+                if (let Some(varDecl) <- (node as AstVarDecl)) {
+                    if (varDecl.IsConst()) {
+                        localConstVars.AddElement(varDecl)
+                    }
+                } else if (let Some(funcDecl) <- (node as AstFuncDecl)) {
+                    if (funcDecl.IsConst()) {
+                        localConstFuncs.AddElement(funcDecl)
+                        let funcBody = funcDecl.funcBody ??
+                            throw IllegalStateException("faithful CollectLocalConstDecl const func has no FuncBody")
+                        if (!funcBody.paramLists.isEmpty()) {
+                            for (param in funcBody.paramLists[0].params) {
+                                if (let Some(desugarDecl) <- param.desugarDecl) {
+                                    localConstFuncs.AddElement(desugarDecl)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (node.astKind == ASTKind.LAMBDA_EXPR || node.astKind == ASTKind.MACRO_DECL ||
+                node.astKind == ASTKind.FUNC_DECL) {
+                funcStack[0]++
+            }
+            if (let Some(funcDecl) <- (node as AstFuncDecl)) {
+                if (ShouldSkipChildren(funcDecl)) {
+                    return AstVisitAction.SKIP_CHILDREN
+                }
+            }
+            return AstVisitAction.WALK_CHILDREN
+        }
+        let postVisit = { node: AstNode =>
+            if (node.astKind == ASTKind.LAMBDA_EXPR || node.astKind == ASTKind.MACRO_DECL ||
+                node.astKind == ASTKind.FUNC_DECL) {
+                funcStack[0]--
+                CJC_ASSERT(funcStack[0] >= 0)
+            }
+            return AstVisitAction.WALK_CHILDREN
+        }
+        for (decl in decls) {
+            funcStack[0] = if (rootIsGlobalDecl) { 0 } else { 1 }
+            AstWalker(decl, visitPre: preVisit, visitPost: postVisit).Walk()
+        }
+    }
+
+    private func CollectLocalConstFuncAndVars(pkg: AstPackage): Unit {
+        CollectLocalConstDecl(globalAndStaticVars, true)
+        CollectLocalConstDecl(globalAndMemberFuncs, true)
+
+        let instanceMemberVars = ArrayList<AstDecl>()
+        for (decl in nominalDecls) {
+            for (member in decl.GetMemberDeclPtrs()) {
+                if (member.astKind == ASTKind.VAR_DECL && !member.TestAttr(AstAttribute.STATIC)) {
+                    instanceMemberVars.add(member)
+                }
+            }
+        }
+        CollectLocalConstDecl(instanceMemberVars, true)
+
+        let instLocalconstFuncs = ArrayList<AstDecl>()
+        for (decl in pkg.genericInstantiatedDecls) {
+            if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+                if (funcDecl.IsConst() && IsLocalFunc(funcDecl)) {
+                    instLocalconstFuncs.add(funcDecl)
+                }
+            }
+        }
+        CollectLocalConstDecl(instLocalconstFuncs, false)
+        FlatternLocalConstVars()
+    }
+
+    private func FlatternLocalConstVars(): Unit {
+        let flatternedLocalConstVars = ElementList()
+        for (element in localConstVars.stableOrderValue) {
+            if (element.astKind == ASTKind.VAR_DECL) {
+                element.toBeCompiled = true
+                flatternedLocalConstVars.AddElement(element)
+            } else if (let Some(varWithPattern) <- (element as AstVarWithPatternDecl)) {
+                varWithPattern.toBeCompiled = true
+                let allPatterns = ArrayList<AstVarDecl>()
+                FlattenGlobalVarWithPatternDecl(RequirePattern(varWithPattern.irrefutablePattern,
+                    "local const var-with-pattern pattern"), allPatterns)
+                for (varDecl in allPatterns) {
+                    varDecl.toBeCompiled = true
+                    flatternedLocalConstVars.AddElement(varDecl)
+                }
+            }
+        }
+        localConstVars = flatternedLocalConstVars
+    }
+
     private func Run(nodesWithDeps: ElementList, fileAndVarMap: ArrayList<FaithfulInitFileVars>,
         funcsAndVars: ElementList): ArrayList<FaithfulInitFileVars> {
         let orderedFiles = SortGlobalVarDep(nodesWithDeps, fileAndVarMap, funcsAndVars)
@@ -1592,6 +1786,7 @@ public class FaithfulAST2CHIR {
             }
             initOrder.add(entry)
         }
+        funcsAndVars.AddElements(localConstVars.stableOrderValue)
         return SortLocalConstVarDep(initOrder, funcsAndVars)
     }
 
@@ -1628,6 +1823,9 @@ public class FaithfulAST2CHIR {
         funcsAndVars: ElementList): Unit {
         let globalVarSet = BuildDeclSet(globalAndStaticVars)
         let candidateSet = BuildDeclSet(funcsAndVars.stableOrderValue)
+        for (localConstVar in localConstVars.stableOrderValue) {
+            candidateSet.Add(localConstVar)
+        }
         let patternOwnerMap = BuildPatternDependencyOwnerMap()
         for (node in nodesWithDeps.stableOrderValue) {
             if (let Some(varDecl) <- (node as AstVarDecl)) {
@@ -2714,16 +2912,16 @@ public class FaithfulAST2CHIR {
         AddGlobalVarToPackage(globalVar)
     }
 
-    private func CreateGlobalVarSignature(decls: ArrayList<AstDecl>): Unit {
+    private func CreateGlobalVarSignature(decls: ArrayList<AstDecl>, isLocalConst!: Bool = false): Unit {
         for (decl in decls) {
             if (let Some(varDecl) <- (decl as AstVarDecl)) {
-                let _ = CreateAndCacheGlobalVar(varDecl)
+                let _ = CreateAndCacheGlobalVar(varDecl, isLocalConst: isLocalConst)
             } else if (let Some(varWithPattern) <- (decl as AstVarWithPatternDecl)) {
                 let varDecls = ArrayList<AstVarDecl>()
                 FlattenGlobalVarWithPatternDecl(RequirePattern(varWithPattern.irrefutablePattern,
                     "global var-with-pattern pattern"), varDecls)
                 for (varDecl in varDecls) {
-                    let _ = CreateAndCacheGlobalVar(varDecl)
+                    let _ = CreateAndCacheGlobalVar(varDecl, isLocalConst: isLocalConst)
                 }
             }
         }
@@ -2755,13 +2953,16 @@ public class FaithfulAST2CHIR {
             "faithful AST2CHIR unsupported global var-with-pattern: ${ASTKindName(pattern.astKind)}")
     }
 
-    private func CreateAndCacheGlobalVar(decl: AstVarDecl): GlobalVar {
+    private func CreateAndCacheGlobalVar(decl: AstVarDecl, isLocalConst!: Bool = false): GlobalVar {
         let varTy = chirType.TranslateType(RequireAstTy(decl))
         let globalVar = builder.CreateGlobalVar(builder.context.GetRefTy(varTy), EffectiveMangledName(decl),
             srcCodeIdentifier: decl.identifier.Val(), rawMangledName: EffectiveRawMangledName(decl),
             packageName: EffectivePackageName(decl))
         globalVar.SetDebugLocation(TranslateLocationWithoutScope(builder.context, decl.begin, decl.end))
         ApplyDeclAttrs(globalVar, decl)
+        if (isLocalConst) {
+            globalVar.EnableAttr(Attribute.COMPILER_ADD)
+        }
         if (decl.IsConst()) {
             globalVar.EnableAttr(Attribute.CONST)
         }

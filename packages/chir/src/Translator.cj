@@ -384,6 +384,8 @@ public class Translator {
     private let builder: CHIRBuilder
     private let chirTy: CHIRType
     private let globalSymbolTable: FaithfulAST2CHIRNodeMap
+    private let localConstVars: ElementList
+    private let localConstFuncs: ElementList
     private var astNodeSymbolTable: AST2CHIRNodeMap<Value> = AST2CHIRNodeMap<Value>()
     private let localValSymbolTable: FaithfulLocalValueMap = FaithfulLocalValueMap()
     private let exprValueTable: HashMap<Int64, Value> = HashMap<Int64, Value>()
@@ -402,10 +404,13 @@ public class Translator {
     private let overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>>
 
     public init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap,
+        localConstVars!: ElementList = ElementList(), localConstFuncs!: ElementList = ElementList(),
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None) {
         this.builder = builder
         this.chirTy = chirTy
         this.globalSymbolTable = globalSymbolTable
+        this.localConstVars = localConstVars
+        this.localConstFuncs = localConstFuncs
         this.overrideSrcFuncResolver = overrideSrcFuncResolver
     }
 
@@ -548,9 +553,10 @@ public class Translator {
         if (let Some(funcBody) <- funcDecl.funcBody) {
             if (let Some(astBody) <- funcBody.body) {
                 TranslateConstructorDefaultFieldInitializers(funcDecl, funcBody)
+                let lastBlock = CurrentBlock()
                 let result = Translator.TranslateASTNode(astBody, this)
-                if (entry.GetTerminator().isNone()) {
-                    builder.CreateGoTo(GetBlockByAST(astBody), entry)
+                if (lastBlock.GetTerminator().isNone()) {
+                    builder.CreateGoTo(GetBlockByAST(astBody), lastBlock)
                 }
                 if (CurrentBlock().GetTerminator().isNone()) {
                     EmitImplicitFunctionExit(fn, result)
@@ -2024,6 +2030,15 @@ public class Translator {
         }
         tryBodyContext.add(expr)
         tryCatchContext.add(exceptionBlock)
+        if (expr.TestAttr(AstAttribute.MACRO_INVOKE_BODY)) {
+            let pkg = builder.context.GetCurPackage() ??
+                throw IllegalStateException("faithful AST2CHIR macro invoke body has no current package")
+            let pkgInit = pkg.GetPackageInitFunc() ??
+                throw IllegalStateException("faithful AST2CHIR macro invoke body has no package init function")
+            let initFnTy = pkgInit.GetFuncType() ??
+                throw IllegalStateException("faithful AST2CHIR package init function has no FuncType")
+            let _ = CreateApplyMaybeWithException(initFnTy.GetReturnType(), pkgInit, FuncCallContext())
+        }
         let baseBlock = CurrentBlock()
         let tryAstBlock = RequireBlock(expr.tryBlock, "try block")
         let tryValue = Translator.TranslateASTNode(tryAstBlock, this)
@@ -3551,8 +3566,11 @@ public class Translator {
         beginCatchArgs.add(exception)
         let beginCatch = RequireResult(builder.CreateIntrinsic(exceptionValueTy,
             IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), CurrentBlock()))
+        if (expr.catchBlocks.size != expr.catchPatterns.size) {
+            throw IllegalStateException("faithful AST2CHIR catch block/pattern count mismatch")
+        }
         var idx: Int64 = 0
-        while (idx < expr.catchPatterns.size && idx < expr.catchBlocks.size) {
+        while (idx < expr.catchPatterns.size) {
             let localScopeMark = localValSymbolTable.Mark()
             let (falseBlock, trueBlock) = TranslateExceptionPattern(expr.catchPatterns[idx], beginCatch)
             currentBlock = trueBlock
@@ -6079,6 +6097,23 @@ public class Translator {
         astNodeSymbolTable.Set(node, value)
     }
 
+    private func ShouldInGlobalTable(node: AstNode): Bool {
+        if (node.TestAttr(AstAttribute.GLOBAL) && !node.IsNominalDecl()) {
+            return true
+        }
+        if ((node.TestAttr(AstAttribute.STATIC) && node.astKind == ASTKind.VAR_DECL) ||
+            node.astKind == ASTKind.FUNC_DECL) {
+            if (let Some(decl) <- (node as AstDecl)) {
+                if (let Some(outerDecl) <- decl.outerDecl) {
+                    if (outerDecl.IsNominalDecl()) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
     private func GetSymbolTable(node: AstNode): Value {
         if (let Some(decl) <- (node as AstDecl)) {
             return GetSymbolTable(decl)
@@ -6099,10 +6134,18 @@ public class Translator {
     }
 
     private func GetSymbolTable(decl: AstDecl): Value {
-        if (let Some(value) <- localValSymbolTable.TryGet(decl)) {
-            return value
+        if (ShouldInGlobalTable(decl)) {
+            return globalSymbolTable.Get(decl)
         }
-        return globalSymbolTable.Get(decl)
+        if (localConstVars.HasElement(decl)) {
+            return globalSymbolTable.Get(decl)
+        }
+        if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+            if (localConstFuncs.HasElement(funcDecl)) {
+                return globalSymbolTable.Get(decl)
+            }
+        }
+        return localValSymbolTable.Get(decl)
     }
 
     private func GetDerefedValue(value: Value): Value {
