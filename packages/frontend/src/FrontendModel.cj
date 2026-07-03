@@ -1505,16 +1505,15 @@ private class CjoSignatureMaterializer {
         while (idx < declCount) {
             let formatIndex = UInt32(idx + 1)
             if (let Some(record) <- flatDecls.get(formatIndex)) {
-                let _ = EnsureFlatDecl(record)
-            }
-            idx++
-        }
-        idx = 0
-        while (idx < declCount) {
-            let formatIndex = UInt32(idx + 1)
-            if (let Some(record) <- flatDecls.get(formatIndex)) {
                 if (record.isTopLevel) {
+                    if (IgnoreDecl(reader, record)) {
+                        idx++
+                        continue
+                    }
                     if (let Some(decl) <- EnsureFlatDecl(record)) {
+                        if (decl.TestAttr(Attribute.ALREADY_LOADED)) {
+                            decl.doNotExport = true
+                        }
                         AddFlatTopLevelDecl(decl)
                     }
                 }
@@ -1522,6 +1521,23 @@ private class CjoSignatureMaterializer {
             idx++
         }
         FinalizeSourceImportedDecls()
+    }
+
+    private func IgnoreDecl(reader: CjoFlatBuffer, record: CjoFlatDecl): Bool {
+        // 1. Ignore main entry function during loading (it is only needed for incremental compilation).
+        // 2. Ignore instantiated decl and non-external, non-implicit used decl when 'importSrcCode' is disabled.
+        // 3. When current is macro package:
+        //    a) ignore instantiated decl. NOTE: macro package's instantiated decls will not be used in CodeGen.
+        //    b) ignore non-macro decl when interpretation is off.
+        //    c) ignore decl which is not macro and not type when interpretation is on.
+        return TestAttr(reader, record, Attribute.MAIN_ENTRY) ||
+            (!importSrcCode &&
+                (TestAttr(reader, record, Attribute.GENERIC_INSTANTIATED) ||
+                    (TestAttr(reader, record, Attribute.PRIVATE) &&
+                        !TestAttr(reader, record, Attribute.IMPLICIT_USED)))) ||
+            (pkg.isMacroPackage &&
+                (TestAttr(reader, record, Attribute.GENERIC_INSTANTIATED) ||
+                    !TestAttr(reader, record, Attribute.MACRO_FUNC)))
     }
 
     private func AddFlatTopLevelDecl(decl: Decl): Unit {
@@ -1735,6 +1751,20 @@ private class CjoSignatureMaterializer {
             }
             wordIdx++
         }
+    }
+
+    private func TestAttr(reader: CjoFlatBuffer, record: CjoFlatDecl, attr: Attribute): Bool {
+        let attrs = reader.VectorField(record.table, 22)
+        if (attrs < 0) {
+            return false
+        }
+        let attrIdx = AttributeIndex(attr)
+        let wordIdx = attrIdx / 64
+        if (wordIdx >= reader.VectorLength(attrs)) {
+            return false
+        }
+        let bit = attrIdx % 64
+        return (reader.VectorU64(attrs, wordIdx) & (1u64 << UInt64(bit))) != 0u64
     }
 
     private func EnableFlatAttribute(decl: Decl, idx: Int64): Unit {
