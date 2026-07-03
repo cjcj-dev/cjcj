@@ -384,6 +384,7 @@ public class Translator {
     private let builder: CHIRBuilder
     private let chirTy: CHIRType
     private let globalSymbolTable: FaithfulAST2CHIRNodeMap
+    private var astNodeSymbolTable: AST2CHIRNodeMap<Value> = AST2CHIRNodeMap<Value>()
     private let localValSymbolTable: FaithfulLocalValueMap = FaithfulLocalValueMap()
     private let exprValueTable: HashMap<Int64, Value> = HashMap<Int64, Value>()
     private var currentBlock: Option<Block> = None
@@ -435,6 +436,7 @@ public class Translator {
 
     public static func TranslateASTNode(node: AstNode, trans: Translator): Option<Value> {
         var base = node
+        let backBlock = trans.currentBlock
         let nodePtr = GetDesugaredExpr(node)
         if (let Some(expr) <- (nodePtr as AstExpr)) {
             if (let Some(mapExpr) <- expr.mapExpr) {
@@ -446,7 +448,7 @@ public class Translator {
                 return value
             }
         }
-        return match (nodePtr.astKind) {
+        let result = match (nodePtr.astKind) {
             case ASTKind.MAIN_DECL => trans.Visit(RequireNodeAsMainDecl(nodePtr))
             case ASTKind.FUNC_DECL => trans.Visit(RequireNodeAsFuncDecl(nodePtr))
             case ASTKind.STRUCT_DECL => trans.Visit(RequireNodeAsStructDecl(nodePtr))
@@ -485,6 +487,14 @@ public class Translator {
             case _ => throw IllegalArgumentException(
                 "not yet ported in faithful AST2CHIR: ${ASTKindName(nodePtr.astKind)}")
         }
+        if (let Some(block) <- (nodePtr as AstBlock)) {
+            if (nodePtr.objectId != node.objectId || nodePtr.TestAttr(AstAttribute.UNSAFE)) {
+                let sourceBlock = backBlock ??
+                    throw IllegalStateException("faithful AST2CHIR desugar block has no source block")
+                trans.builder.CreateGoTo(trans.GetBlockByAST(block), sourceBlock)
+            }
+        }
+        return result
     }
 
     public static func GetDesugaredExpr(node: AstNode): AstNode {
@@ -539,6 +549,9 @@ public class Translator {
             if (let Some(astBody) <- funcBody.body) {
                 TranslateConstructorDefaultFieldInitializers(funcDecl, funcBody)
                 let result = Translator.TranslateASTNode(astBody, this)
+                if (entry.GetTerminator().isNone()) {
+                    builder.CreateGoTo(GetBlockByAST(astBody), entry)
+                }
                 if (CurrentBlock().GetTerminator().isNone()) {
                     EmitImplicitFunctionExit(fn, result)
                 }
@@ -666,6 +679,9 @@ public class Translator {
         currentBlock = entry
         if (let Some(astBody) <- funcBody.body) {
             let result = Translator.TranslateASTNode(astBody, this)
+            if (entry.GetTerminator().isNone()) {
+                builder.CreateGoTo(GetBlockByAST(astBody), entry)
+            }
             if (CurrentBlock().GetTerminator().isNone()) {
                 EmitImplicitFunctionExit(fn, result)
             }
@@ -854,6 +870,9 @@ public class Translator {
     }
 
     public func Visit(block: AstBlock): Option<Value> {
+        let chirBlock = CreateBlock()
+        SetSymbolTable(block, chirBlock)
+        currentBlock = chirBlock
         let nodes = CollectBlockBodyNodes(block)
         if (nodes.isEmpty()) {
             return None
@@ -1039,7 +1058,13 @@ public class Translator {
         let savedBlock = currentBlock
         let savedLambda = currentLambda
         let savedDelayExitSignal = delayExitSignal
+        let savedTryCatchContext = tryCatchContext.clone()
+        let savedTryBodyContext = tryBodyContext.clone()
+        let savedFinallyContext = finallyContext.clone()
         delayExitSignal = None
+        tryCatchContext.clear()
+        tryBodyContext.clear()
+        finallyContext.clear()
         blockGroupStack.add(body)
         currentLambda = lambda
         let entry = builder.CreateBlock(body)
@@ -1050,6 +1075,9 @@ public class Translator {
         lambda.SetReturnValue(retSlot)
         if (let Some(astBody) <- funcBody.body) {
             let result = Translator.TranslateASTNode(astBody, this)
+            if (entry.GetTerminator().isNone()) {
+                builder.CreateGoTo(GetBlockByAST(astBody), entry)
+            }
             if (CurrentBlock().GetTerminator().isNone()) {
                 EmitImplicitLambdaExit(lambda, result)
             }
@@ -1059,6 +1087,18 @@ public class Translator {
         currentBlock = savedBlock
         currentLambda = savedLambda
         delayExitSignal = savedDelayExitSignal
+        tryCatchContext.clear()
+        for (block in savedTryCatchContext) {
+            tryCatchContext.add(block)
+        }
+        tryBodyContext.clear()
+        for (tryExpr in savedTryBodyContext) {
+            tryBodyContext.add(tryExpr)
+        }
+        finallyContext.clear()
+        for (context in savedFinallyContext) {
+            finallyContext.add(context)
+        }
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         if (let Some(result) <- lambda.GetResult()) {
             return Some(result)
@@ -1167,7 +1207,11 @@ public class Translator {
         TranslateIfCondition(condExpr, thenBlock, elseBlock)
 
         currentBlock = thenBlock
-        let thenValue = Translator.TranslateASTNode(RequireBlock(expr.thenBody, "if then body"), this)
+        let thenAstBlock = RequireBlock(expr.thenBody, "if then body")
+        let thenValue = Translator.TranslateASTNode(thenAstBlock, this)
+        if (thenBlock.GetTerminator().isNone()) {
+            builder.CreateGoTo(GetBlockByAST(thenAstBlock), thenBlock)
+        }
         StoreIfResult(resultLoc, thenValue)
         if (CurrentBlock().GetTerminator().isNone()) {
             builder.CreateGoTo(joinBlock, CurrentBlock())
@@ -1175,7 +1219,13 @@ public class Translator {
 
         currentBlock = elseBlock
         let elseValue: Option<Value> = if (let Some(elseExpr) <- expr.elseBody) {
-            Translator.TranslateASTNode(elseExpr, this)
+            let value = Translator.TranslateASTNode(elseExpr, this)
+            if (let Some(elseAstBlock) <- (elseExpr as AstBlock)) {
+                if (elseBlock.GetTerminator().isNone()) {
+                    builder.CreateGoTo(GetBlockByAST(elseAstBlock), elseBlock)
+                }
+            }
+            value
         } else {
             None
         }
@@ -1830,7 +1880,11 @@ public class Translator {
         TranslateIfCondition(RequireExpr(expr.condExpr, "while condition"), bodyBlock, endBlock)
 
         currentBlock = bodyBlock
-        let _ = Translator.TranslateASTNode(RequireBlock(expr.body, "while body"), this)
+        let bodyAstBlock = RequireBlock(expr.body, "while body")
+        let _ = Translator.TranslateASTNode(bodyAstBlock, this)
+        if (bodyBlock.GetTerminator().isNone()) {
+            builder.CreateGoTo(GetBlockByAST(bodyAstBlock), bodyBlock)
+        }
         if (CurrentBlock().GetTerminator().isNone()) {
             builder.CreateGoTo(conditionBlock, CurrentBlock())
         }
@@ -1849,7 +1903,11 @@ public class Translator {
 
         loopTargetStack.add(FaithfulLoopTarget(conditionBlock, endBlock))
         currentBlock = bodyBlock
-        let _ = Translator.TranslateASTNode(RequireBlock(expr.body, "do-while body"), this)
+        let bodyAstBlock = RequireBlock(expr.body, "do-while body")
+        let _ = Translator.TranslateASTNode(bodyAstBlock, this)
+        if (bodyBlock.GetTerminator().isNone()) {
+            builder.CreateGoTo(GetBlockByAST(bodyAstBlock), bodyBlock)
+        }
         if (CurrentBlock().GetTerminator().isNone()) {
             builder.CreateGoTo(conditionBlock, CurrentBlock())
         }
@@ -1966,7 +2024,12 @@ public class Translator {
         }
         tryBodyContext.add(expr)
         tryCatchContext.add(exceptionBlock)
-        let tryValue = Translator.TranslateASTNode(RequireBlock(expr.tryBlock, "try block"), this)
+        let baseBlock = CurrentBlock()
+        let tryAstBlock = RequireBlock(expr.tryBlock, "try block")
+        let tryValue = Translator.TranslateASTNode(tryAstBlock, this)
+        if (baseBlock.GetTerminator().isNone()) {
+            builder.CreateGoTo(GetBlockByAST(tryAstBlock), baseBlock)
+        }
         StoreTryResult(resultLoc, tryValue)
         if (CurrentBlock().GetTerminator().isNone()) {
             builder.CreateGoTo(normalEndBlock, CurrentBlock())
@@ -2168,7 +2231,13 @@ public class Translator {
         let savedLambda = currentLambda
         let savedAstFuncDecl = currentAstFuncDecl
         let savedDelayExitSignal = delayExitSignal
+        let savedTryCatchContext = tryCatchContext.clone()
+        let savedTryBodyContext = tryBodyContext.clone()
+        let savedFinallyContext = finallyContext.clone()
         delayExitSignal = None
+        tryCatchContext.clear()
+        tryBodyContext.clear()
+        finallyContext.clear()
         blockGroupStack.add(body)
         currentLambda = lambda
         currentAstFuncDecl = funcDecl
@@ -2181,6 +2250,9 @@ public class Translator {
             lambda.SetReturnValue(retSlot)
         }
         let result = Translator.TranslateASTNode(astBody, this)
+        if (entry.GetTerminator().isNone()) {
+            builder.CreateGoTo(GetBlockByAST(astBody), entry)
+        }
         if (CurrentBlock().GetTerminator().isNone()) {
             EmitImplicitLambdaExit(lambda, result)
         }
@@ -2188,6 +2260,18 @@ public class Translator {
         currentLambda = savedLambda
         currentAstFuncDecl = savedAstFuncDecl
         delayExitSignal = savedDelayExitSignal
+        tryCatchContext.clear()
+        for (block in savedTryCatchContext) {
+            tryCatchContext.add(block)
+        }
+        tryBodyContext.clear()
+        for (tryExpr in savedTryBodyContext) {
+            tryBodyContext.add(tryExpr)
+        }
+        finallyContext.clear()
+        for (context in savedFinallyContext) {
+            finallyContext.add(context)
+        }
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         return Some(lambdaValue)
     }
@@ -2466,7 +2550,9 @@ public class Translator {
         if (inExpression.body.size < 3) {
             throw IllegalStateException("faithful AST2CHIR string ForInExpr expects desugared block with 3 nodes")
         }
+        let forInExprBlock = CurrentBlock()
         let _ = Translator.TranslateASTNode(inExpression, this)
+        builder.CreateGoTo(GetBlockByAST(inExpression), forInExprBlock)
         let indexDecl = RequireBodyVarDecl(inExpression, 0, "for-in string induction var")
         let endDecl = RequireBodyVarDecl(inExpression, 2, "for-in string end var")
         let inductiveVar = GetSymbolTable(indexDecl)
@@ -2710,7 +2796,11 @@ public class Translator {
             currentBlock = bodyBlock
         }
         if (let Some(body) <- expr.body) {
+            let prevBlock = CurrentBlock()
             let _ = Translator.TranslateASTNode(body, this)
+            if (prevBlock.GetTerminator().isNone()) {
+                builder.CreateGoTo(GetBlockByAST(body), prevBlock)
+            }
         }
         if (CurrentBlock().GetTerminator().isNone()) {
             builder.CreateExit(None, CurrentBlock())
@@ -3467,7 +3557,11 @@ public class Translator {
             let (falseBlock, trueBlock) = TranslateExceptionPattern(expr.catchPatterns[idx], beginCatch)
             currentBlock = trueBlock
             BindExceptionPatternValues(expr.catchPatterns[idx], beginCatch)
-            let catchValue = Translator.TranslateASTNode(expr.catchBlocks[idx], this)
+            let catchBlock = expr.catchBlocks[idx]
+            let catchValue = Translator.TranslateASTNode(catchBlock, this)
+            if (trueBlock.GetTerminator().isNone()) {
+                builder.CreateGoTo(GetBlockByAST(catchBlock), trueBlock)
+            }
             StoreTryResult(resultLoc, catchValue)
             if (CurrentBlock().GetTerminator().isNone()) {
                 builder.CreateGoTo(endBlock, CurrentBlock())
@@ -3572,8 +3666,14 @@ public class Translator {
         let beginCatch = RequireResult(builder.CreateIntrinsic(exceptionTy,
             IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), CurrentBlock()))
         let localScopeMark = localValSymbolTable.Mark()
+        let savedAstNodeSymbolTable = astNodeSymbolTable
+        astNodeSymbolTable = AST2CHIRNodeMap<Value>(savedAstNodeSymbolTable)
         let _ = Translator.TranslateASTNode(finallyBlock, this)
+        if (exceptionBlock.GetTerminator().isNone()) {
+            builder.CreateGoTo(GetBlockByAST(finallyBlock), exceptionBlock)
+        }
         localValSymbolTable.Restore(localScopeMark)
+        astNodeSymbolTable = savedAstNodeSymbolTable
         let rethrowEdges = activeContext.CloneControlFlowBlocks()
         activeContext.RestoreControlFlowBlocks(savedControlFlowBlocks)
         let endCatchBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "finally rethrow"))
@@ -3614,8 +3714,14 @@ public class Translator {
         builder.CreateGoTo(finallyEntryBlock, edge.prevBlock)
         currentBlock = finallyEntryBlock
         let localScopeMark = localValSymbolTable.Mark()
+        let savedAstNodeSymbolTable = astNodeSymbolTable
+        astNodeSymbolTable = AST2CHIRNodeMap<Value>(savedAstNodeSymbolTable)
         let _ = Translator.TranslateASTNode(finallyBlock, this)
+        if (finallyEntryBlock.GetTerminator().isNone()) {
+            builder.CreateGoTo(GetBlockByAST(finallyBlock), finallyEntryBlock)
+        }
         localValSymbolTable.Restore(localScopeMark)
+        astNodeSymbolTable = savedAstNodeSymbolTable
         if (CurrentBlock().GetTerminator().isSome()) {
             return
         }
@@ -3675,7 +3781,11 @@ public class Translator {
             }
 
             currentBlock = bodyBlock
-            let bodyValue = Translator.TranslateASTNode(RequireBlock(matchCase.exprOrDecls, "match case body"), this)
+            let bodyAstBlock = RequireBlock(matchCase.exprOrDecls, "match case body")
+            let bodyValue = Translator.TranslateASTNode(bodyAstBlock, this)
+            if (bodyBlock.GetTerminator().isNone()) {
+                builder.CreateGoTo(GetBlockByAST(bodyAstBlock), bodyBlock)
+            }
             StoreIfResult(resultLoc, bodyValue)
             if (CurrentBlock().GetTerminator().isNone()) {
                 builder.CreateGoTo(endBlock, CurrentBlock())
@@ -3712,8 +3822,11 @@ public class Translator {
             }
 
             currentBlock = bodyBlock
-            let bodyValue = Translator.TranslateASTNode(RequireBlock(matchCase.exprOrDecls, "condition match body"),
-                this)
+            let bodyAstBlock = RequireBlock(matchCase.exprOrDecls, "condition match body")
+            let bodyValue = Translator.TranslateASTNode(bodyAstBlock, this)
+            if (bodyBlock.GetTerminator().isNone()) {
+                builder.CreateGoTo(GetBlockByAST(bodyAstBlock), bodyBlock)
+            }
             StoreIfResult(resultLoc, bodyValue)
             if (CurrentBlock().GetTerminator().isNone()) {
                 builder.CreateGoTo(endBlock, CurrentBlock())
@@ -5952,6 +6065,37 @@ public class Translator {
             out.add(value)
         }
         return out
+    }
+
+    private func SetSymbolTable(node: AstNode, value: Value, isLocal!: Bool = true): Unit {
+        if (let Some(decl) <- (node as AstDecl)) {
+            if (isLocal) {
+                localValSymbolTable.Set(decl, value)
+            } else {
+                globalSymbolTable.Set(decl, value)
+            }
+            return
+        }
+        astNodeSymbolTable.Set(node, value)
+    }
+
+    private func GetSymbolTable(node: AstNode): Value {
+        if (let Some(decl) <- (node as AstDecl)) {
+            return GetSymbolTable(decl)
+        }
+        return astNodeSymbolTable.Get(node)
+    }
+
+    private func GetBlockByAST(block: AstBlock): Block {
+        return (GetSymbolTable(block) as Block) ??
+            throw IllegalStateException("faithful AST2CHIR block cache is not a Block")
+    }
+
+    private func CreateBlock(): Block {
+        if (blockGroupStack.isEmpty()) {
+            throw IllegalStateException("faithful AST2CHIR CreateBlock without block group")
+        }
+        return builder.CreateBlock(blockGroupStack[blockGroupStack.size - 1])
     }
 
     private func GetSymbolTable(decl: AstDecl): Value {

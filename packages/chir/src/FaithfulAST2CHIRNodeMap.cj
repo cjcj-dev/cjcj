@@ -3,9 +3,72 @@ package cangjie_compiler::chir
 import std.collection.*
 
 import cangjie_compiler::ast.ASTKindIndex
+import cangjie_compiler::ast.ASTKindName
 import cangjie_compiler::ast.Attribute as AstAttribute
 import cangjie_compiler::ast.Decl as AstDecl
 import cangjie_compiler::ast.FuncDecl as AstFuncDecl
+import cangjie_compiler::ast.Node as AstNode
+
+// Mirrors C++ AST2CHIRNodeMap<T> (include/cangjie/CHIR/AST2CHIR/AST2CHIRNodeMap.h:23-66).
+public class AST2CHIRNodeMap<T> {
+    private let cache: HashMap<Int64, T> = HashMap<Int64, T>()
+    private let keys: ArrayList<Int64> = ArrayList<Int64>()
+
+    public init() {}
+
+    public init(other: AST2CHIRNodeMap<T>) {
+        for (key in other.keys) {
+            if (let Some(value) <- other.cache.get(key)) {
+                cache[key] = value
+                keys.add(key)
+            }
+        }
+    }
+
+    public func Has(node: AstNode): Bool {
+        return cache.contains(node.objectId)
+    }
+
+    public func Set(node: AstNode, chirNode: T): Unit {
+        if (cache.contains(node.objectId)) {
+            throw IllegalStateException("AST2CHIRNodeMap duplicate node: ${ASTKindName(node.astKind)}")
+        }
+        cache[node.objectId] = chirNode
+        keys.add(node.objectId)
+    }
+
+    public func Get(node: AstNode): T {
+        return TryGet(node) ??
+            throw IllegalStateException("AST2CHIRNodeMap miss: ${ASTKindName(node.astKind)}")
+    }
+
+    public func TryGet(node: AstNode): Option<T> {
+        return cache.get(node.objectId)
+    }
+
+    public func GetALL(): HashMap<Int64, T> {
+        let out = HashMap<Int64, T>()
+        for (key in keys) {
+            if (let Some(value) <- cache.get(key)) {
+                out[key] = value
+            }
+        }
+        return out
+    }
+
+    public func Erase(node: AstNode): Unit {
+        cache.remove(node.objectId)
+        var idx = keys.size - 1
+        while (idx >= 0) {
+            if (keys[idx] == node.objectId) {
+                keys.remove(at: idx)
+                return
+            }
+            idx--
+        }
+    }
+
+}
 
 private func FaithfulAstDeclStructuralKey(decl: AstDecl): String {
     return "${ASTKindIndex(decl.astKind)}:" + decl.fullPackageName + ":" + decl.identifier.Val() + ":" +
