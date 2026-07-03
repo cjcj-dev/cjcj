@@ -77,7 +77,7 @@ extend ParserImpl {
         // 路径会 Next() 消费 RPAREN(C++ GetInvalidExprInAtom 不消费 lookahead), 不短路会吞掉右括号
         // 导致 Expect(RPAREN) 失败+token 失同步。保留与 C++ ParseQuote.cpp:47 等价的同步语义。
         let parsedExpr = if (Seeing(TokenKind.RPAREN) || Seeing(TokenKind.END)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected expression in quote interpolation")
+            DiagExpectedExpression()
             InvalidExpr(Peek().Begin())
         } else {
             ParseExpr()
@@ -137,10 +137,7 @@ extend ParserImpl {
             if (Seeing(TokenKind.LPAREN)) {
                 depth++
             } else if (Seeing(TokenKind.DOLLAR)) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    Peek().Begin(),
-                    "expected escaped dollar token or quote interpolation")
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_expect_escape_dollar_token, Peek().Begin())
             }
             if (SkipAmbiguousToken() || SkipCombinedDoubleArrow()) {
                 tokens.add(lastToken)
@@ -160,7 +157,8 @@ extend ParserImpl {
         ret.begin = token.Begin()
         ret.quotePos = token.Begin()
         if (newlineSkipped || Seeing(TokenKind.NL)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.End(), "unexpected line break after quote")
+            let lineBreakToken = if (Seeing(TokenKind.NL)) { Peek() } else { lastToken }
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_line_break, lineBreakToken)
             ret.isBroken = true
         }
         SkipBlank(TokenKind.NL)
@@ -169,7 +167,7 @@ extend ParserImpl {
             ParseQuoteTokens(ret)
             ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after quote expression").Begin()
         } else {
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected '(' after quote")
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_paren, Peek(), ConvertToken(Peek()))
             ret.isBroken = true
         }
         ret.end = lastToken.End()
