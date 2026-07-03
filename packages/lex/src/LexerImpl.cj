@@ -1424,7 +1424,7 @@ public class LexerImpl {
                 return (base, prefix, digits[0], reasonPoint, digits[2])
             }
             ReadUTF8Char()
-            let lower = lowerByte(UInt8(currentChar))
+            let lower = lowerByte(UInt8(currentChar & 0xff))
             if (lower == b'x') {
                 reasonPoint = pCurrent
                 ReadUTF8Char()
@@ -1554,7 +1554,7 @@ public class LexerImpl {
 
     private func ProcessNumberExponentPart(prefix: UInt8, reasonPoint: Int64, isFloatRef: Bool): Bool {
         var isFloat = isFloatRef
-        let exp = lowerByte(UInt8(currentChar))
+        let exp = lowerByte(UInt8(currentChar & 0xff))
         if (exp == b'e' || exp == b'p') {
             if (success && ((prefix != b'd' && prefix != b'x') || (exp == b'e' && prefix == b'x') ||
                 (exp == b'p' && prefix == b'd'))) {

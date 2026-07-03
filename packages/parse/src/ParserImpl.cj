@@ -34,7 +34,7 @@ public class ParserImpl {
         this.diag = diag
         this.sourceManager = sm
         this.lexerDiag.SetSourceManager(sm)
-        this.lexer = Lexer(fileID, input, lexerDiag, sm)
+        this.lexer = Lexer(fileID, input, lexerDiag, sm, cts: attachComment)
         this.enableAttachComment = attachComment
         this.parseDeclFile = parsingDeclFiles
         Init()
@@ -44,7 +44,7 @@ public class ParserImpl {
         this.diag = diag
         this.sourceManager = sm
         this.lexerDiag.SetSourceManager(sm)
-        this.lexer = Lexer(input, lexerDiag, sm, pos)
+        this.lexer = Lexer(input, lexerDiag, sm, pos, cts: attachComment)
         this.enableAttachComment = attachComment
         this.parseDeclFile = parsingDeclFiles
         Init()
@@ -54,7 +54,7 @@ public class ParserImpl {
         this.diag = diag
         this.sourceManager = sm
         this.lexerDiag.SetSourceManager(sm)
-        this.lexer = Lexer(inputTokens, lexerDiag, sm)
+        this.lexer = Lexer(inputTokens, lexerDiag, sm, cts: attachComment)
         this.enableAttachComment = attachComment
         this.parseDeclFile = parsingDeclFiles
         Init()

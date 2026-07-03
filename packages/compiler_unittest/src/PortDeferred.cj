@@ -92,12 +92,3 @@ package cangjie_compiler::compiler_unittest
 // PORT-DEFERRED: Macro/MacroTest.ExpandDecl_WithFailedMacroCall_HandlesError01 requires old macro expansion error fixtures.
 // PORT-DEFERRED: Macro/MacroTest.ExpandDecl_WithFailedMacroCall_HandlesError02 requires old macro expansion error fixtures.
 // PORT-DEFERRED: Macro/MacroTest.ExpandDecl_WithFailedMacroCall_HandlesError03 requires old macro expansion error fixtures.
-
-// PORT-DEFERRED: ConditionalCompilation/ConditionalCompilationTest.for_lsp requires old LSP conditional-compilation fixture plumbing.
-// PORT-DEFERRED: ConditionalCompilation/ConditionalCompilationTest.passedCondition_for_lsp requires old LSP conditional-compilation fixture plumbing.
-// PORT-DEFERRED: ConditionalCompilation/ConditionalCompilationTest.passedCondition_cfgFile_for_lsp requires config-file fixture setup.
-// PORT-DEFERRED: ConditionalCompilation/ConditionalCompilationTest.packagePaths_for_lsp requires package-path fixture setup.
-// PORT-DEFERRED: ConditionalCompilation/ConditionalCompilationTest.invalid_condition_value_after_short_circuit requires old conditional parser fixture setup.
-// PORT-DEFERRED: ConditionalCompilation/ConditionalCompilationTest.cfgPaths_no_file_for_lsp requires config-path fixture setup.
-// PORT-DEFERRED: ConditionalCompilation/ConditionalCompilationTest.same_with_builtin_for_lsp requires builtin conditional fixture setup.
-// PORT-DEFERRED: ConditionalCompilation/ConditionalCompilationTest.cfg_path_ignored_for_lsp requires config-path fixture setup.
