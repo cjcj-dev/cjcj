@@ -14,6 +14,7 @@ import cangjie_compiler::meta_transformation.NativeMetaTransformPlugin
 import cangjie_compiler::lex.Lexer as CangjieLexer
 import cangjie_compiler::lex.TokenKind as CangjieTokenKind
 import cangjie_compiler::lex.TokenKindValue
+import cangjie_compiler::utils.FreeIdleMemoryToOS
 import std.collection.*
 
 private class PendingMangledDecl {
@@ -592,6 +593,7 @@ public class CompilerInstance {
 
     public func PerformCHIRCompilation(): Bool {
         typeManager.ReleasePostSemaCaches()
+        FreeIdleMemoryToOS()
         chirData.ClearRealPackages()
         var ret = true
         let sourcePackagesCHIR = GetSourcePackages()
