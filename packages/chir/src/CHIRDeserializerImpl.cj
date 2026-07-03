@@ -268,7 +268,6 @@ class CHIRDeserializerImpl {
                     }
                 }
                 createParameters(fn, CHIRFieldAt(fields, 8))
-                pkg.AddGlobalFunc(fn)
             }
         }
     }

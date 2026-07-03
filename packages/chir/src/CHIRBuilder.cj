@@ -47,6 +47,9 @@ public class CHIRBuilder {
         let fn = Function(funcType, GLOBAL_VALUE_PREFIX + identifier, srcCodeIdentifier, rawMangledName, packageName,
             genericTypeParams: genericTypeParams)
         context.RegisterValue(fn)
+        if (let Some(pkg) <- context.GetCurPackage()) {
+            pkg.AddGlobalFunc(fn)
+        }
         return fn
     }
 

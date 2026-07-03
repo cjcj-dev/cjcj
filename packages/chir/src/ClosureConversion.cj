@@ -1707,7 +1707,6 @@ public class ClosureConversion {
         let fn = builder.CreateFunction(funcTy, identifier, srcCodeIdentifier: srcCodeIdentifier,
             rawMangledName: identifier, packageName: CurrentPackage().GetName(),
             genericTypeParams: genericTypeParams)
-        AddFunctionToPackage(fn)
         return fn
     }
 
@@ -1724,12 +1723,6 @@ public class ClosureConversion {
 
     private func MarkAutoEnvClass(classDef: ClassDef): Unit {
         classDef.SetAnnotation(CC_AUTO_ENV_CLASS_ANNOTATION, "true")
-    }
-
-    private func AddFunctionToPackage(fn: Function): Unit {
-        if (CurrentPackage().TryGetGlobalFunc(fn.GetIdentifier()).isNone()) {
-            CurrentPackage().AddGlobalFunc(fn)
-        }
     }
 
     private func AddClassToPackage(classDef: ClassDef): Unit {

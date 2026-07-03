@@ -442,6 +442,19 @@ public func CreateTypedStoreForAddress(irBuilder: IRBuilder2, value: CGValue, ad
     if (ShouldUseGCStaticWriteBarrier(irBuilder, addr) && ShouldUseGCStaticRefWriteBarrier(addr)) {
         return irBuilder.CallGCWriteStaticRef(storedValue, addr.GetRawValue())
     }
+    if (let Some(valueCGType) <- value.GetCGType()) {
+        if (let Some(addrCGType) <- addr.GetCGType()) {
+            if (valueCGType.IsVArrayPtrType() && addrCGType.IsVArrayPtrType()) {
+                let valueType = valueCGType.GetPointerElementType().getOrThrow().GetLLVMType()
+                let size = unsafe {
+                    LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw),
+                        irBuilder.GetCGModule().GetTypeSize(valueType), 0)
+                }
+                let align = irBuilder.GetCGModule().GetABITypeAlignment(valueType)
+                return irBuilder.CreateMemCpy(addr.GetRawValue(), align, value.GetRawValue(), align, size)
+            }
+        }
+    }
     return irBuilder.CreateStore(storedValue, addr.GetRawValue())
 }
 

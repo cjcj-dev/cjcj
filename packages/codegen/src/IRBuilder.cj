@@ -470,6 +470,9 @@ public class IRBuilder2 <: Resource {
 
         let rawValue = value.GetRawValue()
         let rawDest = dest.GetRawValue()
+        if (GetTrackedBasePtr(rawDest).isSome()) {
+            return None
+        }
         let destTy = destElementCGType.GetOriginal()
         let typeInfoTy = boxType ?? destTy
         let typeInfo = CreateTypeInfo(typeInfoTy)
@@ -1508,11 +1511,7 @@ public class IRBuilder2 <: Resource {
         if (let Some(staticSize) <- cgTy.GetSize()) {
             return unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(staticSize), 0) }
         }
-        let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
-        let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
-        let typedTypeInfo = CreateBitCast(typeInfoValue, typeInfoPtrType, name: "ti.typed")
-        let sizePtr = CreateStructGEP(typeInfoType, typedTypeInfo, 4u32, name: "ti.size")
-        return CreateLoad(unsafe { LLVMInt32TypeInContext(GetLLVMContext().raw) }, sizePtr, name: "ti.size")
+        return GetSizeFromTypeInfo(typeInfoValue)
     }
 
     private func EnsureAllocaGenericLayoutMetadata(chirTy: Type, typeInfoValue: LLVMValueRef): Unit {
@@ -3408,6 +3407,9 @@ public class IRBuilder2 <: Resource {
 
     public func StoreValueToObjectPayload(objectValue: LLVMValueRef, sourceValue: LLVMValueRef, sourceTy: Type): Unit {
         let valueTy = sourceTy.StripAllRefs()
+        if (valueTy.IsUnit()) {
+            return
+        }
         let valueCGType = CGType.GetOrCreate(cgMod, valueTy)
         let payload = GetPayloadFromObject(objectValue)
         let payloadType = unsafe { LLVMPointerType(valueCGType.GetLLVMType(), 1u32) }
@@ -3437,11 +3439,13 @@ public class IRBuilder2 <: Resource {
             CallGCWriteStruct(objectValue, typedPayload, sourcePtr, size, valueCGType.GetOriginal().ToString())
             return
         }
-        CreateStore(storedValue, typedPayload)
+        let addrType = CGType.GetOrCreate(cgMod, GetCGContext().GetCHIRBuilder().context.GetRefTy(valueTy),
+            extraInfo: TypeExtraInfo(1u32))
+        CreateStore(CGValue(storedValue, valueCGType), CGValue(typedPayload, addrType))
     }
 
     private func ShouldLoadGenericAggregateBoxSource(sourceValue: LLVMValueRef, valueTy: Type, valueCGType: CGType): Bool {
-        if (!(valueTy.IsStruct() || valueTy.IsTuple() || valueTy.IsEnum() || valueTy.IsVArray())) {
+        if (!(valueTy.IsStruct() || valueTy.IsTuple() || valueTy.IsEnum() || valueTy.IsVArray() || valueTy.IsUnit())) {
             return false
         }
         if (let Some(enumCGType) <- (valueCGType as CGEnumType)) {

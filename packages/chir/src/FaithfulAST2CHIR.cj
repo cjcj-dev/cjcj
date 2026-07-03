@@ -2776,7 +2776,6 @@ public class FaithfulAST2CHIR {
         fn.InitBody(body)
         let entry = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
-        AddFunctionToPackage(fn)
         return fn
     }
 
@@ -3015,7 +3014,6 @@ public class FaithfulAST2CHIR {
         }
         TranslateFuncParams(funcDecl, fn)
         globalCache.Set(funcDecl, fn)
-        AddFunctionToPackage(fn)
     }
 
     private func CreateImportedFuncSignatureAndSetGlobalCache(funcDecl: AstFuncDecl): Unit {
@@ -3029,7 +3027,6 @@ public class FaithfulAST2CHIR {
         ApplyFuncKind(fn, funcDecl)
         TranslateFuncParams(funcDecl, fn)
         globalCache.Set(funcDecl, fn)
-        AddFunctionToPackage(fn)
     }
 
     private func CreateImportedValueSignatureAndSetGlobalCache(varDecl: AstVarDecl): Unit {
@@ -3258,10 +3255,6 @@ public class FaithfulAST2CHIR {
             return outerDecl.astKind == ASTKind.CLASS_DECL || outerDecl.astKind == ASTKind.INTERFACE_DECL
         }
         return false
-    }
-
-    private func AddFunctionToPackage(fn: Function): Unit {
-        CurrentPackage().AddGlobalFunc(fn)
     }
 
     private func AddGlobalVarToPackage(globalVar: GlobalVar): Unit {
