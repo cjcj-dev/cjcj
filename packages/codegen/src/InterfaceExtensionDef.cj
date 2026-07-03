@@ -175,8 +175,8 @@ private func GenerateObjectExtensionDefForType(cgMod: CGModule, targetDef: Class
     unsafe {
         LLVMSetInitializer(extensionDef, ConstNamedStruct(extensionDefType, values))
         LLVMSetLinkage(extensionDef, LLVMLinkageValue(LLVMLinkage.Private))
-        LLVMSetGlobalConstant(extensionDef, 1)
     }
+    addAttribute(extensionDef, GC_MTABLE_ATTR)
     cgMod.AddNonExternalExtensionDef(extensionDef)
     return true
 }
@@ -205,8 +205,8 @@ private func GenerateExtensionDefForType(cgMod: CGModule, targetDef: CustomTypeD
     unsafe {
         LLVMSetInitializer(extensionDef, ConstNamedStruct(extensionDefType, content))
         LLVMSetLinkage(extensionDef, LLVMLinkageValue(LLVMLinkage.Private))
-        LLVMSetGlobalConstant(extensionDef, 1)
     }
+    addAttribute(extensionDef, GC_MTABLE_ATTR)
     cgMod.AddNonExternalExtensionDef(extensionDef)
     return true
 }
@@ -608,6 +608,7 @@ private func EmitNonExternalExtensionDefsTable(cgMod: CGModule): Unit {
         LLVMSetLinkage(table, LLVMLinkageValue(LLVMLinkage.Private))
         LLVMSetGlobalConstant(table, 0)
     }
+    addAttribute(table, "InnerTypeExtensions")
     cgMod.GetCGContext().AddLLVMUsedVars(EXTENSION_DEFS_NAME)
 }
 
