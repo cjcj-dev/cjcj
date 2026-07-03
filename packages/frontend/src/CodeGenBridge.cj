@@ -11,9 +11,11 @@ import cangjie_compiler::chir.DeadCodeElimination
 import cangjie_compiler::chir.FaithfulAST2CHIR
 import cangjie_compiler::chir.FuncKind as ChirFuncKind
 import cangjie_compiler::chir.Function as ChirFunction
+import cangjie_compiler::chir.GetRefToArrayElem
 import cangjie_compiler::chir.MergeBlocks
 import cangjie_compiler::chir.OptFuncRetType
 import cangjie_compiler::chir.Package as RealCHIRPackage
+import cangjie_compiler::chir.RedundantFutureRemoval
 import cangjie_compiler::chir.RedundantGetOrThrowElimination
 import cangjie_compiler::chir.RedundantLoadElimination
 import cangjie_compiler::chir.UnitUnify
@@ -25,6 +27,7 @@ import cangjie_compiler::codegen.GenPackageModules
 import cangjie_compiler::codegen.LLVMModuleHandle as LLVMModuleHandle
 import cangjie_compiler::codegen.SavePackageModule
 import cangjie_compiler::meta_transformation.TryRunCHIRMetaTransforms
+import cangjie_compiler::option.OptimizationFlag
 import cangjie_compiler::option.TempFileInfo
 import cangjie_compiler::utils.DEFAULT_PACKAGE_NAME
 import cangjie_compiler::utils.FileUtil
@@ -81,6 +84,12 @@ private func RunOptimizationPass(pkg: RealCHIRPackage, builder: ChirBuilder, opt
     RedundantGetOrThrowElimination().RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
     // C++ 此处有 RunRangePropagation，selfhost 未移植，待补。
     UselessAllocateElimination.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
+    // GAP_TODO: Devirtualization is unported; C++ call is CHIR.cpp:648.
+    // GAP_TODO: ArrayLambdaOpt is unported; C++ call is CHIR.cpp:649.
+    if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_FUTURE)) {
+        RedundantFutureRemoval(pkg, isDebug: options.chirDebugOptimizer).RunOnPackage()
+    }
+    GetRefToArrayElem.RunOnPackage(pkg, builder)
 }
 
 public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool {
