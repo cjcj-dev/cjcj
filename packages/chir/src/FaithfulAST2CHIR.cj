@@ -942,6 +942,8 @@ public class FaithfulAST2CHIR {
     private let foreignFuncSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private var localConstVars: ElementList = ElementList()
     private let localConstFuncs: ElementList = ElementList()
+    private var funcsAndVarsDepMap: DeclDepMap = DeclDepMap()
+    private var localConstVarsDepMap: DeclDepMap = DeclDepMap()
     private let packageInitializerBlocks: HashMap<Int64, Block> = HashMap<Int64, Block>()
     private let initFuncsForConstVar: ArrayList<Function> = ArrayList<Function>()
 
@@ -965,11 +967,14 @@ public class FaithfulAST2CHIR {
         CurrentPackage().SetPackageAccessLevel(BuildPackageAccessLevel(node.accessible))
         CollectImportedDecls(node)
         CollectDeclsInCurPkg(node)
-        CollectLocalConstFuncAndVars(node)
+        let initOrder = GlobalDeclAnalysis(node)
+        if (failure) {
+            return false
+        }
         CacheTopLevelDeclToGlobalSymbolTable()
         TranslateNominalDecls(node)
         TranslateOtherTopLevelDecls(node)
-        SetInitFuncForStaticVar()
+        SetInitFuncForStaticVar(initOrder)
         UpdateMemberVarPath(builder).RunOnPackage(CurrentPackage())
         FlatForInExpr(builder).RunOnPackage(CurrentPackage())
         if (!failure && opts.IsConstEvalEnabled() && !opts.enIncrementalCompilation && opts.commonPartCjos.isEmpty()) {
@@ -1522,8 +1527,7 @@ public class FaithfulAST2CHIR {
         }
     }
 
-    private func SetInitFuncForStaticVar(): Unit {
-        let initOrder = GlobalDeclAnalysis()
+    private func SetInitFuncForStaticVar(initOrder: ArrayList<FaithfulInitFileVars>): Unit {
         CreatePackageInit(nodeInitOrder: initOrder, suffix: "")
         CreatePackageInit(nodeInitOrder: initOrder, suffix: "_literal")
     }
@@ -1547,17 +1551,25 @@ public class FaithfulAST2CHIR {
             overrideSrcFuncResolver: overrideSrcFuncResolver)
     }
 
-    private func GlobalDeclAnalysis(): ArrayList<FaithfulInitFileVars> {
+    private func GlobalDeclAnalysis(pkg: AstPackage): ArrayList<FaithfulInitFileVars> {
         let funcsAndVars = ElementList()
         let fileAndVarMap = ArrayList<FaithfulInitFileVars>()
+        funcsAndVarsDepMap = DeclDepMap()
+        localConstVarsDepMap = DeclDepMap()
         CollectStaticInitFuncInfo()
         CollectFuncsAndVars(funcsAndVars, fileAndVarMap)
+        CollectLocalConstFuncAndVars(pkg)
 
         let nodesWithDeps = ElementList()
         for (element in funcsAndVars.stableOrderValue) {
+            if (opts.enIncrementalCompilation && !element.toBeCompiled && element.identifier.Val() != STATIC_INIT_VAR) {
+                continue
+            }
             nodesWithDeps.AddElement(element)
         }
-        return Run(nodesWithDeps, fileAndVarMap, funcsAndVars)
+        let initOrder = Run(nodesWithDeps, fileAndVarMap, funcsAndVars)
+        FlatternLocalConstVars()
+        return initOrder
     }
 
     private func CollectStaticInitFuncInfo(): Unit {
@@ -1747,7 +1759,6 @@ public class FaithfulAST2CHIR {
             }
         }
         CollectLocalConstDecl(instLocalconstFuncs, false)
-        FlatternLocalConstVars()
     }
 
     private func FlatternLocalConstVars(): Unit {
@@ -1793,8 +1804,7 @@ public class FaithfulAST2CHIR {
     private func SortGlobalVarDep(nodesWithDeps: ElementList, fileAndVarMap: ArrayList<FaithfulInitFileVars>,
         funcsAndVars: ElementList): ArrayList<AstFile> {
         let _ = fileAndVarMap
-        let funcsAndVarsDepMap = DeclDepMap()
-        AnalysisDependency(nodesWithDeps, funcsAndVarsDepMap, funcsAndVars)
+        AnalysisDependency(nodesWithDeps, funcsAndVars)
 
         let fileDependencyMap = FileDepMap()
         for (decl in funcsAndVars.stableOrderValue) {
@@ -1819,8 +1829,7 @@ public class FaithfulAST2CHIR {
         return sortedFiles
     }
 
-    private func AnalysisDependency(nodesWithDeps: ElementList, funcsAndVarsDepMap: DeclDepMap,
-        funcsAndVars: ElementList): Unit {
+    private func AnalysisDependency(nodesWithDeps: ElementList, funcsAndVars: ElementList): Unit {
         let globalVarSet = BuildDeclSet(globalAndStaticVars)
         let candidateSet = BuildDeclSet(funcsAndVars.stableOrderValue)
         for (localConstVar in localConstVars.stableOrderValue) {
@@ -1833,7 +1842,10 @@ public class FaithfulAST2CHIR {
                     continue
                 }
             }
-            funcsAndVarsDepMap.AddDeps(node, CollectDirectDependencies(node, candidateSet, globalVarSet, patternOwnerMap))
+            let (dependencies, localConstVarDeps) =
+                CollectDirectDependencies(node, candidateSet, globalVarSet, patternOwnerMap)
+            funcsAndVarsDepMap.AddDeps(node, dependencies)
+            localConstVarsDepMap.AddDeps(node, localConstVarDeps)
         }
     }
 
@@ -1891,6 +1903,12 @@ public class FaithfulAST2CHIR {
             return initOrder
         }
 
+        AnalysisDependency(localConstVars, funcsAndVars)
+        for (element in localConstVarsDepMap.stableOrderValue) {
+            for (dep in element.deps) {
+                funcsAndVarsDepMap.AddDep(element.decl, dep)
+            }
+        }
         let globalVarsAndLocalConstVarsDepMap = DeclDepMap()
         AnalysisGlobalVarsAndLocalConstVarsDependency(initOrder, globalVarsAndLocalConstVarsDepMap)
 
@@ -1914,6 +1932,29 @@ public class FaithfulAST2CHIR {
                     globalVarsAndLocalConstVarsDepMap.AddDep(globalVar, previousVar)
                 }
                 previous = globalVar
+            }
+        }
+        for (localConstVar in localConstVars.stableOrderValue) {
+            let visited = FaithfulInitDeclSet()
+            AnalysisGlocalVarsAndLocalConstVarsDependencyImpl(localConstVar, localConstVar, visited,
+                globalVarsAndLocalConstVarsDepMap)
+        }
+    }
+
+    private func AnalysisGlocalVarsAndLocalConstVarsDependencyImpl(rootDecl: AstDecl, curDecl: AstDecl,
+        visited: FaithfulInitDeclSet, globalVarsAndLocalConstVarsDepMap: DeclDepMap): Unit {
+        CJC_ASSERT(funcsAndVarsDepMap.Contains(curDecl))
+        let directDepsOfCurDecl = funcsAndVarsDepMap.GetDep(curDecl)
+        for (dep in directDepsOfCurDecl) {
+            if (visited.Contains(dep)) {
+                continue
+            }
+            visited.Add(dep)
+            if (dep.astKind == ASTKind.VAR_DECL || dep.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
+                globalVarsAndLocalConstVarsDepMap.AddDep(rootDecl, dep)
+            } else {
+                AnalysisGlocalVarsAndLocalConstVarsDependencyImpl(rootDecl, dep, visited,
+                    globalVarsAndLocalConstVarsDepMap)
             }
         }
     }
@@ -1966,17 +2007,21 @@ public class FaithfulAST2CHIR {
     }
 
     private func CollectDirectDependencies(root: AstDecl, candidateSet: FaithfulInitDeclSet,
-        globalVarSet: FaithfulInitDeclSet, patternOwnerMap: FaithfulInitDeclOwnerMap): ArrayList<AstDecl> {
+        globalVarSet: FaithfulInitDeclSet, patternOwnerMap: FaithfulInitDeclOwnerMap):
+        (ArrayList<AstDecl>, ArrayList<AstDecl>) {
         let dependencies = ArrayList<AstDecl>()
+        let localConstVarDeps = ArrayList<AstDecl>()
         let dependencySet = FaithfulInitDeclSet()
+        let localConstVarDepSet = FaithfulInitDeclSet()
         let visitor = { node: AstNode =>
             if (let Some(expr) <- (node as AstExpr)) {
-                CollectExprDependency(expr, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
+                CollectExprDependency(expr, dependencies, localConstVarDeps, dependencySet, localConstVarDepSet,
+                    candidateSet, globalVarSet, patternOwnerMap)
             }
             AstVisitAction.WALK_CHILDREN
         }
         AstWalker(root, visitPre: visitor).Walk()
-        return dependencies
+        return (dependencies, localConstVarDeps)
     }
 
     private func BuildPatternDependencyOwnerMap(): FaithfulInitDeclOwnerMap {
@@ -2021,7 +2066,8 @@ public class FaithfulAST2CHIR {
     }
 
     private func CollectExprDependency(expr: AstExpr, dependencies: ArrayList<AstDecl>,
-        dependencySet: FaithfulInitDeclSet, candidateSet: FaithfulInitDeclSet, globalVarSet: FaithfulInitDeclSet,
+        localConstVarDeps: ArrayList<AstDecl>, dependencySet: FaithfulInitDeclSet,
+        localConstVarDepSet: FaithfulInitDeclSet, candidateSet: FaithfulInitDeclSet, globalVarSet: FaithfulInitDeclSet,
         patternOwnerMap: FaithfulInitDeclOwnerMap): Unit {
         if (let Some(callExpr) <- (expr as AstCallExpr)) {
             if (let Some(callee) <- callExpr.resolvedFunction) {
@@ -2041,6 +2087,9 @@ public class FaithfulAST2CHIR {
             if (let Some(target) <- refExpr.ref.target) {
                 if (target.astKind == ASTKind.FUNC_DECL || IsGlobalOrStaticVarDecl(target)) {
                     AddDependency(target, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
+                } else if (target.IsConst()) {
+                    AddDependency(target, localConstVarDeps, localConstVarDepSet, candidateSet, globalVarSet,
+                        patternOwnerMap)
                 }
             }
             return
