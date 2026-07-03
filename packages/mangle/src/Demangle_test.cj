@@ -5,6 +5,7 @@ import std.unittest.testmacro.*
 
 @Test
 public class DemangleTest {
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Demangle/DemangleTest.cpp:16 TEST(DemangleTest, PackageNameColonDelimiter)
     @TestCase
     public func PackageNameColonDelimiter(): Unit {
         let demangler1 = Demangler("4abc:")
