@@ -4282,7 +4282,7 @@ private class CjoSignatureMaterializer {
     }
 }
 
-private enum FrontendPackageRelation {
+enum FrontendPackageRelation {
     | NONE
     | CHILD
     | SAME_MODULE
@@ -4353,6 +4353,218 @@ private class CjoPackageInfo {
     }
 }
 
+private class DependencyGraph {
+    private let importManager: ImportManager
+    private let dependencyMap: HashMap<String, HashMap<String, ArrayList<ImportSpec>>> =
+        HashMap<String, HashMap<String, ArrayList<ImportSpec>>>()
+    private let pkgReExportMap: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
+    private let cacheDirectDependencyPackageDecls: HashMap<String, ArrayList<PackageDecl>> =
+        HashMap<String, ArrayList<PackageDecl>>()
+    private let cacheDependencyPackageDecls: HashMap<String, ArrayList<PackageDecl>> =
+        HashMap<String, ArrayList<PackageDecl>>()
+    private let cacheDependencyPackageNames: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
+
+    public init(importManager: ImportManager) {
+        this.importManager = importManager
+    }
+
+    public func GetDirectDependencyPackageDecls(fullPackageName: String): ArrayList<PackageDecl> {
+        if (let Some(cached) <- cacheDirectDependencyPackageDecls.get(fullPackageName)) {
+            return cached
+        }
+        let packageDecls = ArrayList<PackageDecl>()
+        let collected = HashSet<Node>()
+        let tmpQueue = ArrayList<PackageDecl>()
+        let edgeNames = ArrayList<String>()
+        for (edgeName in GetEdges(fullPackageName).keys()) {
+            edgeNames.add(edgeName)
+        }
+        sort(edgeNames, by: { left: String, right: String =>
+            if (left < right) {
+                Ordering.LT
+            } else if (left > right) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        })
+        for (edgeName in edgeNames) {
+            if (let Some(pkgDecl) <- importManager.GetPackageDecl(edgeName)) {
+                tmpQueue.add(pkgDecl)
+            }
+        }
+        var head: Int64 = 0
+        while (head < tmpQueue.size) {
+            let pkgDecl = tmpQueue[head]
+            head++
+            if (!collected.contains(pkgDecl)) {
+                collected.add(pkgDecl)
+                packageDecls.add(pkgDecl)
+            }
+            if (!pkgDecl.srcPackage.isMacroPackage) {
+                continue
+            }
+            if (let Some(reExports) <- pkgReExportMap.get(pkgDecl.srcPackage.fullPackageName)) {
+                for (reExportPackageName in reExports) {
+                    if (let Some(reExportPkgDecl) <- importManager.GetPackageDecl(reExportPackageName)) {
+                        if (!reExportPkgDecl.srcPackage.isMacroPackage && !collected.contains(reExportPkgDecl)) {
+                            packageDecls.add(reExportPkgDecl)
+                            collected.add(reExportPkgDecl)
+                        } else if (reExportPkgDecl.srcPackage.isMacroPackage) {
+                            tmpQueue.add(reExportPkgDecl)
+                            collected.add(reExportPkgDecl)
+                        }
+                    }
+                }
+            }
+        }
+        cacheDirectDependencyPackageDecls[fullPackageName] = packageDecls
+        return packageDecls
+    }
+
+    public func GetAllDependencyPackageDecls(fullPackageName: String, includeMacroPkg: Bool): ArrayList<PackageDecl> {
+        let keyPair = fullPackageName + "|" + if (includeMacroPkg) { "true" } else { "false" }
+        if (let Some(cached) <- cacheDependencyPackageDecls.get(keyPair)) {
+            return cached
+        }
+        let packageDecls = ArrayList<PackageDecl>()
+        for (pkgName in GetAllDependencyPackageNames(fullPackageName, includeMacroPkg)) {
+            if (let Some(pkgDecl) <- importManager.GetPackageDecl(pkgName)) {
+                packageDecls.add(pkgDecl)
+            }
+        }
+        cacheDependencyPackageDecls[keyPair] = packageDecls
+        return packageDecls
+    }
+
+    public func GetAllDependencyPackageNames(fullPackageName: String, includeMacroPkg: Bool): ArrayList<String> {
+        if (let Some(cached) <- cacheDependencyPackageNames.get(fullPackageName)) {
+            return cached
+        }
+        let packageNames = HashSet<String>()
+        let stack = ArrayList<String>()
+        let edgeNames = ArrayList<String>()
+        for (edgeName in GetEdges(fullPackageName).keys()) {
+            edgeNames.add(edgeName)
+        }
+        sort(edgeNames, by: { left: String, right: String =>
+            if (left < right) {
+                Ordering.LT
+            } else if (left > right) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        })
+        for (edgeName in edgeNames) {
+            stack.add(edgeName)
+        }
+        while (!stack.isEmpty()) {
+            let pkgName = stack[stack.size - 1]
+            stack.remove(at: stack.size - 1)
+            if (packageNames.contains(pkgName)) {
+                continue
+            }
+            let nestedEdgeNames = ArrayList<String>()
+            for (edgeName in GetEdges(pkgName).keys()) {
+                nestedEdgeNames.add(edgeName)
+            }
+            sort(nestedEdgeNames, by: { left: String, right: String =>
+                if (left < right) {
+                    Ordering.LT
+                } else if (left > right) {
+                    Ordering.GT
+                } else {
+                    Ordering.EQ
+                }
+            })
+            for (edgeName in nestedEdgeNames) {
+                stack.add(edgeName)
+            }
+            packageNames.add(pkgName)
+        }
+        let out = ArrayList<String>()
+        for (pkgName in packageNames) {
+            if (includeMacroPkg || !importManager.IsMacroRelatedPackageName(pkgName)) {
+                out.add(pkgName)
+            }
+        }
+        sort(out, by: { left: String, right: String =>
+            if (left < right) {
+                Ordering.LT
+            } else if (left > right) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        })
+        cacheDependencyPackageNames[fullPackageName] = out
+        return out
+    }
+
+    public func AddDependenciesForPackage(pkg: Package): Unit {
+        if (dependencyMap.contains(pkg.fullPackageName)) {
+            return
+        }
+        for (file in pkg.files) {
+            for (importSpec in file.imports) {
+                AddDependenciesForImport(pkg, importSpec)
+            }
+        }
+    }
+
+    public func Clear(): Unit {
+        dependencyMap.clear()
+        pkgReExportMap.clear()
+        cacheDirectDependencyPackageDecls.clear()
+        cacheDependencyPackageDecls.clear()
+        cacheDependencyPackageNames.clear()
+    }
+
+    private func GetEdges(fullPackageName: String): HashMap<String, ArrayList<ImportSpec>> {
+        if (let Some(edges) <- dependencyMap.get(fullPackageName)) {
+            return edges
+        }
+        return HashMap<String, ArrayList<ImportSpec>>()
+    }
+
+    private func AddDependenciesForImport(pkg: Package, importSpec: ImportSpec): Unit {
+        let fullPackageName = importManager.GetPackageNameByImport(importSpec)
+        if (let None <- importManager.GetPackage(fullPackageName)) {
+            return
+        }
+        let packageValue = importManager.GetPackage(fullPackageName).getOrThrow()
+        if (packageValue.fullPackageName == pkg.fullPackageName) {
+            return
+        }
+        AddDependency(pkg.fullPackageName, packageValue.fullPackageName, importSpec)
+        AddDependenciesForPackage(packageValue)
+        let relation = importManager.GetFrontendPackageRelation(pkg.fullPackageName, fullPackageName)
+        if (importSpec.IsReExport() && importManager.IsFrontendVisible(importSpec, relation)) {
+            if (!pkgReExportMap.contains(pkg.fullPackageName)) {
+                pkgReExportMap[pkg.fullPackageName] = HashSet<String>()
+            }
+            if (let Some(reExports) <- pkgReExportMap.get(pkg.fullPackageName)) {
+                reExports.add(fullPackageName)
+            }
+        }
+    }
+
+    private func AddDependency(u: String, v: String, importSpec: ImportSpec): Unit {
+        if (!dependencyMap.contains(u)) {
+            dependencyMap[u] = HashMap<String, ArrayList<ImportSpec>>()
+        }
+        if (let Some(edges) <- dependencyMap.get(u)) {
+            if (!edges.contains(v)) {
+                edges[v] = ArrayList<ImportSpec>()
+            }
+            if (let Some(imports) <- edges.get(v)) {
+                imports.add(importSpec)
+            }
+        }
+    }
+}
+
 private const NO_CJO_HELP_INFO: String =
     "check if the .cjo file of the package exists in CANGJIE_PATH or CANGJIE_HOME, or use " +
     "'--import-path' to specify the .cjo file path"
@@ -4369,8 +4581,7 @@ public class ImportManager {
     private let depPkgCjdPaths: HashMap<String, String> = HashMap<String, String>()
     private let stdDepsMap: HashMap<String, StdDepEntry> = HashMap<String, StdDepEntry>()
     private let packageNameMap: HashMap<String, CjoPackageInfo> = HashMap<String, CjoPackageInfo>()
-    private let directDependencies: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
-    private let directDependencyOrder: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
+    private var dependencyGraph: Option<DependencyGraph> = None
     private let loadingPackages: HashSet<String> = HashSet<String>()
     private let sourcePackagesForMembers: ArrayList<Package> = ArrayList<Package>()
     private let packageMembers: HashMap<String, HashMap<String, ArrayList<Decl>>> =
@@ -4393,6 +4604,7 @@ public class ImportManager {
         this.diag = diag
         this.typeManager = typeManager
         this.globalOptions = globalOptions
+        this.dependencyGraph = Some(DependencyGraph(this))
     }
 
     public func UpdateSearchPath(cangjieModules: String): Unit {
@@ -4452,10 +4664,17 @@ public class ImportManager {
     }
 
     public func BuildIndex(cangjieModules: String, opts: GlobalOptions, pkgs: ArrayList<Package>): Bool {
-        UpdateSearchPath(cangjieModules)
+        let incrBuildIndex = HasBuildIndex()
+        if (!incrBuildIndex) {
+            UpdateSearchPath(cangjieModules)
+        } else {
+            ClearCachesForRebuild()
+        }
         canInlineImportedSource = CanInlineImportedSource(opts)
-        for (path in opts.importPaths) {
-            AppendSearchPath(path)
+        if (!incrBuildIndex) {
+            for (path in opts.importPaths) {
+                AppendSearchPath(path)
+            }
         }
         importedPackages.clear()
         packageDecls.clear()
@@ -4463,8 +4682,7 @@ public class ImportManager {
         depPkgCjdPaths.clear()
         stdDepsMap.clear()
         packageNameMap.clear()
-        directDependencies.clear()
-        directDependencyOrder.clear()
+        dependencyGraph.getOrThrow().Clear()
         loadingPackages.clear()
         sourcePackagesForMembers.clear()
         packageMembers.clear()
@@ -4485,6 +4703,9 @@ public class ImportManager {
         if (!ResolveImportedPackages(pkgs)) {
             return false
         }
+        for (pkg in pkgs) {
+            dependencyGraph.getOrThrow().AddDependenciesForPackage(pkg)
+        }
         SubstituteImportedTypeAliasTy(pkgs, opts)
         for (pkg in pkgs) {
             RebuildPackageMembers(pkg.fullPackageName)
@@ -4493,6 +4714,14 @@ public class ImportManager {
             AddImportedDeclsForSourcePackage(pkg)
         }
         CheckImports(pkgs)
+        for (pd in GetAllPackageDecls()) {
+            if (pd.srcPackage.hasSourceImportedDecl) {
+                pkgs.add(pd.srcPackage)
+            }
+        }
+        if (!pkgs.isEmpty()) {
+            curPackage = Some(pkgs[0])
+        }
         SetHasBuildIndex(true)
         return diag.GetErrorCount() == 0
     }
@@ -4516,6 +4745,17 @@ public class ImportManager {
     public func SetHasBuildIndex(value: Bool): Unit {
         hasBuildIndex = value
     }
+    private func ClearCachesForRebuild(): Unit {
+        ClearForReBuildIndex()
+        typeManager.Clear()
+        typeManager.ClearMapCache()
+        depPkgCjdPaths.clear()
+        stdDepsMap.clear()
+        dependencyGraph.getOrThrow().Clear()
+        importedDeclsMap.clear()
+        fileImportedDeclsMap.clear()
+        fileUsedMacroDeclsMap.clear()
+    }
     public func SetSourceCodeImportStatus(shouldImport: Bool): Unit {
         importSrcCode = shouldImport
     }
@@ -4523,6 +4763,19 @@ public class ImportManager {
 
     public func GetAllImportedPackages(): ArrayList<Package> {
         return importedPackages
+    }
+
+    private func GetAllPackageDecls(includeMacroPkg!: Bool = false): ArrayList<PackageDecl> {
+        let out = ArrayList<PackageDecl>()
+        for (packageName in packageNameMap.keys()) {
+            if (let Some(info) <- packageNameMap.get(packageName)) {
+                if (!info.pkg.TestAttr(Attribute.IMPORTED) || includeMacroPkg ||
+                    (!info.onlyUsedByMacro && !info.pkg.isMacroPackage)) {
+                    out.add(info.pkgDecl)
+                }
+            }
+        }
+        return out
     }
 
     private func GetPackageInfo(fullPackageName: String): Option<CjoPackageInfo> {
@@ -4572,13 +4825,18 @@ public class ImportManager {
 
     public func GetCurImportedPackages(fullPackageName: String): ArrayList<Package> {
         let out = ArrayList<Package>()
-        let deps = directDependencyOrder.get(fullPackageName) ?? return out
-        for (dep in deps) {
-            if (let Some(pkg) <- GetPackage(dep)) {
-                out.add(pkg)
-            }
+        for (pkgDecl in dependencyGraph.getOrThrow().GetDirectDependencyPackageDecls(fullPackageName)) {
+            out.add(pkgDecl.srcPackage)
         }
         return out
+    }
+
+    public func GetAllDependentPackageDecls(fullPackageName: String, includeMacroPkg: Bool): ArrayList<PackageDecl> {
+        return dependencyGraph.getOrThrow().GetAllDependencyPackageDecls(fullPackageName, includeMacroPkg)
+    }
+
+    public func GetAllDependentPackageNames(fullPackageName: String): ArrayList<String> {
+        return dependencyGraph.getOrThrow().GetAllDependencyPackageNames(fullPackageName, false)
     }
 
     public func AddImportedPackage(pkg: Package): Unit {
@@ -4832,7 +5090,7 @@ public class ImportManager {
         return IsFrontendCompatibleAccessLevel(importLevel, GetAccessLevel(decl)) && IsFrontendVisible(decl, relation)
     }
 
-    private func IsFrontendVisible(node: Node, relation: FrontendPackageRelation): Bool {
+    func IsFrontendVisible(node: Node, relation: FrontendPackageRelation): Bool {
         return node.TestAttr(Attribute.PUBLIC) || relation == FrontendPackageRelation.SAME_PACKAGE ||
             (node.TestAttr(Attribute.PROTECTED) && relation != FrontendPackageRelation.NONE) ||
             (node.TestAttr(Attribute.INTERNAL) &&
@@ -4852,7 +5110,7 @@ public class ImportManager {
         }
     }
 
-    private func GetFrontendPackageRelation(srcFullPkgName: String, targetFullPkgName: String): FrontendPackageRelation {
+    func GetFrontendPackageRelation(srcFullPkgName: String, targetFullPkgName: String): FrontendPackageRelation {
         let pureSrcFullPackageName = if (IsTestPackage(srcFullPkgName)) {
             GetMainPartPkgNameForTestPkg(srcFullPkgName)
         } else {
@@ -5767,34 +6025,170 @@ private func JoinStringList(values: ArrayList<String>, delimiter: String): Strin
     return builder.toString()
 }
 
+public class PackageInfo {
+    public var fullPackageName: String
+    public let deps: ArrayList<PackageInfo> = ArrayList<PackageInfo>()
+
+    public init(fullPackageName: String) {
+        this.fullPackageName = fullPackageName
+    }
+}
+
+private class TarjanContext {
+    public let indices: HashMap<String, Int64> = HashMap<String, Int64>()
+    public let lowlinks: HashMap<String, Int64> = HashMap<String, Int64>()
+    public let onStack: HashSet<String> = HashSet<String>()
+    public var nextIndex: Int64 = 0
+
+    public init() {}
+}
+
 public class PackageManager {
     private let importManager: ImportManager
+    private let orderedPackageInfos: ArrayList<ArrayList<PackageInfo>> = ArrayList<ArrayList<PackageInfo>>()
+    public let packageToOtherSccMap: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
+    public let packageInfoMap: HashMap<String, PackageInfo> = HashMap<String, PackageInfo>()
+
     public init(importManager: ImportManager) {
         this.importManager = importManager
     }
 
     public func ResolveDependence(pkgs: ArrayList<Package>): Bool {
-        let _ = importManager
-        sort(pkgs, by: { left: Package, right: Package =>
-            if (left.fullPackageName < right.fullPackageName) {
-                Ordering.LT
-            } else if (left.fullPackageName > right.fullPackageName) {
-                Ordering.GT
-            } else {
-                Ordering.EQ
+        packageInfoMap.clear()
+        orderedPackageInfos.clear()
+        packageToOtherSccMap.clear()
+        CollectDeps(pkgs)
+        let ctx = TarjanContext()
+        let stack = ArrayList<PackageInfo>()
+        while (ctx.indices.size < packageInfoMap.size) {
+            var progressed = false
+            for (name in packageInfoMap.keys()) {
+                if (!ctx.indices.contains(name)) {
+                    if (let Some(info) <- packageInfoMap.get(name)) {
+                        TarjanForSCC(ctx, stack, info)
+                        progressed = true
+                    }
+                }
             }
-        })
-        return true
+            if (!progressed) {
+                break
+            }
+        }
+        let sortPackageMap = HashMap<String, Package>()
+        for (pkg in pkgs) {
+            sortPackageMap[pkg.fullPackageName] = pkg
+        }
+        var ret = true
+        var pkgIndex: Int64 = 0
+        for (component in orderedPackageInfos) {
+            ret = ret && component.size == 1
+            for (pkgInfo in component) {
+                if (let Some(pkg) <- sortPackageMap.get(pkgInfo.fullPackageName)) {
+                    pkgs[pkgIndex] = pkg
+                    pkgIndex++
+                }
+            }
+        }
+        return ret
     }
 
     public func GetBuildOrders(pkgs: ArrayList<Package>): ArrayList<ArrayList<Package>> {
         let out = ArrayList<ArrayList<Package>>()
+        let sortPackageMap = HashMap<String, Package>()
         for (pkg in pkgs) {
+            sortPackageMap[pkg.fullPackageName] = pkg
+        }
+        for (component in orderedPackageInfos) {
             let group = ArrayList<Package>()
-            group.add(pkg)
+            for (pkgInfo in component) {
+                if (let Some(pkg) <- sortPackageMap.get(pkgInfo.fullPackageName)) {
+                    group.add(pkg)
+                }
+            }
             out.add(group)
         }
         return out
+    }
+
+    private func CollectDeps(pkgs: ArrayList<Package>): Unit {
+        for (pkg in pkgs) {
+            packageInfoMap[pkg.fullPackageName] = PackageInfo(pkg.fullPackageName)
+        }
+        for (pkg in pkgs) {
+            if (let Some(pkgInfo) <- packageInfoMap.get(pkg.fullPackageName)) {
+                for (file in pkg.files) {
+                    CollectDepsInFile(file, pkgInfo, pkg)
+                }
+            }
+        }
+    }
+
+    private func CollectDepsInFile(file: File, pkgInfo: PackageInfo, pkg: Package): Unit {
+        for (importSpec in file.imports) {
+            var fullPkgName = importManager.GetPackageNameByImport(importSpec)
+            let pdOpt = importManager.GetPackageDecl(fullPkgName)
+            if (let None <- pdOpt) {
+                continue
+            }
+            let importPkg = pdOpt.getOrThrow().srcPackage
+            if (importPkg.TestAttr(Attribute.TOOL_ADD)) {
+                continue
+            }
+            fullPkgName = importPkg.fullPackageName
+            if (let Some(found) <- packageInfoMap.get(fullPkgName)) {
+                AddUniqueInfo(pkgInfo.deps, found)
+            } else {
+                if (!packageToOtherSccMap.contains(pkg.fullPackageName)) {
+                    packageToOtherSccMap[pkg.fullPackageName] = HashSet<String>()
+                }
+                if (let Some(values) <- packageToOtherSccMap.get(pkg.fullPackageName)) {
+                    values.add(importPkg.fullPackageName)
+                }
+            }
+        }
+    }
+
+    private func TarjanForSCC(ctx: TarjanContext, stack: ArrayList<PackageInfo>, u: PackageInfo): Unit {
+        ctx.nextIndex++
+        ctx.indices[u.fullPackageName] = ctx.nextIndex
+        ctx.lowlinks[u.fullPackageName] = ctx.nextIndex
+        stack.add(u)
+        ctx.onStack.add(u.fullPackageName)
+
+        for (w in u.deps) {
+            if (!ctx.indices.contains(w.fullPackageName)) {
+                TarjanForSCC(ctx, stack, w)
+                let currentLow = ctx.lowlinks.get(u.fullPackageName).getOrThrow()
+                let childLow = ctx.lowlinks.get(w.fullPackageName).getOrThrow()
+                ctx.lowlinks[u.fullPackageName] = if (currentLow < childLow) { currentLow } else { childLow }
+            } else if (ctx.onStack.contains(w.fullPackageName)) {
+                let currentLow = ctx.lowlinks.get(u.fullPackageName).getOrThrow()
+                let childIndex = ctx.indices.get(w.fullPackageName).getOrThrow()
+                ctx.lowlinks[u.fullPackageName] = if (currentLow < childIndex) { currentLow } else { childIndex }
+            }
+        }
+        if (ctx.lowlinks.get(u.fullPackageName).getOrThrow() == ctx.indices.get(u.fullPackageName).getOrThrow()) {
+            let infos = ArrayList<PackageInfo>()
+            while (!stack.isEmpty()) {
+                let v = stack[stack.size - 1]
+                stack.remove(at: stack.size - 1)
+                ctx.onStack.remove(v.fullPackageName)
+                infos.add(v)
+                if (v.fullPackageName == u.fullPackageName) {
+                    break
+                }
+            }
+            orderedPackageInfos.add(infos)
+        }
+    }
+
+    private func AddUniqueInfo(values: ArrayList<PackageInfo>, value: PackageInfo): Unit {
+        for (item in values) {
+            if (item.fullPackageName == value.fullPackageName) {
+                return
+            }
+        }
+        values.add(value)
     }
 }
 
