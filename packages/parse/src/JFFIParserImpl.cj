@@ -49,16 +49,10 @@ public class JFFIParserImpl {
                 decl.EnableAttr(Attribute.IS_BROKEN)
             }
             if (decl.astKind == ASTKind.CLASS_DECL && decl.TestAttr(Attribute.OPEN)) {
-                parser.diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    decl.begin,
-                    "@JavaImpl class cannot be open")
+                parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_open, decl)
                 decl.EnableAttr(Attribute.IS_BROKEN)
             } else if (decl.astKind == ASTKind.INTERFACE_DECL) {
-                parser.diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    decl.begin,
-                    "@JavaImpl cannot be applied to an interface")
+                parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_interface, decl)
                 decl.EnableAttr(Attribute.IS_BROKEN)
             }
         }
@@ -69,10 +63,7 @@ public class JFFIParserImpl {
             return
         }
         decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.diag.DiagnoseRefactor(
-            DiagKindRefactor.parse_diag_error,
-            anno.begin,
-            "@JavaHasDefault can only be applied to functions")
+        parser.DiagUnexpectedAnnoOnKind(anno, decl.begin, anno.identifier.Val(), decl.astKind)
     }
 
     public func IsAbstractFunction(fd: FuncDecl, outerDecl: Decl): Bool {
@@ -88,39 +79,39 @@ public class JFFIParserImpl {
     }
 
     public func DiagJavaMirrorCannotHaveFinalizer(node: Node): Unit {
-        parser.diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, node.begin, "Java mirror cannot have a finalizer")
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_have_finalizer, node)
     }
 
     public func DiagJavaMirrorCannotHavePrivateMember(node: Node): Unit {
-        parser.diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, node.begin, "Java mirror cannot have private members")
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_have_private_member, node)
     }
 
     public func DiagJavaMirrorCannotHaveStaticInit(node: Node): Unit {
-        parser.diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, node.begin, "Java mirror cannot have a static initializer")
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_have_static_init, node)
     }
 
     public func DiagJavaMirrorCannotHaveConstMember(node: Node): Unit {
-        parser.diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, node.begin, "Java mirror cannot have const members")
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_have_const_member, node)
     }
 
     public func DiagJavaImplCannotBeGeneric(node: Node): Unit {
-        parser.diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, node.begin, "@JavaImpl declaration cannot be generic")
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_generic, node)
     }
 
     public func DiagJavaImplCannotBeAbstract(node: Node): Unit {
-        parser.diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, node.begin, "@JavaImpl declaration cannot be abstract")
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_abstract, node)
     }
 
     public func DiagJavaImplCannotBeSealed(node: Node): Unit {
-        parser.diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, node.begin, "@JavaImpl declaration cannot be sealed")
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_sealed, node)
     }
 
     public func DiagJavaMirrorCannotBeSealed(node: Node): Unit {
-        parser.diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, node.begin, "@JavaMirror declaration cannot be sealed")
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_be_sealed, node)
     }
 
     public func DiagJavaImplCannotHaveStaticInit(node: Node): Unit {
-        parser.diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, node.begin, "@JavaImpl declaration cannot have a static initializer")
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_have_static_init, node)
     }
 
     private func CheckMirrorAnnoTarget(anno: Annotation, decl: Decl): Unit {
@@ -128,10 +119,7 @@ public class JFFIParserImpl {
             return
         }
         decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.diag.DiagnoseRefactor(
-            DiagKindRefactor.parse_diag_error,
-            anno.begin,
-            "@JavaMirror can only be applied to classes and interfaces")
+        parser.DiagUnexpectedAnnoOnKind(anno, decl.begin, anno.identifier.Val(), decl.astKind)
     }
 
     private func CheckImplAnnoTarget(anno: Annotation, decl: Decl): Unit {
@@ -139,10 +127,7 @@ public class JFFIParserImpl {
             return
         }
         decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.diag.DiagnoseRefactor(
-            DiagKindRefactor.parse_diag_error,
-            anno.begin,
-            "@JavaImpl can only be applied to classes and interfaces")
+        parser.DiagUnexpectedAnnoOnKind(anno, decl.begin, anno.identifier.Val(), decl.astKind)
     }
 }
 
