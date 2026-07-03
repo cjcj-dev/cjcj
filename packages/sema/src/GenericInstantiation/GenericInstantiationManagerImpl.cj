@@ -278,6 +278,7 @@ public class GenericInstantiationManagerImpl {
     private let usedSrcImportedDecls: ArrayList<Decl> = ArrayList<Decl>()
     private let instantiationWalkerID: UInt32 = GetNextWalkerID()
     private let rearrangeWalkerID: UInt32 = GetNextWalkerID()
+    private var curPkg: Option<Package> = None
 
     public init(ci: CompilerInstance) {
         this.ci = ci
@@ -288,6 +289,7 @@ public class GenericInstantiationManagerImpl {
         if (resetGlobalState) {
             ResetGenericInstantiationStage()
         }
+        curPkg = pkg
         InstantiatedExtendRecorder(ci.typeManager).Record(pkg)
         for (file in pkg.files) {
             for (decl in file.decls) {
@@ -301,6 +303,7 @@ public class GenericInstantiationManagerImpl {
         RearrangeReferences(pkg)
         updateInstantiatedExtendMap(ci.typeManager, pkg)
         updateInstantiatedDeclsLinkage(pkg)
+        ClearImportedUnusedInstantiatedDecls()
     }
 
     public func GetInstantiatedDeclWithGenericInfo(genericInfo: GenericInfo, pkg: Package): Option<Decl> {
@@ -341,7 +344,201 @@ public class GenericInstantiationManagerImpl {
         instantiations.clear()
         structContext.clear()
         usedSrcImportedDecls.clear()
+        curPkg = None
         PartialInstantiation.ResetGlobalMap()
+    }
+
+    private func WalkImportedInstantiations(processFunc: (Decl) -> Unit, skipChecker: (Package) -> Bool): Unit {
+        for (packageDecl in ci.importedPackageDecls) {
+            let srcPkg = packageDecl.srcPackage
+            if (skipChecker(srcPkg)) {
+                continue
+            }
+            for (decl in srcPkg.genericInstantiatedDecls) {
+                if (let Some(genericDecl) <- decl.genericDecl) {
+                    if (IsMacroRelatedPackageName(genericDecl.fullPackageName)) {
+                        continue
+                    }
+                }
+                processFunc(decl)
+            }
+        }
+    }
+
+    private func RestoreInstantiatedDeclTy(): Unit {
+        WalkImportedInstantiations({ decl: Decl =>
+            RestoreInstantiatedDeclTy(decl)
+        }, { pkg: Package =>
+            IsMacroRelatedPackageName(pkg.fullPackageName)
+        })
+    }
+
+    private func RestoreInstantiatedDeclTy(decl: Decl): Unit {
+        if (Ty.IsInitialTy(decl.GetTy()) || !decl.IsNominalDecl() || decl.astKind == ASTKind.EXTEND_DECL) {
+            return
+        }
+        if (!IsDeclCanRestoredForTy(decl)) {
+            return
+        }
+        match (decl.TyKind()) {
+            case TypeKind.TYPE_CLASS =>
+                if (let Some(classTy) <- (decl.GetTy().getOrThrow() as ClassTy)) {
+                    if (let Some(classDecl) <- (decl as ClassDecl)) {
+                        classTy.decl = classDecl
+                        classTy.commonDecl = classDecl
+                        if (let Some(declPtr) <- classTy.declPtr) {
+                            let thisTy = ci.typeManager.GetClassThisTy(declPtr, classTy.typeArgs.toArray())
+                            thisTy.decl = classDecl
+                            thisTy.commonDecl = classDecl
+                        }
+                    }
+                }
+            case TypeKind.TYPE_INTERFACE =>
+                if (let Some(interfaceTy) <- (decl.GetTy().getOrThrow() as InterfaceTy)) {
+                    if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+                        interfaceTy.decl = interfaceDecl
+                        interfaceTy.commonDecl = interfaceDecl
+                    }
+                }
+            case TypeKind.TYPE_STRUCT =>
+                if (let Some(structTy) <- (decl.GetTy().getOrThrow() as StructTy)) {
+                    if (let Some(structDecl) <- (decl as StructDecl)) {
+                        structTy.decl = structDecl
+                    }
+                }
+            case TypeKind.TYPE_ENUM =>
+                if (let Some(enumTy) <- (decl.GetTy().getOrThrow() as EnumTy)) {
+                    if (let Some(enumDecl) <- (decl as EnumDecl)) {
+                        enumTy.decl = enumDecl
+                    }
+                }
+            case _ =>
+                return
+        }
+    }
+
+    private func IsDeclCanRestoredForTy(decl: Decl): Bool {
+        if (let None <- curPkg) {
+            return true
+        }
+        let currentPkg = curPkg.getOrThrow()
+        if (decl.fullPackageName == currentPkg.fullPackageName) {
+            return true
+        }
+        let typeMapping = BuildTypeMapping(decl)
+        if (let Some(genericDecl) <- decl.genericDecl) {
+            for (entry in instantiations) {
+                if (SameDecl(entry.genericDecl, genericDecl) && sameSubst(entry.subst, typeMapping) &&
+                    entry.instantiatedDecl.fullPackageName == currentPkg.fullPackageName) {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    private func BuildTypeMapping(instantiatedDecl: Decl): TypeSubst {
+        if (let Some(genericDecl) <- instantiatedDecl.genericDecl) {
+            return ci.typeManager.GenerateGenericMappingFromGeneric(genericDecl, instantiatedDecl)
+        }
+        return TypeSubst()
+    }
+
+    private func ClearImportedUnusedInstantiatedDecls(): Unit {
+        let currentPkg = curPkg.getOrThrow()
+        let instantiatedTys = HashSet<Int64>()
+        let removedDeclIds = HashSet<Int64>()
+        let removedDecls = ArrayList<Decl>()
+        for (decl in currentPkg.genericInstantiatedDecls) {
+            if (decl.IsNominalDecl()) {
+                RestoreInstantiatedDeclTy(decl)
+                if (let Some(declTy) <- decl.GetTy()) {
+                    instantiatedTys.add(declTy.objectId)
+                }
+            }
+        }
+        for (packageDecl in ci.importedPackageDecls) {
+            let importPkg = packageDecl.srcPackage
+            let ignore = importPkg.objectId == currentPkg.objectId || !importPkg.TestAttr(Attribute.IMPORTED)
+            if (ignore) {
+                continue
+            }
+            for (decl in importPkg.genericInstantiatedDecls) {
+                if (let Some(declTy) <- decl.GetTy()) {
+                    if (instantiatedTys.contains(declTy.objectId) && !removedDeclIds.contains(decl.objectId)) {
+                        removedDeclIds.add(decl.objectId)
+                        removedDecls.add(decl)
+                    }
+                }
+            }
+            let removedOtherDeclIds = HashSet<Int64>()
+            for (decl in importPkg.genericInstantiatedDecls) {
+                var outermostDecl = decl.outerDecl
+                while (let Some(outerDecl) <- outermostDecl) {
+                    if (let Some(nextOuterDecl) <- outerDecl.outerDecl) {
+                        outermostDecl = nextOuterDecl
+                    } else {
+                        break
+                    }
+                }
+                if (let Some(rootDecl) <- outermostDecl) {
+                    if (removedDeclIds.contains(rootDecl.objectId)) {
+                        removedOtherDeclIds.add(decl.objectId)
+                    }
+                }
+            }
+            for (removedDecl in removedDecls) {
+                if (let Some(extendDecl) <- (removedDecl as ExtendDecl)) {
+                    ci.typeManager.RemoveExtendFromMap(extendDecl)
+                }
+            }
+            var srcImportedIdx: Int64 = 0
+            while (srcImportedIdx < importPkg.srcImportedNonGenericDecls.size) {
+                let srcImportedDecl = importPkg.srcImportedNonGenericDecls[srcImportedIdx]
+                if (let Some(outerDecl) <- srcImportedDecl.outerDecl) {
+                    if (removedDeclIds.contains(outerDecl.objectId)) {
+                        importPkg.srcImportedNonGenericDecls.remove(at: srcImportedIdx)
+                        continue
+                    }
+                }
+                srcImportedIdx++
+            }
+            var genericIdx: Int64 = 0
+            while (genericIdx < importPkg.genericInstantiatedDecls.size) {
+                let genericDecl = importPkg.genericInstantiatedDecls[genericIdx]
+                if (removedDeclIds.contains(genericDecl.objectId)) {
+                    importPkg.genericInstantiatedDecls.remove(at: genericIdx)
+                    continue
+                }
+                genericIdx++
+            }
+            var innerIdx: Int64 = 0
+            while (innerIdx < importPkg.genericInstantiatedDecls.size) {
+                let innerDecl = importPkg.genericInstantiatedDecls[innerIdx]
+                if (removedOtherDeclIds.contains(innerDecl.objectId)) {
+                    importPkg.genericInstantiatedDecls.remove(at: innerIdx)
+                    continue
+                }
+                innerIdx++
+            }
+            removedDeclIds.clear()
+            removedDecls.clear()
+        }
+        updateInstantiatedExtendMap(ci.typeManager, currentPkg)
+    }
+
+    private func IsMacroRelatedPackageName(fullPackageName: String): Bool {
+        for (packageDecl in ci.importedPackageDecls) {
+            if (packageDecl.srcPackage.fullPackageName == fullPackageName) {
+                return packageDecl.srcPackage.isMacroPackage
+            }
+        }
+        for (pkg in ci.sourcePackages) {
+            if (pkg.fullPackageName == fullPackageName) {
+                return pkg.isMacroPackage
+            }
+        }
+        return false
     }
 
     public func GetAllGenericToInsDecls(): ArrayList<(Decl, ArrayList<Decl>)> {

@@ -487,10 +487,12 @@ public class CompilerInstance {
         for (importedPackage in importManager.GetAllImportedPackages()) {
             if (let Some(packageDecl) <- importManager.GetPackageDecl(importedPackage.fullPackageName)) {
                 semaInstance.packageDecls.add(packageDecl)
+                semaInstance.importedPackageDecls.add(packageDecl)
                 semaInstance.AddResolvedPackageDecl(importedPackage.fullPackageName, packageDecl)
             } else {
                 let packageDecl = RealASTPackageDecl(importedPackage)
                 semaInstance.packageDecls.add(packageDecl)
+                semaInstance.importedPackageDecls.add(packageDecl)
                 semaInstance.AddResolvedPackageDecl(importedPackage.fullPackageName, packageDecl)
             }
         }

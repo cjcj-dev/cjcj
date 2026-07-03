@@ -13,6 +13,7 @@ public class CompilerInstance {
     public var diag: Option<BasicDiagnosticEngine> = None
     public let sourcePackages: ArrayList<Package> = ArrayList<Package>()
     public let packageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()
+    public let importedPackageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()
     public let resolvedImportedDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
     public let resolvedPackageMemberDeclsMap: HashMap<String, HashMap<String, ArrayList<Decl>>> =
