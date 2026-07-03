@@ -145,7 +145,7 @@ public open class CGType {
     protected var addrspace: UInt32 = 0u32
     protected var size: Option<Int64> = None
     protected var align: Option<Int64> = None
-    private var typeInfo: Option<LLVMValueRef> = None
+    protected var typeInfo: Option<LLVMValueRef> = None
     private var typeTemplate: Option<LLVMValueRef> = None
     private var containedGenerated: Bool = false
     private var cgGenericKind: CGGenericKind
@@ -339,6 +339,7 @@ public open class CGType {
                 }
             }
             DefineTypeInfoGlobalIfNeeded(cgMod, chirType, ti)
+            PostActionOfGenTypeInfo()
         }
     }
 
@@ -354,6 +355,7 @@ public open class CGType {
     protected open func GenLLVMType(): LLVMTypeRef { return LLVMNullType() }
     protected open func GenContainedCGTypes(): Unit {}
     protected open func CalculateSizeAndAlign(): Unit { size = None; align = None }
+    protected open func PostActionOfGenTypeInfo(): Unit {}
 
     public static func GetCGGenericKind(chirType: Type): CGGenericKind {
         let hasGenericTypeArg = HasGenericTypeArg(chirType)

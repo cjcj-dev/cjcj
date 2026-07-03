@@ -77,6 +77,7 @@ public func DeclareTypeInfoGlobal(cgMod: CGModule, chirTy: Type, genericKind: CG
     cgMod.GetCGContext().AddCodeGenAddedFuncsOrVars(chirTy, typeInfoName)
     let typeInfo = GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoTy)
     if (genericKind == CGGenericKind.STATIC_GI || genericKind == CGGenericKind.CONCRETE) {
+        addAttribute(typeInfo, GC_KLASS_ATTR)
         if (!IsModifiableClass(chirTy)) {
             addAttribute(typeInfo, NOT_MODIFIABLE_CLASS_ATTR)
         }

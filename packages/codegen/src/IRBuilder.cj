@@ -3550,9 +3550,6 @@ public class IRBuilder2 <: Resource {
             if (let Some(typeInfoProvider) <- FindGenericTypeInfoProvider(currentFunction, baseTy)) {
                 return typeInfoProvider(this)
             }
-            if (let Some(methodTypeInfo) <- FindMethodOuterTypeInfo(currentFunction, baseTy)) {
-                return methodTypeInfo
-            }
         }
         if (baseTy.IsGeneric()) {
             throw IllegalStateException("missing runtime TypeInfo mapping for generic type: " + baseTy.ToString())
@@ -3578,20 +3575,6 @@ public class IRBuilder2 <: Resource {
             }
         }
         return None
-    }
-
-    private func FindMethodOuterTypeInfo(currentFunction: CGFunction, baseTy: Type): Option<LLVMValueRef> {
-        let ownerFunc = (currentFunction.GetOriginal() as Function) ?? return None
-        let parentDef = ownerFunc.GetParentCustomTypeDef() ?? return None
-        let parentTy = parentDef.GetType() ?? return None
-        let parentCustomTy = (parentTy.StripAllRefs() as CustomType) ?? return None
-        let baseCustomTy = (baseTy.StripAllRefs() as CustomType) ?? return None
-        if (parentCustomTy.GetCustomTypeDef().GetIdentifier() != baseCustomTy.GetCustomTypeDef().GetIdentifier()) {
-            return None
-        }
-        let functionType = currentFunction.GetCGFunctionType() ?? return None
-        let methodTypeInfoIndex = functionType.GetMethodTypeInfoIndex() ?? return None
-        return Some(unsafe { LLVMGetParam(currentFunction.GetRawFunction(), UInt32(methodTypeInfoIndex)) })
     }
 
     public func GetTypeArgsFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {
