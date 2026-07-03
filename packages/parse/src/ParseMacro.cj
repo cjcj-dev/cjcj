@@ -170,7 +170,7 @@ extend ParserImpl {
                 ParseDiagnoseRefactor(
                     DiagKindRefactor.parse_macro_call_illegal_with_builtin,
                     lookahead,
-                    invocation.macroCallDiagInfo.identifier)
+                    invocation.macroCallDiagInfo.identifier).Emit()
             }
             invocation.hasAttr = true
             ParseMacroCallAttr(invocation)
@@ -235,7 +235,7 @@ extend ParserImpl {
             PopulateMacroOriginPositions(invocation)
             return
         }
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_illegal_macro_expand_input_args_without_paren, parsedDecl.begin)
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_illegal_macro_expand_input_args_without_paren, parsedDecl.begin).Emit()
     }
 
     private func IsValidMacroInputDeclKind(kind: ASTKind): Bool {
@@ -308,7 +308,7 @@ extend ParserImpl {
             ParseDiagnoseRefactor(
                 DiagKindRefactor.parse_unexpected_newline_between_at_and_mc,
                 atToken.Begin(),
-                Peek().Value())
+                Peek().Value()).Emit()
         }
         var currentPart = ExpectMacroIdentifierPart(node)
         if (currentPart.Empty()) {
@@ -382,7 +382,7 @@ extend ParserImpl {
         } else {
             DiagKindRefactor.parse_illegal_macro_expand_input_args
         }
-        ParseDiagnoseRefactor(diagKind, token)
+        ParseDiagnoseRefactor(diagKind, token).Emit()
         return false
     }
 

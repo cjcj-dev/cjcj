@@ -28,9 +28,9 @@ public class MPParserImpl {
         for (modifier in modifiers) {
             if (HasCJMPModifiers(modifier) && !CompilePlatform() && !CompileCommon()) {
                 if (let Some(file) <- parser.currentFile) {
-                    parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_cjmp_decl, file)
+                    parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_cjmp_decl, file).Emit()
                 } else {
-                    parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_cjmp_decl, modifier)
+                    parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_cjmp_decl, modifier).Emit()
                 }
                 ok = false
             }
@@ -92,7 +92,7 @@ public class MPParserImpl {
                 DiagKindRefactor.parse_cjmp_in_common_ctor_required,
                 MakeRange(decl.identifier.Begin(), decl.identifier.End()),
                 declType,
-                decl.identifier.Val())
+                decl.identifier.Val()).Emit()
         }
     }
 
@@ -110,13 +110,13 @@ public class MPParserImpl {
                             DiagKindRefactor.parse_cjmp_pattern_decl,
                             pattern,
                             GetDiagKind(pattern),
-                            kind)
+                            kind).Emit()
                     }
                 }
                 return false
             }
             if (IsStaticInitializer(decl)) {
-                parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_cjmp_static_init, decl, kind)
+                parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_cjmp_static_init, decl, kind).Emit()
                 return false
             }
         }
@@ -150,7 +150,7 @@ public class MPParserImpl {
                     DiagKindRefactor.parse_specific_member_must_have_implementation,
                     member,
                     member.identifier.Val(),
-                    decl.identifier.Val())
+                    decl.identifier.Val()).Emit()
                 member.EnableAttr(Attribute.IS_BROKEN)
             }
         }
@@ -160,7 +160,7 @@ public class MPParserImpl {
         parser.ParseDiagnoseRefactor(
             DiagKindRefactor.parse_cjmp_outdecl_miss_match,
             node,
-            arguments: [p0, p1, p2, p3])
+            arguments: [p0, p1, p2, p3]).Emit()
         node.EnableAttr(Attribute.IS_BROKEN)
     }
 
@@ -191,7 +191,7 @@ private func CheckGenericDeclFrozen(decl: Decl, parser: ParserImpl): Bool {
         parser.ParseDiagnoseRefactor(
             DiagKindRefactor.sema_common_generic_frozen_not_supported,
             reportAt,
-            decl.identifier.Val())
+            decl.identifier.Val()).Emit()
         return false
     }
     return true

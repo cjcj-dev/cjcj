@@ -240,6 +240,7 @@ public class ParserImpl {
             let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_character, lookahead, expectStr,
                 ConvertToken(lookahead))
             builder.AddMainHintArguments(expectStr)
+            builder.Emit()
         }
         return token
     }

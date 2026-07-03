@@ -129,7 +129,7 @@ extend ParserImpl {
                 hasQuestSuffix = true
             } else if (Seeing(TokenKind.QUEST) && !SeeingCombinator([TokenKind.QUEST, TokenKind.QUEST])) {
                 ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_character_after, Peek().Begin(),
-                    "'.', '(', '[', '{' or '?'", Peek().Value())
+                    "'.', '(', '[', '{' or '?'", Peek().Value()).Emit()
                 Next()
                 break
             }
@@ -221,7 +221,7 @@ extend ParserImpl {
         }
         if (![ASTKind.MACRO_EXPAND_EXPR, ASTKind.ARRAY_EXPR, ASTKind.OPTIONAL_EXPR, ASTKind.CALL_EXPR,
             ASTKind.REF_EXPR, ASTKind.MEMBER_ACCESS].contains(baseExpr.astKind)) {
-            ParseDiagnoseRefactor(DiagKindRefactor.parse_trailing_closure_only_follow_name, baseExpr)
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_trailing_closure_only_follow_name, baseExpr).Emit()
         }
         if (baseExpr.astKind == ASTKind.CALL_EXPR) {
             let callExpr = (baseExpr as CallExpr).getOrThrow()
@@ -230,7 +230,7 @@ extend ParserImpl {
                 return
             }
             if (![ASTKind.MEMBER_ACCESS, ASTKind.REF_EXPR, ASTKind.OPTIONAL_EXPR].contains(baseFunc.astKind)) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_trailing_closure_only_follow_name, baseExpr)
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_trailing_closure_only_follow_name, baseExpr).Emit()
             }
         }
     }
@@ -412,7 +412,7 @@ extend ParserImpl {
     private func ParseIndexAccess(): Expr {
         if (IsAssignment(Peek().kind)) {
             ParseDiagnoseRefactor(
-                DiagKindRefactor.parse_expected_expression, lastToken.End(), lastToken.Value(), Peek().Value())
+                DiagKindRefactor.parse_expected_expression, lastToken.End(), lastToken.Value(), Peek().Value()).Emit()
             ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RSQUARE], targetTokenConsumed: false)
             return InvalidExpr(Peek().Begin())
         }
@@ -441,7 +441,7 @@ extend ParserImpl {
         }
         if (ret.isClosed && ret.stopExpr.isNone()) {
             ParseDiagnoseRefactor(
-                DiagKindRefactor.parse_expected_expression, lastToken.End(), lastToken.Value(), Peek().Value())
+                DiagKindRefactor.parse_expected_expression, lastToken.End(), lastToken.Value(), Peek().Value()).Emit()
             ret.isBroken = true
         }
         if (Seeing(TokenKind.COLON)) {
@@ -592,7 +592,7 @@ extend ParserImpl {
             base.isBroken = true
         }
         if (base.astKind == ASTKind.TUPLE_LIT && tok.kind != TokenKind.ASSIGN) {
-            ParseDiagnoseRefactor(DiagKindRefactor.parse_cannot_operator_a_tuple, tok, tok.Value())
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_cannot_operator_a_tuple, tok, tok.Value()).Emit()
         }
     }
 
@@ -618,6 +618,7 @@ extend ParserImpl {
             }
             let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_expected_found, node, "_ wildcard")
             builder.AddMainHintArguments("expression", "wildcard")
+            builder.Emit()
             node.isBroken = true
             return
         }
@@ -720,7 +721,7 @@ extend ParserImpl {
         }
         if (!SkipBackarrow()) {
             ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_backarrow_in_let_cond, Peek(), conditionName,
-                ConvertToken(Peek()))
+                ConvertToken(Peek())).Emit()
             ConsumeUntilAny([TokenKind.AND, TokenKind.OR, TokenKind.RPAREN, TokenKind.LET, TokenKind.BACKARROW], targetTokenConsumed: false)
             let invalid = InvalidExpr(Peek().Begin())
             ret.backarrowPos = Peek().Begin()
@@ -732,7 +733,7 @@ extend ParserImpl {
         ret.backarrowPos = lastToken.Begin()
         if (AtTerminator()) {
             ParseDiagnoseRefactor(
-                DiagKindRefactor.parse_expected_expression, lastToken.End(), lastToken.Value(), Peek().Value())
+                DiagKindRefactor.parse_expected_expression, lastToken.End(), lastToken.Value(), Peek().Value()).Emit()
             let invalid = InvalidExpr(Peek().Begin())
             ret.initializer = invalid
             ret.end = invalid.end
@@ -767,7 +768,7 @@ extend ParserImpl {
     public func ParseUnsafeBlock(): Expr {
         let unsafeToken = Expect(TokenKind.UNSAFE, "expected 'unsafe'")
         if (!Seeing(TokenKind.LCURL)) {
-            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, unsafeToken, ConvertToken(Peek()))
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, unsafeToken, ConvertToken(Peek())).Emit()
             return InvalidExpr(unsafeToken.Begin())
         }
         let block = ParseBlock(ScopeKind.FUNC_BODY)
@@ -875,6 +876,7 @@ extend ParserImpl {
                 let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_case, Peek(),
                     ConvertToken(Peek()))
                 builder.AddHint(MakeRange(matchCase.begin, "case"))
+                builder.Emit()
             }
             matchCase.arrowPos = lastToken.Begin()
             let block = Block()
@@ -904,6 +906,7 @@ extend ParserImpl {
                 builder.AddHint(MakeRange(ret.begin, "match"))
                 Next()
                 SkipNLOrSemi()
+                builder.Emit()
                 continue
             }
             let matchCase = MatchCaseOther()
@@ -917,6 +920,7 @@ extend ParserImpl {
                 let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_case, Peek(),
                     ConvertToken(Peek()))
                 builder.AddHint(MakeRange(matchCase.begin, "case"))
+                builder.Emit()
             }
             matchCase.arrowPos = lastToken.Begin()
             let block = Block()
@@ -998,7 +1002,7 @@ extend ParserImpl {
                 decl.assignPos = lastToken.Begin()
                 decl.initializer = ParseExpr(ExprKind.VAR_INIT)
             } else {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_assignment, Peek(), ConvertToken(Peek()))
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_assignment, Peek(), ConvertToken(Peek())).Emit()
             }
             decl.end = if (let Some(expr) <- decl.initializer) {
                 expr.end
@@ -1093,7 +1097,7 @@ extend ParserImpl {
                 pattern.colonPos = lastToken.Begin()
             } else {
                 ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_colon_in_catch_pattern, Peek(),
-                    ConvertToken(Peek()))
+                    ConvertToken(Peek())).Emit()
                 pattern.isBroken = true
             }
             do {
@@ -1109,7 +1113,7 @@ extend ParserImpl {
         }
         let token = Peek()
         ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_wildcard_or_exception_pattern, token,
-            ConvertToken(token))
+            ConvertToken(token)).Emit()
         Next()
         return InvalidPattern(token.Begin())
     }
@@ -1119,7 +1123,7 @@ extend ParserImpl {
             let wildcard = WildcardPattern(lastToken.Begin())
             if (!Skip(TokenKind.COLON)) {
                 ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_colon_in_effect_pattern, Peek(),
-                    ConvertToken(Peek()))
+                    ConvertToken(Peek())).Emit()
                 return InvalidPattern(wildcard.begin)
             }
             let pattern = CommandTypePattern()
@@ -1151,7 +1155,7 @@ extend ParserImpl {
                 pattern.colonPos = lastToken.Begin()
             } else {
                 ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_colon_in_effect_pattern, Peek(),
-                    ConvertToken(Peek()))
+                    ConvertToken(Peek())).Emit()
                 pattern.isBroken = true
             }
             do {
@@ -1166,7 +1170,7 @@ extend ParserImpl {
             return pattern
         }
         let token = Peek()
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_wildcard_or_effect_pattern, token, ConvertToken(token))
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_wildcard_or_effect_pattern, token, ConvertToken(token)).Emit()
         Next()
         return InvalidPattern(token.Begin())
     }
@@ -1289,7 +1293,7 @@ extend ParserImpl {
         if (Seeing(TokenKind.LPAREN)) {
             if (newlineSkipped) {
                 ParseDiagnoseRefactor(DiagKindRefactor.parse_newline_not_allowed_between_spawn_and_argument,
-                    firstNLPosition)
+                    firstNLPosition).Emit()
             }
             if (Skip(TokenKind.LPAREN)) {
                 ret.leftParenPos = lastToken.Begin()
@@ -1406,7 +1410,7 @@ extend ParserImpl {
             if (!paramList.params.isEmpty() && !SkipDoubleArrow()) {
                 if (!lambda.TestAttr(Attribute.HAS_BROKEN)) {
                     ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_lambda, Peek(),
-                        ConvertToken(Peek()))
+                        ConvertToken(Peek())).Emit()
                 }
                 ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.DOUBLE_ARROW, TokenKind.RCURL],
                     targetTokenConsumed: false)
@@ -1423,7 +1427,7 @@ extend ParserImpl {
                         SeeingTokenAndCombinator(TokenKind.WILDCARD, [TokenKind.ASSIGN, TokenKind.GT])
                     if (!hasDoubleArrow && !hasWildcard) {
                         ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_lambda, Peek(),
-                            ConvertToken(Peek()))
+                            ConvertToken(Peek())).Emit()
                     }
                 }
                 if (lastToken.kind == TokenKind.DOUBLE_ARROW || Skip(TokenKind.DOUBLE_ARROW) ||
@@ -1469,7 +1473,7 @@ extend ParserImpl {
                 hasSubCondition = CheckCondition(right) || hasSubCondition
             }
             if (hasSubCondition && binary.op != TokenKind.AND && binary.op != TokenKind.OR) {
-                diag.DiagnoseRefactor(DiagKindRefactor.parse_expected_if_let_andand, binary.operatorPos)
+                diag.DiagnoseRefactor(DiagKindRefactor.parse_expected_if_let_andand, binary.operatorPos).Emit()
                 binary.isBroken = true
             }
             return hasSubCondition

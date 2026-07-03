@@ -261,6 +261,10 @@ extend ParserImpl {
         return idx >= TokenKindIndex(TokenKind.INT8) && idx <= TokenKindIndex(TokenKind.UNIT)
     }
 
+    public func SeeingOperator(): Bool {
+        return Seeing(TokenKind.DOT, TokenKind.WILDCARD)
+    }
+
     public func SeeingTypeConvertiblePrimitiveToken(kind: TokenKind): Bool {
         let idx = TokenKindIndex(kind)
         return idx >= TokenKindIndex(TokenKind.INT8) && idx <= TokenKindIndex(TokenKind.RUNE)

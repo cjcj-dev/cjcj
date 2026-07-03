@@ -55,7 +55,7 @@ extend ParserImpl {
                 pkg.isBroken = true
                 ParseDiagnoseRefactor(
                     DiagKindRefactor.parse_package_name_has_backtick,
-                    MakeRange(curIdent.Begin() - 1, curIdent.End() + 1))
+                    MakeRange(curIdent.Begin() - 1, curIdent.End() + 1)).Emit()
                 ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
                 break
             }
@@ -282,7 +282,7 @@ extend ParserImpl {
                 if (curIdent.IsRaw() && !content.isBroken) {
                     ParseDiagnoseRefactor(
                         DiagKindRefactor.parse_package_name_has_backtick,
-                        MakeRange(curIdent.Begin() - 1, curIdent.End() + 1))
+                        MakeRange(curIdent.Begin() - 1, curIdent.End() + 1)).Emit()
                 }
             }
             if (!skipDoubleColon && !Skip(TokenKind.DOT)) {

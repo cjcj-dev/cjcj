@@ -112,7 +112,7 @@ public open class FFIParserImpl {
                 }
             }
             decl.EnableAttr(Attribute.IS_BROKEN)
-            parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_foreign_name_on_ffi_decl_member, decl)
+            parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_foreign_name_on_ffi_decl_member, decl).Emit()
             return
         }
     }
@@ -186,7 +186,7 @@ public func DiagConflictingAnnos(diag: DiagnosticEngine, first: Annotation, seco
         MakeRange(pos, end),
         first.identifier.Val(),
         second.identifier.Val(),
-        onStr)
+        onStr).Emit()
 }
 
 public func IsLitStringArg(arg: FuncArg): Bool {

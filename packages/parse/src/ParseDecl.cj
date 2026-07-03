@@ -448,7 +448,7 @@ extend ParserImpl {
                 DiagKindRefactor.parse_macro_define_conflicted_with_builtin,
                 MakeRange(ret.identifier.Begin(), ret.identifier.End()),
                 ret.identifier.Val(),
-                builtinKind)
+                builtinKind).Emit()
             ret.EnableAttr(Attribute.IS_BROKEN)
         }
         let body = ParseMacroBody(ret)
@@ -506,14 +506,14 @@ extend ParserImpl {
             } else {
                 DiagKindRefactor.parse_macro_expected_right_parameter_nums
             }
-            ParseDiagnoseRefactor(diagKind, pos)
+            ParseDiagnoseRefactor(diagKind, pos).Emit()
             macroDecl.EnableAttr(Attribute.IS_BROKEN)
         } else {
             for (param in paramList.params) {
                 if (let Some(paramType) <- param.typeNode) {
                     CheckMacroParamType(macroDecl, paramType, false)
                 } else {
-                    ParseDiagnoseRefactor(DiagKindRefactor.parse_macro_illegal_param_type, lookahead)
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_macro_illegal_param_type, lookahead).Emit()
                     macroDecl.EnableAttr(Attribute.IS_BROKEN)
                 }
                 if (param.isNamedParam) {
@@ -532,7 +532,7 @@ extend ParserImpl {
         if (isReturnTy) {
             DiagExpectMacroParamType(typeNode)
         } else {
-            ParseDiagnoseRefactor(DiagKindRefactor.parse_macro_illegal_param_type, typeNode)
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_macro_illegal_param_type, typeNode).Emit()
         }
         macroDecl.EnableAttr(Attribute.IS_BROKEN)
     }
@@ -561,7 +561,7 @@ extend ParserImpl {
             if (!inMacroPackage) {
                 ParseDiagnoseRefactor(
                     DiagKindRefactor.parse_expected_macro_decl_define_in_macro_package,
-                    MakeRange(macroDecl.identifier.Begin(), macroDecl.identifier.End()))
+                    MakeRange(macroDecl.identifier.Begin(), macroDecl.identifier.End())).Emit()
                 macroDecl.EnableAttr(Attribute.IS_BROKEN)
             }
         }
@@ -624,17 +624,13 @@ extend ParserImpl {
         }
         if (decl.TestAttr(Attribute.INTRINSIC)) {
             if (!ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) && !ScopeKindEquals(scopeKind, ScopeKind.UNKNOWN_SCOPE)) {
-                diag.DiagnoseRefactor(
+                ParseDiagnoseRefactor(
                     DiagKindRefactor.parse_intrinsic_function_must_be_toplevel,
-                    decl.begin,
-                    "intrinsic function must be top-level")
+                    MakeRange(decl.begin, lastToken.End())).Emit()
             }
             if (let Some(funcBody) <- decl.funcBody) {
                 if (let Some(block) <- funcBody.body) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_intrinsic_function_cannot_have_body,
-                        block.begin,
-                        "intrinsic function cannot have body")
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_intrinsic_function_cannot_have_body, block).Emit()
                 }
             }
         }
@@ -661,15 +657,9 @@ extend ParserImpl {
             let funcBody = decl.funcBody.getOrThrow()
             if (decl.TestAttr(Attribute.GENERIC)) {
                 if (let Some(generic) <- funcBody.generic) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_foreign_func_should_not_be_generic,
-                        generic.begin,
-                        "foreign function cannot be generic")
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_foreign_func_should_not_be_generic, generic).Emit()
                 } else {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_foreign_func_should_not_be_generic,
-                        decl.begin,
-                        "foreign function cannot be generic")
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_foreign_func_should_not_be_generic, decl).Emit()
                 }
                 decl.EnableAttr(Attribute.IS_BROKEN)
             }
@@ -681,17 +671,13 @@ extend ParserImpl {
                         break
                     }
                 }
-                diag.DiagnoseRefactor(
+                ParseDiagnoseRefactor(
                     DiagKindRefactor.parse_foreign_func_must_declare_return_type,
-                    foreignPos,
-                    "foreign function must declare return type")
+                    MakeRange(foreignPos, decl.keywordPos + 4)).Emit()
                 decl.EnableAttr(Attribute.IS_BROKEN)
             }
             if (let Some(block) <- funcBody.body) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_foreign_function_with_body,
-                    block.begin,
-                    "foreign function cannot have body")
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_foreign_function_with_body, block).Emit()
                 decl.EnableAttr(Attribute.IS_BROKEN)
             }
         }
@@ -757,16 +743,16 @@ extend ParserImpl {
                 if (!decl.TestAttr(Attribute.FOREIGN)) {
                     ParseDiagnoseRefactor(
                         DiagKindRefactor.parse_variable_length_parameter_only_in_the_foreign_function,
-                        MakeRange(decl.keywordPos, decl.identifier.End()))
+                        MakeRange(decl.keywordPos, decl.identifier.End())).Emit()
                     decl.EnableAttr(Attribute.IS_BROKEN)
                     break
                 }
 
                 if (index == 0) {
-                    ParseDiagnoseRefactor(DiagKindRefactor.parse_variable_length_parameter_can_not_be_first, params[index])
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_variable_length_parameter_can_not_be_first, params[index]).Emit()
                     decl.EnableAttr(Attribute.IS_BROKEN)
                 } else if (index != params.size - 1) {
-                    ParseDiagnoseRefactor(DiagKindRefactor.parse_variable_length_parameter_must_in_the_end, params[index])
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_variable_length_parameter_must_in_the_end, params[index]).Emit()
                     decl.EnableAttr(Attribute.IS_BROKEN)
                 } else {
                     varargIdx = Some(index)
@@ -901,9 +887,9 @@ extend ParserImpl {
         list.end = list.rightParenPos + 1
         if (ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY)) {
             if (list.params.isEmpty()) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_setter_must_contain_one_parameter, list.begin)
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_setter_must_contain_one_parameter, list.begin).Emit()
             } else if (list.params.size > 1) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_setter_can_only_accept_one_parameter, list.params[1].begin)
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_setter_can_only_accept_one_parameter, list.params[1].begin).Emit()
             }
         }
         return list
@@ -933,7 +919,7 @@ extend ParserImpl {
                 ParseDiagnoseRefactor(
                     DiagKindRefactor.parse_expected_parameter_rp,
                     lastToken,
-                    ConvertToken(lastToken))
+                    ConvertToken(lastToken)).Emit()
                 param.EnableAttr(Attribute.IS_BROKEN)
             }
         }
@@ -945,7 +931,7 @@ extend ParserImpl {
         }
         if (Skip(TokenKind.WILDCARD)) {
             if (param.hasLetOrVar) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_wildcard_can_not_be_used_as_member_name, lastToken)
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_wildcard_can_not_be_used_as_member_name, lastToken).Emit()
                 param.EnableAttr(Attribute.IS_BROKEN)
             }
             param.identifier = SrcIdentifier("_", "_", lastToken.Begin(), lastToken.End(), false)
@@ -966,6 +952,7 @@ extend ParserImpl {
                     lastToken.Value())
                 builder.AddMainHintArguments("':'")
                 param.EnableAttr(Attribute.IS_BROKEN)
+                builder.Emit()
             }
             param.notMarkPos = lastToken.Begin()
             param.isNamedParam = true
@@ -989,7 +976,7 @@ extend ParserImpl {
         }
         if (Skip(TokenKind.ASSIGN)) {
             if (!param.isNamedParam) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_dot_lparen, lastToken, ConvertToken(lastToken))
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_dot_lparen, lastToken, ConvertToken(lastToken)).Emit()
                 param.EnableAttr(Attribute.IS_BROKEN)
             }
             param.assignPos = lastToken.Begin()
@@ -1063,6 +1050,7 @@ extend ParserImpl {
             ConvertToken(Peek()))
         builder.AddHint(MakeRange(key.Begin(), keyName))
         ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
+        builder.Emit()
         return InvalidDecl(key.Begin())
     }
 
@@ -1085,6 +1073,7 @@ extend ParserImpl {
             ConvertToken(Peek()))
         builder.AddHint(MakeRange(key.Begin(), "const"))
         ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
+        builder.Emit()
         return InvalidDecl(key.Begin())
     }
 
@@ -1497,6 +1486,10 @@ extend ParserImpl {
         let key = Expect(TokenKind.TYPE, "expected 'type'")
         ret.keywordPos = key.Begin()
         ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
+        while (SeeingOperator()) {
+            DiagExpectedName("type", "after 'type'")
+            Next()
+        }
         ret.identifier = ExpectIdentifierWithPos(ret)
         if (let Some(generic) <- ParseOptionalGeneric()) { ret.generic = generic }
         ret.assignPos = Expect(TokenKind.ASSIGN, "expected '=' in type alias").Begin()
@@ -1591,11 +1584,11 @@ extend ParserImpl {
         ret.funcBody = ParseFuncBody(scopeKind)
         if (let Some(body) <- ret.funcBody) {
             if (!body.paramLists.isEmpty() && !body.paramLists[0].params.isEmpty()) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_finalizer_can_not_accept_any_parameter, body.paramLists[0])
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_finalizer_can_not_accept_any_parameter, body.paramLists[0]).Emit()
                 ret.EnableAttr(Attribute.IS_BROKEN)
             }
             if (let Some(retType) <- body.retType) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_return_type, retType, "finalizer")
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_return_type, retType, "finalizer").Emit()
                 ret.EnableAttr(Attribute.IS_BROKEN)
             }
             ret.end = body.end
@@ -1636,7 +1629,7 @@ extend ParserImpl {
         }
         if (let Some(body) <- ret.funcBody) {
             if (let Some(retType) <- body.retType) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_return_type, retType, "primary constructor")
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_return_type, retType, "primary constructor").Emit()
                 ret.EnableAttr(Attribute.IS_BROKEN)
             }
             ret.end = body.end

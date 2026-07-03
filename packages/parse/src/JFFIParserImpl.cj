@@ -49,10 +49,10 @@ public class JFFIParserImpl {
                 decl.EnableAttr(Attribute.IS_BROKEN)
             }
             if (decl.astKind == ASTKind.CLASS_DECL && decl.TestAttr(Attribute.OPEN)) {
-                parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_open, decl)
+                parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_open, decl).Emit()
                 decl.EnableAttr(Attribute.IS_BROKEN)
             } else if (decl.astKind == ASTKind.INTERFACE_DECL) {
-                parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_interface, decl)
+                parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_interface, decl).Emit()
                 decl.EnableAttr(Attribute.IS_BROKEN)
             }
         }
@@ -79,39 +79,39 @@ public class JFFIParserImpl {
     }
 
     public func DiagJavaMirrorCannotHaveFinalizer(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_have_finalizer, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_have_finalizer, node).Emit()
     }
 
     public func DiagJavaMirrorCannotHavePrivateMember(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_have_private_member, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_have_private_member, node).Emit()
     }
 
     public func DiagJavaMirrorCannotHaveStaticInit(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_have_static_init, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_have_static_init, node).Emit()
     }
 
     public func DiagJavaMirrorCannotHaveConstMember(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_have_const_member, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_have_const_member, node).Emit()
     }
 
     public func DiagJavaImplCannotBeGeneric(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_generic, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_generic, node).Emit()
     }
 
     public func DiagJavaImplCannotBeAbstract(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_abstract, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_abstract, node).Emit()
     }
 
     public func DiagJavaImplCannotBeSealed(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_sealed, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_sealed, node).Emit()
     }
 
     public func DiagJavaMirrorCannotBeSealed(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_be_sealed, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_cannot_be_sealed, node).Emit()
     }
 
     public func DiagJavaImplCannotHaveStaticInit(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_have_static_init, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_have_static_init, node).Emit()
     }
 
     private func CheckMirrorAnnoTarget(anno: Annotation, decl: Decl): Unit {

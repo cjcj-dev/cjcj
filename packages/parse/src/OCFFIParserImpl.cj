@@ -130,85 +130,85 @@ public class OCFFIParserImpl {
     }
 
     public func DiagObjCMirrorCannotHaveFinalizer(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_have_finalizer, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_have_finalizer, node).Emit()
     }
 
     public func DiagObjCMirrorCannotHavePrivateMember(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_have_private_member, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_have_private_member, node).Emit()
     }
 
     public func DiagObjCMirrorCannotHaveConstMember(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_have_const_member, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_have_const_member, node).Emit()
     }
 
     public func DiagObjCMirrorCannotHaveStaticInit(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_have_static_init, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_have_static_init, node).Emit()
     }
 
     public func DiagObjCMirrorFieldCannotHaveInitializer(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_field_cannot_have_initializer, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_field_cannot_have_initializer, node).Emit()
     }
 
     public func DiagObjCMirrorCannotHavePrimaryCtor(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_have_primary_ctor, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_have_primary_ctor, node).Emit()
     }
 
     public func DiagObjCMirrorFieldCannotBeStatic(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_field_cannot_be_static, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_field_cannot_be_static, node).Emit()
     }
 
     public func DiagObjCImplCannotHaveStaticInit(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_impl_cannot_have_static_init, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_impl_cannot_have_static_init, node).Emit()
     }
 
     public func DiagObjCImplCannotBeGeneric(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_impl_cannot_be_generic, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_impl_cannot_be_generic, node).Emit()
     }
 
     public func DiagObjCInitFuncMustBeStatic(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_init_method_must_be_static, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_init_method_must_be_static, node).Emit()
     }
 
     public func DiagObjCInitFuncMustBeInMirrorClass(node: FuncDecl): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_init_method_must_be_in_mirror_class, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_init_method_must_be_in_mirror_class, node).Emit()
     }
 
     public func DiagObjCOptionalFuncMustBeInMirrorClass(fd: FuncDecl): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_optional_method_must_be_in_mirror_class, fd)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_optional_method_must_be_in_mirror_class, fd).Emit()
     }
 
     public func DiagObjCMirrorFuncCannotBeForeign(node: FuncDecl): Unit {
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_func_cannot_be_foreign, node,
-            node.identifier.Val())
+            node.identifier.Val()).Emit()
     }
 
     public func DiagObjCMirrorFuncCannotBeC(node: FuncDecl): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_func_cannot_be_c, node, node.identifier.Val())
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_func_cannot_be_c, node, node.identifier.Val()).Emit()
     }
 
     public func DiagObjCMirrorFuncCannotBeGeneric(node: FuncDecl): Unit {
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_func_cannot_be_generic, node,
-            node.identifier.Val())
+            node.identifier.Val()).Emit()
     }
 
     public func DiagObjCMirrorFuncCannotHaveBody(node: FuncDecl): Unit {
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_func_cannot_have_body, node,
-            node.identifier.Val())
+            node.identifier.Val()).Emit()
     }
 
     public func DiagObjCMirrorFuncMustHaveExplicitType(node: FuncDecl): Unit {
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_func_must_have_explicit_type, node,
-            node.identifier.Val())
+            node.identifier.Val()).Emit()
     }
 
     public func DiagObjCMirrorFuncCannotBeConst(node: FuncDecl): Unit {
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_func_cannot_be_const, node,
-            node.identifier.Val())
+            node.identifier.Val()).Emit()
     }
 
     public func DiagObjCMirrorFuncMustBeTopLevel(node: FuncDecl): Unit {
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_func_must_be_top_level, node,
-            node.identifier.Val())
+            node.identifier.Val()).Emit()
     }
 
     private func CheckMirrorAnnoTarget(anno: Annotation, scopeKind: ScopeKind, decl: Decl): Unit {
@@ -261,19 +261,19 @@ public class OCFFIParserImpl {
     }
 
     private func DiagObjCMirrorCannotBeSealed(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_be_sealed, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_be_sealed, node).Emit()
     }
 
     private func DiagObjCImplCannotBeInterface(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_impl_cannot_be_interface, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_impl_cannot_be_interface, node).Emit()
     }
 
     private func DiagObjCImplCannotBeAbstract(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_impl_cannot_be_abstract, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_impl_cannot_be_abstract, node).Emit()
     }
 
     private func DiagObjCImplCannotBeSealed(node: Node): Unit {
-        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_impl_cannot_be_sealed, node)
+        parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_impl_cannot_be_sealed, node).Emit()
     }
 }
 

@@ -41,7 +41,7 @@ extend ParserImpl {
             diag.DiagnoseRefactor(
                 DiagKindRefactor.lex_unknown_start_of_token,
                 slash.Begin(),
-                "unknown start of token: ${slash.Value()}")
+                "unknown start of token: ${slash.Value()}").Emit()
             tokens.add(slash)
             Next()
             return
@@ -92,7 +92,7 @@ extend ParserImpl {
                 diag.DiagnoseRefactor(
                     DiagKindRefactor.parse_invalid_quote_dollar_expr,
                     dollar.Begin(),
-                    "invalid expression after the operator '$'")
+                    "invalid expression after the operator '$'").Emit()
                 break
             }
         }
@@ -137,7 +137,7 @@ extend ParserImpl {
             if (Seeing(TokenKind.LPAREN)) {
                 depth++
             } else if (Seeing(TokenKind.DOLLAR)) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_expect_escape_dollar_token, Peek().Begin())
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_expect_escape_dollar_token, Peek().Begin()).Emit()
             }
             if (SkipAmbiguousToken() || SkipCombinedDoubleArrow()) {
                 tokens.add(lastToken)
@@ -158,7 +158,7 @@ extend ParserImpl {
         ret.quotePos = token.Begin()
         if (newlineSkipped || Seeing(TokenKind.NL)) {
             let lineBreakToken = if (Seeing(TokenKind.NL)) { Peek() } else { lastToken }
-            ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_line_break, lineBreakToken)
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_line_break, lineBreakToken).Emit()
             ret.isBroken = true
         }
         SkipBlank(TokenKind.NL)
@@ -167,7 +167,7 @@ extend ParserImpl {
             ParseQuoteTokens(ret)
             ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after quote expression").Begin()
         } else {
-            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_paren, Peek(), ConvertToken(Peek()))
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_paren, Peek(), ConvertToken(Peek())).Emit()
             ret.isBroken = true
         }
         ret.end = lastToken.End()

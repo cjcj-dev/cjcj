@@ -219,7 +219,7 @@ extend ParserImpl {
             if (!Seeing(TokenKind.LCURL)) {
                 if (let Some(ty) <- ret.typeNode) {
                     if (!ty.isBroken) {
-                        ParseDiagnoseRefactor(DiagKindRefactor.parse_varray_with_paren, ty.end)
+                        ParseDiagnoseRefactor(DiagKindRefactor.parse_varray_with_paren, ty.end).Emit()
                     }
                 }
                 ret.isBroken = true

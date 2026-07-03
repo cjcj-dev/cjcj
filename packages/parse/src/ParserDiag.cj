@@ -134,6 +134,7 @@ extend ParserImpl {
             help.AddSubstitution(MakeRange(lookahead.Begin(), lookahead.End()), "`" + lookahead.Value() + "`")
             builder.AddHelp(help)
         }
+        builder.Emit()
     }
 
     public func DiagExpectedIdentifierClassDecl(node: Node): Unit {
@@ -167,6 +168,7 @@ extend ParserImpl {
             "after '.' in qualified name", ConvertToken(lookahead))
         builder.AddMainHintArguments("a type name")
         builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:133 DiagExpectedIdentifierMacroExpandDecl fullNameDotPos")
+        builder.Emit()
     }
 
     public func DiagExpectedIdentifierMacroExpandExpr(node: Node): Unit {
@@ -181,6 +183,7 @@ extend ParserImpl {
             "after '.' in qualified name", ConvertToken(lookahead))
         builder.AddMainHintArguments("a type name")
         builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:141 DiagExpectedIdentifierMacroExpandExpr fullNameDotPos")
+        builder.Emit()
     }
 
     public func DiagExpectedIdentifierFuncDecl(node: Node): Unit {
@@ -265,7 +268,7 @@ extend ParserImpl {
     }
 
     public func DiagRawIdentifierNotAllowed(str: String): Unit {
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_not_allowed_raw_identifier, lastToken, str)
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_not_allowed_raw_identifier, lastToken, str).Emit()
     }
 
     public func DiagExpectedIdentifierGenericConstraint(node: Node): Unit {
@@ -305,6 +308,7 @@ extend ParserImpl {
                         "at beginning of enum body", ConvertToken(lastToken))
                     db.AddMainHintArguments("an enum constructor name")
                     db.AddNote("ellipse cannot be the only constructor of an enum decl")
+                    db.Emit()
                     return
                 }
                 DiagExpectedIdentifier(MakeRange(enumDecl.leftCurlPos, enumDecl.leftCurlPos + "{".size),
@@ -347,11 +351,12 @@ extend ParserImpl {
         let note = SubDiagnostic(
             "the maximum length is " + maxLength.toString() + ", the real length is " + realLength.toString())
         builder.AddNote(note)
+        builder.Emit()
     }
 
     public func DiagExpectedExpression(): Unit {
         ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_expression, lookahead, ConvertToken(lastToken),
-            ConvertToken(lookahead))
+            ConvertToken(lookahead)).Emit()
     }
 
     public func DiagExpectedDeclaration(scopeKind: ScopeKind): Unit {
@@ -359,16 +364,18 @@ extend ParserImpl {
         if (scopeKind == ScopeKind.TOPLEVEL) {
             builder.AddNote("only declarations or macro expressions can be used in the top-level")
         }
+        builder.Emit()
     }
 
     public func DiagExpectedDeclaration(pos: Position, str: String): Unit {
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_decl, pos, str)
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_decl, pos, str).Emit()
     }
 
     public func DiagUnsafeWillBeIgnored(mod: Modifier): Unit {
         let backend = OptionBackendToString(compileOptions.backend)
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unsafe_will_be_ignored, mod, backend)
         builder.AddMainHintArguments(backend)
+        builder.Emit()
     }
 
     public func DiagMissingBody(str: String, name: String, pos: Position): Unit {
@@ -378,16 +385,19 @@ extend ParserImpl {
         let bodyName = if (name.isEmpty()) { str } else { str + name }
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_missing_body, pos, bodyName)
         builder.AddMainHintArguments(str)
+        builder.Emit()
     }
 
     public func DiagNamedParameterAfterUnnamed(param: FuncParam, pre: FuncParam): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_named_parameter_after_unnamed, param)
         builder.AddHint(MakeRange(pre.begin, pre.end))
+        builder.Emit()
     }
 
     public func DiagMemberParameterAfterRegular(param: FuncParam, pre: FuncParam): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_member_parameter_after_regular, param)
         builder.AddHint(MakeRange(pre.begin, pre.end))
+        builder.Emit()
     }
 
     public func DiagExpectNoModifier(mod: Modifier): Unit {
@@ -396,11 +406,13 @@ extend ParserImpl {
             MakeRange(mod.begin, mod.end), args[0], args[1])
         builder.AddHint(MakeRange(mod.begin, mod.end), arguments: [args[0]])
         builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:649 PrepareExpectNoModifierArg chainedAST context")
+        builder.Emit()
     }
 
     public func DiagUnexpectedAnnoOn(anno: Annotation, onPos: Position, annoStr: String, onStr: String): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_anno_on, anno, "@" + annoStr, onStr)
         builder.AddHint(MakeRange(onPos, onStr), arguments: [onStr])
+        builder.Emit()
     }
 
     public func DiagUnexpectedAnnoOnKind(anno: Annotation, onPos: Position, annoStr: String, kind: ASTKind): Unit {
@@ -415,18 +427,19 @@ extend ParserImpl {
                     DiagKindRefactor.parse_unexpected_const_modifier_on_variable,
                     MakeRange(modifier.begin, modifier.end))
                 builder.AddHint(MakeRange(decl.keywordPos, decl.keywordPos + 3))
+                builder.Emit()
                 return
             }
         }
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_const_modifier_on_variable, decl)
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_const_modifier_on_variable, decl).Emit()
     }
 
     public func DiagDeprecatedInvalidTarget(node: Node, invalidTarget: String): Unit {
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_invalid_target, node, invalidTarget)
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_invalid_target, node, invalidTarget).Emit()
     }
 
     public func DiagAnnotationExpectsOneArgument(node: Annotation, annotationName: String): Unit {
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_annotation_one_argument, node, annotationName, "")
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_annotation_one_argument, node, annotationName, "").Emit()
     }
 
     public func DiagAnnotationExpectsOneArgument(node: Annotation, annotationName: String, argInfo: String): Unit {
@@ -441,11 +454,13 @@ extend ParserImpl {
         } else {
             builder.AddMainHintArguments("single " + argInfo + " for " + annotationName)
         }
+        builder.Emit()
     }
 
     public func DiagAnnotationMoreThanOneArgs(node: Annotation, annotationName: String): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_annotation_max_one_argument, node, annotationName, "")
         builder.AddMainHintArguments("single argument for " + annotationName)
+        builder.Emit()
     }
 
     public func DiagAnnotationMoreThanOneArgs(node: Annotation, annotationName: String, argInfo: String): Unit {
@@ -460,6 +475,7 @@ extend ParserImpl {
         } else {
             builder.AddMainHintArguments("single " + argInfo + " for " + annotationName)
         }
+        builder.Emit()
     }
 
     public func DiagAnnotationShouldNotHaveArgs(node: Annotation, annotationName: String): Unit {
@@ -467,7 +483,7 @@ extend ParserImpl {
         if (!node.args.isEmpty()) {
             diagNode = node.args[0]
         }
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_annotation_no_arguments, diagNode, annotationName)
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_annotation_no_arguments, diagNode, annotationName).Emit()
     }
 
     public func DiagIllegalModifierInScope(mod: Modifier): Unit {
@@ -476,6 +492,7 @@ extend ParserImpl {
             "declaration", "")
         builder.AddHint(MakeRange(mod.begin, mod.end), arguments: ["unexpected modifier"])
         builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:504 DiagIllegalModifierInScope chainedAST")
+        builder.Emit()
     }
 
     public func DiagConflictedModifier(resMod: Modifier, tarMod: Modifier): Unit {
@@ -487,6 +504,7 @@ extend ParserImpl {
         builder.AddHint(MakeRange(resMod.begin, resMod.begin + resStr.size))
         builder.AddHint(MakeRange(tarMod.begin, tarMod.end), arguments: ["declaration"])
         builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:559 DiagConflictedModifier chainedAST")
+        builder.Emit()
     }
 
     public func GetSingleLineContent(begin: Position, end: Position): String {
@@ -503,6 +521,7 @@ extend ParserImpl {
         let tokens = lexer.LookAheadSkipNL(1)
         let endPos = if (tokens.isEmpty()) { lookahead.End() } else { tokens[0].End() }
         builder.AddHint(MakeRange(lookahead.Begin(), endPos), arguments: [str])
+        builder.Emit()
     }
 
     public func DiagUnexpectedWhenON(annos: ArrayList<Annotation>): Unit {
@@ -515,6 +534,7 @@ extend ParserImpl {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_anno_on, lookahead, "@When",
             lookahead.Value())
         builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:642 DiagUnexpectedWhenON annotation lookup")
+        builder.Emit()
     }
 
     public func DiagUnexpectedDeclInScope(sk: ScopeKind): Unit {
@@ -523,12 +543,14 @@ extend ParserImpl {
             "declaration", scopeInfo[1])
         builder.AddMainHintArguments("declaration in " + scopeInfo[1])
         builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:717 DiagUnexpectedDeclInScope chainedAST")
+        builder.Emit()
     }
 
     public func DiagExpectedMoreFieldInTuplePattern(): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_tuple_pattern_expected_more_field, lookahead)
         builder.AddNote(
             "GAP_TODO: requires faithful port of ParserDiag.cpp:748 DiagExpectedMoreFieldInTuplePattern chainedAST")
+        builder.Emit()
     }
 
     public func DiagExpectedTypeNameAfterAs(tok: Token): Unit {
@@ -538,12 +560,14 @@ extend ParserImpl {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_type, lookahead, ConvertToken(tok),
             ConvertToken(lookahead))
         builder.AddHint(MakeRange(tok.Begin(), tok.End()), arguments: [ConvertToken(tok)])
+        builder.Emit()
     }
 
     public func DiagExpectedTypeName(): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_type, lookahead, ConvertToken(lastToken),
             ConvertToken(lookahead))
         builder.AddHint(MakeRange(lastToken.Begin(), lastToken.End()), arguments: [ConvertToken(lastToken)])
+        builder.Emit()
     }
 
     public func DiagInvalidLeftHandExpr(expr: Expr, tok: Token): Unit {
@@ -552,6 +576,7 @@ extend ParserImpl {
         }
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_left_hand_expr, tok, tok.Value())
         builder.AddHint(MakeRange(expr.begin, expr.end))
+        builder.Emit()
     }
 
     public func IsNoneAssociative(tok: Token): Bool {
@@ -575,6 +600,7 @@ extend ParserImpl {
         if (!name.isEmpty()) {
             let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_chained_none_associative, tok, name)
             builder.AddHint(MakeRange(preT.Begin(), preT.End()))
+            builder.Emit()
         }
     }
 
@@ -582,6 +608,7 @@ extend ParserImpl {
         let typeName = sourceManager.GetContentBetween(ty.begin.fileID, ty.begin, ty.end)
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_super_declaration, ty, typeName)
         builder.AddNote("only class types and interface types can be subtyped")
+        builder.Emit()
     }
 
     public func DiagExpectedRightDelimiter(del: String, pos: Position): Unit {
@@ -599,12 +626,14 @@ extend ParserImpl {
         }
         builder.AddMainHintArguments(expected)
         builder.AddHint(pos, arguments: [del])
+        builder.Emit()
     }
 
     public func DiagInvalidIncreExpr(expr: Expr): Unit {
         let name = if (lookahead.kind == TokenKind.INCR) { "increment" } else { "decrement" }
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_incre_expr, lookahead, name)
         builder.AddHint(MakeRange(expr.begin, expr.end))
+        builder.Emit()
     }
 
     public func DiagInvalidMacroExpandExpr(tok: Token, expr: MacroExpandExpr): Unit {
@@ -612,6 +641,7 @@ extend ParserImpl {
             let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_expression, decl, ConvertToken(tok),
                 "a declaration")
             builder.AddHint(MakeRange(tok.Begin(), tok.End()))
+            builder.Emit()
             return
         }
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_expression, expr, ConvertToken(tok),
@@ -619,6 +649,7 @@ extend ParserImpl {
         builder.AddHint(MakeRange(tok.Begin(), tok.End()))
         builder.AddNote(
             "GAP_TODO: requires faithful port of ParserDiag.cpp:855 DiagInvalidMacroExpandExpr invocation.decl")
+        builder.Emit()
     }
 
     public func DiagUnrecognizedNodeAfterMacro(tok: Token, expr: MacroExpandExpr): Unit {
@@ -626,10 +657,12 @@ extend ParserImpl {
             ConvertToken(tok))
         if (let Some(decl) <- expr.invocation.decl) {
             builder.AddHint(MakeRange(decl.begin, decl.end))
+            builder.Emit()
             return
         }
         builder.AddNote(
             "GAP_TODO: requires faithful port of ParserDiag.cpp:862 DiagUnrecognizedNodeAfterMacro invocation.decl")
+        builder.Emit()
     }
 
     public func DiagChainedAsExpr(expr: Expr, tok: Token): Unit {
@@ -642,10 +675,11 @@ extend ParserImpl {
         }
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_chained_none_associative, tok, "`is` and `as`")
         builder.AddHint(MakeRange(pos, pos + "is".size))
+        builder.Emit()
     }
 
     public func DiagExpecetedOpeOrEnd(): Unit {
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_operator_or_end, lookahead, ConvertToken(lookahead))
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_operator_or_end, lookahead, ConvertToken(lookahead)).Emit()
     }
 
     public func DiagExpectedNoNewLine(): Unit {
@@ -657,14 +691,15 @@ extend ParserImpl {
             ConvertToken(lastToken))
         builder.AddHint(MakeRange(lastToken.Begin(), lastToken.End()), arguments: [ConvertToken(lastToken)])
         skipNL = old
+        builder.Emit()
     }
 
     public func DiagCannotHaveAssignmentInInit(expr: Expr): Unit {
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_cannot_have_assi_in_init, expr)
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_cannot_have_assi_in_init, expr).Emit()
     }
 
     public func DiagOrPattern(): Unit {
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_illegal_or_pattern, lookahead.Begin())
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_illegal_or_pattern, lookahead.Begin()).Emit()
     }
 
     public func DiagDeclarationInMacroPackage(decl: Decl): Unit {
@@ -698,28 +733,32 @@ extend ParserImpl {
         let note = SubDiagnostic(
             "Declarations in 'macro package' cannot be accessed in other packages, except macro declarations.")
         builder.AddNote(note)
+        builder.Emit()
     }
 
     public func DiagExpectPublicBeforeMacroCall(md: MacroDecl): Unit {
         ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_public_before_macro_decl,
-            MakeRange(md.keywordPos, md.keywordPos + "macro".size))
+            MakeRange(md.keywordPos, md.keywordPos + "macro".size)).Emit()
     }
 
     public func DiagExpectMacroParamType(ty: Type): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_macro_illegal_ret_type, ty)
         builder.AddMainHintArguments(ConvertToken(lastToken))
+        builder.Emit()
     }
 
     public func DiagMacroUnexpectNamedParam(param: FuncParam): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_macro_illegal_named_param,
             MakeRange(param.notMarkPos, param.notMarkPos + 1))
         builder.AddHint(MakeRange(param.begin, param.identifier.Begin()), arguments: [param.identifier.Val()])
+        builder.Emit()
     }
 
     public func DiagIllegalFunc(funcDecl: FuncDecl): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_illegal_function_name,
             MakeRange(funcDecl.identifier.Begin(), funcDecl.identifier.End()))
         builder.AddHint(MakeRange(funcDecl.keywordPos, funcDecl.keywordPos + "func".size))
+        builder.Emit()
     }
 
     public func DiagParseExpectedParenthis(postType: Type): Unit {
@@ -727,6 +766,7 @@ extend ParserImpl {
         let help = DiagHelp("should be surrounded by '(' and ')'")
         help.AddSubstitution(MakeRange(postType.begin, postType.end), "(" + lastToken.Value() + ")")
         builder.AddHelp(help)
+        builder.Emit()
     }
 
     public func DiagParseIllegalDeclarationPattern(decl: VarWithPatternDecl, scopeKind: ScopeKind): Unit {
@@ -748,6 +788,7 @@ extend ParserImpl {
                 builder.AddNote(
                     "GAP_TODO: requires faithful port of ParserDiag.cpp:963 DiagParseIllegalDeclarationPattern struct chainedAST")
             }
+            builder.Emit()
         }
     }
 
@@ -755,6 +796,7 @@ extend ParserImpl {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_this_type_not_allow, lookahead)
         let note = SubDiagnostic("'This' type can only be used as the return type of an instance member function in class")
         builder.AddNote(note)
+        builder.Emit()
     }
 
     public func DiagInvalidUnicodeScalar(startPos: Position, str: String): Unit {
@@ -767,11 +809,13 @@ extend ParserImpl {
         builder.AddHint(MakeRange(startPos + str.size, startPos + str.size + 1))
         let note = SubDiagnostic("the valid range of code point is '0x0 ~ 0x7fffffff'")
         builder.AddNote(note)
+        builder.Emit()
     }
 
     public func DiagExpectedLiteral(subPos: Position): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_literal, lookahead, ConvertToken(lookahead))
         builder.AddHint(subPos)
+        builder.Emit()
     }
 
     public func DiagTypePatternInLetCondExpr(pat: Pattern, ek: ExprKind): Unit {
@@ -780,23 +824,27 @@ extend ParserImpl {
         let note = SubDiagnostic(
             exprName + " expression can only accept constant, wildcard, binding, tuple and enum pattern")
         builder.AddNote(note)
+        builder.Emit()
     }
 
     public func DiagExpectedLeftParenAfter(pos: Position, str: String): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_paren_after, lookahead, str,
             ConvertToken(lookahead))
         builder.AddHint(MakeRange(pos, str))
+        builder.Emit()
     }
 
     public func DiagMatchCaseExpectedExprOrDecl(): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_expr_or_decl_in, lookahead,
             ConvertToken(lookahead))
         DiagMatchCase(builder)
+        builder.Emit()
     }
 
     public func DiagMatchCaseBodyCannotBeEmpty(pos: Position): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_case_body_cannot_be_empty, pos)
         DiagMatchCase(builder)
+        builder.Emit()
     }
 
     public func DiagMatchCase(builder: DiagnosticBuilder): Unit {
@@ -817,18 +865,21 @@ extend ParserImpl {
             builder.AddNote(
                 "GAP_TODO: requires faithful port of ParserDiag.cpp:1062 DiagExpectedCatchOrHandleOrFinallyAfterTry tryBlock")
         }
+        builder.Emit()
     }
 
     public func DiagExpectedSelectorOrMatchExprBody(pos: Position): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_selector_or_match_expression_body, lookahead,
             ConvertToken(lookahead))
         builder.AddHint(MakeRange(pos, "match"))
+        builder.Emit()
     }
 
     public func DiagRedefinedResourceName(cur: (String, Position), pre: (String, Position)): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_redefined_resource_name,
             MakeRange(cur[1], cur[0]), cur[0])
         builder.AddHint(MakeRange(pre[1], pre[0]))
+        builder.Emit()
     }
 
     public func DiagExpectedNoArgumentsInSpawn(params: ArrayList<FuncParam>, pos: Position): Unit {
@@ -845,6 +896,7 @@ extend ParserImpl {
             builder.AddNote(
                 "GAP_TODO: requires faithful port of ParserDiag.cpp:1085 DiagExpectedNoArgumentsInSpawn params")
         }
+        builder.Emit()
     }
 
     public func DiagExpectCharacter(expectStr: String, noteStr!: String = ""): Unit {
@@ -854,6 +906,7 @@ extend ParserImpl {
         if (!noteStr.isEmpty()) {
             builder.AddNote(noteStr)
         }
+        builder.Emit()
     }
 
     public func DiagExpectCharacter(pos: Position, expectStr: String, noteStr!: String = ""): Unit {
@@ -863,6 +916,7 @@ extend ParserImpl {
         if (!noteStr.isEmpty()) {
             builder.AddNote(noteStr)
         }
+        builder.Emit()
     }
 
     public func DiagExpectSemiOrNewline(): Unit {
@@ -872,6 +926,7 @@ extend ParserImpl {
     public func DiagRedundantArrowAfterFunc(ty: Type): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_redundant_arrow_after_func_type, lookahead)
         builder.AddHint(MakeRange(ty.begin, ty.end), arguments: ["function type"])
+        builder.Emit()
     }
 
     public func DiagInvalidOverloadedOperator(): Unit {
@@ -879,6 +934,7 @@ extend ParserImpl {
             ConvertToken(lookahead))
         let note = SubDiagnostic("only operator '+', '-', ... can be overloaded")
         builder.AddNote(note)
+        builder.Emit()
     }
 
     public func DiagAndSuggestKeywordForExpectedDeclaration(
@@ -900,6 +956,7 @@ extend ParserImpl {
                 }
             }
         }
+        builder.Emit()
     }
 
     public func DiagConstVariableExpectedInitializer(vd: Decl): Unit {
@@ -908,20 +965,23 @@ extend ParserImpl {
         }
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_const_expected_initializer, vd.end)
         builder.AddHint(MakeRange(vd.begin, vd.end))
+        builder.Emit()
     }
 
     public func DiagConstVariableExpectedStatic(key: Token): Unit {
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_static_for_const_member_var, key)
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_static_for_const_member_var, key).Emit()
     }
 
     public func DiagExpectedOneOfTypeOrInitializer(vd: Decl, str: String): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_one_of_type_or_initializer, vd.end, str)
         builder.AddHint(MakeRange(vd.begin, vd.end))
+        builder.Emit()
     }
 
     public func DiagExpectedTypeOrInitializerInPattern(vd: Decl): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_type_or_init_in_pattern, vd.end)
         builder.AddHint(MakeRange(vd.begin, vd.end))
+        builder.Emit()
     }
 
     public func DiagExpectedInitializerForToplevelVar(vd: Decl): Unit {
@@ -930,6 +990,7 @@ extend ParserImpl {
         }
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_var_must_be_initialized, vd.end)
         builder.AddHint(MakeRange(vd.begin, vd.end))
+        builder.Emit()
     }
 
     public func DiagExpectedIdentifierOrPattern(isVar: Bool, pos: Position, isConst: Bool): Unit {
@@ -937,6 +998,7 @@ extend ParserImpl {
             let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_one_of_identifier_or_pattern,
                 lookahead, "const", ConvertToken(lookahead))
             builder.AddHint(MakeRange(pos, "const"))
+            builder.Emit()
             return
         }
         let s = if (isVar) { "var" } else { "let" }
@@ -949,12 +1011,14 @@ extend ParserImpl {
             help.AddSubstitution(MakeRange(lookahead.Begin(), lookahead.End()), "`" + lookahead.Value() + "`")
             builder.AddHelp(help)
         }
+        builder.Emit()
     }
 
     public func DiagExpectedGetOrSetInProp(pos: Position): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_get_or_set_in_prop, lookahead,
             ConvertToken(lookahead))
         builder.AddHint(MakeRange(pos, "prop"))
+        builder.Emit()
     }
 
     public func DiagDuplicatedGetOrSet(node: Node, pd: PropDecl): Unit {
@@ -963,58 +1027,68 @@ extend ParserImpl {
         builder.AddMainHintArguments(lookahead.Value())
         builder.AddHint(MakeRange(node.begin, node.end))
         builder.AddHint(MakeRange(pd.begin, "prop"))
+        builder.Emit()
     }
 
     public func DiagUnknownPrimaryConstructor(str: String): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_decl, lookahead, ConvertToken(lookahead))
         builder.AddHelp(DiagHelp("probably you want a primary constructor name: '" + str + "'"))
+        builder.Emit()
     }
 
     public func DiagExpectedName(str: String, afterName: String): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_name, lookahead, str + " name",
             afterName, ConvertToken(lookahead))
         builder.AddMainHintArguments(str + " name")
+        builder.Emit()
     }
 
     public func DiagGetOrSetCannotBeGeneric(str: String, ge: Generic): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_getter_setter_cannot_be_generic, ge, str)
         builder.AddNote(
             "GAP_TODO: requires faithful port of ParserDiag.cpp:1265 DiagGetOrSetCannotBeGeneric chainedAST")
+        builder.Emit()
     }
 
     public func DiagUnexpectedWhere(token: Token): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_where, token)
         builder.AddHint(MakeRange(token.Begin(), token.End()))
         builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:1285 DiagUnexpectedWhere chainedAST")
+        builder.Emit()
     }
 
     public func DiagDuplicatedIntrinsicFunc(decl: Decl, prev: Decl): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_duplicated_intrinsic_function, decl,
             decl.identifier.Val())
         builder.AddHint(MakeRange(prev.begin, prev.end))
+        builder.Emit()
     }
 
     public func DiagDeclCannotInheritTheirSelf(decl: InheritableDecl, rt: RefType): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_decl_cannot_inherit_their_self, rt,
             rt.ref.identifier.Val())
         builder.AddHint(MakeRange(decl.identifier.Begin(), decl.identifier.End()), arguments: [rt.ref.identifier.Val()])
+        builder.Emit()
     }
 
     public func DiagDuplicatedModifier(mod: Modifier, pre: Modifier): Unit {
         let modStr = TokenKindLiteral(mod.modifier)
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_duplicate_modifier, mod, modStr)
         builder.AddHint(MakeRange(pre.begin, pre.end))
+        builder.Emit()
     }
 
     public func DiagUnexpectedColonInRange(re: RangeExpr): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_colon_in_range, lookahead)
         builder.AddHint(MakeRange(re.begin, re.end))
         builder.AddNote("range expression in index access cannot have step if it is without start or end")
+        builder.Emit()
     }
 
     public func DiagDuplicatedAttiValue(attr: String, pos: Position, pre: Position): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_duplicated_attr_value, MakeRange(pos, attr), attr)
         builder.AddHint(MakeRange(pre, attr))
+        builder.Emit()
     }
 
     public func DiagDuplicatedItem(
@@ -1028,6 +1102,7 @@ extend ParserImpl {
             name, sourceName, attachment)
         builder.AddMainHintArguments(name)
         builder.AddHint(MakeRange(prePos, sourceName))
+        builder.Emit()
     }
 
     public func DiagUnrecognizedAttrInAnno(
@@ -1055,12 +1130,14 @@ extend ParserImpl {
         } else {
             builder.AddNote("annotation '@" + anno.identifier.Val() + "' only accept " + str + " as attribute")
         }
+        builder.Emit()
     }
 
     public func DiagDuplicatedAnno(anno: Annotation, pre: Annotation): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_duplicated_annotation, anno,
             "@" + anno.identifier.Val())
         builder.AddHint(MakeRange(pre.begin, pre.end))
+        builder.Emit()
     }
 
     public func DiagExpectedLsquareAfter(node: Node, aName: String, note: String): Unit {
@@ -1068,6 +1145,7 @@ extend ParserImpl {
             ConvertToken(lookahead))
         builder.AddNote(note)
         builder.AddHint(MakeRange(node.begin, node.end))
+        builder.Emit()
     }
 
     public func DiagUnrecognizedExprInWhen(expr: Expr, when: Annotation): Unit {
@@ -1075,42 +1153,45 @@ extend ParserImpl {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unrecognized_expression_in_when, expr, str)
         builder.AddHint(MakeRange(when.begin, when.end))
         builder.AddNote("annotation '@When' can only support unary, binary and ref expression")
+        builder.Emit()
     }
 
     public func DiagDeprecatedArgumentNotLitConst(node: Node): Unit {
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_arguments_must_be_lit_const_expr, node)
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_arguments_must_be_lit_const_expr, node).Emit()
     }
 
     public func DiagDeprecatedArgumentDuplicated(node: Node, parameterName: String): Unit {
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_argument_duplication, node, parameterName)
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_argument_duplication, node, parameterName).Emit()
     }
 
     public func DiagDeprecatedWrongArgumentType(node: Node, paramName: String, expectedType: String): Unit {
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_wrong_argument, node, paramName, expectedType)
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_wrong_argument, node, paramName, expectedType).Emit()
     }
 
     public func DiagDeprecatedUnknownArgument(arg: Node, name: String): Unit {
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_unknown_argument, arg, name)
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_unknown_argument, arg, name).Emit()
     }
 
     public func DiagDeprecatedEmptyStringArgument(node: Node, paramName: String): Unit {
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_empty_string_argument, node, paramName)
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_deprecated_empty_string_argument, node, paramName).Emit()
     }
 
     public func DiagUnexpectedTypeIn(ty: Type, inPos: Position, inStr: String, noteStr: String): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_type_in, ty, inStr)
         builder.AddHint(MakeRange(inPos, inStr), arguments: [inStr])
         builder.AddNote(noteStr)
+        builder.Emit()
     }
 
     public func DiagImportingByPackageNameIsNotSupported(expectPos: Position): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_importing_by_package_name_is_not_supported,
             expectPos)
         builder.AddNote("importing by package name is not supported.")
+        builder.Emit()
     }
 
     public func DiagVArrayTypeArgMismatch(range: BasicRange, note: String): Unit {
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_varray_type_args_mismatch, range, note)
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_varray_type_args_mismatch, range, note).Emit()
         ConsumeUntil(TokenKind.NL)
     }
 
@@ -1120,6 +1201,7 @@ extend ParserImpl {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_redundant_modifier, modRange, modStr)
         builder.AddMainHintArguments("interface member", modStr)
         builder.AddNote("GAP_TODO: requires faithful port of ParserDiag.cpp:1553 DiagRedundantModifiers chainedAST")
+        builder.Emit()
     }
 
     public func DiagRedundantModifiers(lowerModifier: Modifier, higherModifier: Modifier): Unit {
@@ -1130,6 +1212,7 @@ extend ParserImpl {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_redundant_modifier, resRange, resStr)
         builder.AddMainHintArguments("'" + tarStr + "'", resStr)
         builder.AddHint(tarRange)
+        builder.Emit()
     }
 }
 

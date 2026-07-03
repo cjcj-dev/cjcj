@@ -29,7 +29,7 @@ extend ParserImpl {
                 opt.end = lastToken.End()
                 if (Seeing(TokenKind.NL)) {
                     ParseDiagnoseRefactor(DiagKindRefactor.parse_newline_not_allowed_between_quest_and_type,
-                        Peek().End())
+                        Peek().End()).Emit()
                     SkipBlank(TokenKind.NL)
                 }
             }
@@ -120,7 +120,7 @@ extend ParserImpl {
         ret.varrayPos = token.Begin()
         ret.begin = token.Begin()
         if (!Skip(TokenKind.LT)) {
-            ParseDiagnoseRefactor(DiagKindRefactor.parse_varray_type_parameter, token.End())
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_varray_type_parameter, token.End()).Emit()
             return InvalidType(Peek().Begin())
         }
         ret.leftAnglePos = lastToken.Begin()
@@ -146,7 +146,7 @@ extend ParserImpl {
                 constType.dollarPos = lastToken.Begin()
                 constType.begin = constType.dollarPos
                 if (!Seeing(TokenKind.INTEGER_LITERAL)) {
-                    ParseDiagnoseRefactor(DiagKindRefactor.parse_expect_integer_literal_varray, constType.dollarPos)
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_expect_integer_literal_varray, constType.dollarPos).Emit()
                     ConsumeUntilAny([TokenKind.NL])
                     return InvalidType(Peek().Begin())
                 }
@@ -179,6 +179,7 @@ extend ParserImpl {
                 if (let Some(pos) <- typeNameMap.get(parameterName.Val())) {
                     builder.AddHint(MakeRange(pos, parameterName.Val()))
                 }
+                builder.Emit()
             } else {
                 typeNameMap.add(parameterName.Val(), parameterName.Begin())
             }
@@ -271,7 +272,7 @@ extend ParserImpl {
         if (HasNamedTypeParameters(types) && HasUnnamedTypeParameters(types)) {
             if (!types.isEmpty()) {
                 ParseDiagnoseRefactor(DiagKindRefactor.parse_all_parameters_must_be_named,
-                    MakeRange(types[0].begin, types[types.size - 1].end))
+                    MakeRange(types[0].begin, types[types.size - 1].end)).Emit()
             }
         }
         if (!Skip(TokenKind.RPAREN)) {
@@ -289,6 +290,7 @@ extend ParserImpl {
                     DiagKindRefactor.parse_only_tuple_and_func_type_allow_type_parameter_name,
                     MakeRange(first.begin, first.begin + first.typeParameterName.size), first.typeParameterName)
                 builder.AddNote("only tuple type and function type support type parameter name")
+                builder.Emit()
             }
             let paren = ParenType()
             paren.leftParenPos = left.Begin()
@@ -301,7 +303,7 @@ extend ParserImpl {
         if (types.size >= 2) {
             return MakeTupleType(types, left.Begin(), right)
         }
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_arrow_in_func_type, Peek().Begin())
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_arrow_in_func_type, Peek().Begin()).Emit()
         return MakeFuncType(types, left.Begin(), right, right)
     }
 }
