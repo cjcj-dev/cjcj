@@ -1384,6 +1384,10 @@ public class Translator {
                     return false
                 }
             }
+            let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr)).StripAllRefs()
+            if (baseTy.IsClass() && funcDecl.TestAttr(AstAttribute.STATIC)) {
+                return false
+            }
         }
         return ShouldUseVirtualMemberDispatch(funcDecl)
     }

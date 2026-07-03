@@ -138,6 +138,7 @@ class CHIRSerializerImpl {
         fields.add(if (let Some(structDef) <- (def as StructDef)) { CHIRBoolToWire(structDef.IsCStruct()) } else { "" })
         fields.add(if (let Some(enumDef) <- (def as EnumDef)) { CHIRBoolToWire(!enumDef.IsExhaustive()) } else { "" })
         fields.add(SerializeVTable(def.GetDefVTable()))
+        fields.add(if (let Some(ty) <- def.GetType()) { CHIRSerializeType(ty) } else { "" })
         lines.add(CHIRWireJoinFields(fields))
     }
 

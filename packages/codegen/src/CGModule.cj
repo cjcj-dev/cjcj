@@ -74,7 +74,7 @@ public class MTableInterfaceInfo {
 public class CGModule {
     private let cgCtx: CGContext
     private var module: Option<LLVMModuleHandle>
-    private let functions: HashMap<String, CGFunction> = HashMap<String, CGFunction>()
+    private let functions: HashMap<Value, CGFunction> = HashMap<Value, CGFunction>()
     private let globalVariables: HashMap<String, CGValue> = HashMap<String, CGValue>()
     private let localValueMapping: HashMap<Value, CGValue> = HashMap<Value, CGValue>()
     private let basicBlocks: HashMap<Int64, LLVMBasicBlockRef> = HashMap<Int64, LLVMBasicBlockRef>()
@@ -248,8 +248,8 @@ public class CGModule {
 
     public func GetOrInsertCGFunction(chirValue: Value, forWrapper!: Bool = false): CGFunction {
         let name = GetCodeGenGlobalName(chirValue)
-        if (functions.contains(name)) {
-            return functions[name]
+        if (functions.contains(chirValue)) {
+            return functions[chirValue]
         }
         let cgFuncType = CGType.GetOrCreateWithNode(this, chirValue, allowBasePtr: true, forWrapper: forWrapper)
         let functionType = if (let Some(chirType) <- chirValue.GetType()) {
@@ -299,7 +299,7 @@ public class CGModule {
         AddGenericParamMappings(rawFunction, cgFunc, chirValue, cgFuncType)
         ApplyFunctionABIAttributes(rawFunction, chirValue, cgFuncType)
         MaybeSetCangjieGC(rawFunction, chirValue)
-        functions[name] = cgFunc
+        functions[chirValue] = cgFunc
         return cgFunc
     }
 
@@ -565,9 +565,8 @@ public class CGModule {
 
     public func GetMappedValue(chirValue: Value): Option<CGValue> {
         if (let Some(functionValue) <- (chirValue as Function)) {
-            let name = GetCodeGenGlobalName(functionValue)
-            if (functions.contains(name)) {
-                return functions[name]
+            if (functions.contains(functionValue)) {
+                return functions[functionValue]
             }
             return None
         }
@@ -587,7 +586,7 @@ public class CGModule {
     public func SetOrUpdateMappedCGValue(chirValue: Value, value: CGValue): Unit {
         if (let Some(functionValue) <- (chirValue as Function)) {
             if (let Some(cgFunction) <- (value as CGFunction)) {
-                functions[GetCodeGenGlobalName(functionValue)] = cgFunction
+                functions[functionValue] = cgFunction
                 return
             }
             throw IllegalArgumentException("function mapping requires CGFunction: " + GetCodeGenGlobalName(functionValue))
@@ -601,7 +600,7 @@ public class CGModule {
 
     public func RemoveMappedCGValue(chirValue: Value): Unit {
         if (let Some(functionValue) <- (chirValue as Function)) {
-            functions.remove(GetCodeGenGlobalName(functionValue))
+            functions.remove(functionValue)
             return
         }
         if (let Some(globalValue) <- (chirValue as GlobalVar)) {

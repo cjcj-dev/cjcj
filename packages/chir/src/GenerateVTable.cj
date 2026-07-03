@@ -163,17 +163,15 @@ public func TypeCastOrBoxIfNeeded(value: Value, expectedTy: Type, builder: CHIRB
 }
 
 private func CollectNonExtendParentDefs(cur: ClassDef, allParents: HashSet<Int64>): Unit {
+    if (allParents.contains(cur.nodeId)) {
+        return
+    }
+    allParents.add(cur.nodeId)
     for (parent in cur.GetImplementedInterfaceDefs()) {
-        if (!allParents.contains(parent.nodeId)) {
-            allParents.add(parent.nodeId)
-            CollectNonExtendParentDefs(parent, allParents)
-        }
+        CollectNonExtendParentDefs(parent, allParents)
     }
     if (let Some(superDef) <- cur.GetSuperClassDef()) {
-        if (!allParents.contains(superDef.nodeId)) {
-            allParents.add(superDef.nodeId)
-            CollectNonExtendParentDefs(superDef, allParents)
-        }
+        CollectNonExtendParentDefs(superDef, allParents)
     }
 }
 
@@ -211,7 +209,7 @@ public func GetInstSubType(genericSubType: Type, instParentType: ClassType, buil
         }
     }
     CJC_ASSERT(res)
-    return ReplaceRawGenericArgType(genericSubType, replaceTable)
+    return ReplaceRawGenericArgType(genericSubType, replaceTable, builder)
 }
 
 public func RemoveBoxTypeShellIfNeed(ty: Type): Type {
@@ -430,11 +428,11 @@ public class VTableGenerator {
         }
         let instParamTypes = ArrayList<Type>()
         for (paramTy in originalParamTypes) {
-            instParamTypes.add(ReplaceRawGenericArgType(paramTy, replaceTable))
+            instParamTypes.add(ReplaceRawGenericArgType(paramTy, replaceTable, builder))
         }
         let sigType = builder.context.GetFuncTy(instParamTypes, builder.context.GetUnitTy())
-        let instParentType = ReplaceRawGenericArgType(originalParentType, replaceTable)
-        let instRetType = ReplaceRawGenericArgType(originalFuncType.GetReturnType(), replaceTable)
+        let instParentType = ReplaceRawGenericArgType(originalParentType, replaceTable, builder)
+        let instRetType = ReplaceRawGenericArgType(originalFuncType.GetReturnType(), replaceTable, builder)
         let condition = FuncSigInfo(sigType, funcName: method.GetSrcCodeIdentifier(),
             genericTypeParams: method.GetGenericTypeParams())
         return VirtualMethodInfo(condition, method, method.GetAttributeInfo(), originalFuncType, instParentType,
@@ -458,7 +456,7 @@ public class VTableGenerator {
         let res = ownParent.GetCustomTypeDef().GetType().getOrThrow().CalculateGenericTyMapping(ownParent)
         CJC_ASSERT(res[0])
         for (ty in ownParent.GetCustomTypeDef().GetImplementedInterfaceTys()) {
-            let instTy = (ReplaceRawGenericArgType(ty, res[1]) as ClassType).getOrThrow()
+            let instTy = (ReplaceRawGenericArgType(ty, res[1], builder) as ClassType).getOrThrow()
             GetAllInstantiatedParentType(instTy, builder, inheritanceList)
         }
         if (let Some(superClass) <- ownParent.GetSuperClassTy(builder: builder)) {
@@ -544,7 +542,7 @@ public class VTableGenerator {
     }
 
     private func GetInstMapFromDefIncludeParents(def: CustomTypeDef, curType: Type): HashMap<Int64, Type> {
-        let inheritanceList = def.GetType().getOrThrow().GetSuperTypesRecusively(builder)
+        let inheritanceList = def.GetSuperTypesRecusively(builder)
         let replaceTable = HashMap<Int64, Type>()
         for (parent in inheritanceList) {
             let fromParent = GetInstMapFromDefAndExtends(parent)
@@ -556,7 +554,7 @@ public class VTableGenerator {
         }
         let res = def.GetType().getOrThrow().CalculateGenericTyMapping(curType)
         for ((key, value) in replaceTable) {
-            replaceTable[key] = ReplaceRawGenericArgType(value, res[1])
+            replaceTable[key] = ReplaceRawGenericArgType(value, res[1], builder)
         }
         for ((key, value) in res[1]) {
             if (!replaceTable.contains(key)) {
@@ -622,7 +620,7 @@ public class VTableGenerator {
         if (customTypeDef.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
             return
         }
-        let inheritanceList = customTypeDef.GetType().getOrThrow().GetSuperTypesRecusively(builder)
+        let inheritanceList = customTypeDef.GetSuperTypesRecusively(builder)
         let vtable = VTableInDef()
         for (parent in inheritanceList) {
             MergeVtable(parent, vtable)
@@ -810,7 +808,7 @@ public class WrapVirtualFunc {
         while (boundIdx < resultTable.funcGenericTypeParams.size) {
             let newUpperBounds = ArrayList<Type>()
             for (ty in parentMethodGenericTys[boundIdx].GetUpperBounds()) {
-                newUpperBounds.add(ReplaceRawGenericArgType(ty, resultTable.replaceTable))
+                newUpperBounds.add(ReplaceRawGenericArgType(ty, resultTable.replaceTable, builder))
             }
             resultTable.funcGenericTypeParams[boundIdx].SetUpperBounds(newUpperBounds)
             boundIdx++
@@ -876,7 +874,8 @@ public class WrapVirtualFunc {
 
     private func GetWrapperFuncType(parentFuncTyWithoutThisArg: FuncType, selfTy: Type,
         replaceTable: HashMap<Int64, Type>, isStatic: Bool): FuncType {
-        let erasedFuncTy = (ReplaceRawGenericArgType(parentFuncTyWithoutThisArg, replaceTable) as FuncType).getOrThrow()
+        let erasedFuncTy = (ReplaceRawGenericArgType(parentFuncTyWithoutThisArg, replaceTable, builder) as FuncType)
+            .getOrThrow()
         let wrapperParamTypes = erasedFuncTy.GetParamTypes()
         var wrapperRetTy = erasedFuncTy.GetReturnType()
         let parentParamTypes = parentFuncTyWithoutThisArg.GetParamTypes()
@@ -969,7 +968,7 @@ public class WrapVirtualFunc {
 private func FindPathToTarget(cur: ClassType, targetParent: ClassType, builder: CHIRBuilder,
     replaceTable: HashMap<Int64, Type>, outPath: ArrayList<ClassType>, onPath: HashSet<Int64>): Bool {
     if (cur.objectId == targetParent.objectId) {
-        outPath.add((ReplaceRawGenericArgType(cur, replaceTable) as ClassType).getOrThrow())
+        outPath.add((ReplaceRawGenericArgType(cur, replaceTable, builder) as ClassType).getOrThrow())
         return true
     }
     if (onPath.contains(cur.objectId)) {
@@ -983,7 +982,7 @@ private func FindPathToTarget(cur: ClassType, targetParent: ClassType, builder: 
         }
         for (interfaceTy in ex.GetImplementedInterfaceTys()) {
             if (FindPathToTarget(interfaceTy, targetParent, builder, res[1], outPath, onPath)) {
-                outPath.add((ReplaceRawGenericArgType(cur, replaceTable) as ClassType).getOrThrow())
+                outPath.add((ReplaceRawGenericArgType(cur, replaceTable, builder) as ClassType).getOrThrow())
                 onPath.remove(cur.objectId)
                 return true
             }
@@ -991,14 +990,14 @@ private func FindPathToTarget(cur: ClassType, targetParent: ClassType, builder: 
     }
     for (interfaceTy in cur.GetImplementedInterfaceTys(builder)) {
         if (FindPathToTarget(interfaceTy, targetParent, builder, replaceTable, outPath, onPath)) {
-            outPath.add((ReplaceRawGenericArgType(cur, replaceTable) as ClassType).getOrThrow())
+            outPath.add((ReplaceRawGenericArgType(cur, replaceTable, builder) as ClassType).getOrThrow())
             onPath.remove(cur.objectId)
             return true
         }
     }
     if (let Some(superClass) <- cur.GetSuperClassTy(builder: builder)) {
         if (FindPathToTarget(superClass, targetParent, builder, replaceTable, outPath, onPath)) {
-            outPath.add((ReplaceRawGenericArgType(cur, replaceTable) as ClassType).getOrThrow())
+            outPath.add((ReplaceRawGenericArgType(cur, replaceTable, builder) as ClassType).getOrThrow())
             onPath.remove(cur.objectId)
             return true
         }
@@ -1051,7 +1050,7 @@ public class WrapMutFunc {
 
     private func CreateMutFuncWrapper(rawFunc: Function, curDef: CustomTypeDef, srcClassTy: ClassType): Unit {
         let replaceTable = CollectReplaceTable(curDef, srcClassTy, rawFunc, builder)
-        let instFuncTy = (ReplaceRawGenericArgType(rawFunc.GetFuncType().getOrThrow(), replaceTable) as FuncType)
+        let instFuncTy = (ReplaceRawGenericArgType(rawFunc.GetFuncType().getOrThrow(), replaceTable, builder) as FuncType)
             .getOrThrow()
         let wrapperParamsTy = instFuncTy.GetParamTypes()
         let parentDefType = curDef.GetType().getOrThrow()

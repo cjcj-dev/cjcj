@@ -1429,6 +1429,9 @@ public class FaithfulAST2CHIR {
                 throw IllegalArgumentException(
                     "faithful AST2CHIR CreateCustomTypeDef expected nominal decl, got ${ASTKindName(decl.astKind)}")
         }
+        if (isImported) {
+            customTypeDef.EnableAttr(Attribute.IMPORTED)
+        }
         ApplyDeclAttrs(customTypeDef, decl)
         MaybeSetCoreBuiltinClassTy(customTypeDef)
         chirType.SetGlobalNominalCache(decl, customTypeDef)

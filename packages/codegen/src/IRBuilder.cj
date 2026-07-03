@@ -2181,7 +2181,9 @@ public class IRBuilder2 <: Resource {
         let objectSlot = CreateBitCast(objectValue, objectSlotType, name: "obj.payload.slot")
         let indices = ArrayList<LLVMValueRef>()
         indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), 1u64, 0) })
-        return CreateGEP(i8PtrType, objectSlot, indices, name: "obj.payload")
+        let payload = CreateGEP(i8PtrType, objectSlot, indices, name: "obj.payload")
+        TrackBasePtr(payload, objectValue)
+        return payload
     }
 
     public func CallIntrinsicNull(): LLVMValueRef {

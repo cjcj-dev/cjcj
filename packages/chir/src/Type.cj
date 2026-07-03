@@ -487,7 +487,7 @@ public open class Type {
                     visited2.add(value)
                 }
             }
-            let instUpperBound = ReplaceRawGenericArgType(upperBound, instMap)
+            let instUpperBound = ReplaceRawGenericArgType(upperBound, instMap, builder)
             if (!IsEqualOrSubTypeOf(instUpperBound, builder, visited: visited2)) {
                 return false
             }
@@ -1074,7 +1074,7 @@ public open class CustomType <: Type {
             let res = extendedType.CalculateGenericTyMapping(this)
             CJC_ASSERT(res[0])
             for (parent in extendDef.GetImplementedInterfaceTys()) {
-                allParents.add((ReplaceRawGenericArgType(parent, res[1]) as ClassType).getOrThrow())
+                allParents.add((ReplaceRawGenericArgType(parent, res[1], builder) as ClassType).getOrThrow())
             }
         }
         return allParents
@@ -1094,7 +1094,7 @@ public open class CustomType <: Type {
             typeIdx++
         }
         for (ty in def.GetImplementedInterfaceTys()) {
-            instSuperInterfaceTys.add((ReplaceRawGenericArgType(ty, replaceTable) as ClassType).getOrThrow())
+            instSuperInterfaceTys.add((ReplaceRawGenericArgType(ty, replaceTable, builder) as ClassType).getOrThrow())
         }
         return instSuperInterfaceTys
     }
@@ -1336,7 +1336,8 @@ public func GetAllInstantiatedParentType(cur: ClassType, builder: CHIRBuilder, p
             GetAllInstantiatedParentType(interfaceTy, builder, extendParents, visited: visited)
             var parentIdx: Int64 = 0
             while (parentIdx < extendParents.size) {
-                let instParent = (ReplaceRawGenericArgType(extendParents[parentIdx], res[1]) as ClassType).getOrThrow()
+                let instParent =
+                    (ReplaceRawGenericArgType(extendParents[parentIdx], res[1], builder) as ClassType).getOrThrow()
                 var found = false
                 for (parent in parents) {
                     if (parent.IsEqual(instParent)) {
@@ -1423,6 +1424,76 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type
         return EnumType(enumTy.GetEnumDef(), args)
     }
     return ty
+}
+
+public func CreateNewTypeWithArgs(oldType: Type, newArgs: ArrayList<Type>, builder: CHIRBuilder): Type {
+    if (newArgs.isEmpty()) {
+        return oldType
+    }
+    if (let Some(tupleTy) <- (oldType as TupleType)) {
+        let _ = tupleTy
+        return builder.context.GetTupleTy(newArgs)
+    }
+    if (let Some(structTy) <- (oldType as StructType)) {
+        return builder.context.GetStructTy(structTy.GetStructDef(), newArgs)
+    }
+    if (let Some(enumTy) <- (oldType as EnumType)) {
+        return builder.context.GetEnumTy(enumTy.GetEnumDef(), newArgs)
+    }
+    if (let Some(funcTy) <- (oldType as FuncType)) {
+        let paramTys = ArrayList<Type>()
+        var idx: Int64 = 0
+        while (idx < newArgs.size - 1) {
+            paramTys.add(newArgs[idx])
+            idx++
+        }
+        return builder.context.GetFuncTy(paramTys, newArgs[newArgs.size - 1], hasVarLenParam: funcTy.HasVarArg(),
+            isCFunc: oldType.IsCFunc())
+    }
+    if (let Some(classTy) <- (oldType as ClassType)) {
+        return builder.context.GetClassTy(classTy.GetClassDef(), newArgs)
+    }
+    if (let Some(refTy) <- (oldType as RefType)) {
+        let _ = refTy
+        CJC_ASSERT(newArgs.size == 1)
+        return builder.context.GetRefTy(newArgs[0])
+    }
+    if (let Some(pointerTy) <- (oldType as CPointerType)) {
+        let _ = pointerTy
+        CJC_ASSERT(newArgs.size == 1)
+        return builder.context.GetCPointerTy(newArgs[0])
+    }
+    if (let Some(rawArrayTy) <- (oldType as RawArrayType)) {
+        CJC_ASSERT(newArgs.size == 1)
+        return builder.context.GetRawArrayTy(newArgs[0], dims: rawArrayTy.GetDims())
+    }
+    if (let Some(varrayTy) <- (oldType as VArrayType)) {
+        CJC_ASSERT(newArgs.size == 1)
+        return builder.context.GetVArrayTy(newArgs[0], varrayTy.size)
+    }
+    if (let Some(boxTy) <- (oldType as BoxType)) {
+        let _ = boxTy
+        CJC_ASSERT(newArgs.size == 1)
+        return builder.context.GetBoxTy(newArgs[0])
+    }
+    throw IllegalStateException("CreateNewTypeWithArgs unsupported for " + oldType.ToString())
+}
+
+public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type>, builder: CHIRBuilder): Type {
+    if (replaceTable.isEmpty()) {
+        return ty
+    }
+    if (let Some(genericTy) <- (ty as GenericType)) {
+        if (let Some(instTy) <- replaceTable.get(genericTy.objectId)) {
+            return instTy
+        }
+        return ty
+    }
+    let newArgs = ArrayList<Type>()
+    for (argTy in ty.GetTypeArgs()) {
+        newArgs.add(ReplaceRawGenericArgType(argTy, replaceTable, builder))
+    }
+    return CreateNewTypeWithArgs(ty, newArgs, builder)
 }
 
 private func ReplaceRawGenericArgType(ty: Type, genericParams: ArrayList<GenericType>,

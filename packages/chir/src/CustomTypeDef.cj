@@ -206,7 +206,7 @@ public class VirtualMethodInfo {
         }
         var paramIdx: Int64 = 0
         while (paramIdx < paramTysInMethod.size) {
-            let paramTyInMethod = ReplaceRawGenericArgType(paramTysInMethod[paramIdx], replaceTable)
+            let paramTyInMethod = ReplaceRawGenericArgType(paramTysInMethod[paramIdx], replaceTable, builder)
             if (!ParamTypeIsEquivalent(paramTyInMethod, paramTysInVtable[paramIdx])) {
                 return false
             }
@@ -242,7 +242,7 @@ public class VirtualMethodInfo {
         }
         var paramIdx: Int64 = 0
         while (paramIdx < genericParamTys.size) {
-            let declaredInstType = ReplaceRawGenericArgType(genericParamTys[paramIdx], localReplaceTable)
+            let declaredInstType = ReplaceRawGenericArgType(genericParamTys[paramIdx], localReplaceTable, builder)
             if (!ParamTypeIsEquivalent(declaredInstType, instArgTys[paramIdx])) {
                 return false
             }
@@ -575,6 +575,20 @@ public open class CustomTypeDef <: Base {
         return out
     }
 
+    public func GetSuperTypesRecusively(builder: CHIRBuilder): ArrayList<ClassType> {
+        let inheritanceList = ArrayList<ClassType>()
+        for (interfaceTy in GetImplementedInterfaceTys()) {
+            GetAllInstantiatedParentType(interfaceTy, builder, inheritanceList)
+        }
+        if (IsClassLike()) {
+            let classDef = (this as ClassDef).getOrThrow()
+            if (let Some(superClass) <- classDef.GetSuperClassTy()) {
+                GetAllInstantiatedParentType(superClass, builder, inheritanceList)
+            }
+        }
+        return inheritanceList
+    }
+
     public func AddInstanceVar(info: MemberVarInfo): Unit {
         info.outerDef = this
         instanceVars.add(info)
@@ -757,7 +771,7 @@ public open class CustomTypeDef <: Base {
             var matched = true
             var paramIdx: Int64 = 0
             while (paramIdx < originalFuncParamTys.size) {
-                let instType = ReplaceRawGenericArgType(originalFuncParamTys[paramIdx], localReplaceTable)
+                let instType = ReplaceRawGenericArgType(originalFuncParamTys[paramIdx], localReplaceTable, builder)
                 if (!instParamTys[paramIdx].IsGeneric() && !instType.IsEqual(instParamTys[paramIdx])) {
                     matched = false
                     break
@@ -799,7 +813,7 @@ public open class CustomTypeDef <: Base {
                 let funcInfo = vtableIt.GetVirtualMethods()[methodIdx]
                 if (funcInfo.FuncSigIsMatched(funcCallType, replaceTable, builder)) {
                     let originalParentType = vtableIt.GetSrcParentType().getOrThrow()
-                    let instSrcParentTy = ReplaceRawGenericArgType(originalParentType, replaceTable)
+                    let instSrcParentTy = ReplaceRawGenericArgType(originalParentType, replaceTable, builder)
                     let item = VTableSearchRes()
                     item.instSrcParentType = (instSrcParentTy as ClassType).getOrThrow()
                     item.halfInstSrcParentType = originalParentType
@@ -812,7 +826,7 @@ public open class CustomTypeDef <: Base {
                     item.attr = funcInfo.GetAttributeInfo()
                     item.offset = UInt64(methodIdx)
                     res.add(item)
-                    let instTy = ReplaceRawGenericArgType(funcInfo.GetCondition().funcType, replaceTable)
+                    let instTy = ReplaceRawGenericArgType(funcInfo.GetCondition().funcType, replaceTable, builder)
                     candidateTypes.add((instTy as FuncType).getOrThrow())
                 }
                 methodIdx++
