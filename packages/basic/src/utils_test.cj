@@ -60,6 +60,73 @@ class UtilsTest {
     }
 
     @TestCase
+    func faithfulUnorderedMapClearThenInsertIterationTest(): Unit {
+        /*
+        Golden data generated with /usr/bin/g++:
+        #include <iostream>
+        #include <string>
+        #include <unordered_map>
+        #include <vector>
+
+        static void dump(const char* label, const std::unordered_map<std::string, long>& map)
+        {
+            std::cout << label << " bucket_count=" << map.bucket_count() << " keys=";
+            bool first = true;
+            for (const auto& item : map) {
+                if (!first) {
+                    std::cout << ",";
+                }
+                first = false;
+                std::cout << item.first;
+            }
+            std::cout << "\n";
+        }
+
+        int main()
+        {
+            std::unordered_map<std::string, long> map;
+            const std::vector<std::string> initial = {
+                "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda",
+                "mu", "nu", "xi"
+            };
+            long index = 0;
+            for (const auto& key : initial) {
+                map.emplace(key, index++);
+            }
+            dump("before_clear", map);
+            map.clear();
+            dump("after_clear", map);
+            const std::vector<std::string> after = {
+                "clear.alpha", "clear.beta", "clear.gamma", "clear.delta", "clear.epsilon"
+            };
+            index = 0;
+            for (const auto& key : after) {
+                map.emplace(key, index++);
+            }
+            dump("after_reinsert", map);
+        }
+
+        before_clear bucket_count=29 keys=xi,alpha,delta,zeta,lambda,gamma,iota,epsilon,eta,kappa,beta,theta,mu,nu
+        after_clear bucket_count=29 keys=
+        after_reinsert bucket_count=29 keys=clear.delta,clear.gamma,clear.beta,clear.epsilon,clear.alpha
+        */
+        let map = buildFaithfulMap([
+            "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda",
+            "mu", "nu", "xi"
+        ])
+        map.clear()
+        @Expect(map.BucketCount(), 29)
+        @Expect(map.keys().size, 0)
+        map.add("clear.alpha", 0)
+        map.add("clear.beta", 1)
+        map.add("clear.gamma", 2)
+        map.add("clear.delta", 3)
+        map.add("clear.epsilon", 4)
+        @Expect(map.BucketCount(), 29)
+        expectStringList(map.keys(), ["clear.delta", "clear.gamma", "clear.beta", "clear.epsilon", "clear.alpha"])
+    }
+
+    @TestCase
     func faithfulUnorderedMapStdPackageIterationTest(): Unit {
         let map = buildFaithfulMap([
             "std.collection.array_list", "std.core.byte_extension", "std.core.duration", "std.core.string",

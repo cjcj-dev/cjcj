@@ -77,12 +77,10 @@ public class FaithfulUnorderedMap<V> {
     }
 
     public func clear(): Unit {
-        buckets = FaithfulUnorderedMap<V>.MAllocateBuckets(1)
+        buckets = FaithfulUnorderedMap<V>.MAllocateBuckets(bucketCount)
         nodes.clear()
         beforeBeginNext = FAITHFUL_UNORDERED_MAP_EMPTY
-        bucketCount = 1
         elementCount = 0
-        nextResize = 0
     }
 
     public func keys(): ArrayList<String> {
