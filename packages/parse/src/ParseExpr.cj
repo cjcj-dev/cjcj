@@ -788,14 +788,16 @@ extend ParserImpl {
         let left = Expect(TokenKind.LCURL, "expected '{'")
         block.leftCurlPos = left.Begin()
         block.begin = left.Begin()
-        SkipNLOrSemi()
-        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
-            let node = ParseExprOrDecl(scopeKind)
-            block.body.add(node)
+        try (cs = ChainScope(this, block)) {
             SkipNLOrSemi()
+            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
+                let node = ParseExprOrDecl(scopeKind)
+                block.body.add(node)
+                SkipNLOrSemi()
+            }
+            block.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after block").Begin()
+            block.end = block.rightCurlPos + 1
         }
-        block.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after block").Begin()
-        block.end = block.rightCurlPos + 1
         return block
     }
 
@@ -842,57 +844,61 @@ extend ParserImpl {
         let ret = MatchExpr()
         let token = Expect(TokenKind.MATCH, "expected 'match'")
         ret.begin = token.Begin()
-        if (Seeing([TokenKind.LCURL, TokenKind.CASE])) {
-            ParseMatchNoSelector(ret)
-            return ret
-        }
-        ret.matchMode = true
-        if (Skip(TokenKind.LPAREN)) {
-            ret.leftParenPos = lastToken.Begin()
-            if (!Seeing(TokenKind.RPAREN)) {
-                ret.selector = ParseExpr()
+        try (cs = ChainScope(this, ret)) {
+            if (Seeing([TokenKind.LCURL, TokenKind.CASE])) {
+                ParseMatchNoSelector(ret)
+                return ret
             }
-            ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after match selector").Begin()
-        }
-        ret.leftCurlPos = Expect(TokenKind.LCURL, "expected '{' for match body").Begin()
-        SkipNLOrSemi()
-        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
-            let matchCase = MatchCase()
-            Expect(TokenKind.CASE, "expected 'case'")
-            matchCase.begin = lastToken.Begin()
-            while (!Seeing(TokenKind.END) && !SeeingDoubleArrow() && !Seeing(TokenKind.WHERE)) {
-                matchCase.patterns.add(ParsePattern())
-                if (Skip(TokenKind.BITOR)) {
-                    matchCase.bitOrPosVector.add(lastToken.Begin())
-                } else {
-                    break
+            ret.matchMode = true
+            if (Skip(TokenKind.LPAREN)) {
+                ret.leftParenPos = lastToken.Begin()
+                if (!Seeing(TokenKind.RPAREN)) {
+                    ret.selector = ParseExpr()
+                }
+                ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after match selector").Begin()
+            }
+            ret.leftCurlPos = Expect(TokenKind.LCURL, "expected '{' for match body").Begin()
+            SkipNLOrSemi()
+            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
+                let matchCase = MatchCase()
+                Expect(TokenKind.CASE, "expected 'case'")
+                matchCase.begin = lastToken.Begin()
+                try (caseScope = ChainScope(this, matchCase)) {
+                    while (!Seeing(TokenKind.END) && !SeeingDoubleArrow() && !Seeing(TokenKind.WHERE)) {
+                        matchCase.patterns.add(ParsePattern())
+                        if (Skip(TokenKind.BITOR)) {
+                            matchCase.bitOrPosVector.add(lastToken.Begin())
+                        } else {
+                            break
+                        }
+                    }
+                    if (Skip(TokenKind.WHERE)) {
+                        matchCase.wherePos = lastToken.Begin()
+                        matchCase.patternGuard = ParseExpr()
+                    }
+                    if (!SkipDoubleArrow()) {
+                        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_case, Peek(),
+                            ConvertToken(Peek()))
+                        builder.AddHint(MakeRange(matchCase.begin, "case"))
+                        builder.Emit()
+                    }
+                    matchCase.arrowPos = lastToken.Begin()
+                    let block = Block()
+                    block.begin = Peek().Begin()
+                    while (!Seeing(TokenKind.END) && !Seeing(TokenKind.CASE) && !Seeing(TokenKind.RCURL)) {
+                        block.body.add(ParseExprOrDecl(ScopeKind.FUNC_BODY))
+                        SkipNLOrSemi()
+                    }
+                    block.end = lastToken.End()
+                    matchCase.exprOrDecls = block
+                    matchCase.end = block.end
+                    ret.matchCases.add(matchCase)
+                    SkipNLOrSemi()
                 }
             }
-            if (Skip(TokenKind.WHERE)) {
-                matchCase.wherePos = lastToken.Begin()
-                matchCase.patternGuard = ParseExpr()
-            }
-            if (!SkipDoubleArrow()) {
-                let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_case, Peek(),
-                    ConvertToken(Peek()))
-                builder.AddHint(MakeRange(matchCase.begin, "case"))
-                builder.Emit()
-            }
-            matchCase.arrowPos = lastToken.Begin()
-            let block = Block()
-            block.begin = Peek().Begin()
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.CASE) && !Seeing(TokenKind.RCURL)) {
-                block.body.add(ParseExprOrDecl(ScopeKind.FUNC_BODY))
-                SkipNLOrSemi()
-            }
-            block.end = lastToken.End()
-            matchCase.exprOrDecls = block
-            matchCase.end = block.end
-            ret.matchCases.add(matchCase)
-            SkipNLOrSemi()
+            ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after match").Begin()
+            ret.end = ret.rightCurlPos + 1
         }
-        ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after match").Begin()
-        ret.end = ret.rightCurlPos + 1
         return ret
     }
 
@@ -911,29 +917,31 @@ extend ParserImpl {
             }
             let matchCase = MatchCaseOther()
             matchCase.begin = lastToken.Begin()
-            if (Skip(TokenKind.WILDCARD)) {
-                matchCase.matchExpr = WildcardExpr(lastToken.Begin())
-            } else {
-                matchCase.matchExpr = ParseExpr()
-            }
-            if (!SkipDoubleArrow()) {
-                let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_case, Peek(),
-                    ConvertToken(Peek()))
-                builder.AddHint(MakeRange(matchCase.begin, "case"))
-                builder.Emit()
-            }
-            matchCase.arrowPos = lastToken.Begin()
-            let block = Block()
-            block.begin = Peek().Begin()
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.CASE) && !Seeing(TokenKind.RCURL)) {
-                block.body.add(ParseExprOrDecl(ScopeKind.FUNC_BODY))
+            try (caseScope = ChainScope(this, matchCase)) {
+                if (Skip(TokenKind.WILDCARD)) {
+                    matchCase.matchExpr = WildcardExpr(lastToken.Begin())
+                } else {
+                    matchCase.matchExpr = ParseExpr()
+                }
+                if (!SkipDoubleArrow()) {
+                    let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_case, Peek(),
+                        ConvertToken(Peek()))
+                    builder.AddHint(MakeRange(matchCase.begin, "case"))
+                    builder.Emit()
+                }
+                matchCase.arrowPos = lastToken.Begin()
+                let block = Block()
+                block.begin = Peek().Begin()
+                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.CASE) && !Seeing(TokenKind.RCURL)) {
+                    block.body.add(ParseExprOrDecl(ScopeKind.FUNC_BODY))
+                    SkipNLOrSemi()
+                }
+                block.end = lastToken.End()
+                matchCase.exprOrDecls = block
+                matchCase.end = block.end
+                ret.matchCaseOthers.add(matchCase)
                 SkipNLOrSemi()
             }
-            block.end = lastToken.End()
-            matchCase.exprOrDecls = block
-            matchCase.end = block.end
-            ret.matchCaseOthers.add(matchCase)
-            SkipNLOrSemi()
         }
         ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after match").Begin()
         ret.end = ret.rightCurlPos + 1
@@ -984,34 +992,37 @@ extend ParserImpl {
         let resourceNames = ArrayList<(String, Position)>()
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
             let decl = AstVarDecl()
-            decl.isVar = false
-            decl.isResourceVar = true
-            decl.identifier = ExpectIdentifierWithPos(decl)
-            decl.begin = decl.identifier.Begin()
-            for (nameAndPos in resourceNames) {
-                if (nameAndPos[0] == decl.identifier.Val()) {
-                    DiagRedefinedResourceName((decl.identifier.Val(), decl.identifier.Begin()), nameAndPos)
+            try (cs = ChainScope(this, decl)) {
+                decl.isVar = false
+                decl.isResourceVar = true
+                decl.identifier = ExpectIdentifierWithPos(decl)
+                decl.begin = decl.identifier.Begin()
+                for (nameAndPos in resourceNames) {
+                    if (nameAndPos[0] == decl.identifier.Val()) {
+                        DiagRedefinedResourceName((decl.identifier.Val(), decl.identifier.Begin()), nameAndPos)
+                    }
                 }
+                resourceNames.add((decl.identifier.Val(), decl.identifier.Begin()))
+                if (Skip(TokenKind.COLON)) {
+                    decl.colonPos = lastToken.Begin()
+                    decl.typeNode = ParseType()
+                }
+                if (Skip(TokenKind.ASSIGN)) {
+                    decl.assignPos = lastToken.Begin()
+                    decl.initializer = ParseExpr(ExprKind.VAR_INIT)
+                } else {
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_assignment, Peek(),
+                        ConvertToken(Peek())).Emit()
+                }
+                decl.end = if (let Some(expr) <- decl.initializer) {
+                    expr.end
+                } else if (let Some(ty) <- decl.typeNode) {
+                    ty.end
+                } else {
+                    decl.identifier.End()
+                }
+                ret.resourceSpec.add(decl)
             }
-            resourceNames.add((decl.identifier.Val(), decl.identifier.Begin()))
-            if (Skip(TokenKind.COLON)) {
-                decl.colonPos = lastToken.Begin()
-                decl.typeNode = ParseType()
-            }
-            if (Skip(TokenKind.ASSIGN)) {
-                decl.assignPos = lastToken.Begin()
-                decl.initializer = ParseExpr(ExprKind.VAR_INIT)
-            } else {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_assignment, Peek(), ConvertToken(Peek())).Emit()
-            }
-            decl.end = if (let Some(expr) <- decl.initializer) {
-                expr.end
-            } else if (let Some(ty) <- decl.typeNode) {
-                ty.end
-            } else {
-                decl.identifier.End()
-            }
-            ret.resourceSpec.add(decl)
             if (Skip(TokenKind.COMMA)) {
                 ret.resourceSpecCommaPos.add(lastToken.Begin())
             } else {
@@ -1351,52 +1362,56 @@ extend ParserImpl {
 
     private func ParseLambdaFuncParam(): AstFuncParam {
         let param = AstFuncParam()
-        if (Skip(TokenKind.WILDCARD)) {
-            param.identifier = SrcIdentifier("_", "_", lastToken.Begin(), lastToken.End(), false)
-        } else {
-            param.identifier = ExpectIdentifierWithPos(param)
-        }
-        if (param.identifier.Empty()) {
-            param.EnableAttr(Attribute.IS_BROKEN)
-            ConsumeUntilAny([TokenKind.DOUBLE_ARROW, TokenKind.COLON, TokenKind.COMMA, TokenKind.NL,
-                TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
-        }
-        param.isVar = false
-        param.begin = param.identifier.Begin()
-        if (Skip(TokenKind.COLON)) {
-            param.colonPos = lastToken.Begin()
-            param.typeNode = ParseType()
-            if (let Some(typeNode) <- param.typeNode) {
-                param.end = typeNode.end
+        try (cs = ChainScope(this, param)) {
+            if (Skip(TokenKind.WILDCARD)) {
+                param.identifier = SrcIdentifier("_", "_", lastToken.Begin(), lastToken.End(), false)
+            } else {
+                param.identifier = ExpectIdentifierWithPos(param)
             }
-        } else {
-            param.end = param.identifier.End()
+            if (param.identifier.Empty()) {
+                param.EnableAttr(Attribute.IS_BROKEN)
+                ConsumeUntilAny([TokenKind.DOUBLE_ARROW, TokenKind.COLON, TokenKind.COMMA, TokenKind.NL,
+                    TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
+            }
+            param.isVar = false
+            param.begin = param.identifier.Begin()
+            if (Skip(TokenKind.COLON)) {
+                param.colonPos = lastToken.Begin()
+                param.typeNode = ParseType()
+                if (let Some(typeNode) <- param.typeNode) {
+                    param.end = typeNode.end
+                }
+            } else {
+                param.end = param.identifier.End()
+            }
         }
         return param
     }
 
     private func ParseFuncParamListInLambdaExpr(): AstFuncParamList {
         let paramList = AstFuncParamList()
-        if (SeeingInvalidParamListInLambdaExpr()) {
-            paramList.begin = Peek().Begin()
-            paramList.end = Peek().Begin()
-            return paramList
-        }
-        while (!Seeing(TokenKind.END) && !SeeingDoubleArrow()) {
-            let param = ParseLambdaFuncParam()
-            if (param.TestAttr(Attribute.IS_BROKEN)) {
-                paramList.EnableAttr(Attribute.IS_BROKEN)
+        try (cs = ChainScope(this, paramList)) {
+            if (SeeingInvalidParamListInLambdaExpr()) {
+                paramList.begin = Peek().Begin()
+                paramList.end = Peek().Begin()
+                return paramList
             }
-            paramList.params.add(param)
-            if (Skip(TokenKind.COMMA)) {
-                param.commaPos = lastToken.Begin()
-            } else {
-                break
+            while (!Seeing(TokenKind.END) && !SeeingDoubleArrow()) {
+                let param = ParseLambdaFuncParam()
+                if (param.TestAttr(Attribute.IS_BROKEN)) {
+                    paramList.EnableAttr(Attribute.IS_BROKEN)
+                }
+                paramList.params.add(param)
+                if (Skip(TokenKind.COMMA)) {
+                    param.commaPos = lastToken.Begin()
+                } else {
+                    break
+                }
             }
-        }
-        if (!paramList.params.isEmpty()) {
-            paramList.begin = paramList.params[0].begin
-            paramList.end = paramList.params[paramList.params.size - 1].end
+            if (!paramList.params.isEmpty()) {
+                paramList.begin = paramList.params[0].begin
+                paramList.end = paramList.params[paramList.params.size - 1].end
+            }
         }
         return paramList
     }
@@ -1404,52 +1419,56 @@ extend ParserImpl {
     public func ParseLambdaExpr(isTailClosure: Bool): LambdaExpr {
         let lambda = LambdaExpr()
         lambda.begin = Peek().Begin()
-        let body = AstFuncBody()
-        if (Skip(TokenKind.LCURL)) {
-            let paramList = ParseFuncParamListInLambdaExpr()
-            if (!paramList.params.isEmpty() && !SkipDoubleArrow()) {
-                if (!lambda.TestAttr(Attribute.HAS_BROKEN)) {
-                    ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_lambda, Peek(),
-                        ConvertToken(Peek())).Emit()
-                }
-                ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.DOUBLE_ARROW, TokenKind.RCURL],
-                    targetTokenConsumed: false)
-                if (!Skip(TokenKind.DOUBLE_ARROW)) {
-                    let _ = SkipCombinedDoubleArrow()
-                }
-                lambda.EnableAttr(Attribute.HAS_BROKEN)
-            } else {
-                if (paramList.params.isEmpty() && !isTailClosure) {
-                    let hasDoubleArrow = lastToken.kind == TokenKind.DOUBLE_ARROW || Skip(TokenKind.DOUBLE_ARROW) ||
-                        SkipCombinedDoubleArrow()
-                    let hasWildcard = Seeing([TokenKind.WILDCARD, TokenKind.DOUBLE_ARROW]) ||
-                        Seeing([TokenKind.WILDCARD, TokenKind.COMMA]) ||
-                        SeeingTokenAndCombinator(TokenKind.WILDCARD, [TokenKind.ASSIGN, TokenKind.GT])
-                    if (!hasDoubleArrow && !hasWildcard) {
-                        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_lambda, Peek(),
-                            ConvertToken(Peek())).Emit()
+        try (cs = ChainScope(this, lambda)) {
+            let body = AstFuncBody()
+            try (bodyScope = ChainScope(this, body)) {
+                if (Skip(TokenKind.LCURL)) {
+                    let paramList = ParseFuncParamListInLambdaExpr()
+                    if (!paramList.params.isEmpty() && !SkipDoubleArrow()) {
+                        if (!lambda.TestAttr(Attribute.HAS_BROKEN)) {
+                            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_lambda, Peek(),
+                                ConvertToken(Peek())).Emit()
+                        }
+                        ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.DOUBLE_ARROW, TokenKind.RCURL],
+                            targetTokenConsumed: false)
+                        if (!Skip(TokenKind.DOUBLE_ARROW)) {
+                            let _ = SkipCombinedDoubleArrow()
+                        }
+                        lambda.EnableAttr(Attribute.HAS_BROKEN)
+                    } else {
+                        if (paramList.params.isEmpty() && !isTailClosure) {
+                            let hasDoubleArrow = lastToken.kind == TokenKind.DOUBLE_ARROW ||
+                                Skip(TokenKind.DOUBLE_ARROW) || SkipCombinedDoubleArrow()
+                            let hasWildcard = Seeing([TokenKind.WILDCARD, TokenKind.DOUBLE_ARROW]) ||
+                                Seeing([TokenKind.WILDCARD, TokenKind.COMMA]) ||
+                                SeeingTokenAndCombinator(TokenKind.WILDCARD, [TokenKind.ASSIGN, TokenKind.GT])
+                            if (!hasDoubleArrow && !hasWildcard) {
+                                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_lambda, Peek(),
+                                    ConvertToken(Peek())).Emit()
+                            }
+                        }
+                        if (lastToken.kind == TokenKind.DOUBLE_ARROW || Skip(TokenKind.DOUBLE_ARROW) ||
+                            SkipCombinedDoubleArrow()) {
+                            body.doubleArrowPos = lastToken.Begin()
+                        }
                     }
-                }
-                if (lastToken.kind == TokenKind.DOUBLE_ARROW || Skip(TokenKind.DOUBLE_ARROW) ||
-                    SkipCombinedDoubleArrow()) {
-                    body.doubleArrowPos = lastToken.Begin()
+                    body.begin = lastToken.Begin()
+                    body.paramLists.add(paramList)
+                    let block = Block()
+                    block.leftCurlPos = lambda.begin
+                    block.begin = lambda.begin
+                    while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
+                        block.body.add(ParseExprOrDecl(ScopeKind.FUNC_BODY))
+                        SkipNLOrSemi()
+                    }
+                    block.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after lambda").Begin()
+                    block.end = block.rightCurlPos + 1
+                    body.body = Some(block)
+                    body.end = block.end
+                    lambda.funcBody = Some(body)
+                    lambda.end = block.end
                 }
             }
-            body.begin = lastToken.Begin()
-            body.paramLists.add(paramList)
-            let block = Block()
-            block.leftCurlPos = lambda.begin
-            block.begin = lambda.begin
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
-                block.body.add(ParseExprOrDecl(ScopeKind.FUNC_BODY))
-                SkipNLOrSemi()
-            }
-            block.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after lambda").Begin()
-            block.end = block.rightCurlPos + 1
-            body.body = Some(block)
-            body.end = block.end
-            lambda.funcBody = Some(body)
-            lambda.end = block.end
         }
         return lambda
     }

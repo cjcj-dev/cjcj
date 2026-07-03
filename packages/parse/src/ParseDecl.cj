@@ -427,38 +427,42 @@ extend ParserImpl {
 
     public func ParseFuncDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): FuncDecl {
         let ret = FuncDecl()
-        ParseFuncLikeHeader(ret, TokenKind.FUNC, scopeKind, modifiers, annos)
+        try (cs = ChainScope(this, ret)) {
+            ParseFuncLikeHeader(ret, TokenKind.FUNC, scopeKind, modifiers, annos)
+        }
         return ret
     }
 
     public func ParseMacroDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): MacroDecl {
         let ret = MacroDecl()
-        ApplyModifiersAndAnnotations(ret, modifiers, annos)
-        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.MACRO))
-        let keywordToken = Expect(TokenKind.MACRO, "expected 'macro'")
-        ret.keywordPos = keywordToken.Begin()
-        if (ret.begin.IsZero()) {
-            ret.begin = keywordToken.Begin()
+        try (cs = ChainScope(this, ret)) {
+            ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.MACRO))
+            let keywordToken = Expect(TokenKind.MACRO, "expected 'macro'")
+            ret.keywordPos = keywordToken.Begin()
+            if (ret.begin.IsZero()) {
+                ret.begin = keywordToken.Begin()
+            }
+            ret.EnableAttr(Attribute.MACRO_FUNC)
+            ret.identifier = ExpectIdentifierWithPos(ret)
+            if (IsBuiltinAnnotation(moduleName, ret.identifier.Val()) || IsBuiltinMacroDeclName(ret.identifier.Val())) {
+                let builtinKind = if (IsBuiltinMacroDeclName(ret.identifier.Val())) { "macro" } else { "annotation" }
+                ParseDiagnoseRefactor(
+                    DiagKindRefactor.parse_macro_define_conflicted_with_builtin,
+                    MakeRange(ret.identifier.Begin(), ret.identifier.End()),
+                    ret.identifier.Val(),
+                    builtinKind).Emit()
+                ret.EnableAttr(Attribute.IS_BROKEN)
+            }
+            let body = ParseMacroBody(ret)
+            ret.funcBody = body
+            ret.end = body.end
+            if (!ret.TestAttr(Attribute.PUBLIC) && !ret.TestAttr(Attribute.IS_BROKEN)) {
+                DiagExpectPublicBeforeMacroCall(ret)
+                ret.EnableAttr(Attribute.IS_BROKEN)
+            }
+            CheckMacroDeclPackage(ret)
         }
-        ret.EnableAttr(Attribute.MACRO_FUNC)
-        ret.identifier = ExpectIdentifierWithPos(ret)
-        if (IsBuiltinAnnotation(moduleName, ret.identifier.Val()) || IsBuiltinMacroDeclName(ret.identifier.Val())) {
-            let builtinKind = if (IsBuiltinMacroDeclName(ret.identifier.Val())) { "macro" } else { "annotation" }
-            ParseDiagnoseRefactor(
-                DiagKindRefactor.parse_macro_define_conflicted_with_builtin,
-                MakeRange(ret.identifier.Begin(), ret.identifier.End()),
-                ret.identifier.Val(),
-                builtinKind).Emit()
-            ret.EnableAttr(Attribute.IS_BROKEN)
-        }
-        let body = ParseMacroBody(ret)
-        ret.funcBody = body
-        ret.end = body.end
-        if (!ret.TestAttr(Attribute.PUBLIC) && !ret.TestAttr(Attribute.IS_BROKEN)) {
-            DiagExpectPublicBeforeMacroCall(ret)
-            ret.EnableAttr(Attribute.IS_BROKEN)
-        }
-        CheckMacroDeclPackage(ret)
         return ret
     }
 
@@ -573,17 +577,19 @@ extend ParserImpl {
 
     public func ParseMainDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): MainDecl {
         let ret = MainDecl()
-        ApplyModifiersAndAnnotations(ret, modifiers, annos)
-        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.MAIN))
-        let keywordToken = Expect(TokenKind.MAIN, "expected function keyword")
-        ret.keywordPos = keywordToken.Begin()
-        if (ret.begin.IsZero()) { ret.begin = keywordToken.Begin() }
-        let body = ParseFuncBody(scopeKind)
-        ret.funcBody = body
-        ret.end = body.end
-        ret.identifier = SrcIdentifier("main", "main", ret.keywordPos, ret.keywordPos + 4, false)
-        if (ret.TestAttr(Attribute.UNSAFE)) {
-            SetUnsafe(ret, modifiers: modifiers)
+        try (cs = ChainScope(this, ret)) {
+            ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.MAIN))
+            let keywordToken = Expect(TokenKind.MAIN, "expected function keyword")
+            ret.keywordPos = keywordToken.Begin()
+            if (ret.begin.IsZero()) { ret.begin = keywordToken.Begin() }
+            let body = ParseFuncBody(scopeKind)
+            ret.funcBody = body
+            ret.end = body.end
+            ret.identifier = SrcIdentifier("main", "main", ret.keywordPos, ret.keywordPos + 4, false)
+            if (ret.TestAttr(Attribute.UNSAFE)) {
+                SetUnsafe(ret, modifiers: modifiers)
+            }
         }
         return ret
     }
@@ -825,29 +831,31 @@ extend ParserImpl {
     public func ParseFuncBody(scopeKind: ScopeKind): FuncBody {
         let body = FuncBody()
         body.begin = Peek().Begin()
-        if (let Some(generic) <- ParseOptionalGeneric()) {
-            body.generic = generic
-        }
-        body.paramLists.add(ParseParameterList(scopeKind))
-        let paramsEnd = lastToken.End()
-        if (Skip(TokenKind.COLON)) {
-            body.colonPos = lastToken.Begin()
-            body.retType = ParseType()
-        }
-        var constraintsEnd = INVALID_POSITION
-        for (constraint in ParseGenericConstraints()) {
-            EnsureFuncBodyGeneric(body).genericConstraints.add(constraint)
-            constraintsEnd = constraint.end
-        }
-        if (Seeing(TokenKind.LCURL)) {
-            body.body = ParseBlock(ScopeKind.FUNC_BODY)
-            if (let Some(block) <- body.body) { body.end = block.end }
-        } else if (!constraintsEnd.IsZero()) {
-            body.end = constraintsEnd
-        } else if (let Some(retType) <- body.retType) {
-            body.end = retType.end
-        } else {
-            body.end = paramsEnd
+        try (cs = ChainScope(this, body)) {
+            if (let Some(generic) <- ParseOptionalGeneric()) {
+                body.generic = generic
+            }
+            body.paramLists.add(ParseParameterList(scopeKind))
+            let paramsEnd = lastToken.End()
+            if (Skip(TokenKind.COLON)) {
+                body.colonPos = lastToken.Begin()
+                body.retType = ParseType()
+            }
+            var constraintsEnd = INVALID_POSITION
+            for (constraint in ParseGenericConstraints()) {
+                EnsureFuncBodyGeneric(body).genericConstraints.add(constraint)
+                constraintsEnd = constraint.end
+            }
+            if (Seeing(TokenKind.LCURL)) {
+                body.body = ParseBlock(ScopeKind.FUNC_BODY)
+                if (let Some(block) <- body.body) { body.end = block.end }
+            } else if (!constraintsEnd.IsZero()) {
+                body.end = constraintsEnd
+            } else if (let Some(retType) <- body.retType) {
+                body.end = retType.end
+            } else {
+                body.end = paramsEnd
+            }
         }
         return body
     }
@@ -865,31 +873,34 @@ extend ParserImpl {
         let list = FuncParamList()
         list.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' for parameter list").Begin()
         list.begin = list.leftParenPos
-        var namedParameter: Option<FuncParam> = None
-        var memberParameter: Option<FuncParam> = None
-        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-            let parsed = ParseParamInParamList(scopeKind, namedParameter, memberParameter)
-            let param = parsed[0]
-            namedParameter = parsed[1]
-            memberParameter = parsed[2]
-            if (param.identifier.Val() == "...") {
-                list.hasVariableLenArg = true
-                list.variadicArgIndex = UInt64(list.params.size)
+        try (cs = ChainScope(this, list)) {
+            var namedParameter: Option<FuncParam> = None
+            var memberParameter: Option<FuncParam> = None
+            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
+                let parsed = ParseParamInParamList(scopeKind, namedParameter, memberParameter)
+                let param = parsed[0]
+                namedParameter = parsed[1]
+                memberParameter = parsed[2]
+                if (param.identifier.Val() == "...") {
+                    list.hasVariableLenArg = true
+                    list.variadicArgIndex = UInt64(list.params.size)
+                }
+                list.params.add(param)
+                if (Skip(TokenKind.COMMA)) {
+                    param.commaPos = lastToken.Begin()
+                } else {
+                    break
+                }
             }
-            list.params.add(param)
-            if (Skip(TokenKind.COMMA)) {
-                param.commaPos = lastToken.Begin()
-            } else {
-                break
-            }
-        }
-        list.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after parameters").Begin()
-        list.end = list.rightParenPos + 1
-        if (ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY)) {
-            if (list.params.isEmpty()) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_setter_must_contain_one_parameter, list.begin).Emit()
-            } else if (list.params.size > 1) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_setter_can_only_accept_one_parameter, list.params[1].begin).Emit()
+            list.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after parameters").Begin()
+            list.end = list.rightParenPos + 1
+            if (ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY)) {
+                if (list.params.isEmpty()) {
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_setter_must_contain_one_parameter, list.begin).Emit()
+                } else if (list.params.size > 1) {
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_setter_can_only_accept_one_parameter,
+                        list.params[1].begin).Emit()
+                }
             }
         }
         return list
@@ -901,10 +912,11 @@ extend ParserImpl {
 
     public func ParseFuncParam(scopeKind: ScopeKind): FuncParam {
         let param = FuncParam()
-        ParseAnnotations(param.annotations)
-        let mods = ArrayList<Modifier>()
-        ParseModifiers(mods)
-        for (modifier in mods) { param.modifiers.add(modifier) }
+        try (cs = ChainScope(this, param)) {
+            ParseAnnotations(param.annotations)
+            let mods = ArrayList<Modifier>()
+            ParseModifiers(mods)
+            for (modifier in mods) { param.modifiers.add(modifier) }
         let isPrimaryConstructor = ScopeKindEquals(scopeKind, ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS) ||
             ScopeKindEquals(scopeKind, ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT)
         var memberStart = INVALID_POSITION
@@ -991,6 +1003,7 @@ extend ParserImpl {
             ty.end
         } else {
             param.identifier.End()
+        }
         }
         return param
     }
@@ -1091,16 +1104,18 @@ extend ParserImpl {
         isConst: Bool
     ): VarDecl {
         let decl = VarDecl()
-        ApplyModifiersAndAnnotations(decl, modifiers, annos)
-        decl.keywordPos = key.Begin()
-        decl.identifier = ExpectIdentifierWithPos(decl)
-        decl.isVar = isVar
-        decl.isConst = isConst
-        decl.begin = if (decl.begin.IsZero()) { key.Begin() } else { decl.begin }
-        ParseTypeAndExpr(decl)
-        CheckVarDeclShape(decl, modifiers, scopeKind, key)
-        if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
-            SetUnsafe(decl, modifiers: modifiers)
+        try (cs = ChainScope(this, decl)) {
+            ApplyModifiersAndAnnotations(decl, modifiers, annos)
+            decl.keywordPos = key.Begin()
+            decl.identifier = ExpectIdentifierWithPos(decl)
+            decl.isVar = isVar
+            decl.isConst = isConst
+            decl.begin = if (decl.begin.IsZero()) { key.Begin() } else { decl.begin }
+            ParseTypeAndExpr(decl)
+            CheckVarDeclShape(decl, modifiers, scopeKind, key)
+            if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
+                SetUnsafe(decl, modifiers: modifiers)
+            }
         }
         return decl
     }
@@ -1113,34 +1128,37 @@ extend ParserImpl {
         isVar: Bool,
         isConst: Bool
     ): VarWithPatternDecl {
-        let pattern = ParsePattern(ArrayList<Attribute>(), isVar, true)
         let decl = VarWithPatternDecl()
-        ApplyModifiersAndAnnotations(decl, modifiers, annos)
-        decl.keywordPos = key.Begin()
-        decl.irrefutablePattern = pattern
-        decl.isVar = isVar
-        decl.isConst = isConst
-        decl.begin = if (decl.begin.IsZero()) { key.Begin() } else { decl.begin }
-        ParseTypeAndExpr(decl)
-        if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
-            let setGlobalAttr = { node: Node =>
-                node.EnableAttr(Attribute.GLOBAL)
-                VisitAction.WALK_CHILDREN
+        try (cs = ChainScope(this, decl)) {
+            let pattern = ParsePattern(ArrayList<Attribute>(), isVar, true)
+            ApplyModifiersAndAnnotations(decl, modifiers, annos)
+            decl.keywordPos = key.Begin()
+            decl.irrefutablePattern = pattern
+            decl.isVar = isVar
+            decl.isConst = isConst
+            decl.begin = if (decl.begin.IsZero()) { key.Begin() } else { decl.begin }
+            ParseTypeAndExpr(decl)
+            if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+                let setGlobalAttr = { node: Node =>
+                    node.EnableAttr(Attribute.GLOBAL)
+                    VisitAction.WALK_CHILDREN
+                }
+                Walker(pattern, visitPre: setGlobalAttr).Walk()
             }
-            Walker(pattern, visitPre: setGlobalAttr).Walk()
-        }
-        if (decl.end.IsZero()) {
-            decl.end = pattern.end
-        }
-        if ((pattern.astKind == ASTKind.TUPLE_PATTERN || pattern.astKind == ASTKind.ENUM_PATTERN ||
-                pattern.astKind == ASTKind.WILDCARD_PATTERN) &&
-            (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY))) {
-            DiagParseIllegalDeclarationPattern(decl, scopeKind)
-            decl.EnableAttr(Attribute.IS_BROKEN)
-        }
-        CheckVarDeclShape(decl, modifiers, scopeKind, key)
-        if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
-            SetUnsafe(decl, modifiers: modifiers)
+            if (decl.end.IsZero()) {
+                decl.end = pattern.end
+            }
+            if ((pattern.astKind == ASTKind.TUPLE_PATTERN || pattern.astKind == ASTKind.ENUM_PATTERN ||
+                    pattern.astKind == ASTKind.WILDCARD_PATTERN) &&
+                (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) ||
+                    ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY))) {
+                DiagParseIllegalDeclarationPattern(decl, scopeKind)
+                decl.EnableAttr(Attribute.IS_BROKEN)
+            }
+            CheckVarDeclShape(decl, modifiers, scopeKind, key)
+            if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
+                SetUnsafe(decl, modifiers: modifiers)
+            }
         }
         return decl
     }
@@ -1214,71 +1232,79 @@ extend ParserImpl {
 
     public func ParseClassDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ClassDecl {
         let ret = ClassDecl()
-        ParseInheritableHeader(ret, TokenKind.CLASS, modifiers, annos)
-        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.CLASS))
-        SetPrimaryDecl(ret.identifier.Val())
-        ParseClassLikeBody(ret, ScopeKind.CLASS_BODY)
-        RevertPrimaryDecl()
+        try (cs = ChainScope(this, ret)) {
+            ParseInheritableHeader(ret, TokenKind.CLASS, modifiers, annos)
+            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.CLASS))
+            SetPrimaryDecl(ret.identifier.Val())
+            ParseClassLikeBody(ret, ScopeKind.CLASS_BODY)
+            RevertPrimaryDecl()
+        }
         return ret
     }
 
     public func ParseInterfaceDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): InterfaceDecl {
         let ret = InterfaceDecl()
-        ParseInheritableHeader(ret, TokenKind.INTERFACE, modifiers, annos)
-        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.INTERFACE))
-        ParseClassLikeBody(ret, ScopeKind.INTERFACE_BODY)
+        try (cs = ChainScope(this, ret)) {
+            ParseInheritableHeader(ret, TokenKind.INTERFACE, modifiers, annos)
+            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.INTERFACE))
+            ParseClassLikeBody(ret, ScopeKind.INTERFACE_BODY)
+        }
         return ret
     }
 
     public func ParseStructDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): StructDecl {
         let ret = StructDecl()
-        ParseInheritableHeader(ret, TokenKind.STRUCT, modifiers, annos)
-        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.STRUCT))
-        SetPrimaryDecl(ret.identifier.Val())
-        ParseClassLikeBody(ret, ScopeKind.STRUCT_BODY)
-        RevertPrimaryDecl()
+        try (cs = ChainScope(this, ret)) {
+            ParseInheritableHeader(ret, TokenKind.STRUCT, modifiers, annos)
+            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.STRUCT))
+            SetPrimaryDecl(ret.identifier.Val())
+            ParseClassLikeBody(ret, ScopeKind.STRUCT_BODY)
+            RevertPrimaryDecl()
+        }
         return ret
     }
 
     public func ParseEnumDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): EnumDecl {
         let ret = EnumDecl()
-        ParseInheritableHeader(ret, TokenKind.ENUM, modifiers, annos)
-        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.ENUM))
-        if (Skip(TokenKind.LCURL)) {
-            ret.leftCurlPos = lastToken.Begin()
-            ret.bodyScope = DummyBody()
-            if (let Some(bodyScope) <- ret.bodyScope) {
-                bodyScope.begin = ret.leftCurlPos
-            }
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
-                if (Skip(TokenKind.BITOR)) {
-                    ret.bitOrPosVector.add(lastToken.Begin())
-                    continue
+        try (cs = ChainScope(this, ret)) {
+            ParseInheritableHeader(ret, TokenKind.ENUM, modifiers, annos)
+            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.ENUM))
+            if (Skip(TokenKind.LCURL)) {
+                ret.leftCurlPos = lastToken.Begin()
+                ret.bodyScope = DummyBody()
+                if (let Some(bodyScope) <- ret.bodyScope) {
+                    bodyScope.begin = ret.leftCurlPos
                 }
-                let localAnnos = ArrayList<Annotation>()
-                ParseAnnotations(localAnnos)
-                if (Skip(TokenKind.ELLIPSIS)) {
-                    ret.hasEllipsis = true
-                    ret.ellipsisPos = lastToken.Begin()
-                    break
-                } else if (SeeingIdentifierLike()) {
-                    let ctor = ParseEnumConstructor(ArrayList<Modifier>(), localAnnos)
-                    ctor.outerDecl = ret
-                    if (ctor.astKind == ASTKind.FUNC_DECL) {
-                        ret.hasArguments = true
+                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
+                    if (Skip(TokenKind.BITOR)) {
+                        ret.bitOrPosVector.add(lastToken.Begin())
+                        continue
                     }
-                    ret.constructors.add(ctor)
-                } else if (SeeingDeclInScope(ScopeKind.ENUM_BODY)) {
-                    let member = ParseDecl(ScopeKind.ENUM_BODY)
-                    member.outerDecl = ret
-                    ret.members.add(member)
-                } else {
-                    Next()
+                    let localAnnos = ArrayList<Annotation>()
+                    ParseAnnotations(localAnnos)
+                    if (Skip(TokenKind.ELLIPSIS)) {
+                        ret.hasEllipsis = true
+                        ret.ellipsisPos = lastToken.Begin()
+                        break
+                    } else if (SeeingIdentifierLike()) {
+                        let ctor = ParseEnumConstructor(ArrayList<Modifier>(), localAnnos)
+                        ctor.outerDecl = ret
+                        if (ctor.astKind == ASTKind.FUNC_DECL) {
+                            ret.hasArguments = true
+                        }
+                        ret.constructors.add(ctor)
+                    } else if (SeeingDeclInScope(ScopeKind.ENUM_BODY)) {
+                        let member = ParseDecl(ScopeKind.ENUM_BODY)
+                        member.outerDecl = ret
+                        ret.members.add(member)
+                    } else {
+                        Next()
+                    }
+                    SkipNLOrSemi()
                 }
-                SkipNLOrSemi()
+                ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after enum body").Begin()
+                ret.end = ret.rightCurlPos + 1
             }
-            ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after enum body").Begin()
-            ret.end = ret.rightCurlPos + 1
         }
         return ret
     }
@@ -1287,42 +1313,46 @@ extend ParserImpl {
         let identifier = ExpectIdentifierWithPos(Node())
         if (Skip(TokenKind.LPAREN)) {
             let decl = FuncDecl()
-            ApplyModifiersAndAnnotations(decl, modifiers, annos)
-            decl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
-            decl.identifier = identifier
-            decl.begin = if (decl.begin.IsZero()) { identifier.Begin() } else { decl.begin }
-            let paramList = FuncParamList()
-            paramList.leftParenPos = lastToken.Begin()
-            paramList.begin = paramList.leftParenPos
-            var index: Int64 = 1
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-                let param = FuncParam()
-                let ty = ParseType()
-                param.identifier = SrcIdentifier("p${index}", "p${index}", ty.begin, ty.begin, false)
-                param.isIdentifierCompilerAdd = true
-                param.typeNode = ty
-                param.begin = ty.begin
-                param.end = ty.end
-                paramList.params.add(param)
-                index++
-                if (!Skip(TokenKind.COMMA)) { break }
+            try (cs = ChainScope(this, decl)) {
+                ApplyModifiersAndAnnotations(decl, modifiers, annos)
+                decl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
+                decl.identifier = identifier
+                decl.begin = if (decl.begin.IsZero()) { identifier.Begin() } else { decl.begin }
+                let paramList = FuncParamList()
+                paramList.leftParenPos = lastToken.Begin()
+                paramList.begin = paramList.leftParenPos
+                var index: Int64 = 1
+                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
+                    let param = FuncParam()
+                    let ty = ParseType()
+                    param.identifier = SrcIdentifier("p${index}", "p${index}", ty.begin, ty.begin, false)
+                    param.isIdentifierCompilerAdd = true
+                    param.typeNode = ty
+                    param.begin = ty.begin
+                    param.end = ty.end
+                    paramList.params.add(param)
+                    index++
+                    if (!Skip(TokenKind.COMMA)) { break }
+                }
+                paramList.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after enum constructor").Begin()
+                paramList.end = paramList.rightParenPos + 1
+                let body = FuncBody()
+                body.begin = paramList.begin
+                body.paramLists.add(paramList)
+                body.end = paramList.end
+                decl.funcBody = body
+                decl.end = body.end
             }
-            paramList.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after enum constructor").Begin()
-            paramList.end = paramList.rightParenPos + 1
-            let body = FuncBody()
-            body.begin = paramList.begin
-            body.paramLists.add(paramList)
-            body.end = paramList.end
-            decl.funcBody = body
-            decl.end = body.end
             return decl
         }
         let decl = VarDecl()
-        ApplyModifiersAndAnnotations(decl, modifiers, annos)
-        decl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
-        decl.identifier = identifier
-        decl.begin = if (decl.begin.IsZero()) { decl.identifier.Begin() } else { decl.begin }
-        decl.end = decl.identifier.End()
+        try (cs = ChainScope(this, decl)) {
+            ApplyModifiersAndAnnotations(decl, modifiers, annos)
+            decl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
+            decl.identifier = identifier
+            decl.begin = if (decl.begin.IsZero()) { decl.identifier.Begin() } else { decl.begin }
+            decl.end = decl.identifier.End()
+        }
         return decl
     }
 
@@ -1459,96 +1489,110 @@ extend ParserImpl {
 
     public func ParseExtendDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ExtendDecl {
         let ret = ExtendDecl()
-        ApplyModifiersAndAnnotations(ret, modifiers, annos)
-        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.EXTEND))
-        let key = Expect(TokenKind.EXTEND, "expected 'extend'")
-        ret.keywordPos = key.Begin()
-        ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
-        if (let Some(generic) <- ParseOptionalGeneric()) {
-            ret.generic = generic
-            ret.EnableAttr(Attribute.GENERIC)
+        try (cs = ChainScope(this, ret)) {
+            ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.EXTEND))
+            let key = Expect(TokenKind.EXTEND, "expected 'extend'")
+            ret.keywordPos = key.Begin()
+            ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
+            if (let Some(generic) <- ParseOptionalGeneric()) {
+                ret.generic = generic
+                ret.EnableAttr(Attribute.GENERIC)
+            }
+            ret.extendedType = ParseType()
+            if (Skip(TokenKind.UPPERBOUND)) {
+                ParseInheritedTypes(ret)
+            }
+            for (constraint in ParseGenericConstraints()) {
+                EnsureDeclGeneric(ret).genericConstraints.add(constraint)
+            }
+            ParseClassLikeBody(ret, ScopeKind.EXTEND_BODY)
         }
-        ret.extendedType = ParseType()
-        if (Skip(TokenKind.UPPERBOUND)) {
-            ParseInheritedTypes(ret)
-        }
-        for (constraint in ParseGenericConstraints()) {
-            EnsureDeclGeneric(ret).genericConstraints.add(constraint)
-        }
-        ParseClassLikeBody(ret, ScopeKind.EXTEND_BODY)
         return ret
     }
 
     public func ParseTypeAlias(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): TypeAliasDecl {
         let ret = TypeAliasDecl()
-        ApplyModifiersAndAnnotations(ret, modifiers, annos)
-        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.TYPE))
-        let key = Expect(TokenKind.TYPE, "expected 'type'")
-        ret.keywordPos = key.Begin()
-        ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
-        while (SeeingOperator()) {
-            DiagExpectedName("type", "after 'type'")
-            Next()
+        try (cs = ChainScope(this, ret)) {
+            ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.TYPE))
+            let key = Expect(TokenKind.TYPE, "expected 'type'")
+            ret.keywordPos = key.Begin()
+            ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
+            while (SeeingOperator()) {
+                DiagExpectedName("type", "after 'type'")
+                Next()
+            }
+            ret.identifier = ExpectIdentifierWithPos(ret)
+            if (let Some(generic) <- ParseOptionalGeneric()) { ret.generic = generic }
+            ret.assignPos = Expect(TokenKind.ASSIGN, "expected '=' in type alias").Begin()
+            ret.typeNode = ParseType()
+            ret.end = if (let Some(ty) <- ret.typeNode) { ty.end } else { ret.identifier.End() }
         }
-        ret.identifier = ExpectIdentifierWithPos(ret)
-        if (let Some(generic) <- ParseOptionalGeneric()) { ret.generic = generic }
-        ret.assignPos = Expect(TokenKind.ASSIGN, "expected '=' in type alias").Begin()
-        ret.typeNode = ParseType()
-        ret.end = if (let Some(ty) <- ret.typeNode) { ty.end } else { ret.identifier.End() }
         return ret
     }
 
     public func ParsePropDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): PropDecl {
         let ret = PropDecl()
-        ApplyModifiersAndAnnotations(ret, modifiers, annos)
-        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.PROPERTY))
-        if (ret.TestAttr(Attribute.MUT)) {
-            ret.isVar = true
-        }
-        let key = Expect(TokenKind.PROP, "expected 'prop'")
-        ret.keywordPos = key.Begin()
-        ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
-        ret.identifier = ExpectIdentifierWithPos(ret)
-        if (Skip(TokenKind.COLON)) {
-            ret.colonPos = lastToken.Begin()
-            ret.typeNode = ParseType()
-        }
-        if (Skip(TokenKind.ASSIGN)) {
-            ret.assignPos = lastToken.Begin()
-            ret.initializer = ParseExpr(ExprKind.VAR_INIT)
-        }
-        if (Skip(TokenKind.LCURL)) {
-            ret.leftCurlPos = lastToken.Begin()
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
-                if (Seeing(TokenKind.IDENTIFIER) && (Peek().Value() == "get" || Peek().Value() == "set")) {
-                    let accessorName = Peek().Value()
-                    let accessor = FuncDecl()
-                    accessor.identifier = ParseIdentifierFromToken(Peek())
-                    Next()
-                    accessor.funcBody = ParseFuncBody(if (accessorName == "get") { ScopeKind.PROP_MEMBER_GETTER_BODY } else { ScopeKind.PROP_MEMBER_SETTER_BODY })
-                    accessor.outerDecl = ret
-                    accessor.propDecl = ret
-                    if (accessorName == "get") {
-                        accessor.isGetter = true
-                        ret.getters.add(accessor)
-                    } else {
-                        accessor.isSetter = true
-                        ret.setters.add(accessor)
-                    }
-                } else {
-                    Next()
-                }
-                SkipNLOrSemi()
+        try (cs = ChainScope(this, ret)) {
+            ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.PROPERTY))
+            if (ret.TestAttr(Attribute.MUT)) {
+                ret.isVar = true
             }
-            ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after property body").Begin()
-            ret.end = ret.rightCurlPos + 1
-        } else {
-            ret.end = if (let Some(expr) <- ret.initializer) {
-                expr.end
-            } else if (let Some(ty) <- ret.typeNode) {
-                ty.end
+            let key = Expect(TokenKind.PROP, "expected 'prop'")
+            ret.keywordPos = key.Begin()
+            ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
+            ret.identifier = ExpectIdentifierWithPos(ret)
+            if (Skip(TokenKind.COLON)) {
+                ret.colonPos = lastToken.Begin()
+                ret.typeNode = ParseType()
+            }
+            if (Skip(TokenKind.ASSIGN)) {
+                ret.assignPos = lastToken.Begin()
+                ret.initializer = ParseExpr(ExprKind.VAR_INIT)
+            }
+            if (Skip(TokenKind.LCURL)) {
+                ret.leftCurlPos = lastToken.Begin()
+                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
+                    if (Seeing(TokenKind.IDENTIFIER) && (Peek().Value() == "get" || Peek().Value() == "set")) {
+                        let accessorName = Peek().Value()
+                        let accessor = FuncDecl()
+                        try (accessorScope = ChainScope(this, accessor)) {
+                            accessor.identifier = ParseIdentifierFromToken(Peek())
+                            accessor.begin = accessor.identifier.Begin()
+                            accessor.keywordPos = accessor.begin
+                            Next()
+                            accessor.funcBody = ParseFuncBody(if (accessorName == "get") {
+                                ScopeKind.PROP_MEMBER_GETTER_BODY
+                            } else {
+                                ScopeKind.PROP_MEMBER_SETTER_BODY
+                            })
+                            accessor.outerDecl = ret
+                            accessor.propDecl = ret
+                            if (accessorName == "get") {
+                                accessor.isGetter = true
+                                ret.getters.add(accessor)
+                            } else {
+                                accessor.isSetter = true
+                                ret.setters.add(accessor)
+                            }
+                        }
+                    } else {
+                        Next()
+                    }
+                    SkipNLOrSemi()
+                }
+                ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after property body").Begin()
+                ret.end = ret.rightCurlPos + 1
             } else {
-                ret.identifier.End()
+                ret.end = if (let Some(expr) <- ret.initializer) {
+                    expr.end
+                } else if (let Some(ty) <- ret.typeNode) {
+                    ty.end
+                } else {
+                    ret.identifier.End()
+                }
             }
         }
         return ret
@@ -1556,83 +1600,91 @@ extend ParserImpl {
 
     public func ParseConstructor(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): FuncDecl {
         let ret = FuncDecl()
-        ApplyModifiersAndAnnotations(ret, modifiers, annos)
-        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.CONSTRUCTOR))
-        let key = Expect(TokenKind.INIT, "expected 'init'")
-        ret.keywordPos = key.Begin()
-        ret.identifier = SrcIdentifier("init", "init", key.Begin(), key.End(), false)
-        ret.EnableAttr(Attribute.CONSTRUCTOR)
-        if (HasModifierToken(modifiers, TokenKind.CONST)) {
-            ret.isConst = true
+        try (cs = ChainScope(this, ret)) {
+            ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.CONSTRUCTOR))
+            let key = Expect(TokenKind.INIT, "expected 'init'")
+            ret.keywordPos = key.Begin()
+            ret.identifier = SrcIdentifier("init", "init", key.Begin(), key.End(), false)
+            ret.EnableAttr(Attribute.CONSTRUCTOR)
+            if (HasModifierToken(modifiers, TokenKind.CONST)) {
+                ret.isConst = true
+            }
+            ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
+            ret.funcBody = ParseFuncBody(scopeKind)
+            if (let Some(body) <- ret.funcBody) { ret.end = body.end }
         }
-        ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
-        ret.funcBody = ParseFuncBody(scopeKind)
-        if (let Some(body) <- ret.funcBody) { ret.end = body.end }
         return ret
     }
 
     public func ParseFinalizer(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): FuncDecl {
         let ret = FuncDecl()
-        ApplyModifiersAndAnnotations(ret, modifiers, annos)
-        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.FINALIZER))
-        let tilde = Expect(TokenKind.BITNOT, "expected '~' before finalizer")
-        let initTok = Expect(TokenKind.INIT, "expected 'init' after '~'")
-        ret.keywordPos = initTok.Begin()
-        ret.identifier = SrcIdentifier("~init", "~init", tilde.Begin(), initTok.End(), false)
-        ret.EnableAttr(Attribute.FINALIZER)
-        ret.begin = if (ret.begin.IsZero()) { tilde.Begin() } else { ret.begin }
-        ret.funcBody = ParseFuncBody(scopeKind)
-        if (let Some(body) <- ret.funcBody) {
-            if (!body.paramLists.isEmpty() && !body.paramLists[0].params.isEmpty()) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_finalizer_can_not_accept_any_parameter, body.paramLists[0]).Emit()
-                ret.EnableAttr(Attribute.IS_BROKEN)
+        try (cs = ChainScope(this, ret)) {
+            ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.FINALIZER))
+            let tilde = Expect(TokenKind.BITNOT, "expected '~' before finalizer")
+            let initTok = Expect(TokenKind.INIT, "expected 'init' after '~'")
+            ret.keywordPos = initTok.Begin()
+            ret.identifier = SrcIdentifier("~init", "~init", tilde.Begin(), initTok.End(), false)
+            ret.EnableAttr(Attribute.FINALIZER)
+            ret.begin = if (ret.begin.IsZero()) { tilde.Begin() } else { ret.begin }
+            ret.funcBody = ParseFuncBody(scopeKind)
+            if (let Some(body) <- ret.funcBody) {
+                if (!body.paramLists.isEmpty() && !body.paramLists[0].params.isEmpty()) {
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_finalizer_can_not_accept_any_parameter,
+                        body.paramLists[0]).Emit()
+                    ret.EnableAttr(Attribute.IS_BROKEN)
+                }
+                if (let Some(retType) <- body.retType) {
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_return_type, retType, "finalizer").Emit()
+                    ret.EnableAttr(Attribute.IS_BROKEN)
+                }
+                ret.end = body.end
             }
-            if (let Some(retType) <- body.retType) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_return_type, retType, "finalizer").Emit()
-                ret.EnableAttr(Attribute.IS_BROKEN)
+            if (HasModifierToken(modifiers, TokenKind.UNSAFE)) {
+                SetUnsafe(ret, modifiers: modifiers)
             }
-            ret.end = body.end
-        }
-        if (HasModifierToken(modifiers, TokenKind.UNSAFE)) {
-            SetUnsafe(ret, modifiers: modifiers)
         }
         return ret
     }
 
     public func ParsePrimaryConstructor(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): PrimaryCtorDecl {
         let ret = PrimaryCtorDecl()
-        ApplyModifiersAndAnnotations(ret, modifiers, annos)
-        EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.PRIMARY_CONSTRUCTOR))
-        let id = ExpectIdentifierWithPos(ret)
-        ret.identifier = id
-        ret.keywordPos = id.Begin()
-        ret.begin = if (ret.begin.IsZero()) { id.Begin() } else { ret.begin }
-        if (!curPrimaryDeclIdent.isEmpty() && id.Val() != curPrimaryDeclIdent) {
-            DiagUnknownPrimaryConstructor(curPrimaryDeclIdent)
-            ret.EnableAttr(Attribute.IS_BROKEN)
-        }
-        let bodyScope = if (ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) {
-            ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT
-        } else {
-            ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS
-        }
-        ret.funcBody = ParseFuncBody(bodyScope)
-        ret.EnableAttr(Attribute.CONSTRUCTOR)
-        ret.EnableAttr(Attribute.PRIMARY_CONSTRUCTOR)
-        if (ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) {
-            ret.EnableAttr(Attribute.IN_STRUCT)
-        } else {
-            ret.EnableAttr(Attribute.IN_CLASSLIKE)
-        }
-        if (HasModifierToken(modifiers, TokenKind.CONST)) {
-            ret.isConst = true
-        }
-        if (let Some(body) <- ret.funcBody) {
-            if (let Some(retType) <- body.retType) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_return_type, retType, "primary constructor").Emit()
+        try (cs = ChainScope(this, ret)) {
+            ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.PRIMARY_CONSTRUCTOR))
+            let id = ExpectIdentifierWithPos(ret)
+            ret.identifier = id
+            ret.keywordPos = id.Begin()
+            ret.begin = if (ret.begin.IsZero()) { id.Begin() } else { ret.begin }
+            if (!curPrimaryDeclIdent.isEmpty() && id.Val() != curPrimaryDeclIdent) {
+                DiagUnknownPrimaryConstructor(curPrimaryDeclIdent)
                 ret.EnableAttr(Attribute.IS_BROKEN)
             }
-            ret.end = body.end
+            let bodyScope = if (ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) {
+                ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT
+            } else {
+                ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS
+            }
+            ret.funcBody = ParseFuncBody(bodyScope)
+            ret.EnableAttr(Attribute.CONSTRUCTOR)
+            ret.EnableAttr(Attribute.PRIMARY_CONSTRUCTOR)
+            if (ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) {
+                ret.EnableAttr(Attribute.IN_STRUCT)
+            } else {
+                ret.EnableAttr(Attribute.IN_CLASSLIKE)
+            }
+            if (HasModifierToken(modifiers, TokenKind.CONST)) {
+                ret.isConst = true
+            }
+            if (let Some(body) <- ret.funcBody) {
+                if (let Some(retType) <- body.retType) {
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_return_type, retType,
+                        "primary constructor").Emit()
+                    ret.EnableAttr(Attribute.IS_BROKEN)
+                }
+                ret.end = body.end
+            }
         }
         return ret
     }

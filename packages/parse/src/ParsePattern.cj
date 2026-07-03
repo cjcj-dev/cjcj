@@ -191,37 +191,39 @@ extend ParserImpl {
         tuple.leftParenPos = Expect(TokenKind.LPAREN, "expected '('").Begin()
         tuple.leftBracePos = tuple.leftParenPos
         tuple.begin = tuple.leftParenPos
-        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-            tuple.patterns.add(ParsePattern(attributes, isVar, inDecl))
-            if (Seeing(TokenKind.BITOR)) {
-                DiagOrPattern()
-                ConsumeUntilAny([TokenKind.COMMA, TokenKind.RPAREN], targetTokenConsumed: false)
-            }
-            if (Skip(TokenKind.COMMA)) {
-                tuple.commaPosVector.add(lastToken.Begin())
-            } else {
-                break
-            }
-        }
-        if (!Skip(TokenKind.RPAREN)) {
-            var hasBrokenChild = false
-            for (tupleChild in tuple.patterns) {
-                if (tupleChild.isBroken) {
-                    hasBrokenChild = true
+        try (cs = ChainScope(this, tuple)) {
+            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
+                tuple.patterns.add(ParsePattern(attributes, isVar, inDecl))
+                if (Seeing(TokenKind.BITOR)) {
+                    DiagOrPattern()
+                    ConsumeUntilAny([TokenKind.COMMA, TokenKind.RPAREN], targetTokenConsumed: false)
+                }
+                if (Skip(TokenKind.COMMA)) {
+                    tuple.commaPosVector.add(lastToken.Begin())
+                } else {
                     break
                 }
             }
-            if (!hasBrokenChild) {
-                DiagExpectedRightDelimiter("(", tuple.begin)
+            if (!Skip(TokenKind.RPAREN)) {
+                var hasBrokenChild = false
+                for (tupleChild in tuple.patterns) {
+                    if (tupleChild.isBroken) {
+                        hasBrokenChild = true
+                        break
+                    }
+                }
+                if (!hasBrokenChild) {
+                    DiagExpectedRightDelimiter("(", tuple.begin)
+                }
+                tuple.rightParenPos = lastToken.Begin()
+            } else {
+                tuple.rightParenPos = lastToken.Begin()
             }
-            tuple.rightParenPos = lastToken.Begin()
-        } else {
-            tuple.rightParenPos = lastToken.Begin()
-        }
-        tuple.rightBracePos = tuple.rightParenPos
-        tuple.end = lastToken.End()
-        if (!isEnumPatternParams && tuple.patterns.size == 1) {
-            DiagExpectedMoreFieldInTuplePattern()
+            tuple.rightBracePos = tuple.rightParenPos
+            tuple.end = lastToken.End()
+            if (!isEnumPatternParams && tuple.patterns.size == 1) {
+                DiagExpectedMoreFieldInTuplePattern()
+            }
         }
         return tuple
     }

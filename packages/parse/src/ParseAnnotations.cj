@@ -59,19 +59,21 @@ extend ParserImpl {
         anno.begin = atToken.Begin()
         anno.identifier = ExpectIdentifierWithPos(anno)
         anno.kind = NameToAnnotationKind(anno.identifier.Val())
-        if (anno.kind == AnnotationKind.ATTRIBUTE) {
-            ParseAttributeAnnotation(anno)
-        } else if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
-            ParseOverflowAnnotation(anno)
-        } else if (anno.kind == AnnotationKind.WHEN) {
-            ParseWhenAnnotation(anno)
-        } else {
-            ParseAnnotationArguments(anno)
-            if (anno.kind == AnnotationKind.DEPRECATED) {
-                CheckDeprecatedAnnotation(anno)
+        try (cs = ChainScope(this, anno)) {
+            if (anno.kind == AnnotationKind.ATTRIBUTE) {
+                ParseAttributeAnnotation(anno)
+            } else if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
+                ParseOverflowAnnotation(anno)
+            } else if (anno.kind == AnnotationKind.WHEN) {
+                ParseWhenAnnotation(anno)
+            } else {
+                ParseAnnotationArguments(anno)
+                if (anno.kind == AnnotationKind.DEPRECATED) {
+                    CheckDeprecatedAnnotation(anno)
+                }
             }
+            anno.end = if (!anno.rsquarePos.IsZero()) { anno.rsquarePos + 1 } else { anno.identifier.End() }
         }
-        anno.end = if (!anno.rsquarePos.IsZero()) { anno.rsquarePos + 1 } else { anno.identifier.End() }
         return anno
     }
 

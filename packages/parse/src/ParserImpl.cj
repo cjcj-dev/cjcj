@@ -31,6 +31,7 @@ public class ParserImpl {
     public var enableAttachComment: Bool = false
     public var compileOptions: GlobalOptions = GlobalOptions()
     public let commentsMap: TokenVecMap = TokenVecMap()
+    public let chainedAST: ArrayList<Node> = ArrayList<Node>()
 
     public init(fileID: UInt64, input: String, diag: BasicDiagnosticEngine, sm: SourceManager, attachComment: Bool, parsingDeclFiles: Bool) {
         this.diag = diag
@@ -451,6 +452,28 @@ public class ParserImpl {
         arg2: String
     ): BasicDiagnosticBuilder {
         return ParseDiagnoseRefactor(kind, node, arguments: [arg0, arg1, arg2])
+    }
+}
+
+public class ChainScope <: Resource {
+    private let parser: ParserImpl
+    private var closed: Bool = false
+
+    public init(parser: ParserImpl, node: Node) {
+        this.parser = parser
+        parser.chainedAST.add(node)
+    }
+
+    public func close(): Unit {
+        if (closed) {
+            return
+        }
+        parser.chainedAST.remove(at: parser.chainedAST.size - 1)
+        closed = true
+    }
+
+    public func isClosed(): Bool {
+        return closed
     }
 }
 

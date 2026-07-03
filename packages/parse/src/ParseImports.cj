@@ -36,58 +36,60 @@ extend ParserImpl {
             pkg.begin = token.Begin()
         }
 
-        var curIdent = SrcIdentifier()
-        var skipDoubleColon = false
-        while (true) {
-            skipDoubleColon = false
+        try (cs = ChainScope(this, pkg)) {
+            var curIdent = SrcIdentifier()
+            var skipDoubleColon = false
+            while (true) {
+                skipDoubleColon = false
+                if (!curIdent.Empty()) {
+                    pkg.prefixPaths.add(curIdent.Val())
+                    pkg.prefixPoses.add(curIdent.Begin())
+                    pkg.prefixDotPoses.add(lastToken.Begin())
+                }
+                curIdent = ExpectPackageIdentifierWithPos(pkg)
+                if (curIdent.Empty()) {
+                    pkg.isBroken = true
+                    ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
+                    break
+                }
+                if (curIdent.IsRaw()) {
+                    pkg.isBroken = true
+                    ParseDiagnoseRefactor(
+                        DiagKindRefactor.parse_package_name_has_backtick,
+                        MakeRange(curIdent.Begin() - 1, curIdent.End() + 1)).Emit()
+                    ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
+                    break
+                }
+                if (pkg.prefixPaths.isEmpty() && Skip(TokenKind.DOUBLE_COLON)) {
+                    pkg.hasDoubleColon = true
+                    skipDoubleColon = true
+                }
+                if (!skipDoubleColon && !Skip(TokenKind.DOT)) {
+                    break
+                }
+            }
             if (!curIdent.Empty()) {
-                pkg.prefixPaths.add(curIdent.Val())
-                pkg.prefixPoses.add(curIdent.Begin())
-                pkg.prefixDotPoses.add(lastToken.Begin())
+                pkg.packageName = curIdent
+                pkg.end = curIdent.End()
+            } else {
+                pkg.end = token.End()
             }
-            curIdent = ExpectPackageIdentifierWithPos(pkg)
-            if (curIdent.Empty()) {
+            let fullPackageName = pkg.GetPackageName()
+            if (!pkg.isBroken && fullPackageName.size > PACKAGE_NAME_LEN_LIMIT) {
+                let start = if (!pkg.prefixPoses.isEmpty()) { pkg.prefixPoses[0] } else { pkg.packageName.Begin() }
+                DiagNameLengthOverflow(
+                    MakeRange(start, curIdent.End()),
+                    fullPackageName,
+                    PACKAGE_NAME_LEN_LIMIT,
+                    fullPackageName.size)
                 pkg.isBroken = true
-                ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
-                break
             }
-            if (curIdent.IsRaw()) {
-                pkg.isBroken = true
-                ParseDiagnoseRefactor(
-                    DiagKindRefactor.parse_package_name_has_backtick,
-                    MakeRange(curIdent.Begin() - 1, curIdent.End() + 1)).Emit()
-                ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
-                break
+            if (!pkg.prefixPaths.isEmpty()) {
+                moduleName = pkg.prefixPaths[0]
             }
-            if (pkg.prefixPaths.isEmpty() && Skip(TokenKind.DOUBLE_COLON)) {
-                pkg.hasDoubleColon = true
-                skipDoubleColon = true
-            }
-            if (!skipDoubleColon && !Skip(TokenKind.DOT)) {
-                break
-            }
+            let _ = CheckDeclModifiers(modifiers, ScopeKind.TOPLEVEL, DefKind.PACKAGE)
+            SkipNLOrSemi()
         }
-        if (!curIdent.Empty()) {
-            pkg.packageName = curIdent
-            pkg.end = curIdent.End()
-        } else {
-            pkg.end = token.End()
-        }
-        let fullPackageName = pkg.GetPackageName()
-        if (!pkg.isBroken && fullPackageName.size > PACKAGE_NAME_LEN_LIMIT) {
-            let start = if (!pkg.prefixPoses.isEmpty()) { pkg.prefixPoses[0] } else { pkg.packageName.Begin() }
-            DiagNameLengthOverflow(
-                MakeRange(start, curIdent.End()),
-                fullPackageName,
-                PACKAGE_NAME_LEN_LIMIT,
-                fullPackageName.size)
-            pkg.isBroken = true
-        }
-        if (!pkg.prefixPaths.isEmpty()) {
-            moduleName = pkg.prefixPaths[0]
-        }
-        let _ = CheckDeclModifiers(modifiers, ScopeKind.TOPLEVEL, DefKind.PACKAGE)
-        SkipNLOrSemi()
         return pkg
     }
 

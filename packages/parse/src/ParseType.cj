@@ -72,20 +72,22 @@ extend ParserImpl {
 
     public func ParseRefType(onlyRef: Bool): RefType {
         let ref = RefType()
-        ref.ref.identifier = ExpectIdentifierWithPos(ref)
-        ref.begin = ref.ref.identifier.Begin()
-        if (!onlyRef && Skip(TokenKind.LT)) {
-            ref.leftAnglePos = lastToken.Begin()
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
-                ref.typeArguments.add(ParseType())
-                if (!Skip(TokenKind.COMMA)) {
-                    break
+        try (cs = ChainScope(this, ref)) {
+            ref.ref.identifier = ExpectIdentifierWithPos(ref)
+            ref.begin = ref.ref.identifier.Begin()
+            if (!onlyRef && Skip(TokenKind.LT)) {
+                ref.leftAnglePos = lastToken.Begin()
+                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
+                    ref.typeArguments.add(ParseType())
+                    if (!Skip(TokenKind.COMMA)) {
+                        break
+                    }
                 }
+                ref.rightAnglePos = Expect(TokenKind.GT, "expected '>' after type arguments").Begin()
+                ref.end = ref.rightAnglePos + 1
+            } else {
+                ref.end = ref.ref.identifier.End()
             }
-            ref.rightAnglePos = Expect(TokenKind.GT, "expected '>' after type arguments").Begin()
-            ref.end = ref.rightAnglePos + 1
-        } else {
-            ref.end = ref.ref.identifier.End()
         }
         return ref
     }
@@ -94,22 +96,24 @@ extend ParserImpl {
         var current: Type = ParseRefType(false)
         while (Skip(TokenKind.DOT)) {
             let q = QualifiedType()
-            q.baseType = current
-            q.dotPos = lastToken.Begin()
-            q.field = ExpectIdentifierWithPos(q)
-            if (Skip(TokenKind.LT)) {
-                q.leftAnglePos = lastToken.Begin()
-                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
-                    q.typeArguments.add(ParseType())
-                    if (!Skip(TokenKind.COMMA)) { break }
+            try (cs = ChainScope(this, q)) {
+                q.baseType = current
+                q.dotPos = lastToken.Begin()
+                q.field = ExpectIdentifierWithPos(q)
+                if (Skip(TokenKind.LT)) {
+                    q.leftAnglePos = lastToken.Begin()
+                    while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
+                        q.typeArguments.add(ParseType())
+                        if (!Skip(TokenKind.COMMA)) { break }
+                    }
+                    q.rightAnglePos = Expect(TokenKind.GT, "expected '>' after type arguments").Begin()
+                    q.end = q.rightAnglePos + 1
+                } else {
+                    q.end = q.field.End()
                 }
-                q.rightAnglePos = Expect(TokenKind.GT, "expected '>' after type arguments").Begin()
-                q.end = q.rightAnglePos + 1
-            } else {
-                q.end = q.field.End()
+                q.begin = current.begin
+                current = q
             }
-            q.begin = current.begin
-            current = q
         }
         return current
     }
@@ -119,49 +123,52 @@ extend ParserImpl {
         let token = Expect(TokenKind.VARRAY, "expected 'VArray'")
         ret.varrayPos = token.Begin()
         ret.begin = token.Begin()
-        if (!Skip(TokenKind.LT)) {
-            ParseDiagnoseRefactor(DiagKindRefactor.parse_varray_type_parameter, token.End()).Emit()
-            return InvalidType(Peek().Begin())
-        }
-        ret.leftAnglePos = lastToken.Begin()
-        let typeArgument = ParseType()
-        ret.typeArgument = typeArgument
-        if (typeArgument.IsInvalid()) {
-            return InvalidType(Peek().Begin())
-        }
-        if (!Skip(TokenKind.COMMA)) {
-            DiagVArrayTypeArgMismatch(MakeRange(ret.leftAnglePos, Peek().End()), "a type argument and size literal")
-            ConsumeUntilAny([TokenKind.NL])
-            return InvalidType(Peek().Begin())
-        } else {
-            typeArgument.commaPos = lastToken.Begin()
-            skipNL = false
-            if (!Skip(TokenKind.DOLLAR)) {
-                DiagVArrayTypeArgMismatch(MakeRange(Peek().Begin(), Peek().End()),
-                    "a '$' follows an integer literal as the second generic argument")
+        try (cs = ChainScope(this, ret)) {
+            if (!Skip(TokenKind.LT)) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_varray_type_parameter, token.End()).Emit()
+                return InvalidType(Peek().Begin())
+            }
+            ret.leftAnglePos = lastToken.Begin()
+            let typeArgument = ParseType()
+            ret.typeArgument = typeArgument
+            if (typeArgument.IsInvalid()) {
+                return InvalidType(Peek().Begin())
+            }
+            if (!Skip(TokenKind.COMMA)) {
+                DiagVArrayTypeArgMismatch(MakeRange(ret.leftAnglePos, Peek().End()), "a type argument and size literal")
                 ConsumeUntilAny([TokenKind.NL])
                 return InvalidType(Peek().Begin())
             } else {
-                let constType = ConstantType()
-                constType.dollarPos = lastToken.Begin()
-                constType.begin = constType.dollarPos
-                if (!Seeing(TokenKind.INTEGER_LITERAL)) {
-                    ParseDiagnoseRefactor(DiagKindRefactor.parse_expect_integer_literal_varray, constType.dollarPos).Emit()
+                typeArgument.commaPos = lastToken.Begin()
+                skipNL = false
+                if (!Skip(TokenKind.DOLLAR)) {
+                    DiagVArrayTypeArgMismatch(MakeRange(Peek().Begin(), Peek().End()),
+                        "a '$' follows an integer literal as the second generic argument")
                     ConsumeUntilAny([TokenKind.NL])
                     return InvalidType(Peek().Begin())
+                } else {
+                    let constType = ConstantType()
+                    constType.dollarPos = lastToken.Begin()
+                    constType.begin = constType.dollarPos
+                    if (!Seeing(TokenKind.INTEGER_LITERAL)) {
+                        ParseDiagnoseRefactor(DiagKindRefactor.parse_expect_integer_literal_varray,
+                            constType.dollarPos).Emit()
+                        ConsumeUntilAny([TokenKind.NL])
+                        return InvalidType(Peek().Begin())
+                    }
+                    skipNL = true
+                    constType.constantExpr = ParseLitConst()
+                    constType.end = Peek().End()
+                    ret.constantType = constType
                 }
-                skipNL = true
-                constType.constantExpr = ParseLitConst()
-                constType.end = Peek().End()
-                ret.constantType = constType
             }
+            if (!Skip(TokenKind.GT)) {
+                DiagExpectedRightDelimiter("<", ret.leftAnglePos)
+                return InvalidType(Peek().Begin())
+            }
+            ret.rightAnglePos = lastToken.Begin()
+            ret.end = lastToken.End()
         }
-        if (!Skip(TokenKind.GT)) {
-            DiagExpectedRightDelimiter("<", ret.leftAnglePos)
-            return InvalidType(Peek().Begin())
-        }
-        ret.rightAnglePos = lastToken.Begin()
-        ret.end = lastToken.End()
         return ret
     }
 
