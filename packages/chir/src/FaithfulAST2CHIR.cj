@@ -2460,7 +2460,6 @@ public class FaithfulAST2CHIR {
             fn.AppendAttributeInfo(attrs)
             fn.SetFuncKind(FuncKind.GLOBALVAR_INIT)
             fn.EnableAttr(Attribute.PUBLIC)
-            AddFunctionToPackage(fn)
             InsertInitializerIntoPackageInitializer(fn, importsInitFunc)
         }
         if (block.GetTerminator().isNone()) {
