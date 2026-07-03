@@ -12,7 +12,7 @@ import cangjie_compiler::chir.RefType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
-import cangjie_compiler::mangle.{GetCustomTypeIdentifier, GetTypeQualifiedName}
+import cangjie_compiler::mangle.GetCustomTypeIdentifier
 import cangjie_compiler::utils.CJC_ASSERT
 
 public enum CGTypeKind {
@@ -556,7 +556,7 @@ public open class CGType {
     }
 
     public static func GetNameOfTypeInfoGV(chirType: Type): String {
-        return GetTypeQualifiedName(chirType) + ".ti"
+        return CGType.GetRuntimeTypeName(chirType) + ".ti"
     }
 
     public static func GetRuntimeTypeName(chirType: Type): String {
