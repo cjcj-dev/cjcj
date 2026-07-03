@@ -94,7 +94,8 @@ private func GetSignature(node: Node): (BasicRange, String) {
             return (MakeRange(node.begin, node.begin + pcd.identifier.Length()), "primary constructor")
         }
     }
-    return (MakeRange(DEFAULT_POSITION, DEFAULT_POSITION), "declaration")
+    CJC_ABORT()
+    return (MakeRange(DEFAULT_POSITION, node.begin + DEFAULT_POSITION), "declaration")
 }
 
 private func TraceBackNode(chainAST: ArrayList<Node>, kinds: Array<ASTKind>): Option<Node> {
@@ -507,8 +508,8 @@ extend ParserImpl {
         let args = ArrayList<String>()
         let ranges = ArrayList<BasicRange>()
         PrepareExpectNoModifierArg(node, args, ranges)
-        let arg = args[0]
-        let range = ranges[0]
+        let arg = if (args.isEmpty()) { "" } else { args[0] }
+        let range = if (ranges.isEmpty()) { MakeRange(DEFAULT_POSITION, DEFAULT_POSITION) } else { ranges[0] }
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_no_modifier,
             MakeRange(mod.begin, mod.begin + mod.ToString().size), arg, mod.ToString())
         builder.AddHint(range, arguments: [arg])
@@ -656,6 +657,7 @@ extend ParserImpl {
     public func DiagConflictedModifier(resMod: Modifier, tarMod: Modifier): Unit {
         if (chainedAST.isEmpty()) {
             InternalError("The chainAST is empty in DiagConflictedModifier")
+            return
         }
         let node = chainedAST[chainedAST.size - 1]
         let resStr = TokenKindLiteral(resMod.modifier)
@@ -748,6 +750,7 @@ extend ParserImpl {
     public func DiagExpectedMoreFieldInTuplePattern(): Unit {
         if (chainedAST.isEmpty() || chainedAST[chainedAST.size - 1].astKind != ASTKind.TUPLE_PATTERN) {
             InternalError("The chainAST is empty in DiagExpectedMoreFieldInTuplePattern")
+            return
         }
         let tp = (chainedAST[chainedAST.size - 1] as TuplePattern).getOrThrow()
         ParseDiagnoseRefactor(DiagKindRefactor.parse_tuple_pattern_expected_more_field,

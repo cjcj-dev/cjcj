@@ -313,19 +313,23 @@ extend ParserImpl {
         let generic = Generic()
         generic.leftAnglePos = Peek().Begin()
         Next()
-        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
-            let param = GenericParamDecl()
-            param.identifier = ExpectIdentifierWithPos(param)
-            param.begin = param.identifier.Begin()
-            param.end = param.identifier.End()
-            generic.typeParameters.add(param)
-            if (!Skip(TokenKind.COMMA)) {
-                break
+        try (cs = ChainScope(this, generic)) {
+            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
+                let param = GenericParamDecl()
+                try (paramScope = ChainScope(this, param)) {
+                    param.identifier = ExpectIdentifierWithPos(param)
+                    param.begin = param.identifier.Begin()
+                    param.end = param.identifier.End()
+                    generic.typeParameters.add(param)
+                }
+                if (!Skip(TokenKind.COMMA)) {
+                    break
+                }
             }
+            generic.rightAnglePos = Expect(TokenKind.GT, "expected '>' after generic parameters").Begin()
+            generic.begin = generic.leftAnglePos
+            generic.end = generic.rightAnglePos + 1
         }
-        generic.rightAnglePos = Expect(TokenKind.GT, "expected '>' after generic parameters").Begin()
-        generic.begin = generic.leftAnglePos
-        generic.end = generic.rightAnglePos + 1
         return generic
     }
 
@@ -336,30 +340,32 @@ extend ParserImpl {
         }
         while (true) {
             let constraint = GenericConstraint()
-            if (lastToken.kind == TokenKind.COMMA && !out.isEmpty()) {
-                out[out.size - 1].commaPos = lastToken.Begin()
-            } else if (lastToken.kind == TokenKind.WHERE) {
-                constraint.wherePos = lastToken.Begin()
-            }
-            let refTy = ParseRefType(true)
-            constraint.refType = refTy
-            if (!Skip(TokenKind.UPPERBOUND)) {
-                DiagExpectCharacter("'<:'")
-            } else {
-                constraint.operatorPos = lastToken.Begin()
-            }
-            constraint.upperBounds.add(ParseType())
-            while (Skip(TokenKind.BITAND)) {
-                constraint.bitAndPos.add(lastToken.Begin())
+            try (cs = ChainScope(this, constraint)) {
+                if (lastToken.kind == TokenKind.COMMA && !out.isEmpty()) {
+                    out[out.size - 1].commaPos = lastToken.Begin()
+                } else if (lastToken.kind == TokenKind.WHERE) {
+                    constraint.wherePos = lastToken.Begin()
+                }
+                let refTy = ParseRefType(true)
+                constraint.refType = refTy
+                if (!Skip(TokenKind.UPPERBOUND)) {
+                    DiagExpectCharacter("'<:'")
+                } else {
+                    constraint.operatorPos = lastToken.Begin()
+                }
                 constraint.upperBounds.add(ParseType())
+                while (Skip(TokenKind.BITAND)) {
+                    constraint.bitAndPos.add(lastToken.Begin())
+                    constraint.upperBounds.add(ParseType())
+                }
+                constraint.begin = if (constraint.wherePos.IsZero()) { refTy.begin } else { constraint.wherePos }
+                constraint.end = if (!constraint.upperBounds.isEmpty()) {
+                    constraint.upperBounds[constraint.upperBounds.size - 1].end
+                } else {
+                    refTy.end
+                }
+                out.add(constraint)
             }
-            constraint.begin = if (constraint.wherePos.IsZero()) { refTy.begin } else { constraint.wherePos }
-            constraint.end = if (!constraint.upperBounds.isEmpty()) {
-                constraint.upperBounds[constraint.upperBounds.size - 1].end
-            } else {
-                refTy.end
-            }
-            out.add(constraint)
             if (!Skip(TokenKind.COMMA)) {
                 break
             }

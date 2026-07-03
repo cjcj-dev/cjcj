@@ -94,22 +94,24 @@ extend ParserImpl {
     public func ParseMacroCall(scopeKind: ScopeKind): MacroExpandParam {
         CJC_ASSERT(SeeingMacroCallDecl())
         let macroCall = MacroExpandParam()
-        if (let Some(file) <- currentFile) {
-            macroCall.curFile = file
-            file.hasMacro = true
-        }
-        macroCall.begin = Peek().Begin()
-        ParseMacroInvocation(scopeKind, ArrayList<Modifier>(), macroCall.invocation, macroCall)
-        macroCall.identifier = SrcIdentifier(
-            macroCall.invocation.macroCallDiagInfo.identifier,
-            macroCall.invocation.macroCallDiagInfo.identifier,
-            macroCall.invocation.macroNamePos,
-            macroCall.invocation.macroNamePos + macroCall.invocation.macroCallDiagInfo.identifier.size,
-            false)
-        macroCall.end = if (let Some(inputDecl) <- macroCall.invocation.decl) { inputDecl.end } else { lastToken.End() }
-        if (ScopeKindEquals(scopeKind, ScopeKind.ENUM_CONSTRUCTOR) &&
-            (macroCall.invocation.hasParenthesis || macroCall.invocation.decl.isSome())) {
-            macroCall.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
+        try (cs = ChainScope(this, macroCall)) {
+            if (let Some(file) <- currentFile) {
+                macroCall.curFile = file
+                file.hasMacro = true
+            }
+            macroCall.begin = Peek().Begin()
+            ParseMacroInvocation(scopeKind, ArrayList<Modifier>(), macroCall.invocation, macroCall)
+            macroCall.identifier = SrcIdentifier(
+                macroCall.invocation.macroCallDiagInfo.identifier,
+                macroCall.invocation.macroCallDiagInfo.identifier,
+                macroCall.invocation.macroNamePos,
+                macroCall.invocation.macroNamePos + macroCall.invocation.macroCallDiagInfo.identifier.size,
+                false)
+            macroCall.end = if (let Some(inputDecl) <- macroCall.invocation.decl) { inputDecl.end } else { lastToken.End() }
+            if (ScopeKindEquals(scopeKind, ScopeKind.ENUM_CONSTRUCTOR) &&
+                (macroCall.invocation.hasParenthesis || macroCall.invocation.decl.isSome())) {
+                macroCall.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
+            }
         }
         return macroCall
     }

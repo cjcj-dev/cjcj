@@ -182,16 +182,18 @@ extend ParserImpl {
 
     public func ParseInterpolationExpr(part: StringPart): Expr {
         let ret = InterpolationExpr()
-        ret.begin = part.begin
-        ret.end = part.end
-        ret.dollarPos = part.begin
-        ret.rawString = part.value
-        if (part.value.size >= 2) {
-            let nested = ParserImpl(part.value[1..], diag, sourceManager, part.begin + 1, enableAttachComment, parseDeclFile)
-            nested.SetCompileOptions(compileOptions)
-            ret.block = nested.ParseBlock(ScopeKind.FUNC_BODY)
-        } else {
-            ret.isBroken = true
+        try (cs = ChainScope(this, ret)) {
+            ret.begin = part.begin
+            ret.end = part.end
+            ret.dollarPos = part.begin
+            ret.rawString = part.value
+            if (part.value.size >= 2) {
+                let nested = ParserImpl(part.value[1..], diag, sourceManager, part.begin + 1, enableAttachComment, parseDeclFile)
+                nested.SetCompileOptions(compileOptions)
+                ret.block = nested.ParseBlock(ScopeKind.FUNC_BODY)
+            } else {
+                ret.isBroken = true
+            }
         }
         return ret
     }
@@ -212,32 +214,34 @@ extend ParserImpl {
 
     public func ParseVArrayExpr(): Expr {
         let ret = ArrayExpr()
-        ret.begin = Peek().Begin()
-        ret.typeNode = ParseVarrayType()
-        ret.isValueArray = true
-        if (!Skip(TokenKind.LPAREN)) {
-            if (!Seeing(TokenKind.LCURL)) {
-                if (let Some(ty) <- ret.typeNode) {
-                    if (!ty.isBroken) {
-                        ParseDiagnoseRefactor(DiagKindRefactor.parse_varray_with_paren, ty.end).Emit()
+        try (cs = ChainScope(this, ret)) {
+            ret.begin = Peek().Begin()
+            ret.typeNode = ParseVarrayType()
+            ret.isValueArray = true
+            if (!Skip(TokenKind.LPAREN)) {
+                if (!Seeing(TokenKind.LCURL)) {
+                    if (let Some(ty) <- ret.typeNode) {
+                        if (!ty.isBroken) {
+                            ParseDiagnoseRefactor(DiagKindRefactor.parse_varray_with_paren, ty.end).Emit()
+                        }
                     }
+                    ret.isBroken = true
                 }
-                ret.isBroken = true
+                if (let Some(ty) <- ret.typeNode) { ret.end = ty.end }
+                return ret
             }
-            if (let Some(ty) <- ret.typeNode) { ret.end = ty.end }
-            return ret
-        }
-        ret.leftParenPos = lastToken.Begin()
-        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-            ret.args.add(ParseFuncArg())
-            if (Skip(TokenKind.COMMA)) {
-                ret.commaPosVector.add(lastToken.Begin())
-            } else {
-                break
+            ret.leftParenPos = lastToken.Begin()
+            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
+                ret.args.add(ParseFuncArg())
+                if (Skip(TokenKind.COMMA)) {
+                    ret.commaPosVector.add(lastToken.Begin())
+                } else {
+                    break
+                }
             }
+            ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after VArray arguments").Begin()
+            ret.end = ret.rightParenPos + 1
         }
-        ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after VArray arguments").Begin()
-        ret.end = ret.rightParenPos + 1
         return ret
     }
 

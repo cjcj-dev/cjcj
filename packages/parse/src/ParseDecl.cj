@@ -1017,30 +1017,32 @@ extend ParserImpl {
             return (ParseMacroCall(scopeKind), meetNamedParameter, meetMemberParams)
         }
         let param = ParseFuncParam(scopeKind)
-        if (let Some(firstNamed) <- meetNamedParameter) {
-            if (!param.isNamedParam) {
-                DiagNamedParameterAfterUnnamed(param, firstNamed)
-            }
-        }
-        if (let Some(firstMember) <- meetMemberParams) {
-            if (!param.isMemberParam) {
-                DiagMemberParameterAfterRegular(param, firstMember)
-            }
-        }
         var namedParameter = meetNamedParameter
         var memberParameter = meetMemberParams
-        if (param.isNamedParam && namedParameter.isNone()) {
-            namedParameter = param
+        try (cs = ChainScope(this, param)) {
+            if (let Some(firstNamed) <- meetNamedParameter) {
+                if (!param.isNamedParam) {
+                    DiagNamedParameterAfterUnnamed(param, firstNamed)
+                }
+            }
+            if (let Some(firstMember) <- meetMemberParams) {
+                if (!param.isMemberParam) {
+                    DiagMemberParameterAfterRegular(param, firstMember)
+                }
+            }
+            if (param.isNamedParam && namedParameter.isNone()) {
+                namedParameter = param
+            }
+            if (param.isMemberParam && memberParameter.isNone()) {
+                memberParameter = param
+            }
+            CheckModifierInParamList(scopeKind, param.modifiers, param.isMemberParam, param)
+            if (Seeing(TokenKind.COMMA)) {
+                param.commaPos = Peek().Begin()
+            }
+            SetDeclBeginPos(param)
+            CheckDeprecationOfFuncParam(param)
         }
-        if (param.isMemberParam && memberParameter.isNone()) {
-            memberParameter = param
-        }
-        CheckModifierInParamList(scopeKind, param.modifiers, param.isMemberParam, param)
-        if (Seeing(TokenKind.COMMA)) {
-            param.commaPos = Peek().Begin()
-        }
-        SetDeclBeginPos(param)
-        CheckDeprecationOfFuncParam(param)
         return (param, namedParameter, memberParameter)
     }
 
@@ -1311,47 +1313,56 @@ extend ParserImpl {
 
     public func ParseEnumConstructor(modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Decl {
         let identifier = ExpectIdentifierWithPos(Node())
-        if (Skip(TokenKind.LPAREN)) {
-            let decl = FuncDecl()
-            try (cs = ChainScope(this, decl)) {
-                ApplyModifiersAndAnnotations(decl, modifiers, annos)
-                decl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
-                decl.identifier = identifier
-                decl.begin = if (decl.begin.IsZero()) { identifier.Begin() } else { decl.begin }
-                let paramList = FuncParamList()
-                paramList.leftParenPos = lastToken.Begin()
-                paramList.begin = paramList.leftParenPos
-                var index: Int64 = 1
-                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-                    let param = FuncParam()
-                    let ty = ParseType()
-                    param.identifier = SrcIdentifier("p${index}", "p${index}", ty.begin, ty.begin, false)
-                    param.isIdentifierCompilerAdd = true
-                    param.typeNode = ty
-                    param.begin = ty.begin
-                    param.end = ty.end
-                    paramList.params.add(param)
-                    index++
-                    if (!Skip(TokenKind.COMMA)) { break }
-                }
-                paramList.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after enum constructor").Begin()
-                paramList.end = paramList.rightParenPos + 1
-                let body = FuncBody()
-                body.begin = paramList.begin
-                body.paramLists.add(paramList)
-                body.end = paramList.end
-                decl.funcBody = body
-                decl.end = body.end
+        let decl: Decl = if (Skip(TokenKind.LPAREN)) {
+            let funcDecl = FuncDecl()
+            ApplyModifiersAndAnnotations(funcDecl, modifiers, annos)
+            funcDecl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
+            funcDecl.identifier = identifier
+            funcDecl.begin = if (funcDecl.begin.IsZero()) { identifier.Begin() } else { funcDecl.begin }
+            let paramList = FuncParamList()
+            paramList.leftParenPos = lastToken.Begin()
+            paramList.begin = paramList.leftParenPos
+            var index: Int64 = 1
+            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
+                let param = FuncParam()
+                let ty = ParseType()
+                param.identifier = SrcIdentifier("p${index}", "p${index}", ty.begin, ty.begin, false)
+                param.isIdentifierCompilerAdd = true
+                param.typeNode = ty
+                param.begin = ty.begin
+                param.end = ty.end
+                paramList.params.add(param)
+                index++
+                if (!Skip(TokenKind.COMMA)) { break }
             }
-            return decl
+            paramList.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after enum constructor").Begin()
+            paramList.end = paramList.rightParenPos + 1
+            let body = FuncBody()
+            body.begin = paramList.begin
+            body.paramLists.add(paramList)
+            body.end = paramList.end
+            funcDecl.funcBody = body
+            funcDecl.end = body.end
+            funcDecl
+        } else {
+            let varDecl = VarDecl()
+            ApplyModifiersAndAnnotations(varDecl, modifiers, annos)
+            varDecl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
+            varDecl.identifier = identifier
+            varDecl.begin = if (varDecl.begin.IsZero()) { varDecl.identifier.Begin() } else { varDecl.begin }
+            varDecl.end = varDecl.identifier.End()
+            varDecl
         }
-        let decl = VarDecl()
         try (cs = ChainScope(this, decl)) {
-            ApplyModifiersAndAnnotations(decl, modifiers, annos)
-            decl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
-            decl.identifier = identifier
-            decl.begin = if (decl.begin.IsZero()) { decl.identifier.Begin() } else { decl.begin }
-            decl.end = decl.identifier.End()
+            if (!modifiers.isEmpty()) {
+                let firstMod = SortModifierByPos(modifiers)[0]
+                DiagExpectNoModifier(firstMod)
+            }
+            for (anno in annos) {
+                if (anno.kind != AnnotationKind.WHEN && anno.kind != AnnotationKind.DEPRECATED) {
+                    DiagUnexpectedAnnoOn(annos[0], identifier.Begin(), annos[0].identifier.Val(), identifier.Val())
+                }
+            }
         }
         return decl
     }

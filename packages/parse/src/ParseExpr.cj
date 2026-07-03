@@ -81,23 +81,25 @@ extend ParserImpl {
             let op = Peek()
             Next()
             let unary = UnaryExpr()
-            unary.op = op.kind
-            unary.operatorPos = op.Begin()
-            unary.begin = op.Begin()
-            let child = ParseUnaryExpr(RemoveParsingIfCondExpr(ek))
-            if (op.kind == TokenKind.SUB) {
-                if (let Some(lit) <- (child as LitConstExpr)) {
-                    if ((lit.kind == LitConstKind.INTEGER || lit.kind == LitConstKind.FLOAT) &&
-                        !lit.stringValue.isEmpty() && lit.stringValue[0] != b'-') {
-                        lit.stringValue = "-" + lit.stringValue
-                        lit.rawString = lit.stringValue
-                        lit.begin = op.Begin()
-                        return lit
+            try (cs = ChainScope(this, unary)) {
+                unary.op = op.kind
+                unary.operatorPos = op.Begin()
+                unary.begin = op.Begin()
+                let child = ParseUnaryExpr(RemoveParsingIfCondExpr(ek))
+                if (op.kind == TokenKind.SUB) {
+                    if (let Some(lit) <- (child as LitConstExpr)) {
+                        if ((lit.kind == LitConstKind.INTEGER || lit.kind == LitConstKind.FLOAT) &&
+                            !lit.stringValue.isEmpty() && lit.stringValue[0] != b'-') {
+                            lit.stringValue = "-" + lit.stringValue
+                            lit.rawString = lit.stringValue
+                            lit.begin = op.Begin()
+                            return lit
+                        }
                     }
                 }
+                unary.expr = child
+                if (let Some(child) <- unary.expr) { unary.end = child.end }
             }
-            unary.expr = child
-            if (let Some(child) <- unary.expr) { unary.end = child.end }
             return unary
         }
         return ParseBaseExpr(ParseAtom(ek), ek)
@@ -135,48 +137,54 @@ extend ParserImpl {
             }
             if (!newlineSkipped && Skip(TokenKind.LPAREN)) {
                 let call = CallExpr()
-                call.baseFunc = base
-                call.leftParenPos = lastToken.Begin()
-                call.begin = base.begin
-                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-                    call.args.add(ParseFuncArg())
-                    if (!Skip(TokenKind.COMMA)) { break }
+                try (cs = ChainScope(this, call)) {
+                    call.baseFunc = base
+                    call.leftParenPos = lastToken.Begin()
+                    call.begin = base.begin
+                    while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
+                        call.args.add(ParseFuncArg())
+                        if (!Skip(TokenKind.COMMA)) { break }
+                    }
+                    call.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after arguments").Begin()
+                    call.end = call.rightParenPos + 1
                 }
-                call.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after arguments").Begin()
-                call.end = call.rightParenPos + 1
                 base = call
                 continue
             }
             if (Skip(TokenKind.DOT)) {
                 let member = MemberAccess()
-                member.baseExpr = base
-                member.dotPos = lastToken.Begin()
-                member.begin = base.begin
-                member.field = ExpectIdentifierWithPos(member)
-                if (Seeing(TokenKind.LT) && LooksLikeTypeArguments()) {
-                    let parsed = ParseTypeArguments(ek)
-                    if (parsed[0]) {
-                        for (ty in parsed[1]) { member.typeArguments.add(ty) }
+                try (cs = ChainScope(this, member)) {
+                    member.baseExpr = base
+                    member.dotPos = lastToken.Begin()
+                    member.begin = base.begin
+                    member.field = ExpectIdentifierWithPos(member)
+                    if (Seeing(TokenKind.LT) && LooksLikeTypeArguments()) {
+                        let parsed = ParseTypeArguments(ek)
+                        if (parsed[0]) {
+                            for (ty in parsed[1]) { member.typeArguments.add(ty) }
+                        }
                     }
+                    member.end = member.field.End()
                 }
-                member.end = member.field.End()
                 base = member
                 continue
             }
             if (!newlineSkipped && Skip(TokenKind.LSQUARE)) {
                 let sub = SubscriptExpr()
-                sub.baseExpr = base
-                sub.leftParenPos = lastToken.Begin()
-                sub.begin = base.begin
-                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RSQUARE)) {
-                    if (!sub.indexExprs.isEmpty()) {
-                        sub.commaPos.add(lastToken.Begin())
+                try (cs = ChainScope(this, sub)) {
+                    sub.baseExpr = base
+                    sub.leftParenPos = lastToken.Begin()
+                    sub.begin = base.begin
+                    while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RSQUARE)) {
+                        if (!sub.indexExprs.isEmpty()) {
+                            sub.commaPos.add(lastToken.Begin())
+                        }
+                        sub.indexExprs.add(ParseExpr(ExprKind.INDEX_EXPR))
+                        if (!Skip(TokenKind.COMMA)) { break }
                     }
-                    sub.indexExprs.add(ParseExpr(ExprKind.INDEX_EXPR))
-                    if (!Skip(TokenKind.COMMA)) { break }
+                    sub.rightParenPos = Expect(TokenKind.RSQUARE, "expected ']' after subscript").Begin()
+                    sub.end = sub.rightParenPos + 1
                 }
-                sub.rightParenPos = Expect(TokenKind.RSQUARE, "expected ']' after subscript").Begin()
-                sub.end = sub.rightParenPos + 1
                 base = sub
                 continue
             }
@@ -287,44 +295,102 @@ extend ParserImpl {
                 Next()
             }
             if (op.kind == TokenKind.IS || op.kind == TokenKind.AS) {
-                let typeNode = ParseType()
                 if (op.kind == TokenKind.IS) {
                     let expr = IsExpr()
                     expr.leftExpr = lhs
-                    expr.isType = typeNode
                     expr.isPos = op.Begin()
                     expr.begin = lhs.begin
-                    expr.end = typeNode.end
+                    try (cs = ChainScope(this, expr)) {
+                        let typeNode = ParseType()
+                        expr.isType = typeNode
+                        expr.end = typeNode.end
+                    }
                     lhs = expr
                 } else {
                     let expr = AsExpr()
                     expr.leftExpr = lhs
-                    expr.asType = typeNode
                     expr.asPos = op.Begin()
                     expr.begin = lhs.begin
-                    expr.end = typeNode.end
+                    try (cs = ChainScope(this, expr)) {
+                        let typeNode = ParseType()
+                        expr.asType = typeNode
+                        expr.end = typeNode.end
+                    }
                     lhs = expr
                 }
                 continue
             }
-            var rhs = ParseUnaryExpr(ek)
-            var nextOp = Peek()
-            if (let Some(nextCombined) <- LookupSeenCombinator()) {
-                nextOp = nextCombined
+            let node: Expr = if (IsAssignment(op.kind)) {
+                let expr = AssignExpr()
+                expr.leftValue = lhs
+                expr.op = op.kind
+                expr.assignPos = op.Begin()
+                expr.isCompound = op.kind != TokenKind.ASSIGN
+                expr.begin = lhs.begin
+                expr.hasQuestSuffix = lhs.hasQuestSuffix
+                expr
+            } else if (op.kind == TokenKind.RANGEOP || op.kind == TokenKind.CLOSEDRANGEOP) {
+                let expr = RangeExpr()
+                expr.startExpr = lhs
+                expr.rangePos = op.Begin()
+                expr.isClosed = op.kind == TokenKind.CLOSEDRANGEOP
+                expr.begin = lhs.begin
+                expr
+            } else {
+                let expr = BinaryExpr()
+                expr.leftExpr = lhs
+                expr.op = op.kind
+                expr.operatorPos = op.Begin()
+                expr.begin = lhs.begin
+                expr
             }
-            let nextPrec = Precedence(nextOp.kind)
-            if (prec < nextPrec) {
-                rhs = ParseExprRhsWithPre(prec + 1, rhs, ek, op)
-            } else if (prec == nextPrec && (nextOp.kind == TokenKind.COALESCING || nextOp.kind == TokenKind.EXP)) {
-                rhs = ParseExprRhsWithPre(prec, rhs, ek, op)
-            } else if (prec == nextPrec && IsNoneAssociative(nextOp.kind) && !rhs.isBroken) {
-                DiagNoneAssociativeOp(op, nextOp)
-                rhs.isBroken = true
+            try (cs = ChainScope(this, node)) {
+                var rhs = ParseUnaryExpr(ek)
+                var nextOp = Peek()
+                if (let Some(nextCombined) <- LookupSeenCombinator()) {
+                    nextOp = nextCombined
+                }
+                let nextPrec = Precedence(nextOp.kind)
+                if (prec < nextPrec) {
+                    rhs = ParseExprRhsWithPre(prec + 1, rhs, ek, op)
+                } else if (prec == nextPrec && (nextOp.kind == TokenKind.COALESCING || nextOp.kind == TokenKind.EXP)) {
+                    rhs = ParseExprRhsWithPre(prec, rhs, ek, op)
+                } else if (prec == nextPrec && IsNoneAssociative(nextOp.kind) && !rhs.isBroken) {
+                    DiagNoneAssociativeOp(op, nextOp)
+                    rhs.isBroken = true
+                }
+                if (!CheckMacroExprRules(op, Token(TokenKind.DOT), rhs)) {
+                    rhs.isBroken = true
+                    node.isBroken = true
+                }
+                if (let Some(assign) <- (node as AssignExpr)) {
+                    assign.rightExpr = rhs
+                    assign.end = rhs.end
+                    if (op.kind == TokenKind.ASSIGN) {
+                        CheckWildcardInExpr(rhs)
+                    }
+                    assign.isBroken = assign.isBroken || rhs.isBroken
+                } else if (let Some(range) <- (node as RangeExpr)) {
+                    range.stopExpr = rhs
+                    range.end = rhs.end
+                    range.isBroken = range.isBroken || rhs.isBroken
+                } else if (let Some(binary) <- (node as BinaryExpr)) {
+                    binary.rightExpr = rhs
+                    binary.end = rhs.end
+                    binary.isBroken = binary.isBroken || rhs.isBroken
+                }
             }
-            if (!CheckMacroExprRules(op, Token(TokenKind.DOT), rhs)) {
-                rhs.isBroken = true
+            if (let Some(assign) <- (node as AssignExpr)) {
+                if (assign.hasQuestSuffix) {
+                    let chain = OptionalChainExpr()
+                    chain.expr = assign
+                    chain.begin = assign.begin
+                    chain.end = assign.end
+                    chain.hasQuestSuffix = true
+                    lhs = chain
+                    continue
+                }
             }
-            let node = MakeBinaryExpr(lhs, op, rhs)
             lhs = node
         }
         return lhs
@@ -367,44 +433,103 @@ extend ParserImpl {
                 Next()
             }
             if (op.kind == TokenKind.IS || op.kind == TokenKind.AS) {
-                let typeNode = ParseType()
                 if (op.kind == TokenKind.IS) {
                     let expr = IsExpr()
                     expr.leftExpr = lhs
-                    expr.isType = typeNode
                     expr.isPos = op.Begin()
                     expr.begin = lhs.begin
-                    expr.end = typeNode.end
+                    try (cs = ChainScope(this, expr)) {
+                        let typeNode = ParseType()
+                        expr.isType = typeNode
+                        expr.end = typeNode.end
+                    }
                     lhs = expr
                 } else {
                     let expr = AsExpr()
                     expr.leftExpr = lhs
-                    expr.asType = typeNode
                     expr.asPos = op.Begin()
                     expr.begin = lhs.begin
-                    expr.end = typeNode.end
+                    try (cs = ChainScope(this, expr)) {
+                        let typeNode = ParseType()
+                        expr.asType = typeNode
+                        expr.end = typeNode.end
+                    }
                     lhs = expr
                 }
                 continue
             }
-            var rhs = ParseUnaryExpr(ek)
-            var nextOp = Peek()
-            if (let Some(nextCombined) <- LookupSeenCombinator()) {
-                nextOp = nextCombined
+            let node: Expr = if (IsAssignment(op.kind)) {
+                let expr = AssignExpr()
+                expr.leftValue = lhs
+                expr.op = op.kind
+                expr.assignPos = op.Begin()
+                expr.isCompound = op.kind != TokenKind.ASSIGN
+                expr.begin = lhs.begin
+                expr.hasQuestSuffix = lhs.hasQuestSuffix
+                expr
+            } else if (op.kind == TokenKind.RANGEOP || op.kind == TokenKind.CLOSEDRANGEOP) {
+                let expr = RangeExpr()
+                expr.startExpr = lhs
+                expr.rangePos = op.Begin()
+                expr.isClosed = op.kind == TokenKind.CLOSEDRANGEOP
+                expr.begin = lhs.begin
+                expr
+            } else {
+                let expr = BinaryExpr()
+                expr.leftExpr = lhs
+                expr.op = op.kind
+                expr.operatorPos = op.Begin()
+                expr.begin = lhs.begin
+                expr
             }
-            let nextPrec = Precedence(nextOp.kind)
-            if (prec < nextPrec) {
-                rhs = ParseExprRhsWithPre(prec + 1, rhs, ek, op)
-            } else if (prec == nextPrec && (nextOp.kind == TokenKind.COALESCING || nextOp.kind == TokenKind.EXP)) {
-                rhs = ParseExprRhsWithPre(prec, rhs, ek, op)
-            } else if (prec == nextPrec && IsNoneAssociative(nextOp.kind) && !rhs.isBroken) {
-                DiagNoneAssociativeOp(op, nextOp)
-                rhs.isBroken = true
+            try (cs = ChainScope(this, node)) {
+                var rhs = ParseUnaryExpr(ek)
+                var nextOp = Peek()
+                if (let Some(nextCombined) <- LookupSeenCombinator()) {
+                    nextOp = nextCombined
+                }
+                let nextPrec = Precedence(nextOp.kind)
+                if (prec < nextPrec) {
+                    rhs = ParseExprRhsWithPre(prec + 1, rhs, ek, op)
+                } else if (prec == nextPrec && (nextOp.kind == TokenKind.COALESCING || nextOp.kind == TokenKind.EXP)) {
+                    rhs = ParseExprRhsWithPre(prec, rhs, ek, op)
+                } else if (prec == nextPrec && IsNoneAssociative(nextOp.kind) && !rhs.isBroken) {
+                    DiagNoneAssociativeOp(op, nextOp)
+                    rhs.isBroken = true
+                }
+                if (!CheckMacroExprRules(op, Token(TokenKind.DOT), rhs)) {
+                    rhs.isBroken = true
+                    node.isBroken = true
+                }
+                if (let Some(assign) <- (node as AssignExpr)) {
+                    assign.rightExpr = rhs
+                    assign.end = rhs.end
+                    if (op.kind == TokenKind.ASSIGN) {
+                        CheckWildcardInExpr(rhs)
+                    }
+                    assign.isBroken = assign.isBroken || rhs.isBroken
+                } else if (let Some(range) <- (node as RangeExpr)) {
+                    range.stopExpr = rhs
+                    range.end = rhs.end
+                    range.isBroken = range.isBroken || rhs.isBroken
+                } else if (let Some(binary) <- (node as BinaryExpr)) {
+                    binary.rightExpr = rhs
+                    binary.end = rhs.end
+                    binary.isBroken = binary.isBroken || rhs.isBroken
+                }
             }
-            if (!CheckMacroExprRules(op, Token(TokenKind.DOT), rhs)) {
-                rhs.isBroken = true
+            if (let Some(assign) <- (node as AssignExpr)) {
+                if (assign.hasQuestSuffix) {
+                    let chain = OptionalChainExpr()
+                    chain.expr = assign
+                    chain.begin = assign.begin
+                    chain.end = assign.end
+                    chain.hasQuestSuffix = true
+                    lhs = chain
+                    continue
+                }
             }
-            lhs = MakeBinaryExpr(lhs, op, rhs)
+            lhs = node
         }
         return lhs
     }
@@ -458,53 +583,6 @@ extend ParserImpl {
             }
         }
         return ParseExprWithPrevious(TokenKind.DOT, ret, ExprKind.INDEX_EXPR)
-    }
-
-    public func MakeBinaryExpr(left: Expr, op: Token, right: Expr): Expr {
-        if (IsAssignment(op.kind)) {
-            let expr = AssignExpr()
-            expr.leftValue = left
-            expr.rightExpr = right
-            expr.op = op.kind
-            expr.assignPos = op.Begin()
-            expr.isCompound = op.kind != TokenKind.ASSIGN
-            expr.begin = left.begin
-            expr.end = right.end
-            if (op.kind == TokenKind.ASSIGN) {
-                CheckWildcardInExpr(right)
-            }
-            expr.isBroken = left.isBroken || right.isBroken
-            expr.hasQuestSuffix = left.hasQuestSuffix
-            if (expr.hasQuestSuffix) {
-                let chain = OptionalChainExpr()
-                chain.expr = expr
-                chain.begin = expr.begin
-                chain.end = expr.end
-                chain.hasQuestSuffix = true
-                return chain
-            }
-            return expr
-        }
-        if (op.kind == TokenKind.RANGEOP || op.kind == TokenKind.CLOSEDRANGEOP) {
-            let expr = RangeExpr()
-            expr.startExpr = left
-            expr.stopExpr = right
-            expr.rangePos = op.Begin()
-            expr.isClosed = op.kind == TokenKind.CLOSEDRANGEOP
-            expr.begin = left.begin
-            expr.end = right.end
-            expr.isBroken = left.isBroken || right.isBroken
-            return expr
-        }
-        let expr = BinaryExpr()
-        expr.leftExpr = left
-        expr.rightExpr = right
-        expr.op = op.kind
-        expr.operatorPos = op.Begin()
-        expr.begin = left.begin
-        expr.end = right.end
-        expr.isBroken = left.isBroken || right.isBroken
-        return expr
     }
 
     public func Precedence(kind: TokenKind): UInt8 {
@@ -917,31 +995,29 @@ extend ParserImpl {
             }
             let matchCase = MatchCaseOther()
             matchCase.begin = lastToken.Begin()
-            try (caseScope = ChainScope(this, matchCase)) {
-                if (Skip(TokenKind.WILDCARD)) {
-                    matchCase.matchExpr = WildcardExpr(lastToken.Begin())
-                } else {
-                    matchCase.matchExpr = ParseExpr()
-                }
-                if (!SkipDoubleArrow()) {
-                    let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_case, Peek(),
-                        ConvertToken(Peek()))
-                    builder.AddHint(MakeRange(matchCase.begin, "case"))
-                    builder.Emit()
-                }
-                matchCase.arrowPos = lastToken.Begin()
-                let block = Block()
-                block.begin = Peek().Begin()
-                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.CASE) && !Seeing(TokenKind.RCURL)) {
-                    block.body.add(ParseExprOrDecl(ScopeKind.FUNC_BODY))
-                    SkipNLOrSemi()
-                }
-                block.end = lastToken.End()
-                matchCase.exprOrDecls = block
-                matchCase.end = block.end
-                ret.matchCaseOthers.add(matchCase)
+            if (Skip(TokenKind.WILDCARD)) {
+                matchCase.matchExpr = WildcardExpr(lastToken.Begin())
+            } else {
+                matchCase.matchExpr = ParseExpr()
+            }
+            if (!SkipDoubleArrow()) {
+                let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_case, Peek(),
+                    ConvertToken(Peek()))
+                builder.AddHint(MakeRange(matchCase.begin, "case"))
+                builder.Emit()
+            }
+            matchCase.arrowPos = lastToken.Begin()
+            let block = Block()
+            block.begin = Peek().Begin()
+            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.CASE) && !Seeing(TokenKind.RCURL)) {
+                block.body.add(ParseExprOrDecl(ScopeKind.FUNC_BODY))
                 SkipNLOrSemi()
             }
+            block.end = lastToken.End()
+            matchCase.exprOrDecls = block
+            matchCase.end = block.end
+            ret.matchCaseOthers.add(matchCase)
+            SkipNLOrSemi()
         }
         ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after match").Begin()
         ret.end = ret.rightCurlPos + 1
@@ -1457,12 +1533,14 @@ extend ParserImpl {
                     let block = Block()
                     block.leftCurlPos = lambda.begin
                     block.begin = lambda.begin
-                    while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
-                        block.body.add(ParseExprOrDecl(ScopeKind.FUNC_BODY))
-                        SkipNLOrSemi()
+                    try (blockScope = ChainScope(this, block)) {
+                        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
+                            block.body.add(ParseExprOrDecl(ScopeKind.FUNC_BODY))
+                            SkipNLOrSemi()
+                        }
+                        block.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after lambda").Begin()
+                        block.end = block.rightCurlPos + 1
                     }
-                    block.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after lambda").Begin()
-                    block.end = block.rightCurlPos + 1
                     body.body = Some(block)
                     body.end = block.end
                     lambda.funcBody = Some(body)
