@@ -26,6 +26,8 @@ extend ParserImpl {
         }
         let ret = if (ExprKindEquals(ek, ExprKind.INDEX_EXPR)) {
             ParseIndexAccess()
+        } else if (enableCustomAnno && SeeingIfAvailable()) {
+            ParseIfAvailable()
         } else {
             let left = ParseUnaryExpr(ek)
             ParseExprRhs(0, left, ek)
@@ -844,6 +846,99 @@ extend ParserImpl {
         return arg
     }
 
+    public func ParseIfAvailable(): IfAvailableExpr {
+        let _ = Skip(TokenKind.AT)
+        let begin = lastToken.Begin()
+        let _ = Skip(TokenKind.IDENTIFIER)
+
+        var bad = false
+        var lparenPos = INVALID_POSITION
+        var lparenSkipped = false
+        if (Skip(TokenKind.LPAREN)) {
+            lparenPos = lastToken.Begin()
+            lparenSkipped = true
+        } else {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_character, lookahead.Begin(), "(", lookahead.Value()).Emit()
+            bad = true
+        }
+        let arg = ParseFuncArg()
+        if (arg.name.Empty()) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_ifavailable_arg_no_name, lookahead).Emit()
+            bad = true
+        }
+        if (!Skip(TokenKind.COMMA)) {
+            Next()
+            let firstCommaBuilder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_character,
+                lastToken.Begin(), "','", "'" + lastToken.Value() + "'")
+            firstCommaBuilder.AddMainHintArguments("','")
+            firstCommaBuilder.Emit()
+            let missingFirstComma = IfAvailableExpr()
+            missingFirstComma.SetArg(arg)
+            missingFirstComma.begin = begin
+            missingFirstComma.EnableAttr(Attribute.IS_BROKEN)
+            missingFirstComma.end = lastToken.End()
+            ConsumeUntil(TokenKind.RPAREN)
+            return missingFirstComma
+        }
+
+        let firstLambdaExpr = ParseExpr()
+        if (let Some(lambda) <- (firstLambdaExpr as LambdaExpr)) {
+            let _ = lambda
+        } else {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_ifavailable_not_lambda, firstLambdaExpr).Emit()
+            bad = true
+        }
+
+        if (!Skip(TokenKind.COMMA)) {
+            Next()
+            let secondCommaBuilder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_character,
+                lastToken.Begin(), "','", "'" + lastToken.Value() + "'")
+            secondCommaBuilder.AddMainHintArguments("','")
+            secondCommaBuilder.Emit()
+            let missingSecondComma = IfAvailableExpr()
+            missingSecondComma.SetArg(arg)
+            if (let Some(lambda) <- (firstLambdaExpr as LambdaExpr)) {
+                missingSecondComma.SetLambda1(lambda)
+            }
+            missingSecondComma.begin = begin
+            missingSecondComma.EnableAttr(Attribute.IS_BROKEN)
+            missingSecondComma.end = lastToken.End()
+            ConsumeUntil(TokenKind.RPAREN)
+            return missingSecondComma
+        }
+        let secondLambdaExpr = ParseExpr()
+        if (let Some(lambda) <- (secondLambdaExpr as LambdaExpr)) {
+            let _ = lambda
+        } else {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_ifavailable_not_lambda, secondLambdaExpr).Emit()
+            bad = true
+        }
+        let parsedIfAvailable = IfAvailableExpr()
+        parsedIfAvailable.SetArg(arg)
+        if (let Some(lambda) <- (firstLambdaExpr as LambdaExpr)) {
+            parsedIfAvailable.SetLambda1(lambda)
+        }
+        if (let Some(lambda) <- (secondLambdaExpr as LambdaExpr)) {
+            parsedIfAvailable.SetLambda2(lambda)
+        }
+        parsedIfAvailable.begin = begin
+        if (!Skip(TokenKind.RPAREN)) {
+            if (lparenSkipped) {
+                let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_right_delimiter,
+                    lookahead.Begin(), "(")
+                builder.AddMainHintArguments(")")
+                builder.AddHint(lparenPos, arguments: ["("])
+                builder.Emit()
+            }
+            bad = true
+        }
+        if (bad) {
+            parsedIfAvailable.EnableAttr(Attribute.IS_BROKEN)
+        }
+        parsedIfAvailable.end = lastToken.End()
+        return parsedIfAvailable
+    }
+
     public func ParseUnsafeBlock(): Expr {
         let unsafeToken = Expect(TokenKind.UNSAFE, "expected 'unsafe'")
         if (!Seeing(TokenKind.LCURL)) {
@@ -945,6 +1040,9 @@ extend ParserImpl {
         }
         if (SeeingMacroCall()) {
             if (curMacroCall.isSome() || enableCustomAnno) {
+                if (SeeingIfAvailable()) {
+                    return ParseIfAvailable()
+                }
                 return ParseDecl(scopeKind)
             }
             return ParseExpr()

@@ -337,6 +337,9 @@ extend ParserImpl {
     }
 
     public func SeeingDeclInScope(scopeKind: ScopeKind): Bool {
+        if (SeeingIfAvailable()) {
+            return false
+        }
         let seeingScopedSpecial = (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) && SeeingFinalizer()) ||
             SeeingPrimaryConstructor(scopeKind)
         return seeingScopedSpecial || (SeeingModifier() && !Seeing([TokenKind.UNSAFE, TokenKind.LCURL])) ||

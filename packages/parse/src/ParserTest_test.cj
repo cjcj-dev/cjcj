@@ -4,6 +4,7 @@ import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
 import cangjie_compiler::ast.{VisitAction, Walker}
+import cangjie_compiler::basic.{DiagCategory, DiagKindRefactor}
 
 private let SHARED_CODE = #"
     main(argc:int, argv:string="123") {
@@ -859,6 +860,96 @@ class ParserPortTest {
             "IfExpr", "WhileExpr", "LitConstExpr", "LitConstExpr"
         ]), true)
         @Expect(expectInts(numExprs, [1, 1, 1, 1, 2, 3, 1]), true)
+    }
+
+    @TestCase
+    func ParseIfAvailable(): Unit {
+        let validSm = SourceManager()
+        let validDiag = DiagnosticEngine()
+        let validParser = Parser("@IfAvailable(level: 19, {=> 1}, {=> 2})", validDiag, validSm).EnableCustomAnno()
+        let validExpr = validParser.ParseExpr()
+        @Expect(countErrors(validDiag), 0)
+        @Expect((validExpr as IfAvailableExpr).isSome(), true)
+        let ifAvailable = (validExpr as IfAvailableExpr).getOrThrow()
+        @Expect(ifAvailable.TestAttr(Attribute.IS_BROKEN), false)
+        let arg = ifAvailable.GetArg().getOrThrow()
+        @Expect(arg.name.Val(), "level")
+        @Expect((arg.expr.getOrThrow() as LitConstExpr).getOrThrow().stringValue, "19")
+        @Expect(ifAvailable.GetLambda1().isSome(), true)
+        @Expect(ifAvailable.GetLambda2().isSome(), true)
+
+        let fileSm = SourceManager()
+        let fileDiag = DiagnosticEngine()
+        let fileParser = Parser(#"
+        func f() {
+            @IfAvailable(level: 19, {=> 1}, {=> 2})
+        }
+        "#, fileDiag, fileSm).EnableCustomAnno()
+        let parsedFile = fileParser.ParseTopLevel()
+        let foundIfAvailable = ArrayList<String>()
+        let foundMacroIfAvailable = ArrayList<String>()
+        Walker(parsedFile, visitPre: { node: Node =>
+            if (let Some(_) <- (node as IfAvailableExpr)) {
+                foundIfAvailable.add("ifAvailable")
+            } else if (let Some(macroExpr) <- (node as MacroExpandExpr)) {
+                if (macroExpr.invocation.IsIfAvailable()) {
+                    foundMacroIfAvailable.add("macroIfAvailable")
+                }
+            }
+            return VisitAction.WALK_CHILDREN
+        }).Walk()
+        @Expect(countErrors(fileDiag), 0)
+        @Expect(foundIfAvailable.size, 1)
+        @Expect(foundMacroIfAvailable.size, 0)
+
+        let noNameSm = SourceManager()
+        let noNameDiag = DiagnosticEngine()
+        let noNameParser = Parser("@IfAvailable(19, {=> 1}, {=> 2})", noNameDiag, noNameSm).EnableCustomAnno()
+        let noNameExpr = noNameParser.ParseExpr()
+        let noNameDiags = noNameDiag.GetCategoryDiagnostic(DiagCategory.PARSE)
+        @Assert(noNameDiags.size > 0)
+        @Expect(noNameDiags[0].rKind, DiagKindRefactor.parse_ifavailable_arg_no_name)
+        @Expect(noNameExpr.TestAttr(Attribute.IS_BROKEN), true)
+
+        let notLambdaSm = SourceManager()
+        let notLambdaDiag = DiagnosticEngine()
+        let notLambdaParser = Parser("@IfAvailable(level: 19, 1, {=> 2})", notLambdaDiag,
+            notLambdaSm).EnableCustomAnno()
+        let notLambdaExpr = notLambdaParser.ParseExpr()
+        let notLambdaDiags = notLambdaDiag.GetCategoryDiagnostic(DiagCategory.PARSE)
+        @Assert(notLambdaDiags.size > 0)
+        @Expect(notLambdaDiags[0].rKind, DiagKindRefactor.parse_ifavailable_not_lambda)
+        @Expect(notLambdaExpr.TestAttr(Attribute.IS_BROKEN), true)
+
+        let missingCommaSm = SourceManager()
+        let missingCommaDiag = DiagnosticEngine()
+        let missingCommaParser = Parser("@IfAvailable(level: 19, {=> 1} true, {=> 2})", missingCommaDiag,
+            missingCommaSm).EnableCustomAnno()
+        let missingCommaExpr = missingCommaParser.ParseExpr()
+        let missingCommaDiags = missingCommaDiag.GetCategoryDiagnostic(DiagCategory.PARSE)
+        @Assert(missingCommaDiags.size > 0)
+        @Expect(missingCommaDiags[0].rKind, DiagKindRefactor.parse_expected_character)
+        @Expect(missingCommaExpr.TestAttr(Attribute.IS_BROKEN), true)
+
+        let missingRparenSm = SourceManager()
+        let missingRparenDiag = DiagnosticEngine()
+        let missingRparenParser = Parser("@IfAvailable(level: 19, {=> 1}, {=> 2}", missingRparenDiag,
+            missingRparenSm).EnableCustomAnno()
+        let missingRparenExpr = missingRparenParser.ParseExpr()
+        let missingRparenDiags = missingRparenDiag.GetCategoryDiagnostic(DiagCategory.PARSE)
+        @Assert(missingRparenDiags.size > 0)
+        @Expect(missingRparenDiags[0].rKind, DiagKindRefactor.parse_expected_right_delimiter)
+        @Expect(missingRparenExpr.TestAttr(Attribute.IS_BROKEN), true)
+
+        let missingLparenSm = SourceManager()
+        let missingLparenDiag = DiagnosticEngine()
+        let missingLparenParser = Parser("@IfAvailable level: 19, {=> 1}, {=> 2})", missingLparenDiag,
+            missingLparenSm).EnableCustomAnno()
+        let missingLparenExpr = missingLparenParser.ParseExpr()
+        let missingLparenDiags = missingLparenDiag.GetCategoryDiagnostic(DiagCategory.PARSE)
+        @Assert(missingLparenDiags.size > 0)
+        @Expect(missingLparenDiags[0].rKind, DiagKindRefactor.parse_expected_character)
+        @Expect(missingLparenExpr.TestAttr(Attribute.IS_BROKEN), true)
     }
 
     @TestCase
