@@ -1,5 +1,6 @@
 package cangjie_compiler::basic
 
+import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
 
@@ -12,11 +13,76 @@ private func expectArray(actual: Array<String>, expected: Array<String>): Unit {
     }
 }
 
+private func expectStringList(actual: ArrayList<String>, expected: Array<String>): Unit {
+    @Expect(actual.size, expected.size)
+    var idx: Int64 = 0
+    while (idx < expected.size && idx < actual.size) {
+        @Expect(actual[idx], expected[idx])
+        idx++
+    }
+}
+
+private func buildFaithfulMap(keys: Array<String>): FaithfulUnorderedMap<Int64> {
+    let map = FaithfulUnorderedMap<Int64>()
+    var idx: Int64 = 0
+    for (key in keys) {
+        map.add(key, idx)
+        idx++
+    }
+    return map
+}
+
 @Test
 class UtilsTest {
     @TestCase
     func getHashTest(): Unit {
         @Expect(GetHash("hello world"), 5577293430985752569u64)
+    }
+
+    @TestCase
+    func faithfulUnorderedMapSmallIterationTest(): Unit {
+        let map = buildFaithfulMap(["a", "b", "c", "d", "e"])
+        @Expect(map.BucketCount(), 13)
+        expectStringList(map.keys(), ["e", "c", "b", "d", "a"])
+    }
+
+    @TestCase
+    func faithfulUnorderedMapRehashIterationTest(): Unit {
+        let map = buildFaithfulMap([
+            "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda",
+            "mu", "nu", "xi"
+        ])
+        @Expect(map.BucketCount(), 29)
+        expectStringList(map.keys(), [
+            "xi", "alpha", "delta", "zeta", "lambda", "gamma", "iota", "epsilon", "eta", "kappa", "beta",
+            "theta", "mu", "nu"
+        ])
+    }
+
+    @TestCase
+    func faithfulUnorderedMapStdPackageIterationTest(): Unit {
+        let map = buildFaithfulMap([
+            "std.collection.array_list", "std.core.byte_extension", "std.core.duration", "std.core.string",
+            "std.core.string_builder", "std.core.string_common", "std.core.array", "std.core.range",
+            "std.core.array_common", "std.core.object", "default"
+        ])
+        @Expect(map.BucketCount(), 13)
+        expectStringList(map.keys(), [
+            "default", "std.core.object", "std.core.range", "std.core.array", "std.core.string_common",
+            "std.core.string_builder", "std.core.string", "std.core.duration", "std.core.byte_extension",
+            "std.core.array_common", "std.collection.array_list"
+        ])
+    }
+
+    @TestCase
+    func faithfulUnorderedMapAssignAndRemoveTest(): Unit {
+        let map = buildFaithfulMap(["a", "b", "c", "d", "e"])
+        map.add("c", 99)
+        @Expect(map.get("c").getOrThrow(), 99)
+        expectStringList(map.keys(), ["e", "c", "b", "d", "a"])
+        map.remove("c")
+        expectStringList(map.keys(), ["e", "b", "d", "a"])
+        @Expect(map.contains("c"), false)
     }
 
     @TestCase
