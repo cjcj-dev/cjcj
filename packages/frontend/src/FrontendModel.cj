@@ -4342,6 +4342,17 @@ private class StdDepEntry {
     }
 }
 
+private class CjoPackageInfo {
+    public var pkg: Package
+    public var pkgDecl: PackageDecl
+    public var onlyUsedByMacro: Bool = false
+
+    public init(pkg: Package) {
+        this.pkg = pkg
+        this.pkgDecl = PackageDecl(pkg)
+    }
+}
+
 private const NO_CJO_HELP_INFO: String =
     "check if the .cjo file of the package exists in CANGJIE_PATH or CANGJIE_HOME, or use " +
     "'--import-path' to specify the .cjo file path"
@@ -4357,6 +4368,7 @@ public class ImportManager {
         HashMap<String, HashMap<String, Decl>>()
     private let depPkgCjdPaths: HashMap<String, String> = HashMap<String, String>()
     private let stdDepsMap: HashMap<String, StdDepEntry> = HashMap<String, StdDepEntry>()
+    private let packageNameMap: HashMap<String, CjoPackageInfo> = HashMap<String, CjoPackageInfo>()
     private let directDependencies: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
     private let directDependencyOrder: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
     private let loadingPackages: HashSet<String> = HashSet<String>()
@@ -4374,6 +4386,8 @@ public class ImportManager {
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
     private var canInlineImportedSource: Bool = false
     private var importSrcCode: Bool = true
+    private var hasBuildIndex: Bool = false
+    private var curPackage: Option<Package> = None
 
     public init(diag: DiagnosticEngine, typeManager: FaithfulSemaTypeManager, globalOptions: GlobalOptions) {
         this.diag = diag
@@ -4448,6 +4462,7 @@ public class ImportManager {
         exportIdDeclMaps.clear()
         depPkgCjdPaths.clear()
         stdDepsMap.clear()
+        packageNameMap.clear()
         directDependencies.clear()
         directDependencyOrder.clear()
         loadingPackages.clear()
@@ -4458,38 +4473,16 @@ public class ImportManager {
         importedDeclsMap.clear()
         fileImportedDeclsMap.clear()
         fileUsedMacroDeclsMap.clear()
-        let sourcePackages = HashSet<String>()
         for (pkg in pkgs) {
             if (pkg.fullPackageName.isEmpty()) {
                 diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "empty package name")
                 return false
             }
             AddImplicitImports(pkg, opts)
-            sourcePackages.add(pkg.fullPackageName)
             sourcePackagesForMembers.add(pkg)
+            AddSourcePackage(pkg)
         }
-        for (pkg in pkgs) {
-            let deps = CollectDirectDependencyNamesInOrder(pkg, sourcePackages)
-            let filteredDeps = HashSet<String>()
-            for (dep in deps) {
-                if (dep.isEmpty() || dep == pkg.fullPackageName) {
-                    continue
-                }
-                filteredDeps.add(dep)
-                if (!sourcePackages.contains(dep) && !depPkgCjdPaths.contains(dep)) {
-                    let cjdPath = FileUtil.FindSerializationFile(dep, ".cjo", searchPath.toArray())
-                    if (!cjdPath.isEmpty()) {
-                        depPkgCjdPaths.add(dep, cjdPath)
-                    }
-                }
-                if (let Some(cjoPath) <- depPkgCjdPaths.get(dep)) {
-                    HandleStdPackage(dep, cjoPath, isRecursive: false)
-                }
-            }
-            directDependencies.add(pkg.fullPackageName, filteredDeps)
-            directDependencyOrder.add(pkg.fullPackageName, deps)
-        }
-        if (!LoadResolvedImportedPackages()) {
+        if (!ResolveImportedPackages(pkgs)) {
             return false
         }
         SubstituteImportedTypeAliasTy(pkgs, opts)
@@ -4500,6 +4493,7 @@ public class ImportManager {
             AddImportedDeclsForSourcePackage(pkg)
         }
         CheckImports(pkgs)
+        SetHasBuildIndex(true)
         return diag.GetErrorCount() == 0
     }
 
@@ -4509,6 +4503,19 @@ public class ImportManager {
 
     public func DeleteASTLoaders(): Unit {}
     public func ClearPackageBCHIRCache(): Unit {}
+    public func ClearForReBuildIndex(): Unit {
+        packageNameMap.clear()
+        importedPackageNameMap.clear()
+        loadingPackages.clear()
+        importedPackages.clear()
+        hasBuildIndex = false
+    }
+    public func HasBuildIndex(): Bool {
+        return hasBuildIndex
+    }
+    public func SetHasBuildIndex(value: Bool): Unit {
+        hasBuildIndex = value
+    }
     public func SetSourceCodeImportStatus(shouldImport: Bool): Unit {
         importSrcCode = shouldImport
     }
@@ -4518,7 +4525,40 @@ public class ImportManager {
         return importedPackages
     }
 
+    private func GetPackageInfo(fullPackageName: String): Option<CjoPackageInfo> {
+        return packageNameMap.get(fullPackageName)
+    }
+
+    private func AddSourcePackage(pkg: Package): Unit {
+        let info = CjoPackageInfo(pkg)
+        packageNameMap[pkg.fullPackageName] = info
+        packageDecls[pkg.fullPackageName] = info.pkgDecl
+    }
+
+    public func IsOnlyUsedByMacro(fullPackageName: String): Bool {
+        if (let Some(info) <- GetPackageInfo(fullPackageName)) {
+            return info.onlyUsedByMacro
+        }
+        return false
+    }
+
+    public func SetOnlyUsedByMacro(fullPackageName: String, onlyUsedByMacro: Bool): Unit {
+        if (let Some(info) <- GetPackageInfo(fullPackageName)) {
+            info.onlyUsedByMacro = onlyUsedByMacro
+        }
+    }
+
+    public func IsMacroRelatedPackageName(fullPackageName: String): Bool {
+        if (let Some(info) <- GetPackageInfo(fullPackageName)) {
+            return info.onlyUsedByMacro
+        }
+        return false
+    }
+
     public func GetPackageDecl(fullPackageName: String): Option<PackageDecl> {
+        if (let Some(info) <- GetPackageInfo(fullPackageName)) {
+            return Some(info.pkgDecl)
+        }
         if (let Some(packageDecl) <- packageDecls.get(fullPackageName)) {
             return Some(packageDecl)
         }
@@ -4995,6 +5035,9 @@ public class ImportManager {
     }
 
     public func GetPackage(name: String): Option<Package> {
+        if (let Some(info) <- GetPackageInfo(name)) {
+            return Some(info.pkg)
+        }
         for (pkg in importedPackages) {
             if (pkg.fullPackageName == name) {
                 return Some(pkg)
@@ -5022,7 +5065,7 @@ public class ImportManager {
                     if (importSpec.IsImportMulti()) {
                         continue
                     }
-                    let fullPackageName = importSpec.content.GetImportedPackageNameWithIsDecl()
+                    let fullPackageName = GetPackageNameByImport(importSpec)
                     if (fullPackageName.isEmpty()) {
                         continue
                     }
@@ -5068,7 +5111,7 @@ public class ImportManager {
                         continue
                     } else if (importSpec.IsImportAll()) {
                         continue
-                    } else if (IsPackageImportForCheck(importSpec, fullPackageName, sourcePackages)) {
+                    } else if (IsImportPackage(importSpec)) {
                         if (importSpec.IsReExport()) {
                             diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
                                 DiagKindRefactor.package_re_export_package_name,
@@ -5228,6 +5271,9 @@ public class ImportManager {
     }
 
     private func AddImportedPackageIfMissing(pkg: Package): Unit {
+        let info = CjoPackageInfo(pkg)
+        packageNameMap[pkg.fullPackageName] = info
+        packageDecls[pkg.fullPackageName] = info.pkgDecl
         for (existing in importedPackages) {
             if (existing.fullPackageName == pkg.fullPackageName) {
                 return
@@ -5236,27 +5282,151 @@ public class ImportManager {
         importedPackages.add(pkg)
     }
 
-    private func LoadResolvedImportedPackages(): Bool {
-        if (let Some(corePath) <- depPkgCjdPaths.get("std.core")) {
-            if ((let None <- GetPackage("std.core")) && !LoadImportedPackageFromCjo("std.core", corePath)) {
-                return false
+    private func SaveDepPkgCjoPath(fullPackageName: String, cjoPath: String): Unit {
+        depPkgCjdPaths[fullPackageName] = cjoPath
+    }
+
+    private func GetPackageCjo(importSpec: ImportSpec): (String, String) {
+        let mapped = GetPackageNameByImport(importSpec)
+        if (!mapped.isEmpty()) {
+            return (mapped, FileUtil.FindSerializationFile(mapped, ".cjo", searchPath.toArray()))
+        }
+        var cjoPath = ""
+        var cjoPackageName = ""
+        var inGroupPackageName = ""
+        for (candidate in importSpec.content.GetPossiblePackageNames()) {
+            cjoPackageName = candidate
+            if (inGroupPackageName.isEmpty() && GetPackageInfo(cjoPackageName).isSome()) {
+                inGroupPackageName = cjoPackageName
+            }
+            cjoPath = FileUtil.FindSerializationFile(cjoPackageName, ".cjo", searchPath.toArray())
+            if (!cjoPath.isEmpty()) {
+                break
             }
         }
-        let depNames = ArrayList<String>()
-        for (dep in depPkgCjdPaths.keys()) {
-            depNames.add(dep)
+        if (!inGroupPackageName.isEmpty() && inGroupPackageName != cjoPackageName) {
+            cjoPackageName = inGroupPackageName
+            cjoPath = ""
         }
-        for (dep in depNames) {
-            if (dep == "std.core" || (let Some(_) <- GetPackage(dep))) {
-                continue
-            }
-            if (let Some(path) <- depPkgCjdPaths.get(dep)) {
-                if (!LoadImportedPackageFromCjo(dep, path)) {
-                    return false
+        if (cjoPackageName.isEmpty()) {
+            cjoPackageName = importSpec.content.GetImportedPackageName()
+        }
+        AddImportedPackageName(importSpec, cjoPackageName)
+        return (cjoPackageName, cjoPath)
+    }
+
+    private func ResolveImportedPackages(packages: ArrayList<Package>): Bool {
+        var success = true
+        for (pkg in packages) {
+            curPackage = Some(pkg)
+            success = ResolveImportedPackageHeaders(pkg, isRecursive: false) && success
+            pkg.ClearAllDependentStdPkgs()
+            for (cjoPath in stdDepsMap.keys()) {
+                if (let Some(entry) <- stdDepsMap.get(cjoPath)) {
+                    pkg.AddDependentStdPkg(entry.fullPackageName)
                 }
             }
         }
+        return success
+    }
+
+    private func ResolveImportedPackageHeaders(pkg: Package, isRecursive!: Bool = false): Bool {
+        var success = true
+        for (file in pkg.files) {
+            if (!ResolveImportedPackageForFile(file, isRecursive: isRecursive)) {
+                success = false
+            }
+        }
+        return success
+    }
+
+    private func ResolveImportedPackageForFile(file: File, isRecursive!: Bool = false): Bool {
+        var success = true
+        if (let None <- file.curPackage) {
+            return true
+        }
+        let curPkg = file.curPackage.getOrThrow()
+        let isMacroRelated = curPkg.isMacroPackage || IsMacroRelatedPackageName(curPkg.fullPackageName)
+        if (let None <- curPackage) {
+            return true
+        }
+        let rootPkg = curPackage.getOrThrow()
+        let relation = GetFrontendPackageRelation(rootPkg.fullPackageName, curPkg.fullPackageName)
+        for (importSpec in file.imports) {
+            if (importSpec.IsImportMulti() || !importSpec.withImplicitExport) {
+                continue
+            }
+            let isVisibleImport = importSpec.IsReExport() && IsFrontendVisible(importSpec, relation)
+            let packageAndPath = GetPackageCjo(importSpec)
+            let fullPackageName = packageAndPath[0]
+            let cjoPath = packageAndPath[1]
+            SaveDepPkgCjoPath(fullPackageName, cjoPath)
+            if (let Some(importPkg) <- GetPackage(fullPackageName)) {
+                if (!importPkg.TestAttr(Attribute.IMPORTED) && curPkg.TestAttr(Attribute.IMPORTED)) {
+                    success = false
+                    diag.DiagnoseRefactor(DiagKindRefactor.module_same_name_with_indirect_dependent_pkg,
+                        DEFAULT_POSITION, arguments: [fullPackageName, curPkg.fullPackageName])
+                } else {
+                    success = HandleParsedPackage(importPkg, cjoPath, !isMacroRelated || isVisibleImport,
+                        isRecursive) && success
+                }
+                continue
+            }
+            let isMainPartPkgForTestPkg = globalOptions.compileTestsOnly && IsTestPackage(curPkg.fullPackageName) &&
+                GetMainPartPkgNameForTestPkg(curPkg.fullPackageName) == fullPackageName
+            if (!CheckCjoPathLegality(importSpec, cjoPath, fullPackageName, isRecursive, isMainPartPkgForTestPkg) ||
+                !LoadImportedPackageFromCjo(fullPackageName, cjoPath)) {
+                success = false
+                continue
+            }
+            if (let Some(importPkg) <- GetPackage(fullPackageName)) {
+                if (importPkg.isMacroPackage && isRecursive && !isVisibleImport && isMacroRelated) {
+                    RemovePackage(fullPackageName, importPkg)
+                    continue
+                }
+                let macroReExportCommonPackage = isVisibleImport && isMacroRelated && !importPkg.isMacroPackage
+                if ((!IsMacroRelatedPackageName(curPkg.fullPackageName) && !importPkg.isMacroPackage) ||
+                    rootPkg.isMacroPackage || macroReExportCommonPackage) {
+                    HandleStdPackage(fullPackageName, cjoPath, isRecursive: isRecursive)
+                    for (depStdPkg in importPkg.GetAllDependentStdPkgs()) {
+                        HandleStdPackage(depStdPkg, FindAndSaveDepStdCjoPath(depStdPkg), isRecursive: true)
+                    }
+                } else {
+                    SetOnlyUsedByMacro(fullPackageName, true)
+                }
+                success = ResolveImportedPackageHeaders(importPkg, isRecursive: true) && success
+            }
+        }
+        return success
+    }
+
+    private func HandleParsedPackage(pkg: Package, filePath: String, isUsedAsCommon: Bool, isRecursive: Bool): Bool {
+        var shouldPromoteMacroUse = false
+        if (let Some(root) <- curPackage) {
+            shouldPromoteMacroUse = root.isMacroPackage || (isUsedAsCommon && !pkg.isMacroPackage)
+        }
+        if (IsOnlyUsedByMacro(pkg.fullPackageName) && shouldPromoteMacroUse) {
+            SetOnlyUsedByMacro(pkg.fullPackageName, false)
+            HandleStdPackage(pkg.fullPackageName, filePath, isRecursive: isRecursive)
+            for (depStdPkg in pkg.GetAllDependentStdPkgs()) {
+                HandleStdPackage(depStdPkg, FindAndSaveDepStdCjoPath(depStdPkg), isRecursive: true)
+            }
+            return ResolveImportedPackageHeaders(pkg, isRecursive: true)
+        }
         return true
+    }
+
+    private func RemovePackage(fullPkgName: String, pkg: Package): Unit {
+        packageNameMap.remove(fullPkgName)
+        packageDecls.remove(fullPkgName)
+        var idx: Int64 = 0
+        while (idx < importedPackages.size) {
+            if (importedPackages[idx].fullPackageName == pkg.fullPackageName) {
+                importedPackages.remove(at: idx)
+                return
+            }
+            idx++
+        }
     }
 
     private func LoadImportedPackageFromCjo(fullPackageName: String, cjoPath: String): Bool {
