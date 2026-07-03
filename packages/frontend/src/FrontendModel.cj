@@ -19,7 +19,7 @@ import cangjie_compiler::option.enumIndex
 public import cangjie_compiler::mangle.BaseMangler
 import cangjie_compiler::sema.GenericInstantiation.GenericInstantiationManagerImpl as RealGenericInstantiationManagerImpl
 import cangjie_compiler::sema.TypeManager as FaithfulSemaTypeManager
-import cangjie_compiler::utils.{AST_PACKAGE_NAME, MAIN_INVOKE}
+import cangjie_compiler::utils.{AST_PACKAGE_NAME, EraseIf, JoinStrings, MAIN_INVOKE}
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.ProfileRecorder
 import cangjie_compiler::utils.STANDARD_LIBS
@@ -699,9 +699,9 @@ private class CjoFullId {
 
 private class CjoSignatureMaterializer {
     private let packageName: String
-    private let pkg: Package
-    private let filesByIndex: HashMap<UInt32, File>
-    private let idToFileMap: HashMap<UInt64, File>
+    private var pkg: Package
+    private var filesByIndex: HashMap<UInt32, File>
+    private var idToFileMap: HashMap<UInt64, File>
     private let importedPackages: ArrayList<Package>
     private let packageDecls: HashMap<String, PackageDecl>
     private let exportIdDeclMaps: HashMap<String, HashMap<String, Decl>>
@@ -711,6 +711,7 @@ private class CjoSignatureMaterializer {
     private var flatAllTypes: Int64 = -1
     private var flatAllExprs: Int64 = -1
     private var flatImports: Int64 = -1
+    private var data: Option<Array<UInt8>> = None
     private let typeManager: FaithfulSemaTypeManager
     private let flatDecls: HashMap<UInt32, CjoFlatDecl> = HashMap<UInt32, CjoFlatDecl>()
     private let flatNominalKinds: HashMap<String, UInt8> = HashMap<String, UInt8>()
@@ -730,7 +731,7 @@ private class CjoSignatureMaterializer {
         packageDecls: HashMap<String, PackageDecl>, exportIdDeclMaps: HashMap<String, HashMap<String, Decl>>,
         diag: DiagnosticEngine, typeManager: FaithfulSemaTypeManager,
         importSrcCode!: Bool = true, deserializingCommon!: Bool = false, canInline!: Bool = false,
-        isLoadCache!: Bool = false) {
+        isLoadCache!: Bool = false, data!: Option<Array<UInt8>> = None) {
         this.packageName = packageName
         this.pkg = pkg
         this.filesByIndex = filesByIndex
@@ -744,6 +745,7 @@ private class CjoSignatureMaterializer {
         this.deserializingCommon = deserializingCommon
         this.canInline = canInline
         this.isLoadCache = isLoadCache
+        this.data = data
         if (!this.exportIdDeclMaps.contains(packageName)) {
             this.exportIdDeclMaps[packageName] = HashMap<String, Decl>()
         }
@@ -755,8 +757,9 @@ private class CjoSignatureMaterializer {
         LoadRefs()
     }
 
-    public func LoadPackageDependencies(data: Array<UInt8>): Bool {
-        PreLoadImportedPackageNode(data)
+    public func LoadPackageDependencies(newData: Array<UInt8>): Bool {
+        data = Some(newData)
+        PreLoadImportedPackageNode(newData)
         return flatAllTypes >= 0 && flatAllDecls >= 0
     }
 
@@ -813,6 +816,220 @@ private class CjoSignatureMaterializer {
             idx++
         }
         return dep
+    }
+
+    public func PreloadCommonPartOfPackage(targetPkg: Package, opts: GlobalOptions): Bool {
+        let rawData = data.getOrThrow()
+        flat = Some(CjoFlatBuffer(rawData))
+        flatAllDecls = -1
+        flatAllTypes = -1
+        flatAllExprs = -1
+        flatImports = -1
+        flatDecls.clear()
+        flatNominalKinds.clear()
+        flatTypeCache.clear()
+        flatGenericParamDecls.clear()
+        allLoadedDecls.clear()
+        allLoadedExprs.clear()
+        allDummyExprs.clear()
+        importNonGenericSrcFuncDecls.clear()
+        let reader = flat.getOrThrow()
+        if (!reader.VerifyPackageBuffer()) {
+            diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed, DEFAULT_POSITION,
+                arguments: ["ast", targetPkg.fullPackageName, CANGJIE_VERSION])
+            return false
+        }
+        let root = reader.RootTable()
+        if (root < 0) {
+            return false
+        }
+        let deserializedPackageName = reader.StringField(root, 8)
+        if (targetPkg.fullPackageName != deserializedPackageName) {
+            ReportPackageMismatch(targetPkg, targetPkg.fullPackageName, deserializedPackageName)
+            return false
+        }
+        pkg = targetPkg
+        filesByIndex = HashMap<UInt32, File>()
+        idToFileMap = HashMap<UInt64, File>()
+        flatAllTypes = reader.VectorField(root, 18)
+        flatAllDecls = reader.VectorField(root, 20)
+        flatAllExprs = reader.VectorField(root, 22)
+        flatImports = reader.VectorField(root, 12)
+        let specificFeatures = CollectFeaturesFromPackage(targetPkg)
+        let filesVec = reader.VectorField(root, 14)
+        var idx: Int64 = 0
+        while (idx < reader.VectorLength(filesVec)) {
+            let commonFile = PreloadCommonFile(reader, UInt32(idx))
+            ValidateCommonSpecificFeatureSetsRelations(commonFile, specificFeatures, targetPkg)
+            targetPkg.files.add(commonFile)
+            idx++
+        }
+        if (!ValidateOptions(reader, opts)) {
+            return false
+        }
+        AddCurFile(targetPkg)
+        return true
+    }
+
+    private func PreloadCommonFile(reader: CjoFlatBuffer, indexOfFile: UInt32): File {
+        let root = reader.RootTable()
+        let fileIndex = Int64(indexOfFile)
+        let allFiles = reader.VectorField(root, 14)
+        let allFileImports = reader.VectorField(root, 16)
+        let allFileInfo = reader.VectorField(root, 28)
+        let fileInfo = reader.VectorOffsetElement(allFileInfo, fileIndex)
+        let tmpFilePath = reader.StringAt(reader.VectorOffsetElement(allFiles, fileIndex))
+        let fileID = diag.GetSourceManager().AddSource(tmpFilePath, "", packageName: Some(pkg.fullPackageName),
+            isCjmpFile: true)
+        if (UInt32(fileID) != reader.U32Field(fileInfo, 4, 0u32)) {
+            throw IllegalStateException("FlatBuffer common part file ID mismatch")
+        }
+        let source = diag.GetSourceManager().GetSource(fileID)
+        let file = CreateFile(source.path)
+        file.fileName = FileUtil.GetFileName(source.path)
+        file.filePath = source.path
+        file.fileHash = source.fileHash
+        file.begin.fileID = fileID
+        file.curFile = Some(file)
+        file.curPackage = Some(pkg)
+        let importsTable = reader.VectorOffsetElement(allFileImports, fileIndex)
+        if (importsTable >= 0) {
+            MaterializeFlatImports(reader, importsTable, file)
+            for (importSpec in file.imports) {
+                importSpec.EnableAttr(Attribute.FROM_COMMON_PART)
+            }
+        }
+        let featureTable = reader.OffsetField(fileInfo, 10)
+        if (featureTable >= 0) {
+            file.feature = LoadFeaturesDirective(reader, featureTable)
+        }
+        file.EnableAttr(Attribute.FROM_COMMON_PART)
+        file.EnableAttr(Attribute.COMMON)
+        file.isCommon = true
+        file.begin = LoadFlatPosition(reader, reader.TableField(fileInfo, 6))
+        file.end = LoadFlatPosition(reader, reader.TableField(fileInfo, 8))
+        filesByIndex[UInt32(fileIndex + 1)] = file
+        if (!idToFileMap.contains(fileID)) {
+            idToFileMap[fileID] = file
+        }
+        return file
+    }
+
+    private func LoadFeaturesDirective(reader: CjoFlatBuffer, raw: Int64): Option<FeaturesDirective> {
+        let ftrDirective = FeaturesDirective()
+        let featuresSet = FeaturesSet()
+        let rawFeaturesSet = reader.OffsetField(raw, 4)
+        let rawFeatures = reader.VectorField(rawFeaturesSet, 4)
+        var idx: Int64 = 0
+        while (idx < reader.VectorLength(rawFeatures)) {
+            let rawFeature = reader.VectorOffsetElement(rawFeatures, idx)
+            let feature = FeatureId()
+            let identifiers = reader.VectorField(rawFeature, 4)
+            var identifierIdx: Int64 = 0
+            while (identifierIdx < reader.VectorLength(identifiers)) {
+                feature.identifiers.add(Identifier(reader.StringAt(reader.VectorOffsetElement(identifiers, identifierIdx))))
+                identifierIdx++
+            }
+            featuresSet.content.add(feature)
+            idx++
+        }
+        ftrDirective.featuresSet = Some(featuresSet)
+        return Some(ftrDirective)
+    }
+
+    private func ReportPackageMismatch(node: Package, expectedPackageName: String, actualPackageName: String): Unit {
+        var range = MakeRange(node.begin, node.end)
+        if (range.HasZero()) {
+            if (node.files.isEmpty()) {
+                throw IllegalStateException("There are no files in the current package")
+            }
+            let file = node.files[0]
+            range = MakeRange(file.begin, file.end)
+        }
+        diag.AsBasicDiagnosticEngine().DiagnoseRefactor(DiagKindRefactor.module_common_cjo_wrong_package, range,
+            arguments: [actualPackageName, expectedPackageName]).Emit()
+    }
+
+    private func CollectFeaturesFromPackage(sourcePkg: Package): TreeSet<String> {
+        let features = TreeSet<String>()
+        for (feature in sourcePkg.files[0].GetFeatures()) {
+            features.add(feature)
+        }
+        return features
+    }
+
+    private func ValidateCommonSpecificFeatureSetsRelations(
+        commonFile: File,
+        specificFeatures: TreeSet<String>,
+        sourcePkg: Package
+    ): Unit {
+        let parentFeatures = TreeSet<String>()
+        for (feature in commonFile.GetFeatures()) {
+            parentFeatures.add(feature)
+        }
+        let difference = ArrayList<String>()
+        for (feature in parentFeatures) {
+            if (!specificFeatures.contains(feature)) {
+                difference.add("'" + feature + "'")
+            }
+        }
+        if (!difference.isEmpty()) {
+            let diagBuilder = diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
+                DiagKindRefactor.feature_is_not_subset_of_child_set,
+                commonFile.begin,
+                arguments: [commonFile.GetFullPackageName(), commonFile.filePath])
+            diagBuilder.AddNote("Extra feature from common part file: " + JoinStrings(difference.toArray(), " "))
+            let childFile = sourcePkg.files[0]
+            if (let Some(featureDirective) <- childFile.feature) {
+                diagBuilder.AddNote(MakeRange(featureDirective.begin, featureDirective.end),
+                    "Conflicting specific feature set:")
+            }
+            diagBuilder.Emit()
+        }
+    }
+
+    private func ValidateOptions(reader: CjoFlatBuffer, opts: GlobalOptions): Bool {
+        let root = reader.RootTable()
+        let optionsTable = reader.OffsetField(root, 32)
+        if (optionsTable < 0) {
+            diag.DiagnoseRefactor(DiagKindRefactor.module_common_cjo_no_options, DEFAULT_POSITION)
+            return true
+        }
+        var failed = false
+        let loadedDebugOption = reader.U8Field(optionsTable, 6, 0u8) != 0u8
+        if (loadedDebugOption != opts.enableCompileDebug) {
+            let before = if (loadedDebugOption) { "enabled" } else { "disabled" }
+            let after = if (opts.enableCompileDebug) { "enabled" } else { "disabled" }
+            diag.DiagnoseRefactor(DiagKindRefactor.module_common_cjo_debug_mismatch, DEFAULT_POSITION,
+                arguments: [before, after])
+            failed = true
+        }
+        let cjoOptLevel = match (reader.U8Field(optionsTable, 4, 0u8)) {
+            case 0u8 => OptimizationLevel.O0
+            case 1u8 => OptimizationLevel.O1
+            case 2u8 => OptimizationLevel.O2
+            case 3u8 => OptimizationLevel.O3
+            case 4u8 => OptimizationLevel.Os
+            case 5u8 => OptimizationLevel.Oz
+            case _ => throw IllegalStateException("Unexpected optimization level")
+        }
+        if (cjoOptLevel != opts.optimizationLevel) {
+            diag.DiagnoseRefactor(DiagKindRefactor.module_common_cjo_opt_mismatch, DEFAULT_POSITION,
+                arguments: [OptimizationLevelToString(cjoOptLevel), OptimizationLevelToString(opts.optimizationLevel)])
+            failed = true
+        }
+        return !failed
+    }
+
+    private func OptimizationLevelToString(level: OptimizationLevel): String {
+        return match (level) {
+            case OptimizationLevel.O0 => "O0"
+            case OptimizationLevel.O1 => "O1"
+            case OptimizationLevel.O2 => "O2"
+            case OptimizationLevel.O3 => "O3"
+            case OptimizationLevel.Os => "Os"
+            case OptimizationLevel.Oz => "Oz"
+        }
     }
 
     private func PreLoadImportedPackageNode(data: Array<UInt8>): Unit {
@@ -4692,6 +4909,7 @@ public class ImportManager {
         HashMap<Node, (String, Bool)>()
     private let visitedPkgs: HashSet<String> = HashSet<String>()
     private let typeAliasCache: HashMap<Int64, Ty> = HashMap<Int64, Ty>()
+    private let commonPartLoaders: ArrayList<CjoSignatureMaterializer> = ArrayList<CjoSignatureMaterializer>()
     private let importedDeclsMap: HashMap<String, ArrayList<Decl>> = HashMap<String, ArrayList<Decl>>()
     private let fileImportedDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
@@ -4792,6 +5010,7 @@ public class ImportManager {
         packageMembersVisited.clear()
         importedPackageNameMap.clear()
         visitedPkgs.clear()
+        commonPartLoaders.clear()
         importedDeclsMap.clear()
         fileImportedDeclsMap.clear()
         fileUsedMacroDeclsMap.clear()
@@ -5829,6 +6048,9 @@ public class ImportManager {
         var success = true
         for (pkg in packages) {
             curPackage = Some(pkg)
+            if (!LoadFilesOfCommonPart(pkg)) {
+                return false
+            }
             success = ResolveImportedPackageHeaders(pkg, isRecursive: false) && success
             pkg.ClearAllDependentStdPkgs()
             for (cjoPath in stdDepsMap.keys()) {
@@ -5885,6 +6107,19 @@ public class ImportManager {
         return false
     }
 
+    private func LoadFilesOfCommonPart(pkg: Package): Bool {
+        if (!globalOptions.IsCompilingCJMPSpecific() && globalOptions.commonPartCjos.isEmpty()) {
+            return true
+        }
+        EraseIf<File>(pkg.files, { file: File => file.TestAttr(Attribute.FROM_COMMON_PART) })
+        for (commonLoader in GetCommonPartCjos(pkg.fullPackageName)) {
+            if (!commonLoader.PreloadCommonPartOfPackage(pkg, globalOptions)) {
+                return false
+            }
+        }
+        return true
+    }
+
     private func LoadPackageDeclsOnDemand(packages: ArrayList<Package>, fromLsp!: Bool = false): Unit {
         let queue = ArrayList<CjoPackageInfo>()
         let loaders = ArrayList<CjoSignatureMaterializer>()
@@ -5902,6 +6137,14 @@ public class ImportManager {
                             queue.add(info)
                         }
                     }
+                }
+            }
+        }
+        for (pkg in packages) {
+            if (globalOptions.IsCompilingCJMPSpecific() || !globalOptions.commonPartCjos.isEmpty()) {
+                for (commonLoader in GetCommonPartCjos(pkg.fullPackageName)) {
+                    commonLoader.LoadPackageDecls()
+                    loaders.add(commonLoader)
                 }
             }
         }
@@ -5934,6 +6177,37 @@ public class ImportManager {
         if (!fromLsp) {
             SubstituteImportedTypeAliasTy(packages, globalOptions)
         }
+    }
+
+    private func GetCommonPartCjos(expectedName: String): ArrayList<CjoSignatureMaterializer> {
+        if (!commonPartLoaders.isEmpty()) {
+            return commonPartLoaders
+        }
+        if (globalOptions.commonPartCjos.isEmpty()) {
+            diag.DiagnoseRefactor(DiagKindRefactor.module_common_part_path_is_required, DEFAULT_POSITION)
+        }
+        for (commonPartCjo in globalOptions.commonPartCjos) {
+            if (let Some(loader) <- ReadCjo(expectedName, commonPartCjo)) {
+                commonPartLoaders.add(loader)
+            }
+        }
+        return commonPartLoaders
+    }
+
+    private func ReadCjo(fullPackageName: String, cjoPath: String): Option<CjoSignatureMaterializer> {
+        let (ok, data, reason) = FileUtil.ReadBinaryFileToBuffer(cjoPath)
+        if (!ok) {
+            diag.DiagnoseRefactor(DiagKindRefactor.module_read_file_to_buffer_failed, DEFAULT_POSITION,
+                arguments: [cjoPath, reason])
+            return None
+        }
+        let pkg = CreatePackage(fullPackageName)
+        let filesByIndex = HashMap<UInt32, File>()
+        let idToFileMap = HashMap<UInt64, File>()
+        let materializer = CjoSignatureMaterializer(fullPackageName, pkg, filesByIndex, idToFileMap, importedPackages,
+            packageDecls, exportIdDeclMaps, diag, typeManager, importSrcCode: importSrcCode,
+            deserializingCommon: true, canInline: canInlineImportedSource, data: Some(data))
+        return Some(materializer)
     }
 
     private func ResolveImportedPackageHeaders(pkg: Package, isRecursive!: Bool = false): Bool {
