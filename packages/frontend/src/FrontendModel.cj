@@ -6223,12 +6223,12 @@ public class ImportManager {
     private func ResolveImportedPackageForFile(file: File, isRecursive!: Bool = false): Bool {
         var success = true
         if (let None <- file.curPackage) {
-            return true
+            throw IllegalStateException("ResolveImportedPackageForFile requires file.curPackage")
         }
         let curPkg = file.curPackage.getOrThrow()
         let isMacroRelated = curPkg.isMacroPackage || IsMacroRelatedPackageName(curPkg.fullPackageName)
         if (let None <- curPackage) {
-            return true
+            throw IllegalStateException("ResolveImportedPackageForFile requires curPackage")
         }
         let rootPkg = curPackage.getOrThrow()
         let relation = GetFrontendPackageRelation(rootPkg.fullPackageName, curPkg.fullPackageName)
@@ -6242,6 +6242,10 @@ public class ImportManager {
             let cjoPath = packageAndPath[1]
             SaveDepPkgCjoPath(fullPackageName, cjoPath)
             if (let Some(importPkg) <- GetPackage(fullPackageName)) {
+                if (importPkg.TestAttr(Attribute.IMPORTED) && !importPkg.TestAttr(Attribute.TOOL_ADD) &&
+                    cjoPath.isEmpty()) {
+                    throw IllegalStateException("already-parsed imported package has empty cjo path")
+                }
                 if (!importPkg.TestAttr(Attribute.IMPORTED) && curPkg.TestAttr(Attribute.IMPORTED)) {
                     success = false
                     diag.DiagnoseRefactor(DiagKindRefactor.module_same_name_with_indirect_dependent_pkg,
