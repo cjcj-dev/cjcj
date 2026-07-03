@@ -310,6 +310,8 @@ foreign {
     func LLVMTypeOf(value: LLVMValueRef): LLVMTypeRef
     func LLVMGetTypeContext(ty: LLVMTypeRef): LLVMContextRef
     func LLVMGetValueContext(value: LLVMValueRef): LLVMContextRef
+    func LLVMIsAMDNode(value: LLVMValueRef): LLVMValueRef
+    func LLVMIsAMDString(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAGlobalVariable(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAFunction(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAArgument(value: LLVMValueRef): LLVMValueRef

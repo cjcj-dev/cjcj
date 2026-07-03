@@ -95,7 +95,7 @@ public func LLVMValueToMetadata(value: LLVMValueRef): LLVMMetadataRef {
 }
 
 public func LLVMGetMDStringValue(value: LLVMValueRef): Option<String> {
-    if (value.isNull()) {
+    if (value.isNull() || unsafe { LLVMIsAMDString(value) }.isNull()) {
         return None
     }
     var result: Option<String> = None
@@ -110,7 +110,7 @@ public func LLVMGetMDStringValue(value: LLVMValueRef): Option<String> {
 
 public func LLVMGetMDNodeOperands(value: LLVMValueRef): ArrayList<LLVMValueRef> {
     let operands = ArrayList<LLVMValueRef>()
-    if (value.isNull()) {
+    if (value.isNull() || unsafe { LLVMIsAMDNode(value) }.isNull()) {
         return operands
     }
     let count = unsafe { LLVMGetMDNodeNumOperands(value) }

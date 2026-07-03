@@ -4859,9 +4859,18 @@ public class Translator {
     }
 
     private func TranslateEnumCtorRef(constructor: AstDecl, astTy: AstTy): Value {
-        let args = ArrayList<Value>()
-        args.add(CreateEnumSelectorConstant(constructor))
-        return RequireResult(builder.CreateTuple(chirTy.TranslateType(astTy), args, CurrentBlock()))
+        let enumType = chirTy.TranslateType(astTy)
+        let outer = constructor.outerDecl ??
+            throw IllegalStateException("faithful AST2CHIR enum constructor has no outer enum")
+        let enumDecl = (outer as AstEnumDecl) ??
+            throw IllegalStateException("faithful AST2CHIR enum constructor outer is not enum")
+        let selector = CreateEnumSelectorConstant(constructor)
+        if (enumDecl.hasArguments) {
+            let args = ArrayList<Value>()
+            args.add(selector)
+            return RequireResult(builder.CreateTuple(enumType, args, CurrentBlock()))
+        }
+        return RequireResult(builder.CreateTypeCast(enumType, selector, CurrentBlock()))
     }
 
     // The instantiated this-type for a member call, taken from the base expression's (sema-resolved) type,

@@ -10,7 +10,7 @@ import cangjie_compiler::chir.TransformToConcrete
 import cangjie_compiler::chir.TransformToGeneric
 import cangjie_compiler::chir.UnBox
 import cangjie_compiler::chir.UnBoxToRef
-import cangjie_compiler::utils.OverflowStrategy
+import cangjie_compiler::utils.{OverflowStrategy, StaticCast}
 
 public func EmitTypeCastExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (chirExpr.GetNumOfOperands() == 0) {
@@ -161,6 +161,13 @@ public func CastValueToType(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, so
     }
     if (sourceTy.IsEnum() && targetTy.IsTuple()) {
         return sourceValue
+    }
+    if ((targetTy.IsEnum() && sourceTy.IsInteger()) || (targetTy.IsInteger() && sourceTy.IsEnum())) {
+        let enumTy = if (targetTy.IsEnum()) { targetTy } else { sourceTy }
+        if (StaticCast<CGEnumType>(CGType.GetOrCreate(irBuilder.GetCGModule(), enumTy)).IsTrivial()) {
+            return sourceValue
+        }
+        return irBuilder.CreateNullValue(targetTy)
     }
     if (targetTy.IsGeneric()) {
         let sourceCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), sourceTy.StripAllRefs())

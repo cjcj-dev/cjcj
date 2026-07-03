@@ -899,8 +899,59 @@ public class CGModule {
     }
 
     public func ClearLinkNameUsedInMeta(): Unit { linkNameUsedInMeta.clear() }
-    public func IsLinkNameUsedInMeta(linkageName: String): Bool { return linkNameUsedInMeta.contains(linkageName) }
-    public func GetLinkNamesUsedInMeta(): HashSet<String> { return linkNameUsedInMeta }
+    public func IsLinkNameUsedInMeta(linkageName: String): Bool {
+        if (linkNameUsedInMeta.isEmpty()) {
+            CollectLinkNameUsedInMeta()
+        }
+        return linkNameUsedInMeta.contains(linkageName)
+    }
+    public func GetLinkNamesUsedInMeta(): HashSet<String> {
+        if (linkNameUsedInMeta.isEmpty()) {
+            CollectLinkNameUsedInMeta()
+        }
+        return linkNameUsedInMeta
+    }
+
+    private func CollectLinkNameUsedInMeta(): Unit {
+        let moduleHandle = GetLLVMModule() ?? return
+        let metaTypes: Array<String> = [
+            METADATA_PKG,
+            METADATA_TYPES,
+            METADATA_TYPETEMPLATES,
+            METADATA_PRIMITIVE_TYPES,
+            METADATA_PRIMITIVE_TYPETEMPLATES,
+            METADATA_GLOBAL_VAR,
+            METADATA_FUNCTIONS]
+        for (metaType in metaTypes) {
+            CollectLinkNameUsedInMeta(LLVMGetNamedMetadataOperandValues(moduleHandle, metaType))
+        }
+    }
+
+    private func CollectLinkNameUsedInMeta(operands: ArrayList<LLVMValueRef>): Unit {
+        let visited = HashSet<UIntNative>()
+        let queue = ArrayList<LLVMValueRef>()
+        for (operand in operands) {
+            if (!operand.isNull()) {
+                visited.add(operand.toUIntNative())
+                queue.add(operand)
+            }
+        }
+        var idx: Int64 = 0
+        while (idx < queue.size) {
+            let front = queue[idx]
+            idx++
+            if (let Some(metaString) <- LLVMGetMDStringValue(front)) {
+                linkNameUsedInMeta.add(metaString)
+                continue
+            }
+            for (operand in LLVMGetMDNodeOperands(front)) {
+                if (!operand.isNull() && !visited.contains(operand.toUIntNative())) {
+                    visited.add(operand.toUIntNative())
+                    queue.add(operand)
+                }
+            }
+        }
+    }
     public func AddNonExternalExtensionDef(extensionDef: LLVMValueRef): Unit { nonExternalExtensionDefs.add(extensionDef) }
     public func AddExternalExtensionDef(extensionDef: LLVMValueRef): Unit { externalExtensionDefs.add(extensionDef) }
     public func GetNonExternalExtensionDefs(): ArrayList<LLVMValueRef> { return nonExternalExtensionDefs }
