@@ -77,6 +77,25 @@ public func DiagWrongNumberOfArguments(diag: BasicDiagnosticEngine, ce: CallExpr
     DiagWrongNumberOfArgumentsCommon(diag, ce, optionParamTys.toArray(), None)
 }
 
+public func DiagWrongNumberOfArguments(diag: BasicDiagnosticEngine, ce: CallExpr, fd: FuncDecl): Unit {
+    if (!ce.ShouldDiagnose(allowCompilerAdd: true)) {
+        return
+    }
+    CJC_NULLPTR_CHECK(fd.funcBody)
+    let body = fd.funcBody.getOrThrow()
+    CJC_ASSERT(!body.paramLists.isEmpty())
+    let params = body.paramLists[0].params
+    let optionParamTys = ArrayList<Option<Ty>>()
+    for (param in params) {
+        if (let Some(typeNode) <- param.typeNode) {
+            optionParamTys.add(typeNode.GetTy())
+        } else {
+            optionParamTys.add(param.GetTy())
+        }
+    }
+    DiagWrongNumberOfArgumentsCommon(diag, ce, optionParamTys.toArray(), Some(fd))
+}
+
 public func MakeRangeForDeclIdentifier(decl: Decl): BasicRange {
     if (let Some(funcDecl) <- (decl as FuncDecl)) {
         if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {

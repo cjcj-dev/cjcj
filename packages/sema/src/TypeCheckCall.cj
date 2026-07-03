@@ -321,7 +321,9 @@ private func CheckArgsWithParamName(diag: Option<BasicDiagnosticEngine>, ce: Cal
     for (entry in hasTy) {
         if (!entry) {
             if (let Some(diagValue) <- diag) {
-                DiagOld(diagValue, ce, BasicDiagKind.sema_parameters_and_arguments_mismatch)
+                if (let None <- ce.sourceExpr) {
+                    DiagWrongNumberOfArguments(diagValue, ce, fd)
+                }
             }
             return false
         }
