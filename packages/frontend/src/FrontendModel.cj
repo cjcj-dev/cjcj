@@ -18,6 +18,7 @@ import cangjie_compiler::option.enumIndex
 public import cangjie_compiler::mangle.BaseMangler
 import cangjie_compiler::sema.GenericInstantiation.GenericInstantiationManagerImpl as RealGenericInstantiationManagerImpl
 import cangjie_compiler::sema.TypeManager as FaithfulSemaTypeManager
+import cangjie_compiler::utils.AST_PACKAGE_NAME
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.ProfileRecorder
 import cangjie_compiler::utils.STANDARD_LIBS
@@ -748,21 +749,21 @@ private class CjoSignatureMaterializer {
     }
 
     public func Materialize(data: Array<UInt8>): Unit {
-        MaterializeHeader(data)
+        let _ = LoadPackageDependencies(data)
         LoadPackageDecls()
         LoadRefs()
     }
 
-    private func MaterializeHeader(data: Array<UInt8>): Unit {
-        LoadSerializedDeclRecords(data)
-        MaterializeSerializedImports()
+    public func LoadPackageDependencies(data: Array<UInt8>): Bool {
+        MaterializeHeader(data)
+        return flatAllTypes >= 0 && flatAllDecls >= 0
     }
 
-    private func LoadPackageDecls(): Unit {
+    public func LoadPackageDecls(): Unit {
         MaterializeSerializedDecls()
     }
 
-    private func LoadRefs(): Unit {
+    public func LoadRefs(): Unit {
         if ((let None <- flat) || flatAllDecls < 0) {
             return
         }
@@ -789,6 +790,32 @@ private class CjoSignatureMaterializer {
         for ((_, expr2) in allLoadedExprs) {
             PostLoadFlatReference(expr2)
         }
+    }
+
+    public func GetImportedPackageName(): String {
+        return packageName
+    }
+
+    public func GetDependentPackageNames(): ArrayList<String> {
+        let dep = ArrayList<String>()
+        if ((let None <- flat) || flatImports < 0) {
+            return dep
+        }
+        let reader = flat.getOrThrow()
+        var idx: Int64 = 0
+        while (idx < reader.VectorLength(flatImports)) {
+            let importItem = reader.StringAt(reader.VectorOffsetElement(flatImports, idx))
+            if (importItem != packageName) {
+                dep.add(importItem)
+            }
+            idx++
+        }
+        return dep
+    }
+
+    private func MaterializeHeader(data: Array<UInt8>): Unit {
+        LoadSerializedDeclRecords(data)
+        MaterializeSerializedImports()
     }
 
     private func LoadFlatDeclRefs(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
@@ -1286,6 +1313,26 @@ private class CjoSignatureMaterializer {
         let root = reader.RootTable()
         if (root < 0 || reader.StringField(root, 8) != packageName) {
             return
+        }
+        pkg.isMacroPackage = reader.U8Field(root, 24, 0u8) != 0u8
+        let packageAccess = reader.U8Field(root, 26, 0u8)
+        pkg.accessible = if (packageAccess == 0u8) {
+            AccessLevel.PUBLIC
+        } else if (packageAccess == 1u8) {
+            AccessLevel.PROTECTED
+        } else {
+            AccessLevel.INTERNAL
+        }
+        let dependentStdPkgs = reader.VectorField(root, 34)
+        if (dependentStdPkgs >= 0) {
+            var depIdx: Int64 = 0
+            while (depIdx < reader.VectorLength(dependentStdPkgs)) {
+                let depStdPkg = reader.StringAt(reader.VectorOffsetElement(dependentStdPkgs, depIdx))
+                if (!depStdPkg.isEmpty()) {
+                    pkg.AddDependentStdPkg(depStdPkg)
+                }
+                depIdx++
+            }
         }
         flatAllTypes = reader.VectorField(root, 18)
         flatAllDecls = reader.VectorField(root, 20)
@@ -4343,6 +4390,7 @@ private class StdDepEntry {
 }
 
 private class CjoPackageInfo {
+    public var loader: Option<CjoSignatureMaterializer> = None
     public var pkg: Package
     public var pkgDecl: PackageDecl
     public var onlyUsedByMacro: Bool = false
@@ -4350,6 +4398,12 @@ private class CjoPackageInfo {
     public init(pkg: Package) {
         this.pkg = pkg
         this.pkgDecl = PackageDecl(pkg)
+    }
+
+    public init(pkg: Package, loader: CjoSignatureMaterializer) {
+        this.pkg = pkg
+        this.pkgDecl = PackageDecl(pkg)
+        this.loader = Some(loader)
     }
 }
 
@@ -4583,6 +4637,7 @@ public class ImportManager {
     private let packageNameMap: HashMap<String, CjoPackageInfo> = HashMap<String, CjoPackageInfo>()
     private var dependencyGraph: Option<DependencyGraph> = None
     private let loadingPackages: HashSet<String> = HashSet<String>()
+    private let loadedPackages: HashSet<String> = HashSet<String>()
     private let sourcePackagesForMembers: ArrayList<Package> = ArrayList<Package>()
     private let packageMembers: HashMap<String, HashMap<String, ArrayList<Decl>>> =
         HashMap<String, HashMap<String, ArrayList<Decl>>>()
@@ -4684,6 +4739,7 @@ public class ImportManager {
         packageNameMap.clear()
         dependencyGraph.getOrThrow().Clear()
         loadingPackages.clear()
+        loadedPackages.clear()
         sourcePackagesForMembers.clear()
         packageMembers.clear()
         packageMembersVisited.clear()
@@ -4706,7 +4762,6 @@ public class ImportManager {
         for (pkg in pkgs) {
             dependencyGraph.getOrThrow().AddDependenciesForPackage(pkg)
         }
-        SubstituteImportedTypeAliasTy(pkgs, opts)
         for (pkg in pkgs) {
             RebuildPackageMembers(pkg.fullPackageName)
         }
@@ -4733,9 +4788,15 @@ public class ImportManager {
     public func DeleteASTLoaders(): Unit {}
     public func ClearPackageBCHIRCache(): Unit {}
     public func ClearForReBuildIndex(): Unit {
+        for (packageName in packageNameMap.keys()) {
+            if (let Some(info) <- packageNameMap.get(packageName)) {
+                info.loader = None
+            }
+        }
         packageNameMap.clear()
         importedPackageNameMap.clear()
         loadingPackages.clear()
+        loadedPackages.clear()
         importedPackages.clear()
         hasBuildIndex = false
     }
@@ -5025,7 +5086,7 @@ public class ImportManager {
                         }
                     }
                 }
-            } else if (IsPackageImport(importSpec, targetPackageName)) {
+            } else if (IsImportPackage(importSpec)) {
                 let importedName = if (importSpec.IsImportAlias()) {
                     importSpec.content.aliasName.Val()
                 } else {
@@ -5072,18 +5133,6 @@ public class ImportManager {
             fileImportedDeclsMap[fileHash] = HashMap<String, ArrayList<Decl>>()
         }
         return fileImportedDeclsMap.get(fileHash).getOrThrow()
-    }
-
-    private func IsPackageImport(importSpec: ImportSpec, targetPackageName: String): Bool {
-        if (importSpec.IsImportAll() || importSpec.content.isDecl) {
-            return false
-        }
-        for (pkg in importedPackages) {
-            if (pkg.fullPackageName == targetPackageName) {
-                return true
-            }
-        }
-        return false
     }
 
     private func IsVisibleImportedDecl(importLevel: AccessLevel, relation: FrontendPackageRelation, decl: Decl): Bool {
@@ -5585,7 +5634,100 @@ public class ImportManager {
                 }
             }
         }
+        LoadPackageDeclsOnDemand(packages)
         return success
+    }
+
+    private func AddLoadedPackages(pkgName: String): Bool {
+        if (loadedPackages.contains(pkgName)) {
+            return false
+        }
+        loadedPackages.add(pkgName)
+        return true
+    }
+
+    private func AlreadyLoaded(pkgName: String): Bool {
+        return loadedPackages.contains(pkgName)
+    }
+
+    private func IsReExportBy(srcPackage: String, reExportPackage: String): Bool {
+        if (let Some(info) <- GetPackageInfo(srcPackage)) {
+            for (file in info.pkg.files) {
+                for (importSpec in file.imports) {
+                    if (!importSpec.IsReExport()) {
+                        continue
+                    }
+                    if (GetPackageNameByImport(importSpec) == reExportPackage) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private func NeedCollectDependency(curName: String, isCurMacro: Bool, depName: String): Bool {
+        if (depName == curName || AlreadyLoaded(depName)) {
+            return false
+        }
+        if (let Some(depPd) <- GetPackageDecl(depName)) {
+            let isDepMacro = depPd.srcPackage.isMacroPackage
+            if (!isCurMacro || isDepMacro || depName == AST_PACKAGE_NAME || IsReExportBy(curName, depName)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func LoadPackageDeclsOnDemand(packages: ArrayList<Package>, fromLsp!: Bool = false): Unit {
+        let queue = ArrayList<CjoPackageInfo>()
+        let loaders = ArrayList<CjoSignatureMaterializer>()
+        for (pkg in packages) {
+            if (fromLsp) {
+                if (let Some(info) <- GetPackageInfo(pkg.fullPackageName)) {
+                    queue.add(info)
+                }
+            }
+            for (file in pkg.files) {
+                for (importSpec in file.imports) {
+                    let pkgName = GetPackageNameByImport(importSpec)
+                    if (!pkgName.isEmpty()) {
+                        if (let Some(info) <- GetPackageInfo(pkgName)) {
+                            queue.add(info)
+                        }
+                    }
+                }
+            }
+        }
+        var head: Int64 = 0
+        while (head < queue.size) {
+            let cur = queue[head]
+            head++
+            if (let None <- cur.loader) {
+                continue
+            }
+            let loader = cur.loader.getOrThrow()
+            let pkgName = loader.GetImportedPackageName()
+            if (!AddLoadedPackages(pkgName)) {
+                continue
+            }
+            loaders.add(loader)
+            loader.LoadPackageDecls()
+            let isCurMacro = cur.pkg.isMacroPackage
+            for (depPkg in loader.GetDependentPackageNames()) {
+                if (NeedCollectDependency(pkgName, isCurMacro, depPkg)) {
+                    if (let Some(depInfo) <- GetPackageInfo(depPkg)) {
+                        queue.add(depInfo)
+                    }
+                }
+            }
+        }
+        for (loader2 in loaders) {
+            loader2.LoadRefs()
+        }
+        if (!fromLsp) {
+            SubstituteImportedTypeAliasTy(packages, globalOptions)
+        }
     }
 
     private func ResolveImportedPackageHeaders(pkg: Package, isRecursive!: Bool = false): Bool {
@@ -5703,22 +5845,20 @@ public class ImportManager {
             loadingPackages.remove(fullPackageName)
             return false
         }
-        if (!LoadSerializedImportDependencies(data, fullPackageName)) {
-            loadingPackages.remove(fullPackageName)
-            return false
-        }
-        for (depStdPkg in ReadAllDependentStdPkgs(data)) {
-            let depCjoPath = FindAndSaveDepStdCjoPath(depStdPkg)
-            HandleStdPackage(depStdPkg, depCjoPath, isRecursive: true)
-        }
         let pkg = CreatePackage(fullPackageName)
         pkg.EnableAttr(Attribute.IMPORTED)
         let (filesByIndex, idToFileMap) = MaterializeCjoFiles(data, pkg)
         let materializer = CjoSignatureMaterializer(fullPackageName, pkg, filesByIndex, idToFileMap, importedPackages,
             packageDecls, exportIdDeclMaps, diag, typeManager, importSrcCode: importSrcCode,
             canInline: canInlineImportedSource)
-        materializer.Materialize(data)
-        AddImportedPackageIfMissing(pkg)
+        if (!materializer.LoadPackageDependencies(data)) {
+            loadingPackages.remove(fullPackageName)
+            return false
+        }
+        let info = CjoPackageInfo(pkg, materializer)
+        packageNameMap[fullPackageName] = info
+        packageDecls[fullPackageName] = info.pkgDecl
+        importedPackages.add(pkg)
         loadingPackages.remove(fullPackageName)
         return true
     }
@@ -5780,34 +5920,6 @@ public class ImportManager {
         file.curPackage = Some(pkg)
         pkg.files.add(file)
         return file
-    }
-
-    private func LoadSerializedImportDependencies(data: Array<UInt8>, ownerPackageName: String): Bool {
-        let reader = CjoFlatBuffer(data)
-        let root = reader.RootTable()
-        if (root < 0) {
-            return true
-        }
-        let flatImports = reader.VectorField(root, 12)
-        if (flatImports < 0) {
-            return true
-        }
-        var idx: Int64 = 0
-        while (idx < reader.VectorLength(flatImports)) {
-            let depName = reader.StringAt(reader.VectorOffsetElement(flatImports, idx))
-            if (!depName.isEmpty() && depName != ownerPackageName && (let None <- GetPackage(depName)) &&
-                !loadingPackages.contains(depName)) {
-                let depPath = FileUtil.FindSerializationFile(depName, ".cjo", searchPath.toArray())
-                if (!depPath.isEmpty()) {
-                    HandleStdPackage(depName, depPath, isRecursive: true)
-                    if (!LoadImportedPackageFromCjo(depName, depPath)) {
-                        return false
-                    }
-                }
-            }
-            idx++
-        }
-        return true
     }
 
     private func ReadAllDependentStdPkgs(data: Array<UInt8>): ArrayList<String> {
