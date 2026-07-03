@@ -72,8 +72,9 @@ class EngineTest {
         @Expect(DiagKindIndex(DiagKind.sema_diag_end), 287)
     }
 
-    // PORT-DEFERRED: Handle1 and ErrorMessageTest.MassageTest depend on the parser/lexer packages, but
-    // package basic cannot depend on parse/lex without creating a package cycle in this workspace.
+    // PORT-DEFERRED: Handle1 depends on the parser/lexer packages, but package basic cannot depend on
+    // parse/lex without creating a package cycle in this workspace. ErrorMessageTest.MassageTest is ported
+    // in compiler_unittest/ErrorMessage_test.cj.
     // PORT-DEFERRED: apiTest, apiTest2, and apiTest4 exercise the old C++ emitter/node overload surface.
     // The selfhost DiagnosticEmitter renders to String and has no AST Node overload equivalent in basic.
 }
