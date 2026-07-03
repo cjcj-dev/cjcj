@@ -642,7 +642,14 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
     if (let Some(value) <- (expr as SubscriptExpr)) { return SynSubscriptExpr(typeManager, value) }
     if (let Some(value) <- (expr as RangeExpr)) { return SynRangeExpr(typeManager, value) }
     if (let Some(value) <- (expr as IsExpr)) { return SynIsExpr(typeManager, value) }
-    if (let Some(value) <- (expr as AsExpr)) { return SynAsExpr(typeManager, value, None) }
+    if (let Some(value) <- (expr as AsExpr)) {
+        if (let Some(realCtx) <- ctx) {
+            if (let Some(optionDecl) <- GetCoreDecl(realCtx, "Option")) {
+                return SynAsExpr(typeManager, value, optionDecl as EnumDecl, diag: diag)
+            }
+        }
+        return SynAsExpr(typeManager, value, None, diag: diag)
+    }
     if (let Some(value) <- (expr as IncOrDecExpr)) {
         return SynIncOrDecExpr(value,
             { operand: Expr => SynExprShallow(typeManager, operand, diag: diag) },
@@ -699,8 +706,15 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     if (let Some(value) <- (expr as IfAvailableExpr)) { return ChkIfAvailableExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as SubscriptExpr)) { return ChkSubscriptExpr(typeManager, target, value, ctx: ctx) }
     if (let Some(value) <- (expr as RangeExpr)) { return ChkRangeExpr(typeManager, target, value) }
-    if (let Some(value) <- (expr as IsExpr)) { return ChkIsExpr(typeManager, target, value) }
-    if (let Some(value) <- (expr as AsExpr)) { return ChkAsExpr(typeManager, target, value, None) }
+    if (let Some(value) <- (expr as IsExpr)) { return ChkIsExpr(typeManager, target, value, diag: diag) }
+    if (let Some(value) <- (expr as AsExpr)) {
+        if (let Some(realCtx) <- ctx) {
+            if (let Some(optionDecl) <- GetCoreDecl(realCtx, "Option")) {
+                return ChkAsExpr(typeManager, target, value, optionDecl as EnumDecl, diag: diag)
+            }
+        }
+        return ChkAsExpr(typeManager, target, value, None, diag: diag)
+    }
     if (let Some(value) <- (expr as IncOrDecExpr)) {
         return ChkIncOrDecExpr(typeManager, target, value,
             { operand: Expr => SynExprShallow(typeManager, operand, diag: diag) },

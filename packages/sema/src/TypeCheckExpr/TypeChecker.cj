@@ -3832,14 +3832,16 @@ public class TypeChecker {
             if (let Some(leftExpr) <- isExpr.leftExpr) {
                 let _ = Synthesize(ctx, leftExpr)
             }
-            return FinishSynthesize(ctx, isExpr, SynExprShallow(impl.typeManager, isExpr, diag: impl.diag))
+            return FinishSynthesize(ctx, isExpr, SynExprShallow(impl.typeManager, isExpr, ctx: Some(ctx),
+                diag: impl.diag))
         }
         if (let Some(asExpr) <- (expr as AsExpr)) {
             SynthesizeTypeNode(ctx, asExpr.asType)
             if (let Some(leftExpr2) <- asExpr.leftExpr) {
                 let _ = Synthesize(ctx, leftExpr2)
             }
-            return FinishSynthesize(ctx, asExpr, SynAsExpr(impl.typeManager, asExpr, LookupCoreEnumDecl(ctx, "Option")))
+            return FinishSynthesize(ctx, asExpr, SynAsExpr(impl.typeManager, asExpr,
+                LookupCoreEnumDecl(ctx, "Option"), diag: impl.diag))
         }
         if (let Some(optionalChain) <- (expr as OptionalChainExpr)) {
             return FinishSynthesize(ctx, optionalChain, SynOptionalChainExpr(impl.typeManager, optionalChain,
@@ -4321,7 +4323,8 @@ public class TypeChecker {
             if (let Some(leftExpr) <- asExpr.leftExpr) {
                 let _ = Synthesize(ctx, leftExpr)
             }
-            return FinishCheck(ctx, asExpr, ChkAsExpr(impl.typeManager, target, asExpr, LookupCoreEnumDecl(ctx, "Option")))
+            return FinishCheck(ctx, asExpr, ChkAsExpr(impl.typeManager, target, asExpr,
+                LookupCoreEnumDecl(ctx, "Option"), diag: impl.diag))
         }
         if (let Some(optionalChain) <- (expr as OptionalChainExpr)) {
             return FinishCheck(ctx, optionalChain, ChkOptionalChainExpr(impl.typeManager, target, optionalChain,
