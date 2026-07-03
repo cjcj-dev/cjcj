@@ -53,10 +53,9 @@ extend ParserImpl {
             }
             if (curIdent.IsRaw()) {
                 pkg.isBroken = true
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    curIdent.Begin(),
-                    "raw identifier '${curIdent.GetRawText()}' is not allowed in package name")
+                ParseDiagnoseRefactor(
+                    DiagKindRefactor.parse_package_name_has_backtick,
+                    MakeRange(curIdent.Begin() - 1, curIdent.End() + 1))
                 ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
                 break
             }
@@ -76,11 +75,12 @@ extend ParserImpl {
         }
         let fullPackageName = pkg.GetPackageName()
         if (!pkg.isBroken && fullPackageName.size > PACKAGE_NAME_LEN_LIMIT) {
-            let start = if (!pkg.prefixPoses.isEmpty()) { pkg.prefixPoses[0] } else { pkg.packagePos }
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                start,
-                "package name length ${fullPackageName.size} exceeds limit ${PACKAGE_NAME_LEN_LIMIT}")
+            let start = if (!pkg.prefixPoses.isEmpty()) { pkg.prefixPoses[0] } else { pkg.packageName.Begin() }
+            DiagNameLengthOverflow(
+                MakeRange(start, curIdent.End()),
+                fullPackageName,
+                PACKAGE_NAME_LEN_LIMIT,
+                fullPackageName.size)
             pkg.isBroken = true
         }
         if (!pkg.prefixPaths.isEmpty()) {
@@ -111,10 +111,7 @@ extend ParserImpl {
                     break
                 }
                 if (!Skip(TokenKind.SEMI)) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        Peek().Begin(),
-                        "expected ';' or newline after import")
+                    DiagExpectSemiOrNewline()
                     ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI])
                 }
             }
@@ -143,10 +140,7 @@ extend ParserImpl {
         spec.end = spec.content.end
         for (anno in annos) {
             if (anno.kind != AnnotationKind.WHEN) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    anno.begin,
-                    "unexpected annotation '${anno.identifier.Val()}' on import")
+                DiagUnexpectedAnnoOn(anno, spec.importPos, anno.identifier.Val(), "import")
                 anno.isBroken = true
             }
         }
@@ -171,10 +165,11 @@ extend ParserImpl {
                 let fullPackageName = content.GetImportedPackageName()
                 if (!content.isBroken && fullPackageName.size > PACKAGE_NAME_LEN_LIMIT) {
                     let start = ImportContentBeginPosition(content)
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        start,
-                        "import package name length ${fullPackageName.size} exceeds limit ${PACKAGE_NAME_LEN_LIMIT}")
+                    DiagNameLengthOverflow(
+                        MakeRange(start, content.end),
+                        fullPackageName,
+                        PACKAGE_NAME_LEN_LIMIT,
+                        fullPackageName.size)
                     MarkImportContentBroken(content)
                 }
                 continue
@@ -189,10 +184,11 @@ extend ParserImpl {
                     } else {
                         ImportContentBeginPosition(item)
                     }
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        start,
-                        "import package name length ${fullPackageName.size} exceeds limit ${PACKAGE_NAME_LEN_LIMIT}")
+                    DiagNameLengthOverflow(
+                        MakeRange(start, content.end),
+                        fullPackageName,
+                        PACKAGE_NAME_LEN_LIMIT,
+                        fullPackageName.size)
                     MarkImportContentBroken(item)
                 }
             }
@@ -284,10 +280,9 @@ extend ParserImpl {
                 content.hasDoubleColon = true
                 skipDoubleColon = true
                 if (curIdent.IsRaw() && !content.isBroken) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        curIdent.Begin(),
-                        "raw identifier '${curIdent.GetRawText()}' is not allowed as an organization name")
+                    ParseDiagnoseRefactor(
+                        DiagKindRefactor.parse_package_name_has_backtick,
+                        MakeRange(curIdent.Begin() - 1, curIdent.End() + 1))
                 }
             }
             if (!skipDoubleColon && !Skip(TokenKind.DOT)) {
@@ -319,10 +314,7 @@ extend ParserImpl {
                     return
                 }
                 if (!skippedComma) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        lastToken.End(),
-                        "expected ',' in import list")
+                    DiagExpectCharacter(lastToken.End(), "','")
                     MarkImportContentBroken(content)
                 }
             }
@@ -341,10 +333,7 @@ extend ParserImpl {
             }
         }
         if (lastToken.kind != TokenKind.RCURL && !Skip(TokenKind.RCURL)) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                content.leftCurlPos,
-                "expected '}' after import list")
+            DiagExpectedRightDelimiter("{", content.leftCurlPos)
             MarkImportContentBroken(content)
             content.end = lastToken.End()
         } else {
@@ -385,9 +374,13 @@ extend ParserImpl {
             Next()
             return ParseIdentifierFromToken(token)
         }
+        var pos = INVALID_POSITION
+        if (!node.isBroken) {
+            pos = lastToken.End()
+            DiagExpectedIdentifierWithNode(node)
+        }
         node.isBroken = true
-        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected package identifier")
-        return SrcIdentifier("", "", token.Begin(), token.Begin(), false)
+        return SrcIdentifier("", "", pos, pos, false)
     }
 }
 

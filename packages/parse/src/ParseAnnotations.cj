@@ -35,10 +35,7 @@ extend ParserImpl {
             let annotation = ParseAnnotation()
             for (anno in annos) {
                 if (anno.kind != AnnotationKind.CUSTOM && anno.identifier.Val() == annotation.identifier.Val()) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        annotation.begin,
-                        "duplicated annotation '${annotation.identifier.Val()}'")
+                    DiagDuplicatedAnno(annotation, anno)
                     annotation.isBroken = true
                     break
                 }
@@ -55,7 +52,7 @@ extend ParserImpl {
         let anno = Annotation()
         let atToken = Peek()
         if (!Skip(TokenKind.AT)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, atToken.Begin(), "expected annotation")
+            DiagExpectCharacter("'@'")
             anno.isBroken = true
             return anno
         }
@@ -85,7 +82,7 @@ extend ParserImpl {
             if (Skip(TokenKind.AT_EXCL)) {
                 anno.isCompileTimeVisible = true
             } else {
-                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, atToken.Begin(), "expected annotation")
+                DiagExpectCharacter("'@'")
                 anno.isBroken = true
                 return anno
             }
@@ -116,9 +113,10 @@ extend ParserImpl {
         }
         let pos = lastToken.Begin()
         anno.lsquarePos = pos
+        var backArgsIsInvalid = false
         while (true) {
             if (Seeing(TokenKind.END)) {
-                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, pos, "expected ']' after annotation arguments")
+                DiagExpectedRightDelimiter("[", pos)
                 anno.isBroken = true
                 break
             }
@@ -127,13 +125,20 @@ extend ParserImpl {
                 break
             }
             let arg = ParseAnnotationArgument()
+            backArgsIsInvalid = false
+            if (let Some(expr) <- arg.expr) {
+                backArgsIsInvalid = expr.astKind == ASTKind.INVALID_EXPR
+            }
             if (Skip(TokenKind.COMMA)) {
                 arg.commaPos = lastToken.Begin()
                 if (Seeing(TokenKind.RSQUARE)) {
-                    diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, lastToken.Begin(), "expected annotation argument")
+                    DiagExpectCharacter("identifier")
                 }
             } else if (!Seeing(TokenKind.RSQUARE)) {
-                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, pos, "expected ']' after annotation arguments")
+                if (backArgsIsInvalid) {
+                    break
+                }
+                DiagExpectedRightDelimiter("[", pos)
                 anno.isBroken = true
             }
             anno.args.add(arg)
@@ -172,7 +177,7 @@ extend ParserImpl {
             break
         }
         if (!Skip(TokenKind.RSQUARE)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, pos, "expected ']' after @Attribute")
+            DiagExpectedRightDelimiter("[", pos)
             ConsumeUntil(TokenKind.NL)
             anno.isBroken = true
         } else {
@@ -189,7 +194,7 @@ extend ParserImpl {
                 Next()
             }
             if (!Skip(TokenKind.RSQUARE)) {
-                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, pos, "expected ']' after overflow annotation")
+                DiagExpectedRightDelimiter("[", pos)
                 ConsumeUntil(TokenKind.NL)
                 anno.isBroken = true
             } else {
@@ -207,7 +212,7 @@ extend ParserImpl {
     public func ParseWhenAnnotation(anno: Annotation): Unit {
         if (!Skip(TokenKind.LSQUARE)) {
             anno.isBroken = true
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, anno.begin, "when annotation must have condition")
+            DiagExpectedLsquareAfter(anno, "@When", "when annotation must have condition")
             return
         }
         let pos = lastToken.Begin()
@@ -216,15 +221,12 @@ extend ParserImpl {
         if (let Some(expr) <- anno.condExpr) {
             if (expr.astKind != ASTKind.UNARY_EXPR && expr.astKind != ASTKind.BINARY_EXPR &&
                 expr.astKind != ASTKind.REF_EXPR && !expr.isBroken) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    expr.begin,
-                    "unrecognized expression in @When condition")
+                DiagUnrecognizedExprInWhen(expr, anno)
                 anno.isBroken = true
             }
         }
         if (!Skip(TokenKind.RSQUARE)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, pos, "expected ']' after @When condition")
+            DiagExpectedRightDelimiter("[", pos)
             ConsumeUntil(TokenKind.NL)
             anno.isBroken = true
         } else {
@@ -250,16 +252,16 @@ extend ParserImpl {
                         ValidateDeprecatedAnnotationArgument(anno, lit, "strict", LitConstKind.BOOL, strictFound)
                         strictFound = true
                     } else {
-                        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, arg.begin, "unknown @Deprecated argument '${name}'")
+                        DiagDeprecatedUnknownArgument(arg, name)
                         anno.isBroken = true
                     }
                 } else {
-                    diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, arg.begin, "@Deprecated argument must be a literal")
+                    DiagDeprecatedArgumentNotLitConst(arg)
                     anno.isBroken = true
                     return
                 }
             } else {
-                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, arg.begin, "@Deprecated argument must be a literal")
+                DiagDeprecatedArgumentNotLitConst(arg)
                 anno.isBroken = true
                 return
             }
@@ -274,18 +276,15 @@ extend ParserImpl {
         alreadyFound: Bool
     ): Unit {
         if (alreadyFound) {
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, lit.begin, "duplicated @Deprecated argument '${name}'")
+            DiagDeprecatedArgumentDuplicated(lit, name)
             anno.isBroken = true
         }
         if (lit.stringValue.isEmpty()) {
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, lit.begin, "@Deprecated argument '${name}' cannot be empty")
+            DiagDeprecatedEmptyStringArgument(lit, name)
             anno.isBroken = true
         } else if (lit.kind != expectedKind) {
             let expected = if (expectedKind == LitConstKind.STRING) { "String" } else { "Bool" }
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                lit.begin,
-                "@Deprecated argument '${name}' must be ${expected}")
+            DiagDeprecatedWrongArgumentType(lit, name, expected)
             anno.isBroken = true
         }
     }
