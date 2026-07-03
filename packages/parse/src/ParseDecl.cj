@@ -46,10 +46,9 @@ extend ParserImpl {
             ParseModifiers(modifiers)
             file.packageSpec = ParsePackageHeader(modifiers)
             if (!annos.isEmpty()) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    annos[0].begin,
-                    "unexpected annotation '${annos[0].identifier.Val()}' on package")
+                if (let Some(packageSpec) <- file.packageSpec) {
+                    DiagUnexpectedAnnoOn(annos[0], packageSpec.packagePos, annos[0].identifier.Val(), "package")
+                }
                 annos.clear()
             }
             SkipBlank(TokenKind.SEMI)
@@ -63,10 +62,7 @@ extend ParserImpl {
         var topLevelCount: Int64 = 0
         while (!Seeing(TokenKind.END)) {
             if (topLevelCount > 0 && !newlineSkipped && !Skip(TokenKind.SEMI)) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    Peek().Begin(),
-                    "expected ';' or newline between top-level declarations")
+                DiagExpectSemiOrNewline()
                 ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
             }
             SkipBlank(TokenKind.SEMI)
@@ -93,26 +89,62 @@ extend ParserImpl {
             return
         }
         if (SeeingPackageHeader()) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                Peek().Begin(),
-                "package declaration is only allowed in the preamble")
+            let keywords = ArrayList<String>()
+            keywords.add("macro")
+            keywords.add("package")
+            keywords.add("import")
+            keywords.add("func")
+            keywords.add("let")
+            keywords.add("var")
+            keywords.add("const")
+            keywords.add("enum")
+            keywords.add("type")
+            keywords.add("struct")
+            keywords.add("class")
+            keywords.add("interface")
+            keywords.add("extend")
+            keywords.add("main")
+            DiagAndSuggestKeywordForExpectedDeclaration(keywords, 1, ScopeKind.TOPLEVEL)
             ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
             return
         }
         if (SeeingImport()) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                Peek().Begin(),
-                "import declaration is only allowed before top-level declarations")
+            let keywords = ArrayList<String>()
+            keywords.add("macro")
+            keywords.add("package")
+            keywords.add("import")
+            keywords.add("func")
+            keywords.add("let")
+            keywords.add("var")
+            keywords.add("const")
+            keywords.add("enum")
+            keywords.add("type")
+            keywords.add("struct")
+            keywords.add("class")
+            keywords.add("interface")
+            keywords.add("extend")
+            keywords.add("main")
+            DiagAndSuggestKeywordForExpectedDeclaration(keywords, 1, ScopeKind.TOPLEVEL)
             ParseImportSpec(file.imports, annos)
             return
         }
         if (Seeing(TokenKind.FEATURES)) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                Peek().Begin(),
-                "features directive is only allowed before the package header")
+            let keywords = ArrayList<String>()
+            keywords.add("macro")
+            keywords.add("package")
+            keywords.add("import")
+            keywords.add("func")
+            keywords.add("let")
+            keywords.add("var")
+            keywords.add("const")
+            keywords.add("enum")
+            keywords.add("type")
+            keywords.add("struct")
+            keywords.add("class")
+            keywords.add("interface")
+            keywords.add("extend")
+            keywords.add("main")
+            DiagAndSuggestKeywordForExpectedDeclaration(keywords, 1, ScopeKind.TOPLEVEL)
             file.feature = ParseTopLvlFeatures(annos)
             return
         }
@@ -124,7 +156,22 @@ extend ParserImpl {
             file.decls.add(decl)
             return
         }
-        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "unexpected token at top level")
+        let keywords = ArrayList<String>()
+        keywords.add("macro")
+        keywords.add("package")
+        keywords.add("import")
+        keywords.add("func")
+        keywords.add("let")
+        keywords.add("var")
+        keywords.add("const")
+        keywords.add("enum")
+        keywords.add("type")
+        keywords.add("struct")
+        keywords.add("class")
+        keywords.add("interface")
+        keywords.add("extend")
+        keywords.add("main")
+        DiagAndSuggestKeywordForExpectedDeclaration(keywords, 1, ScopeKind.TOPLEVEL)
         Next()
     }
 
@@ -144,7 +191,7 @@ extend ParserImpl {
                 break
             }
             if (Seeing(TokenKind.END)) {
-                diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, leftCurlPos, "expected '}' after foreign block")
+                DiagExpectedRightDelimiter("{", leftCurlPos)
                 break
             }
             let clonedModifiers = CloneModifiers(modifiers)
@@ -180,10 +227,7 @@ extend ParserImpl {
     private func CheckNoDeprecatedAnnotation(annos: ArrayList<Annotation>, invalidTarget: String): Unit {
         for (anno in annos) {
             if (anno.kind == AnnotationKind.DEPRECATED) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    anno.begin,
-                    "@Deprecated cannot be applied to ${invalidTarget}")
+                DiagDeprecatedInvalidTarget(anno, invalidTarget)
             }
         }
     }
@@ -223,10 +267,7 @@ extend ParserImpl {
     private func CheckMacroPackageTopLevelDecl(file: File, decl: Decl): Unit {
         if (let Some(pkg) <- file.packageSpec) {
             if (pkg.hasMacro && decl.TestAttr(Attribute.PUBLIC) && decl.astKind != ASTKind.MACRO_DECL) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    decl.begin,
-                    "public declaration in a macro package must be a macro declaration")
+                DiagDeclarationInMacroPackage(decl)
                 decl.EnableAttr(Attribute.IS_BROKEN)
             }
         }
@@ -236,10 +277,23 @@ extend ParserImpl {
         if (SeeingExpectedAfterFeatures(true)) {
             return
         }
-        diag.DiagnoseRefactor(
-            DiagKindRefactor.parse_diag_error,
-            Peek().Begin(),
-            "expected features, package, import, or top-level declaration")
+        let keywords = ArrayList<String>()
+        keywords.add("features")
+        keywords.add("macro")
+        keywords.add("package")
+        keywords.add("import")
+        keywords.add("func")
+        keywords.add("let")
+        keywords.add("var")
+        keywords.add("const")
+        keywords.add("enum")
+        keywords.add("type")
+        keywords.add("struct")
+        keywords.add("class")
+        keywords.add("interface")
+        keywords.add("extend")
+        keywords.add("main")
+        DiagAndSuggestKeywordForExpectedDeclaration(keywords, 1, ScopeKind.TOPLEVEL)
         while (!Seeing(TokenKind.END) && !SeeingExpectedAfterFeatures(true)) {
             Next()
         }
@@ -250,10 +304,22 @@ extend ParserImpl {
             return
         }
         if (!SeeingExpectedAfterFeatures(false)) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                Peek().Begin(),
-                "expected package, import, or top-level declaration")
+            let keywords = ArrayList<String>()
+            keywords.add("macro")
+            keywords.add("package")
+            keywords.add("import")
+            keywords.add("func")
+            keywords.add("let")
+            keywords.add("var")
+            keywords.add("const")
+            keywords.add("enum")
+            keywords.add("type")
+            keywords.add("struct")
+            keywords.add("class")
+            keywords.add("interface")
+            keywords.add("extend")
+            keywords.add("main")
+            DiagAndSuggestKeywordForExpectedDeclaration(keywords, 1, ScopeKind.TOPLEVEL)
         }
     }
 
@@ -289,10 +355,7 @@ extend ParserImpl {
 
     public func ParseDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Decl {
         if (SeeingBuiltinAnnotation() && !modifiers.isEmpty() && annos.isEmpty()) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                modifiers[0].begin,
-                "modifier cannot appear before annotation")
+            DiagExpectNoModifierBefore(SortModifierByPos(modifiers)[0], "annotation")
         }
         ParseAnnotations(annos)
         ParseModifiers(modifiers)
@@ -317,7 +380,7 @@ extend ParserImpl {
         if (Seeing(TokenKind.INIT)) { return ParseConstructor(scopeKind, modifiers, annos) }
         if (SeeingConsumedConstModifier(modifiers)) { return ParseConstVariable(scopeKind, modifiers, annos) }
         let token = Peek()
-        diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, token.Begin(), "expected declaration")
+        DiagExpectedDeclaration(scopeKind)
         ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
         return InvalidDecl(token.Begin())
     }
@@ -334,10 +397,7 @@ extend ParserImpl {
         }
         for (anno in annos) {
             if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    anno.begin,
-                    "unexpected annotation '${anno.identifier.Val()}' on '${Peek().Value()}'")
+                DiagUnexpectedAnnoOn(anno, Peek().Begin(), anno.identifier.Val(), Peek().Value())
                 anno.isBroken = true
                 break
             }
@@ -350,20 +410,14 @@ extend ParserImpl {
                 continue
             }
             if (!Seeing(TokenKind.CLASS) && !Seeing(TokenKind.AT)) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    anno.begin,
-                    "@Annotation can only be applied to class declarations")
+                DiagUnexpectedAnnoOn(anno, Peek().Begin(), anno.identifier.Val(), Peek().Value())
                 anno.isBroken = true
                 return
             }
             for (modifier in modifiers) {
                 if (modifier.modifier == TokenKind.ABSTRACT || modifier.modifier == TokenKind.OPEN ||
                     modifier.modifier == TokenKind.SEALED) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        modifier.begin,
-                        "@Annotation cannot be combined with '${modifier.ToString()}'")
+                    DiagUnexpectedAnnoOn(anno, modifier.begin, anno.identifier.Val(), modifier.ToString())
                     anno.isBroken = true
                     return
                 }
@@ -390,20 +444,18 @@ extend ParserImpl {
         ret.identifier = ExpectIdentifierWithPos(ret)
         if (IsBuiltinAnnotation(moduleName, ret.identifier.Val()) || IsBuiltinMacroDeclName(ret.identifier.Val())) {
             let builtinKind = if (IsBuiltinMacroDeclName(ret.identifier.Val())) { "macro" } else { "annotation" }
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                ret.identifier.Begin(),
-                "macro declaration '${ret.identifier.Val()}' conflicts with builtin ${builtinKind}")
+            ParseDiagnoseRefactor(
+                DiagKindRefactor.parse_macro_define_conflicted_with_builtin,
+                MakeRange(ret.identifier.Begin(), ret.identifier.End()),
+                ret.identifier.Val(),
+                builtinKind)
             ret.EnableAttr(Attribute.IS_BROKEN)
         }
         let body = ParseMacroBody(ret)
         ret.funcBody = body
         ret.end = body.end
         if (!ret.TestAttr(Attribute.PUBLIC) && !ret.TestAttr(Attribute.IS_BROKEN)) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                ret.begin,
-                "macro declaration must be public")
+            DiagExpectPublicBeforeMacroCall(ret)
             ret.EnableAttr(Attribute.IS_BROKEN)
         }
         CheckMacroDeclPackage(ret)
@@ -438,10 +490,8 @@ extend ParserImpl {
             invalidBlock.isBroken = true
             body.body = invalidBlock
             body.end = invalidBlock.end
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                Peek().Begin(),
-                "expected macro body for '${macroDecl.identifier.Val()}'")
+            DiagMissingBody("macro", if (!macroDecl.identifier.Valid()) { "" } else { " '" + macroDecl.identifier.Val() + "'" },
+                Peek().End())
             macroDecl.EnableAttr(Attribute.IS_BROKEN)
         }
         return body
@@ -451,27 +501,23 @@ extend ParserImpl {
         let paramList = ParseParameterList(ScopeKind.MACRO_BODY)
         if (paramList.params.isEmpty() || paramList.params.size > 2) {
             let pos = if (paramList.params.isEmpty()) { paramList.begin } else { paramList.params[0].begin }
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                pos,
-                "macro declaration expects one or two Tokens parameters")
+            let diagKind = if (paramList.params.isEmpty()) {
+                DiagKindRefactor.parse_macro_unexpected_empty_parameter
+            } else {
+                DiagKindRefactor.parse_macro_expected_right_parameter_nums
+            }
+            ParseDiagnoseRefactor(diagKind, pos)
             macroDecl.EnableAttr(Attribute.IS_BROKEN)
         } else {
             for (param in paramList.params) {
                 if (let Some(paramType) <- param.typeNode) {
                     CheckMacroParamType(macroDecl, paramType, false)
                 } else {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        param.begin,
-                        "macro parameter type must be Tokens")
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_macro_illegal_param_type, lookahead)
                     macroDecl.EnableAttr(Attribute.IS_BROKEN)
                 }
                 if (param.isNamedParam) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        param.begin,
-                        "macro parameters cannot be named parameters")
+                    DiagMacroUnexpectNamedParam(param)
                     macroDecl.EnableAttr(Attribute.IS_BROKEN)
                 }
             }
@@ -483,11 +529,11 @@ extend ParserImpl {
         if (IsTokensRefType(typeNode)) {
             return
         }
-        let subject = if (isReturnTy) { "return type" } else { "parameter type" }
-        diag.DiagnoseRefactor(
-            DiagKindRefactor.parse_diag_error,
-            typeNode.begin,
-            "macro ${subject} must be Tokens")
+        if (isReturnTy) {
+            DiagExpectMacroParamType(typeNode)
+        } else {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_macro_illegal_param_type, typeNode)
+        }
         macroDecl.EnableAttr(Attribute.IS_BROKEN)
     }
 
@@ -513,10 +559,9 @@ extend ParserImpl {
                 inMacroPackage = pkg.hasMacro
             }
             if (!inMacroPackage) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    macroDecl.identifier.Begin(),
-                    "macro declaration must be defined in a macro package")
+                ParseDiagnoseRefactor(
+                    DiagKindRefactor.parse_expected_macro_decl_define_in_macro_package,
+                    MakeRange(macroDecl.identifier.Begin(), macroDecl.identifier.End()))
                 macroDecl.EnableAttr(Attribute.IS_BROKEN)
             }
         }
@@ -710,25 +755,18 @@ extend ParserImpl {
                 paramList.variadicArgIndex = UInt64(index)
 
                 if (!decl.TestAttr(Attribute.FOREIGN)) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        decl.keywordPos,
-                        "variable length parameter is only allowed in foreign function")
+                    ParseDiagnoseRefactor(
+                        DiagKindRefactor.parse_variable_length_parameter_only_in_the_foreign_function,
+                        MakeRange(decl.keywordPos, decl.identifier.End()))
                     decl.EnableAttr(Attribute.IS_BROKEN)
                     break
                 }
 
                 if (index == 0) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        params[index].begin,
-                        "variable length parameter cannot be first")
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_variable_length_parameter_can_not_be_first, params[index])
                     decl.EnableAttr(Attribute.IS_BROKEN)
                 } else if (index != params.size - 1) {
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.parse_diag_error,
-                        params[index].begin,
-                        "variable length parameter must be at the end")
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_variable_length_parameter_must_in_the_end, params[index])
                     decl.EnableAttr(Attribute.IS_BROKEN)
                 } else {
                     varargIdx = Some(index)
@@ -744,12 +782,12 @@ extend ParserImpl {
     public func ExpectOperatorIdentifier(ret: FuncDecl): SrcIdentifier {
         let operatorToken = SkipAndReturnOverloadingOperator()
         if (operatorToken.kind == TokenKind.ILLEGAL) {
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected overloadable operator")
+            DiagInvalidOverloadedOperator()
             Next()
             return SrcIdentifier("", "", Peek().Begin(), Peek().Begin(), false)
         }
         if (!Seeing(TokenKind.LPAREN) && !Seeing(TokenKind.LT)) {
-            diag.DiagnoseRefactor(DiagKindRefactor.parse_diag_error, Peek().Begin(), "expected '(' after operator name")
+            DiagExpectCharacter("'('")
             Next()
         }
         ret.op = operatorToken.kind
@@ -863,15 +901,9 @@ extend ParserImpl {
         list.end = list.rightParenPos + 1
         if (ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY)) {
             if (list.params.isEmpty()) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    list.begin,
-                    "setter must contain one parameter")
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_setter_must_contain_one_parameter, list.begin)
             } else if (list.params.size > 1) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    list.params[1].begin,
-                    "setter can only accept one parameter")
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_setter_can_only_accept_one_parameter, list.params[1].begin)
             }
         }
         return list
@@ -898,10 +930,10 @@ extend ParserImpl {
                 param.isVar = lastToken.kind == TokenKind.VAR
                 memberStart = lastToken.Begin()
             } else {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    lastToken.Begin(),
-                    "'${lastToken.Value()}' is only allowed in primary constructor parameter lists")
+                ParseDiagnoseRefactor(
+                    DiagKindRefactor.parse_expected_parameter_rp,
+                    lastToken,
+                    ConvertToken(lastToken))
                 param.EnableAttr(Attribute.IS_BROKEN)
             }
         }
@@ -913,10 +945,7 @@ extend ParserImpl {
         }
         if (Skip(TokenKind.WILDCARD)) {
             if (param.hasLetOrVar) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    lastToken.Begin(),
-                    "wildcard cannot be used as member parameter name")
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_wildcard_can_not_be_used_as_member_name, lastToken)
                 param.EnableAttr(Attribute.IS_BROKEN)
             }
             param.identifier = SrcIdentifier("_", "_", lastToken.Begin(), lastToken.End(), false)
@@ -930,10 +959,12 @@ extend ParserImpl {
         if (!ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY) &&
             !ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_GETTER_BODY) && Skip(TokenKind.NOT)) {
             if (param.identifier.Val() == "_") {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    lastToken.Begin(),
-                    "expected ':' after wildcard parameter")
+                let builder = ParseDiagnoseRefactor(
+                    DiagKindRefactor.parse_expected_character,
+                    lastToken,
+                    "':'",
+                    lastToken.Value())
+                builder.AddMainHintArguments("':'")
                 param.EnableAttr(Attribute.IS_BROKEN)
             }
             param.notMarkPos = lastToken.Begin()
@@ -945,10 +976,7 @@ extend ParserImpl {
             return param
         }
         if (!Skip(TokenKind.COLON)) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                Peek().Begin(),
-                "expected ':' in parameter declaration")
+            DiagExpectCharacter("':'")
             let invalidType = InvalidType(Peek().Begin())
             invalidType.isBroken = true
             param.typeNode = invalidType
@@ -961,10 +989,7 @@ extend ParserImpl {
         }
         if (Skip(TokenKind.ASSIGN)) {
             if (!param.isNamedParam) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    lastToken.Begin(),
-                    "default parameter value requires a named parameter marker '!'")
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_dot_lparen, lastToken, ConvertToken(lastToken))
                 param.EnableAttr(Attribute.IS_BROKEN)
             }
             param.assignPos = lastToken.Begin()
@@ -1121,10 +1146,7 @@ extend ParserImpl {
         if ((pattern.astKind == ASTKind.TUPLE_PATTERN || pattern.astKind == ASTKind.ENUM_PATTERN ||
                 pattern.astKind == ASTKind.WILDCARD_PATTERN) &&
             (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY))) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                pattern.begin,
-                "declaration patterns are not allowed in class or struct body")
+            DiagParseIllegalDeclarationPattern(decl, scopeKind)
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
         CheckVarDeclShape(decl, modifiers, scopeKind, key)
@@ -1162,32 +1184,28 @@ extend ParserImpl {
     ): Unit {
         EnableModifierAttrs(decl, CheckDeclModifiers(modifiers, scopeKind, DefKind.VARIABLE))
         if (!decl.isConst && HasModifierToken(modifiers, TokenKind.CONST)) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                key.Begin(),
-                "modifier 'const' cannot be used on '${key.Value()}' declaration")
+            DiagUnExpectedModifierOnDeclaration(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
-        }
-        if (decl.isConst && (let None <- decl.initializer)) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                key.Begin(),
-                "const variable declaration requires an initializer")
+        } else if (decl.astKind == ASTKind.VAR_DECL && decl.isConst &&
+            (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) &&
+            !HasModifierToken(modifiers, TokenKind.STATIC)) {
+            DiagConstVariableExpectedStatic(key)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        } else if (decl.isConst && (let None <- decl.initializer)) {
+            DiagConstVariableExpectedInitializer(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
         } else if (!decl.isConst && !ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) &&
             (let None <- decl.typeNode) && (let None <- decl.initializer)) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                key.Begin(),
-                "local variable declaration requires a type annotation or initializer")
+            if (decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
+                DiagExpectedTypeOrInitializerInPattern(decl)
+            } else {
+                DiagExpectedOneOfTypeOrInitializer(decl, decl.identifier.Val())
+            }
             decl.EnableAttr(Attribute.IS_BROKEN)
         } else if (!decl.isConst && ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) && (let None <- decl.initializer) &&
             !HasModifierToken(modifiers, TokenKind.FOREIGN) &&
             ((let None <- decl.typeNode) || !HasModifierToken(modifiers, TokenKind.COMMON))) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                key.Begin(),
-                "top-level variable declaration requires an initializer unless it is foreign")
+            DiagExpectedInitializerForToplevelVar(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
     }
@@ -1345,10 +1363,7 @@ extend ParserImpl {
             if (IsValidInheritedType(inheritedType)) {
                 decl.inheritedTypes.add(inheritedType)
             } else if (!inheritedType.TestAttr(Attribute.IS_BROKEN)) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    inheritedType.begin,
-                    "expected inherited type name")
+                DiagInvalidInheritType(inheritedType)
             }
             if (!Skip(TokenKind.BITAND)) {
                 break
@@ -1576,17 +1591,11 @@ extend ParserImpl {
         ret.funcBody = ParseFuncBody(scopeKind)
         if (let Some(body) <- ret.funcBody) {
             if (!body.paramLists.isEmpty() && !body.paramLists[0].params.isEmpty()) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    body.paramLists[0].begin,
-                    "finalizer cannot accept parameters")
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_finalizer_can_not_accept_any_parameter, body.paramLists[0])
                 ret.EnableAttr(Attribute.IS_BROKEN)
             }
             if (let Some(retType) <- body.retType) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    retType.begin,
-                    "finalizer cannot declare a return type")
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_return_type, retType, "finalizer")
                 ret.EnableAttr(Attribute.IS_BROKEN)
             }
             ret.end = body.end
@@ -1606,10 +1615,7 @@ extend ParserImpl {
         ret.keywordPos = id.Begin()
         ret.begin = if (ret.begin.IsZero()) { id.Begin() } else { ret.begin }
         if (!curPrimaryDeclIdent.isEmpty() && id.Val() != curPrimaryDeclIdent) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.parse_diag_error,
-                id.Begin(),
-                "expected primary constructor name '${curPrimaryDeclIdent}'")
+            DiagUnknownPrimaryConstructor(curPrimaryDeclIdent)
             ret.EnableAttr(Attribute.IS_BROKEN)
         }
         let bodyScope = if (ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) {
@@ -1630,10 +1636,7 @@ extend ParserImpl {
         }
         if (let Some(body) <- ret.funcBody) {
             if (let Some(retType) <- body.retType) {
-                diag.DiagnoseRefactor(
-                    DiagKindRefactor.parse_diag_error,
-                    retType.begin,
-                    "primary constructor cannot declare a return type")
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_return_type, retType, "primary constructor")
                 ret.EnableAttr(Attribute.IS_BROKEN)
             }
             ret.end = body.end
