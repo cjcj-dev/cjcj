@@ -1,6 +1,9 @@
 package cangjie_compiler::utils
 
-// PORT-DEFERRED: CastASTTests.cpp and CastTyTests.cpp validate C++ template instantiation,
-// dynamic_cast/static_cast parity, and generated C++ include tables. The selfhost does not expose an
-// equivalent RTTI/template casting surface in package utils, and the tested AST/Ty owners are downstream
-// packages that depend on utils.
+// PORT-DEFERRED: Utils/CastASTTests.VerifyCastingCount, VerifyMonoCasting, VerifyIntermediateCasting,
+// TryAddNewType, and VerifyStaticCasting require the C++ ASTCasting template/RTTI surface from
+// /root/cj_build/cangjie_compiler/include/cangjie/AST/ASTCasting.h:24 and :57; package utils cannot depend
+// on downstream package ast to construct the tested AST nodes.
+// PORT-DEFERRED: Utils/CastTyTests.VerifyCastingCount, VerifyMonoCasting, and VerifyIntermediateCasting require
+// the C++ AST Ty casting template surface from /root/cj_build/cangjie_compiler/include/cangjie/AST/ASTCasting.h:31
+// and :65; package utils cannot depend on downstream package ast/sema type owners.

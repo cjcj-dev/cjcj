@@ -5,6 +5,7 @@ import std.unittest.testmacro.*
 
 @Test
 class FloatAndSipHashTest {
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:711 TEST(UtilsTest, Float32ToFloat16)
     @TestCase
     func float32ToFloat16(): Unit {
         @Expect(FloatFormat.Float32ToFloat16(6.5536e4), 0b0111110000000000u16)
@@ -16,6 +17,7 @@ class FloatAndSipHashTest {
         @Expect(FloatFormat.Float32ToFloat16(5.9604e-8), 0b0000000000000000u16)
     }
 
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:842 TEST(UtilsTest, SipHash)
     @TestCase
     func sipHash(): Unit {
         @Expect(SipHash.GetHashValue("123abc"), 0x4F03C64A98DDE71Eu64)
@@ -29,11 +31,12 @@ class FloatAndSipHashTest {
         @Expect(SipHash.GetHashValue(Int64(-89456113)), 0x456D9FCA9BDD4D37u64)
         @Expect(SipHash.GetHashValue(Float64(-89456113.123789)), 0xB72124ADB2EABF59u64)
         @Expect(SipHash.GetHashValue(Float32(789456.222666)), 0xC413B71DA4335E1Bu64)
-        // PORT-DEFERRED: std::bitset overloads have no selfhost SipHash equivalent.
+        // PORT-DEFERRED: std::bitset overloads at /root/cj_build/cangjie_compiler/include/cangjie/Utils/SipHash.h:18 have no selfhost SipHash equivalent.
         @Expect(SipHash.GetHashValue(Float64(-89456113.123789)), 0xB72124ADB2EABF59u64)
         @Expect(SipHash.GetHashValue("123abc"), 0x4F03C64A98DDE71Eu64)
     }
 
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:882 TEST(UtilsTest, SipHash2)
     @TestCase
     func sipHash2(): Unit {
         let pairs: Array<(String, String)> = [
@@ -69,15 +72,29 @@ class FloatAndSipHashTest {
         }
     }
 
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:949 TEST(UtilsTest, IsUnderFlowFloat)
     @TestCase
     func isUnderFlowFloat(): Unit {
-        @Expect(FloatFormat.IsUnderFlowFloat("1e10000000000000000000000000000000"), false)
-        @Expect(FloatFormat.IsUnderFlowFloat("-1E10000"), false)
-        @Expect(FloatFormat.IsUnderFlowFloat("1E10000"), false)
-        @Expect(FloatFormat.IsUnderFlowFloat("-1E-10000"), true)
-        @Expect(FloatFormat.IsUnderFlowFloat("1E-10000"), true)
-        @Expect(FloatFormat.IsUnderFlowFloat(".123e-10000"), true)
-        @Expect(FloatFormat.IsUnderFlowFloat("0x1p-100000000000000000000000000000000000000000"), true)
-        @Expect(FloatFormat.IsUnderFlowFloat("1.0"), false)
+        let underUse = { value: String => FloatFormat.IsUnderFlowFloat(value.replace("_", "")) }
+        @Expect(underUse("1_e10000000000000000000000000000000"), false)
+        @Expect(underUse("1e10000000000000000000000000000000"), false)
+        @Expect(underUse("-1_e10000000000000000000000000000000"), false)
+        @Expect(underUse("-1E10000"), false)
+        @Expect(underUse("1E10000"), false)
+        @Expect(underUse("-1E-10000"), true)
+        @Expect(underUse("1E-10000"), true)
+        @Expect(underUse("0_." +
+            "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" +
+            "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" +
+            "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" +
+            "0000000000000000000000000000000000000000000001"), true)
+        @Expect(underUse("." +
+            "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" +
+            "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" +
+            "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" +
+            "0000000000000000000000000000000000000000000001"), true)
+        @Expect(underUse(".123e-10000"), true)
+        @Expect(underUse("0x1p-100000000000000000000000000000000000000000"), true)
+        @Expect(underUse("1.0"), false)
     }
 }
