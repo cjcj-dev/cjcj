@@ -19,6 +19,8 @@
   "cangjie_compiler::codegen" = { path = "../codegen" }
   "cangjie_compiler::driver" = { path = "../driver" }
   "cangjie_compiler::frontend" = { path = "../frontend" }
+  "cangjie_compiler::lex" = { path = "../lex" }
+  "cangjie_compiler::macro_pkg" = { path = "../macro" }
   "cangjie_compiler::option" = { path = "../option" }
   "cangjie_compiler::parse" = { path = "../parse" }
   "cangjie_compiler::sema" = { path = "../sema" }

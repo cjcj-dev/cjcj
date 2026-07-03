@@ -52,7 +52,6 @@ package cangjie_compiler::compiler_unittest
 // PORT-DEFERRED: Modules/PackageTest.TypeAliasRefExport requires serialized package fixture artifacts.
 // PORT-DEFERRED: Modules/ImportIncrTest.ImportIncrTest requires old incremental import fixture directories and artifacts.
 
-// PORT-DEFERRED: Macro/TokenSerializationTest.BufferCase requires direct macro token serialization fixture parity.
 // PORT-DEFERRED: Macro/NodeSerializationTest.BinaryExpr_Serialization requires direct macro node construction fixtures.
 // PORT-DEFERRED: Macro/NodeSerializationTest.UnaryExpr_Serialization requires direct macro node construction fixtures.
 // PORT-DEFERRED: Macro/NodeSerializationTest.VarDecl_Serialization requires direct macro node construction fixtures.
