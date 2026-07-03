@@ -3,11 +3,14 @@ package cangjie_compiler::codegen
 import std.collection.*
 import std.sort.*
 import cangjie_compiler::chir.Attribute
+import cangjie_compiler::chir.CustomDefKind
 import cangjie_compiler::chir.CustomType
+import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.FuncKind
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.Type
+import cangjie_compiler::option.EnvironmentType
 import cangjie_compiler::mangle.MANGLE_FUNC_PARAM_TYPE_PREFIX
 import cangjie_compiler::mangle.MANGLE_VOID_TY_SUFFIX
 import cangjie_compiler::mangle.SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION
@@ -32,7 +35,7 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
     for (subPackage in splitter.SplitCHIRPackage()) {
         let cgMod = CGModule(subPackage, cgPkgContext)
         cgPkgContext.AddCGModule(cgMod)
-        EmitTypeTemplatesForOwnedGenericCustomDefs(cgMod)
+        EmitTIOrTTForCustomDefs(cgMod)
         for (globalVar in subPackage.chirGVs) {
             EmitGlobalVariableIR(cgMod, globalVar)
         }
@@ -61,19 +64,41 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         let keepTypesFunc = KeepSomeTypesManually(cgMod)
         EmitStaticGenericTIsAndLLVMUsed(cgMod, keepTypesFunc)
         cgMod.Opt()
+        GenerateReflectionMetadata(cgMod, subPackage)
+        cgMod.GenTypeInfo()
         cgMod.EraseUselessInstsAndDeclarations()
     }
     return cgPkgContext.ReleaseLLVMModules()
 }
 
-private func EmitTypeTemplatesForOwnedGenericCustomDefs(cgMod: CGModule): Unit {
+private func EmitTIOrTTForCustomDefs(cgMod: CGModule): Unit {
     for (def in cgMod.GetCGContext().GetSubCHIRPackage().chirCustomDefs) {
-        if (def.IsExtend() || !def.IsGenericDef()) {
+        if (!def.IsExtend()) {
+            let cgType = CGType.GetOrCreate(cgMod, def.GetType().getOrThrow())
+            if (cgType.IsConcrete()) {
+                cgType.GetOrCreateTypeInfo()
+            } else if (def.IsGenericDef()) {
+                let customTy = StaticCast<CustomType>(def.GetType().getOrThrow())
+                EnsureSourceGenericTypeTemplate(cgMod, customTy)
+                cgType.GetOrCreateTypeTemplate()
+            }
+        }
+        if (def.TestAttr(Attribute.IMPORTED) || def.TestAttr(Attribute.NON_RECOMPILE)) {
             continue
         }
-        if (let Some(defTy) <- def.GetType()) {
-            let customTy = StaticCast<CustomType>(defTy)
-            EnsureSourceGenericTypeTemplate(cgMod, customTy)
+        if (def.GetCustomKind() == CustomDefKind.TYPE_ENUM) {
+            let enumTy = StaticCast<EnumType>(def.GetType().getOrThrow())
+            let cgEnumType = StaticCast<CGEnumType>(CGType.GetOrCreate(cgMod, enumTy))
+            if ((!cgEnumType.IsTrivial() && !cgEnumType.IsZeroSizeEnum()) ||
+                (!cgMod.GetCGContext().GetCompileOptions().disableReflection &&
+                    cgMod.GetCGContext().GetCompileOptions().target.env != EnvironmentType.OHOS)) {
+                let ctors = enumTy.GetEnumDef().GetConstructorInfos(builder: Some(cgMod.GetCGContext().GetCHIRBuilder()))
+                var idx: Int64 = 0
+                while (idx < ctors.size) {
+                    cgMod.GetOrCreateEnumCtorTIOrTT(enumTy, idx)
+                    idx++
+                }
+            }
         }
     }
 }

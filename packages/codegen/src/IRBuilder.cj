@@ -1305,80 +1305,41 @@ public class IRBuilder2 <: Resource {
         return false
     }
 
-    private func IsVArrayPtrType(cgType: CGType): Bool {
-        if (!cgType.IsPointerType()) {
-            return false
+    private func DoSimpleCast(arg: CGValue, destType: CGType, name: String): LLVMValueRef {
+        let raw = arg.GetRawValue()
+        let argCGType = arg.GetCGType() ?? return raw
+        let rawTy = unsafe { LLVMTypeOf(raw) }
+        if (!argCGType.IsStructPtrType() && !argCGType.IsVArrayPtrType()) {
+            return raw
         }
-        let contained = cgType.GetContainedTypes()
-        return !contained.isEmpty() && contained[0].IsVArrayType()
+        let destPtrTy = destType.GetLLVMType()
+        if (rawTy.isNull() || unsafe { LLVMGetTypeKind(rawTy) } != LLVM_POINTER_TYPE_KIND ||
+            unsafe { LLVMGetTypeKind(destPtrTy) } != LLVM_POINTER_TYPE_KIND) {
+            return raw
+        }
+        let rawAddrspace = unsafe { LLVMGetPointerAddressSpace(rawTy) }
+        let destAddrspace = destType.GetAddrspace()
+        if (rawAddrspace != destAddrspace) {
+            return CreateAddrSpaceCast(raw, destPtrTy,
+                name: if (name.isEmpty()) { "arg.cast" } else { name + ".arg.cast" })
+        }
+        return CreateBitCast(raw, destPtrTy, name: if (name.isEmpty()) { "arg.cast" } else { name + ".arg.cast" })
     }
 
     private func FixFuncArg(arg: CGValue, destType: CGType, name!: String = ""): LLVMValueRef {
         let raw = arg.GetRawValue()
-        let paramTy = destType.GetOriginal()
-        let derefParamTy = paramTy.StripAllRefs()
-        let derefDestType = CGType.GetOrCreate(cgMod, derefParamTy)
-        if (let Some(argCGType) <- arg.GetCGType()) {
-            let rawTy = unsafe { LLVMTypeOf(raw) }
-            let isValueOrAddr0 = rawTy.isNull() || unsafe { LLVMGetTypeKind(rawTy) } != 12 ||
-                unsafe { LLVMGetPointerAddressSpace(rawTy) } == 0u32
-            if ((isValueOrAddr0 || IsOptionLikeRefValue(argCGType)) && derefDestType.GetSize().isNone()) {
-                let argTy = argCGType.GetOriginal().StripAllRefs()
-                let objectValue = CallAllocaGeneric(argTy)
-                StoreValueToObjectPayload(objectValue, raw, argTy)
-                return objectValue
-            }
-        }
-        if (paramTy.IsFunc()) {
-            if (let Some(funcTy) <- (paramTy as FuncType)) {
-                if (!funcTy.IsCFunc()) {
-                    return CreatePointerCast(raw, CGType.GetRefType(GetLLVMContext()),
-                        name: if (name.isEmpty()) { "fn.arg" } else { name + ".fn.arg" })
-                }
-            }
-            let rawTy = unsafe { LLVMTypeOf(raw) }
-            if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == LLVM_POINTER_TYPE_KIND) {
-                return CreateBitCast(raw, CGType.GetOrCreate(cgMod, paramTy).GetLLVMType(),
-                    name: if (name.isEmpty()) { "fn.arg.cast" } else { name + ".fn.arg.cast" })
-            }
-            return raw
-        }
-        if (!(derefParamTy.IsStruct() || derefParamTy.IsTuple() ||
-            derefDestType.IsStructType() || derefDestType.IsVArrayType() || derefParamTy.IsEnum())) {
-            return raw
-        }
         let rawTy = unsafe { LLVMTypeOf(raw) }
-        if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == LLVM_POINTER_TYPE_KIND) {
-            let argCGType = arg.GetCGType() ?? return raw
-            if (!argCGType.IsStructPtrType() && !IsVArrayPtrType(argCGType)) {
-                return raw
-            }
-            let destPtrTy = destType.GetLLVMType()
-            if (unsafe { LLVMGetTypeKind(destPtrTy) } != LLVM_POINTER_TYPE_KIND) {
-                return raw
-            }
-            let rawAddrspace = unsafe { LLVMGetPointerAddressSpace(rawTy) }
-            let destAddrspace = destType.GetAddrspace()
-            if (rawAddrspace != destAddrspace) {
-                return CreateAddrSpaceCast(raw, destPtrTy,
-                    name: if (name.isEmpty()) { "arg.cast" } else { name + ".arg.cast" })
-            }
-            return CreateBitCast(raw, destPtrTy, name: if (name.isEmpty()) { "arg.cast" } else { name + ".arg.cast" })
-        }
-        let allocaName = if (name.isEmpty()) { "arg.addr" } else { name + ".arg.addr" }
-        if (let Some(argCGType) <- arg.GetCGType()) {
+        let argCGType = arg.GetCGType() ?? return raw
+        let destDerefType = CGType.GetOrCreate(cgMod, destType.GetOriginal().StripAllRefs())
+        let isValueOrAddr0 = rawTy.isNull() || unsafe { LLVMGetTypeKind(rawTy) } != LLVM_POINTER_TYPE_KIND ||
+            unsafe { LLVMGetPointerAddressSpace(rawTy) } == 0u32
+        if ((isValueOrAddr0 || IsOptionLikeRefValue(argCGType)) && destDerefType.GetSize().isNone()) {
             let argTy = argCGType.GetOriginal().StripAllRefs()
-            if ((argTy.IsStruct() || argTy.IsTuple()) && !argTy.IsEqual(derefParamTy)) {
-                let actualSlot = CreateEntryAlloca(argCGType, name: allocaName)
-                StoreAggregateArgToSlot(raw, actualSlot)
-                let destPtrTy = destType.GetLLVMType()
-                return CreatePointerCast(actualSlot, destPtrTy,
-                    name: if (name.isEmpty()) { "arg.addr.cast" } else { name + ".arg.addr.cast" })
-            }
+            let objectValue = CallAllocaGeneric(argTy)
+            StoreValueToObjectPayload(objectValue, raw, argTy)
+            return objectValue
         }
-        let slot = CreateEntryAlloca(derefDestType, name: allocaName)
-        StoreAggregateArgToSlot(raw, slot)
-        return slot
+        return DoSimpleCast(arg, destType, name)
     }
 
     private func StoreAggregateArgToSlot(raw: LLVMValueRef, slot: LLVMValueRef): LLVMValueRef {
@@ -3793,7 +3754,7 @@ public class IRBuilder2 <: Resource {
             fixedArgs, name: "ti")
     }
 
-    private func CreateTypeInfoArray(typeArgs: ArrayList<Type>): LLVMValueRef {
+    public func CreateTypeInfoArray(typeArgs: ArrayList<Type>): LLVMValueRef {
         let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
         let arrayType = unsafe { LLVMArrayType(typeInfoPtrType, UInt32(typeArgs.size)) }
         let slot = CreateEntryAlloca(arrayType, name: "ti.args")
