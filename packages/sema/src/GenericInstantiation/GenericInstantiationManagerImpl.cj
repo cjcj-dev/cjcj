@@ -387,6 +387,8 @@ public class GenericInstantiationManagerImpl {
                                                     let binaryExpr = BinaryExpr()
                                                     binaryExpr.leftExpr = memberAccess.baseExpr
                                                     binaryExpr.rightExpr = callExpr.args[0].expr
+                                                    memberAccess.baseExpr = None
+                                                    callExpr.args[0].expr = None
                                                     binaryExpr.op = funcDecl.op
                                                     if (let Some(callTy) <- callExpr.GetTy()) {
                                                         binaryExpr.SetTy(callTy)
@@ -407,6 +409,7 @@ public class GenericInstantiationManagerImpl {
                                                 if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
                                                     let unaryExpr = UnaryExpr()
                                                     unaryExpr.expr = memberAccess.baseExpr
+                                                    memberAccess.baseExpr = None
                                                     unaryExpr.op = funcDecl.op
                                                     if (let Some(callTy) <- callExpr.GetTy()) {
                                                         unaryExpr.SetTy(callTy)

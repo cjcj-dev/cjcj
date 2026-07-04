@@ -592,21 +592,24 @@ private func SynBuiltinBinaryFromRight(typeManager: TypeManager, be: BinaryExpr,
     }
     let leftExpr = be.leftExpr.getOrThrow()
     let rightExpr = be.rightExpr.getOrThrow()
+    var targetRight: Ty = TypeManager.GetInvalidTy()
     try (ds = DiagSuppressor(diag)) {
         let rightTy = SynBinaryOperand(typeManager, rightExpr, synthesizer)
         if (!Ty.IsTyCorrect(rightTy)) {
             be.SetTy(TypeManager.GetInvalidTy())
             return None
         }
-        let targetRight = Ty.GetPrimitiveUpperBound(TcReplaceIdeal(typeManager, rightExpr))
-        let isWellTyped = Ty.IsTyCorrect(targetRight) &&
-            (targetRight.IsNothing() || targetRight.IsPrimitiveSubType() || targetRight.IsTuple() ||
-                targetRight.IsPlaceholder())
-        if (!isWellTyped) {
-            let _ = SynBinaryOperand(typeManager, leftExpr, synthesizer)
-            be.SetTy(TypeManager.GetInvalidTy())
-            return Some(TypeManager.GetInvalidTy())
-        }
+        targetRight = Ty.GetPrimitiveUpperBound(TcReplaceIdeal(typeManager, rightExpr))
+    }
+    let isWellTyped = Ty.IsTyCorrect(targetRight) &&
+        (targetRight.IsNothing() || targetRight.IsPrimitiveSubType() || targetRight.IsTuple() ||
+            targetRight.IsPlaceholder())
+    if (!isWellTyped) {
+        let _ = SynBinaryOperand(typeManager, leftExpr, synthesizer)
+        be.SetTy(TypeManager.GetInvalidTy())
+        return Some(TypeManager.GetInvalidTy())
+    }
+    try (ds = DiagSuppressor(diag)) {
         ClearExprKeepTargets(leftExpr)
         if (ChkBinaryOperand(typeManager, targetRight, leftExpr, ctx, checker)) {
             ds.ReportDiag()
