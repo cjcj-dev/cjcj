@@ -239,13 +239,11 @@ public func LLVMSetInstructionMetadata(context: LLVMContextHandle, value: LLVMVa
     if (value.isNull() || metadata.isNull()) {
         return
     }
-    let kindID = LLVMGetMDKindID(context, name)
-    if (kindID == 0u32) {
+    if (context.raw.isNull() || name.isEmpty()) {
         return
     }
-    let metadataValue = LLVMMetadataToValue(context, metadata)
-    if (!metadataValue.isNull()) {
-        unsafe { LLVMSetMetadata(value, kindID, metadataValue) }
+    try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+        unsafe { LLVMSelfhostInstructionSetMetadata(value, nameCString.value, UInt32(name.size), metadata) }
     }
 }
 

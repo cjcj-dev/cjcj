@@ -52,15 +52,7 @@ public class CGPrimitiveType <: CGType {
                 generated = CGType.GetUnitType(cgCtx.GetLLVMContext())
             case TypeKind.TYPE_VOID =>
                 generated = unsafe { LLVMVoidTypeInContext(context) }
-                var voidLayout = LLVMNullType()
-                try (layoutNameCString = unsafe { LibC.mallocCString(UNIT_TYPE_STR) }.asResource()) {
-                    voidLayout = unsafe { LLVMGetTypeByName2(context, layoutNameCString.value) }
-                    if (voidLayout.isNull()) {
-                        voidLayout = unsafe { LLVMStructCreateNamed(context, layoutNameCString.value) }
-                        SetStructTypeBody(voidLayout, ArrayList<LLVMTypeRef>())
-                    }
-                }
-                layoutType = voidLayout
+                layoutType = CGType.GetUnitType(cgCtx.GetLLVMContext())
                 return generated
             case _ =>
                 CJC_ASSERT_WITH_MSG(false, "Should not reach here: unsupported chir type")

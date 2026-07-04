@@ -6,6 +6,7 @@ import cangjie_compiler::chir.CheckCustomTypeDefIsExpected
 import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CustomType
+import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.ExtendDef
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GenericType
@@ -303,6 +304,13 @@ public func IsAutoEnvInstBaseType(chirTy: Type): Bool {
 public func IsGenericRef(chirTy: Type): Bool {
     let typeArgs = chirTy.GetTypeArgs()
     return chirTy.IsRef() && !typeArgs.isEmpty() && typeArgs[0].IsGeneric()
+}
+
+public func IsTrivialEnum(chirTy: Type): Bool {
+    if (let Some(enumTy) <- (chirTy as EnumType)) {
+        return enumTy.GetEnumDef().IsAllCtorsTrivial()
+    }
+    return false
 }
 
 public func IsStructRef(chirTy: Type): Bool {

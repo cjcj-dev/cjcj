@@ -286,6 +286,17 @@ foreign {
     func LLVMSelfhostInvokeGetNormalDest(invokeInst: LLVMValueRef): LLVMBasicBlockRef
     func LLVMSelfhostInvokeGetUnwindDest(invokeInst: LLVMValueRef): LLVMBasicBlockRef
     func LLVMSelfhostBasicBlockGetFirstInsertionPoint(block: LLVMBasicBlockRef): LLVMValueRef
+    func LLVMSelfhostGetInsertPointInstruction(builder: LLVMBuilderRef): LLVMValueRef
+    func LLVMSelfhostCreateCall(builder: LLVMBuilderRef, functionTy: LLVMTypeRef, callee: LLVMValueRef,
+        args: CPointer<LLVMValueRef>, argCount: UInt32, name: CString): LLVMValueRef
+    func LLVMSelfhostCreatePointerCast(builder: LLVMBuilderRef, value: LLVMValueRef, destType: LLVMTypeRef,
+        name: CString): LLVMValueRef
+    func LLVMSelfhostInstructionSetMetadata(inst: LLVMValueRef, kind: CString, kindLen: UInt32,
+        metadata: LLVMMetadataRef): Unit
+    func LLVMSelfhostCreateGCReadStaticAgg(builder: LLVMBuilderRef, module: LLVMModuleRef, aggType: LLVMTypeRef,
+        dest: LLVMValueRef, source: LLVMValueRef, size: LLVMValueRef, sizeType: LLVMTypeRef): LLVMValueRef
+    func LLVMSelfhostCreateGCWriteStaticAgg(builder: LLVMBuilderRef, module: LLVMModuleRef, aggType: LLVMTypeRef,
+        dest: LLVMValueRef, source: LLVMValueRef, size: LLVMValueRef, sizeType: LLVMTypeRef): LLVMValueRef
     func LLVMSelfhostGetPrimitiveSizeInBits(ty: LLVMTypeRef): UInt64
     func LLVMSelfhostGetFirstUse(value: LLVMValueRef): LLVMUseRef
     func LLVMSelfhostGetNextUse(useRef: LLVMUseRef): LLVMUseRef

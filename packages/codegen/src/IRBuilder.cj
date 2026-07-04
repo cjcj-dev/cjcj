@@ -56,7 +56,6 @@ private let MALLOC_OBJECT_INTRINSIC_NAME: String = "llvm.cj.malloc.object"
 private let CJ_MEMSET_INTRINSIC_NAME: String = "llvm.cj.memset"
 private let GCWRITE_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.ref"
 private let GCREAD_STATIC_REF_INTRINSIC_NAME: String = "llvm.cj.gcread.static.ref"
-private let GCREAD_STATIC_STRUCT_INTRINSIC_NAME: String = "llvm.cj.gcread.static.struct"
 private let GCWRITE_STATIC_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.static.ref"
 private let NEW_CJ_THREAD_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThread"
 private let NEW_CJ_THREAD_NO_RETURN_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThreadNoReturn"
@@ -171,31 +170,17 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateEntryAlloca(valueType: LLVMTypeRef, name!: String = ""): LLVMValueRef {
+        CJC_ASSERT(!valueType.isNull())
         let currentBlock = unsafe { LLVMGetInsertBlock(builder.raw) }
-        if (currentBlock.isNull()) {
-            return CreateAllocaAtCurrentPoint(valueType, name)
-        }
+        CJC_ASSERT(!currentBlock.isNull())
+        let currentInsertPoint = unsafe { LLVMSelfhostGetInsertPointInstruction(builder.raw) }
         let currentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
-        if (currentFunction.isNull()) {
-            return CreateAllocaAtCurrentPoint(valueType, name)
-        }
-        let allocaBlock = GetOrCreateAllocaBlock(currentFunction)
-        if (allocaBlock.isNull()) {
-            return CreateAllocaAtCurrentPoint(valueType, name)
-        }
-        let terminator = unsafe { LLVMGetBasicBlockTerminator(allocaBlock) }
-        if (terminator.isNull()) {
-            unsafe { LLVMPositionBuilderAtEnd(builder.raw, allocaBlock) }
-        } else {
-            unsafe { LLVMPositionBuilderBefore(builder.raw, terminator) }
-        }
+        CJC_ASSERT(!currentFunction.isNull())
+        let currentLocation = unsafe { LLVMGetCurrentDebugLocation2(builder.raw) }
+        SetInsertPointToAllocas(currentFunction)
         let result = CreateAllocaAtCurrentPoint(valueType, name)
-        let currentTerminator = unsafe { LLVMGetBasicBlockTerminator(currentBlock) }
-        if (currentTerminator.isNull()) {
-            unsafe { LLVMPositionBuilderAtEnd(builder.raw, currentBlock) }
-        } else {
-            unsafe { LLVMPositionBuilderBefore(builder.raw, currentTerminator) }
-        }
+        RestoreInsertPoint(currentBlock, currentInsertPoint)
+        unsafe { LLVMSetCurrentDebugLocation2(builder.raw, currentLocation) }
         return result
     }
 
@@ -854,6 +839,30 @@ public class IRBuilder2 <: Resource {
         return result
     }
 
+    private func SetInsertPointToAllocas(currentFunction: LLVMValueRef): Unit {
+        var entryBlock = unsafe { LLVMGetEntryBasicBlock(currentFunction) }
+        if (!IsBasicBlockNamed(entryBlock, "allocas")) {
+            let allocaBlock = CreateEntryBasicBlock(currentFunction, "allocas")
+            SetInsertPoint(allocaBlock)
+            let savedLocation = unsafe { LLVMGetCurrentDebugLocation2(builder.raw) }
+            unsafe { LLVMSetCurrentDebugLocation2(builder.raw, LLVMNullMetadata()) }
+            CreateBr(entryBlock)
+            unsafe { LLVMSetCurrentDebugLocation2(builder.raw, savedLocation) }
+            entryBlock = allocaBlock
+        }
+        let terminator = unsafe { LLVMGetBasicBlockTerminator(entryBlock) }
+        CJC_ASSERT(!terminator.isNull())
+        SetInsertPointBefore(terminator)
+    }
+
+    private func RestoreInsertPoint(block: LLVMBasicBlockRef, insertPoint: LLVMValueRef): Unit {
+        if (insertPoint.isNull()) {
+            unsafe { LLVMPositionBuilderAtEnd(builder.raw, block) }
+        } else {
+            unsafe { LLVMPositionBuilderBefore(builder.raw, insertPoint) }
+        }
+    }
+
     public func CreateAndInsertBasicBlock(name: String): LLVMBasicBlockRef {
         let currentBlock = GetInsertBlock()
         if (currentBlock.isNull()) {
@@ -1084,7 +1093,10 @@ public class IRBuilder2 <: Resource {
         var result = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             if (args.isEmpty()) {
-                result = unsafe { LLVMBuildCall2(builder.raw, calleeType, callee, CPointer<LLVMValueRef>(), 0u32, nameCString.value) }
+                result = unsafe {
+                    LLVMSelfhostCreateCall(builder.raw, calleeType, callee, CPointer<LLVMValueRef>(), 0u32,
+                        nameCString.value)
+                }
             } else {
                 try (argPtr = LibC.malloc<LLVMValueRef>(count: args.size).asResource()) {
                     var idx: Int64 = 0
@@ -1092,7 +1104,10 @@ public class IRBuilder2 <: Resource {
                         unsafe { (argPtr.value + idx).write(args[idx]) }
                         idx++
                     }
-                    result = unsafe { LLVMBuildCall2(builder.raw, calleeType, callee, argPtr.value, UInt32(args.size), nameCString.value) }
+                    result = unsafe {
+                        LLVMSelfhostCreateCall(builder.raw, calleeType, callee, argPtr.value, UInt32(args.size),
+                            nameCString.value)
+                    }
                 }
             }
         }
@@ -1859,24 +1874,14 @@ public class IRBuilder2 <: Resource {
 
     public func CallGCReadStaticAgg(structType: LLVMTypeRef, args: ArrayList<LLVMValueRef>): LLVMValueRef {
         CJC_ASSERT(args.size == 3)
-        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
-        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
         let i64Type = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
-        let overloadedTypes = ArrayList<LLVMTypeRef>()
-        overloadedTypes.add(i64Type)
-        let fixedArgs = ArrayList<LLVMValueRef>()
-        fixedArgs.add(CreatePointerCast(args[0], i8PtrType, name: "gcread.static.agg.dest"))
-        fixedArgs.add(CreatePointerCast(args[1], i8PtrType, name: "gcread.static.agg.source"))
-        fixedArgs.add(CreateZExtOrTrunc(args[2], i64Type, name: "gcread.static.agg.size"))
-        let call = CreateIntrinsicCallNoInvoke(GCREAD_STATIC_STRUCT_INTRINSIC_NAME, overloadedTypes, fixedArgs)
-        let aggTypeName = if (!structType.isNull() && unsafe { LLVMGetTypeKind(structType) } == LLVM_STRUCT_TYPE_KIND) {
-            LLVMCStringToString(unsafe { LLVMGetStructName(structType) }) ?? ""
-        } else {
-            ""
+        if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+            return unsafe {
+                LLVMSelfhostCreateGCReadStaticAgg(builder.raw, moduleHandle.raw, structType, args[0], args[1], args[2],
+                    i64Type)
+            }
         }
-        let metadata = LLVMCreateMDTupleFromString(GetLLVMContext(), aggTypeName)
-        LLVMSetInstructionMetadata(GetLLVMContext(), call, "AggType", metadata)
-        return call
+        return LLVMNullValue()
     }
 
     public func CallGCReadGeneric(dest: LLVMValueRef, baseObject: LLVMValueRef, source: LLVMValueRef,
@@ -2890,7 +2895,7 @@ public class IRBuilder2 <: Resource {
     public func CreatePointerCast(value: LLVMValueRef, destType: LLVMTypeRef, name!: String = "ptrcast"): LLVMValueRef {
         var result = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
-            result = unsafe { LLVMBuildPointerCast(builder.raw, value, destType, nameCString.value) }
+            result = unsafe { LLVMSelfhostCreatePointerCast(builder.raw, value, destType, nameCString.value) }
         }
         PropagateBasePtr(value, result)
         return result
@@ -3518,6 +3523,16 @@ public class IRBuilder2 <: Resource {
         return GetSizeFromTypeInfo(CreateTypeInfo(baseType))
     }
 
+    public func GetLayoutSize_64(chirTy: Type): LLVMValueRef {
+        let baseType = DeRef(chirTy)
+        let cgType = CGType.GetOrCreate(cgMod, baseType)
+        if (let Some(staticSize) <- cgType.GetSize()) {
+            return unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), UInt64(staticSize), 0) }
+        }
+        let typeInfo = CreateTypeInfo(baseType)
+        return CreateSExt(GetSizeFromTypeInfo(typeInfo), unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) })
+    }
+
     public func GetSizeFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {
         let currentBlock = GetInsertBlock()
         let blockKey = currentBlock.toUIntNative()
@@ -4016,27 +4031,6 @@ public class IRBuilder2 <: Resource {
             intrinsicID = unsafe { LLVMLookupIntrinsicID(nameCString.value, UIntNative(intrinsicName.size)) }
         }
         return intrinsicID
-    }
-
-    private func GetOrCreateAllocaBlock(parentFunction: LLVMValueRef): LLVMBasicBlockRef {
-        let entryBlock = unsafe { LLVMGetEntryBasicBlock(parentFunction) }
-        if (entryBlock.isNull()) {
-            return LLVMNullBasicBlock()
-        }
-        var result = LLVMNullBasicBlock()
-        try (allocasName = unsafe { LibC.mallocCString("allocas") }.asResource()) {
-            let entryName = unsafe { LLVMGetBasicBlockName(entryBlock) }
-            if (!entryName.isNull() && unsafe { strcmp(entryName, allocasName.value) } == 0) {
-                result = entryBlock
-            } else {
-                result = unsafe {
-                    LLVMInsertBasicBlockInContext(GetLLVMContext().raw, entryBlock, allocasName.value)
-                }
-                unsafe { LLVMPositionBuilderAtEnd(builder.raw, result) }
-                let _ = unsafe { LLVMBuildBr(builder.raw, entryBlock) }
-            }
-        }
-        return result
     }
 
     private func IsBasicBlockNamed(block: LLVMBasicBlockRef, name: String): Bool {

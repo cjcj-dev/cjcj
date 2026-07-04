@@ -15,6 +15,11 @@ import cangjie_compiler::chir.Value
 import cangjie_compiler::mangle.GetCustomTypeIdentifier
 import cangjie_compiler::utils.CJC_ASSERT
 
+private let LLVM_FUNCTION_TYPE_KIND: Int32 = 9
+private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
+private let LLVM_ARRAY_TYPE_KIND: Int32 = 11
+private let LLVM_POINTER_TYPE_KIND: Int32 = 12
+
 public enum CGTypeKind {
     | OTHERS
     | CG_PRIMITIVE
@@ -186,11 +191,12 @@ public open class CGType {
     public func IsBooleanType(): Bool { return chirType.IsBoolean() }
 
     public func IsPointerType(addrSpace!: UInt32 = 0u32): Bool {
-        if (chirType.IsRef() || chirType.IsRawArray() || chirType.IsBox() || chirType.IsCPointer() ||
-            chirType.IsCString()) {
-            return addrspace == addrSpace || addrSpace == 0u32
+        if (chirType.IsRef()) {
+            return true
         }
-        return false
+        let rawTy = GetLLVMType()
+        return !chirType.IsFunc() && !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == LLVM_POINTER_TYPE_KIND &&
+            unsafe { LLVMGetPointerAddressSpace(rawTy) } == addrSpace
     }
 
     public func IsStructType(): Bool {
@@ -201,7 +207,14 @@ public open class CGType {
         let rawTy = GetLLVMType()
         return !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 11
     }
-    public func IsStructPtrType(): Bool { return IsPointerType() && !GetContainedTypes().isEmpty() && GetContainedTypes()[0].IsStructType() }
+    public func IsStructPtrType(): Bool {
+        if (!IsPointerType()) {
+            return false
+        }
+        let elementType = GetPointerElementType().getOrThrow().GetLLVMType()
+        CJC_ASSERT(!elementType.isNull())
+        return unsafe { LLVMGetTypeKind(elementType) } == LLVM_STRUCT_TYPE_KIND
+    }
     public func IsRefType(): Bool { return cgTypeKind == CGTypeKind.CG_REF }
     public func IsReference(): Bool {
         if (chirType.IsRef()) {
@@ -231,7 +244,14 @@ public open class CGType {
         }
         return false
     }
-    public func IsFuncPtrType(): Bool { return chirType.IsFunc() }
+    public func IsFuncPtrType(): Bool {
+        if (!IsPointerType()) {
+            return false
+        }
+        let elementType = GetPointerElementType().getOrThrow().GetLLVMType()
+        CJC_ASSERT(!elementType.isNull())
+        return unsafe { LLVMGetTypeKind(elementType) } == LLVM_FUNCTION_TYPE_KIND
+    }
     public func IsCGEnum(): Bool { return cgTypeKind == CGTypeKind.CG_ENUM }
     public func IsCGRef(): Bool { return cgTypeKind == CGTypeKind.CG_REF }
     public func IsCGFunction(): Bool { return cgTypeKind == CGTypeKind.CG_FUNCTION }
@@ -256,8 +276,12 @@ public open class CGType {
         return !rawTy.isNull() && IsPointerType() && GetPointerElementType().getOrThrow().IsPointerType()
     }
     public func IsVArrayPtrType(): Bool {
-        return IsPointerType() &&
-            unsafe { LLVMGetTypeKind(GetPointerElementType().getOrThrow().GetLLVMType()) } == 11
+        if (!IsPointerType()) {
+            return false
+        }
+        let elementType = GetPointerElementType().getOrThrow().GetLLVMType()
+        CJC_ASSERT(!elementType.isNull())
+        return unsafe { LLVMGetTypeKind(elementType) } == LLVM_ARRAY_TYPE_KIND
     }
     public func GetAddrspace(): UInt32 { return addrspace }
     public func GetSize(): Option<Int64> { Complete(); return size }

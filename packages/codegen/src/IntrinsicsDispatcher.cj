@@ -333,13 +333,46 @@ private func GenerateCPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>
     let indexValue = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
     let value = irBuilder.GetCGModule().GetMappedCGValue(args[2])
     if (let Some(valueTy) <- args[2].GetType()) {
-        let valueCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), valueTy)
-        let typedPtr = irBuilder.CreatePointerCast(pointerValue,
-            unsafe { LLVMPointerType(valueCGType.GetLLVMType(), 0u32) }, name: "ptr.write.cast")
+        if (valueTy.IsGeneric()) {
+            let valueTySize = irBuilder.GetLayoutSize_32(valueTy)
+            let fixedTypeSize = irBuilder.CreateZExtOrTrunc(valueTySize,
+                unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }, name: "ptr.write.size")
+            let offset = irBuilder.CreateBinary(ExprKind.MUL, fixedTypeSize, indexValue, name: "ptr.write.offset")
+            let i8Type = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
+            let indices = ArrayList<LLVMValueRef>()
+            indices.add(offset)
+            let addr = irBuilder.CreateGEP(i8Type, pointerValue, indices, name: "ele.ptr")
+            let payloadPtr = irBuilder.GetPayloadFromObject(value.GetRawValue())
+            return irBuilder.CreateMemCpy(addr, 0u32, payloadPtr, 0u32, valueTySize)
+        }
+        let rawValue = value.GetRawValue()
+        let rawValueType = unsafe { LLVMTypeOf(rawValue) }
+        let pointerType = unsafe { LLVMTypeOf(pointerValue) }
+        let pointerAddrSpace = if (!pointerType.isNull() &&
+            unsafe { LLVMGetTypeKind(pointerType) } == 12) {
+            unsafe { LLVMGetPointerAddressSpace(pointerType) }
+        } else {
+            0u32
+        }
+        let paramType = if (IsStructPtrType(rawValueType)) {
+            unsafe { LLVMPointerType(GetPointerElementType(rawValueType), pointerAddrSpace) }
+        } else {
+            unsafe { LLVMPointerType(rawValueType, 0u32) }
+        }
+        let typedPtr = irBuilder.CreatePointerCast(pointerValue, paramType, name: "ptr.write.cast")
         let indices = ArrayList<LLVMValueRef>()
         indices.add(indexValue)
-        let addr = irBuilder.CreateGEP(valueCGType.GetLLVMType(), typedPtr, indices, name: "ptr.write.addr")
-        return irBuilder.CreateStore(value.GetRawValue(), addr)
+        let addr = irBuilder.CreateGEP(GetPointerElementType(paramType), typedPtr, indices, name: "ptr.write.addr")
+        if (valueTy.IsStruct() || valueTy.IsUnit()) {
+            let elementType = GetPointerElementType(rawValueType)
+            let size = unsafe {
+                LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw),
+                    irBuilder.GetCGModule().GetTypeSize(elementType), 0)
+            }
+            let align = irBuilder.GetCGModule().GetABITypeAlignment(elementType)
+            return irBuilder.CreateMemCpy(addr, align, rawValue, align, size)
+        }
+        return irBuilder.CreateStore(rawValue, addr)
     }
     return LLVMNullValue()
 }
