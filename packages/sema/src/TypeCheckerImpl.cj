@@ -236,18 +236,18 @@ public class TypeCheckerImpl {
 
     public func Lookup(ctx: ASTContext, name: String, scopeName: String, node: Node,
         isSetter!: Bool = false): ArrayList<Decl> {
-        return Lookup(typeManager, ctx, name, scopeName, node, isSetter: isSetter)
+        return Lookup(typeManager, ctx, name, scopeName, node, isSetter: isSetter, importManager: importManager)
     }
 
     public func LookupTopLevel(ctx: ASTContext, name: String, scopeName: String, node: Node,
         isSetter!: Bool = false): ArrayList<Decl> {
-        return LookupTopLevel(typeManager, ctx, name, scopeName, node, isSetter: isSetter)
+        return LookupTopLevel(typeManager, ctx, name, scopeName, node, isSetter: isSetter, importManager: importManager)
     }
 
     public func FieldLookup(ctx: ASTContext, decl: Option<Decl>, fieldName: String,
         info!: LookupInfo = LookupInfo()): ArrayList<Decl> {
         let _ = ctx
-        return FieldLookup(typeManager, decl, fieldName, info: info)
+        return FieldLookup(typeManager, decl, fieldName, info: info, importManager: importManager)
     }
 
     public func ExtendFieldLookup(ctx: ASTContext, file: File, ty: Option<Ty>, fieldName: String): ArrayList<Decl> {

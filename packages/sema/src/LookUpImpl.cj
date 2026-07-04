@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
 import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
+import cangjie_compiler::modules.SemaImportManager
 import cangjie_compiler::modules.SplitQualifiedName as ModulesSplitQualifiedName
 
 private let LOOKUP_CORE_PACKAGE_NAME: String = "std.core"
@@ -536,9 +537,18 @@ private func fieldLookupStruct(typeManager: TypeManager, sd: StructDecl, fieldNa
     return results
 }
 
-private func fieldLookupPackage(pd: PackageDecl, fieldName: String): ArrayList<Decl> {
+private func fieldLookupPackage(pd: PackageDecl, fieldName: String,
+    importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
     let results = ArrayList<Decl>()
     if (!pd.TestAttr(Attribute.IMPORTED)) {
+        return results
+    }
+    if (let Some(manager) <- importManager) {
+        for (decl in manager.GetPackageMembersByName(pd.srcPackage, fieldName)) {
+            if (!decl.TestAttr(Attribute.MAIN_ENTRY)) {
+                addDeclUnique(results, decl)
+            }
+        }
         return results
     }
     for (file in pd.srcPackage.files) {
@@ -634,8 +644,21 @@ private func lookupKnownPackageDecl(ctx: ASTContext, fullPackageName: String): O
     return None
 }
 
-private func stdLibFieldLookup(ctx: ASTContext, node: Node, fieldName: String): ArrayList<Decl> {
+private func stdLibFieldLookup(ctx: ASTContext, node: Node, fieldName: String,
+    importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
     let results = ArrayList<Decl>()
+    if (let Some(manager) <- importManager) {
+        var target: Option<Decl> = None
+        if (node.TestAttr(Attribute.IN_CORE)) {
+            target = manager.GetCoreDecl<Decl>(fieldName)
+        } else if (node.TestAttr(Attribute.IN_MACRO)) {
+            target = manager.GetAstDecl<Decl>(fieldName)
+        }
+        if (let Some(decl) <- target) {
+            results.add(decl)
+        }
+        return results
+    }
     var packageName: Option<String> = None
     if (node.TestAttr(Attribute.IN_CORE)) {
         packageName = Some(LOOKUP_CORE_PACKAGE_NAME)
@@ -774,7 +797,7 @@ private func collectResolvedImportedDeclsByName(ctx: ASTContext, node: Node, nam
 }
 
 public func FieldLookup(typeManager: TypeManager, decl: Option<Decl>, fieldName: String,
-    info!: LookupInfo = LookupInfo()): ArrayList<Decl> {
+    info!: LookupInfo = LookupInfo(), importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
     let results = ArrayList<Decl>()
     if (let Some(target) <- decl) {
         let actual = if (let Some(specific) <- target.specificImplementation) { specific } else { target }
@@ -797,7 +820,7 @@ public func FieldLookup(typeManager: TypeManager, decl: Option<Decl>, fieldName:
             return fieldLookupStruct(typeManager, structDecl, fieldName, info)
         }
         if (let Some(packageDecl) <- (actual as PackageDecl)) {
-            return fieldLookupPackage(packageDecl, fieldName)
+            return fieldLookupPackage(packageDecl, fieldName, importManager: importManager)
         }
     }
     return results
@@ -927,19 +950,19 @@ private func lookupImpl(typeManager: TypeManager, ctx: ASTContext, name: String,
 }
 
 public func Lookup(typeManager: TypeManager, ctx: ASTContext, name: String, scopeName: String, node: Node,
-    isSetter!: Bool = false): ArrayList<Decl> {
-    return lookupCommon(typeManager, ctx, name, scopeName, node, false, isSetter)
+    isSetter!: Bool = false, importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
+    return lookupCommon(typeManager, ctx, name, scopeName, node, false, isSetter, importManager: importManager)
 }
 
 public func LookupTopLevel(typeManager: TypeManager, ctx: ASTContext, name: String, scopeName: String, node: Node,
-    isSetter!: Bool = false): ArrayList<Decl> {
-    return lookupCommon(typeManager, ctx, name, scopeName, node, true, isSetter)
+    isSetter!: Bool = false, importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
+    return lookupCommon(typeManager, ctx, name, scopeName, node, true, isSetter, importManager: importManager)
 }
 
 private func lookupCommon(typeManager: TypeManager, ctx: ASTContext, name: String, scopeName: String, node: Node,
-    onlyLookUpTopLevel: Bool, isSetter: Bool): ArrayList<Decl> {
+    onlyLookUpTopLevel: Bool, isSetter: Bool, importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
     let results = ArrayList<Decl>()
-    for (decl in stdLibFieldLookup(ctx, node, name)) {
+    for (decl in stdLibFieldLookup(ctx, node, name, importManager: importManager)) {
         results.add(decl)
     }
     if (!results.isEmpty() || name == INVALID_IDENTIFIER || scopeName.isEmpty()) {
@@ -949,6 +972,14 @@ private func lookupCommon(typeManager: TypeManager, ctx: ASTContext, name: Strin
         return results
     }
     if (!results.isEmpty() && !isAllFuncDecl(results)) {
+        return results
+    }
+    if (let Some(manager) <- importManager) {
+        if (let Some(file) <- node.curFile) {
+            for (decl in manager.GetImportedDeclsByName(file, name)) {
+                addDeclUnique(results, decl)
+            }
+        }
         return results
     }
     for (decl in collectResolvedImportedDeclsByName(ctx, node, name)) {

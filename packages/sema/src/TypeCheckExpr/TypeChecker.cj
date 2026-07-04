@@ -17,6 +17,7 @@ import cangjie_compiler::sema.FFI.*
 import cangjie_compiler::sema.InheritanceChecker.*
 import cangjie_compiler::sema.LegalityOfUsage.*
 import cangjie_compiler::sema.NativeFFI.*
+import cangjie_compiler::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
 import cangjie_compiler::utils.CTYPE_NAME as UtilsCTypeName
 
 private func contextPackage(ctx: ASTContext): Option<Package> {
@@ -1266,7 +1267,7 @@ public class TypeChecker {
             return
         }
         let objectDecl: Option<Decl> = if (let Some(manager) <- impl.importManager) {
-            manager.GetImportedDecl("std.core", "Object")
+            manager.GetImportedDecl<Decl>(UTILS_CORE_PACKAGE_NAME, "Object")
         } else {
             None
         }
@@ -1281,11 +1282,9 @@ public class TypeChecker {
 
     private func UpdateAnyTy(): Unit {
         if (let Some(manager) <- impl.importManager) {
-            if (let Some(decl) <- manager.GetCoreDecl("Any")) {
-                if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
-                    if (Ty.IsTyCorrect(interfaceDecl.GetTy())) {
-                        impl.typeManager.SetSemaAnyTy(interfaceDecl.GetTy().getOrThrow())
-                    }
+            if (let Some(interfaceDecl) <- manager.GetCoreDecl<InterfaceDecl>("Any")) {
+                if (Ty.IsTyCorrect(interfaceDecl.GetTy())) {
+                    impl.typeManager.SetSemaAnyTy(interfaceDecl.GetTy().getOrThrow())
                 }
             }
         }
@@ -1298,11 +1297,9 @@ public class TypeChecker {
             }
         }
         if (let Some(manager) <- impl.importManager) {
-            if (let Some(decl) <- manager.GetCoreDecl(UtilsCTypeName)) {
-                if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
-                    if (Ty.IsTyCorrect(interfaceDecl.GetTy())) {
-                        impl.typeManager.SetSemaCTypeTy(interfaceDecl.GetTy().getOrThrow())
-                    }
+            if (let Some(interfaceDecl) <- manager.GetCoreDecl<InterfaceDecl>(UtilsCTypeName)) {
+                if (Ty.IsTyCorrect(interfaceDecl.GetTy())) {
+                    impl.typeManager.SetSemaCTypeTy(interfaceDecl.GetTy().getOrThrow())
                 }
             }
         }
@@ -2591,15 +2588,17 @@ public class TypeChecker {
     }
 
     private func LookupCoreDeclForSpawn(ctx: ASTContext, name: String): Option<Decl> {
-        if (let Some(decl) <- lookupResolvedPackageDecl(ctx, "std.core", name)) {
-            return Some(decl)
+        let _ = ctx
+        if (let Some(manager) <- impl.importManager) {
+            return manager.GetCoreDecl<Decl>(name)
         }
         return None
     }
 
     private func LookupCoreFutureForSpawn(ctx: ASTContext): Option<ClassDecl> {
-        if (let Some(decl) <- LookupCoreDeclForSpawn(ctx, "Future")) {
-            return decl as ClassDecl
+        let _ = ctx
+        if (let Some(manager) <- impl.importManager) {
+            return manager.GetCoreDecl<ClassDecl>("Future")
         }
         return None
     }
@@ -3246,7 +3245,11 @@ public class TypeChecker {
         if (inTy.IsNothing()) {
             return TypeManager.GetInvalidTy()
         }
-        let iterableDecl = GetCoreDecl(ctx, "Iterable")
+        let iterableDecl: Option<Decl> = if (let Some(manager) <- impl.importManager) {
+            manager.GetCoreDecl<Decl>("Iterable")
+        } else {
+            None
+        }
         if (let Some(genericTy) <- (inTy as GenericsTy)) {
             if (genericTy.isPlaceholder) {
                 let iterableTy = iterableDecl.getOrThrow().GetTy().getOrThrow()
@@ -3686,15 +3689,19 @@ public class TypeChecker {
     }
 
     private func LookupCoreTy(ctx: ASTContext, name: String): Option<Ty> {
-        if (let Some(decl) <- GetCoreDecl(ctx, name)) {
-            return decl.GetTy()
+        let _ = ctx
+        if (let Some(manager) <- impl.importManager) {
+            if (let Some(decl) <- manager.GetCoreDecl<Decl>(name)) {
+                return decl.GetTy()
+            }
         }
         return None
     }
 
     private func LookupCoreEnumDecl(ctx: ASTContext, name: String): Option<EnumDecl> {
-        if (let Some(decl) <- GetCoreDecl(ctx, name)) {
-            return decl as EnumDecl
+        let _ = ctx
+        if (let Some(manager) <- impl.importManager) {
+            return manager.GetCoreDecl<EnumDecl>(name)
         }
         return None
     }
@@ -3829,8 +3836,8 @@ public class TypeChecker {
     private func CheckArrayLit(ctx: ASTContext, target: Ty, arrayLit: ArrayLit): Bool {
         let targetTy = UnboxOptionType(target)
         var arrayStruct: Option<StructDecl> = None
-        if (let Some(arrayDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "Array")) {
-            arrayStruct = arrayDecl as StructDecl
+        if (let Some(manager) <- impl.importManager) {
+            arrayStruct = manager.GetCoreDecl<StructDecl>("Array")
         }
         var matched = true
         if (targetTy.typeArgs.size >= 1) {
@@ -3873,8 +3880,10 @@ public class TypeChecker {
         }
         if (let Some(syncExpr) <- (expr as SynchronizedExpr)) {
             var lockTy: Option<Ty> = None
-            if (let Some(lockDecl) <- lookupResolvedPackageDecl(ctx, "std.sync", "Lock")) {
-                lockTy = lockDecl.GetTy()
+            if (let Some(manager) <- impl.importManager) {
+                if (let Some(lockDecl) <- manager.GetSyncDecl("Lock")) {
+                    lockTy = lockDecl.GetTy()
+                }
             }
             return FinishSynthesize(ctx, syncExpr, SynSyncExpr(impl.typeManager, syncExpr, lockTy: lockTy,
                 diag: impl.diag,
@@ -4032,7 +4041,7 @@ public class TypeChecker {
                 let _ = Synthesize(ctx, leftExpr)
             }
             return FinishSynthesize(ctx, isExpr, SynExprShallow(impl.typeManager, isExpr, ctx: Some(ctx),
-                diag: impl.diag))
+                diag: impl.diag, importManager: impl.importManager))
         }
         if (let Some(asExpr) <- (expr as AsExpr)) {
             SynthesizeTypeNode(ctx, asExpr.asType)
@@ -4066,12 +4075,16 @@ public class TypeChecker {
         if (isStringLiteral(expr)) {
             if (let Some(lit) <- (expr as LitConstExpr)) {
                 var stringTy: Option<Ty> = None
-                if (let Some(stringDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "String")) {
-                    stringTy = stringDecl.GetTy()
+                if (let Some(manager) <- impl.importManager) {
+                    if (let Some(stringDecl) <- manager.GetCoreDecl<Decl>("String")) {
+                        stringTy = stringDecl.GetTy()
+                    }
                 }
                 var toStringTy: Option<Ty> = None
-                if (let Some(toStringDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "ToString")) {
-                    toStringTy = toStringDecl.GetTy()
+                if (let Some(manager2) <- impl.importManager) {
+                    if (let Some(toStringDecl) <- manager2.GetCoreDecl<Decl>("ToString")) {
+                        toStringTy = toStringDecl.GetTy()
+                    }
                 }
                 return FinishSynthesize(ctx, lit,
                     SynLitConstExpr(lit, stringTy: stringTy, toStringTy: toStringTy,
@@ -4084,8 +4097,8 @@ public class TypeChecker {
         SynthesizeNodeChildren(ctx, expr)
         if (let Some(rangeExpr) <- (expr as RangeExpr)) {
             var rangeStruct: Option<StructDecl> = None
-            if (let Some(rangeDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "Range")) {
-                rangeStruct = rangeDecl as StructDecl
+            if (let Some(manager3) <- impl.importManager) {
+                rangeStruct = manager3.GetCoreDecl<StructDecl>("Range")
             }
             return FinishSynthesize(ctx, rangeExpr, SynRangeExpr(impl.typeManager, rangeExpr, rangeDecl: rangeStruct,
                 ctx: Some(ctx), checker: Some({ targetTy: Ty, child: Expr => Check(ctx, targetTy, child) }),
@@ -4095,8 +4108,8 @@ public class TypeChecker {
         }
         if (let Some(arrayLit) <- (expr as ArrayLit)) {
             var arrayStruct: Option<StructDecl> = None
-            if (let Some(arrayDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "Array")) {
-                arrayStruct = arrayDecl as StructDecl
+            if (let Some(manager4) <- impl.importManager) {
+                arrayStruct = manager4.GetCoreDecl<StructDecl>("Array")
             }
             let arrayTy = SynArrayLit(impl.typeManager, arrayLit, arrayStruct)
             return FinishSynthesize(ctx, arrayLit, arrayTy)
@@ -4104,7 +4117,8 @@ public class TypeChecker {
         if (let Some(spawnExpr) <- (expr as SpawnExpr)) {
             return SynthesizeSpawnExpr(ctx, spawnExpr)
         }
-        return FinishSynthesize(ctx, expr, SynExprShallow(impl.typeManager, expr, diag: impl.diag))
+        return FinishSynthesize(ctx, expr,
+            SynExprShallow(impl.typeManager, expr, diag: impl.diag, importManager: impl.importManager))
     }
 
     private func SynthesizeLogicalBinaryExpr(ctx: ASTContext, be: BinaryExpr): Ty {
@@ -4205,7 +4219,7 @@ public class TypeChecker {
                 return impl.typeManager.CheckTypeCompatibility(target, desugarTy) != TypeCompatibility.INCOMPATIBLE
             }
         }
-        return ChkBinaryExpr(impl.typeManager, target, be, ctx: Some(ctx),
+        return ChkBinaryExpr(impl, target, be, ctx: Some(ctx),
             synthesizer: Some({ operand: Expr => SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand) }),
             checker: Some({ targetTy: Ty, operand2: Expr => CheckWithNegCache(ctx, targetTy, operand2) }),
             diag: impl.diag)
@@ -4387,8 +4401,8 @@ public class TypeChecker {
         }
         if (let Some(rangeExpr) <- (expr as RangeExpr)) {
             var rangeStruct: Option<StructDecl> = None
-            if (let Some(rangeDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "Range")) {
-                rangeStruct = rangeDecl as StructDecl
+            if (let Some(manager) <- impl.importManager) {
+                rangeStruct = manager.GetCoreDecl<StructDecl>("Range")
             }
             return FinishCheck(ctx, rangeExpr, ChkRangeExpr(impl.typeManager, target, rangeExpr,
                 rangeDecl: rangeStruct, ctx: Some(ctx),
@@ -4401,11 +4415,15 @@ public class TypeChecker {
             var stringTy: Option<Ty> = None
             var toStringTy: Option<Ty> = None
             if (isStringLiteral(lit)) {
-                if (let Some(stringDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "String")) {
-                    stringTy = stringDecl.GetTy()
+                if (let Some(manager2) <- impl.importManager) {
+                    if (let Some(stringDecl) <- manager2.GetCoreDecl<Decl>("String")) {
+                        stringTy = stringDecl.GetTy()
+                    }
                 }
-                if (let Some(toStringDecl) <- lookupResolvedPackageDecl(ctx, "std.core", "ToString")) {
-                    toStringTy = toStringDecl.GetTy()
+                if (let Some(manager3) <- impl.importManager) {
+                    if (let Some(toStringDecl) <- manager3.GetCoreDecl<Decl>("ToString")) {
+                        toStringTy = toStringDecl.GetTy()
+                    }
                 }
             }
             return FinishCheck(ctx, lit, ChkLitConstExpr(impl.typeManager, target, lit, stringTy: stringTy,
@@ -4441,7 +4459,7 @@ public class TypeChecker {
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
             let _ = SynthesizeNameReference(ctx, nameRef)
             return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx),
-                diag: impl.diag))
+                diag: impl.diag, importManager: impl.importManager))
         }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             let throwTy = SynthesizeThrowExpr(ctx, throwExpr)
@@ -4469,8 +4487,10 @@ public class TypeChecker {
         }
         if (let Some(syncExpr) <- (expr as SynchronizedExpr)) {
             var lockTy: Option<Ty> = None
-            if (let Some(lockDecl) <- lookupResolvedPackageDecl(ctx, "std.sync", "Lock")) {
-                lockTy = lockDecl.GetTy()
+            if (let Some(manager4) <- impl.importManager) {
+                if (let Some(lockDecl) <- manager4.GetSyncDecl("Lock")) {
+                    lockTy = lockDecl.GetTy()
+                }
             }
             return FinishCheck(ctx, syncExpr, ChkSyncExpr(impl.typeManager, syncExpr, lockTy: lockTy,
                 targetTy: Some(target), diag: impl.diag,
@@ -4532,7 +4552,7 @@ public class TypeChecker {
         }
         let _ = Synthesize(ctx, expr)
         return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx),
-            diag: impl.diag))
+            diag: impl.diag, importManager: impl.importManager))
     }
 
     private func ResolveRefExpr(ctx: ASTContext, refExpr: RefExpr): Unit {

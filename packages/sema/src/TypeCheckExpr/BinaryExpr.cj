@@ -6,6 +6,8 @@ import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.*
+import cangjie_compiler::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
+import cangjie_compiler::utils.STD_LIB_OPTION
 
 public type BinaryOperandSynthesizer = (Expr) -> Ty
 public type BinaryOperandChecker = (Ty, Expr) -> Bool
@@ -1086,16 +1088,60 @@ private func ChkFlowExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr): 
     return false
 }
 
-private func SynCoalescingExpr(typeManager: TypeManager, be: BinaryExpr,
+private func IsCoalescingLeftTyValid(impl: TypeCheckerImpl, ty: Ty): Bool {
+    var realTy = ty
+    if (ty.IsPlaceholder()) {
+        if (let Some(genericTy) <- (ty as GenericsTy)) {
+            if (let Some(manager) <- impl.importManager) {
+                if (let Some(optionDecl) <- manager.GetCoreDecl<Decl>(STD_LIB_OPTION)) {
+                    realTy = if (let Some(optionTy) <- optionDecl.GetTy()) {
+                        impl.typeManager.ConstrainByCtor(genericTy, optionTy) ?? TypeManager.GetInvalidTy()
+                    } else {
+                        TypeManager.GetInvalidTy()
+                    }
+                } else {
+                    realTy = TypeManager.GetInvalidTy()
+                }
+            } else {
+                realTy = TypeManager.GetInvalidTy()
+            }
+        }
+    }
+    if (!Ty.IsTyCorrect(realTy) || !realTy.IsEnum()) {
+        return false
+    }
+    let enumTy = match (realTy as EnumTy) {
+        case Some(value) => value
+        case None => return false
+    }
+    let enumDecl = match (enumTy.declPtr) {
+        case Some(value) => value
+        case None => return false
+    }
+    if (enumDecl.fullPackageName != UTILS_CORE_PACKAGE_NAME || enumTy.typeArgs.size != 1) {
+        return false
+    } else if (enumDecl.identifier == STD_LIB_OPTION) {
+        return true
+    }
+    return false
+}
+
+private func SynCoalescingExpr(impl: TypeCheckerImpl, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None): Ty {
+    let typeManager = impl.typeManager
     if (let Some(leftExpr) <- be.leftExpr) {
         let leftTy = SynBinaryOperand(typeManager, leftExpr, synthesizer)
         if (!Ty.IsTyCorrect(leftTy)) {
             return BinaryInvalid(be)
         }
-        let concreteLeftTy = TcReplaceIdeal(typeManager, leftExpr)
-        if (!concreteLeftTy.IsCoreOptionType() || concreteLeftTy.typeArgs.size != 1) {
+        var concreteLeftTy = TcReplaceIdeal(typeManager, leftExpr)
+        if (!IsCoalescingLeftTyValid(impl, concreteLeftTy)) {
+            return BinaryInvalid(be)
+        }
+        concreteLeftTy = typeManager.TryGreedySubst(concreteLeftTy)
+        leftExpr.SetTy(concreteLeftTy)
+        if (concreteLeftTy.typeArgs.size != 1) {
             return BinaryInvalid(be)
         }
         let unboxedTy = concreteLeftTy.typeArgs[0]
@@ -1109,17 +1155,24 @@ private func SynCoalescingExpr(typeManager: TypeManager, be: BinaryExpr,
     return BinaryInvalid(be)
 }
 
-private func ChkCoalescingExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
+private func ChkCoalescingExpr(impl: TypeCheckerImpl, target: Ty, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None): Bool {
+    let typeManager = impl.typeManager
     if (let Some(leftExpr) <- be.leftExpr) {
         let leftTy = SynBinaryOperand(typeManager, leftExpr, synthesizer)
         if (!Ty.IsTyCorrect(leftTy)) {
             let _ = BinaryInvalid(be)
             return false
         }
-        let concreteLeftTy = TcReplaceIdeal(typeManager, leftExpr)
-        if (!concreteLeftTy.IsCoreOptionType() || concreteLeftTy.typeArgs.size != 1) {
+        var concreteLeftTy = TcReplaceIdeal(typeManager, leftExpr)
+        if (!IsCoalescingLeftTyValid(impl, concreteLeftTy)) {
+            let _ = BinaryInvalid(be)
+            return false
+        }
+        concreteLeftTy = typeManager.TryGreedySubst(concreteLeftTy)
+        leftExpr.SetTy(concreteLeftTy)
+        if (concreteLeftTy.typeArgs.size != 1) {
             let _ = BinaryInvalid(be)
             return false
         }
@@ -1410,7 +1463,7 @@ public func SynBinaryExpr(impl: TypeCheckerImpl, be: BinaryExpr,
             return overloadTy3
         }
     } else if (be.op == TokenKind.COALESCING) {
-        return SynCoalescingExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
+        return SynCoalescingExpr(impl, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
     } else if (IsFlowOperator(be.op)) {
         return SynFlowExpr(typeManager, be, synthesizer: synthesizer)
     } else {
@@ -1430,11 +1483,12 @@ public func SynBinaryExpr(typeManager: TypeManager, be: BinaryExpr,
         synthesizer: synthesizer, checker: checker, diag: diag)
 }
 
-public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
+public func ChkBinaryExpr(impl: TypeCheckerImpl, target: Ty, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    let typeManager = impl.typeManager
     if (be.op == TokenKind.COALESCING) {
-        return ChkCoalescingExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
+        return ChkCoalescingExpr(impl, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
     }
     if (IsFlowOperator(be.op)) {
         return ChkFlowExpr(typeManager, target, be)
@@ -1466,4 +1520,11 @@ public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     }
     let _ = BinaryInvalid(be)
     return false
+}
+
+public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    return ChkBinaryExpr(TypeCheckerImpl(typeManager: typeManager, diag: diag), target, be, ctx: ctx,
+        synthesizer: synthesizer, checker: checker, diag: diag)
 }

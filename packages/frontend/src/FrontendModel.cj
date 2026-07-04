@@ -20,7 +20,8 @@ import cangjie_compiler::option.enumIndex
 public import cangjie_compiler::mangle.BaseMangler
 import cangjie_compiler::sema.GenericInstantiation.GenericInstantiationManagerImpl as RealGenericInstantiationManagerImpl
 import cangjie_compiler::sema.TypeManager as FaithfulSemaTypeManager
-import cangjie_compiler::utils.{AST_PACKAGE_NAME, EraseIf, JoinStrings, MAIN_INVOKE}
+import cangjie_compiler::utils.{AST_PACKAGE_NAME, CORE_PACKAGE_NAME, DynamicCast, EraseIf, JoinStrings, MAIN_INVOKE,
+    SYNC_PACKAGE_NAME}
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.ProfileRecorder
 import cangjie_compiler::utils.STANDARD_LIBS
@@ -5336,12 +5337,27 @@ public class ImportManager <: SemaImportManager {
         return out
     }
 
-    public func GetCoreDecl(name: String): Option<Decl> {
-        return GetImportedDecl("std.core", name)
+    public func GetSyncDecl(name: String): Option<Decl> {
+        return GetImportedDecl<Decl>(SYNC_PACKAGE_NAME, name)
     }
 
-    public func GetAstDecl(name: String): Option<Decl> {
-        return GetImportedDecl("std.ast", name)
+    public func GetImportedDecl<T>(packageName: String, name: String): Option<T> where T <: Decl {
+        let decls = GetPackageMembersByName(packageName, name)
+        if (decls.isEmpty()) {
+            if (let Some(decl) <- GetImplicitPackageMembersByName(packageName, name)) {
+                return DynamicCast<T>(decl)
+            }
+            return None
+        }
+        return DynamicCast<T>(decls[0])
+    }
+
+    public func GetCoreDecl<T>(name: String): Option<T> where T <: Decl {
+        return GetImportedDecl<T>(CORE_PACKAGE_NAME, name)
+    }
+
+    public func GetAstDecl<T>(name: String): Option<T> where T <: Decl {
+        return GetImportedDecl<T>(AST_PACKAGE_NAME, name)
     }
 
     public func GetImportedPackageDecl(node: Node, packageName: String): (Option<PackageDecl>, Bool) {
@@ -5360,14 +5376,6 @@ public class ImportManager <: SemaImportManager {
             return (ret, false)
         }
         return (None, false)
-    }
-
-    public func GetImportedDecl(packageName: String, name: String): Option<Decl> {
-        let decls = GetPackageMembersByName(packageName, name)
-        if (decls.isEmpty()) {
-            return GetImplicitPackageMembersByName(packageName, name)
-        }
-        return Some(decls[0])
     }
 
     private func CollectDeclsFromImportToMap(srcFullPackageName: String, importSpec: ImportSpec,
@@ -5445,7 +5453,11 @@ public class ImportManager <: SemaImportManager {
         return out
     }
 
-    private func GetImportedDeclsByName(file: File, name: String): ArrayList<Decl> {
+    public func GetPackageMembersByName(pkg: Package, name: String): ArrayList<Decl> {
+        return GetPackageMembersByName(pkg.fullPackageName, name)
+    }
+
+    public func GetImportedDeclsByName(file: File, name: String): ArrayList<Decl> {
         let out = ArrayList<Decl>()
         if (let Some(decls) <- importedDeclsMap.get(name)) {
             for (decl in decls) {

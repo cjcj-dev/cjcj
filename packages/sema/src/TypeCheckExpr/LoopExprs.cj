@@ -5,6 +5,7 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
 import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::modules.SemaImportManager
 import cangjie_compiler::sema.*
 import cangjie_compiler::utils.CJC_ASSERT
 
@@ -12,11 +13,16 @@ private func LoopInvalid(expr: Expr): Ty {
     return TcInvalid(expr)
 }
 
-private func GetIterableTy(typeManager: TypeManager, ctx: ASTContext, ty: Ty): Ty {
+private func GetIterableTy(typeManager: TypeManager, ctx: ASTContext, ty: Ty,
+    importManager!: Option<SemaImportManager> = None): Ty {
     if (ty.IsNothing()) {
         return TypeManager.GetInvalidTy()
     }
-    let iterableInterface = GetCoreDecl(ctx, "Iterable")
+    let iterableInterface: Option<Decl> = if (let Some(manager) <- importManager) {
+        manager.GetCoreDecl<Decl>("Iterable")
+    } else {
+        GetCoreDecl(ctx, "Iterable")
+    }
     if (let Some(genTy) <- (ty as GenericsTy)) {
         if (genTy.isPlaceholder) {
             let iterableTy = iterableInterface.getOrThrow().GetTy().getOrThrow()
@@ -108,18 +114,18 @@ public func ChkDoWhileExpr(typeManager: TypeManager, target: Ty, dwe: DoWhileExp
 public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr, ctx: ASTContext,
     synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None,
     checker!: Option<(ASTContext, Ty, Expr) -> Bool> = None,
-    diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    diag!: Option<BasicDiagnosticEngine> = None, importManager!: Option<SemaImportManager> = None): Ty {
     var ok = true
     var elementTy: Ty = TypeManager.GetInvalidTy()
     if (let Some(inExpression) <- fie.inExpression) {
         let inTy = if (let Some(realSynthesizer) <- synthesizer) {
             realSynthesizer(ctx, SynPos.EXPR_ARG, inExpression)
         } else {
-            SynExprShallow(typeManager, inExpression, ctx: Some(ctx), diag: diag)
+            SynExprShallow(typeManager, inExpression, ctx: Some(ctx), diag: diag, importManager: importManager)
         }
         ok = Ty.IsTyCorrect(inTy) && ReplaceIdealTy(typeManager, inExpression, diag: diag) && ok
         if (let Some(realInTy) <- inExpression.GetTy()) {
-            let iterableTy = GetIterableTy(typeManager, ctx, realInTy)
+            let iterableTy = GetIterableTy(typeManager, ctx, realInTy, importManager: importManager)
             if (Ty.IsTyCorrect(iterableTy)) {
                 CJC_ASSERT(!iterableTy.typeArgs.isEmpty())
                 elementTy = iterableTy.typeArgs[0]
@@ -155,7 +161,8 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr, ctx: ASTConte
         let guardOk = if (let Some(realChecker) <- checker) {
             realChecker(ctx, TcBoolTy(), patternGuard)
         } else {
-            ChkExprShallow(typeManager, TcBoolTy(), patternGuard, ctx: Some(ctx), diag: diag)
+            ChkExprShallow(typeManager, TcBoolTy(), patternGuard, ctx: Some(ctx), diag: diag,
+                importManager: importManager)
         }
         if (!guardOk) {
             ok = false
@@ -201,7 +208,7 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr, ctx: ASTConte
 public func ChkForInExpr(typeManager: TypeManager, target: Ty, fie: ForInExpr, ctx: ASTContext,
     synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None,
     checker!: Option<(ASTContext, Ty, Expr) -> Bool> = None,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    diag!: Option<BasicDiagnosticEngine> = None, importManager!: Option<SemaImportManager> = None): Bool {
     var isWellTyped = typeManager.IsSubtype(TcUnitTy(), target)
     if (!isWellTyped) {
         if (let Some(diagValue) <- diag) {
@@ -209,7 +216,7 @@ public func ChkForInExpr(typeManager: TypeManager, target: Ty, fie: ForInExpr, c
         }
     }
     isWellTyped = Ty.IsTyCorrect(SynForInExpr(typeManager, fie, ctx, synthesizer: synthesizer,
-        checker: checker, diag: diag)) && isWellTyped
+        checker: checker, diag: diag, importManager: importManager)) && isWellTyped
     if (!isWellTyped) {
         let _ = LoopInvalid(fie)
     }

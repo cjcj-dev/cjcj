@@ -3,6 +3,7 @@ package cangjie_compiler::sema.TypeCheckExpr
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::modules.SemaImportManager
 import cangjie_compiler::sema.*
 
 func TcUnitTy(): Ty {
@@ -604,7 +605,8 @@ private func AddUpperBoundTargetMap(ma: MemberAccess, target: Decl, upperBound: 
 }
 
 public func SynExprShallow(typeManager: TypeManager, expr: Expr,
-    diag!: Option<BasicDiagnosticEngine> = None, ctx!: Option<ASTContext> = None): Ty {
+    diag!: Option<BasicDiagnosticEngine> = None, ctx!: Option<ASTContext> = None,
+    importManager!: Option<SemaImportManager> = None): Ty {
     if (let Some(desugar) <- expr.desugarExpr) {
         if (let Some(desugarTy) <- desugar.GetTy()) {
             expr.SetTy(desugarTy)
@@ -632,7 +634,7 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
     if (let Some(value) <- (expr as DoWhileExpr)) { return SynDoWhileExpr(typeManager, value, ctx: ctx) }
     if (let Some(value) <- (expr as ForInExpr)) {
         if (let Some(realCtx) <- ctx) {
-            return SynForInExpr(typeManager, value, realCtx, diag: diag)
+            return SynForInExpr(typeManager, value, realCtx, diag: diag, importManager: importManager)
         }
         return TcInvalid(value)
     }
@@ -643,10 +645,10 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
     if (let Some(value) <- (expr as RangeExpr)) { return SynRangeExpr(typeManager, value) }
     if (let Some(value) <- (expr as IsExpr)) { return SynIsExpr(typeManager, value) }
     if (let Some(value) <- (expr as AsExpr)) {
-        if (let Some(realCtx) <- ctx) {
-            if (let Some(optionDecl) <- GetCoreDecl(realCtx, "Option")) {
-                return SynAsExpr(typeManager, value, optionDecl as EnumDecl, diag: diag)
-            }
+        if (let Some(manager) <- importManager) {
+            return SynAsExpr(typeManager, value, manager.GetCoreDecl<EnumDecl>("Option"), diag: diag)
+        } else if (let Some(realCtx) <- ctx) {
+            return SynAsExpr(typeManager, value, GetCoreDecl(realCtx, "Option") as EnumDecl, diag: diag)
         }
         return SynAsExpr(typeManager, value, None, diag: diag)
     }
@@ -676,7 +678,8 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
 }
 
 public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
-    ctx!: Option<ASTContext> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    ctx!: Option<ASTContext> = None, diag!: Option<BasicDiagnosticEngine> = None,
+    importManager!: Option<SemaImportManager> = None): Bool {
     if (let Some(realCtx) <- ctx) {
         typeCheckExprPutTargetType(realCtx, expr, target)
     }
@@ -696,7 +699,7 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     if (let Some(value) <- (expr as DoWhileExpr)) { return ChkDoWhileExpr(typeManager, target, value, ctx: ctx) }
     if (let Some(value) <- (expr as ForInExpr)) {
         if (let Some(realCtx) <- ctx) {
-            return ChkForInExpr(typeManager, target, value, realCtx, diag: diag)
+            return ChkForInExpr(typeManager, target, value, realCtx, diag: diag, importManager: importManager)
         }
         let _ = TcInvalid(value)
         return false
@@ -708,10 +711,10 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     if (let Some(value) <- (expr as RangeExpr)) { return ChkRangeExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as IsExpr)) { return ChkIsExpr(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as AsExpr)) {
-        if (let Some(realCtx) <- ctx) {
-            if (let Some(optionDecl) <- GetCoreDecl(realCtx, "Option")) {
-                return ChkAsExpr(typeManager, target, value, optionDecl as EnumDecl, diag: diag)
-            }
+        if (let Some(manager) <- importManager) {
+            return ChkAsExpr(typeManager, target, value, manager.GetCoreDecl<EnumDecl>("Option"), diag: diag)
+        } else if (let Some(realCtx) <- ctx) {
+            return ChkAsExpr(typeManager, target, value, GetCoreDecl(realCtx, "Option") as EnumDecl, diag: diag)
         }
         return ChkAsExpr(typeManager, target, value, None, diag: diag)
     }
