@@ -615,6 +615,8 @@ public func DesugarVariadicCallExpr(expr: CallExpr, fixedPositionalArity: Int64)
         callExpr.sourceExpr = expr
         CopyBasicInfo(expr, callExpr)
         callExpr.baseFunc = baseFunc
+        // Mirrors C++ std::move(ce.baseFunc): the original call no longer owns the moved base.
+        expr.baseFunc = None
 
         var idx: Int64 = 0
         while (idx < fixedPositionalArity) {
