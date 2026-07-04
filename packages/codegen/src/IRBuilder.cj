@@ -1800,7 +1800,7 @@ public class IRBuilder2 <: Resource {
         args.add(CreateBitCast(parameters[2],
             unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) },
             name: "assign.generic.ti"))
-        return CreateIntrinsicCall(ASSIGN_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+        return CreateIntrinsicCallNoInvoke(ASSIGN_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
     public func CallGCWrite(value: LLVMValueRef, baseObj: LLVMValueRef, fieldPtr: LLVMValueRef): LLVMValueRef {
@@ -1918,7 +1918,7 @@ public class IRBuilder2 <: Resource {
         } else {
             fixedArgs.add(parameters[2])
         }
-        return CreateIntrinsicCall(GET_FIELD_OFFSET_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), fixedArgs)
+        return CreateIntrinsicCallNoInvoke(GET_FIELD_OFFSET_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), fixedArgs)
     }
 
     public func CallGCWriteStruct(baseObject: LLVMValueRef, dest: LLVMValueRef, source: LLVMValueRef,
@@ -3798,18 +3798,11 @@ public class IRBuilder2 <: Resource {
         let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
         let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
         let i8PtrPtrType = unsafe { LLVMPointerType(i8PtrType, 0u32) }
-        let i32Type = unsafe { LLVMInt32TypeInContext(GetLLVMContext().raw) }
-        let paramTypes = ArrayList<LLVMTypeRef>()
-        paramTypes.add(i8PtrType)
-        paramTypes.add(i32Type)
-        paramTypes.add(i8PtrPtrType)
-        let functionType = MakeFunctionType(i8PtrType, paramTypes)
         let fixedArgs = ArrayList<LLVMValueRef>()
         fixedArgs.add(CreateBitCast(args[0], i8PtrType, name: "ti.template.raw"))
         fixedArgs.add(args[1])
         fixedArgs.add(CreateBitCast(args[2], i8PtrPtrType, name: "ti.args.i8"))
-        return CreateCallOrInvoke(GetOrInsertRuntimeFunction(GET_TYPE_INFO_INTRINSIC_NAME, functionType), functionType,
-            fixedArgs, name: "ti")
+        return CreateIntrinsicCallNoInvoke(GET_TYPE_INFO_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), fixedArgs, name: "ti")
     }
 
     public func CreateTypeInfoArray(typeArgs: ArrayList<Type>): LLVMValueRef {
@@ -3850,7 +3843,7 @@ public class IRBuilder2 <: Resource {
         let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
         let args = ArrayList<LLVMValueRef>()
         args.add(CreateBitCast(typeInfoValue, i8PtrType, name: "isref.ti"))
-        return CreateIntrinsicCall(IS_REFERENCE_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args, name: "isref")
+        return CreateIntrinsicCallNoInvoke(IS_REFERENCE_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args, name: "isref")
     }
 
     private func GetRuntimeExceptionHelperType(): LLVMTypeRef {

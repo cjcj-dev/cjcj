@@ -41,7 +41,7 @@ public func GenerateLoad(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValue
             if (let Some(staticRead) <- TryGenerateGCStaticReadForLoad(irBuilder, pointerElementType, addr)) {
                 return staticRead
             }
-            return irBuilder.CreateLoad(pointerElementType.GetLLVMType(), addr.GetRawValue(), name: "load")
+            return irBuilder.CreateLoad(addr, name: "load")
         }
     }
     if (let Some(resultTy) <- chirExpr.GetResultType()) {
@@ -147,7 +147,7 @@ private func ResolveLoadElementPathByNames(base: Value, names: ArrayList<String>
 
 private func ShouldUseClassFieldReadBarrier(irBuilder: IRBuilder2, elementType: CGType): Bool {
     let stripped = elementType.GetOriginal().StripAllRefs()
-    if (stripped.IsGeneric() || stripped.IsReferenceType() || elementType.GetSize().isNone()) {
+    if (stripped.IsReferenceType()) {
         return true
     }
     if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), stripped) as CGEnumType)) {
@@ -696,12 +696,11 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
         if (ShouldSkipNoOpStore(rhs, lhs)) {
             return LLVMNullValue()
         }
-        let storeAddr = irBuilder.CreateGEP(storePlace, path, name: "store.elem.addr").GetRawValue()
+        let storeAddr = irBuilder.CreateGEP(storePlace, path, name: "store.elem.addr")
         if (rhs.TestAttr(Attribute.FOREIGN)) {
             AddFnAttr(storeValue.GetRawValue(), CJ2C_ATTR)
         }
-        let fieldTy = ResolveElementTypeByPath(locationTy, path)
-        return StoreElementValue(irBuilder, storePlace, storeValue, storeAddr, fieldTy)
+        return irBuilder.CreateStore(storeValue, storeAddr)
     }
     if (let Some(storeByName) <- (chirExpr as StoreElementByName)) {
         if (let Some(locationTy) <- storeByName.GetLocation().GetType()) {
@@ -711,146 +710,20 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
                 }
                 let byNameValue = irBuilder.GetCGModule().GetMappedCGValue(storeByName.GetValue())
                 let byNamePlace = irBuilder.GetCGModule().GetMappedCGValue(storeByName.GetLocation())
-                let byNameAddr = irBuilder.CreateGEP(byNamePlace, path, name: "store.elem.addr").GetRawValue()
-                if (byNameAddr.isNull()) {
+                let byNameAddr = irBuilder.CreateGEP(byNamePlace, path, name: "store.elem.addr")
+                if (byNameAddr.GetRawValue().isNull()) {
                     return LLVMNullValue()
                 }
-                return StoreElementValue(irBuilder, byNamePlace, byNameValue, byNameAddr,
-                    ResolveElementTypeByPath(locationTy, path))
+                return irBuilder.CreateStore(byNameValue, byNameAddr)
             }
         }
     }
     return LLVMNullValue()
 }
 
-private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elementValue: CGValue,
-    elementPtr: LLVMValueRef, fieldTy: Option<Type>): LLVMValueRef {
-    let baseObject = irBuilder.GetTrackedManagedBase(elementPtr) ?? baseValue.GetRawValue()
-    if (let Some(baseType) <- baseValue.GetCGType()) {
-        if (IsManagedObjectElementBase(baseType.GetOriginal()) && IsGenericField(fieldTy)) {
-            return irBuilder.StoreGenericMemberValue(baseObject, elementPtr, elementValue,
-                baseType.GetOriginal(), fieldTy)
-        }
-    }
-    if (let Some(genericStore) <- TryStoreGenericElementValue(irBuilder, elementValue, elementPtr, fieldTy)) {
-        return genericStore
-    }
-    if (let Some(fieldType) <- fieldTy) {
-        if (IsAggregateFieldType(irBuilder, fieldType)) {
-            return StoreAggregateElementValue(irBuilder, baseValue, elementValue, elementPtr, fieldType)
-        }
-    }
-    let rawElementValue = StoreElementRawValue(irBuilder, elementValue)
-    if (let Some(baseType) <- baseValue.GetCGType()) {
-        if (let Some(rawArrayTy) <- FindRawArrayType(baseType.GetOriginal())) {
-            let elementCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rawArrayTy.GetElementType())
-            return StoreRawArrayElement(irBuilder, baseValue.GetRawValue(), elementCGType, elementValue, elementPtr)
-        }
-        if (IsManagedObjectElementBase(baseType.GetOriginal())) {
-            if (IsManagedReferenceField(irBuilder, fieldTy)) {
-                return irBuilder.CallGCWrite(rawElementValue, baseObject, elementPtr)
-            }
-        }
-    }
-    if (ShouldUseObjectFieldWriteBarrier(irBuilder, baseValue, elementValue, elementPtr)) {
-        return irBuilder.CallGCWrite(rawElementValue, baseObject, elementPtr)
-    }
-    return irBuilder.CreateStore(rawElementValue, elementPtr)
-}
-
-private func TryStoreGenericElementValue(irBuilder: IRBuilder2, elementValue: CGValue, elementPtr: LLVMValueRef,
-    fieldTy: Option<Type>): Option<LLVMValueRef> {
-    let genericFieldTy = (fieldTy ?? return None).StripAllRefs()
-    if (!genericFieldTy.IsGeneric()) {
-        return None
-    }
-    let refTy = irBuilder.GetCGContext().GetCHIRBuilder().context.GetRefTy(genericFieldTy)
-    let dest = CGValue(elementPtr, CGType.GetOrCreate(irBuilder.GetCGModule(), refTy))
-    return irBuilder.TryCreateGenericStore(elementValue, dest)
-}
-
 private func IsGenericField(fieldTy: Option<Type>): Bool {
     if (let Some(ty) <- fieldTy) {
         return ty.StripAllRefs().IsGeneric()
-    }
-    return false
-}
-
-private func IsAggregateFieldType(irBuilder: IRBuilder2, fieldTy: Type): Bool {
-    let stripped = fieldTy.StripAllRefs()
-    let fieldCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), stripped)
-    if (fieldCGType.IsStructType() || fieldCGType.IsVArrayType()) {
-        return true
-    }
-    return false
-}
-
-private func StoreAggregateElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elementValue: CGValue,
-    elementPtr: LLVMValueRef, fieldTy: Type): LLVMValueRef {
-    let fieldCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), fieldTy.StripAllRefs())
-    let rawElementValue = elementValue.GetRawValue()
-    let fieldSize = if (let Some(size) <- fieldCGType.GetSize()) { size } else { 0 }
-    let fieldSizeValue = unsafe {
-        LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(fieldSize), 0)
-    }
-    let align = irBuilder.GetCGModule().GetABITypeAlignment(fieldCGType.GetLLVMType())
-    var source = rawElementValue
-    if (!IsPointerLLVMValue(rawElementValue)) {
-        if (irBuilder.IsLLVMTypeContainsRef(fieldCGType.GetLLVMType()) &&
-            (irBuilder.IsGlobalVariableBasePtr(elementPtr) || IsAddressSpacePointer(elementPtr, 1u32))) {
-            source = irBuilder.CreateEntryAlloca(fieldCGType, name: "store.elem.agg")
-            irBuilder.CreateStore(rawElementValue, source)
-        } else {
-            return irBuilder.CreateStore(rawElementValue, elementPtr)
-        }
-    } else {
-        source = ReadManagedAggregateSourceIfNeeded(irBuilder, rawElementValue, fieldCGType, fieldSizeValue)
-    }
-    if (irBuilder.IsGlobalVariableBasePtr(elementPtr) && irBuilder.IsLLVMTypeContainsRef(fieldCGType.GetLLVMType())) {
-        return CallGCWriteStaticStruct(irBuilder, elementPtr, source, fieldSizeValue, fieldCGType.GetLLVMType())
-    }
-    if (IsAddressSpacePointer(elementPtr, 1u32) && irBuilder.IsLLVMTypeContainsRef(fieldCGType.GetLLVMType())) {
-        let baseObject = irBuilder.GetTrackedManagedBase(elementPtr) ?? baseValue.GetRawValue()
-        return irBuilder.CallGCWriteStruct(baseObject, elementPtr, source, fieldSizeValue,
-            fieldCGType.GetOriginal().ToString())
-    }
-    return irBuilder.CreateMemCpy(elementPtr, align, source, align, fieldSizeValue)
-}
-
-private func StoreElementRawValue(irBuilder: IRBuilder2, value: CGValue): LLVMValueRef {
-    let raw = value.GetRawValue()
-    if (!IsPointerLLVMValue(raw)) {
-        return raw
-    }
-    if (let Some(valueCGType) <- value.GetCGType()) {
-        let valueTy = valueCGType.GetOriginal().StripAllRefs()
-        if (!valueCGType.IsReference() && (valueTy.IsStruct() || valueTy.IsTuple() || valueTy.IsVArray())) {
-            return irBuilder.CreateLoad(valueCGType.GetLLVMType(), raw, name: "store.elem.value")
-        }
-    }
-    return raw
-}
-
-private func ShouldUseObjectFieldWriteBarrier(irBuilder: IRBuilder2, baseValue: CGValue, elementValue: CGValue,
-    elementPtr: LLVMValueRef): Bool {
-    if (!IsAddressSpacePointer(baseValue.GetRawValue(), 1u32) || !IsAddressSpacePointer(elementPtr, 1u32)) {
-        return false
-    }
-    if (let Some(elementCGType) <- elementValue.GetCGType()) {
-        if (elementCGType.IsReference() || IsOptionLikeRefValue(irBuilder, elementCGType)) {
-            return true
-        }
-        if (elementCGType.GetSize().isNone()) {
-            return true
-        }
-    }
-    return false
-}
-
-private func IsOptionLikeRefValue(irBuilder: IRBuilder2, elementCGType: CGType): Bool {
-    if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(),
-        elementCGType.GetOriginal().StripAllRefs()) as CGEnumType)) {
-        return enumCGType.IsOptionLikeRef()
     }
     return false
 }

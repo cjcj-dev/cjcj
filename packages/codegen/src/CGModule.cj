@@ -13,7 +13,6 @@ import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.GlobalVar
 import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
 import cangjie_compiler::mangle.GetTypeArgsQualifiedName
 import cangjie_compiler::option.ArchType
@@ -672,24 +671,21 @@ public class CGModule {
         while (idx < chirFunc.GetNumOfParams()) {
             let param = chirFunc.GetParam(idx)
             let rawArg = cgFunc.GetArgByIndexFromCHIR(idx)
-            let paramCGType = if (let Some(paramTy) <- param.GetType()) {
-                let valueCGType = GetCGTypeForValue(param)
-                if (!paramTy.IsRef() && (paramTy.IsStruct() || paramTy.IsTuple() ||
-                    valueCGType.IsStructType() || valueCGType.IsVArrayType())) {
-                    CGType.GetOrCreate(this, cgCtx.GetCGPkgContext().GetCHIRBuilder().context.GetRefTy(paramTy))
-                } else {
-                    valueCGType
-                }
+            let paramCGType = FixedCGTypeOfFuncArg(this, param, rawArg)
+            let rawArgIdx = if (let Some(functionType) <- cgFunc.GetCGFunctionType()) {
+                let realArgIndices = functionType.GetRealArgIndices()
+                if (idx >= 0 && idx < realArgIndices.size) { realArgIndices[idx] } else if (cgFunc.IsSRet()) { idx + 1 } else { idx }
+            } else if (cgFunc.IsSRet()) {
+                idx + 1
             } else {
-                GetCGTypeForValue(param)
+                idx
             }
             if (chirFunc.IsConstructor() && idx == 0) {
-                AddParamAttr(cgFunc.GetRawFunction(), UInt32(idx), "noalias")
+                AddParamAttr(cgFunc.GetRawFunction(), UInt32(rawArgIdx), "noalias")
             }
             if (paramCGType.IsStructPtrType() || paramCGType.IsVArrayPtrType()) {
-                AddParamAttr(cgFunc.GetRawFunction(), UInt32(idx), "noalias")
+                AddParamAttr(cgFunc.GetRawFunction(), UInt32(rawArgIdx), "noalias")
             }
-            SetOrUpdateMappedCGValue(param, CGValue(rawArg, paramCGType))
             idx++
         }
     }
@@ -1085,13 +1081,6 @@ public class CGModule {
             }
         }
         return String.fromUtf8(out.toArray())
-    }
-
-    private func GetCGTypeForValue(chirValue: Value): CGType {
-        if (let Some(valueType) <- chirValue.GetType()) {
-            return CGType.GetOrCreate(this, valueType)
-        }
-        return CGType(this, cgCtx, Type(TypeKind.TYPE_INVALID))
     }
 
     private func ShouldUseRefCGTypeForTupleExpressionResult(valueType: Type): Bool {

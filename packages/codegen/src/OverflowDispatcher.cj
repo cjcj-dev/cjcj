@@ -80,6 +80,12 @@ public func GenerateOverflowBinary(irBuilder: IRBuilder2, strategy: OverflowStra
             return saturated
         }
     }
+    if (kind == ExprKind.DIV || kind == ExprKind.MOD) {
+        return GenerateOverflowDivOrMod(irBuilder, strategy, kind, lhs, lhsValue, rhsValue, resultType)
+    }
+    if (strategy == OverflowStrategy.SATURATING) {
+        return GenerateCheckedOverflowBinary(irBuilder, kind, lhs, lhsValue, rhsValue, resultType, strategy: strategy)
+    }
     if (strategy == OverflowStrategy.THROWING || strategy == OverflowStrategy.CHECKED) {
         return GenerateThrowingBinaryIntOp(irBuilder, kind, lhs, rhs, lhsValue, rhsValue, resultType)
     }
@@ -113,6 +119,7 @@ public func GenerateOverflowUnary(irBuilder: IRBuilder2, strategy: OverflowStrat
         if (!saturated.isNull()) {
             return saturated
         }
+        return GenerateCheckedOverflowUnary(irBuilder, kind, operand, operandValue, resultType, strategy: strategy)
     }
     if (strategy == OverflowStrategy.THROWING || strategy == OverflowStrategy.CHECKED) {
         return GenerateThrowingUnaryIntOp(irBuilder, kind, operand, operandValue, resultType)
@@ -151,7 +158,8 @@ private func GenerateWrappingBinaryIntOp(irBuilder: IRBuilder2, kind: ExprKind, 
 }
 
 private func GenerateCheckedOverflowBinary(irBuilder: IRBuilder2, kind: ExprKind, lhs: Value,
-    lhsValue: LLVMValueRef, rhsValue: LLVMValueRef, resultType: Option<Type>): LLVMValueRef {
+    lhsValue: LLVMValueRef, rhsValue: LLVMValueRef, resultType: Option<Type>,
+    strategy!: OverflowStrategy = OverflowStrategy.THROWING): LLVMValueRef {
     let intrinsicName = OverflowIntrinsicName(kind, lhs.GetType())
     if (intrinsicName.isEmpty()) {
         return irBuilder.CreateBinaryTyped(kind, lhsValue, rhsValue, lhs.GetType(), resultType,
@@ -178,16 +186,19 @@ private func GenerateCheckedOverflowBinary(irBuilder: IRBuilder2, kind: ExprKind
     irBuilder.CreateStore(overflowPair, pairSlot)
     let overflowFlagPtr = irBuilder.CreateStructGEP(pairType, pairSlot, 1u32)
     let overflowFlag = irBuilder.CreateLoad(boolType, overflowFlagPtr)
-    return EmitOverflowCheck(irBuilder, overflowFlag, pairSlot, pairType, operandType, ExprKindNameForIR(kind))
+    return EmitOverflowCheck(irBuilder, overflowFlag, pairSlot, pairType, operandType, ExprKindNameForIR(kind), strategy,
+        kind, lhs, lhsValue, rhsValue)
 }
 
 private func GenerateCheckedOverflowUnary(irBuilder: IRBuilder2, kind: ExprKind, operand: Value,
-    operandValue: LLVMValueRef, resultType: Option<Type>): LLVMValueRef {
+    operandValue: LLVMValueRef, resultType: Option<Type>,
+    strategy!: OverflowStrategy = OverflowStrategy.THROWING): LLVMValueRef {
     if (kind != ExprKind.NEG) {
         return irBuilder.CreateUnaryTyped(kind, operandValue, operand.GetType(), name: ExprKindNameForIR(kind))
     }
     let zeroValue = unsafe { LLVMConstInt(LLVMTypeOf(operandValue), 0u64, 0) }
-    return GenerateCheckedOverflowBinary(irBuilder, ExprKind.SUB, operand, zeroValue, operandValue, resultType)
+    return GenerateCheckedOverflowBinary(irBuilder, ExprKind.SUB, operand, zeroValue, operandValue, resultType,
+        strategy: strategy)
 }
 
 private func GenerateCheckedDivOrMod(irBuilder: IRBuilder2, kind: ExprKind, lhs: Value, lhsValue: LLVMValueRef,
@@ -256,6 +267,88 @@ private func GenerateCheckedShift(irBuilder: IRBuilder2, kind: ExprKind, lhs: Va
         name: ExprKindNameForIR(kind))
 }
 
+private func GenerateOverflowDivOrMod(irBuilder: IRBuilder2, strategy: OverflowStrategy, kind: ExprKind,
+    lhs: Value, lhsValue: LLVMValueRef, rhsValue: LLVMValueRef, resultType: Option<Type>): LLVMValueRef {
+    if (strategy == OverflowStrategy.CHECKED) {
+        return GenerateCheckedDivOrMod(irBuilder, kind, lhs, lhsValue, rhsValue, resultType)
+    }
+    if (!IsSignedOverflowType(lhs.GetType())) {
+        return GenerateCheckedDivOrMod(irBuilder, kind, lhs, lhsValue, rhsValue, resultType)
+    }
+    let elemLLVMType = unsafe { LLVMTypeOf(lhsValue) }
+    let bitWidth = unsafe { LLVMGetIntTypeWidth(elemLLVMType) }
+    let minBits = if (bitWidth >= 64u32) { 0x8000000000000000u64 } else { 1u64 << UInt64(bitWidth - 1u32) }
+    let maxBits = if (bitWidth >= 64u32) { 0x7fffffffffffffffu64 } else {
+        (1u64 << UInt64(bitWidth - 1u32)) - 1u64
+    }
+    let allBits = if (bitWidth >= 64u32) { UInt64.Max } else { (1u64 << UInt64(bitWidth)) - 1u64 }
+    let minValue = unsafe { LLVMConstInt(elemLLVMType, minBits, 1) }
+    let negativeOne = unsafe { LLVMConstInt(elemLLVMType, allBits, 1) }
+    let overflowFlag = GenerateOverflowLogicCondition(irBuilder,
+        { => irBuilder.CreateICmp(LLVMIntPredicate.SLE, lhsValue, minValue, name: "div.min") },
+        { => irBuilder.CreateICmp(LLVMIntPredicate.EQ, rhsValue, negativeOne, name: "div.neg.one") })
+    let expectedFlag = irBuilder.GenerateCallExpectFunction(overflowFlag, irBuilder.GetFalse())
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(MakeBlockNameList("normal", "overflow", "end"))
+    if (blocks.size < 3) {
+        return GenerateCheckedDivOrMod(irBuilder, kind, lhs, lhsValue, rhsValue, resultType)
+    }
+    irBuilder.CreateCondBr(expectedFlag, blocks[1], blocks[0])
+    let resultSlot = irBuilder.CreateEntryAlloca(elemLLVMType)
+
+    irBuilder.SetInsertPoint(blocks[0])
+    let normalValue = GenerateCheckedDivOrMod(irBuilder, kind, lhs, lhsValue, rhsValue, resultType)
+    irBuilder.CreateStore(normalValue, resultSlot)
+    irBuilder.CreateBr(blocks[2])
+
+    irBuilder.SetInsertPoint(blocks[1])
+    if (strategy == OverflowStrategy.THROWING && kind == ExprKind.DIV) {
+        irBuilder.CreateOverflowOrArithmeticException(ExprKindNameForIR(kind))
+    } else {
+        let overflowValue = if (kind == ExprKind.MOD) {
+            unsafe { LLVMConstInt(elemLLVMType, 0u64, 0) }
+        } else if (strategy == OverflowStrategy.SATURATING) {
+            unsafe { LLVMConstInt(elemLLVMType, maxBits, 1) }
+        } else {
+            minValue
+        }
+        irBuilder.CreateStore(overflowValue, resultSlot)
+        irBuilder.CreateBr(blocks[2])
+    }
+
+    irBuilder.SetInsertPoint(blocks[2])
+    return irBuilder.CreateLoad(elemLLVMType, resultSlot)
+}
+
+private func GenerateOverflowLogicCondition(irBuilder: IRBuilder2, condLeft: () -> LLVMValueRef,
+    condRight: () -> LLVMValueRef, isLogicAnd!: Bool = true): LLVMValueRef {
+    let boolType = unsafe { LLVMInt1TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let logicValueName = if (isLogicAnd) { "and.val" } else { "or.val" }
+    let logicValue = irBuilder.CreateEntryAlloca(boolType, name: logicValueName)
+    let shortValue = if (isLogicAnd) { irBuilder.GetFalse() } else { irBuilder.GetTrue() }
+    let rhsName = if (isLogicAnd) { "land.rhs" } else { "lor.rhs" }
+    let endName = if (isLogicAnd) { "land.end" } else { "lor.end" }
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(MakeBlockNameList("tmpLabel", rhsName, endName))
+    if (blocks.size < 3) {
+        return condLeft()
+    }
+    let condLeftValue = condLeft()
+    if (isLogicAnd) {
+        irBuilder.CreateCondBr(condLeftValue, blocks[1], blocks[0])
+    } else {
+        irBuilder.CreateCondBr(condLeftValue, blocks[0], blocks[1])
+    }
+    irBuilder.SetInsertPoint(blocks[0])
+    irBuilder.CreateStore(shortValue, logicValue)
+    irBuilder.CreateBr(blocks[2])
+
+    irBuilder.SetInsertPoint(blocks[1])
+    irBuilder.CreateStore(condRight(), logicValue)
+    irBuilder.CreateBr(blocks[2])
+
+    irBuilder.SetInsertPoint(blocks[2])
+    return irBuilder.CreateLoad(boolType, logicValue)
+}
+
 private func GenerateSaturatingBinaryIntOp(irBuilder: IRBuilder2, kind: ExprKind, lhs: Value,
     lhsValue: LLVMValueRef, rhsValue: LLVMValueRef): LLVMValueRef {
     if (kind != ExprKind.ADD && kind != ExprKind.SUB) {
@@ -273,6 +366,87 @@ private func GenerateSaturatingBinaryIntOp(irBuilder: IRBuilder2, kind: ExprKind
     return irBuilder.CreateIntrinsicCall(intrinsicName, overloadedTypes, args, name: ExprKindNameForIR(kind) + ".sat")
 }
 
+private func GenerateOverflowSaturatingOp(irBuilder: IRBuilder2, kind: ExprKind, lhsValue: LLVMValueRef,
+    rhsValue: LLVMValueRef, retValue: LLVMValueRef): Unit {
+    let elemLLVMType = unsafe { LLVMTypeOf(lhsValue) }
+    let bitWidth = unsafe { LLVMGetIntTypeWidth(elemLLVMType) }
+    let maxBits = if (bitWidth >= 64u32) { 0x7fffffffffffffffu64 } else {
+        (1u64 << UInt64(bitWidth - 1u32)) - 1u64
+    }
+    let minBits = if (bitWidth >= 64u32) { 0x8000000000000000u64 } else { 1u64 << UInt64(bitWidth - 1u32) }
+    let zeroValue = unsafe { LLVMConstInt(elemLLVMType, 0u64, 0) }
+    var condValue = LLVMNullValue()
+    if (kind == ExprKind.ADD) {
+        condValue = GenerateOverflowLogicCondition(irBuilder,
+            { => irBuilder.CreateICmp(LLVMIntPredicate.SGT, lhsValue, zeroValue, name: "icmpsgt") },
+            { => irBuilder.CreateICmp(LLVMIntPredicate.SGT, rhsValue, zeroValue, name: "icmpsgt") })
+    }
+    if (kind == ExprKind.SUB) {
+        condValue = GenerateOverflowLogicCondition(irBuilder,
+            { => irBuilder.CreateICmp(LLVMIntPredicate.SGE, lhsValue, zeroValue, name: "icmpsge") },
+            { => irBuilder.CreateICmp(LLVMIntPredicate.SLT, rhsValue, zeroValue, name: "icmpslt") })
+    }
+    if (kind == ExprKind.MUL) {
+        let lhsPositive = irBuilder.CreateICmp(LLVMIntPredicate.SGT, lhsValue, zeroValue, name: "icmpsgt")
+        let rhsPositive = irBuilder.CreateICmp(LLVMIntPredicate.SGT, rhsValue, zeroValue, name: "icmpsgt")
+        condValue = irBuilder.CreateICmp(LLVMIntPredicate.EQ, lhsPositive, rhsPositive, name: "icmpeq")
+    }
+    if (kind == ExprKind.EXP) {
+        let oneValue = unsafe { LLVMConstInt(elemLLVMType, 1u64, 0) }
+        condValue = GenerateOverflowLogicCondition(irBuilder,
+            { => irBuilder.CreateICmp(LLVMIntPredicate.SGT, lhsValue, zeroValue, name: "icmpsgt") },
+            { =>
+                let right = irBuilder.CreateBinaryTyped(ExprKind.BITAND, rhsValue, oneValue, None, None, name: "and")
+                irBuilder.CreateICmp(LLVMIntPredicate.EQ, right, zeroValue, name: "icmpeq")
+            },
+            isLogicAnd: false)
+    }
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(MakeBlockNameList("if.then", "if.else", "if.end"))
+    if (blocks.size < 3) {
+        return
+    }
+    irBuilder.CreateCondBr(condValue, blocks[0], blocks[1])
+
+    irBuilder.SetInsertPoint(blocks[0])
+    irBuilder.CreateStore(unsafe { LLVMConstInt(elemLLVMType, maxBits, 1) }, retValue)
+    irBuilder.CreateBr(blocks[2])
+
+    irBuilder.SetInsertPoint(blocks[1])
+    irBuilder.CreateStore(unsafe { LLVMConstInt(elemLLVMType, minBits, 1) }, retValue)
+    irBuilder.CreateBr(blocks[2])
+
+    irBuilder.SetInsertPoint(blocks[2])
+}
+
+private func GenerateOverflowSaturating(irBuilder: IRBuilder2, kind: ExprKind, lhs: Value,
+    lhsValue: LLVMValueRef, rhsValue: LLVMValueRef, retValue: LLVMValueRef): Unit {
+    let elemLLVMType = unsafe { LLVMTypeOf(lhsValue) }
+    let bitWidth = unsafe { LLVMGetIntTypeWidth(elemLLVMType) }
+    if (!IsSignedOverflowType(lhs.GetType())) {
+        let maxBits = if (bitWidth >= 64u32) { UInt64.Max } else { (1u64 << UInt64(bitWidth)) - 1u64 }
+        let value = if (kind == ExprKind.ADD || kind == ExprKind.MUL || kind == ExprKind.EXP) {
+            unsafe { LLVMConstInt(elemLLVMType, maxBits, 0) }
+        } else {
+            unsafe { LLVMConstInt(elemLLVMType, 0u64, 0) }
+        }
+        irBuilder.CreateStore(value, retValue)
+        return
+    }
+    if (kind == ExprKind.ADD || kind == ExprKind.SUB || kind == ExprKind.MUL || kind == ExprKind.EXP) {
+        GenerateOverflowSaturatingOp(irBuilder, kind, lhsValue, rhsValue, retValue)
+        return
+    }
+    let maxBits = if (bitWidth >= 64u32) { 0x7fffffffffffffffu64 } else {
+        (1u64 << UInt64(bitWidth - 1u32)) - 1u64
+    }
+    let value = if (kind == ExprKind.MOD) {
+        unsafe { LLVMConstInt(elemLLVMType, 0u64, 0) }
+    } else {
+        unsafe { LLVMConstInt(elemLLVMType, maxBits, 1) }
+    }
+    irBuilder.CreateStore(value, retValue)
+}
+
 private func GenerateSaturatingUnaryIntOp(irBuilder: IRBuilder2, kind: ExprKind, operand: Value,
     operandValue: LLVMValueRef): LLVMValueRef {
     let _ = irBuilder
@@ -287,7 +461,8 @@ private func GenerateSaturatingUnaryIntOp(irBuilder: IRBuilder2, kind: ExprKind,
 }
 
 private func EmitOverflowCheck(irBuilder: IRBuilder2, overflowFlag: LLVMValueRef, pairSlot: LLVMValueRef,
-    pairType: LLVMTypeRef, resultType: LLVMTypeRef, opName: String): LLVMValueRef {
+    pairType: LLVMTypeRef, resultType: LLVMTypeRef, opName: String, strategy: OverflowStrategy, kind: ExprKind,
+    lhs: Value, lhsValue: LLVMValueRef, rhsValue: LLVMValueRef): LLVMValueRef {
     let currentBlock = irBuilder.GetInsertBlock()
     if (currentBlock.isNull()) {
         let valuePtr = irBuilder.CreateStructGEP(pairType, pairSlot, 0u32)
@@ -309,7 +484,12 @@ private func EmitOverflowCheck(irBuilder: IRBuilder2, overflowFlag: LLVMValueRef
     irBuilder.CreateBr(blocks[2])
 
     irBuilder.SetInsertPoint(blocks[1])
-    irBuilder.CreateOverflowOrArithmeticException(opName)
+    if (strategy == OverflowStrategy.SATURATING) {
+        GenerateOverflowSaturating(irBuilder, kind, lhs, lhsValue, rhsValue, ifValue)
+        irBuilder.CreateBr(blocks[2])
+    } else {
+        irBuilder.CreateOverflowOrArithmeticException(opName)
+    }
 
     irBuilder.SetInsertPoint(blocks[2])
     return irBuilder.CreateLoad(resultType, ifValue)
@@ -377,9 +557,11 @@ private func GetOverflowIntrinsicInfo(kind: IntrinsicKind): Option<OverflowIntri
     if (kind == IntrinsicKind.OVERFLOW_WRAPPING_MUL) { return Some(OverflowIntrinsicInfo(ExprKind.MUL, OverflowStrategy.WRAPPING)) }
     if (kind == IntrinsicKind.OVERFLOW_CHECKED_MUL) { return Some(OverflowIntrinsicInfo(ExprKind.MUL, OverflowStrategy.CHECKED)) }
     if (kind == IntrinsicKind.OVERFLOW_THROWING_DIV) { return Some(OverflowIntrinsicInfo(ExprKind.DIV, OverflowStrategy.THROWING)) }
+    if (kind == IntrinsicKind.OVERFLOW_SATURATING_DIV) { return Some(OverflowIntrinsicInfo(ExprKind.DIV, OverflowStrategy.SATURATING)) }
     if (kind == IntrinsicKind.OVERFLOW_WRAPPING_DIV) { return Some(OverflowIntrinsicInfo(ExprKind.DIV, OverflowStrategy.WRAPPING)) }
     if (kind == IntrinsicKind.OVERFLOW_CHECKED_DIV) { return Some(OverflowIntrinsicInfo(ExprKind.DIV, OverflowStrategy.CHECKED)) }
     if (kind == IntrinsicKind.OVERFLOW_THROWING_MOD) { return Some(OverflowIntrinsicInfo(ExprKind.MOD, OverflowStrategy.THROWING)) }
+    if (kind == IntrinsicKind.OVERFLOW_SATURATING_MOD) { return Some(OverflowIntrinsicInfo(ExprKind.MOD, OverflowStrategy.SATURATING)) }
     if (kind == IntrinsicKind.OVERFLOW_WRAPPING_MOD) { return Some(OverflowIntrinsicInfo(ExprKind.MOD, OverflowStrategy.WRAPPING)) }
     if (kind == IntrinsicKind.OVERFLOW_CHECKED_MOD) { return Some(OverflowIntrinsicInfo(ExprKind.MOD, OverflowStrategy.CHECKED)) }
     if (kind == IntrinsicKind.OVERFLOW_THROWING_NEG) { return Some(OverflowIntrinsicInfo(ExprKind.NEG, OverflowStrategy.THROWING)) }
