@@ -3,6 +3,7 @@ package cangjie_compiler::sema
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::modules.SemaImportManager
 import cangjie_compiler::option.GetHardwareConcurrency
 import cangjie_compiler::utils.ProfileRecorder
 
@@ -77,10 +78,13 @@ public class CollectDeclsInfo {
 public class TypeCheckerImpl {
     public var typeManager: TypeManager
     public var diag: Option<BasicDiagnosticEngine> = None
+    public var importManager: Option<SemaImportManager> = None
 
-    public init(typeManager!: TypeManager = TypeManager(), diag!: Option<BasicDiagnosticEngine> = None) {
+    public init(typeManager!: TypeManager = TypeManager(), diag!: Option<BasicDiagnosticEngine> = None,
+        importManager!: Option<SemaImportManager> = None) {
         this.typeManager = typeManager
         this.diag = diag
+        this.importManager = importManager
     }
 
     public func PickConstaintFromTys(tv: GenericsTy, tys: TySet, isUB: Bool): MatchResult {
@@ -292,11 +296,11 @@ public class TypeCheckerImpl {
     }
 
     public func GetTyFromASTType(ctx: ASTContext, node: Option<Node>): Ty {
-        return GetTyFromASTNode(typeManager, ctx, node)
+        return GetTyFromASTNode(typeManager, ctx, node, importManager: importManager, diag: diag)
     }
 
     public func GetTyFromASTType(ctx: ASTContext, node: Node): Ty {
-        return GetTyFromASTNode(typeManager, ctx, node)
+        return GetTyFromASTNode(typeManager, ctx, node, importManager: importManager, diag: diag)
     }
 
     public func GetTyFromASTDecl(decl: Decl, typeArgs: ArrayList<Ty>): Ty {
@@ -312,19 +316,19 @@ public class TypeCheckerImpl {
     }
 
     public func ResolveOneDecl(ctx: ASTContext, decl: Decl): Unit {
-        ResolveOneDecl(typeManager, ctx, decl)
+        ResolveOneDecl(typeManager, ctx, decl, importManager: importManager, diag: diag)
     }
 
     public func ResolveDecls(ctx: ASTContext): Unit {
-        ResolveDecls(typeManager, ctx)
+        ResolveDecls(typeManager, ctx, importManager: importManager, diag: diag)
     }
 
     public func ResolveTypeAlias(ctx: ASTContext): Unit {
-        ResolveTypeAlias(typeManager, ctx)
+        ResolveTypeAlias(typeManager, ctx, importManager: importManager, diag: diag)
     }
 
     public func SetTypeTy(ctx: ASTContext, typeNode: Type): Unit {
-        SetTypeTy(typeManager, ctx, typeNode)
+        SetTypeTy(typeManager, ctx, typeNode, importManager: importManager, diag: diag)
     }
 
     public func SubstituteTypeAliasForAlias(tad: TypeAliasDecl): Unit {
@@ -332,10 +336,10 @@ public class TypeCheckerImpl {
     }
 
     public func ResolveNames(ctx: ASTContext): Unit {
-        ResolveNames(typeManager, ctx)
+        ResolveNames(typeManager, ctx, importManager: importManager, diag: diag)
     }
 
     public func PreSetDeclType(ctx: ASTContext): Unit {
-        PreSetDeclType(typeManager, ctx)
+        PreSetDeclType(typeManager, ctx, importManager: importManager, diag: diag)
     }
 }

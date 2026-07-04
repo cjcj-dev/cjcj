@@ -5115,6 +5115,10 @@ public class ImportManager <: SemaImportManager {
         return out
     }
 
+    public func GetAllImportedPackages(includeMacroPkg: Bool): ArrayList<PackageDecl> {
+        return GetAllPackageDecls(includeMacroPkg: includeMacroPkg)
+    }
+
     private func GetAllPackageDecls(includeMacroPkg!: Bool = false): ArrayList<PackageDecl> {
         let out = ArrayList<PackageDecl>()
         for (packageName in packageNameMap.keys()) {
@@ -5243,6 +5247,16 @@ public class ImportManager <: SemaImportManager {
         return out
     }
 
+    public func GetAllImportedDecls(file: File): ArrayList<Decl> {
+        let out = ArrayList<Decl>()
+        for (group in GetImportedDecls(file)) {
+            for (decl in group.decls) {
+                AddDeclIfMissing(out, decl)
+            }
+        }
+        return out
+    }
+
     public func AddUsedMacroDecls(file: File, decl: Decl): Unit {
         if (!fileUsedMacroDeclsMap.contains(file.indexOfPackage)) {
             fileUsedMacroDeclsMap[file.indexOfPackage] = HashMap<String, ArrayList<Decl>>()
@@ -5330,7 +5344,25 @@ public class ImportManager <: SemaImportManager {
         return GetImportedDecl("std.ast", name)
     }
 
-    private func GetImportedDecl(packageName: String, name: String): Option<Decl> {
+    public func GetImportedPackageDecl(node: Node, packageName: String): (Option<PackageDecl>, Bool) {
+        if (let Some(file) <- node.curFile) {
+            let decls = GetImportedDeclsByName(file, packageName)
+            var ret: Option<PackageDecl> = None
+            for (decl in decls) {
+                if (let Some(packageDecl) <- (decl as PackageDecl)) {
+                    if (let None <- ret) {
+                        ret = Some(packageDecl)
+                    } else {
+                        return (ret, true)
+                    }
+                }
+            }
+            return (ret, false)
+        }
+        return (None, false)
+    }
+
+    public func GetImportedDecl(packageName: String, name: String): Option<Decl> {
         let decls = GetPackageMembersByName(packageName, name)
         if (decls.isEmpty()) {
             return GetImplicitPackageMembersByName(packageName, name)
@@ -5407,6 +5439,23 @@ public class ImportManager <: SemaImportManager {
             if (let Some(decls) <- info.declMap.get(name)) {
                 for (decl in decls) {
                     AddDeclIfMissing(out, decl)
+                }
+            }
+        }
+        return out
+    }
+
+    private func GetImportedDeclsByName(file: File, name: String): ArrayList<Decl> {
+        let out = ArrayList<Decl>()
+        if (let Some(decls) <- importedDeclsMap.get(name)) {
+            for (decl in decls) {
+                AddDeclIfMissing(out, decl)
+            }
+        }
+        if (let Some(fileMap) <- fileImportedDeclsMap.get(file.fileHash)) {
+            if (let Some(decls2) <- fileMap.get(name)) {
+                for (decl2 in decls2) {
+                    AddDeclIfMissing(out, decl2)
                 }
             }
         }

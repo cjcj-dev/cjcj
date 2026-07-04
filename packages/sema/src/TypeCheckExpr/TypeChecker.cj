@@ -5,6 +5,7 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
 import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.DEFAULT_POSITION as BasicDefaultPosition
 import cangjie_compiler::basic.DiagnosticCache
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
@@ -16,6 +17,7 @@ import cangjie_compiler::sema.FFI.*
 import cangjie_compiler::sema.InheritanceChecker.*
 import cangjie_compiler::sema.LegalityOfUsage.*
 import cangjie_compiler::sema.NativeFFI.*
+import cangjie_compiler::utils.CTYPE_NAME as UtilsCTypeName
 
 private func contextPackage(ctx: ASTContext): Option<Package> {
     return ctx.curPackage
@@ -423,7 +425,7 @@ public class TypeChecker {
             tm.compileTestsOnly = instance.globalOptions.compileTestsOnly
         }
         impl = if (let Some(instance) <- ci) {
-            TypeCheckerImpl(typeManager: tm, diag: instance.diag)
+            TypeCheckerImpl(typeManager: tm, diag: instance.diag, importManager: instance.importManager)
         } else {
             TypeCheckerImpl(typeManager: tm)
         }
@@ -479,11 +481,17 @@ public class TypeChecker {
             }
         }
         PreCheck(contexts)
-        for (ctx in contexts) {
-            SeedImportedExtendMaps(ctx)
-        }
+        BuildImportedExtendMap()
         for (ctx in contexts) {
             BuildCurrentPackageExtendMap(ctx)
+        }
+        CheckCHIRClassDependencies()
+        UpdateAnyTy()
+        UpdateCTypeTy()
+        for (ctx in contexts) {
+            if (let Some(pkg) <- contextPackage(ctx)) {
+                CollectDeclsWithMember(pkg, ctx)
+            }
         }
         return contexts
     }
@@ -1035,19 +1043,156 @@ public class TypeChecker {
         }
     }
 
-    private func SeedImportedExtendMaps(ctx: ASTContext): Unit {
+    private func BuildImportedExtendMap(): Unit {
         let extends = ArrayList<ExtendDecl>()
-        for (packageDecl in ctx.packageDecls) {
-            if (!packageDecl.srcPackage.TestAttr(Attribute.IMPORTED)) {
-                continue
-            }
-            IterateToplevelDecls(packageDecl.srcPackage, { decl: Decl =>
-                if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-                    extends.add(extendDecl)
+        if (let Some(manager) <- impl.importManager) {
+            for (packageDecl in manager.GetAllImportedPackages(true)) {
+                if (packageDecl.srcPackage.TestAttr(Attribute.IMPORTED)) {
+                    IterateToplevelDecls(packageDecl.srcPackage, { decl: Decl =>
+                        if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+                            extends.add(extendDecl)
+                        }
+                    })
                 }
-            })
+            }
         }
         TypeCheckExtendUpdateExtendMap(impl.typeManager, extends)
+    }
+
+    private func IsTypeDeclKind(kind: ASTKind): Bool {
+        return kind == ASTKind.CLASS_DECL || kind == ASTKind.STRUCT_DECL || kind == ASTKind.ENUM_DECL ||
+            kind == ASTKind.INTERFACE_DECL || kind == ASTKind.EXTEND_DECL || kind == ASTKind.BUILTIN_DECL
+    }
+
+    private func IsMemberDeclKind(kind: ASTKind): Bool {
+        return kind == ASTKind.FUNC_DECL || kind == ASTKind.PROP_DECL || kind == ASTKind.VAR_DECL
+    }
+
+    private func GetTypeDecl(decl: Decl): Decl {
+        if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            if (let Some(extendedType) <- extendDecl.extendedType) {
+                if (let Some(target) <- extendedType.GetTarget()) {
+                    return GetRealTarget(target)
+                }
+                if (let Some(ty) <- extendedType.GetTy()) {
+                    return impl.typeManager.GetDummyBuiltInDecl(ty)
+                }
+            }
+        }
+        return decl
+    }
+
+    private func GetTypeDeclOfMember(decl: Decl): Decl {
+        if (let Some(outer) <- decl.outerDecl) {
+            return GetTypeDecl(outer)
+        }
+        return decl
+    }
+
+    private func MemDecl2Sig(decl: Decl): MemSig {
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            let arity = if (funcDecl.TestAttr(Attribute.IMPORTED)) {
+                UInt64(GetParamTys(funcDecl).size)
+            } else if (let Some(body) <- funcDecl.funcBody) {
+                if (!body.paramLists.isEmpty()) {
+                    UInt64(body.paramLists[0].params.size)
+                } else {
+                    0u64
+                }
+            } else {
+                0u64
+            }
+            let genArity = if (let Some(generic) <- funcDecl.generic) {
+                UInt64(generic.typeParameters.size)
+            } else {
+                0u64
+            }
+            return MemSig(funcDecl.identifier.Val(), false, arity, genArity)
+        }
+        return MemSig(decl.identifier.Val(), true, 0u64, 0u64)
+    }
+
+    private func CollectDeclsWithMember(pkg: Package, ctx: ASTContext): Unit {
+        ctx.mem2Decls.clear()
+        ctx.subtypeDeclsMap.clear()
+        let allTops = ArrayList<Decl>()
+        let processedDecls = ArrayList<Decl>()
+        let collectDecl = { top: Decl =>
+            var alreadyProcessed = false
+            for (processed in processedDecls) {
+                if (SameDecl(processed, top)) {
+                    alreadyProcessed = true
+                    break
+                }
+            }
+            if (!alreadyProcessed) {
+                processedDecls.add(top)
+                if (IsTypeDeclKind(top.astKind)) {
+                    var foundTop = false
+                    for (existingTop in allTops) {
+                        if (SameDecl(existingTop, top)) {
+                            foundTop = true
+                            break
+                        }
+                    }
+                    if (!foundTop) {
+                        allTops.add(top)
+                    }
+                }
+                for (member in top.GetMemberDecls()) {
+                    if (!IsMemberDeclKind(member.astKind)) {
+                        continue
+                    }
+                    let sig = MemDecl2Sig(member)
+                    let topDecl = GetTypeDeclOfMember(member)
+                    ctx.AddMemDecl(sig, topDecl)
+                    if (sig.genArity > 0u64) {
+                        ctx.AddMemDecl(MemSig(sig.id, sig.isVarOrProp, sig.arity, 0u64), topDecl)
+                    }
+                }
+            }
+        }
+        for (sym in impl.GetAllDecls(ctx)) {
+            if (let Some(node) <- sym.node) {
+                if (let Some(decl) <- (node as Decl)) {
+                    collectDecl(decl)
+                }
+            }
+        }
+        if (let Some(manager) <- impl.importManager) {
+            for (file in pkg.files) {
+                for (decl in manager.GetAllImportedDecls(file)) {
+                    collectDecl(decl)
+                }
+            }
+        }
+        for (entry in impl.typeManager.builtinTyToExtendMap) {
+            for (top in entry.extends) {
+                collectDecl(top)
+            }
+        }
+        for (top in allTops) {
+            let realTop = GetTypeDecl(top)
+            if (let Some(inheritable) <- (top as InheritableDecl)) {
+                for (superDecl in inheritable.GetAllSuperDecls()) {
+                    if (!ctx.subtypeDeclsMap.contains(superDecl)) {
+                        ctx.subtypeDeclsMap[superDecl] = ArrayList<Decl>()
+                    }
+                    if (let Some(subtypes) <- ctx.subtypeDeclsMap.get(superDecl)) {
+                        var foundSubtype = false
+                        for (subtype in subtypes) {
+                            if (SameDecl(subtype, realTop)) {
+                                foundSubtype = true
+                                break
+                            }
+                        }
+                        if (!foundSubtype) {
+                            subtypes.add(realTop)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func BuildCurrentPackageExtendMap(ctx: ASTContext): Unit {
@@ -1104,11 +1249,63 @@ public class TypeChecker {
                 } else {
                     PreCheckAnnoForFFI(pkg)
                 }
-                let _ = PreCheckPackage(ctx, pkg, typeManager: impl.typeManager)
+                let _ = PreCheckPackage(ctx, pkg, typeManager: impl.typeManager,
+                    importManager: impl.importManager, diag: impl.diag)
                 let _ = CheckDeclAttributesForPackage(pkg, opts: GlobalOptions())
             }
         }
         impl.typeManager.ClearMapCache()
+    }
+
+    private func CheckCHIRClassDependencies(): Unit {
+        if (let None <- ci) {
+            return
+        }
+        let instance = ci.getOrThrow()
+        if (!instance.globalOptions.chirCC || instance.globalOptions.implicitPrelude) {
+            return
+        }
+        let objectDecl: Option<Decl> = if (let Some(manager) <- impl.importManager) {
+            manager.GetImportedDecl("std.core", "Object")
+        } else {
+            None
+        }
+        if (let None <- objectDecl) {
+            if (let Some(diagValue) <- impl.diag) {
+                diagValue.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_core_object_not_found_when_no_prelude,
+                    BasicDefaultPosition).Emit()
+            }
+        }
+    }
+
+    private func UpdateAnyTy(): Unit {
+        if (let Some(manager) <- impl.importManager) {
+            if (let Some(decl) <- manager.GetCoreDecl("Any")) {
+                if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+                    if (Ty.IsTyCorrect(interfaceDecl.GetTy())) {
+                        impl.typeManager.SetSemaAnyTy(interfaceDecl.GetTy().getOrThrow())
+                    }
+                }
+            }
+        }
+    }
+
+    private func UpdateCTypeTy(): Unit {
+        if (let Some(instance) <- ci) {
+            if (!instance.globalOptions.implicitPrelude) {
+                return
+            }
+        }
+        if (let Some(manager) <- impl.importManager) {
+            if (let Some(decl) <- manager.GetCoreDecl(UtilsCTypeName)) {
+                if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
+                    if (Ty.IsTyCorrect(interfaceDecl.GetTy())) {
+                        impl.typeManager.SetSemaCTypeTy(interfaceDecl.GetTy().getOrThrow())
+                    }
+                }
+            }
+        }
     }
 
     private func DoTypeCheck(ctx: ASTContext, pkg: Package): Unit {

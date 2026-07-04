@@ -3,6 +3,10 @@ package cangjie_compiler::sema
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
+import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
+import cangjie_compiler::basic.DiagKind as BasicDiagKind
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::modules.SemaImportManager
 
 private class ResolveTypeWalkerBox {
     public var typeManager: TypeManager
@@ -107,6 +111,29 @@ private func findImportedPackageDecl(ctx: ASTContext, packageName: String): Impo
     return result
 }
 
+private func findImportedPackageDecl(
+    ctx: ASTContext,
+    qt: QualifiedType,
+    packageName: String,
+    importManager: Option<SemaImportManager>,
+    diag: Option<BasicDiagnosticEngine>
+): ImportedPackageLookup {
+    let result = ImportedPackageLookup()
+    if (let Some(manager) <- importManager) {
+        let (packageDecl, conflicted) = manager.GetImportedPackageDecl(qt, packageName)
+        result.decl = packageDecl
+        result.conflicted = conflicted
+        if (conflicted) {
+            if (let Some(diagValue) <- diag) {
+                diagValue.Diagnose(qt.begin, qt.end, BasicDiagKind.sema_package_name_conflict,
+                    args: [BasicDiagArgument(packageName)]).Emit()
+            }
+        }
+        return result
+    }
+    return findImportedPackageDecl(ctx, packageName)
+}
+
 private func markPackageBaseType(typeNode: Type): Unit {
     typeNode.SetTy(TypeManager.GetInvalidTy())
     if (let Some(qualified) <- (typeNode as QualifiedType)) {
@@ -121,11 +148,12 @@ private func bindImportedPackageBase(baseType: Type, packageDecl: PackageDecl): 
     markPackageBaseType(baseType)
 }
 
-private func getTypeArgTys(typeManager: TypeManager, ctx: ASTContext, typeArguments: ArrayList<Type>): ArrayList<Ty> {
+private func getTypeArgTys(typeManager: TypeManager, ctx: ASTContext, typeArguments: ArrayList<Type>,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): ArrayList<Ty> {
     let out = ArrayList<Ty>()
     for (arg in typeArguments) {
         if (Ty.IsInitialTy(arg.GetTy())) {
-            arg.SetTy(GetTyFromASTType(typeManager, ctx, arg))
+            arg.SetTy(GetTyFromASTType(typeManager, ctx, arg, importManager: importManager, diag: diag))
         }
         if (let Some(argTy) <- arg.GetTy()) {
             out.add(argTy)
@@ -209,14 +237,16 @@ private func getTyFromBuiltinDecl(typeManager: TypeManager, bid: BuiltInDecl, ty
     return TypeManager.GetInvalidTy()
 }
 
-private func getTyFromASTCFuncType(typeManager: TypeManager, ctx: ASTContext, rt: RefType): Ty {
+private func getTyFromASTCFuncType(typeManager: TypeManager, ctx: ASTContext, rt: RefType,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (rt.typeArguments.size != 1) {
         return TypeManager.GetInvalidTy()
     }
     if (let Some(funcType) <- (rt.typeArguments[0] as FuncType)) {
         let paramTys = ArrayList<Ty>()
         for (paramType in funcType.paramTypes) {
-            paramType.SetTy(GetTyFromASTType(typeManager, ctx, paramType))
+            paramType.SetTy(GetTyFromASTType(typeManager, ctx, paramType,
+                importManager: importManager, diag: diag))
             if (let Some(paramTy) <- paramType.GetTy()) {
                 paramTys.add(paramTy)
             } else {
@@ -225,7 +255,8 @@ private func getTyFromASTCFuncType(typeManager: TypeManager, ctx: ASTContext, rt
         }
         var retTy: Ty = TypeManager.GetInvalidTy()
         if (let Some(retType) <- funcType.retType) {
-            retType.SetTy(GetTyFromASTType(typeManager, ctx, retType))
+            retType.SetTy(GetTyFromASTType(typeManager, ctx, retType,
+                importManager: importManager, diag: diag))
             if (let Some(retTypeTy) <- retType.GetTy()) {
                 retTy = retTypeTy
             } else {
@@ -234,7 +265,8 @@ private func getTyFromASTCFuncType(typeManager: TypeManager, ctx: ASTContext, rt
         } else {
             return TypeManager.GetInvalidTy()
         }
-        funcType.SetTy(GetTyFromASTFuncType(typeManager, ctx, funcType))
+        funcType.SetTy(GetTyFromASTFuncType(typeManager, ctx, funcType,
+            importManager: importManager, diag: diag))
         let cfg = FuncTyConfig()
         cfg.isC = true
         return typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
@@ -457,28 +489,32 @@ public func GetTyFromASTDecl(typeManager: TypeManager, decl: Decl, typeArgs: Arr
     return TypeManager.GetInvalidTy()
 }
 
-public func GetTyFromASTNode(typeManager: TypeManager, ctx: ASTContext, node: Option<Node>): Ty {
+public func GetTyFromASTNode(typeManager: TypeManager, ctx: ASTContext, node: Option<Node>,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (let Some(value) <- node) {
-        return GetTyFromASTNode(typeManager, ctx, value)
+        return GetTyFromASTNode(typeManager, ctx, value, importManager: importManager, diag: diag)
     }
     return TypeManager.GetInvalidTy()
 }
 
-public func GetTyFromASTNode(typeManager: TypeManager, ctx: ASTContext, node: Node): Ty {
+public func GetTyFromASTNode(typeManager: TypeManager, ctx: ASTContext, node: Node,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (let Some(typeNode) <- (node as Type)) {
-        return GetTyFromASTType(typeManager, ctx, typeNode)
+        return GetTyFromASTType(typeManager, ctx, typeNode, importManager: importManager, diag: diag)
     }
     return TypeManager.GetInvalidTy()
 }
 
-public func GetTyFromASTType(typeManager: TypeManager, ctx: ASTContext, node: Option<Type>): Ty {
+public func GetTyFromASTType(typeManager: TypeManager, ctx: ASTContext, node: Option<Type>,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (let Some(value) <- node) {
-        return GetTyFromASTType(typeManager, ctx, value)
+        return GetTyFromASTType(typeManager, ctx, value, importManager: importManager, diag: diag)
     }
     return TypeManager.GetInvalidTy()
 }
 
-public func GetTyFromASTType(typeManager: TypeManager, ctx: ASTContext, node: Type): Ty {
+public func GetTyFromASTType(typeManager: TypeManager, ctx: ASTContext, node: Type,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (!Ty.IsInitialTy(node.GetTy())) {
         if (let Some(ty) <- node.GetTy()) {
             return ty
@@ -490,37 +526,43 @@ public func GetTyFromASTType(typeManager: TypeManager, ctx: ASTContext, node: Ty
         return ty
     }
     if (let Some(refType) <- (node as RefType)) {
-        let ty = GetTyFromASTRefType(typeManager, ctx, refType)
+        let ty = GetTyFromASTRefType(typeManager, ctx, refType, importManager: importManager, diag: diag)
         refType.SetTy(ty)
         return ty
     }
     if (let Some(qualifiedType) <- (node as QualifiedType)) {
-        let ty = GetTyFromASTQualifiedType(typeManager, ctx, qualifiedType)
+        let ty = GetTyFromASTQualifiedType(typeManager, ctx, qualifiedType,
+            importManager: importManager, diag: diag)
         qualifiedType.SetTy(ty)
         return ty
     }
     if (let Some(varrayType) <- (node as VArrayType)) {
-        let ty = GetTyFromASTVArrayType(typeManager, ctx, varrayType)
+        let ty = GetTyFromASTVArrayType(typeManager, ctx, varrayType,
+            importManager: importManager, diag: diag)
         varrayType.SetTy(ty)
         return ty
     }
     if (let Some(tupleType) <- (node as TupleType)) {
-        let ty = GetTyFromASTTupleType(typeManager, ctx, tupleType)
+        let ty = GetTyFromASTTupleType(typeManager, ctx, tupleType,
+            importManager: importManager, diag: diag)
         tupleType.SetTy(ty)
         return ty
     }
     if (let Some(parenType) <- (node as ParenType)) {
-        let ty = GetTyFromASTType(typeManager, ctx, parenType.innerType)
+        let ty = GetTyFromASTType(typeManager, ctx, parenType.innerType,
+            importManager: importManager, diag: diag)
         parenType.SetTy(ty)
         return ty
     }
     if (let Some(funcType) <- (node as FuncType)) {
-        let ty = GetTyFromASTFuncType(typeManager, ctx, funcType)
+        let ty = GetTyFromASTFuncType(typeManager, ctx, funcType,
+            importManager: importManager, diag: diag)
         funcType.SetTy(ty)
         return ty
     }
     if (let Some(optionType) <- (node as OptionType)) {
-        let ty = GetTyFromASTOptionType(typeManager, ctx, optionType)
+        let ty = GetTyFromASTOptionType(typeManager, ctx, optionType,
+            importManager: importManager, diag: diag)
         optionType.SetTy(ty)
         return ty
     }
@@ -532,7 +574,8 @@ public func GetTyFromASTType(typeManager: TypeManager, ctx: ASTContext, node: Ty
     return TypeManager.GetInvalidTy()
 }
 
-public func GetTyFromASTRefType(typeManager: TypeManager, ctx: ASTContext, rt: RefType): Ty {
+public func GetTyFromASTRefType(typeManager: TypeManager, ctx: ASTContext, rt: RefType,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (let Some(target) <- rt.ref.target) {
         if (target.astKind == ASTKind.PACKAGE_DECL) {
             if (let Some(ty) <- rt.GetTy()) {
@@ -563,15 +606,16 @@ public func GetTyFromASTRefType(typeManager: TypeManager, ctx: ASTContext, rt: R
     if (let Some(builtin) <- (target as BuiltInDecl)) {
         if (builtin.IsType(BuiltInType.CFUNC)) {
             ReplaceTarget(rt, Some(target))
-            return getTyFromASTCFuncType(typeManager, ctx, rt)
+            return getTyFromASTCFuncType(typeManager, ctx, rt, importManager: importManager, diag: diag)
         }
     }
     ReplaceTarget(rt, Some(target))
-    let typeArgs = getTypeArgTys(typeManager, ctx, rt.typeArguments)
+    let typeArgs = getTypeArgTys(typeManager, ctx, rt.typeArguments, importManager: importManager, diag: diag)
     return GetTyFromASTDecl(typeManager, target, typeArgs)
 }
 
-public func GetTyFromASTQualifiedType(typeManager: TypeManager, ctx: ASTContext, qt: QualifiedType): Ty {
+public func GetTyFromASTQualifiedType(typeManager: TypeManager, ctx: ASTContext, qt: QualifiedType,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (let Some(target) <- qt.target) {
         if (target.astKind == ASTKind.PACKAGE_DECL) {
             if (let Some(ty) <- qt.GetTy()) {
@@ -589,14 +633,15 @@ public func GetTyFromASTQualifiedType(typeManager: TypeManager, ctx: ASTContext,
         if (baseType.astKind == ASTKind.INVALID_TYPE) {
             return TypeManager.GetInvalidTy()
         }
-        let packageLookup = findImportedPackageDecl(ctx, ASTContext.GetPackageName(baseType))
+        let packageLookup = findImportedPackageDecl(ctx, qt, ASTContext.GetPackageName(baseType),
+            importManager, diag)
         if (packageLookup.conflicted) {
             return TypeManager.GetInvalidTy()
         }
         if (let Some(packageDecl) <- packageLookup.decl) {
             bindImportedPackageBase(baseType, packageDecl)
         } else {
-            let _ = GetTyFromASTType(typeManager, ctx, baseType)
+            let _ = GetTyFromASTType(typeManager, ctx, baseType, importManager: importManager, diag: diag)
         }
         if (let Some(baseTarget) <- baseType.GetTarget()) {
             if (let Some(packageDecl) <- (baseTarget as PackageDecl)) {
@@ -604,7 +649,8 @@ public func GetTyFromASTQualifiedType(typeManager: TypeManager, ctx: ASTContext,
                 if (!packageTargets.isEmpty()) {
                     let target = packageTargets[0]
                     ReplaceTarget(qt, Some(target))
-                    let typeArgs = getTypeArgTys(typeManager, ctx, qt.typeArguments)
+                    let typeArgs = getTypeArgTys(typeManager, ctx, qt.typeArguments,
+                        importManager: importManager, diag: diag)
                     return GetTyFromASTDecl(typeManager, target, typeArgs)
                 }
                 return TypeManager.GetInvalidTy()
@@ -615,7 +661,8 @@ public func GetTyFromASTQualifiedType(typeManager: TypeManager, ctx: ASTContext,
             if (!typeTargets.isEmpty()) {
                 let target = typeTargets[0]
                 ReplaceTarget(qt, Some(target))
-                let typeArgs = getTypeArgTys(typeManager, ctx, qt.typeArguments)
+                let typeArgs = getTypeArgTys(typeManager, ctx, qt.typeArguments,
+                    importManager: importManager, diag: diag)
                 return GetTyFromASTDecl(typeManager, target, typeArgs)
             }
         }
@@ -623,18 +670,21 @@ public func GetTyFromASTQualifiedType(typeManager: TypeManager, ctx: ASTContext,
     return TypeManager.GetInvalidTy()
 }
 
-public func GetTyFromASTVArrayType(typeManager: TypeManager, ctx: ASTContext, varrayType: VArrayType): Ty {
-    let elemTy = GetTyFromASTType(typeManager, ctx, varrayType.typeArgument)
+public func GetTyFromASTVArrayType(typeManager: TypeManager, ctx: ASTContext, varrayType: VArrayType,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    let elemTy = GetTyFromASTType(typeManager, ctx, varrayType.typeArgument,
+        importManager: importManager, diag: diag)
     if (let Some(size) <- varraySizeFromConstantType(varrayType.constantType)) {
         return typeManager.GetVArrayTy(elemTy, size)
     }
     return TypeManager.GetInvalidTy()
 }
 
-public func GetTyFromASTTupleType(typeManager: TypeManager, ctx: ASTContext, tupleType: TupleType): Ty {
+public func GetTyFromASTTupleType(typeManager: TypeManager, ctx: ASTContext, tupleType: TupleType,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     let elemTys = ArrayList<Ty>()
     for (fieldType in tupleType.fieldTypes) {
-        let fieldTy = GetTyFromASTType(typeManager, ctx, fieldType)
+        let fieldTy = GetTyFromASTType(typeManager, ctx, fieldType, importManager: importManager, diag: diag)
         if (Ty.IsInitialTy(fieldType.GetTy())) {
             return TypeManager.GetInvalidTy()
         }
@@ -643,16 +693,17 @@ public func GetTyFromASTTupleType(typeManager: TypeManager, ctx: ASTContext, tup
     return typeManager.GetTupleTy(elemTys.toArray())
 }
 
-public func GetTyFromASTFuncType(typeManager: TypeManager, ctx: ASTContext, funcType: FuncType): Ty {
+public func GetTyFromASTFuncType(typeManager: TypeManager, ctx: ASTContext, funcType: FuncType,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     let paramTys = ArrayList<Ty>()
     for (paramType in funcType.paramTypes) {
-        let paramTy = GetTyFromASTType(typeManager, ctx, paramType)
+        let paramTy = GetTyFromASTType(typeManager, ctx, paramType, importManager: importManager, diag: diag)
         if (Ty.IsInitialTy(paramType.GetTy())) {
             return TypeManager.GetInvalidTy()
         }
         paramTys.add(paramTy)
     }
-    let retTy = GetTyFromASTType(typeManager, ctx, funcType.retType)
+    let retTy = GetTyFromASTType(typeManager, ctx, funcType.retType, importManager: importManager, diag: diag)
     if (let None <- funcType.retType) {
         return TypeManager.GetInvalidTy()
     }
@@ -661,12 +712,14 @@ public func GetTyFromASTFuncType(typeManager: TypeManager, ctx: ASTContext, func
     return typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
 }
 
-public func GetTyFromASTOptionType(typeManager: TypeManager, ctx: ASTContext, optionType: OptionType): Ty {
+public func GetTyFromASTOptionType(typeManager: TypeManager, ctx: ASTContext, optionType: OptionType,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (let Some(componentType) <- optionType.componentType) {
-        componentType.SetTy(GetTyFromASTType(typeManager, ctx, componentType))
+        componentType.SetTy(GetTyFromASTType(typeManager, ctx, componentType,
+            importManager: importManager, diag: diag))
     }
     if (let Some(desugarType) <- optionType.desugarType) {
-        return GetTyFromASTRefType(typeManager, ctx, desugarType)
+        return GetTyFromASTRefType(typeManager, ctx, desugarType, importManager: importManager, diag: diag)
     }
     return TypeManager.GetInvalidTy()
 }
@@ -676,21 +729,24 @@ public func SetDeclTy(typeManager: TypeManager, decl: Decl): Unit {
     decl.SetTy(GetTyFromASTDecl(typeManager, decl, typeArgs))
 }
 
-public func SetTypeAliasDeclTy(typeManager: TypeManager, ctx: ASTContext, tad: TypeAliasDecl): Unit {
+public func SetTypeAliasDeclTy(typeManager: TypeManager, ctx: ASTContext, tad: TypeAliasDecl,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Unit {
     SetDeclTy(typeManager, tad)
     if (let Some(typeNode) <- tad.typeNode) {
-        typeNode.SetTy(GetTyFromASTType(typeManager, ctx, typeNode))
+        typeNode.SetTy(GetTyFromASTType(typeManager, ctx, typeNode, importManager: importManager, diag: diag))
     }
 }
 
-public func ResolveOneDecl(typeManager: TypeManager, ctx: ASTContext, decl: Decl): Unit {
+public func ResolveOneDecl(typeManager: TypeManager, ctx: ASTContext, decl: Decl,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Unit {
     if (let Some(classDecl) <- (decl as ClassDecl)) {
         if (decl.HasAnno(AstAnnotationKind.ANNOTATION)) {
             decl.EnableAttr(Attribute.IS_ANNOTATION)
         }
         SetDeclTy(typeManager, classDecl)
         for (superType in classDecl.inheritedTypes) {
-            superType.SetTy(GetTyFromASTType(typeManager, ctx, superType))
+            superType.SetTy(GetTyFromASTType(typeManager, ctx, superType,
+                importManager: importManager, diag: diag))
             if (let Some(selfTy) <- classDecl.GetTy()) {
                 if (let Some(superTy) <- superType.GetTy()) {
                     markDirectSubtype(superTy, selfTy)
@@ -702,7 +758,8 @@ public func ResolveOneDecl(typeManager: TypeManager, ctx: ASTContext, decl: Decl
     if (let Some(inheritable) <- (decl as InheritableDecl)) {
         SetDeclTy(typeManager, inheritable)
         for (superType in inheritable.inheritedTypes) {
-            superType.SetTy(GetTyFromASTType(typeManager, ctx, superType))
+            superType.SetTy(GetTyFromASTType(typeManager, ctx, superType,
+                importManager: importManager, diag: diag))
             if (let Some(selfTy) <- inheritable.GetTy()) {
                 if (let Some(superTy) <- superType.GetTy()) {
                     markDirectSubtype(superTy, selfTy)
@@ -713,7 +770,7 @@ public func ResolveOneDecl(typeManager: TypeManager, ctx: ASTContext, decl: Decl
         return
     }
     if (let Some(typeAliasDecl) <- (decl as TypeAliasDecl)) {
-        SetTypeAliasDeclTy(typeManager, ctx, typeAliasDecl)
+        SetTypeAliasDeclTy(typeManager, ctx, typeAliasDecl, importManager: importManager, diag: diag)
         return
     }
     if (let Some(vpd) <- (decl as VarWithPatternDecl)) {
@@ -726,7 +783,8 @@ public func ResolveOneDecl(typeManager: TypeManager, ctx: ASTContext, decl: Decl
     }
 }
 
-public func ResolveDecls(typeManager: TypeManager, ctx: ASTContext): Unit {
+public func ResolveDecls(typeManager: TypeManager, ctx: ASTContext,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Unit {
     let decls = if (let Some(pkg) <- ctx.curPackage) { collectDeclsFromPackage(pkg) } else { GetAllDecls(ctx) }
     for (decl in decls) {
         if (decl.astKind == ASTKind.VAR_DECL || decl.astKind == ASTKind.FUNC_DECL) {
@@ -734,12 +792,13 @@ public func ResolveDecls(typeManager: TypeManager, ctx: ASTContext): Unit {
         }
     }
     for (decl in decls) {
-        ResolveOneDecl(typeManager, ctx, decl)
+        ResolveOneDecl(typeManager, ctx, decl, importManager: importManager, diag: diag)
     }
 }
 
-public func SetTypeTy(typeManager: TypeManager, ctx: ASTContext, typeNode: Type): Unit {
-    typeNode.SetTy(GetTyFromASTType(typeManager, ctx, typeNode))
+public func SetTypeTy(typeManager: TypeManager, ctx: ASTContext, typeNode: Type,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Unit {
+    typeNode.SetTy(GetTyFromASTType(typeManager, ctx, typeNode, importManager: importManager, diag: diag))
     if (let Some(target) <- typeNode.GetTarget()) {
         if (target.TyKind() == TypeKind.TYPE) {
             let typeArgs = ArrayList<Ty>()
@@ -774,11 +833,12 @@ public func SubstituteTypeAliasForAlias(typeManager: TypeManager, tad: TypeAlias
     let _ = walker.Walk()
 }
 
-public func ResolveTypeAlias(typeManager: TypeManager, ctx: ASTContext): Unit {
+public func ResolveTypeAlias(typeManager: TypeManager, ctx: ASTContext,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Unit {
     let decls = if (let Some(pkg) <- ctx.curPackage) { collectDeclsFromPackage(pkg) } else { GetAllDecls(ctx) }
     for (decl in decls) {
         if (let Some(tad) <- (decl as TypeAliasDecl)) {
-            SetTypeAliasDeclTy(typeManager, ctx, tad)
+            SetTypeAliasDeclTy(typeManager, ctx, tad, importManager: importManager, diag: diag)
         }
     }
     TypeAliasCircleCheck(ctx)
@@ -813,14 +873,15 @@ public func MarkAliasGenericParameters(ctx: ASTContext): Unit {
     }
 }
 
-public func ResolveNames(typeManager: TypeManager, ctx: ASTContext): Unit {
+public func ResolveNames(typeManager: TypeManager, ctx: ASTContext,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Unit {
     let box = ResolveTypeWalkerBox(typeManager, ctx)
     let resolveSingleType = { node: Node =>
         if (let Some(typeNode) <- (node as Type)) {
             if (typeNode.astKind == ASTKind.THIS_TYPE || typeNode.astKind == ASTKind.INVALID_TYPE) {
                 return VisitAction.WALK_CHILDREN
             }
-            SetTypeTy(box.typeManager, box.ctx, typeNode)
+            SetTypeTy(box.typeManager, box.ctx, typeNode, importManager: importManager, diag: diag)
         }
         VisitAction.WALK_CHILDREN
     }
@@ -843,11 +904,12 @@ public func ResolveNames(typeManager: TypeManager, ctx: ASTContext): Unit {
     }
 }
 
-public func PreSetDeclType(typeManager: TypeManager, ctx: ASTContext): Unit {
-    ResolveDecls(typeManager, ctx)
-    ResolveTypeAlias(typeManager, ctx)
+public func PreSetDeclType(typeManager: TypeManager, ctx: ASTContext,
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Unit {
+    ResolveDecls(typeManager, ctx, importManager: importManager, diag: diag)
+    ResolveTypeAlias(typeManager, ctx, importManager: importManager, diag: diag)
     MarkAliasGenericParameters(ctx)
-    ResolveNames(typeManager, ctx)
+    ResolveNames(typeManager, ctx, importManager: importManager, diag: diag)
 }
 
 public func SelfhostPortStatus_TypeCheck(): Bool {

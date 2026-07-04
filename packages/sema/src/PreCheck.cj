@@ -6,6 +6,7 @@ import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::modules.SemaImportManager
 import cangjie_compiler::utils.FileUtil
 
 private let PRECHECK_CORE_PACKAGE_NAME: String = "std.core"
@@ -655,7 +656,8 @@ public func PreCheckPackage(pkg: Package): Bool {
     return PreCheckPackage(ctx, pkg)
 }
 
-public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeManager = TypeManager()): Bool {
+public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeManager = TypeManager(),
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     ctx.curPackage = pkg
     ctx.fullPackageName = pkg.fullPackageName
     ctx.declMap.clear()
@@ -669,7 +671,7 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeMan
         }
     }
     collectLetPatternDecls(ctx, pkg)
-    PreSetDeclType(typeManager, ctx)
+    PreSetDeclType(typeManager, ctx, importManager: importManager, diag: diag)
     addSuperClassObjectForClassDecl(ctx, pkg)
     collectAndCheckAssumption(typeManager, pkg)
     return valid
