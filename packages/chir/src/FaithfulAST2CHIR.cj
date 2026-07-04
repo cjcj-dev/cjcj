@@ -1535,6 +1535,8 @@ public class FaithfulAST2CHIR {
             decl.astKind == ASTKind.INTERFACE_DECL || decl.astKind == ASTKind.ENUM_DECL) {
             if (let Some(ty) <- decl.GetTy()) {
                 let translated = chirType.TranslateType(ty)
+                let customType = (translated.StripAllRefs() as CustomType).getOrThrow()
+                chirType.GetGlobalNominalCache(decl).SetType(customType)
                 return Some(translated)
             }
         }

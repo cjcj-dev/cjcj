@@ -1385,7 +1385,7 @@ public class Translator {
                 }
             }
             let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr)).StripAllRefs()
-            if (baseTy.IsClass() && funcDecl.TestAttr(AstAttribute.STATIC)) {
+            if (baseTy.IsCustomType() && funcDecl.TestAttr(AstAttribute.STATIC)) {
                 return false
             }
         }
@@ -4940,7 +4940,7 @@ public class Translator {
             previousDefaultArgs.add(obj)
         }
         AppendTranslatedCallArgs(expr, calleeDecl, argValues, expectedParamTys, previousDefaultArgs)
-        if (ShouldUseVirtualMemberDispatchForCall(calleeDecl, dispatchReceiverType)) {
+        if (ShouldUseVirtualMemberDispatchForCall(expr, calleeDecl, dispatchReceiverType)) {
             if (calleeDecl.TestAttr(AstAttribute.STATIC)) {
                 let parentTy = TranslateMemberOwnerType(calleeDecl)
                 let rtti = RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
@@ -5028,40 +5028,40 @@ public class Translator {
             return ty
         }
         if (let Some(refTy) <- (ty as RefType)) {
-            return RefType(SubstituteGenericType(refTy.GetBaseType(), genericParams, replacements))
+            return builder.context.GetRefTy(SubstituteGenericType(refTy.GetBaseType(), genericParams, replacements))
         }
         if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
-            return RawArrayType(SubstituteGenericType(rawArrayTy.GetElementType(), genericParams, replacements),
+            return builder.context.GetRawArrayTy(SubstituteGenericType(rawArrayTy.GetElementType(), genericParams, replacements),
                 dims: rawArrayTy.GetDims())
         }
         if (let Some(varrayTy) <- (ty as VArrayType)) {
-            return VArrayType(SubstituteGenericType(varrayTy.GetElementType(), genericParams, replacements),
+            return builder.context.GetVArrayTy(SubstituteGenericType(varrayTy.GetElementType(), genericParams, replacements),
                 varrayTy.size)
         }
         if (let Some(pointerTy) <- (ty as CPointerType)) {
-            return CPointerType(SubstituteGenericType(pointerTy.GetElementType(), genericParams, replacements))
+            return builder.context.GetCPointerTy(SubstituteGenericType(pointerTy.GetElementType(), genericParams, replacements))
         }
         if (let Some(boxTy) <- (ty as BoxType)) {
-            return BoxType(SubstituteGenericType(boxTy.GetBaseType(), genericParams, replacements))
+            return builder.context.GetBoxTy(SubstituteGenericType(boxTy.GetBaseType(), genericParams, replacements))
         }
         if (let Some(tupleTy) <- (ty as TupleType)) {
-            return TupleType(SubstituteGenericTypeArgs(tupleTy.GetTypeArgs(), genericParams, replacements))
+            return builder.context.GetTupleTy(SubstituteGenericTypeArgs(tupleTy.GetTypeArgs(), genericParams, replacements))
         }
         if (let Some(funcTy) <- (ty as FuncType)) {
             let params = SubstituteGenericTypeArgs(funcTy.GetParamTypes(), genericParams, replacements)
             let retTy = SubstituteGenericType(funcTy.GetReturnType(), genericParams, replacements)
-            return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+            return builder.context.GetFuncTy(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
         }
         if (let Some(structTy) <- (ty as StructType)) {
-            return StructType(structTy.GetStructDef(),
+            return builder.context.GetStructTy(structTy.GetStructDef(),
                 SubstituteGenericTypeArgs(structTy.GetGenericArgs(), genericParams, replacements))
         }
         if (let Some(classTy) <- (ty as ClassType)) {
-            return ClassType(classTy.GetClassDef(),
+            return builder.context.GetClassTy(classTy.GetClassDef(),
                 SubstituteGenericTypeArgs(classTy.GetGenericArgs(), genericParams, replacements))
         }
         if (let Some(enumTy) <- (ty as EnumType)) {
-            return EnumType(enumTy.GetEnumDef(),
+            return builder.context.GetEnumTy(enumTy.GetEnumDef(),
                 SubstituteGenericTypeArgs(enumTy.GetGenericArgs(), genericParams, replacements))
         }
         return ty
@@ -5184,11 +5184,34 @@ public class Translator {
         return funcHasOpenFlag && funcDecl.TestAnyAttr(AstAttribute.PUBLIC, AstAttribute.PROTECTED)
     }
 
-    private func ShouldUseVirtualMemberDispatchForCall(funcDecl: AstFuncDecl, receiverTy: Option<Type>): Bool {
+    private func ShouldUseVirtualMemberDispatchForCall(expr: AstCallExpr, funcDecl: AstFuncDecl,
+        receiverTy: Option<Type>): Bool {
         if (!ShouldUseVirtualMemberDispatch(funcDecl)) {
             return false
         }
+        if (let Some(base) <- expr.baseFunc) {
+            if (let Some(member) <- (base as AstMemberAccess)) {
+                if (let Some(baseExpr) <- member.baseExpr) {
+                    if (let Some(refExpr) <- (baseExpr as AstRefExpr)) {
+                        if (refExpr.isSuper) {
+                            return false
+                        }
+                    }
+                    let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr)).StripAllRefs()
+                    if (baseTy.IsCustomType() && funcDecl.TestAttr(AstAttribute.STATIC)) {
+                        return false
+                    }
+                }
+            }
+        }
         if (funcDecl.TestAttr(AstAttribute.STATIC)) {
+            if (let Some(callerDef) <- CurrentFunction().GetOuterDeclaredOrExtendedDef()) {
+                if (let Some(classDef) <- (callerDef as ClassDef)) {
+                    if (!classDef.IsInterface() && !classDef.CanBeInherited()) {
+                        return false
+                    }
+                }
+            }
             return true
         }
         if (let Some(ty) <- receiverTy) {

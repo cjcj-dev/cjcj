@@ -483,8 +483,17 @@ public open class CustomTypeDef <: Base {
 
     public open func GetGenericTypeParams(): ArrayList<GenericType> {
         let out = ArrayList<GenericType>()
-        for (param in genericTypeParams) {
-            out.add(param)
+        if ((this as ExtendDef).isSome()) {
+            for (param in genericTypeParams) {
+                out.add(param)
+            }
+            return out
+        }
+        if (TestAttr(Attribute.GENERIC)) {
+            let customTy = (GetType().getOrThrow() as CustomType).getOrThrow()
+            for (arg in customTy.GetGenericArgs()) {
+                out.add((arg as GenericType).getOrThrow())
+            }
         }
         return out
     }
