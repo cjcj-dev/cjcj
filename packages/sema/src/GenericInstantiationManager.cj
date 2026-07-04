@@ -3,6 +3,7 @@ package cangjie_compiler::sema
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::modules.SemaImportManager
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
 
@@ -11,6 +12,7 @@ public class CompilerInstance {
     public var globalOptions: OptionGlobalOptions = OptionGlobalOptions()
     public var frontendDumpActionIsTypeCheck: Bool = false
     public var diag: Option<BasicDiagnosticEngine> = None
+    public var importManager: Option<SemaImportManager> = None
     public let sourcePackages: ArrayList<Package> = ArrayList<Package>()
     public let packageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()
     public let importedPackageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()

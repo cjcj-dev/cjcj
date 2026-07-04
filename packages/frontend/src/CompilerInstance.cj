@@ -471,6 +471,7 @@ public class CompilerInstance {
         for (pkg in srcPkgs) {
             semaInstance.sourcePackages.add(pkg)
         }
+        semaInstance.importManager = Some(importManager)
         SeedFaithfulSemaResolvedImports(semaInstance)
         let checker = FaithfulSemaTypeChecker(Some(semaInstance))
         checker.TypeCheckForPackages(pkgs)

@@ -14,6 +14,7 @@ import cangjie_compiler::basic.FaithfulUnorderedMap
 import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::chir.CHIRContext as RealCHIRContext
 import cangjie_compiler::chir.Package as RealCHIRPackage
+import cangjie_compiler::modules.SemaImportManager
 import cangjie_compiler::option.OptimizationLevel
 import cangjie_compiler::option.enumIndex
 public import cangjie_compiler::mangle.BaseMangler
@@ -4886,7 +4887,7 @@ private const NO_CJO_HELP_INFO: String =
     "check if the .cjo file of the package exists in CANGJIE_PATH or CANGJIE_HOME, or use " +
     "'--import-path' to specify the .cjo file path"
 
-public class ImportManager {
+public class ImportManager <: SemaImportManager {
     private let diag: DiagnosticEngine
     private let typeManager: FaithfulSemaTypeManager
     private let globalOptions: GlobalOptions
