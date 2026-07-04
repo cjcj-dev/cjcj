@@ -1,6 +1,6 @@
 package cangjie_compiler::ast
 
-import cangjie_compiler::utils.{Stoi, Stoll, Stoull}
+import cangjie_compiler::utils.{StaticCast, Stoi, Stoll, Stoull}
 
 private func EscapeCharacterToInt(byte: UInt8): Int64 {
     return match (byte) {
@@ -126,65 +126,42 @@ private func minForKind(kind: TypeKind): Int64 {
     }
 }
 
-private func bitWidthForKind(kind: TypeKind): UInt64 {
-    return match (kind) {
-        case TypeKind.TYPE_INT8 => 8u64
-        case TypeKind.TYPE_UINT8 => 8u64
-        case TypeKind.TYPE_INT16 => 16u64
-        case TypeKind.TYPE_UINT16 => 16u64
-        case TypeKind.TYPE_INT32 => 32u64
-        case TypeKind.TYPE_UINT32 => 32u64
-        case _ => 64u64
+private func GetRealTypeKindOfNative(ty: Ty): TypeKind {
+    var kind = ty.kind
+    if (kind == TypeKind.TYPE_INT_NATIVE) {
+        kind = if (StaticCast<PrimitiveTy>(ty).bitness == 64u64) { TypeKind.TYPE_INT64 } else { TypeKind.TYPE_INT32 }
+    } else if (kind == TypeKind.TYPE_UINT_NATIVE) {
+        kind = if (StaticCast<PrimitiveTy>(ty).bitness == 64u64) { TypeKind.TYPE_UINT64 } else { TypeKind.TYPE_UINT32 }
     }
+    return kind
 }
 
-private func bitMaskForWidth(width: UInt64): UInt64 {
-    if (width >= 64u64) {
-        return UInt64.Max
+@OverflowWrapping
+private func CalcWrappingValue(value: UInt64, `type`: TypeKind): UInt64 {
+    if (`type` == TypeKind.TYPE_UINT8) {
+        return UInt64(UInt8(value))
     }
-    return (1u64 << width) - 1u64
+    if (`type` == TypeKind.TYPE_UINT16) {
+        return UInt64(UInt16(value))
+    }
+    if (`type` == TypeKind.TYPE_UINT32) {
+        return UInt64(UInt32(value))
+    }
+    return value
 }
 
-private func signExtendNarrow(value: UInt64, width: UInt64): Int64 {
-    if (width >= 64u64) {
-        return Int64(value)
+@OverflowWrapping
+private func CalcWrappingValue(value: Int64, `type`: TypeKind): Int64 {
+    if (`type` == TypeKind.TYPE_INT8) {
+        return Int64(Int8(value))
     }
-    let mask = bitMaskForWidth(width)
-    let truncated = value & mask
-    let signBit = 1u64 << (width - 1u64)
-    if ((truncated & signBit) == 0u64) {
-        return Int64(truncated)
+    if (`type` == TypeKind.TYPE_INT16) {
+        return Int64(Int16(value))
     }
-    let magnitude = ((truncated ^ mask) + 1u64) & mask
-    return -Int64(magnitude)
-}
-
-private func wrappingUInt(value: UInt64, kind: TypeKind): UInt64 {
-    return value & bitMaskForWidth(bitWidthForKind(kind))
-}
-
-private func wrappingInt(value: Int64, kind: TypeKind): Int64 {
-    let width = bitWidthForKind(kind)
-    if (width >= 64u64) {
-        return value
+    if (`type` == TypeKind.TYPE_INT32) {
+        return Int64(Int32(value))
     }
-    return signExtendNarrow(UInt64(value), width)
-}
-
-private func realTypeKindOfNative(ty: Ty): TypeKind {
-    if (ty.kind == TypeKind.TYPE_INT_NATIVE) {
-        if (let Some(primitive) <- (ty as PrimitiveTy)) {
-            return if (primitive.bitness == 64) { TypeKind.TYPE_INT64 } else { TypeKind.TYPE_INT32 }
-        }
-        return TypeKind.TYPE_INT64
-    }
-    if (ty.kind == TypeKind.TYPE_UINT_NATIVE) {
-        if (let Some(primitive) <- (ty as PrimitiveTy)) {
-            return if (primitive.bitness == 64) { TypeKind.TYPE_UINT64 } else { TypeKind.TYPE_UINT32 }
-        }
-        return TypeKind.TYPE_UINT64
-    }
-    return ty.kind
+    return value
 }
 
 public class IntLiteral {
@@ -324,10 +301,10 @@ public class IntLiteral {
         let minValue = minForKind(literalType)
         if (IsUnsigned()) {
             suint64Val = if (outOfMax) { maxValue } else { 0u64 }
-            wuint64Val = wrappingUInt(uint64Val, literalType)
+            wuint64Val = CalcWrappingValue(uint64Val, literalType)
         } else {
             sint64Val = if (outOfMax) { Int64(maxValue) } else { minValue }
-            wint64Val = wrappingInt(int64Val, literalType)
+            wint64Val = CalcWrappingValue(int64Val, literalType)
         }
     }
 
@@ -358,7 +335,7 @@ public class IntLiteral {
     }
 
     public func SetOutOfRange(ty: Ty): Unit {
-        literalType = realTypeKindOfNative(ty)
+        literalType = GetRealTypeKindOfNative(ty)
         outOfRange = outOfRange || CheckOverflow()
     }
 
