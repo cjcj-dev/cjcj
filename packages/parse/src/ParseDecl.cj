@@ -1241,7 +1241,7 @@ extend ParserImpl {
         try (cs = ChainScope(this, ret)) {
             ParseInheritableHeader(ret, TokenKind.CLASS, modifiers, annos)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.CLASS))
-            SetPrimaryDecl(ret.identifier.Val())
+            SetPrimaryDecl(ret.identifier.Val(), isRawId: ret.identifier.IsRaw())
             ParseClassLikeBody(ret, ScopeKind.CLASS_BODY)
             RevertPrimaryDecl()
         }
@@ -1263,7 +1263,7 @@ extend ParserImpl {
         try (cs = ChainScope(this, ret)) {
             ParseInheritableHeader(ret, TokenKind.STRUCT, modifiers, annos)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.STRUCT))
-            SetPrimaryDecl(ret.identifier.Val())
+            SetPrimaryDecl(ret.identifier.Val(), isRawId: ret.identifier.IsRaw())
             ParseClassLikeBody(ret, ScopeKind.STRUCT_BODY)
             RevertPrimaryDecl()
         }

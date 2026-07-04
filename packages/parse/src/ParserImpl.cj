@@ -25,7 +25,9 @@ public class ParserImpl {
     public var currentFile: Option<File> = None
     public var curMacroCall: Option<Node> = None
     public var lastPrimaryDeclIdent: String = ""
+    public var lastPrimaryDeclIdentIsRaw: Bool = false
     public var curPrimaryDeclIdent: String = ""
+    public var curPrimaryDeclIdentIsRaw: Bool = false
     public var enableEH: Bool = false
     public var enableInteropCJMapping: Bool = false
     public var parseDeclFile: Bool = false
@@ -78,7 +80,7 @@ public class ParserImpl {
     }
 
     public func GetPrimaryDeclIdentRawValue(): String {
-        return curPrimaryDeclIdent
+        return if (curPrimaryDeclIdentIsRaw) { "`" + curPrimaryDeclIdent + "`" } else { curPrimaryDeclIdent }
     }
 
     public func EnableCustomAnno(): ParserImpl {
@@ -91,14 +93,16 @@ public class ParserImpl {
         return this
     }
 
-    public func SetPrimaryDecl(decl: String): Unit {
+    public func SetPrimaryDecl(decl: String, isRawId!: Bool = false): Unit {
         lastPrimaryDeclIdent = curPrimaryDeclIdent
+        lastPrimaryDeclIdentIsRaw = curPrimaryDeclIdentIsRaw
         curPrimaryDeclIdent = decl
+        curPrimaryDeclIdentIsRaw = isRawId
     }
 
     public func RevertPrimaryDecl(): Unit {
         curPrimaryDeclIdent = lastPrimaryDeclIdent
-        lastPrimaryDeclIdent = ""
+        curPrimaryDeclIdentIsRaw = lastPrimaryDeclIdentIsRaw
     }
 
     public func SetForImport(isForImport: Bool): ParserImpl {
