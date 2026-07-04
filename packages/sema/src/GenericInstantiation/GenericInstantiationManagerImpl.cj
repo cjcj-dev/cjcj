@@ -4,6 +4,7 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.AfterTypeCheck.IsNeedRuntimeCheck
+import cangjie_compiler::sema.TypeCheckExpr.IsBuiltinUnaryExpr
 import cangjie_compiler::utils.CJC_ASSERT
 
 private class GenericInstantiationRecord {
@@ -301,6 +302,7 @@ public class GenericInstantiationManagerImpl {
         }
         InstantiateReferencedGenerics(pkg)
         RearrangeReferences(pkg)
+        RecoverDesugarForBuiltIn()
         updateInstantiatedExtendMap(ci.typeManager, pkg)
         updateInstantiatedDeclsLinkage(pkg)
         ClearImportedUnusedInstantiatedDecls()
@@ -346,6 +348,86 @@ public class GenericInstantiationManagerImpl {
         usedSrcImportedDecls.clear()
         curPkg = None
         PartialInstantiation.ResetGlobalMap()
+    }
+
+    private func RecoverDesugarForBuiltIn(): Unit {
+        if (let Some(pkg) <- curPkg) {
+            for (decl in pkg.genericInstantiatedDecls) {
+                let walker = Walker(decl, visitPost: { node: Node =>
+                    if (let Some(callExpr) <- (node as CallExpr)) {
+                        if (let Some(funcDecl) <- callExpr.resolvedFunction) {
+                            if (let Some(outerDecl) <- funcDecl.outerDecl) {
+                                var thisTy = outerDecl.GetTy()
+                                var funcTy = funcDecl.GetTy() as FuncTy
+                                if (let Some(baseFunc) <- callExpr.baseFunc) {
+                                    if (baseFunc.astKind == ASTKind.MEMBER_ACCESS) {
+                                        CJC_ASSERT((baseFunc as MemberAccess).isSome())
+                                        if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+                                            if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                                                thisTy = baseExpr.GetTy()
+                                            }
+                                            if (let Some(baseFuncTy) <- baseFunc.GetTy()) {
+                                                CJC_ASSERT(baseFuncTy.IsFunc())
+                                                funcTy = baseFuncTy as FuncTy
+                                            }
+                                        }
+                                    }
+                                }
+                                if (let Some(funcTyValue) <- funcTy) {
+                                    if (let Some(thisTyValue) <- thisTy) {
+                                        if (funcTyValue.paramTys.size == 1 &&
+                                            IsBuiltinBinaryExpr(funcDecl.op, thisTyValue, funcTyValue.paramTys[0])) {
+                                            if (let Some(source) <- callExpr.sourceExpr) {
+                                                if (let Some(binaryExpr) <- (source as BinaryExpr)) {
+                                                    RecoverToBinaryExpr(binaryExpr)
+                                                }
+                                            } else if (let Some(baseFunc) <- callExpr.baseFunc) {
+                                                CJC_ASSERT((baseFunc as MemberAccess).isSome())
+                                                if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+                                                    let binaryExpr = BinaryExpr()
+                                                    binaryExpr.leftExpr = memberAccess.baseExpr
+                                                    binaryExpr.rightExpr = callExpr.args[0].expr
+                                                    binaryExpr.op = funcDecl.op
+                                                    if (let Some(callTy) <- callExpr.GetTy()) {
+                                                        binaryExpr.SetTy(callTy)
+                                                    }
+                                                    CopyBasicInfo(callExpr, binaryExpr)
+                                                    AddCurFile(binaryExpr, file: callExpr.curFile)
+                                                    callExpr.desugarExpr = binaryExpr
+                                                }
+                                            }
+                                        } else if (funcTyValue.paramTys.isEmpty() &&
+                                            IsBuiltinUnaryExpr(funcDecl.op, thisTyValue)) {
+                                            if (let Some(source) <- callExpr.sourceExpr) {
+                                                if (let Some(unaryExpr) <- (source as UnaryExpr)) {
+                                                    RecoverToUnaryExpr(unaryExpr)
+                                                }
+                                            } else if (let Some(baseFunc) <- callExpr.baseFunc) {
+                                                CJC_ASSERT((baseFunc as MemberAccess).isSome())
+                                                if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+                                                    let unaryExpr = UnaryExpr()
+                                                    unaryExpr.expr = memberAccess.baseExpr
+                                                    unaryExpr.op = funcDecl.op
+                                                    if (let Some(callTy) <- callExpr.GetTy()) {
+                                                        unaryExpr.SetTy(callTy)
+                                                    }
+                                                    CopyBasicInfo(callExpr, unaryExpr)
+                                                    AddCurFile(unaryExpr, file: callExpr.curFile)
+                                                    callExpr.desugarExpr = unaryExpr
+                                                }
+                                            }
+                                        }
+                                        return VisitAction.SKIP_CHILDREN
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return VisitAction.WALK_CHILDREN
+                })
+                let _ = walker.Walk()
+            }
+        }
     }
 
     private func WalkImportedInstantiations(processFunc: (Decl) -> Unit, skipChecker: (Package) -> Bool): Unit {
