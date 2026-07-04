@@ -599,6 +599,14 @@ public class Constraint {
     public func Clear(): Unit {
         entries.clear()
     }
+
+    public func CommitScope(): ConstraintPDataCommitScope {
+        return PData.CommitScope(this)
+    }
+
+    public func Reset(): Unit {
+        PData.Reset(this)
+    }
 }
 
 public class Constraints {

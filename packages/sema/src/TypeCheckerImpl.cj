@@ -16,6 +16,12 @@ public enum SynPos {
     | UNUSED
 }
 
+public enum MatchResult {
+    | NONE
+    | UNIQUE
+    | AMBIGUOUS
+}
+
 private func SynPosIndex(value: SynPos): Int64 {
     return match (value) {
         case SynPos.NONE => 0
@@ -75,6 +81,74 @@ public class TypeCheckerImpl {
     public init(typeManager!: TypeManager = TypeManager(), diag!: Option<BasicDiagnosticEngine> = None) {
         this.typeManager = typeManager
         this.diag = diag
+    }
+
+    public func PickConstaintFromTys(tv: GenericsTy, tys: TySet, isUB: Bool): MatchResult {
+        var result = MatchResult.NONE
+        try (cs = typeManager.constraints.CommitScope()) {
+            var cnt: Int64 = 0
+            var target: Option<Ty> = None
+            for (ty in tys.values) {
+                if (if (isUB) { typeManager.IsSubtype(tv, ty) } else { typeManager.IsSubtype(ty, tv) }) {
+                    cnt++
+                    target = Some(ty)
+                }
+                typeManager.constraints.Reset()
+            }
+            if (cnt > 1) {
+                result = MatchResult.AMBIGUOUS
+            } else if (cnt == 1) {
+                if (let Some(targetTy) <- target) {
+                    let _ = if (isUB) {
+                        typeManager.IsSubtype(tv, targetTy)
+                    } else {
+                        typeManager.IsSubtype(targetTy, tv)
+                    }
+                }
+                result = MatchResult.UNIQUE
+            } else {
+                result = MatchResult.NONE
+            }
+        }
+        return result
+    }
+
+    public func PickConstaintFromTys(tv1: Ty, tv2: Ty, tys: ArrayList<(Ty, Ty)>, isUB: Bool): MatchResult {
+        var result = MatchResult.NONE
+        try (cs = typeManager.constraints.CommitScope()) {
+            var cnt: Int64 = 0
+            var target1: Option<Ty> = None
+            var target2: Option<Ty> = None
+            for (tysEntry in tys) {
+                let ty1 = tysEntry[0]
+                let ty2 = tysEntry[1]
+                if (if (isUB) {
+                    typeManager.IsSubtype(tv1, ty1) && typeManager.IsSubtype(tv2, ty2)
+                } else {
+                    typeManager.IsSubtype(ty1, tv1) && typeManager.IsSubtype(ty2, tv2)
+                }) {
+                    cnt++
+                    target1 = Some(ty1)
+                    target2 = Some(ty2)
+                }
+                typeManager.constraints.Reset()
+            }
+            if (cnt > 1) {
+                result = MatchResult.AMBIGUOUS
+            } else if (cnt == 1) {
+                if ((let Some(targetTy1) <- target1) && (let Some(targetTy2) <- target2)) {
+                    let _ = if (isUB) {
+                        typeManager.IsSubtype(tv1, targetTy1) && typeManager.IsSubtype(tv2, targetTy2)
+                    } else {
+                        typeManager.IsSubtype(targetTy1, tv1) && typeManager.IsSubtype(targetTy2, tv2)
+                    }
+                }
+                result = MatchResult.UNIQUE
+            } else {
+                result = MatchResult.NONE
+            }
+        }
+        return result
     }
 
     public func WarmupCache(ctx: ASTContext): Unit {

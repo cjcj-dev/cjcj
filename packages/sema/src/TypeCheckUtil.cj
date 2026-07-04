@@ -53,6 +53,163 @@ public func GetIdealTypesByKind(kind: TypeKind): ArrayList<TypeKind> {
     return out
 }
 
+private func GENERAL_ARITHMIC_INT_TYPE_MAP(): ArrayList<(TypeKind, TypeKind)> {
+    let out = ArrayList<(TypeKind, TypeKind)>()
+    out.add((TypeKind.TYPE_INT8, TypeKind.TYPE_INT8))
+    out.add((TypeKind.TYPE_INT16, TypeKind.TYPE_INT16))
+    out.add((TypeKind.TYPE_INT32, TypeKind.TYPE_INT32))
+    out.add((TypeKind.TYPE_INT64, TypeKind.TYPE_INT64))
+    out.add((TypeKind.TYPE_INT_NATIVE, TypeKind.TYPE_INT_NATIVE))
+    out.add((TypeKind.TYPE_IDEAL_INT, TypeKind.TYPE_IDEAL_INT))
+    out.add((TypeKind.TYPE_UINT8, TypeKind.TYPE_UINT8))
+    out.add((TypeKind.TYPE_UINT16, TypeKind.TYPE_UINT16))
+    out.add((TypeKind.TYPE_UINT32, TypeKind.TYPE_UINT32))
+    out.add((TypeKind.TYPE_UINT64, TypeKind.TYPE_UINT64))
+    out.add((TypeKind.TYPE_UINT_NATIVE, TypeKind.TYPE_UINT_NATIVE))
+    return out
+}
+
+private func GENERAL_ARITHMIC_TYPE_MAP(): ArrayList<(TypeKind, TypeKind)> {
+    let out = GENERAL_ARITHMIC_INT_TYPE_MAP()
+    out.add((TypeKind.TYPE_FLOAT16, TypeKind.TYPE_FLOAT16))
+    out.add((TypeKind.TYPE_FLOAT32, TypeKind.TYPE_FLOAT32))
+    out.add((TypeKind.TYPE_FLOAT64, TypeKind.TYPE_FLOAT64))
+    out.add((TypeKind.TYPE_IDEAL_FLOAT, TypeKind.TYPE_IDEAL_FLOAT))
+    return out
+}
+
+private func GENERAL_RELATION_NUMERIC_TYPE_MAP(): ArrayList<(TypeKind, TypeKind)> {
+    let out = ArrayList<(TypeKind, TypeKind)>()
+    out.add((TypeKind.TYPE_INT8, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_INT16, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_INT32, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_INT64, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_INT_NATIVE, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_IDEAL_INT, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_UINT8, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_UINT16, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_UINT32, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_UINT64, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_UINT_NATIVE, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_FLOAT16, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_FLOAT32, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_FLOAT64, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_IDEAL_FLOAT, TypeKind.TYPE_BOOLEAN))
+    out.add((TypeKind.TYPE_RUNE, TypeKind.TYPE_BOOLEAN))
+    return out
+}
+
+private func EMPTY_KIND_MAP(): ArrayList<(TypeKind, TypeKind)> {
+    return ArrayList<(TypeKind, TypeKind)>()
+}
+
+private func UNARY_EXPR_TYPE_MAP(op: TokenKind): ArrayList<(TypeKind, TypeKind)> {
+    if (op == TokenKind.SUB) {
+        return GENERAL_ARITHMIC_TYPE_MAP()
+    } else if (op == TokenKind.NOT) {
+        let out = GENERAL_ARITHMIC_INT_TYPE_MAP()
+        out.add((TypeKind.TYPE_BOOLEAN, TypeKind.TYPE_BOOLEAN))
+        return out
+    } else if (op == TokenKind.INCR || op == TokenKind.DECR) {
+        return GENERAL_ARITHMIC_INT_TYPE_MAP()
+    }
+    return EMPTY_KIND_MAP()
+}
+
+private func BINARY_EXPR_TYPE_MAP(op: TokenKind): ArrayList<(TypeKind, TypeKind)> {
+    if (op == TokenKind.ADD || op == TokenKind.SUB || op == TokenKind.MUL || op == TokenKind.DIV) {
+        return GENERAL_ARITHMIC_TYPE_MAP()
+    } else if (op == TokenKind.MOD || op == TokenKind.LSHIFT || op == TokenKind.RSHIFT ||
+        op == TokenKind.BITAND || op == TokenKind.BITXOR || op == TokenKind.BITOR) {
+        return GENERAL_ARITHMIC_INT_TYPE_MAP()
+    } else if (op == TokenKind.EXP) {
+        let out = ArrayList<(TypeKind, TypeKind)>()
+        out.add((TypeKind.TYPE_INT64, TypeKind.TYPE_INT64))
+        out.add((TypeKind.TYPE_IDEAL_INT, TypeKind.TYPE_IDEAL_INT))
+        out.add((TypeKind.TYPE_FLOAT64, TypeKind.TYPE_FLOAT64))
+        out.add((TypeKind.TYPE_IDEAL_FLOAT, TypeKind.TYPE_IDEAL_FLOAT))
+        return out
+    } else if (op == TokenKind.EQUAL || op == TokenKind.NOTEQ) {
+        let out = GENERAL_RELATION_NUMERIC_TYPE_MAP()
+        out.add((TypeKind.TYPE_UNIT, TypeKind.TYPE_BOOLEAN))
+        out.add((TypeKind.TYPE_BOOLEAN, TypeKind.TYPE_BOOLEAN))
+        return out
+    } else if (op == TokenKind.LT || op == TokenKind.LE || op == TokenKind.GT || op == TokenKind.GE) {
+        return GENERAL_RELATION_NUMERIC_TYPE_MAP()
+    } else if (op == TokenKind.AND || op == TokenKind.OR) {
+        let out = ArrayList<(TypeKind, TypeKind)>()
+        out.add((TypeKind.TYPE_BOOLEAN, TypeKind.TYPE_BOOLEAN))
+        return out
+    }
+    return EMPTY_KIND_MAP()
+}
+
+private func SEMA_EXP_TYPES(leftKind: TypeKind, rightKind: TypeKind): Bool {
+    if (leftKind == TypeKind.TYPE_INT64) {
+        return rightKind == TypeKind.TYPE_UINT64
+    }
+    if (leftKind == TypeKind.TYPE_FLOAT64) {
+        return rightKind == TypeKind.TYPE_FLOAT64 || rightKind == TypeKind.TYPE_INT64
+    }
+    return false
+}
+
+public func TypeMapToTys(m: ArrayList<(TypeKind, TypeKind)>, fromKey: Bool): TySet {
+    let result = TySet()
+    for (entry in m) {
+        let operandKind = entry[0]
+        let retKind = entry[1]
+        let _ = result.Add(TypeManager.GetPrimitiveTy(if (fromKey) { operandKind } else { retKind }))
+    }
+    return result
+}
+
+public func GetBinaryOpTypeCandidates(op: TokenKind): ArrayList<(TypeKind, TypeKind)> {
+    return BINARY_EXPR_TYPE_MAP(op)
+}
+
+public func GetUnaryOpTypeCandidates(op: TokenKind): ArrayList<(TypeKind, TypeKind)> {
+    return UNARY_EXPR_TYPE_MAP(op)
+}
+
+private func TypeKindInMap(m: ArrayList<(TypeKind, TypeKind)>, kind: TypeKind): Bool {
+    for (entry in m) {
+        if (entry[0] == kind) {
+            return true
+        }
+    }
+    return false
+}
+
+public func IsBuiltinBinaryExpr(op: TokenKind, leftTy: Ty, rightTy: Ty): Bool {
+    let tys = ArrayList<Ty>()
+    tys.add(leftTy)
+    tys.add(rightTy)
+    if (!Ty.AreTysCorrect(tys)) {
+        return false
+    }
+    if (op == TokenKind.LSQUARE) {
+        return leftTy.kind == TypeKind.TYPE_ARRAY && rightTy.kind == TypeKind.TYPE_INT64
+    } else if (op == TokenKind.EXP) {
+        return SEMA_EXP_TYPES(leftTy.kind, rightTy.kind)
+    }
+    let typeCandidate = BINARY_EXPR_TYPE_MAP(op)
+    if (typeCandidate.isEmpty()) {
+        return false
+    }
+    if (op == TokenKind.LSHIFT || op == TokenKind.RSHIFT) {
+        return TypeKindInMap(typeCandidate, leftTy.kind) && TypeKindInMap(typeCandidate, rightTy.kind)
+    } else if (leftTy == rightTy) {
+        if (leftTy.kind == TypeKind.TYPE_UNIT && (op == TokenKind.EQUAL || op == TokenKind.NOTEQ)) {
+            return true
+        }
+        if (TypeKindInMap(typeCandidate, leftTy.kind)) {
+            return true
+        }
+    }
+    return false
+}
+
 public func UpdateInstTysWithTypeArgs(expr: NameReferenceExpr): Bool {
     if (!expr.instTys.isEmpty()) {
         return true

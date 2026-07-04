@@ -2780,7 +2780,7 @@ public class TypeChecker {
                 let _ = Synthesize(ctx, innerExpr)
             }
         }
-        return ChkUnaryExpr(impl.typeManager, target, unaryExpr)
+        return ChkUnaryExpr(impl, target, unaryExpr)
     }
 
     private func SynthesizedIfHasMissingElse(ifExpr: IfExpr): Bool {
@@ -3787,7 +3787,7 @@ public class TypeChecker {
                 }
             }
             SynthesizeBinaryChildren(ctx, binaryExpr)
-            let binaryTy = SynBinaryExpr(impl.typeManager, binaryExpr, ctx: Some(ctx),
+            let binaryTy = SynBinaryExpr(impl, binaryExpr, ctx: Some(ctx),
                 synthesizer: Some({ operand: Expr => SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand) }),
                 checker: Some({ targetTy: Ty, operand2: Expr => CheckWithNegCache(ctx, targetTy, operand2) }),
                 diag: impl.diag)

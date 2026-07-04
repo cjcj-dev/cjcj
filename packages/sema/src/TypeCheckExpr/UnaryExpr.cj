@@ -2,7 +2,11 @@ package cangjie_compiler::sema.TypeCheckExpr
 
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.TypeCompatibility
+import cangjie_compiler::sema.TypeCheckerImpl
 import cangjie_compiler::sema.TypeManager
+import cangjie_compiler::sema.GetUnaryOpTypeCandidates
+import cangjie_compiler::sema.MatchResult
+import cangjie_compiler::sema.TypeMapToTys
 
 private func UnaryCandidateReturnKind(op: TokenKind, operandKind: TypeKind): TypeKind {
     if (op == TokenKind.SUB) {
@@ -77,7 +81,8 @@ public func IsBuiltinUnaryExpr(op: TokenKind, ty: Ty): Bool {
     return UnaryCandidateReturnKind(op, ty.kind) != TypeKind.TYPE_INVALID
 }
 
-public func SynBuiltinUnaryExpr(typeManager: TypeManager, ue: UnaryExpr): Ty {
+public func SynBuiltinUnaryExpr(impl: TypeCheckerImpl, ue: UnaryExpr): Ty {
+    let typeManager = impl.typeManager
     if (let Some(innerExpr) <- ue.expr) {
         // Mirror C++ SynBuiltinUnaryExpr's `Synthesize(ctx, ue.expr)`: an operand reset by Clear()
         // has Initial type and must be synthesized again, but already-typed operands must not be
@@ -100,26 +105,33 @@ public func SynBuiltinUnaryExpr(typeManager: TypeManager, ue: UnaryExpr): Ty {
                 ue.SetTy(TypeManager.GetInvalidTy())
                 return TypeManager.GetInvalidTy()
             }
-            let retKind = UnaryCandidateReturnKind(ue.op, innerTy.kind)
-            if (retKind != TypeKind.TYPE_INVALID) {
-                let retTy = TypeManager.GetPrimitiveTy(retKind)
-                ue.SetTy(retTy)
-                return retTy
+            let typeCandidate = GetUnaryOpTypeCandidates(ue.op)
+            if (typeCandidate.isEmpty()) {
+                ue.SetTy(TypeManager.GetInvalidTy())
+                return TypeManager.GetInvalidTy()
             }
-            if (innerTy.IsGeneric()) {
-                ue.SetTy(innerTy)
-                return innerTy
+            if (let Some(tv) <- (innerTy as GenericsTy)) {
+                if (tv.isPlaceholder) {
+                    match (impl.PickConstaintFromTys(tv, TypeMapToTys(typeCandidate, true), true)) {
+                        case MatchResult.UNIQUE =>
+                            let resultTy = typeManager.TryGreedySubst(tv)
+                            ue.SetTy(resultTy)
+                            return resultTy
+                        case MatchResult.AMBIGUOUS =>
+                            ue.SetTy(TypeManager.GetInvalidTy())
+                            return TypeManager.GetInvalidTy()
+                        case MatchResult.NONE =>
+                            ue.SetTy(TypeManager.GetInvalidTy())
+                            return TypeManager.GetInvalidTy()
+                    }
+                }
             }
-            let numericCandidate = TypeManager.GetPrimitiveTy(if (innerTy.IsFloating()) {
-                TypeKind.TYPE_FLOAT64
-            } else if (innerTy.IsBoolean()) {
-                TypeKind.TYPE_BOOLEAN
-            } else {
-                TypeKind.TYPE_INT64
-            })
-            if (typeManager.IsSubtype(innerTy, numericCandidate)) {
-                ue.SetTy(innerTy)
-                return innerTy
+            for (typeValue in typeCandidate) {
+                let primitiveTy = TypeManager.GetPrimitiveTy(typeValue[1])
+                if (typeManager.IsSubtype(innerTy, primitiveTy)) {
+                    ue.SetTy(innerTy)
+                    return innerTy
+                }
             }
         }
     }
@@ -127,14 +139,19 @@ public func SynBuiltinUnaryExpr(typeManager: TypeManager, ue: UnaryExpr): Ty {
     return TypeManager.GetInvalidTy()
 }
 
-public func SynUnaryExpr(typeManager: TypeManager, ue: UnaryExpr): Ty {
+public func SynBuiltinUnaryExpr(typeManager: TypeManager, ue: UnaryExpr): Ty {
+    return SynBuiltinUnaryExpr(TypeCheckerImpl(typeManager: typeManager), ue)
+}
+
+public func SynUnaryExpr(impl: TypeCheckerImpl, ue: UnaryExpr): Ty {
+    let typeManager = impl.typeManager
     if (let Some(desugar) <- ue.desugarExpr) {
         if (let Some(desugarTy) <- desugar.GetTy()) {
             ue.SetTy(desugarTy)
             return desugarTy
         }
     }
-    let builtinTy = SynBuiltinUnaryExpr(typeManager, ue)
+    let builtinTy = SynBuiltinUnaryExpr(impl, ue)
     if (Ty.IsTyCorrect(builtinTy)) {
         if (let Some(innerExpr) <- ue.expr) {
             if (let Some(innerTy) <- innerExpr.GetTy()) {
@@ -152,8 +169,13 @@ public func SynUnaryExpr(typeManager: TypeManager, ue: UnaryExpr): Ty {
     return TypeManager.GetInvalidTy()
 }
 
-public func ChkUnaryExpr(typeManager: TypeManager, target: Ty, ue: UnaryExpr): Bool {
-    let retTy = SynUnaryExpr(typeManager, ue)
+public func SynUnaryExpr(typeManager: TypeManager, ue: UnaryExpr): Ty {
+    return SynUnaryExpr(TypeCheckerImpl(typeManager: typeManager), ue)
+}
+
+public func ChkUnaryExpr(impl: TypeCheckerImpl, target: Ty, ue: UnaryExpr): Bool {
+    let typeManager = impl.typeManager
+    let retTy = SynUnaryExpr(impl, ue)
     if (!Ty.IsTyCorrect(retTy) || !Ty.IsTyCorrect(target)) {
         ue.SetTy(TypeManager.GetInvalidTy())
         return false
@@ -163,4 +185,8 @@ public func ChkUnaryExpr(typeManager: TypeManager, target: Ty, ue: UnaryExpr): B
         return false
     }
     return true
+}
+
+public func ChkUnaryExpr(typeManager: TypeManager, target: Ty, ue: UnaryExpr): Bool {
+    return ChkUnaryExpr(TypeCheckerImpl(typeManager: typeManager), target, ue)
 }
