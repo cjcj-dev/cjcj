@@ -503,7 +503,7 @@ public open class CustomTypeDef <: Base {
     }
 
     public func IsGenericDef(): Bool {
-        return !genericTypeParams.isEmpty()
+        return !GetGenericTypeParams().isEmpty()
     }
 
     public open func IsClass(): Bool {

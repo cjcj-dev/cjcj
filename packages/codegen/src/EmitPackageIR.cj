@@ -55,7 +55,6 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
             CreatePackageInitResetFunction(cgMod)
             SpecifyPackageInitFunc(cgMod)
         }
-        InitializeCjStringLiteral(cgMod)
         GenerateInterfaceExtensionDefs(cgMod)
         RedefineTypeInfosForCustomDefs(cgMod)
         // Mirror C++ EmitPackageIR.cpp:372 cgMod.GenTypeInfo(): drain the delayed concrete-TypeInfo
@@ -67,6 +66,7 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         cgMod.Opt()
         GenerateReflectionMetadata(cgMod, subPackage)
         cgMod.GenTypeInfo()
+        InitializeCjStringLiteral(cgMod)
         cgMod.EraseUselessInstsAndDeclarations()
     }
     return cgPkgContext.ReleaseLLVMModules()
