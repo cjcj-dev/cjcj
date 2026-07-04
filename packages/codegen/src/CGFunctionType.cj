@@ -2,7 +2,6 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.ExtendDef
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GenericType
@@ -35,6 +34,7 @@ public class CGFunctionType <: CGType {
     private let forWrapper: Bool
     private let constructorType: Bool
     private let instantiatedParamTypes: ArrayList<Type> = ArrayList<Type>()
+    public let closureParamIndices: ArrayList<LLVMMetadataRef> = ArrayList<LLVMMetadataRef>()
 
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: FuncType, extraInfo: TypeExtraInfo) {
         super(cgMod, cgCtx, chirType, cgTypeKind: CGTypeKind.CG_FUNCTION)
@@ -52,7 +52,11 @@ public class CGFunctionType <: CGType {
     }
 
     public init(cgMod: CGModule, cgCtx: CGContext, chirFunc: Function, extraInfo: TypeExtraInfo) {
-        super(cgMod, cgCtx, chirFunc.GetType().getOrThrow(), cgTypeKind: CGTypeKind.CG_FUNCTION)
+        super(cgMod, cgCtx, if (let Some(overrideSrcFuncType) <- chirFunc.GetOverrideSrcFuncType()) {
+            overrideSrcFuncType
+        } else {
+            chirFunc.GetType().getOrThrow()
+        }, cgTypeKind: CGTypeKind.CG_FUNCTION)
         this.chirFunc = chirFunc
         allowBasePtr = if (extraInfo.forWrapper) { false } else { extraInfo.allowBasePtr }
         methodType = chirFunc.GetParentCustomTypeDef().isSome()
@@ -124,7 +128,7 @@ public class CGFunctionType <: CGType {
         }
         let retCGType = CGType.GetOrCreate(cgMod, funcTy.GetReturnType())
         let retTy = funcTy.GetReturnType()
-        hasSRet = !IsVoidLikeReturn(retTy) && ShouldUseSRet(retTy, retCGType)
+        hasSRet = !IsVoidLikeReturn(retTy) && ShouldUseSRet(retCGType)
         let retLLVMType = if (IsVoidLikeReturn(retTy) || hasSRet) {
             unsafe { LLVMVoidTypeInContext(cgCtx.GetLLVMContext().raw) }
         } else {
@@ -248,10 +252,7 @@ public class CGFunctionType <: CGType {
         align = Int64(cgMod.GetABITypeAlignment(rawType))
     }
 
-    private func ShouldUseSRet(retTy: Type, retCGType: CGType): Bool {
-        if (retTy.IsReferenceType() || retTy.IsRef() || retCGType.IsReference()) {
-            return false
-        }
+    private func ShouldUseSRet(retCGType: CGType): Bool {
         let retLLVMType = retCGType.GetLLVMType()
         if (!retLLVMType.isNull()) {
             let kind = unsafe { LLVMGetTypeKind(retLLVMType) }
@@ -313,16 +314,4 @@ public class CGFunctionType <: CGType {
         return IsStructOrExtendMethod(chirFunc.getOrThrow())
     }
 
-    private func IsStructOrExtendMethod(fn: Function): Bool {
-        let declaredParent = fn.GetParentCustomTypeDef() ?? return false
-        if (declaredParent.IsStruct()) {
-            return true
-        }
-        if (let Some(extendDef) <- (declaredParent as ExtendDef)) {
-            if (let Some(extendedTy) <- extendDef.GetExtendedType()) {
-                return extendedTy.IsStruct()
-            }
-        }
-        return false
-    }
 }

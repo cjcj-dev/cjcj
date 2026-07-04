@@ -1,26 +1,30 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.CHIRBuilder
 import cangjie_compiler::chir.ClassType
+import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Function
+import cangjie_compiler::chir.GlobalVar
 import cangjie_compiler::chir.Package
 import cangjie_compiler::chir.Type
+import cangjie_compiler::chir.Value
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::utils.{CJC_ASSERT, DynamicCast}
 
 public class CallBaseToReplaceInfo {
     public let callWithoutTI: LLVMValueRef
-    public let callerName: String
-    public let calleeName: String
+    public let cgFuncCaller: CGFunction
+    public let cgFuncCallee: CGFunction
     public let thisParamType: Type
     public let isCalleeMutOrCtor: Bool
 
-    public init(callWithoutTI: LLVMValueRef, callerName: String, calleeName: String, thisParamType: Type,
+    public init(callWithoutTI: LLVMValueRef, cgFuncCaller: CGFunction, cgFuncCallee: CGFunction, thisParamType: Type,
         isCalleeMutOrCtor: Bool) {
         this.callWithoutTI = callWithoutTI
-        this.callerName = callerName
-        this.calleeName = calleeName
+        this.cgFuncCaller = cgFuncCaller
+        this.cgFuncCallee = cgFuncCallee
         this.thisParamType = thisParamType
         this.isCalleeMutOrCtor = isCalleeMutOrCtor
     }
@@ -75,11 +79,14 @@ public class CGContext {
     private let cjStrings: HashMap<String, String> = HashMap<String, String>()
     private let codegenAddedFuncsOrVars: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
     private let llvmUsedGVs: HashSet<String> = HashSet<String>()
+    private let callBasesToInline: ArrayList<(LLVMValueRef, LLVMValueRef)> = ArrayList<(LLVMValueRef, LLVMValueRef)>()
     private let callBasesToReplace: ArrayList<CallBaseToReplaceInfo> = ArrayList<CallBaseToReplaceInfo>()
     private let dependentPartialOrderOfTypes: ArrayList<PartialOrderPair> = ArrayList<PartialOrderPair>()
     private var cjStringType: LLVMTypeRef = LLVMNullType()
 
     public var debugValue: LLVMValueRef = LLVMNullValue()
+    public let genericParamsSizeBlockLevelCacheMap: HashMap<UIntNative, HashMap<UIntNative, LLVMValueRef>> =
+        HashMap<UIntNative, HashMap<UIntNative, LLVMValueRef>>()
 
     public init(subCHIRPackage: SubCHIRPackage, cgPkgContext: CGPkgContext) {
         this.subCHIRPackage = subCHIRPackage
@@ -98,8 +105,10 @@ public class CGContext {
         cjStrings.clear()
         codegenAddedFuncsOrVars.clear()
         llvmUsedGVs.clear()
+        callBasesToInline.clear()
         callBasesToReplace.clear()
         dependentPartialOrderOfTypes.clear()
+        genericParamsSizeBlockLevelCacheMap.clear()
         subCHIRPackage.Clear()
     }
 
@@ -113,6 +122,66 @@ public class CGContext {
     public func GetCachedMangleMap(): CachedMangleMap { return cgPkgContext.GetCachedMangleMap() }
     public func IsCGParallelEnabled(): Bool { return cgPkgContext.IsCGParallelEnabled() }
     public func IsLineInfoEnabled(): Bool { return cgPkgContext.IsLineInfoEnabled() }
+
+    public func IsCustomTypeOfOtherLLVMModule(chirType: Type): Bool {
+        if (let Some(customType) <- (chirType as CustomType)) {
+            let customDef = customType.GetCustomTypeDef()
+            if (customDef.TestAttr(Attribute.IMPORTED)) {
+                return true
+            }
+            return !subCHIRPackage.OwnsCustomDef(customDef)
+        }
+        return false
+    }
+
+    public func IsValueOfOtherLLVMModule(chirValue: Value): Bool {
+        if (chirValue.TestAttr(Attribute.IMPORTED)) {
+            return true
+        }
+        if (let Some(chirFunc) <- (chirValue as Function)) {
+            if (chirFunc.IsFuncWithBody()) {
+                return !subCHIRPackage.OwnsFunction(chirFunc)
+            }
+            return false
+        } else if (let Some(chirGV) <- (chirValue as GlobalVar)) {
+            if (chirGV.IsGlobalVarWithInitializer()) {
+                return !subCHIRPackage.OwnsGlobalVar(chirGV)
+            }
+        }
+        return false
+    }
+
+    public func AddCallBaseToInline(callBase: LLVMValueRef, retInst: LLVMValueRef): Unit {
+        callBasesToInline.add((callBase, retInst))
+    }
+
+    public func GetCallBasesToInline(): ArrayList<(LLVMValueRef, LLVMValueRef)> {
+        let out = ArrayList<(LLVMValueRef, LLVMValueRef)>()
+        for (item in callBasesToInline) {
+            out.add(item)
+        }
+        return out
+    }
+
+    public func AddCallBaseToReplace(callBaseToReplaceInfo: CallBaseToReplaceInfo): Unit {
+        callBasesToReplace.add(callBaseToReplaceInfo)
+    }
+
+    public func GetCallBasesToReplace(): ArrayList<CallBaseToReplaceInfo> {
+        let out = ArrayList<CallBaseToReplaceInfo>()
+        for (item in callBasesToReplace) {
+            out.add(item)
+        }
+        return out
+    }
+
+    public func SetBasePtr(value: LLVMValueRef, basePtr: LLVMValueRef): Unit {
+        impl.SetBasePtr(value, basePtr)
+    }
+
+    public func GetBasePtrOf(value: LLVMValueRef): Option<LLVMValueRef> {
+        return impl.GetBasePtr(value)
+    }
 
     public func GetImplicitUsedFunc(funcMangledName: String): Option<Function> {
         return cgPkgContext.GetImplicitUsedFunc(funcMangledName)
@@ -171,7 +240,11 @@ public class CGContext {
         if (unwindBlockStack.isEmpty()) {
             return None
         }
-        return unwindBlockStack[unwindBlockStack.size - 1]
+        let top = unwindBlockStack[unwindBlockStack.size - 1]
+        if (top.isNull()) {
+            return None
+        }
+        return top
     }
 
     public func PopUnwindBlockStack(): Unit {
@@ -191,6 +264,10 @@ public class CGContext {
 
     public func IsGeneratedStructType(structTypeName: String): Bool {
         return generatedStructType.contains(structTypeName)
+    }
+
+    public func AddNullableReference(value: LLVMValueRef): Unit {
+        impl.AddNullableReference(value)
     }
 
     public func AddGlobalsOfCompileUnit(globalsName: String): Unit {

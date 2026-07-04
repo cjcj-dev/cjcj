@@ -366,11 +366,7 @@ public class CHIRContext {
                 return TypeArgsAreEqual(structTy.argTys, args) && refEq(structTy.GetStructDef(), def)
             }
             return false
-        }, { =>
-            let structTy = StructType(def, args)
-            def.SetType(structTy)
-            structTy
-        })
+        }, { => StructType(def, args) })
         return (ty as StructType).getOrThrow()
     }
 
@@ -382,11 +378,7 @@ public class CHIRContext {
                 return TypeArgsAreEqual(classTy.argTys, args) && refEq(classTy.GetClassDef(), def)
             }
             return false
-        }, { =>
-            let classTy = ClassType(def, args)
-            def.SetType(classTy)
-            classTy
-        })
+        }, { => ClassType(def, args) })
         return (ty as ClassType).getOrThrow()
     }
 
@@ -398,11 +390,7 @@ public class CHIRContext {
                 return TypeArgsAreEqual(enumTy.argTys, args) && refEq(enumTy.GetEnumDef(), def)
             }
             return false
-        }, { =>
-            let enumTy = EnumType(def, args)
-            def.SetType(enumTy)
-            enumTy
-        })
+        }, { => EnumType(def, args) })
         return (ty as EnumType).getOrThrow()
     }
 

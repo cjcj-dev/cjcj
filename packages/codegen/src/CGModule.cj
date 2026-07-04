@@ -15,6 +15,7 @@ import cangjie_compiler::chir.GlobalVar
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
+import cangjie_compiler::mangle.GetTypeArgsQualifiedName
 import cangjie_compiler::option.ArchType
 import cangjie_compiler::option.EnvironmentType
 import cangjie_compiler::option.OSType
@@ -73,7 +74,7 @@ public class MTableInterfaceInfo {
 public class CGModule {
     private let cgCtx: CGContext
     private var module: Option<LLVMModuleHandle>
-    private let functions: HashMap<String, CGFunction> = HashMap<String, CGFunction>()
+    private let functions: HashMap<Value, CGFunction> = HashMap<Value, CGFunction>()
     private let globalVariables: HashMap<String, CGValue> = HashMap<String, CGValue>()
     private let localValueMapping: HashMap<Value, CGValue> = HashMap<Value, CGValue>()
     private let basicBlocks: HashMap<Int64, LLVMBasicBlockRef> = HashMap<Int64, LLVMBasicBlockRef>()
@@ -146,6 +147,66 @@ public class CGModule {
         return module
     }
 
+    public func GenerateTypeNameConstantString(typeMangledName: String, isWeakODR: Bool,
+        qualifiedName!: String = ""): LLVMValueRef {
+        let context = GetLLVMContext().raw
+        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(context), 0u32) }
+        let moduleHandle = module ?? return unsafe { LLVMConstNull(i8PtrType) }
+        let value = if (!qualifiedName.isEmpty()) { qualifiedName } else { typeMangledName }
+        var strConstant = LLVMNullValue()
+        try (valueCString = unsafe { LibC.mallocCString(value) }.asResource()) {
+            strConstant = unsafe { LLVMConstStringInContext(context, valueCString.value, UInt32(value.size), 0) }
+        }
+        let globalName = typeMangledName + ".name"
+        var klassName = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(globalName) }.asResource()) {
+            klassName = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+            if (klassName.isNull()) {
+                klassName = unsafe { LLVMAddGlobal(moduleHandle.raw, LLVMTypeOf(strConstant), nameCString.value) }
+            }
+        }
+        unsafe {
+            LLVMSetInitializer(klassName, strConstant)
+            LLVMSetAlignment(klassName, 1u32)
+            LLVMSetGlobalConstant(klassName, 1)
+            LLVMSetUnnamedAddress(klassName, LLVMUnnamedAddrValue(LLVMUnnamedAddr.GlobalUnnamedAddr))
+        }
+        addAttribute(klassName, CJTYPE_NAME_ATTR)
+        AddLinkageTypeMetadata(klassName, if (isWeakODR) { LLVMLinkage.WeakODR } else { LLVMLinkage.Private }, false)
+        return unsafe { LLVMConstBitCast(klassName, i8PtrType) }
+    }
+
+    public func GetEnumCaseClassName(chirEnumType: EnumType, ctorIndex: Int64): String {
+        let enumDef = chirEnumType.GetEnumDef()
+        var name = enumDef.GetPackageName() + ":" + enumDef.GetSrcCodeIdentifier() + ":" + ctorIndex.toString()
+        if (!CGType.GetOrCreate(this, chirEnumType).IsDynamicGI() && !chirEnumType.GetTypeArgs().isEmpty()) {
+            name += "<" + GetTypeArgsQualifiedName(chirEnumType.GetTypeArgs()) + ">"
+        }
+        return name
+    }
+
+    public func GetOrCreateEnumCtorTIOrTT(chirEnumType: EnumType, ctorIndex: Int64): LLVMValueRef {
+        let isTT = CGType.GetOrCreate(this, chirEnumType).IsDynamicGI()
+        let className = GetEnumCaseClassName(chirEnumType, ctorIndex) + if (isTT) { ".tt" } else { ".ti" }
+        let globalType = if (isTT) {
+            CGType.GetOrCreateTypeTemplateType(cgCtx.GetLLVMContext())
+        } else {
+            CGType.GetOrCreateTypeInfoType(cgCtx.GetLLVMContext())
+        }
+        if (let Some(moduleHandle) <- module) {
+            var global = LLVMNullValue()
+            try (nameCString = unsafe { LibC.mallocCString(className) }.asResource()) {
+                global = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+                if (global.isNull()) {
+                    global = unsafe { LLVMAddGlobal(moduleHandle.raw, globalType, nameCString.value) }
+                    EnumCtorTIOrTTGenerator(this, chirEnumType, ctorIndex).Emit()
+                }
+            }
+            return global
+        }
+        return LLVMNullValue()
+    }
+
     public func ReleaseLLVMModule(): Option<LLVMModuleHandle> {
         FinalizeDebugInfo()
         let released = module
@@ -187,8 +248,8 @@ public class CGModule {
 
     public func GetOrInsertCGFunction(chirValue: Value, forWrapper!: Bool = false): CGFunction {
         let name = GetCodeGenGlobalName(chirValue)
-        if (functions.contains(name)) {
-            return functions[name]
+        if (functions.contains(chirValue)) {
+            return functions[chirValue]
         }
         let cgFuncType = CGType.GetOrCreateWithNode(this, chirValue, allowBasePtr: true, forWrapper: forWrapper)
         let functionType = if (let Some(chirType) <- chirValue.GetType()) {
@@ -222,11 +283,23 @@ public class CGModule {
         } else {
             LLVMNullValue()
         }
+        if (forWrapper) {
+            AddFnAttr(rawFunction, "wrapper")
+        }
+        if (chirValue.TestAttr(Attribute.NO_INLINE)) {
+            AddFnAttr(rawFunction, "noinline")
+        }
+        if (let Some(functionCGType) <- (cgFuncType as CGFunctionType)) {
+            if (functionCGType.HasBasePtr()) {
+                AddFnStringAttr(rawFunction, STRUCT_MUT_FUNC_ATTR)
+                AddFnStringAttr(rawFunction, THIS_PARAM_HAS_BP)
+            }
+        }
         let cgFunc = CGFunction(rawFunction, cgFuncType, chirValue, this)
         AddGenericParamMappings(rawFunction, cgFunc, chirValue, cgFuncType)
         ApplyFunctionABIAttributes(rawFunction, chirValue, cgFuncType)
         MaybeSetCangjieGC(rawFunction, chirValue)
-        functions[name] = cgFunc
+        functions[chirValue] = cgFunc
         return cgFunc
     }
 
@@ -492,9 +565,8 @@ public class CGModule {
 
     public func GetMappedValue(chirValue: Value): Option<CGValue> {
         if (let Some(functionValue) <- (chirValue as Function)) {
-            let name = GetCodeGenGlobalName(functionValue)
-            if (functions.contains(name)) {
-                return functions[name]
+            if (functions.contains(functionValue)) {
+                return functions[functionValue]
             }
             return None
         }
@@ -514,7 +586,7 @@ public class CGModule {
     public func SetOrUpdateMappedCGValue(chirValue: Value, value: CGValue): Unit {
         if (let Some(functionValue) <- (chirValue as Function)) {
             if (let Some(cgFunction) <- (value as CGFunction)) {
-                functions[GetCodeGenGlobalName(functionValue)] = cgFunction
+                functions[functionValue] = cgFunction
                 return
             }
             throw IllegalArgumentException("function mapping requires CGFunction: " + GetCodeGenGlobalName(functionValue))
@@ -528,7 +600,7 @@ public class CGModule {
 
     public func RemoveMappedCGValue(chirValue: Value): Unit {
         if (let Some(functionValue) <- (chirValue as Function)) {
-            functions.remove(GetCodeGenGlobalName(functionValue))
+            functions.remove(functionValue)
             return
         }
         if (let Some(globalValue) <- (chirValue as GlobalVar)) {
@@ -568,7 +640,10 @@ public class CGModule {
 
     public func GetMappedBB(chirBlock: Block): Option<LLVMBasicBlockRef> {
         if (basicBlocks.contains(chirBlock.nodeId)) {
-            return basicBlocks[chirBlock.nodeId]
+            let mappedBlock = basicBlocks[chirBlock.nodeId]
+            if (!mappedBlock.isNull()) {
+                return mappedBlock
+            }
         }
         return None
     }
@@ -838,8 +913,59 @@ public class CGModule {
     }
 
     public func ClearLinkNameUsedInMeta(): Unit { linkNameUsedInMeta.clear() }
-    public func IsLinkNameUsedInMeta(linkageName: String): Bool { return linkNameUsedInMeta.contains(linkageName) }
-    public func GetLinkNamesUsedInMeta(): HashSet<String> { return linkNameUsedInMeta }
+    public func IsLinkNameUsedInMeta(linkageName: String): Bool {
+        if (linkNameUsedInMeta.isEmpty()) {
+            CollectLinkNameUsedInMeta()
+        }
+        return linkNameUsedInMeta.contains(linkageName)
+    }
+    public func GetLinkNamesUsedInMeta(): HashSet<String> {
+        if (linkNameUsedInMeta.isEmpty()) {
+            CollectLinkNameUsedInMeta()
+        }
+        return linkNameUsedInMeta
+    }
+
+    private func CollectLinkNameUsedInMeta(): Unit {
+        let moduleHandle = GetLLVMModule() ?? return
+        let metaTypes: Array<String> = [
+            METADATA_PKG,
+            METADATA_TYPES,
+            METADATA_TYPETEMPLATES,
+            METADATA_PRIMITIVE_TYPES,
+            METADATA_PRIMITIVE_TYPETEMPLATES,
+            METADATA_GLOBAL_VAR,
+            METADATA_FUNCTIONS]
+        for (metaType in metaTypes) {
+            CollectLinkNameUsedInMeta(LLVMGetNamedMetadataOperandValues(moduleHandle, metaType))
+        }
+    }
+
+    private func CollectLinkNameUsedInMeta(operands: ArrayList<LLVMValueRef>): Unit {
+        let visited = HashSet<UIntNative>()
+        let queue = ArrayList<LLVMValueRef>()
+        for (operand in operands) {
+            if (!operand.isNull()) {
+                visited.add(operand.toUIntNative())
+                queue.add(operand)
+            }
+        }
+        var idx: Int64 = 0
+        while (idx < queue.size) {
+            let front = queue[idx]
+            idx++
+            if (let Some(metaString) <- LLVMGetMDStringValue(front)) {
+                linkNameUsedInMeta.add(metaString)
+                continue
+            }
+            for (operand in LLVMGetMDNodeOperands(front)) {
+                if (!operand.isNull() && !visited.contains(operand.toUIntNative())) {
+                    visited.add(operand.toUIntNative())
+                    queue.add(operand)
+                }
+            }
+        }
+    }
     public func AddNonExternalExtensionDef(extensionDef: LLVMValueRef): Unit { nonExternalExtensionDefs.add(extensionDef) }
     public func AddExternalExtensionDef(extensionDef: LLVMValueRef): Unit { externalExtensionDefs.add(extensionDef) }
     public func GetNonExternalExtensionDefs(): ArrayList<LLVMValueRef> { return nonExternalExtensionDefs }

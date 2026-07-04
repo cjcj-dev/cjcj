@@ -1,5 +1,6 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::basic.Linkage as BasicLinkage
 import std.collection.*
 
 public open class Value <: Base & Hashable & Equatable<Value> {
@@ -775,6 +776,7 @@ public open class GlobalValue <: Value {
     private let features: ArrayList<String> = ArrayList<String>()
     private let annoInfo: AnnoInfo = AnnoInfo()
     private var linkage: Linkage = Linkage.EXTERNAL
+    private var linkTypeInfo: BasicLinkage = BasicLinkage.EXTERNAL
 
     public init(kind: ValueKind, ty: Option<Type>, identifier: String, srcCodeIdentifier: String,
         rawMangledName: String, packageName: String) {
@@ -849,6 +851,15 @@ public open class GlobalValue <: Value {
 
     public func GetLinkage(): Linkage {
         return linkage
+    }
+
+    public func SetLinkTypeInfo(linkType: BasicLinkage): Unit {
+        linkTypeInfo = linkType
+        SetAnnotation("LinkTypeInfo", LinkTypeInfo(linkType).ToString())
+    }
+
+    public func GetLinkTypeInfo(): BasicLinkage {
+        return linkTypeInfo
     }
 
     public open func DestroySelf(): Unit {}
@@ -1229,22 +1240,7 @@ public class Function <: GlobalValue {
 
     public func GetParentCustomTypeOrExtendedType(): Option<Type> {
         if (let Some(def) <- GetParentCustomTypeDef()) {
-            let typeArgs = ArrayList<Type>()
-            for (genericParam in def.GetGenericTypeParams()) {
-                typeArgs.add(genericParam)
-            }
-            if (let Some(classDef) <- (def as ClassDef)) {
-                return ClassType(classDef, typeArgs)
-            }
-            if (let Some(structDef) <- (def as StructDef)) {
-                return StructType(structDef, typeArgs)
-            }
-            if (let Some(enumDef) <- (def as EnumDef)) {
-                return EnumType(enumDef, typeArgs)
-            }
-            if (let Some(extendDef) <- (def as ExtendDef)) {
-                return extendDef.extendedType
-            }
+            return def.GetType()
         }
         return None
     }

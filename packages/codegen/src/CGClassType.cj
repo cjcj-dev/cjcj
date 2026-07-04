@@ -1,6 +1,8 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.Attribute
+import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Type
 
@@ -61,5 +63,43 @@ public class CGClassType <: CGCustomType {
         }
         size = None
         align = None
+    }
+
+    protected override func PostActionOfGenTypeInfo(): Unit {
+        let classDef = (chirType as ClassType).getOrThrow().GetClassDef()
+        if (!(classDef.TestAttr(Attribute.COMPILER_ADD) || !IsModifiableClass(chirType) || !IsStaticGI())) {
+            return
+        }
+        if (let Some(rawTypeInfo) <- typeInfo) {
+            addAttribute(rawTypeInfo, HAS_EXT_PART)
+            let llvmCtx = cgCtx.GetLLVMContext()
+            let extPartType = CGType.GetClassTTExtTypeVer1(llvmCtx)
+            let typeInfoName = LLVMCStringToString(unsafe { LLVMGetValueName(rawTypeInfo) }) ?? ""
+            let extPart = GetOrInsertCodeGenGlobal(cgMod, "ext_" + typeInfoName, extPartType)
+            let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(llvmCtx.raw), 0u32) }
+            let i16Type = unsafe { LLVMInt16TypeInContext(llvmCtx.raw) }
+            let i32Type = unsafe { LLVMInt32TypeInContext(llvmCtx.raw) }
+            let i8Type = unsafe { LLVMInt8TypeInContext(llvmCtx.raw) }
+            let values = ArrayList<LLVMValueRef>()
+            values.add(unsafe { LLVMConstBitCast(rawTypeInfo, i8PtrType) })
+            values.add(unsafe { LLVMConstInt(i16Type, 1u64, 0) })
+            values.add(unsafe { LLVMConstInt(i32Type, cgMod.GetTypeSize(extPartType), 0) })
+            values.add(unsafe { LLVMConstInt(i8Type, 1u64, 0) })
+            try (valuePtr = LibC.malloc<LLVMValueRef>(count: values.size).asResource()) {
+                var idx: Int64 = 0
+                while (idx < values.size) {
+                    unsafe { (valuePtr.value + idx).write(values[idx]) }
+                    idx++
+                }
+                unsafe {
+                    LLVMSetGlobalConstant(extPart, 1)
+                    LLVMSetUnnamedAddress(extPart, LLVMUnnamedAddrValue(LLVMUnnamedAddr.GlobalUnnamedAddr))
+                    LLVMSetInitializer(extPart, LLVMConstNamedStruct(extPartType, valuePtr.value, UInt32(values.size)))
+                    LLVMSetLinkage(extPart, LLVMLinkageValue(LLVMLinkage.Private))
+                }
+            }
+            addAttribute(extPart, GC_TI_EXT_ATTR)
+            cgCtx.AddLLVMUsedVars("ext_" + typeInfoName)
+        }
     }
 }

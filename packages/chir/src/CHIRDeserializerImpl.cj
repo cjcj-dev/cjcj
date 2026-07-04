@@ -268,7 +268,6 @@ class CHIRDeserializerImpl {
                     }
                 }
                 createParameters(fn, CHIRFieldAt(fields, 8))
-                pkg.AddGlobalFunc(fn)
             }
         }
     }
@@ -329,6 +328,25 @@ class CHIRDeserializerImpl {
                 if (let Some(genericTy) <- (CHIRParseType(paramText, builder, customDefs) as GenericType)) {
                     def.AddGenericTypeParam(genericTy)
                 }
+            }
+            let genericParamTypes = ArrayList<Type>()
+            for (genericParam in def.GetGenericTypeParams()) {
+                genericParamTypes.add(genericParam)
+            }
+            let serializedDefType = CHIRFieldAt(fields, 27)
+            let parsedDefType: Option<CustomType> = if (!serializedDefType.isEmpty()) {
+                CHIRParseType(serializedDefType, builder, customDefs) as CustomType
+            } else if (let Some(structDef) <- (def as StructDef)) {
+                builder.context.GetStructTy(structDef, genericParamTypes)
+            } else if (let Some(classDef) <- (def as ClassDef)) {
+                builder.context.GetClassTy(classDef, genericParamTypes)
+            } else if (let Some(enumDef) <- (def as EnumDef)) {
+                builder.context.GetEnumTy(enumDef, genericParamTypes)
+            } else {
+                None
+            }
+            if (let Some(customTy) <- parsedDefType) {
+                def.SetType(customTy)
             }
             for (memberText in CHIRWireSplitList(CHIRFieldAt(fields, 7))) {
                 if (memberText.isEmpty()) {
@@ -518,6 +536,11 @@ class CHIRDeserializerImpl {
                         if (let Some(srcFuncTy) <- (CHIRParseType(CHIRFieldAt(fields, 21), builder, customDefs) as FuncType)) {
                             fn.SetOverrideSrcFuncType(srcFuncTy)
                         }
+                    }
+                    if (!CHIRFieldAt(fields, 22).isEmpty()) {
+                        fn.SetLinkTypeInfo(LinkTypeInfo.Extract(CHIRFieldAt(fields, 22)))
+                    } else if (let Some(linkText) <- fn.GetAnnotation("LinkTypeInfo")) {
+                        fn.SetLinkTypeInfo(LinkTypeInfo.Extract(linkText))
                     }
                 }
             }

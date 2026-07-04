@@ -38,7 +38,11 @@ public class ExtendDef <: CustomTypeDef {
     }
 
     public override func GetGenericTypeParams(): ArrayList<GenericType> {
-        return super.GetGenericTypeParams()
+        let out = ArrayList<GenericType>()
+        for (param in genericTypeParams) {
+            out.add(param)
+        }
+        return out
     }
 
     public func RemoveParent(parent: ClassType): Unit {

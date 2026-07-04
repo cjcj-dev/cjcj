@@ -10,7 +10,7 @@ import cangjie_compiler::chir.TransformToConcrete
 import cangjie_compiler::chir.TransformToGeneric
 import cangjie_compiler::chir.UnBox
 import cangjie_compiler::chir.UnBoxToRef
-import cangjie_compiler::utils.OverflowStrategy
+import cangjie_compiler::utils.{CJC_ASSERT_WITH_MSG, OverflowStrategy, StaticCast}
 
 public func EmitTypeCastExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (chirExpr.GetNumOfOperands() == 0) {
@@ -154,34 +154,145 @@ private func EmitTransformToConcreteExpression(irBuilder: IRBuilder2,
     return sourceRawValue
 }
 
+private func GenerateGenericTypeCast(irBuilder: IRBuilder2, sourceCGValue: CGValue, sourceTy: Type,
+    targetTy: Type): Option<LLVMValueRef> {
+    let cgMod = irBuilder.GetCGModule()
+    let sourceValue = sourceCGValue.GetRawValue()
+    let targetCGType = CGType.GetOrCreate(cgMod, targetTy)
+    let sourceCGType = CGType.GetOrCreate(cgMod, sourceTy)
+    let targetIsOptionLike = if (targetTy.IsEnum()) {
+        StaticCast<CGEnumType>(targetCGType).IsOptionLike()
+    } else {
+        false
+    }
+    let sourceIsOptionLike = if (sourceTy.IsEnum()) {
+        StaticCast<CGEnumType>(sourceCGType).IsOptionLike()
+    } else {
+        false
+    }
+    if (sourceTy.IsGeneric() && targetTy.IsGeneric()) {
+        return Some(sourceValue)
+    } else if (sourceTy.IsGeneric() && IsGenericRef(targetTy)) {
+        let result = irBuilder.CreateEntryAlloca(targetCGType.GetLLVMType())
+        irBuilder.CreateStore(sourceValue, result)
+        return Some(result)
+    } else if (IsGenericRef(sourceTy) && targetTy.IsGeneric()) {
+        return Some(irBuilder.CreateLoad(targetCGType.GetLLVMType(), sourceValue))
+    } else if (sourceTy.IsGeneric() &&
+        (targetTy.IsStruct() || targetTy.IsRawArray() || targetTy.IsTuple() || IsTrivialEnum(targetTy) ||
+            targetIsOptionLike)) {
+        if (targetCGType.GetSize().isSome()) {
+            let elementType = targetCGType.GetLLVMType()
+            let sourcePayload = irBuilder.CreateBitCast(irBuilder.GetPayloadFromObject(sourceValue),
+                unsafe { LLVMPointerType(elementType, 1u32) })
+            return Some(irBuilder.CreateLoad(elementType, sourcePayload))
+        }
+        return Some(sourceValue)
+    } else if ((sourceTy.IsStruct() || sourceTy.IsRawArray() || sourceTy.IsTuple() || IsTrivialEnum(sourceTy) ||
+        sourceIsOptionLike) && targetTy.IsGeneric()) {
+        if (sourceCGType.GetSize().isSome()) {
+            let typeInfoOfSource = irBuilder.CreateTypeInfo(sourceTy)
+            let temp = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>(
+                [typeInfoOfSource, irBuilder.GetLayoutSize32(sourceTy, sourceCGType)]))
+            let payloadPtr = irBuilder.GetPayloadFromObject(temp)
+            let addr = irBuilder.CreateBitCast(payloadPtr,
+                unsafe { LLVMPointerType(sourceCGType.GetLLVMType(), 1u32) })
+            let addrType = CGType.GetOrCreate(cgMod,
+                irBuilder.GetCGContext().GetCHIRBuilder().context.GetRefTy(sourceTy), extraInfo: TypeExtraInfo(1u32))
+            irBuilder.CreateStore(sourceCGValue, CGValue(addr, addrType))
+            return Some(temp)
+        }
+        return Some(sourceValue)
+    } else if (sourceTy.IsGeneric() && IsStructRef(targetTy)) {
+        CJC_ASSERT_WITH_MSG(false, "Illegal GenericTypeCast.")
+        return Some(LLVMNullValue())
+    } else if (IsStructRef(sourceTy) && targetTy.IsGeneric()) {
+        CJC_ASSERT_WITH_MSG(false, "Illegal GenericTypeCast")
+        return Some(LLVMNullValue())
+    } else if (sourceTy.IsGeneric() && (IsClassRef(targetTy) || targetTy.IsEnum())) {
+        return Some(sourceValue)
+    } else if ((IsClassRef(sourceTy) || sourceTy.IsEnum()) && targetTy.IsGeneric()) {
+        return Some(sourceValue)
+    } else if (sourceTy.IsGeneric() && IsDynamicStruct(targetTy)) {
+        return None
+    } else if (IsDynamicStruct(sourceTy) && targetTy.IsGeneric()) {
+        return None
+    } else if (sourceTy.IsGeneric() && IsDynamicStructRef(targetTy)) {
+        return None
+    } else if (IsDynamicStructRef(sourceTy) && targetTy.IsGeneric()) {
+        return None
+    } else if (sourceTy.IsGeneric() && IsDynamicClassRef(targetTy)) {
+        return Some(sourceValue)
+    } else if (IsDynamicClassRef(sourceTy) && targetTy.IsGeneric()) {
+        return Some(sourceValue)
+    } else if (IsStructRef(sourceTy) && IsDynamicClassRef(targetTy)) {
+        let typeInfo = irBuilder.CreateTypeInfo(sourceTy)
+        let size = irBuilder.GetLayoutSize_32(sourceTy)
+        let temp = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfo, size]))
+        irBuilder.CallGCWriteGenericPayload(temp, sourceValue, size)
+        return Some(temp)
+    } else if (IsDynamicClassRef(sourceTy) && IsStructRef(targetTy)) {
+        return None
+    } else if (sourceTy.IsStructArray() && targetTy.IsStructArray()) {
+        let tmp = irBuilder.CreateEntryAlloca(targetCGType)
+        irBuilder.CreateMemCpy(tmp, 0u32, sourceValue, 0u32, irBuilder.GetLayoutSize_32(targetTy))
+        return Some(tmp)
+    } else if (IsStaticStruct(sourceTy) && IsDynamicStruct(targetTy)) {
+        let typeInfo = irBuilder.CreateTypeInfo(sourceTy)
+        let size = irBuilder.GetLayoutSize_32(sourceTy)
+        let temp = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfo, size]))
+        irBuilder.CallGCWriteGenericPayload(temp, sourceValue, size)
+        return Some(temp)
+    } else if (IsDynamicStruct(sourceTy) && IsStaticStruct(targetTy)) {
+        let tmp = irBuilder.CreateEntryAlloca(targetCGType)
+        let dataPtr = irBuilder.GetPayloadFromObject(sourceValue)
+        if (irBuilder.IsLLVMTypeContainsRef(targetCGType.GetLLVMType())) {
+            let args = ArrayList<LLVMValueRef>([
+                tmp, sourceValue, dataPtr, irBuilder.GetLayoutSize_64(targetTy)
+            ])
+            irBuilder.CallGCReadAgg(targetCGType.GetLayoutType(), args)
+        } else {
+            irBuilder.CreateMemCpy(tmp, 0u32, dataPtr, 0u32, irBuilder.GetLayoutSize_32(targetTy))
+        }
+        return Some(tmp)
+    } else if (IsStaticStruct(sourceTy) && IsDynamicStruct(targetTy)) {
+        let typeInfo = irBuilder.CreateTypeInfo(sourceTy)
+        let size = irBuilder.GetLayoutSize_32(sourceTy)
+        let temp = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfo, size]))
+        irBuilder.CallGCWriteGenericPayload(temp, sourceValue, size)
+        return Some(temp)
+    } else if (IsDynamicClass(sourceTy) && IsStaticClass(targetTy)) {
+        return Some(sourceValue)
+    } else if (IsStaticClass(sourceTy) && IsDynamicClass(targetTy)) {
+        return Some(sourceValue)
+    } else if ((sourceTy.IsTuple() && targetTy.IsTuple()) &&
+        (sourceCGType.GetSize().isNone() && targetCGType.GetSize().isSome())) {
+        let elementType = targetCGType.GetLLVMType()
+        let sourcePayload = irBuilder.CreateBitCast(irBuilder.GetPayloadFromObject(sourceValue),
+            unsafe { LLVMPointerType(elementType, 1u32) })
+        return Some(irBuilder.CreateLoad(elementType, sourcePayload))
+    }
+    return None
+}
+
 public func CastValueToType(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: Type, targetTy: Type,
     targetLLVMType: LLVMTypeRef, overflowStrategy!: OverflowStrategy = OverflowStrategy.NA): LLVMValueRef {
     if (sourceTy.IsEqual(targetTy)) {
         return sourceValue
     }
+    let sourceCGValue = CGValue(sourceValue, CGType.GetOrCreate(irBuilder.GetCGModule(), sourceTy))
+    if (let Some(genericCast) <- GenerateGenericTypeCast(irBuilder, sourceCGValue, sourceTy, targetTy)) {
+        return genericCast
+    }
     if (sourceTy.IsEnum() && targetTy.IsTuple()) {
         return sourceValue
     }
-    if (targetTy.IsGeneric()) {
-        let sourceCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), sourceTy.StripAllRefs())
-        if (sourceCGType.IsReference()) {
-            return irBuilder.CreatePointerCast(sourceValue, targetLLVMType)
+    if ((targetTy.IsEnum() && sourceTy.IsInteger()) || (targetTy.IsInteger() && sourceTy.IsEnum())) {
+        let enumTy = if (targetTy.IsEnum()) { targetTy } else { sourceTy }
+        if (StaticCast<CGEnumType>(CGType.GetOrCreate(irBuilder.GetCGModule(), enumTy)).IsTrivial()) {
+            return sourceValue
         }
-        let objectValue = irBuilder.CallValueIntrinsicAlloc(sourceTy)
-        irBuilder.StoreValueToObjectPayload(objectValue, sourceValue, sourceTy)
-        return objectValue
-    }
-    if (sourceTy.IsGeneric()) {
-        let targetCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy)
-        if (targetCGType.IsReference()) {
-            return irBuilder.CreatePointerCast(sourceValue, targetLLVMType, name: "generic.cast.ref")
-        }
-        if (targetCGType.GetSize().isSome()) {
-            let payload = irBuilder.GetPayloadFromObject(sourceValue)
-            let payloadType = unsafe { LLVMPointerType(targetLLVMType, 1u32) }
-            let typedPayload = irBuilder.CreateBitCast(payload, payloadType, name: "generic.cast.payload")
-            return irBuilder.CreateLoad(targetLLVMType, typedPayload, name: "generic.cast.value")
-        }
+        return irBuilder.CreateNullValue(targetTy)
     }
     if (sourceTy.StripAllRefs().IsValueType() && IsObjectReferenceType(targetTy)) {
         let objectValue = irBuilder.CallValueIntrinsicAlloc(sourceTy)
@@ -217,7 +328,7 @@ public func CastValueToType(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, so
     if (IsPointerLikeType(sourceTy) && IsPointerLikeType(targetTy)) {
         return irBuilder.CreatePointerCast(sourceValue, targetLLVMType)
     }
-    return irBuilder.CreateBitCast(sourceValue, targetLLVMType)
+    return irBuilder.CreateNullValue(targetTy)
 }
 
 private func EmitIntegerCast(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: Type, targetTy: Type,

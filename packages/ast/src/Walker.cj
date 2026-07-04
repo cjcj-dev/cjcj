@@ -1,6 +1,7 @@
 package cangjie_compiler::ast
 
 import cangjie_compiler::utils.CJC_ASSERT
+import std.sync.AtomicUInt32
 
 public enum VisitAction {
     | WALK_CHILDREN
@@ -28,13 +29,12 @@ extend VisitAction <: Equatable<VisitAction> {
     }
 }
 
-private var nextWalkerID: UInt32 = 1u32
+private let nextWalkerID = AtomicUInt32(1u32)
 
 public func GetNextWalkerID(): UInt32 {
-    let out = nextWalkerID
-    nextWalkerID++
-    if (nextWalkerID == 0u32) {
-        nextWalkerID = 1u32
+    var out = nextWalkerID.fetchAdd(1u32)
+    while (out == 0u32) {
+        out = nextWalkerID.fetchAdd(1u32)
     }
     return out
 }

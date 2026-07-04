@@ -12,14 +12,7 @@ public func BCHIRMangledName(value: Value): String {
 }
 
 public func BCHIRMangledName(def: CustomTypeDef): String {
-    let identifier = def.GetIdentifier()
-    if (identifier.size > 0) {
-        let first = identifier[0]
-        if (first == b'@' || first == b'%' || first == b'$') {
-            return identifier[1..]
-        }
-    }
-    return identifier
+    return def.GetIdentifierWithoutPrefix()
 }
 
 public func BCHIRPrimitiveTypeKindToOpCode(kind: TypeKind): OpCode {

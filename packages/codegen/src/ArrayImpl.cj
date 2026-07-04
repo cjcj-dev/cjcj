@@ -2,6 +2,7 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.Attribute
+import cangjie_compiler::chir.Constant
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Box as ChirBox
 import cangjie_compiler::chir.Expression
@@ -197,7 +198,18 @@ public func GenerateRawArrayAllocate(irBuilder: IRBuilder2, chirExpr: Expression
     }
     if (let Some(resultTy) <- chirExpr.GetResultType()) {
         if (let Some(rawArrayTy) <- FindRawArrayType(resultTy)) {
-            let lengthValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0)).GetRawValue()
+            let length = chirExpr.GetOperand(0)
+            let lengthValue = irBuilder.GetCGModule().GetMappedCGValue(length).GetRawValue()
+            if (let Some(lengthLocal) <- (length as LocalVar)) {
+                if (let Some(lengthExpr) <- lengthLocal.GetExpr()) {
+                    if (lengthExpr.IsConstant()) {
+                        let constExpr = (lengthExpr as Constant).getOrThrow()
+                        if (constExpr.GetSignedIntLitVal() >= 0) {
+                            return irBuilder.AllocateArray(rawArrayTy, lengthValue)
+                        }
+                    }
+                }
+            }
             return GenerateCheckedRawArrayAllocate(irBuilder, rawArrayTy, lengthValue)
         }
     }
@@ -242,22 +254,16 @@ public func GenerateRawArrayInitByValue(irBuilder: IRBuilder2, chirExpr: Express
 
 private func GenerateCheckedRawArrayAllocate(irBuilder: IRBuilder2, rawArrayTy: RawArrayType,
     lengthValue: LLVMValueRef): LLVMValueRef {
-    let currentBlock = irBuilder.GetInsertBlock()
-    if (currentBlock.isNull()) {
-        return irBuilder.AllocateArray(rawArrayTy, lengthValue)
-    }
-    let parentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
-    if (parentFunction.isNull()) {
-        return irBuilder.AllocateArray(rawArrayTy, lengthValue)
-    }
-    let throwBlock = irBuilder.CreateEntryBasicBlock(parentFunction, "arr.alloc.throw")
-    unsafe { LLVMMoveBasicBlockAfter(throwBlock, currentBlock) }
-    let bodyBlock = irBuilder.CreateEntryBasicBlock(parentFunction, "arr.alloc.body")
-    unsafe { LLVMMoveBasicBlockAfter(bodyBlock, throwBlock) }
-    let zeroValue = unsafe { LLVMConstInt(LLVMTypeOf(lengthValue), 0u64, 1) }
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>(
+        [GenNameForBB("arr.alloc.throw"), GenNameForBB("arr.alloc.body")]))
+    CJC_ASSERT(blocks.size == 2)
+    let throwBlock = blocks[0]
+    let bodyBlock = blocks[1]
+    let zeroValue = unsafe { LLVMConstInt(LLVMTypeOf(lengthValue), 0u64, 0) }
     let isValidLength = irBuilder.CreateICmp(LLVMIntPredicate.SGE, lengthValue, zeroValue,
         name: "arr.alloc.size.valid")
-    irBuilder.CreateCondBr(isValidLength, bodyBlock, throwBlock)
+    let expectedValidLength = irBuilder.GenerateCallExpectFunction(isValidLength, irBuilder.GetTrue())
+    irBuilder.CreateCondBr(expectedValidLength, bodyBlock, throwBlock)
 
     irBuilder.SetInsertPoint(throwBlock)
     irBuilder.CreateNegativeArraySizeException()
@@ -442,6 +448,19 @@ public func CreateTypedStoreForAddress(irBuilder: IRBuilder2, value: CGValue, ad
     if (ShouldUseGCStaticWriteBarrier(irBuilder, addr) && ShouldUseGCStaticRefWriteBarrier(addr)) {
         return irBuilder.CallGCWriteStaticRef(storedValue, addr.GetRawValue())
     }
+    if (let Some(valueCGType) <- value.GetCGType()) {
+        if (let Some(addrCGType) <- addr.GetCGType()) {
+            if (valueCGType.IsVArrayPtrType() && addrCGType.IsVArrayPtrType()) {
+                let valueType = valueCGType.GetPointerElementType().getOrThrow().GetLLVMType()
+                let size = unsafe {
+                    LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw),
+                        irBuilder.GetCGModule().GetTypeSize(valueType), 0)
+                }
+                let align = irBuilder.GetCGModule().GetABITypeAlignment(valueType)
+                return irBuilder.CreateMemCpy(addr.GetRawValue(), align, value.GetRawValue(), align, size)
+            }
+        }
+    }
     return irBuilder.CreateStore(storedValue, addr.GetRawValue())
 }
 
@@ -518,8 +537,16 @@ private func ShouldLoadInlineValueForAddressStore(valueCGType: CGType, destCGTyp
     if (IsBareGCRefLLVMType(destCGType.GetLLVMType())) {
         return false
     }
+    let destTy = destCGType.GetOriginal().StripAllRefs()
+    if (destTy.IsCPointer() || destTy.IsCString() || destTy.IsCFunc()) {
+        return false
+    }
     let valueElementCGType = valueCGType.GetPointerElementType() ?? return false
-    return valueElementCGType.GetOriginal().StripAllRefs().IsEqual(destCGType.GetOriginal().StripAllRefs())
+    let valueElementTy = valueElementCGType.GetOriginal().StripAllRefs()
+    if (valueElementTy.IsCPointer() || valueElementTy.IsCString() || valueElementTy.IsCFunc()) {
+        return false
+    }
+    return valueElementTy.IsEqual(destTy)
 }
 
 private func ShouldLoadInlineObjectPayloadForAddressStore(valueCGType: CGType): Bool {
@@ -563,7 +590,7 @@ private func TryStoreStructPtrValueForAddress(irBuilder: IRBuilder2, value: CGVa
     if (irBuilder.IsGlobalVariableBasePtr(addr.GetRawValue()) &&
         irBuilder.IsLLVMTypeContainsRef(destCGType.GetLLVMType())) {
         return Some(CallGCWriteStaticStruct(irBuilder, addr.GetRawValue(), source, fieldSizeValue,
-            AggregateLLVMTypeName(destCGType)))
+            destCGType.GetLLVMType()))
     }
     if (IsAddressSpacePointer(addr.GetRawValue(), 1u32) && irBuilder.IsLLVMTypeContainsRef(destCGType.GetLLVMType())) {
         return Some(irBuilder.CallGCWriteStruct(addr.GetRawValue(), addr.GetRawValue(), source, fieldSizeValue,
@@ -594,36 +621,18 @@ private func TryStoreStaticAggregateValueForAddress(irBuilder: IRBuilder2, store
     let fieldSizeValue = unsafe {
         LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(fieldSize), 0)
     }
-    return Some(CallGCWriteStaticStruct(irBuilder, addr.GetRawValue(), source, fieldSizeValue,
-        AggregateLLVMTypeName(destCGType)))
+    return Some(CallGCWriteStaticStruct(irBuilder, addr.GetRawValue(), source, fieldSizeValue, destCGType.GetLLVMType()))
 }
 
 private func CallGCWriteStaticStruct(irBuilder: IRBuilder2, dest: LLVMValueRef, source: LLVMValueRef,
-    size: LLVMValueRef, aggTypeName: String): LLVMValueRef {
-    let i8Type = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
-    let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+    size: LLVMValueRef, aggType: LLVMTypeRef): LLVMValueRef {
+    CJC_ASSERT(!aggType.isNull() && unsafe { LLVMGetTypeKind(aggType) } == LLVM_STRUCT_TYPE_KIND)
     let i64Type = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
-    let overloadedTypes = ArrayList<LLVMTypeRef>()
-    overloadedTypes.add(i64Type)
-    let args = ArrayList<LLVMValueRef>()
-    args.add(irBuilder.CreatePointerCast(dest, i8PtrType, name: "gcwrite.static.struct.dest"))
-    args.add(irBuilder.CreatePointerCast(source, i8PtrType, name: "gcwrite.static.struct.source"))
-    args.add(size)
-    let call = irBuilder.CreateIntrinsicCallNoInvoke("llvm.cj.gcwrite.static.struct", overloadedTypes, args)
-    LLVMSetInstructionMetadata(irBuilder.GetLLVMContext(), call, "AggType",
-        LLVMCreateMDTupleFromString(irBuilder.GetLLVMContext(), aggTypeName))
-    return call
-}
-
-private func AggregateLLVMTypeName(cgType: CGType): String {
-    if (cgType.GetOriginal().StripAllRefs().IsString()) {
-        return STRUCT_TYPE_PREFIX + "std.core:String"
+    let moduleHandle = irBuilder.GetCGModule().GetLLVMModule() ?? return LLVMNullValue()
+    return unsafe {
+        LLVMSelfhostCreateGCWriteStaticAgg(irBuilder.GetBuilder().raw, moduleHandle.raw, aggType, dest, source, size,
+            i64Type)
     }
-    let llvmTy = cgType.GetLLVMType()
-    if (!llvmTy.isNull() && unsafe { LLVMGetTypeKind(llvmTy) } == 10) {
-        return LLVMCStringToString(unsafe { LLVMGetStructName(llvmTy) }) ?? ""
-    }
-    return ""
 }
 
 public func GenerateGetElementRef(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
@@ -716,9 +725,10 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
 
 private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elementValue: CGValue,
     elementPtr: LLVMValueRef, fieldTy: Option<Type>): LLVMValueRef {
+    let baseObject = irBuilder.GetTrackedManagedBase(elementPtr) ?? baseValue.GetRawValue()
     if (let Some(baseType) <- baseValue.GetCGType()) {
         if (IsManagedObjectElementBase(baseType.GetOriginal()) && IsGenericField(fieldTy)) {
-            return irBuilder.StoreGenericMemberValue(baseValue.GetRawValue(), elementPtr, elementValue,
+            return irBuilder.StoreGenericMemberValue(baseObject, elementPtr, elementValue,
                 baseType.GetOriginal(), fieldTy)
         }
     }
@@ -738,12 +748,12 @@ private func StoreElementValue(irBuilder: IRBuilder2, baseValue: CGValue, elemen
         }
         if (IsManagedObjectElementBase(baseType.GetOriginal())) {
             if (IsManagedReferenceField(irBuilder, fieldTy)) {
-                return irBuilder.CallGCWrite(rawElementValue, baseValue.GetRawValue(), elementPtr)
+                return irBuilder.CallGCWrite(rawElementValue, baseObject, elementPtr)
             }
         }
     }
     if (ShouldUseObjectFieldWriteBarrier(irBuilder, baseValue, elementValue, elementPtr)) {
-        return irBuilder.CallGCWrite(rawElementValue, baseValue.GetRawValue(), elementPtr)
+        return irBuilder.CallGCWrite(rawElementValue, baseObject, elementPtr)
     }
     return irBuilder.CreateStore(rawElementValue, elementPtr)
 }
@@ -797,11 +807,11 @@ private func StoreAggregateElementValue(irBuilder: IRBuilder2, baseValue: CGValu
         source = ReadManagedAggregateSourceIfNeeded(irBuilder, rawElementValue, fieldCGType, fieldSizeValue)
     }
     if (irBuilder.IsGlobalVariableBasePtr(elementPtr) && irBuilder.IsLLVMTypeContainsRef(fieldCGType.GetLLVMType())) {
-        return CallGCWriteStaticStruct(irBuilder, elementPtr, source, fieldSizeValue,
-            AggregateLLVMTypeName(fieldCGType))
+        return CallGCWriteStaticStruct(irBuilder, elementPtr, source, fieldSizeValue, fieldCGType.GetLLVMType())
     }
     if (IsAddressSpacePointer(elementPtr, 1u32) && irBuilder.IsLLVMTypeContainsRef(fieldCGType.GetLLVMType())) {
-        return irBuilder.CallGCWriteStruct(baseValue.GetRawValue(), elementPtr, source, fieldSizeValue,
+        let baseObject = irBuilder.GetTrackedManagedBase(elementPtr) ?? baseValue.GetRawValue()
+        return irBuilder.CallGCWriteStruct(baseObject, elementPtr, source, fieldSizeValue,
             fieldCGType.GetOriginal().ToString())
     }
     return irBuilder.CreateMemCpy(elementPtr, align, source, align, fieldSizeValue)

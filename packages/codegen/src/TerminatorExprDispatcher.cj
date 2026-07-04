@@ -4,14 +4,15 @@ import std.collection.*
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.Block
 import cangjie_compiler::chir.Branch
+import cangjie_compiler::chir.Exit
 import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GoTo
 import cangjie_compiler::chir.IntOpWithException
 import cangjie_compiler::chir.LocalVar
 import cangjie_compiler::chir.MultiBranch
 import cangjie_compiler::chir.Type
+import cangjie_compiler::utils.CJC_ASSERT
 
 public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let kind = chirExpr.GetExprKind()
@@ -46,7 +47,7 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
         return LLVMNullValue()
     }
     if (kind == ExprKind.EXIT) {
-        return HandleExitExpression(irBuilder, chirExpr)
+        return HandleExitExpression(irBuilder, (chirExpr as Exit).getOrThrow())
     }
     if (kind == ExprKind.RAISE_EXCEPTION) {
         return HandleRaiseException(irBuilder, chirExpr)
@@ -95,173 +96,76 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
     return LLVMNullValue()
 }
 
-private func HandleExitExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
-    if (chirExpr.GetNumOfOperands() > 0) {
-        return CreateDirectRet(irBuilder, chirExpr)
+private func HandleExitDebugInfo(irBuilder: IRBuilder2, exitExpr: Exit): Unit {
+    let cgMod = irBuilder.GetCGModule()
+    let cgCtx = cgMod.GetCGContext()
+    if (!cgCtx.debugValue.isNull()) {
+        CJC_ASSERT(cgCtx.GetCompileOptions().enableCompileDebug)
+        let cgFunc = irBuilder.GetInsertCGFunction().getOrThrow()
+        let thisValue = cgFunc.GetArgByIndexFromCHIR(0)
+        let curCHIRFunc = (cgFunc.GetOriginal() as Function).getOrThrow()
+        let thisTy = curCHIRFunc.GetParam(0).GetType().getOrThrow()
+        let cgType = CGType.GetOrCreate(cgMod, thisTy)
+        let thisCGValue = CGValue(thisValue, cgType)
+        let payload = irBuilder.GetPayloadFromObject(cgCtx.debugValue)
+        irBuilder.CreateStore(CGValue(payload, cgType), thisCGValue)
     }
-    if (let Some(topLevelFunc) <- chirExpr.GetTopLevelFunc()) {
-        return CreateRetFromFunctionReturnSlot(irBuilder, topLevelFunc)
-    }
-    return irBuilder.CreateRetVoid()
-}
-
-private func CreateDirectRet(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
-    if (let Some(retTy) <- CurrentFunctionReturnType(irBuilder, chirExpr)) {
-        if (IsVoidLikeReturn(retTy)) {
-            return irBuilder.CreateRetVoid()
-        }
-    }
-    let directRetValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0))
     if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
-        if (cgFunc.IsSRet()) {
-            let sretArg = unsafe { LLVMGetParam(cgFunc.GetRawFunction(), 0u32) }
-            if (let Some(structCopy) <- TryCreateStructPtrSRet(irBuilder, directRetValue, sretArg)) {
-                return structCopy
-            }
-            if (let Some(retTy) <- CurrentFunctionReturnType(irBuilder, chirExpr)) {
-                if (retTy.IsGeneric()) {
-                    irBuilder.StoreGenericSRetReturnValue(directRetValue.GetRawValue(), sretArg, retTy)
-                    return irBuilder.CreateRetVoid()
-                }
-            }
-            irBuilder.CreateStore(directRetValue.GetRawValue(), sretArg)
-            return irBuilder.CreateRetVoid()
+        if (HasAttributeAtIndex(cgFunc.GetRawFunction(), UInt32.Max, HAS_WITH_TI_WRAPPER_ATTR)) {
+            let _ = exitExpr.GetDebugLocation()
+            // GAP_TODO CGContext::AddDebugLocOfRetExpr TerminatorExprDispatcher.cpp:45
         }
     }
-    if (let Some(loadedRet) <- TryLoadStructPtrDirectReturn(irBuilder, directRetValue)) {
-        return irBuilder.CreateRet(loadedRet)
-    }
-    return irBuilder.CreateRet(directRetValue.GetRawValue())
 }
 
-private func TryCreateStructPtrSRet(irBuilder: IRBuilder2, value: CGValue, sretArg: LLVMValueRef): Option<LLVMValueRef> {
-    let valueCGType = value.GetCGType() ?? return None
-    if (!valueCGType.IsStructPtrType()) {
-        return None
+private func CreateRetFromSlot(irBuilder: IRBuilder2, parentFunc: Function, retAddr: LLVMValueRef,
+    retType: LLVMTypeRef): LLVMValueRef {
+    let cgMod = irBuilder.GetCGModule()
+    let cgFunc = irBuilder.GetInsertCGFunction().getOrThrow()
+    let functionType = cgFunc.GetCGFunctionType().getOrThrow().GetLLVMFunctionType()
+    var actualRetType = retType
+    let llvmRetType = unsafe { LLVMGetReturnType(functionType) }
+    if (!llvmRetType.isNull() && unsafe { LLVMGetTypeKind(llvmRetType) } == 0) {
+        return irBuilder.CreateRetVoid()
     }
-    let structCGType = valueCGType.GetPointerElementType() ?? return None
-    CreateStructPtrCopyToAddress(irBuilder, sretArg, value.GetRawValue(), structCGType)
-    return Some(irBuilder.CreateRetVoid())
-}
-
-private func TryCreateStructSlotSRet(irBuilder: IRBuilder2, slot: CGValue, sretArg: LLVMValueRef): Option<LLVMValueRef> {
-    let slotCGType = slot.GetCGType() ?? return None
-    if (!slotCGType.IsStructPtrType()) {
-        return None
+    let curLLVMFunc = cgFunc.GetRawFunction()
+    if (HasAttributeAtIndex(curLLVMFunc, UInt32.Max, CFUNC_ATTR)) {
+        let retVal = cgMod.GetCGCFFI().ProcessRetValue(llvmRetType, retAddr, irBuilder)
+        return irBuilder.CreateRet(retVal)
     }
-    let structCGType = slotCGType.GetPointerElementType() ?? return None
-    CreateStructPtrCopyToAddress(irBuilder, sretArg, slot.GetRawValue(), structCGType)
-    return Some(irBuilder.CreateRetVoid())
-}
-
-private func CreateStructPtrCopyToAddress(irBuilder: IRBuilder2, dest: LLVMValueRef, source: LLVMValueRef,
-    structCGType: CGType): LLVMValueRef {
-    let structSize = if (let Some(size) <- structCGType.GetSize()) { size } else { 0 }
-    let sizeValue = unsafe {
-        LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(structSize), 0)
+    if (parentFunc.GetOverrideSrcFuncType().isSome() && !HasAttributeAtIndex(curLLVMFunc, 1u32, "sret")) {
+        actualRetType = llvmRetType
     }
-    let align = irBuilder.GetCGModule().GetABITypeAlignment(structCGType.GetLLVMType())
-    if (IsReturnAddressSpacePointer(dest, 1u32) && irBuilder.IsLLVMTypeContainsRef(structCGType.GetLLVMType())) {
-        return irBuilder.CallGCWriteStruct(dest, dest, source, sizeValue, structCGType.GetOriginal().ToString())
-    }
-    return irBuilder.CreateMemCpy(dest, align, source, align, sizeValue)
-}
-
-private func TryLoadStructPtrDirectReturn(irBuilder: IRBuilder2, value: CGValue): Option<LLVMValueRef> {
-    let valueCGType = value.GetCGType() ?? return None
-    if (!valueCGType.IsStructPtrType()) {
-        return None
-    }
-    let structCGType = valueCGType.GetPointerElementType() ?? return None
-    return Some(irBuilder.CreateLoad(structCGType.GetLLVMType(), value.GetRawValue(), name: "ret.struct"))
-}
-
-private func IsReturnAddressSpacePointer(value: LLVMValueRef, addressSpace: UInt32): Bool {
-    let rawTy = unsafe { LLVMTypeOf(value) }
-    return !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12 &&
-        unsafe { LLVMGetPointerAddressSpace(rawTy) } == addressSpace
-}
-
-private func IsLLVMArgumentValue(value: LLVMValueRef): Bool {
-    return !value.isNull() && !unsafe { LLVMIsAArgument(value) }.isNull()
-}
-
-private func CurrentFunctionReturnType(irBuilder: IRBuilder2, chirExpr: Expression): Option<Type> {
-    if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
-        if (let Some(rawTy) <- cgFunc.GetOriginal().GetType()) {
-            if (let Some(funcTy) <- (rawTy as FuncType)) {
-                return Some(funcTy.GetReturnType())
-            }
-        }
-    }
-    if (let Some(topLevelFunc) <- chirExpr.GetTopLevelFunc()) {
-        return topLevelFunc.GetReturnType()
-    }
-    return None
-}
-
-private func CreateRetFromFunctionReturnSlot(irBuilder: IRBuilder2, parentFunc: Function): LLVMValueRef {
-    if (let Some(retTy) <- parentFunc.GetReturnType()) {
-        if (IsVoidLikeReturn(retTy)) {
-            return irBuilder.CreateRetVoid()
-        }
-        if (let Some(retValue) <- parentFunc.GetReturnValue()) {
-            let retAddr = irBuilder.GetCGModule().GetMappedCGValue(retValue)
-            if (retTy.IsRawArray() && IsRawArrayReturnValue(retValue)) {
-                return irBuilder.CreateRet(retAddr.GetRawValue())
-            }
-            if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
-                if (HasAttributeAtIndex(cgFunc.GetRawFunction(), UInt32.Max, CFUNC_ATTR)) {
-                    let functionType = cgFunc.GetCGFunctionType().getOrThrow().GetLLVMFunctionType()
-                    let llvmRetType = unsafe { LLVMGetReturnType(functionType) }
-                    if (!llvmRetType.isNull() && unsafe { LLVMGetTypeKind(llvmRetType) } == 0) {
-                        return irBuilder.CreateRetVoid()
-                    }
-                    let retVal = irBuilder.GetCGModule().GetCGCFFI().ProcessRetValue(llvmRetType,
-                        retAddr.GetRawValue(), irBuilder)
-                    return irBuilder.CreateRet(retVal)
-                }
-            }
-            if (let Some(slotType) <- retAddr.GetCGType()) {
-                if (let Some(elementType) <- slotType.GetPointerElementType()) {
-                    if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
-                        if (cgFunc.IsSRet()) {
-                            let sretArg = unsafe { LLVMGetParam(cgFunc.GetRawFunction(), 0u32) }
-                            if (let Some(structCopy) <- TryCreateStructSlotSRet(irBuilder, retAddr, sretArg)) {
-                                return structCopy
-                            }
-                            if (retTy.IsGeneric() && retAddr.IsSRetArg() && IsLLVMArgumentValue(retAddr.GetRawValue())) {
-                                return irBuilder.CreateRetVoid()
-                            }
-                            let loadedRet = irBuilder.CreateLoad(elementType.GetLLVMType(), retAddr.GetRawValue(), name: "ret")
-                            if (retTy.IsGeneric()) {
-                                irBuilder.StoreGenericSRetReturnValue(loadedRet, sretArg, retTy)
-                                return irBuilder.CreateRetVoid()
-                            }
-                            irBuilder.CreateStore(loadedRet, sretArg)
-                            return irBuilder.CreateRetVoid()
-                        }
-                    }
-                    let loadedRet = irBuilder.CreateLoad(elementType.GetLLVMType(), retAddr.GetRawValue(), name: "ret")
-                    return irBuilder.CreateRet(loadedRet)
-                }
-            }
-            return irBuilder.CreateRet(retAddr.GetRawValue())
-        }
-    }
-    return irBuilder.CreateRetVoid()
-}
-
-private func IsRawArrayReturnValue(retValue: LocalVar): Bool {
-    if (let Some(retExpr) <- retValue.GetExpr()) {
-        return retExpr.GetExprKind() == ExprKind.RAW_ARRAY_ALLOCATE ||
-            retExpr.GetExprKind() == ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION
-    }
-    return false
+    return irBuilder.CreateRet(irBuilder.CreateLoad(actualRetType, retAddr))
 }
 
 private func IsVoidLikeReturn(retTy: Type): Bool {
     return retTy.IsUnit() || retTy.IsNothing() || retTy.IsVoid()
+}
+
+private func EmitDirectRet(irBuilder: IRBuilder2, ret: LocalVar): LLVMValueRef {
+    let retExpr = ret.GetExpr().getOrThrow()
+    CJC_ASSERT(retExpr.GetExprKind() == ExprKind.RAW_ARRAY_ALLOCATE)
+    return irBuilder.CreateRet(irBuilder.GetCGModule().GetMappedCGValue(ret).GetRawValue())
+}
+
+private func HandleExitExpression(irBuilder: IRBuilder2, exitExpr: Exit): LLVMValueRef {
+    let cgMod = irBuilder.GetCGModule()
+    HandleExitDebugInfo(irBuilder, exitExpr)
+    let parentFunc = exitExpr.GetTopLevelFunc().getOrThrow()
+    let retTy = parentFunc.GetReturnType().getOrThrow()
+    if (IsVoidLikeReturn(retTy)) {
+        return irBuilder.CreateRetVoid()
+    }
+    let ret = parentFunc.GetReturnValue().getOrThrow()
+    if (retTy.IsRawArray()) {
+        return EmitDirectRet(irBuilder, ret)
+    }
+    let retExpr = ret.GetExpr().getOrThrow()
+    CJC_ASSERT(retExpr.GetExprKind() == ExprKind.ALLOCATE)
+    let retAddr = cgMod.GetMappedCGValue(ret).GetRawValue()
+    let retType = CGType.GetOrCreate(cgMod, ret.GetType().getOrThrow().GetTypeArgs()[0]).GetLLVMType()
+    return CreateRetFromSlot(irBuilder, parentFunc, retAddr, retType)
 }
 
 private func HandleMultiBranchTerminator(irBuilder: IRBuilder2, multiBranch: MultiBranch): LLVMValueRef {

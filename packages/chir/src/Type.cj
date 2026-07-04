@@ -3,6 +3,7 @@ package cangjie_compiler::chir
 import cangjie_compiler::utils.CJC_ASSERT
 import std.collection.*
 import std.sort.*
+import std.sync.*
 
 @OverflowWrapping
 func HashCombine(seed: Int64, value: Int64): Int64 {
@@ -52,15 +53,14 @@ func TypeArgsAreEqual(left: ArrayList<Type>, right: ArrayList<Type>): Bool {
 }
 
 public open class Type {
-    private static var nextObjectId: Int64 = 1
+    private static let nextObjectId = AtomicInt64(1)
 
     public let objectId: Int64
     public let kind: TypeKind
     public let argTys: ArrayList<Type> = ArrayList<Type>()
 
     public init(kind: TypeKind) {
-        objectId = nextObjectId
-        nextObjectId++
+        objectId = nextObjectId.fetchAdd(1)
         this.kind = kind
     }
 
@@ -487,7 +487,7 @@ public open class Type {
                     visited2.add(value)
                 }
             }
-            let instUpperBound = ReplaceRawGenericArgType(upperBound, instMap)
+            let instUpperBound = ReplaceRawGenericArgType(upperBound, instMap, builder)
             if (!IsEqualOrSubTypeOf(instUpperBound, builder, visited: visited2)) {
                 return false
             }
@@ -1017,6 +1017,7 @@ public open class CustomType <: Type {
     public let def: CustomTypeDef
     private let implementedInterfaceTys: ArrayList<ClassType> = ArrayList<ClassType>()
     private var hasSetSuperInterface: Bool = false
+    private let setSuperInterfaceMtx: Mutex = Mutex()
 
     public init(kind: TypeKind, def: CustomTypeDef, typeArgs: ArrayList<Type>) {
         super(kind)
@@ -1074,7 +1075,7 @@ public open class CustomType <: Type {
             let res = extendedType.CalculateGenericTyMapping(this)
             CJC_ASSERT(res[0])
             for (parent in extendDef.GetImplementedInterfaceTys()) {
-                allParents.add((ReplaceRawGenericArgType(parent, res[1]) as ClassType).getOrThrow())
+                allParents.add((ReplaceRawGenericArgType(parent, res[1], builder) as ClassType).getOrThrow())
             }
         }
         return allParents
@@ -1094,22 +1095,27 @@ public open class CustomType <: Type {
             typeIdx++
         }
         for (ty in def.GetImplementedInterfaceTys()) {
-            instSuperInterfaceTys.add((ReplaceRawGenericArgType(ty, replaceTable) as ClassType).getOrThrow())
+            instSuperInterfaceTys.add((ReplaceRawGenericArgType(ty, replaceTable, builder) as ClassType).getOrThrow())
         }
         return instSuperInterfaceTys
     }
 
     public func GetImplementedInterfaceTys(builder: CHIRBuilder,
         visited!: Option<HashSet<String>> = None): ArrayList<ClassType> {
-        if (hasSetSuperInterface) {
-            return implementedInterfaceTys.clone()
+        var result = ArrayList<ClassType>()
+        synchronized(setSuperInterfaceMtx) {
+            if (hasSetSuperInterface) {
+                result = implementedInterfaceTys.clone()
+            } else {
+                implementedInterfaceTys.clear()
+                for (interfaceTy in CalculateImplementedInterfaceTys(builder, visited: visited)) {
+                    implementedInterfaceTys.add(interfaceTy)
+                }
+                hasSetSuperInterface = true
+                result = implementedInterfaceTys.clone()
+            }
         }
-        implementedInterfaceTys.clear()
-        for (interfaceTy in CalculateImplementedInterfaceTys(builder, visited: visited)) {
-            implementedInterfaceTys.add(interfaceTy)
-        }
-        hasSetSuperInterface = true
-        return implementedInterfaceTys.clone()
+        return result
     }
 
     public func GetInstMap(instMap: HashMap<Int64, Type>): Unit {
@@ -1336,7 +1342,8 @@ public func GetAllInstantiatedParentType(cur: ClassType, builder: CHIRBuilder, p
             GetAllInstantiatedParentType(interfaceTy, builder, extendParents, visited: visited)
             var parentIdx: Int64 = 0
             while (parentIdx < extendParents.size) {
-                let instParent = (ReplaceRawGenericArgType(extendParents[parentIdx], res[1]) as ClassType).getOrThrow()
+                let instParent =
+                    (ReplaceRawGenericArgType(extendParents[parentIdx], res[1], builder) as ClassType).getOrThrow()
                 var found = false
                 for (parent in parents) {
                     if (parent.IsEqual(instParent)) {
@@ -1425,6 +1432,76 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type
     return ty
 }
 
+public func CreateNewTypeWithArgs(oldType: Type, newArgs: ArrayList<Type>, builder: CHIRBuilder): Type {
+    if (newArgs.isEmpty()) {
+        return oldType
+    }
+    if (let Some(tupleTy) <- (oldType as TupleType)) {
+        let _ = tupleTy
+        return builder.context.GetTupleTy(newArgs)
+    }
+    if (let Some(structTy) <- (oldType as StructType)) {
+        return builder.context.GetStructTy(structTy.GetStructDef(), newArgs)
+    }
+    if (let Some(enumTy) <- (oldType as EnumType)) {
+        return builder.context.GetEnumTy(enumTy.GetEnumDef(), newArgs)
+    }
+    if (let Some(funcTy) <- (oldType as FuncType)) {
+        let paramTys = ArrayList<Type>()
+        var idx: Int64 = 0
+        while (idx < newArgs.size - 1) {
+            paramTys.add(newArgs[idx])
+            idx++
+        }
+        return builder.context.GetFuncTy(paramTys, newArgs[newArgs.size - 1], hasVarLenParam: funcTy.HasVarArg(),
+            isCFunc: oldType.IsCFunc())
+    }
+    if (let Some(classTy) <- (oldType as ClassType)) {
+        return builder.context.GetClassTy(classTy.GetClassDef(), newArgs)
+    }
+    if (let Some(refTy) <- (oldType as RefType)) {
+        let _ = refTy
+        CJC_ASSERT(newArgs.size == 1)
+        return builder.context.GetRefTy(newArgs[0])
+    }
+    if (let Some(pointerTy) <- (oldType as CPointerType)) {
+        let _ = pointerTy
+        CJC_ASSERT(newArgs.size == 1)
+        return builder.context.GetCPointerTy(newArgs[0])
+    }
+    if (let Some(rawArrayTy) <- (oldType as RawArrayType)) {
+        CJC_ASSERT(newArgs.size == 1)
+        return builder.context.GetRawArrayTy(newArgs[0], dims: rawArrayTy.GetDims())
+    }
+    if (let Some(varrayTy) <- (oldType as VArrayType)) {
+        CJC_ASSERT(newArgs.size == 1)
+        return builder.context.GetVArrayTy(newArgs[0], varrayTy.size)
+    }
+    if (let Some(boxTy) <- (oldType as BoxType)) {
+        let _ = boxTy
+        CJC_ASSERT(newArgs.size == 1)
+        return builder.context.GetBoxTy(newArgs[0])
+    }
+    throw IllegalStateException("CreateNewTypeWithArgs unsupported for " + oldType.ToString())
+}
+
+public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type>, builder: CHIRBuilder): Type {
+    if (replaceTable.isEmpty()) {
+        return ty
+    }
+    if (let Some(genericTy) <- (ty as GenericType)) {
+        if (let Some(instTy) <- replaceTable.get(genericTy.objectId)) {
+            return instTy
+        }
+        return ty
+    }
+    let newArgs = ArrayList<Type>()
+    for (argTy in ty.GetTypeArgs()) {
+        newArgs.add(ReplaceRawGenericArgType(argTy, replaceTable, builder))
+    }
+    return CreateNewTypeWithArgs(ty, newArgs, builder)
+}
+
 private func ReplaceRawGenericArgType(ty: Type, genericParams: ArrayList<GenericType>,
     genericArgs: ArrayList<Type>): Type {
     if (genericParams.isEmpty() || genericArgs.isEmpty()) {
@@ -1505,6 +1582,7 @@ public class StructType <: CustomType {
 public class ClassType <: CustomType {
     private var superClassTy: Option<ClassType> = None
     private var hasSetSuperClass: Bool = false
+    private let setSuperClassMtx: Mutex = Mutex()
 
     public init(def: ClassDef, typeArgs: ArrayList<Type>) {
         super(TypeKind.TYPE_CLASS, def, typeArgs)
@@ -1529,23 +1607,25 @@ public class ClassType <: CustomType {
             typeIdx++
         }
         if (let Some(superTy) <- GetClassDef().GetSuperClassTy()) {
-            let _ = builder
-            return (ReplaceRawGenericArgType(superTy, replaceTable) as ClassType).getOrThrow()
+            return (ReplaceRawGenericArgType(superTy, replaceTable, builder) as ClassType).getOrThrow()
         }
-        let _ = builder
         return None
     }
 
     public func GetSuperClassTy(builder!: Option<CHIRBuilder> = None): Option<ClassType> {
-        if (hasSetSuperClass) {
-            return superClassTy
+        var result: Option<ClassType> = None
+        synchronized(setSuperClassMtx) {
+            if (hasSetSuperClass) {
+                result = superClassTy
+            } else if (let Some(chirBuilder) <- builder) {
+                superClassTy = CalculateSuperClassTy(chirBuilder)
+                hasSetSuperClass = true
+                result = superClassTy
+            } else {
+                result = GetClassDef().GetSuperClassTy()
+            }
         }
-        if (let Some(chirBuilder) <- builder) {
-            superClassTy = CalculateSuperClassTy(chirBuilder)
-            hasSetSuperClass = true
-            return superClassTy
-        }
-        return GetClassDef().GetSuperClassTy()
+        return result
     }
 }
 

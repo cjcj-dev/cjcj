@@ -3,11 +3,14 @@ package cangjie_compiler::codegen
 import std.collection.*
 import std.sort.*
 import cangjie_compiler::chir.Attribute
+import cangjie_compiler::chir.CustomDefKind
 import cangjie_compiler::chir.CustomType
+import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.FuncKind
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.Type
+import cangjie_compiler::option.EnvironmentType
 import cangjie_compiler::mangle.MANGLE_FUNC_PARAM_TYPE_PREFIX
 import cangjie_compiler::mangle.MANGLE_VOID_TY_SUFFIX
 import cangjie_compiler::mangle.SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION
@@ -32,7 +35,7 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
     for (subPackage in splitter.SplitCHIRPackage()) {
         let cgMod = CGModule(subPackage, cgPkgContext)
         cgPkgContext.AddCGModule(cgMod)
-        EmitTypeTemplatesForOwnedGenericCustomDefs(cgMod)
+        EmitTIOrTTForCustomDefs(cgMod)
         for (globalVar in subPackage.chirGVs) {
             EmitGlobalVariableIR(cgMod, globalVar)
         }
@@ -52,28 +55,157 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
             CreatePackageInitResetFunction(cgMod)
             SpecifyPackageInitFunc(cgMod)
         }
-        InitializeCjStringLiteral(cgMod)
         GenerateInterfaceExtensionDefs(cgMod)
         RedefineTypeInfosForCustomDefs(cgMod)
         // Mirror C++ EmitPackageIR.cpp:372 cgMod.GenTypeInfo(): drain the delayed concrete-TypeInfo
         // definitions (queued by CGType.GetOrCreateTypeInfo) before optimization.
         cgMod.GenTypeInfo()
+        ReplaceFunction(cgMod)
         let keepTypesFunc = KeepSomeTypesManually(cgMod)
         EmitStaticGenericTIsAndLLVMUsed(cgMod, keepTypesFunc)
         cgMod.Opt()
+        GenerateReflectionMetadata(cgMod, subPackage)
+        cgMod.GenTypeInfo()
+        InitializeCjStringLiteral(cgMod)
         cgMod.EraseUselessInstsAndDeclarations()
     }
     return cgPkgContext.ReleaseLLVMModules()
 }
 
-private func EmitTypeTemplatesForOwnedGenericCustomDefs(cgMod: CGModule): Unit {
+private func ReplaceFunction(cgMod: CGModule): Unit {
+    if (!cgMod.GetCGContext().GetCompileOptions().enableCompileDebug) {
+        return
+    }
+
+    try (irBuilder = IRBuilder2(cgMod)) {
+        let callBasesToReplace = cgMod.GetCGContext().GetCallBasesToReplace()
+        for (item in callBasesToReplace) {
+            irBuilder.SetInsertCGFunction(item.cgFuncCaller)
+            let oldCall = item.callWithoutTI
+            irBuilder.SetInsertPointBefore(oldCall)
+            let hasSRet = unsafe { LLVMSelfhostCallBaseHasStructRetAttr(oldCall) } != 0
+            let thisParamOffset: Int64 = if (hasSRet) { 1 } else { 0 }
+            let thisParamWithoutTI = unsafe { LLVMSelfhostCallBaseGetArgOperand(oldCall, UInt32(thisParamOffset)) }
+            let argsVal = ArrayList<LLVMValueRef>()
+            let argCount = unsafe { LLVMSelfhostCallBaseArgSize(oldCall) }
+            var argIdx: UInt32 = 0u32
+            while (argIdx < argCount) {
+                argsVal.add(unsafe { LLVMSelfhostCallBaseGetArgOperand(oldCall, argIdx) })
+                argIdx++
+            }
+            var basePtr = LLVMNullValue()
+            if (item.isCalleeMutOrCtor) {
+                let basePtrIndex = thisParamOffset + 1
+                basePtr = argsVal[basePtrIndex]
+                argsVal.remove(at: basePtrIndex)
+            }
+
+            let thisCHIRType = DeRef(item.thisParamType)
+            let blockKey = irBuilder.GetInsertBlock().toUIntNative()
+            let sizeCacheMap = cgMod.GetCGContext().genericParamsSizeBlockLevelCacheMap
+            if (!sizeCacheMap.contains(blockKey)) {
+                sizeCacheMap[blockKey] = HashMap<UIntNative, LLVMValueRef>()
+            }
+            sizeCacheMap[blockKey].clear()
+            let thisParamTypeInfo = irBuilder.CreateTypeInfo(thisCHIRType)
+            let size32 = irBuilder.GetLayoutSize_32(thisCHIRType)
+            let size64 = irBuilder.CreateSExt(size32, unsafe { LLVMInt64TypeInContext(cgMod.GetLLVMContext().raw) })
+            let thisParamWithTI = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>(
+                [thisParamTypeInfo, size32]))
+            argsVal[thisParamOffset] = thisParamWithTI
+
+            let payloadPtr = irBuilder.GetPayloadFromObject(thisParamWithTI)
+            let thisLLVMType = CGType.GetOrCreate(cgMod, thisCHIRType).GetLLVMType()
+            if (irBuilder.IsLLVMTypeContainsRef(thisLLVMType)) {
+                if (item.isCalleeMutOrCtor) {
+                    let load = irBuilder.CreateEntryAlloca(thisLLVMType)
+                    let _ = irBuilder.CreateCJMemsetStructWith0(load, thisLLVMType)
+                    irBuilder.CallGCReadAgg(thisLLVMType, ArrayList<LLVMValueRef>(
+                        [load, basePtr, thisParamWithoutTI, size64]))
+                    irBuilder.CallGCWriteAgg(thisLLVMType, ArrayList<LLVMValueRef>(
+                        [thisParamWithTI, payloadPtr, load, size64]))
+                } else {
+                    irBuilder.CallGCWriteAgg(thisLLVMType, ArrayList<LLVMValueRef>(
+                        [thisParamWithTI, payloadPtr, thisParamWithoutTI, size64]))
+                }
+            } else {
+                irBuilder.CreateMemCpy(payloadPtr, 0u32, thisParamWithoutTI, 0u32, size32)
+            }
+
+            let callee = item.cgFuncCallee.GetWrapperFunction()
+            CJC_ASSERT(!callee.isNull())
+            let calleeType = unsafe { LLVMGlobalGetValueType(callee) }
+            var newCall = LLVMNullValue()
+            if (unsafe { LLVMSelfhostIsCallInst(oldCall) } != 0) {
+                newCall = irBuilder.CreateCall(callee, calleeType, argsVal)
+                irBuilder.SetInsertPointBefore(unsafe { LLVMGetNextInstruction(oldCall) })
+            } else if (unsafe { LLVMSelfhostIsInvokeInst(oldCall) } != 0) {
+                let normalDest = unsafe { LLVMSelfhostInvokeGetNormalDest(oldCall) }
+                let unwindDest = unsafe { LLVMSelfhostInvokeGetUnwindDest(oldCall) }
+                newCall = irBuilder.CreateInvoke(callee, calleeType, normalDest, unwindDest, argsVal)
+                let firstInsertionPoint = unsafe { LLVMSelfhostBasicBlockGetFirstInsertionPoint(normalDest) }
+                if (firstInsertionPoint.isNull()) {
+                    irBuilder.SetInsertPoint(normalDest)
+                } else {
+                    irBuilder.SetInsertPointBefore(firstInsertionPoint)
+                }
+            }
+            CJC_ASSERT(!newCall.isNull())
+            if (hasSRet) {
+                let sretAttr = unsafe { LLVMSelfhostCallBaseGetStructRetAttr(oldCall) }
+                unsafe { LLVMSelfhostCallBaseAddAttributeAtIndex(newCall, 1u32, sretAttr) }
+                AddAttributeAtIndex(newCall, 1u32, "noalias")
+            }
+            unsafe {
+                LLVMReplaceAllUsesWith(oldCall, newCall)
+                LLVMInstructionEraseFromParent(oldCall)
+            }
+
+            if (!item.isCalleeMutOrCtor) {
+                continue
+            }
+            if (irBuilder.IsLLVMTypeContainsRef(thisLLVMType)) {
+                let load = irBuilder.CreateEntryAlloca(thisLLVMType)
+                let _ = irBuilder.CreateCJMemsetStructWith0(load, thisLLVMType)
+                irBuilder.CallGCReadAgg(thisLLVMType, ArrayList<LLVMValueRef>(
+                    [load, thisParamWithTI, payloadPtr, size64]))
+                irBuilder.CallGCWriteAgg(thisLLVMType, ArrayList<LLVMValueRef>(
+                    [basePtr, thisParamWithoutTI, load, size64]))
+            } else {
+                irBuilder.CreateMemCpy(thisParamWithoutTI, 0u32, payloadPtr, 0u32, size32)
+            }
+        }
+    }
+}
+
+private func EmitTIOrTTForCustomDefs(cgMod: CGModule): Unit {
     for (def in cgMod.GetCGContext().GetSubCHIRPackage().chirCustomDefs) {
-        if (def.IsExtend() || !def.IsGenericDef()) {
+        if (!def.IsExtend()) {
+            let cgType = CGType.GetOrCreate(cgMod, def.GetType().getOrThrow())
+            if (cgType.IsConcrete()) {
+                cgType.GetOrCreateTypeInfo()
+            } else if (def.IsGenericDef()) {
+                let customTy = StaticCast<CustomType>(def.GetType().getOrThrow())
+                EnsureSourceGenericTypeTemplate(cgMod, customTy)
+                cgType.GetOrCreateTypeTemplate()
+            }
+        }
+        if (def.TestAttr(Attribute.IMPORTED) || def.TestAttr(Attribute.NON_RECOMPILE)) {
             continue
         }
-        if (let Some(defTy) <- def.GetType()) {
-            let customTy = StaticCast<CustomType>(defTy)
-            EnsureSourceGenericTypeTemplate(cgMod, customTy)
+        if (def.GetCustomKind() == CustomDefKind.TYPE_ENUM) {
+            let enumTy = StaticCast<EnumType>(def.GetType().getOrThrow())
+            let cgEnumType = StaticCast<CGEnumType>(CGType.GetOrCreate(cgMod, enumTy))
+            if ((!cgEnumType.IsTrivial() && !cgEnumType.IsZeroSizeEnum()) ||
+                (!cgMod.GetCGContext().GetCompileOptions().disableReflection &&
+                    cgMod.GetCGContext().GetCompileOptions().target.env != EnvironmentType.OHOS)) {
+                let ctors = enumTy.GetEnumDef().GetConstructorInfos(builder: Some(cgMod.GetCGContext().GetCHIRBuilder()))
+                var idx: Int64 = 0
+                while (idx < ctors.size) {
+                    cgMod.GetOrCreateEnumCtorTIOrTT(enumTy, idx)
+                    idx++
+                }
+            }
         }
     }
 }

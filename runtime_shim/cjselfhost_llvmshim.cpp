@@ -18,17 +18,29 @@
 //         src/CodeGen/CGFunction.cpp:252  specificInst->moveBefore(&entryBB.front())
 //   CGCFFI ABI classifier support:
 //         src/CodeGen/CJNative/CJNativeCGCFFI.cpp:542  type.getPrimitiveSizeInBits()
+//   With-TypeInfo wrapper rewrite support:
+//         src/CodeGen/CJNative/EmitPackageIR.cpp:526-616  llvm::CallBase/InvokeInst APIs.
 
 #include <llvm-c/Core.h>
+
+#include <vector>
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalObject.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/Metadata.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IR/Use.h"
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
@@ -50,6 +62,57 @@ struct LLVMSelfhostLoopInfoState {
         loopInfo.analyze(domTree);
     }
 };
+
+void ConvertArgsType(IRBuilder<> &builder, Function *func, std::vector<Value*> &args)
+{
+    auto *functionType = func->getFunctionType();
+    for (size_t idx = 0; idx < args.size(); ++idx) {
+        if (args[idx]->getType() == functionType->getParamType(idx)) {
+            continue;
+        }
+        if (!args[idx]->getType()->isPointerTy()) {
+            continue;
+        }
+        args[idx] = builder.CreatePointerCast(args[idx], functionType->getParamType(idx));
+    }
+}
+
+CallInst *CreateCall(IRBuilder<> &builder, FunctionType *functionType, Value *callee, ArrayRef<Value*> args,
+    const Twine &name = "")
+{
+    if (auto *func = dyn_cast<Function>(callee)) {
+        return builder.CreateCall(func, args, name);
+    }
+    return builder.CreateCall(functionType, callee, args, name);
+}
+
+CallInst *CreateCall(IRBuilder<> &builder, Function *callee, ArrayRef<Value*> args, const Twine &name = "")
+{
+    return builder.CreateCall(callee, args, name);
+}
+
+LLVMValueRef CreateGCStaticAggCall(LLVMBuilderRef Builder, LLVMModuleRef Module, LLVMTypeRef AggType,
+    LLVMValueRef Dest, LLVMValueRef Source, LLVMValueRef Size, LLVMTypeRef SizeType, Intrinsic::ID ID)
+{
+    auto *builder = unwrap(Builder);
+    auto *module = unwrap(Module);
+    auto *sizeType = unwrap<Type>(SizeType);
+    auto *func = Intrinsic::getDeclaration(module, ID, {sizeType});
+    std::vector<Value*> args{unwrap(Dest), unwrap(Source), unwrap(Size)};
+    if (ID == Intrinsic::cj_gcwrite_static_struct) {
+        if (auto *size = dyn_cast<ConstantInt>(args[2]); size && size->isZero()) {
+            return nullptr;
+        }
+    }
+    args[2] = builder->CreateZExtOrTrunc(args[2], sizeType);
+    auto *structType = unwrap<StructType>(AggType);
+    auto typeName = structType->isLiteral() ? "" : structType->getStructName().str();
+    auto *meta = MDTuple::get(builder->getContext(), {MDString::get(builder->getContext(), typeName)});
+    ConvertArgsType(*builder, func, args);
+    auto *inst = CreateCall(*builder, func, args);
+    inst->setMetadata("AggType", meta);
+    return wrap(inst);
+}
 } // namespace
 
 using LLVMSelfhostLoopInfoRef = LLVMSelfhostLoopInfoState*;
@@ -130,6 +193,128 @@ extern "C" int LLVMSelfhostInstructionComesBefore(LLVMValueRef Inst, LLVMValueRe
 extern "C" void LLVMSelfhostInstructionMoveBefore(LLVMValueRef Inst, LLVMValueRef Other)
 {
     unwrap<Instruction>(Inst)->moveBefore(unwrap<Instruction>(Other));
+}
+
+extern "C" int LLVMSelfhostIsCallInst(LLVMValueRef Inst)
+{
+    return isa<CallInst>(unwrap<Value>(Inst)) ? 1 : 0;
+}
+
+extern "C" int LLVMSelfhostIsInvokeInst(LLVMValueRef Inst)
+{
+    return isa<InvokeInst>(unwrap<Value>(Inst)) ? 1 : 0;
+}
+
+extern "C" int LLVMSelfhostCallBaseHasStructRetAttr(LLVMValueRef Call)
+{
+    return unwrap<CallBase>(Call)->hasStructRetAttr() ? 1 : 0;
+}
+
+extern "C" unsigned LLVMSelfhostCallBaseArgSize(LLVMValueRef Call)
+{
+    return unwrap<CallBase>(Call)->arg_size();
+}
+
+extern "C" LLVMValueRef LLVMSelfhostCallBaseGetArgOperand(LLVMValueRef Call, unsigned Index)
+{
+    return wrap(unwrap<CallBase>(Call)->getArgOperand(Index));
+}
+
+extern "C" LLVMAttributeRef LLVMSelfhostCallBaseGetStructRetAttr(LLVMValueRef Call)
+{
+    return wrap(unwrap<CallBase>(Call)->getAttributeAtIndex(AttributeList::FirstArgIndex, Attribute::StructRet));
+}
+
+extern "C" void LLVMSelfhostCallBaseAddAttributeAtIndex(LLVMValueRef Call, unsigned Index, LLVMAttributeRef Attr)
+{
+    unwrap<CallBase>(Call)->addAttributeAtIndex(Index, unwrap(Attr));
+}
+
+extern "C" LLVMBasicBlockRef LLVMSelfhostInvokeGetNormalDest(LLVMValueRef Inst)
+{
+    return wrap(cast<InvokeInst>(unwrap<Value>(Inst))->getNormalDest());
+}
+
+extern "C" LLVMBasicBlockRef LLVMSelfhostInvokeGetUnwindDest(LLVMValueRef Inst)
+{
+    return wrap(cast<InvokeInst>(unwrap<Value>(Inst))->getUnwindDest());
+}
+
+extern "C" LLVMValueRef LLVMSelfhostBasicBlockGetFirstInsertionPoint(LLVMBasicBlockRef BB)
+{
+    BasicBlock *block = unwrap(BB);
+    auto insertPoint = block->getFirstInsertionPt();
+    if (insertPoint == block->end()) {
+        return nullptr;
+    }
+    return wrap(&*insertPoint);
+}
+
+extern "C" LLVMValueRef LLVMSelfhostGetInsertPointInstruction(LLVMBuilderRef Builder)
+{
+    auto *builder = unwrap(Builder);
+    auto *block = builder->GetInsertBlock();
+    if (block == nullptr) {
+        return nullptr;
+    }
+    auto insertPoint = builder->GetInsertPoint();
+    if (insertPoint == block->end()) {
+        return nullptr;
+    }
+    return wrap(&*insertPoint);
+}
+
+extern "C" LLVMValueRef LLVMSelfhostCreateCall(LLVMBuilderRef Builder, LLVMTypeRef FunctionTy, LLVMValueRef Callee,
+    LLVMValueRef *Args, unsigned NumArgs, const char *Name)
+{
+    auto *builder = unwrap(Builder);
+    std::vector<Value*> args;
+    args.reserve(NumArgs);
+    for (unsigned idx = 0; idx < NumArgs; ++idx) {
+        args.push_back(unwrap(Args[idx]));
+    }
+    auto *callee = unwrap<Value>(Callee);
+    if (auto *func = dyn_cast<Function>(callee)) {
+        return wrap(CreateCall(*builder, func, args, Name));
+    }
+    return wrap(CreateCall(*builder, unwrap<FunctionType>(FunctionTy), callee, args, Name));
+}
+
+extern "C" LLVMValueRef LLVMSelfhostCreatePointerCast(
+    LLVMBuilderRef Builder, LLVMValueRef Value, LLVMTypeRef DestTy, const char *Name)
+{
+    return wrap(unwrap(Builder)->CreatePointerCast(unwrap(Value), unwrap<Type>(DestTy), Name));
+}
+
+extern "C" void LLVMSelfhostInstructionSetMetadata(
+    LLVMValueRef Inst, const char *Kind, unsigned KindLen, LLVMMetadataRef Metadata)
+{
+    if (Inst == nullptr || Metadata == nullptr) {
+        return;
+    }
+    auto *node = cast<MDNode>(unwrap(Metadata));
+    auto *value = unwrap<Value>(Inst);
+    if (auto *instruction = dyn_cast<Instruction>(value)) {
+        instruction->setMetadata(StringRef(Kind, KindLen), node);
+        return;
+    }
+    if (auto *globalObject = dyn_cast<GlobalObject>(value)) {
+        globalObject->setMetadata(StringRef(Kind, KindLen), node);
+    }
+}
+
+extern "C" LLVMValueRef LLVMSelfhostCreateGCReadStaticAgg(LLVMBuilderRef Builder, LLVMModuleRef Module,
+    LLVMTypeRef Type, LLVMValueRef Dest, LLVMValueRef Source, LLVMValueRef Size, LLVMTypeRef SizeType)
+{
+    return CreateGCStaticAggCall(Builder, Module, Type, Dest, Source, Size, SizeType,
+        Intrinsic::cj_gcread_static_struct);
+}
+
+extern "C" LLVMValueRef LLVMSelfhostCreateGCWriteStaticAgg(LLVMBuilderRef Builder, LLVMModuleRef Module,
+    LLVMTypeRef Type, LLVMValueRef Dest, LLVMValueRef Source, LLVMValueRef Size, LLVMTypeRef SizeType)
+{
+    return CreateGCStaticAggCall(Builder, Module, Type, Dest, Source, Size, SizeType,
+        Intrinsic::cj_gcwrite_static_struct);
 }
 
 extern "C" uint64_t LLVMSelfhostGetPrimitiveSizeInBits(LLVMTypeRef Ty)

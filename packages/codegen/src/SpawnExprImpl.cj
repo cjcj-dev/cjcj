@@ -132,22 +132,16 @@ private func SetFutureRuntimeThreadHandle(irBuilder: IRBuilder2, futureObj: CGVa
     if (cjThreadHandle.isNull()) {
         return
     }
-    if (let Some(futureCGType) <- futureObj.GetCGType()) {
-        if (let Some(futureElementType) <- futureCGType.GetPointerElementType()) {
-            let layoutType = futureElementType.GetLayoutType()
-            let payload = irBuilder.GetPayloadFromObject(futureObj.GetRawValue())
-            let typedPayload = irBuilder.CreateBitCast(payload, unsafe { LLVMPointerType(layoutType, 1u32) },
-                name: "future.payload")
-            let threadSlot = irBuilder.CreateStructGEP(layoutType, typedPayload, 0u32, name: "future.thread.slot")
-            let threadObj = irBuilder.CallGCReadRef(futureObj.GetRawValue(), threadSlot)
-            let setterArgs = ArrayList<LLVMValueRef>()
-            setterArgs.add(irBuilder.CreateEntryAlloca(CGType.GetUnitType(irBuilder.GetLLVMContext())))
-            setterArgs.add(threadObj)
-            setterArgs.add(cjThreadHandle)
-            setterArgs.add(unsafe { LLVMConstNull(CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())) })
-            let _ = irBuilder.CreateSetRuntimeCJThreadHandleCall(setterArgs)
-        }
-    }
+    let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 1u32) }
+    let fieldPath = ArrayList<UInt64>()
+    fieldPath.add(0u64)
+    let threadObj = irBuilder.CreateLoad(i8PtrTy, irBuilder.CreateGEP(futureObj, fieldPath).GetRawValue())
+    let setterArgs = ArrayList<LLVMValueRef>()
+    setterArgs.add(irBuilder.CreateEntryAlloca(CGType.GetUnitType(irBuilder.GetLLVMContext())))
+    setterArgs.add(threadObj)
+    setterArgs.add(cjThreadHandle)
+    setterArgs.add(unsafe { LLVMConstNull(CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())) })
+    let _ = irBuilder.CreateSetRuntimeCJThreadHandleCall(setterArgs)
 }
 
 private func MakeSpawnBlockNames(first: String, second: String): ArrayList<String> {

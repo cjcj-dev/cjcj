@@ -1,5 +1,6 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::basic.Linkage as BasicLinkage
 import std.collection.*
 
 // GAP_TODO: MarkExpressionAsMustNotOverflow ConstAnalysis.h:243 producer absent.
@@ -25,6 +26,48 @@ public class GeneratedFromForIn {
 
     public static func Extract(label: GeneratedFromForIn): Bool {
         return label.value
+    }
+}
+
+public class LinkTypeInfo {
+    private let linkType: BasicLinkage
+
+    public init() {
+        linkType = BasicLinkage.EXTERNAL
+    }
+
+    public init(linkType: BasicLinkage) {
+        this.linkType = linkType
+    }
+
+    public static func Extract(info: LinkTypeInfo): BasicLinkage {
+        return info.linkType
+    }
+
+    public static func Extract(info: String): BasicLinkage {
+        match (info) {
+            case "linkType: external" => return BasicLinkage.EXTERNAL
+            case "linkType: weak_odr" => return BasicLinkage.WEAK_ODR
+            case "linkType: internal" => return BasicLinkage.INTERNAL
+            case "linkType: linkonce_odr" => return BasicLinkage.LINKONCE_ODR
+            case "linkType: external_weak" => return BasicLinkage.EXTERNAL_WEAK
+            case _ => return BasicLinkage.EXTERNAL
+        }
+    }
+
+    public func Clone(): LinkTypeInfo {
+        return LinkTypeInfo(linkType)
+    }
+
+    public func ToString(): String {
+        let linkToString = match (linkType) {
+            case BasicLinkage.EXTERNAL => "external"
+            case BasicLinkage.WEAK_ODR => "weak_odr"
+            case BasicLinkage.INTERNAL => "internal"
+            case BasicLinkage.LINKONCE_ODR => "linkonce_odr"
+            case BasicLinkage.EXTERNAL_WEAK => "external_weak"
+        }
+        return "linkType: " + linkToString
     }
 }
 
@@ -114,6 +157,33 @@ private func SkipKindFromAnnotationValue(value: String): SkipKind {
     }
 }
 
+public class EnumCaseIndex {
+    private let index: Option<Int64>
+
+    public init() {
+        index = None
+    }
+
+    public init(input: Option<Int64>) {
+        index = input
+    }
+
+    public func Clone(): EnumCaseIndex {
+        return EnumCaseIndex(index)
+    }
+
+    public func ToString(): String {
+        if (let Some(value) <- index) {
+            return "EnumCaseIndex: " + value.toString()
+        }
+        return "EnumCaseIndex: "
+    }
+
+    public static func Extract(label: EnumCaseIndex): Option<Int64> {
+        return label.index
+    }
+}
+
 public class AnnotationMap {
     private let values: HashMap<String, String> = HashMap<String, String>()
 
@@ -168,35 +238,109 @@ public class AnnotationMap {
     }
 }
 
+public class CustomAnnoInstance {
+    private let annoClassName: String
+    private let argValues: ArrayList<String> = ArrayList<String>()
+    private let loc: DebugLocation
+
+    public init(className: String, argValues: ArrayList<String>, loc: DebugLocation) {
+        annoClassName = className
+        for (argValue in argValues) {
+            this.argValues.add(argValue)
+        }
+        this.loc = loc
+    }
+
+    public func ToString(indent: Int64): String {
+        var out = IndentToString(indent) + "@" + annoClassName
+        let argStr = JoinStrings(argValues, ", ")
+        if (!argStr.isEmpty()) {
+            out += "[" + argStr + "]"
+        }
+        out += CommentToString(loc.ToString())
+        return out
+    }
+
+    public func Dump(): Unit {
+        println(ToString(0))
+    }
+
+    public func GetAnnoClassName(): String {
+        return annoClassName
+    }
+
+    public func GetArgValues(): ArrayList<String> {
+        let out = ArrayList<String>()
+        for (argValue in argValues) {
+            out.add(argValue)
+        }
+        return out
+    }
+
+    public func GetDebugLocation(): DebugLocation {
+        return loc
+    }
+}
+
 public class AnnoInfo {
-    private let customAnnotations: ArrayList<String> = ArrayList<String>()
+    var mangledName: String = "none"
+    let annoInstances: ArrayList<CustomAnnoInstance> = ArrayList<CustomAnnoInstance>()
 
     public init() {}
 
+    public init(funcName: String, instances: ArrayList<CustomAnnoInstance>) {
+        mangledName = funcName
+        for (instance in instances) {
+            annoInstances.add(instance)
+        }
+    }
+
     public func Add(annotation: String): Unit {
-        customAnnotations.add(annotation)
+        annoInstances.add(CustomAnnoInstance(annotation, ArrayList<String>(), DebugLocation()))
     }
 
     public func Clear(): Unit {
-        customAnnotations.clear()
+        mangledName = "none"
+        annoInstances.clear()
+    }
+
+    public func IsAvailable(): Bool {
+        return mangledName != "none"
     }
 
     public func GetAnnotations(): ArrayList<String> {
         let out = ArrayList<String>()
-        for (annotation in customAnnotations) {
-            out.add(annotation)
+        for (instance in annoInstances) {
+            out.add(instance.GetAnnoClassName())
         }
         return out
     }
 
     public func ToString(indent!: Int64 = 0): String {
-        if (customAnnotations.isEmpty()) {
+        if (!IsAvailable()) {
             return ""
         }
         let lines = ArrayList<String>()
-        for (annotation in customAnnotations) {
-            lines.add("${IndentToString(indent)}@${annotation}")
+        lines.add("${IndentToString(indent)}@AnnoFactoryFunc: ${mangledName}")
+        for (instance in annoInstances) {
+            lines.add(instance.ToString(indent))
         }
         return JoinStrings(lines, "\n")
+    }
+
+    public func Dump(): Unit {
+        println(ToString())
+    }
+
+    public func GetAnnoFactoryFuncMangledName(): String {
+        return mangledName
+    }
+
+    public func GetCustomAnnoInstances(): ArrayList<CustomAnnoInstance> {
+        let out = ArrayList<CustomAnnoInstance>()
+        for (instance in annoInstances) {
+            out.add(instance)
+        }
+        return out
     }
 }

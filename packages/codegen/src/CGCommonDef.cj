@@ -103,6 +103,10 @@ public class GenericTypeAndPath {
             this.path.add(value)
         }
     }
+
+    public func GetPath(): ArrayList<Int64> {
+        return path.clone()
+    }
 }
 
 public func IsCHIRWrapper(chirFuncName: String): Bool {
@@ -122,5 +126,23 @@ public func CHIRLinkage2LLVMLinkage(chirLinkage: Linkage): LLVMLinkage {
 public func AddLinkageTypeMetadata(globalObject: LLVMValueRef, linkageType: LLVMLinkage, markByMD: Bool): Unit {
     if (!markByMD) {
         unsafe { LLVMSetLinkage(globalObject, LLVMLinkageValue(linkageType)) }
+    }
+}
+
+public func GetLinkageTypeOfGlobalObject(globalObject: LLVMValueRef): LLVMLinkage {
+    let linkage = unsafe { LLVMGetLinkage(globalObject) }
+    return match (linkage) {
+        case 0 => LLVMLinkage.External
+        case 1 => LLVMLinkage.AvailableExternally
+        case 2 => LLVMLinkage.LinkOnceAny
+        case 3 => LLVMLinkage.LinkOnceODR
+        case 5 => LLVMLinkage.WeakAny
+        case 6 => LLVMLinkage.WeakODR
+        case 7 => LLVMLinkage.Appending
+        case 8 => LLVMLinkage.Internal
+        case 9 => LLVMLinkage.Private
+        case 12 => LLVMLinkage.ExternalWeak
+        case 14 => LLVMLinkage.Common
+        case _ => LLVMLinkage.External
     }
 }

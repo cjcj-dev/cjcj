@@ -18,6 +18,9 @@ public class CGStructType <: CGCustomType {
             llvmType = stringLayout
             return stringLayout
         }
+        if (!IsSized()) {
+            return unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
+        }
         let structType = StaticCast<StructType>(chirType)
         var layoutName = STRUCT_TYPE_PREFIX
         if (let Some(defTy) <- structType.GetStructDef().GetType()) {
@@ -35,8 +38,20 @@ public class CGStructType <: CGCustomType {
         if (!cgCtx.IsGeneratedStructType(layoutName)) {
             cgCtx.AddGeneratedStructType(layoutName)
             let fieldTypes = ArrayList<LLVMTypeRef>()
+            let litStructPtrIndices = ArrayList<Int64>()
+            var idx: Int64 = 0
             for (fieldTy in structType.GetInstantiatedMemberTys()) {
-                fieldTypes.add(CGType.GetOrCreate(cgMod, fieldTy).GetLLVMType())
+                let fieldType = CGType.GetOrCreate(cgMod, fieldTy).GetLLVMType()
+                fieldTypes.add(fieldType)
+                if (fieldTy.IsCFunc() && IsLitStructPtrType(fieldType)) {
+                    litStructPtrIndices.add(idx)
+                }
+                idx++
+            }
+            SetStructTypeBody(structLayout, fieldTypes)
+            for (litStructPtrIdx in litStructPtrIndices) {
+                let memberTys = structType.GetInstantiatedMemberTys()
+                fieldTypes[litStructPtrIdx] = CGType.GetOrCreate(cgMod, memberTys[litStructPtrIdx]).GetLLVMType()
             }
             SetStructTypeBody(structLayout, fieldTypes)
         }

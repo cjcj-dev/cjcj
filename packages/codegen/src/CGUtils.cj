@@ -6,6 +6,10 @@ import cangjie_compiler::chir.CheckCustomTypeDefIsExpected
 import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CustomType
+import cangjie_compiler::chir.EnumType
+import cangjie_compiler::chir.ExtendDef
+import cangjie_compiler::chir.Function
+import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.Parameter
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
@@ -26,6 +30,27 @@ public func GenNameForBB(name: String, extraInfo!: UInt64 = 0u64): String {
     return name
 }
 
+public func UnwindGenericRelateType(llvmCtx: LLVMContextHandle, ty: Type): ArrayList<LLVMMetadataRef> {
+    let tyArgMeta = ArrayList<LLVMMetadataRef>()
+    if (ty.IsGeneric()) {
+        return tyArgMeta
+    }
+    let typeArgs = ty.GetTypeArgs()
+    if (!typeArgs.isEmpty()) {
+        tyArgMeta.add(LLVMCreateMDString(llvmCtx, CGType.GetNameOfTypeTemplateGV(ty)))
+        let tyArg = typeArgs[0]
+        if (tyArg.IsValueType()) {
+            tyArgMeta.add(LLVMCreateMDString(llvmCtx, CGType.GetNameOfTypeInfoGV(tyArg)))
+        } else {
+            let nestedTyArgMeta = UnwindGenericRelateType(llvmCtx, tyArg.StripAllRefs())
+            if (!nestedTyArgMeta.isEmpty()) {
+                tyArgMeta.add(LLVMCreateMDTuple(llvmCtx, nestedTyArgMeta))
+            }
+        }
+    }
+    return tyArgMeta
+}
+
 public func GetClassObjLayoutName(className: String): String {
     return "ObjLayout." + className
 }
@@ -39,6 +64,28 @@ public func GetOrCreateNamedStructType(context: LLVMContextHandle, name: String)
         }
     }
     return result
+}
+
+public func GetLLVMStructType(cgMod: CGModule, elementTypes: ArrayList<Type>, name: String): LLVMTypeRef {
+    let cgCtx = cgMod.GetCGContext()
+    let llvmCtx = cgMod.GetLLVMContext()
+    var layoutType = LLVMNullType()
+    try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+        layoutType = unsafe { LLVMGetTypeByName2(llvmCtx.raw, nameCString.value) }
+    }
+    if (!layoutType.isNull() && cgCtx.IsGeneratedStructType(name)) {
+        return layoutType
+    }
+    if (layoutType.isNull()) {
+        layoutType = GetOrCreateNamedStructType(llvmCtx, name)
+    }
+    cgCtx.AddGeneratedStructType(name)
+    let elemTypes = ArrayList<LLVMTypeRef>()
+    for (elemType in elementTypes) {
+        elemTypes.add(CGType.GetOrCreate(cgMod, elemType).GetLLVMType())
+    }
+    SetStructTypeBody(layoutType, elemTypes)
+    return layoutType
 }
 
 public func SetStructTypeBody(structType: LLVMTypeRef, body: ArrayList<LLVMTypeRef>): Unit {
@@ -82,6 +129,19 @@ public func IsLitStructPtrType(llvmType: LLVMTypeRef): Bool {
 
 public func IsCommonStruct(chirTy: Type): Bool {
     return chirTy.IsStruct() && !chirTy.IsCPointer() && !chirTy.IsCString()
+}
+
+public func IsStructOrExtendMethod(value: Value): Bool {
+    let functionValue = (value as Function) ?? return false
+    let declaredParent = functionValue.GetParentCustomTypeDef() ?? return false
+    if (declaredParent.IsStruct()) {
+        return true
+    } else if (let Some(extendDef) <- (declaredParent as ExtendDef)) {
+        if (let Some(extendedTy) <- extendDef.GetExtendedType()) {
+            return extendedTy.IsStruct()
+        }
+    }
+    return false
 }
 
 public func AlignedUpTo(offset: UInt64, align: UInt64): UInt64 {
@@ -175,6 +235,36 @@ public func DeRef(chirTy: Type): Type {
     return chirTy.StripAllRefs()
 }
 
+private func GetGenericArgsFromCHIRTypeHelper(chirTy: Type, path: ArrayList<Int64>,
+    result: ArrayList<GenericTypeAndPath>): Unit {
+    let baseType = DeRef(chirTy)
+    if (let Some(genericType) <- (baseType as GenericType)) {
+        result.add(GenericTypeAndPath(genericType, path))
+    }
+    let args = baseType.GetTypeArgs()
+    var index: Int64 = 0
+    while (index < args.size) {
+        let newPath = path.clone()
+        newPath.add(index)
+        GetGenericArgsFromCHIRTypeHelper(args[index], newPath, result)
+        index++
+    }
+}
+
+public func GetGenericArgsFromCHIRType(chirTy: Type): ArrayList<GenericTypeAndPath> {
+    let result = ArrayList<GenericTypeAndPath>()
+    GetGenericArgsFromCHIRTypeHelper(chirTy, ArrayList<Int64>(), result)
+    return result
+}
+
+public func GetTypeInnerType(chirTy: Type, gtAndPath: GenericTypeAndPath): Type {
+    var result = DeRef(chirTy)
+    for (path in gtAndPath.GetPath()) {
+        result = DeRef(result.GetTypeArgs()[path])
+    }
+    return result
+}
+
 public func IsThisArgOfStructMethod(chirValue: Value): Bool {
     if (!chirValue.IsParameter()) {
         return false
@@ -214,6 +304,13 @@ public func IsAutoEnvInstBaseType(chirTy: Type): Bool {
 public func IsGenericRef(chirTy: Type): Bool {
     let typeArgs = chirTy.GetTypeArgs()
     return chirTy.IsRef() && !typeArgs.isEmpty() && typeArgs[0].IsGeneric()
+}
+
+public func IsTrivialEnum(chirTy: Type): Bool {
+    if (let Some(enumTy) <- (chirTy as EnumType)) {
+        return enumTy.GetEnumDef().IsAllCtorsTrivial()
+    }
+    return false
 }
 
 public func IsStructRef(chirTy: Type): Bool {

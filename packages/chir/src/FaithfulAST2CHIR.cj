@@ -9,6 +9,7 @@ import cangjie_compiler::ast.ASTKindIndex
 import cangjie_compiler::ast.ASTKindName
 import cangjie_compiler::ast.AccessLevel as AstAccessLevel
 import cangjie_compiler::ast.ArrayExpr as AstArrayExpr
+import cangjie_compiler::ast.AttributePack as AstAttributePack
 import cangjie_compiler::ast.ArrayLit as AstArrayLit
 import cangjie_compiler::ast.Attribute as AstAttribute
 import cangjie_compiler::ast.CallExpr as AstCallExpr
@@ -43,7 +44,10 @@ import cangjie_compiler::ast.Walker as AstWalker
 import cangjie_compiler::ast.WildcardPattern as AstWildcardPattern
 import cangjie_compiler::ast.Position as AstPosition
 import cangjie_compiler::ast.IsStaticInitializer as AstIsStaticInitializer
-import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, STATIC_INIT_VAR}
+import cangjie_compiler::ast.IsImpl as AstIsImpl
+import cangjie_compiler::ast.IsMirror as AstIsMirror
+import cangjie_compiler::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
+import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, ProfileRecorder, STATIC_INIT_VAR}
 
 private class FaithfulInitFileVars {
     public let file: AstFile
@@ -853,6 +857,47 @@ private func FaithfulIsHashableFileName(fileName: String): Bool {
     return false
 }
 
+private func BuildAttr(attrs: AstAttributePack): AttributeInfo {
+    let attrInfo = AttributeInfo()
+    if (attrs.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) { attrInfo.Enable(Attribute.GENERIC_INSTANTIATED) }
+    if (attrs.TestAttr(AstAttribute.STATIC)) { attrInfo.Enable(Attribute.STATIC) }
+    if (attrs.TestAttr(AstAttribute.FOREIGN)) { attrInfo.Enable(Attribute.FOREIGN) }
+    if (attrs.TestAttr(AstAttribute.MUT)) { attrInfo.Enable(Attribute.MUT) }
+    if (attrs.TestAttr(AstAttribute.INTERNAL)) { attrInfo.Enable(Attribute.INTERNAL) }
+    if (attrs.TestAttr(AstAttribute.PUBLIC)) { attrInfo.Enable(Attribute.PUBLIC) }
+    if (attrs.TestAttr(AstAttribute.PRIVATE)) { attrInfo.Enable(Attribute.PRIVATE) }
+    if (attrs.TestAttr(AstAttribute.PROTECTED)) { attrInfo.Enable(Attribute.PROTECTED) }
+    if (attrs.TestAttr(AstAttribute.ABSTRACT)) { attrInfo.Enable(Attribute.ABSTRACT) }
+    if (attrs.TestAttr(AstAttribute.OPEN)) { attrInfo.Enable(Attribute.VIRTUAL) }
+    if (attrs.TestAttr(AstAttribute.OVERRIDE)) { attrInfo.Enable(Attribute.OVERRIDE) }
+    if (attrs.TestAttr(AstAttribute.REDEF)) { attrInfo.Enable(Attribute.REDEF) }
+    if (attrs.TestAttr(AstAttribute.SEALED)) { attrInfo.Enable(Attribute.SEALED) }
+    if (attrs.TestAttr(AstAttribute.OPERATOR)) { attrInfo.Enable(Attribute.OPERATOR) }
+    if (attrs.TestAttr(AstAttribute.COMPILER_ADD)) { attrInfo.Enable(Attribute.COMPILER_ADD) }
+    if (attrs.TestAttr(AstAttribute.IMPLICIT_ADD)) { attrInfo.Enable(Attribute.NO_DEBUG_INFO) }
+    if (attrs.TestAttr(AstAttribute.GENERIC)) { attrInfo.Enable(Attribute.GENERIC) }
+    if (attrs.TestAttr(AstAttribute.IMPORTED)) { attrInfo.Enable(Attribute.IMPORTED) }
+    if (attrs.TestAttr(AstAttribute.NO_REFLECT_INFO)) { attrInfo.Enable(Attribute.NO_REFLECT_INFO) }
+    if (attrs.TestAttr(AstAttribute.COMMON)) { attrInfo.Enable(Attribute.COMMON) }
+    if (attrs.TestAttr(AstAttribute.SPECIFIC)) { attrInfo.Enable(Attribute.SPECIFIC) }
+    if (attrs.TestAttr(AstAttribute.JAVA_MIRROR)) { attrInfo.Enable(Attribute.JAVA_MIRROR) }
+    if (attrs.TestAttr(AstAttribute.OBJ_C_MIRROR)) { attrInfo.Enable(Attribute.OBJ_C_MIRROR) }
+    if (attrs.TestAttr(AstAttribute.HAS_INITED_FIELD)) { attrInfo.Enable(Attribute.HAS_INITED_FIELD) }
+    if (attrs.TestAttr(AstAttribute.UNSAFE)) { attrInfo.Enable(Attribute.UNSAFE) }
+    return attrInfo
+}
+
+private func BuildVarDeclAttr(decl: AstVarDecl): AttributeInfo {
+    let attrInfo = BuildAttr(decl.GetAttrs())
+    if (!decl.isVar) {
+        attrInfo.Enable(Attribute.READONLY)
+    }
+    if (decl.IsConst()) {
+        attrInfo.Enable(Attribute.CONST)
+    }
+    return attrInfo
+}
+
 private func BuildPackageAccessLevel(level: AstAccessLevel): AccessLevel {
     return match (level) {
         case AstAccessLevel.INTERNAL => AccessLevel.INTERNAL
@@ -975,8 +1020,20 @@ public class FaithfulAST2CHIR {
         TranslateNominalDecls(node)
         TranslateOtherTopLevelDecls(node)
         SetInitFuncForStaticVar(initOrder)
-        UpdateMemberVarPath(builder).RunOnPackage(CurrentPackage())
         FlatForInExpr(builder).RunOnPackage(CurrentPackage())
+        try (recorder = ProfileRecorder("Canonicalization", "GenerateVTable")) {
+            let allDefs = CurrentPackage().GetAllCustomTypeDef()
+            let generator = GenerateVTable(CurrentPackage(), allDefs, builder, opts, "GenerateVTable")
+            generator.CreateVTable()
+            generator.UpdateOperatorVirFunc()
+            generator.CreateVirtualFuncWrapper(IncreKind.INVALID, CompilationCache(), VirtualWrapperDepMap(),
+                VirtualWrapperDepMap())
+            generator.SetSrcFuncType()
+            generator.CreateMutFuncWrapper()
+            generator.UpdateFuncCall()
+        }
+        UpdateMemberVarPath(builder).RunOnPackage(CurrentPackage())
+        NoSideEffectMarker().RunOnPackage(CurrentPackage())
         if (!failure && opts.IsConstEvalEnabled() && !opts.enIncrementalCompilation && opts.commonPartCjos.isEmpty()) {
             let bchirPackages = ArrayList<BCHIR>()
             ConstEvalPass(builder, opts: opts).RunOnPackage(CurrentPackage(), initFuncsForConstVar, bchirPackages)
@@ -985,7 +1042,7 @@ public class FaithfulAST2CHIR {
             AST2CHIRCheck()
         }
         if (!failure) {
-            ClosureConversion(builder).RunOnPackage(CurrentPackage())
+            ClosureConversion(builder, opts: opts).RunOnPackage(CurrentPackage())
             ReplaceSrcCodeImportedValAfterConstEval(CurrentPackage())
         }
         return !failure
@@ -1372,9 +1429,15 @@ public class FaithfulAST2CHIR {
                 throw IllegalArgumentException(
                     "faithful AST2CHIR CreateCustomTypeDef expected nominal decl, got ${ASTKindName(decl.astKind)}")
         }
+        if (isImported) {
+            customTypeDef.EnableAttr(Attribute.IMPORTED)
+        }
         ApplyDeclAttrs(customTypeDef, decl)
         MaybeSetCoreBuiltinClassTy(customTypeDef)
         chirType.SetGlobalNominalCache(decl, customTypeDef)
+        if (decl.astKind == ASTKind.EXTEND_DECL) {
+            AttachCustomTypeGenericParams(decl)
+        }
     }
 
     private func MaybeSetCoreBuiltinClassTy(def: CustomTypeDef): Unit {
@@ -1472,6 +1535,8 @@ public class FaithfulAST2CHIR {
             decl.astKind == ASTKind.INTERFACE_DECL || decl.astKind == ASTKind.ENUM_DECL) {
             if (let Some(ty) <- decl.GetTy()) {
                 let translated = chirType.TranslateType(ty)
+                let customType = (translated.StripAllRefs() as CustomType).getOrThrow()
+                chirType.GetGlobalNominalCache(decl).SetType(customType)
                 return Some(translated)
             }
         }
@@ -1485,6 +1550,38 @@ public class FaithfulAST2CHIR {
         TranslateVecDecl(genericNominalDecls, trans)
         TranslateVecDecl(nominalDecls, trans)
         TranslateVecDecl(importedGenericInstantiatedNominalDecls, trans)
+        SetExtendInfo()
+    }
+
+    private func SetExtendInfo(): Unit {
+        try (recorder = ProfileRecorder("TranslateNominalDecls", "SetExtendInfo")) {
+            for (customDef in CurrentPackage().GetAllCustomTypeDef()) {
+                if (customDef.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+                    continue
+                }
+                let extendDef = customDef as ExtendDef
+                if (let None <- extendDef) {
+                    continue
+                }
+                let ext = extendDef.getOrThrow()
+                let extendedType = ext.GetExtendedType().getOrThrow()
+                if (let Some(builtinType) <- (extendedType as BuiltinType)) {
+                    GetBuiltinTypeWithVTable(builtinType, builder).AddExtend(ext)
+                } else {
+                    let customType = (extendedType as CustomType).getOrThrow()
+                    let customTypeDef = customType.GetCustomTypeDef()
+                    CJC_ASSERT(customTypeDef.GetCustomKind() != CustomDefKind.TYPE_EXTEND)
+                    customTypeDef.AddExtend(ext)
+                }
+            }
+        }
+    }
+
+    private func GetBuiltinTypeWithVTable(builtinType: BuiltinType, builder: CHIRBuilder): BuiltinType {
+        if (builtinType.IsCPointer()) {
+            return builder.context.GetCPointerTy(builder.context.GetUnitTy())
+        }
+        return builtinType
     }
 
     private func TranslateOtherTopLevelDecls(node: AstPackage): Unit {
@@ -2365,7 +2462,6 @@ public class FaithfulAST2CHIR {
             fn.AppendAttributeInfo(attrs)
             fn.SetFuncKind(FuncKind.GLOBALVAR_INIT)
             fn.EnableAttr(Attribute.PUBLIC)
-            AddFunctionToPackage(fn)
             InsertInitializerIntoPackageInitializer(fn, importsInitFunc)
         }
         if (block.GetTerminator().isNone()) {
@@ -2684,7 +2780,6 @@ public class FaithfulAST2CHIR {
         fn.InitBody(body)
         let entry = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
-        AddFunctionToPackage(fn)
         return fn
     }
 
@@ -2911,7 +3006,6 @@ public class FaithfulAST2CHIR {
         AttachFunctionGenericParams(funcDecl, fn)
         ApplyDeclAttrs(fn, funcDecl)
         ApplyFuncKind(fn, funcDecl)
-        SetOverrideSrcFuncType(funcDecl, fn)
         if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) {
             fn.SetFuncKind(FuncKind.MAIN_ENTRY)
         }
@@ -2924,7 +3018,6 @@ public class FaithfulAST2CHIR {
         }
         TranslateFuncParams(funcDecl, fn)
         globalCache.Set(funcDecl, fn)
-        AddFunctionToPackage(fn)
     }
 
     private func CreateImportedFuncSignatureAndSetGlobalCache(funcDecl: AstFuncDecl): Unit {
@@ -2936,18 +3029,8 @@ public class FaithfulAST2CHIR {
         fn.EnableAttr(Attribute.IMPORTED)
         ApplyDeclAttrs(fn, funcDecl)
         ApplyFuncKind(fn, funcDecl)
-        SetOverrideSrcFuncType(funcDecl, fn)
         TranslateFuncParams(funcDecl, fn)
         globalCache.Set(funcDecl, fn)
-        AddFunctionToPackage(fn)
-    }
-
-    private func SetOverrideSrcFuncType(funcDecl: AstFuncDecl, fn: Function): Unit {
-        let resolver = overrideSrcFuncResolver ?? return
-        let overrideSrcFuncDecl = resolver(funcDecl) ?? return
-        let overrideSrcFuncTy = AdjustFuncType(overrideSrcFuncDecl,
-            RequireFuncType(chirType.TranslateType(RequireAstTy(overrideSrcFuncDecl))))
-        fn.SetOverrideSrcFuncType(overrideSrcFuncTy)
     }
 
     private func CreateImportedValueSignatureAndSetGlobalCache(varDecl: AstVarDecl): Unit {
@@ -2957,11 +3040,18 @@ public class FaithfulAST2CHIR {
             packageName: EffectivePackageName(varDecl))
         globalVar.EnableAttr(Attribute.IMPORTED)
         ApplyDeclAttrs(globalVar, varDecl)
+        if (varDecl.IsConst()) {
+            globalVar.EnableAttr(Attribute.CONST)
+        }
         globalCache.Set(varDecl, globalVar)
         AddGlobalVarToPackage(globalVar)
     }
 
     private func CreateGlobalVarSignature(decls: ArrayList<AstDecl>, isLocalConst!: Bool = false): Unit {
+        // GAP_TODO: annotated-decl factory metadata remains unported; C++ CreateAnnoFactoryFuncSig
+        // invokes TranslateAnnotationsArraySig/Body and TranslateCustomAnnoInstanceSig
+        // (TranslateAnnotation.cpp:34-88,175-236; AST2CHIR.cpp:217,230; ASTPackage2CHIR.cpp:1024).
+        // Until that root is ported, AnnoInfo.mangledName keeps the C++ default "none".
         for (decl in decls) {
             if (let Some(varDecl) <- (decl as AstVarDecl)) {
                 let _ = CreateAndCacheGlobalVar(varDecl, isLocalConst: isLocalConst)
@@ -3008,7 +3098,7 @@ public class FaithfulAST2CHIR {
             srcCodeIdentifier: decl.identifier.Val(), rawMangledName: EffectiveRawMangledName(decl),
             packageName: EffectivePackageName(decl))
         globalVar.SetDebugLocation(TranslateLocationWithoutScope(builder.context, decl.begin, decl.end))
-        ApplyDeclAttrs(globalVar, decl)
+        globalVar.AppendAttributeInfo(BuildVarDeclAttr(decl))
         if (isLocalConst) {
             globalVar.EnableAttr(Attribute.COMPILER_ADD)
         }
@@ -3171,35 +3261,24 @@ public class FaithfulAST2CHIR {
         return false
     }
 
-    private func AddFunctionToPackage(fn: Function): Unit {
-        CurrentPackage().AddGlobalFunc(fn)
-    }
-
     private func AddGlobalVarToPackage(globalVar: GlobalVar): Unit {
         CurrentPackage().AddGlobalVar(globalVar)
     }
 
     private func ApplyDeclAttrs(target: Base, decl: AstDecl): Unit {
-        if (decl.TestAttr(AstAttribute.PUBLIC)) { target.EnableAttr(Attribute.PUBLIC) }
-        if (decl.TestAttr(AstAttribute.PROTECTED)) { target.EnableAttr(Attribute.PROTECTED) }
-        if (decl.TestAttr(AstAttribute.PRIVATE)) { target.EnableAttr(Attribute.PRIVATE) }
-        if (decl.TestAttr(AstAttribute.STATIC)) { target.EnableAttr(Attribute.STATIC) }
-        if (decl.TestAttr(AstAttribute.MUT)) { target.EnableAttr(Attribute.MUT) }
-        if (decl.IsConst()) { target.EnableAttr(Attribute.CONST) }
-        if (decl.TestAttr(AstAttribute.ABSTRACT)) { target.EnableAttr(Attribute.ABSTRACT) }
-        if (decl.TestAttr(AstAttribute.OPEN)) { target.EnableAttr(Attribute.VIRTUAL) }
-        if (decl.TestAttr(AstAttribute.FOREIGN)) { target.EnableAttr(Attribute.FOREIGN) }
-        if (decl.TestAttr(AstAttribute.IMPORTED)) { target.EnableAttr(Attribute.IMPORTED) }
-        if (decl.TestAttr(AstAttribute.SRC_IMPORTED)) { target.EnableAttr(Attribute.SRC_CODE_IMPORTED) }
+        target.AppendAttributeInfo(BuildAttr(decl.GetAttrs()))
         if (decl.TestAttr(AstAttribute.C)) {
-            target.EnableAttr(Attribute.C)
             if (let Some(structDef) <- (target as StructDef)) {
                 structDef.SetCStruct(true)
             }
         }
-        if (decl.TestAttr(AstAttribute.OPERATOR)) { target.EnableAttr(Attribute.OPERATOR) }
-        if (decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) { target.EnableAttr(Attribute.GENERIC_INSTANTIATED) }
-        if (decl.TestAttr(AstAttribute.IMPLICIT_ADD)) { target.EnableAttr(Attribute.IMPLICIT_ADD) }
+        if (let Some(customTypeDef) <- (target as CustomTypeDef)) {
+            if (AstIsImpl(decl)) {
+                customTypeDef.EnableAttr(Attribute.JAVA_IMPL)
+            } else if (AstIsMirror(decl)) {
+                customTypeDef.EnableAttr(Attribute.JAVA_MIRROR)
+            }
+        }
     }
 
     private func EffectiveMangledName(decl: AstDecl): String {

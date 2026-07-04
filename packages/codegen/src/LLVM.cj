@@ -33,6 +33,7 @@ public enum LLVMLinkage {
     | Internal
     | Private
     | ExternalWeak
+    | Common
 }
 
 public enum LLVMUnnamedAddr {
@@ -67,6 +68,7 @@ public func LLVMLinkageValue(linkage: LLVMLinkage): Int32 {
         case LLVMLinkage.Internal => 8
         case LLVMLinkage.Private => 9
         case LLVMLinkage.ExternalWeak => 12
+        case LLVMLinkage.Common => 14
     }
 }
 
@@ -200,6 +202,7 @@ foreign {
     func LLVMGetStructElementTypes(structTy: LLVMTypeRef, dest: CPointer<LLVMTypeRef>): Unit
     func LLVMGetArrayLength(arrayTy: LLVMTypeRef): UInt32
     func LLVMGetReturnType(functionType: LLVMTypeRef): LLVMTypeRef
+    func LLVMIsFunctionVarArg(functionType: LLVMTypeRef): Int32
     func LLVMCountParamTypes(functionType: LLVMTypeRef): UInt32
     func LLVMGetParamTypes(functionType: LLVMTypeRef, dest: CPointer<LLVMTypeRef>): Unit
 
@@ -222,6 +225,7 @@ foreign {
     func LLVMDeleteGlobal(global: LLVMValueRef): Unit
     func LLVMGetGlobalParent(global: LLVMValueRef): LLVMModuleRef
     func LLVMGetValueName(value: LLVMValueRef): CString
+    func LLVMSetValueName2(value: LLVMValueRef, name: CString, nameLen: UIntNative): Unit
     func LLVMGetLinkage(global: LLVMValueRef): Int32
     func LLVMSetLinkage(global: LLVMValueRef, linkage: Int32): Unit
     func LLVMSetUnnamedAddress(global: LLVMValueRef, unnamedAddr: Int32): Unit
@@ -271,6 +275,28 @@ foreign {
         predecessors: CPointer<LLVMBasicBlockRef>): Unit
     func LLVMSelfhostInstructionComesBefore(inst: LLVMValueRef, other: LLVMValueRef): Int32
     func LLVMSelfhostInstructionMoveBefore(inst: LLVMValueRef, other: LLVMValueRef): Unit
+    func LLVMSelfhostIsCallInst(inst: LLVMValueRef): Int32
+    func LLVMSelfhostIsInvokeInst(inst: LLVMValueRef): Int32
+    func LLVMSelfhostCallBaseHasStructRetAttr(callBase: LLVMValueRef): Int32
+    func LLVMSelfhostCallBaseArgSize(callBase: LLVMValueRef): UInt32
+    func LLVMSelfhostCallBaseGetArgOperand(callBase: LLVMValueRef, index: UInt32): LLVMValueRef
+    func LLVMSelfhostCallBaseGetStructRetAttr(callBase: LLVMValueRef): LLVMAttributeRef
+    func LLVMSelfhostCallBaseAddAttributeAtIndex(callBase: LLVMValueRef, index: UInt32,
+        attr: LLVMAttributeRef): Unit
+    func LLVMSelfhostInvokeGetNormalDest(invokeInst: LLVMValueRef): LLVMBasicBlockRef
+    func LLVMSelfhostInvokeGetUnwindDest(invokeInst: LLVMValueRef): LLVMBasicBlockRef
+    func LLVMSelfhostBasicBlockGetFirstInsertionPoint(block: LLVMBasicBlockRef): LLVMValueRef
+    func LLVMSelfhostGetInsertPointInstruction(builder: LLVMBuilderRef): LLVMValueRef
+    func LLVMSelfhostCreateCall(builder: LLVMBuilderRef, functionTy: LLVMTypeRef, callee: LLVMValueRef,
+        args: CPointer<LLVMValueRef>, argCount: UInt32, name: CString): LLVMValueRef
+    func LLVMSelfhostCreatePointerCast(builder: LLVMBuilderRef, value: LLVMValueRef, destType: LLVMTypeRef,
+        name: CString): LLVMValueRef
+    func LLVMSelfhostInstructionSetMetadata(inst: LLVMValueRef, kind: CString, kindLen: UInt32,
+        metadata: LLVMMetadataRef): Unit
+    func LLVMSelfhostCreateGCReadStaticAgg(builder: LLVMBuilderRef, module: LLVMModuleRef, aggType: LLVMTypeRef,
+        dest: LLVMValueRef, source: LLVMValueRef, size: LLVMValueRef, sizeType: LLVMTypeRef): LLVMValueRef
+    func LLVMSelfhostCreateGCWriteStaticAgg(builder: LLVMBuilderRef, module: LLVMModuleRef, aggType: LLVMTypeRef,
+        dest: LLVMValueRef, source: LLVMValueRef, size: LLVMValueRef, sizeType: LLVMTypeRef): LLVMValueRef
     func LLVMSelfhostGetPrimitiveSizeInBits(ty: LLVMTypeRef): UInt64
     func LLVMSelfhostGetFirstUse(value: LLVMValueRef): LLVMUseRef
     func LLVMSelfhostGetNextUse(useRef: LLVMUseRef): LLVMUseRef
@@ -310,6 +336,8 @@ foreign {
     func LLVMTypeOf(value: LLVMValueRef): LLVMTypeRef
     func LLVMGetTypeContext(ty: LLVMTypeRef): LLVMContextRef
     func LLVMGetValueContext(value: LLVMValueRef): LLVMContextRef
+    func LLVMIsAMDNode(value: LLVMValueRef): LLVMValueRef
+    func LLVMIsAMDString(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAGlobalVariable(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAFunction(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAArgument(value: LLVMValueRef): LLVMValueRef
@@ -335,6 +363,8 @@ foreign {
         numCases: UInt32): LLVMValueRef
     func LLVMAddCase(switchValue: LLVMValueRef, onValue: LLVMValueRef, dest: LLVMBasicBlockRef): Unit
     func LLVMBuildAlloca(builder: LLVMBuilderRef, valueType: LLVMTypeRef, name: CString): LLVMValueRef
+    func LLVMBuildArrayAlloca(builder: LLVMBuilderRef, valueType: LLVMTypeRef, value: LLVMValueRef,
+        name: CString): LLVMValueRef
     func LLVMBuildLoad2(builder: LLVMBuilderRef, valueType: LLVMTypeRef, pointer: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildStore(builder: LLVMBuilderRef, value: LLVMValueRef, pointer: LLVMValueRef): LLVMValueRef
     func LLVMBuildMemSet(builder: LLVMBuilderRef, pointer: LLVMValueRef, value: LLVMValueRef, len: LLVMValueRef,

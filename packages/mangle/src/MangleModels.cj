@@ -2,13 +2,12 @@ package cangjie_compiler::mangle
 
 import std.collection.*
 import cangjie_compiler::ast.{ASTKind, Attribute, Linkage, TypeKind, TypeKindName}
+import std.sync.AtomicInt64
 
-private var nextMangleDeclIdentity: Int64 = 1
+private let nextMangleDeclIdentity = AtomicInt64(1)
 
 private func AllocateMangleDeclIdentity(): Int64 {
-    let value = nextMangleDeclIdentity
-    nextMangleDeclIdentity++
-    return value
+    return nextMangleDeclIdentity.fetchAdd(1)
 }
 
 public class MangleFile {

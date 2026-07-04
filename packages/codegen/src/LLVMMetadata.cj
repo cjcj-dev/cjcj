@@ -95,7 +95,7 @@ public func LLVMValueToMetadata(value: LLVMValueRef): LLVMMetadataRef {
 }
 
 public func LLVMGetMDStringValue(value: LLVMValueRef): Option<String> {
-    if (value.isNull()) {
+    if (value.isNull() || unsafe { LLVMIsAMDString(value) }.isNull()) {
         return None
     }
     var result: Option<String> = None
@@ -110,7 +110,7 @@ public func LLVMGetMDStringValue(value: LLVMValueRef): Option<String> {
 
 public func LLVMGetMDNodeOperands(value: LLVMValueRef): ArrayList<LLVMValueRef> {
     let operands = ArrayList<LLVMValueRef>()
-    if (value.isNull()) {
+    if (value.isNull() || unsafe { LLVMIsAMDNode(value) }.isNull()) {
         return operands
     }
     let count = unsafe { LLVMGetMDNodeNumOperands(value) }
@@ -239,13 +239,11 @@ public func LLVMSetInstructionMetadata(context: LLVMContextHandle, value: LLVMVa
     if (value.isNull() || metadata.isNull()) {
         return
     }
-    let kindID = LLVMGetMDKindID(context, name)
-    if (kindID == 0u32) {
+    if (context.raw.isNull() || name.isEmpty()) {
         return
     }
-    let metadataValue = LLVMMetadataToValue(context, metadata)
-    if (!metadataValue.isNull()) {
-        unsafe { LLVMSetMetadata(value, kindID, metadataValue) }
+    try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+        unsafe { LLVMSelfhostInstructionSetMetadata(value, nameCString.value, UInt32(name.size), metadata) }
     }
 }
 

@@ -66,38 +66,6 @@ private func StructTypeInContext(context: LLVMContextRef, fieldTypes: ArrayList<
     return result
 }
 
-private func ConstInBoundsGEP2(elementType: LLVMTypeRef, pointer: LLVMValueRef,
-    firstIndex: LLVMValueRef, secondIndex: LLVMValueRef): LLVMValueRef {
-    var result = LLVMNullValue()
-    try (indexPtr = LibC.malloc<LLVMValueRef>(count: 2).asResource()) {
-        unsafe {
-            (indexPtr.value + 0).write(firstIndex)
-            (indexPtr.value + 1).write(secondIndex)
-            result = LLVMConstInBoundsGEP2(elementType, pointer, indexPtr.value, 2u32)
-        }
-    }
-    return result
-}
-
-private func GenerateTypeNameConstantString(cgMod: CGModule, moduleHandle: LLVMModuleHandle,
-    typeName: String): LLVMValueRef {
-    let context = cgMod.GetLLVMContext().raw
-    var initializer = LLVMNullValue()
-    try (nameCString = unsafe { LibC.mallocCString(typeName) }.asResource()) {
-        initializer = unsafe { LLVMConstStringInContext(context, nameCString.value, UInt32(typeName.size), 0) }
-    }
-    let nameGlobal = GetOrInsertGlobal(moduleHandle, typeName + ".name", unsafe { LLVMTypeOf(initializer) })
-    unsafe {
-        LLVMSetInitializer(nameGlobal, initializer)
-        LLVMSetGlobalConstant(nameGlobal, 1)
-        LLVMSetLinkage(nameGlobal, LLVMLinkageValue(LLVMLinkage.Private))
-        LLVMSetAlignment(nameGlobal, 1u32)
-    }
-    let i32Type = unsafe { LLVMInt32TypeInContext(context) }
-    let zero = unsafe { LLVMConstInt(i32Type, 0u64, 0) }
-    return ConstInBoundsGEP2(unsafe { LLVMTypeOf(initializer) }, nameGlobal, zero, zero)
-}
-
 private func BuildPackedRawStringData(cjStrings: HashMap<String, String>,
     moduleHandle: LLVMModuleHandle): String {
     let uniqueContents = HashSet<String>()
@@ -155,7 +123,7 @@ private func GetReadOnlyArrayKlassInfo(cgMod: CGModule, moduleHandle: LLVMModule
     let memberTypeInfo = GetOrInsertGlobal(moduleHandle, "UInt8.ti", typeInfoType)
 
     let typeInfoValues = ArrayList<LLVMValueRef>()
-    typeInfoValues.add(GenerateTypeNameConstantString(cgMod, moduleHandle, "RawArray<UInt8>"))
+    typeInfoValues.add(cgMod.GenerateTypeNameConstantString("RawArray<UInt8>", false))
     typeInfoValues.add(unsafe { LLVMConstInt(i8Type, RAW_ARRAY_UINT8_KIND, 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i16Type, 0u64, 0) })

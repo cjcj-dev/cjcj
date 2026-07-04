@@ -1,6 +1,7 @@
 package cangjie_compiler::ast
 
 import std.collection.*
+import std.sync.AtomicInt64
 
 public enum ForInKind {
     | FORIN_INVALID
@@ -39,12 +40,10 @@ private func FindPositionByUInt64Key(entries: ArrayList<(UInt64, Position)>, key
 }
 
 private class AstObjectIdAllocator {
-    private static var nextId: Int64 = 1
+    private static let nextId = AtomicInt64(1)
 
     public static func Next(): Int64 {
-        let out = nextId
-        nextId++
-        return out
+        return nextId.fetchAdd(1)
     }
 }
 

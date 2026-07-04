@@ -1,6 +1,10 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::basic.Linkage as BasicLinkage
+import cangjie_compiler::option.GlobalOptions
+import cangjie_compiler::utils.CJC_ASSERT
+import cangjie_compiler::utils.ProfileRecorder
 
 private let GENERIC_VIRTUAL_FUNC: String = "$GenericVirtualFunc"
 private let INST_VIRTUAL_FUNC: String = "$InstVirtualFunc"
@@ -19,17 +23,20 @@ private let CC_AUTO_ENV_IMPL_ANNOTATION: String = "IsAutoEnvImpl"
 
 public class ClosureConversion {
     private let builder: CHIRBuilder
+    private let opts: GlobalOptions
     private var pkg: Option<Package> = None
     private let genericAutoEnvBaseDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
     private let instAutoEnvBaseDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
+    private let instAutoEnvWrapperDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
     private let autoEnvImplDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
     private let boxClassMap: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
     private let convertedCache: HashMap<Int64, Function> = HashMap<Int64, Function>()
     private let duplicateLambdaName: HashMap<String, Int64> = HashMap<String, Int64>()
     private let typeConvertMap: HashMap<String, Type> = HashMap<String, Type>()
 
-    public init(builder: CHIRBuilder) {
+    public init(builder: CHIRBuilder, opts!: GlobalOptions = GlobalOptions()) {
         this.builder = builder
+        this.opts = opts
     }
 
     public func RunOnPackage(pkg: Package): Unit {
@@ -39,6 +46,7 @@ public class ClosureConversion {
         ConvertGlobalFunctions(pkg)
         LiftType(pkg)
         ConvertExpressions(pkg)
+        CreateVTableForAutoEnvDef()
     }
 
     private func CurrentPackage(): Package {
@@ -69,6 +77,27 @@ public class ClosureConversion {
                     }
                 }
             }
+        }
+    }
+
+    private func CreateVTableForAutoEnvDef(): Unit {
+        try (recorder = ProfileRecorder("ClosureConversion", "CreateVTableForAutoEnvDef")) {
+            let defs = ArrayList<CustomTypeDef>()
+            for ((_, genericDef) in genericAutoEnvBaseDefs) {
+                defs.add(genericDef)
+            }
+            for ((_, instDef) in instAutoEnvBaseDefs) {
+                defs.add(instDef)
+            }
+            for ((_, wrapperDef) in instAutoEnvWrapperDefs) {
+                defs.add(wrapperDef)
+            }
+            for ((_, implDef) in autoEnvImplDefs) {
+                defs.add(implDef)
+            }
+            let generator = GenerateVTable(CurrentPackage(), defs, builder, opts, "CreateVTableForAutoEnvDef")
+            generator.CreateVTable()
+            generator.SetSrcFuncType()
         }
     }
 
@@ -406,14 +435,12 @@ public class ClosureConversion {
         let retTy = builder.context.GetGenericTy("ccbase_r${paramNum}", "ccbase_r${paramNum}")
         classDef.AddGenericTypeParam(retTy)
         paramsAndRet.add(retTy)
-        let classArgs = TypesFromGenerics(classDef.GetGenericTypeParams())
-        let classTy = builder.context.GetClassTy(classDef, classArgs)
+        let classTy = builder.context.GetClassTy(classDef, paramsAndRet)
         classDef.SetType(classTy)
-        MarkAutoEnvClass(classDef)
+        SetAutoEnvBaseDefAttr(classDef)
+        classDef.EnableAttr(Attribute.GENERIC)
         classDef.SetAnnotation(CC_AUTO_ENV_BASE_ANNOTATION, "true")
         classDef.SetAnnotation(CC_AUTO_ENV_GENERIC_BASE_ANNOTATION, "true")
-        classDef.EnableAttr(Attribute.ABSTRACT)
-        classDef.EnableAttr(Attribute.PUBLIC)
         AddClassToPackage(classDef)
         CreateVirtualFuncInAutoEnvBaseDef(classDef, GENERIC_VIRTUAL_FUNC, paramsAndRet)
         genericAutoEnvBaseDefs[className] = classDef
@@ -429,11 +456,9 @@ public class ClosureConversion {
         let classTy = builder.context.GetClassTy(classDef, ArrayList<Type>())
         classDef.SetType(classTy)
         classDef.SetSuperClassTy(builder.context.GetClassTy(superClass, funcTy.GetTypeArgs()))
-        MarkAutoEnvClass(classDef)
+        SetAutoEnvBaseDefAttr(classDef)
         classDef.SetAnnotation(CC_AUTO_ENV_BASE_ANNOTATION, "true")
         classDef.SetAnnotation(CC_AUTO_ENV_INST_BASE_ANNOTATION, "true")
-        classDef.EnableAttr(Attribute.ABSTRACT)
-        classDef.EnableAttr(Attribute.PUBLIC)
         AddClassToPackage(classDef)
         CreateVirtualFuncInAutoEnvBaseDef(classDef, INST_VIRTUAL_FUNC, funcTy.GetTypeArgs())
         instAutoEnvBaseDefs[className] = classDef
@@ -458,9 +483,11 @@ public class ClosureConversion {
             genericTypeParams: ArrayList<GenericType>())
         method.EnableAttr(Attribute.ABSTRACT)
         method.EnableAttr(Attribute.PUBLIC)
-        method.EnableAttr(Attribute.VIRTUAL)
-        for (paramTy in paramTypes) {
-            builder.CreateParameter(paramTy, INVALID_LOCATION, method)
+        method.EnableAttr(Attribute.NO_DEBUG_INFO)
+        var paramIdx: Int64 = 0
+        while (paramIdx + 1 < paramsAndRetType.size) {
+            builder.CreateParameter(paramTypes[paramIdx], INVALID_LOCATION, method)
+            paramIdx++
         }
         classDef.AddMethod(method)
         return method
@@ -516,7 +543,7 @@ public class ClosureConversion {
         }
         idx = 0
         while (idx < genericTypes.size) {
-            let newGeneric = classDef.GetGenericTypeParams()[idx]
+            let newGeneric = (classTypeArgs[idx] as GenericType).getOrThrow()
             let newBounds = ArrayList<Type>()
             for (bound in genericTypes[idx].GetUpperBounds()) {
                 newBounds.add(SubstituteGenericTypes(bound, genericMap))
@@ -538,9 +565,11 @@ public class ClosureConversion {
             }
         }
         classDef.SetSuperClassTy(builder.context.GetClassTy(superClassDef, superArgs))
-        MarkAutoEnvClass(classDef)
+        SetAutoEnvImplDefAttr(classDef)
+        if (!classTypeArgs.isEmpty()) {
+            classDef.EnableAttr(Attribute.GENERIC)
+        }
         classDef.SetAnnotation(CC_AUTO_ENV_IMPL_ANNOTATION, "true")
-        classDef.EnableAttr(Attribute.PUBLIC)
         AddClassToPackage(classDef)
         return classDef
     }
@@ -576,7 +605,7 @@ public class ClosureConversion {
         let methodTy = builder.context.GetFuncTy(params, boxedRetTy)
         let method = CreateCCFunction(methodTy, GenericOverrideFuncName(srcFunc), GENERIC_VIRTUAL_FUNC,
             genericTypeParams: ArrayList<GenericType>())
-        SetMemberMethodAttr(method)
+        SetMemberMethodAttr(method, srcFunc.TestAttr(Attribute.CONST))
         classDef.AddMethod(method)
         CreateGenericOverrideMethodBody(method, srcFunc, boxedRetTy, genericMap)
         return method
@@ -602,7 +631,7 @@ public class ClosureConversion {
         let methodTy = builder.context.GetFuncTy(params, retTy)
         let method = CreateCCFunction(methodTy, InstOverrideFuncName(srcFunc), INST_VIRTUAL_FUNC,
             genericTypeParams: ArrayList<GenericType>())
-        SetMemberMethodAttr(method)
+        SetMemberMethodAttr(method, srcFunc.TestAttr(Attribute.CONST))
         classDef.AddMethod(method)
         CreateOverrideMethodBody(method, srcFunc, retTy, genericMap, directParamsStart: 0)
         return Some(method)
@@ -1409,7 +1438,8 @@ public class ClosureConversion {
         if (let Some(calleeTy) <- callee.GetType()) {
             if (let Some(funcTy) <- (calleeTy as FuncType)) {
                 let baseDef = GetOrCreateAutoEnvBaseDef(funcTy)
-                return InstantiateAutoEnvBaseType(baseDef, ConvertFuncArgsAndRetType(funcTy))
+                let instParentType = InstantiateAutoEnvBaseType(baseDef, funcTy)
+                return InstantiateAutoEnvGenericBaseType(instParentType, call)
             }
             if (let Some(refTy) <- (calleeTy as RefType)) {
                 if (let Some(classTy) <- (refTy.GetBaseType() as ClassType)) {
@@ -1419,6 +1449,44 @@ public class ClosureConversion {
         }
         let _ = call
         throw IllegalStateException("not yet handled in ClosureConversion: applying non-AutoEnv callee")
+    }
+
+    private func GetAutoEnvGenericBase(closureType: ClassType): ClassType {
+        if (closureType.IsAutoEnvGenericBase()) {
+            return closureType
+        }
+        return GetAutoEnvGenericBase(closureType.GetSuperClassTy(builder: builder).getOrThrow())
+    }
+
+    private func InstantiateAutoEnvGenericBaseType(closureType: ClassType, expr: Expression): ClassType {
+        if (!closureType.IsGenericRelated()) {
+            return closureType
+        }
+        let funcTypeArgs = ArrayList<Type>()
+        if (let Some(apply) <- (expr as Apply)) {
+            for (arg in apply.GetArgs()) {
+                funcTypeArgs.add(arg.GetType().getOrThrow())
+            }
+        } else if (let Some(applyE) <- (expr as ApplyWithException)) {
+            for (arg in applyE.GetArgs()) {
+                funcTypeArgs.add(arg.GetType().getOrThrow())
+            }
+        } else {
+            return closureType
+        }
+        funcTypeArgs.add(expr.GetResultType().getOrThrow())
+        let autoEnvGenericBase = GetAutoEnvGenericBase(closureType)
+        let autoEnvTypeArgs = autoEnvGenericBase.GetGenericArgs()
+        let replaceTable = HashMap<Int64, Type>()
+        CJC_ASSERT(autoEnvTypeArgs.size == funcTypeArgs.size)
+        var idx: Int64 = 0
+        while (idx < funcTypeArgs.size) {
+            if (autoEnvTypeArgs[idx].IsGeneric() && !funcTypeArgs[idx].IsGeneric()) {
+                replaceTable[(autoEnvTypeArgs[idx] as GenericType).getOrThrow().objectId] = funcTypeArgs[idx]
+            }
+            idx++
+        }
+        return (ReplaceRawGenericArgType(closureType, replaceTable, builder) as ClassType).getOrThrow()
     }
 
     private func ResolveAutoEnvVirtualMethod(classTy: ClassType): Function {
@@ -1680,13 +1748,19 @@ public class ClosureConversion {
         let fn = builder.CreateFunction(funcTy, identifier, srcCodeIdentifier: srcCodeIdentifier,
             rawMangledName: identifier, packageName: CurrentPackage().GetName(),
             genericTypeParams: genericTypeParams)
-        AddFunctionToPackage(fn)
         return fn
     }
 
-    private func SetMemberMethodAttr(fn: Function): Unit {
+    private func SetMemberMethodAttr(fn: Function, isConst: Bool): Unit {
+        fn.EnableAttr(Attribute.COMPILER_ADD)
+        fn.EnableAttr(Attribute.NO_REFLECT_INFO)
+        fn.EnableAttr(Attribute.INTERNAL)
         fn.EnableAttr(Attribute.PUBLIC)
-        fn.EnableAttr(Attribute.VIRTUAL)
+        fn.EnableAttr(Attribute.NO_DEBUG_INFO)
+        fn.SetLinkTypeInfo(BasicLinkage.INTERNAL)
+        if (isConst) {
+            fn.EnableAttr(Attribute.CONST)
+        }
     }
 
     private func SetObjectSuperClass(classDef: ClassDef): Unit {
@@ -1699,10 +1773,16 @@ public class ClosureConversion {
         classDef.SetAnnotation(CC_AUTO_ENV_CLASS_ANNOTATION, "true")
     }
 
-    private func AddFunctionToPackage(fn: Function): Unit {
-        if (CurrentPackage().TryGetGlobalFunc(fn.GetIdentifier()).isNone()) {
-            CurrentPackage().AddGlobalFunc(fn)
-        }
+    private func SetAutoEnvImplDefAttr(classDef: ClassDef): Unit {
+        classDef.EnableAttr(Attribute.COMPILER_ADD)
+        classDef.EnableAttr(Attribute.NO_REFLECT_INFO)
+        MarkAutoEnvClass(classDef)
+        classDef.SetLinkTypeInfo(BasicLinkage.INTERNAL)
+    }
+
+    private func SetAutoEnvBaseDefAttr(classDef: ClassDef): Unit {
+        SetAutoEnvImplDefAttr(classDef)
+        classDef.EnableAttr(Attribute.ABSTRACT)
     }
 
     private func AddClassToPackage(classDef: ClassDef): Unit {
@@ -1720,14 +1800,6 @@ public class ClosureConversion {
             throw IllegalStateException("ClosureConversion class has no type: " + classDef.GetIdentifier())
         return (ty as ClassType) ??
             throw IllegalStateException("ClosureConversion class has no class type: " + classDef.GetIdentifier())
-    }
-
-    private func TypesFromGenerics(genericTypes: ArrayList<GenericType>): ArrayList<Type> {
-        let out = ArrayList<Type>()
-        for (genericTy in genericTypes) {
-            out.add(genericTy)
-        }
-        return out
     }
 
     private func FindMethodBySrcName(def: ClassDef, name: String): Option<Function> {
