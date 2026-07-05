@@ -414,12 +414,20 @@ public open class ToolChain {
     }
 
     protected func GetOutputFileInfo(objFiles: ArrayList<TempFileInfo>): TempFileInfo {
-        let kind = match (driverOptions.outputMode) {
-            case OutputMode.EXECUTABLE => TempFileKind.O_EXE
-            case OutputMode.STATIC_LIB => TempFileKind.O_STATICLIB
-            case OutputMode.SHARED_LIB => TempFileKind.O_DYLIB
-            case OutputMode.CHIR => TempFileKind.O_CHIR
-            case OutputMode.OBJ => TempFileKind.O_OBJ
+        // Faithful port of C++ ToolChain::GetOutputFileInfo (src/Driver/Toolchains/ToolChain.cpp:271-280):
+        // a macro-definition package links to a 'lib-macro_<pkg>' dynamic library (O_MACRO), which the
+        // macro evaluator dlopens by that exact name; it must not be named like an ordinary 'lib<pkg>'
+        // shared library. --compile-macro sets outputMode = SHARED_LIB, so this case must win over it.
+        let kind = if (driverOptions.compileMacro) {
+            TempFileKind.O_MACRO
+        } else {
+            match (driverOptions.outputMode) {
+                case OutputMode.EXECUTABLE => TempFileKind.O_EXE
+                case OutputMode.STATIC_LIB => TempFileKind.O_STATICLIB
+                case OutputMode.SHARED_LIB => TempFileKind.O_DYLIB
+                case OutputMode.CHIR => TempFileKind.O_CHIR
+                case OutputMode.OBJ => TempFileKind.O_OBJ
+            }
         }
         return CreateNewFileInfoWrapper(objFiles, kind)
     }
