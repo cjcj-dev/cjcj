@@ -3404,8 +3404,7 @@ public func DiagnoseForMultiMapping(diag: Option<BasicDiagnosticEngine>, ce: Cal
 // C++ vector), wrapped as a one-element list, so ExpandMultiTypeSubst is the sole multi-mapping
 // source; (2) CheckCandidateConstrains is NOT called here — the selfhost CheckCandidate tail runs
 // it commonly for both generic and non-generic (TypeCheckCall.cj:2408); (3) the per-mapping arg
-// check uses argChecker via CheckCallArgCompatible (selfhost callback pattern, = C++ CheckWithCache);
-// (4) CheckUseTrailingClosureWithFunctionType (C++ :1094) not yet ported (GAP_TODO below).
+// check uses argChecker via CheckCallArgCompatible (selfhost callback pattern, = C++ CheckWithCache).
 private func CheckGenericCallCompatible(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
     ctx: Option<ASTContext>, ce: CallExpr, fd: FuncDecl, paramTyInArgOrder: ArrayList<Ty>,
     target: Option<Ty>, argChecker: Option<CallArgChecker>,
@@ -3452,8 +3451,11 @@ private func CheckGenericCallCompatible(typeManager: TypeManager, diag: Option<B
                     matched = false
                     break
                 }
-                // GAP_TODO: CheckUseTrailingClosureWithFunctionType (C++ TypeCheckCall.cpp:1094)
-                // not yet ported; the trailing-closure-vs-non-function-param diagnostic is skipped.
+                // C++ TypeCheckCall.cpp:1094 — uses the original (pre-substitution) param type.
+                if (!CheckUseTrailingClosureWithFunctionType(diag, ce.args[i], paramTyInArgOrder[i], fd)) {
+                    matched = false
+                    break
+                }
                 currentCnt++
                 i++
             }
@@ -3477,4 +3479,43 @@ private func CheckGenericCallCompatible(typeManager: TypeManager, diag: Option<B
     }
     DiagnoseForMultiMapping(diag, ce, fd, typeMappings, resolved)
     return None
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:596 IsFunctionalType.
+private func IsFunctionalType(ty: Ty): Bool {
+    if (let Some(genericTy) <- (ty as GenericsTy)) {
+        for (upper in genericTy.upperBounds) {
+            if (upper.IsFunc()) {
+                return true
+            }
+        }
+        return false
+    }
+    return ty.IsFunc()
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:605 CheckUseTrailingClosureWithFunctionType.
+private func CheckUseTrailingClosureWithFunctionType(diag: Option<BasicDiagnosticEngine>, arg: FuncArg,
+    originalTy: Ty, candidate: FuncDecl): Bool {
+    // Implicit added func argument is added by trailing closure.
+    if (!arg.TestAttr(Attribute.IMPLICIT_ADD) || IsFunctionalType(originalTy)) {
+        return true
+    }
+    arg.SetTy(TypeManager.GetInvalidTy())
+    if (let Some(expr) <- arg.expr) {
+        expr.SetTy(TypeManager.GetInvalidTy())
+    }
+    let message = if (originalTy.IsGeneric()) {
+        "generic type without upper bound of function type"
+    } else {
+        "non-function type"
+    }
+    if (let Some(diagValue) <- diag) {
+        let builder = diagValue.DiagnoseRefactor(
+            BasicDiagKindRefactor.sema_trailing_lambda_cannot_used_for_non_function,
+            MakeRange(arg.begin, arg.end), arguments: [message])
+        builder.AddMainHintArguments(originalTy.String())
+        builder.AddNote(MakeRangeForDeclIdentifier(candidate), "found candidate")
+    }
+    return false
 }
