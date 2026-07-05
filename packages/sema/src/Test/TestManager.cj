@@ -216,6 +216,9 @@ public class TestManager {
         }
     }
 
+    // Carried for surface parity with C++ TestManager::PreparePackageForTestIfNeeded; the C++
+    // side also has no live caller in the compile pipeline (only an LSP/public entry), so this
+    // is intentionally left unwired.
     public func PreparePackageForTestIfNeeded(pkg: Package): Unit {
         MarkMockCreationContainingGenericFuncsInPackage(pkg)
         if (ShouldMarkMockSupported(pkg)) {

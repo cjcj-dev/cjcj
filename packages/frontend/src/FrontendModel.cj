@@ -6879,10 +6879,7 @@ public class TestManager {
     }
 
     public func MarkDeclsForTestIfNeeded(pkgs: ArrayList<Package>): Unit {
-        // S2: TestManager is now constructed and injected with the live import manager, but the
-        // mark pass is intentionally not yet delegated to impl. Wiring MarkDeclsForTestIfNeeded
-        // (and the GenericInstantiation mock hooks) to impl is slices S3/S4.
-        let _ = pkgs
+        impl.MarkDeclsForTestIfNeeded(pkgs)
     }
 }
 
