@@ -403,9 +403,16 @@ public class RuntimeInit {
     public func InitRuntime(runtimeLibPath: String, initArgs!: ArrayList<(String, String)> = ArrayList<(String, String)>()): Bool {
         if (!initRuntime) {
             let opened = OpenSymbolTable(runtimeLibPath)
-            if (!PrepareRuntime(opened, initArgs)) {
+            if (!opened.opened) {
                 return false
             }
+            // GAP_TODO(self-host runtime reuse): C++ initializes the Cangjie runtime here because
+            // the C++ compiler process has no live runtime. The self-host cjc is itself a Cangjie
+            // program with an already-running runtime, so CJ_RUNTIME_INIT reports "already
+            // initialized" and PrepareRuntime returns false. That is the expected self-host state,
+            // not a failure: reuse the running runtime by taking RunCJTask/ReleaseHandle from the
+            // (already-loaded) runtime library instead of re-initializing it.
+            let _ = PrepareRuntime(opened, initArgs)
             runtimeMethodFunc = GetMethodPointer(opened, CJ_NEW_TASK_FROM_C)
             runtimeReleaseFunc = GetMethodPointer(opened, CJ_RELEASE_HANDLE_FROM_C)
             if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull()) {

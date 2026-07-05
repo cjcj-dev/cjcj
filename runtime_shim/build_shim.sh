@@ -23,3 +23,16 @@ clang++ -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
 
 echo "built: $HERE/cjselfhost_llvmshim.o"
 nm -C "$HERE/cjselfhost_llvmshim.o" | grep -E ' T (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost)' || true
+
+# Macro runtime layout. The self-host cjc resolves the Cangjie runtime lib relative to its own
+# binary (CompilerInvocation.GetRuntimeLibPath: <cjc>/../runtime/lib/<host>, a faithful 1:1 port of
+# C++ which has no CANGJIE_HOME fallback). C++'s cjc is installed under CANGJIE_HOME/bin so the
+# sibling ../runtime resolves; the build-dir cjc (target/release/bin) has no sibling runtime/, so
+# link it to CANGJIE_HOME's runtime for in-process macro invocation. Deployment note: an installed
+# cjc needs no symlink — this is a build-layout shim, not a compiler-code change.
+REPO="$(cd "$HERE/.." && pwd)"
+if [ -n "${CANGJIE_HOME:-}" ] && [ -d "$CANGJIE_HOME/runtime" ]; then
+    mkdir -p "$REPO/target/release"
+    ln -sfn "$CANGJIE_HOME/runtime" "$REPO/target/release/runtime"
+    echo "linked runtime layout: $REPO/target/release/runtime -> $CANGJIE_HOME/runtime"
+fi
