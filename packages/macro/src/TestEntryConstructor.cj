@@ -13,7 +13,7 @@ public func MakeOwnedNodeDecl(kind: ASTKind): Decl {
 }
 
 public func CreateRefExpr(name: String): RefExpr {
-    let expr = RefExpr(name)
+    let expr = RefExpr(SrcIdentifier(name))
     expr.EnableAttr(Attribute.COMPILER_ADD)
     return expr
 }
@@ -21,7 +21,7 @@ public func CreateRefExpr(name: String): RefExpr {
 public func CreateMemberAccess(base: Expr, field: String): MemberAccess {
     let expr = MemberAccess()
     expr.baseExpr = Some(base)
-    expr.field = field
+    expr.field = SrcIdentifier(field)
     expr.EnableAttr(Attribute.COMPILER_ADD)
     return expr
 }
@@ -32,7 +32,7 @@ public func CreateCallExpr(base: Expr, args: ArrayList<FuncArg>, target!: Option
     for (arg in args) {
         expr.args.add(arg)
     }
-    expr.target = target
+    expr.resolvedFunction = target
     expr.EnableAttr(Attribute.COMPILER_ADD)
     return expr
 }
@@ -84,12 +84,19 @@ public class TestModule {
     }
 }
 
+private func classDeclMembers(classDecl: ClassDecl): ArrayList<Decl> {
+    if (let Some(body) <- classDecl.body) {
+        return body.decls
+    }
+    return ArrayList<Decl>()
+}
+
 private func isValidTestSuiteRegisterFunction(decl: Decl): Bool {
     if (let Some(funcDecl) <- (decl as FuncDecl)) {
-        if (funcDecl.funcBody.paramLists.size > 1) {
+        if (funcDecl.funcBody.getOrThrow().paramLists.size > 1) {
             return false
         }
-        if (funcDecl.funcBody.paramLists.size == 1 && !funcDecl.funcBody.paramLists[0].params.isEmpty()) {
+        if (funcDecl.funcBody.getOrThrow().paramLists.size == 1 && !funcDecl.funcBody.getOrThrow().paramLists[0].params.isEmpty()) {
             return false
         }
         return TestEntryConstructor.IsTestRegistrationFunction(funcDecl)
@@ -212,7 +219,7 @@ private func getClassFromMacro(med: MacroExpandDecl): Option<ClassDecl> {
 }
 
 private func isUnitFunction(fd: FuncDecl): Bool {
-    if (let Some(retType) <- fd.funcBody.retType) {
+    if (let Some(retType) <- fd.funcBody.getOrThrow().retType) {
         if (let Some(primitiveType) <- (retType as PrimitiveType)) {
             return TypeKindEquals(primitiveType.kind, TypeKind.TYPE_UNIT)
         }
@@ -224,12 +231,12 @@ private func isUnitFunction(fd: FuncDecl): Bool {
 private func hasParameterlessConstructor(classDecl: ClassDecl): Bool {
     var hasConstructorWithInput = false
     var hasConstructorWithoutInput = false
-    for (member in classDecl.members) {
+    for (member in classDeclMembers(classDecl)) {
         if (let Some(funcDecl) <- (member as FuncDecl)) {
             if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
-                if (!funcDecl.funcBody.paramLists.isEmpty() && funcDecl.funcBody.paramLists[0].params.isEmpty()) {
+                if (!funcDecl.funcBody.getOrThrow().paramLists.isEmpty() && funcDecl.funcBody.getOrThrow().paramLists[0].params.isEmpty()) {
                     hasConstructorWithoutInput = true
-                } else if (!funcDecl.funcBody.paramLists.isEmpty()) {
+                } else if (!funcDecl.funcBody.getOrThrow().paramLists.isEmpty()) {
                     hasConstructorWithInput = true
                 }
             }
@@ -256,19 +263,19 @@ private func getMainPartPackageName(packageName: String): String {
 }
 
 private func createMethodCall(refName: String, decl: FuncDecl, args: ArrayList<FuncArg>): CallExpr {
-    let method = CreateMemberAccess(CreateRefExpr(refName), decl.identifier)
+    let method = CreateMemberAccess(CreateRefExpr(refName), decl.identifier.GetRawText())
     method.target = Some(decl)
     return CreateCallExpr(method, args, target: Some(decl))
 }
 
 private func createSuiteVarDecl(varName: String, suiteName: String, suiteKind: String): VarDecl {
     let vd = VarDecl()
-    vd.identifier = varName
+    vd.identifier = SrcIdentifier(varName)
     vd.fullPackageName = suiteName
-    vd.declType = Some(CreateRefType(suiteKind))
+    vd.typeNode = Some(CreateRefType(suiteKind))
     let suiteNameArg = FuncArg()
     let suiteLiteral = LitConstExpr()
-    suiteLiteral.kind = TokenKind.STRING_LITERAL
+    suiteLiteral.kind = LitConstKind.STRING
     suiteLiteral.rawString = suiteName
     suiteNameArg.expr = Some(suiteLiteral)
     let suiteArgs = ArrayList<FuncArg>()
@@ -334,7 +341,7 @@ public class TestEntryConstructor {
         }
         for (anno in decl.annotations) {
             for (attr in anno.attrs) {
-                if (attr == TEST_REGISTER_ATTR) {
+                if (attr.Value() == TEST_REGISTER_ATTR) {
                     return true
                 }
             }
@@ -419,9 +426,9 @@ public class TestEntryConstructor {
             let testPkg = module.testPackages[idx]
             if (testPkg.packageName != pkg.fullPackageName && idx < module.testPackages.size - 1) {
                 let importSpec = ImportSpec()
-                importSpec.content.kind = "all"
+                importSpec.content.kind = ImportKind.IMPORT_ALL
                 importSpec.content.prefixPaths.add(testPkg.packageName)
-                importSpec.content.identifier = "*"
+                importSpec.content.identifier = Identifier("*")
                 pkg.files[0].imports.add(importSpec)
             }
             idx++
@@ -433,13 +440,15 @@ public class TestEntryConstructor {
             return
         }
         let entryFunc = FuncDecl()
-        entryFunc.identifier = TEST_ENTRY_NAME
+        entryFunc.identifier = SrcIdentifier(TEST_ENTRY_NAME)
         let packageName = getMainPartPackageName(pkg.fullPackageName)
         entryFunc.fullPackageName = packageName
         entryFunc.EnableAttr(Attribute.GLOBAL)
         entryFunc.EnableAttr(Attribute.COMPILER_ADD)
         entryFunc.curFile = Some(pkg.files[0])
-        entryFunc.funcBody.retType = Some(CreatePrimitiveType(TypeKind.TYPE_INT64))
+        let entryBody = FuncBody()
+        entryFunc.funcBody = Some(entryBody)
+        entryBody.retType = Some(CreatePrimitiveType(TypeKind.TYPE_INT64))
         let body = Block()
         body.body.add(createSuiteVarDecl("testPkg", packageName, "TestPackage"))
         if (mockEnabled) {
@@ -457,13 +466,13 @@ public class TestEntryConstructor {
         args.add(arg)
         let entryMainCall = CreateCallExpr(CreateRefExpr("entryMain"), args)
         let zero = LitConstExpr()
-        zero.kind = TokenKind.INTEGER_LITERAL
+        zero.kind = LitConstKind.INTEGER
         zero.rawString = "0"
         let binary = CreateBinaryExpr(entryMainCall, zero, TokenKind.GT)
         let thenBlock = Block()
         let retOne = ReturnExpr()
         let one = LitConstExpr()
-        one.kind = TokenKind.INTEGER_LITERAL
+        one.kind = LitConstKind.INTEGER
         one.rawString = "1"
         retOne.expr = Some(one)
         thenBlock.body.add(retOne)
@@ -471,23 +480,22 @@ public class TestEntryConstructor {
         body.body.add(ifExpr)
         let retZero = ReturnExpr()
         let zeroRet = LitConstExpr()
-        zeroRet.kind = TokenKind.INTEGER_LITERAL
+        zeroRet.kind = LitConstKind.INTEGER
         zeroRet.rawString = "0"
         retZero.expr = Some(zeroRet)
         body.body.add(retZero)
-        entryFunc.funcBody.body = Some(body)
-        entryFunc.funcBody.paramLists.add(FuncParamList())
-        entryFunc.funcBody.funcDecl = Some(entryFunc)
+        entryBody.body = Some(body)
+        entryBody.paramLists.add(FuncParamList())
+        entryBody.funcDecl = Some(entryFunc)
         pkg.files[0].decls.add(entryFunc)
     }
 
     public static func FindMainPartPkgForTestPkg(testPackage: Package, importedPkgs: ArrayList<PackageDecl>): Option<Package> {
         let mainPartPkgName = getMainPartPackageName(testPackage.fullPackageName)
         for (packageDecl in importedPkgs) {
-            if (let Some(srcPackage) <- packageDecl.srcPackage) {
-                if (srcPackage.fullPackageName == mainPartPkgName) {
-                    return Some(srcPackage)
-                }
+            let srcPackage = packageDecl.srcPackage
+            if (srcPackage.fullPackageName == mainPartPkgName) {
+                return Some(srcPackage)
             }
         }
         return None

@@ -218,7 +218,7 @@ public func AssignExprReplacement(target: ReplaceTarget, expr: Expr): Bool {
             }
         } else if (target.exprField == ExprFieldKind.FOR_IN_EXPR_VALUE) {
             if (let Some(parentForInExpr) <- (parentNode as ForInExpr)) {
-                parentForInExpr.inExpr = Some(expr)
+                parentForInExpr.inExpression = Some(expr)
                 return true
             }
         } else if (target.exprField == ExprFieldKind.FOR_IN_PATTERN_GUARD) {
@@ -334,7 +334,7 @@ public func UpdateMacroInfo(node: Node, collector: MacroCollector): Unit {
     } else if (let Some(doWhileExpr) <- (node as DoWhileExpr)) {
         updateExprField(doWhileExpr.condExpr, doWhileExpr, ExprFieldKind.DO_WHILE_COND_EXPR, collector)
     } else if (let Some(forInExpr) <- (node as ForInExpr)) {
-        updateExprField(forInExpr.inExpr, forInExpr, ExprFieldKind.FOR_IN_EXPR_VALUE, collector)
+        updateExprField(forInExpr.inExpression, forInExpr, ExprFieldKind.FOR_IN_EXPR_VALUE, collector)
         updateExprField(forInExpr.patternGuard, forInExpr, ExprFieldKind.FOR_IN_PATTERN_GUARD, collector)
     } else if (let Some(throwExpr) <- (node as ThrowExpr)) {
         updateExprField(throwExpr.expr, throwExpr, ExprFieldKind.THROW_EXPR_VALUE, collector)
@@ -357,11 +357,17 @@ public func UpdateMacroInfo(node: Node, collector: MacroCollector): Unit {
     } else if (let Some(varDecl) <- (node as VarDecl)) {
         updateExprField(varDecl.initializer, varDecl, ExprFieldKind.VAR_DECL_INITIALIZER, collector)
     } else if (let Some(classDecl) <- (node as ClassDecl)) {
-        updateDeclContainer(classDecl.members, classDecl, collector)
+        if (let Some(body) <- classDecl.body) {
+            updateDeclContainer(body.decls, classDecl, collector)
+        }
     } else if (let Some(structDecl) <- (node as StructDecl)) {
-        updateDeclContainer(structDecl.members, structDecl, collector)
+        if (let Some(body) <- structDecl.body) {
+            updateDeclContainer(body.decls, structDecl, collector)
+        }
     } else if (let Some(interfaceDecl) <- (node as InterfaceDecl)) {
-        updateDeclContainer(interfaceDecl.members, interfaceDecl, collector)
+        if (let Some(body) <- interfaceDecl.body) {
+            updateDeclContainer(body.decls, interfaceDecl, collector)
+        }
     } else if (let Some(enumDecl) <- (node as EnumDecl)) {
         updateDeclContainer(enumDecl.members, enumDecl, collector)
         updateDeclContainer(enumDecl.constructors, enumDecl, collector)

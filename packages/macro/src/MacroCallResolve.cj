@@ -133,7 +133,7 @@ private func collectParentMacroName(macCall: MacroCall): Unit {
 
 private func declMatchesMacroName(decl: Decl, macroName: String, identifier: String): Bool {
     if (macroName.contains(".")) {
-        return decl.identifier == identifier && (decl.fullPackageName + "." + decl.identifier == macroName ||
+        return decl.identifier == identifier && (decl.fullPackageName + "." + decl.identifier.GetRawText() == macroName ||
             decl.fullPackageName.endsWith(macroName[0..(macroName.size - identifier.size - 1)]))
     }
     return decl.identifier == macroName || decl.identifier == identifier
@@ -169,16 +169,15 @@ private func findImportedPackageByQualifier(instance: CompilerInstance, qualifie
     var foundName = ""
     var conflict = false
     for (packageDecl in instance.importManager.GetAllImportedPackages()) {
-        if (let Some(pkg) <- packageDecl.srcPackage) {
-            let matches = packageDecl.identifier == qualifier || packageDecl.fullPackageName == qualifier ||
-                pkg.fullPackageName == qualifier || pkg.fullPackageName.endsWith("." + qualifier)
-            if (matches) {
-                if (found.isSome() && foundName != pkg.fullPackageName) {
-                    conflict = true
-                } else if (found.isNone()) {
-                    found = Some(pkg)
-                    foundName = pkg.fullPackageName
-                }
+        let pkg = packageDecl.srcPackage
+        let matches = packageDecl.identifier == qualifier || packageDecl.fullPackageName == qualifier ||
+            pkg.fullPackageName == qualifier || pkg.fullPackageName.endsWith("." + qualifier)
+        if (matches) {
+            if (found.isSome() && foundName != pkg.fullPackageName) {
+                conflict = true
+            } else if (found.isNone()) {
+                found = Some(pkg)
+                foundName = pkg.fullPackageName
             }
         }
     }
@@ -231,10 +230,10 @@ private func getAllDeclsForMacroName(macCall: MacroCall, macroName: String, out:
 }
 
 private func firstParamCount(fd: FuncDecl): Int64 {
-    if (fd.funcBody.paramLists.isEmpty()) {
+    if (fd.funcBody.getOrThrow().paramLists.isEmpty()) {
         return 0
     }
-    return fd.funcBody.paramLists[0].params.size
+    return fd.funcBody.getOrThrow().paramLists[0].params.size
 }
 
 private func isMacroFuncDecl(decl: Decl): Bool {
@@ -279,7 +278,7 @@ private func getValidFuncDecl(macCall: MacroCall, decls: ArrayList<Decl>): Bool 
         }
         return false
     }
-    if (fds.size == 1 && !fds[0].funcBody.paramLists.isEmpty()) {
+    if (fds.size == 1 && !fds[0].funcBody.getOrThrow().paramLists.isEmpty()) {
         let argsSize = firstParamCount(fds[0])
         if (macCall.HasAttribute()) {
             if (argsSize != MACRO_ATTR_ARGS) {
@@ -299,8 +298,8 @@ private func getValidFuncDecl(macCall: MacroCall, decls: ArrayList<Decl>): Bool 
         macCall.BindDefinition(fds[0])
         return true
     }
-    if (fds.size == MACRO_DEF_NUM && !fds[0].funcBody.paramLists.isEmpty() &&
-        !fds[1].funcBody.paramLists.isEmpty()) {
+    if (fds.size == MACRO_DEF_NUM && !fds[0].funcBody.getOrThrow().paramLists.isEmpty() &&
+        !fds[1].funcBody.getOrThrow().paramLists.isEmpty()) {
         let argsSize1 = firstParamCount(fds[0])
         let argsSize2 = firstParamCount(fds[1])
         if (argsSize1 == argsSize2) {
@@ -381,7 +380,7 @@ private func findMacroDefPkg(macCall: MacroCall, instance: CompilerInstance, fd:
 
 private func bindInvokeFunc(macCall: MacroCall): Bool {
     if (let Some(fd) <- macCall.GetDefinition()) {
-        macCall.methodName = GetMacroFuncName(fd.fullPackageName, macCall.HasAttribute(), fd.identifier)
+        macCall.methodName = GetMacroFuncName(fd.fullPackageName, macCall.HasAttribute(), fd.identifier.GetRawText())
         macCall.packageName = fd.fullPackageName
         if (let Some(instance) <- macCall.ci) {
             if (instance.invocation.globalOptions.enableMacroInLSP) {

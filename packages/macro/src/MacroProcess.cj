@@ -451,11 +451,13 @@ private func setCurFileRecursive(node: Node, file: File): Unit {
         }
     }
     if (let Some(funcDecl) <- (node as FuncDecl)) {
-        for (list in funcDecl.funcBody.paramLists) {
-            setCurFileRecursive(list, file)
-        }
-        if (let Some(body) <- funcDecl.funcBody.body) {
-            setCurFileRecursive(body, file)
+        if (let Some(funcBody) <- funcDecl.funcBody) {
+            for (list in funcBody.paramLists) {
+                setCurFileRecursive(list, file)
+            }
+            if (let Some(body) <- funcBody.body) {
+                setCurFileRecursive(body, file)
+            }
         }
     }
 }

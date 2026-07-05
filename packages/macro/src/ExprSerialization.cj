@@ -10,7 +10,7 @@ public func SerializeExprForNodeWriter(writer: NodeWriter, expr: Expr): String {
         return "tokenPart(" + writer.SerializeTokenVector(tokenPart.tokens) + ")"
     }
     if (let Some(refExpr) <- (expr as RefExpr)) {
-        return "ref(" + writer.EscapeText(refExpr.refName) + ")"
+        return "ref(" + writer.EscapeText(refExpr.ref.identifier.GetRawText()) + ")"
     }
     if (let Some(call) <- (expr as CallExpr)) {
         return SerializeCallExprForNodeWriter(writer, call)
@@ -19,17 +19,21 @@ public func SerializeExprForNodeWriter(writer: NodeWriter, expr: Expr): String {
         return SerializeMemberAccessForNodeWriter(writer, member)
     }
     if (let Some(lit) <- (expr as LitConstExpr)) {
-        return "lit(" + TokenKindIndex(lit.kind).toString() + ":" + writer.EscapeText(lit.rawString) + ")"
+        return "lit(" + LitConstKindIndex(lit.kind).toString() + ":" + writer.EscapeText(lit.rawString) + ")"
     }
     if (let Some(primitiveTypeExpr) <- (expr as PrimitiveTypeExpr)) {
         return "primitiveTypeExpr(" + TypeKindName(primitiveTypeExpr.typeKind) + ")"
     }
-    if (let Some(exprList) <- (expr as ExprListExpr)) {
-        return SerializeExprVectorForNodeWriter(writer, "exprList:" + ASTKindIndex(exprList.astKind).toString(),
-            exprList.children)
+    if (let Some(tupleLit) <- (expr as TupleLit)) {
+        return SerializeExprVectorForNodeWriter(writer, "exprList:" + ASTKindIndex(tupleLit.astKind).toString(),
+            tupleLit.children)
+    }
+    if (let Some(arrayLit) <- (expr as ArrayLit)) {
+        return SerializeExprVectorForNodeWriter(writer, "exprList:" + ASTKindIndex(arrayLit.astKind).toString(),
+            arrayLit.children)
     }
     if (let Some(quoteExpr) <- (expr as QuoteExpr)) {
-        return "quote(tokens=" + writer.SerializeTokenVector(quoteExpr.tokens) + ";exprs=" +
+        return "quote(exprs=" +
             SerializeExprVectorForNodeWriter(writer, "items", quoteExpr.exprs) + ")"
     }
     if (let Some(parenExpr) <- (expr as ParenExpr)) {
@@ -254,7 +258,7 @@ public func SerializeMemberAccessForNodeWriter(writer: NodeWriter, member: Membe
     if (let Some(baseExpr) <- member.baseExpr) {
         builder.append(SerializeExprForNodeWriter(writer, baseExpr))
     }
-    builder.append("." + writer.EscapeText(member.field) + ")")
+    builder.append("." + writer.EscapeText(member.field.GetRawText()) + ")")
     return builder.toString()
 }
 
@@ -387,7 +391,7 @@ public func SerializeCondBodyExprForNodeWriter(
 }
 
 public func SerializeForInExprForNodeWriter(writer: NodeWriter, forInExpr: ForInExpr): String {
-    return "forIn(source=" + SerializeExprOptionForNodeWriter(writer, forInExpr.inExpr) + ";guard=" +
+    return "forIn(source=" + SerializeExprOptionForNodeWriter(writer, forInExpr.inExpression) + ";guard=" +
         SerializeExprOptionForNodeWriter(writer, forInExpr.patternGuard) + ";body=" +
         SerializeBlockOptionForNodeWriter(writer, forInExpr.body) + ")"
 }

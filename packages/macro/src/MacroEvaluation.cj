@@ -245,7 +245,7 @@ private func createMacroExpandFromTokens(inputTokens: ArrayList<Token>, atIndex:
     let decl = MacroExpandDecl()
     decl.begin = inputTokens[atIndex].Begin()
     let nameToken = inputTokens[atIndex + 1]
-    decl.identifier = nameToken.Value()
+    decl.identifier = SrcIdentifier(nameToken.Value(), nameToken.Begin(), nameToken.End(), false)
     decl.invocation.macroCallDiagInfo.fullName = nameToken.Value()
     decl.invocation.macroCallDiagInfo.identifier = nameToken.Value()
     decl.invocation.macroCallDiagInfo.identifierPos = nameToken.Begin()
@@ -479,7 +479,11 @@ private func checkMacroCallArgs(macCall: MacroCall, diag: DiagnosticEngine, comp
 }
 
 private func isDeprecatedAnnotation(anno: Annotation): Bool {
-    return anno.kind == "DEPRECATED" || anno.kind == "Deprecated" || anno.identifier.Val() == "Deprecated"
+    match (anno.kind) {
+        case DEPRECATED => return true
+        case _ => ()
+    }
+    return anno.identifier.Val() == "Deprecated"
 }
 
 private func needDeprecatedPoint(value: String): Bool {

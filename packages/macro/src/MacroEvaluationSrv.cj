@@ -138,7 +138,7 @@ extend MacroEvaluation {
         MacroEvalMsgSerializer.DeSerializeFullNameFromCall(fullName, text)
         decl.begin = begin.value
         decl.end = end.value
-        decl.identifier = id.value
+        decl.identifier = SrcIdentifier(id.value)
         decl.invocation.macroCallDiagInfo.identifier = id.value
         decl.invocation.macroCallDiagInfo.fullName = if (fullName.value.isEmpty()) { id.value } else { fullName.value }
         decl.invocation.macroCallDiagInfo.identifierPos = pos.value

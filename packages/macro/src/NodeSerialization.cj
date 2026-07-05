@@ -2,6 +2,11 @@ package cangjie_compiler::macro_pkg
 
 import std.collection.*
 
+// GAP_TODO: this NodeFormatTextV1 text serialization is a selfhost-local placeholder.
+// C++ NodeWriter emits a FlatBuffers binary payload (NodeSerialization.cpp:1147-1213) read
+// directly off the live AST. Field reads here now source from the same live ast.* members C++
+// reads, but the wire format (FlatBuffers) remains a separate campaign.
+
 public let INITIAL_FILE_SIZE: Int64 = 65536
 
 private func EscapeNodeText(value: String): String {
@@ -107,19 +112,19 @@ public class NodeWriter {
             return "constPattern(lit=" + SerializeExprOptionForNodeWriter(this, constPattern.literal) + ")"
         }
         if (let Some(varPattern) <- (pattern as VarPattern)) {
-            return "varPattern(" + EscapeNodeText(varPattern.identifier) + ";isVar=" +
-                varPattern.isVar.toString() + ")"
+            return "varPattern(" + EscapeNodeText(varPattern.Identifier().GetRawText()) + ";isVar=" +
+                varPattern.IsVar().toString() + ")"
         }
         if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
             return "tuplePattern(" + SerializePatternVector(tuplePattern.patterns) + ")"
         }
         if (let Some(enumPattern) <- (pattern as EnumPattern)) {
-            return "enumPattern(" + EscapeNodeText(enumPattern.constructor) + ";types=" +
+            return "enumPattern(" + SerializeExprOptionForNodeWriter(this, enumPattern.constructor) + ";types=" +
                 SerializeTypeVector(enumPattern.typeArguments) + ";patterns=" +
                 SerializePatternVector(enumPattern.patterns) + ")"
         }
         if (let Some(varOrEnumPattern) <- (pattern as VarOrEnumPattern)) {
-            return "varOrEnumPattern(" + EscapeNodeText(varOrEnumPattern.identifier) + ";pattern=" +
+            return "varOrEnumPattern(" + EscapeNodeText(varOrEnumPattern.identifier.GetRawText()) + ";pattern=" +
                 SerializePatternOption(varOrEnumPattern.pattern) + ")"
         }
         if (let Some(typePattern) <- (pattern as TypePattern)) {
@@ -188,12 +193,12 @@ public class NodeWriter {
             return "primitiveType(" + kindName + ")"
         }
         if (let Some(refType) <- (ty as RefType)) {
-            return "refType(" + EscapeNodeText(refType.name) + ";args=" + SerializeTypeVector(refType.typeArguments) +
+            return "refType(" + EscapeNodeText(refType.ref.identifier.GetRawText()) + ";args=" + SerializeTypeVector(refType.typeArguments) +
                 ")"
         }
         if (let Some(qualifiedType) <- (ty as QualifiedType)) {
             return "qualifiedType(base=" + SerializeTypeOptionForNodeWriter(this, qualifiedType.baseType) +
-                ";field=" + EscapeNodeText(qualifiedType.field) + ";args=" +
+                ";field=" + EscapeNodeText(qualifiedType.field.GetRawText()) + ";args=" +
                 SerializeTypeVector(qualifiedType.typeArguments) + ")"
         }
         if (let Some(optionType) <- (ty as OptionType)) {
@@ -220,7 +225,7 @@ public class NodeWriter {
         if (let Some(_) <- (ty as ThisType)) {
             return "thisType()"
         }
-        return "type(" + ASTKindIndex(ty.astKind).toString() + "," + EscapeNodeText(ty.name) + ")"
+        return "type(" + ASTKindIndex(ty.astKind).toString() + "," + EscapeNodeText(ty.ToString()) + ")"
     }
 
     public func SerializeAnnotation(annotation: Annotation): String {
@@ -233,7 +238,7 @@ public class NodeWriter {
                 if (idx > 0) {
                     builder.append(",")
                 }
-                builder.append(annotation.attrs[idx])
+                builder.append(annotation.attrs[idx].Value())
                 idx++
             }
             builder.append("]")
@@ -250,10 +255,12 @@ public class NodeWriter {
             return "macroExpandDecl(" + SerializeMacroInvocation(macroDecl.invocation) + ")"
         }
         if (let Some(macroFunc) <- (decl as MacroDecl)) {
-            return "macro(" + EscapeNodeText(macroFunc.identifier) + "," + SerializeFuncBody(macroFunc.funcBody) + ")"
+            return "macro(" + EscapeNodeText(macroFunc.identifier.GetRawText()) + "," +
+                SerializeFuncBodyOption(macroFunc.funcBody) + ")"
         }
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
-            return "func(" + EscapeNodeText(funcDecl.identifier) + "," + SerializeFuncBody(funcDecl.funcBody) + ")"
+            return "func(" + EscapeNodeText(funcDecl.identifier.GetRawText()) + "," +
+                SerializeFuncBodyOption(funcDecl.funcBody) + ")"
         }
         if (let Some(patternVarDecl) <- (decl as VarWithPatternDecl)) {
             return SerializeVarWithPatternDecl(patternVarDecl)
@@ -265,26 +272,29 @@ public class NodeWriter {
             return SerializeFuncParam(param)
         }
         if (let Some(classDecl) <- (decl as ClassDecl)) {
-            return SerializeMemberContainer("class", classDecl.identifier, classDecl.members)
+            let members = if (let Some(body) <- classDecl.body) { body.decls } else { ArrayList<Decl>() }
+            return SerializeMemberContainer("class", classDecl.identifier.GetRawText(), members)
         }
         if (let Some(structDecl) <- (decl as StructDecl)) {
-            return SerializeMemberContainer("struct", structDecl.identifier, structDecl.members)
+            let members = if (let Some(body) <- structDecl.body) { body.decls } else { ArrayList<Decl>() }
+            return SerializeMemberContainer("struct", structDecl.identifier.GetRawText(), members)
         }
         if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
-            return SerializeMemberContainer("interface", interfaceDecl.identifier, interfaceDecl.members)
+            let members = if (let Some(body) <- interfaceDecl.body) { body.decls } else { ArrayList<Decl>() }
+            return SerializeMemberContainer("interface", interfaceDecl.identifier.GetRawText(), members)
         }
         if (let Some(enumDecl) <- (decl as EnumDecl)) {
             return SerializeEnumDecl(enumDecl)
         }
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-            return SerializeMemberContainer("extend", extendDecl.identifier, extendDecl.members)
+            return SerializeMemberContainer("extend", extendDecl.identifier.GetRawText(), extendDecl.members)
         }
-        return "decl(" + ASTKindIndex(decl.astKind).toString() + "," + EscapeNodeText(decl.identifier) + ")"
+        return "decl(" + ASTKindIndex(decl.astKind).toString() + "," + EscapeNodeText(decl.identifier.GetRawText()) + ")"
     }
 
     private func SerializeEnumDecl(enumDecl: EnumDecl): String {
         let builder = StringBuilder()
-        builder.append("enum(" + EscapeNodeText(enumDecl.identifier) + ";hasArguments=" +
+        builder.append("enum(" + EscapeNodeText(enumDecl.identifier.GetRawText()) + ";hasArguments=" +
             enumDecl.hasArguments.toString() + ";constructors=[")
         var ctorIdx: Int64 = 0
         while (ctorIdx < enumDecl.constructors.size) {
@@ -324,23 +334,11 @@ public class NodeWriter {
 
     private func SerializeVarDecl(varDecl: VarDecl): String {
         let builder = StringBuilder()
-        builder.append("var(" + EscapeNodeText(varDecl.identifier))
-        if (let Some(declType) <- varDecl.declType) {
+        builder.append("var(" + EscapeNodeText(varDecl.identifier.GetRawText()))
+        if (let Some(declType) <- varDecl.typeNode) {
             builder.append(";type=" + SerializeType(declType))
         } else {
             builder.append(";type=none")
-        }
-        if (!varDecl.constructorTypes.isEmpty()) {
-            builder.append(";constructorTypes=[")
-            var typeIdx: Int64 = 0
-            while (typeIdx < varDecl.constructorTypes.size) {
-                if (typeIdx > 0) {
-                    builder.append(",")
-                }
-                builder.append(SerializeType(varDecl.constructorTypes[typeIdx]))
-                typeIdx++
-            }
-            builder.append("]")
         }
         if (let Some(initializer) <- varDecl.initializer) {
             builder.append(";init=" + SerializeExprForNodeWriter(this, initializer))
@@ -353,14 +351,14 @@ public class NodeWriter {
 
     private func SerializeVarWithPatternDecl(patternVarDecl: VarWithPatternDecl): String {
         let builder = StringBuilder()
-        builder.append("varPattern(" + EscapeNodeText(patternVarDecl.identifier))
+        builder.append("varPattern(" + EscapeNodeText(patternVarDecl.identifier.GetRawText()))
         builder.append(";isVar=" + patternVarDecl.isVar.toString())
         if (let Some(pattern) <- patternVarDecl.irrefutablePattern) {
             builder.append(";pattern=" + SerializePattern(pattern))
         } else {
             builder.append(";pattern=none")
         }
-        if (let Some(declType) <- patternVarDecl.declType) {
+        if (let Some(declType) <- patternVarDecl.typeNode) {
             builder.append(";type=" + SerializeType(declType))
         } else {
             builder.append(";type=none")
@@ -372,6 +370,13 @@ public class NodeWriter {
         }
         builder.append(")")
         return builder.toString()
+    }
+
+    public func SerializeFuncBodyOption(body: Option<FuncBody>): String {
+        if (let Some(value) <- body) {
+            return SerializeFuncBody(value)
+        }
+        return "none"
     }
 
     public func SerializeFuncBody(body: FuncBody): String {
@@ -419,7 +424,7 @@ public class NodeWriter {
 
     private func SerializeFuncParamBase(param: FuncParam): String {
         let builder = StringBuilder()
-        builder.append(EscapeNodeText(param.identifier))
+        builder.append(EscapeNodeText(param.identifier.GetRawText()))
         builder.append(";named=" + param.isNamedParam.toString())
         builder.append(";member=" + param.isMemberParam.toString())
         if (let Some(assignment) <- param.assignment) {
