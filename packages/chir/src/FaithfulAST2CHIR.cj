@@ -1244,6 +1244,8 @@ public class FaithfulAST2CHIR {
                 CollectFuncDecl(RequireFuncDecl(decl))
             case ASTKind.MAIN_DECL =>
                 CollectDesugarDecl(decl)
+            case ASTKind.MACRO_DECL =>
+                CollectDesugarDecl(decl)
             case ASTKind.VAR_DECL =>
                 CollectVarandVarwithpatternDecl(decl)
             case ASTKind.VAR_WITH_PATTERN_DECL =>
@@ -1330,6 +1332,14 @@ public class FaithfulAST2CHIR {
 
     private func CollectDesugarDecl(decl: AstDecl): Unit {
         if (decl.astKind == ASTKind.MAIN_DECL) {
+            // The desugarDecl has the attribute MAIN_ENTRY.
+            if (let Some(desugared) <- decl.GetDesugarDecl()) {
+                CollectFuncDecl(desugared)
+            }
+            return
+        }
+        if (decl.astKind == ASTKind.MACRO_DECL) {
+            // The desugarDecl has the attribute MACRO_FUNC.
             if (let Some(desugared) <- decl.GetDesugarDecl()) {
                 CollectFuncDecl(desugared)
             }
