@@ -1,0 +1,15 @@
+[macro-compile] rc=0
+
+[user-compile] rc=0
+
+[run] exit=3
+[control-compile] rc=0
+warning: unused import 'std.collection.*'
+ ==> <BUILD>/control/main.cj:8:1:
+  |
+8 | import std.collection.*
+  | ^^^^^^^^^^^^^^^^^^^^^^^ unused import
+  |
+  # note: this warning can be suppressed by setting the compiler option `-Woff unused`
+
+1 warning generated, 1 warning printed.

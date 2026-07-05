@@ -1,0 +1,5 @@
+[macro-compile] rc=0
+
+[user-compile] rc=0
+
+[run] exit=7
