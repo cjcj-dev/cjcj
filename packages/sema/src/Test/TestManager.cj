@@ -3,7 +3,7 @@ package cangjie_compiler::sema.Test
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::modules.ImportManager
+import cangjie_compiler::modules.SemaImportManager
 import cangjie_compiler::sema.TypeManager
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
@@ -189,7 +189,7 @@ public class TestManager {
     private let ctx: MockContext = MockContext()
     private var mockUtils: Option<MockUtils> = None
     private var mockManager: Option<MockManager> = None
-    private var importManager: ImportManager
+    private var importManager: SemaImportManager
     private var typeManager: TypeManager
     private var diag: BasicDiagnosticEngine
     private var testEnabled: Bool = false
@@ -198,7 +198,7 @@ public class TestManager {
     private var mockCompatible: Bool = false
     private var exportForTest: Bool = false
 
-    public init(importManager: ImportManager, typeManager: TypeManager, diag: BasicDiagnosticEngine,
+    public init(importManager: SemaImportManager, typeManager: TypeManager, diag: BasicDiagnosticEngine,
         compilationOptions: OptionGlobalOptions) {
         this.importManager = importManager
         this.typeManager = typeManager
@@ -306,7 +306,7 @@ public class TestManager {
         if (IsThereMockUsageInPackage(pkg)) {
             return true
         }
-        for (importedPkg in importManager.GetAllImportedPackages(includeMacroPkg: true)) {
+        for (importedPkg in importManager.GetAllImportedPackages(true)) {
             if (pkg.fullPackageName != importedPkg.srcPackage.fullPackageName &&
                 importedPkg.srcPackage.TestAttr(Attribute.MOCK_SUPPORTED)) {
                 return true
@@ -367,7 +367,7 @@ public class TestManager {
     }
 
     private func CheckIfNoMockSupportDependencies(pkg: Package): Unit {
-        for (importedPkg in importManager.GetAllImportedPackages(includeMacroPkg: true)) {
+        for (importedPkg in importManager.GetAllImportedPackages(true)) {
             if (pkg.fullPackageName != importedPkg.srcPackage.fullPackageName &&
                 importedPkg.srcPackage.TestAttr(Attribute.MOCK_SUPPORTED) &&
                 !pkg.TestAttr(Attribute.MOCK_SUPPORTED)) {

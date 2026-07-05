@@ -1,7 +1,7 @@
 package cangjie_compiler::sema.Test
 
 import cangjie_compiler::ast.*
-import cangjie_compiler::modules.ImportManager
+import cangjie_compiler::modules.SemaImportManager
 import cangjie_compiler::sema.TypeManager
 import cangjie_compiler::utils.DynamicCast
 
@@ -23,7 +23,7 @@ private let MOCK_ZERO_VALUE_NAME: String = "MockZeroValue"
 private let MOCKED_DECL_SUFFIX: String = "$Mocked"
 private let UNITTEST_MOCK_INTERNAL_PACKAGE_NAME: String = "std.unittest.mock.internal"
 
-private func GetDeclFromMockPackage<T>(importManager: ImportManager, identifier: String): Option<T> where T <: Decl {
+private func GetDeclFromMockPackage<T>(importManager: SemaImportManager, identifier: String): Option<T> where T <: Decl {
     if (let Some(decl) <- importManager.GetImportedDecl(UNITTEST_MOCK_INTERNAL_PACKAGE_NAME, identifier)) {
         return DynamicCast<T>(decl)
     }
@@ -89,7 +89,7 @@ extend MockKind <: Equatable<MockKind> {
 
 public class MockManager {
     private let typeManager: TypeManager
-    private let importManager: ImportManager
+    private let importManager: SemaImportManager
     private let mockUtils: MockUtils
 
     private var callHandlerDecl: Option<InterfaceDecl> = None
@@ -106,7 +106,7 @@ public class MockManager {
     private var requireMockObject: Option<FuncDecl> = None
     private var mockZeroValueDecl: Option<StructDecl> = None
 
-    public init(importManager: ImportManager, typeManager: TypeManager, mockUtils: MockUtils) {
+    public init(importManager: SemaImportManager, typeManager: TypeManager, mockUtils: MockUtils) {
         this.typeManager = typeManager
         this.importManager = importManager
         this.mockUtils = mockUtils
