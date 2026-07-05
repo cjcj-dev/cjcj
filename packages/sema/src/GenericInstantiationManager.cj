@@ -103,7 +103,21 @@ public class CompilerInstance {
                 return
             }
         }
+        var idx: Int64 = 0
+        while (idx < values.size) {
+            if (CompNodeByPos(decl, values[idx])) {
+                values.add(decl, at: idx)
+                return
+            }
+            idx++
+        }
         values.add(decl)
+    }
+
+    private func CompNodeByPos(left: Decl, right: Decl): Bool {
+        return left.begin.fileID < right.begin.fileID ||
+            (left.begin.fileID == right.begin.fileID && left.begin < right.begin) ||
+            (left.begin.fileID == right.begin.fileID && left.begin == right.begin && left.objectId < right.objectId)
     }
 
     private func SameImportedAwareDecl(left: Decl, right: Decl): Bool {

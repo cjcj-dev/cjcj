@@ -4656,7 +4656,7 @@ private class CjoPackageInfo {
     public var loader: Option<CjoSignatureMaterializer> = None
     public var pkg: Package
     public var pkgDecl: PackageDecl
-    public let declMap: HashMap<String, ArrayList<Decl>> = HashMap<String, ArrayList<Decl>>()
+    public let declMap: TreeMap<String, ArrayList<Decl>> = TreeMap<String, ArrayList<Decl>>()
     public let implicitDeclMap: HashMap<String, Decl> = HashMap<String, Decl>()
     public var onlyUsedByMacro: Bool = false
 
@@ -4904,19 +4904,19 @@ public class ImportManager <: SemaImportManager {
     private let loadingPackages: HashSet<String> = HashSet<String>()
     private let loadedPackages: HashSet<String> = HashSet<String>()
     private let sourcePackagesForMembers: ArrayList<Package> = ArrayList<Package>()
-    private let packageMembers: HashMap<String, HashMap<String, ArrayList<Decl>>> =
-        HashMap<String, HashMap<String, ArrayList<Decl>>>()
+    private let packageMembers: HashMap<String, TreeMap<String, ArrayList<Decl>>> =
+        HashMap<String, TreeMap<String, ArrayList<Decl>>>()
     private let packageMembersVisited: HashSet<String> = HashSet<String>()
     private let importedPackageNameMap: HashMap<Node, (String, Bool)> =
         HashMap<Node, (String, Bool)>()
     private let visitedPkgs: HashSet<String> = HashSet<String>()
     private let typeAliasCache: HashMap<Int64, Ty> = HashMap<Int64, Ty>()
     private let commonPartLoaders: ArrayList<CjoSignatureMaterializer> = ArrayList<CjoSignatureMaterializer>()
-    private let importedDeclsMap: HashMap<String, ArrayList<Decl>> = HashMap<String, ArrayList<Decl>>()
-    private let fileImportedDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
-        HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
-    private let fileUsedMacroDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
-        HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
+    private let importedDeclsMap: TreeMap<String, ArrayList<Decl>> = TreeMap<String, ArrayList<Decl>>()
+    private let fileImportedDeclsMap: HashMap<UInt64, TreeMap<String, ArrayList<Decl>>> =
+        HashMap<UInt64, TreeMap<String, ArrayList<Decl>>>()
+    private let fileUsedMacroDeclsMap: HashMap<UInt64, TreeMap<String, ArrayList<Decl>>> =
+        HashMap<UInt64, TreeMap<String, ArrayList<Decl>>>()
     private var canInlineImportedSource: Bool = false
     private var importSrcCode: Bool = true
     private var hasBuildIndex: Bool = false
@@ -5260,7 +5260,7 @@ public class ImportManager <: SemaImportManager {
 
     public func AddUsedMacroDecls(file: File, decl: Decl): Unit {
         if (!fileUsedMacroDeclsMap.contains(file.indexOfPackage)) {
-            fileUsedMacroDeclsMap[file.indexOfPackage] = HashMap<String, ArrayList<Decl>>()
+            fileUsedMacroDeclsMap[file.indexOfPackage] = TreeMap<String, ArrayList<Decl>>()
         }
         if (let Some(usedDeclMap) <- fileUsedMacroDeclsMap.get(file.indexOfPackage)) {
             PutImportedDecl(usedDeclMap, decl.fullPackageName, decl)
@@ -5379,7 +5379,7 @@ public class ImportManager <: SemaImportManager {
     }
 
     private func CollectDeclsFromImportToMap(srcFullPackageName: String, importSpec: ImportSpec,
-        targetMap: HashMap<String, ArrayList<Decl>>): Unit {
+        targetMap: TreeMap<String, ArrayList<Decl>>): Unit {
         if (importSpec.IsImportMulti()) {
             return
         }
@@ -5394,9 +5394,9 @@ public class ImportManager <: SemaImportManager {
         let relation = GetFrontendPackageRelation(srcFullPackageName, targetPackageName)
         let importLevel = GetAccessLevel(importSpec)
         if (importSpec.IsImportAll()) {
-            let members = GetPackageMembers(targetPackageName)
-            for (name in members.keys()) {
-                if (let Some(decls) <- members.get(name)) {
+            if (let Some(info) <- GetPackageInfo(targetPackageName)) {
+                for (name in info.declMap.keys()) {
+                    let decls = info.declMap.get(name) ?? continue
                     for (decl in decls) {
                         if (IsVisibleImportedDecl(importLevel, relation, decl)) {
                             PutImportedDecl(targetMap, name, decl)
@@ -5542,18 +5542,18 @@ public class ImportManager <: SemaImportManager {
     private func AddImportsToMap(
         importSpec: ImportSpec,
         importedPackage: String,
-        declMap: HashMap<String, ArrayList<Decl>>
+        declMap: TreeMap<String, ArrayList<Decl>>
     ): Unit {
         if (let None <- GetPackageInfo(importedPackage)) {
             return
         }
         let importLevel = GetAccessLevel(importSpec)
         if (importSpec.IsImportAll()) {
-            let members = GetPackageMembers(importedPackage)
-            for (name in members.keys()) {
-                if (let Some(decls) <- members.get(name)) {
+            if (let Some(info) <- GetPackageInfo(importedPackage)) {
+                for (name in info.declMap.keys()) {
+                    let decls = info.declMap.get(name) ?? continue
                     if (!declMap.contains(name)) {
-                        declMap[name] = ArrayList<Decl>()
+                        declMap.add(name, ArrayList<Decl>())
                     }
                     if (let Some(targetMap) <- declMap.get(name)) {
                         AddImportedDeclToMap(decls, targetMap, importLevel)
@@ -5573,14 +5573,14 @@ public class ImportManager <: SemaImportManager {
             sourceName
         }
         if (!declMap.contains(targetName)) {
-            declMap[targetName] = ArrayList<Decl>()
+            declMap.add(targetName, ArrayList<Decl>())
         }
         if (let Some(targetMap) <- declMap.get(targetName)) {
             AddImportedDeclToMap(decls, targetMap, importLevel)
         }
     }
 
-    private func AddDeclToMap(decl: Decl, declMap: HashMap<String, ArrayList<Decl>>): Unit {
+    private func AddDeclToMap(decl: Decl, declMap: TreeMap<String, ArrayList<Decl>>): Unit {
         if (decl.astKind == ASTKind.EXTEND_DECL) {
             return
         }
@@ -5605,9 +5605,9 @@ public class ImportManager <: SemaImportManager {
         PutImportedDecl(declMap, decl.identifier.Val(), decl)
     }
 
-    private func GetFileImportedDeclMap(fileHash: UInt64): HashMap<String, ArrayList<Decl>> {
+    private func GetFileImportedDeclMap(fileHash: UInt64): TreeMap<String, ArrayList<Decl>> {
         if (!fileImportedDeclsMap.contains(fileHash)) {
-            fileImportedDeclsMap[fileHash] = HashMap<String, ArrayList<Decl>>()
+            fileImportedDeclsMap[fileHash] = TreeMap<String, ArrayList<Decl>>()
         }
         return fileImportedDeclsMap.get(fileHash).getOrThrow()
     }
@@ -5706,9 +5706,9 @@ public class ImportManager <: SemaImportManager {
         return true
     }
 
-    private func PutImportedDecl(map: HashMap<String, ArrayList<Decl>>, name: String, decl: Decl): Unit {
+    private func PutImportedDecl(map: TreeMap<String, ArrayList<Decl>>, name: String, decl: Decl): Unit {
         if (!map.contains(name)) {
-            map[name] = ArrayList<Decl>()
+            map.add(name, ArrayList<Decl>())
         }
         if (let Some(values) <- map.get(name)) {
             AddDeclIfMissing(values, decl)
@@ -5721,7 +5721,21 @@ public class ImportManager <: SemaImportManager {
                 return
             }
         }
+        var idx: Int64 = 0
+        while (idx < values.size) {
+            if (CompNodeByPos(decl, values[idx])) {
+                values.add(decl, at: idx)
+                return
+            }
+            idx++
+        }
         values.add(decl)
+    }
+
+    private func CompNodeByPos(left: Decl, right: Decl): Bool {
+        return left.begin.fileID < right.begin.fileID ||
+            (left.begin.fileID == right.begin.fileID && left.begin < right.begin) ||
+            (left.begin.fileID == right.begin.fileID && left.begin == right.begin && left.objectId < right.objectId)
     }
 
     private func SameImportedAwareDecl(left: Decl, right: Decl): Bool {
@@ -5964,7 +5978,7 @@ public class ImportManager <: SemaImportManager {
         }
         let pkg = pkgOpt.getOrThrow()
         if (!packageMembers.contains(fullPackageName)) {
-            packageMembers[fullPackageName] = HashMap<String, ArrayList<Decl>>()
+            packageMembers[fullPackageName] = TreeMap<String, ArrayList<Decl>>()
         }
         let members = packageMembers.get(fullPackageName).getOrThrow()
         for (file in pkg.files) {
@@ -6011,7 +6025,7 @@ public class ImportManager <: SemaImportManager {
     private func AddReExportedMembers(
         importSpec: ImportSpec,
         importedPackage: String,
-        targetMembers: HashMap<String, ArrayList<Decl>>
+        targetMembers: TreeMap<String, ArrayList<Decl>>
     ): Unit {
         if (let None <- packageMembers.get(importedPackage)) {
             return
@@ -6038,7 +6052,7 @@ public class ImportManager <: SemaImportManager {
 
     private func AddImportedDeclsWithAccess(
         decls: ArrayList<Decl>,
-        targetMembers: HashMap<String, ArrayList<Decl>>,
+        targetMembers: TreeMap<String, ArrayList<Decl>>,
         targetName: String,
         importLevel: AccessLevel
     ): Unit {

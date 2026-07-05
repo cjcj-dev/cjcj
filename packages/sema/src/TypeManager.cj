@@ -328,12 +328,30 @@ public class TypeManager {
                         }
                     }
                     if (!found) {
+                        var idx: Int64 = 0
+                        while (idx < values.size) {
+                            if (CompNodeByPos(decl, values[idx])) {
+                                values.add(decl, at: idx)
+                                break
+                            }
+                            idx++
+                        }
+                        if (idx < values.size) {
+                            RecordTypeAlias(decl, name)
+                            continue
+                        }
                         values.add(decl)
                     }
                     RecordTypeAlias(decl, name)
                 }
             }
         }
+    }
+
+    private func CompNodeByPos(left: Decl, right: Decl): Bool {
+        return left.begin.fileID < right.begin.fileID ||
+            (left.begin.fileID == right.begin.fileID && left.begin < right.begin) ||
+            (left.begin.fileID == right.begin.fileID && left.begin == right.begin && left.objectId < right.objectId)
     }
 
     private func RecordTypeAlias(decl: Decl, alias: String): Unit {
