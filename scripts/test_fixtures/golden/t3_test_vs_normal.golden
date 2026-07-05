@@ -1,0 +1,17 @@
+[compile-normal] rc=0
+
+[run-normal] exit=0
+5
+[symbols-normal]
+  TestPackage=103
+  registerSuite=19
+  testEntry=129
+  ToMock=0
+[compile-test] rc=0
+
+[run-test] exit=0
+[symbols-test]
+  TestPackage=103
+  registerSuite=19
+  testEntry=129
+  ToMock=0

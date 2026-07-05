@@ -1,0 +1,8 @@
+[compile-test-mock] rc=0
+
+[run-test-mock] exit=0
+[symbols-test-mock]
+  TestPackage=111
+  registerSuite=23
+  testEntry=129
+  ToMock=25

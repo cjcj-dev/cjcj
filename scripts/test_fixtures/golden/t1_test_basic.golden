@@ -1,0 +1,8 @@
+[compile-test] rc=0
+
+[run-test] exit=0
+[symbols-test]
+  TestPackage=103
+  registerSuite=19
+  testEntry=129
+  ToMock=0
