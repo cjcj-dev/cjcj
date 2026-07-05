@@ -20,7 +20,13 @@ import cangjie_compiler::mangle.SPECIAL_NAME_FOR_INIT_RESET_FUNCTION
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, StaticCast}
 
-private let CANGJIE_SDK_VERSION: String = "1.1.0-alpha.20260331010029"
+// GAP_TODO(sdk-version-injection): C++ derives this from the CJ_SDK_VERSION build macro
+// (src/Basic/Version.cpp:18 CANGJIE_VERSION = CJ_SDK_VERSION), so it always matches the
+// toolchain that builds the compiler. The self-host build has no equivalent build-time
+// injection yet, so the value is hard-coded to the current toolchain version; it must be
+// bumped in lock-step with the runtime until an injection mechanism exists, otherwise the
+// runtime's CheckPackageCompatibility rejects (or, when absent, null-derefs on) the .so.
+private let CANGJIE_SDK_VERSION: String = "1.2.0-alpha.20260619020029"
 private let PKG_INIT_FUNC_METADATA: String = "pkg_init_func"
 private let HAS_INVOKED_PKG_INIT_LITERAL: String = "has_invoked_pkg_init_literal"
 
@@ -48,7 +54,13 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         for (chirFunc in subPackage.chirImportedCFuncs) {
             EmitImportedCFuncIR(cgMod, chirFunc)
         }
-        if (subPackage.mainModule && options.CompileExecutable()) {
+        if (subPackage.mainModule) {
+            // Mirror C++ EmitPackageIR.cpp:359: the main-module block runs for every output type,
+            // including libraries. Emitting the SDK version and the package-init-reset function is
+            // required for a shared/static library to be loadable by the runtime (the runtime reads
+            // the SDK version at dlopen time via CheckPackageCompatibility). Only the executable
+            // entry (main/cj_entry$) is output-type-specific, so its guard lives inside
+            // EmitMainFunctionIR (mirroring C++ EmitMain's internal CompileExecutable() early-return).
             EmitCJSDKVersion(cgMod)
             EmitMainFunctionIR(cgMod)
             RegisterExceptionRaiser(cgMod)
@@ -234,6 +246,21 @@ private func EmitCJSDKVersion(cgMod: CGModule): Unit {
 }
 
 private func EmitMainFunctionIR(cgMod: CGModule): Unit {
+    // Mirror C++ EmitMain (EmitPackageIR.cpp:253): the executable entry is only emitted when
+    // compiling an executable; for a library the runtime provides no `main`.
+    if (!cgMod.GetCGContext().GetCompileOptions().CompileExecutable()) {
+        return
+    }
+    // Mirror C++ EmitMain (EmitPackageIR.cpp:258-267): only the package that actually defines the
+    // user main emits `main`/`cj_entry$`. When mutually-dependent source packages are compiled
+    // together into one executable, a sibling package may *find* the user main as an IMPORTED
+    // declaration in its own CHIR; emitting the entry for it causes "multiple definition of
+    // `main`/`cj_entry$`" at link time. Skip when no user main is visible, or the visible one is
+    // imported from another package.
+    let userMainEntry = FindMainEntryFunction(cgMod)
+    if (userMainEntry.isNone() || userMainEntry.getOrThrow().TestAttr(Attribute.IMPORTED)) {
+        return
+    }
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
         var mainFunc = LLVMNullValue()
         try (mainName = unsafe { LibC.mallocCString("main") }.asResource()) {
