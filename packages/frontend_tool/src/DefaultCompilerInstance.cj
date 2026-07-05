@@ -3,6 +3,7 @@ package cangjie_compiler::frontend_tool
 import std.collection.*
 import cangjie_compiler::frontend.*
 import cangjie_compiler::option.OutputMode
+import cangjie_compiler::option.TempFileInfo
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.ProfileRecorder
 
@@ -97,7 +98,34 @@ public open class DefaultCompilerInstance {
     }
 
     public open func PerformCodeGen(): Bool {
-        return ProfiledBool("Main Stage", "CodeGen", { => PerformCodeGenImpl() })
+        return ProfiledBool("Main Stage", "CodeGen", { =>
+            if (!PerformCodeGenImpl()) {
+                return false
+            }
+            // Codegen rebuilds frontendOutputFiles from scratch for the emitted .bc modules
+            // (CodeGenBridge clears the list first), which drops any .cjo output the earlier SAVE_CJO
+            // stage would register. Re-register each serialized package .cjo here, after codegen, so
+            // the driver publishes <pkg>.cjo next to the built library, mirroring the C++ driver
+            // emitting the package interface alongside the object output.
+            if (ShouldSaveCjoForOutputMode()) {
+                RegisterCjoOutputs(core.GetSourcePackages())
+            }
+            return true
+        })
+    }
+
+    private func RegisterCjoOutputs(pkgs: ArrayList<Package>): Unit {
+        for (pkg in pkgs) {
+            if (pkg.IsEmpty()) {
+                continue
+            }
+            let cjoPath = invocation.globalOptions.GenerateCachedPathName(pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
+            invocation.globalOptions.cjoOutputFiles.add(TempFileInfo(
+                fileName: FileUtil.ToCjoFileName(pkg.fullPackageName),
+                filePath: cjoPath,
+                rawPath: cjoPath,
+                isFrontendOutput: true))
+        }
     }
 
     public open func PerformCjoSaving(): Bool {

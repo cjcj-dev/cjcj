@@ -1,7 +1,6 @@
 package cangjie_compiler::driver
 
 import std.collection.*
-import std.fs.Directory as FSDirectory
 import cangjie_compiler::frontend_tool.DriverOptions as FrontendToolDriverOptions
 import cangjie_compiler::frontend_tool.ExecuteFrontendWithResult
 
@@ -234,6 +233,15 @@ private func ApplyFrontendOutputs(opts: DriverOptions, frontendOpts: FrontendToo
             isFrontendOutput: output.isFrontendOutput,
             isForeignInput: output.isForeignInput))
     }
+    opts.cjoOutputFiles.clear()
+    for (output in frontendOpts.cjoOutputFiles) {
+        opts.cjoOutputFiles.add(TempFileInfo(
+            fileName: output.fileName,
+            filePath: output.filePath,
+            rawPath: output.rawPath,
+            isFrontendOutput: output.isFrontendOutput,
+            isForeignInput: output.isForeignInput))
+    }
     opts.inputCjoFile = frontendOpts.inputCjoFile
     opts.compilationCachedPath = frontendOpts.compilationCachedPath
     opts.compilationCachedDir = frontendOpts.compilationCachedDir
@@ -269,26 +277,28 @@ private func ReconcileFrontendOutputs(opts: DriverOptions): Bool {
 
 private func PublishFrontendCjoOutputs(opts: DriverOptions): Bool {
     if (!HasFrontendSourceInput(opts) || opts.IsEmitCHIREnable() || opts.frontendOnlyAction ||
-        opts.frontendOutputFiles.isEmpty()) {
+        opts.cjoOutputFiles.isEmpty()) {
         return true
     }
-    let sourceDir = FileUtil.GetDirPath(opts.frontendOutputFiles[0].filePath)
-    let outputDir = if (opts.output.isEmpty()) { "." } else { FileUtil.GetDirPath(opts.output) }
+    // Publish each source package's serialized .cjo into the output directory under its
+    // package-qualified name. The frontend registers these outputs (RegisterCjoOutputs) with fileName
+    // set to ToCjoFileName(pkg); the on-disk path is a hashed cached file, so it is renamed on publish
+    // for the importer to resolve it. When -o names a directory (e.g. --compile-macro), that
+    // directory is the output location; otherwise the .cjo sits next to the -o file.
+    let outputDir = if (opts.output.isEmpty()) {
+        "."
+    } else if (FileUtil.IsDir(opts.output)) {
+        opts.output
+    } else {
+        FileUtil.GetDirPath(opts.output)
+    }
     var copied = true
-    try {
-        for (info in FSDirectory.readFrom(sourceDir)) {
-            if (!info.isRegular() || FileUtil.GetFileExtension(info.name) != "cjo") {
-                continue
-            }
-            let source = FileUtil.JoinPath(sourceDir, info.name)
-            let target = FileUtil.JoinPath(outputDir, info.name)
-            if (source != target && !CopyFile(source, target)) {
-                eprintln("error: failed to publish CJO output: " + target)
-                copied = false
-            }
+    for (info in opts.cjoOutputFiles) {
+        let target = FileUtil.JoinPath(outputDir, info.fileName + ".cjo")
+        if (info.filePath != target && !CopyFile(info.filePath, target)) {
+            eprintln("error: failed to publish CJO output: " + target)
+            copied = false
         }
-    } catch (e: Exception) {
-        return true
     }
     return copied
 }

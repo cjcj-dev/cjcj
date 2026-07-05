@@ -293,6 +293,9 @@ public open class GlobalOptions <: Option {
     public let directBuiltinDependencies: HashSet<String> = HashSet<String>()
     public let indirectBuiltinDependencies: HashSet<String> = HashSet<String>()
     public let frontendOutputFiles: ArrayList<TempFileInfo> = ArrayList<TempFileInfo>()
+    // Serialized package .cjo outputs to publish next to the built library. Kept separate from
+    // frontendOutputFiles, which the backend consumes as bitcode inputs (a .cjo there breaks opt).
+    public let cjoOutputFiles: ArrayList<TempFileInfo> = ArrayList<TempFileInfo>()
     public let bcInputFiles: ArrayList<String> = ArrayList<String>()
     public let bcPackageNames: ArrayList<String> = ArrayList<String>()
     public let inputFileOrder: ArrayList<OrderedInput> = ArrayList<OrderedInput>()

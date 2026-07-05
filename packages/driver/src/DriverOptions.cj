@@ -150,6 +150,7 @@ public class DriverOptions {
     public let commonPartCjos: ArrayList<String> = ArrayList<String>()
     public let commonPartChirs: ArrayList<String> = ArrayList<String>()
     public let frontendOutputFiles: ArrayList<TempFileInfo> = ArrayList<TempFileInfo>()
+    public let cjoOutputFiles: ArrayList<TempFileInfo> = ArrayList<TempFileInfo>()
     public let symbolsNeedLocalized: ArrayList<String> = ArrayList<String>()
     public let symbolsNeedLocalizedPerPkg: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
     public let orderedInputObjs: ArrayList<OrderedInput> = ArrayList<OrderedInput>()
