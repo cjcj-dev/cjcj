@@ -2374,9 +2374,12 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     if (paramTyInArgOrder.size != ce.args.size) {
         return None
     }
-    let typeMapping = if (IsGenericCall(ctx, ce, fd)) {
-        match (GenerateTypeMappingForCall(typeManager, diag, ctx, ce, fd, paramTyInArgOrder, inferenceFailure, target,
-            argChecker)) {
+    let isGeneric = IsGenericCall(ctx, ce, fd)
+    let typeMapping = if (isGeneric) {
+        // C2c: generic calls go through CheckGenericCallCompatible (multi-mapping expand/resolve),
+        // which does its own per-mapping argument check; non-generic calls keep CheckCallCompatible.
+        match (CheckGenericCallCompatible(typeManager, diag, ctx, ce, fd, paramTyInArgOrder, target, argChecker,
+            inferenceFailure)) {
             case Some(value) => value
             case None => return None
         }
@@ -2385,7 +2388,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     }
     let unit = FunctionMatchingUnit(fd, paramTyInArgOrder, typeMapping)
     unit.argNameValid = argNamesValid
-    if (!CheckCallCompatible(typeManager, diag, ce, fd, unit, argChecker: argChecker)) {
+    if (!isGeneric && !CheckCallCompatible(typeManager, diag, ce, fd, unit, argChecker: argChecker)) {
         return None
     }
     if (NeedSynOnUsed(fd)) {
@@ -3394,4 +3397,84 @@ public func DiagnoseForMultiMapping(diag: Option<BasicDiagnosticEngine>, ce: Cal
     } else {
         DiagOld(diagValue, ce, BasicDiagKind.sema_ambiguous_arg_type)
     }
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:1053 CheckGenericCallCompatible.
+// Deviations (all flagged): (1) selfhost GenerateTypeMappingForCall yields a single mapping (vs
+// C++ vector), wrapped as a one-element list, so ExpandMultiTypeSubst is the sole multi-mapping
+// source; (2) CheckCandidateConstrains is NOT called here — the selfhost CheckCandidate tail runs
+// it commonly for both generic and non-generic (TypeCheckCall.cj:2408); (3) the per-mapping arg
+// check uses argChecker via CheckCallArgCompatible (selfhost callback pattern, = C++ CheckWithCache);
+// (4) CheckUseTrailingClosureWithFunctionType (C++ :1094) not yet ported (GAP_TODO below).
+private func CheckGenericCallCompatible(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ctx: Option<ASTContext>, ce: CallExpr, fd: FuncDecl, paramTyInArgOrder: ArrayList<Ty>,
+    target: Option<Ty>, argChecker: Option<CallArgChecker>,
+    inferenceFailure: Option<CallInferenceFailure>): Option<SubstPack> {
+    let firstMapping = match (GenerateTypeMappingForCall(typeManager, diag, ctx, ce, fd, paramTyInArgOrder,
+        inferenceFailure, target, argChecker)) {
+        case Some(v) => v
+        case None => return None
+    }
+    let typeMappings = ArrayList<SubstPack>()
+    typeMappings.add(firstMapping)
+    FilterAndReduceSubstPacks(typeMappings, typeManager)
+    if (typeMappings.isEmpty()) {
+        return None
+    }
+    if (paramTyInArgOrder.size != ce.args.size) {
+        return None
+    }
+    let usedTys = TySet()
+    if (let Some(fdTy) <- fd.GetTy()) {
+        usedTys.Add(fdTy)
+    }
+    usedTys.AddAll(GetGenericParamsForCall(ce, fd))
+    let resMappings = ArrayList<SubstPack>()
+    for (mts in typeMappings) {
+        for (m in ExpandMultiTypeSubst(mts, usedTys)) {
+            resMappings.add(m)
+        }
+    }
+    var matchedCnt: Int64 = 0
+    var mi = 0
+    while (mi < resMappings.size) {
+        let mapping = resMappings[mi]
+        var matched = true
+        var currentCnt = 0
+        try (ds = DiagSuppressor(diag)) {
+            var i = 0
+            while (i < paramTyInArgOrder.size) {
+                var paramTy = paramTyInArgOrder[i]
+                if (paramTy.HasGeneric()) {
+                    paramTy = typeManager.ApplySubstPack(paramTy, mapping)
+                }
+                if (!CheckCallArgCompatible(typeManager, diag, ce, i, paramTy, argChecker)) {
+                    matched = false
+                    break
+                }
+                // GAP_TODO: CheckUseTrailingClosureWithFunctionType (C++ TypeCheckCall.cpp:1094)
+                // not yet ported; the trailing-closure-vs-non-function-param diagnostic is skipped.
+                currentCnt++
+                i++
+            }
+            if (currentCnt > matchedCnt) {
+                matchedCnt = currentCnt
+            }
+            if (matched || resMappings.size == 1) {
+                ds.ReportDiag()
+            }
+        }
+        if (matched) {
+            mi++
+        } else {
+            resMappings.remove(at: mi)
+        }
+    }
+    let _ = matchedCnt
+    let resolved = ResolveTypeMappings(typeManager, resMappings, fd)
+    if (resolved.size == 1) {
+        return Some(resolved[0])
+    }
+    DiagnoseForMultiMapping(diag, ce, fd, typeMappings, resolved)
+    return None
 }
