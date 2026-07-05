@@ -4921,6 +4921,10 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         HashMap<UInt64, TreeMap<String, ArrayList<Decl>>>()
     private let fileUsedMacroDeclsMap: HashMap<UInt64, TreeMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, TreeMap<String, ArrayList<Decl>>>()
+    // Macro packages directly imported by a source package (keyed by full package name to dedupe).
+    // Populated per source package during import resolution (UpdateMacroPackageUsage); exposed via
+    // GetImportedPkgsForMacro for the macro-expansion pipeline.
+    private let directMacroDeps: HashMap<String, Package> = HashMap<String, Package>()
     private var canInlineImportedSource: Bool = false
     private var importSrcCode: Bool = true
     private var hasBuildIndex: Bool = false
@@ -5238,6 +5242,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         importedDeclsMap.clear()
         fileImportedDeclsMap.clear()
         fileUsedMacroDeclsMap.clear()
+        directMacroDeps.clear()
         for (pkg in pkgs) {
             if (pkg.fullPackageName.isEmpty()) {
                 diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "empty package name")
@@ -5258,6 +5263,12 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         }
         for (pkg in pkgs) {
             AddImportedDeclsForSourcePackage(pkg)
+        }
+        // Record each source package's directly-imported macro packages after the dependency graph is
+        // built. Faithful to C++ ImportManager::ResolveImports -> UpdateMacroPackageUsage
+        // (src/Modules/ImportManager.cpp:594-597,538-546): only direct (not transitive) imports count.
+        for (pkg in pkgs) {
+            UpdateMacroPackageUsage(pkg)
         }
         CheckImports(pkgs)
         for (pd in GetAllPackageDecls()) {
@@ -5400,6 +5411,30 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         let out = ArrayList<Package>()
         for (pkgDecl in dependencyGraph.getOrThrow().GetDirectDependencyPackageDecls(fullPackageName)) {
             out.add(pkgDecl.srcPackage)
+        }
+        return out
+    }
+
+    // Faithful port of C++ ImportManager::UpdateMacroPackageUsage (src/Modules/ImportManager.cpp:538-546):
+    // record the macro packages that pkg imports directly (GetCurImportedPackages returns direct
+    // dependencies only), skipping compiler/tool-injected packages. Transitively-imported macro
+    // packages are intentionally excluded.
+    private func UpdateMacroPackageUsage(pkg: Package): Unit {
+        for (importedPkg in GetCurImportedPackages(pkg.fullPackageName)) {
+            if (!importedPkg.TestAttr(Attribute.TOOL_ADD) && importedPkg.isMacroPackage) {
+                directMacroDeps[importedPkg.fullPackageName] = importedPkg
+            }
+        }
+    }
+
+    // Faithful port of C++ ImportManager::GetImportedPkgsForMacro (include/cangjie/Modules/ImportManager.h:246-249):
+    // the set of macro packages directly imported by the compiled source packages.
+    public func GetImportedPkgsForMacro(): ArrayList<Package> {
+        let out = ArrayList<Package>()
+        for (name in directMacroDeps.keys()) {
+            if (let Some(pkg) <- directMacroDeps.get(name)) {
+                out.add(pkg)
+            }
         }
         return out
     }
