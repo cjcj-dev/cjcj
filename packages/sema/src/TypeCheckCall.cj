@@ -3310,3 +3310,88 @@ public func FilterAndReduceSubstPacks(mapsList: ArrayList<SubstPack>, typeManage
         mapsList.add(maps)
     }
 }
+
+// C++ src/Sema/TypeCheckCall.cpp:268 ResolveTypeMappings.
+// (CompareParamTys is already present as the private helper above at :938 — same as C++ :246.)
+// Deviation: C++ handles the pathological both-null FuncTy cast (nullptr==nullptr) by marking j
+// redundant; fd.GetTy() is asserted a func and ApplySubstPack preserves func-ness, so that case
+// cannot arise here and is skipped.
+public func ResolveTypeMappings(typeManager: TypeManager, typeMappings: ArrayList<SubstPack>,
+    fd: FuncDecl): ArrayList<SubstPack> {
+    let mappingSize = typeMappings.size
+    let matchMark = ArrayList<Bool>()
+    for (_ in 0..mappingSize) {
+        matchMark.add(true)
+    }
+    let fdTy = fd.GetTy().getOrThrow()
+    var i = 0
+    while (i < mappingSize) {
+        if (!matchMark[i]) {
+            i++
+            continue
+        }
+        var j = i + 1
+        while (j < mappingSize) {
+            if (!matchMark[j]) {
+                j++
+                continue
+            }
+            if (let Some(iTy) <- (typeManager.ApplySubstPack(fdTy, typeMappings[i]) as FuncTy)) {
+                if (let Some(jTy) <- (typeManager.ApplySubstPack(fdTy, typeMappings[j]) as FuncTy)) {
+                    if (SameTy(iTy, jTy)) {
+                        matchMark[j] = false
+                        j++
+                        continue
+                    }
+                    let iToJ = CompareParamTys(typeManager, iTy.paramTys, jTy.paramTys)
+                    let jToI = CompareParamTys(typeManager, jTy.paramTys, iTy.paramTys)
+                    if (iToJ && !jToI) {
+                        matchMark[j] = false
+                    } else if (!iToJ && jToI) {
+                        matchMark[i] = false
+                        break
+                    }
+                }
+            }
+            j++
+        }
+        i++
+    }
+    let resMappings = ArrayList<SubstPack>()
+    var k = 0
+    while (k < mappingSize) {
+        if (matchMark[k]) {
+            resMappings.add(typeMappings[k])
+        }
+        k++
+    }
+    return resMappings
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:309 DiagnoseForMultiMapping.
+public func DiagnoseForMultiMapping(diag: Option<BasicDiagnosticEngine>, ce: CallExpr, fd: FuncDecl,
+    typeMappings: ArrayList<SubstPack>, resMappings: ArrayList<SubstPack>): Unit {
+    let diagValue = match (diag) {
+        case Some(d) => d
+        case None => return
+    }
+    // Do not know how to skip the whole type checking process at some earlier stage for function
+    // calls. Patch here: skip when any argument has an invalid type.
+    for (arg in ce.args) {
+        if (let Some(expr) <- arg.expr) {
+            if (let Some(argTy) <- expr.GetTy()) {
+                if (argTy.IsInvalid()) {
+                    return
+                }
+            }
+        }
+    }
+    if (resMappings.isEmpty()) {
+        DiagOld(diagValue, ce, BasicDiagKind.sema_parameters_and_arguments_mismatch)
+    } else if (resMappings.size > typeMappings.size) {
+        DiagOldStrings(diagValue, ce, BasicDiagKind.sema_generic_ambiguous_method_match_in_upper_bounds,
+            [fd.identifier.Val()])
+    } else {
+        DiagOld(diagValue, ce, BasicDiagKind.sema_ambiguous_arg_type)
+    }
+}
