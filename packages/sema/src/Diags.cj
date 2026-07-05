@@ -183,3 +183,26 @@ public func DiagMismatchedTypes(diag: BasicDiagnosticEngine, node: Node, target:
     }
     DiagMismatchedTypesWithFoundTy(diag, node, target, node.GetTy().getOrThrow(), note: note)
 }
+
+public func DiagMismatchedTypes(diag: BasicDiagnosticEngine, node: Node, typeNode: Node,
+    because!: String = ""): Unit {
+    if (!Ty.IsTyCorrect(node.GetTy())) {
+        return
+    }
+    let typeTy = typeNode.GetTy().getOrThrow()
+    CJC_ASSERT(Ty.IsTyCorrect(typeTy))
+    if (typeNode.ShouldDiagnose() && !because.isEmpty()) {
+        let builder = diag.DiagnoseRefactor(
+            BasicDiagKindRefactor.sema_mismatched_types_because,
+            MakeRange(node.begin, node.end))
+        var tyStr = node.GetTy().getOrThrow().String()
+        if (let Some(thisTy) <- (node.GetTy().getOrThrow() as ClassThisTy)) {
+            tyStr = ClassTy(thisTy.name, thisTy.declPtr.getOrThrow(), thisTy.typeArgs.toArray()).String()
+        }
+        builder.AddMainHintArguments(typeTy.String(), tyStr)
+        builder.AddHint(MakeRange(typeNode.begin, typeNode.end), arguments: [typeTy.String(), because])
+        builder.Emit()
+    } else {
+        DiagMismatchedTypesWithFoundTy(diag, node, typeTy, node.GetTy().getOrThrow())
+    }
+}

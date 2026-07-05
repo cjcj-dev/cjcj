@@ -1936,6 +1936,81 @@ public class TypeChecker {
         return true
     }
 
+    private func CheckBodyRetType(ctx: ASTContext, fb: FuncBody): Bool {
+        let retType = fb.retType.getOrThrow()
+        let retTy = retType.GetTy().getOrThrow()
+        if (let None <- fb.body) {
+            if (retTy.HasQuestTy()) {
+                retType.SetTy(TypeManager.GetInvalidTy())
+                return false
+            }
+            return true
+        }
+        let body = fb.body.getOrThrow()
+        if (retTy.IsQuest()) {
+            let ret = Synthesize(ctx, SynPos.NONE, body)
+            if ((let None <- fb.funcDecl) && !Ty.IsTyCorrect(ret)) {
+                retType.SetTy(TypeManager.GetInvalidTy())
+                return false
+            }
+            retType.SetTy(CalcFuncRetTyFromBody(fb))
+            var isWellTyped = Ty.IsTyCorrect(retType.GetTy())
+            if (retType.GetTy().getOrThrow().HasQuestTy()) {
+                isWellTyped = false
+                retType.SetTy(TypeManager.GetInvalidTy())
+                if (!CanSkipDiag(fb)) {
+                    if (let Some(diagValue) <- impl.diag) {
+                        DiagUnableToInferReturnType(diagValue, fb)
+                    }
+                }
+            }
+            if (isWellTyped) {
+                if (CheckReturnThisInFuncBody(fb)) {
+                    ReplaceFuncRetTyWithThis(fb, retType.GetTy().getOrThrow())
+                } else if (let Some(classThisTy) <- (retType.GetTy().getOrThrow() as ClassThisTy)) {
+                    retType.SetTy(classThisTy.declPtr.getOrThrow().GetTy().getOrThrow())
+                }
+            }
+            return isWellTyped
+        } else {
+            var isWellTyped = true
+            if (retTy.IsUnit()) {
+                isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, body))
+            } else if (NeedCheckBodyReturn(fb)) {
+                isWellTyped = Check(ctx, retTy, body)
+                if (!isWellTyped && body.body.isEmpty()) {
+                    if (let Some(diagValue2) <- impl.diag) {
+                        DiagMismatchedTypes(diagValue2, body, retType, because: "return type")
+                    }
+                }
+                if (isWellTyped && (retType.GetTy().getOrThrow() as ClassThisTy).isSome()) {
+                    var node = body.body[body.body.size - 1]
+                    while (true) {
+                        if (let Some(expr) <- (node as Expr)) {
+                            if (let Some(desugarExpr) <- expr.desugarExpr) {
+                                node = desugarExpr
+                                continue
+                            }
+                        }
+                        break
+                    }
+                    let kind = node.astKind
+                    if (kind != ASTKind.CALL_EXPR && kind != ASTKind.MEMBER_ACCESS && kind != ASTKind.REF_EXPR &&
+                        kind != ASTKind.RETURN_EXPR && kind != ASTKind.PAREN_EXPR) {
+                        body.SetTy(impl.typeManager.GetThisRealTy(body.GetTy().getOrThrow()))
+                    }
+                    if (!CheckReturnThisInFuncBody(fb) && !retType.GetTy().getOrThrow().IsNothing()) {
+                        if (let Some(diagValue3) <- impl.diag) {
+                            DiagMismatchedTypes(diagValue3, body, retType, because: "return type")
+                        }
+                        isWellTyped = false
+                    }
+                }
+            }
+            return isWellTyped
+        }
+    }
+
     private func ReplaceFuncRetTyWithThis(fb: FuncBody, ty: Ty): Unit {
         if (let Some(classTy) <- (ty as ClassTy)) {
             let refType = RefType()
@@ -1953,6 +2028,36 @@ public class TypeChecker {
         }
     }
 
+    private func CheckFuncBody(ctx: ASTContext, fb: FuncBody): Bool {
+        if (let Some(retType) <- fb.retType) {
+            let _ = SynthesizeNode(ctx, SynPos.NONE, retType)
+        } else {
+            AddRetTypeNode(fb)
+        }
+
+        if (let Some(funcDecl) <- fb.funcDecl) {
+            if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+                CheckCtorFuncBody(ctx, fb)
+                return true
+            }
+        }
+
+        if (!CheckThisTypeOfFuncBody(fb)) {
+            if (let Some(diagValue) <- impl.diag) {
+                let retType2 = fb.retType.getOrThrow()
+                diagValue.Diagnose(
+                    retType2.begin,
+                    retType2.end,
+                    BasicDiagKind.sema_invalid_position_of_this_type).Emit()
+            }
+        }
+        let paramTys = ArrayList<Ty>()
+        if (!CheckNormalFuncBody(ctx, fb, paramTys)) {
+            return false
+        }
+        return true
+    }
+
     private func AddRetTypeNode(fb: FuncBody): Unit {
         if (let None <- fb.retType) {
             fb.retType = Some(RefType())
@@ -1961,6 +2066,64 @@ public class TypeChecker {
         retType.EnableAttr(Attribute.COMPILER_ADD)
         retType.SetTy(TypeManager.GetQuestTy())
         retType.EnableAttr(Attribute.IS_CHECK_VISITED)
+    }
+
+    private func CheckNormalFuncBody(ctx: ASTContext, fb: FuncBody, paramTys: ArrayList<Ty>): Bool {
+        if (fb.paramLists.isEmpty()) {
+            return false
+        }
+        CheckFuncParamList(ctx, fb.paramLists[0])
+        paramTys.clear()
+        let funcBodyParamTys = GetFuncBodyParamTys(fb)
+        for (paramTy in funcBodyParamTys) {
+            paramTys.add(paramTy)
+        }
+
+        let isCFFIBackend = OptionIsUnsafeBackend(GlobalOptions().backend)
+        var isCFunc = fb.TestAttr(Attribute.C)
+        if (!isCFunc) {
+            if (let Some(funcDecl) <- fb.funcDecl) {
+                isCFunc = funcDecl.TestAttr(Attribute.FOREIGN) && isCFFIBackend
+            }
+        }
+        var hasVariableLenArg = fb.paramLists[0].hasVariableLenArg
+        if (let Some(funcDecl2) <- fb.funcDecl) {
+            hasVariableLenArg = funcDecl2.hasVariableLenArg || hasVariableLenArg
+        }
+        let cfg = FuncTyConfig()
+        cfg.isC = isCFunc
+        cfg.hasVariableLenArg = hasVariableLenArg
+        let retType = fb.retType.getOrThrow()
+        if (!Ty.IsTyCorrect(retType.GetTy())) {
+            if (!fb.TestAttr(Attribute.IS_CHECK_VISITED)) {
+                fb.EnableAttr(Attribute.IS_CHECK_VISITED)
+                let _ = Synthesize(ctx, SynPos.NONE, fb.body.getOrThrow())
+            }
+            fb.SetTy(impl.typeManager.GetFunctionTy(paramTys.toArray(), retType.GetTy().getOrThrow(), cfg: cfg))
+            return false
+        }
+
+        var funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), retType.GetTy().getOrThrow(), cfg: cfg)
+        if (let Some(funcDecl3) <- fb.funcDecl) {
+            funcDecl3.SetTy(funcTy)
+        }
+        fb.SetTy(funcTy)
+
+        if (!CheckBodyRetType(ctx, fb)) {
+            fb.SetTy(impl.typeManager.GetFunctionTy(paramTys.toArray(), retType.GetTy().getOrThrow(), cfg: cfg))
+            return false
+        }
+
+        if (isCFFIBackend) {
+            UnsafeCheck(fb)
+        }
+
+        funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), retType.GetTy().getOrThrow(), cfg: cfg)
+        if (let Some(funcDecl4) <- fb.funcDecl) {
+            funcDecl4.SetTy(funcTy)
+        }
+        fb.SetTy(funcTy)
+        return true
     }
 
     private func CheckReturnThisInFuncBody(fb: FuncBody): Bool {
@@ -2085,7 +2248,7 @@ public class TypeChecker {
             return
         }
         for (param in fpl.params) {
-            if (!Ty.IsTyCorrect(SynthesizeDecl(ctx, param))) {
+            if (!Ty.IsTyCorrect(SynthesizeNode(ctx, SynPos.NONE, param))) {
                 paramTys.add(TypeManager.GetInvalidTy())
                 continue
             }
