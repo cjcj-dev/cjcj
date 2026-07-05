@@ -1,0 +1,14 @@
+[compile] rc=0
+warning: unused function:'foo'
+  ==> prog.cj:12:1:
+   |
+12 |   func foo(): Int64 {
+   |  _^
+13 | |     7
+14 | | }
+   | |_^ unused function
+   |
+   # note: this warning can be suppressed by setting the compiler option `-Woff unused`
+
+1 warning generated, 1 warning printed.
+[run] exit=0
