@@ -71,6 +71,18 @@ public class Collector {
             } else if (let Some(macroParam) <- (node as MacroExpandParam)) {
                 collector.AddSymbol(ctx, node, buildTrie: buildTrie)
                 collector.CollectMacroExpandParam(macroParam)
+            } else if (let Some(macroDecl) <- (node as MacroDecl)) {
+                // Faithful port of C++ Collector::BuildSymbolTable MACRO_DECL case
+                // (src/Sema/Collector.cpp:770-776). DesugarMacroDecl rewrites a macro
+                // definition into a companion FuncDecl (macroDecl.desugarDecl) carrying the
+                // same identifier and the moved funcBody. Only that desugar must contribute a
+                // symbol: adding one for the MacroDecl node itself would register the macro
+                // name twice (macro node + desugar) and make PreCheck.CheckRedefinition report
+                // a false redefinition of the macro against its own desugar. Collect only the
+                // desugar by descending into it; when no desugar exists, collect nothing.
+                if (macroDecl.desugarDecl.isNone()) {
+                    return VisitAction.SKIP_CHILDREN
+                }
             } else {
                 collector.AddSymbol(ctx, node, buildTrie: buildTrie)
             }
