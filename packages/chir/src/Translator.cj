@@ -4128,7 +4128,7 @@ public class Translator {
     }
 
     private func TranslateEnumPatternPayloadType(pattern: AstEnumPattern, paramTy: AstTy): Type {
-        let translated = chirTy.TranslateType(paramTy).StripAllRefs()
+        let translated = chirTy.TranslateType(paramTy)
         if (let Some(enumTy) <- (chirTy.TranslateType(RequireAstTy(pattern)) as EnumType)) {
             return SubstituteGenericType(translated, enumTy.GetEnumDef().GetGenericTypeParams(),
                 enumTy.GetGenericArgs())
