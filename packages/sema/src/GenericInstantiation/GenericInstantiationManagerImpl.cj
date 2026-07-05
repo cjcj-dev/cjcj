@@ -5,6 +5,7 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.AfterTypeCheck.IsNeedRuntimeCheck
 import cangjie_compiler::sema.TypeCheckExpr.IsBuiltinUnaryExpr
+import cangjie_compiler::sema.Test.TestManager as RealTestManager
 import cangjie_compiler::utils.CJC_ASSERT
 
 private class GenericInstantiationRecord {
@@ -280,10 +281,17 @@ public class GenericInstantiationManagerImpl {
     private let instantiationWalkerID: UInt32 = GetNextWalkerID()
     private let rearrangeWalkerID: UInt32 = GetNextWalkerID()
     private var curPkg: Option<Package> = None
+    // Injected by the frontend so the two mock hooks (PrepareToMock/HandleCreateMock)
+    // can run at the same points as C++ GenericInstantiatePackage; None when unset.
+    private var testManager: Option<RealTestManager> = None
 
     public init(ci: CompilerInstance) {
         this.ci = ci
         SetOptLevel(ci.globalOptions)
+    }
+
+    public func SetTestManager(tm: RealTestManager): Unit {
+        testManager = Some(tm)
     }
 
     public func GenericInstantiatePackage(pkg: Package, resetGlobalState!: Bool = true): Unit {
@@ -292,6 +300,12 @@ public class GenericInstantiationManagerImpl {
         }
         curPkg = pkg
         InstantiatedExtendRecorder(ci.typeManager).Record(pkg)
+        // C++ GenericInstantiationManagerImpl.cpp:287 — PrepareToMock, after RecordExtend, before instantiation.
+        if (ci.globalOptions.enableCompileTest) {
+            if (let Some(tm) <- testManager) {
+                tm.PrepareToMock(pkg)
+            }
+        }
         for (file in pkg.files) {
             for (decl in file.decls) {
                 collectIdentityInstantiation(decl)
@@ -301,6 +315,12 @@ public class GenericInstantiationManagerImpl {
             collectExistingInstantiation(decl)
         }
         InstantiateReferencedGenerics(pkg)
+        // C++ GenericInstantiationManagerImpl.cpp:306 — HandleCreateMock, after instantiation, before rearrange.
+        if (ci.globalOptions.enableCompileTest) {
+            if (let Some(tm) <- testManager) {
+                tm.HandleCreateMock(pkg)
+            }
+        }
         RearrangeReferences(pkg)
         RecoverDesugarForBuiltIn()
         updateInstantiatedExtendMap(ci.typeManager, pkg)

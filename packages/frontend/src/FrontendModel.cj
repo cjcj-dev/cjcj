@@ -6881,6 +6881,12 @@ public class TestManager {
     public func MarkDeclsForTestIfNeeded(pkgs: ArrayList<Package>): Unit {
         impl.MarkDeclsForTestIfNeeded(pkgs)
     }
+
+    // The GenericInstantiation mock hooks need the sema TestManager directly (the
+    // sema.GenericInstantiation package cannot see this frontend wrapper).
+    public func GetImpl(): RealTestManager {
+        return impl
+    }
 }
 
 public class GenericInstantiationManager {
@@ -6888,6 +6894,7 @@ public class GenericInstantiationManager {
 
     public init(instance: CompilerInstance) {
         impl = RealGenericInstantiationManagerImpl(instance.faithfulSemaInstance.getOrThrow())
+        impl.SetTestManager(instance.testManager.GetImpl())
     }
 
     public func GenericInstantiatePackage(pkg: Package, resetGlobalState!: Bool = true): Unit {
