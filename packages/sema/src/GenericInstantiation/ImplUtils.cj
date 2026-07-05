@@ -3,6 +3,7 @@ package cangjie_compiler::sema.GenericInstantiation
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
+import cangjie_compiler::sema.Test.TestManager
 
 public func GetDeclTy(decl: Decl): Option<Ty> {
     if (decl.astKind == ASTKind.EXTEND_DECL) {

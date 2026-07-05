@@ -2,6 +2,14 @@ package cangjie_compiler::sema.Test
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
+import cangjie_compiler::modules.ImportManager
+import cangjie_compiler::sema.TypeManager
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.DEFAULT_POSITION as BasicDefaultPosition
+import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
+import cangjie_compiler::option.MockMode
 
 private let MOCK_ON_COMPILATION_OPTION: String = "--mock=on"
 private let TEST_COMPILATION_OPTION: String = "--test"
@@ -178,7 +186,53 @@ public func IsThereMockUsageInPackage(pkg: Package): Bool {
 }
 
 public class TestManager {
-    public init() {}
+    private let ctx: MockContext = MockContext()
+    private var mockUtils: Option<MockUtils> = None
+    private var mockManager: Option<MockManager> = None
+    private var importManager: ImportManager
+    private var typeManager: TypeManager
+    private var diag: BasicDiagnosticEngine
+    private var testEnabled: Bool = false
+    private var mockMode: MockMode = MockMode.DEFAULT
+    private var mockCompatibleIfNeeded: Bool = false
+    private var mockCompatible: Bool = false
+    private var exportForTest: Bool = false
+
+    public init(importManager: ImportManager, typeManager: TypeManager, diag: BasicDiagnosticEngine,
+        compilationOptions: OptionGlobalOptions) {
+        this.importManager = importManager
+        this.typeManager = typeManager
+        this.diag = diag
+        testEnabled = compilationOptions.enableCompileTest
+        mockMode = compilationOptions.mock
+        mockCompatibleIfNeeded = testEnabled && mockMode == MockMode.DEFAULT
+        mockCompatible = mockCompatibleIfNeeded || mockMode == MockMode.ON
+        exportForTest = compilationOptions.exportForTest
+        mockUtils = Some(MockUtils())
+        if (mockCompatible && testEnabled) {
+            if (let Some(utils) <- mockUtils) {
+                mockManager = Some(MockManager(importManager, typeManager, utils))
+            }
+        }
+    }
+
+    public func PreparePackageForTestIfNeeded(pkg: Package): Unit {
+        MarkMockCreationContainingGenericFuncsInPackage(pkg)
+        if (ShouldMarkMockSupported(pkg)) {
+            MarkNodesMockSupported(pkg)
+        }
+        markGeneratedTestDecls(pkg)
+    }
+
+    public func MarkDeclsForTestIfNeeded(pkgs: ArrayList<Package>): Unit {
+        for (pkg in pkgs) {
+            MarkMockCreationContainingGenericFuncsInPackage(pkg)
+            if (ShouldMarkMockSupported(pkg)) {
+                MarkNodesMockSupported(pkg)
+            }
+            markGeneratedTestDecls(pkg)
+        }
+    }
 
     public static func IsDeclOpenToMock(decl: Decl): Bool {
         return MockSupportManager.IsDeclOpenToMock(decl)
@@ -202,5 +256,145 @@ public class TestManager {
 
     public static func TestCompilationOption(): String {
         return TEST_COMPILATION_OPTION
+    }
+
+    public func PrepareToMock(pkg: Package): Unit {
+        if (pkg.files.isEmpty()) {
+            return
+        }
+        if (let Some(manager) <- mockManager) {
+            manager.LoadMockLibDecls()
+        }
+        if (ShouldMarkMockSupported(pkg)) {
+            ctx.PrepareManglerContext(pkg)
+            pkg.EnableAttr(Attribute.MOCK_SUPPORTED)
+            MarkNodesMockSupported(pkg)
+        } else {
+            CheckIfNoMockSupportDependencies(pkg)
+        }
+    }
+
+    public func HandleCreateMock(pkg: Package): Unit {
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (!NodeBelongsToPackage(node, pkg)) {
+                return VisitAction.WALK_CHILDREN
+            }
+            if (let Some(callExpr) <- (node as CallExpr)) {
+                return CollectToCreateMockCalls(callExpr)
+            }
+            if (let Some(funcDecl) <- (node as FuncDecl)) {
+                if (funcDecl.TestAttr(Attribute.CONTAINS_MOCK_CREATION_CALL) && IsGenericFuncDecl(funcDecl) &&
+                    !funcDecl.HasAnno(AstAnnotationKind.FROZEN)) {
+                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                    let _ = diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.sema_mock_frozen_required,
+                        funcDecl.begin,
+                        arguments: [funcDecl.identifier.Val()]
+                    )
+                }
+            }
+            return VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+    }
+
+    private func ShouldMarkMockSupported(pkg: Package): Bool {
+        return mockMode == MockMode.ON || (mockCompatibleIfNeeded && IsThereMockUsage(pkg))
+    }
+
+    private func IsThereMockUsage(pkg: Package): Bool {
+        if (IsThereMockUsageInPackage(pkg)) {
+            return true
+        }
+        for (importedPkg in importManager.GetAllImportedPackages(includeMacroPkg: true)) {
+            if (pkg.fullPackageName != importedPkg.srcPackage.fullPackageName &&
+                importedPkg.srcPackage.TestAttr(Attribute.MOCK_SUPPORTED)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func MarkNodesMockSupported(pkg: Package): Unit {
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (!NodeBelongsToPackage(node, pkg)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            MockSupportManager.MarkNodeMockSupportedIfNeeded(node)
+            return VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+    }
+
+    private func CollectToCreateMockCalls(callExpr: CallExpr): VisitAction {
+        let mockKind = MockManager.GetMockKind(callExpr)
+        if (mockKind == MockKind.NOT_MOCK) {
+            return VisitAction.WALK_CHILDREN
+        }
+        if (let Some(callTy) <- callExpr.GetTy()) {
+            if (callTy.HasGeneric()) {
+                callExpr.EnableAttr(Attribute.IS_BROKEN)
+                return VisitAction.WALK_CHILDREN
+            }
+        }
+        if (let Some(baseFunc) <- callExpr.baseFunc) {
+            if (let Some(baseTy) <- baseFunc.GetTy()) {
+                if (baseTy.typeArgs.size > 1) {
+                    let typeArgument = baseTy.typeArgs[1]
+                    if (!typeArgument.IsClass() && !typeArgument.IsInterface()) {
+                        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                        let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_unsupported_type, callExpr.begin)
+                        callExpr.EnableAttr(Attribute.IS_BROKEN)
+                        return VisitAction.SKIP_CHILDREN
+                    }
+                    if (mockCompatible && testEnabled) {
+                        return VisitAction.WALK_CHILDREN
+                    }
+                }
+            }
+        }
+        if (!testEnabled) {
+            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+            let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_not_in_test_mode, callExpr.begin,
+                arguments: ["--test"])
+        } else if (mockMode != MockMode.RUNTIME_ERROR) {
+            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+            let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_disabled, callExpr.begin,
+                arguments: ["--mock=on"])
+        }
+        callExpr.EnableAttr(Attribute.IS_BROKEN)
+        return VisitAction.WALK_CHILDREN
+    }
+
+    private func CheckIfNoMockSupportDependencies(pkg: Package): Unit {
+        for (importedPkg in importManager.GetAllImportedPackages(includeMacroPkg: true)) {
+            if (pkg.fullPackageName != importedPkg.srcPackage.fullPackageName &&
+                importedPkg.srcPackage.TestAttr(Attribute.MOCK_SUPPORTED) &&
+                !pkg.TestAttr(Attribute.MOCK_SUPPORTED)) {
+                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                let _ = diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.package_mocking_support_inconsistency,
+                    BasicDefaultPosition,
+                    arguments: [importedPkg.srcPackage.fullPackageName, "--mock=on"]
+                )
+            }
+        }
+    }
+
+    private func markGeneratedTestDecls(pkg: Package): Unit {
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                markGeneratedTestDecl(decl)
+            }
+        }
+    }
+
+    private func markGeneratedTestDecl(decl: Decl): Unit {
+        if (IsDeclGeneratedForTest(decl)) {
+            decl.toBeCompiled = true
+        }
+        for (member in decl.GetMemberDecls()) {
+            markGeneratedTestDecl(member)
+        }
     }
 }
