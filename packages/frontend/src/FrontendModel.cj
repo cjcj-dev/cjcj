@@ -4959,16 +4959,234 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
 
     public func GeneratePkgDepInfo(pkgs: ArrayList<Package>): ArrayList<String> {
         let out = ArrayList<String>()
-        let sourcePackages = HashSet<String>()
         for (pkg in pkgs) {
-            sourcePackages.add(pkg.fullPackageName)
-        }
-        for (pkg in pkgs) {
-            let deps = CollectDirectDependencyNames(pkg, sourcePackages)
-            out.add("{\"package\":\"" + EscapeJson(pkg.fullPackageName) + "\",\"deps\":" +
-                StringSetToJsonArray(deps) + "}")
+            out.add(GeneratePkgDepInfoForPackage(pkg, true))
         }
         return out
+    }
+
+    // Faithful port of C++ ImportManager::GeneratePkgDepInfo (src/Modules/ImportManager.cpp:691-747):
+    // emit the full package dependency descriptor JSON (package / isMacro / accessLevel / structured
+    // dependencies with import positions / transitive std-dependencies / feature set / product flag),
+    // as consumed by --scan-dependency. exportCJO=true (the .cjo-write default) records import file
+    // names rather than absolute paths and derives std-dependencies from the package's collected
+    // dependent std packages.
+    private func GeneratePkgDepInfoForPackage(pkg: Package, exportCJO: Bool): String {
+        let dependencies = HashMap<String, FrontendDepInfoItem>()
+        let features = HashSet<String>()
+        var isProduct = true
+        for (file in pkg.files) {
+            for (importSpec in file.imports) {
+                if (importSpec.IsImportMulti() || importSpec.TestAttr(Attribute.IMPLICIT_ADD)) {
+                    continue
+                }
+                let names = importSpec.content.GetPossiblePackageNames()
+                if (names.isEmpty()) {
+                    continue
+                }
+                let longName = FileUtil.ToPackageName(names[0])
+                let shortName = FileUtil.ToPackageName(names[names.size - 1])
+                if (!dependencies.contains(longName)) {
+                    dependencies[longName] = CreateDepInfoItem(longName, shortName)
+                }
+                if (let Some(item) <- dependencies.get(longName)) {
+                    item.imports.add(importSpec)
+                }
+            }
+            if (let Some(featureDirective) <- file.feature) {
+                if (let Some(set) <- featureDirective.featuresSet) {
+                    for (featureId in set.content) {
+                        features.add(featureId.ToString())
+                    }
+                }
+                for (anno in featureDirective.annotations) {
+                    if (anno.kind == AstAnnotationKind.NON_PRODUCT) {
+                        isProduct = false
+                    }
+                }
+            }
+        }
+        return "{\"package\":\"" + EscapeJson(pkg.fullPackageName) + "\"," +
+            "\"isMacro\":" + DepInfoBool(pkg.isMacroPackage) + "," +
+            "\"accessLevel\":\"" + DepInfoAccessLevel(pkg.accessible) + "\"," +
+            "\"dependencies\":" + DependenciesToJson(dependencies, exportCJO) + "," +
+            "\"std-dependencies\":" + StdDependenciesToJson(dependencies, pkg, exportCJO) + "," +
+            "\"features\":" + FeatureSetToJson(features) + "," +
+            "\"product\":" + DepInfoBool(isProduct) + "}"
+    }
+
+    private func CreateDepInfoItem(longName: String, shortName: String): FrontendDepInfoItem {
+        let item = FrontendDepInfoItem()
+        if (STANDARD_LIBS.contains(longName)) {
+            item.packageName = longName
+            item.isStd = true
+        } else if (STANDARD_LIBS.contains(shortName)) {
+            item.packageName = shortName
+            item.isStd = true
+        } else {
+            item.packageName = shortName
+            if (longName != shortName) {
+                item.orPackage = longName
+            }
+            item.isStd = false
+        }
+        return item
+    }
+
+    private func DependenciesToJson(dependencies: HashMap<String, FrontendDepInfoItem>, exportCJO: Bool): String {
+        let keys = ArrayList<String>()
+        for (key in dependencies.keys()) {
+            keys.add(key)
+        }
+        sort(keys)
+        let items = ArrayList<String>()
+        for (name in keys) {
+            if (let Some(item) <- dependencies.get(name)) {
+                items.add(DependencyItemToJson(item, exportCJO))
+            }
+        }
+        return "[" + JoinStrings(items, ",") + "]"
+    }
+
+    private func DependencyItemToJson(item: FrontendDepInfoItem, exportCJO: Bool): String {
+        SortImportSpecsByPosition(item.imports)
+        var value = "{\"package\":\"" + EscapeJson(item.packageName) + "\","
+        if (!item.orPackage.isEmpty()) {
+            value += "\"orPackage\":\"" + EscapeJson(item.orPackage) + "\","
+        }
+        value += "\"isStd\":" + DepInfoBool(item.isStd) + ","
+        value += "\"imports\":" + ImportSpecsToJson(item.imports, exportCJO) + "}"
+        return value
+    }
+
+    private func ImportSpecsToJson(imports: ArrayList<ImportSpec>, exportCJO: Bool): String {
+        let items = ArrayList<String>()
+        for (importSpec in imports) {
+            items.add(ImportSpecToJson(importSpec, exportCJO))
+        }
+        return "[" + JoinStrings(items, ",") + "]"
+    }
+
+    private func ImportSpecToJson(importSpec: ImportSpec, exportCJO: Bool): String {
+        var fileName = ""
+        if (let Some(curFileValue) <- importSpec.curFile) {
+            fileName = if (exportCJO) { curFileValue.fileName } else { curFileValue.filePath }
+        }
+        return "{\"file\":\"" + EscapeJson(fileName) + "\"," +
+            "\"begin\":" + DepInfoPosition(importSpec.begin) + "," +
+            "\"end\":" + DepInfoPosition(importSpec.end) + "}"
+    }
+
+    private func DepInfoPosition(pos: Position): String {
+        return "{\"line\":" + pos.line.toString() + ",\"column\":" + pos.column.toString() + "}"
+    }
+
+    private func StdDependenciesToJson(
+        dependencies: HashMap<String, FrontendDepInfoItem>,
+        pkg: Package,
+        exportCJO: Bool
+    ): String {
+        let stdDependencies = HashMap<String, HashSet<String>>()
+        stdDependencies[CORE_PACKAGE_NAME] = HashSet<String>()
+        if (exportCJO) {
+            for (stdName in pkg.GetAllDependentStdPkgs()) {
+                CollectStdDependency(stdDependencies, stdName)
+            }
+        } else {
+            for (depName in dependencies.keys()) {
+                if (let Some(item) <- dependencies.get(depName)) {
+                    if (item.isStd) {
+                        CollectStdDependency(stdDependencies, item.packageName)
+                    }
+                }
+            }
+        }
+        let keys = ArrayList<String>()
+        for (key in stdDependencies.keys()) {
+            keys.add(key)
+        }
+        sort(keys)
+        let items = ArrayList<String>()
+        for (stdName in keys) {
+            let imports = if (let Some(importSet) <- stdDependencies.get(stdName)) {
+                FeatureSetToJson(importSet)
+            } else {
+                "[]"
+            }
+            items.add("{\"" + EscapeJson(stdName) + "\":" + imports + "}")
+        }
+        return "[" + JoinStrings(items, ",") + "]"
+    }
+
+    private func CollectStdDependency(stdDependencies: HashMap<String, HashSet<String>>, stdPkg: String): Unit {
+        if (stdDependencies.contains(stdPkg)) {
+            return
+        }
+        let importInfo = HashSet<String>()
+        stdDependencies[stdPkg] = importInfo
+        var pkgOpt = GetPackage(stdPkg)
+        if (let None <- pkgOpt) {
+            let cjoPath = FileUtil.FindSerializationFile(stdPkg, ".cjo", searchPath.toArray())
+            if (cjoPath.isEmpty()) {
+                diag.DiagnoseRefactor(DiagKindRefactor.package_search_error, DEFAULT_POSITION, arguments: [stdPkg])
+                return
+            }
+            if (!LoadImportedPackageFromCjo(stdPkg, cjoPath)) {
+                return
+            }
+            pkgOpt = GetPackage(stdPkg)
+        }
+        if (let Some(stdPkgInfo) <- pkgOpt) {
+            for (file in stdPkgInfo.files) {
+                for (importSpec in file.imports) {
+                    importInfo.add(importSpec.content.GetImportedPackageNameWithIsDecl())
+                }
+            }
+        }
+        let importNames = ArrayList<String>()
+        for (importName in importInfo) {
+            importNames.add(importName)
+        }
+        for (importName in importNames) {
+            CollectStdDependency(stdDependencies, importName)
+        }
+    }
+
+    private func FeatureSetToJson(features: HashSet<String>): String {
+        let ordered = ArrayList<String>()
+        for (feature in features) {
+            ordered.add(feature)
+        }
+        sort(ordered)
+        let items = ArrayList<String>()
+        for (feature in ordered) {
+            items.add("\"" + EscapeJson(feature) + "\"")
+        }
+        return "[" + JoinStrings(items, ",") + "]"
+    }
+
+    private func SortImportSpecsByPosition(imports: ArrayList<ImportSpec>): Unit {
+        sort(imports, by: { left: ImportSpec, right: ImportSpec =>
+            if (left.begin < right.begin) {
+                Ordering.LT
+            } else if (right.begin < left.begin) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        })
+    }
+
+    private func DepInfoBool(value: Bool): String {
+        return if (value) { "true" } else { "false" }
+    }
+
+    private func DepInfoAccessLevel(level: AccessLevel): String {
+        return match (level) {
+            case AccessLevel.PUBLIC => "public"
+            case AccessLevel.PROTECTED => "protected"
+            case _ => "internal"
+        }
     }
 
     public func GeneratePkgDepInfoByCjo(path: String): ArrayList<String> {
@@ -6614,38 +6832,6 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             im.prefixPoses[im.prefixPoses.size - 1] + im.prefixPaths[im.prefixPaths.size - 1].size)
     }
 
-    private func CollectDirectDependencyNames(pkg: Package, sourcePackages: HashSet<String>): HashSet<String> {
-        let deps = HashSet<String>()
-        for (dep in CollectDirectDependencyNamesInOrder(pkg, sourcePackages)) {
-            deps.add(dep)
-        }
-        return deps
-    }
-
-    private func CollectDirectDependencyNamesInOrder(pkg: Package, sourcePackages: HashSet<String>): ArrayList<String> {
-        let deps = ArrayList<String>()
-        let seen = HashSet<String>()
-        for (file in pkg.files) {
-            for (importSpec in file.imports) {
-                if (importSpec.IsImportMulti() || !importSpec.withImplicitExport) {
-                    continue
-                }
-                let depName = NormalizeImportedPackageName(importSpec, sourcePackages)
-                if (!depName.isEmpty() && depName != pkg.fullPackageName && !seen.contains(depName)) {
-                    seen.add(depName)
-                    deps.add(depName)
-                }
-                if (!depName.isEmpty() && !sourcePackages.contains(depName) && (let None <- GetPackage(depName))) {
-                    let cjoPath = FileUtil.FindSerializationFile(depName, ".cjo", searchPath.toArray())
-                    let isMainPartPkgForTestPkg = globalOptions.compileTestsOnly && IsTestPackage(pkg.fullPackageName) &&
-                        GetMainPartPkgNameForTestPkg(pkg.fullPackageName) == depName
-                    let _ = CheckCjoPathLegality(importSpec, cjoPath, depName, false, isMainPartPkgForTestPkg)
-                }
-            }
-        }
-        return deps
-    }
-
     private func AddImplicitImports(pkg: Package, opts: GlobalOptions): Unit {
         if (!opts.implicitPrelude) {
             return
@@ -6672,28 +6858,6 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         let possibleName = importSpec.content.GetImportedPackageName()
         importedPackageNameMap[importSpec] =
             (packageName, packageName == possibleName && importSpec.content.kind != ImportKind.IMPORT_ALL)
-    }
-
-    private func NormalizeImportedPackageName(importSpec: ImportSpec, sourcePackages: HashSet<String>): String {
-        let content = importSpec.content
-        if (content.kind == ImportKind.IMPORT_ALL || content.isDecl) {
-            let packageName = content.GetPrefixPath()
-            AddImportedPackageName(importSpec, packageName)
-            return packageName
-        }
-        let importedPackageName = content.GetImportedPackageName()
-        for (possibleName in content.GetPossiblePackageNames()) {
-            if (sourcePackages.contains(possibleName) ||
-                !FileUtil.FindSerializationFile(possibleName, ".cjo", searchPath.toArray()).isEmpty()) {
-                if (possibleName != importedPackageName) {
-                    content.isDecl = true
-                }
-                AddImportedPackageName(importSpec, possibleName)
-                return possibleName
-            }
-        }
-        AddImportedPackageName(importSpec, importedPackageName)
-        return importedPackageName
     }
 
     private func AddNoteForExtendExportDiag(builder: Option<DiagnosticBuilder>, note: String): Unit {
@@ -6902,40 +7066,6 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     }
 }
 
-private func StringSetToJsonArray(values: HashSet<String>): String {
-    let orderedValues = ArrayList<String>()
-    for (value in values) {
-        orderedValues.add(value)
-    }
-    sort(orderedValues, by: { left: String, right: String =>
-        if (left < right) {
-            Ordering.LT
-        } else if (left > right) {
-            Ordering.GT
-        } else {
-            Ordering.EQ
-        }
-    })
-    let parts = ArrayList<String>()
-    for (value in orderedValues) {
-        parts.add("\"" + EscapeJson(value) + "\"")
-    }
-    return "[" + JoinStringList(parts, ",") + "]"
-}
-
-private func JoinStringList(values: ArrayList<String>, delimiter: String): String {
-    let builder = StringBuilder()
-    var idx: Int64 = 0
-    while (idx < values.size) {
-        if (idx > 0) {
-            builder.append(delimiter)
-        }
-        builder.append(values[idx])
-        idx++
-    }
-    return builder.toString()
-}
-
 public class PackageInfo {
     public var fullPackageName: String
     public let deps: ArrayList<PackageInfo> = ArrayList<PackageInfo>()
@@ -7141,6 +7271,17 @@ public class GenericInstantiationManager {
 
 public func EscapeJson(text: String): String {
     return text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r")
+}
+
+// One entry of the "dependencies" array in the package dependency descriptor (see
+// GeneratePkgDepInfoForPackage). Mirrors C++ DependencyInfoItem (src/Modules/ImportManager.cpp:85-90).
+private class FrontendDepInfoItem {
+    public var packageName: String = ""
+    public var orPackage: String = ""
+    public var isStd: Bool = false
+    public let imports: ArrayList<ImportSpec> = ArrayList<ImportSpec>()
+
+    public init() {}
 }
 
 public let DIR_SEPARATOR: String = "/"
