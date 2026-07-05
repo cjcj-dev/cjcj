@@ -887,7 +887,7 @@ private func BuildAttr(attrs: AstAttributePack): AttributeInfo {
     return attrInfo
 }
 
-private func BuildVarDeclAttr(decl: AstVarDecl): AttributeInfo {
+func BuildVarDeclAttr(decl: AstVarDecl): AttributeInfo {
     let attrInfo = BuildAttr(decl.GetAttrs())
     if (!decl.isVar) {
         attrInfo.Enable(Attribute.READONLY)
@@ -907,7 +907,12 @@ private func BuildPackageAccessLevel(level: AstAccessLevel): AccessLevel {
     }
 }
 
-private func TranslateLocationWithoutScope(context: CHIRContext, beginPos: AstPosition,
+func GetDeclLoc(context: CHIRContext, decl: AstDecl): DebugLocation {
+    let begin = decl.identifier.Begin()
+    return TranslateLocationWithoutScope(context, begin, decl.identifier.End())
+}
+
+func TranslateLocationWithoutScope(context: CHIRContext, beginPos: AstPosition,
     endPos: AstPosition): DebugLocation {
     let fileId = UInt32(beginPos.fileID)
     return DebugLocation(context.GetSourceFileName(fileId), fileId,
@@ -1645,7 +1650,7 @@ public class FaithfulAST2CHIR {
 
     private func CreateTranslator(): Translator {
         return Translator(builder, chirType, globalCache, localConstVars: localConstVars, localConstFuncs: localConstFuncs,
-            overrideSrcFuncResolver: overrideSrcFuncResolver)
+            overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts)
     }
 
     private func GlobalDeclAnalysis(pkg: AstPackage): ArrayList<FaithfulInitFileVars> {

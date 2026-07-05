@@ -53,7 +53,7 @@ private func HasGenericInNonFuncScope(ty: Type): Bool {
 }
 
 private func TypeCastIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, parentBlock: Block,
-    needCheck!: Bool = true): Value {
+    loc: DebugLocation, needCheck!: Bool = true): Value {
     let valueTy = value.GetType() ?? return value
     if (valueTy.IsNothing()) {
         return value
@@ -65,6 +65,7 @@ private func TypeCastIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuild
             tmpValue = load.GetResult().getOrThrow()
         }
         let ret = builder.CreateTypeCast(expectedTy, tmpValue, parentBlock)
+        ret.SetDebugLocation(loc)
         let _ = needCheck
         return ret.GetResult().getOrThrow()
     }
@@ -72,7 +73,7 @@ private func TypeCastIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuild
 }
 
 private func TransformGenericIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, parentBlock: Block,
-    needCheck!: Bool = true): Option<Value> {
+    loc: DebugLocation, needCheck!: Bool = true): Option<Value> {
     let valueTy = value.GetType() ?? return None
     if (valueTy.IsEnum() && (expectedTy.IsTuple() || expectedTy.IsUnsignedInteger())) {
         return None
@@ -85,10 +86,12 @@ private func TransformGenericIfNeeded(value: Value, expectedTy: Type, builder: C
     }
     if (HasGenericInNonFuncScope(expectedTy) && !HasGenericInNonFuncScope(valueTy)) {
         let ret = builder.CreateTransformToGeneric(expectedTy, value, parentBlock)
+        ret.SetDebugLocation(loc)
         let _ = needCheck
         return ret.GetResult().getOrThrow()
     } else if (HasGenericInNonFuncScope(valueTy) && !HasGenericInNonFuncScope(expectedTy)) {
         let ret = builder.CreateTransformToConcrete(expectedTy, value, parentBlock)
+        ret.SetDebugLocation(loc)
         let _ = needCheck
         return ret.GetResult().getOrThrow()
     }
@@ -105,7 +108,7 @@ private func LeftTypeIsBoxOfRightType(left: Type, right: Type): Bool {
 }
 
 private func BoxIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, parentBlock: Block,
-    needCheck!: Bool = true): Option<Value> {
+    loc: DebugLocation, needCheck!: Bool = true): Option<Value> {
     let srcTy = value.GetType() ?? return None
     var srcIsValueTy = srcTy.IsValueType()
     if (let Some(refTy) <- (srcTy as RefType)) {
@@ -124,27 +127,33 @@ private func BoxIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, p
         var boxSrcVal = value
         if (srcTy.IsRef()) {
             let loadSrc = builder.CreateLoad((srcTy as RefType).getOrThrow().GetBaseType(), boxSrcVal, parentBlock)
+            loadSrc.SetDebugLocation(loc)
             boxSrcVal = loadSrc.GetResult().getOrThrow()
         }
         let ret = builder.CreateBox(expectedTy, boxSrcVal, parentBlock)
+        ret.SetDebugLocation(loc)
         let _ = needCheck
         return ret.GetResult().getOrThrow()
     } else if (srcIsReferenceTy && dstIsValueTy) {
         if (expectedTy.IsRef()) {
             let ret = builder.CreateUnBoxToRef(expectedTy, value, parentBlock)
+            ret.SetDebugLocation(loc)
             let _ = needCheck
             return ret.GetResult().getOrThrow()
         } else {
             let ret = builder.CreateUnBox(expectedTy, value, parentBlock)
+            ret.SetDebugLocation(loc)
             let _ = needCheck
             return ret.GetResult().getOrThrow()
         }
     } else if (LeftTypeIsBoxOfRightType(srcTy, expectedTy)) {
         let ret = builder.CreateUnBox(expectedTy, value, parentBlock)
+        ret.SetDebugLocation(loc)
         let _ = needCheck
         return ret.GetResult().getOrThrow()
     } else if (LeftTypeIsBoxOfRightType(expectedTy, srcTy)) {
         let ret = builder.CreateBox(expectedTy, value, parentBlock)
+        ret.SetDebugLocation(loc)
         let _ = needCheck
         return ret.GetResult().getOrThrow()
     }
@@ -153,13 +162,18 @@ private func BoxIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, p
 
 public func TypeCastOrBoxIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, parentBlock: Block,
     needCheck!: Bool = true): Value {
-    if (let Some(ret) <- BoxIfNeeded(value, expectedTy, builder, parentBlock, needCheck: needCheck)) {
+    return TypeCastOrBoxIfNeeded(value, expectedTy, builder, parentBlock, INVALID_LOCATION, needCheck: needCheck)
+}
+
+public func TypeCastOrBoxIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, parentBlock: Block,
+    loc: DebugLocation, needCheck!: Bool = true): Value {
+    if (let Some(ret) <- BoxIfNeeded(value, expectedTy, builder, parentBlock, loc, needCheck: needCheck)) {
         return ret
     }
-    if (let Some(ret) <- TransformGenericIfNeeded(value, expectedTy, builder, parentBlock, needCheck: needCheck)) {
+    if (let Some(ret) <- TransformGenericIfNeeded(value, expectedTy, builder, parentBlock, loc, needCheck: needCheck)) {
         return ret
     }
-    return TypeCastIfNeeded(value, expectedTy, builder, parentBlock, needCheck: needCheck)
+    return TypeCastIfNeeded(value, expectedTy, builder, parentBlock, loc, needCheck: needCheck)
 }
 
 private func CollectNonExtendParentDefs(cur: ClassDef, allParents: HashSet<Int64>): Unit {

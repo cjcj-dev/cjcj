@@ -3,6 +3,7 @@ package cangjie_compiler::chir
 import std.collection.*
 
 import cangjie_compiler::utils.CJC_ASSERT
+import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::basic.Linkage as BasicLinkage
 import cangjie_compiler::ast.ASTKind
 import cangjie_compiler::ast.IsValidCFuncConstructorCall
@@ -53,6 +54,8 @@ import cangjie_compiler::ast.Node as AstNode
 import cangjie_compiler::ast.ParenExpr as AstParenExpr
 import cangjie_compiler::ast.Pattern as AstPattern
 import cangjie_compiler::ast.PointerExpr as AstPointerExpr
+import cangjie_compiler::ast.Position as AstPosition
+import cangjie_compiler::ast.PositionStatus as AstPositionStatus
 import cangjie_compiler::ast.PropDecl as AstPropDecl
 import cangjie_compiler::ast.RangeExpr as AstRangeExpr
 import cangjie_compiler::ast.RefExpr as AstRefExpr
@@ -90,6 +93,34 @@ private class FaithfulLeftValueInfo {
             this.path.add(item)
         }
     }
+}
+
+// Static member func and global func should create alloc node for print `unused variable` warning.
+private func ShouldCreateAlloc(decl: AstVarDecl, opts: GlobalOptions, rValueIsEmpty: Bool): Bool {
+    if (decl.isConst) {
+        return !rValueIsEmpty
+    }
+    if (rValueIsEmpty || decl.isVar || opts.enableCompileDebug || opts.enableCoverage) {
+        return true
+    }
+    if (let Some(initializerExpr) <- decl.initializer) {
+        if (let Some(refExpr) <- (initializerExpr as AstRefExpr)) {
+            if (let Some(target) <- refExpr.ref.target) {
+                if (target.astKind == ASTKind.FUNC_DECL &&
+                    target.TestAnyAttr(AstAttribute.GLOBAL, AstAttribute.STATIC)) {
+                    return true
+                }
+            }
+        }
+        if (let Some(memberAccess) <- (initializerExpr as AstMemberAccess)) {
+            if (let Some(target) <- memberAccess.target) {
+                if (target.astKind == ASTKind.FUNC_DECL && target.TestAttr(AstAttribute.STATIC)) {
+                    return true
+                }
+            }
+        }
+    }
+    return false
 }
 
 private class FaithfulLoopTarget {
@@ -402,16 +433,20 @@ public class Translator {
     private let tryBodyContext: ArrayList<AstTryExpr> = ArrayList<AstTryExpr>()
     private let finallyContext: ArrayList<FaithfulFinallyControlContext> = ArrayList<FaithfulFinallyControlContext>()
     private let overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>>
+    private let scopeInfo: ArrayList<Int64> = ArrayList<Int64>([0])
+    private let opts: GlobalOptions
 
     public init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap,
         localConstVars!: ElementList = ElementList(), localConstFuncs!: ElementList = ElementList(),
-        overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None) {
+        overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None,
+        opts!: GlobalOptions = GlobalOptions()) {
         this.builder = builder
         this.chirTy = chirTy
         this.globalSymbolTable = globalSymbolTable
         this.localConstVars = localConstVars
         this.localConstFuncs = localConstFuncs
         this.overrideSrcFuncResolver = overrideSrcFuncResolver
+        this.opts = opts
     }
 
     public func TranslateGlobalVarInitializer(fn: Function, decl: AstVarDecl, globalVar: GlobalVar): Unit {
@@ -807,18 +842,68 @@ public class Translator {
         if (currentBlock.isNone()) {
             return globalSymbolTable.TryGet(varDecl)
         }
-        let valueTy = chirTy.TranslateType(RequireAstTy(varDecl))
-        let slotTy = builder.context.GetRefTy(valueTy)
-        let slot = builder.CreateAllocate(slotTy, valueTy, CurrentBlock())
-        let slotValue = RequireResult(slot)
-        slotValue.SetSrcCodeIdentifier(varDecl.identifier.Val())
-        localValSymbolTable.Set(varDecl, slotValue)
-        if (let Some(initializerExpr) <- varDecl.initializer) {
-            if (let Some(initValue) <- Translator.TranslateASTNode(initializerExpr, this)) {
-                builder.CreateStore(CastValueIfNeeded(initValue, valueTy), slotValue, CurrentBlock())
-            }
+        if (localConstVars.HasElement(varDecl)) {
+            return None
         }
-        return slotValue
+        let initializer = varDecl.initializer
+        var leftValue = TranslateLeftValueOfVarDecl(varDecl, initializer.isNone(), true)
+        if (let Some(initializerExpr) <- initializer) {
+            let oldCompileTimeValueMark = builder.GetCompileTimeValueMark()
+            builder.SetCompileTimeValueMark(varDecl.isConst)
+            let initNode = TranslateExprArg(initializerExpr)
+            builder.SetCompileTimeValueMark(oldCompileTimeValueMark)
+            leftValue = Some(StoreRValueToLValue(varDecl, initNode, leftValue))
+        }
+        let finalLeftValue = leftValue ??
+            throw IllegalStateException("faithful AST2CHIR VarDecl has no left value: ${varDecl.identifier.Val()}")
+        SetSymbolTable(varDecl, finalLeftValue)
+        return Some(finalLeftValue)
+    }
+
+    private func TranslateLeftValueOfVarDecl(decl: AstVarDecl, rValueIsEmpty: Bool, isLocalVar: Bool): Option<Value> {
+        var leftValue: Option<Value> = None
+        let varPos = TranslateLocation(decl)
+        let leftType = chirTy.TranslateType(RequireAstTy(decl))
+        if (isLocalVar) {
+            if (ShouldCreateAlloc(decl, opts, rValueIsEmpty)) {
+                let allocate = builder.CreateAllocate(builder.context.GetRefTy(leftType), leftType, CurrentBlock())
+                allocate.SetDebugLocation(varPos)
+                let allocatedValue = RequireResult(allocate)
+                leftValue = Some(allocatedValue)
+                if (!decl.TestAttr(AstAttribute.IMPLICIT_ADD)) {
+                    allocatedValue.SetSrcCodeIdentifier(decl.identifier.Val())
+                    let debugInfo = builder.CreateDebug(builder.context.GetUnitTy(), allocatedValue,
+                        decl.identifier.Val(), CurrentBlock())
+                    debugInfo.SetDebugLocation(varPos)
+                }
+                allocatedValue.AppendAttributeInfo(BuildVarDeclAttr(decl))
+            }
+        } else {
+            let symbol = GetSymbolTable(decl)
+            symbol.AppendAttributeInfo(BuildVarDeclAttr(decl))
+            leftValue = Some(symbol)
+        }
+        return leftValue
+    }
+
+    private func StoreRValueToLValue(decl: AstVarDecl, rVal: Value, lVal: Option<Value>): Value {
+        let leftType = chirTy.TranslateType(RequireAstTy(decl))
+        let varPos = TranslateLocation(decl)
+        if (let Some(leftValue) <- lVal) {
+            CreateAndAppendWrappedStore(rVal, leftValue, varPos)
+            return leftValue
+        }
+        let warnPos = GetDeclLoc(builder.context, decl)
+        let castedValue = TypeCastOrBoxIfNeeded(rVal, leftType, varPos)
+        if (!decl.TestAttr(AstAttribute.IMPLICIT_ADD) && !decl.isConst) {
+            let debugInfo = builder.CreateDebug(builder.context.GetUnitTy(), castedValue,
+                decl.identifier.Val(), CurrentBlock())
+            debugInfo.SetDebugLocation(varPos)
+            let debugResult = RequireResult(debugInfo)
+            debugResult.SetDebugLocation(warnPos)
+            debugResult.EnableAttr(Attribute.READONLY)
+        }
+        return castedValue
     }
 
     private func IsUnnecessarySuperCall(node: AstNode): Bool {
@@ -6081,6 +6166,42 @@ public class Translator {
             }
         }
         return RequireResult(builder.CreateTypeCast(expectedTy, value, CurrentBlock()))
+    }
+
+    private func TypeCastOrBoxIfNeeded(value: Value, expectedTy: Type, loc: DebugLocation,
+        needCheck!: Bool = true): Value {
+        return TypeCastOrBoxIfNeeded(value, expectedTy, builder, CurrentBlock(), loc, needCheck: needCheck)
+    }
+
+    private func CreateAndAppendWrappedStore(rhs: Value, lhs: Value, loc: DebugLocation): Unit {
+        CreateAndAppendWrappedStore(rhs, lhs, CurrentBlock(), loc)
+    }
+
+    private func CreateAndAppendWrappedStore(rhs: Value, lhs: Value, parent: Block, loc: DebugLocation): Unit {
+        let lhsType = (lhs.GetType().getOrThrow() as RefType) ??
+            throw IllegalStateException("faithful AST2CHIR wrapped store lhs is not ref: ${lhs.GetIdentifier()}")
+        let castedRhs = TypeCastOrBoxIfNeeded(rhs, lhsType.GetBaseType(), loc)
+        let store = builder.CreateStore(castedRhs, lhs, parent)
+        store.SetDebugLocation(loc)
+    }
+
+    private func TranslateLocation(node: AstNode): DebugLocation {
+        return TranslateLocation(node.begin, node.end)
+    }
+
+    private func TranslateLocation(beginPos: AstPosition, endPos: AstPosition): DebugLocation {
+        match (beginPos.GetStatus()) {
+            case AstPositionStatus.IGNORE => return TranslateFileLocation(beginPos.fileID)
+            case _ => ()
+        }
+        var loc = TranslateLocationWithoutScope(builder.context, beginPos, endPos)
+        loc.SetScopeInfo(scopeInfo)
+        return loc
+    }
+
+    private func TranslateFileLocation(fileID: UInt64): DebugLocation {
+        let fileId = UInt32(fileID)
+        return DebugLocation(builder.context.GetSourceFileName(fileId), fileId, Position(), Position())
     }
 
     private func CopyStringList(values: ArrayList<String>): ArrayList<String> {
