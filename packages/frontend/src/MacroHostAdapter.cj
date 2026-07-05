@@ -25,6 +25,10 @@ class MacroHostAdapter <: MacroHost {
         return ci.invocation.globalOptions
     }
 
+    public func GetRuntimeLibPath(): String {
+        return ci.invocation.GetRuntimeLibPath()
+    }
+
     public prop importManager: MacroHostImportManager {
         get() {
             return ci.importManager

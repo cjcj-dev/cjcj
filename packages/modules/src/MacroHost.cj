@@ -25,6 +25,7 @@ public interface MacroHostImportManager <: SemaImportManager {
 public interface MacroHost {
     func GetDiag(): DiagnosticEngine
     func GetGlobalOptions(): GlobalOptions
+    func GetRuntimeLibPath(): String
     prop importManager: MacroHostImportManager
     func GetSourceManager(): SourceManager
 }

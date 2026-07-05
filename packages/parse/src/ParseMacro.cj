@@ -81,6 +81,10 @@ extend ParserImpl {
         }
         CJC_ASSERT(SeeingMacroCall())
         let expr = MacroExpandExpr()
+        if (let Some(file) <- currentFile) {
+            expr.curFile = file
+            file.hasMacro = true
+        }
         expr.begin = Peek().Begin()
         ParseMacroInvocation(ScopeKind.FUNC_BODY, ArrayList<Modifier>(), expr.invocation, expr)
         expr.identifier = AstIdentifier(
@@ -139,6 +143,10 @@ extend ParserImpl {
 
     public func ParseMacroCallDeclInput(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Decl {
         let decl = MacroExpandDecl()
+        if (let Some(file) <- currentFile) {
+            decl.curFile = file
+            file.hasMacro = true
+        }
         ApplyModifiersAndAnnotations(decl, modifiers, annos)
         decl.begin = if (decl.begin.IsZero()) { Peek().Begin() } else { decl.begin }
         ParseMacroInvocation(scopeKind, modifiers, decl.invocation, decl)

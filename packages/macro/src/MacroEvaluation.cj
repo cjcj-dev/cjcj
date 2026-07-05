@@ -684,7 +684,11 @@ public class MacroEvaluation {
             SendExitStgTaskToServer()
             return
         }
-        let runtimeReady = RuntimeInit.GetInstance().InitRuntime("selfhost-macro-runtime")
+        let initArgs = ArrayList<(String, String)>()
+        for ((key, value) in ci.GetGlobalOptions().environment.allVariables) {
+            initArgs.add((key, value))
+        }
+        let runtimeReady = RuntimeInit.GetInstance().InitRuntime(ci.GetRuntimeLibPath(), initArgs: initArgs)
         if (runtimeReady) {
             EvalMacros()
         }
