@@ -2319,26 +2319,147 @@ private func CheckGenericDeclInstantiationForCall(typeManager: TypeManager, diag
     return false
 }
 
-private func CheckInstantiatedCandidateGenericDecl(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
-    ce: CallExpr, fd: FuncDecl, typeMapping: SubstPack): Bool {
-    let genericDecl = GenericDeclForCall(fd) ?? return true
-    let generic = genericDecl.GetGeneric() ?? return true
-    let instTys = ArrayList<Ty>()
-    for (param in generic.typeParameters) {
-        if (let Some(paramTy) <- param.GetTy()) {
-            if (let Some(genericTy) <- (paramTy as GenericsTy)) {
-                instTys.add(typeManager.ApplySubstPack(genericTy, typeMapping))
+// C2e[B]: C++ src/Sema/TypeCheckReference.cpp:122 ReplaceWithGenericTyInInheritableDecl.
+private func replaceWithGenericTyInInheritableDecl(typeManager: TypeManager, ty: Ty, outerDecl: Decl, id: Decl): Ty {
+    if (!ty.HasGeneric()) {
+        return ty
+    }
+    var typeMapping = MultiTypeSubst()
+    if (let Some(currentTy) <- outerDecl.GetTy()) {
+        if (let Some(idTy) <- id.GetTy()) {
+            typeMapping = Promotion(typeManager).GetPromoteTypeMapping(currentTy, idTy)
+        }
+    }
+    if (typeMapping.entries.isEmpty()) {
+        return ty
+    }
+    return typeManager.GetBestInstantiatedTy(ty, typeMapping)
+}
+
+// C2e[B]: C++ src/Sema/TypeCheckCall.cpp:1116 CheckAndGetMappingForTypeDecl.
+// Deviation: the C++ `if (!it.first->IsGeneric()) continue` guard is omitted — the selfhost
+// MultiTypeSubst key (tyVar) is always a GenericsTy, so the guard never triggers.
+private func CheckAndGetMappingForTypeDecl(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    baseExpr: Expr, typeDecl: Decl, targetDecl: Decl, typeMapping: SubstPack): Bool {
+    let mts = MultiTypeSubst()
+    var mapping = MultiTypeSubst()
+    if (let Some(baseTy) <- baseExpr.GetTy()) {
+        if (let Some(targetTy) <- targetDecl.GetTy()) {
+            mapping = Promotion(typeManager).GetPromoteTypeMapping(baseTy, targetTy)
+        }
+    }
+    for (entry in mapping.entries) {
+        for (ty in entry.tys.values) {
+            if (ty.IsGeneric()) {
+                if (let Some(genTy) <- (ty as GenericsTy)) {
+                    mts.Put(genTy, typeManager.ApplySubstPack(entry.tyVar, typeMapping))
+                }
             }
         }
     }
-    if (instTys.isEmpty() || Ty.ExistGeneric(instTys)) {
+    var valid = true
+    var diagMessage = ""
+    for (entry in mts.entries) {
+        if (entry.tys.values.size > 1) {
+            if (!diagMessage.isEmpty()) {
+                diagMessage += ", "
+            }
+            diagMessage += "'" + entry.tyVar.String() + "' to '" + Ty.GetTypesToStr(entry.tys.values, "', '") + "'"
+            valid = false
+        }
+    }
+    if (!valid) {
+        if (let Some(diagValue) <- diag) {
+            if (let Some(typeDeclTy) <- typeDecl.GetTy()) {
+                let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_generic_type_inconsistent,
+                    MakeRange(baseExpr.begin, baseExpr.end), arguments: [typeDeclTy.String()])
+                builder.AddNote(diagMessage)
+                builder.Emit()
+            }
+        }
+    }
+    return valid
+}
+
+// C2e[B]: C++ src/Sema/TypeCheckCall.cpp:1171-1213 (outer-decl constraint block of
+// CheckCandidateConstrains). Replaces the earlier simplified func-own-generic approximation.
+private func CheckInstantiatedCandidateGenericDecl(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ce: CallExpr, fd: FuncDecl, typeMapping: SubstPack): Bool {
+    let ignored = match (fd.outerDecl) {
+        case Some(outer) => !outer.IsNominalDecl() || !Ty.IsTyCorrect(outer.GetTy())
+        case None => true
+    }
+    if (ignored) {
         return true
     }
-    let checkNode = match (ce.baseFunc) {
-        case Some(value) => value
-        case None => ce
+    var structDecl = fd.outerDecl.getOrThrow()
+    if (let Some(base) <- ce.baseFunc) {
+        if (let Some(ma) <- (base as MemberAccess)) {
+            if (let Some(baseExpr) <- ma.baseExpr) {
+                if (Ty.IsTyCorrect(baseExpr.GetTy())) {
+                    var baseTy = baseExpr.GetTy().getOrThrow()
+                    if (let Some(structTy) <- structDecl.GetTy()) {
+                        if (let Some(res) <- typeManager.GetExtendDeclByInterface(baseTy, structTy)) {
+                            structDecl = res
+                        }
+                    }
+                    if (let None <- structDecl.GetGeneric()) {
+                        return true
+                    }
+                    var typeDecl: Option<Decl> = None
+                    if (let Some(td) <- Ty.GetInheritableDeclPtrOfTy(Some(baseTy))) {
+                        let tdDecl: Decl = td
+                        typeDecl = Some(tdDecl)
+                    }
+                    let typeArgs = baseExpr.GetTypeArgs()
+                    let sameStructTypeDecl = SameDeclOpt(typeDecl, Some(structDecl))
+                    if (!NeedFurtherInstantiation(typeArgs) && sameStructTypeDecl) {
+                        return CheckGenericDeclInstantiationForCall(typeManager, diag, structDecl, typeArgs, baseExpr)
+                    }
+                    let needCheckTypeInconsistency = match (typeDecl) {
+                        case Some(td) => td.TestAttr(Attribute.GENERIC) && !sameStructTypeDecl
+                        case None => false
+                    }
+                    if (needCheckTypeInconsistency) {
+                        if (!CheckAndGetMappingForTypeDecl(typeManager, diag, baseExpr, typeDecl.getOrThrow(),
+                            structDecl, typeMapping)) {
+                            return false
+                        }
+                    }
+                    if (structDecl.astKind == ASTKind.EXTEND_DECL) {
+                        if (let Some(td) <- typeDecl) {
+                            baseTy = replaceWithGenericTyInInheritableDecl(typeManager, baseTy, structDecl, td)
+                        }
+                    }
+                    if (let Some(structTy) <- structDecl.GetTy()) {
+                        let prRes = Promotion(typeManager).Promote(baseTy, structTy)
+                        if (prRes.values.isEmpty()) {
+                            return true
+                        }
+                        let instTy = typeManager.ApplySubstPack(prRes.values[0], typeMapping)
+                        return Ty.IsTyCorrect(instTy) &&
+                            CheckGenericDeclInstantiationForCall(typeManager, diag, structDecl, instTy.typeArgs,
+                                baseExpr)
+                    }
+                    return true
+                }
+            }
+        }
     }
-    return CheckGenericDeclInstantiationForCall(typeManager, diag, genericDecl, instTys, checkNode)
+    if (IsClassOrEnumConstructor(fd)) {
+        let userDefinedTypeArgs = match (ce.baseFunc) {
+            case Some(base) => base.GetTypeArgs()
+            case None => ArrayList<Type>()
+        }
+        if (!NeedFurtherInstantiation(userDefinedTypeArgs)) {
+            let checkNode: Node = match (ce.baseFunc) {
+                case Some(base) => base
+                case None => ce
+            }
+            return CheckGenericDeclInstantiationForCall(typeManager, diag, structDecl, userDefinedTypeArgs, checkNode)
+        }
+    }
+    return true
 }
 
 private func CheckCandidateConstrains(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
