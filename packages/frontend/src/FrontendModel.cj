@@ -5274,14 +5274,22 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         }
     }
 
-    // GAP_TODO: C++ returns directMacroDeps (direct macro-import dependencies tracked during import
-    // resolution, ImportManager.h:246). Selfhost has no directMacroDeps yet; approximate with the
-    // imported macro packages. Refine once import resolution records direct macro deps.
+    // GAP_TODO: C++ returns directMacroDeps (ImportManager.h:246,408), a set populated by
+    // UpdateMacroPackageUsage (ImportManager.cpp:538-546) called from ResolveImportedPackages
+    // (:597): for each source package it takes GetCurImportedPackages(pkg.fullPackageName) — the
+    // DIRECT imports — and keeps those that are `isMacroPackage && !TestAttr(TOOL_ADD)`, so the
+    // result is the union of source packages' direct macro imports.
+    // The live frontend ImportManager has no directMacroDeps field and no import-resolution call
+    // site to populate it (the legacy modules.ImportManager.UpdateMacroPackageUsage exists but is
+    // inactive). GetCurImportedPackages (this class) is the available info source for a faithful
+    // port. Until then we approximate with all non-TOOL_ADD imported macro packages — a superset
+    // that additionally includes transitively (not directly) imported macro packages. The
+    // TOOL_ADD exclusion below matches C++; the direct-import scoping is the remaining gap.
     public func GetImportedPkgsForMacro(): ArrayList<Package> {
         let out = ArrayList<Package>()
         for (packageName in packageNameMap.keys()) {
             if (let Some(info) <- packageNameMap.get(packageName)) {
-                if (info.pkg.isMacroPackage) {
+                if (info.pkg.isMacroPackage && !info.pkg.TestAttr(Attribute.TOOL_ADD)) {
                     out.add(info.pkg)
                 }
             }

@@ -131,99 +131,37 @@ private func collectParentMacroName(macCall: MacroCall): Unit {
     }
 }
 
-private func declMatchesMacroName(decl: Decl, macroName: String, identifier: String): Bool {
-    if (macroName.contains(".")) {
-        return decl.identifier == identifier && (decl.fullPackageName + "." + decl.identifier.GetRawText() == macroName ||
-            decl.fullPackageName.endsWith(macroName[0..(macroName.size - identifier.size - 1)]))
-    }
-    return decl.identifier == macroName || decl.identifier == identifier
-}
-
-private func collectDeclsFromDecl(decl: Decl, macroName: String, identifier: String, out: ArrayList<Decl>): Unit {
-    if (declMatchesMacroName(decl, macroName, identifier)) {
-        out.add(decl)
-    }
-    for (member in decl.GetMemberDecls()) {
-        collectDeclsFromDecl(member, macroName, identifier, out)
-    }
-}
-
-private func collectDeclsFromPackage(pkg: Package, macroName: String, identifier: String, out: ArrayList<Decl>): Unit {
-    for (file in pkg.files) {
-        for (decl in file.decls) {
-            collectDeclsFromDecl(decl, macroName, identifier, out)
-        }
-    }
-}
-
-private func collectPackageMembersByName(pkg: Package, identifier: String, out: ArrayList<Decl>): Unit {
-    for (file in pkg.files) {
-        for (decl in file.decls) {
-            collectDeclsFromDecl(decl, identifier, identifier, out)
-        }
-    }
-}
-
-private func findImportedPackageByQualifier(instance: MacroHost, qualifier: String): (Option<Package>, Bool) {
-    var found: Option<Package> = None
-    var foundName = ""
-    var conflict = false
-    for (packageDecl in instance.importManager.GetAllImportedPackages(true)) {
-        let pkg = packageDecl.srcPackage
-        let matches = packageDecl.identifier == qualifier || packageDecl.fullPackageName == qualifier ||
-            pkg.fullPackageName == qualifier || pkg.fullPackageName.endsWith("." + qualifier)
-        if (matches) {
-            if (found.isSome() && foundName != pkg.fullPackageName) {
-                conflict = true
-            } else if (found.isNone()) {
-                found = Some(pkg)
-                foundName = pkg.fullPackageName
-            }
-        }
-    }
-    for (pkg in instance.importManager.GetImportedPkgsForMacro()) {
-        let matches = pkg.fullPackageName == qualifier || pkg.fullPackageName.endsWith("." + qualifier)
-        if (matches) {
-            if (found.isSome() && foundName != pkg.fullPackageName) {
-                conflict = true
-            } else if (found.isNone()) {
-                found = Some(pkg)
-                foundName = pkg.fullPackageName
-            }
-        }
-    }
-    return (found, conflict)
-}
-
 private func getAllDeclsForMacroName(macCall: MacroCall, macroName: String, out: ArrayList<Decl>): Bool {
     if (let Some(instance) <- macCall.ci) {
         let identifier = macCall.GetIdentifier()
-        if (macroName.contains(".")) {
-            let lastDot = macroName.lastIndexOf(".") ?? -1
-            if (lastDot > 0) {
-                let qualifier = macroName[0..lastDot]
-                let (pkgOpt, conflict) = findImportedPackageByQualifier(instance, qualifier)
-                if (let Some(pkg) <- pkgOpt) {
-                    if (conflict) {
-                        instance.GetDiag().Diagnose(macCall.GetBeginPos(), "package name conflict: " + qualifier)
-                        return false
-                    }
-                    collectPackageMembersByName(pkg, identifier, out)
-                    return true
-                }
-                instance.GetDiag().Diagnose(macCall.GetBeginPos(), "undefined package name '" + qualifier + "'")
-                return false
-            }
-        }
         if (let Some(node) <- macCall.GetNode()) {
             if (let Some(file) <- node.curFile) {
-                if (let Some(pkg) <- file.curPackage) {
-                    collectDeclsFromPackage(pkg, macroName, identifier, out)
+                if (macroName.contains(".")) {
+                    // The package name may be an alias: import p0.* as p1.*, p1 is the alias for p0.
+                    let pkgNameMaybeAlias = macroName[0..(macroName.lastIndexOf(".") ?? 0)]
+                    let (packageDeclOpt, isConflicted) = instance.importManager.GetImportedPackageDecl(node,
+                        pkgNameMaybeAlias)
+                    if (let Some(packageDecl) <- packageDeclOpt) {
+                        if (isConflicted) {
+                            instance.GetDiag().Diagnose(macCall.GetBeginPos(), DiagKind.sema_package_name_conflict,
+                                args: [DiagArgument(pkgNameMaybeAlias)]).Emit()
+                            return false
+                        }
+                        for (foundDecl in instance.importManager.GetPackageMembersByName(packageDecl.srcPackage,
+                            identifier)) {
+                            out.add(foundDecl)
+                        }
+                    } else {
+                        instance.GetDiag().Diagnose(macCall.GetBeginPos(), DiagKind.macro_undefined_pkg_name,
+                            args: [DiagArgument(pkgNameMaybeAlias)]).Emit()
+                        return false
+                    }
+                } else {
+                    for (importedDecl in instance.importManager.GetImportedDeclsByName(file, identifier)) {
+                        out.add(importedDecl)
+                    }
                 }
             }
-        }
-        for (pkg in instance.importManager.GetImportedPkgsForMacro()) {
-            collectDeclsFromPackage(pkg, macroName, identifier, out)
         }
     }
     return true
