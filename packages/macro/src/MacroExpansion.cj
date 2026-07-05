@@ -168,7 +168,7 @@ private func checkUnhandledMacroCall(pkg: Package, diag: DiagnosticEngine): Unit
     }
 }
 
-private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall, ci: CompilerInstance): ArrayList<Node> {
+private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall, ci: MacroHost): ArrayList<Node> {
     let out = ArrayList<Node>()
     if (tokens.isEmpty()) {
         return out
@@ -184,10 +184,10 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall,
         return out
     }
     let parserDiag = ParsedDiagnosticEngine()
-    let generatedParser = GeneratedParser(tokens.toArray(), parserDiag, ci.diag.GetSourceManager(),
-        attachComment: ci.invocation.globalOptions.enableAddCommentToAst,
-        parseDeclFile: ci.invocation.globalOptions.compileCjd)
-    generatedParser.SetCompileOptions(ci.invocation.globalOptions)
+    let generatedParser = GeneratedParser(tokens.toArray(), parserDiag, ci.GetDiag().GetSourceManager(),
+        attachComment: ci.GetGlobalOptions().enableAddCommentToAst,
+        parseDeclFile: ci.GetGlobalOptions().compileCjd)
+    generatedParser.SetCompileOptions(ci.GetGlobalOptions())
     generatedParser.SetPrimaryDecl(macroNode.RequireInvocation().outerDeclIdent)
     generatedParser.EnableCustomAnno()
     let parsedCurrentMacroCall = makeParsedCurrentMacroCall(macroNode.RequireNode())
@@ -198,7 +198,7 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall,
     }
     let parsedNodes = generatedParser.ParseNodes(parsedScope, parsedCurrentMacroCall)
     let hasParseError = parserDiag.GetErrorCount() > 0u64
-    forwardParserDiagnostics(parserDiag, ci.diag)
+    forwardParserDiagnostics(parserDiag, ci.GetDiag())
     if (hasParseError) {
         out.add(makeInvalidGeneratedNode(tokens))
         return out
@@ -738,11 +738,11 @@ private func replaceParamVectorWith(container: ArrayList<FuncParam>, loc: Int64,
 
 public class MacroExpansion {
     var curPackage: Option<Package> = None
-    var ci: CompilerInstance
+    var ci: MacroHost
     var macroCollector: MacroCollector = MacroCollector()
     public let tokensEvalInMacro: ArrayList<String> = ArrayList<String>()
 
-    public init(ci: CompilerInstance) {
+    public init(ci: MacroHost) {
         this.ci = ci
     }
 
@@ -750,7 +750,7 @@ public class MacroExpansion {
         curPackage = Some(pkg)
         CollectMacros(pkg)
         if (hasNoMacros(macroCollector) || macroCollector.macCalls.isEmpty() ||
-            hasDefAndCallInSamePkg(macroCollector, ci.diag) || ci.diag.GetErrorCount() > 0) {
+            hasDefAndCallInSamePkg(macroCollector, ci.GetDiag()) || ci.GetDiag().GetErrorCount() > 0) {
             return
         }
         EvaluateMacros()
@@ -759,20 +759,20 @@ public class MacroExpansion {
     }
 
     public func Execute(packages: ArrayList<Package>): Unit {
-        if (ci.invocation.globalOptions.enableCompileTest) {
-            TestEntryConstructor(ci.diag).CheckTestSuite(packages)
+        if (ci.GetGlobalOptions().enableCompileTest) {
+            TestEntryConstructor(ci.GetDiag()).CheckTestSuite(packages)
         }
         for (pkg in packages) {
             Execute(pkg)
         }
-        if (ci.invocation.globalOptions.enableCompileTest && ci.invocation.globalOptions.CompileExecutable()) {
-            TestEntryConstructor.ConstructTestSuite(ci.invocation.globalOptions.moduleName, packages,
-                ci.importManager.GetAllImportedPackages(), ci.invocation.globalOptions.compileTestsOnly,
-                ci.invocation.globalOptions.mock == MockMode.ON)
+        if (ci.GetGlobalOptions().enableCompileTest && ci.GetGlobalOptions().CompileExecutable()) {
+            TestEntryConstructor.ConstructTestSuite(ci.GetGlobalOptions().moduleName, packages,
+                ci.importManager.GetAllImportedPackages(true), ci.GetGlobalOptions().compileTestsOnly,
+                ci.GetGlobalOptions().mock == MockMode.ON)
         }
         for (pkg in packages) {
             AddCurFile(pkg)
-            checkUnhandledMacroCall(pkg, ci.diag)
+            checkUnhandledMacroCall(pkg, ci.GetDiag())
         }
     }
 
@@ -788,7 +788,7 @@ public class MacroExpansion {
         if (localCollector.macCalls.isEmpty()) {
             return currentDecls
         }
-        let evaluator = MacroEvaluation(ci, localCollector, ci.invocation.globalOptions.enableMacroInLSP)
+        let evaluator = MacroEvaluation(ci, localCollector, ci.GetGlobalOptions().enableMacroInLSP)
         evaluator.Evaluate()
         ProcessMacroCallList(this, localCollector.macCalls)
         ReplaceMacroCallsInDecls(localCollector.macCalls)
@@ -847,7 +847,7 @@ public class MacroExpansion {
     }
 
     private func EvaluateMacros(): Unit {
-        let evaluator = MacroEvaluation(ci, macroCollector, ci.invocation.globalOptions.enableMacroInLSP)
+        let evaluator = MacroEvaluation(ci, macroCollector, ci.GetGlobalOptions().enableMacroInLSP)
         evaluator.Evaluate()
         tokensEvalInMacro.clear()
         for (code in evaluator.GetVecOfGeneratedCodes()) {
@@ -877,10 +877,10 @@ public class MacroExpansion {
             if (node.IsInvalid()) {
                 return
             }
-            if (hasMacroCallInNode(node, ci.diag)) {
+            if (hasMacroCallInNode(node, ci.GetDiag())) {
                 return
             }
-            checkWhenAfterMacroExpand(node, ci.diag)
+            checkWhenAfterMacroExpand(node, ci.GetDiag())
         }
         ReplaceEachMacroHelper(macCall, nodes)
     }
@@ -889,7 +889,7 @@ public class MacroExpansion {
         let target = macroNode.replaceLoc
         if (target.kind == ReplaceTargetKind.EXPR_BOX) {
             if (newNodes.isEmpty()) {
-                emitMacroDiag(ci.diag, macroNode.GetBeginPos(), DiagKind.macro_unexpect_no_expr)
+                emitMacroDiag(ci.GetDiag(), macroNode.GetBeginPos(), DiagKind.macro_unexpect_no_expr)
             } else if (newNodes.size == 1) {
                 if (let Some(replacementExpr) <- (newNodes[0] as Expr)) {
                     if (AssignExprReplacement(target, replacementExpr)) {
@@ -898,10 +898,10 @@ public class MacroExpansion {
                         }
                     }
                 } else {
-                    emitMacroDiag(ci.diag, newNodes[0].begin, DiagKind.macro_expect_one_expr)
+                    emitMacroDiag(ci.GetDiag(), newNodes[0].begin, DiagKind.macro_expect_one_expr)
                 }
             } else {
-                emitMacroDiag(ci.diag, newNodes[newNodes.size - 1].begin, DiagKind.macro_expect_one_expr)
+                emitMacroDiag(ci.GetDiag(), newNodes[newNodes.size - 1].begin, DiagKind.macro_expect_one_expr)
             }
         } else if (target.kind == ReplaceTargetKind.NODE_VECTOR) {
             if (let Some(nodes) <- target.nodes) {
@@ -910,18 +910,18 @@ public class MacroExpansion {
             }
         } else if (target.kind == ReplaceTargetKind.EXPR_VECTOR) {
             if (let Some(exprs) <- target.exprs) {
-                replaceExprVector(exprs, target.loc, newNodes, macroNode, ci.diag)
+                replaceExprVector(exprs, target.loc, newNodes, macroNode, ci.GetDiag())
             }
         } else if (target.kind == ReplaceTargetKind.DECL_VECTOR) {
             if (let Some(decls) <- target.decls) {
-                replaceDeclVector(decls, target.loc, newNodes, macroNode, ci.diag)
+                replaceDeclVector(decls, target.loc, newNodes, macroNode, ci.GetDiag())
             }
         } else if (target.kind == ReplaceTargetKind.PARAM_VECTOR) {
             if (let Some(params) <- target.params) {
-                replaceParamVector(params, target.loc, newNodes, macroNode, ci.diag)
+                replaceParamVector(params, target.loc, newNodes, macroNode, ci.GetDiag())
             }
         } else {
-            emitMacroDiag(ci.diag, macroNode.GetBeginPos(), DiagKind.macro_expand_invalid_node_replace)
+            emitMacroDiag(ci.GetDiag(), macroNode.GetBeginPos(), DiagKind.macro_expand_invalid_node_replace)
         }
     }
 }

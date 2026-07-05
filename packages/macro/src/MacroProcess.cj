@@ -47,7 +47,7 @@ private func getTokenLengthForMap(token: Token): Int64 {
 }
 
 private func reportMappingFailedDiag(
-    oldTokens: ArrayList<Token>, newTokens: ArrayList<Token>, mcPos: Position, ci: CompilerInstance): Unit {
+    oldTokens: ArrayList<Token>, newTokens: ArrayList<Token>, mcPos: Position, ci: MacroHost): Unit {
     let minSize = if (oldTokens.size < newTokens.size) { oldTokens.size } else { newTokens.size }
     var idx: Int64 = 0
     while (idx < minSize) {
@@ -57,10 +57,10 @@ private func reportMappingFailedDiag(
         }
         if (oldTokens[idx].kind != newTokens[idx].kind || oldTokens[idx].Value() != newTokens[idx].Value()) {
             if (oldTokens[idx].Value().isEmpty()) {
-                ci.diag.Diagnose(mcPos, "macro call map info failed for empty token kind " +
+                ci.GetDiag().Diagnose(mcPos, "macro call map info failed for empty token kind " +
                     TokenKindIndex(oldTokens[idx].kind).toString())
             } else {
-                ci.diag.Diagnose(mcPos, "macro call map info failed: expected '" + oldTokens[idx].Value() +
+                ci.GetDiag().Diagnose(mcPos, "macro call map info failed: expected '" + oldTokens[idx].Value() +
                     "', got '" + newTokens[idx].Value() + "'")
             }
             return
@@ -112,8 +112,8 @@ private func shiftedPosition(pos: Position, start: Position, tokenBegin: Positio
 }
 
 private func handleInterpolationStringPosMap(strToken: Token, newStartPos: Position,
-    invocation: MacroInvocation, ci: CompilerInstance, isMacroMap!: Bool = false): Unit {
-    let lexer = RealLexer([strToken], ci.diag, ci.GetSourceManager())
+    invocation: MacroInvocation, ci: MacroHost, isMacroMap!: Bool = false): Unit {
+    let lexer = RealLexer([strToken], ci.GetDiag(), ci.GetSourceManager())
     let strParts = lexer.GetStrParts(strToken)
     var multiStrDeltaLine: Int64 = 1
     for (part in strParts) {
@@ -124,7 +124,7 @@ private func handleInterpolationStringPosMap(strToken: Token, newStartPos: Posit
         if (part.strKind != StringPartKind.EXPR) {
             continue
         }
-        let tokens = GetTokensFromString(part.value, ci.diag, pos: part.begin)
+        let tokens = GetTokensFromString(part.value, ci.GetDiag(), pos: part.begin)
         if (tokens.size <= 2) {
             continue
         }
@@ -157,7 +157,7 @@ private func handleInterpolationStringPosMap(strToken: Token, newStartPos: Posit
     }
 }
 
-private func isPureCustomAnnotation(invocation: MacroInvocation, ci: CompilerInstance): Bool {
+private func isPureCustomAnnotation(invocation: MacroInvocation, ci: MacroHost): Bool {
     if (!invocation.macroCallDiagInfo.isCustom || invocation.newTokens.isEmpty()) {
         return false
     }
@@ -174,7 +174,7 @@ private func isPureCustomAnnotation(invocation: MacroInvocation, ci: CompilerIns
     return true
 }
 
-public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: CompilerInstance): Unit {
+public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: MacroHost): Unit {
     if (let Some(invocation) <- node.GetInvocation()) {
         if (invocation.macroCallDiagInfo.isCurFile) {
             return
@@ -208,7 +208,7 @@ public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: CompilerInsta
             if (!isSpecialToken(prevTokenKind, token.kind)) {
                 lastColumn++
             }
-            if (ci.invocation.globalOptions.enableCompileDebug || ci.invocation.globalOptions.displayLineInfo) {
+            if (ci.GetGlobalOptions().enableCompileDebug || ci.GetGlobalOptions().displayLineInfo) {
                 collectMacroDebugPosition(invocation, token, lastColumn)
             }
             let keyPos = Position(mcPos.fileID, mcPos.line, lastColumn)
@@ -230,13 +230,13 @@ public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: CompilerInsta
             invocation.newTokens[tokenIdx] = token
             tokenIdx++
         }
-        if (ci.invocation.globalOptions.enableCompileDebug || ci.invocation.globalOptions.displayLineInfo) {
+        if (ci.GetGlobalOptions().enableCompileDebug || ci.GetGlobalOptions().displayLineInfo) {
             invocation.macroDebugMap.add((UInt64(lastColumn), node.end))
         }
     }
 }
 
-public func RefreshTokensPosMap(node: Node, sm: SourceManager, ci: CompilerInstance): Unit {
+public func RefreshTokensPosMap(node: Node, sm: SourceManager, ci: MacroHost): Unit {
     if (let Some(invocation) <- node.GetInvocation()) {
         if (invocation.newTokens.isEmpty()) {
             return
@@ -252,7 +252,7 @@ public func RefreshTokensPosMap(node: Node, sm: SourceManager, ci: CompilerInsta
             invocation.macroCallDiagInfo.isCurFile = true
         }
         invocation.macroCallDiagInfo.mcBegin = node.curFile.getOrThrow().macroCallPosBase
-        let tokens = GetTokensFromString(invocation.newTokensStr, ci.diag, pos: invocation.macroCallDiagInfo.mcBegin)
+        let tokens = GetTokensFromString(invocation.newTokensStr, ci.GetDiag(), pos: invocation.macroCallDiagInfo.mcBegin)
         if (tokens.isEmpty()) {
             return
         }
@@ -261,7 +261,7 @@ public func RefreshTokensPosMap(node: Node, sm: SourceManager, ci: CompilerInsta
             reportMappingFailedDiag(invocation.newTokens, tokens, node.begin, ci)
             return
         }
-        if (ci.invocation.globalOptions.enableMacroDebug) {
+        if (ci.GetGlobalOptions().enableMacroDebug) {
             return
         }
         RefreshNewTokensPos(node, sm, ci)
@@ -286,7 +286,7 @@ private func macroCallHasExpandedTokens(call: MacroCall): Bool {
     return !MacroExpandFailed(invocation.newTokens) && call.status != MacroEvalStatus.FAIL
 }
 
-private func macroCallSucceededForPackage(call: MacroCall, ci: CompilerInstance): Bool {
+private func macroCallSucceededForPackage(call: MacroCall, ci: MacroHost): Bool {
     if (!macroCallHasExpandedTokens(call)) {
         return false
     }
@@ -328,9 +328,9 @@ private func removeMacroCallFile(path: String): Unit {
     }
 }
 
-private func generateMacroCallFile(file: File, nodes: ArrayList<Node>, ci: CompilerInstance): Unit {
+private func generateMacroCallFile(file: File, nodes: ArrayList<Node>, ci: MacroHost): Unit {
     let sm = ci.GetSourceManager()
-    let isCjmpFile = ci.invocation.globalOptions.IsCompilingCJMPSpecific()
+    let isCjmpFile = ci.GetGlobalOptions().IsCompilingCJMPSpecific()
     let path = file.macroCallFilePath
     let fileID = sm.AddSource(path, "")
     var curFilePosBase = file.begin
@@ -342,16 +342,16 @@ private func generateMacroCallFile(file: File, nodes: ArrayList<Node>, ci: Compi
             appendMacroAnnotations(sm, path, node, isCjmpFile)
             let _ = sm.AppendSource(path, invocation.newTokensStr, isCjmpFile: isCjmpFile)
             RefreshTokensPosMap(node, sm, ci)
-            invocation.macroCallDiagInfo.isForLSP = ci.invocation.globalOptions.enableMacroInLSP
+            invocation.macroCallDiagInfo.isForLSP = ci.GetGlobalOptions().enableMacroInLSP
             syncMacroCallDiagInfo(node, invocation)
         }
     }
     let content = sm.GetContentBetween(curFilePosBase.fileID, curFilePosBase, file.end)
     let _ = sm.AppendSource(path, content, isCjmpFile: isCjmpFile)
-    if (ci.invocation.globalOptions.enableMacroInLSP || ci.invocation.globalOptions.enableMacroDebug) {
+    if (ci.GetGlobalOptions().enableMacroInLSP || ci.GetGlobalOptions().enableMacroDebug) {
         let source = sm.GetSource(fileID)
         if (!writeStringToFile(path, source.buffer)) {
-            ci.diag.Diagnose(file.begin, "failed to save macro call file '" + path + "'")
+            ci.GetDiag().Diagnose(file.begin, "failed to save macro call file '" + path + "'")
         }
     } else {
         removeMacroCallFile(path)
@@ -401,8 +401,8 @@ public func ProcessPackageMacros(expansion: MacroExpansion, pkg: Package): Unit 
                     break
                 }
             }
-            if (!hasMacroCall && (expansion.ci.invocation.globalOptions.enableMacroInLSP ||
-                expansion.ci.invocation.globalOptions.enableMacroDebug)) {
+            if (!hasMacroCall && (expansion.ci.GetGlobalOptions().enableMacroInLSP ||
+                expansion.ci.GetGlobalOptions().enableMacroDebug)) {
                 removeMacroCallFile(file.macroCallFilePath)
             }
         }

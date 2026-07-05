@@ -16,6 +16,7 @@ import cangjie_compiler::chir.CHIRContext as RealCHIRContext
 import cangjie_compiler::chir.Package as RealCHIRPackage
 import cangjie_compiler::modules.SemaCjoManager
 import cangjie_compiler::modules.SemaImportManager
+import cangjie_compiler::modules.MacroHostImportManager
 import cangjie_compiler::option.OptimizationLevel
 import cangjie_compiler::option.enumIndex
 public import cangjie_compiler::mangle.BaseMangler
@@ -4890,7 +4891,7 @@ private const NO_CJO_HELP_INFO: String =
     "check if the .cjo file of the package exists in CANGJIE_PATH or CANGJIE_HOME, or use " +
     "'--import-path' to specify the .cjo file path"
 
-public class ImportManager <: SemaImportManager & SemaCjoManager {
+public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImportManager {
     private let diag: DiagnosticEngine
     private let typeManager: FaithfulSemaTypeManager
     private let globalOptions: GlobalOptions
@@ -5271,6 +5272,32 @@ public class ImportManager <: SemaImportManager & SemaCjoManager {
         if (let Some(usedDeclMap) <- fileUsedMacroDeclsMap.get(file.indexOfPackage)) {
             PutImportedDecl(usedDeclMap, decl.fullPackageName, decl)
         }
+    }
+
+    // GAP_TODO: C++ returns directMacroDeps (direct macro-import dependencies tracked during import
+    // resolution, ImportManager.h:246). Selfhost has no directMacroDeps yet; approximate with the
+    // imported macro packages. Refine once import resolution records direct macro deps.
+    public func GetImportedPkgsForMacro(): ArrayList<Package> {
+        let out = ArrayList<Package>()
+        for (packageName in packageNameMap.keys()) {
+            if (let Some(info) <- packageNameMap.get(packageName)) {
+                if (info.pkg.isMacroPackage) {
+                    out.add(info.pkg)
+                }
+            }
+        }
+        return out
+    }
+
+    public func GetImportedStdMacroPackages(): ArrayList<String> {
+        let stdMacroPackages = ["std.unittest.testmacro", "std.unittest.mock.mockmacro", "std.deriving"]
+        let out = ArrayList<String>()
+        for (packageName in stdMacroPackages) {
+            if (GetPackageDecl(packageName).isSome()) {
+                out.add(packageName)
+            }
+        }
+        return out
     }
 
     public func GetUsedMacroDecls(file: File): HashMap<String, ArrayList<Decl>> {

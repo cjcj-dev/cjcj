@@ -272,7 +272,7 @@ private func decodeDiagnostics(value: String, out: ArrayList<Diagnostic>): Unit 
 private func getCallDiagnostics(macCall: MacroCall): ArrayList<Diagnostic> {
     if (let Some(instance) <- macCall.ci) {
         let out = ArrayList<Diagnostic>()
-        for (diag in instance.diag.GetCategoryDiagnostic(DiagCategory.PARSE)) {
+        for (diag in instance.GetDiag().GetCategoryDiagnostic(DiagCategory.PARSE)) {
             out.add(diag)
         }
         return out

@@ -6,6 +6,8 @@ import cangjie_compiler::basic.InteropCJPackageConfigReader
 import cangjie_compiler::conditional_compilation.ConditionalCompilation
 import cangjie_compiler::parse.Parser as RealParser
 import cangjie_compiler::basic.GetHash
+import cangjie_compiler::basic.DiagCategory
+import cangjie_compiler::macro_pkg.MacroExpansion
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.ProfileRecorder
 import std.collection.*
@@ -81,7 +83,32 @@ public open class CompileStrategy {
     }
 
     public func MacroExpand(): Bool {
-        return true
+        let beforeErrCnt = ci.diag.GetErrorCount()
+        let host = MacroHostAdapter(ci)
+        let expansion = MacroExpansion(host)
+        // S0 seam: run the real expansion pipeline only on packages with no macro calls (which
+        // early-out inside Execute), so the seam is live and exercised end-to-end while behavior is
+        // unchanged. Macro-bearing packages are left to a later slice.
+        for (pkg in ci.srcPkgs) {
+            if (!packageHasMacro(pkg)) {
+                expansion.Execute(pkg)
+            }
+        }
+        ci.diag.EmitCategoryDiagnostics(DiagCategory.PARSE)
+        ci.tokensEvalInMacro.clear()
+        for (tokens in expansion.tokensEvalInMacro) {
+            ci.tokensEvalInMacro.add(tokens)
+        }
+        return beforeErrCnt == ci.diag.GetErrorCount()
+    }
+
+    private func packageHasMacro(pkg: Package): Bool {
+        for (file in pkg.files) {
+            if (file.hasMacro) {
+                return true
+            }
+        }
+        return false
     }
 
     public open func Sema(): Bool {

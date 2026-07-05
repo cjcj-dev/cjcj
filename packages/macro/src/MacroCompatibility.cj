@@ -23,6 +23,7 @@ public import cangjie_compiler::basic.{
 }
 public import cangjie_compiler::lex.{Token, TokenKind, TokenKindIndex, TokenKindLiteral}
 public import cangjie_compiler::option.MockMode
+public import cangjie_compiler::modules.{MacroHost, MacroHostImportManager}
 
 public import cangjie_compiler::ast.{
     Annotation, ArrayExpr, ArrayLit, AsExpr, BinaryExpr, Block, CallExpr, ClassDecl, CommandTypePattern,
@@ -102,52 +103,4 @@ extend DiagnosticEngine {
 
 public func TokenKindText(kind: TokenKind): String {
     return TokenKindLiteral(kind)
-}
-
-public class CompilerInvocation {
-    public var globalOptions: CompilerGlobalOptions = CompilerGlobalOptions()
-
-    public init() {}
-}
-
-public class ImportManager {
-    public let importedMacroPackages: ArrayList<Package> = ArrayList<Package>()
-    public let importedStdMacroPackages: ArrayList<String> = ArrayList<String>()
-    public let importedPackageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()
-    public let searchPath: ArrayList<String> = ArrayList<String>()
-    public let usedMacroDecls: ArrayList<(File, Decl)> = ArrayList<(File, Decl)>()
-
-    public init() {}
-
-    public func GetImportedPkgsForMacro(): ArrayList<Package> {
-        return importedMacroPackages
-    }
-
-    public func GetImportedStdMacroPackages(): ArrayList<String> {
-        return importedStdMacroPackages
-    }
-
-    public func GetAllImportedPackages(): ArrayList<PackageDecl> {
-        return importedPackageDecls
-    }
-
-    public func GetSearchPath(): ArrayList<String> {
-        return searchPath
-    }
-
-    public func AddUsedMacroDecls(file: File, decl: Decl): Unit {
-        usedMacroDecls.add((file, decl))
-    }
-}
-
-public class CompilerInstance {
-    public var diag: DiagnosticEngine = DiagnosticEngine()
-    public var invocation: CompilerInvocation = CompilerInvocation()
-    public var importManager: ImportManager = ImportManager()
-
-    public init() {}
-
-    public func GetSourceManager(): SourceManager {
-        return diag.GetSourceManager()
-    }
 }

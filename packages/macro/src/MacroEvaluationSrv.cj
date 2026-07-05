@@ -180,7 +180,7 @@ extend MacroEvaluation {
     public func ResetForNextEval(): Unit {
         usedMacroPkgs.clear()
         macroCollector.clear()
-        ci.diag.Reset()
+        ci.GetDiag().Reset()
         RuntimeInit.GetInstance().CloseRuntime()
     }
 }

@@ -298,7 +298,7 @@ public class MacroCall {
     public var isDataReady: Bool = false
     public var useParentPos: Bool = false
     public var parentMacroCall: Option<MacroCall> = None
-    public var ci: Option<CompilerInstance> = None
+    public var ci: Option<MacroHost> = None
     public let parentNames: ArrayList<String> = ArrayList<String>()
     public let items: ArrayList<ItemInfo> = ArrayList<ItemInfo>()
     public let childMessages: ArrayList<ChildMessage> = ArrayList<ChildMessage>()
@@ -453,7 +453,7 @@ public class MacroCall {
         }
         if (!success && report) {
             if (let Some(instance) <- ci) {
-                instance.diag.Diagnose(begin, DiagKind.macro_assert_parent_context_failed,
+                instance.GetDiag().Diagnose(begin, DiagKind.macro_assert_parent_context_failed,
                     args: [DiagArgument(GetFullName()), DiagArgument(parentStr)]).Emit()
             } else {
                 assertParents.add(parentStr)
@@ -465,9 +465,9 @@ public class MacroCall {
     public func DiagReport(level: Int64, range: Range, message: String, hint: String): Unit {
         if (let Some(instance) <- ci) {
             if (level == 1) {
-                instance.diag.Warn(range, message + hint)
+                instance.GetDiag().Warn(range, message + hint)
             } else {
-                instance.diag.Diagnose(range, message + hint)
+                instance.GetDiag().Diagnose(range, message + hint)
             }
         }
     }

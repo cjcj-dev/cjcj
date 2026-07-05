@@ -164,11 +164,11 @@ private func collectPackageMembersByName(pkg: Package, identifier: String, out: 
     }
 }
 
-private func findImportedPackageByQualifier(instance: CompilerInstance, qualifier: String): (Option<Package>, Bool) {
+private func findImportedPackageByQualifier(instance: MacroHost, qualifier: String): (Option<Package>, Bool) {
     var found: Option<Package> = None
     var foundName = ""
     var conflict = false
-    for (packageDecl in instance.importManager.GetAllImportedPackages()) {
+    for (packageDecl in instance.importManager.GetAllImportedPackages(true)) {
         let pkg = packageDecl.srcPackage
         let matches = packageDecl.identifier == qualifier || packageDecl.fullPackageName == qualifier ||
             pkg.fullPackageName == qualifier || pkg.fullPackageName.endsWith("." + qualifier)
@@ -181,7 +181,7 @@ private func findImportedPackageByQualifier(instance: CompilerInstance, qualifie
             }
         }
     }
-    for (pkg in instance.importManager.importedMacroPackages) {
+    for (pkg in instance.importManager.GetImportedPkgsForMacro()) {
         let matches = pkg.fullPackageName == qualifier || pkg.fullPackageName.endsWith("." + qualifier)
         if (matches) {
             if (found.isSome() && foundName != pkg.fullPackageName) {
@@ -205,13 +205,13 @@ private func getAllDeclsForMacroName(macCall: MacroCall, macroName: String, out:
                 let (pkgOpt, conflict) = findImportedPackageByQualifier(instance, qualifier)
                 if (let Some(pkg) <- pkgOpt) {
                     if (conflict) {
-                        instance.diag.Diagnose(macCall.GetBeginPos(), "package name conflict: " + qualifier)
+                        instance.GetDiag().Diagnose(macCall.GetBeginPos(), "package name conflict: " + qualifier)
                         return false
                     }
                     collectPackageMembersByName(pkg, identifier, out)
                     return true
                 }
-                instance.diag.Diagnose(macCall.GetBeginPos(), "undefined package name '" + qualifier + "'")
+                instance.GetDiag().Diagnose(macCall.GetBeginPos(), "undefined package name '" + qualifier + "'")
                 return false
             }
         }
@@ -222,7 +222,7 @@ private func getAllDeclsForMacroName(macCall: MacroCall, macroName: String, out:
                 }
             }
         }
-        for (pkg in instance.importManager.importedMacroPackages) {
+        for (pkg in instance.importManager.GetImportedPkgsForMacro()) {
             collectDeclsFromPackage(pkg, macroName, identifier, out)
         }
     }
@@ -255,7 +255,7 @@ private func getValidFuncDecl(macCall: MacroCall, decls: ArrayList<Decl>): Bool 
         if (!isMacroFuncDecl(decl)) {
             if (macCall.RequireInvocation().hasParenthesis) {
                 if (let Some(instance) <- macCall.ci) {
-                    instance.diag.Diagnose(macCall.GetBeginPos(),
+                    instance.GetDiag().Diagnose(macCall.GetBeginPos(),
                         "expect macro definition '" + macCall.GetIdentifier() + "', but found another declaration")
                 }
                 return false
@@ -272,7 +272,7 @@ private func getValidFuncDecl(macCall: MacroCall, decls: ArrayList<Decl>): Bool 
     if (fds.isEmpty()) {
         if (macCall.RequireInvocation().hasParenthesis && !macCall.RequireInvocation().IsIfAvailable()) {
             if (let Some(instance) <- macCall.ci) {
-                instance.diag.Diagnose(macCall.GetBeginPos(), "undeclared macro identifier '" +
+                instance.GetDiag().Diagnose(macCall.GetBeginPos(), "undeclared macro identifier '" +
                     macCall.GetIdentifier() + "'")
             }
         }
@@ -283,14 +283,14 @@ private func getValidFuncDecl(macCall: MacroCall, decls: ArrayList<Decl>): Bool 
         if (macCall.HasAttribute()) {
             if (argsSize != MACRO_ATTR_ARGS) {
                 if (let Some(instance) <- macCall.ci) {
-                    instance.diag.Diagnose(macCall.GetBeginPos(),
+                    instance.GetDiag().Diagnose(macCall.GetBeginPos(),
                         "expect an attributed macro '" + macCall.GetIdentifier() + "', but find a plain one")
                 }
                 return false
             }
         } else if (argsSize != MACRO_COMMON_ARGS) {
             if (let Some(instance) <- macCall.ci) {
-                instance.diag.Diagnose(macCall.GetBeginPos(),
+                instance.GetDiag().Diagnose(macCall.GetBeginPos(),
                     "expect a plain macro '" + macCall.GetIdentifier() + "', but find an attributed one")
             }
             return false
@@ -304,7 +304,7 @@ private func getValidFuncDecl(macCall: MacroCall, decls: ArrayList<Decl>): Bool 
         let argsSize2 = firstParamCount(fds[1])
         if (argsSize1 == argsSize2) {
             if (let Some(instance) <- macCall.ci) {
-                instance.diag.Diagnose(macCall.GetBeginPos(), "ambiguous match for macro call " + macCall.GetIdentifier())
+                instance.GetDiag().Diagnose(macCall.GetBeginPos(), "ambiguous match for macro call " + macCall.GetIdentifier())
             }
             return false
         }
@@ -333,18 +333,18 @@ private func bindDefinitionByName(macCall: MacroCall, macroName: String): Bool {
         return true
     }
     if (let Some(instance) <- macCall.ci) {
-        instance.diag.Diagnose(macCall.GetBeginPos(), "ambiguous match for macro call " + macCall.GetIdentifier())
+        instance.GetDiag().Diagnose(macCall.GetBeginPos(), "ambiguous match for macro call " + macCall.GetIdentifier())
     }
     return false
 }
 
-private func findStdMacroLibPath(packageName: String, instance: CompilerInstance): String {
+private func findStdMacroLibPath(packageName: String, instance: MacroHost): String {
     let baseName = convertPackageNameToLibCangjieBaseFormat(packageName)
     if (baseName.isEmpty()) {
         return ""
     }
     let libName = "lib" + baseName + LIB_SUFFIX
-    let executablePath = instance.invocation.globalOptions.executablePath
+    let executablePath = instance.GetGlobalOptions().executablePath
     if (!executablePath.isEmpty()) {
         let candidate = joinPath(joinPath(getDirPath(executablePath), "../runtime/lib"), libName)
         if (fileExists(candidate)) {
@@ -358,7 +358,7 @@ private func findStdMacroLibPath(packageName: String, instance: CompilerInstance
     return ""
 }
 
-private func findMacroDefPkg(macCall: MacroCall, instance: CompilerInstance, fd: FuncDecl): Unit {
+private func findMacroDefPkg(macCall: MacroCall, instance: MacroHost, fd: FuncDecl): Unit {
     for (packageName in instance.importManager.GetImportedStdMacroPackages()) {
         if (packageName == fd.fullPackageName) {
             macCall.libPath = findStdMacroLibPath(packageName, instance)
@@ -383,10 +383,10 @@ private func bindInvokeFunc(macCall: MacroCall): Bool {
         macCall.methodName = GetMacroFuncName(fd.fullPackageName, macCall.HasAttribute(), fd.identifier.GetRawText())
         macCall.packageName = fd.fullPackageName
         if (let Some(instance) <- macCall.ci) {
-            if (instance.invocation.globalOptions.enableMacroInLSP) {
+            if (instance.GetGlobalOptions().enableMacroInLSP) {
                 collectParentMacroName(macCall)
             }
-            if (instance.invocation.globalOptions.macroLib.isEmpty()) {
+            if (instance.GetGlobalOptions().macroLib.isEmpty()) {
                 findMacroDefPkg(macCall, instance, fd)
             }
         } else if (macCall.libPath.isEmpty()) {
@@ -398,7 +398,7 @@ private func bindInvokeFunc(macCall: MacroCall): Bool {
 }
 
 extend MacroCall {
-    public func ResolveMacroCall(instance: CompilerInstance): Bool {
+    public func ResolveMacroCall(instance: MacroHost): Bool {
         ci = Some(instance)
         let macCallFullName = GetFullName()
         if (IsBuiltInMacro(macCallFullName)) {
@@ -424,7 +424,7 @@ extend MacroCall {
         if (!bindInvokeFunc(this)) {
             status = MacroEvalStatus.FAIL
             if (let Some(current) <- ci) {
-                current.diag.Diagnose(GetBeginPos(), "Cannot find method from dynamic libs for macro call '" +
+                current.GetDiag().Diagnose(GetBeginPos(), "Cannot find method from dynamic libs for macro call '" +
                     GetFullName() + "'")
             }
             return false

@@ -74,7 +74,7 @@ public func WaitMacroCallEvalResultFromServer(call: MacroCall): Unit {
     }
     call.isDataReady = true
     for (parentName in call.assertParents) {
-        call.ci.getOrThrow().diag.Diagnose(call.GetBeginPos(), DiagKind.macro_assert_parent_context_failed,
+        call.ci.getOrThrow().GetDiag().Diagnose(call.GetBeginPos(), DiagKind.macro_assert_parent_context_failed,
             args: [DiagArgument(call.GetFullName()), DiagArgument(parentName)]).Emit()
     }
 }
@@ -165,7 +165,7 @@ extend MacroEvaluation {
                 }
                 call.isDataReady = true
                 for (parentName in call.assertParents) {
-                    ci.diag.Diagnose(call.GetBeginPos(), DiagKind.macro_assert_parent_context_failed,
+                    ci.GetDiag().Diagnose(call.GetBeginPos(), DiagKind.macro_assert_parent_context_failed,
                         args: [DiagArgument(call.GetFullName()), DiagArgument(parentName)]).Emit()
                 }
                 break

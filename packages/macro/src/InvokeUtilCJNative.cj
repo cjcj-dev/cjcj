@@ -23,7 +23,7 @@ extend MacroCall {
         if (!handle.opened) {
             status = MacroEvalStatus.FAIL
             if (let Some(instance) <- ci) {
-                instance.diag.Diagnose(DiagKind.can_not_open_macro_library,
+                instance.GetDiag().Diagnose(DiagKind.can_not_open_macro_library,
                     args: [DiagArgument(libPath)]).Emit()
             }
             return false

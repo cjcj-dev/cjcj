@@ -655,7 +655,7 @@ private func evaluateNativeMacro(macCall: MacroCall): Bool {
 }
 
 public class MacroEvaluation {
-    var ci: CompilerInstance
+    var ci: MacroHost
     var macroCollector: MacroCollector
     var useChildProcess: Bool
     let vecOfGeneratedCodes: ArrayList<String> = ArrayList<String>()
@@ -664,7 +664,7 @@ public class MacroEvaluation {
     var enableParallelMacro: Bool = false
     let usedMacroPkgs: ArrayList<(String, Bool)> = ArrayList<(String, Bool)>()
 
-    public init(cIns: CompilerInstance, mc: MacroCollector, useChildProcess: Bool) {
+    public init(cIns: MacroHost, mc: MacroCollector, useChildProcess: Bool) {
         ci = cIns
         macroCollector = mc
         this.useChildProcess = useChildProcess
@@ -711,7 +711,7 @@ public class MacroEvaluation {
     }
 
     private func InitThreadNum(): Unit {
-        enableParallelMacro = ci.invocation.globalOptions.enableParallelMacro
+        enableParallelMacro = ci.GetGlobalOptions().enableParallelMacro
     }
 
     public func GetMacroDefDynamicFiles(): ArrayList<String> {
@@ -719,7 +719,7 @@ public class MacroEvaluation {
         for (packageName in ci.importManager.GetImportedStdMacroPackages()) {
             out.add("lib" + packageName.replace(".", "_") + LIB_SUFFIX)
         }
-        for (lib in ci.invocation.globalOptions.macroLib) {
+        for (lib in ci.GetGlobalOptions().macroLib) {
             out.add(lib)
         }
         return out
@@ -788,12 +788,12 @@ public class MacroEvaluation {
             return true
         }
         if (!preprocessTokens(attrTokens, escapePosVec)) {
-            ci.diag.Diagnose(attrTokens[0].Begin(), " illegal escape in macro call")
+            ci.GetDiag().Diagnose(attrTokens[0].Begin(), " illegal escape in macro call")
             return false
         }
         for (token in attrTokens) {
             if (token.kind == TokenKind.AT && !isEscapedAt(token.Begin(), escapePosVec)) {
-                ci.diag.Diagnose(token.Begin(), " illegal input tokens in macro attribute")
+                ci.GetDiag().Diagnose(token.Begin(), " illegal input tokens in macro attribute")
                 return false
             }
         }
@@ -879,7 +879,7 @@ public class MacroEvaluation {
         let tmpMacCall = MacroCall(tmpMacExpr)
         tmpMacCall.isForInterpolation = true
         let tmpInvocation = tmpMacCall.RequireInvocation()
-        appendTokens(tmpInvocation.args, GetTokensFromString(interpStr, ci.diag))
+        appendTokens(tmpInvocation.args, GetTokensFromString(interpStr, ci.GetDiag()))
         CreateMacroCallTree(tmpMacCall)
         if (tmpInvocation.nodes.isEmpty()) {
             return false
@@ -893,7 +893,7 @@ public class MacroEvaluation {
             childIdx++
         }
         let invocation = macCall.RequireInvocation()
-        invocation.nodes.add(TokenPart(GetTokensFromString(macCall.newStr, ci.diag)))
+        invocation.nodes.add(TokenPart(GetTokensFromString(macCall.newStr, ci.GetDiag())))
         for (innerNode in tmpInvocation.nodes) {
             invocation.nodes.add(innerNode)
         }
@@ -919,7 +919,7 @@ public class MacroEvaluation {
         interpCall.isForInterpolation = true
         interpCall.strKind = token.kind
 
-        let lexer = RealLexer([token], ci.diag, ci.GetSourceManager())
+        let lexer = RealLexer([token], ci.GetDiag(), ci.GetSourceManager())
         let strParts = lexer.GetStrParts(token)
         for (strPart in strParts) {
             if (strPart.strKind == StringPartKind.EXPR && HasMacroCallInStrInterpolation(strPart.value, interpCall)) {
@@ -931,7 +931,7 @@ public class MacroEvaluation {
         if (interpInvocation.nodes.isEmpty()) {
             return false
         }
-        interpInvocation.nodes.add(TokenPart(GetTokensFromString(interpCall.newStr, ci.diag)))
+        interpInvocation.nodes.add(TokenPart(GetTokensFromString(interpCall.newStr, ci.GetDiag())))
 
         let parentInvocation = parentMacCall.RequireInvocation()
         if (curIndex > startIndex) {
@@ -976,7 +976,7 @@ public class MacroEvaluation {
                     } else {
                         DiagKind.macro_is_deprecated_warning
                     }
-                    ci.diag.Diagnose(macCall.GetBeginPos(), diagKind,
+                    ci.GetDiag().Diagnose(macCall.GetBeginPos(), diagKind,
                         args: [DiagArgument(macCall.GetFullName()), DiagArgument(since), DiagArgument(message)]).Emit()
                 }
             }
@@ -1018,7 +1018,7 @@ public class MacroEvaluation {
                 return false
             }
             if (macCall.RequireInvocation().isCompileTimeVisible) {
-                ci.diag.Diagnose(macCall.GetBeginPos(), "macro expansion cannot be prefixed with '@!'")
+                ci.GetDiag().Diagnose(macCall.GetBeginPos(), "macro expansion cannot be prefixed with '@!'")
             }
             return true
         }
@@ -1048,7 +1048,7 @@ public class MacroEvaluation {
         }
         if (!preprocessTokens(inputTokens, escapePosVec)) {
             if (!inputTokens.isEmpty()) {
-                ci.diag.Diagnose(inputTokens[0].Begin(), " illegal escape in macro call")
+                ci.GetDiag().Diagnose(inputTokens[0].Begin(), " illegal escape in macro call")
             }
             return
         }
@@ -1059,7 +1059,7 @@ public class MacroEvaluation {
             let currentToken = inputTokens[curIndex.value]
             if (currentToken.kind == TokenKind.AT && !isEscapedAt(currentToken.Begin(), escapePosVec) &&
                 (curIndex.value == inputTokens.size - 1 || !IsIdentifierOrContextualKeyword(inputTokens[curIndex.value + 1].kind))) {
-                ci.diag.Diagnose(currentToken.Begin(), " illegal input tokens in macro call")
+                ci.GetDiag().Diagnose(currentToken.Begin(), " illegal input tokens in macro call")
             }
             if (currentToken.kind == TokenKind.QUOTE && curIndex.value + 1 < inputTokens.size &&
                 inputTokens[curIndex.value + 1].kind == TokenKind.LPAREN) {
@@ -1123,9 +1123,9 @@ public class MacroEvaluation {
         while (progress) {
             progress = false
             for (macCall in pMacroCalls) {
-                if (isMacroCallReadyForEval(macCall, ci.diag, ci.invocation.globalOptions.compileCjd)) {
+                if (isMacroCallReadyForEval(macCall, ci.GetDiag(), ci.GetGlobalOptions().compileCjd)) {
                     EvalOneMacroCall(macCall)
-                    setMacroCallEvalResult(macCall, ci.diag)
+                    setMacroCallEvalResult(macCall, ci.GetDiag())
                     progress = true
                 }
             }
@@ -1193,12 +1193,12 @@ public class MacroEvaluation {
         invocation.newTokens.clear()
         var subline: Int64 = 1
         for (token in retTokens) {
-            ProcessCombinedToken(invocation.newTokens, token, ci.diag)
+            ProcessCombinedToken(invocation.newTokens, token, ci.GetDiag())
             if (token.kind == TokenKind.NL) {
                 subline++
             }
         }
-        if (ci.invocation.globalOptions.enableMacroInLSP || ci.invocation.globalOptions.enableMacroDebug) {
+        if (ci.GetGlobalOptions().enableMacroInLSP || ci.GetGlobalOptions().enableMacroDebug) {
             let beginComment = "/* ===== Emitted by MacroCall " + macCall.GetMacroInfo() + " ===== */"
             let endComment = "/* ===== End of the Emit ===== */"
             let rebuilt = ArrayList<Token>()
@@ -1222,7 +1222,7 @@ public class MacroEvaluation {
         for (dyfile in GetMacroDefDynamicFiles()) {
             let handle = OpenSymbolTable(dyfile)
             if (!handle.opened) {
-                ci.diag.Diagnose(DEFAULT_POSITION, "Cannot dlopen from the dynamic library '" + dyfile + "' for macro")
+                ci.GetDiag().Diagnose(DEFAULT_POSITION, "Cannot dlopen from the dynamic library '" + dyfile + "' for macro")
             }
         }
     }
