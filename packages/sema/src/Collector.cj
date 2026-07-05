@@ -83,6 +83,23 @@ public class Collector {
                 if (macroDecl.desugarDecl.isNone()) {
                     return VisitAction.SKIP_CHILDREN
                 }
+            } else if (let Some(syncExpr) <- (node as SynchronizedExpr)) {
+                collector.AddSymbol(ctx, node, buildTrie: buildTrie)
+                if (let Some(currentWalker2) <- walkerBox.value) {
+                    if (let Some(mutex) <- syncExpr.mutex) {
+                        let action = currentWalker2.WalkNode(mutex)
+                        if (action == VisitAction.STOP_NOW) {
+                            return action
+                        }
+                    }
+                    if (let Some(desugarExpr) <- syncExpr.desugarExpr) {
+                        let action = currentWalker2.WalkNode(desugarExpr)
+                        if (action == VisitAction.STOP_NOW) {
+                            return action
+                        }
+                    }
+                }
+                return VisitAction.SKIP_CHILDREN
             } else {
                 collector.AddSymbol(ctx, node, buildTrie: buildTrie)
             }
