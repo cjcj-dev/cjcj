@@ -19,6 +19,7 @@ import cangjie_compiler::sema.LegalityOfUsage.*
 import cangjie_compiler::sema.NativeFFI.*
 import cangjie_compiler::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
 import cangjie_compiler::utils.CTYPE_NAME as UtilsCTypeName
+import cangjie_compiler::utils.CJC_ASSERT
 
 private func contextPackage(ctx: ASTContext): Option<Package> {
     return ctx.curPackage
@@ -1915,6 +1916,193 @@ public class TypeChecker {
         if (let Some(typeAlias) <- (decl as TypeAliasDecl)) {
             SynthesizeTypeNode(ctx, typeAlias.typeNode)
         }
+    }
+
+    private func CheckThisTypeOfFuncBody(fb: FuncBody): Bool {
+        let retType = fb.retType.getOrThrow()
+        var returnThis = retType.astKind == ASTKind.THIS_TYPE
+        if (!returnThis) {
+            if (let Some(refType) <- (retType as RefType)) {
+                returnThis = refType.ref.identifier.Val() == "This"
+            }
+        }
+        if (returnThis) {
+            if (let Some(funcDecl) <- fb.funcDecl) {
+                if (funcDecl.TestAttr(Attribute.STATIC)) {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    private func ReplaceFuncRetTyWithThis(fb: FuncBody, ty: Ty): Unit {
+        if (let Some(classTy) <- (ty as ClassTy)) {
+            let refType = RefType()
+            refType.curFile = fb.curFile
+            if (let Some(classDecl) <- classTy.decl) {
+                refType.ref.target = Some(classDecl)
+            }
+            refType.ref.identifier = SrcIdentifier("This")
+            refType.SetTy(impl.typeManager.GetClassThisTy(classTy.declPtr.getOrThrow(), classTy.typeArgs.toArray()))
+            refType.EnableAttr(Attribute.COMPILER_ADD)
+            if (let Some(oldRetType) <- fb.retType) {
+                fb.curFile.getOrThrow().trashBin.add(oldRetType)
+            }
+            fb.retType = Some(refType)
+        }
+    }
+
+    private func AddRetTypeNode(fb: FuncBody): Unit {
+        if (let None <- fb.retType) {
+            fb.retType = Some(RefType())
+        }
+        let retType = fb.retType.getOrThrow()
+        retType.EnableAttr(Attribute.COMPILER_ADD)
+        retType.SetTy(TypeManager.GetQuestTy())
+        retType.EnableAttr(Attribute.IS_CHECK_VISITED)
+    }
+
+    private func CheckReturnThisInFuncBody(fb: FuncBody): Bool {
+        let checkExprType = Box<(Expr) -> Bool>({ _: Expr => false })
+        checkExprType.value = { expr: Expr =>
+            var curExpr = expr
+            while (let Some(desugarExpr) <- curExpr.desugarExpr) {
+                curExpr = desugarExpr
+            }
+            if (let Some(refExpr) <- (curExpr as RefExpr)) {
+                return refExpr.isThis
+            } else if (let Some(callExpr) <- (curExpr as CallExpr)) {
+                if (let Some(resolvedFunction) <- callExpr.resolvedFunction) {
+                    var isMemberCall = false
+                    if (let Some(baseFunc) <- callExpr.baseFunc) {
+                        isMemberCall = (baseFunc as RefExpr).isSome()
+                        if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+                            if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                                isMemberCall = IsThisOrSuper(baseExpr)
+                            }
+                        }
+                    }
+                    return isMemberCall && IsFuncReturnThisType(resolvedFunction)
+                }
+            } else if (let Some(parenExpr) <- (curExpr as ParenExpr)) {
+                return checkExprType.value(parenExpr.expr.getOrThrow())
+            }
+
+            let returnThis = Box<Bool>(false)
+            let walker = Walker(curExpr, visitPre: { node: Node =>
+                if (node.astKind != ASTKind.RETURN_EXPR) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                let returnExpr = (node as ReturnExpr).getOrThrow()
+                returnThis.value = checkExprType.value(returnExpr.expr.getOrThrow())
+                VisitAction.SKIP_CHILDREN
+            })
+            let _ = walker.Walk()
+            return returnThis.value
+        }
+        if (let Some(body) <- fb.body) {
+            if (!body.body.isEmpty()) {
+                let lastNode = body.body[body.body.size - 1]
+                if (let Some(lastExpr) <- (lastNode as Expr)) {
+                    var expr = lastExpr
+                    while (let Some(desugarExpr) <- expr.desugarExpr) {
+                        expr = desugarExpr
+                    }
+                    if (let Some(parentClassLike) <- fb.parentClassLike) {
+                        return checkExprType.value(expr) && (parentClassLike as ClassDecl).isSome()
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private func CheckCtorFuncBody(ctx: ASTContext, fb: FuncBody): Unit {
+        let funcDecl = fb.funcDecl.getOrThrow()
+        if (let Some(parentClassLike) <- fb.parentClassLike) {
+            if (let Some(attr) <- HasJavaAttr(parentClassLike)) {
+                funcDecl.EnableAttr(attr)
+            }
+        }
+        var ctorTy: Ty = TypeManager.GetInvalidTy()
+        if (funcDecl.TestAttr(Attribute.STATIC)) {
+            ctorTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        } else {
+            if (let Some(parentStruct) <- fb.parentStruct) {
+                ctorTy = parentStruct.GetTy() ?? TypeManager.GetInvalidTy()
+            }
+            if (let Some(parentClassLike2) <- fb.parentClassLike) {
+                ctorTy = parentClassLike2.GetTy() ?? TypeManager.GetInvalidTy()
+            }
+        }
+        if (!Ty.IsTyCorrect(ctorTy) || fb.paramLists.isEmpty()) {
+            return
+        }
+        CheckFuncParamList(ctx, fb.paramLists[0])
+        let paramTys = GetFuncBodyParamTys(fb)
+        let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), ctorTy)
+        fb.SetTy(funcTy)
+        funcDecl.SetTy(funcTy)
+        fb.retType.getOrThrow().SetTy(ctorTy)
+        let _ = SynthesizeBlock(ctx, SynPos.UNUSED, fb.body.getOrThrow())
+    }
+
+    private func UnsafeCheck(fb: FuncBody): Unit {
+        if (let Some(funcDecl) <- fb.funcDecl) {
+            if (funcDecl.TestAttr(Attribute.FOREIGN) || funcDecl.TestAttr(Attribute.C)) {
+                CJC_ASSERT(!fb.paramLists.isEmpty())
+                if (let Some(diagValue) <- impl.diag) {
+                    for (param in fb.paramLists[0].params) {
+                        CheckCFuncParam(param, diagValue)
+                    }
+                    let retType = fb.retType.getOrThrow()
+                    if (!Ty.IsTyCorrect(retType.GetTy())) {
+                        return
+                    }
+                    let retTy = retType.GetTy().getOrThrow()
+                    if (!Ty.IsMetCType(retTy)) {
+                        let builder = diagValue.DiagnoseRefactor(
+                            BasicDiagKindRefactor.sema_invalid_cfunc_return_type,
+                            GetFuncBodyRange(fb, retType))
+                        builder.AddNote("return type is " + retTy.String())
+                        builder.Emit()
+                    } else if ((retTy as VArrayTy).isSome()) {
+                        let builder = diagValue.DiagnoseRefactor(
+                            BasicDiagKindRefactor.sema_varray_in_cfunc,
+                            GetFuncBodyRange(fb, retType))
+                        builder.Emit()
+                    }
+                }
+            }
+        }
+    }
+
+    private func CheckFuncParamList(ctx: ASTContext, fpl: FuncParamList): Unit {
+        let paramTys = ArrayList<Ty>()
+        if (fpl.params.isEmpty()) {
+            fpl.SetTy(impl.typeManager.GetTupleTy(paramTys.toArray()))
+            return
+        }
+        for (param in fpl.params) {
+            if (!Ty.IsTyCorrect(SynthesizeDecl(ctx, param))) {
+                paramTys.add(TypeManager.GetInvalidTy())
+                continue
+            }
+            let paramTy = param.GetTy() ?? TypeManager.GetInvalidTy()
+            paramTys.add(paramTy)
+            if (let Some(assignment) <- param.assignment) {
+                var curExpr = assignment
+                while (let Some(desugarExpr) <- curExpr.desugarExpr) {
+                    curExpr = desugarExpr
+                }
+                let _ = Check(ctx, paramTy, curExpr)
+                if (Ty.IsTyCorrect(curExpr.GetTy())) {
+                    assignment.SetTy(curExpr.GetTy().getOrThrow())
+                }
+            }
+        }
+        fpl.SetTy(impl.typeManager.GetTupleTy(paramTys.toArray()))
     }
 
     private func SynthesizeFuncParam(ctx: ASTContext, fp: FuncParam): Ty {

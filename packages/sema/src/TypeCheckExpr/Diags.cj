@@ -214,3 +214,33 @@ public func DiagUnableToInferExpr(diag: BasicDiagnosticEngine, expr: Expr): Unit
     let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unable_to_infer_expr, NodeRange(expr))
     builder.Emit()
 }
+
+public func DiagUnableToInferReturnType(diag: BasicDiagnosticEngine, funcDecl: FuncDecl): Unit {
+    if (Ty.IsTyCorrect(funcDecl.GetTy())) {
+        let builder = diag.DiagnoseRefactor(
+            BasicDiagKindRefactor.sema_unable_to_infer_return_type,
+            DeclIdentifierRange(funcDecl))
+        builder.Emit()
+    }
+}
+
+public func DiagUnableToInferReturnType(diag: BasicDiagnosticEngine, funcDecl: FuncDecl, expr: Expr): Unit {
+    if (Ty.IsTyCorrect(funcDecl.GetTy())) {
+        let builder = diag.DiagnoseRefactor(
+            BasicDiagKindRefactor.sema_unable_to_infer_return_type,
+            DeclIdentifierRange(funcDecl))
+        builder.AddNote(NodeRange(expr), "with recursive usage from")
+        builder.Emit()
+    }
+}
+
+public func DiagUnableToInferReturnType(diag: BasicDiagnosticEngine, funcBody: FuncBody): Unit {
+    if (let Some(funcDecl) <- funcBody.funcDecl) {
+        DiagUnableToInferReturnType(diag, funcDecl)
+    } else {
+        let builder = diag.DiagnoseRefactor(
+            BasicDiagKindRefactor.sema_unable_to_infer_return_type,
+            NodeRange(funcBody))
+        builder.Emit()
+    }
+}

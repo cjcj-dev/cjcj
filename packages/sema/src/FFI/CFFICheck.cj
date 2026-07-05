@@ -46,6 +46,14 @@ private func FuncBodyTypeRange(body: FuncBody, typeNode: Type): BasicRange {
     return NodeRange(typeNode)
 }
 
+public func GetFuncBodyRange(body: FuncBody, typeNode: Type): BasicRange {
+    if (!typeNode.begin.IsZero()) {
+        return NodeRange(typeNode)
+    }
+    let funcDecl = body.funcDecl.getOrThrow()
+    return IdentifierRange(funcDecl.identifier)
+}
+
 private func EmitRefactor(diag: BasicDiagnosticEngine, kind: BasicDiagKindRefactor, node: Node,
     args!: Array<String> = Array<String>()): Unit {
     let builder = diag.DiagnoseRefactor(kind, NodeRange(node), arguments: args)
