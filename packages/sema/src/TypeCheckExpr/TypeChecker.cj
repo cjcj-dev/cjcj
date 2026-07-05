@@ -2489,6 +2489,13 @@ public class TypeChecker {
     }
 
     private func SynthesizeFuncBody(ctx: ASTContext, fb: FuncBody): Ty {
+        if ((fb.funcDecl).isSome()) {
+            let previousFuncBody = currentFuncBody
+            currentFuncBody = Some(fb)
+            let _ = CheckFuncBody(ctx, fb)
+            currentFuncBody = previousFuncBody
+            return fb.GetTy() ?? TypeManager.GetInvalidTy()
+        }
         let retType = EnsureRetType(ctx, fb)
         SynthesizeFuncParams(ctx, fb)
         let paramTys = GetFuncBodyParamTys(fb)
