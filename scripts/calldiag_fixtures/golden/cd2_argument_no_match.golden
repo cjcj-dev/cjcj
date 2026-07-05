@@ -1,0 +1,15 @@
+[compile] rc=1
+error: generics type arguments do not match the constraint of '(Generics-T) -> Int64'
+ ==> <WORK>/cd2_argument_no_match.cj:7:17:
+  |
+7 |     return need<Int64>(42)
+  |                 ^
+  |
+note: 'Int64' is not a subtype of 'Interface-Nums'
+ ==> <WORK>/cd2_argument_no_match.cj:2:27:
+  |
+2 | func need<T>(x: T): Int64 where T <: Nums {
+  |                           ^
+  |
+
+1 error generated, 1 error printed.

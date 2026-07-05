@@ -1,0 +1,9 @@
+[compile] rc=1
+error: generic infinite instantiation
+ ==> <WORK>/cd1_infinite_instantiation.cj:4:12:
+  |
+4 |     return rec<ArrayList<T>>(ArrayList<T>())
+  |            ^
+  |
+
+1 error generated, 1 error printed.
