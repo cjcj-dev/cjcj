@@ -676,3 +676,156 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeMan
     collectAndCheckAssumption(typeManager, pkg)
     return valid
 }
+
+// C2e[A]: function overload-conflict detection. C++ src/Sema/PreCheck.cpp:1597-1689 +
+// src/Sema/Diags.cpp:217 DiagOverloadConflict + src/Sema/PreCheck.cpp:69 GetSubstituteMap.
+
+private func preCheckFuncParamTys(fd: FuncDecl): ArrayList<Ty> {
+    if (let Some(funcTy) <- (fd.GetTy() as FuncTy)) {
+        return funcTy.paramTys
+    }
+    return GetParamTys(fd)
+}
+
+// C++ src/Sema/PreCheck.cpp:69 GetSubstituteMap.
+private func preCheckGetSubstituteMap(typeManager: TypeManager, decl1: FuncDecl, decl2: FuncDecl): TypeSubst {
+    let substituteMap = typeManager.GenerateGenericMappingFromGeneric(decl1, decl2)
+    if (let Some(outer1) <- decl1.outerDecl) {
+        if (let Some(outer2) <- decl2.outerDecl) {
+            let parentMap = typeManager.GenerateGenericMappingFromGeneric(outer1, outer2)
+            for (entry in parentMap.entries) {
+                substituteMap.Put(entry.tyVar, entry.ty)
+            }
+        }
+    }
+    return substituteMap
+}
+
+// C++ src/Sema/PreCheck.cpp:1603-1627 same-signature predicate.
+private func preCheckFuncSameSignature(typeManager: TypeManager, left: FuncDecl, fd: FuncDecl): Bool {
+    let paramTys1 = preCheckFuncParamTys(left)
+    let paramTys2 = preCheckFuncParamTys(fd)
+    let substituteMap = preCheckGetSubstituteMap(typeManager, left, fd)
+    var visibilityMatch = true
+    // Private functions in different files are not considered redefinitions.
+    let bothTopLevel = !fd.IsMemberDecl() && !left.IsMemberDecl()
+    let bothPrivate = fd.TestAttr(Attribute.PRIVATE) && left.TestAttr(Attribute.PRIVATE)
+    if (bothTopLevel && bothPrivate) {
+        if (let Some(f1) <- fd.curFile) {
+            if (let Some(f2) <- left.curFile) {
+                if (f1.fileHash != f2.fileHash) {
+                    visibilityMatch = false
+                }
+            }
+        }
+    }
+    return visibilityMatch &&
+        typeManager.IsFuncParameterTypesIdentical(paramTys1, paramTys2, typeMapping: substituteMap) &&
+        fd.TestAttr(Attribute.STATIC) == left.TestAttr(Attribute.STATIC) &&
+        fd.TestAttr(Attribute.CONSTRUCTOR) == left.TestAttr(Attribute.CONSTRUCTOR) &&
+        fd.TestAttr(Attribute.MAIN_ENTRY) == left.TestAttr(Attribute.MAIN_ENTRY) &&
+        !preCheckIsSameDeserializedFunction(fd, left)
+}
+
+// C++ src/Sema/Diags.cpp:217 DiagOverloadConflict.
+// The 'kind' prefix is message-only (not used by the same-signature partition); it approximates
+// C++'s IsClassOrEnumConstructor/IsStaticInitializer via the CONSTRUCTOR / STATIC+CONSTRUCTOR attrs.
+private func preCheckDiagOverloadConflict(diag: BasicDiagnosticEngine, sameSigFuncs: ArrayList<FuncDecl>): Unit {
+    if (sameSigFuncs.isEmpty()) {
+        return
+    }
+    let baseFd = sameSigFuncs[0]
+    let identifier = baseFd.identifier.Val()
+    // C++ Diags.cpp:227-234: "macro" / class-or-enum "constructor" / static-init "static constructor".
+    let kind = if (baseFd.TestAttr(Attribute.MACRO_FUNC)) {
+        "macro"
+    } else if (baseFd.TestAttr(Attribute.STATIC) && baseFd.TestAttr(Attribute.CONSTRUCTOR)) {
+        "static constructor"
+    } else if (baseFd.TestAttr(Attribute.CONSTRUCTOR)) {
+        "constructor"
+    } else {
+        "function"
+    }
+    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_overload_conflicts,
+        MakeRange(baseFd.identifier.Begin(), baseFd.identifier.End()), arguments: [kind, identifier])
+    var hasConstraints = false
+    for (fd in sameSigFuncs) {
+        if (let Some(generic) <- fd.GetGeneric()) {
+            if (!generic.genericConstraints.isEmpty()) {
+                hasConstraints = true
+            }
+        }
+    }
+    if (hasConstraints) {
+        builder.AddNote("generic constraints are not involved in the overloading")
+    }
+    var idx = 1
+    while (idx < sameSigFuncs.size) {
+        let fd = sameSigFuncs[idx]
+        builder.AddNote(MakeRange(fd.identifier.Begin(), fd.identifier.End()), "conflict with the declaration")
+        idx++
+    }
+    builder.Emit()
+}
+
+// C++ src/Sema/PreCheck.cpp:1597 PreCheckFuncRedefinitionWithSameSignature.
+private func preCheckFuncRedefinitionWithSameSignature(typeManager: TypeManager, diag: BasicDiagnosticEngine,
+    funcs: ArrayList<FuncDecl>): Unit {
+    let remaining = ArrayList<FuncDecl>(funcs)
+    while (remaining.size > 1) {
+        let first = remaining[0]
+        let sameSig = ArrayList<FuncDecl>()
+        let rest = ArrayList<FuncDecl>()
+        for (fd in remaining) {
+            if (preCheckFuncSameSignature(typeManager, first, fd)) {
+                sameSig.add(fd)
+            } else {
+                rest.add(fd)
+            }
+        }
+        if (sameSig.size > 1) {
+            preCheckDiagOverloadConflict(diag, sameSig)
+        }
+        if (sameSig.isEmpty()) {
+            // 'first' did not match itself (deserialized edge); consume it (rest[0] == first).
+            if (!rest.isEmpty()) {
+                rest.remove(at: 0)
+            }
+        }
+        remaining.clear()
+        for (fd in rest) {
+            remaining.add(fd)
+        }
+    }
+}
+
+// C++ src/Sema/PreCheck.cpp:1651 PreCheckFuncRedefinition (function grouping; the four sibling
+// checks macro/enum/FFI/static-conflict are separate C++ passes, out of C2e[A] scope).
+// 'syms' must be the FUNC_DECL symbols in C++ GetSymsByASTKind order (SearchOrder.POS_DESC) so the
+// base-vs-conflict diagnostic ordering matches the reference compiler.
+public func PreCheckFuncRedefinition(pkg: Package, syms: ArrayList<Symbol>, diag: BasicDiagnosticEngine,
+    typeManager: TypeManager): Unit {
+    if (pkg.TestAttr(Attribute.IMPORTED) || pkg.TestAttr(Attribute.TOOL_ADD)) {
+        return
+    }
+    let groups = TreeMap<String, ArrayList<FuncDecl>>()
+    for (sym in syms) {
+        if (let Some(node) <- sym.node) {
+            if (let Some(fd) <- (node as FuncDecl)) {
+                if (!fd.TestAttr(Attribute.MACRO_INVOKE_FUNC) && (let None <- fd.propDecl)) {
+                    let key = GetScopeNameWithoutTail(sym.scopeName) + "\u{0}" + sym.name
+                    if (let Some(list) <- groups.get(key)) {
+                        list.add(fd)
+                    } else {
+                        let list = ArrayList<FuncDecl>()
+                        list.add(fd)
+                        groups[key] = list
+                    }
+                }
+            }
+        }
+    }
+    for ((_, funcs) in groups) {
+        preCheckFuncRedefinitionWithSameSignature(typeManager, diag, funcs)
+    }
+}

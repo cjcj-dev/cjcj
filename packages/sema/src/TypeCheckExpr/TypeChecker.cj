@@ -1249,6 +1249,12 @@ public class TypeChecker {
                 }
                 let _ = PreCheckPackage(ctx, pkg, typeManager: impl.typeManager,
                     importManager: impl.importManager, diag: impl.diag)
+                // C2e[A]: overload-conflict detection runs after PreCheckPackage so parameter types
+                // are resolved (the func return type may still be uninferred, matching C++).
+                if (let Some(diagValue) <- impl.diag) {
+                    PreCheckFuncRedefinition(pkg, impl.GetSymsByASTKind(ctx, ASTKind.FUNC_DECL), diagValue,
+                        impl.typeManager)
+                }
                 let _ = CheckDeclAttributesForPackage(pkg, opts: GlobalOptions())
             }
         }
