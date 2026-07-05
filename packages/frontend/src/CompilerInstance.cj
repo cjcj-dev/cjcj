@@ -9,6 +9,7 @@ import cangjie_compiler::mangle.ManglerContext as RealManglerContext
 import cangjie_compiler::sema.CompilerInstance as FaithfulSemaCompilerInstance
 import cangjie_compiler::sema.Desugar.DesugarBeforeTypeCheck as FaithfulDesugarBeforeTypeCheck
 import cangjie_compiler::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
+import cangjie_compiler::sema.TypeCheckReferenceRemoveTargetNotMeetExtendConstraint
 import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
 import cangjie_compiler::meta_transformation.NativeMetaTransformPlugin
 import cangjie_compiler::lex.Lexer as CangjieLexer
@@ -121,6 +122,11 @@ private func PackageDiagnosticPosition(pkg: Package): Position {
         return pkg.files[0].begin
     }
     return DEFAULT_POSITION
+}
+
+public enum ExtendMemberQueryType {
+    | ByTy(Ty)
+    | ByInheritableDecl(InheritableDecl)
 }
 
 public class CompilerInstance {
@@ -751,33 +757,64 @@ public class CompilerInstance {
         return ModularizeCompilation()
     }
 
-    public func GetExtendDecls(typeName: String): ArrayList<ExtendDecl> {
-        let out = ArrayList<ExtendDecl>()
-        for (pkg in GetPackages()) {
-            for (file in pkg.files) {
-                for (decl in file.decls) {
-                    if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-                        if (let Some(extendedType) <- extendDecl.extendedType) {
-                            if (extendedType.ToString() == typeName) {
-                                out.add(extendDecl)
-                            }
-                        }
-                    }
+    public func GetExtendDecls(queryType: ExtendMemberQueryType): ArrayList<ExtendDecl> {
+        let semaTypeManager = typeManager.AsFaithfulSemaTypeManager()
+        match (queryType) {
+            case ByTy(ty) => return semaTypeManager.GetAllExtendsByTy(ty)
+            case ByInheritableDecl(decl) => return semaTypeManager.GetDeclExtends(decl)
+        }
+    }
+
+    private func CollectInheritMember(id: InheritableDecl, members: ArrayList<Decl>): Unit {
+        for (superType in id.inheritedTypes) {
+            if (let Some(target) <- superType.GetTarget()) {
+                if (let Some(targetDecl) <- (target as InheritableDecl)) {
+                    CollectInheritMember(targetDecl, members)
                 }
             }
         }
-        return out
-    }
-
-    public func GetAllVisibleExtendMembers(typeName: String, curFile: File): ArrayList<Decl> {
-        let _ = curFile
-        let out = ArrayList<Decl>()
-        for (extendDecl in GetExtendDecls(typeName)) {
-            for (member in extendDecl.members) {
-                out.add(member)
+        if (id.astKind != ASTKind.INTERFACE_DECL) {
+            return
+        }
+        for (m in id.GetMemberDecls()) {
+            if (!m.TestAttr(Attribute.ABSTRACT)) {
+                members.add(m)
             }
         }
-        return out
+    }
+
+    public func GetAllVisibleExtendMembers(queryType: ExtendMemberQueryType, curFile: File): ArrayList<Decl> {
+        let extends = GetExtendDecls(queryType)
+        let members = ArrayList<Decl>()
+        let exprTy: Option<Ty> = match (queryType) {
+            case ByTy(ty) => Some(ty)
+            case ByInheritableDecl(decl) => decl.GetTy()
+        }
+        if (!Ty.IsTyCorrect(exprTy)) {
+            return ArrayList<Decl>()
+        }
+        let realExprTy = exprTy.getOrThrow()
+        for (e in extends) {
+            if (!importManager.IsExtendAccessible(curFile, e, None)) {
+                continue
+            }
+            let extendMember = e.GetMemberDecls()
+            if (curFile.curPackage.getOrThrow().fullPackageName == e.fullPackageName) {
+                for (m in extendMember) {
+                    members.add(m)
+                }
+            } else {
+                for (m in extendMember) {
+                    if (importManager.IsExtendMemberAccessible(curFile, m, realExprTy, None)) {
+                        members.add(m)
+                    }
+                }
+            }
+            CollectInheritMember(e, members)
+            TypeCheckReferenceRemoveTargetNotMeetExtendConstraint(
+                typeManager.AsFaithfulSemaTypeManager(), Some(realExprTy), members)
+        }
+        return members
     }
 
     public func GetGivenReferenceTarget(ctx: ASTContext, scopeName: String, exprName: String, hasLocalDecl: Bool): Candidate {
