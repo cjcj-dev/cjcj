@@ -808,13 +808,6 @@ public class Translator {
             return globalSymbolTable.TryGet(varDecl)
         }
         let valueTy = chirTy.TranslateType(RequireAstTy(varDecl))
-        if (!varDecl.isVar) {
-            if (let Some(initializerExpr) <- varDecl.initializer) {
-                if (let Some(initValue) <- TryBindImmutableClassCtorLocal(varDecl, valueTy, initializerExpr)) {
-                    return initValue
-                }
-            }
-        }
         let slotTy = builder.context.GetRefTy(valueTy)
         let slot = builder.CreateAllocate(slotTy, valueTy, CurrentBlock())
         let slotValue = RequireResult(slot)
@@ -826,35 +819,6 @@ public class Translator {
             }
         }
         return slotValue
-    }
-
-    private func TryBindImmutableClassCtorLocal(varDecl: AstVarDecl, valueTy: Type, initializerExpr: AstExpr): Option<Value> {
-        if (!valueTy.IsReferenceTypeWithRefDims(1)) {
-            return None
-        }
-        if (let Some(callExpr) <- (initializerExpr as AstCallExpr)) {
-            let calleeDecl = callExpr.resolvedFunction ?? ResolveCalleeFromBase(callExpr)
-            if (IsClassCtorDecl(calleeDecl)) {
-                let initValue = TranslateStructOrClassCtorCall(callExpr, calleeDecl)
-                let boundValue = CastValueIfNeeded(initValue, valueTy)
-                if (let Some(local) <- boundValue.AsLocalVar()) {
-                    local.SetSrcCodeIdentifier(varDecl.identifier.Val())
-                }
-                localValSymbolTable.Set(varDecl, boundValue)
-                return Some(boundValue)
-            }
-        }
-        return None
-    }
-
-    private func IsClassCtorDecl(calleeDecl: AstFuncDecl): Bool {
-        if (!calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR) || calleeDecl.TestAttr(AstAttribute.STATIC)) {
-            return false
-        }
-        if (let Some(outerDecl) <- calleeDecl.outerDecl) {
-            return outerDecl.astKind == ASTKind.CLASS_DECL
-        }
-        return false
     }
 
     private func IsUnnecessarySuperCall(node: AstNode): Bool {
