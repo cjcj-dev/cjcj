@@ -2,7 +2,8 @@ package cangjie_compiler::frontend
 
 public import cangjie_compiler::basic.{
     BEGIN_POSITION, CANGJIE_VERSION, DEFAULT_POSITION, INVALID_POSITION, DiagCategory, DiagColor, DiagKindRefactor,
-    DiagHelp, DiagSeverity, IntegratedString, MakeRange, Position, PositionStatus, Range, Source, SourceManager
+    DiagHelp, DiagSeverity, DiagnosticBuilder, IntegratedString, MakeRange, Position, PositionStatus, Range, Source,
+    SourceManager
 }
 public import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
@@ -6693,6 +6694,203 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         }
         AddImportedPackageName(importSpec, importedPackageName)
         return importedPackageName
+    }
+
+    private func AddNoteForExtendExportDiag(builder: Option<DiagnosticBuilder>, note: String): Unit {
+        if (let Some(b) <- builder) {
+            b.AddNote(note)
+        }
+    }
+
+    private func AddNoteForExtendExportDiag(builder: Option<DiagnosticBuilder>, range: BasicRange, note: String): Unit {
+        if (let Some(b) <- builder) {
+            b.AddNote(range, "to use the following extension, import '" + note + "'")
+        }
+    }
+
+    private func GetExtendTypeAliasRealTarget(decl: Decl): Decl {
+        if (let Some(tad) <- (decl as TypeAliasDecl)) {
+            if (let Some(typeNode) <- tad.typeNode) {
+                if (!tad.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
+                    if (let Some(realTarget) <- typeNode.GetTarget()) {
+                        return GetExtendTypeAliasRealTarget(realTarget)
+                    }
+                }
+            }
+        }
+        return decl
+    }
+
+    public func IsTypeAccessible(file: File, typeNode: Type): Bool {
+        // NOTE: For compatibility reason, extension declaration's visibility does not depend on alias declarations.
+        if (let Some(target) <- typeNode.GetTarget()) {
+            let decl = GetExtendTypeAliasRealTarget(target)
+            return typeManager.IsDeclAccessible(file, decl)
+        }
+        // Builtin type and primitive type is always accessible.
+        return true
+    }
+
+    public func IsExtendAllUpperBoundsImported(ed: ExtendDecl, file: File, builder: Option<DiagnosticBuilder>): Bool {
+        if (let None <- ed.generic) {
+            return true
+        }
+        let upperboundsNotImported = TreeSet<String>()
+        var areAllUpperBoundsImported = true
+        for (gc in ed.generic.getOrThrow().genericConstraints) {
+            for (ub in gc.upperBounds) {
+                if (!IsTypeAccessible(file, ub)) {
+                    areAllUpperBoundsImported = false
+                    upperboundsNotImported.add(ub.GetTy().getOrThrow().String())
+                    break
+                }
+            }
+        }
+        for (up in upperboundsNotImported) {
+            AddNoteForExtendExportDiag(builder, MakeRange(ed.begin, ed.end), up)
+        }
+        return areAllUpperBoundsImported
+    }
+
+    public func IsExtendAccessible(file: File, ed: ExtendDecl, builder: Option<DiagnosticBuilder>): Bool {
+        if (let None <- file.curPackage) {
+            return true
+        }
+        let filePackage = file.curPackage.getOrThrow()
+        if (ed.fullPackageName == filePackage.fullPackageName) {
+            return true
+        }
+        let curPkgName = filePackage.fullPackageName
+
+        if (globalOptions.compileTestsOnly && ed.TestAttr(Attribute.FOR_TEST) && IsTestPackage(curPkgName) &&
+            GetMainPartPkgNameForTestPkg(curPkgName) == ed.fullPackageName) {
+            return true
+        }
+        let areAllUpperBoundsImported = IsExtendAllUpperBoundsImported(ed, file, builder)
+        var hasAnyInterfacesImported = false
+        var isExtendedTypeAccessible = false
+        let extendedDecl = Ty.GetInheritableDeclPtrOfTy(ed.GetTy())
+        let isInSamePkg = if (let Some(realExtendedDecl) <- extendedDecl) {
+            ed.fullPackageName == realExtendedDecl.fullPackageName
+        } else {
+            ed.fullPackageName == "std.core"
+        }
+        if (!isInSamePkg) {
+            for (inhert in ed.inheritedTypes) {
+                if (IsTypeAccessible(file, inhert)) {
+                    hasAnyInterfacesImported = true
+                }
+            }
+            isExtendedTypeAccessible = IsTypeAccessible(file, ed.extendedType.getOrThrow())
+        } else {
+            hasAnyInterfacesImported = true
+            if (let Some(realExtendedDecl) <- extendedDecl) {
+                let relation = GetFrontendPackageRelation(filePackage.fullPackageName, realExtendedDecl.fullPackageName)
+                isExtendedTypeAccessible = IsFrontendVisible(realExtendedDecl, relation)
+            } else {
+                isExtendedTypeAccessible = true
+            }
+        }
+        if (!hasAnyInterfacesImported) {
+            if (let Some(b) <- builder) {
+                b.AddNote(MakeRange(ed.begin, ed.end),
+                    "to use the following extension, you must import at least one of its inherited interfaces")
+            }
+        }
+        // For direct extension, all upperbound (if any) need to be imported.
+        // For interface extension, all upperbound (if any) and at lest one interface need to be imported.
+        if (!isExtendedTypeAccessible) {
+            AddNoteForExtendExportDiag(builder, MakeRange(ed.begin, ed.end),
+                ed.extendedType.getOrThrow().GetTy().getOrThrow().String())
+        }
+        let isExtendImported = areAllUpperBoundsImported && hasAnyInterfacesImported && isExtendedTypeAccessible
+        return ed.IsExportedDecl() && isExtendImported
+    }
+
+    private func FindImplmentInterface(file: File, member: Decl, it: Type): Option<Type> {
+        let _ = file
+        let targetDecl = Ty.GetInheritableDeclPtrOfTy(it.GetTy())
+        if (let None <- targetDecl) {
+            return None
+        }
+        let target = targetDecl.getOrThrow()
+        for (superType in target.inheritedTypes) {
+            if (let Some(implInterface) <- FindImplmentInterface(file, member, superType)) {
+                return Some(implInterface)
+            }
+        }
+        for (m in target.GetMemberDecls()) {
+            if (typeManager.PairIsOverrideOrImpl(member, m)) {
+                return Some(it)
+            }
+        }
+        return None
+    }
+
+    public func IsExtendMemberImported(extendDecl: ExtendDecl, file: File, member: Decl,
+        builder: Option<DiagnosticBuilder>): Bool {
+        if (extendDecl.inheritedTypes.isEmpty()) {
+            return true
+        }
+        let extendedDecl = Ty.GetInheritableDeclPtrOfTy(extendDecl.GetTy())
+        let isInSamePkg = if (let Some(realExtendedDecl) <- extendedDecl) {
+            extendDecl.fullPackageName == realExtendedDecl.fullPackageName
+        } else {
+            extendDecl.fullPackageName == "std.core"
+        }
+        if (isInSamePkg) {
+            if (!IsTypeAccessible(file, extendDecl.extendedType.getOrThrow())) {
+                AddNoteForExtendExportDiag(builder, MakeRange(extendDecl.begin, extendDecl.end),
+                    extendDecl.GetTy().getOrThrow().String())
+                return false
+            }
+            return true
+        }
+        // Check whether the interface to which the member belongs is imported.
+        for (superType in extendDecl.inheritedTypes) {
+            if (let Some(implInterface) <- FindImplmentInterface(file, member, superType)) {
+                if (!IsTypeAccessible(file, implInterface)) {
+                    AddNoteForExtendExportDiag(builder, MakeRange(extendDecl.begin, extendDecl.end),
+                        implInterface.GetTy().getOrThrow().String())
+                    return false
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    public func IsExtendMemberAccessible(file: File, member: Decl, baseTy: Ty,
+        builder: Option<DiagnosticBuilder>): Bool {
+        let extendOpt = typeManager.GetExtendDeclByMember(member, baseTy)
+        if ((let None <- extendOpt) || (let None <- file.curPackage)) {
+            return true
+        }
+        let extendDecl = extendOpt.getOrThrow()
+        let curPkgName = file.curPackage.getOrThrow().fullPackageName
+        if (globalOptions.compileTestsOnly && !member.TestAttr(Attribute.PRIVATE) &&
+            extendDecl.TestAttr(Attribute.FOR_TEST) && IsTestPackage(curPkgName) &&
+            GetMainPartPkgNameForTestPkg(curPkgName) == member.fullPackageName) {
+            return true
+        }
+        // Access to extended members must meet the following four requirements:
+        // 1. extension is exported.
+        // 2. extension is imported. `IsExtendAccessible` checks 1 and 2.
+        // 3. extension member is exported. `IsExportedDecl` checks 3.
+        // 4. extension member is imported.
+        if (extendDecl.fullPackageName == curPkgName) {
+            return true
+        }
+        if (!IsExtendAccessible(file, extendDecl, builder)) {
+            return false
+        }
+        if (!member.IsExportedDecl()) {
+            AddNoteForExtendExportDiag(builder,
+                "cannot access this member because it is not declared in any interface implemented by the extension")
+            return false
+        }
+
+        return IsExtendMemberImported(extendDecl, file, member, builder)
     }
 
     private func IsTestPackage(pkgName: String): Bool {

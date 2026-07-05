@@ -3428,7 +3428,7 @@ public class TypeChecker {
         let targets = ExtendFieldLookup(impl.typeManager, file, baseExpr.GetTy(), memberAccess.field.Val())
         if (let Some(diagValue) <- impl.diag) {
             if (!TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
-                diagValue, impl.typeManager, ctx, memberAccess, targets)) {
+                diagValue, impl.typeManager, ctx, memberAccess, targets, importManager: impl.importManager)) {
                 return
             }
         }

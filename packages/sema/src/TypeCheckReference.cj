@@ -11,6 +11,7 @@ import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
 import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
+import cangjie_compiler::modules.SemaImportManager
 
 private func TypeCheckReferenceRange(node: Node): BasicRange {
     var rangeEnd = node.end
@@ -445,9 +446,40 @@ private func TypeCheckReferenceCheckInvalidThisOrSuperInCFunc(
     builder.Emit()
 }
 
+private func TypeCheckReferenceRecommendImportForMemberAccess(
+    tm: TypeManager,
+    importManager: Option<SemaImportManager>,
+    ma: MemberAccess,
+    builder: BasicDiagnosticBuilder
+): Unit {
+    let manager = match (importManager) {
+        case Some(m) => m
+        case None => return
+    }
+    let baseExpr = match (ma.baseExpr) {
+        case Some(b) => b
+        case None => return
+    }
+    if (!Ty.IsTyCorrect(baseExpr.GetTy())) {
+        return
+    }
+    let baseTy = baseExpr.GetTy().getOrThrow()
+    for (ed in tm.GetAllExtendsByTy(baseTy)) {
+        for (decl in ed.members) {
+            if (decl.identifier == ma.field.Val()) {
+                if (let Some(curFile) <- ma.curFile) {
+                    manager.IsExtendMemberAccessible(curFile, decl, baseTy, Some(builder))
+                }
+            }
+        }
+    }
+}
+
 private func TypeCheckReferenceDiagMemberAccessNotFound(
     diag: BasicDiagnosticEngine,
-    ma: MemberAccess
+    tm: TypeManager,
+    ma: MemberAccess,
+    importManager: Option<SemaImportManager>
 ): Unit {
     if (let Some(baseExpr) <- ma.baseExpr) {
         if (let Some(baseTy) <- baseExpr.GetTy()) {
@@ -463,6 +495,7 @@ private func TypeCheckReferenceDiagMemberAccessNotFound(
                         TypeCheckReferenceNominalKindName(baseTy),
                         TypeCheckReferenceDisplayTyName(baseTy)
                     ])
+                TypeCheckReferenceRecommendImportForMemberAccess(tm, importManager, ma, builder)
                 builder.Emit()
                 return
             }
@@ -471,6 +504,7 @@ private func TypeCheckReferenceDiagMemberAccessNotFound(
     let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_undeclared_identifier,
         TypeCheckReferenceFieldRange(ma),
         arguments: [ma.field.Val()])
+    TypeCheckReferenceRecommendImportForMemberAccess(tm, importManager, ma, builder)
     builder.Emit()
 }
 
@@ -754,10 +788,11 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
     tm: TypeManager,
     ctx: ASTContext,
     ma: MemberAccess,
-    targets: ArrayList<Decl>
+    targets: ArrayList<Decl>,
+    importManager!: Option<SemaImportManager> = None
 ): Bool {
     if (targets.isEmpty()) {
-        TypeCheckReferenceDiagMemberAccessNotFound(diag, ma)
+        TypeCheckReferenceDiagMemberAccessNotFound(diag, tm, ma, importManager)
         return false
     }
     var idx: Int64 = 0
@@ -784,7 +819,7 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
         baseTy = baseExpr.GetTy()
     }
     if (!TypeCheckReferenceFilterTargetsInExtend(tm, ma, baseTy, targets)) {
-        TypeCheckReferenceDiagMemberAccessNotFound(diag, ma)
+        TypeCheckReferenceDiagMemberAccessNotFound(diag, tm, ma, importManager)
         return false
     }
     if (!TypeCheckReferenceIsRefTypeArgSizeValid(diag, ma, targets) ||
@@ -792,7 +827,7 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
         return false
     }
     if (targets.isEmpty()) {
-        TypeCheckReferenceDiagMemberAccessNotFound(diag, ma)
+        TypeCheckReferenceDiagMemberAccessNotFound(diag, tm, ma, importManager)
         return false
     }
     var hasCallOrPattern = false

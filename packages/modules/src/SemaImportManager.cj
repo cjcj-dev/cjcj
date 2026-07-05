@@ -2,11 +2,14 @@ package cangjie_compiler::modules
 
 import std.collection.*
 import cangjie_compiler::ast.Decl as ASTDecl
+import cangjie_compiler::ast.ExtendDecl as ASTExtendDecl
 import cangjie_compiler::ast.File as ASTFile
 import cangjie_compiler::ast.ImportSpec as ASTImportSpec
 import cangjie_compiler::ast.Node as ASTNode
 import cangjie_compiler::ast.Package as ASTPackage
 import cangjie_compiler::ast.PackageDecl as ASTPackageDecl
+import cangjie_compiler::ast.Ty as ASTTy
+import cangjie_compiler::basic.DiagnosticBuilder
 
 public interface SemaCjoManager {
     func GetPackageNameByImport(importSpec: ASTImportSpec): String
@@ -27,4 +30,7 @@ public interface SemaImportManager {
     func GetUsedMacroDecls(file: ASTFile): HashMap<String, ArrayList<ASTDecl>>
     func GetImportedDeclsByName(file: ASTFile, name: String): ArrayList<ASTDecl>
     func GetPackageMembersByName(pkg: ASTPackage, name: String): ArrayList<ASTDecl>
+    func IsExtendAccessible(file: ASTFile, ed: ASTExtendDecl, builder: Option<DiagnosticBuilder>): Bool
+    func IsExtendMemberAccessible(file: ASTFile, member: ASTDecl, baseTy: ASTTy,
+        builder: Option<DiagnosticBuilder>): Bool
 }
