@@ -6,6 +6,7 @@ import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.MakeRange as BasicMakeRange
 import cangjie_compiler::basic.Position as BasicPosition
+import cangjie_compiler::modules.SemaImportManager
 
 public class UsedImportTarget {
     public var identifier: String
@@ -33,7 +34,7 @@ public class UnusedImportFinding {
 
 private class CheckUnusedImportImpl {
     private var pkg: Package
-    private var ctx: Option<ASTContext> = None
+    private let importManager: SemaImportManager
     private let usedPackageInAST: HashMap<String, ArrayList<UsedImportTarget>> =
         HashMap<String, ArrayList<UsedImportTarget>>()
     private let usedPackageInFile: HashMap<Node, HashMap<String, ArrayList<UsedImportTarget>>> =
@@ -45,9 +46,9 @@ private class CheckUnusedImportImpl {
     private let needCheckImport: ArrayList<ImportSpec> = ArrayList<ImportSpec>()
     private let findings: ArrayList<UnusedImportFinding> = ArrayList<UnusedImportFinding>()
 
-    public init(pkg: Package, ctx!: Option<ASTContext> = None) {
+    public init(pkg: Package, importManager: SemaImportManager) {
         this.pkg = pkg
-        this.ctx = ctx
+        this.importManager = importManager
     }
 
     public func Check(): ArrayList<UnusedImportFinding> {
@@ -92,7 +93,8 @@ private class CheckUnusedImportImpl {
     }
 
     private func IsImportContentUsed(importSpec: ImportSpec): Bool {
-        let packageName = GetPackageNameByImport(ctx, importSpec)
+        let cjoManager = importManager.GetCjoManager()
+        let packageName = cjoManager.GetPackageNameByImport(importSpec)
         if (packageName.isEmpty()) {
             return false
         }
@@ -104,7 +106,7 @@ private class CheckUnusedImportImpl {
         }
 
         let cacheUsedPackage = GetCacheUsedPackageMap(importSpec)
-        let declsMap = GetPackageMembers(ctx, packageName)
+        let declsMap = cjoManager.GetPackageMembers(packageName)
         if (importSpec.IsImportAll()) {
             if (CheckImportAllUsed(importSpec, packageName, usedPackage, cacheUsedPackage, declsMap)) {
                 return true
@@ -119,21 +121,27 @@ private class CheckUnusedImportImpl {
             }
         }
 
-        if (let Some(packageValue) <- GetPackage(ctx, packageName)) {
+        if (let Some(packageValue) <- importManager.GetPackage(packageName)) {
             if (packageValue.isMacroPackage) {
-                return IsImportContentUsedInMacro(importSpec, packageName, declsMap)
+                return IsImportContentUsedInMacro(importSpec)
             }
         }
         return false
     }
 
-    private func IsImportContentUsedInMacro(
-        importSpec: ImportSpec,
-        packageName: String,
-        declsMap: HashMap<String, ArrayList<Decl>>
-    ): Bool {
+    private func IsImportContentUsedInMacro(importSpec: ImportSpec): Bool {
         let file = importSpec.curFile.getOrThrow()
-        let usedMacroInFile = GetUsedMacroDecls(ctx, file)
+        let cjoManager = importManager.GetCjoManager()
+        let packageName = cjoManager.GetPackageNameByImport(importSpec)
+        let usedMacroInFile = importManager.GetUsedMacroDecls(file)
+        if (usedMacroInFile.isEmpty()) {
+            // GAP_TODO: pre-IM3 master suppressed these diagnostics before emit.
+            // Keep the macro-package approximation until macro campaign S4 wires the
+            // C++ data source: CompileStrategy::MacroExpand (src/Frontend/CompileStrategy.cpp:555-570)
+            // -> MacroEvaluation::SaveUsedMacros (src/Macro/MacroEvaluation.cpp:737-746).
+            return true
+        }
+        let declsMap = cjoManager.GetPackageMembers(packageName)
 
         if (importSpec.IsImportAll() || !importSpec.content.isDecl) {
             if (!GetDeclsFromMap(usedMacroInFile, packageName).isEmpty()) {
@@ -217,7 +225,7 @@ private class CheckUnusedImportImpl {
         usedDecls: ArrayList<UsedImportTarget>
     ): Bool {
         let identifier = GetImportedDeclVisibleName(importSpec)
-        let packageDecl = GetPackageDecl(ctx, packageName) ?? return false
+        let packageDecl = importManager.GetPackageDecl(packageName) ?? return false
         return ContainsUsedTarget(usedDecls, identifier, packageDecl)
     }
 
@@ -343,47 +351,6 @@ private func IsInternalImportNeedExport(importSpec: ImportSpec): Bool {
     return false
 }
 
-private func GetPackageNameByImport(ctx: Option<ASTContext>, importSpec: ImportSpec): String {
-    if (let Some(context) <- ctx) {
-        if (let Some(packageNamePair) <- context.resolvedImportPackageNameMap.get(importSpec)) {
-            return packageNamePair[0]
-        }
-    }
-    return ""
-}
-
-private func GetPackageMembers(ctx: Option<ASTContext>, packageName: String): HashMap<String, ArrayList<Decl>> {
-    if (let Some(context) <- ctx) {
-        if (let Some(declsMap) <- context.resolvedCjoPackageMemberDeclsMap.get(packageName)) {
-            return declsMap
-        }
-    }
-    return HashMap<String, ArrayList<Decl>>()
-}
-
-private func GetPackageDecl(ctx: Option<ASTContext>, packageName: String): Option<PackageDecl> {
-    if (let Some(context) <- ctx) {
-        return context.resolvedPackageDeclMap.get(packageName)
-    }
-    return None
-}
-
-private func GetPackage(ctx: Option<ASTContext>, packageName: String): Option<Package> {
-    if (let Some(packageDecl) <- GetPackageDecl(ctx, packageName)) {
-        return Some(packageDecl.srcPackage)
-    }
-    return None
-}
-
-private func GetUsedMacroDecls(ctx: Option<ASTContext>, file: File): HashMap<String, ArrayList<Decl>> {
-    if (let Some(context) <- ctx) {
-        if (let Some(usedMacroDecls) <- context.resolvedUsedMacroDeclsMap.get(file.indexOfPackage)) {
-            return usedMacroDecls
-        }
-    }
-    return HashMap<String, ArrayList<Decl>>()
-}
-
 private func GetImportedDeclVisibleName(importSpec: ImportSpec): String {
     if (importSpec.IsImportAlias()) {
         return importSpec.content.aliasName.Val()
@@ -483,32 +450,20 @@ private func ToBasicPosition(pos: Position): BasicPosition {
     return BasicPosition(pos.fileID, pos.line, pos.column)
 }
 
-public func CollectUnusedImports(pkg: Package): ArrayList<UnusedImportFinding> {
-    return CheckUnusedImportImpl(pkg).Check()
+public func CollectUnusedImports(pkg: Package, importManager: SemaImportManager): ArrayList<UnusedImportFinding> {
+    return CheckUnusedImportImpl(pkg, importManager).Check()
 }
 
-public func CollectUnusedImports(ctx: ASTContext, pkg: Package): ArrayList<UnusedImportFinding> {
-    return CheckUnusedImportImpl(pkg, ctx: Some(ctx)).Check()
-}
-
-public func ReportUnusedImports(pkg: Package, diag: BasicDiagnosticEngine): ArrayList<UnusedImportFinding> {
-    let result = CollectUnusedImports(pkg)
+public func ReportUnusedImports(
+    pkg: Package,
+    diag: BasicDiagnosticEngine,
+    importManager: SemaImportManager
+): ArrayList<UnusedImportFinding> {
+    let result = CollectUnusedImports(pkg, importManager)
     for (finding in result) {
         let range = BasicMakeRange(ToBasicPosition(finding.begin), ToBasicPosition(finding.end))
         let args: Array<String> = [finding.content]
-        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-        diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unused_import, range, arguments: args)
-    }
-    return result
-}
-
-public func ReportUnusedImports(ctx: ASTContext, pkg: Package, diag: BasicDiagnosticEngine): ArrayList<UnusedImportFinding> {
-    let result = CollectUnusedImports(ctx, pkg)
-    for (finding in result) {
-        let range = BasicMakeRange(ToBasicPosition(finding.begin), ToBasicPosition(finding.end))
-        let args: Array<String> = [finding.content]
-        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-        diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unused_import, range, arguments: args)
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unused_import, range, arguments: args).Emit()
     }
     return result
 }

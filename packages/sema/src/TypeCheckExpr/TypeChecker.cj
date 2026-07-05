@@ -459,11 +459,7 @@ public class TypeChecker {
     }
 
     public func CheckUnusedImportSpec(pkg: Package): ArrayList<UnusedImportFinding> {
-        return CollectUnusedImports(pkg)
-    }
-
-    public func CheckUnusedImportSpec(ctx: ASTContext, pkg: Package): ArrayList<UnusedImportFinding> {
-        return CollectUnusedImports(ctx, pkg)
+        return CollectUnusedImports(pkg, impl.importManager.getOrThrow())
     }
 
     public func CheckAllDeclAttributes(pkg: Package): ArrayList<DeclAttributeIssue> {
@@ -1341,10 +1337,11 @@ public class TypeChecker {
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
                 SetOverflowStrategyForPkg(pkg)
+                let manager = impl.importManager.getOrThrow()
                 if (let Some(diagValue) <- impl.diag) {
-                    let _ = ReportUnusedImports(ctx, pkg, diagValue)
+                    let _ = ReportUnusedImports(pkg, diagValue, manager)
                 } else {
-                    let _ = CollectUnusedImports(ctx, pkg)
+                    let _ = CollectUnusedImports(pkg, manager)
                 }
                 let _ = CheckConstEvaluation(pkg)
                 RunInheritanceCheck(pkg)

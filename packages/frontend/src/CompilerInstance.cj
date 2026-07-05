@@ -512,6 +512,14 @@ public class CompilerInstance {
                 let usedMacroDeclsMap = importManager.GetUsedMacroDecls(file)
                 for (macroPackageName in usedMacroDeclsMap.keys()) {
                     if (let Some(decls) <- usedMacroDeclsMap.get(macroPackageName)) {
+                        // GAP_TODO: C++ reaches MacroEvaluation::SaveUsedMacros from
+                        // CompileStrategy::MacroExpand (src/Frontend/CompileStrategy.cpp:555-570)
+                        // and writes this in src/Macro/MacroEvaluation.cpp:737-746. Keep this
+                        // no-op seed pipe until the macro campaign S4 frontend<->macro root
+                        // provides the live data source.
+                        for (decl in decls) {
+                            importManager.AddUsedMacroDecls(file, decl)
+                        }
                         semaInstance.AddResolvedUsedMacroDecls(file.indexOfPackage, macroPackageName, decls)
                     }
                 }
