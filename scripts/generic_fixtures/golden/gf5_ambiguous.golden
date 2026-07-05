@@ -1,0 +1,42 @@
+[compile] rc=1
+error: function 'g' has overload conflicts
+ ==> <WORK>/gf5_ambiguous.cj:5:6:
+  |
+5 | func g<T>(x: T): Int64 where T <: B { return 2 }
+  |      ^
+  |
+  # note: generic constraints are not involved in the overloading
+note: conflict with the declaration
+ ==> <WORK>/gf5_ambiguous.cj:4:6:
+  |
+4 | func g<T>(x: T): Int64 where T <: A { return 1 }
+  |      ^
+  |
+
+error: mismatched types
+ ==> <WORK>/gf5_ambiguous.cj:7:13:
+  |
+7 |     println(g(C()))
+  |             ^^^^^^ expected 'Struct-String', found 'Int64'
+  |
+
+error: no matching function declaration for function call 'g'
+ ==> <WORK>/gf5_ambiguous.cj:7:13:
+  |
+7 |     println(g(C()))
+  |             ^
+  |
+note: found possible candidate
+ ==> <WORK>/gf5_ambiguous.cj:4:6:
+  |
+4 | func g<T>(x: T): Int64 where T <: A { return 1 }
+  |      ^
+  |
+note: found possible candidate
+ ==> <WORK>/gf5_ambiguous.cj:5:6:
+  |
+5 | func g<T>(x: T): Int64 where T <: B { return 2 }
+  |      ^
+  |
+
+3 errors generated, 3 errors printed.

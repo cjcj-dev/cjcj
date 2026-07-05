@@ -792,3 +792,88 @@ private func TypeCheckUtilDeclKey(decl: Decl): String {
     return "${ASTKindIndex(decl.astKind)}:${decl.fullPackageName}:${decl.identifier.Val()}:" +
         "${decl.begin.ToString()}:${decl.end.ToString()}"
 }
+
+// C2a: substitution-pack + generic-parameter helpers, 1:1 from C++.
+
+// C++ src/Sema/TypeCheckUtil.cpp:723 HasTyVarsToSolve.
+public func HasTyVarsToSolve(maps: SubstPack): Bool {
+    for (entry in maps.u2i.entries) {
+        let solved = if (let Some(tv) <- (entry.ty as GenericsTy)) {
+            maps.inst.Get(tv).isSome()
+        } else {
+            false
+        }
+        if (!solved) {
+            return true
+        }
+    }
+    return false
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:993 GetGenericParamsForDecl.
+public func GetGenericParamsForDecl(decl: Decl): TySet {
+    let ret = TySet()
+    if (let Some(generic) <- decl.generic) {
+        for (gp in generic.typeParameters) {
+            if (let Some(ty) <- gp.GetTy()) {
+                ret.Add(ty)
+            }
+        }
+    }
+    if (let Some(ed) <- (decl as ExtendDecl)) {
+        if (let Some(extendedType) <- ed.extendedType) {
+            if (let Some(target) <- extendedType.GetTarget()) {
+                ret.AddAll(GetGenericParamsForDecl(GetRealTarget(target)))
+            }
+        }
+    } else if (let Some(fd) <- (decl as FuncDecl)) {
+        if (let Some(funcBody) <- fd.funcBody) {
+            if (let Some(generic) <- funcBody.generic) {
+                for (gp in generic.typeParameters) {
+                    if (let Some(ty) <- gp.GetTy()) {
+                        ret.Add(ty)
+                    }
+                }
+            }
+        }
+    }
+    if (let Some(outer) <- decl.outerDecl) {
+        ret.AddAll(GetGenericParamsForDecl(outer))
+    }
+    return ret
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:1017 GetGenericParamsForTy.
+public func GetGenericParamsForTy(ty: Ty): TySet {
+    if (let Some(id) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
+        return GetGenericParamsForDecl(id)
+    }
+    return TySet()
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:1025 GetGenericParamsForCall.
+public func GetGenericParamsForCall(ce: CallExpr, fd: FuncDecl): TySet {
+    let ret = GetGenericParamsForDecl(fd)
+    var base: Option<Expr> = ce.baseFunc
+    while (let Some(b) <- base) {
+        if (let Some(bty) <- b.GetTy()) {
+            ret.AddAll(GetGenericParamsForTy(bty))
+        }
+        if (let Some(ma) <- (b as MemberAccess)) {
+            if (let Some(target) <- ma.target) {
+                ret.AddAll(GetGenericParamsForDecl(target))
+            }
+            base = ma.baseExpr
+        } else if (let Some(ce0) <- (b as CallExpr)) {
+            base = ce0.baseFunc
+        } else if (let Some(re) <- (b as RefExpr)) {
+            if (let Some(target) <- re.ref.target) {
+                ret.AddAll(GetGenericParamsForDecl(target))
+            }
+            base = None
+        } else {
+            base = None
+        }
+    }
+    return ret
+}

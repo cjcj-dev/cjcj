@@ -1,0 +1,4 @@
+[compile] rc=0
+
+[run] exit=0
+42

@@ -3282,3 +3282,31 @@ public func SynCallExprWithDiag(typeManager: TypeManager, diag: BasicDiagnosticE
 public func SelfhostPortStatus_TypeCheckCall(): Bool {
     return true
 }
+
+// C++ src/Sema/TypeCheckCall.cpp:970 ReduceSubstPack.
+public func ReduceSubstPack(maps: SubstPack, typeManager: TypeManager): Unit {
+    for (entry in maps.inst.entries) {
+        let instsFinal = TySet()
+        for (ty in entry.tys.values) {
+            instsFinal.AddAll(typeManager.GetInstantiatedTys(ty, maps.inst))
+        }
+        entry.tys = instsFinal
+    }
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:982 FilterAndReduceSubstPacks.
+public func FilterAndReduceSubstPacks(mapsList: ArrayList<SubstPack>, typeManager: TypeManager): Unit {
+    let filtered = ArrayList<SubstPack>()
+    for (maps in mapsList) {
+        if (!HasTyVarsToSolve(maps)) {
+            filtered.add(maps)
+        }
+    }
+    for (maps in filtered) {
+        ReduceSubstPack(maps, typeManager)
+    }
+    mapsList.clear()
+    for (maps in filtered) {
+        mapsList.add(maps)
+    }
+}
