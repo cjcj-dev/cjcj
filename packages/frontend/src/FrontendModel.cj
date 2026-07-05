@@ -21,6 +21,7 @@ import cangjie_compiler::option.enumIndex
 public import cangjie_compiler::mangle.BaseMangler
 import cangjie_compiler::sema.GenericInstantiation.GenericInstantiationManagerImpl as RealGenericInstantiationManagerImpl
 import cangjie_compiler::sema.TypeManager as FaithfulSemaTypeManager
+import cangjie_compiler::sema.Test.TestManager as RealTestManager
 import cangjie_compiler::utils.{AST_PACKAGE_NAME, CORE_PACKAGE_NAME, DynamicCast, EraseIf, JoinStrings, MAIN_INVOKE,
     SYNC_PACKAGE_NAME}
 import cangjie_compiler::utils.FileUtil
@@ -6870,8 +6871,17 @@ public class PackageManager {
 }
 
 public class TestManager {
-    public init() {}
+    private let impl: RealTestManager
+
+    public init(importManager: SemaImportManager, typeManager: FaithfulSemaTypeManager,
+        diag: BasicDiagnosticEngine, compilationOptions: GlobalOptions) {
+        impl = RealTestManager(importManager, typeManager, diag, compilationOptions)
+    }
+
     public func MarkDeclsForTestIfNeeded(pkgs: ArrayList<Package>): Unit {
+        // S2: TestManager is now constructed and injected with the live import manager, but the
+        // mark pass is intentionally not yet delegated to impl. Wiring MarkDeclsForTestIfNeeded
+        // (and the GenericInstantiation mock hooks) to impl is slices S3/S4.
         let _ = pkgs
     }
 }

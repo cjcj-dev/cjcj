@@ -137,7 +137,7 @@ public class CompilerInstance {
     public let typeManager: TypeManager = TypeManager()
     public let importManager: ImportManager
     public let packageManager: PackageManager
-    public let testManager: TestManager = TestManager()
+    public let testManager: TestManager
     public var gim: Option<GenericInstantiationManager> = None
     public var compileOnePackageFromSrcFiles: Bool = false
     public var loadSrcFilesFromCache: Bool = false
@@ -172,6 +172,8 @@ public class CompilerInstance {
         let faithfulTypeManager = typeManager.AsFaithfulSemaTypeManager()
         importManager = ImportManager(diag, faithfulTypeManager, invocation.globalOptions)
         packageManager = PackageManager(importManager)
+        testManager = TestManager(importManager, faithfulTypeManager, diag.AsBasicDiagnosticEngine(),
+            invocation.globalOptions)
         compileStrategy = Some(FullCompileStrategy(this))
         chirData.InitData(fileNameMap, Int64(invocation.globalOptions.GetJobs()))
         if (invocation.globalOptions.compilePackage) {
