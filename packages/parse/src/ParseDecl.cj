@@ -5,34 +5,25 @@ import cangjie_compiler::ast.Node
 import cangjie_compiler::ast.SortModifierByPos
 import cangjie_compiler::ast.VisitAction
 import cangjie_compiler::ast.Walker
+import cangjie_compiler::utils.FileUtil
 import std.collection.*
 
 extend ParserImpl {
     public func ParseTopLevel(): File {
         let file = File()
         currentFile = file
-        file.begin = Peek().Begin()
-        SkipNLOrSemi()
-        var pendingAnnos = ArrayList<Annotation>()
-        ParseTopLevelPreamble(file, pendingAnnos)
-        ParseTopLevelDecls(file, pendingAnnos)
-        file.end = Peek().End()
-        if (enableAttachComment) {
-            AttachCommentToFile(file)
-        }
-        let comments = ArrayList<Token>()
-        for (comment in lexer.GetComments()) {
-            comments.add(comment)
-        }
-        commentsMap.Put(UInt32(file.begin.fileID), comments)
-        return file
-    }
-
-    private func ParseTopLevelPreamble(file: File, annos: ArrayList<Annotation>): Unit {
+        Peek()
+        file.begin = Position(lexer.GetFileID(), 1, 1)
+        let source = sourceManager.GetSource(file.begin.fileID)
+        file.fileName = FileUtil.GetFileName(source.path)
+        file.filePath = source.path
+        file.fileHash = source.fileHash
+        SkipBlank(TokenKind.NL)
+        var annos = ArrayList<Annotation>()
         if (SeeingBuiltinAnnotation()) {
             ParseAnnotations(annos)
         }
-        if (Seeing(TokenKind.FEATURES)) {
+        if (SeeingFeatures()) {
             file.feature = ParseTopLvlFeatures(annos)
             annos.clear()
         } else {
@@ -41,32 +32,62 @@ extend ParserImpl {
         if (SeeingBuiltinAnnotation()) {
             ParseAnnotations(annos)
         }
-        if (SeeingPackageHeaderAfterModifiers()) {
-            let modifiers = ArrayList<Modifier>()
-            ParseModifiers(modifiers)
+        let scope = ParserScope(this)
+        let modifiers = ArrayList<Modifier>()
+        ParseModifiers(modifiers)
+        if (SeeingPackage() || SeeingMacroPackage()) {
             file.packageSpec = ParsePackageHeader(modifiers)
+            if (ParsePackageHeaderEnd()) {
+                file.end = lastToken.End()
+                file.curFile = file
+                return file
+            }
+            SkipBlank(TokenKind.SEMI)
             if (!annos.isEmpty()) {
                 if (let Some(packageSpec) <- file.packageSpec) {
                     DiagUnexpectedAnnoOn(annos[0], packageSpec.packagePos, annos[0].identifier.Val(), "package")
                 }
                 annos.clear()
             }
-            SkipBlank(TokenKind.SEMI)
         } else {
-            CheckExpectedTopLevelDeclWhenNoPackage(annos)
+            CheckExpectedTopLevelDeclWhenNoPackage(annos, modifiers)
+            scope.ResetParserScope()
         }
         ParseImportSpecInTop(file.imports, annos)
+        if (!scanDepPkg) {
+            ParseTopLevelDecls(file, annos)
+        }
+        file.end = lookahead.End()
+        if (file.end.IsZero()) {
+            file.end = file.begin
+        }
+        if (enableAttachComment) {
+            AttachCommentToFile(file)
+        }
+        let comments = ArrayList<Token>()
+        for (comment in lexer.GetComments()) {
+            comments.add(comment)
+        }
+        commentsMap.Put(UInt32(file.begin.fileID), comments)
+        AssignCurFile(file)
+        return file
     }
 
     private func ParseTopLevelDecls(file: File, annos: ArrayList<Annotation>): Unit {
         var topLevelCount: Int64 = 0
-        while (!Seeing(TokenKind.END)) {
-            if (topLevelCount > 0 && !newlineSkipped && !Skip(TokenKind.SEMI)) {
-                DiagExpectSemiOrNewline()
-                ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
+        while (true) {
+            if (!newlineSkipped) {
+                if (Seeing(TokenKind.END)) {
+                    break
+                }
             }
-            SkipBlank(TokenKind.SEMI)
-            if (Seeing(TokenKind.END)) {
+            if (topLevelCount >= 1) {
+                if (!newlineSkipped && !Skip(TokenKind.SEMI)) {
+                    DiagExpectSemiOrNewline()
+                }
+                SkipBlank(TokenKind.SEMI)
+            }
+            if (DetectPrematureEnd()) {
                 break
             }
             ParseAnnotations(annos)
@@ -81,99 +102,35 @@ extend ParserImpl {
         let modifiers = ArrayList<Modifier>()
         ParseModifiers(modifiers)
         if (HasModifierToken(modifiers, TokenKind.FOREIGN)) {
-            for (decl in ParseForeignDecls(modifiers, annos)) {
-                decl.EnableAttr(Attribute.GLOBAL)
-                FinalizeDeclTree(decl)
-                CheckMacroPackageTopLevelDecl(file, decl)
-                file.decls.add(decl)
+            let decls = ParseForeignDecls(modifiers, annos)
+            if (!decls.isEmpty()) {
+                for (decl in decls) {
+                    FinalizeDeclTree(decl)
+                    file.decls.add(decl)
+                }
             }
             return
         }
-        if (SeeingPackageHeader()) {
-            let keywords = ArrayList<String>()
-            keywords.add("macro")
-            keywords.add("package")
-            keywords.add("import")
-            keywords.add("func")
-            keywords.add("let")
-            keywords.add("var")
-            keywords.add("const")
-            keywords.add("enum")
-            keywords.add("type")
-            keywords.add("struct")
-            keywords.add("class")
-            keywords.add("interface")
-            keywords.add("extend")
-            keywords.add("main")
-            DiagAndSuggestKeywordForExpectedDeclaration(keywords, 1, ScopeKind.TOPLEVEL)
-            ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
-            return
+        let decl = ParseDecl(ScopeKind.TOPLEVEL, modifiers, annos)
+        FinalizeDeclTree(decl)
+        if (let Some(current) <- currentFile) {
+            if (let Some(pkg) <- current.packageSpec) {
+                if (HasModifierToken(decl.modifiers, TokenKind.PUBLIC) && pkg.hasMacro &&
+                    decl.astKind != ASTKind.MACRO_DECL) {
+                    DiagDeclarationInMacroPackage(decl)
+                }
+            }
         }
-        if (SeeingImport()) {
-            let keywords = ArrayList<String>()
-            keywords.add("macro")
-            keywords.add("package")
-            keywords.add("import")
-            keywords.add("func")
-            keywords.add("let")
-            keywords.add("var")
-            keywords.add("const")
-            keywords.add("enum")
-            keywords.add("type")
-            keywords.add("struct")
-            keywords.add("class")
-            keywords.add("interface")
-            keywords.add("extend")
-            keywords.add("main")
-            DiagAndSuggestKeywordForExpectedDeclaration(keywords, 1, ScopeKind.TOPLEVEL)
-            ParseImportSpec(file.imports, annos)
-            return
+        file.decls.add(decl)
+    }
+
+    private func AssignCurFile(file: File): Unit {
+        file.curFile = file
+        let visitPre = { curNode: Node =>
+            curNode.curFile = file
+            VisitAction.WALK_CHILDREN
         }
-        if (Seeing(TokenKind.FEATURES)) {
-            let keywords = ArrayList<String>()
-            keywords.add("macro")
-            keywords.add("package")
-            keywords.add("import")
-            keywords.add("func")
-            keywords.add("let")
-            keywords.add("var")
-            keywords.add("const")
-            keywords.add("enum")
-            keywords.add("type")
-            keywords.add("struct")
-            keywords.add("class")
-            keywords.add("interface")
-            keywords.add("extend")
-            keywords.add("main")
-            DiagAndSuggestKeywordForExpectedDeclaration(keywords, 1, ScopeKind.TOPLEVEL)
-            file.feature = ParseTopLvlFeatures(annos)
-            return
-        }
-        if (SeeingDecl() || SeeingConsumedConstModifier(modifiers) || Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
-            let decl = ParseDecl(ScopeKind.TOPLEVEL, modifiers, annos)
-            decl.EnableAttr(Attribute.GLOBAL)
-            FinalizeDeclTree(decl)
-            CheckMacroPackageTopLevelDecl(file, decl)
-            file.decls.add(decl)
-            return
-        }
-        let keywords = ArrayList<String>()
-        keywords.add("macro")
-        keywords.add("package")
-        keywords.add("import")
-        keywords.add("func")
-        keywords.add("let")
-        keywords.add("var")
-        keywords.add("const")
-        keywords.add("enum")
-        keywords.add("type")
-        keywords.add("struct")
-        keywords.add("class")
-        keywords.add("interface")
-        keywords.add("extend")
-        keywords.add("main")
-        DiagAndSuggestKeywordForExpectedDeclaration(keywords, 1, ScopeKind.TOPLEVEL)
-        Next()
+        Walker(file, visitPre: visitPre).Walk()
     }
 
     private func ParseForeignDecls(modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ArrayList<Decl> {
@@ -185,13 +142,12 @@ extend ParserImpl {
         CheckNoDeprecatedAnnotation(annos, "foreign block")
         let leftCurlPos = lastToken.Begin()
         SkipBlank(TokenKind.SEMI)
-        let savedInForeignBlock = inForeignBlock
         inForeignBlock = true
         while (true) {
             if (Skip(TokenKind.RCURL)) {
                 break
             }
-            if (Seeing(TokenKind.END)) {
+            if (DetectPrematureEnd()) {
                 DiagExpectedRightDelimiter("{", leftCurlPos)
                 break
             }
@@ -201,7 +157,7 @@ extend ParserImpl {
             ret.add(ParseDecl(ScopeKind.TOPLEVEL, clonedModifiers, clonedAnnos))
             SkipBlank(TokenKind.SEMI)
         }
-        inForeignBlock = savedInForeignBlock
+        inForeignBlock = false
         return ret
     }
 
@@ -233,78 +189,63 @@ extend ParserImpl {
         }
     }
 
-    private func SeeingPackageHeader(): Bool {
-        return Seeing(TokenKind.PACKAGE) || Seeing([TokenKind.MACRO, TokenKind.PACKAGE])
+    private func ParsePackageHeaderEnd(): Bool {
+        var seeingFileEnd = false
+        if (newlineSkipped) {
+            return seeingFileEnd
+        }
+        if (Seeing(TokenKind.END)) {
+            seeingFileEnd = true
+        } else if (!Skip(TokenKind.SEMI)) {
+            DiagExpectSemiOrNewline()
+        }
+        return seeingFileEnd
     }
 
-    private func SeeingPackageHeaderAfterModifiers(): Bool {
-        if (SeeingPackageHeader()) {
-            return true
-        }
-        if (!SeeingModifier()) {
-            return false
-        }
-        let ahead = lexer.LookAheadSkipNL(32)
-        var kind = Peek().kind
-        var index: Int64 = 0
-        while ((TokenKindIndex(kind) >= TokenKindIndex(TokenKind.STATIC) &&
-            TokenKindIndex(kind) <= TokenKindIndex(TokenKind.OPERATOR)) ||
-            kind == TokenKind.CONST || kind == TokenKind.COMMON || kind == TokenKind.SPECIFIC) {
-            if (index >= ahead.size) {
-                return false
-            }
-            kind = ahead[index].kind
-            index++
-        }
-        if (kind == TokenKind.PACKAGE) {
-            return true
-        }
-        if (kind == TokenKind.MACRO && index < ahead.size && ahead[index].kind == TokenKind.PACKAGE) {
-            return true
-        }
-        return false
+    private func SeeingPackage(): Bool {
+        return Seeing(TokenKind.PACKAGE)
     }
 
-    private func CheckMacroPackageTopLevelDecl(file: File, decl: Decl): Unit {
-        if (let Some(pkg) <- file.packageSpec) {
-            if (pkg.hasMacro && decl.TestAttr(Attribute.PUBLIC) && decl.astKind != ASTKind.MACRO_DECL) {
-                DiagDeclarationInMacroPackage(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
-        }
+    private func SeeingFeatures(): Bool {
+        return Seeing(TokenKind.FEATURES)
+    }
+
+    private func SeeingMacroPackage(): Bool {
+        return Seeing([TokenKind.MACRO, TokenKind.PACKAGE])
     }
 
     private func CheckAndHandleUnexpectedTopLevelDeclAfterFeatures(): Unit {
-        if (SeeingExpectedAfterFeatures(true)) {
-            return
-        }
-        let keywords = ArrayList<String>()
-        keywords.add("features")
-        keywords.add("macro")
-        keywords.add("package")
-        keywords.add("import")
-        keywords.add("func")
-        keywords.add("let")
-        keywords.add("var")
-        keywords.add("const")
-        keywords.add("enum")
-        keywords.add("type")
-        keywords.add("struct")
-        keywords.add("class")
-        keywords.add("interface")
-        keywords.add("extend")
-        keywords.add("main")
-        DiagAndSuggestKeywordForExpectedDeclaration(keywords, 1, ScopeKind.TOPLEVEL)
-        while (!Seeing(TokenKind.END) && !SeeingExpectedAfterFeatures(true)) {
-            Next()
+        if (!IsExpectedTokenAfterFeaturesOrPackage(true)) {
+            let keywords = ArrayList<String>()
+            keywords.add("features")
+            keywords.add("macro")
+            keywords.add("package")
+            keywords.add("import")
+            keywords.add("func")
+            keywords.add("let")
+            keywords.add("var")
+            keywords.add("const")
+            keywords.add("enum")
+            keywords.add("type")
+            keywords.add("struct")
+            keywords.add("class")
+            keywords.add("interface")
+            keywords.add("extend")
+            keywords.add("main")
+            DiagAndSuggestKeywordForExpectedDeclaration(keywords, 1, ScopeKind.TOPLEVEL)
+            let consumeTarget = { => IsExpectedTokenAfterFeaturesOrPackage(true) }
+            ConsumeUntilAny(consumeTarget, targetTokenConsumed: false)
         }
     }
 
-    private func CheckExpectedTopLevelDeclWhenNoPackage(annos: ArrayList<Annotation>): Unit {
-        if (!annos.isEmpty()) {
+    private func CheckExpectedTopLevelDeclWhenNoPackage(
+        annos: ArrayList<Annotation>,
+        modifiers: ArrayList<Modifier>
+    ): Unit {
+        if (!annos.isEmpty() || !modifiers.isEmpty()) {
             return
         }
-        if (!SeeingExpectedAfterFeatures(false)) {
+        if (!IsExpectedTokenAfterFeaturesOrPackage(false)) {
             let keywords = ArrayList<String>()
             keywords.add("macro")
             keywords.add("package")
@@ -324,12 +265,12 @@ extend ParserImpl {
         }
     }
 
-    private func SeeingExpectedAfterFeatures(allowPackageKeyword: Bool): Bool {
+    private func IsExpectedTokenAfterFeaturesOrPackage(allowPackageKeyword: Bool): Bool {
         if (Seeing(TokenKind.SEMI) || SeeingImport() || SeeingDecl() || SeeingMacroCallDecl() ||
-            SeeingBuiltinAnnotation() || Seeing(TokenKind.END)) {
+            SeeingInitializer() || SeeingFinalizer() || SeeingBuiltinAnnotation() || Seeing(TokenKind.END)) {
             return true
         }
-        return allowPackageKeyword && SeeingPackageHeader()
+        return allowPackageKeyword && (SeeingPackage() || SeeingMacroPackage())
     }
 
     public func SeeingDecl(): Bool {

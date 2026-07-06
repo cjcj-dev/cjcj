@@ -33,6 +33,7 @@ public class ParserImpl {
     public var parseDeclFile: Bool = false
     public var enableAttachComment: Bool = false
     public var compileOptions: GlobalOptions = GlobalOptions()
+    public var scanDepPkg: Bool = false
     public let commentsMap: TokenVecMap = TokenVecMap()
     public let chainedAST: ArrayList<Node> = ArrayList<Node>()
     public let bracketsStack: ArrayList<TokenKind> = ArrayList<TokenKind>()
@@ -118,6 +119,7 @@ public class ParserImpl {
 
     public func SetCompileOptions(opts: GlobalOptions): Unit {
         compileOptions = opts
+        scanDepPkg = opts.scanDepPkg
         enableEH = opts.enableEH
     }
 
@@ -476,6 +478,34 @@ public class ChainScope <: Resource {
 
     public func isClosed(): Bool {
         return closed
+    }
+}
+
+public class ParserScope {
+    private let ref: ParserImpl
+    private let oldLookAhead: Token
+    private let oldSkipToken: Token
+    private let oldLastToken: Token
+    private let oldLastNoneNLToken: Token
+    private let oldNewlineSkipped: Bool
+
+    public init(parser: ParserImpl) {
+        ref = parser
+        oldLookAhead = parser.lookahead
+        oldSkipToken = parser.lastToken
+        oldLastToken = parser.lastToken
+        oldLastNoneNLToken = parser.lastNoneNLToken
+        oldNewlineSkipped = parser.newlineSkipped
+        parser.lexer.SetResetPoint()
+    }
+
+    public func ResetParserScope(): Unit {
+        ref.lookahead = oldLookAhead
+        ref.lastToken = oldSkipToken
+        ref.lexer.Reset()
+        ref.lastToken = oldLastToken
+        ref.lastNoneNLToken = oldLastNoneNLToken
+        ref.newlineSkipped = oldNewlineSkipped
     }
 }
 

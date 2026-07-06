@@ -139,6 +139,19 @@ extend ParserImpl {
         TargetTokenConsumedControl(flag, targetTokenConsumed)
     }
 
+    public func ConsumeUntilAny(functor: () -> Bool, targetTokenConsumed!: Bool = true): Unit {
+        skipNL = false
+        var flag = false
+        while (!functor()) {
+            let consumeResult = ConsumeCommon(flag)
+            flag = consumeResult[1]
+            if (!consumeResult[0]) {
+                break
+            }
+        }
+        TargetTokenConsumedControl(flag, targetTokenConsumed)
+    }
+
     public func ConsumeUntilDeclOrNL(): Unit {
         ConsumeUntilDeclOrNL(TokenKind.SENTINEL)
     }
@@ -427,6 +440,10 @@ extend ParserImpl {
     public func SeeingPrimaryConstructor(scopeKind: ScopeKind): Bool {
         return (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) &&
             SeeingPrimaryIdentifier()
+    }
+
+    public func SeeingInitializer(): Bool {
+        return Seeing(TokenKind.INIT)
     }
 
     public func SeeingFinalizer(): Bool {
