@@ -847,17 +847,122 @@ public open class BaseMangler {
                     }
                 }
             } else if (curPrefix.astKind == ASTKind.LAMBDA_EXPR) {
-                let lambdaIndex = GetLambdaIndex(curPrefix, prefix, prefixIndex)
+                let outerNode = if (let Some(value) <- FindOuterNodeOfLambda(prefix, prefixIndex)) {
+                    value
+                } else {
+                    throw IllegalArgumentException("Outer container of lambda is not found.")
+                }
+                var pkgName = ""
+                if (ASTKindIndex(outerNode.astKind) >= ASTKindIndex(ASTKind.DECL) &&
+                    ASTKindIndex(outerNode.astKind) <= ASTKindIndex(ASTKind.INVALID_DECL)) {
+                    pkgName = outerNode.fullPackageName
+                } else {
+                    for (lambdaPrefixDecl in prefix) {
+                        if (ASTKindIndex(lambdaPrefixDecl.astKind) >= ASTKindIndex(ASTKind.DECL) &&
+                            ASTKindIndex(lambdaPrefixDecl.astKind) <= ASTKindIndex(ASTKind.INVALID_DECL)) {
+                            pkgName = lambdaPrefixDecl.fullPackageName
+                            break
+                        }
+                    }
+                }
+                pkgName = ManglerContext.ReduceUnitTestPackageName(pkgName)
+                if (pkgName.isEmpty()) {
+                    throw IllegalArgumentException("Package name of lambda is empty.")
+                }
+                let ctx = if (let Some(value) <- manglerCtxTable.get(pkgName)) {
+                    value
+                } else {
+                    throw IllegalArgumentException("Mangler context not prepared for package: " + pkgName)
+                }
+                let lambdaIndex = if (let Some(value) <- ctx.GetIndexOfLambda(outerNode, curPrefix)) {
+                    value
+                } else {
+                    throw IllegalArgumentException("Index of lambda is not found.")
+                }
                 mangled += MANGLE_LAMBDA_PREFIX + DecimalToManglingNumber("${lambdaIndex}")
             } else if (curPrefix.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
                 if (curPrefix.TestAttr(Attribute.GLOBAL)) {
-                    if (let Some(pattern) <- curPrefix.irrefutablePattern) {
-                        if (!PatternContainsVarDecl(pattern)) {
-                            let index = GetIndexOfWildcard(curPrefix, prefix)
-                            mangled += MANGLE_ANONYMOUS_VARIABLE_PREFIX + DecimalToManglingNumber("${index}")
+                    var mangleStr = ""
+                    var patternContainsVar = false
+                    let varDeclCollection = HashSet<Int64>()
+                    let vwpDecl = curPrefix
+
+                    func patternWalkThrough(pattern: ManglePattern): Unit {
+                        if (!mangleStr.isEmpty()) {
+                            return
                         }
-                    } else if (!curPrefix.identifier.isEmpty()) {
-                        mangled += MangleName(curPrefix.identifier)
+                        if (pattern.astKind == ASTKind.VAR_PATTERN) {
+                            let varDecl = pattern.varDecl.getOrThrow()
+                            mangleStr = MangleName(varDecl.identifier)
+                            if (varDeclCollection.contains(varDecl.identity)) {
+                                patternContainsVar = true
+                            }
+                        }
+
+                        if (pattern.astKind == ASTKind.TUPLE_PATTERN) {
+                            for (item in pattern.patterns) {
+                                patternWalkThrough(item)
+                            }
+                        } else if (pattern.astKind == ASTKind.ENUM_PATTERN) {
+                            for (item in pattern.patterns) {
+                                patternWalkThrough(item)
+                            }
+                        }
+                    }
+
+                    func collectAllVarPattern(pattern: ManglePattern): Unit {
+                        if (pattern.astKind == ASTKind.VAR_PATTERN) {
+                            let varDecl = pattern.varDecl.getOrThrow()
+                            varDeclCollection.add(varDecl.identity)
+                            return
+                        }
+                        if (pattern.astKind == ASTKind.TUPLE_PATTERN) {
+                            for (item in pattern.patterns) {
+                                collectAllVarPattern(item)
+                            }
+                        } else if (pattern.astKind == ASTKind.ENUM_PATTERN) {
+                            for (item in pattern.patterns) {
+                                collectAllVarPattern(item)
+                            }
+                        }
+                    }
+
+                    if (let Some(pattern) <- vwpDecl.irrefutablePattern) {
+                        if (pattern.astKind == ASTKind.TUPLE_PATTERN) {
+                            for (item in pattern.patterns) {
+                                collectAllVarPattern(item)
+                            }
+                        } else if (pattern.astKind == ASTKind.ENUM_PATTERN) {
+                            for (item in pattern.patterns) {
+                                collectAllVarPattern(item)
+                            }
+                        }
+
+                        if (pattern.astKind == ASTKind.TUPLE_PATTERN) {
+                            for (item in pattern.patterns) {
+                                patternWalkThrough(item)
+                                if (!mangleStr.isEmpty()) {
+                                    break
+                                }
+                            }
+                        } else if (pattern.astKind == ASTKind.ENUM_PATTERN) {
+                            for (item in pattern.patterns) {
+                                patternWalkThrough(item)
+                                if (!mangleStr.isEmpty()) {
+                                    break
+                                }
+                            }
+                        }
+                    }
+
+                    if (patternContainsVar) {
+                    } else if (!mangleStr.isEmpty()) {
+                        mangled += mangleStr
+                    } else {
+                        let index = GetIndexOfWildcard(vwpDecl, prefix)
+                        mangleStr += MANGLE_ANONYMOUS_VARIABLE_PREFIX
+                        mangleStr += DecimalToManglingNumber("${index}")
+                        mangled += mangleStr
                     }
                 }
             }
@@ -873,25 +978,28 @@ public open class BaseMangler {
             } else {
                 throw IllegalArgumentException("Private prefix node has no current file.")
             }
-            mangled = MANGLE_FILE_ID_PREFIX + fileIdFor(file) + mangled
+            let fileName = file.fileName
+            mangled = MANGLE_FILE_ID_PREFIX + if (BaseMangler.IsHashable(fileName)) {
+                BaseMangler.HashToBase62(fileName)
+            } else {
+                BaseMangler.FileNameWithoutExtension(fileName) + MANGLE_DOLLAR_PREFIX
+            } + mangled
         }
-        mangled = ManglePackageForPrefixNode(node, prefix) + mangled
-        return mangled
-    }
-
-    private func ManglePackageForPrefixNode(node: MangleDecl, prefix: ArrayList<MangleDecl>): String {
         if (node.astKind == ASTKind.LAMBDA_EXPR) {
-            var idx = prefix.size - 1
-            while (idx >= 0) {
-                let prefixDecl = prefix[idx]
-                if (prefixDecl.astKind != ASTKind.LAMBDA_EXPR && prefixDecl.astKind != ASTKind.NODE &&
-                    !prefixDecl.fullPackageName.isEmpty()) {
-                    return ManglePackage(prefixDecl)
+            var reverseIndex = prefix.size - 1
+            while (reverseIndex >= 0) {
+                let packagePrefixDecl = prefix[reverseIndex]
+                if (ASTKindIndex(packagePrefixDecl.astKind) >= ASTKindIndex(ASTKind.DECL) &&
+                    ASTKindIndex(packagePrefixDecl.astKind) <= ASTKindIndex(ASTKind.INVALID_DECL)) {
+                    mangled = ManglePackage(packagePrefixDecl) + mangled
+                    break
                 }
-                idx--
+                reverseIndex--
             }
+        } else {
+            mangled = ManglePackage(node) + mangled
         }
-        return ManglePackage(node)
+        return mangled
     }
 
     public func ManglePackage(decl: MangleDecl): String {
@@ -1700,20 +1808,6 @@ public open class BaseMangler {
             }
         }
         return None
-    }
-
-    private func PatternContainsVarDecl(pattern: ManglePattern): Bool {
-        if (pattern.astKind == ASTKind.VAR_PATTERN) {
-            return true
-        }
-        if (pattern.astKind == ASTKind.TUPLE_PATTERN || pattern.astKind == ASTKind.ENUM_PATTERN) {
-            for (child in pattern.patterns) {
-                if (PatternContainsVarDecl(child)) {
-                    return true
-                }
-            }
-        }
-        return false
     }
 
     private func fileIdFor(file: MangleFile): String {
