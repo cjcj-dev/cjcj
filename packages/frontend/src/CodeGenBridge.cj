@@ -85,18 +85,28 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
 private func RunOptimizationPass(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions): Unit {
     OptFuncRetType(pkg, builder).Unit2Void()
     // C++ 此处有 RunArrayListConstStartOpt，selfhost 未移植，待补。
-    UnitUnify(builder).RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
+    if (options.IsCHIROptimizationLevelOverO2()) {
+        UnitUnify(builder).RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
+    }
     // C++ 此处有 CollectDevirtualizationInfo / RunFunctionInline，selfhost 未移植，待补。
-    RedundantLoadElimination().RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
-    RedundantGetOrThrowElimination().RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
+    if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_LOAD)) {
+        RedundantLoadElimination().RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
+    }
+    if (options.enableChirRGetOrThrowE) {
+        RedundantGetOrThrowElimination().RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
+    }
     // C++ 此处有 RunRangePropagation，selfhost 未移植，待补。
-    UselessAllocateElimination.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
+    if (options.IsCHIROptimizationLevelOverO2()) {
+        UselessAllocateElimination.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
+    }
     // GAP_TODO: Devirtualization is unported; C++ call is CHIR.cpp:648.
     // GAP_TODO: ArrayLambdaOpt is unported; C++ call is CHIR.cpp:649.
     if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_FUTURE)) {
         RedundantFutureRemoval(pkg, isDebug: options.chirDebugOptimizer).RunOnPackage()
     }
-    GetRefToArrayElem.RunOnPackage(pkg, builder)
+    if (options.IsCHIROptimizationLevelOverO2() && !options.interpFullBchir) {
+        GetRefToArrayElem.RunOnPackage(pkg, builder)
+    }
 }
 
 public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool {
