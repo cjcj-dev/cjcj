@@ -182,6 +182,18 @@ public func GetMethodIdxInAutoEnvObject(methodName: String): UInt64 {
     return methodIdx
 }
 
+public func MangleMethodName(methodName: String, funcTy: FuncType, omitFirstArg!: Bool = false): String {
+    var res = methodName + "("
+    let paramTys = funcTy.GetParamTypes()
+    var idx = if (omitFirstArg) { 1 } else { 0 }
+    while (idx < paramTys.size) {
+        res += paramTys[idx].ToString() + " "
+        idx++
+    }
+    res += ")"
+    return res
+}
+
 public func JoinStrings(values: ArrayList<String>, delimiter: String): String {
     var out = ""
     var idx: Int64 = 0

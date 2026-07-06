@@ -40,16 +40,19 @@ public class CHIR2BCHIRContext {
 
 public class CHIR2BCHIR {
     let bchir: BCHIR
+    private let isIncremental: Bool
     private let stringMemo: HashMap<String, Int64> = HashMap<String, Int64>()
     private let typeMemo: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
 
-    public init(bchir: BCHIR) {
+    public init(bchir: BCHIR, isIncremental!: Bool = false) {
         this.bchir = bchir
+        this.isIncremental = isIncremental
     }
 
     public static func CompilePackage(chirPkg: Package, destBchir: BCHIR,
-        initFuncsForConstVar!: ArrayList<Function> = ArrayList<Function>(), forConstEval!: Bool = false): Unit {
-        let compiler = CHIR2BCHIR(destBchir)
+        initFuncsForConstVar!: ArrayList<Function> = ArrayList<Function>(), forConstEval!: Bool = false,
+        incremental!: Bool = false): Unit {
+        let compiler = CHIR2BCHIR(destBchir, isIncremental: incremental)
         compiler.TranslatePackage(chirPkg, initFuncsForConstVar: initFuncsForConstVar, forConstEval: forConstEval)
     }
 
@@ -89,7 +92,7 @@ public class CHIR2BCHIR {
                 info.finalizer = finalizer.GetIdentifierWithoutPrefix()
             }
             CollectMethods(classDef, info)
-            bchir.AddSClass(BCHIRMangledName(classDef), info)
+            AddClassInfo(BCHIRMangledName(classDef), info)
         }
         for (structDef in chirPkg.GetAllStructDef()) {
             if (forConstEval && !IsConstClass(structDef)) {
@@ -97,12 +100,12 @@ public class CHIR2BCHIR {
             }
             let info = BCHIRSClassInfo()
             CollectMethods(structDef, info)
-            bchir.AddSClass(BCHIRMangledName(structDef), info)
+            AddClassInfo(BCHIRMangledName(structDef), info)
         }
         for (enumDef in chirPkg.GetAllEnumDef()) {
             let info = BCHIRSClassInfo()
             CollectMethods(enumDef, info)
-            bchir.AddSClass(BCHIRMangledName(enumDef), info)
+            AddClassInfo(BCHIRMangledName(enumDef), info)
         }
         for (extendDef in chirPkg.GetAllExtendDef()) {
             if (let Some(extendedDef) <- extendDef.GetExtendedCustomTypeDef()) {
@@ -124,12 +127,19 @@ public class CHIR2BCHIR {
                 } else {
                     let freshInfo = BCHIRSClassInfo()
                     CollectMethods(extendDef, freshInfo)
-                    bchir.AddSClass(name, freshInfo)
+                    AddClassInfo(name, freshInfo)
                 }
             } else {
                 CJC_ASSERT(false)
             }
         }
+    }
+
+    private func AddClassInfo(classMangledName: String, classInfo: BCHIRSClassInfo): Unit {
+        if (isIncremental) {
+            bchir.RemoveClass(classMangledName)
+        }
+        bchir.AddSClass(classMangledName, classInfo)
     }
 
     private func IsConstClass(def: CustomTypeDef): Bool {
@@ -160,16 +170,13 @@ public class CHIR2BCHIR {
     }
 
     private func CollectMethods(def: CustomTypeDef, info: BCHIRSClassInfo): Unit {
-        for (method in def.GetMethods()) {
-            let methodName = method.GetSrcCodeIdentifier()
-            let key = if (methodName.isEmpty()) { BCHIRMangledName(method) } else { methodName }
-            info.vtable[key] = BCHIRMangledName(method)
-        }
-        for (extendDef in def.GetExtends()) {
-            for (method in extendDef.GetMethods()) {
-                let methodName = method.GetSrcCodeIdentifier()
-                let key = if (methodName.isEmpty()) { BCHIRMangledName(method) } else { methodName }
-                info.vtable[key] = BCHIRMangledName(method)
+        for (vtable in def.GetDefVTable().GetTypeVTables()) {
+            for (funcInfo in vtable.GetVirtualMethods()) {
+                let methodName = MangleMethodName(funcInfo.GetMethodName(), funcInfo.GetMethodSigType())
+                let method = funcInfo.GetVirtualMethod().getOrThrow()
+                if (!method.IsPureAbstract()) {
+                    info.vtable[methodName] = method.GetIdentifierWithoutPrefix()
+                }
             }
         }
     }

@@ -78,12 +78,14 @@ private func TranslateFieldExpression(context: CHIR2BCHIRContext, expr: Expressi
 public func TranslateInvokeExpression(context: CHIR2BCHIRContext, expr: Expression, withException: Bool): Unit {
     if (let Some(invoke) <- (expr as Invoke)) {
         let opCode = if (withException) { OpCode.INVOKE_EXC } else { OpCode.INVOKE }
-        BCHIRPushOpWithName(context.definition, opCode, invoke.GetMethodName())
+        BCHIRPushOpWithName(context.definition, opCode,
+            MangleMethodName(invoke.GetMethodName(), invoke.GetMethodType(), omitFirstArg: true))
         context.definition.PushCell(expr.GetNumOfOperands())
         context.definition.PushCell(0)
     } else if (let Some(invokeWithException) <- (expr as InvokeWithException)) {
         let opCode = if (withException) { OpCode.INVOKE_EXC } else { OpCode.INVOKE }
-        BCHIRPushOpWithName(context.definition, opCode, invokeWithException.GetMethodName())
+        BCHIRPushOpWithName(context.definition, opCode,
+            MangleMethodName(invokeWithException.GetMethodName(), invokeWithException.GetMethodType(), omitFirstArg: true))
         context.definition.PushCell(expr.GetNumOfOperands())
         context.definition.PushCell(0)
     } else {
