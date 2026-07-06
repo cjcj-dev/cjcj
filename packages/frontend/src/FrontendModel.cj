@@ -882,7 +882,7 @@ private class CjoSignatureMaterializer {
         let fileIndex = Int64(indexOfFile)
         let allFiles = reader.VectorField(root, 14)
         let allFileImports = reader.VectorField(root, 16)
-        let allFileInfo = reader.VectorField(root, 28)
+        let allFileInfo = reader.VectorField(root, 32)
         let fileInfo = reader.VectorOffsetElement(allFileInfo, fileIndex)
         let tmpFilePath = reader.StringAt(reader.VectorOffsetElement(allFiles, fileIndex))
         let fileID = diag.GetSourceManager().AddSource(tmpFilePath, "", packageName: Some(pkg.fullPackageName),
@@ -996,7 +996,7 @@ private class CjoSignatureMaterializer {
 
     private func ValidateOptions(reader: CjoFlatBuffer, opts: GlobalOptions): Bool {
         let root = reader.RootTable()
-        let optionsTable = reader.OffsetField(root, 32)
+        let optionsTable = reader.OffsetField(root, 36)
         if (optionsTable < 0) {
             diag.DiagnoseRefactor(DiagKindRefactor.module_common_cjo_no_options, DEFAULT_POSITION)
             return true
@@ -3737,8 +3737,8 @@ private class CjoSignatureMaterializer {
         if (children >= 0 && reader.VectorLength(children) >= 1) {
             pattern.pattern = LoadFlatPattern(reader, reader.VectorOffsetElement(children, 0))
         }
-        pattern.matchBeforeRuntime = reader.U8Field(patternTable, 18, 0u8) != 0u8
-        pattern.needRuntimeTypeCheck = reader.U8Field(patternTable, 20, 0u8) != 0u8
+        pattern.matchBeforeRuntime = reader.U8Field(patternTable, 20, 0u8) != 0u8
+        pattern.needRuntimeTypeCheck = reader.U8Field(patternTable, 22, 0u8) != 0u8
         return pattern
     }
 
