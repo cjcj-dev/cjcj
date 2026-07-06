@@ -494,6 +494,13 @@ public class CGModule {
                 }
             }
         }
+        if (chirValue.IsFuncWithBody()) {
+            if (let Some(functionValue) <- (chirValue as Function)) {
+                if (!functionValue.IsCFFIWrapper()) {
+                    SetCangjieGC(rawFunction)
+                }
+            }
+        }
     }
 
     private func ApplyFunctionABIAttributes(rawFunction: LLVMValueRef, chirValue: Value, cgFuncType: CGType): Unit {

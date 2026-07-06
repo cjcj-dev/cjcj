@@ -176,6 +176,11 @@ private func enumCtorArity(decl: Decl): UInt64 {
 }
 
 private func collectDecl(ctx: ASTContext, decl: Decl): Bool {
+    if (let Some(macroDecl) <- (decl as MacroDecl)) {
+        if (let Some(desugarDecl) <- macroDecl.desugarDecl) {
+            return collectDecl(ctx, desugarDecl)
+        }
+    }
     var valid = !decl.IsInvalid()
     let name = decl.identifier.Val()
     if (!name.isEmpty() && name != INVALID_IDENTIFIER) {

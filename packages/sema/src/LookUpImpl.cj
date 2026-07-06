@@ -129,14 +129,10 @@ private func isDefinedAfter(target: Decl, ref: Node): Bool {
     return ref.begin < target.begin
 }
 
-private func sameNodeShape(left: Node, right: Node): Bool {
-    return left.astKind == right.astKind && left.begin == right.begin && left.end == right.end
-}
-
 private func containsNode(root: Node, needle: Node): Bool {
     let found = LookupBoolBox(false)
     let walker = Walker(root, visitPre: { node: Node =>
-        if (sameNodeShape(node, needle)) {
+        if (node == needle) {
             found.value = true
             return VisitAction.STOP_NOW
         }

@@ -1023,8 +1023,8 @@ public class FaithfulAST2CHIR {
         }
         CacheTopLevelDeclToGlobalSymbolTable()
         TranslateNominalDecls(node)
-        TranslateOtherTopLevelDecls(node)
         SetInitFuncForStaticVar(initOrder)
+        TranslateOtherTopLevelDecls(node)
         FlatForInExpr(builder).RunOnPackage(CurrentPackage())
         try (recorder = ProfileRecorder("Canonicalization", "GenerateVTable")) {
             let allDefs = CurrentPackage().GetAllCustomTypeDef()

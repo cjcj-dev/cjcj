@@ -370,19 +370,97 @@ extend ParserImpl {
         }
         if (SeeingFinalizer()) { return ParseFinalizer(scopeKind, modifiers, annos) }
         if (SeeingPrimaryConstructor(scopeKind)) { return ParsePrimaryConstructor(scopeKind, modifiers, annos) }
-        if (Seeing(TokenKind.FUNC)) { return ParseFuncDecl(scopeKind, modifiers, annos) }
-        if (Seeing(TokenKind.MACRO)) { return ParseMacroDecl(scopeKind, modifiers, annos) }
-        if (Seeing(TokenKind.MAIN)) { return ParseMainDecl(scopeKind, modifiers, annos) }
-        if (Seeing(TokenKind.LET) || Seeing(TokenKind.VAR) || Seeing(TokenKind.CONST)) { return ParseVarOrLet(scopeKind, modifiers, annos) }
-        if (Seeing(TokenKind.CLASS)) { return ParseClassDecl(scopeKind, modifiers, annos) }
-        if (Seeing(TokenKind.INTERFACE)) { return ParseInterfaceDecl(scopeKind, modifiers, annos) }
-        if (Seeing(TokenKind.STRUCT)) { return ParseStructDecl(scopeKind, modifiers, annos) }
-        if (Seeing(TokenKind.ENUM)) { return ParseEnumDecl(scopeKind, modifiers, annos) }
-        if (Seeing(TokenKind.EXTEND)) { return ParseExtendDecl(scopeKind, modifiers, annos) }
-        if (Seeing(TokenKind.TYPE)) { return ParseTypeAlias(scopeKind, modifiers, annos) }
-        if (Seeing(TokenKind.PROP)) { return ParsePropDecl(scopeKind, modifiers, annos) }
-        if (Seeing(TokenKind.INIT)) { return ParseConstructor(scopeKind, modifiers, annos) }
-        if (SeeingConsumedConstModifier(modifiers)) { return ParseConstVariable(scopeKind, modifiers, annos) }
+        if (Seeing(TokenKind.FUNC)) {
+            let decl = ParseFuncDecl(scopeKind, modifiers, annos)
+            if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+                decl.EnableAttr(Attribute.GLOBAL)
+            }
+            return decl
+        }
+        if (Seeing(TokenKind.MACRO)) {
+            let decl = ParseMacroDecl(scopeKind, modifiers, annos)
+            if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+                decl.EnableAttr(Attribute.GLOBAL)
+            }
+            return decl
+        }
+        if (Seeing(TokenKind.MAIN)) {
+            let decl = ParseMainDecl(scopeKind, modifiers, annos)
+            if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+                decl.EnableAttr(Attribute.GLOBAL)
+            }
+            return decl
+        }
+        if (Seeing(TokenKind.LET) || Seeing(TokenKind.VAR) || Seeing(TokenKind.CONST)) {
+            let decl = ParseVarOrLet(scopeKind, modifiers, annos)
+            if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+                decl.EnableAttr(Attribute.GLOBAL)
+            }
+            return decl
+        }
+        if (Seeing(TokenKind.CLASS)) {
+            let decl = ParseClassDecl(scopeKind, modifiers, annos)
+            if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+                decl.EnableAttr(Attribute.GLOBAL)
+            }
+            return decl
+        }
+        if (Seeing(TokenKind.INTERFACE)) {
+            let decl = ParseInterfaceDecl(scopeKind, modifiers, annos)
+            if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+                decl.EnableAttr(Attribute.GLOBAL)
+            }
+            return decl
+        }
+        if (Seeing(TokenKind.STRUCT)) {
+            let decl = ParseStructDecl(scopeKind, modifiers, annos)
+            if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+                decl.EnableAttr(Attribute.GLOBAL)
+            }
+            return decl
+        }
+        if (Seeing(TokenKind.ENUM)) {
+            let decl = ParseEnumDecl(scopeKind, modifiers, annos)
+            if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+                decl.EnableAttr(Attribute.GLOBAL)
+            }
+            return decl
+        }
+        if (Seeing(TokenKind.EXTEND)) {
+            let decl = ParseExtendDecl(scopeKind, modifiers, annos)
+            if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+                decl.EnableAttr(Attribute.GLOBAL)
+            }
+            return decl
+        }
+        if (Seeing(TokenKind.TYPE)) {
+            let decl = ParseTypeAlias(scopeKind, modifiers, annos)
+            if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+                decl.EnableAttr(Attribute.GLOBAL)
+            }
+            return decl
+        }
+        if (Seeing(TokenKind.PROP)) {
+            let decl = ParsePropDecl(scopeKind, modifiers, annos)
+            if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+                decl.EnableAttr(Attribute.GLOBAL)
+            }
+            return decl
+        }
+        if (Seeing(TokenKind.INIT)) {
+            let decl = ParseConstructor(scopeKind, modifiers, annos)
+            if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+                decl.EnableAttr(Attribute.GLOBAL)
+            }
+            return decl
+        }
+        if (SeeingConsumedConstModifier(modifiers)) {
+            let decl = ParseConstVariable(scopeKind, modifiers, annos)
+            if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+                decl.EnableAttr(Attribute.GLOBAL)
+            }
+            return decl
+        }
         let token = Peek()
         DiagExpectedDeclaration(scopeKind)
         ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
