@@ -474,13 +474,10 @@ public class CGFunction <: CGValue {
             return
         }
         let entryBlock = unsafe { LLVMGetFirstBasicBlock(function) }
-        if (entryBlock.isNull()) {
-            return
-        }
+        CJC_ASSERT(!entryBlock.isNull())
 
         let builder = IRBuilder2(cgMod)
         let structAllocas = ArrayList<(LLVMValueRef, LLVMTypeRef)>()
-        var insertBefore = LLVMNullValue()
         var inst = unsafe { LLVMGetFirstInstruction(entryBlock) }
         while (!inst.isNull()) {
             if (unsafe { LLVMGetInstructionOpcode(inst) } == LLVM_ALLOCA_OPCODE) {
@@ -489,24 +486,101 @@ public class CGFunction <: CGValue {
                     builder.IsLLVMTypeContainsRef(allocatedType)) {
                     structAllocas.add((inst, allocatedType))
                 }
-            } else if (insertBefore.isNull()) {
-                insertBefore = inst
             }
             inst = unsafe { LLVMGetNextInstruction(inst) }
         }
 
-        if (structAllocas.isEmpty()) {
-            builder.close()
-            return
-        }
-        if (insertBefore.isNull()) {
-            builder.SetInsertPoint(entryBlock)
-        } else {
-            builder.SetInsertPointBefore(insertBefore)
-        }
+        let loopInfo = unsafe { LLVMSelfhostCreateLoopInfo(function) }
+        CJC_ASSERT(!loopInfo.isNull())
         for ((alloca, allocatedType) in structAllocas) {
-            builder.CreateCJMemsetStructWith0(alloca, allocatedType)
+            let basicBlocks = ArrayList<LLVMBasicBlockRef>()
+            var useRef = unsafe { LLVMSelfhostGetFirstUse(alloca) }
+            while (!useRef.isNull()) {
+                let userInstruction = unsafe { LLVMSelfhostGetUserInstruction(useRef) }
+                if (!userInstruction.isNull()) {
+                    let userBlock = unsafe { LLVMGetInstructionParent(userInstruction) }
+                    if (!userBlock.isNull()) {
+                        var containsUserBlock = false
+                        for (basicBlock in basicBlocks) {
+                            if (basicBlock.toUIntNative() == userBlock.toUIntNative()) {
+                                containsUserBlock = true
+                                break
+                            }
+                        }
+                        if (!containsUserBlock) {
+                            basicBlocks.add(userBlock)
+                        }
+                    }
+                }
+                useRef = unsafe { LLVMSelfhostGetNextUse(useRef) }
+            }
+
+            let nearestCommonAncestor = if (basicBlocks.isEmpty()) {
+                unsafe { LLVMGetInstructionParent(alloca) }
+            } else {
+                CGFunction.GetNearestCommonAncestorOfBasicBlocks(basicBlocks)
+            }
+            CJC_ASSERT(!nearestCommonAncestor.isNull())
+            var insertPoint = unsafe { LLVMGetBasicBlockTerminator(nearestCommonAncestor) }
+            useRef = unsafe { LLVMSelfhostGetFirstUse(alloca) }
+            while (!useRef.isNull()) {
+                let userInstruction = unsafe { LLVMSelfhostGetUserInstruction(useRef) }
+                if (!userInstruction.isNull() &&
+                    unsafe { LLVMGetInstructionParent(userInstruction) }.toUIntNative() ==
+                    nearestCommonAncestor.toUIntNative() &&
+                    unsafe { LLVMSelfhostInstructionComesBefore(userInstruction, insertPoint) } != 0) {
+                    insertPoint = userInstruction
+                }
+                useRef = unsafe { LLVMSelfhostGetNextUse(useRef) }
+            }
+            CJC_ASSERT(!insertPoint.isNull())
+
+            let loopRef = unsafe { LLVMSelfhostLoopInfoGetLoopFor(loopInfo, unsafe {
+                LLVMGetInstructionParent(insertPoint)
+            }) }
+            if (!loopRef.isNull()) {
+                let outermostLoop = unsafe { LLVMSelfhostLoopGetOutermostLoop(loopRef) }
+                let header = unsafe { LLVMSelfhostLoopGetHeader(outermostLoop) }
+                let predecessorCount = unsafe { LLVMSelfhostGetBasicBlockPredecessorCount(header) }
+                try (predecessors = LibC.malloc<LLVMBasicBlockRef>(count: Int64(predecessorCount)).asResource()) {
+                    unsafe { LLVMSelfhostGetBasicBlockPredecessors(header, predecessors.value) }
+                    var predecessorIdx: UInt32 = 0u32
+                    while (predecessorIdx < predecessorCount) {
+                        let predecessor = unsafe { (predecessors.value + Int64(predecessorIdx)).read() }
+                        if (unsafe { LLVMSelfhostLoopContainsBasicBlock(outermostLoop, predecessor) } == 0) {
+                            let predecessorTerminator = unsafe { LLVMGetBasicBlockTerminator(predecessor) }
+                            CJC_ASSERT(!predecessorTerminator.isNull())
+                            builder.SetInsertPointBefore(predecessorTerminator)
+                            builder.CreateCJMemsetStructWith0(alloca, allocatedType)
+                        }
+                        predecessorIdx++
+                    }
+                }
+            } else {
+                builder.SetInsertPointBefore(insertPoint)
+                builder.CreateCJMemsetStructWith0(alloca, allocatedType)
+            }
         }
+        unsafe { LLVMSelfhostDisposeLoopInfo(loopInfo) }
         builder.close()
+    }
+
+    private static func GetNearestCommonAncestorOfBasicBlocks(
+        basicBlocks: ArrayList<LLVMBasicBlockRef>): LLVMBasicBlockRef {
+        if (basicBlocks.isEmpty()) {
+            return LLVMNullBasicBlock()
+        }
+        var result = LLVMNullBasicBlock()
+        try (blockPtr = LibC.malloc<LLVMBasicBlockRef>(count: basicBlocks.size).asResource()) {
+            var blockIdx: Int64 = 0
+            while (blockIdx < basicBlocks.size) {
+                unsafe { (blockPtr.value + blockIdx).write(basicBlocks[blockIdx]) }
+                blockIdx++
+            }
+            result = unsafe {
+                LLVMSelfhostGetNearestCommonAncestorOfBasicBlocks(blockPtr.value, UInt32(basicBlocks.size))
+            }
+        }
+        return result
     }
 }
