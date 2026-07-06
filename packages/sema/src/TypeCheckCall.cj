@@ -1392,29 +1392,38 @@ func GenerateTypeMappingForBaseExpr(typeManager: TypeManager, baseExpr: Expr,
     typeManager.GenerateGenericMapping(typeMapping, memberBaseTy)
 }
 
-// Mirrors C++ TypeCheckCall.cpp:938-965.
-private func GenerateTypeMappingByTyArgs(typeArgs: ArrayList<Type>, generic: Generic): TypeSubst {
-    let typeMapping = TypeSubst()
-    let typeArgsSize = typeArgs.size
-    if (generic.typeParameters.size != typeArgsSize) {
-        return typeMapping
+// Mirrors C++ ExtraScopes.cpp:204-233.
+private func GenerateSubstPackByTyArgs(typeManager: TypeManager, tmaps: SubstPack, typeArgs: ArrayList<Type>,
+    generic: Generic): Unit {
+    let tyParamSize = generic.typeParameters.size
+    if (tyParamSize < typeArgs.size) {
+        return
     }
-    for (idx in 0..typeArgsSize) {
+    var idx: Int64 = 0
+    while (idx < tyParamSize) {
         let typeParam = generic.typeParameters[idx]
-        let paramTy = typeParam.GetTy() ?? continue
-        let genericTy = (paramTy as GenericsTy) ?? continue
-        var typeArgTy: Ty = TypeManager.GetInvalidTy()
-        if (let Some(value) <- typeArgs[idx].GetTy()) {
-            if (value.HasIntersectionTy()) {
-                continue
+        if (let Some(paramTy) <- typeParam.GetTy()) {
+            if (Ty.IsTyCorrect(paramTy)) {
+                if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                    if (!tmaps.u2i.Contains(genericTy)) {
+                        tmaps.u2i.Put(genericTy, typeManager.AllocTyVar())
+                    }
+                    if (idx < typeArgs.size) {
+                        if (let Some(typeArgTy) <- typeArgs[idx].GetTy()) {
+                            if (Ty.IsTyCorrect(typeArgTy) && !typeArgTy.HasIntersectionTy()) {
+                                if (let Some(mappedTy) <- tmaps.u2i.Get(genericTy)) {
+                                    if (let Some(instGenTy) <- (mappedTy as GenericsTy)) {
+                                        tmaps.inst.Put(instGenTy, typeArgTy)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            typeArgTy = value
         }
-        if (Ty.IsTyCorrect(genericTy) && Ty.IsTyCorrect(typeArgTy)) {
-            typeMapping.Put(genericTy, typeArgTy)
-        }
+        idx++
     }
-    return typeMapping
 }
 
 private func GetEffectiveTypeArgsForCall(baseFunc: Expr, typeArgs: ArrayList<Type>): ArrayList<Type> {
@@ -1599,15 +1608,6 @@ private func TypeCheckCallIsTypeObjectCreation(fd: FuncDecl, ce: CallExpr): Bool
     return (isTypeNameCall && fd.TestAttr(Attribute.CONSTRUCTOR)) || fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)
 }
 
-private func TypeCheckCallHasUpperBoundMapping(memberAccess: MemberAccess, target: Decl): Bool {
-    for (entry in memberAccess.foundUpperBoundMap) {
-        if (SameDecl(entry[0], target) && !entry[1].isEmpty()) {
-            return true
-        }
-    }
-    return false
-}
-
 // Mirrors C++ TypeCheckUtil.cpp:382-392.
 private func IsGenericUpperBoundCall(expr: Expr, target: Decl): Bool {
     let memberAccess = match (expr as MemberAccess) {
@@ -1625,7 +1625,12 @@ private func IsGenericUpperBoundCall(expr: Expr, target: Decl): Bool {
     if (!baseTy.IsGeneric() || target.outerDecl.isNone()) {
         return false
     }
-    return TypeCheckCallHasUpperBoundMapping(memberAccess, target)
+    for (entry in memberAccess.foundUpperBoundMap) {
+        if (SameDecl(entry[0], target) && !entry[1].isEmpty()) {
+            return true
+        }
+    }
+    return false
 }
 
 private func GenerateTypeMappingForUpperBounds(typeManager: TypeManager, memberAccess: MemberAccess,
@@ -1635,54 +1640,61 @@ private func GenerateTypeMappingForUpperBounds(typeManager: TypeManager, memberA
             for (upper in entry[1]) {
                 typeManager.GenerateGenericMapping(typeMapping, upper)
             }
-            return
         }
     }
 }
 
-private func GenerateCallBaseTypeMapping(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
-    ctx: Option<ASTContext>, ce: CallExpr, fd: FuncDecl): Option<SubstPack> {
-    let typeMapping = SubstPack()
-    if (let Some(base) <- ce.baseFunc) {
-        let typeArgs = GetEffectiveTypeArgsForCall(base, base.GetTypeArgs())
-        let isInStructDecl = fd.outerDecl.isSome() && fd.outerDecl.getOrThrow().IsNominalDecl() &&
-            !TypeCheckCallIsTypeObjectCreation(fd, ce)
-        if (IsGenericUpperBoundCall(base, fd)) {
-            if (let Some(memberAccess) <- (base as MemberAccess)) {
-                GenerateTypeMappingForUpperBounds(typeManager, memberAccess, fd, typeMapping)
-            }
-        } else if (isInStructDecl && fd.outerDecl.getOrThrow().astKind == ASTKind.EXTEND_DECL) {
-            if (let Some(ctxValue) <- ctx) {
-                if (!GenerateExtendGenericTypeMapping(typeManager, diag, ctxValue, fd, ce, typeMapping)) {
-                    return None
+extend InstCtxScope {
+    // Mirrors C++ ExtraScopes.cpp:303-339.
+    public func SetRefDecl(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: Option<ASTContext>,
+        fd: FuncDecl, ce: CallExpr): Bool {
+        refMaps = SubstPack()
+        if (let Some(base) <- ce.baseFunc) {
+            let typeArgs = GetEffectiveTypeArgsForCall(base, base.GetTypeArgs())
+            let isInStructDecl = fd.outerDecl.isSome() && fd.outerDecl.getOrThrow().IsNominalDecl() &&
+                !TypeCheckCallIsTypeObjectCreation(fd, ce)
+            if (IsGenericUpperBoundCall(base, fd)) {
+                if (let Some(memberAccess) <- (base as MemberAccess)) {
+                    GenerateTypeMappingForUpperBounds(typeManager, memberAccess, fd, refMaps)
                 }
-            } else {
-                return None
-            }
-        } else if (!GetCurrentGeneric(fd, ce).isSome() && !typeArgs.isEmpty()) {
-            if (let Some(diagValue) <- diag) {
-                DiagOld(diagValue, ce, BasicDiagKind.sema_non_generic_function_with_type_argument)
-            }
-            return None
-        } else if (let Some(_) <- (base as RefExpr)) {
-            if (isInStructDecl) {
+            } else if (isInStructDecl && fd.outerDecl.getOrThrow().astKind == ASTKind.EXTEND_DECL) {
                 if (let Some(ctxValue) <- ctx) {
-                    if (!GenerateTypeMappingByCallContext(typeManager, diag, ctxValue, fd, ce, typeMapping)) {
-                        return None
+                    if (!GenerateExtendGenericTypeMapping(typeManager, diag, ctxValue, fd, ce, refMaps)) {
+                        return false
                     }
                 } else {
-                    return None
+                    return false
+                }
+            } else {
+                if (!GetCurrentGeneric(fd, ce).isSome() && !typeArgs.isEmpty()) {
+                    if (let Some(diagValue) <- diag) {
+                        DiagOld(diagValue, ce, BasicDiagKind.sema_non_generic_function_with_type_argument)
+                    }
+                    return false
+                }
+                if (let Some(_) <- (base as RefExpr)) {
+                    if (isInStructDecl) {
+                        if (let Some(ctxValue) <- ctx) {
+                            if (!GenerateTypeMappingByCallContext(typeManager, diag, ctxValue, fd, ce, refMaps)) {
+                                return false
+                            }
+                        } else {
+                            return false
+                        }
+                    }
+                } else if (let Some(_) <- (base as MemberAccess)) {
+                    ReplaceTarget(base, Some(fd))
+                    GenerateTypeMappingForBaseExpr(typeManager, base, refMaps)
                 }
             }
-        } else if (let Some(_) <- (base as MemberAccess)) {
-            ReplaceTarget(base, Some(fd))
-            GenerateTypeMappingForBaseExpr(typeManager, base, typeMapping)
+            if (let Some(generic) <- GetCurrentGeneric(fd, ce)) {
+                GenerateSubstPackByTyArgs(typeManager, refMaps, typeArgs, generic)
+            }
         }
-        if (let Some(generic) <- GetCurrentGeneric(fd, ce)) {
-            typeManager.PackMapping(typeMapping, GenerateTypeMappingByTyArgs(typeArgs, generic))
-        }
+        maps = curMaps.Clone()
+        maps.Merge(refMaps)
+        return true
     }
-    return Some(typeMapping)
 }
 
 private func HasRecordedCallTypeArgs(ce: CallExpr): Bool {
@@ -2009,16 +2021,41 @@ private func TryUpdateEnumTyByTarget(ce: CallExpr, fd: FuncDecl, retTarget: Opti
     }
 }
 
-// Mirrors C++ TypeArgumentInference.cpp:541-555, adapted to selfhost's explicit SubstPack threading.
+// Mirrors C++ TypeArgumentInference.cpp:541-555.
 private func GenerateTypeMappingForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
     ctx: Option<ASTContext>, ce: CallExpr, fd: FuncDecl, paramTys: ArrayList<Ty>,
-    inferenceFailure: Option<CallInferenceFailure>, target: Option<Ty>, argChecker: Option<CallArgChecker>): Option<SubstPack> {
+    inferenceFailure: Option<CallInferenceFailure>, target: Option<Ty>,
+    argChecker: Option<CallArgChecker>): ArrayList<SubstPack> {
+    let typeMappings = ArrayList<SubstPack>()
     TryUpdateEnumTyByTarget(ce, fd, target)
-    let typeMapping = GenerateCallBaseTypeMapping(typeManager, diag, ctx, ce, fd) ?? return None
-    if (!InferGenericCallTypeMapping(typeManager, ce, fd, paramTys, typeMapping, inferenceFailure, target, argChecker)) {
-        return None
+    let instCtxScope = InstCtxScope(typeManager)
+    if (!instCtxScope.SetRefDecl(typeManager, diag, ctx, fd, ce)) {
+        instCtxScope.Close()
+        return typeMappings
     }
-    return Some(typeMapping)
+    let instMapping = typeManager.GetInstMapping()
+    if (HasTyVarsToSolve(instMapping)) {
+        for (mapping in GenerateTypeMappingByInference(typeManager, ce, fd, paramTys, instMapping, inferenceFailure,
+            target, argChecker)) {
+            typeMappings.add(mapping)
+        }
+    } else {
+        typeMappings.add(instMapping)
+    }
+    instCtxScope.Close()
+    return typeMappings
+}
+
+// Mirrors C++ TypeArgumentInference.cpp:557-588.
+private func GenerateTypeMappingByInference(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl,
+    paramTys: ArrayList<Ty>, instMapping: SubstPack, inferenceFailure: Option<CallInferenceFailure>,
+    target: Option<Ty>, argChecker: Option<CallArgChecker>): ArrayList<SubstPack> {
+    let typeMappings = ArrayList<SubstPack>()
+    let currentSubst = instMapping.Clone()
+    if (InferGenericCallTypeMapping(typeManager, ce, fd, paramTys, currentSubst, inferenceFailure, target, argChecker)) {
+        typeMappings.add(currentSubst)
+    }
+    return typeMappings
 }
 
 private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl, paramTys: ArrayList<Ty>,
@@ -2529,7 +2566,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
             return None
         }
     }
-    if (!CheckCandidateConstrains(typeManager, diag, ce, fd, typeMapping)) {
+    if (!isGeneric && !CheckCandidateConstrains(typeManager, diag, ce, fd, typeMapping)) {
         return None
     }
     return if (argNamesValid) {
@@ -3521,22 +3558,14 @@ public func DiagnoseForMultiMapping(diag: Option<BasicDiagnosticEngine>, ce: Cal
 }
 
 // C++ src/Sema/TypeCheckCall.cpp:1053 CheckGenericCallCompatible.
-// Deviations (all flagged): (1) selfhost GenerateTypeMappingForCall yields a single mapping (vs
-// C++ vector), wrapped as a one-element list, so ExpandMultiTypeSubst is the sole multi-mapping
-// source; (2) CheckCandidateConstrains is NOT called here — the selfhost CheckCandidate tail runs
-// it commonly for both generic and non-generic (TypeCheckCall.cj:2408); (3) the per-mapping arg
-// check uses argChecker via CheckCallArgCompatible (selfhost callback pattern, = C++ CheckWithCache).
+// Deviation: the per-mapping arg check uses argChecker via CheckCallArgCompatible
+// (selfhost callback pattern, = C++ CheckWithCache).
 private func CheckGenericCallCompatible(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
     ctx: Option<ASTContext>, ce: CallExpr, fd: FuncDecl, paramTyInArgOrder: ArrayList<Ty>,
     target: Option<Ty>, argChecker: Option<CallArgChecker>,
     inferenceFailure: Option<CallInferenceFailure>): Option<SubstPack> {
-    let firstMapping = match (GenerateTypeMappingForCall(typeManager, diag, ctx, ce, fd, paramTyInArgOrder,
-        inferenceFailure, target, argChecker)) {
-        case Some(v) => v
-        case None => return None
-    }
-    let typeMappings = ArrayList<SubstPack>()
-    typeMappings.add(firstMapping)
+    let typeMappings = GenerateTypeMappingForCall(typeManager, diag, ctx, ce, fd, paramTyInArgOrder,
+        inferenceFailure, target, argChecker)
     FilterAndReduceSubstPacks(typeMappings, typeManager)
     if (typeMappings.isEmpty()) {
         return None
@@ -3596,7 +3625,11 @@ private func CheckGenericCallCompatible(typeManager: TypeManager, diag: Option<B
     let _ = matchedCnt
     let resolved = ResolveTypeMappings(typeManager, resMappings, fd)
     if (resolved.size == 1) {
-        return Some(resolved[0])
+        let selectedMapping = resolved[0]
+        if (CheckCandidateConstrains(typeManager, diag, ce, fd, selectedMapping)) {
+            return Some(selectedMapping)
+        }
+        return None
     }
     DiagnoseForMultiMapping(diag, ce, fd, typeMappings, resolved)
     return None
