@@ -29,6 +29,13 @@ public class CHIRBuilder {
         return def
     }
 
+    public func CreateClassDef(packageName: String, identifier: String, srcCodeIdentifier: String,
+        isClass!: Bool = true): ClassDef {
+        let def = ClassDef(packageName, "_" + identifier, srcCodeIdentifier, isClass: isClass)
+        context.RegisterClass(def)
+        return def
+    }
+
     public func CreateEnumDef(packageName: String, identifier: String): EnumDef {
         let def = EnumDef(packageName, "_" + identifier)
         context.RegisterEnum(def)

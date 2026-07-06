@@ -17,13 +17,11 @@ private let MANGLE_VOID_TY_SUFFIX: String = "v"
 private let MANGLE_POINTER_PREFIX: String = "P"
 private let MANGLE_VARRAY_PREFIX: String = "V"
 private let MANGLE_TUPLE_PREFIX: String = "T"
-private let MANGLE_AT_PREFIX: String = "@"
 private let MANGLE_DOLLAR_PREFIX: String = "$"
 private let MANGLE_WILDCARD_PREFIX: String = "_"
 private let MANGLE_LT_PREFIX: String = "<"
 private let MANGLE_GT_PREFIX: String = ">"
 private let MANGLE_PREFIX_LEN: Int64 = 2
-private let MANGLE_CHAR_LEN: Int64 = 1
 
 private let MANGLE_VIRTUAL_PREFIX: String = "_CV"
 private let MANGLE_MUTABLE_PREFIX: String = "_CM"
@@ -157,15 +155,7 @@ func MangleArraySliceType(t: Type, genericsTypeStack: ArrayList<String>, useGene
 }
 
 private func IdentifierForMangledCHIRType(def: CustomTypeDef): String {
-    return StripCangjiePrefix(CustomTypeDefMangledIdentifier(def))
-}
-
-private func CustomTypeDefMangledIdentifier(def: CustomTypeDef): String {
-    let identifier = def.GetIdentifier()
-    if (StartsWith(identifier, MANGLE_AT_PREFIX)) {
-        return identifier[MANGLE_CHAR_LEN..]
-    }
-    return identifier
+    return StripCangjiePrefix(def.GetIdentifierWithoutPrefix())
 }
 
 private func CustomTypeDefIdentifierForQualifiedName(def: CustomTypeDef): String {
@@ -173,7 +163,7 @@ private func CustomTypeDefIdentifierForQualifiedName(def: CustomTypeDef): String
     if (!srcCodeIdentifier.isEmpty() && !def.TestAttr(Attribute.PRIVATE)) {
         return srcCodeIdentifier
     }
-    return CustomTypeDefMangledIdentifier(def)
+    return def.GetIdentifierWithoutPrefix()
 }
 
 private func MangleGenericTypeByName(srcCodeIdentifier: String, genericsTypeStack: ArrayList<String>,

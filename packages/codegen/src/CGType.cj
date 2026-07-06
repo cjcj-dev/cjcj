@@ -13,6 +13,7 @@ import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
 import cangjie_compiler::mangle.GetCustomTypeIdentifier
+import cangjie_compiler::mangle.GetTypeQualifiedName
 import cangjie_compiler::utils.CJC_ASSERT
 
 private let LLVM_FUNCTION_TYPE_KIND: Int32 = 9
@@ -582,6 +583,11 @@ public open class CGType {
     }
 
     public static func GetNameOfTypeInfoGV(chirType: Type): String {
+        if (let Some(customTy) <- (chirType as CustomType)) {
+            if (customTy.GetCustomTypeDef().GetSrcCodeIdentifier().isEmpty()) {
+                return GetTypeQualifiedName(chirType) + ".ti"
+            }
+        }
         return CGType.GetRuntimeTypeName(chirType) + ".ti"
     }
 

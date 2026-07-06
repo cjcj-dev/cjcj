@@ -529,7 +529,7 @@ public class ClosureConversion {
 
     private func CreateAutoEnvImplDef(className: String, genericTypes: ArrayList<GenericType>, srcFunc: Value,
         superClassDef: ClassDef, genericMap: HashMap<String, Type>): ClassDef {
-        let classDef = builder.CreateClassDef(CurrentPackage().GetName(), className)
+        let classDef = builder.CreateClassDef(CurrentPackage().GetName(), className, "")
         let classTypeArgs = ArrayList<Type>()
         var idx: Int64 = 0
         while (idx < genericTypes.size) {
