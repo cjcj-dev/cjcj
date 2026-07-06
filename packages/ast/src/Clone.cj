@@ -189,6 +189,96 @@ public class ASTCloner {
     }
 
     private static func CloneNode(node: Node, visitFunc: (Node, Node) -> Unit): Node {
+        if (let Some(typeNode) <- (node as Type)) {
+            let target = CloneType(typeNode, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
+        if (let Some(expr) <- (node as Expr)) {
+            let target = CloneExpr(expr, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
+        if (let Some(decl) <- (node as Decl)) {
+            let target = CloneDecl(decl, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
+        if (let Some(pattern) <- (node as Pattern)) {
+            let target = ClonePattern(pattern, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
+        if (let Some(classBody) <- (node as ClassBody)) {
+            let target = CloneClassBody(classBody, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
+        if (let Some(structBody) <- (node as StructBody)) {
+            let target = CloneStructBody(structBody, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
+        if (let Some(interfaceBody) <- (node as InterfaceBody)) {
+            let target = CloneInterfaceBody(interfaceBody, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
+        if (let Some(genericConstraint) <- (node as GenericConstraint)) {
+            let target = CloneGenericConstraint(genericConstraint, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
+        if (let Some(funcBody) <- (node as FuncBody)) {
+            let target = CloneFuncBody(funcBody, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
+        if (let Some(funcParamList) <- (node as FuncParamList)) {
+            let target = CloneFuncParamList(funcParamList, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
+        if (let Some(funcArg) <- (node as FuncArg)) {
+            let target = CloneFuncArg(funcArg, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
+        if (let Some(matchCase) <- (node as MatchCase)) {
+            let target = CloneMatchCase(matchCase, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
+        if (let Some(matchCaseOther) <- (node as MatchCaseOther)) {
+            let target = CloneMatchCaseOther(matchCaseOther, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
+        if (let Some(annotation) <- (node as Annotation)) {
+            let target = CloneAnnotation(annotation, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
+        if (let Some(importSpec) <- (node as ImportSpec)) {
+            let target = CloneImportSpec(importSpec, visitFunc)
+            visitFunc(node, target)
+            target.EnableAttr(Attribute.COMPILER_ADD)
+            return target
+        }
         let target = makeNode(node)
         CopyNodeField(node, target)
         copyCommon(node, target, visitFunc)
@@ -333,7 +423,7 @@ public class ASTCloner {
 
     private static func cloneExpr(node: Option<Expr>, visitFunc: (Node, Node) -> Unit): Option<Expr> {
         if (let Some(value) <- node) {
-            return CloneNode(value, visitFunc) as Expr
+            return CloneExpr(value, visitFunc)
         }
         return None
     }
@@ -378,6 +468,1047 @@ public class ASTCloner {
             return CloneNode(value, visitFunc) as FuncArg
         }
         return None
+    }
+
+    private static func CloneExpr(node: Option<Expr>, visitFunc: (Node, Node) -> Unit): Option<Expr> {
+        if (let Some(value) <- node) {
+            return CloneExpr(value, visitFunc)
+        }
+        return None
+    }
+
+    private static func CloneType(node: Option<Type>, visitFunc: (Node, Node) -> Unit): Option<Type> {
+        if (let Some(value) <- node) {
+            return CloneType(value, visitFunc)
+        }
+        return None
+    }
+
+    private static func CloneType(source: Type, visitFunc: (Node, Node) -> Unit): Type {
+        let target: Type = match (source.astKind) {
+            case ASTKind.REF_TYPE => CloneRefType((source as RefType).getOrThrow(), visitFunc)
+            case ASTKind.PRIMITIVE_TYPE => PrimitiveType()
+            case ASTKind.PAREN_TYPE => CloneParenType((source as ParenType).getOrThrow(), visitFunc)
+            case ASTKind.QUALIFIED_TYPE => CloneQualifiedType((source as QualifiedType).getOrThrow(), visitFunc)
+            case ASTKind.OPTION_TYPE => CloneOptionType((source as OptionType).getOrThrow(), visitFunc)
+            case ASTKind.FUNC_TYPE => CloneFuncType((source as FuncType).getOrThrow(), visitFunc)
+            case ASTKind.TUPLE_TYPE => CloneTupleType((source as TupleType).getOrThrow(), visitFunc)
+            case ASTKind.CONSTANT_TYPE => CloneConstantType((source as ConstantType).getOrThrow(), visitFunc)
+            case ASTKind.VARRAY_TYPE => CloneVArrayType((source as VArrayType).getOrThrow(), visitFunc)
+            case ASTKind.THIS_TYPE => ThisType(source.begin)
+            case ASTKind.INVALID_TYPE => InvalidType(source.begin)
+            case _ => Type()
+        }
+        if (let Some(primitiveSource) <- (source as PrimitiveType)) {
+            if (let Some(primitiveTarget) <- (target as PrimitiveType)) {
+                primitiveTarget.str = primitiveSource.str
+                primitiveTarget.kind = primitiveSource.kind
+            }
+        }
+        target.commaPos = source.commaPos
+        target.bitAndPos = source.bitAndPos
+        target.typeParameterName = source.typeParameterName
+        target.typeParameterNameIsRawId = source.typeParameterNameIsRawId
+        target.typePos = source.typePos
+        target.colonPos = source.colonPos
+        CopyNodeField(source, target)
+        visitFunc(source, target)
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func ClonePattern(node: Option<Pattern>, visitFunc: (Node, Node) -> Unit): Option<Pattern> {
+        if (let Some(value) <- node) {
+            return ClonePattern(value, visitFunc)
+        }
+        return None
+    }
+
+    private static func ClonePattern(source: Pattern, visitFunc: (Node, Node) -> Unit): Pattern {
+        let target: Pattern = match (source.astKind) {
+            case ASTKind.CONST_PATTERN => CloneConstPattern((source as ConstPattern).getOrThrow(), visitFunc)
+            case ASTKind.WILDCARD_PATTERN => WildcardPattern()
+            case ASTKind.VAR_PATTERN => CloneVarPattern((source as VarPattern).getOrThrow(), visitFunc)
+            case ASTKind.TUPLE_PATTERN => CloneTuplePattern((source as TuplePattern).getOrThrow(), visitFunc)
+            case ASTKind.TYPE_PATTERN => CloneTypePattern((source as TypePattern).getOrThrow(), visitFunc)
+            case ASTKind.ENUM_PATTERN => CloneEnumPattern((source as EnumPattern).getOrThrow(), visitFunc)
+            case ASTKind.EXCEPT_TYPE_PATTERN =>
+                CloneExceptTypePattern((source as ExceptTypePattern).getOrThrow(), visitFunc)
+            case ASTKind.COMMAND_TYPE_PATTERN =>
+                CloneCommandTypePattern((source as CommandTypePattern).getOrThrow(), visitFunc)
+            case ASTKind.VAR_OR_ENUM_PATTERN =>
+                CloneVarOrEnumPattern((source as VarOrEnumPattern).getOrThrow(), visitFunc)
+            case ASTKind.INVALID_PATTERN => InvalidPattern(source.begin)
+            case _ => InvalidPattern()
+        }
+        CopyNodeField(source, target)
+        copyCommon(source, target, visitFunc)
+        copySpecific(source, target, visitFunc)
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        visitFunc(source, target)
+        return target
+    }
+
+    private static func CloneDecl(source: Decl, visitFunc: (Node, Node) -> Unit): Decl {
+        let target: Decl = match (source.astKind) {
+            case ASTKind.GENERIC_PARAM_DECL =>
+                CloneGenericParamDecl((source as GenericParamDecl).getOrThrow())
+            case ASTKind.PROP_DECL => ClonePropDecl((source as PropDecl).getOrThrow(), visitFunc)
+            case ASTKind.VAR_DECL => CloneVarDecl((source as VarDecl).getOrThrow(), visitFunc)
+            case ASTKind.FUNC_PARAM => CloneVarDecl((source as VarDecl).getOrThrow(), visitFunc)
+            case ASTKind.FUNC_DECL => CloneFuncDecl((source as FuncDecl).getOrThrow(), visitFunc)
+            case ASTKind.STRUCT_DECL => CloneStructDecl((source as StructDecl).getOrThrow(), visitFunc)
+            case ASTKind.CLASS_DECL => CloneClassDecl((source as ClassDecl).getOrThrow(), visitFunc)
+            case ASTKind.INTERFACE_DECL => CloneInterfaceDecl((source as InterfaceDecl).getOrThrow(), visitFunc)
+            case ASTKind.ENUM_DECL => CloneEnumDecl((source as EnumDecl).getOrThrow(), visitFunc)
+            case ASTKind.PRIMARY_CTOR_DECL => ClonePrimaryCtorDecl((source as PrimaryCtorDecl).getOrThrow(), visitFunc)
+            case ASTKind.EXTEND_DECL => CloneExtendDecl((source as ExtendDecl).getOrThrow(), visitFunc)
+            case ASTKind.MACRO_EXPAND_DECL => CloneMacroExpandDecl((source as MacroExpandDecl).getOrThrow())
+            case ASTKind.VAR_WITH_PATTERN_DECL =>
+                CloneVarWithPatternDecl((source as VarWithPatternDecl).getOrThrow(), visitFunc)
+            case ASTKind.TYPE_ALIAS_DECL => CloneTypeAliasDecl((source as TypeAliasDecl).getOrThrow(), visitFunc)
+            case ASTKind.MACRO_DECL => InvalidDecl(source.begin)
+            case ASTKind.MAIN_DECL => InvalidDecl(source.begin)
+            case ASTKind.INVALID_DECL => InvalidDecl(source.begin)
+            case _ => InvalidDecl(source.begin)
+        }
+        CopyNodeField(source, target)
+        copyCommon(source, target, visitFunc)
+        copySpecific(source, target, visitFunc)
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        visitFunc(source, target)
+        return target
+    }
+
+    private static func CloneFuncBody(source: FuncBody, visitFunc: (Node, Node) -> Unit): FuncBody {
+        let target = FuncBody()
+        CopyNodeField(source, target)
+        copySpecific(source, target, visitFunc)
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneBlock(node: Option<Block>, visitFunc: (Node, Node) -> Unit): Option<Block> {
+        if (let Some(value) <- node) {
+            return CloneBlock(value, visitFunc)
+        }
+        return None
+    }
+
+    private static func CloneFuncArg(source: FuncArg, visitFunc: (Node, Node) -> Unit): FuncArg {
+        let target = FuncArg()
+        CopyNodeField(source, target)
+        copySpecific(source, target, visitFunc)
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneGenericParamDecl(source: GenericParamDecl): Decl {
+        let target = GenericParamDecl()
+        target.outerDecl = source.outerDecl
+        target.commaPos = source.commaPos
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneFuncParam(source: FuncParam, visitFunc: (Node, Node) -> Unit): VarDecl {
+        let _ = source
+        let _ = visitFunc
+        let target = FuncParam()
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneVarWithPatternDecl(source: VarWithPatternDecl, visitFunc: (Node, Node) -> Unit): Decl {
+        let _ = source
+        let _ = visitFunc
+        return VarWithPatternDecl()
+    }
+
+    private static func CloneVarDecl(source: VarDecl, visitFunc: (Node, Node) -> Unit): Decl {
+        if (let Some(param) <- (source as FuncParam)) {
+            return CloneFuncParam(param, visitFunc)
+        }
+        let _ = visitFunc
+        let target = VarDecl()
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneFuncDecl(source: FuncDecl, visitFunc: (Node, Node) -> Unit): Decl {
+        let _ = source
+        let _ = visitFunc
+        let target = FuncDecl()
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func ClonePrimaryCtorDecl(source: PrimaryCtorDecl, visitFunc: (Node, Node) -> Unit): Decl {
+        let _ = source
+        let _ = visitFunc
+        let target = PrimaryCtorDecl()
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func ClonePropDecl(source: PropDecl, visitFunc: (Node, Node) -> Unit): Decl {
+        let _ = source
+        let _ = visitFunc
+        let target = PropDecl()
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneExtendDecl(source: ExtendDecl, visitFunc: (Node, Node) -> Unit): Decl {
+        let _ = source
+        let _ = visitFunc
+        let target = ExtendDecl()
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneMacroExpandDecl(source: MacroExpandDecl): Decl {
+        let _ = source
+        let target = MacroExpandDecl()
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneStructDecl(source: StructDecl, visitFunc: (Node, Node) -> Unit): Decl {
+        let _ = source
+        let _ = visitFunc
+        let target = StructDecl()
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneClassDecl(source: ClassDecl, visitFunc: (Node, Node) -> Unit): Decl {
+        let _ = source
+        let _ = visitFunc
+        let target = ClassDecl()
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneInterfaceDecl(source: InterfaceDecl, visitFunc: (Node, Node) -> Unit): Decl {
+        let _ = source
+        let _ = visitFunc
+        let target = InterfaceDecl()
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneEnumDecl(source: EnumDecl, visitFunc: (Node, Node) -> Unit): Decl {
+        let _ = source
+        let _ = visitFunc
+        let target = EnumDecl()
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneTypeAliasDecl(source: TypeAliasDecl, visitFunc: (Node, Node) -> Unit): Decl {
+        let _ = source
+        let _ = visitFunc
+        let target = TypeAliasDecl()
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneConstPattern(source: ConstPattern, visitFunc: (Node, Node) -> Unit): ConstPattern {
+        let _ = source
+        let _ = visitFunc
+        return ConstPattern()
+    }
+
+    private static func CloneVarPattern(source: VarPattern, visitFunc: (Node, Node) -> Unit): VarPattern {
+        let _ = source
+        let _ = visitFunc
+        return VarPattern()
+    }
+
+    private static func CloneTuplePattern(source: TuplePattern, visitFunc: (Node, Node) -> Unit): TuplePattern {
+        let _ = source
+        let _ = visitFunc
+        return TuplePattern()
+    }
+
+    private static func CloneTypePattern(source: TypePattern, visitFunc: (Node, Node) -> Unit): TypePattern {
+        let _ = source
+        let _ = visitFunc
+        return TypePattern()
+    }
+
+    private static func CloneEnumPattern(source: EnumPattern, visitFunc: (Node, Node) -> Unit): EnumPattern {
+        let _ = source
+        let _ = visitFunc
+        return EnumPattern()
+    }
+
+    private static func CloneExceptTypePattern(
+        source: ExceptTypePattern, visitFunc: (Node, Node) -> Unit): ExceptTypePattern {
+        let _ = source
+        let _ = visitFunc
+        return ExceptTypePattern()
+    }
+
+    private static func CloneCommandTypePattern(
+        source: CommandTypePattern, visitFunc: (Node, Node) -> Unit): CommandTypePattern {
+        let _ = source
+        let _ = visitFunc
+        return CommandTypePattern()
+    }
+
+    private static func CloneVarOrEnumPattern(
+        source: VarOrEnumPattern, visitFunc: (Node, Node) -> Unit): VarOrEnumPattern {
+        let _ = visitFunc
+        let target = VarOrEnumPattern(source.identifier)
+        return target
+    }
+
+    private static func CloneClassBody(source: ClassBody, visitFunc: (Node, Node) -> Unit): ClassBody {
+        let target = ClassBody()
+        CopyNodeField(source, target)
+        copySpecific(source, target, visitFunc)
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneStructBody(source: StructBody, visitFunc: (Node, Node) -> Unit): StructBody {
+        let target = StructBody()
+        CopyNodeField(source, target)
+        copySpecific(source, target, visitFunc)
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneInterfaceBody(source: InterfaceBody, visitFunc: (Node, Node) -> Unit): InterfaceBody {
+        let target = InterfaceBody()
+        CopyNodeField(source, target)
+        copySpecific(source, target, visitFunc)
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneGenericConstraint(
+        source: GenericConstraint, visitFunc: (Node, Node) -> Unit): GenericConstraint {
+        let target = GenericConstraint()
+        CopyNodeField(source, target)
+        copySpecific(source, target, visitFunc)
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneFuncParamList(source: FuncParamList, visitFunc: (Node, Node) -> Unit): FuncParamList {
+        let target = FuncParamList()
+        CopyNodeField(source, target)
+        copySpecific(source, target, visitFunc)
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneAnnotation(source: Annotation, visitFunc: (Node, Node) -> Unit): Annotation {
+        let target = Annotation()
+        CopyNodeField(source, target)
+        copySpecific(source, target, visitFunc)
+        return target
+    }
+
+    private static func CloneImportSpec(source: ImportSpec, visitFunc: (Node, Node) -> Unit): ImportSpec {
+        let target = ImportSpec()
+        CopyNodeField(source, target)
+        copySpecific(source, target, visitFunc)
+        return target
+    }
+
+    private static func CloneMatchCase(source: MatchCase, visitFunc: (Node, Node) -> Unit): MatchCase {
+        let target = MatchCase()
+        CopyNodeField(source, target)
+        copySpecific(source, target, visitFunc)
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneMatchCaseOther(
+        source: MatchCaseOther, visitFunc: (Node, Node) -> Unit): MatchCaseOther {
+        let target = MatchCaseOther()
+        CopyNodeField(source, target)
+        copySpecific(source, target, visitFunc)
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneRefType(source: RefType, visitFunc: (Node, Node) -> Unit): RefType {
+        let target = RefType()
+        CopyNodeField(source, target)
+        target.ref = cloneReference(source.ref)
+        target.leftAnglePos = source.leftAnglePos
+        for (typeArg in source.typeArguments) {
+            target.typeArguments.add(CloneType(typeArg, visitFunc))
+        }
+        target.rightAnglePos = source.rightAnglePos
+        target.commaPos = source.commaPos
+        target.bitAndPos = source.bitAndPos
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneQualifiedType(source: QualifiedType, visitFunc: (Node, Node) -> Unit): QualifiedType {
+        let target = QualifiedType()
+        target.baseType = CloneType(source.baseType, visitFunc)
+        target.field = cloneSrcIdentifier(source.field)
+        target.target = source.target
+        for (typeArg in source.typeArguments) {
+            target.typeArguments.add(CloneType(typeArg, visitFunc))
+        }
+        return target
+    }
+
+    private static func CloneParenType(source: ParenType, visitFunc: (Node, Node) -> Unit): ParenType {
+        let target = ParenType()
+        target.innerType = CloneType(source.innerType, visitFunc)
+        target.leftParenPos = source.leftParenPos
+        target.rightParenPos = source.rightParenPos
+        return target
+    }
+
+    private static func CloneOptionType(source: OptionType, visitFunc: (Node, Node) -> Unit): OptionType {
+        let target = OptionType()
+        target.componentType = CloneType(source.componentType, visitFunc)
+        target.questNum = source.questNum
+        for (pos in source.questVector) { target.questVector.add(pos) }
+        target.desugarType = if (let Some(desugarType) <- source.desugarType) {
+            CloneRefType(desugarType, visitFunc)
+        } else {
+            None
+        }
+        return target
+    }
+
+    private static func CloneFuncType(source: FuncType, visitFunc: (Node, Node) -> Unit): FuncType {
+        let target = FuncType()
+        for (paramType in source.paramTypes) {
+            target.paramTypes.add(CloneType(paramType, visitFunc))
+        }
+        target.retType = CloneType(source.retType, visitFunc)
+        target.isC = source.isC
+        target.leftParenPos = source.leftParenPos
+        target.rightParenPos = source.rightParenPos
+        target.arrowPos = source.arrowPos
+        return target
+    }
+
+    private static func CloneTupleType(source: TupleType, visitFunc: (Node, Node) -> Unit): TupleType {
+        let target = TupleType()
+        for (fieldType in source.fieldTypes) {
+            target.fieldTypes.add(CloneType(fieldType, visitFunc))
+        }
+        target.leftParenPos = source.leftParenPos
+        target.rightParenPos = source.rightParenPos
+        for (pos in source.commaPosVector) { target.commaPosVector.add(pos) }
+        return target
+    }
+
+    private static func CloneConstantType(source: ConstantType, visitFunc: (Node, Node) -> Unit): ConstantType {
+        let target = ConstantType()
+        target.constantExpr = CloneExpr(source.constantExpr, visitFunc)
+        target.dollarPos = source.dollarPos
+        return target
+    }
+
+    private static func CloneVArrayType(source: VArrayType, visitFunc: (Node, Node) -> Unit): VArrayType {
+        let target = VArrayType()
+        target.leftAnglePos = source.leftAnglePos
+        target.typeArgument = CloneType(source.typeArgument, visitFunc)
+        target.constantType = CloneType(source.constantType, visitFunc)
+        target.rightAnglePos = source.rightAnglePos
+        return target
+    }
+
+    private static func CloneIfExpr(source: IfExpr, visitFunc: (Node, Node) -> Unit): IfExpr {
+        let target = IfExpr()
+        target.ifPos = source.ifPos
+        target.leftParenPos = source.leftParenPos
+        target.condExpr = CloneExpr(source.condExpr, visitFunc)
+        target.rightParenPos = source.rightParenPos
+        if (let Some(thenBody) <- source.thenBody) {
+            target.thenBody = CloneExpr(thenBody, visitFunc) as Block
+        }
+        target.hasElse = source.hasElse
+        target.isElseIf = source.isElseIf
+        target.elsePos = source.elsePos
+        target.elseBody = CloneExpr(source.elseBody, visitFunc)
+        return target
+    }
+
+    private static func CloneMacroExpandExpr(source: MacroExpandExpr, visitFunc: (Node, Node) -> Unit): MacroExpandExpr {
+        let target = MacroExpandExpr()
+        target.identifier = cloneIdentifier(source.identifier)
+        target.invocation = CloneMacroInvocation(source.invocation)
+        for (annotation in source.annotations) {
+            if (let Some(cloned) <- (CloneNode(annotation, visitFunc) as Annotation)) { target.annotations.add(cloned) }
+        }
+        for (modifier in source.modifiers) {
+            if (let Some(cloned) <- (CloneNode(modifier, visitFunc) as Modifier)) { target.modifiers.add(cloned) }
+        }
+        return target
+    }
+
+    private static func CloneTokenPart(source: TokenPart, visitFunc: (Node, Node) -> Unit): TokenPart {
+        let _ = visitFunc
+        let target = TokenPart()
+        for (token in source.tokens) { target.tokens.add(token) }
+        return target
+    }
+
+    private static func CloneQuoteExpr(source: QuoteExpr, visitFunc: (Node, Node) -> Unit): QuoteExpr {
+        let target = QuoteExpr()
+        for (expr in source.exprs) {
+            target.exprs.add(CloneExpr(expr, visitFunc))
+        }
+        target.quotePos = source.quotePos
+        target.leftParenPos = source.leftParenPos
+        target.rightParenPos = source.rightParenPos
+        return target
+    }
+
+    private static func CloneTryExpr(source: TryExpr, visitFunc: (Node, Node) -> Unit): TryExpr {
+        let target = TryExpr()
+        target.tryPos = source.tryPos
+        target.lParen = source.lParen
+        for (resource in source.resourceSpec) {
+            if (let Some(cloned) <- (CloneNode(resource, visitFunc) as VarDecl)) { target.resourceSpec.add(cloned) }
+        }
+        target.isDesugaredFromSyncBlock = source.isDesugaredFromSyncBlock
+        target.isDesugaredFromTryWithResources = source.isDesugaredFromTryWithResources
+        target.isIllegalResourceSpec = source.isIllegalResourceSpec
+        target.tryBlock = CloneBlock(source.tryBlock, visitFunc)
+        for (pos in source.catchPosVector) { target.catchPosVector.add(pos) }
+        for (block in source.catchBlocks) {
+            target.catchBlocks.add(CloneBlock(block, visitFunc))
+        }
+        for (pattern in source.catchPatterns) {
+            target.catchPatterns.add(ClonePattern(pattern, visitFunc))
+        }
+        for (handler in source.handlers) { target.handlers.add(cloneHandler(handler, visitFunc)) }
+        target.finallyPos = source.finallyPos
+        target.finallyBlock = CloneBlock(source.finallyBlock, visitFunc)
+        for (pos in source.resourceSpecCommaPos) { target.resourceSpecCommaPos.add(pos) }
+        target.rParen = source.rParen
+        for (pos in source.catchLParenPosVector) { target.catchLParenPosVector.add(pos) }
+        for (pos in source.catchRParenPosVector) { target.catchRParenPosVector.add(pos) }
+        if (let Some(lambda) <- source.tryLambda) {
+            if (let Some(cloned) <- (CloneExpr(lambda, visitFunc) as LambdaExpr)) { target.tryLambda = cloned }
+        }
+        if (let Some(lambda) <- source.finallyLambda) {
+            if (let Some(cloned) <- (CloneExpr(lambda, visitFunc) as LambdaExpr)) { target.finallyLambda = cloned }
+        }
+        return target
+    }
+
+    private static func CloneThrowExpr(source: ThrowExpr, visitFunc: (Node, Node) -> Unit): ThrowExpr {
+        let target = ThrowExpr()
+        target.throwPos = source.throwPos
+        target.expr = CloneExpr(source.expr, visitFunc)
+        return target
+    }
+
+    private static func ClonePerformExpr(source: PerformExpr, visitFunc: (Node, Node) -> Unit): PerformExpr {
+        let target = PerformExpr()
+        target.performPos = source.performPos
+        target.expr = CloneExpr(source.expr, visitFunc)
+        return target
+    }
+
+    private static func CloneResumeExpr(source: ResumeExpr, visitFunc: (Node, Node) -> Unit): ResumeExpr {
+        let target = ResumeExpr()
+        target.resumePos = source.resumePos
+        target.withPos = source.withPos
+        target.withExpr = CloneExpr(source.withExpr, visitFunc)
+        target.throwingPos = source.throwingPos
+        target.throwingExpr = CloneExpr(source.throwingExpr, visitFunc)
+        return target
+    }
+
+    private static func CloneReturnExpr(source: ReturnExpr, visitFunc: (Node, Node) -> Unit): ReturnExpr {
+        let target = ReturnExpr()
+        target.returnPos = source.returnPos
+        target.expr = CloneExpr(source.expr, visitFunc)
+        target.refFuncBody = source.refFuncBody
+        return target
+    }
+
+    private static func CloneWhileExpr(source: WhileExpr, visitFunc: (Node, Node) -> Unit): WhileExpr {
+        let target = WhileExpr()
+        target.whilePos = source.whilePos
+        target.leftParenPos = source.leftParenPos
+        target.condExpr = CloneExpr(source.condExpr, visitFunc)
+        target.body = CloneBlock(source.body, visitFunc)
+        target.rightParenPos = source.rightParenPos
+        return target
+    }
+
+    private static func CloneDoWhileExpr(source: DoWhileExpr, visitFunc: (Node, Node) -> Unit): DoWhileExpr {
+        let target = DoWhileExpr()
+        target.doPos = source.doPos
+        target.body = CloneBlock(source.body, visitFunc)
+        target.whilePos = source.whilePos
+        target.leftParenPos = source.leftParenPos
+        target.condExpr = CloneExpr(source.condExpr, visitFunc)
+        target.rightParenPos = source.rightParenPos
+        return target
+    }
+
+    private static func CloneAssignExpr(source: AssignExpr, visitFunc: (Node, Node) -> Unit): AssignExpr {
+        let target = AssignExpr()
+        target.leftValue = CloneExpr(source.leftValue, visitFunc)
+        target.op = source.op
+        target.rightExpr = CloneExpr(source.rightExpr, visitFunc)
+        target.isCompound = source.isCompound
+        target.assignPos = source.assignPos
+        return target
+    }
+
+    private static func CloneIncOrDecExpr(source: IncOrDecExpr, visitFunc: (Node, Node) -> Unit): IncOrDecExpr {
+        let target = IncOrDecExpr()
+        target.op = source.op
+        target.operatorPos = source.operatorPos
+        target.expr = CloneExpr(source.expr, visitFunc)
+        return target
+    }
+
+    private static func CloneUnaryExpr(source: UnaryExpr, visitFunc: (Node, Node) -> Unit): UnaryExpr {
+        let target = UnaryExpr()
+        target.op = source.op
+        target.expr = CloneExpr(source.expr, visitFunc)
+        target.operatorPos = source.operatorPos
+        return target
+    }
+
+    private static func CloneBinaryExpr(source: BinaryExpr, visitFunc: (Node, Node) -> Unit): BinaryExpr {
+        let target = BinaryExpr()
+        target.op = source.op
+        target.leftExpr = CloneExpr(source.leftExpr, visitFunc)
+        target.rightExpr = CloneExpr(source.rightExpr, visitFunc)
+        target.operatorPos = source.operatorPos
+        return target
+    }
+
+    private static func CloneRangeExpr(source: RangeExpr, visitFunc: (Node, Node) -> Unit): RangeExpr {
+        let target = RangeExpr()
+        target.startExpr = CloneExpr(source.startExpr, visitFunc)
+        target.rangePos = source.rangePos
+        target.stopExpr = CloneExpr(source.stopExpr, visitFunc)
+        target.colonPos = source.colonPos
+        target.stepExpr = CloneExpr(source.stepExpr, visitFunc)
+        target.isClosed = source.isClosed
+        target.decl = source.decl
+        return target
+    }
+
+    private static func CloneSubscriptExpr(source: SubscriptExpr, visitFunc: (Node, Node) -> Unit): SubscriptExpr {
+        let target = SubscriptExpr()
+        target.baseExpr = CloneExpr(source.baseExpr, visitFunc)
+        target.leftParenPos = source.leftParenPos
+        for (expr in source.indexExprs) {
+            target.indexExprs.add(CloneExpr(expr, visitFunc))
+        }
+        for (pos in source.commaPos) { target.commaPos.add(pos) }
+        target.rightParenPos = source.rightParenPos
+        target.isTupleAccess = source.isTupleAccess
+        return target
+    }
+
+    private static func CloneMemberAccess(source: MemberAccess, visitFunc: (Node, Node) -> Unit): MemberAccess {
+        let target = MemberAccess()
+        target.baseExpr = CloneExpr(source.baseExpr, visitFunc)
+        target.dotPos = source.dotPos
+        target.field = cloneSrcIdentifier(source.field)
+        target.target = source.target
+        for (decl in source.targets) { target.targets.add(decl) }
+        target.isPattern = source.isPattern
+        target.isAlone = source.isAlone
+        for (ty in source.instTys) { target.instTys.add(ty) }
+        target.matchedParentTy = source.matchedParentTy
+        target.callOrPattern = source.callOrPattern
+        for (entry in source.foundUpperBoundMap) { target.foundUpperBoundMap.add(entry) }
+        target.isExposedAccess = source.isExposedAccess
+        for (ty in source.typeArguments) {
+            target.typeArguments.add(CloneType(ty, visitFunc))
+        }
+        return target
+    }
+
+    private static func CloneCallExpr(source: CallExpr, visitFunc: (Node, Node) -> Unit): CallExpr {
+        let target = CallExpr()
+        target.baseFunc = CloneExpr(source.baseFunc, visitFunc)
+        target.leftParenPos = source.leftParenPos
+        target.needCheckToTokens = source.needCheckToTokens
+        let cloneTable = HashMap<Node, FuncArg>()
+        for (arg in source.args) {
+            let cloned = (CloneNode(arg, visitFunc) as FuncArg).getOrThrow()
+            target.args.add(cloned)
+            cloneTable[arg] = cloned
+        }
+        if (let Some(sourceDesugarArgs) <- source.desugarArgs) {
+            for (arg in source.defaultArgs) {
+                let cloned = (CloneNode(arg, visitFunc) as FuncArg).getOrThrow()
+                target.defaultArgs.add(cloned)
+                cloneTable[arg] = cloned
+            }
+            let clonedDesugarArgs = ArrayList<FuncArg>()
+            for (sourceArg in sourceDesugarArgs) {
+                clonedDesugarArgs.add(cloneTable.get(sourceArg).getOrThrow())
+            }
+            target.desugarArgs = Some(clonedDesugarArgs)
+        }
+        target.rightParenPos = source.rightParenPos
+        target.resolvedFunction = source.resolvedFunction
+        target.callKind = source.callKind
+        target.sugarKind = source.sugarKind
+        if (let Some(baseFunc) <- target.baseFunc) {
+            if (let Some(member) <- (baseFunc as MemberAccess)) { member.callOrPattern = target }
+        }
+        return target
+    }
+
+    private static func CloneParenExpr(source: ParenExpr, visitFunc: (Node, Node) -> Unit): ParenExpr {
+        let target = ParenExpr()
+        target.leftParenPos = source.leftParenPos
+        target.expr = CloneExpr(source.expr, visitFunc)
+        target.rightParenPos = source.rightParenPos
+        return target
+    }
+
+    private static func CloneLambdaExpr(source: LambdaExpr, visitFunc: (Node, Node) -> Unit): LambdaExpr {
+        let target = if (let Some(body) <- source.funcBody) {
+            LambdaExpr((CloneNode(body, visitFunc) as FuncBody).getOrThrow())
+        } else {
+            LambdaExpr()
+        }
+        if (source.TestAttr(Attribute.MOCK_SUPPORTED)) { target.EnableAttr(Attribute.MOCK_SUPPORTED) }
+        return target
+    }
+
+    private static func CloneLitConstExpr(source: LitConstExpr, visitFunc: (Node, Node) -> Unit): LitConstExpr {
+        let target = LitConstExpr(source.kind, source.stringValue)
+        for (code in source.codepoint) { target.codepoint.add(code) }
+        target.delimiterNum = source.delimiterNum
+        target.stringKind = source.stringKind
+        target.rawString = source.rawString
+        if (let Some(refType) <- source.ref) {
+            target.ref = CloneRefType(refType, visitFunc)
+            if (let Some(clonedRef) <- target.ref) { visitFunc(refType, clonedRef) }
+        }
+        target.siExpr = if (let Some(expr) <- source.siExpr) { CloneExpr(expr, visitFunc) as StrInterpolationExpr } else { None }
+        return target
+    }
+
+    private static func CloneInterpolationExpr(source: InterpolationExpr, visitFunc: (Node, Node) -> Unit): InterpolationExpr {
+        let target = InterpolationExpr()
+        target.rawString = source.rawString
+        target.dollarPos = source.dollarPos
+        target.block = CloneBlock(source.block, visitFunc)
+        return target
+    }
+
+    private static func CloneStrInterpolationExpr(
+        source: StrInterpolationExpr, visitFunc: (Node, Node) -> Unit): StrInterpolationExpr {
+        let target = StrInterpolationExpr()
+        target.rawString = source.rawString
+        for (part in source.strParts) { target.strParts.add(part) }
+        for (expr in source.strPartExprs) {
+            target.strPartExprs.add(CloneExpr(expr, visitFunc))
+        }
+        return target
+    }
+
+    private static func CloneArrayLit(source: ArrayLit, visitFunc: (Node, Node) -> Unit): ArrayLit {
+        let target = ArrayLit()
+        target.leftSquarePos = source.leftSquarePos
+        for (expr in source.children) {
+            target.children.add(CloneExpr(expr, visitFunc))
+        }
+        for (pos in source.commaPosVector) { target.commaPosVector.add(pos) }
+        target.rightSquarePos = source.rightSquarePos
+        target.initFunc = source.initFunc
+        return target
+    }
+
+    private static func CloneArrayExpr(source: ArrayExpr, visitFunc: (Node, Node) -> Unit): ArrayExpr {
+        let target = ArrayExpr()
+        target.typeNode = CloneType(source.typeNode, visitFunc)
+        target.leftParenPos = source.leftParenPos
+        for (arg in source.args) { target.args.add((CloneNode(arg, visitFunc) as FuncArg).getOrThrow()) }
+        for (pos in source.commaPosVector) { target.commaPosVector.add(pos) }
+        target.rightParenPos = source.rightParenPos
+        target.initFunc = source.initFunc
+        target.isValueArray = source.isValueArray
+        return target
+    }
+
+    private static func ClonePointerExpr(source: PointerExpr, visitFunc: (Node, Node) -> Unit): PointerExpr {
+        let target = PointerExpr()
+        target.typeNode = CloneType(source.typeNode, visitFunc)
+        target.arg = if (let Some(arg) <- source.arg) { CloneNode(arg, visitFunc) as FuncArg } else { None }
+        return target
+    }
+
+    private static func CloneTupleLit(source: TupleLit, visitFunc: (Node, Node) -> Unit): TupleLit {
+        let target = TupleLit()
+        target.leftParenPos = source.leftParenPos
+        for (expr in source.children) {
+            target.children.add(CloneExpr(expr, visitFunc))
+        }
+        for (pos in source.commaPosVector) { target.commaPosVector.add(pos) }
+        target.rightParenPos = source.rightParenPos
+        return target
+    }
+
+    private static func CloneRefExpr(source: RefExpr, visitFunc: (Node, Node) -> Unit): RefExpr {
+        let target = RefExpr(cloneSrcIdentifier(source.ref.identifier))
+        target.leftAnglePos = source.leftAnglePos
+        target.ref.target = source.ref.target
+        for (decl in source.ref.targets) { target.ref.targets.add(decl) }
+        for (ty in source.typeArguments) {
+            target.typeArguments.add(CloneType(ty, visitFunc))
+        }
+        target.rightAnglePos = source.rightAnglePos
+        target.isSuper = source.isSuper
+        target.isThis = source.isThis
+        target.isAlone = source.isAlone
+        for (ty in source.instTys) { target.instTys.add(ty) }
+        target.matchedParentTy = source.matchedParentTy
+        target.callOrPattern = source.callOrPattern
+        return target
+    }
+
+    private static func CloneForInExpr(source: ForInExpr, visitFunc: (Node, Node) -> Unit): ForInExpr {
+        let target = ForInExpr()
+        target.leftParenPos = source.leftParenPos
+        target.rightParenPos = source.rightParenPos
+        target.pattern = ClonePattern(source.pattern, visitFunc)
+        target.inPos = source.inPos
+        target.inExpression = CloneExpr(source.inExpression, visitFunc)
+        target.wherePos = source.wherePos
+        target.patternGuard = CloneExpr(source.patternGuard, visitFunc)
+        target.patternInDesugarExpr = source.patternInDesugarExpr
+        target.body = CloneBlock(source.body, visitFunc)
+        target.forInKind = source.forInKind
+        return target
+    }
+
+    private static func CloneMatchExpr(source: MatchExpr, visitFunc: (Node, Node) -> Unit): MatchExpr {
+        let target = MatchExpr()
+        target.matchMode = source.matchMode
+        target.sugarKind = source.sugarKind
+        target.selector = CloneExpr(source.selector, visitFunc)
+        for (matchCase in source.matchCases) {
+            if (let Some(cloned) <- (CloneNode(matchCase, visitFunc) as MatchCase)) { target.matchCases.add(cloned) }
+        }
+        for (other in source.matchCaseOthers) {
+            if (let Some(cloned) <- (CloneNode(other, visitFunc) as MatchCaseOther)) { target.matchCaseOthers.add(cloned) }
+        }
+        target.leftParenPos = source.leftParenPos
+        target.rightParenPos = source.rightParenPos
+        target.leftCurlPos = source.leftCurlPos
+        target.rightCurlPos = source.rightCurlPos
+        return target
+    }
+
+    private static func CloneJumpExpr(source: JumpExpr): JumpExpr {
+        let target = JumpExpr()
+        target.isBreak = source.isBreak
+        target.refLoop = source.refLoop
+        return target
+    }
+
+    private static func CloneTypeConvExpr(source: TypeConvExpr, visitFunc: (Node, Node) -> Unit): TypeConvExpr {
+        let target = TypeConvExpr()
+        target.typeNode = CloneType(source.typeNode, visitFunc)
+        target.expr = CloneExpr(source.expr, visitFunc)
+        target.leftParenPos = source.leftParenPos
+        target.rightParenPos = source.rightParenPos
+        return target
+    }
+
+    private static func CloneSpawnExpr(source: SpawnExpr, visitFunc: (Node, Node) -> Unit): SpawnExpr {
+        let target = SpawnExpr()
+        target.task = CloneExpr(source.task, visitFunc)
+        target.arg = CloneExpr(source.arg, visitFunc)
+        target.futureObj = if (let Some(decl) <- source.futureObj) { CloneDecl(decl, visitFunc) as VarDecl } else { None }
+        target.spawnPos = source.spawnPos
+        target.leftParenPos = source.leftParenPos
+        target.rightParenPos = source.rightParenPos
+        return target
+    }
+
+    private static func CloneSynchronizedExpr(
+        source: SynchronizedExpr, visitFunc: (Node, Node) -> Unit): SynchronizedExpr {
+        let target = SynchronizedExpr()
+        target.mutex = CloneExpr(source.mutex, visitFunc)
+        target.body = CloneBlock(source.body, visitFunc)
+        target.syncPos = source.syncPos
+        target.leftParenPos = source.leftParenPos
+        target.rightParenPos = source.rightParenPos
+        return target
+    }
+
+    private static func CloneInvalidExpr(source: InvalidExpr): InvalidExpr {
+        let target = InvalidExpr(source.begin)
+        target.value = source.value
+        return target
+    }
+
+    private static func CloneBlock(source: Block, visitFunc: (Node, Node) -> Unit): Block {
+        let target = Block()
+        CopyNodeField(source, target)
+        target.unsafePos = source.unsafePos
+        target.leftCurlPos = source.leftCurlPos
+        for (node in source.body) { target.body.add(CloneNode(node, visitFunc)) }
+        target.rightCurlPos = source.rightCurlPos
+        target.EnableAttr(Attribute.COMPILER_ADD)
+        return target
+    }
+
+    private static func CloneTrailingClosureExpr(
+        source: TrailingClosureExpr, visitFunc: (Node, Node) -> Unit): TrailingClosureExpr {
+        let target = TrailingClosureExpr()
+        target.leftLambda = source.leftLambda
+        target.rightLambda = source.rightLambda
+        target.expr = CloneExpr(source.expr, visitFunc)
+        target.lambda = if (let Some(lambda) <- source.lambda) { CloneExpr(lambda, visitFunc) as LambdaExpr } else { None }
+        return target
+    }
+
+    private static func CloneIsExpr(source: IsExpr, visitFunc: (Node, Node) -> Unit): IsExpr {
+        let target = IsExpr()
+        target.leftExpr = CloneExpr(source.leftExpr, visitFunc)
+        target.isType = CloneType(source.isType, visitFunc)
+        target.isPos = source.isPos
+        return target
+    }
+
+    private static func CloneAsExpr(source: AsExpr, visitFunc: (Node, Node) -> Unit): AsExpr {
+        let target = AsExpr()
+        target.leftExpr = CloneExpr(source.leftExpr, visitFunc)
+        target.asType = CloneType(source.asType, visitFunc)
+        target.asPos = source.asPos
+        return target
+    }
+
+    private static func CloneOptionalExpr(source: OptionalExpr, visitFunc: (Node, Node) -> Unit): OptionalExpr {
+        let target = OptionalExpr()
+        target.baseExpr = CloneExpr(source.baseExpr, visitFunc)
+        target.questPos = source.questPos
+        return target
+    }
+
+    private static func CloneOptionalChainExpr(
+        source: OptionalChainExpr, visitFunc: (Node, Node) -> Unit): OptionalChainExpr {
+        let target = OptionalChainExpr()
+        target.expr = CloneExpr(source.expr, visitFunc)
+        return target
+    }
+
+    private static func CloneLetPatternDestructor(
+        source: LetPatternDestructor, visitFunc: (Node, Node) -> Unit): LetPatternDestructor {
+        let target = LetPatternDestructor()
+        target.backarrowPos = source.backarrowPos
+        for (pattern in source.patterns) {
+            target.patterns.add(ClonePattern(pattern, visitFunc))
+        }
+        for (pos in source.orPos) { target.orPos.add(pos) }
+        target.initializer = CloneExpr(source.initializer, visitFunc)
+        return target
+    }
+
+    private static func CloneIfAvailableExpr(
+        source: IfAvailableExpr, visitFunc: (Node, Node) -> Unit): IfAvailableExpr {
+        let arg = CloneFuncArg(source.GetArg().getOrThrow(), visitFunc)
+        let lambda1 = CloneLambdaExpr(source.GetLambda1().getOrThrow(), visitFunc)
+        let lambda2 = CloneLambdaExpr(source.GetLambda2().getOrThrow(), visitFunc)
+        return IfAvailableExpr(arg, lambda1, lambda2)
+    }
+
+    private static func CloneExpr(source: Expr, visitFunc: (Node, Node) -> Unit): Expr {
+        let clonedExpr: Expr = match (source.astKind) {
+            case ASTKind.IF_EXPR => CloneIfExpr((source as IfExpr).getOrThrow(), visitFunc)
+            case ASTKind.PRIMITIVE_TYPE_EXPR =>
+                PrimitiveTypeExpr((source as PrimitiveTypeExpr).getOrThrow().typeKind)
+            case ASTKind.MACRO_EXPAND_EXPR => CloneMacroExpandExpr((source as MacroExpandExpr).getOrThrow(), visitFunc)
+            case ASTKind.TOKEN_PART => CloneTokenPart((source as TokenPart).getOrThrow(), visitFunc)
+            case ASTKind.QUOTE_EXPR => CloneQuoteExpr((source as QuoteExpr).getOrThrow(), visitFunc)
+            case ASTKind.TRY_EXPR => CloneTryExpr((source as TryExpr).getOrThrow(), visitFunc)
+            case ASTKind.THROW_EXPR => CloneThrowExpr((source as ThrowExpr).getOrThrow(), visitFunc)
+            case ASTKind.PERFORM_EXPR => ClonePerformExpr((source as PerformExpr).getOrThrow(), visitFunc)
+            case ASTKind.RESUME_EXPR => CloneResumeExpr((source as ResumeExpr).getOrThrow(), visitFunc)
+            case ASTKind.RETURN_EXPR => CloneReturnExpr((source as ReturnExpr).getOrThrow(), visitFunc)
+            case ASTKind.WHILE_EXPR => CloneWhileExpr((source as WhileExpr).getOrThrow(), visitFunc)
+            case ASTKind.DO_WHILE_EXPR => CloneDoWhileExpr((source as DoWhileExpr).getOrThrow(), visitFunc)
+            case ASTKind.ASSIGN_EXPR => CloneAssignExpr((source as AssignExpr).getOrThrow(), visitFunc)
+            case ASTKind.INC_OR_DEC_EXPR => CloneIncOrDecExpr((source as IncOrDecExpr).getOrThrow(), visitFunc)
+            case ASTKind.UNARY_EXPR => CloneUnaryExpr((source as UnaryExpr).getOrThrow(), visitFunc)
+            case ASTKind.BINARY_EXPR => CloneBinaryExpr((source as BinaryExpr).getOrThrow(), visitFunc)
+            case ASTKind.RANGE_EXPR => CloneRangeExpr((source as RangeExpr).getOrThrow(), visitFunc)
+            case ASTKind.SUBSCRIPT_EXPR => CloneSubscriptExpr((source as SubscriptExpr).getOrThrow(), visitFunc)
+            case ASTKind.MEMBER_ACCESS => CloneMemberAccess((source as MemberAccess).getOrThrow(), visitFunc)
+            case ASTKind.CALL_EXPR => CloneCallExpr((source as CallExpr).getOrThrow(), visitFunc)
+            case ASTKind.PAREN_EXPR => CloneParenExpr((source as ParenExpr).getOrThrow(), visitFunc)
+            case ASTKind.LAMBDA_EXPR => CloneLambdaExpr((source as LambdaExpr).getOrThrow(), visitFunc)
+            case ASTKind.LIT_CONST_EXPR => CloneLitConstExpr((source as LitConstExpr).getOrThrow(), visitFunc)
+            case ASTKind.ARRAY_LIT => CloneArrayLit((source as ArrayLit).getOrThrow(), visitFunc)
+            case ASTKind.ARRAY_EXPR => CloneArrayExpr((source as ArrayExpr).getOrThrow(), visitFunc)
+            case ASTKind.POINTER_EXPR => ClonePointerExpr((source as PointerExpr).getOrThrow(), visitFunc)
+            case ASTKind.TUPLE_LIT => CloneTupleLit((source as TupleLit).getOrThrow(), visitFunc)
+            case ASTKind.REF_EXPR => CloneRefExpr((source as RefExpr).getOrThrow(), visitFunc)
+            case ASTKind.FOR_IN_EXPR => CloneForInExpr((source as ForInExpr).getOrThrow(), visitFunc)
+            case ASTKind.MATCH_EXPR => CloneMatchExpr((source as MatchExpr).getOrThrow(), visitFunc)
+            case ASTKind.JUMP_EXPR => CloneJumpExpr((source as JumpExpr).getOrThrow())
+            case ASTKind.TYPE_CONV_EXPR => CloneTypeConvExpr((source as TypeConvExpr).getOrThrow(), visitFunc)
+            case ASTKind.SPAWN_EXPR => CloneSpawnExpr((source as SpawnExpr).getOrThrow(), visitFunc)
+            case ASTKind.SYNCHRONIZED_EXPR => CloneSynchronizedExpr((source as SynchronizedExpr).getOrThrow(), visitFunc)
+            case ASTKind.INVALID_EXPR => CloneInvalidExpr((source as InvalidExpr).getOrThrow())
+            case ASTKind.BLOCK => CloneBlock((source as Block).getOrThrow(), visitFunc)
+            case ASTKind.INTERPOLATION_EXPR => CloneInterpolationExpr((source as InterpolationExpr).getOrThrow(), visitFunc)
+            case ASTKind.STR_INTERPOLATION_EXPR =>
+                CloneStrInterpolationExpr((source as StrInterpolationExpr).getOrThrow(), visitFunc)
+            case ASTKind.TRAIL_CLOSURE_EXPR =>
+                CloneTrailingClosureExpr((source as TrailingClosureExpr).getOrThrow(), visitFunc)
+            case ASTKind.IS_EXPR => CloneIsExpr((source as IsExpr).getOrThrow(), visitFunc)
+            case ASTKind.AS_EXPR => CloneAsExpr((source as AsExpr).getOrThrow(), visitFunc)
+            case ASTKind.OPTIONAL_EXPR => CloneOptionalExpr((source as OptionalExpr).getOrThrow(), visitFunc)
+            case ASTKind.OPTIONAL_CHAIN_EXPR =>
+                CloneOptionalChainExpr((source as OptionalChainExpr).getOrThrow(), visitFunc)
+            case ASTKind.WILDCARD_EXPR => WildcardExpr()
+            case ASTKind.LET_PATTERN_DESTRUCTOR =>
+                CloneLetPatternDestructor((source as LetPatternDestructor).getOrThrow(), visitFunc)
+            case ASTKind.IF_AVAILABLE_EXPR => CloneIfAvailableExpr((source as IfAvailableExpr).getOrThrow(), visitFunc)
+            case _ => InvalidExpr(source.begin)
+        }
+        if (clonedExpr.astKind != ASTKind.INVALID_EXPR) {
+            CopyNodeField(source, clonedExpr)
+            clonedExpr.isConst = source.isConst
+            clonedExpr.isBaseFunc = source.isBaseFunc
+            clonedExpr.isInFlowExpr = source.isInFlowExpr
+            clonedExpr.constNumValue.asInt.Assign(source.constNumValue.asInt)
+            clonedExpr.constNumValue.asFloat.value = source.constNumValue.asFloat.value
+            clonedExpr.constNumValue.asFloat.flowStatus = source.constNumValue.asFloat.flowStatus
+            clonedExpr.constNumValue.asBoolean = source.constNumValue.asBoolean
+            clonedExpr.hasSemi = source.hasSemi
+            clonedExpr.mapExpr = if (let Some(mapExpr) <- source.mapExpr) {
+                if (mapExpr == source) { clonedExpr } else { mapExpr }
+            } else {
+                None
+            }
+            clonedExpr.sourceExpr = source.sourceExpr
+            clonedExpr.overflowStrategy = source.overflowStrategy
+            if (source.desugarExpr.isSome() && clonedExpr.desugarExpr.isNone()) {
+                clonedExpr.desugarExpr = CloneExpr(source.desugarExpr, visitFunc)
+            }
+            clonedExpr.EnableAttr(Attribute.COMPILER_ADD)
+            visitFunc(source, clonedExpr)
+        }
+        return clonedExpr
     }
 
     private static func makeNode(node: Node): Node {
