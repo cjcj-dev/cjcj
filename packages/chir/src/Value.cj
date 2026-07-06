@@ -502,15 +502,33 @@ public class Block <: Value {
     }
 
     public func MoveTo(newBlockGroup: BlockGroup): Unit {
-        RemoveSelfFromBlockGroup()
+        if (let Some(group) <- parentGroup) {
+            group.RemoveBlock(this)
+            if (let Some(entry) <- group.GetEntryBlock()) {
+                if (refEq(entry, this)) {
+                    group.SetEntryBlock(None)
+                }
+            }
+        }
         newBlockGroup.AddBlock(this)
     }
 
     public func RemoveSelfFromBlockGroup(): Unit {
         if (let Some(group) <- parentGroup) {
             group.RemoveBlock(this)
+            if (let Some(entry) <- group.GetEntryBlock()) {
+                if (refEq(entry, this)) {
+                    group.SetEntryBlock(None)
+                }
+            }
         }
         parentGroup = None
+        ClearPredecessorsOnly()
+        ClearUsersOnly()
+        for (expr in GetExpressions()) {
+            expr.RemoveSelfFromBlock()
+        }
+        ClearExprsOnly()
     }
 
     public func RemoveExprOnly(expr: Expression): Unit {
@@ -542,14 +560,21 @@ public class Block <: Value {
         while (idx < predecessors.size) {
             if (refEq(predecessors[idx], block)) {
                 predecessors.remove(at: idx)
-                break
+                continue
             }
             idx++
+        }
+        if (let Some(term) <- block.GetTerminator()) {
+            RemoveUserOnly(term)
         }
     }
 
     public func ClearPredecessorsOnly(): Unit {
         predecessors.clear()
+    }
+
+    public func ClearExprsOnly(): Unit {
+        exprs.clear()
     }
 
     public func Clone(builder: CHIRBuilder, newGroup: BlockGroup): Block {
@@ -638,18 +663,23 @@ public class BlockGroup <: Value {
         return entryBlock
     }
 
-    public func SetEntryBlock(block: Block): Unit {
+    public func SetEntryBlock(block: Option<Block>): Unit {
+        if (let None <- block) {
+            entryBlock = None
+            return
+        }
+        let realBlock = block.getOrThrow()
         var hasBlock = false
         for (item in blocks) {
-            if (refEq(item, block)) {
+            if (refEq(item, realBlock)) {
                 hasBlock = true
                 break
             }
         }
         if (!hasBlock) {
-            AddBlock(block)
+            AddBlock(realBlock)
         }
-        entryBlock = block
+        entryBlock = realBlock
     }
 
     public func GetTopLevelFunc(): Option<Function> {
@@ -698,14 +728,9 @@ public class BlockGroup <: Value {
         while (idx < blocks.size) {
             if (refEq(blocks[idx], block)) {
                 blocks.remove(at: idx)
-                break
+                continue
             }
             idx++
-        }
-        if (let Some(entry) <- entryBlock) {
-            if (refEq(entry, block)) {
-                entryBlock = if (blocks.isEmpty()) { None } else { blocks[0] }
-            }
         }
     }
 

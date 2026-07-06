@@ -3,7 +3,7 @@ package cangjie_compiler::chir
 import std.collection.*
 
 import cangjie_compiler::utils.CJC_ASSERT
-import cangjie_compiler::option.GlobalOptions
+import cangjie_compiler::option.{GlobalOptions, OptimizationFlag}
 import cangjie_compiler::basic.Linkage as BasicLinkage
 import cangjie_compiler::ast.ASTKind
 import cangjie_compiler::ast.IsValidCFuncConstructorCall
@@ -46,6 +46,7 @@ import cangjie_compiler::ast.JumpExpr as AstJumpExpr
 import cangjie_compiler::ast.LambdaExpr as AstLambdaExpr
 import cangjie_compiler::ast.LetPatternDestructor as AstLetPatternDestructor
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
+import cangjie_compiler::ast.MatchCase as AstMatchCase
 import cangjie_compiler::ast.MainDecl as AstMainDecl
 import cangjie_compiler::ast.MatchExpr as AstMatchExpr
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
@@ -64,6 +65,7 @@ import cangjie_compiler::ast.SpawnExpr as AstSpawnExpr
 import cangjie_compiler::ast.StructDecl as AstStructDecl
 import cangjie_compiler::ast.StructTy as AstStructTy
 import cangjie_compiler::ast.SubscriptExpr as AstSubscriptExpr
+import cangjie_compiler::ast.SugarKind as AstSugarKind
 import cangjie_compiler::ast.TokenKind as AstTokenKind
 import cangjie_compiler::ast.TokenKindValue as AstTokenKindValue
 import cangjie_compiler::ast.Ty as AstTy
@@ -93,6 +95,24 @@ private class FaithfulLeftValueInfo {
             this.path.add(item)
         }
     }
+}
+
+private class SecondSwitchInfo {
+    public let ep: AstEnumPattern
+    public let caseId: Int64
+
+    public init(ep: AstEnumPattern, caseId: Int64) {
+        this.ep = ep
+        this.caseId = caseId
+    }
+}
+
+private class EnumMatchInfo {
+    public let indexToBodies: TreeMap<UInt64, TreeMap<UInt64, ArrayList<SecondSwitchInfo>>> =
+        TreeMap<UInt64, TreeMap<UInt64, ArrayList<SecondSwitchInfo>>>()
+    public let firstSwitchBlocks: TreeMap<UInt64, Block> = TreeMap<UInt64, Block>()
+    public let innerDefaultInfos: TreeMap<UInt64, ArrayList<SecondSwitchInfo>> =
+        TreeMap<UInt64, ArrayList<SecondSwitchInfo>>()
 }
 
 // Static member func and global func should create alloc node for print `unused variable` warning.
@@ -2045,13 +2065,18 @@ public class Translator {
 
     public func Visit(expr: AstMatchExpr): Option<Value> {
         let matchTy = chirTy.TranslateType(RequireAstTy(expr))
-        let resultLoc: Option<Value> = if (matchTy.IsUnit() || matchTy.IsNothing()) {
+        let resultLoc: Option<Value> = if (HasTypeOfNothing(expr) || matchTy.IsUnit() || matchTy.IsNothing()) {
             None
         } else {
             RequireResult(builder.CreateAllocate(builder.context.GetRefTy(matchTy), matchTy, CurrentBlock()))
         }
         if (expr.matchMode) {
-            TranslateMatchWithSelector(expr, resultLoc)
+            if (CanOptimizeMatchToSwitch(expr)) {
+                PrintDebugMessage(opts.chirDebugOptimizer, expr)
+                TranslateMatchAsTable(expr, resultLoc)
+            } else {
+                TranslateMatchWithSelector(expr, resultLoc)
+            }
         } else {
             TranslateConditionMatches(expr, resultLoc)
         }
@@ -3825,100 +3850,1006 @@ public class Translator {
         return BaseExceptionObjectType()
     }
 
-    private func TranslateMatchWithSelector(expr: AstMatchExpr, resultLoc: Option<Value>): Unit {
-        let selector = Translator.TranslateASTNode(RequireExpr(expr.selector, "match selector"), this) ??
-            throw IllegalStateException("faithful AST2CHIR match selector produced no value")
-        let group = RequireParentBlockGroup(CurrentBlock(), "match")
-        let endBlock = builder.CreateBlock(group)
-        var caseIndex: Int64 = 0
-        while (caseIndex < expr.matchCases.size) {
-            let matchCase = expr.matchCases[caseIndex]
-            let localScopeMark = localValSymbolTable.Mark()
-            let bodyBlock = builder.CreateBlock(group)
-            let nextBlock = builder.CreateBlock(group)
-            let matchedBlock = if (matchCase.patternGuard.isSome()) { builder.CreateBlock(group) } else { bodyBlock }
-            if (matchCase.patterns.size == 1) {
-                TranslateSinglePatternBranch(matchCase.patterns[0], selector, matchedBlock, nextBlock)
-                currentBlock = matchedBlock
-                BindPatternValues(matchCase.patterns[0], selector)
-            } else {
-                var patternIndex: Int64 = 0
-                while (patternIndex < matchCase.patterns.size) {
-                    let afterPattern = if (patternIndex == matchCase.patterns.size - 1) {
-                        nextBlock
-                    } else {
-                        builder.CreateBlock(group)
-                    }
-                    TranslateSinglePatternBranch(matchCase.patterns[patternIndex], selector, matchedBlock, afterPattern)
-                    currentBlock = afterPattern
-                    patternIndex++
-                }
-                currentBlock = matchedBlock
-            }
-            if (let Some(guardExpr) <- matchCase.patternGuard) {
-                let guardValue = Translator.TranslateASTNode(guardExpr, this) ??
-                    throw IllegalStateException("faithful AST2CHIR match pattern guard produced no value")
-                builder.CreateBranch(guardValue, bodyBlock, nextBlock, CurrentBlock())
-            }
-
-            currentBlock = bodyBlock
-            let bodyAstBlock = RequireBlock(matchCase.exprOrDecls, "match case body")
-            let bodyValue = Translator.TranslateASTNode(bodyAstBlock, this)
-            if (bodyBlock.GetTerminator().isNone()) {
-                builder.CreateGoTo(GetBlockByAST(bodyAstBlock), bodyBlock)
-            }
-            StoreIfResult(resultLoc, bodyValue)
-            if (CurrentBlock().GetTerminator().isNone()) {
-                builder.CreateGoTo(endBlock, CurrentBlock())
-            }
-
-            localValSymbolTable.Restore(localScopeMark)
-            currentBlock = nextBlock
-            caseIndex++
+    private func CanOptimizeMatchToSwitch(matchExpr: AstMatchExpr): Bool {
+        if (!opts.IsOptimizationExisted(OptimizationFlag.SWITCH_OPT)) {
+            return false
         }
-        if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateGoTo(endBlock, CurrentBlock())
+        if (matchExpr.matchCases.size <= 1 ||
+            matchExpr.matchCases[0].patterns[0].astKind == ASTKind.WILDCARD_PATTERN) {
+            return false
+        }
+        let selectorTy = RequireAstTy(RequireExpr(matchExpr.selector, "match selector"))
+        let validSelectorTy = IsOptimizableTy(selectorTy) || (selectorTy.IsEnum() && IsOptimizableEnumTy(selectorTy))
+        if (!validSelectorTy) {
+            return false
+        }
+        for (curCase in matchExpr.matchCases) {
+            if (curCase.patternGuard.isSome()) {
+                return false
+            }
+            for (curPattern in curCase.patterns) {
+                if (curPattern.astKind == ASTKind.WILDCARD_PATTERN) {
+                    return true
+                }
+                if (curPattern.astKind == ASTKind.CONST_PATTERN) {
+                    continue
+                }
+                let varOrEnumPattern = curPattern as AstVarOrEnumPattern
+                let realPatternKind = if (let Some(vep) <- varOrEnumPattern) {
+                    RequirePattern(vep.pattern, "var-or-enum pattern").astKind
+                } else {
+                    curPattern.astKind
+                }
+                if (realPatternKind != ASTKind.ENUM_PATTERN) {
+                    return false
+                }
+                if (varOrEnumPattern.isSome()) {
+                    continue
+                }
+                let enumPattern = (curPattern as AstEnumPattern) ??
+                    throw IllegalStateException("faithful AST2CHIR optimizable match expected enum pattern")
+                if (enumPattern.patterns.isEmpty()) {
+                    continue
+                }
+                let firstParamKind = enumPattern.patterns[0].astKind
+                if (firstParamKind == ASTKind.WILDCARD_PATTERN || firstParamKind == ASTKind.CONST_PATTERN) {
+                    continue
+                }
+                return false
+            }
+        }
+        return true
+    }
+
+    private func PrintDebugMessage(isDebug: Bool, node: AstNode): Unit {
+        if (!isDebug) {
+            return
+        }
+        let fileStr = " file: " + (if (let Some(file) <- node.curFile) {
+            file.fileName
+        } else {
+            node.begin.fileID.toString()
+        })
+        let message = "The matchExpr in the" + fileStr + " line:" + node.begin.line.toString() +
+            " and the column:" + node.begin.column.toString() + " was optimized by The opt: switchOpt"
+        println(message)
+    }
+
+    private func HasTypeOfNothing(matchExpr: AstMatchExpr): Bool {
+        if (matchExpr.matchMode) {
+            for (matchCase in matchExpr.matchCases) {
+                if (!RequireAstTy(matchCase).IsNothing()) {
+                    return false
+                }
+            }
+            return true
+        }
+        for (matchCase in matchExpr.matchCaseOthers) {
+            if (!RequireAstTy(matchCase).IsNothing()) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func GetSourceExprByMatchExpr(matchExpr: AstMatchExpr): SourceExpr {
+        return match (matchExpr.sugarKind) {
+            case AstSugarKind.QUEST => SourceExpr.QUEST
+            case _ => SourceExpr.MATCH_EXPR
+        }
+    }
+
+    private func TranslateMatchWithSelector(matchExpr: AstMatchExpr, retVal: Option<Value>): Unit {
+        let selectorVal = Translator.TranslateASTNode(RequireExpr(matchExpr.selector, "match selector"), this) ??
+            throw IllegalStateException("faithful AST2CHIR match selector produced no value")
+        SetSkipPrintWarning(selectorVal)
+        let endBlock = CreateBlock()
+        let caseNum = matchExpr.matchCases.size
+        let needScope = match (matchExpr.sugarKind) {
+            case AstSugarKind.IS | AstSugarKind.AS => false
+            case _ => true
+        }
+        if (needScope) {
+            scopeInfo.add(-1)
+        }
+        let originLoc = TranslateLocation(matchExpr)
+        let sourceExpr = GetSourceExprByMatchExpr(matchExpr)
+        var caseIdx: Int64 = 0
+        while (caseIdx < caseNum) {
+            let localScopeMark = localValSymbolTable.Mark()
+            if (needScope) {
+                scopeInfo[scopeInfo.size - 1] = scopeInfo[scopeInfo.size - 1] + 1
+            }
+            let current = matchExpr.matchCases[caseIdx]
+            let (falseBlock, matchedBlock) = if (current.patterns.size == 1) {
+                TranslateNestingCasePattern(current.patterns[0], selectorVal, originLoc, sourceExpr: sourceExpr)
+            } else {
+                TranslateOrPattern(current.patterns, selectorVal, originLoc)
+            }
+            var trueBlock = matchedBlock
+            trueBlock = TranslatePatternGuard(current, falseBlock, trueBlock)
+            if (sourceExpr == SourceExpr.QUEST && caseIdx == 0) {
+                CJC_ASSERT(caseNum == 2)
+                let secondBody = RequireBlock(matchExpr.matchCases[1].exprOrDecls, "question match second body")
+                if (!secondBody.body.isEmpty()) {
+                    let loc1 = TranslateLocation(secondBody.body[0].begin, secondBody.body[secondBody.body.size - 1].end)
+                    falseBlock.SetDebugLocation(loc1)
+                }
+                CJC_ASSERT(trueBlock.GetPredecessors().size == 1)
+                let loc2 = TranslateLocation(matchExpr.matchCases[0])
+                trueBlock.GetPredecessors()[0].SetDebugLocation(loc2)
+            }
+            let currentBody = TranslateMatchCaseBody(RequireBlock(current.exprOrDecls, "match case body"), retVal,
+                endBlock)
+            builder.CreateGoTo(currentBody, trueBlock)
+            localValSymbolTable.Restore(localScopeMark)
+            if (caseIdx == caseNum - 1) {
+                builder.CreateGoTo(endBlock, falseBlock)
+                falseBlock.EnableAttr(Attribute.UNREACHABLE)
+            } else {
+                currentBlock = falseBlock
+            }
+            caseIdx++
+        }
+        if (needScope) {
+            scopeInfo.remove(at: scopeInfo.size - 1)
         }
         currentBlock = endBlock
     }
 
-    private func TranslateConditionMatches(expr: AstMatchExpr, resultLoc: Option<Value>): Unit {
-        let group = RequireParentBlockGroup(CurrentBlock(), "condition match")
-        let endBlock = builder.CreateBlock(group)
-        var caseIndex: Int64 = 0
-        while (caseIndex < expr.matchCaseOthers.size) {
-            let matchCase = expr.matchCaseOthers[caseIndex]
-            let bodyBlock = builder.CreateBlock(group)
-            let nextBlock = builder.CreateBlock(group)
-            if (let Some(condExpr) <- matchCase.matchExpr) {
-                if (condExpr.astKind == ASTKind.WILDCARD_EXPR) {
-                    builder.CreateGoTo(bodyBlock, CurrentBlock())
-                } else {
-                    let condValue = Translator.TranslateASTNode(condExpr, this) ??
-                        throw IllegalStateException("faithful AST2CHIR condition match case produced no value")
-                    builder.CreateBranch(condValue, bodyBlock, nextBlock, CurrentBlock())
-                }
-            } else {
-                builder.CreateGoTo(bodyBlock, CurrentBlock())
-            }
-
-            currentBlock = bodyBlock
-            let bodyAstBlock = RequireBlock(matchCase.exprOrDecls, "condition match body")
-            let bodyValue = Translator.TranslateASTNode(bodyAstBlock, this)
-            if (bodyBlock.GetTerminator().isNone()) {
-                builder.CreateGoTo(GetBlockByAST(bodyAstBlock), bodyBlock)
-            }
-            StoreIfResult(resultLoc, bodyValue)
-            if (CurrentBlock().GetTerminator().isNone()) {
-                builder.CreateGoTo(endBlock, CurrentBlock())
-            }
-            currentBlock = nextBlock
-            caseIndex++
+    private func TranslatePatternGuard(matchCase: AstMatchCase, falseBlock: Block, trueBlock: Block): Block {
+        if (matchCase.patternGuard.isNone()) {
+            return trueBlock
         }
+        currentBlock = trueBlock
+        let newTrueBlock = CreateBlock()
+        let cond = Translator.TranslateASTNode(RequireExpr(matchCase.patternGuard, "match pattern guard"), this) ??
+            throw IllegalStateException("faithful AST2CHIR match pattern guard produced no value")
+        builder.CreateBranch(cond, newTrueBlock, falseBlock, CurrentBlock())
+        return newTrueBlock
+    }
+
+    private func TranslateMatchCaseBody(caseBody: AstBlock, retVal: Option<Value>, endBlock: Block): Block {
+        let loc = if (caseBody.rightCurlPos.IsZero()) {
+            if (caseBody.body.isEmpty()) {
+                TranslateLocation(caseBody.end, caseBody.end)
+            } else {
+                TranslateLocation(caseBody.body[caseBody.body.size - 1])
+            }
+        } else {
+            TranslateLocation(caseBody)
+        }
+        TranslateSubExprToLoc(caseBody, retVal, loc)
+        let currentBody = GetBlockByAST(caseBody)
         if (CurrentBlock().GetTerminator().isNone()) {
             builder.CreateGoTo(endBlock, CurrentBlock())
         }
+        return currentBody
+    }
+
+    private func GetConstPatternVal(constPattern: AstConstPattern): UInt64 {
+        let litExpr = (RequireExpr(constPattern.literal, "const pattern literal") as AstLitConstExpr) ??
+            throw IllegalStateException("faithful AST2CHIR const pattern literal is not LitConstExpr")
+        let ty = RequireAstTy(litExpr)
+        if (ty.IsSignedInteger()) {
+            return IntLiteral(litExpr.constNumValue.asInt.`Int64`()).GetUnsignedVal()
+        }
+        if (ty.IsUnsignedInteger()) {
+            return litExpr.constNumValue.asInt.Uint64()
+        }
+        if (ty.IsRune()) {
+            return UInt64(litExpr.codepoint[0])
+        }
+        if (ty.IsBoolean()) {
+            return if (litExpr.constNumValue.asBoolean) { 1u64 } else { 0u64 }
+        }
+        throw IllegalArgumentException("unsupported const pattern type: ${ty.String()}")
+    }
+
+    private func GetRealEnumPattern(pattern: AstPattern): AstEnumPattern {
+        CJC_ASSERT(pattern.astKind == ASTKind.VAR_OR_ENUM_PATTERN || pattern.astKind == ASTKind.ENUM_PATTERN)
+        if (let Some(varOrEnumPattern) <- (pattern as AstVarOrEnumPattern)) {
+            return (RequirePattern(varOrEnumPattern.pattern, "var-or-enum enum pattern") as AstEnumPattern) ??
+                throw IllegalStateException("faithful AST2CHIR var-or-enum does not contain enum pattern")
+        }
+        return (pattern as AstEnumPattern) ??
+            throw IllegalStateException("faithful AST2CHIR expected enum pattern")
+    }
+
+    private func IsOptimizableEnumPatterns(patterns: ArrayList<AstPattern>): Bool {
+        for (pattern in patterns) {
+            CJC_ASSERT(pattern.astKind == ASTKind.VAR_OR_ENUM_PATTERN || pattern.astKind == ASTKind.ENUM_PATTERN)
+            if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
+                for (subPattern in enumPattern.patterns) {
+                    if (subPattern.astKind != ASTKind.WILDCARD_PATTERN) {
+                        return false
+                    }
+                }
+            }
+        }
+        return true
+    }
+
+    private func GetEnumPatternID(enumPattern: AstEnumPattern): UInt64 {
+        return UInt64(GetEnumCtorId(RequireEnumPatternConstructor(enumPattern)))
+    }
+
+    private func TranslateOrPattern(patterns: ArrayList<AstPattern>, selectorVal: Value,
+        originLoc: DebugLocation): (Block, Block) {
+        CJC_ASSERT(patterns.size > 1)
+        let patternKind = patterns[0].astKind
+        if (patternKind == ASTKind.WILDCARD_PATTERN) {
+            let trueBlock = CreateBlock()
+            builder.CreateGoTo(trueBlock, CurrentBlock())
+            return (CreateBlock(), trueBlock)
+        }
+        if (patternKind == ASTKind.CONST_PATTERN) {
+            let patternTy = RequireAstTy(patterns[0])
+            if (patternTy.IsString() || patternTy.IsFloating()) {
+                return TranslateComplicatedOrPattern(patterns, selectorVal, originLoc)
+            }
+            if (patternTy.IsUnit()) {
+                let trueBlock = CreateBlock()
+                builder.CreateGoTo(trueBlock, CurrentBlock())
+                return (CreateBlock(), trueBlock)
+            }
+            let values = TreeSet<UInt64>()
+            for (pattern in patterns) {
+                values.add(GetConstPatternVal((pattern as AstConstPattern) ??
+                    throw IllegalStateException("faithful AST2CHIR or-pattern expected const pattern")))
+            }
+            let out = ArrayList<UInt64>()
+            for (value in values) {
+                out.add(value)
+            }
+            return TranslateConstantMultiOr(out, selectorVal)
+        }
+        if (patternKind == ASTKind.TUPLE_PATTERN || patternKind == ASTKind.TYPE_PATTERN) {
+            return TranslateComplicatedOrPattern(patterns, selectorVal, originLoc)
+        }
+        CJC_ASSERT(patternKind == ASTKind.VAR_OR_ENUM_PATTERN || patternKind == ASTKind.ENUM_PATTERN)
+        if (IsOptimizableEnumPatterns(patterns)) {
+            let values = TreeSet<UInt64>()
+            for (pattern in patterns) {
+                values.add(GetEnumPatternID(GetRealEnumPattern(pattern)))
+            }
+            let out = ArrayList<UInt64>()
+            for (value in values) {
+                out.add(value)
+            }
+            return TranslateConstantMultiOr(out, GetEnumIDValue(RequireAstTy(patterns[0]), selectorVal))
+        }
+        return TranslateComplicatedOrPattern(patterns, selectorVal, originLoc)
+    }
+
+    private func GetEnumIDValue(ty: AstTy, selectorVal: Value): Value {
+        CJC_ASSERT(ty.kind == AstTypeKind.TYPE_ENUM)
+        let enumDecl = ((AstTy.GetDeclOfTy(Some(ty)) ??
+            throw IllegalStateException("faithful AST2CHIR enum type has no enum decl")) as AstEnumDecl) ??
+            throw IllegalStateException("faithful AST2CHIR enum type has no enum decl")
+        let enumTy = (ty as AstEnumTy) ??
+            throw IllegalStateException("faithful AST2CHIR enum selector ty is not EnumTy")
+        let selectorType = GetSelectorType(enumTy)
+        if (!enumDecl.hasArguments) {
+            return CreateWrappedTypeCast(selectorType, GetDerefedValue(selectorVal), CurrentBlock())
+        }
+        let path = ArrayList<UInt64>()
+        path.add(0u64)
+        return RequireResult(builder.CreateField(selectorType, selectorVal, path, CurrentBlock()))
+    }
+
+    private func TranslateConstantMultiOr(values: ArrayList<UInt64>, value: Value): (Block, Block) {
+        let falseBlock = CreateBlock()
+        let trueBlock = CreateBlock()
+        let succs = ArrayList<Block>()
+        for (_ in values) {
+            succs.add(trueBlock)
+        }
+        builder.CreateMultiBranch(TypeCastOrBoxIfNeeded(value, builder.context.GetUInt64Ty(), value.GetDebugLocation(),
+            needCheck: false), falseBlock, values, succs, CurrentBlock())
+        return (falseBlock, trueBlock)
+    }
+
+    private func TranslateComplicatedOrPattern(patterns: ArrayList<AstPattern>, selectorVal: Value,
+        originLoc: DebugLocation): (Block, Block) {
+        CJC_ASSERT(patterns.size > 1)
+        let trueBlock = CreateBlock()
+        for (pattern in patterns) {
+            let (innerFalse, innerTrue) = TranslateNestingCasePattern(pattern, selectorVal, originLoc)
+            builder.CreateGoTo(trueBlock, innerTrue)
+            currentBlock = innerFalse
+        }
+        return (CurrentBlock(), trueBlock)
+    }
+
+    private func DispatchingPattern(queue: ArrayList<(AstPattern, Value)>, finalMatchedBlock: Block,
+        nextConditionBlock: Block, originLoc: DebugLocation): Option<Value> {
+        let (pattern, value) = queue[0]
+        queue.remove(at: 0)
+        if (pattern.astKind == ASTKind.VAR_OR_ENUM_PATTERN) {
+            let varOrEnumPattern = (pattern as AstVarOrEnumPattern) ??
+                throw IllegalStateException("faithful AST2CHIR expected var-or-enum pattern")
+            queue.add((RequirePattern(varOrEnumPattern.pattern, "var-or-enum pattern"), value))
+            return None
+        }
+        if (pattern.astKind == ASTKind.VAR_PATTERN) {
+            HandleVarPattern((pattern as AstVarPattern) ??
+                throw IllegalStateException("faithful AST2CHIR expected var pattern"), value, finalMatchedBlock)
+            return None
+        }
+        if (pattern.astKind == ASTKind.WILDCARD_PATTERN) {
+            return None
+        }
+        if (pattern.astKind == ASTKind.TUPLE_PATTERN) {
+            CollectingSubPatterns(RequireAstTy(pattern),
+                ((pattern as AstTuplePattern) ??
+                    throw IllegalStateException("faithful AST2CHIR expected tuple pattern")).patterns, value, queue)
+            return None
+        }
+        if (pattern.astKind == ASTKind.ENUM_PATTERN) {
+            return HandleEnumPattern((pattern as AstEnumPattern) ??
+                throw IllegalStateException("faithful AST2CHIR expected enum pattern"), value, queue,
+                nextConditionBlock, originLoc)
+        }
+        if (pattern.astKind == ASTKind.TYPE_PATTERN) {
+            return HandleTypePattern((pattern as AstTypePattern) ??
+                throw IllegalStateException("faithful AST2CHIR expected type pattern"), value, queue)
+        }
+        if (pattern.astKind == ASTKind.CONST_PATTERN) {
+            return HandleConstPattern((pattern as AstConstPattern) ??
+                throw IllegalStateException("faithful AST2CHIR expected const pattern"), value, originLoc)
+        }
+        throw IllegalArgumentException("translating unsupported pattern: ${ASTKindName(pattern.astKind)}")
+    }
+
+    private func TranslateNestingCasePattern(pattern: AstPattern, selectorVal: Value, originLoc: DebugLocation,
+        sourceExpr!: SourceExpr = SourceExpr.MATCH_EXPR): (Block, Block) {
+        let falseBlock = CreateBlock()
+        let trueBlock = CreateBlock()
+        let queue = ArrayList<(AstPattern, Value)>()
+        queue.add((pattern, selectorVal))
+        var newBlock = CreateBlock()
+        let patternLoc = TranslateLocation(pattern)
+        if (sourceExpr != SourceExpr.QUEST) {
+            CurrentBlock().SetDebugLocation(patternLoc)
+        }
+        while (!queue.isEmpty()) {
+            let cond = DispatchingPattern(queue, trueBlock, newBlock, originLoc)
+            if (let Some(condValue) <- cond) {
+                let nextBlock = if (queue.isEmpty()) { trueBlock } else { newBlock }
+                if (sourceExpr != SourceExpr.QUEST) {
+                    nextBlock.SetDebugLocation(patternLoc)
+                }
+                CreateWrappedBranch(sourceExpr, GetDerefedValue(condValue), nextBlock, falseBlock, CurrentBlock())
+                currentBlock = nextBlock
+                if (!queue.isEmpty()) {
+                    newBlock = CreateBlock()
+                }
+            } else if (queue.isEmpty()) {
+                if (sourceExpr != SourceExpr.QUEST) {
+                    CurrentBlock().SetDebugLocation(patternLoc)
+                }
+                builder.CreateGoTo(trueBlock, CurrentBlock())
+            }
+        }
+        newBlock.RemoveSelfFromBlockGroup()
+        return (falseBlock, trueBlock)
+    }
+
+    private func CollectingSubPatterns(patternTy: AstTy, patterns: ArrayList<AstPattern>, value: Value,
+        queue: ArrayList<(AstPattern, Value)>, offset!: Int64 = 0): Unit {
+        if (patterns.isEmpty()) {
+            return
+        }
+        let indexes = ArrayList<UInt64>()
+        let funcTy = patternTy as AstFuncTy
+        let isEnumField = funcTy.isSome()
+        let typeArgs = if (let Some(realFuncTy) <- funcTy) {
+            realFuncTy.paramTys
+        } else {
+            patternTy.typeArgs
+        }
+        CJC_ASSERT(typeArgs.size == patterns.size)
+        var index: Int64 = 0
+        while (index < patterns.size) {
+            indexes.add(UInt64(index + offset))
+            collectRecursively(patterns[index], typeArgs[index], value, queue, indexes, isEnumField)
+            indexes.remove(at: indexes.size - 1)
+            index++
+        }
+    }
+
+    private func collectRecursively(pattern: AstPattern, ty: AstTy, value: Value,
+        queue: ArrayList<(AstPattern, Value)>, indexes: ArrayList<UInt64>, isEnumField: Bool): Unit {
+        if (pattern.astKind == ASTKind.WILDCARD_PATTERN) {
+            queue.add((pattern, value))
+            return
+        }
+        let tuplePattern = pattern as AstTuplePattern
+        if (tuplePattern.isNone() || isEnumField) {
+            let elementAstTy = if (ty.HasGeneric()) { RequireAstTy(pattern) } else { ty }
+            let elementTy = chirTy.TranslateType(elementAstTy)
+            let elementVal = RequireResult(builder.CreateField(elementTy, value, indexes, CurrentBlock()))
+            queue.add((pattern, elementVal))
+            return
+        }
+        let realTuplePattern = tuplePattern.getOrThrow()
+        var idx: Int64 = 0
+        while (idx < realTuplePattern.patterns.size) {
+            indexes.add(UInt64(idx))
+            collectRecursively(realTuplePattern.patterns[idx], RequireAstTy(realTuplePattern).typeArgs[idx], value,
+                queue, indexes, isEnumField)
+            indexes.remove(at: indexes.size - 1)
+            idx++
+        }
+    }
+
+    private func HandleVarPattern(varPattern: AstVarPattern, value: Value, trueBlock: Block): Unit {
+        let backupBlock = CurrentBlock()
+        currentBlock = trueBlock
+        var val = if (varPattern.desugarExpr.isSome()) { GetDerefedValue(value) } else { value }
+        let varType = chirTy.TranslateType(RequireAstTy(varPattern))
+        let loc = TranslateLocation(varPattern)
+        let varDecl = varPattern.varDecl ??
+            throw IllegalStateException("faithful AST2CHIR VarPattern has no VarDecl")
+        if (opts.enableCompileDebug || opts.enableCoverage) {
+            let alloca = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(varType), varType, trueBlock))
+            if (!varDecl.TestAttr(AstAttribute.COMPILER_ADD)) {
+                alloca.SetSrcCodeIdentifier(varDecl.identifier.Val())
+                let debugInfo = builder.CreateDebug(builder.context.GetUnitTy(), alloca, varDecl.identifier.Val(),
+                    trueBlock)
+                debugInfo.SetDebugLocation(loc)
+            }
+            CreateAndAppendWrappedStore(val, alloca, trueBlock, loc)
+            val = RequireResult(builder.CreateLoad(varType, alloca, trueBlock))
+        } else {
+            val = TypeCastOrBoxIfNeeded(val, varType, loc)
+        }
+        val.EnableAttr(Attribute.READONLY)
+        currentBlock = backupBlock
+        if (let Some(desugarExpr) <- varPattern.desugarExpr) {
+            SetExprValue(desugarExpr, val)
+        } else {
+            SetSymbolTable(varDecl, val)
+        }
+    }
+
+    private func HandleEnumPattern(enumPattern: AstEnumPattern, value: Value, queue: ArrayList<(AstPattern, Value)>,
+        trueBlock: Block, originLoc: DebugLocation): Value {
+        let enumIdx = GetEnumIDValue(RequireAstTy(enumPattern), value)
+        let selectorTy = GetSelectorType((RequireAstTy(enumPattern) as AstEnumTy) ??
+            throw IllegalStateException("faithful AST2CHIR enum pattern type is not EnumTy"))
+        let enumId = GetEnumPatternID(enumPattern)
+        let idValue = if (selectorTy.IsBoolean()) {
+            RequireResult(builder.CreateConstant(selectorTy, BoolLiteral(enumId != 0u64), CurrentBlock()))
+        } else {
+            RequireResult(builder.CreateConstant(selectorTy, IntLiteral(enumId), CurrentBlock()))
+        }
+        let cond = RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), enumIdx,
+            idValue, CurrentBlock()))
+        cond.SetDebugLocation(originLoc)
+        let backBlock = CurrentBlock()
+        currentBlock = trueBlock
+        var enumValue = value
+        if (!enumPattern.patterns.isEmpty()) {
+            enumValue = CastEnumValueToConstructorTupleType(enumValue, enumPattern)
+        }
+        CollectingSubPatterns(RequireAstTy(RequireExpr(enumPattern.constructor, "enum pattern constructor")),
+            enumPattern.patterns, enumValue, queue, offset: 1)
+        currentBlock = backBlock
+        return cond
+    }
+
+    private func GetSelectorType(ty: AstEnumTy): Type {
+        let enumDecl = ty.decl ??
+            throw IllegalStateException("faithful AST2CHIR enum ty has no decl")
+        return if (IsOptionLikeEnumDecl(enumDecl)) {
+            builder.context.GetBoolTy()
+        } else {
+            builder.context.GetUInt32Ty()
+        }
+    }
+
+    private func HandleConstPattern(constPattern: AstConstPattern, value: Value, originLoc: DebugLocation): Value {
+        if (constPattern.operatorCallExpr.isNone()) {
+            let litVal = Translator.TranslateASTNode(RequireExpr(constPattern.literal, "const pattern literal"), this) ??
+                throw IllegalStateException("faithful AST2CHIR const pattern literal produced no value")
+            SetSkipPrintWarning(litVal)
+            let cond = RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), value,
+                litVal, CurrentBlock()))
+            cond.SetDebugLocation(originLoc)
+            return cond
+        }
+        let operatorCallExpr = constPattern.operatorCallExpr.getOrThrow()
+        let base = ConstPatternOperatorBase(operatorCallExpr)
+        SetExprValue(base, value)
+        return Translator.TranslateASTNode(operatorCallExpr, this) ??
+            throw IllegalStateException("faithful AST2CHIR const pattern operator call produced no value")
+    }
+
+    private func HandleTypePattern(typePattern: AstTypePattern, value: Value,
+        queue: ArrayList<(AstPattern, Value)>): Option<Value> {
+        let innerPattern = RequirePattern(typePattern.pattern, "type pattern inner")
+        if (typePattern.matchBeforeRuntime) {
+            if (let Some(desugarExpr) <- typePattern.desugarExpr) {
+                let desugarVarPattern = typePattern.desugarVarPattern ??
+                    throw IllegalStateException("faithful AST2CHIR type pattern missing desugar var pattern")
+                let desugarVarDecl = desugarVarPattern.varDecl ??
+                    throw IllegalStateException("faithful AST2CHIR type pattern missing desugar var decl")
+                SetSymbolTable(desugarVarDecl, value)
+                let newVal = Translator.TranslateASTNode(desugarExpr, this) ??
+                    throw IllegalStateException("faithful AST2CHIR type pattern desugar produced no value")
+                queue.add((innerPattern, newVal))
+            } else if (innerPattern.astKind == ASTKind.VAR_PATTERN) {
+                queue.add((innerPattern, value))
+            }
+            return None
+        }
+        let typeNode = typePattern.typeNode ??
+            throw IllegalStateException("faithful AST2CHIR type pattern has no type node")
+        let targetTy = chirTy.TranslateType(RequireAstTy(typeNode))
+        queue.add((innerPattern, value))
+        if (typePattern.needRuntimeTypeCheck) {
+            return RequireResult(builder.CreateInstanceOf(builder.context.GetBoolTy(), value, targetTy, CurrentBlock()))
+        }
+        return RequireResult(builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(false), CurrentBlock()))
+    }
+
+    private func TranslateConditionMatches(matchExpr: AstMatchExpr, retVal: Option<Value>): Unit {
+        let endBlock = CreateBlock()
+        var isStillReachable = true
+        let caseSize = matchExpr.matchCaseOthers.size
+        scopeInfo.add(-1)
+        var idx: Int64 = 0
+        while (idx < caseSize) {
+            scopeInfo[scopeInfo.size - 1] = scopeInfo[scopeInfo.size - 1] + 1
+            let current = matchExpr.matchCaseOthers[idx]
+            let localScopeMark = localValSymbolTable.Mark()
+            let baseBlock = CurrentBlock()
+            let currentBody = TranslateMatchCaseBody(RequireBlock(current.exprOrDecls, "condition match body"),
+                retVal, endBlock)
+            localValSymbolTable.Restore(localScopeMark)
+            if (!isStillReachable) {
+                idx++
+                continue
+            }
+            let matchCaseExpr = RequireExpr(current.matchExpr, "condition match expr")
+            if (matchCaseExpr.astKind == ASTKind.WILDCARD_EXPR) {
+                builder.CreateGoTo(currentBody, baseBlock)
+                isStillReachable = false
+            } else {
+                currentBlock = baseBlock
+                let nextBlock = CreateBlock()
+                let cond = Translator.TranslateASTNode(matchCaseExpr, this) ??
+                    throw IllegalStateException("faithful AST2CHIR condition match case produced no value")
+                builder.CreateBranch(cond, currentBody, nextBlock, CurrentBlock())
+                currentBlock = nextBlock
+                if (idx == caseSize - 1) {
+                    CurrentBlock().EnableAttr(Attribute.UNREACHABLE)
+                }
+            }
+            idx++
+        }
+        scopeInfo.remove(at: scopeInfo.size - 1)
         currentBlock = endBlock
+    }
+
+    private func WithoutEnumSubPattern(matchExpr: AstMatchExpr): Bool {
+        for (curCase in matchExpr.matchCases) {
+            for (subPattern in curCase.patterns) {
+                if (subPattern.astKind != ASTKind.ENUM_PATTERN) {
+                    continue
+                }
+                let enumPattern = (subPattern as AstEnumPattern) ??
+                    throw IllegalStateException("faithful AST2CHIR expected enum pattern")
+                if (!enumPattern.patterns.isEmpty()) {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    private func GetJumpablePatternVal(pattern: AstPattern): UInt64 {
+        CJC_ASSERT(pattern.astKind == ASTKind.CONST_PATTERN || pattern.astKind == ASTKind.VAR_OR_ENUM_PATTERN ||
+            pattern.astKind == ASTKind.ENUM_PATTERN)
+        if (let Some(constPattern) <- (pattern as AstConstPattern)) {
+            return GetConstPatternVal(constPattern)
+        }
+        return GetEnumPatternID(GetRealEnumPattern(pattern))
+    }
+
+    private func IsOptimizableTy(ty: AstTy): Bool {
+        return ty.IsInteger() || ty.IsRune()
+    }
+
+    private func IsOptimizableEnumTy(ty: AstTy): Bool {
+        CJC_ASSERT(ty.IsEnum())
+        let enumTy = (ty as AstEnumTy) ??
+            throw IllegalStateException("faithful AST2CHIR enum ty is not EnumTy")
+        if (GetSelectorType(enumTy).IsBoolean()) {
+            return false
+        }
+        let enumDecl = ((AstTy.GetDeclOfTy(Some(ty)) ??
+            throw IllegalStateException("faithful AST2CHIR enum type has no enum decl")) as AstEnumDecl) ??
+            throw IllegalStateException("faithful AST2CHIR enum type has no enum decl")
+        if (enumDecl.hasEllipsis) {
+            return false
+        }
+        for (ctor in enumDecl.constructors) {
+            if (let Some(ctorTy) <- ctor.GetTy()) {
+                if (let Some(funcTy) <- (ctorTy as AstFuncTy)) {
+                    CJC_ASSERT(!funcTy.paramTys.isEmpty())
+                    if (!IsOptimizableTy(funcTy.paramTys[0])) {
+                        return false
+                    }
+                }
+            }
+        }
+        return true
+    }
+
+    private func TranslateMatchAsTable(matchExpr: AstMatchExpr, retVal: Option<Value>): Unit {
+        let selectorTy = RequireAstTy(RequireExpr(matchExpr.selector, "match selector"))
+        let selectorVal = Translator.TranslateASTNode(RequireExpr(matchExpr.selector, "match selector"), this) ??
+            throw IllegalStateException("faithful AST2CHIR match selector produced no value")
+        SetSkipPrintWarning(selectorVal)
+        var enumDecl: Option<AstEnumDecl> = None
+        if (let Some(decl) <- AstTy.GetDeclOfTy(Some(selectorTy))) {
+            enumDecl = decl as AstEnumDecl
+        }
+        if (let None <- enumDecl) {
+            TranslateTrivialMatchAsTable(matchExpr, selectorVal, retVal, 0)
+        } else if (!enumDecl.getOrThrow().hasArguments || WithoutEnumSubPattern(matchExpr)) {
+            TranslateTrivialMatchAsTable(matchExpr, GetEnumIDValue(selectorTy, selectorVal), retVal,
+                enumDecl.getOrThrow().constructors.size)
+        } else {
+            TranslateEnumPatternMatchAsTable(matchExpr, selectorVal, retVal)
+        }
+    }
+
+    private func TranslateTrivialMatchAsTable(matchExpr: AstMatchExpr, selectorVal: Value, retVal: Option<Value>,
+        countOfPatterns: Int64): Unit {
+        let indexToBodies = TreeMap<UInt64, Block>()
+        let baseBlock = CurrentBlock()
+        let endBlock = CreateBlock()
+        var defaultBlock = endBlock
+        var isStillReachable = true
+        scopeInfo.add(-1)
+        for (curCase in matchExpr.matchCases) {
+            scopeInfo[scopeInfo.size - 1] = scopeInfo[scopeInfo.size - 1] + 1
+            let currentBody = TranslateMatchCaseBody(RequireBlock(curCase.exprOrDecls, "match case body"), retVal,
+                endBlock)
+            CJC_ASSERT(!curCase.patterns.isEmpty())
+            if (!isStillReachable) {
+                continue
+            }
+            if (curCase.patterns[0].astKind == ASTKind.WILDCARD_PATTERN) {
+                defaultBlock = currentBody
+                defaultBlock.SetDebugLocation(TranslateLocation(curCase.patterns[0]))
+                isStillReachable = false
+                continue
+            }
+            for (pattern in curCase.patterns) {
+                let patternVal = GetJumpablePatternVal(pattern)
+                currentBody.SetDebugLocation(TranslateLocation(pattern))
+                if (indexToBodies.contains(patternVal)) {
+                    continue
+                }
+                indexToBodies[patternVal] = currentBody
+                CJC_ASSERT(!indexToBodies.isEmpty())
+                if (Int64(indexToBodies.size) == countOfPatterns) {
+                    isStillReachable = false
+                }
+            }
+        }
+        scopeInfo.remove(at: scopeInfo.size - 1)
+        let indexes = ArrayList<UInt64>()
+        let blocks = ArrayList<Block>()
+        for (key in indexToBodies.keys()) {
+            indexes.add(key)
+            blocks.add(indexToBodies.get(key).getOrThrow())
+        }
+        if (refEq(defaultBlock, endBlock)) {
+            defaultBlock = blocks[0]
+        }
+        currentBlock = baseBlock
+        let targetType = if (let Some(enumTy) <- (RequireAstTy(RequireExpr(matchExpr.selector, "match selector")) as
+            AstEnumTy)) {
+            GetSelectorType(enumTy)
+        } else {
+            builder.context.GetUInt64Ty()
+        }
+        let castedVal = TypeCastOrBoxIfNeeded(selectorVal, targetType, selectorVal.GetDebugLocation(),
+            needCheck: false)
+        let term = builder.CreateMultiBranch(castedVal, defaultBlock, indexes, blocks, baseBlock)
+        term.SetDebugLocation(TranslateLocation(matchExpr))
+        currentBlock = endBlock
+    }
+
+    private func TranslateEnumPatternMatchAsTable(matchExpr: AstMatchExpr, enumVal: Value,
+        retVal: Option<Value>): Unit {
+        var isStillReachable = true
+        let baseBlock = CurrentBlock()
+        let endBlock = CreateBlock()
+        var firstDefaultBlock = endBlock
+        let firstSelectorVal = GetEnumIDValue(RequireAstTy(RequireExpr(matchExpr.selector, "match selector")), enumVal)
+        let matchInfo = EnumMatchInfo()
+        var wildcardIdx = matchExpr.matchCases.size
+        scopeInfo.add(-1)
+        var idx: Int64 = 0
+        while (idx < matchExpr.matchCases.size) {
+            scopeInfo[scopeInfo.size - 1] = scopeInfo[scopeInfo.size - 1] + 1
+            let matchCase = matchExpr.matchCases[idx]
+            CJC_ASSERT(!matchCase.patterns.isEmpty())
+            if (!isStillReachable) {
+                idx++
+                continue
+            }
+            if (matchCase.patterns[0].astKind == ASTKind.WILDCARD_PATTERN) {
+                isStillReachable = false
+                firstDefaultBlock = TranslateMatchCaseBody(RequireBlock(matchCase.exprOrDecls, "match case body"),
+                    retVal, endBlock)
+                firstDefaultBlock.SetDebugLocation(TranslateLocation(matchCase.patterns[0].begin,
+                    matchCase.patterns[0].end))
+                wildcardIdx = idx
+                idx++
+                continue
+            }
+            for (pattern in matchCase.patterns) {
+                CollectEnumPatternInfo(pattern, matchInfo, idx)
+            }
+            idx++
+        }
+        scopeInfo.remove(at: scopeInfo.size - 1)
+        let indexes = ArrayList<UInt64>()
+        let blocks = ArrayList<Block>()
+        for (key in matchInfo.firstSwitchBlocks.keys()) {
+            indexes.add(key)
+            blocks.add(matchInfo.firstSwitchBlocks.get(key).getOrThrow())
+        }
+        if (refEq(firstDefaultBlock, endBlock)) {
+            firstDefaultBlock = blocks[0]
+        }
+        currentBlock = baseBlock
+        builder.CreateMultiBranch(firstSelectorVal, firstDefaultBlock, indexes, blocks, baseBlock)
+        let branchInfos = TranslateSecondLevelAsTable(matchInfo, enumVal, firstDefaultBlock)
+        var caseIdx: Int64 = 0
+        while (caseIdx < matchExpr.matchCases.size) {
+            if (caseIdx == wildcardIdx) {
+                caseIdx++
+                continue
+            }
+            let bodyBlock = TranslateMatchCaseBody(RequireBlock(matchExpr.matchCases[caseIdx].exprOrDecls,
+                "match case body"), retVal, endBlock)
+            if (let Some(branchBlocks) <- branchInfos.get(caseIdx)) {
+                for (block in branchBlocks) {
+                    builder.CreateGoTo(bodyBlock, block)
+                }
+            }
+            caseIdx++
+        }
+        currentBlock = endBlock
+    }
+
+    private func CollectEnumPatternInfo(pattern: AstPattern, info: EnumMatchInfo, caseId: Int64): Unit {
+        let enumPattern = GetRealEnumPattern(pattern)
+        let patternVal = GetEnumPatternID(enumPattern)
+        if (!info.firstSwitchBlocks.contains(patternVal)) {
+            let block = CreateBlock()
+            block.SetDebugLocation(TranslateLocation(pattern))
+            info.firstSwitchBlocks[patternVal] = block
+        }
+        let switchInfo = SecondSwitchInfo(enumPattern, caseId)
+        if (!info.indexToBodies.contains(patternVal)) {
+            info.indexToBodies[patternVal] = TreeMap<UInt64, ArrayList<SecondSwitchInfo>>()
+        }
+        let secondSwitchMap = info.indexToBodies.get(patternVal).getOrThrow()
+        if (enumPattern.patterns.isEmpty()) {
+            if (!info.innerDefaultInfos.contains(patternVal)) {
+                info.innerDefaultInfos[patternVal] = ArrayList<SecondSwitchInfo>()
+            }
+            info.innerDefaultInfos.get(patternVal).getOrThrow().add(switchInfo)
+            return
+        }
+        let secondValPattern = enumPattern.patterns[0]
+        if (secondValPattern.astKind == ASTKind.WILDCARD_PATTERN) {
+            if (!info.innerDefaultInfos.contains(patternVal)) {
+                info.innerDefaultInfos[patternVal] = ArrayList<SecondSwitchInfo>()
+            }
+            info.innerDefaultInfos.get(patternVal).getOrThrow().add(switchInfo)
+        } else if (info.innerDefaultInfos.contains(patternVal) && enumPattern.patterns.size != 1) {
+            info.innerDefaultInfos.get(patternVal).getOrThrow().add(switchInfo)
+        } else {
+            CJC_ASSERT(secondValPattern.astKind == ASTKind.CONST_PATTERN)
+            let secondVal = GetConstPatternVal((secondValPattern as AstConstPattern) ??
+                throw IllegalStateException("faithful AST2CHIR expected const second pattern"))
+            if (!secondSwitchMap.contains(secondVal)) {
+                secondSwitchMap[secondVal] = ArrayList<SecondSwitchInfo>()
+            }
+            secondSwitchMap.get(secondVal).getOrThrow().add(switchInfo)
+        }
+    }
+
+    private func TranslateSecondLevelAsTable(info: EnumMatchInfo, enumVal: Value,
+        firstDefaultBlock: Block): HashMap<Int64, ArrayList<Block>> {
+        let blockBranchInfos = HashMap<Int64, ArrayList<Block>>()
+        for (firstIdx in info.indexToBodies.keys()) {
+            let secondMap = info.indexToBodies.get(firstIdx).getOrThrow()
+            let firstLevelBlock = info.firstSwitchBlocks.get(firstIdx).getOrThrow()
+            let found = info.innerDefaultInfos.get(firstIdx)
+            var secondDefaultBlock = firstDefaultBlock
+            if (let None <- found) {
+                secondDefaultBlock = firstDefaultBlock
+            } else if (!found.getOrThrow().isEmpty() && found.getOrThrow()[0].ep.patterns.isEmpty()) {
+                let caseId = found.getOrThrow()[0].caseId
+                if (!blockBranchInfos.contains(caseId)) {
+                    blockBranchInfos[caseId] = ArrayList<Block>()
+                }
+                blockBranchInfos.get(caseId).getOrThrow().add(firstLevelBlock)
+            } else {
+                secondDefaultBlock = if (secondMap.isEmpty()) { firstLevelBlock } else { CreateBlock() }
+                TranslateSecondLevelTable(firstDefaultBlock, secondDefaultBlock, enumVal, found.getOrThrow(),
+                    blockBranchInfos)
+            }
+            if (secondMap.isEmpty()) {
+                continue
+            }
+            currentBlock = firstLevelBlock
+            var firstSecondKey = 0u64
+            var hasFirstSecondKey = false
+            for (secondKey in secondMap.keys()) {
+                firstSecondKey = secondKey
+                hasFirstSecondKey = true
+                break
+            }
+            CJC_ASSERT(hasFirstSecondKey)
+            CJC_ASSERT(!secondMap.get(firstSecondKey).getOrThrow().isEmpty())
+            let enumPattern = secondMap.get(firstSecondKey).getOrThrow()[0].ep
+            CJC_ASSERT(!enumPattern.patterns.isEmpty())
+            let firstPattern = enumPattern.patterns[0]
+            PrintDebugMessage(opts.chirDebugOptimizer, enumPattern)
+            CJC_ASSERT(RequireAstTy(firstPattern).IsInteger() || RequireAstTy(firstPattern).IsRune())
+            let selectorTy = chirTy.TranslateType(RequireAstTy(firstPattern))
+            let enumValueTuple = CastEnumValueToConstructorTupleType(enumVal, enumPattern)
+            let secondPath = ArrayList<UInt64>()
+            secondPath.add(1u64)
+            let secondSelectVar = RequireResult(builder.CreateField(selectorTy, enumValueTuple, secondPath,
+                CurrentBlock()))
+            let indexes = ArrayList<UInt64>()
+            let blocks = ArrayList<Block>()
+            for (index in secondMap.keys()) {
+                indexes.add(index)
+                let block = CreateBlock()
+                blocks.add(block)
+                TranslateSecondLevelTable(secondDefaultBlock, block, enumVal, secondMap.get(index).getOrThrow(),
+                    blockBranchInfos)
+            }
+            currentBlock = firstLevelBlock
+            builder.CreateMultiBranch(TypeCastOrBoxIfNeeded(secondSelectVar, builder.context.GetUInt64Ty(),
+                secondSelectVar.GetDebugLocation(), needCheck: false), secondDefaultBlock, indexes, blocks,
+                firstLevelBlock)
+        }
+        return blockBranchInfos
+    }
+
+    private func TranslateSecondLevelTable(endBlock: Block, tableBlock: Block, enumVal: Value,
+        infos: ArrayList<SecondSwitchInfo>, blockBranchInfos: HashMap<Int64, ArrayList<Block>>): Unit {
+        currentBlock = tableBlock
+        var hasGotoBase = false
+        CJC_ASSERT(!infos.isEmpty())
+        CJC_ASSERT(!infos[0].ep.patterns.isEmpty())
+        let isWildcardPattern = infos[0].ep.patterns[0].astKind == ASTKind.WILDCARD_PATTERN
+        var idx: Int64 = 0
+        while (idx < infos.size) {
+            let current = infos[idx]
+            let trueBlock = if (!hasGotoBase && current.ep.patterns.size == 1) { tableBlock } else { CreateBlock() }
+            hasGotoBase = hasGotoBase || current.ep.patterns.size == 1
+            let falseBlock = CreateBlock()
+            let queue = ArrayList<(AstPattern, Value)>()
+            let elementTys = ((RequireEnumPatternConstructor(current.ep).GetTy() ??
+                throw IllegalStateException("faithful AST2CHIR enum constructor has no type")) as AstFuncTy) ??
+                throw IllegalStateException("faithful AST2CHIR enum constructor type is not FuncTy")
+            let start: Int64 = if (isWildcardPattern &&
+                current.ep.patterns[0].astKind != ASTKind.WILDCARD_PATTERN) { 0 } else { 1 }
+            var patternIdx = start
+            while (patternIdx < current.ep.patterns.size) {
+                let elementTy = chirTy.TranslateType(elementTys.paramTys[patternIdx])
+                let enumValueTuple = CastEnumValueToConstructorTupleType(enumVal, current.ep)
+                let path = ArrayList<UInt64>()
+                path.add(UInt64(1 + patternIdx))
+                let elementVal = RequireResult(builder.CreateField(elementTy, enumValueTuple, path, CurrentBlock()))
+                queue.add((current.ep.patterns[patternIdx], elementVal))
+                patternIdx++
+            }
+            var newBlock = CreateBlock()
+            while (!queue.isEmpty()) {
+                let originLoc = if (let Some(ctxExpr) <- current.ep.ctxExpr) {
+                    TranslateLocation(ctxExpr.begin, ctxExpr.end)
+                } else {
+                    TranslateLocation(current.ep)
+                }
+                let cond = DispatchingPattern(queue, trueBlock, newBlock, originLoc)
+                if (let Some(condValue) <- cond) {
+                    let nextBlock = if (queue.isEmpty()) { trueBlock } else { newBlock }
+                    builder.CreateBranch(condValue, nextBlock, falseBlock, CurrentBlock())
+                    currentBlock = nextBlock
+                } else if (queue.isEmpty()) {
+                    builder.CreateGoTo(trueBlock, CurrentBlock())
+                }
+                if (cond.isSome() && !queue.isEmpty()) {
+                    newBlock = CreateBlock()
+                }
+            }
+            newBlock.RemoveSelfFromBlockGroup()
+            if (!blockBranchInfos.contains(current.caseId)) {
+                blockBranchInfos[current.caseId] = ArrayList<Block>()
+            }
+            blockBranchInfos.get(current.caseId).getOrThrow().add(trueBlock)
+            if (idx == infos.size - 1) {
+                builder.CreateGoTo(endBlock, falseBlock)
+            } else {
+                currentBlock = falseBlock
+            }
+            idx++
+        }
+    }
+
+    private func TranslateSubExprToLoc(node: AstNode, location: Option<Value>, debugLoc: DebugLocation): Unit {
+        let value = Translator.TranslateASTNode(node, this)
+        if (let None <- location) {
+            return
+        }
+        let loc = location.getOrThrow()
+        let targetTy = ((loc.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR location has no type")) as RefType) ??
+            throw IllegalStateException("faithful AST2CHIR location is not ref")
+        if (targetTy.GetBaseType().IsNothing()) {
+            return
+        }
+        var storedValue = value
+        if (RequireAstTy(node).IsUnit() && !targetTy.GetBaseType().IsUnit()) {
+            storedValue = RequireResult(builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(),
+                CurrentBlock()))
+            storedValue.getOrThrow().SetDebugLocation(debugLoc)
+        }
+        if (targetTy.GetBaseType().IsUnit() || storedValue.isNone()) {
+            if (!opts.enableCompileDebug) {
+                return
+            }
+            if (storedValue.isNone()) {
+                if (RequireAstTy(node).IsUnit()) {
+                    storedValue = RequireResult(builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(),
+                        CurrentBlock()))
+                    storedValue.getOrThrow().SetDebugLocation(debugLoc)
+                } else {
+                    storedValue = RequireResult(builder.CreateConstant(builder.context.GetNothingType(), NullLiteral(),
+                        CurrentBlock()))
+                    storedValue.getOrThrow().SetDebugLocation(debugLoc)
+                    SetSkipPrintWarning(storedValue.getOrThrow())
+                }
+            }
+        }
+        var realValue = GetDerefedValue(storedValue.getOrThrow())
+        if ((realValue.GetType() ?? throw IllegalStateException("faithful AST2CHIR value has no type")).IsNothing()) {
+            return
+        }
+        realValue = TypeCastOrBoxIfNeeded(realValue, targetTy.GetBaseType(), debugLoc)
+        CreateAndAppendWrappedStore(realValue, loc, debugLoc)
+    }
+
+    private func CreateWrappedBranch(sourceExpr: SourceExpr, cond: Value, trueBlock: Block, falseBlock: Block,
+        parent: Block): Unit {
+        let branch = builder.CreateBranch(cond, trueBlock, falseBlock, parent)
+        branch.SetSourceExpr(sourceExpr)
+    }
+
+    private func CreateWrappedTypeCast(ty: Type, operand: Value, parent: Block): Value {
+        return RequireResult(builder.CreateTypeCast(ty, operand, parent))
+    }
+
+    private func SetSkipPrintWarning(value: Value): Unit {
+        value.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
     }
 
     private func TranslateSinglePatternBranch(pattern: AstPattern, selector: Value, trueBlock: Block,
@@ -4199,12 +5130,30 @@ public class Translator {
 
     private func CastEnumValueToConstructorTupleType(value: Value, pattern: AstEnumPattern): Value {
         let constructor = RequireEnumPatternConstructor(pattern)
+        let enumDecl = ((constructor.outerDecl ?? throw IllegalStateException(
+            "faithful AST2CHIR enum constructor has no outer enum")) as AstEnumDecl) ??
+            throw IllegalStateException("faithful AST2CHIR enum constructor outer is not enum")
         let fieldTys = ArrayList<Type>()
-        fieldTys.add(GetEnumSelectorType(constructor))
-        for (payloadTy in EnumPatternPayloadTypes(pattern)) {
-            fieldTys.add(payloadTy)
+        fieldTys.add(GetSelectorType((RequireAstTy(enumDecl) as AstEnumTy) ??
+            throw IllegalStateException("faithful AST2CHIR enum decl type is not EnumTy")))
+        let payloadTypes = EnumPatternPayloadTypes(pattern)
+        if (!payloadTypes.isEmpty()) {
+            for (payloadTy in payloadTypes) {
+                fieldTys.add(payloadTy)
+            }
+        } else if (!pattern.patterns.isEmpty()) {
+            let constructorTy = RequireAstTy(RequireExpr(pattern.constructor, "enum pattern constructor"))
+            if (let Some(funcTy) <- (constructorTy as AstFuncTy)) {
+                for (payloadTy in funcTy.paramTys) {
+                    fieldTys.add(TranslateEnumPatternPayloadType(pattern, payloadTy))
+                }
+            } else {
+                for (payloadTy in constructorTy.typeArgs) {
+                    fieldTys.add(TranslateEnumPatternPayloadType(pattern, payloadTy))
+                }
+            }
         }
-        let resultValue = CastValueIfNeeded(value, builder.context.GetTupleTy(fieldTys))
+        let resultValue = TypeCastOrBoxIfNeeded(value, builder.context.GetTupleTy(fieldTys), value.GetDebugLocation())
         resultValue.SetEnumCaseIndex(Some(GetEnumCtorId(constructor)))
         return resultValue
     }
@@ -4230,18 +5179,6 @@ public class Translator {
             return ResolveMemberAccessTarget(member, "faithful AST2CHIR enum pattern MemberAccess")
         }
         throw IllegalArgumentException("not yet ported in faithful AST2CHIR: enum pattern constructor expression")
-    }
-
-    private func SameTranslatorAstDecl(left: AstDecl, right: AstDecl): Bool {
-        if (left.TestAttr(AstAttribute.IMPORTED) && right.TestAttr(AstAttribute.IMPORTED)) {
-            if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
-                return left.rawMangleName == right.rawMangleName
-            }
-            if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
-                return left.mangledName == right.mangledName
-            }
-        }
-        return left.objectId == right.objectId
     }
 
     private func TranslateVArrayExpr(expr: AstArrayExpr, arrayTy: VArrayType): Value {
@@ -5423,7 +6360,7 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR enum constructor outer is not enum")
         var idx: Int64 = 0
         for (ctor in enumDecl.constructors) {
-            if (SameTranslatorAstDecl(ctor, constructor)) {
+            if (refEq(ctor, constructor)) {
                 return idx
             }
             idx++
