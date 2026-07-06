@@ -1037,6 +1037,7 @@ public class FaithfulAST2CHIR {
             generator.CreateMutFuncWrapper()
             generator.UpdateFuncCall()
         }
+        MarkClassHasInited(builder).RunOnPackage(CurrentPackage())
         UpdateMemberVarPath(builder).RunOnPackage(CurrentPackage())
         NoSideEffectMarker().RunOnPackage(CurrentPackage())
         if (!failure && opts.IsConstEvalEnabled() && !opts.enIncrementalCompilation && opts.commonPartCjos.isEmpty()) {
