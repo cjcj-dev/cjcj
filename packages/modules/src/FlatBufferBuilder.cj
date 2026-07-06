@@ -57,6 +57,31 @@ public class FlatBufferBuilder {
         return UInt32(buffer.size)
     }
 
+    public func CreateVectorOfStrings(values: ArrayList<String>): FlatBufferOffset {
+        let offsets = ArrayList<FlatBufferOffset>()
+        for (value in values) {
+            offsets.add(CreateString(value))
+        }
+        return CreateVectorOffsets(offsets)
+    }
+
+    public func CreateVectorOfStructs(values: ArrayList<ArrayList<UInt8>>, elementSize!: Int64, alignment!: Int64):
+        FlatBufferOffset {
+        StartVector(elementSize, values.size, alignment)
+        var idx = values.size - 1
+        while (idx >= 0) {
+            let bytes = values[idx]
+            var byteIdx = bytes.size - 1
+            while (byteIdx >= 0) {
+                PrependRawByte(bytes[byteIdx])
+                byteIdx--
+            }
+            idx--
+        }
+        PrependU32(UInt32(values.size))
+        return UInt32(buffer.size)
+    }
+
     public func CreateVectorU32(values: ArrayList<UInt32>): FlatBufferOffset {
         StartVector(4, values.size, 4)
         var idx = values.size - 1
@@ -113,6 +138,10 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    public func AddU8(field: Int64, value: Bool, defaultValue!: Bool = false): Unit {
+        AddBool(field, value, defaultValue: defaultValue)
+    }
+
     public func AddBool(field: Int64, value: Bool, defaultValue!: Bool = false): Unit {
         if (value == defaultValue) {
             return
@@ -150,6 +179,14 @@ public class FlatBufferBuilder {
             return
         }
         PrependI64(value)
+        Slot(field)
+    }
+
+    public func AddI8(field: Int64, value: Int64, defaultValue!: Int64 = 0): Unit {
+        if (value == defaultValue) {
+            return
+        }
+        PrependU8(UInt8(value))
         Slot(field)
     }
 
@@ -216,6 +253,12 @@ public class FlatBufferBuilder {
             PrependRawByte(ident[idx])
             idx--
         }
+        PrependUOffset(root)
+        return buffer.toArray()
+    }
+
+    public func Finish(root: FlatBufferOffset): Array<UInt8> {
+        Prep(minAlign, 4)
         PrependUOffset(root)
         return buffer.toArray()
     }

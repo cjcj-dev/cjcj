@@ -17,6 +17,15 @@ public enum StringKind {
     | MULTILINE_RAW
 }
 
+public func StringKindIndex(kind: StringKind): Int64 {
+    return match (kind) {
+        case StringKind.NORMAL => 0
+        case StringKind.JSTRING => 1
+        case StringKind.MULTILINE => 2
+        case StringKind.MULTILINE_RAW => 3
+    }
+}
+
 public enum SuffixKind {
     | NONE
     | QUEST
@@ -518,7 +527,7 @@ public enum AnnotationKind {
     | UNKNOWN
 }
 
-private func AnnotationKindIndex(kind: AnnotationKind): Int64 {
+public func AnnotationKindIndex(kind: AnnotationKind): Int64 {
     return match (kind) {
         case AnnotationKind.JAVA => 0
         case AnnotationKind.CALLING_CONV => 1
