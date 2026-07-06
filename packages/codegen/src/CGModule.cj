@@ -321,6 +321,9 @@ public class CGModule {
     private func AddGenericParamMapping(cgFunc: CGFunction, genericTy: GenericType,
         provider: (IRBuilder2) -> LLVMValueRef): Unit {
         cgFunc.genericParamsMap[genericTy.objectId] = provider
+        cgFunc.genericParamsNameMap[genericTy.ToString()] = provider
+        cgFunc.genericParamsNameMap[genericTy.GetIdentifier()] = provider
+        cgFunc.genericParamsNameMap[genericTy.GetSrcCodeIdentifier()] = provider
     }
 
     private func AddOuterGenericParamMappings(rawFunction: LLVMValueRef, cgFunc: CGFunction, fn: Function,
@@ -329,7 +332,9 @@ public class CGModule {
         let outerTypeInfo = unsafe { LLVMGetParam(rawFunction, UInt32(outerInfoIndex)) }
         if (!parentDef.GetGenericTypeParams().isEmpty()) {
             if (let Some(parentTy) <- parentDef.GetType()) {
-                cgFunc.genericParamsMap[parentTy.objectId] = { _: IRBuilder2 => outerTypeInfo }
+                let outerTypeInfoProvider = { _: IRBuilder2 => outerTypeInfo }
+                cgFunc.genericParamsMap[parentTy.objectId] = outerTypeInfoProvider
+                cgFunc.genericParamsNameMap[parentTy.ToString()] = outerTypeInfoProvider
             }
         }
         if (let Some(extendDef) <- (parentDef as ExtendDef)) {

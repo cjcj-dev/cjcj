@@ -15,6 +15,7 @@ import cangjie_compiler::chir.Field
 import cangjie_compiler::chir.FloatLiteral
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
+import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.GetMethodIdxInAutoEnvObject
 import cangjie_compiler::chir.IntLiteral
 import cangjie_compiler::chir.LiteralValue
@@ -3634,12 +3635,44 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateTypeInfo(chirTy: Type): LLVMValueRef {
+        // GAP_TODO(create-typeinfo-delegate-parity): C++ single-arg CreateTypeInfo
+        // delegates to the map overload (CJNativeIntrinsicsCall.cpp:1465-1470).
+        // Keep the pre-port selfhost lookup as a miss fallback until the upstream
+        // CHIR generic canonicalization gap is fixed: meta_transformation
+        // currently passes class generic DeclT as objectId 622 while the
+        // CGFunction maps function generic DeclT as objectId 4030. After that
+        // root is fixed, delegate here.
         let typeInfoProviders = if (let Some(currentFunction) <- cgFunction) {
             currentFunction.genericParamsMap
         } else {
             HashMap<Int64, (IRBuilder2) -> LLVMValueRef>()
         }
+        let baseTy = chirTy.StripAllRefs()
+        if (baseTy.IsGeneric() && !typeInfoProviders.contains(baseTy.objectId)) {
+            if (let Some(currentFunction) <- cgFunction) {
+                if (let Some(typeInfoProvider) <- FindGenericTypeInfoProvider(currentFunction, baseTy)) {
+                    return typeInfoProvider(this)
+                }
+            }
+            throw IllegalStateException("missing runtime TypeInfo mapping for generic type: " + baseTy.ToString())
+        }
         return CreateTypeInfo(chirTy, typeInfoProviders)
+    }
+
+    private func FindGenericTypeInfoProvider(currentFunction: CGFunction,
+        baseTy: Type): Option<(IRBuilder2) -> LLVMValueRef> {
+        if (let Some(typeInfoProvider) <- currentFunction.genericParamsNameMap.get(baseTy.ToString())) {
+            return Some(typeInfoProvider)
+        }
+        if (let Some(genericTy) <- (baseTy as GenericType)) {
+            if (let Some(typeInfoProvider) <- currentFunction.genericParamsNameMap.get(genericTy.GetIdentifier())) {
+                return Some(typeInfoProvider)
+            }
+            if (let Some(typeInfoProvider) <- currentFunction.genericParamsNameMap.get(genericTy.GetSrcCodeIdentifier())) {
+                return Some(typeInfoProvider)
+            }
+        }
+        return None
     }
 
     public func CreateTypeInfo(chirTy: Type, typeInfoProviders: HashMap<Int64, (IRBuilder2) -> LLVMValueRef>,
