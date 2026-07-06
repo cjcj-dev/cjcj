@@ -875,6 +875,7 @@ public class Translator {
                     let debugInfo = builder.CreateDebug(builder.context.GetUnitTy(), allocatedValue,
                         decl.identifier.Val(), CurrentBlock())
                     debugInfo.SetDebugLocation(varPos)
+                    debugInfo.SetDebugLocationInfoForWarning(GetDeclLoc(builder.context, decl))
                 }
                 allocatedValue.AppendAttributeInfo(BuildVarDeclAttr(decl))
             }
@@ -899,6 +900,7 @@ public class Translator {
             let debugInfo = builder.CreateDebug(builder.context.GetUnitTy(), castedValue,
                 decl.identifier.Val(), CurrentBlock())
             debugInfo.SetDebugLocation(varPos)
+            debugInfo.SetDebugLocationInfoForWarning(warnPos)
             let debugResult = RequireResult(debugInfo)
             debugResult.SetDebugLocation(warnPos)
             debugResult.EnableAttr(Attribute.READONLY)

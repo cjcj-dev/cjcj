@@ -18,9 +18,11 @@ import cangjie_compiler::chir.Package as RealCHIRPackage
 import cangjie_compiler::chir.RedundantFutureRemoval
 import cangjie_compiler::chir.RedundantGetOrThrowElimination
 import cangjie_compiler::chir.RedundantLoadElimination
+import cangjie_compiler::chir.ShouldReportUnusedCodeWarnings
 import cangjie_compiler::chir.UnitUnify
 import cangjie_compiler::chir.UselessAllocateElimination
 import cangjie_compiler::ast.Package as RealASTPackage
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::codegen.CHIRData as CodegenCHIRData
 import cangjie_compiler::codegen.ClearPackageModules
 import cangjie_compiler::codegen.GenPackageModules
@@ -54,7 +56,7 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
         case Some(value) => value
         case None => return None
     }
-    RulesChecking(lowered, builder, instance.invocation.globalOptions)
+    RulesChecking(lowered, builder, instance.invocation.globalOptions, instance.diag.AsBasicDiagnosticEngine())
     RunOptimizationPass(lowered, builder, instance.invocation.globalOptions)
     if (!TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)) {
         instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
@@ -66,13 +68,17 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
     return Some(lowered)
 }
 
-private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions): Unit {
+private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions,
+    diag: BasicDiagnosticEngine): Unit {
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
         enableCoverage: options.enableCoverage)
     ConstPropagation(builder: Some(builder), opts: options).RunOnPackage(pkg)
     DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(pkg, isDebug: options.chirDebugOptimizer)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
         enableCoverage: options.enableCoverage)
+    if (ShouldReportUnusedCodeWarnings()) {
+        DeadCodeElimination(builder, diag, pkg).ReportUnusedCode(pkg, options)
+    }
 }
 
 private func RunOptimizationPass(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions): Unit {

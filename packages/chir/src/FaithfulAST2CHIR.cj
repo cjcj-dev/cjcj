@@ -3018,6 +3018,7 @@ public class FaithfulAST2CHIR {
         let fn = builder.CreateFunction(funcTy, EffectiveFunctionIdentifier(funcDecl),
             srcCodeIdentifier: EffectiveFunctionSrcIdentifier(funcDecl), rawMangledName: EffectiveFunctionRawName(funcDecl),
             packageName: EffectivePackageName(funcDecl))
+        fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.keywordPos, funcDecl.end))
         AttachFunctionGenericParams(funcDecl, fn)
         ApplyDeclAttrs(fn, funcDecl)
         ApplyFuncKind(fn, funcDecl)
@@ -3040,6 +3041,7 @@ public class FaithfulAST2CHIR {
         let fn = builder.CreateFunction(funcTy, EffectiveMangledName(funcDecl),
             srcCodeIdentifier: funcDecl.identifier.Val(), rawMangledName: EffectiveRawMangledName(funcDecl),
             packageName: EffectivePackageName(funcDecl))
+        fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.keywordPos, funcDecl.end))
         AttachFunctionGenericParams(funcDecl, fn)
         fn.EnableAttr(Attribute.IMPORTED)
         ApplyDeclAttrs(fn, funcDecl)
@@ -3113,6 +3115,7 @@ public class FaithfulAST2CHIR {
             srcCodeIdentifier: decl.identifier.Val(), rawMangledName: EffectiveRawMangledName(decl),
             packageName: EffectivePackageName(decl))
         globalVar.SetDebugLocation(TranslateLocationWithoutScope(builder.context, decl.begin, decl.end))
+        globalVar.SetDebugLocationInfoForWarning(GetDeclLoc(builder.context, decl))
         globalVar.AppendAttributeInfo(BuildVarDeclAttr(decl))
         if (isLocalConst) {
             globalVar.EnableAttr(Attribute.COMPILER_ADD)

@@ -15,6 +15,7 @@ public open class Base {
     public let nodeId: Int64
     private let annotationMap: AnnotationMap = AnnotationMap()
     private var loc: DebugLocation = DebugLocation()
+    private var locForWarning: DebugLocation = DebugLocation()
     private let attributes: AttributeInfo = AttributeInfo()
 
     public init() {
@@ -116,6 +117,14 @@ public open class Base {
         loc = newLoc
     }
 
+    public func SetDebugLocationInfoForWarning(newLoc: DebugLocation): Unit {
+        locForWarning = newLoc
+    }
+
+    public func GetDebugLocationInfoForWarning(): DebugLocation {
+        return locForWarning
+    }
+
     public func GetAttributeInfo(): AttributeInfo {
         return attributes
     }
@@ -139,6 +148,7 @@ public open class Base {
     public func CopyBaseInfoFrom(other: Base): Unit {
         annotationMap.CopyFrom(other.GetAnno())
         loc = other.GetDebugLocation()
+        locForWarning = other.GetDebugLocationInfoForWarning()
     }
 
     public func BaseCommentToString(): String {

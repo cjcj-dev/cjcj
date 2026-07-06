@@ -232,6 +232,17 @@ public class Parameter <: Value {
         return annoInfo
     }
 
+    public func GetDebugExpr(): Option<Debug> {
+        var idx = GetUsersRef().size - 1
+        while (idx >= 0) {
+            if (let Some(debugExpr) <- (GetUsersRef()[idx] as Debug)) {
+                return debugExpr
+            }
+            idx--
+        }
+        return None
+    }
+
     public override func ToString(indent: Int64): String {
         let typeText = if (let Some(valueTy) <- GetType()) { valueTy.ToString() } else { "<none>" }
         var out = annoInfo.ToString(indent: indent)

@@ -1,6 +1,10 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.MakeRange as BasicMakeRange
+import cangjie_compiler::basic.Position as BasicPosition
+import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::utils.{CJC_ABORT, FileUtil}
 
 public let ANY_TYPE: String = "ANY_TYPE"
@@ -114,6 +118,44 @@ public func ToPosInfo(loc: DebugLocation, isPrintFileName!: Bool = false): Strin
     let beginPos = loc.GetBeginPos()
     let fileName = if (isPrintFileName) { FileUtil.GetFileName(loc.GetAbsPath()) + "," } else { "" }
     return " at [" + fileName + beginPos.line.toString() + "," + beginPos.column.toString() + "]"
+}
+
+public func ToRange(loc: DebugLocation): BasicRange {
+    let begin = loc.GetBeginPos()
+    let end = loc.GetEndPos()
+    let beginPos = BasicPosition(UInt64(loc.GetFileID()), Int64(begin.line), Int64(begin.column))
+    let endPos = BasicPosition(UInt64(loc.GetFileID()), Int64(end.line), Int64(end.column))
+    return BasicMakeRange(beginPos, endPos)
+}
+
+public func ToRangeIfNotZero(loc: DebugLocation): (Bool, BasicRange) {
+    let begin = loc.GetBeginPos()
+    let end = loc.GetEndPos()
+    let beginPos = BasicPosition(UInt64(loc.GetFileID()), Int64(begin.line), Int64(begin.column))
+    let endPos = BasicPosition(UInt64(loc.GetFileID()), Int64(end.line), Int64(end.column))
+    let range = BasicMakeRange(beginPos, endPos)
+    if (!beginPos.IsZero() && !endPos.IsZero()) {
+        return (true, range)
+    }
+    return (false, range)
+}
+
+public func GetDebugPos(expr: Base): (Bool, BasicRange) {
+    let warningRange = ToRangeIfNotZero(expr.GetDebugLocationInfoForWarning())
+    if (warningRange[0]) {
+        return warningRange
+    }
+    return ToRangeIfNotZero(expr.GetDebugLocation())
+}
+
+public func IsCrossPackage(pos: BasicPosition, currentPackage: String, diag: BasicDiagnosticEngine): Bool {
+    let source = diag.GetSourceManager().GetSource(pos.fileID)
+    if (let Some(packageName) <- source.packageName) {
+        if (currentPackage != packageName) {
+            return true
+        }
+    }
+    return false
 }
 
 public func CheckCustomTypeDefIsExpected(def: CustomTypeDef, packageName: String, defSrcCodeName: String): Bool {
