@@ -448,68 +448,6 @@ private func NeedCheck(parent: MemberSignature, child: MemberSignature): Bool {
     return true
 }
 
-private func CheckForeignName(
-    diag: DiagnosticEngine,
-    typeManager: TypeManager,
-    parent: MemberSignature,
-    child: MemberSignature,
-    checkingDecl: Decl
-): Unit {
-    if (!NeedCheck(parent, child)) {
-        return
-    }
-
-    let childDecl = child.decl.getOrThrow()
-    let parentDecl = parent.decl.getOrThrow()
-    let childAnnotation = GetForeignNameAnnotation(childDecl)
-    let parentAnnotation = GetForeignNameAnnotation(parentDecl)
-    if ((let None <- childAnnotation) && (let None <- parentAnnotation)) {
-        return
-    }
-
-    let childIsSubtype = if (let Some(childStructTy) <- child.structTy) {
-        if (let Some(parentStructTy) <- parent.structTy) {
-            typeManager.IsSubtype(childStructTy, parentStructTy)
-        } else {
-            false
-        }
-    } else {
-        false
-    }
-    if (!childIsSubtype) {
-        if ((let None <- childAnnotation) && (let Some(_) <- parentAnnotation)) {
-            DiagConflictingForeignName(diag, parentDecl, childDecl, checkingDecl)
-        } else if ((let None <- parentAnnotation) && (let Some(_) <- childAnnotation)) {
-            DiagConflictingForeignName(diag, childDecl, parentDecl, checkingDecl)
-        } else if (GetAnnoValue(childAnnotation.getOrThrow()) != GetAnnoValue(parentAnnotation.getOrThrow())) {
-            DiagConflictingForeignName(diag, parentDecl, childDecl, checkingDecl)
-        }
-        return
-    }
-
-    if (let Some(childValue) <- childAnnotation) {
-        if (!childValue.TestAttr(Attribute.COMPILER_ADD)) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.sema_foreign_name_appeared_in_child,
-                MakeRange(childValue.GetBegin(), childDecl.identifier.End()),
-                arguments: [childValue.identifier.Val()]
-            )
-        } else if (let None <- parentAnnotation) {
-            DiagConflictingForeignName(diag, childDecl, parentDecl, checkingDecl)
-        } else if (GetAnnoValue(childValue) != GetAnnoValue(parentAnnotation.getOrThrow())) {
-            DiagConflictingForeignName(diag, parentDecl, childDecl, checkingDecl)
-        }
-    } else if ((let Some(_) <- parentAnnotation) && child.replaceOther) {
-        DiagConflictingForeignName(diag, parentDecl, childDecl, checkingDecl)
-    } else if (let Some(parentValue) <- parentAnnotation) {
-        if (let Some(clonedAnnotation) <- (ASTCloner.Clone(parentValue) as Annotation)) {
-            clonedAnnotation.EnableAttr(Attribute.COMPILER_ADD)
-            CopyBasicInfo(childDecl, clonedAnnotation)
-            childDecl.annotations.add(clonedAnnotation)
-        }
-    }
-}
-
 private func DiagConflictingAnnotation(
     diag: DiagnosticEngine,
     declWithAnno: Decl,
@@ -585,84 +523,6 @@ private func IsForeignNameLikeAnnotation(annotationKind: AstAnnotationKind): Boo
     return annotationKind == AstAnnotationKind.FOREIGN_NAME ||
         annotationKind == AstAnnotationKind.FOREIGN_GETTER_NAME ||
         annotationKind == AstAnnotationKind.FOREIGN_SETTER_NAME
-}
-
-private func CheckAnnotation(
-    diag: DiagnosticEngine,
-    typeManager: TypeManager,
-    annotationKind: AstAnnotationKind,
-    parent: MemberSignature,
-    child: MemberSignature,
-    checkingDecl: Decl
-): Unit {
-    if (!NeedCheckForeignName(parent, child)) {
-        return
-    }
-
-    let childDecl = child.decl.getOrThrow()
-    let parentDecl = parent.decl.getOrThrow()
-    let childAnnotation = GetAnnotation(childDecl, annotationKind)
-    let parentAnnotation = GetAnnotation(parentDecl, annotationKind)
-    if ((let None <- childAnnotation) && (let None <- parentAnnotation)) {
-        return
-    }
-
-    let childIsSubtype = if (let Some(childStructTy) <- child.structTy) {
-        if (let Some(parentStructTy) <- parent.structTy) {
-            typeManager.IsSubtype(childStructTy, parentStructTy)
-        } else {
-            false
-        }
-    } else {
-        false
-    }
-    if (!childIsSubtype) {
-        if ((let None <- childAnnotation) && (let Some(_) <- parentAnnotation)) {
-            DiagConflictingAnnotation(diag, parentDecl, childDecl, checkingDecl, annotationKind)
-        } else if ((let None <- parentAnnotation) && (let Some(_) <- childAnnotation)) {
-            DiagConflictingAnnotation(diag, childDecl, parentDecl, checkingDecl, annotationKind)
-        } else if (IsForeignNameLikeAnnotation(annotationKind) &&
-            GetAnnoValue(childAnnotation.getOrThrow()) != GetAnnoValue(parentAnnotation.getOrThrow())) {
-            DiagConflictingAnnotation(diag, parentDecl, childDecl, checkingDecl, annotationKind)
-        }
-        return
-    }
-
-    if (let Some(childValue) <- childAnnotation) {
-        if (!childValue.TestAttr(Attribute.COMPILER_ADD)) {
-            diag.DiagnoseRefactor(
-                DiagKindRefactor.sema_foreign_name_appeared_in_child,
-                MakeRange(childValue.GetBegin(), childDecl.identifier.End()),
-                arguments: [childValue.identifier.Val()]
-            )
-        } else if (let None <- parentAnnotation) {
-            DiagConflictingAnnotation(diag, childDecl, parentDecl, checkingDecl, annotationKind)
-        } else if (IsForeignNameLikeAnnotation(annotationKind) &&
-            GetAnnoValue(childValue) != GetAnnoValue(parentAnnotation.getOrThrow())) {
-            DiagConflictingAnnotation(diag, parentDecl, childDecl, checkingDecl, annotationKind)
-        }
-    } else if ((let Some(_) <- parentAnnotation) && child.replaceOther) {
-        DiagConflictingAnnotation(diag, parentDecl, childDecl, checkingDecl, annotationKind)
-    } else if (let Some(parentValue) <- parentAnnotation) {
-        if (let Some(clonedAnnotation) <- (ASTCloner.Clone(parentValue) as Annotation)) {
-            clonedAnnotation.EnableAttr(Attribute.COMPILER_ADD)
-            CopyBasicInfo(childDecl, clonedAnnotation)
-            childDecl.annotations.add(clonedAnnotation)
-        }
-    }
-}
-
-private func CheckForeignAnnotations(
-    diag: DiagnosticEngine,
-    typeManager: TypeManager,
-    parent: MemberSignature,
-    child: MemberSignature,
-    checkingDecl: Decl
-): Unit {
-    CheckAnnotation(diag, typeManager, AstAnnotationKind.FOREIGN_NAME, parent, child, checkingDecl)
-    CheckAnnotation(diag, typeManager, AstAnnotationKind.FOREIGN_GETTER_NAME, parent, child, checkingDecl)
-    CheckAnnotation(diag, typeManager, AstAnnotationKind.FOREIGN_SETTER_NAME, parent, child, checkingDecl)
-    CheckAnnotation(diag, typeManager, AstAnnotationKind.OBJ_C_OPTIONAL, parent, child, checkingDecl)
 }
 
 public class StructInheritanceChecker {
@@ -1802,18 +1662,6 @@ public class StructInheritanceChecker {
             }
         }
     }
-
-    @When[backend == "cjnative"]
-    private func CheckNativeFFI(parent: MemberSignature, child: MemberSignature): Unit {
-        if (!checkingDecls.isEmpty()) {
-            let checkingDecl = checkingDecls[checkingDecls.size - 1]
-            CheckForeignName(diag, typeManager, parent, child, checkingDecl)
-            CheckForeignAnnotations(diag, typeManager, parent, child, checkingDecl)
-        }
-    }
-
-    @When[backend != "cjnative"]
-    private func CheckNativeFFI(parent: MemberSignature, child: MemberSignature): Unit {}
 
     private func CheckIncompleteOverrideOrImplOfExtend(interfaceSig: MemberSignature, child: MemberSignature): Unit {
         if (checkingDecls.isEmpty()) {
