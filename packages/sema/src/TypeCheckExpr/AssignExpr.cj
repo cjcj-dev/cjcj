@@ -178,12 +178,17 @@ private func PropagateAssignDesugarTarget(ae: AssignExpr, desugar: Expr): Unit {
     }
 }
 
-private func TrySynAssignOverload(typeManager: TypeManager, ae: AssignExpr): Option<Ty> {
+private func TrySynAssignOverload(typeManager: TypeManager, ae: AssignExpr,
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<(Expr) -> Ty> = None): Option<Ty> {
     if (let Some(leftValue) <- ae.leftValue) {
         if (let Some(_) <- (leftValue as SubscriptExpr)) {
             DesugarSubscriptOverloadExpr(ae)
             if (let Some(desugar) <- ae.desugarExpr) {
-                let desugarTy = SynExprShallow(typeManager, desugar)
+                let desugarTy = if (let Some(syn) <- synthesizer) {
+                    syn(desugar)
+                } else {
+                    SynExprShallow(typeManager, desugar, ctx: ctx)
+                }
                 if (Ty.IsTyCorrect(desugarTy)) {
                     PropagateAssignDesugarTarget(ae, desugar)
                     ae.SetTy(desugarTy)
@@ -197,7 +202,11 @@ private func TrySynAssignOverload(typeManager: TypeManager, ae: AssignExpr): Opt
     if (ae.isCompound) {
         DesugarOperatorOverloadExpr(ae)
         if (let Some(desugar2) <- ae.desugarExpr) {
-            let desugarTy2 = SynExprShallow(typeManager, desugar2)
+            let desugarTy2 = if (let Some(syn2) <- synthesizer) {
+                syn2(desugar2)
+            } else {
+                SynExprShallow(typeManager, desugar2, ctx: ctx)
+            }
             if (Ty.IsTyCorrect(desugarTy2)) {
                 PropagateAssignDesugarTarget(ae, desugar2)
                 ae.SetTy(desugarTy2)
@@ -232,7 +241,8 @@ private func SynMultipleAssignExpr(typeManager: TypeManager, ae: AssignExpr): Ty
 }
 
 public func SynAssignExpr(typeManager: TypeManager, ae: AssignExpr,
-    rightChecker!: Option<AssignRightChecker> = None): Ty {
+    rightChecker!: Option<AssignRightChecker> = None, ctx!: Option<ASTContext> = None,
+    synthesizer!: Option<(Expr) -> Ty> = None): Ty {
     if (let Some(desugar) <- ae.desugarExpr) {
         if (let Some(leftValue) <- ae.leftValue) {
             if (leftValue.astKind == ASTKind.TUPLE_LIT) {
@@ -250,7 +260,7 @@ public func SynAssignExpr(typeManager: TypeManager, ae: AssignExpr,
     if (let None <- ae.rightExpr) {
         return AssignInvalid(ae)
     }
-    if (let Some(overloadTy) <- TrySynAssignOverload(typeManager, ae)) {
+    if (let Some(overloadTy) <- TrySynAssignOverload(typeManager, ae, ctx: ctx, synthesizer: synthesizer)) {
         return overloadTy
     }
     let unitTy = TcUnitTy()

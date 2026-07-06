@@ -77,12 +77,20 @@ private func InferParamTyFromNode(typeManager: TypeManager, param: FuncParam,
     return TypeManager.GetInvalidTy()
 }
 
+private func CanInferLambdaParamBody(ctx: Option<ASTContext>, le: LambdaExpr): Bool {
+    if (let Some(ctxValue) <- ctx) {
+        return !ctxValue.funcArgReachable.contains(le)
+    }
+    return true
+}
+
 private func CollectLambdaParamTys(typeManager: TypeManager, le: LambdaExpr,
-    allowPlaceholder!: Bool = false): Option<LambdaParamInference> {
+    allowPlaceholder!: Bool = false, ctx!: Option<ASTContext> = None): Option<LambdaParamInference> {
     if (let Some(paramList) <- LambdaParamList(le)) {
         let inference = LambdaParamInference()
         for (param in paramList.params) {
-            let paramTy = InferParamTyFromNode(typeManager, param, inference.placeholders, allowPlaceholder)
+            let paramTy = InferParamTyFromNode(typeManager, param, inference.placeholders,
+                allowPlaceholder && CanInferLambdaParamBody(ctx, le))
             if (!Ty.IsTyCorrect(paramTy)) {
                 return None
             }
@@ -191,7 +199,7 @@ private func CloneFuncTyConfig(funcTy: FuncTy): FuncTyConfig {
     return cfg
 }
 
-public func SynLamExpr(typeManager: TypeManager, le: LambdaExpr): Ty {
+public func SynLamExpr(typeManager: TypeManager, le: LambdaExpr, ctx!: Option<ASTContext> = None): Ty {
     if (let None <- le.funcBody) {
         return LambdaInvalid(le)
     }
@@ -199,7 +207,7 @@ public func SynLamExpr(typeManager: TypeManager, le: LambdaExpr): Ty {
         return LambdaInvalid(le)
     }
     let tyVarScope = BeginTyVarScope(typeManager)
-    let inferenceOpt = CollectLambdaParamTys(typeManager, le, allowPlaceholder: true)
+    let inferenceOpt = CollectLambdaParamTys(typeManager, le, allowPlaceholder: true, ctx: ctx)
     if (let None <- inferenceOpt) {
         EndTyVarScope(tyVarScope)
         return LambdaInvalid(le)
@@ -264,9 +272,9 @@ private func CheckLambdaBodyAgainstTarget(typeManager: TypeManager, le: LambdaEx
     return false
 }
 
-public func ChkLamExpr(typeManager: TypeManager, target: Ty, le: LambdaExpr): Bool {
+public func ChkLamExpr(typeManager: TypeManager, target: Ty, le: LambdaExpr, ctx!: Option<ASTContext> = None): Bool {
     if (target.IsAny() || (le.TestAttr(Attribute.C) && target.IsCType())) {
-        return Ty.IsTyCorrect(SynLamExpr(typeManager, le))
+        return Ty.IsTyCorrect(SynLamExpr(typeManager, le, ctx: ctx))
     }
     let targetTy = UnboxOptionType(target)
     if (let Some(targetFuncTy) <- (targetTy as FuncTy)) {
@@ -284,7 +292,7 @@ public func ChkLamExpr(typeManager: TypeManager, target: Ty, le: LambdaExpr): Bo
         le.SetTy(funcTy)
         return true
     }
-    let synTy = SynLamExpr(typeManager, le)
+    let synTy = SynLamExpr(typeManager, le, ctx: ctx)
     if (Ty.IsTyCorrect(synTy) && typeManager.CheckTypeCompatibility(target, synTy) != TypeCompatibility.INCOMPATIBLE) {
         return true
     }

@@ -17,6 +17,20 @@ public type CallArgChecker = (Ty, FuncArg) -> Bool
 public type CallDesugarChecker = (Ty, Expr) -> Bool
 public type CallDeclSynthesizer = (FuncDecl) -> Bool
 
+private class MatchingStat {
+    public var matchedArgs: UInt32 = 0u32
+    public var argNameValid: Bool = false
+
+    public init() {}
+
+    public func Clone(): MatchingStat {
+        let out = MatchingStat()
+        out.matchedArgs = matchedArgs
+        out.argNameValid = argNameValid
+        return out
+    }
+}
+
 private class FunctionMatchingUnit {
     public var id: Int64 = -1
     public var fd: FuncDecl
@@ -32,6 +46,38 @@ private class FunctionMatchingUnit {
         this.tysInArgOrder = tysInArgOrder
         this.typeMapping = typeMapping
     }
+}
+
+private class FunctionCandidate {
+    public var fd: FuncDecl
+    public var ce: CallExpr
+    public let argCombinations: ArrayList<ArrayList<Ty>> = ArrayList<ArrayList<Ty>>()
+    public var stat: MatchingStat = MatchingStat()
+
+    public init(fd: FuncDecl, ce: CallExpr, argCombinations: ArrayList<ArrayList<Ty>>) {
+        this.fd = fd
+        this.ce = ce
+        for (combination in argCombinations) {
+            let cloned = ArrayList<Ty>()
+            for (argTy in combination) {
+                cloned.add(argTy)
+            }
+            this.argCombinations.add(cloned)
+        }
+    }
+
+    public func Clone(): FunctionCandidate {
+        let out = FunctionCandidate(fd, ce, argCombinations)
+        out.stat = stat.Clone()
+        return out
+    }
+}
+
+private class FuncTyPair {
+    public var genericIgnored: Bool = false
+    public let candidates: ArrayList<(FuncDecl, Ty, TypeSubst)> = ArrayList<(FuncDecl, Ty, TypeSubst)>()
+
+    public init() {}
 }
 
 private class CallInferenceFailure {
@@ -81,6 +127,16 @@ private func DiagRefEmit(diag: BasicDiagnosticEngine, node: Node, kind: BasicDia
     args!: Array<String> = Array<String>()): Unit {
     // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
     let _ = diag.DiagnoseRefactor(kind, NodeRange(node), arguments: args)
+}
+
+private func DiagUnableToInferReturnType(diag: BasicDiagnosticEngine, funcDecl: FuncDecl, expr: Expr): Unit {
+    if (Ty.IsTyCorrect(funcDecl.GetTy())) {
+        let builder = diag.DiagnoseRefactor(
+            BasicDiagKindRefactor.sema_unable_to_infer_return_type,
+            MakeRangeForDeclIdentifier(funcDecl))
+        builder.AddNote(NodeRange(expr), "with recursive usage from")
+        builder.Emit()
+    }
 }
 
 private func BodyParamList(fd: FuncDecl): Option<FuncParamList> {
@@ -505,7 +561,9 @@ private func FuncDeclsGroupByFixedPositionalArity(candidates: ArrayList<FuncDecl
 // (sema.TypeCheckExpr subpackage) because this main-sema package cannot import sema.Desugar directly.
 private func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
     ctx: Option<ASTContext>, target: Option<Ty>, ce: CallExpr, candidates: ArrayList<FuncDecl>,
-    variadicDesugar: (CallExpr, Int64) -> Unit, argChecker!: Option<CallArgChecker> = None): Bool {
+    variadicDesugar: (CallExpr, Int64) -> Unit, argChecker!: Option<CallArgChecker> = None,
+    declSynthesizer!: Option<CallDeclSynthesizer> = None, argSynthesizer!: Option<(FuncArg) -> Ty> = None,
+    exprSynthesizer!: Option<(Expr) -> Ty> = None, effectiveArgChecker!: Option<CallArgChecker> = None): Bool {
     if (!CheckArgsOrder(diag, ce)) {
         return false
     }
@@ -517,7 +575,8 @@ private func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDia
             if (let Some(desugar) <- ce.desugarExpr) {
                 if (let Some(desugarCall) <- (desugar as CallExpr)) {
                     let matchResults = MatchFunctionForCall(typeManager, diag, ctx, group, desugarCall, target,
-                        argChecker: argChecker)
+                        argChecker: argChecker, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer,
+                        exprSynthesizer: exprSynthesizer, effectiveArgChecker: effectiveArgChecker)
                     if (matchResults.size == 1) {
                         results.add(matchResults[0])
                     }
@@ -532,7 +591,8 @@ private func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDia
         if (let Some(desugar) <- ce.desugarExpr) {
             if (let Some(desugarCall) <- (desugar as CallExpr)) {
                 let matchResults = MatchFunctionForCall(typeManager, diag, ctx, results, desugarCall, target,
-                    argChecker: argChecker)
+                    argChecker: argChecker, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer,
+                    exprSynthesizer: exprSynthesizer, effectiveArgChecker: effectiveArgChecker)
                 if (matchResults.size == 1) {
                     ce.SetTy(desugarCall.GetTy() ?? TypeManager.GetInvalidTy())
                     ce.resolvedFunction = desugarCall.resolvedFunction
@@ -1426,6 +1486,36 @@ private func GenerateSubstPackByTyArgs(typeManager: TypeManager, tmaps: SubstPac
     }
 }
 
+// C++ src/Sema/TypeCheckCall.cpp:938 GenerateTypeMappingByTyArgs.
+private func GenerateTypeMappingByTyArgs(typeArgs: ArrayList<Type>, generic: Generic): TypeSubst {
+    let typeMapping = TypeSubst()
+    let typeArgsSize = typeArgs.size
+    if (generic.typeParameters.size != typeArgsSize) {
+        return typeMapping
+    }
+    var idx: Int64 = 0
+    while (idx < typeArgsSize) {
+        let typeParam = generic.typeParameters[idx]
+        var typeArgTy: Ty = TypeManager.GetInvalidTy()
+        if (let Some(ty) <- typeArgs[idx].GetTy()) {
+            if (ty.HasIntersectionTy()) {
+                idx++
+                continue
+            }
+            typeArgTy = ty
+        }
+        if (let Some(paramTy) <- typeParam.GetTy()) {
+            if (Ty.IsTyCorrect(paramTy) && Ty.IsTyCorrect(typeArgTy)) {
+                if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                    typeMapping.Put(genericTy, typeArgTy)
+                }
+            }
+        }
+        idx++
+    }
+    return typeMapping
+}
+
 private func GetEffectiveTypeArgsForCall(baseFunc: Expr, typeArgs: ArrayList<Type>): ArrayList<Type> {
     if (let None <- (baseFunc as RefExpr)) {
         return typeArgs
@@ -1697,15 +1787,6 @@ extend InstCtxScope {
     }
 }
 
-private func HasRecordedCallTypeArgs(ce: CallExpr): Bool {
-    if (let Some(base) <- ce.baseFunc) {
-        if (!base.GetTypeArgs().isEmpty()) {
-            return true
-        }
-    }
-    return false
-}
-
 private func ClearInferredCallTypeArgsForTargetCheck(ce: CallExpr): Unit {
     if (let Some(base) <- ce.baseFunc) {
         if (!base.GetTypeArgs().isEmpty()) {
@@ -1801,7 +1882,9 @@ private func AddCurrentGenericInstTyVars(typeManager: TypeManager, generic: Gene
 
 private class TyArgSynState {
     public let tyVarsToSolve: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
+    public var retTarget: Option<Ty> = None
     public let argTys: ArrayList<Ty> = ArrayList<Ty>()
+    public let ignoredEnumCtor: ArrayList<Int64> = ArrayList<Int64>()
     public let failSet: ArrayList<Bool> = ArrayList<Bool>()
     public let questParamTys: ArrayList<Option<Ty>> = ArrayList<Option<Ty>>()
     public var unsolvedCount: Int64 = 0
@@ -1908,7 +1991,7 @@ private func PrepareQuestParamTy(typeManager: TypeManager, paramsTy: ArrayList<T
     var anyNewTarget = false
     for (idx in 0..paramsTy.size) {
         stat.questParamTys[idx] = None
-        if (stat.failSet[idx]) {
+        if (stat.failSet[idx] && !stat.ignoredEnumCtor.contains(idx)) {
             if (let Some(solution) <- stat.solution) {
                 let partial = typeManager.GetInstantiatedTy(paramsTy[idx], solution)
                 if (let Some(questParamTy) <- UnsolvedAsQuest(typeManager, stat.tyVarsToSolve, partial)) {
@@ -1921,14 +2004,82 @@ private func PrepareQuestParamTy(typeManager: TypeManager, paramsTy: ArrayList<T
     return anyNewTarget
 }
 
-private func FillValidArgTys(stat: TyArgSynState, pack: LocTyArgSynArgPack, paramsTyInOrder: ArrayList<Ty>): Unit {
+private func ValidateArgTys(ce: CallExpr, stat: TyArgSynState): ArrayList<Ty> {
+    let validArgTys = ArrayList<Ty>()
+    stat.ignoredEnumCtor.clear()
     for (idx in 0..stat.argTys.size) {
-        if (Ty.IsTyCorrect(stat.argTys[idx])) {
+        let isIgnoredEnumCtor = if (idx < ce.args.size) {
+            if (let Some(expr) <- ce.args[idx].expr) {
+                IsEnumCtorWithoutTypeArgs(expr, expr.GetTarget())
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+        if (isIgnoredEnumCtor) {
+            stat.failSet[idx] = true
+            stat.ignoredEnumCtor.add(idx)
+        } else if (Ty.IsTyCorrect(stat.argTys[idx])) {
             stat.failSet[idx] = false
-            pack.argTys.add(stat.argTys[idx])
-            pack.paramTys.add(paramsTyInOrder[idx])
+            validArgTys.add(stat.argTys[idx])
         } else {
             stat.failSet[idx] = true
+        }
+    }
+    return validArgTys
+}
+
+private func MakeArgBlames(stat: TyArgSynState, ce: CallExpr, argTys: ArrayList<Ty>,
+    paramTys: ArrayList<Ty>, typeManager: TypeManager): ArrayList<Blame> {
+    let blames = ArrayList<Blame>()
+    var j: Int64 = 0
+    for (idx in 0..ce.args.size) {
+        if (!stat.ignoredEnumCtor.contains(idx) && Ty.IsTyCorrect(stat.argTys[idx])) {
+            if (j < argTys.size && j < paramTys.size) {
+                blames.add(Blame(src: Some(ce.args[idx]), lb: Some(argTys[j]),
+                    ub: Some(typeManager.RecoverUnivTyVar(paramTys[j])), style: BlameStyle.ARGUMENT))
+            }
+            j++
+        }
+    }
+    return blames
+}
+
+private func DisableBodyInferForArgs(ctx: ASTContext, ce: CallExpr): Unit {
+    for (arg in ce.args) {
+        let walker = Walker(arg, visitPre: { node: Node =>
+            if (let Some(lambda) <- (node as LambdaExpr)) {
+                ctx.funcArgReachable[lambda] = true
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (IsQuestableNode(node)) {
+                return VisitAction.WALK_CHILDREN
+            }
+            VisitAction.SKIP_CHILDREN
+        })
+        let _ = walker.Walk()
+    }
+}
+
+private func ConstrainByUpperbound(typeManager: TypeManager): Unit {
+    let instMapping = typeManager.GetInstMapping()
+    for (entry in instMapping.u2i.entries) {
+        if (let Some(instTv) <- (entry.ty as GenericsTy)) {
+            var found = false
+            for (toSolve in typeManager.GetUnsolvedTyVars()) {
+                if (SameTy(toSolve, instTv)) {
+                    found = true
+                    break
+                }
+            }
+            if (!found) {
+                continue
+            }
+            for (upperBound in entry.tyVar.upperBounds) {
+                let bounds = typeManager.constraints.GetOrCreate(instTv)
+                bounds.ubs.Add(typeManager.InstOf(upperBound))
+            }
         }
     }
 }
@@ -1976,6 +2127,7 @@ private func PropagatePlaceholderAndSolve(typeManager: TypeManager, ce: CallExpr
     for (tyVar in tyVarsToSolve) {
         typeManager.MarkAsUnsolvedTyVar(tyVar)
     }
+    ConstrainByUpperbound(typeManager)
     if (let Some(target) <- retTyUB) {
         if (!typeManager.IsSubtype(funcRetTy, target)) {
             typeManager.restoreTypeManagerConstraint(saved)
@@ -2021,12 +2173,158 @@ private func TryUpdateEnumTyByTarget(ce: CallExpr, fd: FuncDecl, retTarget: Opti
     }
 }
 
+// Mirrors C++ TypeArgumentInference.cpp:431-535.
+private func PrepareTyArgsSynthesis(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: ASTContext,
+    candidate: FunctionCandidate, retTyUB: Option<Ty>, argChecker: Option<CallArgChecker>,
+    argSynthesizer: Option<(FuncArg) -> Ty>, declSynthesizer: Option<CallDeclSynthesizer>): ErrOrSubst {
+    let fd = candidate.fd
+    let ce = candidate.ce
+    let fdTy = fd.GetTy() ?? TypeManager.GetInvalidTy()
+    if (!Ty.IsTyCorrect(fdTy) || !fdTy.IsFunc()) {
+        return ErrOrSubst(SolvingErrInfo())
+    }
+    DisableBodyInferForArgs(ctx, ce)
+    let stat = TyArgSynState()
+    if (!candidate.argCombinations.isEmpty()) {
+        for (argTy in candidate.argCombinations[0]) {
+            stat.argTys.add(argTy)
+        }
+    }
+    if (stat.argTys.size != ce.args.size) {
+        return ErrOrSubst(SolvingErrInfo())
+    }
+    if (NeedSynOnUsed(fd)) {
+        if (let Some(synthesizer) <- declSynthesizer) {
+            let _ = synthesizer(fd)
+        }
+    }
+    for (_ in stat.argTys) {
+        stat.failSet.add(true)
+        stat.questParamTys.add(None)
+    }
+    for (tyVar in GetTyVarsToSolve(typeManager.GetInstMapping())) {
+        stat.tyVarsToSolve.add(tyVar)
+    }
+    stat.unsolvedCount = stat.tyVarsToSolve.size + 1
+    try (ds = DiagSuppressor(diag)) {
+        try (cs = PData.CommitScope(typeManager.constraints)) {
+            for (idx in 0..stat.argTys.size) {
+                if (Ty.IsTyCorrect(stat.argTys[idx])) {
+                    stat.failSet[idx] = false
+                }
+            }
+            stat.retTarget = retTyUB
+            let paramsTyInOrder = GetParamTysInArgsOrder(typeManager, ce, fd)
+            for (idx2 in 0..paramsTyInOrder.size) {
+                paramsTyInOrder[idx2] = typeManager.InstOf(paramsTyInOrder[idx2])
+            }
+            let funcRetTy = if (let Some(funcTy) <- (fdTy as FuncTy)) {
+                typeManager.InstOf(funcTy.retTy)
+            } else {
+                TypeManager.GetInvalidTy()
+            }
+            var argPack = LocTyArgSynArgPack()
+            while (stat.newInfo) {
+                for (argIdx in 0..stat.argTys.size) {
+                    if (stat.failSet[argIdx] && (let Some(questParamTy) <- stat.questParamTys[argIdx])) {
+                        try (ds2 = DiagSuppressor(diag)) {
+                            ce.args[argIdx].Clear()
+                            if (let Some(checker) <- argChecker) {
+                                if (checker(questParamTy, ce.args[argIdx])) {
+                                    stat.argTys[argIdx] = ce.args[argIdx].GetTy() ?? TypeManager.GetInvalidTy()
+                                }
+                            }
+                        }
+                    } else if (Ty.IsInitialTy(Some(stat.argTys[argIdx]))) {
+                        if (let Some(synthesizer) <- argSynthesizer) {
+                            stat.argTys[argIdx] = synthesizer(ce.args[argIdx])
+                        }
+                    } else if (stat.failSet[argIdx] && !stat.lastResortUnused) {
+                        try (ds3 = DiagSuppressor(diag)) {
+                            if (let Some(synthesizer2) <- argSynthesizer) {
+                                stat.argTys[argIdx] = synthesizer2(ce.args[argIdx])
+                            }
+                        }
+                    }
+                }
+                let validArgTys = ValidateArgTys(ce, stat)
+                let paramTys = ArrayList<Ty>()
+                for (paramIdx in 0..paramsTyInOrder.size) {
+                    if (!stat.failSet[paramIdx]) {
+                        paramTys.add(paramsTyInOrder[paramIdx])
+                    }
+                }
+                let retBlame = Blame(src: Some(ce), lb: Some(typeManager.RecoverUnivTyVar(funcRetTy)),
+                    ub: retTyUB, style: BlameStyle.RETURN)
+                argPack = LocTyArgSynArgPack()
+                for (tyVar2 in stat.tyVarsToSolve) {
+                    argPack.tyVarsToSolve.add(tyVar2)
+                }
+                for (argTy in validArgTys) {
+                    argPack.argTys.add(argTy)
+                }
+                for (paramTy in paramTys) {
+                    argPack.paramTys.add(paramTy)
+                }
+                for (blame in MakeArgBlames(stat, ce, validArgTys, paramTys, typeManager)) {
+                    argPack.argBlames.add(blame)
+                }
+                argPack.funcRetTy = Some(funcRetTy)
+                argPack.retTyUB = stat.retTarget
+                argPack.retBlame = retBlame
+                let synCtx = LocalTypeArgumentSynthesis(typeManager, argPack, needDiagMsg: false)
+                stat.solution = synCtx.SynthesizeTypeArguments(allowPartial: true)
+                let newUnsolvedCount = if (let Some(solution) <- stat.solution) {
+                    synCtx.CountUnsolvedTyVars(solution)
+                } else {
+                    0
+                }
+                stat.newInfo = MayNeedNextIteration(stat, newUnsolvedCount)
+                if (stat.newInfo) {
+                    stat.newInfo = PrepareQuestParamTy(typeManager, paramsTyInOrder, stat)
+                }
+                if (!stat.newInfo && stat.unsolvedCount > 0 && stat.lastResortUnused) {
+                    stat.lastResortUnused = false
+                    if (let Some(sol) <- PropagatePlaceholderAndSolve(typeManager, ce, paramsTyInOrder, funcRetTy,
+                        retTyUB, argChecker, stat.tyVarsToSolve)) {
+                        if (!HasUnsolvedTyVars(stat.tyVarsToSolve, sol)) {
+                            stat.solution = Some(sol)
+                            stat.unsolvedCount = 0
+                        }
+                    }
+                }
+            }
+            if ((let None <- stat.solution) || stat.unsolvedCount > 0) {
+                stat.solution = None
+                for (idx3 in stat.ignoredEnumCtor) {
+                    if (idx3 < ce.args.size) {
+                        if (let Some(expr) <- ce.args[idx3].expr) {
+                            if (let Some(diagValue) <- diag) {
+                                DiagOld(diagValue, expr, BasicDiagKind.sema_generic_type_without_type_argument)
+                            }
+                        }
+                    }
+                }
+                ds.ReportDiag()
+                let diagSyn = LocalTypeArgumentSynthesis(typeManager, argPack, needDiagMsg: true)
+                let _ = diagSyn.SynthesizeTypeArguments(allowPartial: false)
+                return ErrOrSubst(diagSyn.GetErrInfo())
+            }
+            PData.Reset(typeManager.constraints)
+            return ErrOrSubst(stat.solution.getOrThrow())
+        }
+    }
+    return ErrOrSubst(SolvingErrInfo())
+}
+
 // Mirrors C++ TypeArgumentInference.cpp:541-555.
 private func GenerateTypeMappingForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
-    ctx: Option<ASTContext>, ce: CallExpr, fd: FuncDecl, paramTys: ArrayList<Ty>,
-    inferenceFailure: Option<CallInferenceFailure>, target: Option<Ty>,
-    argChecker: Option<CallArgChecker>): ArrayList<SubstPack> {
+    ctx: Option<ASTContext>, candidate: FunctionCandidate, inferenceFailure: Option<CallInferenceFailure>,
+    target: Option<Ty>, argChecker: Option<CallArgChecker>, argSynthesizer: Option<(FuncArg) -> Ty>,
+    declSynthesizer: Option<CallDeclSynthesizer>): ArrayList<SubstPack> {
     let typeMappings = ArrayList<SubstPack>()
+    let ce = candidate.ce
+    let fd = candidate.fd
     TryUpdateEnumTyByTarget(ce, fd, target)
     let instCtxScope = InstCtxScope(typeManager)
     if (!instCtxScope.SetRefDecl(typeManager, diag, ctx, fd, ce)) {
@@ -2035,8 +2333,8 @@ private func GenerateTypeMappingForCall(typeManager: TypeManager, diag: Option<B
     }
     let instMapping = typeManager.GetInstMapping()
     if (HasTyVarsToSolve(instMapping)) {
-        for (mapping in GenerateTypeMappingByInference(typeManager, ce, fd, paramTys, instMapping, inferenceFailure,
-            target, argChecker)) {
+        for (mapping in GenerateTypeMappingByInference(typeManager, diag, ctx, candidate, inferenceFailure,
+            target, argChecker, argSynthesizer, declSynthesizer)) {
             typeMappings.add(mapping)
         }
     } else {
@@ -2047,112 +2345,37 @@ private func GenerateTypeMappingForCall(typeManager: TypeManager, diag: Option<B
 }
 
 // Mirrors C++ TypeArgumentInference.cpp:557-588.
-private func GenerateTypeMappingByInference(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl,
-    paramTys: ArrayList<Ty>, instMapping: SubstPack, inferenceFailure: Option<CallInferenceFailure>,
-    target: Option<Ty>, argChecker: Option<CallArgChecker>): ArrayList<SubstPack> {
+private func GenerateTypeMappingByInference(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ctx: Option<ASTContext>, candidate: FunctionCandidate, inferenceFailure: Option<CallInferenceFailure>,
+    target: Option<Ty>, argChecker: Option<CallArgChecker>, argSynthesizer: Option<(FuncArg) -> Ty>,
+    declSynthesizer: Option<CallDeclSynthesizer>): ArrayList<SubstPack> {
+    let ce = candidate.ce
+    let fd = candidate.fd
+    if (!Ty.IsTyCorrect(fd.GetTy()) || !(fd.GetTy() ?? TypeManager.GetInvalidTy()).IsFunc()) {
+        return ArrayList<SubstPack>()
+    }
     let typeMappings = ArrayList<SubstPack>()
-    let currentSubst = instMapping.Clone()
-    if (InferGenericCallTypeMapping(typeManager, ce, fd, paramTys, currentSubst, inferenceFailure, target, argChecker)) {
-        typeMappings.add(currentSubst)
+    let realCtx = ctx ?? return typeMappings
+    let combinationSize = candidate.argCombinations.size
+    var cbIndex: Int64 = 0
+    while (cbIndex < combinationSize) {
+        let curCandidate = candidate.Clone()
+        curCandidate.argCombinations[0] = candidate.argCombinations[cbIndex]
+        cbIndex++
+        let errOrSubst = PrepareTyArgsSynthesis(typeManager, diag, realCtx, curCandidate, target, argChecker,
+            argSynthesizer, declSynthesizer)
+        if (let Some(newSubst) <- errOrSubst.subst) {
+            let currentSubst = typeManager.GetInstMapping()
+            typeManager.PackMapping(currentSubst, newSubst)
+            typeMappings.add(currentSubst)
+        } else if (let Some(_) <- errOrSubst.error) {
+            ()
+        }
+    }
+    if (typeMappings.isEmpty() && AllCallArgsHaveCorrectTy(ce)) {
+        MarkCallInferenceFailure(inferenceFailure, ce, fd, target)
     }
     return typeMappings
-}
-
-private func InferGenericCallTypeMapping(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl, paramTys: ArrayList<Ty>,
-    typeMapping: SubstPack, inferenceFailure: Option<CallInferenceFailure>, target: Option<Ty>,
-    argChecker: Option<CallArgChecker>): Bool {
-    if (HasRecordedCallTypeArgs(ce)) {
-        return true
-    }
-    let generic = GetCurrentGeneric(fd, ce) ?? return true
-    let stat = TyArgSynState()
-    AddCurrentGenericInstTyVars(typeManager, generic, typeMapping, stat.tyVarsToSolve)
-    if (stat.tyVarsToSolve.isEmpty()) {
-        return true
-    }
-    stat.unsolvedCount = stat.tyVarsToSolve.size + 1
-    let paramsTyInOrder = ArrayList<Ty>()
-    for (paramTy in paramTys) {
-        paramsTyInOrder.add(typeManager.ApplySubstPack(paramTy, typeMapping))
-    }
-    var idx: Int64 = 0
-    while (idx < ce.args.size && idx < paramsTyInOrder.size) {
-        let argTy = GetExprTy(ce.args[idx])
-        stat.argTys.add(argTy)
-        stat.failSet.add(!Ty.IsTyCorrect(argTy))
-        stat.questParamTys.add(None)
-        idx++
-    }
-    if (stat.argTys.size != ce.args.size) {
-        MarkCallInferenceFailure(inferenceFailure, ce, fd, target)
-        return false
-    }
-    let funcRetTy = if (let Some(fdTy) <- fd.GetTy()) {
-        if (let Some(funcTy) <- (typeManager.ApplySubstPack(fdTy, typeMapping) as FuncTy)) {
-            funcTy.retTy
-        } else {
-            TypeManager.GetInvalidTy()
-        }
-    } else {
-        TypeManager.GetInvalidTy()
-    }
-    var pack = LocTyArgSynArgPack()
-    // Mirrors the C++ fixpoint loop in src/Sema/TypeArgumentInference.cpp:431-540:
-    // every partial solution is fed back as contextual targets for still-failed arguments.
-    while (stat.newInfo) {
-        for (argIdx in 0..stat.argTys.size) {
-            if (stat.failSet[argIdx]) {
-                if (let Some(questParamTy) <- stat.questParamTys[argIdx]) {
-                    if (let Some(checker) <- argChecker) {
-                        ce.args[argIdx].Clear()
-                        if (checker(questParamTy, ce.args[argIdx])) {
-                            stat.argTys[argIdx] = GetExprTy(ce.args[argIdx])
-                        }
-                    }
-                }
-            }
-        }
-        pack = LocTyArgSynArgPack()
-        for (tyVar in stat.tyVarsToSolve) {
-            pack.tyVarsToSolve.add(tyVar)
-        }
-        FillValidArgTys(stat, pack, paramsTyInOrder)
-        pack.funcRetTy = Some(funcRetTy)
-        pack.retTyUB = target
-        if (pack.argTys.size != pack.paramTys.size || (pack.argTys.isEmpty() && (let None <- target))) {
-            stat.solution = None
-            stat.newInfo = false
-        } else {
-            let syn = LocalTypeArgumentSynthesis(typeManager, pack)
-            stat.solution = syn.SynthesizeTypeArguments(allowPartial: true)
-            let newUnsolvedCount = if (let Some(solution) <- stat.solution) {
-                syn.CountUnsolvedTyVars(solution)
-            } else {
-                0
-            }
-            stat.newInfo = MayNeedNextIteration(stat, newUnsolvedCount)
-            if (stat.newInfo) {
-                stat.newInfo = PrepareQuestParamTy(typeManager, paramsTyInOrder, stat)
-            }
-            if (!stat.newInfo && stat.unsolvedCount > 0 && stat.lastResortUnused) {
-                stat.lastResortUnused = false
-                // Matches the lambda-body last resort in TypeArgumentInference.cpp:485-519.
-                if (let Some(sol) <- PropagatePlaceholderAndSolve(typeManager, ce, paramsTyInOrder, funcRetTy, target,
-                    argChecker, stat.tyVarsToSolve)) {
-                    if (!HasUnsolvedTyVars(stat.tyVarsToSolve, sol)) {
-                        stat.solution = Some(sol)
-                        stat.unsolvedCount = 0
-                    }
-                }
-            }
-        }
-    }
-    if ((let None <- stat.solution) || stat.unsolvedCount > 0) {
-        MarkCallInferenceFailure(inferenceFailure, ce, fd, target)
-        return false
-    }
-    typeManager.PackMapping(typeMapping, stat.solution.getOrThrow())
-    return true
 }
 
 private func DiagnoseForCallInference(diag: Option<BasicDiagnosticEngine>, ce: CallExpr): Unit {
@@ -2215,9 +2438,13 @@ private func CheckCallCompatible(typeManager: TypeManager, diag: Option<BasicDia
     if (paramTys.size != ce.args.size) {
         return false
     }
+    let shouldClearArg = argChecker.isSome()
     var idx: Int64 = 0
     while (idx < paramTys.size) {
         let paramTy = typeManager.ApplySubstPack(paramTys[idx], unit.typeMapping)
+        if (shouldClearArg) {
+            ce.args[idx].Clear()
+        }
         if (!CheckCallArgCompatible(typeManager, diag, ce, idx, paramTy, argChecker)) {
             return false
         }
@@ -2246,18 +2473,32 @@ private func CheckCallCompatible(typeManager: TypeManager, diag: Option<BasicDia
     return true
 }
 
-private func GenericDeclForCall(fd: FuncDecl): Option<Decl> {
-    if (let Some(body) <- fd.funcBody) {
-        if (let Some(_) <- body.generic) {
-            return Some(fd)
-        }
+// C++ src/Sema/TypeCheckCall.cpp:2065 ReInferCallArgs.
+private func ReInferCallArgs(typeManager: TypeManager, ce: CallExpr, legal: FunctionMatchingUnit,
+    argChecker: Option<CallArgChecker>): Unit {
+    let checker = argChecker ?? return
+    var idx: Int64 = 0
+    while (idx < legal.tysInArgOrder.size && idx < ce.args.size) {
+        let instTy = typeManager.ApplySubstPack(legal.tysInArgOrder[idx], legal.typeMapping)
+        let _ = checker(instTy, ce.args[idx])
+        idx++
     }
-    if (let Some(outer) <- fd.outerDecl) {
-        if (IsClassOrEnumConstructor(fd)) {
-            return Some(outer)
-        }
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:2075 RecoverCallArgs.
+private func RecoverCallArgs(ce: CallExpr, argsTys: ArrayList<Option<Ty>>, argChecker: Option<CallArgChecker>): Unit {
+    if (argsTys.isEmpty() || argsTys.size != ce.args.size) {
+        return
     }
-    return None
+    if (let Some(fd) <- ce.resolvedFunction) {
+        UpdateCallTargets(ce, fd)
+    }
+    let checker = argChecker ?? return
+    var idx: Int64 = 0
+    while (idx < argsTys.size) {
+        let _ = checker(argsTys[idx].getOrThrow(), ce.args[idx])
+        idx++
+    }
 }
 
 private func EmitGenericInstantiationFailureForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
@@ -2374,8 +2615,7 @@ private func replaceWithGenericTyInInheritableDecl(typeManager: TypeManager, ty:
 }
 
 // C2e[B]: C++ src/Sema/TypeCheckCall.cpp:1116 CheckAndGetMappingForTypeDecl.
-// Deviation: the C++ `if (!it.first->IsGeneric()) continue` guard is omitted — the selfhost
-// MultiTypeSubst key (tyVar) is always a GenericsTy, so the guard never triggers.
+// Selfhost MultiTypeSubst stores generic-ty keys, matching the reachable body after C++'s generic-key guard.
 private func CheckAndGetMappingForTypeDecl(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
     baseExpr: Expr, typeDecl: Decl, targetDecl: Decl, typeMapping: SubstPack): Bool {
     let mts = MultiTypeSubst()
@@ -2512,9 +2752,12 @@ private func CheckCandidateConstrains(typeManager: TypeManager, diag: Option<Bas
 }
 
 private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: Option<ASTContext>,
-    ce: CallExpr, fd: FuncDecl, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
+    candidate: FunctionCandidate, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
     inferenceFailure!: Option<CallInferenceFailure> = None,
-    declSynthesizer!: Option<CallDeclSynthesizer> = None): Option<FunctionMatchingUnit> {
+    declSynthesizer!: Option<CallDeclSynthesizer> = None,
+    argSynthesizer!: Option<(FuncArg) -> Ty> = None): Option<FunctionMatchingUnit> {
+    let ce = candidate.ce
+    let fd = candidate.fd
     let wrongNormalArgSize = !fd.hasVariableLenArg && !IsPossibleVariadicFunction(fd, ce) && (if (let Some(params) <- BodyParamList(
         fd)) {
         params.params.size != ce.args.size
@@ -2527,7 +2770,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
         }
         return None
     }
-    let argNamesValid = CheckArgsWithParamName(diag, ce, fd)
+    candidate.stat.argNameValid = CheckArgsWithParamName(diag, ce, fd)
     let paramTyInArgOrder = GetParamTysInArgsOrder(typeManager, ce, fd)
     if (paramTyInArgOrder.size != ce.args.size) {
         return None
@@ -2536,8 +2779,8 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     let typeMapping = if (isGeneric) {
         // C2c: generic calls go through CheckGenericCallCompatible (multi-mapping expand/resolve),
         // which does its own per-mapping argument check; non-generic calls keep CheckCallCompatible.
-        match (CheckGenericCallCompatible(typeManager, diag, ctx, ce, fd, paramTyInArgOrder, target, argChecker,
-            inferenceFailure)) {
+        match (CheckGenericCallCompatible(typeManager, diag, ctx, candidate, target, argChecker,
+            inferenceFailure, argSynthesizer, declSynthesizer)) {
             case Some(value) => value
             case None => return None
         }
@@ -2545,7 +2788,8 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
         SubstPack()
     }
     let unit = FunctionMatchingUnit(fd, paramTyInArgOrder, typeMapping)
-    unit.argNameValid = argNamesValid
+    unit.argNameValid = candidate.stat.argNameValid
+    unit.matchedArgs = candidate.stat.matchedArgs
     if (!isGeneric && !CheckCallCompatible(typeManager, diag, ce, fd, unit, argChecker: argChecker)) {
         return None
     }
@@ -2569,7 +2813,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     if (!isGeneric && !CheckCandidateConstrains(typeManager, diag, ce, fd, typeMapping)) {
         return None
     }
-    return if (argNamesValid) {
+    return if (candidate.stat.argNameValid) {
         Some(unit)
     } else {
         None
@@ -2653,6 +2897,381 @@ private func IsInGenericStructDecl(fd: FuncDecl): Bool {
         return outerDecl.IsNominalDecl() && outerDecl.GetGeneric().isSome()
     }
     return false
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:197 GetAllGenericTys(const Expr&, const FuncDecl&).
+private func GetAllGenericTys(expr: Expr, fd: FuncDecl): ArrayList<Ty> {
+    let result = ArrayList<Ty>()
+    let generics = ArrayList<Generic>()
+    if (let Some(body) <- fd.funcBody) {
+        if (let Some(generic) <- body.generic) {
+            generics.add(generic)
+        }
+    }
+    if (IsInGenericStructDecl(fd)) {
+        let isStaticMemberAccess = (expr.astKind == ASTKind.MEMBER_ACCESS) && fd.TestAttr(Attribute.STATIC)
+        if (isStaticMemberAccess || IsClassOrEnumConstructor(fd)) {
+            if (let Some(outerDecl) <- fd.outerDecl) {
+                if (let Some(generic) <- outerDecl.GetGeneric()) {
+                    generics.add(generic)
+                }
+            }
+        }
+    }
+    for (generic in generics) {
+        for (typeParam in generic.typeParameters) {
+            if (let Some(paramTy) <- typeParam.GetTy()) {
+                result.add(paramTy)
+            }
+        }
+    }
+    return result
+}
+
+// C++ src/Sema/TypeCheckGeneric.cj mirror of TypeCheckerImpl::GenerateGenericTypeMapping(ctx, expr).
+private func GenerateGenericTypeMapping(typeManager: TypeManager, ctx: ASTContext, expr: Expr): SubstPack {
+    let typeMapping = GenerateGenericTypeMapping(typeManager, expr)
+    if (let Some(refExpr) <- (expr as RefExpr)) {
+        if (let Some(symbol) <- TypeCheckCallGetCurStructSymbol(ctx, refExpr.scopeName)) {
+            if (let Some(node) <- symbol.node) {
+                if (node.IsNominalDecl()) {
+                    if (!Ty.IsTyCorrect(node.GetTy())) {
+                        return typeMapping
+                    }
+                    typeManager.GenerateGenericMapping(typeMapping, node.GetTy().getOrThrow())
+                }
+            }
+        }
+    }
+    return typeMapping
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:2716 GetDeclOfThisType.
+private func GetDeclOfThisType(ctx: ASTContext, expr: Expr): Option<Decl> {
+    if (let Some(memberAccess) <- (expr as MemberAccess)) {
+        if (let Some(baseExpr) <- memberAccess.baseExpr) {
+            if (let Some(classTy) <- ((baseExpr.GetTy() ?? TypeManager.GetInvalidTy()) as ClassTy)) {
+                if (let Some(decl) <- classTy.declPtr) {
+                    return Some(decl)
+                }
+            }
+        }
+        return None
+    }
+    if (let Some(refExpr) <- (expr as RefExpr)) {
+        if (let Some(baseFunc) <- refExpr.GetTarget()) {
+            if (let Some(varDecl) <- (baseFunc as VarDecl)) {
+                if (let Some(initializer) <- varDecl.initializer) {
+                    if (let Some(maInitializer) <- (initializer as MemberAccess)) {
+                        if (let Some(baseExpr) <- maInitializer.baseExpr) {
+                            if (let Some(baseTarget) <- baseExpr.GetTarget()) {
+                                if (let Some(baseTy) <- baseTarget.GetTy()) {
+                                    if (let Some(classTy) <- (baseTy as ClassTy)) {
+                                        if (let Some(decl) <- classTy.declPtr) {
+                                            return Some(decl)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                if (let Some(outMostFunc) <- ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC, expr.scopeName)) {
+                    if (let Some(node) <- outMostFunc.node) {
+                        if (let Some(funcDecl) <- (node as FuncDecl)) {
+                            if (let Some(body) <- funcDecl.funcBody) {
+                                if (let Some(parentClassLike) <- body.parentClassLike) {
+                                    return Some(parentClassLike)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return None
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:997 FilterTypeMappings.
+private func FilterTypeMappings(typeManager: TypeManager, ctx: ASTContext, expr: Expr, fd: FuncDecl,
+    typeMappings: ArrayList<MultiTypeSubst>): Unit {
+    let genericParams = StaticToTyVars(GetAllGenericTys(expr, fd))
+    for (curTyParam in genericParams) {
+        var idx: Int64 = 0
+        while (idx < typeMappings.size) {
+            if ((let None <- typeMappings[idx].Get(curTyParam))) {
+                typeMappings.remove(at: idx)
+            } else {
+                idx++
+            }
+        }
+    }
+    let tyVars = if (let Some(fdTy) <- fd.GetTy()) {
+        GetAllGenericTys(fdTy)
+    } else {
+        ArrayList<GenericsTy>()
+    }
+    if (let Some(body) <- fd.funcBody) {
+        if (let Some(generic) <- body.generic) {
+            for (typeParam in generic.typeParameters) {
+                if (let Some(paramTy) <- typeParam.GetTy()) {
+                    if (let Some(genericTy) <- (paramTy as GenericsTy)) {
+                        if (!TypeCheckCallGenericListContains(tyVars, genericTy)) {
+                            tyVars.add(genericTy)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (IsFuncReturnThisType(fd)) {
+        if (let Some(thisDecl) <- GetDeclOfThisType(ctx, expr)) {
+            if (let Some(thisTy) <- thisDecl.GetTy()) {
+                for (genericTy in GetAllGenericTys(thisTy)) {
+                    if (!TypeCheckCallGenericListContains(tyVars, genericTy)) {
+                        tyVars.add(genericTy)
+                    }
+                }
+            }
+        }
+    } else if (let Some(memberAccess) <- (expr as MemberAccess)) {
+        if (let Some(_) <- memberAccess.baseExpr) {
+            if (let Some(outerDecl) <- fd.outerDecl) {
+                let fdTyHasQuest = if (let Some(fdTy) <- fd.GetTy()) { fdTy.HasQuestTy() } else { false }
+                if (IsGenericUpperBoundCall(memberAccess, fd) || fdTyHasQuest) {
+                    if (let Some(outerTy) <- outerDecl.GetTy()) {
+                        for (genericTy2 in GetAllGenericTys(outerTy)) {
+                            if (!TypeCheckCallGenericListContains(tyVars, genericTy2)) {
+                                tyVars.add(genericTy2)
+                            }
+                        }
+                    }
+                }
+            }
+            let baseExpr = memberAccess.baseExpr.getOrThrow()
+            if (let Some(baseTarget) <- GetRealTarget(baseExpr.GetTarget())) {
+                let isNameAccessNeedInfer = baseTarget.IsTypeDecl() && baseExpr.GetTypeArgs().isEmpty()
+                if (isNameAccessNeedInfer) {
+                    if (let Some(baseTy) <- baseTarget.GetTy()) {
+                        for (genericTy3 in GetAllGenericTys(baseTy)) {
+                            if (!TypeCheckCallGenericListContains(tyVars, genericTy3)) {
+                                tyVars.add(genericTy3)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    var mapIdx: Int64 = 0
+    while (mapIdx < typeMappings.size) {
+        typeMappings[mapIdx] = ReduceMultiTypeSubst(typeManager, tyVars, typeMappings[mapIdx])
+        mapIdx++
+    }
+    if (typeMappings.isEmpty()) {
+        typeMappings.add(MultiTypeSubst())
+    }
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:1547 CollectValidFuncTys.
+private func CollectValidFuncTys(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: ASTContext,
+    funcs: ArrayList<FuncDecl>, expr: Expr, targetTy!: Option<FuncTy> = None,
+    declSynthesizer!: Option<CallDeclSynthesizer> = None): FuncTyPair {
+    let pair = FuncTyPair()
+    let filteredFuncs = FilterShadowedFunc(funcs)
+    let typeArgs = expr.GetTypeArgs()
+    try (ds = DiagSuppressor(diag)) {
+        for (fd in filteredFuncs) {
+            let fdTy = fd.GetTy() ?? TypeManager.GetInvalidTy()
+            if (!Ty.IsTyCorrect(fdTy) || !fdTy.IsFunc()) {
+                continue
+            }
+            let mts = SubstPack()
+            if (let Some(generic) <- fd.GetGeneric()) {
+                pair.genericIgnored = pair.genericIgnored || typeArgs.isEmpty()
+                if (typeArgs.isEmpty() || !CheckGenericDeclInstantiationForCall(typeManager, diag, fd, typeArgs, expr)) {
+                    continue
+                }
+                typeManager.PackMapping(mts, GenerateTypeMappingByTyArgs(typeArgs, generic))
+            }
+            ReplaceTarget(expr, Some(fd))
+            mts.Merge(GenerateGenericTypeMapping(typeManager, ctx, expr))
+            let typeMappings = ArrayList<MultiTypeSubst>()
+            typeMappings.add(typeManager.ZipSubstPack(mts))
+            FilterTypeMappings(typeManager, ctx, expr, fd, typeMappings)
+            let usedTys = TySet()
+            usedTys.Add(fdTy)
+            usedTys.AddAll(GetGenericParamsForDecl(fd))
+            let resMappings = ExpandMultiTypeSubst(typeMappings[0], usedTys)
+            let thisCd: Option<ClassDecl> = if (let Some(thisDecl) <- GetDeclOfThisType(ctx, expr)) {
+                thisDecl as ClassDecl
+            } else {
+                None
+            }
+            let hasThisRet = if (let Some(classDecl) <- thisCd) {
+                Ty.IsTyCorrect(classDecl.GetTy()) && IsFuncReturnThisType(fd)
+            } else {
+                false
+            }
+            let genericParams = GetAllGenericTys(expr, fd)
+            for (mapping in resMappings) {
+                if (!genericParams.isEmpty() && mapping.IsEmpty()) {
+                    pair.genericIgnored = true
+                    break
+                }
+                var instTy = typeManager.GetInstantiatedTy(fdTy, mapping)
+                if (let Some(targetFuncTy) <- targetTy) {
+                    if (let Some(instFuncTy) <- (instTy as FuncTy)) {
+                        if (!typeManager.IsFuncParametersSubtype(instFuncTy, targetFuncTy)) {
+                            continue
+                        }
+                    }
+                }
+                if (NeedSynOnUsed(fd)) {
+                    if (let Some(synthesizer) <- declSynthesizer) {
+                        if (synthesizer(fd)) {
+                            let newFdTy = fd.GetTy() ?? TypeManager.GetInvalidTy()
+                            if (!Ty.IsTyCorrect(newFdTy) || newFdTy.HasQuestTy()) {
+                                if (let Some(diagValue) <- diag) {
+                                    DiagUnableToInferReturnType(diagValue, fd, expr)
+                                }
+                                break
+                            }
+                        }
+                    }
+                }
+                let latestFdTy = fd.GetTy() ?? TypeManager.GetInvalidTy()
+                instTy = typeManager.GetInstantiatedTy(latestFdTy, mapping)
+                if (!instTy.IsFunc()) {
+                    continue
+                }
+                if (hasThisRet) {
+                    if (let Some(classDecl2) <- thisCd) {
+                        if (let Some(classTy) <- classDecl2.GetTy()) {
+                            let realThisTy = typeManager.GetInstantiatedTy(classTy, mapping)
+                            if (let Some(instFuncTy2) <- (instTy as FuncTy)) {
+                                instTy = typeManager.GetFunctionTy(instFuncTy2.paramTys.toArray(), realThisTy)
+                            }
+                        }
+                    }
+                }
+                pair.candidates.add((fd, instTy, mapping))
+            }
+        }
+    }
+    return pair
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:1618 HasBaseOfPlaceholderTy.
+private func HasBaseOfPlaceholderTy(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: ASTContext,
+    node: Option<Expr>, exprSynthesizer: Option<(Expr) -> Ty>): Bool {
+    if (let None <- node) {
+        return false
+    }
+    if (typeManager.GetUnsolvedTyVars().isEmpty()) {
+        return false
+    }
+    let expr = node.getOrThrow()
+    if (let Some(memberAccess) <- (expr as MemberAccess)) {
+        if (let Some(baseExpr) <- memberAccess.baseExpr) {
+            SetIsNotAlone(baseExpr)
+            if (HasBaseOfPlaceholderTy(typeManager, diag, ctx, Some(baseExpr), exprSynthesizer)) {
+                return true
+            }
+        }
+    }
+    let wasOK = Ty.IsTyCorrect(expr.GetTy())
+    if (Ty.IsInitialTy(expr.GetTy())) {
+        try (ds = DiagSuppressor(diag)) {
+            ctx.targetTypeMap[expr] = TypeManager.GetQuestTy()
+            if (let Some(synthesizer) <- exprSynthesizer) {
+                let _ = synthesizer(expr)
+            }
+            ctx.targetTypeMap.remove(expr)
+        }
+    }
+    if ((expr.GetTy() ?? TypeManager.GetInvalidTy()).IsPlaceholder()) {
+        return true
+    }
+    if (!wasOK) {
+        expr.Clear()
+    }
+    return false
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:1647 GetArgTyPossibilities.
+private func GetArgTyPossibilities(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: ASTContext,
+    ce: CallExpr, argSynthesizer: Option<(FuncArg) -> Ty>, exprSynthesizer: Option<(Expr) -> Ty>,
+    declSynthesizer: Option<CallDeclSynthesizer>): ArrayList<TySet> {
+    let ceArgs = ArrayList<TySet>()
+    for (arg in ce.args) {
+        let argCandidates = TySet()
+        if (let None <- arg.expr) {
+            continue
+        }
+        let expr = arg.expr.getOrThrow()
+        if (!expr.IsReferenceExpr() || HasBaseOfPlaceholderTy(typeManager, diag, ctx, Some(expr), exprSynthesizer)) {
+            argCandidates.Add(Ty.GetInitialTy())
+            ceArgs.add(argCandidates)
+            continue
+        }
+        ctx.targetTypeMap[expr] = TypeManager.GetQuestTy()
+        if (let Some(synthesizer) <- argSynthesizer) {
+            let _ = synthesizer(arg)
+        }
+        ctx.targetTypeMap.remove(expr)
+        let targets = GetFuncTargets(expr)
+        if (!Ty.IsTyCorrect(arg.GetTy()) || targets.isEmpty()) {
+            argCandidates.Add(arg.GetTy() ?? TypeManager.GetInvalidTy())
+            ceArgs.add(argCandidates)
+            continue
+        }
+        let validFuncTys = CollectValidFuncTys(typeManager, diag, ctx, targets, expr,
+            declSynthesizer: declSynthesizer)
+        for (candidate in validFuncTys.candidates) {
+            argCandidates.Add(candidate[1])
+        }
+        if (argCandidates.IsEmpty()) {
+            if (validFuncTys.genericIgnored) {
+                if (let Some(diagValue) <- diag) {
+                    DiagOld(diagValue, arg, BasicDiagKind.sema_generic_type_without_type_argument)
+                }
+                return ArrayList<TySet>()
+            }
+            argCandidates.Add(arg.GetTy() ?? TypeManager.GetInvalidTy())
+        }
+        ceArgs.add(argCandidates)
+    }
+    return ceArgs
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:1692 GetArgsCombination.
+private func GetArgsCombination(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: ASTContext,
+    ce: CallExpr, argSynthesizer: Option<(FuncArg) -> Ty>, exprSynthesizer: Option<(Expr) -> Ty>,
+    declSynthesizer: Option<CallDeclSynthesizer>): ArrayList<ArrayList<Ty>> {
+    let ceArgs = GetArgTyPossibilities(typeManager, diag, ctx, ce, argSynthesizer, exprSynthesizer, declSynthesizer)
+    if (ceArgs.isEmpty()) {
+        return ArrayList<ArrayList<Ty>>()
+    }
+    var combinations = ArrayList<ArrayList<Ty>>()
+    combinations.add(ArrayList<Ty>())
+    for (argCandidates in ceArgs) {
+        let nextCombinations = ArrayList<ArrayList<Ty>>()
+        for (prefix in combinations) {
+            for (candidateTy in argCandidates.values) {
+                let combined = ArrayList<Ty>()
+                for (ty in prefix) {
+                    combined.add(ty)
+                }
+                combined.add(candidateTy)
+                nextCombinations.add(combined)
+            }
+        }
+        combinations = nextCombinations
+    }
+    return combinations
 }
 
 // Mirrors C++ TypeCheckCall.cpp:725-772.
@@ -2937,29 +3556,39 @@ private func PostCheckCallExpr(typeManager: TypeManager, diag: Option<BasicDiagn
 private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: Option<ASTContext>,
     candidates: ArrayList<FuncDecl>, ce: CallExpr, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
     inferenceFailure!: Option<CallInferenceFailure> = None,
-    declSynthesizer!: Option<CallDeclSynthesizer> = None): ArrayList<FuncDecl> {
+    declSynthesizer!: Option<CallDeclSynthesizer> = None, argSynthesizer!: Option<(FuncArg) -> Ty> = None,
+    exprSynthesizer!: Option<(Expr) -> Ty> = None, effectiveArgChecker!: Option<CallArgChecker> = None): ArrayList<FuncDecl> {
     let legals = ArrayList<FunctionMatchingUnit>()
+    let argCombinations = if (let Some(ctxValue) <- ctx) {
+        GetArgsCombination(typeManager, diag, ctxValue, ce, argSynthesizer, exprSynthesizer, declSynthesizer)
+    } else {
+        let fallbackCombinations = ArrayList<ArrayList<Ty>>()
+        let currentArgs = ArrayList<Ty>()
+        for (arg in ce.args) {
+            currentArgs.add(GetExprTy(arg))
+        }
+        fallbackCombinations.add(currentArgs)
+        fallbackCombinations
+    }
+    if (!ce.args.isEmpty() && argCombinations.isEmpty()) {
+        return ArrayList<FuncDecl>()
+    }
+    if (ce.args.isEmpty() && argCombinations.isEmpty()) {
+        argCombinations.add(ArrayList<Ty>())
+    }
     if (candidates.size == 1) {
         var checked: Option<FunctionMatchingUnit> = None
+        let candidate = FunctionCandidate(candidates[0], ce, argCombinations)
         try (ds = DiagSuppressor(diag)) {
-            checked = CheckCandidate(typeManager, diag, ctx, ce, candidates[0], target, argChecker: argChecker,
-                inferenceFailure: inferenceFailure, declSynthesizer: declSynthesizer)
+            checked = CheckCandidate(typeManager, diag, ctx, candidate, target, argChecker: argChecker,
+                inferenceFailure: inferenceFailure, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer)
         }
         let out = ArrayList<FuncDecl>()
         if (let None <- checked) {
             return out
         }
         let unit = checked.getOrThrow()
-        if (let Some(checker) <- argChecker) {
-            var argIdx: Int64 = 0
-            while (argIdx < ce.args.size && argIdx < unit.tysInArgOrder.size) {
-                let paramTy = typeManager.ApplySubstPack(unit.tysInArgOrder[argIdx], unit.typeMapping)
-                if (!checker(paramTy, ce.args[argIdx])) {
-                    return out
-                }
-                argIdx++
-            }
-        }
+        ReInferCallArgs(typeManager, ce, unit, effectiveArgChecker)
         BuildDesugaredCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
         if (let Some(fdTy) <- unit.fd.GetTy()) {
             if (IsGenericCall(ctx, ce, unit.fd)) {
@@ -3003,9 +3632,10 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
             }
             var checked: Option<FunctionMatchingUnit> = None
             var suppressedDiags: Array<BasicDiagnostic> = Array<BasicDiagnostic>()
+            let candidate = FunctionCandidate(fd, ce, argCombinations)
             try (ds = DiagSuppressor(diag)) {
-                checked = CheckCandidate(typeManager, diag, ctx, ce, fd, target, argChecker: argChecker,
-                    inferenceFailure: inferenceFailure, declSynthesizer: declSynthesizer)
+                checked = CheckCandidate(typeManager, diag, ctx, candidate, target, argChecker: argChecker,
+                    inferenceFailure: inferenceFailure, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer)
                 suppressedDiags = ds.GetSuppressedDiag()
             }
             if (let None <- checked) {
@@ -3068,16 +3698,7 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
             if (funcHasError) {
                 return out
             }
-            if (let Some(checker) <- argChecker) {
-                var argIdx: Int64 = 0
-                while (argIdx < ce.args.size && argIdx < unit.tysInArgOrder.size) {
-                    let paramTy = typeManager.ApplySubstPack(unit.tysInArgOrder[argIdx], unit.typeMapping)
-                    if (!checker(paramTy, ce.args[argIdx])) {
-                        return out
-                    }
-                    argIdx++
-                }
-            }
+            ReInferCallArgs(typeManager, ce, unit, effectiveArgChecker)
             BuildDesugaredCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
             if (let Some(fdTy) <- unit.fd.GetTy()) {
                 if (IsGenericCall(ctx, ce, unit.fd)) {
@@ -3296,7 +3917,8 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
     clearInferredForTarget!: Bool = true, declSynthesizer!: Option<CallDeclSynthesizer> = None,
     ctx!: Option<ASTContext> = None, variadicDesugar!: Option<(CallExpr, Int64) -> Unit> = None,
     typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None,
-    argSynthesizer!: Option<(FuncArg) -> Ty> = None): Bool {
+    argSynthesizer!: Option<(FuncArg) -> Ty> = None, exprSynthesizer!: Option<(Expr) -> Ty> = None,
+    effectiveArgChecker!: Option<CallArgChecker> = None): Bool {
     if (let Some(desugar) <- ce.desugarExpr) {
         if (Ty.IsTyCorrect(desugar.GetTy())) {
             ce.SetTy(desugar.GetTy().getOrThrow())
@@ -3362,7 +3984,8 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
     }
     let inferenceFailure = CallInferenceFailure()
     let result = MatchFunctionForCall(typeManager, diag, ctx, candidates, ce, target, argChecker: argChecker,
-        inferenceFailure: Some(inferenceFailure), declSynthesizer: declSynthesizer)
+        inferenceFailure: Some(inferenceFailure), declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer,
+        exprSynthesizer: exprSynthesizer, effectiveArgChecker: effectiveArgChecker)
     ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy() ?? TypeManager.GetInvalidTy()))
     if (result.size == 1) {
         return true
@@ -3376,7 +3999,8 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
             }
             if (result.isEmpty() &&
                 ChkVariadicCallExpr(typeManager, diag, ctx, target, ce, candidates, desugarVariadic,
-                    argChecker: argChecker)) {
+                    argChecker: argChecker, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer,
+                    exprSynthesizer: exprSynthesizer, effectiveArgChecker: effectiveArgChecker)) {
                 return true
             }
         }
@@ -3394,15 +4018,7 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
         }
         ce.resolvedFunction = Some(result[0])
     }
-    if (prevCheckTrue) {
-        var idx: Int64 = 0
-        while (idx < ce.args.size && idx < argsTys.size) {
-            if (let Some(argTy) <- argsTys[idx]) {
-                ce.args[idx].SetTy(argTy)
-            }
-            idx++
-        }
-    }
+    RecoverCallArgs(ce, argsTys, effectiveArgChecker)
     if (let Some(diagValue) <- diag) {
         if (!diagValue.GetDiagnoseStatus() && !prevCheckTrue) {
             ce.callKind = CallKind.CALL_INVALID
@@ -3424,10 +4040,12 @@ public func SynCallExprWithArgChecker(typeManager: TypeManager, ce: CallExpr, ar
     diag!: Option<BasicDiagnosticEngine> = None, declSynthesizer!: Option<CallDeclSynthesizer> = None,
     ctx!: Option<ASTContext> = None, variadicDesugar!: Option<(CallExpr, Int64) -> Unit> = None,
     typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None,
-    argSynthesizer!: Option<(FuncArg) -> Ty> = None): Ty {
+    argSynthesizer!: Option<(FuncArg) -> Ty> = None, exprSynthesizer!: Option<(Expr) -> Ty> = None,
+    effectiveArgChecker!: Option<CallArgChecker> = None): Ty {
     if (ChkCallExprWithArgChecker(typeManager, diag, None, ce, argChecker, declSynthesizer: declSynthesizer,
         ctx: ctx, variadicDesugar: variadicDesugar, typeChecker: typeChecker,
-        typeSynthesizer: typeSynthesizer, argSynthesizer: argSynthesizer)) {
+        typeSynthesizer: typeSynthesizer, argSynthesizer: argSynthesizer, exprSynthesizer: exprSynthesizer,
+        effectiveArgChecker: effectiveArgChecker)) {
         return ce.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return TypeManager.GetInvalidTy()
@@ -3474,9 +4092,7 @@ public func FilterAndReduceSubstPacks(mapsList: ArrayList<SubstPack>, typeManage
 
 // C++ src/Sema/TypeCheckCall.cpp:268 ResolveTypeMappings.
 // (CompareParamTys is already present as the private helper above at :938 — same as C++ :246.)
-// Deviation: C++ handles the pathological both-null FuncTy cast (nullptr==nullptr) by marking j
-// redundant; fd.GetTy() is asserted a func and ApplySubstPack preserves func-ness, so that case
-// cannot arise here and is skipped.
+// fd.GetTy() is asserted a func and ApplySubstPack preserves func-ness before CompareParamTys.
 public func ResolveTypeMappings(typeManager: TypeManager, typeMappings: ArrayList<SubstPack>,
     fd: FuncDecl): ArrayList<SubstPack> {
     let mappingSize = typeMappings.size
@@ -3558,18 +4174,20 @@ public func DiagnoseForMultiMapping(diag: Option<BasicDiagnosticEngine>, ce: Cal
 }
 
 // C++ src/Sema/TypeCheckCall.cpp:1053 CheckGenericCallCompatible.
-// Deviation: the per-mapping arg check uses argChecker via CheckCallArgCompatible
-// (selfhost callback pattern, = C++ CheckWithCache).
+// The selfhost argChecker callback is TypeChecker.cj's CheckWithCache entry, matching C++ line 1090.
 private func CheckGenericCallCompatible(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
-    ctx: Option<ASTContext>, ce: CallExpr, fd: FuncDecl, paramTyInArgOrder: ArrayList<Ty>,
-    target: Option<Ty>, argChecker: Option<CallArgChecker>,
-    inferenceFailure: Option<CallInferenceFailure>): Option<SubstPack> {
-    let typeMappings = GenerateTypeMappingForCall(typeManager, diag, ctx, ce, fd, paramTyInArgOrder,
-        inferenceFailure, target, argChecker)
+    ctx: Option<ASTContext>, candidate: FunctionCandidate, target: Option<Ty>, argChecker: Option<CallArgChecker>,
+    inferenceFailure: Option<CallInferenceFailure>, argSynthesizer: Option<(FuncArg) -> Ty>,
+    declSynthesizer: Option<CallDeclSynthesizer>): Option<SubstPack> {
+    let ce = candidate.ce
+    let fd = candidate.fd
+    let typeMappings = GenerateTypeMappingForCall(typeManager, diag, ctx, candidate,
+        inferenceFailure, target, argChecker, argSynthesizer, declSynthesizer)
     FilterAndReduceSubstPacks(typeMappings, typeManager)
     if (typeMappings.isEmpty()) {
         return None
     }
+    let paramTyInArgOrder = GetParamTysInArgsOrder(typeManager, ce, fd)
     if (paramTyInArgOrder.size != ce.args.size) {
         return None
     }
@@ -3622,7 +4240,7 @@ private func CheckGenericCallCompatible(typeManager: TypeManager, diag: Option<B
             resMappings.remove(at: mi)
         }
     }
-    let _ = matchedCnt
+    candidate.stat.matchedArgs = UInt32(matchedCnt)
     let resolved = ResolveTypeMappings(typeManager, resMappings, fd)
     if (resolved.size == 1) {
         let selectedMapping = resolved[0]

@@ -21,6 +21,9 @@ import cangjie_compiler::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
 import cangjie_compiler::utils.CTYPE_NAME as UtilsCTypeName
 import cangjie_compiler::utils.CJC_ASSERT
 
+private let INOUT_TEMP_VALUE: String = "temporary value"
+private let INOUT_IMMUTABLE: String = "is a immutable variable"
+
 private func contextPackage(ctx: ASTContext): Option<Package> {
     return ctx.curPackage
 }
@@ -1581,7 +1584,7 @@ public class TypeChecker {
 
     private func SynthesizeFuncArg(ctx: ASTContext, arg: FuncArg): Ty {
         if (let Some(expr) <- arg.expr) {
-            let exprTy = Synthesize(ctx, expr)
+            let exprTy = Synthesize(ctx, SynPos.EXPR_ARG, expr)
             if (Ty.IsTyCorrect(exprTy)) {
                 arg.SetTy(exprTy)
                 return exprTy
@@ -2957,15 +2960,7 @@ public class TypeChecker {
     }
 
     private func CheckCallArgFromContext(ctx: ASTContext, target: Ty, arg: FuncArg): Bool {
-        if (let Some(expr) <- arg.expr) {
-            typeCheckExprClearKeepTargets(expr)
-            let ok = Check(ctx, target, expr, clearInferredCallTypes: false)
-            if (ok) {
-                arg.SetTy(expr.GetTy() ?? target)
-            }
-            return ok
-        }
-        return false
+        return CheckWithCache(ctx, target, arg)
     }
 
     private func LookupCoreDeclForSpawn(ctx: ASTContext, name: String): Option<Decl> {
@@ -3503,7 +3498,8 @@ public class TypeChecker {
         return isWellTyped
     }
 
-    private func SynthesizeMatchChildren(ctx: ASTContext, matchExpr: MatchExpr): Unit {
+    private func SynthesizeMatchChildren(ctx: ASTContext, matchExpr: MatchExpr): ArrayList<Decl> {
+        let allBoundDecls = ArrayList<Decl>()
         var selectorTy: Option<Ty> = None
         if (let Some(selector) <- matchExpr.selector) {
             let _ = Synthesize(ctx, selector)
@@ -3519,6 +3515,9 @@ public class TypeChecker {
                             Check(ctx, target, expr)
                         }))
                     BindCollectedConditionDecls(ctx, matchCase.patterns, boundDecls)
+                    for (decl in boundDecls) {
+                        AddUniqueBoundDecl(allBoundDecls, decl)
+                    }
                 }
             }
             if (let Some(patternGuard) <- matchCase.patternGuard) {
@@ -3527,7 +3526,6 @@ public class TypeChecker {
             if (let Some(action) <- matchCase.exprOrDecls) {
                 let _ = SynthesizeBlock(ctx, action)
             }
-            RemovePatternBindings(ctx, boundDecls)
         }
         for (matchCaseOther in matchExpr.matchCaseOthers) {
             if (let Some(matchCaseExpr) <- matchCaseOther.matchExpr) {
@@ -3537,6 +3535,7 @@ public class TypeChecker {
                 let _ = SynthesizeBlock(ctx, otherAction)
             }
         }
+        return allBoundDecls
     }
 
     private func CollectPatternBinding(pattern: Pattern, out: ArrayList<Decl>): Unit {
@@ -3712,7 +3711,19 @@ public class TypeChecker {
 
     private func SynthesizeNameReference(ctx: ASTContext, nameRef: NameReferenceExpr): Ty {
         if (impl.typeManager.GetUnsolvedTyVars().isEmpty() && ctx.IsSynSkippedForCorrectTy(nameRef)) {
-            return nameRef.GetTy() ?? TypeManager.GetInvalidTy()
+            var canSkip = true
+            if (let Some(refExpr) <- (nameRef as RefExpr)) {
+                canSkip = refExpr.isThis || refExpr.isSuper
+                if (let Some(target) <- refExpr.ref.target) {
+                    let targetTy = target.GetTy() ?? TypeManager.GetInvalidTy()
+                    canSkip = !targetTy.IsPlaceholder()
+                }
+            } else if (let Some(memberAccess) <- (nameRef as MemberAccess)) {
+                canSkip = memberAccess.target.isSome()
+            }
+            if (canSkip) {
+                return nameRef.GetTy() ?? TypeManager.GetInvalidTy()
+            }
         }
         for (typeArg in nameRef.GetTypeArgs()) {
             impl.SetTypeTy(ctx, typeArg)
@@ -3970,6 +3981,25 @@ public class TypeChecker {
         return ret
     }
 
+    private func CheckAndCache(ctx: ASTContext, target: Ty, arg: FuncArg, key: CacheKey): Bool {
+        let dc = DiagnosticCache()
+        if (let Some(diagValue) <- impl.diag) {
+            dc.ToExclude(diagValue)
+        }
+        GetTypeCheckCache(ctx, arg).lastKey = key
+        let ret = ChkFuncArg(ctx, target, arg)
+        if (let Some(diagValue2) <- impl.diag) {
+            dc.BackUp(diagValue2)
+        }
+        let entry = CacheEntry()
+        entry.successful = ret
+        entry.result = arg.GetTy()
+        entry.diags = dc
+        entry.targets = CollectTargets(arg)
+        GetTypeCheckCache(ctx, arg).chkCache[key] = entry
+        return ret
+    }
+
     private func SynthesizeWithCache(ctx: ASTContext, pos: SynPos, expr: Expr): Ty {
         if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
             return Synthesize(ctx, pos, expr)
@@ -3994,6 +4024,20 @@ public class TypeChecker {
             return cache.successful
         }
         return CheckAndCache(ctx, target, expr, key)
+    }
+
+    private func CheckWithCache(ctx: ASTContext, target: Ty, arg: FuncArg): Bool {
+        if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
+            GetTypeCheckCache(ctx, arg).lastKey = GetCacheKeyForChk(ctx, arg, target)
+            return ChkFuncArg(ctx, target, arg)
+        }
+        let key = GetCacheKeyForChk(ctx, arg, target)
+        let nodeCache = GetTypeCheckCache(ctx, arg)
+        if (let Some(cache) <- nodeCache.chkCache.get(key)) {
+            RestoreCached(ctx, arg, cache)
+            return cache.successful
+        }
+        return CheckAndCache(ctx, target, arg, key)
     }
 
     private func SynthesizeWithNegCache(ctx: ASTContext, pos: SynPos, expr: Expr): Ty {
@@ -4046,6 +4090,236 @@ public class TypeChecker {
         }
         expr.Clear()
         return CheckAndCache(ctx, target, expr, key)
+    }
+
+    private func CheckWithEffectiveCache(ctx: ASTContext, target: Ty, arg: FuncArg,
+        recoverDiag: Bool): Bool {
+        if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
+            GetTypeCheckCache(ctx, arg).lastKey = GetCacheKeyForChk(ctx, arg, target)
+            return ChkFuncArg(ctx, target, arg)
+        }
+        let key = GetCacheKeyForChk(ctx, arg, target)
+        if (!Ty.IsInitialTy(arg.GetTy())) {
+            let nodeCache = GetTypeCheckCache(ctx, arg)
+            if (let Some(lastKey) <- nodeCache.lastKey) {
+                if (lastKey == key) {
+                    if (let Some(cache) <- nodeCache.chkCache.get(key)) {
+                        RestoreCached(ctx, arg, cache, recoverDiag: recoverDiag)
+                        return cache.successful
+                    }
+                    return CheckAndCache(ctx, target, arg, key)
+                }
+            }
+        }
+        arg.Clear()
+        return CheckAndCache(ctx, target, arg, key)
+    }
+
+    private func ChkFuncArg(ctx: ASTContext, target: Ty, arg: FuncArg): Bool {
+        if (let None <- arg.expr) {
+            arg.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
+        if (arg.withInout) {
+            return ChkFuncArgWithInout(ctx, target, arg)
+        }
+        let expr = arg.expr.getOrThrow()
+        if (!Check(ctx, target, expr)) {
+            arg.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
+        arg.SetTy(expr.GetTy() ?? TypeManager.GetInvalidTy())
+        return true
+    }
+
+    private func ChkFuncArgWithInout(ctx: ASTContext, target: Ty, arg: FuncArg): Bool {
+        let expr = arg.expr.getOrThrow()
+        var realTarget = target
+        var exprTy = expr.GetTy() ?? TypeManager.GetInvalidTy()
+        if (!Ty.IsTyCorrect(exprTy)) {
+            exprTy = Synthesize(ctx, SynPos.EXPR_ARG, expr)
+        }
+        let argTy = exprTy as VArrayTy
+        let ptrParamTy = target as PointerTy
+        let varrParamTy = target as VArrayTy
+        if (let Some(argVArray) <- argTy) {
+            if (let Some(ptrTy) <- ptrParamTy) {
+                if (!ptrTy.typeArgs.isEmpty()) {
+                    realTarget = impl.typeManager.GetVArrayTy(ptrTy.typeArgs[0], argVArray.size)
+                }
+            } else if (let Some(_) <- varrParamTy) {
+                realTarget = target
+            }
+        } else if (let Some(ptrTy2) <- ptrParamTy) {
+            if (!ptrTy2.typeArgs.isEmpty()) {
+                realTarget = ptrTy2.typeArgs[0]
+            }
+        }
+        if (!Ty.IsTyCorrect(exprTy) || !impl.typeManager.IsSubtype(exprTy, realTarget)) {
+            if (Ty.IsTyCorrect(exprTy)) {
+                if (let Some(diagValue) <- impl.diag) {
+                    DiagMismatchedTypes(diagValue, expr, realTarget)
+                }
+            }
+            arg.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
+        if (!ChkInoutFuncArg(arg)) {
+            arg.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
+        let pointerArgTy = if (let Some(vArrayTarget) <- (realTarget as VArrayTy)) {
+            vArrayTarget.typeArgs[0]
+        } else {
+            realTarget
+        }
+        arg.SetTy(impl.typeManager.GetPointerTy(pointerArgTy))
+        return true
+    }
+
+    private func ChkInoutFuncArg(arg: FuncArg): Bool {
+        let expr = arg.expr.getOrThrow()
+        match (expr.astKind) {
+            case ASTKind.REF_EXPR =>
+                return ChkInoutRefExpr((expr as RefExpr).getOrThrow(), isBase: false)
+            case ASTKind.MEMBER_ACCESS =>
+                return ChkInoutMemberAccess((expr as MemberAccess).getOrThrow())
+            case ASTKind.LIT_CONST_EXPR =>
+                if (let Some(diagValue) <- impl.diag) {
+                    let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_inout_must_be_var_variable,
+                        MakeRange(expr.begin, expr.end))
+                    builder.AddMainHintArguments("literal")
+                    builder.Emit()
+                }
+                return false
+            case _ =>
+                if (let Some(diagValue2) <- impl.diag) {
+                    let builder2 = diagValue2.DiagnoseRefactor(BasicDiagKindRefactor.sema_inout_must_be_var_variable,
+                        MakeRange(expr.begin, expr.end))
+                    builder2.AddMainHintArguments(INOUT_TEMP_VALUE)
+                    builder2.Emit()
+                }
+                return false
+        }
+    }
+
+    private func ChkInoutRefExpr(refExpr: RefExpr, isBase!: Bool = false): Bool {
+        let target = GetRealTarget(refExpr.GetTarget())
+        let thisOrSuper = refExpr.isThis || refExpr.isSuper
+        if (isBase && thisOrSuper) {
+            return true
+        }
+        let targetIsVarOrParam = if (let Some(targetDecl) <- target) {
+            targetDecl.astKind == ASTKind.VAR_DECL || targetDecl.astKind == ASTKind.FUNC_PARAM
+        } else {
+            false
+        }
+        if (thisOrSuper || !targetIsVarOrParam) {
+            if (let Some(diagValue) <- impl.diag) {
+                let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_inout_must_be_var_variable,
+                    MakeRange(refExpr.begin, refExpr.end))
+                builder.AddMainHintArguments("not a variable")
+                builder.Emit()
+            }
+            return false
+        }
+        let varDecl = (target.getOrThrow() as VarDeclAbstract).getOrThrow()
+        if (!varDecl.isVar) {
+            if (let Some(diagValue2) <- impl.diag) {
+                let builder2 = diagValue2.DiagnoseRefactor(BasicDiagKindRefactor.sema_inout_must_be_var_variable,
+                    MakeRange(refExpr.begin, refExpr.end))
+                builder2.AddMainHintArguments(INOUT_IMMUTABLE)
+                builder2.Emit()
+            }
+            return false
+        }
+        if (let Some(outerDecl) <- varDecl.outerDecl) {
+            if (outerDecl.IsNominalDecl() && outerDecl.astKind != ASTKind.STRUCT_DECL &&
+                !varDecl.TestAttr(Attribute.STATIC)) {
+                if (let Some(diagValue3) <- impl.diag) {
+                    let builder3 = diagValue3.DiagnoseRefactor(BasicDiagKindRefactor.sema_inout_modify_heap_variable,
+                        MakeRange(refExpr.begin, refExpr.end))
+                    builder3.Emit()
+                }
+                return false
+            }
+        }
+        return true
+    }
+
+    private func ChkInoutMemberAccess(memberAccess: MemberAccess): Bool {
+        if (let Some(desugar) <- memberAccess.desugarExpr) {
+            if (desugar.astKind == ASTKind.LIT_CONST_EXPR) {
+                if (let Some(diagValue) <- impl.diag) {
+                    let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_inout_must_be_var_variable,
+                        MakeRange(memberAccess.begin, memberAccess.end))
+                    builder.AddMainHintArguments(INOUT_IMMUTABLE)
+                    builder.Emit()
+                }
+                return false
+            }
+        }
+        let target = memberAccess.GetTarget()
+        if (let None <- target) {
+            return false
+        }
+        var meetConstraints = true
+        if (let Some(varDecl) <- (target.getOrThrow() as VarDeclAbstract)) {
+            if (!varDecl.isVar) {
+                if (let Some(diagValue2) <- impl.diag) {
+                    let builder2 = diagValue2.DiagnoseRefactor(BasicDiagKindRefactor.sema_inout_must_be_var_variable,
+                        MakeRange(memberAccess.field.Begin(), memberAccess.field.End()))
+                    builder2.AddMainHintArguments(INOUT_IMMUTABLE)
+                    builder2.Emit()
+                }
+                meetConstraints = false
+            }
+            if (varDecl.TestAttr(Attribute.STATIC)) {
+                return meetConstraints
+            }
+        } else {
+            if (let Some(diagValue3) <- impl.diag) {
+                let builder3 = diagValue3.DiagnoseRefactor(BasicDiagKindRefactor.sema_inout_must_be_var_variable,
+                    MakeRange(memberAccess.begin, memberAccess.end))
+                if (target.getOrThrow().astKind == ASTKind.FUNC_DECL) {
+                    builder3.AddMainHintArguments("function declaration")
+                } else {
+                    builder3.AddMainHintArguments(INOUT_TEMP_VALUE)
+                }
+                builder3.Emit()
+            }
+            meetConstraints = false
+        }
+        let baseExpr = match (memberAccess.baseExpr) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (Ty.IsTyCorrect(baseExpr.GetTy()) && (baseExpr.GetTy().getOrThrow()).IsClassLike()) {
+            if (let Some(diagValue4) <- impl.diag) {
+                let builder4 = diagValue4.DiagnoseRefactor(BasicDiagKindRefactor.sema_inout_modify_heap_variable,
+                    MakeRange(baseExpr.begin, baseExpr.end))
+                builder4.Emit()
+            }
+            return false
+        }
+        if (let Some(baseRef) <- (baseExpr as RefExpr)) {
+            return ChkInoutRefExpr(baseRef, isBase: true) && meetConstraints
+        }
+        if (let Some(baseMember) <- (baseExpr as MemberAccess)) {
+            if (let Some(beTarget) <- GetRealTarget(baseExpr.GetTarget())) {
+                if (beTarget.astKind != ASTKind.PACKAGE_DECL) {
+                    return ChkInoutMemberAccess(baseMember) && meetConstraints
+                }
+            }
+            return false
+        }
+        if (let Some(diagValue5) <- impl.diag) {
+            let builder5 = diagValue5.DiagnoseRefactor(BasicDiagKindRefactor.sema_inout_must_be_var_variable,
+                MakeRange(baseExpr.begin, baseExpr.end))
+            builder5.AddMainHintArguments(INOUT_TEMP_VALUE)
+            builder5.Emit()
+        }
+        return false
     }
 
     private func SynthesizeWithEffectiveCache(ctx: ASTContext, pos: SynPos, expr: Expr,
@@ -4253,6 +4527,7 @@ public class TypeChecker {
         if (impl.typeManager.GetUnsolvedTyVars().isEmpty() && ctx.IsSynSkippedForCorrectTy(expr)) {
             return expr.GetTy() ?? TypeManager.GetInvalidTy()
         }
+        GetTypeCheckCache(ctx, expr).lastKey = GetCacheKeyForSyn(ctx, expr)
         if (let Some(incOrDec) <- (expr as IncOrDecExpr)) {
             return FinishSynthesize(ctx, incOrDec, SynIncOrDecExpr(incOrDec,
                 { leftValue: Expr => Synthesize(ctx, SynPos.LEFT_VALUE, leftValue) },
@@ -4306,18 +4581,25 @@ public class TypeChecker {
                     }
                 }),
                 typeSynthesizer: Some({ typeNode: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode) }),
-                argSynthesizer: Some({ arg: FuncArg => SynthesizeFuncArg(ctx, arg) }))
+                argSynthesizer: Some({ arg: FuncArg => SynthesizeFuncArg(ctx, arg) }),
+                exprSynthesizer: Some({ child: Expr => SynthesizeWithCache(ctx, SynPos.EXPR_ARG, child) }),
+                effectiveArgChecker: Some({ expectedTy: Ty, arg: FuncArg =>
+                    CheckWithEffectiveCache(ctx, expectedTy, arg, false)
+                }))
             return FinishSynthesize(ctx, callExpr, callTy)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
             return SynthesizeIfExpr(ctx, pos, ifExpr)
         }
         if (let Some(matchExpr) <- (expr as MatchExpr)) {
-            SynthesizeMatchChildren(ctx, matchExpr)
-            return FinishSynthesize(ctx, matchExpr, SynMatchExpr(impl.typeManager, ctx, matchExpr, diag: impl.diag,
+            let boundDecls = SynthesizeMatchChildren(ctx, matchExpr)
+            let matchTy = SynMatchExpr(impl.typeManager, ctx, matchExpr, diag: impl.diag,
                 exprChecker: Some({ target: Ty, expr: Expr =>
                     Check(ctx, target, expr)
-                })))
+                }))
+            ctx.SkipSynForCorrectTy(matchExpr)
+            RemovePatternBindings(ctx, boundDecls)
+            return matchTy
         }
         if (let Some(jumpExpr) <- (expr as JumpExpr)) {
             return FinishSynthesize(ctx, jumpExpr, SynLoopControlExpr(ctx, jumpExpr))
@@ -4396,7 +4678,8 @@ public class TypeChecker {
         if (let Some(assign) <- (expr as AssignExpr)) {
             SynthesizeAssignChildren(ctx, assign)
             return FinishSynthesize(ctx, assign, SynAssignExpr(impl.typeManager, assign,
-                rightChecker: Some({ target: Ty, rightExpr: Expr => Check(ctx, target, rightExpr) })))
+                rightChecker: Some({ target: Ty, rightExpr: Expr => Check(ctx, target, rightExpr) }),
+                ctx: Some(ctx), synthesizer: Some({ desugar: Expr => Synthesize(ctx, SynPos.UNUSED, desugar) })))
         }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             return SynthesizeThrowExpr(ctx, throwExpr)
@@ -4682,6 +4965,7 @@ public class TypeChecker {
         if (target.HasQuestTy() && !IsQuestableNode(expr)) {
             return false
         }
+        GetTypeCheckCache(ctx, expr).lastKey = GetCacheKeyForChk(ctx, expr, target)
         if (let Some(lambda) <- (expr as LambdaExpr)) {
             return FinishCheck(ctx, lambda, CheckLambdaExprWithTarget(ctx, target, lambda))
         }
@@ -4692,7 +4976,7 @@ public class TypeChecker {
         }
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
             typeCheckExprPutTargetType(ctx, nameRef, target)
-            let _ = Synthesize(ctx, nameRef)
+            let _ = SynthesizeNameReference(ctx, nameRef)
             let ok = ChkNameReferenceExpr(impl.typeManager, target, nameRef, diag: impl.diag)
             return FinishCheck(ctx, expr, ok)
         }
@@ -4727,18 +5011,28 @@ public class TypeChecker {
                     }
                 }),
                 typeSynthesizer: Some({ typeNode: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode) }),
-                argSynthesizer: Some({ arg: FuncArg => SynthesizeFuncArg(ctx, arg) }))
+                argSynthesizer: Some({ arg: FuncArg => SynthesizeFuncArg(ctx, arg) }),
+                exprSynthesizer: Some({ child: Expr => SynthesizeWithCache(ctx, SynPos.EXPR_ARG, child) }),
+                effectiveArgChecker: Some({ expectedTy: Ty, arg: FuncArg =>
+                    CheckWithEffectiveCache(ctx, expectedTy, arg, false)
+                }))
             return FinishCheck(ctx, callExpr, ok)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
             return FinishCheck(ctx, ifExpr, CheckIfExprWithTarget(ctx, target, ifExpr))
         }
         if (let Some(matchExpr) <- (expr as MatchExpr)) {
-            SynthesizeMatchChildren(ctx, matchExpr)
-            return FinishCheck(ctx, matchExpr, ChkMatchExpr(impl.typeManager, ctx, target, matchExpr, diag: impl.diag,
+            let boundDecls = SynthesizeMatchChildren(ctx, matchExpr)
+            let matchOk = ChkMatchExpr(impl.typeManager, ctx, target, matchExpr, diag: impl.diag,
                 exprChecker: Some({ target2: Ty, expr: Expr =>
                     Check(ctx, target2, expr)
-                })))
+                }))
+            if (matchOk) {
+                ctx.SkipSynForCorrectTy(matchExpr)
+            }
+            typeCheckExprClearTargetType(ctx, matchExpr)
+            RemovePatternBindings(ctx, boundDecls)
+            return matchOk
         }
         if (let Some(parenExpr) <- (expr as ParenExpr)) {
             return FinishCheck(ctx, parenExpr, ChkParenExpr(impl.typeManager, target, parenExpr,

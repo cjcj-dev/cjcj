@@ -202,6 +202,7 @@ public class ASTContext {
     public let targetTypeMap: HashMap<Node, Ty> = HashMap<Node, Ty>()
     public let lastTargetTypeMap: HashMap<Node, Ty> = HashMap<Node, Ty>()
     public let typeCheckCache: HashMap<Node, TypeCheckCache> = HashMap<Node, TypeCheckCache>()
+    public let funcArgReachable: HashMap<Node, Bool> = HashMap<Node, Bool>()
     public var searcher: Searcher = Searcher()
     public let packageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()
     public let resolvedImportedDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
@@ -308,15 +309,19 @@ public class ASTContext {
     }
 
     public func SkipSynForCorrectTy(node: Node): Unit {
-        let cache = TypeCheckCache()
         var isDesugared = false
         if (let Some(expr) <- (node as Expr)) {
             if (let Some(_) <- expr.desugarExpr) {
                 isDesugared = true
             }
         }
-        cache.lastKey = CacheKey(node.GetTy(), isDesugared, 0)
-        typeCheckCache[node] = cache
+        if (let Some(cache) <- typeCheckCache.get(node)) {
+            cache.lastKey = CacheKey(node.GetTy(), isDesugared, 0)
+            return
+        }
+        let newCache = TypeCheckCache()
+        newCache.lastKey = CacheKey(node.GetTy(), isDesugared, 0)
+        typeCheckCache[node] = newCache
     }
 
     public func IsSynSkippedForCorrectTy(node: Node): Bool {

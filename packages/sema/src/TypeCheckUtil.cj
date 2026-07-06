@@ -810,6 +810,19 @@ public func HasTyVarsToSolve(maps: SubstPack): Bool {
     return false
 }
 
+// C++ src/Sema/TypeCheckUtil.cpp:743 GetTyVarsToSolve.
+public func GetTyVarsToSolve(maps: SubstPack): ArrayList<GenericsTy> {
+    let ret = ArrayList<GenericsTy>()
+    for (entry in maps.u2i.entries) {
+        if (let Some(tv) <- (entry.ty as GenericsTy)) {
+            if (let None <- maps.inst.Get(tv)) {
+                ret.add(tv)
+            }
+        }
+    }
+    return ret
+}
+
 // C++ src/Sema/TypeCheckUtil.cpp:993 GetGenericParamsForDecl.
 public func GetGenericParamsForDecl(decl: Decl): TySet {
     let ret = TySet()
