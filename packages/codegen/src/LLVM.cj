@@ -11,6 +11,7 @@ public type LLVMBuilderRef = CPointer<Unit>
 public type LLVMMemoryBufferRef = CPointer<Unit>
 public type LLVMMetadataRef = CPointer<Unit>
 public type LLVMNamedMDNodeRef = CPointer<Unit>
+public type LLVMValueMetadataEntry = CPointer<Unit>
 public type LLVMAttributeRef = CPointer<Unit>
 public type LLVMUseRef = CPointer<Unit>
 public type LLVMDIBuilderRef = CPointer<Unit>
@@ -238,6 +239,10 @@ foreign {
     func LLVMGlobalSetMetadata(global: LLVMValueRef, kind: UInt32, metadata: LLVMMetadataRef): Unit
     func LLVMGlobalEraseMetadata(global: LLVMValueRef, kind: UInt32): Unit
     func LLVMGlobalClearMetadata(global: LLVMValueRef): Unit
+    func LLVMGlobalCopyAllMetadata(value: LLVMValueRef, numEntries: CPointer<UIntNative>): LLVMValueMetadataEntry
+    func LLVMDisposeValueMetadataEntries(entries: LLVMValueMetadataEntry): Unit
+    func LLVMValueMetadataEntriesGetKind(entries: LLVMValueMetadataEntry, index: UInt32): UInt32
+    func LLVMValueMetadataEntriesGetMetadata(entries: LLVMValueMetadataEntry, index: UInt32): LLVMMetadataRef
     func LLVMGlobalObjectAddStringAttribute(gv: LLVMValueRef, k: CString, kLen: UInt32, v: CString,
         vLen: UInt32): Unit
     func LLVMCountParams(fn: LLVMValueRef): UInt32

@@ -122,6 +122,7 @@ public class CGContext {
     public func GetCachedMangleMap(): CachedMangleMap { return cgPkgContext.GetCachedMangleMap() }
     public func IsCGParallelEnabled(): Bool { return cgPkgContext.IsCGParallelEnabled() }
     public func IsLineInfoEnabled(): Bool { return cgPkgContext.IsLineInfoEnabled() }
+    public func AddLocalizedSymbol(symName: String): Unit { cgPkgContext.AddLocalizedSymbol(symName) }
 
     public func IsCustomTypeOfOtherLLVMModule(chirType: Type): Bool {
         if (let Some(customType) <- (chirType as CustomType)) {

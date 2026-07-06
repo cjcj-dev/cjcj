@@ -80,8 +80,105 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         cgMod.GenTypeInfo()
         InitializeCjStringLiteral(cgMod)
         cgMod.EraseUselessInstsAndDeclarations()
+        SetSymbolLinkageType(cgMod)
     }
+    let localizedSymbols = cgPkgContext.GetLocalizedSymbols()
+    let localizedSymbolsVec = ArrayList<String>()
+    for (symbol in localizedSymbols) {
+        localizedSymbolsVec.add(symbol)
+    }
+    sort(localizedSymbolsVec, by: { left: String, right: String => CompareString(left, right) })
+    options.symbolsNeedLocalized.clear()
+    for (symbol in localizedSymbolsVec) {
+        options.symbolsNeedLocalized.add(symbol)
+    }
+    let localizedSymbolsForPkg = ArrayList<String>()
+    for (symbol in localizedSymbolsVec) {
+        localizedSymbolsForPkg.add(symbol)
+    }
+    options.symbolsNeedLocalizedPerPkg[cgPkgContext.GetCHIRPackage().GetName()] = localizedSymbolsForPkg
     return cgPkgContext.ReleaseLLVMModules()
+}
+
+private func SetSymbolLinkageType(cgMod: CGModule): Unit {
+    let moduleHandle = cgMod.GetLLVMModule() ?? return
+    let linkageTypeKind = LLVMGetMDKindID(cgMod.GetLLVMContext(), "LinkageType")
+    var globalObject = unsafe { LLVMGetFirstGlobal(moduleHandle.raw) }
+    while (!globalObject.isNull()) {
+        var hasLinkageType = false
+        if (linkageTypeKind != 0u32) {
+            try (countPtr = LibC.malloc<UIntNative>().asResource()) {
+                unsafe { countPtr.value.write(UIntNative(0)) }
+                let entries = unsafe { LLVMGlobalCopyAllMetadata(globalObject, countPtr.value) }
+                let count = unsafe { countPtr.value.read() }
+                if (!entries.isNull()) {
+                    var idx: UInt32 = 0u32
+                    while (idx < UInt32(count)) {
+                        if (unsafe { LLVMValueMetadataEntriesGetKind(entries, idx) } == linkageTypeKind) {
+                            hasLinkageType = true
+                            break
+                        }
+                        idx++
+                    }
+                    unsafe { LLVMDisposeValueMetadataEntries(entries) }
+                }
+            }
+        }
+        if (hasLinkageType) {
+            let linkageType = GetLinkageTypeOfGlobalObject(globalObject)
+            LLVMEraseGlobalMetadata(cgMod.GetLLVMContext(), globalObject, "LinkageType")
+            if (unsafe { LLVMIsDeclaration(globalObject) } == 0) {
+                if (LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.WeakODR) ||
+                    LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.LinkOnceAny) ||
+                    LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.LinkOnceODR)) {
+                    unsafe { LLVMSetLinkage(globalObject, LLVMLinkageValue(linkageType)) }
+                } else if (LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.Internal) ||
+                    LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.Private)) {
+                    cgMod.GetCGContext().AddLocalizedSymbol(
+                        LLVMCStringToString(unsafe { LLVMGetValueName(globalObject) }) ?? "")
+                }
+            }
+        }
+        globalObject = unsafe { LLVMGetNextGlobal(globalObject) }
+    }
+    var functionObject = unsafe { LLVMGetFirstFunction(moduleHandle.raw) }
+    while (!functionObject.isNull()) {
+        var hasLinkageType = false
+        if (linkageTypeKind != 0u32) {
+            try (countPtr = LibC.malloc<UIntNative>().asResource()) {
+                unsafe { countPtr.value.write(UIntNative(0)) }
+                let entries = unsafe { LLVMGlobalCopyAllMetadata(functionObject, countPtr.value) }
+                let count = unsafe { countPtr.value.read() }
+                if (!entries.isNull()) {
+                    var idx: UInt32 = 0u32
+                    while (idx < UInt32(count)) {
+                        if (unsafe { LLVMValueMetadataEntriesGetKind(entries, idx) } == linkageTypeKind) {
+                            hasLinkageType = true
+                            break
+                        }
+                        idx++
+                    }
+                    unsafe { LLVMDisposeValueMetadataEntries(entries) }
+                }
+            }
+        }
+        if (hasLinkageType) {
+            let linkageType = GetLinkageTypeOfGlobalObject(functionObject)
+            LLVMEraseGlobalMetadata(cgMod.GetLLVMContext(), functionObject, "LinkageType")
+            if (unsafe { LLVMIsDeclaration(functionObject) } == 0) {
+                if (LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.WeakODR) ||
+                    LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.LinkOnceAny) ||
+                    LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.LinkOnceODR)) {
+                    unsafe { LLVMSetLinkage(functionObject, LLVMLinkageValue(linkageType)) }
+                } else if (LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.Internal) ||
+                    LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.Private)) {
+                    cgMod.GetCGContext().AddLocalizedSymbol(
+                        LLVMCStringToString(unsafe { LLVMGetValueName(functionObject) }) ?? "")
+                }
+            }
+        }
+        functionObject = unsafe { LLVMGetNextFunction(functionObject) }
+    }
 }
 
 private func ReplaceFunction(cgMod: CGModule): Unit {

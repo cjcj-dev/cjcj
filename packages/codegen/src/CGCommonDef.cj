@@ -126,10 +126,67 @@ public func CHIRLinkage2LLVMLinkage(chirLinkage: Linkage): LLVMLinkage {
 public func AddLinkageTypeMetadata(globalObject: LLVMValueRef, linkageType: LLVMLinkage, markByMD: Bool): Unit {
     if (!markByMD) {
         unsafe { LLVMSetLinkage(globalObject, LLVMLinkageValue(linkageType)) }
+        return
     }
+    let linkageTypeStr = match (linkageType) {
+        case LLVMLinkage.External => "ExternalLinkage"
+        case LLVMLinkage.AvailableExternally => "AvailableExternallyLinkage"
+        case LLVMLinkage.LinkOnceAny => "LinkOnceAnyLinkage"
+        case LLVMLinkage.LinkOnceODR => "LinkOnceODRLinkage"
+        case LLVMLinkage.WeakAny => "WeakAnyLinkage"
+        case LLVMLinkage.WeakODR => "WeakODRLinkage"
+        case LLVMLinkage.Appending => "AppendingLinkage"
+        case LLVMLinkage.Internal => "InternalLinkage"
+        case LLVMLinkage.Private => "PrivateLinkage"
+        case LLVMLinkage.ExternalWeak => "ExternalWeakLinkage"
+        case LLVMLinkage.Common => "CommonLinkage"
+    }
+    let context = LLVMContextHandle(unsafe { LLVMGetTypeContext(LLVMTypeOf(globalObject)) }, owned: false)
+    LLVMSetGlobalStringMetadata(context, globalObject, "LinkageType", linkageTypeStr)
 }
 
 public func GetLinkageTypeOfGlobalObject(globalObject: LLVMValueRef): LLVMLinkage {
+    let context = LLVMContextHandle(unsafe { LLVMGetTypeContext(LLVMTypeOf(globalObject)) }, owned: false)
+    let kindID = LLVMGetMDKindID(context, "LinkageType")
+    if (kindID != 0u32) {
+        try (countPtr = LibC.malloc<UIntNative>().asResource()) {
+            unsafe { countPtr.value.write(UIntNative(0)) }
+            let entries = unsafe { LLVMGlobalCopyAllMetadata(globalObject, countPtr.value) }
+            let count = unsafe { countPtr.value.read() }
+            if (!entries.isNull()) {
+                var idx: UInt32 = 0u32
+                while (idx < UInt32(count)) {
+                    if (unsafe { LLVMValueMetadataEntriesGetKind(entries, idx) } == kindID) {
+                        let metadata = unsafe { LLVMValueMetadataEntriesGetMetadata(entries, idx) }
+                        let operands = LLVMGetMDNodeOperands(LLVMMetadataToValue(context, metadata))
+                        unsafe { LLVMDisposeValueMetadataEntries(entries) }
+                        if (!operands.isEmpty()) {
+                            if (let Some(linkageTypeStr) <- LLVMGetMDStringValue(operands[0])) {
+                                return match (linkageTypeStr) {
+                                    case "ExternalLinkage" => LLVMLinkage.External
+                                    case "AvailableExternallyLinkage" => LLVMLinkage.AvailableExternally
+                                    case "LinkOnceAnyLinkage" => LLVMLinkage.LinkOnceAny
+                                    case "LinkOnceODRLinkage" => LLVMLinkage.LinkOnceODR
+                                    case "WeakAnyLinkage" => LLVMLinkage.WeakAny
+                                    case "WeakODRLinkage" => LLVMLinkage.WeakODR
+                                    case "AppendingLinkage" => LLVMLinkage.Appending
+                                    case "InternalLinkage" => LLVMLinkage.Internal
+                                    case "PrivateLinkage" => LLVMLinkage.Private
+                                    case "ExternalWeakLinkage" => LLVMLinkage.ExternalWeak
+                                    case "CommonLinkage" => LLVMLinkage.Common
+                                    case _ => throw IllegalArgumentException("unexpected LinkageType metadata: " +
+                                        linkageTypeStr)
+                                }
+                            }
+                        }
+                        throw IllegalArgumentException("unexpected LinkageType metadata")
+                    }
+                    idx++
+                }
+                unsafe { LLVMDisposeValueMetadataEntries(entries) }
+            }
+        }
+    }
     let linkage = unsafe { LLVMGetLinkage(globalObject) }
     return match (linkage) {
         case 0 => LLVMLinkage.External

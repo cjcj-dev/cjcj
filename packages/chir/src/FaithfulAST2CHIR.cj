@@ -1,6 +1,8 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::basic.Linkage as BasicLinkage
 import cangjie_compiler::option.GlobalOptions
+import cangjie_compiler::option.OSType
 import std.collection.*
 import std.convert.*
 
@@ -896,6 +898,32 @@ func BuildVarDeclAttr(decl: AstVarDecl): AttributeInfo {
         attrInfo.Enable(Attribute.CONST)
     }
     return attrInfo
+}
+
+private func GetFuncLinkage(opts: GlobalOptions, funcDecl: AstFuncDecl): BasicLinkage {
+    if (funcDecl.TestAttr(AstAttribute.IMPORTED)) {
+        return funcDecl.linkage
+    }
+    if (funcDecl.linkage == BasicLinkage.EXTERNAL || funcDecl.linkage == BasicLinkage.WEAK_ODR) {
+        if (funcDecl.TestAttr(AstAttribute.IMPORTED)) {
+            return BasicLinkage.INTERNAL
+        } else if (opts.target.IsMinGW()) {
+            return BasicLinkage.EXTERNAL
+        }
+    }
+    return funcDecl.linkage
+}
+
+private func SetGlobalVarLinkageType(value: GlobalValue, decl: AstVarDecl, isLiftedLocalConst: Bool, isWin: Bool): Unit {
+    if (isLiftedLocalConst) {
+        value.SetLinkTypeInfo(BasicLinkage.INTERNAL)
+        return
+    }
+    if (decl.isConst && !isWin) {
+        value.SetLinkTypeInfo(BasicLinkage.WEAK_ODR)
+        return
+    }
+    value.SetLinkTypeInfo(decl.linkage)
 }
 
 private func BuildPackageAccessLevel(level: AstAccessLevel): AccessLevel {
@@ -3022,6 +3050,7 @@ public class FaithfulAST2CHIR {
         fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.keywordPos, funcDecl.end))
         AttachFunctionGenericParams(funcDecl, fn)
         ApplyDeclAttrs(fn, funcDecl)
+        fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
         ApplyFuncKind(fn, funcDecl)
         if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) {
             fn.SetFuncKind(FuncKind.MAIN_ENTRY)
@@ -3046,6 +3075,7 @@ public class FaithfulAST2CHIR {
         AttachFunctionGenericParams(funcDecl, fn)
         fn.EnableAttr(Attribute.IMPORTED)
         ApplyDeclAttrs(fn, funcDecl)
+        fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
         ApplyFuncKind(fn, funcDecl)
         TranslateFuncParams(funcDecl, fn)
         globalCache.Set(funcDecl, fn)
@@ -3118,6 +3148,7 @@ public class FaithfulAST2CHIR {
         globalVar.SetDebugLocation(TranslateLocationWithoutScope(builder.context, decl.begin, decl.end))
         globalVar.SetDebugLocationInfoForWarning(GetDeclLoc(builder.context, decl))
         globalVar.AppendAttributeInfo(BuildVarDeclAttr(decl))
+        SetGlobalVarLinkageType(globalVar, decl, isLocalConst, opts.target.os == OSType.WINDOWS)
         if (isLocalConst) {
             globalVar.EnableAttr(Attribute.COMPILER_ADD)
         }
