@@ -1,8 +1,9 @@
 package cangjie_compiler::chir
 
+import cangjie_compiler::basic.Linkage as BasicLinkage
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::utils.{OverflowStrategy, Stoi}
+import cangjie_compiler::utils.{CJC_ASSERT, OverflowStrategy, Stoi}
 
 private let MANGLE_CANGJIE_PREFIX: String = "_C"
 private let MANGLE_NESTED_PREFIX: String = "N"
@@ -159,11 +160,17 @@ private func IdentifierForMangledCHIRType(def: CustomTypeDef): String {
 }
 
 private func CustomTypeDefIdentifierForQualifiedName(def: CustomTypeDef): String {
+    CJC_ASSERT(!def.GetType().getOrThrow().IsAutoEnvBase())
     let srcCodeIdentifier = def.GetSrcCodeIdentifier()
-    if (!srcCodeIdentifier.isEmpty() && !def.TestAttr(Attribute.PRIVATE)) {
-        return srcCodeIdentifier
+    let linkType = if (let Some(linkTypeInfo) <- def.GetAnnotation("LinkTypeInfo")) {
+        LinkTypeInfo.Extract(linkTypeInfo)
+    } else {
+        BasicLinkage.EXTERNAL
     }
-    return def.GetIdentifierWithoutPrefix()
+    if (srcCodeIdentifier.isEmpty() || (def.TestAttr(Attribute.PRIVATE) && linkType == BasicLinkage.INTERNAL)) {
+        return def.GetIdentifierWithoutPrefix()
+    }
+    return srcCodeIdentifier
 }
 
 private func MangleGenericTypeByName(srcCodeIdentifier: String, genericsTypeStack: ArrayList<String>,
