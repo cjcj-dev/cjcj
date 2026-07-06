@@ -140,13 +140,3 @@ public class MemberMap {
         return out
     }
 }
-
-public class InheritedMemberEntry {
-    public var decl: InheritableDecl
-    public var members: MemberMap
-
-    public init(decl: InheritableDecl, members: MemberMap) {
-        this.decl = decl
-        this.members = members
-    }
-}

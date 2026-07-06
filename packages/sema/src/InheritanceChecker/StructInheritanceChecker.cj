@@ -4,7 +4,7 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.{DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, MakeRange, SubDiagnostic}
 import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::modules.{GetPackageRelation, PackageRelation}
+import cangjie_compiler::modules.{GetPackageRelation, PackageRelation, SemaImportManager}
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::sema.*
 
@@ -376,9 +376,10 @@ public class StructInheritanceChecker {
     public let diag: DiagnosticEngine
     public let typeManager: TypeManager
     public let pkg: Package
+    public let importManager: SemaImportManager
     public let opts: OptionGlobalOptions
 
-    private let structInheritedMembers: ArrayList<InheritedMemberEntry> = ArrayList<InheritedMemberEntry>()
+    private let structInheritedMembers: HashMap<Node, MemberMap> = HashMap<Node, MemberMap>()
     private let checkingDecls: ArrayList<InheritableDecl> = ArrayList<InheritableDecl>()
     private let instantiatedKeys: HashSet<String> = HashSet<String>()
     private let instantiatedMemberDiagnostics: ArrayList<InstantiatedMemberDiagnosticRecord> =
@@ -388,10 +389,17 @@ public class StructInheritanceChecker {
     private let instantiationTypeMaps: ArrayList<TypeSubst> = ArrayList<TypeSubst>()
     private var infiniteInstantiationOccurred: Bool = false
 
-    public init(diag: DiagnosticEngine, typeManager: TypeManager, pkg: Package, opts!: OptionGlobalOptions) {
+    public init(
+        diag: DiagnosticEngine,
+        typeManager: TypeManager,
+        pkg: Package,
+        importManager: SemaImportManager,
+        opts!: OptionGlobalOptions
+    ) {
         this.diag = diag
         this.typeManager = typeManager
         this.pkg = pkg
+        this.importManager = importManager
         this.opts = opts
     }
 
@@ -399,74 +407,7 @@ public class StructInheritanceChecker {
         if (pkg.files.isEmpty()) {
             return false
         }
-        return IsExtendAccessible(pkg.files[0], extendDecl)
-    }
-
-    private func IsTyAccessible(file: File, ty: Ty): Bool {
-        if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
-            return typeManager.IsDeclAccessible(file, decl)
-        }
-        return true
-    }
-
-    private func IsTypeAccessible(file: File, typeNode: Type): Bool {
-        if (let Some(ty) <- typeNode.GetTy()) {
-            return IsTyAccessible(file, ty)
-        }
-        return true
-    }
-
-    private func IsExtendAllUpperBoundsImported(extendDecl: ExtendDecl, file: File): Bool {
-        if (let None <- extendDecl.generic) {
-            return true
-        }
-        let generic = extendDecl.generic.getOrThrow()
-        for (constraint in generic.genericConstraints) {
-            for (upperBound in constraint.upperBounds) {
-                if (!IsTypeAccessible(file, upperBound)) {
-                    return false
-                }
-            }
-        }
-        return true
-    }
-
-    private func IsExtendAccessible(file: File, extendDecl: ExtendDecl): Bool {
-        if (let Some(filePackage) <- file.curPackage) {
-            if (extendDecl.fullPackageName == filePackage.fullPackageName) {
-                return true
-            }
-            let allUpperBoundsImported = IsExtendAllUpperBoundsImported(extendDecl, file)
-            var hasAnyInterfacesImported = false
-            var extendedTypeAccessible = false
-            let extendedDecl = Ty.GetInheritableDeclPtrOfTy(extendDecl.GetTy())
-            let inSamePackage = if (let Some(realExtendedDecl) <- extendedDecl) {
-                extendDecl.fullPackageName == realExtendedDecl.fullPackageName
-            } else {
-                extendDecl.fullPackageName == "std.core"
-            }
-            if (!inSamePackage) {
-                for (inheritedType in extendDecl.inheritedTypes) {
-                    if (IsTypeAccessible(file, inheritedType)) {
-                        hasAnyInterfacesImported = true
-                    }
-                }
-                if (let Some(extendedType) <- extendDecl.extendedType) {
-                    extendedTypeAccessible = IsTypeAccessible(file, extendedType)
-                }
-            } else {
-                hasAnyInterfacesImported = true
-                if (let Some(realExtendedDecl) <- extendedDecl) {
-                    let relation = GetPackageRelation(filePackage.fullPackageName, realExtendedDecl.fullPackageName)
-                    extendedTypeAccessible = IsAstVisibleInRelation(realExtendedDecl, relation)
-                } else {
-                    extendedTypeAccessible = true
-                }
-            }
-            return extendDecl.IsExportedDecl() && allUpperBoundsImported && hasAnyInterfacesImported &&
-                extendedTypeAccessible
-        }
-        return true
+        return importManager.IsExtendAccessible(pkg.files[0], extendDecl, None)
     }
 
     @When[backend == "cjnative"]
@@ -546,10 +487,12 @@ public class StructInheritanceChecker {
         CheckInstDupFuncsInNominalDecls(this)
     }
 
-    public func MoveStructInheritedMembers(): ArrayList<InheritedMemberEntry> {
-        let out = ArrayList<InheritedMemberEntry>()
-        for (entry in structInheritedMembers) {
-            out.add(InheritedMemberEntry(entry.decl, entry.members.Clone()))
+    public func MoveStructInheritedMembers(): HashMap<Node, MemberMap> {
+        let out = HashMap<Node, MemberMap>()
+        for (decl in structInheritedMembers.keys()) {
+            if (let Some(members) <- structInheritedMembers.get(decl)) {
+                out[decl] = members.Clone()
+            }
         }
         structInheritedMembers.clear()
         return out
@@ -680,14 +623,14 @@ public class StructInheritanceChecker {
     }
 
     public func GetStoredMembersForDecl(decl: InheritableDecl): MemberMap {
-        if (let Some(entry) <- FindStoredEntry(decl)) {
-            return entry.members
+        if (let Some(members) <- structInheritedMembers.get(decl)) {
+            return members
         }
         return MemberMap()
     }
 
     public func CheckMembersWithInheritedDecls(decl: InheritableDecl): Unit {
-        if (let Some(_) <- FindStoredEntry(decl)) {
+        if (structInheritedMembers.contains(decl)) {
             return
         }
         checkingDecls.add(decl)
@@ -742,16 +685,7 @@ public class StructInheritanceChecker {
             entry.signature.isInheritedInterface = false
             entry.signature.extendDecl = None
         }
-        structInheritedMembers.add(InheritedMemberEntry(decl, interfaceMembers))
-    }
-
-    private func FindStoredEntry(decl: InheritableDecl): Option<InheritedMemberEntry> {
-        for (entry in structInheritedMembers) {
-            if (SameDecl(entry.decl, decl)) {
-                return entry
-            }
-        }
-        return None
+        structInheritedMembers[decl] = interfaceMembers
     }
 
     private func GetAndCheckInheritedInterfaces(decl: InheritableDecl): MemberMap {
@@ -794,7 +728,7 @@ public class StructInheritanceChecker {
             if ((let None <- extendDecl.extendedType) || !Ty.IsTyCorrect(extendDecl.extendedType.getOrThrow().GetTy())) {
                 continue
             }
-            if (!IsExtendAccessible(curFile, extendDecl)) {
+            if (!importManager.IsExtendAccessible(curFile, extendDecl, None)) {
                 continue
             }
             CheckMembersWithInheritedDecls(extendDecl)
@@ -938,7 +872,7 @@ public class StructInheritanceChecker {
                 curDecl.fullPackageName != pkg.fullPackageName && IsExtendVisibleInCurpkg(otherExtend)
             if (otherExtend.fullPackageName != curDecl.fullPackageName && !areAllFromOtherPkg) {
                 if (let Some(curFile) <- curDecl.curFile) {
-                    if (IsExtendAccessible(curFile, otherExtend)) {
+                    if (importManager.IsExtendAccessible(curFile, otherExtend, None)) {
                         AddExtendUniqueByPosition(ordered, otherExtend)
                     }
                 }
@@ -2326,7 +2260,7 @@ public class StructInheritanceChecker {
                             continue
                         }
                         if (let Some(interfaceDecl) <- Ty.GetInheritableDeclPtrOfTy(upper)) {
-                            if (let Some(_) <- FindStoredEntry(interfaceDecl)) {
+                            if (structInheritedMembers.contains(interfaceDecl)) {
                                 MergeInheritedMembers(inheritedMembers, GetStoredMembersForDecl(interfaceDecl), upper, inheritedInterfaces: true)
                             }
                         }
