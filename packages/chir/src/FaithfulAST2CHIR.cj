@@ -1,8 +1,12 @@
 package cangjie_compiler::chir
 
 import cangjie_compiler::basic.Linkage as BasicLinkage
+import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
+import cangjie_compiler::basic.DiagKind as BasicDiagKind
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::option.OSType
+import cangjie_compiler::option.OutputMode
 import std.collection.*
 import std.convert.*
 
@@ -22,9 +26,11 @@ import cangjie_compiler::ast.EnumPattern as AstEnumPattern
 import cangjie_compiler::ast.ExtendDecl as AstExtendDecl
 import cangjie_compiler::ast.Expr as AstExpr
 import cangjie_compiler::ast.File as AstFile
+import cangjie_compiler::ast.FuncArg as AstFuncArg
 import cangjie_compiler::ast.FuncDecl as AstFuncDecl
 import cangjie_compiler::ast.FuncParam as AstFuncParam
 import cangjie_compiler::ast.GenericsTy as AstGenericsTy
+import cangjie_compiler::ast.IsPackageMemberAccess as AstIsPackageMemberAccess
 import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
 import cangjie_compiler::ast.LitConstKind as AstLitConstKind
 import cangjie_compiler::ast.MemberAccess as AstMemberAccess
@@ -988,6 +994,7 @@ public class FaithfulAST2CHIR {
     private let opts: GlobalOptions
     private let chirWFC: Bool
     private let chirOptOverO2: Bool
+    private let diag: Option<BasicDiagnosticEngine>
     private var outputPackage: Option<Package> = None
     private var failure: Bool = false
     private var failureReason: String = ""
@@ -1029,7 +1036,8 @@ public class FaithfulAST2CHIR {
         importedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(),
         directImportedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(),
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None,
-        opts!: GlobalOptions = GlobalOptions(), chirWFC!: Bool = false, chirOptOverO2!: Bool = false) {
+        opts!: GlobalOptions = GlobalOptions(), chirWFC!: Bool = false, chirOptOverO2!: Bool = false,
+        diag!: Option<BasicDiagnosticEngine> = None) {
         this.builder = builder
         this.chirType = chirType
         this.importedPackages = importedPkgs
@@ -1038,6 +1046,7 @@ public class FaithfulAST2CHIR {
         this.opts = opts
         this.chirWFC = chirWFC
         this.chirOptOverO2 = chirOptOverO2
+        this.diag = diag
     }
 
     public func ToCHIRPackage(node: AstPackage): Bool {
@@ -1944,8 +1953,9 @@ public class FaithfulAST2CHIR {
 
     private func SortGlobalVarDep(nodesWithDeps: ElementList, fileAndVarMap: ArrayList<FaithfulInitFileVars>,
         funcsAndVars: ElementList): ArrayList<AstFile> {
-        let _ = fileAndVarMap
         AnalysisDependency(nodesWithDeps, funcsAndVars)
+        // GAP_TODO(sortglobalvardep-cache-merge): needs CompilationCache.h:149 varAndFuncDep over AST Decl identity.
+        // Resume at GlobalDeclAnalysis.cpp:484-490 after the AST Decl identity carrier exists in selfhost.
 
         let fileDependencyMap = FileDepMap()
         for (decl in funcsAndVars.stableOrderValue) {
@@ -1967,6 +1977,11 @@ public class FaithfulAST2CHIR {
             failureReason = "chir file might circular dependency"
             return ArrayList<AstFile>()
         }
+        if (opts.enIncrementalCompilation) {
+            for (fileVars in fileAndVarMap) {
+                CheckUseBeforeInit(fileVars.vars, var2varDepsInFile)
+            }
+        }
         return sortedFiles
     }
 
@@ -1978,6 +1993,11 @@ public class FaithfulAST2CHIR {
         }
         let patternOwnerMap = BuildPatternDependencyOwnerMap()
         for (node in nodesWithDeps.stableOrderValue) {
+            if (let Some(varWithPattern) <- (node as AstVarWithPatternDecl)) {
+                ParseVarWithPatternDecl(varWithPattern, patternOwnerMap)
+            }
+        }
+        for (node in nodesWithDeps.stableOrderValue) {
             if (let Some(varDecl) <- (node as AstVarDecl)) {
                 if (varDecl.TestAttr(AstAttribute.STATIC) && !varDecl.TestAttr(AstAttribute.DEFAULT)) {
                     continue
@@ -1985,6 +2005,13 @@ public class FaithfulAST2CHIR {
             }
             let (dependencies, localConstVarDeps) =
                 CollectDirectDependencies(node, candidateSet, globalVarSet, patternOwnerMap)
+            if (MergingSpecific()) {
+                ReplaceCommonDependenciesWithSpecific(dependencies)
+                RestoreCJMPDependencies(node, dependencies)
+            }
+            if (OutputCHIR()) {
+                SaveCJMPDependencies(node, dependencies)
+            }
             funcsAndVarsDepMap.AddDeps(node, dependencies)
             localConstVarsDepMap.AddDeps(node, localConstVarDeps)
         }
@@ -2028,6 +2055,27 @@ public class FaithfulAST2CHIR {
             } else {
                 AnalysisFileDependencyImpl(rootDecl, dep, visited, funcsAndVarsDepMap, fileDependencyMap,
                     var2varDepsInFile)
+            }
+        }
+    }
+
+    private func CheckUseBeforeInit(vars: ArrayList<AstDecl>, var2varDepsInFile: DeclDepMap): Unit {
+        let alreadyInited = FaithfulInitDeclSet()
+        for (varDecl in vars) {
+            alreadyInited.Add(varDecl)
+            if (varDecl.identifier.Val() == STATIC_INIT_VAR) {
+                continue
+            }
+            for (dep in var2varDepsInFile.GetDep(varDecl)) {
+                if (!alreadyInited.Contains(dep)) {
+                    if (let Some(diagValue) <- diag) {
+                        diagValue.Diagnose(BasicDiagKind.chir_used_before_initialization,
+                            args: [BasicDiagArgument(dep.identifier.Val())]).Emit()
+                    } else {
+                        failure = true
+                        failureReason = "variable '${dep.identifier.Val()}' is used before initialization"
+                    }
+                }
             }
         }
     }
@@ -2154,27 +2202,92 @@ public class FaithfulAST2CHIR {
         let localConstVarDeps = ArrayList<AstDecl>()
         let dependencySet = FaithfulInitDeclSet()
         let localConstVarDepSet = FaithfulInitDeclSet()
+        AnalysisDepOf(root, dependencies, localConstVarDeps, dependencySet, localConstVarDepSet, candidateSet,
+            globalVarSet, patternOwnerMap)
+        return (dependencies, localConstVarDeps)
+    }
+
+    private func WalkAndCollectDep(root: AstNode, dependencies: ArrayList<AstDecl>,
+        localConstVarDeps: ArrayList<AstDecl>, dependencySet: FaithfulInitDeclSet,
+        localConstVarDepSet: FaithfulInitDeclSet, candidateSet: FaithfulInitDeclSet,
+        globalVarSet: FaithfulInitDeclSet, patternOwnerMap: FaithfulInitDeclOwnerMap): Unit {
         let visitor = { node: AstNode =>
             if (let Some(expr) <- (node as AstExpr)) {
-                CollectExprDependency(expr, dependencies, localConstVarDeps, dependencySet, localConstVarDepSet,
+                if (expr.desugarExpr.isSome()) {
+                    var realExpr = expr
+                    while (realExpr.desugarExpr.isSome()) {
+                        realExpr = realExpr.desugarExpr.getOrThrow()
+                    }
+                    WalkAndCollectDep(realExpr, dependencies, localConstVarDeps, dependencySet, localConstVarDepSet,
+                        candidateSet, globalVarSet, patternOwnerMap)
+                    return AstVisitAction.SKIP_CHILDREN
+                }
+                return VisitExprAction(expr, dependencies, localConstVarDeps, dependencySet, localConstVarDepSet,
                     candidateSet, globalVarSet, patternOwnerMap)
             }
-            AstVisitAction.WALK_CHILDREN
+            if (let Some(param) <- (node as AstFuncParam)) {
+                if (param.assignment.isSome()) {
+                    if (let Some(desugarDecl) <- param.desugarDecl) {
+                        WalkAndCollectDep(desugarDecl, dependencies, localConstVarDeps, dependencySet,
+                            localConstVarDepSet, candidateSet, globalVarSet, patternOwnerMap)
+                    }
+                    return AstVisitAction.SKIP_CHILDREN
+                }
+                return AstVisitAction.WALK_CHILDREN
+            }
+            if (let Some(arg) <- (node as AstFuncArg)) {
+                if (arg.TestAttr(AstAttribute.HAS_INITIAL)) {
+                    return AstVisitAction.SKIP_CHILDREN
+                }
+                return AstVisitAction.WALK_CHILDREN
+            }
+            if (let Some(funcDecl) <- (node as AstFuncDecl)) {
+                if (funcDecl.TestAttr(AstAttribute.GENERIC)) {
+                    for (instance in GetInstantiatedDecls(funcDecl)) {
+                        WalkAndCollectDep(instance, dependencies, localConstVarDeps, dependencySet,
+                            localConstVarDepSet, candidateSet, globalVarSet, patternOwnerMap)
+                    }
+                }
+                return AstVisitAction.WALK_CHILDREN
+            }
+            return AstVisitAction.WALK_CHILDREN
         }
         AstWalker(root, visitPre: visitor).Walk()
-        return (dependencies, localConstVarDeps)
+    }
+
+    private func GetInstantiatedDecls(funcDecl: AstFuncDecl): ArrayList<AstDecl> {
+        let out = ArrayList<AstDecl>()
+        if (let Some(curFile) <- funcDecl.curFile) {
+            if (let Some(pkg) <- curFile.curPackage) {
+                for (decl in pkg.genericInstantiatedDecls) {
+                    if (let Some(genericDecl) <- decl.genericDecl) {
+                        if (FaithfulInitSameDecl(genericDecl, funcDecl)) {
+                            out.add(decl)
+                        }
+                    }
+                }
+            }
+        }
+        return out
     }
 
     private func BuildPatternDependencyOwnerMap(): FaithfulInitDeclOwnerMap {
         let out = FaithfulInitDeclOwnerMap()
         for (candidate in globalAndStaticVars) {
             if (let Some(varWithPattern) <- (candidate as AstVarWithPatternDecl)) {
-                if (let Some(pattern) <- varWithPattern.irrefutablePattern) {
-                    AddPatternDependencyOwners(pattern, varWithPattern, out)
-                }
+                ParseVarWithPatternDecl(varWithPattern, out)
             }
         }
         return out
+    }
+
+    private func ParseVarWithPatternDecl(root: AstVarWithPatternDecl, out: FaithfulInitDeclOwnerMap): Unit {
+        ParsePattern(root, RequirePattern(root.irrefutablePattern, "global var-with-pattern pattern"), out)
+    }
+
+    private func ParsePattern(rootDecl: AstVarWithPatternDecl, pattern: AstPattern,
+        out: FaithfulInitDeclOwnerMap): Unit {
+        AddPatternDependencyOwners(pattern, rootDecl, out)
     }
 
     private func AddPatternDependencyOwners(pattern: AstPattern, owner: AstDecl,
@@ -2206,46 +2319,255 @@ public class FaithfulAST2CHIR {
         return out
     }
 
-    private func CollectExprDependency(expr: AstExpr, dependencies: ArrayList<AstDecl>,
+    private func VisitExprAction(expr: AstExpr, dependencies: ArrayList<AstDecl>,
         localConstVarDeps: ArrayList<AstDecl>, dependencySet: FaithfulInitDeclSet,
         localConstVarDepSet: FaithfulInitDeclSet, candidateSet: FaithfulInitDeclSet, globalVarSet: FaithfulInitDeclSet,
-        patternOwnerMap: FaithfulInitDeclOwnerMap): Unit {
+        patternOwnerMap: FaithfulInitDeclOwnerMap): AstVisitAction {
         if (let Some(callExpr) <- (expr as AstCallExpr)) {
-            if (let Some(callee) <- callExpr.resolvedFunction) {
-                AddDependency(callee, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
-            }
-            return
+            return CollectDepInCallExpr(callExpr, dependencies, dependencySet, candidateSet, globalVarSet,
+                patternOwnerMap)
         }
         if (let Some(member) <- (expr as AstMemberAccess)) {
             if (let Some(target) <- member.target) {
-                if (target.astKind == ASTKind.FUNC_DECL || IsGlobalOrStaticVarDecl(target)) {
+                if (target.astKind == ASTKind.FUNC_DECL) {
+                    AddDependency(target, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
+                }
+                if (target.astKind == ASTKind.VAR_DECL && target.TestAttr(AstAttribute.STATIC)) {
+                    AddDependency(target, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
+                }
+                if (AstIsPackageMemberAccess(member) && target.astKind == ASTKind.VAR_DECL) {
                     AddDependency(target, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
                 }
             }
-            return
+            return AstVisitAction.WALK_CHILDREN
         }
         if (let Some(refExpr) <- (expr as AstRefExpr)) {
             if (let Some(target) <- refExpr.ref.target) {
-                if (target.astKind == ASTKind.FUNC_DECL || IsGlobalOrStaticVarDecl(target)) {
+                let hasRefTarget = target.astKind == ASTKind.FUNC_DECL || target.astKind == ASTKind.VAR_DECL
+                if (hasRefTarget && target.TestAnyAttr(AstAttribute.GLOBAL, AstAttribute.STATIC)) {
                     AddDependency(target, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
-                } else if (target.IsConst()) {
+                } else if (hasRefTarget && target.IsConst()) {
                     AddDependency(target, localConstVarDeps, localConstVarDepSet, candidateSet, globalVarSet,
                         patternOwnerMap)
                 }
             }
-            return
+            return AstVisitAction.SKIP_CHILDREN
         }
         if (let Some(arrayExpr) <- (expr as AstArrayExpr)) {
             if (let Some(initFunc) <- arrayExpr.initFunc) {
                 AddDependency(initFunc, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
             }
-            return
+            return AstVisitAction.WALK_CHILDREN
         }
         if (let Some(arrayLit) <- (expr as AstArrayLit)) {
             if (let Some(initFunc) <- arrayLit.initFunc) {
                 AddDependency(initFunc, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
             }
+            return AstVisitAction.WALK_CHILDREN
         }
+        if (let Some(litConstExpr) <- (expr as AstLitConstExpr)) {
+            return CollectDepInLitConstExpr(litConstExpr, dependencies, dependencySet, candidateSet, globalVarSet,
+                patternOwnerMap)
+        }
+        return AstVisitAction.WALK_CHILDREN
+    }
+
+    private func CollectDepInCallExpr(callExpr: AstCallExpr, dependencies: ArrayList<AstDecl>,
+        dependencySet: FaithfulInitDeclSet, candidateSet: FaithfulInitDeclSet, globalVarSet: FaithfulInitDeclSet,
+        patternOwnerMap: FaithfulInitDeclOwnerMap): AstVisitAction {
+        if (let Some(callee) <- callExpr.resolvedFunction) {
+            AddDependency(callee, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
+        }
+        if (let None <- callExpr.desugarArgs) {
+            return AstVisitAction.WALK_CHILDREN
+        }
+        let argExprs = callExpr.desugarArgs.getOrThrow()
+        var argIndex: Int64 = 0
+        while (argIndex < argExprs.size) {
+            if (argExprs[argIndex].TestAttr(AstAttribute.HAS_INITIAL)) {
+                let resolved = callExpr.resolvedFunction ??
+                    throw IllegalStateException("faithful GlobalDeclAnalysis default arg call has no resolved function")
+                let funcBody = resolved.funcBody ??
+                    throw IllegalStateException("faithful GlobalDeclAnalysis default arg function has no body")
+                let param = funcBody.paramLists[0].params[argIndex]
+                let desugarDecl = param.desugarDecl ??
+                    throw IllegalStateException("faithful GlobalDeclAnalysis default arg has no desugar decl")
+                AddDependency(desugarDecl, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
+            }
+            argIndex++
+        }
+        return AstVisitAction.WALK_CHILDREN
+    }
+
+    private func CollectDepInLitConstExpr(litConstExpr: AstLitConstExpr, dependencies: ArrayList<AstDecl>,
+        dependencySet: FaithfulInitDeclSet, candidateSet: FaithfulInitDeclSet, globalVarSet: FaithfulInitDeclSet,
+        patternOwnerMap: FaithfulInitDeclOwnerMap): AstVisitAction {
+        if (litConstExpr.kind == AstLitConstKind.JSTRING || litConstExpr.ref.isNone()) {
+            return AstVisitAction.WALK_CHILDREN
+        }
+        let target = litConstExpr.ref.getOrThrow().ref.target ?? return AstVisitAction.WALK_CHILDREN
+        let structDecl = (target as AstStructDecl) ?? return AstVisitAction.WALK_CHILDREN
+        if (!litConstExpr.stringValue.isEmpty()) {
+            return AstVisitAction.WALK_CHILDREN
+        }
+        let body = structDecl.body ?? return AstVisitAction.WALK_CHILDREN
+        for (decl in body.decls) {
+            if (decl.astKind == ASTKind.VAR_DECL && decl.identifier.Val() == "empty" &&
+                decl.TestAttr(AstAttribute.STATIC)) {
+                AddDependency(decl, dependencies, dependencySet, candidateSet, globalVarSet, patternOwnerMap)
+            }
+        }
+        return AstVisitAction.WALK_CHILDREN
+    }
+
+    private func AnalysisDepOf(rootDecl: AstDecl, dependencies: ArrayList<AstDecl>,
+        localConstVarDeps: ArrayList<AstDecl>, dependencySet: FaithfulInitDeclSet,
+        localConstVarDepSet: FaithfulInitDeclSet, candidateSet: FaithfulInitDeclSet, globalVarSet: FaithfulInitDeclSet,
+        patternOwnerMap: FaithfulInitDeclOwnerMap): Unit {
+        WalkAndCollectDep(rootDecl, dependencies, localConstVarDeps, dependencySet, localConstVarDepSet, candidateSet,
+            globalVarSet, patternOwnerMap)
+        if (let Some(funcDecl) <- (rootDecl as AstFuncDecl)) {
+            if (funcDecl.TestAttr(AstAttribute.CONSTRUCTOR)) {
+                if (funcDecl.TestAttr(AstAttribute.STATIC)) {
+                    AdditionalAnalysisDepOfStaticInit(funcDecl, dependencies, dependencySet)
+                } else {
+                    AdditionalAnalysisDepOfNonStaticCtor(funcDecl, dependencies, localConstVarDeps, dependencySet,
+                        localConstVarDepSet, candidateSet, globalVarSet, patternOwnerMap)
+                }
+            }
+        }
+    }
+
+    private func AdditionalAnalysisDepOfNonStaticCtor(funcDecl: AstFuncDecl, dependencies: ArrayList<AstDecl>,
+        localConstVarDeps: ArrayList<AstDecl>, dependencySet: FaithfulInitDeclSet,
+        localConstVarDepSet: FaithfulInitDeclSet, candidateSet: FaithfulInitDeclSet,
+        globalVarSet: FaithfulInitDeclSet, patternOwnerMap: FaithfulInitDeclOwnerMap): Unit {
+        let funcBody = funcDecl.funcBody ??
+            throw IllegalStateException("faithful GlobalDeclAnalysis constructor has no body")
+        let parentDecl: AstDecl = if (let Some(parentClassLike) <- funcBody.parentClassLike) {
+            parentClassLike
+        } else {
+            funcBody.parentStruct.getOrThrow()
+        }
+        for (memberVar in GetNonStaticMemberVars(parentDecl)) {
+            if (memberVar.initializer.isSome()) {
+                WalkAndCollectDep(memberVar, dependencies, localConstVarDeps, dependencySet, localConstVarDepSet,
+                    candidateSet, globalVarSet, patternOwnerMap)
+            }
+        }
+    }
+
+    private func AdditionalAnalysisDepOfStaticInit(staticInit: AstFuncDecl, dependencies: ArrayList<AstDecl>,
+        dependencySet: FaithfulInitDeclSet): Unit {
+        let parentDecl = staticInit.outerDecl ??
+            throw IllegalStateException("faithful GlobalDeclAnalysis static init has no outer decl")
+        let staticVars = GetStaticMemberVars(parentDecl)
+        let filteredDependencies = ArrayList<AstDecl>()
+        let filteredSet = FaithfulInitDeclSet()
+        for (dep in dependencies) {
+            if (ContainsDecl(staticVars, dep)) {
+                continue
+            }
+            if (filteredSet.Add(dep)) {
+                filteredDependencies.add(dep)
+            }
+        }
+        for (staticVar in staticVars) {
+            if (DoesStaticInitDependOnStaticVar(staticInit, staticVar) && filteredSet.Add(staticVar)) {
+                filteredDependencies.add(staticVar)
+            }
+        }
+        dependencies.clear()
+        for (dep in filteredDependencies) {
+            dependencies.add(dep)
+            dependencySet.Add(dep)
+        }
+    }
+
+    private func DoesStaticInitDependOnStaticVar(staticInit: AstFuncDecl, staticVar: AstVarDecl): Bool {
+        var staticVarInitializerFileId: Option<UInt64> = None
+        if (let Some(specific) <- staticVar.specificImplementation) {
+            if (let Some(specificStaticVar) <- (specific as AstVarDecl)) {
+                if (let Some(initializer) <- specificStaticVar.initializer) {
+                    staticVarInitializerFileId = UInt64(initializer.begin.fileID)
+                }
+            }
+        } else if (let Some(initializer) <- staticVar.initializer) {
+            staticVarInitializerFileId = UInt64(initializer.begin.fileID)
+        }
+        let staticInitFileId = UInt64(staticInit.begin.fileID)
+        if (let Some(initializerFileId) <- staticVarInitializerFileId) {
+            return staticInitFileId != initializerFileId
+        }
+        return true
+    }
+
+    private func GetStaticMemberVars(decl: AstDecl): ArrayList<AstVarDecl> {
+        let out = ArrayList<AstVarDecl>()
+        for (member in decl.GetMemberDeclPtrs()) {
+            if (let Some(varDecl) <- (member as AstVarDecl)) {
+                if (varDecl.TestAttr(AstAttribute.STATIC)) {
+                    out.add(varDecl)
+                }
+            }
+        }
+        return out
+    }
+
+    private func GetNonStaticMemberVars(decl: AstDecl): ArrayList<AstVarDecl> {
+        let out = ArrayList<AstVarDecl>()
+        for (member in decl.GetMemberDeclPtrs()) {
+            if (let Some(varDecl) <- (member as AstVarDecl)) {
+                if (!varDecl.TestAttr(AstAttribute.STATIC)) {
+                    out.add(varDecl)
+                }
+            }
+        }
+        return out
+    }
+
+    private func ContainsDecl(decls: ArrayList<AstVarDecl>, target: AstDecl): Bool {
+        for (decl in decls) {
+            if (FaithfulInitSameDecl(decl, target)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func ReplaceCommonDependenciesWithSpecific(dependencies: ArrayList<AstDecl>): Unit {
+        var idx: Int64 = 0
+        while (idx < dependencies.size) {
+            if (let Some(specific) <- dependencies[idx].specificImplementation) {
+                dependencies[idx] = specific
+            }
+            idx++
+        }
+    }
+
+    private func SaveCJMPDependencies(decl: AstDecl, dependencies: ArrayList<AstDecl>): Unit {
+        for (dependency in dependencies) {
+            decl.dependencies.add(dependency)
+        }
+    }
+
+    private func RestoreCJMPDependencies(decl: AstDecl, dependencies: ArrayList<AstDecl>): Unit {
+        for (dependencyOpt in decl.dependencies) {
+            if (let Some(dependency) <- dependencyOpt) {
+                dependencies.add(dependency)
+                if (let Some(specific) <- dependency.specificImplementation) {
+                    dependencies.add(specific)
+                }
+            }
+        }
+    }
+
+    private func MergingSpecific(): Bool {
+        return opts.IsCompilingCJMPSpecific()
+    }
+
+    private func OutputCHIR(): Bool {
+        return opts.outputMode == OutputMode.CHIR
     }
 
     private func AddDependency(dep: AstDecl, dependencies: ArrayList<AstDecl>, dependencySet: FaithfulInitDeclSet,
@@ -2342,11 +2664,6 @@ public class FaithfulAST2CHIR {
             !decl.TestAttr(AstAttribute.GLOBAL)
     }
 
-    private func IsGlobalOrStaticVarDecl(decl: AstDecl): Bool {
-        return (decl.astKind == ASTKind.VAR_DECL || decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL) &&
-            decl.TestAnyAttr(AstAttribute.GLOBAL, AstAttribute.STATIC)
-    }
-
     private func ReplaceSrcCodeImportedValAfterConstEval(pkg: Package): Unit {
         let initFuncsToRemove = ArrayList<Function>()
         for (decl in globalAndMemberFuncs) {
@@ -2390,44 +2707,78 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreatePackageInit(nodeInitOrder!: ArrayList<FaithfulInitFileVars>, suffix!: String): Unit {
-        let pkg = CurrentPackage()
-        let packageInit = GeneratePackageInitBase(suffix)
-        packageInit.EnableAttr(Attribute.PUBLIC)
-        if (suffix == "_literal") {
-            pkg.SetPackageLiteralInitFunc(packageInit)
+        let (packageInit, initBlock, createdPackageInit) = if (suffix == "_literal") {
+            PreparePackageLiteralInit()
         } else {
-            pkg.SetPackageInitFunc(packageInit)
+            PreparePackageInit()
         }
-        let initBlock = GetBlockWithInitializers(packageInit)
-        let importsInitFunc = CreateImportsInitFunc(suffix)
-        InsertInitializerIntoPackageInitializer(importsInitFunc, packageInit)
-        UpdateImportsInit(importsInitFunc, suffix)
-        if (suffix != "_literal") {
+        packageInit.EnableAttr(Attribute.PUBLIC)
+        if (createdPackageInit && suffix != "_literal") {
             AddGenericInstantiatedInit(initBlock)
         }
         for (fileVars in nodeInitOrder) {
-            if (fileVars.vars.isEmpty()) {
-                continue
-            }
-            if (suffix == "_literal" && IsImportedInitEntry(fileVars)) {
-                TranslateImportedFileLiteralInitializer(fileVars, initBlock)
-                continue
-            }
-            if (!fileVars.vars.isEmpty() && IsSymbolImportedDecl(fileVars.vars[0])) {
-                continue
-            }
-            let fileInit = if (suffix == "_literal") {
-                TranslateFileLiteralInitializer(fileVars)
+            if (suffix == "_literal") {
+                if (fileVars.vars.isEmpty()) {
+                    continue
+                }
+                if (IsImportedInitEntry(fileVars)) {
+                    TranslateImportedFileLiteralInitializer(fileVars, initBlock)
+                    continue
+                }
+                if (IsSymbolImportedDecl(fileVars.vars[0])) {
+                    continue
+                }
+                if (let Some(fileLiteralInit) <- TranslateFileLiteralInitializer(fileVars)) {
+                    InsertInitializerIntoPackageInitializer(fileLiteralInit, packageInit)
+                }
             } else {
-                TranslateFileInitializer(fileVars)
-            }
-            if (let Some(initFn) <- fileInit) {
-                InsertInitializerIntoPackageInitializer(initFn, packageInit)
+                if (!fileVars.vars.isEmpty() || opts.enIncrementalCompilation) {
+                    if (!fileVars.vars.isEmpty() && IsSymbolImportedDecl(fileVars.vars[0])) {
+                        continue
+                    }
+                    if (let Some(fileInit) <- TranslateFileInitializer(fileVars)) {
+                        InsertInitializerIntoPackageInitializer(fileInit, packageInit)
+                    }
+                }
             }
         }
         if (initBlock.GetTerminator().isNone()) {
             builder.CreateExit(None, initBlock)
         }
+    }
+
+    private func PreparePackageInit(): (Function, Block, Bool) {
+        let pkg = CurrentPackage()
+        if (let Some(packageInit) <- pkg.GetPackageInitFunc()) {
+            let curBlock = DropExitNodeOfInitializer(packageInit)
+            let importsInitFunc = GetImportsInitFunc("")
+            UpdateImportsInit(importsInitFunc, "")
+            return (packageInit, curBlock, false)
+        }
+        let packageInit = GeneratePackageInitBase("")
+        pkg.SetPackageInitFunc(packageInit)
+        let curBlock = GetBlockWithInitializers(packageInit)
+        let importsInitFunc = CreateImportsInitFunc("")
+        InsertInitializerIntoPackageInitializer(importsInitFunc, packageInit)
+        UpdateImportsInit(importsInitFunc, "")
+        return (packageInit, curBlock, true)
+    }
+
+    private func PreparePackageLiteralInit(): (Function, Block, Bool) {
+        let pkg = CurrentPackage()
+        if (let Some(packageLiteralInit) <- pkg.GetPackageLiteralInitFunc()) {
+            let curBlock = DropExitNodeOfInitializer(packageLiteralInit)
+            let importsInitFunc = GetImportsInitFunc("_literal")
+            UpdateImportsInit(importsInitFunc, "_literal")
+            return (packageLiteralInit, curBlock, false)
+        }
+        let packageLiteralInit = GeneratePackageInitBase("_literal")
+        pkg.SetPackageLiteralInitFunc(packageLiteralInit)
+        let curBlock = GetBlockWithInitializers(packageLiteralInit)
+        let importsInitFunc = CreateImportsInitFunc("_literal")
+        InsertInitializerIntoPackageInitializer(importsInitFunc, packageLiteralInit)
+        UpdateImportsInit(importsInitFunc, "_literal")
+        return (packageLiteralInit, curBlock, true)
     }
 
     private func GeneratePackageInitBase(suffix: String): Function {
@@ -2448,6 +2799,7 @@ public class FaithfulAST2CHIR {
         let applyInitFuncBlock = builder.CreateBlock(body)
         builder.CreateBranch(flagRef, returnBlock, applyInitFuncBlock, entry)
         builder.CreateExit(None, returnBlock)
+        applyInitFuncBlock.EnableAttr(Attribute.INITIALIZER)
         let trueLit = RequireResult(builder.CreateConstant(boolTy, BoolLiteral(true), applyInitFuncBlock))
         builder.CreateStore(trueLit, initFlag, applyInitFuncBlock)
         packageInitializerBlocks[packageInit.nodeId] = applyInitFuncBlock
@@ -2466,6 +2818,7 @@ public class FaithfulAST2CHIR {
         initFlag.EnableAttr(Attribute.COMPILER_ADD)
         initFlag.EnableAttr(Attribute.INITIALIZER)
         initFlag.EnableAttr(Attribute.NO_DEBUG_INFO)
+        initFlag.SetLinkTypeInfo(BasicLinkage.INTERNAL)
         initFlag.SetInitializer(builder.CreateLiteralValue(BoolLiteral(false), boolTy))
         AddGlobalVarToPackage(initFlag)
         return initFlag
@@ -2477,10 +2830,18 @@ public class FaithfulAST2CHIR {
             PackageInitFuncName(pkg.GetName(), suffix + "_importsInit"), "", pkg.GetName())
         importsInit.SetLinkage(Linkage.INTERNAL)
         let entry = RequireEntryBlock(importsInit)
+        entry.EnableAttr(Attribute.INITIALIZER)
         if (entry.GetTerminator().isNone()) {
             builder.CreateExit(None, entry)
         }
         return importsInit
+    }
+
+    private func GetImportsInitFunc(suffix: String): Function {
+        let pkg = CurrentPackage()
+        let initializerName = PackageInitFuncName(pkg.GetName(), suffix + "_importsInit")
+        return pkg.TryGetGlobalFunc(GLOBAL_VALUE_PREFIX + initializerName) ??
+            throw IllegalStateException("faithful AST2CHIR missing imports init func: " + initializerName)
     }
 
     private func UpdateImportsInit(importsInitFunc: Function, suffix: String): Unit {
@@ -2514,11 +2875,33 @@ public class FaithfulAST2CHIR {
     }
 
     private func InsertInitializerIntoPackageInitializer(initFn: Function, packageInit: Function): Unit {
-        InsertInitializerIntoBlock(initFn, GetBlockWithInitializers(packageInit))
+        let block = GetBlockWithInitializers(packageInit)
+        if (initFn.TestAttr(Attribute.DESERIALIZED) && packageInit.TestAttr(Attribute.DESERIALIZED)) {
+            if (let Some(initCallExpr) <- FindApplyIn(block, initFn)) {
+                let expressions = block.GetExpressions()
+                if (!expressions.isEmpty()) {
+                    let lastExpr = expressions[expressions.size - 1]
+                    if (initCallExpr.nodeId != lastExpr.nodeId) {
+                        initCallExpr.MoveAfter(lastExpr)
+                    }
+                }
+            } else {
+                CreateInitFuncApply(initFn, block)
+            }
+            return
+        }
+        CreateInitFuncApply(initFn, block)
     }
 
-    private func InsertInitializerIntoBlock(initFn: Function, block: Block): Unit {
-        CreateInitFuncApply(initFn, block)
+    private func FindApplyIn(block: Block, applyCallee: Function): Option<Apply> {
+        for (expression in block.GetExpressions()) {
+            if (let Some(apply) <- (expression as Apply)) {
+                if (apply.GetCallee().nodeId == applyCallee.nodeId) {
+                    return apply
+                }
+            }
+        }
+        return None
     }
 
     private func AddGenericInstantiatedInit(block: Block): Unit {
@@ -2535,27 +2918,73 @@ public class FaithfulAST2CHIR {
     }
 
     private func GetBlockWithInitializers(fn: Function): Block {
+        if (let Some(body) <- fn.GetBody()) {
+            for (block in body.GetBlocks()) {
+                if (block.TestAttr(Attribute.INITIALIZER)) {
+                    return block
+                }
+            }
+        }
         if (let Some(block) <- packageInitializerBlocks.get(fn.nodeId)) {
             return block
         }
         return RequireEntryBlock(fn)
     }
 
-    private func TranslateFileInitializer(fileVars: FaithfulInitFileVars): Option<Function> {
-        if (fileVars.vars.isEmpty()) {
-            return None
+    private func TryGetFileInitializer(file: AstFile, suffix: String): Option<Function> {
+        let initializerName = FileInitFuncName(file, suffix)
+        return CurrentPackage().TryGetGlobalFunc(GLOBAL_VALUE_PREFIX + initializerName)
+    }
+
+    private func RemoveInitializerForVarDecl(varDecl: AstVarDecl, fileInit: Function): Unit {
+        let declInitName = GLOBAL_VALUE_PREFIX + GlobalVarInitFuncName(varDecl)
+        let body = fileInit.GetBody() ??
+            throw IllegalStateException("faithful AST2CHIR file init has no body")
+        let blocks = body.GetBlocks()
+        if (blocks.isEmpty()) {
+            return
         }
-        if (IsSymbolImportedDecl(fileVars.vars[0])) {
+        let blockWithInitializers = blocks[blocks.size - 1]
+        for (expr in blockWithInitializers.GetExpressions()) {
+            if (let Some(apply) <- (expr as Apply)) {
+                let initFunc = apply.GetCallee()
+                CJC_ASSERT(initFunc.TestAttr(Attribute.INITIALIZER))
+                if (initFunc.GetIdentifier() == declInitName) {
+                    expr.RemoveSelfFromBlock()
+                    return
+                }
+            }
+        }
+    }
+
+    private func RemoveCommonInitializersReplacedWithSpecific(fileInit: Function,
+        decls: ArrayList<AstDecl>): Unit {
+        for (decl in decls) {
+            if (decl.IsCommonMatchedWithSpecific()) {
+                RemoveInitializerForVarDecl(RequireVarDecl(decl), fileInit)
+            }
+        }
+    }
+
+    private func TranslateFileInitializer(fileVars: FaithfulInitFileVars): Option<Function> {
+        if (let Some(fileInit) <- TryGetFileInitializer(fileVars.file, "")) {
+            CJC_ASSERT(fileInit.TestAttr(Attribute.INITIALIZER))
+            RemoveCommonInitializersReplacedWithSpecific(fileInit, fileVars.vars)
+            return fileInit
+        }
+        if (!fileVars.vars.isEmpty() && IsSymbolImportedDecl(fileVars.vars[0])) {
             return None
         }
         let initFuncs = ArrayList<Function>()
         for (decl in fileVars.vars) {
             if (let Some(varDecl) <- (decl as AstVarDecl)) {
                 if (let Some(initFunc) <- TranslateSingleInitializer(varDecl)) {
+                    initFunc.SetFeatures(fileVars.file.GetFeatures())
                     initFuncs.add(initFunc)
                 }
             } else if (let Some(varWithPattern) <- (decl as AstVarWithPatternDecl)) {
                 if (let Some(initFunc) <- TranslateVarWithPatternInitializer(varWithPattern)) {
+                    initFunc.SetFeatures(fileVars.file.GetFeatures())
                     initFuncs.add(initFunc)
                 }
             }
@@ -2568,6 +2997,9 @@ public class FaithfulAST2CHIR {
         }
         if (entry.GetTerminator().isNone()) {
             builder.CreateExit(None, entry)
+        }
+        if (initFuncs.isEmpty()) {
+            fileInit.DisableAttr(Attribute.NO_INLINE)
         }
         return fileInit
     }
@@ -2602,22 +3034,24 @@ public class FaithfulAST2CHIR {
     }
 
     private func TranslateFileLiteralInitializer(fileVars: FaithfulInitFileVars): Option<Function> {
-        let initFuncs = ArrayList<Function>()
+        let varsToGenInit = ArrayList<AstVarDecl>()
         for (decl in fileVars.vars) {
             if (let Some(varDecl) <- (decl as AstVarDecl)) {
                 if (NeedVarLiteralInitFunc(varDecl)) {
-                    initFuncs.add(CreateGlobalVarStoreInitFunc(varDecl, suffix: "$literal"))
+                    varsToGenInit.add(varDecl)
                 }
             }
         }
-        if (initFuncs.isEmpty()) {
+        if (varsToGenInit.isEmpty()) {
             return None
         }
         let fileInit = CreateEmptyGVInitFunc(FileInitFuncName(fileVars.file, "_literal"),
             FileInitFuncName(fileVars.file, "_literal"), "", FileOwnerPackageName(fileVars.file))
+        fileInit.DisableAttr(Attribute.NO_INLINE)
+        fileInit.SetDebugLocation(INVALID_LOCATION)
         let entry = RequireEntryBlock(fileInit)
-        for (initFunc in initFuncs) {
-            CreateInitFuncApply(initFunc, entry)
+        for (varDecl in varsToGenInit) {
+            StoreLiteralInitializerInBlock(varDecl, entry)
         }
         if (entry.GetTerminator().isNone()) {
             builder.CreateExit(None, entry)
@@ -2626,14 +3060,74 @@ public class FaithfulAST2CHIR {
     }
 
     private func TranslateSingleInitializer(varDecl: AstVarDecl): Option<Function> {
-        if (varDecl.initializer.isNone() || varDecl.specificImplementation.isSome()) {
+        if (!CanInitBeGenerated(varDecl)) {
             return None
+        }
+        if (varDecl.specificImplementation.isSome()) {
+            return None
+        }
+        if (let Some(initFunc) <- CurrentPackage().TryGetGlobalFunc(GLOBAL_VALUE_PREFIX + GlobalVarInitFuncName(varDecl))) {
+            if (!varDecl.TestAttr(AstAttribute.SPECIFIC)) {
+                return initFunc
+            }
         }
         if (!NeedInitGlobalVarByInitFunc(varDecl)) {
             SetLiteralInitializer(varDecl)
             return None
         }
+        if (IsIncrementalNoChange(varDecl) && !IsSrcCodeImportedGlobalDecl(varDecl)) {
+            if (varDecl.identifier.Val() == STATIC_INIT_VAR) {
+                return CreateGlobalVarStoreInitFunc(varDecl, suffix: "")
+            }
+            return TranslateIncrementalNoChangeVar(varDecl)
+        }
         return CreateGlobalVarStoreInitFunc(varDecl, suffix: "")
+    }
+
+    private func CanInitBeGenerated(varDecl: AstVarDecl): Bool {
+        return varDecl.initializer.isSome()
+    }
+
+    private func IsIncrementalNoChange(varDecl: AstVarDecl): Bool {
+        return opts.enIncrementalCompilation && !varDecl.toBeCompiled
+    }
+
+    private func TranslateIncrementalNoChangeVar(varDecl: AstVarDecl): Function {
+        let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetUnitTy())
+        let initFn = builder.CreateFunction(funcTy, GlobalVarInitFuncName(varDecl),
+            srcCodeIdentifier: "gv$_" + varDecl.identifier.Val(), rawMangledName: EffectiveRawMangledName(varDecl),
+            packageName: EffectivePackageName(varDecl))
+        initFn.SetFuncKind(FuncKind.GLOBALVAR_INIT)
+        initFn.EnableAttr(Attribute.IMPORTED)
+        initFn.SetLinkTypeInfo(BasicLinkage.INTERNAL)
+        if (varDecl.IsConst()) {
+            initFn.EnableAttr(Attribute.CONST)
+        }
+        return initFn
+    }
+
+    private func SetLiteralInitializer(varDecl: AstVarDecl): Unit {
+        let _ = NeedVarLiteralInitFunc(varDecl)
+    }
+
+    private func NeedVarLiteralInitFunc(varDecl: AstVarDecl): Bool {
+        if (varDecl.initializer.isNone() || NeedInitGlobalVarByInitFunc(varDecl)) {
+            return false
+        }
+        if (varDecl.TestAttr(AstAttribute.COMMON) && varDecl.specificImplementation.isSome()) {
+            return false
+        }
+        if (IsIncrementalNoChange(varDecl)) {
+            return false
+        }
+        let litExpr = (RequireExpr(varDecl.initializer, "literal global initializer") as AstLitConstExpr) ??
+            throw IllegalStateException("faithful AST2CHIR literal global initializer expected LitConstExpr")
+        let globalVar = RequireGlobalVar(globalCache.Get(varDecl))
+        globalVar.SetInitializer(TranslateLitConstant(litExpr, RequireAstTy(litExpr)))
+        if (!varDecl.isVar) {
+            return false
+        }
+        return true
     }
 
     private func TranslateVarWithPatternInitializer(decl: AstVarWithPatternDecl): Option<Function> {
@@ -2684,27 +3178,6 @@ public class FaithfulAST2CHIR {
         return initFn
     }
 
-    private func SetLiteralInitializer(varDecl: AstVarDecl): Unit {
-        let _ = NeedVarLiteralInitFunc(varDecl)
-    }
-
-    private func NeedVarLiteralInitFunc(varDecl: AstVarDecl): Bool {
-        if (varDecl.initializer.isNone() || NeedInitGlobalVarByInitFunc(varDecl)) {
-            return false
-        }
-        if (varDecl.TestAttr(AstAttribute.COMMON) && varDecl.specificImplementation.isSome()) {
-            return false
-        }
-        let litExpr = (RequireExpr(varDecl.initializer, "literal global initializer") as AstLitConstExpr) ??
-            throw IllegalStateException("faithful AST2CHIR literal global initializer expected LitConstExpr")
-        let globalVar = RequireGlobalVar(globalCache.Get(varDecl))
-        globalVar.SetInitializer(TranslateLitConstant(litExpr, RequireAstTy(litExpr)))
-        if (!varDecl.isVar) {
-            return false
-        }
-        return true
-    }
-
     private func NeedInitGlobalVarByInitFunc(varDecl: AstVarDecl): Bool {
         if (let None <- varDecl.initializer) {
             return false
@@ -2713,12 +3186,9 @@ public class FaithfulAST2CHIR {
             return true
         }
         let initExpr = RequireExpr(varDecl.initializer, "global variable initializer")
-        if (let Some(litExpr) <- (initExpr as AstLitConstExpr)) {
-            if (IsSimpleLiteralValue(litExpr)) {
+        if (IsSimpleLiteralValue(initExpr)) {
+            if (let Some(litExpr) <- (Translator.GetDesugaredExpr(initExpr) as AstLitConstExpr)) {
                 let declTy = chirType.TranslateType(RequireAstTy(varDecl))
-                if (IsStringGlobalLiteralInit(litExpr, declTy)) {
-                    return true
-                }
                 let initTy = chirType.TranslateType(RequireAstTy(initExpr))
                 return !declTy.IsEqual(initTy)
             }
@@ -2726,24 +3196,23 @@ public class FaithfulAST2CHIR {
         return true
     }
 
-    private func IsStringGlobalLiteralInit(litExpr: AstLitConstExpr, declTy: Type): Bool {
-        if (litExpr.kind != AstLitConstKind.STRING && litExpr.kind != AstLitConstKind.JSTRING) {
+    private func IsSimpleLiteralValue(node: AstExpr): Bool {
+        let realNode = Translator.GetDesugaredExpr(node)
+        if (realNode.astKind != ASTKind.LIT_CONST_EXPR) {
             return false
         }
-        return declTy.IsString()
-    }
-
-    private func IsSimpleLiteralValue(expr: AstLitConstExpr): Bool {
-        return match (expr.kind) {
-            case AstLitConstKind.BOOL => true
-            case AstLitConstKind.UNIT => true
-            case AstLitConstKind.INTEGER => true
-            case AstLitConstKind.RUNE_BYTE => true
-            case AstLitConstKind.FLOAT => true
-            case AstLitConstKind.RUNE => true
-            case AstLitConstKind.STRING => true
-            case AstLitConstKind.JSTRING => true
-            case AstLitConstKind.NONE => false
+        let realExpr = (realNode as AstExpr) ??
+            throw IllegalStateException("faithful AST2CHIR simple literal expected expr")
+        let realTy = RequireAstTy(realExpr)
+        return match (realTy.kind) {
+            case AstTypeKind.TYPE_FLOAT16 | AstTypeKind.TYPE_FLOAT64 | AstTypeKind.TYPE_IDEAL_FLOAT |
+                AstTypeKind.TYPE_FLOAT32 | AstTypeKind.TYPE_UINT8 | AstTypeKind.TYPE_UINT16 |
+                AstTypeKind.TYPE_UINT32 | AstTypeKind.TYPE_UINT64 | AstTypeKind.TYPE_UINT_NATIVE |
+                AstTypeKind.TYPE_INT8 | AstTypeKind.TYPE_INT16 | AstTypeKind.TYPE_INT32 |
+                AstTypeKind.TYPE_INT64 | AstTypeKind.TYPE_INT_NATIVE | AstTypeKind.TYPE_IDEAL_INT |
+                AstTypeKind.TYPE_RUNE | AstTypeKind.TYPE_BOOLEAN => true
+            case AstTypeKind.TYPE_STRUCT => RequireAstTy(node).IsString()
+            case _ => false
         }
     }
 
