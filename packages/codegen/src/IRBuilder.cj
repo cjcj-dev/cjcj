@@ -1615,30 +1615,6 @@ public class IRBuilder2 <: Resource {
         AddSRetAttribute(callBase, GetSRetAttributeType(returnTy, returnCGType))
         AddNoAliasAttribute(callBase)
         var retValue = callArgs[0]
-        if (returnTy.IsGeneric()) {
-            let resultTy = CurrentExpressionResultType() ?? returnTy
-            let resultCGType = CGType.GetOrCreate(cgMod, resultTy)
-            retValue = CreateLoad(returnCGType.GetLLVMType(), retValue, name: "sret.load")
-            if (resultCGType.GetSize().isNone() && !resultTy.IsGeneric()) {
-                return CopyUnknownSizeSRetReturn(retValue, resultTy)
-            }
-            if (resultCGType.GetSize().isSome() && !resultCGType.IsReference()) {
-                return LoadSRetPayloadValue(retValue, resultCGType)
-            }
-            return retValue
-        }
-        if (ContainsGenericType(returnTy)) {
-            let resultTy = CurrentExpressionResultType() ?? returnTy
-            let resultCGType = CGType.GetOrCreate(cgMod, resultTy)
-            if (resultCGType.GetSize().isNone() && !resultTy.IsGeneric()) {
-                return CopyUnknownSizeSRetReturn(retValue, resultTy)
-            }
-            // C++ IRBuilder2::GetReturnValue (CJNativeIRBuilder.cpp:324-356) gates the box/payload path
-            // ONLY on `!returnCGType.GetSize()`; it has NO ContainsGenericType payload-extraction branch.
-            // For a SIZED return (e.g. Array<Generic-T>, a 24-byte struct whose buffer holds the value
-            // directly in addrspace 0), fall through to the value-load tail. The old LoadSRetPayloadValue
-            // here ran GetPayloadFromObject on the raw addrspace-0 buffer => illegal addrspace-0->1 bitcast.
-        }
         if (returnCGType.GetSize().isNone()) {
             let resultTy = CurrentExpressionResultType() ?? returnTy
             let resultCGType = CGType.GetOrCreate(cgMod, resultTy)
@@ -1654,10 +1630,6 @@ public class IRBuilder2 <: Resource {
         }
         if (returnTy.IsUnit()) {
             return cgMod.GenerateUnitTypeValue()
-        }
-        if (!returnTy.IsUnit() && !returnTy.IsNothing() && !returnTy.IsVoid() && returnCGType.GetSize().isSome() &&
-            !returnCGType.IsReference()) {
-            return CreateLoad(returnCGType.GetLLVMType(), retValue, name: "sret.value")
         }
         return retValue
     }
