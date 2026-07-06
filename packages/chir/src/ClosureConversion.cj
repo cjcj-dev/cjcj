@@ -938,10 +938,7 @@ public class ClosureConversion {
         }
         let globalFunc = CreateCCFunction(funcTy, GenerateGlobalFuncIdentifier(lambda), lambda.GetSrcCodeIdentifier(),
             genericTypeParams: convertedGenericParams)
-        globalFunc.SetFuncKind(FuncKind.LAMBDA)
-        if (lambda.IsCompileTimeValue()) {
-            globalFunc.EnableAttr(Attribute.CONST)
-        }
+        SetLiftedLambdaAttr(globalFunc, lambda)
         if (let Some(parentFunc) <- lambda.GetTopLevelFunc()) {
             globalFunc.InheritIDFromFunc(parentFunc)
         }
@@ -1035,7 +1032,7 @@ public class ClosureConversion {
             throw IllegalStateException("ClosureConversion CFunc lambda result is not a function type")
         let globalFunc = CreateCCFunction(funcTy, GenerateGlobalFuncIdentifier(lambda), lambda.GetSrcCodeIdentifier(),
             genericTypeParams: lambda.GetGenericTypeParams())
-        globalFunc.SetFuncKind(FuncKind.LAMBDA)
+        SetLiftedLambdaAttr(globalFunc, lambda)
         if (let Some(parentFunc) <- lambda.GetTopLevelFunc()) {
             globalFunc.InheritIDFromFunc(parentFunc)
         }
@@ -1749,6 +1746,25 @@ public class ClosureConversion {
             rawMangledName: identifier, packageName: CurrentPackage().GetName(),
             genericTypeParams: genericTypeParams)
         return fn
+    }
+
+    private func SetLiftedLambdaAttr(fn: Function, lambda: Lambda): Unit {
+        fn.EnableAttr(Attribute.COMPILER_ADD)
+        fn.EnableAttr(Attribute.NO_REFLECT_INFO)
+        fn.EnableAttr(Attribute.INTERNAL)
+        fn.SetLinkTypeInfo(BasicLinkage.INTERNAL)
+        fn.SetFuncKind(FuncKind.LAMBDA)
+        if (!lambda.GetGenericTypeParams().isEmpty()) {
+            fn.EnableAttr(Attribute.GENERIC)
+        }
+        if (lambda.IsCompileTimeValue()) {
+            fn.EnableAttr(Attribute.CONST)
+        }
+        if (let Some(body) <- lambda.GetBody()) {
+            if (body.TestAttr(Attribute.NO_INLINE)) {
+                fn.EnableAttr(Attribute.NO_INLINE)
+            }
+        }
     }
 
     private func SetMemberMethodAttr(fn: Function, isConst: Bool): Unit {

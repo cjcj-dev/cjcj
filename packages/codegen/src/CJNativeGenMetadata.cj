@@ -5,6 +5,7 @@ import std.sort.*
 import cangjie_compiler::chir.AnnoInfo
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.AttributeInfo
+import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CustomTypeDef
 import cangjie_compiler::chir.EnumDef
@@ -12,10 +13,13 @@ import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GenericType
+import cangjie_compiler::chir.GlobalVar
+import cangjie_compiler::chir.MemberVarInfo
 import cangjie_compiler::chir.Parameter
+import cangjie_compiler::chir.StructDef
 import cangjie_compiler::chir.Type
 import cangjie_compiler::mangle.GetTypeQualifiedName
-import cangjie_compiler::utils.{CORE_PACKAGE_NAME, SplitQualifiedName, StaticCast}
+import cangjie_compiler::utils.{BOX_DECL_PREFIX, CORE_PACKAGE_NAME, SplitQualifiedName, StaticCast}
 
 private let PRIMITIVE_TIS: Array<String> = [
     "Nothing.ti", "Unit.ti", "Bool.ti", "Rune.ti", "UInt8.ti", "UInt16.ti",
@@ -223,6 +227,33 @@ private open class MetadataInfo {
         return tiName
     }
 
+    protected func GenerateInstanceFieldMetadata(field: MemberVarInfo, idx: Int64): LLVMMetadataRef {
+        let llvmCtx = module.GetLLVMContext()
+        return MetadataVector(llvmCtx)
+            .Concat(UInt32(idx))
+            .Concat(field.name)
+            .Concat(GenerateAttrsMetadata(field.attributeInfo,
+                if (field.TestAttr(Attribute.READONLY)) { ExtraAttribute.IMMUTABLE_FIELD } else { ExtraAttribute.MUTABLE_FIELD },
+                field.annoInfo))
+            .CreateMDTuple()
+    }
+
+    protected func GenerateStaticFieldMetadata(staticField: GlobalVar): LLVMMetadataRef {
+        let llvmCtx = module.GetLLVMContext()
+        return MetadataVector(llvmCtx)
+            .Concat(staticField.GetSrcCodeIdentifier())
+            .Concat(GetTiName(staticField.GetType().getOrThrow()))
+            .Concat(staticField.GetIdentifierWithoutPrefix())
+            .Concat(GenerateAttrsMetadata(staticField.GetAttributeInfo(),
+                if (staticField.TestAttr(Attribute.READONLY)) {
+                    ExtraAttribute.IMMUTABLE_FIELD
+                } else {
+                    ExtraAttribute.MUTABLE_FIELD
+                },
+                staticField.GetAnnoInfo()))
+            .CreateMDTuple()
+    }
+
     protected func GenerateMethodMetadata(method: Function, isFromInterface!: Bool = false): LLVMMetadataRef {
         let llvmCtx = module.GetLLVMContext()
         let funcType = StaticCast<FuncType>(method.GetType().getOrThrow())
@@ -244,6 +275,275 @@ private open class MetadataInfo {
                 hasSRetMode: hasSRetMode))
         module.GetOrInsertCGFunction(method)
         return methodMD.CreateMDTuple()
+    }
+}
+
+private class StructMetadataInfo <: MetadataInfo {
+    public init(cgMod: CGModule, subCHIRPkg: SubCHIRPackage, reflectionMode: GenReflectMode) {
+        super(cgMod, subCHIRPkg, reflectionMode)
+    }
+
+    public override func Gen(): Unit {
+        GenerateAllStructsMetadata()
+    }
+
+    private func GenerateAllStructsMetadata(): Unit {
+        let doneSet = HashSet<String>()
+        for (typeDef in subCHIRPkg.chirCustomDefs) {
+            if (typeDef.TestAttr(Attribute.GENERIC_INSTANTIATED) || typeDef.TestAttr(Attribute.IMPORTED) ||
+                typeDef.TestAttr(Attribute.NON_RECOMPILE) || typeDef.TestAttr(Attribute.NO_REFLECT_INFO) ||
+                !typeDef.IsStruct()) {
+                continue
+            }
+            GenerateStructMetadata(StaticCast<StructDef>(typeDef), doneSet)
+        }
+        for (typeName in doneSet) {
+            module.GetCGContext().AddGeneratedStructType(typeName)
+        }
+    }
+
+    private func GenerateStructMetadata(sd: StructDef, doneSet: HashSet<String>): Unit {
+        let typeName = sd.GetIdentifierWithoutPrefix()
+        let structTypeName = STRUCT_TYPE_PREFIX + typeName
+        if (doneSet.contains(structTypeName)) {
+            return
+        }
+
+        let moduleHandle = module.GetLLVMModule() ?? return
+        let llvmCtx = module.GetLLVMContext()
+        let typesMD = if (sd.TestAttr(Attribute.GENERIC)) { METADATA_TYPETEMPLATES } else { METADATA_TYPES }
+        LLVMGetOrInsertNamedMetadata(moduleHandle, typesMD)
+        let structTy = sd.GetType().getOrThrow()
+        let tiOrTTName = if (sd.TestAttr(Attribute.GENERIC)) {
+            CGType.GetNameOfTypeTemplateGV(structTy)
+        } else {
+            CGType.GetNameOfTypeInfoGV(structTy)
+        }
+        var reflectTIOrTT = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(tiOrTTName) }.asResource()) {
+            reflectTIOrTT = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+        }
+        if (reflectTIOrTT.isNull()) {
+            return
+        }
+
+        if (reflectionMode != GenReflectMode.FULL_REFLECT) {
+            let mdTuple = MetadataVector(llvmCtx)
+                .Concat(tiOrTTName)
+                .Concat(GenerateStructFieldMetadata(sd))
+                .CreateMDTuple()
+            LLVMAddNamedMetadataOperand(moduleHandle, typesMD, mdTuple)
+            LLVMSetGlobalMetadata(llvmCtx, reflectTIOrTT, "Reflection", mdTuple)
+            doneSet.add(structTypeName)
+            return
+        }
+        let declaredGenericTi = if (sd.TestAttr(Attribute.GENERIC)) { GetTiName(structTy) } else { "" }
+
+        let methodsVec = ArrayList<LLVMMetadataRef>()
+        let staticMethodsVec = ArrayList<LLVMMetadataRef>()
+        GenerateStructMethodMetadata(sd, methodsVec, staticMethodsVec)
+        let cgType = CGType.GetOrCreate(module, structTy)
+        let isUnknownSize = cgType.GetSize().isNone()
+        let mdTuple = MetadataVector(llvmCtx)
+            .Concat(tiOrTTName)
+            .Concat(declaredGenericTi)
+            .Concat(GenerateStructFieldMetadata(sd))
+            .Concat(GenerateStructStaticFieldMetadata(sd))
+            .Concat(LLVMCreateMDTuple(llvmCtx, methodsVec))
+            .Concat(LLVMCreateMDTuple(llvmCtx, staticMethodsVec))
+            .Concat(GenerateAttrsMetadata(sd.GetAttributeInfo(), ExtraAttribute.STRUCT, sd.GetAnnoInfo(),
+                hasSRetMode: SRetMode.NO_SRET, enumKind: "", isUnknownSize: isUnknownSize))
+            .CreateMDTuple()
+
+        LLVMAddNamedMetadataOperand(moduleHandle, typesMD, mdTuple)
+        LLVMSetGlobalMetadata(llvmCtx, reflectTIOrTT, "Reflection", mdTuple)
+        doneSet.add(structTypeName)
+    }
+
+    private func GenerateStructFieldMetadata(sd: StructDef): LLVMMetadataRef {
+        let llvmCtx = module.GetLLVMContext()
+        let fieldsVec = MetadataVector(llvmCtx)
+        var idx: Int64 = 0
+        for (field in sd.GetAllInstanceVars()) {
+            fieldsVec.Concat(GenerateInstanceFieldMetadata(field, idx))
+            idx++
+        }
+        return fieldsVec.CreateMDTuple()
+    }
+
+    private func GenerateStructStaticFieldMetadata(sd: StructDef): LLVMMetadataRef {
+        let llvmCtx = module.GetLLVMContext()
+        let staticFieldsVec = MetadataVector(llvmCtx)
+        for (staticField in sd.GetStaticMemberVars()) {
+            staticFieldsVec.Concat(GenerateStaticFieldMetadata(staticField))
+            module.GetOrInsertGlobalVariable(staticField)
+        }
+        return staticFieldsVec.CreateMDTuple()
+    }
+
+    private func GenerateStructMethodMetadata(sd: StructDef, methodsVec: ArrayList<LLVMMetadataRef>,
+        staticMethodsVec: ArrayList<LLVMMetadataRef>): Unit {
+        for (method in sd.GetMethods()) {
+            if (method.TestAttr(Attribute.NO_REFLECT_INFO) || method.TestAttr(Attribute.IMPORTED)) {
+                continue
+            }
+            let methodMD = GenerateMethodMetadata(method)
+            module.GetOrInsertCGFunction(method)
+            if (method.TestAttr(Attribute.STATIC)) {
+                staticMethodsVec.add(methodMD)
+            } else {
+                methodsVec.add(methodMD)
+            }
+        }
+    }
+}
+
+private class ClassMetadataInfo <: MetadataInfo {
+    public init(cgMod: CGModule, subCHIRPkg: SubCHIRPackage, reflectionMode: GenReflectMode) {
+        super(cgMod, subCHIRPkg, reflectionMode)
+    }
+
+    public override func Gen(): Unit {
+        GenerateAllClassesMetadata()
+    }
+
+    private func GenerateAllClassesMetadata(): Unit {
+        for (typeDef in subCHIRPkg.chirCustomDefs) {
+            if (typeDef.TestAttr(Attribute.GENERIC_INSTANTIATED) || typeDef.TestAttr(Attribute.NON_RECOMPILE) ||
+                typeDef.TestAttr(Attribute.IMPORTED) || !typeDef.IsClassLike()) {
+                continue
+            }
+            GenerateClassLikeMetadata(StaticCast<ClassDef>(typeDef))
+        }
+    }
+
+    private func GenerateClassLikeMetadata(cd: ClassDef): Unit {
+        if (cd.TestAttr(Attribute.NO_REFLECT_INFO) && !IsClassForBoxType(cd.GetSrcCodeIdentifier())) {
+            return
+        }
+
+        let moduleHandle = module.GetLLVMModule() ?? return
+        let llvmCtx = module.GetLLVMContext()
+        let typesMD = if (cd.TestAttr(Attribute.GENERIC)) { METADATA_TYPETEMPLATES } else { METADATA_TYPES }
+        LLVMGetOrInsertNamedMetadata(moduleHandle, typesMD)
+        let classTy = cd.GetType().getOrThrow()
+        let tiOrTTName = if (cd.TestAttr(Attribute.GENERIC)) {
+            CGType.GetNameOfTypeTemplateGV(classTy)
+        } else {
+            CGType.GetNameOfTypeInfoGV(classTy)
+        }
+        var reflectTIOrTT = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(tiOrTTName) }.asResource()) {
+            reflectTIOrTT = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+        }
+        if (reflectTIOrTT.isNull()) {
+            return
+        }
+        if (reflectionMode != GenReflectMode.FULL_REFLECT) {
+            let mdTuple = MetadataVector(llvmCtx)
+                .Concat(tiOrTTName)
+                .Concat(GenerateClassLikeFieldMetadata(cd))
+                .CreateMDTuple()
+            LLVMAddNamedMetadataOperand(moduleHandle, typesMD, mdTuple)
+            LLVMSetGlobalMetadata(llvmCtx, reflectTIOrTT, "Reflection", mdTuple)
+            return
+        }
+        let declaredGenericTi = if (cd.TestAttr(Attribute.GENERIC)) { GetTiName(classTy) } else { "" }
+
+        let methodsVec = ArrayList<LLVMMetadataRef>()
+        let staticMethodsVec = ArrayList<LLVMMetadataRef>()
+        GenerateClassLikeMethodMetadata(cd, methodsVec, staticMethodsVec)
+
+        let mdTuple = MetadataVector(llvmCtx)
+            .Concat(tiOrTTName)
+            .Concat(declaredGenericTi)
+            .Concat(GenerateClassLikeFieldMetadata(cd))
+            .Concat(GenerateClassLikeStaticFieldMetadata(cd))
+            .Concat(LLVMCreateMDTuple(llvmCtx, methodsVec))
+            .Concat(LLVMCreateMDTuple(llvmCtx, staticMethodsVec))
+            .Concat(GenerateClassLikeTypeAttrsMetadata(cd))
+            .CreateMDTuple()
+        LLVMAddNamedMetadataOperand(moduleHandle, typesMD, mdTuple)
+        LLVMSetGlobalMetadata(llvmCtx, reflectTIOrTT, "Reflection", mdTuple)
+    }
+
+    private func GenerateClassLikeMethodMetadata(cd: ClassDef, methodsVec: ArrayList<LLVMMetadataRef>,
+        staticMethodsVec: ArrayList<LLVMMetadataRef>): Unit {
+        if (IsClassForBoxType(cd.GetSrcCodeIdentifier())) {
+            return
+        }
+        for (method in cd.GetMethods()) {
+            if (method.TestAttr(Attribute.NO_REFLECT_INFO)) {
+                continue
+            }
+            let methodMD = if (method.IsPureAbstract()) {
+                GenerateClassAbsMethodMetadata(method)
+            } else {
+                GenerateMethodMetadata(method, isFromInterface: cd.IsInterface())
+            }
+            if (method.TestAttr(Attribute.STATIC)) {
+                staticMethodsVec.add(methodMD)
+            } else {
+                methodsVec.add(methodMD)
+            }
+        }
+    }
+
+    private func GenerateClassAbsMethodMetadata(absMethod: Function): LLVMMetadataRef {
+        let llvmCtx = module.GetLLVMContext()
+        let funcTy = absMethod.GetFuncType().getOrThrow()
+        let attr = AttributeInfo()
+        attr.CopyFrom(absMethod.GetAttributeInfo())
+        if (!absMethod.TestAttr(Attribute.STATIC)) {
+            attr.Enable(Attribute.VIRTUAL)
+        }
+        let retTypeInfo = GetTiName(funcTy.GetReturnType())
+        return MetadataVector(llvmCtx)
+            .Concat(absMethod.GetSrcCodeIdentifier())
+            .Concat(retTypeInfo)
+            .Concat("")
+            .Concat(GenerateParametersMetadata(absMethod.GetParams(), hasThis: !absMethod.TestAttr(Attribute.STATIC)))
+            .Concat(GenerateParametersMetadata(absMethod.GetGenericTypeParams()))
+            .Concat(GenerateAttrsMetadata(attr, ExtraAttribute.METHOD, absMethod.GetAnnoInfo()))
+            .CreateMDTuple()
+    }
+
+    private func GenerateClassLikeStaticFieldMetadata(cd: ClassDef): LLVMMetadataRef {
+        let llvmCtx = module.GetCGContext().GetLLVMContext()
+        if (cd.IsInterface()) {
+            return LLVMCreateMDTuple(llvmCtx, ArrayList<LLVMMetadataRef>())
+        }
+        let fieldsVec = MetadataVector(llvmCtx)
+        for (value in cd.GetStaticMemberVars()) {
+            fieldsVec.Concat(GenerateStaticFieldMetadata(value))
+            module.GetOrInsertGlobalVariable(value)
+        }
+        return fieldsVec.CreateMDTuple()
+    }
+
+    private func GenerateClassLikeFieldMetadata(cd: ClassDef): LLVMMetadataRef {
+        let llvmCtx = module.GetCGContext().GetLLVMContext()
+        if (cd.IsInterface()) {
+            return LLVMCreateMDTuple(llvmCtx, ArrayList<LLVMMetadataRef>())
+        }
+        let fieldsVec = MetadataVector(llvmCtx)
+        var idx = cd.GetAllInstanceVarNum() - cd.GetDirectInstanceVarNum()
+        for (field in cd.GetDirectInstanceVars()) {
+            fieldsVec.Concat(GenerateInstanceFieldMetadata(field, idx))
+            idx++
+        }
+        return fieldsVec.CreateMDTuple()
+    }
+
+    private func GenerateClassLikeTypeAttrsMetadata(cd: ClassDef): LLVMMetadataRef {
+        var metadataType = ExtraAttribute.CLASS
+        if (cd.IsInterface()) {
+            metadataType = ExtraAttribute.INTERFACE
+        }
+        if (IsClassForBoxType(cd.GetSrcCodeIdentifier())) {
+            metadataType = ExtraAttribute.BOX_CLASS
+        }
+        return GenerateAttrsMetadata(cd.GetAttributeInfo(), metadataType, cd.GetAnnoInfo())
     }
 }
 
@@ -466,6 +766,121 @@ private class EnumMetadataInfo <: MetadataInfo {
     }
 }
 
+private class GFMetadataInfo <: MetadataInfo {
+    public init(cgMod: CGModule, subCHIRPkg: SubCHIRPackage, reflectionMode: GenReflectMode) {
+        super(cgMod, subCHIRPkg, reflectionMode)
+    }
+
+    public override func Gen(): Unit {
+        GenerateAllFunctionsMetadata()
+    }
+
+    private func GenerateAllFunctionsMetadata(): Unit {
+        if (reflectionMode != GenReflectMode.FULL_REFLECT) {
+            return
+        }
+        let moduleHandle = module.GetLLVMModule() ?? return
+        let llvmCtx = module.GetLLVMContext()
+        LLVMGetOrInsertNamedMetadata(moduleHandle, METADATA_FUNCTIONS)
+        for (gf in subCHIRPkg.chirFuncs) {
+            if (gf.GetParentCustomTypeDef().isSome()) {
+                continue
+            }
+            if (gf.TestAttr(Attribute.NO_REFLECT_INFO) || gf.TestAttr(Attribute.IMPORTED) ||
+                gf.GetSrcCodeIdentifier().isEmpty() || gf.GetFuncType().getOrThrow().IsCFunc() ||
+                gf.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+                continue
+            }
+            let retTypeInfo = GetTiName(gf.GetReturnType().getOrThrow())
+            let hasSRetMode = GetSRetMode(gf.GetReturnType().getOrThrow(), module.GetOrInsertCGFunction(gf))
+            var rawFunction = LLVMNullValue()
+            try (nameCString = unsafe { LibC.mallocCString(gf.GetIdentifierWithoutPrefix()) }.asResource()) {
+                rawFunction = unsafe { LLVMGetNamedFunction(moduleHandle.raw, nameCString.value) }
+            }
+            if (!rawFunction.isNull()) {
+                let funcMD = MetadataVector(llvmCtx)
+                    .Concat(gf.GetSrcCodeIdentifier())
+                    .Concat(retTypeInfo)
+                    .Concat(gf.GetIdentifierWithoutPrefix())
+                    .Concat(GenerateParametersMetadata(gf.GetParams()))
+                    .Concat(GenerateParametersMetadata(gf.GetGenericTypeParams()))
+                    .Concat(GenerateAttrsMetadata(gf.GetAttributeInfo(), ExtraAttribute.METHOD,
+                        gf.GetAnnoInfo(), hasSRetMode: hasSRetMode))
+                    .CreateMDTuple()
+                LLVMAddNamedMetadataOperand(moduleHandle, METADATA_FUNCTIONS, funcMD)
+                LLVMSetGlobalMetadata(llvmCtx, rawFunction, "ReflectionFunc", funcMD)
+            }
+        }
+    }
+}
+
+private class GVMetadataInfo <: MetadataInfo {
+    public init(cgMod: CGModule, subCHIRPkg: SubCHIRPackage, reflectionMode: GenReflectMode) {
+        super(cgMod, subCHIRPkg, reflectionMode)
+    }
+
+    public override func Gen(): Unit {
+        GenerateGlobalVariablesMetadata()
+    }
+
+    private func GenerateGlobalVariablesMetadata(): Unit {
+        if (reflectionMode != GenReflectMode.FULL_REFLECT) {
+            return
+        }
+        let moduleHandle = module.GetLLVMModule() ?? return
+        let llvmCtx = module.GetLLVMContext()
+        LLVMGetOrInsertNamedMetadata(moduleHandle, METADATA_GLOBAL_VAR)
+        for (variable in subCHIRPkg.chirGVs) {
+            if (variable.TestAttr(Attribute.STATIC) || variable.TestAttr(Attribute.NO_REFLECT_INFO) ||
+                variable.TestAttr(Attribute.IMPORTED)) {
+                continue
+            }
+            if (let Some(variableMetadata) <- GenerateVariableMetadata(variable)) {
+                LLVMAddNamedMetadataOperand(moduleHandle, METADATA_GLOBAL_VAR, variableMetadata)
+                var globalVariable = LLVMNullValue()
+                try (nameCString = unsafe { LibC.mallocCString(variable.GetIdentifierWithoutPrefix()) }.asResource()) {
+                    globalVariable = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+                }
+                LLVMSetGlobalMetadata(llvmCtx, globalVariable, "ReflectionGV", variableMetadata)
+            }
+        }
+    }
+
+    private func GenerateVariableMetadata(variable: GlobalVar): Option<LLVMMetadataRef> {
+        let moduleHandle = module.GetLLVMModule() ?? return None
+        let variableMangleName = variable.GetIdentifierWithoutPrefix()
+        var globalVariable = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(variableMangleName) }.asResource()) {
+            globalVariable = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+        }
+        var isStringGV = false
+        if (let Some(initializer) <- variable.GetInitializer()) {
+            if (let Some(initializerTy) <- initializer.GetType()) {
+                isStringGV = initializerTy.IsString()
+            }
+        }
+        if (globalVariable.isNull()) {
+            return None
+        }
+        if (unsafe { LLVMGetInitializer(globalVariable) }.isNull() && !isStringGV) {
+            return None
+        }
+        let llvmCtx = module.GetLLVMContext()
+        return MetadataVector(llvmCtx)
+            .Concat(variable.GetSrcCodeIdentifier())
+            .Concat(GetTiName(variable.GetType().getOrThrow()))
+            .Concat(variableMangleName)
+            .Concat(GenerateAttrsMetadata(variable.GetAttributeInfo(),
+                if (variable.TestAttr(Attribute.READONLY)) {
+                    ExtraAttribute.IMMUTABLE_FIELD
+                } else {
+                    ExtraAttribute.MUTABLE_FIELD
+                },
+                variable.GetAnnoInfo()))
+            .CreateMDTuple()
+    }
+}
+
 public func GenerateReflectionMetadata(module: CGModule, subCHIRPkg: SubCHIRPackage): Unit {
     let globalOptions = module.GetCGContext().GetCGPkgContext().GetGlobalOptions()
     let reflectionMode = if (globalOptions.disableReflection) {
@@ -483,19 +898,11 @@ public func GenerateReflectionMetadata(module: CGModule, subCHIRPkg: SubCHIRPack
     for (kind in allKinds) {
         match (kind) {
             case MetadataKind.PKG_METADATA => PkgMetadataInfo(module, subCHIRPkg, reflectionMode).Gen()
-            case MetadataKind.CLASS_METADATA =>
-                // GAP_TODO: ClassMetadataInfo is unported; C++ dispatch is CJNativeGenMetadata.cpp:756-786.
-                ()
-            case MetadataKind.STRUCT_METADATA =>
-                // GAP_TODO: StructMetadataInfo is unported; C++ dispatch is CJNativeGenMetadata.cpp:756-786.
-                ()
+            case MetadataKind.CLASS_METADATA => ClassMetadataInfo(module, subCHIRPkg, reflectionMode).Gen()
+            case MetadataKind.STRUCT_METADATA => StructMetadataInfo(module, subCHIRPkg, reflectionMode).Gen()
             case MetadataKind.ENUM_METADATA => EnumMetadataInfo(module, subCHIRPkg, reflectionMode).Gen()
-            case MetadataKind.GF_METADATA =>
-                // GAP_TODO: GFMetadataInfo is unported; C++ dispatch is CJNativeGenMetadata.cpp:756-786.
-                ()
-            case MetadataKind.GV_METADATA =>
-                // GAP_TODO: GVMetadataInfo is unported; C++ dispatch is CJNativeGenMetadata.cpp:756-786.
-                ()
+            case MetadataKind.GF_METADATA => GFMetadataInfo(module, subCHIRPkg, reflectionMode).Gen()
+            case MetadataKind.GV_METADATA => GVMetadataInfo(module, subCHIRPkg, reflectionMode).Gen()
             case MetadataKind.COUNT => ()
         }
     }
@@ -548,6 +955,10 @@ private func GetEnumKindName(cgMod: CGModule, ed: EnumDef): String {
         case CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_NONREF => "enumKind3"
         case _ => "UNKNOWN"
     }
+}
+
+private func IsClassForBoxType(className: String): Bool {
+    return className.indexOf(BOX_DECL_PREFIX).isSome()
 }
 
 private func ReplaceDelimiterAfterOrgName(packageName: String): String {

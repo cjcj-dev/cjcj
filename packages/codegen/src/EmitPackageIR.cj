@@ -73,14 +73,14 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         // definitions (queued by CGType.GetOrCreateTypeInfo) before optimization.
         cgMod.GenTypeInfo()
         ReplaceFunction(cgMod)
-        let keepTypesFunc = KeepSomeTypesManually(cgMod)
-        EmitStaticGenericTIsAndLLVMUsed(cgMod, keepTypesFunc)
         cgMod.Opt()
         GenerateReflectionMetadata(cgMod, subPackage)
         cgMod.GenTypeInfo()
         InitializeCjStringLiteral(cgMod)
+        let keepTypesFunc = KeepSomeTypesManually(cgMod)
         cgMod.EraseUselessInstsAndDeclarations()
-        SetSymbolLinkageType(cgMod)
+SetSymbolLinkageType(cgMod)
+        EmitStaticGenericTIsAndLLVMUsed(cgMod, keepTypesFunc)
     }
     let localizedSymbols = cgPkgContext.GetLocalizedSymbols()
     let localizedSymbolsVec = ArrayList<String>()
@@ -1086,14 +1086,31 @@ private func EmitStaticGenericTIsAndLLVMUsed(cgMod: CGModule, keepTypesFunc: LLV
 
 private func EmitStaticGenericTITable(cgMod: CGModule): LLVMValueRef {
     let staticGINames = cgMod.GetCGContext().GetStaticGINames()
-    if (staticGINames.isEmpty()) {
-        return LLVMNullValue()
-    }
     let typeInfoType = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
     let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext())
     let values = ArrayList<LLVMValueRef>()
+    let emittedNames = HashSet<String>()
     for (typeInfoName in staticGINames) {
         values.add(GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoType))
+        emittedNames.add(typeInfoName)
+    }
+    for (reflectStaticGIName in cgMod.GetCGContext().GetReflectGeneratedStaticGINames()) {
+        if (emittedNames.contains(reflectStaticGIName)) {
+            continue
+        }
+        if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+            var staticGI = LLVMNullValue()
+            try (nameCString = unsafe { LibC.mallocCString(reflectStaticGIName) }.asResource()) {
+                staticGI = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+            }
+            if (!staticGI.isNull()) {
+                values.add(staticGI)
+                emittedNames.add(reflectStaticGIName)
+            }
+        }
+    }
+    if (values.isEmpty()) {
+        return LLVMNullValue()
     }
     let arrayType = unsafe { LLVMArrayType(typeInfoPtrType, UInt32(values.size)) }
     let table = GetOrInsertCodeGenGlobal(cgMod, "StaticGenericTIs", arrayType)
@@ -1102,6 +1119,7 @@ private func EmitStaticGenericTITable(cgMod: CGModule): LLVMValueRef {
         LLVMSetLinkage(table, LLVMLinkageValue(LLVMLinkage.Private))
         LLVMSetGlobalConstant(table, 0)
     }
+    addAttribute(table, "CFileStaticGenericTI")
     return table
 }
 

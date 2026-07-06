@@ -2820,6 +2820,10 @@ public class FaithfulAST2CHIR {
         let fn = builder.CreateFunction(funcTy, identifier, srcCodeIdentifier: srcCodeIdentifier,
             rawMangledName: effectiveRawName, packageName: packageName)
         fn.SetFuncKind(FuncKind.GLOBALVAR_INIT)
+        fn.EnableAttr(Attribute.NO_REFLECT_INFO)
+        fn.EnableAttr(Attribute.NO_INLINE)
+        fn.EnableAttr(Attribute.COMPILER_ADD)
+        fn.EnableAttr(Attribute.INITIALIZER)
         let body = builder.CreateBlockGroup(fn)
         fn.InitBody(body)
         let entry = builder.CreateBlock(body)
@@ -3050,7 +3054,11 @@ public class FaithfulAST2CHIR {
         fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.keywordPos, funcDecl.end))
         AttachFunctionGenericParams(funcDecl, fn)
         ApplyDeclAttrs(fn, funcDecl)
-        fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
+fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
+        if (funcDecl.TestAttr(AstAttribute.IN_EXTEND) || funcDecl.TestAttr(AstAttribute.UNSAFE) ||
+            funcDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED) || !funcDecl.TestAttr(AstAttribute.PUBLIC)) {
+            fn.EnableAttr(Attribute.NO_REFLECT_INFO)
+        }
         ApplyFuncKind(fn, funcDecl)
         if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) {
             fn.SetFuncKind(FuncKind.MAIN_ENTRY)

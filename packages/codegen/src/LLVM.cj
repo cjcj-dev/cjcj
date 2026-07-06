@@ -233,6 +233,7 @@ foreign {
     func LLVMSetUnnamedAddress(global: LLVMValueRef, unnamedAddr: Int32): Unit
     func LLVMIsDeclaration(global: LLVMValueRef): Int32
     func LLVMSetGlobalConstant(global: LLVMValueRef, isConstant: Int32): Unit
+    func LLVMGetInitializer(global: LLVMValueRef): LLVMValueRef
     func LLVMSetInitializer(global: LLVMValueRef, constantVal: LLVMValueRef): Unit
     func LLVMGetAlignment(value: LLVMValueRef): UInt32
     func LLVMSetAlignment(value: LLVMValueRef, bytes: UInt32): Unit
