@@ -170,6 +170,7 @@ foreign {
     func LLVMAddNamedMetadataOperand(module: LLVMModuleRef, name: CString, value: LLVMValueRef): Unit
     func LLVMWriteBitcodeToFile(module: LLVMModuleRef, path: CString): Int32
     func LLVMPrintModuleToString(module: LLVMModuleRef): CString
+    func LLVMPrintTypeToString(ty: LLVMTypeRef): CString
     func LLVMDisposeMessage(message: CString): Unit
 
     func LLVMVoidTypeInContext(context: LLVMContextRef): LLVMTypeRef

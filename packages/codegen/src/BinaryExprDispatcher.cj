@@ -17,13 +17,18 @@ public func HandleBinaryExpression(irBuilder: IRBuilder2, chirExpr: CHIRBinaryEx
             }
         }
     }
+    if (kind == ExprKind.EXP) {
+        return GenerateBinaryExpOperation(irBuilder, chirExpr)
+    }
     return GenerateArithmeticOperation(irBuilder, chirExpr)
 }
 
 private func ShouldUseOverflowBinary(kind: ExprKind, strategy: OverflowStrategy): Bool {
-    if (strategy == OverflowStrategy.NA || strategy == OverflowStrategy.WRAPPING) {
+    if ((strategy == OverflowStrategy.NA || strategy == OverflowStrategy.WRAPPING) &&
+        kind != ExprKind.DIV && kind != ExprKind.MOD) {
         return false
     }
     return kind == ExprKind.ADD || kind == ExprKind.SUB || kind == ExprKind.MUL ||
-        kind == ExprKind.DIV || kind == ExprKind.MOD || kind == ExprKind.LSHIFT || kind == ExprKind.RSHIFT
+        kind == ExprKind.DIV || kind == ExprKind.MOD || kind == ExprKind.EXP ||
+        kind == ExprKind.LSHIFT || kind == ExprKind.RSHIFT
 }

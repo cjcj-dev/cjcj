@@ -476,6 +476,23 @@ public open class CGType {
         return unsafe { LLVMFunctionType(retType, CPointer<LLVMTypeRef>(), 0u32, 0) }
     }
 
+    public static func GetCodeGenFunctionType(_: LLVMContextHandle, retType: LLVMTypeRef,
+        paramTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {
+        if (paramTypes.isEmpty()) {
+            return unsafe { LLVMFunctionType(retType, CPointer<LLVMTypeRef>(), 0u32, 0) }
+        }
+        var result = LLVMNullType()
+        try (paramPtr = LibC.malloc<LLVMTypeRef>(count: paramTypes.size).asResource()) {
+            var idx: Int64 = 0
+            while (idx < paramTypes.size) {
+                unsafe { (paramPtr.value + idx).write(paramTypes[idx]) }
+                idx++
+            }
+            result = unsafe { LLVMFunctionType(retType, paramPtr.value, UInt32(paramTypes.size), 0) }
+        }
+        return result
+    }
+
     public static func GetRefTypeOfCHIRInt8(chirBuilder: CHIRBuilder): RefType {
         return chirBuilder.context.GetRefTy(chirBuilder.context.GetInt8Ty())
     }
