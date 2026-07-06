@@ -3751,6 +3751,20 @@ public class TypeChecker {
         }
         let ty = SynNameReferenceExpr(impl.typeManager, nameRef, diag: impl.diag)
         if (Ty.IsTyCorrect(ty)) {
+            if (!nameRef.instTys.isEmpty() && ty.HasGeneric()) {
+                if (let Some(targetForInstTys) <- nameRef.GetTarget()) {
+                    if (targetForInstTys.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                        if (let Some(genericDeclForInstTys) <- targetForInstTys.outerDecl) {
+                            let instTyMapping = GenerateTypeMapping(genericDeclForInstTys, nameRef.instTys)
+                            let instTy = impl.typeManager.GetInstantiatedTy(ty, instTyMapping)
+                            if (Ty.IsTyCorrect(instTy)) {
+                                nameRef.SetTy(instTy)
+                                return instTy
+                            }
+                        }
+                    }
+                }
+            }
             let typeMapping = impl.GenerateGenericTypeMapping(ctx, nameRef)
             let tys = impl.typeManager.ApplySubstPackNonUniq(ty, typeMapping, ignoreUnsolved: true)
             if (let Some(targetForMapping) <- nameRef.GetTarget()) {
@@ -4978,6 +4992,9 @@ public class TypeChecker {
             typeCheckExprPutTargetType(ctx, nameRef, target)
             let _ = SynthesizeNameReference(ctx, nameRef)
             let ok = ChkNameReferenceExpr(impl.typeManager, target, nameRef, diag: impl.diag)
+            if (ok) {
+                ctx.SkipSynForCorrectTy(nameRef)
+            }
             return FinishCheck(ctx, expr, ok)
         }
         if (let Some(callExpr) <- (expr as CallExpr)) {

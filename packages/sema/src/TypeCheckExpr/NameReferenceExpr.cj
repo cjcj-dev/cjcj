@@ -2,6 +2,7 @@ package cangjie_compiler::sema.TypeCheckExpr
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::modules.SemaImportManager
 import cangjie_compiler::sema.*
@@ -848,6 +849,79 @@ public func SynNameReferenceExpr(typeManager: TypeManager, nre: NameReferenceExp
     return TcInvalid(nre)
 }
 
+func IsEnumNeedSynthesis(expr: Expr, target: Decl): Bool {
+    if (!target.TestAttr(Attribute.ENUM_CONSTRUCTOR) || target.GetGeneric().isNone()) {
+        return false
+    }
+    var ref = expr
+    if (let Some(memberAccess) <- (expr as MemberAccess)) {
+        if (let Some(baseExpr) <- memberAccess.baseExpr) {
+            ref = baseExpr
+        }
+    }
+    return NeedFurtherInstantiation(ref.GetTypeArgs())
+}
+
+func CheckInferrableEnumReference(diag: Option<BasicDiagnosticEngine>, typeManager: TypeManager,
+    expr: Expr, target: Ty): Bool {
+    let refineResult = EnumSugarTargetsFinder.RefineTargetTy(typeManager, target, expr.GetTarget())
+    if (let None <- refineResult) {
+        if (let Some(diagValue) <- diag) {
+            let builder = diagValue.Diagnose(expr.begin, expr.end, BasicDiagKind.sema_generic_type_without_type_argument)
+            builder.Emit()
+        }
+        return false
+    }
+    var targetTy = refineResult.getOrThrow()
+    if (target.IsInterface()) {
+        let candidateTys = Promotion(typeManager).Downgrade(targetTy, target)
+        if (candidateTys.values.isEmpty()) {
+            if (let Some(diagValue2) <- diag) {
+                DiagUnableToInferExpr(diagValue2, expr)
+            }
+            return false
+        }
+        targetTy = candidateTys.values[0]
+    }
+    expr.SetTy(targetTy)
+    var ref = expr
+    if (let Some(memberAccess2) <- (expr as MemberAccess)) {
+        if (let Some(baseExpr2) <- memberAccess2.baseExpr) {
+            ref = baseExpr2
+            ref.SetTy(targetTy)
+        }
+    }
+    if (let Some(reference) <- (ref as NameReferenceExpr)) {
+        reference.instTys.clear()
+        for (argTy in targetTy.typeArgs) {
+            reference.instTys.add(argTy)
+        }
+    }
+    return true
+}
+
+private func CheckNonFunctionReference(diag: Option<BasicDiagnosticEngine>, typeManager: TypeManager, target: Ty,
+    refNode: Expr): Bool {
+    let refTarget = refNode.GetTarget()
+    let checkEnumCtor = if (let Some(targetDecl) <- refTarget) {
+        targetDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)
+    } else {
+        false
+    }
+    if (checkEnumCtor && IsEnumNeedSynthesis(refNode, refTarget.getOrThrow())) {
+        return CheckInferrableEnumReference(diag, typeManager, refNode, target)
+    }
+    let refTy = refNode.GetTy() ?? TypeManager.GetInvalidTy()
+    let isWellTyped = typeManager.IsSubtype(refTy, target)
+    if (!isWellTyped) {
+        if (let Some(diagValue) <- diag) {
+            DiagMismatchedTypes(diagValue, refNode, target)
+        }
+        refNode.SetTy(TypeManager.GetInvalidTy())
+    }
+    return isWellTyped
+}
+
 private func EnumConstructorOuterDecl(nre: NameReferenceExpr): Option<EnumDecl> {
     if (let Some(target) <- nre.GetTarget()) {
         if (target.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
@@ -904,7 +978,14 @@ public func ChkNameReferenceExpr(typeManager: TypeManager, target: Ty, nre: Name
     if (!Ty.IsTyCorrect(actualTy)) {
         return false
     }
-    actualTy = InstantiateEnumConstructorRefFromTarget(typeManager, target, nre, actualTy)
+    if (nre.callOrPattern.isNone()) {
+        actualTy = InstantiateEnumConstructorRefFromTarget(typeManager, target, nre, actualTy)
+    }
+    if (nre.callOrPattern.isNone() && (actualTy as FuncTy).isNone() && (let Some(refTarget) <- nre.GetTarget())) {
+        if (refTarget.TestAttr(Attribute.ENUM_CONSTRUCTOR) && IsEnumNeedSynthesis(nre, refTarget)) {
+            return CheckNonFunctionReference(diag, typeManager, target, nre)
+        }
+    }
     if (actualTy.IsQuest()) {
         let funcs = GetFuncTargets(nre)
         for (funcDecl in funcs) {
