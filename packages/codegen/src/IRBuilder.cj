@@ -482,7 +482,14 @@ public class IRBuilder2 <: Resource {
         if (blocks.size < 3) {
             return Some(LLVMNullValue())
         }
-        CreateCondBr(CreateTypeInfoIsReferenceCall(typeInfo), blocks[0], blocks[1])
+        let baseTypeInfoTy = typeInfoTy.StripAllRefs()
+        if (baseTypeInfoTy.IsGeneric()) {
+            CreateCondBr(CreateTypeInfoIsReferenceCall(typeInfoTy), blocks[0], blocks[1])
+        } else if (CGType.GetOrCreate(cgMod, baseTypeInfoTy).IsReference()) {
+            CreateBr(blocks[0])
+        } else {
+            CreateBr(blocks[1])
+        }
 
         SetInsertPoint(blocks[0])
         if (let Some(baseObject) <- managedBase) {
