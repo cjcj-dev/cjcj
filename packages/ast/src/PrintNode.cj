@@ -32,26 +32,26 @@ private class PrintState {
         if (let Some(pkg) <- (node as Package)) { printPackage(pkg, indent); return }
         if (let Some(file) <- (node as File)) { printFile(file, indent); return }
 
-        if (let Some(macroParam) <- (node as MacroExpandParam)) { printMacroExpandParam(macroParam, indent); return }
-        if (let Some(param) <- (node as FuncParam)) { printFuncParam(param, indent); return }
         if (let Some(gpd) <- (node as GenericParamDecl)) { printGenericParamDecl(gpd, indent); return }
+        if (let Some(param) <- (node as FuncParam)) { printFuncParam(param, indent); return }
+        if (let Some(macroParam) <- (node as MacroExpandParam)) { printMacroExpandParam(macroParam, indent); return }
         if (let Some(paramList) <- (node as FuncParamList)) { printFuncParamList(paramList, indent); return }
         if (let Some(mainDecl) <- (node as MainDecl)) { printMainDecl(mainDecl, indent); return }
-        if (let Some(macroDecl) <- (node as MacroDecl)) { printMacroDecl(macroDecl, indent); return }
         if (let Some(funcDecl) <- (node as FuncDecl)) { printFuncDecl(funcDecl, indent); return }
+        if (let Some(macroDecl) <- (node as MacroDecl)) { printMacroDecl(macroDecl, indent); return }
         if (let Some(body) <- (node as FuncBody)) { printFuncBody(body, indent); return }
         if (let Some(propDecl) <- (node as PropDecl)) { printPropDecl(propDecl, indent); return }
         if (let Some(macroDecl) <- (node as MacroExpandDecl)) { printMacroExpandDecl(macroDecl, indent); return }
         if (let Some(vwpd) <- (node as VarWithPatternDecl)) { printVarWithPatternDecl(vwpd, indent); return }
-        if (let Some(primaryCtor) <- (node as PrimaryCtorDecl)) { printPrimaryCtorDecl(primaryCtor, indent); return }
+        if (let Some(varDecl) <- (node as VarDecl)) { printVarDecl(varDecl, indent); return }
         if (let Some(alias) <- (node as TypeAliasDecl)) { printTypeAliasDecl(alias, indent); return }
         if (let Some(classDecl) <- (node as ClassDecl)) { printClassDecl(classDecl, indent); return }
         if (let Some(interfaceDecl) <- (node as InterfaceDecl)) { printInterfaceDecl(interfaceDecl, indent); return }
         if (let Some(enumDecl) <- (node as EnumDecl)) { printEnumDecl(enumDecl, indent); return }
         if (let Some(structDecl) <- (node as StructDecl)) { printStructDecl(structDecl, indent); return }
         if (let Some(extendDecl) <- (node as ExtendDecl)) { printExtendDecl(extendDecl, indent); return }
+        if (let Some(primaryCtor) <- (node as PrimaryCtorDecl)) { printPrimaryCtorDecl(primaryCtor, indent); return }
         if (let Some(invalidDecl) <- (node as InvalidDecl)) { printInvalidDecl(invalidDecl, indent); return }
-        if (let Some(varDecl) <- (node as VarDecl)) { printVarDecl(varDecl, indent); return }
         if (let Some(builtin) <- (node as BuiltInDecl)) { printBuiltInDecl(builtin, indent); return }
 
         if (let Some(ifAvailable) <- (node as IfAvailableExpr)) { printIfAvailableExpr(ifAvailable, indent); return }
@@ -154,7 +154,13 @@ private class PrintState {
             return
         }
         if (let Some(packageSpec) <- (node as PackageSpec)) { printPackageSpec(packageSpec, indent); return }
-        if (let Some(importSpec) <- (node as ImportSpec)) { printImportSpec(importSpec, indent); return }
+        if (let Some(importSpec) <- (node as ImportSpec)) {
+            if (importSpec.content.kind == ImportKind.IMPORT_MULTI) {
+                return
+            }
+            printImportSpec(importSpec, indent)
+            return
+        }
         if (let Some(importContent) <- (node as ImportContent)) { printImportContent(importContent, indent); return }
         if (let Some(annotation) <- (node as Annotation)) { printAnnotation(annotation, indent); return }
         if (let Some(modifier) <- (node as Modifier)) { printModifier(modifier, indent); return }
@@ -181,12 +187,34 @@ private class PrintState {
         return if (value) { "true" } else { "false" }
     }
 
-    private func printDeclOpt(node: Option<Decl>, indent: UInt64, addition: String): Unit {
-        if (let Some(value) <- node) {
-            PrintAstNode(value, indent, addition)
-        } else if (!addition.isEmpty()) {
-            printLine(indent, "// " + addition + " nullptr")
+    private func streamBoolText(value: Bool): String {
+        return if (value) { "1" } else { "0" }
+    }
+
+    private func objectIdPtrText(objectId: Int64): String {
+        var value = UInt64(objectId)
+        if (value == 0u64) {
+            return "0x0"
         }
+        let digits = "0123456789abcdef"
+        var out = ""
+        while (value != 0u64) {
+            let idx = Int64(value % 16u64)
+            out = digits[idx..idx + 1] + out
+            value = value / 16u64
+        }
+        return "0x" + out
+    }
+
+    private func nodePtrText(node: Node): String {
+        return objectIdPtrText(node.objectId)
+    }
+
+    private func nodePtrText(node: Option<Pattern>): String {
+        if (let Some(value) <- node) {
+            return objectIdPtrText(value.objectId)
+        }
+        return "0x0"
     }
 
     private func printExprOpt(node: Option<Expr>, indent: UInt64, addition: String): Unit {
@@ -251,6 +279,8 @@ private class PrintState {
         if (node.TyKind() != TypeKind.TYPE_INITIAL) {
             printLine(indent, "ty: " + node.GetTy().getOrThrow().String())
         }
+        // GAP_TODO(ptr-print-parity): 值域为 objectId 代理非进程地址，因 Cangjie 无原始对象地址。
+        printLine(indent, "ptr: " + nodePtrText(node))
         let fullPackageName = node.GetFullPackageName()
         if (!fullPackageName.isEmpty() && fullPackageName != "default") {
             printLine(indent, "fullPackageName: " + fullPackageName)
@@ -288,10 +318,11 @@ private class PrintState {
     }
 
     private func printTarget(indent: UInt64, target: Decl, addition: String): Unit {
-        if (!target.mangledName.isEmpty()) {
-            printLine(indent, addition + " mangledName: " + quoteText(target.mangledName))
+        if (target.mangledName.isEmpty()) {
+            // GAP_TODO(ptr-print-parity): 值域为 objectId 代理非进程地址，因 Cangjie 无原始对象地址。
+            printLine(indent, addition + " ptr: " + nodePtrText(target))
         } else {
-            printLine(indent, addition + ": " + targetName(target))
+            printLine(indent, addition + " mangledName: " + quoteText(target.mangledName))
         }
     }
 
@@ -355,14 +386,16 @@ private class PrintState {
             printTokens(indent + 2u64, invocation.args)
             printLine(indent + 1u64, "}")
         }
-        printDeclOpt(invocation.decl, indent + 1u64, "decl")
+        if (let Some(decl) <- invocation.decl) {
+            PrintAstNode(decl, indent + 1u64, "decl")
+        }
     }
 
     private func printTokens(indent: UInt64, tokens: ArrayList<Token>): Unit {
         if (tokens.isEmpty()) {
             return
         }
-        printLine(indent, "pos: " + tokens[0].Begin().ToString() + " " + tokens[tokens.size - 1].End().ToString())
+        printLine(indent, "pos:  " + tokens[0].Begin().ToString() + " " + tokens[tokens.size - 1].End().ToString())
         var text = ""
         for (token in tokens) {
             if (token.kind == TokenKind.NL) {
@@ -376,7 +409,7 @@ private class PrintState {
 
     private func printPackage(pkg: Package, indent: UInt64): Unit {
         open(indent, "Package: " + pkg.fullPackageName)
-        printLine(indent + 1u64, "noSubPkg: " + boolText(pkg.noSubPkg))
+        printLine(indent + 1u64, "noSubPkg: " + streamBoolText(pkg.noSubPkg))
         for (file in pkg.files) {
             PrintAstNode(file, indent + 1u64, "")
         }
@@ -401,8 +434,16 @@ private class PrintState {
     private func printFile(file: File, indent: UInt64): Unit {
         open(indent, "File: " + file.fileName)
         printBasic(file, indent + 1u64)
-        if (let Some(feature) <- file.feature) { PrintAstNode(feature, indent + 1u64, "features") }
-        if (let Some(packageSpec) <- file.packageSpec) { PrintAstNode(packageSpec, indent + 1u64, "package") }
+        if (let Some(feature) <- file.feature) {
+            PrintAstNode(feature, indent + 1u64, "features")
+        } else {
+            printLine(indent + 1u64, "// features nullptr")
+        }
+        if (let Some(packageSpec) <- file.packageSpec) {
+            PrintAstNode(packageSpec, indent + 1u64, "package")
+        } else {
+            printLine(indent + 1u64, "// package nullptr")
+        }
         for (importSpec in file.imports) {
             PrintAstNode(importSpec, indent + 1u64, "")
         }
@@ -435,7 +476,7 @@ private class PrintState {
         printAnnotations(param, indent + 1u64)
         printTypeOpt(param.typeNode, indent + 1u64, "type")
         printExprOpt(param.assignment, indent + 1u64, "assignment")
-        printLine(indent + 1u64, "isMemberParam: " + boolText(param.isMemberParam))
+        printLine(indent + 1u64, "isMemberParam: " + streamBoolText(param.isMemberParam))
         if (let Some(desugarDecl) <- param.desugarDecl) {
             PrintAstNode(desugarDecl, indent + 1u64, "desugarDecl")
         }
@@ -575,11 +616,7 @@ private class PrintState {
         printModifiers(varDecl, indent)
         printTypeOpt(varDecl.typeNode, indent + 1u64, "type")
         printExprOpt(varDecl.initializer, indent + 1u64, "initializer")
-        if (let Some(pattern) <- varDecl.parentPattern) {
-            printLine(indent + 1u64, "parentPattern: " + ASTKindName(pattern.astKind))
-        } else {
-            printLine(indent + 1u64, "parentPattern: nullptr")
-        }
+        printLine(indent + 1u64, "parentPattern: " + nodePtrText(varDecl.parentPattern))
         close(indent)
     }
 
@@ -595,7 +632,8 @@ private class PrintState {
 
     private func printClassDecl(classDecl: ClassDecl, indent: UInt64): Unit {
         if (let Some(attr) <- HasJavaAttr(classDecl)) {
-            printLine(indent, "@Java[\"" + if (attr == Attribute.JAVA_APP) { "app" } else { "ext" } + "\"]")
+            let argStr = if (attr == Attribute.JAVA_APP) { "app" } else { "ext" }
+            printLine(indent, "@Java[\"" + argStr + "\"]")
         }
         open(indent, "ClassDecl: " + classDecl.identifier.Val())
         printBasic(classDecl, indent + 1u64)
@@ -613,7 +651,8 @@ private class PrintState {
 
     private func printInterfaceDecl(interfaceDecl: InterfaceDecl, indent: UInt64): Unit {
         if (let Some(attr) <- HasJavaAttr(interfaceDecl)) {
-            printLine(indent, "@Java[\"" + if (attr == Attribute.JAVA_APP) { "app" } else { "ext" } + "\"]")
+            let argStr = if (attr == Attribute.JAVA_APP) { "app" } else { "ext" }
+            printLine(indent, "@Java[\" " + argStr + " \"]")
         }
         open(indent, "InterfaceDecl: " + interfaceDecl.identifier.Val())
         printBasic(interfaceDecl, indent + 1u64)
@@ -674,7 +713,11 @@ private class PrintState {
         open(indent, "ExtendDecl")
         printBasic(ed, indent + 1u64)
         printTypeOpt(ed.extendedType, indent + 1u64, "extendedType")
-        printInheritedTypes(ed.inheritedTypes, indent + 1u64)
+        printLine(indent + 1u64, "inheritedTypes [")
+        for (interfaceType in ed.inheritedTypes) {
+            PrintAstNode(interfaceType, indent + 2u64, "")
+        }
+        printLine(indent + 1u64, "]")
         if (let Some(generic) <- ed.generic) {
             printGeneric(generic, indent + 1u64)
         }
@@ -806,6 +849,7 @@ private class PrintState {
         for (handler in expr.handlers) {
             printLine(indent + 1u64, "Handle {")
             printLine(indent + 2u64, "HandlePattern {")
+            printLine(indent + 3u64, "CommandTypePattern:")
             printPatternOpt(handler.commandPattern, indent + 3u64, "")
             printLine(indent + 2u64, "}")
             printLine(indent + 2u64, "HandleBlock {")
@@ -901,9 +945,7 @@ private class PrintState {
         open(indent, "AssignExpr")
         printBasic(expr, indent + 1u64)
         let opText = assignOpText(expr.op)
-        if (!opText.isEmpty()) {
-            printLine(indent + 1u64, opText)
-        }
+        printLine(indent + 1u64, opText)
         printExprOpt(expr.leftValue, indent + 1u64, "leftValue")
         printExprOpt(expr.rightExpr, indent + 1u64, "rightExpr")
         printOverflow(expr, indent + 1u64)
@@ -920,7 +962,7 @@ private class PrintState {
     }
 
     private func printUnaryExpr(expr: UnaryExpr, indent: UInt64): Unit {
-        open(indent, "UnaryExpr " + TokenKindText(expr.op))
+        printLine(indent, "UnaryExpr { " + TokenKindText(expr.op))
         printBasic(expr, indent + 1u64)
         printExprOpt(expr.expr, indent + 1u64, "")
         printOverflow(expr, indent + 1u64)
@@ -928,7 +970,7 @@ private class PrintState {
     }
 
     private func printBinaryExpr(expr: BinaryExpr, indent: UInt64): Unit {
-        open(indent, "BinaryExpr " + TokenKindText(expr.op))
+        printLine(indent, "BinaryExpr  " + TokenKindText(expr.op) + " {")
         printBasic(expr, indent + 1u64)
         printExprOpt(expr.leftExpr, indent + 1u64, "leftExpr:")
         printExprOpt(expr.rightExpr, indent + 1u64, "rightExpr:")
@@ -1178,19 +1220,18 @@ private class PrintState {
     private func printIfAvailableExpr(expr: IfAvailableExpr, indent: UInt64): Unit {
         open(indent, "IfAvailableExpr")
         printBasic(expr, indent + 1u64)
-        if (let Some(arg) <- expr.GetArg()) { PrintAstNode(arg, indent + 2u64, "arg") }
+        if (let Some(arg) <- expr.GetArg()) {
+            PrintAstNode(arg, indent + 2u64, "arg")
+        } else {
+            printLine(indent + 2u64, "// arg nullptr")
+        }
         printLambdaOpt(expr.GetLambda1(), indent + 2u64, "lambda1")
         printLambdaOpt(expr.GetLambda2(), indent + 2u64, "lamdba2")
         close(indent)
     }
 
-    private func printInvalidExpr(expr: InvalidExpr, indent: UInt64): Unit {
-        open(indent, "InvalidExpr: Need to be fixed!")
-        printBasic(expr, indent + 1u64)
-        if (!expr.value.isEmpty()) {
-            printLine(indent + 1u64, "value: " + quoteText(expr.value))
-        }
-        close(indent)
+    private func printInvalidExpr(_: InvalidExpr, indent: UInt64): Unit {
+        printLine(indent, "InvalidExpr: Need to be fixed!")
     }
 
     private func printBlock(block: Block, indent: UInt64): Unit {
@@ -1229,7 +1270,7 @@ private class PrintState {
     }
 
     private func printIsExpr(expr: IsExpr, indent: UInt64): Unit {
-        open(indent, "IsExpr :")
+        printLine(indent, "IsExpr :  {")
         printBasic(expr, indent + 1u64)
         printExprOpt(expr.leftExpr, indent + 1u64, "leftExpr")
         printTypeOpt(expr.isType, indent + 1u64, "isType")
@@ -1304,7 +1345,7 @@ private class PrintState {
         }
         printLine(indent + 1u64, "]")
         printTypeOpt(typeNode.retType, indent + 1u64, "retType")
-        printLine(indent + 1u64, "IsCFuncType: " + boolText(typeNode.isC))
+        printLine(indent + 1u64, "IsCFuncType: " + streamBoolText(typeNode.isC))
         close(indent)
     }
 
@@ -1345,9 +1386,6 @@ private class PrintState {
         printBasic(typeNode, indent + 1u64)
         printLine(indent + 1u64, "typeArguments:")
         printTypeOpt(typeNode.typeArgument, indent + 2u64, "")
-        if (let Some(sizeType) <- typeNode.constantType) {
-            PrintAstNode(sizeType, indent + 2u64, "size")
-        }
         close(indent)
     }
 
@@ -1356,7 +1394,6 @@ private class PrintState {
         printBasic(typeNode, indent + 1u64)
         printTypeOpt(typeNode.baseType, indent + 1u64, "baseType")
         printLine(indent + 1u64, "field: " + typeNode.field.Val())
-        printTypeArguments(typeNode.typeArguments, indent + 1u64)
         if (let Some(target) <- typeNode.target) {
             printTarget(indent + 1u64, target, "target")
         }
@@ -1383,18 +1420,13 @@ private class PrintState {
         close(indent)
     }
 
-    private func printInvalidType(typeNode: InvalidType, indent: UInt64): Unit {
-        open(indent, "InvalidType: Need to be fixed!")
-        printBasic(typeNode, indent + 1u64)
-        close(indent)
+    private func printInvalidType(_: InvalidType, indent: UInt64): Unit {
+        printLine(indent, "InvalidType: Need to be fixed!")
     }
 
     private func printConstPattern(pattern: ConstPattern, indent: UInt64): Unit {
         open(indent, "ConstPattern")
         printExprOpt(pattern.literal, indent + 1u64, "")
-        if (let Some(callExpr) <- pattern.operatorCallExpr) {
-            PrintAstNode(callExpr, indent + 1u64, "operatorCallExpr")
-        }
         close(indent)
     }
 
@@ -1459,12 +1491,10 @@ private class PrintState {
     }
 
     private func printCommandTypePattern(pattern: CommandTypePattern, indent: UInt64): Unit {
-        open(indent, "CommandTypePattern")
         printPatternOpt(pattern.pattern, indent + 1u64, "")
         for (typeNode in pattern.types) {
             PrintAstNode(typeNode, indent + 1u64, "")
         }
-        close(indent)
     }
 
     private func printInvalidPattern(pattern: InvalidPattern, indent: UInt64): Unit {
@@ -1474,7 +1504,7 @@ private class PrintState {
     }
 
     private func printFeatureId(featureId: FeatureId, indent: UInt64): Unit {
-        open(indent, "FeatureId " + featureId.ToString())
+        printLine(indent, "FeatureId  " + featureId.ToString() + "  {")
         printBasic(featureId, indent + 1u64)
         close(indent)
     }
@@ -1482,7 +1512,7 @@ private class PrintState {
     private func printFeaturesSet(featuresSet: FeaturesSet, indent: UInt64): Unit {
         open(indent, "FeaturesSet")
         printBasic(featuresSet, indent + 1u64)
-        printLine(indent + 1u64, "featureIds: [")
+        printLine(indent + 1u64, "featureIds:  [")
         for (featureId in featuresSet.content) {
             PrintAstNode(featureId, indent + 2u64, "")
         }
@@ -1519,7 +1549,15 @@ private class PrintState {
     private func printImportSpec(importSpec: ImportSpec, indent: UInt64): Unit {
         if (importSpec.content.kind == ImportKind.IMPORT_MULTI) {
             for (item in importSpec.content.items) {
-                printImportContentWithModifier(item, importSpec.modifier, indent)
+                open(indent, "ImportSpec: " + item.identifier.Val())
+                if (item.kind == ImportKind.IMPORT_ALIAS) {
+                    printLine(indent + 1u64, "aliasName: " + item.aliasName.Val())
+                }
+                printLine(indent + 1u64, "prefixPaths: " + item.GetPrefixPath())
+                if (let Some(value) <- importSpec.modifier) {
+                    printLine(indent + 1u64, "modifier: " + TokenKindText(value.modifier))
+                }
+                close(indent)
             }
             return
         }
@@ -1541,14 +1579,14 @@ private class PrintState {
         if (let Some(value) <- modifier) {
             printLine(indent + 1u64, "modifier: " + TokenKindText(value.modifier))
         }
-        printLine(indent + 1u64, "isDecl: " + boolText(content.isDecl))
+        printLine(indent + 1u64, "isDecl: " + streamBoolText(content.isDecl))
         close(indent)
     }
 
     private func printAnnotation(annotation: Annotation, indent: UInt64): Unit {
         open(indent, "Annotation: " + annotation.identifier.Val())
         printBasic(annotation, indent + 1u64)
-        printLine(indent + 1u64, "isCompileTimeVisible: " + boolText(annotation.isCompileTimeVisible))
+        printLine(indent + 1u64, "isCompileTimeVisible: " + streamBoolText(annotation.isCompileTimeVisible))
         printLine(indent + 1u64, "args [")
         for (arg in annotation.args) {
             PrintAstNode(arg, indent + 2u64, "")
@@ -1592,17 +1630,6 @@ private class PrintState {
         }
     }
 
-    private func targetName(decl: Decl): String {
-        if (!decl.mangledName.isEmpty()) {
-            return decl.mangledName
-        }
-        let name = decl.identifier.GetRawText()
-        if (!name.isEmpty()) {
-            return ASTKindName(decl.astKind) + "(" + name + ")"
-        }
-        return ASTKindName(decl.astKind) + "@" + decl.begin.ToString()
-    }
-
     private func linkageName(linkage: Linkage): String {
         return match (linkage) {
             case Linkage.WEAK_ODR => "WEAK_ODR"
@@ -1614,22 +1641,7 @@ private class PrintState {
     }
 
     private func quoteText(value: String): String {
-        return "\"" + escape(value) + "\""
-    }
-
-    private func escape(value: String): String {
-        let out = StringBuilder()
-        for (byte in value.toArray()) {
-            match (byte) {
-                case b'\n' => out.append("\\n")
-                case b'\r' => out.append("\\r")
-                case b'\t' => out.append("\\t")
-                case b'"' => out.append("\\\"")
-                case b'\\' => out.append("\\\\")
-                case _ => out.append(String.fromUtf8([byte]))
-            }
-        }
-        return out.toString()
+        return "\"" + value + "\""
     }
 }
 
