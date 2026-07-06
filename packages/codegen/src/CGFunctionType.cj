@@ -91,8 +91,18 @@ public class CGFunctionType <: CGType {
         }
         return None
     }
+    public func GetGenericParamIndicesMap(): ArrayList<(GenericType, Int64)> {
+        Complete()
+        let out = ArrayList<(GenericType, Int64)>()
+        for (item in genericParamIndicesMap) {
+            out.add((item.chirGenericTy, item.llvmParamIndex))
+        }
+        return out
+    }
     public func GetMethodTypeInfoIndex(): Option<Int64> { Complete(); return methodTypeInfoIndex }
+    public func GetOuterTypeInfoIndex(): Option<Int64> { Complete(); return methodTypeInfoIndex }
     public func GetStaticMethodTypeInfoIndex(): Option<Int64> { Complete(); return staticMethodTypeInfoIndex }
+    public func GetThisTypeInfoIndex(): Option<Int64> { Complete(); return staticMethodTypeInfoIndex }
     public func GetParamType(idx: Int64): CGType {
         let types = GetContainedTypes()
         CJC_ASSERT(idx + 1 < types.size)

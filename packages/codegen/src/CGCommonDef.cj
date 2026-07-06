@@ -119,7 +119,7 @@ public func CHIRLinkage2LLVMLinkage(chirLinkage: Linkage): LLVMLinkage {
         case Linkage.EXTERNAL => LLVMLinkage.External
         case Linkage.INTERNAL => LLVMLinkage.Internal
         case Linkage.LINKONCE_ODR => LLVMLinkage.LinkOnceODR
-        case Linkage.EXTERNAL_WEAK => LLVMLinkage.ExternalWeak
+        case Linkage.EXTERNAL_WEAK => LLVMLinkage.External
     }
 }
 

@@ -38,49 +38,57 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
     cachedMangleMap!: CachedMangleMap = CachedMangleMap()): ArrayList<LLVMModuleHandle> {
     let cgPkgContext = CGPkgContext(chirData, options, enableIncrement, cachedMangleMap)
     let splitter = CHIRSplitter(cgPkgContext)
-    for (subPackage in splitter.SplitCHIRPackage()) {
-        let cgMod = CGModule(subPackage, cgPkgContext)
-        cgPkgContext.AddCGModule(cgMod)
-        EmitTIOrTTForCustomDefs(cgMod)
-        for (globalVar in subPackage.chirGVs) {
-            EmitGlobalVariableIR(cgMod, globalVar)
+    let subPackages = splitter.SplitCHIRPackage()
+    for (subPackageToRegister in subPackages) {
+        let cgModToRegister = CGModule(subPackageToRegister, cgPkgContext)
+        cgPkgContext.AddCGModule(cgModToRegister)
+    }
+    let cgModules = cgPkgContext.GetCGModules()
+    var emitIdx: Int64 = 0
+    while (emitIdx < subPackages.size) {
+        let subPackageToEmit = subPackages[emitIdx]
+        let cgModToEmit = cgModules[emitIdx]
+        EmitTIOrTTForCustomDefs(cgModToEmit)
+        for (globalVar in subPackageToEmit.chirGVs) {
+            EmitGlobalVariableIR(cgModToEmit, globalVar)
         }
-        for (chirFunc in subPackage.chirFuncs) {
-            EmitFunctionIR(cgMod, chirFunc)
+        for (chirFunc in subPackageToEmit.chirFuncs) {
+            EmitFunctionIR(cgModToEmit, chirFunc)
         }
-        for (chirFunc in subPackage.chirForeigns) {
-            EmitImportedCFuncIR(cgMod, chirFunc)
+        for (chirFunc in subPackageToEmit.chirForeigns) {
+            EmitImportedCFuncIR(cgModToEmit, chirFunc)
         }
-        for (chirFunc in subPackage.chirImportedCFuncs) {
-            EmitImportedCFuncIR(cgMod, chirFunc)
+        for (chirFunc in subPackageToEmit.chirImportedCFuncs) {
+            EmitImportedCFuncIR(cgModToEmit, chirFunc)
         }
-        if (subPackage.mainModule) {
+        if (subPackageToEmit.mainModule) {
             // Mirror C++ EmitPackageIR.cpp:359: the main-module block runs for every output type,
             // including libraries. Emitting the SDK version and the package-init-reset function is
             // required for a shared/static library to be loadable by the runtime (the runtime reads
             // the SDK version at dlopen time via CheckPackageCompatibility). Only the executable
             // entry (main/cj_entry$) is output-type-specific, so its guard lives inside
             // EmitMainFunctionIR (mirroring C++ EmitMain's internal CompileExecutable() early-return).
-            EmitCJSDKVersion(cgMod)
-            EmitMainFunctionIR(cgMod)
-            RegisterExceptionRaiser(cgMod)
-            CreatePackageInitResetFunction(cgMod)
-            SpecifyPackageInitFunc(cgMod)
+            EmitCJSDKVersion(cgModToEmit)
+            EmitMainFunctionIR(cgModToEmit)
+            RegisterExceptionRaiser(cgModToEmit)
+            CreatePackageInitResetFunction(cgModToEmit)
+            SpecifyPackageInitFunc(cgModToEmit)
         }
-        GenerateInterfaceExtensionDefs(cgMod)
-        RedefineTypeInfosForCustomDefs(cgMod)
+        GenerateInterfaceExtensionDefs(cgModToEmit)
+        RedefineTypeInfosForCustomDefs(cgModToEmit)
         // Mirror C++ EmitPackageIR.cpp:372 cgMod.GenTypeInfo(): drain the delayed concrete-TypeInfo
         // definitions (queued by CGType.GetOrCreateTypeInfo) before optimization.
-        cgMod.GenTypeInfo()
-        ReplaceFunction(cgMod)
-        cgMod.Opt()
-        GenerateReflectionMetadata(cgMod, subPackage)
-        cgMod.GenTypeInfo()
-        InitializeCjStringLiteral(cgMod)
-        let keepTypesFunc = KeepSomeTypesManually(cgMod)
-        cgMod.EraseUselessInstsAndDeclarations()
-SetSymbolLinkageType(cgMod)
-        EmitStaticGenericTIsAndLLVMUsed(cgMod, keepTypesFunc)
+        cgModToEmit.GenTypeInfo()
+        ReplaceFunction(cgModToEmit)
+        cgModToEmit.Opt()
+        GenerateReflectionMetadata(cgModToEmit, subPackageToEmit)
+        cgModToEmit.GenTypeInfo()
+        InitializeCjStringLiteral(cgModToEmit)
+        let keepTypesFunc = KeepSomeTypesManually(cgModToEmit)
+        cgModToEmit.EraseUselessInstsAndDeclarations()
+        SetSymbolLinkageType(cgModToEmit)
+        EmitStaticGenericTIsAndLLVMUsed(cgModToEmit, keepTypesFunc)
+        emitIdx++
     }
     let localizedSymbols = cgPkgContext.GetLocalizedSymbols()
     let localizedSymbolsVec = ArrayList<String>()

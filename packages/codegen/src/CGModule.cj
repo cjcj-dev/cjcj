@@ -1,6 +1,7 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::basic.Linkage
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.Block
 import cangjie_compiler::chir.CustomTypeDef
@@ -294,10 +295,49 @@ public class CGModule {
                 AddFnStringAttr(rawFunction, THIS_PARAM_HAS_BP)
             }
         }
+        let chirFunc = (chirValue as Function).getOrThrow()
+        let chirLinkage = chirFunc.GetLinkTypeInfo()
+        if (chirValue.IsFuncWithBody()) {
+            let markByMD = cgCtx.IsCGParallelEnabled() && !IsCHIRWrapper(chirValue.GetIdentifierWithoutPrefix())
+            AddLinkageTypeMetadata(rawFunction, CHIRLinkage2LLVMLinkage(chirLinkage), markByMD)
+        } else if (chirLinkage == Linkage.EXTERNAL_WEAK) {
+            unsafe { LLVMSetLinkage(rawFunction, LLVMLinkageValue(LLVMLinkage.ExternalWeak)) }
+        }
         let cgFunc = CGFunction(rawFunction, cgFuncType, chirValue, this)
         AddGenericParamMappings(rawFunction, cgFunc, chirValue, cgFuncType)
+        if (let Some(functionCGType) <- (cgFuncType as CGFunctionType)) {
+            if (let Some(thisTypeInfoIndex) <- functionCGType.GetThisTypeInfoIndex()) {
+                let thisTypeInfoArg = unsafe { LLVMGetParam(rawFunction, UInt32(thisTypeInfoIndex)) }
+                try (nameCString = unsafe { LibC.mallocCString("thisTI") }.asResource()) {
+                    unsafe { LLVMSetValueName2(thisTypeInfoArg, nameCString.value, UIntNative("thisTI".size)) }
+                }
+            }
+        }
         ApplyFunctionABIAttributes(rawFunction, chirValue, cgFuncType)
         MaybeSetCangjieGC(rawFunction, chirValue)
+        if (let Some(chirType) <- chirValue.GetType()) {
+            if (let Some(funcType) <- (chirType as FuncType)) {
+                if (!funcType.IsCFunc()) {
+                    if (let Some(functionCGType) <- (cgFuncType as CGFunctionType)) {
+                        let realArgIndices = functionCGType.GetRealArgIndices()
+                        let chirParamTypes = funcType.GetParamTypes()
+                        var idx: Int64 = 0
+                        while (idx < chirParamTypes.size) {
+                            if (chirParamTypes[idx].IsStruct()) {
+                                AddParamAttr(rawFunction, UInt32(realArgIndices[idx]), "readonly")
+                                AddParamAttr(rawFunction, UInt32(realArgIndices[idx]), "nocapture")
+                            }
+                            idx++
+                        }
+                    }
+                }
+            }
+        }
+        if (chirValue.TestAttr(Attribute.NO_SIDE_EFFECT)) {
+            AddFnAttr(rawFunction, "nounwind")
+            AddFnAttr(rawFunction, "readonly")
+            AddFnAttr(rawFunction, "willreturn")
+        }
         functions[chirValue] = cgFunc
         return cgFunc
     }
@@ -307,13 +347,15 @@ public class CGModule {
         let fn = (chirValue as Function) ?? return
         let functionType = (cgType as CGFunctionType) ?? return
         let _ = functionType.GetLLVMFunctionType()
-        for (genericTy in fn.GetGenericTypeParams()) {
-            if (let Some(paramIdx) <- functionType.GetGenericParamIndex(genericTy)) {
-                let typeInfoParam = unsafe { LLVMGetParam(rawFunction, UInt32(paramIdx)) }
-                AddGenericParamMapping(cgFunc, genericTy, { _: IRBuilder2 => typeInfoParam })
+        for ((genericTy, paramIdx) in functionType.GetGenericParamIndicesMap()) {
+            let typeInfoParam = unsafe { LLVMGetParam(rawFunction, UInt32(paramIdx)) }
+            let typeInfoName = "ti." + genericTy.GetSrcCodeIdentifier()
+            try (nameCString = unsafe { LibC.mallocCString(typeInfoName) }.asResource()) {
+                unsafe { LLVMSetValueName2(typeInfoParam, nameCString.value, UIntNative(typeInfoName.size)) }
             }
+            AddGenericParamMapping(cgFunc, genericTy, { _: IRBuilder2 => typeInfoParam })
         }
-        if (let Some(outerInfoIndex) <- functionType.GetMethodTypeInfoIndex()) {
+        if (let Some(outerInfoIndex) <- functionType.GetOuterTypeInfoIndex()) {
             AddOuterGenericParamMappings(rawFunction, cgFunc, fn, outerInfoIndex)
         }
     }
@@ -330,6 +372,9 @@ public class CGModule {
         outerInfoIndex: Int64): Unit {
         let parentDef = fn.GetParentCustomTypeDef() ?? return
         let outerTypeInfo = unsafe { LLVMGetParam(rawFunction, UInt32(outerInfoIndex)) }
+        try (nameCString = unsafe { LibC.mallocCString("outerTI") }.asResource()) {
+            unsafe { LLVMSetValueName2(outerTypeInfo, nameCString.value, UIntNative("outerTI".size)) }
+        }
         if (!parentDef.GetGenericTypeParams().isEmpty()) {
             if (let Some(parentTy) <- parentDef.GetType()) {
                 let outerTypeInfoProvider = { _: IRBuilder2 => outerTypeInfo }
