@@ -1,6 +1,7 @@
 package cangjie_compiler::parse
 
 import std.collection.*
+import cangjie_compiler::utils.CJC_ABORT
 
 public class OCFFIParserImpl {
     public let parser: ParserImpl
@@ -9,19 +10,21 @@ public class OCFFIParserImpl {
         this.parser = parser
     }
 
-    public func CheckAnnotationForDecl(anno: Annotation, scopeKind: ScopeKind, decl: Decl): Unit {
-        if (anno.kind == AnnotationKind.OBJ_C_MIRROR) {
-            FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@ObjCMirror", decl)
-            CheckMirrorAnnoTarget(anno, scopeKind, decl)
-        } else if (anno.kind == AnnotationKind.OBJ_C_IMPL) {
-            FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@ObjCImpl", decl)
-            CheckImplAnnoTarget(anno, decl)
-        } else if (anno.kind == AnnotationKind.OBJ_C_INIT) {
-            FFIParserImpl(parser).CheckNoArgAnnotation(anno, "@ObjCInit", decl)
-            CheckInitAnnoTarget(anno, decl)
-        } else if (anno.kind == AnnotationKind.OBJ_C_OPTIONAL) {
-            FFIParserImpl(parser).CheckNoArgAnnotation(anno, "@ObjCOptional", decl)
-            CheckOptionalAnnoTarget(anno, decl)
+    public func CheckAnnotation(anno: Annotation, scopeKind: ScopeKind, decl: Decl): Unit {
+        match (anno.kind) {
+            case AnnotationKind.OBJ_C_MIRROR =>
+                CheckMirrorAnnoArgs(anno, decl)
+                CheckMirrorAnnoTarget(anno, scopeKind, decl)
+            case AnnotationKind.OBJ_C_IMPL =>
+                CheckImplAnnoArgs(anno, decl)
+                CheckImplAnnoTarget(anno, decl)
+            case AnnotationKind.OBJ_C_INIT =>
+                CheckInitAnnoArgs(anno, decl)
+                CheckInitAnnoTarget(anno, decl)
+            case AnnotationKind.OBJ_C_OPTIONAL =>
+                CheckOptionalAnnoArgs(anno, decl)
+                CheckOptionalAnnoTarget(anno, decl)
+            case _ => CJC_ABORT()
         }
     }
 
@@ -209,6 +212,22 @@ public class OCFFIParserImpl {
     public func DiagObjCMirrorFuncMustBeTopLevel(node: FuncDecl): Unit {
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_func_must_be_top_level, node,
             node.identifier.Val()).Emit()
+    }
+
+    private func CheckMirrorAnnoArgs(anno: Annotation, decl: Decl): Unit {
+        FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@ObjCMirror", decl)
+    }
+
+    private func CheckImplAnnoArgs(anno: Annotation, decl: Decl): Unit {
+        FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@ObjCImpl", decl)
+    }
+
+    private func CheckInitAnnoArgs(anno: Annotation, decl: Decl): Unit {
+        FFIParserImpl(parser).CheckNoArgAnnotation(anno, "@ObjCInit", decl)
+    }
+
+    private func CheckOptionalAnnoArgs(anno: Annotation, decl: Decl): Unit {
+        FFIParserImpl(parser).CheckNoArgAnnotation(anno, "@ObjCOptional", decl)
     }
 
     private func CheckMirrorAnnoTarget(anno: Annotation, scopeKind: ScopeKind, decl: Decl): Unit {

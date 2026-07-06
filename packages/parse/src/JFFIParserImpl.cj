@@ -1,6 +1,7 @@
 package cangjie_compiler::parse
 
 import std.collection.*
+import cangjie_compiler::utils.CJC_ASSERT
 
 public class JFFIParserImpl {
     public let parser: ParserImpl
@@ -9,12 +10,13 @@ public class JFFIParserImpl {
         this.parser = parser
     }
 
-    public func CheckAnnotationForDecl(anno: Annotation, decl: Decl): Unit {
+    public func CheckAnnotation(anno: Annotation, decl: Decl): Unit {
         if (anno.kind == AnnotationKind.JAVA_MIRROR) {
-            FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@JavaMirror", decl)
+            CheckMirrorAnnoArgs(anno, decl)
             CheckMirrorAnnoTarget(anno, decl)
-        } else if (anno.kind == AnnotationKind.JAVA_IMPL) {
-            FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@JavaImpl", decl)
+        } else {
+            CJC_ASSERT(anno.kind == AnnotationKind.JAVA_IMPL)
+            CheckImplAnnoArgs(anno, decl)
             CheckImplAnnoTarget(anno, decl)
         }
     }
@@ -112,6 +114,14 @@ public class JFFIParserImpl {
 
     public func DiagJavaImplCannotHaveStaticInit(node: Node): Unit {
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_have_static_init, node).Emit()
+    }
+
+    private func CheckMirrorAnnoArgs(anno: Annotation, decl: Decl): Unit {
+        FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@JavaMirror", decl)
+    }
+
+    private func CheckImplAnnoArgs(anno: Annotation, decl: Decl): Unit {
+        FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@JavaImpl", decl)
     }
 
     private func CheckMirrorAnnoTarget(anno: Annotation, decl: Decl): Unit {

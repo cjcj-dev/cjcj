@@ -75,7 +75,7 @@ public open class FFIParserImpl {
         let objc = ObjC()
         for (anno in annos) {
             if (anno.kind == AnnotationKind.JAVA_MIRROR || anno.kind == AnnotationKind.JAVA_IMPL) {
-                java.CheckAnnotationForDecl(anno, decl)
+                java.CheckAnnotation(anno, decl)
             } else if (anno.kind == AnnotationKind.FOREIGN_NAME) {
                 CheckForeignNameAnnoArgs(anno, decl)
                 CheckForeignNameAnnoTarget(anno, decl)
@@ -89,7 +89,7 @@ public open class FFIParserImpl {
                 anno.kind == AnnotationKind.OBJ_C_IMPL ||
                 anno.kind == AnnotationKind.OBJ_C_INIT ||
                 anno.kind == AnnotationKind.OBJ_C_OPTIONAL) {
-                objc.CheckAnnotationForDecl(anno, scopeKind, decl)
+                objc.CheckAnnotation(anno, scopeKind, decl)
             }
         }
     }

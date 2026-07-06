@@ -1410,6 +1410,21 @@ public class StructInheritanceChecker {
         return false
     }
 
+    @When[backend == "cjnative"]
+    private func CheckNativeFFI(parent: MemberSignature, child: MemberSignature): Unit {
+        if (!checkingDecls.isEmpty()) {
+            let checkingDecl = checkingDecls[checkingDecls.size - 1]
+            CheckForeignName(diag, typeManager, parent, child, checkingDecl)
+            CheckForeignAnnotations(diag, typeManager, parent, child, checkingDecl)
+        }
+    }
+
+    @When[backend != "cjnative"]
+    private func CheckNativeFFI(parent: MemberSignature, child: MemberSignature): Unit {
+        let _ = parent
+        let _ = child
+    }
+
     private func DiagnoseForInheritedMember(parent: MemberSignature, child: MemberSignature): Unit {
         if (let Some(parentDecl) <- parent.decl) {
             if (let Some(childDecl) <- child.decl) {
@@ -1435,6 +1450,7 @@ public class StructInheritanceChecker {
                         CheckInheritanceAttributes(parent, childDecl)
                     }
                 }
+                CheckNativeFFI(parent, child)
             }
         }
     }
@@ -1458,6 +1474,7 @@ public class StructInheritanceChecker {
                             CheckMutModifierCompatible(interfaceSig, childDecl)
                         }
                     }
+                    CheckNativeFFI(interfaceSig, child)
                 }
             }
             if (interfaceDecl.TestAttr(Attribute.DEFAULT)) {
@@ -1484,6 +1501,7 @@ public class StructInheritanceChecker {
                             CheckMutModifierCompatible(interfaceSig, childDecl)
                         }
                     }
+                    CheckNativeFFI(interfaceSig, child)
                 }
             }
             if (interfaceDecl.TestAttr(Attribute.DEFAULT)) {
