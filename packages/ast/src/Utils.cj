@@ -968,6 +968,15 @@ public func IsImpl(node: Node): Bool {
     return !node.TestAttr(Attribute.JAVA_MIRROR) && node.TestAttr(Attribute.JAVA_MIRROR_SUBTYPE)
 }
 
+public func IsImpl(ty: Ty): Bool {
+    if (let Some(classLikeTy) <- (ty as ClassLikeTy)) {
+        if (let Some(decl) <- classLikeTy.commonDecl) {
+            return IsImpl(decl)
+        }
+    }
+    return false
+}
+
 public func IsJObject(decl: Decl): Bool {
     return IsJObject(decl, decl.fullPackageName)
 }
@@ -979,6 +988,15 @@ public func IsJObject(decl: Decl, packageName: String): Bool {
 
 public func IsMirror(node: Node): Bool {
     return node.TestAttr(Attribute.JAVA_MIRROR)
+}
+
+public func IsMirror(ty: Ty): Bool {
+    if (let Some(classLikeTy) <- (ty as ClassLikeTy)) {
+        if (let Some(decl) <- classLikeTy.commonDecl) {
+            return IsMirror(decl)
+        }
+    }
+    return false
 }
 
 public func IsCJMapping(node: Node): Bool {

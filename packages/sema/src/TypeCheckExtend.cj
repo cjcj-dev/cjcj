@@ -949,6 +949,95 @@ public func TypeCheckExtendCheckImmutExtendInheritMutSuper(
     return true
 }
 
+func DiagJavaDeclCannotBeExtendedWithInterface(diag: BasicDiagnosticEngine, extendDecl: ExtendDecl): Unit {
+    let extendedType = extendDecl.extendedType.getOrThrow()
+    let extendedTy = extendedType.GetTy().getOrThrow()
+    let diagKind = if (IsMirror(extendedTy)) {
+        BasicDiagKindRefactor.sema_java_mirror_cannot_be_extended_with_interface
+    } else {
+        BasicDiagKindRefactor.sema_java_impl_cannot_be_extended_with_interface
+    }
+    diag.DiagnoseRefactor(diagKind, TypeCheckExtendRange(extendDecl)).Emit()
+}
+
+public func CheckExtendDecl(
+    diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    ctx: ASTContext,
+    extendDecl: ExtendDecl,
+    synthesizeType: (Type) -> Ty,
+    synthesizeMember: (Decl) -> Ty
+): Bool {
+    if (extendDecl.TestAttr(Attribute.IS_CHECK_VISITED)) {
+        return true
+    }
+    extendDecl.EnableAttr(Attribute.IS_CHECK_VISITED)
+    if (let None <- extendDecl.extendedType) {
+        return true
+    }
+    let extendedType = extendDecl.extendedType.getOrThrow()
+    let _ = synthesizeType(extendedType)
+    let extendedDecl = extendedType.GetTarget()
+    var valid = true
+    var idx: Int64 = 0
+    while (idx < extendDecl.inheritedTypes.size) {
+        let inheritedType = extendDecl.inheritedTypes[idx]
+        if (!Ty.IsTyCorrect(synthesizeType(inheritedType))) {
+            ctx.DeleteInvertedIndexes(inheritedType)
+            extendDecl.inheritedTypes.remove(at: idx)
+            valid = false
+            continue
+        }
+        if (let Some(decl) <- extendedDecl) {
+            if (!TypeCheckClassLikeCheckSealedInheritance(diag, decl, inheritedType)) {
+                valid = false
+            }
+            if (!TypeCheckClassLikeCheckThreadContextInheritance(diag, decl, inheritedType)) {
+                valid = false
+            }
+        }
+        if (!TypeCheckExtendCheckImmutExtendInheritMutSuper(diag, inheritedType, extendDecl)) {
+            valid = false
+        }
+        idx++
+    }
+    for (member in extendDecl.members) {
+        let _ = synthesizeMember(member)
+        if (Ty.IsTyCorrect(extendDecl.GetTy()) && extendDecl.GetTy().getOrThrow().IsImmutableType()) {
+            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                if (!extendDecl.GetTy().getOrThrow().IsEnum() && IsIndexAssignmentOperator(funcDecl)) {
+                    diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.sema_immutable_type_extend_assignment_index_operator,
+                        TypeCheckExtendIdentifierRange(funcDecl)).Emit()
+                    valid = false
+                }
+            }
+            if (let Some(propDecl) <- (member as PropDecl)) {
+                if (propDecl.isVar) {
+                    let range = if (let Some(modifier) <- FindModifier(propDecl, TokenKind.MUT)) {
+                        MakeRange(modifier.begin, modifier.end)
+                    } else {
+                        TypeCheckExtendIdentifierRange(propDecl)
+                    }
+                    diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.sema_immutable_type_illegal_property,
+                        range).Emit()
+                    valid = false
+                }
+            }
+        }
+    }
+    if (let Some(decl) <- extendedDecl) {
+        if (let Some(inheritableDecl) <- (decl as InheritableDecl)) {
+            let extends = tm.GetDeclExtends(inheritableDecl)
+            if (!TypeCheckExtendCheckDupDefImplByDiffTypArgs(diag, extends, extendDecl)) {
+                valid = false
+            }
+        }
+    }
+    return valid
+}
+
 public func TypeCheckExtendCheckDecl(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
@@ -983,7 +1072,7 @@ public func TypeCheckExtendCheckDecl(
     for (member in extendDecl.members) {
         if (Ty.IsTyCorrect(extendDecl.GetTy()) && extendDecl.GetTy().getOrThrow().IsImmutableType()) {
             if (let Some(funcDecl) <- (member as FuncDecl)) {
-                if (!extendDecl.GetTy().getOrThrow().IsEnum() && TypeCheckExtendIsIndexAssignmentOperator(funcDecl)) {
+                if (!extendDecl.GetTy().getOrThrow().IsEnum() && IsIndexAssignmentOperator(funcDecl)) {
                     let builder = diag.DiagnoseRefactor(
                         BasicDiagKindRefactor.sema_immutable_type_extend_assignment_index_operator,
                         TypeCheckExtendIdentifierRange(funcDecl))
@@ -1021,20 +1110,20 @@ public func TypeCheckExtendCheckDecl(
     return valid
 }
 
-private func TypeCheckExtendIsIndexAssignmentOperator(funcDecl: FuncDecl): Bool {
+private func IsIndexAssignmentOperator(funcDecl: FuncDecl): Bool {
     if (funcDecl.op != TokenKind.LSQUARE) {
         return false
     }
-    if (let Some(body) <- funcDecl.funcBody) {
-        if (!body.paramLists.isEmpty()) {
-            let params = body.paramLists[0].params
-            return params.size > 1 && params[params.size - 1].isNamedParam
-        }
+    if (let None <- funcDecl.funcBody) {
+        return false
     }
-    if (let Some(rawTy) <- funcDecl.GetTy()) {
-        if (let Some(funcTy) <- (rawTy as FuncTy)) {
-            return funcTy.paramTys.size > 1 && funcTy.retTy.IsUnit()
-        }
+    let body = funcDecl.funcBody.getOrThrow()
+    if (body.paramLists.isEmpty()) {
+        return false
     }
-    return false
+    let params = body.paramLists[0].params
+    if (params.isEmpty()) {
+        return false
+    }
+    return params[params.size - 1].isNamedParam
 }

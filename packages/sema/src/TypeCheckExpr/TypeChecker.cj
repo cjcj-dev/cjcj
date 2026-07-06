@@ -2454,11 +2454,25 @@ public class TypeChecker {
                 { member: Decl => SynthesizeDecl(ctx, member) })
         }
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-            SynthesizeTypeNode(ctx, extendDecl.extendedType)
-            for (inheritedType in extendDecl.inheritedTypes) {
-                impl.SetTypeTy(ctx, inheritedType)
+            if (let Some(diagValue) <- impl.diag) {
+                let _ = CheckExtendDecl(
+                    diagValue,
+                    impl.typeManager,
+                    ctx,
+                    extendDecl,
+                    { typeNode: Type =>
+                        SynthesizeNode(ctx, SynPos.NONE, typeNode)
+                    },
+                    { member: Decl =>
+                        SynthesizeDecl(ctx, member)
+                    })
+            } else {
+                SynthesizeTypeNode(ctx, extendDecl.extendedType)
+                for (inheritedType in extendDecl.inheritedTypes) {
+                    impl.SetTypeTy(ctx, inheritedType)
+                }
+                SynthesizeDeclList(ctx, extendDecl.members)
             }
-            SynthesizeDeclList(ctx, extendDecl.members)
             return tyOrInvalid(extendDecl)
         }
         if (let Some(typeAlias) <- (decl as TypeAliasDecl)) {

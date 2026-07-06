@@ -6,10 +6,30 @@ import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.AfterTypeCheck.*
 
+private func CheckExtendDecl(diag: BasicDiagnosticEngine, decl: ExtendDecl): Unit {
+    let ty = decl.extendedType.getOrThrow().GetTy().getOrThrow()
+    if (!IsMirror(ty) && !IsImpl(ty)) {
+        return
+    }
+    if (!decl.inheritedTypes.isEmpty()) {
+        DiagJavaDeclCannotBeExtendedWithInterface(diag, decl)
+        decl.EnableAttr(Attribute.IS_BROKEN)
+    }
+}
+
 public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
     context!: Option<ASTContext> = None, options!: GlobalOptions = GlobalOptions(),
     synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Unit {
+    if (let Some(diagValue) <- diag) {
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+                    CheckExtendDecl(diagValue, extendDecl)
+                }
+            }
+        }
+    }
     DesugarDeclsForPackage(pkg, options.enableCoverage)
     let walker = Walker(pkg, visitPre: { node: Node =>
         match (node.astKind) {
