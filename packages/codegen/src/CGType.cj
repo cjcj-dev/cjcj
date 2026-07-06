@@ -583,6 +583,12 @@ public open class CGType {
     }
 
     public static func GetNameOfTypeInfoGV(chirType: Type): String {
+        // GAP_TODO(typeinfo-gv-name-parity): C++ CGType::GetNameOfTypeInfoGV (CGType.cpp:581-584) is
+        // UNCONDITIONALLY GetTypeQualifiedName(chirType) + ".ti". The empty-src guard below is a
+        // narrowing: applying the C++ form to all types currently regresses difftest 129/130,
+        // which means selfhost GetTypeQualifiedName (or GetRuntimeTypeName call sites) still
+        // diverges from C++ for non-empty-src types. Faithful fix = align GetTypeQualifiedName
+        // parity and drop this guard.
         if (let Some(customTy) <- (chirType as CustomType)) {
             if (customTy.GetCustomTypeDef().GetSrcCodeIdentifier().isEmpty()) {
                 return GetTypeQualifiedName(chirType) + ".ti"
