@@ -511,6 +511,7 @@ public class ASTCloner {
         target.typeParameterNameIsRawId = source.typeParameterNameIsRawId
         target.typePos = source.typePos
         target.colonPos = source.colonPos
+        target.aliasTy = source.aliasTy
         CopyNodeField(source, target)
         visitFunc(source, target)
         target.EnableAttr(Attribute.COMPILER_ADD)
