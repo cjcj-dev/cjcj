@@ -1119,7 +1119,7 @@ private func LinkTypeInfoToString(linkType: BasicLinkage): String {
     return "linkType: " + linkToString
 }
 
-private func ParamTypeIsEquivalent(paramType: Type, argType: Type): Bool {
+public func ParamTypeIsEquivalent(paramType: Type, argType: Type): Bool {
     if (paramType.IsEqual(argType)) {
         return true
     }

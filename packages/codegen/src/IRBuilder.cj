@@ -1192,23 +1192,24 @@ public class IRBuilder2 <: Resource {
 
     public func CreateCallOrInvokeWithMethodTypeInfo(calleeType: CGFunctionType, callee: LLVMValueRef,
         args: ArrayList<CGValue>, methodTypeInfoArg: Option<LLVMValueRef>, instTypeArgs: ArrayList<Type>,
-        name!: String = ""): LLVMValueRef {
+        thisTypeInfoArg!: Option<LLVMValueRef> = None, name!: String = ""): LLVMValueRef {
         return CreateCallOrInvokeWithMethodTypeInfo(calleeType, callee, args, methodTypeInfoArg, instTypeArgs,
-            None, name: name)
+            None, thisTypeInfoArg, name: name)
     }
 
     public func CreateCallOrInvokeWithMethodTypeInfoAndSRetTypeInfo(calleeType: CGFunctionType, callee: LLVMValueRef,
         args: ArrayList<CGValue>, methodTypeInfoArg: Option<LLVMValueRef>, sretTypeInfoArg: Option<LLVMValueRef>,
         name!: String = ""): LLVMValueRef {
         return CreateCallOrInvokeWithMethodTypeInfo(calleeType, callee, args, methodTypeInfoArg,
-            ArrayList<Type>(), sretTypeInfoArg, name: name)
+            ArrayList<Type>(), sretTypeInfoArg, None, name: name)
     }
 
     private func CreateCallOrInvokeWithMethodTypeInfo(calleeType: CGFunctionType, callee: LLVMValueRef,
         args: ArrayList<CGValue>, methodTypeInfoArg: Option<LLVMValueRef>, instTypeArgs: ArrayList<Type>,
-        sretTypeInfoArg: Option<LLVMValueRef>, name!: String = ""): LLVMValueRef {
+        sretTypeInfoArg: Option<LLVMValueRef>, thisTypeInfoArg: Option<LLVMValueRef>,
+        name!: String = ""): LLVMValueRef {
         let callArgs = TransformCGFunctionArgs(calleeType, args, methodTypeInfoArg, instTypeArgs, sretTypeInfoArg,
-            name: name)
+            thisTypeInfoArg, name: name)
         let llvmCallArgs = TransformLLVMCallArgs(calleeType, callArgs, name: name)
         if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
             let retTy = funcType.GetReturnType()
@@ -1293,7 +1294,7 @@ public class IRBuilder2 <: Resource {
 
     private func TransformCGFunctionArgs(calleeType: CGFunctionType, args: ArrayList<CGValue>,
         methodTypeInfoArg: Option<LLVMValueRef>, instTypeArgs: ArrayList<Type>,
-        sretTypeInfoArg: Option<LLVMValueRef>,
+        sretTypeInfoArg: Option<LLVMValueRef>, thisTypeInfoArg: Option<LLVMValueRef>,
         name!: String = ""): ArrayList<LLVMValueRef> {
         let callArgs = ArrayList<LLVMValueRef>()
         var applyExprWrapper: Option<CHIRApplyWrapper> = None
@@ -1354,7 +1355,11 @@ public class IRBuilder2 <: Resource {
                 }
             }
             if (calleeType.IsStaticMethodType()) {
-                if (let Some(staticThisTypeInfo) <- methodTypeInfoArg) {
+                var staticThisTypeInfoArg = thisTypeInfoArg
+                if (staticThisTypeInfoArg.isNone()) {
+                    staticThisTypeInfoArg = methodTypeInfoArg
+                }
+                if (let Some(staticThisTypeInfo) <- staticThisTypeInfoArg) {
                     callArgs.add(staticThisTypeInfo)
                 } else {
                     callArgs.add(unsafe { LLVMConstNull(CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())) })

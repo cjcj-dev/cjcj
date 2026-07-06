@@ -5,7 +5,7 @@ import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.MakeRange as BasicMakeRange
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::utils.{CJC_ABORT, FileUtil}
+import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, FileUtil}
 
 public let ANY_TYPE: String = "ANY_TYPE"
 public let NOT_CARE: String = "NOT_CARE"
@@ -112,6 +112,130 @@ public func IsGetOrThrowFunction(expr: Expression): Bool {
         return IsExpectedFunction(callee, getOrThrowInfo)
     }
     return false
+}
+
+public func GetSuperTypesRecusively(subType: Type, builder: CHIRBuilder): ArrayList<ClassType> {
+    let result = ArrayList<ClassType>()
+    if (let Some(customType) <- (subType as CustomType)) {
+        return customType.GetSuperTypesRecusively(builder)
+    } else if (let Some(builtinType) <- (subType as BuiltinType)) {
+        return builtinType.GetSuperTypesRecusively(builder)
+    } else if (let Some(genericType) <- (subType as GenericType)) {
+        for (upperBound in genericType.GetUpperBounds()) {
+            let classType = (upperBound.StripAllRefs() as ClassType).getOrThrow()
+            result.add(classType)
+            for (parent in GetSuperTypesRecusively(classType, builder)) {
+                var containsParent = false
+                for (item in result) {
+                    if (item.objectId == parent.objectId) {
+                        containsParent = true
+                        break
+                    }
+                }
+                if (!containsParent) {
+                    result.add(parent)
+                }
+            }
+        }
+    } else {
+        CJC_ABORT()
+    }
+    return result
+}
+
+private func GetInstParentType(candidate: ArrayList<ClassType>, callee: Function, args: ArrayList<Value>,
+    builder: CHIRBuilder): ClassType {
+    CJC_ASSERT(!candidate.isEmpty())
+    if (candidate.size == 1) {
+        return candidate[0]
+    }
+    let classDefs = HashSet<Int64>()
+    for (parentTy in candidate) {
+        classDefs.add(parentTy.GetClassDef().nodeId)
+    }
+    CJC_ASSERT(classDefs.size == 1)
+
+    let offset: Int64 = if (callee.TestAttr(Attribute.STATIC)) { 0 } else { 1 }
+    let argTypes = ArrayList<Type>()
+    var argIdx = offset
+    while (argIdx < args.size) {
+        argTypes.add(args[argIdx].GetType().getOrThrow())
+        argIdx++
+    }
+    let paramTypes = callee.GetFuncType().getOrThrow().GetParamTypes()
+    if (!callee.TestAttr(Attribute.STATIC)) {
+        paramTypes.remove(at: 0)
+    }
+    CJC_ASSERT(argTypes.size == paramTypes.size)
+    for (parentTy in candidate) {
+        let res = parentTy.GetClassDef().GetType().getOrThrow().CalculateGenericTyMapping(parentTy)
+        CJC_ASSERT(res[0])
+        var argTypeMatched = true
+        var paramIdx: Int64 = 0
+        while (paramIdx < paramTypes.size) {
+            let instType = ReplaceRawGenericArgType(paramTypes[paramIdx], res[1], builder)
+            if (!ParamTypeIsEquivalent(instType, argTypes[paramIdx])) {
+                argTypeMatched = false
+                break
+            }
+            paramIdx++
+        }
+        if (argTypeMatched) {
+            return parentTy
+        }
+    }
+    CJC_ABORT()
+    throw IllegalStateException("instantiated parent type of callee is not available")
+}
+
+public func GetInstParentCustomTyOfCallee(value: Value, args: ArrayList<Value>, thisType: Option<Type>,
+    builder: CHIRBuilder): Option<Type> {
+    let callee = value.AsFunction() ?? return None
+    if (!callee.IsMemberFunc()) {
+        return None
+    }
+
+    var calleeParentDef = callee.GetParentCustomTypeDef().getOrThrow()
+    let thisTy = thisType ?? return calleeParentDef.GetType()
+
+    let calleeParentTy = calleeParentDef.GetType().getOrThrow()
+    if (!calleeParentTy.IsBuiltinType() && calleeParentDef.IsExtend()) {
+        calleeParentDef = (calleeParentTy as CustomType).getOrThrow().GetCustomTypeDef()
+    }
+    let derefThisType = thisTy.StripAllRefs()
+    CJC_ASSERT(!(derefThisType.IsCustomType() && calleeParentDef.GetType().getOrThrow().IsBuiltinType()))
+    let typeAndDefIsEquivalent = { ty: CustomType, def: CustomTypeDef =>
+        let typeDef = ty.GetCustomTypeDef()
+        if (typeDef.nodeId == def.nodeId) {
+            true
+        } else if (let Some(defTy) <- def.GetType()) {
+            ty.objectId == defTy.objectId || typeDef.GetIdentifier() == def.GetIdentifier()
+        } else {
+            typeDef.GetIdentifier() == def.GetIdentifier()
+        }
+    }
+
+    if (let Some(customType) <- (derefThisType as CustomType)) {
+        if (typeAndDefIsEquivalent(customType, calleeParentDef)) {
+            return Some(derefThisType)
+        }
+    } else if (let Some(builtinType) <- (derefThisType as BuiltinType)) {
+        if (builtinType.IsSameTypeKind(calleeParentDef.GetType().getOrThrow())) {
+            return Some(derefThisType)
+        }
+    }
+
+    let parentTypes = GetSuperTypesRecusively(derefThisType, builder)
+    let matchedTypes = ArrayList<ClassType>()
+    for (parentTy in parentTypes) {
+        if (typeAndDefIsEquivalent(parentTy, calleeParentDef)) {
+            matchedTypes.add(parentTy)
+        }
+    }
+    if (matchedTypes.isEmpty()) {
+        return Some(derefThisType)
+    }
+    return Some(GetInstParentType(matchedTypes, callee, args, builder))
 }
 
 public func ToPosInfo(loc: DebugLocation, isPrintFileName!: Bool = false): String {

@@ -196,7 +196,7 @@ private func GenerateResolvedStaticInvoke(irBuilder: IRBuilder2, dispatch: Dynam
     if (let Some(thisTy) <- dispatch.GetThisType()) {
         if (let Some(callee) <- FindMethodByName(thisTy, dispatch.GetMethodName())) {
             return GenerateApply(irBuilder, callee, args, callType: Some(dispatch.GetMethodType()),
-                isMethodType: false, isStaticMethodType: true, instTypeArgs: dispatch.GetInstantiatedTypeArgs())
+                isMethodType: true, isStaticMethodType: true, instTypeArgs: dispatch.GetInstantiatedTypeArgs())
         }
     }
     return LLVMNullValue()
@@ -207,7 +207,7 @@ private func GenerateResolvedStaticInvoke(irBuilder: IRBuilder2, dispatch: Dynam
     if (let Some(thisTy) <- dispatch.GetThisType()) {
         if (let Some(callee) <- FindMethodByName(thisTy, dispatch.GetMethodName())) {
             return GenerateApply(irBuilder, callee, args, callType: Some(dispatch.GetMethodType()),
-                isMethodType: false, isStaticMethodType: true, instTypeArgs: dispatch.GetInstantiatedTypeArgs())
+                isMethodType: true, isStaticMethodType: true, instTypeArgs: dispatch.GetInstantiatedTypeArgs())
         }
     }
     return LLVMNullValue()
