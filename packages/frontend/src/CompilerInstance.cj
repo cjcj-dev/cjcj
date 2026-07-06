@@ -436,7 +436,7 @@ public class CompilerInstance {
     }
 
     public func PerformMangling(): Bool {
-        let adapter = RealMangleAstAdapter()
+        let adapter = mangler.adapter
         PrepareManglerContexts(mangler, adapter)
         mangler.lambdaCounter = cachedInfo.lambdaCounter
         ManglingHelpFunction(mangler, adapter)

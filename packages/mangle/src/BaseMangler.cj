@@ -603,6 +603,7 @@ public open class BaseMangler {
     public var lambdaCounter: Int64 = 0
     public var exportIdMode: Bool = false
     public let manglerCtxTable: HashMap<String, ManglerContext> = HashMap<String, ManglerContext>()
+    public let adapter: MangleAstAdapter = MangleAstAdapter()
 
     public init() {}
 
@@ -611,13 +612,11 @@ public open class BaseMangler {
     }
 
     public func Mangle(decl: Decl): String {
-        let adapter = MangleAstAdapter()
         PrepareAstContext(adapter, decl)
         return Mangle(adapter.ConvertDecl(decl))
     }
 
     public func Mangle(decl: Decl, prefix: ArrayList<Node>): String {
-        let adapter = MangleAstAdapter()
         PrepareAstContext(adapter, decl)
         let convertedPrefix = ArrayList<MangleDecl>()
         for (node in prefix) {
@@ -637,7 +636,6 @@ public open class BaseMangler {
     }
 
     public func MangleLambda(lambda: LambdaExpr, prefix: ArrayList<Node>): String {
-        let adapter = MangleAstAdapter()
         PrepareAstContext(adapter, lambda)
         let convertedPrefix = ArrayList<MangleDecl>()
         for (node in prefix) {
@@ -938,7 +936,6 @@ public open class BaseMangler {
     }
 
     public func MangleAstSemanticType(ty: Ty): String {
-        let adapter = MangleAstAdapter()
         return MangleSemaType(adapter.ConvertTy(ty))
     }
 
@@ -1462,7 +1459,6 @@ public open class BaseMangler {
     }
 
     public func MangleExportId(decl: Decl): String {
-        let adapter = MangleAstAdapter()
         PrepareAstContext(adapter, decl)
         let convertedDecl = adapter.ConvertDecl(decl)
         let out = MangleExportId(convertedDecl)
