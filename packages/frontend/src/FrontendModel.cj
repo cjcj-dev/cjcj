@@ -707,6 +707,7 @@ private class CjoSignatureMaterializer {
     private let packageName: String
     private var pkg: Package
     private var filesByIndex: HashMap<UInt32, File>
+    private var allFileIds: Array<UInt64> = Array<UInt64>()
     private var idToFileMap: HashMap<UInt64, File>
     private let importedPackages: ArrayList<Package>
     private let packageDecls: HashMap<String, PackageDecl>
@@ -839,6 +840,7 @@ private class CjoSignatureMaterializer {
         allLoadedExprs.clear()
         allDummyExprs.clear()
         importNonGenericSrcFuncDecls.clear()
+        allFileIds = Array<UInt64>()
         let reader = flat.getOrThrow()
         if (!reader.VerifyPackageBuffer()) {
             diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed, DEFAULT_POSITION,
@@ -863,8 +865,10 @@ private class CjoSignatureMaterializer {
         flatImports = reader.VectorField(root, 12)
         let specificFeatures = CollectFeaturesFromPackage(targetPkg)
         let filesVec = reader.VectorField(root, 14)
+        let fileSize = reader.VectorLength(filesVec)
+        allFileIds = Array<UInt64>(fileSize, repeat: 0u64)
         var idx: Int64 = 0
-        while (idx < reader.VectorLength(filesVec)) {
+        while (idx < fileSize) {
             let commonFile = PreloadCommonFile(reader, UInt32(idx))
             ValidateCommonSpecificFeatureSetsRelations(commonFile, specificFeatures, targetPkg)
             targetPkg.files.add(commonFile)
@@ -912,6 +916,7 @@ private class CjoSignatureMaterializer {
         file.EnableAttr(Attribute.FROM_COMMON_PART)
         file.EnableAttr(Attribute.COMMON)
         file.isCommon = true
+        allFileIds[fileIndex] = fileID
         file.begin = LoadFlatPosition(reader, reader.TableField(fileInfo, 6))
         file.end = LoadFlatPosition(reader, reader.TableField(fileInfo, 8))
         filesByIndex[UInt32(fileIndex + 1)] = file
@@ -1052,6 +1057,7 @@ private class CjoSignatureMaterializer {
         allLoadedExprs.clear()
         allDummyExprs.clear()
         importNonGenericSrcFuncDecls.clear()
+        allFileIds = Array<UInt64>()
         let reader = flat.getOrThrow()
         let root = reader.RootTable()
         if (root < 0 || reader.StringField(root, 8) != packageName) {
@@ -1070,6 +1076,14 @@ private class CjoSignatureMaterializer {
         flatAllDecls = reader.VectorField(root, 20)
         flatAllExprs = reader.VectorField(root, 22)
         flatImports = reader.VectorField(root, 12)
+        let filesVec = reader.VectorField(root, 14)
+        let fileSize = reader.VectorLength(filesVec)
+        allFileIds = Array<UInt64>(fileSize, repeat: 0u64)
+        var fileIdx: Int64 = 0
+        while (fileIdx < fileSize) {
+            allFileIds[fileIdx] = FileByFlatIndex(UInt32(fileIdx + 1)).begin.fileID
+            fileIdx++
+        }
         MaterializeSerializedImports()
         let dependentStdPkgs = reader.VectorField(root, 34)
         if (dependentStdPkgs >= 0) {
@@ -2132,7 +2146,7 @@ private class CjoSignatureMaterializer {
         let line = reader.I32At(posTable + 8)
         let column = reader.I32At(posTable + 12)
         let fileID = if (pkgIndex == 0u32) {
-            if (fileIndex == 0u32) { 0u64 } else { FileByFlatIndex(fileIndex).begin.fileID }
+            if (fileIndex == 0u32) { 0u64 } else { allFileIds[Int64(fileIndex) - 1] }
         } else {
             if (let Some(importedFile) <- ImportedFileByFlatPosition(reader, pkgIndex, fileIndex)) {
                 let importedFileID = importedFile.begin.fileID
