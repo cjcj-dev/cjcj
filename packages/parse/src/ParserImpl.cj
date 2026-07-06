@@ -36,6 +36,7 @@ public class ParserImpl {
     public let commentsMap: TokenVecMap = TokenVecMap()
     public let chainedAST: ArrayList<Node> = ArrayList<Node>()
     public let bracketsStack: ArrayList<TokenKind> = ArrayList<TokenKind>()
+    let intrinsics: HashSet<Node> = HashSet<Node>()
 
     public init(fileID: UInt64, input: String, diag: BasicDiagnosticEngine, sm: SourceManager, attachComment: Bool, parsingDeclFiles: Bool) {
         this.diag = diag

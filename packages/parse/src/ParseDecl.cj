@@ -375,6 +375,11 @@ extend ParserImpl {
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
+            if (HasModifierToken(modifiers, TokenKind.CONST)) {
+                decl.isConst = true
+            }
+            SetDeclBeginPos(decl)
+            SetBeginToAnnotationsBegin(decl, annos)
             return decl
         }
         if (Seeing(TokenKind.MACRO)) {
@@ -510,9 +515,102 @@ extend ParserImpl {
     public func ParseFuncDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): FuncDecl {
         let ret = FuncDecl()
         try (cs = ChainScope(this, ret)) {
-            ParseFuncLikeHeader(ret, TokenKind.FUNC, scopeKind, modifiers, annos)
+            ret.keywordPos = Peek().Begin()
+            ret.begin = Peek().Begin()
+            Next()
+            var funcScopeKind = scopeKind
+            if (forImport && ScopeKindEquals(funcScopeKind, ScopeKind.CLASS_BODY) &&
+                HasModifierToken(modifiers, TokenKind.MUT)) {
+                funcScopeKind = ScopeKind.INTERFACE_BODY
+            }
+            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, funcScopeKind, DefKind.FUNC))
+            if (ret.TestAttr(Attribute.OPERATOR)) {
+                ret.identifier = ExpectOperatorIdentifier(ret)
+            } else {
+                ret.identifier = ExpectIdentifierWithPos(ret)
+            }
+            if (ret.identifier.Begin() == INVALID_POSITION) {
+                ret.identifier.SetPos(Peek().Begin(), Peek().End())
+            }
+            for (modifier in modifiers) {
+                ret.modifiers.add(modifier)
+            }
+            let body = ParseFuncBody(funcScopeKind)
+            ret.funcBody = body
+            let hasNoBody = body.body.isNone()
+            let hasNoReturnType = body.retType.isNone()
+            if (ret.TestAttr(Attribute.COMMON) && hasNoReturnType && hasNoBody) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_common_function_must_have_return_type, ret).Emit()
+            }
+            if (ret.TestAttr(Attribute.SPECIFIC) && hasNoReturnType && hasNoBody) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_specific_function_must_have_return_type, ret).Emit()
+            }
+            if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
+                SetUnsafe(ret, modifiers: modifiers)
+            }
+            let ffiParser = FFIParserImpl(this)
+            ffiParser.CheckFuncSignature(ret, annos)
+            ParseFuncDeclAnnos(annos, ret)
+            CheckFuncBody(funcScopeKind, ret)
+            if (let Some(funcBody) <- ret.funcBody) {
+                ret.end = funcBody.end
+                if (funcBody.paramLists.size > 1) {
+                    ParseDiagnoseRefactor(
+                        DiagKindRefactor.parse_expected_left_brace, funcBody.paramLists[1].begin, "(").Emit()
+                }
+                if (ret.identifier == "main" && !ret.identifier.IsRaw()) {
+                    DiagIllegalFunc(ret)
+                }
+            }
+            SetDefaultFunc(funcScopeKind, ret)
+            if (!ScopeKindEquals(funcScopeKind, ScopeKind.CLASS_BODY) &&
+                !ScopeKindEquals(funcScopeKind, ScopeKind.INTERFACE_BODY)) {
+                ffiParser.CheckForeignNameAnnotation(ret)
+            }
+            if (!ScopeKindEquals(funcScopeKind, ScopeKind.CLASS_BODY)) {
+                ffiParser.ObjC().CheckInitAnnotation(ret)
+            }
         }
         return ret
+    }
+
+    private func ParseFuncDeclAnnos(annos: ArrayList<Annotation>, funcDecl: FuncDecl): Unit {
+        for (anno in annos) {
+            funcDecl.annotations.add(anno)
+            if (anno.kind == AnnotationKind.JAVA) {
+                funcDecl.EnableAttr(Attribute.JAVA_APP)
+            }
+            if (anno.kind == AnnotationKind.INTRINSIC) {
+                CheckIntrinsicFunc(funcDecl)
+                funcDecl.EnableAttr(Attribute.INTRINSIC)
+            }
+            if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
+                funcDecl.EnableAttr(Attribute.NUMERIC_OVERFLOW)
+                funcDecl.overflowStrategy = anno.overflowStrategy
+            }
+            if (anno.kind == AnnotationKind.FASTNATIVE) {
+                funcDecl.isFastNative = true
+            }
+            @When[backend == "cjnative"]
+            let isFrozenAnno = anno.kind == AnnotationKind.FROZEN
+            @When[backend != "cjnative"]
+            let isFrozenAnno = false
+            if (isFrozenAnno) {
+                funcDecl.isFrozen = true
+            }
+        }
+    }
+
+    private func CheckIntrinsicFunc(fd: Decl): Unit {
+        for (intrinsic in intrinsics) {
+            if (let Some(intrinsicDecl) <- (intrinsic as Decl)) {
+                if (fd.identifier == intrinsicDecl.identifier) {
+                    DiagDuplicatedIntrinsicFunc(fd, intrinsicDecl)
+                    return
+                }
+            }
+        }
+        intrinsics.add(fd)
     }
 
     public func ParseMacroDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): MacroDecl {
@@ -850,6 +948,31 @@ extend ParserImpl {
         }
         if (let Some(idx) <- varargIdx) {
             params.remove(at: idx)
+        }
+    }
+
+    private func SetDefaultFunc(scopeKind: ScopeKind, decl: Decl): Unit {
+        if (!ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) {
+            return
+        }
+        if (decl.astKind == ASTKind.FUNC_DECL) {
+            let defaultFunc = !decl.TestAttr(Attribute.FOREIGN) && !decl.TestAttr(Attribute.ABSTRACT)
+            if (defaultFunc) {
+                decl.EnableAttr(Attribute.DEFAULT)
+            }
+        } else if (decl.astKind == ASTKind.PROP_DECL) {
+            if (decl.TestAttr(Attribute.ABSTRACT)) {
+                return
+            }
+            decl.EnableAttr(Attribute.DEFAULT)
+            if (let Some(propDecl) <- (decl as PropDecl)) {
+                for (setter in propDecl.setters) {
+                    setter.EnableAttr(Attribute.DEFAULT)
+                }
+                for (getter in propDecl.getters) {
+                    getter.EnableAttr(Attribute.DEFAULT)
+                }
+            }
         }
     }
 
@@ -1798,6 +1921,12 @@ extend ParserImpl {
         }
         if (index < modifiers.size) {
             decl.begin = modifiers[index].begin
+        }
+    }
+
+    private func SetBeginToAnnotationsBegin(node: Node, annos: ArrayList<Annotation>): Unit {
+        if (!annos.isEmpty()) {
+            node.begin = annos[0].begin
         }
     }
 
