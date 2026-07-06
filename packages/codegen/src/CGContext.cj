@@ -85,6 +85,8 @@ public class CGContext {
     private var cjStringType: LLVMTypeRef = LLVMNullType()
 
     public var debugValue: LLVMValueRef = LLVMNullValue()
+    public let genericParamsCacheMap: HashMap<UIntNative, HashMap<Int64, LLVMValueRef>> =
+        HashMap<UIntNative, HashMap<Int64, LLVMValueRef>>()
     public let genericParamsSizeBlockLevelCacheMap: HashMap<UIntNative, HashMap<UIntNative, LLVMValueRef>> =
         HashMap<UIntNative, HashMap<UIntNative, LLVMValueRef>>()
 
@@ -108,6 +110,7 @@ public class CGContext {
         callBasesToInline.clear()
         callBasesToReplace.clear()
         dependentPartialOrderOfTypes.clear()
+        genericParamsCacheMap.clear()
         genericParamsSizeBlockLevelCacheMap.clear()
         subCHIRPackage.Clear()
     }

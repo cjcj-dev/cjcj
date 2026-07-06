@@ -207,7 +207,8 @@ public class CGFunction <: CGValue {
     private let chirFunc: Value
     private let cgFunctionType: Option<CGFunctionType>
     private var wrapperF: LLVMValueRef = LLVMNullValue()
-    public let genericParamsMap: HashMap<String, (IRBuilder2) -> LLVMValueRef> = HashMap<String, (IRBuilder2) -> LLVMValueRef>()
+    public let genericParamsMap: HashMap<Int64, (IRBuilder2) -> LLVMValueRef> =
+        HashMap<Int64, (IRBuilder2) -> LLVMValueRef>()
 
     public init(function: LLVMValueRef, cgType: CGType, chirFunc: Value, cgMod: CGModule) {
         super(function, cgType)

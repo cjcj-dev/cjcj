@@ -55,6 +55,13 @@ public func GetClassObjLayoutName(className: String): String {
     return "ObjLayout." + className
 }
 
+public func IsExternalDefinedType(chirTy: Type): Bool {
+    if (!chirTy.IsNominal()) {
+        return true
+    }
+    return (chirTy as CustomType).getOrThrow().GetCustomTypeDef().TestAttr(Attribute.IMPORTED)
+}
+
 public func GetOrCreateNamedStructType(context: LLVMContextHandle, name: String): LLVMTypeRef {
     var result = LLVMNullType()
     try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {

@@ -260,6 +260,7 @@ foreign {
     func LLVMGetBasicBlockTerminator(block: LLVMBasicBlockRef): LLVMValueRef
     func LLVMGetNumSuccessors(term: LLVMValueRef): UInt32
     func LLVMGetSuccessor(term: LLVMValueRef, index: UInt32): LLVMBasicBlockRef
+    func LLVMSetSuccessor(term: LLVMValueRef, index: UInt32, block: LLVMBasicBlockRef): Unit
     func LLVMDeleteBasicBlock(block: LLVMBasicBlockRef): Unit
     func LLVMGetFirstInstruction(block: LLVMBasicBlockRef): LLVMValueRef
     func LLVMGetNextInstruction(inst: LLVMValueRef): LLVMValueRef

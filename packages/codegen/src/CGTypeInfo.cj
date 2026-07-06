@@ -1558,10 +1558,19 @@ private func IsCoreObjectClassDef(def: ClassDef): Bool {
 private func GenerateExtensionDefPtrOfTypeInfo(cgMod: CGModule, chirTy: Type,
     extensionDefPtrPtrType: LLVMTypeRef): LLVMValueRef {
     if (let Some(startIdx) <- cgMod.GetExtensionDefStart(chirTy)) {
-        let defs = cgMod.GetNonExternalExtensionDefs()
+        let defs = if (IsExternalDefinedType(chirTy)) {
+            cgMod.GetExternalExtensionDefs()
+        } else {
+            cgMod.GetNonExternalExtensionDefs()
+        }
         if (!defs.isEmpty()) {
             if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
-                try (nameCString = unsafe { LibC.mallocCString("NonExternalExtensionDefs") }.asResource()) {
+                let tableName = if (IsExternalDefinedType(chirTy)) {
+                    "ExternalExtensionDefs"
+                } else {
+                    "NonExternalExtensionDefs"
+                }
+                try (nameCString = unsafe { LibC.mallocCString(tableName) }.asResource()) {
                     let table = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
                     if (!table.isNull()) {
                         let arrayType = unsafe { LLVMGlobalGetValueType(table) }

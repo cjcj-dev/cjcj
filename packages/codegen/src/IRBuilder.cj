@@ -15,7 +15,6 @@ import cangjie_compiler::chir.Field
 import cangjie_compiler::chir.FloatLiteral
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.GetMethodIdxInAutoEnvObject
 import cangjie_compiler::chir.IntLiteral
 import cangjie_compiler::chir.LiteralValue
@@ -912,8 +911,20 @@ public class IRBuilder2 <: Resource {
         unsafe { LLVMPositionBuilderAtEnd(builder.raw, block) }
     }
 
+    public func SetInsertPoint(block: LLVMBasicBlockRef, insertPoint: LLVMValueRef): Unit {
+        RestoreInsertPoint(block, insertPoint)
+    }
+
     public func GetInsertBlock(): LLVMBasicBlockRef {
         return unsafe { LLVMGetInsertBlock(builder.raw) }
+    }
+
+    public func GetInsertFunction(): LLVMValueRef {
+        let block = GetInsertBlock()
+        if (block.isNull()) {
+            return LLVMNullValue()
+        }
+        return unsafe { LLVMGetBasicBlockParent(block) }
     }
 
     public func SetInsertPointBefore(inst: LLVMValueRef): Unit {
@@ -3254,6 +3265,24 @@ public class IRBuilder2 <: Resource {
         return CreateIntrinsicCallNoInvoke("llvm.cj.is.subtype", ArrayList<LLVMTypeRef>(), args, name: "is.subtype")
     }
 
+    public func CallIntrinsicIsSubtype(parameters: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(parameters.size == 2)
+        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreateBitCast(parameters[0], i8PtrType))
+        args.add(CreateBitCast(parameters[1], i8PtrType))
+        return CreateIntrinsicCallNoInvoke("llvm.cj.is.subtype", ArrayList<LLVMTypeRef>(), args)
+    }
+
+    public func CallIntrinsicIsTypeEqualTo(parameters: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(parameters.size == 2)
+        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreateBitCast(parameters[0], i8PtrType))
+        args.add(CreateBitCast(parameters[1], i8PtrType))
+        return CreateIntrinsicCallNoInvoke("llvm.cj.is.typeinfo.equal", ArrayList<LLVMTypeRef>(), args)
+    }
+
     public func CallIntrinsicGetVTableFunc(ti: LLVMValueRef, introTypeIdx: LLVMValueRef,
         funcOffset: LLVMValueRef, introTI: LLVMValueRef): LLVMValueRef {
         let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
@@ -3605,36 +3634,91 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateTypeInfo(chirTy: Type): LLVMValueRef {
-        let baseTy = chirTy.StripAllRefs()
-        if (let Some(currentFunction) <- cgFunction) {
-            if (let Some(typeInfoProvider) <- FindGenericTypeInfoProvider(currentFunction, baseTy)) {
-                return typeInfoProvider(this)
-            }
+        let typeInfoProviders = if (let Some(currentFunction) <- cgFunction) {
+            currentFunction.genericParamsMap
+        } else {
+            HashMap<Int64, (IRBuilder2) -> LLVMValueRef>()
         }
-        if (baseTy.IsGeneric()) {
-            throw IllegalStateException("missing runtime TypeInfo mapping for generic type: " + baseTy.ToString())
-        }
-        let cgTy = CGType.GetOrCreate(cgMod, baseTy)
-        if (cgTy.IsConcrete() || cgTy.IsStaticGI()) {
-            return cgTy.GetOrCreateTypeInfo()
-        }
-        return CreateGenericRuntimeTypeInfo(baseTy)
+        return CreateTypeInfo(chirTy, typeInfoProviders)
     }
 
-    private func FindGenericTypeInfoProvider(currentFunction: CGFunction,
-        baseTy: Type): Option<(IRBuilder2) -> LLVMValueRef> {
-        if (let Some(typeInfoProvider) <- currentFunction.genericParamsMap.get(baseTy.ToString())) {
-            return Some(typeInfoProvider)
-        }
-        if (let Some(genericTy) <- (baseTy as GenericType)) {
-            if (let Some(typeInfoProvider) <- currentFunction.genericParamsMap.get(genericTy.GetIdentifier())) {
-                return Some(typeInfoProvider)
+    public func CreateTypeInfo(chirTy: Type, typeInfoProviders: HashMap<Int64, (IRBuilder2) -> LLVMValueRef>,
+        canChangeBB!: Bool = true): LLVMValueRef {
+        let baseTy = chirTy.StripAllRefs()
+        if (baseTy.IsThis()) {
+            let currentFunction = cgFunction ?? throw IllegalStateException("ThisType requires current CGFunction")
+            let cgFuncType = currentFunction.GetCGFunctionType() ??
+                throw IllegalStateException("ThisType requires CGFunctionType")
+            if (cgFuncType.IsStaticMethodType()) {
+                let thisTypeInfoIndex = cgFuncType.GetStaticMethodTypeInfoIndex() ??
+                    throw IllegalStateException("static method ThisType has no TypeInfo parameter")
+                return unsafe { LLVMGetParam(currentFunction.GetRawFunction(), UInt32(thisTypeInfoIndex)) }
             }
-            if (let Some(typeInfoProvider) <- currentFunction.genericParamsMap.get(genericTy.GetSrcCodeIdentifier())) {
-                return Some(typeInfoProvider)
+            if (!cgFuncType.IsMethodType()) {
+                throw IllegalStateException("ThisType is used outside a method")
+            }
+            let thisArgIndex: UInt32 = if (currentFunction.IsSRet()) { 1u32 } else { 0u32 }
+            return GetTypeInfoFromObject(unsafe { LLVMGetParam(currentFunction.GetRawFunction(), thisArgIndex) })
+        }
+
+        let insertFunction = GetInsertFunction()
+        let functionKey = insertFunction.toUIntNative()
+        let cacheMaps = GetCGContext().genericParamsCacheMap
+        if (!cacheMaps.contains(functionKey)) {
+            cacheMaps[functionKey] = HashMap<Int64, LLVMValueRef>()
+        }
+        let cacheMap = cacheMaps[functionKey]
+        if (let Some(cached) <- cacheMap.get(baseTy.objectId)) {
+            return cached
+        }
+
+        var result = LLVMNullValue()
+        try (debugLocGuard = TemporarilySetDebugLocInThisScope(this, LLVMNullMetadata())) {
+            if (let Some(typeInfoProvider) <- typeInfoProviders.get(baseTy.objectId)) {
+                let currentBlock = GetInsertBlock()
+                let currentInsertPoint = unsafe { LLVMSelfhostGetInsertPointInstruction(builder.raw) }
+                if (canChangeBB) {
+                    SetInsertPointForPreparingTypeInfo()
+                }
+                result = typeInfoProvider(this)
+                RestoreInsertPoint(currentBlock, currentInsertPoint)
+            } else if (baseTy.IsGeneric()) {
+                throw IllegalStateException("missing runtime TypeInfo mapping for generic type: " + baseTy.ToString())
+            } else {
+                let cgTy = CGType.GetOrCreate(cgMod, baseTy)
+                if (cgTy.IsConcrete() || cgTy.IsStaticGI()) {
+                    result = cgTy.GetOrCreateTypeInfo()
+                } else {
+                    let (typeTemplate, typeArgs) = IRBuilderRuntimeTypeTemplateAndArgs(baseTy)
+                    if (typeArgs.isEmpty()) {
+                        throw IllegalStateException("missing runtime TypeInfo arguments for generic-related type: " +
+                            baseTy.ToString())
+                    }
+                    let currentBlock = GetInsertBlock()
+                    let currentInsertPoint = unsafe { LLVMSelfhostGetInsertPointInstruction(builder.raw) }
+                    if (canChangeBB) {
+                        SetInsertPointForPreparingTypeInfo()
+                    }
+                    let typeInfoArray = CreateTypeInfoArray(typeArgs, typeInfoProviders)
+                    let args = ArrayList<LLVMValueRef>()
+                    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+                    args.add(CreateBitCast(typeTemplate, i8PtrType, name: "ti.template"))
+                    args.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(typeArgs.size), 0) })
+                    args.add(typeInfoArray)
+                    result = CallGetTypeInfoIntrinsic(args)
+                    RestoreInsertPoint(currentBlock, currentInsertPoint)
+                }
             }
         }
-        return None
+
+        let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
+        let typeInfoPtrPtrType = unsafe { LLVMPointerType(typeInfoPtrType, 0u32) }
+        if (!result.isNull() && !unsafe { LLVMIsAGlobalVariable(result) }.isNull() &&
+            unsafe { LLVMTypeOf(result) }.toUIntNative() == typeInfoPtrPtrType.toUIntNative()) {
+            result = CreateLoad(typeInfoPtrType, result)
+        }
+        cacheMap[baseTy.objectId] = result
+        return result
     }
 
     public func GetTypeArgsFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {
@@ -3710,21 +3794,6 @@ public class IRBuilder2 <: Resource {
         let metadata = LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>())
         LLVMSetInstructionMetadata(GetLLVMContext(), typeInfo, "invariant.load", metadata)
         return typeInfo
-    }
-
-    private func CreateGenericRuntimeTypeInfo(chirTy: Type): LLVMValueRef {
-        let (typeTemplate, typeArgs) = IRBuilderRuntimeTypeTemplateAndArgs(chirTy)
-        if (typeArgs.isEmpty()) {
-            throw IllegalStateException("missing runtime TypeInfo arguments for generic-related type: " +
-                chirTy.ToString())
-        }
-        let typeInfoArray = CreateTypeInfoArray(typeArgs)
-        let args = ArrayList<LLVMValueRef>()
-        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
-        args.add(CreateBitCast(typeTemplate, i8PtrType, name: "ti.template"))
-        args.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(typeArgs.size), 0) })
-        args.add(typeInfoArray)
-        return CallGetTypeInfoIntrinsic(args)
     }
 
     private func IRBuilderRuntimeTypeTemplateAndArgs(chirTy: Type): (LLVMValueRef, ArrayList<Type>) {
@@ -3813,28 +3882,65 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateTypeInfoArray(typeArgs: ArrayList<Type>): LLVMValueRef {
+        let typeInfoProviders = if (let Some(currentFunction) <- cgFunction) {
+            currentFunction.genericParamsMap
+        } else {
+            HashMap<Int64, (IRBuilder2) -> LLVMValueRef>()
+        }
+        return CreateTypeInfoArray(typeArgs, typeInfoProviders)
+    }
+
+    public func CreateTypeInfoArray(typeArgs: ArrayList<Type>,
+        typeInfoProviders: HashMap<Int64, (IRBuilder2) -> LLVMValueRef>): LLVMValueRef {
         let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
         let arrayType = unsafe { LLVMArrayType(typeInfoPtrType, UInt32(typeArgs.size)) }
         let slot = CreateEntryAlloca(arrayType, name: "ti.args")
+        let storeInst = CreateStore(unsafe { LLVMConstNull(arrayType) }, slot)
+        let typeInfoElements = ArrayList<LLVMValueRef>()
+        var hasStaticTypeInfo = false
         let i32Type = unsafe { LLVMInt32TypeInContext(GetLLVMContext().raw) }
         var idx: Int64 = 0
         while (idx < typeArgs.size) {
-            let indices = ArrayList<LLVMValueRef>()
-            indices.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
-            indices.add(unsafe { LLVMConstInt(i32Type, UInt64(idx), 0) })
-            let argSlot = CreateGEP(arrayType, slot, indices, name: "ti.arg")
             let argTy = typeArgs[idx].StripAllRefs()
             let argCGType = CGType.GetOrCreate(cgMod, argTy)
-            let rawTypeInfo = if (argCGType.IsDynamicGI()) {
-                CreateTypeInfo(argTy)
+            if (argCGType.IsDynamicGI()) {
+                typeInfoElements.add(unsafe { LLVMConstNull(typeInfoPtrType) })
+                let rawTypeInfo = CreateTypeInfo(argTy, typeInfoProviders)
+                let argTypeInfo = CreateBitCast(rawTypeInfo, typeInfoPtrType, name: "ti.arg.cast")
+                let indices = ArrayList<LLVMValueRef>()
+                indices.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
+                indices.add(unsafe { LLVMConstInt(i32Type, UInt64(idx), 0) })
+                let argSlot = CreateInBoundsGEP(arrayType, slot, indices, name: "ti.arg")
+                CreateStore(argTypeInfo, argSlot)
             } else {
-                argCGType.GetOrCreateTypeInfo()
+                typeInfoElements.add(unsafe {
+                    LLVMConstBitCast(argCGType.GetOrCreateTypeInfo(), typeInfoPtrType)
+                })
+                hasStaticTypeInfo = true
             }
-            let argTypeInfo = CreatePointerCast(rawTypeInfo, typeInfoPtrType, name: "ti.arg.cast")
-            CreateStore(argTypeInfo, argSlot)
             idx++
         }
-        return CreateBitCast(slot, unsafe { LLVMPointerType(typeInfoPtrType, 0u32) }, name: "ti.args.raw")
+        var realConstantArray = LLVMNullValue()
+        if (typeInfoElements.isEmpty()) {
+            realConstantArray = unsafe { LLVMConstArray(typeInfoPtrType, CPointer<LLVMValueRef>(), 0u32) }
+        } else {
+            try (valuePtr = LibC.malloc<LLVMValueRef>(count: typeInfoElements.size).asResource()) {
+                var elementIdx: Int64 = 0
+                while (elementIdx < typeInfoElements.size) {
+                    unsafe { (valuePtr.value + elementIdx).write(typeInfoElements[elementIdx]) }
+                    elementIdx++
+                }
+                realConstantArray = unsafe {
+                    LLVMConstArray(typeInfoPtrType, valuePtr.value, UInt32(typeInfoElements.size))
+                }
+            }
+        }
+        if (!hasStaticTypeInfo) {
+            unsafe { LLVMInstructionEraseFromParent(storeInst) }
+        } else {
+            unsafe { LLVMSetOperand(storeInst, 0u32, realConstantArray) }
+        }
+        return slot
     }
 
     public func CreateTypeInfoIsReferenceCall(chirTy: Type): LLVMValueRef {
@@ -4061,6 +4167,9 @@ public class IRBuilder2 <: Resource {
         }
         let created = CreateEntryBasicBlock(parentFunction, "prepTi")
         unsafe { LLVMMoveBasicBlockAfter(created, allocasBlock) }
+        let terminator = unsafe { LLVMGetBasicBlockTerminator(allocasBlock) }
+        CJC_ASSERT(!terminator.isNull())
+        unsafe { LLVMSetSuccessor(terminator, 0u32, created) }
         SetInsertPoint(created)
         if (!oldEntry.isNull()) {
             CreateBr(oldEntry)

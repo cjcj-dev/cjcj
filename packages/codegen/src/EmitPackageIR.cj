@@ -210,6 +210,12 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
             }
 
             let thisCHIRType = DeRef(item.thisParamType)
+            let typeInfoCacheMap = cgMod.GetCGContext().genericParamsCacheMap
+            let insertFunctionKey = irBuilder.GetInsertFunction().toUIntNative()
+            if (!typeInfoCacheMap.contains(insertFunctionKey)) {
+                typeInfoCacheMap[insertFunctionKey] = HashMap<Int64, LLVMValueRef>()
+            }
+            typeInfoCacheMap[insertFunctionKey].clear()
             let blockKey = irBuilder.GetInsertBlock().toUIntNative()
             let sizeCacheMap = cgMod.GetCGContext().genericParamsSizeBlockLevelCacheMap
             if (!sizeCacheMap.contains(blockKey)) {

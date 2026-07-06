@@ -85,7 +85,7 @@ public class CGFunctionType <: CGType {
     public func GetGenericParamIndex(genericTy: Type): Option<Int64> {
         Complete()
         for (item in genericParamIndicesMap) {
-            if (genericTy.IsEqual(item.chirGenericTy)) {
+            if (genericTy.objectId == item.chirGenericTy.objectId) {
                 return Some(item.llvmParamIndex)
             }
         }
