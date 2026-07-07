@@ -67,7 +67,20 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
     }
     if (sourceCGType.GetSize().isSome()) {
         let objectValue = irBuilder.CallValueIntrinsicAlloc(sourceTy)
-        irBuilder.StoreValueToObjectPayload(objectValue, sourceRawValue, sourceTy)
+        let payloadPtr = irBuilder.GetPayloadFromObject(objectValue)
+        let payloadElementType = if (sourceTy.IsRef()) {
+            sourceCGType.GetPointerElementType().getOrThrow().GetLLVMType()
+        } else {
+            sourceCGType.GetLLVMType()
+        }
+        let addr = irBuilder.CreateBitCast(payloadPtr, unsafe { LLVMPointerType(payloadElementType, 1u32) })
+        let addrTy = if (sourceTy.IsRef()) {
+            sourceTy
+        } else {
+            irBuilder.GetCGContext().GetCHIRBuilder().context.GetRefTy(sourceTy)
+        }
+        let addrCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), addrTy, extraInfo: TypeExtraInfo(1u32))
+        irBuilder.CreateStore(sourceCGValue, CGValue(addr, addrCGType))
         return objectValue
     }
     return sourceRawValue

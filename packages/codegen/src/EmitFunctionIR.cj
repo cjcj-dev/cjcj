@@ -17,6 +17,9 @@ private class FunctionGeneratorImpl <: IRGeneratorImpl {
         cgFunction = cgFunc
         if (let Some(body) <- chirFunc.GetBody()) {
             cgMod.MapFunctionParameters(chirFunc, cgFunc)
+            if (!ShouldReturnVoid(chirFunc)) {
+                SetSRetAttrForStructReturnType(chirFunc.GetFuncType().getOrThrow(), cgFunc.GetRawFunction())
+            }
             if (let Some(entryBlock) <- body.GetEntryBlock()) {
                 EmitBasicBlockIR(cgMod, entryBlock)
             }

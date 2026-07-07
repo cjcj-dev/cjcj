@@ -1,6 +1,7 @@
 package cangjie_compiler::codegen
 
 import cangjie_compiler::chir.FuncKind
+import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
 
 private let LLVM_INTEGER_TYPE_KIND: Int32 = 8
@@ -354,4 +355,21 @@ public func ShouldReturnVoid(fn: Function): Bool {
     return kind == FuncKind.CLASS_CONSTRUCTOR || kind == FuncKind.PRIMAL_CLASS_CONSTRUCTOR ||
         kind == FuncKind.STRUCT_CONSTRUCTOR || kind == FuncKind.PRIMAL_STRUCT_CONSTRUCTOR ||
         kind == FuncKind.GLOBALVAR_INIT || kind == FuncKind.FINALIZER
+}
+
+public func SetSRetAttrForStructReturnType(chirFuncTy: FuncType, llvmFunc: LLVMValueRef): Unit {
+    var shouldSetSRet = false
+    if (chirFuncTy.IsCFunc()) {
+        shouldSetSRet = HasAttributeAtIndex(llvmFunc, 1u32, "sret")
+    } else {
+        let llvmFuncTy = unsafe { LLVMGlobalGetValueType(llvmFunc) }
+        let llvmRetTy = unsafe { LLVMGetReturnType(llvmFuncTy) }
+        shouldSetSRet = !llvmRetTy.isNull() && unsafe { LLVMGetTypeKind(llvmRetTy) } == 0
+    }
+
+    if (unsafe { LLVMCountParams(llvmFunc) } > 0u32 && shouldSetSRet) {
+        let sretArgType = GetPointerElementType(unsafe { LLVMTypeOf(LLVMGetParam(llvmFunc, 0u32)) })
+        AddNoAliasAttribute(llvmFunc)
+        AddSRetAttribute(llvmFunc, sretArgType)
+    }
 }

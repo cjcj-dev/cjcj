@@ -38,7 +38,7 @@ private func TryGetSpecialRetValueStorage(irBuilder: IRBuilder2, allocateExpr: A
     }
 
     let llvmFunc = irBuilder.GetCGModule().GetOrInsertCGFunction(parentFunc).GetRawFunction()
-    if (HasAttributeAtIndex(llvmFunc, 1u32, "sret")) {
+    if (unsafe { LLVMSelfhostFunctionHasStructRetAttr(llvmFunc) } != 0) {
         return Some(unsafe { LLVMGetParam(llvmFunc, 0u32) })
     }
 

@@ -686,6 +686,9 @@ private func TryStoreStructPtrValueForAddress(irBuilder: IRBuilder2, value: CGVa
         return Some(irBuilder.CallGCWriteStruct(addr.GetRawValue(), addr.GetRawValue(), source, fieldSizeValue,
             destCGType.GetOriginal().ToString()))
     }
+    if (fieldSize == 0) {
+        return Some(LLVMNullValue())
+    }
     return Some(irBuilder.CreateMemCpy(addr.GetRawValue(), align, source, align, fieldSizeValue))
 }
 

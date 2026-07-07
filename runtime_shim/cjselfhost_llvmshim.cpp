@@ -217,6 +217,11 @@ extern "C" int LLVMSelfhostCallBaseHasStructRetAttr(LLVMValueRef Call)
     return unwrap<CallBase>(Call)->hasStructRetAttr() ? 1 : 0;
 }
 
+extern "C" int LLVMSelfhostFunctionHasStructRetAttr(LLVMValueRef Fn)
+{
+    return unwrap<Function>(Fn)->hasStructRetAttr() ? 1 : 0;
+}
+
 extern "C" unsigned LLVMSelfhostCallBaseArgSize(LLVMValueRef Call)
 {
     return unwrap<CallBase>(Call)->arg_size();

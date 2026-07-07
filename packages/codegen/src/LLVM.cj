@@ -287,6 +287,7 @@ foreign {
     func LLVMSelfhostIsInvokeInst(inst: LLVMValueRef): Int32
     func LLVMSelfhostIsConstant(value: LLVMValueRef): Int32
     func LLVMSelfhostCallBaseHasStructRetAttr(callBase: LLVMValueRef): Int32
+    func LLVMSelfhostFunctionHasStructRetAttr(fn: LLVMValueRef): Int32
     func LLVMSelfhostCallBaseArgSize(callBase: LLVMValueRef): UInt32
     func LLVMSelfhostCallBaseGetArgOperand(callBase: LLVMValueRef, index: UInt32): LLVMValueRef
     func LLVMSelfhostCallBaseGetStructRetAttr(callBase: LLVMValueRef): LLVMAttributeRef
