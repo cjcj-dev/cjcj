@@ -2,7 +2,9 @@ package cangjie_compiler::sema.LegalityOfUsage
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cangjie_compiler::basic.MakeRange as BasicMakeRange
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::sema.*
 
@@ -415,6 +417,174 @@ public func CheckSubscriptLegality(root: Node): ArrayList<SubscriptLegalityIssue
     return out
 }
 
+// Generate type mapping for src is an override or implement of target.
+// C++ truth: TypeCheckUtil.cpp:267 GenerateTypeMappingBetweenFuncs.
+private func GenerateTypeMappingBetweenFuncs(typeManager: TypeManager, src: FuncDecl, target: FuncDecl): MultiTypeSubst {
+    var typeMapping = MultiTypeSubst()
+    if (let Some(outer) <- src.outerDecl) {
+        if (Ty.IsTyCorrect(outer.GetTy())) {
+            typeMapping = typeManager.GenerateStructDeclTypeMapping(outer)
+        }
+    }
+    if (target.TestAttr(Attribute.GENERIC) && src.TestAttr(Attribute.GENERIC)) {
+        MergeTypeSubstToMultiTypeSubst(typeMapping, typeManager.GenerateGenericMappingFromGeneric(target, src))
+    }
+    return typeMapping
+}
+
+// C++ truth: TypeChecker.cpp:1905 TypeChecker::TypeCheckerImpl::GetImplementedTargetIfExist.
+private func GetImplementedTargetIfExist(ctx: ASTContext, typeManager: TypeManager, interfaceTy: Ty, target: Decl,
+    typeMapping: MultiTypeSubst): Option<Decl> {
+    let _ = ctx
+    let targetTy = target.GetTy() ?? TypeManager.GetInvalidTy()
+    let targetInstanceTy = typeManager.GetBestInstantiatedTy(targetTy, typeMapping)
+    let interfaceDecl = Ty.GetDeclPtrOfTy(Some(interfaceTy))
+    let members = FieldLookup(typeManager, interfaceDecl, target.identifier.Val())
+    for (member in members) {
+        var isSameSignature = false
+        if (member.IsFunc() && target.IsFunc()) {
+            if (!typeManager.PairIsOverrideOrImpl(member, target)) {
+                continue
+            }
+            if (let Some(memberFuncTy) <- ((member.GetTy() ?? TypeManager.GetInvalidTy()) as FuncTy)) {
+                if (let Some(targetFuncTy) <- (targetInstanceTy as FuncTy)) {
+                    let mts = typeMapping.Clone()
+                    let memberFuncDecl = (member as FuncDecl).getOrThrow()
+                    let targetFuncDecl = (target as FuncDecl).getOrThrow()
+                    let ts = GenerateTypeMappingBetweenFuncs(typeManager, memberFuncDecl, targetFuncDecl)
+                    MergeMultiTypeSubsts(mts, ts)
+                    let memberParamTys = ArrayList<Ty>()
+                    let targetParamTys = ArrayList<Ty>()
+                    for (memberParamTy in memberFuncTy.paramTys) {
+                        memberParamTys.add(typeManager.GetBestInstantiatedTy(memberParamTy, mts))
+                    }
+                    for (targetParamTy in targetFuncTy.paramTys) {
+                        targetParamTys.add(typeManager.GetBestInstantiatedTy(targetParamTy, mts))
+                    }
+                    isSameSignature = typeManager.IsFuncParameterTypesIdentical(memberParamTys, targetParamTys)
+                }
+            }
+        } else if (member.astKind == ASTKind.PROP_DECL && target.astKind == ASTKind.PROP_DECL) {
+            if (!typeManager.PairIsOverrideOrImpl(member, target)) {
+                continue
+            }
+            if (let Some(memberTy) <- member.GetTy()) {
+                isSameSignature = memberTy.objectId == targetInstanceTy.objectId
+            }
+        }
+        if (isSameSignature && !member.TestAttr(Attribute.ABSTRACT)) {
+            return member
+        }
+    }
+    return None
+}
+
+// C++ truth: TypeChecker.cpp:1958 TypeChecker::TypeCheckerImpl::CheckInvokeTargetHasImpl.
+private func CheckInvokeTargetHasImpl(ctx: ASTContext, typeManager: TypeManager, promotion: Promotion, interfaceTy: Ty,
+    decl: Decl, typeMapping: MultiTypeSubst, traversedDecls: ArrayList<Decl>): (Bool, Option<RefExpr>) {
+    let ret = ArrayList<(Bool, Option<RefExpr>)>()
+    ret.add((false, None))
+    let walker = Walker(decl, visitPre: { node: Node =>
+        if (node.astKind != ASTKind.REF_EXPR) {
+            return VisitAction.WALK_CHILDREN
+        }
+        let refExpr = (node as RefExpr).getOrThrow()
+        if (let Some(target) <- refExpr.GetTarget()) {
+            if (target.TestAttr(Attribute.STATIC)) {
+                if (let Some(outerDecl) <- target.outerDecl) {
+                    if (!outerDecl.IsFunc()) {
+                        if (ContainsDecl(traversedDecls, target)) {
+                            return VisitAction.SKIP_CHILDREN
+                        }
+                        traversedDecls.add(target)
+                        if (let Some(parentTy) <- refExpr.matchedParentTy) {
+                            if (let Some(outerTy) <- outerDecl.GetTy()) {
+                                MergeMultiTypeSubsts(typeMapping, promotion.GetPromoteTypeMapping(parentTy, outerTy))
+                            }
+                        }
+                        if (let Some(newTarget) <- GetImplementedTargetIfExist(ctx, typeManager, interfaceTy, target,
+                            typeMapping)) {
+                            ret[0] = CheckInvokeTargetHasImpl(ctx, typeManager, promotion, interfaceTy, newTarget,
+                                typeMapping, traversedDecls)
+                            if (ret[0][0]) {
+                                return VisitAction.STOP_NOW
+                            }
+                        } else {
+                            ret[0] = (true, Some(refExpr))
+                            return VisitAction.STOP_NOW
+                        }
+                    }
+                }
+            }
+        }
+        return VisitAction.WALK_CHILDREN
+    })
+    walker.Walk()
+    return ret[0]
+}
+
+// C++ truth: LegalityOfUsage.cpp:297 TypeChecker::TypeCheckerImpl::CheckAllInvocationHasImpl.
+private func CheckAllInvocationHasImpl(ctx: ASTContext, root: Node, diag: BasicDiagnosticEngine,
+    typeManager: TypeManager): Unit {
+    let _ = ctx
+    let promotion = Promotion(typeManager)
+    let walker = Walker(root, visitPre: { node: Node =>
+        if (node.astKind != ASTKind.MEMBER_ACCESS) {
+            return VisitAction.WALK_CHILDREN
+        }
+        let memberAccess = (node as MemberAccess).getOrThrow()
+        if (let None <- memberAccess.GetTarget()) {
+            return VisitAction.WALK_CHILDREN
+        }
+        let target = memberAccess.GetTarget().getOrThrow()
+        if (let None <- memberAccess.baseExpr) {
+            return VisitAction.WALK_CHILDREN
+        }
+        let baseExpr = memberAccess.baseExpr.getOrThrow()
+        if (let None <- baseExpr.GetTy()) {
+            return VisitAction.WALK_CHILDREN
+        }
+        let baseTy = baseExpr.GetTy().getOrThrow()
+        let isInterfaceAccess = baseTy.IsInterface()
+        let isStaticFuncOrProp = target.TestAttr(Attribute.STATIC) && target.IsFuncOrProp() &&
+            target.outerDecl.isSome()
+        if (isInterfaceAccess && isStaticFuncOrProp) {
+            let traversedDecls = ArrayList<Decl>()
+            let typeMapping = MultiTypeSubst()
+            if (let Some(parentTy) <- memberAccess.matchedParentTy) {
+                if (let Some(outerDecl) <- target.outerDecl) {
+                    if (let Some(outerTy) <- outerDecl.GetTy()) {
+                        MergeMultiTypeSubsts(typeMapping, promotion.GetPromoteTypeMapping(parentTy, outerTy))
+                    }
+                }
+            }
+            if (let Some(baseDecl) <- Ty.GetDeclPtrOfTy(Some(baseTy))) {
+                if (let Some(baseDeclTy) <- baseDecl.GetTy()) {
+                    MergeMultiTypeSubsts(typeMapping, promotion.GetPromoteTypeMapping(baseTy, baseDeclTy))
+                }
+            }
+            let ret = CheckInvokeTargetHasImpl(ctx, typeManager, promotion, baseTy, target, typeMapping, traversedDecls)
+            if (ret[0]) {
+                if (let Some(refExpr) <- ret[1]) {
+                    let retTarget = refExpr.GetTarget().getOrThrow()
+                    let strType = if (retTarget.IsFunc()) { "function" } else { "property" }
+                    let strNote = "indirect use of unimplemented " + strType + " reference here"
+                    let builder = diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.sema_interface_call_with_unimplemented_call,
+                        BasicMakeRange(memberAccess.begin, memberAccess.end),
+                        strType,
+                        retTarget.identifier.Val())
+                    builder.AddNote(BasicMakeRange(refExpr.begin, refExpr.end), strNote)
+                    builder.Emit()
+                    return VisitAction.SKIP_CHILDREN
+                }
+            }
+        }
+        return VisitAction.WALK_CHILDREN
+    })
+    walker.Walk()
+}
+
 public func CheckLegalityOfUsage(
     ctx: ASTContext,
     pkg: Package,
@@ -429,6 +599,7 @@ public func CheckLegalityOfUsage(
     AppendInitializationIssues(result.initializationIssues, CheckInitialization(ctx, pkg, opts: opts))
     AppendGlobalIssues(result.globalVarInitializationIssues, CheckGlobalVarInitialization(pkg))
     AppendAccessIssues(result.accessLevelViolations, CheckAccessLevelValidity(pkg))
+    CheckAllInvocationHasImpl(ctx, pkg, diag, typeManager)
     AppendSubscriptIssues(result.subscriptLegalityIssues, CheckSubscriptLegality(pkg))
     return result
 }
