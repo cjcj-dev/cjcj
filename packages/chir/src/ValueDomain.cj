@@ -180,48 +180,51 @@ extend ValueDomainKind <: Equatable<ValueDomainKind> {
     }
 }
 
-public class ValueDomain {
-    private var kind: ValueDomainKind
+public class ValueDomain<AV> <: AbstractDomain<ValueDomain<AV>> where AV <: ConstValue {
+    private var valueKind: ValueDomainKind
     private var ref: Option<Ref> = None
-    private var absVal: Option<AbstractObject> = None
+    private var absVal: Option<AV> = None
 
     public init(isTop: Bool) {
-        kind = if (isTop) { ValueDomainKind.TOP } else { ValueDomainKind.BOTTOM }
+        super()
+        valueKind = if (isTop) { ValueDomainKind.TOP } else { ValueDomainKind.BOTTOM }
     }
 
     public init(ref: Ref) {
-        kind = ValueDomainKind.REF
+        super()
+        valueKind = ValueDomainKind.REF
         this.ref = ref
     }
 
-    public init(value: AbstractObject) {
-        kind = ValueDomainKind.VAL
+    public init(value: AV) {
+        super()
+        valueKind = ValueDomainKind.VAL
         absVal = value
     }
 
-    public func Clone(): ValueDomain {
-        if (kind == ValueDomainKind.REF) {
+    public override func Clone(): ValueDomain<AV> {
+        if (valueKind == ValueDomainKind.REF) {
             if (let Some(refValue) <- ref) {
-                return ValueDomain(refValue)
+                return ValueDomain<AV>(refValue)
             }
         }
-        if (kind == ValueDomainKind.VAL) {
-            if (let Some(obj) <- absVal) {
-                return ValueDomain(obj.CloneObject())
+        if (valueKind == ValueDomainKind.VAL) {
+            if (let Some(value) <- absVal) {
+                return ValueDomain<AV>(CloneAbsVal(value))
             }
         }
-        return ValueDomain(kind == ValueDomainKind.TOP)
+        return ValueDomain<AV>(valueKind == ValueDomainKind.TOP)
     }
 
-    public func GetKind(): ValueDomainKind { return kind }
-    public func IsTop(): Bool { return kind == ValueDomainKind.TOP }
-    public func IsBottom(): Bool { return kind == ValueDomainKind.BOTTOM }
-    public func IsRef(): Bool { return kind == ValueDomainKind.REF }
-    public func IsVal(): Bool { return kind == ValueDomainKind.VAL }
+    public func GetKind(): ValueDomainKind { return valueKind }
+    public func IsTop(): Bool { return valueKind == ValueDomainKind.TOP }
+    public override func IsBottom(): Bool { return valueKind == ValueDomainKind.BOTTOM }
+    public func IsRef(): Bool { return valueKind == ValueDomainKind.REF }
+    public func IsVal(): Bool { return valueKind == ValueDomainKind.VAL }
     public func GetRef(): Option<Ref> { return ref }
-    public func GetAbstractValue(): Option<AbstractObject> { return absVal }
+    public func CheckAbsVal(): Option<AV> { return absVal }
 
-    public func Join(rhs: ValueDomain): Bool {
+    public override func Join(rhs: ValueDomain<AV>): Bool {
         if (IsTop() || rhs.IsBottom()) {
             return false
         }
@@ -243,25 +246,27 @@ public class ValueDomain {
         return false
     }
 
+    public func SetRef(ref: Ref): Unit {
+        CJC_ASSERT(valueKind != ValueDomainKind.VAL)
+        if (valueKind != ValueDomainKind.REF) {
+            valueKind = ValueDomainKind.REF
+        }
+        this.ref = ref
+    }
+
     public func SetSelfToBound(isTop: Bool): Unit {
-        kind = if (isTop) { ValueDomainKind.TOP } else { ValueDomainKind.BOTTOM }
+        valueKind = if (isTop) { ValueDomainKind.TOP } else { ValueDomainKind.BOTTOM }
         ref = None
         absVal = None
     }
 
     public func SetSelfToTopRef(): Unit {
-        CJC_ASSERT(kind == ValueDomainKind.REF)
+        CJC_ASSERT(valueKind == ValueDomainKind.REF)
         ref = Ref.GetTopRefInstance()
     }
 
-    public func SetSelfToTopObj(): Unit {
-        kind = ValueDomainKind.VAL
-        ref = None
-        absVal = AbstractObject.GetTopObjInstance()
-    }
-
-    public func ToString(): String {
-        return match (kind) {
+    public override func ToString(): String {
+        return match (valueKind) {
             case ValueDomainKind.BOTTOM => "Bottom"
             case ValueDomainKind.TOP => "TOP"
             case ValueDomainKind.REF => if (let Some(refValue) <- ref) {
@@ -270,8 +275,8 @@ public class ValueDomain {
                 CJC_ABORT()
                 ""
             }
-            case ValueDomainKind.VAL => if (let Some(obj) <- absVal) {
-                obj.ToString(0)
+            case ValueDomainKind.VAL => if (let Some(value) <- absVal) {
+                value.ToString()
             } else {
                 CJC_ABORT()
                 ""
@@ -279,17 +284,17 @@ public class ValueDomain {
         }
     }
 
-    private func CopyFrom(rhs: ValueDomain): Unit {
-        kind = rhs.kind
+    private func CopyFrom(rhs: ValueDomain<AV>): Unit {
+        valueKind = rhs.valueKind
         ref = rhs.ref
-        if (let Some(obj) <- rhs.absVal) {
-            absVal = obj.CloneObject()
+        if (let Some(value) <- rhs.absVal) {
+            absVal = CloneAbsVal(value)
         } else {
             absVal = None
         }
     }
 
-    private func JoinRef(rhs: ValueDomain): Bool {
+    private func JoinRef(rhs: ValueDomain<AV>): Bool {
         if (let Some(leftRef) <- ref) {
             if (leftRef.IsTopRefInstance()) {
                 return false
@@ -312,25 +317,31 @@ public class ValueDomain {
         return false
     }
 
-    private func JoinValue(rhs: ValueDomain): Bool {
-        if (let Some(leftObj) <- absVal) {
-            if (leftObj.IsTopObjInstance()) {
-                return false
-            }
-            if (let Some(rightObj) <- rhs.absVal) {
-                if (rightObj.IsTopObjInstance()) {
-                    SetSelfToTopObj()
+    private func JoinValue(rhs: ValueDomain<AV>): Bool {
+        if (let Some(leftVal) <- absVal) {
+            if (let Some(rightVal) <- rhs.absVal) {
+                let res = leftVal.Join(rightVal)
+                if (let Some(newVal) <- res) {
+                    if (let Some(value) <- newVal) {
+                        absVal = CastAbsVal(value)
+                    } else {
+                        SetSelfToBound(true)
+                    }
                     return true
                 }
-                if (leftObj.GetIdentifier() == rightObj.GetIdentifier()) {
-                    return false
-                }
-                SetSelfToTopObj()
-                return true
+                return false
             }
         }
-        SetSelfToTopObj()
+        SetSelfToBound(true)
         return true
+    }
+
+    private func CloneAbsVal(value: AV): AV {
+        return CastAbsVal(value.Clone())
+    }
+
+    private func CastAbsVal(value: ConstValue): AV {
+        return (value as AV).getOrThrow()
     }
 }
 
