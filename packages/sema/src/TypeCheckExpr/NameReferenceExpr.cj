@@ -784,7 +784,9 @@ private func SynMemberAccess(typeManager: TypeManager, ma: MemberAccess,
                 if (ma.field.Val() == "size") {
                     let sizeTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
                     ma.SetTy(sizeTy)
-                    let _ = varrayTy
+                    let literalExpr = CreateLitConstExpr(LitConstKind.INTEGER, "${varrayTy.size}", sizeTy)
+                    literalExpr.SetTy(sizeTy)
+                    ma.desugarExpr = literalExpr
                     return sizeTy
                 }
             }
