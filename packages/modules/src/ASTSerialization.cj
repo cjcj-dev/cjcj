@@ -200,8 +200,11 @@ public class ASTLoader {
         for (file in cachedPkg.files) {
             for (decl in file.decls) {
                 let mangleName = GetDeclMangleKey(decl)
-                if (!mangleName.isEmpty() && !mangledName2DeclMap.contains(mangleName)) {
-                    removedMangles.add(mangleName)
+                if (mangleName.isEmpty()) {
+                    continue
+                }
+                if (!mangledName2DeclMap.contains(mangleName)) {
+                    CollectRemovedDecl(mangleName, removedMangles)
                 }
             }
         }
