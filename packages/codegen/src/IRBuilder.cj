@@ -133,6 +133,14 @@ public class IRBuilder2 <: Resource {
         return if (GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) { 4u64 } else { 8u64 }
     }
 
+    public func GetSizetLLVMType(): LLVMTypeRef {
+        return if (GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) {
+            unsafe { LLVMInt32TypeInContext(GetLLVMContext().raw) }
+        } else {
+            unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
+        }
+    }
+
     public func GetPayloadOffset(): UInt64 {
         return if (GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) {
             GetPtrSize() + 4u64
@@ -4064,6 +4072,44 @@ public class IRBuilder2 <: Resource {
             return CreateLoad(elementCGType.GetLLVMType(), raw, name: "arr.store.value")
         }
         return raw
+    }
+
+    public func CreateCopyTo(arrayCopyToInfo: ArrayCopyToInfo): Unit {
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 1u32) }
+        let srcArrPtr = CreateBitCast(arrayCopyToInfo.srcArrPtr, i8PtrType, name: "src.arr.ptr.i8")
+        let dstArrPtr = CreateBitCast(arrayCopyToInfo.dstArrPtr, i8PtrType, name: "dst.arr.ptr.i8")
+        let srcIndices = ArrayList<LLVMValueRef>()
+        srcIndices.add(arrayCopyToInfo.srcIndex)
+        let dstIndices = ArrayList<LLVMValueRef>()
+        dstIndices.add(arrayCopyToInfo.dstIndex)
+        let srcArrI8Ptr = CreateInBoundsGEP(i8Type, srcArrPtr, srcIndices, name: "src.arr.i8")
+        let dstArrI8Ptr = CreateInBoundsGEP(i8Type, dstArrPtr, dstIndices, name: "dst.arr.i8")
+        let elemCGType = arrayCopyToInfo.elemType
+        match (elemCGType.GetSize()) {
+            case None =>
+                let sizeType = GetSizetLLVMType()
+                let dataSize = CreateZExtOrTrunc(arrayCopyToInfo.dataSize, sizeType)
+                _ = CreateArrayCopyIntrinsic(ARRAY_COPY_GENERIC_INTRINSIC_NAME, arrayCopyToInfo.dstBP, dstArrI8Ptr,
+                    arrayCopyToInfo.srcBP, srcArrI8Ptr, dataSize)
+            case Some(_) =>
+                match (IsLLVMTypeContainsRef(elemCGType.GetLLVMType())) {
+                    case true =>
+                        let refType = CGType.GetRefType(GetLLVMContext())
+                        let intrinsicName = if (elemCGType.GetLLVMType().toUIntNative() == refType.toUIntNative()) {
+                            ARRAY_COPY_REF_INTRINSIC_NAME
+                        } else {
+                            ARRAY_COPY_STRUCT_INTRINSIC_NAME
+                        }
+                        let sizeType = GetSizetLLVMType()
+                        let dataSize = CreateZExtOrTrunc(arrayCopyToInfo.dataSize, sizeType)
+                        _ = CreateArrayCopyIntrinsic(intrinsicName, arrayCopyToInfo.dstBP, dstArrI8Ptr,
+                            arrayCopyToInfo.srcBP, srcArrI8Ptr, dataSize)
+                    case _ =>
+                        let align = cgMod.GetPrefTypeAlignment(elemCGType.GetLLVMType())
+                        _ = CreateMemMove(dstArrI8Ptr, align, srcArrI8Ptr, align, arrayCopyToInfo.dataSize)
+                }
+        }
     }
 
     private func CreateArrayCopyTo(rawArrayTy: RawArrayType, srcArray: LLVMValueRef, dstArray: LLVMValueRef,

@@ -6,6 +6,7 @@ import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.LocalVar
+import cangjie_compiler::chir.Tuple
 import cangjie_compiler::chir.Type
 import cangjie_compiler::utils.StaticCast
 
@@ -50,6 +51,36 @@ public func GenerateTupleOrAggregateExpression(irBuilder: IRBuilder2, chirExpr: 
 
 private func GenerateNativeTuple(irBuilder: IRBuilder2, chirExpr: Expression, resultTy: Type,
     resultCGType: CGType): LLVMValueRef {
+    let tupleExpr = (chirExpr as Tuple).getOrThrow()
+    let constantTuple = IsConstantTuple(tupleExpr)
+    if (constantTuple[0]) {
+        let constants = ArrayList<LLVMValueRef>()
+        var constantIdx: Int64 = 0
+        while (constantIdx < tupleExpr.GetNumOfOperands()) {
+            let raw = irBuilder.GetCGModule().GetMappedCGValue(tupleExpr.GetOperand(constantIdx)).GetRawValue()
+            if (!unsafe { LLVMIsAGlobalVariable(raw) }.isNull()) {
+                constants.add(unsafe { LLVMGetInitializer(raw) })
+            } else {
+                constants.add(raw)
+            }
+            constantIdx++
+        }
+        var constVal = LLVMNullValue()
+        if (constants.isEmpty()) {
+            constVal = unsafe { LLVMConstNamedStruct(resultCGType.GetLLVMType(), CPointer<LLVMValueRef>(), 0u32) }
+        } else {
+            try (valuePtr = LibC.malloc<LLVMValueRef>(count: constants.size).asResource()) {
+                var idx: Int64 = 0
+                while (idx < constants.size) {
+                    unsafe { (valuePtr.value + idx).write(constants[idx]) }
+                    idx++
+                }
+                constVal = unsafe { LLVMConstNamedStruct(resultCGType.GetLLVMType(), valuePtr.value,
+                    UInt32(constants.size)) }
+            }
+        }
+        return irBuilder.GetCGModule().GetOrCreateGlobalVariable(constVal, constantTuple[1], true)
+    }
     let resultValue = irBuilder.CreateEntryAlloca(resultCGType)
     let resultAddr = CGValue(resultValue, GetRefCGType(irBuilder, resultTy))
     let containedTypes = resultCGType.GetContainedTypes()

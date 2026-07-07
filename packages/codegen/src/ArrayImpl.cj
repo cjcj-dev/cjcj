@@ -10,6 +10,7 @@ import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.GetElementByName
 import cangjie_compiler::chir.GetElementRef
 import cangjie_compiler::chir.LocalVar
+import cangjie_compiler::chir.RawArrayLiteralInit
 import cangjie_compiler::chir.RawArrayType
 import cangjie_compiler::chir.StoreElementByName
 import cangjie_compiler::chir.StoreElementRef
@@ -217,6 +218,9 @@ public func GenerateRawArrayAllocate(irBuilder: IRBuilder2, chirExpr: Expression
 }
 
 public func GenerateRawArrayLiteralInit(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+    if (let Some(arrayLiteralInit) <- (chirExpr as RawArrayLiteralInit)) {
+        return CallArrayIntrinsicInitWithContent(irBuilder, arrayLiteralInit)
+    }
     if (chirExpr.GetNumOfOperands() == 0) {
         return LLVMNullValue()
     }
@@ -236,6 +240,92 @@ public func GenerateRawArrayLiteralInit(irBuilder: IRBuilder2, chirExpr: Express
         return rawArrayValue.GetRawValue()
     }
     return LLVMNullValue()
+}
+
+private func CallArrayIntrinsicInitWithContent(irBuilder: IRBuilder2,
+    arrayLiteralInit: RawArrayLiteralInit): LLVMValueRef {
+    let rawArrayValue = irBuilder.GetCGModule().GetMappedCGValue(arrayLiteralInit.GetRawArray())
+    CJC_ASSERT(GetRawArrayType(rawArrayValue).isSome())
+    if (let Some(rawArrayTy) <- GetRawArrayType(rawArrayValue)) {
+        let constantArray = IsConstantArray(arrayLiteralInit)
+        if (constantArray[0]) {
+            let params = ArrayList<CGValue>()
+            for (element in arrayLiteralInit.GetElements()) {
+                params.add(irBuilder.GetCGModule().GetMappedCGValue(element))
+            }
+            return CallArrayIntrinsicAllocWithConstantContent(irBuilder, rawArrayValue.GetRawValue(), params,
+                rawArrayTy, constantArray[1])
+        }
+        let elementCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rawArrayTy.GetElementType())
+        var elementIdx: Int64 = 0
+        let elements = arrayLiteralInit.GetElements()
+        while (elementIdx < elements.size) {
+            let elementValue = irBuilder.GetCGModule().GetMappedCGValue(elements[elementIdx])
+            let indexValue = unsafe {
+                LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(elementIdx), 0)
+            }
+            let elementPtr = CreateRawArrayElementPointer(irBuilder, rawArrayValue, rawArrayTy, indexValue)
+            StoreRawArrayElement(irBuilder, rawArrayValue.GetRawValue(), elementCGType, elementValue, elementPtr)
+            elementIdx++
+        }
+        return rawArrayValue.GetRawValue()
+    }
+    return LLVMNullValue()
+}
+
+private func CallArrayIntrinsicAllocWithConstantContent(irBuilder: IRBuilder2, array: LLVMValueRef,
+    args: ArrayList<CGValue>, arrTy: RawArrayType, serialized: String): LLVMValueRef {
+    CJC_ASSERT(IsAllConstantValue(args))
+    let constants = ArrayList<LLVMValueRef>()
+    for (arg in args) {
+        let raw = arg.GetRawValue()
+        if (!unsafe { LLVMIsAGlobalVariable(raw) }.isNull()) {
+            constants.add(unsafe { LLVMGetInitializer(raw) })
+        } else {
+            constants.add(raw)
+        }
+    }
+    return InitArrayFilledWithConstant(irBuilder, array, arrTy, constants, serialized)
+}
+
+private func InitArrayFilledWithConstant(irBuilder: IRBuilder2, array: LLVMValueRef, arrTy: RawArrayType,
+    arrayConstantElems: ArrayList<LLVMValueRef>, serialized: String): LLVMValueRef {
+    let cgMod = irBuilder.GetCGModule()
+    let arrayType = CGArrayType.GenerateArrayLayoutType(cgMod, arrTy)
+    let elementCGType = CGType.GetOrCreate(cgMod, arrTy.GetElementType())
+    let elemType = if (elementCGType.IsStructPtrType()) {
+        elementCGType.GetPointerElementType().getOrThrow()
+    } else {
+        elementCGType
+    }
+    let elemLLVMType = elemType.GetLLVMType()
+    var constVal = LLVMNullValue()
+    if (arrayConstantElems.isEmpty()) {
+        constVal = unsafe { LLVMConstArray(elemLLVMType, CPointer<LLVMValueRef>(), 0u32) }
+    } else {
+        try (valuePtr = LibC.malloc<LLVMValueRef>(count: arrayConstantElems.size).asResource()) {
+            var idx: Int64 = 0
+            while (idx < arrayConstantElems.size) {
+                unsafe { (valuePtr.value + idx).write(arrayConstantElems[idx]) }
+                idx++
+            }
+            constVal = unsafe { LLVMConstArray(elemLLVMType, valuePtr.value, UInt32(arrayConstantElems.size)) }
+        }
+    }
+    let arrayConstant = cgMod.GetOrCreateGlobalVariable(constVal, serialized, false)
+    let arrPayloadPtr = irBuilder.GetPayloadFromObject(array)
+    let arrPtr = irBuilder.CreateBitCast(arrPayloadPtr, unsafe { LLVMPointerType(arrayType, 1u32) },
+        name: "arr.ptr")
+    let arrDataPtr = irBuilder.CreateStructGEP(arrayType, arrPtr, 1u32, name: "arr.data")
+    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 1u32) }
+    let srcArrI8Ptr = irBuilder.CreatePointerCast(arrayConstant, i8PtrType, name: "src.arr.i8")
+    let dstArrI8Ptr = irBuilder.CreateBitCast(arrDataPtr, i8PtrType, name: "dst.arr.i8")
+    let int64Type = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let dataSize = unsafe { LLVMConstInt(int64Type, cgMod.GetTypeSize(LLVMGlobalGetValueType(arrayConstant)), 0) }
+    let elemCnt = unsafe { LLVMConstInt(int64Type, UInt64(arrayConstantElems.size), 0) }
+    irBuilder.CreateCopyTo(ArrayCopyToInfo(srcArrI8Ptr, array, srcArrI8Ptr, dstArrI8Ptr, dataSize,
+        irBuilder.GetInt64(0), irBuilder.GetInt64(0), elemType, elemCnt))
+    return array
 }
 
 public func GenerateRawArrayInitByValue(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {

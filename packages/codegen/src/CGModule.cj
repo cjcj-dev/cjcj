@@ -176,6 +176,40 @@ public class CGModule {
         return unsafe { LLVMConstBitCast(klassName, i8PtrType) }
     }
 
+    private func GeneratePrivateUnnamedAddrConstant(name: String, constVal: LLVMValueRef): LLVMValueRef {
+        let moduleHandle = module ?? return LLVMNullValue()
+        let constantType = unsafe { LLVMTypeOf(constVal) }
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+            if (result.isNull()) {
+                result = unsafe { LLVMAddGlobal(moduleHandle.raw, constantType, nameCString.value) }
+            }
+        }
+        unsafe {
+            LLVMSetGlobalConstant(result, 1)
+            LLVMSetUnnamedAddress(result, LLVMUnnamedAddrValue(LLVMUnnamedAddr.GlobalUnnamedAddr))
+            LLVMSetAlignment(result, GetPrefTypeAlignment(constantType))
+            LLVMSetInitializer(result, constVal)
+        }
+        AddLinkageTypeMetadata(result, LLVMLinkage.Private, false)
+        return result
+    }
+
+    public func GetOrCreateGlobalVariable(constVal: LLVMValueRef, gvContent: String, isTuple: Bool): LLVMValueRef {
+        let name = if (isTuple) { GetConstantTupleName(gvContent) } else { GetConstantArrayName(gvContent) }
+        if (let Some(moduleHandle) <- module) {
+            var globalVariable = LLVMNullValue()
+            try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+                globalVariable = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+            }
+            if (!globalVariable.isNull()) {
+                return globalVariable
+            }
+        }
+        return GeneratePrivateUnnamedAddrConstant(name, constVal)
+    }
+
     public func GetEnumCaseClassName(chirEnumType: EnumType, ctorIndex: Int64): String {
         let enumDef = chirEnumType.GetEnumDef()
         var name = enumDef.GetPackageName() + ":" + enumDef.GetSrcCodeIdentifier() + ":" + ctorIndex.toString()

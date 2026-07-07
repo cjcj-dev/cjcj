@@ -20,6 +20,8 @@
 //         src/CodeGen/CJNative/CJNativeCGCFFI.cpp:542  type.getPrimitiveSizeInBits()
 //   With-TypeInfo wrapper rewrite support:
 //         src/CodeGen/CJNative/EmitPackageIR.cpp:526-616  llvm::CallBase/InvokeInst APIs.
+//   Constant array literal support:
+//         src/CodeGen/Utils/CGUtils.cpp:250-255  llvm::dyn_cast<llvm::Constant>(value).
 
 #include <llvm-c/Core.h>
 
@@ -203,6 +205,11 @@ extern "C" int LLVMSelfhostIsCallInst(LLVMValueRef Inst)
 extern "C" int LLVMSelfhostIsInvokeInst(LLVMValueRef Inst)
 {
     return isa<InvokeInst>(unwrap<Value>(Inst)) ? 1 : 0;
+}
+
+extern "C" int LLVMSelfhostIsConstant(LLVMValueRef Val)
+{
+    return isa<Constant>(unwrap<Value>(Val)) ? 1 : 0;
 }
 
 extern "C" int LLVMSelfhostCallBaseHasStructRetAttr(LLVMValueRef Call)

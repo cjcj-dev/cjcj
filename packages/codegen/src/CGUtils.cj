@@ -5,17 +5,24 @@ import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.CheckCustomTypeDefIsExpected
 import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.ClassType
+import cangjie_compiler::chir.Constant
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.ExtendDef
+import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GenericType
+import cangjie_compiler::chir.LocalVar
 import cangjie_compiler::chir.Parameter
+import cangjie_compiler::chir.RawArrayLiteralInit
+import cangjie_compiler::chir.Tuple
 import cangjie_compiler::chir.Type
+import cangjie_compiler::chir.`VArray` as CHIRVArray
 import cangjie_compiler::chir.Value
 import cangjie_compiler::mangle.MANGLE_NESTED_PREFIX
 import cangjie_compiler::mangle.MANGLE_SUFFIX
 import cangjie_compiler::option.OSType
+import cangjie_compiler::utils.CJC_ABORT
 import cangjie_compiler::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, HashString64, STD_LIB_FUTURE, STD_LIB_MONITOR,
     STD_LIB_MUTEX, STD_LIB_WAIT_QUEUE, SYNC_PACKAGE_NAME}
 
@@ -236,6 +243,124 @@ public func GetConstantTupleName(value: String): String {
 
 public func GetConstantArrayName(value: String): String {
     return CONST_ARRAY_PREFIX + HashString64(value)
+}
+
+public class ArrayCopyToInfo {
+    public let srcBP: LLVMValueRef
+    public let dstBP: LLVMValueRef
+    public let srcArrPtr: LLVMValueRef
+    public let dstArrPtr: LLVMValueRef
+    public let dataSize: LLVMValueRef
+    public let srcIndex: LLVMValueRef
+    public let dstIndex: LLVMValueRef
+    public let elemType: CGType
+    public let elemCnt: LLVMValueRef
+
+    public init(srcBP: LLVMValueRef, dstBP: LLVMValueRef, srcArrPtr: LLVMValueRef, dstArrPtr: LLVMValueRef,
+        dataSize: LLVMValueRef, srcIndex: LLVMValueRef, dstIndex: LLVMValueRef, elemType: CGType,
+        elemCnt: LLVMValueRef) {
+        this.srcBP = srcBP
+        this.dstBP = dstBP
+        this.srcArrPtr = srcArrPtr
+        this.dstArrPtr = dstArrPtr
+        this.dataSize = dataSize
+        this.srcIndex = srcIndex
+        this.dstIndex = dstIndex
+        this.elemType = elemType
+        this.elemCnt = elemCnt
+    }
+}
+
+public func ConstantValueToString(expr: Constant): String {
+    if (expr.IsBoolLit()) {
+        return if (expr.GetBoolLitVal()) { "1" } else { "0" }
+    } else if (expr.IsFloatLit()) {
+        return expr.GetFloatLitVal().toString()
+    } else if (expr.IsSignedIntLit()) {
+        return expr.GetSignedIntLitVal().toString()
+    } else if (expr.IsUnSignedIntLit()) {
+        return expr.GetUnsignedIntLitVal().toString()
+    } else if (expr.IsRuneLit()) {
+        return UInt32(expr.GetRuneLitVal()).toString()
+    } else {
+        CJC_ABORT()
+        return ""
+    }
+}
+
+private func IsAllConstantNode(args: ArrayList<Value>): (Bool, String) {
+    if (args.isEmpty()) {
+        return (false, "")
+    }
+    var isAllConstantNode = true
+    var serialized = ""
+    for (node in args) {
+        if (!node.IsLocalVar()) {
+            isAllConstantNode = false
+            break
+        }
+        let localVar = (node as LocalVar).getOrThrow()
+        let maybeExpr = localVar.GetExpr()
+        if (let Some(localExpr) <- maybeExpr) {
+            if (let Some(constant) <- (localExpr as Constant)) {
+                if (constant.IsBoolLit() || constant.IsIntLit() || constant.IsFloatLit() || constant.IsRuneLit()) {
+                    serialized += "{" + ConstantValueToString(constant) +
+                        localVar.GetType().getOrThrow().ToString() + "}"
+                    continue
+                }
+            }
+        }
+        let localExpr = maybeExpr.getOrThrow()
+        var isEleConstant = false
+        var serializedEle = ""
+        if (localExpr.GetExprKind() == ExprKind.TUPLE && localVar.GetType().getOrThrow().IsTuple()) {
+            let result = IsConstantTuple((localExpr as Tuple).getOrThrow())
+            isEleConstant = result[0]
+            serializedEle = result[1] + "Tuple"
+        } else if (localExpr.GetExprKind() == ExprKind.VARRAY) {
+            let result = IsConstantVArray((localExpr as CHIRVArray).getOrThrow())
+            isEleConstant = result[0]
+            serializedEle = result[1] + "VArray"
+        } else {
+            isAllConstantNode = false
+            break
+        }
+        if (isEleConstant) {
+            serialized += "{" + serializedEle + "}"
+            continue
+        } else {
+            isAllConstantNode = false
+            break
+        }
+    }
+    if (!isAllConstantNode) {
+        serialized = ""
+    }
+    return (isAllConstantNode, serialized)
+}
+
+public func IsConstantArray(arrayLiteralInit: RawArrayLiteralInit): (Bool, String) {
+    return IsAllConstantNode(arrayLiteralInit.GetElements())
+}
+
+public func IsConstantVArray(varray: CHIRVArray): (Bool, String) {
+    return IsAllConstantNode(varray.GetOperands())
+}
+
+public func IsConstantTuple(tuple: Tuple): (Bool, String) {
+    return IsAllConstantNode(tuple.GetOperands())
+}
+
+public func IsAllConstantValue(args: ArrayList<CGValue>): Bool {
+    if (args.isEmpty()) {
+        return false
+    }
+    for (arg in args) {
+        if (unsafe { LLVMSelfhostIsConstant(arg.GetRawValue()) } == 0) {
+            return false
+        }
+    }
+    return true
 }
 
 public func DeRef(chirTy: Type): Type {
