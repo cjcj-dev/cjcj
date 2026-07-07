@@ -687,6 +687,7 @@ public class IRBuilder2 <: Resource {
         if (blocks.size < 3) {
             return LLVMNullValue()
         }
+        let size = GetSize32(valueCGType.GetOriginal(), valueCGType)
         CreateCondBr(CreateTypeInfoIsReferenceCall(destTy), blocks[0], blocks[1])
 
         SetInsertPoint(blocks[0])
@@ -694,7 +695,7 @@ public class IRBuilder2 <: Resource {
         CreateBr(blocks[2])
 
         SetInsertPoint(blocks[1])
-        CallGCWriteGeneric(baseObject, dest, value.GetRawValue(), GetSize32(valueCGType.GetOriginal(), valueCGType))
+        CallGCWriteGeneric(baseObject, dest, value.GetRawValue(), size)
         CreateBr(blocks[2])
 
         SetInsertPoint(blocks[2])
