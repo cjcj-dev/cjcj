@@ -911,6 +911,10 @@ public open class CustomTypeDef <: Base {
     public func ToString(): String {
         return ToString(0)
     }
+
+    public func Dump(): Unit {
+        println(ToString())
+    }
 }
 
 private func GetWellMatchingResults(candidateRes: ArrayList<VTableSearchRes>, candidateTypes: ArrayList<FuncType>,

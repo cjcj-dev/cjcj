@@ -1683,10 +1683,40 @@ public class FaithfulAST2CHIR {
     }
 
     private func AST2CHIRCheck(): Unit {
-        let result = CHIRChecker().CheckPackage(CurrentPackage())
-        if (!result.ok) {
-            failure = true
-            failureReason = result.ToString()
+        try (recorder = ProfileRecorder("AST to CHIR Translation", "AST2CHIRCheck")) {
+            for (entry in chirType.GetAllTypeDef()) {
+                let astNode = entry.decl
+                let chirNode = entry.def
+                if (astNode.TestAttr(AstAttribute.GENERIC) && astNode.TestAttr(AstAttribute.IMPORTED)) {
+                    continue
+                }
+                if (astNode.TestAttr(AstAttribute.IMPORTED) && chirNode.TestAttr(Attribute.DESERIALIZED)) {
+                    continue
+                }
+                if (chirNode.TestAttr(Attribute.SKIP_ANALYSIS)) {
+                    continue
+                }
+                if (!AST2CHIRCheckCustomTypeDef(astNode, chirNode, globalCache)) {
+                    failure = true
+                    failureReason = "ast2chir checker failed"
+                    chirNode.Dump()
+                }
+            }
+            for (entry in globalCache.Entries()) {
+                if (entry.value.TestAttr(Attribute.SKIP_ANALYSIS)) {
+                    continue
+                }
+                if (!AST2CHIRCheckValue(entry.decl, entry.value)) {
+                    failure = true
+                    failureReason = "ast2chir checker failed"
+                    entry.value.Dump()
+                }
+            }
+            let result = CHIRChecker().CheckPackage(CurrentPackage())
+            if (!result.ok) {
+                failure = true
+                failureReason = result.ToString()
+            }
         }
     }
 

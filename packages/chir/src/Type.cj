@@ -822,6 +822,10 @@ public class VArrayType <: BuiltinType {
         return argTys[0]
     }
 
+    public func GetSize(): UInt64 {
+        return size
+    }
+
     public override func ToString(): String {
         return "VArray<" + GetElementType().ToString() + ", $" + "${size}" + ">"
     }
