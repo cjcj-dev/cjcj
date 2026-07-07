@@ -426,6 +426,18 @@ public class DeadCodeElimination {
         }
     }
 
+    public func UnreachableBlockElimination(funcsNeedRemoveBlocks: ArrayList<Function>,
+        isDebug!: Bool = false): Unit {
+        for (fn in funcsNeedRemoveBlocks) {
+            if (fn.GetBody().isNone() || fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
+                continue
+            }
+            if (let Some(body) <- fn.GetBody()) {
+                UnreachableBlockEliminationForFunc(body, isDebug: isDebug)
+            }
+        }
+    }
+
     public func UnreachableBlockEliminationForFunc(body: BlockGroup, isDebug!: Bool = false): Unit {
         let entryBlock = body.GetEntryBlock().getOrThrow()
         let unreachable = body.GetBlocks()

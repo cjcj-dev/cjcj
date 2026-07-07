@@ -6,6 +6,7 @@ import cangjie_compiler::chir.CHIRBuilder as ChirBuilder
 import cangjie_compiler::chir.CHIRPrinter as ChirCHIRPrinter
 import cangjie_compiler::chir.CHIRType
 import cangjie_compiler::chir.CHIRTypeCache
+import cangjie_compiler::chir.ConstAnalysisWrapper
 import cangjie_compiler::chir.ConstPropagation
 import cangjie_compiler::chir.DeadCodeElimination
 import cangjie_compiler::chir.FaithfulAST2CHIR
@@ -71,6 +72,7 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
 
 private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions,
     diag: BasicDiagnosticEngine): Unit {
+    DeadCodeElimination(builder).ClearUnreachableMarkBlock(pkg)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
         enableCoverage: options.enableCoverage)
     DeadCodeElimination(builder).NothingTypeExprElimination(pkg, isDebug: options.chirDebugOptimizer)
@@ -81,8 +83,12 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
         DeadCodeElimination(builder, diag, pkg).ReportUnusedCode(pkg, options)
     }
     DeadCodeElimination(builder).RunOnPackage(pkg)
-    ConstPropagation(builder: Some(builder), opts: options).RunOnPackage(pkg)
-    DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(pkg, isDebug: options.chirDebugOptimizer)
+    let wrapper = ConstAnalysisWrapper(builder)
+    wrapper.RunOnPackage(pkg, diag, isDebug: options.chirDebugOptimizer)
+    let cp = ConstPropagation(builder: Some(builder), wrapper: wrapper, opts: options)
+    cp.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer, isCJLint: false)
+    DeadCodeElimination(builder).UnreachableBlockElimination(cp.GetFuncsNeedRemoveBlocks(),
+        isDebug: options.chirDebugOptimizer)
 }
 
 private func RunOptimizationPass(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions): Unit {

@@ -75,7 +75,7 @@ public open class ValueAnalysis<AV, Pool> <: Analysis<State<AV, Pool>> where AV 
     }
 
     public override func Bottom(): State<AV, Pool> {
-        return State<AV, Pool>(childrenMap, allocatedTwoLevelRefMap, allocatedRefMap, allocatedObjMap,
+        return State<AV, Pool>(childrenMap, allocatedRefMap, allocatedTwoLevelRefMap, allocatedObjMap,
             refPool, absObjPool)
     }
 

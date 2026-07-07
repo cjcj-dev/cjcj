@@ -139,6 +139,36 @@ public class OverflowChecker {
     }
 }
 
+public func CutOffHighBits(value: Int64, kind: TypeKind): Int64 {
+    let kindIndex = TypeKindIndex(kind)
+    if (kindIndex >= TypeKindIndex(TypeKind.TYPE_INT8) && kindIndex <= TypeKindIndex(TypeKind.TYPE_INT_NATIVE)) {
+        return NormalizeSigned(value, SignedWidth(kind))
+    }
+    if (kindIndex >= TypeKindIndex(TypeKind.TYPE_UINT8) && kindIndex <= TypeKindIndex(TypeKind.TYPE_UINT_NATIVE)) {
+        return BitsToSigned(NormalizeUnsigned(SignedToBits(value, 64), UnsignedWidth(kind)), 64)
+    }
+    return value
+}
+
+public func CutOffHighBits(value: UInt64, kind: TypeKind): UInt64 {
+    let kindIndex = TypeKindIndex(kind)
+    if (kindIndex >= TypeKindIndex(TypeKind.TYPE_UINT8) && kindIndex <= TypeKindIndex(TypeKind.TYPE_UINT_NATIVE)) {
+        return NormalizeUnsigned(value, UnsignedWidth(kind))
+    }
+    if (kindIndex >= TypeKindIndex(TypeKind.TYPE_INT8) && kindIndex <= TypeKindIndex(TypeKind.TYPE_INT_NATIVE)) {
+        return SignedToBits(BitsToSigned(value, SignedWidth(kind)), 64)
+    }
+    return value
+}
+
+public func CutOffHighBits(value: Float64, kind: TypeKind): Float64 {
+    return match (kind) {
+        case TypeKind.TYPE_FLOAT16 => Float64(Float16(value))
+        case TypeKind.TYPE_FLOAT32 => Float64(Float32(value))
+        case _ => value
+    }
+}
+
 private func IsSignedAddOverflow(x: Int64, y: Int64, width: Int64, strategy: OverflowStrategy): IntOverflowResult {
     let minValue = SignedMin(width)
     let maxValue = SignedMax(width)

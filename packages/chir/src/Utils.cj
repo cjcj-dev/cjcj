@@ -9,6 +9,7 @@ import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, FileUtil}
 
 public let ANY_TYPE: String = "ANY_TYPE"
 public let NOT_CARE: String = "NOT_CARE"
+private let STD_PACKAGE_PREFIX: String = "std."
 
 public class FuncInfo {
     public let funcName: String
@@ -29,6 +30,10 @@ public class FuncInfo {
 public func IsExpectedFunction(fn: Function, funcInfo: FuncInfo): Bool {
     return CheckFuncName(fn, funcInfo) && CheckParentTy(fn, funcInfo) && CheckParametersTy(fn, funcInfo) &&
         CheckReturnTy(fn, funcInfo) && CheckPkgName(fn, funcInfo)
+}
+
+public func IsSTDFunction(fn: Function): Bool {
+    return fn.GetPackageName().startsWith(STD_PACKAGE_PREFIX)
 }
 
 private func CheckFuncName(fn: Function, funcInfo: FuncInfo): Bool {

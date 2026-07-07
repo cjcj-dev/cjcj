@@ -51,6 +51,10 @@ public open class Base {
         annotationMap.Set("NeedCheckCast", if (value) { "true" } else { "false" })
     }
 
+    public func SetNeedCheckArrayBound(value: Bool): Unit {
+        annotationMap.Set("NeedCheckArrayBound", if (value) { "true" } else { "false" })
+    }
+
     public func SetEnumCaseIndex(value: Option<Int64>): Unit {
         let label = EnumCaseIndex(value)
         if (let Some(index) <- EnumCaseIndex.Extract(label)) {
@@ -107,6 +111,13 @@ public open class Base {
             return value == "true"
         }
         return true
+    }
+
+    public func GetNeedCheckArrayBound(): Bool {
+        if (let Some(value) <- annotationMap.Get("NeedCheckArrayBound")) {
+            return value == "true" || value == "1"
+        }
+        return false
     }
 
     public func GetEnumCaseIndex(): Option<Int64> {
