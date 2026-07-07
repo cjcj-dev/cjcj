@@ -1,10 +1,26 @@
 package cangjie_compiler::sema.Desugar
 
+import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::option.GlobalOptions
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.AfterTypeCheck.*
+
+private func UpdatePosForMacroExpandedNodes(pkgs: ArrayList<Package>): Unit {
+    let visit = { curNode: Node =>
+        if (let None <- curNode.curMacroCall) {
+            return VisitAction.WALK_CHILDREN
+        }
+        curNode.begin = curNode.GetDebugPos(curNode.begin)
+        curNode.end = curNode.GetDebugPos(curNode.end)
+        VisitAction.WALK_CHILDREN
+    }
+    for (pkg in pkgs) {
+        let walker = Walker(pkg, visitPre: visit)
+        walker.Walk()
+    }
+}
 
 private func CheckExtendDecl(diag: BasicDiagnosticEngine, decl: ExtendDecl): Unit {
     let ty = decl.extendedType.getOrThrow().GetTy().getOrThrow()
@@ -105,4 +121,9 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
     })
     let _ = walker.Walk()
     AddOptionBox(typeManager, pkg)
+    if (options.enableCompileDebug || options.displayLineInfo) {
+        let pkgs = ArrayList<Package>()
+        pkgs.add(pkg)
+        UpdatePosForMacroExpandedNodes(pkgs)
+    }
 }
