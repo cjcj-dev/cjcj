@@ -719,7 +719,7 @@ public class RangeAnalysis {
             return false
         }
         if (let Some(lhsTy) <- binaryExpr.GetOperand(0).GetType()) {
-            return lhsTy.IsUnsignedInteger() || lhsTy.IsEnum()
+            return lhsTy.IsUnsignedInteger() || IsStructEnum(lhsTy)
         }
         return false
     }

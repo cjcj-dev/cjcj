@@ -114,6 +114,13 @@ public func IsGetOrThrowFunction(expr: Expression): Bool {
     return false
 }
 
+public func IsStructEnum(typeValue: Type): Bool {
+    if (let Some(enumTy) <- (typeValue as EnumType)) {
+        return !enumTy.GetEnumDef().GetCtors().isEmpty()
+    }
+    return false
+}
+
 public func GetSuperTypesRecusively(subType: Type, builder: CHIRBuilder): ArrayList<ClassType> {
     let result = ArrayList<ClassType>()
     if (let Some(customType) <- (subType as CustomType)) {
