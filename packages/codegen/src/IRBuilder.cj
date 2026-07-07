@@ -27,6 +27,7 @@ import cangjie_compiler::chir.StringLiteral
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeCast
+import cangjie_compiler::chir.Value
 import cangjie_compiler::chir.VArrayType
 import cangjie_compiler::option.{ArchType, EnvironmentType, OptimizationLevel}
 import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, CORE_PACKAGE_NAME, STD_LIB_FUTURE, StaticCast}
@@ -2588,6 +2589,36 @@ public class IRBuilder2 <: Resource {
         let dstArrPtr = CreateStructGEP(arrayLayoutType, CreateBitCast(GetPayloadFromObject(dstArray),
             unsafe { LLVMPointerType(arrayLayoutType, 1u32) }, name: "dst.arr.ptr"), 1u32, name: "dst.arr.data")
         return CreateArrayCopyTo(rawArrayTy, srcArray, dstArray, srcArrPtr, dstArrPtr, dataSize, srcIndex, dstIndex)
+    }
+
+    public func AcquireRawData(args: ArrayList<Value>): LLVMValueRef {
+        let llvmArgs = ArrayList<LLVMValueRef>()
+        for (arg in args) {
+            llvmArgs.add(cgMod.GetMappedCGValue(arg).GetRawValue())
+        }
+        CJC_ASSERT(llvmArgs.size == 1)
+        let int1Ty = unsafe { LLVMInt1TypeInContext(GetLLVMContext().raw) }
+        let tmp = CreateEntryAlloca(int1Ty)
+        let _ = CreateStore(GetFalse(), tmp)
+        let isCopyPtr = CreateBitCast(tmp, unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) })
+        let callArgs = ArrayList<LLVMValueRef>()
+        callArgs.add(llvmArgs[0])
+        callArgs.add(isCopyPtr)
+        return CreateIntrinsicCall("llvm.cj.acquire.rawdata", ArrayList<LLVMTypeRef>(), callArgs)
+    }
+
+    public func ReleaseRawData(args: ArrayList<Value>): LLVMValueRef {
+        let llvmArgs = ArrayList<LLVMValueRef>()
+        for (arg in args) {
+            llvmArgs.add(cgMod.GetMappedCGValue(arg).GetRawValue())
+        }
+        CJC_ASSERT(llvmArgs.size == 2)
+        let mode = unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), 0u64, 0) }
+        let callArgs = ArrayList<LLVMValueRef>()
+        callArgs.add(llvmArgs[0])
+        callArgs.add(llvmArgs[1])
+        callArgs.add(mode)
+        return CreateIntrinsicCall("llvm.cj.release.rawdata", ArrayList<LLVMTypeRef>(), callArgs)
     }
 
     public func CallArrayInit(rawArrayValue: LLVMValueRef, arrayLen: LLVMValueRef, elementValue: LLVMValueRef,

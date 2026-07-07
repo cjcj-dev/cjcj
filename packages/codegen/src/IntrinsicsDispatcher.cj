@@ -145,6 +145,8 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
 
 private func IsArrayIntrinsic(kind: IntrinsicKind): Bool {
     return kind == IntrinsicKind.ARRAY_BUILT_IN_COPY_TO ||
+        kind == IntrinsicKind.ARRAY_ACQUIRE_RAW_DATA ||
+        kind == IntrinsicKind.ARRAY_RELEASE_RAW_DATA ||
         kind == IntrinsicKind.ARRAY_GET ||
         kind == IntrinsicKind.ARRAY_SET ||
         kind == IntrinsicKind.ARRAY_GET_UNCHECKED ||
@@ -178,6 +180,12 @@ private func GenerateArraySyscall(irBuilder: IRBuilder2, kind: IntrinsicKind, ar
     }
     if (kind == IntrinsicKind.ARRAY_BUILT_IN_COPY_TO) {
         return GenerateArrayCopyTo(irBuilder, args, resultType)
+    }
+    if (kind == IntrinsicKind.ARRAY_ACQUIRE_RAW_DATA) {
+        return irBuilder.AcquireRawData(args)
+    }
+    if (kind == IntrinsicKind.ARRAY_RELEASE_RAW_DATA) {
+        return irBuilder.ReleaseRawData(args)
     }
     if (kind == IntrinsicKind.ARRAY_SIZE) {
         let arrayValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
