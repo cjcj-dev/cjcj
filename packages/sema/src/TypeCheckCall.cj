@@ -3,7 +3,7 @@ package cangjie_compiler::sema
 import std.collection.*
 import std.sort.*
 import cangjie_compiler::ast.*
-import cangjie_compiler::utils.PData
+import cangjie_compiler::utils.{CJC_NULLPTR_CHECK, PData}
 import cangjie_compiler::basic.Diagnostic as BasicDiagnostic
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagSeverity as BasicDiagSeverity
@@ -3510,9 +3510,99 @@ private func DynamicBindingThisType(typeManager: TypeManager, ce: CallExpr, fd: 
     return None
 }
 
-private func PostCheckCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
-    unit: FunctionMatchingUnit): Bool {
+// C++ src/Sema/Utils.cpp:349 GetCurFuncBody.
+private func GetCurFuncBody(ctx: ASTContext, scopeName: String): Option<FuncBody> {
+    if (let Some(symbol) <- ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, scopeName)) {
+        if (let Some(node) <- symbol.node) {
+            if (let Some(funcDecl) <- (node as FuncDecl)) {
+                return funcDecl.funcBody
+            } else if (let Some(lambdaExpr) <- (node as LambdaExpr)) {
+                return lambdaExpr.funcBody
+            } else if (let Some(macroDecl) <- (node as MacroDecl)) {
+                return macroDecl.desugarDecl.getOrThrow().funcBody
+            } else if (let Some(primaryCtorDecl) <- (node as PrimaryCtorDecl)) {
+                return primaryCtorDecl.funcBody
+            }
+        }
+    }
+    return None
+}
+
+private func diagForInvalidAccess(diag: BasicDiagnosticEngine, re: RefExpr, decl: Decl,
+    curFuncBody: FuncBody): Unit {
+    if (let Some(funcDecl) <- curFuncBody.funcDecl) {
+        var identifierName = if (funcDecl.TestAttr(Attribute.COMPILER_ADD) && funcDecl.ownerFunc.isSome()) {
+            funcDecl.ownerFunc.getOrThrow().identifier.Val()
+        } else {
+            funcDecl.identifier.Val()
+        }
+        if (funcDecl.propDecl.isSome()) {
+            let propDeclName = "*et"
+            identifierName = funcDecl.identifier.Val()[identifierName.size - propDeclName.size..]
+        }
+        DiagOldStrings(diag, re, BasicDiagKind.sema_static_function_cannot_access_non_static_member,
+            [decl.identifier.Val(), identifierName])
+    } else {
+        DiagOldStrings(diag, re, BasicDiagKind.sema_static_lambdaExpr_cannot_access_non_static,
+            [decl.identifier.Val()])
+    }
+}
+
+// C++ src/Sema/TypeCheckExpr.cpp:52 IsLegalAccessFromStaticFunc.
+private func IsLegalAccessFromStaticFunc(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ctx: ASTContext, re: RefExpr, decl: Decl): Bool {
+    let curFuncBody = match (GetCurFuncBody(ctx, re.scopeName)) {
+        case Some(value) => value
+        case None => return true
+    }
+    if (!curFuncBody.TestAttr(Attribute.STATIC) || decl.TestAttr(Attribute.STATIC) || IsClassOrEnumConstructor(decl)) {
+        return true
+    }
+    let symOfCurStruct = ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, re.scopeName)
+    CJC_NULLPTR_CHECK(symOfCurStruct)
+    CJC_NULLPTR_CHECK(re.curFile)
+    let structTy = symOfCurStruct.getOrThrow().node.getOrThrow().GetTy().getOrThrow()
+    let decls = if (let Some(typeDecl) <- Ty.GetDeclPtrOfTy(structTy)) {
+        FieldLookup(typeManager, Some(typeDecl), decl.identifier.Val(),
+            info: LookupInfo(baseTy: typeDecl.GetTy().getOrThrow(), file: re.curFile.getOrThrow()))
+    } else {
+        ExtendFieldLookup(typeManager, re.curFile.getOrThrow(), structTy, decl.identifier.Val())
+    }
+    for (it in decls) {
+        if (SameDecl(it, decl)) {
+            if (let Some(diagValue) <- diag) {
+                diagForInvalidAccess(diagValue, re, decl, curFuncBody)
+            }
+            return false
+        }
+    }
+    return true
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:3407 CheckStaticCallNonStatic.
+private func CheckStaticCallNonStatic(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ctx: Option<ASTContext>, ce: CallExpr, result: FuncDecl): Bool {
+    if ((let None <- result.outerDecl) || !result.outerDecl.getOrThrow().IsNominalDecl()) {
+        return true
+    }
+    if (let Some(ctxValue) <- ctx) {
+        if (let Some(base) <- ce.baseFunc) {
+            if (let Some(refExpr) <- (base as RefExpr)) {
+                return IsLegalAccessFromStaticFunc(typeManager, diag, ctxValue, refExpr, result)
+            }
+        }
+    }
+    return true
+}
+
+private func PostCheckCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: Option<ASTContext>,
+    ce: CallExpr, unit: FunctionMatchingUnit): Bool {
     let fd = unit.fd
+    if (!fd.TestAttr(Attribute.CONSTRUCTOR) && !CheckStaticCallNonStatic(typeManager, diag, ctx, ce, fd)) {
+        ce.SetTy(TypeManager.GetInvalidTy())
+        ce.callKind = CallKind.CALL_INVALID
+        return false
+    }
     ce.resolvedFunction = Some(fd)
     UpdateCallTargets(ce, fd)
     let _ = DynamicBindingThisType(typeManager, ce, fd, unit.typeMapping)
@@ -3605,7 +3695,7 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
         ce.resolvedFunction = Some(unit.fd)
         UpdateCallTargets(ce, unit.fd)
         FillTypeArgumentsTy(typeManager, unit.fd, ce, unit.typeMapping)
-        if (PostCheckCallExpr(typeManager, diag, ce, unit)) {
+        if (PostCheckCallExpr(typeManager, diag, ctx, ce, unit)) {
             out.add(unit.fd)
         }
         return out
@@ -3715,7 +3805,7 @@ private func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDi
             ce.resolvedFunction = Some(unit.fd)
             UpdateCallTargets(ce, unit.fd)
             FillTypeArgumentsTy(typeManager, unit.fd, ce, unit.typeMapping)
-            if (PostCheckCallExpr(typeManager, diag, ce, unit)) {
+            if (PostCheckCallExpr(typeManager, diag, ctx, ce, unit)) {
                 out.add(unit.fd)
             }
         }
