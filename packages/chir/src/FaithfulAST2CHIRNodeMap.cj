@@ -208,3 +208,60 @@ public class FaithfulAST2CHIRNodeMap {
         return out
     }
 }
+
+public class GenericFuncMapEntry {
+    public let genericFunc: AstFuncDecl
+    public let instFuncs: ArrayList<AstFuncDecl>
+
+    public init(genericFunc: AstFuncDecl, instFuncs: ArrayList<AstFuncDecl>) {
+        this.genericFunc = genericFunc
+        this.instFuncs = instFuncs
+    }
+}
+
+public class GenericFuncMap {
+    private let buckets: HashMap<Int64, GenericFuncMapEntry> = HashMap<Int64, GenericFuncMapEntry>()
+    private let keys: ArrayList<Int64> = ArrayList<Int64>()
+
+    public init() {}
+
+    public init(other: GenericFuncMap) {
+        for (entry in other.Entries()) {
+            let instFuncs = ArrayList<AstFuncDecl>()
+            for (instFunc in entry.instFuncs) {
+                instFuncs.add(instFunc)
+            }
+            buckets[entry.genericFunc.objectId] = GenericFuncMapEntry(entry.genericFunc, instFuncs)
+            keys.add(entry.genericFunc.objectId)
+        }
+    }
+
+    public func Add(genericFunc: AstFuncDecl, instFunc: AstFuncDecl): Unit {
+        let key = genericFunc.objectId
+        if (let Some(entry) <- buckets.get(key)) {
+            entry.instFuncs.add(instFunc)
+            return
+        }
+        let instFuncs = ArrayList<AstFuncDecl>()
+        instFuncs.add(instFunc)
+        buckets[key] = GenericFuncMapEntry(genericFunc, instFuncs)
+        keys.add(key)
+    }
+
+    public func Get(genericFunc: AstFuncDecl): Option<ArrayList<AstFuncDecl>> {
+        if (let Some(entry) <- buckets.get(genericFunc.objectId)) {
+            return entry.instFuncs
+        }
+        return None
+    }
+
+    public func Entries(): ArrayList<GenericFuncMapEntry> {
+        let out = ArrayList<GenericFuncMapEntry>()
+        for (key in keys) {
+            if (let Some(entry) <- buckets.get(key)) {
+                out.add(entry)
+            }
+        }
+        return out
+    }
+}

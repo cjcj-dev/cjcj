@@ -67,16 +67,16 @@ private func GenerateInvoke(irBuilder: IRBuilder2, objectValue: Value, args: Arr
     }
     let objectRawValue = cgMod.GetMappedCGValue(objectValue).GetRawValue()
     let objectType = objectValue.GetType().getOrThrow().StripAllRefs()
-    let methodTypeInfoArg = if (IsAutoEnvType(objectType)) {
-        irBuilder.GetTypeInfoFromObject(objectRawValue)
+    let objectTypeInfo = irBuilder.GetTypeInfoFromObject(objectRawValue)
+    let isAutoEnv = IsAutoEnvType(objectType)
+    let methodTypeInfoArg = if (isAutoEnv) {
+        objectTypeInfo
     } else {
-        let objectTypeInfo = irBuilder.GetTypeInfoFromObject(objectRawValue)
         CreateOuterTypeInfo(irBuilder, objectValue, objectTypeInfo, introType, vtableOffset)
     }
-    let rawFuncPtr = if (IsAutoEnvType(objectType)) {
+    let rawFuncPtr = if (isAutoEnv) {
         GenerateFuncPtrForAutoEnv(irBuilder, objectRawValue, methodName)
     } else {
-        let objectTypeInfo = irBuilder.GetTypeInfoFromObject(objectRawValue)
         GenerateFuncPtrForNonAutoEnv(irBuilder, objectTypeInfo, thisType, introType, vtableOffset)
     }
     let typeExtra = TypeExtraInfo(0u32, true, false, true, instTypeArgs)

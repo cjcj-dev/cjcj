@@ -1597,13 +1597,52 @@ public class FaithfulAST2CHIR {
     }
 
     private func TranslateNominalDecls(node: AstPackage): Unit {
-        let _ = node
         let trans = CreateTranslator()
+        try (recorder = ProfileRecorder("TranslateNominalDecls", "SetGenericFuncMap")) {
+            let _ = recorder
+            trans.SetGenericFuncMap(BuildGenericFuncMap(node))
+        }
         TranslateVecDecl(importedNominalDecls, trans)
-        TranslateVecDecl(genericNominalDecls, trans)
-        TranslateVecDecl(nominalDecls, trans)
         TranslateVecDecl(importedGenericInstantiatedNominalDecls, trans)
+        TranslateVecDecl(nominalDecls, trans)
+        TranslateVecDecl(genericNominalDecls, trans)
         SetExtendInfo()
+    }
+
+    private func BuildGenericFuncMap(pkg: AstPackage): GenericFuncMap {
+        let genericFuncMap = GenericFuncMap()
+        for (decl in pkg.genericInstantiatedDecls) {
+            if (decl.astKind != ASTKind.FUNC_DECL || decl.outerDecl.isNone()) {
+                continue
+            }
+            let funcDecl = (decl as AstFuncDecl).getOrThrow()
+            let genericFunc = (funcDecl.genericDecl.getOrThrow() as AstFuncDecl).getOrThrow()
+            genericFuncMap.Add(genericFunc, funcDecl)
+
+            let funcBody = funcDecl.funcBody.getOrThrow()
+            let genericFuncBody = genericFunc.funcBody.getOrThrow()
+            CJC_ASSERT(!funcBody.paramLists.isEmpty())
+            CJC_ASSERT(!genericFuncBody.paramLists.isEmpty())
+            let funcParams = funcBody.paramLists[0].params
+            let genericParams = genericFuncBody.paramLists[0].params
+            CJC_ASSERT(funcParams.size == genericParams.size)
+            var idx: Int64 = 0
+            while (idx < funcParams.size) {
+                if (funcParams[idx].desugarDecl.isNone() ||
+                    funcParams[idx].desugarDecl.getOrThrow().astKind != ASTKind.FUNC_DECL) {
+                    idx++
+                    continue
+                }
+                let desugarDecl = (funcParams[idx].desugarDecl.getOrThrow() as AstFuncDecl).getOrThrow()
+                // C++ can store a nullptr key here; objectId-keyed selfhost maps cannot.
+                // Such an entry is never found by real FuncDecl lookups, so skipping preserves behavior.
+                if (let Some(genericParamDesugarDecl) <- genericParams[idx].desugarDecl) {
+                    genericFuncMap.Add((genericParamDesugarDecl as AstFuncDecl).getOrThrow(), desugarDecl)
+                }
+                idx++
+            }
+        }
+        return genericFuncMap
     }
 
     private func SetExtendInfo(): Unit {

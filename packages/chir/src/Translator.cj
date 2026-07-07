@@ -455,6 +455,7 @@ public class Translator {
     private let overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>>
     private let scopeInfo: ArrayList<Int64> = ArrayList<Int64>([0])
     private let opts: GlobalOptions
+    private var genericFuncMap: GenericFuncMap = GenericFuncMap()
 
     public init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap,
         localConstVars!: ElementList = ElementList(), localConstFuncs!: ElementList = ElementList(),
@@ -467,6 +468,14 @@ public class Translator {
         this.localConstFuncs = localConstFuncs
         this.overrideSrcFuncResolver = overrideSrcFuncResolver
         this.opts = opts
+    }
+
+    public func SetGenericFuncMap(funcMap: GenericFuncMap): Unit {
+        genericFuncMap = GenericFuncMap(funcMap)
+    }
+
+    public func GetGenericFuncMap(): GenericFuncMap {
+        return genericFuncMap
     }
 
     public func TranslateGlobalVarInitializer(fn: Function, decl: AstVarDecl, globalVar: GlobalVar): Unit {
@@ -2427,16 +2436,25 @@ public class Translator {
         } else if (let Some(varDecl) <- (member as AstVarDecl)) {
             AddMemberVarDecl(def, varDecl)
         } else if (let Some(funcDecl) <- (member as AstFuncDecl)) {
-            AddMethodAndDefaultParamMethods(def, funcDecl)
+            if (let Some(extendDef) <- (def as ExtendDef)) {
+                AddExtendMethodAndDefaultParamMethods(extendDef, funcDecl)
+            } else if (let Some(classDef) <- (def as ClassDef)) {
+                TranslateClassLikeMemberFuncDecl(classDef, funcDecl)
+            } else {
+                AddMemberMethodToCustomTypeDef(def, funcDecl)
+            }
         }
     }
 
-    private func AddMethodAndDefaultParamMethods(def: CustomTypeDef, funcDecl: AstFuncDecl): Unit {
+    private func AddMethodIfPresent(def: CustomTypeDef, funcDecl: AstFuncDecl): Unit {
         if (let Some(value) <- globalSymbolTable.TryGet(funcDecl)) {
             if (let Some(fn) <- (value as Function)) {
                 def.AddMethod(fn)
             }
         }
+    }
+
+    private func AddDefaultParamMethods(def: CustomTypeDef, funcDecl: AstFuncDecl): Unit {
         let body = match (funcDecl.funcBody) {
             case Some(value2) => value2
             case None => return
@@ -2455,12 +2473,94 @@ public class Translator {
         }
     }
 
-    private func AddPropertyAccessors(def: CustomTypeDef, propDecl: AstPropDecl): Unit {
-        for (getter in propDecl.getters) {
-            AddMethodAndDefaultParamMethods(def, getter)
+    private func AddMemberMethodToCustomTypeDef(def: CustomTypeDef, funcDecl: AstFuncDecl): Unit {
+        if (IsStaticInit(funcDecl)) {
+            return
         }
-        for (setter in propDecl.setters) {
-            AddMethodAndDefaultParamMethods(def, setter)
+        AddMethodIfPresent(def, funcDecl)
+        AddDefaultParamMethods(def, funcDecl)
+        if (let Some(instFuncs) <- genericFuncMap.Get(funcDecl)) {
+            AddMemberFunctionGenericInstantiations(def, instFuncs, funcDecl)
+        }
+    }
+
+    private func TranslateClassLikeMemberFuncDecl(classDef: ClassDef, funcDecl: AstFuncDecl): Unit {
+        if (SkipMemberFuncInSpecificMerging(classDef, funcDecl)) {
+            return
+        }
+        AddMemberMethodToCustomTypeDef(classDef, funcDecl)
+    }
+
+    private func SkipMemberFuncInSpecificMerging(classDef: ClassDef, funcDecl: AstFuncDecl): Bool {
+        if (!opts.IsCompilingCJMPSpecific() || !classDef.TestAttr(Attribute.DESERIALIZED)) {
+            return false
+        }
+        for (method in classDef.GetMethods()) {
+            if (method.GetIdentifierWithoutPrefix() == funcDecl.mangledName) {
+                if (let Some(instFuncs) <- genericFuncMap.Get(funcDecl)) {
+                    AddMemberFunctionGenericInstantiations(classDef, instFuncs, funcDecl)
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    private func AddMemberFunctionGenericInstantiations(def: CustomTypeDef, instFuncs: ArrayList<AstFuncDecl>,
+        originalDecl: AstFuncDecl): Unit {
+        let originalOuterDecl = originalDecl.outerDecl.getOrThrow()
+        for (instFunc in instFuncs) {
+            CJC_ASSERT(instFunc.outerDecl.getOrThrow() == originalOuterDecl)
+            AddMethodIfPresent(def, instFunc)
+            AddDefaultParamMethods(def, instFunc)
+        }
+    }
+
+    private func AddExtendMethodAndDefaultParamMethods(def: ExtendDef, funcDecl: AstFuncDecl): Unit {
+        AddMethodIfPresent(def, funcDecl)
+        let body = match (funcDecl.funcBody) {
+            case Some(value) => value
+            case None =>
+                AddExtendGenericFuncInstantiations(def, funcDecl, funcDecl)
+                return
+        }
+        if (!body.paramLists.isEmpty()) {
+            for (param in body.paramLists[0].params) {
+                if (let Some(desugarDecl) <- param.desugarDecl) {
+                    AddMethodIfPresent(def, desugarDecl)
+                    AddExtendGenericFuncInstantiations(def, desugarDecl, funcDecl)
+                }
+            }
+        }
+        AddExtendGenericFuncInstantiations(def, funcDecl, funcDecl)
+    }
+
+    private func AddExtendGenericFuncInstantiations(def: ExtendDef, genericFunc: AstFuncDecl,
+        originalDecl: AstFuncDecl): Unit {
+        let originalOuterDecl = originalDecl.outerDecl.getOrThrow()
+        if (let Some(instFuncs) <- genericFuncMap.Get(genericFunc)) {
+            for (instFunc in instFuncs) {
+                CJC_ASSERT(instFunc.outerDecl.getOrThrow() == originalOuterDecl)
+                AddMethodIfPresent(def, instFunc)
+            }
+        }
+    }
+
+    private func AddPropertyAccessors(def: CustomTypeDef, propDecl: AstPropDecl): Unit {
+        if (let Some(classDef) <- (def as ClassDef)) {
+            for (getter in propDecl.getters) {
+                TranslateClassLikeMemberFuncDecl(classDef, getter)
+            }
+            for (setter in propDecl.setters) {
+                TranslateClassLikeMemberFuncDecl(classDef, setter)
+            }
+        } else {
+            for (getter in propDecl.getters) {
+                AddMethodIfPresent(def, getter)
+            }
+            for (setter in propDecl.setters) {
+                AddMethodIfPresent(def, setter)
+            }
         }
     }
 
