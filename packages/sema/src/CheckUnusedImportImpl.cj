@@ -8,13 +8,25 @@ import cangjie_compiler::basic.MakeRange as BasicMakeRange
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::modules.SemaImportManager
 
-public class UsedImportTarget {
+public class UsedImportTarget <: Hashable & Equatable<UsedImportTarget> {
     public var identifier: String
     public var target: Decl
 
     public init(identifier: String, target: Decl) {
         this.identifier = identifier
         this.target = target
+    }
+
+    public operator func ==(right: UsedImportTarget): Bool {
+        return identifier == right.identifier && refEq(target, right.target)
+    }
+
+    public operator func !=(right: UsedImportTarget): Bool {
+        return !(this == right)
+    }
+
+    public func hashCode(): Int64 {
+        return identifier.hashCode() ^ target.objectId.hashCode()
     }
 }
 
@@ -35,14 +47,14 @@ public class UnusedImportFinding {
 private class CheckUnusedImportImpl {
     private var pkg: Package
     private let importManager: SemaImportManager
-    private let usedPackageInAST: HashMap<String, ArrayList<UsedImportTarget>> =
-        HashMap<String, ArrayList<UsedImportTarget>>()
-    private let usedPackageInFile: HashMap<Node, HashMap<String, ArrayList<UsedImportTarget>>> =
-        HashMap<Node, HashMap<String, ArrayList<UsedImportTarget>>>()
-    private let cacheUsedPackageInAST: HashMap<String, ArrayList<UsedImportTarget>> =
-        HashMap<String, ArrayList<UsedImportTarget>>()
-    private let cacheUsedPackageInFile: HashMap<Node, HashMap<String, ArrayList<UsedImportTarget>>> =
-        HashMap<Node, HashMap<String, ArrayList<UsedImportTarget>>>()
+    private let usedPackageInAST: HashMap<String, HashSet<UsedImportTarget>> =
+        HashMap<String, HashSet<UsedImportTarget>>()
+    private let usedPackageInFile: HashMap<Node, HashMap<String, HashSet<UsedImportTarget>>> =
+        HashMap<Node, HashMap<String, HashSet<UsedImportTarget>>>()
+    private let cacheUsedPackageInAST: HashMap<String, HashSet<UsedImportTarget>> =
+        HashMap<String, HashSet<UsedImportTarget>>()
+    private let cacheUsedPackageInFile: HashMap<Node, HashMap<String, HashSet<UsedImportTarget>>> =
+        HashMap<Node, HashMap<String, HashSet<UsedImportTarget>>>()
     private let needCheckImport: ArrayList<ImportSpec> = ArrayList<ImportSpec>()
     private let findings: ArrayList<UnusedImportFinding> = ArrayList<UnusedImportFinding>()
 
@@ -175,8 +187,8 @@ private class CheckUnusedImportImpl {
     private func CheckImportAllUsed(
         importSpec: ImportSpec,
         packageName: String,
-        usedPackage: HashMap<String, ArrayList<UsedImportTarget>>,
-        cacheUsedPackage: HashMap<String, ArrayList<UsedImportTarget>>,
+        usedPackage: HashMap<String, HashSet<UsedImportTarget>>,
+        cacheUsedPackage: HashMap<String, HashSet<UsedImportTarget>>,
         declsMap: HashMap<String, ArrayList<Decl>>
     ): Bool {
         if (!GetPackageTargets(cacheUsedPackage, packageName).isEmpty()) {
@@ -199,8 +211,8 @@ private class CheckUnusedImportImpl {
     private func CheckDeclImportUsed(
         importSpec: ImportSpec,
         packageName: String,
-        usedPackage: HashMap<String, ArrayList<UsedImportTarget>>,
-        cacheUsedPackage: HashMap<String, ArrayList<UsedImportTarget>>,
+        usedPackage: HashMap<String, HashSet<UsedImportTarget>>,
+        cacheUsedPackage: HashMap<String, HashSet<UsedImportTarget>>,
         declsMap: HashMap<String, ArrayList<Decl>>
     ): Bool {
         let identifier = GetImportedDeclVisibleName(importSpec)
@@ -222,7 +234,7 @@ private class CheckUnusedImportImpl {
     private func CheckPackageImportUsed(
         importSpec: ImportSpec,
         packageName: String,
-        usedDecls: ArrayList<UsedImportTarget>
+        usedDecls: HashSet<UsedImportTarget>
     ): Bool {
         let identifier = GetImportedDeclVisibleName(importSpec)
         let packageDecl = importManager.GetPackageDecl(packageName) ?? return false
@@ -282,7 +294,7 @@ private class CheckUnusedImportImpl {
 
     private func AddUsedExtendDeclTarget(
         extendDecl: ExtendDecl,
-        usedMap: HashMap<String, ArrayList<UsedImportTarget>>
+        usedMap: HashMap<String, HashSet<UsedImportTarget>>
     ): Unit {
         for (typeNode in extendDecl.inheritedTypes) {
             if (let Some(target) <- typeNode.GetTarget()) {
@@ -316,7 +328,7 @@ private class CheckUnusedImportImpl {
         }
     }
 
-    private func GetUsedPackageMap(importSpec: ImportSpec): HashMap<String, ArrayList<UsedImportTarget>> {
+    private func GetUsedPackageMap(importSpec: ImportSpec): HashMap<String, HashSet<UsedImportTarget>> {
         if (importSpec.IsPrivateImport()) {
             if (let Some(file) <- importSpec.curFile) {
                 return GetFilePackageMap(usedPackageInFile, file)
@@ -325,7 +337,7 @@ private class CheckUnusedImportImpl {
         return usedPackageInAST
     }
 
-    private func GetCacheUsedPackageMap(importSpec: ImportSpec): HashMap<String, ArrayList<UsedImportTarget>> {
+    private func GetCacheUsedPackageMap(importSpec: ImportSpec): HashMap<String, HashSet<UsedImportTarget>> {
         if (importSpec.IsPrivateImport()) {
             if (let Some(file) <- importSpec.curFile) {
                 return GetFilePackageMap(cacheUsedPackageInFile, file)
@@ -369,35 +381,33 @@ private func GetRefIdentifier(node: Node): String {
 }
 
 private func AddTargetToMap(
-    usedMap: HashMap<String, ArrayList<UsedImportTarget>>,
+    usedMap: HashMap<String, HashSet<UsedImportTarget>>,
     packageName: String,
     identifier: String,
     target: Decl
 ): Unit {
     let targets = GetOrCreatePackageTargets(usedMap, packageName)
-    if (!ContainsUsedTarget(targets, identifier, target)) {
-        targets.add(UsedImportTarget(identifier, target))
-    }
+    targets.add(UsedImportTarget(identifier, target))
 }
 
 private func GetOrCreatePackageTargets(
-    usedMap: HashMap<String, ArrayList<UsedImportTarget>>,
+    usedMap: HashMap<String, HashSet<UsedImportTarget>>,
     packageName: String
-): ArrayList<UsedImportTarget> {
+): HashSet<UsedImportTarget> {
     if (!usedMap.contains(packageName)) {
-        usedMap[packageName] = ArrayList<UsedImportTarget>()
+        usedMap[packageName] = HashSet<UsedImportTarget>()
     }
     return usedMap.get(packageName).getOrThrow()
 }
 
 private func GetPackageTargets(
-    usedMap: HashMap<String, ArrayList<UsedImportTarget>>,
+    usedMap: HashMap<String, HashSet<UsedImportTarget>>,
     packageName: String
-): ArrayList<UsedImportTarget> {
+): HashSet<UsedImportTarget> {
     if (let Some(targets) <- usedMap.get(packageName)) {
         return targets
     }
-    return ArrayList<UsedImportTarget>()
+    return HashSet<UsedImportTarget>()
 }
 
 private func GetDeclsFromMap(
@@ -411,22 +421,17 @@ private func GetDeclsFromMap(
 }
 
 private func GetFilePackageMap(
-    fileMaps: HashMap<Node, HashMap<String, ArrayList<UsedImportTarget>>>,
+    fileMaps: HashMap<Node, HashMap<String, HashSet<UsedImportTarget>>>,
     file: File
-): HashMap<String, ArrayList<UsedImportTarget>> {
+): HashMap<String, HashSet<UsedImportTarget>> {
     if (!fileMaps.contains(file)) {
-        fileMaps[file] = HashMap<String, ArrayList<UsedImportTarget>>()
+        fileMaps[file] = HashMap<String, HashSet<UsedImportTarget>>()
     }
     return fileMaps.get(file).getOrThrow()
 }
 
-private func ContainsUsedTarget(targets: ArrayList<UsedImportTarget>, identifier: String, decl: Decl): Bool {
-    for (target in targets) {
-        if (target.identifier == identifier && refEq(target.target, decl)) {
-            return true
-        }
-    }
-    return false
+private func ContainsUsedTarget(targets: HashSet<UsedImportTarget>, identifier: String, decl: Decl): Bool {
+    return targets.contains(UsedImportTarget(identifier, decl))
 }
 
 private func ContainsDecl(decls: ArrayList<Decl>, decl: Decl): Bool {

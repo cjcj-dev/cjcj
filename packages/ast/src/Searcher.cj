@@ -565,9 +565,9 @@ public class Searcher {
             return out
         }
         if (query.kind == QueryKind.OR) {
-            let out = ArrayList<Symbol>()
+            var out = ArrayList<Symbol>()
             for (child in query.children) {
-                AddAllUnique(out, PerformSearch(ctx, child))
+                out = Union(out, PerformSearch(ctx, child))
             }
             return out
         }
@@ -622,7 +622,7 @@ public class Searcher {
         if (ctx.invertedIndex.scopeLevelIndexes.isEmpty()) {
             return FilterByMatcher(ctx, query)
         }
-        let out = ArrayList<Symbol>()
+        var out = ArrayList<Symbol>()
         if (query.comparator == PositionCompare.EQ) {
             if (let Some(values) <- ctx.invertedIndex.scopeLevelIndexes.get(query.level)) {
                 AddAllUnique(out, values)
@@ -633,7 +633,7 @@ public class Searcher {
             var currentLevel: UInt32 = 0u32
             while (currentLevel < query.level || (query.comparator == PositionCompare.LE && currentLevel == query.level)) {
                 if (let Some(values) <- ctx.invertedIndex.scopeLevelIndexes.get(currentLevel)) {
-                    AddAllUnique(out, values)
+                    out = Union(out, values)
                 }
                 if (currentLevel == UInt32.Max) {
                     break
@@ -705,7 +705,7 @@ public class Searcher {
     private func GetIDsByPosLT(ctx: ASTContext, pos: Position, contain!: Bool = false): ArrayList<Symbol> {
         let out = PosSearchApi.GetIDsLessThanPos(ctx.invertedIndex.posEndTrie, pos, isClose: false)
         if (contain) {
-            AddAllUnique(out, GetIDsByPosEQ(ctx, pos))
+            return Union(out, GetIDsByPosEQ(ctx, pos))
         }
         return out
     }
@@ -713,15 +713,15 @@ public class Searcher {
     private func GetIDsByPosGT(ctx: ASTContext, pos: Position, contain!: Bool = false): ArrayList<Symbol> {
         let out = PosSearchApi.GetIDsGreaterThanPos(ctx.invertedIndex.posBeginTrie, pos, isClose: false)
         if (contain) {
-            AddAllUnique(out, GetIDsByPosEQ(ctx, pos))
+            return Union(out, GetIDsByPosEQ(ctx, pos))
         }
         return out
     }
 
     private func SymbolsForKeys(map: HashMap<String, ArrayList<Symbol>>, keys: ArrayList<String>): ArrayList<Symbol> {
-        let out = ArrayList<Symbol>()
+        var out = ArrayList<Symbol>()
         for (key in keys) {
-            AddAllUnique(out, SymbolsForKey(map, key))
+            out = Union(out, SymbolsForKey(map, key))
         }
         return out
     }
@@ -764,8 +764,49 @@ public class Searcher {
 
     private func Intersection(left: ArrayList<Symbol>, right: ArrayList<Symbol>): ArrayList<Symbol> {
         let out = ArrayList<Symbol>()
+        let outIDs = HashSet<UInt32>()
+        let rightIDs = HashSet<UInt32>()
+        let rightWithoutHashID = ArrayList<Symbol>()
+        for (item in right) {
+            if (item.hashID.hash64 != 0u64 || item.hashID.fieldID != 0u32) {
+                rightIDs.add(item.hashID.fieldID)
+            } else {
+                rightWithoutHashID.add(item)
+            }
+        }
         for (item in left) {
-            if (ContainsSymbol(right, item)) {
+            if (item.hashID.hash64 != 0u64 || item.hashID.fieldID != 0u32) {
+                if (rightIDs.contains(item.hashID.fieldID) && !outIDs.contains(item.hashID.fieldID)) {
+                    out.add(item)
+                    outIDs.add(item.hashID.fieldID)
+                }
+            } else if (ContainsSymbol(rightWithoutHashID, item)) {
+                AddUnique(out, item)
+            }
+        }
+        return out
+    }
+
+    private func Union(left: ArrayList<Symbol>, right: ArrayList<Symbol>): ArrayList<Symbol> {
+        let out = ArrayList<Symbol>()
+        let outIDs = HashSet<UInt32>()
+        for (item in left) {
+            if (item.hashID.hash64 != 0u64 || item.hashID.fieldID != 0u32) {
+                if (!outIDs.contains(item.hashID.fieldID)) {
+                    out.add(item)
+                    outIDs.add(item.hashID.fieldID)
+                }
+            } else {
+                AddUnique(out, item)
+            }
+        }
+        for (item in right) {
+            if (item.hashID.hash64 != 0u64 || item.hashID.fieldID != 0u32) {
+                if (!outIDs.contains(item.hashID.fieldID)) {
+                    out.add(item)
+                    outIDs.add(item.hashID.fieldID)
+                }
+            } else {
                 AddUnique(out, item)
             }
         }
@@ -774,8 +815,23 @@ public class Searcher {
 
     private func Difference(left: ArrayList<Symbol>, right: ArrayList<Symbol>): ArrayList<Symbol> {
         let out = ArrayList<Symbol>()
+        let outIDs = HashSet<UInt32>()
+        let rightIDs = HashSet<UInt32>()
+        let rightWithoutHashID = ArrayList<Symbol>()
+        for (item in right) {
+            if (item.hashID.hash64 != 0u64 || item.hashID.fieldID != 0u32) {
+                rightIDs.add(item.hashID.fieldID)
+            } else {
+                rightWithoutHashID.add(item)
+            }
+        }
         for (item in left) {
-            if (!ContainsSymbol(right, item)) {
+            if (item.hashID.hash64 != 0u64 || item.hashID.fieldID != 0u32) {
+                if (!rightIDs.contains(item.hashID.fieldID) && !outIDs.contains(item.hashID.fieldID)) {
+                    out.add(item)
+                    outIDs.add(item.hashID.fieldID)
+                }
+            } else if (!ContainsSymbol(rightWithoutHashID, item)) {
                 AddUnique(out, item)
             }
         }

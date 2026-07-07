@@ -733,7 +733,7 @@ public func SynPointerExpr(typeManager: TypeManager, pointerExpr: PointerExpr,
 }
 
 public func SynCFuncCall(typeManager: TypeManager, ce: CallExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    argSynthesizer!: Option<(FuncArg) -> Ty> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- ce.baseFunc) {
         ce.SetTy(TypeManager.GetInvalidTy())
         return false
@@ -756,7 +756,15 @@ public func SynCFuncCall(typeManager: TypeManager, ce: CallExpr,
         ce.SetTy(TypeManager.GetInvalidTy())
         return false
     }
-    let argTy = FuncArgTy(ce.args[0])
+    let argTy = if (let Some(synthesizeArg) <- argSynthesizer) {
+        synthesizeArg(ce.args[0])
+    } else {
+        FuncArgTy(ce.args[0])
+    }
+    if (!Ty.IsTyCorrect(argTy)) {
+        ce.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
     var valid = true
     if (!ce.args[0].name.Empty()) {
         if (let Some(diagValue) <- diag) {
@@ -890,7 +898,7 @@ public func ChkPointerCall(typeManager: TypeManager, ctx: Option<ASTContext>, ta
 }
 
 public func ChkCFuncCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    argSynthesizer!: Option<(FuncArg) -> Ty> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- ce.baseFunc) {
         return false
     }
@@ -911,7 +919,7 @@ public func ChkCFuncCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
         return false
     }
     ce.baseFunc.getOrThrow().SetTarget(realTarget)
-    let ok = SynCFuncCall(typeManager, ce, diag: diag)
+    let ok = SynCFuncCall(typeManager, ce, argSynthesizer: argSynthesizer, diag: diag)
     if (!ok) {
         ce.SetTy(TypeManager.GetInvalidTy())
     }
@@ -935,7 +943,7 @@ public func ChkBuiltinCall(typeManager: TypeManager, ctx: Option<ASTContext>, ta
     if (ChkVArrayCall(typeManager, ctx, target, ce, checker: checker, diag: diag)) {
         return true
     }
-    if (ChkCFuncCall(typeManager, target, ce, diag: diag)) {
+    if (ChkCFuncCall(typeManager, target, ce, argSynthesizer: argSynthesizer, diag: diag)) {
         return true
     }
     return false

@@ -2813,9 +2813,6 @@ public class TypeChecker {
                 typeCheckExprClearTargetType(ctx, baseFunc)
             }
         }
-        for (arg in callExpr.args) {
-            let _ = SynthesizeFuncArg(ctx, arg)
-        }
     }
 
     private func ClearLambdaBodyForContextCheck(le: LambdaExpr): Unit {

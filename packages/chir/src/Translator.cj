@@ -2,7 +2,7 @@ package cangjie_compiler::chir
 
 import std.collection.*
 
-import cangjie_compiler::utils.CJC_ASSERT
+import cangjie_compiler::utils.{CJC_ASSERT, STATIC_INIT_FUNC}
 import cangjie_compiler::option.{GlobalOptions, OptimizationFlag}
 import cangjie_compiler::basic.Linkage as BasicLinkage
 import cangjie_compiler::ast.ASTKind
@@ -5659,6 +5659,137 @@ public class Translator {
         throw IllegalStateException("faithful AST2CHIR default argument has no desugared function")
     }
 
+    private func IsStaticInit(funcDecl: AstFuncDecl): Bool {
+        return funcDecl.TestAttr(AstAttribute.STATIC) && funcDecl.TestAttr(AstAttribute.CONSTRUCTOR) &&
+            funcDecl.identifier.Val() == STATIC_INIT_FUNC
+    }
+
+    private func IsStructMutFunction(funcDecl: AstFuncDecl): Bool {
+        let outerDecl = match (funcDecl.outerDecl) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (outerDecl.astKind == ASTKind.STRUCT_DECL) {
+            return funcDecl.TestAnyAttr(AstAttribute.CONSTRUCTOR, AstAttribute.MUT)
+        }
+        if (outerDecl.astKind == ASTKind.EXTEND_DECL) {
+            let extendDecl = (outerDecl as AstExtendDecl).getOrThrow()
+            if (let Some(extendedType) <- extendDecl.extendedType) {
+                if (let Some(astTy) <- extendedType.GetTy()) {
+                    if (astTy.IsStruct()) {
+                        return funcDecl.TestAnyAttr(AstAttribute.CONSTRUCTOR, AstAttribute.MUT)
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private func IsCallingConstructor(expr: AstCallExpr): Bool {
+        let resolvedFunction = match (expr.resolvedFunction) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (expr.callKind == AstCallKind.CALL_SUPER_FUNCTION) {
+            return true
+        }
+        return resolvedFunction.TestAttr(AstAttribute.CONSTRUCTOR) &&
+            !resolvedFunction.TestAttr(AstAttribute.STATIC)
+    }
+
+    private func GetMemberFuncParamAndRetInstTypes(expr: AstCallExpr,
+        calleeDecl: AstFuncDecl): (ArrayList<Type>, Type) {
+        let paramInstTys = FuncParamTypes(expr, calleeDecl)
+        let retInstTy = if (calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR) || calleeDecl.IsFinalizer()) {
+            builder.context.GetUnitTy()
+        } else {
+            chirTy.TranslateType(CallBaseFuncTy(expr, calleeDecl).retTy)
+        }
+        return (paramInstTys, retInstTy)
+    }
+
+    private func GetMemberFuncCallerInstType(expr: AstCallExpr, needExactTy!: Bool = true): Option<Type> {
+        var callerType: Option<Type> = None
+        if (let Some(base) <- expr.baseFunc) {
+            if (let Some(memAccess) <- (base as AstMemberAccess)) {
+                if (!IsPackageMemberAccess(memAccess)) {
+                    let baseExpr = RequireExpr(memAccess.baseExpr, "member function caller base")
+                    callerType = Some(chirTy.TranslateType(RequireAstTy(baseExpr)))
+                } else if (IsCallingConstructor(expr)) {
+                    callerType = Some(chirTy.TranslateType(RequireAstTy(expr)))
+                }
+            } else if (IsCallingConstructor(expr)) {
+                callerType = Some(chirTy.TranslateType(RequireAstTy(expr)))
+            } else if (let Some(resolvedFunction) <- expr.resolvedFunction) {
+                if (let Some(outerDecl) <- resolvedFunction.outerDecl) {
+                    if (outerDecl.IsNominalDecl()) {
+                        if (let Some(outerDef) <- CurrentFunction().GetParentCustomTypeDef()) {
+                            if (let Some(extendDef) <- (outerDef as ExtendDef)) {
+                                callerType = extendDef.GetExtendedType()
+                            } else {
+                                callerType = outerDef.GetType()
+                            }
+                            if (let Some(curCallerType) <- callerType) {
+                                if (curCallerType.IsClassOrArray()) {
+                                    callerType = Some(builder.context.GetRefTy(curCallerType))
+                                }
+                            }
+                        } else if (IsStaticInit(resolvedFunction)) {
+                            callerType = None
+                        } else {
+                            callerType = Some(chirTy.TranslateType(RequireAstTy(outerDecl)))
+                        }
+                    }
+                }
+            }
+        } else if (IsCallingConstructor(expr)) {
+            callerType = Some(chirTy.TranslateType(RequireAstTy(expr)))
+        }
+
+        if (needExactTy) {
+            if (let Some(curCallerType) <- callerType) {
+                if (let Some(resolvedFunction) <- expr.resolvedFunction) {
+                    var (paramInstTys, retInstTy) = GetMemberFuncParamAndRetInstTypes(expr, resolvedFunction)
+                    if (!resolvedFunction.TestAttr(AstAttribute.STATIC)) {
+                        paramInstTys.add(curCallerType, at: 0)
+                    }
+                    let instFuncType = builder.context.GetFuncTy(paramInstTys, retInstTy)
+                    let funcInstTypeArgs = ArrayList<Type>()
+                    if (let Some(base) <- expr.baseFunc) {
+                        if (let Some(nameRef) <- (base as AstNameReferenceExpr)) {
+                            if (!resolvedFunction.TestAttr(AstAttribute.CONSTRUCTOR)) {
+                                for (instTy in nameRef.instTys) {
+                                    funcInstTypeArgs.add(chirTy.TranslateType(instTy))
+                                }
+                            }
+                        }
+                    }
+                    let root = if (let Some(refTy) <- (curCallerType as RefType)) {
+                        refTy.GetBaseType()
+                    } else {
+                        curCallerType
+                    }
+                    var exactCallerType = GetExactParentType(root, resolvedFunction, instFuncType,
+                        funcInstTypeArgs, false) ??
+                        throw IllegalStateException("faithful AST2CHIR member caller has no exact parent type")
+                    if (exactCallerType.IsClass()) {
+                        exactCallerType = builder.context.GetRefTy(exactCallerType)
+                    }
+                    callerType = Some(exactCallerType)
+                }
+            }
+        }
+
+        if (let Some(resolvedFunction) <- expr.resolvedFunction) {
+            if (IsStructMutFunction(resolvedFunction)) {
+                if (let Some(curCallerType) <- callerType) {
+                    callerType = Some(builder.context.GetRefTy(curCallerType))
+                }
+            }
+        }
+        return callerType
+    }
+
     private func TranslateOneCallArg(expr: AstCallExpr, calleeDecl: AstFuncDecl, arg: AstFuncArg, idx: Int64,
         expectedTy: Option<Type>, previousDefaultArgs: ArrayList<Value>): Value {
         if (arg.TestAttr(AstAttribute.HAS_INITIAL)) {
@@ -5670,7 +5801,8 @@ public class Translator {
                 TranslateFuncInstArgs(expr, calleeDecl)
             }
             var value = CreateApplyMaybeWithException(retTy, defaultFunc,
-                FuncCallContext(args: previousDefaultArgs.clone(), instTypeArgs: instArgs))
+                FuncCallContext(args: previousDefaultArgs.clone(), instTypeArgs: instArgs,
+                    thisType: GetMemberFuncCallerInstType(expr)))
             if (let Some(targetTy) <- expectedTy) {
                 value = CoerceValueForExpectedType(value, targetTy)
             }
