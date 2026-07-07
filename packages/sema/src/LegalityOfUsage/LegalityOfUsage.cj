@@ -2,6 +2,7 @@ package cangjie_compiler::sema.LegalityOfUsage
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::sema.*
 
@@ -417,11 +418,14 @@ public func CheckSubscriptLegality(root: Node): ArrayList<SubscriptLegalityIssue
 public func CheckLegalityOfUsage(
     ctx: ASTContext,
     pkg: Package,
+    diag: BasicDiagnosticEngine,
+    typeManager: TypeManager,
     opts!: OptionGlobalOptions = OptionGlobalOptions()
 ): LegalityOfUsageResult {
     SetAllFuncBodyCaptureKinds(pkg)
     let result = LegalityOfUsageResult()
     AppendStaticMemberGenericIssues(result.staticMemberGenericIssues, CheckStaticMembersWithGeneric(pkg))
+    TypeCheckReferenceCheckUsageOfDeprecated(diag, typeManager, pkg)
     AppendInitializationIssues(result.initializationIssues, CheckInitialization(ctx, pkg, opts: opts))
     AppendGlobalIssues(result.globalVarInitializationIssues, CheckGlobalVarInitialization(pkg))
     AppendAccessIssues(result.accessLevelViolations, CheckAccessLevelValidity(pkg))

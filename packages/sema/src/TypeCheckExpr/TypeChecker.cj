@@ -1536,7 +1536,7 @@ public class TypeChecker {
 
     private func RunLegalityOfUsageCheck(ctx: ASTContext, pkg: Package): Unit {
         if (let Some(diagValue) <- impl.diag) {
-            let result = CheckLegalityOfUsage(ctx, pkg, opts: GlobalOptions())
+            let result = CheckLegalityOfUsage(ctx, pkg, diagValue, impl.typeManager, opts: GlobalOptions())
             EmitLegalityOfUsage(diagValue, result)
         }
     }
