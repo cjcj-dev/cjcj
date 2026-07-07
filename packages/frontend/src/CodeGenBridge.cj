@@ -326,6 +326,19 @@ public func ConvertFrontendOptionsToCodegenOptions(options: GlobalOptions): Glob
     return options
 }
 
+public func GetVarInitDepMap(chirPkg: RealCHIRPackage): HashMap<String, String> {
+    let dep = HashMap<String, String>()
+    for (globalVar in chirPkg.GetGlobalVarsWithInit()) {
+        if (globalVar.GetRawMangledName().isEmpty()) {
+            continue
+        }
+        if (let Some(initFunc) <- globalVar.GetInitFunc()) {
+            dep[globalVar.GetRawMangledName()] = initFunc.GetIdentifierWithoutPrefix()
+        }
+    }
+    return dep
+}
+
 private func emitPackageModules(
     instance: CompilerInstance,
     pkg: RealCHIRPackage,

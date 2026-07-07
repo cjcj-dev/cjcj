@@ -584,6 +584,10 @@ public class CompilerInstance {
         }
         if (let Some(realPkg) <- BuildRealCHIRForASTPackage(this, realASTPkg)) {
             chirData.AppendNewRealPackage(realPkg)
+            chirInfo.varInitDepMap.clear()
+            for ((rawMangledName, initFuncName) in GetVarInitDepMap(realPkg)) {
+                chirInfo.varInitDepMap[rawMangledName] = initFuncName
+            }
         } else {
             if (diag.GetErrorCount() != 0) {
                 return false
