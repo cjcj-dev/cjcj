@@ -283,7 +283,14 @@ public open class Expression <: Base {
     }
 
     public func MoveTo(block: Block): Unit {
-        DetachFromBlockOnly()
+        let parentBlock = parent ?? throw IllegalStateException("expression has no parent block")
+        CJC_ASSERT(refEq(GetParentBlockGroup().getOrThrow(), block.GetParentBlockGroup().getOrThrow()))
+        parentBlock.RemoveExprOnly(this)
+        if (let Some(term) <- AsTerminator()) {
+            for (successor in term.GetSuccessors()) {
+                successor.RemovePredecessor(parentBlock)
+            }
+        }
         block.AppendExpression(this)
     }
 

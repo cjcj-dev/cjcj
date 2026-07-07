@@ -1,6 +1,7 @@
 package cangjie_compiler::chir
 
 import cangjie_compiler::basic.Linkage as BasicLinkage
+import cangjie_compiler::utils.CJC_ASSERT
 import std.collection.*
 
 public open class Value <: Base & Hashable & Equatable<Value> {
@@ -408,20 +409,33 @@ public class Block <: Value {
         }
     }
 
-    public func AppendExpression(expression: Expression): Unit {
-        var hasExpression = false
-        for (expr in exprs) {
-            if (refEq(expr, expression)) {
-                hasExpression = true
-                break
-            }
-        }
-        if (!hasExpression) {
-            exprs.add(expression)
-        }
+    public func AppendExprOnly(expr: Expression): Unit {
+        CJC_ASSERT(refEq(expr.GetParentBlockGroup().getOrThrow(), GetParentBlockGroup().getOrThrow()))
+        exprs.add(expr)
+    }
+
+    public func AppendNonTerminatorExpression(expression: Expression): Unit {
+        CJC_ASSERT(!expression.IsTerminator())
+        CJC_ASSERT(refEq(expression.GetParentBlockGroup().getOrThrow(), GetParentBlockGroup().getOrThrow()))
+        expression.GetParentBlock().getOrThrow().RemoveExprOnly(expression)
         expression.SetParent(this)
+        AppendExprOnly(expression)
+    }
+
+    public func AppendExpression(expression: Expression): Unit {
         if (let Some(term) <- expression.AsTerminator()) {
-            term.SyncSuccessorPredecessors()
+            AppendTerminator(term)
+        } else {
+            AppendNonTerminatorExpression(expression)
+        }
+    }
+
+    public func AppendTerminator(term: Terminator): Unit {
+        CJC_ASSERT(refEq(term.GetParentBlockGroup().getOrThrow(), GetParentBlockGroup().getOrThrow()))
+        AppendExprOnly(term)
+        term.SetParent(this)
+        for (successor in term.GetSuccessors()) {
+            successor.AddPredecessor(this)
         }
     }
 
@@ -551,11 +565,16 @@ public class Block <: Value {
             }
         }
         if (!hasBlock) {
-            predecessors.add(block)
+            AppendPredecessorOnly(block)
+            AddUserOnly(block.GetTerminator().getOrThrow())
         }
     }
 
-    public func RemovePredecessor(block: Block): Unit {
+    public func AppendPredecessorOnly(block: Block): Unit {
+        predecessors.add(block)
+    }
+
+    public func RemovePredecessorOnly(block: Block): Unit {
         var idx: Int64 = 0
         while (idx < predecessors.size) {
             if (refEq(predecessors[idx], block)) {
@@ -564,6 +583,10 @@ public class Block <: Value {
             }
             idx++
         }
+    }
+
+    public func RemovePredecessor(block: Block): Unit {
+        RemovePredecessorOnly(block)
         if (let Some(term) <- block.GetTerminator()) {
             RemoveUserOnly(term)
         }
@@ -734,12 +757,25 @@ public class BlockGroup <: Value {
         }
     }
 
-    public func ClearBlockGroup(): Unit {
-        for (block in blocks) {
-            block.ClearPredecessorsOnly()
-        }
+    public func ClearBlocksOnly(): Unit {
         blocks.clear()
-        entryBlock = None
+    }
+
+    public func SetOwnedFuncOnly(newFunc: Option<Function>): Unit {
+        ownerFunc = newFunc
+    }
+
+    public func ClearBlockGroup(): Unit {
+        for (block in GetBlocks()) {
+            block.RemoveSelfFromBlockGroup()
+        }
+        ClearBlocksOnly()
+        SetEntryBlock(None)
+        SetOwnedFuncOnly(None)
+        if (let Some(expr) <- ownerExpression) {
+            RemoveUserOnly(expr)
+        }
+        ownerExpression = None
     }
 
     public func Clone(builder: CHIRBuilder, newFunc: Function): BlockGroup {
