@@ -2,6 +2,7 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
 import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
@@ -173,6 +174,16 @@ private func enumCtorArity(decl: Decl): UInt64 {
         }
     }
     return 0u64
+}
+
+private func preCheckGetNormalizedName(sym: Symbol): String {
+    if (let Some(node) <- sym.node) {
+        let isStaticConstructor = node.TestAttr(Attribute.STATIC) && node.TestAttr(Attribute.CONSTRUCTOR)
+        if (isStaticConstructor && sym.name == "static.init") {
+            return "init"
+        }
+    }
+    return sym.name
 }
 
 private func collectDecl(ctx: ASTContext, decl: Decl): Bool {
@@ -733,26 +744,27 @@ private func preCheckFuncSameSignature(typeManager: TypeManager, left: FuncDecl,
 }
 
 // C++ src/Sema/Diags.cpp:217 DiagOverloadConflict.
-// The 'kind' prefix is message-only (not used by the same-signature partition); it approximates
-// C++'s IsClassOrEnumConstructor/IsStaticInitializer via the CONSTRUCTOR / STATIC+CONSTRUCTOR attrs.
 private func preCheckDiagOverloadConflict(diag: BasicDiagnosticEngine, sameSigFuncs: ArrayList<FuncDecl>): Unit {
     if (sameSigFuncs.isEmpty()) {
         return
     }
     let baseFd = sameSigFuncs[0]
-    let identifier = baseFd.identifier.Val()
-    // C++ Diags.cpp:227-234: "macro" / class-or-enum "constructor" / static-init "static constructor".
+    let identifier = if (baseFd.identifierForLsp.isEmpty()) {
+        baseFd.identifier.Val()
+    } else {
+        baseFd.identifierForLsp
+    }
     let kind = if (baseFd.TestAttr(Attribute.MACRO_FUNC)) {
         "macro"
-    } else if (baseFd.TestAttr(Attribute.STATIC) && baseFd.TestAttr(Attribute.CONSTRUCTOR)) {
-        "static constructor"
-    } else if (baseFd.TestAttr(Attribute.CONSTRUCTOR)) {
+    } else if (IsClassOrEnumConstructor(baseFd)) {
         "constructor"
+    } else if (IsStaticInitializer(baseFd)) {
+        "static constructor"
     } else {
         "function"
     }
     let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_overload_conflicts,
-        MakeRange(baseFd.identifier.Begin(), baseFd.identifier.End()), arguments: [kind, identifier])
+        MakeRange(baseFd.identifier.Begin(), identifier), arguments: [kind, identifier])
     var hasConstraints = false
     for (fd in sameSigFuncs) {
         if (let Some(generic) <- fd.GetGeneric()) {
@@ -767,10 +779,161 @@ private func preCheckDiagOverloadConflict(diag: BasicDiagnosticEngine, sameSigFu
     var idx = 1
     while (idx < sameSigFuncs.size) {
         let fd = sameSigFuncs[idx]
-        builder.AddNote(MakeRange(fd.identifier.Begin(), fd.identifier.End()), "conflict with the declaration")
+        let fdIdentifier = if (fd.identifierForLsp.isEmpty()) { fd.identifier.Val() } else { fd.identifierForLsp }
+        builder.AddNote(MakeRange(fd.identifier.Begin(), fdIdentifier), "conflict with the declaration")
         idx++
     }
     builder.Emit()
+}
+
+// C++ src/Sema/Diags.cpp:382 DiagStaticAndNonStaticOverload.
+private func preCheckDiagStaticAndNonStaticOverload(
+    diag: BasicDiagnosticEngine,
+    fd: FuncDecl,
+    firstNonStatic: FuncDecl
+): Unit {
+    if (!fd.ShouldDiagnose()) {
+        return
+    }
+    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_static_function_overload_conflicts,
+        MakeRange(fd.identifier.Begin(), fd.identifier.End()), arguments: [fd.identifier.Val()])
+    builder.AddNote(MakeRange(firstNonStatic.identifier.Begin(), firstNonStatic.identifier.End()),
+        "non-static function is here")
+    builder.Emit()
+}
+
+// C++ src/Sema/PreCheck.cpp:1486 PreCheckMacroRedefinition.
+private func preCheckMacroRedefinition(diag: BasicDiagnosticEngine, funcs: ArrayList<FuncDecl>): Unit {
+    let macroVec = ArrayList<FuncDecl>()
+    for (funcDecl in funcs) {
+        if (funcDecl.TestAttr(Attribute.MACRO_FUNC) && !funcDecl.TestAttr(Attribute.COMPILER_ADD)) {
+            macroVec.add(funcDecl)
+        }
+    }
+    if (macroVec.size <= 1) {
+        return
+    }
+    for (macroDecl in macroVec) {
+        if ((let None <- macroDecl.funcBody)) {
+            return
+        }
+        let body = macroDecl.funcBody.getOrThrow()
+        if (body.paramLists.isEmpty()) {
+            return
+        }
+    }
+    let cnt0 = macroVec[0].funcBody.getOrThrow().paramLists[0].params.size
+    let cnt1 = macroVec[1].funcBody.getOrThrow().paramLists[0].params.size
+    if ((macroVec.size == 2 && cnt0 == cnt1) || macroVec.size > 2) {
+        for (macroDecl2 in macroVec) {
+            let builder = diag.Diagnose(macroDecl2.begin, macroDecl2.end,
+                BasicDiagKind.sema_expand_macro_redefinition,
+                args: [BasicDiagArgument(macroDecl2.identifier.Val())])
+            builder.Emit()
+        }
+    }
+}
+
+// C++ src/Sema/PreCheck.cpp:1513 PreCheckFuncRedefinitionForEnum.
+private func preCheckFuncRedefinitionForEnum(diag: BasicDiagnosticEngine, funcs: ArrayList<FuncDecl>): Unit {
+    if (funcs.isEmpty()) {
+        return
+    }
+    if ((let None <- funcs[0].outerDecl)) {
+        return
+    }
+    let outerDecl = funcs[0].outerDecl.getOrThrow()
+    let enumDecl = (outerDecl as EnumDecl) ?? return
+    let paramNum = HashSet<UInt64>()
+    let ctorNames = HashMap<String, Decl>()
+    for (constructor in enumDecl.constructors) {
+        ctorNames[constructor.identifier.Val()] = constructor
+    }
+    for (funcDecl in funcs) {
+        if (!funcDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            if (let Some(constructorDecl) <- ctorNames.get(funcDecl.identifier.Val())) {
+                preCheckDiagRedefinitionWithFoundNode(diag, funcDecl, constructorDecl)
+            }
+            continue
+        }
+        let paramTys = preCheckFuncParamTys(funcDecl)
+        let arity = UInt64(paramTys.size)
+        if (paramNum.contains(arity)) {
+            let builder = diag.Diagnose(funcDecl.begin, funcDecl.end,
+                BasicDiagKind.sema_duplicated_item_in_enum,
+                args: [BasicDiagArgument(funcDecl.identifier.Val()), BasicDiagArgument(enumDecl.identifier.Val())])
+            builder.Emit()
+        } else {
+            paramNum.add(arity)
+        }
+    }
+}
+
+// C++ src/Sema/PreCheck.cpp:1546 PreCheckFuncRedefinitionForFFI.
+private func preCheckFuncRedefinitionForFFI(diag: BasicDiagnosticEngine, funcs: ArrayList<FuncDecl>): Unit {
+    let nativeDuplicates = ArrayList<FuncDecl>()
+    for (funcDecl in funcs) {
+        if (funcDecl.TestAnyAttr(Attribute.FOREIGN, Attribute.C)) {
+            nativeDuplicates.add(funcDecl)
+        }
+    }
+    if (nativeDuplicates.size <= 1) {
+        return
+    }
+    var idx = 1
+    while (idx < nativeDuplicates.size) {
+        let fd = nativeDuplicates[idx]
+        if (fd.ShouldDiagnose() && !fd.TestAttr(Attribute.CONSTRUCTOR)) {
+            preCheckDiagRedefinitionWithFoundNode(diag, fd, nativeDuplicates[0])
+        }
+        idx++
+    }
+}
+
+// C++ src/Sema/PreCheck.cpp:1562 PreCheckFuncStaticConflict.
+private func preCheckFuncStaticConflict(diag: BasicDiagnosticEngine, funcs: ArrayList<FuncDecl>): Unit {
+    let staticFuncs = ArrayList<FuncDecl>()
+    var firstNonStatic: Option<FuncDecl> = None
+    for (funcDecl in funcs) {
+        if (funcDecl.TestAttr(Attribute.STATIC) && !funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+            staticFuncs.add(funcDecl)
+        }
+        if (firstNonStatic.isNone() && !funcDecl.TestAttr(Attribute.STATIC) &&
+            !funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+            firstNonStatic = Some(funcDecl)
+        }
+    }
+    if (staticFuncs.isEmpty()) {
+        return
+    }
+    if (let Some(nonStatic) <- firstNonStatic) {
+        for (staticFunc in staticFuncs) {
+            preCheckDiagStaticAndNonStaticOverload(diag, staticFunc, nonStatic)
+        }
+    }
+}
+
+// C++ src/Sema/CJMP/CheckCJMP.cpp:499 MPTypeCheckerImpl::FilterOutCommonCandidatesIfSpecificExist.
+private func FilterOutCommonCandidatesIfSpecificExist(candidates: HashMap<Names, ArrayList<FuncDecl>>): Unit {
+    for ((_, funcs) in candidates) {
+        var hasSpecificCandidates = false
+        for (funcDecl in funcs) {
+            if (funcDecl.TestAttr(Attribute.SPECIFIC)) {
+                hasSpecificCandidates = true
+                break
+            }
+        }
+        if (hasSpecificCandidates) {
+            var idx: Int64 = 0
+            while (idx < funcs.size) {
+                if (funcs[idx].TestAttr(Attribute.COMMON) && funcs[idx].TestAttr(Attribute.FROM_COMMON_PART)) {
+                    funcs.remove(at: idx)
+                } else {
+                    idx++
+                }
+            }
+        }
+    }
 }
 
 // C++ src/Sema/PreCheck.cpp:1597 PreCheckFuncRedefinitionWithSameSignature.
@@ -804,33 +967,39 @@ private func preCheckFuncRedefinitionWithSameSignature(typeManager: TypeManager,
     }
 }
 
-// C++ src/Sema/PreCheck.cpp:1651 PreCheckFuncRedefinition (function grouping; the four sibling
-// checks macro/enum/FFI/static-conflict are separate C++ passes, out of C2e[A] scope).
-// 'syms' must be the FUNC_DECL symbols in C++ GetSymsByASTKind order (SearchOrder.POS_DESC) so the
-// base-vs-conflict diagnostic ordering matches the reference compiler.
+// C++ src/Sema/PreCheck.cpp:1651 PreCheckFuncRedefinition.
 public func PreCheckFuncRedefinition(pkg: Package, syms: ArrayList<Symbol>, diag: BasicDiagnosticEngine,
     typeManager: TypeManager): Unit {
     if (pkg.TestAttr(Attribute.IMPORTED) || pkg.TestAttr(Attribute.TOOL_ADD)) {
         return
     }
-    let groups = TreeMap<String, ArrayList<FuncDecl>>()
+    let candidates = HashMap<Names, ArrayList<FuncDecl>>()
     for (sym in syms) {
         if (let Some(node) <- sym.node) {
             if (let Some(fd) <- (node as FuncDecl)) {
                 if (!fd.TestAttr(Attribute.MACRO_INVOKE_FUNC) && (let None <- fd.propDecl)) {
-                    let key = GetScopeNameWithoutTail(sym.scopeName) + "\u{0}" + sym.name
-                    if (let Some(list) <- groups.get(key)) {
-                        list.add(fd)
+                    let names = Names(preCheckGetNormalizedName(sym), GetScopeNameWithoutTail(sym.scopeName))
+                    if (let Some(funcs) <- candidates.get(names)) {
+                        funcs.add(fd)
                     } else {
-                        let list = ArrayList<FuncDecl>()
-                        list.add(fd)
-                        groups[key] = list
+                        let newFuncs = ArrayList<FuncDecl>()
+                        newFuncs.add(fd)
+                        candidates[names] = newFuncs
                     }
                 }
             }
         }
     }
+    FilterOutCommonCandidatesIfSpecificExist(candidates)
+    let groups = TreeMap<String, ArrayList<FuncDecl>>()
+    for ((names, funcs) in candidates) {
+        groups[names.scopeName + "\u{0}" + names.name] = funcs
+    }
     for ((_, funcs) in groups) {
+        preCheckMacroRedefinition(diag, funcs)
+        preCheckFuncRedefinitionForEnum(diag, funcs)
+        preCheckFuncRedefinitionForFFI(diag, funcs)
+        preCheckFuncStaticConflict(diag, funcs)
         preCheckFuncRedefinitionWithSameSignature(typeManager, diag, funcs)
     }
 }
