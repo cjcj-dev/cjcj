@@ -300,6 +300,16 @@ foreign {
         args: CPointer<LLVMValueRef>, argCount: UInt32, name: CString): LLVMValueRef
     func LLVMSelfhostCreatePointerCast(builder: LLVMBuilderRef, value: LLVMValueRef, destType: LLVMTypeRef,
         name: CString): LLVMValueRef
+    func LLVMSelfhostSetAnyRegCallingConv(inst: LLVMValueRef): Unit
+    func LLVMSelfhostGetGEPResultElementType(gep: LLVMValueRef): LLVMTypeRef
+    func LLVMSelfhostCreateAtomicCmpXchg(builder: LLVMBuilderRef, ptr: LLVMValueRef, cmp: LLVMValueRef,
+        newValue: LLVMValueRef): LLVMValueRef
+    func LLVMSelfhostCreateAtomicRMW(builder: LLVMBuilderRef, op: UInt32, ptr: LLVMValueRef,
+        value: LLVMValueRef): LLVMValueRef
+    func LLVMSelfhostCreateAtomicLoad(builder: LLVMBuilderRef, valueType: LLVMTypeRef, ptr: LLVMValueRef,
+        alignBytes: UInt32, name: CString): LLVMValueRef
+    func LLVMSelfhostCreateAtomicStore(builder: LLVMBuilderRef, value: LLVMValueRef, ptr: LLVMValueRef,
+        alignBytes: UInt32): LLVMValueRef
     func LLVMSelfhostInstructionSetMetadata(inst: LLVMValueRef, kind: CString, kindLen: UInt32,
         metadata: LLVMMetadataRef): Unit
     func LLVMSelfhostCreateGCReadStaticAgg(builder: LLVMBuilderRef, module: LLVMModuleRef, aggType: LLVMTypeRef,

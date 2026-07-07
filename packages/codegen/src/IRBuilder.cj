@@ -18,12 +18,14 @@ import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.GetMethodIdxInAutoEnvObject
 import cangjie_compiler::chir.IntLiteral
+import cangjie_compiler::chir.IntrinsicKind
 import cangjie_compiler::chir.LiteralValue
 import cangjie_compiler::chir.Load
 import cangjie_compiler::chir.LocalVar
 import cangjie_compiler::chir.RawArrayType
 import cangjie_compiler::chir.RuneLiteral
 import cangjie_compiler::chir.StringLiteral
+import cangjie_compiler::chir.StructType
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeCast
@@ -56,11 +58,15 @@ private let GCWRITE_GENERIC_PAYLOAD_INTRINSIC_NAME: String = "llvm.cj.gcwrite.ge
 private let MALLOC_OBJECT_INTRINSIC_NAME: String = "llvm.cj.malloc.object"
 private let CJ_MEMSET_INTRINSIC_NAME: String = "llvm.cj.memset"
 private let GCWRITE_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.ref"
+private let GCREAD_WEAK_REF_INTRINSIC_NAME: String = "llvm.cj.gcread.weakref"
 private let GCREAD_STATIC_REF_INTRINSIC_NAME: String = "llvm.cj.gcread.static.ref"
 private let GCWRITE_STATIC_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.static.ref"
+private let SET_LOCATION_INTRINSIC_NAME: String = "llvm.cj.set.location"
+private let FILL_IN_STACK_TRACE_INTRINSIC_NAME: String = "llvm.cj.fill.in.stack.trace"
 private let NEW_CJ_THREAD_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThread"
 private let NEW_CJ_THREAD_NO_RETURN_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThreadNoReturn"
 private let MIN_ANDROID_ARM32_ENUM_ALIGN: UInt32 = 4u32
+private let SEQ_CST_AS_INT32: Int64 = 5
 private let LLVM_INTEGER_TYPE_KIND: Int32 = 8
 private let LLVM_FUNCTION_TYPE_KIND: Int32 = 9
 private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
@@ -92,6 +98,127 @@ private func IsLoadExprForAllocatedGenericRef(chirExpression: Expression): Bool 
     let locationExpr = (location as LocalVar).getOrThrow().GetExpr().getOrThrow()
     let locationExprKind = locationExpr.GetExprKind()
     return locationExprKind == ExprKind.ALLOCATE || locationExprKind == ExprKind.ALLOCATE_WITH_EXCEPTION
+}
+
+private func IntrinsicRuntimeFunctionName(kind: IntrinsicKind): Option<String> {
+    return match (kind) {
+        case IntrinsicKind.FUTURE_INIT => Some("CJ_MCC_FutureInit")
+        case IntrinsicKind.FUTURE_IS_COMPLETE => Some("CJ_MCC_FutureIsComplete")
+        case IntrinsicKind.FUTURE_WAIT => Some("CJ_MCC_FutureWait")
+        case IntrinsicKind.FUTURE_NOTIFYALL => Some("CJ_MCC_FutureNotifyAll")
+        case IntrinsicKind.IS_THREAD_OBJECT_INITED => Some("CJ_MCC_IsThreadObjectInited")
+        case IntrinsicKind.GET_THREAD_OBJECT => Some("CJ_MCC_GetCurrentCJThreadObject")
+        case IntrinsicKind.SET_THREAD_OBJECT => Some("CJ_MCC_SetCurrentCJThreadObject")
+        case IntrinsicKind.MUTEX_INIT => Some("CJ_MCC_MutexInit")
+        case IntrinsicKind.CJ_MUTEX_LOCK => Some("CJ_MCC_MutexLock")
+        case IntrinsicKind.MUTEX_TRY_LOCK => Some("CJ_MCC_MutexTryLock")
+        case IntrinsicKind.MUTEX_CHECK_STATUS => Some("CJ_MCC_MutexCheckStatus")
+        case IntrinsicKind.MUTEX_UNLOCK => Some("CJ_MCC_MutexUnlock")
+        case IntrinsicKind.WAITQUEUE_INIT => Some("CJ_MCC_WaitQueueInit")
+        case IntrinsicKind.MONITOR_INIT => Some("CJ_MCC_WaitQueueForMonitorInit")
+        case IntrinsicKind.MOITIOR_WAIT => Some("CJ_MCC_MonitorWait")
+        case IntrinsicKind.MOITIOR_NOTIFY => Some("CJ_MCC_MonitorNotify")
+        case IntrinsicKind.MOITIOR_NOTIFY_ALL => Some("CJ_MCC_MonitorNotifyAll")
+        case IntrinsicKind.MULTICONDITION_WAIT => Some("CJ_MCC_MultiConditionMonitorWait")
+        case IntrinsicKind.MULTICONDITION_NOTIFY => Some("CJ_MCC_MultiConditionMonitorNotify")
+        case IntrinsicKind.MULTICONDITION_NOTIFY_ALL => Some("CJ_MCC_MultiConditionMonitorNotifyAll")
+        case IntrinsicKind.SLEEP => Some("CJ_MRT_Sleep")
+        case _ => None
+    }
+}
+
+private func IntrinsicHasFastNativeAttr(kind: IntrinsicKind): Bool {
+    return kind == IntrinsicKind.FUTURE_INIT ||
+        kind == IntrinsicKind.FUTURE_IS_COMPLETE ||
+        kind == IntrinsicKind.FUTURE_NOTIFYALL ||
+        kind == IntrinsicKind.IS_THREAD_OBJECT_INITED ||
+        kind == IntrinsicKind.GET_THREAD_OBJECT ||
+        kind == IntrinsicKind.SET_THREAD_OBJECT ||
+        kind == IntrinsicKind.MUTEX_INIT ||
+        kind == IntrinsicKind.MUTEX_TRY_LOCK ||
+        kind == IntrinsicKind.MUTEX_CHECK_STATUS ||
+        kind == IntrinsicKind.MUTEX_UNLOCK ||
+        kind == IntrinsicKind.WAITQUEUE_INIT ||
+        kind == IntrinsicKind.MONITOR_INIT ||
+        kind == IntrinsicKind.MOITIOR_NOTIFY ||
+        kind == IntrinsicKind.MOITIOR_NOTIFY_ALL ||
+        kind == IntrinsicKind.MULTICONDITION_NOTIFY ||
+        kind == IntrinsicKind.MULTICONDITION_NOTIFY_ALL
+}
+
+private func IntrinsicFunctionAttributes(kind: IntrinsicKind): ArrayList<String> {
+    let attributes = ArrayList<String>()
+    if (IntrinsicHasFastNativeAttr(kind)) {
+        attributes.add(FAST_NATIVE_ATTR)
+    }
+    return attributes
+}
+
+private func IntrinsicLLVMName(kind: IntrinsicKind): Option<String> {
+    return match (kind) {
+        case IntrinsicKind.GET_MAX_HEAP_SIZE => Some("llvm.cj.get.max.heap.size")
+        case IntrinsicKind.GET_ALLOCATE_HEAP_SIZE => Some("llvm.cj.get.allocated.heap.size")
+        case IntrinsicKind.GET_REAL_HEAP_SIZE => Some("llvm.cj.get.real.heap.size")
+        case IntrinsicKind.GET_THREAD_NUMBER => Some("llvm.cj.get.thread.number")
+        case IntrinsicKind.GET_BLOCKING_THREAD_NUMBER => Some("llvm.cj.get.blocking.thread.number")
+        case IntrinsicKind.GET_NATIVE_THREAD_NUMBER => Some("llvm.cj.get.native.thread.number")
+        case IntrinsicKind.DUMP_CJ_HEAP_DATA => Some("llvm.cj.dump.heap.data")
+        case IntrinsicKind.GET_GC_COUNT => Some("llvm.cj.get.gc.count")
+        case IntrinsicKind.GET_GC_TIME_US => Some("llvm.cj.get.gc.time.us")
+        case IntrinsicKind.GET_GC_FREED_SIZE => Some("llvm.cj.get.gc.freed.size")
+        case IntrinsicKind.START_CJ_CPU_PROFILING => Some("llvm.cj.start.cpu.profiling")
+        case IntrinsicKind.STOP_CJ_CPU_PROFILING => Some("llvm.cj.stop.cpu.profiling")
+        case IntrinsicKind.INVOKE_GC => Some("llvm.cj.invoke.gc")
+        case IntrinsicKind.SET_GC_THRESHOLD => Some("llvm.cj.set.gc.threshold")
+        case IntrinsicKind.CROSS_ACCESS_BARRIER => Some("llvm.cj.cross.access.barrier")
+        case IntrinsicKind.CREATE_EXPORT_HANDLE => Some("llvm.cj.create.export.handle")
+        case IntrinsicKind.GET_EXPORTED_REF => Some("llvm.cj.get.exported.ref")
+        case IntrinsicKind.REMOVE_EXPORTED_REF => Some("llvm.cj.remove.exported.ref")
+        case IntrinsicKind.GET_JSLAMBDA_ADDR => Some("llvm.cj.get.lambda.addr")
+        case IntrinsicKind.ABS => Some("llvm.abs")
+        case IntrinsicKind.FABS => Some("llvm.fabs")
+        case IntrinsicKind.FLOOR => Some("llvm.floor")
+        case IntrinsicKind.CEIL => Some("llvm.ceil")
+        case IntrinsicKind.TRUNC => Some("llvm.trunc")
+        case IntrinsicKind.SIN => Some("llvm.sin")
+        case IntrinsicKind.COS => Some("llvm.cos")
+        case IntrinsicKind.EXP => Some("llvm.exp")
+        case IntrinsicKind.EXP2 => Some("llvm.exp2")
+        case IntrinsicKind.LOG => Some("llvm.log")
+        case IntrinsicKind.LOG2 => Some("llvm.log2")
+        case IntrinsicKind.LOG10 => Some("llvm.log10")
+        case IntrinsicKind.SQRT => Some("llvm.sqrt")
+        case IntrinsicKind.ROUND => Some("llvm.round")
+        case IntrinsicKind.POW => Some("llvm.pow")
+        case IntrinsicKind.POWI => Some("llvm.powi")
+        case IntrinsicKind.ATOMIC_STORE => Some("llvm.cj.atomic.store")
+        case IntrinsicKind.ATOMIC_COMPARE_AND_SWAP => Some("llvm.cj.atomic.compare.swap")
+        case IntrinsicKind.ATOMIC_LOAD => Some("llvm.cj.atomic.load")
+        case IntrinsicKind.ATOMIC_SWAP => Some("llvm.cj.atomic.swap")
+        case IntrinsicKind.BLACK_BOX => Some("llvm.cj.blackhole")
+        case _ => None
+    }
+}
+
+private func IntrinsicIsPlatformDependent(kind: IntrinsicKind): Bool {
+    return kind == IntrinsicKind.GET_MAX_HEAP_SIZE ||
+        kind == IntrinsicKind.GET_ALLOCATE_HEAP_SIZE ||
+        kind == IntrinsicKind.GET_REAL_HEAP_SIZE ||
+        kind == IntrinsicKind.GET_THREAD_NUMBER ||
+        kind == IntrinsicKind.GET_BLOCKING_THREAD_NUMBER ||
+        kind == IntrinsicKind.GET_NATIVE_THREAD_NUMBER ||
+        kind == IntrinsicKind.GET_GC_COUNT ||
+        kind == IntrinsicKind.GET_GC_FREED_SIZE
+}
+
+private func IsReflectIntrinsicFunctionName(name: String): Bool {
+    return name == "CJ_MCC_ApplyCJInstanceMethod" ||
+        name == "CJ_MCC_ApplyCJStaticMethod" ||
+        name == "CJ_MCC_ApplyCJGenericInstanceMethod" ||
+        name == "CJ_MCC_ApplyCJGenericStaticMethod" ||
+        name == "CJ_MCC_CheckMethodActualArgs" ||
+        name == "CJ_MCC_GetOrCreateTypeInfoForReflect" ||
+        name == "CJ_MCC_NewAndInitEnumTupleObject"
 }
 
 public class IRBuilder2 <: Resource {
@@ -1221,6 +1348,7 @@ public class IRBuilder2 <: Resource {
         let callArgs = TransformCGFunctionArgs(calleeType, args, methodTypeInfoArg, instTypeArgs, sretTypeInfoArg,
             thisTypeInfoArg, name: name)
         let llvmCallArgs = TransformLLVMCallArgs(calleeType, callArgs, name: name)
+        CallSetLocation()
         if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
             let retTy = funcType.GetReturnType()
             let callName = if (retTy.IsUnit() || retTy.IsNothing() || retTy.IsVoid() || calleeType.HasSRet()) {
@@ -1778,6 +1906,499 @@ public class IRBuilder2 <: Resource {
             return LLVMNullValue()
         }
         return CreateCall(callee, calleeType, args, name: name)
+    }
+
+    public func CallSetLocation(): LLVMValueRef {
+        if (!GetCGContext().GetCompileOptions().enableCompileDebug) {
+            return LLVMNullValue()
+        }
+        let callInst = CreateIntrinsicCallNoInvoke(SET_LOCATION_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(),
+            ArrayList<LLVMValueRef>())
+        if (!callInst.isNull() && GetCGContext().GetCompileOptions().target.arch != ArchType.ARM32) {
+            unsafe { LLVMSelfhostSetAnyRegCallingConv(callInst) }
+        }
+        return callInst
+    }
+
+    public func CallRuntimeIntrinsics(kind: IntrinsicKind, args: ArrayList<Value>,
+        resultType: Option<Type>): LLVMValueRef {
+        return CallMappedIntrinsic(kind, args, resultType)
+    }
+
+    public func CallInteropIntrinsics(kind: IntrinsicKind, args: ArrayList<Value>,
+        resultType: Option<Type>): LLVMValueRef {
+        return CallMappedIntrinsic(kind, args, resultType)
+    }
+
+    public func CallSyncIntrinsics(kind: IntrinsicKind, args: ArrayList<Value>, typeArgs: ArrayList<Type>,
+        resultType: Option<Type>): LLVMValueRef {
+        if (IsAtomicIntrinsicKind(kind)) {
+            return CallAtomicIntrinsics(kind, MapIntrinsicArguments(args), typeArgs, resultType)
+        }
+        return CallMappedIntrinsic(kind, args, resultType)
+    }
+
+    public func CallStackTraceIntrinsic(kind: IntrinsicKind, args: ArrayList<Value>,
+        resultType: Option<Type>): LLVMValueRef {
+        let parameters = MapIntrinsicArguments(args)
+        if (kind == IntrinsicKind.FILL_IN_STACK_TRACE) {
+            CJC_ASSERT(!parameters.isEmpty())
+            let retTy = resultType.getOrThrow()
+            let uint64ArrayTy = (DeRef(retTy) as RawArrayType).getOrThrow()
+            let funcArgs = RawValuesOfCGValues(parameters)
+            let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+            funcArgs[0] = CreateBitCast(CreateTypeInfo(uint64ArrayTy), i8PtrTy)
+            return CreateIntrinsicCallNoInvoke(FILL_IN_STACK_TRACE_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(),
+                funcArgs)
+        }
+        if (kind == IntrinsicKind.DECODE_STACK_TRACE) {
+            let retTy = resultType.getOrThrow()
+            let retCGType = CGType.GetOrCreate(cgMod, retTy)
+            let resultStructTy = (retTy as StructType).getOrThrow()
+            let uint8ArrayTy = (DeRef(resultStructTy.GetStructDef().GetInstanceVar(0).ty) as RawArrayType)
+                .getOrThrow()
+            parameters.add(CreateTypeInfoAsInt8RefCGValue(uint8ArrayTy))
+            return CallIntrinsicFunction(retCGType.GetLLVMType(), "CJ_MCC_DecodeStackTrace", parameters,
+                ArrayList<String>())
+        }
+        throw IllegalStateException("unsupported stack trace intrinsic")
+    }
+
+    public func CallThreadInfoIntrinsic(kind: IntrinsicKind, args: ArrayList<Value>,
+        resultType: Option<Type>): LLVMValueRef {
+        let parameters = MapIntrinsicArguments(args)
+        let retTy = resultType.getOrThrow()
+        let retCGType = CGType.GetOrCreate(cgMod, retTy)
+        if (kind == IntrinsicKind.DUMP_CURRENT_THREAD_INFO) {
+            let snapshotInfoDef = (retTy as StructType).getOrThrow().GetStructDef()
+            let stackTraceArrayTy = (DeRef(snapshotInfoDef.GetInstanceVar(2).ty) as RawArrayType).getOrThrow()
+            parameters.add(CreateTypeInfoAsInt8RefCGValue(stackTraceArrayTy))
+            let charArrayTy = (DeRef(snapshotInfoDef.GetInstanceVar(0).ty) as RawArrayType).getOrThrow()
+            parameters.add(CreateTypeInfoAsInt8RefCGValue(charArrayTy))
+            return CallIntrinsicFunction(retCGType.GetLLVMType(), "CJ_MCC_GetCurrentThreadSnapshot", parameters,
+                ArrayList<String>())
+        }
+        if (kind == IntrinsicKind.DUMP_ALL_THREADS_INFO) {
+            let snapshotArrayTy = (DeRef(retTy) as RawArrayType).getOrThrow()
+            let snapshotInfoDef = (snapshotArrayTy.GetElementType() as StructType).getOrThrow().GetStructDef()
+            parameters.add(CreateTypeInfoAsInt8RefCGValue(snapshotArrayTy))
+            let stackTraceArrayTy = (DeRef(snapshotInfoDef.GetInstanceVar(2).ty) as RawArrayType).getOrThrow()
+            parameters.add(CreateTypeInfoAsInt8RefCGValue(stackTraceArrayTy))
+            let charArrayTy = (DeRef(snapshotInfoDef.GetInstanceVar(0).ty) as RawArrayType).getOrThrow()
+            parameters.add(CreateTypeInfoAsInt8RefCGValue(charArrayTy))
+            return CallIntrinsicFunction(retCGType.GetLLVMType(), "CJ_MCC_GetAllThreadSnapshot", parameters,
+                ArrayList<String>())
+        }
+        throw IllegalStateException("unsupported thread info intrinsic")
+    }
+
+    public func CallMathIntrinsics(kind: IntrinsicKind, args: ArrayList<Value>): LLVMValueRef {
+        let parameters = RawValuesOfCGValues(MapIntrinsicArguments(args))
+        CJC_ASSERT(!parameters.isEmpty())
+        if (kind == IntrinsicKind.POWI) {
+            CJC_ASSERT(parameters.size == 2)
+            let overloadedTypes = ArrayList<LLVMTypeRef>()
+            overloadedTypes.add(unsafe { LLVMTypeOf(parameters[0]) })
+            overloadedTypes.add(unsafe { LLVMTypeOf(parameters[1]) })
+            return CallMappedLLVMIntrinsic(kind, parameters, overloadedTypes)
+        }
+        let overloadedTypes = ArrayList<LLVMTypeRef>()
+        overloadedTypes.add(unsafe { LLVMTypeOf(parameters[0]) })
+        if (kind == IntrinsicKind.ABS) {
+            parameters.add(GetFalse())
+        }
+        return CallMappedLLVMIntrinsic(kind, parameters, overloadedTypes)
+    }
+
+    public func CallIntrinsicFunction(retType: LLVMTypeRef, name: String, parameters: ArrayList<CGValue>,
+        attributes: ArrayList<String>): LLVMValueRef {
+        CJC_ASSERT(!retType.isNull())
+        let parameterTypes = BuildIntrinsicFunctionParamTypes(name, parameters)
+        let hasSRet = IntrinsicFunctionNeedsSRet(retType)
+        let functionType = BuildIntrinsicFunctionType(retType, parameterTypes, hasSRet)
+        let functionValue = GetOrCreateIntrinsicFunction(name, functionType, retType, hasSRet, attributes)
+        let callArgs = BuildIntrinsicFunctionCallArgs(name, retType, hasSRet, parameters)
+        var callFunctionType = functionType
+        let functionValueType = unsafe { LLVMTypeOf(functionValue) }
+        if (!functionValueType.isNull() && unsafe { LLVMGetTypeKind(functionValueType) } == LLVM_POINTER_TYPE_KIND) {
+            callFunctionType = GetPointerElementType(functionValueType)
+        }
+        let callInst = CreateCallOrInvoke(functionValue, callFunctionType, callArgs)
+        if (hasSRet) {
+            return callArgs[0]
+        }
+        return callInst
+    }
+
+    public func CallGCReadWeakRef(args: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(args.size == 2)
+        let refTy = CGType.GetRefType(GetLLVMContext())
+        let refPlaceTy = unsafe { LLVMPointerType(refTy, 1u32) }
+        let fixedArgs = ArrayList<LLVMValueRef>()
+        fixedArgs.add(CreatePointerCast(args[0], refTy, name: "gcread.weak.base"))
+        fixedArgs.add(CreatePointerCast(args[1], refPlaceTy, name: "gcread.weak.place"))
+        return CreateIntrinsicCallNoInvoke(GCREAD_WEAK_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), fixedArgs,
+            name: "gcread.weak")
+    }
+
+    public func CallVArrayIntrinsicIndexCheck(arrayPtr: CGValue, indices: ArrayList<LLVMValueRef>): Unit {
+        var arrayType = arrayPtr.GetCGType().getOrThrow().GetPointerElementType().getOrThrow().GetLLVMType()
+        for (index in indices) {
+            CJC_ASSERT(unsafe { LLVMGetTypeKind(arrayType) } == LLVM_ARRAY_TYPE_KIND)
+            let len = unsafe {
+                LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), UInt64(LLVMGetArrayLength(arrayType)), 0)
+            }
+            CallIntrinsicIndexCheck(len, index)
+            let elementType = unsafe { LLVMGetElementType(arrayType) }
+            if (elementType.isNull() || unsafe { LLVMGetTypeKind(elementType) } != LLVM_ARRAY_TYPE_KIND) {
+                return
+            }
+            arrayType = elementType
+        }
+    }
+
+    public func CreateVArrayStore(value: CGValue, place: LLVMValueRef): LLVMValueRef {
+        let valueCGType = value.GetCGType().getOrThrow()
+        let elementTy = valueCGType.GetOriginal()
+        let elementRefTy = GetCGContext().GetCHIRBuilder().context.GetRefTy(elementTy)
+        let placeCGType = CGType.GetOrCreate(cgMod, elementRefTy)
+        let placeValue = CGValue(place, placeCGType)
+        if (valueCGType.IsVArrayType() || valueCGType.IsStructType()) {
+            return CreateStore(CGValue(value.GetRawValue(), placeCGType), placeValue)
+        }
+        return CreateStore(value, placeValue)
+    }
+
+    public func GetUUIDFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {
+        let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
+        let typeInfoPtrType = unsafe { LLVMPointerType(typeInfoType, 0u32) }
+        let ptr = CreateStructGEP(typeInfoType, CreateBitCast(typeInfo, typeInfoPtrType),
+            6u32, name: "ti.uuid")
+        let uuid = CreateLoad(unsafe { LLVMInt32TypeInContext(GetLLVMContext().raw) }, ptr, name: "ti.uuid")
+        LLVMSetInstructionMetadata(GetLLVMContext(), uuid, "invariant.load",
+            LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>()))
+        return uuid
+    }
+
+    public func CallIntrinsicFuncRefEq(parameters: ArrayList<CGValue>): LLVMValueRef {
+        CJC_ASSERT(parameters.size == 2)
+        let realUUID0 = GetRealUUIDForAutoEnvClass(parameters[0].GetRawValue())
+        let realUUID1 = GetRealUUIDForAutoEnvClass(parameters[1].GetRawValue())
+        return CreateICmp(LLVMIntPredicate.EQ, realUUID0, realUUID1, name: "refeq")
+    }
+
+    private func CallMappedIntrinsic(kind: IntrinsicKind, args: ArrayList<Value>,
+        resultType: Option<Type>): LLVMValueRef {
+        return CallMappedIntrinsicWithCGValues(kind, MapIntrinsicArguments(args), resultType)
+    }
+
+    private func CallMappedIntrinsicWithCGValues(kind: IntrinsicKind, parameters: ArrayList<CGValue>,
+        resultType: Option<Type>): LLVMValueRef {
+        if (let Some(funcName) <- IntrinsicRuntimeFunctionName(kind)) {
+            return CallIntrinsicFunction(ResultLLVMType(resultType), funcName, parameters,
+                IntrinsicFunctionAttributes(kind))
+        }
+        return CallMappedLLVMIntrinsic(kind, RawValuesOfCGValues(parameters), ArrayList<LLVMTypeRef>())
+    }
+
+    private func CallMappedLLVMIntrinsic(kind: IntrinsicKind, args: ArrayList<LLVMValueRef>,
+        overloadedTypes: ArrayList<LLVMTypeRef>): LLVMValueRef {
+        if (let Some(intrinsicName) <- IntrinsicLLVMName(kind)) {
+            let finalOverloadedTypes = ArrayList<LLVMTypeRef>()
+            if (IntrinsicIsPlatformDependent(kind)) {
+                finalOverloadedTypes.add(GetSizetLLVMType())
+            } else {
+                for (overloadedType in overloadedTypes) {
+                    finalOverloadedTypes.add(overloadedType)
+                }
+            }
+            if (kind == IntrinsicKind.BLACK_BOX) {
+                CJC_ASSERT(args.size == 1)
+                let argType = unsafe { LLVMTypeOf(args[0]) }
+                if (argType.isNull() || unsafe { LLVMGetTypeKind(argType) } != LLVM_POINTER_TYPE_KIND) {
+                    return args[0]
+                }
+                let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+                if (unsafe { LLVMGetPointerAddressSpace(argType) } == 0u32) {
+                    let arg = CreateBitCast(args[0], i8PtrTy)
+                    return CreateBitCast(CreateIntrinsicCallNoInvoke(intrinsicName, finalOverloadedTypes,
+                        ArrayList<LLVMValueRef>([arg])), argType)
+                }
+                let arg = CreateAddrSpaceCast(args[0], i8PtrTy)
+                return CreateAddrSpaceCast(CreateIntrinsicCallNoInvoke(intrinsicName, finalOverloadedTypes,
+                    ArrayList<LLVMValueRef>([arg])), argType)
+            }
+            return CreateIntrinsicCallNoInvoke(intrinsicName, finalOverloadedTypes, args)
+        }
+        throw IllegalStateException("unsupported LLVM intrinsic")
+    }
+
+    private func MapIntrinsicArguments(args: ArrayList<Value>): ArrayList<CGValue> {
+        let parameters = ArrayList<CGValue>()
+        for (arg in args) {
+            parameters.add(cgMod.GetMappedCGValue(arg))
+        }
+        return parameters
+    }
+
+    private func RawValuesOfCGValues(parameters: ArrayList<CGValue>): ArrayList<LLVMValueRef> {
+        let rawValues = ArrayList<LLVMValueRef>()
+        for (parameter in parameters) {
+            rawValues.add(parameter.GetRawValue())
+        }
+        return rawValues
+    }
+
+    private func ResultLLVMType(resultType: Option<Type>): LLVMTypeRef {
+        if (let Some(retTy) <- resultType) {
+            return CGType.GetOrCreate(cgMod, retTy).GetLLVMType()
+        }
+        return CGType.GetUnitType(GetLLVMContext())
+    }
+
+    private func CreateTypeInfoAsInt8RefCGValue(chirTy: Type): CGValue {
+        let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        return CGValue(CreateBitCast(CreateTypeInfo(chirTy), i8PtrTy),
+            CGType.GetOrCreate(cgMod, CGType.GetRefTypeOfCHIRInt8(GetCGContext().GetCHIRBuilder())))
+    }
+
+    private func IntrinsicFunctionNeedsSRet(retType: LLVMTypeRef): Bool {
+        return retType.toUIntNative() != CGType.GetUnitType(GetLLVMContext()).toUIntNative() &&
+            unsafe { LLVMGetTypeKind(retType) } == LLVM_STRUCT_TYPE_KIND
+    }
+
+    private func BuildIntrinsicFunctionParamTypes(name: String,
+        parameters: ArrayList<CGValue>): ArrayList<LLVMTypeRef> {
+        let parameterTypes = ArrayList<LLVMTypeRef>()
+        for (parameter in parameters) {
+            let valueCGType = parameter.GetCGType().getOrThrow()
+            var paramType = unsafe { LLVMTypeOf(parameter.GetRawValue()) }
+            if (IsStructPtrType(paramType) && !valueCGType.IsCGTI()) {
+                if (!IsReflectIntrinsicFunctionName(name)) {
+                    parameterTypes.add(CGType.GetRefType(GetLLVMContext()))
+                }
+                if (unsafe { LLVMGetPointerAddressSpace(paramType) } != 1u32) {
+                    let elementCGType = valueCGType.GetPointerElementType().getOrThrow()
+                    paramType = unsafe { LLVMPointerType(elementCGType.GetLLVMType(), 1u32) }
+                }
+            }
+            parameterTypes.add(paramType)
+        }
+        return parameterTypes
+    }
+
+    private func BuildIntrinsicFunctionType(retType: LLVMTypeRef, parameterTypes: ArrayList<LLVMTypeRef>,
+        hasSRet: Bool): LLVMTypeRef {
+        if (!hasSRet) {
+            return MakeFunctionType(retType, parameterTypes)
+        }
+        let fixedParameterTypes = ArrayList<LLVMTypeRef>()
+        fixedParameterTypes.add(unsafe { LLVMPointerType(retType, 0u32) })
+        for (parameterType in parameterTypes) {
+            fixedParameterTypes.add(parameterType)
+        }
+        return MakeFunctionType(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, fixedParameterTypes)
+    }
+
+    private func GetOrCreateIntrinsicFunction(name: String, functionType: LLVMTypeRef, retType: LLVMTypeRef,
+        hasSRet: Bool, attributes: ArrayList<String>): LLVMValueRef {
+        if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+            var functionValue = LLVMNullValue()
+            try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+                functionValue = unsafe { LLVMGetNamedFunction(moduleHandle.raw, nameCString.value) }
+                if (functionValue.isNull()) {
+                    functionValue = unsafe { LLVMAddFunction(moduleHandle.raw, nameCString.value, functionType) }
+                    if (hasSRet) {
+                        AddNoAliasAttribute(functionValue)
+                        AddSRetAttribute(functionValue, retType)
+                    }
+                    AddLinkageTypeMetadata(functionValue, LLVMLinkage.External,
+                        GetCGContext().IsCGParallelEnabled())
+                    for (attribute in attributes) {
+                        AddFnAttr(functionValue, attribute)
+                    }
+                }
+            }
+            return functionValue
+        }
+        throw IllegalStateException("cannot create intrinsic function without an LLVM module")
+    }
+
+    private func BuildIntrinsicFunctionCallArgs(name: String, retType: LLVMTypeRef, hasSRet: Bool,
+        parameters: ArrayList<CGValue>): ArrayList<LLVMValueRef> {
+        let callArgs = ArrayList<LLVMValueRef>()
+        if (hasSRet) {
+            callArgs.add(CreateEntryAlloca(retType))
+        }
+        for (parameter in parameters) {
+            let valueCGType = parameter.GetCGType().getOrThrow()
+            var llvmVal = parameter.GetRawValue()
+            let llvmValType = unsafe { LLVMTypeOf(llvmVal) }
+            if (IsStructPtrType(llvmValType) && !valueCGType.IsCGTI()) {
+                if (!IsReflectIntrinsicFunctionName(name)) {
+                    callArgs.add(GetTrackedBasePtr(llvmVal) ??
+                        unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) })
+                }
+                if (unsafe { LLVMGetPointerAddressSpace(llvmValType) } != 1u32) {
+                    let elementCGType = valueCGType.GetPointerElementType().getOrThrow()
+                    llvmVal = CreateAddrSpaceCast(llvmVal,
+                        unsafe { LLVMPointerType(elementCGType.GetLLVMType(), 1u32) })
+                }
+            }
+            callArgs.add(llvmVal)
+        }
+        return callArgs
+    }
+
+    private func IsAtomicIntrinsicKind(kind: IntrinsicKind): Bool {
+        return kind == IntrinsicKind.ATOMIC_LOAD ||
+            kind == IntrinsicKind.ATOMIC_STORE ||
+            kind == IntrinsicKind.ATOMIC_SWAP ||
+            kind == IntrinsicKind.ATOMIC_COMPARE_AND_SWAP ||
+            kind == IntrinsicKind.ATOMIC_FETCH_ADD ||
+            kind == IntrinsicKind.ATOMIC_FETCH_SUB ||
+            kind == IntrinsicKind.ATOMIC_FETCH_AND ||
+            kind == IntrinsicKind.ATOMIC_FETCH_OR ||
+            kind == IntrinsicKind.ATOMIC_FETCH_XOR
+    }
+
+    private func AtomicRMWOp(kind: IntrinsicKind): Option<UInt32> {
+        return match (kind) {
+            case IntrinsicKind.ATOMIC_SWAP => Some(0u32)
+            case IntrinsicKind.ATOMIC_FETCH_ADD => Some(1u32)
+            case IntrinsicKind.ATOMIC_FETCH_SUB => Some(2u32)
+            case IntrinsicKind.ATOMIC_FETCH_AND => Some(3u32)
+            case IntrinsicKind.ATOMIC_FETCH_OR => Some(5u32)
+            case IntrinsicKind.ATOMIC_FETCH_XOR => Some(6u32)
+            case _ => None
+        }
+    }
+
+    private func CallAtomicIntrinsics(kind: IntrinsicKind, args: ArrayList<CGValue>, typeArgs: ArrayList<Type>,
+        resultType: Option<Type>): LLVMValueRef {
+        CJC_ASSERT(!args.isEmpty())
+        let fieldPtr = CreateGEP(args[0], ArrayList<UInt64>([0u64]), name: "atomic.field").GetRawValue()
+        CJC_ASSERT(typeArgs.size == 2)
+        if (typeArgs[1].IsPrimitive()) {
+            return CallAtomicPrimitiveIntrinsics(kind, args, fieldPtr)
+        }
+        let parameters = ArrayList<LLVMValueRef>()
+        let isCompareAndSwap = kind == IntrinsicKind.ATOMIC_COMPARE_AND_SWAP
+        var valueArgLimit = args.size - 1
+        if (isCompareAndSwap) {
+            valueArgLimit = args.size - 2
+        }
+        var argIdx: Int64 = 1
+        while (argIdx < valueArgLimit) {
+            parameters.add(args[argIdx].GetRawValue())
+            argIdx++
+        }
+        parameters.add(args[0].GetRawValue())
+        let fieldPtrType = unsafe { LLVMTypeOf(fieldPtr) }
+        let fieldPtrAddrSpace = if (!fieldPtrType.isNull() &&
+            unsafe { LLVMGetTypeKind(fieldPtrType) } == LLVM_POINTER_TYPE_KIND) {
+            unsafe { LLVMGetPointerAddressSpace(fieldPtrType) }
+        } else {
+            0u32
+        }
+        let fixedFieldPtrType = unsafe { LLVMPointerType(CGType.GetRefType(GetLLVMContext()), fieldPtrAddrSpace) }
+        parameters.add(CreateBitCast(fieldPtr, fixedFieldPtrType))
+        if (isCompareAndSwap) {
+            parameters.add(GetInt32(SEQ_CST_AS_INT32))
+            parameters.add(GetInt32(SEQ_CST_AS_INT32))
+        } else {
+            parameters.add(GetInt32(SEQ_CST_AS_INT32))
+        }
+        if (kind == IntrinsicKind.ATOMIC_STORE || kind == IntrinsicKind.ATOMIC_SWAP) {
+            let valueType = args[1].GetCGType().getOrThrow().GetOriginal()
+            let valueCGType = CGType.GetOrCreate(cgMod, valueType)
+            if (valueCGType.GetSize().isNone() && !valueType.IsGeneric()) {
+                let payloadPtr = GetPayloadFromObject(args[1].GetRawValue())
+                parameters[0] = CallGCRead(ArrayList<LLVMValueRef>([args[1].GetRawValue(), payloadPtr]))
+            }
+        }
+        let result = CallMappedLLVMIntrinsic(kind, parameters, ArrayList<LLVMTypeRef>())
+        if (let Some(retTy) <- resultType) {
+            if (!retTy.IsGeneric()) {
+                let retCGType = CGType.GetOrCreate(cgMod, retTy)
+                if (retCGType.GetSize().isNone()) {
+                    CJC_ASSERT(kind == IntrinsicKind.ATOMIC_LOAD || kind == IntrinsicKind.ATOMIC_SWAP)
+                    let boxVal = CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([CreateTypeInfo(retTy), GetInt32(8)]))
+                    let payloadPtr = GetPayloadFromObject(boxVal)
+                    CallGCWrite(result, boxVal, payloadPtr)
+                    return boxVal
+                }
+            }
+        }
+        return result
+    }
+
+    private func CallAtomicPrimitiveIntrinsics(kind: IntrinsicKind, args: ArrayList<CGValue>,
+        fieldPtr: LLVMValueRef): LLVMValueRef {
+        var fieldType = unsafe { LLVMSelfhostGetGEPResultElementType(fieldPtr) }
+        if (fieldType.isNull()) {
+            fieldType = GetPointerElementType(unsafe { LLVMTypeOf(fieldPtr) })
+        }
+        if (kind == IntrinsicKind.ATOMIC_COMPARE_AND_SWAP) {
+            let cas = unsafe {
+                LLVMSelfhostCreateAtomicCmpXchg(builder.raw, fieldPtr, args[1].GetRawValue(), args[2].GetRawValue())
+            }
+            return CreateExtractValue(cas, 1u32)
+        }
+        if (let Some(op) <- AtomicRMWOp(kind)) {
+            return unsafe { LLVMSelfhostCreateAtomicRMW(builder.raw, op, fieldPtr, args[1].GetRawValue()) }
+        }
+        let align = UInt32(unsafe { LLVMSelfhostGetPrimitiveSizeInBits(fieldType) })
+        if (kind == IntrinsicKind.ATOMIC_STORE) {
+            let _ = unsafe { LLVMSelfhostCreateAtomicStore(builder.raw, args[1].GetRawValue(), fieldPtr, align) }
+            return LLVMNullValue()
+        }
+        if (kind == IntrinsicKind.ATOMIC_LOAD) {
+            try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
+                return unsafe {
+                    LLVMSelfhostCreateAtomicLoad(builder.raw, fieldType, fieldPtr, align, nameCString.value)
+                }
+            }
+        }
+        return LLVMNullValue()
+    }
+
+    private func GetRealUUIDForAutoEnvClass(obj: LLVMValueRef): LLVMValueRef {
+        let i8PtrTy0 = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let i8PtrTy1 = CGType.GetRefType(GetLLVMContext())
+        let blocks = CreateAndInsertBasicBlocks(ArrayList<String>(["judge", "wrapperClass", "end"]))
+        CJC_ASSERT(blocks.size == 3)
+        let judgeBB = blocks[0]
+        let wrapperClassBB = blocks[1]
+        let endBB = blocks[2]
+        let newObjPtr = CreateEntryAlloca(i8PtrTy1, name: "obj")
+        CreateStore(obj, newObjPtr)
+        CreateBr(judgeBB)
+
+        SetInsertPoint(judgeBB)
+        let newObj0 = CreateLoad(i8PtrTy1, newObjPtr)
+        let typeInfoValue = CreateBitCast(GetTypeInfoFromObject(newObj0), i8PtrTy0)
+        let cgTi = CGValue(typeInfoValue,
+            CGType.GetOrCreate(cgMod, CGType.GetRefTypeOfCHIRInt8(GetCGContext().GetCHIRBuilder())))
+        let wrapperArgs = ArrayList<CGValue>()
+        wrapperArgs.add(cgTi)
+        let isWrapperClass = CallIntrinsicFunction(unsafe { LLVMInt1TypeInContext(GetLLVMContext().raw) },
+            "CJ_MCC_IsWrapperClassForAutoEnv", wrapperArgs, ArrayList<String>())
+        CreateCondBr(isWrapperClass, wrapperClassBB, endBB)
+
+        SetInsertPoint(wrapperClassBB)
+        let newObj1 = CreateLoad(i8PtrTy1, newObjPtr)
+        let payload = GetPayloadFromObject(newObj1)
+        let realAutoEnvClassPtrType = unsafe { LLVMPointerType(i8PtrTy1, 1u32) }
+        let realAutoEnvClass = CreateGEP(i8PtrTy1, CreateBitCast(payload, realAutoEnvClassPtrType),
+            ArrayList<LLVMValueRef>([GetInt32(2)]), name: "realAutoEnvClass")
+        let loadInst = CallGCRead(ArrayList<LLVMValueRef>([newObj1, realAutoEnvClass]))
+        CreateStore(loadInst, newObjPtr)
+        CreateBr(judgeBB)
+
+        SetInsertPoint(endBB)
+        let newObj2 = CreateLoad(i8PtrTy1, newObjPtr)
+        return GetUUIDFromTypeInfo(GetTypeInfoFromObject(newObj2))
     }
 
     public func GenerateCallExpectFunction(val: LLVMValueRef, expectVal: LLVMValueRef): LLVMValueRef {

@@ -16,18 +16,18 @@ private let IS_SUBTYPE_INTRINSIC_NAME: String = "llvm.cj.is.subtype"
 public func GenerateIntrinsic(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(intrinsicExpr) <- (chirExpr as Intrinsic)) {
         return GenerateIntrinsic(irBuilder, intrinsicExpr.GetIntrinsicKind(), intrinsicExpr.GetArgs(),
-            intrinsicExpr.GetInstantiatedTypeArgs(), intrinsicExpr.GetResultType())
+            intrinsicExpr.GetInstantiatedTypeArgs(), intrinsicExpr.GetResultType(), NeedCheckArrayBound(chirExpr))
     }
     if (let Some(intrinsicWithExceptionExpr) <- (chirExpr as IntrinsicWithException)) {
         return GenerateIntrinsic(irBuilder, intrinsicWithExceptionExpr.GetIntrinsicKind(),
             intrinsicWithExceptionExpr.GetArgs(), intrinsicWithExceptionExpr.GetInstantiatedTypeArgs(),
-            intrinsicWithExceptionExpr.GetResultType())
+            intrinsicWithExceptionExpr.GetResultType(), NeedCheckArrayBound(chirExpr))
     }
     return LLVMNullValue()
 }
 
 private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args: ArrayList<Value>,
-    typeArgs: ArrayList<Type>, resultType: Option<Type>): LLVMValueRef {
+    typeArgs: ArrayList<Type>, resultType: Option<Type>, needArrayBoundCheck: Bool): LLVMValueRef {
     if (IsOverflowIntrinsic(kind)) {
         return GenerateOverflowIntrinsic(irBuilder, kind, args, resultType)
     }
@@ -41,8 +41,10 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
         let exceptionValue = irBuilder.GetCGModule().GetMappedCGValue(args[0])
         return irBuilder.CallPostThrowExceptionIntrinsic(exceptionValue.GetRawValue())
     }
-    if (kind == IntrinsicKind.OBJECT_REFEQ || kind == IntrinsicKind.RAW_ARRAY_REFEQ ||
-        kind == IntrinsicKind.FUNC_REFEQ) {
+    if (kind == IntrinsicKind.FUNC_REFEQ) {
+        return GenerateFuncRefEq(irBuilder, args)
+    }
+    if (kind == IntrinsicKind.OBJECT_REFEQ || kind == IntrinsicKind.RAW_ARRAY_REFEQ) {
         if (args.size >= 2) {
             let lhs = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
             let rhs = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
@@ -139,8 +141,34 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     if (IsArrayIntrinsic(kind)) {
         return GenerateArraySyscall(irBuilder, kind, args, resultType)
     }
-    let _ = IntrinsicKindToString(kind)
-    return UnitOrTypedNull(irBuilder, resultType)
+    if (IsVArrayIntrinsic(kind)) {
+        return GenerateVArrayIntrinsic(irBuilder, kind, args, resultType, needArrayBoundCheck)
+    }
+    if (IsMathIntrinsic(kind)) {
+        return irBuilder.CallMathIntrinsics(kind, args)
+    }
+    if (IsRuntimeIntrinsic(kind)) {
+        return irBuilder.CallRuntimeIntrinsics(kind, args, resultType)
+    }
+    if (IsFutureIntrinsic(kind)) {
+        return irBuilder.CallRuntimeIntrinsics(kind, args, resultType)
+    }
+    if (IsSyncIntrinsic(kind)) {
+        return irBuilder.CallSyncIntrinsics(kind, args, typeArgs, resultType)
+    }
+    if (IsStackTraceIntrinsic(kind)) {
+        return irBuilder.CallStackTraceIntrinsic(kind, args, resultType)
+    }
+    if (IsThreadInfoIntrinsic(kind)) {
+        return irBuilder.CallThreadInfoIntrinsic(kind, args, resultType)
+    }
+    if (IsInteropIntrinsic(kind)) {
+        return irBuilder.CallInteropIntrinsics(kind, args, resultType)
+    }
+    if (kind == IntrinsicKind.EXCLUSIVE_SCOPE) {
+        return GenerateExclusiveScope(irBuilder, args, resultType)
+    }
+    throw IllegalStateException("unsupported intrinsic kind: " + IntrinsicKindToString(kind))
 }
 
 private func IsArrayIntrinsic(kind: IntrinsicKind): Bool {
@@ -157,11 +185,180 @@ private func IsArrayIntrinsic(kind: IntrinsicKind): Bool {
         kind == IntrinsicKind.ARRAY_INIT
 }
 
+private func IsFutureIntrinsic(kind: IntrinsicKind): Bool {
+    return kind == IntrinsicKind.FUTURE_INIT ||
+        kind == IntrinsicKind.FUTURE_IS_COMPLETE ||
+        kind == IntrinsicKind.FUTURE_WAIT ||
+        kind == IntrinsicKind.FUTURE_NOTIFYALL ||
+        kind == IntrinsicKind.IS_THREAD_OBJECT_INITED ||
+        kind == IntrinsicKind.GET_THREAD_OBJECT ||
+        kind == IntrinsicKind.SET_THREAD_OBJECT
+}
+
+private func IsSyncIntrinsic(kind: IntrinsicKind): Bool {
+    return kind == IntrinsicKind.SLEEP ||
+        kind == IntrinsicKind.ATOMIC_LOAD ||
+        kind == IntrinsicKind.ATOMIC_STORE ||
+        kind == IntrinsicKind.ATOMIC_SWAP ||
+        kind == IntrinsicKind.ATOMIC_COMPARE_AND_SWAP ||
+        kind == IntrinsicKind.ATOMIC_FETCH_ADD ||
+        kind == IntrinsicKind.ATOMIC_FETCH_SUB ||
+        kind == IntrinsicKind.ATOMIC_FETCH_AND ||
+        kind == IntrinsicKind.ATOMIC_FETCH_OR ||
+        kind == IntrinsicKind.ATOMIC_FETCH_XOR ||
+        kind == IntrinsicKind.MUTEX_INIT ||
+        kind == IntrinsicKind.CJ_MUTEX_LOCK ||
+        kind == IntrinsicKind.MUTEX_TRY_LOCK ||
+        kind == IntrinsicKind.MUTEX_CHECK_STATUS ||
+        kind == IntrinsicKind.MUTEX_UNLOCK ||
+        kind == IntrinsicKind.WAITQUEUE_INIT ||
+        kind == IntrinsicKind.MONITOR_INIT ||
+        kind == IntrinsicKind.MOITIOR_WAIT ||
+        kind == IntrinsicKind.MOITIOR_NOTIFY ||
+        kind == IntrinsicKind.MOITIOR_NOTIFY_ALL ||
+        kind == IntrinsicKind.MULTICONDITION_WAIT ||
+        kind == IntrinsicKind.MULTICONDITION_NOTIFY ||
+        kind == IntrinsicKind.MULTICONDITION_NOTIFY_ALL
+}
+
+private func IsMathIntrinsic(kind: IntrinsicKind): Bool {
+    return kind == IntrinsicKind.ABS ||
+        kind == IntrinsicKind.FABS ||
+        kind == IntrinsicKind.FLOOR ||
+        kind == IntrinsicKind.CEIL ||
+        kind == IntrinsicKind.TRUNC ||
+        kind == IntrinsicKind.SIN ||
+        kind == IntrinsicKind.COS ||
+        kind == IntrinsicKind.EXP ||
+        kind == IntrinsicKind.EXP2 ||
+        kind == IntrinsicKind.LOG ||
+        kind == IntrinsicKind.LOG2 ||
+        kind == IntrinsicKind.LOG10 ||
+        kind == IntrinsicKind.SQRT ||
+        kind == IntrinsicKind.ROUND ||
+        kind == IntrinsicKind.POW ||
+        kind == IntrinsicKind.POWI
+}
+
+private func IsStackTraceIntrinsic(kind: IntrinsicKind): Bool {
+    return kind == IntrinsicKind.FILL_IN_STACK_TRACE ||
+        kind == IntrinsicKind.DECODE_STACK_TRACE
+}
+
+private func IsThreadInfoIntrinsic(kind: IntrinsicKind): Bool {
+    return kind == IntrinsicKind.DUMP_CURRENT_THREAD_INFO ||
+        kind == IntrinsicKind.DUMP_ALL_THREADS_INFO
+}
+
+private func IsVArrayIntrinsic(kind: IntrinsicKind): Bool {
+    return kind == IntrinsicKind.VARRAY_SET ||
+        kind == IntrinsicKind.VARRAY_GET
+}
+
+private func IsRuntimeIntrinsic(kind: IntrinsicKind): Bool {
+    return kind == IntrinsicKind.INVOKE_GC ||
+        kind == IntrinsicKind.SET_GC_THRESHOLD ||
+        kind == IntrinsicKind.DUMP_CJ_HEAP_DATA ||
+        kind == IntrinsicKind.GET_GC_COUNT ||
+        kind == IntrinsicKind.GET_GC_TIME_US ||
+        kind == IntrinsicKind.GET_GC_FREED_SIZE ||
+        kind == IntrinsicKind.START_CJ_CPU_PROFILING ||
+        kind == IntrinsicKind.STOP_CJ_CPU_PROFILING ||
+        kind == IntrinsicKind.BLACK_BOX ||
+        kind == IntrinsicKind.GET_MAX_HEAP_SIZE ||
+        kind == IntrinsicKind.GET_ALLOCATE_HEAP_SIZE ||
+        kind == IntrinsicKind.GET_REAL_HEAP_SIZE ||
+        kind == IntrinsicKind.GET_THREAD_NUMBER ||
+        kind == IntrinsicKind.GET_BLOCKING_THREAD_NUMBER ||
+        kind == IntrinsicKind.GET_NATIVE_THREAD_NUMBER
+}
+
+private func IsInteropIntrinsic(kind: IntrinsicKind): Bool {
+    return kind == IntrinsicKind.CROSS_ACCESS_BARRIER ||
+        kind == IntrinsicKind.CREATE_EXPORT_HANDLE ||
+        kind == IntrinsicKind.GET_EXPORTED_REF ||
+        kind == IntrinsicKind.REMOVE_EXPORTED_REF ||
+        kind == IntrinsicKind.GET_JSLAMBDA_ADDR
+}
+
+private func NeedCheckArrayBound(chirExpr: Expression): Bool {
+    if (let Some(value) <- chirExpr.GetAnnotation("NeedCheckArrayBound")) {
+        return value == "true" || value == "1"
+    }
+    return false
+}
+
 private func GeneratePreInitializeIntrinsic(irBuilder: IRBuilder2): LLVMValueRef {
     let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) }
     let args = ArrayList<LLVMValueRef>()
     args.add(unsafe { LLVMConstNull(i8PtrType) })
     return irBuilder.CreateIntrinsicCall("llvm.cj.pre.initialize.package", ArrayList<LLVMTypeRef>(), args)
+}
+
+private func GenerateFuncRefEq(irBuilder: IRBuilder2, args: ArrayList<Value>): LLVMValueRef {
+    let parameters = ArrayList<CGValue>()
+    for (arg in args) {
+        parameters.add(irBuilder.GetCGModule().GetMappedCGValue(arg))
+    }
+    return irBuilder.CallIntrinsicFuncRefEq(parameters)
+}
+
+private func GenerateExclusiveScope(irBuilder: IRBuilder2, args: ArrayList<Value>,
+    resultType: Option<Type>): LLVMValueRef {
+    if (args.size < 2 || resultType.isNone()) {
+        return LLVMNullValue()
+    }
+    let parameters = ArrayList<CGValue>()
+    parameters.add(irBuilder.GetCGModule().GetMappedCGValue(args[0]))
+    parameters.add(irBuilder.GetCGModule().GetMappedCGValue(args[1]))
+    let retTy = resultType.getOrThrow()
+    return irBuilder.CallIntrinsicFunction(CGType.GetOrCreate(irBuilder.GetCGModule(), retTy).GetLLVMType(),
+        PREFIX_OF_BACKEND_SYMS + "ExclusiveScope", parameters, ArrayList<String>())
+}
+
+private func GenerateVArrayIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args: ArrayList<Value>,
+    resultType: Option<Type>, needArrayBoundCheck: Bool): LLVMValueRef {
+    let parameters = ArrayList<CGValue>()
+    for (arg in args) {
+        parameters.add(irBuilder.GetCGModule().GetMappedCGValue(arg))
+    }
+    if (parameters.isEmpty()) {
+        return LLVMNullValue()
+    }
+    let varrPtr = parameters[0]
+    let varrLLVMType = varrPtr.GetCGType().getOrThrow().GetPointerElementType().getOrThrow().GetLLVMType()
+    if (kind == IntrinsicKind.VARRAY_SET) {
+        let indices = ArrayList<LLVMValueRef>()
+        var idx: Int64 = 2
+        while (idx < parameters.size) {
+            indices.add(parameters[idx].GetRawValue())
+            idx++
+        }
+        if (needArrayBoundCheck) {
+            irBuilder.CallVArrayIntrinsicIndexCheck(varrPtr, indices)
+        }
+        let elementPtr = irBuilder.CreateVArrayGEP(varrLLVMType, varrPtr.GetRawValue(), indices,
+            name: "varr.idx.set.gep")
+        irBuilder.CreateVArrayStore(parameters[1], elementPtr)
+        return LLVMNullValue()
+    }
+    if (kind == IntrinsicKind.VARRAY_GET) {
+        let indices = ArrayList<LLVMValueRef>()
+        var idx: Int64 = 1
+        while (idx < parameters.size) {
+            indices.add(parameters[idx].GetRawValue())
+            idx++
+        }
+        irBuilder.CallVArrayIntrinsicIndexCheck(varrPtr, indices)
+        let elementPtr = irBuilder.CreateVArrayGEP(varrLLVMType, varrPtr.GetRawValue(), indices,
+            name: "varr.idx.get.gep")
+        if (let Some(retTy) <- resultType) {
+            let retCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), retTy)
+            return irBuilder.CreateLoad(retCGType.GetLLVMType(), elementPtr)
+        }
+        return LLVMNullValue()
+    }
+    throw IllegalStateException("unimplemented varray intrinsic")
 }
 
 private func GenerateArraySyscall(irBuilder: IRBuilder2, kind: IntrinsicKind, args: ArrayList<Value>,
@@ -452,16 +649,6 @@ private func UnitOrNull(irBuilder: IRBuilder2, resultType: Option<Type>): LLVMVa
         if (resultTy.IsUnit()) {
             return irBuilder.GetCGModule().GenerateUnitTypeValue()
         }
-    }
-    return LLVMNullValue()
-}
-
-private func UnitOrTypedNull(irBuilder: IRBuilder2, resultType: Option<Type>): LLVMValueRef {
-    if (let Some(resultTy) <- resultType) {
-        if (resultTy.IsUnit()) {
-            return irBuilder.GetCGModule().GenerateUnitTypeValue()
-        }
-        return unsafe { LLVMConstNull(CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType()) }
     }
     return LLVMNullValue()
 }

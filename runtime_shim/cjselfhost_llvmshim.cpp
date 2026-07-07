@@ -287,11 +287,62 @@ extern "C" LLVMValueRef LLVMSelfhostCreateCall(LLVMBuilderRef Builder, LLVMTypeR
     return wrap(CreateCall(*builder, unwrap<FunctionType>(FunctionTy), callee, args, Name));
 }
 
-extern "C" LLVMValueRef LLVMSelfhostCreatePointerCast(
-    LLVMBuilderRef Builder, LLVMValueRef Value, LLVMTypeRef DestTy, const char *Name)
-{
-    return wrap(unwrap(Builder)->CreatePointerCast(unwrap(Value), unwrap<Type>(DestTy), Name));
-}
+	extern "C" LLVMValueRef LLVMSelfhostCreatePointerCast(
+	    LLVMBuilderRef Builder, LLVMValueRef Value, LLVMTypeRef DestTy, const char *Name)
+	{
+	    return wrap(unwrap(Builder)->CreatePointerCast(unwrap(Value), unwrap<Type>(DestTy), Name));
+	}
+
+	extern "C" void LLVMSelfhostSetAnyRegCallingConv(LLVMValueRef Inst)
+	{
+	    if (auto *callBase = dyn_cast<CallBase>(unwrap<Value>(Inst))) {
+	        callBase->setCallingConv(CallingConv::AnyReg);
+	    }
+	}
+
+	extern "C" LLVMTypeRef LLVMSelfhostGetGEPResultElementType(LLVMValueRef Gep)
+	{
+	    if (auto *gep = dyn_cast<GetElementPtrInst>(unwrap<Value>(Gep))) {
+	        return wrap(gep->getResultElementType());
+	    }
+	    return nullptr;
+	}
+
+	extern "C" LLVMValueRef LLVMSelfhostCreateAtomicCmpXchg(
+	    LLVMBuilderRef Builder, LLVMValueRef Ptr, LLVMValueRef Cmp, LLVMValueRef NewVal)
+	{
+	    auto *builder = unwrap(Builder);
+	    return wrap(builder->CreateAtomicCmpXchg(unwrap(Ptr), unwrap(Cmp), unwrap(NewVal), MaybeAlign(),
+	        AtomicOrdering::SequentiallyConsistent, AtomicOrdering::SequentiallyConsistent));
+	}
+
+	extern "C" LLVMValueRef LLVMSelfhostCreateAtomicRMW(
+	    LLVMBuilderRef Builder, unsigned Op, LLVMValueRef Ptr, LLVMValueRef Val)
+	{
+	    auto *builder = unwrap(Builder);
+	    return wrap(builder->CreateAtomicRMW(static_cast<AtomicRMWInst::BinOp>(Op), unwrap(Ptr), unwrap(Val),
+	        MaybeAlign(), AtomicOrdering::SequentiallyConsistent));
+	}
+
+	extern "C" LLVMValueRef LLVMSelfhostCreateAtomicLoad(
+	    LLVMBuilderRef Builder, LLVMTypeRef ValueTy, LLVMValueRef Ptr, unsigned AlignBytes, const char *Name)
+	{
+	    auto *builder = unwrap(Builder);
+	    auto *load = builder->CreateLoad(unwrap<Type>(ValueTy), unwrap(Ptr), Name);
+	    load->setAlignment(Align(AlignBytes));
+	    load->setAtomic(AtomicOrdering::SequentiallyConsistent);
+	    return wrap(load);
+	}
+
+	extern "C" LLVMValueRef LLVMSelfhostCreateAtomicStore(
+	    LLVMBuilderRef Builder, LLVMValueRef Val, LLVMValueRef Ptr, unsigned AlignBytes)
+	{
+	    auto *builder = unwrap(Builder);
+	    auto *store = builder->CreateStore(unwrap(Val), unwrap(Ptr));
+	    store->setAlignment(Align(AlignBytes));
+	    store->setAtomic(AtomicOrdering::SequentiallyConsistent);
+	    return wrap(store);
+	}
 
 extern "C" void LLVMSelfhostInstructionSetMetadata(
     LLVMValueRef Inst, const char *Kind, unsigned KindLen, LLVMMetadataRef Metadata)
