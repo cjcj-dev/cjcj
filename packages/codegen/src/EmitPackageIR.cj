@@ -1098,9 +1098,18 @@ private func EmitStaticGenericTITable(cgMod: CGModule): LLVMValueRef {
     let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext())
     let values = ArrayList<LLVMValueRef>()
     let emittedNames = HashSet<String>()
+    let orderedStaticGINames = ArrayList<String>()
     for (typeInfoName in staticGINames) {
-        values.add(GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoType))
-        emittedNames.add(typeInfoName)
+        orderedStaticGINames.add(typeInfoName)
+    }
+    sort(orderedStaticGINames, by: { left: String, right: String => CompareString(left, right) })
+    for (typeInfoName in orderedStaticGINames) {
+        let staticGI = GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoType)
+        if (ShouldEmitStaticGI(staticGI)) {
+            CJC_ASSERT(unsafe { LLVMIsDeclaration(staticGI) } == 0)
+            values.add(staticGI)
+            emittedNames.add(typeInfoName)
+        }
     }
     for (reflectStaticGIName in cgMod.GetCGContext().GetReflectGeneratedStaticGINames()) {
         if (emittedNames.contains(reflectStaticGIName)) {
@@ -1112,6 +1121,7 @@ private func EmitStaticGenericTITable(cgMod: CGModule): LLVMValueRef {
                 staticGI = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
             }
             if (!staticGI.isNull()) {
+                CJC_ASSERT(unsafe { LLVMIsDeclaration(staticGI) } == 0)
                 values.add(staticGI)
                 emittedNames.add(reflectStaticGIName)
             }
@@ -1120,15 +1130,91 @@ private func EmitStaticGenericTITable(cgMod: CGModule): LLVMValueRef {
     if (values.isEmpty()) {
         return LLVMNullValue()
     }
+    let sortedValues = TopologicalSortStaticGIs(cgMod, values)
     let arrayType = unsafe { LLVMArrayType(typeInfoPtrType, UInt32(values.size)) }
     let table = GetOrInsertCodeGenGlobal(cgMod, "StaticGenericTIs", arrayType)
     unsafe {
-        LLVMSetInitializer(table, ConstLLVMArray(typeInfoPtrType, values))
+        LLVMSetInitializer(table, ConstLLVMArray(typeInfoPtrType, sortedValues))
         LLVMSetLinkage(table, LLVMLinkageValue(LLVMLinkage.Private))
         LLVMSetGlobalConstant(table, 0)
     }
     addAttribute(table, "CFileStaticGenericTI")
     return table
+}
+
+private func ShouldEmitStaticGI(staticGI: LLVMValueRef): Bool {
+    if (!CGFunction.HasNoUse(staticGI)) {
+        return true
+    }
+    let linkage = unsafe { LLVMGetLinkage(staticGI) }
+    return !IsLocalLinkageValue(linkage) && linkage != LLVMLinkageValue(LLVMLinkage.LinkOnceODR)
+}
+
+private func IsLocalLinkageValue(linkage: Int32): Bool {
+    return linkage == LLVMLinkageValue(LLVMLinkage.Internal) || linkage == LLVMLinkageValue(LLVMLinkage.Private)
+}
+
+private func TopologicalSortStaticGIs(cgMod: CGModule, content: ArrayList<LLVMValueRef>): ArrayList<LLVMValueRef> {
+    let partialOrder = cgMod.GetCGContext().GetDependentPartialOrderOfTypes()
+    let indegrees = ArrayList<Int64>()
+    for (_ in content) {
+        indegrees.add(0)
+    }
+    for (pair in partialOrder) {
+        let biggerIdx = IndexOfStaticGI(content, pair.bigger)
+        if (biggerIdx >= 0) {
+            indegrees[biggerIdx] = indegrees[biggerIdx] + 1
+        }
+    }
+    let queue = ArrayList<LLVMValueRef>()
+    var contentIdx: Int64 = 0
+    while (contentIdx < content.size) {
+        if (indegrees[contentIdx] == 0) {
+            queue.add(content[contentIdx])
+        }
+        contentIdx++
+    }
+    let result = ArrayList<LLVMValueRef>()
+    var queueIdx: Int64 = 0
+    while (queueIdx < queue.size) {
+        let current = queue[queueIdx]
+        queueIdx++
+        result.add(current)
+        var targetIdx: Int64 = 0
+        while (targetIdx < content.size) {
+            if (HasStaticGIPartialOrder(partialOrder, current, content[targetIdx])) {
+                indegrees[targetIdx] = indegrees[targetIdx] - 1
+                if (indegrees[targetIdx] == 0) {
+                    queue.add(content[targetIdx])
+                }
+            }
+            targetIdx++
+        }
+    }
+    CJC_ASSERT(result.size == content.size)
+    return result
+}
+
+private func IndexOfStaticGI(content: ArrayList<LLVMValueRef>, value: LLVMValueRef): Int64 {
+    var idx: Int64 = 0
+    while (idx < content.size) {
+        if (content[idx].toUIntNative() == value.toUIntNative()) {
+            return idx
+        }
+        idx++
+    }
+    return -1
+}
+
+private func HasStaticGIPartialOrder(partialOrder: ArrayList<PartialOrderPair>, smaller: LLVMValueRef,
+    bigger: LLVMValueRef): Bool {
+    for (pair in partialOrder) {
+        if (pair.smaller.toUIntNative() == smaller.toUIntNative() &&
+            pair.bigger.toUIntNative() == bigger.toUIntNative()) {
+            return true
+        }
+    }
+    return false
 }
 
 private func ConstLLVMArray(elementType: LLVMTypeRef, values: ArrayList<LLVMValueRef>): LLVMValueRef {

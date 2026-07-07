@@ -124,6 +124,15 @@ public class CGFunctionType <: CGType {
 
     protected override func GenLLVMType(): LLVMTypeRef {
         let funcTy = (chirType as FuncType).getOrThrow()
+        let int8Ty = unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
+        let int8PtrTy = unsafe { LLVMPointerType(int8Ty, 0u32) }
+        let funcLayout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), "Func.Type")
+        if (unsafe { LLVMCountStructElementTypes(funcLayout) } == 0u32) {
+            let body = ArrayList<LLVMTypeRef>()
+            body.add(int8PtrTy)
+            SetStructTypeBody(funcLayout, body)
+        }
+        layoutType = funcLayout
         if (funcTy.IsCFunc()) {
             llvmType = unsafe {
                 LLVMPointerType(LLVMStructTypeInContext(cgCtx.GetLLVMContext().raw, CPointer<LLVMTypeRef>(), 0u32, 0),

@@ -332,7 +332,7 @@ public open class CGType {
             typeInfo = genericInfo
             return genericInfo
         }
-        if ((chirType as CustomType).isSome() && chirType.IsGenericRelated()) {
+        if (cgGenericKind == CGGenericKind.DYNAMIC_GI) {
             let genericCustomInfo = GetOrCreateGenericCustomTypeInfoGlobal(cgMod, chirType)
             typeInfo = genericCustomInfo
             return genericCustomInfo

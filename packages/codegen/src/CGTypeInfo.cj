@@ -22,6 +22,7 @@ import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKindIndex
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.VArrayType
+import cangjie_compiler::mangle.{GetCustomTypeIdentifier, GetTypeQualifiedName}
 import cangjie_compiler::option.{ArchType, EnvironmentType, OSType}
 import cangjie_compiler::utils.{CJC_ASSERT, REF_PACKAGE_NAME, STD_LIB_WEAK_REF, StaticCast}
 
@@ -33,6 +34,10 @@ private let UG_WEAKREF_KIND: UInt64 = 133u64
 private let UG_FUNC_KIND: UInt64 = 131u64
 private let UG_GENERIC_CUSTOM_KIND: UInt64 = 254u64
 private let UG_GENERIC_KIND: UInt64 = 255u64
+private let UG_CSTRING: UInt64 = 17u64
+private let UG_CPOINTER: UInt64 = 18u64
+private let UG_CFUNC: UInt64 = 19u64
+private let UG_VARRAY: UInt64 = 20u64
 private let UG_TUPLE_KIND: UInt64 = 21u64
 private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
 private let UG_STRUCT_KIND: UInt64 = 22u64
@@ -138,9 +143,8 @@ public func GetOrCreateGenericTypeInfoGlobal(cgMod: CGModule, chirTy: Type): LLV
 }
 
 public func GetOrCreateGenericCustomTypeInfoGlobal(cgMod: CGModule, chirTy: Type): LLVMValueRef {
-    let customTy = (chirTy as CustomType) ?? throw IllegalArgumentException("expected generic custom type info")
     let typeInfoTy = GetOrCreateGenericCustomTypeInfoType(cgMod.GetLLVMContext())
-    let qualifiedName = GenericCustomTypeInfoName(cgMod, customTy)
+    let qualifiedName = GetTypeQualifiedNameForReflect(cgMod, chirTy, forNameFieldOfTi: true)
     let typeInfoName = qualifiedName + ".ti"
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
         try (nameCString = unsafe { LibC.mallocCString(typeInfoName) }.asResource()) {
@@ -159,14 +163,16 @@ public func GetOrCreateGenericCustomTypeInfoGlobal(cgMod: CGModule, chirTy: Type
         let i8Type = unsafe { LLVMInt8TypeInContext(context) }
         let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
         let values = ArrayList<LLVMValueRef>()
-        values.add(GenerateTypeInfoNameConstant(cgMod, moduleHandle, qualifiedName))
+        values.add(GenerateTypeInfoNameConstant(cgMod, moduleHandle,
+            GetTypeQualifiedName(chirTy, forNameFieldOfTi: true)))
         values.add(unsafe { LLVMConstInt(i8Type, UG_GENERIC_CUSTOM_KIND, 0) })
-        values.add(unsafe { LLVMConstInt(i8Type, UInt64(customTy.GetGenericArgs().size), 0) })
-        values.add(GenerateTypeArgsOfGenericCustomTypeInfo(cgMod, customTy, qualifiedName))
-        values.add(unsafe { LLVMConstBitCast(EnsureSourceGenericTypeTemplate(cgMod, customTy), i8PtrType) })
+        values.add(unsafe { LLVMConstInt(i8Type, GenTypeArgsNumOfGenericCustomTypeInfo(cgMod, chirTy), 0) })
+        values.add(GenTypeArgsOfGenericCustomTypeInfo(cgMod, chirTy))
+        values.add(unsafe { LLVMConstBitCast(CGType.GetOrCreate(cgMod, chirTy).GetOrCreateTypeTemplate(), i8PtrType) })
         unsafe {
             LLVMSetInitializer(typeInfo, TypeInfoConstStruct(typeInfoTy, values))
             LLVMSetLinkage(typeInfo, LLVMLinkageValue(LLVMLinkage.Private))
+            addAttribute(typeInfo, GENERIC_TYPEINFO_ATTR)
             LLVMSetGlobalConstant(typeInfo, 0)
         }
     }
@@ -232,11 +238,32 @@ private func GenerateUpperBoundsOfGenericTypeInfo(cgMod: CGModule, genericTy: Ge
     return unsafe { LLVMConstBitCast(upperBoundsGlobal, i8PtrType) }
 }
 
-private func GenerateTypeArgsOfGenericCustomTypeInfo(cgMod: CGModule, customTy: CustomType,
-    qualifiedName: String): LLVMValueRef {
+private func GenTypeArgsOfGenericCustomTypeInfo(cgMod: CGModule, chirTy: Type): LLVMValueRef {
     let i8Type = unsafe { LLVMInt8TypeInContext(cgMod.GetLLVMContext().raw) }
     let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
-    let typeArgs = customTy.GetGenericArgs()
+    let typeArgs = ArrayList<Type>()
+    if (let Some(customTy) <- (chirTy as CustomType)) {
+        for (typeArg in customTy.GetGenericArgs()) {
+            typeArgs.add(typeArg)
+        }
+    } else if (let Some(tupleTy) <- (chirTy as TupleType)) {
+        for (typeArg in tupleTy.GetTypeArgs()) {
+            typeArgs.add(typeArg)
+        }
+    } else if (let Some(funcTy) <- (chirTy as FuncType)) {
+        typeArgs.add(funcTy.GetReturnType())
+        for (paramTy in funcTy.GetParamTypes()) {
+            typeArgs.add(paramTy)
+        }
+    } else if (let Some(cPointerTy) <- (chirTy as CPointerType)) {
+        typeArgs.add(cPointerTy.GetElementType())
+    } else if (let Some(vArrayTy) <- (chirTy as VArrayType)) {
+        var idx: UInt64 = 0u64
+        while (idx < vArrayTy.GetSize()) {
+            typeArgs.add(vArrayTy.GetElementType())
+            idx++
+        }
+    }
     if (typeArgs.isEmpty()) {
         return unsafe { LLVMConstNull(i8PtrType) }
     }
@@ -247,58 +274,113 @@ private func GenerateTypeArgsOfGenericCustomTypeInfo(cgMod: CGModule, customTy: 
         })
     }
     let arrayType = unsafe { LLVMArrayType(i8PtrType, UInt32(values.size)) }
-    let typeArgsGlobal = GetOrInsertCodeGenGlobal(cgMod, qualifiedName + ".typeArgs", arrayType)
+    let typeArgsGlobal = GetOrInsertCodeGenGlobal(cgMod,
+        GetTypeQualifiedNameForReflect(cgMod, chirTy) + ".ti.typeArgs", arrayType)
     if (unsafe { LLVMIsDeclaration(typeArgsGlobal) } != 0) {
         unsafe {
             LLVMSetInitializer(typeArgsGlobal, ConstArray(i8PtrType, values))
             LLVMSetLinkage(typeArgsGlobal, LLVMLinkageValue(LLVMLinkage.Private))
-            LLVMSetGlobalConstant(typeArgsGlobal, 1)
         }
     }
     return unsafe { LLVMConstBitCast(typeArgsGlobal, i8PtrType) }
 }
 
-private func GenericCustomTypeInfoName(cgMod: CGModule, customTy: CustomType): String {
-    let def = customTy.GetCustomTypeDef()
-    let packageName = if (let Some(genericDecl) <- def.GetGenericDecl()) {
-        genericDecl.GetPackageName()
-    } else {
-        def.GetPackageName()
+private func GenTypeArgsNumOfGenericCustomTypeInfo(cgMod: CGModule, chirTy: Type): UInt64 {
+    if (let Some(vArrayTy) <- (chirTy as VArrayType)) {
+        return vArrayTy.GetSize()
     }
-    var name = if (packageName.isEmpty()) {
-        def.GetSrcCodeIdentifier()
-    } else {
-        packageName + ":" + def.GetSrcCodeIdentifier()
-    }
-    let typeArgs = customTy.GetGenericArgs()
-    if (!typeArgs.isEmpty()) {
-        name += "<" + GenericTypeArgsQualifiedName(cgMod, typeArgs) + ">"
-    }
-    return name
+    return GenTypeArgsNumOfTypeInfo(cgMod, chirTy)
 }
 
-private func GenericTypeArgsQualifiedName(cgMod: CGModule, typeArgs: ArrayList<Type>): String {
+private func GetTypeArgsQualifiedNameForReflect(cgMod: CGModule, typeArgs: ArrayList<Type>,
+    forNameFieldOfTi!: Bool): String {
     var out = ""
     var idx: Int64 = 0
     for (typeArg in typeArgs) {
         if (idx > 0) {
             out += ","
         }
-        out += GenericTypeQualifiedName(cgMod, typeArg)
+        out += GetTypeQualifiedNameForReflect(cgMod, typeArg, forNameFieldOfTi: forNameFieldOfTi)
         idx++
     }
     return out
 }
 
-private func GenericTypeQualifiedName(cgMod: CGModule, chirTy: Type): String {
+private func GetTypeQualifiedNameOfCustomTypeForReflect(cgMod: CGModule, customTy: CustomType,
+    forNameFieldOfTi!: Bool): String {
+    let def = customTy.GetCustomTypeDef()
+    if (def.GetAnnotation("IsAutoEnvGenericBase").isSome()) {
+        let typeArgs = customTy.GetGenericArgs()
+        CJC_ASSERT(!typeArgs.isEmpty())
+        let paramTypes = ArrayList<Type>()
+        var idx: Int64 = 0
+        while (idx + 1 < typeArgs.size) {
+            paramTypes.add(typeArgs[idx])
+            idx++
+        }
+        return "Closure<(" + GetTypeArgsQualifiedNameForReflect(cgMod, paramTypes, forNameFieldOfTi: true) + ")->" +
+            GetTypeQualifiedNameForReflect(cgMod, typeArgs[typeArgs.size - 1], forNameFieldOfTi: true) + ">"
+    }
+    let packageName = if (let Some(genericDecl) <- def.GetGenericDecl()) {
+        genericDecl.GetPackageName()
+    } else {
+        def.GetPackageName()
+    }
+    var out = packageName + ":" + GetCustomTypeIdentifier(customTy)
+    let typeArgs = customTy.GetGenericArgs()
+    if (!typeArgs.isEmpty()) {
+        out += "<" + GetTypeArgsQualifiedNameForReflect(cgMod, typeArgs,
+            forNameFieldOfTi: forNameFieldOfTi) + ">"
+    }
+    return out
+}
+
+private func GetTypeQualifiedNameForReflect(cgMod: CGModule, chirTy: Type,
+    forNameFieldOfTi!: Bool = false): String {
     let stripped = chirTy.StripAllRefs()
+    if (stripped.IsPrimitive()) {
+        return stripped.ToString()
+    }
+    if (let Some(rawArrayTy) <- (stripped as RawArrayType)) {
+        return "RawArray<" + GetTypeQualifiedNameForReflect(cgMod, rawArrayTy.GetElementType(),
+            forNameFieldOfTi: forNameFieldOfTi) + ">"
+    }
+    if (let Some(vArrayTy) <- (stripped as VArrayType)) {
+        return "VArray<" + GetTypeQualifiedNameForReflect(cgMod, vArrayTy.GetElementType(),
+            forNameFieldOfTi: forNameFieldOfTi) + "," + "${vArrayTy.GetSize()}" + ">"
+    }
+    if (let Some(cPointerTy) <- (stripped as CPointerType)) {
+        return "CPointer<" + GetTypeQualifiedNameForReflect(cgMod, cPointerTy.GetElementType(),
+            forNameFieldOfTi: forNameFieldOfTi) + ">"
+    }
+    if (stripped.IsCString()) {
+        return "CString"
+    }
+    if (let Some(tupleTy) <- (stripped as TupleType)) {
+        return "Tuple<" + GetTypeArgsQualifiedNameForReflect(cgMod, tupleTy.GetTypeArgs(),
+            forNameFieldOfTi: forNameFieldOfTi) + ">"
+    }
+    if (let Some(customTy) <- (stripped as CustomType)) {
+        return GetTypeQualifiedNameOfCustomTypeForReflect(cgMod, customTy,
+            forNameFieldOfTi: forNameFieldOfTi)
+    }
+    if (let Some(funcTy) <- (stripped as FuncType)) {
+        return "(" + GetTypeArgsQualifiedNameForReflect(cgMod, funcTy.GetParamTypes(),
+            forNameFieldOfTi: forNameFieldOfTi) + ")->" +
+            GetTypeQualifiedNameForReflect(cgMod, funcTy.GetReturnType(), forNameFieldOfTi: forNameFieldOfTi)
+    }
     if (let Some(genericTy) <- (stripped as GenericType)) {
         return GenericTypeInfoName(cgMod, genericTy)
     }
-    if (let Some(customTy) <- (stripped as CustomType)) {
-        return GenericCustomTypeInfoName(cgMod, customTy)
+    if (stripped.IsVoid()) {
+        return UNIT_TYPE_STR
     }
-    return stripped.ToString()
+    if (let Some(boxTy) <- (stripped as BoxType)) {
+        let typeQualifiedName = GetTypeQualifiedNameForReflect(cgMod, boxTy.GetBaseType(),
+            forNameFieldOfTi: forNameFieldOfTi)
+        return if (forNameFieldOfTi) { typeQualifiedName } else { "Box<" + typeQualifiedName + ">" }
+    }
+    throw IllegalArgumentException("unexpected type for reflect qualified name: " + stripped.ToString())
 }
 
 public func RedefineTypeInfoGlobal(cgMod: CGModule, chirTy: Type): Unit {
@@ -320,7 +402,7 @@ public func RedefineTypeInfoGlobal(cgMod: CGModule, chirTy: Type): Unit {
         return
     }
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
-        let initializer = BuildConcreteTypeInfoInitializer(cgMod, moduleHandle, chirTy, typeInfoTy)
+        let initializer = BuildConcreteTypeInfoInitializer(cgMod, moduleHandle, chirTy, typeInfo, typeInfoTy)
         unsafe {
             LLVMSetInitializer(typeInfo, initializer)
             SetConcreteTypeInfoLinkage(cgMod, typeInfo, chirTy)
@@ -351,7 +433,8 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
         }
         return
     }
-    if (!(chirTy.IsClass() || chirTy.IsStruct() || chirTy.IsEnum() || chirTy.IsTuple())) {
+    if (!(chirTy.IsClass() || chirTy.IsStruct() || chirTy.IsEnum() || chirTy.IsTuple() || chirTy.IsFunc() ||
+        chirTy.IsVArray() || chirTy.IsCPointer())) {
         return
     }
     if (let Some(customTy) <- (chirTy as CustomType)) {
@@ -367,7 +450,7 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
         return
     }
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
-        let initializer = BuildConcreteTypeInfoInitializer(cgMod, moduleHandle, chirTy, typeInfoTy)
+        let initializer = BuildConcreteTypeInfoInitializer(cgMod, moduleHandle, chirTy, typeInfo, typeInfoTy)
         unsafe {
             LLVMSetInitializer(typeInfo, initializer)
             SetConcreteTypeInfoLinkage(cgMod, typeInfo, chirTy)
@@ -499,7 +582,7 @@ private func BuildRawArrayTypeInfoInitializer(cgMod: CGModule, moduleHandle: LLV
 }
 
 private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, moduleHandle: LLVMModuleHandle, chirTy: Type,
-    typeInfoTy: LLVMTypeRef): LLVMValueRef {
+    typeInfo: LLVMValueRef, typeInfoTy: LLVMTypeRef): LLVMValueRef {
     let contextHandle = cgMod.GetLLVMContext()
     let context = contextHandle.raw
     let i8Type = unsafe { LLVMInt8TypeInContext(context) }
@@ -514,7 +597,7 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, moduleHandle: LLV
     }
     let cgType = CGType.GetOrCreate(cgMod, chirTy)
     let typeInfoName = TypeInfoGlobalName(cgMod, chirTy)
-    let fieldCount = UInt64(GetInstanceFieldTypes(cgMod, chirTy).size)
+    let fieldCount = GenFieldsNumOfTypeInfo(cgMod, chirTy)
     var inheritedClassNum = InheritedClassNumBase(chirTy)
     let (mtable, updatedInheritedClassNum) = GenerateMTableOfTypeInfo(cgMod, chirTy, i8PtrType, inheritedClassNum)
     inheritedClassNum = updatedInheritedClassNum
@@ -529,13 +612,13 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, moduleHandle: LLV
     typeInfoValues.add(unsafe { LLVMConstNull(bitMapPtrType) })
     typeInfoValues.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i8Type, alignValue, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, UInt64(chirTy.GetTypeArgs().size), 0) })
+    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, GenTypeArgsNumOfTypeInfo(cgMod, chirTy), 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i16Type, inheritedClassNum + INHERITED_CLASS_NUM_FE_FLAG, 0) })
     typeInfoValues.add(GenerateOffsetsOfTypeInfo(cgMod, chirTy, cgType, typeInfoName, i32PtrType))
     typeInfoValues.add(GenerateSourceGenericOfTypeInfo(cgMod, chirTy, i8PtrType))
-    typeInfoValues.add(GenerateTypeArgsOfTypeInfo(cgMod, chirTy, typeInfoName, i8PtrType))
+    typeInfoValues.add(GenerateTypeArgsOfTypeInfo(cgMod, chirTy, typeInfo, typeInfoName, i8PtrType))
     typeInfoValues.add(GenerateFieldsOfTypeInfo(cgMod, chirTy, typeInfoName, i8PtrType))
-    typeInfoValues.add(GenerateSuperOfTypeInfo(cgMod, chirTy, typeInfoPtrType))
+    typeInfoValues.add(GenerateSuperOfTypeInfo(cgMod, chirTy, typeInfo, typeInfoPtrType))
     typeInfoValues.add(GenerateExtensionDefPtrOfTypeInfo(cgMod, chirTy, extensionDefPtrPtrType))
     typeInfoValues.add(mtable)
     typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
@@ -1192,9 +1275,73 @@ private func GetIntNativeRuntimeType(cgMod: CGModule): Type {
     }
 }
 
-private func GenerateTypeArgsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoName: String,
-    i8PtrType: LLVMTypeRef): LLVMValueRef {
-    let typeArgs = chirTy.GetTypeArgs()
+private func GenFieldsNumOfTypeInfo(cgMod: CGModule, chirTy: Type): UInt64 {
+    if (let Some(vArrayTy) <- (chirTy as VArrayType)) {
+        return vArrayTy.GetSize()
+    }
+    return UInt64(GetInstanceFieldTypes(cgMod, chirTy).size)
+}
+
+private func GenTypeArgsNumOfTypeInfo(_: CGModule, chirTy: Type): UInt64 {
+    if (IsAutoEnvBaseType(chirTy)) {
+        CJC_ASSERT(!IsAutoEnvInstBaseType(chirTy))
+        return 1u64
+    }
+    if (let Some(funcTy) <- (chirTy as FuncType)) {
+        return UInt64(funcTy.GetParamTypes().size + 1)
+    }
+    if ((chirTy as CPointerType).isSome()) {
+        return 1u64
+    }
+    if (let Some(tupleTy) <- (chirTy as TupleType)) {
+        return UInt64(tupleTy.GetTypeArgs().size)
+    }
+    if (let Some(customTy) <- (chirTy as CustomType)) {
+        return UInt64(customTy.GetGenericArgs().size)
+    }
+    return 0u64
+}
+
+private func GenerateTypeArgsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfo: LLVMValueRef,
+    typeInfoName: String, i8PtrType: LLVMTypeRef): LLVMValueRef {
+    if (let Some(boxTy) <- (chirTy as BoxType)) {
+        let boxBaseCGType = CGType.GetOrCreate(cgMod, boxTy.GetBaseType().StripAllRefs())
+        let boxBaseTI = boxBaseCGType.GetOrCreateTypeInfo()
+        if (boxBaseCGType.IsStaticGI()) {
+            cgMod.GetCGContext().AddDependentPartialOrderOfTypes(boxBaseTI, typeInfo)
+        }
+        return unsafe { LLVMConstBitCast(boxBaseTI, i8PtrType) }
+    }
+    let typeArgs = ArrayList<Type>()
+    if (IsAutoEnvBaseType(chirTy)) {
+        if (let Some(customTy) <- (chirTy as CustomType)) {
+            let genericArgs = customTy.GetGenericArgs()
+            if (!genericArgs.isEmpty()) {
+                let paramTypes = ArrayList<Type>()
+                var idx: Int64 = 0
+                while (idx + 1 < genericArgs.size) {
+                    paramTypes.add(genericArgs[idx])
+                    idx++
+                }
+                typeArgs.add(FuncType(paramTypes, genericArgs[genericArgs.size - 1]))
+            }
+        }
+    } else if (let Some(funcTy) <- (chirTy as FuncType)) {
+        typeArgs.add(funcTy.GetReturnType())
+        for (paramTy in funcTy.GetParamTypes()) {
+            typeArgs.add(paramTy)
+        }
+    } else if (let Some(cPointerTy) <- (chirTy as CPointerType)) {
+        typeArgs.add(cPointerTy.GetElementType())
+    } else if (let Some(tupleTy) <- (chirTy as TupleType)) {
+        for (typeArg in tupleTy.GetTypeArgs()) {
+            typeArgs.add(typeArg)
+        }
+    } else if (let Some(customTy) <- (chirTy as CustomType)) {
+        for (typeArg in customTy.GetGenericArgs()) {
+            typeArgs.add(typeArg)
+        }
+    }
     if (typeArgs.isEmpty()) {
         return unsafe { LLVMConstNull(i8PtrType) }
     }
@@ -1204,13 +1351,19 @@ private func GenerateTypeArgsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoN
     if (unsafe { LLVMIsDeclaration(typeArgsGlobal) } != 0) {
         let values = ArrayList<LLVMValueRef>()
         for (typeArg in typeArgs) {
-            values.add(CGType.GetOrCreate(cgMod, typeArg.StripAllRefs()).GetOrCreateTypeInfo())
+            let argCGType = CGType.GetOrCreate(cgMod, typeArg.StripAllRefs())
+            let argTI = argCGType.GetOrCreateTypeInfo()
+            if (argCGType.IsStaticGI()) {
+                cgMod.GetCGContext().AddDependentPartialOrderOfTypes(argTI, typeInfo)
+            }
+            values.add(unsafe { LLVMConstBitCast(argTI, typeInfoPtrType) })
         }
         unsafe {
             LLVMSetInitializer(typeArgsGlobal, ConstArray(typeInfoPtrType, values))
             LLVMSetLinkage(typeArgsGlobal, LLVMLinkageValue(LLVMLinkage.Private))
             addAttribute(typeArgsGlobal, CJTI_TYPE_ARGS_ATTR)
             LLVMSetGlobalConstant(typeArgsGlobal, 1)
+            LLVMSetUnnamedAddress(typeArgsGlobal, LLVMUnnamedAddrValue(LLVMUnnamedAddr.GlobalUnnamedAddr))
         }
     }
     return unsafe { LLVMConstBitCast(typeArgsGlobal, i8PtrType) }
@@ -1456,6 +1609,10 @@ private func TypeInfoKind(cgMod: CGModule, chirTy: Type): UInt64 {
     if (IsAutoEnvBaseType(chirTy)) {
         return UG_FUNC_KIND
     }
+    if (chirTy.IsFunc()) { return UG_CFUNC }
+    if (chirTy.IsVArray()) { return UG_VARRAY }
+    if (chirTy.IsCPointer()) { return UG_CPOINTER }
+    if (chirTy.IsCString()) { return UG_CSTRING }
     if (let Some(classTy) <- (chirTy as ClassType)) {
         if (IsWeakRefClass(classTy)) {
             return UG_WEAKREF_KIND
@@ -1660,7 +1817,20 @@ private func GetCoreObjectTypeInfo(cgMod: CGModule): LLVMValueRef {
     return objectTypeInfo
 }
 
-private func GenerateSuperOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoPtrType: LLVMTypeRef): LLVMValueRef {
+private func GenerateSuperOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfo: LLVMValueRef,
+    typeInfoPtrType: LLVMTypeRef): LLVMValueRef {
+    if (let Some(cPointerTy) <- (chirTy as CPointerType)) {
+        let elementTI = CGType.GetOrCreate(cgMod, cPointerTy.GetElementType().StripAllRefs()).GetOrCreateTypeInfo()
+        return unsafe { LLVMConstBitCast(elementTI, typeInfoPtrType) }
+    }
+    if (let Some(vArrayTy) <- (chirTy as VArrayType)) {
+        let elementCGType = CGType.GetOrCreate(cgMod, vArrayTy.GetElementType().StripAllRefs())
+        let elementTI = elementCGType.GetOrCreateTypeInfo()
+        if (elementCGType.IsStaticGI()) {
+            cgMod.GetCGContext().AddDependentPartialOrderOfTypes(elementTI, typeInfo)
+        }
+        return unsafe { LLVMConstBitCast(elementTI, typeInfoPtrType) }
+    }
     if (let Some(classTy) <- (chirTy as ClassType)) {
         if (classTy.GetClassDef().IsInterface()) {
             return unsafe { LLVMConstNull(typeInfoPtrType) }

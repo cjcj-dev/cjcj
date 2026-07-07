@@ -225,7 +225,11 @@ public class CGContext {
         if (!cgPkgContext.GetGlobalOptions().enIncrementalCompilation) {
             return
         }
-        let declMangledName = ty.ToString()
+        if (!(ty.IsClass() || ty.IsStruct() || ty.IsEnum())) {
+            return
+        }
+        let customTy = (ty as CustomType) ?? return
+        let declMangledName = customTy.GetCustomTypeDef().GetIdentifierWithoutPrefix()
         if (!codegenAddedFuncsOrVars.contains(declMangledName)) {
             codegenAddedFuncsOrVars[declMangledName] = HashSet<String>()
         }
@@ -335,6 +339,12 @@ public class CGContext {
     }
 
     public func AddDependentPartialOrderOfTypes(smaller: LLVMValueRef, bigger: LLVMValueRef): Unit {
+        for (pair in dependentPartialOrderOfTypes) {
+            if (pair.smaller.toUIntNative() == smaller.toUIntNative() &&
+                pair.bigger.toUIntNative() == bigger.toUIntNative()) {
+                return
+            }
+        }
         dependentPartialOrderOfTypes.add(PartialOrderPair(smaller, bigger))
     }
 
