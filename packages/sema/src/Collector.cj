@@ -627,11 +627,47 @@ public class Collector {
         scopeManager.FinalizeScope(ctx)
     }
 
+    private func CollectCondition(ctx: ASTContext, e: Expr): Unit {
+        if (let Some(letPattern) <- (e as LetPatternDestructor)) {
+            if (let Some(initializer) <- letPattern.initializer) {
+                AssignNode(ctx, initializer)
+            }
+            SetCurrentScope(ctx, letPattern)
+            for (pattern in letPattern.patterns) {
+                AssignNode(ctx, pattern)
+            }
+            return
+        }
+
+        if (let Some(paren) <- (e as ParenExpr)) {
+            SetCurrentScope(ctx, paren)
+            if (let Some(inner) <- paren.expr) {
+                CollectCondition(ctx, inner)
+            }
+            return
+        }
+
+        if (let Some(binop) <- (e as BinaryExpr)) {
+            if (binop.op == TokenKind.AND || binop.op == TokenKind.OR) {
+                SetCurrentScope(ctx, binop)
+                if (let Some(leftExpr) <- binop.leftExpr) {
+                    CollectCondition(ctx, leftExpr)
+                }
+                if (let Some(rightExpr) <- binop.rightExpr) {
+                    CollectCondition(ctx, rightExpr)
+                }
+                return
+            }
+        }
+
+        AssignNode(ctx, e)
+    }
+
     private func AssignIfExpr(ctx: ASTContext, ie: IfExpr): Unit {
         SetScopeGate(ctx, ie)
         scopeManager.InitializeScope(ctx)
         if (let Some(cond) <- ie.condExpr) {
-            AssignNode(ctx, cond)
+            CollectCondition(ctx, cond)
         }
         if (let Some(thenBody) <- ie.thenBody) {
             AssignBlockContents(ctx, thenBody)
@@ -669,7 +705,7 @@ public class Collector {
         SetScopeGate(ctx, we)
         scopeManager.InitializeScope(ctx)
         if (let Some(cond) <- we.condExpr) {
-            AssignNode(ctx, cond)
+            CollectCondition(ctx, cond)
         }
         if (let Some(body) <- we.body) {
             AssignBlockContents(ctx, body)
