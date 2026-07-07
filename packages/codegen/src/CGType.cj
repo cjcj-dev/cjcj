@@ -14,6 +14,7 @@ import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
 import cangjie_compiler::mangle.GetCustomTypeIdentifier
 import cangjie_compiler::mangle.GetTypeQualifiedName
+import cangjie_compiler::option.ArchType
 import cangjie_compiler::utils.CJC_ASSERT
 
 private let LLVM_FUNCTION_TYPE_KIND: Int32 = 9
@@ -495,6 +496,81 @@ public open class CGType {
 
     public static func GetRefTypeOfCHIRInt8(chirBuilder: CHIRBuilder): RefType {
         return chirBuilder.context.GetRefTy(chirBuilder.context.GetInt8Ty())
+    }
+
+    public static func GetObjectCGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetObjectTy().getOrThrow())
+    }
+
+    public static func GetInt8CGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetInt8Ty())
+    }
+
+    public static func GetInt8PtrCGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, CGType.GetRefTypeOfCHIRInt8(cgMod.GetCGContext().GetCHIRBuilder()))
+    }
+
+    public static func GetInt16CGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetInt16Ty())
+    }
+
+    public static func GetInt32CGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetInt32Ty())
+    }
+
+    public static func GetInt64CGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetInt64Ty())
+    }
+
+    public static func GetIntNativeCGType(cgMod: CGModule): CGType {
+        if (cgMod.GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) {
+            return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetInt32Ty())
+        }
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetInt64Ty())
+    }
+
+    public static func GetUInt8CGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetUInt8Ty())
+    }
+
+    public static func GetUInt16CGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetUInt16Ty())
+    }
+
+    public static func GetUInt32CGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetUInt32Ty())
+    }
+
+    public static func GetUInt64CGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetUInt64Ty())
+    }
+
+    public static func GetFloat16CGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetFloat16Ty())
+    }
+
+    public static func GetFloat32CGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetFloat32Ty())
+    }
+
+    public static func GetFloat64CGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetFloat64Ty())
+    }
+
+    public static func GetUnitCGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetUnitTy())
+    }
+
+    public static func GetNothingCGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetNothingType())
+    }
+
+    public static func GetBoolCGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetBoolTy())
+    }
+
+    public static func GetCStringCGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetCStringTy())
     }
 
     public static func GetOrCreateTypeInfoType(context: LLVMContextHandle): LLVMTypeRef {
