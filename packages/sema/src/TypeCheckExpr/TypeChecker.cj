@@ -17,9 +17,14 @@ import cangjie_compiler::sema.FFI.*
 import cangjie_compiler::sema.InheritanceChecker.*
 import cangjie_compiler::sema.LegalityOfUsage.*
 import cangjie_compiler::sema.NativeFFI.*
+import cangjie_compiler::utils.CFUNC_NAME
 import cangjie_compiler::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
+import cangjie_compiler::utils.CPOINTER_NAME
+import cangjie_compiler::utils.CSTRING_NAME
 import cangjie_compiler::utils.CTYPE_NAME as UtilsCTypeName
 import cangjie_compiler::utils.CJC_ASSERT
+import cangjie_compiler::utils.RAW_ARRAY_NAME
+import cangjie_compiler::utils.VARRAY_NAME
 
 private let INOUT_TEMP_VALUE: String = "temporary value"
 private let INOUT_IMMUTABLE: String = "is a immutable variable"
@@ -504,11 +509,93 @@ public class TypeChecker {
         SeedImportedPackageDecls(ctx)
         AddCurFile(pkg)
         AddDefaultFunction(pkg)
+        if (pkg.fullPackageName == UTILS_CORE_PACKAGE_NAME && !pkg.files.isEmpty() &&
+            !pkg.TestAttr(Attribute.IMPORTED)) {
+            AddBuiltInArrayDecl(pkg)
+            AddBuiltInVArrayDecl(pkg)
+            AddBuiltInPointerDecl(pkg)
+            AddBuiltinCFuncDecl(pkg)
+            AddBuiltInCStringDecl(pkg)
+        }
         AddDefaultParamFunctions(pkg)
         let enableMacroInLSP = if (let Some(instance) <- ci) { instance.globalOptions.enableMacroInLSP } else { false }
         Collector(enableMacroInLsp: enableMacroInLSP).BuildSymbolTable(ctx, pkg, buildTrie: false)
         MarkOutermostBinaryExpressions(pkg)
         impl.WarmupCache(ctx)
+    }
+
+    private func AddBuiltInArrayDecl(pkg: Package): Unit {
+        let builtInDecl = BuiltInDecl(BuiltInType.ARRAY)
+        builtInDecl.identifier = SrcIdentifier(RAW_ARRAY_NAME)
+        let generic = Generic()
+        let typeParameter = GenericParamDecl()
+        typeParameter.identifier = SrcIdentifier("T")
+        typeParameter.outerDecl = builtInDecl
+        generic.typeParameters.add(typeParameter)
+        builtInDecl.generic = generic
+        builtInDecl.EnableAttr(Attribute.GLOBAL)
+        builtInDecl.EnableAttr(Attribute.GENERIC)
+        CopyFileID(builtInDecl, pkg.files[0])
+        pkg.files[0].decls.add(builtInDecl)
+    }
+
+    private func AddBuiltInPointerDecl(pkg: Package): Unit {
+        let builtInDecl = BuiltInDecl(BuiltInType.POINTER)
+        builtInDecl.identifier = SrcIdentifier(CPOINTER_NAME)
+        let generic = Generic()
+        let typeParameter = GenericParamDecl()
+        typeParameter.identifier = SrcIdentifier("T")
+        typeParameter.outerDecl = builtInDecl
+        generic.typeParameters.add(typeParameter)
+        generic.genericConstraints.add(CreateConstraintForFFI(UtilsCTypeName))
+        builtInDecl.generic = generic
+        builtInDecl.EnableAttr(Attribute.PUBLIC)
+        builtInDecl.EnableAttr(Attribute.GLOBAL)
+        builtInDecl.EnableAttr(Attribute.GENERIC)
+        CopyFileID(builtInDecl, pkg.files[0])
+        pkg.files[0].decls.add(builtInDecl)
+    }
+
+    private func AddBuiltInCStringDecl(pkg: Package): Unit {
+        let builtInDecl = BuiltInDecl(BuiltInType.CSTRING)
+        builtInDecl.identifier = SrcIdentifier(CSTRING_NAME)
+        builtInDecl.generic = None
+        builtInDecl.EnableAttr(Attribute.PUBLIC)
+        builtInDecl.EnableAttr(Attribute.GLOBAL)
+        CopyFileID(builtInDecl, pkg.files[0])
+        pkg.files[0].decls.add(builtInDecl)
+    }
+
+    private func AddBuiltInVArrayDecl(pkg: Package): Unit {
+        let builtInDecl = BuiltInDecl(BuiltInType.VARRAY)
+        builtInDecl.identifier = SrcIdentifier(VARRAY_NAME)
+        let generic = Generic()
+        let typeParameter = GenericParamDecl()
+        typeParameter.identifier = SrcIdentifier("T")
+        typeParameter.outerDecl = builtInDecl
+        generic.typeParameters.add(typeParameter)
+        builtInDecl.generic = generic
+        builtInDecl.EnableAttr(Attribute.GLOBAL)
+        builtInDecl.EnableAttr(Attribute.PUBLIC)
+        builtInDecl.EnableAttr(Attribute.GENERIC)
+        CopyFileID(builtInDecl, pkg.files[0])
+        pkg.files[0].decls.add(builtInDecl)
+    }
+
+    private func AddBuiltinCFuncDecl(pkg: Package): Unit {
+        let builtInDecl = BuiltInDecl(BuiltInType.CFUNC)
+        builtInDecl.identifier = SrcIdentifier(CFUNC_NAME)
+        let generic = Generic()
+        let typeParameter = GenericParamDecl()
+        typeParameter.identifier = SrcIdentifier("T")
+        typeParameter.outerDecl = builtInDecl
+        generic.typeParameters.add(typeParameter)
+        builtInDecl.generic = generic
+        builtInDecl.EnableAttr(Attribute.GLOBAL)
+        builtInDecl.EnableAttr(Attribute.PUBLIC)
+        builtInDecl.EnableAttr(Attribute.GENERIC)
+        CopyFileID(builtInDecl, pkg.files[0])
+        pkg.files[0].decls.add(builtInDecl)
     }
 
     private func AddDefaultFunction(pkg: Package): Unit {
