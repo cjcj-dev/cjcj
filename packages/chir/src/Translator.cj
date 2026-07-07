@@ -2882,7 +2882,6 @@ public class Translator {
         bodyBlockGroup.SetEntryBlock(builder.CreateBlock(bodyBlockGroup))
         latchBlockGroup.SetEntryBlock(builder.CreateBlock(latchBlockGroup))
         let condEntryBlock = builder.CreateBlock(condBlockGroup)
-        condEntryBlock.SetGeneratedFromForIn(true)
         condBlockGroup.SetEntryBlock(condEntryBlock)
         return forIn
     }

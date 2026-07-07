@@ -83,19 +83,15 @@ public class MergeBlocks {
                     MergeForInCondBlock(builder, block)
                     merged++
                     changed = true
-                    break
                 } else if (CanMergeIntoPredecessor(block, enableCompileDebug, enableCoverage)) {
                     if (MergeIntoPredecessor(block)) {
                         merged++
                         changed = true
-                        break
                     }
-                }
-                if (CanMergeGotoOnlyBlock(block, enableCompileDebug, enableCoverage)) {
+                } else if (CanMergeGotoOnlyBlock(block, enableCompileDebug, enableCoverage)) {
                     if (MergeGotoOnlyBlock(block)) {
                         merged++
                         changed = true
-                        break
                     }
                 }
             }
