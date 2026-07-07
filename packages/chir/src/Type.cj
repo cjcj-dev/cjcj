@@ -643,6 +643,14 @@ public class TupleType <: Type {
         }
     }
 
+    public func GetElementTypes(): ArrayList<Type> {
+        return GetTypeArgs()
+    }
+
+    public func GetElementType(index: Int64): Type {
+        return argTys[index]
+    }
+
     public override func ToString(): String {
         let parts = ArrayList<String>()
         for (ty in argTys) {
@@ -1644,4 +1652,46 @@ public class EnumType <: CustomType {
     public func IsOption(): Bool {
         return GetEnumDef().GetPackageName() == "std.core" && GetEnumDef().GetIdentifier() == "Option"
     }
+}
+
+private func GetSelectorType(def: EnumDef): TypeKind {
+    if (!def.IsExhaustive()) {
+        return TypeKind.TYPE_UINT32
+    }
+    if (def.IsOptionLike()) {
+        return TypeKind.TYPE_BOOLEAN
+    }
+    return TypeKind.TYPE_UINT32
+}
+
+public func GetFieldOfType(baseTy: Type, index: UInt64, builder: CHIRBuilder): Option<Type> {
+    var ty: Option<Type> = None
+    if (let Some(refTy) <- (baseTy as RefType)) {
+        ty = GetFieldOfType(refTy.GetBaseType(), index, builder)
+    } else if (let Some(tupleTy) <- (baseTy as TupleType)) {
+        if (index < UInt64(tupleTy.GetElementTypes().size)) {
+            ty = tupleTy.GetElementType(Int64(index))
+        }
+    } else if (let Some(structTy) <- (baseTy as StructType)) {
+        let memberTys = structTy.GetInstantiatedMemberTys()
+        if (index < UInt64(memberTys.size)) {
+            ty = memberTys[Int64(index)]
+        }
+    } else if (let Some(classTy) <- (baseTy as ClassType)) {
+        let memberTys = classTy.GetInstantiatedMemberTys()
+        if (index < UInt64(memberTys.size)) {
+            ty = memberTys[Int64(index)]
+        }
+    } else if (let Some(enumTy) <- (baseTy as EnumType)) {
+        if (index == 0u64) {
+            if (GetSelectorType(enumTy.GetEnumDef()) == TypeKind.TYPE_BOOLEAN) {
+                ty = builder.context.GetBoolTy()
+            } else {
+                ty = builder.context.GetUInt32Ty()
+            }
+        }
+    } else if (let Some(rawArrayTy) <- (baseTy as RawArrayType)) {
+        ty = rawArrayTy.GetElementType()
+    }
+    return ty
 }

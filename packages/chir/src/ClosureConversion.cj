@@ -46,6 +46,8 @@ public class ClosureConversion {
         ConvertGlobalFunctions(pkg)
         LiftType(pkg)
         ConvertExpressions(pkg)
+        ModifyTypeMismatchInVTable()
+        ModifyTypeMismatchInExpr()
         CreateVTableForAutoEnvDef()
     }
 
@@ -1558,6 +1560,640 @@ public class ClosureConversion {
             funcTy.GetTypeArgs()
         }
         return builder.context.GetClassTy(autoEnvBaseDef, args)
+    }
+
+    private func OperandNeedTypeCast(args: ArrayList<Value>, paramTypes: ArrayList<Type>,
+        offset: Int64): ArrayList<Int64> {
+        let index = ArrayList<Int64>()
+        CJC_ASSERT(args.size == paramTypes.size)
+        var idx: Int64 = 0
+        while (idx < paramTypes.size) {
+            let paramTy = paramTypes[idx].StripAllRefs()
+            let argTy = args[idx].GetType().getOrThrow().StripAllRefs()
+            if (!paramTy.IsAutoEnvBase() || !argTy.IsAutoEnvBase()) {
+                idx++
+                continue
+            }
+            let paramTyDef = (paramTy as ClassType).getOrThrow().GetClassDef()
+            let argTyDef = (argTy as ClassType).getOrThrow().GetClassDef()
+            if (let Some(argSuperDef) <- argTyDef.GetSuperClassDef()) {
+                if (refEq(argSuperDef, paramTyDef)) {
+                    index.add(idx + offset)
+                }
+            }
+            idx++
+        }
+        return index
+    }
+
+    private func GetFieldBaseType(base: Value): Option<Type> {
+        if (!base.IsLocalVar()) {
+            return base.GetType()
+        }
+        let expr = (base as LocalVar).getOrThrow().GetExpr() ?? return base.GetType()
+        if (expr.GetExprKind() != ExprKind.TYPECAST) {
+            return base.GetType()
+        }
+        let srcValType = (expr as TypeCast).getOrThrow().GetSourceValue().GetType().getOrThrow()
+        if (srcValType.IsEnum()) {
+            return None
+        }
+        return base.GetType()
+    }
+
+    private func FieldRetValNeedWrapper(e: Field): Bool {
+        let fieldRetType = e.GetResult().getOrThrow().GetType().getOrThrow().StripAllRefs()
+        if (!fieldRetType.IsAutoEnvInstBase()) {
+            return false
+        }
+        var declaredType = GetFieldBaseType(e.GetBase())
+        if (declaredType.isNone()) {
+            return true
+        }
+        for (idx in e.GetPath()) {
+            declaredType = GetFieldOfType(declaredType.getOrThrow(), idx, builder)
+            CJC_ASSERT(declaredType.isSome())
+        }
+        return !declaredType.getOrThrow().StripAllRefs().IsAutoEnvInstBase()
+    }
+
+    private func IsAutoEnvGenericType(ty: Type): Bool {
+        if (!ty.IsAutoEnv()) {
+            return false
+        }
+        if (ty.IsAutoEnvGenericBase()) {
+            return true
+        }
+        let classTy = (ty as ClassType).getOrThrow()
+        let parentType = classTy.GetClassDef().GetSuperClassTy()
+        return parentType.isSome() && parentType.getOrThrow().IsAutoEnvGenericBase() && !ty.IsAutoEnvInstBase()
+    }
+
+    private func EnumConstructorNeedTypeCast(e: Expression): (Bool, ArrayList<Int64>) {
+        let index = ArrayList<Int64>()
+        let tuple = (e as Tuple) ?? return (false, index)
+        let resultType = tuple.GetResult().getOrThrow().GetType().getOrThrow()
+        if (!resultType.IsEnum()) {
+            return (false, index)
+        }
+        let enumDef = (resultType as EnumType).getOrThrow().GetEnumDef()
+        let selectorExpr = ((tuple.GetOperand(0) as LocalVar).getOrThrow().GetExpr().getOrThrow() as Constant).
+            getOrThrow()
+        var ctorIndex: Int64 = 0
+        if (selectorExpr.IsIntLit()) {
+            ctorIndex = Int64(selectorExpr.GetUnsignedIntLitVal())
+        } else if (selectorExpr.IsBoolLit()) {
+            ctorIndex = if (selectorExpr.GetBoolLitVal()) { 1 } else { 0 }
+        } else {
+            throw IllegalStateException("ClosureConversion enum constructor selector is not int or bool")
+        }
+        let constructor = enumDef.GetCtor(ctorIndex)
+        let paramTypes = constructor.funcType.getOrThrow().GetParamTypes()
+        let args = tuple.GetOperands()
+        args.remove(at: 0)
+        let castIndex = OperandNeedTypeCast(args, paramTypes, 1)
+        return (!castIndex.isEmpty(), castIndex)
+    }
+
+    private func TupleNeedTypeCast(e: Expression): (Bool, ArrayList<Int64>) {
+        let index = ArrayList<Int64>()
+        let tuple = (e as Tuple) ?? return (false, index)
+        let resultType = tuple.GetResult().getOrThrow().GetType().getOrThrow()
+        let tupleType = (resultType as TupleType) ?? return (false, index)
+        let castIndex = OperandNeedTypeCast(tuple.GetOperands(), tupleType.GetElementTypes(), 0)
+        return (!castIndex.isEmpty(), castIndex)
+    }
+
+    private func AddTypeCastForOperand(expr: Expression, index: ArrayList<Int64>): Unit {
+        let parentBlock = expr.GetParentBlock() ??
+            throw IllegalStateException("ClosureConversion typecast operand has no parent block")
+        for (idx in index) {
+            let op = expr.GetOperand(idx)
+            let opClassTy = (op.GetType().getOrThrow().StripAllRefs() as ClassType).getOrThrow()
+            let expectedType = builder.context.GetRefTy(opClassTy.GetClassDef().GetSuperClassTy().getOrThrow())
+            let typecast = builder.CreateTypeCast(expectedType, op, parentBlock)
+            typecast.MoveBefore(expr)
+            expr.ReplaceOperand(idx, RequireResult(typecast))
+        }
+    }
+
+    private func ReplaceOperandWithAutoEnvWrapperClass(op: Value, autoEnvWrapperClass: Value,
+        skip: ArrayList<Expression>): Unit {
+        for (user in op.GetUsers()) {
+            var shouldSkip = user.GetExprKind() == ExprKind.INSTANCEOF
+            if (!shouldSkip) {
+                for (skipExpr in skip) {
+                    if (refEq(skipExpr, user)) {
+                        shouldSkip = true
+                        break
+                    }
+                }
+            }
+            if (!shouldSkip) {
+                user.ReplaceOperand(op, autoEnvWrapperClass)
+            }
+        }
+    }
+
+    private func GetFuncTypeFromAutoEnvBaseDef(autoEnvBaseDef: ClassDef): (String, FuncType) {
+        let methods = autoEnvBaseDef.GetMethods()
+        CJC_ASSERT(methods.size == 1)
+        return (methods[0].GetSrcCodeIdentifier(), methods[0].GetFuncType().getOrThrow())
+    }
+
+    private func CreateAutoEnvWrapper(className: String, superClassType: ClassType): ClassDef {
+        let wrapperClassDef = builder.CreateClassDef(CurrentPackage().GetName(), className, "")
+        let classType = builder.context.GetClassTy(wrapperClassDef, ArrayList<Type>())
+        wrapperClassDef.SetType(classType)
+        wrapperClassDef.SetSuperClassTy(superClassType)
+        SetAutoEnvImplDefAttr(wrapperClassDef)
+        AddClassToPackage(wrapperClassDef)
+        return wrapperClassDef
+    }
+
+    private func CreateMemberVarInAutoEnvWrapper(autoEnvWrapperDef: ClassDef): Unit {
+        let memberVarBaseType = autoEnvWrapperDef.GetSuperClassTy().getOrThrow().GetSuperClassTy(builder: builder).
+            getOrThrow()
+        let memberVarType = builder.context.GetRefTy(memberVarBaseType)
+        let memberVar = MemberVarInfo("v", memberVarType, isStatic: false, isReadOnly: false,
+            rawMangledName: "v")
+        memberVar.attributeInfo.Enable(Attribute.PUBLIC)
+        autoEnvWrapperDef.AddInstanceVar(memberVar)
+    }
+
+    private func CreateGenericMethodInAutoEnvWrapper(autoEnvWrapperDef: ClassDef): Function {
+        let memberVars = autoEnvWrapperDef.GetDirectInstanceVars()
+        CJC_ASSERT(memberVars.size == 1)
+        let memberVarType = (memberVars[0].ty.StripAllRefs() as ClassType).getOrThrow()
+        let (paramTypes, retType) = CreateFuncTypeWithBoxType(autoEnvWrapperDef, memberVarType.GetGenericArgs(),
+            HashMap<String, Type>())
+        paramTypes.add(builder.context.GetRefTy(RequireClassType(autoEnvWrapperDef)), at: 0)
+        let funcType = builder.context.GetFuncTy(paramTypes, retType)
+        let funcMangledName = GenerateWrapperClassGenericOverrideFuncMangleName(autoEnvWrapperDef)
+        let fn = CreateCCFunction(funcType, funcMangledName, GENERIC_VIRTUAL_FUNC)
+        autoEnvWrapperDef.AddMethod(fn)
+        SetMemberMethodAttr(fn, false)
+
+        let blockGroup = builder.CreateBlockGroup(fn)
+        fn.InitBody(blockGroup)
+        let entry = builder.CreateBlock(blockGroup)
+        blockGroup.SetEntryBlock(entry)
+        for (paramTy in paramTypes) {
+            builder.CreateParameter(paramTy, INVALID_LOCATION, fn)
+        }
+
+        let retVal = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(retType), retType, entry))
+        fn.SetReturnValue(retVal)
+
+        let instCustomType = memberVarType
+        let (methodName, originalFuncType) = GetFuncTypeFromAutoEnvBaseDef(instCustomType.GetClassDef())
+        let funcParams = fn.GetParams()
+        let invokeArgs = ArrayList<Value>()
+        var idx: Int64 = 1
+        while (idx < funcParams.size) {
+            invokeArgs.add(funcParams[idx])
+            idx++
+        }
+
+        let memberVarRefType = builder.context.GetRefTy(memberVarType)
+        let memberVarRefRefType = builder.context.GetRefTy(memberVarRefType)
+        let path = ArrayList<UInt64>()
+        path.add(0u64)
+        let memberVarRefRef = RequireResult(builder.CreateGetElementRef(memberVarRefRefType, funcParams[0], path, entry))
+        let memberVarRef = RequireResult(builder.CreateLoad(memberVarRefType, memberVarRefRef, entry))
+        let invokeInfo = InvokeCallContext(memberVarRef,
+            FuncCallContext(args: invokeArgs, thisType: Some(instCustomType)),
+            FuncSigInfo(originalFuncType, funcName: methodName))
+        let invoke = builder.CreateInvoke(retType, invokeInfo, entry)
+        invoke.SetVirtualMethodOffset(0u64)
+        builder.CreateStore(RequireResult(invoke), retVal, entry)
+        builder.CreateExit(None, entry)
+        return fn
+    }
+
+    private func CreateInstMethodInAutoEnvWrapper(autoEnvWrapperDef: ClassDef, genericFunc: Function): Unit {
+        let superDef = autoEnvWrapperDef.GetSuperClassDef().getOrThrow()
+        CJC_ASSERT(superDef.GetType().getOrThrow().IsAutoEnvInstBase())
+        let methods = superDef.GetMethods()
+        CJC_ASSERT(methods.size == 1)
+        let parentFuncType = methods[0].GetFuncType().getOrThrow()
+        let paramTypes = parentFuncType.GetParamTypes()
+        CJC_ASSERT(!paramTypes.isEmpty())
+        paramTypes[0] = builder.context.GetRefTy(RequireClassType(autoEnvWrapperDef))
+        let retType = parentFuncType.GetReturnType()
+        let funcType = builder.context.GetFuncTy(paramTypes, retType)
+        let funcMangledName = GenerateWrapperClassInstOverrideFuncMangleName(autoEnvWrapperDef)
+        let fn = CreateCCFunction(funcType, funcMangledName, INST_VIRTUAL_FUNC)
+        autoEnvWrapperDef.AddMethod(fn)
+        SetMemberMethodAttr(fn, false)
+
+        let blockGroup = builder.CreateBlockGroup(fn)
+        fn.InitBody(blockGroup)
+        let entry = builder.CreateBlock(blockGroup)
+        blockGroup.SetEntryBlock(entry)
+        for (paramTy in paramTypes) {
+            builder.CreateParameter(paramTy, INVALID_LOCATION, fn)
+        }
+
+        let retVal = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(retType), retType, entry))
+        fn.SetReturnValue(retVal)
+        let applyArgs = ArrayList<Value>()
+        for (param in fn.GetParams()) {
+            applyArgs.add(param)
+        }
+        let apply = builder.CreateApply(retType, genericFunc, FuncCallContext(args: applyArgs,
+            thisType: Some(RequireClassType(autoEnvWrapperDef))), entry)
+        builder.CreateStore(RequireResult(apply), retVal, entry)
+        builder.CreateExit(None, entry)
+        CastApplyArgAndRetIfNeed(apply)
+    }
+
+    private func GetOrCreateAutoEnvWrapper(instAutoEnvBaseType: ClassType): ClassDef {
+        let instAutoEnvBaseDef = instAutoEnvBaseType.GetClassDef()
+        let wrapperName = GenerateWrapperClassMangleName(instAutoEnvBaseDef)
+        if (let Some(found) <- instAutoEnvWrapperDefs.get(wrapperName)) {
+            return found
+        }
+        let wrapperClassDef = CreateAutoEnvWrapper(wrapperName, instAutoEnvBaseType)
+        CreateMemberVarInAutoEnvWrapper(wrapperClassDef)
+        let genericFunc = CreateGenericMethodInAutoEnvWrapper(wrapperClassDef)
+        CreateInstMethodInAutoEnvWrapper(wrapperClassDef, genericFunc)
+        instAutoEnvWrapperDefs[wrapperName] = wrapperClassDef
+        return wrapperClassDef
+    }
+
+    private func CastApplyArgAndRetIfNeed(e: Apply): Unit {
+        let maybeCalleeType = e.GetCallee().GetType().getOrThrow() as FuncType
+        if (maybeCalleeType.isNone()) {
+            return
+        }
+        let calleeType = maybeCalleeType.getOrThrow()
+        if (!calleeType.IsCJFunc()) {
+            return
+        }
+        let index = OperandNeedTypeCast(e.GetArgs(), calleeType.GetParamTypes(), 1)
+        if (!index.isEmpty()) {
+            AddTypeCastForOperand(e, index)
+        }
+        let declaredRetType = calleeType.GetReturnType().StripAllRefs()
+        let applyRetType = e.GetResult().getOrThrow().GetType().getOrThrow().StripAllRefs()
+        if (!declaredRetType.IsAutoEnvInstBase() && applyRetType.IsAutoEnvInstBase()) {
+            WrapApplyRetVal(e)
+        }
+    }
+
+    private func WrapApplyRetVal(apply: Apply): Unit {
+        let applyRetVal = apply.GetResult().getOrThrow()
+        let applyRetType = applyRetVal.GetType().getOrThrow()
+        let applyRetTypeNoRef = (applyRetType.StripAllRefs() as ClassType).getOrThrow()
+        let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(applyRetTypeNoRef)
+        let newApplyRetType = builder.context.GetRefTy(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
+            GetSuperClassTy().getOrThrow())
+        applyRetVal.SetType(newApplyRetType)
+        let parentBlock = apply.GetParentBlock().getOrThrow()
+        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let allocate = builder.CreateAllocate(builder.context.GetRefTy(autoEnvWrapperType), autoEnvWrapperType,
+            parentBlock)
+        allocate.MoveAfter(apply)
+        let path = ArrayList<UInt64>()
+        path.add(0u64)
+        let storeMemberVar = builder.CreateStoreElementRef(applyRetVal, RequireResult(allocate), path, parentBlock)
+        storeMemberVar.MoveAfter(allocate)
+        let typecast = builder.CreateTypeCast(applyRetType, RequireResult(allocate), parentBlock)
+        typecast.MoveAfter(storeMemberVar)
+        let skip = ArrayList<Expression>()
+        skip.add(storeMemberVar)
+        ReplaceOperandWithAutoEnvWrapperClass(applyRetVal, RequireResult(typecast), skip)
+    }
+
+    private func CastApplyWithExceptionArgAndRetIfNeed(e: ApplyWithException): Unit {
+        let maybeCalleeType = e.GetCallee().GetType().getOrThrow() as FuncType
+        if (maybeCalleeType.isNone()) {
+            return
+        }
+        let calleeType = maybeCalleeType.getOrThrow()
+        if (!calleeType.IsCJFunc()) {
+            return
+        }
+        let index = OperandNeedTypeCast(e.GetArgs(), calleeType.GetParamTypes(), 1)
+        if (!index.isEmpty()) {
+            AddTypeCastForOperand(e, index)
+        }
+        let declaredRetType = calleeType.GetReturnType().StripAllRefs()
+        let applyRetType = e.GetResult().getOrThrow().GetType().getOrThrow().StripAllRefs()
+        if (!declaredRetType.IsAutoEnvInstBase() && applyRetType.IsAutoEnvInstBase()) {
+            WrapApplyWithExceptionRetVal(e)
+        }
+    }
+
+    private func WrapApplyWithExceptionRetVal(apply: ApplyWithException): Unit {
+        let applyRetVal = apply.GetResult().getOrThrow()
+        let applyRetType = applyRetVal.GetType().getOrThrow()
+        let applyRetTypeNoRef = (applyRetType.StripAllRefs() as ClassType).getOrThrow()
+        let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(applyRetTypeNoRef)
+        let newApplyRetType = builder.context.GetRefTy(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
+            GetSuperClassTy().getOrThrow())
+        applyRetVal.SetType(newApplyRetType)
+        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let autoEnvWrapperRefType = builder.context.GetRefTy(autoEnvWrapperType)
+        for (user in applyRetVal.GetUsers()) {
+            if (user.GetExprKind() == ExprKind.INSTANCEOF) {
+                continue
+            }
+            let userParentBlock = user.GetParentBlock().getOrThrow()
+            let allocate = builder.CreateAllocate(autoEnvWrapperRefType, autoEnvWrapperType, userParentBlock)
+            allocate.MoveBefore(user)
+            let path = ArrayList<UInt64>()
+            path.add(0u64)
+            let storeMemberVar = builder.CreateStoreElementRef(applyRetVal, RequireResult(allocate), path,
+                userParentBlock)
+            storeMemberVar.MoveAfter(allocate)
+            let typecast = builder.CreateTypeCast(applyRetType, RequireResult(allocate), userParentBlock)
+            typecast.MoveAfter(storeMemberVar)
+            user.ReplaceOperand(applyRetVal, RequireResult(typecast))
+        }
+    }
+
+    private func CastInvokeRetIfNeed(e: DynamicDispatch): Unit {
+        let declaredRetType = e.GetMethodType().GetReturnType().StripAllRefs()
+        let invokeRetType = e.GetResult().getOrThrow().GetType().getOrThrow().StripAllRefs()
+        if (!declaredRetType.IsAutoEnvInstBase() && invokeRetType.IsAutoEnvInstBase()) {
+            WrapInvokeRetVal(e)
+        }
+    }
+
+    private func WrapInvokeRetVal(e: DynamicDispatch): Unit {
+        let invokeRetVal = e.GetResult().getOrThrow()
+        let invokeRetType = invokeRetVal.GetType().getOrThrow()
+        let invokeRetTypeNoRef = (invokeRetType.StripAllRefs() as ClassType).getOrThrow()
+        let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(invokeRetTypeNoRef)
+        let newInvokeRetType = builder.context.GetRefTy(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
+            GetSuperClassTy().getOrThrow())
+        invokeRetVal.SetType(newInvokeRetType)
+        let parentBlock = e.GetParentBlock().getOrThrow()
+        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let allocate = builder.CreateAllocate(builder.context.GetRefTy(autoEnvWrapperType), autoEnvWrapperType,
+            parentBlock)
+        allocate.MoveAfter(e)
+        let path = ArrayList<UInt64>()
+        path.add(0u64)
+        let storeMemberVar = builder.CreateStoreElementRef(invokeRetVal, RequireResult(allocate), path, parentBlock)
+        storeMemberVar.MoveAfter(allocate)
+        let typecast = builder.CreateTypeCast(invokeRetType, RequireResult(allocate), parentBlock)
+        typecast.MoveAfter(storeMemberVar)
+        let skip = ArrayList<Expression>()
+        skip.add(storeMemberVar)
+        ReplaceOperandWithAutoEnvWrapperClass(invokeRetVal, RequireResult(typecast), skip)
+    }
+
+    private func CastInvokeWithExceptionRetIfNeed(e: DynamicDispatchWithException): Unit {
+        let declaredRetType = e.GetMethodType().GetReturnType().StripAllRefs()
+        let invokeRetType = e.GetResult().getOrThrow().GetType().getOrThrow().StripAllRefs()
+        if (!declaredRetType.IsAutoEnvInstBase() && invokeRetType.IsAutoEnvInstBase()) {
+            WrapInvokeWithExceptionRetVal(e)
+        }
+    }
+
+    private func WrapInvokeWithExceptionRetVal(e: DynamicDispatchWithException): Unit {
+        let invokeRetVal = e.GetResult().getOrThrow()
+        let invokeRetType = invokeRetVal.GetType().getOrThrow()
+        let invokeRetTypeNoRef = (invokeRetType.StripAllRefs() as ClassType).getOrThrow()
+        let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(invokeRetTypeNoRef)
+        let newInvokeRetType = builder.context.GetRefTy(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
+            GetSuperClassTy().getOrThrow())
+        invokeRetVal.SetType(newInvokeRetType)
+        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let autoEnvWrapperRefType = builder.context.GetRefTy(autoEnvWrapperType)
+        for (user in invokeRetVal.GetUsers()) {
+            if (user.GetExprKind() == ExprKind.INSTANCEOF) {
+                continue
+            }
+            let userParentBlock = user.GetParentBlock().getOrThrow()
+            let allocate = builder.CreateAllocate(autoEnvWrapperRefType, autoEnvWrapperType, userParentBlock)
+            allocate.MoveBefore(user)
+            let path = ArrayList<UInt64>()
+            path.add(0u64)
+            let storeMemberVar = builder.CreateStoreElementRef(invokeRetVal, RequireResult(allocate), path,
+                userParentBlock)
+            storeMemberVar.MoveAfter(allocate)
+            let typecast = builder.CreateTypeCast(invokeRetType, RequireResult(allocate), userParentBlock)
+            typecast.MoveAfter(storeMemberVar)
+            user.ReplaceOperand(invokeRetVal, RequireResult(typecast))
+        }
+    }
+
+    private func CastGetElementRefRetIfNeed(e: GetElementRef): Unit {
+        let getEleRefRetType = e.GetResult().getOrThrow().GetType().getOrThrow().StripAllRefs()
+        if (!getEleRefRetType.IsAutoEnvInstBase()) {
+            return
+        }
+        var locationType = e.GetLocation().GetType().getOrThrow()
+        for (idx in e.GetPath()) {
+            locationType = GetFieldOfType(locationType, idx, builder).getOrThrow()
+        }
+        if (!locationType.StripAllRefs().IsAutoEnvInstBase()) {
+            WrapGetElementRefRetVal(e)
+        }
+    }
+
+    private func WrapGetElementRefRetVal(getEleRef: GetElementRef): Unit {
+        let getEleRefRetVal = getEleRef.GetResult().getOrThrow()
+        let getEleRefRetType = getEleRefRetVal.GetType().getOrThrow()
+        CJC_ASSERT(getEleRefRetType.IsReferenceTypeWithRefDims(2))
+        let getEleRefRetTypeNoRef = (getEleRefRetType.StripAllRefs() as ClassType).getOrThrow()
+        let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(getEleRefRetTypeNoRef)
+        let newGetEleRefRetType = builder.context.GetRefTy(builder.context.GetRefTy(
+            autoEnvWrapperDef.GetSuperClassDef().getOrThrow().GetSuperClassTy().getOrThrow()))
+        getEleRefRetVal.SetType(newGetEleRefRetType)
+        let parentBlock = getEleRef.GetParentBlock().getOrThrow()
+        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let allocate1 = builder.CreateAllocate(builder.context.GetRefTy(autoEnvWrapperType), autoEnvWrapperType,
+            parentBlock)
+        allocate1.MoveAfter(getEleRef)
+        let loadRetType = (newGetEleRefRetType as RefType).getOrThrow().GetBaseType()
+        let load = builder.CreateLoad(loadRetType, getEleRefRetVal, parentBlock)
+        load.MoveAfter(allocate1)
+        let path = ArrayList<UInt64>()
+        path.add(0u64)
+        let storeMemberVar = builder.CreateStoreElementRef(RequireResult(load), RequireResult(allocate1), path,
+            parentBlock)
+        storeMemberVar.MoveAfter(load)
+        let expectedType = (getEleRefRetType as RefType).getOrThrow().GetBaseType()
+        let typecast = builder.CreateTypeCast(expectedType, RequireResult(allocate1), parentBlock)
+        typecast.MoveAfter(storeMemberVar)
+        let typecastRetType = RequireResult(typecast).GetType().getOrThrow()
+        let allocate2 = builder.CreateAllocate(builder.context.GetRefTy(typecastRetType), typecastRetType,
+            parentBlock)
+        allocate2.MoveAfter(typecast)
+        let store = builder.CreateStore(RequireResult(typecast), RequireResult(allocate2), parentBlock)
+        store.MoveAfter(allocate2)
+        let skip = ArrayList<Expression>()
+        skip.add(load)
+        ReplaceOperandWithAutoEnvWrapperClass(getEleRefRetVal, RequireResult(allocate2), skip)
+    }
+
+    private func WrapFieldRetVal(field: Field): Unit {
+        let fieldRetVal = field.GetResult().getOrThrow()
+        let fieldRetType = fieldRetVal.GetType().getOrThrow()
+        CJC_ASSERT(fieldRetType.IsReferenceTypeWithRefDims(1))
+        let fieldRetTypeNoRef = (fieldRetType.StripAllRefs() as ClassType).getOrThrow()
+        let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(fieldRetTypeNoRef)
+        let newFieldRetType = builder.context.GetRefTy(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
+            GetSuperClassTy().getOrThrow())
+        fieldRetVal.SetType(newFieldRetType)
+        let parentBlock = field.GetParentBlock().getOrThrow()
+        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let allocate = builder.CreateAllocate(builder.context.GetRefTy(autoEnvWrapperType), autoEnvWrapperType,
+            parentBlock)
+        allocate.MoveAfter(field)
+        let path = ArrayList<UInt64>()
+        path.add(0u64)
+        let storeMemberVar = builder.CreateStoreElementRef(fieldRetVal, RequireResult(allocate), path, parentBlock)
+        storeMemberVar.MoveAfter(allocate)
+        let typecast = builder.CreateTypeCast(fieldRetType, RequireResult(allocate), parentBlock)
+        typecast.MoveAfter(storeMemberVar)
+        let skip = ArrayList<Expression>()
+        skip.add(storeMemberVar)
+        ReplaceOperandWithAutoEnvWrapperClass(fieldRetVal, RequireResult(typecast), skip)
+    }
+
+    private func CastRawArrayInitByValueArgIfNeed(e: RawArrayInitByValue): Unit {
+        let rawArrayType = (e.GetRawArray().GetType().getOrThrow().StripAllRefs() as RawArrayType).getOrThrow()
+        let expectedType = ArrayList<Type>()
+        expectedType.add(rawArrayType.GetElementType())
+        let initValue = ArrayList<Value>()
+        initValue.add(e.GetInitValue())
+        let index = OperandNeedTypeCast(initValue, expectedType, 2)
+        if (!index.isEmpty()) {
+            AddTypeCastForOperand(e, index)
+        }
+    }
+
+    private func CastTypeCastArgIfNeed(e: TypeCast): Unit {
+        let srcType = e.GetSourceTy().getOrThrow().StripAllRefs()
+        let targetType = e.GetTargetTy().getOrThrow().StripAllRefs()
+        if (IsAutoEnvGenericType(srcType) && targetType.IsAutoEnvInstBase()) {
+            WrapTypeCastSrcVal(e)
+        }
+    }
+
+    private func WrapTypeCastSrcVal(typecast: TypeCast): Unit {
+        let targetTypeNoRef = (typecast.GetTargetTy().getOrThrow().StripAllRefs() as ClassType).getOrThrow()
+        let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(targetTypeNoRef)
+        let parentBlock = typecast.GetParentBlock().getOrThrow()
+        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let allocate = builder.CreateAllocate(builder.context.GetRefTy(autoEnvWrapperType), autoEnvWrapperType,
+            parentBlock)
+        allocate.MoveBefore(typecast)
+        let srcVal = typecast.GetSourceValue()
+        let path = ArrayList<UInt64>()
+        path.add(0u64)
+        let storeMemberVar = builder.CreateStoreElementRef(srcVal, RequireResult(allocate), path, parentBlock)
+        storeMemberVar.MoveAfter(allocate)
+        typecast.ReplaceOperand(srcVal, RequireResult(allocate))
+    }
+
+    private func CastSpawnArgIfNeed(e: Spawn): Unit {
+        if (!e.IsExecuteClosure()) {
+            return
+        }
+        let funcType = e.GetExecuteClosure().getOrThrow().GetFuncType().getOrThrow()
+        let index = OperandNeedTypeCast(e.GetOperands(), funcType.GetParamTypes(), 0)
+        if (!index.isEmpty()) {
+            AddTypeCastForOperand(e, index)
+        }
+    }
+
+    private func ModifyTypeMismatchInExpr(): Unit {
+        for (fn in CurrentPackage().GetGlobalFuncsWithBody()) {
+            if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
+                continue
+            }
+            if (let Some(body) <- fn.GetBody()) {
+                ModifyTypeMismatchInBlockGroup(body)
+            }
+        }
+    }
+
+    private func ModifyTypeMismatchInBlockGroup(group: BlockGroup): Unit {
+        for (block in group.GetBlocks()) {
+            for (expr in block.GetExpressions()) {
+                if (let Some(apply) <- (expr as Apply)) {
+                    CastApplyArgAndRetIfNeed(apply)
+                } else if (let Some(applyWithException) <- (expr as ApplyWithException)) {
+                    CastApplyWithExceptionArgAndRetIfNeed(applyWithException)
+                } else if (let Some(invoke) <- (expr as Invoke)) {
+                    CastInvokeRetIfNeed(invoke)
+                } else if (let Some(invokeWithException) <- (expr as InvokeWithException)) {
+                    CastInvokeWithExceptionRetIfNeed(invokeWithException)
+                } else {
+                    let enumRes = EnumConstructorNeedTypeCast(expr)
+                    if (enumRes[0]) {
+                        AddTypeCastForOperand(expr, enumRes[1])
+                    } else {
+                        let tupleRes = TupleNeedTypeCast(expr)
+                        if (tupleRes[0]) {
+                            AddTypeCastForOperand(expr, tupleRes[1])
+                        } else if (let Some(getElementRef) <- (expr as GetElementRef)) {
+                            CastGetElementRefRetIfNeed(getElementRef)
+                        } else if (let Some(field) <- (expr as Field)) {
+                            if (FieldRetValNeedWrapper(field)) {
+                                WrapFieldRetVal(field)
+                            }
+                        } else if (let Some(rawArrayInitByValue) <- (expr as RawArrayInitByValue)) {
+                            CastRawArrayInitByValueArgIfNeed(rawArrayInitByValue)
+                        } else if (let Some(typecast) <- (expr as TypeCast)) {
+                            CastTypeCastArgIfNeed(typecast)
+                        } else if (let Some(spawnExpr) <- (expr as Spawn)) {
+                            CastSpawnArgIfNeed(spawnExpr)
+                        }
+                    }
+                }
+                for (subGroup in expr.GetBlockGroups()) {
+                    ModifyTypeMismatchInBlockGroup(subGroup)
+                }
+            }
+        }
+    }
+
+    private func ModifyTypeMismatchInFunc(fn: Function, paramIndex: Int64): Unit {
+        let param = fn.GetParam(paramIndex)
+        let paramType = param.GetType().getOrThrow().StripAllRefs()
+        let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper((paramType as ClassType).getOrThrow())
+        let parentBlock = fn.GetBody().getOrThrow().GetEntryBlock().getOrThrow()
+        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let allocate = builder.CreateAllocate(builder.context.GetRefTy(autoEnvWrapperType), autoEnvWrapperType,
+            parentBlock)
+        parentBlock.InsertExprIntoHead(allocate)
+        let path = ArrayList<UInt64>()
+        path.add(0u64)
+        let storeMemberVar = builder.CreateStoreElementRef(param, RequireResult(allocate), path, parentBlock)
+        storeMemberVar.MoveAfter(allocate)
+        let typecast = builder.CreateTypeCast(param.GetType().getOrThrow(), RequireResult(allocate), parentBlock)
+        typecast.MoveAfter(storeMemberVar)
+        let skip = ArrayList<Expression>()
+        skip.add(storeMemberVar)
+        ReplaceOperandWithAutoEnvWrapperClass(param, RequireResult(typecast), skip)
+    }
+
+    private func ModifyTypeMismatchInVTable(): Unit {
+        for (fn in CurrentPackage().GetGlobalFuncsWithBody()) {
+            if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
+                continue
+            }
+            let rawFuncType = fn.GetOverrideSrcFuncType() ?? continue
+            let rawParamTypes = rawFuncType.GetParamTypes()
+            let paramTypes = fn.GetFuncType().getOrThrow().GetParamTypes()
+            CJC_ASSERT(rawParamTypes.size == paramTypes.size)
+            var idx: Int64 = 0
+            while (idx < rawParamTypes.size) {
+                if (rawParamTypes[idx].StripAllRefs().IsAutoEnvGenericBase() &&
+                    paramTypes[idx].StripAllRefs().IsAutoEnvInstBase()) {
+                    ModifyTypeMismatchInFunc(fn, idx)
+                }
+                idx++
+            }
+        }
     }
 
     private func CreateGenericTypeParamsForAutoEnvImplDef(value: Value): ArrayList<GenericType> {
