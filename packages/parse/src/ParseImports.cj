@@ -372,7 +372,7 @@ extend ParserImpl {
 
     public func ExpectPackageIdentifierWithPos(node: Node): SrcIdentifier {
         let token = Peek()
-        if (IsPackageIdentifierOrContextualKeyword(token.kind)) {
+        if (IsPackageIdentifierOrContextualKeyword(token.kind) || token.kind == TokenKind.COMMON) {
             Next()
             return ParseIdentifierFromToken(token)
         }
@@ -383,6 +383,10 @@ extend ParserImpl {
         }
         node.isBroken = true
         return SrcIdentifier("", "", pos, pos, false)
+    }
+
+    public func ExpectPackageIdentWithPos(node: Node): SrcIdentifier {
+        return ExpectPackageIdentifierWithPos(node)
     }
 }
 

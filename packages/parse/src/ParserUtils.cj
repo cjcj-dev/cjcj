@@ -499,15 +499,34 @@ extend ParserImpl {
             lexer.LookAhead(1).size > 0 && lexer.LookAhead(1)[0].kind == TokenKind.DOT
     }
 
-    public func ParseIdentifierFromToken(token: Token): SrcIdentifier {
-        let raw = token.Value()
-        var value = raw
-        var isRaw = false
-        if (raw.size >= 2 && raw[0] == b'`' && raw[raw.size - 1] == b'`') {
-            value = raw[1..(raw.size - 1)]
-            isRaw = true
+    public func IsRawIdentifier(identifier: String): Bool {
+        if (identifier.size <= "``".size) {
+            return false
         }
-        return SrcIdentifier(value, raw, token.Begin(), token.End(), isRaw)
+        return identifier[0] == b'`'
+    }
+
+    public func ParseNameFromRawIdentifier(rawIdentifier: String): String {
+        return rawIdentifier[1..(rawIdentifier.size - 1)]
+    }
+
+    public func ParseIdentifierFromToken(token: Token): SrcIdentifier {
+        let len = token.End().column - token.Begin().column
+        return ParseIdentifierFromName(token.Value(), token.Begin(), token.End(), len)
+    }
+
+    public func ParseIdentifierFromName(
+        identifier: String,
+        tkPos: Position,
+        end: Position,
+        len: Int64
+    ): SrcIdentifier {
+        let isRaw = IsRawIdentifier(identifier)
+        let name = if (isRaw) { ParseNameFromRawIdentifier(identifier) } else { identifier }
+        let pos = if (isRaw) { tkPos + 1 } else { tkPos }
+        let endPos = if (isRaw) { end - 1 } else { end }
+        let _ = len
+        return SrcIdentifier(name, pos, endPos, isRaw)
     }
 
     public func ExpectIdentifierWithPos(node: Node): SrcIdentifier {

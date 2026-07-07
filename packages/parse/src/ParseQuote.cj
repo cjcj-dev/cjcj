@@ -54,12 +54,8 @@ extend ParserImpl {
         let token = Peek()
         let rawText = token.Value()
         let rawIdentifier = if (rawText.size > 1) { rawText[1..] } else { "" }
-        var value = rawIdentifier
-        var isRaw = false
-        if (rawIdentifier.size >= 2 && rawIdentifier[0] == b'`' && rawIdentifier[rawIdentifier.size - 1] == b'`') {
-            value = rawIdentifier[1..(rawIdentifier.size - 1)]
-            isRaw = true
-        }
+        let isRaw = IsRawIdentifier(rawIdentifier)
+        let value = if (isRaw) { ParseNameFromRawIdentifier(rawIdentifier) } else { rawIdentifier }
         let ident = SrcIdentifier(value, rawIdentifier, token.Begin() + 1, token.End(), isRaw)
         let ref = RefExpr(ident)
         ref.isQuoteDollar = true
