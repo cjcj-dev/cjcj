@@ -234,6 +234,30 @@ func CHIRApplyBaseAnnotations(base: Base, value: String): Unit {
     base.GetAnno().Clear()
     for (rawLine in value.split("\n")) {
         let line = rawLine
+        if (line == "skip: dce warning") {
+            base.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+            continue
+        }
+        if (line == "skip: for-in exit") {
+            base.SetSkipCheck(SkipKind.SKIP_FORIN_EXIT)
+            continue
+        }
+        if (line == "skip: vic") {
+            base.SetSkipCheck(SkipKind.SKIP_VIC)
+            continue
+        }
+        if (line == "NeverOverflowInfo: true") {
+            base.SetNeverOverflowInfo(true)
+            continue
+        }
+        if (line == "NeverOverflowInfo: false") {
+            base.SetNeverOverflowInfo(false)
+            continue
+        }
+        if (line == "// generated-from-forin ") {
+            base.SetGeneratedFromForIn(true)
+            continue
+        }
         if (!line.startsWith("@")) {
             continue
         }
