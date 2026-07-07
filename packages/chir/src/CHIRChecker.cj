@@ -1266,15 +1266,45 @@ public class CHIRChecker {
                     CheckInvokeStatic(invokeStaticExpr, topLevelFunc, result)
                 }
             case ExprKind.INSTANCEOF =>
-                CheckOperandNumEqual(1, expr, topLevelFunc, result)
-                CheckBoolResult(expr, topLevelFunc, result)
-            case ExprKind.TYPECAST | ExprKind.BOX | ExprKind.UNBOX | ExprKind.TRANSFORM_TO_GENERIC |
-                ExprKind.TRANSFORM_TO_CONCRETE | ExprKind.UNBOX_TO_REF =>
+                if (let Some(instanceOfExpr) <- (expr as InstanceOf)) {
+                    CheckInstanceOf(instanceOfExpr, topLevelFunc, result)
+                }
+            case ExprKind.TYPECAST =>
                 CheckOperandNumEqual(1, expr, topLevelFunc, result)
                 CheckHaveResult(expr, topLevelFunc, result)
-            case ExprKind.RAW_ARRAY_ALLOCATE | ExprKind.RAW_ARRAY_INIT_BY_VALUE | ExprKind.SPAWN |
-                ExprKind.GET_RTTI | ExprKind.GET_RTTI_STATIC =>
+                if (let Some(typeCastExpr) <- (expr as TypeCast)) {
+                    CheckTypeCast(typeCastExpr, topLevelFunc, result)
+                }
+            case ExprKind.BOX =>
+                if (let Some(boxExpr) <- (expr as Box)) {
+                    CheckBox(boxExpr, topLevelFunc, result)
+                }
+            case ExprKind.UNBOX =>
+                if (let Some(unBoxExpr) <- (expr as UnBox)) {
+                    CheckUnBox(unBoxExpr, topLevelFunc, result)
+                }
+            case ExprKind.TRANSFORM_TO_GENERIC =>
+                if (let Some(transformExpr) <- (expr as TransformToGeneric)) {
+                    CheckTransformToGeneric(transformExpr, topLevelFunc, result)
+                }
+            case ExprKind.TRANSFORM_TO_CONCRETE =>
+                if (let Some(transformExpr) <- (expr as TransformToConcrete)) {
+                    CheckTransformToConcrete(transformExpr, topLevelFunc, result)
+                }
+            case ExprKind.UNBOX_TO_REF =>
+                if (let Some(unBoxToRefExpr) <- (expr as UnBoxToRef)) {
+                    CheckUnBoxToRef(unBoxToRefExpr, topLevelFunc, result)
+                }
+            case ExprKind.RAW_ARRAY_ALLOCATE | ExprKind.RAW_ARRAY_INIT_BY_VALUE | ExprKind.SPAWN =>
                 CheckHaveResult(expr, topLevelFunc, result)
+            case ExprKind.GET_RTTI =>
+                if (let Some(getRTTIExpr) <- (expr as GetRTTI)) {
+                    CheckGetRTTI(getRTTIExpr, topLevelFunc, result)
+                }
+            case ExprKind.GET_RTTI_STATIC =>
+                if (let Some(getRTTIStaticExpr) <- (expr as GetRTTIStatic)) {
+                    CheckGetRTTIStatic(getRTTIStaticExpr, topLevelFunc, result)
+                }
             case ExprKind.VARRAY_BUILDER =>
                 if (let Some(varrayBuilderExpr) <- (expr as VArrayBuilder)) {
                     CheckVArrayBuilder(varrayBuilderExpr, topLevelFunc, result)
@@ -1504,6 +1534,197 @@ public class CHIRChecker {
         let funcType = expr.GetInitFunc().GetType().getOrThrow()
         if (!IsFuncTypeOrClosureBaseRefType(funcType)) {
             TypeCheckError(expr, expr.GetInitFunc(), "Function type or closure ref", topLevelFunc, result)
+        }
+    }
+
+    private func CheckInstanceOf(expr: InstanceOf, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!CheckOperandNumEqual(1, expr, topLevelFunc, result)) {
+            return
+        }
+        CheckBoolResult(expr, topLevelFunc, result)
+        CheckTypeIsValid(expr.GetType(), "target", expr, topLevelFunc, result)
+        if (let Some(objectTy) <- expr.GetObject().GetType()) {
+            if (objectTy.StripAllRefs().IsPrimitive() && expr.GetType().StripAllRefs().IsPrimitive()) {
+                if (let Some(resultValue) <- expr.GetResult()) {
+                    result.AddError("in function ${topLevelFunc.GetIdentifier()}, invalid InstanceOf `" +
+                        "${resultValue.ToString(0)}`, source type is ${objectTy.StripAllRefs().ToString()}, " +
+                        "target type is ${expr.GetType().ToString()}, they are both exact type, doesn't need to " +
+                        "use `InstanceOf` to check in runtime.")
+                }
+            }
+        }
+    }
+
+    private func CheckTypeCast(expr: TypeCast, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        let _ = expr
+        let _ = topLevelFunc
+        let _ = result
+    }
+
+    private func CheckBox(expr: Box, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!CheckOperandNumEqual(1, expr, topLevelFunc, result)) {
+            return
+        }
+        if (!CheckHaveResult(expr, topLevelFunc, result)) {
+            return
+        }
+        if (let Some(targetTy) <- expr.GetTargetTy()) {
+            if (let Some(sourceTy) <- expr.GetSourceTy()) {
+                if (!targetTy.IsRef()) {
+                    TypeCheckResultError(expr, "reference", topLevelFunc, result)
+                } else {
+                    let strippedTy = targetTy.StripAllRefs()
+                    if (let Some(boxTy) <- (strippedTy as BoxType)) {
+                        if (boxTy.GetBaseType().objectId != sourceTy.objectId) {
+                            result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                                "${CHIRCheckerExpressionString(expr)}`, the target type is ${targetTy.ToString()}, " +
+                                "then source type must be its base type, can't be ${sourceTy.ToString()}.")
+                        }
+                    } else if (!strippedTy.IsClass()) {
+                        result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                            "${CHIRCheckerExpressionString(expr)}`, the target type must be Class& or Box&, " +
+                            "can't be ${targetTy.ToString()}.")
+                    }
+                }
+                if (!sourceTy.IsValueType()) {
+                    TypeCheckError(expr, expr.GetSourceValue(), "value", topLevelFunc, result)
+                }
+            }
+        }
+    }
+
+    private func CheckUnBox(expr: UnBox, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!CheckOperandNumEqual(1, expr, topLevelFunc, result)) {
+            return
+        }
+        if (!CheckHaveResult(expr, topLevelFunc, result)) {
+            return
+        }
+        if (let Some(targetTy) <- expr.GetTargetTy()) {
+            if (let Some(sourceTy) <- expr.GetSourceTy()) {
+                if (!sourceTy.IsRef()) {
+                    TypeCheckError(expr, expr.GetSourceValue(), "reference", topLevelFunc, result)
+                } else {
+                    let strippedTy = sourceTy.StripAllRefs()
+                    if (let Some(boxTy) <- (strippedTy as BoxType)) {
+                        if (boxTy.GetBaseType().objectId != targetTy.objectId) {
+                            result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                                "${CHIRCheckerExpressionString(expr)}`, the source type is ${sourceTy.ToString()}, " +
+                                "then target type must be its base type, can't be ${targetTy.ToString()}.")
+                        }
+                    } else if (!strippedTy.IsClass()) {
+                        result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                            "${CHIRCheckerExpressionString(expr)}`, the source type must be Class& or Box&, " +
+                            "can't be ${sourceTy.ToString()}.")
+                    }
+                }
+                if (!targetTy.IsValueType()) {
+                    TypeCheckResultError(expr, "value", topLevelFunc, result)
+                }
+            }
+        }
+    }
+
+    private func CheckTransformToGeneric(expr: TransformToGeneric, topLevelFunc: Function,
+        result: CHIRCheckResult): Unit {
+        if (!CheckOperandNumEqual(1, expr, topLevelFunc, result)) {
+            return
+        }
+        if (!CheckHaveResult(expr, topLevelFunc, result)) {
+            return
+        }
+        if (let Some(targetTy) <- expr.GetTargetTy()) {
+            if (!targetTy.IsGenericRelated()) {
+                TypeCheckResultError(expr, "generic related", topLevelFunc, result)
+            }
+        }
+        if (let Some(sourceTy) <- expr.GetSourceTy()) {
+            if (sourceTy.IsGeneric()) {
+                TypeCheckError(expr, expr.GetSourceValue(), "concrete", topLevelFunc, result)
+            }
+        }
+    }
+
+    private func CheckTransformToConcrete(expr: TransformToConcrete, topLevelFunc: Function,
+        result: CHIRCheckResult): Unit {
+        if (!CheckOperandNumEqual(1, expr, topLevelFunc, result)) {
+            return
+        }
+        if (!CheckHaveResult(expr, topLevelFunc, result)) {
+            return
+        }
+        if (let Some(targetTy) <- expr.GetTargetTy()) {
+            if (targetTy.IsGeneric()) {
+                TypeCheckResultError(expr, "concrete", topLevelFunc, result)
+            }
+        }
+        if (let Some(sourceTy) <- expr.GetSourceTy()) {
+            if (!sourceTy.IsGenericRelated()) {
+                TypeCheckError(expr, expr.GetSourceValue(), "generic related", topLevelFunc, result)
+            }
+        }
+    }
+
+    private func CheckUnBoxToRef(expr: UnBoxToRef, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!CheckOperandNumEqual(1, expr, topLevelFunc, result)) {
+            return
+        }
+        if (!CheckHaveResult(expr, topLevelFunc, result)) {
+            return
+        }
+        if (let Some(targetTy) <- expr.GetTargetTy()) {
+            var isValueRefType = false
+            if (let Some(refTy) <- (targetTy as RefType)) {
+                isValueRefType = refTy.GetBaseType().IsValueType()
+            }
+            if (!isValueRefType) {
+                TypeCheckResultError(expr, "Value&", topLevelFunc, result)
+            }
+        }
+        if (let Some(sourceTy) <- expr.GetSourceTy()) {
+            var isReferenceRefType = false
+            if (let Some(refTy) <- (sourceTy as RefType)) {
+                isReferenceRefType = refTy.GetBaseType().IsReferenceType()
+            }
+            if (!isReferenceRefType) {
+                TypeCheckError(expr, expr.GetSourceValue(), "Reference&", topLevelFunc, result)
+            }
+        }
+    }
+
+    private func CheckGetRTTI(expr: GetRTTI, topLevelFunc: Function, result: CHIRCheckResult): Unit {
+        if (!CheckOperandNumEqual(1, expr, topLevelFunc, result)) {
+            return
+        }
+        CheckUnitResult(expr, topLevelFunc, result)
+        let operand = expr.GetOperand()
+        if (let Some(operandTy) <- operand.GetType()) {
+            if (let Some(refTy) <- (operandTy as RefType)) {
+                let baseTy = refTy.GetBaseType()
+                if (!baseTy.IsClass() && !baseTy.IsThis()) {
+                    TypeCheckError(expr, operand, "Class& or This&", topLevelFunc, result)
+                }
+            } else {
+                TypeCheckError(expr, operand, "Class& or This&", topLevelFunc, result)
+            }
+        }
+    }
+
+    private func CheckGetRTTIStatic(expr: GetRTTIStatic, topLevelFunc: Function,
+        result: CHIRCheckResult): Unit {
+        if (!CheckOperandNumEqual(0, expr, topLevelFunc, result)) {
+            return
+        }
+        CheckUnitResult(expr, topLevelFunc, result)
+        if (!HasRule(CHIRCheckerRule.CHIR_GET_RTTI_STATIC_TYPE)) {
+            return
+        }
+        let rttiTy = expr.GetRTTIType()
+        let strippedTy = rttiTy.StripAllRefs()
+        if (!strippedTy.IsGeneric() && !strippedTy.IsThis()) {
+            result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                "${CHIRCheckerExpressionString(expr)}`, RTTI type should be `This` or Generic type, but now it's " +
+                "${rttiTy.ToString()}.")
         }
     }
 
@@ -2050,6 +2271,24 @@ public class CHIRChecker {
                 TypeCheckError(expr, expr.GetOperand(0), "Function", topLevelFunc, result)
             }
         }
+    }
+
+    private func CheckTypeIsValid(ty: Type, typeName: String, expr: Expression, topLevelFunc: Function,
+        result: CHIRCheckResult): Bool {
+        if (let Some(customTy) <- (ty as CustomType)) {
+            if (let Some(genericTy) <- customTy.GetCustomTypeDef().GetType()) {
+                let declaredSize = genericTy.GetTypeArgsRef().size
+                let callSiteSize = customTy.GetTypeArgsRef().size
+                if (declaredSize != callSiteSize) {
+                    result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                        "${CHIRCheckerExpressionString(expr)}`, type args' size NOT matched, the ${typeName} type " +
+                        "is `${customTy.ToString()}` which has ${callSiteSize} type arg(s), but its original type " +
+                        "is `${genericTy.ToString()}` which has ${declaredSize} type arg(s).")
+                    return false
+                }
+            }
+        }
+        return true
     }
 
     private func CheckHaveResult(expr: Expression, topLevelFunc: Function, result: CHIRCheckResult): Bool {
