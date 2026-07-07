@@ -501,6 +501,14 @@ foreign {
         nameLen: UIntNative, exportSymbols: Int32): LLVMMetadataRef
     func LLVMDIBuilderCreateDebugLocation(context: LLVMContextRef, line: UInt32, column: UInt32,
         scope: LLVMMetadataRef, inlinedAt: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMDIBuilderCreateBasicType(builder: LLVMDIBuilderRef, name: CString, nameLen: UIntNative,
+        sizeInBits: UInt64, encoding: UInt32, flags: UInt32): LLVMMetadataRef
+    func LLVMDIBuilderCreatePointerType(builder: LLVMDIBuilderRef, pointeeTy: LLVMMetadataRef, sizeInBits: UInt64,
+        alignInBits: UInt32, addressSpace: UInt32, name: CString, nameLen: UIntNative): LLVMMetadataRef
+    func LLVMDIBuilderCreateNullPtrType(builder: LLVMDIBuilderRef): LLVMMetadataRef
+    func LLVMDIBuilderCreateMemberType(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef, name: CString,
+        nameLen: UIntNative, file: LLVMMetadataRef, lineNo: UInt32, sizeInBits: UInt64, alignInBits: UInt32,
+        offsetInBits: UInt64, flags: UInt32, ty: LLVMMetadataRef): LLVMMetadataRef
 }
 
 public func LLVMNullContext(): LLVMContextRef { return CPointer<Unit>() }

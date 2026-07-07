@@ -7,6 +7,8 @@ private let LLVM_DWARF_LANG_CPP14: Int32 = 32
 private let LLVM_DWARF_EMISSION_NONE: Int32 = 0
 private let LLVM_DWARF_EMISSION_FULL: Int32 = 1
 private let LLVM_DWARF_EMISSION_LINE_TABLES_ONLY: Int32 = 2
+private let DW_ATE_signed: UInt32 = 5u32
+private let FlagZero: UInt32 = 0u32
 let DWARF_VERSION: UInt64 = 4u64
 
 public class DIBuilder {
@@ -18,6 +20,7 @@ public class DIBuilder {
     private var defaultFile: LLVMMetadataRef = LLVMNullMetadata()
     private var compileUnit: LLVMMetadataRef = LLVMNullMetadata()
     private var namespaceScope: LLVMMetadataRef = LLVMNullMetadata()
+    private var refDIType: LLVMMetadataRef = LLVMNullMetadata()
 
     public init(cgMod: CGModule) {
         this.cgMod = cgMod
@@ -114,6 +117,61 @@ public class DIBuilder {
             }
         }
         return result
+    }
+
+    private func createBasicType(name: String, sizeInBits: UInt64, encoding: UInt32): LLVMMetadataRef {
+        var result = LLVMNullMetadata()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe {
+                LLVMDIBuilderCreateBasicType(raw, nameCString.value, UIntNative(name.size), sizeInBits, encoding,
+                    FlagZero)
+            }
+        }
+        return result
+    }
+
+    private func CreateRefType(): LLVMMetadataRef {
+        if (refDIType.isNull()) {
+            let basicType = createBasicType("Int64", 64u64, DW_ATE_signed)
+            refDIType = CreatePointerType(basicType)
+        }
+        return refDIType
+    }
+
+    private func CreatePointerType(diType: LLVMMetadataRef, sizeInBits!: UInt64 = 64u64): LLVMMetadataRef {
+        return createPointerType(diType, sizeInBits: sizeInBits)
+    }
+
+    private func createPointerType(diType: LLVMMetadataRef, sizeInBits!: UInt64 = 64u64): LLVMMetadataRef {
+        var result = LLVMNullMetadata()
+        try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
+            result = unsafe {
+                LLVMDIBuilderCreatePointerType(raw, diType, sizeInBits, 0u32, 0u32, nameCString.value, 0)
+            }
+        }
+        return result
+    }
+
+    private func createNullPtrType(): LLVMMetadataRef {
+        return unsafe { LLVMDIBuilderCreateNullPtrType(raw) }
+    }
+
+    private func createMemberType(scope: LLVMMetadataRef, name: String, file: LLVMMetadataRef, lineNo: UInt32,
+        sizeInBits: UInt64, alignInBits: UInt32, offsetInBits: UInt64, flags: UInt32,
+        diType: LLVMMetadataRef): LLVMMetadataRef {
+        var result = LLVMNullMetadata()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe {
+                LLVMDIBuilderCreateMemberType(raw, scope, nameCString.value, UIntNative(name.size), file, lineNo,
+                    sizeInBits, alignInBits, offsetInBits, flags, diType)
+            }
+        }
+        return result
+    }
+
+    private func CreateTypeInfoMember(fwdDecl: LLVMMetadataRef, diFile: LLVMMetadataRef): LLVMMetadataRef {
+        return createMemberType(fwdDecl, "$ti", diFile, 0u32, 64u64, 0u32, 0u64, FlagZero,
+            CreateRefType())
     }
 }
 
