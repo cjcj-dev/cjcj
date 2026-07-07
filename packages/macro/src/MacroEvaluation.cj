@@ -10,6 +10,7 @@ import cangjie_compiler::parse.PackageSpec as EvalParsedPackageSpec
 import cangjie_compiler::parse.Parser as EvalParser
 import cangjie_compiler::parse.ScopeKind as EvalParsedScopeKind
 import cangjie_compiler::parse.SrcIdentifier as EvalParsedSrcIdentifier
+import cangjie_compiler::ast.{VisitAction, Walker}
 import std.collection.*
 
 private func appendTokens(target: ArrayList<Token>, source: ArrayList<Token>): Unit {
@@ -146,6 +147,23 @@ private func skipAnnotationTokens(tokens: ArrayList<Token>): Int64 {
     return idx
 }
 
+private func calculateEndIdx(tokens: ArrayList<Token>, targetPos: Position): Int64 {
+    if (tokens.isEmpty()) {
+        return 0
+    }
+    var idx: Int64 = 0
+    while (idx < tokens.size) {
+        if (tokens[idx].Begin() == targetPos) {
+            return idx
+        }
+        if (tokens[idx].End() == targetPos) {
+            return idx + 1
+        }
+        idx++
+    }
+    return tokens.size - 1
+}
+
 private func moduleNameForMacroCall(macCall: MacroCall): String {
     if (let Some(node) <- macCall.GetNode()) {
         if (let Some(file) <- node.curFile) {
@@ -212,96 +230,103 @@ private func makeEvaluationParsedFile(macroFile: File): EvalParsedFile {
     return parsedFile
 }
 
-private func calculateCallEnd(inputTokens: ArrayList<Token>, atIndex: Int64): Int64 {
-    var idx = atIndex + 2
-    if (idx < inputTokens.size && inputTokens[idx].kind == TokenKind.LSQUARE) {
-        var squareDepth: Int64 = 1
-        idx++
-        while (idx < inputTokens.size && squareDepth > 0) {
-            if (inputTokens[idx].kind == TokenKind.LSQUARE) {
-                squareDepth++
-            } else if (inputTokens[idx].kind == TokenKind.RSQUARE) {
-                squareDepth--
+private func isInPrimaryFuncParam(decl: Decl, mcPos: Position): Bool {
+    let primaryFuncParam = Box<Bool>(false)
+    let checkMacroCallScope = { curNode: Node =>
+        if (ASTKindEquals(curNode.astKind, ASTKind.MACRO_EXPAND_PARAM) && curNode.begin == mcPos) {
+            if (let Some(invocation) <- curNode.GetConstInvocation()) {
+                let scope = invocation.scopeKind
+                let primaryCtorScope = match (scope) {
+                    case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS => true
+                    case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT => true
+                    case _ => false
+                }
+                if (primaryCtorScope) {
+                    primaryFuncParam.value = true
+                }
             }
-            idx++
+            return VisitAction.SKIP_CHILDREN
         }
+        return VisitAction.WALK_CHILDREN
     }
-    if (idx < inputTokens.size && inputTokens[idx].kind == TokenKind.LPAREN) {
-        var parenDepth: Int64 = 1
-        idx++
-        while (idx < inputTokens.size && parenDepth > 0) {
-            if (inputTokens[idx].kind == TokenKind.LPAREN) {
-                parenDepth++
-            } else if (inputTokens[idx].kind == TokenKind.RPAREN) {
-                parenDepth--
-            }
-            idx++
-        }
-    }
-    return idx
+    let mcWalker = Walker(decl, visitPre: checkMacroCallScope)
+    let _ = mcWalker.Walk()
+    return primaryFuncParam.value
 }
 
-private func createMacroExpandFromTokens(inputTokens: ArrayList<Token>, atIndex: Int64): MacroExpandDecl {
-    let decl = MacroExpandDecl()
-    decl.begin = inputTokens[atIndex].Begin()
-    let nameToken = inputTokens[atIndex + 1]
-    decl.identifier = SrcIdentifier(nameToken.Value(), nameToken.Begin(), nameToken.End(), false)
-    decl.invocation.macroCallDiagInfo.fullName = nameToken.Value()
-    decl.invocation.macroCallDiagInfo.identifier = nameToken.Value()
-    decl.invocation.macroCallDiagInfo.identifierPos = nameToken.Begin()
-    decl.invocation.atPos = inputTokens[atIndex].Begin()
-    decl.invocation.macroNamePos = nameToken.Begin()
-    var idx = atIndex + 2
-    if (idx < inputTokens.size && inputTokens[idx].kind == TokenKind.LSQUARE) {
-        decl.invocation.hasAttr = true
-        decl.invocation.leftSquarePos = inputTokens[idx].Begin()
-        idx++
-        var squareDepth: Int64 = 1
-        while (idx < inputTokens.size && squareDepth > 0) {
-            if (inputTokens[idx].kind == TokenKind.LSQUARE) {
-                squareDepth++
-            } else if (inputTokens[idx].kind == TokenKind.RSQUARE) {
-                squareDepth--
-                if (squareDepth == 0) {
-                    decl.invocation.rightSquarePos = inputTokens[idx].Begin()
-                    idx++
-                    break
-                }
-            }
-            if (squareDepth > 0) {
-                decl.invocation.attrs.add(inputTokens[idx])
-            }
-            idx++
+private func getMacroScopeKind(invocation: MacroInvocation, mcPos: Position): ScopeKind {
+    if (invocation.hasParenthesis) {
+        return ScopeKind.UNKNOWN_SCOPE
+    }
+    if (let Some(decl) <- invocation.decl) {
+        if (isInPrimaryFuncParam(decl, mcPos)) {
+            return ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM
+        }
+        match (decl.astKind) {
+            case ASTKind.INTERFACE_DECL => return ScopeKind.INTERFACE_BODY
+            case ASTKind.EXTEND_DECL => return ScopeKind.EXTEND_BODY
+            case ASTKind.CLASS_DECL => return ScopeKind.CLASS_BODY
+            case ASTKind.STRUCT_DECL => return ScopeKind.STRUCT_BODY
+            case ASTKind.ENUM_DECL => return ScopeKind.ENUM_BODY
+            case ASTKind.FUNC_DECL => return ScopeKind.FUNC_BODY
+            case _ => ()
         }
     }
-    if (idx < inputTokens.size && inputTokens[idx].kind == TokenKind.LPAREN) {
-        decl.invocation.hasParenthesis = true
-        decl.invocation.leftParenPos = inputTokens[idx].Begin()
-        idx++
-        var parenDepth: Int64 = 1
-        while (idx < inputTokens.size && parenDepth > 0) {
-            if (inputTokens[idx].kind == TokenKind.LPAREN) {
-                parenDepth++
-            } else if (inputTokens[idx].kind == TokenKind.RPAREN) {
-                parenDepth--
-                if (parenDepth == 0) {
-                    decl.invocation.rightParenPos = inputTokens[idx].Begin()
-                    idx++
-                    break
-                }
-            }
-            if (parenDepth > 0) {
-                decl.invocation.args.add(inputTokens[idx])
-            }
-            idx++
+    let hasScope = match (invocation.scopeKind) {
+        case ScopeKind.UNKNOWN_SCOPE => false
+        case _ => true
+    }
+    if (hasScope) {
+        return invocation.scopeKind
+    }
+    return ScopeKind.TOPLEVEL
+}
+
+private func getMacroScopeKindReEval(invocation: MacroInvocation): ScopeKind {
+    if (invocation.hasParenthesis) {
+        return ScopeKind.UNKNOWN_SCOPE
+    }
+    let hasScope = match (invocation.scopeKind) {
+        case ScopeKind.UNKNOWN_SCOPE => false
+        case _ => true
+    }
+    if (hasScope) {
+        return invocation.scopeKind
+    }
+    return ScopeKind.TOPLEVEL
+}
+
+private func getPrimaryName(invocation: MacroInvocation): String {
+    if (let Some(decl) <- invocation.decl) {
+        if (ASTKindEquals(decl.astKind, ASTKind.STRUCT_DECL) || ASTKindEquals(decl.astKind, ASTKind.CLASS_DECL)) {
+            return decl.identifier.Val()
         }
+        return invocation.outerDeclIdent
     }
-    if (idx > atIndex && idx - 1 < inputTokens.size) {
-        decl.end = inputTokens[idx - 1].End()
-    } else {
-        decl.end = nameToken.End()
+    return ""
+}
+
+private func refreshTokensPos(inputTokens: ArrayList<Token>, pos: Position, sm: SourceManager): Unit {
+    if (inputTokens.isEmpty()) {
+        return
     }
-    return decl
+    var meFileID = pos.fileID
+    var meLine = pos.line
+    var lastColumn = pos.column + inputTokens[0].Length() + 1
+    var tokenIdx: Int64 = 0
+    while (tokenIdx < inputTokens.size) {
+        var token = inputTokens[tokenIdx]
+        if (IsCurFile(sm, token)) {
+            meFileID = token.Begin().fileID
+            meLine = token.Begin().line
+            lastColumn = token.Begin().column + token.Value().size + 1
+        } else {
+            token.SetValuePos(token.Value(), Position(meFileID, meLine, lastColumn, token.Begin().isCurFile),
+                Position(meFileID, meLine, lastColumn + token.Value().size, token.End().isCurFile))
+            inputTokens[tokenIdx] = token
+        }
+        tokenIdx++
+    }
 }
 
 private func refreshMacroCallArgs(macCall: MacroCall, diag: DiagnosticEngine): Unit {
@@ -422,26 +447,10 @@ private func handleBeforeMacroCallEval(macCall: MacroCall, diag: DiagnosticEngin
 private func refreshTokensPosForMacroArgCheck(inputTokens: ArrayList<Token>, pos: Position,
     sm: SourceManager): ArrayList<Token> {
     let out = ArrayList<Token>()
-    if (inputTokens.isEmpty()) {
-        return out
-    }
-    var meFileID = pos.fileID
-    var meLine = pos.line
-    var lastColumn = pos.column + inputTokens[0].Length() + 1
-    var tokenIdx: Int64 = 0
-    while (tokenIdx < inputTokens.size) {
-        var token = inputTokens[tokenIdx]
-        if (IsCurFile(sm, token)) {
-            meFileID = token.Begin().fileID
-            meLine = token.Begin().line
-            lastColumn = token.Begin().column + token.Value().size + 1
-        } else {
-            token.SetValuePos(token.Value(), Position(meFileID, meLine, lastColumn, token.Begin().isCurFile),
-                Position(meFileID, meLine, lastColumn + token.Value().size, token.End().isCurFile))
-        }
+    for (token in inputTokens) {
         out.add(token)
-        tokenIdx++
     }
+    refreshTokensPos(out, pos, sm)
     return out
 }
 
@@ -466,7 +475,7 @@ private func checkMacroCallArgs(macCall: MacroCall, diag: DiagnosticEngine, comp
     let refreshedTokens = refreshTokensPosForMacroArgCheck(invocation.args, parsePos, diag.GetSourceManager())
     let parserDiag = EvalParsedDiagnosticEngine()
     let parser = EvalParser(refreshedTokens.toArray(), parserDiag, diag.GetSourceManager(), parseDeclFile: compileCjd)
-    parser.SetPrimaryDecl(invocation.outerDeclIdent)
+    parser.SetPrimaryDecl(getPrimaryName(invocation))
     if (let Some(macroFile) <- macCall.RequireNode().curFile) {
         parser.SetCurFile(makeEvaluationParsedFile(macroFile))
     }
@@ -652,6 +661,27 @@ private func evaluateNativeMacro(macCall: MacroCall): Bool {
         return invokeAttrNativeMacro(macCall, attrBytes, inputBytes)
     }
     return invokeCommonNativeMacro(macCall, inputBytes)
+}
+
+private func refreshNewTokensPosition(originPos: ArrayList<Position>, tokensToParse: ArrayList<Token>): Unit {
+    var idx: Int64 = 0
+    while (idx < tokensToParse.size) {
+        originPos.add(tokensToParse[idx].Begin())
+        idx++
+    }
+    idx = 1
+    while (idx < tokensToParse.size) {
+        var begin = tokensToParse[idx - 1].End() + 1
+        var end = begin + tokensToParse[idx].Value().size
+        if (tokensToParse[idx].kind == TokenKind.QUEST && tokensToParse[idx - 1].kind == TokenKind.QUEST) {
+            begin = tokensToParse[idx - 1].End()
+            end = begin + tokensToParse[idx].Value().size
+        }
+        var token = tokensToParse[idx]
+        token.SetValuePos(token.Value(), begin, end)
+        tokensToParse[idx] = token
+        idx++
+    }
 }
 
 public class MacroEvaluation {
@@ -949,23 +979,64 @@ public class MacroEvaluation {
 
     public func CreateChildMacroCall(inputTokens: ArrayList<Token>, startIndex: Box<Int64>,
         curIndex: Box<Int64>, macCall: MacroCall, reEval!: Bool = false): Unit {
-        let _ = reEval
         let parentInvocation = macCall.RequireInvocation()
-        let decl = createMacroExpandFromTokens(inputTokens, curIndex.value)
-        decl.curFile = macCall.RequireNode().curFile
+        let primaryName = getPrimaryName(parentInvocation)
+        let scopeKind = if (reEval) {
+            getMacroScopeKindReEval(parentInvocation)
+        } else {
+            getMacroScopeKind(parentInvocation, inputTokens[curIndex.value].Begin())
+        }
+        let tempDiag = DiagnosticEngine()
+        let sm = SourceManager()
+        tempDiag.SetSourceManager(sm)
+        let diag = if (reEval) { tempDiag } else { ci.GetDiag() }
+        let errCnt = diag.GetErrorCount()
+        let tokensToParse = tokenListFromRange(inputTokens, curIndex.value, inputTokens.size)
+        let originPos = ArrayList<Position>()
+        if (reEval) {
+            refreshNewTokensPosition(originPos, tokensToParse)
+        }
+        let parser = EvalParser(tokensToParse.toArray(), diag, ci.GetDiag().GetSourceManager(),
+            parseDeclFile: ci.GetGlobalOptions().compileCjd)
+        parser.SetPrimaryDecl(primaryName)
+        if (let Some(macroFile) <- macCall.RequireNode().curFile) {
+            parser.SetCurFile(makeEvaluationParsedFile(macroFile))
+        }
+        parser.SetCompileOptions(ci.GetGlobalOptions())
+        let decl = parser.ParseDecl(toEvaluationParsedScopeKind(scopeKind))
+        if (!decl.IsMacroCallNode()) {
+            curIndex.value++
+            return
+        }
         let child = MacroCall(decl)
         child.parentMacroCall = Some(macCall)
         macCall.children.add(child)
-        CreateMacroCallTree(child)
+        if (diag.GetErrorCount() > errCnt) {
+            child.status = MacroEvalStatus.FAIL
+        } else {
+            CreateMacroCallTree(child)
+        }
         if (child.status == MacroEvalStatus.FAIL) {
             macCall.status = MacroEvalStatus.FAIL
         }
         parentInvocation.macroAtPosition.add(child.GetBeginPos())
+        for (atPos in child.RequireInvocation().macroAtPosition) {
+            parentInvocation.macroAtPosition.add(atPos)
+        }
         if (startIndex.value < curIndex.value) {
             parentInvocation.nodes.add(TokenPart(tokenListFromRange(inputTokens, startIndex.value, curIndex.value)))
         }
-        let endIndex = calculateCallEnd(inputTokens, curIndex.value)
+        let endIndex = curIndex.value + calculateEndIdx(tokensToParse, decl.end)
         parentInvocation.nodes.add(decl)
+        if (reEval) {
+            var idx: Int64 = 1
+            while (idx < tokensToParse.size) {
+                var token = tokensToParse[idx]
+                token.SetValuePos(token.Value(), originPos[idx], originPos[idx] + tokensToParse[idx].Value().size)
+                tokensToParse[idx] = token
+                idx++
+            }
+        }
         startIndex.value = endIndex
         curIndex.value = endIndex
     }
