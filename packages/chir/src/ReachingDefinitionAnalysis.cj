@@ -2,13 +2,13 @@ package cangjie_compiler::chir
 
 import std.collection.*
 
-public class ReachingDefinitionDomain {
-    private var reachable: Bool = false
+public class ReachingDefinitionDomain <: AbstractDomain<ReachingDefinitionDomain> {
     private let reachingDefs: ArrayList<ExpressionFlatSet> = ArrayList<ExpressionFlatSet>()
     private let reachingLoadDefs: ArrayList<ExpressionFlatSet> = ArrayList<ExpressionFlatSet>()
     private let allocateIdxMap: HashMap<Int64, Int64>
 
     public init(allocateIdxMap: HashMap<Int64, Int64>) {
+        super()
         this.allocateIdxMap = allocateIdxMap
         var idx: Int64 = 0
         while (idx < allocateIdxMap.size) {
@@ -19,7 +19,8 @@ public class ReachingDefinitionDomain {
     }
 
     public init(allocateIdxMap: HashMap<Int64, Int64>, reachingDefs: ArrayList<ExpressionFlatSet>,
-        reachingLoadDefs: ArrayList<ExpressionFlatSet>, reachable: Bool) {
+        reachingLoadDefs: ArrayList<ExpressionFlatSet>, kind: ReachableKind) {
+        super()
         this.allocateIdxMap = allocateIdxMap
         for (slot in reachingDefs) {
             this.reachingDefs.add(slot.Clone())
@@ -27,19 +28,19 @@ public class ReachingDefinitionDomain {
         for (slot in reachingLoadDefs) {
             this.reachingLoadDefs.add(slot.Clone())
         }
-        this.reachable = reachable
+        this.kind = kind
     }
 
-    public func Clone(): ReachingDefinitionDomain {
-        return ReachingDefinitionDomain(allocateIdxMap, reachingDefs, reachingLoadDefs, reachable)
+    public override func Clone(): ReachingDefinitionDomain {
+        return ReachingDefinitionDomain(allocateIdxMap, reachingDefs, reachingLoadDefs, kind)
     }
 
     public func IsReachable(): Bool {
-        return reachable
+        return !IsBottom()
     }
 
     public func SetReachable(value: Bool): Unit {
-        reachable = value
+        kind = if (value) { ReachableKind.REACHABLE } else { ReachableKind.UNREACHABLE }
     }
 
     public func SetAllTrackedToTop(): Unit {
@@ -51,14 +52,8 @@ public class ReachingDefinitionDomain {
         }
     }
 
-    public func Join(rhs: ReachingDefinitionDomain): Bool {
-        if (!rhs.reachable) {
-            return false
-        }
-        if (!reachable) {
-            CopyFrom(rhs)
-            return true
-        }
+    public override func Join(rhs: ReachingDefinitionDomain): Bool {
+        kind = ReachableKind.REACHABLE
         var changed = false
         var idx: Int64 = 0
         while (idx < reachingDefs.size && idx < rhs.reachingDefs.size) {
@@ -130,8 +125,8 @@ public class ReachingDefinitionDomain {
         return false
     }
 
-    public func ToString(): String {
-        if (!reachable) {
+    public override func ToString(): String {
+        if (IsBottom()) {
             return "Unreachable"
         }
         let defParts = ArrayList<String>()
@@ -143,18 +138,6 @@ public class ReachingDefinitionDomain {
             loadParts.add(slot.ToString())
         }
         return "{ " + JoinStrings(defParts, ", ") + " } { " + JoinStrings(loadParts, ", ") + " }"
-    }
-
-    private func CopyFrom(rhs: ReachingDefinitionDomain): Unit {
-        reachable = rhs.reachable
-        reachingDefs.clear()
-        reachingLoadDefs.clear()
-        for (slot in rhs.reachingDefs) {
-            reachingDefs.add(slot.Clone())
-        }
-        for (slot in rhs.reachingLoadDefs) {
-            reachingLoadDefs.add(slot.Clone())
-        }
     }
 }
 
@@ -208,17 +191,18 @@ public class ReachingDefinitionResult {
     }
 }
 
-public class ReachingDefinitionAnalysis {
+public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
     private let functionValue: Function
     private let allocateIdxMap: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     private let trackedAllocations: ArrayList<Value> = ArrayList<Value>()
 
     public init(functionValue: Function) {
+        super(functionValue)
         this.functionValue = functionValue
         CollectTrackedAllocations()
     }
 
-    public func Bottom(): ReachingDefinitionDomain {
+    public override func Bottom(): ReachingDefinitionDomain {
         return ReachingDefinitionDomain(allocateIdxMap)
     }
 
@@ -230,12 +214,12 @@ public class ReachingDefinitionAnalysis {
         return result
     }
 
-    public func InitializeFuncEntryState(state: ReachingDefinitionDomain): Unit {
+    public override func InitializeFuncEntryState(state: ReachingDefinitionDomain): Unit {
         state.SetReachable(true)
         state.SetAllTrackedToTop()
     }
 
-    public func PropagateExpressionEffect(state: ReachingDefinitionDomain, expression: Expression): Unit {
+    public override func PropagateExpressionEffect(state: ReachingDefinitionDomain, expression: Expression): Unit {
         let kind = expression.GetExprKind()
         if (kind == ExprKind.STORE) {
             HandleStoreExpr(state, expression)
@@ -249,12 +233,10 @@ public class ReachingDefinitionAnalysis {
             HandleApplyExpr(state, expression)
         } else if (kind == ExprKind.INTRINSIC) {
             HandleIntrinsicExpr(state, expression)
-        } else if (kind == ExprKind.LAMBDA) {
-            HandleVarStateCapturedByLambda(state, expression)
         }
     }
 
-    public func PropagateTerminatorEffect(state: ReachingDefinitionDomain, terminator: Terminator): Option<Block> {
+    public override func PropagateTerminatorEffect(state: ReachingDefinitionDomain, terminator: Terminator): Option<Block> {
         let kind = terminator.GetExprKind()
         if (kind == ExprKind.APPLY_WITH_EXCEPTION) {
             HandleApplyExpr(state, terminator)
@@ -264,11 +246,9 @@ public class ReachingDefinitionAnalysis {
         return None
     }
 
-    public func HandleVarStateCapturedByLambda(state: ReachingDefinitionDomain, lambdaExpr: Expression): Unit {
-        if (let Some(lambda) <- (lambdaExpr as Lambda)) {
-            for (captured in GetLambdaCapturedVarsRecursively(lambda)) {
-                state.Invalidate(captured)
-            }
+    public override func HandleVarStateCapturedByLambda(state: ReachingDefinitionDomain, lambda: Lambda): Unit {
+        for (captured in GetLambdaCapturedVarsRecursively(lambda)) {
+            state.Invalidate(captured)
         }
     }
 

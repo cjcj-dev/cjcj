@@ -1,5 +1,7 @@
 package cangjie_compiler::chir
 
+import std.collection.*
+
 private func ModifyApplyCalleeInfo(loadResult: LocalVar, storeValue: Value): Unit {
     if (!storeValue.IsFunc()) {
         return
@@ -39,49 +41,28 @@ public class RedundantLoadElimination {
         }
         if (let Some(body) <- fn.GetBody()) {
             let analysis = ReachingDefinitionAnalysis(fn)
-            let result = analysis.Run()
-            return RunOnBody(body, analysis, result, isDebug)
+            let result = Engine<ReachingDefinitionDomain>(fn, analysis).IterateToFixpoint() ?? return 0
+            let toBeRemoved = ArrayList<Expression>()
+            result.VisitWith(
+                { _: ReachingDefinitionDomain, _: Expression, _: Int64 => () },
+                { state: ReachingDefinitionDomain, expr: Expression, _: Int64 =>
+                    if (expr.GetParentBlock().isSome() && expr.GetExprKind() == ExprKind.LOAD &&
+                        expr.GetNumOfOperands() == 1) {
+                        if (TryReplaceLoad(expr, state, body, isDebug)) {
+                            toBeRemoved.add(expr)
+                        }
+                    }
+                },
+                { _: ReachingDefinitionDomain, _: Terminator, _: Option<Block> => () }
+            )
+            for (expr in toBeRemoved) {
+                if (expr.GetParentBlock().isSome()) {
+                    expr.RemoveSelfFromBlock()
+                }
+            }
+            return toBeRemoved.size
         }
         return 0
-    }
-
-    private func RunOnBody(body: BlockGroup, analysis: ReachingDefinitionAnalysis, result: ReachingDefinitionResult,
-        isDebug: Bool): Int64 {
-        var changed: Int64 = 0
-        for (block in body.GetBlocksRef()) {
-            changed += RunOnBlock(block, body, analysis, result, isDebug)
-            for (expr in block.GetExpressions()) {
-                if (let Some(lambdaExpr) <- (expr as Lambda)) {
-                    if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                        changed += RunOnBody(lambdaBody, analysis, result, isDebug)
-                    }
-                }
-            }
-        }
-        return changed
-    }
-
-    private func RunOnBlock(block: Block, scope: BlockGroup, analysis: ReachingDefinitionAnalysis,
-        result: ReachingDefinitionResult, isDebug: Bool): Int64 {
-        var changed: Int64 = 0
-        let state = if (let Some(entryState) <- result.GetEntryState(block)) { entryState } else { analysis.Bottom() }
-        let exprs = block.GetExpressions()
-        for (expr in exprs) {
-            if (expr.GetParentBlock().isNone()) {
-                continue
-            }
-            if (let Some(term) <- expr.AsTerminator()) {
-                analysis.PropagateTerminatorEffect(state, term)
-            } else {
-                analysis.PropagateExpressionEffect(state, expr)
-            }
-            if (expr.GetParentBlock().isSome() && expr.GetExprKind() == ExprKind.LOAD && expr.GetNumOfOperands() == 1) {
-                if (TryReplaceLoad(expr, state, scope, isDebug)) {
-                    changed++
-                }
-            }
-        }
-        return changed
     }
 
     private func TryReplaceLoad(loadExpr: Expression, state: ReachingDefinitionDomain, scope: BlockGroup,
@@ -112,7 +93,6 @@ public class RedundantLoadElimination {
     private func ReplaceLoad(loadExpr: Expression, value: Value, scope: BlockGroup, isDebug: Bool): Bool {
         if (let Some(result) <- loadExpr.GetResult()) {
             result.ReplaceWith(value, scope)
-            loadExpr.RemoveSelfFromBlock()
             if (isDebug) {
                 println("[RLE] replaced Load " + loadExpr.GetDebugLocation().ToString() +
                     " with " + value.GetIdentifier() + ".")
