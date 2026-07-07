@@ -343,6 +343,7 @@ private func CheckArgsWithParamName(diag: Option<BasicDiagnosticEngine>, ce: Cal
     }
     var namedArgFound = false
     var pos: Int64 = 0
+    var argIdx: Int64 = 0
     for (arg in ce.args) {
         let argName = GetArgName(fd, arg)
         var index: Int64 = 0
@@ -355,7 +356,7 @@ private func CheckArgsWithParamName(diag: Option<BasicDiagnosticEngine>, ce: Cal
             }
             if (pos < params.size && params[pos].isNamedParam) {
                 if (let Some(diagValue) <- diag) {
-                    DiagOld(diagValue, arg, BasicDiagKind.sema_invalid_named_arguments)
+                    DiagNeedNamedArgument(diagValue, ce, fd, pos, argIdx)
                 }
                 return false
             }
@@ -373,6 +374,7 @@ private func CheckArgsWithParamName(diag: Option<BasicDiagnosticEngine>, ce: Cal
             marks[index] = true
             hasTy[index] = true
         }
+        argIdx++
     }
     for (entry in hasTy) {
         if (!entry) {

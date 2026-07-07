@@ -66,6 +66,31 @@ private func DiagWrongNumberOfArgumentsCommon(diag: BasicDiagnosticEngine, ce: C
     builder.Emit()
 }
 
+private func GetRestNamedParams(params: ArrayList<FuncParam>, offset: Int64): ArrayList<Int64> {
+    let uncheckedNamedParams = ArrayList<Int64>()
+    var idx = offset
+    while (idx < params.size) {
+        if (params[idx].isNamedParam) {
+            uncheckedNamedParams.add(idx)
+        }
+        idx++
+    }
+    return uncheckedNamedParams
+}
+
+private func GetRestArgNames(fd: FuncDecl, args: ArrayList<FuncArg>, offset: Int64): ArrayList<String> {
+    let uncheckedArgNames = ArrayList<String>()
+    var idx = offset
+    while (idx < args.size) {
+        let name = GetArgName(fd, args[idx])
+        if (!name.isEmpty() && !uncheckedArgNames.contains(name)) {
+            uncheckedArgNames.add(name)
+        }
+        idx++
+    }
+    return uncheckedArgNames
+}
+
 public func DiagWrongNumberOfArguments(diag: BasicDiagnosticEngine, ce: CallExpr, paramTys: Array<Ty>): Unit {
     if (!ce.ShouldDiagnose(allowCompilerAdd: true)) {
         return
@@ -94,6 +119,40 @@ public func DiagWrongNumberOfArguments(diag: BasicDiagnosticEngine, ce: CallExpr
         }
     }
     DiagWrongNumberOfArgumentsCommon(diag, ce, optionParamTys.toArray(), Some(fd))
+}
+
+public func DiagNeedNamedArgument(
+    diag: BasicDiagnosticEngine,
+    ce: CallExpr,
+    fd: FuncDecl,
+    paramPos: Int64,
+    argPos: Int64
+): Unit {
+    CJC_ASSERT(argPos < ce.args.size)
+    if (argPos >= ce.args.size) {
+        return
+    }
+    CJC_NULLPTR_CHECK(fd.funcBody)
+    let body = fd.funcBody.getOrThrow()
+    CJC_ASSERT(!body.paramLists.isEmpty())
+    let params = body.paramLists[0].params
+    let restParams = GetRestNamedParams(params, paramPos)
+    let restArgNames = GetRestArgNames(fd, ce.args, argPos + 1)
+    var expectedPrefix = ""
+    var first = true
+    for (paramIdx in restParams) {
+        let param = params[paramIdx]
+        if (restArgNames.contains(param.identifier.Val())) {
+            continue
+        }
+        if (param.identifier.Empty()) {
+            continue
+        }
+        expectedPrefix += (if (first) { "'" } else { " or '" }) + param.identifier.GetRawText() + ":'"
+        first = false
+    }
+    diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_need_named_argument,
+        MakeRange(ce.args[argPos].begin, ce.args[argPos].end), arguments: [expectedPrefix]).Emit()
 }
 
 public func MakeRangeForDeclIdentifier(decl: Decl): BasicRange {
