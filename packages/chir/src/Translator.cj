@@ -6986,7 +6986,8 @@ public class Translator {
             return FaithfulLeftValueInfo(castedBaseVal, path)
         }
         if (!pathMemberTy.IsReferenceTypeWithRefDims(1) &&
-            (baseTy.IsReferenceTypeWithRefDims(1) || baseTy.IsValueOrGenericTypeWithRefDims(1))) {
+            (baseTy.IsReferenceTypeWithRefDims(1) || baseTy.IsValueOrGenericTypeWithRefDims(1) ||
+                baseTy.IsValueOrGenericTypeWithRefDims(0))) {
             return FaithfulLeftValueInfo(base, path)
         }
         let loaded = LoadLeftValue(info, chirTy.TranslateType(RequireAstTy(baseExpr))) ??
