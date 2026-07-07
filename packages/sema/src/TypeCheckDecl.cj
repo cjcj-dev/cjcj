@@ -38,6 +38,12 @@ private func TypeCheckDeclIdentifierRange(decl: Decl): BasicRange {
     return MakeRange(decl.begin, decl.end)
 }
 
+public func TypeCheckDeclDiagUnableToInferDecl(diag: BasicDiagnosticEngine, decl: Decl): Unit {
+    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unable_to_infer_decl,
+        MakeRangeForDeclIdentifier(decl))
+    builder.Emit()
+}
+
 private func TypeCheckDeclCopyTypeArgs(args: ArrayList<Ty>): Array<Ty> {
     let out = ArrayList<Ty>()
     for (arg in args) {

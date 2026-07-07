@@ -2432,6 +2432,9 @@ public class TypeChecker {
         if (let Some(vd) <- (decl as VarDeclAbstract)) {
             if (vd.TestAttr(Attribute.IS_CHECK_VISITED)) {
                 if (IsGlobalOrMember(vd) && Ty.IsInitialTy(vd.GetTy())) {
+                    if (let Some(diagValue) <- impl.diag) {
+                        TypeCheckDeclDiagUnableToInferDecl(diagValue, vd)
+                    }
                     vd.SetTy(TypeManager.GetInvalidTy())
                 }
                 return vd.GetTy() ?? TypeManager.GetInvalidTy()
@@ -2573,6 +2576,16 @@ public class TypeChecker {
     }
 
     private func SynthesizeVarWithPatternDecl(ctx: ASTContext, vpd: VarWithPatternDecl): Ty {
+        if (vpd.TestAttr(Attribute.IS_CHECK_VISITED)) {
+            if (vpd.TestAttr(Attribute.GLOBAL) && Ty.IsInitialTy(vpd.GetTy())) {
+                if (let Some(diagValue) <- impl.diag) {
+                    TypeCheckDeclDiagUnableToInferDecl(diagValue, vpd)
+                }
+                vpd.SetTy(TypeManager.GetInvalidTy())
+            }
+            return vpd.GetTy() ?? TypeManager.GetInvalidTy()
+        }
+        vpd.EnableAttr(Attribute.IS_CHECK_VISITED)
         SynthesizeTypeNode(ctx, vpd.typeNode)
         if (let Some(initializer) <- vpd.initializer) {
             if (let Some(typeNode) <- vpd.typeNode) {
