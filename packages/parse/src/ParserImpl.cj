@@ -276,6 +276,10 @@ public class ParserImpl {
         return found
     }
 
+    public func SkipSemi(): Unit {
+        SkipBlank(TokenKind.SEMI)
+    }
+
     public func Expect(kind: TokenKind, _: String): Token {
         let token = Peek()
         if (!Skip(kind)) {

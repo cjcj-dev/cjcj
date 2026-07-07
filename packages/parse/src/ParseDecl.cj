@@ -983,6 +983,11 @@ extend ParserImpl {
             }
             body.paramLists.add(ParseParameterList(scopeKind))
             let paramsEnd = lastToken.End()
+            if (ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY) ||
+                ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_GETTER_BODY)) {
+                ParsePropMemberBody(scopeKind, body)
+                return body
+            }
             if (Skip(TokenKind.COLON)) {
                 body.colonPos = lastToken.Begin()
                 body.retType = ParseType()
@@ -1710,38 +1715,7 @@ extend ParserImpl {
                 ret.initializer = ParseExpr(ExprKind.VAR_INIT)
             }
             if (Skip(TokenKind.LCURL)) {
-                ret.leftCurlPos = lastToken.Begin()
-                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
-                    if (Seeing(TokenKind.IDENTIFIER) && (Peek().Value() == "get" || Peek().Value() == "set")) {
-                        let accessorName = Peek().Value()
-                        let accessor = FuncDecl()
-                        try (accessorScope = ChainScope(this, accessor)) {
-                            accessor.identifier = ParseIdentifierFromToken(Peek())
-                            accessor.begin = accessor.identifier.Begin()
-                            accessor.keywordPos = accessor.begin
-                            Next()
-                            accessor.funcBody = ParseFuncBody(if (accessorName == "get") {
-                                ScopeKind.PROP_MEMBER_GETTER_BODY
-                            } else {
-                                ScopeKind.PROP_MEMBER_SETTER_BODY
-                            })
-                            accessor.outerDecl = ret
-                            accessor.propDecl = ret
-                            if (accessorName == "get") {
-                                accessor.isGetter = true
-                                ret.getters.add(accessor)
-                            } else {
-                                accessor.isSetter = true
-                                ret.setters.add(accessor)
-                            }
-                        }
-                    } else {
-                        Next()
-                    }
-                    SkipNLOrSemi()
-                }
-                ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after property body").Begin()
-                ret.end = ret.rightCurlPos + 1
+                ParsePropBody(modifiers, ret)
             } else {
                 ret.end = if (let Some(expr) <- ret.initializer) {
                     expr.end
@@ -1753,6 +1727,143 @@ extend ParserImpl {
             }
         }
         return ret
+    }
+
+    private func CheckGetterAnnotations(annos: ArrayList<Annotation>, getter: Node): Unit {
+        for (anno in annos) {
+            DiagUnexpectedAnnoOn(anno, getter.begin, anno.identifier.Val(), "get")
+        }
+    }
+
+    private func CheckSetterAnnotations(annos: ArrayList<Annotation>, setter: Node): Unit {
+        for (anno in annos) {
+            if (anno.kind != AnnotationKind.DEPRECATED) {
+                DiagUnexpectedAnnoOn(anno, setter.begin, anno.identifier.Val(), "set")
+            }
+        }
+    }
+
+    private func SeeingPropMember(): Bool {
+        return Seeing(TokenKind.IDENTIFIER) && (Peek().Value() == "get" || Peek().Value() == "set")
+    }
+
+    private func ParsePropBody(modifiers: ArrayList<Modifier>, propDecl: PropDecl): Unit {
+        propDecl.leftCurlPos = lastToken.Begin()
+        var setter: Option<Node> = None
+        var getter: Option<Node> = None
+        while (true) {
+            if (Skip(TokenKind.RCURL)) {
+                propDecl.rightCurlPos = lastToken.Begin()
+                break
+            }
+            if (DetectPrematureEnd()) {
+                DiagExpectedRightDelimiter("{", propDecl.leftCurlPos)
+                break
+            }
+            let annos = ArrayList<Annotation>()
+            ParseAnnotations(annos)
+            let modis = ArrayList<Modifier>()
+            ParseModifiers(modis)
+            if (SeeingPropMember()) {
+                if (Peek().Value() == "get") {
+                    if (let Some(prevGetter) <- getter) {
+                        DiagDuplicatedGetOrSet(prevGetter, propDecl)
+                    }
+                    let res = ParsePropMemberDecl(modis)
+                    CheckGetterAnnotations(annos, res)
+                    for (anno in annos) { res.annotations.add(anno) }
+                    res.outerDecl = propDecl
+                    propDecl.getters.add(res)
+                    getter = res
+                    SkipSemi()
+                    SetBeginToAnnotationsBegin(res, annos)
+                } else {
+                    if (let Some(prevSetter) <- setter) {
+                        DiagDuplicatedGetOrSet(prevSetter, propDecl)
+                    }
+                    let res = ParsePropMemberDecl(modis)
+                    CheckSetterAnnotations(annos, res)
+                    for (anno in annos) { res.annotations.add(anno) }
+                    res.outerDecl = propDecl
+                    propDecl.setters.add(res)
+                    setter = res
+                    SkipSemi()
+                    SetBeginToAnnotationsBegin(res, annos)
+                }
+            } else {
+                DiagExpectedGetOrSetInProp(propDecl.begin)
+                ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI])
+            }
+        }
+        propDecl.rightCurlPos = lastToken.Begin()
+        for (modifier in modifiers) {
+            if (!HasModifierToken(propDecl.modifiers, modifier.modifier)) {
+                propDecl.modifiers.add(modifier)
+            }
+        }
+        propDecl.end = Peek().End()
+    }
+
+    private func ParsePropMemberDecl(modifiers: ArrayList<Modifier>): FuncDecl {
+        let ret = FuncDecl()
+        try (cs = ChainScope(this, ret)) {
+            ret.identifier = ParseIdentifierFromToken(Peek())
+            ret.keywordPos = Peek().Begin()
+            ret.begin = Peek().Begin()
+            let isGetter = Peek().Value() == "get"
+            if (isGetter) {
+                ret.isGetter = true
+            } else {
+                ret.isSetter = true
+            }
+            Next()
+            ret.begin = Peek().Begin()
+            if (!modifiers.isEmpty()) {
+                var firstModifier = modifiers[0]
+                for (modifier in modifiers) {
+                    if (modifier < firstModifier) {
+                        firstModifier = modifier
+                    }
+                }
+                DiagExpectNoModifier(firstModifier)
+                ret.begin = SortModifierByPos(modifiers)[0].begin
+            }
+            if (!isGetter) {
+                ret.funcBody = ParseFuncBody(ScopeKind.PROP_MEMBER_SETTER_BODY)
+            } else {
+                ret.funcBody = ParseFuncBody(ScopeKind.PROP_MEMBER_GETTER_BODY)
+            }
+            if (let Some(funcBody) <- ret.funcBody) {
+                if (let None <- funcBody.body) {
+                    DiagMissingBody(if (!ret.identifier.Valid()) { "" } else { "function" },
+                        " '" + ret.identifier.Val() + "'", lastToken.End())
+                }
+                ret.end = funcBody.end
+            }
+        }
+        return ret
+    }
+
+    private func ParsePropMemberBody(scopeKind: ScopeKind, fb: FuncBody): Unit {
+        if (let Some(generic) <- fb.generic) {
+            if (ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY)) {
+                DiagGetOrSetCannotBeGeneric("getter", generic)
+            }
+            if (ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_GETTER_BODY)) {
+                DiagGetOrSetCannotBeGeneric("setter", generic)
+            }
+        }
+        if (!Seeing(TokenKind.LCURL)) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, Peek(), ConvertToken(Peek())).Emit()
+            ConsumeUntilDecl(TokenKind.LCURL)
+            if (!Seeing(TokenKind.LCURL)) {
+                return
+            }
+        }
+        fb.body = ParseBlock(ScopeKind.FUNC_BODY)
+        if (let Some(block) <- fb.body) {
+            fb.end = block.end
+        }
     }
 
     public func ParseConstructor(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): FuncDecl {
