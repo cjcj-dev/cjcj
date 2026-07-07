@@ -2838,6 +2838,257 @@ public class TypeChecker {
         }
     }
 
+    private func ResetLambdaForReinfer(ctx: ASTContext, le: LambdaExpr): Unit {
+        if (let Some(funcBody) <- le.funcBody) {
+            funcBody.retType = None
+            AddRetTypeNode(funcBody)
+            funcBody.Clear()
+            if (let Some(body) <- funcBody.body) {
+                let walker = Walker(body, visitPre: { node: Node =>
+                    if (((node as Decl).isSome() || (node as Expr).isSome()) && !Ty.IsInitialTy(node.GetTy())) {
+                        node.Clear()
+                    }
+                    VisitAction.WALK_CHILDREN
+                })
+                let _ = walker.Walk()
+            }
+            ctx.ClearTypeCheckCache(funcBody)
+        }
+    }
+
+    private func DiagInferParamTyFail(le: LambdaExpr): Bool {
+        if (let Some(funcBody) <- le.funcBody) {
+            if (!funcBody.paramLists.isEmpty()) {
+                for (param in funcBody.paramLists[0].params) {
+                    if (let None <- param.typeNode) {
+                        if (let Some(diagValue) <- impl.diag) {
+                            let builder = diagValue.DiagnoseRefactor(
+                                BasicDiagKindRefactor.sema_lambdaExpr_must_have_type_annotation, param.begin)
+                            builder.Emit()
+                        }
+                        le.SetTy(TypeManager.GetInvalidTy())
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private func FindCandidatesFromCall(
+        ctx: ASTContext,
+        callExpr: CallExpr,
+        unsolvedParams: HashMap<String, FuncParam>
+    ): (String, ArrayList<Decl>) {
+        if (let Some(baseFunc) <- callExpr.baseFunc) {
+            if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+                if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                    if (let Some(refExpr) <- (baseExpr as RefExpr)) {
+                        let id = refExpr.ref.identifier.Val()
+                        if (unsolvedParams.contains(id)) {
+                            let sig = MemSig(memberAccess.field.Val(), false, UInt64(callExpr.args.size),
+                                UInt64(memberAccess.typeArguments.size))
+                            return (id, ctx.Mem2Decls(sig))
+                        }
+                    }
+                }
+            }
+        }
+        return ("", ArrayList<Decl>())
+    }
+
+    private func FindCandidatesFromAccess(
+        ctx: ASTContext,
+        memberAccess: MemberAccess,
+        unsolvedParams: HashMap<String, FuncParam>
+    ): (String, ArrayList<Decl>) {
+        if (let Some(baseExpr) <- memberAccess.baseExpr) {
+            if (let Some(refExpr) <- (baseExpr as RefExpr)) {
+                let id = refExpr.ref.identifier.Val()
+                if (unsolvedParams.contains(id)) {
+                    let sig = MemSig(memberAccess.field.Val(), true, 0u64, 0u64)
+                    return (id, ctx.Mem2Decls(sig))
+                }
+            }
+        }
+        return ("", ArrayList<Decl>())
+    }
+
+    private func TryInferFromSyntaxInfo(ctx: ASTContext, le: LambdaExpr): Unit {
+        if (impl.typeManager.GetInnermostUnsolvedTyVars().isEmpty()) {
+            return
+        }
+        let unsolvedParams = HashMap<String, FuncParam>()
+        if (let Some(funcBody) <- le.funcBody) {
+            if (!funcBody.paramLists.isEmpty()) {
+                for (param in funcBody.paramLists[0].params) {
+                    if ((param.GetTy() ?? TypeManager.GetInvalidTy()).IsPlaceholder()) {
+                        unsolvedParams[param.identifier.Val()] = param
+                    }
+                }
+            }
+        }
+        if (unsolvedParams.isEmpty()) {
+            return
+        }
+
+        let candidates = HashMap<String, ArrayList<Decl>>()
+        let candidateIds = ArrayList<String>()
+        let candiHandler = { candi: (String, ArrayList<Decl>) =>
+            let id = candi[0]
+            let decls = candi[1]
+            if (id.isEmpty()) {
+                false
+            } else {
+                if (!candidates.contains(id)) {
+                    candidates[id] = decls
+                    candidateIds.add(id)
+                } else if (let Some(existing) <- candidates.get(id)) {
+                    let kept = ArrayList<Decl>()
+                    for (oldDecl in existing) {
+                        var found = false
+                        for (candidateDecl in decls) {
+                            if (SameDecl(oldDecl, candidateDecl)) {
+                                found = true
+                                break
+                            }
+                        }
+                        if (found) {
+                            kept.add(oldDecl)
+                        }
+                    }
+                    existing.clear()
+                    for (keptDecl in kept) {
+                        existing.add(keptDecl)
+                    }
+                }
+                true
+            }
+        }
+        let memberScanner = Box<(Node) -> VisitAction>({ _: Node => VisitAction.WALK_CHILDREN })
+        memberScanner.value = { node: Node =>
+            if (let Some(callExpr) <- (node as CallExpr)) {
+                if (candiHandler(FindCandidatesFromCall(ctx, callExpr, unsolvedParams))) {
+                    for (arg in callExpr.args) {
+                        let argWalker = Walker(arg, visitPre: memberScanner.value)
+                        let _ = argWalker.Walk()
+                    }
+                    return VisitAction.SKIP_CHILDREN
+                }
+            } else if (let Some(memberAccess) <- (node as MemberAccess)) {
+                let _ = candiHandler(FindCandidatesFromAccess(ctx, memberAccess, unsolvedParams))
+            }
+            VisitAction.WALK_CHILDREN
+        }
+        if (let Some(funcBody2) <- le.funcBody) {
+            let walker = Walker(funcBody2, visitPre: memberScanner.value)
+            let _ = walker.Walk()
+        }
+
+        for (id in candidateIds) {
+            if (let Some(param) <- unsolvedParams.get(id)) {
+                if (let Some(tyVar) <- ((param.GetTy() ?? TypeManager.GetInvalidTy()) as GenericsTy)) {
+                    TryEnforceCandidate(tyVar, candidates.get(id) ?? ArrayList<Decl>(), impl.typeManager)
+                }
+            }
+        }
+    }
+
+    private func SolveLamExprParamTys(ctx: ASTContext, le: LambdaExpr): Bool {
+        let tyVars = impl.typeManager.GetInnermostUnsolvedTyVars()
+        let sol = LocalTypeArgumentSynthesis.SolveConstraints(impl.typeManager, impl.typeManager.constraints)
+        var successful = false
+        if (let Some(subst) <- sol) {
+            if (!HasUnsolvedTyVars(subst, tyVars)) {
+                ResetLambdaForReinfer(ctx, le)
+                if (let Some(funcBody) <- le.funcBody) {
+                    if (!funcBody.paramLists.isEmpty()) {
+                        for (param in funcBody.paramLists[0].params) {
+                            if (let Some(paramTy) <- param.GetTy()) {
+                                param.SetTy(impl.typeManager.GetInstantiatedTy(paramTy, subst))
+                            }
+                        }
+                    }
+                    if (Ty.IsTyCorrect(SynthesizeNode(ctx, SynPos.EXPR_ARG, funcBody)) &&
+                        (let Some(body) <- funcBody.body) && Ty.IsTyCorrect(body.GetTy())) {
+                        le.SetTy(funcBody.GetTy() ?? TypeManager.GetInvalidTy())
+                        successful = true
+                    }
+                }
+            }
+        }
+        if (!successful && DiagInferParamTyFail(le)) {
+            return false
+        }
+        return true
+    }
+
+    private func SynLamExpr(ctx: ASTContext, le: LambdaExpr): Ty {
+        let funcBody = le.funcBody ?? return TypeManager.GetInvalidTy()
+        if (funcBody.paramLists.isEmpty()) {
+            return TypeManager.GetInvalidTy()
+        }
+        funcBody.retType = None
+        AddRetTypeNode(funcBody)
+        let retType = funcBody.retType.getOrThrow()
+        retType.begin = le.begin
+        retType.end = le.end
+
+        let tyVarScope = BeginTyVarScope(impl.typeManager)
+        for (param in funcBody.paramLists[0].params) {
+            let paramTy = if (let Some(typeNode) <- param.typeNode) {
+                SynthesizeNode(ctx, SynPos.NONE, typeNode)
+            } else {
+                TypeManager.GetInvalidTy()
+            }
+            if (Ty.IsTyCorrect(paramTy)) {
+                param.SetTy(paramTy)
+            } else if (!ctx.funcArgReachable.contains(le) && (let None <- param.typeNode)) {
+                param.SetTy(impl.typeManager.AllocTyVar(srcId: "T-Lam", needSolving: true))
+            } else {
+                if (let Some(diagValue) <- impl.diag) {
+                    let builder = diagValue.DiagnoseRefactor(
+                        BasicDiagKindRefactor.sema_lambdaExpr_must_have_type_annotation, param.begin)
+                    builder.Emit()
+                }
+                le.SetTy(TypeManager.GetInvalidTy())
+                EndTyVarScope(tyVarScope)
+                return le.GetTy() ?? TypeManager.GetInvalidTy()
+            }
+        }
+        TryInferFromSyntaxInfo(ctx, le)
+        let skipSolving = impl.typeManager.GetInnermostUnsolvedTyVars().isEmpty()
+        var leTy: Ty = TypeManager.GetInvalidTy()
+        try (ds = DiagSuppressor(impl.diag)) {
+            leTy = SynthesizeNode(ctx, SynPos.EXPR_ARG, funcBody)
+            if (skipSolving) {
+                ds.ReportDiag()
+            }
+        }
+        if (!Ty.IsTyCorrect(leTy) || (let None <- funcBody.body) ||
+            !Ty.IsTyCorrect(funcBody.body.getOrThrow().GetTy())) {
+            le.SetTy(TypeManager.GetInvalidTy())
+            if (DiagInferParamTyFail(le)) {
+                EndTyVarScope(tyVarScope)
+                return le.GetTy() ?? TypeManager.GetInvalidTy()
+            }
+        } else {
+            if (skipSolving) {
+                le.SetTy(funcBody.GetTy() ?? TypeManager.GetInvalidTy())
+            } else if (!SolveLamExprParamTys(ctx, le)) {
+                EndTyVarScope(tyVarScope)
+                return le.GetTy() ?? TypeManager.GetInvalidTy()
+            }
+        }
+        if (let Some(funcTy) <- ((le.GetTy() ?? TypeManager.GetInvalidTy()) as FuncTy)) {
+            retType.SetTy(funcTy.retTy)
+        } else {
+            retType.SetTy(TypeManager.GetInvalidTy())
+        }
+        EndTyVarScope(tyVarScope)
+        return le.GetTy() ?? TypeManager.GetInvalidTy()
+    }
+
     private func LambdaParamListForCheck(le: LambdaExpr): Option<FuncParamList> {
         if (let Some(funcBody) <- le.funcBody) {
             if (!funcBody.paramLists.isEmpty()) {
@@ -4658,6 +4909,9 @@ public class TypeChecker {
                 returnExpr.refFuncBody = Some(fb)
             }
             return FinishSynthesize(ctx, returnExpr, SynthesizeReturnExpr(ctx, returnExpr))
+        }
+        if (let Some(lambdaExpr) <- (expr as LambdaExpr)) {
+            return FinishSynthesize(ctx, lambdaExpr, SynLamExpr(ctx, lambdaExpr))
         }
         if (let Some(parenExpr) <- (expr as ParenExpr)) {
             return FinishSynthesize(ctx, parenExpr, SynParenExpr(impl.typeManager, parenExpr,

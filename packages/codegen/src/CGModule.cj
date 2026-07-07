@@ -390,12 +390,20 @@ public class CGModule {
             AddGenericParamMapping(cgFunc, genericTy, { _: IRBuilder2 => typeInfoParam })
         }
         if (let Some(outerInfoIndex) <- functionType.GetOuterTypeInfoIndex()) {
+            if (fn.IsInExtend()) {
+                let extendDef = (fn.GetParentCustomTypeDef().getOrThrow() as ExtendDef).getOrThrow()
+                let outerTypeInfo = unsafe { LLVMGetParam(rawFunction, UInt32(outerInfoIndex)) }
+                AddExtendGenericParamMappings(cgFunc, extendDef, outerTypeInfo)
+            }
             AddOuterGenericParamMappings(rawFunction, cgFunc, fn, outerInfoIndex)
         }
     }
 
     private func AddGenericParamMapping(cgFunc: CGFunction, genericTy: GenericType,
         provider: (IRBuilder2) -> LLVMValueRef): Unit {
+        if (cgFunc.genericParamsMap.contains(genericTy.objectId)) {
+            return
+        }
         cgFunc.genericParamsMap[genericTy.objectId] = provider
         cgFunc.genericParamsNameMap[genericTy.ToString()] = provider
         cgFunc.genericParamsNameMap[genericTy.GetIdentifier()] = provider
@@ -409,23 +417,28 @@ public class CGModule {
         try (nameCString = unsafe { LibC.mallocCString("outerTI") }.asResource()) {
             unsafe { LLVMSetValueName2(outerTypeInfo, nameCString.value, UIntNative("outerTI".size)) }
         }
+        let extendDefOpt = parentDef as ExtendDef
         if (!parentDef.GetGenericTypeParams().isEmpty()) {
-            if (let Some(parentTy) <- parentDef.GetType()) {
-                let outerTypeInfoProvider = { _: IRBuilder2 => outerTypeInfo }
-                cgFunc.genericParamsMap[parentTy.objectId] = outerTypeInfoProvider
-                cgFunc.genericParamsNameMap[parentTy.ToString()] = outerTypeInfoProvider
+            let parentTy = if (let Some(extendDef) <- extendDefOpt) {
+                extendDef.GetExtendedType()
+            } else {
+                parentDef.GetType()
             }
-        }
-        if (let Some(extendDef) <- (parentDef as ExtendDef)) {
-            AddExtendGenericParamMappings(cgFunc, extendDef, outerTypeInfo)
-            return
+            if (let Some(parentTyValue) <- parentTy) {
+                if (!cgFunc.genericParamsMap.contains(parentTyValue.objectId)) {
+                    cgFunc.genericParamsMap[parentTyValue.objectId] = { _: IRBuilder2 => outerTypeInfo }
+                    cgFunc.genericParamsNameMap[parentTyValue.ToString()] = { _: IRBuilder2 => outerTypeInfo }
+                }
+            }
         }
         var idx: Int64 = 0
         for (genericTy in parentDef.GetGenericTypeParams()) {
             let capturedIdx = idx
-            AddGenericParamMapping(cgFunc, genericTy, {
-                irBuilder: IRBuilder2 => irBuilder.GetTypeInfoFromTypeInfoArgs(outerTypeInfo, capturedIdx)
-            })
+            if (!cgFunc.genericParamsMap.contains(genericTy.objectId)) {
+                AddGenericParamMapping(cgFunc, genericTy, {
+                    irBuilder: IRBuilder2 => irBuilder.GetTypeInfoFromTypeInfoArgs(outerTypeInfo, capturedIdx)
+                })
+            }
             idx++
         }
     }

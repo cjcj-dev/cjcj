@@ -810,6 +810,21 @@ public func HasTyVarsToSolve(maps: SubstPack): Bool {
     return false
 }
 
+// C++ src/Sema/TypeCheckUtil.cpp:733 HasUnsolvedTyVars.
+public func HasUnsolvedTyVars(subst: TypeSubst, tyVars: ArrayList<GenericsTy>): Bool {
+    for (tyVar in tyVars) {
+        if (let None <- subst.Get(tyVar)) {
+            return true
+        }
+        for (entry in subst.entries) {
+            if (entry.ty.Contains(tyVar)) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
 // C++ src/Sema/TypeCheckUtil.cpp:743 GetTyVarsToSolve.
 public func GetTyVarsToSolve(maps: SubstPack): ArrayList<GenericsTy> {
     let ret = ArrayList<GenericsTy>()
@@ -821,6 +836,70 @@ public func GetTyVarsToSolve(maps: SubstPack): ArrayList<GenericsTy> {
         }
     }
     return ret
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:924 LessThanAll.
+public func LessThanAll(ty: Ty, tys: TySet, lessThan: (Ty, Ty) -> Bool): Bool {
+    for (element in tys.values) {
+        if (!lessThan(ty, element)) {
+            return false
+        }
+    }
+    return true
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:930 FindSmallestTy.
+public func FindSmallestTy(tys: TySet, lessThan: (Ty, Ty) -> Bool): Ty {
+    if (tys.values.isEmpty()) {
+        return TypeManager.GetNothingTy()
+    }
+    var bubble: Option<Ty> = None
+    for (ty in tys.values) {
+        if (let Some(bubbleTy) <- bubble) {
+            if (lessThan(bubbleTy, ty)) {
+                continue
+            } else if (lessThan(ty, bubbleTy)) {
+                bubble = Some(ty)
+            } else {
+                bubble = None
+            }
+        } else {
+            bubble = Some(ty)
+        }
+    }
+    if (let Some(bubbleTy2) <- bubble) {
+        if (LessThanAll(bubbleTy2, tys, lessThan)) {
+            return bubbleTy2
+        }
+    }
+    return TypeManager.GetInvalidTy()
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:958 TryEnforceCandidate.
+public func TryEnforceCandidate(tv: GenericsTy, candidates: ArrayList<Decl>, tyMgr: TypeManager): Unit {
+    if (candidates.isEmpty()) {
+        return
+    }
+    let declTys = TySet()
+    for (decl in candidates) {
+        if (let Some(declTy) <- decl.GetTy()) {
+            declTys.Add(declTy)
+        }
+    }
+    let promotion = Promotion(tyMgr)
+    let isSuperDecl = { sup: Ty, sub: Ty =>
+        !promotion.Promote(sub, sup).values.isEmpty()
+    }
+    let uniq = FindSmallestTy(declTys, isSuperDecl)
+    if (Ty.IsTyCorrect(uniq)) {
+        let _ = tyMgr.ConstrainByCtor(tv, uniq)
+    } else {
+        let tyArgs = ArrayList<GenericsTy>()
+        tyMgr.constraints.GetOrCreate(tv).sum.softClear()
+        for (declTy2 in declTys.values) {
+            let _ = tyMgr.AddSumByCtor(tv, declTy2, tyArgs)
+        }
+    }
 }
 
 // C++ src/Sema/TypeCheckUtil.cpp:993 GetGenericParamsForDecl.
