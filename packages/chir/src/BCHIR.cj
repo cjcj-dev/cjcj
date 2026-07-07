@@ -120,6 +120,14 @@ public class BCHIRDefinition {
         return codePositionsAnnotations.get(index)
     }
 
+    public func GetMangledNamesAnnotations(): HashMap<Int64, String> {
+        return mangledNamesAnnotations
+    }
+
+    public func GetCodePositionsAnnotations(): HashMap<Int64, BCHIRCodePosition> {
+        return codePositionsAnnotations
+    }
+
     public func Clone(): BCHIRDefinition {
         let cloned = BCHIRDefinition()
         cloned.SetNumArgs(numArgs)
