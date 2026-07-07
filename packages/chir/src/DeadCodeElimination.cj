@@ -10,7 +10,7 @@ import cangjie_compiler::basic.WarnGroup
 import cangjie_compiler::basic.WarnGroupIndex
 import cangjie_compiler::basic.WarningOptionMgr
 import cangjie_compiler::option.{CompileTarget, GlobalOptions, OutputMode}
-import cangjie_compiler::utils.{ANNOTATION_VAR_POSTFIX, CJC_ABORT, InternalError, OverflowStrategy,
+import cangjie_compiler::utils.{ANNOTATION_VAR_POSTFIX, CJC_ABORT, CJC_ASSERT, InternalError, OverflowStrategy,
     REFLECT_PACKAGE_NAME}
 
 private let STD_CORE_FUTURE_MANGLED_NAME: String = "_CNat6Future"
@@ -77,6 +77,15 @@ public class DeadCodeElimination {
                 continue
             }
             ReportUnusedCodeInFunc(fn.GetBody().getOrThrow(), opts)
+        }
+    }
+
+    public func NothingTypeExprElimination(pkg: Package, isDebug!: Bool = false): Unit {
+        for (fn in pkg.GetGlobalFunctionsRef()) {
+            if (fn.GetBody().isNone() || fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
+                continue
+            }
+            NothingTypeExprEliminationForFunc(fn.GetBody().getOrThrow(), isDebug)
         }
     }
 
@@ -522,6 +531,55 @@ public class DeadCodeElimination {
         return removed
     }
 
+    public func NothingTypeExprEliminationForFunc(funcBody: BlockGroup, isDebug: Bool): Unit {
+        if (HandleFuncWithNothingParamter(builder, funcBody)) {
+            return
+        }
+        for (block in funcBody.GetBlocks()) {
+            var isNothingIr = false
+            for (expr in block.GetExpressions()) {
+                if (let Some(lambdaExpr) <- (expr as Lambda)) {
+                    if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
+                        NothingTypeExprEliminationForFunc(lambdaBody, isDebug)
+                    }
+                }
+                if (!isNothingIr) {
+                    if (let Some(resultTy) <- expr.GetResultType()) {
+                        if (resultTy.IsNothing() && !expr.IsConstantNull()) {
+                            if (!expr.IsTerminator()) {
+                                isNothingIr = true
+                                continue
+                            } else {
+                                match (expr.GetExprKind()) {
+                                    case ExprKind.APPLY_WITH_EXCEPTION =>
+                                        HandleNothingTerminator(builder,
+                                            (expr as ApplyWithException).getOrThrow(), funcBody)
+                                    case ExprKind.INVOKE_WITH_EXCEPTION =>
+                                        HandleNothingTerminator(builder,
+                                            (expr as InvokeWithException).getOrThrow(), funcBody)
+                                    case ExprKind.INVOKESTATIC_WITH_EXCEPTION =>
+                                        HandleNothingTerminator(builder,
+                                            (expr as InvokeStaticWithException).getOrThrow(), funcBody)
+                                    case _ =>
+                                        CJC_ABORT()
+                                        return
+                                }
+                            }
+                        }
+                    }
+                }
+                if (isNothingIr) {
+                    expr.RemoveSelfFromBlock()
+                    DumpForDebug(Some(expr), None, isDebug)
+                }
+            }
+            if (isNothingIr) {
+                CreateNullReturnValue(builder, block, funcBody)
+                builder.CreateExit(None, block)
+            }
+        }
+    }
+
     private func CheckUselessBlock(block: Block): Bool {
         return !block.IsEntry() && block.GetPredecessorsRef().isEmpty() && !block.TestAttr(Attribute.UNREACHABLE)
     }
@@ -609,6 +667,78 @@ public class DeadCodeElimination {
             block.RemoveSelfFromBlockGroup()
         }
     }
+}
+
+private func DumpForDebug(expr: Option<Expression>, fn: Option<Function>, isDebug: Bool): Unit {
+    if (!isDebug) {
+        return
+    }
+    if (let Some(expression) <- expr) {
+        println("[DCE] The " + expression.GetExprKindName() + " expression" +
+            ToPosInfo(expression.GetDebugLocation()) + " has been deleted")
+    }
+    if (let Some(functionValue) <- fn) {
+        println("[DCE] The " + functionValue.GetIdentifier() + " function of " + functionValue.GetPackageName() +
+            " package" + ToPosInfo(functionValue.GetDebugLocation()) + " has been deleted")
+    }
+}
+
+private func CreateNullReturnValue(builder: CHIRBuilder, parent: Block, funcBody: BlockGroup): Unit {
+    if (let Some(retVal) <- GetReturnValue(funcBody)) {
+        let retValTy = GetFuncType(funcBody).getOrThrow().GetReturnType()
+        let nullExpr = builder.CreateConstant(retValTy, NullLiteral(), parent)
+        builder.CreateStore(nullExpr.GetResult().getOrThrow(), retVal, parent)
+    }
+}
+
+private func HandleFuncWithNothingParamter(builder: CHIRBuilder, funcBody: BlockGroup): Bool {
+    let params = GetFuncParams(funcBody)
+    for (param in params) {
+        if (!param.GetType().getOrThrow().IsNothing()) {
+            continue
+        }
+        let entry = funcBody.GetEntryBlock().getOrThrow()
+        for (block in funcBody.GetBlocks()) {
+            if (!refEq(block, entry)) {
+                block.RemoveSelfFromBlockGroup()
+            }
+        }
+        for (expr in entry.GetExpressions()) {
+            if (let Some(debugExpr) <- (expr as Debug)) {
+                if (debugExpr.GetValue().IsParameter()) {
+                    continue
+                }
+            }
+            if (let Some(result) <- expr.GetResult()) {
+                if (let Some(retVal) <- GetReturnValue(funcBody)) {
+                    if (refEq(result, retVal)) {
+                        continue
+                    }
+                }
+            }
+            expr.RemoveSelfFromBlock()
+        }
+        CreateNullReturnValue(builder, entry, funcBody)
+        builder.CreateExit(None, entry)
+        if (let Some(fn) <- param.GetTopLevelFunc()) {
+            fn.SetSkipCheck(SkipKind.SKIP_VIC)
+        }
+        return true
+    }
+    return false
+}
+
+private func HandleNothingTerminator(builder: CHIRBuilder, expr: ExpressionWithException,
+    funcBody: BlockGroup): Unit {
+    CJC_ASSERT(expr.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION ||
+        expr.GetExprKind() == ExprKind.INVOKE_WITH_EXCEPTION ||
+        expr.GetExprKind() == ExprKind.INVOKESTATIC_WITH_EXCEPTION)
+    let newSuccessBlock = builder.CreateBlock(funcBody)
+    CreateNullReturnValue(builder, newSuccessBlock, funcBody)
+    builder.CreateExit(None, newSuccessBlock)
+
+    let oldSuccessBlock = expr.GetSuccessBlock()
+    expr.ReplaceSuccessor(oldSuccessBlock, newSuccessBlock)
 }
 
 private func GetFuncIdent(fn: Function): String {

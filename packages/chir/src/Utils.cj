@@ -121,6 +121,30 @@ public func IsStructEnum(typeValue: Type): Bool {
     return false
 }
 
+public func GetFuncParams(funcBody: BlockGroup): ArrayList<Parameter> {
+    if (let Some(fn) <- funcBody.GetOwnerFunc()) {
+        return fn.GetParams()
+    }
+    let lambdaExpr = (funcBody.GetOwnerExpression().getOrThrow() as Lambda).getOrThrow()
+    return lambdaExpr.GetParams()
+}
+
+public func GetReturnValue(funcBody: BlockGroup): Option<LocalVar> {
+    if (let Some(fn) <- funcBody.GetOwnerFunc()) {
+        return fn.GetReturnValue()
+    }
+    let lambdaExpr = (funcBody.GetOwnerExpression().getOrThrow() as Lambda).getOrThrow()
+    return lambdaExpr.GetReturnValue()
+}
+
+public func GetFuncType(funcBody: BlockGroup): Option<FuncType> {
+    if (let Some(fn) <- funcBody.GetOwnerFunc()) {
+        return fn.GetFuncType()
+    }
+    let lambdaExpr = (funcBody.GetOwnerExpression().getOrThrow() as Lambda).getOrThrow()
+    return lambdaExpr.GetFuncType()
+}
+
 public func GetSuperTypesRecusively(subType: Type, builder: CHIRBuilder): ArrayList<ClassType> {
     let result = ArrayList<ClassType>()
     if (let Some(customType) <- (subType as CustomType)) {

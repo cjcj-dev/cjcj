@@ -73,6 +73,7 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     diag: BasicDiagnosticEngine): Unit {
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
         enableCoverage: options.enableCoverage)
+    DeadCodeElimination(builder).NothingTypeExprElimination(pkg, isDebug: options.chirDebugOptimizer)
     ConstPropagation(builder: Some(builder), opts: options).RunOnPackage(pkg)
     DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(pkg, isDebug: options.chirDebugOptimizer)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
