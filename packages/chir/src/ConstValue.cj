@@ -225,27 +225,33 @@ public func IsTrackedGV(gv: GlobalVar): Bool {
 }
 
 public func HandleNonNullLiteralValue(literalValue: LiteralValue): ConstValueDomain {
+    return HandleNonNullLiteralValue<ConstValue>(literalValue, typed: true)
+}
+
+public func HandleNonNullLiteralValue<AV>(literalValue: LiteralValue, typed!: Bool): ValueDomain<AV>
+    where AV <: ConstValue {
+    let _ = typed
     if (literalValue.IsBoolLit()) {
-        return ConstValueDomain(ConstBoolVal((literalValue as BoolLiteral).getOrThrow().GetVal()))
+        return ValueDomain<AV>((ConstBoolVal((literalValue as BoolLiteral).getOrThrow().GetVal()) as AV).getOrThrow())
     } else if (literalValue.IsFloatLit()) {
         if (literalValue.GetType().getOrThrow().GetTypeKind() != TypeKind.TYPE_FLOAT16) {
-            return ConstValueDomain(ConstFloatVal((literalValue as FloatLiteral).getOrThrow().GetVal()))
+            return ValueDomain<AV>((ConstFloatVal((literalValue as FloatLiteral).getOrThrow().GetVal()) as AV).getOrThrow())
         }
-        return ConstValueDomain(true)
+        return ValueDomain<AV>(true)
     } else if (literalValue.IsIntLit()) {
         let intLiteral = (literalValue as IntLiteral).getOrThrow()
         let intTy = (literalValue.GetType().getOrThrow() as IntType).getOrThrow()
         if (intTy.IsSigned()) {
-            return ConstValueDomain(ConstIntVal(intLiteral.GetSignedVal()))
+            return ValueDomain<AV>((ConstIntVal(intLiteral.GetSignedVal()) as AV).getOrThrow())
         }
-        return ConstValueDomain(ConstUIntVal(intLiteral.GetUnsignedVal()))
+        return ValueDomain<AV>((ConstUIntVal(intLiteral.GetUnsignedVal()) as AV).getOrThrow())
     } else if (literalValue.IsRuneLit()) {
-        return ConstValueDomain(ConstRuneVal((literalValue as RuneLiteral).getOrThrow().GetVal()))
+        return ValueDomain<AV>((ConstRuneVal((literalValue as RuneLiteral).getOrThrow().GetVal()) as AV).getOrThrow())
     } else if (literalValue.IsStringLit()) {
-        return ConstValueDomain(ConstStrVal((literalValue as StringLiteral).getOrThrow().GetVal()))
+        return ValueDomain<AV>((ConstStrVal((literalValue as StringLiteral).getOrThrow().GetVal()) as AV).getOrThrow())
     } else if (literalValue.IsUnitLit()) {
-        return ConstValueDomain(true)
+        return ValueDomain<AV>(true)
     }
     CJC_ABORT()
-    return ConstValueDomain(true)
+    return ValueDomain<AV>(true)
 }

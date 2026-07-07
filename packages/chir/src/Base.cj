@@ -47,6 +47,10 @@ public open class Base {
         annotationMap.Set("NeverOverflowInfo", if (NeverOverflowInfo.Extract(label)) { "true" } else { "false" })
     }
 
+    public func SetNeedCheckCast(value: Bool): Unit {
+        annotationMap.Set("NeedCheckCast", if (value) { "true" } else { "false" })
+    }
+
     public func SetEnumCaseIndex(value: Option<Int64>): Unit {
         let label = EnumCaseIndex(value)
         if (let Some(index) <- EnumCaseIndex.Extract(label)) {
@@ -96,6 +100,13 @@ public open class Base {
             return NeverOverflowInfo.Extract(NeverOverflowInfo(value == "true"))
         }
         return NeverOverflowInfo.Extract(NeverOverflowInfo())
+    }
+
+    public func GetNeedCheckCast(): Bool {
+        if (let Some(value) <- annotationMap.Get("NeedCheckCast")) {
+            return value == "true"
+        }
+        return true
     }
 
     public func GetEnumCaseIndex(): Option<Int64> {
