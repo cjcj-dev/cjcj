@@ -1549,7 +1549,22 @@ public class IRBuilder2 <: Resource {
         if ((isValueOrAddr0 || IsOptionLikeRefValue(argCGType)) && destDerefType.GetSize().isNone()) {
             let argTy = argCGType.GetOriginal().StripAllRefs()
             let objectValue = CallAllocaGeneric(argTy)
-            StoreValueToObjectPayload(objectValue, raw, argTy)
+            let payloadPtr = GetPayloadFromObject(objectValue)
+            let argDerefCGType = CGType.GetOrCreate(cgMod, argTy)
+            if (argTy.IsStruct()) {
+                let size = GetLayoutSize_64(argTy)
+                if (IsLLVMTypeContainsRef(argDerefCGType.GetLLVMType())) {
+                    CallGCWriteAgg(argDerefCGType.GetLayoutType(),
+                        ArrayList<LLVMValueRef>([objectValue, payloadPtr, raw, size]))
+                } else {
+                    CreateMemCpy(payloadPtr, 0u32, raw, 0u32, size)
+                }
+            } else {
+                let addr = CreateBitCast(payloadPtr, unsafe { LLVMPointerType(argDerefCGType.GetLLVMType(), 1u32) })
+                let addrType = CGType.GetOrCreate(cgMod, GetCGContext().GetCHIRBuilder().context.GetRefTy(argTy),
+                    extraInfo: TypeExtraInfo(1u32))
+                CreateStore(arg, CGValue(addr, addrType))
+            }
             return objectValue
         }
         return DoSimpleCast(arg, destType, name)
