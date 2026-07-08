@@ -153,7 +153,7 @@ public open class CGType {
     protected var size: Option<Int64> = None
     protected var align: Option<Int64> = None
     protected var typeInfo: Option<LLVMValueRef> = None
-    private var typeTemplate: Option<LLVMValueRef> = None
+    protected var typeTemplate: Option<LLVMValueRef> = None
     private var containedGenerated: Bool = false
     private var cgGenericKind: CGGenericKind
 
@@ -374,9 +374,13 @@ public open class CGType {
             return existingTemplate
         }
         let createdTemplate = GetOrCreateTypeTemplateGlobal(cgMod, chirType)
+        CJC_ASSERT(!createdTemplate.isNull())
         typeTemplate = createdTemplate
+        cgMod.DelayGenTypeTemplate(this)
         return createdTemplate
     }
+
+    public open func GenTypeTemplate(): Unit {}
 
     protected open func GenLLVMType(): LLVMTypeRef { return LLVMNullType() }
     protected open func GenContainedCGTypes(): Unit {}

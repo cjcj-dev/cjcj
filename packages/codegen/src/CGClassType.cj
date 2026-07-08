@@ -75,6 +75,18 @@ public class CGClassType <: CGCustomType {
         align = None
     }
 
+    protected override func PreActionOfGenTypeTemplate(): Unit {
+        let classDef = (chirType as ClassType).getOrThrow().GetClassDef()
+        if (let Some(rawTypeTemplate) <- typeTemplate) {
+            if (IsCoreFutureClass(classDef)) {
+                addAttribute(rawTypeTemplate, classDef.GetSrcCodeIdentifier())
+            }
+            if (classDef.GetFinalizer().isSome()) {
+                addAttribute(rawTypeTemplate, GC_FINALIZER_ATTR)
+            }
+        }
+    }
+
     protected override func PostActionOfGenTypeInfo(): Unit {
         let classDef = (chirType as ClassType).getOrThrow().GetClassDef()
         if (!(classDef.TestAttr(Attribute.COMPILER_ADD) || !IsModifiableClass(chirType) || !IsStaticGI())) {

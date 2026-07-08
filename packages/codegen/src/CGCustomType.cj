@@ -3,7 +3,7 @@ package cangjie_compiler::codegen
 import std.collection.*
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Type
-import cangjie_compiler::utils.StaticCast
+import cangjie_compiler::utils.{CJC_ASSERT_WITH_MSG, StaticCast}
 
 public open class CGCustomType <: CGType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type, cgTypeKind!: CGTypeKind = CGTypeKind.OTHERS) {
@@ -126,5 +126,25 @@ public open class CGCustomType <: CGType {
         }
         addAttribute(typeInfoOfFields, CJTI_OFFSETS_ATTR)
         return unsafe { LLVMConstBitCast(typeInfoOfFields, i32PtrType) }
+    }
+
+    protected open func PreActionOfGenTypeTemplate(): Unit {}
+    protected open func PostActionOfGenTypeTemplate(): Unit {}
+
+    public override func GenTypeTemplate(): Unit {
+        let customType = StaticCast<CustomType>(chirType)
+        let customTypeDef = customType.GetCustomTypeDef()
+        CJC_ASSERT_WITH_MSG(customTypeDef.IsGenericDef(), "Should be a generic type here.")
+        CJC_ASSERT_WITH_MSG(typeTemplate.isSome(), "This type does not have a type-template GV, please check the caller.")
+        if (let Some(rawTypeTemplate) <- typeTemplate) {
+            PreActionOfGenTypeTemplate()
+            if (unsafe { LLVMIsDeclaration(rawTypeTemplate) } == 0) {
+                return
+            }
+            DefineCustomTypeTemplateIfNeeded(cgMod, customType, rawTypeTemplate)
+            // GAP_TODO: C++ tail calls diBuilder->CreateAnonymousTypeForGenericType(typeTemplate, chirType)
+            // (CGCustomType.cpp:315); debug-info only, DIBuilder anonymous-type facility not yet ported.
+            PostActionOfGenTypeTemplate()
+        }
     }
 }

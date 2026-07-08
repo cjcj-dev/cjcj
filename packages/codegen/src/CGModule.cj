@@ -97,6 +97,9 @@ public class CGModule {
     // queued here and drained iteratively by GenTypeInfo() rather than defined recursively inline, so a
     // recursive type (a field/type-arg referencing the type being defined) does not infinitely recurse.
     private let delayGenTypeInfo: ArrayList<CGType> = ArrayList<CGType>()
+    // Faithful to C++ CGModule::delayGenTypeTemplate (CGModule.h:317): TypeTemplate definitions are
+    // queued when their globals are first declared and drained before TypeInfo generation.
+    private let delayGenTypeTemplate: ArrayList<CGType> = ArrayList<CGType>()
 
     public init(subCHIRPackage: SubCHIRPackage, cgPkgCtx: CGPkgContext) {
         cgCtx = CGContext(subCHIRPackage, cgPkgCtx)
@@ -125,6 +128,12 @@ public class CGModule {
         delayGenTypeInfo.add(cgType)
     }
 
+    // Mirror C++ CGModule::DelayGenTypeTemplate (CGModule.h:291-293): queue a CGType whose
+    // TypeTemplate global has been declared but not yet defined.
+    public func DelayGenTypeTemplate(cgType: CGType): Unit {
+        delayGenTypeTemplate.add(cgType)
+    }
+
     // Mirror C++ CGModule::GenTypeInfo (CGModule.cpp:124-130): drain the delayed-TypeInfo stack,
     // defining each queued type. Draining a type may enqueue further types (its fields/type args); the
     // loop runs until the stack is empty. LIFO to match C++ std::stack ordering.
@@ -132,6 +141,16 @@ public class CGModule {
         while (!delayGenTypeInfo.isEmpty()) {
             let cgType = delayGenTypeInfo.remove(at: delayGenTypeInfo.size - 1)
             cgType.GenTypeInfo()
+        }
+    }
+
+    // Mirror C++ CGModule::GenTypeTemplate (CGModule.cpp:132-138): drain the delayed-TypeTemplate
+    // stack. Defining a TypeTemplate can enqueue TypeInfos via field/super callback generation; those
+    // are intentionally drained by the following GenTypeInfo stage.
+    public func GenTypeTemplate(): Unit {
+        while (!delayGenTypeTemplate.isEmpty()) {
+            let cgType = delayGenTypeTemplate.remove(at: delayGenTypeTemplate.size - 1)
+            cgType.GenTypeTemplate()
         }
     }
 

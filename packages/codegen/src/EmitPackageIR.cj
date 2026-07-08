@@ -4,7 +4,6 @@ import std.collection.*
 import std.sort.*
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.CustomDefKind
-import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.Function
@@ -71,7 +70,9 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
             SpecifyPackageInitFunc(cgModToEmit)
         }
         GenerateInterfaceExtensionDefs(cgModToEmit)
-        RedefineTypeInfosForCustomDefs(cgModToEmit)
+        // Mirror C++ EmitPackageIR.cpp:370 cgMod.GenTypeTemplate(): drain delayed generic
+        // TypeTemplate definitions before TypeInfo generation.
+        cgModToEmit.GenTypeTemplate()
         // Mirror C++ EmitPackageIR.cpp:372 cgMod.GenTypeInfo(): drain the delayed concrete-TypeInfo
         // definitions (queued by CGType.GetOrCreateTypeInfo) before optimization.
         cgModToEmit.GenTypeInfo()
@@ -303,9 +304,8 @@ private func EmitTIOrTTForCustomDefs(cgMod: CGModule): Unit {
             let cgType = CGType.GetOrCreate(cgMod, def.GetType().getOrThrow())
             if (cgType.IsConcrete()) {
                 cgType.GetOrCreateTypeInfo()
-            } else if (def.IsGenericDef()) {
-                let customTy = StaticCast<CustomType>(def.GetType().getOrThrow())
-                EnsureSourceGenericTypeTemplate(cgMod, customTy)
+            }
+            if (def.IsGenericDef()) {
                 cgType.GetOrCreateTypeTemplate()
             }
         }

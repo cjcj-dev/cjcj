@@ -624,80 +624,54 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, moduleHandle: LLV
 }
 
 private func GenerateSourceGenericOfTypeInfo(cgMod: CGModule, chirTy: Type, i8PtrType: LLVMTypeRef): LLVMValueRef {
-    if (chirTy.GetTypeArgs().isEmpty()) {
-        return unsafe { LLVMConstNull(i8PtrType) }
-    }
-    if (let Some(customTy) <- (chirTy as CustomType)) {
-        let typeTemplate = EnsureSourceGenericTypeTemplate(cgMod, customTy)
-        if (!typeTemplate.isNull()) {
-            return unsafe { LLVMConstBitCast(typeTemplate, i8PtrType) }
-        }
-    }
-    let typeTemplate = GetOrCreateTypeTemplateGlobal(cgMod, chirTy)
-    if (!typeTemplate.isNull()) {
+    let cgType = CGType.GetOrCreate(cgMod, chirTy)
+    if (cgType.IsStaticGI()) {
+        let typeTemplate = cgType.GetOrCreateTypeTemplate()
         return unsafe { LLVMConstBitCast(typeTemplate, i8PtrType) }
     }
     return unsafe { LLVMConstNull(i8PtrType) }
 }
 
 public func EnsureSourceGenericTypeTemplate(cgMod: CGModule, customTy: CustomType): LLVMValueRef {
-    let typeTemplateTy = CGType.GetOrCreateTypeTemplateType(cgMod.GetLLVMContext())
+    let sourceTy = StaticCast<CustomType>(customTy.GetCustomTypeDef().GetType().getOrThrow())
+    return CGType.GetOrCreate(cgMod, sourceTy).GetOrCreateTypeTemplate()
+}
+
+public func DefineCustomTypeTemplateIfNeeded(cgMod: CGModule, customTy: CustomType,
+    typeTemplate: LLVMValueRef): Unit {
     let sourceTy = SourceCustomType(customTy)
+    let typeTemplateTy = CGType.GetOrCreateTypeTemplateType(cgMod.GetLLVMContext())
     let typeTemplateName = SourceGenericTypeTemplateName(sourceTy)
-    let typeTemplate = GetOrInsertCodeGenGlobal(cgMod, typeTemplateName, typeTemplateTy)
-    if (sourceTy.GetCustomTypeDef().TestAttr(Attribute.IMPORTED)) {
-        unsafe { LLVMSetLinkage(typeTemplate, LLVMLinkageValue(LLVMLinkage.ExternalWeak)) }
-        return typeTemplate
+    if (cgMod.GetCGContext().IsCustomTypeOfOtherLLVMModule(sourceTy) || IsAutoEnvBaseType(sourceTy)) {
+        if (LinkageOfCustomTypeDef(sourceTy.GetCustomTypeDef()) == Linkage.EXTERNAL_WEAK) {
+            unsafe { LLVMSetLinkage(typeTemplate, LLVMLinkageValue(LLVMLinkage.ExternalWeak)) }
+        }
+        return
     }
     if (IsRuntimeOwnedTypeTemplate(typeTemplateName)) {
         unsafe { LLVMSetLinkage(typeTemplate, LLVMLinkageValue(LLVMLinkage.External)) }
-        return typeTemplate
-    }
-    if (!cgMod.OwnsTypeTemplateName(typeTemplateName)) {
-        unsafe { LLVMSetLinkage(typeTemplate, LLVMLinkageValue(LLVMLinkage.External)) }
-        return typeTemplate
+        return
     }
     if (!typeTemplate.isNull() && unsafe { LLVMIsDeclaration(typeTemplate) } != 0) {
+        let linkageType = TypeTemplateLinkage(sourceTy.GetCustomTypeDef())
         if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
             unsafe {
                 LLVMSetInitializer(typeTemplate,
                     BuildSourceGenericTypeTemplateInitializer(cgMod, moduleHandle, sourceTy, typeTemplateTy,
                         typeTemplateName))
                 addAttribute(typeTemplate, TYPE_TEMPLATE_ATTR)
-                AddLinkageTypeMetadata(typeTemplate, TypeTemplateLinkage(),
-                    cgMod.GetCGContext().IsCGParallelEnabled())
-                LLVMSetGlobalConstant(typeTemplate, 0)
+                AddLinkageTypeMetadata(typeTemplate, linkageType, cgMod.GetCGContext().IsCGParallelEnabled())
             }
         }
     }
-    return typeTemplate
 }
 
 public func RefreshSourceGenericTypeTemplateInitializer(cgMod: CGModule, customTy: CustomType): Unit {
-    let sourceTy = SourceCustomType(customTy)
+    let sourceTy = StaticCast<CustomType>(customTy.GetCustomTypeDef().GetType().getOrThrow())
     if (sourceTy.GetGenericArgs().isEmpty() || sourceTy.GetCustomTypeDef().TestAttr(Attribute.IMPORTED)) {
         return
     }
-    let typeTemplateName = SourceGenericTypeTemplateName(sourceTy)
-    if (IsRuntimeOwnedTypeTemplate(typeTemplateName) || !cgMod.OwnsTypeTemplateName(typeTemplateName)) {
-        return
-    }
-    let typeTemplateTy = CGType.GetOrCreateTypeTemplateType(cgMod.GetLLVMContext())
-    let typeTemplate = GetOrInsertCodeGenGlobal(cgMod, typeTemplateName, typeTemplateTy)
-    if (typeTemplate.isNull()) {
-        return
-    }
-    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
-        unsafe {
-            LLVMSetInitializer(typeTemplate,
-                BuildSourceGenericTypeTemplateInitializer(cgMod, moduleHandle, sourceTy, typeTemplateTy,
-                    typeTemplateName))
-            addAttribute(typeTemplate, TYPE_TEMPLATE_ATTR)
-            AddLinkageTypeMetadata(typeTemplate, TypeTemplateLinkage(),
-                cgMod.GetCGContext().IsCGParallelEnabled())
-            LLVMSetGlobalConstant(typeTemplate, 0)
-        }
-    }
+    let _ = CGType.GetOrCreate(cgMod, sourceTy).GetOrCreateTypeTemplate()
 }
 
 private func SourceGenericTypeTemplateName(customTy: CustomType): String {
@@ -738,7 +712,7 @@ private func BuildSourceGenericTypeTemplateInitializer(cgMod: CGModule, moduleHa
     values.add(unsafe { LLVMConstInt(i16Type, UInt64(sourceTy.GetGenericArgs().size), 0) })
     values.add(GenerateFieldsFnsOfTypeTemplate(cgMod, sourceTy, typeTemplateName, i8PtrType))
     values.add(GenerateSuperFnOfTypeTemplate(cgMod, sourceTy, typeTemplateName, i8PtrType))
-    values.add(unsafe { LLVMConstNull(i8PtrType) })
+    values.add(GenerateFinalizerOfTypeTemplate(cgMod, sourceTy, i8PtrType))
     values.add(unsafe { LLVMConstNull(i8PtrType) })
     values.add(GenerateExtensionDefPtrOfTypeInfo(cgMod, sourceTy, extensionDefPtrPtrType))
     values.add(unsafe { LLVMConstInt(i16Type, TypeTemplateInheritedClassNumValue(sourceTy), 0) })
@@ -748,6 +722,13 @@ private func BuildSourceGenericTypeTemplateInitializer(cgMod: CGModule, moduleHa
 private func GenerateFieldsFnsOfTypeTemplate(cgMod: CGModule, customTy: CustomType, typeTemplateName: String,
     i8PtrType: LLVMTypeRef): LLVMValueRef {
     let sourceTy = SourceCustomType(customTy)
+    if (let Some(enumTy) <- (sourceTy as EnumType)) {
+        if (let Some(enumCGType) <- (CGType.GetOrCreate(cgMod, enumTy) as CGEnumType)) {
+            if (enumCGType.IsOptionLikeT()) {
+                return enumCGType.GenFieldsFnsOfTypeTemplateForOptionLikeT(cgMod, typeTemplateName)
+            }
+        }
+    }
     let fieldTypes = GetTypeTemplateFieldTypes(cgMod, sourceTy)
     if (fieldTypes.isEmpty()) {
         return unsafe { LLVMConstNull(i8PtrType) }
@@ -1033,7 +1014,7 @@ private func RuntimeTypeTemplateAndArgs(cgMod: CGModule, chirTy: Type): (LLVMVal
         return (CGType.GetOrCreate(cgMod, chirTy).GetOrCreateTypeTemplate(), typeArgs)
     }
     if (let Some(customTy) <- (chirTy as CustomType)) {
-        let typeTemplate = EnsureSourceGenericTypeTemplate(cgMod, SourceCustomType(customTy))
+        let typeTemplate = EnsureSourceGenericTypeTemplate(cgMod, customTy)
         if (IsAutoEnvBaseType(customTy)) {
             let autoEnvTy = if (IsAutoEnvInstBaseType(customTy)) {
                 if (let Some(classTy) <- (customTy as ClassType)) {
@@ -1177,6 +1158,9 @@ private func CallGetTypeInfoIntrinsic(cgMod: CGModule, irBuilder: IRBuilder2,
 }
 
 private func GetTypeTemplateFieldTypes(cgMod: CGModule, customTy: CustomType): ArrayList<Type> {
+    if (let Some(enumTy) <- (customTy as EnumType)) {
+        return GetEnumTypeTemplateFieldTypes(cgMod, enumTy)
+    }
     let result = ArrayList<Type>()
     if (IsAutoEnvType(customTy)) {
         let intNativeTy = GetIntNativeRuntimeType(cgMod)
@@ -1189,11 +1173,59 @@ private func GetTypeTemplateFieldTypes(cgMod: CGModule, customTy: CustomType): A
     return result
 }
 
+private func GetEnumTypeTemplateFieldTypes(cgMod: CGModule, enumTy: EnumType): ArrayList<Type> {
+    let result = ArrayList<Type>()
+    let builder = cgMod.GetCGContext().GetCHIRBuilder()
+    if (let Some(enumCGType) <- (CGType.GetOrCreate(cgMod, enumTy) as CGEnumType)) {
+        let enumKind = enumCGType.GetCGEnumTypeKind()
+        if (enumKind == CGEnumTypeKind.NON_EXHAUSTIVE_UNASSOCIATED ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED ||
+            enumKind == CGEnumTypeKind.NON_EXHAUSTIVE_ASSOCIATED ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_OTHER) {
+            result.add(builder.context.GetInt32Ty())
+            return result
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF) {
+            result.add(builder.context.GetUnitTy())
+            if (let Some(objectTy) <- builder.context.GetObjectTy()) {
+                result.add(builder.context.GetRefTy(objectTy))
+            } else {
+                CJC_ASSERT(false)
+            }
+            return result
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_NONREF ||
+            enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T) {
+            result.add(builder.context.GetBoolTy())
+            if (let Some(associatedTy) <- enumCGType.GetAssociatedValueTypeOfOptionLike()) {
+                result.add(associatedTy)
+            }
+            return result
+        }
+        if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ZERO_SIZE) {
+            return result
+        }
+        CJC_ASSERT(false)
+    }
+    return result
+}
+
 private func TypeTemplateSuperClassTy(classTy: ClassType): Option<ClassType> {
     if (let Some(superTy) <- classTy.GetSuperClassTy()) {
         return Some(superTy)
     }
     return None
+}
+
+private func GenerateFinalizerOfTypeTemplate(cgMod: CGModule, customTy: CustomType,
+    i8PtrType: LLVMTypeRef): LLVMValueRef {
+    let sourceTy = SourceCustomType(customTy)
+    if (let Some(classTy) <- (sourceTy as ClassType)) {
+        if (let Some(finalizer) <- classTy.GetClassDef().GetFinalizer()) {
+            return unsafe { LLVMConstBitCast(cgMod.GetOrInsertCGFunction(finalizer).GetRawFunction(), i8PtrType) }
+        }
+    }
+    return unsafe { LLVMConstNull(i8PtrType) }
 }
 
 private func SourceCustomType(customTy: CustomType): CustomType {
@@ -1253,8 +1285,26 @@ private func AddGenericParamIfAbsent(params: ArrayList<GenericType>, candidate: 
     params.add(candidate)
 }
 
-private func TypeTemplateLinkage(): LLVMLinkage {
-    return LLVMLinkage.External
+private func LinkageOfCustomTypeDef(def: CustomTypeDef): Linkage {
+    if (let Some(linkTypeInfo) <- def.GetAnnotation("LinkTypeInfo")) {
+        return match (linkTypeInfo) {
+            case "linkType: weak_odr" => Linkage.WEAK_ODR
+            case "linkType: external" => Linkage.EXTERNAL
+            case "linkType: internal" => Linkage.INTERNAL
+            case "linkType: linkonce_odr" => Linkage.LINKONCE_ODR
+            case "linkType: external_weak" => Linkage.EXTERNAL_WEAK
+            case _ => throw IllegalArgumentException("unexpected LinkTypeInfo annotation: " + linkTypeInfo)
+        }
+    }
+    return Linkage.EXTERNAL
+}
+
+private func TypeTemplateLinkage(def: CustomTypeDef): LLVMLinkage {
+    let linkageType = CHIRLinkage2LLVMLinkage(LinkageOfCustomTypeDef(def))
+    if (LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.Internal)) {
+        return LLVMLinkage.Private
+    }
+    return linkageType
 }
 
 private func TypeTemplateInheritedClassNumValue(customTy: CustomType): UInt64 {
@@ -1687,6 +1737,10 @@ private func InheritedClassNumBase(chirTy: Type): UInt64 {
     return 0u64
 }
 
+private func IsCoreObjectClass(classTy: ClassType): Bool {
+    return IsCoreObjectClassDef(classTy.GetClassDef())
+}
+
 private func ClassInheritanceDepth(classTy: ClassType): Int64 {
     if (classTy.GetClassDef().IsInterface()) {
         return 0
@@ -1802,11 +1856,6 @@ private func GetLayoutMetadataName(cgMod: CGModule, chirTy: Type): String {
     return STRUCT_TYPE_PREFIX + chirTy.ToString()
 }
 
-private func IsCoreObjectClass(classTy: ClassType): Bool {
-    let def = classTy.GetClassDef()
-    return def.GetPackageName() == "std.core" && def.GetSrcCodeIdentifier() == "Object"
-}
-
 private func GetCoreObjectTypeInfo(cgMod: CGModule): LLVMValueRef {
     let typeInfoTy = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
     let objectTypeInfo = GetOrInsertCodeGenGlobal(cgMod, "std.core:Object.ti", typeInfoTy)
@@ -1831,6 +1880,9 @@ private func GenerateSuperOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfo: LL
     }
     if (let Some(classTy) <- (chirTy as ClassType)) {
         if (classTy.GetClassDef().IsInterface()) {
+            return unsafe { LLVMConstNull(typeInfoPtrType) }
+        }
+        if (IsAutoEnvBaseType(classTy)) {
             return unsafe { LLVMConstNull(typeInfoPtrType) }
         }
         if (let Some(superTy) <- classTy.GetSuperClassTy()) {
@@ -1937,10 +1989,13 @@ private func TypeInfoConstInBoundsGEP2(elementType: LLVMTypeRef, pointer: LLVMVa
 
 public func NeedTypeTemplate(chirTy: Type): Bool {
     if (chirTy.IsTuple() || chirTy.IsVArray() || chirTy.IsRawArray() || chirTy.IsCPointer() ||
-        chirTy.IsBox() || chirTy.IsFunc()) {
+        chirTy.IsBox() || chirTy.IsCFunc() || chirTy.IsFunc()) {
         return true
     }
-    return !chirTy.GetTypeArgs().isEmpty()
+    if (let Some(customTy) <- (chirTy as CustomType)) {
+        return !customTy.GetGenericArgs().isEmpty()
+    }
+    return false
 }
 
 public func GetOrCreateTypeTemplateGlobal(cgMod: CGModule, chirTy: Type): LLVMValueRef {
