@@ -14,11 +14,18 @@ public class UpdateMemberVarPath {
         try (recorder = ProfileRecorder("Canonicalization", "UpdateMemberVarPath")) {
             for (fn in pkg.GetGlobalFuncsWithBody()) {
                 if (let Some(body) <- fn.GetBody()) {
-                    for (block in body.GetBlocks()) {
-                        for (expr in block.GetExpressions()) {
-                            UpdateExpression(expr)
-                        }
-                    }
+                    UpdateBlockGroup(body)
+                }
+            }
+        }
+    }
+
+    private func UpdateBlockGroup(group: BlockGroup): Unit {
+        for (block in group.GetBlocks()) {
+            for (expr in block.GetExpressions()) {
+                UpdateExpression(expr)
+                for (subGroup in expr.GetBlockGroups()) {
+                    UpdateBlockGroup(subGroup)
                 }
             }
         }

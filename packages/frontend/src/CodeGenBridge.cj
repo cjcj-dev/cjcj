@@ -6,6 +6,7 @@ import cangjie_compiler::chir.CHIRBuilder as ChirBuilder
 import cangjie_compiler::chir.CHIRPrinter as ChirCHIRPrinter
 import cangjie_compiler::chir.CHIRType
 import cangjie_compiler::chir.CHIRTypeCache
+import cangjie_compiler::chir.ClosureConversion
 import cangjie_compiler::chir.ConstAnalysisWrapper
 import cangjie_compiler::chir.ConstPropagation
 import cangjie_compiler::chir.DeadCodeElimination
@@ -66,6 +67,7 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
         instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
         return None
     }
+    ClosureConversion(builder, opts: instance.invocation.globalOptions).RunOnPackage(lowered)
     if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
         ChirCHIRPrinter.PrintPackage(lowered)
     }

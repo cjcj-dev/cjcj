@@ -1313,7 +1313,6 @@ public class ClosureConversion {
         let instantiateClassTy = GenerateInstantiatedClassType(autoEnvImplType, user, srcFunc)
         let refType = builder.context.GetRefTy(instantiateClassTy)
         let allocate = builder.CreateAllocate(refType, instantiateClassTy, parent)
-        parent.InsertExprIntoHead(allocate)
         let obj = RequireResult(allocate)
         var idx: UInt64 = 0u64
         for (env in envs) {
@@ -1323,6 +1322,8 @@ public class ClosureConversion {
             store.MoveBefore(user)
             idx++
         }
+        // If not moved to head, recursive lambda calls can leave unreachable expressions.
+        parent.InsertExprIntoHead(allocate)
         return obj
     }
 

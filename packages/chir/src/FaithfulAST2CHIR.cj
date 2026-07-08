@@ -1087,7 +1087,6 @@ public class FaithfulAST2CHIR {
             AST2CHIRCheck()
         }
         if (!failure) {
-            ClosureConversion(builder, opts: opts).RunOnPackage(CurrentPackage())
             ReplaceSrcCodeImportedValAfterConstEval(CurrentPackage())
         }
         return !failure
