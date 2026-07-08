@@ -1202,7 +1202,49 @@ public class IRBuilder2 <: Resource {
 
     public func CreateNullValue(ty: Type): LLVMValueRef {
         let cgType = CGType.GetOrCreate(cgMod, ty)
-        return unsafe { LLVMConstNull(cgType.GetLLVMType()) }
+        let llvmTy = cgType.GetLLVMType()
+        if (GetInsertBlock().isNull()) {
+            return unsafe { LLVMConstNull(llvmTy) }
+        }
+        if (cgType.GetSize().isNone()) {
+            let typeInfo = CreateTypeInfo(ty)
+            return CallAllocaGenericWithTypeInfoAndSize(ty, typeInfo, GetLayoutSize_32(ty))
+        }
+        if (ty.IsUnit()) {
+            return cgMod.GenerateUnitTypeValue()
+        }
+        let llvmKind = unsafe { LLVMGetTypeKind(llvmTy) }
+        if (llvmKind == LLVM_STRUCT_TYPE_KIND) {
+            let allocaInst = CreateEntryAlloca(llvmTy)
+            if (!IsLLVMTypeContainsRef(llvmTy)) {
+                CreateCJMemsetStructWith0(allocaInst, llvmTy)
+            }
+            return allocaInst
+        }
+        if (llvmKind == LLVM_ARRAY_TYPE_KIND) {
+            let allocaInst = CreateEntryAlloca(llvmTy)
+            let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+            let sizeOf2G: UInt64 = 2147483647u64
+            let typeSize = cgMod.GetTypeSize(llvmTy)
+            var idx: UInt64 = 0u64
+            while (idx + sizeOf2G < typeSize) {
+                let dataPtr = CreateGEP(llvmTy, allocaInst,
+                    ArrayList<LLVMValueRef>([GetInt64(0), unsafe {
+                        LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), idx, 0)
+                    }]))
+                CreateMemSet(dataPtr, unsafe { LLVMConstInt(i8Type, 0u64, 0) },
+                    unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), sizeOf2G, 0) }, align: 1u32)
+                idx += sizeOf2G
+            }
+            let dataPtr = CreateGEP(llvmTy, allocaInst,
+                ArrayList<LLVMValueRef>([GetInt64(0), unsafe {
+                    LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), idx, 0)
+                }]))
+            CreateMemSet(dataPtr, unsafe { LLVMConstInt(i8Type, 0u64, 0) },
+                unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), typeSize - idx, 0) }, align: 1u32)
+            return allocaInst
+        }
+        return unsafe { LLVMConstNull(llvmTy) }
     }
 
     public func CreateLiteralValue(literal: LiteralValue, resultType: Type): LLVMValueRef {
