@@ -1415,7 +1415,9 @@ public class ClosureConversion {
                 let newMap = genericTypeArgs[idx].CalculateGenericTyMapping(givInstTypes[idx])
                 CJC_ASSERT(newMap[0])
                 for ((key, value) in newMap[1]) {
-                    genericMap[key] = value
+                    if (!genericMap.contains(key)) {
+                        genericMap[key] = value
+                    }
                 }
                 idx++
             }
