@@ -21,6 +21,7 @@ import cangjie_compiler::chir.RedundantGetOrThrowElimination
 import cangjie_compiler::chir.RedundantLoadElimination
 import cangjie_compiler::chir.ShouldReportUnusedCodeWarnings
 import cangjie_compiler::chir.UnitUnify
+import cangjie_compiler::chir.UpdateMemberVarPath
 import cangjie_compiler::chir.UselessAllocateElimination
 import cangjie_compiler::ast.Package as RealASTPackage
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
@@ -72,6 +73,12 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
 
 private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions,
     diag: BasicDiagnosticEngine): Unit {
+    // Canonicalize member-var paths over the whole package before analysis, mirroring C++
+    // ToCHIR::Canonicalization() at CHIR.cpp:1150 ("after this pass, the CHIR is ready for
+    // analysis and optimization"). Generic instantiation adds function bodies after
+    // FaithfulAST2CHIR ran UpdateMemberVarPath, so their GetElementByName/StoreElementByName/
+    // FieldByName nodes would otherwise reach ConstAnalysis (memory-major but unhandled).
+    UpdateMemberVarPath(builder).RunOnPackage(pkg)
     DeadCodeElimination(builder).ClearUnreachableMarkBlock(pkg)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
         enableCoverage: options.enableCoverage)
