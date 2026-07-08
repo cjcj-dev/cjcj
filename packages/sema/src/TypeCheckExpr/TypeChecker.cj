@@ -1649,26 +1649,31 @@ public class TypeChecker {
                     }
                 }
             }
-            if (!body.paramLists.isEmpty()) {
-                let params = body.paramLists[0].params
-                var invalidParamTy = params.size > 1
-                if (!invalidParamTy) {
-                    for (param in params) {
-                        let paramTy = param.GetTy()
-                        let isArrayTy = paramTy.isSome() && paramTy.getOrThrow().IsStructArray() &&
-                            !paramTy.getOrThrow().typeArgs.isEmpty()
-                        let isArrayStringTy = isArrayTy && paramTy.getOrThrow().typeArgs[0].IsString()
-                        if (!isArrayStringTy) {
-                            invalidParamTy = true
-                            break
-                        }
-                    }
+        }
+        let body = match (fd.funcBody) {
+            case Some(value) => value
+            case None => return
+        }
+        if (body.paramLists.isEmpty()) {
+            return
+        }
+        let params = body.paramLists[0].params
+        var invalidParamTy = params.size > 1
+        if (!invalidParamTy) {
+            for (param in params) {
+                let paramTy = param.GetTy()
+                let isArrayTy = paramTy.isSome() && paramTy.getOrThrow().IsStructArray() &&
+                    !paramTy.getOrThrow().typeArgs.isEmpty()
+                let isArrayStringTy = isArrayTy && paramTy.getOrThrow().typeArgs[0].IsString()
+                if (!isArrayStringTy) {
+                    invalidParamTy = true
+                    break
                 }
-                if (invalidParamTy) {
-                    if (let Some(diagValue3) <- impl.diag) {
-                        diagValue3.Diagnose(fd.begin, fd.end, BasicDiagKind.sema_unexpected_param_for_entry).Emit()
-                    }
-                }
+            }
+        }
+        if (invalidParamTy) {
+            if (let Some(diagValue3) <- impl.diag) {
+                diagValue3.Diagnose(fd.begin, fd.end, BasicDiagKind.sema_unexpected_param_for_entry).Emit()
             }
         }
         AddMainFunction(file, fd)
