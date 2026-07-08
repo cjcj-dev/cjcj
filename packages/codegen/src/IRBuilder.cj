@@ -4175,9 +4175,6 @@ public class IRBuilder2 <: Resource {
         if (!objectValue.isNull()) {
             AddRetAttr(objectValue, "noalias")
             AddSpecialClassMallocMetadata(objectValue, classTy)
-            return CreatePointerCast(objectValue,
-                unsafe { LLVMPointerType(classCGType.GetLLVMType(), 1u32) },
-                name: "class.alloc.cast")
         }
         return objectValue
     }
