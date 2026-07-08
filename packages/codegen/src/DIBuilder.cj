@@ -16,6 +16,13 @@ import cangjie_compiler::mangle.MANGLE_FUNC_PARA_INIT_PREFIX
 import cangjie_compiler::mangle.MANGLE_GLOBAL_VARIABLE_INIT_PREFIX
 import cangjie_compiler::utils.CJC_ASSERT
 
+// GAP_TODO(C07-debug-location-parity):
+// - EmitExpressionIR.cpp:64-66 enableCompileDebug parameter loads
+//   call IRBuilder2::CreateLoadInstForParameter before dispatch; this is not ported.
+// - Dispatcher-level EmitLocation sites still not ported from C++:
+//   ApplyImpl.cpp:346; ArithmeticOpImpl.cpp:342,370; TupleExprImpl.cpp:199,236;
+//   MemoryExprDispatcher.cpp:73,108,185,264,285, especially line 108 removable=true;
+//   OtherExprDispatcher.cpp has multiple dispatcher-level sites; IRBuilder.cpp:217,264.
 let LLVM_MODULE_FLAG_WARNING: Int32 = 1
 private let LLVM_DWARF_LANG_CPP14: Int32 = 32
 private let LLVM_DWARF_EMISSION_NONE: Int32 = 0
@@ -249,7 +256,7 @@ public class DIBuilder {
         let lexicalBlock = unsafe {
             LLVMDIBuilderCreateLexicalBlock(raw, parentScope, file, begin.line, begin.column)
         }
-        lexicalBlocks[key] = lexicalBlock
+        lexicalBlocks[ScopeInfoKey(position.GetScopeInfo())] = lexicalBlock
         return lexicalBlock
     }
 
