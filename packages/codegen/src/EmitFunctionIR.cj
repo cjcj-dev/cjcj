@@ -1,6 +1,7 @@
 package cangjie_compiler::codegen
 
 import cangjie_compiler::chir.Function
+import cangjie_compiler::option.MockMode
 
 private class FunctionGeneratorImpl <: IRGeneratorImpl {
     private let cgMod: CGModule
@@ -15,13 +16,28 @@ private class FunctionGeneratorImpl <: IRGeneratorImpl {
     public func EmitIR(): Unit {
         let cgFunc = cgMod.GetOrInsertCGFunction(chirFunc)
         cgFunction = cgFunc
+        let rawFunction = cgFunc.GetRawFunction()
+        let options = cgMod.GetCGContext().GetCompileOptions()
+        let isMockMode = options.mock == MockMode.ON || options.enableCompileTest
+        let shouldGenDebugInfo = isMockMode || chirFunc.IsFuncWithBody()
+        if (shouldGenDebugInfo) {
+            if (let Some(diBuilder) <- cgMod.GetDIBuilder()) {
+                diBuilder.SetSubprogram(chirFunc, rawFunction)
+            }
+        }
         if (let Some(body) <- chirFunc.GetBody()) {
             cgMod.MapFunctionParameters(chirFunc, cgFunc)
             if (!ShouldReturnVoid(chirFunc)) {
-                SetSRetAttrForStructReturnType(chirFunc.GetFuncType().getOrThrow(), cgFunc.GetRawFunction())
+                SetSRetAttrForStructReturnType(chirFunc.GetFuncType().getOrThrow(), rawFunction)
             }
             if (let Some(entryBlock) <- body.GetEntryBlock()) {
                 EmitBasicBlockIR(cgMod, entryBlock)
+            }
+            if (!unsafe { LLVMGetSubprogram(rawFunction) }.isNull()) {
+                cgMod.GetCGContext().debugValue = LLVMNullValue()
+                if (let Some(diBuilder) <- cgMod.GetDIBuilder()) {
+                    diBuilder.FinalizeSubProgram(rawFunction)
+                }
             }
         } else {
             // Declarations are materialized by GetOrInsertCGFunction and have no body to emit.

@@ -501,6 +501,7 @@ foreign {
     func LLVMCreateDIBuilder(module: LLVMModuleRef): LLVMDIBuilderRef
     func LLVMDisposeDIBuilder(builder: LLVMDIBuilderRef): Unit
     func LLVMDIBuilderFinalize(builder: LLVMDIBuilderRef): Unit
+    func LLVMDIBuilderFinalizeSubprogram(builder: LLVMDIBuilderRef, subprogram: LLVMMetadataRef): Unit
     func LLVMDIBuilderCreateFile(builder: LLVMDIBuilderRef, filename: CString, filenameLen: UIntNative,
         directory: CString, directoryLen: UIntNative): LLVMMetadataRef
     func LLVMDIBuilderCreateCompileUnit(builder: LLVMDIBuilderRef, language: Int32, fileRef: LLVMMetadataRef,
@@ -512,14 +513,37 @@ foreign {
         nameLen: UIntNative, exportSymbols: Int32): LLVMMetadataRef
     func LLVMDIBuilderCreateDebugLocation(context: LLVMContextRef, line: UInt32, column: UInt32,
         scope: LLVMMetadataRef, inlinedAt: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMDIBuilderGetOrCreateTypeArray(builder: LLVMDIBuilderRef, data: CPointer<LLVMMetadataRef>,
+        numElements: UIntNative): LLVMMetadataRef
+    func LLVMDIBuilderCreateLexicalBlock(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef, file: LLVMMetadataRef,
+        line: UInt32, column: UInt32): LLVMMetadataRef
+    func LLVMDIScopeGetFile(scope: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMDIBuilderCreateSubroutineType(builder: LLVMDIBuilderRef, file: LLVMMetadataRef,
+        parameterTypes: CPointer<LLVMMetadataRef>, numParameterTypes: UInt32, flags: UInt32): LLVMMetadataRef
+    func LLVMDIBuilderCreateFunction(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef, name: CString,
+        nameLen: UIntNative, linkageName: CString, linkageNameLen: UIntNative, file: LLVMMetadataRef,
+        lineNo: UInt32, ty: LLVMMetadataRef, isLocalToUnit: Int32, isDefinition: Int32, scopeLine: UInt32,
+        flags: UInt32, isOptimized: Int32): LLVMMetadataRef
     func LLVMDIBuilderCreateBasicType(builder: LLVMDIBuilderRef, name: CString, nameLen: UIntNative,
         sizeInBits: UInt64, encoding: UInt32, flags: UInt32): LLVMMetadataRef
     func LLVMDIBuilderCreatePointerType(builder: LLVMDIBuilderRef, pointeeTy: LLVMMetadataRef, sizeInBits: UInt64,
         alignInBits: UInt32, addressSpace: UInt32, name: CString, nameLen: UIntNative): LLVMMetadataRef
+    func LLVMDIBuilderCreateMemberPointerType(builder: LLVMDIBuilderRef, pointeeType: LLVMMetadataRef,
+        classType: LLVMMetadataRef, sizeInBits: UInt64, alignInBits: UInt32, flags: UInt32): LLVMMetadataRef
     func LLVMDIBuilderCreateNullPtrType(builder: LLVMDIBuilderRef): LLVMMetadataRef
     func LLVMDIBuilderCreateMemberType(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef, name: CString,
         nameLen: UIntNative, file: LLVMMetadataRef, lineNo: UInt32, sizeInBits: UInt64, alignInBits: UInt32,
         offsetInBits: UInt64, flags: UInt32, ty: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMGetSubprogram(function: LLVMValueRef): LLVMMetadataRef
+    func LLVMSetSubprogram(function: LLVMValueRef, subprogram: LLVMMetadataRef): Unit
+    func LLVMSelfhostDIBuilderCreateSubroutineType(builder: LLVMDIBuilderRef, parameterTypes: CPointer<LLVMMetadataRef>,
+        numParameterTypes: UIntNative, flags: UInt32): LLVMMetadataRef
+    func LLVMSelfhostDIBuilderCreateFunction(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef, name: CString,
+        nameLen: UIntNative, linkageName: CString, linkageNameLen: UIntNative, file: LLVMMetadataRef,
+        lineNo: UInt32, ty: LLVMMetadataRef, scopeLine: UInt32, flags: UInt32, spFlags: UInt32,
+        templateParams: LLVMMetadataRef, declaration: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMSelfhostDILocationGet(context: LLVMContextRef, line: UInt32, column: UInt32,
+        scope: LLVMMetadataRef, inlinedAt: LLVMMetadataRef, isImplicitCode: Bool): LLVMMetadataRef
 }
 
 public func LLVMNullContext(): LLVMContextRef { return CPointer<Unit>() }

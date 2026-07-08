@@ -1,6 +1,7 @@
 package cangjie_compiler::codegen
 
 import std.collection.*
+import cangjie_compiler::chir.ExprMajorKind
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
@@ -38,7 +39,15 @@ public func EmitExpressionIR(cgMod: CGModule, chirExprs: ArrayList<Expression>):
 
 public func EmitExpressionIR(cgMod: CGModule, irBuilder: IRBuilder2, chirExprs: ArrayList<Expression>): Unit {
     for (chirExpr in chirExprs) {
-        irBuilder.SetCHIRExpr(CHIRExprWrapper(chirExpr))
+        let chirExprWrapper = CHIRExprWrapper(chirExpr)
+        if (chirExpr.GetParentBlock().isSome()) {
+            irBuilder.EmitLocation(chirExprWrapper)
+        }
+        irBuilder.SetCHIRExpr(chirExprWrapper)
+        if (chirExpr.GetExprMajorKind() == ExprMajorKind.UNARY_EXPR ||
+            chirExpr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
+            irBuilder.EmitLocation(chirExprWrapper)
+        }
         let rawRet = DispatchExpression(irBuilder, chirExpr)
         if (!rawRet.isNull()) {
             MapExpressionResult(cgMod, irBuilder, chirExpr, rawRet)

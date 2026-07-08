@@ -248,6 +248,16 @@ public class IRBuilder2 <: Resource {
         }
     }
 
+    public func EmitLocation(debugNode: CHIRExprWrapper, removable!: Bool = false): Unit {
+        if (!cgMod.GetCGContext().IsLineInfoEnabled()) {
+            return
+        }
+        if (let Some(diBuilder) <- cgMod.GetDIBuilder()) {
+            let diLoc = diBuilder.CreateDILoc(debugNode, removable: removable)
+            unsafe { LLVMSetCurrentDebugLocation2(builder.raw, diLoc) }
+        }
+    }
+
     public func SetInsertCGFunction(cgFunc: CGFunction): Unit {
         cgFunction = cgFunc
     }

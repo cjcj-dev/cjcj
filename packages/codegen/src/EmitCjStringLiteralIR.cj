@@ -120,7 +120,14 @@ private func GetReadOnlyArrayKlassInfo(cgMod: CGModule, moduleHandle: LLVMModule
     }
     let typeTemplateType = CGType.GetOrCreateTypeTemplateType(contextHandle)
     let rawArrayTypeTemplate = GetOrInsertGlobal(moduleHandle, "RawArray.tt", typeTemplateType)
-    let memberTypeInfo = GetOrInsertGlobal(moduleHandle, "UInt8.ti", typeInfoType)
+    let memberTypeInfoName = "UInt8.ti"
+    let memberTypeInfoExisted = !GetNamedGlobal(moduleHandle, memberTypeInfoName).isNull()
+    let memberTypeInfo = GetOrInsertGlobal(moduleHandle, memberTypeInfoName, typeInfoType)
+    if (!memberTypeInfoExisted) {
+        LLVMSetGlobalStringMetadata(contextHandle, memberTypeInfo, GC_TYPE_META_NAME, "UInt8.Type")
+        addAttribute(memberTypeInfo, GC_KLASS_ATTR)
+        addAttribute(memberTypeInfo, NOT_MODIFIABLE_CLASS_ATTR)
+    }
 
     let typeInfoValues = ArrayList<LLVMValueRef>()
     typeInfoValues.add(cgMod.GenerateTypeNameConstantString("RawArray<UInt8>", false))

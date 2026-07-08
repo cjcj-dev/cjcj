@@ -22,8 +22,11 @@
 //         src/CodeGen/CJNative/EmitPackageIR.cpp:526-616  llvm::CallBase/InvokeInst APIs.
 //   Constant array literal support:
 //         src/CodeGen/Utils/CGUtils.cpp:250-255  llvm::dyn_cast<llvm::Constant>(value).
+//   DIBuilder subprogram support:
+//         src/CodeGen/DIBuilder.cpp:204-207, 282-283, 455-476  C++ overloads not exposed exactly by LLVM-C.
 
 #include <llvm-c/Core.h>
+#include <llvm-c/DebugInfo.h>
 
 #include <vector>
 
@@ -33,6 +36,8 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/DIBuilder.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalObject.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -364,6 +369,44 @@ extern "C" void LLVMSelfhostInstructionSetMetadata(
     if (auto *globalObject = dyn_cast<GlobalObject>(value)) {
         globalObject->setMetadata(StringRef(Kind, KindLen), node);
     }
+}
+
+extern "C" LLVMMetadataRef LLVMSelfhostDIBuilderCreateSubroutineType(
+    LLVMDIBuilderRef Builder, LLVMMetadataRef *Types, size_t Count, unsigned Flags)
+{
+    auto *builder = unwrap(Builder);
+    std::vector<Metadata*> eltTys;
+    eltTys.reserve(Count);
+    for (size_t idx = 0; idx < Count; ++idx) {
+        eltTys.push_back(Types[idx] == nullptr ? nullptr : unwrap(Types[idx]));
+    }
+    auto diFlags = static_cast<DINode::DIFlags>(Flags);
+    return wrap(builder->createSubroutineType(builder->getOrCreateTypeArray(eltTys), diFlags));
+}
+
+extern "C" LLVMMetadataRef LLVMSelfhostDIBuilderCreateFunction(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope,
+    const char *Name, size_t NameLen, const char *LinkageName, size_t LinkageNameLen, LLVMMetadataRef File,
+    unsigned LineNo, LLVMMetadataRef Ty, unsigned ScopeLine, unsigned Flags, unsigned SPFlags,
+    LLVMMetadataRef TParams, LLVMMetadataRef Decl)
+{
+    auto *builder = unwrap(Builder);
+    auto *scope = unwrap<DIScope>(Scope);
+    auto *file = unwrap<DIFile>(File);
+    auto *type = unwrap<DISubroutineType>(Ty);
+    auto diFlags = static_cast<DINode::DIFlags>(Flags);
+    auto spFlags = static_cast<DISubprogram::DISPFlags>(SPFlags);
+    auto *templateParams = TParams == nullptr ? nullptr : unwrap<MDTuple>(TParams);
+    auto *declaration = Decl == nullptr ? nullptr : unwrap<DISubprogram>(Decl);
+    return wrap(builder->createFunction(scope, StringRef(Name, NameLen), StringRef(LinkageName, LinkageNameLen),
+        file, LineNo, type, ScopeLine, diFlags, spFlags, templateParams, declaration));
+}
+
+extern "C" LLVMMetadataRef LLVMSelfhostDILocationGet(LLVMContextRef Context, unsigned Line, unsigned Column,
+    LLVMMetadataRef Scope, LLVMMetadataRef InlinedAt, bool IsImplicitCode)
+{
+    auto *scope = unwrap<Metadata>(Scope);
+    auto *inlinedAt = InlinedAt == nullptr ? nullptr : unwrap<DILocation>(InlinedAt);
+    return wrap(DILocation::get(*unwrap(Context), Line, Column, scope, inlinedAt, IsImplicitCode));
 }
 
 extern "C" LLVMValueRef LLVMSelfhostCreateGCReadStaticAgg(LLVMBuilderRef Builder, LLVMModuleRef Module,
