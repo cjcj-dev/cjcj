@@ -3320,6 +3320,10 @@ public class Translator {
         return CalculateDelayExitLevelForBreak() - 1
     }
 
+    private func CalculateDelayExitLevelForThrow(): Int64 {
+        return CalculateDelayExitLevelForReturn() + 1
+    }
+
     private func CalculateDelayExitLevelForReturn(): Int64 {
         var level: Int64 = 0
         var idx = blockGroupStack.size - 1
@@ -5560,6 +5564,33 @@ public class Translator {
         return RequireResult(apply)
     }
 
+    private func CreateAllocateMaybeWithException(resultTy: Type, allocatedTy: Type): Value {
+        if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
+            let successBlock = CreateBlock()
+            if (delayExitSignal.isSome() && !blockGroupStack.isEmpty()) {
+                let errorBlockGroup = RequireParentBlockGroup(errorBlock, "allocate-with-exception error block")
+                if (!refEq(blockGroupStack[blockGroupStack.size - 1], errorBlockGroup)) {
+                    let exceptBlock = CreateBlock()
+                    exceptBlock.SetExceptions(ArrayList<ClassType>())
+                    let term = builder.CreateAllocateWithException(resultTy, allocatedTy, successBlock, exceptBlock,
+                        CurrentBlock())
+                    let result = RequireResult(term)
+                    currentBlock = exceptBlock
+                    UpdateDelayExitSignal(CalculateDelayExitLevelForThrow())
+                    builder.CreateExit(None, exceptBlock)
+                    currentBlock = successBlock
+                    return result
+                }
+            }
+            let term = builder.CreateAllocateWithException(resultTy, allocatedTy, successBlock, errorBlock,
+                CurrentBlock())
+            let result = RequireResult(term)
+            currentBlock = successBlock
+            return result
+        }
+        return RequireResult(builder.CreateAllocate(resultTy, allocatedTy, CurrentBlock()))
+    }
+
     private func CreateSpawnMaybeWithException(resultTy: Type, futureObj: Value, spawnArg: Option<Value>): Unit {
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
             let successBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "spawn-with-exception"))
@@ -5736,7 +5767,7 @@ public class Translator {
                         RemoveDeadLoadForBlackBox(load)
                     } else {
                         let argRefType = builder.context.GetRefTy(argTy)
-                        newArg = RequireResult(builder.CreateAllocate(argRefType, argTy, CurrentBlock()))
+                        newArg = CreateAllocateMaybeWithException(argRefType, argTy)
                         builder.CreateStore(arg, newArg, CurrentBlock())
                     }
                 }
@@ -6480,7 +6511,7 @@ public class Translator {
         let thisObj = if (IsSuperOrThisCtorCall(expr)) {
             CastValueIfNeeded(GetCurrentConstructorThisObject(), thisRefTy)
         } else {
-            RequireResult(builder.CreateAllocate(thisRefTy, thisTy, CurrentBlock()))
+            CreateAllocateMaybeWithException(thisRefTy, thisTy)
         }
         let args = ArrayList<Value>()
         args.add(thisObj)
@@ -7078,7 +7109,7 @@ public class Translator {
         let thisObj = if (IsSuperOrThisCtorCall(expr)) {
             CastValueIfNeeded(GetCurrentConstructorThisObject(), thisRefTy)
         } else {
-            RequireResult(builder.CreateAllocate(thisRefTy, thisTy, CurrentBlock()))
+            CreateAllocateMaybeWithException(thisRefTy, thisTy)
         }
         let args = ArrayList<Value>()
         args.add(thisObj)

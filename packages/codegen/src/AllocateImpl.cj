@@ -2,30 +2,28 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.Allocate
+import cangjie_compiler::chir.AllocateWithException
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.Type
 
 public func GenerateAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
-    if (let Some(allocateExpr) <- (chirExpr as Allocate)) {
-        let allocatedTy = allocateExpr.GetType()
-        if (allocatedTy.IsClass()) {
-            let obj = irBuilder.CallClassIntrinsicAlloc(allocatedTy)
-            if (IsAutoEnvType(allocatedTy)) {
-                InitializeAutoEnvCallableAbi(irBuilder, obj, allocatedTy)
+    let allocatedTy: Option<Type> = if (let Some(allocateExpr) <- (chirExpr as Allocate)) {
+        Some(allocateExpr.GetType())
+    } else if (let Some(allocateWithException) <- (chirExpr as AllocateWithException)) {
+        Some(allocateWithException.GetType())
+    } else {
+        None
+    }
+    if (let Some(actualAllocatedTy) <- allocatedTy) {
+        if (actualAllocatedTy.IsClass()) {
+            let obj = irBuilder.CallClassIntrinsicAlloc(actualAllocatedTy)
+            if (IsAutoEnvType(actualAllocatedTy)) {
+                InitializeAutoEnvCallableAbi(irBuilder, obj, actualAllocatedTy)
             }
             return obj
         }
-    }
-    if (let Some(resultTy) <- chirExpr.GetResultType()) {
-        let cgType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
-        // Allocate yields a Ref<T> (a pointer to T). The stack slot must hold a T, so the alloca's
-        // LLVM type is the pointee (T) -- the alloca instruction itself then produces the T* that
-        // matches the Ref<T> result. Allocating the Ref type directly would yield a T** and break
-        // the subsequent Load/Store (whose operand must be a pointer to the value type).
-        if (let Some(elementType) <- cgType.GetPointerElementType()) {
-            return irBuilder.CreateEntryAlloca(elementType, name: "alloca")
-        }
+        let cgType = CGType.GetOrCreate(irBuilder.GetCGModule(), actualAllocatedTy)
         return irBuilder.CreateEntryAlloca(cgType, name: "alloca")
     }
     return LLVMNullValue()
