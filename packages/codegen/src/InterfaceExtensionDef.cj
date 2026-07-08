@@ -343,9 +343,7 @@ private class CGExtensionDef {
         while (idx < typeArgs.size) {
             let backupBB = irBuilder.GetInsertBlock()
             irBuilder.SetInsertPointForPreparingTypeInfo()
-            let indices = ArrayList<LLVMValueRef>()
-            indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(cgMod.GetLLVMContext().raw), UInt64(idx), 0) })
-            let tiPtr = irBuilder.CreateInBoundsGEP(typeInfoPtrType, typeInfos, indices)
+            let tiPtr = irBuilder.CreateConstGEP1_32(typeInfoPtrType, typeInfos, UInt32(idx))
             let ti = irBuilder.CreateLoad(typeInfoPtrType, tiPtr, name: idx.toString() + "ti")
             let chirType = typeArgs[idx]
             innerTypeMap[chirType.objectId] = InnerTiInfo(ti, true)
