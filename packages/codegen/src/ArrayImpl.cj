@@ -192,10 +192,9 @@ public func GenerateRawArrayLiteralInit(irBuilder: IRBuilder2, chirExpr: Express
         var elementIdx: Int64 = 1
         while (elementIdx < chirExpr.GetNumOfOperands()) {
             let elementValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(elementIdx))
-            let indexValue = unsafe {
-                LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(elementIdx - 1), 0)
-            }
-            let elementPtr = CreateRawArrayElementPointer(irBuilder, rawArrayValue, rawArrayTy, indexValue)
+            let rawIndex = elementIdx - 1
+            let elementPtr = irBuilder.CreateGEP(rawArrayValue, ArrayList<UInt64>([UInt64(rawIndex)]),
+                name: "arr.idx${rawIndex}E").GetRawValue()
             StoreRawArrayElement(irBuilder, rawArrayValue.GetRawValue(), elementCGType, elementValue, elementPtr)
             elementIdx++
         }
@@ -223,10 +222,8 @@ private func CallArrayIntrinsicInitWithContent(irBuilder: IRBuilder2,
         let elements = arrayLiteralInit.GetElements()
         while (elementIdx < elements.size) {
             let elementValue = irBuilder.GetCGModule().GetMappedCGValue(elements[elementIdx])
-            let indexValue = unsafe {
-                LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(elementIdx), 0)
-            }
-            let elementPtr = CreateRawArrayElementPointer(irBuilder, rawArrayValue, rawArrayTy, indexValue)
+            let elementPtr = irBuilder.CreateGEP(rawArrayValue, ArrayList<UInt64>([UInt64(elementIdx)]),
+                name: "arr.idx${elementIdx}E").GetRawValue()
             StoreRawArrayElement(irBuilder, rawArrayValue.GetRawValue(), elementCGType, elementValue, elementPtr)
             elementIdx++
         }
