@@ -83,3 +83,43 @@ public func NeedSwitchContext(decl: Decl): Bool {
     }
     return false
 }
+
+private func GimHasExtendDecl(values: ArrayList<ExtendDecl>, candidate: ExtendDecl): Bool {
+    for (value in values) {
+        if (SameDecl(value, candidate)) {
+            return true
+        }
+    }
+    return false
+}
+
+private func GimAddUniqueExtends(target: ArrayList<ExtendDecl>, source: ArrayList<ExtendDecl>): Unit {
+    for (extendDecl in source) {
+        if (!GimHasExtendDecl(target, extendDecl)) {
+            target.add(extendDecl)
+        }
+    }
+}
+
+public func CollectAllRelatedExtends(typeManager: TypeManager, boxedDecl: InheritableDecl): ArrayList<ExtendDecl> {
+    if (boxedDecl.astKind != ASTKind.CLASS_DECL) {
+        return typeManager.GetDeclExtends(boxedDecl)
+    }
+    let out = ArrayList<ExtendDecl>()
+    if (let Some(classDecl) <- (boxedDecl as ClassDecl)) {
+        GimAddUniqueExtends(out, typeManager.GetDeclExtends(classDecl))
+        var current = classDecl.GetSuperClassDecl()
+        while (let Some(superClass) <- current) {
+            GimAddUniqueExtends(out, typeManager.GetDeclExtends(superClass))
+            current = superClass.GetSuperClassDecl()
+        }
+    }
+    return out
+}
+
+public func GetAllRelatedExtendsByTy(typeManager: TypeManager, ty: Ty): ArrayList<ExtendDecl> {
+    if (let Some(baseDecl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
+        return CollectAllRelatedExtends(typeManager, baseDecl)
+    }
+    return typeManager.GetAllExtendsByTy(ty)
+}
