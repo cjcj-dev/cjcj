@@ -24,14 +24,16 @@ public class CHIRBuilder {
     }
 
     public func CreateClassDef(packageName: String, identifier: String, isClass!: Bool = true): ClassDef {
-        let def = ClassDef(packageName, "_" + identifier, isClass: isClass)
+        let chirIdentifier = if (identifier.startsWith("$")) { identifier } else { "_" + identifier }
+        let def = ClassDef(packageName, chirIdentifier, isClass: isClass)
         context.RegisterClass(def)
         return def
     }
 
     public func CreateClassDef(packageName: String, identifier: String, srcCodeIdentifier: String,
         isClass!: Bool = true): ClassDef {
-        let def = ClassDef(packageName, "_" + identifier, srcCodeIdentifier, isClass: isClass)
+        let chirIdentifier = if (identifier.startsWith("$")) { identifier } else { "_" + identifier }
+        let def = ClassDef(packageName, chirIdentifier, srcCodeIdentifier, isClass: isClass)
         context.RegisterClass(def)
         return def
     }

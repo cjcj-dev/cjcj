@@ -55,12 +55,6 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
     let sourceCGValue = irBuilder.GetCGModule().GetMappedCGValue(sourceValue)
     let sourceRawValue = sourceCGValue.GetRawValue()
     let sourceTy = boxExpr.GetSourceTy() ?? return sourceRawValue
-    if (sourceTy.IsUnit() || sourceTy.IsVoid() || sourceTy.IsNothing()) {
-        if (let Some(targetTy) <- boxExpr.GetTargetTy()) {
-            return unsafe { LLVMConstNull(CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType()) }
-        }
-        return unsafe { LLVMConstNull(CGType.GetRefType(irBuilder.GetLLVMContext())) }
-    }
     let sourceCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), sourceTy)
     if (sourceCGType.IsReference()) {
         return sourceRawValue
