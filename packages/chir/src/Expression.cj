@@ -12,6 +12,7 @@ public open class Expression <: Base {
     private let blockGroups: ArrayList<BlockGroup> = ArrayList<BlockGroup>()
     private var parent: Option<Block> = None
     private var result: Option<LocalVar> = None
+    private var operandsAndGroupsConnected: Bool = false
 
     public init(kind: ExprKind, operands: ArrayList<Value>, blockGroups: ArrayList<BlockGroup>,
         parent: Option<Block>) {
@@ -138,14 +139,20 @@ public open class Expression <: Base {
     }
 
     public func ConnectOperandsAndGroups(): Unit {
+        if (operandsAndGroupsConnected) {
+            return
+        }
+        operandsAndGroupsConnected = true
         for (operand in operands) {
-            if (!ExpressionListContains(operand.GetUsersRef(), this)) {
-                operand.AddUserOnly(this)
-            }
+            operand.AddUserOnly(this)
         }
         for (group in blockGroups) {
             group.SetOwnerExpression(this)
         }
+    }
+
+    protected func MarkOperandsAndGroupsConnected(): Unit {
+        operandsAndGroupsConnected = true
     }
 
     public func GetResultType(): Option<Type> {
@@ -823,6 +830,7 @@ public class Apply <: FuncCall {
         for (arg in callContext.args) {
             AppendOperand(arg)
         }
+        MarkOperandsAndGroupsConnected()
     }
 
     public func GetCallee(): Value {
@@ -986,6 +994,7 @@ public class Invoke <: DynamicDispatch {
         for (arg in callContext.funcCallCtx.args) {
             AppendOperand(arg)
         }
+        MarkOperandsAndGroupsConnected()
     }
 
     public func GetObject(): Value {
@@ -1042,6 +1051,7 @@ public class InvokeStatic <: DynamicDispatch {
         for (arg in callContext.funcCallCtx.args) {
             AppendOperand(arg)
         }
+        MarkOperandsAndGroupsConnected()
     }
 
     public func GetRTTIValue(): Value {
@@ -1462,7 +1472,12 @@ public class RawArrayAllocate <: Expression {
 
 public class RawArrayLiteralInit <: Expression {
     public init(rawArray: Value, elements: ArrayList<Value>, parent: Option<Block>) {
-        super(ExprKind.RAW_ARRAY_LITERAL_INIT, MakeRawArrayLiteralOperands(rawArray, elements), parent)
+        super(ExprKind.RAW_ARRAY_LITERAL_INIT, ArrayList<Value>(), parent)
+        AppendOperand(rawArray)
+        for (element in elements) {
+            AppendOperand(element)
+        }
+        MarkOperandsAndGroupsConnected()
     }
 
     public func GetRawArray(): Value {
@@ -2189,15 +2204,6 @@ private func MakeThreeOperands(first: Value, second: Value, third: Value): Array
     return ops
 }
 
-private func MakeRawArrayLiteralOperands(rawArray: Value, elements: ArrayList<Value>): ArrayList<Value> {
-    let ops = ArrayList<Value>()
-    ops.add(rawArray)
-    for (element in elements) {
-        ops.add(element)
-    }
-    return ops
-}
-
 private func MakeVArrayBuilderOperands(size: Value, item: Value, initFunc: Value): ArrayList<Value> {
     let ops = ArrayList<Value>()
     ops.add(size)
@@ -2375,15 +2381,6 @@ private func PrependGenericTypeParams(result: ArrayList<GenericType>, params: Ar
 private func ContainsParameter(values: ArrayList<Parameter>, param: Parameter): Bool {
     for (value in values) {
         if (value.nodeId == param.nodeId) {
-            return true
-        }
-    }
-    return false
-}
-
-private func ExpressionListContains(values: ArrayList<Expression>, expr: Expression): Bool {
-    for (value in values) {
-        if (value.nodeId == expr.nodeId) {
             return true
         }
     }
