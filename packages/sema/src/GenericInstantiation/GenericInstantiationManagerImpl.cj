@@ -320,7 +320,7 @@ public class GenericInstantiationManagerImpl {
     private let declInstantiationByTypeMap: HashMap<String, ArrayList<GenericInstantiationRecord>> =
         HashMap<String, ArrayList<GenericInstantiationRecord>>()
     private let instantiatedDeclsMap: HashMap<Int64, ArrayList<Decl>> = HashMap<Int64, ArrayList<Decl>>()
-    private let abstractFuncToDeclMap: AbstractFuncMap = AbstractFuncMap()
+    let abstractFuncToDeclMap: AbstractFuncMap = AbstractFuncMap()
     private let inheritedMemberFuncsCache: HashMap<Int64, ArrayList<FuncDecl>> =
         HashMap<Int64, ArrayList<FuncDecl>>()
     private let inheritedInterfacesCache: HashMap<Int64, ArrayList<InheritableDecl>> =
@@ -352,7 +352,7 @@ public class GenericInstantiationManagerImpl {
             ResetGenericInstantiationStage()
         }
         curPkg = pkg
-        InstantiatedExtendRecorder(ci.typeManager).Record(pkg)
+        InstantiatedExtendRecorder(this, ci.typeManager).Record(pkg)
         // C++ GenericInstantiationManagerImpl.cpp:287 — PrepareToMock, after RecordExtend, before instantiation.
         if (ci.globalOptions.enableCompileTest) {
             if (let Some(tm) <- testManager) {
@@ -394,7 +394,7 @@ public class GenericInstantiationManagerImpl {
             addInstantiationRecord(genericDecl, instantiatedDecl, genericInfo.gTyToTyMap)
             if (!SameDecl(genericDecl, instantiatedDecl)) {
                 appendGenericInstantiation(pkg, instantiatedDecl)
-                InstantiatedExtendRecorder(ci.typeManager).Record(instantiatedDecl)
+                InstantiatedExtendRecorder(this, ci.typeManager).Record(instantiatedDecl)
                 InstantiateReferencedGenericsInNode(instantiatedDecl, pkg)
                 RearrangeReferencesInNode(instantiatedDecl, pkg)
                 updateInstantiatedExtendMap(ci.typeManager, pkg)
@@ -733,7 +733,7 @@ public class GenericInstantiationManagerImpl {
         return false
     }
 
-    private func GetGeneralDecl(decl: Decl, getOriginal!: Bool = false): Decl {
+    func GetGeneralDecl(decl: Decl, getOriginal!: Bool = false): Decl {
         let target = GetRealTarget(decl)
         if (let Some(outerDecl) <- target.outerDecl) {
             if ((let Some(_) <- outerDecl.genericDecl) && !outerDecl.IsFunc()) {
@@ -827,9 +827,20 @@ public class GenericInstantiationManagerImpl {
                 }
             } else if (let Some(interfaceOuter) <- interfaceFunc.outerDecl) {
                 if (interfaceOuter.TestAttr(Attribute.GENERIC)) {
-                    // GAP_TODO(gim-batch3): port C++ GenericInstantiationManagerImpl.cpp:785-793
-                    // after GetReversedTypeSubst/TyGeneralizer lands.
-                    let _ = targetBaseTy
+                    let typeMapping = GenerateTypeMappingByTy(interfaceOuter.GetTy(), Some(targetBaseTy))
+                    if (let Some(implOuter) <- implMember.outerDecl) {
+                        if (implOuter.TestAttr(Attribute.GENERIC)) {
+                            let tmpMapping = GenerateTypeMappingByTy(implOuter.GetTy(), Some(ty))
+                            let rts = GetReversedTypeSubst(tmpMapping)
+                            let tg = TyGeneralizer(ci.typeManager, rts)
+                            for (entry in typeMapping.entries) {
+                                entry.ty = tg.Generalize(entry.ty)
+                            }
+                        }
+                    }
+                    if (let Some(funcTy) <- iFuncTy) {
+                        iFuncTy = ci.typeManager.GetInstantiatedTy(funcTy, typeMapping) as FuncTy
+                    }
                 }
             }
             let usableDecls = GetInstantiatedDecls(implMember)
@@ -1459,7 +1470,7 @@ public class GenericInstantiationManagerImpl {
         return VisitAction.WALK_CHILDREN
     }
 
-    private func PushStructContext(node: Node): Unit {
+    func PushStructContext(node: Node): Unit {
         if (let Some(decl) <- (node as Decl)) {
             if (NeedSwitchContext(decl)) {
                 structContext.add(decl)
@@ -1467,7 +1478,7 @@ public class GenericInstantiationManagerImpl {
         }
     }
 
-    private func PopStructContext(node: Node): VisitAction {
+    func PopStructContext(node: Node): VisitAction {
         if (let Some(decl) <- (node as Decl)) {
             if (!structContext.isEmpty() && NeedSwitchContext(decl) &&
                 SameDecl(structContext[structContext.size - 1], decl)) {
@@ -1477,7 +1488,7 @@ public class GenericInstantiationManagerImpl {
         return VisitAction.KEEP_DECISION
     }
 
-    private func GetStructDeclByContext(): Option<Decl> {
+    func GetStructDeclByContext(): Option<Decl> {
         if (structContext.isEmpty()) {
             return None
         }

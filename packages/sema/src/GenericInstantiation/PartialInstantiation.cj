@@ -3,6 +3,7 @@ package cangjie_compiler::sema.GenericInstantiation
 import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
+import cangjie_compiler::sema.*
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::option.OptimizationLevel
 import cangjie_compiler::option.OutputMode
@@ -14,6 +15,8 @@ private var currentOutputMode: OutputMode = OutputMode.EXECUTABLE
 
 private let ins2generic: HashMap<Int64, Decl> = HashMap<Int64, Decl>()
 private let generic2ins: HashMap<Int64, ArrayList<Decl>> = HashMap<Int64, ArrayList<Decl>>()
+
+public type ReversedTypeSubst = TreeMap<Int64, GenericsTy>
 
 private func hasInstantiation(genericDecl: Decl, instantiatedDecl: Decl): Bool {
     if (let Some(values) <- generic2ins.get(genericDecl.objectId)) {
@@ -273,6 +276,149 @@ public func IsOpenDecl(decl: Decl): Bool {
         return true
     }
     return decl.astKind == ASTKind.INTERFACE_DECL
+}
+
+private func generalizeTypeArgs(typeArgs: ArrayList<Ty>, generalizer: TyGeneralizer): Array<Ty> {
+    let out = ArrayList<Ty>()
+    for (ty in typeArgs) {
+        out.add(generalizer.Generalize(ty))
+    }
+    return out.toArray()
+}
+
+private func generalizeSetTys(typeArgs: ArrayList<Ty>, generalizer: TyGeneralizer): Array<Ty> {
+    let out = ArrayList<Ty>()
+    let tys = TreeMap<Int64, Ty>()
+    for (ty in typeArgs) {
+        let generalized = generalizer.Generalize(ty)
+        if (!tys.contains(generalized.objectId)) {
+            tys.add(generalized.objectId, generalized)
+        }
+    }
+    for (key in tys.keys()) {
+        if (let Some(ty) <- tys.get(key)) {
+            out.add(ty)
+        }
+    }
+    return out.toArray()
+}
+
+public func GetReversedTypeSubst(typeMapping: TypeSubst): ReversedTypeSubst {
+    let out = ReversedTypeSubst()
+    for (entry in typeMapping.entries) {
+        if (!out.contains(entry.ty.objectId)) {
+            out.add(entry.ty.objectId, entry.tyVar)
+        }
+    }
+    return out
+}
+
+public class TyGeneralizer {
+    private var tyMgr: TypeManager
+    private var typeMapping: ReversedTypeSubst
+
+    public init(tyMgr: TypeManager, mapping: ReversedTypeSubst) {
+        this.tyMgr = tyMgr
+        typeMapping = mapping
+    }
+
+    public func Generalize(ty: Ty): Ty {
+        if (typeMapping.size == 0 || !Ty.IsTyCorrect(ty)) {
+            return ty
+        }
+        if (let Some(genericTy) <- typeMapping.get(ty.objectId)) {
+            return genericTy
+        }
+        if (let Some(funcTy) <- (ty as FuncTy)) {
+            let paramTys = ArrayList<Ty>()
+            for (paramTy in funcTy.paramTys) {
+                paramTys.add(Generalize(paramTy))
+            }
+            let cfg = FuncTyConfig()
+            cfg.isC = funcTy.IsCFunc()
+            cfg.isClosureTy = funcTy.isClosureTy
+            cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+            return tyMgr.GetFunctionTy(paramTys.toArray(), Generalize(funcTy.retTy), cfg: cfg)
+        }
+        if (let Some(tupleTy) <- (ty as TupleTy)) {
+            return tyMgr.GetTupleTy(generalizeTypeArgs(tupleTy.typeArgs, this), isClosureTy: tupleTy.isClosureTy)
+        }
+        if (let Some(arrayTy) <- (ty as ArrayTy)) {
+            if (arrayTy.typeArgs.isEmpty()) {
+                return arrayTy
+            }
+            return tyMgr.GetArrayTy(Generalize(arrayTy.typeArgs[0]), arrayTy.dims)
+        }
+        if (let Some(pointerTy) <- (ty as PointerTy)) {
+            if (pointerTy.typeArgs.isEmpty()) {
+                return pointerTy
+            }
+            return tyMgr.GetPointerTy(Generalize(pointerTy.typeArgs[0]))
+        }
+        if (let Some(structTy) <- (ty as StructTy)) {
+            if (let Some(decl) <- structTy.declPtr) {
+                if (let Some(_) <- decl.generic) {
+                    return tyMgr.GetStructTy(decl, generalizeTypeArgs(structTy.typeArgs, this))
+                }
+            }
+            return structTy
+        }
+        if (let Some(classThisTy) <- (ty as ClassThisTy)) {
+            if (let Some(decl) <- classThisTy.declPtr) {
+                if (let Some(_) <- decl.generic) {
+                    return tyMgr.GetClassThisTy(decl, generalizeTypeArgs(classThisTy.typeArgs, this))
+                }
+            }
+            return classThisTy
+        }
+        if (let Some(classTy) <- (ty as ClassTy)) {
+            if (let Some(decl) <- classTy.declPtr) {
+                if (let Some(_) <- decl.generic) {
+                    return tyMgr.GetClassTy(decl, generalizeTypeArgs(classTy.typeArgs, this))
+                }
+            }
+            return classTy
+        }
+        if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+            if (let Some(decl) <- interfaceTy.declPtr) {
+                if (let Some(_) <- decl.generic) {
+                    return tyMgr.GetInterfaceTy(decl, generalizeTypeArgs(interfaceTy.typeArgs, this))
+                }
+            }
+            return interfaceTy
+        }
+        if (let Some(refEnumTy) <- (ty as RefEnumTy)) {
+            if (let Some(decl) <- refEnumTy.declPtr) {
+                if (let Some(_) <- decl.generic) {
+                    return tyMgr.GetRefEnumTy(decl, generalizeTypeArgs(refEnumTy.typeArgs, this))
+                }
+            }
+            return refEnumTy
+        }
+        if (let Some(enumTy) <- (ty as EnumTy)) {
+            if (let Some(decl) <- enumTy.declPtr) {
+                if (let Some(_) <- decl.generic) {
+                    let generalized = tyMgr.GetEnumTy(decl, typeArgs: generalizeTypeArgs(enumTy.typeArgs, this))
+                    generalized.hasCorrespondRefEnumTy = enumTy.hasCorrespondRefEnumTy
+                    return generalized
+                }
+            }
+            return enumTy
+        }
+        if (let Some(aliasTy) <- (ty as TypeAliasTy)) {
+            if (let Some(decl) <- aliasTy.declPtr) {
+                return tyMgr.GetTypeAliasTy(decl, generalizeTypeArgs(aliasTy.typeArgs, this))
+            }
+            return aliasTy
+        }
+        if (let Some(intersectionTy) <- (ty as IntersectionTy)) {
+            return tyMgr.GetIntersectionTy(generalizeSetTys(intersectionTy.tys, this))
+        }
+        if (let Some(unionTy) <- (ty as UnionTy)) {
+            return tyMgr.GetUnionTy(generalizeSetTys(unionTy.tys, this))
+        }
+        return ty
+    }
 }
 
 public func DefaultVisitFunc(source: Node, target: Node): Unit {
