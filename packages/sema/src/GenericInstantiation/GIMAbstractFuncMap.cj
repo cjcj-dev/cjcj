@@ -22,7 +22,7 @@ public class AbstractFuncMap {
 
     public func Add(ty: Ty, absFunc: FuncDecl, implDecl: Decl, offset: Int64): Unit {
         for (entry in entries) {
-            if (SameTy(entry.ty, ty) && SameDecl(entry.absFunc, absFunc)) {
+            if (SameDecl(entry.absFunc, absFunc) && SameTy(entry.ty, ty)) {
                 AddImpl(entry.impls, implDecl, offset)
                 return
             }
@@ -34,7 +34,7 @@ public class AbstractFuncMap {
 
     public func Find(ty: Ty, absFunc: FuncDecl): Option<ArrayList<(Decl, Int64)>> {
         for (entry in entries) {
-            if (SameTy(entry.ty, ty) && SameDecl(entry.absFunc, absFunc)) {
+            if (SameDecl(entry.absFunc, absFunc) && SameTy(entry.ty, ty)) {
                 return entry.impls
             }
         }
