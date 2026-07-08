@@ -3,6 +3,10 @@ package cangjie_compiler::codegen
 import cangjie_compiler::chir.Allocate
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.ExprKind
+import cangjie_compiler::option.OptimizationLevel
+
+private let LLVM_ALLOCA_OPCODE: Int32 = 26
+private let LLVM_POINTER_TYPE_KIND: Int32 = 12
 
 public func HandleMemoryExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let kind = chirExpr.GetExprKind()
@@ -12,7 +16,11 @@ public func HandleMemoryExpression(irBuilder: IRBuilder2, chirExpr: Expression):
                 return retValueStorage
             }
         }
-        return GenerateAllocate(irBuilder, chirExpr)
+        let result = GenerateAllocate(irBuilder, chirExpr)
+        if (let Some(allocateExpr) <- (chirExpr as Allocate)) {
+            TryEmitNullInitForDebugLocalClass(irBuilder, allocateExpr, result)
+        }
+        return result
     }
     if (kind == ExprKind.LOAD) {
         return GenerateLoad(irBuilder, chirExpr)
@@ -51,4 +59,47 @@ private func TryGetSpecialRetValueStorage(irBuilder: IRBuilder2, allocateExpr: A
         return Some(irBuilder.CreateEntryAlloca(retValueCGType))
     }
     return None
+}
+
+private func TryEmitNullInitForDebugLocalClass(irBuilder: IRBuilder2, allocateExpr: Allocate,
+    result: LLVMValueRef): Unit {
+    if (irBuilder.GetCGContext().GetCompileOptions().optimizationLevel != OptimizationLevel.O0) {
+        return
+    }
+    let localVar = match (allocateExpr.GetResult()) {
+        case Some(value) => value
+        case None => return
+    }
+    if (localVar.GetSrcCodeIdentifier().isEmpty()) {
+        return
+    }
+    let chirType = allocateExpr.GetType().StripAllRefs()
+    if (!chirType.IsClass() || result.isNull() || unsafe { LLVMIsAInstruction(result) }.isNull() ||
+        unsafe { LLVMGetInstructionOpcode(result) } != LLVM_ALLOCA_OPCODE) {
+        return
+    }
+
+    let allocatedType = unsafe { LLVMGetAllocatedType(result) }
+    if (allocatedType.isNull() || unsafe { LLVMGetTypeKind(allocatedType) } != LLVM_POINTER_TYPE_KIND) {
+        return
+    }
+    let currentBlock = irBuilder.GetInsertBlock()
+    if (currentBlock.isNull()) {
+        return
+    }
+    let currentInsertPoint = unsafe { LLVMSelfhostGetInsertPointInstruction(irBuilder.GetBuilder().raw) }
+    let currentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
+    if (currentFunction.isNull()) {
+        return
+    }
+    let entryBlock = unsafe { LLVMGetEntryBasicBlock(currentFunction) }
+    let terminator = unsafe { LLVMGetBasicBlockTerminator(entryBlock) }
+    if (terminator.isNull()) {
+        return
+    }
+    try (debugLocGuard = TemporarilySetDebugLocInThisScope(irBuilder, LLVMNullMetadata())) {
+        irBuilder.SetInsertPointBefore(terminator)
+        let _ = irBuilder.CreateStore(unsafe { LLVMConstNull(allocatedType) }, result)
+    }
+    irBuilder.SetInsertPoint(currentBlock, currentInsertPoint)
 }
