@@ -67,7 +67,11 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
         instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
         return None
     }
-    ClosureConversion(builder, opts: instance.invocation.globalOptions).RunOnPackage(lowered)
+    let closure = ClosureConversion(builder, opts: instance.invocation.globalOptions,
+        srcCodeImportedFuncs: ast2chir.GetSrcCodeImportedFuncs())
+    closure.RunOnPackage(lowered)
+    ast2chir.ReplaceSrcCodeImportedValAfterClosureConversion(lowered, closure.GetUselessClassDef(),
+        closure.GetUselessLambda())
     if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
         ChirCHIRPrinter.PrintPackage(lowered)
     }

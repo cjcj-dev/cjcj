@@ -34,10 +34,25 @@ public class ClosureConversion {
     private let convertedCache: HashMap<Int64, Function> = HashMap<Int64, Function>()
     private let duplicateLambdaName: HashMap<String, Int64> = HashMap<String, Int64>()
     private let typeConvertMap: HashMap<String, Type> = HashMap<String, Type>()
+    private let srcCodeImportedFuncs: ArrayList<Function> = ArrayList<Function>()
+    private let uselessClasses: ArrayList<ClassDef> = ArrayList<ClassDef>()
+    private let uselessLambda: ArrayList<Function> = ArrayList<Function>()
 
-    public init(builder: CHIRBuilder, opts!: GlobalOptions = GlobalOptions()) {
+    public init(builder: CHIRBuilder, opts!: GlobalOptions = GlobalOptions(),
+        srcCodeImportedFuncs!: ArrayList<Function> = ArrayList<Function>()) {
         this.builder = builder
         this.opts = opts
+        for (fn in srcCodeImportedFuncs) {
+            this.srcCodeImportedFuncs.add(fn)
+        }
+    }
+
+    public func GetUselessClassDef(): ArrayList<ClassDef> {
+        return uselessClasses.clone()
+    }
+
+    public func GetUselessLambda(): ArrayList<Function> {
+        return uselessLambda.clone()
     }
 
     public func RunOnPackage(pkg: Package): Unit {
@@ -530,6 +545,12 @@ public class ClosureConversion {
         let classDef = CreateAutoEnvImplDef(className, genericTypes, result, superClassDef, genericMap)
         CreateMemberVarInAutoEnvImplDef(classDef, boxedEnvs, genericMap)
         let globalFunc = LiftLambdaToGlobalFunc(classDef, lambda, genericTypes, genericMap, boxedEnvs)
+        let parentFunc = lambda.GetTopLevelFunc() ??
+            throw IllegalStateException("ClosureConversion lambda has no top-level function")
+        if (ContainsFunction(srcCodeImportedFuncs, parentFunc)) {
+            AddClassNoDup(uselessClasses, classDef)
+            AddFunctionNoDup(uselessLambda, globalFunc)
+        }
         CreateGenericOverrideMethodInAutoEnvImplDef(classDef, globalFunc, genericMap)
         CreateInstOverrideMethodInAutoEnvImplDef(classDef, globalFunc, genericMap)
         autoEnvImplDefs[className] = classDef
@@ -2784,6 +2805,36 @@ public class ClosureConversion {
 
     private func IsClosureConversionGeneratedFunction(fn: Function): Bool {
         return StripGlobalPrefix(fn.GetIdentifierWithoutPrefix()).startsWith(CC_FUNC_PREFIX)
+    }
+
+    private func ContainsFunction(functions: ArrayList<Function>, target: Function): Bool {
+        for (fn in functions) {
+            if (fn.nodeId == target.nodeId) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func AddFunctionNoDup(functions: ArrayList<Function>, target: Function): Unit {
+        if (!ContainsFunction(functions, target)) {
+            functions.add(target)
+        }
+    }
+
+    private func ContainsClassDef(classes: ArrayList<ClassDef>, target: ClassDef): Bool {
+        for (classDef in classes) {
+            if (classDef.nodeId == target.nodeId) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func AddClassNoDup(classes: ArrayList<ClassDef>, target: ClassDef): Unit {
+        if (!ContainsClassDef(classes, target)) {
+            classes.add(target)
+        }
     }
 
     private func StripGlobalPrefix(identifier: String): String {

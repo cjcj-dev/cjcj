@@ -1086,9 +1086,6 @@ public class FaithfulAST2CHIR {
         if (chirWFC) {
             AST2CHIRCheck()
         }
-        if (!failure) {
-            ReplaceSrcCodeImportedValAfterConstEval(CurrentPackage())
-        }
         return !failure
     }
 
@@ -1106,6 +1103,60 @@ public class FaithfulAST2CHIR {
 
     public func GetGlobalCache(): FaithfulAST2CHIRNodeMap {
         return globalCache
+    }
+
+    public func GetSrcCodeImportedFuncs(): ArrayList<Function> {
+        let funcs = ArrayList<Function>()
+        for (decl in globalAndMemberFuncs) {
+            if (!IsSrcCodeImportedGlobalDecl(decl)) {
+                continue
+            }
+            if (let Some(fn) <- (globalCache.Get(decl) as Function)) {
+                if (!ContainsFunction(funcs, fn)) {
+                    funcs.add(fn)
+                }
+            }
+        }
+        return funcs
+    }
+
+    public func GetSrcCodeImportedVars(): ArrayList<GlobalVar> {
+        let vars = ArrayList<GlobalVar>()
+        for (decl in globalAndStaticVars) {
+            if (!IsSrcCodeImportedGlobalDecl(decl)) {
+                continue
+            }
+            if (let Some(globalVar) <- (globalCache.Get(decl) as GlobalVar)) {
+                if (!ContainsGlobalVar(vars, globalVar)) {
+                    vars.add(globalVar)
+                }
+            }
+        }
+        return vars
+    }
+
+    public func ReplaceSrcCodeImportedValAfterClosureConversion(pkg: Package, uselessClasses: ArrayList<ClassDef>,
+        uselessLambda: ArrayList<Function>): Unit {
+        let initFuncsToRemove = ArrayList<Function>()
+        for (fn in GetSrcCodeImportedFuncs()) {
+            fn.DestroyFuncBody()
+        }
+        for (globalVar in GetSrcCodeImportedVars()) {
+            if (let Some(initFunc) <- globalVar.GetInitFunc()) {
+                if (!ContainsFunction(initFuncsToRemove, initFunc)) {
+                    initFuncsToRemove.add(initFunc)
+                }
+            }
+            globalVar.DestroyInitializer()
+        }
+        let newFuncs = ArrayList<Function>()
+        for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
+            if (!ContainsFunction(initFuncsToRemove, fn)) {
+                newFuncs.add(fn)
+            }
+        }
+        pkg.SetAllGlobalFuncs(newFuncs)
+        RemoveUselessDefFromCC(pkg, uselessClasses, uselessLambda)
     }
 
     private func CurrentPackage(): Package {
@@ -2734,42 +2785,68 @@ public class FaithfulAST2CHIR {
             !decl.TestAttr(AstAttribute.GLOBAL)
     }
 
-    private func ReplaceSrcCodeImportedValAfterConstEval(pkg: Package): Unit {
-        let initFuncsToRemove = ArrayList<Function>()
-        for (decl in globalAndMemberFuncs) {
-            if (!IsSrcCodeImportedGlobalDecl(decl)) {
-                continue
+    private func RemoveUselessDefFromCC(pkg: Package, uselessClasses: ArrayList<ClassDef>,
+        uselessLambda: ArrayList<Function>): Unit {
+        let funcsToRemove = ArrayList<Function>()
+        for (lambda in uselessLambda) {
+            for (user in lambda.GetUsers()) {
+                user.RemoveSelfFromBlock()
             }
-            let fn = (globalCache.Get(decl) as Function) ?? continue
-            fn.DestroyFuncBody()
+            lambda.DestroySelf()
+            AddFunctionNoDup(funcsToRemove, lambda)
         }
-        for (decl in globalAndStaticVars) {
-            if (!IsSrcCodeImportedGlobalDecl(decl)) {
-                continue
-            }
-            let globalVar = (globalCache.Get(decl) as GlobalVar) ?? continue
-            if (let Some(initFunc) <- globalVar.GetInitFunc()) {
-                if (!ContainsFunction(initFuncsToRemove, initFunc)) {
-                    initFuncsToRemove.add(initFunc)
+        for (def in uselessClasses) {
+            for (method in def.GetMethods()) {
+                for (user in method.GetUsers()) {
+                    user.RemoveSelfFromBlock()
                 }
+                method.DestroySelf()
+                AddFunctionNoDup(funcsToRemove, method)
             }
-            globalVar.DestroyInitializer()
         }
-        if (initFuncsToRemove.isEmpty()) {
-            return
+        let newClasses = ArrayList<ClassDef>()
+        for (def in pkg.GetClasses()) {
+            if (!ContainsClassDef(uselessClasses, def)) {
+                newClasses.add(def)
+            }
         }
-        let newFuncs = ArrayList<Function>()
+        pkg.SetClasses(newClasses)
+        let globalFuncs = ArrayList<Function>()
         for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
-            if (!ContainsFunction(initFuncsToRemove, fn)) {
-                newFuncs.add(fn)
+            if (!ContainsFunction(funcsToRemove, fn)) {
+                globalFuncs.add(fn)
             }
         }
-        pkg.SetAllGlobalFuncs(newFuncs)
+        pkg.SetAllGlobalFuncs(globalFuncs)
     }
 
     private func ContainsFunction(functions: ArrayList<Function>, target: Function): Bool {
         for (fn in functions) {
-            if (fn == target) {
+            if (fn.nodeId == target.nodeId) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func AddFunctionNoDup(functions: ArrayList<Function>, target: Function): Unit {
+        if (!ContainsFunction(functions, target)) {
+            functions.add(target)
+        }
+    }
+
+    private func ContainsGlobalVar(vars: ArrayList<GlobalVar>, target: GlobalVar): Bool {
+        for (globalVar in vars) {
+            if (globalVar.nodeId == target.nodeId) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func ContainsClassDef(classes: ArrayList<ClassDef>, target: ClassDef): Bool {
+        for (classDef in classes) {
+            if (classDef.nodeId == target.nodeId) {
                 return true
             }
         }
