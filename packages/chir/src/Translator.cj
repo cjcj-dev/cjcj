@@ -5613,11 +5613,17 @@ public class Translator {
 
     private func CreateApplyMaybeWithException(resultTy: Type, callee: Value, callContext: FuncCallContext): Value {
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
-            let successBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "apply-with-exception"))
-            let term = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
-                CurrentBlock())
+            let successBlock = CreateBlock()
+            let exceptionBlock = DelayExitExceptionBlock(errorBlock)
+            let term = if (let Some(exceptBlock) <- exceptionBlock) {
+                builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, exceptBlock,
+                    CurrentBlock())
+            } else {
+                builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
+                    CurrentBlock())
+            }
             let result = RequireResult(term)
-            currentBlock = successBlock
+            FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return result
         }
         return RequireResult(builder.CreateApply(resultTy, callee, callContext, CurrentBlock()))
@@ -5626,11 +5632,17 @@ public class Translator {
     private func CreateAndAppendApplyCallFromCallExpr(resultTy: Type, callee: Value, callContext: FuncCallContext,
         expr: AstCallExpr): Value {
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
-            let successBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "apply-with-exception"))
-            let term = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
-                CurrentBlock())
+            let successBlock = CreateBlock()
+            let exceptionBlock = DelayExitExceptionBlock(errorBlock)
+            let term = if (let Some(exceptBlock) <- exceptionBlock) {
+                builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, exceptBlock,
+                    CurrentBlock())
+            } else {
+                builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
+                    CurrentBlock())
+            }
             let result = RequireResult(term)
-            currentBlock = successBlock
+            FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return result
         }
         let apply = builder.CreateApply(resultTy, callee, callContext, CurrentBlock())
@@ -5643,20 +5655,13 @@ public class Translator {
     private func CreateAllocateMaybeWithException(resultTy: Type, allocatedTy: Type): Value {
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
             let successBlock = CreateBlock()
-            if (delayExitSignal.isSome() && !blockGroupStack.isEmpty()) {
-                let errorBlockGroup = RequireParentBlockGroup(errorBlock, "allocate-with-exception error block")
-                if (!refEq(blockGroupStack[blockGroupStack.size - 1], errorBlockGroup)) {
-                    let exceptBlock = CreateBlock()
-                    exceptBlock.SetExceptions(ArrayList<ClassType>())
-                    let term = builder.CreateAllocateWithException(resultTy, allocatedTy, successBlock, exceptBlock,
-                        CurrentBlock())
-                    let result = RequireResult(term)
-                    currentBlock = exceptBlock
-                    UpdateDelayExitSignal(CalculateDelayExitLevelForThrow())
-                    builder.CreateExit(None, exceptBlock)
-                    currentBlock = successBlock
-                    return result
-                }
+            let exceptionBlock = DelayExitExceptionBlock(errorBlock)
+            if (let Some(exceptBlock) <- exceptionBlock) {
+                let term = builder.CreateAllocateWithException(resultTy, allocatedTy, successBlock, exceptBlock,
+                    CurrentBlock())
+                let result = RequireResult(term)
+                FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
+                return result
             }
             let term = builder.CreateAllocateWithException(resultTy, allocatedTy, successBlock, errorBlock,
                 CurrentBlock())
@@ -5669,13 +5674,18 @@ public class Translator {
 
     private func CreateSpawnMaybeWithException(resultTy: Type, futureObj: Value, spawnArg: Option<Value>): Unit {
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
-            let successBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "spawn-with-exception"))
-            if (let Some(arg) <- spawnArg) {
-                builder.CreateSpawnWithException(resultTy, futureObj, arg, successBlock, errorBlock, CurrentBlock())
-            } else {
-                builder.CreateSpawnWithException(resultTy, futureObj, successBlock, errorBlock, CurrentBlock())
+            let successBlock = CreateBlock()
+            let exceptionBlock = DelayExitExceptionBlock(errorBlock)
+            let targetBlock = match (exceptionBlock) {
+                case Some(exceptBlock) => exceptBlock
+                case None => errorBlock
             }
-            currentBlock = successBlock
+            if (let Some(arg) <- spawnArg) {
+                builder.CreateSpawnWithException(resultTy, futureObj, arg, successBlock, targetBlock, CurrentBlock())
+            } else {
+                builder.CreateSpawnWithException(resultTy, futureObj, successBlock, targetBlock, CurrentBlock())
+            }
+            FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return
         }
         if (let Some(arg) <- spawnArg) {
@@ -5683,6 +5693,28 @@ public class Translator {
         } else {
             builder.CreateSpawn(resultTy, futureObj, CurrentBlock())
         }
+    }
+
+    private func DelayExitExceptionBlock(errorBlock: Block): Option<Block> {
+        if (delayExitSignal.isNone() || blockGroupStack.isEmpty()) {
+            return None
+        }
+        let errorBlockGroup = RequireParentBlockGroup(errorBlock, "with-exception error block")
+        if (refEq(blockGroupStack[blockGroupStack.size - 1], errorBlockGroup)) {
+            return None
+        }
+        let exceptBlock = CreateBlock()
+        exceptBlock.SetExceptions(ArrayList<ClassType>())
+        return Some(exceptBlock)
+    }
+
+    private func FinishDelayExitExceptionBlock(exceptionBlock: Option<Block>, successBlock: Block): Unit {
+        if (let Some(exceptBlock) <- exceptionBlock) {
+            currentBlock = exceptBlock
+            UpdateDelayExitSignal(CalculateDelayExitLevelForThrow())
+            builder.CreateExit(None, exceptBlock)
+        }
+        currentBlock = successBlock
     }
 
     private func ActiveCallArgs(expr: AstCallExpr): ArrayList<AstFuncArg> {
@@ -5775,11 +5807,17 @@ public class Translator {
 
     private func CreateIntrinsicMaybeWithException(resultTy: Type, callContext: IntrisicCallContext): Value {
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
-            let successBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "intrinsic-with-exception"))
-            let term = builder.CreateIntrinsicWithException(resultTy, callContext, successBlock, errorBlock,
-                CurrentBlock())
+            let successBlock = CreateBlock()
+            let exceptionBlock = DelayExitExceptionBlock(errorBlock)
+            let term = if (let Some(exceptBlock) <- exceptionBlock) {
+                builder.CreateIntrinsicWithException(resultTy, callContext, successBlock, exceptBlock,
+                    CurrentBlock())
+            } else {
+                builder.CreateIntrinsicWithException(resultTy, callContext, successBlock, errorBlock,
+                    CurrentBlock())
+            }
             let result = RequireResult(term)
-            currentBlock = successBlock
+            FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return result
         }
         return RequireResult(builder.CreateIntrinsic(resultTy, callContext, CurrentBlock()))
@@ -6140,10 +6178,15 @@ public class Translator {
 
     private func CreateInvokeMaybeWithException(resultTy: Type, callContext: InvokeCallContext): Value {
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
-            let successBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "invoke-with-exception"))
-            let term = builder.CreateInvokeWithException(resultTy, callContext, successBlock, errorBlock, CurrentBlock())
+            let successBlock = CreateBlock()
+            let exceptionBlock = DelayExitExceptionBlock(errorBlock)
+            let term = if (let Some(exceptBlock) <- exceptionBlock) {
+                builder.CreateInvokeWithException(resultTy, callContext, successBlock, exceptBlock, CurrentBlock())
+            } else {
+                builder.CreateInvokeWithException(resultTy, callContext, successBlock, errorBlock, CurrentBlock())
+            }
             let result = RequireResult(term)
-            currentBlock = successBlock
+            FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return result
         }
         return RequireResult(builder.CreateInvoke(resultTy, callContext, CurrentBlock()))
@@ -6151,12 +6194,17 @@ public class Translator {
 
     private func CreateInvokeStaticMaybeWithException(resultTy: Type, callContext: InvokeCallContext): Value {
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
-            let successBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(),
-                "invoke-static-with-exception"))
-            let term = builder.CreateInvokeStaticWithException(resultTy, callContext, successBlock, errorBlock,
-                CurrentBlock())
+            let successBlock = CreateBlock()
+            let exceptionBlock = DelayExitExceptionBlock(errorBlock)
+            let term = if (let Some(exceptBlock) <- exceptionBlock) {
+                builder.CreateInvokeStaticWithException(resultTy, callContext, successBlock, exceptBlock,
+                    CurrentBlock())
+            } else {
+                builder.CreateInvokeStaticWithException(resultTy, callContext, successBlock, errorBlock,
+                    CurrentBlock())
+            }
             let result = RequireResult(term)
-            currentBlock = successBlock
+            FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return result
         }
         return RequireResult(builder.CreateInvokeStatic(resultTy, callContext, CurrentBlock()))
