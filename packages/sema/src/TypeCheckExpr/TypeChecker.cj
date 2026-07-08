@@ -23,6 +23,7 @@ import cangjie_compiler::utils.CPOINTER_NAME
 import cangjie_compiler::utils.CSTRING_NAME
 import cangjie_compiler::utils.CTYPE_NAME as UtilsCTypeName
 import cangjie_compiler::utils.CJC_ASSERT
+import cangjie_compiler::utils.OBJECT_NAME
 import cangjie_compiler::utils.RAW_ARRAY_NAME
 import cangjie_compiler::utils.VARRAY_NAME
 
@@ -630,6 +631,7 @@ public class TypeChecker {
                 }
                 AddDefaultCtorIfNeeded(classDecl)
                 AddSetterGetterInProp(classDecl)
+                AddDefaultSuperCallForConstructors(classDecl)
                 for (member in body.decls) {
                     AddDefaultFunctionForDecl(member)
                 }
@@ -719,17 +721,103 @@ public class TypeChecker {
         }
     }
 
+    private func IsCoreObjectClass(classDecl: ClassDecl): Bool {
+        var fullPackageName = ""
+        if (let Some(fileValue) <- classDecl.curFile) {
+            if (let Some(pkgValue) <- fileValue.curPackage) {
+                fullPackageName = pkgValue.fullPackageName
+            }
+        }
+        return classDecl.identifier.Val() == OBJECT_NAME && fullPackageName == UTILS_CORE_PACKAGE_NAME
+    }
+
+    private func AddDefaultSuperCallForConstructors(classDecl: ClassDecl): Unit {
+        let classBody = if (let Some(bodyValue) <- classDecl.body) { bodyValue } else { return }
+        for (member in classBody.decls) {
+            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                if (!IsInstanceConstructor(funcDecl)) {
+                    continue
+                }
+                if (let Some(funcBody) <- funcDecl.funcBody) {
+                    if (let Some(_) <- funcBody.body) {
+                        SetFuncDeclConstructorCall(funcDecl)
+                        let noConstructorCall = match (funcDecl.constructorCall) {
+                            case ConstructorCall.NONE => true
+                            case _ => false
+                        }
+                        if (noConstructorCall && !IsCoreObjectClass(classDecl)) {
+                            AddDefaultSuperCall(funcBody)
+                            funcDecl.constructorCall = ConstructorCall.SUPER
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func AddDefaultSuperCall(funcBody: FuncBody): Unit {
+        let block = if (let Some(bodyValue) <- funcBody.body) { bodyValue } else { return }
+        let hasSuper = Box<Bool>(false)
+        let walker = Walker(block, visitPre: { node: Node =>
+            if (let Some(refExpr) <- (node as RefExpr)) {
+                if (refExpr.isSuper && refExpr.isBaseFunc) {
+                    hasSuper.value = true
+                    return VisitAction.STOP_NOW
+                }
+            } else if (node.astKind == ASTKind.FUNC_BODY) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            return VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+        if (hasSuper.value) {
+            return
+        }
+        let superCall = CallExpr()
+        CopyBasicInfo(funcBody, superCall)
+        let superExpr = CreateRefExpr("super")
+        superExpr.isSuper = true
+        superExpr.isAlone = false
+        CopyBasicInfo(funcBody, superExpr)
+        superCall.baseFunc = superExpr
+        superCall.EnableAttr(Attribute.COMPILER_ADD)
+        if (block.body.isEmpty()) {
+            superCall.begin = funcBody.begin
+        }
+        block.body.add(superCall, at: 0)
+    }
+
     private func SetFuncDeclConstructorCall(fd: FuncDecl): Unit {
         let funcBody = if (let Some(value) <- fd.funcBody) { value } else { return }
         let body = if (let Some(value) <- funcBody.body) { value } else { return }
         if (body.body.isEmpty()) {
             return
         }
+        var refExpr: Option<RefExpr> = None
         if (let Some(callExpr) <- (body.body[0] as CallExpr)) {
-            if (IsThisConstructorCall(callExpr) && !fd.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
+            if (let Some(baseFunc) <- callExpr.baseFunc) {
+                if (let Some(baseRef) <- (baseFunc as RefExpr)) {
+                    refExpr = Some(baseRef)
+                }
+            }
+        } else if (let Some(trailing) <- (body.body[0] as TrailingClosureExpr)) {
+            if (let Some(desugar) <- trailing.desugarExpr) {
+                if (let Some(callExpr) <- (desugar as CallExpr)) {
+                    if (let Some(baseFunc) <- callExpr.baseFunc) {
+                        if (let Some(baseRef) <- (baseFunc as RefExpr)) {
+                            refExpr = Some(baseRef)
+                        }
+                    }
+                } else if (let Some(baseRef) <- (desugar as RefExpr)) {
+                    refExpr = Some(baseRef)
+                }
+            }
+        }
+        if (let Some(value) <- refExpr) {
+            if (value.isThis && !fd.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
                 fd.constructorCall = ConstructorCall.OTHER_INIT
             }
-            if (IsSuperConstructorCall(callExpr)) {
+            if (value.isSuper) {
                 fd.constructorCall = ConstructorCall.SUPER
             }
         }

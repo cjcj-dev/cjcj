@@ -5543,6 +5543,23 @@ public class Translator {
         return RequireResult(builder.CreateApply(resultTy, callee, callContext, CurrentBlock()))
     }
 
+    private func CreateAndAppendApplyCallFromCallExpr(resultTy: Type, callee: Value, callContext: FuncCallContext,
+        expr: AstCallExpr): Value {
+        if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
+            let successBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "apply-with-exception"))
+            let term = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
+                CurrentBlock())
+            let result = RequireResult(term)
+            currentBlock = successBlock
+            return result
+        }
+        let apply = builder.CreateApply(resultTy, callee, callContext, CurrentBlock())
+        if (expr.callKind == AstCallKind.CALL_SUPER_FUNCTION) {
+            apply.SetSuperCall()
+        }
+        return RequireResult(apply)
+    }
+
     private func CreateSpawnMaybeWithException(resultTy: Type, futureObj: Value, spawnArg: Option<Value>): Unit {
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
             let successBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "spawn-with-exception"))
@@ -6470,8 +6487,8 @@ public class Translator {
         let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(thisRefTy))
         AppendTranslatedCallArgs(expr, calleeDecl, args, expectedParamTys, ArrayList<Value>())
         let callee = globalSymbolTable.Get(calleeDecl)
-        let _ = CreateApplyMaybeWithException(builder.context.GetUnitTy(), callee,
-            FuncCallContext(args: args, thisType: thisRefTy))
+        let _ = CreateAndAppendApplyCallFromCallExpr(builder.context.GetUnitTy(), callee,
+            FuncCallContext(args: args, thisType: thisRefTy), expr)
         if (let Some(outerDecl) <- calleeDecl.outerDecl) {
             if (outerDecl.astKind == ASTKind.STRUCT_DECL) {
                 return RequireResult(builder.CreateLoad(thisTy, thisObj, CurrentBlock()))
@@ -7068,8 +7085,8 @@ public class Translator {
         let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(thisRefTy))
         AppendTranslatedCallArgs(expr, calleeDecl, args, expectedParamTys, ArrayList<Value>())
         let callee = globalSymbolTable.Get(calleeDecl)
-        let _ = CreateApplyMaybeWithException(builder.context.GetUnitTy(), callee,
-            FuncCallContext(args: args, thisType: thisRefTy))
+        let _ = CreateAndAppendApplyCallFromCallExpr(builder.context.GetUnitTy(), callee,
+            FuncCallContext(args: args, thisType: thisRefTy), expr)
         return FaithfulLeftValueInfo(args[0], ArrayList<String>())
     }
 

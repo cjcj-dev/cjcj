@@ -141,6 +141,7 @@ extend ParserImpl {
             if (!newlineSkipped && Skip(TokenKind.LPAREN)) {
                 let call = CallExpr()
                 try (cs = ChainScope(this, call)) {
+                    base.isBaseFunc = true
                     call.baseFunc = base
                     call.leftParenPos = lastToken.Begin()
                     call.begin = base.begin
