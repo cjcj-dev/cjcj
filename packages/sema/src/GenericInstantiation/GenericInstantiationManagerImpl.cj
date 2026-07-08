@@ -2126,6 +2126,14 @@ public class GenericInstantiationManagerImpl {
         if (ignoredInstantiationKind(generalDecl) || generalDecl.IsBuiltIn()) {
             return target
         }
+        let needsTopLevelRearrange = generalDecl.IsNominalDecl() || generalDecl.outerDecl.isNone() ||
+            (if (let Some(outer) <- generalDecl.outerDecl) { !outer.IsNominalDecl() } else { false })
+        if (needsTopLevelRearrange) {
+            if ((let None <- generalDecl.GetGeneric()) || !generalDecl.TestAttr(Attribute.GENERIC)) {
+                return generalDecl
+            }
+            return FindCachedGenericDecl(generalDecl, instTys, pkg) ?? target
+        }
         let targetBaseTy = if (let Some(value) <- upperTy) {
             if (Ty.IsTyCorrect(value) && !value.HasGeneric()) {
                 Some(value)
@@ -2136,11 +2144,7 @@ public class GenericInstantiationManagerImpl {
             baseTy
         }
         var resultDecl: Decl = FindCachedGenericDecl(generalDecl, instTys, pkg) ?? target
-        let needsTopLevelRearrange = generalDecl.IsNominalDecl() || generalDecl.outerDecl.isNone() ||
-            (if (let Some(outer) <- generalDecl.outerDecl) { !outer.IsNominalDecl() } else { false })
-        if (needsTopLevelRearrange) {
-            resultDecl = FindCachedGenericDecl(generalDecl, instTys, pkg) ?? target
-        } else if (let Some(outerDecl) <- generalDecl.outerDecl) {
+        if (let Some(outerDecl) <- generalDecl.outerDecl) {
             if (outerDecl.IsNominalDecl()) {
                 let targetBaseTyValue = if (let Some(value) <- targetBaseTy) {
                     value
