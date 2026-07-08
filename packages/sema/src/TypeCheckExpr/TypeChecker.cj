@@ -514,7 +514,6 @@ public class TypeChecker {
         ctx.curPackage = pkg
         ctx.fullPackageName = pkg.fullPackageName
         SeedImportedPackageDecls(ctx)
-        AddCurFile(pkg)
         AddDefaultFunction(pkg)
         if (pkg.fullPackageName == UTILS_CORE_PACKAGE_NAME && !pkg.files.isEmpty() &&
             !pkg.TestAttr(Attribute.IMPORTED)) {
@@ -528,6 +527,8 @@ public class TypeChecker {
         let enableMacroInLSP = if (let Some(instance) <- ci) { instance.globalOptions.enableMacroInLSP } else { false }
         Collector(enableMacroInLsp: enableMacroInLSP).BuildSymbolTable(ctx, pkg, buildTrie: false)
         MarkOutermostBinaryExpressions(pkg)
+        AddCurFile(pkg)
+        MarkParamWithInitialValue(pkg)
         impl.WarmupCache(ctx)
     }
 
@@ -1531,12 +1532,14 @@ public class TypeChecker {
                 } else {
                     let _ = CollectUnusedImports(pkg, manager)
                 }
-                let _ = CheckConstEvaluation(pkg)
                 RunInheritanceCheck(pkg)
                 SetConstructorCalls(pkg)
                 // Check legality of usage after sema type completed.
                 // Mirrors C++ TypeChecker.cpp:2053 (CheckLegalityOfUsage).
                 RunLegalityOfUsageCheck(ctx, pkg)
+                // C++ TypeChecker.cpp:2060-2062 desugars property access in sema before const checking.
+                DesugarForPropDecl(impl.typeManager, pkg)
+                let _ = CheckConstEvaluation(pkg)
                 PerformDesugarAfterTypeCheck(impl.typeManager, pkg, context: Some(ctx), options: GlobalOptions(),
                     synthesizer: Some({ synCtx: ASTContext, pos: SynPos, node: Node =>
                         SynthesizeWithoutRecover(synCtx, pos, node)

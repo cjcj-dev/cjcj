@@ -1714,9 +1714,27 @@ extend ParserImpl {
                 ret.assignPos = lastToken.Begin()
                 ret.initializer = ParseExpr(ExprKind.VAR_INIT)
             }
+            let inClassLikeScope = ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) ||
+                ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)
             if (Skip(TokenKind.LCURL)) {
                 ParsePropBody(modifiers, ret)
+            } else if (inClassLikeScope || ScopeKindEquals(scopeKind, ScopeKind.UNKNOWN_SCOPE) ||
+                ret.TestAttr(Attribute.COMMON)) {
+                if (CanBeAbstract(ret, scopeKind)) {
+                    ret.EnableAttr(Attribute.ABSTRACT)
+                }
+                if (let Some(typeNode) <- ret.typeNode) {
+                    ret.end = typeNode.end
+                }
             } else {
+                if (!parseDeclFile) {
+                    let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_character, Peek(), "'{'",
+                        ConvertToken(Peek()))
+                    builder.AddMainHintArguments("'{'")
+                    builder.AddNote("property declaration must have body")
+                    builder.Emit()
+                    ret.EnableAttr(Attribute.HAS_BROKEN)
+                }
                 ret.end = if (let Some(expr) <- ret.initializer) {
                     expr.end
                 } else if (let Some(ty) <- ret.typeNode) {
