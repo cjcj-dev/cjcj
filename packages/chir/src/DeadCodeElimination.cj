@@ -49,10 +49,37 @@ public class DeadCodeElimination {
     public func RunOnFunction(fn: Function): Int64 {
         var removed: Int64 = 0
         if (let Some(body) <- fn.GetBody()) {
-            var passRemoved: Int64 = -1
-            while (passRemoved != 0) {
-                passRemoved = RunOnBody(body)
-                removed += passRemoved
+            let workList = ArrayList<Expression>()
+            let workListSet = HashSet<Int64>()
+            for (block in body.GetBlocksRef()) {
+                for (expr in block.GetExpressionsRef()) {
+                    if (CheckUselessExpr(expr)) {
+                        workList.add(expr)
+                        workListSet.add(expr.nodeId)
+                    }
+                }
+            }
+
+            var workIdx: Int64 = 0
+            while (workIdx < workList.size) {
+                let expr = workList[workIdx]
+                workIdx++
+                workListSet.remove(expr.nodeId)
+
+                let operands = expr.GetOperands()
+                expr.RemoveSelfFromBlock()
+                removed++
+
+                for (operand in operands) {
+                    if (let Some(localVar) <- operand.AsLocalVar()) {
+                        if (let Some(opExpr) <- localVar.GetExpr()) {
+                            if (CheckUselessExpr(opExpr) && !workListSet.contains(opExpr.nodeId)) {
+                                workList.add(opExpr)
+                                workListSet.add(opExpr.nodeId)
+                            }
+                        }
+                    }
+                }
             }
         }
         return removed
@@ -517,30 +544,6 @@ public class DeadCodeElimination {
                 ClearUnreachableMarkBlockForFunc(body)
             }
         }
-    }
-
-    private func RunOnBody(body: BlockGroup): Int64 {
-        var removed: Int64 = 0
-        for (block in body.GetBlocksRef()) {
-            removed += RunOnBlock(block)
-        }
-        return removed
-    }
-
-    private func RunOnBlock(block: Block): Int64 {
-        var removed: Int64 = 0
-        let exprs = block.GetExpressionsRef()
-        var idx: Int64 = 0
-        while (idx < exprs.size) {
-            let expr = exprs[idx]
-            if (CheckUselessExpr(expr)) {
-                expr.RemoveSelfFromBlock()
-                removed++
-            } else {
-                idx++
-            }
-        }
-        return removed
     }
 
     public func NothingTypeExprEliminationForFunc(funcBody: BlockGroup, isDebug: Bool): Unit {

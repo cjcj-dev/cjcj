@@ -89,7 +89,9 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     if (ShouldReportUnusedCodeWarnings()) {
         DeadCodeElimination(builder, diag, pkg).ReportUnusedCode(pkg, options)
     }
-    DeadCodeElimination(builder).RunOnPackage(pkg)
+    if (options.IsCHIROptimizationLevelOverO2()) {
+        DeadCodeElimination(builder).RunOnPackage(pkg)
+    }
     let wrapper = ConstAnalysisWrapper(builder)
     wrapper.RunOnPackage(pkg, diag, isDebug: options.chirDebugOptimizer)
     let cp = ConstPropagation(builder: Some(builder), wrapper: wrapper, opts: options)
