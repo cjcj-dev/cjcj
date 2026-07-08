@@ -1857,13 +1857,12 @@ public class TypeManager {
         overrideCache.add(OverrideCacheEntry(src, target, baseTy, expectInstParent, value))
     }
 
+    public func AddDeclExtendsEntry(entry: DeclExtendsEntry): Unit {
+        declToExtendMap.add(entry)
+        declToExtendIndex[entry.decl.objectId] = entry
+    }
+
     public func GetDeclExtends(decl: InheritableDecl): ArrayList<ExtendDecl> {
-        if (declToExtendIndex.size != declToExtendMap.size) {
-            declToExtendIndex.clear()
-            for (entry in declToExtendMap) {
-                declToExtendIndex[entry.decl.objectId] = entry
-            }
-        }
         if (let Some(entry) <- declToExtendIndex.get(decl.objectId)) {
             return entry.extends
         }

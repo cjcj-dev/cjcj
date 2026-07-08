@@ -263,7 +263,7 @@ private func addDeclExtendUnique(typeManager: TypeManager, decl: InheritableDecl
     }
     let entry = DeclExtendsEntry(decl)
     entry.extends.add(extendDecl)
-    typeManager.declToExtendMap.add(entry)
+    typeManager.AddDeclExtendsEntry(entry)
 }
 
 private func updateInstantiatedExtendMap(typeManager: TypeManager, pkg: Package): Unit {

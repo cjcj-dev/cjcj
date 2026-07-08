@@ -335,7 +335,7 @@ public func TypeCheckExtendUpdateExtendMap(tm: TypeManager, extends: ArrayList<E
                 } else {
                     let entry = DeclExtendsEntry(inheritableDecl)
                     entry.extends.add(extendDecl)
-                    tm.declToExtendMap.add(entry)
+                    tm.AddDeclExtendsEntry(entry)
                 }
                 for (interfaceType in extendDecl.inheritedTypes) {
                     if (let Some(interfaceDeclPtr) <- Ty.GetDeclPtrOfTy(interfaceType.GetTy())) {
