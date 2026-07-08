@@ -43,6 +43,9 @@ public class ClosureConversion {
     public func RunOnPackage(pkg: Package): Unit {
         this.pkg = pkg
         ConvertGlobalFunctions(pkg)
+        // GAP_TODO: C++ runs DoFunctionInlineForLambda(InlineLambda) here on this collection
+        // (ClosureConversion.cpp:3160-3162), gated by FUNC_INLINING at O2 (LambdaInline.cpp:61);
+        // InlineLambda is not yet ported, so this first collection's result is unused.
         let _ = CollectNestedFunctions(pkg)
         let nestedFuncs = CollectNestedFunctions(pkg)
         ConvertNestedFunctions(nestedFuncs)
