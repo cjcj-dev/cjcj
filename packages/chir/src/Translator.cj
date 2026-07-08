@@ -1252,16 +1252,145 @@ public class Translator {
 
     private func TranslateLetPatternCondition(letPattern: AstLetPatternDestructor, trueBlock: Block,
         falseBlock: Block): Unit {
+        if (CanOptimizeLetPatternToSwitch(letPattern)) {
+            TranslateLetPatternConditionAsTable(letPattern, trueBlock, falseBlock)
+            return
+        }
+        TranslateLetPatternConditionAsMatch(letPattern, trueBlock, falseBlock)
+    }
+
+    private func TranslateLetPatternConditionAsMatch(letPattern: AstLetPatternDestructor, trueBlock: Block,
+        falseBlock: Block): Unit {
         let selector = Translator.TranslateASTNode(RequireExpr(letPattern.initializer, "if-let initializer"), this) ??
             throw IllegalStateException("faithful AST2CHIR if-let initializer produced no value")
         let originLoc = TranslateLocation(letPattern)
+        scopeInfo.add(-1)
+        scopeInfo[scopeInfo.size - 1] = scopeInfo[scopeInfo.size - 1] + 1
         let (patternFalseBlock, patternTrueBlock) = if (letPattern.patterns.size == 1) {
             TranslateNestingCasePattern(letPattern.patterns[0], selector, originLoc, sourceExpr: SourceExpr.IF_EXPR)
         } else {
             TranslateOrPattern(letPattern.patterns, selector, originLoc)
         }
+        scopeInfo.remove(at: scopeInfo.size - 1)
         builder.CreateGoTo(trueBlock, patternTrueBlock)
         builder.CreateGoTo(falseBlock, patternFalseBlock)
+    }
+
+    private func TranslateLetPatternConditionAsTable(letPattern: AstLetPatternDestructor, trueBlock: Block,
+        falseBlock: Block): Unit {
+        let selectorTy = RequireAstTy(RequireExpr(letPattern.initializer, "if-let initializer"))
+        let selectorVal = Translator.TranslateASTNode(RequireExpr(letPattern.initializer, "if-let initializer"), this) ??
+            throw IllegalStateException("faithful AST2CHIR if-let initializer produced no value")
+        var enumDecl: Option<AstEnumDecl> = None
+        if (let Some(decl) <- AstTy.GetDeclOfTy(Some(selectorTy))) {
+            enumDecl = decl as AstEnumDecl
+        }
+        let (patternTrueBlock, patternFalseBlock) = if (let None <- enumDecl) {
+            TranslateTrivialLetPatternAsTable(letPattern, selectorVal, 0)
+        } else if (!enumDecl.getOrThrow().hasArguments || DoesNotHaveEnumSubpattern(letPattern)) {
+            TranslateTrivialLetPatternAsTable(letPattern, GetEnumIDValue(selectorTy, selectorVal),
+                enumDecl.getOrThrow().constructors.size)
+        } else {
+            TranslateEnumLetPatternMatchAsTable(letPattern, selectorVal)
+        }
+        builder.CreateGoTo(trueBlock, patternTrueBlock)
+        if (let Some(block) <- patternFalseBlock) {
+            builder.CreateGoTo(falseBlock, block)
+        }
+    }
+
+    private func TranslateEnumLetPatternMatchAsTable(letPattern: AstLetPatternDestructor,
+        enumVal: Value): (Block, Option<Block>) {
+        var isStillReachable = true
+        let baseBlock = CurrentBlock()
+        let trueBlock = CreateBlock()
+        let falseBlock = CreateBlock()
+        var firstDefaultBlock = falseBlock
+        let firstSelectorVal = GetEnumIDValue(RequireAstTy(RequireExpr(letPattern.initializer, "if-let initializer")),
+            enumVal)
+        let matchInfo = EnumMatchInfo()
+        scopeInfo.add(-1)
+        scopeInfo[scopeInfo.size - 1] = scopeInfo[scopeInfo.size - 1] + 1
+        if (letPattern.patterns[0].astKind == ASTKind.WILDCARD_PATTERN) {
+            isStillReachable = false
+            firstDefaultBlock = trueBlock
+            firstDefaultBlock.SetDebugLocation(TranslateLocation(letPattern.patterns[0]))
+        }
+        for (pattern in letPattern.patterns) {
+            CollectEnumPatternInfo(pattern, matchInfo, 0)
+        }
+        scopeInfo.remove(at: scopeInfo.size - 1)
+        let indexes = ArrayList<UInt64>()
+        let blocks = ArrayList<Block>()
+        for (key in matchInfo.firstSwitchBlocks.keys()) {
+            indexes.add(key)
+            blocks.add(matchInfo.firstSwitchBlocks.get(key).getOrThrow())
+        }
+        currentBlock = baseBlock
+        builder.CreateMultiBranch(firstSelectorVal, firstDefaultBlock, indexes, blocks, baseBlock)
+        let branchInfos = TranslateSecondLevelAsTable(matchInfo, enumVal, firstDefaultBlock)
+        if (let Some(branchBlocks) <- branchInfos.get(0)) {
+            for (block in branchBlocks) {
+                builder.CreateGoTo(trueBlock, block)
+            }
+        }
+        currentBlock = falseBlock
+        return (trueBlock, if (isStillReachable) { Some(falseBlock) } else { None })
+    }
+
+    private func TranslateTrivialLetPatternAsTable(letPattern: AstLetPatternDestructor, selectorVal: Value,
+        countOfPatterns: Int64): (Block, Option<Block>) {
+        let indexToBodies = TreeMap<UInt64, Block>()
+        let baseBlock = CurrentBlock()
+        let trueBlock = CreateBlock()
+        var defaultBlock: Option<Block> = None
+        var isStillReachable = true
+        scopeInfo.add(-1)
+        scopeInfo[scopeInfo.size - 1] = scopeInfo[scopeInfo.size - 1] + 1
+        CJC_ASSERT(!letPattern.patterns.isEmpty())
+        if (letPattern.patterns[0].astKind == ASTKind.WILDCARD_PATTERN) {
+            let patternBlock = CreateBlock()
+            isStillReachable = false
+            defaultBlock = Some(patternBlock)
+        } else {
+            for (pattern in letPattern.patterns) {
+                let patternVal = GetJumpablePatternVal(pattern)
+                let patternBlock = CreateBlock()
+                patternBlock.SetDebugLocation(TranslateLocation(pattern))
+                builder.CreateGoTo(trueBlock, patternBlock)
+                if (indexToBodies.contains(patternVal)) {
+                    continue
+                }
+                indexToBodies[patternVal] = patternBlock
+                if (Int64(indexToBodies.size) == countOfPatterns) {
+                    isStillReachable = false
+                    defaultBlock = Some(patternBlock)
+                }
+            }
+        }
+        scopeInfo.remove(at: scopeInfo.size - 1)
+        if (let None <- defaultBlock) {
+            defaultBlock = Some(CreateBlock())
+        }
+        let realDefaultBlock = defaultBlock.getOrThrow()
+        let indexes = ArrayList<UInt64>()
+        let blocks = ArrayList<Block>()
+        for (key in indexToBodies.keys()) {
+            indexes.add(key)
+            blocks.add(indexToBodies.get(key).getOrThrow())
+        }
+        currentBlock = baseBlock
+        let targetType = if (let Some(enumTy) <- (RequireAstTy(RequireExpr(letPattern.initializer,
+            "if-let initializer")) as AstEnumTy)) {
+            GetSelectorType(enumTy)
+        } else {
+            builder.context.GetUInt64Ty()
+        }
+        let castedVal = TypeCastOrBoxIfNeeded(selectorVal, targetType, INVALID_LOCATION, needCheck: false)
+        let term = builder.CreateMultiBranch(castedVal, realDefaultBlock, indexes, blocks, baseBlock)
+        term.SetDebugLocation(TranslateLocation(letPattern))
+        currentBlock = realDefaultBlock
+        return (trueBlock, if (isStillReachable) { Some(realDefaultBlock) } else { None })
     }
 
     public func Visit(expr: AstIfExpr): Option<Value> {
@@ -4056,6 +4185,48 @@ public class Translator {
         return BaseExceptionObjectType()
     }
 
+    private func CanOptimizeLetPatternToSwitch(letPattern: AstLetPatternDestructor): Bool {
+        if (!opts.IsOptimizationExisted(OptimizationFlag.SWITCH_OPT)) {
+            return false
+        }
+        if (letPattern.patterns[0].astKind == ASTKind.WILDCARD_PATTERN) {
+            return false
+        }
+        let selectorTy = RequireAstTy(RequireExpr(letPattern.initializer, "if-let initializer"))
+        let validSelectorTy = IsOptimizableTy(selectorTy) || (selectorTy.IsEnum() && IsOptimizableEnumTy(selectorTy))
+        if (!validSelectorTy) {
+            return false
+        }
+        for (curPattern in letPattern.patterns) {
+            CJC_ASSERT(curPattern.astKind != ASTKind.WILDCARD_PATTERN)
+            if (curPattern.astKind == ASTKind.CONST_PATTERN) {
+                continue
+            }
+            let varOrEnumPattern = curPattern as AstVarOrEnumPattern
+            let realPatternKind = if (let Some(vep) <- varOrEnumPattern) {
+                RequirePattern(vep.pattern, "var-or-enum pattern").astKind
+            } else {
+                curPattern.astKind
+            }
+            if (realPatternKind != ASTKind.ENUM_PATTERN) {
+                return false
+            } else if (varOrEnumPattern.isSome()) {
+                continue
+            }
+            let enumPattern = (curPattern as AstEnumPattern) ??
+                throw IllegalStateException("faithful AST2CHIR optimizable if-let expected enum pattern")
+            if (enumPattern.patterns.isEmpty()) {
+                continue
+            }
+            let firstParamKind = enumPattern.patterns[0].astKind
+            if (firstParamKind == ASTKind.WILDCARD_PATTERN || firstParamKind == ASTKind.CONST_PATTERN) {
+                continue
+            }
+            return false
+        }
+        return true
+    }
+
     private func CanOptimizeMatchToSwitch(matchExpr: AstMatchExpr): Bool {
         if (!opts.IsOptimizationExisted(OptimizationFlag.SWITCH_OPT)) {
             return false
@@ -4648,6 +4819,17 @@ public class Translator {
                 }
                 let enumPattern = (subPattern as AstEnumPattern) ??
                     throw IllegalStateException("faithful AST2CHIR expected enum pattern")
+                if (!enumPattern.patterns.isEmpty()) {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    private func DoesNotHaveEnumSubpattern(letPattern: AstLetPatternDestructor): Bool {
+        for (pattern in letPattern.patterns) {
+            if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
                 if (!enumPattern.patterns.isEmpty()) {
                     return false
                 }
