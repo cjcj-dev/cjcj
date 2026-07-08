@@ -115,12 +115,9 @@ LLVMValueRef CreateGCStaticAggCall(LLVMBuilderRef Builder, LLVMModuleRef Module,
         }
     }
     args[2] = builder->CreateZExtOrTrunc(args[2], sizeType);
-    auto *structType = unwrap<StructType>(AggType);
-    auto typeName = structType->isLiteral() ? "" : structType->getStructName().str();
-    auto *meta = MDTuple::get(builder->getContext(), {MDString::get(builder->getContext(), typeName)});
     ConvertArgsType(*builder, func, args);
     auto *inst = CreateCall(*builder, func, args);
-    inst->setMetadata("AggType", meta);
+    (void)AggType;
     return wrap(inst);
 }
 } // namespace
@@ -381,6 +378,21 @@ extern "C" void LLVMSelfhostInstructionSetMetadata(
     if (auto *globalObject = dyn_cast<GlobalObject>(value)) {
         globalObject->setMetadata(StringRef(Kind, KindLen), node);
     }
+}
+
+extern "C" void LLVMSelfhostInstructionCopyMetadata(LLVMValueRef Dest, LLVMValueRef Src)
+{
+    if (Dest == nullptr || Src == nullptr) {
+        return;
+    }
+    auto *destValue = unwrap<Value>(Dest);
+    auto *srcValue = unwrap<Value>(Src);
+    auto *destInst = dyn_cast<Instruction>(destValue);
+    auto *srcInst = dyn_cast<Instruction>(srcValue);
+    if (destInst == nullptr || srcInst == nullptr) {
+        return;
+    }
+    destInst->copyMetadata(*srcInst);
 }
 
 extern "C" LLVMMetadataRef LLVMSelfhostDIBuilderCreateSubroutineType(

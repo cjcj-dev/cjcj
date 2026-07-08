@@ -12,6 +12,8 @@ import cangjie_compiler::chir.UnBox
 import cangjie_compiler::chir.UnBoxToRef
 import cangjie_compiler::utils.{CJC_ASSERT_WITH_MSG, OverflowStrategy, StaticCast}
 
+private let LLVM_POINTER_TYPE_KIND: Int32 = 12
+
 public func EmitTypeCastExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (chirExpr.GetNumOfOperands() == 0) {
         return LLVMNullValue()
@@ -157,11 +159,49 @@ private func EmitUnBoxToRefExpression(irBuilder: IRBuilder2, unboxExpr: UnBoxToR
 
 private func EmitTransformToGenericExpression(irBuilder: IRBuilder2, transformExpr: TransformToGeneric): LLVMValueRef {
     let sourceValue = transformExpr.GetSourceValue()
-    let sourceCGValue = irBuilder.GetCGModule().GetMappedCGValue(sourceValue)
+    let cgMod = irBuilder.GetCGModule()
+    let sourceCGValue = cgMod.GetMappedCGValue(sourceValue)
     let targetTy = transformExpr.GetTargetTy() ?? return sourceCGValue.GetRawValue()
     let sourceTy = transformExpr.GetSourceTy() ?? return sourceCGValue.GetRawValue()
-    return CastValueToType(irBuilder, sourceCGValue.GetRawValue(), sourceTy, targetTy,
-        CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType())
+    let srcCGType = CGType.GetOrCreate(cgMod, sourceTy)
+    let targetCGType = CGType.GetOrCreate(cgMod, targetTy)
+    if (srcCGType.IsReference() && targetTy.IsGeneric()) {
+        return sourceCGValue.GetRawValue()
+    }
+    if (let Some(srcSize) <- srcCGType.GetSize()) {
+        if (let Some(targetSize) <- targetCGType.GetSize()) {
+            if (srcSize == targetSize) {
+                return sourceCGValue.GetRawValue()
+            }
+        }
+    }
+    let boxedValue = irBuilder.CallClassIntrinsicAlloc(sourceTy.StripAllRefs())
+    let payloadPtr = irBuilder.GetPayloadFromObject(boxedValue)
+    let elemLLVMType = if (sourceTy.IsRef()) {
+        (srcCGType.GetPointerElementType() ?? srcCGType).GetLLVMType()
+    } else {
+        srcCGType.GetLLVMType()
+    }
+    let addr = irBuilder.CreateBitCast(payloadPtr, unsafe { LLVMPointerType(elemLLVMType, 1u32) })
+    let refChirTy: Type = if (sourceTy.IsRef()) {
+        sourceTy
+    } else {
+        irBuilder.GetCGContext().GetCHIRBuilder().context.GetRefTy(sourceTy)
+    }
+    let addrCGType = CGType.GetOrCreate(cgMod, refChirTy, extraInfo: TypeExtraInfo(1u32))
+    let rawSource = sourceCGValue.GetRawValue()
+    let baseSourceTy = sourceTy.StripAllRefs()
+    let rawSourceTy = unsafe { LLVMTypeOf(rawSource) }
+    let rawSourceIsPointer = !rawSourceTy.isNull() && unsafe { LLVMGetTypeKind(rawSourceTy) } == LLVM_POINTER_TYPE_KIND
+    let valueForStore = if (!sourceTy.IsRef() && rawSourceIsPointer &&
+        (baseSourceTy.IsStruct() || baseSourceTy.IsTuple() || baseSourceTy.IsVArray())) {
+        CGValue(rawSource, CGType.GetOrCreate(cgMod,
+            irBuilder.GetCGContext().GetCHIRBuilder().context.GetRefTy(baseSourceTy)))
+    } else {
+        sourceCGValue
+    }
+    irBuilder.CreateStore(valueForStore, CGValue(addr, addrCGType))
+    return boxedValue
 }
 
 private func EmitTransformToConcreteExpression(irBuilder: IRBuilder2,

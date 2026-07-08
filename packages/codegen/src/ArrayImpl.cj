@@ -564,7 +564,7 @@ private func StoreValueForAddress(irBuilder: IRBuilder2, value: CGValue, addr: C
                 return irBuilder.CreateLoad(destTy, raw, name: "store.value")
             }
             if (IsPointerLLVMType(destTy)) {
-                return irBuilder.CreateBitCast(raw, destTy, name: "store.ptr.cast")
+                return irBuilder.CreatePointerCast(raw, destTy, name: "store.ptr.cast")
             }
         }
     }
@@ -671,12 +671,15 @@ private func TryStoreStaticAggregateValueForAddress(irBuilder: IRBuilder2, store
 private func CallGCWriteStaticStruct(irBuilder: IRBuilder2, dest: LLVMValueRef, source: LLVMValueRef,
     size: LLVMValueRef, aggType: LLVMTypeRef): LLVMValueRef {
     CJC_ASSERT(!aggType.isNull() && unsafe { LLVMGetTypeKind(aggType) } == LLVM_STRUCT_TYPE_KIND)
-    let i64Type = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
     let moduleHandle = irBuilder.GetCGModule().GetLLVMModule() ?? return LLVMNullValue()
-    return unsafe {
+    let call = unsafe {
         LLVMSelfhostCreateGCWriteStaticAgg(irBuilder.GetBuilder().raw, moduleHandle.raw, aggType, dest, source, size,
-            i64Type)
+            irBuilder.GetSizetLLVMType())
     }
+    let aggTypeName = LLVMCStringToString(unsafe { LLVMGetStructName(aggType) }) ?? ""
+    let metadata = LLVMCreateMDTupleFromString(irBuilder.GetLLVMContext(), aggTypeName)
+    LLVMSetInstructionMetadata(irBuilder.GetLLVMContext(), call, "AggType", metadata)
+    return call
 }
 
 public func GenerateGetElementRef(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {

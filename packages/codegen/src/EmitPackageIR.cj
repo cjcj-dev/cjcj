@@ -277,6 +277,7 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
                 AddAttributeAtIndex(newCall, 1u32, "noalias")
             }
             unsafe {
+                LLVMSelfhostInstructionCopyMetadata(newCall, oldCall)
                 LLVMReplaceAllUsesWith(oldCall, newCall)
                 LLVMInstructionEraseFromParent(oldCall)
             }

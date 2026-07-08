@@ -314,6 +314,7 @@ foreign {
         alignBytes: UInt32): LLVMValueRef
     func LLVMSelfhostInstructionSetMetadata(inst: LLVMValueRef, kind: CString, kindLen: UInt32,
         metadata: LLVMMetadataRef): Unit
+    func LLVMSelfhostInstructionCopyMetadata(dest: LLVMValueRef, src: LLVMValueRef): Unit
     func LLVMSelfhostCreateGCReadStaticAgg(builder: LLVMBuilderRef, module: LLVMModuleRef, aggType: LLVMTypeRef,
         dest: LLVMValueRef, source: LLVMValueRef, size: LLVMValueRef, sizeType: LLVMTypeRef): LLVMValueRef
     func LLVMSelfhostCreateGCWriteStaticAgg(builder: LLVMBuilderRef, module: LLVMModuleRef, aggType: LLVMTypeRef,

@@ -2563,14 +2563,21 @@ public class IRBuilder2 <: Resource {
 
     public func CallGCReadStaticAgg(structType: LLVMTypeRef, args: ArrayList<LLVMValueRef>): LLVMValueRef {
         CJC_ASSERT(args.size == 3)
-        let i64Type = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
+        var call = LLVMNullValue()
         if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
-            return unsafe {
+            call = unsafe {
                 LLVMSelfhostCreateGCReadStaticAgg(builder.raw, moduleHandle.raw, structType, args[0], args[1], args[2],
-                    i64Type)
+                    GetSizetLLVMType())
             }
         }
-        return LLVMNullValue()
+        let aggTypeName = if (!structType.isNull() && unsafe { LLVMGetTypeKind(structType) } == LLVM_STRUCT_TYPE_KIND) {
+            LLVMCStringToString(unsafe { LLVMGetStructName(structType) }) ?? ""
+        } else {
+            ""
+        }
+        let metadata = LLVMCreateMDTupleFromString(GetLLVMContext(), aggTypeName)
+        LLVMSetInstructionMetadata(GetLLVMContext(), call, "AggType", metadata)
+        return call
     }
 
     public func CallGCReadGeneric(dest: LLVMValueRef, baseObject: LLVMValueRef, source: LLVMValueRef,
