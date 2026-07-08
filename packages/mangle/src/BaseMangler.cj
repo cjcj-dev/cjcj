@@ -675,7 +675,7 @@ public open class BaseMangler {
     }
 
     public func MangleFunctionDecl(funcDecl: MangleDecl, prefix: ArrayList<MangleDecl>,
-        genericsTypeStack: ArrayList<String>, declare: Bool): String {
+        genericsTypeStack: ArrayList<String>, _: Bool): String {
         if (!funcDecl.mangledName.isEmpty()) {
             return funcDecl.mangledName
         }
@@ -687,7 +687,7 @@ public open class BaseMangler {
                 outerDecl = outer.outerDecl
             }
             reverseDecls(newPrefix)
-            var mangled = MangleDeclName(funcDecl, newPrefix, genericsTypeStack, declare, withSuffix: false)
+            var mangled = MangleDeclName(funcDecl, newPrefix, genericsTypeStack, true, withSuffix: false)
             mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX
             mangled += MangleFuncParams(funcDecl, genericsTypeStack, false)
             return mangled
@@ -712,13 +712,13 @@ public open class BaseMangler {
                 }
                 reverseDecls(newPrefix)
                 let mangledPrefix = MANGLE_CANGJIE_PREFIX + MANGLE_NESTED_PREFIX
-                let ownerMangled = MangleDeclName(funcDecl, newPrefix, genericsTypeStack, declare, withSuffix: true)
+                let ownerMangled = MangleDeclName(funcDecl, newPrefix, genericsTypeStack, true, withSuffix: true)
                 mangled += MANGLE_CANGJIE_PREFIX + MANGLE_FUNC_PARA_INIT_PREFIX +
                     ownerMangled[mangledPrefix.size..ownerMangled.size - 1]
                 mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX
             }
         } else {
-            mangled = MangleDeclName(funcDecl, prefix, genericsTypeStack, declare, withSuffix: false)
+            mangled = MangleDeclName(funcDecl, prefix, genericsTypeStack, true, withSuffix: false)
             mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX
         }
         mangled += MangleFuncParams(funcDecl, genericsTypeStack, false)
@@ -1143,6 +1143,25 @@ public open class BaseMangler {
                     for (arg in generic.typeParameters) {
                         if (let Some(ty) <- arg.semaTy) {
                             args.add(ty)
+                        }
+                    }
+                }
+            }
+        }
+        // GAP_TODO(default-param-generic-desugar): C++ has no such mangler branch; its mechanism is
+        // desugar-side CollectGenericParam (TypeChecker.cpp:2386, called from MakeDefaultParamFunction
+        // :2506) cloning+renaming owner generics onto the desugared func's own funcBody->generic.
+        // selfhost MakeDefaultParamFunction (sema TypeChecker.cj:944) lacks that port; this branch is a
+        // byte-equivalent compensation (positional G<idx>_ encoding). Once CollectGenericParam is ported,
+        // args becomes non-empty here and this branch short-circuits dead; delete it then.
+        if (args.isEmpty() && collectFuncGeneric && declare && decl.TestAttr(Attribute.HAS_INITIAL)) {
+            if (let Some(owner) <- decl.ownerFunc) {
+                if (let Some(ownerBody) <- owner.funcBody) {
+                    if (let Some(ownerGeneric) <- ownerBody.generic) {
+                        for (arg in ownerGeneric.typeParameters) {
+                            if (let Some(ty) <- arg.semaTy) {
+                                args.add(ty)
+                            }
                         }
                     }
                 }
