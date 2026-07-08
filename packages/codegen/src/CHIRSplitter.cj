@@ -104,10 +104,38 @@ public class SubCHIRPackage {
     }
 
     public func AddGlobalVar(globalVar: GlobalVar): Bool {
-        if (OwnsGlobalVar(globalVar)) {
-            return false
+        let name = globalVar.GetIdentifierWithoutPrefix()
+        var idx: Int64 = 0
+        while (idx < chirGVs.size) {
+            let ownedName = chirGVs[idx].GetIdentifierWithoutPrefix()
+            if (ownedName == name) {
+                return false
+            }
+            if (name < ownedName) {
+                chirGVs.add(globalVar, at: idx)
+                return true
+            }
+            idx++
         }
         chirGVs.add(globalVar)
+        return true
+    }
+
+    public func AddCustomDef(def: CustomTypeDef): Bool {
+        let name = def.GetIdentifierWithoutPrefix()
+        var idx: Int64 = 0
+        while (idx < chirCustomDefs.size) {
+            let ownedName = chirCustomDefs[idx].GetIdentifierWithoutPrefix()
+            if (ownedName == name) {
+                return false
+            }
+            if (name < ownedName) {
+                chirCustomDefs.add(def, at: idx)
+                return true
+            }
+            idx++
+        }
+        chirCustomDefs.add(def)
         return true
     }
 
@@ -122,10 +150,24 @@ public class SubCHIRPackage {
     }
 
     public func AddFunction(fn: Function): Bool {
-        if (OwnsFunction(fn)) {
-            return false
+        return AddFunctionTo(chirFuncs, fn)
+    }
+
+    private func AddFunctionTo(functions: ArrayList<Function>, fn: Function): Bool {
+        let name = fn.GetIdentifierWithoutPrefix()
+        var idx: Int64 = 0
+        while (idx < functions.size) {
+            let ownedName = functions[idx].GetIdentifierWithoutPrefix()
+            if (ownedName == name) {
+                return false
+            }
+            if (name < ownedName) {
+                functions.add(fn, at: idx)
+                return true
+            }
+            idx++
         }
-        chirFuncs.add(fn)
+        functions.add(fn)
         return true
     }
 
@@ -140,19 +182,11 @@ public class SubCHIRPackage {
     }
 
     public func AddForeign(fn: Function): Bool {
-        if (ContainsFunction(chirForeigns, fn)) {
-            return false
-        }
-        chirForeigns.add(fn)
-        return true
+        return AddFunctionTo(chirForeigns, fn)
     }
 
     public func AddImportedCFunc(fn: Function): Bool {
-        if (ContainsFunction(chirImportedCFuncs, fn)) {
-            return false
-        }
-        chirImportedCFuncs.add(fn)
-        return true
+        return AddFunctionTo(chirImportedCFuncs, fn)
     }
 
     public func AddOwnedTypeTemplateName(name: String): Unit {
@@ -440,7 +474,7 @@ public class CHIRSplitter {
             } else {
                 targetIndex = NextRoundRobinIndex(packages)
             }
-            packages[targetIndex].chirCustomDefs.add(customDef)
+            let _ = packages[targetIndex].AddCustomDef(customDef)
         }
     }
 
@@ -459,7 +493,7 @@ public class CHIRSplitter {
             } else {
                 targetIndex = NextRoundRobinIndex(packages)
             }
-            packages[targetIndex].chirCustomDefs.add(customDef)
+            let _ = packages[targetIndex].AddCustomDef(customDef)
         }
         for (customDef in cgPkgCtx.GetCHIRPackage().GetImportedEnums()) {
             var targetIndex: Int64 = 0
@@ -472,7 +506,7 @@ public class CHIRSplitter {
             } else {
                 targetIndex = NextRoundRobinIndex(packages)
             }
-            packages[targetIndex].chirCustomDefs.add(customDef)
+            let _ = packages[targetIndex].AddCustomDef(customDef)
         }
     }
 
@@ -491,7 +525,7 @@ public class CHIRSplitter {
             } else {
                 targetIndex = NextRoundRobinIndex(packages)
             }
-            packages[targetIndex].chirCustomDefs.add(customDef)
+            let _ = packages[targetIndex].AddCustomDef(customDef)
         }
     }
 
@@ -506,7 +540,7 @@ public class CHIRSplitter {
             } else {
                 NextRoundRobinIndex(packages)
             }
-            packages[targetIndex].chirCustomDefs.add(customDef)
+            let _ = packages[targetIndex].AddCustomDef(customDef)
             if (!subCHIRPackagesCache.extendDefCache.contains(key)) {
                 subCHIRPackagesCache.extendDefCache[key] = targetIndex
             }

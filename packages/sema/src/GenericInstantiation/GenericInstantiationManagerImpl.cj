@@ -1541,10 +1541,14 @@ public class GenericInstantiationManagerImpl {
     private func GenericRefExprInstantiate(refExpr: RefExpr, pkg: Package): Unit {
         WalkNameReferenceTypeArguments(refExpr, pkg)
         if (let Some(target) <- refExpr.GetTarget()) {
-            if (target.astKind == ASTKind.GENERIC_PARAM_DECL || target.astKind == ASTKind.PACKAGE_DECL) {
+            if (target.astKind == ASTKind.GENERIC_PARAM_DECL || target.astKind == ASTKind.PACKAGE_DECL ||
+                !Ty.IsTyCorrect(refExpr.GetTy())) {
                 return
             }
             var targetDecl = GetRealTarget(target)
+            if (targetDecl.IsBuiltIn() || !RequireInstantiation(targetDecl)) {
+                return
+            }
             let instTys = ArrayList<Ty>()
             for (ty in refExpr.instTys) {
                 instTys.add(ty)
@@ -1590,10 +1594,17 @@ public class GenericInstantiationManagerImpl {
             InstantiateReferencedGenericsInNode(baseExpr, pkg)
         }
         if (let Some(target) <- memberAccess.GetTarget()) {
-            if (target.astKind == ASTKind.PACKAGE_DECL) {
+            if (target.astKind == ASTKind.PACKAGE_DECL || !Ty.IsTyCorrect(memberAccess.GetTy()) ||
+                RealTestManager.IsMockAccessor(target)) {
+                return
+            }
+            if (let None <- memberAccess.baseExpr) {
                 return
             }
             var targetDecl = GetRealTarget(target)
+            if (targetDecl.IsBuiltIn() || !RequireInstantiation(targetDecl)) {
+                return
+            }
             let instTys = ArrayList<Ty>()
             for (ty in memberAccess.instTys) {
                 instTys.add(ty)

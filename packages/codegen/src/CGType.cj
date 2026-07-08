@@ -454,12 +454,19 @@ public open class CGType {
 
     public static func GetArrayBaseType(cgCtx: CGContext): LLVMTypeRef {
         let context = cgCtx.GetLLVMContext()
-        let result = GetOrCreateNamedStructType(context, "ArrayBase")
-        if (!cgCtx.IsGeneratedStructType("ArrayBase")) {
+        var result = LLVMNullType()
+        var created = false
+        try (nameCString = unsafe { LibC.mallocCString("ArrayBase") }.asResource()) {
+            result = unsafe { LLVMGetTypeByName2(context.raw, nameCString.value) }
+            if (result.isNull()) {
+                result = unsafe { LLVMStructCreateNamed(context.raw, nameCString.value) }
+                created = true
+            }
+        }
+        if (created) {
             let body = ArrayList<LLVMTypeRef>()
             body.add(unsafe { LLVMInt64TypeInContext(context.raw) })
             SetStructTypeBody(result, body)
-            cgCtx.AddGeneratedStructType("ArrayBase")
         }
         return result
     }

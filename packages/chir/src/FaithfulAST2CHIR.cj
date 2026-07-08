@@ -57,6 +57,8 @@ import cangjie_compiler::ast.IsMirror as AstIsMirror
 import cangjie_compiler::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
 import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, ProfileRecorder, STATIC_INIT_VAR}
 
+private let USER_MAIN_MANGLED_NAME: String = "user.main"
+
 private class FaithfulInitFileVars {
     public let file: AstFile
     public let vars: ArrayList<AstDecl> = ArrayList<AstDecl>()
@@ -3601,14 +3603,24 @@ fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
         if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) {
             fn.SetFuncKind(FuncKind.MAIN_ENTRY)
         }
+        let mangledName = EffectiveMangledName(funcDecl)
+        if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY) || mangledName == USER_MAIN_MANGLED_NAME ||
+            FaithfulStartsWith(mangledName, "rt$")) {
+            fn.EnableAttr(Attribute.NO_INLINE)
+        }
         if (!funcDecl.TestAttr(AstAttribute.ABSTRACT)) {
             let body = builder.CreateBlockGroup(fn)
             fn.InitBody(body)
             let entry = builder.CreateBlock(body)
             body.SetEntryBlock(entry)
-            EnsureReturnSlot(fn, entry)
         }
         TranslateFuncParams(funcDecl, fn)
+        if (!funcDecl.TestAttr(AstAttribute.ABSTRACT)) {
+            let entry = fn.GetEntryBlock() ??
+                throw IllegalStateException("faithful AST2CHIR function has no entry block: ${fn.GetIdentifier()}")
+            CreateFunctionEntryDebugs(funcDecl, fn, entry)
+            EnsureReturnSlot(fn, entry)
+        }
         globalCache.Set(funcDecl, fn)
     }
 
@@ -3743,6 +3755,42 @@ fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
             globalCache.Set(param, fn.GetParam(explicitIndex + offset))
             explicitIndex++
         }
+    }
+
+    private func CreateFunctionEntryDebugs(funcDecl: AstFuncDecl, fn: Function, entry: Block): Unit {
+        if (NeedCreateDebugForFirstParam(funcDecl) && fn.GetNumOfParams() > 0) {
+            let _ = builder.CreateDebug(builder.context.GetUnitTy(), fn.GetParam(0), "this", entry)
+        }
+        let body = funcDecl.funcBody ??
+            throw IllegalStateException("faithful AST2CHIR function has no body: ${fn.GetIdentifier()}")
+        if (body.paramLists.isEmpty()) {
+            throw IllegalStateException("faithful AST2CHIR function has no parameter list: ${fn.GetIdentifier()}")
+        }
+        let offset: Int64 = if (HasImplicitThisParam(funcDecl)) { 1 } else { 0 }
+        var paramIndex: Int64 = 0
+        for (param in body.paramLists[0].params) {
+            let debugInfo = builder.CreateDebug(builder.context.GetUnitTy(), fn.GetParam(paramIndex + offset),
+                param.identifier.GetRawText(), entry)
+            debugInfo.SetDebugLocation(TranslateLocationWithoutScope(builder.context, param.begin, param.end))
+            debugInfo.SetDebugLocationInfoForWarning(GetDeclLoc(builder.context, param))
+            if (funcDecl.TestAttr(AstAttribute.HAS_INITIAL)) {
+                debugInfo.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+            }
+            paramIndex++
+        }
+    }
+
+    private func NeedCreateDebugForFirstParam(funcDecl: AstFuncDecl): Bool {
+        if (!HasImplicitThisParam(funcDecl)) {
+            return false
+        }
+        let outerDecl = funcDecl.outerDecl ?? return false
+        if (let Some(extendDecl) <- (outerDecl as AstExtendDecl)) {
+            let extendedType = extendDecl.extendedType ?? return false
+            let astTy = extendedType.GetTy() ?? return false
+            return astTy.IsNominal()
+        }
+        return true
     }
 
     private func AdjustFuncType(funcDecl: AstFuncDecl, funcTy: FuncType): FuncType {

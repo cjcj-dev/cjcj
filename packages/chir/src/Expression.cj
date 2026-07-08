@@ -891,6 +891,10 @@ public open class DynamicDispatch <: FuncCall {
         return virMethodCtx.funcType
     }
 
+    public func SetMethodType(ty: FuncType): Unit {
+        virMethodCtx.funcType = ty
+    }
+
     public func GetGenericTypeParams(): ArrayList<GenericType> {
         return virMethodCtx.GetGenericTypeParams()
     }
@@ -1600,6 +1604,13 @@ public class Intrinsic <: Expression {
         return instantiatedTypeArgs.clone()
     }
 
+    public func SetInstantiatedTypeArgs(args: ArrayList<Type>): Unit {
+        instantiatedTypeArgs.clear()
+        for (ty in args) {
+            instantiatedTypeArgs.add(ty)
+        }
+    }
+
     public func GetArgs(): ArrayList<Value> {
         return GetOperands()
     }
@@ -1985,6 +1996,10 @@ public class Lambda <: Expression {
 
     public func GetFuncType(): Option<FuncType> {
         return funcTy
+    }
+
+    public func SetFuncType(ty: FuncType): Unit {
+        funcTy = ty
     }
 
     public func GetIdentifier(): String {

@@ -46,6 +46,39 @@ public class DeadCodeElimination {
         return removed
     }
 
+    public func UselessFuncElimination(pkg: Package, opts: GlobalOptions): Unit {
+        curPkg = Some(pkg)
+        curPkgName = pkg.GetName()
+        let allFuncs = pkg.GetGlobalFunctions(includePureAbstract: true)
+        let usingReflectPackage = ReflectPackageIsUsed(curPkg.getOrThrow())
+        let funcsToBeRemoved = ArrayList<Function>()
+        var keepRemoving = true
+        while (keepRemoving) {
+            funcsToBeRemoved.clear()
+            var idx: Int64 = 0
+            while (idx < allFuncs.size) {
+                let fn = allFuncs[idx]
+                if (fn.TestAttr(Attribute.IMPORTED)) {
+                    idx++
+                    continue
+                }
+                if (CheckUselessFunc(fn, opts, usingReflectPackage)) {
+                    funcsToBeRemoved.add(fn)
+                    DumpForDebug(None, Some(fn), opts.chirDebugOptimizer)
+                    allFuncs.remove(at: idx)
+                    continue
+                }
+                idx++
+            }
+            for (fn in funcsToBeRemoved) {
+                fn.DestroySelf()
+            }
+            keepRemoving = !funcsToBeRemoved.isEmpty()
+        }
+        pkg.SetAllGlobalFuncs(allFuncs)
+        ClearRemovedFuncParamDftValHostFunc(pkg)
+    }
+
     public func RunOnFunction(fn: Function): Int64 {
         var removed: Int64 = 0
         if (let Some(body) <- fn.GetBody()) {
@@ -763,6 +796,19 @@ private func GetFuncIdent(fn: Function): String {
         return "set"
     }
     return fn.GetSrcCodeIdentifier()
+}
+
+private func ClearRemovedFuncParamDftValHostFunc(pkg: Package): Unit {
+    for (fn in pkg.GetGlobalFunctionsRef()) {
+        if (fn.GetBody().isNone() || fn.TestAttr(Attribute.IMPORTED)) {
+            continue
+        }
+        if (let Some(hostFunc) <- fn.GetParamDftValHostFunc()) {
+            if (hostFunc.IsFuncWithBody() && hostFunc.GetBody().isNone()) {
+                fn.ClearParamDftValHostFunc()
+            }
+        }
+    }
 }
 
 private func ReflectPackageIsUsed(pkg: Package): Bool {

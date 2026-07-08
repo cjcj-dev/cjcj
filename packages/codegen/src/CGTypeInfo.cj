@@ -428,8 +428,6 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
                 LLVMSetLinkage(typeInfo, LLVMLinkageValue(LLVMLinkage.LinkOnceODR))
                 LLVMSetGlobalConstant(typeInfo, 0)
             }
-            LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), typeInfo, GC_TYPE_META_NAME,
-                ARRAY_LAYOUT_PREFIX + chirTy.ToString())
         }
         return
     }

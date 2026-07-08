@@ -12,12 +12,6 @@ public class CGStructType <: CGCustomType {
     }
 
     protected override func GenLLVMType(): LLVMTypeRef {
-        if (chirType.IsString()) {
-            let stringLayout = cgCtx.GetCjStringType()
-            layoutType = stringLayout
-            llvmType = stringLayout
-            return stringLayout
-        }
         if (!IsSized()) {
             return unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
         }
@@ -59,9 +53,6 @@ public class CGStructType <: CGCustomType {
     }
 
     protected override func GenContainedCGTypes(): Unit {
-        if (chirType.IsString()) {
-            return
-        }
         let structType = StaticCast<StructType>(chirType)
         for (fieldTy in structType.GetInstantiatedMemberTys()) {
             containedCGTypes.add(CGType.GetOrCreate(cgMod, fieldTy))

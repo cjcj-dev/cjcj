@@ -13,17 +13,12 @@ public class CGCStringType <: CGType {
     protected override func GenLLVMType(): LLVMTypeRef {
         let int8Ty = unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
         let llvmType = unsafe { LLVMPointerType(int8Ty, 0u32) }
-        // Mirror C++ CGCStringType::GenLLVMType (CGCStringType.cpp:21-23): wrap the pointer in a
-        // "CString.Type" layout struct and record it as the layout type, so the generated TypeInfo
-        // carries a GC layout. Without it, passing a CString through a generic type parameter emits an
-        // llvm.cj.alloca.generic whose TypeInfo has a null layout type (rejected by the cangjie pass).
         let layoutName = "CString.Type"
         let layout = GetOrCreateNamedStructType(cgCtx.GetLLVMContext(), layoutName)
-        if (!cgCtx.IsGeneratedStructType(layoutName)) {
+        if (unsafe { LLVMCountStructElementTypes(layout) } == 0u32) {
             let body = ArrayList<LLVMTypeRef>()
             body.add(llvmType)
             SetStructTypeBody(layout, body)
-            cgCtx.AddGeneratedStructType(layoutName)
         }
         layoutType = layout
         return llvmType

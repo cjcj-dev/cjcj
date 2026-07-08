@@ -35,6 +35,7 @@ import cangjie_compiler::option.OptimizationFlag
 import cangjie_compiler::option.TempFileInfo
 import cangjie_compiler::utils.DEFAULT_PACKAGE_NAME
 import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.REFLECT_PACKAGE_NAME
 
 public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTPackage): Option<RealCHIRPackage> {
     let builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
@@ -88,6 +89,10 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
         enableCoverage: options.enableCoverage)
     if (ShouldReportUnusedCodeWarnings()) {
         DeadCodeElimination(builder, diag, pkg).ReportUnusedCode(pkg, options)
+    }
+    if (options.IsCHIROptimizationLevelOverO2() && !options.enableCoverage &&
+        !options.enIncrementalCompilation && pkg.GetName() != REFLECT_PACKAGE_NAME) {
+        DeadCodeElimination(builder, diag, pkg).UselessFuncElimination(pkg, options)
     }
     if (options.IsCHIROptimizationLevelOverO2()) {
         DeadCodeElimination(builder).RunOnPackage(pkg)

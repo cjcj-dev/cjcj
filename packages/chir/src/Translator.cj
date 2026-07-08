@@ -1012,7 +1012,7 @@ public class Translator {
     public func Visit(expr: AstReturnExpr): Option<Value> {
         if (let Some(retExpr) <- expr.expr) {
             let value = TranslateExprArg(retExpr)
-            StoreOuterReturnValueIfNeeded(value)
+            StoreReturnExprValueIfNeeded(expr, value)
             UpdateDelayExitSignalForReturnIfNeeded()
             RecordFinallyControlIfNeeded(FaithfulFinallyControlType.RETURN)
             builder.CreateExit(None, CurrentBlock())
@@ -1157,6 +1157,7 @@ public class Translator {
         let entry = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
         currentBlock = entry
+        CreateLambdaParamDebugs(funcBody, lambda, entry)
         let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(funcTy.GetReturnType()),
             funcTy.GetReturnType(), entry))
         lambda.SetReturnValue(retSlot)
@@ -2349,6 +2350,7 @@ public class Translator {
         let entry = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
         currentBlock = entry
+        CreateLambdaParamDebugs(funcBody, lambda, entry, hasInitial: funcDecl.TestAttr(AstAttribute.HAS_INITIAL))
         let retTy = funcTy.GetReturnType()
         if (!retTy.IsUnit() && !retTy.IsNothing() && !retTy.IsVoid()) {
             let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(retTy), retTy, entry))
@@ -2620,9 +2622,31 @@ public class Translator {
         var idx: Int64 = 0
         for (param in params) {
             if (idx < paramTys.size) {
-                let chirParam = builder.CreateParameter(paramTys[idx], INVALID_LOCATION, lambda)
-                chirParam.SetSrcCodeIdentifier(param.identifier.Val())
+                let chirParam = builder.CreateParameter(paramTys[idx],
+                    TranslateLocationWithoutScope(builder.context, param.begin, param.end), lambda)
+                chirParam.SetSrcCodeIdentifier(param.identifier.GetRawText())
                 localValSymbolTable.Set(param, chirParam)
+            }
+            idx++
+        }
+    }
+
+    private func CreateLambdaParamDebugs(funcBody: AstFuncBody, lambda: Lambda, entry: Block,
+        hasInitial!: Bool = false): Unit {
+        if (funcBody.paramLists.isEmpty()) {
+            return
+        }
+        let params = funcBody.paramLists[0].params
+        let offset: Int64 = if (params.size < lambda.GetNumOfParams()) { 1 } else { 0 }
+        CJC_ASSERT(params.size + offset == lambda.GetNumOfParams())
+        var idx: Int64 = 0
+        for (param in params) {
+            let debugInfo = builder.CreateDebug(builder.context.GetUnitTy(), lambda.GetParam(idx + offset),
+                param.identifier.GetRawText(), entry)
+            debugInfo.SetDebugLocation(TranslateLocationWithoutScope(builder.context, param.begin, param.end))
+            debugInfo.SetDebugLocationInfoForWarning(GetDeclLoc(builder.context, param))
+            if (hasInitial) {
+                debugInfo.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
             }
             idx++
         }
@@ -3577,10 +3601,13 @@ public class Translator {
         return None
     }
 
-    private func StoreOuterReturnValueIfNeeded(value: Value): Unit {
+    private func StoreReturnExprValueIfNeeded(expr: AstReturnExpr, value: Value): Unit {
         if (let Some(returnLocation) <- GetOuterBlockGroupReturnValLocation()) {
-            builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(returnLocation)), returnLocation,
-                CurrentBlock())
+            if (expr.TestAttr(AstAttribute.COMPILER_ADD)) {
+                CreateAndAppendWrappedStore(value, returnLocation)
+            } else {
+                CreateAndAppendWrappedStore(value, returnLocation, TranslateLocation(expr))
+            }
         }
     }
 
@@ -7457,6 +7484,10 @@ public class Translator {
 
     private func CreateAndAppendWrappedStore(rhs: Value, lhs: Value, loc: DebugLocation): Unit {
         CreateAndAppendWrappedStore(rhs, lhs, CurrentBlock(), loc)
+    }
+
+    private func CreateAndAppendWrappedStore(rhs: Value, lhs: Value): Unit {
+        CreateAndAppendWrappedStore(rhs, lhs, CurrentBlock(), INVALID_LOCATION)
     }
 
     private func CreateAndAppendWrappedStore(rhs: Value, lhs: Value, parent: Block, loc: DebugLocation): Unit {

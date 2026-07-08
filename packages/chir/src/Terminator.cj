@@ -430,6 +430,10 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
         return virMethodCtx.funcType
     }
 
+    public func SetMethodType(ty: FuncType): Unit {
+        virMethodCtx.funcType = ty
+    }
+
     public func GetGenericTypeParams(): ArrayList<GenericType> {
         return virMethodCtx.GetGenericTypeParams()
     }
@@ -706,6 +710,13 @@ public class IntrinsicWithException <: ExpressionWithException {
         return instantiatedTypeArgs.clone()
     }
 
+    public func SetInstantiatedTypeArgs(args: ArrayList<Type>): Unit {
+        instantiatedTypeArgs.clear()
+        for (ty in args) {
+            instantiatedTypeArgs.add(ty)
+        }
+    }
+
     public func GetArgs(): ArrayList<Value> {
         return GetOperands()
     }
@@ -728,7 +739,7 @@ public class IntrinsicWithException <: ExpressionWithException {
 }
 
 public class AllocateWithException <: ExpressionWithException {
-    private let allocatedType: Type
+    private var allocatedType: Type
 
     public init(ty: Type, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
         super(ExprKind.ALLOCATE_WITH_EXCEPTION, ArrayList<Value>(), successBlock, errorBlock, parent)
@@ -737,6 +748,10 @@ public class AllocateWithException <: ExpressionWithException {
 
     public func GetType(): Type {
         return allocatedType
+    }
+
+    public func SetType(ty: Type): Unit {
+        allocatedType = ty
     }
 
     public override func OperandsToString(): String {
@@ -752,7 +767,7 @@ public class AllocateWithException <: ExpressionWithException {
 }
 
 public class RawArrayAllocateWithException <: ExpressionWithException {
-    private let elementType: Type
+    private var elementType: Type
 
     public init(elementTy: Type, size: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
         super(ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION, MakeUnaryTermOperands(size), successBlock, errorBlock, parent)
@@ -765,6 +780,10 @@ public class RawArrayAllocateWithException <: ExpressionWithException {
 
     public func GetElementType(): Type {
         return elementType
+    }
+
+    public func SetElementType(ty: Type): Unit {
+        elementType = ty
     }
 
     public override func OperandsToString(): String {

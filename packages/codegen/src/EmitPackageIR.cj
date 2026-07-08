@@ -7,7 +7,6 @@ import cangjie_compiler::chir.CustomDefKind
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.FuncKind
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.Type
 import cangjie_compiler::option.EnvironmentType
@@ -55,9 +54,6 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         for (chirFunc in subPackageToEmit.chirFuncs) {
             EmitFunctionIR(cgModToEmit, chirFunc)
         }
-        for (chirFunc in subPackageToEmit.chirForeigns) {
-            EmitImportedCFuncIR(cgModToEmit, chirFunc)
-        }
         for (chirFunc in subPackageToEmit.chirImportedCFuncs) {
             EmitImportedCFuncIR(cgModToEmit, chirFunc)
         }
@@ -84,10 +80,10 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         GenerateReflectionMetadata(cgModToEmit, subPackageToEmit)
         cgModToEmit.GenTypeInfo()
         InitializeCjStringLiteral(cgModToEmit)
-        let keepTypesFunc = KeepSomeTypesManually(cgModToEmit)
+        KeepSomeTypesManually(cgModToEmit)
         cgModToEmit.EraseUselessInstsAndDeclarations()
         SetSymbolLinkageType(cgModToEmit)
-        EmitStaticGenericTIsAndLLVMUsed(cgModToEmit, keepTypesFunc)
+        EmitStaticGenericTIsAndLLVMUsed(cgModToEmit)
         emitIdx++
     }
     let localizedSymbols = cgPkgContext.GetLocalizedSymbols()
@@ -368,10 +364,11 @@ private func EmitMainFunctionIR(cgMod: CGModule): Unit {
     // declaration in its own CHIR; emitting the entry for it causes "multiple definition of
     // `main`/`cj_entry$`" at link time. Skip when no user main is visible, or the visible one is
     // imported from another package.
-    let userMainEntry = FindMainEntryFunction(cgMod)
+    let userMainEntry = FindUserMainFunction(cgMod)
     if (userMainEntry.isNone() || userMainEntry.getOrThrow().TestAttr(Attribute.IMPORTED)) {
         return
     }
+    let userMainFunc = cgMod.GetOrInsertCGFunction(userMainEntry.getOrThrow())
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
         var mainFunc = LLVMNullValue()
         try (mainName = unsafe { LibC.mallocCString("main") }.asResource()) {
@@ -399,10 +396,8 @@ private func EmitMainFunctionIR(cgMod: CGModule): Unit {
                 unsafe {
                     LLVMPositionBuilderAtEnd(builder, entryBlock)
                 }
-                if (let Some(mainEntry) <- FindMainEntryFunction(cgMod)) {
-                    CreateUserMainWrapper(cgMod, moduleHandle, llvmContext, mainEntry)
-                }
-                let cjEntryFunc = CreateCJEntryFunction(cgMod, moduleHandle, llvmContext, i32Type)
+                let cjEntryFunc = CreateCJEntryFunction(cgMod, moduleHandle, llvmContext, i32Type,
+                    userMainFunc.GetRawFunction())
                 let voidFnType = unsafe { LLVMFunctionType(voidType, CPointer<LLVMTypeRef>(), 0u32, 0) }
                 let i32FnType = unsafe { LLVMFunctionType(i32Type, CPointer<LLVMTypeRef>(), 0u32, 0) }
                 let runtimeInit = GetOrInsertLLVMFunction(moduleHandle, PREFIX_OF_RUNTIME_SYMS + "CjRuntimeInit",
@@ -438,50 +433,12 @@ private func EmitMainFunctionIR(cgMod: CGModule): Unit {
     }
 }
 
-private func CreateUserMainWrapper(cgMod: CGModule, moduleHandle: LLVMModuleHandle, llvmContext: LLVMContextRef,
-    mainEntry: Function): Unit {
-    try (wrapperName = unsafe { LibC.mallocCString(USER_MAIN_MANGLED_NAME) }.asResource()) {
-        if (!unsafe { LLVMGetNamedFunction(moduleHandle.raw, wrapperName.value) }.isNull()) {
-            return
-        }
-        let i64Type = unsafe { LLVMInt64TypeInContext(llvmContext) }
-        let wrapperType = unsafe { LLVMFunctionType(i64Type, CPointer<LLVMTypeRef>(), 0u32, 0) }
-        let wrapperFunc = unsafe { LLVMAddFunction(moduleHandle.raw, wrapperName.value, wrapperType) }
-        SetCangjieGC(wrapperFunc)
-        AddFnAttr(wrapperFunc, "noinline")
-        cgMod.SetExceptionIntrinsicPersonality(wrapperFunc)
-        try (blockName = unsafe { LibC.mallocCString("entry") }.asResource()) {
-            let entryBlock = unsafe { LLVMAppendBasicBlockInContext(llvmContext, wrapperFunc, blockName.value) }
-            try (irBuilder = IRBuilder2(cgMod, entryBlock)) {
-                let retSlot = irBuilder.CreateEntryAlloca(i64Type)
-                let cgMain = cgMod.GetOrInsertCGFunction(mainEntry)
-                let mainRet = irBuilder.CreateCallOrInvoke(cgMain)
-                let retValue = if (mainRet.isNull()) {
-                    irBuilder.GetInt64(0)
-                } else if (let Some(retTy) <- mainEntry.GetReturnType()) {
-                    if (retTy.IsUnit() || retTy.IsVoid() || retTy.IsNothing()) {
-                        irBuilder.GetInt64(0)
-                    } else {
-                        mainRet
-                    }
-                } else {
-                    irBuilder.GetInt64(0)
-                }
-                irBuilder.CreateStore(retValue, retSlot)
-                let loaded = irBuilder.CreateLoad(i64Type, retSlot)
-                let _ = irBuilder.CreateRet(loaded)
-            }
-        }
-    }
-}
-
 private func CreateCJEntryFunction(cgMod: CGModule, moduleHandle: LLVMModuleHandle, llvmContext: LLVMContextRef,
-    i32Type: LLVMTypeRef): LLVMValueRef {
+    i32Type: LLVMTypeRef, userMain: LLVMValueRef): LLVMValueRef {
     let entryType = unsafe { LLVMFunctionType(i32Type, CPointer<LLVMTypeRef>(), 0u32, 0) }
     let entryFunc = GetOrInsertLLVMFunction(moduleHandle, CJ_ENTRY_FUNC_NAME, entryType)
     SetCangjieGC(entryFunc)
     cgMod.SetExceptionIntrinsicPersonality(entryFunc)
-    let zero = unsafe { LLVMConstInt(i32Type, 0u64, 0) }
     try (blockName = unsafe { LibC.mallocCString("entry") }.asResource()) {
         let entryBlock = unsafe { LLVMAppendBasicBlockInContext(llvmContext, entryFunc, blockName.value) }
         try (irBuilder = IRBuilder2(cgMod, entryBlock)) {
@@ -493,7 +450,7 @@ private func CreateCJEntryFunction(cgMod: CGModule, moduleHandle: LLVMModuleHand
 
             let unwindBlock = irBuilder.CreateAndInsertBasicBlock("unwindDest")
             try (unwindScope = CodeGenUnwindBlockScope(cgMod, unwindBlock)) {
-                CreateCJEntryTryScope(cgMod, irBuilder, zero, i32Type)
+                CreateCJEntryTryScope(cgMod, irBuilder, userMain, i32Type)
             }
             irBuilder.SetInsertPoint(unwindBlock)
             CreateUnwindBlockForTryCatchWrapper(cgMod, irBuilder, i32Type)
@@ -502,25 +459,30 @@ private func CreateCJEntryFunction(cgMod: CGModule, moduleHandle: LLVMModuleHand
     return entryFunc
 }
 
-private func CreateCJEntryTryScope(cgMod: CGModule, irBuilder: IRBuilder2, zero: LLVMValueRef,
+private func CreateCJEntryTryScope(cgMod: CGModule, irBuilder: IRBuilder2, userMain: LLVMValueRef,
     i32Type: LLVMTypeRef): Unit {
-    if (let Some(initFn) <- cgMod.GetCGContext().GetCHIRPackage().GetPackageInitFunc()) {
-        let cgInit = cgMod.GetOrInsertCGFunction(initFn)
-        let _ = irBuilder.CreateCallOrInvoke(cgInit)
+    let initFn = cgMod.GetCGContext().GetCHIRPackage().GetPackageInitFunc().getOrThrow()
+    let cgInit = cgMod.GetOrInsertCGFunction(initFn)
+    let _ = irBuilder.CreateCallOrInvoke(cgInit)
+
+    let userMainArgs = ArrayList<LLVMValueRef>()
+    if (unsafe { LLVMCountParams(userMain) } > 0u32) {
+        let getCommandLineArgsFuncCHIRNode = cgMod.GetCGContext().GetImplicitUsedFunc(
+            "_CNat18getCommandLineArgsHv").getOrThrow()
+        let getCommandLineArgsFuncReturnType = getCommandLineArgsFuncCHIRNode.GetFuncType().getOrThrow().GetReturnType()
+        let retCGType = CGType.GetOrCreate(cgMod, getCommandLineArgsFuncReturnType)
+        let commandLineArgs = irBuilder.CreateEntryAlloca(retCGType.GetLLVMType())
+        let _ = irBuilder.CreateCJMemsetStructWith0(commandLineArgs, retCGType.GetLLVMType())
+        let commandLineArgsCallArgs = ArrayList<LLVMValueRef>()
+        commandLineArgsCallArgs.add(commandLineArgs)
+        let _ = irBuilder.CreateGetCommandLineArgsCall(commandLineArgsCallArgs)
+        userMainArgs.add(irBuilder.CreatePointerCast(commandLineArgs,
+            unsafe { LLVMTypeOf(LLVMGetParam(userMain, 0u32)) }))
     }
-    if (let Some(_) <- FindMainEntryFunction(cgMod)) {
-        if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
-            let i64Type = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
-            let wrapperType = unsafe { LLVMFunctionType(i64Type, CPointer<LLVMTypeRef>(), 0u32, 0) }
-            let userMain = GetOrInsertLLVMFunction(moduleHandle, USER_MAIN_MANGLED_NAME, wrapperType)
-            let callResult = irBuilder.CreateCallOrInvoke(userMain, wrapperType, ArrayList<LLVMValueRef>())
-            irBuilder.CreateExecAtExitCallbacksCall()
-            let _ = irBuilder.CreateRet(GenerateMainRetVal(irBuilder, callResult, i32Type))
-            return
-        }
-    }
+    let userMainRetVal = irBuilder.CreateCallOrInvoke(userMain, unsafe { LLVMGlobalGetValueType(userMain) },
+        userMainArgs)
     irBuilder.CreateExecAtExitCallbacksCall()
-    let _ = irBuilder.CreateRet(zero)
+    let _ = irBuilder.CreateRet(GenerateMainRetVal(irBuilder, userMainRetVal, i32Type))
 }
 
 private func CreateUnwindBlockForTryCatchWrapper(cgMod: CGModule, irBuilder: IRBuilder2, i32Type: LLVMTypeRef): Unit {
@@ -944,16 +906,9 @@ private func SetLLVMValueName(parent: LLVMValueRef, paramIndex: UInt32, name: St
     }
 }
 
-private func FindMainEntryFunction(cgMod: CGModule): Option<Function> {
-    for (chirFunc in cgMod.GetCGContext().GetSubCHIRPackage().chirFuncs) {
-        if (chirFunc.GetFuncKind() == FuncKind.MAIN_ENTRY) {
-            return Some(chirFunc)
-        }
-    }
-    for (chirFunc in cgMod.GetCGContext().GetCHIRPackage().GetGlobalFunctions(includePureAbstract: true)) {
-        if (chirFunc.GetFuncKind() == FuncKind.MAIN_ENTRY) {
-            return Some(chirFunc)
-        }
+private func FindUserMainFunction(cgMod: CGModule): Option<Function> {
+    if (let Some(value) <- cgMod.GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(USER_MAIN_MANGLED_NAME)) {
+        return value as Function
     }
     return None
 }
@@ -1005,7 +960,7 @@ private func BuildVoidCall(builder: LLVMBuilderRef, functionType: LLVMTypeRef, c
     }
 }
 
-private func KeepSomeTypesManually(cgMod: CGModule): LLVMValueRef {
+private func KeepSomeTypesManually(cgMod: CGModule): Unit {
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
         let llvmContext = cgMod.GetLLVMContext().raw
         let functionType = unsafe {
@@ -1015,6 +970,7 @@ private func KeepSomeTypesManually(cgMod: CGModule): LLVMValueRef {
         AddFnAttr(functionValue, "noinline")
         AddFnAttr(functionValue, "optnone")
         AddLinkageTypeMetadata(functionValue, LLVMLinkage.Private, false)
+        cgMod.GetCGContext().AddLLVMUsedVars(FOR_KEEPING_SOME_TYPES_FUNC_NAME)
         try (blockName = unsafe { LibC.mallocCString("entry.unreachable") }.asResource(),
             allocaName = unsafe { LibC.mallocCString("") }.asResource()) {
             let builder = unsafe { LLVMCreateBuilderInContext(llvmContext) }
@@ -1033,17 +989,12 @@ private func KeepSomeTypesManually(cgMod: CGModule): LLVMValueRef {
                 LLVMDisposeBuilder(builder)
             }
         }
-        return functionValue
     }
-    return LLVMNullValue()
 }
 
-private func EmitStaticGenericTIsAndLLVMUsed(cgMod: CGModule, keepTypesFunc: LLVMValueRef): Unit {
+private func EmitStaticGenericTIsAndLLVMUsed(cgMod: CGModule): Unit {
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
         let usedValues = ArrayList<LLVMValueRef>()
-        if (!keepTypesFunc.isNull()) {
-            usedValues.add(keepTypesFunc)
-        }
         let staticGITable = EmitStaticGenericTITable(cgMod)
         if (!staticGITable.isNull()) {
             usedValues.add(staticGITable)

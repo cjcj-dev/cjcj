@@ -20,6 +20,7 @@ private let CC_AUTO_ENV_BASE_ANNOTATION: String = "IsAutoEnvBase"
 private let CC_AUTO_ENV_GENERIC_BASE_ANNOTATION: String = "IsAutoEnvGenericBase"
 private let CC_AUTO_ENV_INST_BASE_ANNOTATION: String = "IsAutoEnvInstBase"
 private let CC_AUTO_ENV_IMPL_ANNOTATION: String = "IsAutoEnvImpl"
+private let GENERIC_THIS_SRC_NAME: String = "This"
 
 public class ClosureConversion {
     private let builder: CHIRBuilder
@@ -41,11 +42,12 @@ public class ClosureConversion {
 
     public func RunOnPackage(pkg: Package): Unit {
         this.pkg = pkg
+        ConvertGlobalFunctions(pkg)
+        let _ = CollectNestedFunctions(pkg)
         let nestedFuncs = CollectNestedFunctions(pkg)
         ConvertNestedFunctions(nestedFuncs)
-        ConvertGlobalFunctions(pkg)
-        LiftType(pkg)
         ConvertExpressions(pkg)
+        LiftType(pkg)
         ModifyTypeMismatchInVTable()
         ModifyTypeMismatchInExpr()
         CreateVTableForAutoEnvDef()
@@ -124,6 +126,7 @@ public class ClosureConversion {
                     ReplaceUserPoint(lambdaFunc, user, boxedEnvs, autoEnvImplDef)
                 }
             }
+            RemoveGetInstantiateValue(users)
             lambdaFunc.DetachLiftedBodyAndRemoveSelf()
         }
     }
@@ -153,6 +156,7 @@ public class ClosureConversion {
                 let autoEnvImplDef = GetOrCreateAutoEnvImplDef(fn, autoEnvBaseDef)
                 ReplaceUserPoint(fn, user, autoEnvImplDef)
             }
+            RemoveGetInstantiateValue(users)
         }
     }
 
@@ -955,11 +959,19 @@ public class ClosureConversion {
         }
         let body = lambda.GetBody() ??
             throw IllegalStateException("ClosureConversion lambda has no body")
+        ReplaceThisTypeInApplyAndInvoke(lambda, convertedGenericParams)
         globalFunc.InitBody(body)
         if (let Some(retValue) <- lambda.GetReturnValue()) {
             globalFunc.SetReturnValue(retValue)
         }
-        ReplaceEnvVarWithMemberVar(capturedValues, globalFunc, thisParam)
+        var envParamDebug: Option<Expression> = None
+        if (classDef.GetAllInstanceVarNum() != 0) {
+            let debugExpr = builder.CreateDebug(builder.context.GetUnitTy(), thisParam, "$env",
+                globalFunc.GetEntryBlock().getOrThrow())
+            globalFunc.GetEntryBlock().getOrThrow().InsertExprIntoHead(debugExpr)
+            envParamDebug = Some(debugExpr)
+        }
+        ReplaceEnvVarWithMemberVar(capturedValues, envParamDebug, globalFunc, thisParam)
         // Mirror C++ LiftLambdaToGlobalFunc step 3 (ClosureConversion.cpp:2008-2028):
         // traverse the lifted body and re-map the original generics (e.g. the
         // enclosing func's `T`) to the lifted func's own generic params, so the
@@ -1016,6 +1028,146 @@ public class ClosureConversion {
         }
     }
 
+    // Mirror C++ ReplaceThisTypeInApplyAndInvoke
+    // (src/CHIR/Transformation/ClosureConversion.cpp:464-482).
+    private func ReplaceThisTypeInApplyAndInvoke(lambda: Lambda, genericTypeParams: ArrayList<GenericType>): Unit {
+        let result = lambda.GetResult() ??
+            throw IllegalStateException("ClosureConversion lambda has no result")
+        if (!NeedAddThisType(result)) {
+            return
+        }
+        CJC_ASSERT(!genericTypeParams.isEmpty())
+        let thisType = genericTypeParams[0]
+        let body = lambda.GetBody() ??
+            throw IllegalStateException("ClosureConversion lambda has no body")
+        ConvertBlockGroupThisTypes(body, thisType)
+    }
+
+    private func ConvertBlockGroupThisTypes(group: BlockGroup, thisType: Type): Unit {
+        for (block in group.GetBlocks()) {
+            for (expr in block.GetExpressions()) {
+                ConvertExpressionThisTypes(expr, thisType)
+                for (subGroup in expr.GetBlockGroups()) {
+                    ConvertBlockGroupThisTypes(subGroup, thisType)
+                }
+            }
+        }
+    }
+
+    private func ConvertExpressionThisTypes(expr: Expression, thisType: Type): Unit {
+        if (let Some(result) <- expr.GetResult()) {
+            ConvertValueThisType(result, thisType)
+        }
+        if (let Some(allocate) <- (expr as Allocate)) {
+            allocate.SetType(ReplaceThisTypeToConcreteType(allocate.GetType(), thisType))
+        } else if (let Some(allocateWithException) <- (expr as AllocateWithException)) {
+            allocateWithException.SetType(ReplaceThisTypeToConcreteType(allocateWithException.GetType(), thisType))
+        } else if (let Some(instanceOfExpr) <- (expr as InstanceOf)) {
+            instanceOfExpr.SetTestedType(ReplaceThisTypeToConcreteType(instanceOfExpr.GetType(), thisType))
+        } else if (let Some(rawArrayAllocate) <- (expr as RawArrayAllocate)) {
+            rawArrayAllocate.SetElementType(ReplaceThisTypeToConcreteType(rawArrayAllocate.GetElementType(), thisType))
+        } else if (let Some(rawArrayAllocateWithException) <- (expr as RawArrayAllocateWithException)) {
+            rawArrayAllocateWithException.SetElementType(
+                ReplaceThisTypeToConcreteType(rawArrayAllocateWithException.GetElementType(), thisType))
+        } else if (let Some(getRTTIStatic) <- (expr as GetRTTIStatic)) {
+            getRTTIStatic.SetRTTIType(ReplaceThisTypeToConcreteType(getRTTIStatic.GetRTTIType(), thisType))
+        }
+        if (let Some(call) <- (expr as FuncCall)) {
+            ConvertFuncCallThisTypes(call, thisType)
+        }
+        if (let Some(callWithException) <- (expr as FuncCallWithException)) {
+            ConvertFuncCallWithExceptionThisTypes(callWithException, thisType)
+        }
+        if (let Some(dispatch) <- (expr as DynamicDispatch)) {
+            dispatch.SetMethodType(ConvertFuncParamsAndRetTypeWithThisType(dispatch.GetMethodType(), thisType))
+        }
+        if (let Some(dispatchWithException) <- (expr as DynamicDispatchWithException)) {
+            dispatchWithException.SetMethodType(
+                ConvertFuncParamsAndRetTypeWithThisType(dispatchWithException.GetMethodType(), thisType))
+        }
+        if (let Some(constant) <- (expr as Constant)) {
+            ConvertValueThisType(constant.GetValue(), thisType)
+        }
+        if (let Some(intrinsic) <- (expr as Intrinsic)) {
+            intrinsic.SetInstantiatedTypeArgs(ConvertTypeArgsWithThisType(intrinsic.GetInstantiatedTypeArgs(), thisType))
+        }
+        if (let Some(intrinsicWithException) <- (expr as IntrinsicWithException)) {
+            intrinsicWithException.SetInstantiatedTypeArgs(
+                ConvertTypeArgsWithThisType(intrinsicWithException.GetInstantiatedTypeArgs(), thisType))
+        }
+        if (let Some(getInstantiateValue) <- (expr as GetInstantiateValue)) {
+            let instantiateTypes = getInstantiateValue.GetInstantiateTypesRef()
+            var idx: Int64 = 0
+            while (idx < instantiateTypes.size) {
+                instantiateTypes[idx] = ReplaceThisTypeToConcreteType(instantiateTypes[idx], thisType)
+                idx++
+            }
+        }
+        if (let Some(lambdaExpr) <- (expr as Lambda)) {
+            if (let Some(lambdaTy) <- lambdaExpr.GetFuncType()) {
+                lambdaExpr.SetFuncType(ConvertFuncParamsAndRetTypeWithThisType(lambdaTy, thisType))
+            }
+            for (param in lambdaExpr.GetParams()) {
+                ConvertValueThisType(param, thisType)
+            }
+        }
+    }
+
+    private func ConvertFuncCallThisTypes(call: FuncCall, thisType: Type): Unit {
+        if (let Some(rawThisTy) <- call.GetThisType()) {
+            call.SetThisType(ReplaceThisTypeToConcreteType(rawThisTy, thisType))
+        }
+        call.SetInstantiatedTypeArgs(ConvertTypeArgsWithThisType(call.GetInstantiatedTypeArgs(), thisType))
+    }
+
+    private func ConvertFuncCallWithExceptionThisTypes(call: FuncCallWithException, thisType: Type): Unit {
+        if (let Some(rawThisTy) <- call.GetThisType()) {
+            call.SetThisType(ReplaceThisTypeToConcreteType(rawThisTy, thisType))
+        }
+        call.SetInstantiatedTypeArgs(ConvertTypeArgsWithThisType(call.GetInstantiatedTypeArgs(), thisType))
+    }
+
+    private func ConvertFuncParamsAndRetTypeWithThisType(funcTy: FuncType, thisType: Type): FuncType {
+        let params = ArrayList<Type>()
+        for (paramTy in funcTy.GetParamTypes()) {
+            params.add(ReplaceThisTypeToConcreteType(paramTy, thisType))
+        }
+        return builder.context.GetFuncTy(params, ReplaceThisTypeToConcreteType(funcTy.GetReturnType(), thisType),
+            hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+    }
+
+    private func ConvertTypeArgsWithThisType(args: ArrayList<Type>, thisType: Type): ArrayList<Type> {
+        let converted = ArrayList<Type>()
+        for (arg in args) {
+            converted.add(ReplaceThisTypeToConcreteType(arg, thisType))
+        }
+        return converted
+    }
+
+    private func ConvertValueThisType(value: Value, thisType: Type): Unit {
+        if (let Some(valueTy) <- value.GetType()) {
+            value.SetType(ReplaceThisTypeToConcreteType(valueTy, thisType))
+        }
+    }
+
+    // Mirror C++ ReplaceThisTypeToConcreteType
+    // (src/CHIR/Utils/Utils.cpp:450-461).
+    private func ReplaceThisTypeToConcreteType(ty: Type, concreteType: Type): Type {
+        if (let Some(refTy) <- (ty as RefType)) {
+            if (refTy.GetBaseType().IsThis()) {
+                return concreteType
+            }
+        }
+        if (ty.IsThis()) {
+            return concreteType
+        }
+        let newArgs = ArrayList<Type>()
+        for (argTy in ty.GetTypeArgs()) {
+            newArgs.add(ReplaceThisTypeToConcreteType(argTy, concreteType))
+        }
+        return CreateNewTypeWithArgs(ty, newArgs, builder)
+    }
+
     private func ConvertValueTypeWithGenericMap(value: Value, genericMap: HashMap<String, Type>): Unit {
         if (value.AsFunction().isSome()) {
             return
@@ -1056,11 +1208,11 @@ public class ClosureConversion {
         lambda.DetachLiftedBodyAndRemoveSelf()
     }
 
-    private func ReplaceEnvVarWithMemberVar(capturedValues: ArrayList<Value>, globalFunc: Function,
-        thisParam: Value): Unit {
+    private func ReplaceEnvVarWithMemberVar(capturedValues: ArrayList<Value>, firstExpr: Option<Expression>,
+        globalFunc: Function, thisParam: Value): Unit {
         let entry = globalFunc.GetEntryBlock() ??
             throw IllegalStateException("ClosureConversion lifted function has no entry block")
-        var lastExpr: Option<Expression> = None
+        var lastExpr = firstExpr
         var capturedIndex: UInt64 = 0u64
         for (captured in capturedValues) {
             let capturedTy = captured.GetType() ??
@@ -1096,7 +1248,9 @@ public class ClosureConversion {
         let envs = ArrayList<Value>()
         let obj = CreateAutoEnvImplObject(parent, RequireClassType(autoEnvImplDef), envs, user, fn)
         let baseObj = CastAutoEnvObjToSuper(obj, autoEnvImplDef, user)
-        user.ReplaceOperand(fn, baseObj)
+        let converted = CastTypeFromAutoEnvRefToFuncType(fn.GetFuncType().getOrThrow(), baseObj, user,
+            GetOutDefDeclaredTypes(fn))
+        user.ReplaceOperand(fn, converted)
     }
 
     private func ReplaceUserPoint(lambda: Lambda, user: Expression, envs: ArrayList<Value>,
@@ -1146,8 +1300,9 @@ public class ClosureConversion {
                 return
             }
         }
-        let baseObj = CastAutoEnvObjToSuper(autoEnvObj, autoEnvImplDef, user)
-        user.ReplaceOperand(result, baseObj)
+        let converted = CastTypeFromAutoEnvRefToFuncType((result.GetType().getOrThrow() as FuncType).getOrThrow(),
+            autoEnvObj, user, GetOutDefDeclaredTypes(result))
+        user.ReplaceOperand(result, converted)
     }
 
     private func CreateAutoEnvImplObject(parent: Block, autoEnvImplType: ClassType, envs: ArrayList<Value>,
@@ -1180,9 +1335,25 @@ public class ClosureConversion {
         for (genericTy in GetVisiableGenericTypes(srcFunc)) {
             autoEnvInstTypeArgs.add(genericTy)
         }
-        // Overlay any explicit instantiated type args carried by the call site that
-        // applies srcFunc onto the trailing func-generic slots.
-        if (let Some(apply) <- (user as Apply)) {
+        if (let Some(giv) <- (user as GetInstantiateValue)) {
+            let givInstTypes = giv.GetInstantiateTypes()
+            let funcGenericParamNum = GetFuncGenericTypeParamNum(srcFunc)
+            CJC_ASSERT(funcGenericParamNum <= autoEnvInstTypeArgs.size)
+            CJC_ASSERT(funcGenericParamNum <= givInstTypes.size)
+            let instArgsOffset = autoEnvInstTypeArgs.size - funcGenericParamNum
+            let givInstTysOffset = givInstTypes.size - funcGenericParamNum
+            var idx: Int64 = 0
+            while (idx < funcGenericParamNum) {
+                autoEnvInstTypeArgs[instArgsOffset + idx] = givInstTypes[givInstTysOffset + idx]
+                idx++
+            }
+            let instTypeParams = GetInstTypeParamsForCustomTypeDef(givInstTypes, srcFunc)
+            idx = 0
+            while (idx < instTypeParams.size) {
+                autoEnvInstTypeArgs[idx] = instTypeParams[idx]
+                idx++
+            }
+        } else if (let Some(apply) <- (user as Apply)) {
             if (apply.GetCallee().nodeId == srcFunc.nodeId) {
                 OverlayInstantiatedTypeArgs(autoEnvInstTypeArgs, apply.GetInstantiatedTypeArgs())
             }
@@ -1194,9 +1365,7 @@ public class ClosureConversion {
         if (NeedAddThisType(srcFunc)) {
             autoEnvInstTypeArgs.add(builder.context.GetThisTy(), at: 0)
         }
-        if (autoEnvImplType.GetGenericArgs().size != autoEnvInstTypeArgs.size) {
-            return autoEnvImplType
-        }
+        CJC_ASSERT(autoEnvImplType.GetGenericArgs().size == autoEnvInstTypeArgs.size)
         return builder.context.GetClassTy(autoEnvImplType.GetClassDef(), autoEnvInstTypeArgs)
     }
 
@@ -1213,6 +1382,94 @@ public class ClosureConversion {
             i++
             j++
         }
+    }
+
+    private func GetFuncGenericTypeParamNum(srcFunc: Value): Int64 {
+        if (let Some(fn) <- srcFunc.AsFunction()) {
+            return fn.GetGenericTypeParams().size
+        }
+        let local = srcFunc.AsLocalVar() ??
+            throw IllegalStateException("ClosureConversion generic-param source is not a function or lambda result")
+        let lambda = (local.GetExpr().getOrThrow() as Lambda).getOrThrow()
+        return lambda.GetGenericTypeParams().size
+    }
+
+    private func GetInstTypeParamsForCustomTypeDef(givInstTypes: ArrayList<Type>,
+        srcFunc: Value): ArrayList<Type> {
+        let result = ArrayList<Type>()
+        let memberFunc = GetTopLevelFunctionForValue(srcFunc) ??
+            throw IllegalStateException("ClosureConversion instantiated type source has no top-level function")
+        let parentCustomTypeDef = memberFunc.GetParentCustomTypeDef() ?? return result
+        if (let Some(extendDef) <- (parentCustomTypeDef as ExtendDef)) {
+            let extendedType = extendDef.GetExtendedType() ??
+                throw IllegalStateException("ClosureConversion extend def has no extended type")
+            let genericTypeArgs = extendedType.GetTypeArgs()
+            CJC_ASSERT(genericTypeArgs.size <= givInstTypes.size)
+            let genericMap = HashMap<Int64, Type>()
+            var idx: Int64 = 0
+            while (idx < genericTypeArgs.size) {
+                let newMap = genericTypeArgs[idx].CalculateGenericTyMapping(givInstTypes[idx])
+                CJC_ASSERT(newMap[0])
+                for ((key, value) in newMap[1]) {
+                    genericMap[key] = value
+                }
+                idx++
+            }
+            for (ty in extendDef.GetGenericTypeParams()) {
+                result.add(genericMap.get(ty.objectId).getOrThrow())
+            }
+            return result
+        }
+        let offset = parentCustomTypeDef.GetGenericTypeParams().size
+        CJC_ASSERT(offset <= givInstTypes.size)
+        var idx2: Int64 = 0
+        while (idx2 < offset) {
+            result.add(givInstTypes[idx2])
+            idx2++
+        }
+        return result
+    }
+
+    private func GetOutDefDeclaredTypes(innerDef: Value): ArrayList<Type> {
+        let visibleGenericTypes = GetVisiableGenericTypes(innerDef)
+        let instArgs = ArrayList<Type>()
+        for (genericTy in visibleGenericTypes) {
+            instArgs.add(genericTy)
+        }
+        if (let Some(parentFunc) <- GetTopLevelFunctionForValue(innerDef)) {
+            if (let Some(parentDef) <- parentFunc.GetParentCustomTypeDef()) {
+                if (let Some(extendDef) <- (parentDef as ExtendDef)) {
+                    let exGenericTypes = extendDef.GetGenericTypeParams()
+                    var removeCount: Int64 = 0
+                    while (removeCount < exGenericTypes.size && !instArgs.isEmpty()) {
+                        instArgs.remove(at: 0)
+                        removeCount++
+                    }
+                    if (let Some(extendedTy) <- extendDef.GetExtendedType()) {
+                        let exTypeArgs = extendedTy.GetTypeArgs()
+                        var insertIdx: Int64 = 0
+                        for (argTy in exTypeArgs) {
+                            instArgs.add(argTy, at: insertIdx)
+                            insertIdx++
+                        }
+                    }
+                }
+            }
+        }
+        return instArgs
+    }
+
+    private func GetTopLevelFunctionForValue(value: Value): Option<Function> {
+        if (let Some(fn) <- value.AsFunction()) {
+            return Some(fn)
+        }
+        if (let Some(param) <- value.AsParameter()) {
+            return param.GetTopLevelFunc()
+        }
+        if (let Some(local) <- value.AsLocalVar()) {
+            return local.GetTopLevelFunc()
+        }
+        return None
     }
 
     // Mirror C++ GetVisiableGenericTypes (src/CHIR/Utils/Utils.cpp:1050-1108):
@@ -1312,6 +1569,67 @@ public class ClosureConversion {
             return RequireResult(castToBase)
         }
         return autoEnvObj
+    }
+
+    private func RemoveGetInstantiateValue(maybeGetInsValue: ArrayList<Expression>): Unit {
+        for (expr in maybeGetInsValue) {
+            if (let Some(getInsValue) <- (expr as GetInstantiateValue)) {
+                let op = getInsValue.GetGenericResult()
+                let getInsResult = getInsValue.GetResult() ??
+                    throw IllegalStateException("ClosureConversion GetInstantiateValue has no result")
+                let users = getInsResult.GetUsers()
+                for (user in users) {
+                    user.ReplaceOperand(getInsResult, op)
+                }
+                getInsValue.RemoveSelfFromBlock()
+            }
+        }
+    }
+
+    private func CastTypeFromAutoEnvRefToFuncType(srcFuncType: FuncType, autoEnvObj: Value, user: Expression,
+        genericTypeParams: ArrayList<Type>): Value {
+        var unboxRetTy = RemoveBoxTypeShellIfNeed(srcFuncType)
+        if (let Some(giv) <- (user as GetInstantiateValue)) {
+            let allInstTypes = giv.GetInstantiateTypes()
+            let replaceMap = HashMap<Int64, Type>()
+            CJC_ASSERT(allInstTypes.size >= genericTypeParams.size)
+            let offset = allInstTypes.size - genericTypeParams.size
+            var instIdx = offset
+            var genericIdx: Int64 = 0
+            while (instIdx < allInstTypes.size) {
+                if (let Some(genericTy) <- (genericTypeParams[genericIdx] as GenericType)) {
+                    replaceMap[genericTy.objectId] = allInstTypes[instIdx]
+                }
+                instIdx++
+                genericIdx++
+            }
+            unboxRetTy = ReplaceRawGenericArgType(unboxRetTy, replaceMap, builder)
+        } else {
+            let autoEnvObjTy = (autoEnvObj.GetType().getOrThrow() as RefType).getOrThrow().GetBaseType()
+            unboxRetTy = GetFuncTypeWithoutThisPtrFromAutoEnvType((autoEnvObjTy as ClassType).getOrThrow())
+        }
+        let parent = user.GetParentBlock() ??
+            throw IllegalStateException("ClosureConversion auto-env cast user has no parent block")
+        let unbox = builder.CreateUnBox(unboxRetTy, autoEnvObj, parent)
+        unbox.MoveBefore(user)
+        return RequireResult(unbox)
+    }
+
+    private func GetFuncTypeWithoutThisPtrFromAutoEnvType(autoEnvType: ClassType): FuncType {
+        CJC_ASSERT(autoEnvType.IsAutoEnv())
+        if (autoEnvType.IsAutoEnvBase()) {
+            let (_, methodTy) = GetFuncTypeFromAutoEnvBaseDef(autoEnvType.GetClassDef())
+            let params = methodTy.GetParamTypes()
+            let newParams = ArrayList<Type>()
+            var idx: Int64 = 1
+            while (idx < params.size) {
+                newParams.add(params[idx])
+                idx++
+            }
+            return builder.context.GetFuncTy(newParams, methodTy.GetReturnType(),
+                hasVarLenParam: methodTy.HasVarArg(), isCFunc: methodTy.IsCFunc())
+        }
+        return GetFuncTypeWithoutThisPtrFromAutoEnvType(autoEnvType.GetSuperClassTy(builder: builder).getOrThrow())
     }
 
     private func BoxAllMutableVars(rawEnvs: ArrayList<Value>): ArrayList<Value> {
@@ -1503,11 +1821,23 @@ public class ClosureConversion {
     }
 
     private func ApplyNeedConvertToInvoke(apply: Apply): Bool {
-        return !apply.GetCallee().IsFunc() && IsAutoEnvRefType(apply.GetCallee().GetType())
+        if (apply.GetCallee().IsFunc()) {
+            return false
+        }
+        if (let Some(calleeTy) <- apply.GetCallee().GetType()) {
+            return calleeTy.IsCJFunc()
+        }
+        return false
     }
 
     private func ApplyWithExceptionNeedConvertToInvokeWithException(apply: ApplyWithException): Bool {
-        return !apply.GetCallee().IsFunc() && IsAutoEnvRefType(apply.GetCallee().GetType())
+        if (apply.GetCallee().IsFunc()) {
+            return false
+        }
+        if (let Some(calleeTy) <- apply.GetCallee().GetType()) {
+            return calleeTy.IsCJFunc()
+        }
+        return false
     }
 
     private func TypeCastNeedConvertToBox(expr: Expression): Bool {
@@ -1540,17 +1870,6 @@ public class ClosureConversion {
         let targetTy = unbox.GetTargetTy() ??
             throw IllegalStateException("ClosureConversion UnBox has no target type")
         return targetTy.IsCJFunc()
-    }
-
-    private func IsAutoEnvRefType(tyOpt: Option<Type>): Bool {
-        if (let Some(ty) <- tyOpt) {
-            if (let Some(refTy) <- (ty as RefType)) {
-                if (let Some(classTy) <- (refTy.GetBaseType() as ClassType)) {
-                    return IsAutoEnvDef(classTy.GetClassDef())
-                }
-            }
-        }
-        return false
     }
 
     private func InstantiateAutoEnvBaseType(autoEnvBaseDef: ClassDef, funcTy: FuncType): ClassType {
@@ -2197,37 +2516,11 @@ public class ClosureConversion {
     }
 
     private func CreateGenericTypeParamsForAutoEnvImplDef(value: Value): ArrayList<GenericType> {
-        let result = ArrayList<GenericType>()
-        if (let Some(fn) <- value.AsFunction()) {
-            AddGenericParamsNoDup(result, GenericParamsFromFunction(fn))
-            return result
-        }
-        if (let Some(local) <- value.AsLocalVar()) {
-            if (let Some(expr) <- local.GetExpr()) {
-                if (let Some(lambda) <- (expr as Lambda)) {
-                    AddGenericParamsNoDup(result, lambda.GetGenericTypeParams())
-                }
-            }
-            if (let Some(topLevelFunc) <- local.GetTopLevelFunc()) {
-                AddGenericParamsNoDup(result, GenericParamsFromFunction(topLevelFunc))
-            }
-            return result
-        }
-        if (let Some(param) <- value.AsParameter()) {
-            if (let Some(topLevelFunc2) <- param.GetTopLevelFunc()) {
-                AddGenericParamsNoDup(result, GenericParamsFromFunction(topLevelFunc2))
-            }
+        let result = GetVisiableGenericTypes(value)
+        if (NeedAddThisType(value)) {
+            result.add(builder.context.GetGenericTy("This", GENERIC_THIS_SRC_NAME), at: 0)
         }
         return result
-    }
-
-    private func GenericParamsFromFunction(fn: Function): ArrayList<GenericType> {
-        let out = ArrayList<GenericType>()
-        if (let Some(parentDef) <- fn.GetParentCustomTypeDef()) {
-            AddGenericParamsNoDup(out, parentDef.GetGenericTypeParams())
-        }
-        AddGenericParamsNoDup(out, fn.GetGenericTypeParams())
-        return out
     }
 
     private func AddGenericParamsNoDup(target: ArrayList<GenericType>, values: ArrayList<GenericType>): Unit {
@@ -2461,10 +2754,6 @@ public class ClosureConversion {
             }
         }
         return None
-    }
-
-    private func IsAutoEnvDef(def: ClassDef): Bool {
-        return def.GetAnnotation(CC_AUTO_ENV_CLASS_ANNOTATION).isSome()
     }
 
     private func IsInstAutoEnvBaseDef(def: ClassDef): Bool {

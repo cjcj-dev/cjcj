@@ -9,6 +9,7 @@ import cangjie_compiler::basic.DEFAULT_POSITION as BasicDefaultPosition
 import cangjie_compiler::basic.DiagnosticCache
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
+import cangjie_compiler::option.OutputMode as OptionOutputMode
 import cangjie_compiler::option.IsUnsafeBackend as OptionIsUnsafeBackend
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.*
@@ -23,6 +24,7 @@ import cangjie_compiler::utils.CPOINTER_NAME
 import cangjie_compiler::utils.CSTRING_NAME
 import cangjie_compiler::utils.CTYPE_NAME as UtilsCTypeName
 import cangjie_compiler::utils.CJC_ASSERT
+import cangjie_compiler::utils.MAIN_INVOKE
 import cangjie_compiler::utils.OBJECT_NAME
 import cangjie_compiler::utils.RAW_ARRAY_NAME
 import cangjie_compiler::utils.VARRAY_NAME
@@ -428,6 +430,7 @@ public class TypeChecker {
     private let contexts: ArrayList<ASTContext> = ArrayList<ASTContext>()
     private var currentFuncBody: Option<FuncBody> = None
     private let activeEnumConstructorRegistrations: ArrayList<EnumDecl> = ArrayList<EnumDecl>()
+    private let mainFunctionMap: HashMap<Node, ArrayList<Decl>> = HashMap<Node, ArrayList<Decl>>()
 
     public init(ci: Option<CompilerInstance>) {
         this.ci = ci
@@ -1515,7 +1518,6 @@ public class TypeChecker {
         PerformRecursiveTypesElimination(recursivePkgs, impl.typeManager)
         let implicitUsedDecls = GetImplicitUsedCoreDecls()
         let activePkgs = ArrayList<Package>()
-        var hasProgramEntry = false
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
                 activePkgs.add(pkg)
@@ -1541,35 +1543,239 @@ public class TypeChecker {
                     }), diag: impl.diag)
                 DesugarAfterInstantiation(impl.typeManager, recursivePkgs, pkg,
                     implicitUsedDecls: Some(implicitUsedDecls))
-                for (file in pkg.files) {
-                    for (decl in file.decls) {
-                        if (let Some(mainDecl) <- (decl as MainDecl)) {
-                            if (let Some(_) <- mainDecl.desugarDecl) {
-                                hasProgramEntry = true
-                            }
-                        }
+                CollectMainFunctionsFromMainDecls(pkg)
+            }
+        }
+        GenerateMainInvoke()
+        substituteImportedTypeAliasTy(impl.typeManager, recursivePkgs)
+        CheckWhetherHasProgramEntry()
+    }
+
+    private func CreateConvInt64(vd: VarDecl, ty: Ty): TypeConvExpr {
+        let convType = PrimitiveType()
+        convType.kind = TypeKind.TYPE_INT64
+        convType.SetTy(ty)
+        let numConv = TypeConvExpr()
+        numConv.typeNode = convType
+        let refExpr = CreateRefExpr(vd)
+        refExpr.SetTy(ty)
+        numConv.expr = refExpr
+        numConv.SetTy(ty)
+        return numConv
+    }
+
+    private func CreateMainInvokeDecl(funcBody: FuncBody, mainFunc: FuncDecl, funcTy: Ty): FuncDecl {
+        let mainInvokeFunc = FuncDecl()
+        funcBody.funcDecl = mainInvokeFunc
+        mainInvokeFunc.toBeCompiled = mainFunc.toBeCompiled
+        mainInvokeFunc.SetTy(funcTy)
+        mainInvokeFunc.identifier = SrcIdentifier(MAIN_INVOKE)
+        mainInvokeFunc.funcBody = funcBody
+        mainInvokeFunc.moduleName = mainFunc.moduleName
+        mainInvokeFunc.fullPackageName = mainFunc.fullPackageName
+        mainInvokeFunc.EnableAttr(Attribute.GLOBAL)
+        AddCurFile(mainInvokeFunc, file: mainFunc.curFile)
+        if (mainFunc.TestAttr(Attribute.INCRE_COMPILE)) {
+            mainInvokeFunc.EnableAttr(Attribute.INCRE_COMPILE)
+        }
+        return mainInvokeFunc
+    }
+
+    private func CollectMainFunctionsFromMainDecls(pkg: Package): Unit {
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                if (let Some(mainDecl) <- (decl as MainDecl)) {
+                    if (let Some(mainFunc) <- mainDecl.desugarDecl) {
+                        AddMainFunction(file, mainFunc)
                     }
-                    for (decl2 in file.exportedInternalDecls) {
-                        if (let Some(mainDecl2) <- (decl2 as MainDecl)) {
-                            if (let Some(_) <- mainDecl2.desugarDecl) {
-                                hasProgramEntry = true
-                            }
-                        }
+                }
+            }
+            for (decl2 in file.exportedInternalDecls) {
+                if (let Some(mainDecl2) <- (decl2 as MainDecl)) {
+                    if (let Some(mainFunc2) <- mainDecl2.desugarDecl) {
+                        AddMainFunction(file, mainFunc2)
                     }
                 }
             }
         }
-        substituteImportedTypeAliasTy(impl.typeManager, recursivePkgs)
-        CheckWhetherHasProgramEntry(hasProgramEntry)
     }
 
-    private func CheckWhetherHasProgramEntry(hasProgramEntry: Bool): Unit {
+    private func AddMainFunction(file: File, decl: Decl): Unit {
+        if (!mainFunctionMap.contains(file)) {
+            mainFunctionMap[file] = ArrayList<Decl>()
+        }
+        for (value in mainFunctionMap[file]) {
+            if (value.objectId == decl.objectId) {
+                return
+            }
+        }
+        mainFunctionMap[file].add(decl)
+    }
+
+    private func ContainsMainFunction(file: File, decl: Decl): Bool {
+        if (let Some(values) <- mainFunctionMap.get(file)) {
+            for (value in values) {
+                if (value.objectId == decl.objectId) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func CheckEntryFunc(fd: FuncDecl): Unit {
+        if (fd.curFile.isNone() || fd.curFile.getOrThrow().curPackage.isNone() || !fd.TestAttr(Attribute.GLOBAL)) {
+            return
+        }
+        let file = fd.curFile.getOrThrow()
+        if (let Some(diagValue) <- impl.diag) {
+            if (file.isCommon) {
+                let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_common_package_has_main,
+                    MakeRange(fd.begin, fd.end))
+                builder.Emit()
+            }
+            if (!mainFunctionMap.isEmpty() && (!mainFunctionMap.contains(file) || !ContainsMainFunction(file, fd))) {
+                diagValue.Diagnose(fd.begin, fd.end, BasicDiagKind.sema_redefinition_entry).Emit()
+            }
+        }
+        if (let Some(body) <- fd.funcBody) {
+            if (let Some(retType) <- body.retType) {
+                if (let Some(retTy) <- retType.GetTy()) {
+                    if (Ty.IsTyCorrect(retTy) && !(retTy.IsInteger() || retTy.IsUnit())) {
+                        if (let Some(diagValue2) <- impl.diag) {
+                            diagValue2.Diagnose(fd.begin, fd.end,
+                                BasicDiagKind.sema_unexpected_return_type_for_entry).Emit()
+                        }
+                    }
+                }
+            }
+            if (!body.paramLists.isEmpty()) {
+                let params = body.paramLists[0].params
+                var invalidParamTy = params.size > 1
+                if (!invalidParamTy) {
+                    for (param in params) {
+                        let paramTy = param.GetTy()
+                        let isArrayTy = paramTy.isSome() && paramTy.getOrThrow().IsStructArray() &&
+                            !paramTy.getOrThrow().typeArgs.isEmpty()
+                        let isArrayStringTy = isArrayTy && paramTy.getOrThrow().typeArgs[0].IsString()
+                        if (!isArrayStringTy) {
+                            invalidParamTy = true
+                            break
+                        }
+                    }
+                }
+                if (invalidParamTy) {
+                    if (let Some(diagValue3) <- impl.diag) {
+                        diagValue3.Diagnose(fd.begin, fd.end, BasicDiagKind.sema_unexpected_param_for_entry).Emit()
+                    }
+                }
+            }
+        }
+        AddMainFunction(file, fd)
+    }
+
+    private func GenerateMainInvoke(): Unit {
+        if (mainFunctionMap.size != 1) {
+            return
+        }
+        var mainFunctions: Option<ArrayList<Decl>> = None
+        for (values in mainFunctionMap.values()) {
+            mainFunctions = Some(values)
+            break
+        }
+        if (let None <- mainFunctions) {
+            return
+        }
+        let mainFunctionList = mainFunctions.getOrThrow()
+        if (mainFunctionList.size != 1) {
+            return
+        }
+        let mainFunc = if (let Some(value) <- (mainFunctionList[0] as FuncDecl)) {
+            value
+        } else {
+            return
+        }
+        let mainFile = if (let Some(value2) <- mainFunc.curFile) {
+            value2
+        } else {
+            return
+        }
+        let packageHasMain = if (let Some(value3) <- mainFile.curPackage) {
+            value3
+        } else {
+            return
+        }
+        let rawFuncTy = if (let Some(value4) <- mainFunc.GetTy()) {
+            value4
+        } else {
+            return
+        }
+        let funcTy = if (let Some(value5) <- (rawFuncTy as FuncTy)) {
+            value5
+        } else {
+            return
+        }
+        var options = OptionGlobalOptions()
+        if (let Some(instance) <- ci) {
+            options = instance.globalOptions
+        }
+        let outputCHIR = options.outputMode == OptionOutputMode.CHIR
+        let mainBody = if (let Some(value6) <- mainFunc.funcBody) {
+            value6
+        } else {
+            return
+        }
+        if ((!options.CompileExecutable() && !outputCHIR) || packageHasMain.TestAttr(Attribute.IMPORTED) ||
+            options.enIncrementalCompilation || !Ty.IsTyCorrect(funcTy.retTy) || mainBody.paramLists.isEmpty()) {
+            return
+        }
+
+        let mainTy = funcTy.retTy
+        let int64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+        let mainInvokeTy = impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), int64Ty)
+        let funcBody = FuncBody()
+        funcBody.SetTy(mainInvokeTy)
+        let block = Block()
+        block.SetTy(mainInvokeTy)
+        funcBody.body = block
+        let funcParamList = FuncParamList()
+        var argPtr: Option<VarDecl> = None
+        if (!mainBody.paramLists[0].params.isEmpty()) {
+            let param = mainBody.paramLists[0].params[0]
+            var paramType: Option<Type> = None
+            if (let Some(typeNode) <- param.typeNode) {
+                paramType = ASTCloner.Clone(typeNode) as Type
+            }
+            let newParam = CreateFuncParam("v", paramType, None, param.GetTy())
+            argPtr = newParam
+            funcParamList.params.add(newParam)
+        }
+        funcBody.paramLists.add(funcParamList)
+
+        let args = ArrayList<FuncArg>()
+        if (let Some(argDecl) <- argPtr) {
+            args.add(CreateFuncArg(CreateRefExpr(argDecl), "", argDecl.GetTy()))
+        }
+        let callMain = CreateCallExpr(CreateRefExpr(mainFunc), args, mainFunc, mainTy, CallKind.CALL_DECLARED_FUNCTION)
+        let retVal = CreateVarDecl("retVal", callMain, None)
+        let retExpr = if (mainTy.IsInteger()) {
+            CreateReturnExpr(CreateConvInt64(retVal, int64Ty), funcBody)
+        } else {
+            CreateReturnExpr(CreateLitConstExpr(LitConstKind.INTEGER, "0", int64Ty), funcBody)
+        }
+        retExpr.SetTy(TypeManager.GetNothingTy())
+        block.body.add(retVal)
+        block.body.add(retExpr)
+        mainFile.decls.add(CreateMainInvokeDecl(funcBody, mainFunc, mainInvokeTy))
+    }
+
+    private func CheckWhetherHasProgramEntry(): Unit {
         if (let None <- ci) {
             return
         }
         let instance = ci.getOrThrow()
         if (!instance.globalOptions.CompileExecutable() || instance.globalOptions.enableCompileTest ||
-            instance.frontendDumpActionIsTypeCheck || hasProgramEntry || instance.globalOptions.compileCjd) {
+            instance.frontendDumpActionIsTypeCheck || !mainFunctionMap.isEmpty() || instance.globalOptions.compileCjd) {
             return
         }
         if (instance.sourcePackages.isEmpty() || instance.sourcePackages[0].files.isEmpty()) {
@@ -2566,7 +2772,11 @@ public class TypeChecker {
                     let _ = PrepareFuncBodySignature(ctx, body)
                 }
                 BindLocalDeclIfNeeded(ctx, funcDecl)
-                return SynthesizeFuncBody(ctx, body)
+                let funcTy = SynthesizeFuncBody(ctx, body)
+                if (funcDecl.TestAttr(Attribute.MAIN_ENTRY)) {
+                    CheckEntryFunc(funcDecl)
+                }
+                return funcTy
             }
         }
         if (let Some(mainDecl) <- (decl as MainDecl)) {
