@@ -346,7 +346,19 @@ private func PropagateZExtAttributeFromCallee(callee: LLVMValueRef, callBase: LL
     }
 }
 
+private func PropagateSRetAttributeFromCallee(callee: LLVMValueRef, callBase: LLVMValueRef): Unit {
+    if (!IsLLVMFunction(callee) || callBase.isNull() ||
+        unsafe { LLVMSelfhostFunctionHasStructRetAttr(callee) } == 0) {
+        return
+    }
+    AddNoAliasAttribute(callBase)
+    if (let Some(sretType) <- GetTypeAttributeValueAtIndex(callee, 1u32, "sret")) {
+        AddSRetAttribute(callBase, sretType)
+    }
+}
+
 public func PropagateCallABIAttributesFromCallee(callee: LLVMValueRef, callBase: LLVMValueRef): Unit {
+    PropagateSRetAttributeFromCallee(callee, callBase)
     PropagateZExtAttributeFromCallee(callee, callBase)
 }
 
