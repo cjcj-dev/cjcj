@@ -281,6 +281,7 @@ foreign {
     func LLVMSelfhostGetBasicBlockPredecessorCount(block: LLVMBasicBlockRef): UInt32
     func LLVMSelfhostGetBasicBlockPredecessors(block: LLVMBasicBlockRef,
         predecessors: CPointer<LLVMBasicBlockRef>): Unit
+    func LLVMSelfhostRemoveUnreachableBlocks(fn: LLVMValueRef): Unit
     func LLVMSelfhostInstructionComesBefore(inst: LLVMValueRef, other: LLVMValueRef): Int32
     func LLVMSelfhostInstructionMoveBefore(inst: LLVMValueRef, other: LLVMValueRef): Unit
     func LLVMSelfhostIsCallInst(inst: LLVMValueRef): Int32

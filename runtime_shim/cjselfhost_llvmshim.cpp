@@ -24,6 +24,8 @@
 //         src/CodeGen/Utils/CGUtils.cpp:250-255  llvm::dyn_cast<llvm::Constant>(value).
 //   DIBuilder subprogram support:
 //         src/CodeGen/DIBuilder.cpp:204-207, 282-283, 455-476  C++ overloads not exposed exactly by LLVM-C.
+//   CGFunction::RemoveUnreachableBlocks support:
+//         src/CodeGen/CGFunction.cpp:211-217  llvm::removeUnreachableBlocks(Function&).
 
 #include <llvm-c/Core.h>
 #include <llvm-c/DebugInfo.h>
@@ -50,6 +52,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Use.h"
 #include "llvm/IR/User.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/Value.h"
 
 #include "flatbuffers/ModuleFormat_generated.h"
@@ -190,6 +193,15 @@ extern "C" void LLVMSelfhostGetBasicBlockPredecessors(LLVMBasicBlockRef BB, LLVM
     for (auto *pred : predecessors(unwrap(BB))) {
         Preds[idx++] = wrap(pred);
     }
+}
+
+extern "C" void LLVMSelfhostRemoveUnreachableBlocks(LLVMValueRef Fn)
+{
+    auto *function = unwrap<Function>(Fn);
+    if (function->isDeclaration()) {
+        return;
+    }
+    removeUnreachableBlocks(*function);
 }
 
 extern "C" int LLVMSelfhostInstructionComesBefore(LLVMValueRef Inst, LLVMValueRef Other)
