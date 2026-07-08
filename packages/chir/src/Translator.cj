@@ -3209,9 +3209,36 @@ public class Translator {
         currentBlock = trueBlock
         DecreaseDelayExitSignal()
         RestoreForInRetValIfNeeded(forIn)
+        if (!tryCatchContext.isEmpty()) {
+            GenerateSignalCheckForThrow()
+        }
         let forInExit = builder.CreateExit(None, CurrentBlock())
         forInExit.SetSkipCheck(SkipKind.SKIP_FORIN_EXIT)
         currentBlock = falseBlock
+    }
+
+    private func GenerateSignalCheckForThrow(): Unit {
+        let constZeroExpr = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock())
+        constZeroExpr.SetGeneratedFromForIn(true)
+        let constZero = RequireResult(constZeroExpr)
+        let signalLoad = builder.CreateLoad(builder.context.GetInt64Ty(), RequireDelayExitSignal(), CurrentBlock())
+        signalLoad.SetGeneratedFromForIn(true)
+        let signalValue = RequireResult(signalLoad)
+        let hasThrow = RequireResult(builder.CreateBinaryExpression(ExprKind.GT, builder.context.GetBoolTy(),
+            signalValue, constZero, CurrentBlock()))
+        let parentGroup = RequireParentBlockGroup(CurrentBlock(), "for-in throw signal")
+        let throwBlock = builder.CreateBlock(parentGroup)
+        let exceptionTy = BaseExceptionObjectType()
+        let exception = RequireResult(builder.CreateGetException(exceptionTy, throwBlock))
+        let beginCatchArgs = ArrayList<Value>()
+        beginCatchArgs.add(exception)
+        let beginCatch = RequireResult(builder.CreateIntrinsic(exceptionTy,
+            IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), throwBlock))
+        builder.CreateRaiseException(beginCatch, tryCatchContext[tryCatchContext.size - 1], throwBlock)
+        let returnBlock = builder.CreateBlock(parentGroup)
+        let branch = builder.CreateBranch(hasThrow, throwBlock, returnBlock, CurrentBlock())
+        branch.SetGeneratedFromForIn(true)
+        currentBlock = returnBlock
     }
 
     private func InitializeForInCondVar(): Value {
