@@ -119,7 +119,6 @@ public open class Expression <: Base {
 
     public func AppendBlockGroup(group: BlockGroup): Unit {
         blockGroups.add(group)
-        group.AddUserOnly(this)
         group.SetOwnerExpression(this)
     }
 
@@ -140,10 +139,11 @@ public open class Expression <: Base {
 
     public func ConnectOperandsAndGroups(): Unit {
         for (operand in operands) {
-            operand.AddUserOnly(this)
+            if (!ExpressionListContains(operand.GetUsersRef(), this)) {
+                operand.AddUserOnly(this)
+            }
         }
         for (group in blockGroups) {
-            group.AddUserOnly(this)
             group.SetOwnerExpression(this)
         }
     }
@@ -2375,6 +2375,15 @@ private func PrependGenericTypeParams(result: ArrayList<GenericType>, params: Ar
 private func ContainsParameter(values: ArrayList<Parameter>, param: Parameter): Bool {
     for (value in values) {
         if (value.nodeId == param.nodeId) {
+            return true
+        }
+    }
+    return false
+}
+
+private func ExpressionListContains(values: ArrayList<Expression>, expr: Expression): Bool {
+    for (value in values) {
+        if (value.nodeId == expr.nodeId) {
             return true
         }
     }
