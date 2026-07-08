@@ -447,7 +447,6 @@ public class ClosureConversion {
             return found
         }
         let classDef = builder.CreateClassDef(CurrentPackage().GetName(), className)
-        SetObjectSuperClass(classDef)
         let paramsAndRet = ArrayList<Type>()
         var idx: Int64 = 0
         while (idx < paramNum) {

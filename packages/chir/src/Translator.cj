@@ -1829,7 +1829,7 @@ public class Translator {
         }
         for (extendDef in customTy.GetCustomTypeDef().GetExtends()) {
             for (ty in extendDef.GetImplementedInterfaceTys()) {
-                let superInterfaceTy = ReplaceRawGenericArgType(ty, replaceTable)
+                let superInterfaceTy = ReplaceRawGenericArgType(ty, replaceTable, builder)
                 if (let Some(classTy) <- (superInterfaceTy as ClassType)) {
                     if (let Some(found) <- GetExpectedFuncFromCustomType(classTy, funcName, instFuncType, isStatic,
                         funcInstTypeArgs)) {
@@ -1900,7 +1900,7 @@ public class Translator {
             if (let Some(found) <- GetExpectedFuncFromDef(extendDef, funcName, funcType, isStatic, replaceTable,
                 funcInstTypeArgs)) {
                 if (found.GetWrappedRawMethod().isNone()) {
-                    return ReplaceRawGenericArgType(extendDef.GetExtendedType().getOrThrow(), replaceTable)
+                    return ReplaceRawGenericArgType(extendDef.GetExtendedType().getOrThrow(), replaceTable, builder)
                 }
             }
         }
@@ -1941,12 +1941,12 @@ public class Translator {
                 continue
             }
             if (GetExpectedFuncFromDef(extendDef, funcName, funcType, isStatic, replaceTable, funcInstTypeArgs).isSome()) {
-                return ReplaceRawGenericArgType(extendDef.GetExtendedType().getOrThrow(), replaceTable)
+                return ReplaceRawGenericArgType(extendDef.GetExtendedType().getOrThrow(), replaceTable, builder)
             }
         }
         if (let Some(classTy) <- (customTy as ClassType)) {
             if (let Some(superTy) <- classTy.GetClassDef().GetSuperClassTy()) {
-                let superClassTy = ReplaceRawGenericArgType(superTy, replaceTable)
+                let superClassTy = ReplaceRawGenericArgType(superTy, replaceTable, builder)
                 if (let Some(superCustomTy) <- (superClassTy as CustomType)) {
                     if (let Some(exactParentType) <- GetExactParentType(superCustomTy, funcName, funcType, isStatic,
                         funcInstTypeArgs, checkAbstractMethod)) {
@@ -1956,7 +1956,7 @@ public class Translator {
             }
         }
         for (ty in customTy.GetCustomTypeDef().GetImplementedInterfaceTys()) {
-            let superInterfaceTy = ReplaceRawGenericArgType(ty, replaceTable)
+            let superInterfaceTy = ReplaceRawGenericArgType(ty, replaceTable, builder)
             if (let Some(superCustomTy) <- (superInterfaceTy as CustomType)) {
                 if (let Some(exactParentType) <- GetExactParentType(superCustomTy, funcName, funcType, isStatic,
                     funcInstTypeArgs, checkAbstractMethod)) {
@@ -1966,7 +1966,7 @@ public class Translator {
         }
         for (extendDef in customTy.GetCustomTypeDef().GetExtends()) {
             for (ty in extendDef.GetImplementedInterfaceTys()) {
-                let superInterfaceTy = ReplaceRawGenericArgType(ty, replaceTable)
+                let superInterfaceTy = ReplaceRawGenericArgType(ty, replaceTable, builder)
                 if (let Some(superCustomTy) <- (superInterfaceTy as CustomType)) {
                     if (let Some(exactParentType) <- GetExactParentType(superCustomTy, funcName, funcType, isStatic,
                         funcInstTypeArgs, checkAbstractMethod)) {
@@ -7497,7 +7497,7 @@ public class Translator {
                 if (targetBaseTy.GetRefDims() > baseValRefDims) {
                     baseValRefDims = targetBaseTy.GetRefDims()
                 }
-                targetBaseTy = ReplaceRawGenericArgType(targetBaseTy.StripAllRefs(), instMap)
+                targetBaseTy = ReplaceRawGenericArgType(targetBaseTy.StripAllRefs(), instMap, builder)
                 var refIdx: Int64 = 0
                 while (refIdx < baseValRefDims) {
                     targetBaseTy = builder.context.GetRefTy(targetBaseTy)
@@ -7544,7 +7544,7 @@ public class Translator {
             while (memberIndex > 0) {
                 memberIndex--
                 if (allMemberVars[memberIndex].name == name) {
-                    memberTy = ReplaceRawGenericArgType(allMemberVars[memberIndex].ty, instMap)
+                    memberTy = ReplaceRawGenericArgType(allMemberVars[memberIndex].ty, instMap, builder)
                     break
                 }
             }
@@ -7595,7 +7595,7 @@ public class Translator {
             if (targetBaseTy.GetRefDims() > baseValRefDims) {
                 baseValRefDims = targetBaseTy.GetRefDims()
             }
-            targetBaseTy = ReplaceRawGenericArgType(targetBaseTy.StripAllRefs(), instMap)
+            targetBaseTy = ReplaceRawGenericArgType(targetBaseTy.StripAllRefs(), instMap, builder)
             var refIdx: Int64 = 0
             while (refIdx < baseValRefDims) {
                 targetBaseTy = builder.context.GetRefTy(targetBaseTy)

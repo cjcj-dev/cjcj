@@ -1856,14 +1856,6 @@ private func GetLayoutMetadataName(cgMod: CGModule, chirTy: Type): String {
     return STRUCT_TYPE_PREFIX + chirTy.ToString()
 }
 
-private func GetCoreObjectTypeInfo(cgMod: CGModule): LLVMValueRef {
-    let typeInfoTy = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
-    let objectTypeInfo = GetOrInsertCodeGenGlobal(cgMod, "std.core:Object.ti", typeInfoTy)
-    LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), objectTypeInfo, GC_TYPE_META_NAME,
-        GetClassObjLayoutName("std.core:Object"))
-    return objectTypeInfo
-}
-
 private func GenerateSuperOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfo: LLVMValueRef,
     typeInfoPtrType: LLVMTypeRef): LLVMValueRef {
     if (let Some(cPointerTy) <- (chirTy as CPointerType)) {
@@ -1894,9 +1886,6 @@ private func GenerateSuperOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfo: LL
             // (Module::getOrInsertGlobal coercion). LLVMConstBitCast is an identity no-op when the
             // super is already %TypeInfo* (non-generic super), matching C++ byte-for-byte.
             return unsafe { LLVMConstBitCast(superTi, typeInfoPtrType) }
-        }
-        if (!IsCoreObjectClass(classTy)) {
-            return GetCoreObjectTypeInfo(cgMod)
         }
     }
     return unsafe { LLVMConstNull(typeInfoPtrType) }
