@@ -1386,7 +1386,7 @@ public class Translator {
         } else {
             builder.context.GetUInt64Ty()
         }
-        let castedVal = TypeCastOrBoxIfNeeded(selectorVal, targetType, INVALID_LOCATION, needCheck: false)
+        let castedVal = TypeCastOrBoxIfNeeded(selectorVal, targetType, INVALID_LOCATION)
         let term = builder.CreateMultiBranch(castedVal, realDefaultBlock, indexes, blocks, baseBlock)
         term.SetDebugLocation(TranslateLocation(letPattern))
         currentBlock = realDefaultBlock
