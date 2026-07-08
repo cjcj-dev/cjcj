@@ -2,7 +2,6 @@ package cangjie_compiler::sema.GenericInstantiation
 
 import std.collection.*
 import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
 
 public class AbstractFuncMapEntry {
     public var ty: Ty
@@ -16,25 +15,32 @@ public class AbstractFuncMapEntry {
 }
 
 public class AbstractFuncMap {
-    private let entries: ArrayList<AbstractFuncMapEntry> = ArrayList<AbstractFuncMapEntry>()
+    private let entries: HashMap<Int64, HashMap<Int64, AbstractFuncMapEntry>> =
+        HashMap<Int64, HashMap<Int64, AbstractFuncMapEntry>>()
+    private var entryCount: Int64 = 0
 
     public init() {}
 
     public func Add(ty: Ty, absFunc: FuncDecl, implDecl: Decl, offset: Int64): Unit {
-        for (entry in entries) {
-            if (SameDecl(entry.absFunc, absFunc) && SameTy(entry.ty, ty)) {
-                AddImpl(entry.impls, implDecl, offset)
-                return
-            }
+        let tyKey = ty.objectId
+        let funcKey = absFunc.objectId
+        if (!entries.contains(tyKey)) {
+            entries[tyKey] = HashMap<Int64, AbstractFuncMapEntry>()
+        }
+        let tyEntries = entries.get(tyKey).getOrThrow()
+        if (let Some(entry) <- tyEntries.get(funcKey)) {
+            AddImpl(entry.impls, implDecl, offset)
+            return
         }
         let entry = AbstractFuncMapEntry(ty, absFunc)
         AddImpl(entry.impls, implDecl, offset)
-        entries.add(entry)
+        tyEntries[funcKey] = entry
+        entryCount++
     }
 
     public func Find(ty: Ty, absFunc: FuncDecl): Option<ArrayList<(Decl, Int64)>> {
-        for (entry in entries) {
-            if (SameDecl(entry.absFunc, absFunc) && SameTy(entry.ty, ty)) {
+        if (let Some(tyEntries) <- entries.get(ty.objectId)) {
+            if (let Some(entry) <- tyEntries.get(absFunc.objectId)) {
                 return entry.impls
             }
         }
@@ -43,10 +49,11 @@ public class AbstractFuncMap {
 
     public func Clear(): Unit {
         entries.clear()
+        entryCount = 0
     }
 
     public func Size(): Int64 {
-        return entries.size
+        return entryCount
     }
 
     private func AddImpl(impls: ArrayList<(Decl, Int64)>, implDecl: Decl, offset: Int64): Unit {

@@ -22,6 +22,42 @@ private func TypeCompatibilityIndex(value: TypeCompatibility): Int64 {
     }
 }
 
+private func insertTypeManagerCacheKeyPair(pairs: ArrayList<(Int64, Int64)>, pair: (Int64, Int64)): Unit {
+    var idx: Int64 = 0
+    while (idx < pairs.size) {
+        let current = pairs[idx]
+        if (pair[0] < current[0] || (pair[0] == current[0] && pair[1] < current[1])) {
+            pairs.add(pair, at: idx)
+            return
+        }
+        idx++
+    }
+    pairs.add(pair)
+}
+
+private func typeSubstCacheKey(mapping: TypeSubst): String {
+    let builder = StringBuilder()
+    let pairs = ArrayList<(Int64, Int64)>()
+    for (entry in mapping.entries) {
+        insertTypeManagerCacheKeyPair(pairs, (entry.tyVar.objectId, entry.ty.objectId))
+    }
+    for (pair in pairs) {
+        builder.append("|")
+        builder.append(pair[0].toString())
+        builder.append("=")
+        builder.append(pair[1].toString())
+    }
+    return builder.toString()
+}
+
+private func superTysCacheKey(ty: Ty, mapping: TypeSubst, withExtended: Bool): String {
+    let builder = StringBuilder()
+    builder.append(ty.objectId.toString())
+    builder.append(if (withExtended) { ":1" } else { ":0" })
+    builder.append(typeSubstCacheKey(mapping))
+    return builder.toString()
+}
+
 extend TypeCompatibility <: Equatable<TypeCompatibility> {
     public operator func ==(right: TypeCompatibility): Bool {
         return TypeCompatibilityIndex(this) == TypeCompatibilityIndex(right)
@@ -211,22 +247,6 @@ private class CheckedTyExtendRelation {
     }
 }
 
-private class SubtypeCacheEntry {
-    public var leaf: Ty
-    public var root: Ty
-    public var implicitBoxed: Bool
-    public var allowOptionBox: Bool
-    public var value: Bool
-
-    public init(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool, value: Bool) {
-        this.leaf = leaf
-        this.root = root
-        this.implicitBoxed = implicitBoxed
-        this.allowOptionBox = allowOptionBox
-        this.value = value
-    }
-}
-
 private class DeclInstantiationStatusEntry {
     public var decl: Decl
     public let typeArgs: ArrayList<Ty> = ArrayList<Ty>()
@@ -291,13 +311,17 @@ public class TypeManager {
     private let boxedTys: ArrayList<Ty> = ArrayList<Ty>()
     private let tyUsedExtends: ArrayList<TyUsedExtendsEntry> = ArrayList<TyUsedExtendsEntry>()
     private let checkedTyExtendRelation: ArrayList<CheckedTyExtendRelation> = ArrayList<CheckedTyExtendRelation>()
-    private let subtypeCache: ArrayList<SubtypeCacheEntry> = ArrayList<SubtypeCacheEntry>()
+    private let tyExtendInterfaceTyMap: HashMap<Int64, TySet> = HashMap<Int64, TySet>()
+    private let tyToSuperTysMap: HashMap<String, TySet> = HashMap<String, TySet>()
+    private let subtypeCache: HashMap<Int64, HashMap<Int64, HashMap<Int64, Bool>>> =
+        HashMap<Int64, HashMap<Int64, HashMap<Int64, Bool>>>()
     private let declInstantiationStatus: ArrayList<DeclInstantiationStatusEntry> =
         ArrayList<DeclInstantiationStatusEntry>()
     private let allocatedTyCache: HashMap<String, Ty> = HashMap<String, Ty>()
     private let allocatedClassLikeTys: ArrayList<Ty> = ArrayList<Ty>()
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
     private let tyVarScopes: ArrayList<TyVarScope> = ArrayList<TyVarScope>()
+    private let declToExtendIndex: HashMap<Int64, DeclExtendsEntry> = HashMap<Int64, DeclExtendsEntry>()
     private let tyVarScopeDepth: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     private let instCtxScopes: ArrayList<InstCtxScope> = ArrayList<InstCtxScope>()
     private var nextUniqId: UInt64 = 0u64
@@ -883,6 +907,10 @@ public class TypeManager {
         if (!Ty.IsTyCorrect(ty)) {
             return out
         }
+        let cacheKey = superTysCacheKey(ty, typeMapping, withExtended)
+        if (let Some(cached) <- tyToSuperTysMap.get(cacheKey)) {
+            return cached.Clone()
+        }
         let maybeInstTy = if (typeMapping.IsEmpty()) { ty } else { GetInstantiatedTy(ty, typeMapping) }
         if (maybeInstTy.IsClassLike() || maybeInstTy.IsStruct()) {
             out.Add(maybeInstTy)
@@ -902,6 +930,9 @@ public class TypeManager {
             for (extendInterfaceTy in GetAllExtendInterfaceTy(ty).values) {
                 out.Add(GetInstantiatedTy(extendInterfaceTy, typeMapping))
             }
+        }
+        if (!ty.HasPlaceholder()) {
+            tyToSuperTysMap[cacheKey] = out.Clone()
         }
         return out
     }
@@ -1705,6 +1736,9 @@ public class TypeManager {
         if (!Ty.IsTyCorrect(ty)) {
             return TySet()
         }
+        if (let Some(cached) <- tyExtendInterfaceTyMap.get(ty.objectId)) {
+            return cached.Clone()
+        }
         let out = getAllExtendInterfaceTyHelper(GetAllExtendsByTy(ty), GetTypeArgs(ty))
         if (ty.IsClass()) {
             let directSupers = GetAllSuperTys(ty, typeMapping: TypeSubst(), withExtended: false)
@@ -1718,6 +1752,9 @@ public class TypeManager {
                     }
                 }
             }
+        }
+        if (!ty.HasPlaceholder()) {
+            tyExtendInterfaceTyMap[ty.objectId] = out.Clone()
         }
         return out
     }
@@ -1821,10 +1858,14 @@ public class TypeManager {
     }
 
     public func GetDeclExtends(decl: InheritableDecl): ArrayList<ExtendDecl> {
-        for (entry in declToExtendMap) {
-            if (SameDecl(entry.decl, decl)) {
-                return entry.extends
+        if (declToExtendIndex.size != declToExtendMap.size) {
+            declToExtendIndex.clear()
+            for (entry in declToExtendMap) {
+                declToExtendIndex[entry.decl.objectId] = entry
             }
+        }
+        if (let Some(entry) <- declToExtendIndex.get(decl.objectId)) {
+            return entry.extends
         }
         return ArrayList<ExtendDecl>()
     }
@@ -1924,6 +1965,9 @@ public class TypeManager {
     public func ClearMapCache(): Unit {
         builtinTyToExtendMap.clear()
         declToExtendMap.clear()
+        declToExtendIndex.clear()
+        tyExtendInterfaceTyMap.clear()
+        tyToSuperTysMap.clear()
         overrideCache.clear()
         declInstantiationStatus.clear()
         subtypeCache.clear()
@@ -1954,6 +1998,8 @@ public class TypeManager {
 
     public func ReleaseSemaQueryCaches(): Unit {
         overrideCache.clear()
+        tyExtendInterfaceTyMap.clear()
+        tyToSuperTysMap.clear()
         subtypeCache.clear()
         declInstantiationStatus.clear()
     }
@@ -2685,12 +2731,6 @@ public class TypeManager {
         return substituteTypeArgs(ty, typeArgs)
     }
 
-    private func sameSubtypeCacheKey(entry: SubtypeCacheEntry, leaf: Ty, root: Ty, implicitBoxed: Bool,
-        allowOptionBox: Bool): Bool {
-        return entry.implicitBoxed == implicitBoxed && entry.allowOptionBox == allowOptionBox &&
-            SameTy(entry.leaf, leaf) && SameTy(entry.root, root)
-    }
-
     private func sameDeclInstantiationTypeArgs(left: ArrayList<Ty>, right: ArrayList<Ty>): Bool {
         if (left.size != right.size) {
             return false
@@ -2723,37 +2763,51 @@ public class TypeManager {
         }
     }
 
+    private func subtypeCacheFlagKey(implicitBoxed: Bool, allowOptionBox: Bool): Int64 {
+        var key: Int64 = 0
+        if (implicitBoxed) {
+            key += 1
+        }
+        if (allowOptionBox) {
+            key += 2
+        }
+        return key
+    }
+
     private func getSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Option<Bool> {
-        for (entry in subtypeCache) {
-            if (sameSubtypeCacheKey(entry, leaf, root, implicitBoxed, allowOptionBox)) {
-                return entry.value
+        if (let Some(rootMap) <- subtypeCache.get(leaf.objectId)) {
+            if (let Some(flagMap) <- rootMap.get(root.objectId)) {
+                return flagMap.get(subtypeCacheFlagKey(implicitBoxed, allowOptionBox))
             }
         }
         return None
     }
 
     private func addSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool, value: Bool): Unit {
-        subtypeCache.add(SubtypeCacheEntry(leaf, root, implicitBoxed, allowOptionBox, value))
+        setSubtypeCache(leaf, root, implicitBoxed, allowOptionBox, value)
     }
 
     private func setSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool, value: Bool): Unit {
-        for (entry in subtypeCache) {
-            if (sameSubtypeCacheKey(entry, leaf, root, implicitBoxed, allowOptionBox)) {
-                entry.value = value
-                return
+        let leafKey = leaf.objectId
+        if (let None <- subtypeCache.get(leafKey)) {
+            subtypeCache[leafKey] = HashMap<Int64, HashMap<Int64, Bool>>()
+        }
+        if (let Some(rootMap) <- subtypeCache.get(leafKey)) {
+            let rootKey = root.objectId
+            if (let None <- rootMap.get(rootKey)) {
+                rootMap[rootKey] = HashMap<Int64, Bool>()
+            }
+            if (let Some(flagMap) <- rootMap.get(rootKey)) {
+                flagMap[subtypeCacheFlagKey(implicitBoxed, allowOptionBox)] = value
             }
         }
-        addSubtypeCache(leaf, root, implicitBoxed, allowOptionBox, value)
     }
 
     private func removeSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Unit {
-        var idx: Int64 = 0
-        while (idx < subtypeCache.size) {
-            if (sameSubtypeCacheKey(subtypeCache[idx], leaf, root, implicitBoxed, allowOptionBox)) {
-                subtypeCache.remove(at: idx)
-                return
+        if (let Some(rootMap) <- subtypeCache.get(leaf.objectId)) {
+            if (let Some(flagMap) <- rootMap.get(root.objectId)) {
+                flagMap.remove(subtypeCacheFlagKey(implicitBoxed, allowOptionBox))
             }
-            idx++
         }
     }
 

@@ -38,6 +38,14 @@ private func containsExtendDecl(values: ArrayList<ExtendDecl>, decl: ExtendDecl)
     return false
 }
 
+private func addDeclUnique(values: ArrayList<Decl>, seen: HashSet<Int64>, candidate: Decl): Unit {
+    let key = candidate.objectId
+    if (!seen.contains(key)) {
+        seen.add(key)
+        values.add(candidate)
+    }
+}
+
 private func sameSubst(lhs: TypeSubst, rhs: TypeSubst): Bool {
     if (lhs.entries.size != rhs.entries.size) {
         return false
@@ -52,6 +60,39 @@ private func sameSubst(lhs: TypeSubst, rhs: TypeSubst): Bool {
         }
     }
     return true
+}
+
+private func insertGenericInfoKeyPair(pairs: ArrayList<(Int64, Int64)>, pair: (Int64, Int64)): Unit {
+    var idx: Int64 = 0
+    while (idx < pairs.size) {
+        let current = pairs[idx]
+        if (pair[0] < current[0] || (pair[0] == current[0] && pair[1] < current[1])) {
+            pairs.add(pair, at: idx)
+            return
+        }
+        idx++
+    }
+    pairs.add(pair)
+}
+
+private func genericInfoKey(decl: Option<Decl>, subst: TypeSubst): String {
+    let builder = StringBuilder()
+    if (let Some(value) <- decl) {
+        builder.append(value.objectId.toString())
+    } else {
+        builder.append("0")
+    }
+    let pairs = ArrayList<(Int64, Int64)>()
+    for (entry in subst.entries) {
+        insertGenericInfoKeyPair(pairs, (entry.tyVar.objectId, entry.ty.objectId))
+    }
+    for (pair in pairs) {
+        builder.append("|")
+        builder.append(pair[0].toString())
+        builder.append("=")
+        builder.append(pair[1].toString())
+    }
+    return builder.toString()
 }
 
 private func copyTypeArgs(ty: Option<Ty>): ArrayList<Ty> {
@@ -276,12 +317,16 @@ private func HasJavaTargetAttr(target: Decl): Bool {
 public class GenericInstantiationManagerImpl {
     private var ci: CompilerInstance
     private let instantiations: ArrayList<GenericInstantiationRecord> = ArrayList<GenericInstantiationRecord>()
+    private let declInstantiationByTypeMap: HashMap<String, ArrayList<GenericInstantiationRecord>> =
+        HashMap<String, ArrayList<GenericInstantiationRecord>>()
+    private let instantiatedDeclsMap: HashMap<Int64, ArrayList<Decl>> = HashMap<Int64, ArrayList<Decl>>()
     private let abstractFuncToDeclMap: AbstractFuncMap = AbstractFuncMap()
-    private let inheritedMemberFuncsCache: ArrayList<(Ty, ArrayList<FuncDecl>)> = ArrayList<(Ty, ArrayList<FuncDecl>)>()
-    private let inheritedInterfacesCache: ArrayList<(Ty, ArrayList<InheritableDecl>)> =
-        ArrayList<(Ty, ArrayList<InheritableDecl>)>()
-    private let membersIndexMap: ArrayList<(Decl, Int64)> = ArrayList<(Decl, Int64)>()
-    private let skippedMemberOffsets: ArrayList<(Decl, ArrayList<Int64>)> = ArrayList<(Decl, ArrayList<Int64>)>()
+    private let inheritedMemberFuncsCache: HashMap<Int64, ArrayList<FuncDecl>> =
+        HashMap<Int64, ArrayList<FuncDecl>>()
+    private let inheritedInterfacesCache: HashMap<Int64, ArrayList<InheritableDecl>> =
+        HashMap<Int64, ArrayList<InheritableDecl>>()
+    private let membersIndexMap: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
+    private let skippedMemberOffsets: HashMap<Int64, ArrayList<Int64>> = HashMap<Int64, ArrayList<Int64>>()
     private let structContext: ArrayList<Decl> = ArrayList<Decl>()
     private let usedSrcImportedDecls: ArrayList<Decl> = ArrayList<Decl>()
     private let instantiationWalkerID: UInt32 = GetNextWalkerID()
@@ -362,9 +407,9 @@ public class GenericInstantiationManagerImpl {
 
     public func GetInstantiatedDecls(genericDecl: Decl): ArrayList<Decl> {
         let out = ArrayList<Decl>()
-        for (entry in instantiations) {
-            if (SameDecl(entry.genericDecl, genericDecl)) {
-                out.add(entry.instantiatedDecl)
+        if (let Some(values) <- instantiatedDeclsMap.get(genericDecl.objectId)) {
+            for (value in values) {
+                out.add(value)
             }
         }
         return out
@@ -372,6 +417,8 @@ public class GenericInstantiationManagerImpl {
 
     public func ResetGenericInstantiationStage(): Unit {
         instantiations.clear()
+        declInstantiationByTypeMap.clear()
+        instantiatedDeclsMap.clear()
         structContext.clear()
         usedSrcImportedDecls.clear()
         curPkg = None
@@ -379,28 +426,21 @@ public class GenericInstantiationManagerImpl {
         BuildAbstractFuncMap()
     }
 
-    private func FuncListContains(values: ArrayList<FuncDecl>, candidate: FuncDecl): Bool {
-        for (value in values) {
-            if (SameDecl(value, candidate)) {
-                return true
-            }
-        }
-        return false
-    }
-
-    private func AddFuncUnique(values: ArrayList<FuncDecl>, candidate: FuncDecl): Unit {
-        if (!FuncListContains(values, candidate)) {
+    private func AddFuncUnique(values: ArrayList<FuncDecl>, seen: HashSet<Int64>, candidate: FuncDecl): Unit {
+        let key = candidate.objectId
+        if (!seen.contains(key)) {
+            seen.add(key)
             values.add(candidate)
         }
     }
 
-    private func AddInheritableDeclUnique(values: ArrayList<InheritableDecl>, candidate: InheritableDecl): Unit {
-        for (value in values) {
-            if (SameDecl(value, candidate)) {
-                return
-            }
+    private func AddInheritableDeclUnique(values: ArrayList<InheritableDecl>, seen: HashSet<Int64>,
+        candidate: InheritableDecl): Unit {
+        let key = candidate.objectId
+        if (!seen.contains(key)) {
+            seen.add(key)
+            values.add(candidate)
         }
-        values.add(candidate)
     }
 
     private func SameDeclOptions(left: Option<Decl>, right: Option<Decl>): Bool {
@@ -413,16 +453,22 @@ public class GenericInstantiationManagerImpl {
         return right.isNone()
     }
 
-    private func SameVisitedInheritedMember(values: ArrayList<(Ty, Decl)>, ty: Ty, decl: Decl): Bool {
-        for ((visitedTy, visitedDecl) in values) {
-            if (SameTy(visitedTy, ty) && SameDecl(visitedDecl, decl)) {
-                return true
-            }
+    private func HasVisitedInheritedMember(values: HashMap<Int64, HashSet<Int64>>, ty: Ty, decl: Decl): Bool {
+        if (let Some(visitedDecls) <- values.get(ty.objectId)) {
+            return visitedDecls.contains(decl.objectId)
         }
         return false
     }
 
-    private func CollectDeclMemberFuncs(decl: Decl, funcs: ArrayList<FuncDecl>): Unit {
+    private func AddVisitedInheritedMember(values: HashMap<Int64, HashSet<Int64>>, ty: Ty, decl: Decl): Unit {
+        let tyKey = ty.objectId
+        if (!values.contains(tyKey)) {
+            values[tyKey] = HashSet<Int64>()
+        }
+        values.get(tyKey).getOrThrow().add(decl.objectId)
+    }
+
+    private func CollectDeclMemberFuncs(decl: Decl, funcs: ArrayList<FuncDecl>, seen: HashSet<Int64>): Unit {
         for (member in decl.GetMemberDecls()) {
             let ignored = member.astKind == ASTKind.VAR_DECL ||
                 member.TestAnyAttr(Attribute.PRIVATE, Attribute.CONSTRUCTOR)
@@ -431,7 +477,7 @@ public class GenericInstantiationManagerImpl {
             }
             WorkForMembers(member, { current: Decl =>
                 if (let Some(funcDecl) <- (current as FuncDecl)) {
-                    AddFuncUnique(funcs, funcDecl)
+                    AddFuncUnique(funcs, seen, funcDecl)
                 }
             })
         }
@@ -439,36 +485,38 @@ public class GenericInstantiationManagerImpl {
 
     private func MergeMemberFuncs(ty: Ty, decl: Decl, inheritedMembers: ArrayList<FuncDecl>): ArrayList<FuncDecl> {
         let memberFuncs = ArrayList<FuncDecl>()
-        CollectDeclMemberFuncs(decl, memberFuncs)
-        let dropped = ArrayList<FuncDecl>()
+        let memberFuncSet = HashSet<Int64>()
+        CollectDeclMemberFuncs(decl, memberFuncs, memberFuncSet)
+        let dropped = HashSet<Int64>()
         for (member in memberFuncs) {
             for (funcDecl in inheritedMembers) {
                 if (funcDecl.identifier.Val() != member.identifier.Val()) {
                     continue
                 }
                 if (IsImplementationFunc(ty, funcDecl, member)) {
-                    AddFuncUnique(dropped, funcDecl)
+                    dropped.add(funcDecl.objectId)
                 }
             }
         }
         for (funcDecl in inheritedMembers) {
-            if (!FuncListContains(dropped, funcDecl)) {
-                AddFuncUnique(memberFuncs, funcDecl)
+            if (!dropped.contains(funcDecl.objectId)) {
+                AddFuncUnique(memberFuncs, memberFuncSet, funcDecl)
             }
         }
         return memberFuncs
     }
 
     private func CollectInheritedMembers(ty: Ty, decl: Decl): ArrayList<FuncDecl> {
-        let visited = ArrayList<(Ty, Decl)>()
+        let visited = HashMap<Int64, HashSet<Int64>>()
         return CollectInheritedMembersVisit(ty, decl, visited)
     }
 
-    private func CollectInheritedMembersVisit(ty: Ty, decl: Decl, visited: ArrayList<(Ty, Decl)>): ArrayList<FuncDecl> {
-        if (SameVisitedInheritedMember(visited, ty, decl)) {
+    private func CollectInheritedMembersVisit(ty: Ty, decl: Decl,
+        visited: HashMap<Int64, HashSet<Int64>>): ArrayList<FuncDecl> {
+        if (HasVisitedInheritedMember(visited, ty, decl)) {
             return ArrayList<FuncDecl>()
         }
-        visited.add((ty, decl))
+        AddVisitedInheritedMember(visited, ty, decl)
         var inheritedFuncs = ArrayList<FuncDecl>()
         if (let Some(inheritDecl) <- (decl as InheritableDecl)) {
             for (typeNode in inheritDecl.inheritedTypes) {
@@ -484,77 +532,65 @@ public class GenericInstantiationManagerImpl {
         return MergeMemberFuncs(ty, decl, inheritedFuncs)
     }
 
-    private func GetInheritedMemberFuncsFromCache(ty: Ty): Option<ArrayList<FuncDecl>> {
-        for ((cacheTy, funcs) in inheritedMemberFuncsCache) {
-            if (SameTy(cacheTy, ty)) {
-                return funcs
-            }
-        }
-        return None
-    }
-
     private func GetInheritedMemberFuncs(ty: Ty): ArrayList<FuncDecl> {
-        if (let Some(cached) <- GetInheritedMemberFuncsFromCache(ty)) {
+        if (let Some(cached) <- inheritedMemberFuncsCache.get(ty.objectId)) {
             return cached
         }
         var funcs = ArrayList<FuncDecl>()
         if (let Some(baseDecl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
             funcs = CollectInheritedMembers(ty, baseDecl)
         }
+        let funcSet = HashSet<Int64>()
+        for (funcDecl in funcs) {
+            funcSet.add(funcDecl.objectId)
+        }
         for (extendDecl in GetAllRelatedExtendsByTy(ci.typeManager, ty)) {
             if (extendDecl.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
                 continue
             }
-            CollectDeclMemberFuncs(extendDecl, funcs)
+            CollectDeclMemberFuncs(extendDecl, funcs, funcSet)
         }
-        inheritedMemberFuncsCache.add((ty, funcs))
+        inheritedMemberFuncsCache[ty.objectId] = funcs
         return funcs
     }
 
-    private func CollectInterfacesFromDecl(decl: InheritableDecl, out: ArrayList<InheritableDecl>): Unit {
+    private func CollectInterfacesFromDecl(decl: InheritableDecl, out: ArrayList<InheritableDecl>,
+        seen: HashSet<Int64>): Unit {
         for (interfaceTy in decl.GetSuperInterfaceTys()) {
             if (let Some(interfaceDeclValue) <- Ty.GetDeclPtrOfTy(Some(interfaceTy))) {
                 if (let Some(interfaceDecl) <- (interfaceDeclValue as InterfaceDecl)) {
-                    AddInheritableDeclUnique(out, interfaceDecl)
+                    AddInheritableDeclUnique(out, seen, interfaceDecl)
                 }
             }
         }
     }
 
     private func CollectInheritedInterfacesFromDecl(decl: InheritableDecl,
-        out: ArrayList<InheritableDecl>): Unit {
+        out: ArrayList<InheritableDecl>, seen: HashSet<Int64>): Unit {
         if (let Some(classDecl) <- (decl as ClassDecl)) {
             if (let Some(superClass) <- classDecl.GetSuperClassDecl()) {
-                AddInheritableDeclUnique(out, superClass)
-                CollectInheritedInterfacesFromDecl(superClass, out)
+                AddInheritableDeclUnique(out, seen, superClass)
+                CollectInheritedInterfacesFromDecl(superClass, out, seen)
             }
         }
-        CollectInterfacesFromDecl(decl, out)
-    }
-
-    private func GetInheritedInterfacesFromCache(ty: Ty): Option<ArrayList<InheritableDecl>> {
-        for ((cacheTy, interfaces) in inheritedInterfacesCache) {
-            if (SameTy(cacheTy, ty)) {
-                return interfaces
-            }
-        }
-        return None
+        CollectInterfacesFromDecl(decl, out, seen)
     }
 
     private func GetInheritedInterfaces(ty: Ty): ArrayList<InheritableDecl> {
-        if (let Some(cached) <- GetInheritedInterfacesFromCache(ty)) {
+        if (let Some(cached) <- inheritedInterfacesCache.get(ty.objectId)) {
             return cached
         }
         let inheritableType = ArrayList<InheritableDecl>()
+        let inheritableTypeSet = HashSet<Int64>()
         for (extendDecl in GetAllRelatedExtendsByTy(ci.typeManager, ty)) {
             if (extendDecl.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
                 continue
             }
-            CollectInterfacesFromDecl(extendDecl, inheritableType)
+            CollectInterfacesFromDecl(extendDecl, inheritableType, inheritableTypeSet)
         }
         if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
             if (let Some(inheritDecl) <- (decl as InheritableDecl)) {
-                CollectInheritedInterfacesFromDecl(inheritDecl, inheritableType)
+                CollectInheritedInterfacesFromDecl(inheritDecl, inheritableType, inheritableTypeSet)
             }
         }
         let allInterfaceTys = TySet()
@@ -567,11 +603,11 @@ public class GenericInstantiationManagerImpl {
         for (interfaceTy in allInterfaceTys.values) {
             if (let Some(interfaceDeclValue) <- Ty.GetDeclPtrOfTy(Some(interfaceTy))) {
                 if (let Some(interfaceDecl) <- (interfaceDeclValue as InterfaceDecl)) {
-                    AddInheritableDeclUnique(inheritableType, interfaceDecl)
+                    AddInheritableDeclUnique(inheritableType, inheritableTypeSet, interfaceDecl)
                 }
             }
         }
-        inheritedInterfacesCache.add((ty, inheritableType))
+        inheritedInterfacesCache[ty.objectId] = inheritableType
         return inheritableType
     }
 
@@ -714,14 +750,8 @@ public class GenericInstantiationManagerImpl {
     }
 
     private func CountSkippedMembersBefore(decl: Decl, offset: Int64): Int64 {
-        var foundOffsets: Option<ArrayList<Int64>> = None
-        for ((cachedDecl, offsets) in skippedMemberOffsets) {
-            if (SameDecl(cachedDecl, decl)) {
-                foundOffsets = offsets
-                break
-            }
-        }
-        let offsets = if (let Some(cached) <- foundOffsets) {
+        let declKey = decl.objectId
+        let offsets = if (let Some(cached) <- skippedMemberOffsets.get(declKey)) {
             cached
         } else {
             let generated = ArrayList<Int64>()
@@ -734,7 +764,7 @@ public class GenericInstantiationManagerImpl {
                     generated.add(idx)
                 }
             }
-            skippedMemberOffsets.add((decl, generated))
+            skippedMemberOffsets[declKey] = generated
             generated
         }
         for (idx in 0..offsets.size) {
@@ -881,13 +911,23 @@ public class GenericInstantiationManagerImpl {
     private func BuildAbstractFuncMapHelper(ty: Ty): Unit {
         let funcs = GetInheritedMemberFuncs(ty)
         let interfaces = GetInheritedInterfaces(ty)
+        let funcsByName = HashMap<String, ArrayList<FuncDecl>>()
+        for (funcDecl in funcs) {
+            let name = funcDecl.identifier.Val()
+            if (!funcsByName.contains(name)) {
+                funcsByName[name] = ArrayList<FuncDecl>()
+            }
+            funcsByName.get(name).getOrThrow().add(funcDecl)
+        }
         for (interfaceDecl in interfaces) {
             if (let Some(interfaceTy) <- interfaceDecl.GetTy()) {
                 for (realMember in GetInheritedMemberFuncs(interfaceTy)) {
-                    for (funcDecl in funcs) {
-                        if (funcDecl.identifier.Val() != realMember.identifier.Val()) {
-                            continue
-                        }
+                    let candidates = if (let Some(values) <- funcsByName.get(realMember.identifier.Val())) {
+                        values
+                    } else {
+                        continue
+                    }
+                    for (funcDecl in candidates) {
                         if (IsImplementationFunc(ty, realMember, funcDecl)) {
                             MapFuncWithDecl(ty, realMember, funcDecl)
                         }
@@ -897,26 +937,15 @@ public class GenericInstantiationManagerImpl {
         }
     }
 
-    private func AddDeclUnique(values: ArrayList<Decl>, candidate: Decl): Unit {
-        if (!containsDecl(values, candidate)) {
-            values.add(candidate)
-        }
-    }
-
     private func MembersIndexFind(member: Decl): Option<Int64> {
-        for ((decl, idx) in membersIndexMap) {
-            if (SameDecl(decl, member)) {
-                return idx
-            }
-        }
-        return None
+        return membersIndexMap.get(member.objectId)
     }
 
     private func MembersIndexAdd(member: Decl, idx: Int64): Unit {
         if (let Some(_) <- MembersIndexFind(member)) {
             return
         }
-        membersIndexMap.add((member, idx))
+        membersIndexMap[member.objectId] = idx
     }
 
     private func BuildAbstractFuncMap(): Unit {
@@ -930,15 +959,17 @@ public class GenericInstantiationManagerImpl {
         }
         let inheritableDecls = ArrayList<Decl>()
         let genericDecls = ArrayList<Decl>()
+        let inheritableDeclSet = HashSet<Int64>()
+        let genericDeclSet = HashSet<Int64>()
         let collectDecls = { decl: Decl =>
             if ((let None <- GetDeclTy(decl)) || !decl.IsNominalDecl()) {
                 return
             }
             if (decl.astKind != ASTKind.EXTEND_DECL) {
-                AddDeclUnique(inheritableDecls, decl)
+                addDeclUnique(inheritableDecls, inheritableDeclSet, decl)
             }
             if (let Some(_) <- decl.generic) {
-                AddDeclUnique(genericDecls, decl)
+                addDeclUnique(genericDecls, genericDeclSet, decl)
             }
         }
         if (let Some(importManager) <- ci.importManager) {
@@ -1134,11 +1165,9 @@ public class GenericInstantiationManagerImpl {
         }
         let typeMapping = BuildTypeMapping(decl)
         if (let Some(genericDecl) <- decl.genericDecl) {
-            for (entry in instantiations) {
-                if (SameDecl(entry.genericDecl, genericDecl) && sameSubst(entry.subst, typeMapping) &&
-                    entry.instantiatedDecl.fullPackageName == currentPkg.fullPackageName) {
-                    return false
-                }
+            let info = GenericInfo(Some(genericDecl), typeMapping)
+            if (let Some(_) <- FindInCache(info, currentPkg)) {
+                return false
             }
         }
         return true
@@ -1289,8 +1318,12 @@ public class GenericInstantiationManagerImpl {
 
     private func FindInCache(info: GenericInfo, pkg: Option<Package>): Option<Decl> {
         if (let Some(genericDecl) <- info.decl) {
-            for (entry in instantiations) {
-                if (SameDecl(entry.genericDecl, genericDecl) && sameSubst(entry.subst, info.gTyToTyMap)) {
+            let key = genericInfoKey(Some(genericDecl), info.gTyToTyMap)
+            if (let Some(entries) <- declInstantiationByTypeMap.get(key)) {
+                for (entry in entries) {
+                    if (!SameDecl(entry.genericDecl, genericDecl) || !sameSubst(entry.subst, info.gTyToTyMap)) {
+                        continue
+                    }
                     if (let Some(currentPkg) <- pkg) {
                         if (entry.instantiatedDecl.fullPackageName == currentPkg.fullPackageName) {
                             return entry.instantiatedDecl
@@ -1302,6 +1335,19 @@ public class GenericInstantiationManagerImpl {
             }
         }
         return None
+    }
+
+    private func hasInstantiation(genericDecl: Decl, instantiatedDecl: Decl, subst: TypeSubst): Bool {
+        let key = genericInfoKey(Some(genericDecl), subst)
+        if (let Some(entries) <- declInstantiationByTypeMap.get(key)) {
+            for (entry in entries) {
+                if (SameDecl(entry.genericDecl, genericDecl) && SameDecl(entry.instantiatedDecl, instantiatedDecl) &&
+                    sameSubst(entry.subst, subst)) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     public func InstantiateGenericDecl(decl: Decl, typeMapping: TypeSubst, pkg: Package): Decl {
@@ -1329,7 +1375,18 @@ public class GenericInstantiationManagerImpl {
 
     private func addInstantiationRecord(genericDecl: Decl, instantiatedDecl: Decl, subst: TypeSubst): Unit {
         if (!hasInstantiation(genericDecl, instantiatedDecl, subst)) {
-            instantiations.add(GenericInstantiationRecord(genericDecl, instantiatedDecl, subst.Clone()))
+            let record = GenericInstantiationRecord(genericDecl, instantiatedDecl, subst.Clone())
+            instantiations.add(record)
+            let infoKey = genericInfoKey(Some(genericDecl), record.subst)
+            if (!declInstantiationByTypeMap.contains(infoKey)) {
+                declInstantiationByTypeMap[infoKey] = ArrayList<GenericInstantiationRecord>()
+            }
+            declInstantiationByTypeMap.get(infoKey).getOrThrow().add(record)
+            let declKey = genericDecl.objectId
+            if (!instantiatedDeclsMap.contains(declKey)) {
+                instantiatedDeclsMap[declKey] = ArrayList<Decl>()
+            }
+            instantiatedDeclsMap.get(declKey).getOrThrow().add(instantiatedDecl)
         }
     }
 
@@ -2157,13 +2214,4 @@ public class GenericInstantiationManagerImpl {
         return None
     }
 
-    private func hasInstantiation(genericDecl: Decl, instantiatedDecl: Decl, subst: TypeSubst): Bool {
-        for (entry in instantiations) {
-            if (SameDecl(entry.genericDecl, genericDecl) && SameDecl(entry.instantiatedDecl, instantiatedDecl) &&
-                sameSubst(entry.subst, subst)) {
-                return true
-            }
-        }
-        return false
-    }
 }
