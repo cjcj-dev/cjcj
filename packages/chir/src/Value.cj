@@ -742,8 +742,12 @@ public class BlockGroup <: Value {
     }
 
     public func SetOwnerExpression(expr: Expression): Unit {
+        if (let Some(oldExpr) <- ownerExpression) {
+            RemoveUserOnly(oldExpr)
+        }
         ownerExpression = expr
         ownerFunc = None
+        AddUserOnly(expr)
     }
 
     public func RemoveBlock(block: Block): Unit {
