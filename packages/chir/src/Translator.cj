@@ -1254,28 +1254,14 @@ public class Translator {
         falseBlock: Block): Unit {
         let selector = Translator.TranslateASTNode(RequireExpr(letPattern.initializer, "if-let initializer"), this) ??
             throw IllegalStateException("faithful AST2CHIR if-let initializer produced no value")
-        let group = RequireParentBlockGroup(CurrentBlock(), "if-let condition")
-        let matchedBlock = builder.CreateBlock(group)
-        if (letPattern.patterns.size == 1) {
-            TranslateSinglePatternBranch(letPattern.patterns[0], selector, matchedBlock, falseBlock)
-            currentBlock = matchedBlock
-            BindPatternValues(letPattern.patterns[0], selector)
-            builder.CreateGoTo(trueBlock, CurrentBlock())
-            return
+        let originLoc = TranslateLocation(letPattern)
+        let (patternFalseBlock, patternTrueBlock) = if (letPattern.patterns.size == 1) {
+            TranslateNestingCasePattern(letPattern.patterns[0], selector, originLoc, sourceExpr: SourceExpr.IF_EXPR)
+        } else {
+            TranslateOrPattern(letPattern.patterns, selector, originLoc)
         }
-        var patternIndex: Int64 = 0
-        while (patternIndex < letPattern.patterns.size) {
-            let nextBlock = if (patternIndex == letPattern.patterns.size - 1) {
-                falseBlock
-            } else {
-                builder.CreateBlock(group)
-            }
-            TranslateSinglePatternBranch(letPattern.patterns[patternIndex], selector, matchedBlock, nextBlock)
-            currentBlock = nextBlock
-            patternIndex++
-        }
-        currentBlock = matchedBlock
-        builder.CreateGoTo(trueBlock, CurrentBlock())
+        builder.CreateGoTo(trueBlock, patternTrueBlock)
+        builder.CreateGoTo(falseBlock, patternFalseBlock)
     }
 
     public func Visit(expr: AstIfExpr): Option<Value> {
