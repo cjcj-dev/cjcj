@@ -56,6 +56,11 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
     let sourceRawValue = sourceCGValue.GetRawValue()
     let sourceTy = boxExpr.GetSourceTy() ?? return sourceRawValue
     let sourceCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), sourceTy)
+    if (let Some(targetTy) <- boxExpr.GetResultType()) {
+        if (let Some(result) <- GenerateGenericTypeCast(irBuilder, sourceCGValue, sourceTy, targetTy)) {
+            return result
+        }
+    }
     if (sourceCGType.IsReference()) {
         return sourceRawValue
     }
@@ -76,6 +81,22 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
         let addrCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), addrTy, extraInfo: TypeExtraInfo(1u32))
         irBuilder.CreateStore(sourceCGValue, CGValue(addr, addrCGType))
         return objectValue
+    }
+    if (IsThisArgOfStructMethod(sourceValue)) {
+        let tmp = irBuilder.CallClassIntrinsicAlloc(DeRef(sourceTy))
+        let payloadPtr = irBuilder.GetPayloadFromObject(tmp)
+        let size = irBuilder.GetLayoutSize_32(DeRef(sourceTy))
+        if (irBuilder.IsLLVMTypeContainsRef(sourceCGType.GetLLVMType())) {
+            let args = ArrayList<LLVMValueRef>()
+            args.add(tmp)
+            args.add(payloadPtr)
+            args.add(sourceRawValue)
+            args.add(size)
+            irBuilder.CallGCWriteAgg(sourceCGType.GetLayoutType(), args)
+        } else {
+            irBuilder.CreateMemCpy(payloadPtr, 0u32, sourceRawValue, 0u32, size)
+        }
+        return tmp
     }
     return sourceRawValue
 }
