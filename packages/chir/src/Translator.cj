@@ -6584,6 +6584,9 @@ public class Translator {
     private func TranslateStructOrClassCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
         let thisTy = chirTy.TranslateType(RequireAstTy(expr)).StripAllRefs()
         let thisRefTy = builder.context.GetRefTy(thisTy)
+        let userArgs = ArrayList<Value>()
+        let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(thisRefTy))
+        AppendTranslatedCallArgs(expr, calleeDecl, userArgs, expectedParamTys, ArrayList<Value>())
         let thisObj = if (IsSuperOrThisCtorCall(expr)) {
             CastValueIfNeeded(GetCurrentConstructorThisObject(), thisRefTy)
         } else {
@@ -6591,8 +6594,9 @@ public class Translator {
         }
         let args = ArrayList<Value>()
         args.add(thisObj)
-        let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(thisRefTy))
-        AppendTranslatedCallArgs(expr, calleeDecl, args, expectedParamTys, ArrayList<Value>())
+        for (arg in userArgs) {
+            args.add(arg)
+        }
         let callee = globalSymbolTable.Get(calleeDecl)
         let _ = CreateAndAppendApplyCallFromCallExpr(builder.context.GetUnitTy(), callee,
             FuncCallContext(args: args, thisType: thisRefTy), expr)
@@ -7182,6 +7186,9 @@ public class Translator {
         calleeDecl: AstFuncDecl): FaithfulLeftValueInfo {
         let thisTy = chirTy.TranslateType(RequireAstTy(expr)).StripAllRefs()
         let thisRefTy = builder.context.GetRefTy(thisTy)
+        let userArgs = ArrayList<Value>()
+        let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(thisRefTy))
+        AppendTranslatedCallArgs(expr, calleeDecl, userArgs, expectedParamTys, ArrayList<Value>())
         let thisObj = if (IsSuperOrThisCtorCall(expr)) {
             CastValueIfNeeded(GetCurrentConstructorThisObject(), thisRefTy)
         } else {
@@ -7189,8 +7196,9 @@ public class Translator {
         }
         let args = ArrayList<Value>()
         args.add(thisObj)
-        let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(thisRefTy))
-        AppendTranslatedCallArgs(expr, calleeDecl, args, expectedParamTys, ArrayList<Value>())
+        for (arg in userArgs) {
+            args.add(arg)
+        }
         let callee = globalSymbolTable.Get(calleeDecl)
         let _ = CreateAndAppendApplyCallFromCallExpr(builder.context.GetUnitTy(), callee,
             FuncCallContext(args: args, thisType: thisRefTy), expr)
