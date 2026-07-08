@@ -75,13 +75,9 @@ private func insertGenericInfoKeyPair(pairs: ArrayList<(Int64, Int64)>, pair: (I
     pairs.add(pair)
 }
 
-private func genericInfoKey(decl: Option<Decl>, subst: TypeSubst): String {
+private func genericInfoKey(decl: Decl, subst: TypeSubst): String {
     let builder = StringBuilder()
-    if (let Some(value) <- decl) {
-        builder.append(value.objectId.toString())
-    } else {
-        builder.append("0")
-    }
+    builder.append(decl.objectId.toString())
     let pairs = ArrayList<(Int64, Int64)>()
     for (entry in subst.entries) {
         insertGenericInfoKeyPair(pairs, (entry.tyVar.objectId, entry.ty.objectId))
@@ -1329,7 +1325,7 @@ public class GenericInstantiationManagerImpl {
 
     private func FindInCache(info: GenericInfo, pkg: Option<Package>): Option<Decl> {
         if (let Some(genericDecl) <- info.decl) {
-            let key = genericInfoKey(Some(genericDecl), info.gTyToTyMap)
+            let key = genericInfoKey(genericDecl, info.gTyToTyMap)
             if (let Some(entries) <- declInstantiationByTypeMap.get(key)) {
                 for (entry in entries) {
                     if (!SameDecl(entry.genericDecl, genericDecl) || !sameSubst(entry.subst, info.gTyToTyMap)) {
@@ -1349,7 +1345,7 @@ public class GenericInstantiationManagerImpl {
     }
 
     private func hasInstantiation(genericDecl: Decl, instantiatedDecl: Decl, subst: TypeSubst): Bool {
-        let key = genericInfoKey(Some(genericDecl), subst)
+        let key = genericInfoKey(genericDecl, subst)
         if (let Some(entries) <- declInstantiationByTypeMap.get(key)) {
             for (entry in entries) {
                 if (SameDecl(entry.genericDecl, genericDecl) && SameDecl(entry.instantiatedDecl, instantiatedDecl) &&
@@ -1388,7 +1384,7 @@ public class GenericInstantiationManagerImpl {
         if (!hasInstantiation(genericDecl, instantiatedDecl, subst)) {
             let record = GenericInstantiationRecord(genericDecl, instantiatedDecl, subst.Clone())
             instantiations.add(record)
-            let infoKey = genericInfoKey(Some(genericDecl), record.subst)
+            let infoKey = genericInfoKey(genericDecl, record.subst)
             if (!declInstantiationByTypeMap.contains(infoKey)) {
                 declInstantiationByTypeMap[infoKey] = ArrayList<GenericInstantiationRecord>()
             }
