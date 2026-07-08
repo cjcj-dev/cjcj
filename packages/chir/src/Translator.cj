@@ -6507,7 +6507,11 @@ public class Translator {
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         let argValues = ArrayList<Value>()
         let callee = globalSymbolTable.Get(calleeDecl)
-        var thisType: Option<Type> = None
+        var thisType: Option<Type> = if (calleeDecl.TestAttr(AstAttribute.STATIC)) {
+            MemberCallInstantiatedThisType(expr, calleeDecl)
+        } else {
+            None
+        }
         var dispatchReceiverType: Option<Type> = None
         var funcCallThisType: Option<Type> = None
         var thisObj: Option<Value> = None
@@ -6542,7 +6546,7 @@ public class Translator {
         AppendTranslatedCallArgs(expr, calleeDecl, argValues, expectedParamTys, previousDefaultArgs)
         if (ShouldUseVirtualMemberDispatchForCall(expr, calleeDecl, dispatchReceiverType)) {
             if (calleeDecl.TestAttr(AstAttribute.STATIC)) {
-                let parentTy = TranslateMemberOwnerType(calleeDecl)
+                let parentTy = thisType ?? TranslateMemberOwnerType(calleeDecl)
                 let rtti = RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
                     parentTy.StripAllRefs(), CurrentBlock()))
                 let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
@@ -7620,8 +7624,13 @@ public class Translator {
         if (info.path.isEmpty()) {
             return info.base
         }
-        let refTy = builder.context.GetRefTy(expectedTy)
-        return RequireResult(builder.CreateGetElementByName(refTy, info.base, info.path, CurrentBlock()))
+        let baseTy = info.base.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR address base has no type: ${info.base.GetIdentifier()}")
+        if (baseTy.IsRef()) {
+            let refTy = builder.context.GetRefTy(expectedTy)
+            return RequireResult(builder.CreateGetElementByName(refTy, info.base, info.path, CurrentBlock()))
+        }
+        return RequireResult(builder.CreateFieldByName(expectedTy, info.base, info.path, CurrentBlock()))
     }
 
     private func LoadLeftValue(info: FaithfulLeftValueInfo, expectedTy: Type): Option<Value> {
