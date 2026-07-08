@@ -69,11 +69,6 @@ private func GenerateInvoke(irBuilder: IRBuilder2, objectValue: Value, args: Arr
     let objectType = objectValue.GetType().getOrThrow().StripAllRefs()
     let objectTypeInfo = irBuilder.GetTypeInfoFromObject(objectRawValue)
     let isAutoEnv = IsAutoEnvType(objectType)
-    let methodTypeInfoArg = if (isAutoEnv) {
-        objectTypeInfo
-    } else {
-        CreateOuterTypeInfo(irBuilder, objectValue, objectTypeInfo, introType, vtableOffset)
-    }
     let rawFuncPtr = if (isAutoEnv) {
         GenerateFuncPtrForAutoEnv(irBuilder, objectRawValue, methodName)
     } else {
@@ -84,7 +79,7 @@ private func GenerateInvoke(irBuilder: IRBuilder2, objectValue: Value, args: Arr
     let typedFuncPtr = irBuilder.CreateBitCast(rawFuncPtr,
         unsafe { LLVMPointerType(concreteFuncType.GetLLVMFunctionType(), 0u32) })
     let result = irBuilder.CreateCallOrInvokeWithMethodTypeInfo(concreteFuncType, typedFuncPtr, argValues,
-        Some(methodTypeInfoArg), instTypeArgs)
+        None, instTypeArgs)
     GenIRToUnboxResult(irBuilder, objectRawValue, isMutMethod)
     return result
 }
@@ -143,23 +138,6 @@ private func GenerateFuncPtrForAutoEnv(irBuilder: IRBuilder2, objectRawValue: LL
     LLVMSetInstructionMetadata(irBuilder.GetLLVMContext(), loadInst, "invariant.load",
         LLVMCreateMDTuple(irBuilder.GetLLVMContext(), ArrayList<LLVMMetadataRef>()))
     return loadInst
-}
-
-private func CreateOuterTypeInfo(irBuilder: IRBuilder2, objectValue: Value, thisTypeInfo: LLVMValueRef,
-    outerCHIRType: ClassType, vtableOffset: UInt64): LLVMValueRef {
-    let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())
-    if (IsAutoEnvType(objectValue.GetType().getOrThrow().StripAllRefs())) {
-        return irBuilder.GetTypeInfoFromObject(irBuilder.GetCGModule().GetMappedCGValue(objectValue).GetRawValue())
-    }
-    if (irBuilder.GetCGContext().GetCGPkgContext().NeedOuterTypeInfo(outerCHIRType)) {
-        let methodOuterTypeArgs = ArrayList<LLVMValueRef>()
-        methodOuterTypeArgs.add(thisTypeInfo)
-        methodOuterTypeArgs.add(irBuilder.CreateTypeInfo(outerCHIRType))
-        methodOuterTypeArgs.add(irBuilder.GetInt64(Int64(vtableOffset)))
-        let outerType = irBuilder.CallIntrinsicMethodOuterType(methodOuterTypeArgs)
-        return irBuilder.CreateBitCast(outerType, typeInfoPtrType)
-    }
-    return unsafe { LLVMConstNull(typeInfoPtrType) }
 }
 
 private func GenObjTyMetaForVirtualCall(irBuilder: IRBuilder2, ty: Type): LLVMMetadataRef {

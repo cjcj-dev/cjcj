@@ -382,15 +382,7 @@ private func GetRawArrayType(rawArrayValue: CGValue): Option<RawArrayType> {
 
 private func CreateRawArrayElementPointer(irBuilder: IRBuilder2, rawArrayValue: CGValue,
     rawArrayTy: RawArrayType, elementIdx: LLVMValueRef): LLVMValueRef {
-    let arrayLayoutType = CGArrayType.GenerateArrayLayoutType(irBuilder.GetCGModule(), rawArrayTy)
-    let payload = irBuilder.GetPayloadFromObject(rawArrayValue.GetRawValue())
-    let typedPayload = irBuilder.CreateBitCast(payload,
-        unsafe { LLVMPointerType(arrayLayoutType, 1u32) }, name: "rawarray.payload")
-    let indices = ArrayList<LLVMValueRef>()
-    indices.add(LLVMConstI32(irBuilder, 0u64))
-    indices.add(LLVMConstI32(irBuilder, 1u64))
-    indices.add(elementIdx)
-    return irBuilder.CreateGEP(arrayLayoutType, typedPayload, indices, name: "rawarray.elem")
+    return irBuilder.GetArrayElementAddr(rawArrayTy, rawArrayValue.GetRawValue(), elementIdx, false)
 }
 
 private func GenerateRawArrayFillLoop(irBuilder: IRBuilder2, rawArrayValue: CGValue, rawArrayTy: RawArrayType,

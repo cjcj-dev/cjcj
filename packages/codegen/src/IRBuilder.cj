@@ -19,6 +19,8 @@ import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.GetMethodIdxInAutoEnvObject
 import cangjie_compiler::chir.IntLiteral
 import cangjie_compiler::chir.IntrinsicKind
+import cangjie_compiler::chir.Invoke
+import cangjie_compiler::chir.InvokeWithException
 import cangjie_compiler::chir.LiteralValue
 import cangjie_compiler::chir.Load
 import cangjie_compiler::chir.LocalVar
@@ -1480,7 +1482,9 @@ public class IRBuilder2 <: Resource {
                     name: if (name.isEmpty()) { "generic.ti" } else { name + ".generic.ti" }))
             }
             if (calleeType.IsMethodType()) {
-                if (let Some(overrideTypeInfo) <- methodTypeInfoArg) {
+                if (let Some(invokeOuterTypeInfo) <- CreateInvokeOuterTypeInfoArg()) {
+                    callArgs.add(invokeOuterTypeInfo)
+                } else if (let Some(overrideTypeInfo) <- methodTypeInfoArg) {
                     if (calleeType.IsConstructorType() && !args.isEmpty()) {
                         callArgs.add(CreateOuterTypeInfoArg(args[0]) ?? overrideTypeInfo)
                     } else {
@@ -1509,6 +1513,40 @@ public class IRBuilder2 <: Resource {
             callArgs.add(arg.GetRawValue())
         }
         return callArgs
+    }
+
+    private func CreateInvokeOuterTypeInfoArg(): Option<LLVMValueRef> {
+        let exprWrapper = chirExpr ?? return None
+        let expr = exprWrapper.GetExpression()
+        let chirBuilder = GetCGContext().GetCHIRBuilder()
+        if (let Some(invokeExpr) <- (expr as Invoke)) {
+            return Some(CreateInvokeOuterTypeInfoArg(invokeExpr.GetObject(),
+                invokeExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder),
+                invokeExpr.GetVirtualMethodOffset(chirBuilder)))
+        }
+        if (let Some(invokeWithExceptionExpr) <- (expr as InvokeWithException)) {
+            return Some(CreateInvokeOuterTypeInfoArg(invokeWithExceptionExpr.GetObject(),
+                invokeWithExceptionExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder),
+                invokeWithExceptionExpr.GetVirtualMethodOffset(chirBuilder)))
+        }
+        return None
+    }
+
+    private func CreateInvokeOuterTypeInfoArg(objectValue: Value, outerCHIRType: ClassType,
+        vtableOffset: UInt64): LLVMValueRef {
+        let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
+        if (IsAutoEnvType(objectValue.GetType().getOrThrow().StripAllRefs())) {
+            return GetTypeInfoFromObject(cgMod.GetMappedCGValue(objectValue).GetRawValue())
+        }
+        if (GetCGContext().GetCGPkgContext().NeedOuterTypeInfo(outerCHIRType)) {
+            let methodOuterTypeArgs = ArrayList<LLVMValueRef>()
+            methodOuterTypeArgs.add(GetTypeInfoFromObject(cgMod.GetMappedCGValue(objectValue).GetRawValue()))
+            methodOuterTypeArgs.add(CreateTypeInfo(outerCHIRType))
+            methodOuterTypeArgs.add(GetInt64(Int64(vtableOffset)))
+            let outerType = CallIntrinsicMethodOuterType(methodOuterTypeArgs)
+            return CreateBitCast(outerType, typeInfoPtrType)
+        }
+        return unsafe { LLVMConstNull(typeInfoPtrType) }
     }
 
     private func IsOptionLikeRefValue(argCGType: CGType): Bool {
@@ -3165,7 +3203,7 @@ public class IRBuilder2 <: Resource {
         indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), 0u64, 0) })
         indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), 1u64, 0) })
         indices.add(CastIntegerToInt64(index))
-        return CreateGEP(arrayLayoutType, typedPayload, indices, name: "arr.idx.get.gep")
+        return CreateInBoundsGEP(arrayLayoutType, typedPayload, indices, name: "arr.idx.get.gep")
     }
 
     public func CallArrayIntrinsicGet(rawArrayTy: RawArrayType, array: LLVMValueRef, index: LLVMValueRef,
