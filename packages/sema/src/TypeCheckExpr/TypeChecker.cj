@@ -458,6 +458,9 @@ public class TypeChecker {
             optionStrategy = instance.globalOptions.overflowStrategy
         }
         SetIntegerOverflowStrategy(pkgs, optionStrategy)
+        for (pkg in pkgs) {
+            SetOverflowStrategyForPkg(pkg)
+        }
     }
 
     public func CheckInlineFunctions(pkgs: ArrayList<Package>): Unit {
@@ -1518,10 +1521,8 @@ public class TypeChecker {
                 activePkgs.add(pkg)
             }
         }
-        SetOverflowStrategy(activePkgs)
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
-                SetOverflowStrategyForPkg(pkg)
                 let manager = impl.importManager.getOrThrow()
                 if (let Some(diagValue) <- impl.diag) {
                     let _ = ReportUnusedImports(pkg, diagValue, manager)

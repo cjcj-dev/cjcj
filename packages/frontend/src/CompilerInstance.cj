@@ -483,6 +483,9 @@ public class CompilerInstance {
         SeedFaithfulSemaResolvedImports(semaInstance)
         let checker = FaithfulSemaTypeChecker(Some(semaInstance))
         checker.TypeCheckForPackages(pkgs)
+        if (semaInstance.globalOptions.overflowStrategy != OverflowStrategy.NA) {
+            checker.SetOverflowStrategy(pkgs)
+        }
         faithfulSemaInstance = Some(semaInstance)
         return diag.GetErrorCount() == 0
     }

@@ -452,6 +452,7 @@ public class Translator {
     private let tryCatchContext: ArrayList<Block> = ArrayList<Block>()
     private let tryBodyContext: ArrayList<AstTryExpr> = ArrayList<AstTryExpr>()
     private let finallyContext: ArrayList<FaithfulFinallyControlContext> = ArrayList<FaithfulFinallyControlContext>()
+    private let forInExprReturnMap: HashMap<Value, Value> = HashMap<Value, Value>()
     private let overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>>
     private let scopeInfo: ArrayList<Int64> = ArrayList<Int64>([0])
     private let opts: GlobalOptions
@@ -1011,20 +1012,12 @@ public class Translator {
     public func Visit(expr: AstReturnExpr): Option<Value> {
         if (let Some(retExpr) <- expr.expr) {
             let value = TranslateExprArg(retExpr)
-            if (currentLambda.isSome()) {
-                EmitLambdaReturn(Some(value))
-                return None
-            }
-            StoreReturnValueIfNeeded(CurrentFunction(), value)
+            StoreOuterReturnValueIfNeeded(value)
             UpdateDelayExitSignalForReturnIfNeeded()
             RecordFinallyControlIfNeeded(FaithfulFinallyControlType.RETURN)
             builder.CreateExit(None, CurrentBlock())
             let group = RequireParentBlockGroup(CurrentBlock(), "return continuation")
             currentBlock = builder.CreateBlock(group)
-            return None
-        }
-        if (currentLambda.isSome()) {
-            EmitLambdaReturn(None)
             return None
         }
         UpdateDelayExitSignalForReturnIfNeeded()
@@ -2715,6 +2708,7 @@ public class Translator {
         if (inExpression.body.size < 4) {
             throw IllegalStateException("faithful AST2CHIR range ForInExpr expects desugared block with 4 nodes")
         }
+        let forInRetValLocation = GenerateForInRetValLocation()
         let inductiveVar = Translator.TranslateASTNode(inExpression.body[0], this) ??
             throw IllegalStateException("faithful AST2CHIR for-in range induction var produced no value")
         inductiveVar.AsLocalVar().getOrThrow().GetExpr().getOrThrow().SetGeneratedFromForIn(true)
@@ -2733,6 +2727,9 @@ public class Translator {
         let condVar = InitializeForInCondVar()
         InitializeDelayExitSignal()
         let forIn = InitForInExprSkeleton(expr, inductiveVar, condVar, isIter: false)
+        if (let Some(retValLocation) <- forInRetValLocation) {
+            forInExprReturnMap[RequireResult(forIn)] = retValLocation
+        }
 
         TranslateForInRangeBody(expr, forIn)
         TranslateForInRangeLatch(inExpression.body[2], forIn)
@@ -2741,7 +2738,7 @@ public class Translator {
         let endBlock = builder.CreateBlock(parentGroup)
         builder.CreateGoTo(endBlock, forInEntryBlock)
         currentBlock = endBlock
-        UpdateDelayExitSignalInForInEnd()
+        UpdateDelayExitSignalInForInEnd(forIn)
         let rangeEndBranch = builder.CreateBranch(condition, forInEntryBlock, CurrentBlock(), recordBlock)
         rangeEndBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         CurrentBlock().SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
@@ -2754,6 +2751,7 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR string ForInExpr expects desugared block with 3 nodes")
         }
         let forInExprBlock = CurrentBlock()
+        let forInRetValLocation = GenerateForInRetValLocation()
         let _ = Translator.TranslateASTNode(inExpression, this)
         builder.CreateGoTo(GetBlockByAST(inExpression), forInExprBlock)
         let indexDecl = RequireBodyVarDecl(inExpression, 0, "for-in string induction var")
@@ -2773,6 +2771,9 @@ public class Translator {
         let condVar = InitializeForInCondVar()
         InitializeDelayExitSignal()
         let forIn = InitForInExprSkeleton(expr, inductiveVar, condVar, isIter: false)
+        if (let Some(retValLocation) <- forInRetValLocation) {
+            forInExprReturnMap[RequireResult(forIn)] = retValLocation
+        }
 
         TranslateForInStringBody(expr, forIn)
         TranslateForInStringLatch(inductiveVar, forIn)
@@ -2781,7 +2782,7 @@ public class Translator {
         let endBlock = builder.CreateBlock(parentGroup)
         builder.CreateGoTo(endBlock, forInEntryBlock)
         currentBlock = endBlock
-        UpdateDelayExitSignalInForInEnd()
+        UpdateDelayExitSignalInForInEnd(forIn)
         let stringEndBranch = builder.CreateBranch(condition, forInEntryBlock, CurrentBlock(), recordBlock)
         stringEndBranch.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         stringEndBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
@@ -2800,6 +2801,7 @@ public class Translator {
         if (inExpression.body.size < 2) {
             throw IllegalStateException("faithful AST2CHIR iterator ForInExpr expects desugared block with 2 nodes")
         }
+        let forInRetValLocation = GenerateForInRetValLocation()
         let inductiveVar = Translator.TranslateASTNode(inExpression.body[0], this) ??
             throw IllegalStateException("faithful AST2CHIR for-in iterator induction var produced no value")
         let matchExpr = (inExpression.body[1] as AstMatchExpr) ??
@@ -2816,6 +2818,9 @@ public class Translator {
         let condVar = InitializeForInCondVar()
         InitializeDelayExitSignal()
         let forIn = InitForInExprSkeleton(expr, inductiveVar, condVar, isIter: true)
+        if (let Some(retValLocation) <- forInRetValLocation) {
+            forInExprReturnMap[RequireResult(forIn)] = retValLocation
+        }
 
         TranslateForInIterBody(expr, iterNextLocation, forIn)
         TranslateForInIterLatch(matchExpr, iterNextLocation, forIn)
@@ -2824,7 +2829,7 @@ public class Translator {
         let endBlock = builder.CreateBlock(parentGroup)
         builder.CreateGoTo(endBlock, forInEntryBlock)
         currentBlock = endBlock
-        UpdateDelayExitSignalInForInEnd()
+        UpdateDelayExitSignalInForInEnd(forIn)
         builder.CreateGoTo(forInEntryBlock, recordBlock)
         return None
     }
@@ -2851,7 +2856,11 @@ public class Translator {
         currentBlock = forInEntryBlock
         let condVar = InitializeForInCondVar()
         InitializeDelayExitSignal()
+        let forInRetValLocation = GenerateForInRetValLocation()
         let forIn = InitForInClosedRangeExprSkeleton(expr, iterVar, condVar)
+        if (let Some(retValLocation) <- forInRetValLocation) {
+            forInExprReturnMap[RequireResult(forIn)] = retValLocation
+        }
 
         let iterValue = TranslateForInClosedRangeBody(expr, iterVar, forIn)
         TranslateForInClosedRangeCond(expr, iterValue, endValue, condVar, forIn)
@@ -2860,7 +2869,7 @@ public class Translator {
         let endBlock = builder.CreateBlock(parentGroup)
         builder.CreateGoTo(endBlock, forInEntryBlock)
         currentBlock = endBlock
-        UpdateDelayExitSignalInForInEnd()
+        UpdateDelayExitSignalInForInEnd(forIn)
         builder.CreateGoTo(preCondFalseBlock, CurrentBlock())
         currentBlock = preCondFalseBlock
         return None
@@ -3180,7 +3189,7 @@ public class Translator {
         currentBlock = falseBlock
     }
 
-    private func UpdateDelayExitSignalInForInEnd(): Unit {
+    private func UpdateDelayExitSignalInForInEnd(forIn: ForIn): Unit {
         let parentGroup = RequireParentBlockGroup(CurrentBlock(), "for-in end")
         let trueBlock = builder.CreateBlock(parentGroup)
         let falseBlock = builder.CreateBlock(parentGroup)
@@ -3189,6 +3198,7 @@ public class Translator {
         delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
         DecreaseDelayExitSignal()
+        RestoreForInRetValIfNeeded(forIn)
         let forInExit = builder.CreateExit(None, CurrentBlock())
         forInExit.SetSkipCheck(SkipKind.SKIP_FORIN_EXIT)
         currentBlock = falseBlock
@@ -3337,6 +3347,9 @@ public class Translator {
                 }
             }
             if (let Some(owner) <- group.GetOwnerExpression()) {
+                if ((owner as Lambda).isSome()) {
+                    break
+                }
                 if ((owner as ForIn).isSome()) {
                     level += 2
                 }
@@ -3515,6 +3528,75 @@ public class Translator {
         return iterVar
     }
 
+    private func GenerateForInRetValLocation(): Option<Value> {
+        let funcRetValLocation = GetOuterBlockGroupReturnValLocation() ?? return None
+        let forInType = RequireRefBaseType(funcRetValLocation)
+        if (forInType.IsNothing() || forInType.IsUnit()) {
+            return None
+        }
+        let retValExpr = builder.CreateAllocate(builder.context.GetRefTy(forInType), forInType, CurrentBlock())
+        retValExpr.SetGeneratedFromForIn(true)
+        let retValLocation = RequireResult(retValExpr)
+        let nullVal = RequireResult(builder.CreateConstant(forInType, NullLiteral(), CurrentBlock()))
+        builder.CreateStore(nullVal, retValLocation, CurrentBlock())
+        return Some(retValLocation)
+    }
+
+    private func GetOuterBlockGroupReturnValLocation(): Option<Value> {
+        var idx = blockGroupStack.size - 1
+        while (idx >= 0) {
+            let group = blockGroupStack[idx]
+            if (let Some(owner) <- group.GetOwnerExpression()) {
+                if (let Some(forIn) <- (owner as ForIn)) {
+                    let forInResult = RequireResult(forIn)
+                    if (forInExprReturnMap.contains(forInResult)) {
+                        return Some(forInExprReturnMap[forInResult])
+                    }
+                }
+            }
+            idx--
+        }
+        if (blockGroupStack.isEmpty()) {
+            return None
+        }
+        let group = blockGroupStack[blockGroupStack.size - 1]
+        if (let Some(fn) <- group.GetOwnerFunc()) {
+            if (let Some(returnValue) <- fn.GetReturnValue()) {
+                return Some(returnValue)
+            }
+            return None
+        }
+        if (let Some(owner) <- group.GetOwnerExpression()) {
+            if (let Some(lambda) <- (owner as Lambda)) {
+                if (let Some(returnValue) <- lambda.GetReturnValue()) {
+                    return Some(returnValue)
+                }
+                return None
+            }
+        }
+        return None
+    }
+
+    private func StoreOuterReturnValueIfNeeded(value: Value): Unit {
+        if (let Some(returnLocation) <- GetOuterBlockGroupReturnValLocation()) {
+            builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(returnLocation)), returnLocation,
+                CurrentBlock())
+        }
+    }
+
+    private func RestoreForInRetValIfNeeded(forIn: ForIn): Unit {
+        let funcRetValLocation = GetOuterBlockGroupReturnValLocation() ?? return
+        let forInResult = RequireResult(forIn)
+        if (!forInExprReturnMap.contains(forInResult)) {
+            return
+        }
+        let forInRetValLocation = forInExprReturnMap[forInResult]
+        let forInRetVal = RequireResult(builder.CreateLoad(RequireRefBaseType(forInRetValLocation),
+            forInRetValLocation, CurrentBlock()))
+        builder.CreateStore(CastValueIfNeeded(forInRetVal, RequireRefBaseType(funcRetValLocation)),
+            funcRetValLocation, CurrentBlock())
+    }
+
     private func MakeForInIterNoneValue(optionTy: Type): Value {
         let noneTag = CreateEnumSelectorConstantForName(optionTy, "None")
         let values = ArrayList<Value>()
@@ -3569,25 +3651,6 @@ public class Translator {
             if (let Some(retValue) <- value) {
                 StoreLambdaReturnValueIfNeeded(lambda, retValue)
             }
-        }
-        builder.CreateExit(None, CurrentBlock())
-    }
-
-    private func EmitLambdaReturn(value: Option<Value>): Unit {
-        let lambda = currentLambda ??
-            throw IllegalStateException("faithful AST2CHIR lambda return has no current lambda")
-        if (let Some(retValue) <- value) {
-            if (let Some(retTy) <- lambda.GetReturnType()) {
-                if (retTy.IsUnit() || retTy.IsNothing() || retTy.IsVoid()) {
-                    builder.CreateExit(None, CurrentBlock())
-                } else {
-                    StoreLambdaReturnValueIfNeeded(lambda, retValue)
-                    builder.CreateExit(None, CurrentBlock())
-                }
-                return
-            }
-            builder.CreateExit(Some(retValue), CurrentBlock())
-            return
         }
         builder.CreateExit(None, CurrentBlock())
     }

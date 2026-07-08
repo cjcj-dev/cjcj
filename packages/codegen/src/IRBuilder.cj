@@ -40,7 +40,6 @@ private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowExce
 private let CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME: String = "rt$CreateArithmeticException_msg"
 private let THROW_EXCEPTION_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "ThrowException"
 private let THROW_NEGATIVE_ARRAY_SIZE_EXCEPTION_FUNC_NAME: String = "rt$ThrowNegativeArraySizeException"
-private let THROW_INDEX_OUT_OF_BOUNDS_EXCEPTION_FUNC_NAME: String = "rt$ThrowIndexOutOfBoundsException"
 private let THROW_EXCEPTION_INTRINSIC_NAME: String = "llvm.cj.throw.exception"
 private let GET_EXCEPTION_WRAPPER_INTRINSIC_NAME: String = "llvm.cj.get.exception.wrapper"
 private let POST_THROW_EXCEPTION_INTRINSIC_NAME: String = "llvm.cj.post.throw.exception"
@@ -3187,6 +3186,7 @@ public class IRBuilder2 <: Resource {
         CreateCondBr(isThrow, blocks[0], blocks[1])
         SetInsertPoint(blocks[0])
         CreateOutOfBoundException()
+        let _ = CreateUnreachable()
         SetInsertPoint(blocks[1])
     }
 
@@ -3341,7 +3341,7 @@ public class IRBuilder2 <: Resource {
         for (index in indices) {
             gepIndices.add(index)
         }
-        return CreateInBoundsGEP(arrayType, pointer, gepIndices, name: name)
+        return CreateGEP(arrayType, pointer, gepIndices, name: name)
     }
 
     public func VArrayInitedByLambda(varrayLen: LLVMValueRef, autoEnv: CGValue,
@@ -4018,14 +4018,7 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateOutOfBoundException(): Unit {
-        let helperType = MakeFunctionType(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, ArrayList<LLVMTypeRef>())
-        let helper = if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(THROW_INDEX_OUT_OF_BOUNDS_EXCEPTION_FUNC_NAME)) {
-            cgMod.GetOrInsertCGFunction(helperNode).GetRawFunction()
-        } else {
-            GetOrInsertRuntimeFunction(THROW_INDEX_OUT_OF_BOUNDS_EXCEPTION_FUNC_NAME, helperType)
-        }
-        let _ = CreateCallOrInvoke(helper, helperType, ArrayList<LLVMValueRef>())
-        let _ = CreateUnreachable()
+        CreateImplicitExceptionAndThrow("_CNat25IndexOutOfBoundsException6<init>Hv")
     }
 
     public func AllocateArray(rawArrayTy: RawArrayType, length: LLVMValueRef): LLVMValueRef {

@@ -285,7 +285,7 @@ private func NeedCheckArrayBound(chirExpr: Expression): Bool {
     if (let Some(value) <- chirExpr.GetAnnotation("NeedCheckArrayBound")) {
         return value == "true" || value == "1"
     }
-    return false
+    return true
 }
 
 private func GeneratePreInitializeIntrinsic(irBuilder: IRBuilder2): LLVMValueRef {

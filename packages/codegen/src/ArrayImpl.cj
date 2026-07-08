@@ -27,9 +27,6 @@ public func GenerateLoad(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValue
     if (chirExpr.GetNumOfOperands() == 0) {
         return LLVMNullValue()
     }
-    if (let Some(genericFieldLoad) <- TryLoadGenericClassFieldWithReadBarrier(irBuilder, chirExpr)) {
-        return genericFieldLoad
-    }
     let addr = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0))
     if (let Some(addrType) <- addr.GetCGType()) {
         if (let Some(pointerElementType) <- addrType.GetPointerElementType()) {
@@ -50,41 +47,6 @@ public func GenerateLoad(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValue
             addr.GetRawValue(), name: "load")
     }
     return LLVMNullValue()
-}
-
-private func TryLoadGenericClassFieldWithReadBarrier(irBuilder: IRBuilder2,
-    loadExpr: Expression): Option<LLVMValueRef> {
-    let local = (loadExpr.GetOperand(0) as LocalVar) ?? return None
-    let ownerExpr = local.GetExpr() ?? return None
-    let (base, fieldTy, fieldPath) = if (let Some(elementRef) <- (ownerExpr as GetElementRef)) {
-        let path = elementRef.GetPath()
-        let (resolvedBase, resolvedTy) = ResolveLoadBaseAndFieldType(elementRef.GetLocation(), Some(path))
-        (resolvedBase, resolvedTy, Some(path))
-    } else if (let Some(elementByName) <- (ownerExpr as GetElementByName)) {
-        let path = ResolveLoadElementPathByNames(elementByName.GetLocation(), elementByName.GetNames())
-        let (resolvedBase, resolvedTy) = ResolveLoadBaseAndFieldType(elementByName.GetLocation(), path)
-        (resolvedBase, resolvedTy, path)
-    } else {
-        return None
-    }
-    if (!IsGenericField(fieldTy)) {
-        return None
-    }
-    let baseValue = irBuilder.GetCGModule().GetMappedCGValue(base)
-    let baseCGType = baseValue.GetCGType() ?? return None
-    if (!baseCGType.GetOriginal().StripAllRefs().IsClass() ||
-        !IsAddressSpacePointer(baseValue.GetRawValue(), 1u32)) {
-        return None
-    }
-    let resultTy = loadExpr.GetResultType() ?? (fieldTy ?? return None)
-    let elementType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
-    let actualPath = fieldPath ?? return None
-    if (actualPath.isEmpty()) {
-        return None
-    }
-    let fieldAddr = irBuilder.CreateGEP(baseValue, actualPath, name: "field.addr").GetRawValue()
-    return Some(irBuilder.LoadGenericFieldValue(baseValue.GetRawValue(), fieldAddr, elementType,
-        baseCGType.GetOriginal(), fieldTy))
 }
 
 private func TryLoadClassFieldWithReadBarrier(irBuilder: IRBuilder2, loadExpr: Expression, addr: CGValue,
@@ -523,13 +485,6 @@ public func CreateTypedStoreForAddress(irBuilder: IRBuilder2, value: CGValue, ad
     if (let Some(structPtrStore) <- TryStoreStructPtrValueForAddress(irBuilder, value, addr)) {
         return structPtrStore
     }
-    let storedValue = StoreValueForAddress(irBuilder, value, addr)
-    if (let Some(staticAggregateStore) <- TryStoreStaticAggregateValueForAddress(irBuilder, storedValue, addr)) {
-        return staticAggregateStore
-    }
-    if (ShouldUseGCStaticWriteBarrier(irBuilder, addr) && ShouldUseGCStaticRefWriteBarrier(addr)) {
-        return irBuilder.CallGCWriteStaticRef(storedValue, addr.GetRawValue())
-    }
     if (let Some(valueCGType) <- value.GetCGType()) {
         if (let Some(addrCGType) <- addr.GetCGType()) {
             if (valueCGType.IsVArrayPtrType() && addrCGType.IsVArrayPtrType()) {
@@ -542,6 +497,13 @@ public func CreateTypedStoreForAddress(irBuilder: IRBuilder2, value: CGValue, ad
                 return irBuilder.CreateMemCpy(addr.GetRawValue(), align, value.GetRawValue(), align, size)
             }
         }
+    }
+    let storedValue = StoreValueForAddress(irBuilder, value, addr)
+    if (let Some(staticAggregateStore) <- TryStoreStaticAggregateValueForAddress(irBuilder, storedValue, addr)) {
+        return staticAggregateStore
+    }
+    if (ShouldUseGCStaticWriteBarrier(irBuilder, addr) && ShouldUseGCStaticRefWriteBarrier(addr)) {
+        return irBuilder.CallGCWriteStaticRef(storedValue, addr.GetRawValue())
     }
     return irBuilder.CreateStore(storedValue, addr.GetRawValue())
 }
