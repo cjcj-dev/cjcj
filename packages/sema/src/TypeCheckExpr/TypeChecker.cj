@@ -3585,7 +3585,6 @@ public class TypeChecker {
                     return false
                 }
                 ClearLambdaBodyForContextCheck(le)
-                RefreshNameReferencesInTree(ctx, le)
                 let funcBody = le.funcBody.getOrThrow()
                 if (CheckLambdaBody(ctx, funcBody)) {
                     ds.ReportDiag()
