@@ -153,7 +153,15 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr, ctx: ASTConte
         ok = false
     }
     if (let Some(pattern) <- fie.pattern) {
-        ok = ChkPattern(typeManager, ctx, elementTy, pattern, isPatternInMatch: false, diag: diag) && ok
+        let patternExprChecker: ConstPatternExprChecker = match (checker) {
+            case Some(realChecker) => { expectedTy: Ty, expr: Expr => realChecker(ctx, expectedTy, expr) }
+            case None => { expectedTy: Ty, expr: Expr =>
+                ChkExprShallow(typeManager, expectedTy, expr, ctx: Some(ctx), diag: diag,
+                    importManager: importManager)
+            }
+        }
+        ok = ChkPattern(typeManager, ctx, elementTy, pattern, isPatternInMatch: false,
+            exprChecker: Some(patternExprChecker), diag: diag) && ok
     } else {
         ok = false
     }

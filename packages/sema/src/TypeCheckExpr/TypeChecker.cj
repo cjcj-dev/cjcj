@@ -4170,6 +4170,8 @@ public class TypeChecker {
                     let _ = ChkMatchCasePatterns(impl.typeManager, ctx, targetTy, matchCase, diag: impl.diag,
                         exprChecker: Some({ target: Ty, expr: Expr =>
                             Check(ctx, target, expr)
+                        }), desugarCallExpr: Some({ callExprForDesugar: CallExpr =>
+                            DesugarCallExpr(callExprForDesugar)
                         }))
                     BindCollectedConditionDecls(ctx, matchCase.patterns, boundDecls)
                     for (decl in boundDecls) {
@@ -5283,6 +5285,8 @@ public class TypeChecker {
             let matchTy = SynMatchExpr(impl.typeManager, ctx, matchExpr, diag: impl.diag,
                 exprChecker: Some({ target: Ty, expr: Expr =>
                     Check(ctx, target, expr)
+                }), desugarCallExpr: Some({ callExprForDesugar: CallExpr =>
+                    DesugarCallExpr(callExprForDesugar)
                 }))
             ctx.SkipSynForCorrectTy(matchExpr)
             RemovePatternBindings(ctx, boundDecls)
@@ -5721,6 +5725,8 @@ public class TypeChecker {
             let matchOk = ChkMatchExpr(impl.typeManager, ctx, target, matchExpr, diag: impl.diag,
                 exprChecker: Some({ target2: Ty, expr: Expr =>
                     Check(ctx, target2, expr)
+                }), desugarCallExpr: Some({ callExprForDesugar: CallExpr =>
+                    DesugarCallExpr(callExprForDesugar)
                 }))
             if (matchOk) {
                 ctx.SkipSynForCorrectTy(matchExpr)
