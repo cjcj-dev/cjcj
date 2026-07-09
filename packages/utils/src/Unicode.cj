@@ -355,24 +355,28 @@ public func IsASCII(v: UTF32): Bool {
 }
 
 public func IsAlnum(v: Int64): Bool {
-    return (v >= Int64(b'0') && v <= Int64(b'9')) || (v >= Int64(b'a') && v <= Int64(b'z')) ||
+    return v >= 0 && v <= 0xff && ((v >= Int64(b'0') && v <= Int64(b'9')) || (v >= Int64(b'a') && v <= Int64(b'z')) ||
         (v >= Int64(b'A') && v <= Int64(b'Z'))
+    )
 }
 
 public func IsDigit(v: Int64): Bool {
-    return v >= Int64(b'0') && v <= Int64(b'9')
+    return v >= 0 && v <= 0xff && v >= Int64(b'0') && v <= Int64(b'9')
 }
 
 public func IsXDigit(v: Int64): Bool {
-    return IsDigit(v) || (v >= Int64(b'a') && v <= Int64(b'f')) || (v >= Int64(b'A') && v <= Int64(b'F'))
+    return v >= 0 && v <= 0xff && (IsDigit(v) || (v >= Int64(b'a') && v <= Int64(b'f')) ||
+        (v >= Int64(b'A') && v <= Int64(b'F')))
 }
 
 public func IsASCIIIdStart(c: UTF32): Bool {
-    return (c >= UInt32(b'a') && c <= UInt32(b'z')) || (c >= UInt32(b'A') && c <= UInt32(b'Z')) || c == UInt32(b'_')
+    let c1 = c & 0xffu32
+    return (c1 >= UInt32(b'a') && c1 <= UInt32(b'z')) || (c1 >= UInt32(b'A') && c1 <= UInt32(b'Z')) ||
+        c1 == UInt32(b'_')
 }
 
 public func IsASCIIIdContinue(c: UTF32): Bool {
-    return IsASCIIIdStart(c) || (c >= UInt32(b'0') && c <= UInt32(b'9'))
+    return IsDigit(Int64(c)) || IsASCIIIdStart(c)
 }
 
 public func IsXIDStart(c: UTF32): Bool {
