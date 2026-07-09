@@ -400,8 +400,7 @@ extend ParserImpl {
     }
 
     public func SeeingIdentifierLike(): Bool {
-        return IsIdentifierOrContextualKeyword(Peek().kind) ||
-            Seeing(TokenKind.INIT) || Seeing(TokenKind.THIS) || Seeing(TokenKind.SUPER)
+        return IsIdentifierOrContextualKeyword(Peek().kind)
     }
 
     public func SeeingIdentifierAndTargetOp(tokenKinds: Array<TokenKind>): Bool {

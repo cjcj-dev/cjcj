@@ -1208,15 +1208,8 @@ extend ParserImpl {
         if (SeeingIdentifierLike()) {
             return ParseVarDecl(scopeKind, modifiers, annos, key, isVar, isConst)
         }
-        let keyName = if (isVar) { "var" } else { "let" }
-        let builder = ParseDiagnoseRefactor(
-            DiagKindRefactor.parse_expected_one_of_identifier_or_pattern,
-            Peek(),
-            keyName,
-            ConvertToken(Peek()))
-        builder.AddHint(MakeRange(key.Begin(), keyName))
+        DiagExpectedIdentifierOrPattern(isVar, key.Begin(), isConst)
         ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
-        builder.Emit()
         return InvalidDecl(key.Begin())
     }
 
@@ -1232,14 +1225,8 @@ extend ParserImpl {
         if (SeeingIdentifierLike()) {
             return ParseVarDecl(scopeKind, modifiers, annos, key, false, true)
         }
-        let builder = ParseDiagnoseRefactor(
-            DiagKindRefactor.parse_expected_one_of_identifier_or_pattern,
-            Peek(),
-            "const",
-            ConvertToken(Peek()))
-        builder.AddHint(MakeRange(key.Begin(), "const"))
+        DiagExpectedIdentifierOrPattern(false, key.Begin(), true)
         ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
-        builder.Emit()
         return InvalidDecl(key.Begin())
     }
 
