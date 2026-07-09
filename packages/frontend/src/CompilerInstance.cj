@@ -9,6 +9,7 @@ import cangjie_compiler::mangle.ManglerContext as RealManglerContext
 import cangjie_compiler::sema.CompilerInstance as FaithfulSemaCompilerInstance
 import cangjie_compiler::sema.Desugar.DesugarBeforeTypeCheck as FaithfulDesugarBeforeTypeCheck
 import cangjie_compiler::sema.AnalyzeFunctionLinkage
+import cangjie_compiler::sema.CheckInlineFunctionsForPackages
 import cangjie_compiler::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
 import cangjie_compiler::sema.TypeCheckReferenceRemoveTargetNotMeetExtendConstraint
 import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
@@ -396,6 +397,9 @@ public class CompilerInstance {
     public func PerformDesugarAfterSema(): Bool {
         testManager.MarkDeclsForTestIfNeeded(GetSourcePackages())
         getCompileStrategy().DesugarAfterSema()
+        // Inline checking needs to process source package and imported packages which has source imported decls.
+        CheckInlineFunctionsForPackages(GetPackages(), invocation.globalOptions)
+        // Since the inlined function will affect decls' visibility, analyze linkage after inline decl checking.
         for (pkg in srcPkgs) {
             AnalyzeFunctionLinkage(pkg, invocation.globalOptions)
         }
