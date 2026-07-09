@@ -6,6 +6,7 @@ import cangjie_compiler::utils.{CJC_ASSERT, STATIC_INIT_FUNC}
 import cangjie_compiler::option.{GlobalOptions, OptimizationFlag}
 import cangjie_compiler::basic.Linkage as BasicLinkage
 import cangjie_compiler::ast.ASTKind
+import cangjie_compiler::ast.IsInstanceConstructor as AstIsInstanceConstructor
 import cangjie_compiler::ast.IsValidCFuncConstructorCall
 import cangjie_compiler::ast.BuiltInDecl
 import cangjie_compiler::ast.BuiltInType
@@ -639,7 +640,7 @@ public class Translator {
     }
 
     private func TranslateConstructorDefaultFieldInitializers(funcDecl: AstFuncDecl, funcBody: AstFuncBody): Unit {
-        if (!funcDecl.TestAttr(AstAttribute.CONSTRUCTOR) || HasDelegatedThisCall(funcBody)) {
+        if (!AstIsInstanceConstructor(funcDecl) || HasDelegatedThisCall(funcBody)) {
             return
         }
         let owner = match (funcDecl.outerDecl) {
