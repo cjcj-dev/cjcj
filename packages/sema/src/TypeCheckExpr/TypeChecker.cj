@@ -5228,6 +5228,7 @@ public class TypeChecker {
                 Some({ target: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, target, arg) }), diag: impl.diag,
                 declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }), ctx: Some(ctx),
                 variadicDesugar: Some({ vce: CallExpr, arity: Int64 => DesugarVariadicCallExpr(vce, arity) }),
+                desugarCallExpr: Some({ callExprForDesugar: CallExpr => DesugarCallExpr(callExprForDesugar) }),
                 typeChecker: Some({ targetTy: Ty, typeNode: Type =>
                     if (!Ty.IsTyCorrect(targetTy)) {
                         typeNode.SetTy(TypeManager.GetInvalidTy())
@@ -5664,6 +5665,7 @@ public class TypeChecker {
                 clearInferredForTarget: clearInferredCallTypes,
                 declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }), ctx: Some(ctx),
                 variadicDesugar: Some({ vce: CallExpr, arity: Int64 => DesugarVariadicCallExpr(vce, arity) }),
+                desugarCallExpr: Some({ callExprForDesugar: CallExpr => DesugarCallExpr(callExprForDesugar) }),
                 typeChecker: Some({ targetTy: Ty, typeNode: Type =>
                     if (!Ty.IsTyCorrect(targetTy)) {
                         typeNode.SetTy(TypeManager.GetInvalidTy())

@@ -533,6 +533,29 @@ private func IsPossibleVariadicFunctionInList(candidates: ArrayList<FuncDecl>, c
     return false
 }
 
+// C++ src/Sema/TypeCheckCall.cpp:175 IsPossibleEnumConstructor.
+private func IsPossibleEnumConstructor(candidates: ArrayList<FuncDecl>, baseExpr: Expr): Bool {
+    if (baseExpr.astKind != ASTKind.REF_EXPR) {
+        return false
+    }
+    let re = (baseExpr as RefExpr).getOrThrow()
+    if (!candidates.isEmpty()) {
+        if (let Some(outer) <- candidates[0].outerDecl) {
+            if ((outer as EnumDecl).isSome()) {
+                for (target in re.ref.targets) {
+                    if (let None <- target.GetTy()) {
+                        return true
+                    }
+                    if (target.TyKind() != TypeKind.TYPE_FUNC) {
+                        return true
+                    }
+                }
+            }
+        }
+    }
+    return false
+}
+
 // Mirror C++ FuncDeclsGroupByFixedPositionalArity (TypeCheckCall.cpp:530): group the variadic-capable
 // candidates by their fixed positional arity (positional param count minus the trailing variadic array
 // param). Uses an ordered TreeMap so group iteration order is deterministic (bcgate parity).
@@ -608,6 +631,46 @@ private func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDia
     }
     ce.callKind = CallKind.CALL_INVALID
     return false
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:3318 TypeCheckerImpl::ChkFunctionCallExpr.
+private func ChkFunctionCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    target: Option<Ty>, ce: CallExpr, argChecker: Option<CallArgChecker>,
+    desugarChecker: Option<CallDesugarChecker>, clearInferredForTarget: Bool,
+    declSynthesizer: Option<CallDeclSynthesizer>, ctx: Option<ASTContext>,
+    variadicDesugar: Option<(CallExpr, Int64) -> Unit>, desugarCallExpr: Option<(CallExpr) -> Unit>,
+    typeChecker: Option<(Ty, Type) -> Bool>, typeSynthesizer: Option<(Type) -> Ty>,
+    argSynthesizer: Option<(FuncArg) -> Ty>, exprSynthesizer: Option<(Expr) -> Ty>,
+    effectiveArgChecker: Option<CallArgChecker>): Bool {
+    if (let Some(desugarCall) <- desugarCallExpr) {
+        desugarCall(ce)
+    }
+    let desugaredCallExpr = (ce.desugarExpr.getOrThrow() as CallExpr).getOrThrow()
+    if (let Some(base) <- desugaredCallExpr.baseFunc) {
+        SetIsNotAlone(base)
+        if (let Some(nameRef) <- (base as NameReferenceExpr)) {
+            nameRef.callOrPattern = Some(desugaredCallExpr)
+        }
+        if (let Some(synthesizer) <- exprSynthesizer) {
+            let _ = synthesizer(base)
+        }
+    }
+    if (!ChkCallExprWithArgChecker(typeManager, diag, target, desugaredCallExpr, argChecker,
+        desugarChecker: desugarChecker, clearInferredForTarget: clearInferredForTarget,
+        declSynthesizer: declSynthesizer, ctx: ctx, variadicDesugar: variadicDesugar,
+        desugarCallExpr: desugarCallExpr, typeChecker: typeChecker, typeSynthesizer: typeSynthesizer,
+        argSynthesizer: argSynthesizer, exprSynthesizer: exprSynthesizer,
+        effectiveArgChecker: effectiveArgChecker)) {
+        RecoverToCallExpr(ce)
+        if (let Some(diagValue) <- diag) {
+            DiagOld(diagValue, ce, BasicDiagKind.sema_no_match_operator_function_call)
+        }
+        ce.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+    ce.callKind = desugaredCallExpr.callKind
+    ce.SetTy(desugaredCallExpr.GetTy() ?? TypeManager.GetInvalidTy())
+    return true
 }
 
 private func SyntaxFilterCandidates(ce: CallExpr, candidates: ArrayList<FuncDecl>): ArrayList<FuncDecl> {
@@ -4003,14 +4066,17 @@ public func ChkCallExprWithDiag(typeManager: TypeManager, diag: BasicDiagnosticE
 }
 
 public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>, ce: CallExpr,
-    ctx!: Option<ASTContext> = None, variadicDesugar!: Option<(CallExpr, Int64) -> Unit> = None): Bool {
-    return ChkCallExprWithArgChecker(typeManager, diag, target, ce, None, ctx: ctx, variadicDesugar: variadicDesugar)
+    ctx!: Option<ASTContext> = None, variadicDesugar!: Option<(CallExpr, Int64) -> Unit> = None,
+    desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Bool {
+    return ChkCallExprWithArgChecker(typeManager, diag, target, ce, None, ctx: ctx, variadicDesugar: variadicDesugar,
+        desugarCallExpr: desugarCallExpr)
 }
 
 public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
     ce: CallExpr, argChecker: Option<CallArgChecker>, desugarChecker!: Option<CallDesugarChecker> = None,
     clearInferredForTarget!: Bool = true, declSynthesizer!: Option<CallDeclSynthesizer> = None,
     ctx!: Option<ASTContext> = None, variadicDesugar!: Option<(CallExpr, Int64) -> Unit> = None,
+    desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
     typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None,
     argSynthesizer!: Option<(FuncArg) -> Ty> = None, exprSynthesizer!: Option<(Expr) -> Ty> = None,
     effectiveArgChecker!: Option<CallArgChecker> = None): Bool {
@@ -4077,6 +4143,11 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
         DiagnoseForCall(diag, candidatesBefore, candidates, ce, decl)
         return false
     }
+    let maybeEnumOverloadOP = if (let Some(baseFunc) <- ce.baseFunc) {
+        IsPossibleEnumConstructor(candidates, baseFunc)
+    } else {
+        false
+    }
     let inferenceFailure = CallInferenceFailure()
     let result = MatchFunctionForCall(typeManager, diag, ctx, candidates, ce, target, argChecker: argChecker,
         inferenceFailure: Some(inferenceFailure), declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer,
@@ -4085,13 +4156,22 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
     if (result.size == 1) {
         return true
     }
+    if (let Some(baseFunc) <- ce.baseFunc) {
+        baseFunc.SetTy(if (maybeEnumOverloadOP || IsPossibleVariadicFunctionInList(candidates, ce)) {
+            TypeManager.GetInvalidTy()
+        } else {
+            baseFunc.GetTy() ?? TypeManager.GetInvalidTy()
+        })
+    }
+    if (maybeEnumOverloadOP && ChkFunctionCallExpr(typeManager, diag, target, ce, argChecker, desugarChecker,
+        clearInferredForTarget, declSynthesizer, ctx, variadicDesugar, desugarCallExpr, typeChecker, typeSynthesizer,
+        argSynthesizer, exprSynthesizer, effectiveArgChecker)) {
+        return true
+    }
     // Mirror C++ TypeCheckCall.cpp:3254-3256: when normal matching fails and the call may target a
     // variadic function, clear the base's type and retry via the variadic desugaring path.
     if (let Some(desugarVariadic) <- variadicDesugar) {
         if (IsPossibleVariadicFunctionInList(candidates, ce)) {
-            if (let Some(baseFunc) <- ce.baseFunc) {
-                baseFunc.SetTy(TypeManager.GetInvalidTy())
-            }
             if (result.isEmpty() &&
                 ChkVariadicCallExpr(typeManager, diag, ctx, target, ce, candidates, desugarVariadic,
                     argChecker: argChecker, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer,
@@ -4124,8 +4204,9 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
     return false
 }
 
-public func SynCallExpr(typeManager: TypeManager, ce: CallExpr, ctx!: Option<ASTContext> = None): Ty {
-    if (ChkCallExpr(typeManager, None, None, ce, ctx: ctx)) {
+public func SynCallExpr(typeManager: TypeManager, ce: CallExpr, ctx!: Option<ASTContext> = None,
+    desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Ty {
+    if (ChkCallExpr(typeManager, None, None, ce, ctx: ctx, desugarCallExpr: desugarCallExpr)) {
         return ce.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return TypeManager.GetInvalidTy()
@@ -4134,11 +4215,12 @@ public func SynCallExpr(typeManager: TypeManager, ce: CallExpr, ctx!: Option<AST
 public func SynCallExprWithArgChecker(typeManager: TypeManager, ce: CallExpr, argChecker: Option<CallArgChecker>,
     diag!: Option<BasicDiagnosticEngine> = None, declSynthesizer!: Option<CallDeclSynthesizer> = None,
     ctx!: Option<ASTContext> = None, variadicDesugar!: Option<(CallExpr, Int64) -> Unit> = None,
+    desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
     typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None,
     argSynthesizer!: Option<(FuncArg) -> Ty> = None, exprSynthesizer!: Option<(Expr) -> Ty> = None,
     effectiveArgChecker!: Option<CallArgChecker> = None): Ty {
     if (ChkCallExprWithArgChecker(typeManager, diag, None, ce, argChecker, declSynthesizer: declSynthesizer,
-        ctx: ctx, variadicDesugar: variadicDesugar, typeChecker: typeChecker,
+        ctx: ctx, variadicDesugar: variadicDesugar, desugarCallExpr: desugarCallExpr, typeChecker: typeChecker,
         typeSynthesizer: typeSynthesizer, argSynthesizer: argSynthesizer, exprSynthesizer: exprSynthesizer,
         effectiveArgChecker: effectiveArgChecker)) {
         return ce.GetTy() ?? TypeManager.GetInvalidTy()

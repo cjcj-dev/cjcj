@@ -6,6 +6,7 @@ import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::modules.SemaImportManager
 import cangjie_compiler::sema.*
+import cangjie_compiler::sema.Desugar.*
 
 func TcUnitTy(): Ty {
     return TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
@@ -452,7 +453,8 @@ private func SynCallExprShallow(typeManager: TypeManager, ce: CallExpr, ctx!: Op
     if (!SynCallChildren(typeManager, ce)) {
         return TcInvalid(ce)
     }
-    let callTy = SynCallExpr(typeManager, ce, ctx: ctx)
+    let callTy = SynCallExpr(typeManager, ce, ctx: ctx,
+        desugarCallExpr: Some({ callExprForDesugar: CallExpr => DesugarCallExpr(callExprForDesugar) }))
     if (Ty.IsTyCorrect(callTy)) {
         return callTy
     }
@@ -464,7 +466,8 @@ private func ChkCallExprShallow(typeManager: TypeManager, target: Ty, ce: CallEx
         let _ = TcInvalid(ce)
         return false
     }
-    if (ChkCallExpr(typeManager, None, Some(target), ce, ctx: ctx)) {
+    if (ChkCallExpr(typeManager, None, Some(target), ce, ctx: ctx,
+        desugarCallExpr: Some({ callExprForDesugar: CallExpr => DesugarCallExpr(callExprForDesugar) }))) {
         return true
     }
     if (Ty.IsTyCorrect(ce.GetTy())) {
