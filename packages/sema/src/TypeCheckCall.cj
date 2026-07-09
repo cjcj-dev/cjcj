@@ -3981,6 +3981,9 @@ private func ResolveDeclForCallBase(ce: CallExpr, candidates: ArrayList<FuncDecl
                     }
                 }
             }
+            if (!target.IsStructOrClassDecl() && !candidates.isEmpty()) {
+                return Some(candidates[0])
+            }
             return Some(target)
         }
     }
