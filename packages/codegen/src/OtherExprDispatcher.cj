@@ -89,8 +89,8 @@ private func GenerateRTTIExpression(irBuilder: IRBuilder2, chirExpr: Expression)
         return irBuilder.CreateBitCast(typeInfo, typeInfoPtrType)
     }
     if (let Some(getRTTIStatic) <- (chirExpr as GetRTTIStatic)) {
-        return irBuilder.CreateBitCast(CGType.GetOrCreate(irBuilder.GetCGModule(),
-            getRTTIStatic.GetRTTIType()).GetOrCreateTypeInfo(), typeInfoPtrType, name: "static.ti")
+        return irBuilder.CreateBitCast(irBuilder.CreateTypeInfo(getRTTIStatic.GetRTTIType()),
+            typeInfoPtrType, name: "static.ti")
     }
     return LLVMNullValue()
 }
