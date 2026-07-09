@@ -20,6 +20,8 @@ import cangjie_compiler::chir.GetMethodIdxInAutoEnvObject
 import cangjie_compiler::chir.IntLiteral
 import cangjie_compiler::chir.IntrinsicKind
 import cangjie_compiler::chir.Invoke
+import cangjie_compiler::chir.InvokeStatic
+import cangjie_compiler::chir.InvokeStaticWithException
 import cangjie_compiler::chir.InvokeWithException
 import cangjie_compiler::chir.LiteralValue
 import cangjie_compiler::chir.Load
@@ -1533,7 +1535,8 @@ public class IRBuilder2 <: Resource {
                     name: if (name.isEmpty()) { "generic.ti" } else { name + ".generic.ti" }))
             }
             if (calleeType.IsMethodType()) {
-                if (let Some(invokeOuterTypeInfo) <- CreateInvokeOuterTypeInfoArg()) {
+                if (let Some(invokeOuterTypeInfo) <- CreateInvokeOuterTypeInfoArg(methodTypeInfoArg,
+                    thisTypeInfoArg)) {
                     callArgs.add(invokeOuterTypeInfo)
                 } else if (let Some(overrideTypeInfo) <- methodTypeInfoArg) {
                     if (calleeType.IsConstructorType() && !args.isEmpty()) {
@@ -1566,10 +1569,29 @@ public class IRBuilder2 <: Resource {
         return callArgs
     }
 
-    private func CreateInvokeOuterTypeInfoArg(): Option<LLVMValueRef> {
+    private func CreateInvokeOuterTypeInfoArg(methodTypeInfoArg: Option<LLVMValueRef>,
+        thisTypeInfoArg: Option<LLVMValueRef>): Option<LLVMValueRef> {
         let exprWrapper = chirExpr ?? return None
         let expr = exprWrapper.GetExpression()
         let chirBuilder = GetCGContext().GetCHIRBuilder()
+        if (let Some(invokeStaticExpr) <- (expr as InvokeStatic)) {
+            var staticThisTypeInfo = thisTypeInfoArg
+            if (staticThisTypeInfo.isNone()) {
+                staticThisTypeInfo = methodTypeInfoArg
+            }
+            return Some(CreateInvokeStaticOuterTypeInfoArg(invokeStaticExpr.GetThisType().getOrThrow(),
+                invokeStaticExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder),
+                invokeStaticExpr.GetVirtualMethodOffset(chirBuilder), staticThisTypeInfo))
+        }
+        if (let Some(invokeStaticWithExceptionExpr) <- (expr as InvokeStaticWithException)) {
+            var staticThisTypeInfo = thisTypeInfoArg
+            if (staticThisTypeInfo.isNone()) {
+                staticThisTypeInfo = methodTypeInfoArg
+            }
+            return Some(CreateInvokeStaticOuterTypeInfoArg(invokeStaticWithExceptionExpr.GetThisType().getOrThrow(),
+                invokeStaticWithExceptionExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder),
+                invokeStaticWithExceptionExpr.GetVirtualMethodOffset(chirBuilder), staticThisTypeInfo))
+        }
         if (let Some(invokeExpr) <- (expr as Invoke)) {
             return Some(CreateInvokeOuterTypeInfoArg(invokeExpr.GetObject(),
                 invokeExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder),
@@ -1581,6 +1603,25 @@ public class IRBuilder2 <: Resource {
                 invokeWithExceptionExpr.GetVirtualMethodOffset(chirBuilder)))
         }
         return None
+    }
+
+    private func CreateInvokeStaticOuterTypeInfoArg(thisTy: Type, outerCHIRType: ClassType, vtableOffset: UInt64,
+        thisTypeInfoArg: Option<LLVMValueRef>): LLVMValueRef {
+        let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
+        if (GetCGContext().GetCGPkgContext().NeedOuterTypeInfo(outerCHIRType)) {
+            let thisTypeInfo = if (DeRef(thisTy).IsThis()) {
+                thisTypeInfoArg.getOrThrow()
+            } else {
+                CreateBitCast(CreateTypeInfo(thisTy), typeInfoPtrType)
+            }
+            let methodOuterTypeArgs = ArrayList<LLVMValueRef>()
+            methodOuterTypeArgs.add(thisTypeInfo)
+            methodOuterTypeArgs.add(CreateTypeInfo(outerCHIRType))
+            methodOuterTypeArgs.add(GetInt64(Int64(vtableOffset)))
+            let outerType = CallIntrinsicMethodOuterType(methodOuterTypeArgs)
+            return CreateBitCast(outerType, typeInfoPtrType)
+        }
+        return unsafe { LLVMConstNull(typeInfoPtrType) }
     }
 
     private func CreateInvokeOuterTypeInfoArg(objectValue: Value, outerCHIRType: ClassType,

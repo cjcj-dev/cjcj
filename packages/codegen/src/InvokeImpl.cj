@@ -4,12 +4,7 @@ import std.collection.*
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.ClassType
-import cangjie_compiler::chir.CustomType
-import cangjie_compiler::chir.CustomTypeDef
-import cangjie_compiler::chir.DynamicDispatch
-import cangjie_compiler::chir.DynamicDispatchWithException
 import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.GetMethodIdxInAutoEnvObject
 import cangjie_compiler::chir.GetTypeQualifiedName
@@ -30,11 +25,10 @@ public func GenerateInvokeExpression(irBuilder: IRBuilder2, chirExpr: Expression
         return GenerateInvoke(irBuilder, invokeWithExceptionExpr)
     }
     if (let Some(invokeStaticExpr) <- (chirExpr as InvokeStatic)) {
-        return GenerateResolvedStaticInvoke(irBuilder, invokeStaticExpr, invokeStaticExpr.GetArgs())
+        return GenerateInvokeStatic(irBuilder, invokeStaticExpr)
     }
     if (let Some(invokeStaticWithExceptionExpr) <- (chirExpr as InvokeStaticWithException)) {
-        return GenerateResolvedStaticInvoke(irBuilder, invokeStaticWithExceptionExpr,
-            invokeStaticWithExceptionExpr.GetArgs())
+        return GenerateInvokeStatic(irBuilder, invokeStaticWithExceptionExpr)
     }
     return LLVMNullValue()
 }
@@ -169,50 +163,40 @@ private func VTableSizeOf(ownerTy: Type): Int64 {
     return 1
 }
 
-private func GenerateResolvedStaticInvoke(irBuilder: IRBuilder2, dispatch: DynamicDispatch,
-    args: ArrayList<Value>): LLVMValueRef {
-    if (let Some(thisTy) <- dispatch.GetThisType()) {
-        if (let Some(callee) <- FindMethodByName(thisTy, dispatch.GetMethodName())) {
-            return GenerateApply(irBuilder, callee, args, callType: Some(dispatch.GetMethodType()),
-                isMethodType: true, isStaticMethodType: true, instTypeArgs: dispatch.GetInstantiatedTypeArgs())
-        }
-    }
-    return LLVMNullValue()
+private func GenerateInvokeStatic(irBuilder: IRBuilder2, invokeStaticExpr: InvokeStatic): LLVMValueRef {
+    irBuilder.SetCHIRExpr(CHIRExprWrapper(invokeStaticExpr))
+    let chirBuilder = irBuilder.GetCGContext().GetCHIRBuilder()
+    return GenerateInvokeStatic(irBuilder, invokeStaticExpr.GetRTTIValue(), invokeStaticExpr.GetArgs(),
+        invokeStaticExpr.GetMethodType(), invokeStaticExpr.GetInstantiatedTypeArgs(), invokeStaticExpr.GetThisType(),
+        invokeStaticExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder),
+        invokeStaticExpr.GetVirtualMethodOffset(chirBuilder))
 }
 
-private func GenerateResolvedStaticInvoke(irBuilder: IRBuilder2, dispatch: DynamicDispatchWithException,
-    args: ArrayList<Value>): LLVMValueRef {
-    if (let Some(thisTy) <- dispatch.GetThisType()) {
-        if (let Some(callee) <- FindMethodByName(thisTy, dispatch.GetMethodName())) {
-            return GenerateApply(irBuilder, callee, args, callType: Some(dispatch.GetMethodType()),
-                isMethodType: true, isStaticMethodType: true, instTypeArgs: dispatch.GetInstantiatedTypeArgs())
-        }
-    }
-    return LLVMNullValue()
+private func GenerateInvokeStatic(irBuilder: IRBuilder2,
+    invokeStaticWithExceptionExpr: InvokeStaticWithException): LLVMValueRef {
+    irBuilder.SetCHIRExpr(CHIRExprWrapper(invokeStaticWithExceptionExpr))
+    let chirBuilder = irBuilder.GetCGContext().GetCHIRBuilder()
+    return GenerateInvokeStatic(irBuilder, invokeStaticWithExceptionExpr.GetRTTIValue(),
+        invokeStaticWithExceptionExpr.GetArgs(), invokeStaticWithExceptionExpr.GetMethodType(),
+        invokeStaticWithExceptionExpr.GetInstantiatedTypeArgs(), invokeStaticWithExceptionExpr.GetThisType(),
+        invokeStaticWithExceptionExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder),
+        invokeStaticWithExceptionExpr.GetVirtualMethodOffset(chirBuilder))
 }
 
-private func FindMethodByName(ownerTy: Type, methodName: String): Option<Function> {
-    if (let Some(customTy) <- (ownerTy.StripAllRefs() as CustomType)) {
-        return FindMethodByName(customTy.GetCustomTypeDef(), methodName)
+private func GenerateInvokeStatic(irBuilder: IRBuilder2, rttiValue: Value, args: ArrayList<Value>,
+    methodType: FuncType, instTypeArgs: ArrayList<Type>, thisType: Option<Type>, introType: ClassType,
+    vtableOffset: UInt64): LLVMValueRef {
+    let cgMod = irBuilder.GetCGModule()
+    let argValues = ArrayList<CGValue>()
+    for (arg in args) {
+        argValues.add(cgMod.GetMappedCGValue(arg))
     }
-    return None
-}
-
-private func FindMethodByName(def: CustomTypeDef, methodName: String): Option<Function> {
-    for (method in def.GetMethods()) {
-        if (MethodNameMatches(method, methodName)) {
-            return Some(method)
-        }
-    }
-    if (let Some(classDef) <- (def as ClassDef)) {
-        if (let Some(superDef) <- classDef.GetSuperClassDef()) {
-            return FindMethodByName(superDef, methodName)
-        }
-    }
-    return None
-}
-
-private func MethodNameMatches(method: Function, methodName: String): Bool {
-    return method.GetIdentifierWithoutPrefix() == methodName || method.GetSrcCodeIdentifier() == methodName ||
-        method.GetRawMangledName() == methodName
+    let thisTI = cgMod.GetMappedCGValue(rttiValue).GetRawValue()
+    let rawFuncPtr = GenerateFuncPtrForNonAutoEnv(irBuilder, thisTI, thisType, introType, vtableOffset)
+    let typeExtra = TypeExtraInfo(0u32, true, true, false, instTypeArgs)
+    let concreteFuncType = (CGType.GetOrCreate(cgMod, methodType, extraInfo: typeExtra) as CGFunctionType).getOrThrow()
+    let typedFuncPtr = irBuilder.CreateBitCast(rawFuncPtr,
+        unsafe { LLVMPointerType(concreteFuncType.GetLLVMFunctionType(), 0u32) })
+    return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(concreteFuncType, typedFuncPtr, argValues, None,
+        instTypeArgs, thisTypeInfoArg: Some(thisTI))
 }
