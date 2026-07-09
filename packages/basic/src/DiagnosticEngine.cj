@@ -49,6 +49,12 @@ private func SignedDiagnosticInt64Bits(value: Int64): UInt64 {
     return DIAG_INT64_SIGN_BIT + UInt64(value - Int64.Min)
 }
 
+@When[arch == "arm"]
+private func HashForPosition(pos: Position): UInt64 {
+    return pos.fileID ^ (SignedDiagnosticInt64Bits(pos.line) << 10) ^
+        (SignedDiagnosticInt64Bits(pos.column) << 20)
+}
+
 private func DiagArgumentKindIndex(kind: DiagArgumentKind): Int64 {
     return match (kind) {
         case DiagArgumentKind.INT => 0
@@ -151,6 +157,15 @@ public struct Range <: Hashable & Equatable<Range> {
         return !(this == right)
     }
 
+    @When[arch == "arm"]
+    public func Hash(): UInt64 {
+        let beginHash = HashForPosition(begin)
+        let endHash = HashForPosition(end)
+        let goldenRatioHashConstant: UInt64 = 0x9e3779b9u64
+        return beginHash ^ (endHash + goldenRatioHashConstant + (beginHash << 6) + (beginHash >> 2))
+    }
+
+    @When[arch != "arm"]
     public func Hash(): UInt64 {
         return begin.fileID ^ (SignedDiagnosticInt64Bits(begin.line) << 8) ^
             (SignedDiagnosticInt64Bits(begin.column) << 16) ^ (begin.fileID << 24) ^
