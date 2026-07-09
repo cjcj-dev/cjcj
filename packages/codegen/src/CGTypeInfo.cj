@@ -555,7 +555,8 @@ private func BuildRawArrayTypeInfoInitializer(cgMod: CGModule, chirTy: Type, typ
     let typeTemplateTy = CGType.GetOrCreateTypeTemplateType(contextHandle)
     let rawArrayTypeTemplate = GetOrInsertCodeGenGlobal(cgMod, "RawArray.tt", typeTemplateTy)
     let typeInfoValues = ArrayList<LLVMValueRef>()
-    typeInfoValues.add(cgMod.GenerateTypeNameConstantString(CGType.GetRuntimeTypeName(chirTy), false))
+    typeInfoValues.add(cgMod.GenerateTypeNameConstantString(GetTypeQualifiedName(chirTy, forNameFieldOfTi: true),
+        false))
     typeInfoValues.add(unsafe { LLVMConstInt(i8Type, UG_RAW_ARRAY_KIND, 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i16Type, 0u64, 0) })
@@ -622,6 +623,14 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, chirTy: Type, typ
 
 private func GenerateSourceGenericOfTypeInfo(cgMod: CGModule, chirTy: Type, i8PtrType: LLVMTypeRef): LLVMValueRef {
     let cgType = CGType.GetOrCreate(cgMod, chirTy)
+    if (let Some(classTy) <- (chirTy as ClassType)) {
+        if (let Some(finalizer) <- classTy.GetClassDef().GetFinalizer()) {
+            if (!cgType.IsStaticGI()) {
+                CJC_ASSERT(classTy.GetGenericArgs().isEmpty())
+                return unsafe { LLVMConstBitCast(cgMod.GetOrInsertCGFunction(finalizer).GetRawFunction(), i8PtrType) }
+            }
+        }
+    }
     if (cgType.IsStaticGI()) {
         let typeTemplate = cgType.GetOrCreateTypeTemplate()
         return unsafe { LLVMConstBitCast(typeTemplate, i8PtrType) }
@@ -688,6 +697,13 @@ private func SourceGenericTypeTemplateRuntimeName(customTy: CustomType): String 
     return templateName
 }
 
+private func ReplaceDelimiterAfterOrgName(typeName: String): String {
+    if (let Some(splitter) <- typeName.indexOf("::")) {
+        return typeName[0..splitter] + "/" + typeName[splitter + 2..]
+    }
+    return typeName
+}
+
 private func BuildSourceGenericTypeTemplateInitializer(cgMod: CGModule, customTy: CustomType,
     typeTemplateTy: LLVMTypeRef, typeTemplateName: String): LLVMValueRef {
     let sourceTy = SourceCustomType(customTy)
@@ -700,7 +716,8 @@ private func BuildSourceGenericTypeTemplateInitializer(cgMod: CGModule, customTy
     }
     let values = ArrayList<LLVMValueRef>()
     let runtimeName = SourceGenericTypeTemplateRuntimeName(sourceTy)
-    values.add(cgMod.GenerateTypeNameConstantString(runtimeName, false))
+    values.add(cgMod.GenerateTypeNameConstantString(runtimeName, false,
+        qualifiedName: ReplaceDelimiterAfterOrgName(runtimeName)))
     values.add(unsafe { LLVMConstInt(i8Type, TypeInfoKind(cgMod, sourceTy), 0) })
     values.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
     let fieldNum = UInt64(GetTypeTemplateFieldTypes(cgMod, sourceTy).size)
@@ -887,7 +904,7 @@ private func AutoEnvGenericBaseType(customTy: CustomType): CustomType {
 private func ClosureRuntimeTypeName(cgMod: CGModule, customTy: CustomType): String {
     let typeArgs = customTy.GetGenericArgs()
     if (typeArgs.isEmpty()) {
-        return CGType.GetRuntimeTypeName(customTy)
+        return GetTypeQualifiedName(customTy, forNameFieldOfTi: true)
     }
     var params = ""
     var idx: Int64 = 0
@@ -911,7 +928,7 @@ private func RuntimeTypeNameForClosure(cgMod: CGModule, chirTy: Type): String {
             return ClosureRuntimeTypeName(cgMod, AutoEnvGenericBaseType(customTy))
         }
     }
-    return CGType.GetRuntimeTypeName(stripped)
+    return GetTypeQualifiedName(stripped, forNameFieldOfTi: true)
 }
 
 private func TypeInfoGlobalName(cgMod: CGModule, chirTy: Type): String {
@@ -929,7 +946,7 @@ private func TypeInfoRuntimeName(cgMod: CGModule, chirTy: Type): String {
             return ClosureRuntimeTypeName(cgMod, AutoEnvGenericBaseType(customTy))
         }
     }
-    return CGType.GetRuntimeTypeName(chirTy)
+    return GetTypeQualifiedName(chirTy, forNameFieldOfTi: true)
 }
 
 private func FindGenericParamIndex(genericTy: GenericType, genericParams: ArrayList<GenericType>): Option<Int64> {

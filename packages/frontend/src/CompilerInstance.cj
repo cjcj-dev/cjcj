@@ -8,6 +8,7 @@ import cangjie_compiler::mangle.MangleDecl as RealMangleDecl
 import cangjie_compiler::mangle.ManglerContext as RealManglerContext
 import cangjie_compiler::sema.CompilerInstance as FaithfulSemaCompilerInstance
 import cangjie_compiler::sema.Desugar.DesugarBeforeTypeCheck as FaithfulDesugarBeforeTypeCheck
+import cangjie_compiler::sema.AnalyzeFunctionLinkage
 import cangjie_compiler::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
 import cangjie_compiler::sema.TypeCheckReferenceRemoveTargetNotMeetExtendConstraint
 import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
@@ -395,6 +396,9 @@ public class CompilerInstance {
     public func PerformDesugarAfterSema(): Bool {
         testManager.MarkDeclsForTestIfNeeded(GetSourcePackages())
         getCompileStrategy().DesugarAfterSema()
+        for (pkg in srcPkgs) {
+            AnalyzeFunctionLinkage(pkg, invocation.globalOptions)
+        }
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "desugar")
         }

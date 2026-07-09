@@ -682,6 +682,14 @@ public class CGModule {
             AddLinkageTypeMetadata(rawGlobal, CHIRLinkage2LLVMLinkage(chirGV.GetLinkTypeInfo()),
                 cgCtx.IsCGParallelEnabled())
         }
+        addAttribute(rawGlobal, CJGLOBAL_VALUE_ATTR)
+        let compileOptions = cgCtx.GetCompileOptions()
+        if (compileOptions.EnableAsan() || compileOptions.EnableHwAsan()) {
+            addAttribute(rawGlobal, "address_sanitize_global")
+        }
+        if (chirGV.TestAttr(Attribute.NON_RECOMPILE)) {
+            addAttribute(rawGlobal, "nonRecompile")
+        }
         let cgValue = CGValue(rawGlobal, cgType)
         globalVariables[name] = cgValue
         return cgValue

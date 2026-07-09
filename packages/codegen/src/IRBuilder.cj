@@ -36,7 +36,7 @@ import cangjie_compiler::chir.TypeCast
 import cangjie_compiler::chir.Value
 import cangjie_compiler::chir.VArrayType
 import cangjie_compiler::option.{ArchType, EnvironmentType, OptimizationLevel}
-import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, CORE_PACKAGE_NAME, STD_LIB_FUTURE, StaticCast}
+import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, StaticCast}
 
 private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowException_msg"
 private let CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME: String = "rt$CreateArithmeticException_msg"
@@ -4199,23 +4199,16 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CallClassIntrinsicAlloc(classTy: Type): LLVMValueRef {
-        let classCGType = CGType.GetOrCreate(cgMod, classTy)
-        let typeInfo = if (IsAutoEnvType(classTy) || classCGType.IsDynamicGI()) {
-            CreateTypeInfo(classTy)
-        } else {
-            classCGType.GetOrCreateTypeInfo()
-        }
-        let typeInfoArg = CreateBitCast(typeInfo, unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw),
-            0u32) }, name: "class.ti")
-        let sizeArg = GetLayoutSize32(classTy, classCGType)
-        let args = ArrayList<LLVMValueRef>()
-        args.add(typeInfoArg)
-        args.add(sizeArg)
-        let objectValue = CreateIntrinsicCall(MALLOC_OBJECT_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
-            name: "class.alloc")
+        let objectValue = CallClassIntrinsicAlloc(ArrayList<LLVMValueRef>([CreateTypeInfo(classTy),
+            GetLayoutSize_32(classTy)]))
         if (!objectValue.isNull()) {
-            AddRetAttr(objectValue, "noalias")
-            AddSpecialClassMallocMetadata(objectValue, classTy)
+            if (classTy.IsClass()) {
+                AddClassMallocMetadata(objectValue, classTy)
+            }
+            if (IsSizeTrustedInCompileUnit(cgMod, classTy)) {
+                LLVMSetInstructionMetadata(GetLLVMContext(), objectValue, "TrustedSize",
+                    LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>()))
+            }
         }
         return objectValue
     }
@@ -4234,14 +4227,20 @@ public class IRBuilder2 <: Resource {
         return objectValue
     }
 
-    private func AddSpecialClassMallocMetadata(objectValue: LLVMValueRef, classTy: Type): Unit {
-        let classType = (classTy.StripAllRefs() as ClassType) ?? return
+    private func AddClassMallocMetadata(objectValue: LLVMValueRef, classTy: Type): Unit {
+        let classType = (classTy as ClassType).getOrThrow()
+        CJC_ASSERT(!classTy.IsAutoEnvBase())
         let classDef = classType.GetClassDef()
-        let srcName = classDef.GetSrcCodeIdentifier()
-        let pkgName = classDef.GetPackageName()
-        if (pkgName == CORE_PACKAGE_NAME && srcName == STD_LIB_FUTURE) {
+        let mallocType = ArrayList<LLVMMetadataRef>()
+        if (classDef.GetFinalizer().isSome()) {
+            mallocType.add(LLVMCreateMDString(GetLLVMContext(), GC_FINALIZER_ATTR))
+        }
+        if (IsCoreFutureClass(classDef) || IsSyncRelatedClass(classDef) || IsWeakRefClass(classDef)) {
+            mallocType.add(LLVMCreateMDString(GetLLVMContext(), classDef.GetSrcCodeIdentifier()))
+        }
+        if (!mallocType.isEmpty()) {
             LLVMSetInstructionMetadata(GetLLVMContext(), objectValue, "MallocType",
-                LLVMCreateMDTupleFromString(GetLLVMContext(), srcName))
+                LLVMCreateMDTuple(GetLLVMContext(), mallocType))
         }
     }
 

@@ -2931,7 +2931,7 @@ public class FaithfulAST2CHIR {
     private func GeneratePackageInitBase(suffix: String): Function {
         let pkg = CurrentPackage()
         let packageInit = CreateEmptyGVInitFunc(PackageInitFuncName(pkg.GetName(), suffix),
-            PackageInitFuncName(pkg.GetName(), suffix), "", pkg.GetName())
+            PackageInitFuncName(pkg.GetName(), suffix), "", pkg.GetName(), BasicLinkage.EXTERNAL)
         let boolTy = builder.context.GetBoolTy()
         let entry = RequireEntryBlock(packageInit)
         let initFlag = CreatePackageInitOnceFlag(if (suffix.isEmpty()) {
@@ -2974,8 +2974,8 @@ public class FaithfulAST2CHIR {
     private func CreateImportsInitFunc(suffix: String): Function {
         let pkg = CurrentPackage()
         let importsInit = CreateEmptyGVInitFunc(PackageInitFuncName(pkg.GetName(), suffix + "_importsInit"),
-            PackageInitFuncName(pkg.GetName(), suffix + "_importsInit"), "", pkg.GetName())
-        importsInit.SetLinkage(Linkage.INTERNAL)
+            PackageInitFuncName(pkg.GetName(), suffix + "_importsInit"), "", pkg.GetName(), BasicLinkage.EXTERNAL)
+        importsInit.SetLinkTypeInfo(BasicLinkage.INTERNAL)
         let entry = RequireEntryBlock(importsInit)
         entry.EnableAttr(Attribute.INITIALIZER)
         if (entry.GetTerminator().isNone()) {
@@ -3137,7 +3137,7 @@ public class FaithfulAST2CHIR {
             }
         }
         let fileInit = CreateEmptyGVInitFunc(FileInitFuncName(fileVars.file, ""), FileInitFuncName(fileVars.file, ""),
-            "", FileOwnerPackageName(fileVars.file))
+            "", FileOwnerPackageName(fileVars.file), BasicLinkage.INTERNAL)
         let entry = RequireEntryBlock(fileInit)
         for (initFunc in initFuncs) {
             CreateInitFuncApply(initFunc, entry)
@@ -3193,7 +3193,7 @@ public class FaithfulAST2CHIR {
             return None
         }
         let fileInit = CreateEmptyGVInitFunc(FileInitFuncName(fileVars.file, "_literal"),
-            FileInitFuncName(fileVars.file, "_literal"), "", FileOwnerPackageName(fileVars.file))
+            FileInitFuncName(fileVars.file, "_literal"), "", FileOwnerPackageName(fileVars.file), BasicLinkage.INTERNAL)
         fileInit.DisableAttr(Attribute.NO_INLINE)
         fileInit.SetDebugLocation(INVALID_LOCATION)
         let entry = RequireEntryBlock(fileInit)
@@ -3293,7 +3293,7 @@ public class FaithfulAST2CHIR {
     private func CreateGlobalVarStoreInitFunc(varDecl: AstVarDecl, suffix!: String): Function {
         let initFn = CreateEmptyGVInitFunc(GlobalVarInitFuncName(varDecl),
             "gv$_" + varDecl.identifier.Val() + suffix, EffectiveRawMangledName(varDecl),
-            EffectivePackageName(varDecl))
+            EffectivePackageName(varDecl), BasicLinkage.INTERNAL)
         if (varDecl.IsConst()) {
             initFn.EnableAttr(Attribute.CONST)
             if (suffix != "$literal") {
@@ -3310,7 +3310,8 @@ public class FaithfulAST2CHIR {
 
     private func CreateGlobalVarWithPatternInitFunc(decl: AstVarWithPatternDecl): Function {
         let initFn = CreateEmptyGVInitFunc(GlobalVarWithPatternInitFuncName(decl),
-            GlobalVarWithPatternInitSrcName(decl), EffectiveRawMangledName(decl), EffectivePackageName(decl))
+            GlobalVarWithPatternInitSrcName(decl), EffectiveRawMangledName(decl), EffectivePackageName(decl),
+            BasicLinkage.INTERNAL)
         if (decl.IsConst()) {
             initFn.EnableAttr(Attribute.CONST)
             initFuncsForConstVar.add(initFn)
@@ -3430,7 +3431,7 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreateEmptyGVInitFunc(identifier: String, srcCodeIdentifier: String, rawMangledName: String,
-        packageName: String): Function {
+        packageName: String, linkage: BasicLinkage): Function {
         let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetVoidTy())
         let effectiveRawName = if (rawMangledName.isEmpty()) { identifier } else { rawMangledName }
         let fn = builder.CreateFunction(funcTy, identifier, srcCodeIdentifier: srcCodeIdentifier,
@@ -3440,6 +3441,7 @@ public class FaithfulAST2CHIR {
         fn.EnableAttr(Attribute.NO_INLINE)
         fn.EnableAttr(Attribute.COMPILER_ADD)
         fn.EnableAttr(Attribute.INITIALIZER)
+        fn.SetLinkTypeInfo(linkage)
         let body = builder.CreateBlockGroup(fn)
         fn.InitBody(body)
         let entry = builder.CreateBlock(body)

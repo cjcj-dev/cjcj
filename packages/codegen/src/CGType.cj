@@ -364,6 +364,7 @@ public open class CGType {
                     cgCtx.AddGeneratedStructType(structName)
                 }
             }
+            PreActionOfGenTypeInfo()
             DefineTypeInfoGlobalIfNeeded(cgMod, chirType, ti)
             PostActionOfGenTypeInfo()
         }
@@ -385,6 +386,7 @@ public open class CGType {
     protected open func GenLLVMType(): LLVMTypeRef { return LLVMNullType() }
     protected open func GenContainedCGTypes(): Unit {}
     protected open func CalculateSizeAndAlign(): Unit { size = None; align = None }
+    protected open func PreActionOfGenTypeInfo(): Unit {}
     protected open func PostActionOfGenTypeInfo(): Unit {}
 
     public static func GetCGGenericKind(chirType: Type): CGGenericKind {

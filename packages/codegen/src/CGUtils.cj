@@ -23,8 +23,8 @@ import cangjie_compiler::mangle.MANGLE_NESTED_PREFIX
 import cangjie_compiler::mangle.MANGLE_SUFFIX
 import cangjie_compiler::option.OSType
 import cangjie_compiler::utils.CJC_ABORT
-import cangjie_compiler::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, HashString64, STD_LIB_FUTURE, STD_LIB_MONITOR,
-    STD_LIB_MUTEX, STD_LIB_WAIT_QUEUE, SYNC_PACKAGE_NAME}
+import cangjie_compiler::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, HashString64, REF_PACKAGE_NAME, STD_LIB_FUTURE,
+    STD_LIB_MONITOR, STD_LIB_MUTEX, STD_LIB_WAIT_QUEUE, STD_LIB_WEAK_REF, SYNC_PACKAGE_NAME}
 
 public func GetCodeGenGlobalName(value: Value): String {
     return value.GetIdentifierWithoutPrefix()
@@ -505,6 +505,36 @@ public func IsSyncRelatedClass(classDef: ClassDef): Bool {
     return CheckCustomTypeDefIsExpected(classDef, SYNC_PACKAGE_NAME, STD_LIB_MONITOR) ||
         CheckCustomTypeDefIsExpected(classDef, SYNC_PACKAGE_NAME, STD_LIB_MUTEX) ||
         CheckCustomTypeDefIsExpected(classDef, SYNC_PACKAGE_NAME, STD_LIB_WAIT_QUEUE)
+}
+
+public func IsWeakRefClass(classDef: ClassDef): Bool {
+    return CheckCustomTypeDefIsExpected(classDef, REF_PACKAGE_NAME, STD_LIB_WEAK_REF)
+}
+
+public func IsSizeTrustedInCompileUnit(cgMod: CGModule, chirTy: Type): Bool {
+    if (!IsModifiableClass(chirTy)) {
+        return false
+    }
+    if (CGType.GetOrCreate(cgMod, chirTy).GetSize().isNone()) {
+        return false
+    }
+    let classDef = (chirTy as ClassType).getOrThrow().GetClassDef()
+    let typePackageName = classDef.GetPackageName()
+    let compileUnitPkgName = cgMod.GetCGContext().GetCHIRPackage().GetName()
+    CJC_ASSERT(!typePackageName.isEmpty() && !compileUnitPkgName.isEmpty())
+    var pos: Int64 = 0
+    var ch = typePackageName[pos]
+    while (ch == compileUnitPkgName[pos]) {
+        if (ch == b'.') {
+            return true
+        }
+        pos++
+        if (pos == typePackageName.size || pos == compileUnitPkgName.size) {
+            return true
+        }
+        ch = typePackageName[pos]
+    }
+    return false
 }
 
 public func IsVArrayRef(chirTy: Type): Bool {
