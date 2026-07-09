@@ -804,7 +804,7 @@ private func GenerateSuperFnOfTypeTemplate(cgMod: CGModule, customTy: CustomType
         if (!classTy.GetClassDef().IsClass()) {
             return unsafe { LLVMConstNull(i8PtrType) }
         }
-        if (let Some(superTy) <- TypeTemplateSuperClassTy(classTy)) {
+        if (let Some(superTy) <- TypeTemplateSuperClassTy(cgMod, classTy)) {
             let superFn = GenerateTypeTemplateTypeInfoFn(cgMod, GetTypeTemplateCallbackFunctionType(cgMod),
                 typeTemplateName + ".superTiFn", superTy, TypeTemplateGenericParams(sourceTy))
             return unsafe { LLVMConstBitCast(superFn, i8PtrType) }
@@ -1050,8 +1050,8 @@ private func GetEnumTypeTemplateFieldTypes(cgMod: CGModule, enumTy: EnumType): A
     return result
 }
 
-private func TypeTemplateSuperClassTy(classTy: ClassType): Option<ClassType> {
-    if (let Some(superTy) <- classTy.GetSuperClassTy()) {
+private func TypeTemplateSuperClassTy(cgMod: CGModule, classTy: ClassType): Option<ClassType> {
+    if (let Some(superTy) <- classTy.GetSuperClassTy(builder: Some(cgMod.GetCGContext().GetCHIRBuilder()))) {
         return Some(superTy)
     }
     return None
@@ -1717,7 +1717,7 @@ private func GenerateSuperOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfo: LL
         if (IsAutoEnvBaseType(classTy)) {
             return unsafe { LLVMConstNull(typeInfoPtrType) }
         }
-        if (let Some(superTy) <- classTy.GetSuperClassTy()) {
+        if (let Some(superTy) <- classTy.GetSuperClassTy(builder: Some(cgMod.GetCGContext().GetCHIRBuilder()))) {
             let superTi = GetAutoEnvBaseClosureTypeInfo(cgMod, superTy) ??
                 CGType.GetOrCreate(cgMod, superTy.StripAllRefs()).GetOrCreateTypeInfo()
             // Coerce to the %TypeInfo* slot type: a DYNAMIC_GI super (e.g. generic Iterator<...>)
