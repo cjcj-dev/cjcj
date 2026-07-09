@@ -7923,11 +7923,12 @@ public class Translator {
 
     private func GetDerefedValue(value: Value): Value {
         if (let Some(ty) <- value.GetType()) {
-            if (ty.IsReferenceTypeWithRefDims(1)) {
-                return value
-            }
             if (let Some(refTy) <- (ty as RefType)) {
-                return RequireResult(builder.CreateLoad(refTy.GetBaseType(), value, CurrentBlock()))
+                let valType = refTy.GetBaseType()
+                if (valType.IsClassOrArray()) {
+                    return value
+                }
+                return RequireResult(builder.CreateLoad(valType, value, CurrentBlock()))
             }
         }
         return value
@@ -7935,11 +7936,12 @@ public class Translator {
 
     private func GetDerefedValue(value: Value, loc: DebugLocation): Value {
         if (let Some(ty) <- value.GetType()) {
-            if (ty.IsReferenceTypeWithRefDims(1)) {
-                return value
-            }
             if (let Some(refTy) <- (ty as RefType)) {
-                let load = builder.CreateLoad(refTy.GetBaseType(), value, CurrentBlock())
+                let valType = refTy.GetBaseType()
+                if (valType.IsClassOrArray()) {
+                    return value
+                }
+                let load = builder.CreateLoad(valType, value, CurrentBlock())
                 load.SetDebugLocation(loc)
                 return RequireResult(load)
             }
