@@ -653,21 +653,20 @@ public class Translator {
         let thisVar = CurrentFunction().GetParam(0)
         var fieldOffset = GetSuperInstanceVarSize(owner)
         for (member in owner.GetMemberDeclPtrs()) {
-            if (let Some(varDecl) <- (member as AstVarDecl)) {
-                if (varDecl.TestAttr(AstAttribute.STATIC)) {
-                    continue
-                }
-                if (let Some(initializer) <- varDecl.initializer) {
-                    let initValue = Translator.TranslateASTNode(initializer, this) ??
-                        throw IllegalStateException("faithful AST2CHIR member initializer produced no value")
-                    let path = ArrayList<UInt64>()
-                    path.add(UInt64(fieldOffset))
-                    let memberTy = GetInstanceMemberTypeByIndex(thisVar, fieldOffset)
-                    builder.CreateStoreElementRef(CoerceInitializerForExpectedType(initializer, initValue, memberTy),
-                        thisVar, path, CurrentBlock())
-                }
-                fieldOffset++
+            if (member.astKind != ASTKind.VAR_DECL || member.TestAttr(AstAttribute.STATIC)) {
+                continue
             }
+            let varDecl = Translator.RequireNodeAsVarDecl(member)
+            if (let Some(initializer) <- varDecl.initializer) {
+                let initValue = Translator.TranslateASTNode(initializer, this) ??
+                    throw IllegalStateException("faithful AST2CHIR member initializer produced no value")
+                let path = ArrayList<UInt64>()
+                path.add(UInt64(fieldOffset))
+                let memberTy = GetInstanceMemberTypeByIndex(thisVar, fieldOffset)
+                builder.CreateStoreElementRef(CoerceInitializerForExpectedType(initializer, initValue, memberTy),
+                    thisVar, path, CurrentBlock())
+            }
+            fieldOffset++
         }
     }
 
