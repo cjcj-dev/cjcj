@@ -6,7 +6,6 @@ import std.fs.Directory as FSDirectory
 import std.fs.File
 import std.fs.FileInfo
 import std.fs.Path
-import std.fs.canonicalize
 import std.fs.exists
 import std.fs.remove
 
@@ -220,6 +219,7 @@ struct Stat {
 @When[os != "Windows"]
 foreign {
     func access(pathname: CString, mode: Int32): Int32
+    func realpath(path: CString, resolvedPath: CString): CString
     func stat(pathname: CString, statbuf: CPointer<Stat>): Int32
     func opendir(dirname: CString): CPointer<Unit>
     func closedir(dirp: CPointer<Unit>): Int32
@@ -935,15 +935,72 @@ public class FileUtil {
         return isAbsolutePathAboveLengthLimit(path)
     }
 
+    @When[os == "Windows"]
     public static func GetAbsPath(path: String): Option<String> {
         if (path.size > FILE_PATH_MAX_LENGTH) {
             return None
         }
-        try {
-            return Normalize(canonicalize(path).toString())
+        try (cPath = unsafe { LibC.mallocCString(path) }.asResource(),
+            buffer = LibC.malloc<UInt8>(count: FILE_PATH_MAX_LENGTH).asResource()) {
+            if (cPath.value.isNull() || buffer.value.isNull()) {
+                return None
+            }
+            let retval = unsafe {
+                GetFullPathNameA(cPath.value, UInt32(FILE_PATH_MAX_LENGTH), buffer.value, CPointer<CString>())
+            }
+            if (retval == 0u32) {
+                return None
+            }
+            let bytes = ArrayList<UInt8>()
+            var idx: Int64 = 0
+            while (idx < FILE_PATH_MAX_LENGTH) {
+                let byte = unsafe { (buffer.value + idx).read() }
+                if (byte == 0u8) {
+                    break
+                }
+                bytes.add(byte)
+                idx++
+            }
+            let resolvedPath = String.fromUtf8(bytes.toArray())
+            if (!FileExist(resolvedPath)) {
+                return None
+            }
+            return Normalize(resolvedPath)
         } catch (e: Exception) {
             return None
         }
+        return None
+    }
+
+    @When[os != "Windows"]
+    public static func GetAbsPath(path: String): Option<String> {
+        if (path.size > FILE_PATH_MAX_LENGTH) {
+            return None
+        }
+        try (cPath = unsafe { LibC.mallocCString(path) }.asResource(),
+            buffer = LibC.malloc<UInt8>(count: FILE_PATH_MAX_LENGTH).asResource()) {
+            if (cPath.value.isNull() || buffer.value.isNull()) {
+                return None
+            }
+            let realpathResult = unsafe { realpath(cPath.value, CString(buffer.value)) }
+            if (realpathResult.isNull()) {
+                return None
+            }
+            let bytes = ArrayList<UInt8>()
+            var idx: Int64 = 0
+            while (idx < FILE_PATH_MAX_LENGTH) {
+                let byte = unsafe { (buffer.value + idx).read() }
+                if (byte == 0u8) {
+                    break
+                }
+                bytes.add(byte)
+                idx++
+            }
+            return Normalize(String.fromUtf8(bytes.toArray()))
+        } catch (e: Exception) {
+            return None
+        }
+        return None
     }
 
     @When[os == "Windows"]

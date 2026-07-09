@@ -247,11 +247,34 @@ private func ApplyFrontendOutputs(opts: DriverOptions, frontendOpts: FrontendToo
     opts.compilationCachedDir = frontendOpts.compilationCachedDir
     opts.compilationCachedFileName = frontendOpts.compilationCachedFileName
     opts.incrementalCompileNoChange = frontendOpts.incrementalCompileNoChange
+    CopyStringList(opts.symbolsNeedLocalized, frontendOpts.symbolsNeedLocalized)
+    CopyStringArrayMap(opts.symbolsNeedLocalizedPerPkg, frontendOpts.symbolsNeedLocalizedPerPkg)
     for (dep in frontendOpts.directBuiltinDependencies) {
         opts.directBuiltinDependencies.add(dep)
     }
     for (dep in frontendOpts.indirectBuiltinDependencies) {
         opts.indirectBuiltinDependencies.add(dep)
+    }
+}
+
+private func CopyStringList(target: ArrayList<String>, source: ArrayList<String>): Unit {
+    target.clear()
+    for (value in source) {
+        target.add(value)
+    }
+}
+
+private func CopyStringArrayMap(
+    target: HashMap<String, ArrayList<String>>,
+    source: HashMap<String, ArrayList<String>>
+): Unit {
+    target.clear()
+    for ((key, values) in source) {
+        let copiedValues = ArrayList<String>()
+        for (value in values) {
+            copiedValues.add(value)
+        }
+        target.add(key, copiedValues)
     }
 }
 

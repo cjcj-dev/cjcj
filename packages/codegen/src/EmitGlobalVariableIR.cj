@@ -1,8 +1,6 @@
 package cangjie_compiler::codegen
 
 import cangjie_compiler::chir.GlobalVar
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.Linkage
 import cangjie_compiler::chir.StringLiteral
 import cangjie_compiler::mangle.MangleCHIRType
 
@@ -20,10 +18,6 @@ private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
         let globalValue = cgMod.GetOrInsertGlobalVariable(chirGV)
         cgValue = globalValue
         let rawGlobal = globalValue.GetRawValue()
-        if (!chirGV.TestAttr(Attribute.IMPORTED)) {
-            AddLinkageTypeMetadata(rawGlobal, GlobalVarLinkage2LLVMLinkage(chirGV.GetLinkage()),
-                cgMod.GetCGContext().IsCGParallelEnabled())
-        }
         let preferredAlignment = cgMod.GetModuleTargetData().GetPrefTypeAlignment(unsafe { LLVMTypeOf(rawGlobal) })
         if (preferredAlignment != 0u32) {
             unsafe { LLVMSetAlignment(rawGlobal, preferredAlignment) }
@@ -58,16 +52,6 @@ private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
 
     public func GetCGValue(): Option<CGValue> {
         return cgValue
-    }
-}
-
-private func GlobalVarLinkage2LLVMLinkage(chirLinkage: Linkage): LLVMLinkage {
-    return match (chirLinkage) {
-        case Linkage.WEAK_ODR => LLVMLinkage.WeakODR
-        case Linkage.EXTERNAL => LLVMLinkage.External
-        case Linkage.INTERNAL => LLVMLinkage.Internal
-        case Linkage.LINKONCE_ODR => LLVMLinkage.LinkOnceODR
-        case Linkage.EXTERNAL_WEAK => LLVMLinkage.ExternalWeak
     }
 }
 

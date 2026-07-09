@@ -1010,19 +1010,20 @@ public class Translator {
     }
 
     public func Visit(expr: AstReturnExpr): Option<Value> {
+        let loc = TranslateLocation(expr)
         if (let Some(retExpr) <- expr.expr) {
             let value = TranslateExprArg(retExpr)
             StoreReturnExprValueIfNeeded(expr, value)
             UpdateDelayExitSignalForReturnIfNeeded()
             RecordFinallyControlIfNeeded(FaithfulFinallyControlType.RETURN)
-            builder.CreateExit(None, CurrentBlock())
+            builder.CreateExit(None, CurrentBlock()).SetDebugLocation(loc)
             let group = RequireParentBlockGroup(CurrentBlock(), "return continuation")
             currentBlock = builder.CreateBlock(group)
             return None
         }
         UpdateDelayExitSignalForReturnIfNeeded()
         RecordFinallyControlIfNeeded(FaithfulFinallyControlType.RETURN)
-        builder.CreateExit(None, CurrentBlock())
+        builder.CreateExit(None, CurrentBlock()).SetDebugLocation(loc)
         let group = RequireParentBlockGroup(CurrentBlock(), "return continuation")
         currentBlock = builder.CreateBlock(group)
         return None
@@ -1128,7 +1129,7 @@ public class Translator {
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
         return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
-            instTypeArgs: instTypeArgs))
+            instTypeArgs: instTypeArgs), loc: TranslateLocation(expr))
     }
 
     public func Visit(expr: AstLambdaExpr): Option<Value> {
@@ -2251,7 +2252,20 @@ public class Translator {
         if (baseBlock.GetTerminator().isNone()) {
             builder.CreateGoTo(GetBlockByAST(tryAstBlock), baseBlock)
         }
-        StoreTryResult(resultLoc, tryValue)
+        let tryValueLoc = if (let Some(value) <- tryValue) {
+            if (let Some(localVar) <- value.AsLocalVar()) {
+                if (let Some(ownerExpr) <- localVar.GetExpr()) {
+                    ownerExpr.GetDebugLocation()
+                } else {
+                    TranslateLocation(tryAstBlock)
+                }
+            } else {
+                TranslateLocation(tryAstBlock)
+            }
+        } else {
+            TranslateLocation(tryAstBlock)
+        }
+        StoreTryResult(resultLoc, tryValue, tryValueLoc)
         if (CurrentBlock().GetTerminator().isNone()) {
             builder.CreateGoTo(normalEndBlock, CurrentBlock())
         }
@@ -3846,12 +3860,21 @@ public class Translator {
         }
     }
 
-    private func StoreTryResult(location: Option<Value>, value: Option<Value>): Unit {
-        if (let Some(loc) <- location) {
+    private func StoreTryResult(location: Option<Value>, value: Option<Value>, debugLoc: DebugLocation): Unit {
+        if (let Some(resultLoc) <- location) {
             if (let Some(result) <- value) {
-                builder.CreateStore(CastValueIfNeeded(result, RequireRefBaseType(loc)), loc, CurrentBlock())
+                CreateAndAppendWrappedStore(GetDerefedValue(result, debugLoc), resultLoc, debugLoc)
             }
         }
+    }
+
+    private func HasNothingTypeArg(args: ArrayList<Value>): Bool {
+        for (arg in args) {
+            if ((arg.GetType() ?? throw IllegalStateException("faithful AST2CHIR call argument has no type")).IsNothing()) {
+                return true
+            }
+        }
+        return false
     }
 
     private func HasTypeOfNothing(expr: AstTryExpr): Bool {
@@ -4003,7 +4026,7 @@ public class Translator {
             if (trueBlock.GetTerminator().isNone()) {
                 builder.CreateGoTo(GetBlockByAST(catchBlock), trueBlock)
             }
-            StoreTryResult(resultLoc, catchValue)
+            StoreTryResult(resultLoc, catchValue, TranslateLocation(catchBlock))
             if (CurrentBlock().GetTerminator().isNone()) {
                 builder.CreateGoTo(endBlock, CurrentBlock())
             }
@@ -5798,13 +5821,6 @@ public class Translator {
     }
 
     private func CallBaseFuncTy(expr: AstCallExpr, calleeDecl: AstFuncDecl): AstFuncTy {
-        if (calleeDecl.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
-            if (let Some(declTy) <- calleeDecl.GetTy()) {
-                if (let Some(funcTy) <- (declTy as AstFuncTy)) {
-                    return funcTy
-                }
-            }
-        }
         if (let Some(base) <- expr.baseFunc) {
             if (let Some(baseTy) <- base.GetTy()) {
                 if (let Some(funcTy) <- (baseTy as AstFuncTy)) {
@@ -5820,7 +5836,8 @@ public class Translator {
         throw IllegalStateException("faithful AST2CHIR expected function type for call")
     }
 
-    private func CreateApplyMaybeWithException(resultTy: Type, callee: Value, callContext: FuncCallContext): Value {
+    private func CreateApplyMaybeWithException(resultTy: Type, callee: Value, callContext: FuncCallContext,
+        loc!: DebugLocation = INVALID_LOCATION): Value {
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
@@ -5831,15 +5848,19 @@ public class Translator {
                 builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
                     CurrentBlock())
             }
+            term.SetDebugLocation(loc)
             let result = RequireResult(term)
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return result
         }
-        return RequireResult(builder.CreateApply(resultTy, callee, callContext, CurrentBlock()))
+        let apply = builder.CreateApply(resultTy, callee, callContext, CurrentBlock())
+        apply.SetDebugLocation(loc)
+        return RequireResult(apply)
     }
 
     private func CreateAndAppendApplyCallFromCallExpr(resultTy: Type, callee: Value, callContext: FuncCallContext,
         expr: AstCallExpr): Value {
+        let loc = TranslateLocation(expr)
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
@@ -5849,36 +5870,57 @@ public class Translator {
             } else {
                 builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
                     CurrentBlock())
+            }
+            term.SetDebugLocation(loc)
+            if (HasNothingTypeArg(callContext.args)) {
+                if (let Some(baseFunc) <- expr.baseFunc) {
+                    term.SetDebugLocationInfoForWarning(TranslateLocation(baseFunc))
+                } else {
+                    term.SetDebugLocationInfoForWarning(loc)
+                }
             }
             let result = RequireResult(term)
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return result
         }
         let apply = builder.CreateApply(resultTy, callee, callContext, CurrentBlock())
+        apply.SetDebugLocation(loc)
         if (expr.callKind == AstCallKind.CALL_SUPER_FUNCTION) {
             apply.SetSuperCall()
+        }
+        if (HasNothingTypeArg(callContext.args)) {
+            if (let Some(baseFunc) <- expr.baseFunc) {
+                apply.SetDebugLocationInfoForWarning(TranslateLocation(baseFunc))
+            } else {
+                apply.SetDebugLocationInfoForWarning(loc)
+            }
         }
         return RequireResult(apply)
     }
 
-    private func CreateAllocateMaybeWithException(resultTy: Type, allocatedTy: Type): Value {
+    private func CreateAllocateMaybeWithException(resultTy: Type, allocatedTy: Type,
+        loc!: DebugLocation = INVALID_LOCATION): Value {
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             if (let Some(exceptBlock) <- exceptionBlock) {
                 let term = builder.CreateAllocateWithException(resultTy, allocatedTy, successBlock, exceptBlock,
                     CurrentBlock())
+                term.SetDebugLocation(loc)
                 let result = RequireResult(term)
                 FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
                 return result
             }
             let term = builder.CreateAllocateWithException(resultTy, allocatedTy, successBlock, errorBlock,
                 CurrentBlock())
+            term.SetDebugLocation(loc)
             let result = RequireResult(term)
             currentBlock = successBlock
             return result
         }
-        return RequireResult(builder.CreateAllocate(resultTy, allocatedTy, CurrentBlock()))
+        let allocate = builder.CreateAllocate(resultTy, allocatedTy, CurrentBlock())
+        allocate.SetDebugLocation(loc)
+        return RequireResult(allocate)
     }
 
     private func CreateSpawnMaybeWithException(resultTy: Type, futureObj: Value, spawnArg: Option<Value>): Unit {
@@ -6002,7 +6044,7 @@ public class Translator {
             }
         }
         let callContext = IntrisicCallContext(kind: intrinsicKind, args: args, instTypeArgs: instTypeArgs)
-        let intriVar = CreateIntrinsicMaybeWithException(retTy, callContext)
+        let intriVar = CreateIntrinsicMaybeWithException(retTy, callContext, loc: TranslateLocation(expr))
 
         if (RequireAstTy(expr).IsUnit()) {
             // Codegen will not generate a valid 'unit' value for intrinsic call.
@@ -6014,7 +6056,8 @@ public class Translator {
         return intriVar
     }
 
-    private func CreateIntrinsicMaybeWithException(resultTy: Type, callContext: IntrisicCallContext): Value {
+    private func CreateIntrinsicMaybeWithException(resultTy: Type, callContext: IntrisicCallContext,
+        loc!: DebugLocation = INVALID_LOCATION): Value {
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
@@ -6025,11 +6068,14 @@ public class Translator {
                 builder.CreateIntrinsicWithException(resultTy, callContext, successBlock, errorBlock,
                     CurrentBlock())
             }
+            term.SetDebugLocation(loc)
             let result = RequireResult(term)
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return result
         }
-        return RequireResult(builder.CreateIntrinsic(resultTy, callContext, CurrentBlock()))
+        let intrinsic = builder.CreateIntrinsic(resultTy, callContext, CurrentBlock())
+        intrinsic.SetDebugLocation(loc)
+        return RequireResult(intrinsic)
     }
 
     private func TranslateExprArg(expr: AstExpr): Value {
@@ -6054,7 +6100,7 @@ public class Translator {
             TranslateExprArg(argExpr)
         }
         if (let Some(targetTy) <- expectedTy) {
-            value = CoerceValueForExpectedType(value, targetTy)
+            value = TypeCastOrBoxIfNeeded(value, targetTy, INVALID_LOCATION)
         }
         return value
     }
@@ -6272,7 +6318,7 @@ public class Translator {
             }
             var value = CreateApplyMaybeWithException(retTy, defaultFunc,
                 FuncCallContext(args: previousDefaultArgs.clone(), instTypeArgs: instArgs,
-                    thisType: GetMemberFuncCallerInstType(expr)))
+                    thisType: GetMemberFuncCallerInstType(expr)), loc: TranslateLocation(expr))
             if (let Some(targetTy) <- expectedTy) {
                 value = CoerceValueForExpectedType(value, targetTy)
             }
@@ -6382,10 +6428,11 @@ public class Translator {
             idx++
         }
         return CreateApplyMaybeWithException(chirTy.TranslateType(RequireAstTy(expr)), callee,
-            FuncCallContext(args: argValues))
+            FuncCallContext(args: argValues), loc: TranslateLocation(expr))
     }
 
-    private func CreateInvokeMaybeWithException(resultTy: Type, callContext: InvokeCallContext): Value {
+    private func CreateInvokeMaybeWithException(resultTy: Type, callContext: InvokeCallContext,
+        loc!: DebugLocation = INVALID_LOCATION): Value {
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
@@ -6394,14 +6441,18 @@ public class Translator {
             } else {
                 builder.CreateInvokeWithException(resultTy, callContext, successBlock, errorBlock, CurrentBlock())
             }
+            term.SetDebugLocation(loc)
             let result = RequireResult(term)
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return result
         }
-        return RequireResult(builder.CreateInvoke(resultTy, callContext, CurrentBlock()))
+        let invoke = builder.CreateInvoke(resultTy, callContext, CurrentBlock())
+        invoke.SetDebugLocation(loc)
+        return RequireResult(invoke)
     }
 
-    private func CreateInvokeStaticMaybeWithException(resultTy: Type, callContext: InvokeCallContext): Value {
+    private func CreateInvokeStaticMaybeWithException(resultTy: Type, callContext: InvokeCallContext,
+        loc!: DebugLocation = INVALID_LOCATION): Value {
         if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
@@ -6412,11 +6463,14 @@ public class Translator {
                 builder.CreateInvokeStaticWithException(resultTy, callContext, successBlock, errorBlock,
                     CurrentBlock())
             }
+            term.SetDebugLocation(loc)
             let result = RequireResult(term)
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return result
         }
-        return RequireResult(builder.CreateInvokeStatic(resultTy, callContext, CurrentBlock()))
+        let invoke = builder.CreateInvokeStatic(resultTy, callContext, CurrentBlock())
+        invoke.SetDebugLocation(loc)
+        return RequireResult(invoke)
     }
 
     private func FuncParamTypes(expr: AstCallExpr, calleeDecl: AstFuncDecl,
@@ -6504,6 +6558,7 @@ public class Translator {
     }
 
     private func TranslateMemberFuncCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
+        let loc = TranslateLocation(expr)
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         let argValues = ArrayList<Value>()
         let callee = globalSymbolTable.Get(calleeDecl)
@@ -6553,7 +6608,12 @@ public class Translator {
                 let invokeCtx = InvokeCallContext(rtti, FuncCallContext(args: argValues,
                     instTypeArgs: instTypeArgs, thisType: parentTy),
                     FuncSigInfo(BuildMethodFuncTypeForMemberAccess(calleeDecl), funcName: calleeDecl.identifier.Val()))
-                return CreateInvokeStaticMaybeWithException(resultTy, invokeCtx)
+                let invoke = CreateInvokeStaticMaybeWithException(resultTy, invokeCtx, loc: loc)
+                if (HasNothingTypeArg(argValues)) {
+                    invoke.AsLocalVar().getOrThrow().GetExpr().getOrThrow().SetDebugLocationInfoForWarning(TranslateLocation(
+                        RequireExpr(expr.baseFunc, "member call base")))
+                }
+                return invoke
             }
             let obj = thisObj ?? throw IllegalStateException("faithful AST2CHIR virtual member call has no this object")
             let objTy = thisType ?? throw IllegalStateException("faithful AST2CHIR virtual member call this has no type")
@@ -6562,7 +6622,12 @@ public class Translator {
             let invokeCtx = InvokeCallContext(obj, FuncCallContext(args: argValues,
                 instTypeArgs: instTypeArgs, thisType: callThisTy),
                 FuncSigInfo(BuildMethodFuncTypeForMemberAccess(calleeDecl), funcName: calleeDecl.identifier.Val()))
-            return CreateInvokeMaybeWithException(resultTy, invokeCtx)
+            let invoke = CreateInvokeMaybeWithException(resultTy, invokeCtx, loc: loc)
+            if (HasNothingTypeArg(argValues)) {
+                invoke.AsLocalVar().getOrThrow().GetExpr().getOrThrow().SetDebugLocationInfoForWarning(TranslateLocation(
+                    RequireExpr(expr.baseFunc, "member call base")))
+            }
+            return invoke
         }
         if (let Some(obj) <- thisObj) {
             argValues.add(obj, at: 0)
@@ -6573,7 +6638,7 @@ public class Translator {
             case None => thisType
         }
         return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
-            instTypeArgs: instTypeArgs, thisType: applyThisType))
+            instTypeArgs: instTypeArgs, thisType: applyThisType), loc: loc)
     }
 
     private func TranslateFuncInstArgs(expr: AstCallExpr, calleeDecl: AstFuncDecl): ArrayList<Type> {
@@ -6843,6 +6908,7 @@ public class Translator {
     }
 
     private func TranslateStructOrClassCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
+        let loc = TranslateLocation(expr)
         let thisTy = chirTy.TranslateType(RequireAstTy(expr)).StripAllRefs()
         let thisRefTy = builder.context.GetRefTy(thisTy)
         let userArgs = ArrayList<Value>()
@@ -6851,7 +6917,9 @@ public class Translator {
         let thisObj = if (IsSuperOrThisCtorCall(expr)) {
             CastValueIfNeeded(GetCurrentConstructorThisObject(), thisRefTy)
         } else {
-            CreateAllocateMaybeWithException(thisRefTy, thisTy)
+            let allocated = CreateAllocateMaybeWithException(thisRefTy, thisTy, loc: loc)
+            allocated.AsLocalVar().getOrThrow().GetExpr().getOrThrow().SetDebugLocationInfoForWarning(loc)
+            allocated
         }
         let args = ArrayList<Value>()
         args.add(thisObj)
@@ -6863,7 +6931,9 @@ public class Translator {
             FuncCallContext(args: args, thisType: thisRefTy), expr)
         if (let Some(outerDecl) <- calleeDecl.outerDecl) {
             if (outerDecl.astKind == ASTKind.STRUCT_DECL) {
-                return RequireResult(builder.CreateLoad(thisTy, thisObj, CurrentBlock()))
+                let load = builder.CreateLoad(thisTy, thisObj, CurrentBlock())
+                load.SetDebugLocation(loc)
+                return RequireResult(load)
             }
         }
         return thisObj
@@ -7453,7 +7523,10 @@ public class Translator {
         let thisObj = if (IsSuperOrThisCtorCall(expr)) {
             CastValueIfNeeded(GetCurrentConstructorThisObject(), thisRefTy)
         } else {
-            CreateAllocateMaybeWithException(thisRefTy, thisTy)
+            let loc = TranslateLocation(expr)
+            let allocated = CreateAllocateMaybeWithException(thisRefTy, thisTy, loc: loc)
+            allocated.AsLocalVar().getOrThrow().GetExpr().getOrThrow().SetDebugLocationInfoForWarning(loc)
+            allocated
         }
         let args = ArrayList<Value>()
         args.add(thisObj)
@@ -7855,6 +7928,20 @@ public class Translator {
             }
             if (let Some(refTy) <- (ty as RefType)) {
                 return RequireResult(builder.CreateLoad(refTy.GetBaseType(), value, CurrentBlock()))
+            }
+        }
+        return value
+    }
+
+    private func GetDerefedValue(value: Value, loc: DebugLocation): Value {
+        if (let Some(ty) <- value.GetType()) {
+            if (ty.IsReferenceTypeWithRefDims(1)) {
+                return value
+            }
+            if (let Some(refTy) <- (ty as RefType)) {
+                let load = builder.CreateLoad(refTy.GetBaseType(), value, CurrentBlock())
+                load.SetDebugLocation(loc)
+                return RequireResult(load)
             }
         }
         return value

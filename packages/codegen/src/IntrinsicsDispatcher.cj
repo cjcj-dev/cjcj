@@ -12,6 +12,8 @@ import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
 
 private let IS_SUBTYPE_INTRINSIC_NAME: String = "llvm.cj.is.subtype"
+private let LLVM_ARRAY_TYPE_KIND_FOR_INTRINSICS: Int32 = 11
+private let LLVM_POINTER_TYPE_KIND_FOR_INTRINSICS: Int32 = 12
 
 public func GenerateIntrinsic(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(intrinsicExpr) <- (chirExpr as Intrinsic)) {
@@ -519,15 +521,46 @@ private func GenerateCPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>,
     let pointerValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
     let indexValue = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
     if (let Some(resultTy) <- resultType) {
+        if (resultTy.IsGeneric()) {
+            let typeInfoOfResult = irBuilder.CreateTypeInfo(resultTy)
+            let resultTySize = irBuilder.GetLayoutSize_32(resultTy)
+            let ret = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfoOfResult, resultTySize]))
+            let destPayloadPtr = irBuilder.GetPayloadFromObject(ret)
+            let fixedTypeSize = irBuilder.CreateZExtOrTrunc(resultTySize,
+                unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }, name: "ptr.read.size")
+            let offset = irBuilder.CreateBinary(ExprKind.MUL, fixedTypeSize, indexValue, name: "ptr.read.offset")
+            let i8Type = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
+            let genericIndices = ArrayList<LLVMValueRef>()
+            genericIndices.add(offset)
+            let gep = irBuilder.CreateGEP(i8Type, pointerValue, genericIndices, name: "ele.ptr")
+            irBuilder.CreateMemCpy(destPayloadPtr, 0u32, gep, 0u32, resultTySize)
+            return ret
+        }
         let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
-        let typedPtr = irBuilder.CreatePointerCast(pointerValue,
+        let typedPtr = irBuilder.CreateBitCast(pointerValue,
             unsafe { LLVMPointerType(resultCGType.GetLLVMType(), 0u32) }, name: "ptr.read.cast")
         let indices = ArrayList<LLVMValueRef>()
         indices.add(indexValue)
         let addr = irBuilder.CreateGEP(resultCGType.GetLLVMType(), typedPtr, indices, name: "ptr.read.addr")
-        return irBuilder.CreateLoad(resultCGType.GetLLVMType(), addr, name: "ptr.read")
+        return HandleValuePtr(irBuilder, addr)
     }
     return LLVMNullValue()
+}
+
+private func HandleValuePtr(irBuilder: IRBuilder2, valPtr: LLVMValueRef): LLVMValueRef {
+    let valPtrType = unsafe { LLVMTypeOf(valPtr) }
+    if (IsStructPtrType(valPtrType) || IsVArrayPtrType(valPtrType)) {
+        return valPtr
+    }
+    return irBuilder.CreateLoad(GetPointerElementType(valPtrType), valPtr, name: "ptr.read")
+}
+
+private func IsVArrayPtrType(llvmType: LLVMTypeRef): Bool {
+    if (llvmType.isNull() || unsafe { LLVMGetTypeKind(llvmType) } != LLVM_POINTER_TYPE_KIND_FOR_INTRINSICS) {
+        return false
+    }
+    let elementType = GetPointerElementType(llvmType)
+    return !elementType.isNull() && unsafe { LLVMGetTypeKind(elementType) } == LLVM_ARRAY_TYPE_KIND_FOR_INTRINSICS
 }
 
 private func GenerateCPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>): LLVMValueRef {

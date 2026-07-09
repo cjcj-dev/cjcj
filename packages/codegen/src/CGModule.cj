@@ -678,6 +678,10 @@ public class CGModule {
         } else {
             LLVMNullValue()
         }
+        if (!chirGV.TestAttr(Attribute.IMPORTED) || chirGV.IsLocalConst()) {
+            AddLinkageTypeMetadata(rawGlobal, CHIRLinkage2LLVMLinkage(chirGV.GetLinkTypeInfo()),
+                cgCtx.IsCGParallelEnabled())
+        }
         let cgValue = CGValue(rawGlobal, cgType)
         globalVariables[name] = cgValue
         return cgValue

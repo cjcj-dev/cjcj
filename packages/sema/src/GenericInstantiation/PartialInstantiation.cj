@@ -189,6 +189,19 @@ private func pruneInterfaceBody(body: InterfaceBody): Unit {
     }
 }
 
+private func pruneExtendDecl(decl: ExtendDecl): Unit {
+    var idx: Int64 = 0
+    while (idx < decl.members.size) {
+        let member = decl.members[idx]
+        let sourceMember = member.genericDecl ?? member
+        if (!RequireInstantiation(sourceMember)) {
+            decl.members.remove(at: idx)
+        } else {
+            idx++
+        }
+    }
+}
+
 private func PruneNonInstantiatedMembers(root: Node): Unit {
     let walker = Walker(root, visitPre: { node: Node =>
         if (let Some(body) <- (node as ClassBody)) {
@@ -197,6 +210,8 @@ private func PruneNonInstantiatedMembers(root: Node): Unit {
             pruneStructBody(body)
         } else if (let Some(body) <- (node as InterfaceBody)) {
             pruneInterfaceBody(body)
+        } else if (let Some(decl) <- (node as ExtendDecl)) {
+            pruneExtendDecl(decl)
         }
         VisitAction.WALK_CHILDREN
     })
