@@ -148,7 +148,7 @@ public open class Base {
     }
 
     public func GetAttributeInfo(): AttributeInfo {
-        return attributes
+        return AttributeInfo(attributes)
     }
 
     public func AppendAttributeInfo(info: AttributeInfo): Unit {

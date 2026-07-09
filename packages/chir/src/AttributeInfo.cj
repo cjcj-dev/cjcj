@@ -1,36 +1,54 @@
 package cangjie_compiler::chir
 
-import std.collection.*
-
 public class AttributeInfo {
-    private let attrs: HashSet<Attribute> = HashSet<Attribute>()
+    private var attributesInfo: VArray<UInt64, $2>
 
-    public init() {}
+    public init() {
+        attributesInfo = VArray<UInt64, $2>({ _: Int64 => 0u64 })
+    }
+
+    public init(other: AttributeInfo) {
+        attributesInfo = VArray<UInt64, $2>({ _: Int64 => 0u64 })
+        for (idx in 0..2) {
+            attributesInfo[idx] = other.attributesInfo[idx]
+        }
+    }
 
     public func Enable(attr: Attribute): Unit {
-        attrs.add(attr)
+        let index = AttributeIndex(attr)
+        let word = Int64(UInt64(index) / 64u64)
+        let mask = 1u64 << (UInt64(index) % 64u64)
+        attributesInfo[word] = attributesInfo[word] | mask
     }
 
     public func Disable(attr: Attribute): Unit {
-        attrs.remove(attr)
+        let index = AttributeIndex(attr)
+        let word = Int64(UInt64(index) / 64u64)
+        let mask = 1u64 << (UInt64(index) % 64u64)
+        attributesInfo[word] = attributesInfo[word] & (UInt64.Max ^ mask)
     }
 
     public func Test(attr: Attribute): Bool {
-        return attrs.contains(attr)
+        let index = AttributeIndex(attr)
+        let word = Int64(UInt64(index) / 64u64)
+        let mask = 1u64 << (UInt64(index) % 64u64)
+        return (attributesInfo[word] & mask) != 0u64
     }
 
     public func Append(info: AttributeInfo): Unit {
-        for (attr in info.attrs) {
-            attrs.add(attr)
+        for (idx in 0..2) {
+            attributesInfo[idx] = attributesInfo[idx] | info.attributesInfo[idx]
         }
     }
 
     public func Clear(): Unit {
-        attrs.clear()
+        for (idx in 0..2) {
+            attributesInfo[idx] = 0u64
+        }
     }
 
     public func CopyFrom(info: AttributeInfo): Unit {
-        attrs.clear()
+        Clear()
         Append(info)
     }
 
@@ -51,7 +69,7 @@ public class AttributeInfo {
             Attribute.PREVIOUSLY_DESERIALIZED
         ]
         for (attr in attrsInOrder) {
-            if (attrs.contains(attr)) {
+            if (Test(attr)) {
                 out += "[" + AttributeName(attr) + "] "
             }
         }
