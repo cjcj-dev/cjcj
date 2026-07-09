@@ -4063,10 +4063,10 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
     HandleAliasOnCallBase(typeManager, ce)
     let candidatesBefore = CollectCallBaseFuncCandidates(ce)
     let candidates = FilterCandidates(typeManager, diag, ctx, ce, candidatesBefore)
-    if (let None <- ResolveDeclForCallBase(ce, candidatesBefore)) {
+    if (let None <- ResolveDeclForCallBase(ce, candidates)) {
         return CheckNonNormalCall(typeManager, diag, target, ce, argChecker: argChecker)
     }
-    let decl = ResolveDeclForCallBase(ce, candidatesBefore).getOrThrow()
+    let decl = ResolveDeclForCallBase(ce, candidates).getOrThrow()
     if (!CheckCallKind(diag, ce, decl)) {
         return CheckNonNormalCall(typeManager, diag, target, ce, argChecker: argChecker)
     }
