@@ -449,25 +449,29 @@ private func SynCallChildren(typeManager: TypeManager, ce: CallExpr): Bool {
     return ok
 }
 
-private func SynCallExprShallow(typeManager: TypeManager, ce: CallExpr, ctx!: Option<ASTContext> = None): Ty {
+private func SynCallExprShallow(typeManager: TypeManager, ce: CallExpr, ctx!: Option<ASTContext> = None,
+    importManager!: Option<SemaImportManager> = None): Ty {
     if (!SynCallChildren(typeManager, ce)) {
         return TcInvalid(ce)
     }
     let callTy = SynCallExpr(typeManager, ce, ctx: ctx,
-        desugarCallExpr: Some({ callExprForDesugar: CallExpr => DesugarCallExpr(callExprForDesugar) }))
+        desugarCallExpr: Some({ callExprForDesugar: CallExpr => DesugarCallExpr(callExprForDesugar) }),
+        importManager: importManager)
     if (Ty.IsTyCorrect(callTy)) {
         return callTy
     }
     return TcInvalid(ce)
 }
 
-private func ChkCallExprShallow(typeManager: TypeManager, target: Ty, ce: CallExpr, ctx!: Option<ASTContext> = None): Bool {
+private func ChkCallExprShallow(typeManager: TypeManager, target: Ty, ce: CallExpr, ctx!: Option<ASTContext> = None,
+    importManager!: Option<SemaImportManager> = None): Bool {
     if (!SynCallChildren(typeManager, ce)) {
         let _ = TcInvalid(ce)
         return false
     }
     if (ChkCallExpr(typeManager, None, Some(target), ce, ctx: ctx,
-        desugarCallExpr: Some({ callExprForDesugar: CallExpr => DesugarCallExpr(callExprForDesugar) }))) {
+        desugarCallExpr: Some({ callExprForDesugar: CallExpr => DesugarCallExpr(callExprForDesugar) }),
+        importManager: importManager)) {
         return true
     }
     if (Ty.IsTyCorrect(ce.GetTy())) {
@@ -625,7 +629,9 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
     if (let Some(value) <- (expr as LitConstExpr)) { return SynLitConstExpr(value, diag: diag) }
     if (let Some(value) <- (expr as ParenExpr)) { return SynParenExpr(typeManager, value) }
     if (let Some(value) <- (expr as TupleLit)) { return SynTupleLit(typeManager, value) }
-    if (let Some(value) <- (expr as CallExpr)) { return SynCallExprShallow(typeManager, value, ctx: ctx) }
+    if (let Some(value) <- (expr as CallExpr)) {
+        return SynCallExprShallow(typeManager, value, ctx: ctx, importManager: importManager)
+    }
     if (let Some(value) <- (expr as Block)) { return SynBlock(typeManager, value, diag: diag) }
     if (let Some(value) <- (expr as UnaryExpr)) { return SynUnaryExpr(typeManager, value) }
     if (let Some(value) <- (expr as BinaryExpr)) {
@@ -690,7 +696,9 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     if (let Some(value) <- (expr as LitConstExpr)) { return ChkLitConstExpr(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as ParenExpr)) { return ChkParenExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as TupleLit)) { return ChkTupleLit(typeManager, target, value, diag: diag) }
-    if (let Some(value) <- (expr as CallExpr)) { return ChkCallExprShallow(typeManager, target, value, ctx: ctx) }
+    if (let Some(value) <- (expr as CallExpr)) {
+        return ChkCallExprShallow(typeManager, target, value, ctx: ctx, importManager: importManager)
+    }
     if (let Some(value) <- (expr as Block)) { return ChkBlock(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as UnaryExpr)) { return ChkUnaryExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as BinaryExpr)) {

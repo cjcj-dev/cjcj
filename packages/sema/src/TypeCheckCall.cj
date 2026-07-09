@@ -12,6 +12,7 @@ import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
 import cangjie_compiler::basic.Position as BasicPosition
 import cangjie_compiler::basic.Range as BasicRange
+import cangjie_compiler::modules.SemaImportManager
 
 public type CallArgChecker = (Ty, FuncArg) -> Bool
 public type CallDesugarChecker = (Ty, Expr) -> Bool
@@ -586,7 +587,8 @@ private func FuncDeclsGroupByFixedPositionalArity(candidates: ArrayList<FuncDecl
 // (sema.TypeCheckExpr subpackage) because this main-sema package cannot import sema.Desugar directly.
 private func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
     ctx: Option<ASTContext>, target: Option<Ty>, ce: CallExpr, candidates: ArrayList<FuncDecl>,
-    variadicDesugar: (CallExpr, Int64) -> Unit, argChecker!: Option<CallArgChecker> = None,
+    diagnostics: ArrayList<BasicDiagnostic>, variadicDesugar: (CallExpr, Int64) -> Unit,
+    argChecker!: Option<CallArgChecker> = None,
     declSynthesizer!: Option<CallDeclSynthesizer> = None, argSynthesizer!: Option<(FuncArg) -> Ty> = None,
     exprSynthesizer!: Option<(Expr) -> Ty> = None, effectiveArgChecker!: Option<CallArgChecker> = None): Bool {
     if (!CheckArgsOrder(diag, ce)) {
@@ -605,6 +607,11 @@ private func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDia
                     if (matchResults.size == 1) {
                         results.add(matchResults[0])
                     }
+                }
+            }
+            if (diagnostics.isEmpty()) {
+                for (diagnostic in ds.GetSuppressedDiag()) {
+                    diagnostics.add(diagnostic)
                 }
             }
         }
@@ -626,6 +633,12 @@ private func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDia
             }
         }
         RecoverFromVariadicCallExpr(ce)
+    } else if (results.isEmpty()) {
+        if (let Some(diagValue) <- diag) {
+            for (diagnostic in diagnostics) {
+                diagValue.Diagnose(diagnostic).Emit()
+            }
+        }
     } else if (results.size > 1) {
         DiagnoseForCall(diag, candidates, results, ce, results[0])
     }
@@ -641,11 +654,19 @@ private func ChkFunctionCallExpr(typeManager: TypeManager, diag: Option<BasicDia
     variadicDesugar: Option<(CallExpr, Int64) -> Unit>, desugarCallExpr: Option<(CallExpr) -> Unit>,
     typeChecker: Option<(Ty, Type) -> Bool>, typeSynthesizer: Option<(Type) -> Ty>,
     argSynthesizer: Option<(FuncArg) -> Ty>, exprSynthesizer: Option<(Expr) -> Ty>,
-    effectiveArgChecker: Option<CallArgChecker>): Bool {
+    effectiveArgChecker: Option<CallArgChecker>, importManager: Option<SemaImportManager>): Bool {
     if (let Some(desugarCall) <- desugarCallExpr) {
         desugarCall(ce)
+    } else {
+        return false
     }
-    let desugaredCallExpr = (ce.desugarExpr.getOrThrow() as CallExpr).getOrThrow()
+    let desugaredCallExpr = match (ce.desugarExpr) {
+        case Some(desugar) => match (desugar as CallExpr) {
+            case Some(callExpr) => callExpr
+            case None => return false
+        }
+        case None => return false
+    }
     if (let Some(base) <- desugaredCallExpr.baseFunc) {
         SetIsNotAlone(base)
         if (let Some(nameRef) <- (base as NameReferenceExpr)) {
@@ -660,7 +681,7 @@ private func ChkFunctionCallExpr(typeManager: TypeManager, diag: Option<BasicDia
         declSynthesizer: declSynthesizer, ctx: ctx, variadicDesugar: variadicDesugar,
         desugarCallExpr: desugarCallExpr, typeChecker: typeChecker, typeSynthesizer: typeSynthesizer,
         argSynthesizer: argSynthesizer, exprSynthesizer: exprSynthesizer,
-        effectiveArgChecker: effectiveArgChecker)) {
+        effectiveArgChecker: effectiveArgChecker, importManager: importManager)) {
         RecoverToCallExpr(ce)
         if (let Some(diagValue) <- diag) {
             DiagOld(diagValue, ce, BasicDiagKind.sema_no_match_operator_function_call)
@@ -4061,15 +4082,237 @@ private func ResolveDeclForCallBase(ce: CallExpr, candidates: ArrayList<FuncDecl
     return None
 }
 
-public func ChkCallExprWithDiag(typeManager: TypeManager, diag: BasicDiagnosticEngine, target: Option<Ty>, ce: CallExpr): Bool {
-    return ChkCallExpr(typeManager, Some(diag), target, ce)
+// C++ src/Sema/TypeCheckExpr/NameReferenceExpr.cpp:538 TypeCheckerImpl::LookupShadowedTopLevelTypeByName.
+public func LookupShadowedTopLevelTypeByName(typeManager: TypeManager, ctx: ASTContext, name: String,
+    scopeName: String, node: Node, importManager!: Option<SemaImportManager> = None): Option<Decl> {
+    if (scopeName.isEmpty() || name.isEmpty()) {
+        return None
+    }
+    let topLevel = LookupTopLevel(typeManager, ctx, name, scopeName, node, importManager: importManager)
+    var found: Option<Decl> = None
+    for (decl in topLevel) {
+        if (!decl.IsTypeDecl()) {
+            continue
+        }
+        if (!decl.IsStructOrClassDecl() && decl.astKind != ASTKind.ENUM_DECL) {
+            continue
+        }
+        if (let Some(foundDecl) <- found) {
+            if (!refEq(foundDecl, decl)) {
+                return None
+            }
+        }
+        found = Some(decl)
+    }
+    return found
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:2968 GetUnqualifiedCallBaseName.
+private func GetUnqualifiedCallBaseName(ce: CallExpr): (Bool, String) {
+    let baseFunc = match (ce.baseFunc) {
+        case Some(value) => value
+        case None => return (false, "")
+    }
+    if (ce.sourceExpr.isSome() || ce.desugarExpr.isSome() || baseFunc.TestAttr(Attribute.MACRO_INVOKE_BODY)) {
+        return (false, "")
+    }
+    if (let Some(refExpr) <- (baseFunc as RefExpr)) {
+        return (true, refExpr.ref.identifier.Val())
+    }
+    if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+        if (let Some(baseExpr) <- memberAccess.baseExpr) {
+            if (let Some(baseRef) <- (baseExpr as RefExpr)) {
+                if (baseRef.isThis) {
+                    return (true, memberAccess.field.Val())
+                }
+            }
+        }
+        return (false, "")
+    }
+    return (false, "")
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:2991 TypeCheckerImpl::ShadowedCallBaseTypeCandidate.
+private func ShadowedCallBaseTypeCandidate(typeManager: TypeManager, ctx: ASTContext, ce: CallExpr,
+    importManager: Option<SemaImportManager>): Option<Decl> {
+    let (ok, name) = GetUnqualifiedCallBaseName(ce)
+    if (!ok) {
+        return None
+    }
+    let baseFunc = match (ce.baseFunc) {
+        case Some(value) => value
+        case None => return None
+    }
+    if (baseFunc.scopeName.isEmpty()) {
+        return None
+    }
+    let nearest = Lookup(typeManager, ctx, name, baseFunc.scopeName, baseFunc, importManager: importManager)
+    if (nearest.isEmpty()) {
+        return None
+    }
+    let nearestDecl = nearest[0]
+    if (nearestDecl.IsTypeDecl() || nearestDecl.TestAttr(Attribute.GLOBAL)) {
+        return None
+    }
+    if (nearestDecl.astKind != ASTKind.FUNC_DECL && nearestDecl.astKind != ASTKind.PROP_DECL &&
+        nearestDecl.astKind != ASTKind.VAR_DECL) {
+        return None
+    }
+    return LookupShadowedTopLevelTypeByName(typeManager, ctx, name, baseFunc.scopeName, baseFunc,
+        importManager: importManager)
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:3024 TypeCheckerImpl::RetryCallAsShadowedTypeConstructionWithType.
+private func RetryCallAsShadowedTypeConstructionWithType(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ctx: ASTContext, target: Option<Ty>, ce: CallExpr, typeDecl: Decl, argChecker: Option<CallArgChecker>,
+    desugarChecker: Option<CallDesugarChecker>, clearInferredForTarget: Bool,
+    declSynthesizer: Option<CallDeclSynthesizer>, variadicDesugar: Option<(CallExpr, Int64) -> Unit>,
+    desugarCallExpr: Option<(CallExpr) -> Unit>, typeChecker: Option<(Ty, Type) -> Bool>,
+    typeSynthesizer: Option<(Type) -> Ty>, argSynthesizer: Option<(FuncArg) -> Ty>,
+    exprSynthesizer: Option<(Expr) -> Ty>, effectiveArgChecker: Option<CallArgChecker>,
+    importManager: Option<SemaImportManager>): Bool {
+    let base = match (ce.baseFunc) {
+        case Some(value) => value
+        case None => return false
+    }
+    if (!Ty.IsTyCorrect(typeDecl.GetTy()) ||
+        (base.astKind != ASTKind.REF_EXPR && base.astKind != ASTKind.MEMBER_ACCESS)) {
+        return false
+    }
+    let savedTarget = base.GetTarget()
+    let savedBaseTy = base.GetTy()
+    let savedRefTargets = ArrayList<Decl>()
+    var savedAlias: Option<TypeAliasDecl> = None
+    if (let Some(refExpr) <- (base as RefExpr)) {
+        for (decl in refExpr.ref.targets) {
+            savedRefTargets.add(decl)
+        }
+        savedAlias = refExpr.aliasTarget
+    } else if (let Some(memberAccess) <- (base as MemberAccess)) {
+        for (decl in memberAccess.targets) {
+            savedRefTargets.add(decl)
+        }
+        savedAlias = memberAccess.aliasTarget
+    }
+    let savedCallKind = ce.callKind
+    let savedResolvedFunc = ce.resolvedFunction
+    let savedCeTy = ce.GetTy()
+
+    var retryOk = false
+    try (ds = DiagSuppressor(diag)) {
+        if (let Some(refExpr2) <- (base as RefExpr)) {
+            ReplaceTarget(refExpr2, Some(typeDecl))
+            refExpr2.aliasTarget = None
+            refExpr2.ref.targets.clear()
+            refExpr2.callOrPattern = Some(ce)
+            refExpr2.isAlone = false
+        } else if (let Some(memberAccess2) <- (base as MemberAccess)) {
+            ReplaceTarget(memberAccess2, Some(typeDecl))
+            memberAccess2.aliasTarget = None
+            memberAccess2.targets.clear()
+            memberAccess2.callOrPattern = Some(ce)
+            memberAccess2.isAlone = false
+        }
+        base.SetTy(typeDecl.GetTy().getOrThrow())
+        ce.callKind = CallKind.CALL_INVALID
+        ce.resolvedFunction = None
+        ce.SetTy(Ty.GetInitialTy())
+        PData.Reset(typeManager.constraints)
+        retryOk = ChkCallExprWithArgChecker(typeManager, diag, target, ce, argChecker,
+            desugarChecker: desugarChecker, clearInferredForTarget: clearInferredForTarget,
+            declSynthesizer: declSynthesizer, ctx: Some(ctx), variadicDesugar: variadicDesugar,
+            desugarCallExpr: desugarCallExpr, typeChecker: typeChecker, typeSynthesizer: typeSynthesizer,
+            argSynthesizer: argSynthesizer, exprSynthesizer: exprSynthesizer,
+            effectiveArgChecker: effectiveArgChecker, importManager: importManager) && Ty.IsTyCorrect(ce.GetTy())
+    }
+    if (retryOk) {
+        return true
+    }
+    if (let Some(refExpr3) <- (base as RefExpr)) {
+        ReplaceTarget(refExpr3, savedTarget)
+        refExpr3.aliasTarget = savedAlias
+        refExpr3.ref.targets.clear()
+        for (decl in savedRefTargets) {
+            refExpr3.ref.targets.add(decl)
+        }
+    } else if (let Some(memberAccess3) <- (base as MemberAccess)) {
+        ReplaceTarget(memberAccess3, savedTarget)
+        memberAccess3.aliasTarget = savedAlias
+        memberAccess3.targets.clear()
+        for (decl in savedRefTargets) {
+            if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                memberAccess3.targets.add(funcDecl)
+            }
+        }
+    }
+    base.SetTy(savedBaseTy.getOrThrow())
+    ce.callKind = savedCallKind
+    ce.resolvedFunction = savedResolvedFunc
+    ce.SetTy(savedCeTy.getOrThrow())
+    PData.Reset(typeManager.constraints)
+    return false
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:3109 TypeCheckerImpl::MayRetryCallAsShadowedTypeConstruction.
+private func MayRetryCallAsShadowedTypeConstruction(ctx: Option<ASTContext>, ce: CallExpr): Bool {
+    let _ = ctx
+    let (ok, _) = GetUnqualifiedCallBaseName(ce)
+    if (!ok) {
+        return false
+    }
+    let baseFunc = match (ce.baseFunc) {
+        case Some(value) => value
+        case None => return false
+    }
+    let target = baseFunc.GetTarget()
+    if (let None <- target) {
+        return false
+    }
+    let targetDecl = target.getOrThrow()
+    if (targetDecl.IsTypeDecl() || targetDecl.TestAttr(Attribute.GLOBAL)) {
+        return false
+    }
+    return targetDecl.astKind == ASTKind.FUNC_DECL || targetDecl.astKind == ASTKind.PROP_DECL ||
+        targetDecl.astKind == ASTKind.VAR_DECL
+}
+
+// C++ src/Sema/TypeCheckCall.cpp:3131 TypeCheckerImpl::RetryCallAsShadowedTypeConstruction.
+private func RetryCallAsShadowedTypeConstruction(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ctx: ASTContext, target: Option<Ty>, ce: CallExpr, argChecker: Option<CallArgChecker>,
+    desugarChecker: Option<CallDesugarChecker>, clearInferredForTarget: Bool,
+    declSynthesizer: Option<CallDeclSynthesizer>, variadicDesugar: Option<(CallExpr, Int64) -> Unit>,
+    desugarCallExpr: Option<(CallExpr) -> Unit>, typeChecker: Option<(Ty, Type) -> Bool>,
+    typeSynthesizer: Option<(Type) -> Ty>, argSynthesizer: Option<(FuncArg) -> Ty>,
+    exprSynthesizer: Option<(Expr) -> Ty>, effectiveArgChecker: Option<CallArgChecker>,
+    importManager: Option<SemaImportManager>): Bool {
+    let (ok, name) = GetUnqualifiedCallBaseName(ce)
+    let baseFunc = match (ce.baseFunc) {
+        case Some(value) => value
+        case None => return false
+    }
+    if (!ok || baseFunc.scopeName.isEmpty()) {
+        return false
+    }
+    let typeDecl = match (LookupShadowedTopLevelTypeByName(typeManager, ctx, name, baseFunc.scopeName, baseFunc,
+        importManager: importManager)) {
+        case Some(value) => value
+        case None => return false
+    }
+    return RetryCallAsShadowedTypeConstructionWithType(typeManager, diag, ctx, target, ce, typeDecl, argChecker,
+        desugarChecker, clearInferredForTarget, declSynthesizer, variadicDesugar, desugarCallExpr, typeChecker,
+        typeSynthesizer, argSynthesizer, exprSynthesizer, effectiveArgChecker, importManager)
+}
+
+public func ChkCallExprWithDiag(typeManager: TypeManager, diag: BasicDiagnosticEngine, target: Option<Ty>,
+    ce: CallExpr, desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Bool {
+    return ChkCallExpr(typeManager, Some(diag), target, ce, desugarCallExpr: desugarCallExpr)
 }
 
 public func ChkCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>, ce: CallExpr,
     ctx!: Option<ASTContext> = None, variadicDesugar!: Option<(CallExpr, Int64) -> Unit> = None,
-    desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Bool {
+    desugarCallExpr!: Option<(CallExpr) -> Unit> = None, importManager!: Option<SemaImportManager> = None): Bool {
     return ChkCallExprWithArgChecker(typeManager, diag, target, ce, None, ctx: ctx, variadicDesugar: variadicDesugar,
-        desugarCallExpr: desugarCallExpr)
+        desugarCallExpr: desugarCallExpr, importManager: importManager)
 }
 
 public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
@@ -4079,7 +4322,7 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
     typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None,
     argSynthesizer!: Option<(FuncArg) -> Ty> = None, exprSynthesizer!: Option<(Expr) -> Ty> = None,
-    effectiveArgChecker!: Option<CallArgChecker> = None): Bool {
+    effectiveArgChecker!: Option<CallArgChecker> = None, importManager!: Option<SemaImportManager> = None): Bool {
     if (let Some(desugar) <- ce.desugarExpr) {
         if (Ty.IsTyCorrect(desugar.GetTy())) {
             ce.SetTy(desugar.GetTy().getOrThrow())
@@ -4122,25 +4365,74 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
         ce.callKind = CallKind.CALL_BUILTIN_FUNCTION
         return true
     }
-    // Mirror C++ GetCallBaseCandidates (TypeCheckCall.cpp:2314): resolving the call-base target
-    // runs HandleAlias, which injects a type alias's concrete type arguments onto the base RefExpr
-    // so the ordinary generic-constructor instantiation path can bind them. The self-hosted port
-    // did this only on the type side; do it here for the expression/call side.
-    HandleAliasOnCallBase(typeManager, ce)
-    let candidatesBefore = CollectCallBaseFuncCandidates(ce)
-    let candidates = FilterCandidates(typeManager, diag, ctx, ce, candidatesBefore)
-    if (let None <- ResolveDeclForCallBase(ce, candidates)) {
-        return CheckNonNormalCall(typeManager, diag, target, ce, argChecker: argChecker)
+    let ctorTypeCandidate: Option<Decl> = if (let Some(ctxValue) <- ctx) {
+        ShadowedCallBaseTypeCandidate(typeManager, ctxValue, ce, importManager)
+    } else {
+        None
     }
-    let decl = ResolveDeclForCallBase(ce, candidates).getOrThrow()
+    var candidates = ArrayList<FuncDecl>()
+    var declOpt: Option<Decl> = None
+    if (let Some(typeCandidate) <- ctorTypeCandidate) {
+        var baseDiags = Array<BasicDiagnostic>()
+        var baseOk = false
+        try (ds = DiagSuppressor(diag)) {
+            // Mirror C++ GetCallBaseCandidates (TypeCheckCall.cpp:2314): resolving the call-base target
+            // runs HandleAlias, which injects a type alias's concrete type arguments onto the base RefExpr
+            // so the ordinary generic-constructor instantiation path can bind them.
+            HandleAliasOnCallBase(typeManager, ce)
+            let collectedCandidates = CollectCallBaseFuncCandidates(ce)
+            candidates = FilterCandidates(typeManager, diag, ctx, ce, collectedCandidates)
+            declOpt = ResolveDeclForCallBase(ce, candidates)
+            baseOk = declOpt.isSome()
+            baseDiags = ds.GetSuppressedDiag()
+        }
+        if (!baseOk) {
+            if (let Some(ctxValue2) <- ctx) {
+                if (RetryCallAsShadowedTypeConstructionWithType(typeManager, diag, ctxValue2, target, ce,
+                    typeCandidate, argChecker, desugarChecker, clearInferredForTarget, declSynthesizer,
+                    variadicDesugar, desugarCallExpr, typeChecker, typeSynthesizer, argSynthesizer,
+                    exprSynthesizer, effectiveArgChecker, importManager)) {
+                    return true
+                }
+            }
+        }
+        if (let Some(diagValue) <- diag) {
+            for (diagnostic in baseDiags) {
+                diagValue.Diagnose(diagnostic).Emit()
+            }
+        }
+    } else {
+        // Mirror C++ GetCallBaseCandidates (TypeCheckCall.cpp:2314): resolving the call-base target
+        // runs HandleAlias, which injects a type alias's concrete type arguments onto the base RefExpr
+        // so the ordinary generic-constructor instantiation path can bind them.
+        HandleAliasOnCallBase(typeManager, ce)
+        let collectedCandidates2 = CollectCallBaseFuncCandidates(ce)
+        candidates = FilterCandidates(typeManager, diag, ctx, ce, collectedCandidates2)
+        declOpt = ResolveDeclForCallBase(ce, candidates)
+    }
+    let decl = match (declOpt) {
+        case Some(value) => value
+        case None => return CheckNonNormalCall(typeManager, diag, target, ce, argChecker: argChecker)
+    }
+    let mayRetryAsTypeCtor = MayRetryCallAsShadowedTypeConstruction(ctx, ce)
     if (!CheckCallKind(diag, ce, decl)) {
+        if (mayRetryAsTypeCtor) {
+            if (let Some(ctxValue3) <- ctx) {
+                if (RetryCallAsShadowedTypeConstruction(typeManager, diag, ctxValue3, target, ce, argChecker,
+                    desugarChecker, clearInferredForTarget, declSynthesizer, variadicDesugar, desugarCallExpr,
+                    typeChecker, typeSynthesizer, argSynthesizer, exprSynthesizer, effectiveArgChecker,
+                    importManager)) {
+                    return true
+                }
+            }
+        }
         return CheckNonNormalCall(typeManager, diag, target, ce, argChecker: argChecker)
     }
     if (ce.callKind == CallKind.CALL_INVALID) {
         return false
     }
     if (candidates.isEmpty()) {
-        DiagnoseForCall(diag, candidatesBefore, candidates, ce, decl)
+        DiagnoseForCall(diag, candidates, candidates, ce, decl)
         return false
     }
     let maybeEnumOverloadOP = if (let Some(baseFunc) <- ce.baseFunc) {
@@ -4148,65 +4440,111 @@ public func ChkCallExprWithArgChecker(typeManager: TypeManager, diag: Option<Bas
     } else {
         false
     }
+    let maybeVariadicFunction = IsPossibleVariadicFunctionInList(candidates, ce)
+    let maybeEnumOrVariadic = maybeEnumOverloadOP || maybeVariadicFunction
     let inferenceFailure = CallInferenceFailure()
-    let result = MatchFunctionForCall(typeManager, diag, ctx, candidates, ce, target, argChecker: argChecker,
-        inferenceFailure: Some(inferenceFailure), declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer,
-        exprSynthesizer: exprSynthesizer, effectiveArgChecker: effectiveArgChecker)
-    ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy() ?? TypeManager.GetInvalidTy()))
-    if (result.size == 1) {
-        return true
-    }
-    if (let Some(baseFunc) <- ce.baseFunc) {
-        baseFunc.SetTy(if (maybeEnumOverloadOP || IsPossibleVariadicFunctionInList(candidates, ce)) {
-            TypeManager.GetInvalidTy()
+    try (cs = PData.CommitScope(typeManager.constraints)) {
+        let result = if (maybeEnumOrVariadic || mayRetryAsTypeCtor) {
+            let suppressedResult = ArrayList<FuncDecl>()
+            let diagnostics = ArrayList<BasicDiagnostic>()
+            try (ds = DiagSuppressor(diag)) {
+                let matched = MatchFunctionForCall(typeManager, diag, ctx, candidates, ce, target, argChecker: argChecker,
+                    inferenceFailure: Some(inferenceFailure), declSynthesizer: declSynthesizer,
+                    argSynthesizer: argSynthesizer, exprSynthesizer: exprSynthesizer,
+                    effectiveArgChecker: effectiveArgChecker)
+                for (fd in matched) {
+                    suppressedResult.add(fd)
+                }
+                for (diagnostic in ds.GetSuppressedDiag()) {
+                    diagnostics.add(diagnostic)
+                }
+            }
+            (suppressedResult, diagnostics)
         } else {
-            baseFunc.GetTy() ?? TypeManager.GetInvalidTy()
-        })
-    }
-    if (maybeEnumOverloadOP && ChkFunctionCallExpr(typeManager, diag, target, ce, argChecker, desugarChecker,
-        clearInferredForTarget, declSynthesizer, ctx, variadicDesugar, desugarCallExpr, typeChecker, typeSynthesizer,
-        argSynthesizer, exprSynthesizer, effectiveArgChecker)) {
-        return true
-    }
-    // Mirror C++ TypeCheckCall.cpp:3254-3256: when normal matching fails and the call may target a
-    // variadic function, clear the base's type and retry via the variadic desugaring path.
-    if (let Some(desugarVariadic) <- variadicDesugar) {
-        if (IsPossibleVariadicFunctionInList(candidates, ce)) {
-            if (result.isEmpty() &&
-                ChkVariadicCallExpr(typeManager, diag, ctx, target, ce, candidates, desugarVariadic,
-                    argChecker: argChecker, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer,
-                    exprSynthesizer: exprSynthesizer, effectiveArgChecker: effectiveArgChecker)) {
-                return true
+            let matched = MatchFunctionForCall(typeManager, diag, ctx, candidates, ce, target, argChecker: argChecker,
+                inferenceFailure: Some(inferenceFailure), declSynthesizer: declSynthesizer,
+                argSynthesizer: argSynthesizer, exprSynthesizer: exprSynthesizer,
+                effectiveArgChecker: effectiveArgChecker)
+            (matched, ArrayList<BasicDiagnostic>())
+        }
+        let matchedResult = result[0]
+        let diagnostics = result[1]
+        ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy() ?? TypeManager.GetInvalidTy()))
+        if (matchedResult.size == 1) {
+            return true
+        }
+        PData.Reset(typeManager.constraints)
+        if (let Some(baseFunc) <- ce.baseFunc) {
+            baseFunc.SetTy(if (maybeEnumOrVariadic) {
+                TypeManager.GetInvalidTy()
+            } else {
+                baseFunc.GetTy() ?? TypeManager.GetInvalidTy()
+            })
+        }
+        let enumOrVariadicRet = (maybeEnumOverloadOP && ChkFunctionCallExpr(typeManager, diag, target, ce,
+            argChecker, desugarChecker, clearInferredForTarget, declSynthesizer, ctx, variadicDesugar,
+            desugarCallExpr, typeChecker, typeSynthesizer, argSynthesizer, exprSynthesizer,
+            effectiveArgChecker, importManager)) ||
+            (if (let Some(desugarVariadic) <- variadicDesugar) {
+                maybeVariadicFunction && matchedResult.isEmpty() &&
+                    ChkVariadicCallExpr(typeManager, diag, ctx, target, ce, candidates, diagnostics,
+                        desugarVariadic, argChecker: argChecker, declSynthesizer: declSynthesizer,
+                        argSynthesizer: argSynthesizer, exprSynthesizer: exprSynthesizer,
+                        effectiveArgChecker: effectiveArgChecker)
+            } else {
+                false
+            })
+        if (enumOrVariadicRet) {
+            return true
+        }
+        if (mayRetryAsTypeCtor) {
+            if (let Some(ctxValue4) <- ctx) {
+                if (RetryCallAsShadowedTypeConstruction(typeManager, diag, ctxValue4, target, ce, argChecker,
+                    desugarChecker, clearInferredForTarget, declSynthesizer, variadicDesugar, desugarCallExpr,
+                    typeChecker, typeSynthesizer, argSynthesizer, exprSynthesizer, effectiveArgChecker,
+                    importManager)) {
+                    return true
+                }
             }
         }
-    }
-    if (result.isEmpty() && !candidatesBefore.isEmpty()) {
-        if (inferenceFailure.failed) {
-            DiagnoseForCallInference(diag, ce)
-        } else {
-            DiagnoseForCall(diag, candidates, result, ce, decl)
+        if (mayRetryAsTypeCtor && !maybeEnumOrVariadic && !diagnostics.isEmpty()) {
+            if (let Some(diagValue2) <- diag) {
+                for (diagnostic2 in diagnostics) {
+                    diagValue2.Diagnose(diagnostic2).Emit()
+                }
+            }
         }
-    } else if (result.size > 1) {
-        DiagnoseForCall(diag, candidates, result, ce, decl)
-        if (let Some(baseFunc) <- ce.baseFunc) {
-            ReplaceTarget(baseFunc, Some(result[0]))
+        if (diagnostics.isEmpty()) {
+            if (matchedResult.isEmpty() && inferenceFailure.failed) {
+                DiagnoseForCallInference(diag, ce)
+            } else {
+                DiagnoseForCall(diag, candidates, matchedResult, ce, decl)
+            }
         }
-        ce.resolvedFunction = Some(result[0])
-    }
-    RecoverCallArgs(ce, argsTys, effectiveArgChecker)
-    if (let Some(diagValue) <- diag) {
-        if (!diagValue.GetDiagnoseStatus() && !prevCheckTrue) {
+        if (matchedResult.size > 1) {
+            if (let Some(baseFunc2) <- ce.baseFunc) {
+                ReplaceTarget(baseFunc2, Some(matchedResult[0]))
+            }
+            ce.resolvedFunction = Some(matchedResult[0])
+        }
+        RecoverCallArgs(ce, argsTys, effectiveArgChecker)
+        if (let Some(diagValue) <- diag) {
+            if (!diagValue.GetDiagnoseStatus() && !prevCheckTrue) {
+                ce.callKind = CallKind.CALL_INVALID
+            }
+        } else if (!prevCheckTrue) {
             ce.callKind = CallKind.CALL_INVALID
         }
-    } else if (!prevCheckTrue) {
-        ce.callKind = CallKind.CALL_INVALID
+        return false
     }
     return false
 }
 
 public func SynCallExpr(typeManager: TypeManager, ce: CallExpr, ctx!: Option<ASTContext> = None,
-    desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Ty {
-    if (ChkCallExpr(typeManager, None, None, ce, ctx: ctx, desugarCallExpr: desugarCallExpr)) {
+    desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
+    importManager!: Option<SemaImportManager> = None): Ty {
+    if (ChkCallExpr(typeManager, None, None, ce, ctx: ctx, desugarCallExpr: desugarCallExpr,
+        importManager: importManager)) {
         return ce.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return TypeManager.GetInvalidTy()
@@ -4218,18 +4556,19 @@ public func SynCallExprWithArgChecker(typeManager: TypeManager, ce: CallExpr, ar
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
     typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None,
     argSynthesizer!: Option<(FuncArg) -> Ty> = None, exprSynthesizer!: Option<(Expr) -> Ty> = None,
-    effectiveArgChecker!: Option<CallArgChecker> = None): Ty {
+    effectiveArgChecker!: Option<CallArgChecker> = None, importManager!: Option<SemaImportManager> = None): Ty {
     if (ChkCallExprWithArgChecker(typeManager, diag, None, ce, argChecker, declSynthesizer: declSynthesizer,
         ctx: ctx, variadicDesugar: variadicDesugar, desugarCallExpr: desugarCallExpr, typeChecker: typeChecker,
         typeSynthesizer: typeSynthesizer, argSynthesizer: argSynthesizer, exprSynthesizer: exprSynthesizer,
-        effectiveArgChecker: effectiveArgChecker)) {
+        effectiveArgChecker: effectiveArgChecker, importManager: importManager)) {
         return ce.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return TypeManager.GetInvalidTy()
 }
 
-public func SynCallExprWithDiag(typeManager: TypeManager, diag: BasicDiagnosticEngine, ce: CallExpr): Ty {
-    if (ChkCallExpr(typeManager, Some(diag), None, ce)) {
+public func SynCallExprWithDiag(typeManager: TypeManager, diag: BasicDiagnosticEngine, ce: CallExpr,
+    desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Ty {
+    if (ChkCallExpr(typeManager, Some(diag), None, ce, desugarCallExpr: desugarCallExpr)) {
         return ce.GetTy() ?? TypeManager.GetInvalidTy()
     }
     return TypeManager.GetInvalidTy()

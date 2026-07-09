@@ -2915,7 +2915,9 @@ public class TypeChecker {
         if (let Some(pattern) <- vpd.irrefutablePattern) {
             if (Ty.IsTyCorrect(declTy)) {
                 let ok = ChkPattern(impl.typeManager, ctx, declTy, pattern, isPatternInMatch: false,
-                    diag: impl.diag)
+                    exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
+                        Check(ctx, patternExpectedTy, patternExpr)
+                    }), diag: impl.diag)
                 if (ok && IsIrrefutablePattern(pattern)) {
                     BindPatternBindings(ctx, pattern)
                 }
@@ -4326,7 +4328,9 @@ public class TypeChecker {
         }
         if (let Some(pattern) <- forInExpr.pattern) {
             let patternOk = ChkPattern(impl.typeManager, ctx, inPatternTy, pattern, isPatternInMatch: false,
-                diag: impl.diag)
+                exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
+                    Check(ctx, patternExpectedTy, patternExpr)
+                }), diag: impl.diag)
             isWellTyped = patternOk && isWellTyped
             if (patternOk) {
                 CollectPatternBinding(pattern, boundDecls)
@@ -5045,7 +5049,10 @@ public class TypeChecker {
             }
             if (let Some(inner) <- exceptPattern.pattern) {
                 let target = CatchPatternBindingTargetTy(ctx, exceptPattern)
-                let _ = ChkPattern(impl.typeManager, ctx, target, inner, isPatternInMatch: false, diag: impl.diag)
+                let _ = ChkPattern(impl.typeManager, ctx, target, inner, isPatternInMatch: false,
+                    exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
+                        Check(ctx, patternExpectedTy, patternExpr)
+                    }), diag: impl.diag)
             }
             return
         }
@@ -5068,7 +5075,10 @@ public class TypeChecker {
                     TypeManager.GetInvalidTy()
                 }
                 let _ = ChkPattern(impl.typeManager, ctx, commandTarget, innerCommandPattern,
-                    isPatternInMatch: false, diag: impl.diag)
+                    isPatternInMatch: false,
+                    exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
+                        Check(ctx, patternExpectedTy, patternExpr)
+                    }), diag: impl.diag)
             }
             return
         }
@@ -5079,7 +5089,10 @@ public class TypeChecker {
             }
         }
         let catchTarget = LookupCoreTy(ctx, "Exception") ?? impl.typeManager.GetAnyTy()
-        let _ = ChkPattern(impl.typeManager, ctx, catchTarget, pattern, isPatternInMatch: false, diag: impl.diag)
+        let _ = ChkPattern(impl.typeManager, ctx, catchTarget, pattern, isPatternInMatch: false,
+            exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
+                Check(ctx, patternExpectedTy, patternExpr)
+            }), diag: impl.diag)
     }
 
     private func CatchPatternBindingTargetTy(ctx: ASTContext, pattern: ExceptTypePattern): Ty {
@@ -5153,7 +5166,10 @@ public class TypeChecker {
             exceptionTy: LookupCoreTy(ctx, "Exception"), errorTy: LookupCoreTy(ctx, "Error"),
             commandTy: commandTy, diag: impl.diag,
             patternChecker: Some({ targetTy: Ty, pattern: Pattern =>
-                ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false, diag: impl.diag)
+                ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false,
+                    exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
+                        Check(ctx, patternExpectedTy, patternExpr)
+                    }), diag: impl.diag)
             })))
     }
 
@@ -5229,6 +5245,7 @@ public class TypeChecker {
                 declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }), ctx: Some(ctx),
                 variadicDesugar: Some({ vce: CallExpr, arity: Int64 => DesugarVariadicCallExpr(vce, arity) }),
                 desugarCallExpr: Some({ callExprForDesugar: CallExpr => DesugarCallExpr(callExprForDesugar) }),
+                importManager: impl.importManager,
                 typeChecker: Some({ targetTy: Ty, typeNode: Type =>
                     if (!Ty.IsTyCorrect(targetTy)) {
                         typeNode.SetTy(TypeManager.GetInvalidTy())
@@ -5666,6 +5683,7 @@ public class TypeChecker {
                 declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }), ctx: Some(ctx),
                 variadicDesugar: Some({ vce: CallExpr, arity: Int64 => DesugarVariadicCallExpr(vce, arity) }),
                 desugarCallExpr: Some({ callExprForDesugar: CallExpr => DesugarCallExpr(callExprForDesugar) }),
+                importManager: impl.importManager,
                 typeChecker: Some({ targetTy: Ty, typeNode: Type =>
                     if (!Ty.IsTyCorrect(targetTy)) {
                         typeNode.SetTy(TypeManager.GetInvalidTy())
@@ -5829,7 +5847,10 @@ public class TypeChecker {
                 exceptionTy: LookupCoreTy(ctx, "Exception"), errorTy: LookupCoreTy(ctx, "Error"),
                 commandTy: commandTy, diag: impl.diag,
                 patternChecker: Some({ targetTy: Ty, pattern: Pattern =>
-                    ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false, diag: impl.diag)
+                    ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false,
+                        exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
+                            Check(ctx, patternExpectedTy, patternExpr)
+                        }), diag: impl.diag)
                 })))
         }
         if (let Some(typeConv) <- (expr as TypeConvExpr)) {
