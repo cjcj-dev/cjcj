@@ -213,8 +213,7 @@ public open class Type {
 
     public open func IsAny(): Bool {
         if (let Some(classTy) <- (this as ClassType)) {
-            return classTy.GetCustomTypeDef().packageName == "std.core" &&
-                classTy.GetCustomTypeDef().identifier == "Any"
+            return CheckCustomTypeDefIsExpected(classTy.GetCustomTypeDef(), "std.core", "Any")
         }
         return false
     }
