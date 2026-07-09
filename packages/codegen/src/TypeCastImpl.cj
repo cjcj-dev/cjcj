@@ -409,7 +409,7 @@ private func EmitIntegerCast(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, s
     if (overflowStrategy == OverflowStrategy.SATURATING) {
         return EmitSaturatingIntegerCast(irBuilder, sourceValue, sourceTy, targetTy, targetLLVMType)
     }
-    if (overflowStrategy == OverflowStrategy.THROWING || overflowStrategy == OverflowStrategy.CHECKED) {
+    if (overflowStrategy == OverflowStrategy.THROWING) {
         return EmitThrowingIntegerCast(irBuilder, sourceValue, sourceTy, targetTy, targetLLVMType)
     }
     return EmitWrappingIntegerCast(irBuilder, sourceValue, sourceTy, targetLLVMType)
@@ -438,27 +438,34 @@ private func EmitThrowingIntegerCast(irBuilder: IRBuilder2, sourceValue: LLVMVal
         return EmitWrappingIntegerCast(irBuilder, sourceValue, sourceTy, targetLLVMType)
     }
     let blocks = MakeBlockNames(ArrayList<String>([
-        "lower.bound.ok", "upper.bound.ok", "lower.bound.overflow", "upper.bound.overflow"
+        "lower.bound.ok", "upper.bound.ok", "upper.bound.overflow", "lower.bound.overflow",
+        "overflow.throwing.end"
     ]))
     let created = irBuilder.CreateAndInsertBasicBlocks(blocks)
-    if (created.size < 4) {
+    if (created.size < 5) {
         return EmitWrappingIntegerCast(irBuilder, sourceValue, sourceTy, targetLLVMType)
     }
     let lowerOK = created[0]
     let upperOK = created[1]
-    let lowerOverflow = created[2]
-    let upperOverflow = created[3]
+    let upperOverflow = created[2]
+    let lowerOverflow = created[3]
+    let endBlock = created[4]
     irBuilder.CreateCondBr(CheckIntegerCastLowerBound(irBuilder, sourceValue, sourceTy, targetTy),
         lowerOK, lowerOverflow)
     irBuilder.SetInsertPoint(lowerOverflow)
     irBuilder.CreateOverflowOrArithmeticException("The result would be less than " + targetTy.ToString() + ".Min.")
+    irBuilder.CreateUnreachable()
     irBuilder.SetInsertPoint(lowerOK)
     irBuilder.CreateCondBr(CheckIntegerCastUpperBound(irBuilder, sourceValue, sourceTy, targetTy),
         upperOK, upperOverflow)
     irBuilder.SetInsertPoint(upperOverflow)
     irBuilder.CreateOverflowOrArithmeticException("The result would be greater than " + targetTy.ToString() + ".Max.")
+    irBuilder.CreateUnreachable()
     irBuilder.SetInsertPoint(upperOK)
-    return EmitWrappingIntegerCast(irBuilder, sourceValue, sourceTy, targetLLVMType)
+    let castValue = EmitWrappingIntegerCast(irBuilder, sourceValue, sourceTy, targetLLVMType)
+    irBuilder.CreateBr(endBlock)
+    irBuilder.SetInsertPoint(endBlock)
+    return castValue
 }
 
 private func EmitSaturatingIntegerCast(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: Type, targetTy: Type,
