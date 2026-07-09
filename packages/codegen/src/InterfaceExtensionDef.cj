@@ -8,18 +8,14 @@ import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.CustomTypeDef
-import cangjie_compiler::chir.EnumDef
-import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.ExtendDef
 import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.ReplaceRawGenericArgType
-import cangjie_compiler::chir.StructDef
-import cangjie_compiler::chir.StructType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.VirtualMethodInfo
 import cangjie_compiler::chir.VTableInType
 import cangjie_compiler::mangle.GetTypeQualifiedName
-import cangjie_compiler::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, StaticCast}
+import cangjie_compiler::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
 private let EXTENSION_DEFS_NAME: String = "NonExternalExtensionDefs"
 private let EXTERNAL_EXTENSION_DEFS_NAME: String = "ExternalExtensionDefs"
@@ -116,7 +112,7 @@ private class CGExtensionDef {
     public init(cgMod: CGModule, chirDef: CustomTypeDef) {
         this.cgMod = cgMod
         this.chirDef = chirDef
-        targetType = SourceGenericTargetType(RequireExtensionTargetType(chirDef))
+        targetType = RequireExtensionTargetType(chirDef)
         isForExternalType = IsExternalDefinedType(targetType)
         typeMangle = GetTypeQualifiedName(targetType)
     }
@@ -759,47 +755,6 @@ private func IsDirectSuperTypeOf(inheritedType: ClassType, targetType: Type, bui
         }
     }
     return false
-}
-
-private func SourceCustomType(customTy: CustomType): CustomType {
-    let def = customTy.GetCustomTypeDef()
-    if (let Some(genericDecl) <- def.GetGenericDecl()) {
-        return SourceCustomTypeForDef(genericDecl, customTy)
-    }
-    if (def.IsGenericDef()) {
-        return SourceCustomTypeForDef(def, customTy)
-    }
-    if (let Some(defTy) <- def.GetType()) {
-        return StaticCast<CustomType>(defTy)
-    }
-    return customTy
-}
-
-private func SourceCustomTypeForDef(def: CustomTypeDef, fallback: CustomType): CustomType {
-    let genericArgs = ArrayList<Type>()
-    for (param in def.GetGenericTypeParams()) {
-        genericArgs.add(param)
-    }
-    if (let Some(classDef) <- (def as ClassDef)) {
-        return ClassType(classDef, genericArgs)
-    }
-    if (let Some(structDef) <- (def as StructDef)) {
-        return StructType(structDef, genericArgs)
-    }
-    if (let Some(enumDef) <- (def as EnumDef)) {
-        return EnumType(enumDef, genericArgs)
-    }
-    if (let Some(defTy) <- def.GetType()) {
-        return StaticCast<CustomType>(defTy)
-    }
-    return fallback
-}
-
-private func SourceGenericTargetType(targetType: Type): Type {
-    if (let Some(customTy) <- (targetType.StripAllRefs() as CustomType)) {
-        return SourceCustomType(customTy)
-    }
-    return targetType
 }
 
 private func ExtensionDefFlag(targetType: Type, inheritedType: ClassType, direct: Bool): UInt64 {
