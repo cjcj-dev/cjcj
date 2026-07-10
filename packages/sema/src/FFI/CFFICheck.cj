@@ -28,27 +28,23 @@ private func ToBasicRange(begin: Position, end: Position): BasicRange {
     return BasicRange(ToBasicPosition(begin), ToBasicPosition(fixedEnd))
 }
 
-private func NodeRange(node: Node): BasicRange {
-    return ToBasicRange(node.begin, node.end)
-}
-
 private func IdentifierRange(identifier: SrcIdentifier): BasicRange {
     return ToBasicRange(identifier.GetRawPos(), identifier.GetRawEndPos())
 }
 
 private func FuncBodyTypeRange(body: FuncBody, typeNode: Type): BasicRange {
     if (!typeNode.begin.IsZero()) {
-        return NodeRange(typeNode)
+        return ToBasicRange(typeNode.GetBegin(), typeNode.GetEnd())
     }
     if (let Some(funcDecl) <- body.funcDecl) {
         return IdentifierRange(funcDecl.identifier)
     }
-    return NodeRange(typeNode)
+    return ToBasicRange(typeNode.GetBegin(), typeNode.GetEnd())
 }
 
 public func GetFuncBodyRange(body: FuncBody, typeNode: Type): BasicRange {
     if (!typeNode.begin.IsZero()) {
-        return NodeRange(typeNode)
+        return ToBasicRange(typeNode.GetBegin(), typeNode.GetEnd())
     }
     let funcDecl = body.funcDecl.getOrThrow()
     return IdentifierRange(funcDecl.identifier)
@@ -56,7 +52,7 @@ public func GetFuncBodyRange(body: FuncBody, typeNode: Type): BasicRange {
 
 private func EmitRefactor(diag: BasicDiagnosticEngine, kind: BasicDiagKindRefactor, node: Node,
     args!: Array<String> = Array<String>()): Unit {
-    let builder = diag.DiagnoseRefactor(kind, NodeRange(node), arguments: args)
+    let builder = DiagnoseRefactor(diag, kind, node, arguments: args)
     builder.Emit()
 }
 
@@ -368,14 +364,18 @@ public func CheckCFuncSignature(body: FuncBody, diag: BasicDiagnosticEngine): Un
             }
             if (let Some(retTy) <- retType.GetTy()) {
                 if (!Ty.IsMetCType(retTy)) {
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(
+                        diag,
                         BasicDiagKindRefactor.sema_invalid_cfunc_return_type,
+                        retType,
                         FuncBodyTypeRange(body, retType))
                     builder.AddNote("return type is " + retTy.String())
                     builder.Emit()
                 } else if (let Some(_) <- (retTy as VArrayTy)) {
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(
+                        diag,
                         BasicDiagKindRefactor.sema_varray_in_cfunc,
+                        retType,
                         FuncBodyTypeRange(body, retType))
                     builder.Emit()
                 }

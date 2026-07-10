@@ -6,8 +6,6 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DEFAULT_POSITION as BasicDefaultPosition
-import cangjie_compiler::basic.Position as BasicPosition
-import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::sema.TypeManager
 import cangjie_compiler::utils.FileUtil
@@ -26,25 +24,9 @@ private let APILEVEL_MAJOR_MAX: UInt64 = 99u64
 private let SYSCAP_DIAG_DISPLAY_LIMIT: Int64 = 3
 private let IFAVAILABLE_LOWER_LIMITLEVEL: UInt32 = 19u32
 
-private func ToBasicPosition(pos: Position): BasicPosition {
-    return BasicPosition(pos.fileID, pos.line, pos.column)
-}
-
-private func ToBasicRange(begin: Position, end: Position): BasicRange {
-    var fixedEnd = end
-    if (begin.fileID != end.fileID) {
-        fixedEnd = begin + 1
-    }
-    return BasicRange(ToBasicPosition(begin), ToBasicPosition(fixedEnd))
-}
-
-private func NodeRange(node: Node): BasicRange {
-    return ToBasicRange(node.begin, node.end)
-}
-
 private func Emit(diag: BasicDiagnosticEngine, kind: BasicDiagKindRefactor, node: Node,
     args!: Array<String> = Array<String>()): Unit {
-    let builder = diag.DiagnoseRefactor(kind, NodeRange(node), arguments: args)
+    let builder = DiagnoseRefactor(diag, kind, node, arguments: args)
     builder.Emit()
 }
 
@@ -587,9 +569,10 @@ public class PluginCustomAnnoChecker {
         let inUnionSet = unionSet.contains(targetSyscap) || (!scopeSyscap.isEmpty() && scopeSyscap == targetSyscap)
         if (!inUnionSet) {
             if (reportDiag && !node.begin.IsZero()) {
-                let builder = diag.DiagnoseRefactor(
+                let builder = DiagnoseRefactor(
+                    diag,
                     BasicDiagKindRefactor.sema_apilevel_syscap_error,
-                    NodeRange(node),
+                    node,
                     arguments: [targetSyscap])
                 builder.AddNote("the following syscaps are supported: " + FormatSyscapsString(scopeSyscap, unionSet))
                 builder.Emit()
@@ -600,9 +583,10 @@ public class PluginCustomAnnoChecker {
             (!scopeSyscap.isEmpty() && scopeSyscap == targetSyscap)
         if (!inIntersectionSet) {
             if (reportDiag && !node.begin.IsZero()) {
-                let builder = diag.DiagnoseRefactor(
+                let builder = DiagnoseRefactor(
+                    diag,
                     BasicDiagKindRefactor.sema_apilevel_syscap_warning,
-                    NodeRange(node),
+                    node,
                     arguments: [targetSyscap])
                 builder.AddNote(
                     "the following syscaps are supported: " + FormatSyscapsString(scopeSyscap, intersectionSet))
@@ -923,17 +907,19 @@ public class PluginCustomAnnoChecker {
         Parse(extended, extendedInfo)
         if (let Some(extendedHide) <- extendedInfo.hasHideAnno) {
             if (let None <- annoInfo.hasHideAnno) {
-                let builder = diag.DiagnoseRefactor(
+                let builder = DiagnoseRefactor(
+                    diag,
                     BasicDiagKindRefactor.sema_hide_missing_hide,
-                    NodeRange(decl))
+                    decl)
                 builder.AddNote("the extended declaration is marked with '@!Hide'")
                 builder.Emit()
             } else if (let Some(currentHide) <- annoInfo.hasHideAnno) {
                 if (extendedHide && !currentHide) {
                     let value = if (currentHide) { "true" } else { "false" }
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(
+                        diag,
                         BasicDiagKindRefactor.sema_hide_diff_param,
-                        NodeRange(decl),
+                        decl,
                         arguments: [value])
                     builder.AddNote("should be same with")
                     builder.Emit()
@@ -950,9 +936,10 @@ public class PluginCustomAnnoChecker {
             if (let Some(memberHide) <- memberInfo.hasHideAnno) {
                 if (memberHide != requiredHide) {
                     let value = if (memberHide) { "true" } else { "false" }
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(
+                        diag,
                         BasicDiagKindRefactor.sema_hide_diff_param,
-                        NodeRange(member),
+                        member,
                         arguments: [value])
                     builder.AddNote("should be same with")
                     builder.Emit()
@@ -1002,20 +989,22 @@ public class PluginCustomAnnoChecker {
 
         if (let Some(currentHide) <- functionWithHide) {
             if (let None <- overriddenFdWithHide) {
-                let builder = diag.DiagnoseRefactor(
+                let builder = DiagnoseRefactor(
+                    diag,
                     BasicDiagKindRefactor.sema_hide_missing_hide,
-                    NodeRange(overriddenFd))
-                builder.AddNote(NodeRange(fd), "the override function is marked with '@!Hide'")
+                    overriddenFd)
+                AddNote(builder, fd, "the override function is marked with '@!Hide'")
                 builder.Emit()
             } else {
                 let overriddenHide = overriddenFdWithHide.getOrThrow()
                 if (currentHide != overriddenHide) {
                     let value = if (currentHide) { "true" } else { "false" }
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(
+                        diag,
                         BasicDiagKindRefactor.sema_hide_diff_param,
-                        NodeRange(decl),
+                        decl,
                         arguments: [value])
-                    builder.AddNote(NodeRange(overriddenFd), "should be same with")
+                    AddNote(builder, overriddenFd, "should be same with")
                     builder.Emit()
                 }
             }

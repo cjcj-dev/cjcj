@@ -20,10 +20,6 @@ private func ToBasicRange(begin: Position, end: Position): BasicRange {
     return BasicRange(ToBasicPosition(begin), ToBasicPosition(fixedEnd))
 }
 
-private func NodeRange(node: Node): BasicRange {
-    return ToBasicRange(node.begin, node.end)
-}
-
 private func TokenRange(pos: Position, tokenText: String): BasicRange {
     return ToBasicRange(pos, pos + tokenText.size)
 }
@@ -68,11 +64,12 @@ public func DiagInvalidMultipleAssignExpr(
     rightExpr: Expr,
     because: String
 ): Unit {
-    let builder = diag.DiagnoseRefactor(
+    let builder = DiagnoseRefactor(
+        diag,
         BasicDiagKindRefactor.sema_mismatched_types_multiple_assign,
-        NodeRange(rightExpr),
+        rightExpr,
         arguments: [TyString(rightExpr.GetTy())])
-    builder.AddHint(NodeRange(leftNode), arguments: [because])
+    AddHint(builder, leftNode, arguments: [because])
     builder.Emit()
 }
 
@@ -82,9 +79,15 @@ public func DiagInvalidBinaryExpr(diag: BasicDiagnosticEngine, be: BinaryExpr): 
             let leftTyText = TyString(left.GetTy())
             let rightTyText = TyString(right.GetTy())
             let opStr = TokenKindText(be.op)
-            let range = if (be.operatorPos.IsZero()) { NodeRange(be) } else { TokenRange(be.operatorPos, opStr) }
-            let builder = diag.DiagnoseRefactor(
+            let range = if (be.operatorPos.IsZero()) {
+                ToBasicRange(be.begin, be.end)
+            } else {
+                TokenRange(be.operatorPos, opStr)
+            }
+            let builder = DiagnoseRefactor(
+                diag,
                 BasicDiagKindRefactor.sema_invalid_binary_expr,
+                be,
                 range,
                 arguments: [opStr, leftTyText, rightTyText])
             if (let Some(leftTy) <- left.GetTy()) {
@@ -123,9 +126,10 @@ public func DiagInvalidUnaryExpr(diag: BasicDiagnosticEngine, ue: UnaryExpr): Un
     if (let Some(innerExpr) <- ue.expr) {
         let opStr = TokenKindText(ue.op)
         let exprTyText = TyString(innerExpr.GetTy())
-        let builder = diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(
+            diag,
             BasicDiagKindRefactor.sema_invalid_unary_expr,
-            NodeRange(ue),
+            ue,
             arguments: [opStr, exprTyText])
         if (let Some(exprTy) <- innerExpr.GetTy()) {
             if (exprTy.IsExtendable()) {
@@ -142,9 +146,10 @@ public func DiagInvalidUnaryExprWithTarget(diag: BasicDiagnosticEngine, ue: Unar
         return
     }
     if (let Some(innerExpr) <- ue.expr) {
-        let builder = diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(
+            diag,
             BasicDiagKindRefactor.sema_invalid_unary_expr_with_target,
-            NodeRange(ue),
+            ue,
             arguments: [TokenKindText(ue.op), TyString(innerExpr.GetTy()), target.String()])
         builder.Emit()
     }
@@ -153,7 +158,7 @@ public func DiagInvalidUnaryExprWithTarget(diag: BasicDiagnosticEngine, ue: Unar
 private func DeclIdentifierRange(decl: Decl): BasicRange {
     let identifier = decl.identifier.Val()
     if (identifier.isEmpty()) {
-        return NodeRange(decl)
+        return ToBasicRange(decl.begin, decl.end)
     }
     return TokenRange(decl.identifier.Begin(), identifier)
 }
@@ -170,15 +175,15 @@ public func DiagMismatchedTypesWithFoundTy(
     }
     var expectedStr = expected.String()
     var foundStr = found.String()
-    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mismatched_types, NodeRange(node))
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mismatched_types, node)
     if (expectedStr == foundStr) {
         if (let Some(expectedDecl) <- Ty.GetDeclPtrOfTy(Some(expected))) {
             expectedStr += "' in '" + expectedDecl.fullPackageName
-            builder.AddNote(DeclIdentifierRange(expectedDecl), "'" + expectedStr + "'")
+            AddNote(builder, expectedDecl, DeclIdentifierRange(expectedDecl), "'" + expectedStr + "'")
         }
         if (let Some(foundDecl) <- Ty.GetDeclPtrOfTy(Some(found))) {
             foundStr += "' in '" + foundDecl.fullPackageName
-            builder.AddNote(DeclIdentifierRange(foundDecl), "'" + foundStr + "'")
+            AddNote(builder, foundDecl, DeclIdentifierRange(foundDecl), "'" + foundStr + "'")
         }
     }
     builder.AddMainHintArguments([expectedStr, foundStr])
@@ -199,9 +204,10 @@ public func DiagInvalidSubscriptExpr(
     }
     let indexPrefix = if (indexTys.size > 1) { "types " } else { "type " }
     let indexStr = indexPrefix + "'" + TypeListString(indexTys) + "'"
-    let builder = diag.DiagnoseRefactor(
+    let builder = DiagnoseRefactor(
+        diag,
         BasicDiagKindRefactor.sema_invalid_subscript_expr,
-        NodeRange(se),
+        se,
         arguments: [baseTy.String(), indexStr])
     if (baseTy.IsExtendable()) {
         builder.AddNote("you may want to implement 'operator func [](" + IndexParameterString(indexTys) +
@@ -211,14 +217,16 @@ public func DiagInvalidSubscriptExpr(
 }
 
 public func DiagUnableToInferExpr(diag: BasicDiagnosticEngine, expr: Expr): Unit {
-    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unable_to_infer_expr, NodeRange(expr))
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_unable_to_infer_expr, expr)
     builder.Emit()
 }
 
 public func DiagUnableToInferReturnType(diag: BasicDiagnosticEngine, funcDecl: FuncDecl): Unit {
     if (Ty.IsTyCorrect(funcDecl.GetTy())) {
-        let builder = diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(
+            diag,
             BasicDiagKindRefactor.sema_unable_to_infer_return_type,
+            funcDecl,
             DeclIdentifierRange(funcDecl))
         builder.Emit()
     }
@@ -226,10 +234,12 @@ public func DiagUnableToInferReturnType(diag: BasicDiagnosticEngine, funcDecl: F
 
 public func DiagUnableToInferReturnType(diag: BasicDiagnosticEngine, funcDecl: FuncDecl, expr: Expr): Unit {
     if (Ty.IsTyCorrect(funcDecl.GetTy())) {
-        let builder = diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(
+            diag,
             BasicDiagKindRefactor.sema_unable_to_infer_return_type,
+            funcDecl,
             DeclIdentifierRange(funcDecl))
-        builder.AddNote(NodeRange(expr), "with recursive usage from")
+        AddNote(builder, expr, ToBasicRange(expr.begin, expr.end), "with recursive usage from")
         builder.Emit()
     }
 }
@@ -238,9 +248,8 @@ public func DiagUnableToInferReturnType(diag: BasicDiagnosticEngine, funcBody: F
     if (let Some(funcDecl) <- funcBody.funcDecl) {
         DiagUnableToInferReturnType(diag, funcDecl)
     } else {
-        let builder = diag.DiagnoseRefactor(
-            BasicDiagKindRefactor.sema_unable_to_infer_return_type,
-            NodeRange(funcBody))
+        let builder = DiagnoseRefactor(
+            diag, BasicDiagKindRefactor.sema_unable_to_infer_return_type, funcBody)
         builder.Emit()
     }
 }

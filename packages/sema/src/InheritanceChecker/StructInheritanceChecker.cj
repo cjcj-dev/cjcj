@@ -22,15 +22,11 @@ private func DeclIdentifierRange(decl: Decl): BasicRange {
     return DeclRange(decl)
 }
 
-private func NodeRange(node: Node): BasicRange {
-    return MakeRange(node.begin, node.end)
-}
-
 private func NodeConflictRange(node: Node): BasicRange {
     if (let Some(decl) <- (node as Decl)) {
         return DeclIdentifierRange(decl)
     }
-    return NodeRange(node)
+    return MakeRange(node.begin, node.end)
 }
 
 private func DeclKindText(decl: Decl): String {
@@ -1921,8 +1917,10 @@ public class StructInheritanceChecker {
     private func DiagnoseInheritedInsconsistType(member: MemberSignature, node: Node): Unit {
         if (let Some(memberDecl) <- member.decl) {
             let typeName = if (memberDecl.astKind == ASTKind.PROP_DECL) { "type" } else { "return type" }
-            let builder = diag.DiagnoseRefactor(
+            let builder = DiagnoseRefactor(
+                diag,
                 DiagKindRefactor.sema_inherit_member_type_inconsistent,
+                node,
                 NodeConflictRange(node),
                 arguments: [typeName, DeclKindText(memberDecl), memberDecl.identifier.Val()]
             )

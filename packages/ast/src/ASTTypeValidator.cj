@@ -94,7 +94,7 @@ public class ASTTypeValidator {
         let valid = validateNode(node)
         if (!valid) {
             markInvalid(node)
-            emitInvalidNodeDiagnostic()
+            emitInvalidNodeDiagnostic(node)
             return VisitAction.STOP_NOW
         }
         popValidRangeIfCurrent(node)
@@ -188,9 +188,10 @@ public class ASTTypeValidator {
         }
     }
 
-    private func emitInvalidNodeDiagnostic(): Unit {
+    private func emitInvalidNodeDiagnostic(node: Node): Unit {
         if (let Some(diag) <- diagEngine) {
-            let builder = diag.DiagnoseRefactor(DiagKindRefactor.sema_invalid_node_after_check, currentValidRange())
+            let builder = DiagnoseRefactor(
+                diag, DiagKindRefactor.sema_invalid_node_after_check, node, currentValidRange())
             builder.AddNote("please report this to Cangjie team and include the project")
             builder.Emit()
         }

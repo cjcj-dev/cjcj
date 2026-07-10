@@ -6,7 +6,6 @@ import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.Position as BasicPosition
-import cangjie_compiler::basic.Range as BasicRange
 
 private func BoolTy(): Ty {
     return TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
@@ -19,14 +18,6 @@ private func ToBasicPosition(pos: Position): BasicPosition {
 private func DiagOld(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind): Unit {
     // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
     let _ = diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind)
-}
-
-private func NodeRange(node: Node): BasicRange {
-    var fixedEnd = node.end
-    if (node.begin.fileID != node.end.fileID) {
-        fixedEnd = node.begin + 1
-    }
-    return BasicRange(ToBasicPosition(node.begin), ToBasicPosition(fixedEnd))
 }
 
 private func SugarKindIndex(kind: SugarKind): Int64 {
@@ -154,11 +145,11 @@ public func ChkNoVarPatternInOrPattern(ctx: ASTContext, patterns: ArrayList<Patt
         return true
     }
     if (let Some(diagValue) <- diag) {
-        let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_var_in_or_pattern,
-            NodeRange(varPatterns[0]))
+        let builder = DiagnoseRefactor(
+            diagValue, BasicDiagKindRefactor.sema_var_in_or_pattern, varPatterns[0])
         var idx: Int64 = 1
         while (idx < varPatterns.size) {
-            builder.AddHint(NodeRange(varPatterns[idx]))
+            AddHint(builder, varPatterns[idx])
             idx++
         }
         // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
@@ -186,10 +177,10 @@ public func ChkPatternsSameASTKind(ctx: ASTContext, patterns: ArrayList<Pattern>
     while (idx < patterns.size) {
         if (patterns[idx].astKind != frontKind) {
             if (let Some(diagValue) <- diag) {
-                let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_different_or_pattern,
-                    NodeRange(patterns[0]))
+                let builder = DiagnoseRefactor(
+                    diagValue, BasicDiagKindRefactor.sema_different_or_pattern, patterns[0])
                 builder.AddMainHintArguments([PatternKindForDiag(ctx, patterns[0])])
-                builder.AddHint(NodeRange(patterns[idx]), arguments: [PatternKindForDiag(ctx, patterns[idx])])
+                AddHint(builder, patterns[idx], arguments: [PatternKindForDiag(ctx, patterns[idx])])
                 // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
             }
             return false

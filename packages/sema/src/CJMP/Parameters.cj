@@ -21,10 +21,6 @@ private func ToBasicRange(begin: Position, end: Position): BasicRange {
     return BasicRange(ToBasicPosition(begin), ToBasicPosition(fixedEnd))
 }
 
-private func NodeRange(node: Node): BasicRange {
-    return ToBasicRange(node.begin, node.end)
-}
-
 private func IdentifierRange(identifier: SrcIdentifier): BasicRange {
     return ToBasicRange(identifier.GetRawPos(), identifier.GetRawEndPos())
 }
@@ -68,21 +64,21 @@ extend MPTypeCheckerImpl {
             let commonParam = commonParams.params[idx]
             let specificParam = specificParams.params[idx]
             if (commonParam.isNamedParam != specificParam.isNamedParam) {
-                let builder = diag.DiagnoseRefactor(
-                    BasicDiagKindRefactor.sema_specific_has_different_parameter, NodeRange(specificParam))
+                let builder = DiagnoseRefactor(
+                    diag, BasicDiagKindRefactor.sema_specific_has_different_parameter, specificParam)
                 builder.Emit()
                 return false
             }
             if (commonParam.isNamedParam && specificParam.isNamedParam &&
                 commonParam.identifier.GetRawText() != specificParam.identifier.GetRawText()) {
-                let builder = diag.DiagnoseRefactor(
-                    BasicDiagKindRefactor.sema_specific_has_different_parameter, NodeRange(specificParam))
+                let builder = DiagnoseRefactor(
+                    diag, BasicDiagKindRefactor.sema_specific_has_different_parameter, specificParam)
                 builder.Emit()
                 return false
             }
             if (commonParam.isMemberParam != specificParam.isMemberParam) {
-                let builder = diag.DiagnoseRefactor(
-                    BasicDiagKindRefactor.sema_specific_primary_unmatched_var_decl, NodeRange(specificParam))
+                let builder = DiagnoseRefactor(
+                    diag, BasicDiagKindRefactor.sema_specific_primary_unmatched_var_decl, specificParam)
                 builder.Emit()
                 return false
             }

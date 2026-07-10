@@ -294,11 +294,13 @@ public func DiagCannotOverride(diag: BasicDiagnosticEngine, child: Decl, parent:
     } else {
         MakeRange(parent.identifier.Begin(), name)
     }
-    let builder = diag.DiagnoseRefactor(
+    let builder = DiagnoseRefactor(
+        diag,
         BasicDiagKindRefactor.sema_cannot_override,
+        child,
         childRange,
         arguments: [kind, name]
     )
-    builder.AddNote(parentRange, "the parent " + kind + " is not modified by 'open'")
+    AddNote(builder, parent, parentRange, "the parent " + kind + " is not modified by 'open'")
     builder.Emit()
 }

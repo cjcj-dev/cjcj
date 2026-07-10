@@ -5,24 +5,6 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 import cangjie_compiler::sema.*
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.Position as BasicPosition
-import cangjie_compiler::basic.Range as BasicRange
-
-private func ToBasicPosition(pos: Position): BasicPosition {
-    return BasicPosition(pos.fileID, pos.line, pos.column)
-}
-
-private func ToBasicRange(begin: Position, end: Position): BasicRange {
-    var fixedEnd = end
-    if (begin.fileID != end.fileID) {
-        fixedEnd = begin + 1
-    }
-    return BasicRange(ToBasicPosition(begin), ToBasicPosition(fixedEnd))
-}
-
-private func NodeRange(node: Node): BasicRange {
-    return ToBasicRange(node.begin, node.end)
-}
 
 private func AnnotationKindName(kind: AstAnnotationKind): String {
     return match (kind) {
@@ -89,9 +71,10 @@ private func IsSpecialHandledAnnotation(annotation: Annotation): Bool {
 private func PostCheckDeprecatedAnnotation(specific: Decl, checker: MPTypeCheckerImpl): Bool {
     if (let Some(specificDeprecation) <- FindFirstAnnotation(specific, AstAnnotationKind.DEPRECATED)) {
         if (!specificDeprecation.TestAttr(Attribute.COMPILER_ADD)) {
-            let builder = checker.diag.DiagnoseRefactor(
+            let builder = DiagnoseRefactor(
+                checker.diag,
                 BasicDiagKindRefactor.sema_specific_has_deprecated_annotation,
-                NodeRange(specificDeprecation),
+                specificDeprecation,
                 arguments: ["Deprecated", DeclKindToString(specific), specific.identifier.Val()])
             builder.AddNote("specific declarations implicitly inherit deprecation from the common declarations")
             builder.Emit()
@@ -162,20 +145,22 @@ private func FormatAnnotationMismatchNote(kind: AstAnnotationKind): String {
 
 private func ReportAnnotationMismatch(annotation: Annotation, decl: Decl, checker: MPTypeCheckerImpl): Unit {
     if (decl.TestAttr(Attribute.SPECIFIC)) {
-        let builder = checker.diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(
+            checker.diag,
             BasicDiagKindRefactor.sema_specific_has_different_annotation,
-            NodeRange(decl),
+            decl,
             arguments: [DeclKindToString(decl)])
         builder.AddNote(FormatAnnotationMismatchNote(annotation))
         builder.Emit()
         return
     }
 
-    let builder = checker.diag.DiagnoseRefactor(
+    let builder = DiagnoseRefactor(
+        checker.diag,
         BasicDiagKindRefactor.sema_specific_has_different_annotation,
-        NodeRange(annotation),
+        annotation,
         arguments: [DeclKindToString(decl)])
-    builder.AddHint(NodeRange(decl), arguments: ["The corresponding common declaration"])
+    AddHint(builder, decl, arguments: ["The corresponding common declaration"])
     builder.AddNote("Either remove the specific annotation or add it to the common declaration")
     builder.Emit()
 }
@@ -196,9 +181,10 @@ private func PostCheckNonSerializedAnnotations(common: Decl, specific: Decl, che
                 if (let Some(specificAnnotation) <- FindFirstAnnotation(specific, kind)) {
                     ReportAnnotationMismatch(specificAnnotation, specific, checker)
                 } else {
-                    let builder = checker.diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(
+                        checker.diag,
                         BasicDiagKindRefactor.sema_specific_has_different_annotation,
-                        NodeRange(specific),
+                        specific,
                         arguments: [DeclKindToString(specific)])
                     builder.AddNote(FormatAnnotationMismatchNote(kind))
                     builder.Emit()
@@ -281,9 +267,10 @@ extend MPTypeCheckerImpl {
                 if (let Some(decl) <- (node as Decl)) {
                     for (annotation in decl.annotations) {
                         if (IsUnsupportedAnnotation(annotation.kind)) {
-                            let builder = diag.DiagnoseRefactor(
+                            let builder = DiagnoseRefactor(
+                                diag,
                                 BasicDiagKindRefactor.sema_common_specific_annotation_not_allowed,
-                                NodeRange(annotation),
+                                annotation,
                                 arguments: [AnnotationKindName(annotation.kind)])
                             builder.AddNote("This annotation kind is not supported on common/specific")
                             builder.Emit()

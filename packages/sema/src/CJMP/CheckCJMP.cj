@@ -5,25 +5,7 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.InheritanceChecker.*
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.Position as BasicPosition
-import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::utils.CJC_ASSERT_WITH_MSG
-
-private func ToBasicPosition(pos: Position): BasicPosition {
-    return BasicPosition(pos.fileID, pos.line, pos.column)
-}
-
-private func ToBasicRange(begin: Position, end: Position): BasicRange {
-    var fixedEnd = end
-    if (begin.fileID != end.fileID) {
-        fixedEnd = begin + 1
-    }
-    return BasicRange(ToBasicPosition(begin), ToBasicPosition(fixedEnd))
-}
-
-private func NodeRange(node: Node): BasicRange {
-    return ToBasicRange(node.begin, node.end)
-}
 
 private func IsCommon(node: Node): Bool {
     return node.TestAttr(Attribute.COMMON)
@@ -79,9 +61,10 @@ private func DeclInfo(decl: Decl): String {
 }
 
 private func DiagNotMatchedDecl(checker: MPTypeCheckerImpl, decl: Decl, left: String, right: String): Unit {
-    let builder = checker.diag.DiagnoseRefactor(
+    let builder = DiagnoseRefactor(
+        checker.diag,
         BasicDiagKindRefactor.sema_not_matched,
-        NodeRange(decl),
+        decl,
         arguments: [left, DeclInfo(decl), right])
     builder.Emit()
 }
@@ -95,9 +78,10 @@ private func DiagNotMatchedCommonDecl(checker: MPTypeCheckerImpl, decl: Decl): U
 }
 
 private func DiagNotMatchedSuperType(checker: MPTypeCheckerImpl, decl: Decl): Unit {
-    let builder = checker.diag.DiagnoseRefactor(
+    let builder = DiagnoseRefactor(
+        checker.diag,
         BasicDiagKindRefactor.sema_specific_has_different_super_type,
-        NodeRange(decl),
+        decl,
         arguments: [DeclKindToString(decl)])
     builder.Emit()
 }
@@ -119,9 +103,10 @@ private func HasGeneralSubClass(cls: ClassDecl): Bool {
 
 private func MatchNominativeDecl(checker: MPTypeCheckerImpl, commonDecl: Decl, specificDecl: Decl): Bool {
     if (commonDecl.astKind != specificDecl.astKind) {
-        let builder = checker.diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(
+            checker.diag,
             BasicDiagKindRefactor.specific_has_different_kind,
-            NodeRange(specificDecl),
+            specificDecl,
             arguments: [DeclKindToString(specificDecl), DeclKindToString(commonDecl)])
         builder.Emit()
         return false
@@ -131,9 +116,10 @@ private func MatchNominativeDecl(checker: MPTypeCheckerImpl, commonDecl: Decl, s
             if (commonEnum.hasEllipsis) {
                 specificDecl.EnableAttr(Attribute.COMMON_NON_EXHAUSTIVE)
             } else if (specificEnum.hasEllipsis) {
-                let builder = checker.diag.DiagnoseRefactor(
+                let builder = DiagnoseRefactor(
+                    checker.diag,
                     BasicDiagKindRefactor.common_non_exaustive_platfrom_exaustive_mismatch,
-                    NodeRange(specificDecl),
+                    specificDecl,
                     arguments: [DeclKindToString(commonDecl), DeclKindToString(specificDecl)])
                 builder.Emit()
             }
@@ -439,9 +425,10 @@ extend MPTypeCheckerImpl {
             }
         }
         if (!hasInit && HasGeneralSubClass(cls)) {
-            let builder = diag.DiagnoseRefactor(
+            let builder = DiagnoseRefactor(
+                diag,
                 BasicDiagKindRefactor.sema_common_open_class_no_init,
-                NodeRange(cls),
+                cls,
                 arguments: [cls.identifier.Val()])
             builder.Emit()
         }
@@ -513,9 +500,10 @@ extend MPTypeCheckerImpl {
 
     public func TrySetSpecificImpl(specificDecl: Decl, commonDecl: Decl, kind: String): Bool {
         if (let Some(_) <- commonDecl.specificImplementation) {
-            let builder = diag.DiagnoseRefactor(
+            let builder = DiagnoseRefactor(
+                diag,
                 BasicDiagKindRefactor.sema_multiple_common_implementations,
-                NodeRange(commonDecl),
+                commonDecl,
                 arguments: [kind])
             builder.Emit()
             return false
@@ -525,9 +513,10 @@ extend MPTypeCheckerImpl {
             if (let Some(outer) <- commonDecl.outerDecl) {
                 outerName = outer.identifier.Val()
             }
-            let builder = diag.DiagnoseRefactor(
+            let builder = DiagnoseRefactor(
+                diag,
                 BasicDiagKindRefactor.sema_specific_member_must_have_implementation,
-                NodeRange(specificDecl),
+                specificDecl,
                 arguments: [specificDecl.identifier.Val(), outerName])
             builder.Emit()
             return false
@@ -549,9 +538,10 @@ extend MPTypeCheckerImpl {
                 if (specific.TestAttr(Attribute.ABSTRACT) && common.TestAttr(Attribute.OPEN) &&
                     common.IsFuncOrProp()) {
                     let kindStr = if (common.astKind == ASTKind.FUNC_DECL) { "function" } else { "property" }
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(
+                        diag,
                         BasicDiagKindRefactor.sema_open_abstract_specific_can_not_replace_open_common,
-                        NodeRange(specific),
+                        specific,
                         arguments: [kindStr, kindStr])
                     builder.Emit()
                 }
@@ -571,16 +561,17 @@ extend MPTypeCheckerImpl {
                     BasicDiagKindRefactor.sema_property_have_same_declaration_in_inherit_immut
                 }
                 let target = if (common.TestAttr(attr)) { specific } else { common }
-                let builder = diag.DiagnoseRefactor(kind, NodeRange(target), arguments: [target.identifier.Val()])
+                let builder = DiagnoseRefactor(diag, kind, target, arguments: [target.identifier.Val()])
                 builder.Emit()
             } else if (common.astKind == ASTKind.CLASS_DECL &&
                 (attr == Attribute.SEALED || attr == Attribute.OPEN) &&
                 specific.TestAttr(Attribute.SEALED) && common.TestAttr(Attribute.ABSTRACT)) {
                 continue
             } else {
-                let builder = diag.DiagnoseRefactor(
+                let builder = DiagnoseRefactor(
+                    diag,
                     BasicDiagKindRefactor.sema_specific_has_different_modifier,
-                    NodeRange(specific),
+                    specific,
                     arguments: [DeclKindToString(specific)])
                 builder.Emit()
             }
@@ -672,9 +663,10 @@ extend MPTypeCheckerImpl {
         }
         if ((IsConstructor(specificFunc) || IsConstructor(commonFunc)) &&
             !IsPrimaryConstructor(specificFunc) && IsPrimaryConstructor(commonFunc)) {
-            let builder = diag.DiagnoseRefactor(
+            let builder = DiagnoseRefactor(
+                diag,
                 BasicDiagKindRefactor.sema_specific_init_common_primary_constructor,
-                NodeRange(commonFunc))
+                commonFunc)
             builder.Emit()
             return false
         }
@@ -726,9 +718,10 @@ extend MPTypeCheckerImpl {
         if (let Some(specificTy) <- specificProp.GetTy()) {
             if (let Some(commonTy) <- commonProp.GetTy()) {
                 if (!typeManager.IsTyEqual(specificTy, commonTy)) {
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(
+                        diag,
                         BasicDiagKindRefactor.sema_specific_has_different_type,
-                        NodeRange(specificProp),
+                        specificProp,
                         arguments: ["property"])
                     builder.Emit()
                 }
@@ -771,9 +764,10 @@ extend MPTypeCheckerImpl {
                 if (let Some(value) <- commonTy) {
                     if (!typeManager.IsTyEqual(value, specificTy)) {
                         let specificKind = if (specificVar.isVar) { "var" } else { "let" }
-                        let builder = diag.DiagnoseRefactor(
+                        let builder = DiagnoseRefactor(
+                            diag,
                             BasicDiagKindRefactor.sema_specific_has_different_type,
-                            NodeRange(specificVar),
+                            specificVar,
                             arguments: [specificKind])
                         builder.Emit()
                     }
@@ -783,9 +777,10 @@ extend MPTypeCheckerImpl {
         if (specificVar.isVar != commonVar.isVar) {
             let specificKind = if (specificVar.isVar) { "var" } else { "let" }
             let commonKind = if (commonVar.isVar) { "var" } else { "let" }
-            let builder = diag.DiagnoseRefactor(
+            let builder = DiagnoseRefactor(
+                diag,
                 BasicDiagKindRefactor.sema_specific_var_not_match_let,
-                NodeRange(specificVar),
+                specificVar,
                 arguments: [specificKind, commonKind])
             builder.Emit()
         }
@@ -885,16 +880,18 @@ extend MPTypeCheckerImpl {
                         let rawName = memberDecl.rawMangleName
                         if (HasRawName(bucket.rawNames, rawName)) {
                             let kind = if (memberDecl.IsFunc()) { "function" } else { "property" }
-                            let builder = diag.DiagnoseRefactor(
+                            let builder = DiagnoseRefactor(
+                                diag,
                                 BasicDiagKindRefactor.sema_common_direct_extension_has_duplicate_private_members,
-                                NodeRange(memberDecl),
+                                memberDecl,
                                 arguments: [extendedType.ToString(), kind, memberDecl.identifier.GetRawText()])
                             builder.Emit()
                         } else if (memberDecl.TestAttr(Attribute.COMMON)) {
                             let kind = if (memberDecl.IsFunc()) { "function" } else { "property" }
-                            let builder = diag.DiagnoseRefactor(
+                            let builder = DiagnoseRefactor(
+                                diag,
                                 BasicDiagKindRefactor.sema_common_direct_extension_has_common_private_members,
-                                NodeRange(memberDecl),
+                                memberDecl,
                                 arguments: [kind, memberDecl.identifier.GetRawText()])
                             builder.Emit()
                         } else {
@@ -917,9 +914,10 @@ extend MPTypeCheckerImpl {
                     !memberDecl.TestAttr(Attribute.FROM_COMMON_PART) &&
                     (memberDecl.astKind == ASTKind.FUNC_DECL || memberDecl.astKind == ASTKind.PROP_DECL)) {
                     let memberKind = if (memberDecl.astKind == ASTKind.FUNC_DECL) { "function" } else { "property" }
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(
+                        diag,
                         BasicDiagKindRefactor.sema_cjmp_non_specific_abstract_member_in_specific_class,
-                        NodeRange(memberDecl),
+                        memberDecl,
                         arguments: [specificDecl.identifier.Val(), memberKind])
                     builder.Emit()
                 }
@@ -1082,9 +1080,10 @@ extend MPTypeCheckerImpl {
         }
         commonFunc.specificImplementation = None
         if (!MatchCJMPFunction(specificFunc, commonFunc)) {
-            let builder = diag.DiagnoseRefactor(
+            let builder = DiagnoseRefactor(
+                diag,
                 BasicDiagKindRefactor.sema_return_type_incompatible,
-                NodeRange(specificFunc),
+                specificFunc,
                 arguments: [specificFunc.identifier.Val()])
             builder.Emit()
         }

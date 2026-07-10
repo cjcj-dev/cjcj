@@ -11,7 +11,6 @@ import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
 import cangjie_compiler::basic.Position as BasicPosition
-import cangjie_compiler::basic.Range as BasicRange
 import cangjie_compiler::modules.SemaImportManager
 
 public type CallArgChecker = (Ty, FuncArg) -> Bool
@@ -92,14 +91,6 @@ private func ToBasicPosition(pos: Position): BasicPosition {
     return BasicPosition(pos.fileID, pos.line, pos.column)
 }
 
-private func NodeRange(node: Node): BasicRange {
-    var fixedEnd = node.end
-    if (node.begin.fileID != node.end.fileID) {
-        fixedEnd = node.begin + 1
-    }
-    return BasicRange(ToBasicPosition(node.begin), ToBasicPosition(fixedEnd))
-}
-
 private func DiagOld(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind,
     args!: Array<BasicDiagArgument> = Array<BasicDiagArgument>()): Unit {
     // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
@@ -121,21 +112,23 @@ private func DiagOldStrings(diag: BasicDiagnosticEngine, node: Node, kind: Basic
 private func DiagRef(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKindRefactor,
     args!: Array<String> = Array<String>()): Unit {
     // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-    let _ = diag.DiagnoseRefactor(kind, NodeRange(node), arguments: args)
+    let _ = DiagnoseRefactor(diag, kind, node, arguments: args)
 }
 
 private func DiagRefEmit(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKindRefactor,
     args!: Array<String> = Array<String>()): Unit {
     // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-    let _ = diag.DiagnoseRefactor(kind, NodeRange(node), arguments: args)
+    let _ = DiagnoseRefactor(diag, kind, node, arguments: args)
 }
 
 private func DiagUnableToInferReturnType(diag: BasicDiagnosticEngine, funcDecl: FuncDecl, expr: Expr): Unit {
     if (Ty.IsTyCorrect(funcDecl.GetTy())) {
-        let builder = diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(
+            diag,
             BasicDiagKindRefactor.sema_unable_to_infer_return_type,
+            funcDecl,
             MakeRangeForDeclIdentifier(funcDecl))
-        builder.AddNote(NodeRange(expr), "with recursive usage from")
+        AddNote(builder, expr, MakeRange(expr.begin, expr.end), "with recursive usage from")
         builder.Emit()
     }
 }
