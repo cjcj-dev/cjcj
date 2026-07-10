@@ -148,9 +148,9 @@ private func TypeCheckExtendDiagDuplicateInterface(
     if (interfaceType.TestAttr(Attribute.IMPORTED)) {
         return
     }
-    let builder = diag.DiagnoseRefactor(
+    let builder = DiagnoseRefactor(diag,
         BasicDiagKindRefactor.sema_extend_duplicate_interface,
-        TypeCheckExtendRange(interfaceType),
+        interfaceType,
         arguments: [interfaceTy.String(), extendedTy.String()])
     builder.Emit()
 }
@@ -163,9 +163,9 @@ private func TypeCheckExtendDiagNonExtendableCoreInterface(
     if (let Some(interfaceDecl) <- Ty.GetDeclPtrOfTy(Some(interfaceTy))) {
         let name = interfaceDecl.identifier.Val()
         if (interfaceDecl.fullPackageName == "std.core" && (name == "Any" || name == "CType")) {
-            let builder = diag.DiagnoseRefactor(
+            let builder = DiagnoseRefactor(diag,
                 BasicDiagKindRefactor.sema_interface_is_not_extendable,
-                TypeCheckExtendRange(interfaceType),
+                interfaceType,
                 arguments: [name])
             builder.Emit()
         }
@@ -599,9 +599,9 @@ private func TypeCheckExtendCheckSpecializationExtendDupInstantiation(
             if (!SameTy(instantTy, compareTy)) {
                 continue
             }
-            let builder = diag.DiagnoseRefactor(
+            let builder = DiagnoseRefactor(diag,
                 BasicDiagKindRefactor.sema_extend_duplicate_interface,
-                TypeCheckExtendRange(compareSuperInterface),
+                compareSuperInterface,
                 arguments: [compareTy.String(), extendedDeclTy.String()])
             builder.AddNote(MakeRange(beComparedDecl.begin, beComparedDecl.end),
                 "it may be an instantiated version of the following declaration")
@@ -931,9 +931,9 @@ public func TypeCheckExtendCheckImmutExtendInheritMutSuper(
     let interfaceDecl = (target as InterfaceDecl).getOrThrow()
     for (member in interfaceDecl.GetMemberDecls()) {
         if (member.astKind == ASTKind.PROP_DECL && member.TestAttr(Attribute.MUT)) {
-            let builder = diag.DiagnoseRefactor(
+            let builder = DiagnoseRefactor(diag,
                 BasicDiagKindRefactor.sema_interface_is_not_extendable,
-                TypeCheckExtendRange(extendDecl),
+                extendDecl,
                 arguments: [interfaceDecl.identifier.Val()])
             builder.AddNote("interface '" + interfaceDecl.identifier.Val() +
                 "' contains mutable member '" + member.identifier.Val() + "'")
