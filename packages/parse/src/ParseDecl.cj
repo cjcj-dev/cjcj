@@ -407,10 +407,14 @@ extend ParserImpl {
             }
             return decl
         }
-        let token = Peek()
+        let ret = InvalidDecl(lookahead.Begin())
         DiagExpectedDeclaration(scopeKind)
-        ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
-        return InvalidDecl(token.Begin())
+
+        ret.EnableAttr(Attribute.IS_BROKEN)
+        ImplementConsumeStrategy(scopeKind)
+        SetBeginToAnnotationsBegin(ret, annos)
+        ret.end = lastToken.End()
+        return ret
     }
 
     private func CheckOverflowAnnotation(annos: ArrayList<Annotation>, scopeKind: ScopeKind): Unit {
@@ -1562,12 +1566,10 @@ extend ParserImpl {
         let leftCurl = lastToken.Begin()
         SetDeclBodyLeftCurl(ret, leftCurl)
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
-            if (SeeingDeclInScope(scopeKind) || Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
-                let member = ParseDecl(scopeKind)
+            let member = ParseDecl(scopeKind)
+            if (!member.IsInvalid()) {
                 member.outerDecl = ret
                 AddBodyMember(ret, member)
-            } else {
-                Next()
             }
             SkipNLOrSemi()
         }
