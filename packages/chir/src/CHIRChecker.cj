@@ -1499,6 +1499,13 @@ public class CHIRChecker {
         if (let Some(resultTy) <- expr.GetResultType()) {
             if (let Some(varrayTy) <- (resultTy as VArrayType)) {
                 let elementTy = varrayTy.GetElementType()
+                if (!CHIRCheckerIsCTypeInVArray(elementTy)) {
+                    result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
+                        "${CHIRCheckerExpressionString(expr)}`, its element type is ${elementTy.ToString()}, " +
+                        "but a C type is expected.\n    C type includes: numeric data types, Rune, Bool, Unit, " +
+                        "Nothing, CPointer, CString, CFunc and Struct.")
+                    return
+                }
                 for (operand in expr.GetOperands()) {
                     if (let Some(operandTy) <- operand.GetType()) {
                         if (!CHIRCheckerTypeIsExpected(operandTy, elementTy)) {
@@ -2853,6 +2860,10 @@ private func CHIRCheckerIsCType(ty: Type): Bool {
     return CHIRCheckerIsOptionalCType(ty, false)
 }
 
+private func CHIRCheckerIsCTypeInVArray(ty: Type): Bool {
+    return CHIRCheckerIsOptionalCType(ty, true)
+}
+
 private func CHIRCheckerIsOptionalCType(ty: Type, includeNormalStruct: Bool): Bool {
     if (let Some(varrayTy) <- (ty as VArrayType)) {
         return CHIRCheckerIsOptionalCType(varrayTy.GetElementType(), includeNormalStruct)
@@ -2867,6 +2878,9 @@ private func CHIRCheckerIsOptionalCType(ty: Type, includeNormalStruct: Bool): Bo
     }
     if (let Some(refTy) <- (ty as RefType)) {
         return CHIRCheckerIsOptionalCType(refTy.GetBaseType(), includeNormalStruct)
+    }
+    if (let Some(pointerTy) <- (ty as CPointerType)) {
+        return CHIRCheckerIsOptionalCType(pointerTy.GetElementType(), includeNormalStruct)
     }
     if (let Some(funcTy) <- (ty as FuncType)) {
         if (funcTy.IsCFunc()) {
