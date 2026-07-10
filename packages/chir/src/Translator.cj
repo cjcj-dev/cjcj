@@ -11,7 +11,6 @@ import cangjie_compiler::ast.IsValidCFuncConstructorCall
 import cangjie_compiler::ast.GetVarsInitializationOrderWithPositions as AstGetVarsInitializationOrderWithPositions
 import cangjie_compiler::ast.BuiltInDecl
 import cangjie_compiler::ast.BuiltInType
-import cangjie_compiler::ast.ASTKindIndex
 import cangjie_compiler::ast.ASTKindName
 import cangjie_compiler::ast.ArrayExpr as AstArrayExpr
 import cangjie_compiler::ast.ArrayLit as AstArrayLit
@@ -294,146 +293,6 @@ private func FaithfulTranslatorGenerateLambdaFuncMangleName(baseFunc: Function, 
         FAITHFUL_TRANSLATOR_MANGLE_WILDCARD_PREFIX
 }
 
-private func FaithfulLocalAstDeclStructuralKey(decl: AstDecl): String {
-    return "${ASTKindIndex(decl.astKind)}:" + decl.fullPackageName + ":" + decl.identifier.Val() + ":" +
-        decl.begin.hashCode().toString() + ":" + decl.end.hashCode().toString()
-}
-
-@OverflowWrapping
-private func FaithfulLocalAstDeclHashCombine(seed: Int64, value: Int64): Int64 {
-    return seed * 1315423911 + value + 0x9e3779b9
-}
-
-private func FaithfulLocalAstDeclHash(decl: AstDecl): Int64 {
-    if (let Some(defaultKey) <- FaithfulLocalDefaultParamFunctionIdentity(decl)) {
-        return defaultKey.hashCode()
-    }
-    if (decl.TestAttr(AstAttribute.IMPORTED)) {
-        if (!decl.rawMangleName.isEmpty()) {
-            return FaithfulLocalAstDeclHashCombine(17, decl.rawMangleName.hashCode())
-        }
-        if (!decl.mangledName.isEmpty()) {
-            return FaithfulLocalAstDeclHashCombine(31, decl.mangledName.hashCode())
-        }
-    }
-    return decl.objectId
-}
-
-private func FaithfulLocalDefaultParamFunctionIdentity(decl: AstDecl): Option<String> {
-    if (!decl.TestAttr(AstAttribute.HAS_INITIAL)) {
-        return None
-    }
-    if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
-        if (let Some(owner) <- funcDecl.ownerFunc) {
-            return Some(FaithfulLocalAstDeclStructuralKey(owner) + ":default-param:" + decl.identifier.Val())
-        }
-    }
-    return None
-}
-
-private func SameFaithfulLocalAstDecl(left: AstDecl, right: AstDecl): Bool {
-    if (let Some(leftKey) <- FaithfulLocalDefaultParamFunctionIdentity(left)) {
-        if (let Some(rightKey) <- FaithfulLocalDefaultParamFunctionIdentity(right)) {
-            return leftKey == rightKey
-        }
-        return false
-    }
-    if (FaithfulLocalDefaultParamFunctionIdentity(right).isSome()) {
-        return false
-    }
-    if (left.TestAttr(AstAttribute.IMPORTED) && right.TestAttr(AstAttribute.IMPORTED)) {
-        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
-            return left.rawMangleName == right.rawMangleName
-        }
-        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
-            return left.mangledName == right.mangledName
-        }
-    }
-    // Non-imported local decls are matched by stable object identity, faithfully mirroring C++'s
-    // pointer-keyed AST2CHIRNodeMap (AST2CHIRNodeMap.h:66). A structural key wrongly merges distinct
-    // COMPILER_ADD desugar temporaries sharing an identifier and a (0,0,0) position.
-    return left.objectId == right.objectId
-}
-
-private class FaithfulLocalValueEntry {
-    public let decl: AstDecl
-    public var value: Value
-
-    public init(decl: AstDecl, value: Value) {
-        this.decl = decl
-        this.value = value
-    }
-}
-
-private class FaithfulLocalValueMap {
-    private let values: ArrayList<FaithfulLocalValueEntry> = ArrayList<FaithfulLocalValueEntry>()
-    private let buckets: HashMap<Int64, ArrayList<FaithfulLocalValueEntry>> =
-        HashMap<Int64, ArrayList<FaithfulLocalValueEntry>>()
-
-    public init() {}
-
-    public func Set(decl: AstDecl, value: Value): Unit {
-        let entry = FaithfulLocalValueEntry(decl, value)
-        values.add(entry)
-        let key = FaithfulLocalAstDeclHash(decl)
-        if (let Some(bucket) <- buckets.get(key)) {
-            bucket.add(entry)
-            return
-        }
-        let bucket = ArrayList<FaithfulLocalValueEntry>()
-        bucket.add(entry)
-        buckets[key] = bucket
-    }
-
-    public func TryGet(decl: AstDecl): Option<Value> {
-        let key = FaithfulLocalAstDeclHash(decl)
-        if (let Some(bucket) <- buckets.get(key)) {
-            var idx = bucket.size - 1
-            while (idx >= 0) {
-                let entry = bucket[idx]
-                if (SameFaithfulLocalAstDecl(entry.decl, decl)) {
-                    return entry.value
-                }
-                idx--
-            }
-        }
-        return None
-    }
-
-    public func Get(decl: AstDecl): Value {
-        return TryGet(decl) ??
-            throw IllegalStateException("faithful AST2CHIR localCache miss: ${decl.identifier.Val()}")
-    }
-
-    public func Mark(): Int64 {
-        return values.size
-    }
-
-    public func Restore(mark: Int64): Unit {
-        while (values.size > mark) {
-            let entry = values[values.size - 1]
-            RemoveBucketEntry(entry)
-            values.remove(at: values.size - 1)
-        }
-    }
-
-    private func RemoveBucketEntry(entry: FaithfulLocalValueEntry): Unit {
-        let key = FaithfulLocalAstDeclHash(entry.decl)
-        if (let Some(bucket) <- buckets.get(key)) {
-            var idx = bucket.size - 1
-            while (idx >= 0) {
-                let candidate = bucket[idx]
-                if (SameFaithfulLocalAstDecl(candidate.decl, entry.decl) &&
-                    candidate.value.nodeId == entry.value.nodeId) {
-                    bucket.remove(at: idx)
-                    return
-                }
-                idx--
-            }
-        }
-    }
-}
-
 public class Translator {
     private let builder: CHIRBuilder
     private let chirTy: CHIRType
@@ -442,7 +301,7 @@ public class Translator {
     private let localConstFuncs: ElementList
     private let deserializedVals: HashMap<String, Value>
     private var astNodeSymbolTable: AST2CHIRNodeMap<Value> = AST2CHIRNodeMap<Value>()
-    private let localValSymbolTable: FaithfulLocalValueMap = FaithfulLocalValueMap()
+    private var localValSymbolTable: AST2CHIRNodeMap<Value> = AST2CHIRNodeMap<Value>()
     private let exprValueTable: HashMap<Int64, Value> = HashMap<Int64, Value>()
     private var currentBlock: Option<Block> = None
     private var currentFunc: Option<Function> = None
@@ -3346,6 +3205,11 @@ public class Translator {
             }
         }
         TranslateForInBodyBlockGroup(expr)
+        if (let Some(pattern) <- expr.pattern) {
+            if (let Some(varPattern) <- (pattern as AstVarPattern)) {
+                localValSymbolTable.Erase(varPattern.varDecl.getOrThrow())
+            }
+        }
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         return iterValue
     }
@@ -4220,7 +4084,6 @@ public class Translator {
         }
         var idx: Int64 = 0
         while (idx < expr.catchPatterns.size) {
-            let localScopeMark = localValSymbolTable.Mark()
             let (falseBlock, trueBlock) = TranslateExceptionPattern(expr.catchPatterns[idx], beginCatch)
             currentBlock = trueBlock
             BindExceptionPatternValues(expr.catchPatterns[idx], beginCatch)
@@ -4233,7 +4096,6 @@ public class Translator {
             if (CurrentBlock().GetTerminator().isNone()) {
                 builder.CreateGoTo(endBlock, CurrentBlock())
             }
-            localValSymbolTable.Restore(localScopeMark)
             currentBlock = falseBlock
             idx++
         }
@@ -4332,14 +4194,15 @@ public class Translator {
         beginCatchArgs.add(exception)
         let beginCatch = RequireResult(builder.CreateIntrinsic(exceptionTy,
             IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), CurrentBlock()))
-        let localScopeMark = localValSymbolTable.Mark()
+        let savedLocalValSymbolTable = localValSymbolTable
+        localValSymbolTable = AST2CHIRNodeMap<Value>(savedLocalValSymbolTable)
         let savedAstNodeSymbolTable = astNodeSymbolTable
         astNodeSymbolTable = AST2CHIRNodeMap<Value>(savedAstNodeSymbolTable)
         let _ = Translator.TranslateASTNode(finallyBlock, this)
         if (exceptionBlock.GetTerminator().isNone()) {
             builder.CreateGoTo(GetBlockByAST(finallyBlock), exceptionBlock)
         }
-        localValSymbolTable.Restore(localScopeMark)
+        localValSymbolTable = savedLocalValSymbolTable
         astNodeSymbolTable = savedAstNodeSymbolTable
         let rethrowEdges = activeContext.CloneControlFlowBlocks()
         activeContext.RestoreControlFlowBlocks(savedControlFlowBlocks)
@@ -4380,14 +4243,15 @@ public class Translator {
         let finallyEntryBlock = builder.CreateBlock(group)
         builder.CreateGoTo(finallyEntryBlock, edge.prevBlock)
         currentBlock = finallyEntryBlock
-        let localScopeMark = localValSymbolTable.Mark()
+        let savedLocalValSymbolTable = localValSymbolTable
+        localValSymbolTable = AST2CHIRNodeMap<Value>(savedLocalValSymbolTable)
         let savedAstNodeSymbolTable = astNodeSymbolTable
         astNodeSymbolTable = AST2CHIRNodeMap<Value>(savedAstNodeSymbolTable)
         let _ = Translator.TranslateASTNode(finallyBlock, this)
         if (finallyEntryBlock.GetTerminator().isNone()) {
             builder.CreateGoTo(GetBlockByAST(finallyBlock), finallyEntryBlock)
         }
-        localValSymbolTable.Restore(localScopeMark)
+        localValSymbolTable = savedLocalValSymbolTable
         astNodeSymbolTable = savedAstNodeSymbolTable
         if (CurrentBlock().GetTerminator().isSome()) {
             return
@@ -4559,7 +4423,6 @@ public class Translator {
         let sourceExpr = GetSourceExprByMatchExpr(matchExpr)
         var caseIdx: Int64 = 0
         while (caseIdx < caseNum) {
-            let localScopeMark = localValSymbolTable.Mark()
             if (needScope) {
                 scopeInfo[scopeInfo.size - 1] = scopeInfo[scopeInfo.size - 1] + 1
             }
@@ -4585,7 +4448,6 @@ public class Translator {
             let currentBody = TranslateMatchCaseBody(RequireBlock(current.exprOrDecls, "match case body"), retVal,
                 endBlock)
             builder.CreateGoTo(currentBody, trueBlock)
-            localValSymbolTable.Restore(localScopeMark)
             if (caseIdx == caseNum - 1) {
                 builder.CreateGoTo(endBlock, falseBlock)
                 falseBlock.EnableAttr(Attribute.UNREACHABLE)
@@ -5007,11 +4869,9 @@ public class Translator {
         while (idx < caseSize) {
             scopeInfo[scopeInfo.size - 1] = scopeInfo[scopeInfo.size - 1] + 1
             let current = matchExpr.matchCaseOthers[idx]
-            let localScopeMark = localValSymbolTable.Mark()
             let baseBlock = CurrentBlock()
             let currentBody = TranslateMatchCaseBody(RequireBlock(current.exprOrDecls, "condition match body"),
                 retVal, endBlock)
-            localValSymbolTable.Restore(localScopeMark)
             if (!isStillReachable) {
                 idx++
                 continue
