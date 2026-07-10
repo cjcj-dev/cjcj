@@ -2431,6 +2431,60 @@ public class IRBuilder2 <: Resource {
         }
     }
 
+    public func CreateRefStore(cgValue: CGValue, basePtr: LLVMValueRef, place: LLVMValueRef,
+        isBaseObjStruct: Bool): Unit {
+        let currentFunction = GetInsertFunction()
+        CJC_ASSERT(!currentFunction.isNull())
+        let inStructMut = HasAttributeAtIndex(currentFunction, UInt32.Max, STRUCT_MUT_FUNC_ATTR)
+        let valueCGType = cgValue.GetCGType().getOrThrow()
+        let value = cgValue.GetRawValue()
+        var base = basePtr
+        let isDstAddrspace1 = unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(base)) } == 1u32
+        if (isBaseObjStruct) {
+            if (IsGlobalVariableBasePtr(place) && valueCGType.IsPointerType() &&
+                IsLLVMTypeContainsRef(valueCGType.GetPointerElementType().getOrThrow().GetLLVMType())) {
+                CreateWriteBarrierForGlobalVariable(cgValue, CGValue(place, valueCGType))
+                return
+            }
+            if (!inStructMut || unsafe { LLVMIsAArgument(base) }.isNull()) {
+                if (valueCGType.IsPointerType()) {
+                    CreateStore(cgValue, CGValue(place, valueCGType))
+                } else {
+                    CreateStore(value, place)
+                }
+                return
+            } else {
+                let baseName = LLVMCStringToString(unsafe { LLVMGetValueName(base) }) ?? ""
+                if (baseName == "this") {
+                    base = unsafe { LLVMGetPreviousParam(base) }
+                }
+            }
+        }
+        if (valueCGType.IsStructPtrType()) {
+            let structType = valueCGType.GetPointerElementType().getOrThrow().GetLLVMType()
+            if (isDstAddrspace1 && IsLLVMTypeContainsRef(structType)) {
+                let size = unsafe {
+                    LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
+                }
+                CallGCWriteAgg(structType, ArrayList<LLVMValueRef>([base, place, value, size]))
+            } else {
+                let size = unsafe {
+                    LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
+                }
+                let align = cgMod.GetABITypeAlignment(structType)
+                CreateMemCpy(place, align, value, align, size)
+            }
+        } else if (isDstAddrspace1 && valueCGType.IsVArrayPtrType()) {
+            let valueType = valueCGType.GetPointerElementType().getOrThrow()
+            let size = GetInt64(Int64(cgMod.GetTypeSize(valueType.GetLLVMType())))
+            CallGCWriteAgg(valueType.GetLayoutType(), ArrayList<LLVMValueRef>([base, place, value, size]))
+        } else if (isDstAddrspace1 && valueCGType.IsRefType()) {
+            CallGCWrite(value, base, place)
+        } else {
+            CreateStore(value, place)
+        }
+    }
+
     public func CreateVArrayStore(value: CGValue, place: LLVMValueRef): LLVMValueRef {
         let valueCGType = value.GetCGType().getOrThrow()
         let elementTy = valueCGType.GetOriginal()
@@ -2832,6 +2886,49 @@ public class IRBuilder2 <: Resource {
         args.add(place)
         CheckNoWriteBarrierRec()
         return CreateIntrinsicCallNoInvoke(GCWRITE_STATIC_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+    }
+
+    public func CallGCWriteStaticAgg(structType: LLVMTypeRef,
+        args: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(args.size == 3)
+        var call = LLVMNullValue()
+        if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+            call = unsafe {
+                LLVMSelfhostCreateGCWriteStaticAgg(builder.raw, moduleHandle.raw, structType, args[0], args[1],
+                    args[2], GetSizetLLVMType())
+            }
+        }
+        if (call.isNull()) {
+            return call
+        }
+        let aggTypeName = if (!structType.isNull() &&
+            unsafe { LLVMGetTypeKind(structType) } == LLVM_STRUCT_TYPE_KIND) {
+            LLVMCStringToString(unsafe { LLVMGetStructName(structType) }) ?? ""
+        } else {
+            ""
+        }
+        let metadata = LLVMCreateMDTupleFromString(GetLLVMContext(), aggTypeName)
+        LLVMSetInstructionMetadata(GetLLVMContext(), call, "AggType", metadata)
+        return call
+    }
+
+    public func CreateWriteBarrierForGlobalVariable(value: CGValue, globalVar: CGValue): LLVMValueRef {
+        let valueType = value.GetCGType().getOrThrow()
+        var inst = LLVMNullValue()
+        if (valueType.IsStructPtrType()) {
+            let structType = valueType.GetPointerElementType().getOrThrow().GetLLVMType()
+            let size = unsafe {
+                LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
+            }
+            inst = CallGCWriteStaticAgg(structType,
+                ArrayList<LLVMValueRef>([globalVar.GetRawValue(), value.GetRawValue(), size]))
+        } else {
+            inst = CallGCWriteStaticRef(value.GetRawValue(), globalVar.GetRawValue())
+        }
+        if (!unsafe { LLVMIsAConstantPointerNull(value.GetRawValue()) }.isNull() && !inst.isNull()) {
+            LLVMEraseInstructionMetadata(GetLLVMContext(), inst, "dbg")
+        }
+        return inst
     }
 
     public func CallGCWriteGeneric(baseObject: LLVMValueRef, dest: LLVMValueRef, source: LLVMValueRef,

@@ -250,6 +250,7 @@ foreign {
     func LLVMSelfhostGlobalVariableAddEnumAttribute(gv: LLVMValueRef, kindId: UInt32): Unit
     func LLVMCountParams(fn: LLVMValueRef): UInt32
     func LLVMGetParam(fn: LLVMValueRef, index: UInt32): LLVMValueRef
+    func LLVMGetPreviousParam(arg: LLVMValueRef): LLVMValueRef
     func LLVMHasPersonalityFn(fn: LLVMValueRef): Int32
     func LLVMGetPersonalityFn(fn: LLVMValueRef): LLVMValueRef
     func LLVMSetPersonalityFn(fn: LLVMValueRef, personalityFn: LLVMValueRef): Unit
@@ -372,6 +373,7 @@ foreign {
     func LLVMIsAFunction(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAArgument(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAInstruction(value: LLVMValueRef): LLVMValueRef
+    func LLVMIsAConstantPointerNull(value: LLVMValueRef): LLVMValueRef
     func LLVMGetIntTypeWidth(integerTy: LLVMTypeRef): UInt32
 
     func LLVMCreateBuilderInContext(context: LLVMContextRef): LLVMBuilderRef

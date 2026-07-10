@@ -217,7 +217,11 @@ public open class CGType {
         CJC_ASSERT(!elementType.isNull())
         return unsafe { LLVMGetTypeKind(elementType) } == LLVM_STRUCT_TYPE_KIND
     }
-    public func IsRefType(): Bool { return cgTypeKind == CGTypeKind.CG_REF }
+    public func IsRefType(): Bool {
+        let rawTy = GetLLVMType()
+        return !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == LLVM_POINTER_TYPE_KIND &&
+            unsafe { LLVMGetPointerAddressSpace(rawTy) } == 1u32
+    }
     public func IsReference(): Bool {
         if (chirType.IsRef()) {
             let baseType = chirType.GetTypeArgs()[0]
