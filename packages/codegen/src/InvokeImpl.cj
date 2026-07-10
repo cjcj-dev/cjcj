@@ -5,7 +5,6 @@ import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.ClassDef
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.GetMethodIdxInAutoEnvObject
 import cangjie_compiler::chir.GetTypeQualifiedName
 import cangjie_compiler::chir.Invoke
@@ -13,77 +12,66 @@ import cangjie_compiler::chir.InvokeStatic
 import cangjie_compiler::chir.InvokeStaticWithException
 import cangjie_compiler::chir.InvokeWithException
 import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.Value
 import cangjie_compiler::option.{OptimizationLevel, enumIndex}
 import cangjie_compiler::utils.CJC_ASSERT
 
 public func GenerateInvokeExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(invokeExpr) <- (chirExpr as Invoke)) {
-        return GenerateInvoke(irBuilder, invokeExpr)
+        return GenerateInvoke(irBuilder, CHIRInvokeWrapper(invokeExpr))
     }
     if (let Some(invokeWithExceptionExpr) <- (chirExpr as InvokeWithException)) {
-        return GenerateInvoke(irBuilder, invokeWithExceptionExpr)
+        return GenerateInvoke(irBuilder, CHIRInvokeWrapper(invokeWithExceptionExpr))
     }
     if (let Some(invokeStaticExpr) <- (chirExpr as InvokeStatic)) {
-        return GenerateInvokeStatic(irBuilder, invokeStaticExpr)
+        return GenerateInvokeStatic(irBuilder, CHIRInvokeStaticWrapper(invokeStaticExpr))
     }
     if (let Some(invokeStaticWithExceptionExpr) <- (chirExpr as InvokeStaticWithException)) {
-        return GenerateInvokeStatic(irBuilder, invokeStaticWithExceptionExpr)
+        return GenerateInvokeStatic(irBuilder, CHIRInvokeStaticWrapper(invokeStaticWithExceptionExpr))
     }
     return LLVMNullValue()
 }
 
-private func GenerateInvoke(irBuilder: IRBuilder2, invokeExpr: Invoke): LLVMValueRef {
-    irBuilder.SetCHIRExpr(CHIRExprWrapper(invokeExpr))
-    let chirBuilder = irBuilder.GetCGContext().GetCHIRBuilder()
-    return GenerateInvoke(irBuilder, invokeExpr.GetObject(), invokeExpr.GetArgs(), invokeExpr.GetMethodName(),
-        invokeExpr.GetMethodType(), invokeExpr.GetInstantiatedTypeArgs(), invokeExpr.GetThisType(),
-        invokeExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder), invokeExpr.GetVirtualMethodOffset(chirBuilder),
-        invokeExpr.GetVirtualMethodAttr(chirBuilder).Test(Attribute.MUT))
-}
-
-private func GenerateInvoke(irBuilder: IRBuilder2, invokeExpr: InvokeWithException): LLVMValueRef {
-    irBuilder.SetCHIRExpr(CHIRExprWrapper(invokeExpr))
-    let chirBuilder = irBuilder.GetCGContext().GetCHIRBuilder()
-    return GenerateInvoke(irBuilder, invokeExpr.GetObject(), invokeExpr.GetArgs(), invokeExpr.GetMethodName(),
-        invokeExpr.GetMethodType(), invokeExpr.GetInstantiatedTypeArgs(), invokeExpr.GetThisType(),
-        invokeExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder), invokeExpr.GetVirtualMethodOffset(chirBuilder),
-        invokeExpr.GetVirtualMethodAttr(chirBuilder).Test(Attribute.MUT))
-}
-
-private func GenerateInvoke(irBuilder: IRBuilder2, objectValue: Value, args: ArrayList<Value>, methodName: String,
-    methodType: FuncType, instTypeArgs: ArrayList<Type>, thisType: Option<Type>, introType: ClassType,
-    vtableOffset: UInt64, isMutMethod: Bool): LLVMValueRef {
+private func GenerateInvoke(irBuilder: IRBuilder2, invoke: CHIRInvokeWrapper): LLVMValueRef {
+    irBuilder.SetCHIRExpr(invoke)
     let cgMod = irBuilder.GetCGModule()
     let argValues = ArrayList<CGValue>()
-    for (arg in args) {
+    for (arg in invoke.GetArgs()) {
         argValues.add(cgMod.GetMappedCGValue(arg))
     }
-    let objectRawValue = cgMod.GetMappedCGValue(objectValue).GetRawValue()
-    let objectType = objectValue.GetType().getOrThrow().StripAllRefs()
-    let isAutoEnv = IsAutoEnvType(objectType)
-    let rawFuncPtr = if (isAutoEnv) {
-        GenerateFuncPtrForAutoEnv(irBuilder, objectRawValue, methodName)
+    let objectRawValue = cgMod.GetMappedCGValue(invoke.GetObject()).GetRawValue()
+    let objectType = DeRef(invoke.GetObject().GetType().getOrThrow())
+    let rawFuncPtr = if (IsAutoEnvType(objectType)) {
+        GenerateFuncPtrForAutoEnv(irBuilder, invoke)
     } else {
         let objectTypeInfo = irBuilder.GetTypeInfoFromObject(objectRawValue)
-        GenerateFuncPtrForNonAutoEnv(irBuilder, objectTypeInfo, thisType, introType, vtableOffset)
+        GenerateFuncPtrForNonAutoEnv(irBuilder, objectTypeInfo, invoke)
     }
+    let instTypeArgs = invoke.GetInstantiatedTypeArgs()
     let typeExtra = TypeExtraInfo(0u32, true, false, true, instTypeArgs)
-    let concreteFuncType = (CGType.GetOrCreate(cgMod, methodType, extraInfo: typeExtra) as CGFunctionType).getOrThrow()
+    let concreteFuncType =
+        (CGType.GetOrCreate(cgMod, invoke.GetMethodType(), extraInfo: typeExtra) as CGFunctionType).getOrThrow()
     let typedFuncPtr = irBuilder.CreateBitCast(rawFuncPtr,
         unsafe { LLVMPointerType(concreteFuncType.GetLLVMFunctionType(), 0u32) })
     let result = irBuilder.CreateCallOrInvokeWithMethodTypeInfo(concreteFuncType, typedFuncPtr, argValues,
         None, instTypeArgs)
-    GenIRToUnboxResult(irBuilder, objectRawValue, isMutMethod)
+    GenIRToUnboxResult(irBuilder, objectRawValue,
+        invoke.TestVritualMethodAttr(irBuilder.GetCGContext().GetCHIRBuilder(), Attribute.MUT))
     return result
 }
 
-private func GenerateFuncPtrForNonAutoEnv(irBuilder: IRBuilder2, thisTI: LLVMValueRef, thisType: Option<Type>,
-    introType: ClassType, vtableOffset: UInt64): LLVMValueRef {
-    if (VirtualCallCanBeHoisted(irBuilder, thisType)) {
-        throw IllegalStateException("GAP_TODO CGContext::AddVirtualCallInfo4LICM InvokeImpl.cpp:49-90")
+private func GenerateFuncPtrForNonAutoEnv(irBuilder: IRBuilder2, thisTI: LLVMValueRef,
+    invokeExpr: CHIRInvokeExpr): LLVMValueRef {
+    let cgCtx = irBuilder.GetCGContext()
+    if (VirtualCallCanBeHoisted(irBuilder, invokeExpr)) {
+        let prepForVirtualCallBB = irBuilder.CreateAndInsertBasicBlocks(
+            ArrayList<String>([GenNameForBB("prepForVirtualCall.bb")]))[0]
+        invokeExpr.SetPrepForVirtualCallBB(prepForVirtualCallBB)
+        irBuilder.CreateBr(prepForVirtualCallBB)
+        irBuilder.SetInsertPoint(prepForVirtualCallBB)
     }
+    let introType = (invokeExpr.GetOuterType(cgCtx.GetCHIRBuilder()) as ClassType).getOrThrow()
     let introTi = irBuilder.CreateTypeInfo(introType)
+    let vtableOffset = invokeExpr.GetVirtualMethodOffset()
     let idxOfVFunc = irBuilder.GetInt64(Int64(vtableOffset))
     let funcPtr = if (introType.GetClassDef().IsInterface()) {
         let mtableArgs = ArrayList<LLVMValueRef>()
@@ -104,24 +92,31 @@ private func GenerateFuncPtrForNonAutoEnv(irBuilder: IRBuilder2, thisTI: LLVMVal
         LLVMSetInstructionMetadata(irBuilder.GetLLVMContext(), funcPtr, "objType",
             GenObjTyMetaForVirtualCall(irBuilder, introType))
     }
+    let prepForVirtualCallBB = invokeExpr.GetPrepForVirtualCallBB()
+    if (!prepForVirtualCallBB.isNull()) {
+        cgCtx.AddVirtualCallInfo4LICM(irBuilder.GetInsertCGFunction().getOrThrow(),
+            VirtualCallInfo4LICM(prepForVirtualCallBB, funcPtr, invokeExpr.GetThisType(false).getOrThrow(), introType,
+                vtableOffset))
+        let prepForVirtualCallEndBB = irBuilder.CreateAndInsertBasicBlocks(
+            ArrayList<String>([GenNameForBB("prepForVirtualCall.end")]))[0]
+        irBuilder.CreateBr(prepForVirtualCallEndBB)
+        irBuilder.SetInsertPoint(prepForVirtualCallEndBB)
+    }
     return funcPtr
 }
 
-private func VirtualCallCanBeHoisted(irBuilder: IRBuilder2, thisType: Option<Type>): Bool {
+private func VirtualCallCanBeHoisted(irBuilder: IRBuilder2, callExprWrapper: CHIRCallExpr): Bool {
     let options = irBuilder.GetCGContext().GetCompileOptions()
     if (enumIndex(options.optimizationLevel) < enumIndex(OptimizationLevel.O2)) {
         return false
     }
-    if (let Some(thisTy) <- thisType) {
-        return thisTy.IsGeneric()
-    }
-    return false
+    return callExprWrapper.GetThisType(false).getOrThrow().IsGeneric()
 }
 
-private func GenerateFuncPtrForAutoEnv(irBuilder: IRBuilder2, objectRawValue: LLVMValueRef,
-    methodName: String): LLVMValueRef {
+private func GenerateFuncPtrForAutoEnv(irBuilder: IRBuilder2, invoke: CHIRInvokeWrapper): LLVMValueRef {
     let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) }
-    let methodIdx = GetMethodIdxInAutoEnvObject(methodName)
+    let methodIdx = GetMethodIdxInAutoEnvObject(invoke.GetMethodName())
+    let objectRawValue = irBuilder.GetCGModule().GetMappedCGValue(invoke.GetObject()).GetRawValue()
     let payload = irBuilder.GetPayloadFromObject(objectRawValue)
     let typedPayload = irBuilder.CreateBitCast(payload, unsafe { LLVMPointerType(i8PtrTy, 1u32) },
         name: "virtualFPtr")
@@ -163,38 +158,19 @@ private func VTableSizeOf(ownerTy: Type): Int64 {
     return 1
 }
 
-private func GenerateInvokeStatic(irBuilder: IRBuilder2, invokeStaticExpr: InvokeStatic): LLVMValueRef {
-    irBuilder.SetCHIRExpr(CHIRExprWrapper(invokeStaticExpr))
-    let chirBuilder = irBuilder.GetCGContext().GetCHIRBuilder()
-    return GenerateInvokeStatic(irBuilder, invokeStaticExpr.GetRTTIValue(), invokeStaticExpr.GetArgs(),
-        invokeStaticExpr.GetMethodType(), invokeStaticExpr.GetInstantiatedTypeArgs(), invokeStaticExpr.GetThisType(),
-        invokeStaticExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder),
-        invokeStaticExpr.GetVirtualMethodOffset(chirBuilder))
-}
-
-private func GenerateInvokeStatic(irBuilder: IRBuilder2,
-    invokeStaticWithExceptionExpr: InvokeStaticWithException): LLVMValueRef {
-    irBuilder.SetCHIRExpr(CHIRExprWrapper(invokeStaticWithExceptionExpr))
-    let chirBuilder = irBuilder.GetCGContext().GetCHIRBuilder()
-    return GenerateInvokeStatic(irBuilder, invokeStaticWithExceptionExpr.GetRTTIValue(),
-        invokeStaticWithExceptionExpr.GetArgs(), invokeStaticWithExceptionExpr.GetMethodType(),
-        invokeStaticWithExceptionExpr.GetInstantiatedTypeArgs(), invokeStaticWithExceptionExpr.GetThisType(),
-        invokeStaticWithExceptionExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder),
-        invokeStaticWithExceptionExpr.GetVirtualMethodOffset(chirBuilder))
-}
-
-private func GenerateInvokeStatic(irBuilder: IRBuilder2, rttiValue: Value, args: ArrayList<Value>,
-    methodType: FuncType, instTypeArgs: ArrayList<Type>, thisType: Option<Type>, introType: ClassType,
-    vtableOffset: UInt64): LLVMValueRef {
+private func GenerateInvokeStatic(irBuilder: IRBuilder2, invokeStatic: CHIRInvokeStaticWrapper): LLVMValueRef {
+    irBuilder.SetCHIRExpr(invokeStatic)
     let cgMod = irBuilder.GetCGModule()
     let argValues = ArrayList<CGValue>()
-    for (arg in args) {
+    for (arg in invokeStatic.GetArgs()) {
         argValues.add(cgMod.GetMappedCGValue(arg))
     }
-    let thisTI = cgMod.GetMappedCGValue(rttiValue).GetRawValue()
-    let rawFuncPtr = GenerateFuncPtrForNonAutoEnv(irBuilder, thisTI, thisType, introType, vtableOffset)
+    let thisTI = cgMod.GetMappedCGValue(invokeStatic.GetRTTIValue()).GetRawValue()
+    let rawFuncPtr = GenerateFuncPtrForNonAutoEnv(irBuilder, thisTI, invokeStatic)
+    let instTypeArgs = invokeStatic.GetInstantiatedTypeArgs()
     let typeExtra = TypeExtraInfo(0u32, true, true, false, instTypeArgs)
-    let concreteFuncType = (CGType.GetOrCreate(cgMod, methodType, extraInfo: typeExtra) as CGFunctionType).getOrThrow()
+    let concreteFuncType =
+        (CGType.GetOrCreate(cgMod, invokeStatic.GetMethodType(), extraInfo: typeExtra) as CGFunctionType).getOrThrow()
     let typedFuncPtr = irBuilder.CreateBitCast(rawFuncPtr,
         unsafe { LLVMPointerType(concreteFuncType.GetLLVMFunctionType(), 0u32) })
     return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(concreteFuncType, typedFuncPtr, argValues, None,
