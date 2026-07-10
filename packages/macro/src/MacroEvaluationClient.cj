@@ -329,8 +329,8 @@ private func CreateMacroMsgPipe(): Bool {
 @When[os == "Windows"]
 private func GetMacroSrvCmd(enableParallelMacro: Bool, cjcPath: String): String {
     var cmd = FileUtil.JoinPath(FileUtil.GetDirPath(cjcPath), "..\\tools\\bin\\" + MACRO_SRV_NAME + ".exe")
-    cmd += " " + UIntNative(MacroProcMsger.GetInstance().hChildRead).toString()
-    cmd += " " + UIntNative(MacroProcMsger.GetInstance().hChildWrite).toString()
+    cmd += " " + Int32(UIntNative(MacroProcMsger.GetInstance().hChildRead)).toString()
+    cmd += " " + Int32(UIntNative(MacroProcMsger.GetInstance().hChildWrite)).toString()
     cmd += if (enableParallelMacro) { " 1" } else { " 0" }
     cmd += " \"" + cjcPath + "\""
     return cmd
