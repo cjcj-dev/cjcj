@@ -41,3 +41,15 @@ func lookupMacroCtx(fptr: CPointer<Unit>): MacroCall {
         macroCtxTable.get(id).getOrThrow()
     }
 }
+
+// Mirrors libcangjie-std-ast ast_api.cpp:CJ_GetMacroPosition.
+@C
+public func CJ_GetMacroPosition(fptr: CPointer<Unit>, fileID: CPointer<UInt32>, line: CPointer<Int32>,
+    column: CPointer<Int32>): Unit {
+    let pos = lookupMacroCtx(fptr).GetBeginPos()
+    unsafe {
+        fileID.write(UInt32(pos.fileID))
+        line.write(Int32(pos.line))
+        column.write(Int32(pos.column))
+    }
+}
