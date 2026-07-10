@@ -9,6 +9,7 @@ import cangjie_compiler::modules.{GetPackageRelation, PackageRelation, SemaImpor
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.NativeFFI.{GetAnnotation, GetForeignNameAnnotation}
+import cangjie_compiler::sema.Test.TestManager
 
 private func DeclRange(decl: Decl): BasicRange {
     return MakeRange(decl.begin, decl.end)
@@ -1988,35 +1989,27 @@ public class StructInheritanceChecker {
             return
         }
         if (!parentDecl.TestAttr(Attribute.STATIC) && child.TestAttr(Attribute.REDEF)) {
-            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
             diag.Diagnose(
                 child.begin,
                 child.end,
                 DiagKind.sema_func_no_override_or_redefine_modifier,
                 args: [DiagArgument("redef"), DiagArgument(typeText), DiagArgument(name)]
-            )
+            ).Emit()
         } else if (!parentDecl.TestAttr(Attribute.ABSTRACT) && !parentDecl.TestAttr(Attribute.STATIC)) {
             let notInInterface = if (let Some(parentOuter) <- parentDecl.outerDecl) {
                 parentOuter.astKind != ASTKind.INTERFACE_DECL
             } else {
                 true
             }
-            if (!parentDecl.TestAttr(Attribute.OPEN) && notInInterface) {
-                let builder = diag.DiagnoseRefactor(
-                    DiagKindRefactor.sema_cannot_override,
-                    DeclRange(child),
-                    arguments: [typeText, name]
-                )
-                builder.AddNote(DeclRange(parentDecl), "overridden definition is here")
-                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+            if ((!parentDecl.TestAttr(Attribute.OPEN) && notInInterface) || TestManager.IsDeclOpenToMock(parentDecl)) {
+                DiagCannotOverride(diag, child, parentDecl)
             } else if (child.TestAttr(Attribute.ABSTRACT) && notInInterface) {
-                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                 diag.Diagnose(
                     child.begin,
                     child.end,
                     DiagKind.sema_invalid_override_member_in_class,
                     args: [DiagArgument(typeText), DiagArgument(name), DiagArgument(typeText)]
-                )
+                ).Emit()
             }
         }
     }
@@ -2077,13 +2070,12 @@ public class StructInheritanceChecker {
                 }
                 let typeText = DeclKindText(interfaceMember)
                 if (childDecl.TestAttr(Attribute.ABSTRACT) && !interfaceMember.TestAttr(Attribute.ABSTRACT)) {
-                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                     diag.Diagnose(
                         childDecl.begin,
                         childDecl.end,
                         DiagKind.sema_invalid_override_or_redefine_member_in_interface,
                         args: [DiagArgument(typeText), DiagArgument(childDecl.identifier.Val()), DiagArgument(typeText)]
-                    )
+                    ).Emit()
                 }
                 childDecl.EnableAttr(Attribute.INTERFACE_IMPL)
                 if (let Some(propDecl) <- (childDecl as PropDecl)) {
@@ -2358,21 +2350,19 @@ public class StructInheritanceChecker {
         if (let Some(childDecl) <- child.decl) {
             let typeText = DeclKindText(childDecl)
             if (childDecl.TestAttr(Attribute.OVERRIDE)) {
-                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                 diag.Diagnose(
                     childDecl.begin,
                     childDecl.end,
                     DiagKind.sema_missing_overridden_func,
                     args: [DiagArgument(typeText), DiagArgument(childDecl.identifier.Val()), DiagArgument(typeText)]
-                )
+                ).Emit()
             } else if (childDecl.TestAttr(Attribute.REDEF) && childDecl.TestAttr(Attribute.STATIC)) {
-                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
                 diag.Diagnose(
                     childDecl.begin,
                     childDecl.end,
                     DiagKind.sema_missing_redefined_func,
                     args: [DiagArgument(typeText), DiagArgument(childDecl.identifier.Val()), DiagArgument(typeText)]
-                )
+                ).Emit()
             }
         }
     }
