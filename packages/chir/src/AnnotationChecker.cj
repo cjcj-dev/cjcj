@@ -108,6 +108,11 @@ public class AnnotationChecker {
         for (memberVar in def.GetDirectInstanceVars()) {
             CheckTargets(memberVar.annoInfo.GetAnnotations(), MEMBER_VARIABLE_TARGET, result)
         }
+        if (let Some(enumDef) <- (def as EnumDef)) {
+            for (ctor in enumDef.GetCtors()) {
+                CheckTargets(ctor.annoInfo.GetAnnotations(), ENUM_CONSTRUCTOR_TARGET, result)
+            }
+        }
     }
 
     private func CheckTargetsOnGlobalVar(globalVar: GlobalVar, result: CHIRCheckResult): Unit {
