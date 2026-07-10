@@ -19,6 +19,10 @@ import cjcj::lex.Lexer as CangjieLexer
 import cjcj::lex.TokenKind as CangjieTokenKind
 import cjcj::lex.TokenKindValue
 import cjcj::utils.FreeIdleMemoryToOS
+import cjcj::chir.CHIRBuilder as ChirBuilder
+import cjcj::chir.CHIRDeserializer as ChirDeserializer
+import cjcj::chir.CHIRPrinter as ChirPrinter
+import cjcj::chir.ToCHIRPhase as ChirToCHIRPhase
 import std.collection.*
 import std.core.Box as CoreBox
 
@@ -883,11 +887,11 @@ public class CompilerInstance {
     }
 
     public func DeserializeCHIR(): Bool {
-        let chirBuilder = CHIRBuilder(GetCHIRContext())
-        let phase = CoreBox<ToCHIRPhase>(ToCHIRPhase.RAW)
-        CHIRDeserializer.Deserialize(invocation.frontendOptions.chirDeserializePath, chirBuilder, phase)
-        CHIRPrinter.PrintCHIRSerializeInfo(phase.value, "deserialized.chir")
-        CHIRPrinter.PrintPackage(GetCHIRContext().GetCurPackage().getOrThrow(), "deserialized.chir")
+        let chirBuilder = ChirBuilder(chirData.GetRealCHIRContext())
+        let phase = CoreBox<ChirToCHIRPhase>(ChirToCHIRPhase.RAW)
+        ChirDeserializer.Deserialize(invocation.frontendOptions.chirDeserializePath, chirBuilder, phase)
+        ChirPrinter.PrintCHIRSerializeInfo(phase.value, "deserialized.chir")
+        ChirPrinter.PrintPackage(chirData.GetRealCHIRContext().GetCurPackage().getOrThrow(), "deserialized.chir")
         return true
     }
 
