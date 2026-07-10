@@ -234,7 +234,7 @@ public class CHIRChecker {
                 result.AddError(errMsg)
             }
         }
-        if (!globalVar.TestAttr(Attribute.IMPLICIT_ADD) && globalVar.GetSrcCodeIdentifier().isEmpty()) {
+        if (!globalVar.TestAttr(Attribute.COMPILER_ADD) && globalVar.GetSrcCodeIdentifier().isEmpty()) {
             result.AddError("global var ${globalVar.GetIdentifier()} doesn't have src code identifier.")
         }
         if (globalVar.GetPackageName().isEmpty()) {
