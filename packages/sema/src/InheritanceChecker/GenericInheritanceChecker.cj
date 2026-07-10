@@ -186,8 +186,7 @@ public func CheckGenericTypeBoundsMapped(
                 "'" + Ty.GetTypesToStableStr(instUppers.values, "', '") + "'"
             }
             let diagNode = GetConstraintNodeByIndex(i, childGenericNode)
-            let range = MakeRange(diagNode.begin, diagNode.end)
-            let builder = diag.DiagnoseRefactor(DiagKindRefactor.sema_generic_constraint_not_looser, range)
+            let builder = DiagnoseRefactor(diag, DiagKindRefactor.sema_generic_constraint_not_looser, diagNode)
             builder.AddNote("parent constraint is " + parentConstraints)
             // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
         }
