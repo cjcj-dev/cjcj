@@ -191,44 +191,6 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall,
     for (parsedNode in parsedNodes) {
         out.add(convertParsedNode(parsedNode, fallbackFile))
     }
-    if (!out.isEmpty()) {
-        return out
-    }
-
-    // Fallback for bridge-only gaps while the sibling parser AST and Macro's local compatibility AST still differ.
-    let first = tokens[0]
-    if (ASTKindEquals(macroNode.RequireNode().astKind, ASTKind.MACRO_EXPAND_DECL)) {
-        if (first.kind == TokenKind.FUNC || first.kind == TokenKind.MACRO) {
-            let fd = FuncDecl()
-            fd.identifier = SrcIdentifier(findFollowingIdentifier(tokens, 1))
-            fd.begin = first.Begin()
-            fd.end = tokens[tokens.size - 1].End()
-            fd.curFile = macroNode.RequireNode().curFile
-            out.add(fd)
-            return out
-        }
-        if (first.kind == TokenKind.VAR || first.kind == TokenKind.LET || first.kind == TokenKind.CONST) {
-            let varDecl = VarDecl()
-            varDecl.identifier = SrcIdentifier(findFollowingIdentifier(tokens, 1))
-            varDecl.begin = first.Begin()
-            varDecl.end = tokens[tokens.size - 1].End()
-            varDecl.curFile = macroNode.RequireNode().curFile
-            out.add(varDecl)
-            return out
-        }
-        let decl = Decl(ASTKind.DECL)
-        decl.identifier = SrcIdentifier(findFollowingIdentifier(tokens, 0))
-        decl.begin = first.Begin()
-        decl.end = tokens[tokens.size - 1].End()
-        decl.curFile = macroNode.RequireNode().curFile
-        out.add(decl)
-        return out
-    }
-    let tokenPart = TokenPart(tokens)
-    tokenPart.begin = first.Begin()
-    tokenPart.end = tokens[tokens.size - 1].End()
-    tokenPart.curFile = macroNode.RequireNode().curFile
-    out.add(tokenPart)
     return out
 }
 
@@ -465,17 +427,6 @@ private func convertParsedMacroInvocation(
 
 private func convertParsedNode(parsedNode: ParsedNode, fallbackFile: Option<File>): Node {
     return parsedNode
-}
-
-private func findFollowingIdentifier(tokens: ArrayList<Token>, start: Int64): String {
-    var idx = start
-    while (idx < tokens.size) {
-        if (IsIdentifierOrContextualKeyword(tokens[idx].kind)) {
-            return tokens[idx].Value()
-        }
-        idx++
-    }
-    return ""
 }
 
 private func replaceNodeVector(container: ArrayList<Node>, loc: Int64, newNodes: ArrayList<Node>): Unit {
