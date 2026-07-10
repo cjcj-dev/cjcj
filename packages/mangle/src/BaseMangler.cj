@@ -2,7 +2,7 @@ package cjcj::mangle
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::utils.CJC_NULLPTR_CHECK
+import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 
 private class VarBucket {
     public var key: MangleDecl
@@ -1281,11 +1281,11 @@ public open class BaseMangler {
                     if (outerNode.astKind == ASTKind.CLASS_DECL || outerNode.astKind == ASTKind.INTERFACE_DECL ||
                         outerNode.astKind == ASTKind.STRUCT_DECL) {
                         mangleStr += DecimalToManglingNumber("0")
-                    } else if (let Some(index) <- ctx.GetIndexOfVar(outerNode, decl)) {
-                        mangleStr += DecimalToManglingNumber("${index}")
                     } else {
-                        // C++ BaseMangler.cpp:368-371 only CJC_ASSERTs here; release builds do not emit
-                        // a selfhost-only diagnostic from this path.
+                        let indexOption = ctx.GetIndexOfVar(outerNode, decl)
+                        CJC_ASSERT(indexOption.isSome())
+                        let index = indexOption.getOrThrow()
+                        mangleStr += DecimalToManglingNumber("${index}")
                     }
                 }
             }
