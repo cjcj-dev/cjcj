@@ -1142,6 +1142,9 @@ public class Translator {
 
     public func Visit(expr: AstLitConstExpr): Option<Value> {
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        if (resultTy.IsUnit()) {
+            return None
+        }
         let literal = TranslateLitConstant(expr)
         return RequireResult(builder.CreateConstant(resultTy, literal, CurrentBlock()))
     }
@@ -8234,7 +8237,6 @@ public class Translator {
     private func TranslateLitConstant(expr: AstLitConstExpr): LiteralValue {
         let kind = RequireAstTy(expr).kind
         return match (kind) {
-            case AstTypeKind.TYPE_UNIT => UnitLiteral()
             case AstTypeKind.TYPE_FLOAT16 | AstTypeKind.TYPE_FLOAT64 | AstTypeKind.TYPE_IDEAL_FLOAT =>
                 FloatLiteral(expr.constNumValue.asFloat.value)
             case AstTypeKind.TYPE_FLOAT32 =>
