@@ -62,7 +62,7 @@ public class EnumSugarChecker {
         }
         if (varDeclTargets.size > 1) {
             if (let Some(diag) <- typeChecker.diag) {
-                let builder = diag.Diagnose(refExpr.begin, refExpr.end,
+                let builder = Diagnose(diag, refExpr,
                     BasicDiagKind.sema_multiple_constructor_in_enum,
                     args: [BasicDiagArgument(varDeclTargets[0].identifier.Val())])
                 sort(varDeclTargets, by: { left: Decl, right: Decl =>
