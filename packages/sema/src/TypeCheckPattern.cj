@@ -627,9 +627,9 @@ public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
         pattern.matchBeforeRuntime = false
         if (IsSubtypeBoxed(typeManager, target, patternTy)) {
             if (let Some(diagValue) <- diag) {
-                let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_unreachable_pattern,
-                    BasicRange(BasicPosition(pattern.begin.fileID, pattern.begin.line, pattern.begin.column),
-                        BasicPosition(pattern.end.fileID, pattern.end.line, pattern.end.column)))
+                let builder = DiagnoseRefactor(diagValue,
+                    BasicDiagKindRefactor.sema_unreachable_pattern,
+                    pattern)
                 builder.AddNote("the selector is of type '" + target.String() +
                     "', which is not a subtype of '" + patternTy.String())
                 // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
