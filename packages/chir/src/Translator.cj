@@ -74,6 +74,7 @@ import cangjie_compiler::ast.TypeKind as AstTypeKind
 import cangjie_compiler::ast.TypeKindInRange as AstTypeKindInRange
 import cangjie_compiler::ast.TupleLit as AstTupleLit
 import cangjie_compiler::ast.TuplePattern as AstTuplePattern
+import cangjie_compiler::ast.TupleTy as AstTupleTy
 import cangjie_compiler::ast.TryExpr as AstTryExpr
 import cangjie_compiler::ast.TypePattern as AstTypePattern
 import cangjie_compiler::ast.TypeConvExpr as AstTypeConvExpr
@@ -2364,10 +2365,12 @@ public class Translator {
 
     public func Visit(expr: AstTupleLit): Option<Value> {
         let values = ArrayList<Value>()
-        for (child in expr.children) {
-            let value = Translator.TranslateASTNode(child, this) ??
-                throw IllegalStateException("faithful AST2CHIR TupleLit element produced no value")
+        let tupleType = (RequireAstTy(expr) as AstTupleTy).getOrThrow()
+        var idx: Int64 = 0
+        while (idx < expr.children.size) {
+            let value = TranslateExprArg(expr.children[idx], chirTy.TranslateType(tupleType.typeArgs[idx]))
             values.add(value)
+            idx++
         }
         return RequireResult(builder.CreateTuple(chirTy.TranslateType(RequireAstTy(expr)), values, CurrentBlock()))
     }
