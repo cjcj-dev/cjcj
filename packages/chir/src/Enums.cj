@@ -7,8 +7,14 @@ public enum ToCHIRPhase {
     | OPT
     | PLUGIN
     | ANALYSIS_FOR_CJLINT
-    | PHASE_MIN
-    | PHASE_MAX
+
+    public static prop PHASE_MIN: ToCHIRPhase {
+        get() { RAW }
+    }
+
+    public static prop PHASE_MAX: ToCHIRPhase {
+        get() { ANALYSIS_FOR_CJLINT }
+    }
 }
 
 public func ToCHIRPhaseIndex(phase: ToCHIRPhase): UInt8 {
@@ -17,8 +23,6 @@ public func ToCHIRPhaseIndex(phase: ToCHIRPhase): UInt8 {
         case ToCHIRPhase.OPT => 1u8
         case ToCHIRPhase.PLUGIN => 2u8
         case ToCHIRPhase.ANALYSIS_FOR_CJLINT => 3u8
-        case ToCHIRPhase.PHASE_MIN => 0u8
-        case ToCHIRPhase.PHASE_MAX => 3u8
     }
 }
 
