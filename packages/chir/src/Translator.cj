@@ -5840,8 +5840,11 @@ public class Translator {
         let base = Translator.TranslateASTNode(RequireExpr(baseExpr, "tuple access base"), this) ??
             throw IllegalStateException("faithful AST2CHIR tuple base produced no value")
         let baseValue = GetDerefedValue(base)
-        return RequireResult(builder.CreateField(chirTy.TranslateType(RequireAstTy(expr)), baseValue, path,
-            CurrentBlock()))
+        let field = builder.CreateField(chirTy.TranslateType(RequireAstTy(expr)), baseValue, path, CurrentBlock())
+        if (expr.TestAttr(AstAttribute.IMPLICIT_ADD)) {
+            field.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+        }
+        return RequireResult(field)
     }
 
     private func TranslateVArrayAccess(expr: AstSubscriptExpr): Value {
