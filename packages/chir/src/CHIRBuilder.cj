@@ -11,6 +11,11 @@ public class CHIRBuilder {
         this.context = context
     }
 
+    public func GetStructType(packageName: String, name: String,
+        genericType!: ArrayList<String> = ArrayList<String>()): Option<StructType> {
+        return context.GetStructType(packageName, name, genericType: genericType)
+    }
+
     public func CreatePackage(name: String): Package {
         let pkg = Package(name)
         context.SetCurPackage(pkg)

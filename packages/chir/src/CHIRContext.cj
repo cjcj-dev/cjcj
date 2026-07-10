@@ -216,6 +216,34 @@ public class CHIRContext {
         return None
     }
 
+    public func GetStructType(packageName: String, name: String,
+        genericType!: ArrayList<String> = ArrayList<String>()): Option<StructType> {
+        let pkg = curPackage.getOrThrow()
+        for (def in pkg.GetAllStructDef()) {
+            if (def.GetPackageName() != packageName || def.GetSrcCodeIdentifier() != name) {
+                continue
+            }
+            if (def.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+                continue
+            }
+            let structType = (def.GetType().getOrThrow() as StructType).getOrThrow()
+            let argTypes = structType.GetGenericArgs()
+            var idx: Int64 = 0
+            var equal = true
+            while (idx < genericType.size) {
+                if (genericType[idx] != argTypes[idx].ToString()) {
+                    equal = false
+                    break
+                }
+                idx++
+            }
+            if (equal) {
+                return structType
+            }
+        }
+        return None
+    }
+
     public func SetObjectTy(ty: ClassType): Unit {
         objectTy = ty
     }

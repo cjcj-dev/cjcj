@@ -307,6 +307,7 @@ public class Translator {
     private var currentFunc: Option<Function> = None
     private var currentLambda: Option<Lambda> = None
     private var currentAstFuncDecl: Option<AstFuncDecl> = None
+    private var topLevelDecl: Option<AstDecl> = None
     private var lambdaCounter: UInt64 = 0u64
     private var lambdaWrapperCounter: UInt64 = 0u64
     private var delayExitSignal: Option<Value> = None
@@ -321,12 +322,18 @@ public class Translator {
     private let opts: GlobalOptions
     private let mergingSpecific: Bool
     private var genericFuncMap: GenericFuncMap = GenericFuncMap()
+    private let annoFactoryFuncs: ArrayList<(AstDecl, Function)>
+    private let isComputingAnnos: Bool
+    private let initFuncsForAnnoFactory: ArrayList<Function>
 
     public init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap,
         localConstVars!: ElementList = ElementList(), localConstFuncs!: ElementList = ElementList(),
         deserializedVals!: HashMap<String, Value>,
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None,
-        opts!: GlobalOptions = GlobalOptions()) {
+        opts!: GlobalOptions = GlobalOptions(),
+        annoFactoryFuncs!: ArrayList<(AstDecl, Function)> = ArrayList<(AstDecl, Function)>(),
+        isComputingAnnos!: Bool = false,
+        initFuncsForAnnoFactory!: ArrayList<Function> = ArrayList<Function>()) {
         this.builder = builder
         this.chirTy = chirTy
         this.globalSymbolTable = globalSymbolTable
@@ -336,6 +343,13 @@ public class Translator {
         this.overrideSrcFuncResolver = overrideSrcFuncResolver
         this.opts = opts
         this.mergingSpecific = opts.IsCompilingCJMPSpecific()
+        this.annoFactoryFuncs = annoFactoryFuncs
+        this.isComputingAnnos = isComputingAnnos
+        this.initFuncsForAnnoFactory = initFuncsForAnnoFactory
+    }
+
+    public func SetTopLevel(decl: AstDecl): Unit {
+        topLevelDecl = decl
     }
 
     public func SetGenericFuncMap(funcMap: GenericFuncMap): Unit {
@@ -349,7 +363,8 @@ public class Translator {
     public func Copy(): Translator {
         return Translator(builder, chirTy, globalSymbolTable, localConstVars: localConstVars,
             localConstFuncs: localConstFuncs, deserializedVals: deserializedVals,
-            overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts)
+            overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts, annoFactoryFuncs: annoFactoryFuncs,
+            isComputingAnnos: isComputingAnnos, initFuncsForAnnoFactory: initFuncsForAnnoFactory)
     }
 
     public func TranslateGlobalVarInitializer(fn: Function, decl: AstVarDecl, globalVar: GlobalVar): Unit {
@@ -375,6 +390,119 @@ public class Translator {
         delayExitSignal = savedDelayExitSignal
         currentFunc = savedFunc
         currentBlock = savedBlock
+    }
+
+    public func TranslateAnnoFactoryFuncBody(decl: AstDecl, funcDef: Function): Unit {
+        let body = builder.CreateBlockGroup(funcDef)
+        blockGroupStack.add(body)
+        funcDef.InitBody(body)
+        funcDef.EnableAttr(Attribute.COMPILER_ADD)
+        let bodyBlock = CreateBlock()
+        body.SetEntryBlock(bodyBlock)
+        currentBlock = bodyBlock
+        TranslateAnnotationsArrayBody(decl, funcDef)
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    @When[backend != "cjnative"]
+    private func TranslateAnnotationsArrayBody(decl: AstDecl, funcDef: Function): Unit {
+        let _ = decl
+        let _ = funcDef
+    }
+
+    @When[backend == "cjnative"]
+    private func TranslateAnnotationsArrayBody(decl: AstDecl, funcDef: Function): Unit {
+        let annoInsts = funcDef.Get<AnnoFactoryInfo, ArrayList<GlobalVar>>()
+        let annoArrSize = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(),
+            IntLiteral(Int64(annoInsts.size)), CurrentBlock()))
+        let objectTy = builder.context.GetRefTy(builder.context.GetObjectTy().getOrThrow())
+        let rawArrayTy = builder.context.GetRawArrayTy(objectTy)
+        let rawArray = RequireResult(builder.CreateRawArrayAllocate(builder.context.GetRefTy(rawArrayTy), objectTy,
+            annoArrSize, CurrentBlock()))
+        let arrayGeneric = builder.GetStructType("std.core", "Array").getOrThrow()
+        let genericType = (arrayGeneric.GetGenericArgs()[0] as GenericType).getOrThrow()
+        let table = HashMap<Int64, Type>()
+        table[genericType.objectId] = objectTy
+        let arrayType = ReplaceRawGenericArgType(arrayGeneric, table, builder)
+        let arrayValue = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(arrayType), arrayType,
+            CurrentBlock()))
+        let arrayMethods = arrayGeneric.GetStructDef().GetMethods()
+        var arrayInit: Option<Function> = None
+        for (method in arrayMethods) {
+            if (method.IsConstructor() && method.GetNumOfParams() == 4) {
+                arrayInit = method
+                break
+            }
+        }
+        let arrayInitFunc = arrayInit.getOrThrow()
+        let zero = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock()))
+        let args = ArrayList<Value>()
+        args.add(arrayValue)
+        args.add(rawArray)
+        args.add(zero)
+        args.add(annoArrSize)
+        let callContext = FuncCallContext(args: args, thisType: builder.context.GetRefTy(arrayType))
+        let returnType = ReplaceRawGenericArgType(arrayInitFunc.GetFuncType().getOrThrow().GetReturnType(), table,
+            builder)
+        builder.CreateApply(returnType, arrayInitFunc, callContext, CurrentBlock())
+        var annoInstIndex: Int64 = 0
+        while (annoInstIndex < annoInsts.size) {
+            let globalVar = annoInsts[annoInstIndex]
+            let globalVarType = (globalVar.GetType().getOrThrow() as RefType).getOrThrow().GetBaseType()
+            let load = RequireResult(builder.CreateLoad(globalVarType, globalVar, CurrentBlock()))
+            let typecast = RequireResult(builder.CreateTypeCast(objectTy, load, CurrentBlock()))
+            let path = ArrayList<UInt64>()
+            path.add(UInt64(annoInstIndex))
+            builder.CreateStoreElementRef(typecast, rawArray, path, CurrentBlock())
+            annoInstIndex++
+        }
+        funcDef.SetReturnValue(arrayValue)
+        builder.CreateExit(None, CurrentBlock())
+
+        let annotationsArray = decl.annotationsArray.getOrThrow()
+        var annoChildrenId: Int64 = 0
+        annoInstIndex = 0
+        while (annoInstIndex < annoInsts.size) {
+            while (isComputingAnnos &&
+                annotationsArray.children[annoChildrenId].TestAttr(AstAttribute.NO_REFLECT_INFO)) {
+                annoChildrenId++
+            }
+            let globalVar = annoInsts[annoInstIndex]
+            let globalVarInit = globalVar.GetInitFunc().getOrThrow()
+            let globalVarInitBody = globalVarInit.GetBody().getOrThrow()
+            blockGroupStack.add(globalVarInitBody)
+            currentBlock = globalVarInit.GetEntryBlock().getOrThrow()
+            TranslateSubExprToLoc(annotationsArray.children[annoChildrenId], Some(globalVar))
+            annoChildrenId++
+            builder.CreateExit(None, CurrentBlock())
+            blockGroupStack.remove(at: blockGroupStack.size - 1)
+            annoInstIndex++
+        }
+        @When[debug]
+        let isDebugBuild = true
+        @When[!debug]
+        let isDebugBuild = false
+        if (isDebugBuild) {
+            while (isComputingAnnos && annoChildrenId < annotationsArray.children.size &&
+                annotationsArray.children[annoChildrenId].TestAttr(AstAttribute.NO_REFLECT_INFO)) {
+                annoChildrenId++
+            }
+            CJC_ASSERT(annotationsArray.children.size == annoChildrenId)
+        }
+
+        let packageInit = builder.context.GetCurPackage().getOrThrow().GetPackageInitFunc().getOrThrow()
+        let packageInitBody = packageInit.GetBody().getOrThrow()
+        blockGroupStack.add(packageInitBody)
+        currentBlock = packageInit.GetEntryBlock().getOrThrow().GetSuccessors()[1]
+        CurrentBlock().GetTerminator().getOrThrow().RemoveSelfFromBlock()
+        annoInstIndex = 0
+        while (annoInstIndex < annoInsts.size) {
+            builder.CreateApply(builder.context.GetUnitTy(), annoInsts[annoInstIndex].GetInitFunc().getOrThrow(),
+                FuncCallContext(), CurrentBlock())
+            annoInstIndex++
+        }
+        builder.CreateExit(None, CurrentBlock())
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
 
     public static func TranslateASTNode(node: AstNode, trans: Translator): Option<Value> {
@@ -5267,6 +5395,20 @@ public class Translator {
             }
             idx++
         }
+    }
+
+    private func TranslateSubExprToLoc(node: AstNode, location: Option<Value>): Unit {
+        if (let None <- location) {
+            let _ = Translator.TranslateASTNode(node, this)
+            return
+        }
+        let loc = location.getOrThrow()
+        let debugLoc = if (let Some(localVar) <- (loc as LocalVar)) {
+            localVar.GetExpr().getOrThrow().GetDebugLocation()
+        } else {
+            loc.GetDebugLocation()
+        }
+        TranslateSubExprToLoc(node, location, debugLoc)
     }
 
     private func TranslateSubExprToLoc(node: AstNode, location: Option<Value>, debugLoc: DebugLocation): Unit {

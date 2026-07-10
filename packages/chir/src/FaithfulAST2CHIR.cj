@@ -1053,6 +1053,9 @@ public class FaithfulAST2CHIR {
     private var localConstVarsDepMap: DeclDepMap = DeclDepMap()
     private let packageInitializerBlocks: HashMap<Int64, Block> = HashMap<Int64, Block>()
     private let initFuncsForConstVar: ArrayList<Function> = ArrayList<Function>()
+    private let initFuncsForAnnoFactory: ArrayList<Function> = ArrayList<Function>()
+    private let annoFactoryFuncs: ArrayList<(AstDecl, Function)> = ArrayList<(AstDecl, Function)>()
+    private let isComputingAnnos: Bool
 
     public init(builder: CHIRBuilder, chirType: CHIRType,
         importedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(),
@@ -1060,7 +1063,7 @@ public class FaithfulAST2CHIR {
         gim!: Option<GenericInstantiationManager> = None,
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None,
         opts!: GlobalOptions = GlobalOptions(), chirWFC!: Bool = false, chirOptOverO2!: Bool = false,
-        diag!: Option<BasicDiagnosticEngine> = None) {
+        diag!: Option<BasicDiagnosticEngine> = None, isComputingAnnos!: Bool = false) {
         this.builder = builder
         this.chirType = chirType
         this.importedPackages = importedPkgs
@@ -1071,6 +1074,7 @@ public class FaithfulAST2CHIR {
         this.chirWFC = chirWFC
         this.chirOptOverO2 = chirOptOverO2
         this.diag = diag
+        this.isComputingAnnos = isComputingAnnos
     }
 
     public func ToCHIRPackage(node: AstPackage): Bool {
@@ -2037,6 +2041,11 @@ public class FaithfulAST2CHIR {
             let _ = Translator.TranslateASTNode(decl, trans)
         }
         TranslateVecDecl(globalAndStaticVars, CreateTranslator())
+        for ((decl, funcDef) in annoFactoryFuncs) {
+            let trans = CreateTranslator()
+            trans.SetTopLevel(decl)
+            trans.TranslateAnnoFactoryFuncBody(decl, funcDef)
+        }
         SetCompileTimeValueFlag()
     }
 
@@ -2122,7 +2131,9 @@ public class FaithfulAST2CHIR {
 
     private func CreateTranslator(): Translator {
         return Translator(builder, chirType, globalCache, localConstVars: localConstVars, localConstFuncs: localConstFuncs,
-            deserializedVals: deserializedVals, overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts)
+            deserializedVals: deserializedVals, overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts,
+            annoFactoryFuncs: annoFactoryFuncs, isComputingAnnos: isComputingAnnos,
+            initFuncsForAnnoFactory: initFuncsForAnnoFactory)
     }
 
     private func GlobalDeclAnalysis(pkg: AstPackage): ArrayList<FaithfulInitFileVars> {
@@ -4100,8 +4111,8 @@ fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
 
     private func CreateGlobalVarSignature(decls: ArrayList<AstDecl>, isLocalConst!: Bool = false): Unit {
         // GAP_TODO: annotated-decl factory metadata remains unported; C++ CreateAnnoFactoryFuncSig
-        // invokes TranslateAnnotationsArraySig/Body and TranslateCustomAnnoInstanceSig
-        // (TranslateAnnotation.cpp:34-88,175-236; AST2CHIR.cpp:217,230; ASTPackage2CHIR.cpp:1024).
+        // invokes TranslateAnnotationsArraySig and TranslateCustomAnnoInstanceSig
+        // (TranslateAnnotation.cpp:34-80,175-236; AST2CHIR.cpp:217,230; ASTPackage2CHIR.cpp:1024).
         // Until that root is ported, AnnoInfo.mangledName keeps the C++ default "none".
         for (decl in decls) {
             if (let Some(varDecl) <- (decl as AstVarDecl)) {
