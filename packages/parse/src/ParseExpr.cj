@@ -378,6 +378,14 @@ extend ParserImpl {
                     range.stopExpr = rhs
                     range.end = rhs.end
                     range.isBroken = range.isBroken || rhs.isBroken
+                    if (Skip(TokenKind.COLON)) {
+                        range.colonPos = lastToken.Begin()
+                        let preKind = if (range.isClosed) { TokenKind.CLOSEDRANGEOP } else { TokenKind.RANGEOP }
+                        range.stepExpr = ParseExprWithPrevious(preKind, ExprKind.ALL)
+                        if (let Some(step) <- range.stepExpr) {
+                            range.end = step.end
+                        }
+                    }
                 } else if (let Some(binary) <- (node as BinaryExpr)) {
                     binary.rightExpr = rhs
                     binary.end = rhs.end
@@ -516,6 +524,14 @@ extend ParserImpl {
                     range.stopExpr = rhs
                     range.end = rhs.end
                     range.isBroken = range.isBroken || rhs.isBroken
+                    if (Skip(TokenKind.COLON)) {
+                        range.colonPos = lastToken.Begin()
+                        let preKind = if (range.isClosed) { TokenKind.CLOSEDRANGEOP } else { TokenKind.RANGEOP }
+                        range.stepExpr = ParseExprWithPrevious(preKind, ExprKind.ALL)
+                        if (let Some(step) <- range.stepExpr) {
+                            range.end = step.end
+                        }
+                    }
                 } else if (let Some(binary) <- (node as BinaryExpr)) {
                     binary.rightExpr = rhs
                     binary.end = rhs.end
