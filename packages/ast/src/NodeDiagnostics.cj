@@ -1,7 +1,8 @@
 package cangjie_compiler::ast
 
 import cangjie_compiler::basic.{
-    Diagnostic, DiagnosticBuilder, DiagnosticEngine, DiagKindRefactor, GetDiagnoseCategory, SubDiagnostic
+    Diagnostic, DiagnosticBuilder, DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, GetDiagnoseCategory,
+    SubDiagnostic
 }
 import cangjie_compiler::basic.Range as BasicRange
 
@@ -28,6 +29,25 @@ public func AddMacroCallNote(
             diag.AddMacroCallNote(diagnostic, invocation.macroCallDiagInfo, pos)
         }
     }
+}
+
+public func Diagnose(
+    diag: DiagnosticEngine,
+    node: Node,
+    kind: DiagKind,
+    args!: Array<DiagArgument> = Array<DiagArgument>()
+): DiagnosticBuilder {
+    if (node.isInMacroCall) {
+        let diagnostic = Diagnostic()
+        diagnostic.isInMacroCall = true
+        return DiagnosticBuilder(diag, diagnostic)
+    }
+    if (let Some(_) <- node.curMacroCall) {
+        let diagnostic = Diagnostic(node.GetBegin(), node.GetEnd(), kind, args: args)
+        AddMacroCallNote(diag, diagnostic, node, node.begin)
+        return DiagnosticBuilder(diag, diagnostic)
+    }
+    return diag.Diagnose(node.GetBegin(), kind, args: args)
 }
 
 public func DiagnoseRefactor(
