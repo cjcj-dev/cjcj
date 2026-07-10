@@ -29,13 +29,15 @@ private func DiagConflictingForeignName(
     let anno = annoOpt.getOrThrow()
 
     let builder = if (!anno.TestAttr(Attribute.COMPILER_ADD)) {
-        diag.DiagnoseRefactor(
+        DiagnoseRefactor(diag,
             DiagKindRefactor.sema_foreign_name_conflicting_annotation,
+            declWithAnno,
             MakeRange(anno.GetBegin(), declWithAnno.identifier.End()),
             arguments: [declWithAnno.identifier.Val(), anno.identifier.Val(), anno.identifier.Val()])
     } else {
-        diag.DiagnoseRefactor(
+        DiagnoseRefactor(diag,
             DiagKindRefactor.sema_foreign_name_conflicting_derived_annotation,
+            declWithAnno,
             MakeRange(declWithAnno.identifier.Begin(), declWithAnno.identifier.End()),
             arguments: [declWithAnno.identifier.Val(), anno.identifier.Val(), GetAnnoValue(anno)])
     }
@@ -124,8 +126,9 @@ func CheckForeignName(
     }
 
     if (childAnno.isSome() && !childAnno.getOrThrow().TestAttr(Attribute.COMPILER_ADD)) {
-        diag.DiagnoseRefactor(
+        DiagnoseRefactor(diag,
             DiagKindRefactor.sema_foreign_name_appeared_in_child,
+            childDecl,
             MakeRange(childAnno.getOrThrow().GetBegin(), childDecl.identifier.End()),
             arguments: [childAnno.getOrThrow().identifier.Val()]).Emit()
     } else if (childAnno.isSome() && !parentAnno.isSome()) {
@@ -157,13 +160,15 @@ private func DiagConflictingAnnotation(
     let anno = annoOpt.getOrThrow()
 
     let builder = if (!anno.TestAttr(Attribute.COMPILER_ADD)) {
-        diag.DiagnoseRefactor(
+        DiagnoseRefactor(diag,
             DiagKindRefactor.sema_foreign_name_conflicting_annotation,
+            declWithAnno,
             MakeRange(anno.GetBegin(), declWithAnno.identifier.End()),
             arguments: [declWithAnno.identifier.Val(), anno.identifier.Val()])
     } else {
         diag.DiagnoseRefactor(
             DiagKindRefactor.sema_foreign_name_conflicting_derived_annotation,
+            declWithAnno,
             MakeRange(declWithAnno.identifier.Begin(), declWithAnno.identifier.End()),
             arguments: [declWithAnno.identifier.Val(), anno.identifier.Val(), GetAnnoValue(anno)])
     }
@@ -261,6 +266,7 @@ func CheckAnnotation(
     if (childAnno.isSome() && !childAnno.getOrThrow().TestAttr(Attribute.COMPILER_ADD)) {
         diag.DiagnoseRefactor(
             DiagKindRefactor.sema_foreign_name_appeared_in_child,
+            childDecl,
             MakeRange(childAnno.getOrThrow().GetBegin(), childDecl.identifier.End()),
             arguments: [childAnno.getOrThrow().identifier.Val()]).Emit()
     } else if (childAnno.isSome() && !parentAnno.isSome()) {
