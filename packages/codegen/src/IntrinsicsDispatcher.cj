@@ -10,6 +10,7 @@ import cjcj::chir.IntrinsicWithException
 import cjcj::chir.RawArrayType
 import cjcj::chir.Type
 import cjcj::chir.Value
+import cjcj::utils.CJC_ASSERT
 
 private let IS_SUBTYPE_INTRINSIC_NAME: String = "llvm.cj.is.subtype"
 private let LLVM_ARRAY_TYPE_KIND_FOR_INTRINSICS: Int32 = 11
@@ -113,10 +114,10 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
         return GenerateCPointerAdd(irBuilder, args, resultType)
     }
     if (kind == IntrinsicKind.CPOINTER_READ) {
-        return GenerateCPointerRead(irBuilder, args, resultType)
+        return GenerateCPointerRead(irBuilder, args, typeArgs, resultType)
     }
     if (kind == IntrinsicKind.CPOINTER_WRITE) {
-        return GenerateCPointerWrite(irBuilder, args)
+        return GenerateCPointerWrite(irBuilder, args, typeArgs)
     }
     if (kind == IntrinsicKind.BIT_CAST) {
         if (!args.isEmpty() && resultType.isSome()) {
@@ -516,7 +517,29 @@ private func CastIntegerValueToType(irBuilder: IRBuilder2, value: LLVMValueRef, 
     return irBuilder.CreateTrunc(value, targetType, name: "int.trunc")
 }
 
-private func GenerateCPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>,
+private func InstrumentPointerOps(irBuilder: IRBuilder2, instFunc: String, ptr: LLVMValueRef,
+    typeSize: LLVMValueRef): Unit {
+    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) }
+    let castVal = irBuilder.CreateBitCast(ptr, i8PtrType)
+    let cgMod = irBuilder.GetCGModule()
+    irBuilder.CallIntrinsicFunction(unsafe { LLVMVoidTypeInContext(irBuilder.GetLLVMContext().raw) }, instFunc,
+        ArrayList<CGValue>([
+            cgMod.CreateGhostCFuncArgValue(castVal, CGType.GetCStringCGType(cgMod)),
+            cgMod.CreateGhostCFuncArgValue(typeSize, CGType.GetInt64CGType(cgMod))
+        ]), ArrayList<String>([FAST_NATIVE_ATTR]))
+}
+
+private func InsertAsanInstrument(irBuilder: IRBuilder2, typeArgs: ArrayList<Type>, gep: LLVMValueRef,
+    asanFunc: String): Unit {
+    let compileOptions = irBuilder.GetCGModule().GetCGContext().GetCompileOptions()
+    if (compileOptions.EnableAsan() || compileOptions.EnableHwAsan()) {
+        CJC_ASSERT(typeArgs.size == 1)
+        let typeSize = irBuilder.GetSize_64(typeArgs[0])
+        InstrumentPointerOps(irBuilder, asanFunc, gep, typeSize)
+    }
+}
+
+private func GenerateCPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>, typeArgs: ArrayList<Type>,
     resultType: Option<Type>): LLVMValueRef {
     if (args.size < 2 || resultType.isNone()) {
         return LLVMNullValue()
@@ -536,6 +559,7 @@ private func GenerateCPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>,
             let genericIndices = ArrayList<LLVMValueRef>()
             genericIndices.add(offset)
             let gep = irBuilder.CreateGEP(i8Type, pointerValue, genericIndices, name: "ele.ptr")
+            InsertAsanInstrument(irBuilder, typeArgs, gep, "CJ_MCC_AsanRead")
             irBuilder.CreateMemCpy(destPayloadPtr, 0u32, gep, 0u32, resultTySize)
             return ret
         }
@@ -545,6 +569,7 @@ private func GenerateCPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>,
         let indices = ArrayList<LLVMValueRef>()
         indices.add(indexValue)
         let addr = irBuilder.CreateGEP(resultCGType.GetLLVMType(), typedPtr, indices, name: "ptr.read.addr")
+        InsertAsanInstrument(irBuilder, typeArgs, addr, "CJ_MCC_AsanRead")
         return HandleValuePtr(irBuilder, addr)
     }
     return LLVMNullValue()
@@ -566,7 +591,8 @@ private func IsVArrayPtrType(llvmType: LLVMTypeRef): Bool {
     return !elementType.isNull() && unsafe { LLVMGetTypeKind(elementType) } == LLVM_ARRAY_TYPE_KIND_FOR_INTRINSICS
 }
 
-private func GenerateCPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>): LLVMValueRef {
+private func GenerateCPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>,
+    typeArgs: ArrayList<Type>): LLVMValueRef {
     if (args.size < 3) {
         return LLVMNullValue()
     }
@@ -584,6 +610,7 @@ private func GenerateCPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>
             indices.add(offset)
             let addr = irBuilder.CreateGEP(i8Type, pointerValue, indices, name: "ele.ptr")
             let payloadPtr = irBuilder.GetPayloadFromObject(value.GetRawValue())
+            InsertAsanInstrument(irBuilder, typeArgs, addr, "CJ_MCC_AsanWrite")
             return irBuilder.CreateMemCpy(addr, 0u32, payloadPtr, 0u32, valueTySize)
         }
         let rawValue = value.GetRawValue()
@@ -604,6 +631,7 @@ private func GenerateCPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>
         let indices = ArrayList<LLVMValueRef>()
         indices.add(indexValue)
         let addr = irBuilder.CreateGEP(GetPointerElementType(paramType), typedPtr, indices, name: "ptr.write.addr")
+        InsertAsanInstrument(irBuilder, typeArgs, addr, "CJ_MCC_AsanWrite")
         if (valueTy.IsStruct() || valueTy.IsUnit()) {
             let elementType = GetPointerElementType(rawValueType)
             let size = unsafe {
