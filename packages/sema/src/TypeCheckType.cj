@@ -234,9 +234,9 @@ public func TypeCheckTypeCheckVArrayType(
     let typeArgTy = typeArg.GetTy().getOrThrow()
     let result = TypeCheckTypeCheckVArrayWithRefType(tm, typeArgTy)
     if (result.hasReference) {
-        let builder = diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(diag,
             BasicDiagKindRefactor.sema_varray_arg_type_with_reftype,
-            TypeCheckTypeRange(typeArg),
+            typeArg,
             arguments: [typeArgTy.String()])
         builder.AddMainHintArguments([result.reportType])
         builder.Emit()
@@ -272,8 +272,9 @@ public func TypeCheckTypeCheckTypeParametersForAliasRef(
         expected = generic.typeParameters.size
     }
     if (refType.typeArguments.size != expected) {
-        let builder = diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(diag,
             BasicDiagKindRefactor.sema_generic_argument_no_match,
+            refType,
             TypeCheckTypeRange(refType))
         builder.Emit()
         return false
@@ -608,15 +609,15 @@ public func TypeCheckTypeCheckCFuncReturnType(diag: BasicDiagnosticEngine, typeN
     }
     let ty = typeNode.GetTy().getOrThrow()
     if (!Ty.IsMetCType(ty)) {
-        let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_invalid_cfunc_return_type,
-            TypeCheckTypeRange(typeNode))
+        let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_invalid_cfunc_return_type,
+            typeNode)
         builder.AddNote("return type is " + ty.String())
         builder.Emit()
         return false
     }
     if (let Some(_) <- (ty as VArrayTy)) {
-        let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_varray_in_cfunc,
-            TypeCheckTypeRange(typeNode))
+        let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_varray_in_cfunc,
+            typeNode)
         builder.Emit()
         return false
     }
