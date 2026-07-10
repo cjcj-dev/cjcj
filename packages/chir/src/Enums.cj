@@ -1,5 +1,7 @@
 package cjcj::chir
 
+import cjcj::utils.CJC_ABORT
+
 public enum ToCHIRPhase {
     | RAW
     | OPT
@@ -27,6 +29,18 @@ public func ToCHIRPhaseFromUInt8(phase: UInt8): ToCHIRPhase {
         case 2u8 => ToCHIRPhase.PLUGIN
         case 3u8 => ToCHIRPhase.ANALYSIS_FOR_CJLINT
         case _ => ToCHIRPhase.RAW
+    }
+}
+
+public func PhaseToString(phase: ToCHIRPhase): String {
+    return match (phase) {
+        case ToCHIRPhase.RAW => "raw"
+        case ToCHIRPhase.OPT => "opt"
+        case ToCHIRPhase.PLUGIN => "plugin"
+        case ToCHIRPhase.ANALYSIS_FOR_CJLINT => "analysis for cjlint"
+        case _ =>
+            CJC_ABORT()
+            ""
     }
 }
 

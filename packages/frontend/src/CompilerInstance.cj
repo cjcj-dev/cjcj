@@ -20,6 +20,7 @@ import cjcj::lex.TokenKind as CangjieTokenKind
 import cjcj::lex.TokenKindValue
 import cjcj::utils.FreeIdleMemoryToOS
 import std.collection.*
+import std.core.Box as CoreBox
 
 private class PendingMangledDecl {
     public let astDecl: Decl
@@ -882,19 +883,11 @@ public class CompilerInstance {
     }
 
     public func DeserializeCHIR(): Bool {
-        if (!invocation.frontendOptions.chirDeserialize || invocation.frontendOptions.chirDeserializePath.isEmpty()) {
-            return false
-        }
-        let readResult = ReadFileContent(invocation.frontendOptions.chirDeserializePath)
-        if (!readResult[0]) {
-            diag.Diagnose(DiagCategory.CHIR, DEFAULT_POSITION,
-                "failed to deserialize CHIR: " + readResult[2])
-            return false
-        }
-        let chirPkg = CHIRPackage(GetFileName(invocation.frontendOptions.chirDeserializePath))
-        chirPkg.fileCount = SplitLines(readResult[1]).size
-        chirPkg.declCount = 0
-        chirData.AppendNewPackage(chirPkg)
+        let chirBuilder = CHIRBuilder(GetCHIRContext())
+        let phase = CoreBox<ToCHIRPhase>(ToCHIRPhase.RAW)
+        CHIRDeserializer.Deserialize(invocation.frontendOptions.chirDeserializePath, chirBuilder, phase)
+        CHIRPrinter.PrintCHIRSerializeInfo(phase.value, "deserialized.chir")
+        CHIRPrinter.PrintPackage(GetCHIRContext().GetCurPackage().getOrThrow(), "deserialized.chir")
         return true
     }
 
