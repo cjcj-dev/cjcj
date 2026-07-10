@@ -11,18 +11,18 @@ public func ChkFloatTypeOverflow(expr: LitConstExpr, diag!: Option<BasicDiagnost
     match (expr.constNumValue.asFloat.flowStatus) {
         case FlowStatus.OVER =>
             if (let Some(diagValue) <- diag) {
-                let builder = diagValue.DiagnoseRefactor(
+                let builder = DiagnoseRefactor(diagValue,
                     BasicDiagKindRefactor.sema_float_literal_too_large,
-                    BasicMakeRange(expr.begin, expr.end),
+                    expr,
                     arguments: [(expr.GetTy() ?? TypeManager.GetInvalidTy()).String(), info.max])
                 builder.Emit()
             }
             return false
         case FlowStatus.UNDER =>
             if (let Some(diagValue2) <- diag) {
-                let builder = diagValue2.DiagnoseRefactor(
+                let builder = DiagnoseRefactor(diagValue2,
                     BasicDiagKindRefactor.sema_float_literal_too_small,
-                    BasicMakeRange(expr.begin, expr.end),
+                    expr,
                     arguments: [(expr.GetTy() ?? TypeManager.GetInvalidTy()).String(), info.min])
                 builder.Emit()
             }
@@ -44,18 +44,18 @@ public func ChkFloatTypeOverflow(expr: LitConstExpr, diag!: Option<BasicDiagnost
     }
     if (expr.constNumValue.asFloat.value != 0.0 && value == 0u64) {
         if (let Some(diagValue3) <- diag) {
-            let builder = diagValue3.DiagnoseRefactor(
+            let builder = DiagnoseRefactor(diagValue3,
                 BasicDiagKindRefactor.sema_float_literal_too_small,
-                BasicMakeRange(expr.begin, expr.end),
+                expr,
                 arguments: [(expr.GetTy() ?? TypeManager.GetInvalidTy()).String(), info.min])
             builder.Emit()
         }
         return false
     } else if (value == info.inf) {
         if (let Some(diagValue4) <- diag) {
-            let builder = diagValue4.DiagnoseRefactor(
+            let builder = DiagnoseRefactor(diagValue4,
                 BasicDiagKindRefactor.sema_float_literal_too_large,
-                BasicMakeRange(expr.begin, expr.end),
+                expr,
                 arguments: [(expr.GetTy() ?? TypeManager.GetInvalidTy()).String(), info.max])
             builder.Emit()
         }
