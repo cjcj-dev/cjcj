@@ -7792,11 +7792,11 @@ public class Translator {
                     throw IllegalStateException("faithful AST2CHIR member base has no type: ${baseInfo.base.GetIdentifier()}")
                 var baseValRefDims = baseValueTy.GetRefDims()
                 let strippedBaseValueTy = baseValueTy.StripAllRefs()
-                let instMap = HashMap<Int64, Type>()
+                let instMap = HashMap<Int64, (GenericType, Type)>()
                 if (let Some(baseValCustomTy) <- (strippedBaseValueTy as CustomType)) {
-                    baseValCustomTy.GetInstMap(instMap)
+                    baseValCustomTy.GetInstMap(instMap, builder)
                 } else if (let Some(baseValGenericTy) <- (strippedBaseValueTy as GenericType)) {
-                    baseValGenericTy.GetInstMap(instMap)
+                    baseValGenericTy.GetInstMap(instMap, builder)
                 }
                 var targetBaseTy = chirTy.TranslateType(targetBaseAstTy)
                 if (targetBaseTy.GetRefDims() > baseValRefDims) {
@@ -7842,8 +7842,8 @@ public class Translator {
         while (pathIndex < path.size) {
             let name = path[pathIndex]
             let allMemberVars = memberBaseTy.GetCustomTypeDef().GetAllInstanceVars()
-            let instMap = HashMap<Int64, Type>()
-            memberBaseTy.GetInstMap(instMap)
+            let instMap = HashMap<Int64, (GenericType, Type)>()
+            memberBaseTy.GetInstMap(instMap, builder)
             var memberIndex = allMemberVars.size
             memberTy = None
             while (memberIndex > 0) {
@@ -7890,11 +7890,11 @@ public class Translator {
                 throw IllegalStateException("faithful AST2CHIR member base value has no type: ${concreteBaseVal.GetIdentifier()}")
             var baseValRefDims = concreteBaseValTy.GetRefDims()
             let strippedBaseValTy = concreteBaseValTy.StripAllRefs()
-            let instMap = HashMap<Int64, Type>()
+            let instMap = HashMap<Int64, (GenericType, Type)>()
             if (let Some(baseValCustomTy) <- (strippedBaseValTy as CustomType)) {
-                baseValCustomTy.GetInstMap(instMap)
+                baseValCustomTy.GetInstMap(instMap, builder)
             } else if (let Some(baseValGenericTy) <- (strippedBaseValTy as GenericType)) {
-                baseValGenericTy.GetInstMap(instMap)
+                baseValGenericTy.GetInstMap(instMap, builder)
             }
             var targetBaseTy = chirTy.TranslateType(targetBaseAstTy)
             if (targetBaseTy.GetRefDims() > baseValRefDims) {

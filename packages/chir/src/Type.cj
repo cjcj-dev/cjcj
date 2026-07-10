@@ -981,10 +981,10 @@ public class GenericType <: Type {
         }, stable: true)
     }
 
-    public func GetInstMap(instMap: HashMap<Int64, Type>): Unit {
+    public func GetInstMap(instMap: HashMap<Int64, (GenericType, Type)>, builder: CHIRBuilder): Unit {
         for (upperBound in upperBounds) {
             let upperBoundCustomType = (upperBound.StripAllRefs() as CustomType).getOrThrow()
-            upperBoundCustomType.GetInstMap(instMap)
+            upperBoundCustomType.GetInstMap(instMap, builder)
         }
     }
 
@@ -1151,7 +1151,7 @@ public open class CustomType <: Type {
         return result
     }
 
-    public func GetInstMap(instMap: HashMap<Int64, Type>): Unit {
+    public func GetInstMap(instMap: HashMap<Int64, (GenericType, Type)>, builder: CHIRBuilder): Unit {
         let customTypeDef = GetCustomTypeDef()
         let customTypeDefGenericParams = customTypeDef.GetGenericTypeParams()
         let customTypeGenericArgs = GetGenericArgs()
@@ -1162,7 +1162,7 @@ public open class CustomType <: Type {
         while (paramIdx < customTypeDefGenericParams.size) {
             let genericParam = customTypeDefGenericParams[paramIdx]
             if (!instMap.contains(genericParam.objectId)) {
-                instMap[genericParam.objectId] = customTypeGenericArgs[paramIdx]
+                instMap[genericParam.objectId] = (genericParam, customTypeGenericArgs[paramIdx])
             }
             paramIdx++
         }
@@ -1171,7 +1171,7 @@ public open class CustomType <: Type {
             let parentInterfaceDef = parentInterfaceTy.GetCustomTypeDef()
             let parentInterfaceDefGenericParams = parentInterfaceDef.GetGenericTypeParams()
             let instParentInterfaceTy =
-                (ReplaceRawGenericArgType(parentInterfaceTy, instMap) as ClassType).getOrThrow()
+                (ReplaceRawGenericArgType(parentInterfaceTy, instMap, builder) as ClassType).getOrThrow()
             let parentInterfaceTypeGenericArgs = instParentInterfaceTy.GetGenericArgs()
             if (!customTypeDefGenericParams.isEmpty()) {
                 CJC_ASSERT(parentInterfaceDefGenericParams.size == parentInterfaceTypeGenericArgs.size)
@@ -1180,11 +1180,12 @@ public open class CustomType <: Type {
             while (interfaceIdx < parentInterfaceDefGenericParams.size) {
                 let interfaceGenericParam = parentInterfaceDefGenericParams[interfaceIdx]
                 if (!instMap.contains(interfaceGenericParam.objectId)) {
-                    instMap[interfaceGenericParam.objectId] = parentInterfaceTypeGenericArgs[interfaceIdx]
+                    instMap[interfaceGenericParam.objectId] =
+                        (interfaceGenericParam, parentInterfaceTypeGenericArgs[interfaceIdx])
                 }
                 interfaceIdx++
             }
-            parentInterfaceTy.GetInstMap(instMap)
+            parentInterfaceTy.GetInstMap(instMap, builder)
         }
 
         if (let Some(classTy) <- (this as ClassType)) {
@@ -1193,7 +1194,7 @@ public open class CustomType <: Type {
                 let parentClassDef = parentClassTy.GetCustomTypeDef()
                 let parentClassDefGenericParams = parentClassDef.GetGenericTypeParams()
                 let instParentClassTy =
-                    (ReplaceRawGenericArgType(parentClassTy, instMap) as ClassType).getOrThrow()
+                    (ReplaceRawGenericArgType(parentClassTy, instMap, builder) as ClassType).getOrThrow()
                 let parentClassTypeGenericArgs = instParentClassTy.GetGenericArgs()
                 if (!parentClassDefGenericParams.isEmpty()) {
                     CJC_ASSERT(parentClassDefGenericParams.size == parentClassTypeGenericArgs.size)
@@ -1202,11 +1203,12 @@ public open class CustomType <: Type {
                 while (classIdx < parentClassDefGenericParams.size) {
                     let classGenericParam = parentClassDefGenericParams[classIdx]
                     if (!instMap.contains(classGenericParam.objectId)) {
-                        instMap[classGenericParam.objectId] = parentClassTypeGenericArgs[classIdx]
+                        instMap[classGenericParam.objectId] =
+                            (classGenericParam, parentClassTypeGenericArgs[classIdx])
                     }
                     classIdx++
                 }
-                parentClassTy.GetInstMap(instMap)
+                parentClassTy.GetInstMap(instMap, builder)
             }
         }
     }
@@ -1221,8 +1223,8 @@ public open class CustomType <: Type {
             return (this, false)
         }
         let customTypeDef = GetCustomTypeDef()
-        let instMap = HashMap<Int64, Type>()
-        GetInstMap(instMap)
+        let instMap = HashMap<Int64, (GenericType, Type)>()
+        GetInstMap(instMap, builder)
         let currentIdx = path[0]
         let member = customTypeDef.GetAllInstanceVars()[Int64(currentIdx)]
         let isReadOnly = member.TestAttr(Attribute.READONLY)
@@ -1565,6 +1567,24 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type
     if (let Some(genericTy) <- (ty as GenericType)) {
         if (let Some(instTy) <- replaceTable.get(genericTy.objectId)) {
             return instTy
+        }
+        return ty
+    }
+    let newArgs = ArrayList<Type>()
+    for (argTy in ty.GetTypeArgs()) {
+        newArgs.add(ReplaceRawGenericArgType(argTy, replaceTable, builder))
+    }
+    return CreateNewTypeWithArgs(ty, newArgs, builder)
+}
+
+public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, (GenericType, Type)>,
+    builder: CHIRBuilder): Type {
+    if (replaceTable.isEmpty()) {
+        return ty
+    }
+    if (let Some(genericTy) <- (ty as GenericType)) {
+        if (let Some(instTy) <- replaceTable.get(genericTy.objectId)) {
+            return instTy[1]
         }
         return ty
     }
