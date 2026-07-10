@@ -412,7 +412,7 @@ public class ApplyWithException <: FuncCallWithException {
 }
 
 public open class DynamicDispatchWithException <: FuncCallWithException {
-    private let virMethodCtx: FuncSigInfo
+    let virMethodCtx: FuncSigInfo
     private var virtualMethodOffset: Option<UInt64> = None
 
     public init(kind: ExprKind, callContext: InvokeCallContext, successBlock: Block, errorBlock: Block,

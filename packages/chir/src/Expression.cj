@@ -883,7 +883,7 @@ public class Apply <: FuncCall {
 }
 
 public open class DynamicDispatch <: FuncCall {
-    private let virMethodCtx: FuncSigInfo
+    let virMethodCtx: FuncSigInfo
     private var virtualMethodOffset: Option<UInt64> = None
 
     public init(kind: ExprKind, callContext: InvokeCallContext, parent: Option<Block>) {

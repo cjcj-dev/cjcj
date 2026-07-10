@@ -6,6 +6,463 @@ import cjcj::basic.Linkage as BasicLinkage
 import cjcj::basic.LinkageToInt
 import cjcj::modules.{FlatBufferBuilder, FlatBufferOffset}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
+import cjcj::utils.OverflowStrategyIndex
+
+private func IntrinsicKindToPackageIntrinsicKind(kind: IntrinsicKind): UInt16 {
+    return match (kind) {
+        case IntrinsicKind.NOT_INTRINSIC => 0u16
+        case IntrinsicKind.NOT_IMPLEMENTED => 1u16
+        case IntrinsicKind.ARRAY_INIT => 2u16
+        case IntrinsicKind.SIZE_OF => 3u16
+        case IntrinsicKind.ALIGN_OF => 4u16
+        case IntrinsicKind.ARRAY_ACQUIRE_RAW_DATA => 5u16
+        case IntrinsicKind.ARRAY_RELEASE_RAW_DATA => 6u16
+        case IntrinsicKind.ARRAY_BUILT_IN_COPY_TO => 7u16
+        case IntrinsicKind.ARRAY_GET => 8u16
+        case IntrinsicKind.ARRAY_SET => 9u16
+        case IntrinsicKind.ARRAY_GET_UNCHECKED => 10u16
+        case IntrinsicKind.ARRAY_GET_REF_UNCHECKED => 11u16
+        case IntrinsicKind.ARRAY_SET_UNCHECKED => 12u16
+        case IntrinsicKind.ARRAY_SIZE => 13u16
+        case IntrinsicKind.ARRAY_CLONE => 14u16
+        case IntrinsicKind.ARRAY_SLICE_INIT => 15u16
+        case IntrinsicKind.ARRAY_SLICE => 16u16
+        case IntrinsicKind.ARRAY_SLICE_RAWARRAY => 17u16
+        case IntrinsicKind.ARRAY_SLICE_START => 18u16
+        case IntrinsicKind.ARRAY_SLICE_SIZE => 19u16
+        case IntrinsicKind.ARRAY_SLICE_GET_ELEMENT => 20u16
+        case IntrinsicKind.ARRAY_SLICE_GET_ELEMENT_UNCHECKED => 21u16
+        case IntrinsicKind.ARRAY_SLICE_SET_ELEMENT => 22u16
+        case IntrinsicKind.ARRAY_SLICE_SET_ELEMENT_UNCHECKED => 23u16
+        case IntrinsicKind.FILL_IN_STACK_TRACE => 24u16
+        case IntrinsicKind.DECODE_STACK_TRACE => 25u16
+        case IntrinsicKind.DUMP_CURRENT_THREAD_INFO => 26u16
+        case IntrinsicKind.DUMP_ALL_THREADS_INFO => 27u16
+        case IntrinsicKind.CHR => 28u16
+        case IntrinsicKind.ORD => 29u16
+        case IntrinsicKind.CPOINTER_GET_POINTER_ADDRESS => 30u16
+        case IntrinsicKind.CPOINTER_INIT0 => 31u16
+        case IntrinsicKind.CPOINTER_INIT1 => 32u16
+        case IntrinsicKind.CPOINTER_READ => 33u16
+        case IntrinsicKind.CPOINTER_WRITE => 34u16
+        case IntrinsicKind.CPOINTER_ADD => 35u16
+        case IntrinsicKind.CSTRING_INIT => 36u16
+        case IntrinsicKind.CSTRING_CONVERT_CSTR_TO_PTR => 37u16
+        case IntrinsicKind.INOUT_PARAM => 38u16
+        case IntrinsicKind.REGISTER_WATCHED_OBJECT => 39u16
+        case IntrinsicKind.OBJECT_REFEQ => 40u16
+        case IntrinsicKind.RAW_ARRAY_REFEQ => 41u16
+        case IntrinsicKind.FUNC_REFEQ => 42u16
+        case IntrinsicKind.OBJECT_ZERO_VALUE => 43u16
+        case IntrinsicKind.INVOKE_GC => 44u16
+        case IntrinsicKind.SET_GC_THRESHOLD => 45u16
+        case IntrinsicKind.DUMP_CJ_HEAP_DATA => 46u16
+        case IntrinsicKind.GET_GC_COUNT => 47u16
+        case IntrinsicKind.GET_GC_TIME_US => 48u16
+        case IntrinsicKind.GET_GC_FREED_SIZE => 49u16
+        case IntrinsicKind.START_CJ_CPU_PROFILING => 50u16
+        case IntrinsicKind.STOP_CJ_CPU_PROFILING => 51u16
+        case IntrinsicKind.BLACK_BOX => 52u16
+        case IntrinsicKind.GET_MAX_HEAP_SIZE => 53u16
+        case IntrinsicKind.GET_ALLOCATE_HEAP_SIZE => 54u16
+        case IntrinsicKind.GET_REAL_HEAP_SIZE => 55u16
+        case IntrinsicKind.GET_THREAD_NUMBER => 56u16
+        case IntrinsicKind.GET_BLOCKING_THREAD_NUMBER => 57u16
+        case IntrinsicKind.GET_NATIVE_THREAD_NUMBER => 58u16
+        case IntrinsicKind.VARRAY_SET => 59u16
+        case IntrinsicKind.VARRAY_GET => 60u16
+        case IntrinsicKind.FUTURE_INIT => 61u16
+        case IntrinsicKind.FUTURE_IS_COMPLETE => 62u16
+        case IntrinsicKind.FUTURE_WAIT => 63u16
+        case IntrinsicKind.FUTURE_NOTIFYALL => 64u16
+        case IntrinsicKind.IS_THREAD_OBJECT_INITED => 65u16
+        case IntrinsicKind.GET_THREAD_OBJECT => 66u16
+        case IntrinsicKind.SET_THREAD_OBJECT => 67u16
+        case IntrinsicKind.OVERFLOW_CHECKED_ADD => 68u16
+        case IntrinsicKind.OVERFLOW_CHECKED_SUB => 69u16
+        case IntrinsicKind.OVERFLOW_CHECKED_MUL => 70u16
+        case IntrinsicKind.OVERFLOW_CHECKED_DIV => 71u16
+        case IntrinsicKind.OVERFLOW_CHECKED_MOD => 72u16
+        case IntrinsicKind.OVERFLOW_CHECKED_POW => 73u16
+        case IntrinsicKind.OVERFLOW_CHECKED_INC => 74u16
+        case IntrinsicKind.OVERFLOW_CHECKED_DEC => 75u16
+        case IntrinsicKind.OVERFLOW_CHECKED_NEG => 76u16
+        case IntrinsicKind.OVERFLOW_THROWING_ADD => 77u16
+        case IntrinsicKind.OVERFLOW_THROWING_SUB => 78u16
+        case IntrinsicKind.OVERFLOW_THROWING_MUL => 79u16
+        case IntrinsicKind.OVERFLOW_THROWING_DIV => 80u16
+        case IntrinsicKind.OVERFLOW_THROWING_MOD => 81u16
+        case IntrinsicKind.OVERFLOW_THROWING_POW => 82u16
+        case IntrinsicKind.OVERFLOW_THROWING_INC => 83u16
+        case IntrinsicKind.OVERFLOW_THROWING_DEC => 84u16
+        case IntrinsicKind.OVERFLOW_THROWING_NEG => 85u16
+        case IntrinsicKind.OVERFLOW_SATURATING_ADD => 86u16
+        case IntrinsicKind.OVERFLOW_SATURATING_SUB => 87u16
+        case IntrinsicKind.OVERFLOW_SATURATING_MUL => 88u16
+        case IntrinsicKind.OVERFLOW_SATURATING_DIV => 89u16
+        case IntrinsicKind.OVERFLOW_SATURATING_MOD => 90u16
+        case IntrinsicKind.OVERFLOW_SATURATING_POW => 91u16
+        case IntrinsicKind.OVERFLOW_SATURATING_INC => 92u16
+        case IntrinsicKind.OVERFLOW_SATURATING_DEC => 93u16
+        case IntrinsicKind.OVERFLOW_SATURATING_NEG => 94u16
+        case IntrinsicKind.OVERFLOW_WRAPPING_ADD => 95u16
+        case IntrinsicKind.OVERFLOW_WRAPPING_SUB => 96u16
+        case IntrinsicKind.OVERFLOW_WRAPPING_MUL => 97u16
+        case IntrinsicKind.OVERFLOW_WRAPPING_DIV => 98u16
+        case IntrinsicKind.OVERFLOW_WRAPPING_MOD => 99u16
+        case IntrinsicKind.OVERFLOW_WRAPPING_POW => 100u16
+        case IntrinsicKind.OVERFLOW_WRAPPING_INC => 101u16
+        case IntrinsicKind.OVERFLOW_WRAPPING_DEC => 102u16
+        case IntrinsicKind.OVERFLOW_WRAPPING_NEG => 103u16
+        case IntrinsicKind.VECTOR_COMPARE_32 => 104u16
+        case IntrinsicKind.VECTOR_INDEX_BYTE_32 => 105u16
+        case IntrinsicKind.CJ_CORE_CAN_USE_SIMD => 106u16
+        case IntrinsicKind.CJ_TLS_DYN_SET_SESSION_CALLBACK => 107u16
+        case IntrinsicKind.CJ_TLS_DYN_SSL_INIT => 108u16
+        case IntrinsicKind.REFLECTION_INTRINSIC_START_FLAG => 109u16
+        case IntrinsicKind.IS_INTERFACE => 110u16
+        case IntrinsicKind.IS_CLASS => 111u16
+        case IntrinsicKind.IS_PRIMITIVE => 112u16
+        case IntrinsicKind.IS_STRUCT => 113u16
+        case IntrinsicKind.IS_GENERIC => 114u16
+        case IntrinsicKind.IS_TUPLE => 115u16
+        case IntrinsicKind.IS_FUNCTION => 116u16
+        case IntrinsicKind.IS_ENUM => 117u16
+        case IntrinsicKind.IS_BOX => 118u16
+        case IntrinsicKind.GET_OR_CREATE_TYPEINFO_FOR_REFLECT => 119u16
+        case IntrinsicKind.GET_TYPETEMPLATE => 120u16
+        case IntrinsicKind.CHECK_METHOD_ACTUAL_ARGS => 121u16
+        case IntrinsicKind.METHOD_ENTRYPOINT_IS_NULL => 122u16
+        case IntrinsicKind.IS_RELECT_UNSUPPORTED_TYPE => 123u16
+        case IntrinsicKind.GET_TYPE_FOR_ANY => 124u16
+        case IntrinsicKind.GET_TYPE_BY_MANGLED_NAME => 125u16
+        case IntrinsicKind.GET_TYPE_NAME => 126u16
+        case IntrinsicKind.GET_TYPE_BY_QUALIFIED_NAME => 127u16
+        case IntrinsicKind.GET_TYPE_QUALIFIED_NAME_LENGTH => 128u16
+        case IntrinsicKind.GET_TYPE_QUALIFIED_NAME => 129u16
+        case IntrinsicKind.GET_NUM_OF_INTERFACE => 130u16
+        case IntrinsicKind.GET_INTERFACE => 131u16
+        case IntrinsicKind.IS_SUBTYPE => 132u16
+        case IntrinsicKind.GET_TYPE_INFO_MODIFIER => 133u16
+        case IntrinsicKind.GET_TYPE_INFO_ANNOTATIONS => 134u16
+        case IntrinsicKind.GET_OBJ_CLASS => 135u16
+        case IntrinsicKind.GET_SUPER_TYPE_INFO => 136u16
+        case IntrinsicKind.GET_TYPE_ARGS => 137u16
+        case IntrinsicKind.GET_NUM_OF_INSTANCE_METHOD_INFOS => 138u16
+        case IntrinsicKind.GET_INSTANCE_METHOD_INFO => 139u16
+        case IntrinsicKind.GET_NUM_OF_STATIC_METHOD_INFOS => 140u16
+        case IntrinsicKind.GET_STATIC_METHOD_INFO => 141u16
+        case IntrinsicKind.GET_METHOD_NAME => 142u16
+        case IntrinsicKind.GET_METHOD_RETURN_TYPE => 143u16
+        case IntrinsicKind.GET_METHOD_MODIFIER => 144u16
+        case IntrinsicKind.GET_METHOD_ANNOTATIONS => 145u16
+        case IntrinsicKind.APPLY_CJ_METHOD => 146u16
+        case IntrinsicKind.APPLY_CJ_STATIC_METHOD => 147u16
+        case IntrinsicKind.APPLY_CJ_GENERIC_METHOD => 148u16
+        case IntrinsicKind.APPLY_CJ_GENERIC_STATIC_METHOD => 149u16
+        case IntrinsicKind.GET_NUM_OF_ACTUAL_PARAMETERS => 150u16
+        case IntrinsicKind.GET_NUM_OF_GENERIC_PARAMETERS => 151u16
+        case IntrinsicKind.GET_ACTUAL_PARAMETER_INFO => 152u16
+        case IntrinsicKind.GET_GENERIC_PARAMETER_INFO => 153u16
+        case IntrinsicKind.GET_NUM_OF_INSTANCE_FIELD_INFOS => 154u16
+        case IntrinsicKind.GET_INSTANCE_FIELD_INFO => 155u16
+        case IntrinsicKind.GET_NUM_OF_STATIC_FIELD_INFOS => 156u16
+        case IntrinsicKind.GET_STATIC_FIELD_INFO => 157u16
+        case IntrinsicKind.GET_STATIC_FIELD_NAME => 158u16
+        case IntrinsicKind.GET_STATIC_FIELD_TYPE => 159u16
+        case IntrinsicKind.GET_STATIC_FIELD_ANNOTATIONS => 160u16
+        case IntrinsicKind.GET_INSTANCE_FIELD_NAME => 161u16
+        case IntrinsicKind.GET_INSTANCE_FIELD_TYPE => 162u16
+        case IntrinsicKind.GET_INSTANCE_FIELD_ANNOTATIONS => 163u16
+        case IntrinsicKind.GET_INSTANCE_FIELD_MODIFIER => 164u16
+        case IntrinsicKind.GET_STATIC_FIELD_MODIFIER => 165u16
+        case IntrinsicKind.GET_FIELD_VALUE => 166u16
+        case IntrinsicKind.SET_FIELD_VALUE => 167u16
+        case IntrinsicKind.GET_STATIC_FIELD_VALUE => 168u16
+        case IntrinsicKind.SET_STATIC_FIELD_VALUE => 169u16
+        case IntrinsicKind.GET_FIELD_DECLARING_TYPE => 170u16
+        case IntrinsicKind.GET_PARAMETER_INDEX => 171u16
+        case IntrinsicKind.GET_PARAMETER_NAME => 172u16
+        case IntrinsicKind.GET_PARAMETER_TYPE => 173u16
+        case IntrinsicKind.GET_PARAMETER_ANNOTATIONS => 174u16
+        case IntrinsicKind.GET_RELATED_PACKAGE_INF => 175u16
+        case IntrinsicKind.GET_PACKAGE_NAME => 176u16
+        case IntrinsicKind.GET_PACKAGE_NUM_OF_TYPE_INFOS => 177u16
+        case IntrinsicKind.GET_PACKAGE_TYPE_INFO => 178u16
+        case IntrinsicKind.GET_PACKAGE_NUM_OF_GLOBAL_METHODS => 179u16
+        case IntrinsicKind.GET_PACKAGE_GLOBAL_METHOD_INFO => 180u16
+        case IntrinsicKind.GET_PACKAGE_NUM_OF_GLOBAL_FIELD_INFOS => 181u16
+        case IntrinsicKind.GET_PACKAGE_GLOBAL_FIELD_INFO => 182u16
+        case IntrinsicKind.LOAD_PACKAGE => 183u16
+        case IntrinsicKind.GET_PACKAGE_BY_QUALIFIEDNAME => 184u16
+        case IntrinsicKind.GET_PACKAGE_VERSION => 185u16
+        case IntrinsicKind.GET_SUB_PACKAGES => 186u16
+        case IntrinsicKind.GET_NUM_OF_FIELD_TYPES => 187u16
+        case IntrinsicKind.GET_FIELD_TYPES => 188u16
+        case IntrinsicKind.NEW_AND_INIT_OBJECT => 189u16
+        case IntrinsicKind.GET_ASSOCIATED_VALUES => 190u16
+        case IntrinsicKind.GET_NUM_OF_FUNCTION_SIGNATURETYPES => 191u16
+        case IntrinsicKind.GET_FUNCTION_SIGNATURE_TYPES => 192u16
+        case IntrinsicKind.GET_NUM_OF_ENUM_CONSTRUCTOR_INFOS => 193u16
+        case IntrinsicKind.GET_ENUM_CONSTRUCTOR_INFO => 194u16
+        case IntrinsicKind.GET_ENUM_CONSTRUCTOR_NAME => 195u16
+        case IntrinsicKind.GET_ENUM_CONSTRUCTOR_INFO_FROM_ANY => 196u16
+        case IntrinsicKind.REFLECTION_INTRINSIC_END_FLAG => 197u16
+        case IntrinsicKind.SLEEP => 198u16
+        case IntrinsicKind.SOURCE_FILE => 199u16
+        case IntrinsicKind.SOURCE_LINE => 200u16
+        case IntrinsicKind.IDENTITY_HASHCODE => 201u16
+        case IntrinsicKind.IDENTITY_HASHCODE_FOR_ARRAY => 202u16
+        case IntrinsicKind.ATOMIC_LOAD => 203u16
+        case IntrinsicKind.ATOMIC_STORE => 204u16
+        case IntrinsicKind.ATOMIC_SWAP => 205u16
+        case IntrinsicKind.ATOMIC_COMPARE_AND_SWAP => 206u16
+        case IntrinsicKind.ATOMIC_FETCH_ADD => 207u16
+        case IntrinsicKind.ATOMIC_FETCH_SUB => 208u16
+        case IntrinsicKind.ATOMIC_FETCH_AND => 209u16
+        case IntrinsicKind.ATOMIC_FETCH_OR => 210u16
+        case IntrinsicKind.ATOMIC_FETCH_XOR => 211u16
+        case IntrinsicKind.MUTEX_INIT => 212u16
+        case IntrinsicKind.CJ_MUTEX_LOCK => 213u16
+        case IntrinsicKind.MUTEX_TRY_LOCK => 214u16
+        case IntrinsicKind.MUTEX_CHECK_STATUS => 215u16
+        case IntrinsicKind.MUTEX_UNLOCK => 216u16
+        case IntrinsicKind.WAITQUEUE_INIT => 217u16
+        case IntrinsicKind.MONITOR_INIT => 218u16
+        case IntrinsicKind.MOITIOR_WAIT => 219u16
+        case IntrinsicKind.MOITIOR_NOTIFY => 220u16
+        case IntrinsicKind.MOITIOR_NOTIFY_ALL => 221u16
+        case IntrinsicKind.MULTICONDITION_WAIT => 222u16
+        case IntrinsicKind.MULTICONDITION_NOTIFY => 223u16
+        case IntrinsicKind.MULTICONDITION_NOTIFY_ALL => 224u16
+        case IntrinsicKind.CROSS_ACCESS_BARRIER => 225u16
+        case IntrinsicKind.CREATE_EXPORT_HANDLE => 226u16
+        case IntrinsicKind.GET_EXPORTED_REF => 227u16
+        case IntrinsicKind.REMOVE_EXPORTED_REF => 228u16
+        case IntrinsicKind.GET_JSLAMBDA_ADDR => 229u16
+        case IntrinsicKind.FFI_CJ_AST_LEX => 230u16
+        case IntrinsicKind.FFI_CJ_AST_PARSEEXPR => 231u16
+        case IntrinsicKind.FFI_CJ_AST_PARSEDECL => 232u16
+        case IntrinsicKind.FFI_CJ_AST_PARSE_PROPMEMBERDECL => 233u16
+        case IntrinsicKind.FFI_CJ_AST_PARSE_PRICONSTRUCTOR => 234u16
+        case IntrinsicKind.FFI_CJ_AST_PARSE_PATTERN => 235u16
+        case IntrinsicKind.FFI_CJ_AST_PARSE_TYPE => 236u16
+        case IntrinsicKind.FFI_CJ_AST_PARSETOPLEVEL => 237u16
+        case IntrinsicKind.FFI_CJ_AST_DIAGREPORT => 238u16
+        case IntrinsicKind.FFI_CJ_PARENT_CONTEXT => 239u16
+        case IntrinsicKind.FFI_CJ_MACRO_ITEM_INFO => 240u16
+        case IntrinsicKind.FFI_CJ_GET_CHILD_MESSAGES => 241u16
+        case IntrinsicKind.FFI_CJ_CHECK_ADD_SPACE => 242u16
+        case IntrinsicKind.CG_UNSAFE_BEGIN => 243u16
+        case IntrinsicKind.CG_UNSAFE_END => 244u16
+        case IntrinsicKind.STRLEN => 245u16
+        case IntrinsicKind.MEMCPY_S => 246u16
+        case IntrinsicKind.MEMSET_S => 247u16
+        case IntrinsicKind.FREE => 248u16
+        case IntrinsicKind.MALLOC => 249u16
+        case IntrinsicKind.STRCMP => 250u16
+        case IntrinsicKind.MEMCMP => 251u16
+        case IntrinsicKind.STRNCMP => 252u16
+        case IntrinsicKind.STRCASECMP => 253u16
+        case IntrinsicKind.ATOMIC_INT8_LOAD => 254u16
+        case IntrinsicKind.ATOMIC_INT8_STORE => 255u16
+        case IntrinsicKind.ATOMIC_INT8_SWAP => 256u16
+        case IntrinsicKind.ATOMIC_INT8_CAS => 257u16
+        case IntrinsicKind.ATOMIC_INT8_FETCH_ADD => 258u16
+        case IntrinsicKind.ATOMIC_INT8_FETCH_SUB => 259u16
+        case IntrinsicKind.ATOMIC_INT8_FETCH_AND => 260u16
+        case IntrinsicKind.ATOMIC_INT8_FETCH_OR => 261u16
+        case IntrinsicKind.ATOMIC_INT8_FETCH_XOR => 262u16
+        case IntrinsicKind.ATOMIC_INT16_LOAD => 263u16
+        case IntrinsicKind.ATOMIC_INT16_STORE => 264u16
+        case IntrinsicKind.ATOMIC_INT16_SWAP => 265u16
+        case IntrinsicKind.ATOMIC_INT16_CAS => 266u16
+        case IntrinsicKind.ATOMIC_INT16_FETCH_ADD => 267u16
+        case IntrinsicKind.ATOMIC_INT16_FETCH_SUB => 268u16
+        case IntrinsicKind.ATOMIC_INT16_FETCH_AND => 269u16
+        case IntrinsicKind.ATOMIC_INT16_FETCH_OR => 270u16
+        case IntrinsicKind.ATOMIC_INT16_FETCH_XOR => 271u16
+        case IntrinsicKind.ATOMIC_INT32_LOAD => 272u16
+        case IntrinsicKind.ATOMIC_INT32_STORE => 273u16
+        case IntrinsicKind.ATOMIC_INT32_SWAP => 274u16
+        case IntrinsicKind.ATOMIC_INT32_CAS => 275u16
+        case IntrinsicKind.ATOMIC_INT32_FETCH_ADD => 276u16
+        case IntrinsicKind.ATOMIC_INT32_FETCH_SUB => 277u16
+        case IntrinsicKind.ATOMIC_INT32_FETCH_AND => 278u16
+        case IntrinsicKind.ATOMIC_INT32_FETCH_OR => 279u16
+        case IntrinsicKind.ATOMIC_INT32_FETCH_XOR => 280u16
+        case IntrinsicKind.ATOMIC_INT64_LOAD => 281u16
+        case IntrinsicKind.ATOMIC_INT64_STORE => 282u16
+        case IntrinsicKind.ATOMIC_INT64_SWAP => 283u16
+        case IntrinsicKind.ATOMIC_INT64_CAS => 284u16
+        case IntrinsicKind.ATOMIC_INT64_FETCH_ADD => 285u16
+        case IntrinsicKind.ATOMIC_INT64_FETCH_SUB => 286u16
+        case IntrinsicKind.ATOMIC_INT64_FETCH_AND => 287u16
+        case IntrinsicKind.ATOMIC_INT64_FETCH_OR => 288u16
+        case IntrinsicKind.ATOMIC_INT64_FETCH_XOR => 289u16
+        case IntrinsicKind.ATOMIC_UINT8_LOAD => 290u16
+        case IntrinsicKind.ATOMIC_UINT8_STORE => 291u16
+        case IntrinsicKind.ATOMIC_UINT8_SWAP => 292u16
+        case IntrinsicKind.ATOMIC_UINT8_CAS => 293u16
+        case IntrinsicKind.ATOMIC_UINT8_FETCH_ADD => 294u16
+        case IntrinsicKind.ATOMIC_UINT8_FETCH_SUB => 295u16
+        case IntrinsicKind.ATOMIC_UINT8_FETCH_AND => 296u16
+        case IntrinsicKind.ATOMIC_UINT8_FETCH_OR => 297u16
+        case IntrinsicKind.ATOMIC_UINT8_FETCH_XOR => 298u16
+        case IntrinsicKind.ATOMIC_UINT16_LOAD => 299u16
+        case IntrinsicKind.ATOMIC_UINT16_STORE => 300u16
+        case IntrinsicKind.ATOMIC_UINT16_SWAP => 301u16
+        case IntrinsicKind.ATOMIC_UINT16_CAS => 302u16
+        case IntrinsicKind.ATOMIC_UINT16_FETCH_ADD => 303u16
+        case IntrinsicKind.ATOMIC_UINT16_FETCH_SUB => 304u16
+        case IntrinsicKind.ATOMIC_UINT16_FETCH_AND => 305u16
+        case IntrinsicKind.ATOMIC_UINT16_FETCH_OR => 306u16
+        case IntrinsicKind.ATOMIC_UINT16_FETCH_XOR => 307u16
+        case IntrinsicKind.ATOMIC_UINT32_LOAD => 308u16
+        case IntrinsicKind.ATOMIC_UINT32_STORE => 309u16
+        case IntrinsicKind.ATOMIC_UINT32_SWAP => 310u16
+        case IntrinsicKind.ATOMIC_UINT32_CAS => 311u16
+        case IntrinsicKind.ATOMIC_UINT32_FETCH_ADD => 312u16
+        case IntrinsicKind.ATOMIC_UINT32_FETCH_SUB => 313u16
+        case IntrinsicKind.ATOMIC_UINT32_FETCH_AND => 314u16
+        case IntrinsicKind.ATOMIC_UINT32_FETCH_OR => 315u16
+        case IntrinsicKind.ATOMIC_UINT32_FETCH_XOR => 316u16
+        case IntrinsicKind.ATOMIC_UINT64_LOAD => 317u16
+        case IntrinsicKind.ATOMIC_UINT64_STORE => 318u16
+        case IntrinsicKind.ATOMIC_UINT64_SWAP => 319u16
+        case IntrinsicKind.ATOMIC_UINT64_CAS => 320u16
+        case IntrinsicKind.ATOMIC_UINT64_FETCH_ADD => 321u16
+        case IntrinsicKind.ATOMIC_UINT64_FETCH_SUB => 322u16
+        case IntrinsicKind.ATOMIC_UINT64_FETCH_AND => 323u16
+        case IntrinsicKind.ATOMIC_UINT64_FETCH_OR => 324u16
+        case IntrinsicKind.ATOMIC_UINT64_FETCH_XOR => 325u16
+        case IntrinsicKind.ATOMIC_BOOL_LOAD => 326u16
+        case IntrinsicKind.ATOMIC_BOOL_STORE => 327u16
+        case IntrinsicKind.ATOMIC_BOOL_SWAP => 328u16
+        case IntrinsicKind.ATOMIC_BOOL_CAS => 329u16
+        case IntrinsicKind.ATOMIC_REFERENCEBASE_LOAD => 330u16
+        case IntrinsicKind.ATOMIC_REFERENCEBASE_STORE => 331u16
+        case IntrinsicKind.ATOMIC_REFERENCEBASE_SWAP => 332u16
+        case IntrinsicKind.ATOMIC_REFERENCEBASE_CAS => 333u16
+        case IntrinsicKind.ATOMIC_OPTIONREFERENCE_LOAD => 334u16
+        case IntrinsicKind.ATOMIC_OPTIONREFERENCE_STORE => 335u16
+        case IntrinsicKind.ATOMIC_OPTIONREFERENCE_SWAP => 336u16
+        case IntrinsicKind.ATOMIC_OPTIONREFERENCE_CAS => 337u16
+        case IntrinsicKind.BEGIN_CATCH => 338u16
+        case IntrinsicKind.ABS => 339u16
+        case IntrinsicKind.FABS => 340u16
+        case IntrinsicKind.FLOOR => 341u16
+        case IntrinsicKind.CEIL => 342u16
+        case IntrinsicKind.TRUNC => 343u16
+        case IntrinsicKind.SIN => 344u16
+        case IntrinsicKind.COS => 345u16
+        case IntrinsicKind.EXP => 346u16
+        case IntrinsicKind.EXP2 => 347u16
+        case IntrinsicKind.LOG => 348u16
+        case IntrinsicKind.LOG2 => 349u16
+        case IntrinsicKind.LOG10 => 350u16
+        case IntrinsicKind.SQRT => 351u16
+        case IntrinsicKind.ROUND => 352u16
+        case IntrinsicKind.POW => 353u16
+        case IntrinsicKind.POWI => 354u16
+        case IntrinsicKind.BIT_CAST => 355u16
+        case IntrinsicKind.PREINITIALIZE => 356u16
+        case IntrinsicKind.OBJECT_AS => 357u16
+        case IntrinsicKind.IS_NULL => 358u16
+        case IntrinsicKind.GET_TYPE_FOR_TYPE_PARAMETER => 359u16
+        case IntrinsicKind.IS_SUBTYPE_TYPES => 360u16
+        case IntrinsicKind.EXCLUSIVE_SCOPE => 361u16
+
+    }
+}
+
+private func ToPackageExprKind(expr: Expression): UInt8 {
+    return match (expr.GetExprKind()) {
+        case ExprKind.GOTO => CHIRFB_CHIR_EXPR_KIND_GOTO
+        case ExprKind.BRANCH => CHIRFB_CHIR_EXPR_KIND_BRANCH
+        case ExprKind.MULTIBRANCH => CHIRFB_CHIR_EXPR_KIND_MULTI_BRANCH
+        case ExprKind.EXIT => CHIRFB_CHIR_EXPR_KIND_EXIT
+        case ExprKind.APPLY_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_APPLY
+        case ExprKind.INVOKE_WITH_EXCEPTION | ExprKind.INVOKESTATIC_WITH_EXCEPTION =>
+            CHIRFB_CHIR_EXPR_KIND_TRY_INVOKE
+        case ExprKind.RAISE_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_RAISE_EXCEPTION
+        case ExprKind.INT_OP_WITH_EXCEPTION =>
+            match ((expr as IntOpWithException).getOrThrow().GetOpKind()) {
+                case ExprKind.NEG => CHIRFB_CHIR_EXPR_KIND_TRY_NEG
+                case ExprKind.ADD => CHIRFB_CHIR_EXPR_KIND_TRY_ADD
+                case ExprKind.SUB => CHIRFB_CHIR_EXPR_KIND_TRY_SUB
+                case ExprKind.MUL => CHIRFB_CHIR_EXPR_KIND_TRY_MUL
+                case ExprKind.DIV => CHIRFB_CHIR_EXPR_KIND_TRY_DIV
+                case ExprKind.MOD => CHIRFB_CHIR_EXPR_KIND_TRY_MOD
+                case ExprKind.EXP => CHIRFB_CHIR_EXPR_KIND_TRY_EXP
+                case ExprKind.LSHIFT => CHIRFB_CHIR_EXPR_KIND_TRY_L_SHIFT
+                case ExprKind.RSHIFT => CHIRFB_CHIR_EXPR_KIND_TRY_R_SHIFT
+                case _ => CHIRFB_CHIR_EXPR_KIND_INVALID
+            }
+        case ExprKind.SPAWN_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_SPAWN
+        case ExprKind.TYPECAST_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_NUMERIC_CAST
+        case ExprKind.INTRINSIC_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_INTRINSIC
+        case ExprKind.ALLOCATE_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_ALLOCATE
+        case ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_RAW_ARRAY_ALLOCATE
+        case ExprKind.NEG => CHIRFB_CHIR_EXPR_KIND_NEG
+        case ExprKind.NOT => CHIRFB_CHIR_EXPR_KIND_NOT
+        case ExprKind.BITNOT => CHIRFB_CHIR_EXPR_KIND_BIT_NOT
+        case ExprKind.ADD => CHIRFB_CHIR_EXPR_KIND_ADD
+        case ExprKind.SUB => CHIRFB_CHIR_EXPR_KIND_SUB
+        case ExprKind.MUL => CHIRFB_CHIR_EXPR_KIND_MUL
+        case ExprKind.DIV => CHIRFB_CHIR_EXPR_KIND_DIV
+        case ExprKind.MOD => CHIRFB_CHIR_EXPR_KIND_MOD
+        case ExprKind.EXP => CHIRFB_CHIR_EXPR_KIND_EXP
+        case ExprKind.LSHIFT => CHIRFB_CHIR_EXPR_KIND_L_SHIFT
+        case ExprKind.RSHIFT => CHIRFB_CHIR_EXPR_KIND_R_SHIFT
+        case ExprKind.BITAND => CHIRFB_CHIR_EXPR_KIND_BIT_AND
+        case ExprKind.BITOR => CHIRFB_CHIR_EXPR_KIND_BIT_OR
+        case ExprKind.BITXOR => CHIRFB_CHIR_EXPR_KIND_BIT_XOR
+        case ExprKind.LT => CHIRFB_CHIR_EXPR_KIND_LT
+        case ExprKind.GT => CHIRFB_CHIR_EXPR_KIND_GT
+        case ExprKind.LE => CHIRFB_CHIR_EXPR_KIND_LE
+        case ExprKind.GE => CHIRFB_CHIR_EXPR_KIND_GE
+        case ExprKind.EQUAL => CHIRFB_CHIR_EXPR_KIND_EQUAL
+        case ExprKind.NOTEQUAL => CHIRFB_CHIR_EXPR_KIND_NOT_EQUAL
+        case ExprKind.AND => CHIRFB_CHIR_EXPR_KIND_AND
+        case ExprKind.OR => CHIRFB_CHIR_EXPR_KIND_OR
+        case ExprKind.TYPECAST => CHIRFB_CHIR_EXPR_KIND_NUMERIC_CAST
+        case ExprKind.BOX => CHIRFB_CHIR_EXPR_KIND_BOX
+        case ExprKind.UNBOX => CHIRFB_CHIR_EXPR_KIND_UNBOX_TO_VALUE
+        case ExprKind.UNBOX_TO_REF => CHIRFB_CHIR_EXPR_KIND_UNBOX_TO_REF
+        case ExprKind.TRANSFORM_TO_GENERIC => CHIRFB_CHIR_EXPR_KIND_CAST_TO_GENERIC
+        case ExprKind.TRANSFORM_TO_CONCRETE => CHIRFB_CHIR_EXPR_KIND_CAST_TO_CONCRETE
+        case ExprKind.ALLOCATE => CHIRFB_CHIR_EXPR_KIND_ALLOCATE
+        case ExprKind.LOAD => CHIRFB_CHIR_EXPR_KIND_LOAD
+        case ExprKind.STORE => CHIRFB_CHIR_EXPR_KIND_STORE
+        case ExprKind.GET_ELEMENT_BY_NAME => CHIRFB_CHIR_EXPR_KIND_GET_ELEMENT_BY_NAME
+        case ExprKind.GET_ELEMENT_REF => CHIRFB_CHIR_EXPR_KIND_GET_ELEMENT_REF
+        case ExprKind.STORE_ELEMENT_BY_NAME => CHIRFB_CHIR_EXPR_KIND_STORE_ELEMENT_BY_NAME
+        case ExprKind.STORE_ELEMENT_REF => CHIRFB_CHIR_EXPR_KIND_STORE_ELEMENT_REF
+        case ExprKind.FIELD => CHIRFB_CHIR_EXPR_KIND_FIELD
+        case ExprKind.FIELD_BY_NAME => CHIRFB_CHIR_EXPR_KIND_FIELD_BY_NAME
+        case ExprKind.RAW_ARRAY_ALLOCATE => CHIRFB_CHIR_EXPR_KIND_RAW_ARRAY_ALLOCATE
+        case ExprKind.RAW_ARRAY_LITERAL_INIT => CHIRFB_CHIR_EXPR_KIND_RAW_ARRAY_LITERAL_INIT
+        case ExprKind.RAW_ARRAY_INIT_BY_VALUE => CHIRFB_CHIR_EXPR_KIND_RAW_ARRAY_INIT_BY_VALUE
+        case ExprKind.VARRAY => CHIRFB_CHIR_EXPR_KIND_V_ARRAY_EXPR
+        case ExprKind.VARRAY_BUILDER => CHIRFB_CHIR_EXPR_KIND_V_ARRAY_BUILDER
+        case ExprKind.CONSTANT => CHIRFB_CHIR_EXPR_KIND_CONSTANT
+        case ExprKind.DEBUGEXPR => CHIRFB_CHIR_EXPR_KIND_DEBUG
+        case ExprKind.TUPLE => CHIRFB_CHIR_EXPR_KIND_TUPLE
+        case ExprKind.INSTANCEOF => CHIRFB_CHIR_EXPR_KIND_INSTANCE_OF
+        case ExprKind.GET_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_GET_EXCEPTION
+        case ExprKind.SPAWN => CHIRFB_CHIR_EXPR_KIND_SPAWN
+        case ExprKind.LAMBDA => CHIRFB_CHIR_EXPR_KIND_LAMBDA
+        case ExprKind.GET_INSTANTIATE_VALUE => CHIRFB_CHIR_EXPR_KIND_GET_INSTANTIATE_VALUE
+        case ExprKind.APPLY => CHIRFB_CHIR_EXPR_KIND_APPLY
+        case ExprKind.INVOKE | ExprKind.INVOKESTATIC => CHIRFB_CHIR_EXPR_KIND_INVOKE
+        case ExprKind.INTRINSIC => CHIRFB_CHIR_EXPR_KIND_INTRINSIC
+        case ExprKind.GET_RTTI => CHIRFB_CHIR_EXPR_KIND_GET_RTTI
+        case ExprKind.GET_RTTI_STATIC => CHIRFB_CHIR_EXPR_KIND_GET_RTTI_STATIC
+        case ExprKind.FORIN_RANGE | ExprKind.FORIN_ITER | ExprKind.FORIN_CLOSED_RANGE | ExprKind.INVALID =>
+            CHIRFB_CHIR_EXPR_KIND_INVALID
+    }
+}
 
 class CHIRSerializerImpl {
     private let builder: FlatBufferBuilder = FlatBufferBuilder()
@@ -475,6 +932,443 @@ class CHIRSerializerImpl {
 
     private func Serialize(obj: NullLiteral): FlatBufferOffset {
         return CreateNullLiteral(builder, Serialize((obj as LiteralValue).getOrThrow()))
+    }
+
+    private func Serialize(obj: Expression): FlatBufferOffset {
+        let base = Serialize((obj as Base).getOrThrow())
+        let operands = GetId(obj.GetOperands())
+        let blockGroups = ArrayList<UInt32>()
+        for (group in obj.GetBlockGroups()) {
+            blockGroups.add(GetId((group as Value).getOrThrow()))
+        }
+        let owner = if (let Some(value) <- obj.GetParentBlock()) {
+            GetId((value as Value).getOrThrow())
+        } else {
+            0u32
+        }
+        let resultLocalVar = if (let Some(value) <- obj.GetResult()) {
+            GetId((value as Value).getOrThrow())
+        } else {
+            0u32
+        }
+        let resultTy = GetId(obj.GetResultType())
+        return CreateExpressionDirect(builder, base, ToPackageExprKind(obj),
+            if (operands.isEmpty()) { None } else { Some(operands) },
+            if (blockGroups.isEmpty()) { None } else { Some(blockGroups) }, owner, resultLocalVar, resultTy)
+    }
+
+    private func Serialize(obj: UnaryExpression): FlatBufferOffset {
+        let base = Serialize((obj as Expression).getOrThrow())
+        return CreateUnaryExpressionBase(builder, base, UInt8(OverflowStrategyIndex(obj.GetOverflowStrategy())))
+    }
+
+    private func Serialize(obj: BinaryExpression): FlatBufferOffset {
+        let base = Serialize((obj as Expression).getOrThrow())
+        return CreateBinaryExpressionBase(builder, base, UInt8(OverflowStrategyIndex(obj.GetOverflowStrategy())))
+    }
+
+    private func Serialize(obj: Allocate): FlatBufferOffset {
+        return CreateAllocateBase(builder, Serialize((obj as Expression).getOrThrow()), GetId(obj.GetType()))
+    }
+
+    private func Serialize(obj: AllocateWithException): FlatBufferOffset {
+        return CreateAllocateBase(builder, Serialize((obj as Expression).getOrThrow()), GetId(obj.GetType()))
+    }
+
+    private func Serialize(obj: GetElementRef): FlatBufferOffset {
+        let base = Serialize((obj as Expression).getOrThrow())
+        let path = obj.GetPath()
+        return CreateGetElementRefDirect(builder, base, if (path.isEmpty()) { None } else { Some(path) })
+    }
+
+    private func Serialize(obj: GetElementByName): FlatBufferOffset {
+        let base = Serialize((obj as Expression).getOrThrow())
+        return CreateGetElementByName(builder, base, builder.CreateVectorOfStrings(obj.GetNames()))
+    }
+
+    private func Serialize(obj: StoreElementRef): FlatBufferOffset {
+        return CreateStoreElementRefDirect(builder, Serialize((obj as Expression).getOrThrow()), Some(obj.GetPath()))
+    }
+
+    private func Serialize(obj: StoreElementByName): FlatBufferOffset {
+        let base = Serialize((obj as Expression).getOrThrow())
+        return CreateStoreElementByName(builder, base, builder.CreateVectorOfStrings(obj.GetNames()))
+    }
+
+    private func Serialize(obj: Apply): FlatBufferOffset {
+        let expression = Serialize((obj as Expression).getOrThrow())
+        let instantiatedTypeArgs = GetId(obj.GetInstantiatedTypeArgs())
+        let funcCall = CreateFuncCallDirect(builder, expression,
+            if (instantiatedTypeArgs.isEmpty()) { None } else { Some(instantiatedTypeArgs) }, GetId(obj.GetThisType()))
+        return CreateApplyBase(builder, funcCall, obj.IsSuperCall())
+    }
+
+    private func Serialize(obj: ApplyWithException): FlatBufferOffset {
+        let expression = Serialize((obj as Expression).getOrThrow())
+        let instantiatedTypeArgs = GetId(obj.GetInstantiatedTypeArgs())
+        let funcCall = CreateFuncCallDirect(builder, expression,
+            if (instantiatedTypeArgs.isEmpty()) { None } else { Some(instantiatedTypeArgs) }, GetId(obj.GetThisType()))
+        return CreateApplyBase(builder, funcCall, false)
+    }
+
+    private func Serialize(obj: FuncSigInfo): FlatBufferOffset {
+        let genericTypeParams = ArrayList<UInt32>()
+        for (param in obj.genericTypeParams) {
+            genericTypeParams.add(GetId((param as Type).getOrThrow()))
+        }
+        return CreateFuncSigInfoDirect(builder, Some(obj.funcName), GetId((obj.funcType as Type).getOrThrow()),
+            if (genericTypeParams.isEmpty()) { None } else { Some(genericTypeParams) })
+    }
+
+    private func Serialize(obj: Invoke): FlatBufferOffset {
+        let expression = Serialize((obj as Expression).getOrThrow())
+        let instantiatedTypeArgs = GetId(obj.GetInstantiatedTypeArgs())
+        let funcCall = CreateFuncCallDirect(builder, expression,
+            if (instantiatedTypeArgs.isEmpty()) { None } else { Some(instantiatedTypeArgs) }, GetId(obj.GetThisType()))
+        return CreateInvokeBase(builder, funcCall, Serialize(obj.virMethodCtx))
+    }
+
+    private func Serialize(obj: InvokeWithException): FlatBufferOffset {
+        let expression = Serialize((obj as Expression).getOrThrow())
+        let instantiatedTypeArgs = GetId(obj.GetInstantiatedTypeArgs())
+        let funcCall = CreateFuncCallDirect(builder, expression,
+            if (instantiatedTypeArgs.isEmpty()) { None } else { Some(instantiatedTypeArgs) }, GetId(obj.GetThisType()))
+        return CreateInvokeBase(builder, funcCall, Serialize(obj.virMethodCtx))
+    }
+
+    private func Serialize(obj: InvokeStatic): FlatBufferOffset {
+        let expression = Serialize((obj as Expression).getOrThrow())
+        let instantiatedTypeArgs = GetId(obj.GetInstantiatedTypeArgs())
+        let funcCall = CreateFuncCallDirect(builder, expression,
+            if (instantiatedTypeArgs.isEmpty()) { None } else { Some(instantiatedTypeArgs) }, GetId(obj.GetThisType()))
+        return CreateInvokeBase(builder, funcCall, Serialize(obj.virMethodCtx))
+    }
+
+    private func Serialize(obj: InvokeStaticWithException): FlatBufferOffset {
+        let expression = Serialize((obj as Expression).getOrThrow())
+        let instantiatedTypeArgs = GetId(obj.GetInstantiatedTypeArgs())
+        let funcCall = CreateFuncCallDirect(builder, expression,
+            if (instantiatedTypeArgs.isEmpty()) { None } else { Some(instantiatedTypeArgs) }, GetId(obj.GetThisType()))
+        return CreateInvokeBase(builder, funcCall, Serialize(obj.virMethodCtx))
+    }
+
+    private func Serialize(obj: TypeCast): FlatBufferOffset {
+        let base = Serialize((obj as Expression).getOrThrow())
+        return CreateNumericCastBase(builder, base, UInt8(OverflowStrategyIndex(obj.GetOverflowStrategy())))
+    }
+
+    private func Serialize(obj: TypeCastWithException): FlatBufferOffset {
+        let base = Serialize((obj as Expression).getOrThrow())
+        return CreateNumericCastBase(builder, base, UInt8(OverflowStrategyIndex(obj.GetOverflowStrategy())))
+    }
+
+    private func Serialize(obj: InstanceOf): FlatBufferOffset {
+        return CreateInstanceOf(builder, Serialize((obj as Expression).getOrThrow()), GetId(obj.GetType()))
+    }
+
+    private func Serialize(obj: Branch): FlatBufferOffset {
+        return CreateBranch(builder, Serialize((obj as Expression).getOrThrow()), UInt8(SourceExprIndex(obj.GetSourceExpr())))
+    }
+
+    private func Serialize(obj: MultiBranch): FlatBufferOffset {
+        let base = Serialize((obj as Expression).getOrThrow())
+        let caseValues = obj.GetCaseVals()
+        return CreateMultiBranchDirect(builder, base, if (caseValues.isEmpty()) { None } else { Some(caseValues) })
+    }
+
+    private func Serialize(obj: GetInstantiateValue): FlatBufferOffset {
+        let base = Serialize((obj as Expression).getOrThrow())
+        let instantiateTypes = GetId(obj.GetInstantiateTypes())
+        return CreateGetInstantiateValueDirect(builder, base,
+            if (instantiateTypes.isEmpty()) { None } else { Some(instantiateTypes) })
+    }
+
+    private func Serialize(obj: GetRTTIStatic): FlatBufferOffset {
+        return CreateGetRTTIStatic(builder, Serialize((obj as Expression).getOrThrow()), GetId(obj.GetRTTIType()))
+    }
+
+    private func Serialize(obj: Field): FlatBufferOffset {
+        let base = Serialize((obj as Expression).getOrThrow())
+        let path = obj.GetPath()
+        return CreateFieldDirect(builder, base, if (path.isEmpty()) { None } else { Some(path) })
+    }
+
+    private func Serialize(obj: FieldByName): FlatBufferOffset {
+        let base = Serialize((obj as Expression).getOrThrow())
+        return CreateFieldByName(builder, base, builder.CreateVectorOfStrings(obj.GetNames()))
+    }
+
+    private func Serialize(obj: RawArrayAllocate): FlatBufferOffset {
+        return CreateRawArrayAllocateBase(builder, Serialize((obj as Expression).getOrThrow()), GetId(obj.GetElementType()))
+    }
+
+    private func Serialize(obj: RawArrayAllocateWithException): FlatBufferOffset {
+        return CreateRawArrayAllocateBase(builder, Serialize((obj as Expression).getOrThrow()), GetId(obj.GetElementType()))
+    }
+
+    private func Serialize(obj: Intrinsic): FlatBufferOffset {
+        let expression = Serialize((obj as Expression).getOrThrow())
+        let instantiatedTypeArgs = GetId(obj.GetInstantiatedTypeArgs())
+        let funcCall = CreateFuncCallDirect(builder, expression,
+            if (instantiatedTypeArgs.isEmpty()) { None } else { Some(instantiatedTypeArgs) }, 0u32)
+        return CreateIntrinsicBase(builder, funcCall, IntrinsicKindToPackageIntrinsicKind(obj.GetIntrinsicKind()))
+    }
+
+    private func Serialize(obj: IntrinsicWithException): FlatBufferOffset {
+        let expression = Serialize((obj as Expression).getOrThrow())
+        let instantiatedTypeArgs = GetId(obj.GetInstantiatedTypeArgs())
+        let funcCall = CreateFuncCallDirect(builder, expression,
+            if (instantiatedTypeArgs.isEmpty()) { None } else { Some(instantiatedTypeArgs) }, 0u32)
+        return CreateIntrinsicBase(builder, funcCall, IntrinsicKindToPackageIntrinsicKind(obj.GetIntrinsicKind()))
+    }
+
+    private func Serialize(obj: Debug): FlatBufferOffset {
+        CJC_ASSERT(!obj.GetOperands().isEmpty())
+        return CreateDebugDirect(builder, Serialize((obj as Expression).getOrThrow()), Some(obj.GetSrcCodeIdentifier()))
+    }
+
+    private func Serialize(obj: Spawn): FlatBufferOffset {
+        let executeClosure = if (let Some(value) <- obj.GetExecuteClosure()) {
+            GetId((value as Value).getOrThrow())
+        } else {
+            0u32
+        }
+        return CreateSpawnBase(builder, Serialize((obj as Expression).getOrThrow()), executeClosure)
+    }
+
+    private func Serialize(obj: SpawnWithException): FlatBufferOffset {
+        let executeClosure = if (let Some(value) <- obj.GetExecuteClosure()) {
+            GetId((value as Value).getOrThrow())
+        } else {
+            0u32
+        }
+        return CreateSpawnBase(builder, Serialize((obj as Expression).getOrThrow()), executeClosure)
+    }
+
+    private func Serialize(obj: Lambda): FlatBufferOffset {
+        CJC_ASSERT(obj.GetBlockGroups().size == 1)
+        CJC_ASSERT(obj.GetBody().isSome())
+        let base = Serialize((obj as Expression).getOrThrow())
+        let funcTy = if (let Some(value) <- obj.GetFuncType()) { GetId((value as Type).getOrThrow()) } else { 0u32 }
+        let params = ArrayList<UInt32>()
+        for (param in obj.GetParams()) { params.add(GetId((param as Value).getOrThrow())) }
+        let genericTypeParams = ArrayList<UInt32>()
+        for (param in obj.GetGenericTypeParams()) { genericTypeParams.add(GetId((param as Type).getOrThrow())) }
+        let body = GetId((obj.GetBody().getOrThrow() as Value).getOrThrow())
+        let retVal = if (let Some(value) <- obj.GetReturnValue()) {
+            GetId((value as Value).getOrThrow())
+        } else {
+            0u32
+        }
+        return CreateLambdaDirect(builder, base, funcTy, obj.IsLocalFunc(), Some(obj.GetIdentifier()),
+            Some(obj.GetSrcCodeIdentifier()), if (params.isEmpty()) { None } else { Some(params) },
+            if (genericTypeParams.isEmpty()) { None } else { Some(genericTypeParams) }, body, retVal,
+            obj.IsCompileTimeValue())
+    }
+
+    private func Dispatch(obj: Type): FlatBufferOffset {
+        let index = Int64(GetId(obj) - 1u32)
+        return match (obj.GetTypeKind()) {
+            case TypeKind.TYPE_INT8 | TypeKind.TYPE_INT16 | TypeKind.TYPE_INT32 | TypeKind.TYPE_INT64 |
+                TypeKind.TYPE_INT_NATIVE | TypeKind.TYPE_UINT8 | TypeKind.TYPE_UINT16 | TypeKind.TYPE_UINT32 |
+                TypeKind.TYPE_UINT64 | TypeKind.TYPE_UINT_NATIVE | TypeKind.TYPE_FLOAT16 | TypeKind.TYPE_FLOAT32 |
+                TypeKind.TYPE_FLOAT64 | TypeKind.TYPE_RUNE | TypeKind.TYPE_BOOLEAN | TypeKind.TYPE_UNIT |
+                TypeKind.TYPE_NOTHING | TypeKind.TYPE_VOID | TypeKind.TYPE_TUPLE | TypeKind.TYPE_CPOINTER |
+                TypeKind.TYPE_CSTRING | TypeKind.TYPE_REFTYPE | TypeKind.TYPE_BOXTYPE | TypeKind.TYPE_THIS =>
+                typeKind[index] = CHIRFB_TYPE_ELEM_TYPE
+                Serialize(obj)
+            case TypeKind.TYPE_STRUCT | TypeKind.TYPE_ENUM | TypeKind.TYPE_CLASS =>
+                typeKind[index] = CHIRFB_TYPE_ELEM_CUSTOM_TYPE
+                Serialize((obj as CustomType).getOrThrow())
+            case TypeKind.TYPE_FUNC =>
+                typeKind[index] = CHIRFB_TYPE_ELEM_FUNC_TYPE
+                Serialize((obj as FuncType).getOrThrow())
+            case TypeKind.TYPE_RAWARRAY =>
+                typeKind[index] = CHIRFB_TYPE_ELEM_RAW_ARRAY_TYPE
+                Serialize((obj as RawArrayType).getOrThrow())
+            case TypeKind.TYPE_VARRAY =>
+                typeKind[index] = CHIRFB_TYPE_ELEM_V_ARRAY_TYPE
+                Serialize((obj as VArrayType).getOrThrow())
+            case TypeKind.TYPE_GENERIC =>
+                typeKind[index] = CHIRFB_TYPE_ELEM_GENERIC_TYPE
+                Serialize((obj as GenericType).getOrThrow())
+        }
+    }
+
+    private func Dispatch(obj: LiteralValue): FlatBufferOffset {
+        let index = Int64(GetId((obj as Value).getOrThrow()) - 1u32)
+        return match (obj.literalKind) {
+            case LiteralKind.BOOL =>
+                valueKind[index] = CHIRFB_VALUE_ELEM_BOOL_LITERAL
+                Serialize((obj as BoolLiteral).getOrThrow())
+            case LiteralKind.RUNE =>
+                valueKind[index] = CHIRFB_VALUE_ELEM_RUNE_LITERAL
+                Serialize((obj as RuneLiteral).getOrThrow())
+            case LiteralKind.INT =>
+                valueKind[index] = CHIRFB_VALUE_ELEM_INT_LITERAL
+                Serialize((obj as IntLiteral).getOrThrow())
+            case LiteralKind.FLOAT =>
+                valueKind[index] = CHIRFB_VALUE_ELEM_FLOAT_LITERAL
+                Serialize((obj as FloatLiteral).getOrThrow())
+            case LiteralKind.STRING =>
+                valueKind[index] = CHIRFB_VALUE_ELEM_STRING_LITERAL
+                Serialize((obj as StringLiteral).getOrThrow())
+            case LiteralKind.UNIT =>
+                valueKind[index] = CHIRFB_VALUE_ELEM_UNIT_LITERAL
+                Serialize((obj as UnitLiteral).getOrThrow())
+            case LiteralKind.NULL =>
+                valueKind[index] = CHIRFB_VALUE_ELEM_NULL_LITERAL
+                Serialize((obj as NullLiteral).getOrThrow())
+        }
+    }
+
+    private func Dispatch(obj: Value): FlatBufferOffset {
+        let index = Int64(GetId(obj) - 1u32)
+        return match (obj.GetValueKind()) {
+            case ValueKind.KIND_LITERAL => Dispatch((obj as LiteralValue).getOrThrow())
+            case ValueKind.KIND_GLOBALVAR =>
+                valueKind[index] = CHIRFB_VALUE_ELEM_GLOBAL_VAR
+                Serialize((obj as GlobalVar).getOrThrow())
+            case ValueKind.KIND_PARAMETER =>
+                valueKind[index] = CHIRFB_VALUE_ELEM_PARAMETER
+                Serialize((obj as Parameter).getOrThrow())
+            case ValueKind.KIND_LOCALVAR =>
+                valueKind[index] = CHIRFB_VALUE_ELEM_LOCAL_VAR
+                Serialize((obj as LocalVar).getOrThrow())
+            case ValueKind.KIND_FUNC =>
+                valueKind[index] = CHIRFB_VALUE_ELEM_FUNCTION
+                Serialize((obj as Function).getOrThrow())
+            case ValueKind.KIND_BLOCK =>
+                valueKind[index] = CHIRFB_VALUE_ELEM_BLOCK
+                Serialize((obj as Block).getOrThrow())
+            case ValueKind.KIND_BLOCK_GROUP =>
+                valueKind[index] = CHIRFB_VALUE_ELEM_BLOCK_GROUP
+                Serialize((obj as BlockGroup).getOrThrow())
+        }
+    }
+
+    private func Dispatch(obj: Expression): FlatBufferOffset {
+        let index = Int64(GetId(obj) - 1u32)
+        return match (obj.GetExprKind()) {
+            case ExprKind.ALLOCATE =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_ALLOCATE_BASE
+                Serialize((obj as Allocate).getOrThrow())
+            case ExprKind.ALLOCATE_WITH_EXCEPTION =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_ALLOCATE_BASE
+                Serialize((obj as AllocateWithException).getOrThrow())
+            case ExprKind.APPLY =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_APPLY_BASE
+                Serialize((obj as Apply).getOrThrow())
+            case ExprKind.APPLY_WITH_EXCEPTION =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_APPLY_BASE
+                Serialize((obj as ApplyWithException).getOrThrow())
+            case ExprKind.ADD | ExprKind.SUB | ExprKind.MUL | ExprKind.DIV | ExprKind.MOD | ExprKind.EXP |
+                ExprKind.LSHIFT | ExprKind.RSHIFT | ExprKind.BITAND | ExprKind.BITOR | ExprKind.BITXOR |
+                ExprKind.LT | ExprKind.GT | ExprKind.LE | ExprKind.GE | ExprKind.EQUAL | ExprKind.NOTEQUAL |
+                ExprKind.AND | ExprKind.OR =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_BINARY_EXPRESSION_BASE
+                Serialize((obj as BinaryExpression).getOrThrow())
+            case ExprKind.BRANCH =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_BRANCH
+                Serialize((obj as Branch).getOrThrow())
+            case ExprKind.DEBUGEXPR =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_DEBUG
+                Serialize((obj as Debug).getOrThrow())
+            case ExprKind.FIELD =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_FIELD
+                Serialize((obj as Field).getOrThrow())
+            case ExprKind.FIELD_BY_NAME =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_FIELD_BY_NAME
+                Serialize((obj as FieldByName).getOrThrow())
+            case ExprKind.GET_ELEMENT_BY_NAME =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_GET_ELEMENT_BY_NAME
+                Serialize((obj as GetElementByName).getOrThrow())
+            case ExprKind.GET_ELEMENT_REF =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_GET_ELEMENT_REF
+                Serialize((obj as GetElementRef).getOrThrow())
+            case ExprKind.GET_INSTANTIATE_VALUE =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_GET_INSTANTIATE_VALUE
+                Serialize((obj as GetInstantiateValue).getOrThrow())
+            case ExprKind.GET_RTTI_STATIC =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_GET_RTTI_STATIC
+                Serialize((obj as GetRTTIStatic).getOrThrow())
+            case ExprKind.INSTANCEOF =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_INSTANCE_OF
+                Serialize((obj as InstanceOf).getOrThrow())
+            case ExprKind.INT_OP_WITH_EXCEPTION =>
+                let intOp = (obj as IntOpWithException).getOrThrow()
+                let base = Serialize(obj)
+                let overflow = UInt8(OverflowStrategyIndex(intOp.GetOverflowStrategy()))
+                if (ExprKindMajor(intOp.GetOpKind()) == ExprMajorKind.UNARY_EXPR) {
+                    exprKind[index] = CHIRFB_EXPRESSION_ELEM_UNARY_EXPRESSION_BASE
+                    CreateUnaryExpressionBase(builder, base, overflow)
+                } else {
+                    exprKind[index] = CHIRFB_EXPRESSION_ELEM_BINARY_EXPRESSION_BASE
+                    CreateBinaryExpressionBase(builder, base, overflow)
+                }
+            case ExprKind.INTRINSIC =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_INTRINSIC_BASE
+                Serialize((obj as Intrinsic).getOrThrow())
+            case ExprKind.INTRINSIC_WITH_EXCEPTION =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_INTRINSIC_BASE
+                Serialize((obj as IntrinsicWithException).getOrThrow())
+            case ExprKind.INVOKE =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_INVOKE_BASE
+                Serialize((obj as Invoke).getOrThrow())
+            case ExprKind.INVOKE_WITH_EXCEPTION =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_INVOKE_BASE
+                Serialize((obj as InvokeWithException).getOrThrow())
+            case ExprKind.INVOKESTATIC =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_INVOKE_BASE
+                Serialize((obj as InvokeStatic).getOrThrow())
+            case ExprKind.INVOKESTATIC_WITH_EXCEPTION =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_INVOKE_BASE
+                Serialize((obj as InvokeStaticWithException).getOrThrow())
+            case ExprKind.LAMBDA =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_LAMBDA
+                Serialize((obj as Lambda).getOrThrow())
+            case ExprKind.MULTIBRANCH =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_MULTI_BRANCH
+                Serialize((obj as MultiBranch).getOrThrow())
+            case ExprKind.TYPECAST =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_NUMERIC_CAST_BASE
+                Serialize((obj as TypeCast).getOrThrow())
+            case ExprKind.TYPECAST_WITH_EXCEPTION =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_NUMERIC_CAST_BASE
+                Serialize((obj as TypeCastWithException).getOrThrow())
+            case ExprKind.RAW_ARRAY_ALLOCATE =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_RAW_ARRAY_ALLOCATE_BASE
+                Serialize((obj as RawArrayAllocate).getOrThrow())
+            case ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_RAW_ARRAY_ALLOCATE_BASE
+                Serialize((obj as RawArrayAllocateWithException).getOrThrow())
+            case ExprKind.SPAWN =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_SPAWN_BASE
+                Serialize((obj as Spawn).getOrThrow())
+            case ExprKind.SPAWN_WITH_EXCEPTION =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_SPAWN_BASE
+                Serialize((obj as SpawnWithException).getOrThrow())
+            case ExprKind.STORE_ELEMENT_BY_NAME =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_STORE_ELEMENT_BY_NAME
+                Serialize((obj as StoreElementByName).getOrThrow())
+            case ExprKind.STORE_ELEMENT_REF =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_STORE_ELEMENT_REF
+                Serialize((obj as StoreElementRef).getOrThrow())
+            case ExprKind.NEG | ExprKind.NOT | ExprKind.BITNOT =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_UNARY_EXPRESSION_BASE
+                Serialize((obj as UnaryExpression).getOrThrow())
+            case ExprKind.GOTO | ExprKind.EXIT | ExprKind.RAISE_EXCEPTION | ExprKind.LOAD | ExprKind.STORE |
+                ExprKind.CONSTANT | ExprKind.FORIN_RANGE | ExprKind.FORIN_ITER | ExprKind.FORIN_CLOSED_RANGE |
+                ExprKind.TUPLE | ExprKind.BOX | ExprKind.UNBOX | ExprKind.GET_EXCEPTION |
+                ExprKind.RAW_ARRAY_LITERAL_INIT | ExprKind.RAW_ARRAY_INIT_BY_VALUE | ExprKind.VARRAY |
+                ExprKind.VARRAY_BUILDER | ExprKind.TRANSFORM_TO_GENERIC | ExprKind.TRANSFORM_TO_CONCRETE |
+                ExprKind.UNBOX_TO_REF | ExprKind.GET_RTTI =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_EXPRESSION
+                Serialize(obj)
+            case ExprKind.INVALID =>
+                CJC_ABORT()
+                0u32
+        }
     }
 
     public func SerializePackage(pkg: Package): String {
