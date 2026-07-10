@@ -385,6 +385,7 @@ class GenericInstantiationManagerImpl {
     private let rearrangeWalkerID: UInt32 = GetNextWalkerID()
     private let promotion: Promotion
     private var curPkg: Option<Package> = None
+    private var curTriggerNode: Option<Node> = None
     // Injected by the frontend so the two mock hooks (PrepareToMock/HandleCreateMock)
     // can run at the same points as C++ GenericInstantiatePackage; None when unset.
     private var testManager: Option<RealTestManager> = None
@@ -1487,6 +1488,7 @@ class GenericInstantiationManagerImpl {
                 return VisitAction.SKIP_CHILDREN
             }
         }
+        curTriggerNode = node
         InstantiateGenericTysForNode(node, pkg)
         if (let Some(refExpr) <- (node as RefExpr)) {
             GenericRefExprInstantiate(refExpr, pkg)
@@ -1838,6 +1840,7 @@ class GenericInstantiationManagerImpl {
                 return VisitAction.SKIP_CHILDREN
             }
         }
+        curTriggerNode = node
         if (let Some(callExpr) <- (node as CallExpr)) {
             RearrangeCallExprReference(callExpr, pkg)
         } else if (let Some(refExpr) <- (node as RefExpr)) {
