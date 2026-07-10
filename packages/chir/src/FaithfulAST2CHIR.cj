@@ -9,6 +9,7 @@ import cangjie_compiler::option.OSType
 import cangjie_compiler::option.OutputMode
 import std.collection.*
 import std.convert.*
+import std.sort.*
 
 import cangjie_compiler::ast.ASTKind
 import cangjie_compiler::ast.ASTKindIndex
@@ -1328,18 +1329,33 @@ public class FaithfulAST2CHIR {
     private func CollectDecls(decl: AstDecl, instantiated!: Bool): Unit {
         match (decl.astKind) {
             case ASTKind.STRUCT_DECL =>
+                if (decl.TestAttr(AstAttribute.GENERIC)) {
+                    CollectInstantiatedDecls(decl)
+                }
                 CollectDeclsFromStructDecl(RequireStructDecl(decl))
                 CollectNominalDecl(decl, instantiated)
             case ASTKind.CLASS_DECL =>
+                if (decl.TestAttr(AstAttribute.GENERIC)) {
+                    CollectInstantiatedDecls(decl)
+                }
                 CollectDeclsFromClassLikeDecl(RequireClassLikeDecl(decl))
                 CollectNominalDecl(decl, instantiated)
             case ASTKind.INTERFACE_DECL =>
+                if (decl.TestAttr(AstAttribute.GENERIC)) {
+                    CollectInstantiatedDecls(decl)
+                }
                 CollectDeclsFromClassLikeDecl(RequireClassLikeDecl(decl))
                 CollectNominalDecl(decl, instantiated)
             case ASTKind.ENUM_DECL =>
+                if (decl.TestAttr(AstAttribute.GENERIC)) {
+                    CollectInstantiatedDecls(decl)
+                }
                 CollectDeclsFromEnumDecl(RequireEnumDecl(decl))
                 CollectNominalDecl(decl, instantiated)
             case ASTKind.EXTEND_DECL =>
+                if (decl.TestAttr(AstAttribute.GENERIC)) {
+                    CollectInstantiatedDecls(decl)
+                }
                 CollectDeclsFromExtendDecl(RequireExtendDecl(decl))
                 CollectNominalDecl(decl, instantiated)
             case ASTKind.FUNC_DECL =>
@@ -1420,6 +1436,41 @@ public class FaithfulAST2CHIR {
         }
     }
 
+    private func CollectInstantiatedDecls(decl: AstDecl): Unit {
+        CJC_ASSERT(decl.TestAttr(AstAttribute.GENERIC))
+        let curFile = decl.curFile.getOrThrow()
+        let curPackage = curFile.curPackage.getOrThrow()
+        if (curPackage.fullPackageName != CurrentPackage().GetName()) {
+            return
+        }
+        let manager = match (gim) {
+            case Some(value) => value
+            case None => return
+        }
+        let instantiatedDecls = ArrayList<AstDecl>()
+        let instantiatedDeclIds = HashSet<Int64>()
+        for (instantiatedDecl in manager.GetInstantiatedDecls(decl)) {
+            if (!instantiatedDeclIds.contains(instantiatedDecl.objectId)) {
+                instantiatedDeclIds.add(instantiatedDecl.objectId)
+                instantiatedDecls.add(instantiatedDecl)
+            }
+        }
+
+        sort(instantiatedDecls, by: { left: AstDecl, right: AstDecl =>
+            CJC_ASSERT(left.mangledName != right.mangledName)
+            if (left.mangledName < right.mangledName) {
+                Ordering.LT
+            } else if (left.mangledName > right.mangledName) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        })
+        for (instance in instantiatedDecls) {
+            CollectDecls(instance, instantiated: false)
+        }
+    }
+
     private func CollectFuncDecl(funcDecl: AstFuncDecl): Unit {
         if (funcDecl.TestAttr(AstAttribute.INTRINSIC)) {
             return
@@ -1427,6 +1478,9 @@ public class FaithfulAST2CHIR {
         if (funcDecl.TestAttr(AstAttribute.FOREIGN)) {
             CollectDeclToList(funcDecl, foreignFuncs, foreignFuncSet)
             return
+        }
+        if (funcDecl.TestAttr(AstAttribute.GENERIC)) {
+            CollectInstantiatedDecls(funcDecl)
         }
         CollectDeclToList(funcDecl, globalAndMemberFuncs, globalAndMemberFuncSet)
         CollectDesugaredDefaultParams(funcDecl, globalAndMemberFuncs, globalAndMemberFuncSet)
@@ -2375,8 +2429,8 @@ public class FaithfulAST2CHIR {
                 return AstVisitAction.WALK_CHILDREN
             }
             if (let Some(funcDecl) <- (node as AstFuncDecl)) {
-                if (funcDecl.TestAttr(AstAttribute.GENERIC)) {
-                    for (instance in GetInstantiatedDecls(funcDecl)) {
+                if (let Some(manager) <- gim && funcDecl.TestAttr(AstAttribute.GENERIC)) {
+                    for (instance in manager.GetInstantiatedDecls(funcDecl)) {
                         WalkAndCollectDep(instance, dependencies, localConstVarDeps, dependencySet,
                             localConstVarDepSet, candidateSet, globalVarSet, patternOwnerMap)
                     }
@@ -2386,22 +2440,6 @@ public class FaithfulAST2CHIR {
             return AstVisitAction.WALK_CHILDREN
         }
         AstWalker(root, visitPre: visitor).Walk()
-    }
-
-    private func GetInstantiatedDecls(funcDecl: AstFuncDecl): ArrayList<AstDecl> {
-        let out = ArrayList<AstDecl>()
-        if (let Some(curFile) <- funcDecl.curFile) {
-            if (let Some(pkg) <- curFile.curPackage) {
-                for (decl in pkg.genericInstantiatedDecls) {
-                    if (let Some(genericDecl) <- decl.genericDecl) {
-                        if (FaithfulInitSameDecl(genericDecl, funcDecl)) {
-                            out.add(decl)
-                        }
-                    }
-                }
-            }
-        }
-        return out
     }
 
     private func BuildPatternDependencyOwnerMap(): FaithfulInitDeclOwnerMap {
