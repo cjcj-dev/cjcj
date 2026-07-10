@@ -659,6 +659,38 @@ public class CHIRChecker {
         }
     }
 
+    private func CheckVTable(def: CustomTypeDef, result: CHIRCheckResult): Unit {
+        for (vtable in def.GetDefVTable().GetTypeVTables()) {
+            let parentInstType = vtable.GetSrcParentType().getOrThrow()
+            let parentDef = parentInstType.GetClassDef()
+            let parentOriginalType = (parentDef.GetType().getOrThrow() as ClassType).getOrThrow()
+            let parentVTable = parentDef.GetDefVTable().GetExpectedTypeVTable(parentOriginalType)
+            if (parentVTable.IsEmpty()) {
+                result.AddError("in vtable of ${def.GetIdentifier()}, parent type ${parentInstType.ToString()} " +
+                    "can't be found in vtable of parent class ${parentDef.GetIdentifier()}.")
+                continue
+            }
+            if (vtable.GetMethodNum() != parentVTable.GetMethodNum()) {
+                result.AddError("in vtable of ${def.GetIdentifier()}, parent type ${parentInstType.ToString()} " +
+                    "has ${vtable.GetMethodNum()} virtual method(s), but in vtable of parent class " +
+                    "${parentDef.GetIdentifier()}, this parent type has ${parentVTable.GetMethodNum()} virtual " +
+                    "method(s).")
+                continue
+            }
+            let canHaveAbstractMethod = isAllowedToHaveAbstractMethod(def)
+            var idx: Int64 = 0
+            while (idx < vtable.GetMethodNum()) {
+                if (vtable.GetVirtualMethods()[idx].GetVirtualMethod().getOrThrow().IsPureAbstract() &&
+                    !canHaveAbstractMethod) {
+                    result.AddError("in vtable of ${def.GetIdentifier()}, parent type ${parentInstType.ToString()}, " +
+                        "the ${CHIRCheckerIndexToString(idx)} virtual method is unimplemented, but only interface " +
+                        "or abstract class can have this kind of method.")
+                }
+                idx++
+            }
+        }
+    }
+
     private func CheckImplementedInterfaceTypes(def: CustomTypeDef, result: CHIRCheckResult): Unit {
         for (parentType in def.GetImplementedInterfaceTys()) {
             if (!parentType.GetClassDef().IsInterface()) {
