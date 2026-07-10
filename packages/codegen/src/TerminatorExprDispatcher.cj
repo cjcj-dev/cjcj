@@ -112,8 +112,7 @@ private func HandleExitDebugInfo(irBuilder: IRBuilder2, exitExpr: Exit): Unit {
     }
     if (let Some(cgFunc) <- irBuilder.GetInsertCGFunction()) {
         if (HasAttributeAtIndex(cgFunc.GetRawFunction(), UInt32.Max, HAS_WITH_TI_WRAPPER_ATTR)) {
-            let _ = exitExpr.GetDebugLocation()
-            // GAP_TODO CGContext::AddDebugLocOfRetExpr TerminatorExprDispatcher.cpp:45
+            cgCtx.AddDebugLocOfRetExpr(cgFunc.GetRawFunction(), exitExpr.GetDebugLocation())
         }
     }
 }

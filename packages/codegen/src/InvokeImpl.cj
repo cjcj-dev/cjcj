@@ -137,8 +137,27 @@ private func GenObjTyMetaForVirtualCall(irBuilder: IRBuilder2, ty: Type): LLVMMe
     return LLVMCreateMDTupleFromString(irBuilder.GetLLVMContext(), CGType.GetNameOfTypeInfoGV(ty))
 }
 
-private func GenIRToUnboxResult(_: IRBuilder2, _: LLVMValueRef, _: Bool): Unit {
-    // GAP_TODO CGContext::GetOriginalNonRefValOfBoxedValue/SetBoxedValueMap InvokeImpl.cpp:107-129.
+private func GenIRToUnboxResult(irBuilder: IRBuilder2, thisValue: LLVMValueRef, isMut: Bool): Unit {
+    let cgCtx = irBuilder.GetCGModule().GetCGContext()
+    let originalNonRefVal = cgCtx.GetOriginalNonRefValOfBoxedValue(thisValue)
+    if (originalNonRefVal.isNone() || !isMut) {
+        return
+    }
+
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>(["handle_boxed", "handle_end"]))
+    let handleBoxedBB = blocks[0]
+    let handleEndBB = blocks[1]
+    let thisValueTI = irBuilder.GetTypeInfoFromObject(thisValue)
+    irBuilder.CreateCondBr(irBuilder.CreateTypeInfoIsReferenceCall(thisValueTI), handleEndBB, handleBoxedBB)
+
+    irBuilder.SetInsertPoint(handleBoxedBB)
+    let originalValue = originalNonRefVal.getOrThrow()
+    let basePtr = cgCtx.GetBasePtrOf(originalValue).getOrThrow()
+    let sizeOfTI = irBuilder.GetSizeFromTypeInfo(thisValueTI)
+    irBuilder.CallGCWriteGeneric(basePtr, originalValue, thisValue, sizeOfTI)
+    irBuilder.CreateBr(handleEndBB)
+
+    irBuilder.SetInsertPoint(handleEndBB)
 }
 
 private func VTableSizeOf(ownerTy: Type): Int64 {

@@ -5,6 +5,7 @@ import cjcj::chir.Attribute
 import cjcj::chir.CHIRBuilder
 import cjcj::chir.ClassType
 import cjcj::chir.CustomType
+import cjcj::chir.DebugLocation
 import cjcj::chir.Function
 import cjcj::chir.GlobalVar
 import cjcj::chir.Package
@@ -84,6 +85,9 @@ public class CGContext {
     private let virtualCallInfo4LICMMap: ArrayList<(CGFunction, ArrayList<VirtualCallInfo4LICM>)> =
         ArrayList<(CGFunction, ArrayList<VirtualCallInfo4LICM>)>()
     private let dependentPartialOrderOfTypes: ArrayList<PartialOrderPair> = ArrayList<PartialOrderPair>()
+    private let debugLocOfRetExpr: HashMap<UIntNative, ArrayList<DebugLocation>> =
+        HashMap<UIntNative, ArrayList<DebugLocation>>()
+    private let nonRefBox2RefMap: HashMap<UIntNative, LLVMValueRef> = HashMap<UIntNative, LLVMValueRef>()
     private var cjStringType: LLVMTypeRef = LLVMNullType()
 
     public var debugValue: LLVMValueRef = LLVMNullValue()
@@ -113,6 +117,8 @@ public class CGContext {
         callBasesToReplace.clear()
         virtualCallInfo4LICMMap.clear()
         dependentPartialOrderOfTypes.clear()
+        debugLocOfRetExpr.clear()
+        nonRefBox2RefMap.clear()
         genericParamsCacheMap.clear()
         genericParamsSizeBlockLevelCacheMap.clear()
         subCHIRPackage.Clear()
@@ -227,6 +233,32 @@ public class CGContext {
             }
         }
         return ArrayList<VirtualCallInfo4LICM>()
+    }
+
+    public func AddDebugLocOfRetExpr(funcValue: LLVMValueRef, debugLoc: DebugLocation): Unit {
+        let key = funcValue.toUIntNative()
+        if (!debugLocOfRetExpr.contains(key)) {
+            debugLocOfRetExpr[key] = ArrayList<DebugLocation>()
+        }
+        debugLocOfRetExpr[key].add(debugLoc)
+    }
+
+    public func GetDebugLocOfRetExpr(funcValue: LLVMValueRef): ArrayList<DebugLocation> {
+        let key = funcValue.toUIntNative()
+        if (!debugLocOfRetExpr.contains(key)) {
+            debugLocOfRetExpr[key] = ArrayList<DebugLocation>()
+        }
+        return debugLocOfRetExpr[key]
+    }
+
+    public func SetBoxedValueMap(boxedRefVal: LLVMValueRef, originalNonRefVal: LLVMValueRef): Unit {
+        if (!nonRefBox2RefMap.contains(boxedRefVal.toUIntNative())) {
+            nonRefBox2RefMap[boxedRefVal.toUIntNative()] = originalNonRefVal
+        }
+    }
+
+    public func GetOriginalNonRefValOfBoxedValue(boxedRefVal: LLVMValueRef): Option<LLVMValueRef> {
+        return nonRefBox2RefMap.get(boxedRefVal.toUIntNative())
     }
 
     public func SetBasePtr(value: LLVMValueRef, basePtr: LLVMValueRef): Unit {
