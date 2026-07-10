@@ -1213,7 +1213,7 @@ extend ParserImpl {
             return ParseVarDecl(scopeKind, modifiers, annos, key, isVar, isConst)
         }
         DiagExpectedIdentifierOrPattern(isVar, key.Begin(), isConst)
-        ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
+        ConsumeUntil(TokenKind.NL)
         return InvalidDecl(key.Begin())
     }
 
@@ -1230,7 +1230,7 @@ extend ParserImpl {
             return ParseVarDecl(scopeKind, modifiers, annos, key, false, true)
         }
         DiagExpectedIdentifierOrPattern(false, key.Begin(), true)
-        ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
+        ConsumeUntil(TokenKind.NL)
         return InvalidDecl(key.Begin())
     }
 
