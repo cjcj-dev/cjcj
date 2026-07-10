@@ -1426,4 +1426,97 @@ class CHIRDeserializerImpl {
         return def as T
     }
 
+    private func GetFeatures(obj: PackageFormat_GlobalValue): ArrayList<String> {
+        let features = ArrayList<String>()
+        if (let Some(vector) <- obj.GetFeatures()) {
+            var index = 0u32
+            while (index < vector.size()) {
+                let position = (vector.Get(index) as Int64).getOrThrow()
+                features.add(FlatBufferString(vector.data, position).str())
+                index++
+            }
+        }
+        return features
+    }
+
+    private func Deserialize(obj: PackageFormat_BoolLiteral): BoolLiteral {
+        let valueTy = GetType<Type>(obj.GetBase().getOrThrow().GetBase().getOrThrow().GetType()).getOrThrow()
+        return builder.CreateLiteralValue(BoolLiteral(obj.GetVal()), valueTy)
+    }
+
+    private func Deserialize(obj: PackageFormat_RuneLiteral): RuneLiteral {
+        let valueTy = GetType<Type>(obj.GetBase().getOrThrow().GetBase().getOrThrow().GetType()).getOrThrow()
+        return builder.CreateLiteralValue(RuneLiteral(Rune(obj.GetVal())), valueTy)
+    }
+
+    private func Deserialize(obj: PackageFormat_StringLiteral): StringLiteral {
+        let valueTy = GetType<Type>(obj.GetBase().getOrThrow().GetBase().getOrThrow().GetType()).getOrThrow()
+        return builder.CreateLiteralValue(StringLiteral(obj.GetVal().getOrThrow().str()), valueTy)
+    }
+
+    private func Deserialize(obj: PackageFormat_IntLiteral): IntLiteral {
+        let valueTy = GetType<Type>(obj.GetBase().getOrThrow().GetBase().getOrThrow().GetType()).getOrThrow()
+        return builder.CreateLiteralValue(IntLiteral(obj.GetVal()), valueTy)
+    }
+
+    private func Deserialize(obj: PackageFormat_FloatLiteral): FloatLiteral {
+        let valueTy = GetType<Type>(obj.GetBase().getOrThrow().GetBase().getOrThrow().GetType()).getOrThrow()
+        return builder.CreateLiteralValue(FloatLiteral(obj.GetVal()), valueTy)
+    }
+
+    private func Deserialize(obj: PackageFormat_UnitLiteral): UnitLiteral {
+        let valueTy = GetType<Type>(obj.GetBase().getOrThrow().GetBase().getOrThrow().GetType()).getOrThrow()
+        return builder.CreateLiteralValue(UnitLiteral(), valueTy)
+    }
+
+    private func Deserialize(obj: PackageFormat_NullLiteral): NullLiteral {
+        let valueTy = GetType<Type>(obj.GetBase().getOrThrow().GetBase().getOrThrow().GetType()).getOrThrow()
+        return builder.CreateLiteralValue(NullLiteral(), valueTy)
+    }
+
+    private func Deserialize(obj: PackageFormat_GlobalVar): GlobalVar {
+        let globalValue = obj.GetBase().getOrThrow()
+        let valueBase = globalValue.GetBase().getOrThrow()
+        let identifier = valueBase.GetIdentifier().getOrThrow().str()
+        if (compilePlatform) {
+            if (let Some(exist) <- builder.context.GetCurPackage().getOrThrow().TryGetGlobalVar(identifier)) {
+                exist.EnableAttr(Attribute.PREVIOUSLY_DESERIALIZED)
+                return exist
+            }
+        }
+        let valueTy = GetType<RefType>(valueBase.GetType()).getOrThrow()
+        let result = builder.CreateGlobalVar(valueTy, GetMangleNameFromIdentifier(identifier),
+            srcCodeIdentifier: globalValue.GetSrcCodeIdentifier().getOrThrow().str(),
+            rawMangledName: globalValue.GetRawMangledName().getOrThrow().str(),
+            packageName: globalValue.GetPackageName().getOrThrow().str())
+        builder.context.GetCurPackage().getOrThrow().AddGlobalVar(result)
+        result.SetFeatures(GetFeatures(globalValue))
+        if (compilePlatform) { result.EnableAttr(Attribute.DESERIALIZED) }
+        return result
+    }
+
+    private func Deserialize(obj: PackageFormat_Function): Function {
+        let globalValue = obj.GetBase().getOrThrow()
+        let valueBase = globalValue.GetBase().getOrThrow()
+        let valueTy = GetType<FuncType>(valueBase.GetType()).getOrThrow()
+        let identifier = valueBase.GetIdentifier().getOrThrow().str()
+        if (compilePlatform) {
+            if (let Some(exist) <- builder.context.GetCurPackage().getOrThrow().TryGetGlobalFunc(identifier)) {
+                exist.EnableAttr(Attribute.PREVIOUSLY_DESERIALIZED)
+                return exist
+            }
+        }
+        let result = builder.CreateFunction(valueTy, GetMangleNameFromIdentifier(identifier),
+            srcCodeIdentifier: globalValue.GetSrcCodeIdentifier().getOrThrow().str(),
+            rawMangledName: globalValue.GetRawMangledName().getOrThrow().str(),
+            packageName: globalValue.GetPackageName().getOrThrow().str(),
+            genericTypeParams: GetType<GenericType>(obj.GetGenericTypeParams()))
+        result.SetFeatures(GetFeatures(globalValue))
+        result.SetFastNative(obj.GetIsFastNative())
+        result.SetCFFIWrapper(obj.GetIsCFFIWrapper())
+        result.SetFuncKind(CHIRFuncKindFromIndex(Int64(obj.GetFuncKind())))
+        if (compilePlatform) { result.EnableAttr(Attribute.DESERIALIZED) }
+        return result
+    }
+
 }
