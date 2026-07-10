@@ -78,9 +78,9 @@ public func ChkLitConstExprRange(expr: LitConstExpr, diag!: Option<BasicDiagnost
                     if (exprTy.IsIdeal()) {
                         typeName += "64"
                     }
-                    let builder = diagValue.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(diagValue,
                         BasicDiagKindRefactor.sema_exceed_num_value_range,
-                        BasicMakeRange(expr.begin, expr.end),
+                        expr,
                         arguments: [expr.stringValue, typeName])
                     builder.Emit()
                 }
