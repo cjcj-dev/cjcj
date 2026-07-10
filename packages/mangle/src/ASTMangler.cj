@@ -350,25 +350,17 @@ public class ASTMangler {
         }
         mangled += MangleGenericArguments(decl)
         mangled += MangleDeclAstKind(decl.astKind)
-        if (decl.astKind == ASTKind.FUNC_DECL && decl.TestAttr(Attribute.CONSTRUCTOR) &&
-            decl.TestAttr(Attribute.STATIC)) {
-            let initSuffix = MangleName(MANGLE_LT_PREFIX + decl.identifier + MANGLE_GT_PREFIX) +
-                MangleDeclAstKind(ASTKind.FUNC_DECL)
-            if (EndsWith(mangled, initSuffix)) {
-                mangled = mangled[0..mangled.size - initSuffix.size] + MangleName(STATIC_INIT_FUNC)
-            }
-        }
-        mangled += MangleOthers(decl)
-        return mangled
+        let mangledRef = StringRef(mangled)
+        MangleOthers(decl, mangledRef: mangledRef)
+        return mangledRef.value
     }
 
-    private func MangleOthers(decl: MangleDecl): String {
-        var mangled = ""
+    private func MangleOthers(decl: MangleDecl, mangledRef!: StringRef): Unit {
         if (decl.astKind == ASTKind.VAR_DECL ||
             (decl.astKind == ASTKind.FUNC_PARAM && decl.isMemberParam)) {
-            mangled += MANGLE_DIDOLLAR_PREFIX
+            mangledRef.value += MANGLE_DIDOLLAR_PREFIX
             if (let Some(typeAnnotation) <- decl.typeAnnotation) {
-                mangled += MangleAstType(typeAnnotation)
+                mangledRef.value += MangleAstType(typeAnnotation)
             }
         }
         if (decl.astKind == ASTKind.MAIN_DECL || decl.astKind == ASTKind.FUNC_DECL ||
@@ -378,15 +370,20 @@ public class ASTMangler {
             } else {
                 throw IllegalArgumentException("Function-like declaration has no function body: " + decl.identifier)
             }
-            mangled += MangleFuncParameters(body.params)
+            mangledRef.value += MangleFuncParameters(body.params)
             if (decl.astKind == ASTKind.FUNC_DECL) {
-                mangled += MANGLE_DIDOLLAR_PREFIX
+                if (decl.TestAttr(Attribute.CONSTRUCTOR) && decl.TestAttr(Attribute.STATIC)) {
+                    let initNameAndEnd: Int64 = 8
+                    mangledRef.value = mangledRef.value[0..mangledRef.value.size - initNameAndEnd] +
+                        MangleName(STATIC_INIT_FUNC)
+                }
+                mangledRef.value += MANGLE_DIDOLLAR_PREFIX
                 if (let Some(retType) <- body.retType) {
-                    mangled += MangleAstType(retType)
+                    mangledRef.value += MangleAstType(retType)
                 } else if (let Some(outer) <- decl.outerDecl) {
                     if (outer.astKind == ASTKind.PROP_DECL) {
                         if (let Some(typeAnnotation) <- outer.typeAnnotation) {
-                            mangled += MangleAstType(typeAnnotation)
+                            mangledRef.value += MangleAstType(typeAnnotation)
                         } else {
                             throw IllegalArgumentException("Property accessor has no property type: " + decl.identifier)
                         }
@@ -394,11 +391,10 @@ public class ASTMangler {
                 }
             } else if (decl.astKind == ASTKind.MAIN_DECL) {
                 if (let Some(retType) <- body.retType) {
-                    mangled += MangleAstType(retType)
+                    mangledRef.value += MangleAstType(retType)
                 }
             }
         }
-        return mangled
     }
 
     private func MangleExtendLiteralIfInExtend(decl: MangleDecl): String {
