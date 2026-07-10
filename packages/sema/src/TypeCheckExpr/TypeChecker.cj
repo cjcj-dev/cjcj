@@ -2922,6 +2922,13 @@ public class TypeChecker {
                 let _ = TypeCheckClassLikeCheckNominalAnnotationRules(diagValue, classDecl)
             }
             SynthesizeInheritedTypes(ctx, classDecl)
+            for (inheritedType in classDecl.inheritedTypes) {
+                if ((inheritedType as RefType).isSome() && inheritedType.GetTarget().isSome()) {
+                    let diagValue = impl.diag.getOrThrow()
+                    let _ = TypeCheckClassLikeCheckSealedInheritance(diagValue, classDecl, inheritedType)
+                    let _ = TypeCheckClassLikeCheckThreadContextInheritance(diagValue, classDecl, inheritedType)
+                }
+            }
             if (let Some(body) <- classDecl.body) {
                 SynthesizeDeclList(ctx, body.decls)
             }

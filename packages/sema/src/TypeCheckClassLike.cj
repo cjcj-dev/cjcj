@@ -129,27 +129,51 @@ public func TypeCheckClassLikeCheckSealedInheritance(
     if (!target.TestAttr(Attribute.SEALED)) {
         return true
     }
+    var valid = true
     if (target.TestAttr(Attribute.IMPORTED) && !child.TestAttr(Attribute.IMPORTED)) {
-        let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_cannot_inherit_sealed,
-            TypeCheckClassLikeRange(parent),
-            arguments: [target.identifier.Val()])
-        builder.Emit()
-        return false
+        TypeCheckClassLikeDiagCannotInheritSealed(diag, child, parent, false)
+        valid = false
     }
     if (target.TestAttr(Attribute.SPECIFIC)) {
         if (let Some(commonDecl) <- TypeCheckClassLikeFindCorrespondingCommonDecl(target)) {
             if (commonDecl.TestAttr(Attribute.SEALED)) {
                 if (!child.TestAttr(Attribute.FROM_COMMON_PART) && !child.TestAttr(Attribute.SPECIFIC)) {
-                    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_cannot_inherit_sealed,
-                        TypeCheckClassLikeRange(parent),
-                        arguments: [target.identifier.Val()])
-                    builder.Emit()
-                    return false
+                    TypeCheckClassLikeDiagCannotInheritSealed(diag, child, parent, true)
+                    valid = false
                 }
             }
         }
     }
-    return true
+    return valid
+}
+
+private func TypeCheckClassLikeDiagCannotInheritSealed(diag: BasicDiagnosticEngine, child: Decl,
+    parent: Type, isCommon: Bool): Unit {
+    let target = parent.GetTarget().getOrThrow()
+    var isImplement = child.astKind == ASTKind.CLASS_DECL && target.astKind == ASTKind.INTERFACE_DECL
+    var range = TypeCheckClassLikeIdentifierRange(child)
+    if (let Some(extendDecl) <- (child as ExtendDecl)) {
+        if (let Some(extendedType) <- extendDecl.extendedType) {
+            if (let Some(extendedDecl) <- extendedType.GetTarget()) {
+                if (extendedDecl.astKind != ASTKind.INTERFACE_DECL) {
+                    isImplement = true
+                }
+            }
+            range = TypeCheckClassLikeRange(extendedType)
+        }
+    }
+    let inheritOrImplement = if (isImplement) { "implement" } else { "inherit" }
+    let importedOrCommon = if (isCommon) { "common-defined" } else { "imported" }
+    let classOrInterface = if (target.astKind == ASTKind.CLASS_DECL) { "class" } else { "interface" }
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_cannot_inherit_sealed, child, range,
+        arguments: [inheritOrImplement, importedOrCommon, classOrInterface, target.identifier.Val()])
+    let declaredPos = if (isCommon) {
+        "common package part"
+    } else {
+        "package '" + target.fullPackageName + "'"
+    }
+    AddHint(builder, parent, arguments: ["sealed " + classOrInterface + " declared in " + declaredPos])
+    builder.Emit()
 }
 
 public func TypeCheckClassLikeCheckThreadContextInheritance(
