@@ -152,6 +152,28 @@ extend ParserImpl {
         TargetTokenConsumedControl(flag, targetTokenConsumed)
     }
 
+    public func ImplementConsumeStrategy(sc: ScopeKind): Unit {
+        let normalDeclConsume = { => SeeingDecl() || Seeing(TokenKind.RCURL) }
+        let normalFuncBodyConsume = { => SeeingDecl() || SeeingExpr() || Seeing(TokenKind.RCURL) }
+        let normalEnumBodyConsume = { =>
+            SeeingDecl() || Seeing(TokenKind.BITOR) || Seeing(TokenKind.IDENTIFIER) || Seeing(TokenKind.RCURL)
+        }
+        match (sc) {
+            case ScopeKind.TOPLEVEL =>
+                ConsumeUntilDecl()
+                ConsumeUntilAny(normalFuncBodyConsume, targetTokenConsumed: false)
+            case ScopeKind.EXTEND_BODY | ScopeKind.STRUCT_BODY | ScopeKind.INTERFACE_BODY | ScopeKind.CLASS_BODY =>
+                ConsumeUntilAny(normalDeclConsume, targetTokenConsumed: false)
+            case ScopeKind.FUNC_BODY | ScopeKind.MACRO_BODY | ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS |
+                ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT | ScopeKind.PROP_MEMBER_GETTER_BODY |
+                ScopeKind.PROP_MEMBER_SETTER_BODY =>
+                ConsumeUntilAny(normalFuncBodyConsume, targetTokenConsumed: false)
+            case ScopeKind.ENUM_BODY =>
+                ConsumeUntilAny(normalEnumBodyConsume, targetTokenConsumed: false)
+            case _ => ()
+        }
+    }
+
     public func ConsumeUntilDeclOrNL(): Unit {
         ConsumeUntilDeclOrNL(TokenKind.SENTINEL)
     }
