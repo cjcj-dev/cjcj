@@ -1,5 +1,6 @@
 package cangjie_compiler::codegen
 
+import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.GlobalVar
 import cangjie_compiler::chir.StringLiteral
 import cangjie_compiler::chir.MangleCHIRType
@@ -32,6 +33,12 @@ private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
                     LLVMCStringToString(unsafe { LLVMGetValueName(rawGlobal) }) ?? "", stringLiteral.value)
             } else {
                 unsafe { LLVMSetInitializer(rawGlobal, literalValue) }
+            }
+            if (chirGV.TestAttr(Attribute.READONLY)) {
+                unsafe {
+                    LLVMSelfhostGlobalVariableAddEnumAttribute(rawGlobal, 49u32)
+                    LLVMSetGlobalConstant(rawGlobal, 1)
+                }
             }
         } else if (chirGV.GetInitFunc().isSome()) {
             let globalType = globalValue.GetCGType() ??
