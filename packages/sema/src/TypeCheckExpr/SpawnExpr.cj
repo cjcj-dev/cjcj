@@ -63,8 +63,8 @@ public func CheckSpawnArgValid(typeManager: TypeManager, arg: Expr,
                 }
             }
             if (let Some(diagValue2) <- diag) {
-                let builder2 = diagValue2.DiagnoseRefactor(BasicDiagKindRefactor.sema_spawn_arg_invalid,
-                    BasicMakeRange(arg.begin, arg.end))
+                let builder2 = DiagnoseRefactor(diagValue2, BasicDiagKindRefactor.sema_spawn_arg_invalid,
+                    arg)
                 builder2.Emit()
             }
         }
