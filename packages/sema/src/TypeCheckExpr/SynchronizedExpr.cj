@@ -37,8 +37,8 @@ public func ChkSyncExpr(typeManager: TypeManager, se: SynchronizedExpr,
     } else {
         if (let Some(mutexExpr2) <- se.mutex) {
             if (let Some(diagValue) <- diag) {
-                let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_use_expr_without_import,
-                    BasicMakeRange(mutexExpr2.begin, mutexExpr2.end), arguments: ["sync", "synchronized"])
+                let builder = DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_use_expr_without_import,
+                    mutexExpr2, arguments: ["sync", "synchronized"])
                 builder.Emit()
             }
         }
