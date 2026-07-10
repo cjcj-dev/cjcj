@@ -49,7 +49,7 @@ extend ParserImpl {
                 curIdent = ExpectPackageIdentifierWithPos(pkg)
                 if (curIdent.Empty()) {
                     pkg.isBroken = true
-                    ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
+                    ConsumeUntilAny([TokenKind.NL])
                     break
                 }
                 if (curIdent.IsRaw()) {
@@ -57,7 +57,7 @@ extend ParserImpl {
                     ParseDiagnoseRefactor(
                         DiagKindRefactor.parse_package_name_has_backtick,
                         MakeRange(curIdent.Begin() - 1, curIdent.End() + 1)).Emit()
-                    ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
+                    ConsumeUntilAny([TokenKind.NL])
                     break
                 }
                 if (pkg.prefixPaths.isEmpty() && Skip(TokenKind.DOUBLE_COLON)) {
@@ -88,7 +88,6 @@ extend ParserImpl {
                 moduleName = pkg.prefixPaths[0]
             }
             let _ = CheckDeclModifiers(modifiers, ScopeKind.TOPLEVEL, DefKind.PACKAGE)
-            SkipNLOrSemi()
         }
         return pkg
     }
