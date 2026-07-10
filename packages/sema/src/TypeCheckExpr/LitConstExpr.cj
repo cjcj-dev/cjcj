@@ -103,7 +103,7 @@ public func ChkLitConstExprOfTypeInteger(typeManager: TypeManager, target: Ty, l
             return true
         }
         if (let Some(diagValue) <- diag) {
-            diagValue.Diagnose(lce.begin, BasicDiagKind.sema_cannot_convert_literal,
+            Diagnose(diagValue, lce, BasicDiagKind.sema_cannot_convert_literal,
                 args: [BasicDiagArgument(lce.stringValue), BasicDiagArgument(target.String())]).Emit()
         }
         return false
@@ -118,7 +118,7 @@ public func ChkLitConstExprOfTypeInteger(typeManager: TypeManager, target: Ty, l
     }
     if (!target.IsInvalid()) {
         if (let Some(diagValue2) <- diag) {
-            diagValue2.Diagnose(lce.begin, BasicDiagKind.sema_cannot_convert_literal,
+            Diagnose(diagValue2, lce, BasicDiagKind.sema_cannot_convert_literal,
                 args: [BasicDiagArgument("an integer"), BasicDiagArgument(target.String())]).Emit()
         }
         let _ = InvalidLitConstExpr(lce)
@@ -143,7 +143,7 @@ public func ChkLitConstExprOfTypeFloat(typeManager: TypeManager, target: Ty, lce
             return true
         }
         if (let Some(diagValue) <- diag) {
-            diagValue.Diagnose(lce.begin, BasicDiagKind.sema_cannot_convert_literal,
+            Diagnose(diagValue, lce, BasicDiagKind.sema_cannot_convert_literal,
                 args: [BasicDiagArgument(lce.stringValue), BasicDiagArgument(target.String())]).Emit()
         }
         return false
@@ -157,7 +157,7 @@ public func ChkLitConstExprOfTypeFloat(typeManager: TypeManager, target: Ty, lce
         return true
     }
     if (let Some(diagValue2) <- diag) {
-        diagValue2.Diagnose(lce.begin, BasicDiagKind.sema_cannot_convert_literal,
+        Diagnose(diagValue2, lce, BasicDiagKind.sema_cannot_convert_literal,
             args: [BasicDiagArgument("a floating-point"), BasicDiagArgument(target.String())]).Emit()
     }
     lce.SetTy(TypeManager.GetNonNullTy(lce.GetTy() ?? TypeManager.GetInvalidTy()))
