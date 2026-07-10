@@ -25,18 +25,34 @@ fail() {
     FAIL=$((FAIL + 1))
 }
 
-expect_failure() {
+expect_failure_exact() {
     local name="$1"
-    local expected="$2"
+    shift
+    local expected=("$@")
     local output="$WORK/$name.out"
-    if (cd "$WORK" && "$CJC" "$FIXTURES/$name.cj" -o "$WORK/$name") >"$output" 2>&1; then
+    if (cd "$WORK" && "$CJC" "$FIXTURES/$name.cj" --diagnostic-format=noColor \
+        -o "$WORK/$name") >"$output" 2>&1; then
         fail "$name accepted"
-    elif grep -F "$expected" "$output" >/dev/null; then
-        pass "$name rejected with $expected"
-    else
-        fail "$name rejected without $expected"
-        sed -n '1,20p' "$output"
+        return
     fi
+    local actual=()
+    mapfile -t actual < <(grep -E '^(error|note):|^  # note:' "$output" || true)
+    if [ "${#actual[@]}" -ne "${#expected[@]}" ]; then
+        fail "$name diagnostic count expected=${#expected[@]} actual=${#actual[@]}"
+        sed -n '1,80p' "$output"
+        return
+    fi
+    local index=0
+    while [ "$index" -lt "${#expected[@]}" ]; do
+        if [ "${actual[$index]}" != "${expected[$index]}" ]; then
+            fail "$name diagnostic[$index] mismatch"
+            echo "EXPECTED: ${expected[$index]}"
+            echo "ACTUAL:   ${actual[$index]}"
+            return
+        fi
+        index=$((index + 1))
+    done
+    pass "$name rejected with exact diagnostics"
 }
 
 if (cd "$WORK" && "$CJC" "$FIXTURES/legal.cj" -o "$WORK/legal") >"$WORK/legal.out" 2>&1 &&
@@ -47,12 +63,41 @@ else
     sed -n '1,20p' "$WORK/legal.out"
 fi
 
-expect_failure noheap_bad "@NoHeapAlloc"
-expect_failure noheap_array_bad "RawArrayAllocate"
-expect_failure noheap_box_bad "heap allocation 'Allocate'"
-expect_failure nowritebarrierrec_bad "static call path: barrierRoot -> makeHolder"
-expect_failure nowritebarrierrec_cycle_bad "recursive static-call cycle: cycleRoot -> cycleA -> cycleB -> cycleA"
-expect_failure invalid_target "@NoStackGrow"
+expect_failure_exact noheap_bad \
+    "error: '@NoHeapAlloc' not applicable to static call closure emitted heap allocation 'llvm.cj.malloc.object'" \
+    "note: @NoHeapAlloc root is 'allocateObject'" \
+    "note: static call path: allocateObject"
+expect_failure_exact noheap_array_bad \
+    "error: '@NoHeapAlloc' not applicable to static call closure emitted heap allocation 'llvm.cj.malloc.array'" \
+    "note: @NoHeapAlloc root is 'allocateArray'" \
+    "note: static call path: allocateArray"
+expect_failure_exact noheap_box_bad \
+    "error: '@NoHeapAlloc' not applicable to static call closure emitted heap allocation 'llvm.cj.malloc.object'" \
+    "note: @NoHeapAlloc root is 'noHeapBox'" \
+    "note: static call path: noHeapBox -> boxInteger"
+expect_failure_exact nowritebarrierrec_bad \
+    "error: '@NoWriteBarrierRec' not applicable to static call closure emitted write barrier while lowering 'StoreElementRef'" \
+    "note: @NoWriteBarrierRec root is 'barrierRoot'" \
+    "note: static call path: barrierRoot -> makeHolder -> init"
+expect_failure_exact nowritebarrierrec_cycle_bad \
+    "error: '@NoWriteBarrierRec' not applicable to static call closure emitted write barrier while lowering 'StoreElementRef'" \
+    "  # note: recursive static-call cycle: cycleRoot -> cycleA -> cycleB -> cycleA" \
+    "note: @NoWriteBarrierRec root is 'cycleRoot'" \
+    "note: static call path: cycleRoot -> cycleA -> init"
+expect_failure_exact nowritebarrierrec_aggregate_bad \
+    "error: '@NoWriteBarrierRec' not applicable to static call closure emitted write barrier while lowering 'Apply'" \
+    "note: @NoWriteBarrierRec root is 'aggregateBarrier'" \
+    "note: static call path: aggregateBarrier"
+expect_failure_exact nowritebarrierrec_tuple_bad \
+    "error: '@NoWriteBarrierRec' not applicable to static call closure emitted write barrier while lowering 'Tuple'" \
+    "note: @NoWriteBarrierRec root is 'tupleBarrier'" \
+    "note: static call path: tupleBarrier"
+expect_failure_exact nowritebarrierrec_box_bad \
+    "error: '@NoWriteBarrierRec' not applicable to static call closure emitted write barrier while lowering 'Box'" \
+    "note: @NoWriteBarrierRec root is 'boxBarrier'" \
+    "note: static call path: boxBarrier"
+expect_failure_exact invalid_target \
+    "error: class cannot be modified with '@NoStackGrow'"
 
 if (cd "$WORK" && "$CJC" "$FIXTURES/nostackgrow.cj" --output-type=staticlib \
     -o "$WORK/libnostackgrow.a") >"$WORK/nostackgrow.out" 2>&1; then

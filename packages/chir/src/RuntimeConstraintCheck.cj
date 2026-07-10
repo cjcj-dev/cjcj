@@ -6,76 +6,131 @@ import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 
 public class NoHeapAllocChecker {
     private let diag: BasicDiagnosticEngine
+    private let constrainedRoots: HashMap<Int64, Function> = HashMap<Int64, Function>()
+    private let paths: HashMap<Int64, String> = HashMap<Int64, String>()
+    private let visited: HashSet<Int64> = HashSet<Int64>()
+    private let reportedExpressions: HashSet<Int64> = HashSet<Int64>()
+    private let reportedFunctions: HashSet<Int64> = HashSet<Int64>()
 
     public init(diag: BasicDiagnosticEngine) {
         this.diag = diag
     }
 
     public func RunOnPackage(pkg: Package): Unit {
+        constrainedRoots.clear()
+        paths.clear()
+        reportedExpressions.clear()
+        reportedFunctions.clear()
+        var hasNoHeapAlloc = false
         for (fn in pkg.GetGlobalFuncsWithBody()) {
             if (fn.TestAttr(Attribute.NO_HEAP_ALLOC)) {
-                CheckFunction(fn)
+                hasNoHeapAlloc = true
+                break
+            }
+        }
+        if (!hasNoHeapAlloc) {
+            return
+        }
+        let callGraph = CallGraph(pkg)
+        for (root in callGraph.GetFunctionNodes()) {
+            if (let Some(fn) <- root.GetFunction()) {
+                if (fn.TestAttr(Attribute.NO_HEAP_ALLOC)) {
+                    CheckStaticCallClosure(root)
+                }
             }
         }
     }
 
-    private func CheckFunction(fn: Function): Unit {
-        if (let Some(body) <- fn.GetBody()) {
-            VisitBlockGroup(fn, body)
-        }
+    private func CheckStaticCallClosure(root: CallGraphNode): Unit {
+        visited.clear()
+        let rootFn = root.GetFunction().getOrThrow()
+        VisitCallGraphNode(rootFn, root, FunctionName(rootFn))
     }
 
-    private func VisitBlockGroup(fn: Function, group: BlockGroup): Unit {
-        for (block in group.GetBlocksRef()) {
-            for (expr in block.GetExpressionsRef()) {
-                VisitExpression(fn, expr)
+    private func VisitCallGraphNode(root: Function, node: CallGraphNode, path: String): Unit {
+        if (visited.contains(node.id)) {
+            return
+        }
+        visited.add(node.id)
+        if (let Some(nodeFn) <- node.GetFunction()) {
+            if (!constrainedRoots.contains(nodeFn.nodeId)) {
+                constrainedRoots[nodeFn.nodeId] = root
+                paths[nodeFn.nodeId] = path
+            }
+        }
+        for (edge in node.GetCalledEdges()) {
+            if (edge.GetKind() != CallGraphEdgeKind.DIRECT) {
+                continue
+            }
+            let child = edge.GetNode()
+            if (let Some(childFn) <- child.GetFunction()) {
+                VisitCallGraphNode(root, child, path + " -> " + FunctionName(childFn))
             }
         }
     }
 
-    private func VisitExpression(fn: Function, expr: Expression): Unit {
-        if (IsHeapAllocation(expr)) {
-            let exprPos = GetDebugPos(expr)
-            let fnPos = GetDebugPos(fn)
-            let reportRange = if (exprPos[0]) { exprPos[1] } else { fnPos[1] }
-            let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_annotation_not_applicable,
-                reportRange,
-                arguments: ["NoHeapAlloc", "function containing heap allocation '" +
-                    ExprKindName(expr.GetExprKind()) + "'"])
-            builder.AddNote(if (fnPos[0]) { fnPos[1] } else { reportRange },
-                "function '" + FunctionName(fn) + "' is marked @NoHeapAlloc")
-            builder.Emit()
+    public func CheckFunction(fn: Function, expr: Option<Expression>, operation: String): Unit {
+        let root = constrainedRoots.get(fn.nodeId) ?? return
+        var reportPos = GetDebugPos(fn)
+        if (let Some(currentExpr) <- expr) {
+            if (reportedExpressions.contains(currentExpr.nodeId)) {
+                return
+            }
+            reportedExpressions.add(currentExpr.nodeId)
+            let exprPos = GetDebugPos(currentExpr)
+            if (exprPos[0]) {
+                reportPos = exprPos
+            }
+        } else {
+            if (reportedFunctions.contains(fn.nodeId)) {
+                return
+            }
+            reportedFunctions.add(fn.nodeId)
         }
-        for (group in expr.GetBlockGroups()) {
-            VisitBlockGroup(fn, group)
-        }
-    }
-
-    private func IsHeapAllocation(expr: Expression): Bool {
-        match (expr.GetExprKind()) {
-            case ExprKind.ALLOCATE =>
-                return (expr as Allocate).getOrThrow().GetType().StripAllRefs().IsClass()
-            case ExprKind.ALLOCATE_WITH_EXCEPTION =>
-                return (expr as AllocateWithException).getOrThrow().GetType().StripAllRefs().IsClass()
-            case ExprKind.RAW_ARRAY_ALLOCATE | ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION => return true
-            case _ => return false
-        }
+        let fnPos = GetDebugPos(fn)
+        let rootPos = GetDebugPos(root)
+        let reportRange = if (reportPos[0]) { reportPos[1] } else { fnPos[1] }
+        let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_annotation_not_applicable,
+            reportRange,
+            arguments: ["NoHeapAlloc", "static call closure emitted heap allocation '" + operation + "'"])
+        builder.AddNote(if (rootPos[0]) { rootPos[1] } else { reportRange },
+            "@NoHeapAlloc root is '" + FunctionName(root) + "'")
+        builder.AddNote(if (fnPos[0]) { fnPos[1] } else { reportRange },
+            "static call path: " + (paths.get(fn.nodeId) ?? FunctionName(fn)))
+        builder.Emit()
     }
 }
 
 public class NoWriteBarrierRecChecker {
     private let diag: BasicDiagnosticEngine
-    private let reachable: ArrayList<CallGraphNode> = ArrayList<CallGraphNode>()
+    private let constrainedRoots: HashMap<Int64, Function> = HashMap<Int64, Function>()
+    private let paths: HashMap<Int64, String> = HashMap<Int64, String>()
     private let visited: HashSet<Int64> = HashSet<Int64>()
     private let active: HashSet<Int64> = HashSet<Int64>()
-    private let paths: HashMap<Int64, String> = HashMap<Int64, String>()
     private let cycles: ArrayList<String> = ArrayList<String>()
+    private let reportedExpressions: HashSet<Int64> = HashSet<Int64>()
+    private let reportedFunctions: HashSet<Int64> = HashSet<Int64>()
 
     public init(diag: BasicDiagnosticEngine) {
         this.diag = diag
     }
 
     public func RunOnPackage(pkg: Package): Unit {
+        constrainedRoots.clear()
+        paths.clear()
+        cycles.clear()
+        reportedExpressions.clear()
+        reportedFunctions.clear()
+        var hasNoWriteBarrierRec = false
+        for (fn in pkg.GetGlobalFuncsWithBody()) {
+            if (fn.TestAttr(Attribute.NO_WRITE_BARRIER_REC)) {
+                hasNoWriteBarrierRec = true
+                break
+            }
+        }
+        if (!hasNoWriteBarrierRec) {
+            return
+        }
         let callGraph = CallGraph(pkg)
         for (root in callGraph.GetFunctionNodes()) {
             if (let Some(fn) <- root.GetFunction()) {
@@ -87,30 +142,24 @@ public class NoWriteBarrierRecChecker {
     }
 
     private func CheckStaticCallClosure(root: CallGraphNode): Unit {
-        reachable.clear()
         visited.clear()
         active.clear()
-        paths.clear()
-        cycles.clear()
         let rootFn = root.GetFunction().getOrThrow()
-        VisitCallGraphNode(root, FunctionName(rootFn))
-        for (node in reachable) {
-            if (let Some(fn) <- node.GetFunction()) {
-                if (let Some(body) <- fn.GetBody()) {
-                    VisitBlockGroup(rootFn, fn, body, paths.get(node.id) ?? FunctionName(fn))
-                }
-            }
-        }
+        VisitCallGraphNode(rootFn, root, FunctionName(rootFn))
     }
 
-    private func VisitCallGraphNode(node: CallGraphNode, path: String): Unit {
+    private func VisitCallGraphNode(root: Function, node: CallGraphNode, path: String): Unit {
         if (visited.contains(node.id)) {
             return
         }
         visited.add(node.id)
         active.add(node.id)
-        reachable.add(node)
-        paths[node.id] = path
+        if (let Some(nodeFn) <- node.GetFunction()) {
+            if (!constrainedRoots.contains(nodeFn.nodeId)) {
+                constrainedRoots[nodeFn.nodeId] = root
+                paths[nodeFn.nodeId] = path
+            }
+        }
         for (edge in node.GetCalledEdges()) {
             if (edge.GetKind() != CallGraphEdgeKind.DIRECT) {
                 continue
@@ -123,112 +172,48 @@ public class NoWriteBarrierRecChecker {
                         cycles.add(childPath)
                     }
                 } else {
-                    VisitCallGraphNode(child, childPath)
+                    VisitCallGraphNode(root, child, childPath)
                 }
             }
         }
         active.remove(node.id)
     }
 
-    private func VisitBlockGroup(root: Function, fn: Function, group: BlockGroup, path: String): Unit {
-        for (block in group.GetBlocksRef()) {
-            for (expr in block.GetExpressionsRef()) {
-                VisitExpression(root, fn, expr, path)
+    public func CheckFunction(fn: Function, expr: Option<Expression>): Unit {
+        let root = constrainedRoots.get(fn.nodeId) ?? return
+        var operation = "codegen-generated"
+        var reportPos = GetDebugPos(fn)
+        if (let Some(currentExpr) <- expr) {
+            if (reportedExpressions.contains(currentExpr.nodeId)) {
+                return
             }
-        }
-    }
-
-    private func VisitExpression(root: Function, fn: Function, expr: Expression, path: String): Unit {
-        if (IsWriteBarrierExpression(expr)) {
-            let exprPos = GetDebugPos(expr)
-            let fnPos = GetDebugPos(fn)
-            let rootPos = GetDebugPos(root)
-            let reportRange = if (exprPos[0]) { exprPos[1] } else { fnPos[1] }
-            let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_annotation_not_applicable,
-                reportRange,
-                arguments: ["NoWriteBarrierRec", "static call closure containing write-barrier operation '" +
-                    ExprKindName(expr.GetExprKind()) + "'"])
-            builder.AddNote(if (rootPos[0]) { rootPos[1] } else { reportRange },
-                "@NoWriteBarrierRec root is '" + FunctionName(root) + "'")
-            builder.AddNote(if (fnPos[0]) { fnPos[1] } else { reportRange }, "static call path: " + path)
-            for (cycle in cycles) {
-                builder.AddNote("recursive static-call cycle: " + cycle)
+            reportedExpressions.add(currentExpr.nodeId)
+            operation = ExprKindName(currentExpr.GetExprKind())
+            let exprPos = GetDebugPos(currentExpr)
+            if (exprPos[0]) {
+                reportPos = exprPos
             }
-            builder.Emit()
-        }
-        for (group in expr.GetBlockGroups()) {
-            VisitBlockGroup(root, fn, group, path)
-        }
-    }
-
-    private func IsWriteBarrierExpression(expr: Expression): Bool {
-        match (expr.GetExprKind()) {
-            case ExprKind.STORE =>
-                let store = (expr as Store).getOrThrow()
-                return IsManagedStoreLocation(store.GetLocation()) && ValueNeedsWriteBarrier(store.GetValue())
-            case ExprKind.STORE_ELEMENT_REF =>
-                let store = (expr as StoreElementRef).getOrThrow()
-                return IsManagedBase(store.GetLocation()) && ValueNeedsWriteBarrier(store.GetValue())
-            case ExprKind.STORE_ELEMENT_BY_NAME =>
-                let store = (expr as StoreElementByName).getOrThrow()
-                return IsManagedBase(store.GetLocation()) && ValueNeedsWriteBarrier(store.GetValue())
-            case ExprKind.RAW_ARRAY_LITERAL_INIT =>
-                for (value in (expr as RawArrayLiteralInit).getOrThrow().GetElements()) {
-                    if (ValueNeedsWriteBarrier(value)) { return true }
-                }
-                return false
-            case ExprKind.RAW_ARRAY_INIT_BY_VALUE =>
-                return ValueNeedsWriteBarrier((expr as RawArrayInitByValue).getOrThrow().GetInitValue())
-            case ExprKind.INTRINSIC =>
-                let intrinsic = (expr as Intrinsic).getOrThrow()
-                let args = intrinsic.GetArgs()
-                return IsArrayWriteIntrinsic(intrinsic.GetIntrinsicKind()) &&
-                    !args.isEmpty() && ValueNeedsWriteBarrier(args[args.size - 1])
-            case ExprKind.INTRINSIC_WITH_EXCEPTION =>
-                let intrinsic = (expr as IntrinsicWithException).getOrThrow()
-                let args = intrinsic.GetArgs()
-                return IsArrayWriteIntrinsic(intrinsic.GetIntrinsicKind()) &&
-                    !args.isEmpty() && ValueNeedsWriteBarrier(args[args.size - 1])
-            case _ => return false
-        }
-    }
-
-    private func IsManagedStoreLocation(location: Value): Bool {
-        if (location.AsGlobalVar().isSome()) {
-            return true
-        }
-        if (let Some(local) <- location.AsLocalVar()) {
-            if (let Some(expr) <- local.GetExpr()) {
-                if (let Some(element) <- (expr as GetElementRef)) {
-                    return IsManagedBase(element.GetLocation())
-                }
-                if (let Some(element) <- (expr as GetElementByName)) {
-                    return IsManagedBase(element.GetLocation())
-                }
+        } else {
+            if (reportedFunctions.contains(fn.nodeId)) {
+                return
             }
+            reportedFunctions.add(fn.nodeId)
         }
-        return false
-    }
-
-    private func IsManagedBase(value: Value): Bool {
-        if (let Some(ty) <- value.GetType()) {
-            return ty.StripAllRefs().IsReferenceType()
+        let fnPos = GetDebugPos(fn)
+        let rootPos = GetDebugPos(root)
+        let reportRange = if (reportPos[0]) { reportPos[1] } else { fnPos[1] }
+        let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_annotation_not_applicable,
+            reportRange,
+            arguments: ["NoWriteBarrierRec", "static call closure emitted write barrier while lowering '" +
+                operation + "'"])
+        builder.AddNote(if (rootPos[0]) { rootPos[1] } else { reportRange },
+            "@NoWriteBarrierRec root is '" + FunctionName(root) + "'")
+        builder.AddNote(if (fnPos[0]) { fnPos[1] } else { reportRange },
+            "static call path: " + (paths.get(fn.nodeId) ?? FunctionName(fn)))
+        for (cycle in cycles) {
+            builder.AddNote("recursive static-call cycle: " + cycle)
         }
-        return false
-    }
-
-    private func ValueNeedsWriteBarrier(value: Value): Bool {
-        if (let Some(ty) <- value.GetType()) {
-            let stripped = ty.StripAllRefs()
-            return stripped.IsReferenceType() || stripped.IsGeneric()
-        }
-        return false
-    }
-
-    private func IsArrayWriteIntrinsic(kind: IntrinsicKind): Bool {
-        return kind == IntrinsicKind.ARRAY_SET || kind == IntrinsicKind.ARRAY_SET_UNCHECKED ||
-            kind == IntrinsicKind.ARRAY_SLICE_SET_ELEMENT ||
-            kind == IntrinsicKind.ARRAY_SLICE_SET_ELEMENT_UNCHECKED
+        builder.Emit()
     }
 }
 

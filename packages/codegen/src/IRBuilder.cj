@@ -266,6 +266,28 @@ public class IRBuilder2 <: Resource {
     public func GetLLVMContext(): LLVMContextHandle { return cgMod.GetLLVMContext() }
     public func GetBuilder(): LLVMBuilderHandle { return builder }
 
+    public func CheckNoHeapAlloc(operation: String): Unit {
+        let currentFunction = cgFunction ?? return
+        let chirFunction = (currentFunction.GetOriginal() as Function) ?? return
+        var currentExpression: Option<Expression> = None
+        if (let Some(exprWrapper) <- chirExpr) {
+            currentExpression = Some(exprWrapper.GetExpression())
+        }
+        GetCGContext().GetCGPkgContext().GetNoHeapAllocChecker().CheckFunction(
+            chirFunction, currentExpression, operation)
+    }
+
+    public func CheckNoWriteBarrierRec(): Unit {
+        let currentFunction = cgFunction ?? return
+        let chirFunction = (currentFunction.GetOriginal() as Function) ?? return
+        var currentExpression: Option<Expression> = None
+        if (let Some(exprWrapper) <- chirExpr) {
+            currentExpression = Some(exprWrapper.GetExpression())
+        }
+        GetCGContext().GetCGPkgContext().GetNoWriteBarrierRecChecker().CheckFunction(
+            chirFunction, currentExpression)
+    }
+
     public func GetPtrSize(): UInt64 {
         return if (GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) { 4u64 } else { 8u64 }
     }
@@ -1843,6 +1865,7 @@ public class IRBuilder2 <: Resource {
         let args = ArrayList<LLVMValueRef>()
         args.add(typeInfoArg)
         args.add(size)
+        CheckNoHeapAlloc(ALLOCA_GENERIC_INTRINSIC_NAME)
         return CreateIntrinsicCall(ALLOCA_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
             name: "sret.generic")
     }
@@ -1853,6 +1876,7 @@ public class IRBuilder2 <: Resource {
         let args = ArrayList<LLVMValueRef>()
         args.add(CreateBitCast(parameters[0], i8PtrType, name: "alloca.generic.ti"))
         args.add(parameters[1])
+        CheckNoHeapAlloc(ALLOCA_GENERIC_INTRINSIC_NAME)
         return CreateIntrinsicCall(ALLOCA_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
             name: "sret.generic")
     }
@@ -2575,6 +2599,7 @@ public class IRBuilder2 <: Resource {
         args.add(CreatePointerCast(value, gcRefType, name: "gcwrite.val"))
         args.add(CreatePointerCast(baseObj, gcRefType, name: "gcwrite.base"))
         args.add(CreatePointerCast(fieldPtr, gcRefPtrType, name: "gcwrite.field"))
+        CheckNoWriteBarrierRec()
         return CreateIntrinsicCallNoInvoke(GCWRITE_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
@@ -2585,6 +2610,7 @@ public class IRBuilder2 <: Resource {
         args.add(CreatePointerCast(value, refTy, name: "gcwrite.ref.value"))
         args.add(CreatePointerCast(baseObject, refTy, name: "gcwrite.ref.base"))
         args.add(CreatePointerCast(place, refPlaceTy, name: "gcwrite.ref.place"))
+        CheckNoWriteBarrierRec()
         return CreateIntrinsicCallNoInvoke("llvm.cj.gcwrite.ref", ArrayList<LLVMTypeRef>(), args)
     }
 
@@ -2592,6 +2618,7 @@ public class IRBuilder2 <: Resource {
         let args = ArrayList<LLVMValueRef>()
         args.add(value)
         args.add(place)
+        CheckNoWriteBarrierRec()
         return CreateIntrinsicCallNoInvoke(GCWRITE_STATIC_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
@@ -2605,6 +2632,7 @@ public class IRBuilder2 <: Resource {
         args.add(CreatePointerCast(dest, destPtrTy, name: "gcwrite.generic.dest"))
         args.add(source)
         args.add(size)
+        CheckNoWriteBarrierRec()
         return CreateIntrinsicCallNoInvoke(GCWRITE_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
@@ -2614,6 +2642,7 @@ public class IRBuilder2 <: Resource {
         args.add(dest)
         args.add(source)
         args.add(size)
+        CheckNoWriteBarrierRec()
         return CreateIntrinsicCallNoInvoke(GCWRITE_GENERIC_PAYLOAD_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
@@ -2713,6 +2742,7 @@ public class IRBuilder2 <: Resource {
         args.add(CreatePointerCast(dest, destPtrTy, name: "gcwrite.struct.dest"))
         args.add(CreatePointerCast(source, sourcePtrTy, name: "gcwrite.struct.source"))
         args.add(size)
+        CheckNoWriteBarrierRec()
         let call = CreateIntrinsicCallNoInvoke("llvm.cj.gcwrite.struct", overloadedTypes, args)
         let metadata = LLVMCreateMDTupleFromString(GetLLVMContext(), aggTypeName)
         LLVMSetInstructionMetadata(GetLLVMContext(), call, "AggType", metadata)
@@ -2728,6 +2758,7 @@ public class IRBuilder2 <: Resource {
             unsafe { LLVMConstIntGetZExtValue(sizeValue) } == 0u64) {
             return LLVMNullValue()
         }
+        CheckNoWriteBarrierRec()
         let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
         let destPtrTy = unsafe { LLVMPointerType(i8Type, 1u32) }
         let sourceRawTy = unsafe { LLVMTypeOf(args[2]) }
@@ -4130,6 +4161,7 @@ public class IRBuilder2 <: Resource {
             args.add(unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), UInt64(elementSize), 0) })
             MALLOC_ARRAY_INTRINSIC_NAME
         }
+        CheckNoHeapAlloc(intrinsicName)
         let arrayValue = CreateIntrinsicCall(intrinsicName, ArrayList<LLVMTypeRef>(), args, name: "rawarray")
         if (arrayValue.isNull()) {
             return LLVMNullValue()
@@ -4212,6 +4244,7 @@ public class IRBuilder2 <: Resource {
         let args = ArrayList<LLVMValueRef>()
         args.add(CreateBitCast(parameters[0], i8PtrType, name: "class.ti"))
         args.add(parameters[1])
+        CheckNoHeapAlloc(MALLOC_OBJECT_INTRINSIC_NAME)
         let objectValue = CreateIntrinsicCall(MALLOC_OBJECT_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
             name: "class.alloc")
         if (!objectValue.isNull()) {
@@ -4250,6 +4283,7 @@ public class IRBuilder2 <: Resource {
         let args = ArrayList<LLVMValueRef>()
         args.add(typeInfoArg)
         args.add(GetLayoutSize32(valueTy, valueCGType))
+        CheckNoHeapAlloc(MALLOC_OBJECT_INTRINSIC_NAME)
         let objectValue = CreateIntrinsicCall(MALLOC_OBJECT_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
             name: "generic.alloc")
         if (!objectValue.isNull()) {

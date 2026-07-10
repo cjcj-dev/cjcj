@@ -671,7 +671,14 @@ private func TryStoreStaticAggregateValueForAddress(irBuilder: IRBuilder2, store
 private func CallGCWriteStaticStruct(irBuilder: IRBuilder2, dest: LLVMValueRef, source: LLVMValueRef,
     size: LLVMValueRef, aggType: LLVMTypeRef): LLVMValueRef {
     CJC_ASSERT(!aggType.isNull() && unsafe { LLVMGetTypeKind(aggType) } == LLVM_STRUCT_TYPE_KIND)
+    let sizeType = unsafe { LLVMTypeOf(size) }
+    if (!sizeType.isNull() && unsafe { LLVMGetTypeKind(sizeType) } == 8 &&
+        unsafe { LLVMIsAInstruction(size) }.isNull() && unsafe { LLVMIsAArgument(size) }.isNull() &&
+        unsafe { LLVMConstIntGetZExtValue(size) } == 0u64) {
+        return LLVMNullValue()
+    }
     let moduleHandle = irBuilder.GetCGModule().GetLLVMModule() ?? return LLVMNullValue()
+    irBuilder.CheckNoWriteBarrierRec()
     let call = unsafe {
         LLVMSelfhostCreateGCWriteStaticAgg(irBuilder.GetBuilder().raw, moduleHandle.raw, aggType, dest, source, size,
             irBuilder.GetSizetLLVMType())

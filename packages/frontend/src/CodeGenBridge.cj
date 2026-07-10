@@ -100,11 +100,6 @@ private class ToCHIR {
             case None => return None
         }
         chirPkg = Some(lowered)
-        NoHeapAllocChecker(instance.diag.AsBasicDiagnosticEngine()).RunOnPackage(lowered)
-        NoWriteBarrierRecChecker(instance.diag.AsBasicDiagnosticEngine()).RunOnPackage(lowered)
-        if (instance.diag.GetErrorCount() != 0) {
-            return None
-        }
         RulesChecking(lowered, builder, instance.invocation.globalOptions, instance.diag.AsBasicDiagnosticEngine())
         RunOptimizationPass(lowered, builder, instance.invocation.globalOptions)
         if (!TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)) {
@@ -385,8 +380,17 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
         let codegenData = CodegenCHIRData(instance.chirData.GetRealCHIRContext(), realPackage)
         PopulateRealCodegenImplicitFuncs(codegenData, realPackage)
         PruneImportedFunctionBodiesForRealCodegen(realPackage)
+        let noHeapAllocChecker = NoHeapAllocChecker(instance.diag.AsBasicDiagnosticEngine())
+        noHeapAllocChecker.RunOnPackage(realPackage)
+        let noWriteBarrierRecChecker = NoWriteBarrierRecChecker(instance.diag.AsBasicDiagnosticEngine())
+        noWriteBarrierRecChecker.RunOnPackage(realPackage)
         let packageModules = GenPackageModules(codegenData, codegenOptions,
-            instance.invocation.globalOptions.enIncrementalCompilation)
+            instance.invocation.globalOptions.enIncrementalCompilation, noHeapAllocChecker, noWriteBarrierRecChecker)
+        if (instance.diag.GetErrorCount() != 0) {
+            instance.diag.EmitCategoryDiagnostics(DiagCategory.CHIR)
+            ClearPackageModules(packageModules)
+            return false
+        }
         emittedAll = emitPackageModules(instance, realPackage, packageModules, packageIndex) && emittedAll
         ClearPackageModules(packageModules)
         packageIndex++

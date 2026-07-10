@@ -7,6 +7,8 @@ import cangjie_compiler::chir.CustomDefKind
 import cangjie_compiler::chir.EnumType
 import cangjie_compiler::chir.ExprKind
 import cangjie_compiler::chir.Function
+import cangjie_compiler::chir.NoHeapAllocChecker
+import cangjie_compiler::chir.NoWriteBarrierRecChecker
 import cangjie_compiler::chir.Type
 import cangjie_compiler::option.EnvironmentType
 import cangjie_compiler::mangle.MANGLE_FUNC_PARAM_TYPE_PREFIX
@@ -33,8 +35,10 @@ private type LLVMGetCalledValueFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
 private type LLVMSetValueName2Func = CFunc<(LLVMValueRef, CString, UIntNative) -> Unit>
 
 public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enableIncrement: Bool,
+    noHeapAllocChecker: NoHeapAllocChecker, noWriteBarrierRecChecker: NoWriteBarrierRecChecker,
     cachedMangleMap!: CachedMangleMap = CachedMangleMap()): ArrayList<LLVMModuleHandle> {
-    let cgPkgContext = CGPkgContext(chirData, options, enableIncrement, cachedMangleMap)
+    let cgPkgContext = CGPkgContext(chirData, options, enableIncrement, noHeapAllocChecker,
+        noWriteBarrierRecChecker, cachedMangleMap)
     let splitter = CHIRSplitter(cgPkgContext)
     let subPackages = splitter.SplitCHIRPackage()
     for (subPackageToRegister in subPackages) {

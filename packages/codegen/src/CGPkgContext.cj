@@ -5,6 +5,8 @@ import cangjie_compiler::chir.CHIRContext
 import cangjie_compiler::chir.CHIRBuilder
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.Function
+import cangjie_compiler::chir.NoHeapAllocChecker
+import cangjie_compiler::chir.NoWriteBarrierRecChecker
 import cangjie_compiler::chir.Package
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
@@ -59,6 +61,8 @@ public class CGPkgContext {
     private let chirData: CHIRData
     private let options: GlobalOptions
     private let chirBuilder: CHIRBuilder
+    private let noHeapAllocChecker: NoHeapAllocChecker
+    private let noWriteBarrierRecChecker: NoWriteBarrierRecChecker
     private let enableIncrement: Bool
     private let correctedCachedMangleMap: CachedMangleMap = CachedMangleMap()
     private let cgMods: ArrayList<CGModule> = ArrayList<CGModule>()
@@ -67,10 +71,13 @@ public class CGPkgContext {
     private let localizedSymbols: HashSet<String> = HashSet<String>()
 
     public init(chirData: CHIRData, options: GlobalOptions, enableIncrement: Bool,
+        noHeapAllocChecker: NoHeapAllocChecker, noWriteBarrierRecChecker: NoWriteBarrierRecChecker,
         cachedMangleMap: CachedMangleMap) {
         this.chirData = chirData
         this.options = options
         chirBuilder = CHIRBuilder(chirData.GetCHIRContext())
+        this.noHeapAllocChecker = noHeapAllocChecker
+        this.noWriteBarrierRecChecker = noWriteBarrierRecChecker
         this.enableIncrement = enableIncrement
         for (name in cachedMangleMap.importedInlineDecls) { correctedCachedMangleMap.importedInlineDecls.add(name) }
         for (name in cachedMangleMap.newExternalDecls) { correctedCachedMangleMap.newExternalDecls.add(name) }
@@ -95,6 +102,14 @@ public class CGPkgContext {
 
     public func GetCHIRBuilder(): CHIRBuilder {
         return chirBuilder
+    }
+
+    public func GetNoWriteBarrierRecChecker(): NoWriteBarrierRecChecker {
+        return noWriteBarrierRecChecker
+    }
+
+    public func GetNoHeapAllocChecker(): NoHeapAllocChecker {
+        return noHeapAllocChecker
     }
 
     public func GetCHIRPackage(): Package {
