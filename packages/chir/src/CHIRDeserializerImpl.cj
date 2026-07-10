@@ -1509,6 +1509,55 @@ class CHIRDeserializerImpl {
         return def as T
     }
 
+    private func Create(obj: PackageFormat_Pos): Position {
+        return Position(obj.GetLine(), obj.GetColumn())
+    }
+
+    private func Create(obj: PackageFormat_DebugLocation): DebugLocation {
+        let filePath = obj.GetFilePath().getOrThrow().str()
+        let fileId = obj.GetFileId()
+        let beginPos = Create(obj.GetBeginPos().getOrThrow())
+        let endPos = Create(obj.GetEndPos().getOrThrow())
+        let scope = ArrayList<Int64>()
+        if (let Some(values) <- obj.GetScope()) {
+            var index = 0u32
+            while (index < values.size()) {
+                scope.add(Int64((values.Get(index) as Int32).getOrThrow()))
+                index++
+            }
+        }
+        if (builder.context.GetSourceFileName(fileId) == INVALID_NAME) {
+            builder.context.RegisterSourceFileName(fileId, filePath)
+        }
+        return DebugLocation(builder.context.GetSourceFileName(fileId), fileId, beginPos, endPos, scopeInfo: scope)
+    }
+
+    private func Create(obj: PackageFormat_AnnoInfo): AnnoInfo {
+        let mangledName = obj.GetMangledName().getOrThrow().str()
+        let instances = ArrayList<CustomAnnoInstance>()
+        if (let Some(rawInstances) <- obj.GetAnnoInstances()) {
+            var index = 0u32
+            while (index < rawInstances.size()) {
+                let position = (rawInstances.Get(index) as Int64).getOrThrow()
+                let rawInstance = PackageFormat_CustomAnnoInstance(rawInstances.data, position)
+                let argValues = ArrayList<String>()
+                if (let Some(rawArgs) <- rawInstance.GetArgValues()) {
+                    var argIndex = 0u32
+                    while (argIndex < rawArgs.size()) {
+                        let argPos = (rawArgs.Get(argIndex) as Int64).getOrThrow()
+                        argValues.add(FlatBufferString(rawArgs.data, argPos).str())
+                        argIndex++
+                    }
+                }
+                let loc = if (let Some(rawLoc) <- rawInstance.GetLoc()) { Create(rawLoc) } else { DebugLocation() }
+                let className = if (let Some(rawName) <- rawInstance.GetAnnoClassName()) { rawName.str() } else { "" }
+                instances.add(CustomAnnoInstance(className, argValues, loc))
+                index++
+            }
+        }
+        return AnnoInfo(mangledName, instances)
+    }
+
     private func GetFeatures(obj: PackageFormat_GlobalValue): ArrayList<String> {
         let features = ArrayList<String>()
         if (let Some(vector) <- obj.GetFeatures()) {
