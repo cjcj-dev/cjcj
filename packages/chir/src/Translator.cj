@@ -459,6 +459,7 @@ public class Translator {
     private let overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>>
     private let scopeInfo: ArrayList<Int64> = ArrayList<Int64>([0])
     private let opts: GlobalOptions
+    private let mergingSpecific: Bool
     private var genericFuncMap: GenericFuncMap = GenericFuncMap()
 
     public init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap,
@@ -474,6 +475,7 @@ public class Translator {
         this.deserializedVals = deserializedVals
         this.overrideSrcFuncResolver = overrideSrcFuncResolver
         this.opts = opts
+        this.mergingSpecific = opts.IsCompilingCJMPSpecific()
     }
 
     public func SetGenericFuncMap(funcMap: GenericFuncMap): Unit {
@@ -789,6 +791,9 @@ public class Translator {
         })
         SetImplementedInterfaces(def, structDecl)
         for (member in structDecl.GetMemberDeclPtrs()) {
+            if (!ShouldTranslateMember(structDecl, member)) {
+                continue
+            }
             TranslateMemberDecl(def, member)
         }
         return None
@@ -844,6 +849,9 @@ public class Translator {
                 mangledName: ctor.mangledName, funcType: ctorFuncType))
         }
         for (member in enumDecl.members) {
+            if (!ShouldTranslateMember(enumDecl, member)) {
+                continue
+            }
             TranslateMemberDecl(def, member)
         }
         return None
@@ -2543,8 +2551,41 @@ public class Translator {
         SetClassSuperClass(def, decl)
         SetImplementedInterfaces(def, decl)
         for (member in decl.GetMemberDeclPtrs()) {
+            if (!ShouldTranslateMember(decl, member)) {
+                continue
+            }
             TranslateMemberDecl(def, member)
         }
+    }
+
+    private func DeclaredInDifferentFiles(left: AstDecl, right: AstDecl): Bool {
+        if (let Some(leftFile) <- left.curFile) {
+            if (let Some(rightFile) <- right.curFile) {
+                return !refEq(leftFile, rightFile)
+            }
+        }
+        return false
+    }
+
+    private func ShouldTranslateMember(decl: AstDecl, member: AstDecl): Bool {
+        if (!mergingSpecific) {
+            return true
+        }
+        if (decl.TestAttr(AstAttribute.IMPORTED)) {
+            return true
+        }
+        if (!decl.TestAttr(AstAttribute.SPECIFIC)) {
+            return true
+        }
+        if (decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) {
+            return true
+        }
+        let justIntroducedSpecific = !decl.TestAttr(AstAttribute.IMPORTED) &&
+            decl.TestAttr(AstAttribute.SPECIFIC)
+        if (mergingSpecific && justIntroducedSpecific && DeclaredInDifferentFiles(decl, member)) {
+            return false
+        }
+        return true
     }
 
     private func SetClassSuperClass(def: ClassDef, decl: AstClassLikeDecl): Unit {
