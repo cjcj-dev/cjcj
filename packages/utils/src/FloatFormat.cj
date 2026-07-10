@@ -1,6 +1,7 @@
 package cjcj::utils
 
 import std.math.*
+import std.overflow.*
 
 public class FloatFormat {
     public static func Float32ToFloat16(value: Float32): UInt16 {
@@ -10,7 +11,8 @@ public class FloatFormat {
         if (exp > 0b11110) {
             result = 0b11111u16 << 10u16
         } else if (exp <= 0) {
-            result = UInt16(((bit32 & 0x007FFFFFu32) | (1u32 << 23u32)) >> UInt32(13 + (1 - exp)))
+            result = UInt16(((bit32 & 0x007FFFFFu32) | (1u32 << 23u32)).wrappingShr(
+                UInt64(UInt32(13 + (1 - exp)))))
         } else {
             result = UInt16(((bit32 & 0x007FFFFFu32) >> 13u32) | (UInt32(exp) << 10u32))
         }
