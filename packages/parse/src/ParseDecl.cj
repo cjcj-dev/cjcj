@@ -309,6 +309,9 @@ extend ParserImpl {
         ParseModifiers(modifiers)
         CheckOverflowAnnotation(annos, scopeKind)
         CheckAnnotationAnnotation(annos, modifiers)
+        if (SeeingEnumConstructor(scopeKind)) {
+            return ParseEnumConstructor(modifiers, annos)
+        }
         if (Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
             return ParseMacroCallDeclInput(scopeKind, modifiers, annos)
         }
@@ -1422,38 +1425,105 @@ extend ParserImpl {
                 if (let Some(bodyScope) <- ret.bodyScope) {
                     bodyScope.begin = ret.leftCurlPos
                 }
-                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
-                    if (Skip(TokenKind.BITOR)) {
+                if (Seeing(TokenKind.BITOR)) {
+                    Next()
+                }
+                do {
+                    if (lastToken.kind == TokenKind.BITOR) {
                         ret.bitOrPosVector.add(lastToken.Begin())
-                        continue
                     }
-                    let localAnnos = ArrayList<Annotation>()
-                    ParseAnnotations(localAnnos)
-                    if (Skip(TokenKind.ELLIPSIS)) {
+                    let seeingEllipse = Seeing(TokenKind.ELLIPSIS)
+                    if ((!seeingEllipse && !Seeing(TokenKind.IDENTIFIER) && !SeeingMacroCallDecl() &&
+                        !SeeingContextualKeyword() && !SeeingAtWhen()) || SeeingKeywordWithDecl()) {
+                        if (!ret.TestAttr(Attribute.IS_BROKEN)) {
+                            DiagExpectedIdentifierEnumDecl(ret)
+                        }
+                        TryConsumeUntilAny([TokenKind.BITOR])
+                        ret.EnableAttr(Attribute.IS_BROKEN)
+                    } else if (seeingEllipse) {
+                        Next()
+                        if (ret.constructors.isEmpty()) {
+                            DiagExpectedIdentifierEnumDecl(ret)
+                        }
                         ret.hasEllipsis = true
                         ret.ellipsisPos = lastToken.Begin()
                         break
-                    } else if (SeeingIdentifierLike()) {
-                        let ctor = ParseEnumConstructor(ArrayList<Modifier>(), localAnnos)
-                        ctor.outerDecl = ret
-                        if (ctor.astKind == ASTKind.FUNC_DECL) {
-                            ret.hasArguments = true
-                        }
-                        ret.constructors.add(ctor)
-                    } else if (SeeingDeclInScope(ScopeKind.ENUM_BODY)) {
-                        let member = ParseDecl(ScopeKind.ENUM_BODY)
-                        member.outerDecl = ret
-                        ret.members.add(member)
                     } else {
-                        Next()
+                        ParseCaseBody(ret)
                     }
-                    SkipNLOrSemi()
+                    SkipBlank(TokenKind.SEMI)
+                } while (Skip(TokenKind.BITOR))
+                while (true) {
+                    SkipBlank(TokenKind.SEMI)
+                    if (Skip(TokenKind.RCURL)) {
+                        ret.rightCurlPos = lastToken.Begin()
+                        break
+                    }
+                    if (DetectPrematureEnd()) {
+                        DiagExpectedRightDelimiter("{", ret.leftCurlPos)
+                        break
+                    }
+                    let member = ParseDecl(ScopeKind.ENUM_BODY)
+                    if (member.IsInvalid()) {
+                        continue
+                    }
+                    if (member.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_decl,
+                            MakeRange(member.identifier.Begin(), member.identifier.End()), member.identifier.Val()).Emit()
+                    }
+                    SetMemberParentInheritableDecl(ret, member)
+                    ret.members.add(member)
                 }
-                ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after enum body").Begin()
                 ret.end = ret.rightCurlPos + 1
             }
         }
         return ret
+    }
+
+    public func ParseCaseBody(enumDecl: EnumDecl): Unit {
+        let caseBody = ParseDecl(ScopeKind.ENUM_CONSTRUCTOR)
+        if (caseBody.astKind == ASTKind.FUNC_DECL) {
+            enumDecl.hasArguments = true
+        }
+        if (!caseBody.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_unknown_enum_constructor, caseBody).Emit()
+        }
+        SetMemberParentInheritableDecl(enumDecl, caseBody)
+        if (enumDecl.TestAttr(Attribute.SPECIFIC)) {
+            caseBody.EnableAttr(Attribute.SPECIFIC)
+        } else if (enumDecl.TestAttr(Attribute.COMMON)) {
+            caseBody.EnableAttr(Attribute.COMMON)
+        }
+        enumDecl.constructors.add(caseBody)
+    }
+
+    public func SetMemberParentInheritableDecl(ret: InheritableDecl, decl: Decl): Unit {
+        decl.outerDecl = ret
+        if (let Some(macroExpandDecl) <- (decl as MacroExpandDecl)) {
+            if (let Some(inputDecl) <- macroExpandDecl.invocation.decl) {
+                SetMemberParentInheritableDecl(ret, inputDecl)
+            }
+        } else if (let Some(primaryCtorDecl) <- (decl as PrimaryCtorDecl)) {
+            if (let Some(funcBody) <- primaryCtorDecl.funcBody) {
+                if (!funcBody.paramLists.isEmpty()) {
+                    for (param in funcBody.paramLists[0].params) {
+                        if (param.isMemberParam) {
+                            param.outerDecl = ret
+                        }
+                    }
+                }
+            }
+        } else if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            if (let Some(funcBody) <- funcDecl.funcBody) {
+                if (ret.IsClassLikeDecl()) {
+                    if (let Some(classLikeDecl) <- (ret as ClassLikeDecl)) {
+                        funcBody.parentClassLike = classLikeDecl
+                    }
+                } else if (let Some(enumDecl) <- (ret as EnumDecl)) {
+                    funcBody.parentEnum = enumDecl
+                }
+            }
+        }
     }
 
     public func ParseEnumConstructor(modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Decl {

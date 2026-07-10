@@ -139,6 +139,36 @@ extend ParserImpl {
         TargetTokenConsumedControl(flag, targetTokenConsumed)
     }
 
+    public func TryConsumeUntilAny(kinds: Array<TokenKind>): Bool {
+        Peek()
+        let predictTokens = ArrayList<Token>()
+        predictTokens.add(lookahead)
+        for (token in lexer.LookAheadSkipNL(2)) {
+            predictTokens.add(token)
+        }
+        var location: Int64 = -1
+        for (index in 0..predictTokens.size) {
+            for (kind in kinds) {
+                if (predictTokens[index].kind == kind) {
+                    location = index
+                    break
+                }
+            }
+            if (location >= 0) {
+                break
+            }
+        }
+        if (location < 0) {
+            return false
+        }
+        while (location > 0) {
+            Next()
+            Peek()
+            location--
+        }
+        return true
+    }
+
     public func ConsumeUntilAny(functor: () -> Bool, targetTokenConsumed!: Bool = true): Unit {
         skipNL = false
         var flag = false
@@ -311,6 +341,21 @@ extend ParserImpl {
             }
             if (TokenKindIndex(kind) < TokenKindIndex(TokenKind.WILDCARD)) {
                 return true
+            }
+        }
+        return false
+    }
+
+    public func SeeingKeywordWithDecl(): Bool {
+        let tokenKinds: Array<TokenKind> = [TokenKind.STRUCT, TokenKind.ENUM, TokenKind.PACKAGE,
+            TokenKind.IMPORT, TokenKind.CLASS, TokenKind.INTERFACE, TokenKind.FUNC, TokenKind.MACRO,
+            TokenKind.TYPE, TokenKind.LET, TokenKind.VAR, TokenKind.EXTEND, TokenKind.MAIN]
+        if (SeeingContextualKeyword()) {
+            let ahead = lexer.LookAheadSkipNL(1)
+            for (kind in tokenKinds) {
+                if (ahead[0].kind == kind) {
+                    return true
+                }
             }
         }
         return false
