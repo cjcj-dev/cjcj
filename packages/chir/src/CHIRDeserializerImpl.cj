@@ -218,6 +218,9 @@ class CHIRDeserializerImpl {
                 CHIRApplyAnnoInfo(globalVar.GetAnnoInfo(), CHIRFieldAt(fields, 10))
                 CHIRApplyBaseInfo(globalVar, CHIRFieldAt(fields, 11), CHIRFieldAt(fields, 12),
                     annotationText: CHIRFieldAt(fields, 13))
+                if (let Some(linkText) <- globalVar.GetAnnotation("LinkTypeInfo")) {
+                    globalVar.SetLinkTypeInfo(LinkTypeInfo.Extract(linkText))
+                }
                 for (feature in CHIRWireSplitList(CHIRFieldAt(fields, 8))) {
                     if (!feature.isEmpty()) {
                         globalVar.AddFeature(feature)

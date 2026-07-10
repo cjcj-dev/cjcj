@@ -315,7 +315,6 @@ func CHIRKnownAttributes(): ArrayList<Attribute> {
     attrs.add(Attribute.BUILTIN)
     attrs.add(Attribute.CFFI_WRAPPER)
     attrs.add(Attribute.COMPILE_TIME_VALUE)
-    attrs.add(Attribute.EXTERN)
     attrs.add(Attribute.FAST_NATIVE)
     attrs.add(Attribute.IMPLICIT_ADD)
     attrs.add(Attribute.INLINED)
@@ -368,7 +367,6 @@ func CHIRAttributeFromIndex(index: Int64): Attribute {
         case 66 => Attribute.BUILTIN
         case 68 => Attribute.CFFI_WRAPPER
         case 69 => Attribute.COMPILE_TIME_VALUE
-        case 70 => Attribute.EXTERN
         case 71 => Attribute.FAST_NATIVE
         case 72 => Attribute.IMPLICIT_ADD
         case 73 => Attribute.INLINED

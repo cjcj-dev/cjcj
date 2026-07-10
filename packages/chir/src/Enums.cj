@@ -110,7 +110,7 @@ public enum Attribute {
     | DESERIALIZED | INITIALIZER | UNSAFE | JAVA_MIRROR | JAVA_IMPL | OBJ_C_MIRROR
     | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED
     | ANNOTATION | BUILTIN | CFFI_WRAPPER | COMPILE_TIME_VALUE
-    | EXTERN | FAST_NATIVE | IMPLICIT_ADD | INLINED | SRC_CODE_IMPORTED | THIN
+    | FAST_NATIVE | IMPLICIT_ADD | INLINED | SRC_CODE_IMPORTED | THIN
 }
 
 public func AttributeIndex(attr: Attribute): Int64 {
@@ -157,7 +157,6 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.BUILTIN => 66
         case Attribute.CFFI_WRAPPER => 68
         case Attribute.COMPILE_TIME_VALUE => 69
-        case Attribute.EXTERN => 70
         case Attribute.FAST_NATIVE => 71
         case Attribute.IMPLICIT_ADD => 72
         case Attribute.INLINED => 73
@@ -177,7 +176,6 @@ public func AttributeName(attr: Attribute): String {
         case Attribute.COMPILER_ADD => "compilerAdd"
         case Attribute.CONST => "compileTimeVal"
         case Attribute.DESERIALIZED => "deserialized"
-        case Attribute.EXTERN => "extern"
         case Attribute.FAST_NATIVE => "fastNative"
         case Attribute.FINAL => "final"
         case Attribute.FOREIGN => "foreign"
