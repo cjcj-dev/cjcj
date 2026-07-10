@@ -1664,6 +1664,56 @@ public class FaithfulAST2CHIR {
         return commonDecls
     }
 
+    private func BuildGenericTypeMapping(commonDecls: ArrayList<AstDecl>): HashMap<Int64, Type> {
+        let commonGenericTy2specificGenericTy = HashMap<Int64, Type>()
+        for (commonDecl in commonDecls) {
+            if (commonDecl.TestAttr(AstAttribute.GENERIC)) {
+                let commonGeneric = commonDecl.GetGeneric().getOrThrow()
+                let specificGeneric = commonDecl.specificImplementation.getOrThrow().GetGeneric().getOrThrow()
+                let commonTypeParameters = commonGeneric.typeParameters
+                let specificTypeParameters = specificGeneric.typeParameters
+                CJC_ASSERT(commonTypeParameters.size == specificTypeParameters.size &&
+                    !commonTypeParameters.isEmpty())
+                for (idx in 0..commonTypeParameters.size) {
+                    let commonTypeArg = commonTypeParameters[idx].GetTy().getOrThrow()
+                    let specificTypeArg = specificTypeParameters[idx].GetTy().getOrThrow()
+                    if (commonTypeArg.IsGeneric() && specificTypeArg.IsGeneric()) {
+                        let commonGenericTy =
+                            (chirType.TranslateType(commonTypeArg) as GenericType).getOrThrow()
+                        commonGenericTy2specificGenericTy[commonGenericTy.objectId] =
+                            chirType.TranslateType(specificTypeArg)
+                    }
+                }
+            }
+        }
+        return commonGenericTy2specificGenericTy
+    }
+
+    private func ConvertSpecificMemberMethods(chirPkg: Package, replaceGenericFunc: ConvertTypeFunc): Unit {
+        let converter = PrivateTypeConverter(replaceGenericFunc, builder)
+        let preVisit = { expr: Expression =>
+            converter.VisitExpr(expr)
+            VisitResult.CONTINUE
+        }
+        for (decl in chirPkg.GetExtends()) {
+            if (!decl.TestAttr(Attribute.SPECIFIC)) {
+                continue
+            }
+            for (funcDef in decl.GetMethods()) {
+                if (!funcDef.TestAttr(Attribute.DESERIALIZED)) {
+                    continue
+                }
+                if (!funcDef.IsFuncWithBody()) {
+                    continue
+                }
+                if (funcDef.GetBody().isSome()) {
+                    Visitor.Visit(funcDef, preVisit)
+                }
+                converter.VisitValue(funcDef)
+            }
+        }
+    }
+
     private func CollectMethodNames(extendDef: ExtendDef): HashSet<String> {
         let names = HashSet<String>()
         for (method in extendDef.GetMethods()) {
@@ -1735,6 +1785,73 @@ public class FaithfulAST2CHIR {
     private func RemoveUnusedCJMPExtends(chirPkg: Package, commonDecls: ArrayList<AstDecl>): Unit {
         chirPkg.SetExtends(ProcessExtendsByCommonDecl(chirPkg.GetExtends(), commonDecls))
         chirPkg.SetImportedExtends(ProcessExtends(chirPkg.GetImportedExtends()))
+    }
+
+    private func ProcessCommonAndSpecificExtends(): Unit {
+        if (!opts.IsCompilingCJMPSpecific()) {
+            return
+        }
+        let commonDecls = CollectCommonMatchedDecls(ArrayList<ArrayList<AstDecl>>([
+            importedNominalDecls, importedGenericInstantiatedNominalDecls, nominalDecls, genericNominalDecls]))
+        let commonGenericTy2specificGenericTy = BuildGenericTypeMapping(commonDecls)
+        if (!commonGenericTy2specificGenericTy.isEmpty()) {
+            ConvertSpecificMemberMethods(CurrentPackage(), { ty: Type =>
+                ReplaceRawGenericArgType(ty, commonGenericTy2specificGenericTy, builder)
+            })
+        }
+        RemoveUnusedCJMPExtends(CurrentPackage(), commonDecls)
+    }
+
+    private func ParentIsOtherExtendGrandParent(parent: ClassType, curDef: ExtendDef): Bool {
+        let extendDefs = curDef.GetExtendedType().getOrThrow().GetExtends(builder)
+        let allGrandParents = HashMap<Int64, ClassType>()
+        for (extendDef in extendDefs) {
+            if (refEq(extendDef, curDef)) {
+                continue
+            }
+            for (extendParent in extendDef.GetImplementedInterfaceTys()) {
+                for (grandParent in extendParent.GetSuperTypesRecusively(builder)) {
+                    allGrandParents[grandParent.objectId] = grandParent
+                }
+            }
+        }
+        if (allGrandParents.contains(parent.objectId)) {
+            return true
+        }
+        let curParentTypeArgs = parent.GetGenericArgs()
+        let curParentDef = parent.GetClassDef()
+        for (grandParent in allGrandParents.values()) {
+            if (!refEq(grandParent.GetClassDef(), curParentDef)) {
+                continue
+            }
+            let grandParentTypeArgs = grandParent.GetGenericArgs()
+            CJC_ASSERT(curParentTypeArgs.size == grandParentTypeArgs.size)
+            for (idx in 0..curParentTypeArgs.size) {
+                let typeArg1 = curParentTypeArgs[idx]
+                let typeArg2 = grandParentTypeArgs[idx]
+                if (!refEq(typeArg1, typeArg2) && !typeArg1.IsGeneric() && !typeArg2.IsGeneric()) {
+                    return false
+                }
+            }
+            return true
+        }
+        return false
+    }
+
+    private func UpdateExtendParent(): Unit {
+        try (recorder = ProfileRecorder("TranslateNominalDecls", "UpdateExtendParent")) {
+            for (customDef in CurrentPackage().GetAllCustomTypeDef()) {
+                if (!customDef.IsExtend()) {
+                    continue
+                }
+                let extendDef = (customDef as ExtendDef).getOrThrow()
+                for (parent in extendDef.GetImplementedInterfaceTys()) {
+                    if (ParentIsOtherExtendGrandParent(parent, extendDef)) {
+                        extendDef.RemoveParent(parent)
+                    }
+                }
+            }
+        }
     }
 
     private func AttachCustomTypeGenericParams(decl: AstDecl): Unit {
@@ -1812,7 +1929,9 @@ public class FaithfulAST2CHIR {
         TranslateVecDecl(importedGenericInstantiatedNominalDecls, trans)
         TranslateVecDecl(nominalDecls, trans)
         TranslateVecDecl(genericNominalDecls, trans)
+        ProcessCommonAndSpecificExtends()
         SetExtendInfo()
+        UpdateExtendParent()
     }
 
     private func BuildGenericFuncMap(pkg: AstPackage): GenericFuncMap {

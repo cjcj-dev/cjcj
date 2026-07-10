@@ -2713,8 +2713,12 @@ public class Translator {
             tiLinkage = BasicLinkage.LINKONCE_ODR
         }
         def.SetLinkTypeInfo(tiLinkage)
-        SetClassSuperClass(def, decl)
-        SetImplementedInterfaces(def, decl)
+        let needInitialSuperClassSetup = !decl.TestAttr(AstAttribute.SPECIFIC) ||
+            decl.TestAttr(AstAttribute.IMPORTED) || decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)
+        if (needInitialSuperClassSetup) {
+            SetClassSuperClass(def, decl)
+            SetImplementedInterfaces(def, decl)
+        }
         for (member in decl.GetMemberDeclPtrs()) {
             if (!ShouldTranslateMember(decl, member)) {
                 continue
