@@ -737,8 +737,19 @@ public class BlockGroup <: Value {
     }
 
     public func SetOwnerFunc(fn: Function): Unit {
+        if (let Some(oldOwnerFunc) <- ownerFunc) {
+            oldOwnerFunc.RemoveBody()
+        }
+        if (let Some(oldOwnerExpr) <- ownerExpression) {
+            if (let Some(lambdaExpr) <- (oldOwnerExpr as Lambda)) {
+                lambdaExpr.RemoveBody()
+            }
+        }
+        if (let Some(oldOwnerExpr) <- ownerExpression) {
+            RemoveUserOnly(oldOwnerExpr)
+            ownerExpression = None
+        }
         ownerFunc = fn
-        ownerExpression = None
     }
 
     public func GetOwnerExpression(): Option<Expression> {
