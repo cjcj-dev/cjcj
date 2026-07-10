@@ -548,6 +548,9 @@ public func AnnotationKindToString(kind: AnnotationKind): String {
         case AnnotationKind.CUSTOM => "Custom"
         case AnnotationKind.JAVA => "Java"
         case AnnotationKind.UNKNOWN => "Unknown"
+        case AnnotationKind.NO_HEAP_ALLOC => "NoHeapAlloc"
+        case AnnotationKind.NO_WRITE_BARRIER_REC => "NoWriteBarrierRec"
+        case AnnotationKind.NO_STACK_GROW => "NoStackGrow"
     }
 }
 
@@ -577,5 +580,8 @@ public func NameToAnnotationKind(name: String): AnnotationKind {
     if (name == "Frozen") { return AnnotationKind.FROZEN }
     if (name == "EnsurePreparedToMock") { return AnnotationKind.ENSURE_PREPARED_TO_MOCK }
     if (name == "NonProduct") { return AnnotationKind.NON_PRODUCT }
+    if (name == "NoHeapAlloc") { return AnnotationKind.NO_HEAP_ALLOC }
+    if (name == "NoWriteBarrierRec") { return AnnotationKind.NO_WRITE_BARRIER_REC }
+    if (name == "NoStackGrow") { return AnnotationKind.NO_STACK_GROW }
     return AnnotationKind.CUSTOM
 }

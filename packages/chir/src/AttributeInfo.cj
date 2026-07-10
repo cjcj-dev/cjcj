@@ -66,7 +66,8 @@ public class AttributeInfo {
             Attribute.SKIP_ANALYSIS, Attribute.DESERIALIZED, Attribute.INITIALIZER,
             Attribute.UNSAFE, Attribute.JAVA_MIRROR, Attribute.JAVA_IMPL,
             Attribute.OBJ_C_MIRROR, Attribute.HAS_INITED_FIELD, Attribute.JAVA_HAS_DEFAULT,
-            Attribute.PREVIOUSLY_DESERIALIZED
+            Attribute.PREVIOUSLY_DESERIALIZED, Attribute.NO_HEAP_ALLOC,
+            Attribute.NO_WRITE_BARRIER_REC, Attribute.NO_STACK_GROW
         ]
         for (attr in attrsInOrder) {
             if (Test(attr)) {

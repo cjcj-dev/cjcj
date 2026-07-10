@@ -249,6 +249,39 @@ public func CheckAnnoFastNative(decl: Decl, annotation: Annotation, diag: BasicD
     }
 }
 
+public func CheckAnnoNoHeapAlloc(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
+    if (!annotation.args.isEmpty()) {
+        EmitLegacy(diag, BasicDiagKind.sema_annotation_error_arg_num, annotation.args[0],
+            args: [BasicDiagArgument("@NoHeapAlloc"), BasicDiagArgument("no")])
+    }
+    if (decl.astKind != ASTKind.FUNC_DECL) {
+        EmitLegacy(diag, BasicDiagKind.sema_illegal_use_of_annotation, annotation,
+            args: [BasicDiagArgument(DeclKindToString(decl)), BasicDiagArgument("@NoHeapAlloc")])
+    }
+}
+
+public func CheckAnnoNoWriteBarrierRec(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
+    if (!annotation.args.isEmpty()) {
+        EmitLegacy(diag, BasicDiagKind.sema_annotation_error_arg_num, annotation.args[0],
+            args: [BasicDiagArgument("@NoWriteBarrierRec"), BasicDiagArgument("no")])
+    }
+    if (decl.astKind != ASTKind.FUNC_DECL) {
+        EmitLegacy(diag, BasicDiagKind.sema_illegal_use_of_annotation, annotation,
+            args: [BasicDiagArgument(DeclKindToString(decl)), BasicDiagArgument("@NoWriteBarrierRec")])
+    }
+}
+
+public func CheckAnnoNoStackGrow(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
+    if (!annotation.args.isEmpty()) {
+        EmitLegacy(diag, BasicDiagKind.sema_annotation_error_arg_num, annotation.args[0],
+            args: [BasicDiagArgument("@NoStackGrow"), BasicDiagArgument("no")])
+    }
+    if (decl.astKind != ASTKind.FUNC_DECL) {
+        EmitLegacy(diag, BasicDiagKind.sema_illegal_use_of_annotation, annotation,
+            args: [BasicDiagArgument(DeclKindToString(decl)), BasicDiagArgument("@NoStackGrow")])
+    }
+}
+
 public func CheckAnnoFrozen(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
     if (!annotation.args.isEmpty()) {
         EmitLegacy(
@@ -310,6 +343,9 @@ public func PreCheckAnnoForCFFI(decl: Decl, diag: BasicDiagnosticEngine): Unit {
             case AstAnnotationKind.CALLING_CONV => CheckAnnoCallingConv(decl, annotation, diag)
             case AstAnnotationKind.FASTNATIVE => CheckAnnoFastNative(decl, annotation, diag)
             case AstAnnotationKind.FROZEN => CheckAnnoFrozen(decl, annotation, diag)
+            case AstAnnotationKind.NO_HEAP_ALLOC => CheckAnnoNoHeapAlloc(decl, annotation, diag)
+            case AstAnnotationKind.NO_WRITE_BARRIER_REC => CheckAnnoNoWriteBarrierRec(decl, annotation, diag)
+            case AstAnnotationKind.NO_STACK_GROW => CheckAnnoNoStackGrow(decl, annotation, diag)
             case _ => ()
         }
     }

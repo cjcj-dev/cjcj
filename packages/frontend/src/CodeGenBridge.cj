@@ -23,6 +23,8 @@ import cangjie_compiler::chir.Function as ChirFunction
 import cangjie_compiler::chir.GetRefToArrayElem
 import cangjie_compiler::chir.INVALID_LOCATION as CHIR_INVALID_LOCATION
 import cangjie_compiler::chir.MergeBlocks
+import cangjie_compiler::chir.NoHeapAllocChecker
+import cangjie_compiler::chir.NoWriteBarrierRecChecker
 import cangjie_compiler::chir.OptFuncRetType
 import cangjie_compiler::chir.Package as RealCHIRPackage
 import cangjie_compiler::chir.RedundantFutureRemoval
@@ -98,6 +100,11 @@ private class ToCHIR {
             case None => return None
         }
         chirPkg = Some(lowered)
+        NoHeapAllocChecker(instance.diag.AsBasicDiagnosticEngine()).RunOnPackage(lowered)
+        NoWriteBarrierRecChecker(instance.diag.AsBasicDiagnosticEngine()).RunOnPackage(lowered)
+        if (instance.diag.GetErrorCount() != 0) {
+            return None
+        }
         RulesChecking(lowered, builder, instance.invocation.globalOptions, instance.diag.AsBasicDiagnosticEngine())
         RunOptimizationPass(lowered, builder, instance.invocation.globalOptions)
         if (!TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)) {
@@ -206,7 +213,6 @@ private class ToCHIR {
             DumpCHIRToFile("CFFIFuncWrapper")
         }
     }
-
     private func DoCFFIFuncWrapper(curFunc: ChirFunction, isForeign: Bool,
         isExternal!: Bool = true): (ChirValue, Option<ChirApply>) {
         let currentPackage = chirPkg.getOrThrow()

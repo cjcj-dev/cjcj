@@ -1,0 +1,4 @@
+@NoStackGrow
+class InvalidTarget {}
+
+main() {}

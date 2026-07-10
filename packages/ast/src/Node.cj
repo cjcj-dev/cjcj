@@ -525,6 +525,9 @@ public enum AnnotationKind {
     | ENSURE_PREPARED_TO_MOCK
     | NON_PRODUCT
     | UNKNOWN
+    | NO_HEAP_ALLOC
+    | NO_WRITE_BARRIER_REC
+    | NO_STACK_GROW
 }
 
 public func AnnotationKindIndex(kind: AnnotationKind): Int64 {
@@ -555,6 +558,9 @@ public func AnnotationKindIndex(kind: AnnotationKind): Int64 {
         case AnnotationKind.ENSURE_PREPARED_TO_MOCK => 23
         case AnnotationKind.NON_PRODUCT => 24
         case AnnotationKind.UNKNOWN => 25
+        case AnnotationKind.NO_HEAP_ALLOC => 26
+        case AnnotationKind.NO_WRITE_BARRIER_REC => 27
+        case AnnotationKind.NO_STACK_GROW => 28
     }
 }
 

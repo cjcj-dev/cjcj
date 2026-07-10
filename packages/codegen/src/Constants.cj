@@ -10,6 +10,8 @@ public let ARRAY_LAYOUT_PREFIX: String = "ArrayLayout."
 public let INCREMENTAL_CFUNC_ATTR: String = "incremental"
 public let INTERNAL_CFUNC_ATTR: String = "internal"
 public let FAST_NATIVE_ATTR: String = "gc-leaf-function"
+// The LLVM fork's insertStackCheck skips functions carrying gc-leaf-function.
+public let NO_STACK_GROW_ATTR: String = "gc-leaf-function"
 public let VTABLE_LOOKUP: String = "VTABLE_LOOKUP"
 public let GC_TYPE_META_NAME: String = "RelatedType"
 public let GC_GLOBAL_VAR_TYPE: String = "GlobalVarType"

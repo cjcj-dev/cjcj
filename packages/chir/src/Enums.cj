@@ -111,6 +111,9 @@ public enum Attribute {
     | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED
     | ANNOTATION | BUILTIN | CFFI_WRAPPER | COMPILE_TIME_VALUE
     | FAST_NATIVE | INLINED | THIN
+    // FEATURE_DEBT(CJCJ_RUNTIME_SPEC §3.2/§7): selfhost-only extension domain;
+    // upstream CHIR AttributeInfo.h still ends its C++ attribute domain at 38.
+    | NO_HEAP_ALLOC | NO_WRITE_BARRIER_REC | NO_STACK_GROW
 }
 
 public func AttributeIndex(attr: Attribute): Int64 {
@@ -160,6 +163,9 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.FAST_NATIVE => 71
         case Attribute.INLINED => 73
         case Attribute.THIN => 75
+        case Attribute.NO_HEAP_ALLOC => 76
+        case Attribute.NO_WRITE_BARRIER_REC => 77
+        case Attribute.NO_STACK_GROW => 78
     }
 }
 
@@ -206,6 +212,9 @@ public func AttributeName(attr: Attribute): String {
         case Attribute.SPECIFIC => "specific"
         case Attribute.STATIC => "static"
         case Attribute.THIN => "thin"
+        case Attribute.NO_HEAP_ALLOC => "noHeapAlloc"
+        case Attribute.NO_WRITE_BARRIER_REC => "noWriteBarrierRec"
+        case Attribute.NO_STACK_GROW => "noStackGrow"
         case Attribute.UNREACHABLE => "unreachable"
         case Attribute.UNSAFE => "unsafe"
         case Attribute.OVERRIDE => "override"
