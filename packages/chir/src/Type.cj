@@ -344,7 +344,10 @@ public open class Type {
         }
         let classTy = (this as ClassType).getOrThrow()
         let classDef = classTy.GetClassDef()
-        return classDef.GetAnnotation("IsAutoEnvClass").isSome() && classDef.TestAttr(Attribute.ABSTRACT)
+        if (let Some(value) <- classDef.GetAnnotation("IsAutoEnvClass")) {
+            return value == "true" && classDef.TestAttr(Attribute.ABSTRACT)
+        }
+        return false
     }
 
     public func IsAutoEnvInstBase(): Bool {
