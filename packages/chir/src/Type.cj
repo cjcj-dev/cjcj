@@ -1,6 +1,6 @@
 package cangjie_compiler::chir
 
-import cangjie_compiler::utils.CJC_ASSERT
+import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
 import std.collection.*
 import std.sort.*
 import std.sync.*
@@ -988,6 +988,28 @@ public class GenericType <: Type {
         }
     }
 
+    public func GetInstMemberTypeByPath(path: ArrayList<UInt64>, builder: CHIRBuilder): Type {
+        return GetInstMemberTypeByPathCheckingReadOnly(path, builder)[0]
+    }
+
+    public func GetInstMemberTypeByPathCheckingReadOnly(path: ArrayList<UInt64>, builder: CHIRBuilder): (Type, Bool) {
+        var concretType: Option<Type> = None
+        for (upperBound in upperBounds) {
+            let upperBoundCustomType = (upperBound.StripAllRefs() as CustomType).getOrThrow()
+            if (upperBoundCustomType.GetCustomTypeDef().IsClassLike()) {
+                if (concretType.isNone()) {
+                    concretType = upperBound
+                } else if (upperBoundCustomType.IsEqualOrSubTypeOf(
+                    concretType.getOrThrow().StripAllRefs(), builder)) {
+                    concretType = upperBound
+                }
+            }
+        }
+        CJC_NULLPTR_CHECK(concretType)
+        return (concretType.getOrThrow().StripAllRefs() as CustomType).getOrThrow()
+            .GetInstMemberTypeByPathCheckingReadOnly(path, builder)
+    }
+
     public override func ToString(): String {
         return "Generic-" + name
     }
@@ -1187,6 +1209,46 @@ public open class CustomType <: Type {
                 parentClassTy.GetInstMap(instMap)
             }
         }
+    }
+
+    public func GetInstMemberTypeByPath(path: ArrayList<UInt64>, builder: CHIRBuilder): Type {
+        return GetInstMemberTypeByPathCheckingReadOnly(path, builder)[0]
+    }
+
+    public func GetInstMemberTypeByPathCheckingReadOnly(path: ArrayList<UInt64>, builder: CHIRBuilder): (Type, Bool) {
+        if (path.isEmpty()) {
+            CJC_ABORT()
+            return (this, false)
+        }
+        let customTypeDef = GetCustomTypeDef()
+        let instMap = HashMap<Int64, Type>()
+        GetInstMap(instMap)
+        let currentIdx = path[0]
+        let member = customTypeDef.GetAllInstanceVars()[Int64(currentIdx)]
+        let isReadOnly = member.TestAttr(Attribute.READONLY)
+        let memberTy = ReplaceRawGenericArgType(member.ty, instMap, builder)
+        if (path.size > 1) {
+            var pureMemberTy = memberTy
+            while (pureMemberTy.IsRef()) {
+                pureMemberTy = (pureMemberTy as RefType).getOrThrow().GetBaseType()
+            }
+            if (pureMemberTy.IsNominal()) {
+                let subPath = path.clone()
+                subPath.remove(at: 0)
+                let (memberType, isMemberReadOnly) = (pureMemberTy as CustomType).getOrThrow()
+                    .GetInstMemberTypeByPathCheckingReadOnly(subPath, builder)
+                return (memberType, isReadOnly || isMemberReadOnly)
+            } else if (pureMemberTy.IsGeneric()) {
+                let subPath = path.clone()
+                subPath.remove(at: 0)
+                let (memberType, isMemberReadOnly) = (pureMemberTy as GenericType).getOrThrow()
+                    .GetInstMemberTypeByPathCheckingReadOnly(subPath, builder)
+                return (memberType, isReadOnly || isMemberReadOnly)
+            } else {
+                CJC_ABORT()
+            }
+        }
+        return (memberTy, isReadOnly)
     }
 
     public func GetInstantiatedMemberTys(): ArrayList<Type> {
