@@ -280,3 +280,25 @@ public func DiagMismatchedTypes(diag: BasicDiagnosticEngine, node: Node, typeNod
         DiagMismatchedTypesWithFoundTy(diag, node, typeTy, node.GetTy().getOrThrow())
     }
 }
+
+public func DiagCannotOverride(diag: BasicDiagnosticEngine, child: Decl, parent: Decl): Unit {
+    let kind = DeclKindToString(child)
+    let name = child.identifier.Val()
+    let childRange = if (child.identifier.ZeroPos()) {
+        MakeRange(child.begin, child.end)
+    } else {
+        MakeRange(child.identifier.Begin(), child.identifier.End())
+    }
+    let parentRange = if (parent.identifier.ZeroPos()) {
+        MakeRange(parent.begin, parent.end)
+    } else {
+        MakeRange(parent.identifier.Begin(), name)
+    }
+    let builder = diag.DiagnoseRefactor(
+        BasicDiagKindRefactor.sema_cannot_override,
+        childRange,
+        arguments: [kind, name]
+    )
+    builder.AddNote(parentRange, "the parent " + kind + " is not modified by 'open'")
+    builder.Emit()
+}
