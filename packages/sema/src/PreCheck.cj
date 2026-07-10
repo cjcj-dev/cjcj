@@ -122,8 +122,8 @@ private func preCheckDiagRedefinitionWithFoundNode(
     if (preCheckIgnoreCJMPFalsePositiveRedefinition(current, previous)) {
         return
     }
-    let builder = diag.DiagnoseRefactor(
-        BasicDiagKindRefactor.sema_redefinition, rangeDown, arguments: [declDown.identifier.Val()])
+    let builder = DiagnoseRefactor(diag,
+        BasicDiagKindRefactor.sema_redefinition, declDown, rangeDown, arguments: [declDown.identifier.Val()])
     builder.AddNote(rangeUp, "'" + declDown.identifier.Val() + "' is previously declared here")
     builder.Emit()
 }
