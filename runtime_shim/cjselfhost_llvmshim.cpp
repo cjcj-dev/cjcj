@@ -254,6 +254,17 @@ extern "C" int LLVMSelfhostIsConstant(LLVMValueRef Val)
     return isa<Constant>(unwrap<Value>(Val)) ? 1 : 0;
 }
 
+extern "C" int LLVMSelfhostIsConstantInt(LLVMValueRef Val)
+{
+    return isa<ConstantInt>(unwrap<Value>(Val)) ? 1 : 0;
+}
+
+extern "C" int LLVMSelfhostIsNullConstant(LLVMValueRef Val)
+{
+    auto *constant = dyn_cast<Constant>(unwrap<Value>(Val));
+    return constant && constant->isNullValue() ? 1 : 0;
+}
+
 extern "C" int LLVMSelfhostCallBaseHasStructRetAttr(LLVMValueRef Call)
 {
     return unwrap<CallBase>(Call)->hasStructRetAttr() ? 1 : 0;
