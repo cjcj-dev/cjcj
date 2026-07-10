@@ -192,8 +192,10 @@ class CHIRDeserializerImpl {
             genericIndex++
         }
         let currentPackage = builder.context.GetCurPackage().getOrThrow()
-        currentPackage.SetPackageInitFunc(GetValue<Function>(pkg.GetPackageInitFunc()).getOrThrow())
-        currentPackage.SetPackageLiteralInitFunc(GetValue<Function>(pkg.GetPackageLiteralInitFunc()).getOrThrow())
+        currentPackage.SetPackageInitFunc(GetValue<Function>(pkg.GetPackageInitFunc()))
+        let reInitFunc = GetValue<Function>(pkg.GetPackageLiteralInitFunc())
+        CJC_ASSERT(reInitFunc.isSome())
+        currentPackage.SetPackageLiteralInitFunc(reInitFunc.getOrThrow())
     }
 
     private func GetMangleNameFromIdentifier(identifier: String): String {

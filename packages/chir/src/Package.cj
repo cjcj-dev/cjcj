@@ -171,7 +171,7 @@ public class Package {
     }
 
     public func GetPackageInitFunc(): Option<Function> { return packageInitFunc }
-    public func SetPackageInitFunc(fn: Function): Unit { packageInitFunc = fn }
+    public func SetPackageInitFunc(fn: Option<Function>): Unit { packageInitFunc = fn }
     public func SetPackageLiteralInitFunc(fn: Function): Unit { packageLiteralInitFunc = fn }
     public func GetPackageLiteralInitFunc(): Option<Function> { return packageLiteralInitFunc }
 
