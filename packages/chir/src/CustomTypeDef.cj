@@ -677,7 +677,7 @@ public open class CustomTypeDef <: Base {
         return varInitializationFunc
     }
 
-    public func SetVarInitializationFunc(fn: Function): Unit {
+    public func SetVarInitializationFunc(fn: Option<Function>): Unit {
         varInitializationFunc = fn
     }
 

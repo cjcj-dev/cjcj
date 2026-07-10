@@ -425,11 +425,11 @@ class CHIRDeserializerImpl {
                     }
                 }
             }
-            if (let Some(initFuncValue) <- valuesById.get(CHIRFieldAt(fields, 20))) {
-                if (let Some(initFunc) <- (initFuncValue as Function)) {
-                    def.SetVarInitializationFunc(initFunc)
-                }
+            let varInitializationFunc: Option<Function> = match (valuesById.get(CHIRFieldAt(fields, 20))) {
+                case Some(value) => value as Function
+                case None => None
             }
+            def.SetVarInitializationFunc(varInitializationFunc)
             if (let Some(genericDecl) <- customDefsById.get(CHIRFieldAt(fields, 21))) {
                 def.SetGenericDecl(genericDecl)
             }
