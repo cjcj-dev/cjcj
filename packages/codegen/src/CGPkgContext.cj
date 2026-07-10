@@ -180,10 +180,26 @@ public class CGPkgContext {
     }
 
     public func NeedOuterTypeInfo(classType: ClassType): Bool {
-        if (!options.CompileExecutable()) {
+        if (!GetGlobalOptions().CompileExecutable()) {
             return true
         }
-        return !classType.GetGenericArgs().isEmpty()
+
+        let `type` = (classType.GetClassDef().GetType().getOrThrow() as ClassType).getOrThrow()
+        if (!`type`.GetGenericArgs().isEmpty()) {
+            return true
+        }
+
+        let subTypes = subTypeMap.get(`type`.objectId) ?? return false
+        for ((_, subTy) in subTypes) {
+            if (!subTy.GetTypeArgs().isEmpty()) {
+                return true
+            }
+            let subClassType = (subTy as ClassType) ?? continue
+            if (NeedOuterTypeInfo(subClassType)) {
+                return true
+            }
+        }
+        return false
     }
 
     public func FindCHIRGlobalValue(mangledName: String): Option<Value> {
