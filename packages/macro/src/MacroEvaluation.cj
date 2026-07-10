@@ -713,7 +713,7 @@ public class MacroEvaluation {
         this.useChildProcess = useChildProcess
         InitThreadNum()
         if (useChildProcess) {
-            CreateMacroSrvProcess(this)
+            CreateMacroSrvProcess()
         }
     }
 
@@ -747,6 +747,10 @@ public class MacroEvaluation {
     public func ConvertTokensToString(tokens: ArrayList<Token>, offset!: Int64 = 1): String {
         let formatter = MacroFormatter(tokens, escapePosVec, offset)
         return formatter.Produce()
+    }
+
+    public func CreateMacroSrvProcess(): Unit {
+        CreateMacroSrvProcess(this)
     }
 
     public func ExecuteEvalSrvTask(): Unit {
