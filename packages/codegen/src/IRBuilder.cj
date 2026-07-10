@@ -19,10 +19,6 @@ import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.GetMethodIdxInAutoEnvObject
 import cangjie_compiler::chir.IntLiteral
 import cangjie_compiler::chir.IntrinsicKind
-import cangjie_compiler::chir.Invoke
-import cangjie_compiler::chir.InvokeStatic
-import cangjie_compiler::chir.InvokeStaticWithException
-import cangjie_compiler::chir.InvokeWithException
 import cangjie_compiler::chir.LiteralValue
 import cangjie_compiler::chir.Load
 import cangjie_compiler::chir.LocalVar
@@ -1491,12 +1487,16 @@ public class IRBuilder2 <: Resource {
         name!: String = ""): ArrayList<LLVMValueRef> {
         let callArgs = ArrayList<LLVMValueRef>()
         var applyExprWrapper: Option<CHIRApplyWrapper> = None
+        var callExprWrapper: Option<CHIRCallExpr> = None
         if (let Some(exprWrapper) <- chirExpr) {
             let currentExpression = exprWrapper.GetExpression()
             if (let Some(applyExpr) <- (currentExpression as Apply)) {
                 applyExprWrapper = Some(CHIRApplyWrapper(applyExpr))
             } else if (let Some(applyWithExceptionExpr) <- (currentExpression as ApplyWithException)) {
                 applyExprWrapper = Some(CHIRApplyWrapper(applyWithExceptionExpr))
+            }
+            if (let Some(callExpr) <- (exprWrapper as CHIRCallExpr)) {
+                callExprWrapper = Some(callExpr)
             }
         }
         if (calleeType.HasSRet()) {
@@ -1535,9 +1535,8 @@ public class IRBuilder2 <: Resource {
                     name: if (name.isEmpty()) { "generic.ti" } else { name + ".generic.ti" }))
             }
             if (calleeType.IsMethodType()) {
-                if (let Some(invokeOuterTypeInfo) <- CreateInvokeOuterTypeInfoArg(methodTypeInfoArg,
-                    thisTypeInfoArg)) {
-                    callArgs.add(invokeOuterTypeInfo)
+                if (let Some(callExpr) <- callExprWrapper) {
+                    callArgs.add(CreateOuterTypeInfo(callExpr, thisTypeInfoArg))
                 } else if (let Some(overrideTypeInfo) <- methodTypeInfoArg) {
                     if (calleeType.IsConstructorType() && !args.isEmpty()) {
                         callArgs.add(CreateOuterTypeInfoArg(args[0]) ?? overrideTypeInfo)
@@ -1569,76 +1568,70 @@ public class IRBuilder2 <: Resource {
         return callArgs
     }
 
-    private func CreateInvokeOuterTypeInfoArg(methodTypeInfoArg: Option<LLVMValueRef>,
-        thisTypeInfoArg: Option<LLVMValueRef>): Option<LLVMValueRef> {
-        let exprWrapper = chirExpr ?? return None
-        let expr = exprWrapper.GetExpression()
-        let chirBuilder = GetCGContext().GetCHIRBuilder()
-        if (let Some(invokeStaticExpr) <- (expr as InvokeStatic)) {
-            var staticThisTypeInfo = thisTypeInfoArg
-            if (staticThisTypeInfo.isNone()) {
-                staticThisTypeInfo = methodTypeInfoArg
-            }
-            return Some(CreateInvokeStaticOuterTypeInfoArg(invokeStaticExpr.GetThisType().getOrThrow(),
-                invokeStaticExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder),
-                invokeStaticExpr.GetVirtualMethodOffset(chirBuilder), staticThisTypeInfo))
-        }
-        if (let Some(invokeStaticWithExceptionExpr) <- (expr as InvokeStaticWithException)) {
-            var staticThisTypeInfo = thisTypeInfoArg
-            if (staticThisTypeInfo.isNone()) {
-                staticThisTypeInfo = methodTypeInfoArg
-            }
-            return Some(CreateInvokeStaticOuterTypeInfoArg(invokeStaticWithExceptionExpr.GetThisType().getOrThrow(),
-                invokeStaticWithExceptionExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder),
-                invokeStaticWithExceptionExpr.GetVirtualMethodOffset(chirBuilder), staticThisTypeInfo))
-        }
-        if (let Some(invokeExpr) <- (expr as Invoke)) {
-            return Some(CreateInvokeOuterTypeInfoArg(invokeExpr.GetObject(),
-                invokeExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder),
-                invokeExpr.GetVirtualMethodOffset(chirBuilder)))
-        }
-        if (let Some(invokeWithExceptionExpr) <- (expr as InvokeWithException)) {
-            return Some(CreateInvokeOuterTypeInfoArg(invokeWithExceptionExpr.GetObject(),
-                invokeWithExceptionExpr.GetInstSrcParentCustomTypeOfMethod(chirBuilder),
-                invokeWithExceptionExpr.GetVirtualMethodOffset(chirBuilder)))
-        }
-        return None
-    }
-
-    private func CreateInvokeStaticOuterTypeInfoArg(thisTy: Type, outerCHIRType: ClassType, vtableOffset: UInt64,
-        thisTypeInfoArg: Option<LLVMValueRef>): LLVMValueRef {
+    private func CreateOuterTypeInfo(callExprWrapper: CHIRCallExpr,
+        thisTypeInfo: Option<LLVMValueRef>): LLVMValueRef {
+        let outerCHIRType = callExprWrapper.GetOuterType(GetCGContext().GetCHIRBuilder())
         let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
-        if (GetCGContext().GetCGPkgContext().NeedOuterTypeInfo(outerCHIRType)) {
-            let thisTypeInfo = if (DeRef(thisTy).IsThis()) {
-                thisTypeInfoArg.getOrThrow()
+
+        let callExpression = callExprWrapper.GetExpression()
+        if ((callExpression as Apply).isSome() || (callExpression as ApplyWithException).isSome()) {
+            return CreateBitCast(CreateTypeInfo(outerCHIRType), typeInfoPtrType)
+        }
+
+        let outerCHIRClassType = (outerCHIRType as ClassType).getOrThrow()
+        if (callExprWrapper.IsCalleeStatic()) {
+            if (GetCGContext().GetCGPkgContext().NeedOuterTypeInfo(outerCHIRClassType)) {
+                let invokeStaticWrapper = (callExprWrapper as CHIRInvokeStaticWrapper).getOrThrow()
+                let backupBB = GetInsertBlock()
+                let prepForVirtualCallBB = invokeStaticWrapper.GetPrepForVirtualCallBB()
+                if (!prepForVirtualCallBB.isNull()) {
+                    SetInsertPointBefore(unsafe { LLVMGetBasicBlockTerminator(prepForVirtualCallBB) })
+                }
+                let typeInfo = if (DeRef(callExprWrapper.GetThisType().getOrThrow()).IsThis()) {
+                    thisTypeInfo.getOrThrow()
+                } else {
+                    CreateBitCast(CreateTypeInfo(callExprWrapper.GetThisType().getOrThrow()), typeInfoPtrType)
+                }
+                let methodOuterTypeArgs = ArrayList<LLVMValueRef>()
+                methodOuterTypeArgs.add(typeInfo)
+                methodOuterTypeArgs.add(CreateTypeInfo(outerCHIRType))
+                methodOuterTypeArgs.add(GetInt64(Int64(invokeStaticWrapper.GetVirtualMethodOffset())))
+                let outerType = CallIntrinsicMethodOuterType(methodOuterTypeArgs)
+                if (!prepForVirtualCallBB.isNull()) {
+                    GetCGContext().SetGetOuterTypeInst(GetInsertCGFunction().getOrThrow(), prepForVirtualCallBB,
+                        outerType)
+                    SetInsertPoint(backupBB)
+                }
+                return CreateBitCast(outerType, typeInfoPtrType)
             } else {
-                CreateBitCast(CreateTypeInfo(thisTy), typeInfoPtrType)
+                return unsafe { LLVMConstNull(typeInfoPtrType) }
             }
-            let methodOuterTypeArgs = ArrayList<LLVMValueRef>()
-            methodOuterTypeArgs.add(thisTypeInfo)
-            methodOuterTypeArgs.add(CreateTypeInfo(outerCHIRType))
-            methodOuterTypeArgs.add(GetInt64(Int64(vtableOffset)))
-            let outerType = CallIntrinsicMethodOuterType(methodOuterTypeArgs)
-            return CreateBitCast(outerType, typeInfoPtrType)
         }
-        return unsafe { LLVMConstNull(typeInfoPtrType) }
-    }
 
-    private func CreateInvokeOuterTypeInfoArg(objectValue: Value, outerCHIRType: ClassType,
-        vtableOffset: UInt64): LLVMValueRef {
-        let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
-        if (IsAutoEnvType(objectValue.GetType().getOrThrow().StripAllRefs())) {
-            return GetTypeInfoFromObject(cgMod.GetMappedCGValue(objectValue).GetRawValue())
-        }
-        if (GetCGContext().GetCGPkgContext().NeedOuterTypeInfo(outerCHIRType)) {
+        let invokeWrapper = (callExprWrapper as CHIRInvokeWrapper).getOrThrow()
+        if (DeRef(invokeWrapper.GetObject().GetType().getOrThrow()).IsAutoEnv()) {
+            return GetTypeInfoFromObject(cgMod.GetMappedCGValue(callExprWrapper.GetThisParam().getOrThrow()).GetRawValue())
+        } else if (GetCGContext().GetCGPkgContext().NeedOuterTypeInfo(outerCHIRClassType)) {
+            let backupBB = GetInsertBlock()
+            let prepForVirtualCallBB = invokeWrapper.GetPrepForVirtualCallBB()
+            if (!prepForVirtualCallBB.isNull()) {
+                SetInsertPointBefore(unsafe { LLVMGetBasicBlockTerminator(prepForVirtualCallBB) })
+            }
+            let typeInfo = GetTypeInfoFromObject(
+                cgMod.GetMappedCGValue(callExprWrapper.GetThisParam().getOrThrow()).GetRawValue())
             let methodOuterTypeArgs = ArrayList<LLVMValueRef>()
-            methodOuterTypeArgs.add(GetTypeInfoFromObject(cgMod.GetMappedCGValue(objectValue).GetRawValue()))
+            methodOuterTypeArgs.add(typeInfo)
             methodOuterTypeArgs.add(CreateTypeInfo(outerCHIRType))
-            methodOuterTypeArgs.add(GetInt64(Int64(vtableOffset)))
+            methodOuterTypeArgs.add(GetInt64(Int64(invokeWrapper.GetVirtualMethodOffset())))
             let outerType = CallIntrinsicMethodOuterType(methodOuterTypeArgs)
+            if (!prepForVirtualCallBB.isNull()) {
+                GetCGContext().SetGetOuterTypeInst(GetInsertCGFunction().getOrThrow(), prepForVirtualCallBB, outerType)
+                SetInsertPoint(backupBB)
+            }
             return CreateBitCast(outerType, typeInfoPtrType)
+        } else {
+            return unsafe { LLVMConstNull(typeInfoPtrType) }
         }
-        return unsafe { LLVMConstNull(typeInfoPtrType) }
     }
 
     private func IsOptionLikeRefValue(argCGType: CGType): Bool {
