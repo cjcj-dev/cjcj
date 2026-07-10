@@ -1,6 +1,8 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::ast.ASTKind
+import cangjie_compiler::ast.Decl as AstDecl
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::basic.MakeRange as BasicMakeRange
 import cangjie_compiler::basic.Position as BasicPosition
@@ -14,6 +16,22 @@ private let STD_PACKAGE_PREFIX: String = "std."
 public func TryGetFromCache<T>(key: String, cache: HashMap<String, Value>): Option<T> where T <: Value {
     let value = cache.get(key) ?? return None
     return value as T
+}
+
+public func AdjustVarInitType(funcType: FuncType, outerDecl: AstDecl, builder: CHIRBuilder,
+    chirType: CHIRType): FuncType {
+    let params = funcType.GetParamTypes()
+    let paramsTy = ArrayList<Type>()
+    let thisTy = chirType.TranslateType(outerDecl.GetTy().getOrThrow())
+    if (outerDecl.astKind == ASTKind.STRUCT_DECL) {
+        paramsTy.add(builder.context.GetRefTy(thisTy))
+    } else {
+        paramsTy.add(thisTy)
+    }
+    for (param in params) {
+        paramsTy.add(param)
+    }
+    return builder.context.GetFuncTy(paramsTy, funcType.GetReturnType())
 }
 
 public class FuncInfo {
