@@ -594,6 +594,7 @@ public func CheckLegalityOfUsage(
 ): LegalityOfUsageResult {
     SetAllFuncBodyCaptureKinds(pkg)
     let result = LegalityOfUsageResult()
+    TypeCheckReferenceCheckLegalityOfReference(diag, typeManager, ctx, pkg)
     AppendStaticMemberGenericIssues(result.staticMemberGenericIssues, CheckStaticMembersWithGeneric(pkg))
     TypeCheckReferenceCheckUsageOfDeprecated(diag, typeManager, pkg)
     AppendInitializationIssues(result.initializationIssues, CheckInitialization(ctx, pkg, opts: opts))

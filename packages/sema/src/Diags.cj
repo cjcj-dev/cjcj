@@ -190,6 +190,21 @@ public func MakeRangeForDeclIdentifier(decl: Decl): BasicRange {
     return MakeRange(decl.identifier.Begin(), decl.identifier.End())
 }
 
+public func DiagCannotHaveDefaultParam(diag: BasicDiagnosticEngine, fd: FuncDecl, fp: FuncParam): Unit {
+    if (fp.TestAttr(Attribute.IS_BROKEN)) {
+        return
+    }
+    let funcType = if (fd.op != TokenKind.ILLEGAL) {
+        "operator overloading"
+    } else if (fd.TestAttr(Attribute.OPEN)) {
+        "'open'"
+    } else {
+        "abstract"
+    }
+    diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_cannot_have_default_param,
+        MakeRange(fp.begin, fp.end), arguments: [funcType]).Emit()
+}
+
 public func DiagMismatchedTypesWithFoundTy(diag: BasicDiagnosticEngine, node: Node, expected: String,
     found: String, note!: String = ""): Unit {
     if (!node.ShouldDiagnose(allowCompilerAdd: true)) {
