@@ -6,6 +6,10 @@ import std.convert.*
 import std.sync.*
 import std.time.*
 
+foreign {
+    func perror(message: CString): Unit
+}
+
 @When[os == "Linux"]
 @C
 struct FdSet {
@@ -675,6 +679,9 @@ public class MacroProcMsger {
         try (sizePtr = LibC.malloc<UIntNative>().asResource()) {
             unsafe { sizePtr.value.write(sumSize) }
             if (!WriteToSrvPipe(CPointer<UInt8>(sizePtr.value), UIntNative(sizeOf<UIntNative>()))) {
+                try (message = unsafe { LibC.mallocCString("WriteToSrvPipe") }.asResource()) {
+                    unsafe { perror(message.value) }
+                }
                 pipeError.store(true)
                 return false
             }
@@ -692,6 +699,9 @@ public class MacroProcMsger {
                 let curNum = if (slice == msgNum - 1) { lastSize } else { msgSliceLen }
                 let slicePtr = unsafe { msgPtr.value + slice * msgSliceLen }
                 if (!WriteToSrvPipe(slicePtr, UIntNative(curNum))) {
+                    try (message = unsafe { LibC.mallocCString("WriteToSrvPipe") }.asResource()) {
+                        unsafe { perror(message.value) }
+                    }
                     pipeError.store(true)
                     return false
                 }
@@ -709,12 +719,18 @@ public class MacroProcMsger {
         var msgSize: UIntNative = 0
         try (sizePtr = LibC.malloc<UIntNative>().asResource()) {
             if (!ReadFromSrvPipe(CPointer<UInt8>(sizePtr.value), UIntNative(sizeOf<UIntNative>()))) {
+                try (message = unsafe { LibC.mallocCString("ReadFromSrvPipe") }.asResource()) {
+                    unsafe { perror(message.value) }
+                }
                 pipeError.store(true)
                 return false
             }
             msgSize = unsafe { sizePtr.value.read() }
         }
         if (msgSize == 0) {
+            try (message = unsafe { LibC.mallocCString("ReadFromSrvPipe size err") }.asResource()) {
+                unsafe { perror(message.value) }
+            }
             pipeError.store(true)
             return false
         }
@@ -728,6 +744,9 @@ public class MacroProcMsger {
                 let curNum = if (slice == msgNum - 1) { lastSize } else { msgSliceLen }
                 let slicePtr = unsafe { msgPtr.value + slice * msgSliceLen }
                 if (!ReadFromSrvPipe(slicePtr, UIntNative(curNum))) {
+                    try (message = unsafe { LibC.mallocCString("ReadFromSrvPipe") }.asResource()) {
+                        unsafe { perror(message.value) }
+                    }
                     pipeError.store(true)
                     return false
                 }
@@ -788,12 +807,18 @@ public class MacroProcMsger {
                 let ret = unsafe { select(readFd + 1, readset.value, CPointer<FdSet>(), CPointer<FdSet>(),
                     timeout.value) }
                 if (ret == -1) {
+                    try (message = unsafe { LibC.mallocCString("srv proc select pipe fail, stop read.") }.asResource()) {
+                        unsafe { perror(message.value) }
+                    }
                     return false
                 } else if (ret == 0) {
                     return true
                 } else if (FD_ISSET(readFd, readset.value)) {
                     continue
                 } else {
+                    try (message = unsafe { LibC.mallocCString("srv proc FD_ISSET fail, stop read.") }.asResource()) {
+                        unsafe { perror(message.value) }
+                    }
                     return false
                 }
             }
@@ -858,6 +883,9 @@ public class MacroProcMsger {
         try (sizePtr = LibC.malloc<UIntNative>().asResource()) {
             unsafe { sizePtr.value.write(sumSize) }
             if (!WriteToClientPipe(CPointer<UInt8>(sizePtr.value), UIntNative(sizeOf<UIntNative>()))) {
+                try (message = unsafe { LibC.mallocCString("WriteToClientPipe") }.asResource()) {
+                    unsafe { perror(message.value) }
+                }
                 return false
             }
         }
@@ -874,6 +902,9 @@ public class MacroProcMsger {
                 let curNum = if (slice == msgNum - 1) { lastSize } else { msgSliceLen }
                 let slicePtr = unsafe { msgPtr.value + slice * msgSliceLen }
                 if (!WriteToClientPipe(slicePtr, UIntNative(curNum))) {
+                    try (message = unsafe { LibC.mallocCString("WriteToClientPipe") }.asResource()) {
+                        unsafe { perror(message.value) }
+                    }
                     return false
                 }
                 slice++
@@ -887,11 +918,15 @@ public class MacroProcMsger {
         var msgSize: UIntNative = 0
         try (sizePtr = LibC.malloc<UIntNative>().asResource()) {
             if (!ReadFromClientPipe(CPointer<UInt8>(sizePtr.value), UIntNative(sizeOf<UIntNative>()))) {
+                try (message = unsafe { LibC.mallocCString("ReadFromClientPipe") }.asResource()) {
+                    unsafe { perror(message.value) }
+                }
                 return false
             }
             msgSize = unsafe { sizePtr.value.read() }
         }
         if (msgSize == 0) {
+            Errorln("Msg size error, size: 0")
             return false
         }
         let size = Int64(msgSize)
@@ -904,6 +939,9 @@ public class MacroProcMsger {
                 let curNum = if (slice == msgNum - 1) { lastSize } else { msgSliceLen }
                 let slicePtr = unsafe { msgPtr.value + slice * msgSliceLen }
                 if (!ReadFromClientPipe(slicePtr, UIntNative(curNum))) {
+                    try (message = unsafe { LibC.mallocCString("ReadFromClientPipe") }.asResource()) {
+                        unsafe { perror(message.value) }
+                    }
                     return false
                 }
                 slice++

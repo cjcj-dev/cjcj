@@ -234,7 +234,11 @@ private func CloseBothEndsOfPipe(pipefd: CPointer<Int32>): Unit {
 @When[os != "Windows"]
 private func RedirectStdOutTOStdErr(): Unit {
     if (unsafe { dup2(2, 1) } == -1) {
-        Errorln("macro srv dup2 from STDOUT_FILENO to STDERR_FILENO fail")
+        try (message = unsafe {
+            LibC.mallocCString("macro srv dup2 from STDOUT_FILENO to STDERR_FILENO fail")
+        }.asResource()) {
+            unsafe { perror(message.value) }
+        }
     }
 }
 
@@ -452,12 +456,16 @@ func CreateMacroSrvProcess(evaluation: MacroEvaluation): Unit {
             }
             msger.CloseClientResource()
             if (unsafe { pipe(msger.pipefdP2C) } == -1) {
-                Errorln("Create P2C pipe fail")
+                try (message = unsafe { LibC.mallocCString("Create P2C pipe fail: ") }.asResource()) {
+                    unsafe { perror(message.value) }
+                }
                 return
             }
             if (unsafe { pipe(msger.pipefdC2P) } == -1) {
                 CloseBothEndsOfPipe(msger.pipefdP2C)
-                Errorln("Create C2P pipe fail")
+                try (message = unsafe { LibC.mallocCString("Create C2P pipe fail: ") }.asResource()) {
+                    unsafe { perror(message.value) }
+                }
                 return
             }
             msger.pipeError.store(false)
@@ -471,11 +479,17 @@ func CreateMacroSrvProcess(evaluation: MacroEvaluation): Unit {
             msger.macroSrvRun.store(true)
             if (pid == 0) {
                 if (unsafe { prctl(PR_SET_PDEATHSIG, SIGHUP) } == -1) {
-                    Errorln("PR_SET_PDEATHSIG")
+                    try (message = unsafe { LibC.mallocCString("PR_SET_PDEATHSIG: ") }.asResource()) {
+                        unsafe { perror(message.value) }
+                    }
                 }
                 RedirectStdOutTOStdErr()
                 evaluation.ExecMacroSrv(ppid)
-                Errorln("run macro srv in fork, due to exec fail")
+                try (message = unsafe {
+                    LibC.mallocCString("run macro srv in fork, due to exec fail")
+                }.asResource()) {
+                    unsafe { perror(message.value) }
+                }
                 evaluation.RunMacroSrv()
             } else {
                 SetExitSignal()
@@ -497,12 +511,16 @@ func CreateMacroSrvProcess(evaluation: MacroEvaluation): Unit {
             }
             msger.CloseClientResource()
             if (unsafe { pipe(msger.pipefdP2C) } == -1) {
-                Errorln("Create P2C pipe fail")
+                try (message = unsafe { LibC.mallocCString("Create P2C pipe fail: ") }.asResource()) {
+                    unsafe { perror(message.value) }
+                }
                 return
             }
             if (unsafe { pipe(msger.pipefdC2P) } == -1) {
                 CloseBothEndsOfPipe(msger.pipefdP2C)
-                Errorln("Create C2P pipe fail")
+                try (message = unsafe { LibC.mallocCString("Create C2P pipe fail: ") }.asResource()) {
+                    unsafe { perror(message.value) }
+                }
                 return
             }
             msger.pipeError.store(false)
@@ -517,7 +535,11 @@ func CreateMacroSrvProcess(evaluation: MacroEvaluation): Unit {
             if (pid == 0) {
                 RedirectStdOutTOStdErr()
                 evaluation.ExecMacroSrv(ppid)
-                Errorln("run macro srv in fork, due to exec fail")
+                try (message = unsafe {
+                    LibC.mallocCString("run macro srv in fork, due to exec fail")
+                }.asResource()) {
+                    unsafe { perror(message.value) }
+                }
                 evaluation.RunMacroSrv()
             } else {
                 SetExitSignal()
