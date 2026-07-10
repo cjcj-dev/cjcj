@@ -119,6 +119,30 @@ public func IsGetOrThrowFunction(expr: Expression): Bool {
     return false
 }
 
+public func ReplaceUsesWithWrapper(curFunc: Value, apply: Option<Apply>, wrapperFunc: Value,
+    isForeign!: Bool = false): Unit {
+    for (user in curFunc.GetUsers()) {
+        if (let Some(wrapperApply) <- apply) {
+            if (refEq(user, wrapperApply)) {
+                continue
+            }
+        }
+        if (user.GetExprKind() == ExprKind.APPLY) {
+            let applyNode = (user as Apply).getOrThrow()
+            if (!isForeign && refEq(applyNode.GetCallee(), curFunc)) {
+                continue
+            }
+        }
+        if (user.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION) {
+            let applyNode = (user as ApplyWithException).getOrThrow()
+            if (!isForeign && refEq(applyNode.GetCallee(), curFunc)) {
+                continue
+            }
+        }
+        user.ReplaceOperand(curFunc, wrapperFunc)
+    }
+}
+
 public func IsStructEnum(typeValue: Type): Bool {
     if (let Some(enumTy) <- (typeValue as EnumType)) {
         return !enumTy.GetEnumDef().GetCtors().isEmpty()

@@ -1,6 +1,9 @@
 package cangjie_compiler::frontend
 
 import std.collection.*
+import cangjie_compiler::basic.Linkage as BasicLinkage
+import cangjie_compiler::chir.Apply as ChirApply
+import cangjie_compiler::chir.ApplyWithException as ChirApplyWithException
 import cangjie_compiler::chir.Attribute as ChirAttribute
 import cangjie_compiler::chir.CHIRBuilder as ChirBuilder
 import cangjie_compiler::chir.CHIRPrinter as ChirCHIRPrinter
@@ -10,20 +13,27 @@ import cangjie_compiler::chir.ClosureConversion
 import cangjie_compiler::chir.ConstAnalysisWrapper
 import cangjie_compiler::chir.ConstPropagation
 import cangjie_compiler::chir.DeadCodeElimination
+import cangjie_compiler::chir.DebugLocation as ChirDebugLocation
+import cangjie_compiler::chir.ExprKind as ChirExprKind
 import cangjie_compiler::chir.FaithfulAST2CHIR
+import cangjie_compiler::chir.FuncCallContext as ChirFuncCallContext
 import cangjie_compiler::chir.FuncKind as ChirFuncKind
+import cangjie_compiler::chir.FuncSigInfo as ChirFuncSigInfo
 import cangjie_compiler::chir.Function as ChirFunction
 import cangjie_compiler::chir.GetRefToArrayElem
+import cangjie_compiler::chir.INVALID_LOCATION as CHIR_INVALID_LOCATION
 import cangjie_compiler::chir.MergeBlocks
 import cangjie_compiler::chir.OptFuncRetType
 import cangjie_compiler::chir.Package as RealCHIRPackage
 import cangjie_compiler::chir.RedundantFutureRemoval
 import cangjie_compiler::chir.RedundantGetOrThrowElimination
 import cangjie_compiler::chir.RedundantLoadElimination
+import cangjie_compiler::chir.ReplaceUsesWithWrapper
 import cangjie_compiler::chir.ShouldReportUnusedCodeWarnings
 import cangjie_compiler::chir.UnitUnify
 import cangjie_compiler::chir.UpdateMemberVarPath
 import cangjie_compiler::chir.UselessAllocateElimination
+import cangjie_compiler::chir.Value as ChirValue
 import cangjie_compiler::ast.Package as RealASTPackage
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::codegen.CHIRData as CodegenCHIRData
@@ -34,10 +44,12 @@ import cangjie_compiler::codegen.SavePackageModule
 import cangjie_compiler::meta_transformation.TryRunCHIRMetaTransforms
 import cangjie_compiler::option.OptimizationFlag
 import cangjie_compiler::option.TempFileInfo
+import cangjie_compiler::utils.CFFI_FUNC_SUFFIX
 import cangjie_compiler::utils.CHIR_READABLE_FILE_EXTENSION
 import cangjie_compiler::utils.CJC_ASSERT
 import cangjie_compiler::utils.DEFAULT_PACKAGE_NAME
 import cangjie_compiler::utils.FileUtil
+import cangjie_compiler::utils.ProfileRecorder
 import cangjie_compiler::utils.REFLECT_PACKAGE_NAME
 
 public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTPackage): Option<RealCHIRPackage> {
@@ -97,6 +109,7 @@ private class ToCHIR {
         closure.RunOnPackage(lowered)
         ast2chir.ReplaceSrcCodeImportedValAfterClosureConversion(lowered, closure.GetUselessClassDef(),
             closure.GetUselessLambda())
+        CFFIFuncWrapper()
         if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
             ChirCHIRPrinter.PrintPackage(lowered)
         }
@@ -144,6 +157,143 @@ private class ToCHIR {
         if (suffix == "Broken_CHIR") {
             println("broken chir dump to file: " + fullPath)
         }
+    }
+
+    private func CFFIFuncWrapper(): Unit {
+        try (recorder = ProfileRecorder("CHIR", "CFFIFuncWrapper")) {
+            let currentPackage = chirPkg.getOrThrow()
+            let cfuncs = ArrayList<ChirFunction>()
+            let foreignFuncs = ArrayList<ChirFunction>()
+            for (curFunc in currentPackage.GetGlobalFuncsWithBody()) {
+                if (curFunc.GetType().getOrThrow().IsCFunc()) {
+                    cfuncs.add(curFunc)
+                }
+            }
+            for (foreignFunc in currentPackage.GetGlobalFuncsWithoutBody()) {
+                if (foreignFunc.GetType().getOrThrow().IsCFunc()) {
+                    CJC_ASSERT(foreignFunc.IsImportedFunc())
+                    foreignFuncs.add(foreignFunc)
+                }
+            }
+            for (curFunc in cfuncs) {
+                if (curFunc.GetLinkTypeInfo() != BasicLinkage.EXTERNAL) {
+                    if (!IsAllApply(curFunc)) {
+                        let (wrapperFunc, res) = DoCFFIFuncWrapper(curFunc, false, isExternal: false)
+                        ReplaceUsesWithWrapper(curFunc, res, wrapperFunc)
+                    }
+                    continue
+                }
+                let (wrapperFunc, res) = DoCFFIFuncWrapper(curFunc, false)
+                if (!IsAllApply(curFunc)) {
+                    ReplaceUsesWithWrapper(curFunc, res, wrapperFunc)
+                }
+            }
+            for (curFunc in foreignFuncs) {
+                if (curFunc.GetLinkTypeInfo() != BasicLinkage.EXTERNAL) {
+                    continue
+                }
+                let isForeign = curFunc.TestAttr(ChirAttribute.FOREIGN)
+                let (wrapperFunc, res) = DoCFFIFuncWrapper(curFunc, isForeign)
+                let funcPkgName = if (curFunc.GetPackageName().isEmpty()) {
+                    currentPackage.GetName()
+                } else {
+                    curFunc.GetPackageName()
+                }
+                if (funcPkgName != currentPackage.GetName()) {
+                    ReplaceUsesWithWrapper(curFunc, res, wrapperFunc, isForeign: true)
+                }
+            }
+            DumpCHIRToFile("CFFIFuncWrapper")
+        }
+    }
+
+    private func DoCFFIFuncWrapper(curFunc: ChirFunction, isForeign: Bool,
+        isExternal!: Bool = true): (ChirValue, Option<ChirApply>) {
+        let currentPackage = chirPkg.getOrThrow()
+        var ident = curFunc.GetSrcCodeIdentifier()
+        if (curFunc.IsLambda()) {
+            ident = curFunc.GetIdentifierWithoutPrefix()
+            if (let Some(pos) <- ident.indexOf(CFFI_FUNC_SUFFIX)) {
+                ident = ident[0..pos] + ident[pos + CFFI_FUNC_SUFFIX.size..]
+            }
+        }
+        let funcPkgName = if (curFunc.GetPackageName().isEmpty()) {
+            currentPackage.GetName()
+        } else {
+            curFunc.GetPackageName()
+        }
+        if (isForeign || (curFunc.TestAttr(ChirAttribute.PRIVATE) && isExternal)) {
+            ident = funcPkgName + ":" + ident
+        }
+        if (funcPkgName != currentPackage.GetName()) {
+            let wrapperFunc = builder.CreateFunction(curFunc.GetFuncType().getOrThrow(), ident,
+                srcCodeIdentifier: ident, rawMangledName: "", packageName: funcPkgName,
+                genericTypeParams: curFunc.GetGenericTypeParams())
+            wrapperFunc.EnableAttr(ChirAttribute.IMPORTED)
+            wrapperFunc.SetCFFIWrapper(true)
+            return (wrapperFunc, None)
+        }
+        let wrapperFunc = builder.CreateFunction(curFunc.GetFuncType().getOrThrow(), ident,
+            srcCodeIdentifier: ident, rawMangledName: "", packageName: funcPkgName)
+        wrapperFunc.SetDebugLocation(curFunc.GetDebugLocation())
+        wrapperFunc.SetFuncKind(curFunc.GetFuncKind())
+        if (wrapperFunc.IsLambda()) {
+            let originalLambdaInfo = ChirFuncSigInfo(curFunc.GetOriginalLambdaType().getOrThrow(),
+                funcName: curFunc.GetSrcCodeIdentifier(), genericTypeParams: curFunc.GetGenericTypeParams())
+            wrapperFunc.SetOriginalLambdaInfo(originalLambdaInfo)
+        }
+        let body = builder.CreateBlockGroup(wrapperFunc)
+        wrapperFunc.SetCFFIWrapper(true)
+        curFunc.EnableAttr(ChirAttribute.NO_INLINE)
+        curFunc.SetLinkTypeInfo(BasicLinkage.INTERNAL)
+        wrapperFunc.InitBody(body)
+        wrapperFunc.EnableAttr(ChirAttribute.COMPILER_ADD)
+        let linkage = if (isExternal) { BasicLinkage.EXTERNAL } else { BasicLinkage.INTERNAL }
+        wrapperFunc.SetLinkTypeInfo(linkage)
+        let args = ArrayList<ChirValue>()
+        let curFuncType = curFunc.GetFuncType().getOrThrow()
+        for (paramTy in curFuncType.GetParamTypes()) {
+            builder.CreateParameter(paramTy, CHIR_INVALID_LOCATION, wrapperFunc)
+        }
+        for (item in wrapperFunc.GetParams()) {
+            args.add(item)
+        }
+        let entry = builder.CreateBlock(body)
+        body.SetEntryBlock(entry)
+        let retType = curFunc.GetReturnType().getOrThrow()
+        let res = builder.CreateApply(retType, curFunc, ChirFuncCallContext(args: args), entry)
+        res.SetDebugLocation(curFunc.GetDebugLocation())
+        let retAlloc = builder.CreateAllocate(builder.context.GetRefTy(retType), retType, entry)
+        retAlloc.SetDebugLocation(ChirDebugLocation())
+        wrapperFunc.SetReturnValue(retAlloc.GetResult().getOrThrow())
+        builder.CreateStore(res.GetResult().getOrThrow(), retAlloc.GetResult().getOrThrow(), entry)
+        builder.CreateExit(None, entry)
+        return (wrapperFunc, Some(res))
+    }
+
+    private func IsAllApply(curFunc: ChirFunction): Bool {
+        let users = curFunc.GetUsers()
+        var index: Int64 = 0
+        while (index < users.size) {
+            if (users[index].GetExprKind() != ChirExprKind.APPLY &&
+                users[index].GetExprKind() != ChirExprKind.APPLY_WITH_EXCEPTION) {
+                return false
+            }
+            if (users[index].GetExprKind() == ChirExprKind.APPLY) {
+                let applyNode = (users[index] as ChirApply).getOrThrow()
+                if (!refEq(applyNode.GetCallee(), curFunc)) {
+                    return false
+                }
+            }
+            if (users[index].GetExprKind() == ChirExprKind.APPLY_WITH_EXCEPTION) {
+                let applyNode = (users[index] as ChirApplyWithException).getOrThrow()
+                if (!refEq(applyNode.GetCallee(), curFunc)) {
+                    return false
+                }
+            }
+            index++
+        }
+        return true
     }
 }
 

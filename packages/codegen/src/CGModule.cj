@@ -20,7 +20,7 @@ import cangjie_compiler::option.ArchType
 import cangjie_compiler::option.EnvironmentType
 import cangjie_compiler::option.OSType
 import cangjie_compiler::option.TripleInfo
-import cangjie_compiler::utils.CJC_ASSERT_WITH_MSG
+import cangjie_compiler::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
 private let CJ_PERSONALITY_FUNC_NAME: String = "__cj_personality_v0$"
 
@@ -30,6 +30,22 @@ public func SetCangjieGC(rawFunction: LLVMValueRef): Unit {
     }
     try (gcName = unsafe { LibC.mallocCString("cangjie") }.asResource()) {
         unsafe { LLVMSetGC(rawFunction, gcName.value) }
+    }
+}
+
+private func SetCFFIStub(funcValue: Value, rawFunction: LLVMValueRef): Unit {
+    CJC_ASSERT(!rawFunction.isNull())
+    if (funcValue.IsFuncWithBody()) {
+        let funcNode = (funcValue as Function).getOrThrow()
+        if (funcNode.IsCFunc()) {
+            if (!funcNode.IsCFFIWrapper()) {
+                AddFnAttr(rawFunction, C2CJ_ATTR)
+            } else if (funcNode.GetIdentifier().contains(":")) {
+                AddFnAttr(rawFunction, "pkg_c_wrapper")
+            } else {
+                AddFnAttr(rawFunction, CJSTUB_ATTR)
+            }
+        }
     }
 }
 
@@ -366,6 +382,7 @@ public class CGModule {
                 }
             }
         }
+        SetCFFIStub(chirValue, rawFunction)
         ApplyFunctionABIAttributes(rawFunction, chirValue, cgFuncType)
         MaybeSetCangjieGC(rawFunction, chirValue)
         if (let Some(chirType) <- chirValue.GetType()) {
