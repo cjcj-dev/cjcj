@@ -99,9 +99,9 @@ public func TypeCheckAnnotationCheckAnnotationDecl(
     }
     let expr = arg.expr.getOrThrow()
     if (expr.astKind != ASTKind.ARRAY_LIT) {
-        let builder = diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(diag,
             BasicDiagKindRefactor.sema_annotation_arg_target_array_lit,
-            TypeCheckAnnotationRange(expr))
+            expr)
         builder.Emit()
         return false
     }
