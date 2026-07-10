@@ -9,16 +9,15 @@ import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 private let CORE_PACKAGE_NAME: String = "std.core"
 
 private func DiagExpectConstFunc(diag: BasicDiagnosticEngine, fd: FuncDecl): Unit {
-    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_expect_const,
-        MakeRangeForDeclIdentifier(fd), "function")
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_expect_const,
+        fd, MakeRangeForDeclIdentifier(fd), "function")
     builder.AddMainHintArguments("")
     builder.Emit()
 }
 
 private func DiagExpectConstExpr(diag: BasicDiagnosticEngine, expr: Expr, isWeak: Bool): Unit {
     let constKind = if (isWeak) { "expression" } else { "expression guaranteed to be evaluated at compile time" }
-    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_expect_const,
-        MakeRange(expr.begin, expr.end), constKind)
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_expect_const, expr, constKind)
     var mainHint = ""
     if (expr.astKind == ASTKind.RETURN_EXPR) {
         builder.AddNote("cannot jump to non-constant context from a constant context")
