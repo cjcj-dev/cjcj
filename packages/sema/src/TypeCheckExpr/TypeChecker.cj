@@ -2861,6 +2861,15 @@ public class TypeChecker {
                     return funcDecl.GetTy() ?? TypeManager.GetInvalidTy()
                 }
                 funcDecl.EnableAttr(Attribute.IS_CHECK_VISITED)
+                let redefModifier = FindModifier(funcDecl, TokenKind.REDEF)
+                let staticModifier = FindModifier(funcDecl, TokenKind.STATIC)
+                if ((let Some(redef) <- redefModifier) && (let None <- staticModifier) &&
+                    (let None <- funcDecl.propDecl)) {
+                    if (let Some(diagValue) <- impl.diag) {
+                        Diagnose(diagValue, redef, BasicDiagKind.sema_redef_modify_static_func,
+                            args: [BasicDiagArgument("function")]).Emit()
+                    }
+                }
                 SetFunctionBodyOwner(funcDecl, body)
                 if (!Ty.IsTyCorrect(funcDecl.GetTy())) {
                     let _ = PrepareFuncBodySignature(ctx, body)
