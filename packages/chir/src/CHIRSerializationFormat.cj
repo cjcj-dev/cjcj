@@ -314,7 +314,6 @@ func CHIRKnownAttributes(): ArrayList<Attribute> {
     attrs.add(Attribute.ANNOTATION)
     attrs.add(Attribute.CFFI_WRAPPER)
     attrs.add(Attribute.FAST_NATIVE)
-    attrs.add(Attribute.INLINED)
     attrs.add(Attribute.THIN)
     attrs.add(Attribute.NO_HEAP_ALLOC)
     attrs.add(Attribute.NO_WRITE_BARRIER_REC)
@@ -365,7 +364,6 @@ func CHIRAttributeFromIndex(index: Int64): Attribute {
         case 64 => Attribute.ANNOTATION
         case 68 => Attribute.CFFI_WRAPPER
         case 71 => Attribute.FAST_NATIVE
-        case 73 => Attribute.INLINED
         case 75 => Attribute.THIN
         case 76 => Attribute.NO_HEAP_ALLOC
         case 77 => Attribute.NO_WRITE_BARRIER_REC
