@@ -156,12 +156,9 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.JAVA_HAS_DEFAULT => 36
         case Attribute.PREVIOUSLY_DESERIALIZED => 37
         case Attribute.FAST_NATIVE => 71
-<<<<<<< HEAD
         case Attribute.NO_HEAP_ALLOC => 76
         case Attribute.NO_WRITE_BARRIER_REC => 77
         case Attribute.NO_STACK_GROW => 78
-=======
->>>>>>> 57616346 (fix(chir): remove dead thin attribute value)
     }
 }
 
@@ -202,12 +199,9 @@ public func AttributeName(attr: Attribute): String {
         case Attribute.SKIP_ANALYSIS => "skip_analysis"
         case Attribute.SPECIFIC => "specific"
         case Attribute.STATIC => "static"
-<<<<<<< HEAD
         case Attribute.NO_HEAP_ALLOC => "noHeapAlloc"
         case Attribute.NO_WRITE_BARRIER_REC => "noWriteBarrierRec"
         case Attribute.NO_STACK_GROW => "noStackGrow"
-=======
->>>>>>> 57616346 (fix(chir): remove dead thin attribute value)
         case Attribute.UNREACHABLE => "unreachable"
         case Attribute.UNSAFE => "unsafe"
         case Attribute.OVERRIDE => "override"
