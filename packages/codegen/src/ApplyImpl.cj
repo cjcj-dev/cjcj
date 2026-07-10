@@ -8,7 +8,6 @@ import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.FuncType
 import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.GetInstParentCustomTyOfCallee
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
@@ -78,9 +77,36 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
     for (arg in args) {
         argValues.add(irBuilder.GetCGModule().GetMappedCGValue(arg))
     }
-    let methodTypeInfoArgs = BuildApplyMethodTypeInfoArg(irBuilder, callee, args, thisType, argValues)
-    let methodTypeInfoArg = methodTypeInfoArgs[0]
-    let thisTypeInfoArg = methodTypeInfoArgs[1]
+    var thisTypeInfoArg: Option<LLVMValueRef> = None
+    if (callee.TestAttr(Attribute.STATIC)) {
+        let curCGFunc = irBuilder.GetInsertCGFunction().getOrThrow()
+        let curCHIRFunc = (curCGFunc.GetOriginal() as Function).getOrThrow()
+        let curCHIRFuncParentTy = curCHIRFunc.GetParentCustomTypeOrExtendedType()
+        let calleeFunc = callee.AsFunction().getOrThrow()
+        let calleeFuncParentTy = calleeFunc.GetParentCustomTypeOrExtendedType()
+        let sameParentType = match ((curCHIRFuncParentTy, calleeFuncParentTy)) {
+            case (Some(left), Some(right)) => refEq(left, right)
+            case (None, None) => true
+            case _ => false
+        }
+        let curParentIsReference = match (curCHIRFuncParentTy) {
+            case Some(parentTy) => parentTy.IsReferenceType()
+            case None => false
+        }
+        let rawCurFunc = curCGFunc.GetRawFunction()
+        if (curCHIRFunc.TestAttr(Attribute.STATIC) && sameParentType) {
+            thisTypeInfoArg = Some(unsafe { LLVMGetParam(rawCurFunc, LLVMCountParams(rawCurFunc) - 1u32) })
+        } else if (sameParentType && curParentIsReference) {
+            let thisParamIdx: UInt32 = if (curCGFunc.IsSRet()) { 1u32 } else { 0u32 }
+            let thisParam = unsafe { LLVMGetParam(rawCurFunc, thisParamIdx) }
+            thisTypeInfoArg = Some(irBuilder.GetTypeInfoFromObject(thisParam))
+        } else {
+            let typeInfo = irBuilder.CreateTypeInfo(thisType.getOrThrow())
+            let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())
+            thisTypeInfoArg = Some(irBuilder.CreateBitCast(typeInfo, typeInfoPtrType, name: "call.this.ti"))
+        }
+        CJC_ASSERT(thisTypeInfoArg.isSome())
+    }
     if (let Some(instFuncTy) <- callType) {
         let typeInfo = TypeExtraInfo(0u32, isMethodType, isStaticMethodType, true, instTypeArgs)
         if (let Some(instCGFuncTy) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), instFuncTy,
@@ -94,7 +120,7 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
                 unsafe { LLVMPointerType(instCGFuncTy.GetLLVMFunctionType(), 0u32) },
                 name: "call.callee")
             return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(instCGFuncTy, typedCallee, argValues,
-                methodTypeInfoArg, instTypeArgs, thisTypeInfoArg: thisTypeInfoArg, name: "call")
+                None, instTypeArgs, thisTypeInfoArg: thisTypeInfoArg, name: "call")
         }
     }
     if (let Some(cgFunctionValue) <- (calleeValue as CGFunction)) {
@@ -117,14 +143,14 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
             }
             let castedCallee = irBuilder.CreateBitCast(rawFunction, funcPtrType, name: "call.callee")
             return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(selectedFuncTy, castedCallee,
-                argValues, methodTypeInfoArg, instTypeArgs, thisTypeInfoArg: thisTypeInfoArg, name: "call")
+                argValues, None, instTypeArgs, thisTypeInfoArg: thisTypeInfoArg, name: "call")
         }
         return irBuilder.CreateCallOrInvoke(cgFunctionValue, args: argValues, name: "call")
     }
     if (let Some(calleeType) <- calleeValue.GetCGType()) {
         if (let Some(functionType) <- (calleeType as CGFunctionType)) {
             return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(functionType, calleeValue.GetRawValue(), argValues,
-                methodTypeInfoArg, instTypeArgs, thisTypeInfoArg: thisTypeInfoArg, name: "call")
+                None, instTypeArgs, thisTypeInfoArg: thisTypeInfoArg, name: "call")
         }
     }
     return LLVMNullValue()
@@ -520,60 +546,4 @@ private func ImportedGenericStructCtorNeedsWithoutTI(fn: Function): Bool {
         }
     }
     return false
-}
-
-private func BuildApplyMethodTypeInfoArg(irBuilder: IRBuilder2, callee: Value, args: ArrayList<Value>,
-    thisType: Option<Type>, argValues: ArrayList<CGValue>): (Option<LLVMValueRef>, Option<LLVMValueRef>) {
-    var thisTypeInfoArg: Option<LLVMValueRef> = None
-    if (callee.TestAttr(Attribute.STATIC)) {
-        if (let Some(calleeFunc) <- callee.AsFunction()) {
-            if (let Some(calleeFuncParentTy) <- calleeFunc.GetParentCustomTypeOrExtendedType()) {
-                if (let Some(curCGFunc) <- irBuilder.GetInsertCGFunction()) {
-                    if (let Some(curFunc) <- (curCGFunc.GetOriginal() as Function)) {
-                        if (let Some(curFuncParentTy) <- curFunc.GetParentCustomTypeOrExtendedType()) {
-                            if (refEq(curFuncParentTy, calleeFuncParentTy)) {
-                                let rawCurFunc = curCGFunc.GetRawFunction()
-                                if (curFunc.TestAttr(Attribute.STATIC)) {
-                                    thisTypeInfoArg = Some(unsafe {
-                                        LLVMGetParam(rawCurFunc, LLVMCountParams(rawCurFunc) - 1u32)
-                                    })
-                                } else {
-                                    let thisParamIdx: UInt32 = if (curCGFunc.IsSRet()) { 1u32 } else { 0u32 }
-                                    let thisParam = unsafe { LLVMGetParam(rawCurFunc, thisParamIdx) }
-                                    let thisParamType = unsafe { LLVMTypeOf(thisParam) }
-                                    if (!thisParamType.isNull() &&
-                                        unsafe { LLVMGetTypeKind(thisParamType) } == LLVM_POINTER_TYPE_KIND) {
-                                        thisTypeInfoArg = Some(irBuilder.GetTypeInfoFromObject(thisParam))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if (thisTypeInfoArg.isNone() && (let Some(ty) <- thisType)) {
-            if (IsAutoEnvType(ty) && !argValues.isEmpty()) {
-                thisTypeInfoArg = Some(irBuilder.GetTypeInfoFromObject(argValues[0].GetRawValue()))
-            } else {
-                let strippedTy = ty.StripAllRefs()
-                let cgType = CGType.GetOrCreate(irBuilder.GetCGModule(), strippedTy)
-                let typeInfo = if (cgType.IsDynamicGI()) {
-                    irBuilder.CreateTypeInfo(strippedTy)
-                } else {
-                    cgType.GetOrCreateTypeInfo()
-                }
-                let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())
-                thisTypeInfoArg = Some(irBuilder.CreateBitCast(typeInfo, typeInfoPtrType, name: "call.this.ti"))
-            }
-        }
-    }
-
-    let chirBuilder = irBuilder.GetCGContext().GetCHIRBuilder()
-    if (let Some(parentTy) <- GetInstParentCustomTyOfCallee(callee, args, thisType, chirBuilder)) {
-        let typeInfo = irBuilder.CreateTypeInfo(parentTy)
-        let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(irBuilder.GetLLVMContext())
-        return (Some(irBuilder.CreateBitCast(typeInfo, typeInfoPtrType, name: "call.outer.ti")), thisTypeInfoArg)
-    }
-    return (None, thisTypeInfoArg)
 }
