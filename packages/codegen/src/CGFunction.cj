@@ -286,6 +286,7 @@ public class CGFunction <: CGValue {
         CGFunction.RemoveUnreachableBlocks(rawFunction)
         CGFunction.EraseReplaceableAlloca(cgMod, rawFunction)
         CGFunction.AddZeroInitForStructWithRefField(cgMod, rawFunction)
+        LICMOptimizer(cgMod, this).Run()
     }
 
     public func DumpIR(): Unit {
