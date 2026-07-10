@@ -559,7 +559,7 @@ public class CHIRChecker {
         CheckCustomType(def, result)
         CheckInstanceMemberVar(def, result)
         CheckStaticMemberVar(def, result)
-        // GAP_TODO: port C++ CHIRChecker::CheckVTable after the vtable subsystem lands.
+        CheckVTable(def, result)
         for (method in def.GetMethods()) {
             CheckParentCustomTypeDef(method, def, true, result)
         }
