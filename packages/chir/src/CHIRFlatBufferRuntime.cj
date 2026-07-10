@@ -162,3 +162,54 @@ class Table {
         return if (fieldOffset != 0u16) { Some(pointerPos) } else { None }
     }
 }
+
+// flatbuffers/vector.h:158-195,269-278. The C++ length_ address is represented
+// by pos; Data() is the first byte after its four-byte uoffset_t length.
+open class Vector<T> {
+    let data: Array<UInt8>
+    let pos: Int64
+
+    init(data: Array<UInt8>, pos: Int64) {
+        this.data = data
+        this.pos = pos
+    }
+
+    func size(): UInt32 {
+        return EndianScalar<UInt32>(ReadScalar<UInt32>(data, pos))
+    }
+
+    func Get(i: UInt32): T {
+        CJC_ASSERT(i < size())
+        return ReadScalar<T>(data, Data() + Int64(i) * element_stride())
+    }
+
+    func Data(): Int64 {
+        return pos + 4
+    }
+
+    private func element_stride(): Int64 {
+        if (UInt8(0) is T || Int8(0) is T || false is T) {
+            return 1
+        } else if (UInt16(0) is T || Int16(0) is T || Float16(0.0) is T) {
+            return 2
+        } else if (UInt32(0) is T || Int32(0) is T || Float32(0.0) is T || Rune(0) is T) {
+            return 4
+        } else if (UInt64(0) is T || Int64(0) is T || Float64(0.0) is T) {
+            return 8
+        }
+        CJC_ASSERT(false)
+        return 0
+    }
+}
+
+// flatbuffers/string.h:25-28. The namespace-qualified C++ name
+// flatbuffers::String is flattened to avoid shadowing Cangjie's core String.
+class FlatBufferString <: Vector<UInt8> {
+    init(data: Array<UInt8>, pos: Int64) {
+        super(data, pos)
+    }
+
+    func str(): String {
+        return String.fromUtf8(data[Data()..Data() + Int64(size())])
+    }
+}
