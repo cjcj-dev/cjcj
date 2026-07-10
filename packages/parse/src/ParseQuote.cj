@@ -166,6 +166,7 @@ extend ParserImpl {
             ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_paren, Peek(), ConvertToken(Peek())).Emit()
             ret.isBroken = true
         }
+        skipNL = true
         ret.end = lastToken.End()
         ExitQuoteExprMod()
         return ret
