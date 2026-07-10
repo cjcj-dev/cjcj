@@ -1802,6 +1802,24 @@ public class FaithfulAST2CHIR {
         RemoveUnusedCJMPExtends(CurrentPackage(), commonDecls)
     }
 
+    private func ProcessClassStructVarInits(trans: Translator): Unit {
+        if (!opts.IsCompilingCJMP()) {
+            return
+        }
+        let declContainers = ArrayList<ArrayList<AstDecl>>([
+            importedNominalDecls, importedGenericInstantiatedNominalDecls, nominalDecls, genericNominalDecls])
+        for (container in declContainers) {
+            for (decl in container) {
+                if (decl.TestAttr(AstAttribute.FROM_COMMON_PART)) {
+                    continue
+                }
+                if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.STRUCT_DECL) {
+                    trans.CreateClassStructDeclVarInit(decl)
+                }
+            }
+        }
+    }
+
     private func ParentIsOtherExtendGrandParent(parent: ClassType, curDef: ExtendDef): Bool {
         let extendDefs = curDef.GetExtendedType().getOrThrow().GetExtends(builder)
         let allGrandParents = HashMap<Int64, ClassType>()
@@ -1932,6 +1950,7 @@ public class FaithfulAST2CHIR {
         ProcessCommonAndSpecificExtends()
         SetExtendInfo()
         UpdateExtendParent()
+        ProcessClassStructVarInits(trans)
     }
 
     private func BuildGenericFuncMap(pkg: AstPackage): GenericFuncMap {

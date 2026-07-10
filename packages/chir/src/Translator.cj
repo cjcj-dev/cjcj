@@ -743,7 +743,7 @@ public class Translator {
         return CastValueIfNeeded(value, expectedTy)
     }
 
-    private func CreateClassStructDeclVarInit(decl: AstDecl): Unit {
+    public func CreateClassStructDeclVarInit(decl: AstDecl): Unit {
         CJC_ASSERT(decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.STRUCT_DECL)
         let def = chirTy.GetGlobalNominalCache(decl)
         def.SetVarInitializationFunc(TranslateVarsInit(decl))
@@ -955,18 +955,12 @@ public class Translator {
             }
             TranslateMemberDecl(def, member)
         }
-        if (opts.IsCompilingCJMP() && !structDecl.TestAttr(AstAttribute.FROM_COMMON_PART)) {
-            CreateClassStructDeclVarInit(structDecl)
-        }
         return None
     }
 
     public func Visit(classDecl: AstClassDecl): Option<Value> {
         let def = RequireClassDef(chirTy.GetGlobalNominalCache(classDecl))
         TranslateClassLikeDecl(def, classDecl)
-        if (opts.IsCompilingCJMP() && !classDecl.TestAttr(AstAttribute.FROM_COMMON_PART)) {
-            CreateClassStructDeclVarInit(classDecl)
-        }
         return None
     }
 
