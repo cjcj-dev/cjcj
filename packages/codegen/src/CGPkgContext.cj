@@ -6,6 +6,7 @@ import cangjie_compiler::chir.CHIRBuilder
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.Function
 import cangjie_compiler::chir.Package
+import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
 import cangjie_compiler::option.GlobalOptions
 
@@ -61,6 +62,7 @@ public class CGPkgContext {
     private let enableIncrement: Bool
     private let correctedCachedMangleMap: CachedMangleMap = CachedMangleMap()
     private let cgMods: ArrayList<CGModule> = ArrayList<CGModule>()
+    private let subTypeMap: HashMap<Int64, HashMap<Int64, Type>> = HashMap<Int64, HashMap<Int64, Type>>()
     private let quickCHIRValues: HashMap<String, Value> = HashMap<String, Value>()
     private let localizedSymbols: HashSet<String> = HashSet<String>()
 
@@ -158,6 +160,21 @@ public class CGPkgContext {
         let out = HashSet<String>()
         for (symbol in localizedSymbols) { out.add(symbol) }
         return out
+    }
+
+    public func CollectSubTypeMap(): Unit {
+        if (!GetGlobalOptions().CompileExecutable()) {
+            return
+        }
+
+        for (customTypeDef in GetCHIRPackage().GetAllCustomTypeDef()) {
+            for (parentTy in customTypeDef.GetSuperTypesInCurDef()) {
+                let customType = customTypeDef.GetType().getOrThrow()
+                let subTypes = subTypeMap.get(parentTy.objectId) ?? HashMap<Int64, Type>()
+                subTypes[customType.objectId] = customType
+                subTypeMap[parentTy.objectId] = subTypes
+            }
+        }
     }
 
     public func NeedOuterTypeInfo(classType: ClassType): Bool {
