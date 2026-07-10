@@ -146,13 +146,6 @@ private class CheckUnusedImportImpl {
         let cjoManager = importManager.GetCjoManager()
         let packageName = cjoManager.GetPackageNameByImport(importSpec)
         let usedMacroInFile = importManager.GetUsedMacroDecls(file)
-        if (usedMacroInFile.isEmpty()) {
-            // GAP_TODO: pre-IM3 master suppressed these diagnostics before emit.
-            // Keep the macro-package approximation until macro campaign S4 wires the
-            // C++ data source: CompileStrategy::MacroExpand (src/Frontend/CompileStrategy.cpp:555-570)
-            // -> MacroEvaluation::SaveUsedMacros (src/Macro/MacroEvaluation.cpp:737-746).
-            return true
-        }
         let declsMap = cjoManager.GetPackageMembers(packageName)
 
         if (importSpec.IsImportAll() || !importSpec.content.isDecl) {

@@ -51,6 +51,9 @@ public func ExecuteMacroServerTaskLoop(evaluation: MacroEvaluation): Unit {
 private func evalServerCalls(evaluation: MacroEvaluation, calls: ArrayList<MacroCall>): Bool {
     var hasRunnable = false
     for (call in calls) {
+        if (call.status != MacroEvalStatus.INIT) {
+            continue
+        }
         call.ci = Some(evaluation.ci)
         if (!call.FindMacroDefMethod()) {
             call.status = MacroEvalStatus.FAIL
@@ -59,7 +62,7 @@ private func evalServerCalls(evaluation: MacroEvaluation, calls: ArrayList<Macro
             }
             continue
         }
-        evaluation.SaveUsedMacroPkgs(call.packageName)
+        evaluation.SaveUsedMacros(call)
         hasRunnable = true
     }
     if (!hasRunnable) {
