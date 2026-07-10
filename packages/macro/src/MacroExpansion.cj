@@ -7,6 +7,8 @@ import cangjie_compiler::ast.ExprKind as ParsedAstExprKind
 import cangjie_compiler::ast.Node as ParsedAstNode
 import cangjie_compiler::ast.ScopeKind as ParsedAstScopeKind
 import cangjie_compiler::ast.VarDecl as ParsedAstVarDecl
+import cangjie_compiler::ast.VisitAction
+import cangjie_compiler::ast.Walker
 import cangjie_compiler::basic.DiagCategory as ParsedDiagCategory
 import cangjie_compiler::basic.DiagnosticEngine as ParsedDiagnosticEngine
 import cangjie_compiler::parse.Annotation as ParsedAnnotation
@@ -57,30 +59,10 @@ private func emitMacroDiagArg(diag: DiagnosticEngine, pos: Position, kind: DiagK
 }
 
 private func walkNode(node: Node, visit: (Node) -> Bool): Unit {
-    if (!visit(node)) {
-        return
-    }
-    for (child in node.Children()) {
-        walkNode(child, visit)
-    }
-    if (let Some(decl) <- (node as Decl)) {
-        for (anno in decl.annotations) {
-            walkNode(anno, visit)
-        }
-        for (member in decl.GetMemberDecls()) {
-            walkNode(member, visit)
-        }
-    }
-    if (let Some(funcDecl) <- (node as FuncDecl)) {
-        if (let Some(funcBody) <- funcDecl.funcBody) {
-            for (list in funcBody.paramLists) {
-                walkNode(list, visit)
-            }
-            if (let Some(body) <- funcBody.body) {
-                walkNode(body, visit)
-            }
-        }
-    }
+    let walker = Walker(node, visitPre: { curNode: Node =>
+        if (visit(curNode)) { VisitAction.WALK_CHILDREN } else { VisitAction.SKIP_CHILDREN }
+    })
+    let _ = walker.Walk()
 }
 
 private func collectMacroEachFile(file: File, collector: MacroCollector): Unit {
