@@ -157,7 +157,6 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.PREVIOUSLY_DESERIALIZED => 37
         case Attribute.FAST_NATIVE => 71
 <<<<<<< HEAD
-        case Attribute.THIN => 75
         case Attribute.NO_HEAP_ALLOC => 76
         case Attribute.NO_WRITE_BARRIER_REC => 77
         case Attribute.NO_STACK_GROW => 78
@@ -204,7 +203,6 @@ public func AttributeName(attr: Attribute): String {
         case Attribute.SPECIFIC => "specific"
         case Attribute.STATIC => "static"
 <<<<<<< HEAD
-        case Attribute.THIN => "thin"
         case Attribute.NO_HEAP_ALLOC => "noHeapAlloc"
         case Attribute.NO_WRITE_BARRIER_REC => "noWriteBarrierRec"
         case Attribute.NO_STACK_GROW => "noStackGrow"
