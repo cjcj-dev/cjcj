@@ -418,8 +418,8 @@ func CreateGetElementByName(builder: FlatBufferBuilder, base: FlatBufferOffset, 
     return tableBuilder.Finish()
 }
 
-func CreateGetElementByNameDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, fieldNames: Option<ArrayList<String>>): FlatBufferOffset {
-    let fieldNamesOffset = if (let Some(value) <- fieldNames) { builder.CreateVectorOfStrings(value) } else { 0u32 }
+func CreateGetElementByNameDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, fieldNames: Option<ArrayList<FlatBufferOffset>>): FlatBufferOffset {
+    let fieldNamesOffset = if (let Some(value) <- fieldNames) { builder.CreateVectorOffsets(value) } else { 0u32 }
     return CreateGetElementByName(builder, base, fieldNamesOffset)
 }
 
@@ -484,8 +484,8 @@ func CreateStoreElementByName(builder: FlatBufferBuilder, base: FlatBufferOffset
     return tableBuilder.Finish()
 }
 
-func CreateStoreElementByNameDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, fieldNames: Option<ArrayList<String>>): FlatBufferOffset {
-    let fieldNamesOffset = if (let Some(value) <- fieldNames) { builder.CreateVectorOfStrings(value) } else { 0u32 }
+func CreateStoreElementByNameDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, fieldNames: Option<ArrayList<FlatBufferOffset>>): FlatBufferOffset {
+    let fieldNamesOffset = if (let Some(value) <- fieldNames) { builder.CreateVectorOffsets(value) } else { 0u32 }
     return CreateStoreElementByName(builder, base, fieldNamesOffset)
 }
 
@@ -578,8 +578,8 @@ func CreateFieldByName(builder: FlatBufferBuilder, base: FlatBufferOffset, field
     return tableBuilder.Finish()
 }
 
-func CreateFieldByNameDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, fieldNames: Option<ArrayList<String>>): FlatBufferOffset {
-    let fieldNamesOffset = if (let Some(value) <- fieldNames) { builder.CreateVectorOfStrings(value) } else { 0u32 }
+func CreateFieldByNameDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, fieldNames: Option<ArrayList<FlatBufferOffset>>): FlatBufferOffset {
+    let fieldNamesOffset = if (let Some(value) <- fieldNames) { builder.CreateVectorOffsets(value) } else { 0u32 }
     return CreateFieldByName(builder, base, fieldNamesOffset)
 }
 

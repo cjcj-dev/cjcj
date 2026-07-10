@@ -409,11 +409,11 @@ func CreateGlobalValue(builder: FlatBufferBuilder, base: FlatBufferOffset, srcCo
     return tableBuilder.Finish()
 }
 
-func CreateGlobalValueDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, srcCodeIdentifier: Option<String>, rawMangledName: Option<String>, packageName: Option<String>, declaredParent: UInt32, features: Option<ArrayList<String>>, annoInfo: FlatBufferOffset): FlatBufferOffset {
+func CreateGlobalValueDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, srcCodeIdentifier: Option<String>, rawMangledName: Option<String>, packageName: Option<String>, declaredParent: UInt32, features: Option<ArrayList<FlatBufferOffset>>, annoInfo: FlatBufferOffset): FlatBufferOffset {
     let srcCodeIdentifierOffset = if (let Some(value) <- srcCodeIdentifier) { builder.CreateSharedString(value) } else { 0u32 }
     let rawMangledNameOffset = if (let Some(value) <- rawMangledName) { builder.CreateSharedString(value) } else { 0u32 }
     let packageNameOffset = if (let Some(value) <- packageName) { builder.CreateSharedString(value) } else { 0u32 }
-    let featuresOffset = if (let Some(value) <- features) { builder.CreateVectorOfStrings(value) } else { 0u32 }
+    let featuresOffset = if (let Some(value) <- features) { builder.CreateVectorOffsets(value) } else { 0u32 }
     return CreateGlobalValue(builder, base, srcCodeIdentifierOffset, rawMangledNameOffset, packageNameOffset, declaredParent, featuresOffset, annoInfo)
 }
 

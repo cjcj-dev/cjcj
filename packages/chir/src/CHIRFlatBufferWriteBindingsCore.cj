@@ -628,9 +628,9 @@ func CreateCustomAnnoInstance(builder: FlatBufferBuilder, annoClassName: FlatBuf
     return tableBuilder.Finish()
 }
 
-func CreateCustomAnnoInstanceDirect(builder: FlatBufferBuilder, annoClassName: Option<String>, argValues: Option<ArrayList<String>>, loc: FlatBufferOffset): FlatBufferOffset {
+func CreateCustomAnnoInstanceDirect(builder: FlatBufferBuilder, annoClassName: Option<String>, argValues: Option<ArrayList<FlatBufferOffset>>, loc: FlatBufferOffset): FlatBufferOffset {
     let annoClassNameOffset = if (let Some(value) <- annoClassName) { builder.CreateSharedString(value) } else { 0u32 }
-    let argValuesOffset = if (let Some(value) <- argValues) { builder.CreateVectorOfStrings(value) } else { 0u32 }
+    let argValuesOffset = if (let Some(value) <- argValues) { builder.CreateVectorOffsets(value) } else { 0u32 }
     return CreateCustomAnnoInstance(builder, annoClassNameOffset, argValuesOffset, loc)
 }
 
