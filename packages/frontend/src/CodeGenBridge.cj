@@ -106,7 +106,8 @@ private class ToCHIR {
             case None => return None
         }
         chirPkg = Some(lowered)
-        RulesChecking(lowered, builder, instance.invocation.globalOptions, instance.diag.AsBasicDiagnosticEngine())
+        RulesChecking(lowered, builder, instance.invocation.globalOptions,
+            instance.diag.AsBasicDiagnosticEngine(), effectMap)
         RunOptimizationPass(lowered)
         if (!TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)) {
             instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
@@ -415,7 +416,7 @@ private class ToCHIR {
 }
 
 private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions,
-    diag: BasicDiagnosticEngine): Unit {
+    diag: BasicDiagnosticEngine, effectMap: ChirOptEffectCHIRMap): Unit {
     // Canonicalize member-var paths over the whole package before analysis, mirroring C++
     // ToCHIR::Canonicalization() at CHIR.cpp:1150 ("after this pass, the CHIR is ready for
     // analysis and optimization"). Generic instantiation adds function bodies after
@@ -442,6 +443,7 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     let wrapper = ConstAnalysisWrapper(builder)
     wrapper.RunOnPackage(pkg, diag, isDebug: options.chirDebugOptimizer)
     let cp = ConstPropagation(builder: Some(builder), wrapper: wrapper, opts: options)
+    MergeEffectMap(cp.GetEffectMap(), effectMap)
     cp.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer, isCJLint: false)
     DeadCodeElimination(builder).UnreachableBlockElimination(cp.GetFuncsNeedRemoveBlocks(),
         isDebug: options.chirDebugOptimizer)

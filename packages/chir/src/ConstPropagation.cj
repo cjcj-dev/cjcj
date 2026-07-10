@@ -2,6 +2,10 @@ package cjcj::chir
 
 import cjcj::option.{GlobalOptions, OptimizationFlag}
 import std.collection.*
+import std.sync.Mutex
+
+private let constPropagationEffectMap: OptEffectCHIRMap = OptEffectCHIRMap()
+private let constPropagationEffectMapMutex = Mutex()
 
 private class RewriteInfo {
     public let oldExpr: Expression
@@ -57,6 +61,10 @@ public class ConstPropagation {
 
     public func GetFuncsNeedRemoveBlocks(): ArrayList<Function> {
         return funcsNeedRemoveBlocks
+    }
+
+    public func GetEffectMap(): OptEffectCHIRMap {
+        return constPropagationEffectMap
     }
 
     private func VisitFunc(funcValue: Function, isDebug: Bool, isCJLint: Bool,
@@ -282,13 +290,53 @@ public class ConstPropagation {
     }
 
     private func RecordEffectMap(expr: Expression, funcValue: Function): Unit {
-        let _ = expr
-        let _ = funcValue
         if (!opts.enIncrementalCompilation ||
             !opts.IsOptimizationExisted(OptimizationFlag.CONST_PROPAGATION)) {
             return
         }
-        // GAP_TODO(valanalysis): selfhost lacks C++ OptEffectCHIRMap; C++ RecordEffectMap is ConstPropagation.cpp:323-371.
+        var globalVar: Option<GlobalVar> = None
+        if (expr.GetExprKind() == ExprKind.LOAD) {
+            let location = (expr as Load).getOrThrow().GetLocation()
+            if (location.IsGlobalVarWithInitializer()) {
+                globalVar = location.AsGlobalVar()
+            } else if (let Some(localVar) <- location.AsLocalVar()) {
+                let locationExpr = localVar.GetExpr().getOrThrow()
+                if (locationExpr.GetExprKind() == ExprKind.GET_ELEMENT_REF) {
+                    let base = (locationExpr as GetElementRef).getOrThrow().GetLocation()
+                    if (base.IsGlobalVarWithInitializer()) {
+                        globalVar = base.AsGlobalVar()
+                    }
+                }
+            }
+        } else if (expr.GetExprKind() == ExprKind.FIELD) {
+            let base = (expr as Field).getOrThrow().GetBase()
+            if (let Some(localVar) <- base.AsLocalVar()) {
+                let baseExpr = localVar.GetExpr().getOrThrow()
+                if (baseExpr.GetExprKind() == ExprKind.LOAD) {
+                    let location = (baseExpr as Load).getOrThrow().GetLocation()
+                    if (location.IsGlobalVarWithInitializer()) {
+                        globalVar = location.AsGlobalVar()
+                    }
+                }
+            }
+        }
+        if (let Some(gv) <- globalVar) {
+            if (opts.GetJobs() > 1u64) {
+                synchronized(constPropagationEffectMapMutex) {
+                    if (let Some(affectedFunctions) <- constPropagationEffectMap.get(gv)) {
+                        affectedFunctions.add(funcValue)
+                    } else {
+                        constPropagationEffectMap[gv] = HashSet<Value>([funcValue])
+                    }
+                }
+            } else {
+                if (let Some(affectedFunctions) <- constPropagationEffectMap.get(gv)) {
+                    affectedFunctions.add(funcValue)
+                } else {
+                    constPropagationEffectMap[gv] = HashSet<Value>([funcValue])
+                }
+            }
+        }
     }
 }
 
