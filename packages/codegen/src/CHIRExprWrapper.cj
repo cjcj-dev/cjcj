@@ -2,16 +2,18 @@ package cangjie_compiler::codegen
 
 import std.collection.*
 import cangjie_compiler::chir.BinaryExpression
+import cangjie_compiler::chir.CHIRBuilder
 import cangjie_compiler::chir.Constant
 import cangjie_compiler::chir.Expression
 import cangjie_compiler::chir.Apply
 import cangjie_compiler::chir.ApplyWithException
 import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.Function
+import cangjie_compiler::chir.GetInstParentCustomTyOfCallee
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.UnaryExpression
 import cangjie_compiler::chir.Value
-import cangjie_compiler::utils.CJC_ASSERT_WITH_MSG
+import cangjie_compiler::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
 public open class CHIRExprWrapper {
     public let expr: Expression
@@ -53,7 +55,25 @@ public class CHIRConstantExprWrapper <: CHIRExprWrapper {
     }
 }
 
-public class CHIRApplyWrapper <: CHIRExprWrapper {
+public abstract class CHIRCallExpr <: CHIRExprWrapper {
+    public init(expr: Expression) {
+        super(expr)
+    }
+
+    public func GetThisType(fromObj: Bool): Option<Type>
+    public func GetThisType(): Option<Type> {
+        return GetThisType(true)
+    }
+    public func GetInstantiatedTypeArgs(): ArrayList<Type>
+    public func IsCalleeMethod(): Bool
+    public func IsCalleeStructInstanceMethod(): Bool
+    public func IsCalleeStatic(): Bool
+    public func GetOuterType(builder: CHIRBuilder): Type
+    public func GetThisParam(): Option<Value>
+    public func GetArgs(): ArrayList<Value>
+}
+
+public class CHIRApplyWrapper <: CHIRCallExpr {
     public init(apply: Apply) {
         super(apply)
         CheckCalleeTypeArgsNum()
@@ -71,39 +91,40 @@ public class CHIRApplyWrapper <: CHIRExprWrapper {
         return (expr as ApplyWithException).getOrThrow().GetCallee()
     }
 
-    public func GetArgs(): ArrayList<Value> {
+    public override func GetArgs(): ArrayList<Value> {
         if (let Some(apply) <- (expr as Apply)) {
             return apply.GetArgs()
         }
         return (expr as ApplyWithException).getOrThrow().GetArgs()
     }
 
-    public func GetInstantiatedTypeArgs(): ArrayList<Type> {
+    public override func GetInstantiatedTypeArgs(): ArrayList<Type> {
         if (let Some(apply) <- (expr as Apply)) {
             return apply.GetInstantiatedTypeArgs()
         }
         return (expr as ApplyWithException).getOrThrow().GetInstantiatedTypeArgs()
     }
 
-    public func GetThisType(): Option<Type> {
+    public override func GetThisType(fromObj: Bool): Option<Type> {
+        let _ = fromObj
         if (let Some(apply) <- (expr as Apply)) {
             return apply.GetThisType()
         }
         return (expr as ApplyWithException).getOrThrow().GetThisType()
     }
 
-    public func IsCalleeMethod(): Bool {
+    public override func IsCalleeMethod(): Bool {
         if (let Some(calleeFunc) <- GetCallee().AsFunction()) {
             return calleeFunc.IsMemberFunc()
         }
         return false
     }
 
-    public func IsCalleeStatic(): Bool {
+    public override func IsCalleeStatic(): Bool {
         return GetCallee().TestAttr(Attribute.STATIC)
     }
 
-    public func IsCalleeStructInstanceMethod(): Bool {
+    public override func IsCalleeStructInstanceMethod(): Bool {
         if (!IsCalleeMethod() || IsCalleeStatic()) {
             return false
         }
@@ -118,7 +139,13 @@ public class CHIRApplyWrapper <: CHIRExprWrapper {
             (GetCallee().TestAttr(Attribute.MUT) || calleeFunc.IsConstructor())
     }
 
-    public func GetThisParam(): Option<Value> {
+    public override func GetOuterType(builder: CHIRBuilder): Type {
+        let res = GetInstParentCustomTyOfCallee(GetCallee(), GetArgs(), GetThisType(), builder)
+        CJC_ASSERT(res.isSome())
+        return res.getOrThrow()
+    }
+
+    public override func GetThisParam(): Option<Value> {
         if (IsCalleeMethod() && !IsCalleeStatic()) {
             return GetArgs()[0]
         }
