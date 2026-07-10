@@ -52,5 +52,8 @@ private class FunctionGeneratorImpl <: IRGeneratorImpl {
 public func EmitFunctionIR(cgMod: CGModule, chirFunc: Function): Option<CGFunction> {
     let generator = FunctionGeneratorImpl(cgMod, chirFunc)
     IRGenerator(generator).EmitIR()
+    if (let Some(body) <- chirFunc.GetBody()) {
+        cgMod.GetCGContext().GetCHIRBuilder().context.FreeMemoryInFunc(body)
+    }
     return generator.GetCGFunction()
 }

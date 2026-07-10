@@ -123,6 +123,7 @@ private class ToCHIR {
         if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
             ChirCHIRPrinter.PrintPackage(lowered)
         }
+        builder.MergeAllocatedInstance()
         return Some(lowered)
     }
 

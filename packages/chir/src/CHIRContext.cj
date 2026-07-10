@@ -38,6 +38,7 @@ public class CHIRContext {
     private let allocatedClasses: ArrayList<ClassDef> = ArrayList<ClassDef>()
     private let allocatedEnums: ArrayList<EnumDef> = ArrayList<EnumDef>()
     private let allocatedExtends: ArrayList<ExtendDef> = ArrayList<ExtendDef>()
+    private let allocatedPtrInFuncOrLambda: HashMap<Int64, ArrayList<Base>> = HashMap<Int64, ArrayList<Base>>()
 
     private let invalidTy: BuiltinType = BuiltinType(TypeKind.TYPE_INVALID)
     private let unitTy: UnitType = UnitType()
@@ -475,6 +476,22 @@ public class CHIRContext {
             allocatedEnums.size + allocatedExtends.size
     }
 
+    public func MergeAllocatedPtrInFuncOrLambda(input: HashMap<Int64, ArrayList<Base>>): Unit {
+        for ((blockGroupId, ptrs) in input) {
+            if (let Some(allocatedPtrs) <- allocatedPtrInFuncOrLambda.get(blockGroupId)) {
+                allocatedPtrs.add(all: ptrs)
+            } else {
+                allocatedPtrInFuncOrLambda[blockGroupId] = ptrs.clone()
+            }
+        }
+    }
+
+    public func FreeMemoryInFunc(funcBody: BlockGroup): Unit {
+        if (let Some(ptrs) <- allocatedPtrInFuncOrLambda.get(funcBody.nodeId)) {
+            ptrs.clear()
+        }
+    }
+
     public func FreeWholePackage(): Unit {
         curPackage = None
         allocatedValues.clear()
@@ -483,5 +500,6 @@ public class CHIRContext {
         allocatedClasses.clear()
         allocatedEnums.clear()
         allocatedExtends.clear()
+        allocatedPtrInFuncOrLambda.clear()
     }
 }

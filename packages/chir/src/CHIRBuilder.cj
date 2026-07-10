@@ -6,6 +6,7 @@ import cjcj::utils.OverflowStrategy
 public class CHIRBuilder {
     public let context: CHIRContext
     private var markAsCompileTimeValue: Bool = false
+    private let allocatedPtrInFuncOrLambda: HashMap<Int64, ArrayList<Base>> = HashMap<Int64, ArrayList<Base>>()
 
     public init(context: CHIRContext) {
         this.context = context
@@ -145,6 +146,7 @@ public class CHIRBuilder {
     public func CreateBlockGroup(identifier: String): BlockGroup {
         let group = BlockGroup(identifier)
         context.RegisterValue(group)
+        StoreAllocatedPtrInFuncOrLambda(group)
         return group
     }
 
@@ -155,6 +157,9 @@ public class CHIRBuilder {
     public func CreateBlock(identifier: String, parentGroup: Option<BlockGroup>): Block {
         let block = Block(identifier, parentGroup)
         context.RegisterValue(block)
+        if (let Some(group) <- block.GetFuncOrLambdaBody()) {
+            StoreAllocatedPtrInFuncOrLambda(group, ptr: Some(block))
+        }
         return block
     }
 
@@ -213,6 +218,25 @@ public class CHIRBuilder {
 
     public func GetCompileTimeValueMark(): Bool {
         return markAsCompileTimeValue
+    }
+
+    public func MergeAllocatedInstance(): Unit {
+        context.MergeAllocatedPtrInFuncOrLambda(allocatedPtrInFuncOrLambda)
+        allocatedPtrInFuncOrLambda.clear()
+    }
+
+    private func StoreAllocatedPtrInFuncOrLambda(bg: BlockGroup, ptr!: Option<Base> = None): Unit {
+        if (let Some(ptrs) <- allocatedPtrInFuncOrLambda.get(bg.nodeId)) {
+            if (let Some(allocatedPtr) <- ptr) {
+                ptrs.add(allocatedPtr)
+            }
+        } else {
+            let ptrs = ArrayList<Base>()
+            if (let Some(allocatedPtr) <- ptr) {
+                ptrs.add(allocatedPtr)
+            }
+            allocatedPtrInFuncOrLambda[bg.nodeId] = ptrs
+        }
     }
 
     public func CreateLocalVar(ty: Type, identifier: String, expr: Option<Expression>): LocalVar {
