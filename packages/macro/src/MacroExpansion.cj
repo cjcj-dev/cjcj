@@ -2,6 +2,7 @@ package cangjie_compiler::macro_pkg
 
 import std.collection.*
 import std.sort.*
+import cangjie_compiler::ast.AddMacroAttr
 import cangjie_compiler::ast.AnnotationKind as RealAnnotationKind
 import cangjie_compiler::ast.ExprKind as ParsedAstExprKind
 import cangjie_compiler::ast.Node as ParsedAstNode
@@ -162,6 +163,8 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall,
         paramNode.begin = firstParamToken.Begin()
         paramNode.end = tokens[tokens.size - 1].End()
         paramNode.curFile = macroNode.RequireNode().curFile
+        paramNode.curMacroCall = macroNode.RequireNode()
+        AddMacroAttr(paramNode)
         out.add(paramNode)
         return out
     }
@@ -172,13 +175,12 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall,
     generatedParser.SetCompileOptions(ci.GetGlobalOptions())
     generatedParser.SetPrimaryDecl(macroNode.RequireInvocation().outerDeclIdent)
     generatedParser.EnableCustomAnno()
-    let parsedCurrentMacroCall = makeParsedCurrentMacroCall(macroNode.RequireNode())
     let parsedScope = if (ASTKindEquals(macroNode.RequireNode().astKind, ASTKind.MACRO_EXPAND_EXPR)) {
         ParsedScopeKind.FUNC_BODY
     } else {
         toParsedScopeKind(macroNode.RequireInvocation().scopeKind)
     }
-    let parsedNodes = generatedParser.ParseNodes(parsedScope, parsedCurrentMacroCall)
+    let parsedNodes = generatedParser.ParseNodes(parsedScope, macroNode.RequireNode())
     let hasParseError = parserDiag.GetErrorCount() > 0u64
     forwardParserDiagnostics(parserDiag, ci.GetDiag())
     if (hasParseError) {
@@ -228,13 +230,6 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall,
     tokenPart.curFile = macroNode.RequireNode().curFile
     out.add(tokenPart)
     return out
-}
-
-private func makeParsedCurrentMacroCall(macroNode: Node): ParsedNode {
-    let parsedNode = ParsedNode()
-    parsedNode.begin = macroNode.begin
-    parsedNode.end = macroNode.end
-    return parsedNode
 }
 
 private func makeInvalidGeneratedNode(tokens: ArrayList<Token>): Node {
