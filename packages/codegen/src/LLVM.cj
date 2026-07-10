@@ -397,6 +397,7 @@ foreign {
         name: CString): LLVMValueRef
     func LLVMBuildLoad2(builder: LLVMBuilderRef, valueType: LLVMTypeRef, pointer: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildStore(builder: LLVMBuilderRef, value: LLVMValueRef, pointer: LLVMValueRef): LLVMValueRef
+    func LLVMSetVolatile(memoryAccessInst: LLVMValueRef, isVolatile: Int32): Unit
     func LLVMBuildMemSet(builder: LLVMBuilderRef, pointer: LLVMValueRef, value: LLVMValueRef, len: LLVMValueRef,
         align: UInt32): LLVMValueRef
     func LLVMBuildMemCpy(builder: LLVMBuilderRef, dest: LLVMValueRef, destAlign: UInt32, src: LLVMValueRef,

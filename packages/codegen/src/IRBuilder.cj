@@ -616,8 +616,12 @@ public class IRBuilder2 <: Resource {
         return loaded
     }
 
-    public func CreateStore(value: LLVMValueRef, addr: LLVMValueRef): LLVMValueRef {
-        return unsafe { LLVMBuildStore(builder.raw, value, addr) }
+    public func CreateStore(value: LLVMValueRef, addr: LLVMValueRef, isVolatile!: Bool = false): LLVMValueRef {
+        let store = unsafe { LLVMBuildStore(builder.raw, value, addr) }
+        if (isVolatile) {
+            unsafe { LLVMSetVolatile(store, 1) }
+        }
+        return store
     }
 
     public func CreateStore(value: LLVMValueRef, dest: CGValue): LLVMValueRef {
