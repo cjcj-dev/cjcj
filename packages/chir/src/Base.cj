@@ -1,6 +1,5 @@
 package cjcj::chir
 
-import std.convert.*
 import std.sync.AtomicInt64
 
 private class BaseIdAllocator {

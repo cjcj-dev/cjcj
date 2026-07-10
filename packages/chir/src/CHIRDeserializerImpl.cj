@@ -117,6 +117,85 @@ class CHIRDeserializerImpl {
         this.compilePlatform = compilePlatform
     }
 
+    public func Run(pkg: PackageFormat_CHIRPackage): Unit {
+        pool = pkg
+        if (builder.context.GetCurPackage().isNone()) {
+            let currentPackage = builder.CreatePackage(pkg.GetName().getOrThrow().str())
+            currentPackage.SetPackageAccessLevel(CHIRAccessLevelFromIndex(Int64(pkg.GetPkgAccessLevel())))
+        }
+        let defs = pkg.GetDefs().getOrThrow()
+        var id = 1u32
+        while (id <= defs.size()) {
+            GetCustomTypeDef<CustomTypeDef>(id)
+            id++
+        }
+        let values = pkg.GetValues().getOrThrow()
+        let valueKinds = pkg.GetValues_type().getOrThrow()
+        id = 1u32
+        while (id <= values.size()) {
+            let kind = (valueKinds.Get(id - 1u32) as UInt8).getOrThrow()
+            if (kind == CHIRFB_VALUE_ELEM_FUNCTION || kind == CHIRFB_VALUE_ELEM_GLOBAL_VAR) {
+                GetValue<Value>(id)
+            }
+            id++
+        }
+        let defKinds = pkg.GetDefs_type().getOrThrow()
+        id = 1u32
+        while (id <= defs.size()) {
+            let kind = (defKinds.Get(id - 1u32) as UInt8).getOrThrow()
+            let position = (defs.Get(id - 1u32) as Int64).getOrThrow()
+            if (kind == CHIRFB_CUSTOM_TYPE_DEF_ELEM_ENUM_DEF) {
+                Config(PackageFormat_EnumDef(defs.data, position), GetCustomTypeDef<EnumDef>(id).getOrThrow())
+            } else if (kind == CHIRFB_CUSTOM_TYPE_DEF_ELEM_STRUCT_DEF) {
+                Config(PackageFormat_StructDef(defs.data, position), GetCustomTypeDef<StructDef>(id).getOrThrow())
+            } else if (kind == CHIRFB_CUSTOM_TYPE_DEF_ELEM_CLASS_DEF) {
+                Config(PackageFormat_ClassDef(defs.data, position), GetCustomTypeDef<ClassDef>(id).getOrThrow())
+            } else if (kind == CHIRFB_CUSTOM_TYPE_DEF_ELEM_EXTEND_DEF) {
+                Config(PackageFormat_ExtendDef(defs.data, position), GetCustomTypeDef<ExtendDef>(id).getOrThrow())
+            }
+            id++
+        }
+        id = 1u32
+        while (id <= values.size()) {
+            let kind = (valueKinds.Get(id - 1u32) as UInt8).getOrThrow()
+            let position = (values.Get(id - 1u32) as Int64).getOrThrow()
+            if (kind == CHIRFB_VALUE_ELEM_GLOBAL_VAR) {
+                Config(PackageFormat_GlobalVar(values.data, position), GetValue<GlobalVar>(id).getOrThrow())
+            } else if (kind == CHIRFB_VALUE_ELEM_FUNCTION) {
+                Config(PackageFormat_Function(values.data, position), GetValue<Function>(id).getOrThrow())
+            } else if (kind == CHIRFB_VALUE_ELEM_BLOCK) {
+                Config(PackageFormat_Block(values.data, position), GetValue<Block>(id).getOrThrow())
+            } else if (kind == CHIRFB_VALUE_ELEM_BLOCK_GROUP) {
+                Config(PackageFormat_BlockGroup(values.data, position), GetValue<BlockGroup>(id).getOrThrow())
+            }
+            id++
+        }
+        id = 1u32
+        while (id <= values.size()) {
+            let kind = (valueKinds.Get(id - 1u32) as UInt8).getOrThrow()
+            if (kind == CHIRFB_VALUE_ELEM_LOCAL_VAR) {
+                GetValue<Value>(id)
+            } else if (kind == CHIRFB_VALUE_ELEM_FUNCTION) {
+                let position = (values.Get(id - 1u32) as Int64).getOrThrow()
+                let rawFunction = PackageFormat_Function(values.data, position)
+                let function = GetValue<Function>(id).getOrThrow()
+                function.SetLocalId(rawFunction.GetLocalId())
+                function.SetBlockId(rawFunction.GetBlockId())
+                function.SetBlockGroupId(rawFunction.GetBlockGroupId())
+            }
+            id++
+        }
+        var genericIndex: Int64 = 0
+        while (genericIndex < genericTypeConfig.size) {
+            let (genericType, rawGenericType) = genericTypeConfig[genericIndex]
+            genericType.SetUpperBounds(GetType<Type>(rawGenericType.GetUpperBounds()))
+            genericIndex++
+        }
+        let currentPackage = builder.context.GetCurPackage().getOrThrow()
+        currentPackage.SetPackageInitFunc(GetValue<Function>(pkg.GetPackageInitFunc()).getOrThrow())
+        currentPackage.SetPackageLiteralInitFunc(GetValue<Function>(pkg.GetPackageLiteralInitFunc()).getOrThrow())
+    }
+
     private func GetMangleNameFromIdentifier(identifier: String): String {
         if (identifier.startsWith(GLOBAL_VALUE_PREFIX)) {
             return identifier[GLOBAL_VALUE_PREFIX.size..]
@@ -1559,6 +1638,56 @@ class CHIRDeserializerImpl {
         return AnnoInfo(mangledName, instances)
     }
 
+    private func Create(obj: PackageFormat_MemberVarInfo): MemberVarInfo {
+        let attributeInfo = AttributeInfo(obj.GetAttributes())
+        if (compilePlatform) {
+            attributeInfo.Enable(Attribute.DESERIALIZED)
+        }
+        let result = MemberVarInfo(obj.GetName().getOrThrow().str(), GetType<Type>(obj.GetType()).getOrThrow(),
+            rawMangledName: obj.GetRawMangledName().getOrThrow().str())
+        result.attributeInfo.CopyFrom(attributeInfo)
+        result.loc = Create(obj.GetLoc().getOrThrow())
+        result.annoInfo = Create(obj.GetAnnoInfo().getOrThrow())
+        result.initializerFunc = GetValue<Function>(obj.GetInitializerFunc())
+        result.outerDef = GetCustomTypeDef<CustomTypeDef>(obj.GetOuterDef())
+        return result
+    }
+
+    private func Create(obj: PackageFormat_EnumCtorInfo): EnumCtorInfo {
+        return EnumCtorInfo(obj.GetSrcCodeName().getOrThrow().str(), ArrayList<Type>(),
+            mangledName: obj.GetMangledName().getOrThrow().str(), funcType: GetType<FuncType>(obj.GetFuncType()))
+    }
+
+    private func Create(obj: PackageFormat_VirtualMethodInfo): VirtualMethodInfo {
+        let condition = FuncSigInfo(GetType<FuncType>(obj.GetSigType()).getOrThrow(),
+            funcName: obj.GetFuncName().getOrThrow().str(),
+            genericTypeParams: GetType<GenericType>(obj.GetMethodGenericTypeParams()))
+        return VirtualMethodInfo(condition, GetValue<Function>(obj.GetInstance()), AttributeInfo(obj.GetAttributes()),
+            GetType<FuncType>(obj.GetOriginalType()).getOrThrow(), GetType<Type>(obj.GetParentType()).getOrThrow(),
+            GetType<Type>(obj.GetReturnType()).getOrThrow())
+    }
+
+    private func Create(obj: Vector<Offset<PackageFormat_VTableInType>>): VTableInDef {
+        let result = VTableInDef()
+        var index = 0u32
+        while (index < obj.size()) {
+            let position = (obj.Get(index) as Int64).getOrThrow()
+            let item = PackageFormat_VTableInType(obj.data, position)
+            let methods = ArrayList<VirtualMethodInfo>()
+            if (let Some(rawMethods) <- item.GetVirtualMethods()) {
+                var methodIndex = 0u32
+                while (methodIndex < rawMethods.size()) {
+                    let methodPosition = (rawMethods.Get(methodIndex) as Int64).getOrThrow()
+                    methods.add(Create(PackageFormat_VirtualMethodInfo(rawMethods.data, methodPosition)))
+                    methodIndex++
+                }
+            }
+            result.AddNewItemToTypeVTable(GetType<ClassType>(item.GetSrcParentType()).getOrThrow(), methods)
+            index++
+        }
+        return result
+    }
+
     private func ConfigBase(buffer: PackageFormat_Base, obj: Base): Unit {
         let annos = buffer.GetAnnos().getOrThrow()
         let annoTypes = buffer.GetAnnos_type().getOrThrow()
@@ -2776,6 +2905,126 @@ class CHIRDeserializerImpl {
         if (let Some(returnValue) <- GetValue<LocalVar>(buffer.GetRetVal())) {
             obj.SetReturnValue(returnValue)
         }
+    }
+
+    private func ConfigCustomTypeDef(buffer: PackageFormat_CustomTypeDef, obj: CustomTypeDef): Unit {
+        ConfigBase(buffer.GetBase().getOrThrow(), obj)
+        obj.SetSrcCodeIdentifier(buffer.GetSrcCodeIdentifier().getOrThrow().str())
+        obj.SetType(GetType<CustomType>(buffer.GetType()).getOrThrow())
+        if (buffer.GetGenericDecl() != 0u32) {
+            obj.SetGenericDecl(GetCustomTypeDef<CustomTypeDef>(buffer.GetGenericDecl()).getOrThrow())
+        }
+        for (method in GetValue<Function>(buffer.GetMethods())) { obj.AddMethod(method) }
+        for (interfaceType in GetType<ClassType>(buffer.GetImplementedInterfaces())) {
+            obj.AddImplementedInterfaceTy(interfaceType)
+        }
+        if (let Some(rawVars) <- buffer.GetInstanceMemberVars()) {
+            var index = 0u32
+            while (index < rawVars.size()) {
+                let position = (rawVars.Get(index) as Int64).getOrThrow()
+                obj.AddInstanceVar(Create(PackageFormat_MemberVarInfo(rawVars.data, position)))
+                index++
+            }
+        }
+        for (variable in GetValue<GlobalVar>(buffer.GetStaticMemberVars())) { obj.AddStaticMemberVar(variable) }
+        if (compilePlatform) { obj.EnableAttr(Attribute.DESERIALIZED) }
+        obj.SetAnnoInfo(Create(buffer.GetAnnoInfo().getOrThrow()))
+        obj.SetVTable(Create(buffer.GetVtable().getOrThrow()))
+        obj.SetVarInitializationFunc(GetValue<Function>(buffer.GetInstanceVarInitFunc()))
+    }
+
+    private func Config(buffer: PackageFormat_Function, obj: Function): Unit {
+        if (obj.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) { return }
+        ConfigBase(buffer.GetBase().getOrThrow().GetBase().getOrThrow().GetBase().getOrThrow(), obj)
+        if (buffer.GetParamDftValHostFunc() != 0u32) {
+            obj.SetParamDftValHostFunc(GetValue<Function>(buffer.GetParamDftValHostFunc()).getOrThrow())
+        }
+        if (buffer.GetGenericDecl() != 0u32) {
+            obj.SetGenericDecl(GetValue<Function>(buffer.GetGenericDecl()).getOrThrow())
+        }
+        if (let Some(rawAnno) <- buffer.GetBase().getOrThrow().GetAnnoInfo()) { obj.SetAnnoInfo(Create(rawAnno)) }
+        let params = GetValue<Parameter>(buffer.GetParams())
+        obj.RemoveParams()
+        for (param in params) { obj.AddParam(param) }
+        if (buffer.GetBody() != 0u32) {
+            if (let Some(body) <- GetValue<BlockGroup>(buffer.GetBody())) {
+                obj.InitBody(body)
+            } else {
+                CJC_ASSERT(obj.TestAttr(Attribute.COMMON))
+            }
+            obj.SetFuncKind(CHIRFuncKindFromIndex(Int64(buffer.GetFuncKind())))
+            if (let Some(retVal) <- GetValue<LocalVar>(buffer.GetRetVal())) { obj.SetReturnValue(retVal) }
+            obj.SetRawMangledName(buffer.GetBase().getOrThrow().GetRawMangledName().getOrThrow().str())
+            if (compilePlatform) { obj.EnableAttr(Attribute.DESERIALIZED) }
+            obj.SetPropLocation(Create(buffer.GetPropLoc().getOrThrow()))
+            if (let Some(rawInfo) <- buffer.GetOriginalLambdaInfo()) {
+                obj.SetOriginalLambdaInfo(FuncSigInfo(GetType<FuncType>(rawInfo.GetFuncType()).getOrThrow(),
+                    funcName: if (let Some(name) <- rawInfo.GetFuncName()) { name.str() } else { "" },
+                    genericTypeParams: GetType<GenericType>(rawInfo.GetGenericTypeParams())))
+            }
+            if (let Some(retVal) <- GetValue<LocalVar>(buffer.GetRetVal())) { obj.SetReturnValue(retVal) }
+        }
+    }
+
+    private func Config(buffer: PackageFormat_BlockGroup, obj: BlockGroup): Unit {
+        ConfigValue(buffer.GetBase().getOrThrow(), obj)
+        GetValue<Block>(buffer.GetBlocks())
+        obj.SetEntryBlock(GetValue<Block>(buffer.GetEntryBlock()))
+    }
+
+    private func Config(buffer: PackageFormat_Block, obj: Block): Unit {
+        ConfigValue(buffer.GetBase().getOrThrow(), obj)
+        if (buffer.GetIsLandingPadBlock()) { obj.SetExceptions(GetType<ClassType>(buffer.GetExceptionCatchList())) }
+        obj.AppendExpressions(GetExpression<Expression>(buffer.GetExprs()))
+        obj.ClearPredecessorsOnly()
+        for (predecessor in GetValue<Block>(buffer.GetPredecessors())) { obj.AppendPredecessorOnly(predecessor) }
+    }
+
+    private func Config(buffer: PackageFormat_GlobalVar, obj: GlobalVar): Unit {
+        if (obj.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) { return }
+        ConfigBase(buffer.GetBase().getOrThrow().GetBase().getOrThrow().GetBase().getOrThrow(), obj)
+        if (let Some(rawAnno) <- buffer.GetBase().getOrThrow().GetAnnoInfo()) { obj.SetAnnoInfo(Create(rawAnno)) }
+        if (buffer.GetInitializer() != 0u32) {
+            if (let Some(initializer) <- GetValue<Value>(buffer.GetInitializer())) {
+                if (let Some(literal) <- (initializer as LiteralValue)) {
+                    obj.SetInitializer(literal)
+                } else if (let Some(initFunc) <- (initializer as Function)) {
+                    obj.SetInitFunc(initFunc)
+                }
+            }
+        }
+    }
+
+    private func Config(buffer: PackageFormat_EnumDef, obj: EnumDef): Unit {
+        if (obj.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) { return }
+        ConfigCustomTypeDef(buffer.GetBase().getOrThrow(), obj)
+        if (let Some(rawCtors) <- buffer.GetCtors()) {
+            var index = 0u32
+            while (index < rawCtors.size()) {
+                let position = (rawCtors.Get(index) as Int64).getOrThrow()
+                obj.AddCtor(Create(PackageFormat_EnumCtorInfo(rawCtors.data, position)))
+                index++
+            }
+        }
+    }
+
+    private func Config(buffer: PackageFormat_StructDef, obj: StructDef): Unit {
+        if (obj.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) { return }
+        ConfigCustomTypeDef(buffer.GetBase().getOrThrow(), obj)
+        obj.SetCStruct(buffer.GetIsCStruct())
+    }
+
+    private func Config(buffer: PackageFormat_ClassDef, obj: ClassDef): Unit {
+        if (obj.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) { return }
+        ConfigCustomTypeDef(buffer.GetBase().getOrThrow(), obj)
+        if (let Some(targets) <- buffer.GetAnnotationTargets()) { obj.SetAnnotationTargets(GetValue<GlobalVar>(targets)) }
+        if (let Some(superClass) <- GetType<ClassType>(buffer.GetSuperClass())) { obj.SetSuperClassTy(superClass) }
+    }
+
+    private func Config(buffer: PackageFormat_ExtendDef, obj: ExtendDef): Unit {
+        if (obj.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) { return }
+        ConfigCustomTypeDef(buffer.GetBase().getOrThrow(), obj)
+        if (let Some(extendedType) <- GetType<Type>(buffer.GetExtendedType())) { obj.SetExtendedType(extendedType) }
     }
 
     private func GetExpression<T>(id: UInt32): Option<T> {
