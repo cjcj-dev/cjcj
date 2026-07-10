@@ -2727,8 +2727,8 @@ private func CheckAndGetMappingForTypeDecl(typeManager: TypeManager, diag: Optio
     if (!valid) {
         if (let Some(diagValue) <- diag) {
             if (let Some(typeDeclTy) <- typeDecl.GetTy()) {
-                let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_generic_type_inconsistent,
-                    MakeRange(baseExpr.begin, baseExpr.end), arguments: [typeDeclTy.String()])
+                let builder = DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_generic_type_inconsistent,
+                    baseExpr, MakeRange(baseExpr.begin, baseExpr.end), arguments: [typeDeclTy.String()])
                 builder.AddNote(diagMessage)
                 builder.Emit()
             }
@@ -4774,11 +4774,11 @@ private func CheckUseTrailingClosureWithFunctionType(diag: Option<BasicDiagnosti
         "non-function type"
     }
     if (let Some(diagValue) <- diag) {
-        let builder = diagValue.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(diagValue,
             BasicDiagKindRefactor.sema_trailing_lambda_cannot_used_for_non_function,
-            MakeRange(arg.begin, arg.end), arguments: [message])
+            arg, arguments: [message])
         builder.AddMainHintArguments(originalTy.String())
-        builder.AddNote(MakeRangeForDeclIdentifier(candidate), "found candidate")
+        AddNote(builder, candidate, MakeRangeForDeclIdentifier(candidate), "found candidate")
     }
     return false
 }
