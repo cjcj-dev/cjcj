@@ -20,3 +20,4 @@
   "cangjie_compiler::modules" = { path = "../modules" }
   "cangjie_compiler::option" = { path = "../option" }
   "cangjie_compiler::parse" = { path = "../parse" }
+  "cangjie_compiler::utils" = { path = "../utils" }

@@ -1084,7 +1084,7 @@ public class NodeWriter {
     }
 
     @OverflowWrapping
-    public func ExportNode(): ArrayList<UInt8> {
+    public func ExportNode(): CPointer<UInt8> {
         bufferData.clear()
         var fbNode: FlatBufferOffset = 0u32
         var isSupportedNode = true
@@ -1123,7 +1123,19 @@ public class NodeWriter {
                 bufferData.add(byte)
             }
         }
-        return bufferData
+        let rawPtr = unsafe { LibC.malloc<UInt8>(count: bufferData.size) }
+        if (rawPtr.isNull()) {
+            Errorln("Memory Allocation Failed.")
+            return rawPtr
+        }
+        var idx: Int64 = 0
+        unsafe {
+            while (idx < bufferData.size) {
+                rawPtr.write(idx, bufferData[idx])
+                idx++
+            }
+        }
+        return rawPtr
     }
 
     public func SerializeExpr(expr: Option<Expr>): FlatBufferOffset {
