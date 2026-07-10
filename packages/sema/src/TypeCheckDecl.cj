@@ -75,33 +75,6 @@ private func TypeCheckDeclIsBuiltinUnaryOperand(op: TokenKind, ty: Ty): Bool {
     return false
 }
 
-private func TypeCheckDeclIsBuiltinBinaryOperandPair(op: TokenKind, leftTy: Ty, rightTy: Ty): Bool {
-    if (op == TokenKind.EXP) {
-        return (leftTy.kind == TypeKind.TYPE_INT64 && rightTy.kind == TypeKind.TYPE_UINT64) ||
-            (leftTy.kind == TypeKind.TYPE_FLOAT64 &&
-                (rightTy.kind == TypeKind.TYPE_FLOAT64 || rightTy.kind == TypeKind.TYPE_INT64)) ||
-            (leftTy.kind == TypeKind.TYPE_IDEAL_INT && rightTy.kind == TypeKind.TYPE_IDEAL_INT) ||
-            (leftTy.kind == TypeKind.TYPE_IDEAL_FLOAT && rightTy.kind == TypeKind.TYPE_IDEAL_FLOAT)
-    }
-    if (op == TokenKind.LSHIFT || op == TokenKind.RSHIFT) {
-        return leftTy.IsIntegerSubType() && rightTy.IsIntegerSubType()
-    }
-    if (op == TokenKind.MOD || op == TokenKind.BITAND || op == TokenKind.BITOR || op == TokenKind.BITXOR) {
-        return SameTy(leftTy, rightTy) && (leftTy.IsIntegerSubType() || leftTy.kind == TypeKind.TYPE_IDEAL_INT)
-    }
-    if (op == TokenKind.ADD || op == TokenKind.SUB || op == TokenKind.MUL || op == TokenKind.DIV) {
-        return SameTy(leftTy, rightTy) && leftTy.IsNumeric()
-    }
-    if (op == TokenKind.EQUAL || op == TokenKind.NOTEQ) {
-        return SameTy(leftTy, rightTy) && (leftTy.IsNumeric() || leftTy.IsBoolean() || leftTy.IsUnit() ||
-            leftTy.IsRune())
-    }
-    if (op == TokenKind.LT || op == TokenKind.LE || op == TokenKind.GT || op == TokenKind.GE) {
-        return SameTy(leftTy, rightTy) && (leftTy.IsNumeric() || leftTy.IsRune())
-    }
-    return false
-}
-
 private func TypeCheckDeclAddTypeArgsOfType(typeNodeOpt: Option<Type>, out: ArrayList<Type>): Unit {
     if (let None <- typeNodeOpt) {
         return
@@ -400,7 +373,7 @@ public func TypeCheckDeclCheckOperatorOverloadFunc(diag: BasicDiagnosticEngine, 
                 if (fd.fullPackageName != "std.core") {
                     if (let Some(outer) <- fd.outerDecl) {
                         if (let Some(baseTy) <- outer.GetTy()) {
-                            if (TypeCheckDeclIsBuiltinBinaryOperandPair(fd.op, baseTy, funcTy.paramTys[0])) {
+                            if (IsBuiltinBinaryExpr(fd.op, baseTy, funcTy.paramTys[0])) {
                                 TypeCheckDeclEmitDiag(diag, fd,
                                     BasicDiagKind.sema_operator_overload_built_in_binary_operator,
                                     args: [

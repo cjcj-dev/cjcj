@@ -2783,6 +2783,10 @@ public class TypeChecker {
                 let funcTy = SynthesizeFuncBody(ctx, body)
                 if (funcDecl.TestAttr(Attribute.MAIN_ENTRY)) {
                     CheckEntryFunc(funcDecl)
+                } else if (funcDecl.TestAttr(Attribute.OPERATOR)) {
+                    if (let Some(diagValue) <- impl.diag) {
+                        let _ = TypeCheckDeclCheckOperatorOverloadFunc(diagValue, funcDecl)
+                    }
                 }
                 return funcTy
             }
