@@ -269,7 +269,7 @@ public interface ValueTypeConverter <: ValueTypeFunctor {
     }
 }
 
-public class PrivateTypeConverter <: ExprTypeConverter & ValueTypeConverter {
+public open class PrivateTypeConverter <: ExprTypeConverter & ValueTypeConverter {
     public init(converter: ConvertTypeFunc, builder: CHIRBuilder) {
         super(converter, builder)
     }
