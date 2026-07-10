@@ -2775,6 +2775,10 @@ public class TypeChecker {
         }
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             if (let Some(body) <- funcDecl.funcBody) {
+                if (funcDecl.TestAttr(Attribute.IS_CHECK_VISITED)) {
+                    return funcDecl.GetTy() ?? TypeManager.GetInvalidTy()
+                }
+                funcDecl.EnableAttr(Attribute.IS_CHECK_VISITED)
                 SetFunctionBodyOwner(funcDecl, body)
                 if (!Ty.IsTyCorrect(funcDecl.GetTy())) {
                     let _ = PrepareFuncBodySignature(ctx, body)
