@@ -230,6 +230,7 @@ class CHIRSerializerImpl {
         })
         fields.add(if (let Some(funcTy) <- fn.GetOverrideSrcFuncType()) { CHIRSerializeType(funcTy) } else { "" })
         fields.add(LinkTypeInfo(fn.GetLinkTypeInfo()).ToString())
+        fields.add(CHIRBoolToWire(fn.IsCFFIWrapper()))
         lines.add(CHIRWireJoinFields(fields))
     }
 

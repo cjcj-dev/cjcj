@@ -265,6 +265,7 @@ class CHIRDeserializerImpl {
                 CHIRApplyBaseInfo(fn, CHIRFieldAt(fields, 17), CHIRFieldAt(fields, 18),
                     annotationText: CHIRFieldAt(fields, 19))
                 fn.SetPropLocation(CHIRParseDebugLocation(CHIRFieldAt(fields, 15)))
+                fn.SetCFFIWrapper(CHIRWireToBool(CHIRFieldAt(fields, 23)))
                 for (feature in CHIRWireSplitList(CHIRFieldAt(fields, 12))) {
                     if (!feature.isEmpty()) {
                         fn.AddFeature(feature)

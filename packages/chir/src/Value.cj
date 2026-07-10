@@ -1043,6 +1043,7 @@ public class Function <: GlobalValue {
     private var localId: UInt64 = 0u64
     private var propLocation: DebugLocation = DebugLocation()
     private var originalLambdaInfo: Option<FuncSigInfo> = None
+    private var isCFFIWrapper: Bool = false
 
     public init(funcType: FuncType, identifier: String, srcCodeIdentifier: String, rawMangledName: String,
         packageName: String, genericTypeParams!: ArrayList<GenericType> = ArrayList<GenericType>()) {
@@ -1139,9 +1140,9 @@ public class Function <: GlobalValue {
         if (fastNative) { EnableAttr(Attribute.FAST_NATIVE) } else { DisableAttr(Attribute.FAST_NATIVE) }
     }
 
-    public func IsCFFIWrapper(): Bool { return TestAttr(Attribute.CFFI_WRAPPER) }
+    public func IsCFFIWrapper(): Bool { return isCFFIWrapper }
     public func SetCFFIWrapper(isWrapper: Bool): Unit {
-        if (isWrapper) { EnableAttr(Attribute.CFFI_WRAPPER) } else { DisableAttr(Attribute.CFFI_WRAPPER) }
+        isCFFIWrapper = isWrapper
     }
 
     public func GetParamDftValHostFunc(): Option<Function> { return paramDftValHostFunc }
