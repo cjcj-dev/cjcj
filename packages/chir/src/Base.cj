@@ -15,7 +15,6 @@ public open class Base {
     public let nodeId: Int64
     private let annotationMap: AnnotationMap = AnnotationMap()
     private var loc: DebugLocation = DebugLocation()
-    private var locForWarning: DebugLocation = DebugLocation()
     private let attributes: AttributeInfo = AttributeInfo()
 
     public init() {
@@ -39,41 +38,27 @@ public open class Base {
     }
 
     public func SetGeneratedFromForIn(value: Bool): Unit {
-        let label = GeneratedFromForIn(value)
-        if (GeneratedFromForIn.Extract(label)) {
-            annotationMap.Set("GeneratedFromForIn", "true")
-        }
+        annotationMap.Set<GeneratedFromForIn, Bool>(value)
     }
 
     public func SetSkipCheck(kind: SkipKind): Unit {
-        let label = SkipCheck(kind)
-        if (SkipCheck.Extract(label) == SkipKind.NO_SKIP) {
-            annotationMap.Remove("SkipCheck")
-        } else {
-            annotationMap.Set("SkipCheck", SkipKindIndex(SkipCheck.Extract(label)).toString())
-        }
+        annotationMap.Set<SkipCheck, SkipKind>(kind)
     }
 
     public func SetNeverOverflowInfo(value: Bool): Unit {
-        let label = NeverOverflowInfo(value)
-        annotationMap.Set("NeverOverflowInfo", if (NeverOverflowInfo.Extract(label)) { "true" } else { "false" })
+        annotationMap.Set<NeverOverflowInfo, Bool>(value)
     }
 
     public func SetNeedCheckCast(value: Bool): Unit {
-        annotationMap.Set("NeedCheckCast", if (value) { "true" } else { "false" })
+        annotationMap.Set<NeedCheckCast, Bool>(value)
     }
 
     public func SetNeedCheckArrayBound(value: Bool): Unit {
-        annotationMap.Set("NeedCheckArrayBound", if (value) { "true" } else { "false" })
+        annotationMap.Set<NeedCheckArrayBound, Bool>(value)
     }
 
     public func SetEnumCaseIndex(value: Option<Int64>): Unit {
-        let label = EnumCaseIndex(value)
-        if (let Some(index) <- EnumCaseIndex.Extract(label)) {
-            annotationMap.Set("EnumCaseIndex", index.toString())
-        } else {
-            annotationMap.Remove("EnumCaseIndex")
-        }
+        annotationMap.Set<EnumCaseIndex, Option<Int64>>(value)
     }
 
     public func RemoveAnnotation(key: String): Unit {
@@ -81,11 +66,11 @@ public open class Base {
     }
 
     public func RemoveGeneratedFromForIn(): Unit {
-        annotationMap.Remove("GeneratedFromForIn")
+        annotationMap.Remove<GeneratedFromForIn>()
     }
 
     public func RemoveSkipCheck(): Unit {
-        annotationMap.Remove("SkipCheck")
+        annotationMap.Remove<SkipCheck>()
     }
 
     public func GetAnnotation(key: String): Option<String> {
@@ -93,50 +78,27 @@ public open class Base {
     }
 
     public func GetGeneratedFromForIn(): Bool {
-        if (annotationMap.Get("GeneratedFromForIn").isSome()) {
-            return GeneratedFromForIn.Extract(GeneratedFromForIn(true))
-        }
-        return GeneratedFromForIn.Extract(GeneratedFromForIn())
+        return annotationMap.Get<GeneratedFromForIn, Bool>()
     }
 
     public func GetSkipCheck(): SkipKind {
-        if (let Some(value) <- annotationMap.Get("SkipCheck")) {
-            return match (value) {
-                case "1" => SkipKind.SKIP_DCE_WARNING
-                case "2" => SkipKind.SKIP_FORIN_EXIT
-                case "3" => SkipKind.SKIP_VIC
-                case _ => SkipKind.NO_SKIP
-            }
-        }
-        return SkipKind.NO_SKIP
+        return annotationMap.Get<SkipCheck, SkipKind>()
     }
 
     public func GetNeverOverflowInfo(): Bool {
-        if (let Some(value) <- annotationMap.Get("NeverOverflowInfo")) {
-            return NeverOverflowInfo.Extract(NeverOverflowInfo(value == "true"))
-        }
-        return NeverOverflowInfo.Extract(NeverOverflowInfo())
+        return annotationMap.Get<NeverOverflowInfo, Bool>()
     }
 
     public func GetNeedCheckCast(): Bool {
-        if (let Some(value) <- annotationMap.Get("NeedCheckCast")) {
-            return value == "true"
-        }
-        return true
+        return annotationMap.Get<NeedCheckCast, Bool>()
     }
 
     public func GetNeedCheckArrayBound(): Bool {
-        if (let Some(value) <- annotationMap.Get("NeedCheckArrayBound")) {
-            return value == "true" || value == "1"
-        }
-        return false
+        return annotationMap.Get<NeedCheckArrayBound, Bool>()
     }
 
     public func GetEnumCaseIndex(): Option<Int64> {
-        if (let Some(raw) <- annotationMap.Get("EnumCaseIndex")) {
-            return Int64.parse(raw)
-        }
-        return EnumCaseIndex.Extract(EnumCaseIndex())
+        return annotationMap.Get<EnumCaseIndex, Option<Int64>>()
     }
 
     public func GetAnno(): AnnotationMap {
@@ -152,11 +114,11 @@ public open class Base {
     }
 
     public func SetDebugLocationInfoForWarning(newLoc: DebugLocation): Unit {
-        locForWarning = newLoc
+        annotationMap.Set<DebugLocationInfoForWarning, DebugLocation>(newLoc)
     }
 
     public func GetDebugLocationInfoForWarning(): DebugLocation {
-        return locForWarning
+        return annotationMap.Get<DebugLocationInfoForWarning, DebugLocation>()
     }
 
     public func GetAttributeInfo(): AttributeInfo {
@@ -182,7 +144,6 @@ public open class Base {
     public func CopyBaseInfoFrom(other: Base): Unit {
         annotationMap.CopyFrom(other.GetAnno())
         loc = other.GetDebugLocation()
-        locForWarning = other.GetDebugLocationInfoForWarning()
     }
 
     public func BaseCommentToString(): String {

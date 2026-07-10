@@ -2,6 +2,7 @@ package cjcj::chir
 
 import std.collection.*
 import std.convert.*
+import cjcj::basic.Linkage as BasicLinkage
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 
 private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
@@ -1556,6 +1557,42 @@ class CHIRDeserializerImpl {
             }
         }
         return AnnoInfo(mangledName, instances)
+    }
+
+    private func ConfigBase(buffer: PackageFormat_Base, obj: Base): Unit {
+        let annos = buffer.GetAnnos().getOrThrow()
+        let annoTypes = buffer.GetAnnos_type().getOrThrow()
+        var index = 0u32
+        while (index < annos.size()) {
+            let position = (annos.Get(index) as Int64).getOrThrow()
+            let annoType = (annoTypes.Get(index) as UInt8).getOrThrow()
+            match (annoType) {
+                case 1u8 =>
+                    let anno = PackageFormat_NeedCheckArrayBound(annos.data, position)
+                    obj.Set<NeedCheckArrayBound, Bool>(anno.GetNeed())
+                case 2u8 =>
+                    let anno = PackageFormat_NeedCheckCast(annos.data, position)
+                    obj.Set<NeedCheckCast, Bool>(anno.GetNeed())
+                case 3u8 =>
+                    let anno = PackageFormat_DebugLocation(annos.data, position)
+                    obj.Set<DebugLocationInfoForWarning, DebugLocation>(Create(anno))
+                case 7u8 =>
+                    let anno = PackageFormat_LinkTypeInfo(annos.data, position)
+                    let linkage = match (anno.GetLinkage()) {
+                        case 0 => BasicLinkage.WEAK_ODR
+                        case 1 => BasicLinkage.EXTERNAL
+                        case 2 => BasicLinkage.INTERNAL
+                        case 3 => BasicLinkage.LINKONCE_ODR
+                        case 4 => BasicLinkage.EXTERNAL_WEAK
+                        case _ =>
+                            CJC_ABORT()
+                            BasicLinkage.EXTERNAL
+                    }
+                    obj.Set<LinkTypeInfo, BasicLinkage>(linkage)
+                case _ => ()
+            }
+            index++
+        }
     }
 
     private func GetFeatures(obj: PackageFormat_GlobalValue): ArrayList<String> {

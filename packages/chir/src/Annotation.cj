@@ -17,6 +17,102 @@ public interface Annotation<T> <: AnnotationBase {
     static func Extract(annotation: Annotation<T>): T
 }
 
+public class NeedCheckArrayBound <: Annotation<Bool> {
+    private let need: Bool
+
+    public init() {
+        need = true
+    }
+
+    public init(input: Bool) {
+        need = input
+    }
+
+    public static func Create(): Annotation<Bool> {
+        return NeedCheckArrayBound()
+    }
+
+    public static func Create(input: Bool): Annotation<Bool> {
+        return NeedCheckArrayBound(input)
+    }
+
+    public static func Extract(annotation: Annotation<Bool>): Bool {
+        return (annotation as NeedCheckArrayBound).getOrThrow().need
+    }
+
+    public func Clone(): AnnotationBase {
+        return NeedCheckArrayBound(need)
+    }
+
+    public func ToString(): String {
+        return "checkArrayBound: " + if (need) { "true" } else { "false" }
+    }
+}
+
+public class NeedCheckCast <: Annotation<Bool> {
+    private let need: Bool
+
+    public init() {
+        need = true
+    }
+
+    public init(input: Bool) {
+        need = input
+    }
+
+    public static func Create(): Annotation<Bool> {
+        return NeedCheckCast()
+    }
+
+    public static func Create(input: Bool): Annotation<Bool> {
+        return NeedCheckCast(input)
+    }
+
+    public static func Extract(annotation: Annotation<Bool>): Bool {
+        return (annotation as NeedCheckCast).getOrThrow().need
+    }
+
+    public func Clone(): AnnotationBase {
+        return NeedCheckCast(need)
+    }
+
+    public func ToString(): String {
+        return "checkTypeCast: " + if (need) { "true" } else { "false" }
+    }
+}
+
+public class DebugLocationInfoForWarning <: Annotation<DebugLocation> {
+    private let location: DebugLocation
+
+    public init() {
+        location = DebugLocation()
+    }
+
+    public init(input: DebugLocation) {
+        location = input
+    }
+
+    public static func Create(): Annotation<DebugLocation> {
+        return DebugLocationInfoForWarning()
+    }
+
+    public static func Create(input: DebugLocation): Annotation<DebugLocation> {
+        return DebugLocationInfoForWarning(input)
+    }
+
+    public static func Extract(annotation: Annotation<DebugLocation>): DebugLocation {
+        return (annotation as DebugLocationInfoForWarning).getOrThrow().location
+    }
+
+    public func Clone(): AnnotationBase {
+        return DebugLocationInfoForWarning(location)
+    }
+
+    public func ToString(): String {
+        return "warning " + location.ToString()
+    }
+}
+
 public class GeneratedFromForIn <: Annotation<Bool> {
     private let value: Bool
 
@@ -104,6 +200,44 @@ public class LinkTypeInfo <: Annotation<BasicLinkage> {
 
     public static func Extract(annotation: Annotation<BasicLinkage>): BasicLinkage {
         return Extract((annotation as LinkTypeInfo).getOrThrow())
+    }
+}
+
+public class WrappedRawMethod <: Annotation<Option<Function>> {
+    private let rawMethod: Option<Function>
+
+    public init() {
+        rawMethod = None
+    }
+
+    public init(input: Option<Function>) {
+        rawMethod = input
+    }
+
+    public static func Create(): Annotation<Option<Function>> {
+        return WrappedRawMethod()
+    }
+
+    public static func Create(input: Option<Function>): Annotation<Option<Function>> {
+        return WrappedRawMethod(input)
+    }
+
+    public static func Extract(annotation: Annotation<Option<Function>>): Option<Function> {
+        return (annotation as WrappedRawMethod).getOrThrow().rawMethod
+    }
+
+    public func Clone(): AnnotationBase {
+        return WrappedRawMethod(rawMethod)
+    }
+
+    public func ToString(): String {
+        if (let Some(method) <- rawMethod) {
+            if (method.GetBody().isNone()) {
+                return ""
+            }
+            return "wrapped raw method: " + method.GetIdentifier()
+        }
+        return ""
     }
 }
 
@@ -208,6 +342,70 @@ public class NeverOverflowInfo <: Annotation<Bool> {
     }
 }
 
+public class IsAutoEnvClass <: Annotation<Bool> {
+    private let isAutoEnv: Bool
+
+    public init() {
+        isAutoEnv = false
+    }
+
+    public init(input: Bool) {
+        isAutoEnv = input
+    }
+
+    public static func Create(): Annotation<Bool> {
+        return IsAutoEnvClass()
+    }
+
+    public static func Create(input: Bool): Annotation<Bool> {
+        return IsAutoEnvClass(input)
+    }
+
+    public static func Extract(annotation: Annotation<Bool>): Bool {
+        return (annotation as IsAutoEnvClass).getOrThrow().isAutoEnv
+    }
+
+    public func Clone(): AnnotationBase {
+        return IsAutoEnvClass(isAutoEnv)
+    }
+
+    public func ToString(): String {
+        return "IsAutoEnvClass: " + if (isAutoEnv) { "true" } else { "false" }
+    }
+}
+
+public class IsCapturedClassInCC <: Annotation<Bool> {
+    private let flag: Bool
+
+    public init() {
+        flag = false
+    }
+
+    public init(input: Bool) {
+        flag = input
+    }
+
+    public static func Create(): Annotation<Bool> {
+        return IsCapturedClassInCC()
+    }
+
+    public static func Create(input: Bool): Annotation<Bool> {
+        return IsCapturedClassInCC(input)
+    }
+
+    public static func Extract(annotation: Annotation<Bool>): Bool {
+        return (annotation as IsCapturedClassInCC).getOrThrow().flag
+    }
+
+    public func Clone(): AnnotationBase {
+        return IsCapturedClassInCC(flag)
+    }
+
+    public func ToString(): String {
+        return "IsCapturedClassInCC: " + if (flag) { "true" } else { "false" }
+    }
+}
+
 private func SkipKindFromAnnotationValue(value: String): SkipKind {
     return match (value) {
         case "1" => SkipKind.SKIP_DCE_WARNING
@@ -253,6 +451,76 @@ public class EnumCaseIndex <: Annotation<Option<Int64>> {
 
     public static func Extract(annotation: Annotation<Option<Int64>>): Option<Int64> {
         return Extract((annotation as EnumCaseIndex).getOrThrow())
+    }
+}
+
+public class VirMethodOffset <: Annotation<Option<Int64>> {
+    private let offset: Option<Int64>
+
+    public init() {
+        offset = None
+    }
+
+    public init(input: Option<Int64>) {
+        offset = input
+    }
+
+    public static func Create(): Annotation<Option<Int64>> {
+        return VirMethodOffset()
+    }
+
+    public static func Create(input: Option<Int64>): Annotation<Option<Int64>> {
+        return VirMethodOffset(input)
+    }
+
+    public static func Extract(annotation: Annotation<Option<Int64>>): Option<Int64> {
+        return (annotation as VirMethodOffset).getOrThrow().offset
+    }
+
+    public func Clone(): AnnotationBase {
+        return VirMethodOffset(offset)
+    }
+
+    public func ToString(): String {
+        if (let Some(value) <- offset) {
+            return "VirMethodOffset: " + value.toString()
+        }
+        return ""
+    }
+}
+
+public class OverrideSrcFuncType <: Annotation<Option<FuncType>> {
+    private let ty: Option<FuncType>
+
+    public init() {
+        ty = None
+    }
+
+    public init(input: Option<FuncType>) {
+        ty = input
+    }
+
+    public static func Create(): Annotation<Option<FuncType>> {
+        return OverrideSrcFuncType()
+    }
+
+    public static func Create(input: Option<FuncType>): Annotation<Option<FuncType>> {
+        return OverrideSrcFuncType(input)
+    }
+
+    public static func Extract(annotation: Annotation<Option<FuncType>>): Option<FuncType> {
+        return (annotation as OverrideSrcFuncType).getOrThrow().ty
+    }
+
+    public func Clone(): AnnotationBase {
+        return OverrideSrcFuncType(ty)
+    }
+
+    public func ToString(): String {
+        if (let Some(value) <- ty) {
+            return "OverrideSrcFuncType: " + value.ToString()
+        }
+        return ""
     }
 }
 

@@ -1032,8 +1032,6 @@ public class Function <: GlobalValue {
     private let params: ArrayList<Parameter> = ArrayList<Parameter>()
     private let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
     private var returnValue: Option<LocalVar> = None
-    private var wrappedRawMethod: Option<Function> = None
-    private var overrideSrcFuncType: Option<FuncType> = None
     private var genericDecl: Option<Function> = None
     private var paramDftValHostFunc: Option<Function> = None
     private var blockId: UInt64 = 0u64
@@ -1200,13 +1198,15 @@ public class Function <: GlobalValue {
         return None
     }
 
-    public func GetOverrideSrcFuncType(): Option<FuncType> { return overrideSrcFuncType }
-    public func SetOverrideSrcFuncType(funcTy: FuncType): Unit { overrideSrcFuncType = funcTy }
-    public func ClearOverrideSrcFuncType(): Unit { overrideSrcFuncType = None }
+    public func GetOverrideSrcFuncType(): Option<FuncType> { return Get<OverrideSrcFuncType, Option<FuncType>>() }
+    public func SetOverrideSrcFuncType(funcTy: FuncType): Unit {
+        Set<OverrideSrcFuncType, Option<FuncType>>(Some(funcTy))
+    }
+    public func ClearOverrideSrcFuncType(): Unit { Remove<OverrideSrcFuncType>() }
 
-    public func GetWrappedRawMethod(): Option<Function> { return wrappedRawMethod }
-    public func SetWrappedRawMethod(method: Function): Unit { wrappedRawMethod = method }
-    public func ClearWrappedRawMethod(): Unit { wrappedRawMethod = None }
+    public func GetWrappedRawMethod(): Option<Function> { return Get<WrappedRawMethod, Option<Function>>() }
+    public func SetWrappedRawMethod(method: Function): Unit { Set<WrappedRawMethod, Option<Function>>(Some(method)) }
+    public func ClearWrappedRawMethod(): Unit { Remove<WrappedRawMethod>() }
 
     public func GetBody(): Option<BlockGroup> { return body }
 
@@ -1410,12 +1410,12 @@ public class Function <: GlobalValue {
         var out = IndentToString(indent) + GetAttributeInfo().ToString() + "func " + GetIdentifier() +
             " [" + FuncKindName(funcKind) + "]: " + typeText
         let comments = ArrayList<String>()
-        if (let Some(rawMethod) <- wrappedRawMethod) {
+        if (let Some(rawMethod) <- GetWrappedRawMethod()) {
             if (rawMethod.GetBody().isSome()) {
                 comments.add("wrapped raw method: " + rawMethod.GetIdentifier())
             }
         }
-        if (let Some(funcTy) <- overrideSrcFuncType) {
+        if (let Some(funcTy) <- GetOverrideSrcFuncType()) {
             comments.add("OverrideSrcFuncType: " + funcTy.ToString())
         }
         if (!comments.isEmpty()) {
