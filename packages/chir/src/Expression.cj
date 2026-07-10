@@ -1,7 +1,7 @@
 package cangjie_compiler::chir
 
 import std.collection.*
-import cangjie_compiler::utils.{CJC_ASSERT, OverflowStrategy, StaticCast}
+import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, OverflowStrategy, StaticCast}
 import std.sync.AtomicInt64
 
 private let gLambdaClonedIdx = AtomicInt64(0)
@@ -2172,11 +2172,9 @@ public class Lambda <: Expression {
                     clonedParam.SetSrcCodeIdentifier(param.GetSrcCodeIdentifier())
                 }
             }
-            if (let Some(clonedRet) <- FindRetValueInBlockGroup(clonedBody)) {
-                cloned.SetReturnValue(clonedRet)
-            } else if (GetReturnValue().isSome()) {
-                throw IllegalArgumentException("lambda clone could not find cloned return value")
-            }
+            let (blockIdx, exprIdx) = GetAllocExprOfRetVal(GetBody().getOrThrow())
+            let clonedRet = clonedBody.GetBlockByIdx(blockIdx).GetExpressionByIdx(exprIdx).GetResult().getOrThrow()
+            cloned.SetReturnValue(clonedRet)
         }
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
@@ -2226,17 +2224,24 @@ private func MakeForInExecutionOrder(first: BlockGroup, second: BlockGroup, thir
     return groups
 }
 
-private func FindRetValueInBlockGroup(group: BlockGroup): Option<LocalVar> {
-    for (block in group.GetBlocks()) {
-        for (expr in block.GetExpressions()) {
-            if (let Some(result) <- expr.GetResult()) {
+private func GetAllocExprOfRetVal(body: BlockGroup): (Int64, Int64) {
+    let blocks = body.GetBlocks()
+    var blockIdx: Int64 = 0
+    while (blockIdx < blocks.size) {
+        let exprs = blocks[blockIdx].GetExpressions()
+        var exprIdx: Int64 = 0
+        while (exprIdx < exprs.size) {
+            if (let Some(result) <- exprs[exprIdx].GetResult()) {
                 if (result.IsRetValue()) {
-                    return result
+                    return (blockIdx, exprIdx)
                 }
             }
+            exprIdx++
         }
+        blockIdx++
     }
-    return None
+    CJC_ABORT()
+    return (0, 0)
 }
 
 private func GetOutDefDeclaredTypesForValue(innerDef: Value): ArrayList<Type> {
