@@ -1192,6 +1192,9 @@ class CHIRSerializerImpl {
             case TypeKind.TYPE_GENERIC =>
                 typeKind[index] = CHIRFB_TYPE_ELEM_GENERIC_TYPE
                 Serialize((obj as GenericType).getOrThrow())
+            case TypeKind.TYPE_INVALID =>
+                CJC_ABORT()
+                0u32
         }
     }
 
@@ -1368,6 +1371,125 @@ class CHIRSerializerImpl {
             case ExprKind.INVALID =>
                 CJC_ABORT()
                 0u32
+        }
+    }
+
+    private func Serialize(obj: VirtualMethodInfo): FlatBufferOffset {
+        let genericTypeParams = ArrayList<UInt32>()
+        for (param in obj.GetGenericTypeParams()) {
+            genericTypeParams.add(GetId((param as Type).getOrThrow()))
+        }
+        let instance = if (let Some(value) <- obj.GetVirtualMethod()) {
+            GetId((value as Value).getOrThrow())
+        } else {
+            0u32
+        }
+        return CreateVirtualMethodInfoDirect(builder, Some(obj.GetMethodName()),
+            GetId((obj.GetMethodSigType() as Type).getOrThrow()),
+            if (genericTypeParams.isEmpty()) { None } else { Some(genericTypeParams) }, instance,
+            obj.GetAttributeInfo().GetRawAttrs(), GetId((obj.GetOriginalFuncType() as Type).getOrThrow()),
+            GetId(obj.GetInstParentType()), GetId(obj.GetMethodInstRetType()))
+    }
+
+    private func SerializeVTable(obj: VTableInDef, bufferBuilder: FlatBufferBuilder): ArrayList<FlatBufferOffset> {
+        let _ = bufferBuilder
+        let result = ArrayList<FlatBufferOffset>()
+        for (element in obj.GetTypeVTables()) {
+            let parentType = if (let Some(value) <- element.GetSrcParentType()) {
+                GetId((value as Type).getOrThrow())
+            } else {
+                0u32
+            }
+            let virtualMethods = ArrayList<FlatBufferOffset>()
+            for (method in element.GetVirtualMethods()) {
+                virtualMethods.add(Serialize(method))
+            }
+            result.add(CreateVTableInTypeDirect(builder, parentType, Some(virtualMethods)))
+        }
+        return result
+    }
+
+    private func Serialize(obj: CustomTypeDef): FlatBufferOffset {
+        let base = Serialize((obj as Base).getOrThrow())
+        let methods = ArrayList<UInt32>()
+        for (method in obj.GetMethods()) { methods.add(GetId((method as Value).getOrThrow())) }
+        let implementedInterfaces = ArrayList<UInt32>()
+        for (interfaceType in obj.GetImplementedInterfaceTys()) {
+            implementedInterfaces.add(GetId((interfaceType as Type).getOrThrow()))
+        }
+        let instanceMemberVars = ArrayList<FlatBufferOffset>()
+        let memberVars = if (obj.GetCustomKind() == CustomDefKind.TYPE_CLASS) {
+            (obj as ClassDef).getOrThrow().GetDirectInstanceVars()
+        } else {
+            obj.GetAllInstanceVars()
+        }
+        for (memberVar in memberVars) { instanceMemberVars.add(Serialize(memberVar)) }
+        let staticMemberVars = ArrayList<UInt32>()
+        for (memberVar in obj.GetStaticMemberVars()) {
+            staticMemberVars.add(GetId((memberVar as Value).getOrThrow()))
+        }
+        let vtable = SerializeVTable(obj.GetDefVTable(), builder)
+        let varInitializationFunc = if (let Some(value) <- obj.GetVarInitializationFunc()) {
+            GetId((value as Value).getOrThrow())
+        } else {
+            0u32
+        }
+        return CreateCustomTypeDefDirect(builder, base, UInt8(CustomDefKindIndex(obj.GetCustomKind())), GetId(obj),
+            Some(obj.GetSrcCodeIdentifier()), Some(obj.GetIdentifier()), Some(obj.GetPackageName()), GetId(obj.GetType()),
+            GetId(obj.GetGenericDecl()), if (methods.isEmpty()) { None } else { Some(methods) },
+            if (implementedInterfaces.isEmpty()) { None } else { Some(implementedInterfaces) }, Some(instanceMemberVars),
+            if (staticMemberVars.isEmpty()) { None } else { Some(staticMemberVars) }, Serialize(obj.GetAnnoInfo()),
+            Some(vtable), varInitializationFunc)
+    }
+
+    private func Serialize(obj: EnumDef): FlatBufferOffset {
+        let ctors = ArrayList<FlatBufferOffset>()
+        for (ctor in obj.GetCtors()) { ctors.add(Serialize(ctor)) }
+        return CreateEnumDefDirect(builder, Serialize((obj as CustomTypeDef).getOrThrow()), Some(ctors), !obj.IsExhaustive())
+    }
+
+    private func Serialize(obj: StructDef): FlatBufferOffset {
+        return CreateStructDef(builder, Serialize((obj as CustomTypeDef).getOrThrow()), obj.IsCStruct())
+    }
+
+    private func Serialize(obj: ClassDef): FlatBufferOffset {
+        let annotationTargetIds = ArrayList<UInt32>()
+        if (obj.IsAnnotation()) {
+            for (target in obj.GetAnnotationTargets()) {
+                annotationTargetIds.add(GetId((target as Value).getOrThrow()))
+            }
+        }
+        let superClass = if (let Some(value) <- obj.GetSuperClassTy()) {
+            GetId((value as Type).getOrThrow())
+        } else {
+            0u32
+        }
+        return CreateClassDefDirect(builder, Serialize((obj as CustomTypeDef).getOrThrow()), obj.IsClass(),
+            obj.IsAnnotation(), if (obj.IsAnnotation()) { Some(annotationTargetIds) } else { None }, superClass)
+    }
+
+    private func Serialize(obj: ExtendDef): FlatBufferOffset {
+        let genericParams = ArrayList<UInt32>()
+        for (param in obj.GetGenericTypeParams()) { genericParams.add(GetId((param as Type).getOrThrow())) }
+        return CreateExtendDefDirect(builder, Serialize((obj as CustomTypeDef).getOrThrow()),
+            GetId(obj.GetExtendedType()), if (genericParams.isEmpty()) { None } else { Some(genericParams) })
+    }
+
+    private func Dispatch(obj: CustomTypeDef): FlatBufferOffset {
+        let index = Int64(GetId(obj) - 1u32)
+        return match (obj.GetCustomKind()) {
+            case CustomDefKind.TYPE_STRUCT =>
+                defKind[index] = CHIRFB_CUSTOM_TYPE_DEF_ELEM_STRUCT_DEF
+                Serialize((obj as StructDef).getOrThrow())
+            case CustomDefKind.TYPE_ENUM =>
+                defKind[index] = CHIRFB_CUSTOM_TYPE_DEF_ELEM_ENUM_DEF
+                Serialize((obj as EnumDef).getOrThrow())
+            case CustomDefKind.TYPE_CLASS =>
+                defKind[index] = CHIRFB_CUSTOM_TYPE_DEF_ELEM_CLASS_DEF
+                Serialize((obj as ClassDef).getOrThrow())
+            case CustomDefKind.TYPE_EXTEND =>
+                defKind[index] = CHIRFB_CUSTOM_TYPE_DEF_ELEM_EXTEND_DEF
+                Serialize((obj as ExtendDef).getOrThrow())
         }
     }
 
