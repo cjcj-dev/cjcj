@@ -2172,6 +2172,42 @@ public class IRBuilder2 <: Resource {
         return CallMappedLLVMIntrinsic(kind, parameters, overloadedTypes)
     }
 
+    public func CallIntrinsicForUninitialized(ty: Type): LLVMValueRef {
+        if (ty.IsGeneric()) {
+            let blocks = CreateAndInsertBasicBlocks(ArrayList<String>([
+                GenNameForBB("handle_ref"), GenNameForBB("handle_non_ref"), GenNameForBB("handle_nothing"),
+                GenNameForBB("get_uninitialized_value")]))
+            let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+            let ti = CreateBitCast(CreateTypeInfo(ty), i8PtrTy)
+            let nothingTi = CreateBitCast(CGType.GetNothingCGType(cgMod).GetOrCreateTypeInfo(), i8PtrTy)
+            let isNothing = GenerateCallExpectFunction(
+                CreateICmp(LLVMIntPredicate.EQ, ti, nothingTi), GetFalse())
+            CreateCondBr(isNothing, blocks[2], blocks[0])
+
+            SetInsertPoint(blocks[2])
+            CreateRunTimeInvalidGenericParamException()
+            CreateUnreachable()
+
+            SetInsertPoint(blocks[0])
+            let isRef = CreateTypeInfoIsReferenceCall(ti)
+            let lastBBOfHandleRef = GetInsertBlock()
+            CreateCondBr(isRef, blocks[3], blocks[1])
+
+            SetInsertPoint(blocks[1])
+            let zeroValue = CreateNullValue(ty)
+            let lastBBOfHandleNonRef = GetInsertBlock()
+            CreateBr(blocks[3])
+
+            SetInsertPoint(blocks[3])
+            let p1i8 = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 1u32) }
+            let phi = CreatePHI(p1i8)
+            AddIncoming(phi, ArrayList<LLVMValueRef>([unsafe { LLVMConstNull(p1i8) }, zeroValue]),
+                ArrayList<LLVMBasicBlockRef>([lastBBOfHandleRef, lastBBOfHandleNonRef]))
+            return phi
+        }
+        return CreateNullValue(ty)
+    }
+
     public func CallIntrinsicFunction(retType: LLVMTypeRef, name: String, parameters: ArrayList<CGValue>,
         attributes: ArrayList<String>): LLVMValueRef {
         CJC_ASSERT(!retType.isNull())
@@ -4181,6 +4217,10 @@ public class IRBuilder2 <: Resource {
 
     public func CreateOutOfBoundException(): Unit {
         CreateImplicitExceptionAndThrow("_CNat25IndexOutOfBoundsException6<init>Hv")
+    }
+
+    public func CreateRunTimeInvalidGenericParamException(): Unit {
+        CreateImplicitExceptionAndThrow("_CNat9Exception6<init>Hv")
     }
 
     public func AllocateArray(rawArrayTy: RawArrayType, length: LLVMValueRef): LLVMValueRef {

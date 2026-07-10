@@ -54,6 +54,9 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
         }
         return LLVMNullValue()
     }
+    if (kind == IntrinsicKind.OBJECT_ZERO_VALUE) {
+        return irBuilder.CallIntrinsicForUninitialized(resultType.getOrThrow())
+    }
     if (kind == IntrinsicKind.SIZE_OF) {
         if (!typeArgs.isEmpty()) {
             return SizeOfType(irBuilder, typeArgs[0], resultType)
