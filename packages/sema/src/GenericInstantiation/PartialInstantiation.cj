@@ -486,7 +486,75 @@ public func InstantiateGeneric(generic: Generic, visitor: (Node, Node) -> Unit):
 }
 
 public class PartialInstantiation {
+    private let targetAddr2targetAddr: ArrayList<(Node, (Node) -> Unit)> =
+        ArrayList<(Node, (Node) -> Unit)>()
+    private let source2cloned: HashMap<Node, Node> = HashMap<Node, Node>()
+
     public init() {}
+
+    private func TargetAddrMapInsert(from: Option<Node>, target: (Node) -> Unit): Unit {
+        if (let Some(value) <- from) {
+            targetAddr2targetAddr.add((value, target))
+        }
+    }
+
+    private func TargetAddrMapInsert(from: Option<Decl>, target: (Decl) -> Unit): Unit {
+        if (let Some(value) <- from) {
+            targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as Decl).getOrThrow()) }))
+        }
+    }
+
+    private func TargetAddrMapInsert(from: Decl, target: (Decl) -> Unit): Unit {
+        targetAddr2targetAddr.add((from, { cloned: Node => target((cloned as Decl).getOrThrow()) }))
+    }
+
+    private func TargetAddrMapInsert(from: Option<FuncDecl>, target: (FuncDecl) -> Unit): Unit {
+        if (let Some(value) <- from) {
+            targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as FuncDecl).getOrThrow()) }))
+        }
+    }
+
+    private func TargetAddrMapInsert(from: Option<PropDecl>, target: (PropDecl) -> Unit): Unit {
+        if (let Some(value) <- from) {
+            targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as PropDecl).getOrThrow()) }))
+        }
+    }
+
+    private func TargetAddrMapInsert(from: Option<Expr>, target: (Expr) -> Unit): Unit {
+        if (let Some(value) <- from) {
+            targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as Expr).getOrThrow()) }))
+        }
+    }
+
+    private func TargetAddrMapInsert(from: Option<Pattern>, target: (Pattern) -> Unit): Unit {
+        if (let Some(value) <- from) {
+            targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as Pattern).getOrThrow()) }))
+        }
+    }
+
+    private func TargetAddrMapInsert(from: Option<FuncBody>, target: (FuncBody) -> Unit): Unit {
+        if (let Some(value) <- from) {
+            targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as FuncBody).getOrThrow()) }))
+        }
+    }
+
+    private func TargetAddrMapInsert(from: Option<ClassLikeDecl>, target: (ClassLikeDecl) -> Unit): Unit {
+        if (let Some(value) <- from) {
+            targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as ClassLikeDecl).getOrThrow()) }))
+        }
+    }
+
+    private func TargetAddrMapInsert(from: Option<StructDecl>, target: (StructDecl) -> Unit): Unit {
+        if (let Some(value) <- from) {
+            targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as StructDecl).getOrThrow()) }))
+        }
+    }
+
+    private func TargetAddrMapInsert(from: Option<EnumDecl>, target: (EnumDecl) -> Unit): Unit {
+        if (let Some(value) <- from) {
+            targetAddr2targetAddr.add((value, { cloned: Node => target((cloned as EnumDecl).getOrThrow()) }))
+        }
+    }
 
     public static func Instantiate(node: Node): Node {
         return Instantiate(node, DefaultVisitFunc)
@@ -1984,6 +2052,170 @@ public class PartialInstantiation {
         visitor(node, clonedNode)
         clonedNode.EnableAttr(Attribute.COMPILER_ADD)
         return clonedNode
+    }
+
+    private func InstantiateWithRearrange(node: Node, visitor: (Node, Node) -> Unit): Node {
+        let collectMap = { from: Node, target: Node =>
+            if (let Some(sourceDecl) <- (from as Decl)) {
+                if (let Some(targetDecl) <- (target as Decl)) {
+                    source2cloned[sourceDecl] = targetDecl
+                    registerInstantiation(sourceDecl, targetDecl)
+                    TargetAddrMapInsert(sourceDecl.outerDecl,
+                        { value: Decl => targetDecl.outerDecl = value })
+                    TargetAddrMapInsert(sourceDecl.genericDecl,
+                        { value: Decl => targetDecl.genericDecl = value })
+                }
+            }
+            if (let Some(sourceExpr) <- (from as Expr)) {
+                if (let Some(targetExpr) <- (target as Expr)) {
+                    source2cloned[sourceExpr] = targetExpr
+                    TargetAddrMapInsert(sourceExpr.sourceExpr,
+                        { value: Expr => targetExpr.sourceExpr = value })
+                    TargetAddrMapInsert(sourceExpr.mapExpr,
+                        { value: Expr => targetExpr.mapExpr = value })
+                }
+            }
+            if (let Some(sourceFuncBody) <- (from as FuncBody)) {
+                if (let Some(targetFuncBody) <- (target as FuncBody)) {
+                    source2cloned[sourceFuncBody] = targetFuncBody
+                    TargetAddrMapInsert(sourceFuncBody.funcDecl,
+                        { value: FuncDecl => targetFuncBody.funcDecl = value })
+                    TargetAddrMapInsert(sourceFuncBody.outerFunc,
+                        { value: FuncBody => targetFuncBody.outerFunc = value })
+                    TargetAddrMapInsert(sourceFuncBody.parentClassLike,
+                        { value: ClassLikeDecl => targetFuncBody.parentClassLike = value })
+                    TargetAddrMapInsert(sourceFuncBody.parentStruct,
+                        { value: StructDecl => targetFuncBody.parentStruct = value })
+                    TargetAddrMapInsert(sourceFuncBody.parentEnum,
+                        { value: EnumDecl => targetFuncBody.parentEnum = value })
+                }
+            }
+            if (let Some(sourcePattern) <- (from as Pattern)) {
+                if (let Some(targetPattern) <- (target as Pattern)) {
+                    source2cloned[sourcePattern] = targetPattern
+                    TargetAddrMapInsert(sourcePattern.ctxExpr,
+                        { value: Expr => targetPattern.ctxExpr = value })
+                }
+            }
+
+            match (from.astKind) {
+                case ASTKind.REF_EXPR =>
+                    let sourceRefExpr = (from as RefExpr).getOrThrow()
+                    let targetRefExpr = (target as RefExpr).getOrThrow()
+                    var isCallStaticMemberByVirtual = false
+                    if (let Some(refTarget) <- sourceRefExpr.ref.target) {
+                        if (refTarget.IsFunc() && refTarget.TestAttr(Attribute.STATIC)) {
+                            if (let Some(outerDecl) <- refTarget.outerDecl) {
+                                isCallStaticMemberByVirtual = IsOpenDecl(outerDecl)
+                            }
+                        }
+                    }
+                    if (!isCallStaticMemberByVirtual) {
+                        TargetAddrMapInsert(sourceRefExpr.ref.target,
+                            { value: Decl => targetRefExpr.ref.target = value })
+                    }
+                    TargetAddrMapInsert(sourceRefExpr.callOrPattern,
+                        { value: Node => targetRefExpr.callOrPattern = value })
+                case ASTKind.ARRAY_EXPR =>
+                    let sourceArrayExpr = (from as ArrayExpr).getOrThrow()
+                    let targetArrayExpr = (target as ArrayExpr).getOrThrow()
+                    TargetAddrMapInsert(sourceArrayExpr.initFunc,
+                        { value: FuncDecl => targetArrayExpr.initFunc = value })
+                case ASTKind.ARRAY_LIT =>
+                    let sourceArrayLit = (from as ArrayLit).getOrThrow()
+                    let targetArrayLit = (target as ArrayLit).getOrThrow()
+                    TargetAddrMapInsert(sourceArrayLit.initFunc,
+                        { value: FuncDecl => targetArrayLit.initFunc = value })
+                case ASTKind.MEMBER_ACCESS =>
+                    let sourceMemberAccess = (from as MemberAccess).getOrThrow()
+                    var rearrangeMemberAccess = false
+                    if (let Some(baseExpr) <- sourceMemberAccess.baseExpr) {
+                        if (let Some(refExpr) <- (baseExpr as RefExpr)) {
+                            rearrangeMemberAccess = refExpr.isThis
+                        }
+                    }
+                    if (rearrangeMemberAccess) {
+                        let targetMemberAccess = (target as MemberAccess).getOrThrow()
+                        TargetAddrMapInsert(sourceMemberAccess.target,
+                            { value: Decl => targetMemberAccess.target = value })
+                        TargetAddrMapInsert(sourceMemberAccess.callOrPattern,
+                            { value: Node => targetMemberAccess.callOrPattern = value })
+                        CJC_ASSERT(sourceMemberAccess.targets.size == targetMemberAccess.targets.size)
+                        var targetIndex: Int64 = 0
+                        while (targetIndex < sourceMemberAccess.targets.size) {
+                            let capturedIndex = targetIndex
+                            TargetAddrMapInsert(sourceMemberAccess.targets[capturedIndex],
+                                { value: Decl => targetMemberAccess.targets[capturedIndex] = value })
+                            targetIndex++
+                        }
+                    }
+                case ASTKind.FOR_IN_EXPR =>
+                    let sourceForInExpr = (from as ForInExpr).getOrThrow()
+                    let targetForInExpr = (target as ForInExpr).getOrThrow()
+                    TargetAddrMapInsert(sourceForInExpr.patternInDesugarExpr,
+                        { value: Pattern => targetForInExpr.patternInDesugarExpr = value })
+                case ASTKind.CALL_EXPR =>
+                    let sourceCallExpr = (from as CallExpr).getOrThrow()
+                    var rearrangeResolvedFunction = true
+                    if (let Some(baseFunc) <- sourceCallExpr.baseFunc) {
+                        if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+                            rearrangeResolvedFunction = false
+                            if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                                if (let Some(refExpr) <- (baseExpr as RefExpr)) {
+                                    rearrangeResolvedFunction = refExpr.isThis
+                                }
+                            }
+                        }
+                    }
+                    if (rearrangeResolvedFunction) {
+                        let targetCallExpr = (target as CallExpr).getOrThrow()
+                        TargetAddrMapInsert(sourceCallExpr.resolvedFunction,
+                            { value: FuncDecl => targetCallExpr.resolvedFunction = value })
+                    }
+                case ASTKind.RETURN_EXPR =>
+                    let sourceReturnExpr = (from as ReturnExpr).getOrThrow()
+                    let targetReturnExpr = (target as ReturnExpr).getOrThrow()
+                    TargetAddrMapInsert(sourceReturnExpr.refFuncBody,
+                        { value: FuncBody => targetReturnExpr.refFuncBody = value })
+                case ASTKind.JUMP_EXPR =>
+                    let sourceJumpExpr = (from as JumpExpr).getOrThrow()
+                    let targetJumpExpr = (target as JumpExpr).getOrThrow()
+                    TargetAddrMapInsert(sourceJumpExpr.refLoop,
+                        { value: Expr => targetJumpExpr.refLoop = value })
+                case ASTKind.REF_TYPE =>
+                    let sourceRefType = (from as RefType).getOrThrow()
+                    let targetRefType = (target as RefType).getOrThrow()
+                    TargetAddrMapInsert(sourceRefType.ref.target,
+                        { value: Decl => targetRefType.ref.target = value })
+                case ASTKind.QUALIFIED_TYPE =>
+                    let sourceQualifiedType = (from as QualifiedType).getOrThrow()
+                    let targetQualifiedType = (target as QualifiedType).getOrThrow()
+                    TargetAddrMapInsert(sourceQualifiedType.target,
+                        { value: Decl => targetQualifiedType.target = value })
+                case ASTKind.FUNC_DECL =>
+                    let sourceFuncDecl = (from as FuncDecl).getOrThrow()
+                    let targetFuncDecl = (target as FuncDecl).getOrThrow()
+                    TargetAddrMapInsert(sourceFuncDecl.ownerFunc,
+                        { value: FuncDecl => targetFuncDecl.ownerFunc = value })
+                    TargetAddrMapInsert(sourceFuncDecl.propDecl,
+                        { value: PropDecl => targetFuncDecl.propDecl = value })
+                case ASTKind.VAR_DECL =>
+                    let sourceVarDecl = (from as VarDecl).getOrThrow()
+                    let targetVarDecl = (target as VarDecl).getOrThrow()
+                    TargetAddrMapInsert(sourceVarDecl.parentPattern,
+                        { value: Pattern => targetVarDecl.parentPattern = value })
+                case _ => ()
+            }
+            visitor(from, target)
+        }
+
+        let targetNode = InstantiateNode(node, collectMap)
+        for ((source, setter) in targetAddr2targetAddr) {
+            if (let Some(cloned) <- source2cloned.get(source)) {
+                setter(cloned)
+            }
+        }
+        return targetNode
     }
 
     public static func GetGeneralDecl(clonedDecl: Decl): Decl {
