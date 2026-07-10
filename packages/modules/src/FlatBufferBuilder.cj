@@ -18,6 +18,8 @@ private class FlatBufferTableState {
 
 public class FlatBufferBuilder {
     private let buffer: ArrayList<UInt8> = ArrayList<UInt8>()
+    private let stringPool: HashMap<String, FlatBufferOffset> = HashMap<String, FlatBufferOffset>()
+    private let vtableOffsets: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private var minAlign: Int64 = 1
     private var currentTable: Option<FlatBufferTableState> = None
 
@@ -25,6 +27,8 @@ public class FlatBufferBuilder {
 
     public func Clear(): Unit {
         buffer.clear()
+        stringPool.clear()
+        vtableOffsets.clear()
         minAlign = 1
         currentTable = None
     }
@@ -44,6 +48,17 @@ public class FlatBufferBuilder {
         }
         PrependU32(UInt32(bytes.size))
         return UInt32(buffer.size)
+    }
+
+    public func CreateSharedString(value: String): FlatBufferOffset {
+        let sizeBeforeString = buffer.size
+        let offset = CreateString(value)
+        if (stringPool.contains(value)) {
+            PopBytes(buffer.size - sizeBeforeString)
+            return stringPool[value]
+        }
+        stringPool[value] = offset
+        return offset
     }
 
     public func CreateVectorOffsets(values: ArrayList<FlatBufferOffset>): FlatBufferOffset {
@@ -87,6 +102,28 @@ public class FlatBufferBuilder {
         var idx = values.size - 1
         while (idx >= 0) {
             PrependU32Raw(values[idx])
+            idx--
+        }
+        PrependU32(UInt32(values.size))
+        return UInt32(buffer.size)
+    }
+
+    public func CreateVectorU8(values: ArrayList<UInt8>): FlatBufferOffset {
+        StartVector(1, values.size, 1)
+        var idx = values.size - 1
+        while (idx >= 0) {
+            PrependRawByte(values[idx])
+            idx--
+        }
+        PrependU32(UInt32(values.size))
+        return UInt32(buffer.size)
+    }
+
+    public func CreateVectorI32(values: ArrayList<Int64>): FlatBufferOffset {
+        StartVector(4, values.size, 4)
+        var idx = values.size - 1
+        while (idx >= 0) {
+            PrependI32Raw(values[idx])
             idx--
         }
         PrependU32(UInt32(values.size))
@@ -166,6 +203,22 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    public func AddU64(field: Int64, value: UInt64, defaultValue!: UInt64 = 0u64): Unit {
+        if (value == defaultValue) {
+            return
+        }
+        PrependU64(value)
+        Slot(field)
+    }
+
+    public func AddI16(field: Int64, value: Int16, defaultValue!: Int16 = 0i16): Unit {
+        if (value == defaultValue) {
+            return
+        }
+        PrependI16(value)
+        Slot(field)
+    }
+
     public func AddI32(field: Int64, value: Int64, defaultValue!: Int64 = 0): Unit {
         if (value == defaultValue) {
             return
@@ -187,6 +240,14 @@ public class FlatBufferBuilder {
             return
         }
         PrependU8(UInt8(value))
+        Slot(field)
+    }
+
+    public func AddFloat64(field: Int64, value: Float64, defaultValue!: Float64 = 0.0): Unit {
+        if (value == defaultValue) {
+            return
+        }
+        PrependFloat64(value)
         Slot(field)
     }
 
@@ -232,12 +293,22 @@ public class FlatBufferBuilder {
             AppendU16(vtable, UInt16(fieldOffset))
             idx++
         }
-        var byteIdx = vtable.size - 1
-        while (byteIdx >= 0) {
-            PrependRawByte(vtable[byteIdx])
-            byteIdx--
+        var vtableUse: FlatBufferOffset = UInt32(buffer.size + vtableSize)
+        for (vtableOffset in vtableOffsets) {
+            if (VTableEquals(vtable, vtableOffset)) {
+                vtableUse = vtableOffset
+                break
+            }
         }
-        PatchI32(vtableSize, Int32(vtableSize))
+        if (vtableUse == UInt32(buffer.size + vtableSize)) {
+            var byteIdx = vtable.size - 1
+            while (byteIdx >= 0) {
+                PrependRawByte(vtable[byteIdx])
+                byteIdx--
+            }
+            vtableOffsets.add(vtableUse)
+        }
+        PatchI32(buffer.size - tableOffset, Int32(vtableUse) - Int32(tableOffset))
         currentTable = None
         return UInt32(tableOffset)
     }
@@ -266,6 +337,27 @@ public class FlatBufferBuilder {
     private func StartVector(elementSize: Int64, elementCount: Int64, alignment: Int64): Unit {
         Prep(4, elementSize * elementCount)
         Prep(alignment, elementSize * elementCount)
+    }
+
+    private func VTableEquals(vtable: ArrayList<UInt8>, vtableOffset: FlatBufferOffset): Bool {
+        let start = buffer.size - Int64(vtableOffset)
+        if (start < 0 || start + vtable.size > buffer.size) {
+            return false
+        }
+        var idx: Int64 = 0
+        while (idx < vtable.size) {
+            if (buffer[start + idx] != vtable[idx]) {
+                return false
+            }
+            idx++
+        }
+        return true
+    }
+
+    private func PopBytes(amount: Int64): Unit {
+        for (_ in 0..amount) {
+            buffer.remove(at: 0)
+        }
     }
 
     private func Slot(field: Int64): Unit {
@@ -303,6 +395,12 @@ public class FlatBufferBuilder {
         PrependU16Raw(value)
     }
 
+    @OverflowWrapping
+    private func PrependI16(value: Int16): Unit {
+        Prep(2, 0)
+        PrependU16Raw(UInt16(value))
+    }
+
     private func PrependU32(value: UInt32): Unit {
         Prep(4, 0)
         PrependU32Raw(value)
@@ -316,6 +414,16 @@ public class FlatBufferBuilder {
     private func PrependI64(value: Int64): Unit {
         Prep(8, 0)
         PrependI64Raw(value)
+    }
+
+    private func PrependU64(value: UInt64): Unit {
+        Prep(8, 0)
+        PrependU64Raw(value)
+    }
+
+    private func PrependFloat64(value: Float64): Unit {
+        Prep(8, 0)
+        PrependU64Raw(value.toBits())
     }
 
     private func PrependU16Raw(value: UInt16): Unit {
