@@ -13,7 +13,7 @@ private class BaseIdAllocator {
 public open class Base {
     public let nodeId: Int64
     private let annotationMap: AnnotationMap = AnnotationMap()
-    private var loc: DebugLocation = DebugLocation()
+    var loc: DebugLocation = DebugLocation()
     private let attributes: AttributeInfo = AttributeInfo()
 
     public init() {
@@ -159,4 +159,8 @@ public open class Base {
         }
         return locText + ", " + annotationText
     }
+}
+
+func GetDebugLocation(base: Base): DebugLocation {
+    return base.loc
 }
