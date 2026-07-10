@@ -6370,9 +6370,7 @@ public class Translator {
         }
         let arg = RequireFuncArgExpr(expr.args[0], "CFunc constructor argument")
         let targetTy = chirTy.TranslateType(RequireAstTy(expr))
-        var value = TranslateExprArg(arg)
-        value = GetDerefedValue(value)
-        value = CoerceValueForExpectedType(value, targetTy)
+        let value = TranslateExprArg(arg, targetTy, deref: true)
         return Some(value)
     }
 
