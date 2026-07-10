@@ -506,7 +506,8 @@ private func CheckConflictDeclWithSubPackage(pkg: Package, diag: BasicDiagnostic
     for (decl in toplevelDecls) {
         if (subPkgNames.contains(decl.identifier.Val())) {
             let fullSubName = pkg.fullPackageName + "." + decl.identifier.Val()
-            let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_conflict_with_sub_package,
+            let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_conflict_with_sub_package,
+                decl,
                 MakeRange(decl.identifier.Begin(), decl.identifier.End()),
                 arguments: [decl.identifier.Val(), fullSubName])
             builder.Emit()
@@ -728,8 +729,8 @@ private func preCheckDiagOverloadConflict(diag: BasicDiagnosticEngine, sameSigFu
     } else {
         "function"
     }
-    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_overload_conflicts,
-        MakeRange(baseFd.identifier.Begin(), identifier), arguments: [kind, identifier])
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_overload_conflicts,
+        baseFd, MakeRange(baseFd.identifier.Begin(), identifier), arguments: [kind, identifier])
     var hasConstraints = false
     for (fd in sameSigFuncs) {
         if (let Some(generic) <- fd.GetGeneric()) {
@@ -760,8 +761,8 @@ private func preCheckDiagStaticAndNonStaticOverload(
     if (!fd.ShouldDiagnose()) {
         return
     }
-    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_static_function_overload_conflicts,
-        MakeRange(fd.identifier.Begin(), fd.identifier.End()), arguments: [fd.identifier.Val()])
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_static_function_overload_conflicts,
+        fd, MakeRange(fd.identifier.Begin(), fd.identifier.End()), arguments: [fd.identifier.Val()])
     builder.AddNote(MakeRange(firstNonStatic.identifier.Begin(), firstNonStatic.identifier.End()),
         "non-static function is here")
     builder.Emit()
