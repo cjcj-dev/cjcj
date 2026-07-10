@@ -589,9 +589,9 @@ func DiagnoseForInstantiatedMemberImpl(
                             triggerTyParts.add(instTy.String())
                         }
                         let triggeredDeclType = trigger.decl.identifier.Val() + "<" + JoinStrings(triggerTyParts, ", ") + ">"
-                        let builder = checker.diag.DiagnoseRefactor(
+                        let builder = DiagnoseRefactor(checker.diag,
                             DiagKindRefactor.sema_generic_instantiation_causes_ambiguous_functions,
-                            MakeRange(trigger.node.begin, trigger.node.end),
+                            trigger.node,
                             arguments: [triggeredDeclType, childDecl.identifier.Val()]
                         )
                         let candidates = ArrayList<Decl>()
