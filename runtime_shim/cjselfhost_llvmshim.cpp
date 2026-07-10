@@ -169,6 +169,11 @@ extern "C" LLVMSelfhostLoopRef LLVMSelfhostLoopGetOutermostLoop(LLVMSelfhostLoop
     return LoopRef->getOutermostLoop();
 }
 
+extern "C" LLVMBasicBlockRef LLVMSelfhostLoopGetLoopPreheader(LLVMSelfhostLoopRef LoopRef)
+{
+    return wrap(LoopRef->getLoopPreheader());
+}
+
 extern "C" LLVMBasicBlockRef LLVMSelfhostLoopGetHeader(LLVMSelfhostLoopRef LoopRef)
 {
     return wrap(LoopRef->getHeader());
@@ -190,6 +195,22 @@ extern "C" void LLVMSelfhostGetBasicBlockPredecessors(LLVMBasicBlockRef BB, LLVM
     for (auto *pred : predecessors(unwrap(BB))) {
         Preds[idx++] = wrap(pred);
     }
+}
+
+extern "C" LLVMBasicBlockRef LLVMSelfhostBasicBlockGetUniqueSuccessor(LLVMBasicBlockRef BB)
+{
+    return wrap(unwrap(BB)->getUniqueSuccessor());
+}
+
+extern "C" int LLVMSelfhostIsBranchInst(LLVMValueRef Inst)
+{
+    return isa<BranchInst>(unwrap<Value>(Inst)) ? 1 : 0;
+}
+
+extern "C" LLVMBasicBlockRef LLVMSelfhostSplitBasicBlock(
+        LLVMBasicBlockRef BB, LLVMValueRef BeforeInst, const char *Name)
+{
+    return wrap(unwrap(BB)->splitBasicBlock(unwrap<Instruction>(BeforeInst), Name));
 }
 
 extern "C" void LLVMSelfhostRemoveUnreachableBlocks(LLVMValueRef Fn)

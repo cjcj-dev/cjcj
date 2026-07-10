@@ -276,11 +276,16 @@ foreign {
     func LLVMSelfhostLoopInfoGetLoopFor(loopInfo: LLVMSelfhostLoopInfoRef,
         block: LLVMBasicBlockRef): LLVMSelfhostLoopRef
     func LLVMSelfhostLoopGetOutermostLoop(loopRef: LLVMSelfhostLoopRef): LLVMSelfhostLoopRef
+    func LLVMSelfhostLoopGetLoopPreheader(loopRef: LLVMSelfhostLoopRef): LLVMBasicBlockRef
     func LLVMSelfhostLoopGetHeader(loopRef: LLVMSelfhostLoopRef): LLVMBasicBlockRef
     func LLVMSelfhostLoopContainsBasicBlock(loopRef: LLVMSelfhostLoopRef, block: LLVMBasicBlockRef): Int32
     func LLVMSelfhostGetBasicBlockPredecessorCount(block: LLVMBasicBlockRef): UInt32
     func LLVMSelfhostGetBasicBlockPredecessors(block: LLVMBasicBlockRef,
         predecessors: CPointer<LLVMBasicBlockRef>): Unit
+    func LLVMSelfhostBasicBlockGetUniqueSuccessor(block: LLVMBasicBlockRef): LLVMBasicBlockRef
+    func LLVMSelfhostIsBranchInst(inst: LLVMValueRef): Int32
+    func LLVMSelfhostSplitBasicBlock(block: LLVMBasicBlockRef, beforeInst: LLVMValueRef,
+        name: CString): LLVMBasicBlockRef
     func LLVMSelfhostRemoveUnreachableBlocks(fn: LLVMValueRef): Unit
     func LLVMSelfhostInstructionComesBefore(inst: LLVMValueRef, other: LLVMValueRef): Int32
     func LLVMSelfhostInstructionMoveBefore(inst: LLVMValueRef, other: LLVMValueRef): Unit
