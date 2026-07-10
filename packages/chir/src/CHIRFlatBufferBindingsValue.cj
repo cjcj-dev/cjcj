@@ -569,20 +569,20 @@ class PackageFormat_BlockGroup <: Table {
 // PackageFormat_generated.h union verifier switch for ValueElem.
 func VerifyValueElem(data: Array<UInt8>, verifier: VerifierTemplate, obj: Option<Int64>, kind: UInt8): Bool {
     return match (kind) {
-        case CHIRFB_VALUE_ELEM_NONE => true
-        case CHIRFB_VALUE_ELEM_BOOL_LITERAL => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_BoolLiteral(data, tablePos).Verify(active)})
-        case CHIRFB_VALUE_ELEM_RUNE_LITERAL => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_RuneLiteral(data, tablePos).Verify(active)})
-        case CHIRFB_VALUE_ELEM_STRING_LITERAL => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_StringLiteral(data, tablePos).Verify(active)})
-        case CHIRFB_VALUE_ELEM_INT_LITERAL => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_IntLiteral(data, tablePos).Verify(active)})
-        case CHIRFB_VALUE_ELEM_FLOAT_LITERAL => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_FloatLiteral(data, tablePos).Verify(active)})
-        case CHIRFB_VALUE_ELEM_UNIT_LITERAL => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_UnitLiteral(data, tablePos).Verify(active)})
-        case CHIRFB_VALUE_ELEM_NULL_LITERAL => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_NullLiteral(data, tablePos).Verify(active)})
-        case CHIRFB_VALUE_ELEM_PARAMETER => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_Parameter(data, tablePos).Verify(active)})
-        case CHIRFB_VALUE_ELEM_LOCAL_VAR => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_LocalVar(data, tablePos).Verify(active)})
-        case CHIRFB_VALUE_ELEM_GLOBAL_VAR => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_GlobalVar(data, tablePos).Verify(active)})
-        case CHIRFB_VALUE_ELEM_FUNCTION => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_Function(data, tablePos).Verify(active)})
-        case CHIRFB_VALUE_ELEM_BLOCK => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_Block(data, tablePos).Verify(active)})
-        case CHIRFB_VALUE_ELEM_BLOCK_GROUP => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_BlockGroup(data, tablePos).Verify(active)})
+        case 0u8 => true
+        case 1u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_BoolLiteral(data, tablePos).Verify(active)})
+        case 2u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_RuneLiteral(data, tablePos).Verify(active)})
+        case 3u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_StringLiteral(data, tablePos).Verify(active)})
+        case 4u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_IntLiteral(data, tablePos).Verify(active)})
+        case 5u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_FloatLiteral(data, tablePos).Verify(active)})
+        case 6u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_UnitLiteral(data, tablePos).Verify(active)})
+        case 7u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_NullLiteral(data, tablePos).Verify(active)})
+        case 8u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_Parameter(data, tablePos).Verify(active)})
+        case 9u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_LocalVar(data, tablePos).Verify(active)})
+        case 10u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_GlobalVar(data, tablePos).Verify(active)})
+        case 11u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_Function(data, tablePos).Verify(active)})
+        case 12u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_Block(data, tablePos).Verify(active)})
+        case 13u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_BlockGroup(data, tablePos).Verify(active)})
         case _ => true
     }
 }

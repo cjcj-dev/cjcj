@@ -907,20 +907,20 @@ class PackageFormat_ClassDef <: Table {
 // PackageFormat_generated.h union verifier switch for Annotation.
 func VerifyAnnotation(data: Array<UInt8>, verifier: VerifierTemplate, obj: Option<Int64>, kind: UInt8): Bool {
     return match (kind) {
-        case CHIRFB_ANNOTATION_NONE => true
-        case CHIRFB_ANNOTATION_NEED_CHECK_ARRAY_BOUND => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_NeedCheckArrayBound(data, tablePos).Verify(active)})
-        case CHIRFB_ANNOTATION_NEED_CHECK_CAST => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_NeedCheckCast(data, tablePos).Verify(active)})
-        case CHIRFB_ANNOTATION_DEBUG_LOCATION_INFO_FOR_WARNING => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_DebugLocation(data, tablePos).Verify(active)})
-        case CHIRFB_ANNOTATION_GENERATED_FROM_FOR_IN => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_GeneratedFromForIn(data, tablePos).Verify(active)})
-        case CHIRFB_ANNOTATION_IS_AUTO_ENV_CLASS => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_IsAutoEnvClass(data, tablePos).Verify(active)})
-        case CHIRFB_ANNOTATION_IS_CAPTURED_CLASS_IN_CC => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_IsCapturedClassInCC(data, tablePos).Verify(active)})
-        case CHIRFB_ANNOTATION_LINK_TYPE_INFO => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_LinkTypeInfo(data, tablePos).Verify(active)})
-        case CHIRFB_ANNOTATION_SKIP_CHECK => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_SkipCheck(data, tablePos).Verify(active)})
-        case CHIRFB_ANNOTATION_NEVER_OVERFLOW_INFO => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_NeverOverflowInfo(data, tablePos).Verify(active)})
-        case CHIRFB_ANNOTATION_ENUM_CASE_INDEX => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_EnumCaseIndex(data, tablePos).Verify(active)})
-        case CHIRFB_ANNOTATION_VIR_METHOD_OFFSET => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_VirMethodOffset(data, tablePos).Verify(active)})
-        case CHIRFB_ANNOTATION_WRAPPED_RAW_METHOD => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_WrappedRawMethod(data, tablePos).Verify(active)})
-        case CHIRFB_ANNOTATION_OVERRIDE_SRC_FUNC_TYPE => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_OverrideSrcFuncType(data, tablePos).Verify(active)})
+        case 0u8 => true
+        case 1u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_NeedCheckArrayBound(data, tablePos).Verify(active)})
+        case 2u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_NeedCheckCast(data, tablePos).Verify(active)})
+        case 3u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_DebugLocation(data, tablePos).Verify(active)})
+        case 4u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_GeneratedFromForIn(data, tablePos).Verify(active)})
+        case 5u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_IsAutoEnvClass(data, tablePos).Verify(active)})
+        case 6u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_IsCapturedClassInCC(data, tablePos).Verify(active)})
+        case 7u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_LinkTypeInfo(data, tablePos).Verify(active)})
+        case 8u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_SkipCheck(data, tablePos).Verify(active)})
+        case 9u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_NeverOverflowInfo(data, tablePos).Verify(active)})
+        case 10u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_EnumCaseIndex(data, tablePos).Verify(active)})
+        case 11u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_VirMethodOffset(data, tablePos).Verify(active)})
+        case 12u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_WrappedRawMethod(data, tablePos).Verify(active)})
+        case 13u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_OverrideSrcFuncType(data, tablePos).Verify(active)})
         case _ => true
     }
 }
@@ -950,13 +950,13 @@ func VerifyAnnotationVector(data: Array<UInt8>, verifier: VerifierTemplate, valu
 // PackageFormat_generated.h union verifier switch for TypeElem.
 func VerifyTypeElem(data: Array<UInt8>, verifier: VerifierTemplate, obj: Option<Int64>, kind: UInt8): Bool {
     return match (kind) {
-        case CHIRFB_TYPE_ELEM_NONE => true
-        case CHIRFB_TYPE_ELEM_TYPE => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_Type(data, tablePos).Verify(active)})
-        case CHIRFB_TYPE_ELEM_RAW_ARRAY_TYPE => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_RawArrayType(data, tablePos).Verify(active)})
-        case CHIRFB_TYPE_ELEM_V_ARRAY_TYPE => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_VArrayType(data, tablePos).Verify(active)})
-        case CHIRFB_TYPE_ELEM_FUNC_TYPE => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_FuncType(data, tablePos).Verify(active)})
-        case CHIRFB_TYPE_ELEM_CUSTOM_TYPE => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_CustomType(data, tablePos).Verify(active)})
-        case CHIRFB_TYPE_ELEM_GENERIC_TYPE => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_GenericType(data, tablePos).Verify(active)})
+        case 0u8 => true
+        case 1u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_Type(data, tablePos).Verify(active)})
+        case 2u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_RawArrayType(data, tablePos).Verify(active)})
+        case 3u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_VArrayType(data, tablePos).Verify(active)})
+        case 4u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_FuncType(data, tablePos).Verify(active)})
+        case 5u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_CustomType(data, tablePos).Verify(active)})
+        case 6u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_GenericType(data, tablePos).Verify(active)})
         case _ => true
     }
 }
@@ -986,11 +986,11 @@ func VerifyTypeElemVector(data: Array<UInt8>, verifier: VerifierTemplate, values
 // PackageFormat_generated.h union verifier switch for CustomTypeDefElem.
 func VerifyCustomTypeDefElem(data: Array<UInt8>, verifier: VerifierTemplate, obj: Option<Int64>, kind: UInt8): Bool {
     return match (kind) {
-        case CHIRFB_CUSTOM_TYPE_DEF_ELEM_NONE => true
-        case CHIRFB_CUSTOM_TYPE_DEF_ELEM_ENUM_DEF => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_EnumDef(data, tablePos).Verify(active)})
-        case CHIRFB_CUSTOM_TYPE_DEF_ELEM_STRUCT_DEF => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_StructDef(data, tablePos).Verify(active)})
-        case CHIRFB_CUSTOM_TYPE_DEF_ELEM_CLASS_DEF => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_ClassDef(data, tablePos).Verify(active)})
-        case CHIRFB_CUSTOM_TYPE_DEF_ELEM_EXTEND_DEF => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_ExtendDef(data, tablePos).Verify(active)})
+        case 0u8 => true
+        case 1u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_EnumDef(data, tablePos).Verify(active)})
+        case 2u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_StructDef(data, tablePos).Verify(active)})
+        case 3u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_ClassDef(data, tablePos).Verify(active)})
+        case 4u8 => verifier.VerifyTable(obj, {tablePos: Int64, active: VerifierTemplate => PackageFormat_ExtendDef(data, tablePos).Verify(active)})
         case _ => true
     }
 }
