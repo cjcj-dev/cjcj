@@ -1,9 +1,14 @@
 package cjcj::chir
 
 import std.collection.*
-import cjcj::modules.FlatBufferOffset
+import std.reflect.TypeInfo
+import cjcj::basic.Linkage as BasicLinkage
+import cjcj::basic.LinkageToInt
+import cjcj::modules.{FlatBufferBuilder, FlatBufferOffset}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 
 class CHIRSerializerImpl {
+    private let builder: FlatBufferBuilder = FlatBufferBuilder()
     private let valueQueue: ArrayList<Value> = ArrayList<Value>()
     private let typeQueue: ArrayList<Type> = ArrayList<Type>()
     private let exprQueue: ArrayList<Expression> = ArrayList<Expression>()
@@ -76,6 +81,400 @@ class CHIRSerializerImpl {
             defQueue.add(obj)
         }
         return def2Id[obj.nodeId]
+    }
+
+    private func GetId(obj: Option<Value>): UInt32 {
+        return if (let Some(value) <- obj) { GetId(value) } else { 0u32 }
+    }
+
+    private func GetId(obj: Option<Type>): UInt32 {
+        return if (let Some(value) <- obj) { GetId(value) } else { 0u32 }
+    }
+
+    private func GetId(obj: Option<Expression>): UInt32 {
+        return if (let Some(value) <- obj) { GetId(value) } else { 0u32 }
+    }
+
+    private func GetId(obj: Option<CustomTypeDef>): UInt32 {
+        return if (let Some(value) <- obj) { GetId(value) } else { 0u32 }
+    }
+
+    private func GetId(objs: ArrayList<Type>): ArrayList<UInt32> {
+        let indices = ArrayList<UInt32>()
+        for (obj in objs) { indices.add(GetId(obj)) }
+        return indices
+    }
+
+    private func GetId(objs: ArrayList<Value>): ArrayList<UInt32> {
+        let indices = ArrayList<UInt32>()
+        for (obj in objs) { indices.add(GetId(obj)) }
+        return indices
+    }
+
+    private func GetId(objs: ArrayList<Expression>): ArrayList<UInt32> {
+        let indices = ArrayList<UInt32>()
+        for (obj in objs) { indices.add(GetId(obj)) }
+        return indices
+    }
+
+    private func GetId(objs: ArrayList<CustomTypeDef>): ArrayList<UInt32> {
+        let indices = ArrayList<UInt32>()
+        for (obj in objs) { indices.add(GetId(obj)) }
+        return indices
+    }
+
+    private func GetId(objs: HashSet<Value>): ArrayList<UInt32> {
+        let indices = ArrayList<UInt32>()
+        for (obj in objs) { indices.add(GetId(obj)) }
+        return indices
+    }
+
+    private func Serialize(obj: DebugLocation): FlatBufferOffset {
+        let beginPos = CreatePos(builder, obj.GetBeginPos().line, obj.GetBeginPos().column)
+        let endPos = CreatePos(builder, obj.GetEndPos().line, obj.GetEndPos().column)
+        let scope = obj.GetScopeInfo()
+        return CreateDebugLocationDirect(
+            builder, Some(obj.GetAbsPath()), obj.GetFileID(), beginPos, endPos, Some(scope))
+    }
+
+    private func Serialize(obj: AnnoInfo): FlatBufferOffset {
+        let instances = ArrayList<FlatBufferOffset>()
+        for (instance in obj.GetCustomAnnoInstances()) {
+            let argStrings = ArrayList<FlatBufferOffset>()
+            for (arg in instance.GetArgValues()) {
+                argStrings.add(builder.CreateSharedString(arg))
+            }
+            let location = Serialize(instance.GetDebugLocation())
+            instances.add(CreateCustomAnnoInstanceDirect(builder, Some(instance.GetAnnoClassName()),
+                if (argStrings.isEmpty()) { None } else { Some(argStrings) }, location))
+        }
+        return CreateAnnoInfoDirect(builder, Some(obj.GetAnnoFactoryFuncMangledName()),
+            if (instances.isEmpty()) { None } else { Some(instances) })
+    }
+
+    private func Serialize(obj: Base): FlatBufferOffset {
+        let annoTypes = ArrayList<UInt8>()
+        let annos = ArrayList<FlatBufferOffset>()
+        for ((annotationType, annotation) in obj.GetAnno().GetAnnos()) {
+            if (annotationType == TypeInfo.of<NeedCheckArrayBound>()) {
+                annoTypes.add(CHIRFB_ANNOTATION_NEED_CHECK_ARRAY_BOUND)
+                let value = NeedCheckArrayBound.Extract(
+                    (annotation as Annotation<Bool>).getOrThrow())
+                annos.add(CreateNeedCheckArrayBound(builder, value))
+            } else if (annotationType == TypeInfo.of<NeedCheckCast>()) {
+                annoTypes.add(CHIRFB_ANNOTATION_NEED_CHECK_CAST)
+                let value = NeedCheckCast.Extract((annotation as Annotation<Bool>).getOrThrow())
+                annos.add(CreateNeedCheckCast(builder, value))
+            } else if (annotationType == TypeInfo.of<DebugLocationInfoForWarning>()) {
+                annoTypes.add(CHIRFB_ANNOTATION_DEBUG_LOCATION_INFO_FOR_WARNING)
+                let location = DebugLocationInfoForWarning.Extract(
+                    (annotation as Annotation<DebugLocation>).getOrThrow())
+                annos.add(Serialize(location))
+            } else if (annotationType == TypeInfo.of<LinkTypeInfo>()) {
+                annoTypes.add(CHIRFB_ANNOTATION_LINK_TYPE_INFO)
+                let linkage = LinkTypeInfo.Extract(
+                    (annotation as Annotation<BasicLinkage>).getOrThrow())
+                annos.add(CreateLinkTypeInfo(builder, Int16(LinkageToInt(linkage))))
+            } else if (annotationType == TypeInfo.of<SkipCheck>()) {
+                annoTypes.add(CHIRFB_ANNOTATION_SKIP_CHECK)
+                let skipKind = SkipCheck.Extract((annotation as Annotation<SkipKind>).getOrThrow())
+                annos.add(CreateSkipCheck(builder, UInt8(SkipKindIndex(skipKind))))
+            } else if (annotationType == TypeInfo.of<WrappedRawMethod>()) {
+                let rawMethod = WrappedRawMethod.Extract(
+                    (annotation as Annotation<Option<Function>>).getOrThrow())
+                if (let Some(method) <- rawMethod) {
+                    if (method.GetBody().isNone()) { continue }
+                }
+                annoTypes.add(CHIRFB_ANNOTATION_WRAPPED_RAW_METHOD)
+                let rawMethodId = if (let Some(method) <- rawMethod) {
+                    GetId((method as Value).getOrThrow())
+                } else {
+                    0u32
+                }
+                annos.add(CreateWrappedRawMethod(builder, rawMethodId))
+            } else if (annotationType == TypeInfo.of<NeverOverflowInfo>()) {
+                annoTypes.add(CHIRFB_ANNOTATION_NEVER_OVERFLOW_INFO)
+                let value = NeverOverflowInfo.Extract((annotation as Annotation<Bool>).getOrThrow())
+                annos.add(CreateNeverOverflowInfo(builder, value))
+            } else if (annotationType == TypeInfo.of<GeneratedFromForIn>()) {
+                annoTypes.add(CHIRFB_ANNOTATION_GENERATED_FROM_FOR_IN)
+                let value = GeneratedFromForIn.Extract((annotation as Annotation<Bool>).getOrThrow())
+                annos.add(CreateGeneratedFromForIn(builder, value))
+            } else if (annotationType == TypeInfo.of<IsAutoEnvClass>()) {
+                annoTypes.add(CHIRFB_ANNOTATION_IS_AUTO_ENV_CLASS)
+                let value = IsAutoEnvClass.Extract((annotation as Annotation<Bool>).getOrThrow())
+                annos.add(CreateIsAutoEnvClass(builder, value))
+            } else if (annotationType == TypeInfo.of<IsCapturedClassInCC>()) {
+                annoTypes.add(CHIRFB_ANNOTATION_IS_CAPTURED_CLASS_IN_CC)
+                let value = IsCapturedClassInCC.Extract((annotation as Annotation<Bool>).getOrThrow())
+                annos.add(CreateIsCapturedClassInCC(builder, value))
+            } else if (annotationType == TypeInfo.of<EnumCaseIndex>()) {
+                annoTypes.add(CHIRFB_ANNOTATION_ENUM_CASE_INDEX)
+                let index = EnumCaseIndex.Extract(
+                    (annotation as Annotation<Option<Int64>>).getOrThrow())
+                annos.add(CreateEnumCaseIndex(builder, if (let Some(value) <- index) { value } else { -1 }))
+            } else if (annotationType == TypeInfo.of<VirMethodOffset>()) {
+                annoTypes.add(CHIRFB_ANNOTATION_VIR_METHOD_OFFSET)
+                let offset = VirMethodOffset.Extract(
+                    (annotation as Annotation<Option<Int64>>).getOrThrow())
+                annos.add(CreateVirMethodOffset(builder, if (let Some(value) <- offset) { value } else { -1 }))
+            } else if (annotationType == TypeInfo.of<OverrideSrcFuncType>()) {
+                annoTypes.add(CHIRFB_ANNOTATION_OVERRIDE_SRC_FUNC_TYPE)
+                let funcType = OverrideSrcFuncType.Extract(
+                    (annotation as Annotation<Option<FuncType>>).getOrThrow())
+                let typeId = if (let Some(value) <- funcType) {
+                    GetId((value as Type).getOrThrow())
+                } else {
+                    0u32
+                }
+                annos.add(CreateOverrideSrcFuncType(builder, typeId))
+            } else if (annotationType == TypeInfo.of<AnnoFactoryInfo>()) {
+                continue
+            } else {
+                CJC_ABORT()
+            }
+        }
+        let location = Serialize(GetDebugLocation(obj))
+        return CreateBaseDirect(builder, Some(annoTypes), Some(annos), location, obj.GetAttributeInfo().GetRawAttrs())
+    }
+
+    private func Serialize(obj: MemberVarInfo): FlatBufferOffset {
+        let initializerFunc = if (let Some(value) <- obj.initializerFunc) {
+            GetId((value as Value).getOrThrow())
+        } else {
+            0u32
+        }
+        let outerDef = if (let Some(value) <- obj.outerDef) { GetId(value) } else { 0u32 }
+        return CreateMemberVarInfoDirect(builder, Some(obj.name), Some(obj.rawMangledName), GetId(obj.ty),
+            obj.attributeInfo.GetRawAttrs(), Serialize(obj.loc), Serialize(obj.annoInfo), initializerFunc, outerDef)
+    }
+
+    private func Serialize(obj: EnumCtorInfo): FlatBufferOffset {
+        let funcType = if (let Some(value) <- obj.funcType) {
+            GetId((value as Type).getOrThrow())
+        } else {
+            0u32
+        }
+        return CreateEnumCtorInfoDirect(builder, Some(obj.name), Some(obj.mangledName), funcType, 0u32)
+    }
+
+    private func Serialize(obj: Type): FlatBufferOffset {
+        let kind = UInt8(TypeKindIndex(obj.GetTypeKind()))
+        let argTys = GetId(obj.GetTypeArgs())
+        return CreateTypeDirect(builder, kind, if (argTys.isEmpty()) { None } else { Some(argTys) })
+    }
+
+    private func Serialize(obj: RawArrayType): FlatBufferOffset {
+        let base = Serialize((obj as Type).getOrThrow())
+        return CreateRawArrayType(builder, base, UInt32(obj.GetDims()))
+    }
+
+    private func Serialize(obj: VArrayType): FlatBufferOffset {
+        let base = Serialize((obj as Type).getOrThrow())
+        return CreateVArrayType(builder, base, Int64(obj.GetSize()))
+    }
+
+    private func Serialize(obj: FuncType): FlatBufferOffset {
+        let base = Serialize((obj as Type).getOrThrow())
+        return CreateFuncType(builder, base, obj.IsCFunc(), obj.HasVarArg())
+    }
+
+    private func Serialize(obj: CustomType): FlatBufferOffset {
+        let base = Serialize((obj as Type).getOrThrow())
+        return CreateCustomType(builder, base, GetId(obj.GetCustomTypeDef()))
+    }
+
+    private func Serialize(obj: GenericType): FlatBufferOffset {
+        let base = Serialize((obj as Type).getOrThrow())
+        let upperBounds = GetId(obj.GetUpperBounds())
+        return CreateGenericTypeDirect(builder, base, Some(obj.GetIdentifier()), Some(obj.GetSrcCodeIdentifier()),
+            if (upperBounds.isEmpty()) { None } else { Some(upperBounds) })
+    }
+
+    private func Serialize(obj: Value): FlatBufferOffset {
+        let base = Serialize((obj as Base).getOrThrow())
+        let kind = match (obj.GetValueKind()) {
+            case ValueKind.KIND_LITERAL => 0u8
+            case ValueKind.KIND_GLOBALVAR => 1u8
+            case ValueKind.KIND_PARAMETER => 2u8
+            case ValueKind.KIND_LOCALVAR => 3u8
+            case ValueKind.KIND_FUNC => 4u8
+            case ValueKind.KIND_BLOCK => 5u8
+            case ValueKind.KIND_BLOCK_GROUP => 6u8
+        }
+        return CreateValueDirect(builder, base, GetId(obj.GetType()), Some(obj.GetIdentifier()), kind)
+    }
+
+    private func Serialize(obj: Parameter): FlatBufferOffset {
+        let base = Serialize((obj as Value).getOrThrow())
+        let ownedFunc = if (let Some(value) <- obj.GetOwnerFunc()) {
+            GetId((value as Value).getOrThrow())
+        } else {
+            0u32
+        }
+        let ownedLambda = if (let Some(value) <- obj.GetOwnerLambda()) {
+            GetId((value as Expression).getOrThrow())
+        } else {
+            0u32
+        }
+        return CreateParameterDirect(builder, base, ownedFunc, ownedLambda,
+            Some(obj.GetSrcCodeIdentifier()), Serialize(obj.GetAnnoInfo()))
+    }
+
+    private func Serialize(obj: LocalVar): FlatBufferOffset {
+        let base = Serialize((obj as Value).getOrThrow())
+        return CreateLocalVarDirect(builder, base, GetId(obj.GetExpr()), obj.IsRetValue(),
+            Some(obj.GetSrcCodeIdentifier()))
+    }
+
+    private func Serialize(obj: GlobalValue): FlatBufferOffset {
+        let base = Serialize((obj as Value).getOrThrow())
+        let declaredParent = GetId(obj.GetParentCustomTypeDef())
+        let features = ArrayList<FlatBufferOffset>()
+        for (name in obj.GetFeatures()) {
+            features.add(builder.CreateSharedString(name))
+        }
+        return CreateGlobalValueDirect(builder, base, Some(obj.GetSrcCodeIdentifier()),
+            Some(obj.GetRawMangledName()), Some(obj.GetPackageName()), declaredParent,
+            if (features.isEmpty()) { None } else { Some(features) }, Serialize(obj.GetAnnoInfo()))
+    }
+
+    private func Serialize(obj: GlobalVar): FlatBufferOffset {
+        let base = Serialize((obj as GlobalValue).getOrThrow())
+        return CreateGlobalVar(builder, base, GetId(obj.GetInitializerValue()))
+    }
+
+    private func Serialize(obj: Block): FlatBufferOffset {
+        let base = Serialize((obj as Value).getOrThrow())
+        let parentGroup = if (let Some(value) <- obj.GetParentBlockGroup()) {
+            GetId((value as Value).getOrThrow())
+        } else {
+            0u32
+        }
+        let exprs = GetId(obj.GetExpressions())
+        let predecessors = ArrayList<UInt32>()
+        for (predecessor in obj.GetPredecessors()) {
+            predecessors.add(GetId((predecessor as Value).getOrThrow()))
+        }
+        let exceptionCatchList = ArrayList<UInt32>()
+        if (obj.IsLandingPadBlock()) {
+            for (exception in obj.GetExceptions()) {
+                exceptionCatchList.add(GetId((exception as Type).getOrThrow()))
+            }
+        }
+        return CreateBlockDirect(builder, base, parentGroup,
+            if (exprs.isEmpty()) { None } else { Some(exprs) },
+            if (predecessors.isEmpty()) { None } else { Some(predecessors) }, obj.IsLandingPadBlock(),
+            if (exceptionCatchList.isEmpty()) { None } else { Some(exceptionCatchList) })
+    }
+
+    private func Serialize(obj: BlockGroup): FlatBufferOffset {
+        CJC_ASSERT(obj.GetOwnerFunc().isSome() || obj.GetOwnerExpression().isSome())
+        let base = Serialize((obj as Value).getOrThrow())
+        let entryBlock = if (let Some(value) <- obj.GetEntryBlock()) {
+            GetId((value as Value).getOrThrow())
+        } else {
+            0u32
+        }
+        let blocks = ArrayList<UInt32>()
+        for (block in obj.GetBlocks()) {
+            blocks.add(GetId((block as Value).getOrThrow()))
+        }
+        let ownedFunc = if (let Some(value) <- obj.GetOwnerFunc()) {
+            GetId((value as Value).getOrThrow())
+        } else {
+            0u32
+        }
+        let ownedExpression = if (let Some(value) <- obj.GetOwnerExpression()) {
+            GetId(value)
+        } else {
+            0u32
+        }
+        return CreateBlockGroupDirect(builder, base, entryBlock,
+            if (blocks.isEmpty()) { None } else { Some(blocks) }, ownedFunc, ownedExpression)
+    }
+
+    private func Serialize(obj: Function): FlatBufferOffset {
+        let base = Serialize((obj as GlobalValue).getOrThrow())
+        var genericDecl = 0u32
+        if (let Some(genericFunction) <- obj.GetGenericDecl()) {
+            if (genericFunction.IsFuncWithBody()) {
+                genericDecl = GetId((genericFunction as Value).getOrThrow())
+            }
+        }
+        var originalLambdaInfo = 0u32
+        if (obj.GetFuncKind() == FuncKind.LAMBDA) {
+            if (let Some(info) <- obj.originalLambdaInfo) {
+                let genericTypeParams = ArrayList<UInt32>()
+                for (param in info.genericTypeParams) {
+                    genericTypeParams.add(GetId((param as Type).getOrThrow()))
+                }
+                originalLambdaInfo = CreateFuncSigInfoDirect(builder, Some(info.funcName),
+                    GetId((info.funcType as Type).getOrThrow()),
+                    if (genericTypeParams.isEmpty()) { None } else { Some(genericTypeParams) })
+            }
+        }
+        let genericTypeParams = ArrayList<UInt32>()
+        for (param in obj.GetGenericTypeParams()) {
+            genericTypeParams.add(GetId((param as Type).getOrThrow()))
+        }
+        let paramDftValHostFunc = if (let Some(value) <- obj.GetParamDftValHostFunc()) {
+            GetId((value as Value).getOrThrow())
+        } else {
+            0u32
+        }
+        var body = 0u32
+        let params = ArrayList<UInt32>()
+        for (param in obj.GetParams()) {
+            params.add(GetId((param as Value).getOrThrow()))
+        }
+        var retVal = 0u32
+        let propLoc = Serialize(obj.GetPropLocation())
+        if (obj.IsFuncWithBody()) {
+            body = GetId((obj.GetBody().getOrThrow() as Value).getOrThrow())
+            if (let Some(value) <- obj.GetReturnValue()) {
+                retVal = GetId((value as Value).getOrThrow())
+            }
+        }
+        return CreateFunctionDirect(builder, base, genericDecl, UInt8(FuncKindIndex(obj.GetFuncKind())),
+            obj.IsFastNative(), obj.IsCFFIWrapper(), originalLambdaInfo,
+            if (genericTypeParams.isEmpty()) { None } else { Some(genericTypeParams) }, paramDftValHostFunc, body,
+            if (params.isEmpty()) { None } else { Some(params) }, retVal, propLoc,
+            obj.localId, obj.blockId, obj.blockGroupId)
+    }
+
+    private func Serialize(obj: LiteralValue): FlatBufferOffset {
+        let base = Serialize((obj as Value).getOrThrow())
+        return CreateLiteralValue(builder, base, UInt8(LiteralKindIndex(obj.literalKind)))
+    }
+
+    private func Serialize(obj: BoolLiteral): FlatBufferOffset {
+        return CreateBoolLiteral(builder, Serialize((obj as LiteralValue).getOrThrow()), obj.GetVal())
+    }
+
+    private func Serialize(obj: RuneLiteral): FlatBufferOffset {
+        return CreateRuneLiteral(builder, Serialize((obj as LiteralValue).getOrThrow()), UInt32(obj.GetVal()))
+    }
+
+    private func Serialize(obj: StringLiteral): FlatBufferOffset {
+        let base = Serialize((obj as LiteralValue).getOrThrow())
+        return CreateStringLiteral(builder, base, builder.CreateSharedString(obj.GetVal()))
+    }
+
+    private func Serialize(obj: IntLiteral): FlatBufferOffset {
+        return CreateIntLiteral(builder, Serialize((obj as LiteralValue).getOrThrow()), obj.GetUnsignedVal())
+    }
+
+    private func Serialize(obj: FloatLiteral): FlatBufferOffset {
+        return CreateFloatLiteral(builder, Serialize((obj as LiteralValue).getOrThrow()), obj.GetVal())
+    }
+
+    private func Serialize(obj: UnitLiteral): FlatBufferOffset {
+        return CreateUnitLiteral(builder, Serialize((obj as LiteralValue).getOrThrow()))
+    }
+
+    private func Serialize(obj: NullLiteral): FlatBufferOffset {
+        return CreateNullLiteral(builder, Serialize((obj as LiteralValue).getOrThrow()))
     }
 
     public func SerializePackage(pkg: Package): String {

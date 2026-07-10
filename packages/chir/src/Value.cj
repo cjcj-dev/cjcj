@@ -1042,11 +1042,11 @@ public class Function <: GlobalValue {
     private var returnValue: Option<LocalVar> = None
     private var genericDecl: Option<Function> = None
     private var paramDftValHostFunc: Option<Function> = None
-    private var blockId: UInt64 = 0u64
-    private var blockGroupId: UInt64 = 0u64
-    private var localId: UInt64 = 0u64
+    var blockId: UInt64 = 0u64
+    var blockGroupId: UInt64 = 0u64
+    var localId: UInt64 = 0u64
     private var propLocation: DebugLocation = DebugLocation()
-    private var originalLambdaInfo: Option<FuncSigInfo> = None
+    var originalLambdaInfo: Option<FuncSigInfo> = None
     private var isCFFIWrapper: Bool = false
 
     public init(funcType: FuncType, identifier: String, srcCodeIdentifier: String, rawMangledName: String,
