@@ -6050,11 +6050,6 @@ public class TypeChecker {
                 targets.add(target)
             }
         }
-        if (targets.isEmpty()) {
-            refExpr.SetTy(TypeManager.GetInvalidTy())
-            refExpr.ref.targets.clear()
-            return
-        }
         if (let Some(diagValue) <- impl.diag) {
             if (!TypeCheckReferenceFilterAndCheckTargetsOfRef(diagValue, impl.typeManager, ctx, refExpr, targets)) {
                 refExpr.SetTy(TypeManager.GetInvalidTy())
