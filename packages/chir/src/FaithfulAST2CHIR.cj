@@ -1652,6 +1652,18 @@ public class FaithfulAST2CHIR {
         for (decl in importedGenericInstantiatedNominalDecls) { TranslateCustomTypeTyIfReady(decl) }
     }
 
+    private func CollectCommonMatchedDecls(declContainers: ArrayList<ArrayList<AstDecl>>): ArrayList<AstDecl> {
+        let commonDecls = ArrayList<AstDecl>()
+        for (container in declContainers) {
+            for (decl in container) {
+                if (decl.IsCommonMatchedWithSpecific() && decl.astKind == ASTKind.EXTEND_DECL) {
+                    commonDecls.add(decl)
+                }
+            }
+        }
+        return commonDecls
+    }
+
     private func AttachCustomTypeGenericParams(decl: AstDecl): Unit {
         let def = chirType.GetGlobalNominalCache(decl)
         if (let Some(generic) <- decl.GetGeneric()) {
