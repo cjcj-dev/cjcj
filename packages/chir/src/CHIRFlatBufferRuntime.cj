@@ -114,3 +114,51 @@ func ReadScalar<T>(data: Array<UInt8>, pos: Int64): T {
     CJC_ASSERT(false)
     return (UInt8(0) as T).getOrThrow()
 }
+
+// flatbuffers/table.h:27-74. The C++ data_ pointer is represented by data and
+// pos; nullable result pointers are represented by Option<Int64> offsets into
+// the same byte array.
+class Table {
+    let data: Array<UInt8>
+    let pos: Int64
+
+    init(data: Array<UInt8>, pos: Int64) {
+        this.data = data
+        this.pos = pos
+    }
+
+    func GetVTable(): Int64 {
+        return pos - Int64(ReadScalar<Int32>(data, pos))
+    }
+
+    func GetOptionalFieldOffset(field: UInt16): UInt16 {
+        let vtable = GetVTable()
+        let vtsize = ReadScalar<UInt16>(data, vtable)
+        return if (field < vtsize) { ReadScalar<UInt16>(data, vtable + Int64(field)) } else { 0u16 }
+    }
+
+    func GetField<T>(field: UInt16, defaultval: T): T {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return if (fieldOffset != 0u16) {
+            ReadScalar<T>(data, pos + Int64(fieldOffset))
+        } else {
+            defaultval
+        }
+    }
+
+    func GetPointer(field: UInt16): Option<Int64> {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        let pointerPos = pos + Int64(fieldOffset)
+        return if (fieldOffset != 0u16) {
+            Some(pointerPos + Int64(ReadScalar<UInt32>(data, pointerPos)))
+        } else {
+            None
+        }
+    }
+
+    func GetStruct(field: UInt16): Option<Int64> {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        let pointerPos = pos + Int64(fieldOffset)
+        return if (fieldOffset != 0u16) { Some(pointerPos) } else { None }
+    }
+}
