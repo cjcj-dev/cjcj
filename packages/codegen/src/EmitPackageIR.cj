@@ -349,8 +349,8 @@ private func EmitCJSDKVersion(cgMod: CGModule): Unit {
             }
             unsafe {
                 LLVMSetInitializer(versionGlobal, initializer)
+                LLVMSetAlignment(versionGlobal, 1u32)
                 LLVMSetLinkage(versionGlobal, LLVMLinkageValue(LLVMLinkage.Private))
-                LLVMSetGlobalConstant(versionGlobal, 1)
             }
             cgMod.GetCGContext().AddLLVMUsedVars("cj.sdk.version")
         }
