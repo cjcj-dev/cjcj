@@ -2881,7 +2881,7 @@ private func CHIRCheckerIsOptionalCType(ty: Type, includeNormalStruct: Bool): Bo
         return true
     }
     if (let Some(structTy) <- (ty as StructType)) {
-        return includeNormalStruct || structTy.GetCustomTypeDef().TestAttr(Attribute.C)
+        return includeNormalStruct || structTy.GetStructDef().IsCStruct()
     }
     return false
 }

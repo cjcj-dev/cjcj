@@ -2721,7 +2721,6 @@ public class Translator {
         if (decl.TestAttr(AstAttribute.FOREIGN)) { memberInfo.attributeInfo.Enable(Attribute.FOREIGN) }
         if (decl.TestAttr(AstAttribute.IMPORTED)) { memberInfo.attributeInfo.Enable(Attribute.IMPORTED) }
         if (decl.TestAttr(AstAttribute.SRC_IMPORTED)) { memberInfo.attributeInfo.Enable(Attribute.SRC_CODE_IMPORTED) }
-        if (decl.TestAttr(AstAttribute.C)) { memberInfo.attributeInfo.Enable(Attribute.C) }
         if (decl.TestAttr(AstAttribute.IMPLICIT_ADD)) { memberInfo.attributeInfo.Enable(Attribute.IMPLICIT_ADD) }
     }
 
