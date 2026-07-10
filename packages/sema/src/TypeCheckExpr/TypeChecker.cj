@@ -424,6 +424,62 @@ private func typeCheckExprClearKeepTargets(expr: Expr): Unit {
     }
 }
 
+private func CollectGenericParam(funcDecl: FuncDecl, desugared: FuncDecl): Unit {
+    let funcBody = if (let Some(value) <- funcDecl.funcBody) { value } else { return }
+    let originalGeneric = if (let Some(value) <- funcBody.generic) { value } else { return }
+    if (originalGeneric.typeParameters.isEmpty()) {
+        return
+    }
+    let generic = Generic()
+    var typeParamIdx: Int64 = 0
+    let orig2New = HashMap<String, String>()
+    for (param in originalGeneric.typeParameters) {
+        let typeParam = GenericParamDecl()
+        let newIdentifier = param.identifier.Val() + "$" + typeParamIdx.toString()
+        typeParamIdx++
+        typeParam.identifier = SrcIdentifier(newIdentifier)
+        typeParam.outerDecl = desugared
+        if (!orig2New.contains(param.identifier.Val())) {
+            orig2New[param.identifier.Val()] = newIdentifier
+        }
+        generic.typeParameters.add(typeParam)
+    }
+    for (constraint in originalGeneric.genericConstraints) {
+        let genericConstraint = GenericConstraint()
+        CopyBasicInfo(constraint, genericConstraint)
+        let constraintType = constraint.refType.getOrThrow()
+        let constraintIdentifier = constraintType.ref.identifier.Val()
+        let newConstraintIdentifier = if (let Some(value) <- orig2New.get(constraintIdentifier)) {
+            value
+        } else {
+            orig2New[constraintIdentifier] = ""
+            ""
+        }
+        let refType = RefType()
+        refType.ref.identifier = SrcIdentifier(newConstraintIdentifier)
+        genericConstraint.refType = refType
+        for (upperBound in constraint.upperBounds) {
+            genericConstraint.upperBounds.add((ASTCloner.Clone(upperBound) as Type).getOrThrow())
+        }
+        generic.genericConstraints.add(genericConstraint)
+    }
+    desugared.funcBody.getOrThrow().generic = generic
+    let replacesTypeParams = { node: Node =>
+        if (let Some(refType) <- (node as RefType)) {
+            if (let Some(newIdentifier) <- orig2New.get(refType.ref.identifier.Val())) {
+                refType.ref.identifier = SrcIdentifier(newIdentifier)
+            }
+        } else if (let Some(refExpr) <- (node as RefExpr)) {
+            if (let Some(newIdentifier) <- orig2New.get(refExpr.ref.identifier.Val())) {
+                refExpr.ref.identifier = SrcIdentifier(newIdentifier)
+            }
+        }
+        VisitAction.WALK_CHILDREN
+    }
+    let _ = Walker(desugared, visitPre: replacesTypeParams).Walk()
+    desugared.EnableAttr(Attribute.GENERIC)
+}
+
 public class TypeChecker {
     private var ci: Option<CompilerInstance> = None
     private var impl: TypeCheckerImpl = TypeCheckerImpl()
@@ -996,6 +1052,8 @@ public class TypeChecker {
         if (funcDecl.TestAttr(Attribute.GLOBAL)) {
             ret.EnableAttr(Attribute.GLOBAL)
         }
+        ret.EnableAttr(Attribute.PRIVATE)
+        CollectGenericParam(funcDecl, ret)
         AddCurFile(ret, file: funcDecl.curFile)
         return ret
     }
@@ -1005,14 +1063,40 @@ public class TypeChecker {
             return
         }
         let funcBody = funcDecl.funcBody.getOrThrow()
-        if (funcBody.paramLists.isEmpty()) {
+        if (funcBody.paramLists.isEmpty() || funcDecl.TestAttr(Attribute.IMPORTED)) {
             return
         }
         let funcParams = ArrayList<FuncParam>()
+        let isStatic = funcDecl.TestAttr(Attribute.STATIC)
+        let walkFunc = { node: Node =>
+            if (let Some(nestedFunc) <- (node as FuncDecl)) {
+                if (isStatic) {
+                    nestedFunc.EnableAttr(Attribute.STATIC)
+                }
+                GetSingleParamFunc(nestedFunc)
+            }
+            VisitAction.WALK_CHILDREN
+        }
+        let walkOrigin = { node: Node =>
+            if (node.astKind == ASTKind.FUNC_DECL && isStatic) {
+                node.EnableAttr(Attribute.STATIC)
+            }
+            VisitAction.WALK_CHILDREN
+        }
         for (fp in funcBody.paramLists[0].params) {
             if (fp.assignment.isSome() && !fp.TestAttr(Attribute.HAS_INITIAL)) {
-                fp.desugarDecl = Some(MakeDefaultParamFunction(fp, funcDecl, funcParams))
+                if (funcDecl.op != TokenKind.ILLEGAL ||
+                    funcDecl.TestAnyAttr(Attribute.OPEN, Attribute.ABSTRACT, Attribute.DEFAULT)) {
+                    if (let Some(diagValue) <- impl.diag) {
+                        DiagCannotHaveDefaultParam(diagValue, funcDecl, fp)
+                    }
+                    return
+                }
+                let desugarDecl = MakeDefaultParamFunction(fp, funcDecl, funcParams)
+                fp.desugarDecl = Some(desugarDecl)
+                let _ = Walker(desugarDecl, visitPre: walkFunc).Walk()
                 if (let Some(assignment) <- fp.assignment) {
+                    let _ = Walker(assignment, visitPre: walkOrigin).Walk()
                     MarkParamWithInitialValue(assignment)
                 }
             }
