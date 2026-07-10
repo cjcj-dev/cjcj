@@ -202,7 +202,7 @@ public func DiagCannotHaveDefaultParam(diag: BasicDiagnosticEngine, fd: FuncDecl
         "abstract"
     }
     diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_cannot_have_default_param,
-        MakeRange(fp.begin, fp.end), arguments: [funcType]).Emit()
+        MakeRange(fp.GetBegin(), fp.GetEnd()), arguments: [funcType]).Emit()
 }
 
 public func DiagMismatchedTypesWithFoundTy(diag: BasicDiagnosticEngine, node: Node, expected: String,
