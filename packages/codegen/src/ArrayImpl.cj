@@ -11,6 +11,7 @@ import cjcj::chir.GetElementByName
 import cjcj::chir.GetElementRef
 import cjcj::chir.LocalVar
 import cjcj::chir.RawArrayLiteralInit
+import cjcj::chir.RawArrayInitByValue
 import cjcj::chir.RawArrayType
 import cjcj::chir.StoreElementByName
 import cjcj::chir.StoreElementRef
@@ -288,17 +289,24 @@ private func InitArrayFilledWithConstant(irBuilder: IRBuilder2, array: LLVMValue
 }
 
 public func GenerateRawArrayInitByValue(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
-    if (chirExpr.GetNumOfOperands() < 3) {
-        return LLVMNullValue()
+    let rawArrayInitByValue = (chirExpr as RawArrayInitByValue).getOrThrow()
+    let cgMod = irBuilder.GetCGModule()
+    let valueOperand = rawArrayInitByValue.GetInitValue()
+    let elemValue = cgMod.GetMappedCGValue(valueOperand)
+    let sizeVal = cgMod.GetMappedCGValue(rawArrayInitByValue.GetSize()).GetRawValue()
+    let rawArrayType = rawArrayInitByValue.GetRawArray().GetType().getOrThrow().GetTypeArgs()[0]
+    let arrTy = (rawArrayType as RawArrayType).getOrThrow()
+    let array = cgMod.GetMappedCGValue(rawArrayInitByValue.GetRawArray()).GetRawValue()
+    let isNullValue = if (let Some(localVar) <- (valueOperand as LocalVar)) {
+        localVar.GetExpr().getOrThrow().IsConstantNull()
+    } else {
+        false
     }
-    let rawArrayValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0))
-    if (let Some(rawArrayTy) <- GetRawArrayType(rawArrayValue)) {
-        let sizeValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(1)).GetRawValue()
-        let initValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(2)).GetRawValue()
-        GenerateRawArrayFillLoop(irBuilder, rawArrayValue, rawArrayTy, sizeValue, initValue)
-        return rawArrayValue.GetRawValue()
+    if (isNullValue) {
+        return array
     }
-    return LLVMNullValue()
+    irBuilder.CallArrayInit(array, sizeVal, elemValue.GetRawValue(), arrTy)
+    return array
 }
 
 private func GenerateCheckedRawArrayAllocate(irBuilder: IRBuilder2, rawArrayTy: RawArrayType,
@@ -337,51 +345,6 @@ private func GetRawArrayType(rawArrayValue: CGValue): Option<RawArrayType> {
         return FindRawArrayType(rawArrayCGType.GetOriginal())
     }
     return None
-}
-
-private func CreateRawArrayElementPointer(irBuilder: IRBuilder2, rawArrayValue: CGValue,
-    rawArrayTy: RawArrayType, elementIdx: LLVMValueRef): LLVMValueRef {
-    return irBuilder.GetArrayElementAddr(rawArrayTy, rawArrayValue.GetRawValue(), elementIdx, false)
-}
-
-private func GenerateRawArrayFillLoop(irBuilder: IRBuilder2, rawArrayValue: CGValue, rawArrayTy: RawArrayType,
-    sizeValue: LLVMValueRef, initValue: LLVMValueRef): Unit {
-    let currentBlock = irBuilder.GetInsertBlock()
-    if (currentBlock.isNull()) {
-        return
-    }
-    let parentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
-    if (parentFunction.isNull()) {
-        return
-    }
-    let loopCondBlock = irBuilder.CreateEntryBasicBlock(parentFunction, "arr.init.start")
-    unsafe { LLVMMoveBasicBlockAfter(loopCondBlock, currentBlock) }
-    let loopBodyBlock = irBuilder.CreateEntryBasicBlock(parentFunction, "arr.init.body")
-    unsafe { LLVMMoveBasicBlockAfter(loopBodyBlock, loopCondBlock) }
-    let loopEndBlock = irBuilder.CreateEntryBasicBlock(parentFunction, "arr.init.end")
-    unsafe { LLVMMoveBasicBlockAfter(loopEndBlock, loopBodyBlock) }
-
-    let indexSlot = irBuilder.CreateEntryAlloca(unsafe { LLVMTypeOf(sizeValue) }, name: "iterator")
-    let zeroValue = unsafe { LLVMConstInt(LLVMTypeOf(sizeValue), 0u64, 0) }
-    let oneValue = unsafe { LLVMConstInt(LLVMTypeOf(sizeValue), 1u64, 0) }
-    irBuilder.CreateStore(zeroValue, indexSlot)
-    irBuilder.CreateBr(loopCondBlock)
-
-    irBuilder.SetInsertPoint(loopCondBlock)
-    let currentIndex = irBuilder.CreateLoad(unsafe { LLVMTypeOf(sizeValue) }, indexSlot, name: "iterator")
-    let hasElement = irBuilder.CreateICmp(LLVMIntPredicate.SLT, currentIndex, sizeValue, name: "iterator.size.cmp")
-    irBuilder.CreateCondBr(hasElement, loopBodyBlock, loopEndBlock)
-
-    irBuilder.SetInsertPoint(loopBodyBlock)
-    let elementPtr = CreateRawArrayElementPointer(irBuilder, rawArrayValue, rawArrayTy, currentIndex)
-    let elementCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rawArrayTy.GetElementType())
-    StoreRawArrayElement(irBuilder, rawArrayValue.GetRawValue(), elementCGType, CGValue(initValue, elementCGType),
-        elementPtr)
-    let nextIndex = irBuilder.CreateBinary(ExprKind.ADD, currentIndex, oneValue, name: "iterator.next")
-    irBuilder.CreateStore(nextIndex, indexSlot)
-    irBuilder.CreateBr(loopCondBlock)
-
-    irBuilder.SetInsertPoint(loopEndBlock)
 }
 
 public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {

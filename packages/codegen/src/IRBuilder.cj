@@ -249,6 +249,149 @@ private func CreateArrayMemSet(irBuilder: IRBuilder2, arrInfo: ByteArrayInfo, va
     let _ = irBuilder.CreateMemSet(dataPtr, memSetValue, arrInfo.dataSize, align: 1u32)
 }
 
+private func InitByteArrayData(irBuilder: IRBuilder2, arrPtr: LLVMValueRef, arrayLen: LLVMValueRef,
+    value: LLVMValueRef, arrayType: LLVMTypeRef): Unit {
+    let arrayPtr = irBuilder.CreateBitCast(irBuilder.GetPayloadFromObject(arrPtr),
+        unsafe { LLVMPointerType(arrayType, 1u32) })
+    let valType = unsafe { LLVMTypeOf(value) }
+    let initValue = if (unsafe { LLVMGetTypeKind(valType) } == LLVM_POINTER_TYPE_KIND) {
+        let i8Type = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
+        let addressSpace = unsafe { LLVMGetPointerAddressSpace(valType) }
+        irBuilder.CreateLoad(i8Type, irBuilder.CreateBitCast(value, unsafe { LLVMPointerType(i8Type, addressSpace) }))
+    } else {
+        value
+    }
+    if (unsafe { LLVMSelfhostIsConstantInt(arrayLen) } != 0 &&
+        unsafe { LLVMConstIntGetZExtValue(arrayLen) } <= 2147483647u64) {
+        CreateArrayMemSet(irBuilder, ByteArrayInfo(arrayPtr, arrayType, arrayLen, irBuilder.GetInt64(0)), initValue)
+        return
+    }
+
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>([GenNameForBB("byte.arr.init.start"),
+        GenNameForBB("byte.arr.init.body"), GenNameForBB("byte.arr.init.end")]))
+    CJC_ASSERT(blocks.size >= 3)
+    let whileLoopHeader = blocks[0]
+    let whileLoopBody = blocks[1]
+    let afterWhileLoop = blocks[2]
+    let sizeOf2G = irBuilder.GetInt64(2147483647)
+    let i64Ty = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let iterator = irBuilder.CreateEntryAlloca(i64Ty, name: "iterator")
+    irBuilder.CreateStore(irBuilder.GetInt64(0), iterator)
+    irBuilder.CreateBr(whileLoopHeader)
+
+    irBuilder.SetInsertPoint(whileLoopHeader)
+    let iteratorPlus2G = irBuilder.CreateBinary(ExprKind.ADD, irBuilder.CreateLoad(i64Ty, iterator), sizeOf2G)
+    let cmpResult = irBuilder.CreateICmp(LLVMIntPredicate.SLT, iteratorPlus2G, arrayLen, name: "max.size")
+    irBuilder.CreateCondBr(cmpResult, whileLoopBody, afterWhileLoop)
+
+    irBuilder.SetInsertPoint(whileLoopBody)
+    let iteratorIndex = irBuilder.CreateLoad(i64Ty, iterator)
+    CreateArrayMemSet(irBuilder, ByteArrayInfo(arrayPtr, arrayType, sizeOf2G, iteratorIndex), initValue)
+    let newIterator = irBuilder.CreateBinary(ExprKind.ADD, iteratorIndex, sizeOf2G)
+    irBuilder.CreateStore(newIterator, iterator)
+    irBuilder.CreateBr(whileLoopHeader)
+
+    irBuilder.SetInsertPoint(afterWhileLoop)
+    let index = irBuilder.CreateLoad(i64Ty, iterator)
+    let residualSize = irBuilder.CreateBinary(ExprKind.SUB, arrayLen, index)
+    CreateArrayMemSet(irBuilder, ByteArrayInfo(arrayPtr, arrayType, residualSize, index), initValue)
+}
+
+private func InitArrayDataUG(irBuilder: IRBuilder2, arrPtr: LLVMValueRef, arrayLen: LLVMValueRef,
+    value: LLVMValueRef, arrayType: LLVMTypeRef, arrTy: RawArrayType): Unit {
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>([GenNameForBB("arr.init.start"),
+        GenNameForBB("arr.init.body"), GenNameForBB("arr.init.end")]))
+    CJC_ASSERT(blocks.size >= 3)
+    let startBB = blocks[0]
+    let bodyBB = blocks[1]
+    let endBB = blocks[2]
+    let isNotZeroLen = irBuilder.GenerateCallExpectFunction(irBuilder.CreateICmp(LLVMIntPredicate.NE, arrayLen,
+        irBuilder.GetInt64(0)), irBuilder.GetTrue())
+    irBuilder.CreateCondBr(isNotZeroLen, startBB, endBB)
+    irBuilder.SetInsertPoint(startBB)
+    let i64Ty = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let iterator = irBuilder.CreateEntryAlloca(i64Ty, name: "iterator")
+    irBuilder.CreateStore(irBuilder.GetInt64(0), iterator, isVolatile: true)
+    irBuilder.CreateBr(bodyBB)
+
+    irBuilder.SetInsertPoint(bodyBB)
+    let index = irBuilder.CreateLoad(i64Ty, iterator)
+    var offset = irBuilder.CallIntrinsicGetFieldOffset(ArrayList<LLVMValueRef>([
+        irBuilder.CreateTypeInfo(arrTy), index, irBuilder.GetInt32(8)]))
+    offset = irBuilder.CreateBinary(ExprKind.ADD, offset, unsafe {
+        LLVMConstInt(LLVMTypeOf(offset), irBuilder.GetPayloadOffset(), 0)
+    })
+    let fieldType = arrTy.GetElementType()
+    var fieldAddr = irBuilder.CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) },
+        arrPtr, ArrayList<LLVMValueRef>([offset]))
+    let fieldAddrCGType = CGType.GetOrCreate(irBuilder.GetCGModule(),
+        CGType.GetRefTypeOf(irBuilder.GetCGContext().GetCHIRBuilder(), fieldType))
+    let fieldCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), fieldType)
+    if (!fieldType.IsGeneric()) {
+        fieldAddr = irBuilder.CreateBitCast(fieldAddr, unsafe { LLVMPointerType(fieldCGType.GetLLVMType(), 1u32) })
+    }
+    irBuilder.GetCGContext().SetBasePtr(fieldAddr, arrPtr)
+    irBuilder.CreateStore(CGValue(value, fieldCGType), CGValue(fieldAddr, fieldAddrCGType))
+    let incremented = irBuilder.CreateBinary(ExprKind.ADD, index, irBuilder.GetInt64(1))
+    irBuilder.CreateStore(incremented, iterator)
+    let cmpResult = irBuilder.CreateICmp(LLVMIntPredicate.SLT, incremented, arrayLen, name: "iterator.size.cmp")
+    irBuilder.CreateCondBr(cmpResult, bodyBB, endBB)
+    irBuilder.SetInsertPoint(endBB)
+}
+
+private func InitArrayData(irBuilder: IRBuilder2, arrPtr: LLVMValueRef, arrayLen: LLVMValueRef,
+    value: LLVMValueRef, arrayType: LLVMTypeRef): Unit {
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>([GenNameForBB("arr.init.start"),
+        GenNameForBB("arr.init.body"), GenNameForBB("arr.init.end")]))
+    CJC_ASSERT(blocks.size >= 3)
+    let startBB = blocks[0]
+    let bodyBB = blocks[1]
+    let endBB = blocks[2]
+    irBuilder.CreateBr(startBB)
+    irBuilder.SetInsertPoint(startBB)
+    let i64Ty = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let iterator = irBuilder.CreateEntryAlloca(i64Ty, name: "iterator")
+    irBuilder.CreateStore(irBuilder.GetInt64(0), iterator)
+    irBuilder.CreateBr(bodyBB)
+
+    irBuilder.SetInsertPoint(bodyBB)
+    let index = irBuilder.CreateLoad(i64Ty, iterator)
+    let arrHead = irBuilder.CreateBitCast(irBuilder.GetPayloadFromObject(arrPtr),
+        unsafe { LLVMPointerType(arrayType, 1u32) })
+    let dataPtr = irBuilder.CreateGEP(arrayType, arrHead, ArrayList<LLVMValueRef>([
+        irBuilder.GetInt32(0), irBuilder.GetInt32(1), irBuilder.GetInt32(0)]))
+    var elemType = LLVMNullType()
+    let structElementCount = unsafe { LLVMCountStructElementTypes(arrayType) }
+    CJC_ASSERT(structElementCount > 1u32)
+    try (elementTypes = LibC.malloc<LLVMTypeRef>(count: Int64(structElementCount)).asResource()) {
+        unsafe { LLVMGetStructElementTypes(arrayType, elementTypes.value) }
+        elemType = unsafe { LLVMGetElementType((elementTypes.value + 1).read()) }
+    }
+    let elemPtr = irBuilder.CreateGEP(elemType, dataPtr, ArrayList<LLVMValueRef>([index]))
+    let elemKind = unsafe { LLVMGetTypeKind(elemType) }
+    if (elemKind == LLVM_STRUCT_TYPE_KIND) {
+        let size = irBuilder.GetInt64(Int64(irBuilder.GetCGModule().GetTypeSize(elemType)))
+        if (irBuilder.IsLLVMTypeContainsRef(elemType)) {
+            irBuilder.CallGCWriteAgg(elemType, ArrayList<LLVMValueRef>([arrPtr, elemPtr, value, size]))
+        } else {
+            let align = irBuilder.GetCGModule().GetABITypeAlignment(elemType)
+            irBuilder.CreateMemCpy(elemPtr, align, value, align, size)
+        }
+    } else if (elemKind == LLVM_ARRAY_TYPE_KIND) {
+        let size = irBuilder.GetInt64(Int64(irBuilder.GetCGModule().GetTypeSize(elemType)))
+        irBuilder.CallGCWriteAgg(arrayType, ArrayList<LLVMValueRef>([arrPtr, elemPtr, value, size]))
+    } else if (elemType.toUIntNative() == CGType.GetRefType(irBuilder.GetLLVMContext()).toUIntNative()) {
+        irBuilder.CallGCWrite(value, arrPtr, elemPtr)
+    } else {
+        irBuilder.CreateStore(value, elemPtr)
+    }
+    let incremented = irBuilder.CreateBinary(ExprKind.ADD, index, irBuilder.GetInt64(1))
+    irBuilder.CreateStore(incremented, iterator)
+    let cmpResult = irBuilder.CreateICmp(LLVMIntPredicate.SLT, incremented, arrayLen, name: "iterator.size.cmp")
+    irBuilder.CreateCondBr(cmpResult, bodyBB, endBB)
+    irBuilder.SetInsertPoint(endBB)
+}
+
 public class IRBuilder2 <: Resource {
     private let cgMod: CGModule
     private let builder: LLVMBuilderHandle
@@ -3525,43 +3668,47 @@ public class IRBuilder2 <: Resource {
         return CreateIntrinsicCall("llvm.cj.release.rawdata", ArrayList<LLVMTypeRef>(), callArgs)
     }
 
-    public func CallArrayInit(rawArrayValue: LLVMValueRef, arrayLen: LLVMValueRef, elementValue: LLVMValueRef,
-        rawArrayTy: RawArrayType): LLVMValueRef {
-        let currentBlock = GetInsertBlock()
-        if (currentBlock.isNull()) {
-            return LLVMNullValue()
+    public func CallArrayInit(arrPtr: LLVMValueRef, arrayLen: LLVMValueRef, elemValue: LLVMValueRef,
+        arrTy: RawArrayType): Unit {
+        if (unsafe { LLVMSelfhostIsNullConstant(elemValue) } != 0) {
+            return
         }
-        let parentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
-        if (parentFunction.isNull()) {
-            return LLVMNullValue()
+        let arrayType = CGArrayType.GenerateArrayLayoutType(cgMod, arrTy)
+        let elemCGType = CGType.GetOrCreate(cgMod, arrTy.GetElementType())
+        if (elemCGType.GetSize().isNone()) {
+            InitArrayDataUG(this, arrPtr, arrayLen, elemValue, arrayType, arrTy)
+            return
         }
-        let loopCondBlock = CreateEntryBasicBlock(parentFunction, "arr.init.start")
-        unsafe { LLVMMoveBasicBlockAfter(loopCondBlock, currentBlock) }
-        let loopBodyBlock = CreateEntryBasicBlock(parentFunction, "arr.init.body")
-        unsafe { LLVMMoveBasicBlockAfter(loopBodyBlock, loopCondBlock) }
-        let loopEndBlock = CreateEntryBasicBlock(parentFunction, "arr.init.end")
-        unsafe { LLVMMoveBasicBlockAfter(loopEndBlock, loopBodyBlock) }
-
-        let int64Type = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
-        let sizeValue = CastIntegerToInt64(arrayLen)
-        let iterator = CreateEntryAlloca(int64Type, name: "iterator")
-        CreateStore(GetInt64(0), iterator)
-        CreateBr(loopCondBlock)
-
-        SetInsertPoint(loopCondBlock)
-        let currentIndex = CreateLoad(int64Type, iterator, name: "iterator")
-        let hasElement = CreateICmp(LLVMIntPredicate.SLT, currentIndex, sizeValue, name: "iterator.size.cmp")
-        CreateCondBr(hasElement, loopBodyBlock, loopEndBlock)
-
-        SetInsertPoint(loopBodyBlock)
-        let elementCGType = CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType())
-        CallArrayIntrinsicSet(rawArrayTy, rawArrayValue, currentIndex, CGValue(elementValue, elementCGType), false)
-        let nextIndex = CreateBinary(ExprKind.ADD, currentIndex, GetInt64(1), name: "iterator.next")
-        CreateStore(nextIndex, iterator)
-        CreateBr(loopCondBlock)
-
-        SetInsertPoint(loopEndBlock)
-        return LLVMNullValue()
+        let elemType = unsafe { LLVMTypeOf(elemValue) }
+        let blocks = CreateAndInsertBasicBlocks(ArrayList<String>([
+            GenNameForBB("arr.init.non-opt"), GenNameForBB("arr.init.opt")]))
+        CJC_ASSERT(blocks.size >= 2)
+        let nonOptBB = blocks[0]
+        let optBB = blocks[1]
+        var isValNull = LLVMNullValue()
+        if (IsFPType(elemType)) {
+            try (name = unsafe { LibC.mallocCString("val.is-zero") }.asResource()) {
+                isValNull = unsafe { LLVMBuildFCmp(builder.raw, LLVMRealPredicateValue(LLVMRealPredicate.OEQ),
+                    elemValue, LLVMConstReal(elemType, 0.0), name.value) }
+            }
+        } else {
+            isValNull = CreateICmp(LLVMIntPredicate.EQ, elemValue, unsafe { LLVMConstNull(elemType) },
+                name: "val.is-null")
+        }
+        let isZeroSize = CreateICmp(LLVMIntPredicate.EQ, arrayLen, GetInt64(0), name: "size.is-zero")
+        CreateCondBr(CreateBinary(ExprKind.OR, isZeroSize, isValNull), optBB, nonOptBB)
+        SetInsertPoint(nonOptBB)
+        let typeSize = GetCGModule().GetTypeSize(elemType)
+        CJC_ASSERT(typeSize > 0u64)
+        if (typeSize == 1u64) {
+            InitByteArrayData(this, arrPtr, arrayLen, elemValue, arrayType)
+            CreateBr(optBB)
+            SetInsertPoint(optBB)
+            return
+        }
+        InitArrayData(this, arrPtr, arrayLen, elemValue, arrayType)
+        CreateBr(optBB)
+        SetInsertPoint(optBB)
     }
 
     public func CreateVArrayGEP(arrayType: LLVMTypeRef, pointer: LLVMValueRef, indices: ArrayList<LLVMValueRef>,
