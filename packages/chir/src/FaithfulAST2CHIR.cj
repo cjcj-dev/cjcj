@@ -2023,10 +2023,15 @@ public class FaithfulAST2CHIR {
 
     private func TranslateOtherTopLevelDecls(node: AstPackage): Unit {
         let _ = node
-        let trans = CreateTranslator()
-        TranslateVecDecl(globalAndMemberFuncs, trans)
-        TranslateVecDecl(localConstFuncs.stableOrderValue, CreateTranslator())
-        TranslateVecDecl(globalAndStaticVars, trans)
+        for (decl in globalAndMemberFuncs) {
+            let trans = CreateTranslator()
+            let _ = Translator.TranslateASTNode(decl, trans)
+        }
+        for (decl in localConstFuncs.stableOrderValue) {
+            let trans = CreateTranslator()
+            let _ = Translator.TranslateASTNode(decl, trans)
+        }
+        TranslateVecDecl(globalAndStaticVars, CreateTranslator())
         SetCompileTimeValueFlag()
     }
 
