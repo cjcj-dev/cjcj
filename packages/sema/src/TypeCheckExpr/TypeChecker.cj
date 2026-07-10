@@ -4462,19 +4462,7 @@ public class TypeChecker {
 
     private func SynthesizeNameReference(ctx: ASTContext, nameRef: NameReferenceExpr): Ty {
         if (impl.typeManager.GetUnsolvedTyVars().isEmpty() && ctx.IsSynSkippedForCorrectTy(nameRef)) {
-            var canSkip = true
-            if (let Some(refExpr) <- (nameRef as RefExpr)) {
-                canSkip = refExpr.isThis || refExpr.isSuper
-                if (let Some(target) <- refExpr.ref.target) {
-                    let targetTy = target.GetTy() ?? TypeManager.GetInvalidTy()
-                    canSkip = !targetTy.IsPlaceholder()
-                }
-            } else if (let Some(memberAccess) <- (nameRef as MemberAccess)) {
-                canSkip = memberAccess.target.isSome()
-            }
-            if (canSkip) {
-                return nameRef.GetTy() ?? TypeManager.GetInvalidTy()
-            }
+            return nameRef.GetTy() ?? TypeManager.GetInvalidTy()
         }
         for (typeArg in nameRef.GetTypeArgs()) {
             impl.SetTypeTy(ctx, typeArg)
