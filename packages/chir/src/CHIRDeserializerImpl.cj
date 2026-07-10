@@ -1402,14 +1402,14 @@ class CHIRDeserializerImpl {
         if (kind == CHIRFB_CHIR_TYPE_KIND_TUPLE) {
             return builder.context.GetTupleTy(GetType<Type>(obj.GetArgTys()))
         }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_C_STRING) { return builder.context.GetCStringTy() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_THIS) { return builder.context.GetThisTy() }
         let argTys = obj.GetArgTys().getOrThrow()
         CJC_ASSERT(argTys.size() >= 1u32)
         let argTy = GetType<Type>((argTys.Get(0u32) as UInt32).getOrThrow()).getOrThrow()
         if (kind == CHIRFB_CHIR_TYPE_KIND_C_POINTER) { return builder.context.GetCPointerTy(argTy) }
-        if (kind == CHIRFB_CHIR_TYPE_KIND_C_STRING) { return builder.context.GetCStringTy() }
         if (kind == CHIRFB_CHIR_TYPE_KIND_REFTYPE) { return builder.context.GetRefTy(argTy) }
         if (kind == CHIRFB_CHIR_TYPE_KIND_BOXTYPE) { return builder.context.GetBoxTy(argTy) }
-        if (kind == CHIRFB_CHIR_TYPE_KIND_THIS) { return builder.context.GetThisTy() }
         CJC_ABORT()
         return builder.context.GetInvalidTy()
     }
