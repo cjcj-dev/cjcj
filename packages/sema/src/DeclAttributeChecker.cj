@@ -2,6 +2,8 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
 
 public enum DeclAttributeIssueKind {
@@ -60,11 +62,18 @@ public class DeclAttributeIssue {
 
 private class DeclAttributeCheckerImpl {
     private var opts: OptionGlobalOptions
+    private let diag: BasicDiagnosticEngine
     private var rootDecl: Decl
     private let issues: ArrayList<DeclAttributeIssue>
 
-    public init(opts: OptionGlobalOptions, decl: Decl, issues: ArrayList<DeclAttributeIssue>) {
+    public init(
+        opts: OptionGlobalOptions,
+        diag: BasicDiagnosticEngine,
+        decl: Decl,
+        issues: ArrayList<DeclAttributeIssue>
+    ) {
         this.opts = opts
+        this.diag = diag
         rootDecl = decl
         this.issues = issues
     }
@@ -207,19 +216,17 @@ private class DeclAttributeCheckerImpl {
             classDecl.EnableAttr(Attribute.OPEN)
             classDecl.EnableAttr(Attribute.PUBLIC)
             if (!classDecl.TestAttr(Attribute.ABSTRACT)) {
-                AddIssue(
-                    DeclAttributeIssueKind.SEALED_NON_ABSTRACT_CLASS,
-                    classDecl,
-                    "sealed classes must also be abstract"
-                )
+                diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_non_abstract_class_cannot_be_sealed,
+                    MakeRange(classDecl.identifier.Begin(), classDecl.identifier.End())
+                ).Emit()
             }
         }
         SetCommonAttributes(classDecl)
-        if (let Some(body) <- classDecl.body) {
-            for (member in body.decls) {
-                if (member.IsFuncOrProp()) {
-                    CheckAttributesForPropAndFuncDeclInClass(classDecl, member)
-                }
+        let body = classDecl.body.getOrThrow()
+        for (member in body.decls) {
+            if (member.IsFuncOrProp()) {
+                CheckAttributesForPropAndFuncDeclInClass(classDecl, member)
             }
         }
     }
@@ -528,13 +535,18 @@ private func CloneDeclAttributeIssues(values: ArrayList<DeclAttributeIssue>): Ar
     return out
 }
 
-private func WalkDeclAttributes(root: Node, opts: OptionGlobalOptions, issues: ArrayList<DeclAttributeIssue>): Unit {
+private func WalkDeclAttributes(
+    root: Node,
+    opts: OptionGlobalOptions,
+    diag: BasicDiagnosticEngine,
+    issues: ArrayList<DeclAttributeIssue>
+): Unit {
     let walker = Walker(root, visitPre: { node: Node =>
         if (node.TestAnyAttr(Attribute.IMPORTED, Attribute.IS_BROKEN, Attribute.HAS_BROKEN)) {
             return VisitAction.SKIP_CHILDREN
         }
         if (let Some(decl) <- (node as Decl)) {
-            DeclAttributeCheckerImpl(opts, decl, issues).Check()
+            DeclAttributeCheckerImpl(opts, diag, decl, issues).Check()
         }
         VisitAction.WALK_CHILDREN
     })
@@ -543,18 +555,20 @@ private func WalkDeclAttributes(root: Node, opts: OptionGlobalOptions, issues: A
 
 public func CheckDeclAttributesForPackage(
     pkg: Package,
+    diag: BasicDiagnosticEngine,
     opts!: OptionGlobalOptions = OptionGlobalOptions()
 ): ArrayList<DeclAttributeIssue> {
     let issues = ArrayList<DeclAttributeIssue>()
-    WalkDeclAttributes(pkg, opts, issues)
+    WalkDeclAttributes(pkg, opts, diag, issues)
     return CloneDeclAttributeIssues(issues)
 }
 
 public func CheckDeclAttributesForDecl(
     decl: Decl,
+    diag: BasicDiagnosticEngine,
     opts!: OptionGlobalOptions = OptionGlobalOptions()
 ): ArrayList<DeclAttributeIssue> {
     let issues = ArrayList<DeclAttributeIssue>()
-    DeclAttributeCheckerImpl(opts, decl, issues).Check()
+    DeclAttributeCheckerImpl(opts, diag, decl, issues).Check()
     return CloneDeclAttributeIssues(issues)
 }

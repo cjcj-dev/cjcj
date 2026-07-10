@@ -479,7 +479,7 @@ public class TypeChecker {
     }
 
     public func CheckAllDeclAttributes(pkg: Package): ArrayList<DeclAttributeIssue> {
-        return CheckDeclAttributesForPackage(pkg, opts: GlobalOptions())
+        return CheckDeclAttributesForPackage(pkg, impl.diag.getOrThrow(), opts: GlobalOptions())
     }
 
     private func PreTypeCheck(pkgs: ArrayList<Package>): ArrayList<ASTContext> {
@@ -1440,7 +1440,7 @@ public class TypeChecker {
                     PreCheckFuncRedefinition(pkg, impl.GetSymsByASTKind(ctx, ASTKind.FUNC_DECL), diagValue,
                         impl.typeManager)
                 }
-                let _ = CheckDeclAttributesForPackage(pkg, opts: GlobalOptions())
+                let _ = CheckDeclAttributesForPackage(pkg, impl.diag.getOrThrow(), opts: GlobalOptions())
             }
         }
         impl.typeManager.ClearMapCache()
