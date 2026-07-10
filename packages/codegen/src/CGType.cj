@@ -12,8 +12,8 @@ import cangjie_compiler::chir.RefType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
-import cangjie_compiler::mangle.GetCustomTypeIdentifier
-import cangjie_compiler::mangle.GetTypeQualifiedName
+import cangjie_compiler::chir.GetCustomTypeIdentifier
+import cangjie_compiler::chir.GetTypeQualifiedName
 import cangjie_compiler::option.ArchType
 import cangjie_compiler::utils.CJC_ASSERT
 

@@ -2,7 +2,7 @@ package cangjie_compiler::codegen
 
 import cangjie_compiler::chir.GlobalVar
 import cangjie_compiler::chir.StringLiteral
-import cangjie_compiler::mangle.MangleCHIRType
+import cangjie_compiler::chir.MangleCHIRType
 
 private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
     private let cgMod: CGModule

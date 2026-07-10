@@ -5,7 +5,8 @@ import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.RefType
 import cangjie_compiler::chir.RawArrayType
 import cangjie_compiler::chir.Type
-import cangjie_compiler::mangle.{DecimalToManglingNumber, GetTypeQualifiedName}
+import cangjie_compiler::mangle.DecimalToManglingNumber
+import cangjie_compiler::chir.GetTypeQualifiedName
 
 public class CGArrayType <: CGType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type) {

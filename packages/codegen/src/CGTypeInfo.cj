@@ -22,7 +22,7 @@ import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKindIndex
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.VArrayType
-import cangjie_compiler::mangle.{GetCustomTypeIdentifier, GetTypeQualifiedName}
+import cangjie_compiler::chir.{GetCustomTypeIdentifier, GetTypeQualifiedName}
 import cangjie_compiler::option.{ArchType, EnvironmentType, OSType}
 import cangjie_compiler::utils.{CJC_ASSERT, REF_PACKAGE_NAME, STD_LIB_WEAK_REF, StaticCast}
 

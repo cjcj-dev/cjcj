@@ -12,7 +12,7 @@ import cangjie_compiler::chir.GetInstParentCustomTyOfCallee
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TypeKind
 import cangjie_compiler::chir.Value
-import cangjie_compiler::mangle.MangleCHIRType
+import cangjie_compiler::chir.MangleCHIRType
 import cangjie_compiler::option.{ArchType, OSType}
 import cangjie_compiler::utils.CJC_ASSERT
 

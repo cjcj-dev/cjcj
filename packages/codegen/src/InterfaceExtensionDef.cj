@@ -14,7 +14,7 @@ import cangjie_compiler::chir.ReplaceRawGenericArgType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.VirtualMethodInfo
 import cangjie_compiler::chir.VTableInType
-import cangjie_compiler::mangle.GetTypeQualifiedName
+import cangjie_compiler::chir.GetTypeQualifiedName
 import cangjie_compiler::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
 private let EXTENSION_DEFS_NAME: String = "NonExternalExtensionDefs"

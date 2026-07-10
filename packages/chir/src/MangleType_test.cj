@@ -1,9 +1,8 @@
-package cangjie_compiler::mangle
+package cangjie_compiler::chir
 
 import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
-import cangjie_compiler::chir.{CHIRBuilder, CHIRContext, Type}
 
 @Test
 public class MangleTypeTest {

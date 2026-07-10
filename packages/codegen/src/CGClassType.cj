@@ -5,7 +5,7 @@ import cangjie_compiler::chir.Attribute
 import cangjie_compiler::chir.ClassType
 import cangjie_compiler::chir.CustomType
 import cangjie_compiler::chir.Type
-import cangjie_compiler::mangle.GetTypeQualifiedName
+import cangjie_compiler::chir.GetTypeQualifiedName
 
 public class CGClassType <: CGCustomType {
     private var numOfAllFields: Int64 = 0

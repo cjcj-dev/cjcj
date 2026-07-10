@@ -14,7 +14,7 @@ import cangjie_compiler::chir.StructType
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.TupleType
 import cangjie_compiler::chir.VArrayType
-import cangjie_compiler::mangle.GetTypeQualifiedName
+import cangjie_compiler::chir.GetTypeQualifiedName
 import cangjie_compiler::option.{ArchType, EnvironmentType, TripleInfo}
 import cangjie_compiler::utils.CJC_ASSERT
 

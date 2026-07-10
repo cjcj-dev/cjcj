@@ -15,7 +15,7 @@ import cangjie_compiler::chir.GenericType
 import cangjie_compiler::chir.GlobalVar
 import cangjie_compiler::chir.Type
 import cangjie_compiler::chir.Value
-import cangjie_compiler::mangle.GetTypeArgsQualifiedName
+import cangjie_compiler::chir.GetTypeArgsQualifiedName
 import cangjie_compiler::option.ArchType
 import cangjie_compiler::option.EnvironmentType
 import cangjie_compiler::option.OSType

@@ -3,7 +3,7 @@ package cangjie_compiler::codegen
 import std.collection.*
 import cangjie_compiler::chir.StructType
 import cangjie_compiler::chir.Type
-import cangjie_compiler::mangle.GetTypeQualifiedName
+import cangjie_compiler::chir.GetTypeQualifiedName
 import cangjie_compiler::utils.StaticCast
 
 public class CGStructType <: CGCustomType {

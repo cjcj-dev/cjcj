@@ -18,7 +18,7 @@ import cangjie_compiler::chir.MemberVarInfo
 import cangjie_compiler::chir.Parameter
 import cangjie_compiler::chir.StructDef
 import cangjie_compiler::chir.Type
-import cangjie_compiler::mangle.GetTypeQualifiedName
+import cangjie_compiler::chir.GetTypeQualifiedName
 import cangjie_compiler::utils.{BOX_DECL_PREFIX, CORE_PACKAGE_NAME, SplitQualifiedName, StaticCast}
 
 private let PRIMITIVE_TIS: Array<String> = [
