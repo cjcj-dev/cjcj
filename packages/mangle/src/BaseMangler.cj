@@ -1275,7 +1275,7 @@ public open class BaseMangler {
         mangleStr += ManglePrefix(decl, prefix, genericsTypeStack, false)
         mangleStr += MangleName(decl.identifier)
         if (IsLocalVariable(decl)) {
-            if (let Some(ctx) <- manglerCtxTable.get(ManglerContext.ReduceUnitTestPackageName(decl.fullPackageName))) {
+            if (let Some(ctx) <- manglerCtxTable.get(decl.fullPackageName)) {
                 mangleStr += MANGLE_COUNT_PREFIX
                 if (let Some(outerNode) <- findOuterNodeOfLocal(prefix)) {
                     if (outerNode.astKind == ASTKind.CLASS_DECL || outerNode.astKind == ASTKind.INTERFACE_DECL ||
