@@ -1,6 +1,7 @@
 package cjcj::modules
 
 import std.collection.*
+import cjcj::ast.DiagnoseRefactor
 import cjcj::basic.DiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 
@@ -104,7 +105,10 @@ public func DiagForDifferentPackageNames(
 
 public func DiagRootPackageModifier(diag: DiagnosticEngine, packageSpec: PackageSpec): Unit {
     let packageRange = MakeRange(packageSpec.packageName.Begin(), packageSpec.packageName.Val())
-    let builder = diag.DiagnoseRefactor(DiagKindRefactor.package_root_package_should_be_public, packageRange)
+    let builder = DiagnoseRefactor(diag,
+        DiagKindRefactor.package_root_package_should_be_public,
+        packageSpec,
+        packageRange)
     let packageMsg = "package " + packageSpec.packageName.Val()
     builder.AddNote("default modifier of 'package' is 'public', you can use '" + packageMsg + "' instead")
     builder.Emit()
