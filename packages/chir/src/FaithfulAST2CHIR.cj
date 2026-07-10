@@ -55,6 +55,7 @@ import cangjie_compiler::ast.IsStaticInitializer as AstIsStaticInitializer
 import cangjie_compiler::ast.IsImpl as AstIsImpl
 import cangjie_compiler::ast.IsMirror as AstIsMirror
 import cangjie_compiler::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
+import cangjie_compiler::sema.GenericInstantiation.GenericInstantiationManager
 import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, ProfileRecorder, STATIC_INIT_VAR}
 
 private let USER_MAIN_MANGLED_NAME: String = "user.main"
@@ -959,6 +960,7 @@ func TranslateLocationWithoutScope(context: CHIRContext, beginPos: AstPosition,
 public class FaithfulAST2CHIRBuilder {
     private var builder: Option<CHIRBuilder> = None
     private var chirType: Option<CHIRType> = None
+    private var gim: Option<GenericInstantiationManager> = None
     private var overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None
 
     public init() {}
@@ -973,6 +975,12 @@ public class FaithfulAST2CHIRBuilder {
         return this
     }
 
+    public func SetGenericInstantiationManager(
+        value: Option<GenericInstantiationManager>): FaithfulAST2CHIRBuilder {
+        gim = value
+        return this
+    }
+
     public func SetOverrideSrcFuncResolver(
         resolver: (AstFuncDecl) -> Option<AstFuncDecl>): FaithfulAST2CHIRBuilder {
         overrideSrcFuncResolver = Some(resolver)
@@ -983,6 +991,7 @@ public class FaithfulAST2CHIRBuilder {
         return FaithfulAST2CHIR(
             builder ?? throw IllegalStateException("FaithfulAST2CHIRBuilder requires CHIRBuilder"),
             chirType ?? throw IllegalStateException("FaithfulAST2CHIRBuilder requires CHIRType"),
+            gim: gim,
             overrideSrcFuncResolver: overrideSrcFuncResolver)
     }
 }
@@ -992,6 +1001,7 @@ public class FaithfulAST2CHIR {
     private let chirType: CHIRType
     private let importedPackages: ArrayList<AstPackage>
     private let directImportedPackages: ArrayList<AstPackage>
+    private let gim: Option<GenericInstantiationManager>
     private let overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>>
     private let opts: GlobalOptions
     private let chirWFC: Bool
@@ -1037,6 +1047,7 @@ public class FaithfulAST2CHIR {
     public init(builder: CHIRBuilder, chirType: CHIRType,
         importedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(),
         directImportedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(),
+        gim!: Option<GenericInstantiationManager> = None,
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None,
         opts!: GlobalOptions = GlobalOptions(), chirWFC!: Bool = false, chirOptOverO2!: Bool = false,
         diag!: Option<BasicDiagnosticEngine> = None) {
@@ -1044,6 +1055,7 @@ public class FaithfulAST2CHIR {
         this.chirType = chirType
         this.importedPackages = importedPkgs
         this.directImportedPackages = directImportedPkgs
+        this.gim = gim
         this.overrideSrcFuncResolver = overrideSrcFuncResolver
         this.opts = opts
         this.chirWFC = chirWFC

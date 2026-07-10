@@ -42,6 +42,7 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
     let builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
     let chirType = CHIRType(builder, CHIRTypeCache())
     let ast2chir = FaithfulAST2CHIR(builder, chirType,
+        gim: instance.gim,
         importedPkgs: instance.importManager.GetAllImportedPackages(),
         directImportedPkgs: instance.importManager.GetCurImportedPackages(pkg.fullPackageName),
         overrideSrcFuncResolver: Some({ funcDecl =>

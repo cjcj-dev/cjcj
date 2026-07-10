@@ -19,4 +19,5 @@
   "cangjie_compiler::incremental_compilation" = { path = "../incremental_compilation" }
   "cangjie_compiler::modules" = { path = "../modules" }
   "cangjie_compiler::option" = { path = "../option" }
+  "cangjie_compiler::sema" = { path = "../sema" }
   "cangjie_compiler::utils" = { path = "../utils" }
