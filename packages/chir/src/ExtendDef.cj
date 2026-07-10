@@ -7,7 +7,7 @@ public class ExtendDef <: CustomTypeDef {
     public var extendedType: Option<Type> = None
 
     public init(packageName: String, identifier: String) {
-        super(packageName, identifier, identifier, CustomDefKind.TYPE_EXTEND)
+        super(packageName, identifier, "", CustomDefKind.TYPE_EXTEND)
     }
 
     public func GetExtendedType(): Option<Type> {
