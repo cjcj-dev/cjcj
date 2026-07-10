@@ -50,6 +50,74 @@ public class CHIRBuilder {
         return def
     }
 
+    public func CreateStruct(loc: DebugLocation, srcCodeIdentifier: String, mangledName: String,
+        packageName: String, isImported: Bool): StructDef {
+        let def = StructDef(packageName, "@" + mangledName, srcCodeIdentifier)
+        context.RegisterStruct(def)
+        if (let Some(pkg) <- context.GetCurPackage()) {
+            if (isImported) {
+                pkg.AddImportedStruct(def)
+                def.EnableAttr(Attribute.IMPORTED)
+            } else {
+                pkg.AddStruct(def)
+            }
+        }
+        def.SetDebugLocation(loc)
+        return def
+    }
+
+    public func CreateClass(loc: DebugLocation, srcCodeIdentifier: String, mangledName: String,
+        packageName: String, isClass: Bool, isImported: Bool): ClassDef {
+        let def = ClassDef(packageName, "@" + mangledName, srcCodeIdentifier, isClass: isClass)
+        context.RegisterClass(def)
+        if (let Some(pkg) <- context.GetCurPackage()) {
+            if (isImported) {
+                pkg.AddImportedClass(def)
+                def.EnableAttr(Attribute.IMPORTED)
+            } else {
+                pkg.AddClass(def)
+            }
+        }
+        def.SetDebugLocation(loc)
+        return def
+    }
+
+    public func CreateEnum(loc: DebugLocation, srcCodeIdentifier: String, mangledName: String,
+        packageName: String, isImported: Bool, isNonExhaustive: Bool): EnumDef {
+        let def = EnumDef(packageName, "@" + mangledName, srcCodeIdentifier)
+        def.SetNonExhaustive(isNonExhaustive)
+        context.RegisterEnum(def)
+        if (let Some(pkg) <- context.GetCurPackage()) {
+            if (isImported) {
+                pkg.AddImportedEnum(def)
+                def.EnableAttr(Attribute.IMPORTED)
+            } else {
+                pkg.AddEnum(def)
+            }
+        }
+        def.SetDebugLocation(loc)
+        return def
+    }
+
+    public func CreateExtend(loc: DebugLocation, mangledName: String, packageName: String,
+        isImported: Bool, genericParams: ArrayList<GenericType>): ExtendDef {
+        let def = ExtendDef(packageName, "@" + mangledName)
+        for (genericParam in genericParams) {
+            def.AddGenericTypeParam(genericParam)
+        }
+        context.RegisterExtend(def)
+        if (let Some(pkg) <- context.GetCurPackage()) {
+            if (isImported) {
+                pkg.AddImportedExtend(def)
+                def.EnableAttr(Attribute.IMPORTED)
+            } else {
+                pkg.AddExtend(def)
+            }
+        }
+        def.SetDebugLocation(loc)
+        return def
+    }
+
     public func CreateFunction(funcType: FuncType, identifier: String, srcCodeIdentifier!: String = "",
         rawMangledName!: String = "", packageName!: String = "",
         genericTypeParams!: ArrayList<GenericType> = ArrayList<GenericType>()): Function {
