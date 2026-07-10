@@ -200,11 +200,80 @@ private func buildCloneGenericToGenericMap(decl: Decl): TypeSubst {
     return TypeSubst()
 }
 
-private func instantiateCloneTy(ty: Ty, typeManager: TypeManager, typeMapping: TypeSubst, g2gTyMap: TypeSubst): Ty {
-    if (!g2gTyMap.IsEmpty()) {
-        return typeManager.GetInstantiatedTy(typeManager.GetInstantiatedTy(ty, g2gTyMap), typeMapping)
+private func GetOriginalTy(ty: Ty, g2gTyMap: TypeSubst, typeManager: TypeManager): Ty {
+    if (!ty.IsGeneric() && !ty.HasGeneric()) {
+        return ty
     }
-    return typeManager.GetInstantiatedTy(ty, typeMapping)
+    if (let Some(gTy) <- (ty as GenericsTy)) {
+        if (let Some(found) <- g2gTyMap.Get(gTy)) {
+            return found
+        }
+    }
+    if (!ty.IsFunc()) {
+        let tyArgs = ArrayList<Ty>()
+        for (tyArg in ty.typeArgs) {
+            tyArgs.add(GetOriginalTy(tyArg, g2gTyMap, typeManager))
+        }
+        if (ty.IsTuple()) {
+            return typeManager.GetTupleTy(tyArgs.toArray())
+        }
+        let decl = Ty.GetDeclPtrOfTy(ty)
+        if (let None <- decl) {
+            return ty
+        }
+        if (ty.IsClass()) {
+            if (let Some(classDecl) <- (decl.getOrThrow() as ClassDecl)) {
+                if ((ty as ClassThisTy).isSome()) {
+                    return typeManager.GetClassThisTy(classDecl, tyArgs.toArray())
+                }
+                return typeManager.GetClassTy(classDecl, tyArgs.toArray())
+            }
+        }
+        if (ty.IsInterface()) {
+            if (let Some(interfaceDecl) <- (decl.getOrThrow() as InterfaceDecl)) {
+                return typeManager.GetInterfaceTy(interfaceDecl, tyArgs.toArray())
+            }
+        }
+        if (ty.IsEnum()) {
+            if (let Some(enumDecl) <- (decl.getOrThrow() as EnumDecl)) {
+                return typeManager.GetEnumTy(enumDecl, typeArgs: tyArgs.toArray())
+            }
+        }
+        if (ty.IsStruct()) {
+            if (let Some(structDecl) <- (decl.getOrThrow() as StructDecl)) {
+                return typeManager.GetStructTy(structDecl, tyArgs.toArray())
+            }
+        }
+        return ty
+    }
+    let funcTy = (ty as FuncTy).getOrThrow()
+    let paramTys = ArrayList<Ty>()
+    for (paramTy in funcTy.paramTys) {
+        paramTys.add(GetOriginalTy(paramTy, g2gTyMap, typeManager))
+    }
+    return typeManager.GetFunctionTy(paramTys.toArray(), GetOriginalTy(funcTy.retTy, g2gTyMap, typeManager))
+}
+
+private func PerformTyInstantiationDuringClone(genericNode: Node, clonedNode: Node, typeManager: TypeManager,
+    info: GenericInfo, g2gTyMap: TypeSubst): Unit {
+    if (Ty.IsTyCorrect(genericNode.GetTy())) {
+        if (let Some(genericTy) <- genericNode.GetTy()) {
+            clonedNode.SetTy(typeManager.GetInstantiatedTy(GetOriginalTy(genericTy, g2gTyMap, typeManager),
+                info.gTyToTyMap))
+        }
+    }
+    if (let Some(refExpr) <- (clonedNode as NameReferenceExpr)) {
+        if (let Some(parentTy) <- refExpr.matchedParentTy) {
+            refExpr.matchedParentTy = typeManager.GetInstantiatedTy(GetOriginalTy(parentTy, g2gTyMap, typeManager),
+                info.gTyToTyMap)
+        }
+        var idx: Int64 = 0
+        while (idx < refExpr.instTys.size) {
+            refExpr.instTys[idx] = typeManager.GetInstantiatedTy(GetOriginalTy(refExpr.instTys[idx], g2gTyMap,
+                typeManager), info.gTyToTyMap)
+            idx++
+        }
+    }
 }
 
 private func disableDefaultParamDesugarGenericAttr(decl: Decl): Unit {
@@ -223,19 +292,7 @@ private func disableDefaultParamDesugarGenericAttr(decl: Decl): Unit {
 
 private func updateClonedNode(genericNode: Node, clonedNode: Node, typeManager: TypeManager, typeMapping: TypeSubst,
     g2gTyMap: TypeSubst, pkg: Package): Unit {
-    if (let Some(sourceTy) <- genericNode.GetTy()) {
-        clonedNode.SetTy(instantiateCloneTy(sourceTy, typeManager, typeMapping, g2gTyMap))
-    }
-    if (let Some(refExpr) <- (clonedNode as NameReferenceExpr)) {
-        if (let Some(parentTy) <- refExpr.matchedParentTy) {
-            refExpr.matchedParentTy = instantiateCloneTy(parentTy, typeManager, typeMapping, g2gTyMap)
-        }
-        var idx: Int64 = 0
-        while (idx < refExpr.instTys.size) {
-            refExpr.instTys[idx] = instantiateCloneTy(refExpr.instTys[idx], typeManager, typeMapping, g2gTyMap)
-            idx++
-        }
-    }
+    PerformTyInstantiationDuringClone(genericNode, clonedNode, typeManager, GenericInfo(None, typeMapping), g2gTyMap)
     if (let Some(clonedDecl) <- (clonedNode as Decl)) {
         applyPackageAttrs(clonedDecl, pkg)
     }
@@ -1722,7 +1779,7 @@ class GenericInstantiationManagerImpl {
     }
 
     private func InstantiateGenericDeclWithInstTys(decl: Decl, instTys: ArrayList<Ty>, pkg: Package): Unit {
-        let generalDecl = PartialInstantiation.GetGeneralDecl(decl)
+        let generalDecl = GetGeneralDecl(decl)
         if (ignoredInstantiationKind(generalDecl)) {
             return
         }
