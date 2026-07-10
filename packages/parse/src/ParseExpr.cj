@@ -380,8 +380,12 @@ extend ParserImpl {
                     range.isBroken = range.isBroken || rhs.isBroken
                     if (Skip(TokenKind.COLON)) {
                         range.colonPos = lastToken.Begin()
-                        let preKind = if (range.isClosed) { TokenKind.CLOSEDRANGEOP } else { TokenKind.RANGEOP }
-                        range.stepExpr = ParseExprWithPrevious(preKind, ExprKind.ALL)
+                        let dot2 = ".."
+                        var preT = Token(TokenKind.RANGEOP, dot2, range.rangePos, range.rangePos + dot2.size)
+                        preT.kind = if (range.isClosed) { TokenKind.CLOSEDRANGEOP } else { preT.kind }
+                        let op = if (range.isClosed) { "..=" } else { preT.Value() }
+                        preT.SetValuePos(op, preT.Begin(), preT.Begin() + op.size)
+                        range.stepExpr = ParseExprWithPrevious(preT, ExprKind.ALL)
                         if (let Some(step) <- range.stepExpr) {
                             range.end = step.end
                         }
@@ -408,13 +412,13 @@ extend ParserImpl {
         return lhs
     }
 
-    private func ParseExprWithPrevious(preKind: TokenKind, ek: ExprKind): Expr {
-        return ParseExprWithPrevious(preKind, ParseUnaryExpr(ek), ek)
+    private func ParseExprWithPrevious(preT: Token, ek: ExprKind): Expr {
+        return ParseExprWithPrevious(preT, ParseUnaryExpr(ek), ek)
     }
 
-    private func ParseExprWithPrevious(preKind: TokenKind, left: Expr, ek: ExprKind): Expr {
+    private func ParseExprWithPrevious(preT: Token, left: Expr, ek: ExprKind): Expr {
         var lhs = left
-        let prePrec = Precedence(preKind)
+        let prePrec = Precedence(preT.kind)
         while (true) {
             var op = Peek()
             var combinedOperator = false
@@ -436,7 +440,7 @@ extend ParserImpl {
             if (IsAssignment(op.kind)) {
                 CheckLeftExpression(lhs, op)
             }
-            if (!CheckMacroExprRules(Token(preKind), op, lhs)) {
+            if (!CheckMacroExprRules(preT, op, lhs)) {
                 lhs.isBroken = true
             }
             if (combinedOperator) {
@@ -526,8 +530,12 @@ extend ParserImpl {
                     range.isBroken = range.isBroken || rhs.isBroken
                     if (Skip(TokenKind.COLON)) {
                         range.colonPos = lastToken.Begin()
-                        let preKind = if (range.isClosed) { TokenKind.CLOSEDRANGEOP } else { TokenKind.RANGEOP }
-                        range.stepExpr = ParseExprWithPrevious(preKind, ExprKind.ALL)
+                        let dot2 = ".."
+                        var preT = Token(TokenKind.RANGEOP, dot2, range.rangePos, range.rangePos + dot2.size)
+                        preT.kind = if (range.isClosed) { TokenKind.CLOSEDRANGEOP } else { preT.kind }
+                        let op = if (range.isClosed) { "..=" } else { preT.Value() }
+                        preT.SetValuePos(op, preT.Begin(), preT.Begin() + op.size)
+                        range.stepExpr = ParseExprWithPrevious(preT, ExprKind.ALL)
                         if (let Some(step) <- range.stepExpr) {
                             range.end = step.end
                         }
@@ -565,12 +573,12 @@ extend ParserImpl {
         ret.begin = Peek().Begin()
         var hasFirstExpr = false
         if (!Seeing(TokenKind.RANGEOP) && !Seeing(TokenKind.CLOSEDRANGEOP)) {
-            ret.startExpr = ParseExprWithPrevious(TokenKind.RANGEOP, ExprKind.INDEX_EXPR)
+            ret.startExpr = ParseExprWithPrevious(Token(TokenKind.RANGEOP), ExprKind.INDEX_EXPR)
             hasFirstExpr = true
         }
         if (!Seeing(TokenKind.RANGEOP) && !Seeing(TokenKind.CLOSEDRANGEOP)) {
             if (let Some(first) <- ret.startExpr) {
-                return ParseExprWithPrevious(TokenKind.DOT, first, ExprKind.INDEX_EXPR)
+                return ParseExprWithPrevious(Token(TokenKind.DOT), first, ExprKind.INDEX_EXPR)
             }
             return InvalidExpr(Peek().Begin())
         }
@@ -579,7 +587,7 @@ extend ParserImpl {
         Next()
         ret.end = lastToken.End()
         if (!Seeing(TokenKind.RSQUARE) && !Seeing(TokenKind.COLON)) {
-            ret.stopExpr = ParseExprWithPrevious(TokenKind.RANGEOP, ExprKind.INDEX_EXPR)
+            ret.stopExpr = ParseExprWithPrevious(Token(TokenKind.RANGEOP), ExprKind.INDEX_EXPR)
             if (let Some(stop) <- ret.stopExpr) {
                 ret.end = stop.end
             }
@@ -597,12 +605,12 @@ extend ParserImpl {
             }
             Next()
             ret.colonPos = lastToken.Begin()
-            ret.stepExpr = ParseExprWithPrevious(TokenKind.RANGEOP, ExprKind.INDEX_EXPR)
+            ret.stepExpr = ParseExprWithPrevious(Token(TokenKind.RANGEOP), ExprKind.INDEX_EXPR)
             if (let Some(step) <- ret.stepExpr) {
                 ret.end = step.end
             }
         }
-        return ParseExprWithPrevious(TokenKind.DOT, ret, ExprKind.INDEX_EXPR)
+        return ParseExprWithPrevious(Token(TokenKind.DOT), ret, ExprKind.INDEX_EXPR)
     }
 
     public func Precedence(kind: TokenKind): UInt8 {
