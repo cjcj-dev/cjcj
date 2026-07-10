@@ -4,13 +4,13 @@ import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 import cangjie_compiler::utils.{BOX_DECL_PREFIX, CJC_ASSERT, InternalError}
 
-public class InstantiatedExtendRecorder {
+class InstantiatedExtendRecorder {
     private var gim: GenericInstantiationManagerImpl
     private var typeManager: TypeManager
     private var promotion: Promotion
     private let recorderId: UInt32 = GetNextWalkerID()
 
-    public init(gim: GenericInstantiationManagerImpl, typeManager: TypeManager) {
+    init(gim: GenericInstantiationManagerImpl, typeManager: TypeManager) {
         this.gim = gim
         this.typeManager = typeManager
         promotion = Promotion(typeManager)

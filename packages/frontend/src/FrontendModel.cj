@@ -21,7 +21,6 @@ import cangjie_compiler::modules.MacroHostImportManager
 import cangjie_compiler::option.OptimizationLevel
 import cangjie_compiler::option.enumIndex
 public import cangjie_compiler::mangle.BaseMangler
-import cangjie_compiler::sema.GenericInstantiation.GenericInstantiationManagerImpl as RealGenericInstantiationManagerImpl
 import cangjie_compiler::sema.TypeManager as FaithfulSemaTypeManager
 import cangjie_compiler::sema.Test.TestManager as RealTestManager
 import cangjie_compiler::utils.{AST_PACKAGE_NAME, CORE_PACKAGE_NAME, DynamicCast, EraseIf, JoinStrings, MAIN_INVOKE,
@@ -7262,23 +7261,6 @@ public class TestManager {
     // sema.GenericInstantiation package cannot see this frontend wrapper).
     public func GetImpl(): RealTestManager {
         return impl
-    }
-}
-
-public class GenericInstantiationManager {
-    private let impl: RealGenericInstantiationManagerImpl
-
-    public init(instance: CompilerInstance) {
-        impl = RealGenericInstantiationManagerImpl(instance.faithfulSemaInstance.getOrThrow())
-        impl.SetTestManager(instance.testManager.GetImpl())
-    }
-
-    public func GenericInstantiatePackage(pkg: Package, resetGlobalState!: Bool = true): Unit {
-        impl.GenericInstantiatePackage(pkg, resetGlobalState: resetGlobalState)
-    }
-
-    public func ResetGenericInstantiationStage(): Unit {
-        impl.ResetGenericInstantiationStage()
     }
 }
 

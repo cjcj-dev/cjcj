@@ -7,6 +7,7 @@ import cangjie_compiler::mangle.MangleAstAdapter as RealMangleAstAdapter
 import cangjie_compiler::mangle.MangleDecl as RealMangleDecl
 import cangjie_compiler::mangle.ManglerContext as RealManglerContext
 import cangjie_compiler::sema.CompilerInstance as FaithfulSemaCompilerInstance
+import cangjie_compiler::sema.GenericInstantiation.GenericInstantiationManager
 import cangjie_compiler::sema.Desugar.DesugarBeforeTypeCheck as FaithfulDesugarBeforeTypeCheck
 import cangjie_compiler::sema.AnalyzeFunctionLinkage
 import cangjie_compiler::sema.CheckInlineFunctionsForPackages
@@ -411,7 +412,7 @@ public class CompilerInstance {
 
     public func PerformGenericInstantiation(): Bool {
         if (let None <- gim) {
-            gim = Some(GenericInstantiationManager(this))
+            gim = Some(GenericInstantiationManager(faithfulSemaInstance.getOrThrow(), testManager.GetImpl()))
         }
         if (!invocation.globalOptions.enIncrementalCompilation) {
             if (let Some(genericInstantiationManager) <- gim) {

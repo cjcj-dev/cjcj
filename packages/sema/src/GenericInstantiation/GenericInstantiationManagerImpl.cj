@@ -309,7 +309,7 @@ private func HasJavaTargetAttr(target: Decl): Bool {
     return false
 }
 
-public class GenericInstantiationManagerImpl {
+class GenericInstantiationManagerImpl {
     private var ci: CompilerInstance
     private let instantiations: ArrayList<GenericInstantiationRecord> = ArrayList<GenericInstantiationRecord>()
     private let declInstantiationByTypeMap: HashMap<String, ArrayList<GenericInstantiationRecord>> =
@@ -338,7 +338,7 @@ public class GenericInstantiationManagerImpl {
         SetOptLevel(ci.globalOptions)
     }
 
-    public func SetTestManager(tm: RealTestManager): Unit {
+    func SetTestManager(tm: RealTestManager): Unit {
         testManager = Some(tm)
     }
 
