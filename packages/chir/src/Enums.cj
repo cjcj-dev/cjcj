@@ -110,7 +110,7 @@ public enum Attribute {
     | DESERIALIZED | INITIALIZER | UNSAFE | JAVA_MIRROR | JAVA_IMPL | OBJ_C_MIRROR
     | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED
     | ANNOTATION | CFFI_WRAPPER
-    | FAST_NATIVE | THIN
+    | FAST_NATIVE
     // FEATURE_DEBT(CJCJ_RUNTIME_SPEC §3.2/§7): selfhost-only extension domain;
     // upstream CHIR AttributeInfo.h still ends its C++ attribute domain at 38.
     | NO_HEAP_ALLOC | NO_WRITE_BARRIER_REC | NO_STACK_GROW
@@ -159,10 +159,13 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.ANNOTATION => 64
         case Attribute.CFFI_WRAPPER => 68
         case Attribute.FAST_NATIVE => 71
+<<<<<<< HEAD
         case Attribute.THIN => 75
         case Attribute.NO_HEAP_ALLOC => 76
         case Attribute.NO_WRITE_BARRIER_REC => 77
         case Attribute.NO_STACK_GROW => 78
+=======
+>>>>>>> 57616346 (fix(chir): remove dead thin attribute value)
     }
 }
 
@@ -205,10 +208,13 @@ public func AttributeName(attr: Attribute): String {
         case Attribute.SKIP_ANALYSIS => "skip_analysis"
         case Attribute.SPECIFIC => "specific"
         case Attribute.STATIC => "static"
+<<<<<<< HEAD
         case Attribute.THIN => "thin"
         case Attribute.NO_HEAP_ALLOC => "noHeapAlloc"
         case Attribute.NO_WRITE_BARRIER_REC => "noWriteBarrierRec"
         case Attribute.NO_STACK_GROW => "noStackGrow"
+=======
+>>>>>>> 57616346 (fix(chir): remove dead thin attribute value)
         case Attribute.UNREACHABLE => "unreachable"
         case Attribute.UNSAFE => "unsafe"
         case Attribute.OVERRIDE => "override"
