@@ -453,7 +453,7 @@ public func CheckFuncAccessControl(diag: BasicDiagnosticEngine, typeManager: Typ
         return accessibleDecl
     }
     if (!targets.isEmpty() && targets[0].astKind == ASTKind.FUNC_DECL) {
-        let builder = diag.Diagnose(accessSite.begin, accessSite.end,
+        let builder = Diagnose(diag, accessSite,
             BasicDiagKind.sema_invalid_access_function,
             args: [BasicDiagArgument(targets[0].identifier.Val())])
         builder.Emit()
@@ -610,9 +610,9 @@ public func CheckLetInstanceAccessMutableFunc(
         if (useInout) {
             if (let Some(baseTy) <- currentBase.GetTy()) {
                 if (baseTy.IsClassLike()) {
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(diag,
                         BasicDiagKindRefactor.sema_inout_modify_heap_variable,
-                        MakeRange(currentBase.begin, currentBase.end))
+                        currentBase)
                     builder.Emit()
                 }
             }
@@ -638,9 +638,9 @@ public func CheckLetInstanceAccessMutableFunc(
                         if (let Some(outerDecl) <- varDecl.outerDecl) {
                             if (let Some(outerTy) <- outerDecl.GetTy()) {
                                 if (outerTy.IsClassLike()) {
-                                    let builder = diag.DiagnoseRefactor(
+                                    let builder = DiagnoseRefactor(diag,
                                         BasicDiagKindRefactor.sema_inout_modify_heap_variable,
-                                        MakeRange(currentBase.begin, currentBase.end))
+                                        currentBase)
                                     builder.Emit()
                                 }
                             }
