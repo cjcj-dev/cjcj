@@ -3,8 +3,41 @@ package cjcj::sema
 import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 
 private let CORE_PACKAGE_NAME: String = "std.core"
+
+private func DiagExpectConstFunc(diag: BasicDiagnosticEngine, fd: FuncDecl): Unit {
+    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_expect_const,
+        MakeRangeForDeclIdentifier(fd), "function")
+    builder.AddMainHintArguments("")
+    builder.Emit()
+}
+
+private func DiagExpectConstExpr(diag: BasicDiagnosticEngine, expr: Expr, isWeak: Bool): Unit {
+    let constKind = if (isWeak) { "expression" } else { "expression guaranteed to be evaluated at compile time" }
+    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_expect_const,
+        MakeRange(expr.begin, expr.end), constKind)
+    var mainHint = ""
+    if (expr.astKind == ASTKind.RETURN_EXPR) {
+        builder.AddNote("cannot jump to non-constant context from a constant context")
+    } else if (let Some(tryExpr) <- (expr as TryExpr)) {
+        if (tryExpr.isDesugaredFromTryWithResources) {
+            builder.AddNote("try-with-resources expressions are not constant")
+        }
+    } else if (Ty.IsTyCorrect(expr.GetTy()) && expr.GetTy().getOrThrow().IsStructArray() &&
+        (expr.astKind == ASTKind.LIT_CONST_EXPR || expr.astKind == ASTKind.ARRAY_LIT)) {
+        mainHint = "expressions of type 'Array' are not constant"
+        if (let Some(arrayLit) <- (expr as ArrayLit)) {
+            let elementTy = expr.GetTy().getOrThrow().typeArgs[0]
+            let expected = "VArray<" + elementTy.String() + ", $" + arrayLit.children.size.toString() + ">"
+            builder.AddNote("consider add type annotation '" + expected + "' to use value array")
+        }
+    }
+    builder.AddMainHintArguments(mainHint)
+    builder.Emit()
+}
 
 public enum ConstEvaluationIssueKind {
     | EXPECT_CONST_FUNCTION
@@ -179,6 +212,7 @@ private func HasConstInit(decls: ArrayList<Decl>): Bool {
 }
 
 public class ConstEvaluationChecker {
+    private let diag: BasicDiagnosticEngine
     private let issues: ArrayList<ConstEvaluationIssue> = ArrayList<ConstEvaluationIssue>()
     private let inConstContext: ArrayList<Node> = ArrayList<Node>()
     private let inConstFunc: ArrayList<Decl> = ArrayList<Decl>()
@@ -186,7 +220,9 @@ public class ConstEvaluationChecker {
     private var structOrClassMembers: ArrayList<Decl> = ArrayList<Decl>()
     private var inInit: Bool = false
 
-    public init() {}
+    public init(diag: BasicDiagnosticEngine) {
+        this.diag = diag
+    }
 
     public func Check(pkg: Package): ArrayList<ConstEvaluationIssue> {
         ChkAllDeclsByWalk(pkg)
@@ -373,7 +409,7 @@ public class ConstEvaluationChecker {
 
     private func ChkFuncDecl(fd: FuncDecl): Bool {
         if (!fd.isConst) {
-            AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_FUNCTION, fd, target: fd)
+            DiagExpectConstFunc(diag, fd)
             fd.isConst = true
             return false
         }
@@ -540,7 +576,7 @@ public class ConstEvaluationChecker {
                 return ChkExpr(desugar, isWeak)
             }
         }
-        AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, expr)
+        DiagExpectConstExpr(diag, expr, isWeak)
         return false
     }
 
@@ -610,7 +646,7 @@ public class ConstEvaluationChecker {
             case ASTKind.INC_OR_DEC_EXPR =>
                 if (let Some(incOrDec) <- (expr as IncOrDecExpr)) { ChkIncOrDecExpr(incOrDec) } else { false }
             case _ =>
-                AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, expr)
+                DiagExpectConstExpr(diag, expr, isWeak)
                 false
         }
     }
@@ -635,11 +671,11 @@ public class ConstEvaluationChecker {
             return false
         }
         if (IsStructArrayExpr(lit)) {
-            AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, lit, message: "Array literal is not const")
+            DiagExpectConstExpr(diag, lit, true)
             return false
         }
         if (let Some(_) <- lit.siExpr) {
-            AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, lit, message: "string interpolation is not const")
+            DiagExpectConstExpr(diag, lit, false)
             return false
         }
         return true
@@ -649,7 +685,7 @@ public class ConstEvaluationChecker {
         if (ContainsConstNode(inConstContext, ret)) {
             if (let Some(refFuncBody) <- ret.refFuncBody) {
                 if (!ContainsConstNode(inConstContext, refFuncBody)) {
-                    AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, ret)
+                    DiagExpectConstExpr(diag, ret, isWeak)
                     return false
                 }
             }
@@ -662,7 +698,7 @@ public class ConstEvaluationChecker {
             return false
         }
         if (IsStructArrayExpr(arrayLit)) {
-            AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, arrayLit, message: "Array literal is not const")
+            DiagExpectConstExpr(diag, arrayLit, isWeak)
             return false
         }
         return ChkExprChildren(arrayLit.children, isWeak)
@@ -673,7 +709,7 @@ public class ConstEvaluationChecker {
             if (!IsClassOrEnumConstructor(target) &&
                 (refExpr.isThis || refExpr.isSuper || IsInstanceMember(target)) &&
                 !ContainsConstRef(constThisOrSuper, refExpr)) {
-                AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, refExpr, target: target)
+                DiagExpectConstExpr(diag, refExpr, isWeak)
                 return false
             }
             if ((refExpr.isThis || refExpr.isSuper) && target.IsNominalDecl()) {
@@ -688,7 +724,7 @@ public class ConstEvaluationChecker {
             if (isWeak && ContainsConstDecl(inConstFunc, target)) {
                 return true
             }
-            AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, refExpr, target: target)
+            DiagExpectConstExpr(diag, refExpr, isWeak)
         }
         return false
     }
@@ -761,8 +797,7 @@ public class ConstEvaluationChecker {
 
     private func ChkTryExpr(tryExpr: TryExpr, isWeak: Bool): Bool {
         if (tryExpr.isDesugaredFromTryWithResources) {
-            AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, tryExpr,
-                message: "try-with-resources is not const")
+            DiagExpectConstExpr(diag, tryExpr, isWeak)
             return false
         }
         var result = true
@@ -796,7 +831,7 @@ public class ConstEvaluationChecker {
                     }
                 }
             }
-            AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, member, target: target)
+            DiagExpectConstExpr(diag, member, isWeak)
         }
         return false
     }
@@ -804,7 +839,7 @@ public class ConstEvaluationChecker {
     private func ChkSubscriptExpr(subscript: SubscriptExpr, isWeak: Bool): Bool {
         if (let Some(base) <- subscript.baseExpr) {
             if (!Ty.IsTyCorrect(base.GetTy()) || !IsTupleOrVArrayExpr(base)) {
-                AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, subscript)
+                DiagExpectConstExpr(diag, subscript, isWeak)
                 return false
             }
             if (!ChkExpr(base, isWeak)) {
@@ -821,7 +856,7 @@ public class ConstEvaluationChecker {
 
     private func ChkBlock(block: Block, isWeak: Bool): Bool {
         if (block.TestAttr(Attribute.UNSAFE)) {
-            AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, block, message: "unsafe block is not const")
+            DiagExpectConstExpr(diag, block, isWeak)
             return false
         }
         var result = true
@@ -845,7 +880,7 @@ public class ConstEvaluationChecker {
                 }
             }
         }
-        AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, assign)
+        DiagExpectConstExpr(diag, assign, isWeak)
         return false
     }
 
@@ -859,12 +894,12 @@ public class ConstEvaluationChecker {
                 }
             }
         }
-        AddIssue(ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION, incOrDec)
+        DiagExpectConstExpr(diag, incOrDec, true)
         return false
     }
 
 }
 
-public func CheckConstEvaluation(pkg: Package): ArrayList<ConstEvaluationIssue> {
-    return ConstEvaluationChecker().Check(pkg)
+public func CheckConstEvaluation(pkg: Package, diag: BasicDiagnosticEngine): ArrayList<ConstEvaluationIssue> {
+    return ConstEvaluationChecker(diag).Check(pkg)
 }
