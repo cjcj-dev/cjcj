@@ -312,7 +312,6 @@ func CHIRKnownAttributes(): ArrayList<Attribute> {
     attrs.add(Attribute.JAVA_HAS_DEFAULT)
     attrs.add(Attribute.PREVIOUSLY_DESERIALIZED)
     attrs.add(Attribute.ANNOTATION)
-    attrs.add(Attribute.BUILTIN)
     attrs.add(Attribute.CFFI_WRAPPER)
     attrs.add(Attribute.COMPILE_TIME_VALUE)
     attrs.add(Attribute.FAST_NATIVE)
@@ -365,7 +364,6 @@ func CHIRAttributeFromIndex(index: Int64): Attribute {
         case 36 => Attribute.JAVA_HAS_DEFAULT
         case 37 => Attribute.PREVIOUSLY_DESERIALIZED
         case 64 => Attribute.ANNOTATION
-        case 66 => Attribute.BUILTIN
         case 68 => Attribute.CFFI_WRAPPER
         case 69 => Attribute.COMPILE_TIME_VALUE
         case 71 => Attribute.FAST_NATIVE

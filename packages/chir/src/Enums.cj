@@ -109,7 +109,7 @@ public enum Attribute {
     | NON_RECOMPILE | UNREACHABLE | NO_SIDE_EFFECT | COMMON | SPECIFIC | SKIP_ANALYSIS
     | DESERIALIZED | INITIALIZER | UNSAFE | JAVA_MIRROR | JAVA_IMPL | OBJ_C_MIRROR
     | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED
-    | ANNOTATION | BUILTIN | CFFI_WRAPPER | COMPILE_TIME_VALUE
+    | ANNOTATION | CFFI_WRAPPER | COMPILE_TIME_VALUE
     | FAST_NATIVE | INLINED | THIN
     // FEATURE_DEBT(CJCJ_RUNTIME_SPEC §3.2/§7): selfhost-only extension domain;
     // upstream CHIR AttributeInfo.h still ends its C++ attribute domain at 38.
@@ -157,7 +157,6 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.JAVA_HAS_DEFAULT => 36
         case Attribute.PREVIOUSLY_DESERIALIZED => 37
         case Attribute.ANNOTATION => 64
-        case Attribute.BUILTIN => 66
         case Attribute.CFFI_WRAPPER => 68
         case Attribute.COMPILE_TIME_VALUE => 69
         case Attribute.FAST_NATIVE => 71
@@ -173,7 +172,6 @@ public func AttributeName(attr: Attribute): String {
     return match (attr) {
         case Attribute.ABSTRACT => "abstract"
         case Attribute.ANNOTATION => "annotation"
-        case Attribute.BUILTIN => "builtin"
         case Attribute.CFFI_WRAPPER => "cffiWrapper"
         case Attribute.COMMON => "common"
         case Attribute.COMPILE_TIME_VALUE => "compileTimeValue"
