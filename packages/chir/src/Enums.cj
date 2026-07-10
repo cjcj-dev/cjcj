@@ -1,5 +1,45 @@
 package cjcj::chir
 
+public enum ToCHIRPhase {
+    | RAW
+    | OPT
+    | PLUGIN
+    | ANALYSIS_FOR_CJLINT
+    | PHASE_MIN
+    | PHASE_MAX
+}
+
+public func ToCHIRPhaseIndex(phase: ToCHIRPhase): UInt8 {
+    return match (phase) {
+        case ToCHIRPhase.RAW => 0u8
+        case ToCHIRPhase.OPT => 1u8
+        case ToCHIRPhase.PLUGIN => 2u8
+        case ToCHIRPhase.ANALYSIS_FOR_CJLINT => 3u8
+        case ToCHIRPhase.PHASE_MIN => 0u8
+        case ToCHIRPhase.PHASE_MAX => 3u8
+    }
+}
+
+public func ToCHIRPhaseFromUInt8(phase: UInt8): ToCHIRPhase {
+    return match (phase) {
+        case 0u8 => ToCHIRPhase.RAW
+        case 1u8 => ToCHIRPhase.OPT
+        case 2u8 => ToCHIRPhase.PLUGIN
+        case 3u8 => ToCHIRPhase.ANALYSIS_FOR_CJLINT
+        case _ => ToCHIRPhase.RAW
+    }
+}
+
+extend ToCHIRPhase <: Equatable<ToCHIRPhase> {
+    public operator func ==(right: ToCHIRPhase): Bool {
+        return ToCHIRPhaseIndex(this) == ToCHIRPhaseIndex(right)
+    }
+
+    public operator func !=(right: ToCHIRPhase): Bool {
+        return !(this == right)
+    }
+}
+
 public enum TypeKind {
     | TYPE_INVALID
     | TYPE_INT8 | TYPE_INT16 | TYPE_INT32 | TYPE_INT64 | TYPE_INT_NATIVE
