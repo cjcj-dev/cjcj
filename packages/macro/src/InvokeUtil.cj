@@ -1,7 +1,131 @@
 package cjcj::macro_pkg
 
+import cjcj::basic.Errorln
 import std.collection.*
 import std.convert.*
+import std.sync.*
+import std.time.*
+
+@When[os == "Linux"]
+@C
+struct FdSet {
+    var bits: VArray<UIntNative, $16>
+
+    init() {
+        bits = VArray<UIntNative, $16>({ _: Int64 => UIntNative(0) })
+    }
+}
+
+@When[os == "macOS"]
+@C
+struct FdSet {
+    var bits: VArray<UInt32, $32>
+
+    init() {
+        bits = VArray<UInt32, $32>({ _: Int64 => 0u32 })
+    }
+}
+
+@When[os != "Windows"]
+@C
+struct Timeval {
+    var tvSec: IntNative
+    var tvUsec: IntNative
+
+    init(tvSec: IntNative, tvUsec: IntNative) {
+        this.tvSec = tvSec
+        this.tvUsec = tvUsec
+    }
+}
+
+@When[os != "Windows"]
+foreign {
+    func close(fd: Int32): Int32
+    func read(fd: Int32, buf: CPointer<UInt8>, count: UIntNative): IntNative
+    func write(fd: Int32, buf: CPointer<UInt8>, count: UIntNative): IntNative
+    func select(nfds: Int32, readfds: CPointer<FdSet>, writefds: CPointer<FdSet>,
+        exceptfds: CPointer<FdSet>, timeout: CPointer<Timeval>): Int32
+}
+
+@When[os == "Windows"]
+foreign {
+    func CloseHandle(handle: CPointer<Unit>): Int32
+    func WriteFile(handle: CPointer<Unit>, buffer: CPointer<UInt8>, bytesToWrite: UInt32,
+        bytesWritten: CPointer<UInt32>, overlapped: CPointer<Unit>): Int32
+    func ReadFile(handle: CPointer<Unit>, buffer: CPointer<UInt8>, bytesToRead: UInt32,
+        bytesRead: CPointer<UInt32>, overlapped: CPointer<Unit>): Int32
+    func PeekNamedPipe(handle: CPointer<Unit>, buffer: CPointer<UInt8>, bufferSize: UInt32,
+        bytesRead: CPointer<UInt32>, totalBytesAvail: CPointer<UInt32>, bytesLeftThisMessage: CPointer<UInt32>): Int32
+    func GetLastError(): UInt32
+}
+
+@When[os == "Linux"]
+private func FD_ZERO(set: CPointer<FdSet>): Unit {
+    var idx: Int64 = 0
+    unsafe {
+        var value = set.read()
+        while (idx < 16) {
+            value.bits[idx] = UIntNative(0)
+            idx++
+        }
+        set.write(value)
+    }
+}
+
+@When[os == "Linux"]
+private func FD_SET(fd: Int32, set: CPointer<FdSet>): Unit {
+    unsafe {
+        var value = set.read()
+        let word = Int64(fd) / 64
+        let bit = UIntNative(Int64(fd) % 64)
+        value.bits[word] = value.bits[word] | (UIntNative(1) << bit)
+        set.write(value)
+    }
+}
+
+@When[os == "Linux"]
+private func FD_ISSET(fd: Int32, set: CPointer<FdSet>): Bool {
+    unsafe {
+        let value = set.read()
+        let word = Int64(fd) / 64
+        let bit = UIntNative(Int64(fd) % 64)
+        return (value.bits[word] & (UIntNative(1) << bit)) != UIntNative(0)
+    }
+}
+
+@When[os == "macOS"]
+private func FD_ZERO(set: CPointer<FdSet>): Unit {
+    var idx: Int64 = 0
+    unsafe {
+        var value = set.read()
+        while (idx < 32) {
+            value.bits[idx] = 0u32
+            idx++
+        }
+        set.write(value)
+    }
+}
+
+@When[os == "macOS"]
+private func FD_SET(fd: Int32, set: CPointer<FdSet>): Unit {
+    unsafe {
+        var value = set.read()
+        let word = Int64(fd) / 32
+        let bit = UInt32(Int64(fd) % 32)
+        value.bits[word] = value.bits[word] | (1u32 << bit)
+        set.write(value)
+    }
+}
+
+@When[os == "macOS"]
+private func FD_ISSET(fd: Int32, set: CPointer<FdSet>): Bool {
+    unsafe {
+        let value = set.read()
+        let word = Int64(fd) / 32
+        let bit = UInt32(Int64(fd) % 32)
+        return (value.bits[word] & (1u32 << bit)) != 0u32
+    }
+}
 
 @When[os != "Windows"]
 private let DLOPEN_MODE: Int32 = 0x101
@@ -451,79 +575,420 @@ public class RuntimeInit {
 
 public class MacroProcMsger {
     private static let instance: MacroProcMsger = MacroProcMsger(true)
-    public var macroSrvRun: Bool = false
-    public var pipeError: Bool = false
-    private let clientInbox: ArrayList<ArrayList<UInt8>> = ArrayList<ArrayList<UInt8>>()
-    private let serverInbox: ArrayList<ArrayList<UInt8>> = ArrayList<ArrayList<UInt8>>()
+    public let macroSrvRun: AtomicBool = AtomicBool(false)
+    public let pipeError: AtomicBool = AtomicBool(false)
+    public let mutex: Mutex = Mutex()
+    @When[os == "Windows"]
+    public var hParentRead: CPointer<Unit> = CPointer<Unit>()
+    @When[os == "Windows"]
+    public var hParentWrite: CPointer<Unit> = CPointer<Unit>()
+    @When[os == "Windows"]
+    public var hChildRead: CPointer<Unit> = CPointer<Unit>()
+    @When[os == "Windows"]
+    public var hChildWrite: CPointer<Unit> = CPointer<Unit>()
+    @When[os == "Windows"]
+    public var hProcess: CPointer<Unit> = CPointer<Unit>()
+    @When[os == "Windows"]
+    public var hThread: CPointer<Unit> = CPointer<Unit>()
+    @When[os != "Windows"]
+    public let pipefdP2C: CPointer<Int32> = LibC.malloc<Int32>(count: 2)
+    @When[os != "Windows"]
+    public let pipefdC2P: CPointer<Int32> = LibC.malloc<Int32>(count: 2)
+    private let msgSliceLen: Int64 = 4096
 
+    @When[os == "Windows"]
     public init() {}
 
+    @When[os != "Windows"]
+    public init() {
+        unsafe {
+            pipefdP2C.write(-1)
+            (pipefdP2C + 1).write(-1)
+            pipefdC2P.write(-1)
+            (pipefdC2P + 1).write(-1)
+        }
+    }
+
+    @When[os == "Windows"]
     private init(_: Bool) {}
+
+    @When[os != "Windows"]
+    private init(_: Bool) {
+        unsafe {
+            pipefdP2C.write(-1)
+            (pipefdP2C + 1).write(-1)
+            pipefdC2P.write(-1)
+            (pipefdC2P + 1).write(-1)
+        }
+    }
 
     public static func GetInstance(): MacroProcMsger {
         return MacroProcMsger.instance
     }
 
+    @When[os == "Windows"]
+    public func SetSrvPipeHandle(hRead: CPointer<Unit>, hWrite: CPointer<Unit>): Unit {
+        hChildRead = hRead
+        hChildWrite = hWrite
+    }
+
+    @When[os != "Windows"]
+    public func SetSrvPipeHandle(hRead: Int32, hWrite: Int32): Unit {
+        unsafe {
+            pipefdP2C.write(hRead)
+            (pipefdC2P + 1).write(hWrite)
+        }
+    }
+
     public func CloseMacroSrv(): Unit {
-        macroSrvRun = false
-        clientInbox.clear()
-        serverInbox.clear()
+        if (macroSrvRun.load()) {
+            let msg = ArrayList<UInt8>()
+            MacroEvalMsgSerializer().SerializeExitMsg(msg)
+            if (SendMsgToSrv(msg)) {
+                let start = MonoTime.now()
+                var elapsedSeconds: Int64 = 0
+                let waitTime: Int64 = 5
+                while (macroSrvRun.load() && elapsedSeconds < waitTime) {
+                    elapsedSeconds = (MonoTime.now() - start).toSeconds()
+                }
+                if (elapsedSeconds >= waitTime) {
+                    Errorln("wait macro srv exit time out 5")
+                }
+            } else {
+                Errorln("error Send Exit Task")
+            }
+        }
+        CloseClientResource()
     }
 
     public func SendMsgToSrv(msg: ArrayList<UInt8>): Bool {
-        if (msg.isEmpty() || pipeError) {
+        if (msg.isEmpty()) {
             return false
         }
-        serverInbox.add(msg)
+        if (pipeError.load()) {
+            return false
+        }
+        let sumSize = UIntNative(msg.size)
+        let rest = msg.size % msgSliceLen
+        let msgNum = if (rest == 0) { msg.size / msgSliceLen } else { msg.size / msgSliceLen + 1 }
+        let lastSize = if (rest == 0) { msgSliceLen } else { rest }
+        try (sizePtr = LibC.malloc<UIntNative>().asResource()) {
+            unsafe { sizePtr.value.write(sumSize) }
+            if (!WriteToSrvPipe(CPointer<UInt8>(sizePtr.value), UIntNative(sizeOf<UIntNative>()))) {
+                pipeError.store(true)
+                return false
+            }
+        }
+        try (msgPtr = LibC.malloc<UInt8>(count: msg.size).asResource()) {
+            var idx: Int64 = 0
+            unsafe {
+                while (idx < msg.size) {
+                    (msgPtr.value + idx).write(msg[idx])
+                    idx++
+                }
+            }
+            var slice: Int64 = 0
+            while (slice < msgNum) {
+                let curNum = if (slice == msgNum - 1) { lastSize } else { msgSliceLen }
+                let slicePtr = unsafe { msgPtr.value + slice * msgSliceLen }
+                if (!WriteToSrvPipe(slicePtr, UIntNative(curNum))) {
+                    pipeError.store(true)
+                    return false
+                }
+                slice++
+            }
+        }
         return true
     }
 
     public func ReadMsgFromSrv(msg: ArrayList<UInt8>): Bool {
         msg.clear()
-        if (clientInbox.isEmpty() || pipeError) {
+        if (pipeError.load()) {
             return false
         }
-        for (byte in clientInbox[0]) {
-            msg.add(byte)
+        var msgSize: UIntNative = 0
+        try (sizePtr = LibC.malloc<UIntNative>().asResource()) {
+            if (!ReadFromSrvPipe(CPointer<UInt8>(sizePtr.value), UIntNative(sizeOf<UIntNative>()))) {
+                pipeError.store(true)
+                return false
+            }
+            msgSize = unsafe { sizePtr.value.read() }
         }
-        clientInbox.remove(at: 0)
+        if (msgSize == 0) {
+            pipeError.store(true)
+            return false
+        }
+        let size = Int64(msgSize)
+        let rest = size % msgSliceLen
+        let msgNum = if (rest == 0) { size / msgSliceLen } else { size / msgSliceLen + 1 }
+        let lastSize = if (rest == 0) { msgSliceLen } else { rest }
+        try (msgPtr = LibC.malloc<UInt8>(count: size).asResource()) {
+            var slice: Int64 = 0
+            while (slice < msgNum) {
+                let curNum = if (slice == msgNum - 1) { lastSize } else { msgSliceLen }
+                let slicePtr = unsafe { msgPtr.value + slice * msgSliceLen }
+                if (!ReadFromSrvPipe(slicePtr, UIntNative(curNum))) {
+                    pipeError.store(true)
+                    return false
+                }
+                slice++
+            }
+            var idx: Int64 = 0
+            unsafe {
+                while (idx < size) {
+                    msg.add((msgPtr.value + idx).read())
+                    idx++
+                }
+            }
+        }
         return true
     }
 
+    @When[os == "Windows"]
     public func ReadAllMsgFromSrv(msgVec: ArrayList<ArrayList<UInt8>>): Bool {
         msgVec.clear()
-        while (!clientInbox.isEmpty()) {
-            let msg = ArrayList<UInt8>()
-            for (byte in clientInbox[0]) {
-                msg.add(byte)
+        let msg = ArrayList<UInt8>()
+        var errFlag = true
+        while (ReadMsgFromSrv(msg)) {
+            let value = ArrayList<UInt8>()
+            for (byte in msg) {
+                value.add(byte)
             }
-            msgVec.add(msg)
-            clientInbox.remove(at: 0)
+            msgVec.add(value)
+            try (totalBytesAvail = LibC.malloc<UInt32>().asResource()) {
+                if (unsafe { PeekNamedPipe(hParentRead, CPointer<UInt8>(), 0u32, CPointer<UInt32>(),
+                    totalBytesAvail.value, CPointer<UInt32>()) } == 0) {
+                    Errorln("PeekNamedPipe failed with error " + unsafe { GetLastError() }.toString())
+                    return false
+                }
+                if (unsafe { totalBytesAvail.value.read() } == 0u32) {
+                    return true
+                }
+            }
         }
-        return !pipeError
+        return !errFlag
     }
 
+    @When[os != "Windows"]
+    public func ReadAllMsgFromSrv(msgVec: ArrayList<ArrayList<UInt8>>): Bool {
+        msgVec.clear()
+        let msg = ArrayList<UInt8>()
+        var errFlag = true
+        while (ReadMsgFromSrv(msg)) {
+            let value = ArrayList<UInt8>()
+            for (byte in msg) {
+                value.add(byte)
+            }
+            msgVec.add(value)
+            try (readset = LibC.malloc<FdSet>().asResource(), timeout = LibC.malloc<Timeval>().asResource()) {
+                FD_ZERO(readset.value)
+                let readFd = unsafe { pipefdC2P.read() }
+                FD_SET(readFd, readset.value)
+                unsafe { timeout.value.write(Timeval(0, 0)) }
+                let ret = unsafe { select(readFd + 1, readset.value, CPointer<FdSet>(), CPointer<FdSet>(),
+                    timeout.value) }
+                if (ret == -1) {
+                    return false
+                } else if (ret == 0) {
+                    return true
+                } else if (FD_ISSET(readFd, readset.value)) {
+                    continue
+                } else {
+                    return false
+                }
+            }
+        }
+        return !errFlag
+    }
+
+    @When[os == "Windows"]
     public func CloseClientResource(): Unit {
-        clientInbox.clear()
+        if (!hParentRead.isNull()) {
+            if (unsafe { CloseHandle(hParentRead) } != 0) {
+                hParentRead = CPointer<Unit>()
+            } else {
+                Errorln("CloseHandle hParentRead error")
+            }
+        }
+        if (!hParentWrite.isNull()) {
+            if (unsafe { CloseHandle(hParentWrite) } != 0) {
+                hParentWrite = CPointer<Unit>()
+            } else {
+                Errorln("CloseHandle hParentWrite error")
+            }
+        }
+        if (!hProcess.isNull()) {
+            if (unsafe { CloseHandle(hProcess) } != 0) {
+                hProcess = CPointer<Unit>()
+            } else {
+                Errorln("CloseHandle hProcess error")
+            }
+        }
+        if (!hThread.isNull()) {
+            if (unsafe { CloseHandle(hThread) } != 0) {
+                hThread = CPointer<Unit>()
+            } else {
+                Errorln("CloseHandle hThread error")
+            }
+        }
+    }
+
+    @When[os != "Windows"]
+    public func CloseClientResource(): Unit {
+        unsafe {
+            if ((pipefdP2C + 1).read() != -1) {
+                let _ = close((pipefdP2C + 1).read())
+                (pipefdP2C + 1).write(-1)
+            }
+            if (pipefdC2P.read() != -1) {
+                let _ = close(pipefdC2P.read())
+                pipefdC2P.write(-1)
+            }
+        }
     }
 
     public func SendMsgToClient(msg: ArrayList<UInt8>): Bool {
         if (msg.isEmpty()) {
             return false
         }
-        clientInbox.add(msg)
+        let sumSize = UIntNative(msg.size)
+        let rest = msg.size % msgSliceLen
+        let msgNum = if (rest == 0) { msg.size / msgSliceLen } else { msg.size / msgSliceLen + 1 }
+        let lastSize = if (rest == 0) { msgSliceLen } else { rest }
+        try (sizePtr = LibC.malloc<UIntNative>().asResource()) {
+            unsafe { sizePtr.value.write(sumSize) }
+            if (!WriteToClientPipe(CPointer<UInt8>(sizePtr.value), UIntNative(sizeOf<UIntNative>()))) {
+                return false
+            }
+        }
+        try (msgPtr = LibC.malloc<UInt8>(count: msg.size).asResource()) {
+            var idx: Int64 = 0
+            unsafe {
+                while (idx < msg.size) {
+                    (msgPtr.value + idx).write(msg[idx])
+                    idx++
+                }
+            }
+            var slice: Int64 = 0
+            while (slice < msgNum) {
+                let curNum = if (slice == msgNum - 1) { lastSize } else { msgSliceLen }
+                let slicePtr = unsafe { msgPtr.value + slice * msgSliceLen }
+                if (!WriteToClientPipe(slicePtr, UIntNative(curNum))) {
+                    return false
+                }
+                slice++
+            }
+        }
         return true
     }
 
     public func ReadMsgFromClient(msg: ArrayList<UInt8>): Bool {
         msg.clear()
-        if (serverInbox.isEmpty()) {
+        var msgSize: UIntNative = 0
+        try (sizePtr = LibC.malloc<UIntNative>().asResource()) {
+            if (!ReadFromClientPipe(CPointer<UInt8>(sizePtr.value), UIntNative(sizeOf<UIntNative>()))) {
+                return false
+            }
+            msgSize = unsafe { sizePtr.value.read() }
+        }
+        if (msgSize == 0) {
             return false
         }
-        for (byte in serverInbox[0]) {
-            msg.add(byte)
+        let size = Int64(msgSize)
+        let rest = size % msgSliceLen
+        let msgNum = if (rest == 0) { size / msgSliceLen } else { size / msgSliceLen + 1 }
+        let lastSize = if (rest == 0) { msgSliceLen } else { rest }
+        try (msgPtr = LibC.malloc<UInt8>(count: size).asResource()) {
+            var slice: Int64 = 0
+            while (slice < msgNum) {
+                let curNum = if (slice == msgNum - 1) { lastSize } else { msgSliceLen }
+                let slicePtr = unsafe { msgPtr.value + slice * msgSliceLen }
+                if (!ReadFromClientPipe(slicePtr, UIntNative(curNum))) {
+                    return false
+                }
+                slice++
+            }
+            var idx: Int64 = 0
+            unsafe {
+                while (idx < size) {
+                    msg.add((msgPtr.value + idx).read())
+                    idx++
+                }
+            }
         }
-        serverInbox.remove(at: 0)
         return true
     }
+
+    @When[os == "Windows"]
+    private func WriteToSrvPipe(buf: CPointer<UInt8>, size: UIntNative): Bool {
+        return unsafe { WriteFile(hParentWrite, buf, UInt32(size), CPointer<UInt32>(), CPointer<Unit>()) != 0 }
+    }
+
+    @When[os != "Windows"]
+    private func WriteToSrvPipe(buf: CPointer<UInt8>, size: UIntNative): Bool {
+        var writeBuf = buf
+        var writeSize = size
+        var res = unsafe { write((pipefdP2C + 1).read(), writeBuf, writeSize) }
+        while (res >= 0 && res < IntNative(writeSize)) {
+            writeSize -= UIntNative(res)
+            writeBuf = unsafe { writeBuf + Int64(res) }
+            res = unsafe { write((pipefdP2C + 1).read(), writeBuf, writeSize) }
+        }
+        return res >= 0
+    }
+
+    @When[os == "Windows"]
+    private func ReadFromSrvPipe(buf: CPointer<UInt8>, size: UIntNative): Bool {
+        return unsafe { ReadFile(hParentRead, buf, UInt32(size), CPointer<UInt32>(), CPointer<Unit>()) != 0 }
+    }
+
+    @When[os != "Windows"]
+    private func ReadFromSrvPipe(buf: CPointer<UInt8>, size: UIntNative): Bool {
+        var readBuf = buf
+        var readSize = size
+        var res = unsafe { read(pipefdC2P.read(), readBuf, readSize) }
+        while (res > 0 && res < IntNative(readSize)) {
+            readSize -= UIntNative(res)
+            readBuf = unsafe { readBuf + Int64(res) }
+            res = unsafe { read(pipefdC2P.read(), readBuf, readSize) }
+        }
+        return res > 0
+    }
+
+    @When[os == "Windows"]
+    private func WriteToClientPipe(buf: CPointer<UInt8>, size: UIntNative): Bool {
+        return unsafe { WriteFile(hChildWrite, buf, UInt32(size), CPointer<UInt32>(), CPointer<Unit>()) != 0 }
+    }
+
+    @When[os != "Windows"]
+    private func WriteToClientPipe(buf: CPointer<UInt8>, size: UIntNative): Bool {
+        var writeBuf = buf
+        var writeSize = size
+        var res = unsafe { write((pipefdC2P + 1).read(), writeBuf, writeSize) }
+        while (res >= 0 && res < IntNative(writeSize)) {
+            writeSize -= UIntNative(res)
+            writeBuf = unsafe { writeBuf + Int64(res) }
+            res = unsafe { write((pipefdC2P + 1).read(), writeBuf, writeSize) }
+        }
+        return res >= 0
+    }
+
+    @When[os == "Windows"]
+    private func ReadFromClientPipe(buf: CPointer<UInt8>, size: UIntNative): Bool {
+        return unsafe { ReadFile(hChildRead, buf, UInt32(size), CPointer<UInt32>(), CPointer<Unit>()) != 0 }
+    }
+
+    @When[os != "Windows"]
+    private func ReadFromClientPipe(buf: CPointer<UInt8>, size: UIntNative): Bool {
+        var readBuf = buf
+        var readSize = size
+        var res = unsafe { read(pipefdP2C.read(), readBuf, readSize) }
+        while (res > 0 && res < IntNative(readSize)) {
+            readSize -= UIntNative(res)
+            readBuf = unsafe { readBuf + Int64(res) }
+            res = unsafe { read(pipefdP2C.read(), readBuf, readSize) }
+        }
+        return res > 0
+    }
+
 }

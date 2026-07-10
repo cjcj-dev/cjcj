@@ -750,7 +750,7 @@ public class MacroEvaluation {
     }
 
     public func CreateMacroSrvProcess(): Unit {
-        MacroProcMsger.GetInstance().macroSrvRun = true
+        MacroProcMsger.GetInstance().macroSrvRun.store(true)
     }
 
     public func ExecuteEvalSrvTask(): Unit {
@@ -806,7 +806,7 @@ public class MacroEvaluation {
     public func EvaluateWithRuntime(macCall: MacroCall): Unit {
         if (useChildProcess) {
             if (SendMacroCallTaskToServer(macCall) && !enableParallelMacro) {
-                if (MacroProcMsger.GetInstance().macroSrvRun) {
+                if (MacroProcMsger.GetInstance().macroSrvRun.load()) {
                     let _ = ExecuteOneMacroServerTask(this)
                 }
                 WaitMacroCallEvalResultFromServer(macCall)
