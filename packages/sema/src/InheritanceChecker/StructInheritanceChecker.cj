@@ -253,7 +253,7 @@ private func DiagnoseWeakVisibility(
 ): Unit {
     let parentRange = DeclIdentifierRange(parent)
     let childRange = DeclIdentifierRange(child)
-    let range = DeclIdentifierRange(diagNode)
+    let range = MakeRangeForDeclIdentifier(diagNode)
     let childHint = "the visibility of the deriving '" + child.identifier.Val() + "' is '" + VisibilityToString(child) + "'"
     let builder = diag.DiagnoseRefactor(DiagKindRefactor.sema_weak_visibility, range)
     if (let Some(macroCall) <- diagNode.curMacroCall) {
