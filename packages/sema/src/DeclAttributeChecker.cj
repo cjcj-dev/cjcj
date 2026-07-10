@@ -2,6 +2,8 @@ package cangjie_compiler::sema
 
 import std.collection.*
 import cangjie_compiler::ast.*
+import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
+import cangjie_compiler::basic.DiagKind as BasicDiagKind
 import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
@@ -232,6 +234,9 @@ private class DeclAttributeCheckerImpl {
     }
 
     private func CheckAttributesForPropAndFuncDeclInClass(classDecl: ClassDecl, member: Decl): Unit {
+        if (member.astKind != ASTKind.PROP_DECL && member.astKind != ASTKind.FUNC_DECL) {
+            return
+        }
         if (opts.compileCjd) {
             return
         }
@@ -241,11 +246,8 @@ private class DeclAttributeCheckerImpl {
                 (!classDecl.TestAttr(Attribute.ABSTRACT) && !classDecl.TestAttr(Attribute.FOREIGN))) &&
             !classDecl.TestAttr(Attribute.OBJ_C_MIRROR)
         if (invalidAbstract && !member.TestAttr(Attribute.COMMON_WITH_DEFAULT)) {
-            AddIssue(
-                DeclAttributeIssueKind.INVALID_ABSTRACT_MEMBER,
-                member,
-                "abstract ${memberKind} cannot appear in this class context"
-            )
+            Diagnose(diag, member, BasicDiagKind.sema_missing_func_body,
+                args: [BasicDiagArgument(memberKind), BasicDiagArgument(member.identifier.Val())]).Emit()
         }
         if (member.TestAttr(Attribute.ABSTRACT) && classDecl.TestAttr(Attribute.ABSTRACT)) {
             if (!member.TestAttr(Attribute.PUBLIC) && !member.TestAttr(Attribute.PROTECTED)) {
