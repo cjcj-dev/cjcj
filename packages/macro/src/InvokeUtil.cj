@@ -427,12 +427,14 @@ public class RuntimeInit {
                 FinishRuntime(opened)
                 initRuntime = false
             }
+            @When[backend == "cjnative" && env != "ohos"]
             let _ = CloseSymbolTable(opened)
         }
         handle = None
         runtimeMethodFunc = CPointer<Unit>()
         runtimeReleaseFunc = CPointer<Unit>()
-        CloseMacroDynamicLibrary()
+        @When[backend == "cjnative" && env != "ohos"]
+        let _ = CloseMacroDynamicLibrary()
     }
 
     public func GetHandle(): Option<RuntimeHandle> {
