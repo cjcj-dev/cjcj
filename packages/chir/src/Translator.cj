@@ -484,6 +484,12 @@ public class Translator {
         return genericFuncMap
     }
 
+    public func Copy(): Translator {
+        return Translator(builder, chirTy, globalSymbolTable, localConstVars: localConstVars,
+            localConstFuncs: localConstFuncs, deserializedVals: deserializedVals,
+            overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts)
+    }
+
     public func TranslateGlobalVarInitializer(fn: Function, decl: AstVarDecl, globalVar: GlobalVar): Unit {
         let body = fn.GetBody() ??
             throw IllegalStateException("faithful AST2CHIR global initializer function has no body")
