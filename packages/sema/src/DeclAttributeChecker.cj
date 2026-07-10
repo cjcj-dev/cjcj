@@ -251,11 +251,11 @@ private class DeclAttributeCheckerImpl {
         }
         if (member.TestAttr(Attribute.ABSTRACT) && classDecl.TestAttr(Attribute.ABSTRACT)) {
             if (!member.TestAttr(Attribute.PUBLIC) && !member.TestAttr(Attribute.PROTECTED)) {
-                AddIssue(
-                    DeclAttributeIssueKind.INVALID_ABSTRACT_MEMBER_VISIBILITY,
-                    member,
-                    "abstract ${memberKind} in an abstract class must be public or protected"
-                )
+                diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_invalid_member_visibility_in_class,
+                    MakeRange(member.identifier.Begin(), member.identifier.End()),
+                    arguments: ["abstract", memberKind]
+                ).Emit()
             }
         }
         CheckCJMPAttributesForPropAndFuncDeclInClass(classDecl, member)
