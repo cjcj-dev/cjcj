@@ -116,6 +116,57 @@ func ReadScalar<T>(data: Array<UInt8>, pos: Int64): T {
     return (UInt8(0) as T).getOrThrow()
 }
 
+// flatbuffers/buffer.h:28-37. Offset<T> is the four-byte uoffset_t wrapper
+// used to select IndirectHelper's vector-of-offsets read specialization.
+struct Offset<T> {
+    let o: UInt32
+
+    init() {
+        o = 0u32
+    }
+
+    init(o: UInt32) {
+        this.o = o
+    }
+
+    func Union(): Offset<Any> {
+        return Offset<Any>(o)
+    }
+
+    func IsNull(): Bool {
+        return o == 0u32
+    }
+}
+
+// flatbuffers/buffer.h:93-135. C++ template return_type is T for scalar
+// elements and const T* for Offset<T>; Any carries that type-dependent return
+// in Cangjie, with byte-array positions representing C++ byte pointers.
+class IndirectHelper<T> {
+    static func element_stride(): Int64 {
+        if (UInt8(0) is T || Int8(0) is T || false is T) {
+            return 1
+        } else if (UInt16(0) is T || Int16(0) is T || Float16(0.0) is T) {
+            return 2
+        } else if (UInt32(0) is T || Int32(0) is T || Float32(0.0) is T || Rune(0) is T) {
+            return 4
+        } else if (UInt64(0) is T || Int64(0) is T || Float64(0.0) is T) {
+            return 8
+        }
+        return 4
+    }
+
+    static func Read(data: Array<UInt8>, p: Int64, i: UInt32): Any {
+        let stride = element_stride()
+        let elementPos = p + Int64(i) * stride
+        if (UInt8(0) is T || Int8(0) is T || false is T || UInt16(0) is T || Int16(0) is T ||
+            Float16(0.0) is T || UInt32(0) is T || Int32(0) is T || Float32(0.0) is T || Rune(0) is T ||
+            UInt64(0) is T || Int64(0) is T || Float64(0.0) is T) {
+            return ReadScalar<T>(data, elementPos)
+        }
+        return elementPos + Int64(ReadScalar<UInt32>(data, elementPos))
+    }
+}
+
 // flatbuffers/table.h:27-74. The C++ data_ pointer is represented by data and
 // pos; nullable result pointers are represented by Option<Int64> offsets into
 // the same byte array.
@@ -179,9 +230,9 @@ open class Vector<T> {
         return EndianScalar<UInt32>(ReadScalar<UInt32>(data, pos))
     }
 
-    func Get(i: UInt32): T {
+    func Get(i: UInt32): Any {
         CJC_ASSERT(i < size())
-        return ReadScalar<T>(data, Data() + Int64(i) * element_stride())
+        return IndirectHelper<T>.Read(data, Data(), i)
     }
 
     func Data(): Int64 {
@@ -189,17 +240,7 @@ open class Vector<T> {
     }
 
     private func element_stride(): Int64 {
-        if (UInt8(0) is T || Int8(0) is T || false is T) {
-            return 1
-        } else if (UInt16(0) is T || Int16(0) is T || Float16(0.0) is T) {
-            return 2
-        } else if (UInt32(0) is T || Int32(0) is T || Float32(0.0) is T || Rune(0) is T) {
-            return 4
-        } else if (UInt64(0) is T || Int64(0) is T || Float64(0.0) is T) {
-            return 8
-        }
-        CJC_ASSERT(false)
-        return 0
+        return IndirectHelper<T>.element_stride()
     }
 }
 
