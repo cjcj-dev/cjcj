@@ -235,6 +235,7 @@ public class InterpreterValue {
     }
 }
 
+@When[arch == "x86_64" || arch == "aarch64"]
 private func NormalizeIntegerForKind(kind: InterpreterValueKind, value: Int64): Int64 {
     return match (kind) {
         case InterpreterValueKind.IINT8 => NormalizeSignedInteger(value, 8)
@@ -243,6 +244,19 @@ private func NormalizeIntegerForKind(kind: InterpreterValueKind, value: Int64): 
         case InterpreterValueKind.IUINT8 => NormalizeUnsignedInteger(value, 8)
         case InterpreterValueKind.IUINT16 => NormalizeUnsignedInteger(value, 16)
         case InterpreterValueKind.IUINT32 => NormalizeUnsignedInteger(value, 32)
+        case _ => value
+    }
+}
+
+@When[arch != "x86_64" && arch != "aarch64"]
+private func NormalizeIntegerForKind(kind: InterpreterValueKind, value: Int64): Int64 {
+    return match (kind) {
+        case InterpreterValueKind.IINT8 => NormalizeSignedInteger(value, 8)
+        case InterpreterValueKind.IINT16 => NormalizeSignedInteger(value, 16)
+        case InterpreterValueKind.IINT32 | InterpreterValueKind.IINTNAT => NormalizeSignedInteger(value, 32)
+        case InterpreterValueKind.IUINT8 => NormalizeUnsignedInteger(value, 8)
+        case InterpreterValueKind.IUINT16 => NormalizeUnsignedInteger(value, 16)
+        case InterpreterValueKind.IUINT32 | InterpreterValueKind.IUINTNAT => NormalizeUnsignedInteger(value, 32)
         case _ => value
     }
 }

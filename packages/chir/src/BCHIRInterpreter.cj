@@ -29,14 +29,20 @@ public class BCHIRInterpreter {
             if (IsSmallIntOp(opCode)) {
                 interpStack.ArgsPush(InterpreterValue.MakeInt(IntOpKind(opCode), code.Get(pc + 1)))
                 pc += 1 + GetOpCodeArgSize(opCode)
-            } else if (opCode == OpCode.INT64 || opCode == OpCode.INTNAT) {
+            } else if (opCode == OpCode.INT64) {
                 interpStack.ArgsPush(InterpreterValue.MakeInt(IntOpKind(opCode), code.Get8Bytes(pc + 1)))
+                pc += 1 + GetOpCodeArgSize(opCode)
+            } else if (opCode == OpCode.INTNAT) {
+                interpStack.ArgsPush(IValUtils.PrimitiveIntNat(code.Get8Bytes(pc + 1)))
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (IsSmallUIntOp(opCode)) {
                 interpStack.ArgsPush(InterpreterValue.MakeUInt(UIntOpKind(opCode), code.Get(pc + 1)))
                 pc += 1 + GetOpCodeArgSize(opCode)
-            } else if (opCode == OpCode.UINT64 || opCode == OpCode.UINTNAT) {
+            } else if (opCode == OpCode.UINT64) {
                 interpStack.ArgsPush(InterpreterValue.MakeUInt(UIntOpKind(opCode), code.Get8Bytes(pc + 1)))
+                pc += 1 + GetOpCodeArgSize(opCode)
+            } else if (opCode == OpCode.UINTNAT) {
+                interpStack.ArgsPush(IValUtils.PrimitiveUIntNat(code.Get8Bytes(pc + 1)))
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (opCode == OpCode.FLOAT16 || opCode == OpCode.FLOAT32) {
                 interpStack.ArgsPush(InterpreterValue.MakeFloat(FloatOpKind(opCode), Float64(code.Get(pc + 1))))
@@ -1184,12 +1190,12 @@ private func IntegerValueForTypeKind(targetKind: TypeKind, raw: Int64): Option<I
         case TypeKind.TYPE_INT16 => InterpreterValue.MakeInt(InterpreterValueKind.IINT16, TruncateSigned(raw, 16))
         case TypeKind.TYPE_INT32 => InterpreterValue.MakeInt(InterpreterValueKind.IINT32, TruncateSigned(raw, 32))
         case TypeKind.TYPE_INT64 => InterpreterValue.MakeInt(InterpreterValueKind.IINT64, raw)
-        case TypeKind.TYPE_INT_NATIVE => InterpreterValue.MakeInt(InterpreterValueKind.IINTNAT, raw)
+        case TypeKind.TYPE_INT_NATIVE => IValUtils.PrimitiveIntNat(raw)
         case TypeKind.TYPE_UINT8 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT8, TruncateUnsigned(raw, 8))
         case TypeKind.TYPE_UINT16 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT16, TruncateUnsigned(raw, 16))
         case TypeKind.TYPE_UINT32 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT32, TruncateUnsigned(raw, 32))
         case TypeKind.TYPE_UINT64 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT64, raw)
-        case TypeKind.TYPE_UINT_NATIVE => InterpreterValue.MakeUInt(InterpreterValueKind.IUINTNAT, raw)
+        case TypeKind.TYPE_UINT_NATIVE => IValUtils.PrimitiveUIntNat(raw)
         case _ => None
     }
 }

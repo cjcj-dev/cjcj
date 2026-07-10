@@ -331,6 +331,7 @@ private func SignedMulOverflows(x: Int64, y: Int64, minValue: Int64, maxValue: I
     return y < maxValue / x
 }
 
+@When[arch == "x86_64" || arch == "aarch64"]
 private func SignedWidth(kind: TypeKind): Int64 {
     return match (kind) {
         case TypeKind.TYPE_INT8 => 8
@@ -342,6 +343,18 @@ private func SignedWidth(kind: TypeKind): Int64 {
     }
 }
 
+@When[arch != "x86_64" && arch != "aarch64"]
+private func SignedWidth(kind: TypeKind): Int64 {
+    return match (kind) {
+        case TypeKind.TYPE_INT8 => 8
+        case TypeKind.TYPE_INT16 => 16
+        case TypeKind.TYPE_INT32 | TypeKind.TYPE_INT_NATIVE => 32
+        case TypeKind.TYPE_INT64 => 64
+        case _ => throw IllegalArgumentException("expected signed integer type kind")
+    }
+}
+
+@When[arch == "x86_64" || arch == "aarch64"]
 private func UnsignedWidth(kind: TypeKind): Int64 {
     return match (kind) {
         case TypeKind.TYPE_UINT8 => 8
@@ -349,6 +362,17 @@ private func UnsignedWidth(kind: TypeKind): Int64 {
         case TypeKind.TYPE_UINT32 => 32
         case TypeKind.TYPE_UINT64 => 64
         case TypeKind.TYPE_UINT_NATIVE => 64
+        case _ => throw IllegalArgumentException("expected unsigned integer type kind")
+    }
+}
+
+@When[arch != "x86_64" && arch != "aarch64"]
+private func UnsignedWidth(kind: TypeKind): Int64 {
+    return match (kind) {
+        case TypeKind.TYPE_UINT8 => 8
+        case TypeKind.TYPE_UINT16 => 16
+        case TypeKind.TYPE_UINT32 | TypeKind.TYPE_UINT_NATIVE => 32
+        case TypeKind.TYPE_UINT64 => 64
         case _ => throw IllegalArgumentException("expected unsigned integer type kind")
     }
 }

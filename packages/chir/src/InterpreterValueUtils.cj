@@ -4,6 +4,27 @@ import cjcj::utils.CJC_ABORT
 import std.collection.*
 
 public class IValUtils {
+    @When[arch == "x86_64" || arch == "aarch64"]
+    public static func PrimitiveUIntNat(value: Int64): InterpreterValue {
+        return InterpreterValue.MakeUInt(InterpreterValueKind.IUINTNAT, value)
+    }
+
+    @When[arch != "x86_64" && arch != "aarch64"]
+    public static func PrimitiveUIntNat(value: Int64): InterpreterValue {
+        return InterpreterValue.MakeUInt(InterpreterValueKind.IUINTNAT, value & 0xffffffff)
+    }
+
+    @When[arch == "x86_64" || arch == "aarch64"]
+    public static func PrimitiveIntNat(value: Int64): InterpreterValue {
+        return InterpreterValue.MakeInt(InterpreterValueKind.IINTNAT, value)
+    }
+
+    @When[arch != "x86_64" && arch != "aarch64"]
+    @OverflowWrapping
+    public static func PrimitiveIntNat(value: Int64): InterpreterValue {
+        return InterpreterValue.MakeInt(InterpreterValueKind.IINTNAT, Int64(Int32(value)))
+    }
+
     public static func FromLiteral(literal: LiteralValue): InterpreterValue {
         if (let Some(value) <- (literal as IntLiteral)) {
             return InterpreterValue.MakeInt(InterpreterValueKind.IINT64, value.value)
@@ -64,12 +85,12 @@ public class IValUtils {
             case TypeKind.TYPE_UINT32 => return InterpreterValue.MakeUInt(InterpreterValueKind.IUINT32, raw)
             case TypeKind.TYPE_ENUM | TypeKind.TYPE_UINT64 =>
                 return InterpreterValue.MakeUInt(InterpreterValueKind.IUINT64, raw)
-            case TypeKind.TYPE_UINT_NATIVE => return InterpreterValue.MakeUInt(InterpreterValueKind.IUINTNAT, raw)
+            case TypeKind.TYPE_UINT_NATIVE => return PrimitiveUIntNat(raw)
             case TypeKind.TYPE_INT8 => return InterpreterValue.MakeInt(InterpreterValueKind.IINT8, raw)
             case TypeKind.TYPE_INT16 => return InterpreterValue.MakeInt(InterpreterValueKind.IINT16, raw)
             case TypeKind.TYPE_INT32 => return InterpreterValue.MakeInt(InterpreterValueKind.IINT32, raw)
             case TypeKind.TYPE_INT64 => return InterpreterValue.MakeInt(InterpreterValueKind.IINT64, raw)
-            case TypeKind.TYPE_INT_NATIVE => return InterpreterValue.MakeInt(InterpreterValueKind.IINTNAT, raw)
+            case TypeKind.TYPE_INT_NATIVE => return PrimitiveIntNat(raw)
             case TypeKind.TYPE_FLOAT16 => return InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT16, Float64(raw))
             case TypeKind.TYPE_FLOAT32 => return InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT32, Float64(raw))
             case TypeKind.TYPE_FLOAT64 => return InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT64, Float64(raw))
