@@ -570,9 +570,9 @@ private func CheckAllInvocationHasImpl(ctx: ASTContext, root: Node, diag: BasicD
                     let retTarget = refExpr.GetTarget().getOrThrow()
                     let strType = if (retTarget.IsFunc()) { "function" } else { "property" }
                     let strNote = "indirect use of unimplemented " + strType + " reference here"
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(diag,
                         BasicDiagKindRefactor.sema_interface_call_with_unimplemented_call,
-                        BasicMakeRange(memberAccess.begin, memberAccess.end),
+                        memberAccess,
                         strType,
                         retTarget.identifier.Val())
                     builder.AddNote(BasicMakeRange(refExpr.begin, refExpr.end), strNote)
