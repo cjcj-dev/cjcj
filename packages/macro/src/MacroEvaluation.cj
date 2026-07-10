@@ -713,7 +713,7 @@ public class MacroEvaluation {
         this.useChildProcess = useChildProcess
         InitThreadNum()
         if (useChildProcess) {
-            CreateMacroSrvProcess()
+            CreateMacroSrvProcess(this)
         }
     }
 
@@ -747,10 +747,6 @@ public class MacroEvaluation {
     public func ConvertTokensToString(tokens: ArrayList<Token>, offset!: Int64 = 1): String {
         let formatter = MacroFormatter(tokens, escapePosVec, offset)
         return formatter.Produce()
-    }
-
-    public func CreateMacroSrvProcess(): Unit {
-        MacroProcMsger.GetInstance().macroSrvRun.store(true)
     }
 
     public func ExecuteEvalSrvTask(): Unit {
@@ -806,9 +802,6 @@ public class MacroEvaluation {
     public func EvaluateWithRuntime(macCall: MacroCall): Unit {
         if (useChildProcess) {
             if (SendMacroCallTaskToServer(macCall) && !enableParallelMacro) {
-                if (MacroProcMsger.GetInstance().macroSrvRun.load()) {
-                    let _ = ExecuteOneMacroServerTask(this)
-                }
                 WaitMacroCallEvalResultFromServer(macCall)
             }
             return
