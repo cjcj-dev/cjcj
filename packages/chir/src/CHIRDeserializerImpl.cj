@@ -3,7 +3,7 @@ package cjcj::chir
 import std.collection.*
 import std.convert.*
 import cjcj::basic.Linkage as BasicLinkage
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, OverflowStrategy}
 
 private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
     return match (kind) {
@@ -1576,6 +1576,15 @@ class CHIRDeserializerImpl {
                 case 3u8 =>
                     let anno = PackageFormat_DebugLocation(annos.data, position)
                     obj.Set<DebugLocationInfoForWarning, DebugLocation>(Create(anno))
+                case 4u8 =>
+                    let anno = PackageFormat_GeneratedFromForIn(annos.data, position)
+                    obj.Set<GeneratedFromForIn, Bool>(anno.GetValue())
+                case 5u8 =>
+                    let anno = PackageFormat_IsAutoEnvClass(annos.data, position)
+                    obj.Set<IsAutoEnvClass, Bool>(anno.GetValue())
+                case 6u8 =>
+                    let anno = PackageFormat_IsCapturedClassInCC(annos.data, position)
+                    obj.Set<IsCapturedClassInCC, Bool>(anno.GetValue())
                 case 7u8 =>
                     let anno = PackageFormat_LinkTypeInfo(annos.data, position)
                     let linkage = match (anno.GetLinkage()) {
@@ -1589,9 +1598,51 @@ class CHIRDeserializerImpl {
                             BasicLinkage.EXTERNAL
                     }
                     obj.Set<LinkTypeInfo, BasicLinkage>(linkage)
+                case 8u8 =>
+                    let anno = PackageFormat_SkipCheck(annos.data, position)
+                    let skipKind = match (anno.GetSkipKind()) {
+                        case 0u8 => SkipKind.NO_SKIP
+                        case 1u8 => SkipKind.SKIP_DCE_WARNING
+                        case 2u8 => SkipKind.SKIP_FORIN_EXIT
+                        case 3u8 => SkipKind.SKIP_VIC
+                        case _ =>
+                            CJC_ABORT()
+                            SkipKind.NO_SKIP
+                    }
+                    obj.Set<SkipCheck, SkipKind>(skipKind)
+                case 9u8 =>
+                    let anno = PackageFormat_NeverOverflowInfo(annos.data, position)
+                    obj.Set<NeverOverflowInfo, Bool>(anno.GetNeverOverflow())
+                case 10u8 =>
+                    let anno = PackageFormat_EnumCaseIndex(annos.data, position)
+                    if (anno.GetIndex() != -1) {
+                        obj.Set<EnumCaseIndex, Option<Int64>>(Some(anno.GetIndex()))
+                    }
+                case 11u8 =>
+                    let anno = PackageFormat_VirMethodOffset(annos.data, position)
+                    if (anno.GetOffset() != -1) {
+                        obj.Set<VirMethodOffset, Option<Int64>>(Some(anno.GetOffset()))
+                    }
+                case 12u8 =>
+                    let anno = PackageFormat_WrappedRawMethod(annos.data, position)
+                    obj.Set<WrappedRawMethod, Option<Function>>(GetValue<Function>(anno.GetRawMethod()))
+                case 13u8 =>
+                    let anno = PackageFormat_OverrideSrcFuncType(annos.data, position)
+                    obj.Set<OverrideSrcFuncType, Option<FuncType>>(GetType<FuncType>(anno.GetType()))
                 case _ => ()
             }
             index++
+        }
+        if (let Some(location) <- buffer.GetLoc()) {
+            obj.SetDebugLocation(Create(location))
+        }
+        obj.AppendAttributeInfo(AttributeInfo(buffer.GetAttributes()))
+    }
+
+    private func ConfigValue(buffer: PackageFormat_Value, obj: Value): Unit {
+        ConfigBase(buffer.GetBase().getOrThrow(), obj)
+        if (let Some(identifier) <- buffer.GetIdentifier()) {
+            obj.SetIdentifier(identifier.str())
         }
     }
 
@@ -1686,6 +1737,1181 @@ class CHIRDeserializerImpl {
         result.SetFuncKind(CHIRFuncKindFromIndex(Int64(obj.GetFuncKind())))
         if (compilePlatform) { result.EnableAttr(Attribute.DESERIALIZED) }
         return result
+    }
+
+    private func Deserialize(obj: PackageFormat_BlockGroup): BlockGroup {
+        var blockGroup: Option<BlockGroup> = None
+        if (obj.GetOwnedFunc() != 0u32) {
+            let ownedFunc = GetValue<Function>(obj.GetOwnedFunc()).getOrThrow()
+            let result = builder.CreateBlockGroup(ownedFunc)
+            result.SetOwnerFunc(ownedFunc)
+            blockGroup = result
+        } else if (obj.GetOwnedExpression() != 0u32) {
+            let ownedExpression = GetExpression<Expression>(obj.GetOwnedExpression()).getOrThrow()
+            let result = builder.CreateBlockGroup(ownedExpression.GetTopLevelFunc().getOrThrow())
+            if (let Some(lambda) <- (ownedExpression as Lambda)) {
+                lambda.InitBody(result)
+            }
+            blockGroup = result
+        }
+        return blockGroup.getOrThrow()
+    }
+
+    private func Deserialize(obj: PackageFormat_Block): Block {
+        let parentGroup = GetValue<BlockGroup>(obj.GetParentGroup()).getOrThrow()
+        return builder.CreateBlock(parentGroup)
+    }
+
+    private func Deserialize(obj: PackageFormat_Parameter): Parameter {
+        let base = obj.GetBase().getOrThrow()
+        CJC_ASSERT(base.GetKind() == CHIRFB_VALUE_KIND_PARAMETER)
+        let ty = GetType<Type>(base.GetType()).getOrThrow()
+        let result: Parameter
+        if (let Some(ownedFunc) <- GetValue<Function>(obj.GetOwnedFunc())) {
+            result = builder.CreateParameter(ty, INVALID_LOCATION, ownedFunc)
+        } else if (let Some(ownedLambda) <- GetExpression<Lambda>(obj.GetOwnedLambda())) {
+            result = builder.CreateParameter(ty, INVALID_LOCATION, ownedLambda)
+        } else {
+            CJC_ABORT()
+            return builder.CreateParameter(ty, INVALID_LOCATION,
+                GetValue<Function>(obj.GetOwnedFunc()).getOrThrow())
+        }
+        result.SetSrcCodeIdentifier(obj.GetSrcCodeIdentifier().getOrThrow().str())
+        if (let Some(annoInfo) <- obj.GetAnnoInfo()) {
+            result.SetAnnoInfo(Create(annoInfo))
+        }
+        return result
+    }
+
+    private func Deserialize(obj: PackageFormat_LocalVar): LocalVar {
+        let associatedExpr = GetExpression<Expression>(obj.GetAssociatedExpr()).getOrThrow()
+        let result = associatedExpr.GetResult().getOrThrow()
+        result.SetSrcCodeIdentifier(obj.GetSrcCodeIdentifier().getOrThrow().str())
+        result.SetIdentifier(obj.GetBase().getOrThrow().GetIdentifier().getOrThrow().str())
+        if (obj.GetIsRetVal()) {
+            result.SetRetValue(true)
+        }
+        return result
+    }
+
+    private func GetValue<T>(ids: Option<Vector<UInt32>>): ArrayList<T> {
+        let result = ArrayList<T>()
+        if (let Some(vector) <- ids) {
+            var index = 0u32
+            while (index < vector.size()) {
+                let id = (vector.Get(index) as UInt32).getOrThrow()
+                if (let Some(value) <- GetValue<T>(id)) {
+                    result.add(value)
+                }
+                index++
+            }
+        }
+        return result
+    }
+
+    private func GetValue<T>(id: UInt32): Option<T> {
+        if (id == 0u32) {
+            return None
+        }
+        if (let Some(value) <- id2Value.get(id)) {
+            return value as T
+        }
+        let rawPackage = pool.getOrThrow()
+        let values = rawPackage.GetValues().getOrThrow()
+        let kinds = rawPackage.GetValues_type().getOrThrow()
+        let kind = (kinds.Get(id - 1u32) as UInt8).getOrThrow()
+        let position = (values.Get(id - 1u32) as Int64).getOrThrow()
+        let value: Value
+        match (kind) {
+            case 1u8 =>
+                let raw = PackageFormat_BoolLiteral(values.data, position)
+                value = Deserialize(raw)
+                id2Value[id] = value
+                ConfigValue(raw.GetBase().getOrThrow().GetBase().getOrThrow(), value)
+            case 2u8 =>
+                let raw = PackageFormat_RuneLiteral(values.data, position)
+                value = Deserialize(raw)
+                id2Value[id] = value
+                ConfigValue(raw.GetBase().getOrThrow().GetBase().getOrThrow(), value)
+            case 3u8 =>
+                let raw = PackageFormat_StringLiteral(values.data, position)
+                value = Deserialize(raw)
+                id2Value[id] = value
+                ConfigValue(raw.GetBase().getOrThrow().GetBase().getOrThrow(), value)
+            case 4u8 =>
+                let raw = PackageFormat_IntLiteral(values.data, position)
+                value = Deserialize(raw)
+                id2Value[id] = value
+                ConfigValue(raw.GetBase().getOrThrow().GetBase().getOrThrow(), value)
+            case 5u8 =>
+                let raw = PackageFormat_FloatLiteral(values.data, position)
+                value = Deserialize(raw)
+                id2Value[id] = value
+                ConfigValue(raw.GetBase().getOrThrow().GetBase().getOrThrow(), value)
+            case 6u8 =>
+                let raw = PackageFormat_UnitLiteral(values.data, position)
+                value = Deserialize(raw)
+                id2Value[id] = value
+                ConfigValue(raw.GetBase().getOrThrow().GetBase().getOrThrow(), value)
+            case 7u8 =>
+                let raw = PackageFormat_NullLiteral(values.data, position)
+                value = Deserialize(raw)
+                id2Value[id] = value
+                ConfigValue(raw.GetBase().getOrThrow().GetBase().getOrThrow(), value)
+            case 8u8 =>
+                let raw = PackageFormat_Parameter(values.data, position)
+                value = Deserialize(raw)
+                id2Value[id] = value
+                ConfigValue(raw.GetBase().getOrThrow(), value)
+            case 9u8 =>
+                let raw = PackageFormat_LocalVar(values.data, position)
+                value = Deserialize(raw)
+                id2Value[id] = value
+                ConfigValue(raw.GetBase().getOrThrow(), value)
+            case 10u8 =>
+                value = Deserialize(PackageFormat_GlobalVar(values.data, position))
+                id2Value[id] = value
+            case 11u8 =>
+                value = Deserialize(PackageFormat_Function(values.data, position))
+                id2Value[id] = value
+            case 12u8 =>
+                let raw = PackageFormat_Block(values.data, position)
+                value = Deserialize(raw)
+                id2Value[id] = value
+                ConfigValue(raw.GetBase().getOrThrow(), value)
+            case 13u8 =>
+                let raw = PackageFormat_BlockGroup(values.data, position)
+                value = Deserialize(raw)
+                id2Value[id] = value
+                ConfigValue(raw.GetBase().getOrThrow(), value)
+            case _ =>
+                CJC_ABORT()
+                return builder.CreateLiteralValue(UnitLiteral(), builder.context.GetUnitTy()) as T
+        }
+        return value as T
+    }
+
+    private func GetExpression<T>(ids: Option<Vector<UInt32>>): ArrayList<T> {
+        let result = ArrayList<T>()
+        if (let Some(vector) <- ids) {
+            var index = 0u32
+            while (index < vector.size()) {
+                let id = (vector.Get(index) as UInt32).getOrThrow()
+                if (let Some(expression) <- GetExpression<T>(id)) {
+                    result.add(expression)
+                }
+                index++
+            }
+        }
+        return result
+    }
+
+    private func Deserialize(obj: PackageFormat_UnaryExpressionBase): Expression {
+        let base = obj.GetBase().getOrThrow()
+        let operands = base.GetOperands().getOrThrow()
+        let operandId = (operands.Get(0u32) as UInt32).getOrThrow()
+        let operand = GetValue<Value>(operandId).getOrThrow()
+        let parentBlock = GetValue<Block>(base.GetOwner()).getOrThrow()
+        let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
+        let overflowStrategy = match (obj.GetOverflowStrategy()) {
+            case 0u8 => OverflowStrategy.NA
+            case 1u8 => OverflowStrategy.CHECKED
+            case 2u8 => OverflowStrategy.WRAPPING
+            case 3u8 => OverflowStrategy.THROWING
+            case 4u8 => OverflowStrategy.SATURATING
+            case _ =>
+                CJC_ABORT()
+                OverflowStrategy.NA
+        }
+        let (kind, isException) = CHIRExprKindToExprKind(base.GetKind())
+        if (isException) {
+            let normalId = (operands.Get(1u32) as UInt32).getOrThrow()
+            let exceptionId = (operands.Get(2u32) as UInt32).getOrThrow()
+            let result = builder.CreateUnaryIntOpWithException(resultTy, kind, operand,
+                GetValue<Block>(normalId).getOrThrow(), GetValue<Block>(exceptionId).getOrThrow(), parentBlock)
+            result.SetOverflowStrategy(overflowStrategy)
+            return result
+        }
+        return builder.CreateUnaryExpression(kind, resultTy, operand, parentBlock,
+            overflowStrategy: overflowStrategy)
+    }
+
+    private func Deserialize(obj: PackageFormat_BinaryExpressionBase): Expression {
+        let base = obj.GetBase().getOrThrow()
+        let operands = base.GetOperands().getOrThrow()
+        let lhs = GetValue<Value>((operands.Get(0u32) as UInt32).getOrThrow()).getOrThrow()
+        let rhs = GetValue<Value>((operands.Get(1u32) as UInt32).getOrThrow()).getOrThrow()
+        let parentBlock = GetValue<Block>(base.GetOwner()).getOrThrow()
+        let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
+        let overflowStrategy = match (obj.GetOverflowStrategy()) {
+            case 0u8 => OverflowStrategy.NA
+            case 1u8 => OverflowStrategy.CHECKED
+            case 2u8 => OverflowStrategy.WRAPPING
+            case 3u8 => OverflowStrategy.THROWING
+            case 4u8 => OverflowStrategy.SATURATING
+            case _ =>
+                CJC_ABORT()
+                OverflowStrategy.NA
+        }
+        let (kind, isException) = CHIRExprKindToExprKind(base.GetKind())
+        if (isException) {
+            let normalId = (operands.Get(2u32) as UInt32).getOrThrow()
+            let exceptionId = (operands.Get(3u32) as UInt32).getOrThrow()
+            let result = builder.CreateBinaryIntOpWithException(resultTy, kind, lhs, rhs,
+                GetValue<Block>(normalId).getOrThrow(), GetValue<Block>(exceptionId).getOrThrow(), parentBlock)
+            result.SetOverflowStrategy(overflowStrategy)
+            return result
+        }
+        return builder.CreateBinaryExpression(kind, resultTy, lhs, rhs, parentBlock,
+            overflowStrategy: overflowStrategy)
+    }
+
+    private func DeserializeConstant(resultTy: Type, value: LiteralValue, parent: Block): Constant {
+        if (let Some(literal) <- (value as BoolLiteral)) {
+            return builder.CreateConstant(resultTy, BoolLiteral(literal.GetVal()), parent)
+        } else if (let Some(literal) <- (value as FloatLiteral)) {
+            return builder.CreateConstant(resultTy, FloatLiteral(literal.GetVal()), parent)
+        } else if (let Some(literal) <- (value as IntLiteral)) {
+            return builder.CreateConstant(resultTy, IntLiteral(literal.GetUnsignedVal()), parent)
+        } else if (value is NullLiteral) {
+            return builder.CreateConstant(resultTy, NullLiteral(), parent)
+        } else if (let Some(literal) <- (value as RuneLiteral)) {
+            return builder.CreateConstant(resultTy, RuneLiteral(literal.GetVal()), parent)
+        } else if (let Some(literal) <- (value as StringLiteral)) {
+            return builder.CreateConstant(resultTy, StringLiteral(literal.GetVal()), parent)
+        } else if (value is UnitLiteral) {
+            return builder.CreateConstant(resultTy, UnitLiteral(), parent)
+        }
+        CJC_ABORT()
+        return builder.CreateConstant(resultTy, UnitLiteral(), parent)
+    }
+
+    private func Deserialize(obj: PackageFormat_Expression): Expression {
+        let operands = GetValue<Value>(obj.GetOperands())
+        let owner = GetValue<Block>(obj.GetOwner()).getOrThrow()
+        let resultTy = GetType<Type>(obj.GetResultTy())
+        let (kind, _) = CHIRExprKindToExprKind(obj.GetKind())
+        match (kind) {
+            case ExprKind.BOX =>
+                CJC_ASSERT(operands.size == 1)
+                return builder.CreateBox(resultTy.getOrThrow(), operands[0], owner)
+            case ExprKind.CONSTANT =>
+                CJC_ASSERT(operands.size == 1)
+                return DeserializeConstant(resultTy.getOrThrow(),
+                    (operands[0] as LiteralValue).getOrThrow(), owner)
+            case ExprKind.EXIT => return builder.CreateExit(None, owner)
+            case ExprKind.GET_EXCEPTION => return builder.CreateGetException(resultTy.getOrThrow(), owner)
+            case ExprKind.GET_RTTI =>
+                CJC_ASSERT(operands.size == 1)
+                return builder.CreateGetRTTI(resultTy.getOrThrow(), operands[0], owner)
+            case ExprKind.GOTO =>
+                CJC_ASSERT(operands.size == 1)
+                return builder.CreateGoTo((operands[0] as Block).getOrThrow(), owner)
+            case ExprKind.LOAD =>
+                CJC_ASSERT(operands.size == 1)
+                return builder.CreateLoad(resultTy.getOrThrow(), operands[0], owner)
+            case ExprKind.RAISE_EXCEPTION =>
+                if (operands.size == 2) {
+                    return builder.CreateRaiseException(operands[0], (operands[1] as Block).getOrThrow(), owner)
+                }
+                CJC_ASSERT(operands.size == 1)
+                return builder.CreateRaiseException(operands[0], owner)
+            case ExprKind.RAW_ARRAY_INIT_BY_VALUE =>
+                CJC_ASSERT(operands.size == 3)
+                return builder.CreateRawArrayInitByValue(resultTy.getOrThrow(), operands[0], operands[1],
+                    operands[2], owner)
+            case ExprKind.RAW_ARRAY_LITERAL_INIT =>
+                CJC_ASSERT(!operands.isEmpty())
+                let rawArrayMemory = operands[0]
+                operands.remove(at: 0)
+                return builder.CreateRawArrayLiteralInit(resultTy.getOrThrow(), rawArrayMemory, operands, owner)
+            case ExprKind.STORE =>
+                CJC_ASSERT(operands.size == 2)
+                return builder.CreateStore(operands[0], operands[1], owner)
+            case ExprKind.TRANSFORM_TO_CONCRETE =>
+                CJC_ASSERT(operands.size == 1)
+                return builder.CreateTransformToConcrete(resultTy.getOrThrow(), operands[0], owner)
+            case ExprKind.TRANSFORM_TO_GENERIC =>
+                CJC_ASSERT(operands.size == 1)
+                return builder.CreateTransformToGeneric(resultTy.getOrThrow(), operands[0], owner)
+            case ExprKind.TUPLE => return builder.CreateTuple(resultTy.getOrThrow(), operands, owner)
+            case ExprKind.UNBOX =>
+                CJC_ASSERT(operands.size == 1)
+                return builder.CreateUnBox(resultTy.getOrThrow(), operands[0], owner)
+            case ExprKind.UNBOX_TO_REF =>
+                CJC_ASSERT(operands.size == 1)
+                return builder.CreateUnBoxToRef(resultTy.getOrThrow(), operands[0], owner)
+            case ExprKind.VARRAY =>
+                CJC_ASSERT(!operands.isEmpty())
+                return builder.CreateVArray(resultTy.getOrThrow(), operands, owner)
+            case ExprKind.VARRAY_BUILDER =>
+                CJC_ASSERT(operands.size == 3)
+                return builder.CreateVArrayBuilder(resultTy.getOrThrow(), operands[0], operands[1], operands[2], owner)
+            case _ =>
+                CJC_ABORT()
+                return builder.CreateExit(None, owner)
+        }
+    }
+
+    private func Deserialize(obj: PackageFormat_AllocateBase): Expression {
+        let base = obj.GetBase().getOrThrow()
+        let parentBlock = GetValue<Block>(base.GetOwner()).getOrThrow()
+        let targetType = GetType<Type>(obj.GetAllocatedType()).getOrThrow()
+        let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
+        let (_, isException) = CHIRExprKindToExprKind(base.GetKind())
+        if (isException) {
+            let operands = GetValue<Value>(base.GetOperands())
+            CJC_ASSERT(operands.size == 2)
+            return builder.CreateAllocateWithException(resultTy, targetType,
+                (operands[0] as Block).getOrThrow(), (operands[1] as Block).getOrThrow(), parentBlock)
+        }
+        return builder.CreateAllocate(resultTy, targetType, parentBlock)
+    }
+
+    private func Deserialize(obj: PackageFormat_GetElementRef): GetElementRef {
+        let base = obj.GetBase().getOrThrow()
+        let operands = GetValue<Value>(base.GetOperands())
+        let path = ArrayList<UInt64>()
+        let rawPath = obj.GetPath().getOrThrow()
+        var index = 0u32
+        while (index < rawPath.size()) {
+            path.add((rawPath.Get(index) as UInt64).getOrThrow())
+            index++
+        }
+        return builder.CreateGetElementRef(GetType<Type>(base.GetResultTy()).getOrThrow(), operands[0], path,
+            GetValue<Block>(base.GetOwner()).getOrThrow())
+    }
+
+    private func Deserialize(obj: PackageFormat_GetElementByName): GetElementByName {
+        let base = obj.GetBase().getOrThrow()
+        let names = ArrayList<String>()
+        let rawNames = obj.GetFieldNames().getOrThrow()
+        var index = 0u32
+        while (index < rawNames.size()) {
+            names.add(FlatBufferString(rawNames.data, (rawNames.Get(index) as Int64).getOrThrow()).str())
+            index++
+        }
+        let operands = GetValue<Value>(base.GetOperands())
+        return builder.CreateGetElementByName(GetType<Type>(base.GetResultTy()).getOrThrow(), operands[0], names,
+            GetValue<Block>(base.GetOwner()).getOrThrow())
+    }
+
+    private func Deserialize(obj: PackageFormat_StoreElementRef): StoreElementRef {
+        let base = obj.GetBase().getOrThrow()
+        let operands = GetValue<Value>(base.GetOperands())
+        let path = ArrayList<UInt64>()
+        let rawPath = obj.GetPath().getOrThrow()
+        var index = 0u32
+        while (index < rawPath.size()) {
+            path.add((rawPath.Get(index) as UInt64).getOrThrow())
+            index++
+        }
+        return builder.CreateStoreElementRef(operands[0], operands[1], path,
+            GetValue<Block>(base.GetOwner()).getOrThrow())
+    }
+
+    private func Deserialize(obj: PackageFormat_StoreElementByName): StoreElementByName {
+        let base = obj.GetBase().getOrThrow()
+        let names = ArrayList<String>()
+        let rawNames = obj.GetFieldNames().getOrThrow()
+        var index = 0u32
+        while (index < rawNames.size()) {
+            names.add(FlatBufferString(rawNames.data, (rawNames.Get(index) as Int64).getOrThrow()).str())
+            index++
+        }
+        let operands = GetValue<Value>(base.GetOperands())
+        return builder.CreateStoreElementByName(operands[0], operands[1], names,
+            GetValue<Block>(base.GetOwner()).getOrThrow())
+    }
+
+    private func Deserialize(obj: PackageFormat_ApplyBase): Expression {
+        let funcCallBase = obj.GetBase().getOrThrow()
+        let base = funcCallBase.GetBase().getOrThrow()
+        let owner = GetValue<Block>(base.GetOwner()).getOrThrow()
+        let operands = GetValue<Value>(base.GetOperands())
+        CJC_ASSERT(!operands.isEmpty())
+        let callee = operands[0]
+        operands.remove(at: 0)
+        let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
+        let instantiatedTypeArgs = GetType<Type>(funcCallBase.GetInstantiatedTypeArgs())
+        let objType = GetType<Type>(funcCallBase.GetObjType())
+        let (_, isException) = CHIRExprKindToExprKind(base.GetKind())
+        if (isException) {
+            let exceptionBlock = (operands[operands.size - 1] as Block).getOrThrow()
+            operands.remove(at: operands.size - 1)
+            let normalBlock = (operands[operands.size - 1] as Block).getOrThrow()
+            operands.remove(at: operands.size - 1)
+            let callContext = FuncCallContext(args: operands, instTypeArgs: instantiatedTypeArgs,
+                thisType: objType)
+            return builder.CreateApplyWithException(resultTy, callee, callContext, normalBlock,
+                exceptionBlock, owner)
+        }
+        let callContext = FuncCallContext(args: operands, instTypeArgs: instantiatedTypeArgs, thisType: objType)
+        let expression = builder.CreateApply(resultTy, callee, callContext, owner)
+        if (obj.GetIsSuperCall()) {
+            expression.SetSuperCall()
+        }
+        return expression
+    }
+
+    private func Deserialize(obj: PackageFormat_InvokeBase): Expression {
+        let funcCallBase = obj.GetBase().getOrThrow()
+        let base = funcCallBase.GetBase().getOrThrow()
+        let owner = GetValue<Block>(base.GetOwner()).getOrThrow()
+        let operands = GetValue<Value>(base.GetOperands())
+        CJC_ASSERT(!operands.isEmpty())
+        let caller = operands[0]
+        operands.remove(at: 0)
+        let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
+        let (kind, withException) = CHIRExprKindToExprKind(base.GetKind())
+        var exceptionBlock: Option<Block> = None
+        var normalBlock: Option<Block> = None
+        if (withException) {
+            exceptionBlock = (operands[operands.size - 1] as Block).getOrThrow()
+            operands.remove(at: operands.size - 1)
+            normalBlock = (operands[operands.size - 1] as Block).getOrThrow()
+            operands.remove(at: operands.size - 1)
+        }
+        let virMethodCtx = obj.GetVirMethodCtx().getOrThrow()
+        let invokeInfo = InvokeCallContext(caller,
+            FuncCallContext(args: operands, instTypeArgs: GetType<Type>(funcCallBase.GetInstantiatedTypeArgs()),
+                thisType: GetType<Type>(funcCallBase.GetObjType())),
+            FuncSigInfo(GetType<FuncType>(virMethodCtx.GetFuncType()).getOrThrow(),
+                funcName: virMethodCtx.GetFuncName().getOrThrow().str(),
+                genericTypeParams: GetType<GenericType>(virMethodCtx.GetGenericTypeParams())))
+        var isStatic = false
+        if (let Some(local) <- (caller as LocalVar)) {
+            if (let Some(callerExpression) <- local.GetExpr()) {
+                let callerKind = callerExpression.GetExprKind()
+                isStatic = callerKind == ExprKind.GET_RTTI_STATIC || callerKind == ExprKind.GET_RTTI
+            }
+        }
+        if (kind == ExprKind.INVOKE) {
+            if (isStatic) {
+                return builder.CreateInvokeStatic(resultTy, invokeInfo, owner)
+            }
+            return builder.CreateInvoke(resultTy, invokeInfo, owner)
+        }
+        if (isStatic) {
+            return builder.CreateInvokeStaticWithException(resultTy, invokeInfo, normalBlock.getOrThrow(),
+                exceptionBlock.getOrThrow(), owner)
+        }
+        return builder.CreateInvokeWithException(resultTy, invokeInfo, normalBlock.getOrThrow(),
+            exceptionBlock.getOrThrow(), owner)
+    }
+
+    private func Deserialize(obj: PackageFormat_GetInstantiateValue): GetInstantiateValue {
+        let base = obj.GetBase().getOrThrow()
+        let operands = GetValue<Value>(base.GetOperands())
+        return builder.CreateGetInstantiateValue(GetType<Type>(base.GetResultTy()).getOrThrow(), operands[0],
+            GetType<Type>(obj.GetInstantiateTypes()), GetValue<Block>(base.GetOwner()).getOrThrow())
+    }
+
+    private func Deserialize(obj: PackageFormat_NumericCastBase): Expression {
+        let base = obj.GetBase().getOrThrow()
+        let operands = GetValue<Value>(base.GetOperands())
+        let owner = GetValue<Block>(base.GetOwner()).getOrThrow()
+        let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
+        let overflowStrategy = match (obj.GetOverflowStrategy()) {
+            case 0u8 => OverflowStrategy.NA
+            case 1u8 => OverflowStrategy.CHECKED
+            case 2u8 => OverflowStrategy.WRAPPING
+            case 3u8 => OverflowStrategy.THROWING
+            case 4u8 => OverflowStrategy.SATURATING
+            case _ =>
+                CJC_ABORT()
+                OverflowStrategy.NA
+        }
+        let (_, isException) = CHIRExprKindToExprKind(base.GetKind())
+        if (isException) {
+            return builder.CreateTypeCastWithException(resultTy, operands[0],
+                (operands[1] as Block).getOrThrow(), (operands[2] as Block).getOrThrow(), owner)
+        }
+        return builder.CreateTypeCast(resultTy, operands[0], owner, overflowStrategy: overflowStrategy)
+    }
+
+    private func Deserialize(obj: PackageFormat_InstanceOf): InstanceOf {
+        let base = obj.GetBase().getOrThrow()
+        let operands = GetValue<Value>(base.GetOperands())
+        return builder.CreateInstanceOf(GetType<Type>(base.GetResultTy()).getOrThrow(), operands[0],
+            GetType<Type>(obj.GetTargetType()).getOrThrow(), GetValue<Block>(base.GetOwner()).getOrThrow())
+    }
+
+    private func Deserialize(obj: PackageFormat_Field): Field {
+        let base = obj.GetBase().getOrThrow()
+        let operands = GetValue<Value>(base.GetOperands())
+        let indexes = ArrayList<UInt64>()
+        let path = obj.GetPath().getOrThrow()
+        var index = 0u32
+        while (index < path.size()) {
+            indexes.add((path.Get(index) as UInt64).getOrThrow())
+            index++
+        }
+        return builder.CreateField(GetType<Type>(base.GetResultTy()).getOrThrow(), operands[0], indexes,
+            GetValue<Block>(base.GetOwner()).getOrThrow())
+    }
+
+    private func Deserialize(obj: PackageFormat_FieldByName): FieldByName {
+        let base = obj.GetBase().getOrThrow()
+        let operands = GetValue<Value>(base.GetOperands())
+        let names = ArrayList<String>()
+        let fieldNames = obj.GetFieldNames().getOrThrow()
+        var index = 0u32
+        while (index < fieldNames.size()) {
+            names.add(FlatBufferString(fieldNames.data, (fieldNames.Get(index) as Int64).getOrThrow()).str())
+            index++
+        }
+        return builder.CreateFieldByName(GetType<Type>(base.GetResultTy()).getOrThrow(), operands[0], names,
+            GetValue<Block>(base.GetOwner()).getOrThrow())
+    }
+
+    private func Deserialize(obj: PackageFormat_Debug): Debug {
+        let base = obj.GetBase().getOrThrow()
+        let operands = GetValue<Value>(base.GetOperands())
+        CJC_ASSERT(operands.size == 1)
+        return builder.CreateDebug(GetType<Type>(base.GetResultTy()).getOrThrow(), operands[0],
+            obj.GetSrcCodeName().getOrThrow().str(), GetValue<Block>(base.GetOwner()).getOrThrow())
+    }
+
+    private func Deserialize(obj: PackageFormat_Lambda): Lambda {
+        let base = obj.GetBase().getOrThrow()
+        let lambda = builder.CreateLambda(GetType<Type>(base.GetResultTy()).getOrThrow(),
+            GetType<FuncType>(obj.GetFuncTy()).getOrThrow(), GetValue<Block>(base.GetOwner()).getOrThrow(),
+            isLocalFunc: obj.GetIsLocalFunc(), identifier: obj.GetIdentifier().getOrThrow().str(),
+            srcCodeIdentifier: obj.GetSrcCodeName().getOrThrow().str(),
+            genericTypeParams: GetType<GenericType>(obj.GetGenericTypeParams()))
+        if (obj.GetIsCompileTimeValue()) {
+            lambda.SetCompileTimeValue()
+        }
+        return lambda
+    }
+
+    private func Deserialize(obj: PackageFormat_Branch): Branch {
+        let base = obj.GetBase().getOrThrow()
+        let operands = GetValue<Value>(base.GetOperands())
+        let result = builder.CreateBranch(operands[0], (operands[1] as Block).getOrThrow(),
+            (operands[2] as Block).getOrThrow(), GetValue<Block>(base.GetOwner()).getOrThrow())
+        result.SetSourceExpr(CHIRSourceExprFromIndex(Int64(obj.GetSourceExpr())))
+        return result
+    }
+
+    private func Deserialize(obj: PackageFormat_MultiBranch): MultiBranch {
+        let base = obj.GetBase().getOrThrow()
+        let operands = GetValue<Value>(base.GetOperands())
+        let cond = operands[0]
+        operands.remove(at: 0)
+        let defaultBlock = (operands[0] as Block).getOrThrow()
+        operands.remove(at: 0)
+        let caseBlocks = ArrayList<Block>()
+        for (operand in operands) {
+            caseBlocks.add((operand as Block).getOrThrow())
+        }
+        let caseValues = ArrayList<UInt64>()
+        let rawValues = obj.GetCaseValues().getOrThrow()
+        var index = 0u32
+        while (index < rawValues.size()) {
+            caseValues.add((rawValues.Get(index) as UInt64).getOrThrow())
+            index++
+        }
+        return builder.CreateMultiBranch(cond, defaultBlock, caseValues, caseBlocks,
+            GetValue<Block>(base.GetOwner()).getOrThrow())
+    }
+
+    private func Deserialize(obj: PackageFormat_IntrinsicBase): Expression {
+        let funcCallBase = obj.GetBase().getOrThrow()
+        let base = funcCallBase.GetBase().getOrThrow()
+        let intrinsicKind = match (obj.GetIntrinsicKind()) {
+            case 0u16 => IntrinsicKind.NOT_INTRINSIC
+            case 1u16 => IntrinsicKind.NOT_IMPLEMENTED
+            case 2u16 => IntrinsicKind.ARRAY_INIT
+            case 3u16 => IntrinsicKind.SIZE_OF
+            case 4u16 => IntrinsicKind.ALIGN_OF
+            case 5u16 => IntrinsicKind.ARRAY_ACQUIRE_RAW_DATA
+            case 6u16 => IntrinsicKind.ARRAY_RELEASE_RAW_DATA
+            case 7u16 => IntrinsicKind.ARRAY_BUILT_IN_COPY_TO
+            case 8u16 => IntrinsicKind.ARRAY_GET
+            case 9u16 => IntrinsicKind.ARRAY_SET
+            case 10u16 => IntrinsicKind.ARRAY_GET_UNCHECKED
+            case 11u16 => IntrinsicKind.ARRAY_GET_REF_UNCHECKED
+            case 12u16 => IntrinsicKind.ARRAY_SET_UNCHECKED
+            case 13u16 => IntrinsicKind.ARRAY_SIZE
+            case 14u16 => IntrinsicKind.ARRAY_CLONE
+            case 15u16 => IntrinsicKind.ARRAY_SLICE_INIT
+            case 16u16 => IntrinsicKind.ARRAY_SLICE
+            case 17u16 => IntrinsicKind.ARRAY_SLICE_RAWARRAY
+            case 18u16 => IntrinsicKind.ARRAY_SLICE_START
+            case 19u16 => IntrinsicKind.ARRAY_SLICE_SIZE
+            case 20u16 => IntrinsicKind.ARRAY_SLICE_GET_ELEMENT
+            case 21u16 => IntrinsicKind.ARRAY_SLICE_GET_ELEMENT_UNCHECKED
+            case 22u16 => IntrinsicKind.ARRAY_SLICE_SET_ELEMENT
+            case 23u16 => IntrinsicKind.ARRAY_SLICE_SET_ELEMENT_UNCHECKED
+            case 24u16 => IntrinsicKind.FILL_IN_STACK_TRACE
+            case 25u16 => IntrinsicKind.DECODE_STACK_TRACE
+            case 26u16 => IntrinsicKind.DUMP_CURRENT_THREAD_INFO
+            case 27u16 => IntrinsicKind.DUMP_ALL_THREADS_INFO
+            case 28u16 => IntrinsicKind.CHR
+            case 29u16 => IntrinsicKind.ORD
+            case 30u16 => IntrinsicKind.CPOINTER_GET_POINTER_ADDRESS
+            case 31u16 => IntrinsicKind.CPOINTER_INIT0
+            case 32u16 => IntrinsicKind.CPOINTER_INIT1
+            case 33u16 => IntrinsicKind.CPOINTER_READ
+            case 34u16 => IntrinsicKind.CPOINTER_WRITE
+            case 35u16 => IntrinsicKind.CPOINTER_ADD
+            case 36u16 => IntrinsicKind.CSTRING_INIT
+            case 37u16 => IntrinsicKind.CSTRING_CONVERT_CSTR_TO_PTR
+            case 38u16 => IntrinsicKind.INOUT_PARAM
+            case 39u16 => IntrinsicKind.REGISTER_WATCHED_OBJECT
+            case 40u16 => IntrinsicKind.OBJECT_REFEQ
+            case 41u16 => IntrinsicKind.RAW_ARRAY_REFEQ
+            case 42u16 => IntrinsicKind.FUNC_REFEQ
+            case 43u16 => IntrinsicKind.OBJECT_ZERO_VALUE
+            case 44u16 => IntrinsicKind.INVOKE_GC
+            case 45u16 => IntrinsicKind.SET_GC_THRESHOLD
+            case 46u16 => IntrinsicKind.DUMP_CJ_HEAP_DATA
+            case 47u16 => IntrinsicKind.GET_GC_COUNT
+            case 48u16 => IntrinsicKind.GET_GC_TIME_US
+            case 49u16 => IntrinsicKind.GET_GC_FREED_SIZE
+            case 50u16 => IntrinsicKind.START_CJ_CPU_PROFILING
+            case 51u16 => IntrinsicKind.STOP_CJ_CPU_PROFILING
+            case 52u16 => IntrinsicKind.BLACK_BOX
+            case 53u16 => IntrinsicKind.GET_MAX_HEAP_SIZE
+            case 54u16 => IntrinsicKind.GET_ALLOCATE_HEAP_SIZE
+            case 55u16 => IntrinsicKind.GET_REAL_HEAP_SIZE
+            case 56u16 => IntrinsicKind.GET_THREAD_NUMBER
+            case 57u16 => IntrinsicKind.GET_BLOCKING_THREAD_NUMBER
+            case 58u16 => IntrinsicKind.GET_NATIVE_THREAD_NUMBER
+            case 59u16 => IntrinsicKind.VARRAY_SET
+            case 60u16 => IntrinsicKind.VARRAY_GET
+            case 61u16 => IntrinsicKind.FUTURE_INIT
+            case 62u16 => IntrinsicKind.FUTURE_IS_COMPLETE
+            case 63u16 => IntrinsicKind.FUTURE_WAIT
+            case 64u16 => IntrinsicKind.FUTURE_NOTIFYALL
+            case 65u16 => IntrinsicKind.IS_THREAD_OBJECT_INITED
+            case 66u16 => IntrinsicKind.GET_THREAD_OBJECT
+            case 67u16 => IntrinsicKind.SET_THREAD_OBJECT
+            case 68u16 => IntrinsicKind.OVERFLOW_CHECKED_ADD
+            case 69u16 => IntrinsicKind.OVERFLOW_CHECKED_SUB
+            case 70u16 => IntrinsicKind.OVERFLOW_CHECKED_MUL
+            case 71u16 => IntrinsicKind.OVERFLOW_CHECKED_DIV
+            case 72u16 => IntrinsicKind.OVERFLOW_CHECKED_MOD
+            case 73u16 => IntrinsicKind.OVERFLOW_CHECKED_POW
+            case 74u16 => IntrinsicKind.OVERFLOW_CHECKED_INC
+            case 75u16 => IntrinsicKind.OVERFLOW_CHECKED_DEC
+            case 76u16 => IntrinsicKind.OVERFLOW_CHECKED_NEG
+            case 77u16 => IntrinsicKind.OVERFLOW_THROWING_ADD
+            case 78u16 => IntrinsicKind.OVERFLOW_THROWING_SUB
+            case 79u16 => IntrinsicKind.OVERFLOW_THROWING_MUL
+            case 80u16 => IntrinsicKind.OVERFLOW_THROWING_DIV
+            case 81u16 => IntrinsicKind.OVERFLOW_THROWING_MOD
+            case 82u16 => IntrinsicKind.OVERFLOW_THROWING_POW
+            case 83u16 => IntrinsicKind.OVERFLOW_THROWING_INC
+            case 84u16 => IntrinsicKind.OVERFLOW_THROWING_DEC
+            case 85u16 => IntrinsicKind.OVERFLOW_THROWING_NEG
+            case 86u16 => IntrinsicKind.OVERFLOW_SATURATING_ADD
+            case 87u16 => IntrinsicKind.OVERFLOW_SATURATING_SUB
+            case 88u16 => IntrinsicKind.OVERFLOW_SATURATING_MUL
+            case 89u16 => IntrinsicKind.OVERFLOW_SATURATING_DIV
+            case 90u16 => IntrinsicKind.OVERFLOW_SATURATING_MOD
+            case 91u16 => IntrinsicKind.OVERFLOW_SATURATING_POW
+            case 92u16 => IntrinsicKind.OVERFLOW_SATURATING_INC
+            case 93u16 => IntrinsicKind.OVERFLOW_SATURATING_DEC
+            case 94u16 => IntrinsicKind.OVERFLOW_SATURATING_NEG
+            case 95u16 => IntrinsicKind.OVERFLOW_WRAPPING_ADD
+            case 96u16 => IntrinsicKind.OVERFLOW_WRAPPING_SUB
+            case 97u16 => IntrinsicKind.OVERFLOW_WRAPPING_MUL
+            case 98u16 => IntrinsicKind.OVERFLOW_WRAPPING_DIV
+            case 99u16 => IntrinsicKind.OVERFLOW_WRAPPING_MOD
+            case 100u16 => IntrinsicKind.OVERFLOW_WRAPPING_POW
+            case 101u16 => IntrinsicKind.OVERFLOW_WRAPPING_INC
+            case 102u16 => IntrinsicKind.OVERFLOW_WRAPPING_DEC
+            case 103u16 => IntrinsicKind.OVERFLOW_WRAPPING_NEG
+            case 104u16 => IntrinsicKind.VECTOR_COMPARE_32
+            case 105u16 => IntrinsicKind.VECTOR_INDEX_BYTE_32
+            case 106u16 => IntrinsicKind.CJ_CORE_CAN_USE_SIMD
+            case 107u16 => IntrinsicKind.CJ_TLS_DYN_SET_SESSION_CALLBACK
+            case 108u16 => IntrinsicKind.CJ_TLS_DYN_SSL_INIT
+            case 109u16 => IntrinsicKind.REFLECTION_INTRINSIC_START_FLAG
+            case 110u16 => IntrinsicKind.IS_INTERFACE
+            case 111u16 => IntrinsicKind.IS_CLASS
+            case 112u16 => IntrinsicKind.IS_PRIMITIVE
+            case 113u16 => IntrinsicKind.IS_STRUCT
+            case 114u16 => IntrinsicKind.IS_GENERIC
+            case 115u16 => IntrinsicKind.IS_TUPLE
+            case 116u16 => IntrinsicKind.IS_FUNCTION
+            case 117u16 => IntrinsicKind.IS_ENUM
+            case 118u16 => IntrinsicKind.IS_BOX
+            case 119u16 => IntrinsicKind.GET_OR_CREATE_TYPEINFO_FOR_REFLECT
+            case 120u16 => IntrinsicKind.GET_TYPETEMPLATE
+            case 121u16 => IntrinsicKind.CHECK_METHOD_ACTUAL_ARGS
+            case 122u16 => IntrinsicKind.METHOD_ENTRYPOINT_IS_NULL
+            case 123u16 => IntrinsicKind.IS_RELECT_UNSUPPORTED_TYPE
+            case 124u16 => IntrinsicKind.GET_TYPE_FOR_ANY
+            case 125u16 => IntrinsicKind.GET_TYPE_BY_MANGLED_NAME
+            case 126u16 => IntrinsicKind.GET_TYPE_NAME
+            case 127u16 => IntrinsicKind.GET_TYPE_BY_QUALIFIED_NAME
+            case 128u16 => IntrinsicKind.GET_TYPE_QUALIFIED_NAME_LENGTH
+            case 129u16 => IntrinsicKind.GET_TYPE_QUALIFIED_NAME
+            case 130u16 => IntrinsicKind.GET_NUM_OF_INTERFACE
+            case 131u16 => IntrinsicKind.GET_INTERFACE
+            case 132u16 => IntrinsicKind.IS_SUBTYPE
+            case 133u16 => IntrinsicKind.GET_TYPE_INFO_MODIFIER
+            case 134u16 => IntrinsicKind.GET_TYPE_INFO_ANNOTATIONS
+            case 135u16 => IntrinsicKind.GET_OBJ_CLASS
+            case 136u16 => IntrinsicKind.GET_SUPER_TYPE_INFO
+            case 137u16 => IntrinsicKind.GET_TYPE_ARGS
+            case 138u16 => IntrinsicKind.GET_NUM_OF_INSTANCE_METHOD_INFOS
+            case 139u16 => IntrinsicKind.GET_INSTANCE_METHOD_INFO
+            case 140u16 => IntrinsicKind.GET_NUM_OF_STATIC_METHOD_INFOS
+            case 141u16 => IntrinsicKind.GET_STATIC_METHOD_INFO
+            case 142u16 => IntrinsicKind.GET_METHOD_NAME
+            case 143u16 => IntrinsicKind.GET_METHOD_RETURN_TYPE
+            case 144u16 => IntrinsicKind.GET_METHOD_MODIFIER
+            case 145u16 => IntrinsicKind.GET_METHOD_ANNOTATIONS
+            case 146u16 => IntrinsicKind.APPLY_CJ_METHOD
+            case 147u16 => IntrinsicKind.APPLY_CJ_STATIC_METHOD
+            case 148u16 => IntrinsicKind.APPLY_CJ_GENERIC_METHOD
+            case 149u16 => IntrinsicKind.APPLY_CJ_GENERIC_STATIC_METHOD
+            case 150u16 => IntrinsicKind.GET_NUM_OF_ACTUAL_PARAMETERS
+            case 151u16 => IntrinsicKind.GET_NUM_OF_GENERIC_PARAMETERS
+            case 152u16 => IntrinsicKind.GET_ACTUAL_PARAMETER_INFO
+            case 153u16 => IntrinsicKind.GET_GENERIC_PARAMETER_INFO
+            case 154u16 => IntrinsicKind.GET_NUM_OF_INSTANCE_FIELD_INFOS
+            case 155u16 => IntrinsicKind.GET_INSTANCE_FIELD_INFO
+            case 156u16 => IntrinsicKind.GET_NUM_OF_STATIC_FIELD_INFOS
+            case 157u16 => IntrinsicKind.GET_STATIC_FIELD_INFO
+            case 158u16 => IntrinsicKind.GET_STATIC_FIELD_NAME
+            case 159u16 => IntrinsicKind.GET_STATIC_FIELD_TYPE
+            case 160u16 => IntrinsicKind.GET_STATIC_FIELD_ANNOTATIONS
+            case 161u16 => IntrinsicKind.GET_INSTANCE_FIELD_NAME
+            case 162u16 => IntrinsicKind.GET_INSTANCE_FIELD_TYPE
+            case 163u16 => IntrinsicKind.GET_INSTANCE_FIELD_ANNOTATIONS
+            case 164u16 => IntrinsicKind.GET_INSTANCE_FIELD_MODIFIER
+            case 165u16 => IntrinsicKind.GET_STATIC_FIELD_MODIFIER
+            case 166u16 => IntrinsicKind.GET_FIELD_VALUE
+            case 167u16 => IntrinsicKind.SET_FIELD_VALUE
+            case 168u16 => IntrinsicKind.GET_STATIC_FIELD_VALUE
+            case 169u16 => IntrinsicKind.SET_STATIC_FIELD_VALUE
+            case 170u16 => IntrinsicKind.GET_FIELD_DECLARING_TYPE
+            case 171u16 => IntrinsicKind.GET_PARAMETER_INDEX
+            case 172u16 => IntrinsicKind.GET_PARAMETER_NAME
+            case 173u16 => IntrinsicKind.GET_PARAMETER_TYPE
+            case 174u16 => IntrinsicKind.GET_PARAMETER_ANNOTATIONS
+            case 175u16 => IntrinsicKind.GET_RELATED_PACKAGE_INF
+            case 176u16 => IntrinsicKind.GET_PACKAGE_NAME
+            case 177u16 => IntrinsicKind.GET_PACKAGE_NUM_OF_TYPE_INFOS
+            case 178u16 => IntrinsicKind.GET_PACKAGE_TYPE_INFO
+            case 179u16 => IntrinsicKind.GET_PACKAGE_NUM_OF_GLOBAL_METHODS
+            case 180u16 => IntrinsicKind.GET_PACKAGE_GLOBAL_METHOD_INFO
+            case 181u16 => IntrinsicKind.GET_PACKAGE_NUM_OF_GLOBAL_FIELD_INFOS
+            case 182u16 => IntrinsicKind.GET_PACKAGE_GLOBAL_FIELD_INFO
+            case 183u16 => IntrinsicKind.LOAD_PACKAGE
+            case 184u16 => IntrinsicKind.GET_PACKAGE_BY_QUALIFIEDNAME
+            case 185u16 => IntrinsicKind.GET_PACKAGE_VERSION
+            case 186u16 => IntrinsicKind.GET_SUB_PACKAGES
+            case 187u16 => IntrinsicKind.GET_NUM_OF_FIELD_TYPES
+            case 188u16 => IntrinsicKind.GET_FIELD_TYPES
+            case 189u16 => IntrinsicKind.NEW_AND_INIT_OBJECT
+            case 190u16 => IntrinsicKind.GET_ASSOCIATED_VALUES
+            case 191u16 => IntrinsicKind.GET_NUM_OF_FUNCTION_SIGNATURETYPES
+            case 192u16 => IntrinsicKind.GET_FUNCTION_SIGNATURE_TYPES
+            case 193u16 => IntrinsicKind.GET_NUM_OF_ENUM_CONSTRUCTOR_INFOS
+            case 194u16 => IntrinsicKind.GET_ENUM_CONSTRUCTOR_INFO
+            case 195u16 => IntrinsicKind.GET_ENUM_CONSTRUCTOR_NAME
+            case 196u16 => IntrinsicKind.GET_ENUM_CONSTRUCTOR_INFO_FROM_ANY
+            case 197u16 => IntrinsicKind.REFLECTION_INTRINSIC_END_FLAG
+            case 198u16 => IntrinsicKind.SLEEP
+            case 199u16 => IntrinsicKind.SOURCE_FILE
+            case 200u16 => IntrinsicKind.SOURCE_LINE
+            case 201u16 => IntrinsicKind.IDENTITY_HASHCODE
+            case 202u16 => IntrinsicKind.IDENTITY_HASHCODE_FOR_ARRAY
+            case 203u16 => IntrinsicKind.ATOMIC_LOAD
+            case 204u16 => IntrinsicKind.ATOMIC_STORE
+            case 205u16 => IntrinsicKind.ATOMIC_SWAP
+            case 206u16 => IntrinsicKind.ATOMIC_COMPARE_AND_SWAP
+            case 207u16 => IntrinsicKind.ATOMIC_FETCH_ADD
+            case 208u16 => IntrinsicKind.ATOMIC_FETCH_SUB
+            case 209u16 => IntrinsicKind.ATOMIC_FETCH_AND
+            case 210u16 => IntrinsicKind.ATOMIC_FETCH_OR
+            case 211u16 => IntrinsicKind.ATOMIC_FETCH_XOR
+            case 212u16 => IntrinsicKind.MUTEX_INIT
+            case 213u16 => IntrinsicKind.CJ_MUTEX_LOCK
+            case 214u16 => IntrinsicKind.MUTEX_TRY_LOCK
+            case 215u16 => IntrinsicKind.MUTEX_CHECK_STATUS
+            case 216u16 => IntrinsicKind.MUTEX_UNLOCK
+            case 217u16 => IntrinsicKind.WAITQUEUE_INIT
+            case 218u16 => IntrinsicKind.MONITOR_INIT
+            case 219u16 => IntrinsicKind.MOITIOR_WAIT
+            case 220u16 => IntrinsicKind.MOITIOR_NOTIFY
+            case 221u16 => IntrinsicKind.MOITIOR_NOTIFY_ALL
+            case 222u16 => IntrinsicKind.MULTICONDITION_WAIT
+            case 223u16 => IntrinsicKind.MULTICONDITION_NOTIFY
+            case 224u16 => IntrinsicKind.MULTICONDITION_NOTIFY_ALL
+            case 225u16 => IntrinsicKind.CROSS_ACCESS_BARRIER
+            case 226u16 => IntrinsicKind.CREATE_EXPORT_HANDLE
+            case 227u16 => IntrinsicKind.GET_EXPORTED_REF
+            case 228u16 => IntrinsicKind.REMOVE_EXPORTED_REF
+            case 229u16 => IntrinsicKind.GET_JSLAMBDA_ADDR
+            case 230u16 => IntrinsicKind.FFI_CJ_AST_LEX
+            case 231u16 => IntrinsicKind.FFI_CJ_AST_PARSEEXPR
+            case 232u16 => IntrinsicKind.FFI_CJ_AST_PARSEDECL
+            case 233u16 => IntrinsicKind.FFI_CJ_AST_PARSE_PROPMEMBERDECL
+            case 234u16 => IntrinsicKind.FFI_CJ_AST_PARSE_PRICONSTRUCTOR
+            case 235u16 => IntrinsicKind.FFI_CJ_AST_PARSE_PATTERN
+            case 236u16 => IntrinsicKind.FFI_CJ_AST_PARSE_TYPE
+            case 237u16 => IntrinsicKind.FFI_CJ_AST_PARSETOPLEVEL
+            case 238u16 => IntrinsicKind.FFI_CJ_AST_DIAGREPORT
+            case 239u16 => IntrinsicKind.FFI_CJ_PARENT_CONTEXT
+            case 240u16 => IntrinsicKind.FFI_CJ_MACRO_ITEM_INFO
+            case 241u16 => IntrinsicKind.FFI_CJ_GET_CHILD_MESSAGES
+            case 242u16 => IntrinsicKind.FFI_CJ_CHECK_ADD_SPACE
+            case 243u16 => IntrinsicKind.CG_UNSAFE_BEGIN
+            case 244u16 => IntrinsicKind.CG_UNSAFE_END
+            case 245u16 => IntrinsicKind.STRLEN
+            case 246u16 => IntrinsicKind.MEMCPY_S
+            case 247u16 => IntrinsicKind.MEMSET_S
+            case 248u16 => IntrinsicKind.FREE
+            case 249u16 => IntrinsicKind.MALLOC
+            case 250u16 => IntrinsicKind.STRCMP
+            case 251u16 => IntrinsicKind.MEMCMP
+            case 252u16 => IntrinsicKind.STRNCMP
+            case 253u16 => IntrinsicKind.STRCASECMP
+            case 254u16 => IntrinsicKind.ATOMIC_INT8_LOAD
+            case 255u16 => IntrinsicKind.ATOMIC_INT8_STORE
+            case 256u16 => IntrinsicKind.ATOMIC_INT8_SWAP
+            case 257u16 => IntrinsicKind.ATOMIC_INT8_CAS
+            case 258u16 => IntrinsicKind.ATOMIC_INT8_FETCH_ADD
+            case 259u16 => IntrinsicKind.ATOMIC_INT8_FETCH_SUB
+            case 260u16 => IntrinsicKind.ATOMIC_INT8_FETCH_AND
+            case 261u16 => IntrinsicKind.ATOMIC_INT8_FETCH_OR
+            case 262u16 => IntrinsicKind.ATOMIC_INT8_FETCH_XOR
+            case 263u16 => IntrinsicKind.ATOMIC_INT16_LOAD
+            case 264u16 => IntrinsicKind.ATOMIC_INT16_STORE
+            case 265u16 => IntrinsicKind.ATOMIC_INT16_SWAP
+            case 266u16 => IntrinsicKind.ATOMIC_INT16_CAS
+            case 267u16 => IntrinsicKind.ATOMIC_INT16_FETCH_ADD
+            case 268u16 => IntrinsicKind.ATOMIC_INT16_FETCH_SUB
+            case 269u16 => IntrinsicKind.ATOMIC_INT16_FETCH_AND
+            case 270u16 => IntrinsicKind.ATOMIC_INT16_FETCH_OR
+            case 271u16 => IntrinsicKind.ATOMIC_INT16_FETCH_XOR
+            case 272u16 => IntrinsicKind.ATOMIC_INT32_LOAD
+            case 273u16 => IntrinsicKind.ATOMIC_INT32_STORE
+            case 274u16 => IntrinsicKind.ATOMIC_INT32_SWAP
+            case 275u16 => IntrinsicKind.ATOMIC_INT32_CAS
+            case 276u16 => IntrinsicKind.ATOMIC_INT32_FETCH_ADD
+            case 277u16 => IntrinsicKind.ATOMIC_INT32_FETCH_SUB
+            case 278u16 => IntrinsicKind.ATOMIC_INT32_FETCH_AND
+            case 279u16 => IntrinsicKind.ATOMIC_INT32_FETCH_OR
+            case 280u16 => IntrinsicKind.ATOMIC_INT32_FETCH_XOR
+            case 281u16 => IntrinsicKind.ATOMIC_INT64_LOAD
+            case 282u16 => IntrinsicKind.ATOMIC_INT64_STORE
+            case 283u16 => IntrinsicKind.ATOMIC_INT64_SWAP
+            case 284u16 => IntrinsicKind.ATOMIC_INT64_CAS
+            case 285u16 => IntrinsicKind.ATOMIC_INT64_FETCH_ADD
+            case 286u16 => IntrinsicKind.ATOMIC_INT64_FETCH_SUB
+            case 287u16 => IntrinsicKind.ATOMIC_INT64_FETCH_AND
+            case 288u16 => IntrinsicKind.ATOMIC_INT64_FETCH_OR
+            case 289u16 => IntrinsicKind.ATOMIC_INT64_FETCH_XOR
+            case 290u16 => IntrinsicKind.ATOMIC_UINT8_LOAD
+            case 291u16 => IntrinsicKind.ATOMIC_UINT8_STORE
+            case 292u16 => IntrinsicKind.ATOMIC_UINT8_SWAP
+            case 293u16 => IntrinsicKind.ATOMIC_UINT8_CAS
+            case 294u16 => IntrinsicKind.ATOMIC_UINT8_FETCH_ADD
+            case 295u16 => IntrinsicKind.ATOMIC_UINT8_FETCH_SUB
+            case 296u16 => IntrinsicKind.ATOMIC_UINT8_FETCH_AND
+            case 297u16 => IntrinsicKind.ATOMIC_UINT8_FETCH_OR
+            case 298u16 => IntrinsicKind.ATOMIC_UINT8_FETCH_XOR
+            case 299u16 => IntrinsicKind.ATOMIC_UINT16_LOAD
+            case 300u16 => IntrinsicKind.ATOMIC_UINT16_STORE
+            case 301u16 => IntrinsicKind.ATOMIC_UINT16_SWAP
+            case 302u16 => IntrinsicKind.ATOMIC_UINT16_CAS
+            case 303u16 => IntrinsicKind.ATOMIC_UINT16_FETCH_ADD
+            case 304u16 => IntrinsicKind.ATOMIC_UINT16_FETCH_SUB
+            case 305u16 => IntrinsicKind.ATOMIC_UINT16_FETCH_AND
+            case 306u16 => IntrinsicKind.ATOMIC_UINT16_FETCH_OR
+            case 307u16 => IntrinsicKind.ATOMIC_UINT16_FETCH_XOR
+            case 308u16 => IntrinsicKind.ATOMIC_UINT32_LOAD
+            case 309u16 => IntrinsicKind.ATOMIC_UINT32_STORE
+            case 310u16 => IntrinsicKind.ATOMIC_UINT32_SWAP
+            case 311u16 => IntrinsicKind.ATOMIC_UINT32_CAS
+            case 312u16 => IntrinsicKind.ATOMIC_UINT32_FETCH_ADD
+            case 313u16 => IntrinsicKind.ATOMIC_UINT32_FETCH_SUB
+            case 314u16 => IntrinsicKind.ATOMIC_UINT32_FETCH_AND
+            case 315u16 => IntrinsicKind.ATOMIC_UINT32_FETCH_OR
+            case 316u16 => IntrinsicKind.ATOMIC_UINT32_FETCH_XOR
+            case 317u16 => IntrinsicKind.ATOMIC_UINT64_LOAD
+            case 318u16 => IntrinsicKind.ATOMIC_UINT64_STORE
+            case 319u16 => IntrinsicKind.ATOMIC_UINT64_SWAP
+            case 320u16 => IntrinsicKind.ATOMIC_UINT64_CAS
+            case 321u16 => IntrinsicKind.ATOMIC_UINT64_FETCH_ADD
+            case 322u16 => IntrinsicKind.ATOMIC_UINT64_FETCH_SUB
+            case 323u16 => IntrinsicKind.ATOMIC_UINT64_FETCH_AND
+            case 324u16 => IntrinsicKind.ATOMIC_UINT64_FETCH_OR
+            case 325u16 => IntrinsicKind.ATOMIC_UINT64_FETCH_XOR
+            case 326u16 => IntrinsicKind.ATOMIC_BOOL_LOAD
+            case 327u16 => IntrinsicKind.ATOMIC_BOOL_STORE
+            case 328u16 => IntrinsicKind.ATOMIC_BOOL_SWAP
+            case 329u16 => IntrinsicKind.ATOMIC_BOOL_CAS
+            case 330u16 => IntrinsicKind.ATOMIC_REFERENCEBASE_LOAD
+            case 331u16 => IntrinsicKind.ATOMIC_REFERENCEBASE_STORE
+            case 332u16 => IntrinsicKind.ATOMIC_REFERENCEBASE_SWAP
+            case 333u16 => IntrinsicKind.ATOMIC_REFERENCEBASE_CAS
+            case 334u16 => IntrinsicKind.ATOMIC_OPTIONREFERENCE_LOAD
+            case 335u16 => IntrinsicKind.ATOMIC_OPTIONREFERENCE_STORE
+            case 336u16 => IntrinsicKind.ATOMIC_OPTIONREFERENCE_SWAP
+            case 337u16 => IntrinsicKind.ATOMIC_OPTIONREFERENCE_CAS
+            case 338u16 => IntrinsicKind.BEGIN_CATCH
+            case 339u16 => IntrinsicKind.ABS
+            case 340u16 => IntrinsicKind.FABS
+            case 341u16 => IntrinsicKind.FLOOR
+            case 342u16 => IntrinsicKind.CEIL
+            case 343u16 => IntrinsicKind.TRUNC
+            case 344u16 => IntrinsicKind.SIN
+            case 345u16 => IntrinsicKind.COS
+            case 346u16 => IntrinsicKind.EXP
+            case 347u16 => IntrinsicKind.EXP2
+            case 348u16 => IntrinsicKind.LOG
+            case 349u16 => IntrinsicKind.LOG2
+            case 350u16 => IntrinsicKind.LOG10
+            case 351u16 => IntrinsicKind.SQRT
+            case 352u16 => IntrinsicKind.ROUND
+            case 353u16 => IntrinsicKind.POW
+            case 354u16 => IntrinsicKind.POWI
+            case 355u16 => IntrinsicKind.BIT_CAST
+            case 356u16 => IntrinsicKind.PREINITIALIZE
+            case 357u16 => IntrinsicKind.OBJECT_AS
+            case 358u16 => IntrinsicKind.IS_NULL
+            case 359u16 => IntrinsicKind.GET_TYPE_FOR_TYPE_PARAMETER
+            case 360u16 => IntrinsicKind.IS_SUBTYPE_TYPES
+            case 361u16 => IntrinsicKind.EXCLUSIVE_SCOPE
+            case _ =>
+                CJC_ABORT()
+                IntrinsicKind.NOT_INTRINSIC
+        }
+        let operands = GetValue<Value>(base.GetOperands())
+        let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
+        let owner = GetValue<Block>(base.GetOwner()).getOrThrow()
+        let (_, isException) = CHIRExprKindToExprKind(base.GetKind())
+        if (isException) {
+            let exceptionBlock = (operands[operands.size - 1] as Block).getOrThrow()
+            operands.remove(at: operands.size - 1)
+            let normalBlock = (operands[operands.size - 1] as Block).getOrThrow()
+            operands.remove(at: operands.size - 1)
+            let callContext = IntrisicCallContext(kind: intrinsicKind, args: operands,
+                instTypeArgs: GetType<Type>(funcCallBase.GetInstantiatedTypeArgs()))
+            return builder.CreateIntrinsicWithException(resultTy, callContext, normalBlock, exceptionBlock, owner)
+        }
+        let callContext = IntrisicCallContext(kind: intrinsicKind, args: operands,
+            instTypeArgs: GetType<Type>(funcCallBase.GetInstantiatedTypeArgs()))
+        return builder.CreateIntrinsic(resultTy, callContext, owner)
+    }
+
+    private func Deserialize(obj: PackageFormat_RawArrayAllocateBase): Expression {
+        let base = obj.GetBase().getOrThrow()
+        let elementType = GetType<Type>(obj.GetElementType()).getOrThrow()
+        let operands = GetValue<Value>(base.GetOperands())
+        let size = operands[0]
+        operands.remove(at: 0)
+        let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
+        let owner = GetValue<Block>(base.GetOwner()).getOrThrow()
+        let (_, isException) = CHIRExprKindToExprKind(base.GetKind())
+        if (isException) {
+            let exceptionBlock = (operands[operands.size - 1] as Block).getOrThrow()
+            operands.remove(at: operands.size - 1)
+            let normalBlock = (operands[operands.size - 1] as Block).getOrThrow()
+            operands.remove(at: operands.size - 1)
+            return builder.CreateRawArrayAllocateWithException(resultTy, elementType, size, normalBlock,
+                exceptionBlock, owner)
+        }
+        return builder.CreateRawArrayAllocate(resultTy, elementType, size, owner)
+    }
+
+    private func Deserialize(obj: PackageFormat_SpawnBase): Expression {
+        let base = obj.GetBase().getOrThrow()
+        let operands = GetValue<Value>(base.GetOperands())
+        let value = operands[0]
+        operands.remove(at: 0)
+        let executeClosure = GetValue<Function>(obj.GetExecuteClosure())
+        let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
+        let owner = GetValue<Block>(base.GetOwner()).getOrThrow()
+        let (_, isException) = CHIRExprKindToExprKind(base.GetKind())
+        if (isException) {
+            let exceptionBlock = (operands[operands.size - 1] as Block).getOrThrow()
+            operands.remove(at: operands.size - 1)
+            let normalBlock = (operands[operands.size - 1] as Block).getOrThrow()
+            operands.remove(at: operands.size - 1)
+            let expression = if (operands.isEmpty()) {
+                builder.CreateSpawnWithException(resultTy, value, normalBlock, exceptionBlock, owner)
+            } else {
+                builder.CreateSpawnWithException(resultTy, value, operands[0], normalBlock, exceptionBlock, owner)
+            }
+            if (let Some(fn) <- executeClosure) {
+                expression.SetExecuteClosure(fn)
+            }
+            return expression
+        }
+        let expression = if (operands.isEmpty()) {
+            builder.CreateSpawn(resultTy, value, owner)
+        } else {
+            builder.CreateSpawn(resultTy, value, operands[0], owner)
+        }
+        if (let Some(fn) <- executeClosure) {
+            expression.SetExecuteClosure(fn)
+        }
+        return expression
+    }
+
+    private func Deserialize(obj: PackageFormat_GetRTTIStatic): GetRTTIStatic {
+        let base = obj.GetBase().getOrThrow()
+        return builder.CreateGetRTTIStatic(GetType<Type>(base.GetResultTy()).getOrThrow(),
+            GetType<Type>(obj.GetRttiType()).getOrThrow(), GetValue<Block>(base.GetOwner()).getOrThrow())
+    }
+
+    private func ConfigExpression(buffer: PackageFormat_Expression, obj: Expression): Unit {
+        ConfigBase(buffer.GetBase().getOrThrow(), obj)
+    }
+
+    private func ConfigLambda(buffer: PackageFormat_Lambda, obj: Lambda): Unit {
+        ConfigExpression(buffer.GetBase().getOrThrow(), obj)
+        GetValue<Parameter>(buffer.GetParams())
+        if (let Some(returnValue) <- GetValue<LocalVar>(buffer.GetRetVal())) {
+            obj.SetReturnValue(returnValue)
+        }
+    }
+
+    private func GetExpression<T>(id: UInt32): Option<T> {
+        if (id == 0u32) {
+            return None
+        }
+        if (let Some(expression) <- id2Expression.get(id)) {
+            return expression as T
+        }
+        let rawPackage = pool.getOrThrow()
+        let expressions = rawPackage.GetExprs().getOrThrow()
+        let kinds = rawPackage.GetExprs_type().getOrThrow()
+        let kind = (kinds.Get(id - 1u32) as UInt8).getOrThrow()
+        let position = (expressions.Get(id - 1u32) as Int64).getOrThrow()
+        let expression: Expression
+        match (kind) {
+            case 1u8 =>
+                let raw = PackageFormat_Expression(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw, expression)
+            case 2u8 =>
+                let raw = PackageFormat_AllocateBase(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 3u8 =>
+                let raw = PackageFormat_ApplyBase(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow().GetBase().getOrThrow(), expression)
+            case 4u8 =>
+                let raw = PackageFormat_BinaryExpressionBase(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 5u8 =>
+                let raw = PackageFormat_Branch(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 6u8 =>
+                let raw = PackageFormat_Debug(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 7u8 =>
+                let raw = PackageFormat_Field(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 8u8 =>
+                let raw = PackageFormat_FieldByName(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 9u8 =>
+                let raw = PackageFormat_GetElementByName(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 10u8 =>
+                let raw = PackageFormat_GetElementRef(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 11u8 =>
+                let raw = PackageFormat_GetInstantiateValue(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 12u8 =>
+                let raw = PackageFormat_GetRTTIStatic(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 13u8 =>
+                let raw = PackageFormat_InstanceOf(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 14u8 =>
+                let raw = PackageFormat_IntrinsicBase(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow().GetBase().getOrThrow(), expression)
+            case 15u8 =>
+                let raw = PackageFormat_InvokeBase(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow().GetBase().getOrThrow(), expression)
+            case 16u8 =>
+                let raw = PackageFormat_Lambda(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigLambda(raw, (expression as Lambda).getOrThrow())
+            case 17u8 =>
+                let raw = PackageFormat_MultiBranch(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 18u8 =>
+                let raw = PackageFormat_NumericCastBase(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 19u8 =>
+                let raw = PackageFormat_RawArrayAllocateBase(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 20u8 =>
+                let raw = PackageFormat_SpawnBase(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 21u8 =>
+                let raw = PackageFormat_StoreElementByName(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 22u8 =>
+                let raw = PackageFormat_StoreElementRef(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case 23u8 =>
+                let raw = PackageFormat_UnaryExpressionBase(expressions.data, position)
+                expression = Deserialize(raw)
+                id2Expression[id] = expression
+                ConfigExpression(raw.GetBase().getOrThrow(), expression)
+            case _ =>
+                CJC_ABORT()
+                return id2Expression[id] as T
+        }
+        return expression as T
     }
 
 }
