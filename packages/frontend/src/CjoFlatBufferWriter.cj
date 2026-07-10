@@ -5,7 +5,7 @@ import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
 import cangjie_compiler::basic.{CANGJIE_VERSION, DiagKindRefactor, MakeRange}
 import cangjie_compiler::basic.Linkage
 import cangjie_compiler::mangle.BaseMangler as RealBaseMangler
-import cangjie_compiler::modules.{FlatBufferBuilder, FlatBufferOffset}
+import cangjie_compiler::modules.{FlatBufferBuilder, FlatBufferOffset, SemaCjoManager}
 import cangjie_compiler::option.OptimizationLevel
 import cangjie_compiler::sema.TypeManager as FaithfulSemaTypeManager
 import cangjie_compiler::utils.FileUtil
@@ -18,6 +18,7 @@ private let LOCAL_PACKAGE_INDEX: Int64 = -2
 public func SerializePackageToCjoFlatBuffer(
     pkg: Package,
     packageDepInfo: String,
+    cjoManager: SemaCjoManager,
     debug: Bool,
     optimizationLevel: OptimizationLevel,
     saveFileWithAbsPath!: Bool = false,
@@ -26,7 +27,7 @@ public func SerializePackageToCjoFlatBuffer(
     exportContent!: Bool = true,
     exportFuncBody!: Bool = true
 ): Array<UInt8> {
-    let writer = FrontendCjoFlatBufferWriter(packageDepInfo, debug, optimizationLevel,
+    let writer = FrontendCjoFlatBufferWriter(packageDepInfo, cjoManager, debug, optimizationLevel,
         saveFileWithAbsPath: saveFileWithAbsPath, diag: diag, serializingCommon: serializingCommon,
         exportContent: exportContent, exportFuncBody: exportFuncBody)
     return writer.Write(pkg)
@@ -35,6 +36,7 @@ public func SerializePackageToCjoFlatBuffer(
 private class FrontendCjoFlatBufferWriter {
     private let builder: FlatBufferBuilder = FlatBufferBuilder()
     private let packageDepInfo: String
+    private let cjoManager: SemaCjoManager
     private let debugOption: Bool
     private let optimizationLevel: OptimizationLevel
     private let saveFileWithAbsPath: Bool
@@ -69,6 +71,7 @@ private class FrontendCjoFlatBufferWriter {
 
     public init(
         packageDepInfo: String,
+        cjoManager: SemaCjoManager,
         debug: Bool,
         optimizationLevel: OptimizationLevel,
         saveFileWithAbsPath!: Bool,
@@ -78,6 +81,7 @@ private class FrontendCjoFlatBufferWriter {
         exportFuncBody!: Bool
     ) {
         this.packageDepInfo = packageDepInfo
+        this.cjoManager = cjoManager
         this.debugOption = debug
         this.optimizationLevel = optimizationLevel
         this.saveFileWithAbsPath = saveFileWithAbsPath
@@ -167,16 +171,12 @@ private class FrontendCjoFlatBufferWriter {
     private func SaveFileImports(file: File): FlatBufferOffset {
         let specs = ArrayList<FlatBufferOffset>()
         for (importSpec in file.imports) {
-            if (importSpec.content.kind == ImportKind.IMPORT_MULTI) {
-                for (item in importSpec.content.items) {
-                    specs.add(SaveImportSpec(importSpec, item))
-                }
-            } else {
-                specs.add(SaveImportSpec(importSpec, importSpec.content))
+            if (importSpec.IsImportMulti()) {
+                continue
             }
-            let imported = importSpec.content.GetImportedPackageNameWithIsDecl()
-            if (!imported.isEmpty()) {
-                let _ = SavePackageName(imported)
+            specs.add(SaveImportSpec(importSpec, importSpec.content))
+            if (importSpec.IsReExport()) {
+                let _ = SavePackageName(cjoManager.GetPackageNameByImport(importSpec))
             }
         }
         let specsVec = builder.CreateVectorOffsets(specs)

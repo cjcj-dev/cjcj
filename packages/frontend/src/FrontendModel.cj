@@ -4953,22 +4953,14 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
 
     public func UpdateSearchPath(cangjieModules: String): Unit {
         searchPath.clear()
-        if (!cangjieModules.isEmpty()) {
-            searchPath.add(cangjieModules)
+        for (path in globalOptions.importPaths) {
+            searchPath.add(path)
         }
-    }
-
-    private func AppendSearchPath(path: String): Unit {
-        let normalized = NormalizePath(path)
-        if (normalized.isEmpty()) {
-            return
+        searchPath.add(".")
+        for (path in globalOptions.environment.cangjiePaths) {
+            searchPath.add(path)
         }
-        for (entry in searchPath) {
-            if (entry == normalized) {
-                return
-            }
-        }
-        searchPath.add(normalized)
+        searchPath.add(cangjieModules)
     }
 
     public func GetSearchPath(): ArrayList<String> {
@@ -5233,11 +5225,6 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             ClearCachesForRebuild()
         }
         canInlineImportedSource = CanInlineImportedSource(opts)
-        if (!incrBuildIndex) {
-            for (path in opts.importPaths) {
-                AppendSearchPath(path)
-            }
-        }
         importedPackages.clear()
         packageDecls.clear()
         exportIdDeclMaps.clear()

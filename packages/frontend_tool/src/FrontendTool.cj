@@ -307,7 +307,25 @@ private func ConfigureInvocationPaths(
         cangjieHome
     }
     invocation.globalOptions.executablePath = invocation.frontendOptions.executablePath
-    invocation.globalOptions.environment.cangjieHome = invocation.frontendOptions.environment.cangjieHome
+    invocation.globalOptions.environment.allVariables.clear()
+    for ((key, value) in invocation.frontendOptions.environment.allVariables) {
+        invocation.globalOptions.environment.allVariables.add(key, value)
+    }
+    invocation.globalOptions.environment.cangjieHome.hasValue =
+        invocation.frontendOptions.environment.cangjieHome.hasValue
+    invocation.globalOptions.environment.cangjieHome.value =
+        invocation.frontendOptions.environment.cangjieHome.value
+    CopyStringList(
+        invocation.globalOptions.environment.cangjiePaths,
+        invocation.frontendOptions.environment.cangjiePaths)
+    CopyStringList(
+        invocation.globalOptions.environment.libraryPaths,
+        invocation.frontendOptions.environment.libraryPaths)
+    CopyStringList(invocation.globalOptions.environment.paths, invocation.frontendOptions.environment.paths)
+    invocation.globalOptions.environment.macOSSDKRoot.hasValue =
+        invocation.frontendOptions.environment.macOSSDKRoot.hasValue
+    invocation.globalOptions.environment.macOSSDKRoot.value =
+        invocation.frontendOptions.environment.macOSSDKRoot.value
     invocation.globalOptions.cangjieHome = invocation.frontendOptions.cangjieHome
 }
 
