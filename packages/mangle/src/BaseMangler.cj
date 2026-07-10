@@ -2,6 +2,7 @@ package cjcj::mangle
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::utils.CJC_NULLPTR_CHECK
 
 private class VarBucket {
     public var key: MangleDecl
@@ -702,21 +703,21 @@ public open class BaseMangler {
         }
         var mangled = ""
         if (funcDecl.TestAttr(Attribute.HAS_INITIAL)) {
-            if (let Some(owner) <- funcDecl.ownerFunc) {
-                let newPrefix = ArrayList<MangleDecl>()
-                newPrefix.add(owner)
-                var outerDecl = owner.outerDecl
-                while (let Some(outer) <- outerDecl) {
-                    newPrefix.add(outer)
-                    outerDecl = outer.outerDecl
-                }
-                reverseDecls(newPrefix)
-                let mangledPrefix = MANGLE_CANGJIE_PREFIX + MANGLE_NESTED_PREFIX
-                let ownerMangled = MangleDeclName(funcDecl, newPrefix, genericsTypeStack, true, withSuffix: true)
-                mangled += MANGLE_CANGJIE_PREFIX + MANGLE_FUNC_PARA_INIT_PREFIX +
-                    ownerMangled[mangledPrefix.size..ownerMangled.size - 1]
-                mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX
+            CJC_NULLPTR_CHECK(funcDecl.ownerFunc)
+            let owner = funcDecl.ownerFunc.getOrThrow()
+            let newPrefix = ArrayList<MangleDecl>()
+            newPrefix.add(owner)
+            var outerDecl = owner.outerDecl
+            while (let Some(outer) <- outerDecl) {
+                newPrefix.add(outer)
+                outerDecl = outer.outerDecl
             }
+            reverseDecls(newPrefix)
+            let mangledPrefix = MANGLE_CANGJIE_PREFIX + MANGLE_NESTED_PREFIX
+            let ownerMangled = MangleDeclName(funcDecl, newPrefix, genericsTypeStack, true, withSuffix: true)
+            mangled += MANGLE_CANGJIE_PREFIX + MANGLE_FUNC_PARA_INIT_PREFIX +
+                ownerMangled[mangledPrefix.size..ownerMangled.size - 1]
+            mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX
         } else {
             mangled = MangleDeclName(funcDecl, prefix, genericsTypeStack, true, withSuffix: false)
             mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX
