@@ -507,8 +507,12 @@ public open class CGType {
         return result
     }
 
+    public static func GetRefTypeOf(chirBuilder: CHIRBuilder, typeOfCHIR: Type): RefType {
+        return chirBuilder.context.GetRefTy(typeOfCHIR)
+    }
+
     public static func GetRefTypeOfCHIRInt8(chirBuilder: CHIRBuilder): RefType {
-        return chirBuilder.context.GetRefTy(chirBuilder.context.GetInt8Ty())
+        return GetRefTypeOf(chirBuilder, chirBuilder.context.GetInt8Ty())
     }
 
     public static func GetObjectCGType(cgMod: CGModule): CGType {
