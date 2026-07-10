@@ -1,9 +1,12 @@
 package cangjie_compiler::chir
 
 import std.collection.*
+import cangjie_compiler::utils.CJC_ASSERT
 
 public class BlockGroupCopyHelper {
     private let builder: CHIRBuilder
+    private var instMap: HashMap<Int64, Type> = HashMap<Int64, Type>()
+    private var thisType: Option<Type> = None
 
     public init(builder: CHIRBuilder) {
         this.builder = builder
@@ -17,6 +20,77 @@ public class BlockGroupCopyHelper {
         BlockGroupCopyHelper.ReplaceExprOperands(newBlocks, valueMap)
         RemoveClonedDebugExpressions(newDebugs)
         return (newBlocks, FindClonedReturnValue(oldBG, valueMap))
+    }
+
+    public func GetInstMapFromApply(apply: Apply,
+        newBodyOuterFunction!: Option<Function> = None): Unit {
+        if (let Some(localCallee) <- apply.GetCallee().AsLocalVar()) {
+            let lambda = (localCallee.GetExpr().getOrThrow() as Lambda).getOrThrow()
+            let instantiatedTypeArgs = apply.GetInstantiatedTypeArgs()
+            var index: Int64 = 0
+            for (genericType in lambda.GetGenericTypeParams()) {
+                if (!instMap.contains(genericType.objectId)) {
+                    instMap[genericType.objectId] = instantiatedTypeArgs[index]
+                }
+                index++
+            }
+            thisType = builder.context.GetThisTy()
+        } else {
+            let calleeFunction = apply.GetCallee().AsFunction().getOrThrow()
+            let customDef = calleeFunction.GetParentCustomTypeDef()
+            if (let Some(customDefValue) <- customDef) {
+                if (customDefValue.IsGenericDef()) {
+                    var instParentCustomType = GetInstParentCustomTyOfCallee(apply.GetCallee(), apply.GetArgs(),
+                        apply.GetThisType(), builder)
+                    if (instParentCustomType.isNone()) {
+                        if (let Some(extendDef) <- (customDefValue as ExtendDef)) {
+                            instParentCustomType = extendDef.GetExtendedType()
+                        } else {
+                            instParentCustomType = customDefValue.GetType()
+                        }
+                    }
+                    let strippedInstParentCustomType = instParentCustomType.getOrThrow().StripAllRefs()
+                    if (let Some(extendDef) <- (customDefValue as ExtendDef)) {
+                        let newMap = extendDef.GetExtendedType().getOrThrow().CalculateGenericTyMapping(
+                            strippedInstParentCustomType)
+                        CJC_ASSERT(newMap[0])
+                        for ((key, value) in newMap[1]) {
+                            if (!instMap.contains(key)) {
+                                instMap[key] = value
+                            }
+                        }
+                    } else {
+                        instMap = GetInstMapFromCurDefToCurType(
+                            (strippedInstParentCustomType as CustomType).getOrThrow())
+                    }
+                }
+            }
+            let instantiatedTypeArgs = apply.GetInstantiatedTypeArgs()
+            var index: Int64 = 0
+            for (genericType in calleeFunction.GetGenericTypeParams()) {
+                if (!instMap.contains(genericType.objectId)) {
+                    instMap[genericType.objectId] = instantiatedTypeArgs[index]
+                }
+                index++
+            }
+            let outerDef = match (newBodyOuterFunction) {
+                case Some(outerFunction) => outerFunction.GetParentCustomTypeDef()
+                case None => apply.GetTopLevelFunc().getOrThrow().GetParentCustomTypeDef()
+            }
+            if (let Some(customDefValue) <- customDef) {
+                if (let Some(outerDefValue) <- outerDef) {
+                    if (customDefValue.nodeId == outerDefValue.nodeId) {
+                        thisType = builder.context.GetThisTy()
+                    } else {
+                        thisType = apply.GetThisType()
+                    }
+                } else {
+                    thisType = apply.GetThisType()
+                }
+            } else {
+                thisType = apply.GetThisType()
+            }
+        }
     }
 
     public static func ReplaceExprOperands(blocks: ArrayList<Block>, valueMap: HashMap<Int64, Value>): Unit {

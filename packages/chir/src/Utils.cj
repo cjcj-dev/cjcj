@@ -64,6 +64,21 @@ public class GenericTypeConvertor {
     }
 }
 
+public func GetInstMapFromCurDefToCurType(curType: CustomType): HashMap<Int64, Type> {
+    let genericTypeArgs = curType.GetCustomTypeDef().GetGenericTypeParams()
+    let instTypeArgs = curType.GetTypeArgs()
+    if (!genericTypeArgs.isEmpty()) {
+        CJC_ASSERT(genericTypeArgs.size == instTypeArgs.size)
+    }
+    let replaceTable = HashMap<Int64, Type>()
+    var idx: Int64 = 0
+    while (idx < genericTypeArgs.size) {
+        replaceTable[genericTypeArgs[idx].objectId] = instTypeArgs[idx]
+        idx++
+    }
+    return replaceTable
+}
+
 public func IsExpectedFunction(fn: Function, funcInfo: FuncInfo): Bool {
     return CheckFuncName(fn, funcInfo) && CheckParentTy(fn, funcInfo) && CheckParametersTy(fn, funcInfo) &&
         CheckReturnTy(fn, funcInfo) && CheckPkgName(fn, funcInfo)
