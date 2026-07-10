@@ -5688,9 +5688,8 @@ public class Translator {
             instTypeArgs.add(rawArrayTy.GetElementType())
         }
         let initFnTy = builder.context.GetFuncTy(TypesFromValues(args), arrayTy)
-        let exactParentTy = GetExactParentType(arrayTy.StripAllRefs(), initFunc, initFnTy, instTypeArgs, false)
         let _ = CreateApplyMaybeWithException(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
-            FuncCallContext(args: args, instTypeArgs: instTypeArgs, thisType: exactParentTy))
+            FuncCallContext(args: args, instTypeArgs: instTypeArgs, thisType: None))
         return rawArrayRef
     }
 
@@ -5713,9 +5712,8 @@ public class Translator {
             }
         }
         let initFnTy = builder.context.GetFuncTy(TypesFromValues(args), arrayTy)
-        let exactParentTy = GetExactParentType(arrayTy.StripAllRefs(), initFunc, initFnTy, instTypeArgs, false)
         let _ = CreateApplyMaybeWithException(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
-            FuncCallContext(args: args, instTypeArgs: instTypeArgs, thisType: exactParentTy))
+            FuncCallContext(args: args, instTypeArgs: instTypeArgs, thisType: None))
         return rawArrayRef
     }
 
