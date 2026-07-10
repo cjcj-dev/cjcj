@@ -25,14 +25,6 @@ public class CHIRMangler <: BaseMangler {
         return None
     }
 
-    public func MangleCFuncSignature(cFuncTy: MangleType): String {
-        var mangled = if (let Some(ret) <- cFuncTy.retTy) { MangleSemaType(ret) } else { MANGLE_VOID_TY_SUFFIX }
-        for (paramTy in cFuncTy.paramTys) {
-            mangled += MangleSemaType(paramTy)
-        }
-        return mangled
-    }
-
     public func MangleCFuncSignature(cFuncTy: FuncTy): String {
         var mangled = MangleAstSemanticType(cFuncTy.retTy)
         for (paramTy in cFuncTy.paramTys) {
