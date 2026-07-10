@@ -2860,6 +2860,20 @@ private func CHIRCheckerIsCType(ty: Type): Bool {
     return CHIRCheckerIsOptionalCType(ty, false)
 }
 
+private func isAllowedToHaveAbstractMethod(def: CustomTypeDef): Bool {
+    if (def.IsInterface()) {
+        return true
+    } else if (def.IsClass()) {
+        return def.TestAttr(Attribute.ABSTRACT)
+    } else if (let Some(extendDef) <- (def as ExtendDef)) {
+        if (let Some(classType) <- (extendDef.GetExtendedType().getOrThrow() as ClassType)) {
+            return classType.GetClassDef().IsAbstract()
+        }
+        return false
+    }
+    return false
+}
+
 private func CHIRCheckerIsCTypeInVArray(ty: Type): Bool {
     return CHIRCheckerIsOptionalCType(ty, true)
 }
