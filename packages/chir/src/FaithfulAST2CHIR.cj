@@ -21,6 +21,7 @@ import cjcj::ast.AttributePack as AstAttributePack
 import cjcj::ast.ArrayLit as AstArrayLit
 import cjcj::ast.Attribute as AstAttribute
 import cjcj::ast.CallExpr as AstCallExpr
+import cjcj::ast.ClassDecl as AstClassDecl
 import cjcj::ast.ClassLikeDecl as AstClassLikeDecl
 import cjcj::ast.Decl as AstDecl
 import cjcj::ast.EnumDecl as AstEnumDecl
@@ -3997,6 +3998,75 @@ fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
             EnsureReturnSlot(fn, entry)
         }
         globalCache.Set(funcDecl, fn)
+    }
+
+    private func CreatePseudoDefForAnnoOnlyDecl(decl: AstDecl): Unit {
+        if (chirType.Has(decl) || globalCache.TryGet(decl).isSome()) {
+            return
+        }
+        let loc = TranslateLocationWithoutScope(builder.context, decl.begin, decl.end)
+        var symbol: Option<CustomTypeDef> = None
+        if (let Some(classLikeDecl) <- (decl as AstClassLikeDecl)) {
+            let classDef = builder.CreateClassDef(decl.fullPackageName, decl.mangledName, decl.identifier.Val(),
+                isClass: (classLikeDecl as AstClassDecl).isSome())
+            CurrentPackage().AddClass(classDef)
+            classDef.SetDebugLocation(loc)
+            symbol = classDef
+        }
+        if ((decl as AstStructDecl).isSome()) {
+            let structDef = builder.CreateStructDef(decl.fullPackageName, decl.mangledName)
+            CurrentPackage().AddStruct(structDef)
+            structDef.SetSrcCodeIdentifier(decl.identifier.Val())
+            structDef.SetDebugLocation(loc)
+            symbol = structDef
+        }
+        if (let Some(enumDecl) <- (decl as AstEnumDecl)) {
+            let enumDef = builder.CreateEnumDef(decl.fullPackageName, decl.mangledName)
+            CurrentPackage().AddEnum(enumDef)
+            enumDef.SetSrcCodeIdentifier(decl.identifier.Val())
+            enumDef.SetNonExhaustive(enumDecl.hasEllipsis)
+            enumDef.SetDebugLocation(loc)
+            symbol = enumDef
+        }
+        if ((decl as AstExtendDecl).isSome()) {
+            let extendDef = builder.CreateExtendDef(decl.fullPackageName, decl.mangledName)
+            CurrentPackage().AddExtend(extendDef)
+            extendDef.SetDebugLocation(loc)
+            symbol = extendDef
+        }
+        if (let Some(customTypeDef) <- symbol) {
+            customTypeDef.EnableAttr(Attribute.SKIP_ANALYSIS)
+            chirType.SetGlobalNominalCache(decl, customTypeDef)
+            return
+        }
+        var value: Option<Value> = None
+        if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+            let funcBody = funcDecl.funcBody.getOrThrow()
+            let params = funcBody.paramLists[0].params
+            let paramTypes = ArrayList<Type>()
+            for (_ in params) {
+                paramTypes.add(builder.context.GetInt64Ty())
+            }
+            let funcType = builder.context.GetFuncTy(paramTypes, builder.context.GetUnitTy())
+            let funcDef = builder.CreateFunction(funcType, decl.mangledName, srcCodeIdentifier: decl.mangledName,
+                rawMangledName: decl.rawMangleName, packageName: decl.fullPackageName)
+            for (param in params) {
+                let paramLoc = TranslateLocationWithoutScope(builder.context, param.begin, param.end)
+                let _ = builder.CreateParameter(builder.context.GetInt64Ty(), paramLoc, funcDef)
+            }
+            value = funcDef
+        }
+        if ((decl as AstVarDecl).isSome()) {
+            let globalVar = builder.CreateGlobalVar(builder.context.GetRefTy(builder.context.GetInt64Ty()),
+                decl.mangledName, srcCodeIdentifier: decl.identifier.Val(), rawMangledName: decl.rawMangleName,
+                packageName: decl.fullPackageName)
+            AddGlobalVarToPackage(globalVar)
+            globalVar.SetDebugLocation(loc)
+            value = globalVar
+        }
+        let pseudoValue = value.getOrThrow()
+        pseudoValue.EnableAttr(Attribute.SKIP_ANALYSIS)
+        globalCache.Set(decl, pseudoValue)
     }
 
     private func CreateImportedFuncSignatureAndSetGlobalCache(funcDecl: AstFuncDecl): Unit {
