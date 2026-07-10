@@ -217,7 +217,7 @@ class FlatBufferString <: Vector<UInt8> {
 
 // flatbuffers/verifier.h:29-42. The namespace-qualified nested type
 // VerifierTemplate::Options is flattened for Cangjie.
-class VerifierOptions {
+struct VerifierOptions {
     var maxDepth: UInt32 = 64u32
     var maxTables: UInt32 = 1000000u32
     var checkAlignment: Bool = true
