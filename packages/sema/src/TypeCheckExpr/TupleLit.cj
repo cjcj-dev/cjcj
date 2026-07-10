@@ -49,9 +49,9 @@ private func diagMismatchedTypesWithFoundTy(
         return
     }
     if (let Some(diagValue) <- diag) {
-        let builder = diagValue.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(diagValue,
             BasicDiagKindRefactor.sema_mismatched_types,
-            BasicMakeRange(node.begin, node.end))
+            node)
         builder.AddMainHintArguments([expected, found])
         builder.Emit()
     }
