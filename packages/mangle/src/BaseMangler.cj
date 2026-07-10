@@ -750,12 +750,8 @@ public open class BaseMangler {
                     ""
                 }
                 newMangled += MangleName(MANGLE_LT_PREFIX + staticPrefix + decl.identifier + MANGLE_GT_PREFIX)
-            } else if (decl.TestAttr(Attribute.OPERATOR)) {
-                if (let Some(opName) <- OperatorTypeMangle(decl.identifier)) {
-                    newMangled += opName
-                } else {
-                    newMangled += MangleName(decl.identifier)
-                }
+            } else if (decl.TestAttr(Attribute.OPERATOR) && OperatorTypeMangle(decl.identifier).isSome()) {
+                newMangled += OperatorTypeMangle(decl.identifier).getOrThrow()
             } else if (StartsWith(decl.identifier, MANGLE_DOLLAR_PREFIX) &&
                 (EndsWith(decl.identifier, SPECIAL_NAME_FOR_SET) || EndsWith(decl.identifier, SPECIAL_NAME_FOR_GET))) {
                 newMangled += MangleName(decl.identifier[MANGLE_CHAR_LEN..decl.identifier.size - MANGLE_PROP_LEN])
