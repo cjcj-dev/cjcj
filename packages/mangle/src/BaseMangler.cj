@@ -1148,25 +1148,6 @@ public open class BaseMangler {
                 }
             }
         }
-        // GAP_TODO(default-param-generic-desugar): C++ has no such mangler branch; its mechanism is
-        // desugar-side CollectGenericParam (TypeChecker.cpp:2386, called from MakeDefaultParamFunction
-        // :2506) cloning+renaming owner generics onto the desugared func's own funcBody->generic.
-        // selfhost MakeDefaultParamFunction (sema TypeChecker.cj:944) lacks that port; this branch is a
-        // byte-equivalent compensation (positional G<idx>_ encoding). Once CollectGenericParam is ported,
-        // args becomes non-empty here and this branch short-circuits dead; delete it then.
-        if (args.isEmpty() && collectFuncGeneric && declare && decl.TestAttr(Attribute.HAS_INITIAL)) {
-            if (let Some(owner) <- decl.ownerFunc) {
-                if (let Some(ownerBody) <- owner.funcBody) {
-                    if (let Some(ownerGeneric) <- ownerBody.generic) {
-                        for (arg in ownerGeneric.typeParameters) {
-                            if (let Some(ty) <- arg.semaTy) {
-                                args.add(ty)
-                            }
-                        }
-                    }
-                }
-            }
-        }
         if (args.isEmpty()) {
             return ""
         }
