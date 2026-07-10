@@ -175,7 +175,7 @@ public class Parameter <: Value {
     private var ownerFunc: Option<Function> = None
     private var ownerLambda: Option<Lambda> = None
     private var srcCodeIdentifier: String = ""
-    private let annoInfo: AnnoInfo = AnnoInfo()
+    private var annoInfo: AnnoInfo = AnnoInfo()
 
     public init(ty: Type, id: String, ownerFunc: Option<Function>) {
         super(ty, id, ValueKind.KIND_PARAMETER)
@@ -231,6 +231,10 @@ public class Parameter <: Value {
 
     public func GetAnnoInfo(): AnnoInfo {
         return annoInfo
+    }
+
+    public func SetAnnoInfo(info: AnnoInfo): Unit {
+        annoInfo = info
     }
 
     public func GetDebugExpr(): Option<Debug> {
@@ -850,7 +854,7 @@ public abstract class GlobalValue <: Value {
     private var packageName: String
     private var declaredParent: Option<CustomTypeDef> = None
     private let features: ArrayList<String> = ArrayList<String>()
-    private let annoInfo: AnnoInfo = AnnoInfo()
+    private var annoInfo: AnnoInfo = AnnoInfo()
     private var linkage: Linkage = Linkage.EXTERNAL
 
     public init(kind: ValueKind, ty: Option<Type>, identifier: String, srcCodeIdentifier: String,
@@ -916,6 +920,10 @@ public abstract class GlobalValue <: Value {
 
     public func GetAnnoInfo(): AnnoInfo {
         return annoInfo
+    }
+
+    public func SetAnnoInfo(info: AnnoInfo): Unit {
+        annoInfo = info
     }
 
     public func SetLinkage(value: Linkage): Unit {
