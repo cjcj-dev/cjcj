@@ -1218,6 +1218,10 @@ public class Function <: GlobalValue {
 
     public func GetBody(): Option<BlockGroup> { return body }
 
+    public func RemoveBody(): Unit {
+        body = None
+    }
+
     public func InitBody(newBody: BlockGroup): Unit {
         if (body.isSome()) {
             throw IllegalArgumentException("function body already initialized")
