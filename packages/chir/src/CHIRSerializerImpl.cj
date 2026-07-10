@@ -1,12 +1,82 @@
 package cjcj::chir
 
 import std.collection.*
+import cjcj::modules.FlatBufferOffset
 
 class CHIRSerializerImpl {
+    private let valueQueue: ArrayList<Value> = ArrayList<Value>()
+    private let typeQueue: ArrayList<Type> = ArrayList<Type>()
+    private let exprQueue: ArrayList<Expression> = ArrayList<Expression>()
+    private let defQueue: ArrayList<CustomTypeDef> = ArrayList<CustomTypeDef>()
+
+    private var typeCount: UInt32 = 0u32
+    private var valueCount: UInt32 = 0u32
+    private var exprCount: UInt32 = 0u32
+    private var defCount: UInt32 = 0u32
+
+    private let type2Id: HashMap<Int64, UInt32> = HashMap<Int64, UInt32>()
+    private let value2Id: HashMap<Int64, UInt32> = HashMap<Int64, UInt32>()
+    private let expr2Id: HashMap<Int64, UInt32> = HashMap<Int64, UInt32>()
+    private let def2Id: HashMap<Int64, UInt32> = HashMap<Int64, UInt32>()
+
+    private let typeKind: ArrayList<UInt8> = ArrayList<UInt8>()
+    private let valueKind: ArrayList<UInt8> = ArrayList<UInt8>()
+    private let exprKind: ArrayList<UInt8> = ArrayList<UInt8>()
+    private let defKind: ArrayList<UInt8> = ArrayList<UInt8>()
+
+    private let allType: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
+    private let allValue: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
+    private let allExpression: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
+    private let allCustomTypeDef: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
+
     private let serializedBlockGroups: HashSet<Int64> = HashSet<Int64>()
     private let serializedLiteralValues: HashSet<Int64> = HashSet<Int64>()
 
     public init() {}
+
+    private func GetId(obj: Value): UInt32 {
+        if (!value2Id.contains(obj.nodeId)) {
+            valueCount++
+            value2Id[obj.nodeId] = valueCount
+            allValue.add(0u32)
+            valueKind.add(0u8)
+            valueQueue.add(obj)
+        }
+        return value2Id[obj.nodeId]
+    }
+
+    private func GetId(obj: Type): UInt32 {
+        if (!type2Id.contains(obj.objectId)) {
+            typeCount++
+            type2Id[obj.objectId] = typeCount
+            allType.add(0u32)
+            typeKind.add(0u8)
+            typeQueue.add(obj)
+        }
+        return type2Id[obj.objectId]
+    }
+
+    private func GetId(obj: Expression): UInt32 {
+        if (!expr2Id.contains(obj.nodeId)) {
+            exprCount++
+            expr2Id[obj.nodeId] = exprCount
+            allExpression.add(0u32)
+            exprKind.add(0u8)
+            exprQueue.add(obj)
+        }
+        return expr2Id[obj.nodeId]
+    }
+
+    private func GetId(obj: CustomTypeDef): UInt32 {
+        if (!def2Id.contains(obj.nodeId)) {
+            defCount++
+            def2Id[obj.nodeId] = defCount
+            allCustomTypeDef.add(0u32)
+            defKind.add(0u8)
+            defQueue.add(obj)
+        }
+        return def2Id[obj.nodeId]
+    }
 
     public func SerializePackage(pkg: Package): String {
         return serializePackage(pkg, None)
