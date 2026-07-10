@@ -11,6 +11,11 @@ public let ANY_TYPE: String = "ANY_TYPE"
 public let NOT_CARE: String = "NOT_CARE"
 private let STD_PACKAGE_PREFIX: String = "std."
 
+public func TryGetFromCache<T>(key: String, cache: HashMap<String, Value>): Option<T> where T <: Value {
+    let value = cache.get(key) ?? return None
+    return value as T
+}
+
 public class FuncInfo {
     public let funcName: String
     public let parentTy: String
