@@ -1473,6 +1473,7 @@ class CHIRDeserializerImpl {
         let types = rawPackage.GetTypes().getOrThrow()
         let kinds = rawPackage.GetTypes_type().getOrThrow()
         let kind = (kinds.Get(id - 1u32) as UInt8).getOrThrow()
+        if (kind == CHIRFB_TYPE_ELEM_NONE) { return None }
         let position = (types.Get(id - 1u32) as Int64).getOrThrow()
         let ty: Type
         if (kind == CHIRFB_TYPE_ELEM_TYPE) {
