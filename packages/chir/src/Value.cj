@@ -971,15 +971,24 @@ public abstract class GlobalValue <: Value {
     public open func DestroySelf(): Unit {}
 
     public func GlobalValueCommentToString(): String {
-        let base = BaseCommentToString()
-        if (features.isEmpty()) {
-            return base
+        let result = ArrayList<String>()
+        result.add(BaseCommentToString())
+        if (!srcCodeIdentifier.isEmpty()) {
+            result.add("srcCodeIdentifier: " + srcCodeIdentifier)
         }
-        let featureText = "features=" + JoinStrings(features, ",")
-        if (base.isEmpty()) {
-            return featureText
+        if (!rawMangledName.isEmpty()) {
+            result.add("rawMangledName: " + rawMangledName)
         }
-        return base + " " + featureText
+        if (!packageName.isEmpty()) {
+            result.add("packageName: " + packageName)
+        }
+        if (let Some(parent) <- declaredParent) {
+            result.add("declaredParent: " + parent.GetIdentifier())
+        }
+        if (!features.isEmpty()) {
+            result.add("features: {" + JoinStrings(features, ", ") + "}")
+        }
+        return JoinStrings(result, ", ")
     }
 }
 
