@@ -388,6 +388,19 @@ public open class Expression <: Base {
     }
 }
 
+func GetOperands(expression: Expression): ArrayList<Value> {
+    let operands = expression.GetOperands()
+    if (let Some(constant) <- (expression as Constant)) {
+        operands.add(constant.GetValue())
+    }
+    if (let Some(terminator) <- expression.AsTerminator()) {
+        for (successor in terminator.GetSuccessors()) {
+            operands.add(successor)
+        }
+    }
+    return operands
+}
+
 public class UnaryExpression <: Expression {
     private let overflowStrategy: OverflowStrategy
 

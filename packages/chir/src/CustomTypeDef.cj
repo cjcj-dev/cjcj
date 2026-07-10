@@ -917,6 +917,13 @@ public open class CustomTypeDef <: Base {
     }
 }
 
+func GetType(definition: CustomTypeDef): Option<Type> {
+    if ((definition as ExtendDef).isSome()) {
+        return None
+    }
+    return definition.GetType()
+}
+
 private func GetWellMatchingResults(candidateRes: ArrayList<VTableSearchRes>, candidateTypes: ArrayList<FuncType>,
     builder: CHIRBuilder): ArrayList<VTableSearchRes> {
     if (candidateRes.size <= 1) {

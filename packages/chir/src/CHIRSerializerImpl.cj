@@ -911,7 +911,16 @@ class CHIRSerializerImpl {
 
     private func Serialize(obj: LiteralValue): FlatBufferOffset {
         let base = Serialize((obj as Value).getOrThrow())
-        return CreateLiteralValue(builder, base, UInt8(LiteralKindIndex(obj.literalKind)))
+        let literalKind = match (obj.literalKind) {
+            case LiteralKind.BOOL => 0u8
+            case LiteralKind.RUNE => 1u8
+            case LiteralKind.INT => 2u8
+            case LiteralKind.FLOAT => 3u8
+            case LiteralKind.STRING => 4u8
+            case LiteralKind.UNIT => 5u8
+            case LiteralKind.NULL => 6u8
+        }
+        return CreateLiteralValue(builder, base, literalKind)
     }
 
     private func Serialize(obj: BoolLiteral): FlatBufferOffset {
@@ -945,7 +954,7 @@ class CHIRSerializerImpl {
 
     private func Serialize(obj: Expression): FlatBufferOffset {
         let base = Serialize((obj as Base).getOrThrow())
-        let operands = GetId(obj.GetOperands())
+        let operands = GetId(GetOperands(obj))
         let blockGroups = ArrayList<UInt32>()
         for (group in obj.GetBlockGroups()) {
             blockGroups.add(GetId((group as Value).getOrThrow()))
@@ -1444,7 +1453,7 @@ class CHIRSerializerImpl {
             0u32
         }
         return CreateCustomTypeDefDirect(builder, base, UInt8(CustomDefKindIndex(obj.GetCustomKind())), GetId(obj),
-            Some(obj.GetSrcCodeIdentifier()), Some(obj.GetIdentifier()), Some(obj.GetPackageName()), GetId(obj.GetType()),
+            Some(obj.GetSrcCodeIdentifier()), Some(obj.GetIdentifier()), Some(obj.GetPackageName()), GetId(GetType(obj)),
             GetId(obj.GetGenericDecl()), if (methods.isEmpty()) { None } else { Some(methods) },
             if (implementedInterfaces.isEmpty()) { None } else { Some(implementedInterfaces) }, Some(instanceMemberVars),
             if (staticMemberVars.isEmpty()) { None } else { Some(staticMemberVars) }, Serialize(obj.GetAnnoInfo()),
