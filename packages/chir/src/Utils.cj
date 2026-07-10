@@ -79,6 +79,22 @@ public func GetInstMapFromCurDefToCurType(curType: CustomType): HashMap<Int64, T
     return replaceTable
 }
 
+public func ReplaceThisTypeToConcreteType(ty: Type, concreteType: Type, builder: CHIRBuilder): Type {
+    if (let Some(refTy) <- (ty as RefType)) {
+        if (refTy.GetBaseType().IsThis()) {
+            return concreteType
+        }
+    }
+    if (ty.IsThis()) {
+        return concreteType
+    }
+    let newArgs = ArrayList<Type>()
+    for (argTy in ty.GetTypeArgs()) {
+        newArgs.add(ReplaceThisTypeToConcreteType(argTy, concreteType, builder))
+    }
+    return CreateNewTypeWithArgs(ty, newArgs, builder)
+}
+
 public func IsExpectedFunction(fn: Function, funcInfo: FuncInfo): Bool {
     return CheckFuncName(fn, funcInfo) && CheckParentTy(fn, funcInfo) && CheckParametersTy(fn, funcInfo) &&
         CheckReturnTy(fn, funcInfo) && CheckPkgName(fn, funcInfo)

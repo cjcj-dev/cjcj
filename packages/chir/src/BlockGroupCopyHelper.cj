@@ -14,6 +14,7 @@ public class BlockGroupCopyHelper {
 
     public func CloneBlockGroup(oldBG: BlockGroup, newBG: BlockGroup): (ArrayList<Block>, Option<LocalVar>) {
         let newBlocks = CloneBlockGroupInto(oldBG, newBG)
+        InstBlockGroup(newBlocks)
         let valueMap = HashMap<Int64, Value>()
         let newDebugs = ArrayList<Expression>()
         CollectValueMap(oldBG, newBlocks, valueMap, newDebugs)
@@ -90,6 +91,26 @@ public class BlockGroupCopyHelper {
             } else {
                 thisType = apply.GetThisType()
             }
+        }
+    }
+
+    private func InstBlockGroup(blocks: ArrayList<Block>): Unit {
+        let concreteThisType = thisType.getOrThrow()
+        let genericConverter = GenericTypeConvertor(instMap, builder)
+        let convertFunc: ConvertTypeFunc = { ty =>
+            let replaced = ReplaceThisTypeToConcreteType(ty, concreteThisType, builder)
+            if (!refEq(replaced, ty)) {
+                return replaced
+            }
+            return genericConverter.ConvertToInstantiatedType(ty)
+        }
+        let converter = PrivateTypeConverterNoInvokeOriginal(convertFunc, builder)
+        let preVisit: VisitExprActionFunc = { expr =>
+            converter.VisitExpr(expr)
+            return VisitResult.CONTINUE
+        }
+        for (block in blocks) {
+            Visitor.Visit(block, preVisit)
         }
     }
 
@@ -259,6 +280,92 @@ public class BlockGroupCopyHelper {
                 ReplaceExprOperandsInBlock(block, valueMap)
             }
         }
+    }
+}
+
+public func FixCastProblemAfterInst(blocks: ArrayList<Block>, builder: CHIRBuilder): Unit {
+    let preVisit: VisitExprActionFunc = { expr =>
+        if (expr.GetExprKind() == ExprKind.INSTANCEOF) {
+            let instance = (expr as InstanceOf).getOrThrow()
+            let objectType = instance.GetObject().GetType().getOrThrow()
+            if (objectType.IsGenericRelated() ||
+                (objectType.IsRef() && (objectType as RefType).getOrThrow().GetBaseType().IsClass()) ||
+                instance.GetType().IsGenericRelated()) {
+                return VisitResult.CONTINUE
+            }
+            if (objectType.IsEqualOrSubTypeOf(instance.GetType(), builder)) {
+                let trueExpr = builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(true),
+                    expr.GetParentBlock().getOrThrow())
+                expr.ReplaceWith(trueExpr)
+            } else {
+                let falseExpr = builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(false),
+                    expr.GetParentBlock().getOrThrow())
+                expr.ReplaceWith(falseExpr)
+            }
+        } else if (expr.GetExprKind() == ExprKind.TRANSFORM_TO_CONCRETE) {
+            let cast = (expr as TransformToConcrete).getOrThrow()
+            if (!cast.GetSourceTy().getOrThrow().IsGenericRelated()) {
+                let sourceValue = cast.GetSourceValue()
+                let newCast = TypeCastOrBoxIfNeeded(sourceValue, cast.GetTargetTy().getOrThrow(), builder,
+                    expr.GetParentBlock().getOrThrow(), expr.GetDebugLocation())
+                if (refEq(newCast, sourceValue)) {
+                    for (user in expr.GetResult().getOrThrow().GetUsers()) {
+                        user.ReplaceOperand(expr.GetResult().getOrThrow(), sourceValue)
+                    }
+                    expr.RemoveSelfFromBlock()
+                    return VisitResult.CONTINUE
+                }
+                for (user in expr.GetResult().getOrThrow().GetUsers()) {
+                    user.ReplaceOperand(expr.GetResult().getOrThrow(), newCast)
+                }
+                newCast.AsLocalVar().getOrThrow().GetExpr().getOrThrow().MoveBefore(expr)
+                expr.RemoveSelfFromBlock()
+            }
+        } else if (expr.GetExprKind() == ExprKind.TRANSFORM_TO_GENERIC) {
+            let cast = (expr as TransformToGeneric).getOrThrow()
+            if (!cast.GetTargetTy().getOrThrow().IsGenericRelated()) {
+                let sourceValue = cast.GetSourceValue()
+                let newCast = TypeCastOrBoxIfNeeded(sourceValue, cast.GetTargetTy().getOrThrow(), builder,
+                    expr.GetParentBlock().getOrThrow(), expr.GetDebugLocation())
+                if (refEq(newCast, sourceValue)) {
+                    for (user in expr.GetResult().getOrThrow().GetUsers()) {
+                        user.ReplaceOperand(expr.GetResult().getOrThrow(), sourceValue)
+                    }
+                    expr.RemoveSelfFromBlock()
+                    return VisitResult.CONTINUE
+                }
+                for (user in expr.GetResult().getOrThrow().GetUsers()) {
+                    user.ReplaceOperand(expr.GetResult().getOrThrow(), newCast)
+                }
+                newCast.AsLocalVar().getOrThrow().GetExpr().getOrThrow().MoveBefore(expr)
+                expr.RemoveSelfFromBlock()
+            }
+        } else if (expr.GetExprKind() == ExprKind.TYPECAST) {
+            let cast = (expr as TypeCast).getOrThrow()
+            let sourceValue = cast.GetSourceValue()
+            if (sourceValue.GetType().getOrThrow().IsGenericRelated()) {
+                return VisitResult.CONTINUE
+            }
+            let newCastResult = TypeCastOrBoxIfNeeded(sourceValue, expr.GetResult().getOrThrow().GetType().getOrThrow(),
+                builder, expr.GetParentBlock().getOrThrow(), expr.GetDebugLocation())
+            if (refEq(newCastResult, sourceValue)) {
+                return VisitResult.CONTINUE
+            }
+            let newCast = newCastResult.AsLocalVar().getOrThrow()
+            if (newCast.GetExpr().getOrThrow().GetExprKind() == ExprKind.TYPECAST) {
+                newCast.GetExpr().getOrThrow().RemoveSelfFromBlock()
+                return VisitResult.CONTINUE
+            }
+            for (user in expr.GetResult().getOrThrow().GetUsers()) {
+                user.ReplaceOperand(expr.GetResult().getOrThrow(), newCast)
+            }
+            newCast.GetExpr().getOrThrow().MoveBefore(expr)
+            expr.RemoveSelfFromBlock()
+        }
+        return VisitResult.CONTINUE
+    }
+    for (block in blocks) {
+        Visitor.Visit(block, preVisit)
     }
 }
 
