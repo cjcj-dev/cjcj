@@ -4378,6 +4378,34 @@ public class IRBuilder2 <: Resource {
         return CreateSExt(GetSizeFromTypeInfo(typeInfo), unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) })
     }
 
+    public func GetSize_32(chirTy: Type): LLVMValueRef {
+        let baseType = DeRef(chirTy)
+        if (baseType.IsGeneric()) {
+            let blocks = CreateAndInsertBasicBlocks(ArrayList<String>([GenNameForBB("get_ref_size"),
+                GenNameForBB("get_non_ref_size"), GenNameForBB("get_size_exit")]))
+            CreateCondBr(CreateTypeInfoIsReferenceCall(chirTy), blocks[0], blocks[1])
+            SetInsertPoint(blocks[0])
+            CreateBr(blocks[2])
+            SetInsertPoint(blocks[1])
+            let nonRefSize = GetLayoutSize_32(chirTy)
+            CreateBr(blocks[2])
+            SetInsertPoint(blocks[2])
+            let sizePhi = CreatePHI(unsafe { LLVMInt32TypeInContext(GetLLVMContext().raw) })
+            AddIncoming(sizePhi, ArrayList<LLVMValueRef>([
+                unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), GetPtrSize(), 0) }, nonRefSize]),
+                ArrayList<LLVMBasicBlockRef>([blocks[0], blocks[1]]))
+            return sizePhi
+        } else if (CGType.GetOrCreate(cgMod, chirTy).IsReference()) {
+            return unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), GetPtrSize(), 0) }
+        } else {
+            return GetLayoutSize_32(chirTy)
+        }
+    }
+
+    public func GetSize_64(chirTy: Type): LLVMValueRef {
+        return CreateSExt(GetSize_32(chirTy), unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) })
+    }
+
     public func GetSizeFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {
         let currentBlock = GetInsertBlock()
         let blockKey = currentBlock.toUIntNative()
