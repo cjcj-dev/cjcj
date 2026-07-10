@@ -132,6 +132,13 @@ extern "C" void LLVMGlobalObjectAddStringAttribute(
     unwrap<GlobalVariable>(GV)->addAttribute(StringRef(K, KLen), StringRef(V, VLen));
 }
 
+// Mirror C++ `rawGV->addAttribute(llvm::Attribute::ReadOnly)`
+// (src/CodeGen/EmitGlobalVariableIR.cpp:63).
+extern "C" void LLVMSelfhostGlobalVariableAddEnumAttribute(LLVMValueRef GV, unsigned KindId)
+{
+    unwrap<GlobalVariable>(GV)->addAttribute(static_cast<Attribute::AttrKind>(KindId));
+}
+
 extern "C" LLVMBasicBlockRef LLVMSelfhostGetNearestCommonAncestorOfBasicBlocks(
         LLVMBasicBlockRef *BBs, unsigned Count)
 {

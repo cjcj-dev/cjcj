@@ -247,6 +247,7 @@ foreign {
     func LLVMValueMetadataEntriesGetMetadata(entries: LLVMValueMetadataEntry, index: UInt32): LLVMMetadataRef
     func LLVMGlobalObjectAddStringAttribute(gv: LLVMValueRef, k: CString, kLen: UInt32, v: CString,
         vLen: UInt32): Unit
+    func LLVMSelfhostGlobalVariableAddEnumAttribute(gv: LLVMValueRef, kindId: UInt32): Unit
     func LLVMCountParams(fn: LLVMValueRef): UInt32
     func LLVMGetParam(fn: LLVMValueRef, index: UInt32): LLVMValueRef
     func LLVMHasPersonalityFn(fn: LLVMValueRef): Int32
