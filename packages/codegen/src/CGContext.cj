@@ -34,16 +34,16 @@ public class VirtualCallInfo4LICM {
     public let prepForVirtualCallBB: LLVMBasicBlockRef
     public var lookupVirtualInst: LLVMValueRef
     public var getOuterTypeInst: LLVMValueRef = LLVMNullValue()
-    public let thisTypeText: String
-    public let outerTypeText: String
-    public let virtualMethodOffset: Int64
+    public let thisType: Type
+    public let outerType: ClassType
+    public let virtualMethodOffset: UInt64
 
-    public init(prepForVirtualCallBB: LLVMBasicBlockRef, lookupVirtualInst: LLVMValueRef, thisTypeText: String,
-        outerTypeText: String, virtualMethodOffset: Int64) {
+    public init(prepForVirtualCallBB: LLVMBasicBlockRef, lookupVirtualInst: LLVMValueRef, thisType: Type,
+        outerType: ClassType, virtualMethodOffset: UInt64) {
         this.prepForVirtualCallBB = prepForVirtualCallBB
         this.lookupVirtualInst = lookupVirtualInst
-        this.thisTypeText = thisTypeText
-        this.outerTypeText = outerTypeText
+        this.thisType = thisType
+        this.outerType = outerType
         this.virtualMethodOffset = virtualMethodOffset
     }
 
@@ -81,6 +81,8 @@ public class CGContext {
     private let llvmUsedGVs: HashSet<String> = HashSet<String>()
     private let callBasesToInline: ArrayList<(LLVMValueRef, LLVMValueRef)> = ArrayList<(LLVMValueRef, LLVMValueRef)>()
     private let callBasesToReplace: ArrayList<CallBaseToReplaceInfo> = ArrayList<CallBaseToReplaceInfo>()
+    private let virtualCallInfo4LICMMap: ArrayList<(CGFunction, ArrayList<VirtualCallInfo4LICM>)> =
+        ArrayList<(CGFunction, ArrayList<VirtualCallInfo4LICM>)>()
     private let dependentPartialOrderOfTypes: ArrayList<PartialOrderPair> = ArrayList<PartialOrderPair>()
     private var cjStringType: LLVMTypeRef = LLVMNullType()
 
@@ -109,6 +111,7 @@ public class CGContext {
         llvmUsedGVs.clear()
         callBasesToInline.clear()
         callBasesToReplace.clear()
+        virtualCallInfo4LICMMap.clear()
         dependentPartialOrderOfTypes.clear()
         genericParamsCacheMap.clear()
         genericParamsSizeBlockLevelCacheMap.clear()
@@ -177,6 +180,53 @@ public class CGContext {
             out.add(item)
         }
         return out
+    }
+
+    public func AddVirtualCallInfo4LICM(cgfunc: CGFunction, info: VirtualCallInfo4LICM): Unit {
+        for ((mappedCGFunc, vec) in virtualCallInfo4LICMMap) {
+            if (!refEq(mappedCGFunc, cgfunc)) {
+                continue
+            }
+            var idx = vec.size - 1
+            while (idx >= 0) {
+                if (vec[idx].prepForVirtualCallBB.toUIntNative() == info.prepForVirtualCallBB.toUIntNative()) {
+                    return
+                }
+                idx--
+            }
+            vec.add(info)
+            return
+        }
+        let vec = ArrayList<VirtualCallInfo4LICM>()
+        vec.add(info)
+        virtualCallInfo4LICMMap.add((cgfunc, vec))
+    }
+
+    public func SetGetOuterTypeInst(cgfunc: CGFunction, prepForVirtualCallBB: LLVMBasicBlockRef,
+        getOuterTypeInst: LLVMValueRef): Unit {
+        for ((mappedCGFunc, vec) in virtualCallInfo4LICMMap) {
+            if (!refEq(mappedCGFunc, cgfunc)) {
+                continue
+            }
+            var idx = vec.size - 1
+            while (idx >= 0) {
+                if (vec[idx].prepForVirtualCallBB.toUIntNative() == prepForVirtualCallBB.toUIntNative()) {
+                    vec[idx].SetGetOuterTypeInst(getOuterTypeInst)
+                    return
+                }
+                idx--
+            }
+            return
+        }
+    }
+
+    public func GetVirtualCallInfo4LICM(cgfunc: CGFunction): ArrayList<VirtualCallInfo4LICM> {
+        for ((mappedCGFunc, vec) in virtualCallInfo4LICMMap) {
+            if (refEq(mappedCGFunc, cgfunc)) {
+                return vec
+            }
+        }
+        return ArrayList<VirtualCallInfo4LICM>()
     }
 
     public func SetBasePtr(value: LLVMValueRef, basePtr: LLVMValueRef): Unit {
