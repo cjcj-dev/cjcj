@@ -5,6 +5,10 @@ package cjcj::chir
 const CHIRFB_FILE_IDENTIFIER: String = "CHIR"
 const CHIRFB_ROOT_TABLE: String = "CHIRPackage"
 
+func GetCHIRPackage(data: Array<UInt8>): PackageFormat_CHIRPackage {
+    return PackageFormat_CHIRPackage(data, Int64(ReadScalar<UInt32>(data, 0)))
+}
+
 // PackageFormat.fbs:11: pool IDs are uint32 table indexes; 0 is invalid/null and valid IDs start at 1.
 const CHIRFB_INVALID_POOL_ID: UInt32 = 0u32
 const CHIRFB_FIRST_POOL_ID: UInt32 = 1u32
