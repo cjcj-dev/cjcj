@@ -1516,6 +1516,7 @@ public class TypeChecker {
                 } else {
                     PreCheckAnnoForFFI(pkg)
                 }
+                let _ = CheckDeclAttributesForPackage(pkg, impl.diag.getOrThrow(), opts: GlobalOptions())
                 let _ = PreCheckPackage(ctx, pkg, typeManager: impl.typeManager,
                     importManager: impl.importManager, diag: impl.diag)
                 // C2e[A]: overload-conflict detection runs after PreCheckPackage so parameter types
@@ -1524,7 +1525,6 @@ public class TypeChecker {
                     PreCheckFuncRedefinition(pkg, impl.GetSymsByASTKind(ctx, ASTKind.FUNC_DECL), diagValue,
                         impl.typeManager)
                 }
-                let _ = CheckDeclAttributesForPackage(pkg, impl.diag.getOrThrow(), opts: GlobalOptions())
             }
         }
         impl.typeManager.ClearMapCache()
@@ -2909,6 +2909,9 @@ public class TypeChecker {
             }
         }
         if (let Some(classDecl) <- (decl as ClassDecl)) {
+            if (let Some(diagValue) <- impl.diag) {
+                let _ = TypeCheckClassLikeCheckNominalAnnotationRules(diagValue, classDecl)
+            }
             SynthesizeInheritedTypes(ctx, classDecl)
             if (let Some(body) <- classDecl.body) {
                 SynthesizeDeclList(ctx, body.decls)

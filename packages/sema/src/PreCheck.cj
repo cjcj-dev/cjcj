@@ -601,44 +601,6 @@ private func preCheckGetCoreDecl(ctx: ASTContext, pkg: Package, name: String): O
     return None
 }
 
-private func preCheckTypeNodeIsClass(typeNode: Type): Bool {
-    if (let Some(ty) <- typeNode.GetTy()) {
-        if ((ty as ClassTy).isSome()) {
-            return true
-        }
-        if (let Some(decl) <- Ty.GetDeclPtrOfTy(ty)) {
-            if (decl.astKind == ASTKind.CLASS_DECL) {
-                return true
-            }
-            if (let Some(aliasDecl) <- (decl as TypeAliasDecl)) {
-                if (let Some(aliasType) <- aliasDecl.typeNode) {
-                    return preCheckTypeNodeIsClass(aliasType)
-                }
-            }
-        }
-    }
-    if (let Some(target) <- typeNode.GetTarget()) {
-        if (target.astKind == ASTKind.CLASS_DECL) {
-            return true
-        }
-        if (let Some(aliasDecl2) <- (target as TypeAliasDecl)) {
-            if (let Some(aliasType2) <- aliasDecl2.typeNode) {
-                return preCheckTypeNodeIsClass(aliasType2)
-            }
-        }
-    }
-    return false
-}
-
-private func preCheckHasSuperClass(classDecl: ClassDecl): Bool {
-    for (typeNode in classDecl.inheritedTypes) {
-        if (preCheckTypeNodeIsClass(typeNode)) {
-            return true
-        }
-    }
-    return false
-}
-
 private func preCheckAddObjectSuperClass(ctx: ASTContext, pkg: Package, classDecl: ClassDecl): Unit {
     if (pkg.fullPackageName == PRECHECK_CORE_PACKAGE_NAME && classDecl.identifier.Val() == PRECHECK_OBJECT_NAME) {
         return
@@ -655,12 +617,16 @@ private func preCheckAddObjectSuperClass(ctx: ASTContext, pkg: Package, classDec
     }
 }
 
-private func addSuperClassObjectForClassDecl(ctx: ASTContext, pkg: Package): Unit {
+private func addSuperClassObjectForClassDecl(
+    ctx: ASTContext,
+    pkg: Package,
+    diag: BasicDiagnosticEngine
+): Unit {
     let syms = ctx.searcher.Search(ctx, ASTKindQuery(ASTKind.CLASS_DECL), order: SearchOrder.POS_ASC)
     for (sym in syms) {
         let node = sym.node ?? continue
         let classDecl = (node as ClassDecl) ?? continue
-        if (preCheckHasSuperClass(classDecl)) {
+        if (TypeCheckClassLikeHasSuperClass(diag, classDecl)) {
             continue
         }
         preCheckAddObjectSuperClass(ctx, pkg, classDecl)
@@ -687,7 +653,7 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeMan
     }
     collectLetPatternDecls(ctx, pkg)
     PreSetDeclType(typeManager, ctx, importManager: importManager, diag: diag)
-    addSuperClassObjectForClassDecl(ctx, pkg)
+    addSuperClassObjectForClassDecl(ctx, pkg, diag ?? BasicDiagnosticEngine())
     collectAndCheckAssumption(typeManager, pkg)
     return valid
 }
