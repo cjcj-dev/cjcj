@@ -612,8 +612,15 @@ private func invokeCommonNativeMacro(macCall: MacroCall, inputBytes: ArrayList<U
         } else {
             writeNativeBytes(inputPtr.value, inputBytes)
             let invokeFunc = CommonMacroFunc(macCall.invokeFunc)
-            let resultPtr = unsafe { invokeFunc(inputPtr.value, inputBytes.size, CPointer<Unit>()) }
-            result = installNativeMacroResult(macCall, resultPtr)
+            let (ctxId, ctxHandle) = registerMacroCtx(macCall)
+            try {
+                let resultPtr = unsafe {
+                    invokeFunc(inputPtr.value, inputBytes.size, CPointer<Unit>(ctxHandle))
+                }
+                result = installNativeMacroResult(macCall, resultPtr)
+            } finally {
+                unregisterMacroCtx(ctxId, ctxHandle)
+            }
         }
     } catch (e: Exception) {
         result = false
@@ -634,10 +641,16 @@ private func invokeAttrNativeMacro(macCall: MacroCall, attrBytes: ArrayList<UInt
                 } else {
                     writeNativeBytes(inputPtr.value, inputBytes)
                     let invokeFunc = AttrMacroFunc(macCall.invokeFunc)
-                    let resultPtr = unsafe {
-                        invokeFunc(attrPtr.value, attrBytes.size, inputPtr.value, inputBytes.size, CPointer<Unit>())
+                    let (ctxId, ctxHandle) = registerMacroCtx(macCall)
+                    try {
+                        let resultPtr = unsafe {
+                            invokeFunc(attrPtr.value, attrBytes.size, inputPtr.value, inputBytes.size,
+                                CPointer<Unit>(ctxHandle))
+                        }
+                        result = installNativeMacroResult(macCall, resultPtr)
+                    } finally {
+                        unregisterMacroCtx(ctxId, ctxHandle)
                     }
-                    result = installNativeMacroResult(macCall, resultPtr)
                 }
             }
         }
