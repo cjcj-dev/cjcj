@@ -1664,6 +1664,79 @@ public class FaithfulAST2CHIR {
         return commonDecls
     }
 
+    private func CollectMethodNames(extendDef: ExtendDef): HashSet<String> {
+        let names = HashSet<String>()
+        for (method in extendDef.GetMethods()) {
+            names.add(method.GetIdentifier())
+        }
+        return names
+    }
+
+    private func ProcessExtends(extends: ArrayList<ExtendDef>): ArrayList<ExtendDef> {
+        let commonExtends = ArrayList<ExtendDef>()
+        let specificExtends = ArrayList<ExtendDef>()
+        for (ed in extends) {
+            if (ed.TestAttr(Attribute.COMMON)) {
+                commonExtends.add(ed)
+            } else if (ed.TestAttr(Attribute.SPECIFIC)) {
+                specificExtends.add(ed)
+            }
+        }
+
+        let specificMethodNames = HashSet<String>()
+        for (specificEd in specificExtends) {
+            let names = CollectMethodNames(specificEd)
+            for (name in names) {
+                specificMethodNames.add(name)
+            }
+        }
+
+        let commonToRemove = HashSet<Int64>()
+        for (commonEd in commonExtends) {
+            for (method in commonEd.GetMethods()) {
+                if (specificMethodNames.contains(method.GetIdentifier())) {
+                    commonToRemove.add(commonEd.nodeId)
+                    break
+                }
+            }
+        }
+
+        var idx: Int64 = 0
+        while (idx < extends.size) {
+            if (commonToRemove.contains(extends[idx].nodeId)) {
+                extends.remove(at: idx)
+            } else {
+                idx++
+            }
+        }
+        return extends
+    }
+
+    private func ProcessExtendsByCommonDecl(extends: ArrayList<ExtendDef>,
+        commonDecls: ArrayList<AstDecl>): ArrayList<ExtendDef> {
+        let commonDeclMangledNames = HashSet<String>()
+        for (commonDecl in commonDecls) {
+            commonDeclMangledNames.add(commonDecl.mangledName)
+        }
+
+        var idx: Int64 = 0
+        while (idx < extends.size) {
+            let ed = extends[idx]
+            if (ed.TestAttr(Attribute.COMMON) &&
+                commonDeclMangledNames.contains(ed.GetIdentifierWithoutPrefix())) {
+                extends.remove(at: idx)
+            } else {
+                idx++
+            }
+        }
+        return extends
+    }
+
+    private func RemoveUnusedCJMPExtends(chirPkg: Package, commonDecls: ArrayList<AstDecl>): Unit {
+        chirPkg.SetExtends(ProcessExtendsByCommonDecl(chirPkg.GetExtends(), commonDecls))
+        chirPkg.SetImportedExtends(ProcessExtends(chirPkg.GetImportedExtends()))
+    }
+
     private func AttachCustomTypeGenericParams(decl: AstDecl): Unit {
         let def = chirType.GetGlobalNominalCache(decl)
         if (let Some(generic) <- decl.GetGeneric()) {
