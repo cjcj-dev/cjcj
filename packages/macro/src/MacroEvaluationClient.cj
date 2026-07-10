@@ -38,7 +38,7 @@ foreign {
 
 @When[os == "Windows"]
 @C
-private struct SecurityAttributes {
+struct SecurityAttributes {
     var nLength: UInt32
     var securityDescriptor: CPointer<Unit>
     var inheritHandle: Int32
@@ -52,7 +52,7 @@ private struct SecurityAttributes {
 
 @When[os == "Windows"]
 @C
-private struct StartupInfo {
+struct StartupInfo {
     var cb: UInt32
     var reserved: CString
     var desktop: CString
@@ -96,7 +96,7 @@ private struct StartupInfo {
 
 @When[os == "Windows"]
 @C
-private struct ProcessInformation {
+struct ProcessInformation {
     var process: CPointer<Unit>
     var thread: CPointer<Unit>
     var processId: UInt32
@@ -112,7 +112,7 @@ private struct ProcessInformation {
 
 @When[os == "Windows"]
 @C
-private struct JobObjectBasicLimitInformation {
+struct JobObjectBasicLimitInformation {
     var perProcessUserTimeLimit: Int64
     var perJobUserTimeLimit: Int64
     var limitFlags: UInt32
@@ -138,7 +138,7 @@ private struct JobObjectBasicLimitInformation {
 
 @When[os == "Windows"]
 @C
-private struct IoCounters {
+struct IoCounters {
     var readOperationCount: UInt64
     var writeOperationCount: UInt64
     var otherOperationCount: UInt64
@@ -158,7 +158,7 @@ private struct IoCounters {
 
 @When[os == "Windows"]
 @C
-private struct JobObjectExtendedLimitInformation {
+struct JobObjectExtendedLimitInformation {
     var basicLimitInformation: JobObjectBasicLimitInformation
     var ioInfo: IoCounters
     var processMemoryLimit: UIntNative
