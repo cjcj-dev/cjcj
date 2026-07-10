@@ -6073,6 +6073,33 @@ public class Translator {
         return RequireResult(builder.CreateConstant(builder.context.GetNothingType(), NullLiteral(), CurrentBlock()))
     }
 
+    private func TranslateExprArg(node: AstNode, targetTy: Type, deref!: Bool = true): Value {
+        var value = Translator.TranslateASTNode(node, this)
+        if (targetTy.IsUnit()) {
+            return RequireResult(builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(), CurrentBlock()))
+        }
+        if (RequireAstTy(node).IsNothing() || targetTy.IsNothing()) {
+            return RequireResult(builder.CreateConstant(builder.context.GetNothingType(), NullLiteral(), CurrentBlock()))
+        }
+        if (value.isNone()) {
+            if (RequireAstTy(node).IsUnit() && !targetTy.IsUnit()) {
+                value = Some(RequireResult(builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(),
+                    CurrentBlock())))
+            } else {
+                return RequireResult(builder.CreateConstant(builder.context.GetNothingType(), NullLiteral(),
+                    CurrentBlock()))
+            }
+        }
+        var result = value.getOrThrow()
+        if ((result.GetType() ?? throw IllegalStateException("faithful AST2CHIR value has no type")).IsNothing()) {
+            return result
+        }
+        if (deref) {
+            result = GetDerefedValue(result, TranslateLocation(node))
+        }
+        return TypeCastOrBoxIfNeeded(result, targetTy, TranslateLocation(node))
+    }
+
     private func TranslateTrivialArgWithNoSugar(arg: AstFuncArg, expectedTy: Option<Type>): Value {
         let argExpr = RequireFuncArgExpr(arg, "call argument")
         var value = if (arg.withInout) {
