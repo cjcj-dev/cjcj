@@ -2485,16 +2485,21 @@ public class IRBuilder2 <: Resource {
         }
     }
 
-    public func CreateVArrayStore(value: CGValue, place: LLVMValueRef): LLVMValueRef {
-        let valueCGType = value.GetCGType().getOrThrow()
-        let elementTy = valueCGType.GetOriginal()
-        let elementRefTy = GetCGContext().GetCHIRBuilder().context.GetRefTy(elementTy)
-        let placeCGType = CGType.GetOrCreate(cgMod, elementRefTy)
-        let placeValue = CGValue(place, placeCGType)
-        if (valueCGType.IsVArrayType() || valueCGType.IsStructType()) {
-            return CreateStore(CGValue(value.GetRawValue(), placeCGType), placeValue)
+    public func CreateVArrayStore(cgValue: CGValue, place: LLVMValueRef): Unit {
+        var basePtr = unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) }
+        var isBaseObjStruct = true
+        if (!unsafe { LLVMIsAGetElementPtrInst(place) }.isNull()) {
+            var operand = unsafe { LLVMGetOperand(place, 0u32) }
+            while (!unsafe { LLVMIsAGetElementPtrInst(operand) }.isNull()) {
+                operand = unsafe { LLVMGetOperand(operand, 0u32) }
+                if (!unsafe { LLVMIsABitCastInst(operand) }.isNull()) {
+                    basePtr = unsafe { LLVMGetOperand(operand, 0u32) }
+                    isBaseObjStruct = false
+                    break
+                }
+            }
         }
-        return CreateStore(value, placeValue)
+        CreateRefStore(cgValue, basePtr, place, isBaseObjStruct)
     }
 
     public func GetUUIDFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {

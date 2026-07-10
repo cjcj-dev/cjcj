@@ -374,6 +374,8 @@ foreign {
     func LLVMIsAArgument(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAInstruction(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAConstantPointerNull(value: LLVMValueRef): LLVMValueRef
+    func LLVMIsAGetElementPtrInst(value: LLVMValueRef): LLVMValueRef
+    func LLVMIsABitCastInst(value: LLVMValueRef): LLVMValueRef
     func LLVMGetIntTypeWidth(integerTy: LLVMTypeRef): UInt32
 
     func LLVMCreateBuilderInContext(context: LLVMContextRef): LLVMBuilderRef
@@ -499,6 +501,7 @@ foreign {
     func LLVMGetAttributesAtIndex(fn: LLVMValueRef, index: UInt32, attrs: CPointer<LLVMAttributeRef>): Unit
     func LLVMGetEnumAttributeAtIndex(fn: LLVMValueRef, index: UInt32, kindID: UInt32): LLVMAttributeRef
     func LLVMSetOperand(user: LLVMValueRef, index: UInt32, value: LLVMValueRef): Unit
+    func LLVMGetOperand(value: LLVMValueRef, index: UInt32): LLVMValueRef
     func LLVMGetNumOperands(value: LLVMValueRef): Int32
     func LLVMGetStringAttributeAtIndex(fn: LLVMValueRef, index: UInt32, key: CString,
         keyLen: UInt32): LLVMAttributeRef
