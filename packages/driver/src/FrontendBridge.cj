@@ -17,7 +17,7 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
         PrintFrontendCommand(driver.cangjieHome, frontendOptions)
     }
     let result = ExecuteFrontendWithResult(driver.executableName, frontendArgs,
-        driver.driverOptions.environment.allVariables, compileTarget: driver.driverOptions.compileTarget)
+        driver.driverOptions.environment.allVariables, compileTarget: Some(driver.driverOptions.compileTarget))
     if (result.exitCode != 0) {
         return false
     }

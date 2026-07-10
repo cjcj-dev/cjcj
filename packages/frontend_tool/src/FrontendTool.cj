@@ -97,7 +97,7 @@ public func ExecuteFrontendWithResult(
     exePath: String,
     args: Array<String>,
     environmentVars: HashMap<String, String>,
-    compileTarget!: CompileTarget = CompileTarget.DEFAULT
+    compileTarget!: Option<CompileTarget> = None
 ): FrontendExecutionResult {
     let diag = DiagnosticEngine()
     let invocation = CompilerInvocation()
@@ -105,7 +105,9 @@ public func ExecuteFrontendWithResult(
     if (!InitializeCompilerInvocation(invocation, args)) {
         return FrontendExecutionResult(1)
     }
-    invocation.globalOptions.compileTarget = compileTarget
+    if (let Some(target) <- compileTarget) {
+        invocation.globalOptions.compileTarget = target
+    }
 
     let globalOptions = invocation.globalOptions
     if (globalOptions.showUsage) {
