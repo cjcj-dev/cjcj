@@ -109,7 +109,6 @@ public func RequireInstantiation(decl: Decl): Bool {
 private func collectDeclPair(source: Node, target: Node, pairs: ArrayList<(Decl, Decl)>): Unit {
     if (let Some(sourceDecl) <- (source as Decl)) {
         if (let Some(targetDecl) <- (target as Decl)) {
-            targetDecl.genericDecl = sourceDecl
             pairs.add((sourceDecl, targetDecl))
         }
     }

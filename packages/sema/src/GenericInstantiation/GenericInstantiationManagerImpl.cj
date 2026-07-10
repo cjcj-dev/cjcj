@@ -354,11 +354,6 @@ class GenericInstantiationManagerImpl {
                 tm.PrepareToMock(pkg)
             }
         }
-        for (file in pkg.files) {
-            for (decl in file.decls) {
-                collectIdentityInstantiation(decl)
-            }
-        }
         for (decl in pkg.genericInstantiatedDecls) {
             collectExistingInstantiation(decl)
         }
@@ -382,7 +377,6 @@ class GenericInstantiationManagerImpl {
         }
         if (let Some(genericDecl) <- genericInfo.decl) {
             if (genericInfo.gTyToTyMap.IsEmpty()) {
-                collectIdentityInstantiation(genericDecl)
                 return genericDecl
             }
             let instantiatedDecl = InstantiateGenericDecl(genericDecl, genericInfo.gTyToTyMap, pkg)
@@ -1291,7 +1285,9 @@ class GenericInstantiationManagerImpl {
             while (idx < out.size) {
                 let (decl, values) = out[idx]
                 if (SameDecl(decl, entry.genericDecl)) {
-                    values.add(entry.instantiatedDecl)
+                    if (!containsDecl(values, entry.instantiatedDecl)) {
+                        values.add(entry.instantiatedDecl)
+                    }
                     found = true
                     break
                 }
@@ -1358,7 +1354,6 @@ class GenericInstantiationManagerImpl {
 
     public func InstantiateGenericDecl(decl: Decl, typeMapping: TypeSubst, pkg: Package): Decl {
         if (typeMapping.IsEmpty()) {
-            collectIdentityInstantiation(decl)
             return decl
         }
         let g2gTyMap = buildCloneGenericToGenericMap(decl)
@@ -1392,17 +1387,10 @@ class GenericInstantiationManagerImpl {
             if (!instantiatedDeclsMap.contains(declKey)) {
                 instantiatedDeclsMap[declKey] = ArrayList<Decl>()
             }
-            instantiatedDeclsMap.get(declKey).getOrThrow().add(instantiatedDecl)
-        }
-    }
-
-    private func collectIdentityInstantiation(decl: Decl): Unit {
-        if (let Some(_) <- decl.GetGeneric()) {
-            addInstantiationRecord(decl, decl, TypeSubst())
-            PartialInstantiation.RegisterInstantiation(decl, decl)
-        }
-        for (member in decl.GetMemberDecls()) {
-            collectIdentityInstantiation(member)
+            let instantiatedDecls = instantiatedDeclsMap.get(declKey).getOrThrow()
+            if (!containsDecl(instantiatedDecls, instantiatedDecl)) {
+                instantiatedDecls.add(instantiatedDecl)
+            }
         }
     }
 
@@ -1410,8 +1398,6 @@ class GenericInstantiationManagerImpl {
         if (let Some(genericDecl) <- decl.genericDecl) {
             addInstantiationRecord(genericDecl, decl, buildTypeMappingFromDecl(genericDecl, decl))
             PartialInstantiation.RegisterInstantiation(genericDecl, decl)
-        } else {
-            collectIdentityInstantiation(decl)
         }
         for (member in decl.GetMemberDecls()) {
             collectExistingInstantiation(member)
