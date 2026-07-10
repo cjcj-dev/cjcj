@@ -825,17 +825,9 @@ public open class BaseMangler {
                     MANGLE_SUFFIX
             } else if (curPrefix.astKind == ASTKind.EXTEND_DECL) {
                 let isInitFunc = node.astKind == ASTKind.FUNC_DECL && node.TestAttr(Attribute.HAS_INITIAL)
-                let isPrivateInitOwner = if (isInitFunc) {
-                    if (let Some(owner) <- node.ownerFunc) {
-                        owner.TestAttr(Attribute.PRIVATE)
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
                 let useExtendEntity = node.astKind == ASTKind.GENERIC_PARAM_DECL ||
-                    (node.TestAttr(Attribute.PRIVATE) && !isInitFunc) || isPrivateInitOwner
+                    (node.TestAttr(Attribute.PRIVATE) && !isInitFunc) ||
+                    (isInitFunc && node.ownerFunc.getOrThrow().TestAttr(Attribute.PRIVATE))
                 if (useExtendEntity) {
                     mangled += MangleExtendEntity(curPrefix, genericsTypeStack, declare)
                 } else if (let Some(extendedType) <- curPrefix.extendedType) {
