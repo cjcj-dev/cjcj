@@ -3670,8 +3670,13 @@ public class FaithfulAST2CHIR {
             case AstTypeKind.TYPE_FLOAT16 | AstTypeKind.TYPE_FLOAT64 | AstTypeKind.TYPE_IDEAL_FLOAT =>
                 builder.CreateLiteralValue(FloatLiteral(expr.constNumValue.asFloat.value), chirTyToTrans)
             case AstTypeKind.TYPE_FLOAT32 =>
-                builder.CreateLiteralValue(
-                    FloatLiteral(Float64(Float32(Float64.parse(expr.stringValue.replace("_", ""))))), chirTyToTrans)
+                let stringVal = expr.stringValue.replace("_", "")
+                let value = Float64.parse(if (stringVal.endsWith("f32")) {
+                    stringVal[0..stringVal.size - 3]
+                } else {
+                    stringVal
+                })
+                builder.CreateLiteralValue(FloatLiteral(Float64(Float32(value))), chirTyToTrans)
             case AstTypeKind.TYPE_UINT8 | AstTypeKind.TYPE_UINT16 | AstTypeKind.TYPE_UINT32 |
                 AstTypeKind.TYPE_UINT64 | AstTypeKind.TYPE_UINT_NATIVE =>
                 builder.CreateLiteralValue(
