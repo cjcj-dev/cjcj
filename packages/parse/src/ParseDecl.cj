@@ -302,6 +302,9 @@ extend ParserImpl {
         if (SeeingBuiltinAnnotation() && !modifiers.isEmpty() && annos.isEmpty()) {
             DiagExpectNoModifierBefore(SortModifierByPos(modifiers)[0], "annotation")
         }
+        if ((newlineSkipped && Seeing(TokenKind.NL)) || Seeing(TokenKind.SEMI)) {
+            SkipNLOrSemi()
+        }
         ParseAnnotations(annos)
         ParseModifiers(modifiers)
         CheckOverflowAnnotation(annos, scopeKind)
