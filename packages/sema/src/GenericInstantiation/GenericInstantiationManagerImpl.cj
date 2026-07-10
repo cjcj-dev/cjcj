@@ -4,7 +4,6 @@ import std.collection.*
 import cangjie_compiler::ast.*
 import cangjie_compiler::sema.*
 import cangjie_compiler::sema.Desugar.AfterTypeCheck.IsNeedRuntimeCheck
-import cangjie_compiler::sema.TypeCheckExpr.IsBuiltinUnaryExpr
 import cangjie_compiler::sema.Test.TestManager as RealTestManager
 import cangjie_compiler::utils.CJC_ASSERT
 

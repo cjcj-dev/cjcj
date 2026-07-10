@@ -181,6 +181,25 @@ private func TypeKindInMap(m: ArrayList<(TypeKind, TypeKind)>, kind: TypeKind): 
     return false
 }
 
+public func IsUnaryOperator(op: TokenKind): Bool {
+    return !UNARY_EXPR_TYPE_MAP(op).isEmpty()
+}
+
+public func IsBinaryOperator(op: TokenKind): Bool {
+    return !BINARY_EXPR_TYPE_MAP(op).isEmpty()
+}
+
+public func IsBuiltinUnaryExpr(op: TokenKind, ty: Ty): Bool {
+    let typeCandidate = UNARY_EXPR_TYPE_MAP(op)
+    if (typeCandidate.isEmpty()) {
+        return false
+    }
+    if (Ty.IsTyCorrect(ty) && TypeKindInMap(typeCandidate, ty.kind)) {
+        return true
+    }
+    return false
+}
+
 public func IsBuiltinBinaryExpr(op: TokenKind, leftTy: Ty, rightTy: Ty): Bool {
     let tys = ArrayList<Ty>()
     tys.add(leftTy)

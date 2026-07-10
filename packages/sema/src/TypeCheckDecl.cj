@@ -65,16 +65,6 @@ private func TypeCheckDeclIsCompatibleAccessLevel(srcLevel: AccessLevel, targetL
     return TypeCheckDeclAccessRank(srcLevel) <= TypeCheckDeclAccessRank(targetLevel)
 }
 
-private func TypeCheckDeclIsBuiltinUnaryOperand(op: TokenKind, ty: Ty): Bool {
-    if (op == TokenKind.SUB) {
-        return ty.IsNumeric()
-    }
-    if (op == TokenKind.NOT) {
-        return ty.IsIntegerSubType() || ty.IsBoolean() || ty.kind == TypeKind.TYPE_IDEAL_INT
-    }
-    return false
-}
-
 private func TypeCheckDeclAddTypeArgsOfType(typeNodeOpt: Option<Type>, out: ArrayList<Type>): Unit {
     if (let None <- typeNodeOpt) {
         return
@@ -321,19 +311,6 @@ public func CheckPropDecl(pd: PropDecl, typeSynthesizer: (Type) -> Ty, declSynth
     return pd.GetTy() ?? TypeManager.GetInvalidTy()
 }
 
-public func TypeCheckDeclIsUnaryOverloadOperator(op: TokenKind): Bool {
-    return op == TokenKind.NOT || op == TokenKind.SUB
-}
-
-public func TypeCheckDeclIsBinaryOverloadOperator(op: TokenKind): Bool {
-    return op == TokenKind.ADD || op == TokenKind.BITAND || op == TokenKind.BITOR ||
-        op == TokenKind.BITXOR || op == TokenKind.DIV || op == TokenKind.EQUAL ||
-        op == TokenKind.EXP || op == TokenKind.GE || op == TokenKind.GT ||
-        op == TokenKind.LE || op == TokenKind.LSHIFT || op == TokenKind.LT ||
-        op == TokenKind.MOD || op == TokenKind.MUL || op == TokenKind.NOTEQ ||
-        op == TokenKind.RSHIFT || op == TokenKind.SUB
-}
-
 public func TypeCheckDeclCheckOperatorOverloadFunc(diag: BasicDiagnosticEngine, fd: FuncDecl): Bool {
     if (fd.op == TokenKind.ILLEGAL || fd.op == TokenKind.LPAREN) {
         return true
@@ -347,14 +324,14 @@ public func TypeCheckDeclCheckOperatorOverloadFunc(diag: BasicDiagnosticEngine, 
                 return TypeCheckDeclCheckIndexOperatorOverload(diag, fd, funcTy)
             }
             if (funcTy.paramTys.size == 0) {
-                if (!TypeCheckDeclIsUnaryOverloadOperator(fd.op)) {
+                if (!IsUnaryOperator(fd.op)) {
                     TypeCheckDeclEmitDiag(diag, fd, BasicDiagKind.sema_operator_overload_invalid_num_parameter,
                         args: [BasicDiagArgument(fd.identifier.Val())])
                     return false
                 }
                 if (let Some(outer) <- fd.outerDecl) {
                     if (let Some(baseTy) <- outer.GetTy()) {
-                        if (TypeCheckDeclIsBuiltinUnaryOperand(fd.op, baseTy)) {
+                        if (IsBuiltinUnaryExpr(fd.op, baseTy)) {
                             TypeCheckDeclEmitDiag(diag, fd,
                                 BasicDiagKind.sema_operator_overload_built_in_unary_operator,
                                 args: [BasicDiagArgument(fd.identifier.Val()), BasicDiagArgument(baseTy.String())])
@@ -365,7 +342,7 @@ public func TypeCheckDeclCheckOperatorOverloadFunc(diag: BasicDiagnosticEngine, 
                 return true
             }
             if (funcTy.paramTys.size == 1) {
-                if (!TypeCheckDeclIsBinaryOverloadOperator(fd.op)) {
+                if (!IsBinaryOperator(fd.op)) {
                     TypeCheckDeclEmitDiag(diag, fd, BasicDiagKind.sema_operator_overload_invalid_num_parameter,
                         args: [BasicDiagArgument(fd.identifier.Val())])
                     return false
@@ -461,10 +438,6 @@ public func TypeCheckDeclCheckIndexOperatorOverload(
                 valid = false
             }
         }
-    }
-    if (!valid && invalidNamedParams.isEmpty() && params.size > 1) {
-        TypeCheckDeclEmitDiag(diag, fd, BasicDiagKind.sema_operator_overload_invalid_num_parameter,
-            args: [BasicDiagArgument(fd.identifier.Val())])
     }
     return valid
 }

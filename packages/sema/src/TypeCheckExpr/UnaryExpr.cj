@@ -5,38 +5,9 @@ import cangjie_compiler::sema.TypeCompatibility
 import cangjie_compiler::sema.TypeCheckerImpl
 import cangjie_compiler::sema.TypeManager
 import cangjie_compiler::sema.GetUnaryOpTypeCandidates
+import cangjie_compiler::sema.IsUnaryOperator
 import cangjie_compiler::sema.MatchResult
 import cangjie_compiler::sema.TypeMapToTys
-
-private func UnaryCandidateReturnKind(op: TokenKind, operandKind: TypeKind): TypeKind {
-    if (op == TokenKind.SUB) {
-        if (operandKind == TypeKind.TYPE_INT8 || operandKind == TypeKind.TYPE_INT16 ||
-            operandKind == TypeKind.TYPE_INT32 || operandKind == TypeKind.TYPE_INT64 ||
-            operandKind == TypeKind.TYPE_INT_NATIVE || operandKind == TypeKind.TYPE_UINT8 ||
-            operandKind == TypeKind.TYPE_UINT16 || operandKind == TypeKind.TYPE_UINT32 ||
-            operandKind == TypeKind.TYPE_UINT64 || operandKind == TypeKind.TYPE_UINT_NATIVE ||
-            operandKind == TypeKind.TYPE_IDEAL_INT || operandKind == TypeKind.TYPE_FLOAT16 ||
-            operandKind == TypeKind.TYPE_FLOAT32 || operandKind == TypeKind.TYPE_FLOAT64 ||
-            operandKind == TypeKind.TYPE_IDEAL_FLOAT) {
-            return operandKind
-        }
-    }
-    if (op == TokenKind.NOT) {
-        if (operandKind == TypeKind.TYPE_BOOLEAN || operandKind == TypeKind.TYPE_INT8 ||
-            operandKind == TypeKind.TYPE_INT16 || operandKind == TypeKind.TYPE_INT32 ||
-            operandKind == TypeKind.TYPE_INT64 || operandKind == TypeKind.TYPE_INT_NATIVE ||
-            operandKind == TypeKind.TYPE_UINT8 || operandKind == TypeKind.TYPE_UINT16 ||
-            operandKind == TypeKind.TYPE_UINT32 || operandKind == TypeKind.TYPE_UINT64 ||
-            operandKind == TypeKind.TYPE_UINT_NATIVE || operandKind == TypeKind.TYPE_IDEAL_INT) {
-            return operandKind
-        }
-    }
-    return TypeKind.TYPE_INVALID
-}
-
-private func IsBuiltinUnaryOperator(op: TokenKind): Bool {
-    return op == TokenKind.SUB || op == TokenKind.NOT
-}
 
 private func GetNonParenExpr(expr: Expr): Expr {
     var current = expr
@@ -77,10 +48,6 @@ public func GetLeafUnaryExpr(ue: UnaryExpr): UnaryExpr {
     return leaf
 }
 
-public func IsBuiltinUnaryExpr(op: TokenKind, ty: Ty): Bool {
-    return UnaryCandidateReturnKind(op, ty.kind) != TypeKind.TYPE_INVALID
-}
-
 public func SynBuiltinUnaryExpr(impl: TypeCheckerImpl, ue: UnaryExpr): Ty {
     let typeManager = impl.typeManager
     if (let Some(innerExpr) <- ue.expr) {
@@ -95,7 +62,7 @@ public func SynBuiltinUnaryExpr(impl: TypeCheckerImpl, ue: UnaryExpr): Ty {
             return TypeManager.GetInvalidTy()
         }
     }
-    if (!IsBuiltinUnaryOperator(ue.op)) {
+    if (!IsUnaryOperator(ue.op)) {
         ue.SetTy(TypeManager.GetInvalidTy())
         return TypeManager.GetInvalidTy()
     }
