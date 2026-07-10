@@ -162,11 +162,7 @@ private func IdentifierForMangledCHIRType(def: CustomTypeDef): String {
 private func CustomTypeDefIdentifierForQualifiedName(def: CustomTypeDef): String {
     CJC_ASSERT(!def.GetType().getOrThrow().IsAutoEnvBase())
     let srcCodeIdentifier = def.GetSrcCodeIdentifier()
-    let linkType = if (let Some(linkTypeInfo) <- def.GetAnnotation("LinkTypeInfo")) {
-        LinkTypeInfo.Extract(linkTypeInfo)
-    } else {
-        BasicLinkage.EXTERNAL
-    }
+    let linkType = def.Get<LinkTypeInfo, BasicLinkage>()
     if (srcCodeIdentifier.isEmpty() || (def.TestAttr(Attribute.PRIVATE) && linkType == BasicLinkage.INTERNAL)) {
         return def.GetIdentifierWithoutPrefix()
     }

@@ -6,6 +6,7 @@ import cjcj::chir.Attribute
 import cjcj::chir.CustomTypeDef
 import cjcj::chir.EnumType
 import cjcj::chir.GenericType
+import cjcj::chir.LinkTypeInfo
 import cjcj::chir.Type
 import cjcj::option.OSType
 import cjcj::utils.CJC_ASSERT
@@ -424,18 +425,7 @@ private func CreateReflectionMetadata(context: LLVMContextHandle, mangledName: S
 }
 
 private func LinkageOfCustomTypeDef(def: CustomTypeDef): LLVMLinkage {
-    if (let Some(linkTypeInfo) <- def.GetAnnotation("LinkTypeInfo")) {
-        let chirLinkage = match (linkTypeInfo) {
-            case "linkType: weak_odr" => Linkage.WEAK_ODR
-            case "linkType: external" => Linkage.EXTERNAL
-            case "linkType: internal" => Linkage.INTERNAL
-            case "linkType: linkonce_odr" => Linkage.LINKONCE_ODR
-            case "linkType: external_weak" => Linkage.EXTERNAL_WEAK
-            case _ => throw IllegalArgumentException("unexpected LinkTypeInfo annotation: " + linkTypeInfo)
-        }
-        return CHIRLinkage2LLVMLinkage(chirLinkage)
-    }
-    return LLVMLinkage.External
+    return CHIRLinkage2LLVMLinkage(def.Get<LinkTypeInfo, Linkage>())
 }
 
 private func BuildFunctionType(returnType: LLVMTypeRef, paramTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {

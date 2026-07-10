@@ -1,5 +1,6 @@
 package cjcj::chir
 
+import cjcj::basic.Linkage as BasicLinkage
 import std.collection.*
 import std.convert.*
 
@@ -256,6 +257,10 @@ func CHIRApplyBaseAnnotations(base: Base, value: String): Unit {
         }
         if (line == "// generated-from-forin ") {
             base.SetGeneratedFromForIn(true)
+            continue
+        }
+        if (line.startsWith("linkType: ")) {
+            base.Set<LinkTypeInfo, BasicLinkage>(LinkTypeInfo.Extract(line))
             continue
         }
         if (!line.startsWith("@")) {

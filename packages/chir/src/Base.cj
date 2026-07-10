@@ -26,6 +26,18 @@ public open class Base {
         annotationMap.Set(key, value)
     }
 
+    public func Set<T, R>(value: R): Unit where T <: Annotation<R> {
+        annotationMap.Set<T, R>(value)
+    }
+
+    public func Remove<T>(): Unit {
+        annotationMap.Remove<T>()
+    }
+
+    public func Get<T, R>(): R where T <: Annotation<R> {
+        return annotationMap.Get<T, R>()
+    }
+
     public func SetGeneratedFromForIn(value: Bool): Unit {
         let label = GeneratedFromForIn(value)
         if (GeneratedFromForIn.Extract(label)) {

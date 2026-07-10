@@ -852,7 +852,6 @@ public abstract class GlobalValue <: Value {
     private let features: ArrayList<String> = ArrayList<String>()
     private let annoInfo: AnnoInfo = AnnoInfo()
     private var linkage: Linkage = Linkage.EXTERNAL
-    private var linkTypeInfo: BasicLinkage = BasicLinkage.EXTERNAL
 
     public init(kind: ValueKind, ty: Option<Type>, identifier: String, srcCodeIdentifier: String,
         rawMangledName: String, packageName: String) {
@@ -928,12 +927,11 @@ public abstract class GlobalValue <: Value {
     }
 
     public func SetLinkTypeInfo(linkType: BasicLinkage): Unit {
-        linkTypeInfo = linkType
-        SetAnnotation("LinkTypeInfo", LinkTypeInfo(linkType).ToString())
+        Set<LinkTypeInfo, BasicLinkage>(linkType)
     }
 
     public func GetLinkTypeInfo(): BasicLinkage {
-        return linkTypeInfo
+        return Get<LinkTypeInfo, BasicLinkage>()
     }
 
     public open func DestroySelf(): Unit {}

@@ -853,7 +853,7 @@ public open class CustomTypeDef <: Base {
     }
 
     public func SetLinkTypeInfo(linkType: BasicLinkage): Unit {
-        SetAnnotation("LinkTypeInfo", LinkTypeInfoToString(linkType))
+        Set<LinkTypeInfo, BasicLinkage>(linkType)
     }
 
     public func CanBeInherited(): Bool {
@@ -1110,17 +1110,6 @@ private func ContainsClassDef(values: ArrayList<ClassDef>, classDef: ClassDef): 
         }
     }
     return false
-}
-
-private func LinkTypeInfoToString(linkType: BasicLinkage): String {
-    let linkToString = match (linkType) {
-        case BasicLinkage.EXTERNAL => "external"
-        case BasicLinkage.WEAK_ODR => "weak_odr"
-        case BasicLinkage.INTERNAL => "internal"
-        case BasicLinkage.LINKONCE_ODR => "linkonce_odr"
-        case BasicLinkage.EXTERNAL_WEAK => "external_weak"
-    }
-    return "linkType: " + linkToString
 }
 
 public func ParamTypeIsEquivalent(paramType: Type, argType: Type): Bool {

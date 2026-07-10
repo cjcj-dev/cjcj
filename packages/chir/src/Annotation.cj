@@ -2,10 +2,22 @@ package cjcj::chir
 
 import cjcj::basic.Linkage as BasicLinkage
 import std.collection.*
+import std.reflect.TypeInfo
 
 // GAP_TODO: MarkExpressionAsMustNotOverflow ConstAnalysis.h:243 producer absent.
 
-public class GeneratedFromForIn {
+public interface AnnotationBase {
+    func Clone(): AnnotationBase
+    func ToString(): String
+}
+
+public interface Annotation<T> <: AnnotationBase {
+    static func Create(): Annotation<T>
+    static func Create(value: T): Annotation<T>
+    static func Extract(annotation: Annotation<T>): T
+}
+
+public class GeneratedFromForIn <: Annotation<Bool> {
     private let value: Bool
 
     public init() {
@@ -16,7 +28,15 @@ public class GeneratedFromForIn {
         value = input || !input
     }
 
-    public func Clone(): GeneratedFromForIn {
+    public static func Create(): Annotation<Bool> {
+        return GeneratedFromForIn()
+    }
+
+    public static func Create(value: Bool): Annotation<Bool> {
+        return GeneratedFromForIn(value)
+    }
+
+    public func Clone(): AnnotationBase {
         return GeneratedFromForIn()
     }
 
@@ -27,9 +47,13 @@ public class GeneratedFromForIn {
     public static func Extract(label: GeneratedFromForIn): Bool {
         return label.value
     }
+
+    public static func Extract(annotation: Annotation<Bool>): Bool {
+        return Extract((annotation as GeneratedFromForIn).getOrThrow())
+    }
 }
 
-public class LinkTypeInfo {
+public class LinkTypeInfo <: Annotation<BasicLinkage> {
     private let linkType: BasicLinkage
 
     public init() {
@@ -55,7 +79,15 @@ public class LinkTypeInfo {
         }
     }
 
-    public func Clone(): LinkTypeInfo {
+    public static func Create(): Annotation<BasicLinkage> {
+        return LinkTypeInfo()
+    }
+
+    public static func Create(linkType: BasicLinkage): Annotation<BasicLinkage> {
+        return LinkTypeInfo(linkType)
+    }
+
+    public func Clone(): AnnotationBase {
         return LinkTypeInfo(linkType)
     }
 
@@ -68,6 +100,10 @@ public class LinkTypeInfo {
             case BasicLinkage.EXTERNAL_WEAK => "external_weak"
         }
         return "linkType: " + linkToString
+    }
+
+    public static func Extract(annotation: Annotation<BasicLinkage>): BasicLinkage {
+        return Extract((annotation as LinkTypeInfo).getOrThrow())
     }
 }
 
@@ -94,7 +130,7 @@ extend SkipKind <: Equatable<SkipKind> {
     }
 }
 
-public class SkipCheck {
+public class SkipCheck <: Annotation<SkipKind> {
     private let kind: SkipKind
 
     public init() {
@@ -105,7 +141,15 @@ public class SkipCheck {
         this.kind = kind
     }
 
-    public func Clone(): SkipCheck {
+    public static func Create(): Annotation<SkipKind> {
+        return SkipCheck()
+    }
+
+    public static func Create(kind: SkipKind): Annotation<SkipKind> {
+        return SkipCheck(kind)
+    }
+
+    public func Clone(): AnnotationBase {
         return SkipCheck(kind)
     }
 
@@ -121,9 +165,13 @@ public class SkipCheck {
     public static func Extract(label: SkipCheck): SkipKind {
         return label.kind
     }
+
+    public static func Extract(annotation: Annotation<SkipKind>): SkipKind {
+        return Extract((annotation as SkipCheck).getOrThrow())
+    }
 }
 
-public class NeverOverflowInfo {
+public class NeverOverflowInfo <: Annotation<Bool> {
     private let neverOverflowInfo: Bool
 
     public init() {
@@ -134,7 +182,15 @@ public class NeverOverflowInfo {
         neverOverflowInfo = value
     }
 
-    public func Clone(): NeverOverflowInfo {
+    public static func Create(): Annotation<Bool> {
+        return NeverOverflowInfo()
+    }
+
+    public static func Create(value: Bool): Annotation<Bool> {
+        return NeverOverflowInfo(value)
+    }
+
+    public func Clone(): AnnotationBase {
         return NeverOverflowInfo(neverOverflowInfo)
     }
 
@@ -145,6 +201,10 @@ public class NeverOverflowInfo {
 
     public static func Extract(info: NeverOverflowInfo): Bool {
         return info.neverOverflowInfo
+    }
+
+    public static func Extract(annotation: Annotation<Bool>): Bool {
+        return Extract((annotation as NeverOverflowInfo).getOrThrow())
     }
 }
 
@@ -157,7 +217,7 @@ private func SkipKindFromAnnotationValue(value: String): SkipKind {
     }
 }
 
-public class EnumCaseIndex {
+public class EnumCaseIndex <: Annotation<Option<Int64>> {
     private let index: Option<Int64>
 
     public init() {
@@ -168,7 +228,15 @@ public class EnumCaseIndex {
         index = input
     }
 
-    public func Clone(): EnumCaseIndex {
+    public static func Create(): Annotation<Option<Int64>> {
+        return EnumCaseIndex()
+    }
+
+    public static func Create(input: Option<Int64>): Annotation<Option<Int64>> {
+        return EnumCaseIndex(input)
+    }
+
+    public func Clone(): AnnotationBase {
         return EnumCaseIndex(index)
     }
 
@@ -176,29 +244,67 @@ public class EnumCaseIndex {
         if (let Some(value) <- index) {
             return "EnumCaseIndex: " + value.toString()
         }
-        return "EnumCaseIndex: "
+        return ""
     }
 
     public static func Extract(label: EnumCaseIndex): Option<Int64> {
         return label.index
     }
+
+    public static func Extract(annotation: Annotation<Option<Int64>>): Option<Int64> {
+        return Extract((annotation as EnumCaseIndex).getOrThrow())
+    }
 }
 
 public class AnnotationMap {
     private let values: HashMap<String, String> = HashMap<String, String>()
+    private let annotations: HashMap<TypeInfo, AnnotationBase> = HashMap<TypeInfo, AnnotationBase>()
 
     public init() {}
 
+    public init(other: AnnotationMap) {
+        CopyFrom(other)
+    }
+
     public func Set(key: String, value: String): Unit {
         values[key] = value
+    }
+
+    public func Set<T, R>(value: R): Unit where T <: Annotation<R> {
+        annotations[TypeInfo.of<T>()] = T.Create(value)
     }
 
     public func Remove(key: String): Unit {
         values.remove(key)
     }
 
+    public func Remove<T>(): Unit {
+        annotations.remove(TypeInfo.of<T>())
+    }
+
     public func Get(key: String): Option<String> {
         return values.get(key)
+    }
+
+    public func Get<T, R>(): R where T <: Annotation<R> {
+        if (let Some(annotation) <- annotations.get(TypeInfo.of<T>())) {
+            return T.Extract((annotation as Annotation<R>).getOrThrow())
+        }
+        return T.Extract(T.Create())
+    }
+
+    public func GetAnno<T, R>(): T where T <: Annotation<R> {
+        let index = TypeInfo.of<T>()
+        if (let Some(annotation) <- annotations.get(index)) {
+            return (annotation as T).getOrThrow()
+        }
+        let annotation = T.Create()
+        annotations[index] = annotation
+        return (annotation as T).getOrThrow()
+    }
+
+    public func GetAnnos(): ReadOnlyMap<TypeInfo, AnnotationBase> {
+        return annotations
     }
 
     public func Contains(key: String): Bool {
@@ -207,18 +313,33 @@ public class AnnotationMap {
 
     public func Clear(): Unit {
         values.clear()
+        annotations.clear()
     }
 
     public func CopyFrom(other: AnnotationMap): Unit {
+        if (refEq(this, other)) {
+            return
+        }
         values.clear()
         for ((key, value) in other.values) {
             values[key] = value
         }
+        annotations.clear()
+        for ((index, annotation) in other.annotations) {
+            annotations[index] = annotation.Clone()
+        }
     }
 
     public func ToString(indent!: Int64 = 0): String {
-        if (values.isEmpty()) {
+        if (values.isEmpty() && annotations.isEmpty()) {
             return ""
+        }
+        let annotationParts = ArrayList<String>()
+        for ((_, annotation) in annotations) {
+            let text = annotation.ToString()
+            if (!text.isEmpty()) {
+                annotationParts.add("${IndentToString(indent)}${text}")
+            }
         }
         let parts = ArrayList<String>()
         for ((key, value) in values) {
@@ -234,7 +355,15 @@ public class AnnotationMap {
                 parts.add("${IndentToString(indent)}@${key}(${value})")
             }
         }
-        return JoinStrings(parts, "\n")
+        let annotationText = JoinStrings(annotationParts, ", ")
+        let valueText = JoinStrings(parts, "\n")
+        if (annotationText.isEmpty()) {
+            return valueText
+        }
+        if (valueText.isEmpty()) {
+            return annotationText
+        }
+        return annotationText + "\n" + valueText
     }
 }
 

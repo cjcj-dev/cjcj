@@ -14,6 +14,7 @@ import cjcj::chir.EnumDef
 import cjcj::chir.EnumType
 import cjcj::chir.FuncType
 import cjcj::chir.GenericType
+import cjcj::chir.LinkTypeInfo
 import cjcj::chir.RawArrayType
 import cjcj::chir.RefType
 import cjcj::chir.StructDef
@@ -493,20 +494,11 @@ private func SetConcreteTypeInfoLinkage(cgMod: CGModule, typeInfo: LLVMValueRef,
         return
     }
     if (let Some(customTy) <- (chirTy as CustomType)) {
-        if (let Some(linkTypeInfo) <- customTy.GetCustomTypeDef().GetAnnotation("LinkTypeInfo")) {
-            let chirLinkage = match (linkTypeInfo) {
-                case "linkType: weak_odr" => Linkage.WEAK_ODR
-                case "linkType: external" => Linkage.EXTERNAL
-                case "linkType: internal" => Linkage.INTERNAL
-                case "linkType: linkonce_odr" => Linkage.LINKONCE_ODR
-                case "linkType: external_weak" => Linkage.EXTERNAL_WEAK
-                case _ => throw IllegalArgumentException("unexpected LinkTypeInfo annotation: " + linkTypeInfo)
-            }
-            AddLinkageTypeMetadata(typeInfo, CHIRLinkage2LLVMLinkage(chirLinkage),
-                cgMod.GetCGContext().IsCGParallelEnabled())
-            unsafe { LLVMSetGlobalConstant(typeInfo, 0) }
-            return
-        }
+        let chirLinkage = customTy.GetCustomTypeDef().Get<LinkTypeInfo, Linkage>()
+        AddLinkageTypeMetadata(typeInfo, CHIRLinkage2LLVMLinkage(chirLinkage),
+            cgMod.GetCGContext().IsCGParallelEnabled())
+        unsafe { LLVMSetGlobalConstant(typeInfo, 0) }
+        return
     }
     let fallbackLinkage = if (chirTy.GetTypeArgs().isEmpty()) {
         if (ShouldExportTypeInfo(chirTy)) { LLVMLinkage.External } else { LLVMLinkage.LinkOnceODR }
@@ -1127,17 +1119,7 @@ private func AddGenericParamIfAbsent(params: ArrayList<GenericType>, candidate: 
 }
 
 private func LinkageOfCustomTypeDef(def: CustomTypeDef): Linkage {
-    if (let Some(linkTypeInfo) <- def.GetAnnotation("LinkTypeInfo")) {
-        return match (linkTypeInfo) {
-            case "linkType: weak_odr" => Linkage.WEAK_ODR
-            case "linkType: external" => Linkage.EXTERNAL
-            case "linkType: internal" => Linkage.INTERNAL
-            case "linkType: linkonce_odr" => Linkage.LINKONCE_ODR
-            case "linkType: external_weak" => Linkage.EXTERNAL_WEAK
-            case _ => throw IllegalArgumentException("unexpected LinkTypeInfo annotation: " + linkTypeInfo)
-        }
-    }
-    return Linkage.EXTERNAL
+    return def.Get<LinkTypeInfo, Linkage>()
 }
 
 private func TypeTemplateLinkage(def: CustomTypeDef): LLVMLinkage {
