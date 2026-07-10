@@ -13,7 +13,10 @@ public class BlockGroupCopyHelper {
     }
 
     public func CloneBlockGroup(oldBG: BlockGroup, newBG: BlockGroup): (ArrayList<Block>, Option<LocalVar>) {
-        let newBlocks = CloneBlockGroupInto(oldBG, newBG)
+        let newBlocks = ArrayList<Block>()
+        for (block in oldBG.GetBlocks()) {
+            newBlocks.add(block.Clone(builder, newBG))
+        }
         InstBlockGroup(newBlocks)
         let valueMap = HashMap<Int64, Value>()
         let newDebugs = ArrayList<Expression>()
@@ -95,12 +98,13 @@ public class BlockGroupCopyHelper {
     }
 
     private func InstBlockGroup(blocks: ArrayList<Block>): Unit {
-        let concreteThisType = thisType.getOrThrow()
         let genericConverter = GenericTypeConvertor(instMap, builder)
         let convertFunc: ConvertTypeFunc = { ty =>
-            let replaced = ReplaceThisTypeToConcreteType(ty, concreteThisType, builder)
-            if (!refEq(replaced, ty)) {
-                return replaced
+            if (let Some(concreteThisType) <- thisType) {
+                let replaced = ReplaceThisTypeToConcreteType(ty, concreteThisType, builder)
+                if (!refEq(replaced, ty)) {
+                    return replaced
+                }
             }
             return genericConverter.ConvertToInstantiatedType(ty)
         }
@@ -118,131 +122,6 @@ public class BlockGroupCopyHelper {
         for (block in blocks) {
             ReplaceExprOperandsInBlock(block, valueMap)
         }
-    }
-
-    private func CloneBlockGroupInto(oldBG: BlockGroup, newBG: BlockGroup): ArrayList<Block> {
-        let newBlocks = ArrayList<Block>()
-        for (oldBlock in oldBG.GetBlocks()) {
-            let newBlock = CloneBlock(oldBlock, newBG)
-            newBlocks.add(newBlock)
-            if (let Some(oldEntry) <- oldBG.GetEntryBlock()) {
-                if (oldEntry.nodeId == oldBlock.nodeId) {
-                    newBG.SetEntryBlock(newBlock)
-                }
-            }
-        }
-        return newBlocks
-    }
-
-    private func CloneBlock(oldBlock: Block, newBG: BlockGroup): Block {
-        let newBlock = builder.CreateBlock(newBG)
-        newBlock.AppendAttributeInfo(oldBlock.GetAttributeInfo())
-        if (oldBlock.IsLandingPadBlock()) {
-            newBlock.SetExceptions(oldBlock.GetExceptions())
-        }
-        for (expr in oldBlock.GetExpressions()) {
-            let clonedExpr = CloneExpression(expr, newBlock)
-            clonedExpr.CopyBaseInfoFrom(expr)
-            if (let Some(sourceResult) <- expr.GetResult()) {
-                if (let Some(clonedResult) <- clonedExpr.GetResult()) {
-                    clonedResult.CopyBaseInfoFrom(sourceResult)
-                }
-            }
-        }
-        return newBlock
-    }
-
-    private func CloneExpression(expr: Expression, parent: Block): Expression {
-        if (let Some(lambdaExpr) <- (expr as Lambda)) {
-            return CloneLambdaExpression(lambdaExpr, parent)
-        }
-        if (let Some(forInExpr) <- (expr as ForIn)) {
-            return CloneForInExpression(forInExpr, parent)
-        }
-        return expr.Clone(builder, parent)
-    }
-
-    private func CloneLambdaExpression(lambdaExpr: Lambda, parent: Block): Lambda {
-        let resultTy = lambdaExpr.GetResult().getOrThrow().GetType().getOrThrow()
-        let clonedIdentifier = lambdaExpr.GetIdentifier() + ".cloned${builder.context.GetAllNodesNum()}"
-        var clonedLambda: Option<Lambda> = None
-
-        if (let Some(lambdaTy) <- lambdaExpr.GetFuncType()) {
-            let newLambda = builder.CreateLambda(resultTy, lambdaTy, parent, isLocalFunc: lambdaExpr.IsLocalFunc(),
-                identifier: clonedIdentifier, srcCodeIdentifier: lambdaExpr.GetSrcCodeIdentifier(),
-                genericTypeParams: lambdaExpr.GetGenericTypeParams())
-            clonedLambda = newLambda
-            if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                let newBody = builder.CreateBlockGroup(lambdaBody.GetIdentifier())
-                newLambda.InitBody(newBody)
-                CloneBlockGroupInto(lambdaBody, newBody)
-            }
-        } else if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-            let newBody = builder.CreateBlockGroup(lambdaBody.GetIdentifier())
-            let newLambda = builder.CreateLambda(resultTy, lambdaExpr.GetOperands(), newBody, parent)
-            clonedLambda = newLambda
-            CloneBlockGroupInto(lambdaBody, newBody)
-        }
-
-        if (let Some(newLambdaValue) <- clonedLambda) {
-            CloneLambdaParameters(lambdaExpr, newLambdaValue)
-            SetClonedLambdaReturnValue(lambdaExpr, newLambdaValue)
-            if (lambdaExpr.IsCompileTimeValue()) {
-                newLambdaValue.SetCompileTimeValue()
-            }
-            if (let Some(hostFunc) <- lambdaExpr.GetParamDftValHostFunc()) {
-                newLambdaValue.SetParamDftValHostFunc(hostFunc)
-            }
-            return newLambdaValue
-        }
-        throw IllegalArgumentException("cannot clone lambda without function type or body")
-    }
-
-    private func CloneLambdaParameters(oldLambda: Lambda, newLambda: Lambda): Unit {
-        for (oldParam in oldLambda.GetParams()) {
-            if (let Some(paramTy) <- oldParam.GetType()) {
-                let newParam = builder.CreateParameter(paramTy, INVALID_LOCATION, newLambda)
-                newParam.SetSrcCodeIdentifier(oldParam.GetSrcCodeIdentifier())
-                newParam.CopyBaseInfoFrom(oldParam)
-            } else {
-                throw IllegalArgumentException("lambda parameter clone requires a type")
-            }
-        }
-    }
-
-    private func SetClonedLambdaReturnValue(oldLambda: Lambda, newLambda: Lambda): Unit {
-        if (let Some(oldReturn) <- oldLambda.GetReturnValue()) {
-            if (let Some(oldBody) <- oldLambda.GetBody()) {
-                if (let Some(newBody) <- newLambda.GetBody()) {
-                    if (let Some(newReturn) <- FindMappedLocalByExprPosition(oldBody, newBody.GetBlocks(), oldReturn)) {
-                        newLambda.SetReturnValue(newReturn)
-                        return
-                    }
-                }
-            }
-            throw IllegalArgumentException("failed to map cloned lambda return value")
-        }
-    }
-
-    private func CloneForInExpression(forInExpr: ForIn, parent: Block): ForIn {
-        let newForIn = match (forInExpr.GetExprKind()) {
-            case ExprKind.FORIN_RANGE => builder.CreateForInRange(forInExpr.GetResult().getOrThrow().GetType().getOrThrow(),
-                forInExpr.GetInductionVar(), forInExpr.GetLoopCondVar(), parent)
-            case ExprKind.FORIN_ITER => builder.CreateForInIter(forInExpr.GetResult().getOrThrow().GetType().getOrThrow(),
-                forInExpr.GetInductionVar(), forInExpr.GetLoopCondVar(), parent)
-            case ExprKind.FORIN_CLOSED_RANGE => builder.CreateForInClosedRange(forInExpr.GetResult().getOrThrow().GetType().getOrThrow(),
-                forInExpr.GetInductionVar(), forInExpr.GetLoopCondVar(), parent)
-            case _ => throw IllegalArgumentException("unsupported ForIn expression kind")
-        }
-
-        let newBody = builder.CreateBlockGroup(forInExpr.GetBody().GetIdentifier())
-        let newLatch = builder.CreateBlockGroup(forInExpr.GetLatch().GetIdentifier())
-        let newCond = builder.CreateBlockGroup(forInExpr.GetCond().GetIdentifier())
-        newForIn.InitBlockGroups(newBody, newLatch, newCond)
-        CloneBlockGroupInto(forInExpr.GetBody(), newBody)
-        CloneBlockGroupInto(forInExpr.GetLatch(), newLatch)
-        CloneBlockGroupInto(forInExpr.GetCond(), newCond)
-        return newForIn
     }
 
     private static func ReplaceExprOperandsInBlock(block: Block, valueMap: HashMap<Int64, Value>): Unit {
@@ -472,27 +351,6 @@ private func FindClonedReturnValue(oldBG: BlockGroup, valueMap: HashMap<Int64, V
         if (let Some(newReturnValue) <- valueMap.get(oldReturnValue.nodeId)) {
             return newReturnValue.AsLocalVar()
         }
-    }
-    return None
-}
-
-private func FindMappedLocalByExprPosition(oldBG: BlockGroup, newBlocks: ArrayList<Block>,
-    oldLocal: LocalVar): Option<LocalVar> {
-    let oldBlocks = oldBG.GetBlocks()
-    var blockIdx: Int64 = 0
-    while (blockIdx < oldBlocks.size && blockIdx < newBlocks.size) {
-        let oldExprs = oldBlocks[blockIdx].GetExpressions()
-        let newExprs = newBlocks[blockIdx].GetExpressions()
-        var exprIdx: Int64 = 0
-        while (exprIdx < oldExprs.size && exprIdx < newExprs.size) {
-            if (let Some(oldResult) <- oldExprs[exprIdx].GetResult()) {
-                if (oldResult.nodeId == oldLocal.nodeId) {
-                    return newExprs[exprIdx].GetResult()
-                }
-            }
-            exprIdx++
-        }
-        blockIdx++
     }
     return None
 }

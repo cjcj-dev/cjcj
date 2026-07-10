@@ -1082,18 +1082,20 @@ public class ClosureConversion {
             ConvertValueThisType(result, thisType)
         }
         if (let Some(allocate) <- (expr as Allocate)) {
-            allocate.SetType(ReplaceThisTypeToConcreteType(allocate.GetType(), thisType))
+            allocate.SetType(ReplaceThisTypeToConcreteType(allocate.GetType(), thisType, builder))
         } else if (let Some(allocateWithException) <- (expr as AllocateWithException)) {
-            allocateWithException.SetType(ReplaceThisTypeToConcreteType(allocateWithException.GetType(), thisType))
+            allocateWithException.SetType(ReplaceThisTypeToConcreteType(allocateWithException.GetType(), thisType,
+                builder))
         } else if (let Some(instanceOfExpr) <- (expr as InstanceOf)) {
-            instanceOfExpr.SetTestedType(ReplaceThisTypeToConcreteType(instanceOfExpr.GetType(), thisType))
+            instanceOfExpr.SetTestedType(ReplaceThisTypeToConcreteType(instanceOfExpr.GetType(), thisType, builder))
         } else if (let Some(rawArrayAllocate) <- (expr as RawArrayAllocate)) {
-            rawArrayAllocate.SetElementType(ReplaceThisTypeToConcreteType(rawArrayAllocate.GetElementType(), thisType))
+            rawArrayAllocate.SetElementType(ReplaceThisTypeToConcreteType(rawArrayAllocate.GetElementType(), thisType,
+                builder))
         } else if (let Some(rawArrayAllocateWithException) <- (expr as RawArrayAllocateWithException)) {
             rawArrayAllocateWithException.SetElementType(
-                ReplaceThisTypeToConcreteType(rawArrayAllocateWithException.GetElementType(), thisType))
+                ReplaceThisTypeToConcreteType(rawArrayAllocateWithException.GetElementType(), thisType, builder))
         } else if (let Some(getRTTIStatic) <- (expr as GetRTTIStatic)) {
-            getRTTIStatic.SetRTTIType(ReplaceThisTypeToConcreteType(getRTTIStatic.GetRTTIType(), thisType))
+            getRTTIStatic.SetRTTIType(ReplaceThisTypeToConcreteType(getRTTIStatic.GetRTTIType(), thisType, builder))
         }
         if (let Some(call) <- (expr as FuncCall)) {
             ConvertFuncCallThisTypes(call, thisType)
@@ -1122,7 +1124,7 @@ public class ClosureConversion {
             let instantiateTypes = getInstantiateValue.GetInstantiateTypesRef()
             var idx: Int64 = 0
             while (idx < instantiateTypes.size) {
-                instantiateTypes[idx] = ReplaceThisTypeToConcreteType(instantiateTypes[idx], thisType)
+                instantiateTypes[idx] = ReplaceThisTypeToConcreteType(instantiateTypes[idx], thisType, builder)
                 idx++
             }
         }
@@ -1138,14 +1140,14 @@ public class ClosureConversion {
 
     private func ConvertFuncCallThisTypes(call: FuncCall, thisType: Type): Unit {
         if (let Some(rawThisTy) <- call.GetThisType()) {
-            call.SetThisType(ReplaceThisTypeToConcreteType(rawThisTy, thisType))
+            call.SetThisType(ReplaceThisTypeToConcreteType(rawThisTy, thisType, builder))
         }
         call.SetInstantiatedTypeArgs(ConvertTypeArgsWithThisType(call.GetInstantiatedTypeArgs(), thisType))
     }
 
     private func ConvertFuncCallWithExceptionThisTypes(call: FuncCallWithException, thisType: Type): Unit {
         if (let Some(rawThisTy) <- call.GetThisType()) {
-            call.SetThisType(ReplaceThisTypeToConcreteType(rawThisTy, thisType))
+            call.SetThisType(ReplaceThisTypeToConcreteType(rawThisTy, thisType, builder))
         }
         call.SetInstantiatedTypeArgs(ConvertTypeArgsWithThisType(call.GetInstantiatedTypeArgs(), thisType))
     }
@@ -1153,42 +1155,24 @@ public class ClosureConversion {
     private func ConvertFuncParamsAndRetTypeWithThisType(funcTy: FuncType, thisType: Type): FuncType {
         let params = ArrayList<Type>()
         for (paramTy in funcTy.GetParamTypes()) {
-            params.add(ReplaceThisTypeToConcreteType(paramTy, thisType))
+            params.add(ReplaceThisTypeToConcreteType(paramTy, thisType, builder))
         }
-        return builder.context.GetFuncTy(params, ReplaceThisTypeToConcreteType(funcTy.GetReturnType(), thisType),
+        return builder.context.GetFuncTy(params, ReplaceThisTypeToConcreteType(funcTy.GetReturnType(), thisType, builder),
             hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
     }
 
     private func ConvertTypeArgsWithThisType(args: ArrayList<Type>, thisType: Type): ArrayList<Type> {
         let converted = ArrayList<Type>()
         for (arg in args) {
-            converted.add(ReplaceThisTypeToConcreteType(arg, thisType))
+            converted.add(ReplaceThisTypeToConcreteType(arg, thisType, builder))
         }
         return converted
     }
 
     private func ConvertValueThisType(value: Value, thisType: Type): Unit {
         if (let Some(valueTy) <- value.GetType()) {
-            value.SetType(ReplaceThisTypeToConcreteType(valueTy, thisType))
+            value.SetType(ReplaceThisTypeToConcreteType(valueTy, thisType, builder))
         }
-    }
-
-    // Mirror C++ ReplaceThisTypeToConcreteType
-    // (src/CHIR/Utils/Utils.cpp:450-461).
-    private func ReplaceThisTypeToConcreteType(ty: Type, concreteType: Type): Type {
-        if (let Some(refTy) <- (ty as RefType)) {
-            if (refTy.GetBaseType().IsThis()) {
-                return concreteType
-            }
-        }
-        if (ty.IsThis()) {
-            return concreteType
-        }
-        let newArgs = ArrayList<Type>()
-        for (argTy in ty.GetTypeArgs()) {
-            newArgs.add(ReplaceThisTypeToConcreteType(argTy, concreteType))
-        }
-        return CreateNewTypeWithArgs(ty, newArgs, builder)
     }
 
     private func ConvertValueTypeWithGenericMap(value: Value, genericMap: HashMap<String, Type>): Unit {
