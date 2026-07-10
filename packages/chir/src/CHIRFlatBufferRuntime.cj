@@ -170,7 +170,7 @@ class IndirectHelper<T> {
 // flatbuffers/table.h:27-74. The C++ data_ pointer is represented by data and
 // pos; nullable result pointers are represented by Option<Int64> offsets into
 // the same byte array.
-class Table {
+open class Table {
     let data: Array<UInt8>
     let pos: Int64
 
