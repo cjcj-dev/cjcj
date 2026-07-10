@@ -233,6 +233,7 @@ private func GenerateUpperBoundsOfGenericTypeInfo(cgMod: CGModule, genericTy: Ge
             LLVMSetGlobalConstant(upperBoundsGlobal, 1)
         }
     }
+    addAttribute(upperBoundsGlobal, CJTI_UPPER_BOUNDS_ATTR)
     return unsafe { LLVMConstBitCast(upperBoundsGlobal, i8PtrType) }
 }
 
