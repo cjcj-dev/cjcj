@@ -10,6 +10,7 @@ import cjcj::option.DiagFormat as OptionDiagFormat
 import cjcj::incremental_compilation.IncreKind
 import cjcj::incremental_compilation.IncrementalCompilationLogger
 import cjcj::option.MockMode
+import cjcj::option.CompileTarget
 import cjcj::option.OrderedInput as OptionOrderedInput
 import cjcj::option.OutputMode
 import cjcj::option.TempFileInfo as OptionTempFileInfo
@@ -95,7 +96,8 @@ public class FrontendExecutionResult {
 public func ExecuteFrontendWithResult(
     exePath: String,
     args: Array<String>,
-    environmentVars: HashMap<String, String>
+    environmentVars: HashMap<String, String>,
+    compileTarget!: CompileTarget = CompileTarget.DEFAULT
 ): FrontendExecutionResult {
     let diag = DiagnosticEngine()
     let invocation = CompilerInvocation()
@@ -103,6 +105,7 @@ public func ExecuteFrontendWithResult(
     if (!InitializeCompilerInvocation(invocation, args)) {
         return FrontendExecutionResult(1)
     }
+    invocation.globalOptions.compileTarget = compileTarget
 
     let globalOptions = invocation.globalOptions
     if (globalOptions.showUsage) {
