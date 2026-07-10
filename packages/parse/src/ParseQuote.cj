@@ -152,6 +152,7 @@ extend ParserImpl {
         let token = Expect(TokenKind.QUOTE, "expected 'quote'")
         ret.begin = token.Begin()
         ret.quotePos = token.Begin()
+        skipNL = false
         if (newlineSkipped || Seeing(TokenKind.NL)) {
             let lineBreakToken = if (Seeing(TokenKind.NL)) { Peek() } else { lastToken }
             ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_line_break, lineBreakToken).Emit()
