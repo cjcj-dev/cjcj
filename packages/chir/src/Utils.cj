@@ -50,6 +50,20 @@ public class FuncInfo {
     }
 }
 
+public class GenericTypeConvertor {
+    private let instMap: HashMap<Int64, Type>
+    private let builder: CHIRBuilder
+
+    public init(instMap: HashMap<Int64, Type>, builder: CHIRBuilder) {
+        this.instMap = instMap
+        this.builder = builder
+    }
+
+    public func ConvertToInstantiatedType(ty: Type): Type {
+        return ReplaceRawGenericArgType(ty, instMap, builder)
+    }
+}
+
 public func IsExpectedFunction(fn: Function, funcInfo: FuncInfo): Bool {
     return CheckFuncName(fn, funcInfo) && CheckParentTy(fn, funcInfo) && CheckParametersTy(fn, funcInfo) &&
         CheckReturnTy(fn, funcInfo) && CheckPkgName(fn, funcInfo)
