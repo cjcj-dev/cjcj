@@ -2095,7 +2095,6 @@ public class TypeChecker {
         }
         if (let Some(desugarDecl) <- param.desugarDecl) {
             PrepareDeclSignature(ctx, desugarDecl)
-            let _ = SynthesizeDecl(ctx, desugarDecl)
         }
     }
 
