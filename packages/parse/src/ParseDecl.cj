@@ -1245,6 +1245,19 @@ extend ParserImpl {
             SeeingIdentifierAndTargetOp([TokenKind.LPAREN, TokenKind.DOT, TokenKind.LT])
     }
 
+    private func CheckDeclarationInScope(sk: ScopeKind, dk: DefKind): Unit {
+        if (ScopeKindEquals(sk, ScopeKind.UNKNOWN_SCOPE)) {
+            return
+        }
+        if (!HasScopeRules(dk, sk)) {
+            let node = chainedAST[chainedAST.size - 1]
+            if (!node.TestAttr(Attribute.HAS_BROKEN)) {
+                DiagUnexpectedDeclInScope(sk)
+                node.EnableAttr(Attribute.HAS_BROKEN)
+            }
+        }
+    }
+
     private func ParseVarDecl(
         scopeKind: ScopeKind,
         modifiers: ArrayList<Modifier>,
@@ -1256,11 +1269,12 @@ extend ParserImpl {
         let decl = VarDecl()
         try (cs = ChainScope(this, decl)) {
             ApplyModifiersAndAnnotations(decl, modifiers, annos)
-            decl.keywordPos = key.Begin()
-            decl.identifier = ExpectIdentifierWithPos(decl)
+            decl.begin = if (decl.begin.IsZero()) { key.Begin() } else { decl.begin }
             decl.isVar = isVar
             decl.isConst = isConst
-            decl.begin = if (decl.begin.IsZero()) { key.Begin() } else { decl.begin }
+            decl.keywordPos = key.Begin()
+            CheckDeclarationInScope(scopeKind, DefKind.VARIABLE)
+            decl.identifier = ExpectIdentifierWithPos(decl)
             ParseTypeAndExpr(decl)
             CheckVarDeclShape(decl, modifiers, scopeKind, key)
             if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
