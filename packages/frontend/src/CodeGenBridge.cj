@@ -391,8 +391,7 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
 private func PruneImportedFunctionBodiesForRealCodegen(pkg: RealCHIRPackage): Unit {
     let kept = ArrayList<ChirFunction>()
     for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
-        if ((fn.TestAttr(ChirAttribute.IMPORTED) || fn.TestAttr(ChirAttribute.SRC_CODE_IMPORTED)) &&
-            fn.GetBody().isSome()) {
+        if (fn.IsSrcCodeImported()) {
             continue
         }
         kept.add(fn)

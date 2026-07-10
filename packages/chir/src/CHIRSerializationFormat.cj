@@ -317,7 +317,6 @@ func CHIRKnownAttributes(): ArrayList<Attribute> {
     attrs.add(Attribute.COMPILE_TIME_VALUE)
     attrs.add(Attribute.FAST_NATIVE)
     attrs.add(Attribute.INLINED)
-    attrs.add(Attribute.SRC_CODE_IMPORTED)
     attrs.add(Attribute.THIN)
     return attrs
 }
@@ -368,7 +367,6 @@ func CHIRAttributeFromIndex(index: Int64): Attribute {
         case 69 => Attribute.COMPILE_TIME_VALUE
         case 71 => Attribute.FAST_NATIVE
         case 73 => Attribute.INLINED
-        case 74 => Attribute.SRC_CODE_IMPORTED
         case 75 => Attribute.THIN
         case _ => throw IllegalArgumentException("invalid CHIR attribute index")
     }

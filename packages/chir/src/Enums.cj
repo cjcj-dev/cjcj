@@ -110,7 +110,7 @@ public enum Attribute {
     | DESERIALIZED | INITIALIZER | UNSAFE | JAVA_MIRROR | JAVA_IMPL | OBJ_C_MIRROR
     | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED
     | ANNOTATION | BUILTIN | CFFI_WRAPPER | COMPILE_TIME_VALUE
-    | FAST_NATIVE | INLINED | SRC_CODE_IMPORTED | THIN
+    | FAST_NATIVE | INLINED | THIN
 }
 
 public func AttributeIndex(attr: Attribute): Int64 {
@@ -159,7 +159,6 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.COMPILE_TIME_VALUE => 69
         case Attribute.FAST_NATIVE => 71
         case Attribute.INLINED => 73
-        case Attribute.SRC_CODE_IMPORTED => 74
         case Attribute.THIN => 75
     }
 }
@@ -206,7 +205,6 @@ public func AttributeName(attr: Attribute): String {
         case Attribute.SKIP_ANALYSIS => "skip_analysis"
         case Attribute.SPECIFIC => "specific"
         case Attribute.STATIC => "static"
-        case Attribute.SRC_CODE_IMPORTED => "srcCodeImported"
         case Attribute.THIN => "thin"
         case Attribute.UNREACHABLE => "unreachable"
         case Attribute.UNSAFE => "unsafe"

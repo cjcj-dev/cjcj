@@ -844,7 +844,7 @@ public class BlockGroup <: Value {
     }
 }
 
-public open class GlobalValue <: Value {
+public abstract class GlobalValue <: Value {
     private var srcCodeIdentifier: String
     private var rawMangledName: String
     private var packageName: String
@@ -913,9 +913,7 @@ public open class GlobalValue <: Value {
         declaredParent = def
     }
 
-    public open func IsSrcCodeImported(): Bool {
-        return TestAttr(Attribute.SRC_CODE_IMPORTED)
-    }
+    public func IsSrcCodeImported(): Bool
 
     public func GetAnnoInfo(): AnnoInfo {
         return annoInfo

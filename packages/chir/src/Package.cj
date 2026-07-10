@@ -130,11 +130,13 @@ public class Package {
     public func GetGlobalFuncsWithoutBody(includePureAbstract!: Bool = false): ArrayList<Function> {
         let out = ArrayList<Function>()
         for (item in globalFuncs) {
-            if (item.GetBody().isNone() && (!item.TestAttr(Attribute.SRC_CODE_IMPORTED))) {
-                if (includePureAbstract || !item.TestAttr(Attribute.ABSTRACT)) {
-                    out.add(item)
-                }
+            if (item.GetBody().isSome()) {
+                continue
             }
+            if (!includePureAbstract && item.IsPureAbstract()) {
+                continue
+            }
+            out.add(item)
         }
         return out
     }
