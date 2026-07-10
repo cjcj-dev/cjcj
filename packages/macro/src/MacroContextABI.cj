@@ -29,9 +29,17 @@ func registerMacroCtx(macCall: MacroCall): (Int64, CPointer<Int64>) {
 }
 
 func unregisterMacroCtx(id: Int64, handle: CPointer<Int64>): Unit {
-    synchronized(macroCtxLock) {
+    let macCall = synchronized(macroCtxLock) {
+        let value = macroCtxTable.get(id).getOrThrow()
         macroCtxTable.remove(id)
+        value
     }
+    for (ptr in macCall.recordMacroInfo) {
+        if (!ptr.isNull()) {
+            unsafe { LibC.free(ptr) }
+        }
+    }
+    macCall.recordMacroInfo.clear()
     unsafe { LibC.free(handle) }
 }
 
@@ -52,4 +60,61 @@ public func CJ_GetMacroPosition(fptr: CPointer<Unit>, fileID: CPointer<UInt32>, 
         line.write(Int32(pos.line))
         column.write(Int32(pos.column))
     }
+}
+
+// Mirrors libcangjie-std-ast ast_api.cpp:CJ_CheckParentContext.
+@C
+public func CJ_CheckParentContext(fptr: CPointer<Unit>, parent: CString, report: Bool): Bool {
+    return lookupMacroCtx(fptr).CheckParentContext(parent.toString(), report)
+}
+
+// Mirrors libcangjie-std-ast ast_api.cpp:CJ_SetItemInfo.
+@C
+public func CJ_SetItemInfo(fptr: CPointer<Unit>, key: CString, value: CPointer<Unit>, valueType: UInt8): Unit {
+    let macCall = lookupMacroCtx(fptr)
+    try {
+        macCall.SetItemMacroContext(key.toString(), value, valueType)
+    } finally {
+        unsafe { LibC.free(key) }
+    }
+}
+
+// Mirrors libcangjie-std-ast ast_api.cpp:CJ_GetChildMessages.
+@C
+public func CJ_GetChildMessages(fptr: CPointer<Unit>, children: CString): CPointer<CPointer<CPointer<Unit>>> {
+    return lookupMacroCtx(fptr).GetChildMessagesFromMacroContext(children.toString())
+}
+
+private let DIAG_REPORT_RANGE_ERROR: UInt8 = 1u8
+private let DIAG_REPORT_FILEID_ERROR: UInt8 = 2u8
+
+// Mirrors libcangjie-std-ast ast_api.cpp:CJ_AST_DiagReport.
+@C
+public func CJ_AST_DiagReport(fptr: CPointer<Unit>, level: CPointer<Int32>, tokensBytes: CPointer<UInt8>,
+    message: CString, hint: CString): UInt8 {
+    if (fptr.isNull()) {
+        return 0u8
+    }
+    let tokens = TokenSerialization.GetTokensFromNativeBuffer(tokensBytes)
+    let macCall = lookupMacroCtx(fptr)
+    let invocation = macCall.RequireInvocation()
+    let begin = invocation.atPos
+    let end = invocation.macroCallDiagInfo.identifierPos + invocation.macroCallDiagInfo.fullName.size
+    var tokensEndPos = if (tokens.isEmpty()) { end } else { tokens[tokens.size - 1].End() }
+    if (!tokens.isEmpty() && tokens[tokens.size - 1].kind == TokenKind.NL) {
+        tokensEndPos = tokens[tokens.size - 1].Begin()
+    }
+    let range = if (tokens.isEmpty()) {
+        MakeRange(begin, end)
+    } else {
+        MakeRange(tokens[0].Begin(), tokensEndPos)
+    }
+    if (range.begin.fileID != macCall.GetBeginPos().fileID) {
+        return DIAG_REPORT_FILEID_ERROR
+    }
+    if (!tokens.isEmpty() && (range.begin <= macCall.GetBeginPos() || range.end > macCall.GetEndPos())) {
+        return DIAG_REPORT_RANGE_ERROR
+    }
+    macCall.DiagReport(Int64(unsafe { level.read() }), range, message.toString(), hint.toString())
+    return 0u8
 }

@@ -1,6 +1,7 @@
 package cangjie_compiler::macro_pkg
 
 import std.collection.*
+import cangjie_compiler::basic.{DiagSeverityIndex, Errorln}
 
 public enum MacroKind {
     | EXPR_KIND
@@ -299,6 +300,7 @@ public class MacroCall {
     public var useParentPos: Bool = false
     public var parentMacroCall: Option<MacroCall> = None
     public var ci: Option<MacroHost> = None
+    public let recordMacroInfo: ArrayList<CPointer<Unit>> = ArrayList<CPointer<Unit>>()
     public let parentNames: ArrayList<String> = ArrayList<String>()
     public let items: ArrayList<ItemInfo> = ArrayList<ItemInfo>()
     public let childMessages: ArrayList<ChildMessage> = ArrayList<ChildMessage>()
@@ -463,12 +465,32 @@ public class MacroCall {
     }
 
     public func DiagReport(level: Int64, range: Range, message: String, hint: String): Unit {
-        if (let Some(instance) <- ci) {
-            if (level == 1) {
-                instance.GetDiag().Warn(range, message + hint)
-            } else {
-                instance.GetDiag().Diagnose(range, message + hint)
+        let diagKind = if (level == DiagSeverityIndex(DiagSeverity.DS_ERROR)) {
+            DiagKindRefactor.parse_diag_error
+        } else if (level == DiagSeverityIndex(DiagSeverity.DS_WARNING)) {
+            DiagKindRefactor.parse_diag_warning
+        } else {
+            return
+        }
+        let instance = ci.getOrThrow()
+        let builder = instance.GetDiag().DiagnoseRefactor(diagKind, range, message)
+        builder.AddMainHintArguments(hint)
+        builder.Emit()
+    }
+
+    public func SetItemMacroContext(key: String, value: CPointer<Unit>, valueType: UInt8): Unit {
+        try {
+            if (valueType == UInt8(ItemKindIndex(ItemKind.STRING))) {
+                items.add(ItemInfo(key, CString(CPointer<UInt8>(value)).toString()))
+            } else if (valueType == UInt8(ItemKindIndex(ItemKind.INT))) {
+                items.add(ItemInfo(key, unsafe { CPointer<Int64>(value).read() }))
+            } else if (valueType == UInt8(ItemKindIndex(ItemKind.BOOL))) {
+                items.add(ItemInfo(key, unsafe { CPointer<Bool>(value).read() }))
+            } else if (valueType == UInt8(ItemKindIndex(ItemKind.TKS))) {
+                items.add(ItemInfo(key, TokenSerialization.GetTokensFromNativeBuffer(CPointer<UInt8>(value))))
             }
+        } finally {
+            unsafe { LibC.free(value) }
         }
     }
 
@@ -488,13 +510,76 @@ public class MacroCall {
         items.add(ItemInfo(key, value))
     }
 
-    public func GetChildMessagesFromMacroContext(childrenStr: String): ArrayList<ChildMessage> {
-        let out = ArrayList<ChildMessage>()
+    public func GetChildMessagesFromMacroContext(childrenStr: String): CPointer<CPointer<CPointer<Unit>>> {
+        let macroInfos = ArrayList<ChildMessage>()
         if (children.isEmpty() && childMessages.isEmpty()) {
-            return out
+            return CPointer<CPointer<CPointer<Unit>>>()
         }
-        TraverseMacroNode(this, childrenStr, out)
-        return out
+        TraverseMacroNode(this, childrenStr, macroInfos)
+        if (macroInfos.isEmpty()) {
+            return CPointer<CPointer<CPointer<Unit>>>()
+        }
+        let rawPtr = unsafe { LibC.malloc<CPointer<CPointer<Unit>>>(count: macroInfos.size + 1) }
+        if (rawPtr.isNull()) {
+            Errorln("Macro With Context Memory Allocation Failed.")
+            return rawPtr
+        }
+        var i: Int64 = 0
+        while (i < macroInfos.size) {
+            let items = macroInfos[i].items
+            let vecPtr = unsafe { LibC.malloc<CPointer<Unit>>(count: items.size * 3 + 1) }
+            if (vecPtr.isNull()) {
+                Errorln("Macro With Context Memory Allocation Failed.")
+                return rawPtr
+            }
+            var j: Int64 = 0
+            for (item in items) {
+                let keyPtr = unsafe { LibC.mallocCString(item.key) }
+                let keyRaw = CPointer<Unit>(keyPtr.getChars())
+                recordMacroInfo.add(keyRaw)
+                unsafe { vecPtr.write(j, keyRaw) }
+                j++
+
+                var valueRaw = CPointer<Unit>()
+                if (item.kind == ItemKind.STRING) {
+                    let valuePtr = unsafe { LibC.mallocCString(item.sValue) }
+                    valueRaw = CPointer<Unit>(valuePtr.getChars())
+                } else if (item.kind == ItemKind.INT) {
+                    let valuePtr = unsafe { LibC.malloc<Int64>() }
+                    if (!valuePtr.isNull()) {
+                        unsafe { valuePtr.write(item.iValue) }
+                    }
+                    valueRaw = CPointer<Unit>(valuePtr)
+                } else if (item.kind == ItemKind.BOOL) {
+                    let valuePtr = unsafe { LibC.malloc<Bool>() }
+                    if (!valuePtr.isNull()) {
+                        unsafe { valuePtr.write(item.bValue) }
+                    }
+                    valueRaw = CPointer<Unit>(valuePtr)
+                } else if (item.kind == ItemKind.TKS) {
+                    valueRaw = CPointer<Unit>(TokenSerialization.GetTokensBytesWithHead(item.tValue))
+                }
+                recordMacroInfo.add(valueRaw)
+                unsafe { vecPtr.write(j, valueRaw) }
+                j++
+
+                let typePtr = unsafe { LibC.malloc<UInt8>() }
+                if (!typePtr.isNull()) {
+                    unsafe { typePtr.write(UInt8(ItemKindIndex(item.kind))) }
+                }
+                let typeRaw = CPointer<Unit>(typePtr)
+                recordMacroInfo.add(typeRaw)
+                unsafe { vecPtr.write(j, typeRaw) }
+                j++
+            }
+            unsafe {
+                vecPtr.write(j, CPointer<Unit>())
+                rawPtr.write(i, vecPtr)
+            }
+            i++
+        }
+        unsafe { rawPtr.write(i, CPointer<CPointer<Unit>>()) }
+        return rawPtr
     }
 }
 
@@ -517,7 +602,7 @@ public func TraverseMacroNode(macroNode: MacroCall, childName: String, macroInfo
         }
         return
     }
-    if (macroNode.GetFullName() == childName && !macroNode.items.isEmpty()) {
+    if (macroNode.GetFullName() == childName) {
         macroInfos.add(ChildMessage(childName, macroNode.items))
     }
     for (child in macroNode.children) {
