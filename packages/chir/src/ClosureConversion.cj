@@ -1130,7 +1130,11 @@ public class ClosureConversion {
         for (captured in capturedValues) {
             let capturedTy = captured.GetType() ??
                 throw IllegalStateException("ClosureConversion captured value has no type")
-            let fieldRefTy = builder.context.GetRefTy(capturedTy)
+            let fieldRefTy = if (IsMutableVarType(captured)) {
+                capturedTy
+            } else {
+                builder.context.GetRefTy(capturedTy)
+            }
             let path = ArrayList<UInt64>()
             path.add(capturedIndex)
             let fieldRef = builder.CreateGetElementRef(fieldRefTy, thisParam, path, entry)
