@@ -5,7 +5,7 @@ import cjcj::ast.*
 import cjcj::sema.*
 import cjcj::sema.Desugar.AfterTypeCheck.IsNeedRuntimeCheck
 import cjcj::sema.Test.TestManager as RealTestManager
-import cjcj::utils.CJC_ASSERT
+import cjcj::utils.{CJC_ASSERT, InternalError}
 
 private class GenericInstantiationRecord {
     public var genericDecl: Decl
@@ -964,6 +964,87 @@ class GenericInstantiationManagerImpl {
             return (usedMember as FuncDecl).getOrThrow()
         }
         return fd
+    }
+
+    private func ReinstantiatedPartialMemberDecl(genericInfo: GenericInfo, structDecl: Decl, genericMember: Decl,
+        memberIndex: Int64): Decl {
+        let cloned = PartialInstantiation.Instantiate(genericMember, { genericNode: Node, clonedNode: Node =>
+            PerformTyInstantiationDuringClone(genericNode, clonedNode, ci.typeManager, genericInfo, TypeSubst())
+            if (let Some(clonedDecl) <- (clonedNode as Decl)) {
+                if (let Some(genericDecl) <- genericInfo.decl) {
+                    if (let Some(outerDecl) <- clonedDecl.outerDecl) {
+                        if (SameDecl(outerDecl, genericDecl)) {
+                            clonedDecl.outerDecl = structDecl
+                        }
+                    }
+                }
+            }
+        })
+        if (let Some(clonedDecl) <- (cloned as Decl)) {
+            clonedDecl.EnableAttr(Attribute.GENERIC_INSTANTIATED)
+            let partialDecl = clonedDecl
+            let members = structDecl.GetMemberDecls()
+            members[memberIndex] = clonedDecl
+            return partialDecl
+        }
+        InternalError("generic instantiation failed")
+        return genericMember
+    }
+
+    private func GetInstantiatedMemberTarget(baseTy: Ty, target: Decl, inRearrange!: Bool = false): Decl {
+        let targetOuterDecl = target.outerDecl.getOrThrow()
+        let declTy = GetDeclTy(targetOuterDecl)
+        let noGeneric = if (let None <- targetOuterDecl.generic) { true } else { false }
+        let ignore = noGeneric || !targetOuterDecl.TestAttr(Attribute.GENERIC) || !Ty.IsTyCorrect(declTy)
+        if (ignore) {
+            return target
+        }
+        let promotedTys = promotion.Promote(baseTy, declTy.getOrThrow())
+        let realStructTy = if (promotedTys.IsEmpty()) { TypeManager.GetInvalidTy() } else { promotedTys.values[0] }
+        if (realStructTy.HasInvalidTy() || realStructTy.HasGeneric()) {
+            return target
+        }
+        let genericInfo = ConstructGenericInfo(targetOuterDecl, ci.typeManager.GetTypeArgs(realStructTy))
+        var structDecl = FindInCache(genericInfo)
+        if ((let None <- structDecl) && (let Some(triggerNode) <- curTriggerNode) &&
+            triggerNode.visitedByWalkerID == instantiationWalkerID) {
+            if (let Some(currentPkg) <- curPkg) {
+                structDecl = GetInstantiatedDeclWithGenericInfo(genericInfo, currentPkg)
+            }
+        }
+        let realMemberDecl = GetRealMemberDecl(target)
+        let targetToFind = realMemberDecl.decl
+        let foundIndex = membersIndexMap.get(targetToFind.objectId)
+        if ((let None <- structDecl) || (let None <- foundIndex)) {
+            if (!inRearrange) {
+                InternalError("generic instantiation failed")
+            }
+            return target
+        }
+        let structDeclValue = structDecl.getOrThrow()
+        let members = if (target.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            (structDeclValue as EnumDecl).getOrThrow().constructors
+        } else {
+            structDeclValue.GetMemberDecls()
+        }
+        var found: Option<Decl> = None
+        for (member in members) {
+            if (SameDecl(PartialInstantiation.GetGeneralDecl(member), targetToFind)) {
+                found = member
+                break
+            }
+        }
+        if (let None <- found) {
+            return target
+        }
+        var resultDecl = found.getOrThrow()
+        if (resultDecl.TestAttr(Attribute.GENERIC) && resultDecl.TestAttr(Attribute.GENERIC_INSTANTIATED) &&
+            resultDecl.TestAttr(Attribute.UNREACHABLE)) {
+            resultDecl = ReinstantiatedPartialMemberDecl(genericInfo, structDeclValue, targetToFind,
+                foundIndex.getOrThrow())
+        }
+        resultDecl = GetUsedMemberDecl(resultDecl, realMemberDecl.isGetter)
+        return resultDecl
     }
 
     private func BuildAbstractFuncMapHelper(ty: Ty): Unit {
