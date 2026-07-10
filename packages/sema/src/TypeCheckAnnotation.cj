@@ -27,9 +27,9 @@ private func TypeCheckAnnotationIdentifierRange(decl: Decl): BasicRange {
 }
 
 private func TypeCheckAnnotationArgTarget(diag: BasicDiagnosticEngine, node: Node): Unit {
-    let builder = diag.DiagnoseRefactor(
+    let builder = DiagnoseRefactor(diag,
         BasicDiagKindRefactor.sema_annotation_arg_target,
-        TypeCheckAnnotationRange(node))
+        node)
     builder.Emit()
 }
 
