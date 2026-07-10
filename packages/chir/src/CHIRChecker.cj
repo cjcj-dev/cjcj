@@ -1220,6 +1220,13 @@ public class CHIRChecker {
             }
         }
         CheckUnitResult(expr, topLevelFunc, result)
+        if (let Some(localVar) <- (location as LocalVar)) {
+            if (localVar.GetExpr().getOrThrow().GetExprKind() == ExprKind.GET_ELEMENT_REF) {
+                let resultValue = expr.GetResult().getOrThrow()
+                result.AddError("in function ${topLevelFunc.GetIdentifier()}, destination of Store `" +
+                    "${resultValue.GetIdentifier()}` should not be GetElementRef.")
+            }
+        }
     }
 
     private func CheckControlFlowExpression(expr: Expression, topLevelFunc: Function, result: CHIRCheckResult): Unit {
