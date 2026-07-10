@@ -7292,7 +7292,7 @@ public class Translator {
     private func FlattenVarWithPatternDecl(pattern: AstPattern, initValue: Option<Value>,
         isLocalPattern!: Bool = true): Unit {
         if (let Some(varPattern) <- (pattern as AstVarPattern)) {
-            HandleVarPatternDecl(varPattern, initValue, isLocalPattern: isLocalPattern)
+            HandleVarWithVarPattern(varPattern, initValue, isLocalPattern: isLocalPattern)
             return
         }
         if (let Some(tuplePattern) <- (pattern as AstTuplePattern)) {
@@ -7311,33 +7311,34 @@ public class Translator {
             "faithful AST2CHIR unsupported var-with-pattern: ${ASTKindName(pattern.astKind)}")
     }
 
-    private func HandleVarPatternDecl(pattern: AstVarPattern, initValue: Option<Value>,
+    private func HandleVarWithVarPattern(pattern: AstVarPattern, initValue: Option<Value>,
         isLocalPattern!: Bool = true): Unit {
         let varDecl = pattern.varDecl ??
             throw IllegalStateException("faithful AST2CHIR var pattern has no VarDecl")
-        let valueTy = chirTy.TranslateType(RequireAstTy(varDecl))
-        if (!isLocalPattern) {
-            let leftValue = globalSymbolTable.Get(varDecl)
-            if (let Some(value) <- initValue) {
-                builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(leftValue)), leftValue, CurrentBlock())
-            }
-            globalSymbolTable.Set(varDecl, leftValue)
-            return
-        }
-        if (!varDecl.isVar) {
-            if (let Some(value) <- initValue) {
-                let boundValue = CastValueIfNeeded(value, valueTy)
-                boundValue.EnableAttr(Attribute.READONLY)
-                localValSymbolTable.Set(varDecl, boundValue)
-                return
-            }
-        }
-        let slot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(valueTy), valueTy, CurrentBlock()))
-        slot.SetSrcCodeIdentifier(varDecl.identifier.Val())
-        localValSymbolTable.Set(varDecl, slot)
+        var leftValue = TranslateLeftValueOfVarDecl(varDecl, initValue.isNone(), isLocalPattern)
         if (let Some(value) <- initValue) {
-            builder.CreateStore(CastValueIfNeeded(value, valueTy), slot, CurrentBlock())
+            let storedValue = StoreRValueToLValue(varDecl, value, leftValue)
+            leftValue = Some(storedValue)
+            if (let Some(globalVar) <- (storedValue as GlobalVar)) {
+                let initFunc = GetTopLevelFunc(value)
+                globalVar.SetInitFunc(initFunc)
+            }
         }
+        SetSymbolTable(varDecl, leftValue ??
+            throw IllegalStateException("faithful AST2CHIR var pattern has no left value"))
+    }
+
+    private func GetTopLevelFunc(value: Value): Function {
+        if (let Some(parameter) <- value.AsParameter()) {
+            return parameter.GetTopLevelFunc().getOrThrow()
+        } else if (let Some(localVar) <- value.AsLocalVar()) {
+            return localVar.GetTopLevelFunc().getOrThrow()
+        } else if (let Some(block) <- value.AsBlock()) {
+            return block.GetTopLevelFunc().getOrThrow()
+        } else if (let Some(blockGroup) <- value.AsBlockGroup()) {
+            return blockGroup.GetTopLevelFunc().getOrThrow()
+        }
+        throw IllegalStateException("GetTopLevelFunc called with unsupported value kind")
     }
 
     private func HandleTupleOrEnumPatternDecl(pattern: AstPattern, subPatterns: ArrayList<AstPattern>,
