@@ -52,8 +52,7 @@ private func EmitInitializationIssue(diag: BasicDiagnosticEngine, issue: Initial
         // CheckLetFlag* -> DiagCannotAssignToImmutable (Diags.cpp:414-416):
         // DiagnoseRefactor(sema_cannot_assign_to_immutable, ae) with no format args.
         case InitializationIssueKind.ASSIGN_IMMUTABLE =>
-            let range = BasicMakeRange(issue.node.GetBegin(), issue.node.GetEnd())
-            diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_cannot_assign_to_immutable, range).Emit()
+            DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_cannot_assign_to_immutable, issue.node).Emit()
         // CheckIllegal*Access (InitializationChecker.cpp:815, 1526, 1536, 1554):
         // legacy DiagKind::sema_illegal_usage_of_member.
         case InitializationIssueKind.ILLEGAL_MEMBER_USE =>
@@ -108,8 +107,8 @@ private func EmitStaticMemberGenericIssue(diag: BasicDiagnosticEngine, issue: St
         return
     }
     for (ty in issue.genericTys) {
-        let range = BasicMakeRange(issue.node.GetBegin(), issue.node.GetEnd())
-        let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_static_variable_use_generic_parameter, range,
+        let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_static_variable_use_generic_parameter,
+            issue.node,
             arguments: [ty.String()])
         if (let Some(genericTy) <- (ty as GenericsTy)) {
             if (let Some(genericDecl) <- genericTy.decl) {
@@ -141,9 +140,8 @@ private func EmitGlobalVarInitializationIssue(diag: BasicDiagnosticEngine,
         // CollectForStaticInit (GlobalVarChecker.cpp:334-335):
         // sema_common_static_let_cant_be_initialized_in_static_init with one arg (variable name).
         case GlobalVarInitIssueKind.COMMON_STATIC_LET_INITIALIZED_IN_STATIC_INIT =>
-            let range = BasicMakeRange(issue.refNode.GetBegin(), issue.refNode.GetEnd())
-            diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_common_static_let_cant_be_initialized_in_static_init,
-                range, arguments: [issue.used.identifier.Val()]).Emit()
+            DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_common_static_let_cant_be_initialized_in_static_init,
+                issue.refNode, arguments: [issue.used.identifier.Val()]).Emit()
     }
 }
 
