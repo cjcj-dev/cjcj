@@ -1013,6 +1013,9 @@ public class FaithfulAST2CHIR {
     private var failureReason: String = ""
 
     private let globalCache: FaithfulAST2CHIRNodeMap = FaithfulAST2CHIRNodeMap()
+    // GAP_TODO(ASTPackage2CHIR.cpp:1673-1681): populate this table from binary CHIR deserialization.
+    // Non-incremental translation starts with the same empty table as C++.
+    private let deserializedVals: HashMap<String, Value> = HashMap<String, Value>()
     private let allTopLevelNodes: ArrayList<AstDecl> = ArrayList<AstDecl>()
     private let allTopLevelNodeSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let pkgFiles: ArrayList<AstFile> = ArrayList<AstFile>()
@@ -1885,7 +1888,7 @@ public class FaithfulAST2CHIR {
 
     private func CreateTranslator(): Translator {
         return Translator(builder, chirType, globalCache, localConstVars: localConstVars, localConstFuncs: localConstFuncs,
-            overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts)
+            deserializedVals: deserializedVals, overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts)
     }
 
     private func GlobalDeclAnalysis(pkg: AstPackage): ArrayList<FaithfulInitFileVars> {

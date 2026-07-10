@@ -439,6 +439,7 @@ public class Translator {
     private let globalSymbolTable: FaithfulAST2CHIRNodeMap
     private let localConstVars: ElementList
     private let localConstFuncs: ElementList
+    private let deserializedVals: HashMap<String, Value>
     private var astNodeSymbolTable: AST2CHIRNodeMap<Value> = AST2CHIRNodeMap<Value>()
     private let localValSymbolTable: FaithfulLocalValueMap = FaithfulLocalValueMap()
     private let exprValueTable: HashMap<Int64, Value> = HashMap<Int64, Value>()
@@ -462,6 +463,7 @@ public class Translator {
 
     public init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap,
         localConstVars!: ElementList = ElementList(), localConstFuncs!: ElementList = ElementList(),
+        deserializedVals!: HashMap<String, Value>,
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None,
         opts!: GlobalOptions = GlobalOptions()) {
         this.builder = builder
@@ -469,6 +471,7 @@ public class Translator {
         this.globalSymbolTable = globalSymbolTable
         this.localConstVars = localConstVars
         this.localConstFuncs = localConstFuncs
+        this.deserializedVals = deserializedVals
         this.overrideSrcFuncResolver = overrideSrcFuncResolver
         this.opts = opts
     }
