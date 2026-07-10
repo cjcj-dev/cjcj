@@ -550,9 +550,9 @@ private func DiagImmutableAccessMutableFunc(diag: BasicDiagnosticEngine, outerMa
         return
     }
     let maBaseExpr = ma.baseExpr.getOrThrow()
-    let builder = diag.DiagnoseRefactor(
+    let builder = DiagnoseRefactor(diag,
         BasicDiagKindRefactor.sema_immutable_access_mutable_func,
-        MakeRange(maBaseExpr.begin, maBaseExpr.end))
+        maBaseExpr)
     let mutFuncPos = outerMa.GetFieldPos()
     if (!mutFuncPos.IsZero() && !IsFieldOperator(ma.field.Val())) {
         builder.AddHint(MakeRange(mutFuncPos, outerMa.field.Val()), arguments: ["is a mutable function"])
@@ -666,11 +666,13 @@ public func CheckLetInstanceAccessMutableFunc(
         } else {
             MakeRange(memberAccess.field.Begin(), memberAccess.field.End())
         }
-        let builder = diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(diag,
             BasicDiagKindRefactor.sema_use_mutable_func_alone,
+            memberAccess,
             range,
             arguments: [memberAccess.field.Val()])
-        builder.AddNote(
+        AddNote(builder,
+            target,
             TypeCheckAccessDeclIdentifierRange(target),
             "'" + target.identifier.Val() + "' is a mutable funciton")
         builder.Emit()
