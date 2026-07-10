@@ -24,8 +24,8 @@ public func SynResumeExpr(typeManager: TypeManager, re: ResumeExpr,
         re.SetTy(TypeManager.GetNothingTy())
     } else {
         if (let Some(diagValue) <- diag) {
-            let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_implicit_resume_outside_handler,
-                BasicMakeRange(re.begin, re.end))
+            let builder = DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_implicit_resume_outside_handler,
+                re)
             builder.Emit()
         }
         let _ = invalidResumeExpr(re)
@@ -45,8 +45,8 @@ public func SynResumeExpr(typeManager: TypeManager, re: ResumeExpr,
             }
             if (!isThrowable) {
                 if (let Some(diagValue2) <- diag) {
-                    let builder2 = diagValue2.DiagnoseRefactor(
-                        BasicDiagKindRefactor.sema_resume_throwing_mismatch_type, BasicMakeRange(re.begin, re.end))
+                    let builder2 = DiagnoseRefactor(diagValue2,
+                        BasicDiagKindRefactor.sema_resume_throwing_mismatch_type, re)
                     builder2.Emit()
                 }
                 let _ = invalidResumeExpr(re)
@@ -70,8 +70,8 @@ public func SynResumeExpr(typeManager: TypeManager, re: ResumeExpr,
         let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
         if (!typeManager.IsSubtype(resumptionParamTy, unitTy)) {
             if (let Some(diagValue3) <- diag) {
-                let builder3 = diagValue3.DiagnoseRefactor(BasicDiagKindRefactor.sema_resume_no_with,
-                    BasicMakeRange(re.begin, re.end), arguments: [resumptionParamTy.String()])
+                let builder3 = DiagnoseRefactor(diagValue3, BasicDiagKindRefactor.sema_resume_no_with,
+                    re, arguments: [resumptionParamTy.String()])
                 builder3.Emit()
             }
             let _ = invalidResumeExpr(re)
