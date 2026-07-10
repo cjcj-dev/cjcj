@@ -653,7 +653,7 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeMan
     }
     collectLetPatternDecls(ctx, pkg)
     PreSetDeclType(typeManager, ctx, importManager: importManager, diag: diag)
-    addSuperClassObjectForClassDecl(ctx, pkg, diag ?? BasicDiagnosticEngine())
+    addSuperClassObjectForClassDecl(ctx, pkg, diag.getOrThrow())
     collectAndCheckAssumption(typeManager, pkg)
     return valid
 }
