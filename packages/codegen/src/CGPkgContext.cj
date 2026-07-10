@@ -79,12 +79,14 @@ public class CGPkgContext {
                 correctedCachedMangleMap.incrRemovedDecls.add(name)
             }
         }
+        CollectSubTypeMap()
     }
 
     public func Clear(): Unit {
         for (cgMod in cgMods) {
             cgMod.Clear()
         }
+        subTypeMap.clear()
         correctedCachedMangleMap.Clear()
         quickCHIRValues.clear()
         localizedSymbols.clear()
