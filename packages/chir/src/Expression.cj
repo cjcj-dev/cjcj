@@ -124,9 +124,6 @@ public open class Expression <: Base {
     }
 
     public func ClearBlockGroups(): Unit {
-        for (group in blockGroups) {
-            group.RemoveUserOnly(this)
-        }
         blockGroups.clear()
     }
 
@@ -2051,6 +2048,11 @@ public class Lambda <: Expression {
     }
 
     public func GetBody(): Option<BlockGroup> { return body }
+
+    public func RemoveBody(): Unit {
+        ClearBlockGroups()
+        body = None
+    }
 
     public func InitBody(newBody: BlockGroup): Unit {
         if (body.isSome() || GetNumOfBlockGroups() != 0) {
