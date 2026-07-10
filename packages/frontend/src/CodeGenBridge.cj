@@ -34,49 +34,117 @@ import cangjie_compiler::codegen.SavePackageModule
 import cangjie_compiler::meta_transformation.TryRunCHIRMetaTransforms
 import cangjie_compiler::option.OptimizationFlag
 import cangjie_compiler::option.TempFileInfo
+import cangjie_compiler::utils.CHIR_READABLE_FILE_EXTENSION
+import cangjie_compiler::utils.CJC_ASSERT
 import cangjie_compiler::utils.DEFAULT_PACKAGE_NAME
 import cangjie_compiler::utils.FileUtil
 import cangjie_compiler::utils.REFLECT_PACKAGE_NAME
 
 public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTPackage): Option<RealCHIRPackage> {
-    let builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
-    let chirType = CHIRType(builder, CHIRTypeCache())
-    let ast2chir = FaithfulAST2CHIR(builder, chirType,
-        gim: instance.gim,
-        importedPkgs: instance.importManager.GetAllImportedPackages(),
-        directImportedPkgs: instance.importManager.GetCurImportedPackages(pkg.fullPackageName),
-        overrideSrcFuncResolver: Some({ funcDecl =>
-            match (instance.faithfulSemaInstance) {
-                case Some(semaInstance) => semaInstance.typeManager.GetTopOverriddenFuncDecl(Some(funcDecl))
-                case None => None
+    return ToCHIR(instance, pkg).Run()
+}
+
+private class ToCHIR {
+    private static var clearDumpDir: Bool = false
+
+    private let instance: CompilerInstance
+    private let pkg: RealASTPackage
+    private let outputPath: String
+    private let builder: ChirBuilder
+    private var chirPkg: Option<RealCHIRPackage> = None
+    private var debugFileIndex: UInt64 = 0u64
+    private var isComputingAnnos: Bool = false
+
+    public init(instance: CompilerInstance, pkg: RealASTPackage) {
+        this.instance = instance
+        this.pkg = pkg
+        this.outputPath = instance.invocation.globalOptions.output
+        this.builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
+    }
+
+    public func Run(): Option<RealCHIRPackage> {
+        let chirType = CHIRType(builder, CHIRTypeCache())
+        let ast2chir = FaithfulAST2CHIR(builder, chirType,
+            gim: instance.gim,
+            importedPkgs: instance.importManager.GetAllImportedPackages(),
+            directImportedPkgs: instance.importManager.GetCurImportedPackages(pkg.fullPackageName),
+            overrideSrcFuncResolver: Some({ funcDecl =>
+                match (instance.faithfulSemaInstance) {
+                    case Some(semaInstance) => semaInstance.typeManager.GetTopOverriddenFuncDecl(Some(funcDecl))
+                    case None => None
+                }
+            }),
+            opts: instance.invocation.globalOptions,
+            chirWFC: instance.invocation.globalOptions.chirWFC,
+            chirOptOverO2: instance.invocation.globalOptions.IsCHIROptimizationLevelOverO2(),
+            diag: Some(instance.diag.AsBasicDiagnosticEngine()))
+        if (!ast2chir.ToCHIRPackage(pkg)) {
+            return None
+        }
+        let lowered = match (ast2chir.GetPackage()) {
+            case Some(value) => value
+            case None => return None
+        }
+        chirPkg = Some(lowered)
+        RulesChecking(lowered, builder, instance.invocation.globalOptions, instance.diag.AsBasicDiagnosticEngine())
+        RunOptimizationPass(lowered, builder, instance.invocation.globalOptions)
+        if (!TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)) {
+            instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
+            return None
+        }
+        let closure = ClosureConversion(builder, opts: instance.invocation.globalOptions,
+            srcCodeImportedFuncs: ast2chir.GetSrcCodeImportedFuncs())
+        closure.RunOnPackage(lowered)
+        ast2chir.ReplaceSrcCodeImportedValAfterClosureConversion(lowered, closure.GetUselessClassDef(),
+            closure.GetUselessLambda())
+        if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
+            ChirCHIRPrinter.PrintPackage(lowered)
+        }
+        return Some(lowered)
+    }
+
+    private func DumpCHIRToFile(suffix: String, needCheckFlag!: Bool = true): Unit {
+        let opts = instance.invocation.globalOptions
+        if (needCheckFlag && !opts.NeedDumpCHIRToFile()) {
+            return
+        }
+        CJC_ASSERT(chirPkg.isSome())
+        let currentPackage = chirPkg.getOrThrow()
+        CJC_ASSERT(!CHIR_READABLE_FILE_EXTENSION.isEmpty())
+        let extension = if (CHIR_READABLE_FILE_EXTENSION[0] == b'.') {
+            CHIR_READABLE_FILE_EXTENSION[1..]
+        } else {
+            CHIR_READABLE_FILE_EXTENSION
+        }
+        if (!opts.computeAnnotationsDebug && isComputingAnnos) {
+            return
+        }
+        var fileName = debugFileIndex.toString() + "_"
+        debugFileIndex++
+        if (isComputingAnnos) {
+            fileName += "ComputeAnnotations_"
+        }
+        fileName += suffix + "." + extension
+        let debugDir = if (FileUtil.IsDir(outputPath)) {
+            FileUtil.JoinPath(outputPath, currentPackage.GetName() + "_CHIR")
+        } else {
+            FileUtil.GetFileBase(outputPath) + "_CHIR"
+        }
+        if (!ToCHIR.clearDumpDir) {
+            if (FileUtil.FileExist(debugDir)) {
+                FileUtil.RemoveDirectoryRecursively(debugDir)
             }
-        }),
-        opts: instance.invocation.globalOptions,
-        chirWFC: instance.invocation.globalOptions.chirWFC,
-        chirOptOverO2: instance.invocation.globalOptions.IsCHIROptimizationLevelOverO2(),
-        diag: Some(instance.diag.AsBasicDiagnosticEngine()))
-    if (!ast2chir.ToCHIRPackage(pkg)) {
-        return None
+            ToCHIR.clearDumpDir = true
+        }
+        let fullPath = FileUtil.JoinPath(debugDir, fileName)
+        if (!FileUtil.FileExist(fullPath)) {
+            FileUtil.CreateDirs(fullPath)
+        }
+        ChirCHIRPrinter.PrintPackage(currentPackage, fullPath)
+        if (suffix == "Broken_CHIR") {
+            println("broken chir dump to file: " + fullPath)
+        }
     }
-    let lowered = match (ast2chir.GetPackage()) {
-        case Some(value) => value
-        case None => return None
-    }
-    RulesChecking(lowered, builder, instance.invocation.globalOptions, instance.diag.AsBasicDiagnosticEngine())
-    RunOptimizationPass(lowered, builder, instance.invocation.globalOptions)
-    if (!TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)) {
-        instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
-        return None
-    }
-    let closure = ClosureConversion(builder, opts: instance.invocation.globalOptions,
-        srcCodeImportedFuncs: ast2chir.GetSrcCodeImportedFuncs())
-    closure.RunOnPackage(lowered)
-    ast2chir.ReplaceSrcCodeImportedValAfterClosureConversion(lowered, closure.GetUselessClassDef(),
-        closure.GetUselessLambda())
-    if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
-        ChirCHIRPrinter.PrintPackage(lowered)
-    }
-    return Some(lowered)
 }
 
 private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions,
