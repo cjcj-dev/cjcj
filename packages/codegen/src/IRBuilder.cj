@@ -3334,8 +3334,21 @@ public class IRBuilder2 <: Resource {
         isChecked: Bool): LLVMValueRef {
         let elementCHIRType = rawArrayTy.GetElementType()
         let elementCGType = CGType.GetOrCreate(cgMod, elementCHIRType)
-        let elementPtr = GetArrayElementAddr(rawArrayTy, array, index, isChecked)
-        let loaded = CreateLoad(elementCGType.GetLLVMType(), elementPtr, name: "arr.idx.get")
+        let elementType = elementCGType.GetLLVMType()
+        let rawArrayCGType = CGType.GetOrCreate(cgMod, rawArrayTy)
+        var elementPtr = LLVMNullValue()
+        if (rawArrayCGType.GetSize().isNone()) {
+            var offset = CreateBinary(ExprKind.MUL, GetSize_64(elementCHIRType), index)
+            offset = CreateBinary(ExprKind.ADD, offset, GetInt64(Int64(GetPayloadOffset() + 8u64)))
+            elementPtr = CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }, array,
+                ArrayList<LLVMValueRef>([offset]))
+            let arrayAddressSpace = unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(array)) }
+            elementPtr = CreateBitCast(elementPtr, unsafe { LLVMPointerType(elementType, arrayAddressSpace) })
+            GetCGContext().SetBasePtr(elementPtr, array)
+        } else {
+            elementPtr = GetArrayElementAddr(rawArrayTy, array, index, isChecked)
+        }
+        let loaded = CreateLoad(elementType, elementPtr, name: "arr.idx.get")
         if (elementCHIRType.IsEnum()) {
             LLVMSetInstructionMetadata(GetLLVMContext(), loaded, "untrusted_ref",
                 LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>()))
@@ -3345,23 +3358,47 @@ public class IRBuilder2 <: Resource {
 
     public func CallArrayIntrinsicSet(rawArrayTy: RawArrayType, array: LLVMValueRef, index: LLVMValueRef,
         elementValue: CGValue, isChecked: Bool): LLVMValueRef {
-        let elementCGType = CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType())
-        let elementPtr = GetArrayElementAddr(rawArrayTy, array, index, isChecked)
+        let elementCHIRType = rawArrayTy.GetElementType()
+        let elementCGType = CGType.GetOrCreate(cgMod, elementCHIRType)
+        let elementType = elementCGType.GetLLVMType()
+        let rawArrayCGType = CGType.GetOrCreate(cgMod, rawArrayTy)
+        if (rawArrayCGType.GetSize().isNone()) {
+            var offset = CreateBinary(ExprKind.MUL, GetSize_64(elementCHIRType), index)
+            offset = CreateBinary(ExprKind.ADD, offset, GetInt64(Int64(GetPayloadOffset() + 8u64)))
+            var fieldAddr = CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }, array,
+                ArrayList<LLVMValueRef>([offset]))
+            let arrayAddressSpace = unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(array)) }
+            fieldAddr = CreateBitCast(fieldAddr, unsafe { LLVMPointerType(elementType, arrayAddressSpace) })
+            GetCGContext().SetBasePtr(fieldAddr, array)
+            let fieldAddrCGType = CGType.GetOrCreate(cgMod,
+                GetCGContext().GetCHIRBuilder().context.GetRefTy(elementCHIRType))
+            return CreateStore(elementValue, CGValue(fieldAddr, fieldAddrCGType))
+        }
         let rawValue = elementValue.GetRawValue()
-        let rawValueTy = unsafe { LLVMTypeOf(rawValue) }
-        if (elementCGType.IsStructType() && IsLLVMTypeContainsRef(elementCGType.GetLLVMType()) &&
-            !rawValueTy.isNull() && unsafe { LLVMGetTypeKind(rawValueTy) } == 12) {
+        let elementPtr = GetArrayElementAddr(rawArrayTy, array, index, isChecked)
+        if (unsafe { LLVMGetTypeKind(elementType) } == LLVM_STRUCT_TYPE_KIND) {
             let size = unsafe {
                 LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw),
-                    cgMod.GetTypeSize(elementCGType.GetLLVMType()), 0)
+                    cgMod.GetTypeSize(elementType), 0)
             }
-            return CallGCWriteStruct(array, elementPtr, rawValue, size, elementCGType.GetOriginal().ToString())
+            if (IsLLVMTypeContainsRef(elementType)) {
+                return CallGCWriteAgg(elementType,
+                    ArrayList<LLVMValueRef>([array, elementPtr, rawValue, size]))
+            } else {
+                let align = cgMod.GetABITypeAlignment(elementType)
+                return CreateMemCpy(elementPtr, align, rawValue, align, size)
+            }
+        } else if (unsafe { LLVMGetTypeKind(elementType) } == LLVM_ARRAY_TYPE_KIND) {
+            let size = unsafe {
+                LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(elementType), 0)
+            }
+            return CallGCWriteAgg(elementCGType.GetLayoutType(),
+                ArrayList<LLVMValueRef>([array, elementPtr, rawValue, size]))
+        } else if (elementType.toUIntNative() == CGType.GetRefType(GetLLVMContext()).toUIntNative()) {
+            return CallGCWrite(rawValue, array, elementPtr)
+        } else {
+            return CreateStore(rawValue, elementPtr)
         }
-        let rawElementValue = RawValueForArrayElementStore(elementValue, elementCGType)
-        if (elementCGType.IsReference()) {
-            return CallGCWrite(rawElementValue, array, elementPtr)
-        }
-        return CreateStore(rawElementValue, elementPtr)
     }
 
     public func CallArrayIntrinsicCopy(rawArrayTy: RawArrayType, srcArray: LLVMValueRef): LLVMValueRef {
@@ -4913,16 +4950,6 @@ public class IRBuilder2 <: Resource {
             Int64(cgMod.GetTypeSize(elementCGType.GetLLVMType()))
         }
         return unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), UInt64(elementSize), 0) }
-    }
-
-    private func RawValueForArrayElementStore(elementValue: CGValue, elementCGType: CGType): LLVMValueRef {
-        let raw = elementValue.GetRawValue()
-        let rawTy = unsafe { LLVMTypeOf(raw) }
-        if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12 && !elementCGType.IsReference() &&
-            (elementCGType.IsStructType() || elementCGType.IsVArrayType())) {
-            return CreateLoad(elementCGType.GetLLVMType(), raw, name: "arr.store.value")
-        }
-        return raw
     }
 
     public func CreateCopyTo(arrayCopyToInfo: ArrayCopyToInfo): Unit {
