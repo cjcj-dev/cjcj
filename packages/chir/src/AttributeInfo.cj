@@ -7,6 +7,10 @@ public class AttributeInfo {
         attributesInfo = VArray<UInt64, $2>({ _: Int64 => 0u64 })
     }
 
+    public init(attrs: UInt64) {
+        attributesInfo = VArray<UInt64, $2>({ index: Int64 => if (index == 0) { attrs } else { 0u64 } })
+    }
+
     public init(other: AttributeInfo) {
         attributesInfo = VArray<UInt64, $2>({ _: Int64 => 0u64 })
         for (idx in 0..2) {
