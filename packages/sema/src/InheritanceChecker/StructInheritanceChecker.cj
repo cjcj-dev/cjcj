@@ -279,7 +279,7 @@ private func DiagnoseWeakVisibility(
         }
     }
     builder.AddNote(parentNote)
-    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+    builder.Emit()
 }
 
 private func HasCommonDecl(decls: ArrayList<ClassLikeDecl>): Bool {
