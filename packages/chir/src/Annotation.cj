@@ -17,6 +17,40 @@ public interface Annotation<T> <: AnnotationBase {
     static func Extract(annotation: Annotation<T>): T
 }
 
+public class AnnoFactoryInfo <: Annotation<ArrayList<GlobalVar>> {
+    private let value: ArrayList<GlobalVar> = ArrayList<GlobalVar>()
+
+    public init() {}
+
+    public init(values: ArrayList<GlobalVar>) {
+        for (globalVar in values) { value.add(globalVar) }
+    }
+
+    public static func Create(): Annotation<ArrayList<GlobalVar>> {
+        return AnnoFactoryInfo()
+    }
+
+    public static func Create(values: ArrayList<GlobalVar>): Annotation<ArrayList<GlobalVar>> {
+        return AnnoFactoryInfo(values)
+    }
+
+    public static func Extract(annotation: Annotation<ArrayList<GlobalVar>>): ArrayList<GlobalVar> {
+        let values = ArrayList<GlobalVar>()
+        for (globalVar in (annotation as AnnoFactoryInfo).getOrThrow().value) { values.add(globalVar) }
+        return values
+    }
+
+    public func Clone(): AnnotationBase {
+        return AnnoFactoryInfo(value)
+    }
+
+    public func ToString(): String {
+        var out = "annoGVs:"
+        for (globalVar in value) { out += globalVar.GetIdentifier() + "," }
+        return out
+    }
+}
+
 public class NeedCheckArrayBound <: Annotation<Bool> {
     private let need: Bool
 
