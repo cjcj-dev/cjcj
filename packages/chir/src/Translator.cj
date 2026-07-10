@@ -8,6 +8,7 @@ import cangjie_compiler::basic.Linkage as BasicLinkage
 import cangjie_compiler::ast.ASTKind
 import cangjie_compiler::ast.IsInstanceConstructor as AstIsInstanceConstructor
 import cangjie_compiler::ast.IsValidCFuncConstructorCall
+import cangjie_compiler::ast.GetVarsInitializationOrderWithPositions as AstGetVarsInitializationOrderWithPositions
 import cangjie_compiler::ast.BuiltInDecl
 import cangjie_compiler::ast.BuiltInType
 import cangjie_compiler::ast.ASTKindIndex
@@ -652,18 +653,31 @@ public class Translator {
     }
 
     private func TranslateConstructorDefaultFieldInitializers(funcDecl: AstFuncDecl, funcBody: AstFuncBody): Unit {
-        if (!AstIsInstanceConstructor(funcDecl) || HasDelegatedThisCall(funcBody)) {
+        if (!AstIsInstanceConstructor(funcDecl)) {
             return
         }
         let owner = match (funcDecl.outerDecl) {
             case Some(value) => value
             case None => return
         }
+        let thisVar = CurrentFunction().GetParam(0)
+        SetSymbolTable(owner, thisVar)
+        if (HasDelegatedThisCall(funcBody)) {
+            return
+        }
+        if (owner.TestAnyAttr(AstAttribute.COMMON, AstAttribute.SPECIFIC)) {
+            let typeDef = chirTy.GetGlobalNominalCache(owner)
+            let varInitFunc = typeDef.GetVarInitializationFunc().getOrThrow()
+            let args = ArrayList<Value>()
+            args.add(thisVar)
+            builder.CreateApply(varInitFunc.GetReturnType().getOrThrow(), varInitFunc,
+                FuncCallContext(args: args, thisType: thisVar.GetType()), CurrentBlock())
+            return
+        }
         if (owner.astKind != ASTKind.CLASS_DECL && owner.astKind != ASTKind.STRUCT_DECL) {
             return
         }
-        let thisVar = CurrentFunction().GetParam(0)
-        var fieldOffset = GetSuperInstanceVarSize(owner)
+        var fieldOffset = GetSuperInstanceVarSize(thisVar.GetType().getOrThrow())
         for (member in owner.GetMemberDeclPtrs()) {
             if (member.astKind != ASTKind.VAR_DECL || member.TestAttr(AstAttribute.STATIC)) {
                 continue
@@ -673,8 +687,11 @@ public class Translator {
                 let initValue = Translator.TranslateASTNode(initializer, this) ??
                     throw IllegalStateException("faithful AST2CHIR member initializer produced no value")
                 let path = ArrayList<UInt64>()
-                path.add(UInt64(fieldOffset))
-                let memberTy = GetInstanceMemberTypeByIndex(thisVar, fieldOffset)
+                path.add(fieldOffset)
+                let pureCurObjType = (thisVar.GetType().getOrThrow() as RefType).getOrThrow().GetBaseType()
+                CJC_ASSERT(!pureCurObjType.IsRef() && pureCurObjType.IsNominal())
+                let memberTy = (pureCurObjType as CustomType).getOrThrow()
+                    .GetInstMemberTypeByPath(path, builder)
                 builder.CreateStoreElementRef(CoerceInitializerForExpectedType(initializer, initValue, memberTy),
                     thisVar, path, CurrentBlock())
             }
@@ -705,23 +722,16 @@ public class Translator {
         return false
     }
 
-    private func GetSuperInstanceVarSize(owner: AstDecl): Int64 {
-        if (let Some(classDecl) <- (owner as AstClassDecl)) {
-            if (let Some(superDecl) <- classDecl.GetSuperClassDecl()) {
-                return chirTy.GetGlobalNominalCache(superDecl).GetAllInstanceVarNum()
-            }
+    private func GetSuperInstanceVarSize(thisType: Type): UInt64 {
+        CJC_ASSERT(thisType.IsRef())
+        let realType = (thisType as RefType).getOrThrow().GetBaseType()
+        if (!realType.IsClass()) {
+            return 0u64
         }
-        return 0
-    }
-
-    private func GetInstanceMemberTypeByIndex(thisVar: Value, index: Int64): Type {
-        let thisTy = thisVar.GetType() ??
-            throw IllegalStateException("faithful AST2CHIR constructor this has no type")
-        let baseTy = if (let Some(refTy) <- (thisTy as RefType)) { refTy.GetBaseType() } else { thisTy }
-        let customTy = (baseTy as CustomType) ??
-            throw IllegalStateException("faithful AST2CHIR constructor this is not nominal: ${baseTy.ToString()}")
-        let memberTys = customTy.GetInstantiatedMemberTys()
-        return memberTys[index]
+        if (let Some(superClassDef) <- (realType as ClassType).getOrThrow().GetClassDef().GetSuperClassDef()) {
+            return UInt64(superClassDef.GetAllInstanceVarNum())
+        }
+        return 0u64
     }
 
     private func CoerceInitializerForExpectedType(expr: AstExpr, value: Value, expectedTy: Type): Value {
@@ -731,6 +741,155 @@ public class Translator {
             }
         }
         return CastValueIfNeeded(value, expectedTy)
+    }
+
+    private func CreateClassStructDeclVarInit(decl: AstDecl): Unit {
+        CJC_ASSERT(decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.STRUCT_DECL)
+        let def = chirTy.GetGlobalNominalCache(decl)
+        def.SetVarInitializationFunc(TranslateVarsInit(decl))
+    }
+
+    private func ClearOrCreateVarInitFunc(decl: AstDecl): Option<Function> {
+        let postfix = "$varInit"
+        let outerDecl = decl.outerDecl ?? decl
+        if (outerDecl.TestAttr(AstAttribute.IMPORTED) ||
+            !outerDecl.TestAnyAttr(AstAttribute.COMMON, AstAttribute.SPECIFIC)) {
+            return None
+        }
+
+        let mangledName = decl.mangledName + postfix
+        let (funcDef, body) = if (let Some(cachedFunc) <-
+            TryGetFromCache<Function>(GLOBAL_VALUE_PREFIX + mangledName, deserializedVals)) {
+            let newBody = builder.CreateBlockGroup(cachedFunc)
+            cachedFunc.ReplaceBody(newBody)
+            cachedFunc.SetDebugLocation(DebugLocation())
+            (cachedFunc, newBody)
+        } else {
+            let identifier = decl.identifier.Val() + postfix
+            let rawMangledName = decl.rawMangleName + postfix
+            let packageName = outerDecl.fullPackageName
+            let params = ArrayList<Type>()
+            var returnTy = RequireAstTy(decl)
+            if (let Some(varDecl) <- (decl as AstVarDecl)) {
+                if (let Some(initializer) <- varDecl.initializer) {
+                    returnTy = RequireAstTy(initializer)
+                }
+            }
+            let returnType = if (refEq(decl, outerDecl)) {
+                builder.context.GetUnitTy()
+            } else {
+                TranslateType(returnTy)
+            }
+            var funcType = builder.context.GetFuncTy(params, returnType)
+            funcType = AdjustVarInitType(funcType, outerDecl, builder, chirTy)
+            let loc = TranslateLocationWithoutScope(builder.context, decl.begin, decl.end)
+            let customTypeDef = chirTy.GetGlobalNominalCache(outerDecl)
+            let newFunc = builder.CreateFunction(funcType, mangledName, srcCodeIdentifier: identifier,
+                rawMangledName: rawMangledName, packageName: packageName)
+            newFunc.SetDebugLocation(loc)
+            customTypeDef.AddMethod(newFunc)
+            newFunc.SetFuncKind(FuncKind.INSTANCEVAR_INIT)
+            newFunc.EnableAttr(Attribute.PRIVATE)
+            newFunc.EnableAttr(Attribute.COMPILER_ADD)
+            newFunc.EnableAttr(Attribute.MUT)
+            let thisParam = builder.CreateParameter(funcType.GetParamTypes()[0], loc, newFunc)
+            thisParam.SetSrcCodeIdentifier("this")
+            let newBody = builder.CreateBlockGroup(newFunc)
+            newFunc.InitBody(newBody)
+            (newFunc, newBody)
+        }
+        blockGroupStack.add(body)
+        let entry = builder.CreateBlock(body)
+        body.SetEntryBlock(entry)
+        let retVal = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetUnitTy()),
+            builder.context.GetUnitTy(), entry))
+        funcDef.SetReturnValue(retVal)
+        let thisVar = funcDef.GetParam(0)
+        builder.CreateDebug(builder.context.GetUnitTy(), thisVar, "this", entry)
+        currentFunc = funcDef
+        return Some(funcDef)
+    }
+
+    private func TranslateVarInit(varDecl: AstVarDecl): Option<Function> {
+        let initializer = varDecl.initializer ?? return None
+        let funcDef = ClearOrCreateVarInitFunc(varDecl) ?? return None
+        let loc = TranslateLocationWithoutScope(builder.context, varDecl.begin, varDecl.end)
+        let entry = funcDef.GetEntryBlock().getOrThrow()
+        let thisVar = funcDef.GetParam(0)
+        SetSymbolTable(varDecl.outerDecl.getOrThrow(), thisVar)
+        let initBlock = CreateBlock()
+        currentBlock = initBlock
+        let value = TranslateExprArg(initializer)
+        let lastBlock = CurrentBlock()
+        let returnType = funcDef.GetReturnType().getOrThrow()
+        let allocate = builder.CreateAllocate(builder.context.GetRefTy(returnType), returnType, lastBlock)
+        allocate.SetDebugLocation(loc)
+        let retVal = RequireResult(allocate)
+        funcDef.SetReturnValue(retVal)
+        let store = builder.CreateStore(value, retVal, lastBlock)
+        store.SetDebugLocation(loc)
+        builder.CreateExit(None, lastBlock)
+        builder.CreateGoTo(initBlock, entry)
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+        return Some(funcDef)
+    }
+
+    private func TranslateVarsInit(decl: AstDecl): Option<Function> {
+        let funcDef = ClearOrCreateVarInitFunc(decl) ?? return None
+        let thisVar = funcDef.GetParam(0)
+        SetSymbolTable(decl, thisVar)
+        let initBlock = CreateBlock()
+        currentBlock = initBlock
+        TranslateVariablesInit(decl, thisVar)
+        let lastBlock = CurrentBlock()
+        builder.CreateExit(None, lastBlock)
+        builder.CreateGoTo(initBlock, funcDef.GetEntryBlock().getOrThrow())
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+        return Some(funcDef)
+    }
+
+    private func TranslateVariablesInit(parent: AstDecl, thisVar: Parameter): Unit {
+        let offset = GetSuperInstanceVarSize(thisVar.GetType().getOrThrow())
+        let typeDef = chirTy.GetGlobalNominalCache(parent)
+        let varInfoByName = HashMap<String, MemberVarInfo>()
+        let memberVars = typeDef.GetDirectInstanceVars()
+        for (varInfo in memberVars) {
+            varInfoByName[varInfo.name] = varInfo
+        }
+        let initOrder = AstGetVarsInitializationOrderWithPositions(parent)
+        for (item in initOrder) {
+            let member = item.decl.getOrThrow()
+            CJC_ASSERT(!member.isMemberParam || member.initializer.isNone())
+            let varInfo = varInfoByName.get(member.identifier.Val()).getOrThrow()
+            if (ShouldTranslateMember(parent, member)) {
+                let trans = Copy()
+                varInfo.initializerFunc = trans.TranslateVarInit(member)
+            }
+            if (let Some(varInitFunc) <- varInfo.initializerFunc) {
+                let args = ArrayList<Value>()
+                args.add(thisVar)
+                let loc = TranslateLocation(member)
+                let apply = builder.CreateApply(varInitFunc.GetReturnType().getOrThrow(), varInitFunc,
+                    FuncCallContext(args: args, thisType: thisVar.GetType()), CurrentBlock())
+                apply.SetDebugLocation(loc)
+                let value = RequireResult(apply)
+                let path = ArrayList<UInt64>()
+                path.add(offset + item.fieldPosition)
+                let pureCurObjType = (thisVar.GetType().getOrThrow() as RefType).getOrThrow().GetBaseType()
+                CJC_ASSERT(!pureCurObjType.IsRef() && pureCurObjType.IsNominal())
+                let memberType = (pureCurObjType as CustomType).getOrThrow()
+                    .GetInstMemberTypeByPath(path, builder)
+                if (refEq(value.GetType().getOrThrow(), memberType)) {
+                    let store = builder.CreateStoreElementRef(value, thisVar, path, CurrentBlock())
+                    store.SetDebugLocation(loc)
+                } else {
+                    let castedValue = TypeCastOrBoxIfNeeded(value, memberType, loc)
+                    let store = builder.CreateStoreElementRef(castedValue, thisVar, path, CurrentBlock())
+                    store.SetDebugLocation(loc)
+                }
+            }
+        }
+        typeDef.SetDirectInstanceVars(memberVars)
     }
 
     public func Visit(mainDecl: AstMainDecl): Option<Value> {
@@ -796,12 +955,18 @@ public class Translator {
             }
             TranslateMemberDecl(def, member)
         }
+        if (opts.IsCompilingCJMP() && !structDecl.TestAttr(AstAttribute.FROM_COMMON_PART)) {
+            CreateClassStructDeclVarInit(structDecl)
+        }
         return None
     }
 
     public func Visit(classDecl: AstClassDecl): Option<Value> {
         let def = RequireClassDef(chirTy.GetGlobalNominalCache(classDecl))
         TranslateClassLikeDecl(def, classDecl)
+        if (opts.IsCompilingCJMP() && !classDecl.TestAttr(AstAttribute.FROM_COMMON_PART)) {
+            CreateClassStructDeclVarInit(classDecl)
+        }
         return None
     }
 
