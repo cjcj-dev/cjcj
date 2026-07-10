@@ -1,6 +1,6 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
-import cangjie_compiler::utils.{StaticCast, Stoi, Stoll, Stoull}
+import cjcj::utils.{StaticCast, Stoi, Stoll, Stoull}
 
 private func EscapeCharacterToInt(byte: UInt8): Int64 {
     return match (byte) {

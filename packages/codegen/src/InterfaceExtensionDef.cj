@@ -1,21 +1,21 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.CHIRBuilder
-import cangjie_compiler::chir.ClassDef
-import cangjie_compiler::chir.ClassType
-import cangjie_compiler::chir.CustomType
-import cangjie_compiler::chir.CustomTypeDef
-import cangjie_compiler::chir.ExtendDef
-import cangjie_compiler::chir.GenericType
-import cangjie_compiler::chir.ReplaceRawGenericArgType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.VirtualMethodInfo
-import cangjie_compiler::chir.VTableInType
-import cangjie_compiler::chir.GetTypeQualifiedName
-import cangjie_compiler::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
+import cjcj::chir.Attribute
+import cjcj::chir.CHIRBuilder
+import cjcj::chir.ClassDef
+import cjcj::chir.ClassType
+import cjcj::chir.CustomType
+import cjcj::chir.CustomTypeDef
+import cjcj::chir.ExtendDef
+import cjcj::chir.GenericType
+import cjcj::chir.ReplaceRawGenericArgType
+import cjcj::chir.Type
+import cjcj::chir.VirtualMethodInfo
+import cjcj::chir.VTableInType
+import cjcj::chir.GetTypeQualifiedName
+import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
 private let EXTENSION_DEFS_NAME: String = "NonExternalExtensionDefs"
 private let EXTERNAL_EXTENSION_DEFS_NAME: String = "ExternalExtensionDefs"

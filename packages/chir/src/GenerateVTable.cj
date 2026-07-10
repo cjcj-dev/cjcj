@@ -1,11 +1,11 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::basic.Linkage as BasicLinkage
-import cangjie_compiler::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
-import cangjie_compiler::option.{GlobalOptions, OSType}
-import cangjie_compiler::utils.{CJC_ASSERT, CJC_ABORT, OverflowStrategy, ProfileRecorder, TaskQueue}
+import cjcj::basic.Linkage as BasicLinkage
+import cjcj::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
+import cjcj::option.{GlobalOptions, OSType}
+import cjcj::utils.{CJC_ASSERT, CJC_ABORT, OverflowStrategy, ProfileRecorder, TaskQueue}
 
 private let OVERFLOW_OPERATOR_NAMES: Array<String> = ["+", "-", "*", "/"]
 private let SPLIT_OPERATOR_NAME_PREFIX: Array<String> = ["&", "~", "%"]

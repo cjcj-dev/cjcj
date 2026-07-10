@@ -37,7 +37,7 @@ CANGJIE_HOME = os.environ.get(
 )
 REF = os.environ.get("REF_CJC", f"{CANGJIE_HOME}/bin/cjc")
 SELF = os.environ.get(
-    "SELF_CJC", str(REPO / "target/release/bin/cangjie_compiler::cjc")
+    "SELF_CJC", str(REPO / "target/release/bin/cjcj::cjc")
 )
 DIS = f"{CANGJIE_HOME}/third_party/llvm/bin/llvm-dis"
 

@@ -1,4 +1,4 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 public class AttributeInfo {
     private var attributesInfo: VArray<UInt64, $2>

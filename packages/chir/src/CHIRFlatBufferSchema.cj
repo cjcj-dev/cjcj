@@ -1,4 +1,4 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 // CHIR FlatBuffer root and file identifier. PackageFormat.fbs:9,1249;
 // PackageFormat_generated.h:8509-8542 (CHIRPackageIdentifier/GetCHIRPackage/FinishCHIRPackageBuffer).

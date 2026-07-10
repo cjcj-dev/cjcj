@@ -1,7 +1,7 @@
-package cangjie_compiler::sema.Desugar.AfterTypeCheck
+package cjcj::sema.Desugar.AfterTypeCheck
 
 import std.collection.*
-import cangjie_compiler::ast.*
+import cjcj::ast.*
 
 private let V_COMPILER: String = "v-compiler"
 

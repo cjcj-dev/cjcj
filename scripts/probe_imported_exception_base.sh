@@ -9,7 +9,7 @@ export LD_LIBRARY_PATH="$CANGJIE_HOME/third_party/llvm/lib:$CANGJIE_HOME/runtime
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 REF=/root/.cjv/bin/cjc
-SELF="$REPO/target/release/bin/cangjie_compiler::cjc"
+SELF="$REPO/target/release/bin/cjcj::cjc"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 

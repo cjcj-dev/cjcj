@@ -1,8 +1,8 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.{
+import cjcj::ast.*
+import cjcj::basic.{
     DiagnosticEngine as BasicDiagnosticEngine,
     DiagArgument as BasicDiagArgument,
     DiagKind as BasicDiagKind,

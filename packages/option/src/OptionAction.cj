@@ -1,18 +1,18 @@
-package cangjie_compiler::option
+package cjcj::option
 
-import cangjie_compiler::basic.DEFAULT_POSITION as BasicDefaultPosition
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.WarnGroup as BasicWarnGroup
-import cangjie_compiler::basic.WarnGroupIndex as BasicWarnGroupIndex
-import cangjie_compiler::basic.WarningOptionMgr as BasicWarningOptionMgr
-import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.NFC as UtilsNFC
-import cangjie_compiler::utils.Semaphore as UtilsSemaphore
-import cangjie_compiler::utils.Stoi as UtilsStoi
-import cangjie_compiler::utils.StringToOverflowStrategy
-import cangjie_compiler::utils.TryParseInt as UtilsTryParseInt
-import cangjie_compiler::utils.ValidOverflowStrategy
+import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.WarnGroup as BasicWarnGroup
+import cjcj::basic.WarnGroupIndex as BasicWarnGroupIndex
+import cjcj::basic.WarningOptionMgr as BasicWarningOptionMgr
+import cjcj::utils.FileUtil
+import cjcj::utils.NFC as UtilsNFC
+import cjcj::utils.Semaphore as UtilsSemaphore
+import cjcj::utils.Stoi as UtilsStoi
+import cjcj::utils.StringToOverflowStrategy
+import cjcj::utils.TryParseInt as UtilsTryParseInt
+import cjcj::utils.ValidOverflowStrategy
 import std.collection.*
 
 private let CANGJIE_VISIBLE_OPTIONS_ONLY: Bool = true

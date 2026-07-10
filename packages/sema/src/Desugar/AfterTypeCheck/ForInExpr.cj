@@ -1,9 +1,9 @@
-package cangjie_compiler::sema.Desugar.AfterTypeCheck
+package cjcj::sema.Desugar.AfterTypeCheck
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::sema.*
 
 private let INDEX_COMPILER: String = "$index-compiler"
 private let STOP_COMPILER: String = "$stop-compiler"

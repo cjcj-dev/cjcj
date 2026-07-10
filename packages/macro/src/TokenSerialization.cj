@@ -1,6 +1,6 @@
-package cangjie_compiler::macro_pkg
+package cjcj::macro_pkg
 
-import cangjie_compiler::basic.Errorln
+import cjcj::basic.Errorln
 import std.collection.*
 
 private func appendUInt16(out: ArrayList<UInt8>, value: UInt16): Unit {

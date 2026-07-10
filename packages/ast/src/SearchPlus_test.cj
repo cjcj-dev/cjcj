@@ -1,3 +1,3 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
 // PORT-DEFERRED: SearchPlusTest cases require parser/compiler-instance file harness.

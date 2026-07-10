@@ -1,9 +1,9 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
-import cangjie_compiler::modules.{GetPackageRelation, PackageRelation}
-import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::utils.StaticCast
+import cjcj::modules.{GetPackageRelation, PackageRelation}
+import cjcj::option.GlobalOptions
+import cjcj::utils.StaticCast
 
 public enum DevirtualTyKind {
     | SUBTYPE_OF | EXACTLY

@@ -1,91 +1,91 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
 
-import cangjie_compiler::utils.{CJC_ASSERT, STATIC_INIT_FUNC}
-import cangjie_compiler::option.{GlobalOptions, OptimizationFlag}
-import cangjie_compiler::basic.Linkage as BasicLinkage
-import cangjie_compiler::ast.ASTKind
-import cangjie_compiler::ast.IsInstanceConstructor as AstIsInstanceConstructor
-import cangjie_compiler::ast.IsValidCFuncConstructorCall
-import cangjie_compiler::ast.GetVarsInitializationOrderWithPositions as AstGetVarsInitializationOrderWithPositions
-import cangjie_compiler::ast.BuiltInDecl
-import cangjie_compiler::ast.BuiltInType
-import cangjie_compiler::ast.ASTKindName
-import cangjie_compiler::ast.ArrayExpr as AstArrayExpr
-import cangjie_compiler::ast.ArrayLit as AstArrayLit
-import cangjie_compiler::ast.AssignExpr as AstAssignExpr
-import cangjie_compiler::ast.Attribute as AstAttribute
-import cangjie_compiler::ast.BinaryExpr as AstBinaryExpr
-import cangjie_compiler::ast.Block as AstBlock
-import cangjie_compiler::ast.CallExpr as AstCallExpr
-import cangjie_compiler::ast.CallKind as AstCallKind
-import cangjie_compiler::ast.ClassDecl as AstClassDecl
-import cangjie_compiler::ast.ClassLikeDecl as AstClassLikeDecl
-import cangjie_compiler::ast.ClassTy as AstClassTy
-import cangjie_compiler::ast.ConstPattern as AstConstPattern
-import cangjie_compiler::ast.Decl as AstDecl
-import cangjie_compiler::ast.DoWhileExpr as AstDoWhileExpr
-import cangjie_compiler::ast.EnumDecl as AstEnumDecl
-import cangjie_compiler::ast.EnumPattern as AstEnumPattern
-import cangjie_compiler::ast.EnumTy as AstEnumTy
-import cangjie_compiler::ast.ExtendDecl as AstExtendDecl
-import cangjie_compiler::ast.Expr as AstExpr
-import cangjie_compiler::ast.ExceptTypePattern as AstExceptTypePattern
-import cangjie_compiler::ast.ForInExpr as AstForInExpr
-import cangjie_compiler::ast.ForInKind as AstForInKind
-import cangjie_compiler::ast.FuncArg as AstFuncArg
-import cangjie_compiler::ast.FuncBody as AstFuncBody
-import cangjie_compiler::ast.FuncDecl as AstFuncDecl
-import cangjie_compiler::ast.FuncTy as AstFuncTy
-import cangjie_compiler::ast.GenericsTy as AstGenericsTy
-import cangjie_compiler::ast.IfExpr as AstIfExpr
-import cangjie_compiler::ast.InterfaceTy as AstInterfaceTy
-import cangjie_compiler::ast.InterfaceDecl as AstInterfaceDecl
-import cangjie_compiler::ast.InheritableDecl as AstInheritableDecl
-import cangjie_compiler::ast.JumpExpr as AstJumpExpr
-import cangjie_compiler::ast.LambdaExpr as AstLambdaExpr
-import cangjie_compiler::ast.LetPatternDestructor as AstLetPatternDestructor
-import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
-import cangjie_compiler::ast.MatchCase as AstMatchCase
-import cangjie_compiler::ast.MainDecl as AstMainDecl
-import cangjie_compiler::ast.MatchExpr as AstMatchExpr
-import cangjie_compiler::ast.MemberAccess as AstMemberAccess
-import cangjie_compiler::ast.NameReferenceExpr as AstNameReferenceExpr
-import cangjie_compiler::ast.Node as AstNode
-import cangjie_compiler::ast.ParenExpr as AstParenExpr
-import cangjie_compiler::ast.Pattern as AstPattern
-import cangjie_compiler::ast.PointerExpr as AstPointerExpr
-import cangjie_compiler::ast.Position as AstPosition
-import cangjie_compiler::ast.PositionStatus as AstPositionStatus
-import cangjie_compiler::ast.PropDecl as AstPropDecl
-import cangjie_compiler::ast.RangeExpr as AstRangeExpr
-import cangjie_compiler::ast.RefExpr as AstRefExpr
-import cangjie_compiler::ast.ReturnExpr as AstReturnExpr
-import cangjie_compiler::ast.SpawnExpr as AstSpawnExpr
-import cangjie_compiler::ast.StructDecl as AstStructDecl
-import cangjie_compiler::ast.StructTy as AstStructTy
-import cangjie_compiler::ast.SubscriptExpr as AstSubscriptExpr
-import cangjie_compiler::ast.SugarKind as AstSugarKind
-import cangjie_compiler::ast.TokenKind as AstTokenKind
-import cangjie_compiler::ast.TokenKindValue as AstTokenKindValue
-import cangjie_compiler::ast.Ty as AstTy
-import cangjie_compiler::ast.TypeKind as AstTypeKind
-import cangjie_compiler::ast.TypeKindInRange as AstTypeKindInRange
-import cangjie_compiler::ast.TupleLit as AstTupleLit
-import cangjie_compiler::ast.TuplePattern as AstTuplePattern
-import cangjie_compiler::ast.TupleTy as AstTupleTy
-import cangjie_compiler::ast.TryExpr as AstTryExpr
-import cangjie_compiler::ast.TypePattern as AstTypePattern
-import cangjie_compiler::ast.TypeConvExpr as AstTypeConvExpr
-import cangjie_compiler::ast.ThrowExpr as AstThrowExpr
-import cangjie_compiler::ast.UnaryExpr as AstUnaryExpr
-import cangjie_compiler::ast.VarDecl as AstVarDecl
-import cangjie_compiler::ast.VarWithPatternDecl as AstVarWithPatternDecl
-import cangjie_compiler::ast.VarOrEnumPattern as AstVarOrEnumPattern
-import cangjie_compiler::ast.VarPattern as AstVarPattern
-import cangjie_compiler::ast.WildcardPattern as AstWildcardPattern
-import cangjie_compiler::ast.WhileExpr as AstWhileExpr
+import cjcj::utils.{CJC_ASSERT, STATIC_INIT_FUNC}
+import cjcj::option.{GlobalOptions, OptimizationFlag}
+import cjcj::basic.Linkage as BasicLinkage
+import cjcj::ast.ASTKind
+import cjcj::ast.IsInstanceConstructor as AstIsInstanceConstructor
+import cjcj::ast.IsValidCFuncConstructorCall
+import cjcj::ast.GetVarsInitializationOrderWithPositions as AstGetVarsInitializationOrderWithPositions
+import cjcj::ast.BuiltInDecl
+import cjcj::ast.BuiltInType
+import cjcj::ast.ASTKindName
+import cjcj::ast.ArrayExpr as AstArrayExpr
+import cjcj::ast.ArrayLit as AstArrayLit
+import cjcj::ast.AssignExpr as AstAssignExpr
+import cjcj::ast.Attribute as AstAttribute
+import cjcj::ast.BinaryExpr as AstBinaryExpr
+import cjcj::ast.Block as AstBlock
+import cjcj::ast.CallExpr as AstCallExpr
+import cjcj::ast.CallKind as AstCallKind
+import cjcj::ast.ClassDecl as AstClassDecl
+import cjcj::ast.ClassLikeDecl as AstClassLikeDecl
+import cjcj::ast.ClassTy as AstClassTy
+import cjcj::ast.ConstPattern as AstConstPattern
+import cjcj::ast.Decl as AstDecl
+import cjcj::ast.DoWhileExpr as AstDoWhileExpr
+import cjcj::ast.EnumDecl as AstEnumDecl
+import cjcj::ast.EnumPattern as AstEnumPattern
+import cjcj::ast.EnumTy as AstEnumTy
+import cjcj::ast.ExtendDecl as AstExtendDecl
+import cjcj::ast.Expr as AstExpr
+import cjcj::ast.ExceptTypePattern as AstExceptTypePattern
+import cjcj::ast.ForInExpr as AstForInExpr
+import cjcj::ast.ForInKind as AstForInKind
+import cjcj::ast.FuncArg as AstFuncArg
+import cjcj::ast.FuncBody as AstFuncBody
+import cjcj::ast.FuncDecl as AstFuncDecl
+import cjcj::ast.FuncTy as AstFuncTy
+import cjcj::ast.GenericsTy as AstGenericsTy
+import cjcj::ast.IfExpr as AstIfExpr
+import cjcj::ast.InterfaceTy as AstInterfaceTy
+import cjcj::ast.InterfaceDecl as AstInterfaceDecl
+import cjcj::ast.InheritableDecl as AstInheritableDecl
+import cjcj::ast.JumpExpr as AstJumpExpr
+import cjcj::ast.LambdaExpr as AstLambdaExpr
+import cjcj::ast.LetPatternDestructor as AstLetPatternDestructor
+import cjcj::ast.LitConstExpr as AstLitConstExpr
+import cjcj::ast.MatchCase as AstMatchCase
+import cjcj::ast.MainDecl as AstMainDecl
+import cjcj::ast.MatchExpr as AstMatchExpr
+import cjcj::ast.MemberAccess as AstMemberAccess
+import cjcj::ast.NameReferenceExpr as AstNameReferenceExpr
+import cjcj::ast.Node as AstNode
+import cjcj::ast.ParenExpr as AstParenExpr
+import cjcj::ast.Pattern as AstPattern
+import cjcj::ast.PointerExpr as AstPointerExpr
+import cjcj::ast.Position as AstPosition
+import cjcj::ast.PositionStatus as AstPositionStatus
+import cjcj::ast.PropDecl as AstPropDecl
+import cjcj::ast.RangeExpr as AstRangeExpr
+import cjcj::ast.RefExpr as AstRefExpr
+import cjcj::ast.ReturnExpr as AstReturnExpr
+import cjcj::ast.SpawnExpr as AstSpawnExpr
+import cjcj::ast.StructDecl as AstStructDecl
+import cjcj::ast.StructTy as AstStructTy
+import cjcj::ast.SubscriptExpr as AstSubscriptExpr
+import cjcj::ast.SugarKind as AstSugarKind
+import cjcj::ast.TokenKind as AstTokenKind
+import cjcj::ast.TokenKindValue as AstTokenKindValue
+import cjcj::ast.Ty as AstTy
+import cjcj::ast.TypeKind as AstTypeKind
+import cjcj::ast.TypeKindInRange as AstTypeKindInRange
+import cjcj::ast.TupleLit as AstTupleLit
+import cjcj::ast.TuplePattern as AstTuplePattern
+import cjcj::ast.TupleTy as AstTupleTy
+import cjcj::ast.TryExpr as AstTryExpr
+import cjcj::ast.TypePattern as AstTypePattern
+import cjcj::ast.TypeConvExpr as AstTypeConvExpr
+import cjcj::ast.ThrowExpr as AstThrowExpr
+import cjcj::ast.UnaryExpr as AstUnaryExpr
+import cjcj::ast.VarDecl as AstVarDecl
+import cjcj::ast.VarWithPatternDecl as AstVarWithPatternDecl
+import cjcj::ast.VarOrEnumPattern as AstVarOrEnumPattern
+import cjcj::ast.VarPattern as AstVarPattern
+import cjcj::ast.WildcardPattern as AstWildcardPattern
+import cjcj::ast.WhileExpr as AstWhileExpr
 
 private class FaithfulLeftValueInfo {
     public let base: Value

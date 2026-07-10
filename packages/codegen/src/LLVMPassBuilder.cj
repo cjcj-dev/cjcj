@@ -1,4 +1,4 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 public type LLVMErrorRef = CPointer<Unit>
 public type LLVMPassBuilderOptionsRef = CPointer<Unit>

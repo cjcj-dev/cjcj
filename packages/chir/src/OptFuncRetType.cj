@@ -1,6 +1,6 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::utils.{CJC_ASSERT, DynamicCast, StaticCast}
+import cjcj::utils.{CJC_ASSERT, DynamicCast, StaticCast}
 
 public class OptFuncRetType {
     private let chirPackage: Package

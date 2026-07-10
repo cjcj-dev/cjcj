@@ -1,8 +1,8 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT}
+import cjcj::chir.ExprKind
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 
 private func GetCodeGenTypeName(llvmType: LLVMTypeRef): String {
     if (unsafe { LLVMGetTypeKind(llvmType) } == 10) {

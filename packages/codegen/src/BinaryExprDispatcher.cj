@@ -1,7 +1,7 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::utils.OverflowStrategy
+import cjcj::chir.ExprKind
+import cjcj::utils.OverflowStrategy
 
 public func HandleBinaryExpression(irBuilder: IRBuilder2, chirExpr: CHIRBinaryExprWrapper): LLVMValueRef {
     let kind = chirExpr.binaryExpr.GetExprKind()

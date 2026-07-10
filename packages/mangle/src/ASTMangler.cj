@@ -1,8 +1,8 @@
-package cangjie_compiler::mangle
+package cjcj::mangle
 
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::ast.*
+import cjcj::ast.*
 
 public let MANGLE_PAREN_PREFIX: String = "P"
 public let MANGLE_OPTION_PREFIX: String = "O"

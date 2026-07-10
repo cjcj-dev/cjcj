@@ -1,4 +1,4 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
 @When[backend == "cjnative"]
 public func IsReferenceType(ty: Ty): Bool {

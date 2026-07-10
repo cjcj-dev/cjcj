@@ -1,30 +1,30 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
 
-import cangjie_compiler::ast.ASTKind as AstASTKind
-import cangjie_compiler::ast.Attribute as AstAttribute
-import cangjie_compiler::ast.ArrayTy as AstArrayTy
-import cangjie_compiler::ast.ClassDecl as AstClassDecl
-import cangjie_compiler::ast.ClassLikeDecl as AstClassLikeDecl
-import cangjie_compiler::ast.ClassTy as AstClassTy
-import cangjie_compiler::ast.Decl as AstDecl
-import cangjie_compiler::ast.EnumDecl as AstEnumDecl
-import cangjie_compiler::ast.EnumTy as AstEnumTy
-import cangjie_compiler::ast.FuncDecl as AstFuncDecl
-import cangjie_compiler::ast.InterfaceTy as AstInterfaceTy
-import cangjie_compiler::ast.InheritableDecl as AstInheritableDecl
-import cangjie_compiler::ast.IsStaticInitializer as AstIsStaticInitializer
-import cangjie_compiler::ast.Node as AstNode
-import cangjie_compiler::ast.PropDecl as AstPropDecl
-import cangjie_compiler::ast.RefEnumTy as AstRefEnumTy
-import cangjie_compiler::ast.StructDecl as AstStructDecl
-import cangjie_compiler::ast.StructTy as AstStructTy
-import cangjie_compiler::ast.Ty as AstTy
-import cangjie_compiler::ast.TypeKind as AstTypeKind
-import cangjie_compiler::ast.VArrayTy as AstVArrayTy
-import cangjie_compiler::ast.VarDecl as AstVarDecl
-import cangjie_compiler::utils.InternalError
+import cjcj::ast.ASTKind as AstASTKind
+import cjcj::ast.Attribute as AstAttribute
+import cjcj::ast.ArrayTy as AstArrayTy
+import cjcj::ast.ClassDecl as AstClassDecl
+import cjcj::ast.ClassLikeDecl as AstClassLikeDecl
+import cjcj::ast.ClassTy as AstClassTy
+import cjcj::ast.Decl as AstDecl
+import cjcj::ast.EnumDecl as AstEnumDecl
+import cjcj::ast.EnumTy as AstEnumTy
+import cjcj::ast.FuncDecl as AstFuncDecl
+import cjcj::ast.InterfaceTy as AstInterfaceTy
+import cjcj::ast.InheritableDecl as AstInheritableDecl
+import cjcj::ast.IsStaticInitializer as AstIsStaticInitializer
+import cjcj::ast.Node as AstNode
+import cjcj::ast.PropDecl as AstPropDecl
+import cjcj::ast.RefEnumTy as AstRefEnumTy
+import cjcj::ast.StructDecl as AstStructDecl
+import cjcj::ast.StructTy as AstStructTy
+import cjcj::ast.Ty as AstTy
+import cjcj::ast.TypeKind as AstTypeKind
+import cjcj::ast.VArrayTy as AstVArrayTy
+import cjcj::ast.VarDecl as AstVarDecl
+import cjcj::utils.InternalError
 
 private func Errorln(info: String): Unit {
     eprintln("ast2chir checker error: " + info)

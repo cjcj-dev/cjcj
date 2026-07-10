@@ -1,8 +1,8 @@
-package cangjie_compiler::sema.Desugar.AfterTypeCheck
+package cjcj::sema.Desugar.AfterTypeCheck
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::sema.*
 
 private let CORE_PACKAGE_NAME: String = "std.core"
 private let EFFECT_INTERNALS_PACKAGE_NAME: String = "stdx.effect"

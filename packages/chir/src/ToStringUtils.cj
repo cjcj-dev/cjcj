@@ -1,7 +1,7 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
-import cangjie_compiler::utils.OverflowStrategy
+import cjcj::utils.OverflowStrategy
 
 public func IndentToString(indent: Int64): String {
     let unit: Int64 = 2

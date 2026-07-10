@@ -1,7 +1,7 @@
-package cangjie_compiler::incremental_compilation
+package cjcj::incremental_compilation
 
 import std.collection.*
-import cangjie_compiler::utils.CJC_ABORT
+import cjcj::utils.CJC_ABORT
 
 public enum UseIndex {
     | BODY

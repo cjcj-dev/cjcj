@@ -1,1 +1,1 @@
-package cangjie_compiler::macro_pkg
+package cjcj::macro_pkg

@@ -9,7 +9,7 @@ TC=/root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029
 export CANGJIE_HOME=$TC
 export LD_LIBRARY_PATH="$CANGJIE_HOME/third_party/llvm/lib:$CANGJIE_HOME/runtime/lib/linux_x86_64_cjnative:$CANGJIE_HOME/tools/lib:${LD_LIBRARY_PATH:-}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-SELF="$REPO/target/release/bin/cangjie_compiler::cjc"
+SELF="$REPO/target/release/bin/cjcj::cjc"
 REF=/root/.cjv/bin/cjc
 
 # ---- single-sample worker: prints exactly one TAB-separated line: STATUS<TAB>name<TAB>detail ----

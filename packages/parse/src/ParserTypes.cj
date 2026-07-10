@@ -1,10 +1,10 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
-import cangjie_compiler::option.BackendType as OptionBackendType
-import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
-import cangjie_compiler::option.InteropLanguage as OptionInteropLanguage
-import cangjie_compiler::option.OutputMode as OptionOutputMode
-import cangjie_compiler::option.TripleInfo as OptionTripleInfo
+import cjcj::option.BackendType as OptionBackendType
+import cjcj::option.GlobalOptions as OptionGlobalOptions
+import cjcj::option.InteropLanguage as OptionInteropLanguage
+import cjcj::option.OutputMode as OptionOutputMode
+import cjcj::option.TripleInfo as OptionTripleInfo
 
 public enum ScopeKind {
     | TOPLEVEL | CLASS_BODY | INTERFACE_BODY | STRUCT_BODY | EXTEND_BODY | FUNC_BODY | MACRO_BODY

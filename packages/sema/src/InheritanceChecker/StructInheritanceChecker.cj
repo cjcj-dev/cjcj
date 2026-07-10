@@ -1,15 +1,15 @@
-package cangjie_compiler::sema.InheritanceChecker
+package cjcj::sema.InheritanceChecker
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::basic.{DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, MakeRange, SubDiagnostic}
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::modules.{GetPackageRelation, PackageRelation, SemaImportManager}
-import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
-import cangjie_compiler::sema.*
-import cangjie_compiler::sema.NativeFFI.{GetAnnotation, GetForeignNameAnnotation}
-import cangjie_compiler::sema.Test.TestManager
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::basic.{DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, MakeRange, SubDiagnostic}
+import cjcj::basic.Range as BasicRange
+import cjcj::modules.{GetPackageRelation, PackageRelation, SemaImportManager}
+import cjcj::option.GlobalOptions as OptionGlobalOptions
+import cjcj::sema.*
+import cjcj::sema.NativeFFI.{GetAnnotation, GetForeignNameAnnotation}
+import cjcj::sema.Test.TestManager
 
 private func DeclRange(decl: Decl): BasicRange {
     return MakeRange(decl.begin, decl.end)

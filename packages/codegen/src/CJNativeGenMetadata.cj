@@ -1,25 +1,25 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::chir.AnnoInfo
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.AttributeInfo
-import cangjie_compiler::chir.ClassDef
-import cangjie_compiler::chir.ClassType
-import cangjie_compiler::chir.CustomTypeDef
-import cangjie_compiler::chir.EnumDef
-import cangjie_compiler::chir.EnumType
-import cangjie_compiler::chir.FuncType
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.GenericType
-import cangjie_compiler::chir.GlobalVar
-import cangjie_compiler::chir.MemberVarInfo
-import cangjie_compiler::chir.Parameter
-import cangjie_compiler::chir.StructDef
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.GetTypeQualifiedName
-import cangjie_compiler::utils.{BOX_DECL_PREFIX, CORE_PACKAGE_NAME, SplitQualifiedName, StaticCast}
+import cjcj::chir.AnnoInfo
+import cjcj::chir.Attribute
+import cjcj::chir.AttributeInfo
+import cjcj::chir.ClassDef
+import cjcj::chir.ClassType
+import cjcj::chir.CustomTypeDef
+import cjcj::chir.EnumDef
+import cjcj::chir.EnumType
+import cjcj::chir.FuncType
+import cjcj::chir.Function
+import cjcj::chir.GenericType
+import cjcj::chir.GlobalVar
+import cjcj::chir.MemberVarInfo
+import cjcj::chir.Parameter
+import cjcj::chir.StructDef
+import cjcj::chir.Type
+import cjcj::chir.GetTypeQualifiedName
+import cjcj::utils.{BOX_DECL_PREFIX, CORE_PACKAGE_NAME, SplitQualifiedName, StaticCast}
 
 private let PRIMITIVE_TIS: Array<String> = [
     "Nothing.ti", "Unit.ti", "Bool.ti", "Rune.ti", "UInt8.ti", "UInt16.ti",

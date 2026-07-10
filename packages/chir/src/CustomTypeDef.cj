@@ -1,8 +1,8 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
-import cangjie_compiler::basic.Linkage as BasicLinkage
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::basic.Linkage as BasicLinkage
+import cjcj::utils.CJC_ASSERT
 
 public class MemberVarInfo {
     public var name: String

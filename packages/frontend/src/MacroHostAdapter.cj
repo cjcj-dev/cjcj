@@ -1,10 +1,10 @@
-package cangjie_compiler::frontend
+package cjcj::frontend
 
-import cangjie_compiler::modules.MacroHost
-import cangjie_compiler::modules.MacroHostImportManager
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.SourceManager
-import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
+import cjcj::modules.MacroHost
+import cjcj::modules.MacroHostImportManager
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.SourceManager
+import cjcj::option.GlobalOptions as OptionGlobalOptions
 
 // Live-backed MacroHost injected into macro_pkg.MacroExpansion so macro expansion operates on the
 // real CompilerInstance state (mirrors C++ MacroExpansion holding CompilerInstance*). The frontend

@@ -1,10 +1,10 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.StructType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.GetTypeQualifiedName
-import cangjie_compiler::utils.StaticCast
+import cjcj::chir.StructType
+import cjcj::chir.Type
+import cjcj::chir.GetTypeQualifiedName
+import cjcj::utils.StaticCast
 
 public class CGStructType <: CGCustomType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type) {

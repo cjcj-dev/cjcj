@@ -1,11 +1,11 @@
-package cangjie_compiler::sema.GenericInstantiation
+package cjcj::sema.GenericInstantiation
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
-import cangjie_compiler::sema.Desugar.AfterTypeCheck.IsNeedRuntimeCheck
-import cangjie_compiler::sema.Test.TestManager as RealTestManager
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::ast.*
+import cjcj::sema.*
+import cjcj::sema.Desugar.AfterTypeCheck.IsNeedRuntimeCheck
+import cjcj::sema.Test.TestManager as RealTestManager
+import cjcj::utils.CJC_ASSERT
 
 private class GenericInstantiationRecord {
     public var genericDecl: Decl

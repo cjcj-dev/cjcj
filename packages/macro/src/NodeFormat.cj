@@ -1,7 +1,7 @@
-package cangjie_compiler::macro_pkg
+package cjcj::macro_pkg
 
 import std.collection.*
-import cangjie_compiler::modules.{FlatBufferBuilder, FlatBufferOffset}
+import cjcj::modules.{FlatBufferBuilder, FlatBufferOffset}
 
 // Generated from schema/NodeFormat.fbs and NodeFormat_generated.h for Macro/NodeSerialization.cpp.
 

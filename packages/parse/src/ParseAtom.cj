@@ -1,7 +1,7 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
 import std.collection.*
-import cangjie_compiler::basic.StringConvertor
+import cjcj::basic.StringConvertor
 
 extend ParserImpl {
     public func SeeingLiteral(): Bool {

@@ -1,9 +1,9 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
-import cangjie_compiler::basic.SplitQualifiedName
-import cangjie_compiler::utils.CJC_ABORT
-import cangjie_compiler::utils.CJC_ASSERT
-import cangjie_compiler::utils.CJC_NULLPTR_CHECK
+import cjcj::basic.SplitQualifiedName
+import cjcj::utils.CJC_ABORT
+import cjcj::utils.CJC_ASSERT
+import cjcj::utils.CJC_NULLPTR_CHECK
 import std.collection.*
 import std.sync.AtomicUInt32
 

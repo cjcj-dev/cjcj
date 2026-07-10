@@ -1,4 +1,4 @@
-package cangjie_compiler::modules
+package cjcj::modules
 
 public type FormattedIndex = UInt32
 

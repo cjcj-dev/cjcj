@@ -1,8 +1,8 @@
-package cangjie_compiler::incremental_compilation
+package cjcj::incremental_compilation
 
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::option.GlobalOptions
+import cjcj::option.GlobalOptions
 
 public let DELIMITER_NUM: Int64 = 60
 

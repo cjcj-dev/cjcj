@@ -1,8 +1,8 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::ast.*
+import cjcj::ast.*
 
 private let ENUM_SUGAR_CORE_PACKAGE_NAME: String = "std.core"
 

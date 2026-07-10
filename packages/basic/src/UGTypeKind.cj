@@ -1,4 +1,4 @@
-package cangjie_compiler::basic
+package cjcj::basic
 
 public enum UGTypeKind {
     | UG_CLASS

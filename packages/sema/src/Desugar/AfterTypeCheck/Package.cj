@@ -1,9 +1,9 @@
-package cangjie_compiler::sema.Desugar.AfterTypeCheck
+package cjcj::sema.Desugar.AfterTypeCheck
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::sema.*
 
 private let STATIC_INIT_VAR_NAME: String = "$init"
 private let STATIC_INIT_FUNC_NAME: String = "static.init"

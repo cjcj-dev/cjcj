@@ -1,14 +1,14 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::basic.Linkage
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.CustomTypeDef
-import cangjie_compiler::chir.EnumType
-import cangjie_compiler::chir.GenericType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::option.OSType
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::basic.Linkage
+import cjcj::chir.Attribute
+import cjcj::chir.CustomTypeDef
+import cjcj::chir.EnumType
+import cjcj::chir.GenericType
+import cjcj::chir.Type
+import cjcj::option.OSType
+import cjcj::utils.CJC_ASSERT
 
 public class EnumCtorLayout {
     public let fieldTypes: ArrayList<Type> = ArrayList<Type>()

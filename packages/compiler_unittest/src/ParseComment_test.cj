@@ -1,11 +1,11 @@
-package cangjie_compiler::compiler_unittest
+package cjcj::compiler_unittest
 
-import cangjie_compiler::ast.*
-import cangjie_compiler::frontend.CompileStage
-import cangjie_compiler::parse.Parser
-import cangjie_compiler::parse.DiagnosticEngine as ParseDiagnosticEngine
-import cangjie_compiler::parse.Position
-import cangjie_compiler::parse.SourceManager
+import cjcj::ast.*
+import cjcj::frontend.CompileStage
+import cjcj::parse.Parser
+import cjcj::parse.DiagnosticEngine as ParseDiagnosticEngine
+import cjcj::parse.Position
+import cjcj::parse.SourceManager
 import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*

@@ -1,9 +1,9 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::option.GlobalOptions as OptionGlobalOptions
 
 private let CORE_PACKAGE_NAME: String = "std.core"
 private let AST_PACKAGE_NAME: String = "std.ast"

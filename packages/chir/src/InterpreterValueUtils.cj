@@ -1,6 +1,6 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::utils.CJC_ABORT
+import cjcj::utils.CJC_ABORT
 import std.collection.*
 
 public class IValUtils {

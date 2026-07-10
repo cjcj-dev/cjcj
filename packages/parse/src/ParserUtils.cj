@@ -1,10 +1,10 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
 import std.collection.*
-import cangjie_compiler::ast.OverloadableExpr as AstOverloadableExpr
-import cangjie_compiler::ast.VisitAction
-import cangjie_compiler::ast.Walker
-import cangjie_compiler::option.IsUnsafeBackend as OptionIsUnsafeBackend
+import cjcj::ast.OverloadableExpr as AstOverloadableExpr
+import cjcj::ast.VisitAction
+import cjcj::ast.Walker
+import cjcj::option.IsUnsafeBackend as OptionIsUnsafeBackend
 
 func LookupMatchingOpenBracket(kind: TokenKind): TokenKind {
     if (kind == TokenKind.RCURL) {

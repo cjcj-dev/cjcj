@@ -1,4 +1,4 @@
-package cangjie_compiler::utils
+package cjcj::utils
 
 foreign {
     func strlen(str: CString): UIntNative

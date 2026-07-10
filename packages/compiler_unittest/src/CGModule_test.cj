@@ -1,9 +1,9 @@
-package cangjie_compiler::compiler_unittest
+package cjcj::compiler_unittest
 
 import std.unittest.*
 import std.unittest.testmacro.*
-import cangjie_compiler::codegen.CGModule
-import cangjie_compiler::option.{ArchType, EnvironmentType, OSType, TripleInfo, Vendor}
+import cjcj::codegen.CGModule
+import cjcj::option.{ArchType, EnvironmentType, OSType, TripleInfo, Vendor}
 
 @Test
 public class CGModuleTest {

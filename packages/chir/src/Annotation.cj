@@ -1,6 +1,6 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::basic.Linkage as BasicLinkage
+import cjcj::basic.Linkage as BasicLinkage
 import std.collection.*
 
 // GAP_TODO: MarkExpressionAsMustNotOverflow ConstAnalysis.h:243 producer absent.

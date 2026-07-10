@@ -1,25 +1,25 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
 
-import cangjie_compiler::ast.Ty as AstTy
-import cangjie_compiler::ast.TypeKind as AstTypeKind
-import cangjie_compiler::ast.TupleTy as AstTupleTy
-import cangjie_compiler::ast.FuncTy as AstFuncTy
-import cangjie_compiler::ast.ArrayTy as AstArrayTy
-import cangjie_compiler::ast.VArrayTy as AstVArrayTy
-import cangjie_compiler::ast.PointerTy as AstPointerTy
-import cangjie_compiler::ast.Decl as AstDecl
-import cangjie_compiler::ast.ClassDecl as AstClassDecl
-import cangjie_compiler::ast.StructDecl as AstStructDecl
-import cangjie_compiler::ast.InterfaceDecl as AstInterfaceDecl
-import cangjie_compiler::ast.EnumDecl as AstEnumDecl
-import cangjie_compiler::ast.GenericParamDecl as AstGenericParamDecl
-import cangjie_compiler::ast.ClassTy as AstClassTy
-import cangjie_compiler::ast.StructTy as AstStructTy
-import cangjie_compiler::ast.InterfaceTy as AstInterfaceTy
-import cangjie_compiler::ast.EnumTy as AstEnumTy
-import cangjie_compiler::ast.GenericsTy as AstGenericsTy
+import cjcj::ast.Ty as AstTy
+import cjcj::ast.TypeKind as AstTypeKind
+import cjcj::ast.TupleTy as AstTupleTy
+import cjcj::ast.FuncTy as AstFuncTy
+import cjcj::ast.ArrayTy as AstArrayTy
+import cjcj::ast.VArrayTy as AstVArrayTy
+import cjcj::ast.PointerTy as AstPointerTy
+import cjcj::ast.Decl as AstDecl
+import cjcj::ast.ClassDecl as AstClassDecl
+import cjcj::ast.StructDecl as AstStructDecl
+import cjcj::ast.InterfaceDecl as AstInterfaceDecl
+import cjcj::ast.EnumDecl as AstEnumDecl
+import cjcj::ast.GenericParamDecl as AstGenericParamDecl
+import cjcj::ast.ClassTy as AstClassTy
+import cjcj::ast.StructTy as AstStructTy
+import cjcj::ast.InterfaceTy as AstInterfaceTy
+import cjcj::ast.EnumTy as AstEnumTy
+import cjcj::ast.GenericsTy as AstGenericsTy
 
 public class CHIRTypeCacheEntry {
     public let astTy: AstTy

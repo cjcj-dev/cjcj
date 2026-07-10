@@ -1,9 +1,9 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.GlobalVar
-import cangjie_compiler::chir.StringLiteral
-import cangjie_compiler::chir.MangleCHIRType
+import cjcj::chir.Attribute
+import cjcj::chir.GlobalVar
+import cjcj::chir.StringLiteral
+import cjcj::chir.MangleCHIRType
 
 private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
     private let cgMod: CGModule

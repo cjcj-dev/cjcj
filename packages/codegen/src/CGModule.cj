@@ -1,26 +1,26 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::basic.Linkage
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.Block
-import cangjie_compiler::chir.CustomTypeDef
-import cangjie_compiler::chir.EnumType
-import cangjie_compiler::chir.ExtendDef
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.FuncType
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.GenericType
-import cangjie_compiler::chir.GlobalVar
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.Value
-import cangjie_compiler::chir.GetTypeArgsQualifiedName
-import cangjie_compiler::option.ArchType
-import cangjie_compiler::option.EnvironmentType
-import cangjie_compiler::option.OSType
-import cangjie_compiler::option.TripleInfo
-import cangjie_compiler::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
+import cjcj::basic.Linkage
+import cjcj::chir.Attribute
+import cjcj::chir.Block
+import cjcj::chir.CustomTypeDef
+import cjcj::chir.EnumType
+import cjcj::chir.ExtendDef
+import cjcj::chir.ExprKind
+import cjcj::chir.Expression
+import cjcj::chir.FuncType
+import cjcj::chir.Function
+import cjcj::chir.GenericType
+import cjcj::chir.GlobalVar
+import cjcj::chir.Type
+import cjcj::chir.Value
+import cjcj::chir.GetTypeArgsQualifiedName
+import cjcj::option.ArchType
+import cjcj::option.EnvironmentType
+import cjcj::option.OSType
+import cjcj::option.TripleInfo
+import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
 private let CJ_PERSONALITY_FUNC_NAME: String = "__cj_personality_v0$"
 

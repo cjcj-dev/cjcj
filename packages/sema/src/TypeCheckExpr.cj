@@ -1,7 +1,7 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
+import cjcj::ast.*
 
 public func CheckOptionBox(typeManager: TypeManager, target: Ty, ty: Ty): Bool {
     if (typeManager.IsSubtype(ty, target)) {

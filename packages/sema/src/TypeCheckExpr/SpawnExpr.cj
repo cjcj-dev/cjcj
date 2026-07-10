@@ -1,16 +1,16 @@
-package cangjie_compiler::sema.TypeCheckExpr
+package cjcj::sema.TypeCheckExpr
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.MakeRange as BasicMakeRange
-import cangjie_compiler::sema.TypeCompatibility
-import cangjie_compiler::sema.TypeManager
-import cangjie_compiler::sema.TypeSubst
-import cangjie_compiler::sema.FieldLookup
-import cangjie_compiler::sema.LookupInfo
+import cjcj::ast.*
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.MakeRange as BasicMakeRange
+import cjcj::sema.TypeCompatibility
+import cjcj::sema.TypeManager
+import cjcj::sema.TypeSubst
+import cjcj::sema.FieldLookup
+import cjcj::sema.LookupInfo
 
 private let SPAWN_SCHEDULER_HANDLE: String = "getSchedulerHandle"
 

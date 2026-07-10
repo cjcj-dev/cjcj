@@ -1,6 +1,6 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
-import cangjie_compiler::ast.*
+import cjcj::ast.*
 
 public func PerformDesugarBeforeTypeCheck(root: Node, desugarMacrocall!: Bool = false,
     compatibleSDKVersion!: String = ""): Unit {

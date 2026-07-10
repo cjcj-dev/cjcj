@@ -1,8 +1,8 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::option.{OptimizationLevel, enumIndex}
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::option.{OptimizationLevel, enumIndex}
+import cjcj::utils.CJC_ASSERT
 
 class LICMOptimizer {
     private let cgMod: CGModule

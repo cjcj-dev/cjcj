@@ -1,14 +1,14 @@
-package cangjie_compiler::sema.GenericInstantiation
+package cjcj::sema.GenericInstantiation
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::sema.*
-import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
-import cangjie_compiler::option.OptimizationLevel
-import cangjie_compiler::option.OutputMode
-import cangjie_compiler::option.enumIndex
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::sema.*
+import cjcj::option.GlobalOptions as OptionGlobalOptions
+import cjcj::option.OptimizationLevel
+import cjcj::option.OutputMode
+import cjcj::option.enumIndex
+import cjcj::utils.CJC_ASSERT
 
 private var currentOptLevel: OptimizationLevel = OptimizationLevel.O0
 private var currentOutputMode: OutputMode = OutputMode.EXECUTABLE

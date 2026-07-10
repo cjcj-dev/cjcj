@@ -1,6 +1,6 @@
-package cangjie_compiler::compiler_unittest
+package cjcj::compiler_unittest
 
-import cangjie_compiler::frontend.*
+import cjcj::frontend.*
 import std.unittest.*
 import std.unittest.testmacro.*
 

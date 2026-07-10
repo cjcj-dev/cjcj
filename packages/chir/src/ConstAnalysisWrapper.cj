@@ -1,6 +1,6 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import std.collection.*
 
 private let OVERHEAD_BLOCK_SIZE: Int64 = 1000

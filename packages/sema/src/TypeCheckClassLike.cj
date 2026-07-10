@@ -1,15 +1,15 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::modules.ImportManager
-import cangjie_compiler::utils.{CJC_ASSERT, INTEROP_JAVA_LANG_PACKAGE, INTEROP_JOBJECT_NAME, OBJ_C_ID_IDENT,
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.Range as BasicRange
+import cjcj::modules.ImportManager
+import cjcj::utils.{CJC_ASSERT, INTEROP_JAVA_LANG_PACKAGE, INTEROP_JOBJECT_NAME, OBJ_C_ID_IDENT,
     OBJ_C_LANG_PACKAGE_IDENT}
 
 private func TypeCheckClassLikeRange(node: Node): BasicRange {

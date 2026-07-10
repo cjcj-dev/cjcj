@@ -1,7 +1,7 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
 import std.collection.*
-import cangjie_compiler::utils.{CJC_ABORT, CJC_NULLPTR_CHECK}
+import cjcj::utils.{CJC_ABORT, CJC_NULLPTR_CHECK}
 
 private func joinPatternStrings(values: ArrayList<Pattern>, delimiter: String): String {
     let parts = ArrayList<String>()

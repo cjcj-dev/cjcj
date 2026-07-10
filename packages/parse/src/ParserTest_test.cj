@@ -1,10 +1,10 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
 import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
-import cangjie_compiler::ast.{VisitAction, Walker}
-import cangjie_compiler::basic.{DiagCategory, DiagKindRefactor}
+import cjcj::ast.{VisitAction, Walker}
+import cjcj::basic.{DiagCategory, DiagKindRefactor}
 
 private let SHARED_CODE = #"
     main(argc:int, argv:string="123") {

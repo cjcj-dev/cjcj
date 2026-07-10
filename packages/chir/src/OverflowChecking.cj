@@ -1,6 +1,6 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::utils.OverflowStrategy
+import cjcj::utils.OverflowStrategy
 
 public struct IntOverflowResult {
     public let isOverflow: Bool

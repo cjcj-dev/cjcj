@@ -1,9 +1,9 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
-import cangjie_compiler::basic.{DiagHelp, SubDiagnostic}
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::option.BackendToString as OptionBackendToString
-import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, CJC_ASSERT_WITH_MSG, InternalError}
+import cjcj::basic.{DiagHelp, SubDiagnostic}
+import cjcj::basic.Range as BasicRange
+import cjcj::option.BackendToString as OptionBackendToString
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_ASSERT_WITH_MSG, InternalError}
 import std.collection.*
 
 private func LookupDiagExpectedIdentifierHandler(kind: ASTKind): String {

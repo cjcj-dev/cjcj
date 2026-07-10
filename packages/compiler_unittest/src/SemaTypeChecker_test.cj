@@ -1,9 +1,9 @@
-package cangjie_compiler::compiler_unittest
+package cjcj::compiler_unittest
 
 import std.unittest.*
 import std.unittest.testmacro.*
-import cangjie_compiler::ast.{FuncTy, TypeKind}
-import cangjie_compiler::frontend.CompileStage
+import cjcj::ast.{FuncTy, TypeKind}
+import cjcj::frontend.CompileStage
 
 @Test
 public class SemaTypeCheckerTest {

@@ -1,7 +1,7 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::basic.StringConvertor
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::basic.StringConvertor
+import cjcj::utils.CJC_ASSERT
 
 public abstract class LiteralValue <: Value {
     public let literalKind: LiteralKind

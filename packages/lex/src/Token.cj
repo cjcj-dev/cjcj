@@ -1,7 +1,7 @@
-package cangjie_compiler::lex
+package cjcj::lex
 
-import cangjie_compiler::basic.*
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::basic.*
+import cjcj::utils.CJC_ASSERT
 import std.collection.*
 
 public struct Token <: Comparable<Token> & Hashable & Equatable<Token> {

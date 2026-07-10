@@ -1,6 +1,6 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::utils.{OverflowStrategy, OverflowStrategyIndex}
+import cjcj::utils.{OverflowStrategy, OverflowStrategyIndex}
 import std.collection.*
 
 public func CHIR2BCHIRTranslateTerminatorExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,

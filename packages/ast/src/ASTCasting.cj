@@ -1,4 +1,4 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
 public func IsDeclNode(node: Node): Bool {
     return node.IsDecl()

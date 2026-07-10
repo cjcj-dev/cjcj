@@ -1,15 +1,15 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.Intrinsic
-import cangjie_compiler::chir.IntrinsicKind
-import cangjie_compiler::chir.IntrinsicKindToString
-import cangjie_compiler::chir.IntrinsicWithException
-import cangjie_compiler::chir.RawArrayType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.Value
+import cjcj::chir.ExprKind
+import cjcj::chir.Expression
+import cjcj::chir.Intrinsic
+import cjcj::chir.IntrinsicKind
+import cjcj::chir.IntrinsicKindToString
+import cjcj::chir.IntrinsicWithException
+import cjcj::chir.RawArrayType
+import cjcj::chir.Type
+import cjcj::chir.Value
 
 private let IS_SUBTYPE_INTRINSIC_NAME: String = "llvm.cj.is.subtype"
 private let LLVM_ARRAY_TYPE_KIND_FOR_INTRINSICS: Int32 = 11

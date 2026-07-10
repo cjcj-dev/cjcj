@@ -1,16 +1,16 @@
-package cangjie_compiler::conditional_compilation
+package cjcj::conditional_compilation
 
-import cangjie_compiler::basic.CANGJIE_VERSION
-import cangjie_compiler::basic.DEFAULT_POSITION
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.SplitLines
-import cangjie_compiler::basic.SplitString
-import cangjie_compiler::option.BackendType
-import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::option.TripleInfo
-import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.NFC as UtilsNFC
+import cjcj::basic.CANGJIE_VERSION
+import cjcj::basic.DEFAULT_POSITION
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.SplitLines
+import cjcj::basic.SplitString
+import cjcj::option.BackendType
+import cjcj::option.GlobalOptions
+import cjcj::option.TripleInfo
+import cjcj::utils.FileUtil
+import cjcj::utils.NFC as UtilsNFC
 import std.collection.*
 
 public class ConditionalCompilationConfig {

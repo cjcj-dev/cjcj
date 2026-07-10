@@ -1,6 +1,6 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
-import cangjie_compiler::chir.Type
+import cjcj::chir.Type
 
 public class CGGenericType <: CGType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type) {

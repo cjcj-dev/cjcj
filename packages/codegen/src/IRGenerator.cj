@@ -1,4 +1,4 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 public interface IRGeneratorImpl {
     func EmitIR(): Unit

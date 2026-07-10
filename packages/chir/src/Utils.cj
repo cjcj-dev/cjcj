@@ -1,13 +1,13 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
-import cangjie_compiler::ast.ASTKind
-import cangjie_compiler::ast.Decl as AstDecl
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.MakeRange as BasicMakeRange
-import cangjie_compiler::basic.Position as BasicPosition
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, FileUtil}
+import cjcj::ast.ASTKind
+import cjcj::ast.Decl as AstDecl
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.MakeRange as BasicMakeRange
+import cjcj::basic.Position as BasicPosition
+import cjcj::basic.Range as BasicRange
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, FileUtil}
 
 public let ANY_TYPE: String = "ANY_TYPE"
 public let NOT_CARE: String = "NOT_CARE"

@@ -1,7 +1,7 @@
-package cangjie_compiler::option
+package cjcj::option
 
-import cangjie_compiler::basic.PrintCommandDesc as BasicPrintCommandDesc
-import cangjie_compiler::basic.PrintIndentOnly as BasicPrintIndentOnly
+import cjcj::basic.PrintCommandDesc as BasicPrintCommandDesc
+import cjcj::basic.PrintIndentOnly as BasicPrintIndentOnly
 import std.collection.*
 import std.core.Option as CoreOption
 

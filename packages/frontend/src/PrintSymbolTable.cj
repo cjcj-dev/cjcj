@@ -1,7 +1,7 @@
-package cangjie_compiler::frontend
+package cjcj::frontend
 
-import cangjie_compiler::basic.{PrintIndent, PrintIndentOnly, PrintNoSplit, Println}
-import cangjie_compiler::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
+import cjcj::basic.{PrintIndent, PrintIndentOnly, PrintNoSplit, Println}
+import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 import std.collection.*
 
 private let ONE_INDENT: UInt64 = 1u64

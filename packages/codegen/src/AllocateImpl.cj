@@ -1,11 +1,11 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Allocate
-import cangjie_compiler::chir.AllocateWithException
-import cangjie_compiler::chir.ClassType
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.Type
+import cjcj::chir.Allocate
+import cjcj::chir.AllocateWithException
+import cjcj::chir.ClassType
+import cjcj::chir.Expression
+import cjcj::chir.Type
 
 public func GenerateAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let allocatedTy: Option<Type> = if (let Some(allocateExpr) <- (chirExpr as Allocate)) {

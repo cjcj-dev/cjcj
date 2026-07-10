@@ -1,6 +1,6 @@
-package cangjie_compiler::macro_pkg
+package cjcj::macro_pkg
 
-import cangjie_compiler::lex.{Lexer as RealLexer, StringPartKind}
+import cjcj::lex.{Lexer as RealLexer, StringPartKind}
 import std.collection.*
 import std.fs.File as FSFile
 import std.fs.exists

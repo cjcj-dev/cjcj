@@ -1,9 +1,9 @@
-package cangjie_compiler::sema.Desugar
+package cjcj::sema.Desugar
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.Plugin.*
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::ast.*
+import cjcj::sema.Plugin.*
+import cjcj::utils.CJC_ASSERT
 
 private let V_COMPILER: String = "v-compiler"
 private let OPTION_VALUE_CTOR: String = "Some"

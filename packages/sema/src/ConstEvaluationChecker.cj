@@ -1,8 +1,8 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
 
 private let CORE_PACKAGE_NAME: String = "std.core"
 

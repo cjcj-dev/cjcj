@@ -1,16 +1,16 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.CHIRContext
-import cangjie_compiler::chir.CHIRBuilder
-import cangjie_compiler::chir.ClassType
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.NoHeapAllocChecker
-import cangjie_compiler::chir.NoWriteBarrierRecChecker
-import cangjie_compiler::chir.Package
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.Value
-import cangjie_compiler::option.GlobalOptions
+import cjcj::chir.CHIRContext
+import cjcj::chir.CHIRBuilder
+import cjcj::chir.ClassType
+import cjcj::chir.Function
+import cjcj::chir.NoHeapAllocChecker
+import cjcj::chir.NoWriteBarrierRecChecker
+import cjcj::chir.Package
+import cjcj::chir.Type
+import cjcj::chir.Value
+import cjcj::option.GlobalOptions
 
 public class CachedMangleMap {
     public let importedInlineDecls: HashSet<String> = HashSet<String>()

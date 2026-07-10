@@ -1,22 +1,22 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.Constant
-import cangjie_compiler::chir.CustomType
-import cangjie_compiler::chir.Box as ChirBox
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.GetElementByName
-import cangjie_compiler::chir.GetElementRef
-import cangjie_compiler::chir.LocalVar
-import cangjie_compiler::chir.RawArrayLiteralInit
-import cangjie_compiler::chir.RawArrayType
-import cangjie_compiler::chir.StoreElementByName
-import cangjie_compiler::chir.StoreElementRef
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.Value
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::chir.Attribute
+import cjcj::chir.Constant
+import cjcj::chir.CustomType
+import cjcj::chir.Box as ChirBox
+import cjcj::chir.Expression
+import cjcj::chir.ExprKind
+import cjcj::chir.GetElementByName
+import cjcj::chir.GetElementRef
+import cjcj::chir.LocalVar
+import cjcj::chir.RawArrayLiteralInit
+import cjcj::chir.RawArrayType
+import cjcj::chir.StoreElementByName
+import cjcj::chir.StoreElementRef
+import cjcj::chir.Type
+import cjcj::chir.Value
+import cjcj::utils.CJC_ASSERT
 
 private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
 private let LLVM_ARRAY_TYPE_KIND: Int32 = 11

@@ -1,4 +1,4 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 public type LLVMTargetDataRef = CPointer<Unit>
 public type LLVMTargetLibraryInfoRef = CPointer<Unit>

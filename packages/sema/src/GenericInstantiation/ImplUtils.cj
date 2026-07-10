@@ -1,9 +1,9 @@
-package cangjie_compiler::sema.GenericInstantiation
+package cjcj::sema.GenericInstantiation
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
-import cangjie_compiler::sema.Test.TestManager
+import cjcj::ast.*
+import cjcj::sema.*
+import cjcj::sema.Test.TestManager
 
 public func GetDeclTy(decl: Decl): Option<Ty> {
     if (decl.astKind == ASTKind.EXTEND_DECL) {

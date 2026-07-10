@@ -1,11 +1,11 @@
-package cangjie_compiler::sema.Test
+package cjcj::sema.Test
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.GetUsableGetterForProperty
-import cangjie_compiler::sema.GetUsableSetterForProperty
-import cangjie_compiler::sema.SameTy
-import cangjie_compiler::sema.TypeManager
+import cjcj::ast.*
+import cjcj::sema.GetUsableGetterForProperty
+import cjcj::sema.GetUsableSetterForProperty
+import cjcj::sema.SameTy
+import cjcj::sema.TypeManager
 
 foreign {
     func abort(): Unit

@@ -1,7 +1,7 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
-import cangjie_compiler::chir.Constant
-import cangjie_compiler::chir.LiteralValue
+import cjcj::chir.Constant
+import cjcj::chir.LiteralValue
 
 public func HandleConstantExpression(irBuilder: IRBuilder2, chirConst: Constant): LLVMValueRef {
     if (let Some(resultTy) <- chirConst.GetResultType()) {

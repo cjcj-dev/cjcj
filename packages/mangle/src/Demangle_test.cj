@@ -1,4 +1,4 @@
-package cangjie_compiler::mangle
+package cjcj::mangle
 
 import std.unittest.*
 import std.unittest.testmacro.*

@@ -1,16 +1,16 @@
-package cangjie_compiler::option
+package cjcj::option
 
-import cangjie_compiler::basic.DEFAULT_POSITION as BasicDefaultPosition
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::utils.AccessResultType as UtilsAccessResultType
-import cangjie_compiler::utils.CJC_ABORT
-import cangjie_compiler::utils.CJC_ASSERT
-import cangjie_compiler::utils.FileMode as UtilsFileMode
-import cangjie_compiler::utils.Out64
-import cangjie_compiler::utils.OverflowStrategy
-import cangjie_compiler::utils.Semaphore as UtilsSemaphore
-import cangjie_compiler::utils.TryParseInt as UtilsTryParseInt
+import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::utils.AccessResultType as UtilsAccessResultType
+import cjcj::utils.CJC_ABORT
+import cjcj::utils.CJC_ASSERT
+import cjcj::utils.FileMode as UtilsFileMode
+import cjcj::utils.Out64
+import cjcj::utils.OverflowStrategy
+import cjcj::utils.Semaphore as UtilsSemaphore
+import cjcj::utils.TryParseInt as UtilsTryParseInt
 import std.collection.*
 import std.core.Option as CoreOption
 

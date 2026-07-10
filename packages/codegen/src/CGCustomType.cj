@@ -1,9 +1,9 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.CustomType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::utils.{CJC_ASSERT_WITH_MSG, StaticCast}
+import cjcj::chir.CustomType
+import cjcj::chir.Type
+import cjcj::utils.{CJC_ASSERT_WITH_MSG, StaticCast}
 
 public open class CGCustomType <: CGType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type, cgTypeKind!: CGTypeKind = CGTypeKind.OTHERS) {

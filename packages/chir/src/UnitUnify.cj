@@ -1,4 +1,4 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 private class UnitUnifyState {
     public var unitConstant: Option<Constant> = None

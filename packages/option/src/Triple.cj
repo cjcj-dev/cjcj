@@ -1,4 +1,4 @@
-package cangjie_compiler::option
+package cjcj::option
 
 @When[arch == "x86_64"]
 private func DefaultHostArch(): ArchType { return ArchType.X86_64 }

@@ -1,13 +1,13 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
 @When[os == "Windows"]
-import cangjie_compiler::utils.GetApplicationPath
+import cjcj::utils.GetApplicationPath
 @When[!debug && os != "Windows"]
-import cangjie_compiler::utils.{CreateAltSignalStack, RegisterCrashSignalHandler}
+import cjcj::utils.{CreateAltSignalStack, RegisterCrashSignalHandler}
 @When[!debug && os == "Windows"]
-import cangjie_compiler::utils.{RegisterCrashExceptionHandler, RegisterCrashSignalHandler}
-import cangjie_compiler::macro_pkg.RuntimeInit
-import cangjie_compiler::utils.{InternalError, NullPointerException, RegisterCrtlCSignalHandler, TriggerPointSetter}
+import cjcj::utils.{RegisterCrashExceptionHandler, RegisterCrashSignalHandler}
+import cjcj::macro_pkg.RuntimeInit
+import cjcj::utils.{InternalError, NullPointerException, RegisterCrtlCSignalHandler, TriggerPointSetter}
 
 @When[!debug && os != "Windows"]
 private func RegisterSignalHandler(): Unit {

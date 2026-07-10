@@ -1,12 +1,12 @@
-package cangjie_compiler::sema.TypeCheckExpr
+package cjcj::sema.TypeCheckExpr
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::modules.SemaImportManager
-import cangjie_compiler::sema.*
-import cangjie_compiler::sema.Desugar.*
+import cjcj::ast.*
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::modules.SemaImportManager
+import cjcj::sema.*
+import cjcj::sema.Desugar.*
 
 func TcUnitTy(): Ty {
     return TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)

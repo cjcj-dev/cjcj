@@ -1,9 +1,9 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
 import std.collection.*
-import cangjie_compiler::ast.Expr as AstExpr
-import cangjie_compiler::ast.MemberAccess as AstMemberAccess
-import cangjie_compiler::ast.RefExpr as AstRefExpr
+import cjcj::ast.Expr as AstExpr
+import cjcj::ast.MemberAccess as AstMemberAccess
+import cjcj::ast.RefExpr as AstRefExpr
 
 extend ParserImpl {
     public func ParsePattern(): Pattern {

@@ -1,21 +1,21 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.CHIRBuilder
-import cangjie_compiler::chir.CustomType
-import cangjie_compiler::chir.FuncType
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.GenericType
-import cangjie_compiler::chir.LocalVar
-import cangjie_compiler::chir.RefType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.TypeKind
-import cangjie_compiler::chir.Value
-import cangjie_compiler::chir.GetCustomTypeIdentifier
-import cangjie_compiler::chir.GetTypeQualifiedName
-import cangjie_compiler::option.ArchType
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::chir.Attribute
+import cjcj::chir.CHIRBuilder
+import cjcj::chir.CustomType
+import cjcj::chir.FuncType
+import cjcj::chir.Function
+import cjcj::chir.GenericType
+import cjcj::chir.LocalVar
+import cjcj::chir.RefType
+import cjcj::chir.Type
+import cjcj::chir.TypeKind
+import cjcj::chir.Value
+import cjcj::chir.GetCustomTypeIdentifier
+import cjcj::chir.GetTypeQualifiedName
+import cjcj::option.ArchType
+import cjcj::utils.CJC_ASSERT
 
 private let LLVM_FUNCTION_TYPE_KIND: Int32 = 9
 private let LLVM_STRUCT_TYPE_KIND: Int32 = 10

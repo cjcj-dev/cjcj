@@ -1,6 +1,6 @@
-package cangjie_compiler::conditional_compilation
+package cjcj::conditional_compilation
 
-import cangjie_compiler::ast.*
+import cjcj::ast.*
 
 private func AppendCacheField(key: StringBuilder, field: String): Unit {
     key.append(field)

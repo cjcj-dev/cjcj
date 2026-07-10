@@ -1,12 +1,12 @@
-package cangjie_compiler::modules
+package cjcj::modules
 
 import std.collection.*
-import cangjie_compiler::ast.Decl as ASTDecl
-import cangjie_compiler::ast.File as ASTFile
-import cangjie_compiler::ast.Package as ASTPackage
-import cangjie_compiler::basic.DiagnosticEngine
-import cangjie_compiler::basic.SourceManager
-import cangjie_compiler::option.GlobalOptions
+import cjcj::ast.Decl as ASTDecl
+import cjcj::ast.File as ASTFile
+import cjcj::ast.Package as ASTPackage
+import cjcj::basic.DiagnosticEngine
+import cjcj::basic.SourceManager
+import cjcj::option.GlobalOptions
 
 // Macro-expansion host injection surface (design MACRO_INTEGRATION_DESIGN Option B).
 // The macro package operates over these interfaces instead of a private compat

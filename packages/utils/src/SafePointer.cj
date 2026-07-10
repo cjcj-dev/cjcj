@@ -1,4 +1,4 @@
-package cangjie_compiler::utils
+package cjcj::utils
 
 public class NullPointerException <: Exception {
     public let triggerPoint: Int64

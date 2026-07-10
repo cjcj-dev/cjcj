@@ -1,8 +1,8 @@
-package cangjie_compiler::sema.TypeCheckExpr
+package cjcj::sema.TypeCheckExpr
 
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
-import cangjie_compiler::sema.Plugin.*
+import cjcj::ast.*
+import cjcj::sema.*
+import cjcj::sema.Plugin.*
 
 private let LEVEL_IDENTIFIER: String = "level"
 private let SYSCAP_IDENTIFIER: String = "syscap"

@@ -1,17 +1,17 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::utils.{CJC_NULLPTR_CHECK, PData}
-import cangjie_compiler::basic.Diagnostic as BasicDiagnostic
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.DiagSeverity as BasicDiagSeverity
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
-import cangjie_compiler::basic.Position as BasicPosition
-import cangjie_compiler::modules.SemaImportManager
+import cjcj::ast.*
+import cjcj::utils.{CJC_NULLPTR_CHECK, PData}
+import cjcj::basic.Diagnostic as BasicDiagnostic
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagSeverity as BasicDiagSeverity
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.Position as BasicPosition
+import cjcj::modules.SemaImportManager
 
 public type CallArgChecker = (Ty, FuncArg) -> Bool
 public type CallDesugarChecker = (Ty, Expr) -> Bool

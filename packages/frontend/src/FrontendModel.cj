@@ -1,33 +1,33 @@
-package cangjie_compiler::frontend
+package cjcj::frontend
 
-public import cangjie_compiler::basic.{
+public import cjcj::basic.{
     BEGIN_POSITION, CANGJIE_VERSION, DEFAULT_POSITION, INVALID_POSITION, DiagCategory, DiagColor, DiagKindRefactor,
     DiagHelp, DiagSeverity, DiagnosticBuilder, IntegratedString, MakeRange, Position, PositionStatus, Range, Source,
     SourceManager
 }
-public import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::basic.StringConvertor
-import cangjie_compiler::basic.Diagnostic as BasicDiagnostic
-import cangjie_compiler::basic.DiagFormat as BasicDiagFormat
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.FaithfulUnorderedMap
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::chir.CHIRContext as RealCHIRContext
-import cangjie_compiler::chir.Package as RealCHIRPackage
-import cangjie_compiler::modules.SemaCjoManager
-import cangjie_compiler::modules.SemaImportManager
-import cangjie_compiler::modules.MacroHostImportManager
-import cangjie_compiler::option.OptimizationLevel
-import cangjie_compiler::option.enumIndex
-public import cangjie_compiler::mangle.BaseMangler
-import cangjie_compiler::sema.TypeManager as FaithfulSemaTypeManager
-import cangjie_compiler::sema.Test.TestManager as RealTestManager
-import cangjie_compiler::utils.{AST_PACKAGE_NAME, CORE_PACKAGE_NAME, DynamicCast, EraseIf, JoinStrings, MAIN_INVOKE,
+public import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::basic.StringConvertor
+import cjcj::basic.Diagnostic as BasicDiagnostic
+import cjcj::basic.DiagFormat as BasicDiagFormat
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.FaithfulUnorderedMap
+import cjcj::basic.Range as BasicRange
+import cjcj::chir.CHIRContext as RealCHIRContext
+import cjcj::chir.Package as RealCHIRPackage
+import cjcj::modules.SemaCjoManager
+import cjcj::modules.SemaImportManager
+import cjcj::modules.MacroHostImportManager
+import cjcj::option.OptimizationLevel
+import cjcj::option.enumIndex
+public import cjcj::mangle.BaseMangler
+import cjcj::sema.TypeManager as FaithfulSemaTypeManager
+import cjcj::sema.Test.TestManager as RealTestManager
+import cjcj::utils.{AST_PACKAGE_NAME, CORE_PACKAGE_NAME, DynamicCast, EraseIf, JoinStrings, MAIN_INVOKE,
     SYNC_PACKAGE_NAME}
-import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.ProfileRecorder
-import cangjie_compiler::utils.STANDARD_LIBS
+import cjcj::utils.FileUtil
+import cjcj::utils.ProfileRecorder
+import cjcj::utils.STANDARD_LIBS
 import std.collection.*
 import std.sort.*
 

@@ -1,6 +1,6 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
-import cangjie_compiler::chir.Lambda
+import cjcj::chir.Lambda
 
 public func GenerateLambdaExpression(irBuilder: IRBuilder2, lambdaExpr: Lambda): LLVMValueRef {
     let _ = irBuilder

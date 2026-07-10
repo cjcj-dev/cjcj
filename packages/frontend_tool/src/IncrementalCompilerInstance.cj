@@ -1,13 +1,13 @@
-package cangjie_compiler::frontend_tool
+package cjcj::frontend_tool
 
 import std.collection.*
-import cangjie_compiler::frontend.*
-import cangjie_compiler::incremental_compilation.CachedMangleMap
-import cangjie_compiler::incremental_compilation.IncreKind
-import cangjie_compiler::incremental_compilation.IncrementalCompilationLogger
-import cangjie_compiler::option.OutputMode
-import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.ProfileRecorder
+import cjcj::frontend.*
+import cjcj::incremental_compilation.CachedMangleMap
+import cjcj::incremental_compilation.IncreKind
+import cjcj::incremental_compilation.IncrementalCompilationLogger
+import cjcj::option.OutputMode
+import cjcj::utils.FileUtil
+import cjcj::utils.ProfileRecorder
 
 public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     public let cacheMangles: CachedMangleMap = CachedMangleMap()

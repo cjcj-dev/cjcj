@@ -1,9 +1,9 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.IntType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.TypeKind
+import cjcj::chir.IntType
+import cjcj::chir.Type
+import cjcj::chir.TypeKind
 
 public class CGCPointerType <: CGType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type) {

@@ -1,11 +1,11 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::ast.*
-import cangjie_compiler::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.Range as BasicRange
+import cjcj::ast.*
+import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 
 private func GetParamsType(typeList: Array<Option<Ty>>): String {
     let result = StringBuilder()

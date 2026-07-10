@@ -1,20 +1,20 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::basic.SourceManager
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.DebugLocation
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.FuncType
-import cangjie_compiler::chir.FuncKind
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.GenericType
-import cangjie_compiler::chir.Position
-import cangjie_compiler::chir.Type
-import cangjie_compiler::mangle.MANGLE_CANGJIE_PREFIX
-import cangjie_compiler::mangle.MANGLE_FUNC_PARA_INIT_PREFIX
-import cangjie_compiler::mangle.MANGLE_GLOBAL_VARIABLE_INIT_PREFIX
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::basic.SourceManager
+import cjcj::chir.Attribute
+import cjcj::chir.DebugLocation
+import cjcj::chir.ExprKind
+import cjcj::chir.FuncType
+import cjcj::chir.FuncKind
+import cjcj::chir.Function
+import cjcj::chir.GenericType
+import cjcj::chir.Position
+import cjcj::chir.Type
+import cjcj::mangle.MANGLE_CANGJIE_PREFIX
+import cjcj::mangle.MANGLE_FUNC_PARA_INIT_PREFIX
+import cjcj::mangle.MANGLE_GLOBAL_VARIABLE_INIT_PREFIX
+import cjcj::utils.CJC_ASSERT
 
 // GAP_TODO(C07-debug-location-parity):
 // - EmitExpressionIR.cpp:64-66 enableCompileDebug parameter loads

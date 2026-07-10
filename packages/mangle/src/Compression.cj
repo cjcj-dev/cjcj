@@ -1,7 +1,7 @@
-package cangjie_compiler::mangle
+package cjcj::mangle
 
 import std.collection.*
-import cangjie_compiler::utils.{CJC_ASSERT, Stoi}
+import cjcj::utils.{CJC_ASSERT, Stoi}
 
 public enum EntityType {
     | NAME

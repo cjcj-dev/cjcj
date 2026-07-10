@@ -1,6 +1,6 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::utils.CJC_ASSERT
 import std.sync.AtomicUInt32
 
 public enum VisitAction {

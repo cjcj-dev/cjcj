@@ -1,7 +1,7 @@
-package cangjie_compiler::macro_pkg
+package cjcj::macro_pkg
 
 import std.collection.*
-import cangjie_compiler::basic.{DiagSeverityIndex, Errorln}
+import cjcj::basic.{DiagSeverityIndex, Errorln}
 
 public enum MacroKind {
     | EXPR_KIND

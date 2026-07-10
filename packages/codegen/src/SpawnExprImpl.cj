@@ -1,14 +1,14 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.ClassType
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.Spawn
-import cangjie_compiler::chir.SpawnWithException
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.Value
+import cjcj::chir.ClassType
+import cjcj::chir.ExprKind
+import cjcj::chir.Expression
+import cjcj::chir.Function
+import cjcj::chir.Spawn
+import cjcj::chir.SpawnWithException
+import cjcj::chir.Type
+import cjcj::chir.Value
 
 public func GenerateSpawn(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(spawnExpr) <- (chirExpr as Spawn)) {

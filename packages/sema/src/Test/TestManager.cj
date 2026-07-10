@@ -1,15 +1,15 @@
-package cangjie_compiler::sema.Test
+package cjcj::sema.Test
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::modules.SemaImportManager
-import cangjie_compiler::sema.TypeManager
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.DEFAULT_POSITION as BasicDefaultPosition
-import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
-import cangjie_compiler::option.MockMode
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::modules.SemaImportManager
+import cjcj::sema.TypeManager
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
+import cjcj::option.GlobalOptions as OptionGlobalOptions
+import cjcj::option.MockMode
 
 private let MOCK_ON_COMPILATION_OPTION: String = "--mock=on"
 private let TEST_COMPILATION_OPTION: String = "--test"

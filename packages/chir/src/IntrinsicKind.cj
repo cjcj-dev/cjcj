@@ -1,4 +1,4 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 public enum IntrinsicKind {
     | NOT_INTRINSIC | NOT_IMPLEMENTED | ARRAY_INIT

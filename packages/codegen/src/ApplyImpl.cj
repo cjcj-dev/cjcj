@@ -1,19 +1,19 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.Apply
-import cangjie_compiler::chir.ApplyWithException
-import cangjie_compiler::chir.CustomType
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.FuncType
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.TypeKind
-import cangjie_compiler::chir.Value
-import cangjie_compiler::chir.MangleCHIRType
-import cangjie_compiler::option.{ArchType, OSType}
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::chir.Attribute
+import cjcj::chir.Apply
+import cjcj::chir.ApplyWithException
+import cjcj::chir.CustomType
+import cjcj::chir.Expression
+import cjcj::chir.FuncType
+import cjcj::chir.Function
+import cjcj::chir.Type
+import cjcj::chir.TypeKind
+import cjcj::chir.Value
+import cjcj::chir.MangleCHIRType
+import cjcj::option.{ArchType, OSType}
+import cjcj::utils.CJC_ASSERT
 
 private let LLVM_POINTER_TYPE_KIND: Int32 = 12
 

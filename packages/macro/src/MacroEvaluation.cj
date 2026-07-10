@@ -1,16 +1,16 @@
-package cangjie_compiler::macro_pkg
+package cjcj::macro_pkg
 
-import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
-import cangjie_compiler::basic.DiagCategory as EvalParsedDiagCategory
-import cangjie_compiler::basic.DiagnosticEngine as EvalParsedDiagnosticEngine
-import cangjie_compiler::lex.{Lexer as RealLexer, StringPartKind}
-import cangjie_compiler::parse.File as EvalParsedFile
-import cangjie_compiler::parse.IsBuiltinAnnotation as ParseIsBuiltinAnnotation
-import cangjie_compiler::parse.PackageSpec as EvalParsedPackageSpec
-import cangjie_compiler::parse.Parser as EvalParser
-import cangjie_compiler::parse.ScopeKind as EvalParsedScopeKind
-import cangjie_compiler::parse.SrcIdentifier as EvalParsedSrcIdentifier
-import cangjie_compiler::ast.{VisitAction, Walker}
+import cjcj::basic.SplitQualifiedName as BasicSplitQualifiedName
+import cjcj::basic.DiagCategory as EvalParsedDiagCategory
+import cjcj::basic.DiagnosticEngine as EvalParsedDiagnosticEngine
+import cjcj::lex.{Lexer as RealLexer, StringPartKind}
+import cjcj::parse.File as EvalParsedFile
+import cjcj::parse.IsBuiltinAnnotation as ParseIsBuiltinAnnotation
+import cjcj::parse.PackageSpec as EvalParsedPackageSpec
+import cjcj::parse.Parser as EvalParser
+import cjcj::parse.ScopeKind as EvalParsedScopeKind
+import cjcj::parse.SrcIdentifier as EvalParsedSrcIdentifier
+import cjcj::ast.{VisitAction, Walker}
 import std.collection.*
 
 private func appendTokens(target: ArrayList<Token>, source: ArrayList<Token>): Unit {

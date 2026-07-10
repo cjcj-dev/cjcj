@@ -1,9 +1,9 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::basic.Linkage as BasicLinkage
+import cjcj::basic.Linkage as BasicLinkage
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::utils.{CJC_ASSERT, OverflowStrategy, Stoi}
+import cjcj::utils.{CJC_ASSERT, OverflowStrategy, Stoi}
 
 private let MANGLE_CANGJIE_PREFIX: String = "_C"
 private let MANGLE_NESTED_PREFIX: String = "N"

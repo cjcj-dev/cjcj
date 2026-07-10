@@ -1,7 +1,7 @@
-package cangjie_compiler::sema.Desugar.AfterTypeCheck
+package cjcj::sema.Desugar.AfterTypeCheck
 
-import cangjie_compiler::ast.*
-import cangjie_compiler::option.GlobalOptions
+import cjcj::ast.*
+import cjcj::option.GlobalOptions
 
 private func IsArrayArgLineInfoKind(kind: ASTKind): Bool {
     return kind == ASTKind.LIT_CONST_EXPR || kind == ASTKind.REF_EXPR || kind == ASTKind.ARRAY_LIT ||

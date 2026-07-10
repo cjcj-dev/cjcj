@@ -1,8 +1,8 @@
-package cangjie_compiler::frontend_tool
+package cjcj::frontend_tool
 
-import cangjie_compiler::frontend.*
-import cangjie_compiler::option.OutputMode
-import cangjie_compiler::utils.ProfileRecorder
+import cjcj::frontend.*
+import cjcj::option.OutputMode
+import cjcj::utils.ProfileRecorder
 
 public class CjdCompilerInstance <: DefaultCompilerInstance {
     public init(invocation: CompilerInvocation, diag: DiagnosticEngine) {

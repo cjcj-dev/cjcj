@@ -1,4 +1,4 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 foreign {
     func LLVMCreateMemoryBufferWithContentsOfFile(path: CString, outMemBuf: CPointer<LLVMMemoryBufferRef>,

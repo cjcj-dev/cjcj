@@ -1,4 +1,4 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 public let UI64_WIDTH: UInt64 = 64u64
 public let I64_WIDTH: UInt64 = 64u64

@@ -1,12 +1,12 @@
-package cangjie_compiler::sema.LegalityOfUsage
+package cjcj::sema.LegalityOfUsage
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.MakeRange as BasicMakeRange
-import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.MakeRange as BasicMakeRange
+import cjcj::option.GlobalOptions as OptionGlobalOptions
+import cjcj::sema.*
 
 private class BoolBox {
     public var value: Bool

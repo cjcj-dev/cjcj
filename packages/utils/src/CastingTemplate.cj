@@ -1,1 +1,1 @@
-package cangjie_compiler::utils
+package cjcj::utils

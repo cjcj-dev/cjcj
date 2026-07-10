@@ -2,7 +2,7 @@
 set -euo pipefail
 
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-readonly CJC="${REPO_ROOT}/target/release/bin/cangjie_compiler::cjc"
+readonly CJC="${REPO_ROOT}/target/release/bin/cjcj::cjc"
 
 export CANGJIE_HOME=/root/.cjv/toolchains/nightly-1.1.0-alpha.20260331010029
 export LD_LIBRARY_PATH="${CANGJIE_HOME}/third_party/llvm/lib:${CANGJIE_HOME}/runtime/lib/linux_x86_64_cjnative:${CANGJIE_HOME}/tools/lib:${LD_LIBRARY_PATH:-}"

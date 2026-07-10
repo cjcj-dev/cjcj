@@ -1,4 +1,4 @@
-package cangjie_compiler::utils
+package cjcj::utils
 
 public let STOINT_BASE: Int32 = 10
 

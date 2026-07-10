@@ -1,6 +1,6 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
-import cangjie_compiler::basic.StringConvertor
+import cjcj::basic.StringConvertor
 import std.collection.*
 
 public func PrintNode(node: Node, indent!: UInt64 = 0, addition!: String = ""): String {

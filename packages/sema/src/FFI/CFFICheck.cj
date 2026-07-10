@@ -1,18 +1,18 @@
-package cangjie_compiler::sema.FFI
+package cjcj::sema.FFI
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::sema.*
-import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.Position as BasicPosition
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::option.BackendType as OptionBackendType
-import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
-import cangjie_compiler::option.IsUnsafeBackend as OptionIsUnsafeBackend
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::sema.*
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.Position as BasicPosition
+import cjcj::basic.Range as BasicRange
+import cjcj::option.BackendType as OptionBackendType
+import cjcj::option.GlobalOptions as OptionGlobalOptions
+import cjcj::option.IsUnsafeBackend as OptionIsUnsafeBackend
 
 private let CFUNC_NAME: String = "CFunc"
 

@@ -1,4 +1,4 @@
-package cangjie_compiler::mangle
+package cjcj::mangle
 
 // Mirrors demangler/Utils.h:MANGLE_STDPKG_MAP.
 func MANGLE_STDPKG_MAP(pkg: String): Option<String> {

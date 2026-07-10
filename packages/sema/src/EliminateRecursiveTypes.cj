@@ -1,8 +1,8 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::ast.*
+import cjcj::utils.CJC_ASSERT
 
 private class RecursiveEdgeEntry {
     public var decl: Decl

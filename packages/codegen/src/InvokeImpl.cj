@@ -1,19 +1,19 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.ClassDef
-import cangjie_compiler::chir.ClassType
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.GetMethodIdxInAutoEnvObject
-import cangjie_compiler::chir.GetTypeQualifiedName
-import cangjie_compiler::chir.Invoke
-import cangjie_compiler::chir.InvokeStatic
-import cangjie_compiler::chir.InvokeStaticWithException
-import cangjie_compiler::chir.InvokeWithException
-import cangjie_compiler::chir.Type
-import cangjie_compiler::option.{OptimizationLevel, enumIndex}
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::chir.Attribute
+import cjcj::chir.ClassDef
+import cjcj::chir.ClassType
+import cjcj::chir.Expression
+import cjcj::chir.GetMethodIdxInAutoEnvObject
+import cjcj::chir.GetTypeQualifiedName
+import cjcj::chir.Invoke
+import cjcj::chir.InvokeStatic
+import cjcj::chir.InvokeStaticWithException
+import cjcj::chir.InvokeWithException
+import cjcj::chir.Type
+import cjcj::option.{OptimizationLevel, enumIndex}
+import cjcj::utils.CJC_ASSERT
 
 public func GenerateInvokeExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(invokeExpr) <- (chirExpr as Invoke)) {

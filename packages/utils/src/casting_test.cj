@@ -1,4 +1,4 @@
-package cangjie_compiler::utils
+package cjcj::utils
 
 // PORT-DEFERRED: Utils/CastASTTests.VerifyCastingCount, VerifyMonoCasting, VerifyIntermediateCasting,
 // TryAddNewType, and VerifyStaticCasting require the C++ ASTCasting template/RTTI surface from

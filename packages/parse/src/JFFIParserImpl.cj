@@ -1,7 +1,7 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
 import std.collection.*
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::utils.CJC_ASSERT
 
 public class JFFIParserImpl {
     public let parser: ParserImpl

@@ -1,12 +1,12 @@
-package cangjie_compiler::macro_pkg
+package cjcj::macro_pkg
 
-import cangjie_compiler::ast.{
+import cjcj::ast.{
     AnnotationKindIndex, AssignExpr, ASTKindName, FeatureId, FeaturesDirective, FeaturesSet, GenericConstraint,
     MainDecl, OverflowStrategyName, PackageSpec, PrimaryCtorDecl, PropDecl, SortModifierByPos, StringKindIndex,
     TypeAliasDecl
 }
-import cangjie_compiler::basic.Errorln
-import cangjie_compiler::modules.{FlatBufferBuilder, FlatBufferOffset}
+import cjcj::basic.Errorln
+import cjcj::modules.{FlatBufferBuilder, FlatBufferOffset}
 import std.collection.*
 
 public let INITIAL_FILE_SIZE: Int64 = 65536

@@ -1,7 +1,7 @@
-package cangjie_compiler::sema.TypeCheckExpr
+package cjcj::sema.TypeCheckExpr
 
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::sema.*
 
 private func invalidParenExpr(pe: ParenExpr): Ty {
     let invalidTy = TypeManager.GetInvalidTy()

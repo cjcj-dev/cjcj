@@ -1,18 +1,18 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
-public import cangjie_compiler::basic.{
+public import cjcj::basic.{
     BEGIN_POSITION, ClassMapping, DEFAULT_POSITION, GenericTypeArguments, INVALID_POSITION, InteropCJGenericStrategyType,
     InteropCJStrategy, LambdaPattern, Linkage, MacroCallDiagInfo, MakeRange, Position, PositionStatus, Range
 }
-public import cangjie_compiler::lex.{
+public import cjcj::lex.{
     GetContextualKeyword, GetEscapeTokenKinds, IsContextualKeyword, IsExperimental, Len, StringPart, StringPartKind,
     StringPartKindIndex, Token, TokenKind, TokenKindIndex, TokenKindLiteral, TokenKindValue, TokenPrecedence, TokenVecMap
 }
-public import cangjie_compiler::utils.{OverflowStrategy, OverflowStrategyIndex, OverflowStrategyName}
+public import cjcj::utils.{OverflowStrategy, OverflowStrategyIndex, OverflowStrategyName}
 import std.collection.*
 
 // C++ AST consumes these support types from Basic/Lex/Utils. The public imports
-// above re-export them through cangjie_compiler::ast without owning local copies.
+// above re-export them through cjcj::ast without owning local copies.
 public func TokenKindText(kind: TokenKind): String {
     return TokenKindLiteral(kind)
 }

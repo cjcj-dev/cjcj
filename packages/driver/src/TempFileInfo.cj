@@ -1,4 +1,4 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
 public func TempFileKindSuffix(kind: TempFileKind, options: DriverOptions): String {
     return match (kind) {

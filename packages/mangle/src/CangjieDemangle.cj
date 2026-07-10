@@ -1,4 +1,4 @@
-package cangjie_compiler::mangle
+package cjcj::mangle
 
 public class DemangleData {
     private var pkgName: String

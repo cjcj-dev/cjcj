@@ -1,11 +1,11 @@
-package cangjie_compiler::sema.Desugar
+package cjcj::sema.Desugar
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::sema.*
-import cangjie_compiler::sema.Desugar.AfterTypeCheck.*
+import cjcj::ast.*
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::option.GlobalOptions
+import cjcj::sema.*
+import cjcj::sema.Desugar.AfterTypeCheck.*
 
 private func UpdatePosForMacroExpandedNodes(pkgs: ArrayList<Package>): Unit {
     let visit = { curNode: Node =>

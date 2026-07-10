@@ -1,9 +1,9 @@
-package cangjie_compiler::sema.Desugar
+package cjcj::sema.Desugar
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
-import cangjie_compiler::sema.Desugar.AfterTypeCheck.LookupEnumMember
+import cjcj::ast.*
+import cjcj::sema.*
+import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 
 private let OPTION_VALUE_CTOR: String = "Some"
 

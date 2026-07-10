@@ -1,4 +1,4 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
 import std.collection.*
 import std.unittest.*

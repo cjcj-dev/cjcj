@@ -1,15 +1,15 @@
-package cangjie_compiler::conditional_compilation
+package cjcj::conditional_compilation
 
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.SplitString
-import cangjie_compiler::option.BackendToString
-import cangjie_compiler::option.BackendType
-import cangjie_compiler::option.OSType
-import cangjie_compiler::option.TripleInfo
-import cangjie_compiler::utils.{CJC_ASSERT, DynamicCast, EraseIf as UtilsEraseIf}
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.SplitString
+import cjcj::option.BackendToString
+import cjcj::option.BackendType
+import cjcj::option.OSType
+import cjcj::option.TripleInfo
+import cjcj::utils.{CJC_ASSERT, DynamicCast, EraseIf as UtilsEraseIf}
 import std.collection.*
 import std.convert.*
 

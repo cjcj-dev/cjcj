@@ -1,4 +1,4 @@
-package cangjie_compiler::utils
+package cjcj::utils
 
 public func Is<T>(value: Any): Bool {
     return value is T

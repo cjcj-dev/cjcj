@@ -1,8 +1,8 @@
-package cangjie_compiler::sema.TypeCheckExpr
+package cjcj::sema.TypeCheckExpr
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::sema.*
 
 private func LambdaInvalid(le: LambdaExpr): Ty {
     return TcInvalid(le)

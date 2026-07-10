@@ -1,4 +1,4 @@
-package cangjie_compiler::lex
+package cjcj::lex
 
 public let NUM_TOKENS: UInt8 = 200u8
 public let INVALID_PRECEDENCE: UInt8 = 0u8

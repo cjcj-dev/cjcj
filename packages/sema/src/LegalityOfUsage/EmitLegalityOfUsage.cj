@@ -1,12 +1,12 @@
-package cangjie_compiler::sema.LegalityOfUsage
+package cjcj::sema.LegalityOfUsage
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
-import cangjie_compiler::basic.MakeRange as BasicMakeRange
+import cjcj::ast.*
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.MakeRange as BasicMakeRange
 
 // Emit the issues collected by CheckLegalityOfUsage as diagnostics.
 //

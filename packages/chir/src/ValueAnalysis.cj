@@ -1,6 +1,6 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::utils.{BOX_DECL_PREFIX, CJC_ASSERT, CORE_PACKAGE_NAME, InternalError}
+import cjcj::utils.{BOX_DECL_PREFIX, CJC_ASSERT, CORE_PACKAGE_NAME, InternalError}
 import std.collection.*
 
 private var valueAnalysisGlobalChildrenMap: ChildrenMap = ChildrenMap()

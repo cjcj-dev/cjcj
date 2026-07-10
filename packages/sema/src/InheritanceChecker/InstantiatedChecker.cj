@@ -1,10 +1,10 @@
-package cangjie_compiler::sema.InheritanceChecker
+package cjcj::sema.InheritanceChecker
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.{DiagArgument, DiagKind, DiagKindRefactor, MakeRange}
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::basic.{DiagArgument, DiagKind, DiagKindRefactor, MakeRange}
+import cjcj::basic.Range as BasicRange
+import cjcj::sema.*
 
 public class InstantiationTriggerInfo {
     public var node: Node

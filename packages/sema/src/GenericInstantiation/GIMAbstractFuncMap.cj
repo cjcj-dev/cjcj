@@ -1,7 +1,7 @@
-package cangjie_compiler::sema.GenericInstantiation
+package cjcj::sema.GenericInstantiation
 
 import std.collection.*
-import cangjie_compiler::ast.*
+import cjcj::ast.*
 
 public class AbstractFuncMapEntry {
     public var ty: Ty

@@ -1,7 +1,7 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
-import cangjie_compiler::ast.IsStaticInitializer
-import cangjie_compiler::option.OutputModeIndex as OptionOutputModeIndex
+import cjcj::ast.IsStaticInitializer
+import cjcj::option.OutputModeIndex as OptionOutputModeIndex
 import std.collection.*
 
 public class MPParserImpl {

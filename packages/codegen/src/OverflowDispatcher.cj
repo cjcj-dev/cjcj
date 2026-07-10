@@ -1,12 +1,12 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.IntOpWithException
-import cangjie_compiler::chir.IntrinsicKind
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.Value
-import cangjie_compiler::utils.{CJC_ASSERT, OverflowStrategy}
+import cjcj::chir.ExprKind
+import cjcj::chir.IntOpWithException
+import cjcj::chir.IntrinsicKind
+import cjcj::chir.Type
+import cjcj::chir.Value
+import cjcj::utils.{CJC_ASSERT, OverflowStrategy}
 
 private class OverflowIntrinsicInfo {
     public let exprKind: ExprKind

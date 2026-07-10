@@ -1,16 +1,16 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::modules.GetMainPartPkgNameForTestPkg as ModulesGetMainPartPkgNameForTestPkg
-import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
-import cangjie_compiler::modules.IsTestPackage as ModulesIsTestPackage
-import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
+import cjcj::ast.*
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.Range as BasicRange
+import cjcj::modules.GetMainPartPkgNameForTestPkg as ModulesGetMainPartPkgNameForTestPkg
+import cjcj::modules.GetPackageRelation as ModulesGetPackageRelation
+import cjcj::modules.IsTestPackage as ModulesIsTestPackage
+import cjcj::modules.PackageRelation as ModulesPackageRelation
 
 private class InoutUseCacheEntry {
     public var decl: Decl

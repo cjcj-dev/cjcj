@@ -1,4 +1,4 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.fs.File
 

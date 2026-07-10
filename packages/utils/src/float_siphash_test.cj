@@ -1,4 +1,4 @@
-package cangjie_compiler::utils
+package cjcj::utils
 
 import std.unittest.*
 import std.unittest.testmacro.*

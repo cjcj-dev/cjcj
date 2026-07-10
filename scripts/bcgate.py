@@ -14,7 +14,7 @@ bitcode of only a handful of samples, so the expensive run path is taken for jus
 
 Usage:
   python3 scripts/bcgate.py --self <candidate_cjc> [--base <baseline_cjc>] [--corpus DIR] [--run] [-v]
-    --self  PATH   candidate compiler (e.g. a worktree's target/release/bin/cangjie_compiler::cjc)
+    --self  PATH   candidate compiler (e.g. a worktree's target/release/bin/cjcj::cjc)
     --base  PATH   baseline compiler (default: $CANGJIE_HOME/bin/cjc, the reference)
     --corpus DIR   corpus of .cj programs (default: scripts/difftest_corpus)
     --run          for CHANGED samples, compile+run both and compare stdout (else just list them)

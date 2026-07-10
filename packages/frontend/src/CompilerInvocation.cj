@@ -1,4 +1,4 @@
-package cangjie_compiler::frontend
+package cjcj::frontend
 
 import std.collection.*
 

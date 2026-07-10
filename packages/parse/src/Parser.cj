@@ -1,9 +1,9 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.DiagnosticBuilder as BasicDiagnosticBuilder
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.Range as BasicRange
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagnosticBuilder as BasicDiagnosticBuilder
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.Range as BasicRange
 import std.collection.*
 
 public class Parser {

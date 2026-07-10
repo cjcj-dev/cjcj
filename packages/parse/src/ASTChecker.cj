@@ -1,7 +1,7 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
-import cangjie_compiler::ast.{ASTKindName, PointerExpr, VisitAction, Walker}
-import cangjie_compiler::utils.CJC_ABORT
+import cjcj::ast.{ASTKindName, PointerExpr, VisitAction, Walker}
+import cjcj::utils.CJC_ABORT
 import std.collection.*
 
 private func AST_NULLPTR_CHECK<T>(checker: ASTChecker, node: Node, value: Option<T>, subInfo: String): Unit {

@@ -1,8 +1,8 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::option.OSType
+import cjcj::option.OSType
 
 private let RAW_ARRAY_UINT8_KIND: UInt64 = 130u64
 

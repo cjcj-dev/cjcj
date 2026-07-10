@@ -1,8 +1,8 @@
-package cangjie_compiler::sema.Desugar.AfterTypeCheck
+package cjcj::sema.Desugar.AfterTypeCheck
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::sema.*
 
 public func DesugarIsExpr(typeManager: TypeManager, expr: IsExpr): Unit {
     if (!Ty.IsTyCorrect(expr.GetTy())) {

@@ -1,7 +1,7 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
-import cangjie_compiler::utils.{CJC_ASSERT, CORE_PACKAGE_NAME}
+import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME}
 
 private let CONST_EXCEPTIONS: Array<String> = [
     "@_CNat19ArithmeticExceptionE",

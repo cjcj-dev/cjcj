@@ -1,11 +1,11 @@
-package cangjie_compiler::sema.Desugar
+package cjcj::sema.Desugar
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::basic.StringConvertor
-import cangjie_compiler::sema.*
-import cangjie_compiler::utils.{CLASS_ERROR, CLASS_EXCEPTION, GetMacroFuncName, MACRO_OBJECT_NAME, MC_EXCEPTION}
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::basic.StringConvertor
+import cjcj::sema.*
+import cjcj::utils.{CLASS_ERROR, CLASS_EXCEPTION, GetMacroFuncName, MACRO_OBJECT_NAME, MC_EXCEPTION}
 
 private let OPTION_TOKENS: String = "Tokens"
 private let TRANSFORM_TOKENS: String = "transformTokens"

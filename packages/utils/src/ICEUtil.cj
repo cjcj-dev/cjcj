@@ -1,8 +1,8 @@
-package cangjie_compiler::utils
+package cjcj::utils
 
-import cangjie_compiler::basic.ANSI_COLOR_RED
-import cangjie_compiler::basic.ANSI_COLOR_RESET
-import cangjie_compiler::basic.CANGJIE_COMPILER_VERSION
+import cjcj::basic.ANSI_COLOR_RED
+import cjcj::basic.ANSI_COLOR_RESET
+import cjcj::basic.CANGJIE_COMPILER_VERSION
 import std.sync.AtomicBool
 
 public enum CompileStage {

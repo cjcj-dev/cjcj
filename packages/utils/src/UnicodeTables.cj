@@ -1,4 +1,4 @@
-package cangjie_compiler::utils
+package cjcj::utils
 
 // Identifier character ranges mirrored from cangjie_compiler/src/Utils/Unicode.cpp.
 // XID_CONTINUE_RANGES intentionally excludes XID_START_RANGES, matching the C++ tables.

@@ -1,14 +1,14 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.ClassType
-import cangjie_compiler::chir.LocalVar
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.Value
-import cangjie_compiler::chir.VArrayBuilder
-import cangjie_compiler::chir.VArrayType
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::chir.Expression
+import cjcj::chir.ClassType
+import cjcj::chir.LocalVar
+import cjcj::chir.Type
+import cjcj::chir.Value
+import cjcj::chir.VArrayBuilder
+import cjcj::chir.VArrayType
+import cjcj::utils.CJC_ASSERT
 
 public func GenerateVArrayExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(resultTy) <- chirExpr.GetResultType()) {

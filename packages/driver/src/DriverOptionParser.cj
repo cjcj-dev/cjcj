@@ -1,11 +1,11 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
 import std.collection.*
 import std.convert.*
-import cangjie_compiler::option.{
+import cjcj::option.{
     ArgInstanceType, ArgList, CreateOptionTable, GetHardwareConcurrency, Group, ID, Kind, OptionArgInstance, OptionTable
 }
-import cangjie_compiler::utils.Semaphore as UtilsSemaphore
+import cjcj::utils.Semaphore as UtilsSemaphore
 
 private let g_driverOptionTable: OptionTable = CreateOptionTable(frontendMode: false)
 

@@ -1,8 +1,8 @@
-package cangjie_compiler::sema.GenericInstantiation
+package cjcj::sema.GenericInstantiation
 
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
-import cangjie_compiler::utils.{BOX_DECL_PREFIX, CJC_ASSERT, InternalError}
+import cjcj::ast.*
+import cjcj::sema.*
+import cjcj::utils.{BOX_DECL_PREFIX, CJC_ASSERT, InternalError}
 
 class InstantiatedExtendRecorder {
     private var gim: GenericInstantiationManagerImpl

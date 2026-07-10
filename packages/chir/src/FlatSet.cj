@@ -1,4 +1,4 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 public enum ExpressionFlatSetKind {
     | BOTTOM | ELEM | TOP

@@ -1,6 +1,6 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::utils.{CJC_ABORT, OverflowStrategy}
+import cjcj::utils.{CJC_ABORT, OverflowStrategy}
 import std.collection.*
 
 private let RANGE_ANALYSIS_MAX_INQUEUE_TIMES: Int64 = 4

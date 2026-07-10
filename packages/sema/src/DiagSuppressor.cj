@@ -1,6 +1,6 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
-import cangjie_compiler::basic.*
+import cjcj::basic.*
 
 public class DiagSuppressor <: Resource {
     private var diag: Option<DiagnosticEngine> = None

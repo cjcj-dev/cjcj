@@ -1,8 +1,8 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
 import std.collection.*
-import cangjie_compiler::frontend_tool.DriverOptions as FrontendToolDriverOptions
-import cangjie_compiler::frontend_tool.ExecuteFrontendWithResult
+import cjcj::frontend_tool.DriverOptions as FrontendToolDriverOptions
+import cjcj::frontend_tool.ExecuteFrontendWithResult
 
 public func ExecuteFrontendPhase(driver: Driver): Bool {
     if (!PrepareFrontendOutputs(driver.driverOptions)) {

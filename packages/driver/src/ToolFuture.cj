@@ -1,4 +1,4 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
 public open class ToolFuture {
     public var spawnErrorMessage: String = ""

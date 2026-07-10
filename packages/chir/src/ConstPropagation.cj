@@ -1,6 +1,6 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::option.{GlobalOptions, OptimizationFlag}
+import cjcj::option.{GlobalOptions, OptimizationFlag}
 import std.collection.*
 
 private class RewriteInfo {

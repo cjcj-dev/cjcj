@@ -1,4 +1,4 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 public class BCHIRIntrinsic {
     public static func ToByteCodeKind(kind: IntrinsicKind): Int64 {

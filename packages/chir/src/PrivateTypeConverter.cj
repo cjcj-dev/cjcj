@@ -1,7 +1,7 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
-import cangjie_compiler::utils.{CJC_ABORT, StaticCast}
+import cjcj::utils.{CJC_ABORT, StaticCast}
 
 public type ConvertTypeFunc = (Type) -> Type
 

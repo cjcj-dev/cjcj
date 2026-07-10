@@ -1,7 +1,7 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
-import cangjie_compiler::utils.{CJC_ASSERT, OverflowStrategy, OverflowStrategyName}
+import cjcj::utils.{CJC_ASSERT, OverflowStrategy, OverflowStrategyName}
 
 public open class Terminator <: Expression {
     private let successors: ArrayList<Block> = ArrayList<Block>()

@@ -1,24 +1,24 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.CustomDefKind
-import cangjie_compiler::chir.EnumType
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.NoHeapAllocChecker
-import cangjie_compiler::chir.NoWriteBarrierRecChecker
-import cangjie_compiler::chir.Type
-import cangjie_compiler::option.EnvironmentType
-import cangjie_compiler::mangle.MANGLE_FUNC_PARAM_TYPE_PREFIX
-import cangjie_compiler::mangle.MANGLE_VOID_TY_SUFFIX
-import cangjie_compiler::mangle.SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION
-import cangjie_compiler::mangle.SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION
-import cangjie_compiler::mangle.SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION
-import cangjie_compiler::mangle.SPECIAL_NAME_FOR_INIT_RESET_FUNCTION
-import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, StaticCast}
+import cjcj::chir.Attribute
+import cjcj::chir.CustomDefKind
+import cjcj::chir.EnumType
+import cjcj::chir.ExprKind
+import cjcj::chir.Function
+import cjcj::chir.NoHeapAllocChecker
+import cjcj::chir.NoWriteBarrierRecChecker
+import cjcj::chir.Type
+import cjcj::option.EnvironmentType
+import cjcj::mangle.MANGLE_FUNC_PARAM_TYPE_PREFIX
+import cjcj::mangle.MANGLE_VOID_TY_SUFFIX
+import cjcj::mangle.SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION
+import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION
+import cjcj::mangle.SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION
+import cjcj::mangle.SPECIAL_NAME_FOR_INIT_RESET_FUNCTION
+import cjcj::option.GlobalOptions
+import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, StaticCast}
 
 // GAP_TODO(sdk-version-injection): C++ derives this from the CJ_SDK_VERSION build macro
 // (src/Basic/Version.cpp:18 CANGJIE_VERSION = CJ_SDK_VERSION), so it always matches the

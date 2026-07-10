@@ -1,7 +1,7 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::basic.{DiagnosticEngine as BasicDiagnosticEngine, DiagKindRefactor}
-import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, InternalError, OverflowStrategy}
+import cjcj::basic.{DiagnosticEngine as BasicDiagnosticEngine, DiagKindRefactor}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, InternalError, OverflowStrategy}
 import std.collection.*
 
 public type ConstDomain = State<ConstValue, FullStatePool<ConstValue>>

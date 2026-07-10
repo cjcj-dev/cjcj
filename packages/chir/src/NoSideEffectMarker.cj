@@ -1,4 +1,4 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 public class NoSideEffectMarker {
     private let functionWhiteList: Array<FuncInfo> = [

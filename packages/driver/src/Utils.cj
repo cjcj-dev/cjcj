@@ -1,10 +1,10 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
 import std.collection.*
 import std.env.*
 import std.fs.Directory as FSDirectory
 import std.fs.File
-public import cangjie_compiler::utils.{DIR_SEPARATOR, FileUtil, GenerateRandomHexString}
+public import cjcj::utils.{DIR_SEPARATOR, FileUtil, GenerateRandomHexString}
 
 
 public func SplitString(value: String, delimiter: String): Array<String> {

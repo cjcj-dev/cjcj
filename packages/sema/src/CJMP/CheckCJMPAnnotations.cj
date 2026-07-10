@@ -1,10 +1,10 @@
-package cangjie_compiler::sema.CJMP
+package cjcj::sema.CJMP
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::sema.*
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::sema.*
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 
 private func AnnotationKindName(kind: AstAnnotationKind): String {
     return match (kind) {

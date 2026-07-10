@@ -1,6 +1,6 @@
-package cangjie_compiler::meta_transformation
+package cjcj::meta_transformation
 
-import cangjie_compiler::chir.CHIRBuilder
+import cjcj::chir.CHIRBuilder
 import std.collection.*
 
 public type CHIRPluginCallback = (CHIRPluginManager, CHIRBuilder) -> Unit

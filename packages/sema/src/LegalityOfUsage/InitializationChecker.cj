@@ -1,9 +1,9 @@
-package cangjie_compiler::sema.LegalityOfUsage
+package cjcj::sema.LegalityOfUsage
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::option.GlobalOptions as OptionGlobalOptions
+import cjcj::sema.*
 
 public enum InitializationIssueKind {
     | USED_BEFORE_INITIALIZATION

@@ -1,10 +1,10 @@
-package cangjie_compiler::incremental_compilation
+package cjcj::incremental_compilation
 
 import std.collection.*
 import std.fs.File
 import std.fs.exists
-import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::utils.CJC_ABORT
+import cjcj::option.GlobalOptions
+import cjcj::utils.CJC_ABORT
 
 public class IncreResult {
     public var kind: IncreKind = IncreKind.INVALID

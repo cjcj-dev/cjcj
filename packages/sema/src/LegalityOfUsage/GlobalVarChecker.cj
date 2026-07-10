@@ -1,8 +1,8 @@
-package cangjie_compiler::sema.LegalityOfUsage
+package cjcj::sema.LegalityOfUsage
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::sema.*
 
 public enum GlobalVarInitIssueKind {
     | USED_BEFORE_INITIALIZATION

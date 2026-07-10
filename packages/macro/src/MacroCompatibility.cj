@@ -1,31 +1,31 @@
-package cangjie_compiler::macro_pkg
+package cjcj::macro_pkg
 
 import std.collection.*
-import cangjie_compiler::ast.ASTKind as RealASTKind
-import cangjie_compiler::ast.ASTKindIndex as RealASTKindIndex
-import cangjie_compiler::ast.Attribute as RealAttribute
-import cangjie_compiler::ast.AttributePack as RealAttributePack
-import cangjie_compiler::ast.AttributeIndex as RealAttributeIndex
-import cangjie_compiler::ast.ExprKind as RealExprKind
-import cangjie_compiler::ast.Identifier as RealIdentifier
-import cangjie_compiler::ast.Modifier as RealModifier
-import cangjie_compiler::ast.ScopeKind as RealScopeKind
-import cangjie_compiler::ast.TypeKind as RealTypeKind
-import cangjie_compiler::ast.TypeKindIndex as RealTypeKindIndex
-import cangjie_compiler::ast.TypeKindName as RealTypeKindName
-import cangjie_compiler::basic.MakeRange as BasicMakeRange
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::option.GlobalOptions as RealGlobalOptions
+import cjcj::ast.ASTKind as RealASTKind
+import cjcj::ast.ASTKindIndex as RealASTKindIndex
+import cjcj::ast.Attribute as RealAttribute
+import cjcj::ast.AttributePack as RealAttributePack
+import cjcj::ast.AttributeIndex as RealAttributeIndex
+import cjcj::ast.ExprKind as RealExprKind
+import cjcj::ast.Identifier as RealIdentifier
+import cjcj::ast.Modifier as RealModifier
+import cjcj::ast.ScopeKind as RealScopeKind
+import cjcj::ast.TypeKind as RealTypeKind
+import cjcj::ast.TypeKindIndex as RealTypeKindIndex
+import cjcj::ast.TypeKindName as RealTypeKindName
+import cjcj::basic.MakeRange as BasicMakeRange
+import cjcj::basic.Range as BasicRange
+import cjcj::option.GlobalOptions as RealGlobalOptions
 
-public import cangjie_compiler::basic.{
+public import cjcj::basic.{
     BEGIN_POSITION, DEFAULT_POSITION, INVALID_POSITION, DiagArgument, DiagKind, DiagKindRefactor, DiagSeverity,
     Diagnostic, DiagnosticEngine, MacroCallDiagInfo, Position, Source, SourceManager
 }
-public import cangjie_compiler::lex.{Token, TokenKind, TokenKindIndex, TokenKindLiteral}
-public import cangjie_compiler::option.MockMode
-public import cangjie_compiler::modules.{MacroHost, MacroHostImportManager}
+public import cjcj::lex.{Token, TokenKind, TokenKindIndex, TokenKindLiteral}
+public import cjcj::option.MockMode
+public import cjcj::modules.{MacroHost, MacroHostImportManager}
 
-public import cangjie_compiler::ast.{
+public import cjcj::ast.{
     Annotation, ArrayExpr, ArrayLit, AsExpr, BinaryExpr, Block, CallExpr, ClassDecl, CommandTypePattern,
     ConstPattern, ConstantType, Decl, DoWhileExpr, EnumDecl, EnumPattern, ExceptTypePattern, Expr,
     ExtendDecl, File, ForInExpr, FuncArg, FuncBody, FuncDecl, FuncParam, FuncParamList, FuncType, Handler,

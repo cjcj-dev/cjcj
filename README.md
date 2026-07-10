@@ -1,6 +1,6 @@
-# cangjie_compiler_selfhost
+# cjcj
 
-A self-hosting rewrite of the Cangjie compiler (`cangjie_compiler`, originally C++)
+A self-hosting rewrite of the Cangjie compiler (`cjcj`, originally C++)
 into the **Cangjie** language itself.
 
 - **Source of truth (do not modify):** `/root/cj_build/cangjie_compiler` (C++).

@@ -1,11 +1,11 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
 import std.collection.*
-import cangjie_compiler::ast.AddMacroAttr
-import cangjie_compiler::ast.Identifier as AstIdentifier
-import cangjie_compiler::ast.ScopeKind as AstScopeKind
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
+import cjcj::ast.AddMacroAttr
+import cjcj::ast.Identifier as AstIdentifier
+import cjcj::ast.ScopeKind as AstScopeKind
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 
 extend ParserImpl {
     private func IsMacroIdentifierStart(kind: TokenKind): Bool {

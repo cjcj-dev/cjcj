@@ -1,11 +1,11 @@
-package cangjie_compiler::compiler_unittest
+package cjcj::compiler_unittest
 
 import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::frontend.*
-import cangjie_compiler::option.{ArchType, OSType, OutputMode}
+import cjcj::ast.*
+import cjcj::frontend.*
+import cjcj::option.{ArchType, OSType, OutputMode}
 
 private let projectPath: String = ".."
 private let definePath: String = ""

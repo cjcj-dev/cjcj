@@ -1,10 +1,10 @@
-package cangjie_compiler::frontend
+package cjcj::frontend
 
-import cangjie_compiler::basic.GetLineTerminatorLength as BasicGetLineTerminatorLength
-import cangjie_compiler::basic.SplitLines as BasicSplitLines
-import cangjie_compiler::lex.Lexer as CangjieLexer
-import cangjie_compiler::lex.Token as CangjieToken
-import cangjie_compiler::utils.FileUtil
+import cjcj::basic.GetLineTerminatorLength as BasicGetLineTerminatorLength
+import cjcj::basic.SplitLines as BasicSplitLines
+import cjcj::lex.Lexer as CangjieLexer
+import cjcj::lex.Token as CangjieToken
+import cjcj::utils.FileUtil
 import std.collection.*
 
 public func ReadFileContent(path: String): (Bool, String, String) {

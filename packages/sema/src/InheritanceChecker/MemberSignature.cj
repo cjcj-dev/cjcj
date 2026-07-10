@@ -1,8 +1,8 @@
-package cangjie_compiler::sema.InheritanceChecker
+package cjcj::sema.InheritanceChecker
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::sema.*
 
 public class MemberSignature {
     public var decl: Option<Decl> = None

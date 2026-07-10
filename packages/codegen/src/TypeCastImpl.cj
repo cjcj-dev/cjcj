@@ -1,16 +1,16 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Box as ChirBox
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.NumericType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.TypeCast
-import cangjie_compiler::chir.TransformToConcrete
-import cangjie_compiler::chir.TransformToGeneric
-import cangjie_compiler::chir.UnBox
-import cangjie_compiler::chir.UnBoxToRef
-import cangjie_compiler::utils.{CJC_ASSERT_WITH_MSG, OverflowStrategy, StaticCast}
+import cjcj::chir.Box as ChirBox
+import cjcj::chir.Expression
+import cjcj::chir.NumericType
+import cjcj::chir.Type
+import cjcj::chir.TypeCast
+import cjcj::chir.TransformToConcrete
+import cjcj::chir.TransformToGeneric
+import cjcj::chir.UnBox
+import cjcj::chir.UnBoxToRef
+import cjcj::utils.{CJC_ASSERT_WITH_MSG, OverflowStrategy, StaticCast}
 
 private let LLVM_POINTER_TYPE_KIND: Int32 = 12
 

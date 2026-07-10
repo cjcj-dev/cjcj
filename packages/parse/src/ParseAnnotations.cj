@@ -1,6 +1,6 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
-import cangjie_compiler::utils.{StringToOverflowStrategy, StrToLower}
+import cjcj::utils.{StringToOverflowStrategy, StrToLower}
 import std.collection.*
 
 extend ParserImpl {

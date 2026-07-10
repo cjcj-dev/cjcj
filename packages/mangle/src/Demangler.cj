@@ -1,4 +1,4 @@
-package cangjie_compiler::mangle
+package cjcj::mangle
 
 // C++ source mapping:
 // - demangler/Demangler.h and demangler/Demangler.cpp define template Demangler<T> and DemangleInfo<T>.

@@ -1,14 +1,14 @@
-package cangjie_compiler::compiler_unittest
+package cjcj::compiler_unittest
 
 import std.unittest.*
 import std.unittest.testmacro.*
 import std.collection.ArrayList
-import cangjie_compiler::basic.DiagnosticEngine
-import cangjie_compiler::basic.SourceManager
-import cangjie_compiler::lex.Lexer
-import cangjie_compiler::lex.Token as LexToken
-import cangjie_compiler::lex.TokenKind
-import cangjie_compiler::macro_pkg.TokenSerialization
+import cjcj::basic.DiagnosticEngine
+import cjcj::basic.SourceManager
+import cjcj::lex.Lexer
+import cjcj::lex.Token as LexToken
+import cjcj::lex.TokenKind
+import cjcj::macro_pkg.TokenSerialization
 
 private let TOKEN_SERIALIZATION_CODE: String = ##"
 ?:

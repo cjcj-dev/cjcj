@@ -1,10 +1,10 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
+import cjcj::ast.*
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
 
 private func FirstVarDeclOrFirst(values: ArrayList<Decl>): Decl {
     for (decl in values) {

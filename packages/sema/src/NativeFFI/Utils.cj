@@ -1,15 +1,15 @@
-package cangjie_compiler::sema.NativeFFI
+package cjcj::sema.NativeFFI
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::basic.LambdaPattern as BasicLambdaPattern
-import cangjie_compiler::mangle.BaseMangler
-import cangjie_compiler::modules.ImportManager
-import cangjie_compiler::option.GetFileName as OptionGetFileName
-import cangjie_compiler::option.IsDir as OptionIsDir
-import cangjie_compiler::sema.TypeManager
-import cangjie_compiler::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK}
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::basic.LambdaPattern as BasicLambdaPattern
+import cjcj::mangle.BaseMangler
+import cjcj::modules.ImportManager
+import cjcj::option.GetFileName as OptionGetFileName
+import cjcj::option.IsDir as OptionIsDir
+import cjcj::sema.TypeManager
+import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK}
 
 public let NSSTRING_CLASS_IDENT: String = "NSString"
 public let NSOBJECT_CLASS_IDENT: String = "NSObject"

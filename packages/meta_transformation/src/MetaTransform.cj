@@ -1,7 +1,7 @@
-package cangjie_compiler::meta_transformation
+package cjcj::meta_transformation
 
-import cangjie_compiler::chir.Function as CHIRFunction
-import cangjie_compiler::chir.Package as CHIRPackage
+import cjcj::chir.Function as CHIRFunction
+import cjcj::chir.Package as CHIRPackage
 import std.reflect.TypeInfo
 
 public type NativeMetaTransformPluginBuilderRef = CPointer<NativeMetaTransformPluginBuilder>

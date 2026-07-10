@@ -1,11 +1,11 @@
-package cangjie_compiler::sema.CJMP
+package cjcj::sema.CJMP
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
-import cangjie_compiler::sema.InheritanceChecker.*
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::utils.CJC_ASSERT_WITH_MSG
+import cjcj::ast.*
+import cjcj::sema.*
+import cjcj::sema.InheritanceChecker.*
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::utils.CJC_ASSERT_WITH_MSG
 
 private func IsCommon(node: Node): Bool {
     return node.TestAttr(Attribute.COMMON)

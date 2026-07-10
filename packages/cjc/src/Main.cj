@@ -1,9 +1,9 @@
-package cangjie_compiler::cjc
+package cjcj::cjc
 
 import std.env.*
 import std.collection.*
-import cangjie_compiler::driver.RunDriverMain
-import cangjie_compiler::utils.StringifyArgumentVector
+import cjcj::driver.RunDriverMain
+import cjcj::utils.StringifyArgumentVector
 
 private func GetArgumentVector(): Array<String> {
     let command = getCommand()

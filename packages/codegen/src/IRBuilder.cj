@@ -1,38 +1,38 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Apply
-import cangjie_compiler::chir.ApplyWithException
-import cangjie_compiler::chir.BoolLiteral
-import cangjie_compiler::chir.BoxType
-import cangjie_compiler::chir.ClassType
-import cangjie_compiler::chir.CPointerType
-import cangjie_compiler::chir.CustomType
-import cangjie_compiler::chir.EnumType
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.Field
-import cangjie_compiler::chir.FloatLiteral
-import cangjie_compiler::chir.FuncType
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.GenericType
-import cangjie_compiler::chir.GetMethodIdxInAutoEnvObject
-import cangjie_compiler::chir.IntLiteral
-import cangjie_compiler::chir.IntrinsicKind
-import cangjie_compiler::chir.LiteralValue
-import cangjie_compiler::chir.Load
-import cangjie_compiler::chir.LocalVar
-import cangjie_compiler::chir.RawArrayType
-import cangjie_compiler::chir.RuneLiteral
-import cangjie_compiler::chir.StringLiteral
-import cangjie_compiler::chir.StructType
-import cangjie_compiler::chir.TupleType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.TypeCast
-import cangjie_compiler::chir.Value
-import cangjie_compiler::chir.VArrayType
-import cangjie_compiler::option.{ArchType, EnvironmentType, OptimizationLevel}
-import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, StaticCast}
+import cjcj::chir.Apply
+import cjcj::chir.ApplyWithException
+import cjcj::chir.BoolLiteral
+import cjcj::chir.BoxType
+import cjcj::chir.ClassType
+import cjcj::chir.CPointerType
+import cjcj::chir.CustomType
+import cjcj::chir.EnumType
+import cjcj::chir.Expression
+import cjcj::chir.ExprKind
+import cjcj::chir.Field
+import cjcj::chir.FloatLiteral
+import cjcj::chir.FuncType
+import cjcj::chir.Function
+import cjcj::chir.GenericType
+import cjcj::chir.GetMethodIdxInAutoEnvObject
+import cjcj::chir.IntLiteral
+import cjcj::chir.IntrinsicKind
+import cjcj::chir.LiteralValue
+import cjcj::chir.Load
+import cjcj::chir.LocalVar
+import cjcj::chir.RawArrayType
+import cjcj::chir.RuneLiteral
+import cjcj::chir.StringLiteral
+import cjcj::chir.StructType
+import cjcj::chir.TupleType
+import cjcj::chir.Type
+import cjcj::chir.TypeCast
+import cjcj::chir.Value
+import cjcj::chir.VArrayType
+import cjcj::option.{ArchType, EnvironmentType, OptimizationLevel}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, StaticCast}
 
 private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowException_msg"
 private let CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME: String = "rt$CreateArithmeticException_msg"

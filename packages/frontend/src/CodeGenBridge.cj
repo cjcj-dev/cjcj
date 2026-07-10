@@ -1,63 +1,63 @@
-package cangjie_compiler::frontend
+package cjcj::frontend
 
 import std.collection.*
-import cangjie_compiler::basic.Linkage as BasicLinkage
-import cangjie_compiler::chir.Apply as ChirApply
-import cangjie_compiler::chir.ApplyWithException as ChirApplyWithException
-import cangjie_compiler::chir.Attribute as ChirAttribute
-import cangjie_compiler::chir.CHIRBuilder as ChirBuilder
-import cangjie_compiler::chir.CHIRPrinter as ChirCHIRPrinter
-import cangjie_compiler::chir.CHIRType
-import cangjie_compiler::chir.CHIRTypeCache
-import cangjie_compiler::chir.CallGraphAnalysis
-import cangjie_compiler::chir.ClosureConversion
-import cangjie_compiler::chir.ConstAnalysisWrapper
-import cangjie_compiler::chir.ConstPropagation
-import cangjie_compiler::chir.DeadCodeElimination
-import cangjie_compiler::chir.DebugLocation as ChirDebugLocation
-import cangjie_compiler::chir.DevirtualizationInfo
-import cangjie_compiler::chir.ExprKind as ChirExprKind
-import cangjie_compiler::chir.FaithfulAST2CHIR
-import cangjie_compiler::chir.FuncCallContext as ChirFuncCallContext
-import cangjie_compiler::chir.FuncKind as ChirFuncKind
-import cangjie_compiler::chir.FuncSigInfo as ChirFuncSigInfo
-import cangjie_compiler::chir.Function as ChirFunction
-import cangjie_compiler::chir.FunctionInline
-import cangjie_compiler::chir.GetRefToArrayElem
-import cangjie_compiler::chir.INVALID_LOCATION as CHIR_INVALID_LOCATION
-import cangjie_compiler::chir.MergeBlocks
-import cangjie_compiler::chir.MergeEffectMap
-import cangjie_compiler::chir.NoHeapAllocChecker
-import cangjie_compiler::chir.NoWriteBarrierRecChecker
-import cangjie_compiler::chir.OptFuncRetType
-import cangjie_compiler::chir.OptEffectCHIRMap as ChirOptEffectCHIRMap
-import cangjie_compiler::chir.Package as RealCHIRPackage
-import cangjie_compiler::chir.RedundantFutureRemoval
-import cangjie_compiler::chir.RedundantGetOrThrowElimination
-import cangjie_compiler::chir.RedundantLoadElimination
-import cangjie_compiler::chir.ReplaceUsesWithWrapper
-import cangjie_compiler::chir.ShouldReportUnusedCodeWarnings
-import cangjie_compiler::chir.UnitUnify
-import cangjie_compiler::chir.UpdateMemberVarPath
-import cangjie_compiler::chir.UselessAllocateElimination
-import cangjie_compiler::chir.Value as ChirValue
-import cangjie_compiler::ast.Package as RealASTPackage
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::codegen.CHIRData as CodegenCHIRData
-import cangjie_compiler::codegen.ClearPackageModules
-import cangjie_compiler::codegen.GenPackageModules
-import cangjie_compiler::codegen.LLVMModuleHandle as LLVMModuleHandle
-import cangjie_compiler::codegen.SavePackageModule
-import cangjie_compiler::meta_transformation.TryRunCHIRMetaTransforms
-import cangjie_compiler::option.OptimizationFlag
-import cangjie_compiler::option.TempFileInfo
-import cangjie_compiler::utils.CFFI_FUNC_SUFFIX
-import cangjie_compiler::utils.CHIR_READABLE_FILE_EXTENSION
-import cangjie_compiler::utils.CJC_ASSERT
-import cangjie_compiler::utils.DEFAULT_PACKAGE_NAME
-import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.ProfileRecorder
-import cangjie_compiler::utils.REFLECT_PACKAGE_NAME
+import cjcj::basic.Linkage as BasicLinkage
+import cjcj::chir.Apply as ChirApply
+import cjcj::chir.ApplyWithException as ChirApplyWithException
+import cjcj::chir.Attribute as ChirAttribute
+import cjcj::chir.CHIRBuilder as ChirBuilder
+import cjcj::chir.CHIRPrinter as ChirCHIRPrinter
+import cjcj::chir.CHIRType
+import cjcj::chir.CHIRTypeCache
+import cjcj::chir.CallGraphAnalysis
+import cjcj::chir.ClosureConversion
+import cjcj::chir.ConstAnalysisWrapper
+import cjcj::chir.ConstPropagation
+import cjcj::chir.DeadCodeElimination
+import cjcj::chir.DebugLocation as ChirDebugLocation
+import cjcj::chir.DevirtualizationInfo
+import cjcj::chir.ExprKind as ChirExprKind
+import cjcj::chir.FaithfulAST2CHIR
+import cjcj::chir.FuncCallContext as ChirFuncCallContext
+import cjcj::chir.FuncKind as ChirFuncKind
+import cjcj::chir.FuncSigInfo as ChirFuncSigInfo
+import cjcj::chir.Function as ChirFunction
+import cjcj::chir.FunctionInline
+import cjcj::chir.GetRefToArrayElem
+import cjcj::chir.INVALID_LOCATION as CHIR_INVALID_LOCATION
+import cjcj::chir.MergeBlocks
+import cjcj::chir.MergeEffectMap
+import cjcj::chir.NoHeapAllocChecker
+import cjcj::chir.NoWriteBarrierRecChecker
+import cjcj::chir.OptFuncRetType
+import cjcj::chir.OptEffectCHIRMap as ChirOptEffectCHIRMap
+import cjcj::chir.Package as RealCHIRPackage
+import cjcj::chir.RedundantFutureRemoval
+import cjcj::chir.RedundantGetOrThrowElimination
+import cjcj::chir.RedundantLoadElimination
+import cjcj::chir.ReplaceUsesWithWrapper
+import cjcj::chir.ShouldReportUnusedCodeWarnings
+import cjcj::chir.UnitUnify
+import cjcj::chir.UpdateMemberVarPath
+import cjcj::chir.UselessAllocateElimination
+import cjcj::chir.Value as ChirValue
+import cjcj::ast.Package as RealASTPackage
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::codegen.CHIRData as CodegenCHIRData
+import cjcj::codegen.ClearPackageModules
+import cjcj::codegen.GenPackageModules
+import cjcj::codegen.LLVMModuleHandle as LLVMModuleHandle
+import cjcj::codegen.SavePackageModule
+import cjcj::meta_transformation.TryRunCHIRMetaTransforms
+import cjcj::option.OptimizationFlag
+import cjcj::option.TempFileInfo
+import cjcj::utils.CFFI_FUNC_SUFFIX
+import cjcj::utils.CHIR_READABLE_FILE_EXTENSION
+import cjcj::utils.CJC_ASSERT
+import cjcj::utils.DEFAULT_PACKAGE_NAME
+import cjcj::utils.FileUtil
+import cjcj::utils.ProfileRecorder
+import cjcj::utils.REFLECT_PACKAGE_NAME
 
 public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTPackage): Option<RealCHIRPackage> {
     return ToCHIR(instance, pkg).Run()

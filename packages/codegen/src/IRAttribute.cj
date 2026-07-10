@@ -1,8 +1,8 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
-import cangjie_compiler::chir.FuncKind
-import cangjie_compiler::chir.FuncType
-import cangjie_compiler::chir.Function
+import cjcj::chir.FuncKind
+import cjcj::chir.FuncType
+import cjcj::chir.Function
 
 private let LLVM_INTEGER_TYPE_KIND: Int32 = 8
 private let LLVM_ZEROEXT_ATTR: String = "zeroext"

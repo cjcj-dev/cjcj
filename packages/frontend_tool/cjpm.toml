@@ -1,7 +1,7 @@
 [package]
   cjc-version = "1.1.0"
   name = "frontend_tool"
-  organization = "cangjie_compiler"
+  organization = "cjcj"
   description = "Self-hosted Cangjie compiler FrontendTool module scaffold"
   version = "0.1.0"
   target-dir = ""
@@ -14,8 +14,8 @@
   package-configuration = {}
 
 [dependencies]
-  "cangjie_compiler::basic" = { path = "../basic" }
-  "cangjie_compiler::frontend" = { path = "../frontend" }
-  "cangjie_compiler::incremental_compilation" = { path = "../incremental_compilation" }
-  "cangjie_compiler::option" = { path = "../option" }
-  "cangjie_compiler::utils" = { path = "../utils" }
+  "cjcj::basic" = { path = "../basic" }
+  "cjcj::frontend" = { path = "../frontend" }
+  "cjcj::incremental_compilation" = { path = "../incremental_compilation" }
+  "cjcj::option" = { path = "../option" }
+  "cjcj::utils" = { path = "../utils" }

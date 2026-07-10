@@ -1,9 +1,9 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
 import std.core.Box as CoreBox
-import cangjie_compiler::option.{OptimizationLevel, enumIndex}
-import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT}
+import cjcj::option.{OptimizationLevel, enumIndex}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 
 private let INIT_INLINE_THRESHOLD: Int64 = 20
 private let INLINED_COUNT_THRESHOLD: Int64 = 20

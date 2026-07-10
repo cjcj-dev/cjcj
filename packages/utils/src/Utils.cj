@@ -1,10 +1,10 @@
-package cangjie_compiler::utils
+package cjcj::utils
 
-import cangjie_compiler::basic.JoinStrings as BasicJoinStrings
-import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
-import cangjie_compiler::basic.SplitString as BasicSplitString
-import cangjie_compiler::basic.Errorln as Errorf
-import cangjie_compiler::basic.Infoln as Infof
+import cjcj::basic.JoinStrings as BasicJoinStrings
+import cjcj::basic.SplitQualifiedName as BasicSplitQualifiedName
+import cjcj::basic.SplitString as BasicSplitString
+import cjcj::basic.Errorln as Errorf
+import cjcj::basic.Infoln as Infof
 import std.collection.*
 import std.convert.*
 import std.fs.File

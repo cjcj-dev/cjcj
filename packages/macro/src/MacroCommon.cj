@@ -1,7 +1,7 @@
-package cangjie_compiler::macro_pkg
+package cjcj::macro_pkg
 
-import cangjie_compiler::basic.GetLineTerminator
-import cangjie_compiler::lex.Lexer as RealLexer
+import cjcj::basic.GetLineTerminator
+import cjcj::lex.Lexer as RealLexer
 import std.collection.*
 
 public let SOURCE_PACKAGE: String = "sourcePackage"

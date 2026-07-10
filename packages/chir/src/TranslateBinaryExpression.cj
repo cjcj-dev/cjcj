@@ -1,6 +1,6 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::utils.{OverflowStrategy, OverflowStrategyIndex}
+import cjcj::utils.{OverflowStrategy, OverflowStrategyIndex}
 
 public func CHIR2BCHIRTranslateBinaryExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
     let opCode = BCHIRBinaryExprKindToOpCode(expr.GetExprKind())

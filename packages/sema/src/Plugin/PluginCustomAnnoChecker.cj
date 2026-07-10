@@ -1,14 +1,14 @@
-package cangjie_compiler::sema.Plugin
+package cjcj::sema.Plugin
 
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.DEFAULT_POSITION as BasicDefaultPosition
-import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
-import cangjie_compiler::sema.TypeManager
-import cangjie_compiler::utils.FileUtil
+import cjcj::ast.*
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
+import cjcj::option.GlobalOptions as OptionGlobalOptions
+import cjcj::sema.TypeManager
+import cjcj::utils.FileUtil
 
 private let PKG_NAME_OHOS_LABELS: String = "ohos.labels"
 private let APILEVEL_ANNO_NAME: String = "APILevel"

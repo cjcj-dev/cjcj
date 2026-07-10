@@ -8,7 +8,7 @@ export LD_LIBRARY_PATH="$CANGJIE_HOME/third_party/llvm/lib:$CANGJIE_HOME/runtime
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 FIXTURE="$REPO/scripts/septest"
 REF=${REF_CJC:-/root/.cjv/bin/cjc}
-SELF=${SELF_CJC:-"$REPO/target/release/bin/cangjie_compiler::cjc"}
+SELF=${SELF_CJC:-"$REPO/target/release/bin/cjcj::cjc"}
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 

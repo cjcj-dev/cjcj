@@ -1,9 +1,9 @@
-package cangjie_compiler::sema.TypeCheckExpr
+package cjcj::sema.TypeCheckExpr
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
-import cangjie_compiler::sema.Desugar.*
+import cjcj::ast.*
+import cjcj::sema.*
+import cjcj::sema.Desugar.*
 
 private func SubscriptInvalid(se: SubscriptExpr): Ty {
     return TcInvalid(se)

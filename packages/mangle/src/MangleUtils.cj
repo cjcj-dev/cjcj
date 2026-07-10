@@ -1,8 +1,8 @@
-package cangjie_compiler::mangle
+package cjcj::mangle
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::utils.Stoi
+import cjcj::ast.*
+import cjcj::utils.Stoi
 
 public let MANGLE_CANGJIE_PREFIX: String = "_C"
 public let MANGLE_NESTED_PREFIX: String = "N"

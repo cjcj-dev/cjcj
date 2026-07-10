@@ -1,6 +1,6 @@
-package cangjie_compiler::macro_pkg
+package cjcj::macro_pkg
 
-import cangjie_compiler::basic.DiagCategory
+import cjcj::basic.DiagCategory
 import std.collection.*
 import std.convert.*
 

@@ -1,4 +1,4 @@
-package cangjie_compiler::basic
+package cjcj::basic
 
 public let DEFAULT_DIAG_NUM: Int64 = 8
 

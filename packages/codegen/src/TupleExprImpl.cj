@@ -1,14 +1,14 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Constant
-import cangjie_compiler::chir.EnumType
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.LocalVar
-import cangjie_compiler::chir.Tuple
-import cangjie_compiler::chir.Type
-import cangjie_compiler::utils.StaticCast
+import cjcj::chir.Constant
+import cjcj::chir.EnumType
+import cjcj::chir.ExprKind
+import cjcj::chir.Expression
+import cjcj::chir.LocalVar
+import cjcj::chir.Tuple
+import cjcj::chir.Type
+import cjcj::utils.StaticCast
 
 public func GenerateTupleOrAggregateExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(resultTy) <- chirExpr.GetResultType()) {

@@ -1,7 +1,7 @@
 [package]
   cjc-version = "1.1.0"
   name = "compiler_unittest"
-  organization = "cangjie_compiler"
+  organization = "cjcj"
   description = "Downstream compiler unittest harness package"
   version = "0.1.0"
   target-dir = ""
@@ -14,14 +14,14 @@
   package-configuration = {}
 
 [dependencies]
-  "cangjie_compiler::ast" = { path = "../ast" }
-  "cangjie_compiler::basic" = { path = "../basic" }
-  "cangjie_compiler::codegen" = { path = "../codegen" }
-  "cangjie_compiler::driver" = { path = "../driver" }
-  "cangjie_compiler::frontend" = { path = "../frontend" }
-  "cangjie_compiler::lex" = { path = "../lex" }
-  "cangjie_compiler::macro_pkg" = { path = "../macro" }
-  "cangjie_compiler::option" = { path = "../option" }
-  "cangjie_compiler::parse" = { path = "../parse" }
-  "cangjie_compiler::sema" = { path = "../sema" }
-  "cangjie_compiler::utils" = { path = "../utils" }
+  "cjcj::ast" = { path = "../ast" }
+  "cjcj::basic" = { path = "../basic" }
+  "cjcj::codegen" = { path = "../codegen" }
+  "cjcj::driver" = { path = "../driver" }
+  "cjcj::frontend" = { path = "../frontend" }
+  "cjcj::lex" = { path = "../lex" }
+  "cjcj::macro_pkg" = { path = "../macro" }
+  "cjcj::option" = { path = "../option" }
+  "cjcj::parse" = { path = "../parse" }
+  "cjcj::sema" = { path = "../sema" }
+  "cjcj::utils" = { path = "../utils" }

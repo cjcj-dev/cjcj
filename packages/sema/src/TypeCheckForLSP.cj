@@ -1,7 +1,7 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
+import cjcj::ast.*
 
 private let LSP_TYPE_PLACEHOLDER_NAME: String = "$type"
 private let LSP_DEFAULT_RELATIVE_LINE: Int64 = 2147483647

@@ -1,6 +1,6 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::utils.StaticCast
+import cjcj::utils.StaticCast
 
 public class UselessAllocateElimination {
     public init() {}

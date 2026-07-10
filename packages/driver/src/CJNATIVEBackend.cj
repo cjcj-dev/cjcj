@@ -1,7 +1,7 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
 import std.collection.*
-import cangjie_compiler::utils.CJC_ASSERT_WITH_MSG
+import cjcj::utils.CJC_ASSERT_WITH_MSG
 
 public class CJNATIVEBackend <: Backend {
     private var optPath: String = ""

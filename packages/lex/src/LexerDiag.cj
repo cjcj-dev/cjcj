@@ -1,7 +1,7 @@
-package cangjie_compiler::lex
+package cjcj::lex
 
-import cangjie_compiler::basic.*
-import cangjie_compiler::basic.Range as BasicRange
+import cjcj::basic.*
+import cjcj::basic.Range as BasicRange
 
 private func oneArg(value: String): Array<String> {
     return [value]

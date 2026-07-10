@@ -1,16 +1,16 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
-import cangjie_compiler::basic.DiagKindRefactor
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.Linkage as BasicLinkage
-import cangjie_compiler::basic.Position as BasicPosition
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::basic.WarnGroup
-import cangjie_compiler::basic.WarnGroupIndex
-import cangjie_compiler::basic.WarningOptionMgr
-import cangjie_compiler::option.{CompileTarget, GlobalOptions, OutputMode}
-import cangjie_compiler::utils.{ANNOTATION_VAR_POSTFIX, CJC_ABORT, CJC_ASSERT, InternalError, OverflowStrategy,
+import cjcj::basic.DiagKindRefactor
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.Linkage as BasicLinkage
+import cjcj::basic.Position as BasicPosition
+import cjcj::basic.Range as BasicRange
+import cjcj::basic.WarnGroup
+import cjcj::basic.WarnGroupIndex
+import cjcj::basic.WarningOptionMgr
+import cjcj::option.{CompileTarget, GlobalOptions, OutputMode}
+import cjcj::utils.{ANNOTATION_VAR_POSTFIX, CJC_ABORT, CJC_ASSERT, InternalError, OverflowStrategy,
     REFLECT_PACKAGE_NAME}
 
 private let STD_CORE_FUTURE_MANGLED_NAME: String = "_CNat6Future"

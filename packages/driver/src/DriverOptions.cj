@@ -1,12 +1,12 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
 import std.collection.*
-import cangjie_compiler::option.Backend as OptionBackend
-import cangjie_compiler::option.BackendToString as OptionBackendToString
-import cangjie_compiler::option.GetDefaultOutputNameLength
-import cangjie_compiler::option.GetHardwareConcurrency
-import cangjie_compiler::utils.{AccessResultType, FILE_PATH_MAX_LENGTH, FileMode}
-import cangjie_compiler::utils.Semaphore as UtilsSemaphore
+import cjcj::option.Backend as OptionBackend
+import cjcj::option.BackendToString as OptionBackendToString
+import cjcj::option.GetDefaultOutputNameLength
+import cjcj::option.GetHardwareConcurrency
+import cjcj::utils.{AccessResultType, FILE_PATH_MAX_LENGTH, FileMode}
+import cjcj::utils.Semaphore as UtilsSemaphore
 
 public let OBFUCATION_LEVEL_MIN: Int64 = 1
 public let OBFUCATION_LEVEL_MAX: Int64 = 9

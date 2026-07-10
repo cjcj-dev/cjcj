@@ -1,7 +1,7 @@
-package cangjie_compiler::compiler_unittest
+package cjcj::compiler_unittest
 
-import cangjie_compiler::ast.{GetSizeDecl, InvalidTy}
-import cangjie_compiler::driver.GCCVersion
+import cjcj::ast.{GetSizeDecl, InvalidTy}
+import cjcj::driver.GCCVersion
 import std.unittest.*
 import std.unittest.testmacro.*
 

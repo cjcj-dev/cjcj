@@ -1,9 +1,9 @@
-package cangjie_compiler::compiler_unittest
+package cjcj::compiler_unittest
 
-import cangjie_compiler::basic.{
+import cjcj::basic.{
     DiagHandlerKind, DiagSeverity, Diagnostic, DiagnosticEngine, DiagnosticHandler, SourceManager
 }
-import cangjie_compiler::parse.Parser
+import cjcj::parse.Parser
 import std.unittest.*
 import std.unittest.testmacro.*
 

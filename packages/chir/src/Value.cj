@@ -1,7 +1,7 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::basic.Linkage as BasicLinkage
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::basic.Linkage as BasicLinkage
+import cjcj::utils.CJC_ASSERT
 import std.collection.*
 
 public open class Value <: Base & Hashable & Equatable<Value> {

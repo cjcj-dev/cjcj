@@ -1,6 +1,6 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
-import cangjie_compiler::chir.Block
+import cjcj::chir.Block
 
 public class CodeGenBlockScope <: Resource {
     private let irBuilder: IRBuilder2

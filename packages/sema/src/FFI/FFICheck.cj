@@ -1,7 +1,7 @@
-package cangjie_compiler::sema.FFI
+package cjcj::sema.FFI
 
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::ast.*
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 
 public func GetDefaultABI(): Attribute {
     return Attribute.C

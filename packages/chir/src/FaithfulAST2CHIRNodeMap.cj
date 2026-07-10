@@ -1,13 +1,13 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
 
-import cangjie_compiler::ast.ASTKindIndex
-import cangjie_compiler::ast.ASTKindName
-import cangjie_compiler::ast.Attribute as AstAttribute
-import cangjie_compiler::ast.Decl as AstDecl
-import cangjie_compiler::ast.FuncDecl as AstFuncDecl
-import cangjie_compiler::ast.Node as AstNode
+import cjcj::ast.ASTKindIndex
+import cjcj::ast.ASTKindName
+import cjcj::ast.Attribute as AstAttribute
+import cjcj::ast.Decl as AstDecl
+import cjcj::ast.FuncDecl as AstFuncDecl
+import cjcj::ast.Node as AstNode
 
 // Mirrors C++ AST2CHIRNodeMap<T> (include/cangjie/CHIR/AST2CHIR/AST2CHIRNodeMap.h:23-66).
 public class AST2CHIRNodeMap<T> {

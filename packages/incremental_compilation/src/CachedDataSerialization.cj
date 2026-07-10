@@ -1,4 +1,4 @@
-package cangjie_compiler::incremental_compilation
+package cjcj::incremental_compilation
 
 import std.collection.*
 import std.convert.*

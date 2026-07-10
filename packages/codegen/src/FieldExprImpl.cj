@@ -1,14 +1,14 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.CustomType
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.Field
-import cangjie_compiler::chir.FieldByName
-import cangjie_compiler::chir.LocalVar
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.TypeCast
-import cangjie_compiler::chir.Value
+import cjcj::chir.CustomType
+import cjcj::chir.Expression
+import cjcj::chir.Field
+import cjcj::chir.FieldByName
+import cjcj::chir.LocalVar
+import cjcj::chir.Type
+import cjcj::chir.TypeCast
+import cjcj::chir.Value
 
 public func GenerateFieldExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(fieldExpr) <- (chirExpr as Field)) {

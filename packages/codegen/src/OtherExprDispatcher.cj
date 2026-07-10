@@ -1,10 +1,10 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.GetRTTI
-import cangjie_compiler::chir.GetRTTIStatic
-import cangjie_compiler::chir.Lambda
+import cjcj::chir.Expression
+import cjcj::chir.ExprKind
+import cjcj::chir.GetRTTI
+import cjcj::chir.GetRTTIStatic
+import cjcj::chir.Lambda
 
 public func HandleStructedControlFlowExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (chirExpr.GetExprKind() == ExprKind.LAMBDA) {

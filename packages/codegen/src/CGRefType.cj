@@ -1,8 +1,8 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
-import cangjie_compiler::chir.RefType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::utils.StaticCast
+import cjcj::chir.RefType
+import cjcj::chir.Type
+import cjcj::utils.StaticCast
 
 public class CGRefType <: CGType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type, addrspace: UInt32) {

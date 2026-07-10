@@ -1,15 +1,15 @@
-package cangjie_compiler::frontend
+package cjcj::frontend
 
 import std.collection.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::basic.{CANGJIE_VERSION, DiagKindRefactor, MakeRange}
-import cangjie_compiler::basic.Linkage
-import cangjie_compiler::mangle.BaseMangler as RealBaseMangler
-import cangjie_compiler::modules.{FlatBufferBuilder, FlatBufferOffset, SemaCjoManager}
-import cangjie_compiler::option.OptimizationLevel
-import cangjie_compiler::sema.TypeManager as FaithfulSemaTypeManager
-import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.{MAIN_INVOKE, STATIC_INIT_FUNC}
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::basic.{CANGJIE_VERSION, DiagKindRefactor, MakeRange}
+import cjcj::basic.Linkage
+import cjcj::mangle.BaseMangler as RealBaseMangler
+import cjcj::modules.{FlatBufferBuilder, FlatBufferOffset, SemaCjoManager}
+import cjcj::option.OptimizationLevel
+import cjcj::sema.TypeManager as FaithfulSemaTypeManager
+import cjcj::utils.FileUtil
+import cjcj::utils.{MAIN_INVOKE, STATIC_INIT_FUNC}
 
 private let CJO_FILE_IDENTIFIER: String = "CJOF"
 private let INVALID_PACKAGE_INDEX: Int64 = -1

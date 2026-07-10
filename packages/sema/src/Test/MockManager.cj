@@ -1,9 +1,9 @@
-package cangjie_compiler::sema.Test
+package cjcj::sema.Test
 
-import cangjie_compiler::ast.*
-import cangjie_compiler::modules.SemaImportManager
-import cangjie_compiler::sema.TypeManager
-import cangjie_compiler::utils.DynamicCast
+import cjcj::ast.*
+import cjcj::modules.SemaImportManager
+import cjcj::sema.TypeManager
+import cjcj::utils.DynamicCast
 
 private let CREATE_MOCK_FUNC_NAME: String = "createMock"
 private let CREATE_SPY_FUNC_NAME: String = "createSpy"

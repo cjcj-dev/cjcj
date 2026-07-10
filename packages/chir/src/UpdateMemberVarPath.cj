@@ -1,6 +1,6 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::utils.{CJC_NULLPTR_CHECK, ProfileRecorder}
+import cjcj::utils.{CJC_NULLPTR_CHECK, ProfileRecorder}
 import std.collection.*
 
 public class UpdateMemberVarPath {

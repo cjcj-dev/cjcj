@@ -1,8 +1,8 @@
-package cangjie_compiler::modules
+package cjcj::modules
 
 import std.collection.*
-import cangjie_compiler::basic.DiagKindRefactor
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagKindRefactor
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 
 public type DiagnosticEngine = BasicDiagnosticEngine
 

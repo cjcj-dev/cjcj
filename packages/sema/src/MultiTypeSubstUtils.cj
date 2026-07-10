@@ -1,8 +1,8 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::utils.CJC_NULLPTR_CHECK
+import cjcj::ast.*
+import cjcj::utils.CJC_NULLPTR_CHECK
 
 private func containsTy(values: ArrayList<Ty>, ty: Ty): Bool {
     for (value in values) {

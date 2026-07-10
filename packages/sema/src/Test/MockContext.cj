@@ -1,9 +1,9 @@
-package cangjie_compiler::sema.Test
+package cjcj::sema.Test
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::mangle.{BaseMangler, MangleAstAdapter, ManglerContext}
-import cangjie_compiler::utils.CJC_ASSERT_WITH_MSG
+import cjcj::ast.*
+import cjcj::mangle.{BaseMangler, MangleAstAdapter, ManglerContext}
+import cjcj::utils.CJC_ASSERT_WITH_MSG
 
 public class MockContext {
     public let mangler: BaseMangler = BaseMangler()

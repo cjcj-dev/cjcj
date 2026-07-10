@@ -1,8 +1,8 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.VArrayType
+import cjcj::chir.Type
+import cjcj::chir.VArrayType
 
 public class CGVArrayType <: CGType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type) {

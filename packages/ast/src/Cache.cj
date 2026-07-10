@@ -1,6 +1,6 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
-import cangjie_compiler::basic.DiagnosticCache
+import cjcj::basic.DiagnosticCache
 import std.collection.*
 
 public class TargetCache {

@@ -1,4 +1,4 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
 public class ToolInfo {
     public let name: String

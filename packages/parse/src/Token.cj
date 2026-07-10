@@ -1,6 +1,6 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
-public import cangjie_compiler::lex.{
+public import cjcj::lex.{
     GetContextualKeyword, GetEscapeTokenKinds, INVALID_PRECEDENCE, IsContextualKeyword, IsExperimental, Len,
     Lexer, NUM_TOKENS, StringPart, StringPartKind, StringPartKindIndex, Token, TokenKind, TokenKindIndex,
     TokenKindLiteral, TokenKindValue, TokenPrecedence, TokenVecMap

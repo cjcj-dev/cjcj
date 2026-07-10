@@ -1,4 +1,4 @@
-package cangjie_compiler::utils
+package cjcj::utils
 
 // Tables mirrored from cangjie_compiler/src/Utils/Unicode.cpp.
 

@@ -1,8 +1,8 @@
-package cangjie_compiler::sema.Desugar
+package cjcj::sema.Desugar
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
 
 private let COMPOSITION_FUNC_NAME: String = "composition"
 private let CALL_OPERATOR_NAME: String = "()"

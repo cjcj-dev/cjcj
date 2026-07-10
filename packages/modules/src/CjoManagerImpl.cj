@@ -1,13 +1,13 @@
-package cangjie_compiler::modules
+package cjcj::modules
 
 import std.collection.*
 import std.fs.File as FSFile
 import std.fs.exists
-import cangjie_compiler::basic.DiagKindRefactor
-import cangjie_compiler::basic.FaithfulUnorderedMap
-import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::option.OptimizationLevel
-import cangjie_compiler::option.enumIndex
+import cjcj::basic.DiagKindRefactor
+import cjcj::basic.FaithfulUnorderedMap
+import cjcj::option.GlobalOptions
+import cjcj::option.OptimizationLevel
+import cjcj::option.enumIndex
 
 public func OptimizationLevelToString(level: OptimizationLevel): String {
     return match (level) {

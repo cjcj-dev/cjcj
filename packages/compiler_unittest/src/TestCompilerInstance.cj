@@ -1,12 +1,12 @@
-package cangjie_compiler::compiler_unittest
+package cjcj::compiler_unittest
 
 import std.collection.*
 import std.env.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::driver.HostTripleInfo
-import cangjie_compiler::frontend.*
-import cangjie_compiler::option.OutputMode
-import cangjie_compiler::utils.{FileUtil, GenerateRandomHexString}
+import cjcj::ast.*
+import cjcj::driver.HostTripleInfo
+import cjcj::frontend.*
+import cjcj::option.OutputMode
+import cjcj::utils.{FileUtil, GenerateRandomHexString}
 
 private let DEFAULT_TEST_CANGJIE_HOME: String = "/root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029"
 

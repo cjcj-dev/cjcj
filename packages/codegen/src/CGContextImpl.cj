@@ -1,7 +1,7 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Type
+import cjcj::chir.Type
 
 public class CGContextImpl {
     private let cgTypePool: ArrayList<CGType> = ArrayList<CGType>()

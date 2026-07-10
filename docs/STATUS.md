@@ -15,7 +15,7 @@ construct, no facade, no fallback, no "keep a working subset" crutch. Fidelity t
 C++ source is the priority — never merge a port that silently omits a C++ rule;
 complete every rule/helper or report the gap. The old facade/bridge and the
 `parse`-local isolated AST copies have both been removed; there is one source of
-truth (`cangjie_compiler::ast`), and the real packages compose into the same
+truth (`cjcj::ast`), and the real packages compose into the same
 pipeline shape as C++.
 
 ## Current milestones (achieved)

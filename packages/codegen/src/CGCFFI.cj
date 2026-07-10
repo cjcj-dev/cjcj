@@ -1,12 +1,12 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.FuncType
-import cangjie_compiler::chir.StructType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.TypeKind
-import cangjie_compiler::chir.VArrayType
-import cangjie_compiler::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
+import cjcj::chir.FuncType
+import cjcj::chir.StructType
+import cjcj::chir.Type
+import cjcj::chir.TypeKind
+import cjcj::chir.VArrayType
+import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
 private let BITS_PER_BYTE: UInt64 = 8u64
 private let BYTES_PER_WORD: UInt64 = 8u64

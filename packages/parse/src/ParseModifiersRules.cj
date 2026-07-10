@@ -1,4 +1,4 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
 import std.collection.*
 

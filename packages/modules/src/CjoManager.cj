@@ -1,7 +1,7 @@
-package cangjie_compiler::modules
+package cjcj::modules
 
 import std.collection.*
-import cangjie_compiler::utils.FileUtil
+import cjcj::utils.FileUtil
 
 public class CjoManager {
     private var impl: CjoManagerImpl

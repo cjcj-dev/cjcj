@@ -1,13 +1,13 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
-public import cangjie_compiler::option.{
+public import cjcj::option.{
     ArchType, BackendType, CompileTarget, EnvironmentType, LTOMode, OSType, OptimizationLevel, OutputMode,
     SanitizerType, TripleInfo, Vendor
 }
-public import cangjie_compiler::option.EnvironmentOptions as OptionEnvironmentOptions
-public import cangjie_compiler::option.MaybeString as OptionMaybeString
-public import cangjie_compiler::option.OrderedInput as OptionOrderedInput
-import cangjie_compiler::option.enumIndex as OptionOptimizationLevelIndex
+public import cjcj::option.EnvironmentOptions as OptionEnvironmentOptions
+public import cjcj::option.MaybeString as OptionMaybeString
+public import cjcj::option.OrderedInput as OptionOrderedInput
+import cjcj::option.enumIndex as OptionOptimizationLevelIndex
 
 public enum ToolType {
     | UNKNOWN

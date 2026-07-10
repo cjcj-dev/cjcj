@@ -1,4 +1,4 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
 public let X86_64_TARGET_CPUS: Array<String> = [
     "alderlake", "amdfam10", "athlon", "athlon-4", "athlon-fx", "athlon-mp", "athlon-tbird", "athlon-xp",

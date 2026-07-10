@@ -1,19 +1,19 @@
-package cangjie_compiler::modules
+package cjcj::modules
 
 import std.collection.*
 import std.convert.*
-import cangjie_compiler::ast.Annotation as ASTAnnotation
-import cangjie_compiler::ast.AnnotationKind as ASTAnnotationKind
-import cangjie_compiler::ast.FeatureId as ASTFeatureId
-import cangjie_compiler::ast.FeaturesDirective as ASTFeaturesDirective
-import cangjie_compiler::ast.FeaturesSet as ASTFeaturesSet
-import cangjie_compiler::ast.Identifier as ASTIdentifier
-import cangjie_compiler::ast.Modifier as ASTModifier
-import cangjie_compiler::basic.CANGJIE_VERSION
-import cangjie_compiler::basic.DiagKindRefactor
-import cangjie_compiler::lex.TokenKind
-import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::option.OptimizationLevel
+import cjcj::ast.Annotation as ASTAnnotation
+import cjcj::ast.AnnotationKind as ASTAnnotationKind
+import cjcj::ast.FeatureId as ASTFeatureId
+import cjcj::ast.FeaturesDirective as ASTFeaturesDirective
+import cjcj::ast.FeaturesSet as ASTFeaturesSet
+import cjcj::ast.Identifier as ASTIdentifier
+import cjcj::ast.Modifier as ASTModifier
+import cjcj::basic.CANGJIE_VERSION
+import cjcj::basic.DiagKindRefactor
+import cjcj::lex.TokenKind
+import cjcj::option.GlobalOptions
+import cjcj::option.OptimizationLevel
 
 public class ASTWriter {
     private let diag: DiagnosticEngine

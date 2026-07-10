@@ -1,7 +1,7 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
+import cjcj::ast.*
 
 private func sameDeclOpt(left: Option<Decl>, right: Option<Decl>): Bool {
     if (let Some(leftDecl) <- left) {

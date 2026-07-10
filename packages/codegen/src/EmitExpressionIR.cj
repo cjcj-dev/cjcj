@@ -1,10 +1,10 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.ExprMajorKind
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.TypeKind
+import cjcj::chir.ExprMajorKind
+import cjcj::chir.Expression
+import cjcj::chir.Type
+import cjcj::chir.TypeKind
 
 private class ExpressionGeneratorImpl <: IRGeneratorImpl {
     private let cgMod: CGModule

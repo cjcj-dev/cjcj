@@ -1,15 +1,15 @@
-package cangjie_compiler::frontend
+package cjcj::frontend
 
-import cangjie_compiler::ast.AddCurFile
-import cangjie_compiler::ast.TokenKind
-import cangjie_compiler::basic.InteropCJPackageConfigReader
-import cangjie_compiler::conditional_compilation.ConditionalCompilation
-import cangjie_compiler::parse.Parser as RealParser
-import cangjie_compiler::basic.GetHash
-import cangjie_compiler::basic.DiagCategory
-import cangjie_compiler::macro_pkg.MacroExpansion
-import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.ProfileRecorder
+import cjcj::ast.AddCurFile
+import cjcj::ast.TokenKind
+import cjcj::basic.InteropCJPackageConfigReader
+import cjcj::conditional_compilation.ConditionalCompilation
+import cjcj::parse.Parser as RealParser
+import cjcj::basic.GetHash
+import cjcj::basic.DiagCategory
+import cjcj::macro_pkg.MacroExpansion
+import cjcj::utils.FileUtil
+import cjcj::utils.ProfileRecorder
 import std.collection.*
 import std.sort.*
 

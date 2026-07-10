@@ -1,11 +1,11 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::modules.SemaImportManager
-import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
-import cangjie_compiler::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
+import cjcj::ast.*
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::modules.SemaImportManager
+import cjcj::option.GlobalOptions as OptionGlobalOptions
+import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
 
 public class CompilerInstance {
     public var typeManager: TypeManager = TypeManager()

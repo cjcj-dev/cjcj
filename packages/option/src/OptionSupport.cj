@@ -1,16 +1,16 @@
-package cangjie_compiler::option
+package cjcj::option
 
-import cangjie_compiler::basic.Errorln as BasicErrorln
-import cangjie_compiler::basic.Infoln as BasicInfoln
-import cangjie_compiler::basic.Println as BasicPrintln
-import cangjie_compiler::basic.SplitLines as BasicSplitLines
-import cangjie_compiler::basic.Warningln as BasicWarningln
-import cangjie_compiler::utils.AccessResultType as UtilsAccessResultType
-import cangjie_compiler::utils.FILE_PATH_MAX_LENGTH as UTILS_FILE_PATH_MAX_LENGTH
-import cangjie_compiler::utils.FileMode as UtilsFileMode
-import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.SipHash
-import cangjie_compiler::utils.SplitString as UtilsSplitString
+import cjcj::basic.Errorln as BasicErrorln
+import cjcj::basic.Infoln as BasicInfoln
+import cjcj::basic.Println as BasicPrintln
+import cjcj::basic.SplitLines as BasicSplitLines
+import cjcj::basic.Warningln as BasicWarningln
+import cjcj::utils.AccessResultType as UtilsAccessResultType
+import cjcj::utils.FILE_PATH_MAX_LENGTH as UTILS_FILE_PATH_MAX_LENGTH
+import cjcj::utils.FileMode as UtilsFileMode
+import cjcj::utils.FileUtil
+import cjcj::utils.SipHash
+import cjcj::utils.SplitString as UtilsSplitString
 
 public let DEFAULT_ANDROID_API: String = "31"
 public let MIN_ANDROID_API: String = "26"

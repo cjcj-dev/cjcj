@@ -1,7 +1,7 @@
-package cangjie_compiler::sema.LegalityOfUsage
+package cjcj::sema.LegalityOfUsage
 
 import std.collection.*
-import cangjie_compiler::ast.*
+import cjcj::ast.*
 
 public class AccessLevelViolation {
     public var useSite: Node

@@ -1,11 +1,11 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
-import cangjie_compiler::ast.ASTCloner
-import cangjie_compiler::ast.Node
-import cangjie_compiler::ast.SortModifierByPos
-import cangjie_compiler::ast.VisitAction
-import cangjie_compiler::ast.Walker
-import cangjie_compiler::utils.FileUtil
+import cjcj::ast.ASTCloner
+import cjcj::ast.Node
+import cjcj::ast.SortModifierByPos
+import cjcj::ast.VisitAction
+import cjcj::ast.Walker
+import cjcj::utils.FileUtil
 import std.collection.*
 
 extend ParserImpl {

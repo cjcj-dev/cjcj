@@ -1,4 +1,4 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 public let FUNC_MANGLE_NAME_MALLOC_CSTRING: String = "_CNat4LibC13mallocCStringHRNat6StringE"
 public let FUNC_MANGLE_NAME_CSTRING_SIZE: String = "_CNatXk4sizeHv"

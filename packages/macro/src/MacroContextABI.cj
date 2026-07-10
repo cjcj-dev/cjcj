@@ -1,11 +1,11 @@
-package cangjie_compiler::macro_pkg
+package cjcj::macro_pkg
 
 import std.collection.*
 import std.sync.Mutex
-import cangjie_compiler::basic.{DiagCategory, DiagEngineErrorCode}
-import cangjie_compiler::lex.{Len, Lexer as RealLexer}
-import cangjie_compiler::parse.{Parser as RealParser, ScopeKind as ParsedScopeKind}
-import cangjie_compiler::utils.TriggerPointSetter
+import cjcj::basic.{DiagCategory, DiagEngineErrorCode}
+import cjcj::lex.{Len, Lexer as RealLexer}
+import cjcj::parse.{Parser as RealParser, ScopeKind as ParsedScopeKind}
+import cjcj::utils.TriggerPointSetter
 
 private enum ParseKind {
     | EXPR

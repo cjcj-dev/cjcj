@@ -1,6 +1,6 @@
-package cangjie_compiler::macro_pkg
+package cjcj::macro_pkg
 
-import cangjie_compiler::basic.{DiagSeverityIndex, Errorln}
+import cjcj::basic.{DiagSeverityIndex, Errorln}
 import std.collection.*
 
 private func IsResultForMacCall(id: String, pos: Position, mi: MacroInvocation): Bool {

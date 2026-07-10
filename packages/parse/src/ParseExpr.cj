@@ -1,14 +1,14 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
 import std.collection.*
-import cangjie_compiler::ast.MacroExpandDecl as AstMacroExpandDecl
-import cangjie_compiler::ast.ExprKind as AstExprKind
-import cangjie_compiler::ast.FuncBody as AstFuncBody
-import cangjie_compiler::ast.FuncParam as AstFuncParam
-import cangjie_compiler::ast.FuncParamList as AstFuncParamList
-import cangjie_compiler::ast.MacroInvocation as AstMacroInvocation
-import cangjie_compiler::ast.VarDecl as AstVarDecl
-import cangjie_compiler::utils.IF_AVAILABLE
+import cjcj::ast.MacroExpandDecl as AstMacroExpandDecl
+import cjcj::ast.ExprKind as AstExprKind
+import cjcj::ast.FuncBody as AstFuncBody
+import cjcj::ast.FuncParam as AstFuncParam
+import cjcj::ast.FuncParamList as AstFuncParamList
+import cjcj::ast.MacroInvocation as AstMacroInvocation
+import cjcj::ast.VarDecl as AstVarDecl
+import cjcj::utils.IF_AVAILABLE
 
 private let G_NO_NEED_SEMI_EXPR_LIST: Array<ASTKind> = [
     ASTKind.THROW_EXPR, ASTKind.RETURN_EXPR, ASTKind.ASSIGN_EXPR, ASTKind.UNARY_EXPR, ASTKind.SPAWN_EXPR,

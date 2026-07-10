@@ -1,6 +1,6 @@
-package cangjie_compiler::option
+package cjcj::option
 
-public import cangjie_compiler::utils.{OverflowStrategy, OverflowStrategyIndex}
+public import cjcj::utils.{OverflowStrategy, OverflowStrategyIndex}
 
 public enum Kind {
     | UNKNOWN | FLAG | FLAG_WITH_ARG | SEPARATED | CONTINOUS

@@ -1,4 +1,4 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
 public let TOPLEVEL_SCOPE_NAME: String = "a"
 public let SCOPE_SEPARATOR: String = "0"

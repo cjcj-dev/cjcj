@@ -1,6 +1,6 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
 import std.collection.*
 import std.sort.*
 import std.sync.*

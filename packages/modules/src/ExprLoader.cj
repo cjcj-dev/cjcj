@@ -1,1 +1,1 @@
-package cangjie_compiler::modules
+package cjcj::modules

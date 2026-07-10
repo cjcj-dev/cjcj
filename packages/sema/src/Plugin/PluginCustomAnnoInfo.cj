@@ -1,4 +1,4 @@
-package cangjie_compiler::sema.Plugin
+package cjcj::sema.Plugin
 
 public class PluginCustomAnnoInfo {
     public var since: APILevelVersion = APILevelVersion()

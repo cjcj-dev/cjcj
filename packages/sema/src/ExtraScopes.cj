@@ -1,6 +1,6 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
-import cangjie_compiler::ast.*
+import cjcj::ast.*
 
 public func BeginTyVarScope(typeManager: TypeManager): TyVarScope {
     return TyVarScope(typeManager)

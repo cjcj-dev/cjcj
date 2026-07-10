@@ -1,16 +1,16 @@
-package cangjie_compiler::lex
+package cjcj::lex
 
-import cangjie_compiler::basic.*
-import cangjie_compiler::utils.IsAlnum as UtilsIsAlnum
-import cangjie_compiler::utils.IsASCIIIdContinue as UtilsIsASCIIIdContinue
-import cangjie_compiler::utils.IsASCIIIdStart as UtilsIsASCIIIdStart
-import cangjie_compiler::utils.IsCJXIDStart as UtilsIsCJXIDStart
-import cangjie_compiler::utils.IsDigit as UtilsIsDigit
-import cangjie_compiler::utils.IsXDigit as UtilsIsXDigit
-import cangjie_compiler::utils.IsXIDContinue as UtilsIsXIDContinue
-import cangjie_compiler::utils.NFC as UtilsNFC
-import cangjie_compiler::utils.CJC_ABORT
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::basic.*
+import cjcj::utils.IsAlnum as UtilsIsAlnum
+import cjcj::utils.IsASCIIIdContinue as UtilsIsASCIIIdContinue
+import cjcj::utils.IsASCIIIdStart as UtilsIsASCIIIdStart
+import cjcj::utils.IsCJXIDStart as UtilsIsCJXIDStart
+import cjcj::utils.IsDigit as UtilsIsDigit
+import cjcj::utils.IsXDigit as UtilsIsXDigit
+import cjcj::utils.IsXIDContinue as UtilsIsXIDContinue
+import cjcj::utils.NFC as UtilsNFC
+import cjcj::utils.CJC_ABORT
+import cjcj::utils.CJC_ASSERT
 import std.collection.*
 
 public let BYTE_X_FLAG: UInt8 = 0x80u8

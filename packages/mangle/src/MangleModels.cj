@@ -1,7 +1,7 @@
-package cangjie_compiler::mangle
+package cjcj::mangle
 
 import std.collection.*
-import cangjie_compiler::ast.{ASTKind, Attribute, Linkage, TypeKind, TypeKindName}
+import cjcj::ast.{ASTKind, Attribute, Linkage, TypeKind, TypeKindName}
 import std.sync.AtomicInt64
 
 private let nextMangleDeclIdentity = AtomicInt64(1)

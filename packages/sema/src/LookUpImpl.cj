@@ -1,11 +1,11 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
-import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
-import cangjie_compiler::modules.SemaImportManager
-import cangjie_compiler::modules.SplitQualifiedName as ModulesSplitQualifiedName
+import cjcj::ast.*
+import cjcj::modules.GetPackageRelation as ModulesGetPackageRelation
+import cjcj::modules.PackageRelation as ModulesPackageRelation
+import cjcj::modules.SemaImportManager
+import cjcj::modules.SplitQualifiedName as ModulesSplitQualifiedName
 
 private let LOOKUP_CORE_PACKAGE_NAME: String = "std.core"
 private let LOOKUP_AST_PACKAGE_NAME: String = "std.ast"

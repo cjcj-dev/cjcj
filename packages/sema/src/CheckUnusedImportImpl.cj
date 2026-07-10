@@ -1,12 +1,12 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.MakeRange as BasicMakeRange
-import cangjie_compiler::basic.Position as BasicPosition
-import cangjie_compiler::modules.SemaImportManager
+import cjcj::ast.*
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.MakeRange as BasicMakeRange
+import cjcj::basic.Position as BasicPosition
+import cjcj::modules.SemaImportManager
 
 public class UsedImportTarget <: Hashable & Equatable<UsedImportTarget> {
     public var identifier: String

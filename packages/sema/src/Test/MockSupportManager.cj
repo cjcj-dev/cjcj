@@ -1,9 +1,9 @@
-package cangjie_compiler::sema.Test
+package cjcj::sema.Test
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.GetUsableGetterForProperty
-import cangjie_compiler::sema.GetUsableSetterForProperty
+import cjcj::ast.*
+import cjcj::sema.GetUsableGetterForProperty
+import cjcj::sema.GetUsableSetterForProperty
 
 public class DeclsToPrepare {
     public let functions: ArrayList<FuncDecl> = ArrayList<FuncDecl>()

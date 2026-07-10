@@ -1,28 +1,28 @@
-package cangjie_compiler::modules
+package cjcj::modules
 
 import std.collection.*
 import std.convert.*
 import std.sync.AtomicInt64
-import cangjie_compiler::ast.AccessLevel as ASTAccessLevel
-import cangjie_compiler::ast.ASTKind
-import cangjie_compiler::ast.Attribute as ASTAttribute
-import cangjie_compiler::ast.AttributeIndex as ASTAttributeIndex
-import cangjie_compiler::ast.FeaturesDirective as ASTFeaturesDirective
-import cangjie_compiler::ast.ImportKind as ASTImportKind
-import cangjie_compiler::ast.PackageSpec as ASTPackageSpec
-import cangjie_compiler::basic.DEFAULT_POSITION as BASIC_DEFAULT_POSITION
-import cangjie_compiler::basic.INVALID_POSITION as BASIC_INVALID_POSITION
-import cangjie_compiler::basic.MakeRange as BasicMakeRange
-import cangjie_compiler::basic.Position as BasicPosition
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::basic.SplitQualifiedName as BasicSplitQualifiedName
-import cangjie_compiler::basic.ToHexString
-import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.AST_PACKAGE_NAME as UTILS_AST_PACKAGE_NAME
-import cangjie_compiler::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
-import cangjie_compiler::utils.CJC_ASSERT
-import cangjie_compiler::utils.DEFAULT_PACKAGE_NAME as UTILS_DEFAULT_PACKAGE_NAME
-import cangjie_compiler::utils.SYNC_PACKAGE_NAME as UTILS_SYNC_PACKAGE_NAME
+import cjcj::ast.AccessLevel as ASTAccessLevel
+import cjcj::ast.ASTKind
+import cjcj::ast.Attribute as ASTAttribute
+import cjcj::ast.AttributeIndex as ASTAttributeIndex
+import cjcj::ast.FeaturesDirective as ASTFeaturesDirective
+import cjcj::ast.ImportKind as ASTImportKind
+import cjcj::ast.PackageSpec as ASTPackageSpec
+import cjcj::basic.DEFAULT_POSITION as BASIC_DEFAULT_POSITION
+import cjcj::basic.INVALID_POSITION as BASIC_INVALID_POSITION
+import cjcj::basic.MakeRange as BasicMakeRange
+import cjcj::basic.Position as BasicPosition
+import cjcj::basic.Range as BasicRange
+import cjcj::basic.SplitQualifiedName as BasicSplitQualifiedName
+import cjcj::basic.ToHexString
+import cjcj::utils.FileUtil
+import cjcj::utils.AST_PACKAGE_NAME as UTILS_AST_PACKAGE_NAME
+import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
+import cjcj::utils.CJC_ASSERT
+import cjcj::utils.DEFAULT_PACKAGE_NAME as UTILS_DEFAULT_PACKAGE_NAME
+import cjcj::utils.SYNC_PACKAGE_NAME as UTILS_SYNC_PACKAGE_NAME
 
 public let SERIALIZED_FILE_EXTENSION: String = ".cjo"
 public let CJ_D_FILE_EXTENSION: String = ".cj.d"

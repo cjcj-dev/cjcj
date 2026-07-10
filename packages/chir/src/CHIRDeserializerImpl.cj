@@ -1,8 +1,8 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
 import std.convert.*
-import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 
 class CHIRDeserializerImpl {
     private let builder: CHIRBuilder

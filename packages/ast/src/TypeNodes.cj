@@ -1,7 +1,7 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
-import cangjie_compiler::utils.CJC_ASSERT
-import cangjie_compiler::utils.CJC_NULLPTR_CHECK
+import cjcj::utils.CJC_ASSERT
+import cjcj::utils.CJC_NULLPTR_CHECK
 import std.collection.*
 
 public open class Type <: Node {

@@ -1,11 +1,11 @@
-package cangjie_compiler::incremental_compilation
+package cjcj::incremental_compilation
 
 import std.collection.*
-import cangjie_compiler::ast.ASTKind as RealASTKind
-import cangjie_compiler::ast.ASTKindIndex as RealASTKindIndex
-import cangjie_compiler::ast.Attribute as RealAttribute
-import cangjie_compiler::ast.AttributeIndex as RealAttributeIndex
-import cangjie_compiler::basic.Position as BasicPosition
+import cjcj::ast.ASTKind as RealASTKind
+import cjcj::ast.ASTKindIndex as RealASTKindIndex
+import cjcj::ast.Attribute as RealAttribute
+import cjcj::ast.AttributeIndex as RealAttributeIndex
+import cjcj::basic.Position as BasicPosition
 
 public type RawMangledName = String
 public type RawMangled2DeclMap = HashMap<String, IncrDecl>

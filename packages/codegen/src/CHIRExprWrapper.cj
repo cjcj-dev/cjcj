@@ -1,24 +1,24 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.BinaryExpression
-import cangjie_compiler::chir.CHIRBuilder
-import cangjie_compiler::chir.Constant
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.Apply
-import cangjie_compiler::chir.ApplyWithException
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.FuncType
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.GetInstParentCustomTyOfCallee
-import cangjie_compiler::chir.Invoke
-import cangjie_compiler::chir.InvokeStatic
-import cangjie_compiler::chir.InvokeStaticWithException
-import cangjie_compiler::chir.InvokeWithException
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.UnaryExpression
-import cangjie_compiler::chir.Value
-import cangjie_compiler::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
+import cjcj::chir.BinaryExpression
+import cjcj::chir.CHIRBuilder
+import cjcj::chir.Constant
+import cjcj::chir.Expression
+import cjcj::chir.Apply
+import cjcj::chir.ApplyWithException
+import cjcj::chir.Attribute
+import cjcj::chir.FuncType
+import cjcj::chir.Function
+import cjcj::chir.GetInstParentCustomTyOfCallee
+import cjcj::chir.Invoke
+import cjcj::chir.InvokeStatic
+import cjcj::chir.InvokeStaticWithException
+import cjcj::chir.InvokeWithException
+import cjcj::chir.Type
+import cjcj::chir.UnaryExpression
+import cjcj::chir.Value
+import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
 public open class CHIRExprWrapper {
     public let expr: Expression

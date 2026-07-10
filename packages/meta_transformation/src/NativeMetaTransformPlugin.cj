@@ -1,6 +1,6 @@
-package cangjie_compiler::meta_transformation
+package cjcj::meta_transformation
 
-import cangjie_compiler::basic.{CANGJIE_VERSION, Errorln}
+import cjcj::basic.{CANGJIE_VERSION, Errorln}
 
 @When[os == "Linux" || os == "macOS" || os == "iOS"]
 private let RTLD_NOW: Int32 = 0x2

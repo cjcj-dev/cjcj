@@ -1,4 +1,4 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
 public class IfAvailableExpr <: Expr {
     private var arg: Option<FuncArg> = None

@@ -1,4 +1,4 @@
-package cangjie_compiler::compiler_unittest
+package cjcj::compiler_unittest
 
 // PORT-DEFERRED: AST/CreateTest.CheckASTSize requires C++ sizeof(NODE) over ASTKind.inc from /root/cj_build/cangjie_compiler/unittests/AST/CreateTest.cpp:112 and /root/cj_build/cangjie_compiler/include/cangjie/AST/ASTKind.inc:6; Cangjie has no sizeof/layout-introspection API for AST node object sizes.
 // PORT-DEFERRED: AST/ToStringTest.ExtendedNodesParsing '*Int64' branch requires C++ ParserImpl::ParseBaseType invalid-type recovery from /root/cj_build/cangjie_compiler/src/Parse/ParseType.cpp:22 and :50 plus the C++ test branch at /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:161; selfhost ParserImpl.DiagExpectedTypeName raises a zero-range diagnostic exception for this input and packages/parse is out of this task scope.

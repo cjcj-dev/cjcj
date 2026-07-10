@@ -1,11 +1,11 @@
-package cangjie_compiler::sema.InheritanceChecker
+package cjcj::sema.InheritanceChecker
 
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::basic.{DiagnosticEngine, DiagKindRefactor, MakeRange}
-import cangjie_compiler::sema.*
-import cangjie_compiler::sema.NativeFFI.{GetAnnotation, GetForeignNameAnnotation}
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::basic.{DiagnosticEngine, DiagKindRefactor, MakeRange}
+import cjcj::sema.*
+import cjcj::sema.NativeFFI.{GetAnnotation, GetForeignNameAnnotation}
+import cjcj::utils.CJC_ASSERT
 
 private func GetAnnoValue(anno: Annotation): String {
     CJC_ASSERT(anno.args.size == 1)

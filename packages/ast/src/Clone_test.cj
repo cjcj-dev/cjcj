@@ -1,9 +1,9 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
 import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
-import cangjie_compiler::lex.*
+import cjcj::lex.*
 
 @Test
 class CloneTest {

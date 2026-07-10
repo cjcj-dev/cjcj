@@ -1,7 +1,7 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
-import cangjie_compiler::ast.{LitConstKindIndex, OverloadableExpr, PointerExpr, TypeKindIndex}
-import cangjie_compiler::utils.{CJC_ASSERT, FileUtil, OverflowStrategyIndex, SipHash}
+import cjcj::ast.{LitConstKindIndex, OverloadableExpr, PointerExpr, TypeKindIndex}
+import cjcj::utils.{CJC_ASSERT, FileUtil, OverflowStrategyIndex, SipHash}
 import std.collection.*
 import std.sort.*
 

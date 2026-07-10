@@ -1,64 +1,64 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::basic.Linkage as BasicLinkage
-import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::option.OSType
-import cangjie_compiler::option.OutputMode
+import cjcj::basic.Linkage as BasicLinkage
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::option.GlobalOptions
+import cjcj::option.OSType
+import cjcj::option.OutputMode
 import std.collection.*
 import std.convert.*
 import std.sort.*
 
-import cangjie_compiler::ast.ASTKind
-import cangjie_compiler::ast.ASTKindIndex
-import cangjie_compiler::ast.ASTKindName
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::ast.AccessLevel as AstAccessLevel
-import cangjie_compiler::ast.ArrayExpr as AstArrayExpr
-import cangjie_compiler::ast.AttributePack as AstAttributePack
-import cangjie_compiler::ast.ArrayLit as AstArrayLit
-import cangjie_compiler::ast.Attribute as AstAttribute
-import cangjie_compiler::ast.CallExpr as AstCallExpr
-import cangjie_compiler::ast.ClassLikeDecl as AstClassLikeDecl
-import cangjie_compiler::ast.Decl as AstDecl
-import cangjie_compiler::ast.EnumDecl as AstEnumDecl
-import cangjie_compiler::ast.EnumPattern as AstEnumPattern
-import cangjie_compiler::ast.ExtendDecl as AstExtendDecl
-import cangjie_compiler::ast.Expr as AstExpr
-import cangjie_compiler::ast.File as AstFile
-import cangjie_compiler::ast.FuncArg as AstFuncArg
-import cangjie_compiler::ast.FuncDecl as AstFuncDecl
-import cangjie_compiler::ast.FuncParam as AstFuncParam
-import cangjie_compiler::ast.GenericsTy as AstGenericsTy
-import cangjie_compiler::ast.IsPackageMemberAccess as AstIsPackageMemberAccess
-import cangjie_compiler::ast.LitConstExpr as AstLitConstExpr
-import cangjie_compiler::ast.LitConstKind as AstLitConstKind
-import cangjie_compiler::ast.MemberAccess as AstMemberAccess
-import cangjie_compiler::ast.Node as AstNode
-import cangjie_compiler::ast.Package as AstPackage
-import cangjie_compiler::ast.Pattern as AstPattern
-import cangjie_compiler::ast.PropDecl as AstPropDecl
-import cangjie_compiler::ast.RefExpr as AstRefExpr
-import cangjie_compiler::ast.StructDecl as AstStructDecl
-import cangjie_compiler::ast.TuplePattern as AstTuplePattern
-import cangjie_compiler::ast.Ty as AstTy
-import cangjie_compiler::ast.TypeKind as AstTypeKind
-import cangjie_compiler::ast.TypeKindInRange as AstTypeKindInRange
-import cangjie_compiler::ast.VarDecl as AstVarDecl
-import cangjie_compiler::ast.VarPattern as AstVarPattern
-import cangjie_compiler::ast.VarWithPatternDecl as AstVarWithPatternDecl
-import cangjie_compiler::ast.VisitAction as AstVisitAction
-import cangjie_compiler::ast.Walker as AstWalker
-import cangjie_compiler::ast.WildcardPattern as AstWildcardPattern
-import cangjie_compiler::ast.Position as AstPosition
-import cangjie_compiler::ast.IsStaticInitializer as AstIsStaticInitializer
-import cangjie_compiler::ast.IsImpl as AstIsImpl
-import cangjie_compiler::ast.IsMirror as AstIsMirror
-import cangjie_compiler::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
-import cangjie_compiler::sema.GenericInstantiation.GenericInstantiationManager
-import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, ProfileRecorder, STATIC_INIT_VAR}
+import cjcj::ast.ASTKind
+import cjcj::ast.ASTKindIndex
+import cjcj::ast.ASTKindName
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::ast.AccessLevel as AstAccessLevel
+import cjcj::ast.ArrayExpr as AstArrayExpr
+import cjcj::ast.AttributePack as AstAttributePack
+import cjcj::ast.ArrayLit as AstArrayLit
+import cjcj::ast.Attribute as AstAttribute
+import cjcj::ast.CallExpr as AstCallExpr
+import cjcj::ast.ClassLikeDecl as AstClassLikeDecl
+import cjcj::ast.Decl as AstDecl
+import cjcj::ast.EnumDecl as AstEnumDecl
+import cjcj::ast.EnumPattern as AstEnumPattern
+import cjcj::ast.ExtendDecl as AstExtendDecl
+import cjcj::ast.Expr as AstExpr
+import cjcj::ast.File as AstFile
+import cjcj::ast.FuncArg as AstFuncArg
+import cjcj::ast.FuncDecl as AstFuncDecl
+import cjcj::ast.FuncParam as AstFuncParam
+import cjcj::ast.GenericsTy as AstGenericsTy
+import cjcj::ast.IsPackageMemberAccess as AstIsPackageMemberAccess
+import cjcj::ast.LitConstExpr as AstLitConstExpr
+import cjcj::ast.LitConstKind as AstLitConstKind
+import cjcj::ast.MemberAccess as AstMemberAccess
+import cjcj::ast.Node as AstNode
+import cjcj::ast.Package as AstPackage
+import cjcj::ast.Pattern as AstPattern
+import cjcj::ast.PropDecl as AstPropDecl
+import cjcj::ast.RefExpr as AstRefExpr
+import cjcj::ast.StructDecl as AstStructDecl
+import cjcj::ast.TuplePattern as AstTuplePattern
+import cjcj::ast.Ty as AstTy
+import cjcj::ast.TypeKind as AstTypeKind
+import cjcj::ast.TypeKindInRange as AstTypeKindInRange
+import cjcj::ast.VarDecl as AstVarDecl
+import cjcj::ast.VarPattern as AstVarPattern
+import cjcj::ast.VarWithPatternDecl as AstVarWithPatternDecl
+import cjcj::ast.VisitAction as AstVisitAction
+import cjcj::ast.Walker as AstWalker
+import cjcj::ast.WildcardPattern as AstWildcardPattern
+import cjcj::ast.Position as AstPosition
+import cjcj::ast.IsStaticInitializer as AstIsStaticInitializer
+import cjcj::ast.IsImpl as AstIsImpl
+import cjcj::ast.IsMirror as AstIsMirror
+import cjcj::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
+import cjcj::sema.GenericInstantiation.GenericInstantiationManager
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, ProfileRecorder, STATIC_INIT_VAR}
 
 private let USER_MAIN_MANGLED_NAME: String = "user.main"
 

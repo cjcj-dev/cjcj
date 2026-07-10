@@ -1,4 +1,4 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
 import std.collection.*
 import std.process.*

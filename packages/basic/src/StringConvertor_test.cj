@@ -1,4 +1,4 @@
-package cangjie_compiler::basic
+package cjcj::basic
 
 @When[os == "Windows"]
 import std.unittest.*

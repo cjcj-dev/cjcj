@@ -1,7 +1,7 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
 import std.collection.*
-import cangjie_compiler::utils.CJC_ABORT
+import cjcj::utils.CJC_ABORT
 
 public class OCFFIParserImpl {
     public let parser: ParserImpl

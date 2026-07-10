@@ -1,18 +1,18 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.Block
-import cangjie_compiler::chir.Branch
-import cangjie_compiler::chir.Exit
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.GoTo
-import cangjie_compiler::chir.IntOpWithException
-import cangjie_compiler::chir.LocalVar
-import cangjie_compiler::chir.MultiBranch
-import cangjie_compiler::chir.Type
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::chir.Expression
+import cjcj::chir.Block
+import cjcj::chir.Branch
+import cjcj::chir.Exit
+import cjcj::chir.ExprKind
+import cjcj::chir.Function
+import cjcj::chir.GoTo
+import cjcj::chir.IntOpWithException
+import cjcj::chir.LocalVar
+import cjcj::chir.MultiBranch
+import cjcj::chir.Type
+import cjcj::utils.CJC_ASSERT
 
 public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let kind = chirExpr.GetExprKind()

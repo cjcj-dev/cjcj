@@ -1,8 +1,8 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
-import cangjie_compiler::utils.CJC_ASSERT
-import cangjie_compiler::utils.CJC_NULLPTR_CHECK
-import cangjie_compiler::utils.Stoi
+import cjcj::utils.CJC_ASSERT
+import cjcj::utils.CJC_NULLPTR_CHECK
+import cjcj::utils.Stoi
 import std.collection.*
 
 private func exprJoinExprs(values: ArrayList<Expr>, delimiter: String): String {

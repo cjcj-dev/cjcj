@@ -1,12 +1,12 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.FuncType
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.GenericType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::chir.Attribute
+import cjcj::chir.FuncType
+import cjcj::chir.Function
+import cjcj::chir.GenericType
+import cjcj::chir.Type
+import cjcj::utils.CJC_ASSERT
 
 private class GenericParamIndex {
     public let chirGenericTy: GenericType

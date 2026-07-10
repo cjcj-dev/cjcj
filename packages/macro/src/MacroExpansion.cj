@@ -1,38 +1,38 @@
-package cangjie_compiler::macro_pkg
+package cjcj::macro_pkg
 
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::ast.AddMacroAttr
-import cangjie_compiler::ast.AnnotationKind as RealAnnotationKind
-import cangjie_compiler::ast.ExprKind as ParsedAstExprKind
-import cangjie_compiler::ast.Node as ParsedAstNode
-import cangjie_compiler::ast.ScopeKind as ParsedAstScopeKind
-import cangjie_compiler::ast.VarDecl as ParsedAstVarDecl
-import cangjie_compiler::ast.VisitAction
-import cangjie_compiler::ast.Walker
-import cangjie_compiler::basic.DiagCategory as ParsedDiagCategory
-import cangjie_compiler::basic.DiagnosticEngine as ParsedDiagnosticEngine
-import cangjie_compiler::parse.Annotation as ParsedAnnotation
-import cangjie_compiler::parse.Decl as ParsedDecl
-import cangjie_compiler::parse.Expr as ParsedExpr
-import cangjie_compiler::parse.EnumPattern as ParsedEnumPattern
-import cangjie_compiler::parse.FuncArg as ParsedFuncArg
-import cangjie_compiler::parse.FuncBody as ParsedFuncBody
-import cangjie_compiler::parse.FuncDecl as ParsedFuncDecl
-import cangjie_compiler::parse.FuncParam as ParsedFuncParam
-import cangjie_compiler::parse.FuncParamList as ParsedFuncParamList
-import cangjie_compiler::parse.LitConstExpr as ParsedLitConstExpr
-import cangjie_compiler::parse.LitConstKind as ParsedLitConstKind
-import cangjie_compiler::parse.MacroInvocation as ParsedMacroInvocation
-import cangjie_compiler::parse.MatchCase as ParsedMatchCase
-import cangjie_compiler::parse.MatchCaseOther as ParsedMatchCaseOther
-import cangjie_compiler::parse.Modifier as ParsedModifier
-import cangjie_compiler::parse.Node as ParsedNode
-import cangjie_compiler::parse.Parser as GeneratedParser
-import cangjie_compiler::parse.Pattern as ParsedPattern
-import cangjie_compiler::parse.ScopeKind as ParsedScopeKind
-import cangjie_compiler::parse.StringKind as ParsedStringKind
-import cangjie_compiler::parse.Type as ParsedType
+import cjcj::ast.AddMacroAttr
+import cjcj::ast.AnnotationKind as RealAnnotationKind
+import cjcj::ast.ExprKind as ParsedAstExprKind
+import cjcj::ast.Node as ParsedAstNode
+import cjcj::ast.ScopeKind as ParsedAstScopeKind
+import cjcj::ast.VarDecl as ParsedAstVarDecl
+import cjcj::ast.VisitAction
+import cjcj::ast.Walker
+import cjcj::basic.DiagCategory as ParsedDiagCategory
+import cjcj::basic.DiagnosticEngine as ParsedDiagnosticEngine
+import cjcj::parse.Annotation as ParsedAnnotation
+import cjcj::parse.Decl as ParsedDecl
+import cjcj::parse.Expr as ParsedExpr
+import cjcj::parse.EnumPattern as ParsedEnumPattern
+import cjcj::parse.FuncArg as ParsedFuncArg
+import cjcj::parse.FuncBody as ParsedFuncBody
+import cjcj::parse.FuncDecl as ParsedFuncDecl
+import cjcj::parse.FuncParam as ParsedFuncParam
+import cjcj::parse.FuncParamList as ParsedFuncParamList
+import cjcj::parse.LitConstExpr as ParsedLitConstExpr
+import cjcj::parse.LitConstKind as ParsedLitConstKind
+import cjcj::parse.MacroInvocation as ParsedMacroInvocation
+import cjcj::parse.MatchCase as ParsedMatchCase
+import cjcj::parse.MatchCaseOther as ParsedMatchCaseOther
+import cjcj::parse.Modifier as ParsedModifier
+import cjcj::parse.Node as ParsedNode
+import cjcj::parse.Parser as GeneratedParser
+import cjcj::parse.Pattern as ParsedPattern
+import cjcj::parse.ScopeKind as ParsedScopeKind
+import cjcj::parse.StringKind as ParsedStringKind
+import cjcj::parse.Type as ParsedType
 
 private func hasNoMacros(mc: MacroCollector): Bool {
     return mc.macroDefFuncs.isEmpty() && mc.macCalls.isEmpty()

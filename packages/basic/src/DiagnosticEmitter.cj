@@ -1,4 +1,4 @@
-package cangjie_compiler::basic
+package cjcj::basic
 
 import std.collection.*
 import std.sort.*

@@ -1,11 +1,11 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.FuncType
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.Value
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::chir.Attribute
+import cjcj::chir.FuncType
+import cjcj::chir.Function
+import cjcj::chir.Value
+import cjcj::utils.CJC_ASSERT
 
 private let LLVM_ALLOCA_OPCODE: Int32 = 26
 private let LLVM_INTEGER_TYPE_KIND: Int32 = 8

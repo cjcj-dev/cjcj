@@ -1,4 +1,4 @@
-package cangjie_compiler::macro_pkg
+package cjcj::macro_pkg
 
 public enum RTLogLevel {
     | RTLOG_VERBOSE

@@ -1,6 +1,6 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
-import cangjie_compiler::chir.ExprKind
+import cjcj::chir.ExprKind
 
 public func GenerateBooleanOperation(irBuilder: IRBuilder2, chirExpr: CHIRBinaryExprWrapper): LLVMValueRef {
     if (chirExpr.binaryExpr.GetNumOfOperands() < 2) {

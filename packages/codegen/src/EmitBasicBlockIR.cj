@@ -1,7 +1,7 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Block
+import cjcj::chir.Block
 
 private class BasicBlockGeneratorImpl <: IRGeneratorImpl {
     private let cgMod: CGModule

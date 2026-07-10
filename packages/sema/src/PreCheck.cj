@@ -1,14 +1,14 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::modules.SemaImportManager
-import cangjie_compiler::utils.FileUtil
+import cjcj::ast.*
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.Range as BasicRange
+import cjcj::modules.SemaImportManager
+import cjcj::utils.FileUtil
 
 private let PRECHECK_CORE_PACKAGE_NAME: String = "std.core"
 private let PRECHECK_OBJECT_NAME: String = "Object"

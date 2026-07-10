@@ -1,10 +1,10 @@
-package cangjie_compiler::compiler_unittest
+package cjcj::compiler_unittest
 
-import cangjie_compiler::basic.{DiagCategory, DiagKindRefactor, Diagnostic, DiagnosticEngine, SourceManager}
-import cangjie_compiler::frontend.{CompileStage, CompileStageIndex}
-import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::parse.Parser
-import cangjie_compiler::utils.{CJC_ASSERT, FileUtil, ProfileRecorder, TriggerPointSetter}
+import cjcj::basic.{DiagCategory, DiagKindRefactor, Diagnostic, DiagnosticEngine, SourceManager}
+import cjcj::frontend.{CompileStage, CompileStageIndex}
+import cjcj::option.GlobalOptions
+import cjcj::parse.Parser
+import cjcj::utils.{CJC_ASSERT, FileUtil, ProfileRecorder, TriggerPointSetter}
 import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*

@@ -1,8 +1,8 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::option.OptimizationLevel
-import cangjie_compiler::option.enumIndex
+import cjcj::option.OptimizationLevel
+import cjcj::option.enumIndex
 
 public func EraseUselessInstsAndDeclarationsImpl(cgMod: CGModule): Unit {
     cgMod.ClearLinkNameUsedInMeta()

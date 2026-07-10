@@ -1,9 +1,9 @@
-package cangjie_compiler::compiler_unittest
+package cjcj::compiler_unittest
 
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.{DiagnosticEngine, SourceManager}
-import cangjie_compiler::parse.Parser
-import cangjie_compiler::parse.ScopeKind as ParseScopeKind
+import cjcj::ast.*
+import cjcj::basic.{DiagnosticEngine, SourceManager}
+import cjcj::parse.Parser
+import cjcj::parse.ScopeKind as ParseScopeKind
 import std.unittest.*
 import std.unittest.testmacro.*
 

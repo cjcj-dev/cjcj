@@ -1,8 +1,8 @@
-package cangjie_compiler::sema.InheritanceChecker
+package cjcj::sema.InheritanceChecker
 
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.{DiagnosticEngine, DiagKindRefactor}
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::basic.{DiagnosticEngine, DiagKindRefactor}
+import cjcj::sema.*
 
 private func IsBuiltinGeneralArithmeticIntKind(kind: TypeKind): Bool {
     return kind == TypeKind.TYPE_INT8 || kind == TypeKind.TYPE_INT16 || kind == TypeKind.TYPE_INT32 ||

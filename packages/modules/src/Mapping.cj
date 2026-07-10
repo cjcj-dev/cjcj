@@ -1,14 +1,14 @@
-package cangjie_compiler::modules
+package cjcj::modules
 
 import std.collection.*
-import cangjie_compiler::ast.BuiltInType
-import cangjie_compiler::ast.CallKind
-import cangjie_compiler::ast.ForInKind
-import cangjie_compiler::ast.LitConstKind
-import cangjie_compiler::ast.StringKind
-import cangjie_compiler::ast.TypeKind
-import cangjie_compiler::lex.TokenKind
-import cangjie_compiler::utils.OverflowStrategy
+import cjcj::ast.BuiltInType
+import cjcj::ast.CallKind
+import cjcj::ast.ForInKind
+import cjcj::ast.LitConstKind
+import cjcj::ast.StringKind
+import cjcj::ast.TypeKind
+import cjcj::lex.TokenKind
+import cjcj::utils.OverflowStrategy
 
 public let ACCESS_LEVEL_MAP: ArrayList<(AccessLevel, UInt8)> = { =>
     let values = ArrayList<(AccessLevel, UInt8)>()

@@ -1,17 +1,17 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::ast.AnnotationKind as AstAnnotationKind
-import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.DiagnosticBuilder as BasicDiagnosticBuilder
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
-import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
-import cangjie_compiler::modules.SemaImportManager
+import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagnosticBuilder as BasicDiagnosticBuilder
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.Range as BasicRange
+import cjcj::modules.GetPackageRelation as ModulesGetPackageRelation
+import cjcj::modules.PackageRelation as ModulesPackageRelation
+import cjcj::modules.SemaImportManager
 
 private func TypeCheckReferenceRange(node: Node): BasicRange {
     var rangeEnd = node.end

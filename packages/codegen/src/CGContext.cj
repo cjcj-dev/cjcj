@@ -1,17 +1,17 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.CHIRBuilder
-import cangjie_compiler::chir.ClassType
-import cangjie_compiler::chir.CustomType
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.GlobalVar
-import cangjie_compiler::chir.Package
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.Value
-import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::utils.{CJC_ASSERT, DynamicCast}
+import cjcj::chir.Attribute
+import cjcj::chir.CHIRBuilder
+import cjcj::chir.ClassType
+import cjcj::chir.CustomType
+import cjcj::chir.Function
+import cjcj::chir.GlobalVar
+import cjcj::chir.Package
+import cjcj::chir.Type
+import cjcj::chir.Value
+import cjcj::option.GlobalOptions
+import cjcj::utils.{CJC_ASSERT, DynamicCast}
 
 public class CallBaseToReplaceInfo {
     public let callWithoutTI: LLVMValueRef

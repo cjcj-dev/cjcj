@@ -1,4 +1,4 @@
-package cangjie_compiler::basic
+package cjcj::basic
 
 public let ANSI_NO_COLOR: String = ""
 public let ANSI_COLOR_RESET: String = "\u{1b}[0m"

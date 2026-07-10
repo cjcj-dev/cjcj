@@ -1,9 +1,9 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
-import cangjie_compiler::chir.Allocate
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::option.OptimizationLevel
+import cjcj::chir.Allocate
+import cjcj::chir.Expression
+import cjcj::chir.ExprKind
+import cjcj::option.OptimizationLevel
 
 private let LLVM_ALLOCA_OPCODE: Int32 = 26
 private let LLVM_POINTER_TYPE_KIND: Int32 = 12

@@ -1,12 +1,12 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.CustomType
-import cangjie_compiler::chir.RefType
-import cangjie_compiler::chir.RawArrayType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::mangle.DecimalToManglingNumber
-import cangjie_compiler::chir.GetTypeQualifiedName
+import cjcj::chir.CustomType
+import cjcj::chir.RefType
+import cjcj::chir.RawArrayType
+import cjcj::chir.Type
+import cjcj::mangle.DecimalToManglingNumber
+import cjcj::chir.GetTypeQualifiedName
 
 public class CGArrayType <: CGType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type) {

@@ -1,21 +1,21 @@
-package cangjie_compiler::frontend_tool
+package cjcj::frontend_tool
 
 import std.collection.*
-import cangjie_compiler::basic.DiagFormat as BasicDiagFormat
-import cangjie_compiler::basic.DiagKindRefactor
-import cangjie_compiler::basic.PrintVersion
-import cangjie_compiler::basic.WriteError
-import cangjie_compiler::frontend.*
-import cangjie_compiler::option.DiagFormat as OptionDiagFormat
-import cangjie_compiler::incremental_compilation.IncreKind
-import cangjie_compiler::incremental_compilation.IncrementalCompilationLogger
-import cangjie_compiler::option.MockMode
-import cangjie_compiler::option.OrderedInput as OptionOrderedInput
-import cangjie_compiler::option.OutputMode
-import cangjie_compiler::option.TempFileInfo as OptionTempFileInfo
-import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.ProfileRecorder
-import cangjie_compiler::utils.ProfileRecorderType
+import cjcj::basic.DiagFormat as BasicDiagFormat
+import cjcj::basic.DiagKindRefactor
+import cjcj::basic.PrintVersion
+import cjcj::basic.WriteError
+import cjcj::frontend.*
+import cjcj::option.DiagFormat as OptionDiagFormat
+import cjcj::incremental_compilation.IncreKind
+import cjcj::incremental_compilation.IncrementalCompilationLogger
+import cjcj::option.MockMode
+import cjcj::option.OrderedInput as OptionOrderedInput
+import cjcj::option.OutputMode
+import cjcj::option.TempFileInfo as OptionTempFileInfo
+import cjcj::utils.FileUtil
+import cjcj::utils.ProfileRecorder
+import cjcj::utils.ProfileRecorderType
 
 public class DriverOptions {
     public let sourceFiles: ArrayList<String> = ArrayList<String>()

@@ -1,6 +1,6 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
-import cangjie_compiler::utils.{CJC_ASSERT, Directory}
+import cjcj::utils.{CJC_ASSERT, Directory}
 import std.collection.*
 import std.convert.*
 

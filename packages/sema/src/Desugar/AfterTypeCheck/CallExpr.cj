@@ -1,9 +1,9 @@
-package cangjie_compiler::sema.Desugar.AfterTypeCheck
+package cjcj::sema.Desugar.AfterTypeCheck
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::ast.*
+import cjcj::sema.*
+import cjcj::utils.CJC_ASSERT
 
 private let CORE_PACKAGE_NAME: String = "std.core"
 private let AST_PACKAGE_NAME: String = "std.ast"

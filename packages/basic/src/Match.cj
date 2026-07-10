@@ -1,4 +1,4 @@
-package cangjie_compiler::basic
+package cjcj::basic
 
 public class Matcher<T> {
     private let node: T

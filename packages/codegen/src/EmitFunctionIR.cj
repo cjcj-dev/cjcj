@@ -1,7 +1,7 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
-import cangjie_compiler::chir.Function
-import cangjie_compiler::option.MockMode
+import cjcj::chir.Function
+import cjcj::option.MockMode
 
 private class FunctionGeneratorImpl <: IRGeneratorImpl {
     private let cgMod: CGModule

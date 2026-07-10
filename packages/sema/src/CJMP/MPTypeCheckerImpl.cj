@@ -1,7 +1,7 @@
-package cangjie_compiler::sema.CJMP
+package cjcj::sema.CJMP
 
-import cangjie_compiler::sema.*
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::sema.*
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 
 public class MPTypeCheckerImpl {
     public var typeManager: TypeManager

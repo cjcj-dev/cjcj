@@ -1,7 +1,7 @@
-package cangjie_compiler::parse
+package cjcj::parse
 
-import cangjie_compiler::ast.{Comment, CommentGroup, CommentKind, CommentStyle, PointerExpr}
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::ast.{Comment, CommentGroup, CommentKind, CommentStyle, PointerExpr}
+import cjcj::utils.CJC_ASSERT
 import std.collection.*
 import std.sort.*
 

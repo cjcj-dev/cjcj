@@ -1,6 +1,6 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
-import cangjie_compiler::utils.{
+import cjcj::utils.{
     CJC_ASSERT, FloatFormat, GetRootPackageName, INTEROP_JAVA_LANG_PACKAGE, INTEROP_JOBJECT_NAME,
     INTEROPLIB_CFFI_JAVA_ENTITY, JAVA_REF_GETTER_FUNC_NAME, Stold, SYNTHETIC_CLASS_SUFFIX
 }

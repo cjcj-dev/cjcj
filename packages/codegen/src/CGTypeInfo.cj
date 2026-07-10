@@ -1,30 +1,30 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::basic.Linkage
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.BooleanType
-import cangjie_compiler::chir.BoxType
-import cangjie_compiler::chir.ClassDef
-import cangjie_compiler::chir.ClassType
-import cangjie_compiler::chir.CPointerType
-import cangjie_compiler::chir.CustomType
-import cangjie_compiler::chir.CustomTypeDef
-import cangjie_compiler::chir.EnumDef
-import cangjie_compiler::chir.EnumType
-import cangjie_compiler::chir.FuncType
-import cangjie_compiler::chir.GenericType
-import cangjie_compiler::chir.RawArrayType
-import cangjie_compiler::chir.RefType
-import cangjie_compiler::chir.StructDef
-import cangjie_compiler::chir.StructType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.TypeKindIndex
-import cangjie_compiler::chir.TupleType
-import cangjie_compiler::chir.VArrayType
-import cangjie_compiler::chir.{GetCustomTypeIdentifier, GetTypeQualifiedName}
-import cangjie_compiler::option.{ArchType, EnvironmentType, OSType}
-import cangjie_compiler::utils.{CJC_ASSERT, REF_PACKAGE_NAME, STD_LIB_WEAK_REF, StaticCast}
+import cjcj::basic.Linkage
+import cjcj::chir.Attribute
+import cjcj::chir.BooleanType
+import cjcj::chir.BoxType
+import cjcj::chir.ClassDef
+import cjcj::chir.ClassType
+import cjcj::chir.CPointerType
+import cjcj::chir.CustomType
+import cjcj::chir.CustomTypeDef
+import cjcj::chir.EnumDef
+import cjcj::chir.EnumType
+import cjcj::chir.FuncType
+import cjcj::chir.GenericType
+import cjcj::chir.RawArrayType
+import cjcj::chir.RefType
+import cjcj::chir.StructDef
+import cjcj::chir.StructType
+import cjcj::chir.Type
+import cjcj::chir.TypeKindIndex
+import cjcj::chir.TupleType
+import cjcj::chir.VArrayType
+import cjcj::chir.{GetCustomTypeIdentifier, GetTypeQualifiedName}
+import cjcj::option.{ArchType, EnvironmentType, OSType}
+import cjcj::utils.{CJC_ASSERT, REF_PACKAGE_NAME, STD_LIB_WEAK_REF, StaticCast}
 
 private let UG_CLASS_KIND: UInt64 = 128u64
 private let UG_INTERFACE_KIND: UInt64 = 129u64

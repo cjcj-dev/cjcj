@@ -1,8 +1,8 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::basic.Linkage
-import cangjie_compiler::chir.GenericType
+import cjcj::basic.Linkage
+import cjcj::chir.GenericType
 
 public enum TypeInfoFields {
     | TYPEINFO_NAME

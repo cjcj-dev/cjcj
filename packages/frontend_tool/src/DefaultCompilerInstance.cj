@@ -1,11 +1,11 @@
-package cangjie_compiler::frontend_tool
+package cjcj::frontend_tool
 
 import std.collection.*
-import cangjie_compiler::frontend.*
-import cangjie_compiler::option.OutputMode
-import cangjie_compiler::option.TempFileInfo
-import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.ProfileRecorder
+import cjcj::frontend.*
+import cjcj::option.OutputMode
+import cjcj::option.TempFileInfo
+import cjcj::utils.FileUtil
+import cjcj::utils.ProfileRecorder
 
 public open class DefaultCompilerInstance {
     public let invocation: CompilerInvocation

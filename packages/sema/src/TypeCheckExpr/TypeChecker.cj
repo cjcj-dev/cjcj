@@ -1,33 +1,33 @@
-package cangjie_compiler::sema.TypeCheckExpr
+package cjcj::sema.TypeCheckExpr
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.DEFAULT_POSITION as BasicDefaultPosition
-import cangjie_compiler::basic.DiagnosticCache
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::option.GlobalOptions as OptionGlobalOptions
-import cangjie_compiler::option.OutputMode as OptionOutputMode
-import cangjie_compiler::option.IsUnsafeBackend as OptionIsUnsafeBackend
-import cangjie_compiler::sema.*
-import cangjie_compiler::sema.Desugar.*
-import cangjie_compiler::sema.Desugar.AfterTypeCheck.*
-import cangjie_compiler::sema.FFI.*
-import cangjie_compiler::sema.InheritanceChecker.*
-import cangjie_compiler::sema.LegalityOfUsage.*
-import cangjie_compiler::sema.NativeFFI.*
-import cangjie_compiler::utils.CFUNC_NAME
-import cangjie_compiler::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
-import cangjie_compiler::utils.CPOINTER_NAME
-import cangjie_compiler::utils.CSTRING_NAME
-import cangjie_compiler::utils.CTYPE_NAME as UtilsCTypeName
-import cangjie_compiler::utils.CJC_ASSERT
-import cangjie_compiler::utils.MAIN_INVOKE
-import cangjie_compiler::utils.OBJECT_NAME
-import cangjie_compiler::utils.RAW_ARRAY_NAME
-import cangjie_compiler::utils.VARRAY_NAME
+import cjcj::ast.*
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
+import cjcj::basic.DiagnosticCache
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::option.GlobalOptions as OptionGlobalOptions
+import cjcj::option.OutputMode as OptionOutputMode
+import cjcj::option.IsUnsafeBackend as OptionIsUnsafeBackend
+import cjcj::sema.*
+import cjcj::sema.Desugar.*
+import cjcj::sema.Desugar.AfterTypeCheck.*
+import cjcj::sema.FFI.*
+import cjcj::sema.InheritanceChecker.*
+import cjcj::sema.LegalityOfUsage.*
+import cjcj::sema.NativeFFI.*
+import cjcj::utils.CFUNC_NAME
+import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
+import cjcj::utils.CPOINTER_NAME
+import cjcj::utils.CSTRING_NAME
+import cjcj::utils.CTYPE_NAME as UtilsCTypeName
+import cjcj::utils.CJC_ASSERT
+import cjcj::utils.MAIN_INVOKE
+import cjcj::utils.OBJECT_NAME
+import cjcj::utils.RAW_ARRAY_NAME
+import cjcj::utils.VARRAY_NAME
 
 private let INOUT_TEMP_VALUE: String = "temporary value"
 private let INOUT_IMMUTABLE: String = "is a immutable variable"

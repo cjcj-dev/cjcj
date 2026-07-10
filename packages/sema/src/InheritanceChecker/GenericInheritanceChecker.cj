@@ -1,10 +1,10 @@
-package cangjie_compiler::sema.InheritanceChecker
+package cjcj::sema.InheritanceChecker
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.{DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, MakeRange}
-import cangjie_compiler::sema.*
-import cangjie_compiler::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
+import cjcj::ast.*
+import cjcj::basic.{DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, MakeRange}
+import cjcj::sema.*
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
 
 public func GetAllGenericUpperBounds(typeManager: TypeManager, decl: Decl): ArrayList<TySet> {
     if (let None <- decl.GetGeneric()) {

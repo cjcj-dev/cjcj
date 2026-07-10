@@ -1,10 +1,10 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
-import cangjie_compiler::basic.{
+import cjcj::basic.{
     Diagnostic, DiagnosticBuilder, DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, GetDiagnoseCategory,
     SubDiagnostic
 }
-import cangjie_compiler::basic.Range as BasicRange
+import cjcj::basic.Range as BasicRange
 
 public func MakeRealRange(
     node: Node,

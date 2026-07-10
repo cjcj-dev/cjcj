@@ -1,7 +1,7 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
-import cangjie_compiler::utils.{HAS_INITED_IDENT, ProfileRecorder}
+import cjcj::utils.{HAS_INITED_IDENT, ProfileRecorder}
 
 private func IsObjCMirror(classDef: ClassDef): Bool {
     return classDef.TestAttr(Attribute.OBJ_C_MIRROR)

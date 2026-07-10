@@ -1,12 +1,12 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.NumericType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.TypeKind
-import cangjie_compiler::chir.TypeKindIndex
-import cangjie_compiler::option.ArchType
-import cangjie_compiler::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
+import cjcj::chir.NumericType
+import cjcj::chir.Type
+import cjcj::chir.TypeKind
+import cjcj::chir.TypeKindIndex
+import cjcj::option.ArchType
+import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
 public class CGPrimitiveType <: CGType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type) {

@@ -1,6 +1,6 @@
-package cangjie_compiler::utils
+package cjcj::utils
 
-import cangjie_compiler::basic.Errorln
+import cjcj::basic.Errorln
 import std.collection.*
 import std.fs.Directory as FSDirectory
 import std.fs.File

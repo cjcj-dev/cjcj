@@ -1,9 +1,9 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::utils.CJC_ASSERT
-import cangjie_compiler::utils.FileUtil
-import cangjie_compiler::utils.InternalError
+import cjcj::option.GlobalOptions
+import cjcj::utils.CJC_ASSERT
+import cjcj::utils.FileUtil
+import cjcj::utils.InternalError
 import std.collection.*
 
 public class ConstEvalPass {

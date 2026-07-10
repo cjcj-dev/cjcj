@@ -1,7 +1,7 @@
-package cangjie_compiler::sema.Desugar.AfterTypeCheck
+package cjcj::sema.Desugar.AfterTypeCheck
 
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::sema.*
 
 private func declOfTy(ty: Ty): Option<Decl> {
     if (let Some(classTy) <- (ty as ClassTy)) {

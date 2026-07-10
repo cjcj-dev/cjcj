@@ -1,4 +1,4 @@
-package cangjie_compiler::option
+package cjcj::option
 
 private let EMPTY_VALUES: Array<OptionValue> = Array<OptionValue>()
 

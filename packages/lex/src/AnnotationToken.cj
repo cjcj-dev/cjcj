@@ -1,4 +1,4 @@
-package cangjie_compiler::lex
+package cjcj::lex
 
 public enum AnnotationTokenKind {
     | EXCEPT

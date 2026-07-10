@@ -1,8 +1,8 @@
-package cangjie_compiler::compiler_unittest
+package cjcj::compiler_unittest
 
 import std.unittest.*
 import std.unittest.testmacro.*
-import cangjie_compiler::sema.Plugin.*
+import cjcj::sema.Plugin.*
 
 private func Parse(json: String): JsonObject {
     return ParseJsonObject(json.toArray())

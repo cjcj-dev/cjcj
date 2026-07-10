@@ -1,15 +1,15 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::basic.Errorln
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.CustomTypeDef
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.GlobalVar
+import cjcj::basic.Errorln
+import cjcj::chir.Attribute
+import cjcj::chir.CustomTypeDef
+import cjcj::chir.Function
+import cjcj::chir.GlobalVar
 @When[os == "Windows"]
-import cangjie_compiler::basic.StringConvertor
-import cangjie_compiler::utils.{CJC_ASSERT, FileUtil, REFLECT_PACKAGE_NAME}
+import cjcj::basic.StringConvertor
+import cjcj::utils.{CJC_ASSERT, FileUtil, REFLECT_PACKAGE_NAME}
 
 private var counter: Int64 = 0
 

@@ -1,6 +1,6 @@
-package cangjie_compiler::incremental_compilation
+package cjcj::incremental_compilation
 
-import cangjie_compiler::utils.FileUtil
+import cjcj::utils.FileUtil
 import std.fs.File
 
 public enum WriteKind {

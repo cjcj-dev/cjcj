@@ -1,10 +1,10 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
-import cangjie_compiler::chir.Constant
-import cangjie_compiler::chir.BinaryExpression
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.ExprMajorKind
-import cangjie_compiler::chir.UnaryExpression
+import cjcj::chir.Constant
+import cjcj::chir.BinaryExpression
+import cjcj::chir.Expression
+import cjcj::chir.ExprMajorKind
+import cjcj::chir.UnaryExpression
 
 public func DispatchExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(chirConst) <- (chirExpr as Constant)) {

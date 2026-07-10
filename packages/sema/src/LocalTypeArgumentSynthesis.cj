@@ -1,7 +1,7 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
+import cjcj::ast.*
 
 public class LocTyArgSynArgPack {
     public let tyVarsToSolve: ArrayList<GenericsTy> = ArrayList<GenericsTy>()

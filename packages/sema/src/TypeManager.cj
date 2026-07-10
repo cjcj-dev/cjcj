@@ -1,12 +1,12 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
 import std.sort.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::modules.GetPackageRelation as ModulesGetPackageRelation
-import cangjie_compiler::modules.PackageRelation as ModulesPackageRelation
-import cangjie_compiler::modules.SplitQualifiedName as ModulesSplitQualifiedName
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::ast.*
+import cjcj::modules.GetPackageRelation as ModulesGetPackageRelation
+import cjcj::modules.PackageRelation as ModulesPackageRelation
+import cjcj::modules.SplitQualifiedName as ModulesSplitQualifiedName
+import cjcj::utils.CJC_ASSERT
 
 public enum TypeCompatibility {
     | INCOMPATIBLE

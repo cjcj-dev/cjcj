@@ -1,24 +1,24 @@
-package cangjie_compiler::frontend
+package cjcj::frontend
 
-import cangjie_compiler::ast.Package as RealASTPackage
-import cangjie_compiler::ast.PackageDecl as RealASTPackageDecl
-import cangjie_compiler::mangle.BaseMangler as RealBaseMangler
-import cangjie_compiler::mangle.MangleAstAdapter as RealMangleAstAdapter
-import cangjie_compiler::mangle.MangleDecl as RealMangleDecl
-import cangjie_compiler::mangle.ManglerContext as RealManglerContext
-import cangjie_compiler::sema.CompilerInstance as FaithfulSemaCompilerInstance
-import cangjie_compiler::sema.GenericInstantiation.GenericInstantiationManager
-import cangjie_compiler::sema.Desugar.DesugarBeforeTypeCheck as FaithfulDesugarBeforeTypeCheck
-import cangjie_compiler::sema.AnalyzeFunctionLinkage
-import cangjie_compiler::sema.CheckInlineFunctionsForPackages
-import cangjie_compiler::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
-import cangjie_compiler::sema.TypeCheckReferenceRemoveTargetNotMeetExtendConstraint
-import cangjie_compiler::meta_transformation.MetaTransformPluginBuilder
-import cangjie_compiler::meta_transformation.NativeMetaTransformPlugin
-import cangjie_compiler::lex.Lexer as CangjieLexer
-import cangjie_compiler::lex.TokenKind as CangjieTokenKind
-import cangjie_compiler::lex.TokenKindValue
-import cangjie_compiler::utils.FreeIdleMemoryToOS
+import cjcj::ast.Package as RealASTPackage
+import cjcj::ast.PackageDecl as RealASTPackageDecl
+import cjcj::mangle.BaseMangler as RealBaseMangler
+import cjcj::mangle.MangleAstAdapter as RealMangleAstAdapter
+import cjcj::mangle.MangleDecl as RealMangleDecl
+import cjcj::mangle.ManglerContext as RealManglerContext
+import cjcj::sema.CompilerInstance as FaithfulSemaCompilerInstance
+import cjcj::sema.GenericInstantiation.GenericInstantiationManager
+import cjcj::sema.Desugar.DesugarBeforeTypeCheck as FaithfulDesugarBeforeTypeCheck
+import cjcj::sema.AnalyzeFunctionLinkage
+import cjcj::sema.CheckInlineFunctionsForPackages
+import cjcj::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
+import cjcj::sema.TypeCheckReferenceRemoveTargetNotMeetExtendConstraint
+import cjcj::meta_transformation.MetaTransformPluginBuilder
+import cjcj::meta_transformation.NativeMetaTransformPlugin
+import cjcj::lex.Lexer as CangjieLexer
+import cjcj::lex.TokenKind as CangjieTokenKind
+import cjcj::lex.TokenKindValue
+import cjcj::utils.FreeIdleMemoryToOS
 import std.collection.*
 
 private class PendingMangledDecl {

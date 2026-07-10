@@ -1,9 +1,9 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Expression
-import cangjie_compiler::chir.InstanceOf
-import cangjie_compiler::chir.Type
+import cjcj::chir.Expression
+import cjcj::chir.InstanceOf
+import cjcj::chir.Type
 
 private let IS_SUBTYPE_INTRINSIC_NAME_FOR_INSTANCEOF: String = "llvm.cj.is.subtype"
 private let IS_TUPLE_TYPE_OF_INTRINSIC_NAME: String = "llvm.cj.is.tupletype.of"

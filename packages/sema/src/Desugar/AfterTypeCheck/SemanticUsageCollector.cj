@@ -1,8 +1,8 @@
-package cangjie_compiler::sema.Desugar.AfterTypeCheck
+package cjcj::sema.Desugar.AfterTypeCheck
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::sema.*
 
 private func AddDeclUsage(info: SemanticInfo, decl: Decl): Unit {
     if (decl.IsBuiltIn() || decl.astKind == ASTKind.PACKAGE_DECL) {

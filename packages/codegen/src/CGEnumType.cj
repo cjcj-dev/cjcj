@@ -1,22 +1,22 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.BoxType
-import cangjie_compiler::chir.CPointerType
-import cangjie_compiler::chir.ClassType
-import cangjie_compiler::chir.EnumCtorInfo
-import cangjie_compiler::chir.EnumType
-import cangjie_compiler::chir.FuncType
-import cangjie_compiler::chir.GenericType
-import cangjie_compiler::chir.RawArrayType
-import cangjie_compiler::chir.RefType
-import cangjie_compiler::chir.StructType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.TupleType
-import cangjie_compiler::chir.VArrayType
-import cangjie_compiler::chir.GetTypeQualifiedName
-import cangjie_compiler::option.{ArchType, EnvironmentType, TripleInfo}
-import cangjie_compiler::utils.CJC_ASSERT
+import cjcj::chir.BoxType
+import cjcj::chir.CPointerType
+import cjcj::chir.ClassType
+import cjcj::chir.EnumCtorInfo
+import cjcj::chir.EnumType
+import cjcj::chir.FuncType
+import cjcj::chir.GenericType
+import cjcj::chir.RawArrayType
+import cjcj::chir.RefType
+import cjcj::chir.StructType
+import cjcj::chir.Type
+import cjcj::chir.TupleType
+import cjcj::chir.VArrayType
+import cjcj::chir.GetTypeQualifiedName
+import cjcj::option.{ArchType, EnvironmentType, TripleInfo}
+import cjcj::utils.CJC_ASSERT
 
 private let LLVM_POINTER_TYPE_KIND: Int32 = 12
 private let LLVM_STRUCT_TYPE_KIND: Int32 = 10

@@ -1,10 +1,10 @@
-package cangjie_compiler::sema.TypeCheckExpr
+package cjcj::sema.TypeCheckExpr
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::sema.*
+import cjcj::ast.*
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::sema.*
 
 private func ValidExprTy(expr: Option<Expr>): Option<Ty> {
     if (let Some(realExpr) <- expr) {

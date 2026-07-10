@@ -1,10 +1,10 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.TupleType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.GetTypeQualifiedName
-import cangjie_compiler::utils.StaticCast
+import cjcj::chir.TupleType
+import cjcj::chir.Type
+import cjcj::chir.GetTypeQualifiedName
+import cjcj::utils.StaticCast
 
 public class CGTupleType <: CGType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type, _: TypeExtraInfo) {

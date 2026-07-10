@@ -1,15 +1,15 @@
-package cangjie_compiler::modules
+package cjcj::modules
 
 import std.collection.*
-import cangjie_compiler::ast.Decl as ASTDecl
-import cangjie_compiler::ast.ExtendDecl as ASTExtendDecl
-import cangjie_compiler::ast.File as ASTFile
-import cangjie_compiler::ast.ImportSpec as ASTImportSpec
-import cangjie_compiler::ast.Node as ASTNode
-import cangjie_compiler::ast.Package as ASTPackage
-import cangjie_compiler::ast.PackageDecl as ASTPackageDecl
-import cangjie_compiler::ast.Ty as ASTTy
-import cangjie_compiler::basic.DiagnosticBuilder
+import cjcj::ast.Decl as ASTDecl
+import cjcj::ast.ExtendDecl as ASTExtendDecl
+import cjcj::ast.File as ASTFile
+import cjcj::ast.ImportSpec as ASTImportSpec
+import cjcj::ast.Node as ASTNode
+import cjcj::ast.Package as ASTPackage
+import cjcj::ast.PackageDecl as ASTPackageDecl
+import cjcj::ast.Ty as ASTTy
+import cjcj::basic.DiagnosticBuilder
 
 public interface SemaCjoManager {
     func GetPackageNameByImport(importSpec: ASTImportSpec): String

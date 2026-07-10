@@ -1,10 +1,10 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
-import cangjie_compiler::basic.Linkage as BasicLinkage
-import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::utils.CJC_ASSERT
-import cangjie_compiler::utils.ProfileRecorder
+import cjcj::basic.Linkage as BasicLinkage
+import cjcj::option.GlobalOptions
+import cjcj::utils.CJC_ASSERT
+import cjcj::utils.ProfileRecorder
 
 private let GENERIC_VIRTUAL_FUNC: String = "$GenericVirtualFunc"
 private let INST_VIRTUAL_FUNC: String = "$InstVirtualFunc"

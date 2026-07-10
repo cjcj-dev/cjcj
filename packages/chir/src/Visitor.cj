@@ -1,7 +1,7 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.ArrayList
-import cangjie_compiler::utils.DynamicCast
+import cjcj::utils.DynamicCast
 
 public enum VisitResult {
     | CONTINUE

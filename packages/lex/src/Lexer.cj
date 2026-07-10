@@ -1,6 +1,6 @@
-package cangjie_compiler::lex
+package cjcj::lex
 
-import cangjie_compiler::basic.*
+import cjcj::basic.*
 import std.collection.*
 
 public class Lexer {

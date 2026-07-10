@@ -1,7 +1,7 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
-import cangjie_compiler::basic.{DiagnosticEngine, DiagKindRefactor}
-import cangjie_compiler::basic.Range as BasicRange
+import cjcj::basic.{DiagnosticEngine, DiagKindRefactor}
+import cjcj::basic.Range as BasicRange
 import std.collection.*
 
 private class ValidRangeFrame {

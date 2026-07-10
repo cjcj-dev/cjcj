@@ -1,8 +1,8 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
 import std.collection.*
-import cangjie_compiler::basic.DiagKindRefactor
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagKindRefactor
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 
 public class NoHeapAllocChecker {
     private let diag: BasicDiagnosticEngine

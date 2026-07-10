@@ -1,13 +1,13 @@
-package cangjie_compiler::sema.TypeCheckExpr
+package cjcj::sema.TypeCheckExpr
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::sema.*
-import cangjie_compiler::sema.Desugar.*
-import cangjie_compiler::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
-import cangjie_compiler::utils.STD_LIB_OPTION
+import cjcj::ast.*
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::sema.*
+import cjcj::sema.Desugar.*
+import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
+import cjcj::utils.STD_LIB_OPTION
 
 public type BinaryOperandSynthesizer = (Expr) -> Ty
 public type BinaryOperandChecker = (Ty, Expr) -> Bool

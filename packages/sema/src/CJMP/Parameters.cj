@@ -1,13 +1,13 @@
-package cangjie_compiler::sema.CJMP
+package cjcj::sema.CJMP
 
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.*
-import cangjie_compiler::basic.DiagArgument as BasicDiagArgument
-import cangjie_compiler::basic.DiagKind as BasicDiagKind
-import cangjie_compiler::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cangjie_compiler::basic.Position as BasicPosition
-import cangjie_compiler::basic.Range as BasicRange
-import cangjie_compiler::utils.CJC_ASSERT_WITH_MSG
+import cjcj::ast.*
+import cjcj::sema.*
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.Position as BasicPosition
+import cjcj::basic.Range as BasicRange
+import cjcj::utils.CJC_ASSERT_WITH_MSG
 
 private func ToBasicPosition(pos: Position): BasicPosition {
     return BasicPosition(pos.fileID, pos.line, pos.column)

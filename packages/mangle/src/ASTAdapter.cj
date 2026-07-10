@@ -1,7 +1,7 @@
-package cangjie_compiler::mangle
+package cjcj::mangle
 
 import std.collection.*
-import cangjie_compiler::ast.*
+import cjcj::ast.*
 import std.sync.AtomicInt64
 
 private class AstDeclPair {

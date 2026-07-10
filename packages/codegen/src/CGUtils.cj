@@ -1,29 +1,29 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.CheckCustomTypeDefIsExpected
-import cangjie_compiler::chir.ClassDef
-import cangjie_compiler::chir.ClassType
-import cangjie_compiler::chir.Constant
-import cangjie_compiler::chir.CustomType
-import cangjie_compiler::chir.EnumType
-import cangjie_compiler::chir.ExtendDef
-import cangjie_compiler::chir.ExprKind
-import cangjie_compiler::chir.Function
-import cangjie_compiler::chir.GenericType
-import cangjie_compiler::chir.LocalVar
-import cangjie_compiler::chir.Parameter
-import cangjie_compiler::chir.RawArrayLiteralInit
-import cangjie_compiler::chir.Tuple
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.`VArray` as CHIRVArray
-import cangjie_compiler::chir.Value
-import cangjie_compiler::mangle.MANGLE_NESTED_PREFIX
-import cangjie_compiler::mangle.MANGLE_SUFFIX
-import cangjie_compiler::option.OSType
-import cangjie_compiler::utils.CJC_ABORT
-import cangjie_compiler::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, HashString64, REF_PACKAGE_NAME, STD_LIB_FUTURE,
+import cjcj::chir.Attribute
+import cjcj::chir.CheckCustomTypeDefIsExpected
+import cjcj::chir.ClassDef
+import cjcj::chir.ClassType
+import cjcj::chir.Constant
+import cjcj::chir.CustomType
+import cjcj::chir.EnumType
+import cjcj::chir.ExtendDef
+import cjcj::chir.ExprKind
+import cjcj::chir.Function
+import cjcj::chir.GenericType
+import cjcj::chir.LocalVar
+import cjcj::chir.Parameter
+import cjcj::chir.RawArrayLiteralInit
+import cjcj::chir.Tuple
+import cjcj::chir.Type
+import cjcj::chir.`VArray` as CHIRVArray
+import cjcj::chir.Value
+import cjcj::mangle.MANGLE_NESTED_PREFIX
+import cjcj::mangle.MANGLE_SUFFIX
+import cjcj::option.OSType
+import cjcj::utils.CJC_ABORT
+import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, HashString64, REF_PACKAGE_NAME, STD_LIB_FUTURE,
     STD_LIB_MONITOR, STD_LIB_MUTEX, STD_LIB_WAIT_QUEUE, STD_LIB_WEAK_REF, SYNC_PACKAGE_NAME}
 
 public func GetCodeGenGlobalName(value: Value): String {

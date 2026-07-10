@@ -1,4 +1,4 @@
-package cangjie_compiler::mangle
+package cjcj::mangle
 
 public func StdPackageMangle(pkgName: String): Option<String> {
     return match (pkgName) {

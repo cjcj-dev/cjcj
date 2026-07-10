@@ -1,11 +1,11 @@
-package cangjie_compiler::sema
+package cjcj::sema
 
 import std.collection.*
-import cangjie_compiler::ast.*
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::modules.SemaImportManager
-import cangjie_compiler::option.GetHardwareConcurrency
-import cangjie_compiler::utils.ProfileRecorder
+import cjcj::ast.*
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::modules.SemaImportManager
+import cjcj::option.GetHardwareConcurrency
+import cjcj::utils.ProfileRecorder
 
 private let CORES_REQUIRED_WARMUP: UInt64 = 8u64
 

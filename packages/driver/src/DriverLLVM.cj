@@ -1,8 +1,8 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
 import std.collection.*
 import std.convert.*
-import cangjie_compiler::basic.DiagKindRefactor
+import cjcj::basic.DiagKindRefactor
 
 private type DriverLLVMContextRef = CPointer<Unit>
 private type DriverLLVMModuleRef = CPointer<Unit>

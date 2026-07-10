@@ -1,7 +1,7 @@
-package cangjie_compiler::mangle
+package cjcj::mangle
 
 import std.collection.*
-import cangjie_compiler::ast.*
+import cjcj::ast.*
 
 private class VarBucket {
     public var key: MangleDecl

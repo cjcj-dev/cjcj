@@ -1,4 +1,4 @@
-package cangjie_compiler::sema.Plugin
+package cjcj::sema.Plugin
 
 import std.collection.*
 

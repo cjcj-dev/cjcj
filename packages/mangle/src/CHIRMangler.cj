@@ -1,6 +1,6 @@
-package cangjie_compiler::mangle
+package cjcj::mangle
 
-import cangjie_compiler::ast.FuncTy
+import cjcj::ast.FuncTy
 
 public class CHIRMangler <: BaseMangler {
     private var enableCompileTest: Bool

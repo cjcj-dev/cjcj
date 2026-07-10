@@ -1,7 +1,7 @@
 [package]
   cjc-version = "1.1.0"
   name = "cjc"
-  organization = "cangjie_compiler"
+  organization = "cjcj"
   description = "Self-hosted Cangjie compiler executable entry"
   version = "0.1.0"
   target-dir = ""
@@ -14,8 +14,8 @@
   package-configuration = {}
 
 [dependencies]
-  "cangjie_compiler::driver" = { path = "../driver" }
-  "cangjie_compiler::utils" = { path = "../utils" }
-  "cangjie_compiler::frontend" = { path = "../frontend" }
-  "cangjie_compiler::chir" = { path = "../chir" }
-  "cangjie_compiler::basic" = { path = "../basic" }
+  "cjcj::driver" = { path = "../driver" }
+  "cjcj::utils" = { path = "../utils" }
+  "cjcj::frontend" = { path = "../frontend" }
+  "cjcj::chir" = { path = "../chir" }
+  "cjcj::basic" = { path = "../basic" }

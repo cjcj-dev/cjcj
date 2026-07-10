@@ -1,9 +1,9 @@
-package cangjie_compiler::compiler_unittest
+package cjcj::compiler_unittest
 
 import std.unittest.*
 import std.unittest.testmacro.*
-import cangjie_compiler::driver.*
-import cangjie_compiler::option.OSType
+import cjcj::driver.*
+import cjcj::option.OSType
 
 @Test
 public class DriverTest {

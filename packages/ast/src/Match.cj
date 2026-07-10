@@ -1,6 +1,6 @@
-package cangjie_compiler::ast
+package cjcj::ast
 
-import cangjie_compiler::utils.{DynamicCast, StaticCast}
+import cjcj::utils.{DynamicCast, StaticCast}
 import std.reflect.TypeInfo
 
 public func NodeKind(kind: ASTKind): TypeInfo {

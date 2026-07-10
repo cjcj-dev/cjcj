@@ -1,9 +1,9 @@
-package cangjie_compiler::conditional_compilation
+package cjcj::conditional_compilation
 
-import cangjie_compiler::ast.File
-import cangjie_compiler::ast.Package
-import cangjie_compiler::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cangjie_compiler::option.GlobalOptions
+import cjcj::ast.File
+import cjcj::ast.Package
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::option.GlobalOptions
 
 public class ConditionalCompilation {
     private let impl: ConditionalCompilationImpl

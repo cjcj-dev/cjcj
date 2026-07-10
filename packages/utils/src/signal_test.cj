@@ -1,4 +1,4 @@
-package cangjie_compiler::utils
+package cjcj::utils
 
 // PORT-DEFERRED: Utils/SignalTests main/parser signal and stack-overflow cases require the C++ fork/exec
 // harness ExecuteProcess from /root/cj_build/cangjie_compiler/unittests/Utils/SignalTests.cpp:154 and

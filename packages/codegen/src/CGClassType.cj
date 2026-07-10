@@ -1,11 +1,11 @@
-package cangjie_compiler::codegen
+package cjcj::codegen
 
 import std.collection.*
-import cangjie_compiler::chir.Attribute
-import cangjie_compiler::chir.ClassType
-import cangjie_compiler::chir.CustomType
-import cangjie_compiler::chir.Type
-import cangjie_compiler::chir.GetTypeQualifiedName
+import cjcj::chir.Attribute
+import cjcj::chir.ClassType
+import cjcj::chir.CustomType
+import cjcj::chir.Type
+import cjcj::chir.GetTypeQualifiedName
 
 public class CGClassType <: CGCustomType {
     private var numOfAllFields: Int64 = 0

@@ -1,9 +1,9 @@
-package cangjie_compiler::driver
+package cjcj::driver
 
 import std.collection.*
-import cangjie_compiler::basic.{DEFAULT_POSITION, DiagnosticEngine, DiagKindRefactor, PrintVersion}
-import cangjie_compiler::option.{CreateOptionTable, Group}
-import cangjie_compiler::utils.{ProfileRecorder, ProfileRecorderType}
+import cjcj::basic.{DEFAULT_POSITION, DiagnosticEngine, DiagKindRefactor, PrintVersion}
+import cjcj::option.{CreateOptionTable, Group}
+import cjcj::utils.{ProfileRecorder, ProfileRecorderType}
 
 public class Driver {
     public let args: Array<String>

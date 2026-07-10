@@ -1,13 +1,13 @@
-package cangjie_compiler::sema.TypeCheckExpr
+package cjcj::sema.TypeCheckExpr
 
-import cangjie_compiler::ast.*
-import cangjie_compiler::sema.TypeCompatibility
-import cangjie_compiler::sema.TypeCheckerImpl
-import cangjie_compiler::sema.TypeManager
-import cangjie_compiler::sema.GetUnaryOpTypeCandidates
-import cangjie_compiler::sema.IsUnaryOperator
-import cangjie_compiler::sema.MatchResult
-import cangjie_compiler::sema.TypeMapToTys
+import cjcj::ast.*
+import cjcj::sema.TypeCompatibility
+import cjcj::sema.TypeCheckerImpl
+import cjcj::sema.TypeManager
+import cjcj::sema.GetUnaryOpTypeCandidates
+import cjcj::sema.IsUnaryOperator
+import cjcj::sema.MatchResult
+import cjcj::sema.TypeMapToTys
 
 private func GetNonParenExpr(expr: Expr): Expr {
     var current = expr

@@ -1,6 +1,6 @@
-package cangjie_compiler::chir
+package cjcj::chir
 
-import cangjie_compiler::utils.CJC_ABORT
+import cjcj::utils.CJC_ABORT
 
 public enum ConstKind {
     | UINT | INT | FLOAT | RUNE | BOOL | STRING

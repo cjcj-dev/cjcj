@@ -1,1 +1,1 @@
-package cangjie_compiler::sema
+package cjcj::sema

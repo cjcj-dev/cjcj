@@ -1,14 +1,14 @@
-package cangjie_compiler::modules
+package cjcj::modules
 
 import std.collection.*
 import std.fs.exists
 import std.sort.*
-import cangjie_compiler::basic.{DiagHelp, DiagKindRefactor}
-import cangjie_compiler::lex.TokenKind
-import cangjie_compiler::lex.TokenKindIndex
-import cangjie_compiler::option.GlobalOptions
-import cangjie_compiler::option.OutputMode
-import cangjie_compiler::utils.{CJC_ASSERT, InternalError, STANDARD_LIBS}
+import cjcj::basic.{DiagHelp, DiagKindRefactor}
+import cjcj::lex.TokenKind
+import cjcj::lex.TokenKindIndex
+import cjcj::option.GlobalOptions
+import cjcj::option.OutputMode
+import cjcj::utils.{CJC_ASSERT, InternalError, STANDARD_LIBS}
 
 public class ExternalLibCfg {
     public var name: String = ""
