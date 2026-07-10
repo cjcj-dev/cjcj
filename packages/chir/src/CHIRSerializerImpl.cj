@@ -2,6 +2,7 @@ package cjcj::chir
 
 import std.collection.*
 import std.reflect.TypeInfo
+import std.fs.File
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::basic.LinkageToInt
 import cjcj::modules.{FlatBufferBuilder, FlatBufferOffset}
@@ -466,6 +467,7 @@ private func ToPackageExprKind(expr: Expression): UInt8 {
 
 class CHIRSerializerImpl {
     private let builder: FlatBufferBuilder = FlatBufferBuilder()
+    private var pkg: Option<Package> = None
     private let valueQueue: ArrayList<Value> = ArrayList<Value>()
     private let typeQueue: ArrayList<Type> = ArrayList<Type>()
     private let exprQueue: ArrayList<Expression> = ArrayList<Expression>()
@@ -494,7 +496,14 @@ class CHIRSerializerImpl {
     private let serializedBlockGroups: HashSet<Int64> = HashSet<Int64>()
     private let serializedLiteralValues: HashSet<Int64> = HashSet<Int64>()
 
+    private var packageInitFunc: UInt32 = 0u32
+    private var packageLiteralInitFunc: UInt32 = 0u32
+
     public init() {}
+
+    public init(pkg: Package) {
+        this.pkg = pkg
+    }
 
     private func GetId(obj: Value): UInt32 {
         if (!value2Id.contains(obj.nodeId)) {
@@ -1490,6 +1499,72 @@ class CHIRSerializerImpl {
             case CustomDefKind.TYPE_EXTEND =>
                 defKind[index] = CHIRFB_CUSTOM_TYPE_DEF_ELEM_EXTEND_DEF
                 Serialize((obj as ExtendDef).getOrThrow())
+        }
+    }
+
+    func Dispatch(): Unit {
+        while (!(typeQueue.isEmpty() && valueQueue.isEmpty() && exprQueue.isEmpty() && defQueue.isEmpty())) {
+            while (!typeQueue.isEmpty()) {
+                let value = typeQueue[0]
+                allType[Int64(GetId(value) - 1u32)] = Dispatch(value)
+                typeQueue.remove(at: 0)
+            }
+            while (!valueQueue.isEmpty()) {
+                let value = valueQueue[0]
+                allValue[Int64(GetId(value) - 1u32)] = Dispatch(value)
+                valueQueue.remove(at: 0)
+            }
+            while (!exprQueue.isEmpty()) {
+                let value = exprQueue[0]
+                allExpression[Int64(GetId(value) - 1u32)] = Dispatch(value)
+                exprQueue.remove(at: 0)
+            }
+            while (!defQueue.isEmpty()) {
+                let value = defQueue[0]
+                allCustomTypeDef[Int64(GetId(value) - 1u32)] = Dispatch(value)
+                defQueue.remove(at: 0)
+            }
+        }
+        let chirPackage = pkg.getOrThrow()
+        if (let Some(value) <- chirPackage.GetPackageInitFunc()) {
+            packageInitFunc = GetId((value as Value).getOrThrow())
+        }
+        if (let Some(value) <- chirPackage.GetPackageLiteralInitFunc()) {
+            packageLiteralInitFunc = GetId((value as Value).getOrThrow())
+        }
+    }
+
+    func Save(filename: String, phase: ToCHIRPhase): Unit {
+        let chirPackage = pkg.getOrThrow()
+        let serializedPackage = CreateCHIRPackageDirect(builder, Some(chirPackage.GetName()), Some(""),
+            UInt8(AccessLevelIndex(chirPackage.GetPackageAccessLevel())), Some(typeKind), Some(allType),
+            Some(valueKind), Some(allValue), Some(exprKind), Some(allExpression), Some(defKind),
+            Some(allCustomTypeDef), packageInitFunc, ToCHIRPhaseIndex(phase), packageLiteralInitFunc)
+        File.writeTo(filename, builder.Finish(serializedPackage))
+    }
+
+    func Initialize(): Unit {
+        let chirPackage = pkg.getOrThrow()
+        for (value in chirPackage.GetGlobalVars()) {
+            valueQueue.add(value)
+        }
+        for (value in chirPackage.GetGlobalFunctions()) {
+            valueQueue.add(value)
+        }
+        for (definition in chirPackage.GetAllCustomTypeDef()) {
+            defQueue.add(definition)
+        }
+        for (definition in defQueue) {
+            defCount++
+            def2Id[definition.nodeId] = defCount
+            allCustomTypeDef.add(0u32)
+            defKind.add(0u8)
+        }
+        for (value in valueQueue) {
+            valueCount++
+            value2Id[value.nodeId] = valueCount
+            allValue.add(0u32)
+            valueKind.add(0u8)
         }
     }
 
