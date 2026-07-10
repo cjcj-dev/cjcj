@@ -9,23 +9,28 @@ import cangjie_compiler::chir.CHIRBuilder as ChirBuilder
 import cangjie_compiler::chir.CHIRPrinter as ChirCHIRPrinter
 import cangjie_compiler::chir.CHIRType
 import cangjie_compiler::chir.CHIRTypeCache
+import cangjie_compiler::chir.CallGraphAnalysis
 import cangjie_compiler::chir.ClosureConversion
 import cangjie_compiler::chir.ConstAnalysisWrapper
 import cangjie_compiler::chir.ConstPropagation
 import cangjie_compiler::chir.DeadCodeElimination
 import cangjie_compiler::chir.DebugLocation as ChirDebugLocation
+import cangjie_compiler::chir.DevirtualizationInfo
 import cangjie_compiler::chir.ExprKind as ChirExprKind
 import cangjie_compiler::chir.FaithfulAST2CHIR
 import cangjie_compiler::chir.FuncCallContext as ChirFuncCallContext
 import cangjie_compiler::chir.FuncKind as ChirFuncKind
 import cangjie_compiler::chir.FuncSigInfo as ChirFuncSigInfo
 import cangjie_compiler::chir.Function as ChirFunction
+import cangjie_compiler::chir.FunctionInline
 import cangjie_compiler::chir.GetRefToArrayElem
 import cangjie_compiler::chir.INVALID_LOCATION as CHIR_INVALID_LOCATION
 import cangjie_compiler::chir.MergeBlocks
+import cangjie_compiler::chir.MergeEffectMap
 import cangjie_compiler::chir.NoHeapAllocChecker
 import cangjie_compiler::chir.NoWriteBarrierRecChecker
 import cangjie_compiler::chir.OptFuncRetType
+import cangjie_compiler::chir.OptEffectCHIRMap as ChirOptEffectCHIRMap
 import cangjie_compiler::chir.Package as RealCHIRPackage
 import cangjie_compiler::chir.RedundantFutureRemoval
 import cangjie_compiler::chir.RedundantGetOrThrowElimination
@@ -65,6 +70,7 @@ private class ToCHIR {
     private let pkg: RealASTPackage
     private let outputPath: String
     private let builder: ChirBuilder
+    private let effectMap: ChirOptEffectCHIRMap = ChirOptEffectCHIRMap()
     private var chirPkg: Option<RealCHIRPackage> = None
     private var debugFileIndex: UInt64 = 0u64
     private var isComputingAnnos: Bool = false
@@ -101,7 +107,7 @@ private class ToCHIR {
         }
         chirPkg = Some(lowered)
         RulesChecking(lowered, builder, instance.invocation.globalOptions, instance.diag.AsBasicDiagnosticEngine())
-        RunOptimizationPass(lowered, builder, instance.invocation.globalOptions)
+        RunOptimizationPass(lowered)
         if (!TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)) {
             instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
             return None
@@ -158,6 +164,99 @@ private class ToCHIR {
         ChirCHIRPrinter.PrintPackage(currentPackage, fullPath)
         if (suffix == "Broken_CHIR") {
             println("broken chir dump to file: " + fullPath)
+        }
+    }
+
+    private func RunOptimizationPass(currentPackage: RealCHIRPackage): Unit {
+        try (recorder = ProfileRecorder("CHIR", "CHIR Opt")) {
+            let options = instance.invocation.globalOptions
+            OptFuncRetType(currentPackage, builder).Unit2Void()
+            // C++ 此处有 RunArrayListConstStartOpt，selfhost 未移植，待补。
+            if (options.IsCHIROptimizationLevelOverO2()) {
+                UnitUnify(builder).RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
+            }
+            let devirtInfo = CollectDevirtualizationInfo(currentPackage)
+            RunFunctionInline(currentPackage, devirtInfo)
+            if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_LOAD)) {
+                RedundantLoadElimination().RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
+            }
+            if (options.enableChirRGetOrThrowE) {
+                RedundantGetOrThrowElimination().RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
+            }
+            // C++ 此处有 RunRangePropagation，selfhost 未移植，待补。
+            if (options.IsCHIROptimizationLevelOverO2()) {
+                UselessAllocateElimination.RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
+            }
+            // GAP_TODO: Devirtualization is unported; C++ call is CHIR.cpp:648.
+            // GAP_TODO: ArrayLambdaOpt is unported; C++ call is CHIR.cpp:649.
+            if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_FUTURE)) {
+                RedundantFutureRemoval(currentPackage, isDebug: options.chirDebugOptimizer).RunOnPackage()
+            }
+            if (options.IsCHIROptimizationLevelOverO2() && !options.interpFullBchir) {
+                GetRefToArrayElem.RunOnPackage(currentPackage, builder)
+            }
+        }
+    }
+
+    private func CollectDevirtualizationInfo(currentPackage: RealCHIRPackage): DevirtualizationInfo {
+        var result: Option<DevirtualizationInfo> = None
+        try (recorder = ProfileRecorder("CHIR Opt", "Collect Devirt Info")) {
+            let options = instance.invocation.globalOptions
+            let devirtInfo = DevirtualizationInfo(currentPackage, options)
+            if (options.IsOptimizationExisted(OptimizationFlag.FUNC_INLINING) ||
+                (options.IsOptimizationExisted(OptimizationFlag.DEVIRTUALIZATION) &&
+                    !options.enIncrementalCompilation)) {
+                devirtInfo.CollectInfo()
+            }
+            result = devirtInfo
+        }
+        return result.getOrThrow()
+    }
+
+    private func RunFunctionInline(currentPackage: RealCHIRPackage, devirtInfo: DevirtualizationInfo): Unit {
+        let options = instance.invocation.globalOptions
+        if (!options.IsOptimizationExisted(OptimizationFlag.FUNC_INLINING)) {
+            return
+        }
+        try (recorder = ProfileRecorder("CHIR Opt", "FunctionInline")) {
+            let callGraphAnalysis = CallGraphAnalysis(currentPackage, devirtInfo)
+            callGraphAnalysis.DoCallGraphAnalysis(options.chirDebugOptimizer)
+            let pass = FunctionInline(builder, options.optimizationLevel, options.chirDebugOptimizer)
+            for (functionOption in callGraphAnalysis.postOrderSCCFunctionlist) {
+                if (let Some(fn) <- functionOption) {
+                    if (fn.GetSrcCodeIdentifier() == "$toAny" ||
+                        fn.GetFuncKind() == ChirFuncKind.ANNOFACTORY_FUNC) {
+                        continue
+                    }
+                    pass.Run(fn)
+                }
+            }
+            MergeEffectMap(pass.GetEffectMap(), effectMap)
+            DumpCHIRToFile("FunctionInline")
+        }
+        RunMergingBlocks(currentPackage, "CHIR Opt", "MergingBlockAfterInline")
+        UselessFuncElimination(currentPackage, "CHIR Opt")
+    }
+
+    private func RunMergingBlocks(currentPackage: RealCHIRPackage, firstName: String, secondName: String): Unit {
+        try (recorder = ProfileRecorder(firstName, secondName)) {
+            let options = instance.invocation.globalOptions
+            MergeBlocks().RunOnPackage(currentPackage, builder, enableCompileDebug: options.enableCompileDebug,
+                enableCoverage: options.enableCoverage)
+            DumpCHIRToFile(secondName)
+        }
+    }
+
+    private func UselessFuncElimination(currentPackage: RealCHIRPackage, passName: String): Unit {
+        let options = instance.invocation.globalOptions
+        if (!options.IsCHIROptimizationLevelOverO2() || options.enableCoverage ||
+            options.enIncrementalCompilation || currentPackage.GetName() == REFLECT_PACKAGE_NAME) {
+            return
+        }
+        try (recorder = ProfileRecorder(passName, "UselessFuncElimination")) {
+            DeadCodeElimination(builder, instance.diag.AsBasicDiagnosticEngine(), currentPackage)
+                .UselessFuncElimination(currentPackage, options)
+            DumpCHIRToFile("UselessFuncElimination")
         }
     }
 
@@ -329,33 +428,6 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     cp.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer, isCJLint: false)
     DeadCodeElimination(builder).UnreachableBlockElimination(cp.GetFuncsNeedRemoveBlocks(),
         isDebug: options.chirDebugOptimizer)
-}
-
-private func RunOptimizationPass(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions): Unit {
-    OptFuncRetType(pkg, builder).Unit2Void()
-    // C++ 此处有 RunArrayListConstStartOpt，selfhost 未移植，待补。
-    if (options.IsCHIROptimizationLevelOverO2()) {
-        UnitUnify(builder).RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
-    }
-    // C++ 此处有 CollectDevirtualizationInfo / RunFunctionInline，selfhost 未移植，待补。
-    if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_LOAD)) {
-        RedundantLoadElimination().RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
-    }
-    if (options.enableChirRGetOrThrowE) {
-        RedundantGetOrThrowElimination().RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
-    }
-    // C++ 此处有 RunRangePropagation，selfhost 未移植，待补。
-    if (options.IsCHIROptimizationLevelOverO2()) {
-        UselessAllocateElimination.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer)
-    }
-    // GAP_TODO: Devirtualization is unported; C++ call is CHIR.cpp:648.
-    // GAP_TODO: ArrayLambdaOpt is unported; C++ call is CHIR.cpp:649.
-    if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_FUTURE)) {
-        RedundantFutureRemoval(pkg, isDebug: options.chirDebugOptimizer).RunOnPackage()
-    }
-    if (options.IsCHIROptimizationLevelOverO2() && !options.interpFullBchir) {
-        GetRefToArrayElem.RunOnPackage(pkg, builder)
-    }
 }
 
 public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool {
