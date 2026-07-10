@@ -37,6 +37,11 @@ public func GenNameForBB(name: String, extraInfo!: UInt64 = 0u64): String {
     return name
 }
 
+public func IsFPType(ty: LLVMTypeRef): Bool {
+    let kind = unsafe { LLVMGetTypeKind(ty) }
+    return kind == 1 || kind == 2 || kind == 3 || kind == 4 || kind == 5 || kind == 6
+}
+
 public func UnwindGenericRelateType(llvmCtx: LLVMContextHandle, ty: Type): ArrayList<LLVMMetadataRef> {
     let tyArgMeta = ArrayList<LLVMMetadataRef>()
     if (ty.IsGeneric()) {
