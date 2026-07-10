@@ -2,6 +2,12 @@ package cjcj::chir
 
 import cjcj::utils.CJC_ASSERT
 import std.collection.*
+import std.reflect.TypeInfo
+
+func IsInstanceOfValue<AV, Pool>(): Bool where AV <: ConstValue,
+    Pool <: ValueStatePool<AV, Pool> {
+    return TypeInfo.of<Pool>() == TypeInfo.of<ActiveStatePool<AV>>()
+}
 
 public func GetRefName(index: Int64): String {
     return "Ref" + index.toString()
@@ -15,7 +21,23 @@ public func GetObjChildName(parentName: String, fieldIdx: Int64): String {
     return parentName + "." + fieldIdx.toString()
 }
 
-public class FullStatePool<AV> where AV <: ConstValue {
+public interface ValueStatePool<AV, Pool> where AV <: ConstValue {
+    static func Create(): Pool
+    func Clone(): Pool
+    func Size(): Int64
+    func Clear(): Unit
+    func Find(value: Value): Option<Int64>
+    func Contains(value: Value): Bool
+    func At(value: Value): ValueDomain<AV>
+    func GetAt(index: Int64): (Value, ValueDomain<AV>)
+    func Insert(value: Value, domain: ValueDomain<AV>): Unit
+    func SetRef(value: Value, refValue: Ref): Unit
+    func SetValue(value: Value, absVal: AV): Unit
+    func SetBound(value: Value, isTop: Bool): Unit
+    func Join(rhs: Pool): Bool
+}
+
+public class FullStatePool<AV> <: ValueStatePool<AV, FullStatePool<AV>> where AV <: ConstValue {
     private let keys: ArrayList<Value> = ArrayList<Value>()
     private let values: ArrayList<ValueDomain<AV>> = ArrayList<ValueDomain<AV>>()
 
@@ -28,6 +50,10 @@ public class FullStatePool<AV> where AV <: ConstValue {
             values.add(other.values[idx].Clone())
             idx++
         }
+    }
+
+    public static func Create(): FullStatePool<AV> {
+        return FullStatePool<AV>()
     }
 
     public func Clone(): FullStatePool<AV> {
@@ -111,6 +137,193 @@ public class FullStatePool<AV> where AV <: ConstValue {
             idx++
         }
         return changed
+    }
+}
+
+public class ActiveStateNode {
+    public var prev: Option<ActiveStateNode> = None
+    public var next: Option<ActiveStateNode> = None
+    public let value: Value
+
+    public init(value: Value) {
+        this.value = value
+    }
+}
+
+public class ActiveStatePool<AV> <: ValueStatePool<AV, ActiveStatePool<AV>> where AV <: ConstValue {
+    private static let MAX_STATE_POOL_SIZE: Int64 = 120
+    private static let BASE_STATE_POOL_SIZE: Int64 = 80
+
+    private let data: HashMap<Value, ValueDomain<AV>> = HashMap<Value, ValueDomain<AV>>()
+    private let keys: ArrayList<Value> = ArrayList<Value>()
+    private let obj2StateNode: HashMap<Value, ActiveStateNode> = HashMap<Value, ActiveStateNode>()
+    private var first: Option<ActiveStateNode> = None
+    private var tails: Option<ActiveStateNode> = None
+    private let topState: ValueDomain<AV> = ValueDomain<AV>(true)
+    private let topRefState: ValueDomain<AV> = ValueDomain<AV>(Ref.GetTopRefInstance())
+
+    public init() {}
+
+    public init(other: ActiveStatePool<AV>) {
+        if (other.first.isNone()) {
+            return
+        }
+        for (key in other.keys) {
+            data[key] = other.data[key].Clone()
+            keys.add(key)
+            obj2StateNode[key] = ActiveStateNode(key)
+        }
+        for (key in other.keys) {
+            let newNode = obj2StateNode[key]
+            let node = other.obj2StateNode[key]
+            if (let Some(prevNode) <- node.prev) {
+                newNode.prev = Some(obj2StateNode[prevNode.value])
+            }
+            if (let Some(nextNode) <- node.next) {
+                newNode.next = Some(obj2StateNode[nextNode.value])
+            }
+        }
+        if (let Some(firstNode) <- other.first) {
+            first = Some(obj2StateNode[firstNode.value])
+        }
+        if (let Some(tailNode) <- other.tails) {
+            tails = Some(obj2StateNode[tailNode.value])
+        }
+    }
+
+    public static func Create(): ActiveStatePool<AV> {
+        return ActiveStatePool<AV>()
+    }
+
+    public func Clone(): ActiveStatePool<AV> {
+        return ActiveStatePool<AV>(this)
+    }
+
+    public func Size(): Int64 {
+        return data.size
+    }
+
+    public func Clear(): Unit {
+        first = None
+        tails = None
+        data.clear()
+        keys.clear()
+        obj2StateNode.clear()
+    }
+
+    public func Find(value: Value): Option<Int64> {
+        var idx: Int64 = 0
+        while (idx < keys.size) {
+            if (refEq(keys[idx], value)) {
+                return idx
+            }
+            idx++
+        }
+        return None
+    }
+
+    public func Contains(value: Value): Bool {
+        return data.contains(value)
+    }
+
+    public func At(value: Value): ValueDomain<AV> {
+        if (let Some(domain) <- data.get(value)) {
+            return domain
+        }
+        return GetTopState(value)
+    }
+
+    public func GetAt(index: Int64): (Value, ValueDomain<AV>) {
+        let key = keys[index]
+        return (key, data[key])
+    }
+
+    public func Insert(value: Value, domain: ValueDomain<AV>): Unit {
+        if (data.contains(value)) {
+            return
+        }
+        data[value] = domain.Clone()
+        keys.add(value)
+        let stateNode = ActiveStateNode(value)
+        obj2StateNode[value] = stateNode
+        stateNode.next = None
+        stateNode.prev = tails
+        if (tails.isNone()) {
+            CJC_ASSERT(first.isNone())
+            tails = Some(stateNode)
+            first = Some(stateNode)
+        } else {
+            tails.getOrThrow().next = Some(stateNode)
+            tails = Some(stateNode)
+        }
+        CheckPoolOverflow()
+    }
+
+    public func SetRef(value: Value, refValue: Ref): Unit {
+        if (let Some(domain) <- data.get(value)) {
+            domain.SetRef(refValue)
+        } else {
+            Insert(value, ValueDomain<AV>(refValue))
+        }
+    }
+
+    public func SetValue(value: Value, absVal: AV): Unit {
+        if (let Some(domain) <- data.get(value)) {
+            domain.SetValue(absVal)
+        } else {
+            Insert(value, ValueDomain<AV>(absVal))
+        }
+    }
+
+    public func SetBound(value: Value, isTop: Bool): Unit {
+        if (let Some(domain) <- data.get(value)) {
+            domain.SetSelfToBound(isTop)
+        } else {
+            Insert(value, ValueDomain<AV>(isTop))
+        }
+    }
+
+    public func Join(other: ActiveStatePool<AV>): Bool {
+        var changed = false
+        for ((_, value) in data) {
+            if (value.IsRef()) {
+                value.SetRef(Ref.GetTopRefInstance())
+            }
+        }
+        for ((key, value) in other.data) {
+            if (let Some(current) <- data.get(key)) {
+                changed = current.Join(value) || changed
+            } else if (!value.IsRef()) {
+                Insert(key, value)
+            }
+        }
+        return changed
+    }
+
+    private func CheckPoolOverflow(): Unit {
+        if (data.size < MAX_STATE_POOL_SIZE) {
+            return
+        }
+        while (data.size > BASE_STATE_POOL_SIZE) {
+            let stateFirst = first.getOrThrow()
+            let stateNext = stateFirst.next.getOrThrow()
+            stateNext.prev = None
+            first = Some(stateNext)
+            let value = stateFirst.value
+            obj2StateNode.remove(value)
+            data.remove(value)
+            let keyIndex = Find(value).getOrThrow()
+            keys.remove(at: keyIndex)
+        }
+    }
+
+    private func GetTopState(value: Value): ValueDomain<AV> {
+        if (let Some(typeValue) <- value.GetType()) {
+            if (typeValue.IsRef()) {
+                return topRefState
+            }
+        }
+        return topState
     }
 }
 
@@ -302,8 +515,9 @@ public class AllocatedObjMap {
     }
 }
 
-public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: ConstValue {
-    public var programState: FullStatePool<AV> = FullStatePool<AV>()
+public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: ConstValue,
+    Pool <: ValueStatePool<AV, Pool> {
+    public var programState: Pool = Pool.Create()
     public var refMap: RefMap = RefMap()
     public let childrenMap: ChildrenMap
     public let allocatedRefMap: AllocatedRefMap
@@ -634,13 +848,16 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
     }
 
     public func PropagateWithoutChildren(src: Value, dest: Value,
-        targetProgramState!: Option<FullStatePool<AV>> = None): Unit {
+        targetProgramState!: Option<Pool> = None): Unit {
         let state = targetProgramState ?? programState
         if (!src.IsParameter() && !src.IsLocalVar()) {
             CJC_ASSERT(src.IsFunc())
             if (!state.Contains(dest)) {
                 state.SetBound(dest, true)
             }
+            return
+        }
+        if (IsInstanceOfValue<AV, Pool>() && !state.Contains(src)) {
             return
         }
         if (state.Contains(dest)) {
@@ -683,8 +900,14 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
 
     public func SetNonTopChildrenStateToTop(children: ArrayList<AbstractObject>): Unit {
         for (child in children) {
-            let domain = CheckAbstractValueWithTopBottom(child) ??
-                throw IllegalStateException("ValueAnalysis child state missing")
+            let domain = match (CheckAbstractValueWithTopBottom(child)) {
+                case Some(value) => value
+                case None =>
+                    if (IsInstanceOfValue<AV, Pool>()) {
+                        continue
+                    }
+                    throw IllegalStateException("ValueAnalysis child state missing")
+            }
             if (domain.GetKind() == ValueDomainKind.VAL) {
                 programState.SetBound(child, true)
             }
@@ -793,12 +1016,14 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
                     case RefMapValue.RefTarget(_) =>
                         throw IllegalStateException("ValueAnalysis ref-map kind mismatch")
                 }
-                CJC_ASSERT(refEq(obj1, obj2))
+                if (!IsInstanceOfValue<AV, Pool>()) {
+                    CJC_ASSERT(refEq(obj1, obj2))
+                }
         }
         return false
     }
 
-    private func MergeRef(lhs: Ref, rhs: Ref, rhsProgramState: FullStatePool<AV>, rhsRefMap: RefMap): Ref {
+    private func MergeRef(lhs: Ref, rhs: Ref, rhsProgramState: Pool, rhsRefMap: RefMap): Ref {
         let lhsObj = GetAbsObject(refMap, lhs)
         let rhsObj = GetAbsObject(rhsRefMap, rhs)
         CJC_ASSERT(lhsObj.isSome() && rhsObj.isSome())

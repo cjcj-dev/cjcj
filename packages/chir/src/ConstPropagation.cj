@@ -56,6 +56,8 @@ public class ConstPropagation {
         }
         if (let Some(result) <- analysisWrapper.CheckFuncResult(funcValue)) {
             VisitFunc(funcValue, isDebug, isCJLint, result)
+        } else if (let Some(result) <- analysisWrapper.CheckFuncActiveResult(funcValue)) {
+            VisitFunc(funcValue, isDebug, isCJLint, result)
         }
     }
 
@@ -67,13 +69,13 @@ public class ConstPropagation {
         return constPropagationEffectMap
     }
 
-    private func VisitFunc(funcValue: Function, isDebug: Bool, isCJLint: Bool,
-        result: Results<ConstDomain>): Unit {
+    private func VisitFunc<Pool>(funcValue: Function, isDebug: Bool, isCJLint: Bool,
+        result: Results<State<ConstValue, Pool>>): Unit where Pool <: ValueStatePool<ConstValue, Pool> {
         let toBeRewrited = ArrayList<RewriteInfo>()
         let targetSuccMap = ArrayList<TerminatorRewriteInfo>()
         result.VisitWith(
-            { _: ConstDomain, _: Expression, _: Int64 => () },
-            { state: ConstDomain, expr: Expression, index: Int64 =>
+            { _: State<ConstValue, Pool>, _: Expression, _: Int64 => () },
+            { state: State<ConstValue, Pool>, expr: Expression, index: Int64 =>
                 let exprResult = expr.GetResult() ?? return
                 let exprType = exprResult.GetType().getOrThrow()
                 if (expr.IsBinaryExpr()) {
@@ -104,7 +106,7 @@ public class ConstPropagation {
                     }
                 }
             },
-            { state: ConstDomain, terminator: Terminator, targetSucc: Option<Block> =>
+            { state: State<ConstValue, Pool>, terminator: Terminator, targetSucc: Option<Block> =>
                 if (targetSucc.isNone()) {
                     return
                 }
@@ -179,7 +181,8 @@ public class ConstPropagation {
         return false
     }
 
-    private func TrySimplifyingBinaryExpr(state: ConstDomain, binary: BinaryExpression, isDebug: Bool): Unit {
+    private func TrySimplifyingBinaryExpr<Pool>(state: State<ConstValue, Pool>, binary: BinaryExpression,
+        isDebug: Bool): Unit where Pool <: ValueStatePool<ConstValue, Pool> {
         if (SkipCP(binary)) {
             return
         }

@@ -254,6 +254,12 @@ public class ValueDomain<AV> <: AbstractDomain<ValueDomain<AV>> where AV <: Cons
         this.ref = ref
     }
 
+    public func SetValue(value: AV): Unit {
+        CJC_ASSERT(valueKind != ValueDomainKind.REF)
+        valueKind = ValueDomainKind.VAL
+        absVal = value
+    }
+
     public func SetSelfToBound(isTop: Bool): Unit {
         valueKind = if (isTop) { ValueDomainKind.TOP } else { ValueDomainKind.BOTTOM }
         ref = None

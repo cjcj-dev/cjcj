@@ -15,7 +15,8 @@ private var valueAnalysisGlobalState: State<ConstValue, FullStatePool<ConstValue
         valueAnalysisGlobalAllocatedObjMap, valueAnalysisGlobalRefPool, valueAnalysisGlobalAbsObjPool,
         isGlobalState: true)
 
-private func GetValueAnalysisGlobalState<AV, Pool>(): State<AV, Pool> where AV <: ConstValue {
+private func GetValueAnalysisGlobalState<AV, Pool>(): State<AV, Pool> where AV <: ConstValue,
+    Pool <: ValueStatePool<AV, Pool> {
     return (valueAnalysisGlobalState as State<AV, Pool>).getOrThrow()
 }
 
@@ -32,7 +33,8 @@ private func ResetValueAnalysisGlobalState(): Unit {
         isGlobalState: true)
 }
 
-public open class ValueAnalysis<AV, Pool> <: Analysis<State<AV, Pool>> where AV <: ConstValue {
+public open class ValueAnalysis<AV, Pool> <: Analysis<State<AV, Pool>> where AV <: ConstValue,
+    Pool <: ValueStatePool<AV, Pool> {
     private let childrenMap: ChildrenMap = ChildrenMap()
     private let allocatedRefMap: AllocatedRefMap = AllocatedRefMap()
     private let allocatedTwoLevelRefMap: AllocatedRefMap = AllocatedRefMap()
@@ -306,6 +308,11 @@ public open class ValueAnalysis<AV, Pool> <: Analysis<State<AV, Pool>> where AV 
             HandleStoreToGlobal(state, location, value)
             return
         }
+        if (IsInstanceOfValue<AV, Pool>() &&
+            (!state.programState.Contains(value) || !state.programState.Contains(location))) {
+            state.SetToTopOrTopRef(location, true)
+            return
+        }
         let valDomain = state.CheckAbstractValueWithTopBottom(value).getOrThrow()
         let locDomain = state.CheckAbstractValueWithTopBottom(location).getOrThrow()
         CJC_ASSERT(locDomain.GetKind() == ValueDomainKind.REF)
@@ -364,6 +371,10 @@ public open class ValueAnalysis<AV, Pool> <: Analysis<State<AV, Pool>> where AV 
             return
         }
         let dest = load.GetResult().getOrThrow()
+        if (IsInstanceOfValue<AV, Pool>() && !state.programState.Contains(loc)) {
+            state.SetToTopOrTopRef(dest, dest.GetType().getOrThrow().IsRef())
+            return
+        }
         let locVal = state.CheckAbstractValueWithTopBottom(loc).getOrThrow()
         CJC_ASSERT(locVal.GetKind() == ValueDomainKind.REF)
         let locRef = locVal.GetRef().getOrThrow()
