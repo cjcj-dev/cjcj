@@ -1127,12 +1127,11 @@ public open class BaseMangler {
             }
         }
         if (collectFuncGeneric) {
-            if (let Some(body) <- decl.funcBody) {
-                if (let Some(generic) <- body.generic) {
-                    for (arg in generic.typeParameters) {
-                        if (let Some(ty) <- arg.semaTy) {
-                            args.add(ty)
-                        }
+            let body = decl.funcBody.getOrThrow()
+            if (let Some(generic) <- body.generic) {
+                for (arg in generic.typeParameters) {
+                    if (let Some(ty) <- arg.semaTy) {
+                        args.add(ty)
                     }
                 }
             }
