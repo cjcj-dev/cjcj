@@ -676,7 +676,6 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeMan
     importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     ctx.curPackage = pkg
     ctx.fullPackageName = pkg.fullPackageName
-    ctx.declMap.clear()
     ctx.mem2Decls.clear()
     ctx.enumConstructors.clear()
     TypeCheckDeclBuildImportedEnumConstructorMap(ctx)

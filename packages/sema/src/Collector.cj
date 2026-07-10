@@ -71,6 +71,9 @@ public class Collector {
             } else if (let Some(macroParam) <- (node as MacroExpandParam)) {
                 collector.AddSymbol(ctx, node, buildTrie: buildTrie)
                 collector.CollectMacroExpandParam(macroParam)
+            } else if (let Some(mainDecl) <- (node as MainDecl)) {
+                collector.CollectMainDecl(ctx, mainDecl, walkerBox.value.getOrThrow(), buildTrie: buildTrie)
+                return VisitAction.SKIP_CHILDREN
             } else if (let Some(macroDecl) <- (node as MacroDecl)) {
                 // Faithful port of C++ Collector::BuildSymbolTable MACRO_DECL case
                 // (src/Sema/Collector.cpp:770-776). DesugarMacroDecl rewrites a macro
@@ -250,6 +253,20 @@ public class Collector {
     private func CollectMacroExpandParam(mep: MacroExpandParam): Unit {
         if (let Some(decl) <- mep.invocation.decl) {
             WalkMacroCall(mep, decl)
+        }
+    }
+
+    private func CollectMainDecl(ctx: ASTContext, md: MainDecl, walker: Walker, buildTrie!: Bool = true): Unit {
+        if (let Some(desugarDecl) <- md.desugarDecl) {
+            let _ = walker.WalkNode(desugarDecl)
+            return
+        }
+        for (annotation in md.annotations) {
+            let _ = walker.WalkNode(annotation)
+        }
+        AddSymbol(ctx, md, buildTrie: buildTrie)
+        if (let Some(body) <- md.funcBody) {
+            let _ = walker.WalkNode(body)
         }
     }
 

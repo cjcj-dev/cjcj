@@ -2698,7 +2698,6 @@ public class TypeChecker {
         if (let Some(desugarDecl) <- fp.desugarDecl) {
             let _ = SynthesizeDecl(ctx, desugarDecl)
         }
-        BindLocalDeclIfNeeded(ctx, fp)
         return fp.GetTy() ?? TypeManager.GetInvalidTy()
     }
 
@@ -2782,7 +2781,6 @@ public class TypeChecker {
                 if (!Ty.IsTyCorrect(funcDecl.GetTy())) {
                     let _ = PrepareFuncBodySignature(ctx, body)
                 }
-                BindLocalDeclIfNeeded(ctx, funcDecl)
                 let funcTy = SynthesizeFuncBody(ctx, body)
                 if (funcDecl.TestAttr(Attribute.MAIN_ENTRY)) {
                     CheckEntryFunc(funcDecl)
@@ -3542,7 +3540,6 @@ public class TypeChecker {
             if (!impl.typeManager.IsSubtype(targetParamTy, paramTy, implicitBoxed: false, allowOptionBox: false)) {
                 return false
             }
-            BindLocalDeclIfNeeded(ctx, param)
             outParamTys.add(paramTy)
         }
         return true
@@ -4557,8 +4554,6 @@ public class TypeChecker {
 
     private func FinishSynthesize(ctx: ASTContext, expr: Expr, ty: Ty): Ty {
         SynthesizeDesugarsInTree(ctx, expr)
-        RefreshNameReferencesInTree(ctx, expr)
-        RefreshUnsetExprTypesInTree(expr)
         RefreshNameReferencesInTree(ctx, expr)
         ctx.SkipSynForCorrectTy(expr)
         return ty
