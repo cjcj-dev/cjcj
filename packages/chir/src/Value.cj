@@ -757,11 +757,26 @@ public class BlockGroup <: Value {
     }
 
     public func SetOwnerExpression(expr: Expression): Unit {
+        if (expr.IsLambda()) {
+            CJC_ASSERT(ownerExpression.isNone() || ownerExpression.getOrThrow().IsLambda())
+        } else {
+            CJC_ASSERT(ownerFunc.isNone() &&
+                (ownerExpression.isNone() || !ownerExpression.getOrThrow().IsLambda()))
+        }
+        if (expr.IsLambda()) {
+            if (let Some(oldOwnerFunc) <- ownerFunc) {
+                oldOwnerFunc.RemoveBody()
+                ownerFunc = None
+            } else if (let Some(oldOwnerExpr) <- ownerExpression) {
+                if (let Some(lambdaExpr) <- (oldOwnerExpr as Lambda)) {
+                    lambdaExpr.RemoveBody()
+                }
+            }
+        }
         if (let Some(oldExpr) <- ownerExpression) {
             RemoveUserOnly(oldExpr)
         }
         ownerExpression = expr
-        ownerFunc = None
         AddUserOnly(expr)
     }
 
