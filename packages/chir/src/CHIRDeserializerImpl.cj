@@ -20,6 +20,13 @@ class CHIRDeserializerImpl {
     private let expressionRecords: ArrayList<ArrayList<String>> = ArrayList<ArrayList<String>>()
     private let sourceFileRecords: ArrayList<ArrayList<String>> = ArrayList<ArrayList<String>>()
     private var packageRecord: Option<ArrayList<String>> = None
+    private var pool: Option<PackageFormat_CHIRPackage> = None
+    private let id2Type: HashMap<UInt32, Type> = HashMap<UInt32, Type>()
+    private let id2Value: HashMap<UInt32, Value> = HashMap<UInt32, Value>()
+    private let id2Expression: HashMap<UInt32, Expression> = HashMap<UInt32, Expression>()
+    private let id2CustomTypeDef: HashMap<UInt32, CustomTypeDef> = HashMap<UInt32, CustomTypeDef>()
+    private let genericTypeConfig: ArrayList<(GenericType, PackageFormat_GenericType)> =
+        ArrayList<(GenericType, PackageFormat_GenericType)>()
 
     public init(builder: CHIRBuilder, compilePlatform!: Bool = false) {
         this.builder = builder
@@ -1192,6 +1199,231 @@ class CHIRDeserializerImpl {
             return Rune.parse("\\0")
         }
         return Rune.parse(value)
+    }
+
+    private func GetType<T>(ids: Option<Vector<UInt32>>): ArrayList<T> {
+        let result = ArrayList<T>()
+        if (let Some(vector) <- ids) {
+            var index = 0u32
+            while (index < vector.size()) {
+                let id = (vector.Get(index) as UInt32).getOrThrow()
+                if (let Some(ty) <- GetType<T>(id)) {
+                    result.add(ty)
+                }
+                index++
+            }
+        }
+        return result
+    }
+
+    private func Deserialize(obj: PackageFormat_Type): Type {
+        let kind = obj.GetKind()
+        if (kind == CHIRFB_CHIR_TYPE_KIND_INT8) { return builder.context.GetInt8Ty() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_INT16) { return builder.context.GetInt16Ty() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_INT32) { return builder.context.GetInt32Ty() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_INT64) { return builder.context.GetInt64Ty() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_INT_NATIVE) { return builder.context.GetIntNativeTy() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_UINT8) { return builder.context.GetUInt8Ty() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_UINT16) { return builder.context.GetUInt16Ty() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_UINT32) { return builder.context.GetUInt32Ty() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_UINT64) { return builder.context.GetUInt64Ty() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_UINT_NATIVE) { return builder.context.GetUIntNativeTy() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_FLOAT16) { return builder.context.GetFloat16Ty() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_FLOAT32) { return builder.context.GetFloat32Ty() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_FLOAT64) { return builder.context.GetFloat64Ty() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_RUNE) { return builder.context.GetRuneTy() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_BOOLEAN) { return builder.context.GetBoolTy() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_UNIT) { return builder.context.GetUnitTy() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_NOTHING) { return builder.context.GetNothingType() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_VOID) { return builder.context.GetVoidTy() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_TUPLE) {
+            return builder.context.GetTupleTy(GetType<Type>(obj.GetArgTys()))
+        }
+        let argTys = obj.GetArgTys().getOrThrow()
+        CJC_ASSERT(argTys.size() >= 1u32)
+        let argTy = GetType<Type>((argTys.Get(0u32) as UInt32).getOrThrow()).getOrThrow()
+        if (kind == CHIRFB_CHIR_TYPE_KIND_C_POINTER) { return builder.context.GetCPointerTy(argTy) }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_C_STRING) { return builder.context.GetCStringTy() }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_REFTYPE) { return builder.context.GetRefTy(argTy) }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_BOXTYPE) { return builder.context.GetBoxTy(argTy) }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_THIS) { return builder.context.GetThisTy() }
+        CJC_ABORT()
+        return builder.context.GetInvalidTy()
+    }
+
+    private func Deserialize(obj: PackageFormat_RawArrayType): RawArrayType {
+        let argTys = obj.GetBase().getOrThrow().GetArgTys().getOrThrow()
+        let elemTy = GetType<Type>((argTys.Get(0u32) as UInt32).getOrThrow()).getOrThrow()
+        return builder.context.GetRawArrayTy(elemTy, dims: UInt64(obj.GetDims()))
+    }
+
+    private func Deserialize(obj: PackageFormat_VArrayType): VArrayType {
+        let argTys = obj.GetBase().getOrThrow().GetArgTys().getOrThrow()
+        let elemTy = GetType<Type>((argTys.Get(0u32) as UInt32).getOrThrow()).getOrThrow()
+        return builder.context.GetVArrayTy(elemTy, UInt64(obj.GetSize()))
+    }
+
+    private func Deserialize(obj: PackageFormat_FuncType): FuncType {
+        let argTys = obj.GetBase().getOrThrow().GetArgTys().getOrThrow()
+        CJC_ASSERT(argTys.size() > 0u32)
+        let retTyId = (argTys.Get(argTys.size() - 1u32) as UInt32).getOrThrow()
+        let retTy = GetType<Type>(retTyId).getOrThrow()
+        let paramTys = ArrayList<Type>()
+        var index = 0u32
+        while (index + 1u32 < argTys.size()) {
+            paramTys.add(GetType<Type>((argTys.Get(index) as UInt32).getOrThrow()).getOrThrow())
+            index++
+        }
+        return builder.context.GetFuncTy(paramTys, retTy, hasVarLenParam: obj.GetHasVarArg(),
+            isCFunc: obj.GetIsCFuncType())
+    }
+
+    private func Deserialize(obj: PackageFormat_CustomType): CustomType {
+        let kind = obj.GetBase().getOrThrow().GetKind()
+        let def = GetCustomTypeDef<CustomTypeDef>(obj.GetCustomTypeDef()).getOrThrow()
+        let typeArgs = GetType<Type>(obj.GetBase().getOrThrow().GetArgTys())
+        if (kind == CHIRFB_CHIR_TYPE_KIND_CLASS) {
+            return builder.context.GetClassTy((def as ClassDef).getOrThrow(), typeArgs)
+        }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_ENUM) {
+            return builder.context.GetEnumTy((def as EnumDef).getOrThrow(), typeArgs)
+        }
+        if (kind == CHIRFB_CHIR_TYPE_KIND_STRUCT) {
+            return builder.context.GetStructTy((def as StructDef).getOrThrow(), typeArgs)
+        }
+        CJC_ABORT()
+        return builder.context.GetStructTy((def as StructDef).getOrThrow(), typeArgs)
+    }
+
+    private func Deserialize(obj: PackageFormat_GenericType): GenericType {
+        let identifier = obj.GetIdentifier().getOrThrow().str()
+        let srcCodeIdentifier = obj.GetSrcCodeIdentifier().getOrThrow().str()
+        let genericType = builder.context.GetGenericTy(identifier, srcCodeIdentifier)
+        genericTypeConfig.add((genericType, obj))
+        return genericType
+    }
+
+    private func GetType<T>(id: UInt32): Option<T> {
+        if (id == 0u32) { return None }
+        if (let Some(ty) <- id2Type.get(id)) { return ty as T }
+        let rawPackage = pool.getOrThrow()
+        let types = rawPackage.GetTypes().getOrThrow()
+        let kinds = rawPackage.GetTypes_type().getOrThrow()
+        let kind = (kinds.Get(id - 1u32) as UInt8).getOrThrow()
+        let position = (types.Get(id - 1u32) as Int64).getOrThrow()
+        let ty: Type
+        if (kind == CHIRFB_TYPE_ELEM_TYPE) {
+            ty = Deserialize(PackageFormat_Type(types.data, position))
+        } else if (kind == CHIRFB_TYPE_ELEM_RAW_ARRAY_TYPE) {
+            ty = Deserialize(PackageFormat_RawArrayType(types.data, position))
+        } else if (kind == CHIRFB_TYPE_ELEM_V_ARRAY_TYPE) {
+            ty = Deserialize(PackageFormat_VArrayType(types.data, position))
+        } else if (kind == CHIRFB_TYPE_ELEM_FUNC_TYPE) {
+            ty = Deserialize(PackageFormat_FuncType(types.data, position))
+        } else if (kind == CHIRFB_TYPE_ELEM_CUSTOM_TYPE) {
+            ty = Deserialize(PackageFormat_CustomType(types.data, position))
+        } else if (kind == CHIRFB_TYPE_ELEM_GENERIC_TYPE) {
+            ty = Deserialize(PackageFormat_GenericType(types.data, position))
+        } else {
+            CJC_ABORT()
+            return None
+        }
+        id2Type[id] = ty
+        return ty as T
+    }
+
+    private func Deserialize(obj: PackageFormat_EnumDef): EnumDef {
+        let base = obj.GetBase().getOrThrow()
+        let identifier = base.GetIdentifier().getOrThrow().str()
+        if (compilePlatform) {
+            if (let Some(exist) <- builder.context.GetCurPackage().getOrThrow().TryGetEnumDef(identifier)) {
+                exist.EnableAttr(Attribute.PREVIOUSLY_DESERIALIZED)
+                return exist
+            }
+        }
+        let attrs = AttributeInfo(base.GetBase().getOrThrow().GetAttributes())
+        let result = builder.CreateEnum(DebugLocation(), base.GetSrcCodeIdentifier().getOrThrow().str(),
+            GetMangleNameFromIdentifier(identifier), base.GetPackageName().getOrThrow().str(),
+            attrs.Test(Attribute.IMPORTED), obj.GetNonExhaustive())
+        if (compilePlatform) { result.EnableAttr(Attribute.DESERIALIZED) }
+        return result
+    }
+
+    private func Deserialize(obj: PackageFormat_StructDef): StructDef {
+        let base = obj.GetBase().getOrThrow()
+        let identifier = base.GetIdentifier().getOrThrow().str()
+        if (compilePlatform) {
+            if (let Some(exist) <- builder.context.GetCurPackage().getOrThrow().TryGetStructDef(identifier)) {
+                exist.EnableAttr(Attribute.PREVIOUSLY_DESERIALIZED)
+                return exist
+            }
+        }
+        let attrs = AttributeInfo(base.GetBase().getOrThrow().GetAttributes())
+        let result = builder.CreateStruct(DebugLocation(), base.GetSrcCodeIdentifier().getOrThrow().str(),
+            GetMangleNameFromIdentifier(identifier), base.GetPackageName().getOrThrow().str(),
+            attrs.Test(Attribute.IMPORTED))
+        if (compilePlatform) { result.EnableAttr(Attribute.DESERIALIZED) }
+        return result
+    }
+
+    private func Deserialize(obj: PackageFormat_ClassDef): ClassDef {
+        let base = obj.GetBase().getOrThrow()
+        let identifier = base.GetIdentifier().getOrThrow().str()
+        if (compilePlatform) {
+            if (let Some(exist) <- builder.context.GetCurPackage().getOrThrow().TryGetClassDef(identifier)) {
+                exist.EnableAttr(Attribute.PREVIOUSLY_DESERIALIZED)
+                return exist
+            }
+        }
+        let attrs = AttributeInfo(base.GetBase().getOrThrow().GetAttributes())
+        let result = builder.CreateClass(DebugLocation(), base.GetSrcCodeIdentifier().getOrThrow().str(),
+            GetMangleNameFromIdentifier(identifier), base.GetPackageName().getOrThrow().str(), obj.GetIsClass(),
+            attrs.Test(Attribute.IMPORTED))
+        if (compilePlatform) { result.EnableAttr(Attribute.DESERIALIZED) }
+        return result
+    }
+
+    private func Deserialize(obj: PackageFormat_ExtendDef): ExtendDef {
+        let base = obj.GetBase().getOrThrow()
+        let identifier = base.GetIdentifier().getOrThrow().str()
+        if (compilePlatform) {
+            if (let Some(exist) <- builder.context.GetCurPackage().getOrThrow().TryGetExtendDef(identifier)) {
+                exist.EnableAttr(Attribute.PREVIOUSLY_DESERIALIZED)
+                return exist
+            }
+        }
+        let attrs = AttributeInfo(base.GetBase().getOrThrow().GetAttributes())
+        let genericParams = GetType<GenericType>(obj.GetGenericParams())
+        let result = builder.CreateExtend(DebugLocation(), GetMangleNameFromIdentifier(identifier),
+            base.GetPackageName().getOrThrow().str(), attrs.Test(Attribute.IMPORTED), genericParams)
+        if (compilePlatform) { result.EnableAttr(Attribute.DESERIALIZED) }
+        result.AppendAttributeInfo(attrs)
+        return result
+    }
+
+    private func GetCustomTypeDef<T>(id: UInt32): Option<T> {
+        if (id == 0u32) { return None }
+        if (let Some(def) <- id2CustomTypeDef.get(id)) { return def as T }
+        let rawPackage = pool.getOrThrow()
+        let defs = rawPackage.GetDefs().getOrThrow()
+        let kinds = rawPackage.GetDefs_type().getOrThrow()
+        let kind = (kinds.Get(id - 1u32) as UInt8).getOrThrow()
+        let position = (defs.Get(id - 1u32) as Int64).getOrThrow()
+        let def: CustomTypeDef
+        if (kind == CHIRFB_CUSTOM_TYPE_DEF_ELEM_ENUM_DEF) {
+            def = Deserialize(PackageFormat_EnumDef(defs.data, position))
+        } else if (kind == CHIRFB_CUSTOM_TYPE_DEF_ELEM_STRUCT_DEF) {
+            def = Deserialize(PackageFormat_StructDef(defs.data, position))
+        } else if (kind == CHIRFB_CUSTOM_TYPE_DEF_ELEM_CLASS_DEF) {
+            def = Deserialize(PackageFormat_ClassDef(defs.data, position))
+        } else if (kind == CHIRFB_CUSTOM_TYPE_DEF_ELEM_EXTEND_DEF) {
+            def = Deserialize(PackageFormat_ExtendDef(defs.data, position))
+        } else {
+            CJC_ABORT()
+            return None
+        }
+        id2CustomTypeDef[id] = def
+        return def as T
     }
 
 }
