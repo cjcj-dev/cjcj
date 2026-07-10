@@ -39,6 +39,10 @@ public class AttributeInfo {
         return (attributesInfo[word] & mask) != 0u64
     }
 
+    public func GetRawAttrs(): UInt64 {
+        return attributesInfo[0]
+    }
+
     public func Append(info: AttributeInfo): Unit {
         for (idx in 0..2) {
             attributesInfo[idx] = attributesInfo[idx] | info.attributesInfo[idx]
