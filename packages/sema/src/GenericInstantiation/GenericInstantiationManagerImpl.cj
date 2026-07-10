@@ -1685,36 +1685,40 @@ class GenericInstantiationManagerImpl {
             for (ty in refExpr.instTys) {
                 instTys.add(ty)
             }
-            if (refExpr.isThis || refExpr.isSuper) {
+            if (IsClassOrEnumConstructor(targetDecl)) {
+                targetDecl = target.outerDecl.getOrThrow()
                 instTys.clear()
-                if (let Some(thisTy) <- refExpr.GetTy()) {
-                    for (arg in thisTy.typeArgs) {
+                if (let Some(refTy) <- refExpr.GetTy()) {
+                    let constructorBaseTy =
+                        if (let Some(funcTy) <- (refTy as FuncTy)) { funcTy.retTy } else { refTy }
+                    for (arg in constructorBaseTy.typeArgs) {
                         instTys.add(arg)
                     }
                 }
             }
-            if (IsClassOrEnumConstructor(targetDecl)) {
-                if (let Some(outer) <- targetDecl.outerDecl) {
-                    targetDecl = outer
-                    instTys.clear()
-                    if (let Some(refTy) <- refExpr.GetTy()) {
-                        let baseTy = if (let Some(funcTy) <- (refTy as FuncTy)) { funcTy.retTy } else { refTy }
-                        for (arg in baseTy.typeArgs) {
-                            instTys.add(arg)
-                        }
-                    }
+            let needInstantiateParent = if (let Some(outerDecl) <- targetDecl.outerDecl) {
+                outerDecl.IsNominalDecl() &&
+                    (IsGenericInGenericStruct(targetDecl) || outerDecl.TestAttr(Attribute.GENERIC))
+            } else {
+                false
+            }
+            let structDecl = if (structContext.isEmpty()) { targetDecl.outerDecl } else { GetStructDeclByContext() }
+            var baseTy: Option<Ty> = None
+            if (!SameDeclOptions(structDecl, targetDecl.outerDecl)) {
+                baseTy = GetDeclTy(structDecl.getOrThrow())
+            }
+            if (needInstantiateParent) {
+                if (let Some(baseTyValue) <- baseTy) {
+                    targetDecl = GetInstantiatedMemberTarget(baseTyValue, targetDecl)
                 }
             }
-            let contextBaseTy = GetContextBaseTy(targetDecl)
-            if (let Some(baseTy) <- contextBaseTy) {
-                InstantiateParentDeclForMemberTarget(targetDecl, baseTy, pkg)
-            }
             InstantiateGenericDeclWithInstTys(targetDecl, instTys, pkg)
-            if (let Some(baseTy) <- contextBaseTy) {
-                if (targetDecl.IsFunc() && targetDecl.TestAttr(Attribute.GENERIC)) {
-                    let contextTarget = FindInstantiatedTarget(targetDecl, Some(baseTy), instTys,
-                        refExpr.matchedParentTy, pkg)
-                    InstantiateGenericDeclWithInstTys(contextTarget, instTys, pkg)
+            if (let Some(baseTyValue) <- baseTy) {
+                if (let Some(funcDecl) <- (targetDecl as FuncDecl)) {
+                    if (targetDecl.TestAttr(Attribute.GENERIC)) {
+                        targetDecl = FindImplFuncForAbstractFunc(baseTyValue, funcDecl, baseTyValue)
+                        InstantiateGenericDeclWithInstTys(targetDecl, instTys, pkg)
+                    }
                 }
             }
         }
@@ -1742,57 +1746,45 @@ class GenericInstantiationManagerImpl {
                 instTys.add(ty)
             }
             if (IsClassOrEnumConstructor(targetDecl)) {
-                if (let Some(outer) <- targetDecl.outerDecl) {
-                    targetDecl = outer
-                    instTys.clear()
-                    if (let Some(memberTy) <- memberAccess.GetTy()) {
-                        let baseTy = if (let Some(funcTy) <- (memberTy as FuncTy)) { funcTy.retTy } else { memberTy }
-                        for (arg in baseTy.typeArgs) {
-                            instTys.add(arg)
-                        }
-                    }
-                }
-            } else if (let Some(outer) <- targetDecl.outerDecl) {
-                if (outer.IsNominalDecl() && outer.TestAttr(Attribute.GENERIC)) {
-                    if (let Some(baseExpr) <- memberAccess.baseExpr) {
-                        if (let Some(baseTy) <- baseExpr.GetTy()) {
-                            let promotedTys = Promotion(ci.typeManager).Promote(baseTy, GetDeclTy(outer) ?? baseTy)
-                            if (!promotedTys.IsEmpty()) {
-                                InstantiateGenericDeclWithInstTys(outer, copyTypeArgs(Some(promotedTys.values[0])), pkg)
-                            }
-                        }
+                targetDecl = targetDecl.outerDecl.getOrThrow()
+                instTys.clear()
+                if (let Some(memberTy) <- memberAccess.GetTy()) {
+                    let constructorBaseTy =
+                        if (let Some(funcTy) <- (memberTy as FuncTy)) { funcTy.retTy } else { memberTy }
+                    for (arg in constructorBaseTy.typeArgs) {
+                        instTys.add(arg)
                     }
                 }
             }
-            if (let Some(baseTy) <- GetMemberBaseTy(memberAccess)) {
-                InstantiateParentDeclForMemberTarget(targetDecl, baseTy, pkg)
+            let needInstantiateParent = if (let Some(outerDecl) <- targetDecl.outerDecl) {
+                outerDecl.IsNominalDecl() && memberAccess.baseExpr.getOrThrow().GetTy().isSome() &&
+                    (IsGenericInGenericStruct(targetDecl) || outerDecl.TestAttr(Attribute.GENERIC))
+            } else {
+                false
+            }
+            if (needInstantiateParent) {
+                let memberBaseTy = if (Ty.IsTyCorrect(memberAccess.matchedParentTy)) {
+                    memberAccess.matchedParentTy.getOrThrow()
+                } else {
+                    memberAccess.baseExpr.getOrThrow().GetTy().getOrThrow()
+                }
+                targetDecl = GetInstantiatedMemberTarget(memberBaseTy, targetDecl)
             }
             InstantiateGenericDeclWithInstTys(targetDecl, instTys, pkg)
-        }
-    }
-
-    private func GetContextBaseTy(target: Decl): Option<Ty> {
-        if (let Some(contextDecl) <- GetStructDeclByContext()) {
-            if (let Some(targetOuter) <- target.outerDecl) {
-                if (!SameDecl(contextDecl, targetOuter)) {
-                    return GetDeclTy(contextDecl)
-                }
+            let baseExprTy = memberAccess.baseExpr.getOrThrow().GetTy()
+            if (!Ty.IsTyCorrect(baseExprTy)) {
+                return
             }
-        }
-        return None
-    }
-
-    private func InstantiateParentDeclForMemberTarget(target: Decl, baseTy: Ty, pkg: Package): Unit {
-        if (let Some(outer) <- target.outerDecl) {
-            if (outer.IsNominalDecl() && (IsGenericInGenericStruct(target) || outer.TestAttr(Attribute.GENERIC))) {
-                let outerTy = GetDeclTy(outer) ?? baseTy
-                let promotedTys = Promotion(ci.typeManager).Promote(baseTy, outerTy)
-                if (!promotedTys.IsEmpty()) {
-                    InstantiateGenericDeclWithInstTys(outer, copyTypeArgs(Some(promotedTys.values[0])), pkg)
+            if (let Some(funcDecl) <- (targetDecl as FuncDecl)) {
+                if (targetDecl.TestAttr(Attribute.GENERIC)) {
+                    targetDecl = FindImplFuncForAbstractFunc(baseExprTy.getOrThrow(), funcDecl,
+                        baseExprTy.getOrThrow())
+                    InstantiateGenericDeclWithInstTys(targetDecl, instTys, pkg)
+                } else if (!IsInDeclWithAttribute(targetDecl, Attribute.GENERIC) && memberAccess.isExposedAccess) {
+                    targetDecl = FindImplFuncForAbstractFunc(baseExprTy.getOrThrow(), funcDecl,
+                        baseExprTy.getOrThrow())
+                    InstantiateGenericDeclWithInstTys(targetDecl, instTys, pkg)
                 }
-            } else if ((let Some(_) <- (outer as ExtendDecl)) && outer.TestAttr(Attribute.GENERIC) &&
-                !baseTy.HasGeneric()) {
-                InstantiateGenericDeclWithInstTys(outer, copyTypeArgs(Some(baseTy)), pkg)
             }
         }
     }
@@ -1925,20 +1917,20 @@ class GenericInstantiationManagerImpl {
         if (let Some(callExpr) <- (node as CallExpr)) {
             RearrangeCallExprReference(callExpr, pkg)
         } else if (let Some(refExpr) <- (node as RefExpr)) {
-            RearrangeRefExprReference(refExpr, pkg)
+            RearrangeRefExprReference(refExpr)
         } else if (let Some(memberAccess) <- (node as MemberAccess)) {
             RearrangeMemberAccessReference(memberAccess, pkg)
         } else if (let Some(typeNode) <- (node as Type)) {
-            RearrangeTypeReference(typeNode, pkg)
+            RearrangeTypeReference(typeNode)
             if (typeNode.astKind == ASTKind.REF_TYPE || typeNode.astKind == ASTKind.QUALIFIED_TYPE) {
                 return VisitAction.SKIP_CHILDREN
             }
         } else if (let Some(arrayExpr) <- (node as ArrayExpr)) {
-            RearrangeArrayExprReference(arrayExpr, pkg)
+            RearrangeArrayExprReference(arrayExpr)
         } else if (let Some(arrayLit) <- (node as ArrayLit)) {
-            RearrangeArrayLitReference(arrayLit, pkg)
+            RearrangeArrayLitReference(arrayLit)
         } else if (let Some(funcBody) <- (node as FuncBody)) {
-            RearrangeFuncBodyReference(funcBody, pkg)
+            RearrangeFuncBodyReference(funcBody)
         } else if (let Some(pattern) <- (node as Pattern)) {
             UpdateTypePatternMatchResult(pattern)
         }
@@ -2036,7 +2028,50 @@ class GenericInstantiationManagerImpl {
         }
     }
 
-    private func RearrangeRefExprReference(refExpr: RefExpr, pkg: Package): Unit {
+    private func GetInstantiatedTarget(baseTy: Ty, target: Decl, instTys: ArrayList<Ty>,
+        upperTy: Option<Ty>): Decl {
+        let genericDecl = GetGeneralDecl(target)
+        if (genericDecl.IsBuiltIn()) {
+            return target
+        }
+        if (genericDecl.IsNominalDecl() || (let None <- genericDecl.outerDecl) ||
+            !genericDecl.outerDecl.getOrThrow().IsNominalDecl()) {
+            if ((let None <- genericDecl.GetGeneric()) || !genericDecl.TestAttr(Attribute.GENERIC)) {
+                return genericDecl
+            }
+            if (let Some(instantiatedDecl) <- FindInCache(ConstructGenericInfo(genericDecl, instTys))) {
+                return instantiatedDecl
+            }
+            return target
+        }
+        let targetBase = if (Ty.IsTyCorrect(upperTy) && !upperTy.getOrThrow().HasGeneric()) {
+            upperTy.getOrThrow()
+        } else {
+            baseTy
+        }
+        let instantiatedMember = GetInstantiatedMemberTarget(targetBase, genericDecl, inRearrange: true)
+        var decl: Option<Decl> = if (instantiatedMember.TestAttr(Attribute.GENERIC)) {
+            FindInCache(ConstructGenericInfo(instantiatedMember, instTys))
+        } else {
+            Some(instantiatedMember)
+        }
+        if (let Some(declValue) <- decl) {
+            if (let Some(funcDecl) <- (declValue as FuncDecl)) {
+                let implDecl = FindImplFuncForAbstractFunc(baseTy, funcDecl, targetBase)
+                if (implDecl.TestAttr(Attribute.GENERIC)) {
+                    decl = FindInCache(ConstructGenericInfo(implDecl, instTys))
+                } else {
+                    decl = implDecl
+                }
+            }
+        }
+        if (let Some(declValue) <- decl) {
+            return declValue
+        }
+        return target
+    }
+
+    private func RearrangeRefExprReference(refExpr: RefExpr): Unit {
         if (!Ty.IsTyCorrect(refExpr.GetTy())) {
             return
         }
@@ -2068,7 +2103,8 @@ class GenericInstantiationManagerImpl {
                     baseTy = GetDeclTy(structDecl)
                 }
             }
-            refExpr.ref.target = FindInstantiatedTarget(target, baseTy, instTys, refExpr.matchedParentTy, pkg)
+            refExpr.ref.target = GetInstantiatedTarget(baseTy.getOrThrow(), target, instTys,
+                refExpr.matchedParentTy)
             ClearInstTysIfNeeded(refExpr)
         }
     }
@@ -2098,12 +2134,13 @@ class GenericInstantiationManagerImpl {
                     }
                 }
             }
-            memberAccess.target = FindInstantiatedTarget(target, baseTy, instTys, memberAccess.matchedParentTy, pkg)
+            memberAccess.target = GetInstantiatedTarget(baseTy.getOrThrow(), target, instTys,
+                memberAccess.matchedParentTy)
             ClearInstTysIfNeeded(memberAccess)
         }
     }
 
-    private func RearrangeTypeReference(typeNode: Type, pkg: Package): Unit {
+    private func RearrangeTypeReference(typeNode: Type): Unit {
         if (!Ty.IsTyCorrect(typeNode.GetTy())) {
             return
         }
@@ -2112,7 +2149,7 @@ class GenericInstantiationManagerImpl {
                 return
             }
             if (let Some(target) <- Ty.GetDeclPtrOfTy(typeTy)) {
-                let instantiatedDecl = FindInstantiatedTarget(target, Some(typeTy), copyTypeArgs(Some(typeTy)), None, pkg)
+                let instantiatedDecl = GetInstantiatedTarget(typeTy, target, copyTypeArgs(Some(typeTy)), None)
                 if (let Some(refType) <- (typeNode as RefType)) {
                     refType.ref.target = instantiatedDecl
                 } else if (let Some(qualifiedType) <- (typeNode as QualifiedType)) {
@@ -2122,64 +2159,44 @@ class GenericInstantiationManagerImpl {
         }
     }
 
-    private func RearrangeArrayExprReference(arrayExpr: ArrayExpr, pkg: Package): Unit {
+    private func RearrangeArrayExprReference(arrayExpr: ArrayExpr): Unit {
         if (let Some(initFunc) <- arrayExpr.initFunc) {
             if (let Some(arrayTy) <- arrayExpr.GetTy()) {
-                if (let Some(target) <- (FindInstantiatedTarget(initFunc, Some(arrayTy), copyTypeArgs(Some(arrayTy)),
-                    None, pkg) as FuncDecl)) {
-                    arrayExpr.initFunc = target
+                if (Ty.IsTyCorrect(arrayTy)) {
+                    if (let Some(target) <- FindInCache(ConstructGenericInfo(initFunc,
+                        ci.typeManager.GetTypeArgs(arrayTy)))) {
+                        arrayExpr.initFunc = (target as FuncDecl).getOrThrow()
+                    }
                 }
             }
         }
     }
 
-    private func RearrangeArrayLitReference(arrayLit: ArrayLit, pkg: Package): Unit {
+    private func RearrangeArrayLitReference(arrayLit: ArrayLit): Unit {
         if (let Some(initFunc) <- arrayLit.initFunc) {
             if (let Some(arrayTy) <- arrayLit.GetTy()) {
-                if (let Some(target) <- (FindInstantiatedTarget(initFunc, Some(arrayTy), copyTypeArgs(Some(arrayTy)),
-                    None, pkg) as FuncDecl)) {
+                if (let Some(target) <- (GetInstantiatedTarget(arrayTy, initFunc, arrayTy.typeArgs, None) as FuncDecl)) {
                     arrayLit.initFunc = target
                 }
             }
         }
     }
 
-    private func SelectContextOrDeclTy(contextTy: Option<Ty>, decl: Decl): Option<Ty> {
-        if (let Some(value) <- contextTy) {
-            return value
+    private func RearrangeFuncBodyReference(funcBody: FuncBody): Unit {
+        if (structContext.isEmpty()) {
+            return
         }
-        return decl.GetTy()
-    }
-
-    private func RearrangeFuncBodyReference(funcBody: FuncBody, pkg: Package): Unit {
-        var contextTy: Option<Ty> = None
-        if (let Some(contextDecl) <- GetStructDeclByContext()) {
-            contextTy = GetDeclTy(contextDecl)
-        }
+        let contextDecl = GetStructDeclByContext().getOrThrow()
+        let baseTy = GetDeclTy(contextDecl).getOrThrow()
         if (let Some(parentClassLike) <- funcBody.parentClassLike) {
-            if (let Some(parentTy) <- SelectContextOrDeclTy(contextTy, parentClassLike)) {
-                let target = FindInstantiatedTarget(parentClassLike, Some(parentTy), copyTypeArgs(Some(parentTy)),
-                    None, pkg)
-                if (let Some(classLike) <- (target as ClassLikeDecl)) {
-                    funcBody.parentClassLike = classLike
-                }
-            }
+            funcBody.parentClassLike =
+                (GetInstantiatedTarget(baseTy, parentClassLike, baseTy.typeArgs, None) as ClassLikeDecl).getOrThrow()
         } else if (let Some(parentStruct) <- funcBody.parentStruct) {
-            if (let Some(parentTy) <- SelectContextOrDeclTy(contextTy, parentStruct)) {
-                let target = FindInstantiatedTarget(parentStruct, Some(parentTy), copyTypeArgs(Some(parentTy)),
-                    None, pkg)
-                if (let Some(structDecl) <- (target as StructDecl)) {
-                    funcBody.parentStruct = structDecl
-                }
-            }
+            funcBody.parentStruct =
+                (GetInstantiatedTarget(baseTy, parentStruct, baseTy.typeArgs, None) as StructDecl).getOrThrow()
         } else if (let Some(parentEnum) <- funcBody.parentEnum) {
-            if (let Some(parentTy) <- SelectContextOrDeclTy(contextTy, parentEnum)) {
-                let target = FindInstantiatedTarget(parentEnum, Some(parentTy), copyTypeArgs(Some(parentTy)),
-                    None, pkg)
-                if (let Some(enumDecl) <- (target as EnumDecl)) {
-                    funcBody.parentEnum = enumDecl
-                }
-            }
+            funcBody.parentEnum =
+                (GetInstantiatedTarget(baseTy, parentEnum, baseTy.typeArgs, None) as EnumDecl).getOrThrow()
         }
     }
 
@@ -2240,126 +2257,6 @@ class GenericInstantiationManagerImpl {
             }
         }
         return memberAccess.GetTy()
-    }
-
-    private func FindInstantiatedTarget(target: Decl, baseTy: Option<Ty>, instTys: ArrayList<Ty>,
-        upperTy: Option<Ty>, pkg: Package): Decl {
-        let generalDecl = GetGeneralDecl(target)
-        if (ignoredInstantiationKind(generalDecl) || generalDecl.IsBuiltIn()) {
-            return target
-        }
-        let needsTopLevelRearrange = generalDecl.IsNominalDecl() || generalDecl.outerDecl.isNone() ||
-            (if (let Some(outer) <- generalDecl.outerDecl) { !outer.IsNominalDecl() } else { false })
-        if (needsTopLevelRearrange) {
-            if ((let None <- generalDecl.GetGeneric()) || !generalDecl.TestAttr(Attribute.GENERIC)) {
-                return generalDecl
-            }
-            return FindCachedGenericDecl(generalDecl, instTys, pkg) ?? target
-        }
-        let targetBaseTy = if (let Some(value) <- upperTy) {
-            if (Ty.IsTyCorrect(value) && !value.HasGeneric()) {
-                Some(value)
-            } else {
-                baseTy
-            }
-        } else {
-            baseTy
-        }
-        var resultDecl: Decl = FindCachedGenericDecl(generalDecl, instTys, pkg) ?? target
-        if (let Some(outerDecl) <- generalDecl.outerDecl) {
-            if (outerDecl.IsNominalDecl()) {
-                let targetBaseTyValue = if (let Some(value) <- targetBaseTy) {
-                    value
-                } else {
-                    TypeManager.GetInvalidTy()
-                }
-                if (Ty.IsTyCorrect(targetBaseTyValue)) {
-                    let outerGeneral = GetGeneralDecl(outerDecl)
-                    if ((let Some(_) <- outerGeneral.GetGeneric()) && !targetBaseTyValue.HasGeneric()) {
-                        let outerInfo = ConstructGenericInfo(outerGeneral, copyTypeArgs(Some(targetBaseTyValue)))
-                        if (let Some(instantiatedOuter) <- FindInCache(outerInfo, pkg)) {
-                            if (let Some(member) <- FindMemberInInstantiatedDecl(instantiatedOuter, generalDecl)) {
-                                if ((let Some(_) <- member.GetGeneric()) && !instTys.isEmpty()) {
-                                    resultDecl = FindCachedGenericDecl(member, instTys, pkg) ?? member
-                                } else {
-                                    resultDecl = member
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    resultDecl = FindCachedGenericDecl(generalDecl, instTys, pkg) ?? target
-                }
-            } else if ((let Some(_) <- (outerDecl as ExtendDecl)) && outerDecl.TestAttr(Attribute.GENERIC)) {
-                let targetBaseTyValue = if (let Some(value) <- targetBaseTy) {
-                    value
-                } else {
-                    TypeManager.GetInvalidTy()
-                }
-                if (Ty.IsTyCorrect(targetBaseTyValue) && !targetBaseTyValue.HasGeneric()) {
-                    let outerGeneral = GetGeneralDecl(outerDecl)
-                    let outerInfo = ConstructGenericInfo(outerGeneral, copyTypeArgs(Some(targetBaseTyValue)))
-                    if (let Some(instantiatedOuter) <- FindInCache(outerInfo, pkg)) {
-                        if (let Some(member) <- FindMemberInInstantiatedDecl(instantiatedOuter, generalDecl)) {
-                            if ((let Some(_) <- member.GetGeneric()) && !instTys.isEmpty()) {
-                                resultDecl = FindCachedGenericDecl(member, instTys, pkg) ?? member
-                            } else {
-                                resultDecl = member
-                            }
-                        }
-                    }
-                } else {
-                    resultDecl = FindCachedGenericDecl(generalDecl, instTys, pkg) ?? target
-                }
-            } else {
-                resultDecl = FindCachedGenericDecl(generalDecl, instTys, pkg) ?? target
-            }
-        } else {
-            resultDecl = FindCachedGenericDecl(generalDecl, instTys, pkg) ?? target
-        }
-        if (let Some(funcDecl) <- (resultDecl as FuncDecl)) {
-            if (let Some(baseTyValue) <- baseTy) {
-                if (let Some(targetBaseTyValue) <- targetBaseTy) {
-                    resultDecl = FindImplFuncForAbstractFunc(baseTyValue, funcDecl, targetBaseTyValue)
-                    if (resultDecl.TestAttr(Attribute.GENERIC)) {
-                        resultDecl = FindCachedGenericDecl(resultDecl, instTys, pkg) ?? resultDecl
-                    }
-                }
-            }
-        }
-        return resultDecl
-    }
-
-    private func FindCachedGenericDecl(genericDecl: Decl, instTys: ArrayList<Ty>, pkg: Package): Option<Decl> {
-        if ((let None <- genericDecl.GetGeneric()) || instTys.isEmpty() || Ty.ExistGeneric(instTys)) {
-            return None
-        }
-        let genericInfo = ConstructGenericInfo(genericDecl, instTys)
-        if (genericInfo.gTyToTyMap.IsEmpty()) {
-            return None
-        }
-        return FindInCache(genericInfo, pkg)
-    }
-
-    private func FindMemberInInstantiatedDecl(owner: Decl, genericMember: Decl): Option<Decl> {
-        for (member in owner.GetMemberDecls()) {
-            if (SameDecl(PartialInstantiation.GetGeneralDecl(member), genericMember)) {
-                return member
-            }
-            if (let Some(propDecl) <- (member as PropDecl)) {
-                for (getter in propDecl.getters) {
-                    if (SameDecl(PartialInstantiation.GetGeneralDecl(getter), genericMember)) {
-                        return getter
-                    }
-                }
-                for (setter in propDecl.setters) {
-                    if (SameDecl(PartialInstantiation.GetGeneralDecl(setter), genericMember)) {
-                        return setter
-                    }
-                }
-            }
-        }
-        return None
     }
 
 }
