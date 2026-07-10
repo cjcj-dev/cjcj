@@ -671,16 +671,21 @@ public class Translator {
             }
             let varDecl = Translator.RequireNodeAsVarDecl(member)
             if (let Some(initializer) <- varDecl.initializer) {
-                let initValue = Translator.TranslateASTNode(initializer, this) ??
-                    throw IllegalStateException("faithful AST2CHIR member initializer produced no value")
+                let initValue = TranslateExprArg(initializer)
+                let loc = TranslateLocation(member)
                 let path = ArrayList<UInt64>()
                 path.add(fieldOffset)
                 let pureCurObjType = (thisVar.GetType().getOrThrow() as RefType).getOrThrow().GetBaseType()
                 CJC_ASSERT(!pureCurObjType.IsRef() && pureCurObjType.IsNominal())
                 let memberTy = (pureCurObjType as CustomType).getOrThrow()
                     .GetInstMemberTypeByPath(path, builder)
-                builder.CreateStoreElementRef(CoerceInitializerForExpectedType(initializer, initValue, memberTy),
-                    thisVar, path, CurrentBlock())
+                let storedValue = if (refEq(initValue.GetType().getOrThrow(), memberTy)) {
+                    initValue
+                } else {
+                    TypeCastOrBoxIfNeeded(initValue, memberTy, loc)
+                }
+                let store = builder.CreateStoreElementRef(storedValue, thisVar, path, CurrentBlock())
+                store.SetDebugLocation(loc)
             }
             fieldOffset++
         }
@@ -719,15 +724,6 @@ public class Translator {
             return UInt64(superClassDef.GetAllInstanceVarNum())
         }
         return 0u64
-    }
-
-    private func CoerceInitializerForExpectedType(expr: AstExpr, value: Value, expectedTy: Type): Value {
-        if (let Some(litExpr) <- (expr as AstLitConstExpr)) {
-            if (expectedTy.IsConstant()) {
-                return RequireResult(builder.CreateConstant(expectedTy, TranslateLitConstant(litExpr), CurrentBlock()))
-            }
-        }
-        return CastValueIfNeeded(value, expectedTy)
     }
 
     public func CreateClassStructDeclVarInit(decl: AstDecl): Unit {
