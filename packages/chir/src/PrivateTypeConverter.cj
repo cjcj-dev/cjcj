@@ -281,3 +281,49 @@ public open class PrivateTypeConverter <: ExprTypeConverter & ValueTypeConverter
         }
     }
 }
+
+public class PrivateTypeConverterNoInvokeOriginal <: PrivateTypeConverter {
+    public init(converter: ConvertTypeFunc, builder: CHIRBuilder) {
+        super(converter, builder)
+    }
+
+    public override func VisitSubExpression(o: Invoke): Unit {
+        VisitExprDefaultImpl(o)
+        o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
+        let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
+        for (idx in 0..instantiatedTypeArgs.size) {
+            instantiatedTypeArgs[idx] = ConvertType(instantiatedTypeArgs[idx])
+        }
+        o.SetInstantiatedTypeArgs(instantiatedTypeArgs)
+    }
+
+    public override func VisitSubExpression(o: InvokeWithException): Unit {
+        VisitExprDefaultImpl(o)
+        o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
+        let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
+        for (idx in 0..instantiatedTypeArgs.size) {
+            instantiatedTypeArgs[idx] = ConvertType(instantiatedTypeArgs[idx])
+        }
+        o.SetInstantiatedTypeArgs(instantiatedTypeArgs)
+    }
+
+    public override func VisitSubExpression(o: InvokeStatic): Unit {
+        VisitExprDefaultImpl(o)
+        o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
+        let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
+        for (idx in 0..instantiatedTypeArgs.size) {
+            instantiatedTypeArgs[idx] = ConvertType(instantiatedTypeArgs[idx])
+        }
+        o.SetInstantiatedTypeArgs(instantiatedTypeArgs)
+    }
+
+    public override func VisitSubExpression(o: InvokeStaticWithException): Unit {
+        VisitExprDefaultImpl(o)
+        o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
+        let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
+        for (idx in 0..instantiatedTypeArgs.size) {
+            instantiatedTypeArgs[idx] = ConvertType(instantiatedTypeArgs[idx])
+        }
+        o.SetInstantiatedTypeArgs(instantiatedTypeArgs)
+    }
+}
