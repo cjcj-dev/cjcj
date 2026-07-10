@@ -82,16 +82,6 @@ private func indexOf(value: String, needle: String): Int64 {
     return -1
 }
 
-public func JoinScopeName(parent: String, child: String): String {
-    if (parent.isEmpty() || parent == TOPLEVEL_SCOPE_NAME) {
-        return child
-    }
-    if (child.isEmpty()) {
-        return parent
-    }
-    return parent + SCOPE_SEPARATOR + child
-}
-
 public func CopyNodeScopeInfo(target: Node, source: Node): Unit {
     target.scopeName = source.scopeName
     target.exportId = source.exportId
