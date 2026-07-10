@@ -1,5 +1,6 @@
 package cjcj::chir
 
+import std.core.Box as CoreBox
 import cjcj::utils.CJC_ASSERT
 
 // flatbuffers/base.h:370-409. The _MSC_VER intrinsics and __ICCARM__
@@ -211,5 +212,303 @@ class FlatBufferString <: Vector<UInt8> {
 
     func str(): String {
         return String.fromUtf8(data[Data()..Data() + Int64(size())])
+    }
+}
+
+// flatbuffers/verifier.h:29-42. The namespace-qualified nested type
+// VerifierTemplate::Options is flattened for Cangjie.
+class VerifierOptions {
+    var maxDepth: UInt32 = 64u32
+    var maxTables: UInt32 = 1000000u32
+    var checkAlignment: Bool = true
+    var checkNestedFlatbuffers: Bool = true
+    var maxSize: Int64 = Int64(Int32.Max)
+
+    init() {}
+}
+
+// flatbuffers/verifier.h:26-360. C++ byte pointers are byte-array positions;
+// the verifyRoot/verifyTable closures are the Cangjie form of T::Verify static
+// template dispatch and will be supplied by generated table bindings.
+class VerifierTemplate {
+    private let data: Array<UInt8>
+    private let size_: Int64
+    private let opts: VerifierOptions
+    private let trackVerifierBufferSize: Bool
+    private var upperBound: Int64 = 0
+    private var depth: UInt32 = 0u32
+    private var numTables: UInt32 = 0u32
+
+    init(data: Array<UInt8>, opts!: VerifierOptions = VerifierOptions(),
+        trackVerifierBufferSize!: Bool = false) {
+        this.data = data
+        this.size_ = data.size
+        this.opts = opts
+        this.trackVerifierBufferSize = trackVerifierBufferSize
+        CJC_ASSERT(size_ < opts.maxSize)
+    }
+
+    func Check(ok: Bool): Bool {
+        // FLATBUFFERS_DEBUG_VERIFICATION_FAILURE is not enabled for the
+        // self-host target, matching verifier.h:65-69's compiled-out branch.
+        if (trackVerifierBufferSize && !ok) {
+            upperBound = 0
+        }
+        return ok
+    }
+
+    func Verify(elem: Int64, elemLen: Int64): Bool {
+        if (trackVerifierBufferSize) {
+            let bound = elem + elemLen
+            if (upperBound < bound) {
+                upperBound = bound
+            }
+        }
+        // elem and elemLen represent C++ size_t and therefore cannot be
+        // negative; the explicit checks preserve that domain in Int64.
+        return Check(elem >= 0 && elemLen >= 0 && elemLen < size_ && elem <= size_ - elemLen)
+    }
+
+    func VerifyAlignment(elem: Int64, align: Int64): Bool {
+        return Check((elem & (align - 1)) == 0 || !opts.checkAlignment)
+    }
+
+    func Verify<T>(elem: Int64): Bool {
+        var scalarSize: Int64 = 0
+        if (UInt8(0) is T || Int8(0) is T || false is T) {
+            scalarSize = 1
+        } else if (UInt16(0) is T || Int16(0) is T || Float16(0.0) is T) {
+            scalarSize = 2
+        } else if (UInt32(0) is T || Int32(0) is T || Float32(0.0) is T || Rune(0) is T) {
+            scalarSize = 4
+        } else if (UInt64(0) is T || Int64(0) is T || Float64(0.0) is T) {
+            scalarSize = 8
+        } else {
+            CJC_ASSERT(false)
+        }
+        return VerifyAlignment(elem, scalarSize) && Verify(elem, scalarSize)
+    }
+
+    func VerifyFromPointer(pos: Int64, len: Int64): Bool {
+        return Verify(pos, len)
+    }
+
+    func VerifyFieldStruct(base: Int64, elemOff: UInt16, elemLen: Int64, align: Int64): Bool {
+        let field = base + Int64(elemOff)
+        return VerifyAlignment(field, align) && Verify(field, elemLen)
+    }
+
+    func VerifyField<T>(base: Int64, elemOff: UInt16, align: Int64): Bool {
+        let field = base + Int64(elemOff)
+        var scalarSize: Int64 = 0
+        if (UInt8(0) is T || Int8(0) is T || false is T) {
+            scalarSize = 1
+        } else if (UInt16(0) is T || Int16(0) is T || Float16(0.0) is T) {
+            scalarSize = 2
+        } else if (UInt32(0) is T || Int32(0) is T || Float32(0.0) is T || Rune(0) is T) {
+            scalarSize = 4
+        } else if (UInt64(0) is T || Int64(0) is T || Float64(0.0) is T) {
+            scalarSize = 8
+        } else {
+            CJC_ASSERT(false)
+        }
+        return VerifyAlignment(field, align) && Verify(field, scalarSize)
+    }
+
+    func VerifyTable(table: Option<Int64>, verifyTable: (Int64, VerifierTemplate) -> Bool): Bool {
+        return if (let Some(tablePos) <- table) { verifyTable(tablePos, this) } else { true }
+    }
+
+    func VerifyVector(vec: Option<Int64>, elemSize: Int64): Bool {
+        return if (let Some(vecPos) <- vec) { VerifyVectorOrString(vecPos, elemSize) } else { true }
+    }
+
+    func VerifyString(str: Option<Int64>): Bool {
+        if (let None <- str) {
+            return true
+        }
+        let end = CoreBox<Int64>(0)
+        let strPos = str.getOrThrow()
+        return VerifyVectorOrString(strPos, 1, end: Some(end)) && Verify(end.value, 1) &&
+            Check(data[end.value] == 0u8)
+    }
+
+    func VerifyVectorOrString(vec: Int64, elemSize: Int64, end!: Option<CoreBox<Int64>> = None): Bool {
+        if (!Verify<UInt32>(vec)) {
+            return false
+        }
+        let vectorSize = ReadScalar<UInt32>(data, vec)
+        let maxElems = opts.maxSize / elemSize
+        if (!Check(Int64(vectorSize) < maxElems)) {
+            return false
+        }
+        let byteSize = 4 + elemSize * Int64(vectorSize)
+        if (let Some(endPos) <- end) {
+            endPos.value = vec + byteSize
+        }
+        return Verify(vec, byteSize)
+    }
+
+    func VerifyVectorOfStrings(vec: Option<Int64>): Bool {
+        if (let Some(vecPos) <- vec) {
+            let values = Vector<UInt32>(data, vecPos)
+            var idx = 0u32
+            while (idx < values.size()) {
+                let offsetPos = values.Data() + Int64(idx) * 4
+                let target = offsetPos + Int64(ReadScalar<UInt32>(data, offsetPos))
+                if (!VerifyString(Some(target))) {
+                    return false
+                }
+                idx++
+            }
+        }
+        return true
+    }
+
+    func VerifyVectorOfTables(vec: Option<Int64>, verifyTable: (Int64, VerifierTemplate) -> Bool): Bool {
+        if (let Some(vecPos) <- vec) {
+            let values = Vector<UInt32>(data, vecPos)
+            var idx = 0u32
+            while (idx < values.size()) {
+                let offsetPos = values.Data() + Int64(idx) * 4
+                let target = offsetPos + Int64(ReadScalar<UInt32>(data, offsetPos))
+                if (!verifyTable(target, this)) {
+                    return false
+                }
+                idx++
+            }
+        }
+        return true
+    }
+
+    @OverflowWrapping
+    func VerifyTableStart(table: Int64): Bool {
+        if (!Verify<Int32>(table)) {
+            return false
+        }
+        let vtable = table - Int64(ReadScalar<Int32>(data, table))
+        if (!(VerifyComplexity() && Verify<UInt16>(vtable) &&
+            VerifyAlignment(Int64(ReadScalar<UInt16>(data, vtable)), 2))) {
+            return false
+        }
+        let vtableSize = ReadScalar<UInt16>(data, vtable)
+        return Check((vtableSize & 1u16) == 0u16) && Verify(vtable, Int64(vtableSize))
+    }
+
+    func VerifyBufferFromStart(start: Int64, verifyRoot: (Int64, VerifierTemplate) -> Bool): Bool {
+        if (!Check(size_ >= 12)) {
+            return false
+        }
+        // CHIRSerializer.cpp:1523 uses builder.Finish(serializedPackage), and
+        // CHIRDeserializer.cpp:65 calls VerifyBuffer<T>() with no identifier.
+        let rootOffset = VerifyOffset(start)
+        if (!Check(rootOffset != 0)) {
+            return false
+        }
+        if (!verifyRoot(start + rootOffset, this)) {
+            return false
+        }
+        if (trackVerifierBufferSize && GetComputedSize() == 0) {
+            return false
+        }
+        return true
+    }
+
+    func VerifyNestedFlatBuffer(buf: Option<Int64>, verifyRoot: (Int64, VerifierTemplate) -> Bool): Bool {
+        if (!opts.checkNestedFlatbuffers) {
+            return true
+        }
+        if (let None <- buf) {
+            return true
+        }
+        let vectorPos = buf.getOrThrow()
+        let vectorSize = Int64(ReadScalar<UInt32>(data, vectorPos))
+        if (!Check(vectorSize >= 12)) {
+            return false
+        }
+        let vectorData = vectorPos + 4
+        let nested = VerifierTemplate(data[vectorData..vectorData + vectorSize], opts: opts,
+            trackVerifierBufferSize: trackVerifierBufferSize)
+        return nested.VerifyBuffer(verifyRoot)
+    }
+
+    func VerifyBuffer(verifyRoot: (Int64, VerifierTemplate) -> Bool): Bool {
+        return VerifyBufferFromStart(0, verifyRoot)
+    }
+
+    func VerifySizePrefixedBuffer(verifyRoot: (Int64, VerifierTemplate) -> Bool): Bool {
+        return Verify<UInt32>(0) && Check(Int64(ReadScalar<UInt32>(data, 0)) + 4 <= size_) &&
+            VerifyBufferFromStart(4, verifyRoot)
+    }
+
+    @OverflowWrapping
+    func VerifyOffset(start: Int64): Int64 {
+        if (!Verify<UInt32>(start)) {
+            return 0
+        }
+        let offset = ReadScalar<UInt32>(data, start)
+        if (!Check(offset != 0u32)) {
+            return 0
+        }
+        if (!Check(Int32(offset) >= 0)) {
+            return 0
+        }
+        if (!Verify(start + Int64(offset), 1)) {
+            return 0
+        }
+        return Int64(offset)
+    }
+
+    func VerifyOffset(base: Int64, start: UInt16): Int64 {
+        return VerifyOffset(base + Int64(start))
+    }
+
+    @OverflowWrapping
+    func VerifyComplexity(): Bool {
+        depth++
+        numTables++
+        return Check(depth <= opts.maxDepth && numTables <= opts.maxTables)
+    }
+
+    @OverflowWrapping
+    func EndTable(): Bool {
+        depth--
+        return true
+    }
+
+    func GetComputedSize(): Int64 {
+        if (trackVerifierBufferSize) {
+            let computedSize = (upperBound - 1 + 4) & -4
+            return if (computedSize > size_) { 0 } else { computedSize }
+        }
+        CJC_ASSERT(false)
+        return 0
+    }
+}
+
+// flatbuffers/table.h:117-162 verifier-facing Table methods.
+extend Table {
+    func VerifyTableStart(verifier: VerifierTemplate): Bool {
+        return verifier.VerifyTableStart(pos)
+    }
+
+    func VerifyField<T>(verifier: VerifierTemplate, field: UInt16, align: Int64): Bool {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return fieldOffset == 0u16 || verifier.VerifyField<T>(pos, fieldOffset, align)
+    }
+
+    func VerifyFieldRequired<T>(verifier: VerifierTemplate, field: UInt16, align: Int64): Bool {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return verifier.Check(fieldOffset != 0u16) && verifier.VerifyField<T>(pos, fieldOffset, align)
+    }
+
+    func VerifyOffset(verifier: VerifierTemplate, field: UInt16): Bool {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return fieldOffset == 0u16 || verifier.VerifyOffset(pos, fieldOffset) != 0
+    }
+
+    func VerifyOffsetRequired(verifier: VerifierTemplate, field: UInt16): Bool {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return verifier.Check(fieldOffset != 0u16) && verifier.VerifyOffset(pos, fieldOffset) != 0
     }
 }
