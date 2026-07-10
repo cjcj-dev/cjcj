@@ -147,11 +147,11 @@ public class CGFunctionType <: CGType {
         }
         let retCGType = CGType.GetOrCreate(cgMod, funcTy.GetReturnType())
         let retTy = funcTy.GetReturnType()
-        hasSRet = !IsVoidLikeReturn(retTy) && ShouldUseSRet(retCGType)
-        let retLLVMType = if (IsVoidLikeReturn(retTy) || hasSRet) {
-            unsafe { LLVMVoidTypeInContext(cgCtx.GetLLVMContext().raw) }
-        } else {
-            retCGType.GetLLVMType()
+        var retLLVMType = retCGType.GetLLVMType()
+        let retLLVMTypeKind = unsafe { LLVMGetTypeKind(retLLVMType) }
+        if (retLLVMTypeKind == 10 || retLLVMTypeKind == 11 || retCGType.GetSize().isNone()) {
+            hasSRet = true
+            retLLVMType = unsafe { LLVMVoidTypeInContext(cgCtx.GetLLVMContext().raw) }
         }
         let paramLLVMTypes = ArrayList<LLVMTypeRef>()
         var realArgIdx: Int64 = 0
@@ -269,24 +269,6 @@ public class CGFunctionType <: CGType {
         let rawType = llvmType.getOrThrow()
         size = Int64(cgMod.GetTypeSize(rawType))
         align = Int64(cgMod.GetABITypeAlignment(rawType))
-    }
-
-    private func ShouldUseSRet(retCGType: CGType): Bool {
-        let retLLVMType = retCGType.GetLLVMType()
-        if (!retLLVMType.isNull()) {
-            let kind = unsafe { LLVMGetTypeKind(retLLVMType) }
-            if (kind == 10 || kind == 11) {
-                return true
-            }
-        }
-        return retCGType.GetSize().isNone()
-    }
-
-    private func IsVoidLikeReturn(retTy: Type): Bool {
-        if (constructorType) {
-            return true
-        }
-        return retTy.IsNothing() || retTy.IsVoid()
     }
 
     private func GetFixedCGType(paramTy: Type, containedCGTypeIndex: Int64): CGType {

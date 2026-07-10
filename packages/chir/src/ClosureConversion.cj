@@ -782,7 +782,14 @@ public class ClosureConversion {
         idx = offset
         while (idx < params.size) {
             let expectedTy = expectedParamTypes[idx - offset]
-            applyArgs.add(TypeCastOrBoxIfNeeded(params[idx], expectedTy, entry))
+            let paramTy = params[idx].GetType() ??
+                throw IllegalStateException("ClosureConversion parameter has no type")
+            if (paramTy.IsCJFunc()) {
+                CJC_ASSERT(expectedTy.objectId == paramTy.objectId)
+                applyArgs.add(RequireResult(builder.CreateTypeCast(paramTy, params[idx], entry)))
+            } else {
+                applyArgs.add(TypeCastOrBoxIfNeeded(params[idx], expectedTy, builder, entry, INVALID_LOCATION))
+            }
             idx++
         }
 
@@ -790,7 +797,7 @@ public class ClosureConversion {
         let apply = builder.CreateApply(applyRetTy, srcFunc, FuncCallContext(args: applyArgs,
             instTypeArgs: CreateSubstitutedInstTypeArgs(srcFunc, genericMap),
             thisType: CreateSubstitutedThisType(srcFunc, genericMap)), entry)
-        let applyResult = TypeCastOrBoxIfNeeded(RequireResult(apply), methodRetTy, entry)
+        let applyResult = TypeCastOrBoxIfNeeded(RequireResult(apply), methodRetTy, builder, entry, INVALID_LOCATION)
         if (!methodRetTy.IsUnit() && !methodRetTy.IsVoid() && !methodRetTy.IsNothing()) {
             builder.CreateStore(applyResult, retSlot, entry)
         }
@@ -826,107 +833,6 @@ public class ClosureConversion {
             builder.CreateStore(RequireResult(apply), retSlot, entry)
         }
         builder.CreateExit(None, entry)
-    }
-
-    private func TypeCastOrBoxIfNeeded(value: Value, expectedTy: Type, parent: Block): Value {
-        let valueTy = value.GetType() ??
-            throw IllegalStateException("ClosureConversion value has no type")
-        if (valueTy.IsNothing()) {
-            return value
-        }
-        if (let Some(boxed) <- BoxIfNeeded(value, valueTy, expectedTy, parent)) {
-            return boxed
-        }
-        if (let Some(transformed) <- TransformGenericIfNeeded(value, valueTy, expectedTy, parent)) {
-            return transformed
-        }
-        if (valueTy.IsEqual(expectedTy)) {
-            return value
-        }
-        var castSource = value
-        if (valueTy.StripAllRefs().IsGeneric() && valueTy.IsRef()) {
-            castSource = RequireResult(builder.CreateLoad(valueTy.StripAllRefs(), value, parent))
-        }
-        return RequireResult(builder.CreateTypeCast(expectedTy, castSource, parent))
-    }
-
-    private func BoxIfNeeded(value: Value, valueTy: Type, expectedTy: Type, parent: Block): Option<Value> {
-        let srcIsValueTy = if (let Some(refTy) <- (valueTy as RefType)) {
-            refTy.GetBaseType().IsValueType()
-        } else {
-            valueTy.IsValueType()
-        }
-        let srcIsReferenceTy = if (let Some(refTy2) <- (valueTy as RefType)) {
-            refTy2.GetBaseType().IsReferenceType()
-        } else {
-            false
-        }
-        let dstIsValueTy = if (let Some(expectedRefTy) <- (expectedTy as RefType)) {
-            expectedRefTy.GetBaseType().IsValueType()
-        } else {
-            expectedTy.IsValueType()
-        }
-        let dstIsReferenceTy = if (let Some(expectedRefTy2) <- (expectedTy as RefType)) {
-            expectedRefTy2.GetBaseType().IsReferenceType()
-        } else {
-            false
-        }
-        if (srcIsValueTy && dstIsReferenceTy) {
-            let boxSource = if (let Some(srcRefTy) <- (valueTy as RefType)) {
-                RequireResult(builder.CreateLoad(srcRefTy.GetBaseType(), value, parent))
-            } else {
-                value
-            }
-            return Some(RequireResult(builder.CreateBox(expectedTy, boxSource, parent)))
-        }
-        if (srcIsReferenceTy && dstIsValueTy) {
-            if (expectedTy.IsRef()) {
-                return Some(RequireResult(builder.CreateUnBoxToRef(expectedTy, value, parent)))
-            }
-            return Some(RequireResult(builder.CreateUnBox(expectedTy, value, parent)))
-        }
-        if (LeftTypeIsBoxOfRightType(valueTy, expectedTy)) {
-            return Some(RequireResult(builder.CreateUnBox(expectedTy, value, parent)))
-        }
-        if (LeftTypeIsBoxOfRightType(expectedTy, valueTy)) {
-            return Some(RequireResult(builder.CreateBox(expectedTy, value, parent)))
-        }
-        return None
-    }
-
-    private func LeftTypeIsBoxOfRightType(left: Type, right: Type): Bool {
-        if (let Some(leftRefTy) <- (left as RefType)) {
-            if (let Some(boxTy) <- (leftRefTy.GetBaseType() as BoxType)) {
-                return right.IsEqual(boxTy.GetBaseType())
-            }
-        }
-        return false
-    }
-
-    private func TransformGenericIfNeeded(value: Value, valueTy: Type, expectedTy: Type,
-        parent: Block): Option<Value> {
-        if (HasGenericInNonFuncScope(expectedTy) && !HasGenericInNonFuncScope(valueTy)) {
-            return Some(RequireResult(builder.CreateTransformToGeneric(expectedTy, value, parent)))
-        }
-        if (HasGenericInNonFuncScope(valueTy) && !HasGenericInNonFuncScope(expectedTy)) {
-            return Some(RequireResult(builder.CreateTransformToConcrete(expectedTy, value, parent)))
-        }
-        return None
-    }
-
-    private func HasGenericInNonFuncScope(ty: Type): Bool {
-        if (ty.IsFunc()) {
-            return false
-        }
-        if (ty.IsGeneric()) {
-            return true
-        }
-        for (arg in ty.GetTypeArgs()) {
-            if (HasGenericInNonFuncScope(arg)) {
-                return true
-            }
-        }
-        return false
     }
 
     private func CreateSubstitutedInstTypeArgs(srcFunc: Function,

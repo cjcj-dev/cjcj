@@ -39,7 +39,7 @@ public func GenerateTupleOrAggregateExpression(irBuilder: IRBuilder2, chirExpr: 
         }
         let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
         if (resultTy.StripAllRefs().IsTuple()) {
-            return GenerateNativeTuple(irBuilder, chirExpr, resultTy, resultCGType)
+            return GenerateNativeTuple(irBuilder, (chirExpr as Tuple).getOrThrow())
         }
         if (resultTy.StripAllRefs().IsStruct()) {
             return GenerateNativeStruct(irBuilder, chirExpr, resultTy, resultCGType)
@@ -49,9 +49,9 @@ public func GenerateTupleOrAggregateExpression(irBuilder: IRBuilder2, chirExpr: 
     return LLVMNullValue()
 }
 
-private func GenerateNativeTuple(irBuilder: IRBuilder2, chirExpr: Expression, resultTy: Type,
-    resultCGType: CGType): LLVMValueRef {
-    let tupleExpr = (chirExpr as Tuple).getOrThrow()
+private func GenerateNativeTuple(irBuilder: IRBuilder2, tupleExpr: Tuple): LLVMValueRef {
+    let resultTy = tupleExpr.GetResultType().getOrThrow()
+    let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
     let constantTuple = IsConstantTuple(tupleExpr)
     if (constantTuple[0]) {
         let constants = ArrayList<LLVMValueRef>()
@@ -83,27 +83,16 @@ private func GenerateNativeTuple(irBuilder: IRBuilder2, chirExpr: Expression, re
     }
     let resultValue = irBuilder.CreateEntryAlloca(resultCGType)
     let resultAddr = CGValue(resultValue, GetRefCGType(irBuilder, resultTy))
-    let containedTypes = resultCGType.GetContainedTypes()
     var idx: Int64 = 0
-    while (idx < chirExpr.GetNumOfOperands()) {
-        let operand = chirExpr.GetOperand(idx)
+    while (idx < tupleExpr.GetNumOfOperands()) {
+        let operand = tupleExpr.GetOperand(idx)
         let operandValue = irBuilder.GetCGModule().GetMappedCGValue(operand)
-        if (idx < containedTypes.size) {
-            let fieldTy = containedTypes[idx].GetOriginal()
-            let fieldPtr = irBuilder.CreateStructGEP(resultCGType.GetLLVMType(), resultValue, UInt32(idx),
-                name: "tuple.field")
-            let fieldAddr = CGValue(fieldPtr, GetRefCGType(irBuilder, fieldTy))
-            CreateTypedStoreForAddress(irBuilder, operandValue, fieldAddr)
-        } else {
-            let indices = ArrayList<LLVMValueRef>()
-            indices.add(LLVMConstI32(irBuilder, 0u64))
-            indices.add(LLVMConstI32(irBuilder, UInt64(idx)))
-            let fieldPtr = irBuilder.CreateGEP(resultCGType.GetLLVMType(), resultAddr.GetRawValue(), indices,
-                name: "tuple.field")
-            let fieldTy = operand.GetType() ?? resultTy
-            let fieldAddr = CGValue(fieldPtr, GetRefCGType(irBuilder, fieldTy))
-            CreateTypedStoreForAddress(irBuilder, operandValue, fieldAddr)
+        let fieldAddr = irBuilder.CreateGEP(resultAddr, ArrayList<UInt64>([UInt64(idx)]))
+        let resultValueType = unsafe { LLVMTypeOf(resultValue) }
+        if (unsafe { LLVMGetPointerAddressSpace(resultValueType) } == 1u32) {
+            irBuilder.GetCGContext().SetBasePtr(fieldAddr.GetRawValue(), resultValue)
         }
+        irBuilder.CreateStore(operandValue, fieldAddr)
         idx++
     }
     return resultValue
@@ -414,8 +403,4 @@ private func CastAggregateElementIfNeeded(irBuilder: IRBuilder2, rawValue: LLVMV
 
 private func GetRefCGType(irBuilder: IRBuilder2, ty: Type): CGType {
     return CGType.GetOrCreate(irBuilder.GetCGModule(), irBuilder.GetCGContext().GetCHIRBuilder().context.GetRefTy(ty))
-}
-
-private func LLVMConstI32(irBuilder: IRBuilder2, value: UInt64): LLVMValueRef {
-    return unsafe { LLVMConstInt(LLVMInt32TypeInContext(irBuilder.GetLLVMContext().raw), value, 0) }
 }
