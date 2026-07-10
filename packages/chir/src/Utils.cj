@@ -34,6 +34,8 @@ public func AdjustVarInitType(funcType: FuncType, outerDecl: AstDecl, builder: C
     return builder.context.GetFuncTy(paramsTy, funcType.GetReturnType())
 }
 
+public type OptEffectCHIRMap = HashMap<Value, HashSet<Value>>
+
 public class FuncInfo {
     public let funcName: String
     public let parentTy: String
@@ -47,6 +49,22 @@ public class FuncInfo {
         this.params = params
         this.returnTy = returnTy
         this.pkgName = pkgName
+    }
+}
+
+public func MergeEffectMap(from: OptEffectCHIRMap, to: OptEffectCHIRMap): Unit {
+    for ((value, fromValues) in from) {
+        if (let Some(toValues) <- to.get(value)) {
+            for (affected in fromValues) {
+                toValues.add(affected)
+            }
+        } else {
+            let values = HashSet<Value>()
+            for (affected in fromValues) {
+                values.add(affected)
+            }
+            to[value] = values
+        }
     }
 }
 
@@ -98,6 +116,16 @@ public func ReplaceThisTypeToConcreteType(ty: Type, concreteType: Type, builder:
 public func IsExpectedFunction(fn: Function, funcInfo: FuncInfo): Bool {
     return CheckFuncName(fn, funcInfo) && CheckParentTy(fn, funcInfo) && CheckParametersTy(fn, funcInfo) &&
         CheckReturnTy(fn, funcInfo) && CheckPkgName(fn, funcInfo)
+}
+
+public func PrintOptInfo(expr: Expression, debug: Bool, optName: String): Unit {
+    if (!debug) {
+        return
+    }
+    let position = expr.GetDebugLocation().GetBeginPos()
+    let strPos = "in the line:" + position.line.toString() + " and the column:" + position.column.toString()
+    let message = "The " + expr.GetExprKindName() + " node " + strPos + ", was optimized by " + optName
+    println(message)
 }
 
 public func IsSTDFunction(fn: Function): Bool {
