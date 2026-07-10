@@ -2910,7 +2910,9 @@ class CHIRDeserializerImpl {
     private func ConfigCustomTypeDef(buffer: PackageFormat_CustomTypeDef, obj: CustomTypeDef): Unit {
         ConfigBase(buffer.GetBase().getOrThrow(), obj)
         obj.SetSrcCodeIdentifier(buffer.GetSrcCodeIdentifier().getOrThrow().str())
-        obj.SetType(GetType<CustomType>(buffer.GetType()).getOrThrow())
+        if (let Some(customType) <- GetType<CustomType>(buffer.GetType())) {
+            obj.SetType(customType)
+        }
         if (buffer.GetGenericDecl() != 0u32) {
             obj.SetGenericDecl(GetCustomTypeDef<CustomTypeDef>(buffer.GetGenericDecl()).getOrThrow())
         }
