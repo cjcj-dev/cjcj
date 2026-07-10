@@ -195,8 +195,8 @@ private func ChkCommandTypePattern(typeManager: TypeManager, commandPattern: Com
     for (includedTy in included) {
         if (typeManager.IsSubtype(cmdTypePatTy, includedTy)) {
             if (let Some(diagValue3) <- diag) {
-                let builder3 = diagValue3.DiagnoseRefactor(BasicDiagKindRefactor.sema_useless_command_type,
-                    BasicMakeRange(cmdTypePat.begin, cmdTypePat.end))
+                let builder3 = DiagnoseRefactor(diagValue3, BasicDiagKindRefactor.sema_useless_command_type,
+                    cmdTypePat)
                 builder3.Emit()
             }
             commandPattern.SetTy(cmdTypePatTy)
@@ -304,8 +304,8 @@ private func ValidateBlockInTryHandle(block: Block, diag!: Option<BasicDiagnosti
         }
         if (let Some(_) <- (node as ReturnExpr)) {
             if (let Some(diagValue) <- diag) {
-                let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_return_in_try_handle_block,
-                    BasicMakeRange(node.begin, node.end))
+                let builder = DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_return_in_try_handle_block,
+                    node)
                 builder.Emit()
             }
             return VisitAction.STOP_NOW
