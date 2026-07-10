@@ -19,8 +19,8 @@ private func DiagMismatchedSpawnArg(diag: Option<BasicDiagnosticEngine>, arg: Ex
         return
     }
     if (let Some(diagValue) <- diag) {
-        let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_mismatched_types,
-            BasicMakeRange(arg.begin, arg.end))
+        let builder = DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_mismatched_types,
+            arg)
         builder.AddMainHintArguments([expectedTy.String(), (arg.GetTy() ?? TypeManager.GetInvalidTy()).String()])
         builder.Emit()
     }
