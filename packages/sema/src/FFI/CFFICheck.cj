@@ -58,7 +58,7 @@ private func EmitRefactor(diag: BasicDiagnosticEngine, kind: BasicDiagKindRefact
 
 private func EmitLegacy(diag: BasicDiagnosticEngine, kind: BasicDiagKind, node: Node,
     args!: Array<BasicDiagArgument> = Array<BasicDiagArgument>()): Unit {
-    let builder = diag.Diagnose(node.begin, kind, args: args)
+    let builder = Diagnose(diag, node, kind, args: args)
     builder.Emit()
 }
 

@@ -7,6 +7,7 @@ import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.MakeRange as BasicMakeRange
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::sema.*
+import cjcj::sema.FFI.*
 
 private class BoolBox {
     public var value: Bool
@@ -599,6 +600,7 @@ public func CheckLegalityOfUsage(
     TypeCheckReferenceCheckUsageOfDeprecated(diag, typeManager, pkg)
     AppendInitializationIssues(result.initializationIssues, CheckInitialization(ctx, pkg, opts: opts))
     AppendGlobalIssues(result.globalVarInitializationIssues, CheckGlobalVarInitialization(pkg))
+    CheckLegalityOfUnsafeAndInout(pkg, diag, backendType: opts.backend)
     AppendAccessIssues(result.accessLevelViolations, CheckAccessLevelValidity(pkg))
     CheckAllInvocationHasImpl(ctx, pkg, diag, typeManager)
     AppendSubscriptIssues(result.subscriptLegalityIssues, CheckSubscriptLegality(pkg))
