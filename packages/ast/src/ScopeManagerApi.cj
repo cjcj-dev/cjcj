@@ -92,14 +92,6 @@ public func JoinScopeName(parent: String, child: String): String {
     return parent + SCOPE_SEPARATOR + child
 }
 
-public func MakeDeclScopeName(decl: Decl): String {
-    let name = decl.identifier.GetRawText()
-    if (name.isEmpty()) {
-        return decl.scopeName
-    }
-    return JoinScopeName(decl.scopeName, name)
-}
-
 public func CopyNodeScopeInfo(target: Node, source: Node): Unit {
     target.scopeName = source.scopeName
     target.exportId = source.exportId
