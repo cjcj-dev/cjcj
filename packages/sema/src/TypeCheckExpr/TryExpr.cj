@@ -174,8 +174,8 @@ private func ChkCommandTypePattern(typeManager: TypeManager, commandPattern: Com
     }
     if (let None <- commandTy) {
         if (let Some(diagValue) <- diag) {
-            let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_command_handle_type_error,
-                BasicMakeRange(commandPattern.types[0].begin, commandPattern.types[0].end))
+            let builder = DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_command_handle_type_error,
+                commandPattern.types[0])
             builder.Emit()
         }
         return None
@@ -185,8 +185,8 @@ private func ChkCommandTypePattern(typeManager: TypeManager, commandPattern: Com
     let promotedTys = Promotion(typeManager).Promote(cmdTypePatTy, commandTy.getOrThrow())
     if (cmdTypePatTy.IsNothing() || promotedTys.IsEmpty()) {
         if (let Some(diagValue2) <- diag) {
-            let builder2 = diagValue2.DiagnoseRefactor(BasicDiagKindRefactor.sema_command_handle_type_error,
-                BasicMakeRange(cmdTypePat.begin, cmdTypePat.end))
+            let builder2 = DiagnoseRefactor(diagValue2, BasicDiagKindRefactor.sema_command_handle_type_error,
+                cmdTypePat)
             builder2.Emit()
         }
         commandPattern.SetTy(TypeManager.GetInvalidTy())
