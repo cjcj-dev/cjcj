@@ -88,7 +88,8 @@ public func ChkLitConstExprOfTypeUnit(typeManager: TypeManager, target: Ty, lce:
     return false
 }
 
-public func ChkLitConstExprOfTypeInteger(typeManager: TypeManager, target: Ty, lce: LitConstExpr): Bool {
+public func ChkLitConstExprOfTypeInteger(typeManager: TypeManager, target: Ty, lce: LitConstExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let suffixKind = lce.GetNumLitTypeKind()
     if (suffixKind == TypeKind.TYPE_INVALID) {
         let _ = InvalidLitConstExpr(lce)
@@ -101,7 +102,10 @@ public func ChkLitConstExprOfTypeInteger(typeManager: TypeManager, target: Ty, l
             lce.SetTy(target)
             return true
         }
-        let _ = InvalidLitConstExpr(lce)
+        if (let Some(diagValue) <- diag) {
+            diagValue.Diagnose(lce.begin, BasicDiagKind.sema_cannot_convert_literal,
+                args: [BasicDiagArgument(lce.stringValue), BasicDiagArgument(target.String())]).Emit()
+        }
         return false
     }
     if (IsIntegerLiteralBoxable(typeManager, suffixKind, basicTy, target)) {
@@ -113,6 +117,10 @@ public func ChkLitConstExprOfTypeInteger(typeManager: TypeManager, target: Ty, l
         return true
     }
     if (!target.IsInvalid()) {
+        if (let Some(diagValue2) <- diag) {
+            diagValue2.Diagnose(lce.begin, BasicDiagKind.sema_cannot_convert_literal,
+                args: [BasicDiagArgument("an integer"), BasicDiagArgument(target.String())]).Emit()
+        }
         let _ = InvalidLitConstExpr(lce)
         return false
     }
@@ -120,7 +128,8 @@ public func ChkLitConstExprOfTypeInteger(typeManager: TypeManager, target: Ty, l
     return false
 }
 
-public func ChkLitConstExprOfTypeFloat(typeManager: TypeManager, target: Ty, lce: LitConstExpr): Bool {
+public func ChkLitConstExprOfTypeFloat(typeManager: TypeManager, target: Ty, lce: LitConstExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let suffixKind = lce.GetNumLitTypeKind()
     if (suffixKind == TypeKind.TYPE_INVALID) {
         let _ = InvalidLitConstExpr(lce)
@@ -133,7 +142,10 @@ public func ChkLitConstExprOfTypeFloat(typeManager: TypeManager, target: Ty, lce
             lce.SetTy(target)
             return true
         }
-        let _ = InvalidLitConstExpr(lce)
+        if (let Some(diagValue) <- diag) {
+            diagValue.Diagnose(lce.begin, BasicDiagKind.sema_cannot_convert_literal,
+                args: [BasicDiagArgument(lce.stringValue), BasicDiagArgument(target.String())]).Emit()
+        }
         return false
     }
     if (IsFloatLiteralBoxable(typeManager, suffixKind, basicTy, target)) {
@@ -143,6 +155,10 @@ public func ChkLitConstExprOfTypeFloat(typeManager: TypeManager, target: Ty, lce
     if (target.IsAny() || target.IsCType()) {
         lce.SetTy(GetInnerNumericType(target, basicTy))
         return true
+    }
+    if (let Some(diagValue2) <- diag) {
+        diagValue2.Diagnose(lce.begin, BasicDiagKind.sema_cannot_convert_literal,
+            args: [BasicDiagArgument("a floating-point"), BasicDiagArgument(target.String())]).Emit()
     }
     lce.SetTy(TypeManager.GetNonNullTy(lce.GetTy() ?? TypeManager.GetInvalidTy()))
     return false
@@ -318,9 +334,9 @@ public func ChkLitConstExpr(typeManager: TypeManager, target: Ty, lce: LitConstE
     let isWellTyped = match (lce.kind) {
         case LitConstKind.BOOL => ChkLitConstExprOfTypeBool(typeManager, target, lce)
         case LitConstKind.UNIT => ChkLitConstExprOfTypeUnit(typeManager, target, lce)
-        case LitConstKind.INTEGER => ChkLitConstExprOfTypeInteger(typeManager, target, lce)
-        case LitConstKind.RUNE_BYTE => ChkLitConstExprOfTypeInteger(typeManager, target, lce)
-        case LitConstKind.FLOAT => ChkLitConstExprOfTypeFloat(typeManager, target, lce)
+        case LitConstKind.INTEGER => ChkLitConstExprOfTypeInteger(typeManager, target, lce, diag: diag)
+        case LitConstKind.RUNE_BYTE => ChkLitConstExprOfTypeInteger(typeManager, target, lce, diag: diag)
+        case LitConstKind.FLOAT => ChkLitConstExprOfTypeFloat(typeManager, target, lce, diag: diag)
         case LitConstKind.RUNE => ChkLitConstExprOfTypeChar(typeManager, target, lce)
         case LitConstKind.STRING => ChkLitConstExprOfTypeString(typeManager, target, lce, stringTy: stringTy,
             toStringTy: toStringTy, ctx: ctx, synthesizer: synthesizer, checker: checker, diag: diag)
