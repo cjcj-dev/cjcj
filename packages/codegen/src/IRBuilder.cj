@@ -220,6 +220,35 @@ private func IsReflectIntrinsicFunctionName(name: String): Bool {
         name == "CJ_MCC_NewAndInitEnumTupleObject"
 }
 
+private class ByteArrayInfo {
+    public let arrPtr: LLVMValueRef
+    public let arrType: LLVMTypeRef
+    public let dataSize: LLVMValueRef
+    public let index: LLVMValueRef
+
+    public init(arrPtr: LLVMValueRef, arrType: LLVMTypeRef, dataSize: LLVMValueRef, index: LLVMValueRef) {
+        this.arrPtr = arrPtr
+        this.arrType = arrType
+        this.dataSize = dataSize
+        this.index = index
+    }
+}
+
+private func CreateArrayMemSet(irBuilder: IRBuilder2, arrInfo: ByteArrayInfo, value: LLVMValueRef): Unit {
+    let valueType = unsafe { LLVMTypeOf(value) }
+    let isInputValid = irBuilder.GetCGModule().GetTypeSize(valueType) == 1u64
+    CJC_ASSERT(isInputValid)
+    let memSetValue = if (unsafe { LLVMGetTypeKind(valueType) } == LLVM_INTEGER_TYPE_KIND &&
+        unsafe { LLVMGetIntTypeWidth(valueType) } == 8u32) {
+        value
+    } else {
+        irBuilder.CreateZExt(value, unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) })
+    }
+    let dataPtr = irBuilder.CreateGEP(arrInfo.arrType, arrInfo.arrPtr, ArrayList<LLVMValueRef>(
+        [irBuilder.GetInt32(0), irBuilder.GetInt32(1), arrInfo.index]))
+    let _ = irBuilder.CreateMemSet(dataPtr, memSetValue, arrInfo.dataSize, align: 1u32)
+}
+
 public class IRBuilder2 <: Resource {
     private let cgMod: CGModule
     private let builder: LLVMBuilderHandle
