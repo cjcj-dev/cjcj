@@ -151,7 +151,7 @@ extend MacroEvaluation {
         }
     }
 
-    @When[os == "macOS" && backend == "cjnative"]
+    @When[(os == "macOS" || os == "iOS") && backend == "cjnative"]
     public func RunMacroSrv(): Unit {
         useChildProcess = false
         let initArgs = ArrayList<(String, String)>()
@@ -173,7 +173,7 @@ extend MacroEvaluation {
         }
     }
 
-    @When[os == "macOS" && backend != "cjnative"]
+    @When[(os == "macOS" || os == "iOS") && backend != "cjnative"]
     public func RunMacroSrv(): Unit {
         useChildProcess = false
         let msger = MacroProcMsger.GetInstance()
