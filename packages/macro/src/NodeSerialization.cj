@@ -6,7 +6,7 @@ import cjcj::ast.{
     TypeAliasDecl
 }
 import cjcj::basic.Errorln
-import cjcj::modules.{FlatBufferBuilder, FlatBufferOffset}
+import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
 import std.collection.*
 
 public let INITIAL_FILE_SIZE: Int64 = 65536

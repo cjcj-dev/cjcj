@@ -5,7 +5,8 @@ import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.{CANGJIE_VERSION, DiagKindRefactor, MakeRange}
 import cjcj::basic.Linkage
 import cjcj::mangle.BaseMangler as RealBaseMangler
-import cjcj::modules.{FlatBufferBuilder, FlatBufferOffset, SemaCjoManager}
+import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
+import cjcj::modules.SemaCjoManager
 import cjcj::option.OptimizationLevel
 import cjcj::sema.TypeManager as FaithfulSemaTypeManager
 import cjcj::utils.FileUtil

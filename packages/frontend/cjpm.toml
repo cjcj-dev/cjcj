@@ -19,6 +19,7 @@
   "cjcj::chir" = { path = "../chir" }
   "cjcj::codegen" = { path = "../codegen" }
   "cjcj::conditional_compilation" = { path = "../conditional_compilation" }
+  "cjcj::flatbuffers" = { path = "../flatbuffers" }
   "cjcj::lex" = { path = "../lex" }
   "cjcj::macro_pkg" = { path = "../macro" }
   "cjcj::mangle" = { path = "../mangle" }

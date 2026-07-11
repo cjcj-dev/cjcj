@@ -1,7 +1,7 @@
 package cjcj::macro_pkg
 
 import std.collection.*
-import cjcj::modules.{FlatBufferBuilder, FlatBufferOffset}
+import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
 
 // Generated from schema/NodeFormat.fbs and NodeFormat_generated.h for Macro/NodeSerialization.cpp.
 

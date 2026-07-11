@@ -1,5 +1,7 @@
 package cjcj::modules
 
+import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
+
 import std.collection.*
 import std.convert.*
 import cjcj::ast.Annotation as ASTAnnotation

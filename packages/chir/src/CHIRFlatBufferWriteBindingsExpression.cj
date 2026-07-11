@@ -1,7 +1,7 @@
 package cjcj::chir
 
 import std.collection.*
-import cjcj::modules.{FlatBufferBuilder, FlatBufferOffset}
+import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
 
 class ExpressionBuilder {
     private let builder: FlatBufferBuilder

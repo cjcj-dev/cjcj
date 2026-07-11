@@ -1,4 +1,4 @@
-package cjcj::modules
+package cjcj::flatbuffers
 
 import std.collection.*
 
@@ -8,6 +8,7 @@ private class FlatBufferTableState {
     public let fieldLocations: ArrayList<Int64> = ArrayList<Int64>()
     public let objectStart: Int64
 
+    // flatbuffer_builder.h:325-329,409-413,1285-1288 (FieldLoc/TrackField/table start state).
     public init(fieldCount: Int64, objectStart: Int64) {
         this.objectStart = objectStart
         for (_ in 0..fieldCount) {
@@ -18,25 +19,41 @@ private class FlatBufferTableState {
 
 public class FlatBufferBuilder {
     private let buffer: ArrayList<UInt8> = ArrayList<UInt8>()
-    private let stringPool: HashMap<String, FlatBufferOffset> = HashMap<String, FlatBufferOffset>()
+    private var stringPool: Option<HashMap<String, FlatBufferOffset>> = None
     private let vtableOffsets: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private var minAlign: Int64 = 1
     private var currentTable: Option<FlatBufferTableState> = None
+    private var finished: Bool = false
 
+    // flatbuffer_builder.h:84-112 (FlatBufferBuilderImpl constructor state).
     public init() {}
 
+    // flatbuffer_builder.h:166-176 (Clear).
     public func Clear(): Unit {
         buffer.clear()
-        stringPool.clear()
+        if (let Some(pool) <- stringPool) {
+            pool.clear()
+        }
         vtableOffsets.clear()
         minAlign = 1
         currentTable = None
+        finished = false
     }
 
-    public func Size(): Int64 {
+    // flatbuffer_builder.h:178-180 (GetSize).
+    public func GetSize(): Int64 {
         return buffer.size
     }
 
+    // flatbuffer_builder.h:205-211 (GetBufferPointer); Array is the Cangjie byte-buffer carrier.
+    public func GetBufferPointer(): Array<UInt8> {
+        if (!finished) {
+            throw IllegalStateException("flatbuffer is not finished")
+        }
+        return buffer.toArray()
+    }
+
+    // flatbuffer_builder.h:530-563,1375-1385 (CreateString/CreateStringImpl).
     public func CreateString(value: String): FlatBufferOffset {
         let bytes = value.toArray()
         StartVector(1, bytes.size + 1, 1)
@@ -50,17 +67,23 @@ public class FlatBufferBuilder {
         return UInt32(buffer.size)
     }
 
+    // flatbuffer_builder.h:597-624,626-656 (CreateSharedString overloads).
     public func CreateSharedString(value: String): FlatBufferOffset {
+        if (let None <- stringPool) {
+            stringPool = Some(HashMap<String, FlatBufferOffset>())
+        }
+        let pool = stringPool.getOrThrow()
         let sizeBeforeString = buffer.size
         let offset = CreateString(value)
-        if (stringPool.contains(value)) {
+        if (pool.contains(value)) {
             PopBytes(buffer.size - sizeBeforeString)
-            return stringPool[value]
+            return pool[value]
         }
-        stringPool[value] = offset
+        pool[value] = offset
         return offset
     }
 
+    // flatbuffer_builder.h:785-800 (CreateVector for Offset<T> and std::vector).
     public func CreateVectorOffsets(values: ArrayList<FlatBufferOffset>): FlatBufferOffset {
         StartVector(4, values.size, 4)
         var idx = values.size - 1
@@ -72,6 +95,7 @@ public class FlatBufferBuilder {
         return UInt32(buffer.size)
     }
 
+    // flatbuffer_builder.h:855-897 (CreateVectorOfStrings).
     public func CreateVectorOfStrings(values: ArrayList<String>): FlatBufferOffset {
         let offsets = ArrayList<FlatBufferOffset>()
         for (value in values) {
@@ -80,6 +104,7 @@ public class FlatBufferBuilder {
         return CreateVectorOffsets(offsets)
     }
 
+    // flatbuffer_builder.h:900-918 (CreateVectorOfStructs).
     public func CreateVectorOfStructs(values: ArrayList<ArrayList<UInt8>>, elementSize!: Int64, alignment!: Int64):
         FlatBufferOffset {
         StartVector(elementSize, values.size, alignment)
@@ -97,6 +122,7 @@ public class FlatBufferBuilder {
         return UInt32(buffer.size)
     }
 
+    // flatbuffer_builder.h:727-761,798-800 (CreateVector scalar overload).
     public func CreateVectorU32(values: ArrayList<UInt32>): FlatBufferOffset {
         StartVector(4, values.size, 4)
         var idx = values.size - 1
@@ -108,6 +134,7 @@ public class FlatBufferBuilder {
         return UInt32(buffer.size)
     }
 
+    // flatbuffer_builder.h:727-761,798-800 (CreateVector scalar overload).
     public func CreateVectorU8(values: ArrayList<UInt8>): FlatBufferOffset {
         StartVector(1, values.size, 1)
         var idx = values.size - 1
@@ -119,6 +146,7 @@ public class FlatBufferBuilder {
         return UInt32(buffer.size)
     }
 
+    // flatbuffer_builder.h:727-761,798-800 (CreateVector<int32_t> scalar overload).
     public func CreateVectorI32(values: ArrayList<Int64>): FlatBufferOffset {
         StartVector(4, values.size, 4)
         var idx = values.size - 1
@@ -130,6 +158,7 @@ public class FlatBufferBuilder {
         return UInt32(buffer.size)
     }
 
+    // flatbuffer_builder.h:809-817 (CreateVector(std::vector<bool>)).
     public func CreateVectorBool(values: ArrayList<Bool>): FlatBufferOffset {
         StartVector(1, values.size, 1)
         var idx = values.size - 1
@@ -141,6 +170,7 @@ public class FlatBufferBuilder {
         return UInt32(buffer.size)
     }
 
+    // flatbuffer_builder.h:727-761,798-800 (CreateVector scalar overload).
     public func CreateVectorU64(values: ArrayList<UInt64>): FlatBufferOffset {
         StartVector(8, values.size, 8)
         var idx = values.size - 1
@@ -152,6 +182,7 @@ public class FlatBufferBuilder {
         return UInt32(buffer.size)
     }
 
+    // flatbuffer_builder.h:407-413 (StartTable); fieldCount sizes the generated binding's slots.
     public func StartTable(fieldCount: Int64): Unit {
         if (currentTable.isSome()) {
             throw IllegalArgumentException("flatbuffer table already started")
@@ -159,6 +190,7 @@ public class FlatBufferBuilder {
         currentTable = Some(FlatBufferTableState(fieldCount, buffer.size))
     }
 
+    // flatbuffer_builder.h:343-346 (AddOffset).
     public func AddOffset(field: Int64, value: FlatBufferOffset): Unit {
         if (value == 0u32) {
             return
@@ -167,6 +199,7 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    // flatbuffer_builder.h:332-337 (AddElement<uint8_t>).
     public func AddU8(field: Int64, value: UInt8, defaultValue!: UInt8 = 0u8): Unit {
         if (value == defaultValue) {
             return
@@ -175,10 +208,12 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    // flatbuffer_builder.h:332-337 (AddElement<bool>).
     public func AddU8(field: Int64, value: Bool, defaultValue!: Bool = false): Unit {
         AddBool(field, value, defaultValue: defaultValue)
     }
 
+    // flatbuffer_builder.h:332-337 (AddElement<bool>).
     public func AddBool(field: Int64, value: Bool, defaultValue!: Bool = false): Unit {
         if (value == defaultValue) {
             return
@@ -187,6 +222,7 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    // flatbuffer_builder.h:332-337 (AddElement<uint16_t>).
     public func AddU16(field: Int64, value: UInt16, defaultValue!: UInt16 = 0u16): Unit {
         if (value == defaultValue) {
             return
@@ -195,6 +231,7 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    // flatbuffer_builder.h:332-337 (AddElement<uint32_t>).
     public func AddU32(field: Int64, value: UInt32, defaultValue!: UInt32 = 0u32): Unit {
         if (value == defaultValue) {
             return
@@ -203,6 +240,7 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    // flatbuffer_builder.h:332-337 (AddElement<uint64_t>).
     public func AddU64(field: Int64, value: UInt64, defaultValue!: UInt64 = 0u64): Unit {
         if (value == defaultValue) {
             return
@@ -211,6 +249,7 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    // flatbuffer_builder.h:332-337 (AddElement<int16_t>).
     public func AddI16(field: Int64, value: Int16, defaultValue!: Int16 = 0i16): Unit {
         if (value == defaultValue) {
             return
@@ -219,6 +258,7 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    // flatbuffer_builder.h:332-337 (AddElement<int32_t>).
     public func AddI32(field: Int64, value: Int64, defaultValue!: Int64 = 0): Unit {
         if (value == defaultValue) {
             return
@@ -227,6 +267,7 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    // flatbuffer_builder.h:332-337 (AddElement<int64_t>).
     public func AddI64(field: Int64, value: Int64, defaultValue!: Int64 = 0): Unit {
         if (value == defaultValue) {
             return
@@ -235,6 +276,7 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    // flatbuffer_builder.h:332-337 (AddElement<int8_t>).
     public func AddI8(field: Int64, value: Int64, defaultValue!: Int64 = 0): Unit {
         if (value == defaultValue) {
             return
@@ -243,6 +285,7 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    // flatbuffer_builder.h:332-337 (AddElement<double>).
     public func AddFloat64(field: Int64, value: Float64, defaultValue!: Float64 = 0.0): Unit {
         if (value == defaultValue) {
             return
@@ -251,6 +294,7 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    // flatbuffer_builder.h:353-358 (AddStruct).
     public func AddStruct(field: Int64, bytes: ArrayList<UInt8>, alignment: Int64): Unit {
         if (bytes.isEmpty()) {
             return
@@ -264,6 +308,7 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    // flatbuffer_builder.h:415-483 (EndTable, including vtable construction/dedup/backpatch).
     public func EndTable(): FlatBufferOffset {
         if (let None <- currentTable) {
             throw IllegalArgumentException("flatbuffer table not started")
@@ -313,7 +358,9 @@ public class FlatBufferBuilder {
         return UInt32(tableOffset)
     }
 
+    // flatbuffer_builder.h:1224-1229,1258-1282 (Finish with four-byte identifier).
     public func Finish(root: FlatBufferOffset, fileIdentifier: String): Array<UInt8> {
+        CheckFinishState()
         if (fileIdentifier.size != 4) {
             throw IllegalArgumentException("flatbuffer file identifier must be 4 bytes")
         }
@@ -325,20 +372,39 @@ public class FlatBufferBuilder {
             idx--
         }
         PrependUOffset(root)
+        finished = true
         return buffer.toArray()
     }
 
+    // flatbuffer_builder.h:1224-1229,1258-1282 (Finish without identifier).
     public func Finish(root: FlatBufferOffset): Array<UInt8> {
+        CheckFinishState()
         Prep(minAlign, 4)
         PrependUOffset(root)
+        finished = true
         return buffer.toArray()
     }
 
+    // flatbuffer_builder.h:676-684 (StartVector).
     private func StartVector(elementSize: Int64, elementCount: Int64, alignment: Int64): Unit {
+        if (currentTable.isSome()) {
+            throw IllegalStateException("flatbuffer object is nested")
+        }
         Prep(4, elementSize * elementCount)
         Prep(alignment, elementSize * elementCount)
     }
 
+    // flatbuffer_builder.h:393-405,1258-1263 (NotNested and one-shot Finish checks).
+    private func CheckFinishState(): Unit {
+        if (finished) {
+            throw IllegalStateException("flatbuffer is already finished")
+        }
+        if (currentTable.isSome()) {
+            throw IllegalStateException("flatbuffer object is nested")
+        }
+    }
+
+    // flatbuffer_builder.h:453-468 (vt size check and memcmp during vtable dedup).
     private func VTableEquals(vtable: ArrayList<UInt8>, vtableOffset: FlatBufferOffset): Bool {
         let start = buffer.size - Int64(vtableOffset)
         if (start < 0 || start + vtable.size > buffer.size) {
@@ -354,12 +420,14 @@ public class FlatBufferBuilder {
         return true
     }
 
+    // flatbuffer_builder.h:301 (PopBytes) and vector_downward.h:204-207 (pop).
     private func PopBytes(amount: Int64): Unit {
         for (_ in 0..amount) {
             buffer.remove(at: 0)
         }
     }
 
+    // flatbuffer_builder.h:325-341 (TrackField/AddElement field-location recording).
     private func Slot(field: Int64): Unit {
         let state = currentTable.getOrThrow()
         if (field < 0 || field >= state.fieldLocations.size) {
@@ -368,6 +436,7 @@ public class FlatBufferBuilder {
         state.fieldLocations[field] = buffer.size
     }
 
+    // flatbuffer_builder.h:285-291,514-520 and base.h:458-461 (alignment/padding).
     private func Prep(alignment: Int64, additionalBytes: Int64): Unit {
         if (alignment > minAlign) {
             minAlign = alignment
@@ -379,58 +448,69 @@ public class FlatBufferBuilder {
         }
     }
 
+    // flatbuffer_builder.h:317-321,364-390 (PushElement(Offset)/ReferTo).
     private func PrependUOffset(target: FlatBufferOffset): Unit {
         Prep(4, 0)
         let value = UInt32(buffer.size - Int64(target) + 4)
         PrependU32Raw(value)
     }
 
+    // flatbuffer_builder.h:308-315 (PushElement<uint8_t>).
     private func PrependU8(value: UInt8): Unit {
         Prep(1, 0)
         PrependRawByte(value)
     }
 
+    // flatbuffer_builder.h:308-315 (PushElement<uint16_t>).
     private func PrependU16(value: UInt16): Unit {
         Prep(2, 0)
         PrependU16Raw(value)
     }
 
     @OverflowWrapping
+    // flatbuffer_builder.h:308-315 (PushElement<int16_t>).
     private func PrependI16(value: Int16): Unit {
         Prep(2, 0)
         PrependU16Raw(UInt16(value))
     }
 
+    // flatbuffer_builder.h:308-315 (PushElement<uint32_t>).
     private func PrependU32(value: UInt32): Unit {
         Prep(4, 0)
         PrependU32Raw(value)
     }
 
+    // flatbuffer_builder.h:308-315 (PushElement<int32_t>).
     private func PrependI32(value: Int64): Unit {
         Prep(4, 0)
         PrependI32Raw(value)
     }
 
+    // flatbuffer_builder.h:308-315 (PushElement<int64_t>).
     private func PrependI64(value: Int64): Unit {
         Prep(8, 0)
         PrependI64Raw(value)
     }
 
+    // flatbuffer_builder.h:308-315 (PushElement<uint64_t>).
     private func PrependU64(value: UInt64): Unit {
         Prep(8, 0)
         PrependU64Raw(value)
     }
 
+    // flatbuffer_builder.h:308-315 plus base.h:416-422 (PushElement<double>/EndianScalar).
     private func PrependFloat64(value: Float64): Unit {
         Prep(8, 0)
         PrependU64Raw(value.toBits())
     }
 
+    // base.h:416-422,441-444 (EndianScalar/WriteScalar<uint16_t>).
     private func PrependU16Raw(value: UInt16): Unit {
         PrependRawByte(UInt8((value >> 8) & 0xffu16))
         PrependRawByte(UInt8(value & 0xffu16))
     }
 
+    // base.h:416-422,441-444 (EndianScalar/WriteScalar<uint32_t>).
     private func PrependU32Raw(value: UInt32): Unit {
         PrependRawByte(UInt8((value >> 24) & 0xffu32))
         PrependRawByte(UInt8((value >> 16) & 0xffu32))
@@ -438,6 +518,7 @@ public class FlatBufferBuilder {
         PrependRawByte(UInt8(value & 0xffu32))
     }
 
+    // base.h:416-422,441-444 (EndianScalar/WriteScalar<uint64_t>).
     private func PrependU64Raw(value: UInt64): Unit {
         PrependRawByte(UInt8((value >> 56) & 0xffu64))
         PrependRawByte(UInt8((value >> 48) & 0xffu64))
@@ -450,20 +531,24 @@ public class FlatBufferBuilder {
     }
 
     @OverflowWrapping
+    // base.h:416-422,441-444 (EndianScalar/WriteScalar<int32_t>).
     private func PrependI32Raw(value: Int64): Unit {
         PrependU32Raw(UInt32(Int32(value)))
     }
 
     @OverflowWrapping
+    // base.h:416-422,441-444 (EndianScalar/WriteScalar<int64_t>).
     private func PrependI64Raw(value: Int64): Unit {
         PrependU64Raw(UInt64(value))
     }
 
+    // vector_downward.h:185-189 (push_small into downward-growing buffer).
     private func PrependRawByte(value: UInt8): Unit {
         buffer.add(value, at: 0)
     }
 
     @OverflowWrapping
+    // flatbuffer_builder.h:474-481 and base.h:441-444 (vtable soffset backpatch).
     private func PatchI32(pos: Int64, value: Int32): Unit {
         let bits = UInt32(value)
         buffer[pos] = UInt8(bits & 0xffu32)
@@ -473,6 +558,7 @@ public class FlatBufferBuilder {
     }
 }
 
+// flatbuffer_builder.h:426-450 and base.h:441-444 (vtable voffset_t writes).
 private func AppendU16(out: ArrayList<UInt8>, value: UInt16): Unit {
     out.add(UInt8(value & 0xffu16))
     out.add(UInt8((value >> 8) & 0xffu16))

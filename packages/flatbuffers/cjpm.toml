@@ -2,7 +2,7 @@
   cjc-version = "1.1.0"
   name = "flatbuffers"
   organization = "cjcj"
-  description = "Self-hosted FlatBuffers read runtime"
+  description = "Self-hosted FlatBuffers read/write runtime"
   version = "0.1.0"
   target-dir = ""
   script-dir = ""

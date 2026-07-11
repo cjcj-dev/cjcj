@@ -5,7 +5,7 @@ import std.reflect.TypeInfo
 import std.fs.File
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::basic.LinkageToInt
-import cjcj::modules.{FlatBufferBuilder, FlatBufferOffset}
+import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 import cjcj::utils.OverflowStrategyIndex
 
