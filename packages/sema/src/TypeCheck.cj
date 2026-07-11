@@ -125,7 +125,7 @@ private func findImportedPackageDecl(
         result.conflicted = conflicted
         if (conflicted) {
             if (let Some(diagValue) <- diag) {
-                diagValue.Diagnose(qt.begin, qt.end, BasicDiagKind.sema_package_name_conflict,
+                Diagnose(diagValue, qt, BasicDiagKind.sema_package_name_conflict,
                     args: [BasicDiagArgument(packageName)]).Emit()
             }
         }
