@@ -47,7 +47,7 @@ private func TypeCheckTypeCheckAccessLegality(
     if (IsLegalAccess(tm, None, target, typeNode)) {
         return true
     }
-    let builder = diag.Diagnose(typeNode.begin, typeNode.end,
+    let builder = Diagnose(diag, typeNode,
         BasicDiagKind.sema_invalid_access_control,
         args: [BasicDiagArgument(target.identifier.Val())])
     builder.Emit()
