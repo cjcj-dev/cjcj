@@ -1210,7 +1210,8 @@ public class Translator {
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         let binaryKind = ToCHIRBinaryOp(expr.op)
         let mayHaveException = OverloadableExprMayThrowException(expr, resultTy)
-        let loc = if (RequireAstTy(leftExpr).IsNothing()) {
+        let loc = TranslateLocation(expr)
+        let locForWarning = if (RequireAstTy(leftExpr).IsNothing()) {
             TranslateLocation(rightExpr)
         } else {
             GetOperatorLoc(expr)
@@ -1226,6 +1227,7 @@ public class Translator {
                 targetBlock, CurrentBlock())
             binary.SetOverflowStrategy(expr.overflowStrategy)
             binary.SetDebugLocation(loc)
+            binary.SetDebugLocationInfoForWarning(locForWarning)
             let result = RequireResult(binary)
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return result
@@ -1233,11 +1235,13 @@ public class Translator {
         let binary = builder.CreateBinaryExpression(binaryKind, resultTy, lhs, rhs, CurrentBlock(),
             overflowStrategy: expr.overflowStrategy)
         binary.SetDebugLocation(loc)
+        binary.SetDebugLocationInfoForWarning(locForWarning)
         return RequireResult(binary)
     }
 
     public func Visit(expr: AstUnaryExpr): Option<Value> {
-        let operand = Translator.TranslateASTNode(RequireExpr(expr.expr, "unary operand"), this) ??
+        let operandExpr = RequireExpr(expr.expr, "unary operand")
+        let operand = Translator.TranslateASTNode(operandExpr, this) ??
             throw IllegalStateException("faithful AST2CHIR unary operand produced no value")
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         let kind = if (expr.op == AstTokenKind.NOT) {
@@ -1245,8 +1249,29 @@ public class Translator {
         } else {
             ToCHIRUnaryOp(expr.op)
         }
+        let mayHaveException = OverloadableExprMayThrowException(expr, resultTy)
+        let loc = TranslateLocation(expr)
+        let locForWarning = GetOperatorLoc(expr)
+        if (let Some(errorBlock) <- CurrentTryCatchBlock() && mayHaveException) {
+            let successBlock = CreateBlock()
+            let exceptionBlock = DelayExitExceptionBlock(errorBlock)
+            let targetBlock = match (exceptionBlock) {
+                case Some(exceptBlock) => exceptBlock
+                case None => errorBlock
+            }
+            let unary = builder.CreateUnaryIntOpWithException(resultTy, kind, operand, successBlock,
+                targetBlock, CurrentBlock())
+            unary.SetOverflowStrategy(expr.overflowStrategy)
+            unary.SetDebugLocation(loc)
+            unary.SetDebugLocationInfoForWarning(locForWarning)
+            let result = RequireResult(unary)
+            FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
+            return result
+        }
         let unary = builder.CreateUnaryExpression(kind, resultTy, operand, CurrentBlock(),
             overflowStrategy: expr.overflowStrategy)
+        unary.SetDebugLocation(loc)
+        unary.SetDebugLocationInfoForWarning(locForWarning)
         return RequireResult(unary)
     }
 
@@ -8154,6 +8179,15 @@ public class Translator {
     }
 
     private func GetOperatorLoc(expr: AstBinaryExpr): DebugLocation {
+        let begin = if (expr.operatorPos.line == 0 && expr.operatorPos.column == 0) {
+            expr.begin
+        } else {
+            expr.operatorPos
+        }
+        return TranslateLocation(begin, begin + AstTokenKindLiteral(expr.op).size)
+    }
+
+    private func GetOperatorLoc(expr: AstUnaryExpr): DebugLocation {
         let begin = if (expr.operatorPos.line == 0 && expr.operatorPos.column == 0) {
             expr.begin
         } else {

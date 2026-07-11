@@ -837,7 +837,8 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
             return ConstExceptionKind.SUCCESS
         }
         if (isStable) {
-            let _ = diag.DiagnoseRefactor(DiagKindRefactor.chir_step_non_zero_range, ToRange(apply.GetDebugLocation()))
+            diag.DiagnoseRefactor(DiagKindRefactor.chir_step_non_zero_range,
+                ToRange(apply.GetDebugLocation())).Emit()
             return ConstExceptionKind.FAIL
         }
         return ConstExceptionKind.NA
@@ -907,6 +908,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
                 let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_idx_out_of_bounds,
                     ToRange(expr.GetDebugLocation()))
                 builder.AddMainHintArguments("array index can not be negative")
+                builder.Emit()
             }
             return ConstExceptionKind.FAIL
         } else if (UInt64(index) >= len) {
@@ -916,6 +918,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
                 let hint = "array index " + index.toString() + " is past the end of array (which contains " +
                     len.toString() + " elements)"
                 builder.AddMainHintArguments(hint)
+                builder.Emit()
             }
             return ConstExceptionKind.FAIL
         }
@@ -928,6 +931,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
             let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_divisor_is_zero,
                 ToRange(expr.GetDebugLocation()), prompt)
             builder.AddMainHintArguments(prompt)
+            builder.Emit()
         }
     }
 
@@ -938,6 +942,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
             let tyText = expr.GetResult().getOrThrow().GetType().getOrThrow().ToString()
             builder.AddMainHintArguments("-" + tyText + "(" + value.ToString() + ")")
             builder.AddNote(GenerateTypeRangePrompt(expr.GetResult().getOrThrow().GetType().getOrThrow()))
+            builder.Emit()
         }
     }
 
@@ -952,6 +957,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
                 GetRHSOperand(expr).GetType().getOrThrow().ToString() + "(" + rightVal.ToString() + ")"
             builder.AddMainHintArguments(hint)
             builder.AddNote(GenerateTypeRangePrompt(expr.GetResult().getOrThrow().GetType().getOrThrow()))
+            builder.Emit()
         }
     }
 
@@ -961,6 +967,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
                 ToRange(expr.GetDebugLocation()))
             builder.AddMainHintArguments(rightVal.toString(), GetLHSOperand(expr).GetType().getOrThrow().ToString())
             builder.AddNote("right operand can not be negative")
+            builder.Emit()
         }
     }
 
@@ -972,6 +979,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
             builder.AddMainHintArguments(rightVal.toString(), lhsTyString)
             builder.AddNote("the type of left operand is " + lhsTyString +
                 ", the most bits that expected to shift are " + (leftValBit - 1u64).toString())
+            builder.Emit()
         }
     }
 
@@ -987,6 +995,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
             let srcValStr = sourceTy.ToString() + "(" + srcVal + ")"
             builder.AddMainHintArguments(srcValStr, targetTy.ToString())
             builder.AddNote(GenerateTypeRangePrompt(targetTy))
+            builder.Emit()
         }
     }
 }
