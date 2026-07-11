@@ -235,6 +235,11 @@ extend ParserImpl {
         } else {
             parsedDecl = ParseDecl(scopeKind, modifiers, ArrayList<Annotation>())
         }
+        if (let Some(ctor) <- (parsedDecl as FuncDecl)) {
+            if (ctor.TestAttr(Attribute.CONSTRUCTOR)) {
+                CheckConstructorBody(ctor, scopeKind, inMacro: true)
+            }
+        }
         lexer.StopCollectTokens(collectStarted)
         if (IsValidMacroInputDeclKind(parsedDecl.astKind)) {
             ParseNodeToTokens(parsedDecl, beginToken, invocation.args)

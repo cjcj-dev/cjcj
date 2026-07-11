@@ -2820,7 +2820,10 @@ public class TypeChecker {
         fb.SetTy(funcTy)
         funcDecl.SetTy(funcTy)
         fb.retType.getOrThrow().SetTy(ctorTy)
-        let _ = SynthesizeBlock(ctx, SynPos.UNUSED, fb.body.getOrThrow())
+        let _ = match (fb.body) {
+            case Some(body) => SynthesizeBlock(ctx, SynPos.UNUSED, body)
+            case None => TypeManager.GetInvalidTy()
+        }
     }
 
     private func UnsafeCheck(fb: FuncBody): Unit {

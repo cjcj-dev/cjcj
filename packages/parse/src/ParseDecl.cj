@@ -5,7 +5,7 @@ import cjcj::ast.Node
 import cjcj::ast.SortModifierByPos
 import cjcj::ast.VisitAction
 import cjcj::ast.Walker
-import cjcj::utils.FileUtil
+import cjcj::utils.{CJC_ASSERT, FileUtil}
 import std.collection.*
 
 extend ParserImpl {
@@ -821,6 +821,41 @@ extend ParserImpl {
             }
         }
         CheckVariableParams(decl)
+    }
+
+    private func CheckInitCtorDeclBody(ctor: FuncDecl): Unit {
+        let missingBody = match (ctor.funcBody) {
+            case Some(funcBody) => funcBody.body.isNone()
+            case None => true
+        }
+        if (missingBody &&
+            !ctor.TestAnyAttr(Attribute.COMMON, Attribute.JAVA_MIRROR, Attribute.OBJ_C_MIRROR)) {
+            DiagMissingBody("constructor", "", ctor.end)
+            if (!parseDeclFile) {
+                ctor.EnableAttr(Attribute.HAS_BROKEN)
+            }
+        }
+    }
+
+    func CheckConstructorBody(ctor: FuncDecl, scopeKind: ScopeKind, inMacro!: Bool = false): Unit {
+        CJC_ASSERT(ctor.TestAttr(Attribute.CONSTRUCTOR))
+        if (let Some(funcBody) <- ctor.funcBody) {
+            if (let Some(retType) <- funcBody.retType) {
+                ParseDiagnoseRefactor(
+                    DiagKindRefactor.parse_invalid_return_type, retType, "constructor").Emit()
+                ctor.EnableAttr(Attribute.HAS_BROKEN)
+            }
+        }
+        let isInClassLike = ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) ||
+            ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)
+        let missingBody = match (ctor.funcBody) {
+            case Some(funcBody) => funcBody.body.isNone()
+            case None => true
+        }
+        if ((!isInClassLike || inMacro) && missingBody && !ctor.TestAttr(Attribute.COMMON)) {
+            DiagMissingBody("constructor", "", ctor.end)
+            ctor.EnableAttr(Attribute.HAS_BROKEN)
+        }
     }
 
     private func CanBeAbstract(decl: Decl, scopeKind: ScopeKind): Bool {
@@ -1660,6 +1695,24 @@ extend ParserImpl {
         SetDeclBodyLeftCurl(ret, leftCurl)
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
             let member = ParseDecl(scopeKind)
+            if (let Some(ctor) <- (member as FuncDecl)) {
+                if (ctor.TestAttr(Attribute.CONSTRUCTOR)) {
+                    if (let Some(classDecl) <- (ret as ClassDecl)) {
+                        if (classDecl.TestAttr(Attribute.JAVA_MIRROR)) {
+                            ctor.EnableAttr(Attribute.JAVA_MIRROR)
+                        }
+                        if (classDecl.TestAttr(Attribute.OBJ_C_MIRROR)) {
+                            ctor.EnableAttr(Attribute.OBJ_C_MIRROR)
+                        }
+                        CheckInitCtorDeclBody(ctor)
+                    } else if (let Some(structDecl) <- (ret as StructDecl)) {
+                        if (structDecl.TestAttr(Attribute.JAVA_MIRROR)) {
+                            ctor.EnableAttr(Attribute.JAVA_MIRROR)
+                        }
+                        CheckInitCtorDeclBody(ctor)
+                    }
+                }
+            }
             if (!member.IsInvalid()) {
                 member.outerDecl = ret
                 AddBodyMember(ret, member)
@@ -1986,6 +2039,7 @@ extend ParserImpl {
             if (let Some(body) <- ret.funcBody) { ret.end = body.end }
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.CONSTRUCTOR))
         }
+        CheckConstructorBody(ret, scopeKind)
         return ret
     }
 
