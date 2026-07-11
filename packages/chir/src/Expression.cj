@@ -847,6 +847,10 @@ public class Apply <: FuncCall {
         return GetOperand(0)
     }
 
+    public func GetInstParentCustomTyOfCallee(builder: CHIRBuilder): Option<Type> {
+        return GetInstParentCustomTypeForApplyCallee(this, builder)
+    }
+
     public override func GetArgs(): ArrayList<Value> {
         let out = ArrayList<Value>()
         var idx: Int64 = 1

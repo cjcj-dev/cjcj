@@ -502,6 +502,14 @@ public func GetInstParentCustomTyOfCallee(value: Value, args: ArrayList<Value>, 
     return Some(GetInstParentType(matchedTypes, callee, args, builder))
 }
 
+public func GetInstParentCustomTypeForApplyCallee(expr: Apply, builder: CHIRBuilder): Option<Type> {
+    return GetInstParentCustomTyOfCallee(expr.GetCallee(), expr.GetArgs(), expr.GetThisType(), builder)
+}
+
+public func GetInstParentCustomTypeForAweCallee(expr: ApplyWithException, builder: CHIRBuilder): Option<Type> {
+    return GetInstParentCustomTyOfCallee(expr.GetCallee(), expr.GetArgs(), expr.GetThisType(), builder)
+}
+
 public func ToPosInfo(loc: DebugLocation, isPrintFileName!: Bool = false): String {
     let beginPos = loc.GetBeginPos()
     let fileName = if (isPrintFileName) { FileUtil.GetFileName(loc.GetAbsPath()) + "," } else { "" }

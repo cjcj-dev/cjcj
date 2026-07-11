@@ -5,12 +5,12 @@ import cjcj::chir.BinaryExpression
 import cjcj::chir.CHIRBuilder
 import cjcj::chir.Constant
 import cjcj::chir.Expression
+import cjcj::chir.ExprKind
 import cjcj::chir.Apply
 import cjcj::chir.ApplyWithException
 import cjcj::chir.Attribute
 import cjcj::chir.FuncType
 import cjcj::chir.Function
-import cjcj::chir.GetInstParentCustomTyOfCallee
 import cjcj::chir.Invoke
 import cjcj::chir.InvokeStatic
 import cjcj::chir.InvokeStaticWithException
@@ -145,7 +145,11 @@ public class CHIRApplyWrapper <: CHIRCallExpr {
     }
 
     public override func GetOuterType(builder: CHIRBuilder): Type {
-        let res = GetInstParentCustomTyOfCallee(GetCallee(), GetArgs(), GetThisType(), builder)
+        let res = if (expr.GetExprKind() == ExprKind.APPLY) {
+            (expr as Apply).getOrThrow().GetInstParentCustomTyOfCallee(builder)
+        } else {
+            (expr as ApplyWithException).getOrThrow().GetInstParentCustomTyOfCallee(builder)
+        }
         CJC_ASSERT(res.isSome())
         return res.getOrThrow()
     }

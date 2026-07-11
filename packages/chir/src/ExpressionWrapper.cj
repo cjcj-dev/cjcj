@@ -70,6 +70,13 @@ public open class FuncCallBase <: ExpressionBase {
         }
         return exprE.getOrThrow().GetInstantiatedTypeArgs()
     }
+
+    public func GetInstantiatedTypeArgsRef(): ArrayList<Type> {
+        if (let Some(call) <- expr) {
+            return call.GetInstantiatedTypeArgs()
+        }
+        return exprE.getOrThrow().GetInstantiatedTypeArgs()
+    }
 }
 
 public class ApplyBase <: FuncCallBase {
@@ -107,7 +114,10 @@ public class ApplyBase <: FuncCallBase {
     }
 
     public func GetInstParentCustomTyOfCallee(builder: CHIRBuilder): Option<Type> {
-        return GetInstParentCustomTyOfCallee(GetCallee(), GetArgs(), GetThisType(), builder)
+        if (let Some(apply) <- expr) {
+            return apply.GetInstParentCustomTyOfCallee(builder)
+        }
+        return exprE.getOrThrow().GetInstParentCustomTyOfCallee(builder)
     }
 }
 
@@ -145,6 +155,13 @@ public open class DynamicDispatchBase <: FuncCallBase {
         return exprE.getOrThrow().GetGenericTypeParams()
     }
 
+    public func GetGenericTypeParamsRef(): ArrayList<GenericType> {
+        if (let Some(dispatch) <- expr) {
+            return dispatch.GetGenericTypeParams()
+        }
+        return exprE.getOrThrow().GetGenericTypeParams()
+    }
+
     public func GetMethodName(): String {
         if (let Some(dispatch) <- expr) {
             return dispatch.GetMethodName()
@@ -159,11 +176,11 @@ public open class DynamicDispatchBase <: FuncCallBase {
         return exprE.getOrThrow().GetMethodType()
     }
 
-    public func GetVirtualMethodOffset(): Option<UInt64> {
+    public func GetVirtualMethodOffset(): UInt64 {
         if (let Some(dispatch) <- expr) {
-            return dispatch.GetVirtualMethodOffset()
+            return dispatch.GetVirtualMethodOffset().getOrThrow()
         }
-        return exprE.getOrThrow().GetVirtualMethodOffset()
+        return exprE.getOrThrow().GetVirtualMethodOffset().getOrThrow()
     }
 
     public func GetInstSrcParentCustomTypeOfMethod(builder: CHIRBuilder): ClassType {
@@ -440,6 +457,13 @@ public class IntrinsicBase <: ExpressionBase {
     }
 
     public func GetInstantiatedTypeArgs(): ArrayList<Type> {
+        if (let Some(intrinsic) <- expr) {
+            return intrinsic.GetInstantiatedTypeArgs()
+        }
+        return exprE.getOrThrow().GetInstantiatedTypeArgs()
+    }
+
+    public func GetInstantiatedTypeArgsRef(): ArrayList<Type> {
         if (let Some(intrinsic) <- expr) {
             return intrinsic.GetInstantiatedTypeArgs()
         }
