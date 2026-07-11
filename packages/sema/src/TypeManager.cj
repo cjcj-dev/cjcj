@@ -2494,7 +2494,7 @@ public class TypeManager {
         let decl = GenericParamDecl()
         decl.identifier = SrcIdentifier("${srcId}${nextUniqId}")
         nextUniqId++
-        let tv = GenericsTy(decl.identifier.Val(), decl)
+        let tv = GetGenericsTy(decl)
         tv.isPlaceholder = true
         if (let Some(parent) <- derivedFrom) {
             for (upper in parent.upperBounds) {
