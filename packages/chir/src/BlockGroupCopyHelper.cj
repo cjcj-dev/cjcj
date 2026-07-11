@@ -5,7 +5,7 @@ import cjcj::utils.CJC_ASSERT
 
 public class BlockGroupCopyHelper {
     private let builder: CHIRBuilder
-    private var instMap: HashMap<Int64, Type> = HashMap<Int64, Type>()
+    private var instMap: HashMap<GenericType, Type> = HashMap<GenericType, Type>()
     private var thisType: Option<Type> = None
 
     public init(builder: CHIRBuilder) {
@@ -33,8 +33,8 @@ public class BlockGroupCopyHelper {
             let instantiatedTypeArgs = apply.GetInstantiatedTypeArgs()
             var index: Int64 = 0
             for (genericType in lambda.GetGenericTypeParams()) {
-                if (!instMap.contains(genericType.objectId)) {
-                    instMap[genericType.objectId] = instantiatedTypeArgs[index]
+                if (!instMap.contains(genericType)) {
+                    instMap[genericType] = instantiatedTypeArgs[index]
                 }
                 index++
             }
@@ -72,8 +72,8 @@ public class BlockGroupCopyHelper {
             let instantiatedTypeArgs = apply.GetInstantiatedTypeArgs()
             var index: Int64 = 0
             for (genericType in calleeFunction.GetGenericTypeParams()) {
-                if (!instMap.contains(genericType.objectId)) {
-                    instMap[genericType.objectId] = instantiatedTypeArgs[index]
+                if (!instMap.contains(genericType)) {
+                    instMap[genericType] = instantiatedTypeArgs[index]
                 }
                 index++
             }
