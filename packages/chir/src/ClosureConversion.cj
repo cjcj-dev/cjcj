@@ -3,7 +3,7 @@ package cjcj::chir
 import std.collection.*
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::option.GlobalOptions
-import cjcj::utils.CJC_ASSERT
+import cjcj::utils.{CJC_ASSERT, StaticCast}
 import cjcj::utils.ProfileRecorder
 
 private let GENERIC_VIRTUAL_FUNC: String = "$GenericVirtualFunc"
@@ -22,6 +22,18 @@ private let CC_AUTO_ENV_INST_BASE_ANNOTATION: String = "IsAutoEnvInstBase"
 private let CC_AUTO_ENV_IMPL_ANNOTATION: String = "IsAutoEnvImpl"
 private let GENERIC_THIS_SRC_NAME: String = "This"
 
+private func LiftCustomDefType(def: CustomTypeDef, converter: TypeConverterForCC): Unit {
+    let preVisit = { expr: Expression =>
+        converter.VisitExpr(expr)
+        return VisitResult.CONTINUE
+    }
+    for (method in def.GetMethods()) {
+        Visitor.Visit(method, preVisit)
+        converter.VisitValue(method)
+    }
+    converter.VisitDef(def)
+}
+
 public class ClosureConversion {
     private let builder: CHIRBuilder
     private let opts: GlobalOptions
@@ -34,6 +46,7 @@ public class ClosureConversion {
     private let convertedCache: HashMap<Int64, Function> = HashMap<Int64, Function>()
     private let duplicateLambdaName: HashMap<String, Int64> = HashMap<String, Int64>()
     private let typeConvertMap: HashMap<String, Type> = HashMap<String, Type>()
+    private let needConvertedGenericTys: HashMap<Int64, GenericType> = HashMap<Int64, GenericType>()
     private let srcCodeImportedFuncs: ArrayList<Function> = ArrayList<Function>()
     private let uselessClasses: ArrayList<ClassDef> = ArrayList<ClassDef>()
     private let uselessLambda: ArrayList<Function> = ArrayList<Function>()
@@ -179,23 +192,38 @@ public class ClosureConversion {
     }
 
     private func LiftType(pkg: Package): Unit {
+        let convertTypeToClosure: ConvertTypeFunc = { ty: Type => ConvertTypeToClosureType(ty) }
+        func convertTypeToInstBase(ty: Type): Type {
+            let funcType = StaticCast<FuncType>(ty)
+            let autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(funcType)
+            let nestedConverter = TypeConverterForCC(convertTypeToClosure, convertTypeToInstBase, builder)
+            LiftCustomDefType(autoEnvBaseDef, nestedConverter)
+            let convertedFuncType = ConvertFuncArgsAndRetType(funcType)
+            return builder.context.GetRefTy(InstantiateAutoEnvBaseType(autoEnvBaseDef, convertedFuncType))
+        }
+        let converter = TypeConverterForCC(convertTypeToClosure, convertTypeToInstBase, builder)
+        let preVisit = { expr: Expression =>
+            converter.VisitExpr(expr)
+            return VisitResult.CONTINUE
+        }
         for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
-            ConvertFunctionSignature(fn)
-            if (let Some(body) <- fn.GetBody()) {
-                ConvertBlockGroupTypes(body)
+            if (fn.GetBody().isSome()) {
+                Visitor.Visit(fn, preVisit)
             }
-            for (param in fn.GetParams()) {
-                ConvertValueType(param)
-            }
-            if (let Some(retVal) <- fn.GetReturnValue()) {
-                ConvertValueType(retVal)
-            }
+            converter.VisitValue(fn)
         }
         for (globalVar in pkg.GetGlobalVars()) {
-            ConvertValueType(globalVar)
+            converter.VisitValue(globalVar)
         }
         for (def in pkg.GetAllCustomTypeDef()) {
-            ConvertCustomDefTypes(def)
+            if (def.TestAttr(Attribute.SKIP_ANALYSIS)) {
+                continue
+            }
+            converter.VisitDef(def)
+        }
+        LiftGenericTypes()
+        for ((_, ty) in builder.GetAllCustomTypes()) {
+            ty.ResetAllInstantiatedType()
         }
     }
 
@@ -281,97 +309,14 @@ public class ClosureConversion {
         }
     }
 
-    private func ConvertBlockGroupTypes(group: BlockGroup): Unit {
-        for (block in group.GetBlocks()) {
-            for (expr in block.GetExpressions()) {
-                ConvertExpressionTypes(expr)
-                for (subGroup in expr.GetBlockGroups()) {
-                    ConvertBlockGroupTypes(subGroup)
-                }
-            }
-        }
-    }
-
-    private func ConvertExpressionTypes(expr: Expression): Unit {
-        if (let Some(result) <- expr.GetResult()) {
-            ConvertValueType(result)
-        }
-        if (let Some(allocate) <- (expr as Allocate)) {
-            allocate.SetType(ConvertTypeToClosureType(allocate.GetType()))
-        } else if (let Some(rawArrayAllocate) <- (expr as RawArrayAllocate)) {
-            rawArrayAllocate.SetElementType(ConvertTypeToClosureType(rawArrayAllocate.GetElementType()))
-        } else if (let Some(getRTTIStatic) <- (expr as GetRTTIStatic)) {
-            getRTTIStatic.SetRTTIType(ConvertTypeToClosureType(getRTTIStatic.GetRTTIType()))
-        } else if (let Some(instanceOfExpr) <- (expr as InstanceOf)) {
-            instanceOfExpr.SetTestedType(ConvertTypeToClosureType(instanceOfExpr.GetType()))
-        }
-        if (let Some(call) <- (expr as FuncCall)) {
-            if (let Some(thisTy) <- call.GetThisType()) {
-                call.SetThisType(ConvertTypeToClosureType(thisTy))
-            }
-        }
-        if (let Some(callWithException) <- (expr as FuncCallWithException)) {
-            if (let Some(thisTy2) <- callWithException.GetThisType()) {
-                callWithException.SetThisType(ConvertTypeToClosureType(thisTy2))
-            }
-        }
-    }
-
-    private func ConvertCustomDefTypes(def: CustomTypeDef): Unit {
-        let genericParams = def.GetGenericTypeParams()
-        for (genericParam in genericParams) {
-            let convertedBounds = ArrayList<Type>()
-            for (bound in genericParam.GetUpperBounds()) {
-                convertedBounds.add(ConvertTypeToClosureType(bound))
-            }
-            genericParam.SetUpperBounds(convertedBounds)
-        }
-        let vars = def.GetDirectInstanceVars()
-        for (member in vars) {
-            member.ty = ConvertTypeToClosureType(member.ty)
-        }
-        if (let Some(classDef) <- (def as ClassDef)) {
-            if (let Some(superTy) <- classDef.GetSuperClassTy()) {
-                if (let Some(convertedSuper) <- (ConvertTypeToClosureType(superTy) as ClassType)) {
-                    classDef.SetSuperClassTy(convertedSuper)
-                }
-            }
-        }
-        let interfaces = def.GetImplementedInterfaceTys()
-        if (!interfaces.isEmpty()) {
-            let retained = ArrayList<ClassType>()
-            for (interfaceTy in interfaces) {
-                if (let Some(convertedInterface) <- (ConvertTypeToClosureType(interfaceTy) as ClassType)) {
-                    retained.add(convertedInterface)
-                }
-            }
-            // Existing CHIR does not expose a replace API for interface types. The translated programs
-            // that use closures through interfaces get their function-typed members converted above.
-            let _ = retained
-        }
-    }
-
-    private func ConvertFunctionSignature(fn: Function): Unit {
-        if (let Some(funcTy) <- fn.GetFuncType()) {
-            fn.SetType(ConvertFuncArgsAndRetType(funcTy))
-        }
-    }
-
-    private func ConvertValueType(value: Value): Unit {
-        if (value.AsFunction().isSome()) {
-            return
-        }
-        if (let Some(valueTy) <- value.GetType()) {
-            value.SetType(ConvertTypeToClosureType(valueTy))
-        }
-    }
-
     private func ConvertTypeToClosureType(ty: Type): Type {
         if (ty.IsPrimitive() || ty.IsInvalid() || ty.IsAny() || ty.IsVoid() || ty.IsCFunc() ||
             ty.IsCString() || ty.IsThis()) {
             return ty
         }
         if (ty.IsGeneric()) {
+            let genericTy = StaticCast<GenericType>(ty)
+            needConvertedGenericTys[genericTy.objectId] = genericTy
             return ty
         }
         let key = "cc:" + ty.ToString()
@@ -404,6 +349,17 @@ public class ClosureConversion {
         }
         typeConvertMap[key] = converted
         return converted
+    }
+
+    private func LiftGenericTypes(): Unit {
+        let temp = needConvertedGenericTys.clone()
+        for ((_, ty) in temp) {
+            let newUpperBounds = ArrayList<Type>()
+            for (upperBound in ty.GetUpperBounds()) {
+                newUpperBounds.add(ConvertTypeToClosureType(upperBound))
+            }
+            ty.SetUpperBounds(newUpperBounds)
+        }
     }
 
     private func ConvertTypeArgs(types: ArrayList<Type>): ArrayList<Type> {

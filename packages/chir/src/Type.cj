@@ -1071,6 +1071,11 @@ public open class CustomType <: Type {
         return argTys.clone()
     }
 
+    public open func ResetAllInstantiatedType(): Unit {
+        implementedInterfaceTys.clear()
+        hasSetSuperInterface = false
+    }
+
     public override func GetExtends(): ArrayList<ExtendDef> {
         return GetCustomTypeDef().GetExtends()
     }
@@ -1689,6 +1694,12 @@ public class ClassType <: CustomType {
             return classDef
         }
         throw IllegalStateException("ClassType does not reference a ClassDef")
+    }
+
+    public override func ResetAllInstantiatedType(): Unit {
+        super.ResetAllInstantiatedType()
+        superClassTy = None
+        hasSetSuperClass = false
     }
 
     public func CalculateSuperClassTy(builder: CHIRBuilder): Option<ClassType> {

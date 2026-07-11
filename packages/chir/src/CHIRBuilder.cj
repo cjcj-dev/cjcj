@@ -12,6 +12,25 @@ public class CHIRBuilder {
         this.context = context
     }
 
+    public func GetAllCustomTypes(): HashMap<Int64, CustomType> {
+        let result = HashMap<Int64, CustomType>()
+        for ((_, bucket) in context.dynamicAllocatedTys) {
+            for (ty in bucket) {
+                if (let Some(customTy) <- (ty as CustomType)) {
+                    result[customTy.objectId] = customTy
+                }
+            }
+        }
+        for ((_, bucket) in context.constAllocatedTys) {
+            for (ty in bucket) {
+                if (let Some(customTy) <- (ty as CustomType)) {
+                    result[customTy.objectId] = customTy
+                }
+            }
+        }
+        return result
+    }
+
     public func GetStructType(packageName: String, name: String,
         genericType!: ArrayList<String> = ArrayList<String>()): Option<StructType> {
         return context.GetStructType(packageName, name, genericType: genericType)

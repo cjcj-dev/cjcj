@@ -30,8 +30,8 @@ public class CHIRContext {
     private var fileNameMap: HashMap<UInt32, String> = HashMap<UInt32, String>()
     private var threadsNum: UIntNative = 1
     private static let dynamicAllocatedTysMtx: Mutex = Mutex()
-    private let constAllocatedTys: HashMap<Int64, ArrayList<Type>> = HashMap<Int64, ArrayList<Type>>()
-    private let dynamicAllocatedTys: HashMap<Int64, ArrayList<Type>> = HashMap<Int64, ArrayList<Type>>()
+    public let constAllocatedTys: HashMap<Int64, ArrayList<Type>> = HashMap<Int64, ArrayList<Type>>()
+    public let dynamicAllocatedTys: HashMap<Int64, ArrayList<Type>> = HashMap<Int64, ArrayList<Type>>()
     private let allocatedValues: ArrayList<Value> = ArrayList<Value>()
     private let allocatedExpressions: ArrayList<Expression> = ArrayList<Expression>()
     private let allocatedStructs: ArrayList<StructDef> = ArrayList<StructDef>()

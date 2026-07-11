@@ -293,8 +293,8 @@ public interface CustomDefTypeConverter <: CustomDefTypeFunctor {
     func ConvertFuncParamsAndRetType(input: FuncType): FuncType
 
     func VisitDefDefaultImpl(o: CustomTypeDef): Unit {
-        if (let Some(ty) <- o.GetType()) {
-            o.SetType(StaticCast<CustomType>(ConvertType(ty)))
+        if (let Some(ty) <- o.customType) {
+            o.customType = StaticCast<CustomType>(ConvertType(ty))
         }
 
         for (idx in 0..o.implementedInterfaceTys.size) {

@@ -409,7 +409,7 @@ public open class CustomTypeDef <: Base {
     public let identifier: String
     private var srcCodeIdentifier: String
     public let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
-    private var customType: Option<CustomType> = None
+    public var customType: Option<CustomType> = None
     private var genericDecl: Option<CustomTypeDef> = None
     private let instanceVars: ArrayList<MemberVarInfo> = ArrayList<MemberVarInfo>()
     private let staticVars: ArrayList<GlobalVar> = ArrayList<GlobalVar>()
