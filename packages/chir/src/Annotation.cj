@@ -440,15 +440,6 @@ public class IsCapturedClassInCC <: Annotation<Bool> {
     }
 }
 
-private func SkipKindFromAnnotationValue(value: String): SkipKind {
-    return match (value) {
-        case "1" => SkipKind.SKIP_DCE_WARNING
-        case "2" => SkipKind.SKIP_FORIN_EXIT
-        case "3" => SkipKind.SKIP_VIC
-        case _ => SkipKind.NO_SKIP
-    }
-}
-
 public class EnumCaseIndex <: Annotation<Option<Int64>> {
     private let index: Option<Int64>
 
@@ -559,7 +550,6 @@ public class OverrideSrcFuncType <: Annotation<Option<FuncType>> {
 }
 
 public class AnnotationMap {
-    private let values: HashMap<String, String> = HashMap<String, String>()
     private let annotations: HashMap<TypeInfo, AnnotationBase> = HashMap<TypeInfo, AnnotationBase>()
 
     public init() {}
@@ -568,26 +558,16 @@ public class AnnotationMap {
         CopyFrom(other)
     }
 
-    public func Set(key: String, value: String): Unit {
-        values[key] = value
-    }
-
+    // Set annotation T for this node, updating its value if it already exists. Annotation.h:363.
     public func Set<T, R>(value: R): Unit where T <: Annotation<R> {
         annotations[TypeInfo.of<T>()] = T.Create(value)
-    }
-
-    public func Remove(key: String): Unit {
-        values.remove(key)
     }
 
     public func Remove<T>(): Unit {
         annotations.remove(TypeInfo.of<T>())
     }
 
-    public func Get(key: String): Option<String> {
-        return values.get(key)
-    }
-
+    // Get the value of the annotation T, returning the default empty value when absent. Annotation.h:370.
     public func Get<T, R>(): R where T <: Annotation<R> {
         if (let Some(annotation) <- annotations.get(TypeInfo.of<T>())) {
             return T.Extract((annotation as Annotation<R>).getOrThrow())
@@ -605,26 +585,19 @@ public class AnnotationMap {
         return (annotation as T).getOrThrow()
     }
 
+    // Annotation.h:432 GetAnnos().
     public func GetAnnos(): ReadOnlyMap<TypeInfo, AnnotationBase> {
         return annotations
     }
 
-    public func Contains(key: String): Bool {
-        return values.contains(key)
-    }
-
     public func Clear(): Unit {
-        values.clear()
         annotations.clear()
     }
 
+    // Annotation.h:407-425 copy semantics: deep-clone each annotation.
     public func CopyFrom(other: AnnotationMap): Unit {
         if (refEq(this, other)) {
             return
-        }
-        values.clear()
-        for ((key, value) in other.values) {
-            values[key] = value
         }
         annotations.clear()
         for ((index, annotation) in other.annotations) {
@@ -632,8 +605,9 @@ public class AnnotationMap {
         }
     }
 
+    // Annotation.h:403 ToString().
     public func ToString(indent!: Int64 = 0): String {
-        if (values.isEmpty() && annotations.isEmpty()) {
+        if (annotations.isEmpty()) {
             return ""
         }
         let annotationParts = ArrayList<String>()
@@ -643,29 +617,7 @@ public class AnnotationMap {
                 annotationParts.add("${IndentToString(indent)}${text}")
             }
         }
-        let parts = ArrayList<String>()
-        for ((key, value) in values) {
-            if (key == "SkipCheck") {
-                let text = SkipCheck(SkipKindFromAnnotationValue(value)).ToString()
-                if (!text.isEmpty()) {
-                    parts.add("${IndentToString(indent)}${text}")
-                }
-            } else if (key == "NeverOverflowInfo") {
-                let neverOverflowText = NeverOverflowInfo(value == "true").ToString()
-                parts.add("${IndentToString(indent)}${neverOverflowText}")
-            } else {
-                parts.add("${IndentToString(indent)}@${key}(${value})")
-            }
-        }
-        let annotationText = JoinStrings(annotationParts, ", ")
-        let valueText = JoinStrings(parts, "\n")
-        if (annotationText.isEmpty()) {
-            return valueText
-        }
-        if (valueText.isEmpty()) {
-            return annotationText
-        }
-        return annotationText + "\n" + valueText
+        return JoinStrings(annotationParts, ", ")
     }
 }
 

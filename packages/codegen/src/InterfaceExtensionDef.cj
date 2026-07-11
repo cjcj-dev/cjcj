@@ -10,6 +10,7 @@ import cjcj::chir.CustomType
 import cjcj::chir.CustomTypeDef
 import cjcj::chir.ExtendDef
 import cjcj::chir.GenericType
+import cjcj::chir.IsAutoEnvClass
 import cjcj::chir.ReplaceRawGenericArgType
 import cjcj::chir.Type
 import cjcj::chir.VirtualMethodInfo
@@ -790,8 +791,9 @@ private func RequireClassType(def: ClassDef): ClassType {
     throw IllegalStateException("class-like def has no class type: " + def.GetIdentifier())
 }
 
+// Utils.cpp:1025 IsClosureConversionEnvClass(def) = def.Get<IsAutoEnvClass>().
 private func IsClosureConversionEnvClass(def: ClassDef): Bool {
-    return def.GetAnnotation("IsAutoEnvClass").isSome()
+    return def.Get<IsAutoEnvClass, Bool>()
 }
 
 private func RequireCustomType(def: CustomTypeDef): Type {

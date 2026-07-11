@@ -342,24 +342,23 @@ public open class Type <: Hashable & Equatable<Type> {
         }
     }
 
+    // Type.cpp:66 IsAutoEnv = kind == CLASS && IsClosureConversionEnvClass(classDef);
+    // Utils.cpp:1025 IsClosureConversionEnvClass(def) = def.Get<IsAutoEnvClass>().
     public func IsAutoEnv(): Bool {
         if (!IsClass()) {
             return false
         }
         let classTy = (this as ClassType).getOrThrow()
-        return classTy.GetClassDef().GetAnnotation("IsAutoEnvClass").isSome()
+        return classTy.GetClassDef().Get<IsAutoEnvClass, Bool>()
     }
 
+    // Type.cpp:71 IsAutoEnvBase = IsClosureConversionEnvClass(classDef) && classDef->TestAttr(ABSTRACT).
     public func IsAutoEnvBase(): Bool {
         if (!IsClass()) {
             return false
         }
-        let classTy = (this as ClassType).getOrThrow()
-        let classDef = classTy.GetClassDef()
-        if (let Some(value) <- classDef.GetAnnotation("IsAutoEnvClass")) {
-            return value == "true" && classDef.TestAttr(Attribute.ABSTRACT)
-        }
-        return false
+        let classDef = (this as ClassType).getOrThrow().GetClassDef()
+        return classDef.Get<IsAutoEnvClass, Bool>() && classDef.TestAttr(Attribute.ABSTRACT)
     }
 
     public func IsAutoEnvInstBase(): Bool {

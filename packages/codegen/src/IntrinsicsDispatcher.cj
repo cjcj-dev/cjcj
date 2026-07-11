@@ -7,6 +7,7 @@ import cjcj::chir.Intrinsic
 import cjcj::chir.IntrinsicKind
 import cjcj::chir.IntrinsicKindToString
 import cjcj::chir.IntrinsicWithException
+import cjcj::chir.NeedCheckArrayBound
 import cjcj::chir.RawArrayType
 import cjcj::chir.Type
 import cjcj::chir.Value
@@ -19,12 +20,13 @@ private let LLVM_POINTER_TYPE_KIND_FOR_INTRINSICS: Int32 = 12
 public func GenerateIntrinsic(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(intrinsicExpr) <- (chirExpr as Intrinsic)) {
         return GenerateIntrinsic(irBuilder, intrinsicExpr.GetIntrinsicKind(), intrinsicExpr.GetArgs(),
-            intrinsicExpr.GetInstantiatedTypeArgs(), intrinsicExpr.GetResultType(), NeedCheckArrayBound(chirExpr))
+            intrinsicExpr.GetInstantiatedTypeArgs(), intrinsicExpr.GetResultType(),
+            chirExpr.Get<NeedCheckArrayBound, Bool>())
     }
     if (let Some(intrinsicWithExceptionExpr) <- (chirExpr as IntrinsicWithException)) {
         return GenerateIntrinsic(irBuilder, intrinsicWithExceptionExpr.GetIntrinsicKind(),
             intrinsicWithExceptionExpr.GetArgs(), intrinsicWithExceptionExpr.GetInstantiatedTypeArgs(),
-            intrinsicWithExceptionExpr.GetResultType(), NeedCheckArrayBound(chirExpr))
+            intrinsicWithExceptionExpr.GetResultType(), chirExpr.Get<NeedCheckArrayBound, Bool>())
     }
     return LLVMNullValue()
 }
@@ -285,13 +287,6 @@ private func IsInteropIntrinsic(kind: IntrinsicKind): Bool {
         kind == IntrinsicKind.GET_EXPORTED_REF ||
         kind == IntrinsicKind.REMOVE_EXPORTED_REF ||
         kind == IntrinsicKind.GET_JSLAMBDA_ADDR
-}
-
-private func NeedCheckArrayBound(chirExpr: Expression): Bool {
-    if (let Some(value) <- chirExpr.GetAnnotation("NeedCheckArrayBound")) {
-        return value == "true" || value == "1"
-    }
-    return true
 }
 
 private func GeneratePreInitializeIntrinsic(irBuilder: IRBuilder2): LLVMValueRef {

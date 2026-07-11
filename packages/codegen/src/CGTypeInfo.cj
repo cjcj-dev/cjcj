@@ -309,7 +309,8 @@ private func GetTypeArgsQualifiedNameForReflect(cgMod: CGModule, typeArgs: Array
 private func GetTypeQualifiedNameOfCustomTypeForReflect(cgMod: CGModule, customTy: CustomType,
     forNameFieldOfTi!: Bool): String {
     let def = customTy.GetCustomTypeDef()
-    if (def.GetAnnotation("IsAutoEnvGenericBase").isSome()) {
+    // CGType.cpp:962 uses type.IsAutoEnvGenericBase(); Type.cpp:85.
+    if (customTy.IsAutoEnvGenericBase()) {
         let typeArgs = customTy.GetGenericArgs()
         CJC_ASSERT(!typeArgs.isEmpty())
         let paramTypes = ArrayList<Type>()

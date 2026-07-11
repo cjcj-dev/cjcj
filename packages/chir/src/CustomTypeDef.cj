@@ -1162,19 +1162,22 @@ private func MeetAutoEnvBase(subType: Type, superType: Type): Bool {
     return subSuperTy.IsEqual(superClassTy)
 }
 
+// Type.cpp:80 IsAutoEnvInstBase = IsAutoEnvBase && argTys.empty();
+// Type.cpp:71 IsAutoEnvBase = IsClosureConversionEnvClass(def) && def->TestAttr(ABSTRACT).
 private func IsAutoEnvInstBase(ty: Type): Bool {
     if (let Some(customTy) <- (ty as CustomType)) {
         let def = customTy.GetCustomTypeDef()
-        return def.GetAnnotation("IsAutoEnvClass").isSome() && def.TestAttr(Attribute.ABSTRACT) &&
+        return def.Get<IsAutoEnvClass, Bool>() && def.TestAttr(Attribute.ABSTRACT) &&
             customTy.GetGenericArgs().isEmpty()
     }
     return false
 }
 
+// Type.cpp:85 IsAutoEnvGenericBase = IsAutoEnvBase && !argTys.empty().
 private func IsAutoEnvGenericBase(ty: Type): Bool {
     if (let Some(customTy) <- (ty as CustomType)) {
         let def = customTy.GetCustomTypeDef()
-        return def.GetAnnotation("IsAutoEnvClass").isSome() && def.TestAttr(Attribute.ABSTRACT) &&
+        return def.Get<IsAutoEnvClass, Bool>() && def.TestAttr(Attribute.ABSTRACT) &&
             !customTy.GetGenericArgs().isEmpty()
     }
     return false

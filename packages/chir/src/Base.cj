@@ -32,10 +32,6 @@ public open class Base <: Hashable & Equatable<Base> {
         return nodeId.hashCode()
     }
 
-    public func SetAnnotation(key: String, value: String): Unit {
-        annotationMap.Set(key, value)
-    }
-
     public func Set<T, R>(value: R): Unit where T <: Annotation<R> {
         annotationMap.Set<T, R>(value)
     }
@@ -72,20 +68,12 @@ public open class Base <: Hashable & Equatable<Base> {
         annotationMap.Set<EnumCaseIndex, Option<Int64>>(value)
     }
 
-    public func RemoveAnnotation(key: String): Unit {
-        annotationMap.Remove(key)
-    }
-
     public func RemoveGeneratedFromForIn(): Unit {
         annotationMap.Remove<GeneratedFromForIn>()
     }
 
     public func RemoveSkipCheck(): Unit {
         annotationMap.Remove<SkipCheck>()
-    }
-
-    public func GetAnnotation(key: String): Option<String> {
-        return annotationMap.Get(key)
     }
 
     public func GetGeneratedFromForIn(): Bool {

@@ -417,25 +417,19 @@ public func IsThisArgOfStructMethod(chirValue: Value): Bool {
     return true
 }
 
+// Type.cpp:66 IsAutoEnv = kind == CLASS && IsClosureConversionEnvClass(classDef).
 public func IsAutoEnvType(chirTy: Type): Bool {
-    if (let Some(customTy) <- (chirTy.StripAllRefs() as CustomType)) {
-        return customTy.GetCustomTypeDef().GetAnnotation("IsAutoEnvClass").isSome()
-    }
-    return false
+    return chirTy.StripAllRefs().IsAutoEnv()
 }
 
+// Type.cpp:71 IsAutoEnvBase = IsClosureConversionEnvClass(classDef) && classDef->TestAttr(ABSTRACT).
 public func IsAutoEnvBaseType(chirTy: Type): Bool {
-    if (let Some(customTy) <- (chirTy.StripAllRefs() as CustomType)) {
-        return customTy.GetCustomTypeDef().GetAnnotation("IsAutoEnvBase").isSome()
-    }
-    return false
+    return chirTy.StripAllRefs().IsAutoEnvBase()
 }
 
+// Type.cpp:80 IsAutoEnvInstBase = IsAutoEnvBase && argTys.empty().
 public func IsAutoEnvInstBaseType(chirTy: Type): Bool {
-    if (let Some(customTy) <- (chirTy.StripAllRefs() as CustomType)) {
-        return customTy.GetCustomTypeDef().GetAnnotation("IsAutoEnvInstBase").isSome()
-    }
-    return false
+    return chirTy.StripAllRefs().IsAutoEnvInstBase()
 }
 
 public func IsGenericRef(chirTy: Type): Bool {
