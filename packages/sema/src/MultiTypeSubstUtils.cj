@@ -15,7 +15,7 @@ private func containsTy(values: ArrayList<Ty>, ty: Ty): Bool {
 
 private func containsGeneric(values: ArrayList<GenericsTy>, tyVar: GenericsTy): Bool {
     for (value in values) {
-        if (value.objectId == tyVar.objectId) {
+        if (Ptr<GenericsTy>(value) == Ptr<GenericsTy>(tyVar)) {
             return true
         }
     }
@@ -62,7 +62,7 @@ private func keySet(mapping: MultiTypeSubst): ArrayList<GenericsTy> {
 private func removeMapping(mapping: MultiTypeSubst, tyVar: GenericsTy): Unit {
     var idx: Int64 = 0
     while (idx < mapping.entries.size) {
-        if (mapping.entries[idx].tyVar.objectId == tyVar.objectId) {
+        if (Ptr<GenericsTy>(mapping.entries[idx].tyVar) == Ptr<GenericsTy>(tyVar)) {
             mapping.entries.remove(at: idx)
             return
         }
@@ -338,7 +338,7 @@ public func ReduceMultiTypeSubst(typeManager: TypeManager, tyVars: ArrayList<Gen
                 continue
             }
             for (genTy in GetAllGenericTys(ty)) {
-                if (genTy.objectId == entry.tyVar.objectId) {
+                if (Ptr<GenericsTy>(genTy) == Ptr<GenericsTy>(entry.tyVar)) {
                     removeMapping(mapping, entry.tyVar)
                     break
                 }
@@ -531,7 +531,7 @@ public func HaveCyclicSubstitution(typeManager: TypeManager, typeMapping: TypeSu
 private func removeTypeSubst(mapping: TypeSubst, tyVar: GenericsTy): Unit {
     var idx: Int64 = 0
     while (idx < mapping.entries.size) {
-        if (mapping.entries[idx].tyVar.objectId == tyVar.objectId) {
+        if (Ptr<GenericsTy>(mapping.entries[idx].tyVar) == Ptr<GenericsTy>(tyVar)) {
             mapping.entries.remove(at: idx)
             return
         }

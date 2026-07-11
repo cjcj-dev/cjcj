@@ -276,8 +276,8 @@ public func OverflowStrategyPrefix(ovf: OverflowStrategy): String {
     }
 }
 
-private func GetInstMapFromDefAndExtends(customTy: CustomType): HashMap<Int64, Type> {
-    let replaceTable = HashMap<Int64, Type>()
+private func GetInstMapFromDefAndExtends(customTy: CustomType): HashMap<GenericType, Type> {
+    let replaceTable = HashMap<GenericType, Type>()
     let def = customTy.GetCustomTypeDef()
     if (!def.TestAttr(Attribute.GENERIC)) {
         return replaceTable
@@ -289,7 +289,7 @@ private func GetInstMapFromDefAndExtends(customTy: CustomType): HashMap<Int64, T
     }
     var idx: Int64 = 0
     while (idx < genericParams.size) {
-        replaceTable[genericParams[idx].objectId] = instantiatedArgs[idx]
+        replaceTable[genericParams[idx]] = instantiatedArgs[idx]
         idx++
     }
     for (exDef in def.GetExtends()) {
@@ -298,7 +298,7 @@ private func GetInstMapFromDefAndExtends(customTy: CustomType): HashMap<Int64, T
         var extendIdx: Int64 = 0
         while (extendIdx < genericParamsInExtendTy.size) {
             if (let Some(genericTy) <- (genericParamsInExtendTy[extendIdx] as GenericType)) {
-                replaceTable[genericTy.objectId] = instantiatedArgs[extendIdx]
+                replaceTable[genericTy] = instantiatedArgs[extendIdx]
             }
             extendIdx++
         }
@@ -434,7 +434,7 @@ public class VTableGenerator {
     }
 
     private func CreateVirtualFuncInfo(method: Function, originalParentType: Type,
-        replaceTable: HashMap<Int64, Type>): VirtualMethodInfo {
+        replaceTable: HashMap<GenericType, Type>): VirtualMethodInfo {
         let originalFuncType = method.GetFuncType().getOrThrow()
         let originalParamTypes = originalFuncType.GetParamTypes()
         if (!method.TestAttr(Attribute.STATIC)) {
@@ -555,9 +555,9 @@ public class VTableGenerator {
         }
     }
 
-    private func GetInstMapFromDefIncludeParents(def: CustomTypeDef, curType: Type): HashMap<Int64, Type> {
+    private func GetInstMapFromDefIncludeParents(def: CustomTypeDef, curType: Type): HashMap<GenericType, Type> {
         let inheritanceList = def.GetSuperTypesRecusively(builder)
-        let replaceTable = HashMap<Int64, Type>()
+        let replaceTable = HashMap<GenericType, Type>()
         for (parent in inheritanceList) {
             let fromParent = GetInstMapFromDefAndExtends(parent)
             for ((key, value) in fromParent) {
@@ -619,7 +619,7 @@ public class VTableGenerator {
                 }
             }
         }
-        let emptyTable = HashMap<Int64, Type>()
+                let emptyTable = HashMap<GenericType, Type>()
         for (fn in curDef.GetMethods()) {
             if (FuncMayBeInVtable(fn)) {
                 let parentType = fn.GetParentCustomTypeOrExtendedType().getOrThrow()
@@ -980,7 +980,7 @@ public class WrapVirtualFunc {
 }
 
 private func FindPathToTarget(cur: ClassType, targetParent: ClassType, builder: CHIRBuilder,
-    replaceTable: HashMap<Int64, Type>, outPath: ArrayList<ClassType>, onPath: HashSet<Int64>): Bool {
+    replaceTable: HashMap<GenericType, Type>, outPath: ArrayList<ClassType>, onPath: HashSet<Int64>): Bool {
     if (cur == targetParent) {
         outPath.add((ReplaceRawGenericArgType(cur, replaceTable, builder) as ClassType).getOrThrow())
         return true
@@ -1024,7 +1024,7 @@ private func GetTargetInheritanceList(curDef: CustomTypeDef, targetParent: Class
     builder: CHIRBuilder): ArrayList<ClassType> {
     let path = ArrayList<ClassType>()
     let onPath = HashSet<Int64>()
-    let emptyTable = HashMap<Int64, Type>()
+    let emptyTable = HashMap<GenericType, Type>()
     let structTy = (curDef.GetType().getOrThrow() as StructType).getOrThrow()
     for (interfaceTy in structTy.GetImplementedInterfaceTys(builder)) {
         path.clear()
@@ -1038,9 +1038,9 @@ private func GetTargetInheritanceList(curDef: CustomTypeDef, targetParent: Class
 }
 
 private func CollectReplaceTable(curDef: CustomTypeDef, targetParent: ClassType, rawFunc: Function,
-    builder: CHIRBuilder): HashMap<Int64, Type> {
+    builder: CHIRBuilder): HashMap<GenericType, Type> {
     let inheritanceList = GetTargetInheritanceList(curDef, targetParent, builder)
-    var replaceTable = HashMap<Int64, Type>()
+    var replaceTable = HashMap<GenericType, Type>()
     let targetParentDef = rawFunc.GetParentCustomTypeDef().getOrThrow()
     for (parent in inheritanceList) {
         if (parent.GetCustomTypeDef().nodeId != targetParentDef.nodeId) {

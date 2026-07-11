@@ -1273,7 +1273,7 @@ public class ClosureConversion {
                 throw IllegalStateException("ClosureConversion extend def has no extended type")
             let genericTypeArgs = extendedType.GetTypeArgs()
             CJC_ASSERT(genericTypeArgs.size <= givInstTypes.size)
-            let genericMap = HashMap<Int64, Type>()
+            let genericMap = HashMap<GenericType, Type>()
             var idx: Int64 = 0
             while (idx < genericTypeArgs.size) {
                 let newMap = genericTypeArgs[idx].CalculateGenericTyMapping(givInstTypes[idx])
@@ -1286,7 +1286,7 @@ public class ClosureConversion {
                 idx++
             }
             for (ty in extendDef.GetGenericTypeParams()) {
-                result.add(genericMap.get(ty.objectId).getOrThrow())
+                result.add(genericMap.get(ty).getOrThrow())
             }
             return result
         }

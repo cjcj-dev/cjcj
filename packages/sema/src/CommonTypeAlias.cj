@@ -74,6 +74,7 @@ public type TyVars = ArrayList<GenericsTy>
 
 public class TySet {
     public let values: ArrayList<Ty> = ArrayList<Ty>()
+    private let data: HashSet<Ptr<Ty>> = HashSet<Ptr<Ty>>()
     private let log: ArrayList<ArrayList<(Bool, Ty)>> = ArrayList<ArrayList<(Bool, Ty)>>()
     private let stashes: ArrayList<ArrayList<ArrayList<(Bool, Ty)>>> =
         ArrayList<ArrayList<ArrayList<(Bool, Ty)>>>()
@@ -84,9 +85,7 @@ public class TySet {
 
     public init(values: Array<Ty>) {
         for (ty in values) {
-            if (!Contains(ty)) {
-                this.values.add(ty)
-            }
+            let _ = insert(ty)
         }
         commit()
     }
@@ -94,6 +93,7 @@ public class TySet {
     public init(other: TySet) {
         for (ty in other.values) {
             values.add(ty)
+            data.add(Ptr<Ty>(ty))
         }
         for (entries in other.log) {
             let cloned = ArrayList<(Bool, Ty)>()
@@ -127,12 +127,7 @@ public class TySet {
     }
 
     public func Contains(ty: Ty): Bool {
-        for (value in values) {
-            if (SameTy(value, ty)) {
-                return true
-            }
-        }
-        return false
+        return data.contains(Ptr<Ty>(ty))
     }
 
     public func Remove(ty: Ty): Bool {
@@ -150,6 +145,7 @@ public class TySet {
 
     public func Clear(): Unit {
         values.clear()
+        data.clear()
         log.clear()
         stashes.clear()
         commit()
@@ -236,7 +232,7 @@ public class TySet {
     }
 
     private func insert(value: Ty): Bool {
-        if (Contains(value)) {
+        if (!data.add(Ptr<Ty>(value))) {
             return false
         }
         values.add(value)
@@ -246,7 +242,8 @@ public class TySet {
     private func erase(value: Ty): Bool {
         var idx: Int64 = 0
         while (idx < values.size) {
-            if (SameTy(values[idx], value)) {
+            if (Ptr<Ty>(values[idx]) == Ptr<Ty>(value)) {
+                let _ = data.remove(Ptr<Ty>(value))
                 values.remove(at: idx)
                 return true
             }
@@ -289,7 +286,7 @@ public type UpperBounds = TySet
 
 private func AddTyVarUnique(values: TyVars, tyVar: GenericsTy): Bool {
     for (value in values) {
-        if (value.objectId == tyVar.objectId) {
+        if (Ptr<GenericsTy>(value) == Ptr<GenericsTy>(tyVar)) {
             return false
         }
     }
@@ -391,7 +388,7 @@ public class TypeSubst {
 
     public func Put(tyVar: GenericsTy, ty: Ty): Unit {
         for (entry in entries) {
-            if (entry.tyVar.objectId == tyVar.objectId) {
+            if (Ptr<GenericsTy>(entry.tyVar) == Ptr<GenericsTy>(tyVar)) {
                 entry.ty = ty
                 return
             }
@@ -401,7 +398,7 @@ public class TypeSubst {
 
     public func Get(tyVar: GenericsTy): Option<Ty> {
         for (entry in entries) {
-            if (entry.tyVar.objectId == tyVar.objectId) {
+            if (Ptr<GenericsTy>(entry.tyVar) == Ptr<GenericsTy>(tyVar)) {
                 return entry.ty
             }
         }
@@ -445,7 +442,7 @@ public class MultiTypeSubst {
 
     public func Put(tyVar: GenericsTy, ty: Ty): Unit {
         for (entry in entries) {
-            if (entry.tyVar.objectId == tyVar.objectId) {
+            if (Ptr<GenericsTy>(entry.tyVar) == Ptr<GenericsTy>(tyVar)) {
                 entry.tys.Add(ty)
                 return
             }
@@ -463,7 +460,7 @@ public class MultiTypeSubst {
 
     public func Get(tyVar: GenericsTy): Option<TySet> {
         for (entry in entries) {
-            if (entry.tyVar.objectId == tyVar.objectId) {
+            if (Ptr<GenericsTy>(entry.tyVar) == Ptr<GenericsTy>(tyVar)) {
                 return entry.tys
             }
         }
@@ -587,7 +584,7 @@ public class Constraint {
 
     public func GetOrCreate(tyVar: GenericsTy): TyVarBounds {
         for (entry in entries) {
-            if (entry.tyVar.objectId == tyVar.objectId) {
+            if (Ptr<GenericsTy>(entry.tyVar) == Ptr<GenericsTy>(tyVar)) {
                 return entry.bounds
             }
         }

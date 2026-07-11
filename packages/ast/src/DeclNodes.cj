@@ -290,7 +290,7 @@ private func insertInterfaceTyByName(values: ArrayList<InterfaceTy>, ty: Interfa
 }
 
 private func sameInterfaceTy(left: InterfaceTy, right: InterfaceTy): Bool {
-    return left.objectId == right.objectId
+    return Ptr<InterfaceTy>(left) == Ptr<InterfaceTy>(right)
 }
 
 private func sameInterfaceTyForStableOrder(left: InterfaceTy, right: InterfaceTy): Bool {

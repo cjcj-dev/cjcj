@@ -3023,7 +3023,7 @@ private func CalculateAllUpperBounds(genericType: GenericType, builder: CHIRBuil
         CJC_ASSERT(mapping[0])
         for (originalArg in originalType.GetTypeArgsRef()) {
             if (let Some(mappedGeneric) <- (originalArg as GenericType)) {
-                let instType = mapping[1].get(mappedGeneric.objectId) ?? continue
+                let instType = mapping[1].get(mappedGeneric) ?? continue
                 if (instType != genericType) {
                     continue
                 }

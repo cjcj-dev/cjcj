@@ -69,10 +69,10 @@ public func MergeEffectMap(from: OptEffectCHIRMap, to: OptEffectCHIRMap): Unit {
 }
 
 public class GenericTypeConvertor {
-    private let instMap: HashMap<Int64, Type>
+    private let instMap: HashMap<GenericType, Type>
     private let builder: CHIRBuilder
 
-    public init(instMap: HashMap<Int64, Type>, builder: CHIRBuilder) {
+    public init(instMap: HashMap<GenericType, Type>, builder: CHIRBuilder) {
         this.instMap = instMap
         this.builder = builder
     }
@@ -82,22 +82,22 @@ public class GenericTypeConvertor {
     }
 }
 
-public func GetInstMapFromCurDefToCurType(curType: CustomType): HashMap<Int64, Type> {
+public func GetInstMapFromCurDefToCurType(curType: CustomType): HashMap<GenericType, Type> {
     let genericTypeArgs = curType.GetCustomTypeDef().GetGenericTypeParams()
     let instTypeArgs = curType.GetTypeArgs()
     if (!genericTypeArgs.isEmpty()) {
         CJC_ASSERT(genericTypeArgs.size == instTypeArgs.size)
     }
-    let replaceTable = HashMap<Int64, Type>()
+    let replaceTable = HashMap<GenericType, Type>()
     var idx: Int64 = 0
     while (idx < genericTypeArgs.size) {
-        replaceTable[genericTypeArgs[idx].objectId] = instTypeArgs[idx]
+        replaceTable[genericTypeArgs[idx]] = instTypeArgs[idx]
         idx++
     }
     return replaceTable
 }
 
-public func GetInstMapFromCurDefAndExDefToCurType(curType: CustomType): HashMap<Int64, Type> {
+public func GetInstMapFromCurDefAndExDefToCurType(curType: CustomType): HashMap<GenericType, Type> {
     let replaceTable = GetInstMapFromCurDefToCurType(curType)
     for (extendDef in curType.GetCustomTypeDef().GetExtends()) {
         let tempTable = extendDef.GetExtendedType().getOrThrow().CalculateGenericTyMapping(curType)[1]

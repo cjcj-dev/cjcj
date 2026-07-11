@@ -448,12 +448,12 @@ public class LocalTypeArgumentSynthesis {
         for (lb in tvb.lbs.values) {
             let _ = old.lbs.Add(lb)
             for (blameEntry in tvb.lb2Blames) {
-                if (!refEq(blameEntry.ty, lb)) {
+                if (Ptr<Ty>(blameEntry.ty) != Ptr<Ty>(lb)) {
                     continue
                 }
                 var found = false
                 for (oldEntry in old.lb2Blames) {
-                    if (refEq(oldEntry.ty, lb)) {
+                    if (Ptr<Ty>(oldEntry.ty) == Ptr<Ty>(lb)) {
                         for (blame in blameEntry.blames.values) {
                             oldEntry.blames.Add(blame)
                         }
@@ -469,12 +469,12 @@ public class LocalTypeArgumentSynthesis {
         for (ub in tvb.ubs.values) {
             let _ = old.ubs.Add(ub)
             for (blameEntry in tvb.ub2Blames) {
-                if (!refEq(blameEntry.ty, ub)) {
+                if (Ptr<Ty>(blameEntry.ty) != Ptr<Ty>(ub)) {
                     continue
                 }
                 var found = false
                 for (oldEntry in old.ub2Blames) {
-                    if (refEq(oldEntry.ty, ub)) {
+                    if (Ptr<Ty>(oldEntry.ty) == Ptr<Ty>(ub)) {
                         for (blame in blameEntry.blames.values) {
                             oldEntry.blames.Add(blame)
                         }
@@ -694,7 +694,7 @@ public class LocalTypeArgumentSynthesis {
             for (ub0 in ubs.values) {
                 var blames = BlameSet()
                 for (entry in ub2Blames) {
-                    if (refEq(entry.ty, ub0)) {
+                    if (Ptr<Ty>(entry.ty) == Ptr<Ty>(ub0)) {
                         blames = entry.blames.Clone()
                         break
                     }
@@ -721,7 +721,7 @@ public class LocalTypeArgumentSynthesis {
             for (lb0 in lbs.values) {
                 var blames = BlameSet()
                 for (entry in lb2Blames) {
-                    if (refEq(entry.ty, lb0)) {
+                    if (Ptr<Ty>(entry.ty) == Ptr<Ty>(lb0)) {
                         blames = entry.blames.Clone()
                         break
                     }
@@ -1079,7 +1079,7 @@ public class LocalTypeArgumentSynthesis {
                     for (lb in entry.bounds.lbs.values) {
                         var blames = BlameSet()
                         for (blameEntry in entry.bounds.lb2Blames) {
-                            if (refEq(blameEntry.ty, lb)) {
+                            if (Ptr<Ty>(blameEntry.ty) == Ptr<Ty>(lb)) {
                                 blames = blameEntry.blames.Clone()
                                 break
                             }
@@ -1090,7 +1090,7 @@ public class LocalTypeArgumentSynthesis {
                     for (ub in entry.bounds.ubs.values) {
                         var blames = BlameSet()
                         for (blameEntry in entry.bounds.ub2Blames) {
-                            if (refEq(blameEntry.ty, ub)) {
+                            if (Ptr<Ty>(blameEntry.ty) == Ptr<Ty>(ub)) {
                                 blames = blameEntry.blames.Clone()
                                 break
                             }
@@ -1233,7 +1233,7 @@ public class LocalTypeArgumentSynthesis {
                 let newLower = tyMgr.GetInstantiatedTy(lower, typeMapping)
                 bounds.lbs.Add(newLower)
                 for (blameEntry in entry.bounds.lb2Blames) {
-                    if (refEq(blameEntry.ty, lower)) {
+                    if (Ptr<Ty>(blameEntry.ty) == Ptr<Ty>(lower)) {
                         bounds.lb2Blames.add(TyBlameEntry(newLower, blames: blameEntry.blames.Clone()))
                         break
                     }
@@ -1243,7 +1243,7 @@ public class LocalTypeArgumentSynthesis {
                 let newUpper = tyMgr.GetInstantiatedTy(upper, typeMapping)
                 bounds.ubs.Add(newUpper)
                 for (blameEntry in entry.bounds.ub2Blames) {
-                    if (refEq(blameEntry.ty, upper)) {
+                    if (Ptr<Ty>(blameEntry.ty) == Ptr<Ty>(upper)) {
                         bounds.ub2Blames.add(TyBlameEntry(newUpper, blames: blameEntry.blames.Clone()))
                         break
                     }

@@ -369,8 +369,8 @@ public open class Type <: Hashable & Equatable<Type> {
         return IsAutoEnvBase() && !argTys.isEmpty()
     }
 
-    public func CalculateGenericTyMapping(targetTy: Type): (Bool, HashMap<Int64, Type>) {
-        let replaceTable = HashMap<Int64, Type>()
+    public func CalculateGenericTyMapping(targetTy: Type): (Bool, HashMap<GenericType, Type>) {
+        let replaceTable = HashMap<GenericType, Type>()
         let res = CalculateGenericTyMappingImpl(targetTy, this, replaceTable)
         return (res, replaceTable)
     }
@@ -469,22 +469,8 @@ public open class Type <: Hashable & Equatable<Type> {
         if (!res[0]) {
             return false
         }
-        for ((genericId, instTy) in res[1]) {
-            let genericTys = ArrayList<GenericType>()
-            genericRelatedType.VisitTypeRecursively({ ty: Type =>
-                if (let Some(curGenericTy) <- (ty as GenericType)) {
-                    if (curGenericTy.objectId == genericId) {
-                        genericTys.add(curGenericTy)
-                        return false
-                    }
-                }
-                return true
-            })
-            if (genericTys.isEmpty()) {
-                throw IllegalStateException("generic type from CalculateGenericTyMapping is missing")
-            }
-            let typeParam = genericTys[0]
-            if (!instTy.SatisfyGenericConstraints(typeParam, builder, res[1], visited: visited)) {
+        for ((genericType, instTy) in res[1]) {
+            if (!instTy.SatisfyGenericConstraints(genericType, builder, res[1], visited: visited)) {
                 return false
             }
         }
@@ -492,7 +478,7 @@ public open class Type <: Hashable & Equatable<Type> {
     }
 
     public func SatisfyGenericConstraints(genericType: GenericType, builder: CHIRBuilder,
-        instMap: HashMap<Int64, Type>, visited!: Option<HashSet<String>> = None): Bool {
+        instMap: HashMap<GenericType, Type>, visited!: Option<HashSet<String>> = None): Bool {
         for (upperBound in genericType.GetUpperBounds()) {
             let visited2 = HashSet<String>()
             if (let Some(values) <- visited) {
@@ -945,7 +931,7 @@ public class BoxType <: Type {
     }
 }
 
-public class GenericType <: Type {
+public class GenericType <: Type & Equatable<GenericType> {
     public let name: String
     private var srcCodeIdentifier: String
     private let upperBounds: ArrayList<Type> = ArrayList<Type>()
@@ -958,6 +944,14 @@ public class GenericType <: Type {
         super(TypeKind.TYPE_GENERIC)
         this.name = name
         this.srcCodeIdentifier = srcCodeIdentifier
+    }
+
+    public operator func ==(right: GenericType): Bool {
+        return (this as Type) == (right as Type)
+    }
+
+    public operator func !=(right: GenericType): Bool {
+        return (this as Type) != (right as Type)
     }
 
     public func GetIdentifier(): String {
@@ -1323,12 +1317,12 @@ public open class CustomType <: Type {
 }
 
 private func CalculateGenericTyMappingImpl(instType: Type, genericType: Type,
-    replaceTable: HashMap<Int64, Type>): Bool {
+    replaceTable: HashMap<GenericType, Type>): Bool {
     if (let Some(genericTy) <- (genericType as GenericType)) {
-        if (let Some(storedType) <- replaceTable.get(genericTy.objectId)) {
+        if (let Some(storedType) <- replaceTable.get(genericTy)) {
             return storedType.IsEqual(instType)
         }
-        replaceTable[genericTy.objectId] = instType
+        replaceTable[genericTy] = instType
         return true
     }
     if (instType.IsEqual(genericType)) {
@@ -1585,6 +1579,23 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type
     }
     if (let Some(genericTy) <- (ty as GenericType)) {
         if (let Some(instTy) <- replaceTable.get(genericTy.objectId)) {
+            return instTy
+        }
+        return ty
+    }
+    let newArgs = ArrayList<Type>()
+    for (argTy in ty.GetTypeArgs()) {
+        newArgs.add(ReplaceRawGenericArgType(argTy, replaceTable, builder))
+    }
+    return CreateNewTypeWithArgs(ty, newArgs, builder)
+}
+
+public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<GenericType, Type>, builder: CHIRBuilder): Type {
+    if (replaceTable.isEmpty()) {
+        return ty
+    }
+    if (let Some(genericTy) <- (ty as GenericType)) {
+        if (let Some(instTy) <- replaceTable.get(genericTy)) {
             return instTy
         }
         return ty

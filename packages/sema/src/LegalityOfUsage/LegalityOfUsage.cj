@@ -2,6 +2,7 @@ package cjcj::sema.LegalityOfUsage
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::ast.Ptr
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.MakeRange as BasicMakeRange
@@ -470,7 +471,9 @@ private func GetImplementedTargetIfExist(ctx: ASTContext, typeManager: TypeManag
                 continue
             }
             if (let Some(memberTy) <- member.GetTy()) {
-                isSameSignature = memberTy.objectId == targetInstanceTy.objectId
+                let memberPtr: Ptr<Ty> = Ptr<Ty>(memberTy)
+                let targetPtr: Ptr<Ty> = Ptr<Ty>(targetInstanceTy)
+                isSameSignature = memberPtr == targetPtr
             }
         }
         if (isSameSignature && !member.TestAttr(Attribute.ABSTRACT)) {
