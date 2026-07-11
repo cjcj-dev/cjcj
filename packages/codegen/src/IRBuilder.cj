@@ -2191,9 +2191,6 @@ public class IRBuilder2 <: Resource {
     }
 
     private func GetSRetAttributeType(retType: Type, retCGType: CGType): LLVMTypeRef {
-        if (ContainsGenericType(retType) && !retType.IsGeneric()) {
-            return unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
-        }
         if (retCGType.GetSize().isNone() && !retType.IsGeneric()) {
             return unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
         }
