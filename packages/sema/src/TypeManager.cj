@@ -89,7 +89,7 @@ public class TyVarScope {
 
     public func ContainsTyVar(tyVar: GenericsTy): Bool {
         for (value in tyVars) {
-            if (SameTy(value, tyVar)) {
+            if (value.objectId == tyVar.objectId) {
                 return true
             }
         }
@@ -99,7 +99,7 @@ public class TyVarScope {
     public func AddUnsolvedTyVars(out: ArrayList<GenericsTy>, unsolved: ArrayList<GenericsTy>): Unit {
         for (tyVar in tyVars) {
             for (candidate in unsolved) {
-                if (SameTy(tyVar, candidate)) {
+                if (tyVar.objectId == candidate.objectId) {
                     out.add(tyVar)
                     break
                 }
@@ -450,32 +450,32 @@ public class TypeManager {
         let raw = gpd.identifier.Val()
         let name = if (raw.isEmpty()) { "T" } else { raw }
         let ty = GenericsTy(name, gpd)
-        return (internAllocatedTy(ty) as GenericsTy) ?? ty
+        return (internAllocatedTy(ty) as GenericsTy).getOrThrow()
     }
 
     public func GetEnumTy(ed: EnumDecl, typeArgs!: Array<Ty> = Array<Ty>()): EnumTy {
         let ty = EnumTy(declName(ed), ed, typeArgs)
-        return (internAllocatedTy(ty) as EnumTy) ?? ty
+        return (internAllocatedTy(ty) as EnumTy).getOrThrow()
     }
 
     public func GetRefEnumTy(ed: EnumDecl, typeArgs: Array<Ty>): RefEnumTy {
         let ty = RefEnumTy(declName(ed), ed, typeArgs)
-        return (internAllocatedTy(ty) as RefEnumTy) ?? ty
+        return (internAllocatedTy(ty) as RefEnumTy).getOrThrow()
     }
 
     public func GetStructTy(sd: StructDecl, typeArgs: Array<Ty>): StructTy {
         let ty = StructTy(declName(sd), sd, typeArgs)
-        return (internAllocatedTy(ty, classLike: true) as StructTy) ?? ty
+        return (internAllocatedTy(ty, classLike: true) as StructTy).getOrThrow()
     }
 
     public func GetTupleTy(typeArgs: Array<Ty>, isClosureTy!: Bool = false): TupleTy {
         let ty = TupleTy(typeArgs, isClosureTy: isClosureTy)
-        return (internAllocatedTy(ty) as TupleTy) ?? ty
+        return (internAllocatedTy(ty) as TupleTy).getOrThrow()
     }
 
     public func GetFunctionTy(paramTys: Array<Ty>, retTy: Ty, cfg!: FuncTyConfig = FuncTyConfig()): FuncTy {
         let ty = FuncTy(paramTys, retTy, cfg: cfg)
-        return (internAllocatedTy(ty) as FuncTy) ?? ty
+        return (internAllocatedTy(ty) as FuncTy).getOrThrow()
     }
 
     public func GetArrayTy(elemTy: Ty, dims: UInt64): ArrayTy {
@@ -492,18 +492,18 @@ public class TypeManager {
             realElemTy = GetInvalidTy()
         }
         let ty = ArrayTy(realElemTy, realDims)
-        return (internAllocatedTy(ty) as ArrayTy) ?? ty
+        return (internAllocatedTy(ty) as ArrayTy).getOrThrow()
     }
 
     public func GetVArrayTy(elemTy: Ty, size: Int64): VArrayTy {
         let ty = VArrayTy(elemTy, size)
-        return (internAllocatedTy(ty) as VArrayTy) ?? ty
+        return (internAllocatedTy(ty) as VArrayTy).getOrThrow()
     }
 
     public func GetPointerTy(elemTy: Ty): PointerTy {
         let realElemTy = if (Ty.IsTyCorrect(elemTy)) { elemTy } else { GetInvalidTy() }
         let ty = PointerTy(realElemTy)
-        return (internAllocatedTy(ty) as PointerTy) ?? ty
+        return (internAllocatedTy(ty) as PointerTy).getOrThrow()
     }
 
     public func GetArrayTy(): ArrayTy {
@@ -512,22 +512,22 @@ public class TypeManager {
 
     public func GetClassTy(cd: ClassDecl, typeArgs: Array<Ty>): ClassTy {
         let ty = ClassTy(declName(cd), cd, typeArgs)
-        return (internAllocatedTy(ty, classLike: true) as ClassTy) ?? ty
+        return (internAllocatedTy(ty, classLike: true) as ClassTy).getOrThrow()
     }
 
     public func GetClassThisTy(cd: ClassDecl, typeArgs: Array<Ty>): ClassThisTy {
         let ty = ClassThisTy(declName(cd), cd, typeArgs)
-        return (internAllocatedTy(ty, classLike: true) as ClassThisTy) ?? ty
+        return (internAllocatedTy(ty, classLike: true) as ClassThisTy).getOrThrow()
     }
 
     public func GetInterfaceTy(id: InterfaceDecl, typeArgs: Array<Ty>): InterfaceTy {
         let ty = InterfaceTy(declName(id), id, typeArgs)
-        return (internAllocatedTy(ty, classLike: true) as InterfaceTy) ?? ty
+        return (internAllocatedTy(ty, classLike: true) as InterfaceTy).getOrThrow()
     }
 
     public func GetTypeAliasTy(tad: TypeAliasDecl, typeArgs: Array<Ty>): TypeAliasTy {
         let ty = TypeAliasTy(declName(tad), tad, typeArgs)
-        return (internAllocatedTy(ty) as TypeAliasTy) ?? ty
+        return (internAllocatedTy(ty) as TypeAliasTy).getOrThrow()
     }
 
     public func GetIntersectionTy(tys: Array<Ty>): Ty {
@@ -2546,7 +2546,7 @@ public class TypeManager {
         tv.lowerBound = None
         var idx: Int64 = 0
         while (idx < unsolvedTyVars.size) {
-            if (SameTy(unsolvedTyVars[idx], tv)) {
+            if (unsolvedTyVars[idx].objectId == tv.objectId) {
                 unsolvedTyVars.remove(at: idx)
             } else {
                 idx++
@@ -3492,7 +3492,7 @@ public class TypeManager {
 
     private func containsGeneric(values: ArrayList<GenericsTy>, ty: GenericsTy): Bool {
         for (value in values) {
-            if (SameTy(value, ty)) {
+            if (value.objectId == ty.objectId) {
                 return true
             }
         }
@@ -3502,7 +3502,7 @@ public class TypeManager {
     private func removeTypeSubst(mapping: TypeSubst, tyVar: GenericsTy): Unit {
         var idx: Int64 = 0
         while (idx < mapping.entries.size) {
-            if (SameTy(mapping.entries[idx].tyVar, tyVar)) {
+            if (mapping.entries[idx].tyVar.objectId == tyVar.objectId) {
                 mapping.entries.remove(at: idx)
                 return
             }

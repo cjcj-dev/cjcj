@@ -289,7 +289,7 @@ public type UpperBounds = TySet
 
 private func AddTyVarUnique(values: TyVars, tyVar: GenericsTy): Bool {
     for (value in values) {
-        if (SameTy(value, tyVar)) {
+        if (value.objectId == tyVar.objectId) {
             return false
         }
     }
@@ -391,7 +391,7 @@ public class TypeSubst {
 
     public func Put(tyVar: GenericsTy, ty: Ty): Unit {
         for (entry in entries) {
-            if (SameTy(entry.tyVar, tyVar)) {
+            if (entry.tyVar.objectId == tyVar.objectId) {
                 entry.ty = ty
                 return
             }
@@ -401,7 +401,7 @@ public class TypeSubst {
 
     public func Get(tyVar: GenericsTy): Option<Ty> {
         for (entry in entries) {
-            if (SameTy(entry.tyVar, tyVar)) {
+            if (entry.tyVar.objectId == tyVar.objectId) {
                 return entry.ty
             }
         }
@@ -445,7 +445,7 @@ public class MultiTypeSubst {
 
     public func Put(tyVar: GenericsTy, ty: Ty): Unit {
         for (entry in entries) {
-            if (SameTy(entry.tyVar, tyVar)) {
+            if (entry.tyVar.objectId == tyVar.objectId) {
                 entry.tys.Add(ty)
                 return
             }
@@ -463,7 +463,7 @@ public class MultiTypeSubst {
 
     public func Get(tyVar: GenericsTy): Option<TySet> {
         for (entry in entries) {
-            if (SameTy(entry.tyVar, tyVar)) {
+            if (entry.tyVar.objectId == tyVar.objectId) {
                 return entry.tys
             }
         }
@@ -587,7 +587,7 @@ public class Constraint {
 
     public func GetOrCreate(tyVar: GenericsTy): TyVarBounds {
         for (entry in entries) {
-            if (SameTy(entry.tyVar, tyVar)) {
+            if (entry.tyVar.objectId == tyVar.objectId) {
                 return entry.bounds
             }
         }
