@@ -90,8 +90,9 @@ extend MPTypeCheckerImpl {
         let commonGenericsCount = commonFunc.GetGenericsCount()
         let specificGenericsCount = specificFunc.GetGenericsCount()
         if (commonGenericsCount != specificGenericsCount) {
-            let builder = diag.Diagnose(
-                specificFunc.begin,
+            let builder = Diagnose(
+                diag,
+                specificFunc,
                 BasicDiagKind.sema_generic_member_type_argument_different,
                 args: [BasicDiagArgument(specificFunc.identifier.Val())])
             builder.Emit()
