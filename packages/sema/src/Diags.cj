@@ -5,7 +5,7 @@ import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.Range as BasicRange
 import cjcj::ast.*
-import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
 
 private func GetParamsType(typeList: Array<Option<Ty>>): String {
     let result = StringBuilder()
@@ -196,18 +196,46 @@ public func DiagInvalidAssign(diag: BasicDiagnosticEngine, node: Node, name: Str
         node, range, name).Emit()
 }
 
-public func DiagCannotAssignToImmutable(diag: BasicDiagnosticEngine, ae: Expr, perpetrator: Expr): Unit {
-    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_cannot_assign_to_immutable, ae)
+// `assignExpr` can be `AssignExpr` or `IncOrDecExpr`.
+public func DiagCannotAssignToImmutable(
+    diag: BasicDiagnosticEngine,
+    assignExpr: Expr,
+    perpetrator: Expr
+): Unit {
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_cannot_assign_to_immutable, assignExpr)
     if (let Some(target) <- perpetrator.GetTarget()) {
-        if (!target.identifier.Begin().IsZero()) {
+        if (!target.identifier.ZeroPos()) {
             AddNote(builder, target, MakeRange(target.identifier.Begin(), target.identifier.End()),
                 DeclKindToString(target) + " '" + target.identifier.Val() + "' is immutable")
+        } else if (perpetrator.astKind == ASTKind.CALL_EXPR) {
+            AddNote(builder, perpetrator, MakeRange(perpetrator.begin, perpetrator.end),
+                "function call returns immutable value")
         }
     } else if (perpetrator.astKind == ASTKind.CALL_EXPR) {
         AddNote(builder, perpetrator, MakeRange(perpetrator.begin, perpetrator.end),
             "function call returns immutable value")
     }
     builder.Emit()
+}
+
+public func DiagCJMPCannotAssignToImmutableCommonInCtor(
+    diag: BasicDiagnosticEngine,
+    assignExpr: Expr,
+    perpetrator: Expr
+): Unit {
+    if (let Some(target) <- perpetrator.GetTarget()) {
+        if (!target.identifier.ZeroPos()) {
+            let builder = DiagnoseRefactor(diag,
+                BasicDiagKindRefactor.sema_common_assign_to_common_immutable_in_ctor,
+                assignExpr, arguments: [target.identifier.Val()])
+            let modifier = FindModifier(target, TokenKind.COMMON).getOrThrow()
+            AddNote(builder, target, MakeRange(modifier.begin, modifier.end),
+                "'common' let field '" + target.identifier.Val() + "' cannot be assigned in constructor")
+            builder.Emit()
+            return
+        }
+    }
+    CJC_ABORT()
 }
 
 public func DiagCannotHaveDefaultParam(diag: BasicDiagnosticEngine, fd: FuncDecl, fp: FuncParam): Unit {

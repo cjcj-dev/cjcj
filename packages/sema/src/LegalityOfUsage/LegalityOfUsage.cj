@@ -598,7 +598,7 @@ public func CheckLegalityOfUsage(
     TypeCheckReferenceCheckLegalityOfReference(diag, typeManager, ctx, pkg)
     AppendStaticMemberGenericIssues(result.staticMemberGenericIssues, CheckStaticMembersWithGeneric(pkg))
     TypeCheckReferenceCheckUsageOfDeprecated(diag, typeManager, pkg)
-    AppendInitializationIssues(result.initializationIssues, CheckInitialization(ctx, pkg, opts: opts))
+    AppendInitializationIssues(result.initializationIssues, CheckInitialization(ctx, diag, pkg, opts: opts))
     AppendGlobalIssues(result.globalVarInitializationIssues, CheckGlobalVarInitialization(pkg))
     CheckLegalityOfUnsafeAndInout(pkg, diag, backendType: opts.backend)
     AppendAccessIssues(result.accessLevelViolations, CheckAccessLevelValidity(pkg))

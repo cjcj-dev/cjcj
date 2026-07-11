@@ -49,10 +49,6 @@ private func EmitInitializationIssue(diag: BasicDiagnosticEngine, issue: Initial
         // CheckInitInRefExpr (InitializationChecker.cpp:860-861).
         case InitializationIssueKind.CAPTURE_BEFORE_INITIALIZATION =>
             DiagnoseRefactorNode(diag, issue.node, BasicDiagKindRefactor.sema_capture_before_initialization, name)
-        // CheckLetFlag* -> DiagCannotAssignToImmutable (Diags.cpp:414-416):
-        // DiagnoseRefactor(sema_cannot_assign_to_immutable, ae) with no format args.
-        case InitializationIssueKind.ASSIGN_IMMUTABLE =>
-            DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_cannot_assign_to_immutable, issue.node).Emit()
         // CheckIllegal*Access (InitializationChecker.cpp:815, 1526, 1536, 1554):
         // legacy DiagKind::sema_illegal_usage_of_member.
         case InitializationIssueKind.ILLEGAL_MEMBER_USE =>

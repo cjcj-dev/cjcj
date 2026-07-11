@@ -2,12 +2,13 @@ package cjcj::sema.LegalityOfUsage
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::sema.*
+import cjcj::sema.DiagCJMPCannotAssignToImmutableCommonInCtor
 
 public enum InitializationIssueKind {
     | USED_BEFORE_INITIALIZATION
-    | ASSIGN_IMMUTABLE
     | CAPTURE_BEFORE_INITIALIZATION
     | ILLEGAL_MEMBER_USE
     | ILLEGAL_SUPER_MEMBER_USE
@@ -17,11 +18,10 @@ public enum InitializationIssueKind {
 private func InitializationIssueKindIndex(kind: InitializationIssueKind): Int64 {
     return match (kind) {
         case InitializationIssueKind.USED_BEFORE_INITIALIZATION => 0
-        case InitializationIssueKind.ASSIGN_IMMUTABLE => 1
-        case InitializationIssueKind.CAPTURE_BEFORE_INITIALIZATION => 2
-        case InitializationIssueKind.ILLEGAL_MEMBER_USE => 3
-        case InitializationIssueKind.ILLEGAL_SUPER_MEMBER_USE => 4
-        case InitializationIssueKind.UNINITIALIZED_FIELD => 5
+        case InitializationIssueKind.CAPTURE_BEFORE_INITIALIZATION => 1
+        case InitializationIssueKind.ILLEGAL_MEMBER_USE => 2
+        case InitializationIssueKind.ILLEGAL_SUPER_MEMBER_USE => 3
+        case InitializationIssueKind.UNINITIALIZED_FIELD => 4
     }
 }
 
@@ -634,6 +634,7 @@ private func IsInitializedMemberAccess(member: MemberAccess): Bool {
 
 public class InitializationChecker {
     private let ctx: ASTContext
+    private let diag: BasicDiagnosticEngine
     private let opts: OptionGlobalOptions
     private let issues: ArrayList<InitializationIssue> = ArrayList<InitializationIssue>()
     private var currentInitializingVarDependencies: Option<ArrayList<Decl>> = None
@@ -644,8 +645,9 @@ public class InitializationChecker {
     private var optionalCtxDepth: Int64 = 0
     private var tryDepth: Int64 = 0
 
-    public init(ctx: ASTContext, opts!: OptionGlobalOptions = OptionGlobalOptions()) {
+    public init(ctx: ASTContext, diag: BasicDiagnosticEngine, opts!: OptionGlobalOptions = OptionGlobalOptions()) {
         this.ctx = ctx
+        this.diag = diag
         this.opts = opts
     }
 
@@ -1011,7 +1013,11 @@ public class InitializationChecker {
                 if (let Some(varDecl) <- (target as VarDecl)) {
                     if (NotAssignableVariable(varDecl, inInitFunction) ||
                         IsAssignLetDefinedOuterLoop(ctx, varDecl, assignOrInc)) {
-                        AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignOrInc, target: varDecl)
+                        if (varDecl.TestAttr(Attribute.COMMON) && inInitFunction) {
+                            DiagCJMPCannotAssignToImmutableCommonInCtor(diag, assignOrInc, refExpr)
+                        } else {
+                            DiagCannotAssignToImmutable(diag, assignOrInc, refExpr)
+                        }
                     }
                 }
             }
@@ -1022,7 +1028,7 @@ public class InitializationChecker {
                 if (let Some(baseTy) <- base.GetTy()) {
                     if (let Some(_) <- (baseTy as VArrayTy)) {
                         if (base.astKind == ASTKind.SUBSCRIPT_EXPR || base.astKind == ASTKind.CALL_EXPR) {
-                            AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignOrInc, target: base.GetTarget())
+                            DiagCannotAssignToImmutable(diag, assignOrInc, base)
                         } else {
                             CheckLetFlag(assignOrInc, base)
                         }
@@ -1054,18 +1060,18 @@ public class InitializationChecker {
         if (let Some(target) <- member.target) {
             if (let Some(varDecl) <- (target as VarDecl)) {
                 if (NotAssignableVariable(varDecl, inInitFunction)) {
-                    AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: varDecl)
+                    DiagCannotAssignToImmutable(diag, assignExpr, member)
                 }
                 let realBase = GetRealExpr(memberBase)
                 let isStructBase = IsStructBaseExpr(realBase)
                 if ((realBase.astKind == ASTKind.CALL_EXPR || realBase.astKind == ASTKind.SUBSCRIPT_EXPR) &&
                     isStructBase) {
-                    AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: realBase.GetTarget())
+                    DiagCannotAssignToImmutable(diag, assignExpr, realBase)
                 }
                 if (let Some(nameRef) <- (memberBase as NameReferenceExpr)) {
                     if (let Some(baseTarget) <- nameRef.GetTarget()) {
                         if (baseTarget.astKind == ASTKind.PROP_DECL && isStructBase) {
-                            AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: baseTarget)
+                            DiagCannotAssignToImmutable(diag, assignExpr, nameRef)
                         }
                     }
                 }
@@ -1075,7 +1081,7 @@ public class InitializationChecker {
             if (let Some(target) <- refExpr.GetTarget()) {
                 if (let Some(varDecl) <- (target as VarDecl)) {
                     if (!varDecl.isVar && MayBeStructTy(varDecl)) {
-                        AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: varDecl)
+                        DiagCannotAssignToImmutable(diag, assignExpr, refExpr)
                     }
                 }
             }
@@ -1084,7 +1090,7 @@ public class InitializationChecker {
                 if (let Some(varDecl) <- (target as VarDecl)) {
                     if (MayBeStructTy(varDecl)) {
                         if (!varDecl.isVar) {
-                            AddIssue(InitializationIssueKind.ASSIGN_IMMUTABLE, assignExpr, target: varDecl)
+                            DiagCannotAssignToImmutable(diag, assignExpr, member)
                         } else {
                             CheckLetFlag(assignExpr, memberBase)
                         }
@@ -2274,10 +2280,11 @@ public class InitializationChecker {
 
 public func CheckInitialization(
     ctx: ASTContext,
+    diag: BasicDiagnosticEngine,
     root: Node,
     opts!: OptionGlobalOptions = OptionGlobalOptions()
 ): ArrayList<InitializationIssue> {
-    return InitializationChecker(ctx, opts: opts).Check(root)
+    return InitializationChecker(ctx, diag, opts: opts).Check(root)
 }
 
 public func SelfhostPortStatus_LegalityOfUsage_InitializationChecker(): Bool {
