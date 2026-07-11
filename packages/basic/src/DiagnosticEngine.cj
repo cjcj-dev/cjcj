@@ -184,6 +184,7 @@ public struct Range <: Hashable & Equatable<Range> {
         return begin.IsZero() || end.IsZero()
     }
 
+    @OverflowWrapping
     public func hashCode(): Int64 {
         return Int64(Hash())
     }
