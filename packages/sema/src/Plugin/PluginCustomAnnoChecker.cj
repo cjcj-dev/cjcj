@@ -911,7 +911,7 @@ public class PluginCustomAnnoChecker {
                     diag,
                     BasicDiagKindRefactor.sema_hide_missing_hide,
                     decl)
-                builder.AddNote("the extended declaration is marked with '@!Hide'")
+                AddNote(builder, extended, "the extended declaration is marked with '@!Hide'")
                 builder.Emit()
             } else if (let Some(currentHide) <- annoInfo.hasHideAnno) {
                 if (extendedHide && !currentHide) {
@@ -921,7 +921,7 @@ public class PluginCustomAnnoChecker {
                         BasicDiagKindRefactor.sema_hide_diff_param,
                         decl,
                         arguments: [value])
-                    builder.AddNote("should be same with")
+                    AddNote(builder, extended, "should be same with")
                     builder.Emit()
                 }
             }
@@ -941,7 +941,7 @@ public class PluginCustomAnnoChecker {
                         BasicDiagKindRefactor.sema_hide_diff_param,
                         member,
                         arguments: [value])
-                    builder.AddNote("should be same with")
+                    AddNote(builder, decl, "should be same with")
                     builder.Emit()
                 }
             }
