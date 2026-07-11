@@ -117,6 +117,7 @@ private class ToCHIR {
         closure.RunOnPackage(lowered)
         ast2chir.ReplaceSrcCodeImportedValAfterClosureConversion(lowered, closure.GetUselessClassDef(),
             closure.GetUselessLambda())
+        EraseDebugExpr()
         CFFIFuncWrapper()
         if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
             ChirCHIRPrinter.PrintPackage(lowered)
@@ -257,6 +258,22 @@ private class ToCHIR {
             DeadCodeElimination(builder, instance.diag.AsBasicDiagnosticEngine(), currentPackage)
                 .UselessFuncElimination(currentPackage, options)
             DumpCHIRToFile("UselessFuncElimination")
+        }
+    }
+
+    private func EraseDebugExpr(): Unit {
+        try (recorder = ProfileRecorder("CHIR", "EraseUselessDebugExpr")) {
+            for (`func` in chirPkg.getOrThrow().GetGlobalFuncsWithBody()) {
+                for (block in `func`.GetBody().getOrThrow().GetBlocks()) {
+                    for (expr in block.GetExpressions()) {
+                        if (expr.GetExprKind() == ChirExprKind.DEBUGEXPR &&
+                            (expr.GetOperand(0).IsGlobal() || expr.GetOperand(0).IsCompileTimeValue())) {
+                            expr.RemoveSelfFromBlock()
+                        }
+                    }
+                }
+            }
+            DumpCHIRToFile("EraseUselessDebugExpr")
         }
     }
 
