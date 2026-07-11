@@ -190,6 +190,12 @@ public func MakeRangeForDeclIdentifier(decl: Decl): BasicRange {
     return MakeRange(decl.identifier.Begin(), decl.identifier.End())
 }
 
+public func DiagInvalidAssign(diag: BasicDiagnosticEngine, node: Node, name: String): Unit {
+    let range = MakeRange(node.begin, node.end)
+    DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_unqualified_left_value_assigned,
+        node, range, name).Emit()
+}
+
 public func DiagCannotHaveDefaultParam(diag: BasicDiagnosticEngine, fd: FuncDecl, fp: FuncParam): Unit {
     if (fp.TestAttr(Attribute.IS_BROKEN)) {
         return

@@ -5,9 +5,9 @@ import cjcj::ast.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.Diagnostic
 import cjcj::sema.*
 import cjcj::sema.Desugar.*
-import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::utils.CJC_ASSERT
 
 public type AssignRightChecker = (Ty, Expr) -> Bool
@@ -28,6 +28,39 @@ private func IsCompoundNumericAssign(op: TokenKind): Bool {
 
 private func IsCompoundBoolAssign(op: TokenKind): Bool {
     return op == TokenKind.AND_ASSIGN || op == TokenKind.OR_ASSIGN
+}
+
+private func IsAssignableSubScriptExpr(se: SubscriptExpr, isCompound: Bool,
+    diags: Array<Diagnostic>, diag: BasicDiagnosticEngine): Bool {
+    let isOperatorOverload = se.desugarExpr.isSome()
+    if (se.desugarExpr.isSome()) {
+        RecoverToSubscriptExpr(se)
+    }
+    if (se.isTupleAccess) {
+        for (diagnostic in diags) {
+            diag.Diagnose(diagnostic).Emit()
+        }
+        DiagInvalidAssign(diag, se, "tuple element")
+        return false
+    }
+    CJC_ASSERT(se.baseExpr.isSome() && !se.indexExprs.isEmpty())
+    let diagKind = if (isCompound) {
+        BasicDiagKind.sema_subscript_get_set_not_supported
+    } else {
+        BasicDiagKind.sema_subscript_set_not_supported
+    }
+    let indexTy = TypeManager.GetNonNullTy(se.indexExprs[0].GetTy() ?? TypeManager.GetInvalidTy())
+    let baseTy = TypeManager.GetNonNullTy(se.baseExpr.getOrThrow().GetTy() ?? TypeManager.GetInvalidTy())
+    if ((!baseTy.IsArray() && (let None <- (baseTy as VArrayTy))) ||
+        (isOperatorOverload && !indexTy.IsInteger())) {
+        for (diagnostic2 in diags) {
+            diag.Diagnose(diagnostic2).Emit()
+        }
+        Diagnose(diag, se, diagKind,
+            args: [BasicDiagArgument(baseTy.String()), BasicDiagArgument(indexTy.String())]).Emit()
+        return false
+    }
+    return true
 }
 
 private func IsAssignableExpr(expr: Expr): Bool {
