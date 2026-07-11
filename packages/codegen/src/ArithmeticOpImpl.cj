@@ -125,7 +125,7 @@ private func CreateFastPowerCallForFloat64PowerFloat64(irBuilder: IRBuilder2, le
     let args = ArrayList<LLVMValueRef>()
     args.add(leftVal.GetRawValue())
     args.add(rightVal.GetRawValue())
-    return irBuilder.CreateCallOrInvoke(function, functionType, args)
+    return irBuilder.CreateCallOrInvoke(function, args)
 }
 
 private func CreateFastPowerCallForFloat64PowerInt64(irBuilder: IRBuilder2, leftVal: CGValue,
@@ -139,7 +139,7 @@ private func CreateFastPowerCallForFloat64PowerInt64(irBuilder: IRBuilder2, left
     let args = ArrayList<LLVMValueRef>()
     args.add(leftVal.GetRawValue())
     args.add(rightVal.GetRawValue())
-    return irBuilder.CreateCallOrInvoke(function, functionType, args)
+    return irBuilder.CreateCallOrInvoke(function, args)
 }
 
 private func CreateFastPowerCallForInt64PowerUInt64(irBuilder: IRBuilder2, leftVal: CGValue,
@@ -186,7 +186,7 @@ private func CreateFastPowerCallForInt64PowerUInt64(irBuilder: IRBuilder2, leftV
     let args = ArrayList<LLVMValueRef>()
     args.add(leftVal.GetRawValue())
     args.add(rightVal.GetRawValue())
-    return irBuilder.CreateCallOrInvoke(function, functionType, args)
+    return irBuilder.CreateCallOrInvoke(function, args)
 }
 
 public func GenerateArithmeticOperation(irBuilder: IRBuilder2, chirExpr: CHIRBinaryExprWrapper): LLVMValueRef {

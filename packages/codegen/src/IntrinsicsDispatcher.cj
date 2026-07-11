@@ -114,10 +114,10 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
         return GenerateCPointerAdd(irBuilder, args, resultType)
     }
     if (kind == IntrinsicKind.CPOINTER_READ) {
-        return GenerateCPointerRead(irBuilder, args, typeArgs, resultType)
+        return CPointerRead(irBuilder, args, typeArgs, resultType)
     }
     if (kind == IntrinsicKind.CPOINTER_WRITE) {
-        return GenerateCPointerWrite(irBuilder, args, typeArgs)
+        return CPointerWrite(irBuilder, args, typeArgs)
     }
     if (kind == IntrinsicKind.BIT_CAST) {
         if (!args.isEmpty() && resultType.isSome()) {
@@ -539,40 +539,34 @@ private func InsertAsanInstrument(irBuilder: IRBuilder2, typeArgs: ArrayList<Typ
     }
 }
 
-private func GenerateCPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>, typeArgs: ArrayList<Type>,
+private func CPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>, typeArgs: ArrayList<Type>,
     resultType: Option<Type>): LLVMValueRef {
-    if (args.size < 2 || resultType.isNone()) {
-        return LLVMNullValue()
-    }
+    CJC_ASSERT(args.size == 2)
+    let resultTy = resultType.getOrThrow()
     let pointerValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
     let indexValue = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
-    if (let Some(resultTy) <- resultType) {
-        if (resultTy.IsGeneric()) {
-            let typeInfoOfResult = irBuilder.CreateTypeInfo(resultTy)
-            let resultTySize = irBuilder.GetLayoutSize_32(resultTy)
-            let ret = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfoOfResult, resultTySize]))
-            let destPayloadPtr = irBuilder.GetPayloadFromObject(ret)
-            let fixedTypeSize = irBuilder.CreateZExtOrTrunc(resultTySize,
-                unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }, name: "ptr.read.size")
-            let offset = irBuilder.CreateBinary(ExprKind.MUL, fixedTypeSize, indexValue, name: "ptr.read.offset")
-            let i8Type = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
-            let genericIndices = ArrayList<LLVMValueRef>()
-            genericIndices.add(offset)
-            let gep = irBuilder.CreateGEP(i8Type, pointerValue, genericIndices, name: "ele.ptr")
-            InsertAsanInstrument(irBuilder, typeArgs, gep, "CJ_MCC_AsanRead")
-            irBuilder.CreateMemCpy(destPayloadPtr, 0u32, gep, 0u32, resultTySize)
-            return ret
-        }
-        let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
-        let typedPtr = irBuilder.CreateBitCast(pointerValue,
-            unsafe { LLVMPointerType(resultCGType.GetLLVMType(), 0u32) }, name: "ptr.read.cast")
-        let indices = ArrayList<LLVMValueRef>()
-        indices.add(indexValue)
-        let addr = irBuilder.CreateGEP(resultCGType.GetLLVMType(), typedPtr, indices, name: "ptr.read.addr")
-        InsertAsanInstrument(irBuilder, typeArgs, addr, "CJ_MCC_AsanRead")
-        return HandleValuePtr(irBuilder, addr)
+    if (resultTy.IsGeneric()) {
+        let typeInfoOfResult = irBuilder.CreateTypeInfo(resultTy)
+        let resultTySize = irBuilder.GetLayoutSize_32(resultTy)
+        let ret = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfoOfResult, resultTySize]))
+        let destPayloadPtr = irBuilder.GetPayloadFromObject(ret)
+        let fixedTypeSize = irBuilder.CreateZExtOrTrunc(resultTySize,
+            unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }, name: "ptr.read.size")
+        let offset = irBuilder.CreateBinary(ExprKind.MUL, fixedTypeSize, indexValue, name: "ptr.read.offset")
+        let indices = ArrayList<LLVMValueRef>([offset])
+        let gep = irBuilder.CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) },
+            pointerValue, indices, name: "ele.ptr")
+        InsertAsanInstrument(irBuilder, typeArgs, gep, "CJ_MCC_AsanRead")
+        irBuilder.CreateMemCpy(destPayloadPtr, 0u32, gep, 0u32, resultTySize)
+        return ret
     }
-    return LLVMNullValue()
+    let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
+    let typedPtr = irBuilder.CreateBitCast(pointerValue,
+        unsafe { LLVMPointerType(resultCGType.GetLLVMType(), 0u32) }, name: "ptr.read.cast")
+    let indices = ArrayList<LLVMValueRef>([indexValue])
+    let addr = irBuilder.CreateInBoundsGEP(resultCGType.GetLLVMType(), typedPtr, indices, name: "ptr.read.addr")
+    InsertAsanInstrument(irBuilder, typeArgs, addr, "CJ_MCC_AsanRead")
+    return HandleValuePtr(irBuilder, addr)
 }
 
 private func HandleValuePtr(irBuilder: IRBuilder2, valPtr: LLVMValueRef): LLVMValueRef {
@@ -591,57 +585,50 @@ private func IsVArrayPtrType(llvmType: LLVMTypeRef): Bool {
     return !elementType.isNull() && unsafe { LLVMGetTypeKind(elementType) } == LLVM_ARRAY_TYPE_KIND_FOR_INTRINSICS
 }
 
-private func GenerateCPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>,
+private func CPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>,
     typeArgs: ArrayList<Type>): LLVMValueRef {
-    if (args.size < 3) {
-        return LLVMNullValue()
-    }
+    CJC_ASSERT(args.size == 3)
     let pointerValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
     let indexValue = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
     let value = irBuilder.GetCGModule().GetMappedCGValue(args[2])
-    if (let Some(valueTy) <- args[2].GetType()) {
-        if (valueTy.IsGeneric()) {
-            let valueTySize = irBuilder.GetLayoutSize_32(valueTy)
-            let fixedTypeSize = irBuilder.CreateZExtOrTrunc(valueTySize,
-                unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }, name: "ptr.write.size")
-            let offset = irBuilder.CreateBinary(ExprKind.MUL, fixedTypeSize, indexValue, name: "ptr.write.offset")
-            let i8Type = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
-            let indices = ArrayList<LLVMValueRef>()
-            indices.add(offset)
-            let addr = irBuilder.CreateGEP(i8Type, pointerValue, indices, name: "ele.ptr")
-            let payloadPtr = irBuilder.GetPayloadFromObject(value.GetRawValue())
-            InsertAsanInstrument(irBuilder, typeArgs, addr, "CJ_MCC_AsanWrite")
-            return irBuilder.CreateMemCpy(addr, 0u32, payloadPtr, 0u32, valueTySize)
-        }
-        let rawValue = value.GetRawValue()
-        let rawValueType = unsafe { LLVMTypeOf(rawValue) }
-        let pointerType = unsafe { LLVMTypeOf(pointerValue) }
-        let pointerAddrSpace = if (!pointerType.isNull() &&
-            unsafe { LLVMGetTypeKind(pointerType) } == 12) {
-            unsafe { LLVMGetPointerAddressSpace(pointerType) }
-        } else {
-            0u32
-        }
-        let paramType = if (IsStructPtrType(rawValueType)) {
-            unsafe { LLVMPointerType(GetPointerElementType(rawValueType), pointerAddrSpace) }
-        } else {
-            unsafe { LLVMPointerType(rawValueType, 0u32) }
-        }
-        let typedPtr = irBuilder.CreatePointerCast(pointerValue, paramType, name: "ptr.write.cast")
-        let indices = ArrayList<LLVMValueRef>()
-        indices.add(indexValue)
-        let addr = irBuilder.CreateGEP(GetPointerElementType(paramType), typedPtr, indices, name: "ptr.write.addr")
+    let valueTy = args[2].GetType().getOrThrow()
+    if (valueTy.IsGeneric()) {
+        let valueTySize = irBuilder.GetLayoutSize_32(valueTy)
+        let fixedTypeSize = irBuilder.CreateZExtOrTrunc(valueTySize,
+            unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }, name: "ptr.write.size")
+        let offset = irBuilder.CreateBinary(ExprKind.MUL, fixedTypeSize, indexValue, name: "ptr.write.offset")
+        let indices = ArrayList<LLVMValueRef>([offset])
+        let addr = irBuilder.CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) },
+            pointerValue, indices, name: "ele.ptr")
+        let payloadPtr = irBuilder.GetPayloadFromObject(value.GetRawValue())
         InsertAsanInstrument(irBuilder, typeArgs, addr, "CJ_MCC_AsanWrite")
-        if (valueTy.IsStruct() || valueTy.IsUnit()) {
-            let elementType = GetPointerElementType(rawValueType)
-            let size = unsafe {
-                LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw),
-                    irBuilder.GetCGModule().GetTypeSize(elementType), 0)
-            }
-            let align = irBuilder.GetCGModule().GetABITypeAlignment(elementType)
-            return irBuilder.CreateMemCpy(addr, align, rawValue, align, size)
+        irBuilder.CreateMemCpy(addr, 0u32, payloadPtr, 0u32, valueTySize)
+        return LLVMNullValue()
+    }
+    let rawValue = value.GetRawValue()
+    let rawValueType = unsafe { LLVMTypeOf(rawValue) }
+    let pointerType = unsafe { LLVMTypeOf(pointerValue) }
+    let pointerAddrSpace = unsafe { LLVMGetPointerAddressSpace(pointerType) }
+    let paramType = if (IsStructPtrType(rawValueType)) {
+        unsafe { LLVMPointerType(GetPointerElementType(rawValueType), pointerAddrSpace) }
+    } else {
+        unsafe { LLVMPointerType(rawValueType, 0u32) }
+    }
+    let typedPtr = irBuilder.CreateBitCast(pointerValue, paramType, name: "ptr.write.cast")
+    let indices = ArrayList<LLVMValueRef>([indexValue])
+    let addr = irBuilder.CreateInBoundsGEP(GetPointerElementType(paramType), typedPtr, indices,
+        name: "ptr.write.addr")
+    InsertAsanInstrument(irBuilder, typeArgs, addr, "CJ_MCC_AsanWrite")
+    if (valueTy.IsStruct() || valueTy.IsUnit()) {
+        let elementType = GetPointerElementType(rawValueType)
+        let size = unsafe {
+            LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw),
+                irBuilder.GetCGModule().GetTypeSize(elementType), 0)
         }
-        return irBuilder.CreateStore(rawValue, addr)
+        let align = irBuilder.GetCGModule().GetABITypeAlignment(elementType)
+        irBuilder.CreateMemCpy(addr, align, rawValue, align, size)
+    } else {
+        irBuilder.CreateStore(rawValue, addr)
     }
     return LLVMNullValue()
 }

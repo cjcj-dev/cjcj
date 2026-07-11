@@ -3,6 +3,7 @@ package cjcj::codegen
 import std.collection.*
 import cjcj::chir.Attribute
 import cjcj::chir.CheckCustomTypeDefIsExpected
+import cjcj::chir.CHIRBuilder
 import cjcj::chir.ClassDef
 import cjcj::chir.ClassType
 import cjcj::chir.Constant
@@ -10,13 +11,18 @@ import cjcj::chir.CustomType
 import cjcj::chir.EnumType
 import cjcj::chir.ExtendDef
 import cjcj::chir.ExprKind
+import cjcj::chir.Expression
 import cjcj::chir.Function
 import cjcj::chir.GenericType
+import cjcj::chir.GetElementRef
+import cjcj::chir.GetFieldOfType
+import cjcj::chir.IntType
 import cjcj::chir.LocalVar
 import cjcj::chir.Parameter
 import cjcj::chir.RawArrayLiteralInit
 import cjcj::chir.Tuple
 import cjcj::chir.Type
+import cjcj::chir.TypeKind
 import cjcj::chir.`VArray` as CHIRVArray
 import cjcj::chir.Value
 import cjcj::mangle.MANGLE_NESTED_PREFIX
@@ -370,6 +376,43 @@ public func IsAllConstantValue(args: ArrayList<CGValue>): Bool {
 
 public func DeRef(chirTy: Type): Type {
     return chirTy.StripAllRefs()
+}
+
+public func GetIntMaxOrMin(irBuilder: IRBuilder2, ty: IntType, isMax: Bool): Int64 {
+    let minMax = match (irBuilder.GetTypeKindFromType(ty)) {
+        case TypeKind.TYPE_INT8 => (Int64(Int8.Min), Int64(Int8.Max))
+        case TypeKind.TYPE_INT16 => (Int64(Int16.Min), Int64(Int16.Max))
+        case TypeKind.TYPE_INT32 => (Int64(Int32.Min), Int64(Int32.Max))
+        case TypeKind.TYPE_INT64 => (Int64.Min, Int64.Max)
+        case _ => throw IllegalArgumentException("not a signed integer type")
+    }
+    return if (isMax) { minMax[1] } else { minMax[0] }
+}
+
+public func GetUIntMax(irBuilder: IRBuilder2, ty: IntType): UInt64 {
+    return match (irBuilder.GetTypeKindFromType(ty)) {
+        case TypeKind.TYPE_UINT8 => UInt64(UInt8.Max)
+        case TypeKind.TYPE_UINT16 => UInt64(UInt16.Max)
+        case TypeKind.TYPE_UINT32 => UInt64(UInt32.Max)
+        case TypeKind.TYPE_UINT64 => UInt64.Max
+        case _ => throw IllegalArgumentException("not an unsigned integer type")
+    }
+}
+
+public func IsGetElementRefOfClass(expr: Expression, builder: CHIRBuilder): Bool {
+    if (expr.GetExprKind() != ExprKind.GET_ELEMENT_REF) {
+        return false
+    }
+    let getElementRef = (expr as GetElementRef).getOrThrow()
+    var baseType = getElementRef.GetLocation().GetType().getOrThrow().GetTypeArgs()[0]
+    let path = getElementRef.GetPath()
+    CJC_ASSERT(!path.isEmpty())
+    var index: Int64 = 0
+    while (index < path.size - 1) {
+        baseType = GetFieldOfType(baseType, path[index], builder).getOrThrow()
+        index++
+    }
+    return baseType.IsClass()
 }
 
 private func GetGenericArgsFromCHIRTypeHelper(chirTy: Type, path: ArrayList<Int64>,

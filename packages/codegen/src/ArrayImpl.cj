@@ -6,7 +6,6 @@ import cjcj::chir.Constant
 import cjcj::chir.CustomType
 import cjcj::chir.Box as ChirBox
 import cjcj::chir.Expression
-import cjcj::chir.ExprKind
 import cjcj::chir.GetElementByName
 import cjcj::chir.GetElementRef
 import cjcj::chir.LocalVar
@@ -23,138 +22,6 @@ private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
 private let LLVM_ARRAY_TYPE_KIND: Int32 = 11
 private let LLVM_VECTOR_TYPE_KIND: Int32 = 13
 private let LLVM_SCALABLE_VECTOR_TYPE_KIND: Int32 = 17
-
-public func GenerateLoad(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
-    if (chirExpr.GetNumOfOperands() == 0) {
-        return LLVMNullValue()
-    }
-    let addr = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0))
-    if (let Some(addrType) <- addr.GetCGType()) {
-        if (let Some(pointerElementType) <- addrType.GetPointerElementType()) {
-            if (let Some(readBarrier) <- TryGenerateGCReadForLoad(irBuilder, chirExpr, pointerElementType, addr)) {
-                return readBarrier
-            }
-            if (let Some(loaded) <- TryLoadClassFieldWithReadBarrier(irBuilder, chirExpr, addr, pointerElementType)) {
-                return loaded
-            }
-            if (let Some(staticRead) <- TryGenerateGCStaticReadForLoad(irBuilder, pointerElementType, addr)) {
-                return staticRead
-            }
-            return irBuilder.CreateLoad(addr, name: "load")
-        }
-    }
-    if (let Some(resultTy) <- chirExpr.GetResultType()) {
-        return irBuilder.CreateLoad(CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType(),
-            addr.GetRawValue(), name: "load")
-    }
-    return LLVMNullValue()
-}
-
-private func TryLoadClassFieldWithReadBarrier(irBuilder: IRBuilder2, loadExpr: Expression, addr: CGValue,
-    elementType: CGType): Option<LLVMValueRef> {
-    if (!ShouldUseClassFieldReadBarrier(irBuilder, elementType) || !IsAddressSpacePointer(addr.GetRawValue(), 1u32)) {
-        return None
-    }
-    let local = (loadExpr.GetOperand(0) as LocalVar) ?? return None
-    let ownerExpr = local.GetExpr() ?? return None
-    let (base, fieldTy, fieldPath) = if (let Some(elementRef) <- (ownerExpr as GetElementRef)) {
-        let path = elementRef.GetPath()
-        let (resolvedBase, resolvedTy) = ResolveLoadBaseAndFieldType(elementRef.GetLocation(), Some(path))
-        (resolvedBase, resolvedTy, Some(path))
-    } else if (let Some(elementByName) <- (ownerExpr as GetElementByName)) {
-        let path = ResolveLoadElementPathByNames(elementByName.GetLocation(), elementByName.GetNames())
-        let (resolvedBase, resolvedTy) = ResolveLoadBaseAndFieldType(elementByName.GetLocation(), path)
-        (resolvedBase, resolvedTy, path)
-    } else {
-        return None
-    }
-    let baseValue = irBuilder.GetCGModule().GetMappedCGValue(base)
-    let baseCGType = baseValue.GetCGType() ?? return None
-    if (!baseCGType.GetOriginal().StripAllRefs().IsClass()) {
-        return None
-    }
-    if (!IsAddressSpacePointer(baseValue.GetRawValue(), 1u32)) {
-        return None
-    }
-    if (IsGenericField(fieldTy)) {
-        let actualPath = fieldPath ?? return None
-        if (actualPath.isEmpty()) {
-            return None
-        }
-        let genericAddr = irBuilder.CreateGEP(baseValue, actualPath, name: "field.addr").GetRawValue()
-        return Some(irBuilder.LoadGenericFieldValue(baseValue.GetRawValue(), genericAddr, elementType,
-            baseCGType.GetOriginal(), fieldTy))
-    }
-    let raw = irBuilder.CallGCReadRef(baseValue.GetRawValue(), addr.GetRawValue())
-    return Some(irBuilder.CreateBitCast(raw, elementType.GetLLVMType(), name: "load.gcread.cast"))
-}
-
-private func ResolveLoadBaseAndFieldType(base: Value, path: Option<ArrayList<UInt64>>): (Value, Option<Type>) {
-    let fieldTy = if (let Some(elementPath) <- path) {
-        if (let Some(locationTy) <- base.GetType()) {
-            ResolveElementTypeByPath(locationTy, elementPath)
-        } else {
-            Option<Type>.None
-        }
-    } else {
-        Option<Type>.None
-    }
-    return (base, fieldTy)
-}
-
-private func ResolveLoadElementPathByNames(base: Value, names: ArrayList<String>): Option<ArrayList<UInt64>> {
-    if (let Some(locationTy) <- base.GetType()) {
-        return ResolveElementPathByNames(locationTy, names)
-    }
-    return None
-}
-
-private func ShouldUseClassFieldReadBarrier(irBuilder: IRBuilder2, elementType: CGType): Bool {
-    let stripped = elementType.GetOriginal().StripAllRefs()
-    if (stripped.IsReferenceType()) {
-        return true
-    }
-    if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), stripped) as CGEnumType)) {
-        return enumCGType.IsOptionLikeRef()
-    }
-    return false
-}
-
-private func TryGenerateGCReadForLoad(irBuilder: IRBuilder2, chirExpr: Expression, elementType: CGType,
-    addr: CGValue): Option<LLVMValueRef> {
-    if (!elementType.IsReference()) {
-        return None
-    }
-    let addrOperand = chirExpr.GetOperand(0)
-    if (let Some(local) <- addrOperand.AsLocalVar()) {
-        if (let Some(ownerExpr) <- local.GetExpr()) {
-            if (let Some(getElementRef) <- (ownerExpr as GetElementRef)) {
-                let base = getElementRef.GetLocation()
-                if (let Some(baseTy) <- base.GetType()) {
-                    if (IsManagedObjectElementBase(baseTy) &&
-                        IsManagedReferenceField(irBuilder, ResolveElementTypeByPath(baseTy, getElementRef.GetPath()))) {
-                        let baseValue = irBuilder.GetCGModule().GetMappedCGValue(base)
-                        return Some(irBuilder.CallGCReadRef(baseValue.GetRawValue(), addr.GetRawValue()))
-                    }
-                }
-            }
-        }
-    }
-    return None
-}
-
-private func TryGenerateGCStaticReadForLoad(irBuilder: IRBuilder2, elementType: CGType,
-    addr: CGValue): Option<LLVMValueRef> {
-    if (!irBuilder.IsGlobalVariableBasePtr(addr.GetRawValue()) || !IsBareGCRefLLVMType(elementType.GetLLVMType())) {
-        return None
-    }
-    return Some(irBuilder.CallGCReadStaticRef(addr.GetRawValue()))
-}
-
-private func IsManagedObjectElementBase(ty: Type): Bool {
-    let strippedTy = ty.StripAllRefs()
-    return strippedTy.IsClass() || strippedTy.IsBox()
-}
 
 public func GenerateRawArrayAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (chirExpr.GetNumOfOperands() != 1) {
@@ -738,13 +605,6 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
     return LLVMNullValue()
 }
 
-private func IsGenericField(fieldTy: Option<Type>): Bool {
-    if (let Some(ty) <- fieldTy) {
-        return ty.StripAllRefs().IsGeneric()
-    }
-    return false
-}
-
 private func IsAddressSpacePointer(value: LLVMValueRef, addressSpace: UInt32): Bool {
     let rawTy = unsafe { LLVMTypeOf(value) }
     return !rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 12 &&
@@ -984,51 +844,4 @@ private func ResolveElementPathByNames(baseTy: Type, names: ArrayList<String>): 
         }
     }
     return Some(path)
-}
-
-private func ResolveElementTypeByPath(baseTy: Type, path: ArrayList<UInt64>): Option<Type> {
-    if (path.isEmpty()) {
-        return None
-    }
-    var currentTy = baseTy.StripAllRefs()
-    for (pathItem in path) {
-        if (let Some(rawArrayTy) <- (currentTy as RawArrayType)) {
-            currentTy = rawArrayTy.GetElementType().StripAllRefs()
-            continue
-        }
-        if (currentTy.IsTuple()) {
-            let fields = currentTy.GetTypeArgs()
-            let fieldIdx = Int64(pathItem)
-            if (fieldIdx < 0 || fieldIdx >= fields.size) {
-                return None
-            }
-            currentTy = fields[fieldIdx].StripAllRefs()
-            continue
-        }
-        if (let Some(customTy) <- (currentTy as CustomType)) {
-            let fields = customTy.GetInstantiatedMemberTys()
-            let fieldIdx = Int64(pathItem)
-            if (fieldIdx < 0 || fieldIdx >= fields.size) {
-                return None
-            }
-            currentTy = fields[fieldIdx].StripAllRefs()
-            continue
-        }
-        return None
-    }
-    return Some(currentTy)
-}
-
-private func IsManagedReferenceField(irBuilder: IRBuilder2, fieldTy: Option<Type>): Bool {
-    if (let Some(ty) <- fieldTy) {
-        let fieldCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), ty)
-        if (fieldCGType.IsReference()) {
-            return true
-        }
-        if (let Some(enumCGType) <- (CGType.GetOrCreate(irBuilder.GetCGModule(),
-            ty.StripAllRefs()) as CGEnumType)) {
-            return enumCGType.IsOptionLikeRef()
-        }
-    }
-    return false
 }

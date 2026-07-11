@@ -1,9 +1,14 @@
 package cjcj::codegen
 
+import std.collection.ArrayList
 import cjcj::chir.Allocate
+import cjcj::chir.ClassType
 import cjcj::chir.Expression
 import cjcj::chir.ExprKind
+import cjcj::chir.GetElementRef
+import cjcj::chir.Load
 import cjcj::option.OptimizationLevel
+import cjcj::utils.CJC_ASSERT
 
 private let LLVM_ALLOCA_OPCODE: Int32 = 26
 private let LLVM_POINTER_TYPE_KIND: Int32 = 12
@@ -23,7 +28,7 @@ public func HandleMemoryExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         return result
     }
     if (kind == ExprKind.LOAD) {
-        return GenerateLoad(irBuilder, chirExpr)
+        return HandleLoadExpr(irBuilder, (chirExpr as Load).getOrThrow())
     }
     if (kind == ExprKind.STORE) {
         return GenerateStore(irBuilder, chirExpr)
@@ -37,11 +42,33 @@ public func HandleMemoryExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     return LLVMNullValue()
 }
 
+public func HandleLoadExpr(irBuilder: IRBuilder2, load: Load): LLVMValueRef {
+    irBuilder.EmitLocation(CHIRExprWrapper(load))
+    let value = irBuilder.GetCGModule().GetMappedCGValue(load.GetLocation())
+    CJC_ASSERT(value.GetCGType().getOrThrow().GetOriginal().IsRef())
+    let elementType = value.GetCGType().getOrThrow().GetPointerElementType().getOrThrow().GetLLVMType()
+    if (load.GetLocation().IsLocalVar() &&
+        elementType.toUIntNative() == CGType.GetRefType(irBuilder.GetLLVMContext()).toUIntNative()) {
+        let localVar = load.GetLocation().AsLocalVar().getOrThrow()
+        if (IsGetElementRefOfClass(localVar.GetExpr().getOrThrow(), irBuilder.GetCGContext().GetCHIRBuilder())) {
+            let getElementRef = (localVar.GetExpr().getOrThrow() as GetElementRef).getOrThrow()
+            let locationType = DeRef(getElementRef.GetLocation().GetType().getOrThrow())
+            if (locationType.IsClass() &&
+                IsWeakRefClass((locationType as ClassType).getOrThrow().GetClassDef())) {
+                let addr = value.GetRawValue()
+                let base = irBuilder.GetTrackedManagedBase(addr).getOrThrow()
+                return irBuilder.CallGCReadWeakRef(ArrayList<LLVMValueRef>([base, addr]))
+            }
+        }
+    }
+    return irBuilder.CreateLoad(value)
+}
+
 private func TryGetSpecialRetValueStorage(irBuilder: IRBuilder2, allocateExpr: Allocate): Option<LLVMValueRef> {
     let parentFunc = allocateExpr.GetTopLevelFunc() ?? return None
     let resultValue = allocateExpr.GetResult() ?? return None
     let returnValue = parentFunc.GetReturnValue() ?? return None
-    if (returnValue.nodeId != resultValue.nodeId) {
+    if (returnValue != resultValue) {
         return None
     }
 

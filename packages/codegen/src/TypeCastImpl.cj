@@ -4,16 +4,70 @@ import std.collection.*
 import cjcj::chir.Box as ChirBox
 import cjcj::chir.Expression
 import cjcj::chir.ExprKind
+import cjcj::chir.FloatType
+import cjcj::chir.IntType
 import cjcj::chir.NumericType
 import cjcj::chir.Type
 import cjcj::chir.TypeCast
+import cjcj::chir.TypeKind
+import cjcj::chir.TypeKindIndex
 import cjcj::chir.TransformToConcrete
 import cjcj::chir.TransformToGeneric
 import cjcj::chir.UnBox
 import cjcj::chir.UnBoxToRef
 import cjcj::utils.{CJC_ASSERT_WITH_MSG, OverflowStrategy, StaticCast}
+import cjcj::option.ArchType
 
 private let LLVM_POINTER_TYPE_KIND: Int32 = 12
+
+private let G_FLOAT2INT_BOUND_MAP: HashMap<String, (UInt64, UInt64)> = { =>
+    let bounds = HashMap<String, (UInt64, UInt64)>()
+    bounds["Float16Int8"] = (0xC060200000000000u64, 0x4060000000000000u64)
+    bounds["Float16Int16"] = (0xC0E0040000000000u64, 0x40E0000000000000u64)
+    bounds["Float16Int32"] = (0u64, 0u64)
+    bounds["Float16Int64"] = (0u64, 0u64)
+    bounds["Float16UInt8"] = (0xBFF0000000000000u64, 0x4070000000000000u64)
+    bounds["Float16UInt16"] = (0xBFF0000000000000u64, 0x40F0000000000000u64)
+    bounds["Float16UInt32"] = (0xBFF0000000000000u64, 0u64)
+    bounds["Float16UInt64"] = (0xBFF0000000000000u64, 0u64)
+    bounds["Float32Int8"] = (0xC060200000000000u64, 0x4060000000000000u64)
+    bounds["Float32Int16"] = (0xC0E0002000000000u64, 0x40E0000000000000u64)
+    bounds["Float32Int32"] = (0xC1E0000020000000u64, 0x41E0000000000000u64)
+    bounds["Float32Int64"] = (0xC3E0000020000000u64, 0x43E0000000000000u64)
+    bounds["Float32UInt8"] = (0xBFF0000000000000u64, 0x4070000000000000u64)
+    bounds["Float32UInt16"] = (0xBFF0000000000000u64, 0x40F0000000000000u64)
+    bounds["Float32UInt32"] = (0xBFF0000000000000u64, 0x41F0000000000000u64)
+    bounds["Float32UInt64"] = (0xBFF0000000000000u64, 0x43F0000000000000u64)
+    bounds["Float64Int8"] = (0xC060200000000000u64, 0x4060000000000000u64)
+    bounds["Float64Int16"] = (0xC0E0002000000000u64, 0x40E0000000000000u64)
+    bounds["Float64Int32"] = (0xC1E0000000200000u64, 0x41E0000000000000u64)
+    bounds["Float64Int64"] = (0xC3E0000000000001u64, 0x43E0000000000000u64)
+    bounds["Float64UInt8"] = (0xBFF0000000000000u64, 0x4070000000000000u64)
+    bounds["Float64UInt16"] = (0xBFF0000000000000u64, 0x40F0000000000000u64)
+    bounds["Float64UInt32"] = (0xBFF0000000000000u64, 0x41F0000000000000u64)
+    bounds["Float64UInt64"] = (0xBFF0000000000000u64, 0x43F0000000000000u64)
+    bounds
+}()
+
+private func StringIntX(archType: ArchType, intTy: IntType): String {
+    if (archType == ArchType.X86_64 || archType == ArchType.AARCH64) {
+        if (intTy.IsIntNative()) {
+            return "Int64"
+        } else if (intTy.IsUIntNative()) {
+            return "UInt64"
+        }
+        return intTy.ToString()
+    } else if (archType == ArchType.ARM32) {
+        if (intTy.IsIntNative()) {
+            return "Int32"
+        } else if (intTy.IsUIntNative()) {
+            return "UInt32"
+        }
+        return intTy.ToString()
+    }
+    CJC_ASSERT_WITH_MSG(false, "Unsupported ArchType.")
+    return intTy.ToString()
+}
 
 public func EmitTypeCastExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (chirExpr.GetNumOfOperands() == 0) {
@@ -413,8 +467,9 @@ public func CastValueToType(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, so
         irBuilder.StoreValueToObjectPayload(objectValue, sourceValue, sourceTy)
         return objectValue
     }
-    if (IsIntegerLikeType(sourceTy) && IsIntegerLikeType(targetTy)) {
-        return EmitIntegerCast(irBuilder, sourceValue, sourceTy, targetTy, targetLLVMType, overflowStrategy)
+    if (sourceTy.IsInteger() && targetTy.IsInteger()) {
+        return GenerateIntegerConversionExpr(irBuilder, overflowStrategy, sourceValue,
+            CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy), StaticCast<IntType>(sourceTy))
     }
     if (sourceTy.IsFloat() && targetTy.IsFloat()) {
         return EmitFloatCast(irBuilder, sourceValue, sourceTy, targetTy, targetLLVMType)
@@ -426,12 +481,9 @@ public func CastValueToType(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, so
             irBuilder.CreateUIToFP(sourceValue, targetLLVMType)
         }
     }
-    if (sourceTy.IsFloat() && IsIntegerLikeType(targetTy)) {
-        return if (IsSignedIntegerLikeType(targetTy)) {
-            irBuilder.CreateFPToSI(sourceValue, targetLLVMType)
-        } else {
-            irBuilder.CreateFPToUI(sourceValue, targetLLVMType)
-        }
+    if (sourceTy.IsFloat() && targetTy.IsInteger()) {
+        return GenerateFloatToIntegerConvExpr(irBuilder, overflowStrategy, sourceValue,
+            CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy), StaticCast<FloatType>(sourceTy))
     }
     if (IsPointerLikeType(sourceTy) && IsIntegerLikeType(targetTy)) {
         return irBuilder.CreatePtrToInt(sourceValue, targetLLVMType)
@@ -445,184 +497,274 @@ public func CastValueToType(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, so
     return irBuilder.CreateNullValue(targetTy)
 }
 
-private func EmitIntegerCast(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: Type, targetTy: Type,
-    targetLLVMType: LLVMTypeRef, overflowStrategy: OverflowStrategy): LLVMValueRef {
-    let sourceBits = GetIntegerBitWidth(sourceTy)
-    let targetBits = GetIntegerBitWidth(targetTy)
-    if (sourceBits == targetBits && IsSignedIntegerLikeType(sourceTy) == IsSignedIntegerLikeType(targetTy)) {
-        return sourceValue
-    }
-    if (overflowStrategy == OverflowStrategy.SATURATING) {
-        return EmitSaturatingIntegerCast(irBuilder, sourceValue, sourceTy, targetTy, targetLLVMType)
-    }
-    if (overflowStrategy == OverflowStrategy.THROWING) {
-        return EmitThrowingIntegerCast(irBuilder, sourceValue, sourceTy, targetTy, targetLLVMType)
-    }
-    return EmitWrappingIntegerCast(irBuilder, sourceValue, sourceTy, targetLLVMType)
+private func IsUInt2Int(sourceTy: IntType, targetTy: IntType): Bool {
+    return !sourceTy.IsSigned() && targetTy.IsSigned()
 }
 
-private func EmitWrappingIntegerCast(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: Type,
-    targetLLVMType: LLVMTypeRef): LLVMValueRef {
-    let sourceBits = GetIntegerBitWidth(sourceTy)
-    let targetBits = Int64(unsafe { LLVMGetIntTypeWidth(targetLLVMType) })
-    if (sourceBits == targetBits) {
-        return sourceValue
-    }
-    if (sourceBits > targetBits) {
-        return irBuilder.CreateTrunc(sourceValue, targetLLVMType)
-    }
-    if (IsSignedIntegerLikeType(sourceTy)) {
-        return irBuilder.CreateSExt(sourceValue, targetLLVMType)
-    }
-    return irBuilder.CreateZExt(sourceValue, targetLLVMType)
+private func IsInt2UInt(sourceTy: IntType, targetTy: IntType): Bool {
+    return sourceTy.IsSigned() && !targetTy.IsSigned()
 }
 
-private func EmitThrowingIntegerCast(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: Type, targetTy: Type,
-    targetLLVMType: LLVMTypeRef): LLVMValueRef {
-    let currentBlock = irBuilder.GetInsertBlock()
-    if (currentBlock.isNull()) {
-        return EmitWrappingIntegerCast(irBuilder, sourceValue, sourceTy, targetLLVMType)
-    }
-    let blocks = MakeBlockNames(ArrayList<String>([
-        "lower.bound.ok", "upper.bound.ok", "upper.bound.overflow", "lower.bound.overflow",
-        "overflow.throwing.end"
+private func IsInt2Int(sourceTy: IntType, targetTy: IntType): Bool {
+    return sourceTy.IsSigned() && targetTy.IsSigned()
+}
+
+private func IsUInt2UInt(sourceTy: IntType, targetTy: IntType): Bool {
+    return !sourceTy.IsSigned() && !targetTy.IsSigned()
+}
+
+private func GenerateOverflowThrowingBasicBlock(irBuilder: IRBuilder2,
+    checkInfOrNaN: Option<() -> LLVMValueRef>, checkLowerBound: () -> LLVMValueRef,
+    checkUpperBound: () -> LLVMValueRef, typecast: (IRBuilder2) -> LLVMValueRef,
+    targetTyName: String): LLVMValueRef {
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>([
+        GenNameForBB("not.inf.nan"), GenNameForBB("lower.bound.ok"), GenNameForBB("upper.bound.ok"),
+        GenNameForBB("upper.bound.overflow"), GenNameForBB("lower.bound.overflow"),
+        GenNameForBB("inf.or.nan"), GenNameForBB("overflow.throwing.end")
     ]))
-    let created = irBuilder.CreateAndInsertBasicBlocks(blocks)
-    if (created.size < 5) {
-        return EmitWrappingIntegerCast(irBuilder, sourceValue, sourceTy, targetLLVMType)
+    let notInfOrNaN = blocks[0]
+    let lowerBoundOK = blocks[1]
+    let upperBoundOK = blocks[2]
+    let upperBoundOverflow = blocks[3]
+    let lowerBoundOverflow = blocks[4]
+    let infOrNaN = blocks[5]
+    let end = blocks[6]
+    if (let Some(check) <- checkInfOrNaN) {
+        irBuilder.CreateCondBr(check(), notInfOrNaN, infOrNaN)
+        irBuilder.SetInsertPoint(infOrNaN)
+        irBuilder.CreateOverflowOrArithmeticException("Casting Infinite or NaN value to integer.")
+        irBuilder.CreateUnreachable()
+        irBuilder.SetInsertPoint(notInfOrNaN)
+    } else {
+        unsafe { LLVMDeleteBasicBlock(notInfOrNaN) }
+        unsafe { LLVMDeleteBasicBlock(infOrNaN) }
     }
-    let lowerOK = created[0]
-    let upperOK = created[1]
-    let upperOverflow = created[2]
-    let lowerOverflow = created[3]
-    let endBlock = created[4]
-    irBuilder.CreateCondBr(CheckIntegerCastLowerBound(irBuilder, sourceValue, sourceTy, targetTy),
-        lowerOK, lowerOverflow)
-    irBuilder.SetInsertPoint(lowerOverflow)
-    irBuilder.CreateOverflowOrArithmeticException("The result would be less than " + targetTy.ToString() + ".Min.")
+    irBuilder.CreateCondBr(checkLowerBound(), lowerBoundOK, lowerBoundOverflow)
+    irBuilder.SetInsertPoint(lowerBoundOverflow)
+    irBuilder.CreateOverflowOrArithmeticException("The result would be less than " + targetTyName + ".Min.")
     irBuilder.CreateUnreachable()
-    irBuilder.SetInsertPoint(lowerOK)
-    irBuilder.CreateCondBr(CheckIntegerCastUpperBound(irBuilder, sourceValue, sourceTy, targetTy),
-        upperOK, upperOverflow)
-    irBuilder.SetInsertPoint(upperOverflow)
-    irBuilder.CreateOverflowOrArithmeticException("The result would be greater than " + targetTy.ToString() + ".Max.")
+    irBuilder.SetInsertPoint(lowerBoundOK)
+    irBuilder.CreateCondBr(checkUpperBound(), upperBoundOK, upperBoundOverflow)
+    irBuilder.SetInsertPoint(upperBoundOverflow)
+    irBuilder.CreateOverflowOrArithmeticException("The result would be greater than " + targetTyName + ".Max.")
     irBuilder.CreateUnreachable()
-    irBuilder.SetInsertPoint(upperOK)
-    let castValue = EmitWrappingIntegerCast(irBuilder, sourceValue, sourceTy, targetLLVMType)
-    irBuilder.CreateBr(endBlock)
-    irBuilder.SetInsertPoint(endBlock)
-    return castValue
+    irBuilder.SetInsertPoint(upperBoundOK)
+    let typecastValue = typecast(irBuilder)
+    irBuilder.CreateBr(end)
+    irBuilder.SetInsertPoint(end)
+    return typecastValue
 }
 
-private func EmitSaturatingIntegerCast(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: Type, targetTy: Type,
-    targetLLVMType: LLVMTypeRef): LLVMValueRef {
-    let currentBlock = irBuilder.GetInsertBlock()
-    if (currentBlock.isNull()) {
-        return EmitWrappingIntegerCast(irBuilder, sourceValue, sourceTy, targetLLVMType)
-    }
-    let blocks = MakeBlockNames(ArrayList<String>([
-        "lower.bound.ok", "upper.bound.ok", "lower.bound.overflow", "upper.bound.overflow", "sat.end"
-    ]))
-    let created = irBuilder.CreateAndInsertBasicBlocks(blocks)
-    if (created.size < 5) {
-        return EmitWrappingIntegerCast(irBuilder, sourceValue, sourceTy, targetLLVMType)
-    }
-    let lowerOK = created[0]
-    let upperOK = created[1]
-    let lowerOverflow = created[2]
-    let upperOverflow = created[3]
-    let satEnd = created[4]
-    irBuilder.CreateCondBr(CheckIntegerCastLowerBound(irBuilder, sourceValue, sourceTy, targetTy),
-        lowerOK, lowerOverflow)
-
-    irBuilder.SetInsertPoint(lowerOverflow)
-    let retMin = TargetIntegerMinValue(targetLLVMType, targetTy)
-    irBuilder.CreateBr(satEnd)
-
-    irBuilder.SetInsertPoint(lowerOK)
-    irBuilder.CreateCondBr(CheckIntegerCastUpperBound(irBuilder, sourceValue, sourceTy, targetTy),
-        upperOK, upperOverflow)
-
-    irBuilder.SetInsertPoint(upperOverflow)
-    let retMax = TargetIntegerMaxValue(targetLLVMType, targetTy)
-    irBuilder.CreateBr(satEnd)
-
-    irBuilder.SetInsertPoint(upperOK)
-    let castValue = EmitWrappingIntegerCast(irBuilder, sourceValue, sourceTy, targetLLVMType)
-    irBuilder.CreateBr(satEnd)
-
-    irBuilder.SetInsertPoint(satEnd)
-    let result = irBuilder.CreatePHI(targetLLVMType, name: "sat.cast")
-    let values = ArrayList<LLVMValueRef>()
-    values.add(castValue)
-    values.add(retMin)
-    values.add(retMax)
-    let incomingBlocks = ArrayList<LLVMBasicBlockRef>()
-    incomingBlocks.add(upperOK)
-    incomingBlocks.add(lowerOverflow)
-    incomingBlocks.add(upperOverflow)
-    irBuilder.AddIncoming(result, values, incomingBlocks)
-    return result
+private func GenerateCondCheckInfiniteOrNaN(irBuilder: IRBuilder2, sourceValue: LLVMValueRef,
+    sourceTy: NumericType): LLVMValueRef {
+    let llvmContext = irBuilder.GetLLVMContext()
+    let floatInIEEE754 = HashMap<TypeKind, (UInt32, UInt64, LLVMTypeRef)>()
+    floatInIEEE754[TypeKind.TYPE_FLOAT16] =
+        (16u32, 0x7C00u64, unsafe { LLVMInt16TypeInContext(llvmContext.raw) })
+    floatInIEEE754[TypeKind.TYPE_FLOAT32] =
+        (32u32, 0x7F800000u64, unsafe { LLVMInt32TypeInContext(llvmContext.raw) })
+    floatInIEEE754[TypeKind.TYPE_FLOAT64] =
+        (64u32, 0x7FF0000000000000u64, unsafe { LLVMInt64TypeInContext(llvmContext.raw) })
+    let (_, magicValue, integerType) = floatInIEEE754[irBuilder.GetTypeKindFromType(sourceTy)]
+    let integerValue = irBuilder.CreateBitCast(sourceValue, integerType)
+    let exponentValue = unsafe { LLVMConstInt(integerType, magicValue, 0) }
+    let andValue = irBuilder.CreateAnd(integerValue, exponentValue)
+    return irBuilder.CreateICmp(LLVMIntPredicate.NE, andValue, exponentValue, name: "notInfOrNan")
 }
 
-private func CheckIntegerCastLowerBound(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: Type,
-    targetTy: Type): LLVMValueRef {
-    if (!IsSignedIntegerLikeType(sourceTy) || IsSignedIntegerLikeType(targetTy)) {
-        if (!IsSignedIntegerLikeType(sourceTy) || !IsSignedIntegerLikeType(targetTy) ||
-            GetIntegerBitWidth(targetTy) >= GetIntegerBitWidth(sourceTy)) {
+private func GenerateCondCheckLowerBound(irBuilder: IRBuilder2, targetType: CGType,
+    sourceValue: LLVMValueRef, sourceTy: IntType): LLVMValueRef {
+    let targetTy = StaticCast<IntType>(targetType.GetOriginal())
+    if (IsUInt2Int(sourceTy, targetTy)) {
+        return irBuilder.GetTrue()
+    } else if (IsInt2UInt(sourceTy, targetTy)) {
+        let minValue = unsafe { LLVMConstInt(LLVMTypeOf(sourceValue), 0u64, 0) }
+        return irBuilder.CreateICmp(LLVMIntPredicate.SLE, minValue, sourceValue, name: "i2ui.lower")
+    } else if (IsInt2Int(sourceTy, targetTy)) {
+        if (TypeKindIndex(irBuilder.GetTypeKindFromType(targetTy)) >
+            TypeKindIndex(irBuilder.GetTypeKindFromType(sourceTy))) {
             return irBuilder.GetTrue()
         }
-        let minVal = SignedIntegerConst(unsafe { LLVMTypeOf(sourceValue) }, SignedMinValue(GetIntegerBitWidth(targetTy)))
-        return irBuilder.CreateICmp(LLVMIntPredicate.SLE, minVal, sourceValue, name: "i2i.lower")
+        let minValue = SignedIntegerConst(unsafe { LLVMTypeOf(sourceValue) },
+            GetIntMaxOrMin(irBuilder, targetTy, false))
+        return irBuilder.CreateICmp(LLVMIntPredicate.SLE, minValue, sourceValue, name: "i2i.lower")
     }
-    let minVal = unsafe { LLVMConstInt(LLVMTypeOf(sourceValue), 0u64, 0) }
-    return irBuilder.CreateICmp(LLVMIntPredicate.SLE, minVal, sourceValue, name: "i2ui.lower")
+    CJC_ASSERT_WITH_MSG(IsUInt2UInt(sourceTy, targetTy), "expected UInt-to-UInt conversion")
+    return irBuilder.GetTrue()
 }
 
-private func CheckIntegerCastUpperBound(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: Type,
-    targetTy: Type): LLVMValueRef {
-    let sourceBits = GetIntegerBitWidth(sourceTy)
-    let targetBits = GetIntegerBitWidth(targetTy)
-    if (!IsSignedIntegerLikeType(sourceTy) && IsSignedIntegerLikeType(targetTy)) {
-        if (targetBits > sourceBits) {
-            return irBuilder.GetTrue()
-        }
-        let maxVal = UnsignedIntegerConst(unsafe { LLVMTypeOf(sourceValue) }, SignedMaxBits(targetBits))
-        return irBuilder.CreateICmp(LLVMIntPredicate.ULE, sourceValue, maxVal, name: "ui2i.upper")
-    }
-    if (IsSignedIntegerLikeType(sourceTy) && !IsSignedIntegerLikeType(targetTy)) {
-        if (targetBits >= sourceBits) {
-            return irBuilder.GetTrue()
-        }
-        let maxVal = UnsignedIntegerConst(unsafe { LLVMTypeOf(sourceValue) }, UnsignedMaxBits(targetBits))
-        return irBuilder.CreateICmp(LLVMIntPredicate.SLE, sourceValue, maxVal, name: "i2ui.upper")
-    }
-    if (IsSignedIntegerLikeType(sourceTy) && IsSignedIntegerLikeType(targetTy)) {
-        if (targetBits >= sourceBits) {
-            return irBuilder.GetTrue()
-        }
-        let maxVal = SignedIntegerConst(unsafe { LLVMTypeOf(sourceValue) }, SignedMaxValue(targetBits))
-        return irBuilder.CreateICmp(LLVMIntPredicate.SLE, sourceValue, maxVal, name: "i2i.upper")
-    }
-    if (targetBits >= sourceBits) {
+private func GenerateCondCheckLowerBound(irBuilder: IRBuilder2, targetType: CGType,
+    sourceValue: LLVMValueRef, sourceTy: FloatType): LLVMValueRef {
+    let targetTy = StaticCast<IntType>(targetType.GetOriginal())
+    let archType = irBuilder.GetCGContext().GetCompileOptions().target.GetArchType()
+    let lowerBound = G_FLOAT2INT_BOUND_MAP[sourceTy.ToString() + StringIntX(archType, targetTy)][0]
+    if (lowerBound == 0u64) {
         return irBuilder.GetTrue()
     }
-    let maxVal = UnsignedIntegerConst(unsafe { LLVMTypeOf(sourceValue) }, UnsignedMaxBits(targetBits))
+    let lowerBoundValue = unsafe { LLVMConstReal(LLVMTypeOf(sourceValue), Float64.fromBits(lowerBound)) }
+    return irBuilder.CreateFCmpOLT(lowerBoundValue, sourceValue, name: "f2i.lt.min")
+}
+
+private func NeedsIntToUIntConversion(irBuilder: IRBuilder2, sourceTy: IntType, targetTyKind: TypeKind): Bool {
+    let sourceTyKind = irBuilder.GetTypeKindFromType(sourceTy)
+    return match (sourceTyKind) {
+        case TypeKind.TYPE_INT16 => TypeKindIndex(targetTyKind) >= TypeKindIndex(TypeKind.TYPE_UINT16)
+        case TypeKind.TYPE_INT32 => TypeKindIndex(targetTyKind) >= TypeKindIndex(TypeKind.TYPE_UINT32)
+        case TypeKind.TYPE_INT64 => TypeKindIndex(targetTyKind) >= TypeKindIndex(TypeKind.TYPE_UINT64)
+        case TypeKind.TYPE_INT_NATIVE => TypeKindIndex(targetTyKind) >= TypeKindIndex(TypeKind.TYPE_UINT64)
+        case _ => true
+    }
+}
+
+private func NeedsUIntToIntConversion(irBuilder: IRBuilder2, sourceTy: IntType, targetTyKind: TypeKind): Bool {
+    let sourceTyKind = irBuilder.GetTypeKindFromType(sourceTy)
+    return match (sourceTyKind) {
+        case TypeKind.TYPE_UINT8 => TypeKindIndex(targetTyKind) > TypeKindIndex(TypeKind.TYPE_INT8)
+        case TypeKind.TYPE_UINT16 => TypeKindIndex(targetTyKind) > TypeKindIndex(TypeKind.TYPE_INT16)
+        case TypeKind.TYPE_UINT32 => TypeKindIndex(targetTyKind) > TypeKindIndex(TypeKind.TYPE_INT32)
+        case _ => false
+    }
+}
+
+private func GenerateCondCheckUpperBound(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: IntType,
+    targetTy: IntType): LLVMValueRef {
+    let targetTyKind = irBuilder.GetTypeKindFromType(targetTy)
+    let sourceTyKind = irBuilder.GetTypeKindFromType(sourceTy)
+    if (!IsSignedIntegerLikeType(sourceTy) && IsSignedIntegerLikeType(targetTy)) {
+        let targetLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType()
+        let needsConversion = NeedsUIntToIntConversion(irBuilder, sourceTy, targetTyKind)
+        let maxType = if (needsConversion) { targetLLVMType } else { unsafe { LLVMTypeOf(sourceValue) } }
+        let maxVal = SignedIntegerConst(maxType, GetIntMaxOrMin(irBuilder, targetTy, true))
+        let valueToCompare = if (needsConversion) {
+            irBuilder.CreateZExtOrTrunc(sourceValue, targetLLVMType)
+        } else {
+            sourceValue
+        }
+        return irBuilder.CreateICmp(LLVMIntPredicate.ULE, valueToCompare, maxVal, name: "ui2i.upper")
+    }
+    if (IsSignedIntegerLikeType(sourceTy) && !IsSignedIntegerLikeType(targetTy)) {
+        let targetLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType()
+        let needsConversion = NeedsIntToUIntConversion(irBuilder, sourceTy, targetTyKind)
+        let maxType = if (needsConversion) { targetLLVMType } else { unsafe { LLVMTypeOf(sourceValue) } }
+        let maxVal = UnsignedIntegerConst(maxType, GetUIntMax(irBuilder, targetTy))
+        let valueToCompare = if (needsConversion) {
+            irBuilder.CreateZExtOrTrunc(sourceValue, targetLLVMType)
+        } else {
+            sourceValue
+        }
+        return irBuilder.CreateICmp(LLVMIntPredicate.ULE, valueToCompare, maxVal, name: "i2ui.upper")
+    }
+    if (IsSignedIntegerLikeType(sourceTy) && IsSignedIntegerLikeType(targetTy)) {
+        if (TypeKindIndex(targetTyKind) > TypeKindIndex(sourceTyKind)) {
+            return irBuilder.GetTrue()
+        }
+        let maxVal = SignedIntegerConst(unsafe { LLVMTypeOf(sourceValue) },
+            GetIntMaxOrMin(irBuilder, targetTy, true))
+        return irBuilder.CreateICmp(LLVMIntPredicate.SLE, sourceValue, maxVal, name: "i2i.upper")
+    }
+    if (TypeKindIndex(targetTyKind) > TypeKindIndex(sourceTyKind)) {
+        return irBuilder.GetTrue()
+    }
+    let maxVal = UnsignedIntegerConst(unsafe { LLVMTypeOf(sourceValue) }, GetUIntMax(irBuilder, targetTy))
     return irBuilder.CreateICmp(LLVMIntPredicate.ULE, sourceValue, maxVal, name: "ui2ui.upper")
 }
 
-private func TargetIntegerMinValue(targetLLVMType: LLVMTypeRef, targetTy: Type): LLVMValueRef {
-    if (IsSignedIntegerLikeType(targetTy)) {
-        return SignedIntegerConst(targetLLVMType, SignedMinValue(GetIntegerBitWidth(targetTy)))
+private func GenerateCondCheckUpperBound(irBuilder: IRBuilder2, targetType: CGType,
+    sourceValue: LLVMValueRef, sourceTy: FloatType): LLVMValueRef {
+    let targetTy = StaticCast<IntType>(targetType.GetOriginal())
+    let archType = irBuilder.GetCGContext().GetCompileOptions().target.GetArchType()
+    let upperBound = G_FLOAT2INT_BOUND_MAP[sourceTy.ToString() + StringIntX(archType, targetTy)][1]
+    if (upperBound == 0u64) {
+        return irBuilder.GetTrue()
     }
-    return unsafe { LLVMConstInt(targetLLVMType, 0u64, 0) }
+    let upperBoundValue = unsafe { LLVMConstReal(LLVMTypeOf(sourceValue), Float64.fromBits(upperBound)) }
+    return irBuilder.CreateFCmpOLT(sourceValue, upperBoundValue, name: "f2i.gt.max")
 }
 
-private func TargetIntegerMaxValue(targetLLVMType: LLVMTypeRef, targetTy: Type): LLVMValueRef {
-    if (IsSignedIntegerLikeType(targetTy)) {
-        return SignedIntegerConst(targetLLVMType, SignedMaxValue(GetIntegerBitWidth(targetTy)))
+private func GenerateFloatToIntegerConvExpr(irBuilder: IRBuilder2, strategy: OverflowStrategy,
+    sourceValue: LLVMValueRef, targetType: CGType, sourceTy: FloatType): LLVMValueRef {
+    if (strategy == OverflowStrategy.THROWING) {
+        let checkInfOrNaN = { => GenerateCondCheckInfiniteOrNaN(irBuilder, sourceValue, sourceTy) }
+        let checkLowerBound = { => GenerateCondCheckLowerBound(irBuilder, targetType, sourceValue, sourceTy) }
+        let checkUpperBound = { => GenerateCondCheckUpperBound(irBuilder, targetType, sourceValue, sourceTy) }
+        let typecast = { builder: IRBuilder2 =>
+            let targetTy = StaticCast<IntType>(targetType.GetOriginal())
+            if (targetTy.IsSigned()) {
+                builder.CreateFPToSI(sourceValue, targetType.GetLLVMType())
+            } else {
+                builder.CreateFPToUI(sourceValue, targetType.GetLLVMType())
+            }
+        }
+        return GenerateOverflowThrowingBasicBlock(irBuilder, Some(checkInfOrNaN), checkLowerBound, checkUpperBound,
+            typecast, targetType.GetOriginal().ToString())
     }
-    return UnsignedIntegerConst(targetLLVMType, UnsignedMaxBits(GetIntegerBitWidth(targetTy)))
+    let targetTy = StaticCast<IntType>(targetType.GetOriginal())
+    return irBuilder.CallIntrinsicFloatToIntegerSat(targetType.GetLLVMType(), sourceValue, targetTy.IsSigned())
+}
+
+private func GenerateOverflowSaturatingBasicBlock(irBuilder: IRBuilder2, targetType: CGType,
+    checkLowerBound: () -> LLVMValueRef, checkUpperBound: () -> LLVMValueRef,
+    typecast: (IRBuilder2) -> LLVMValueRef): LLVMValueRef {
+    let targetTy = StaticCast<IntType>(targetType.GetOriginal())
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>([
+        GenNameForBB("lower.bound.ok"), GenNameForBB("upper.bound.ok"), GenNameForBB("upper.bound.overflow"),
+        GenNameForBB("lower.bound.overflow"), GenNameForBB("sat.end")
+    ]))
+    let lowerBoundOK = blocks[0]
+    let upperBoundOK = blocks[1]
+    let upperBoundOverflow = blocks[2]
+    let lowerBoundOverflow = blocks[3]
+    let satEnd = blocks[4]
+    irBuilder.CreateCondBr(checkLowerBound(), lowerBoundOK, lowerBoundOverflow)
+    irBuilder.SetInsertPoint(lowerBoundOverflow)
+    let retMin = if (targetTy.IsSigned()) {
+        SignedIntegerConst(targetType.GetLLVMType(), GetIntMaxOrMin(irBuilder, targetTy, false))
+    } else {
+        unsafe { LLVMConstInt(targetType.GetLLVMType(), 0u64, 0) }
+    }
+    irBuilder.CreateBr(satEnd)
+    irBuilder.SetInsertPoint(lowerBoundOK)
+    irBuilder.CreateCondBr(checkUpperBound(), upperBoundOK, upperBoundOverflow)
+    irBuilder.SetInsertPoint(upperBoundOverflow)
+    let retMax = if (targetTy.IsSigned()) {
+        SignedIntegerConst(targetType.GetLLVMType(), GetIntMaxOrMin(irBuilder, targetTy, true))
+    } else {
+        unsafe { LLVMConstInt(targetType.GetLLVMType(), GetUIntMax(irBuilder, targetTy), 0) }
+    }
+    irBuilder.CreateBr(satEnd)
+    irBuilder.SetInsertPoint(upperBoundOK)
+    let typecastValue = typecast(irBuilder)
+    irBuilder.CreateBr(satEnd)
+    irBuilder.SetInsertPoint(satEnd)
+    let result = irBuilder.CreatePHI(targetType.GetLLVMType())
+    irBuilder.AddIncoming(result, ArrayList<LLVMValueRef>([typecastValue, retMin, retMax]),
+        ArrayList<LLVMBasicBlockRef>([upperBoundOK, lowerBoundOverflow, upperBoundOverflow]))
+    return result
+}
+
+private func GenerateIntegerConversionExpr(irBuilder: IRBuilder2, strategy: OverflowStrategy,
+    sourceValue: LLVMValueRef, targetType: CGType, sourceTy: IntType): LLVMValueRef {
+    let targetTy = StaticCast<IntType>(targetType.GetOriginal())
+    let typecast = { builder: IRBuilder2 =>
+        if (sourceTy.IsSigned()) {
+            builder.CreateSExtOrTrunc(sourceValue, targetType.GetLLVMType())
+        } else {
+            builder.CreateZExtOrTrunc(sourceValue, targetType.GetLLVMType())
+        }
+    }
+    let checkLowerBound = { =>
+        GenerateCondCheckLowerBound(irBuilder, targetType, sourceValue, sourceTy)
+    }
+    let checkUpperBound = { =>
+        GenerateCondCheckUpperBound(irBuilder, sourceValue, sourceTy, targetTy)
+    }
+    if (strategy == OverflowStrategy.SATURATING) {
+        return GenerateOverflowSaturatingBasicBlock(irBuilder, targetType, checkLowerBound, checkUpperBound, typecast)
+    } else if (strategy == OverflowStrategy.THROWING) {
+        return GenerateOverflowThrowingBasicBlock(irBuilder, None, checkLowerBound, checkUpperBound, typecast,
+            targetType.GetOriginal().ToString())
+    }
+    return typecast(irBuilder)
 }
 
 private func SignedIntegerConst(llvmType: LLVMTypeRef, value: Int64): LLVMValueRef {
@@ -633,47 +775,11 @@ private func UnsignedIntegerConst(llvmType: LLVMTypeRef, value: UInt64): LLVMVal
     return unsafe { LLVMConstInt(llvmType, value, 0) }
 }
 
-private func SignedMinValue(bits: Int64): Int64 {
-    if (bits >= 64) {
-        return Int64.Min
-    }
-    return -Int64(1u64 << UInt64(bits - 1))
-}
-
-private func SignedMaxValue(bits: Int64): Int64 {
-    if (bits >= 64) {
-        return Int64.Max
-    }
-    return Int64((1u64 << UInt64(bits - 1)) - 1u64)
-}
-
-private func SignedMaxBits(bits: Int64): UInt64 {
-    if (bits >= 64) {
-        return 0x7fffffffffffffffu64
-    }
-    return (1u64 << UInt64(bits - 1)) - 1u64
-}
-
-private func UnsignedMaxBits(bits: Int64): UInt64 {
-    if (bits >= 64) {
-        return UInt64.Max
-    }
-    return (1u64 << UInt64(bits)) - 1u64
-}
-
 private func SignedInt64BitsForConst(value: Int64): UInt64 {
     if (value >= 0) {
         return UInt64(value)
     }
     return 0x8000000000000000u64 + UInt64(value - Int64.Min)
-}
-
-private func MakeBlockNames(names: ArrayList<String>): ArrayList<String> {
-    let out = ArrayList<String>()
-    for (name in names) {
-        out.add(GenNameForBB(name))
-    }
-    return out
 }
 
 private func EmitFloatCast(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: Type, targetTy: Type,
@@ -704,16 +810,6 @@ private func IsPointerLikeType(ty: Type): Bool {
 private func IsObjectReferenceType(ty: Type): Bool {
     let strippedTy = ty.StripAllRefs()
     return strippedTy.IsClassOrArray() || strippedTy.IsBox() || strippedTy.IsThis()
-}
-
-private func GetIntegerBitWidth(ty: Type): Int64 {
-    if (ty.IsBoolean()) {
-        return 1
-    }
-    if (ty.IsRune()) {
-        return 32
-    }
-    return GetNumericBitWidth(ty)
 }
 
 private func GetNumericBitWidth(ty: Type): Int64 {

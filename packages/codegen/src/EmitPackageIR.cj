@@ -452,7 +452,7 @@ private func CreateCJEntryFunction(cgMod: CGModule, moduleHandle: LLVMModuleHand
             let voidFnType = unsafe { LLVMFunctionType(voidType, CPointer<LLVMTypeRef>(), 0u32, 0) }
             let checkThreadLocal = GetOrInsertLLVMFunction(moduleHandle,
                 PREFIX_OF_BACKEND_SYMS + "CheckThreadLocalDataOffset", voidFnType)
-            let _ = irBuilder.CreateCallOrInvoke(checkThreadLocal, voidFnType, ArrayList<LLVMValueRef>())
+            let _ = irBuilder.CreateCallOrInvoke(checkThreadLocal, ArrayList<LLVMValueRef>())
 
             let unwindBlock = irBuilder.CreateAndInsertBasicBlock("unwindDest")
             try (unwindScope = CodeGenUnwindBlockScope(cgMod, unwindBlock)) {
@@ -469,7 +469,7 @@ private func CreateCJEntryTryScope(cgMod: CGModule, irBuilder: IRBuilder2, userM
     i32Type: LLVMTypeRef): Unit {
     let initFn = cgMod.GetCGContext().GetCHIRPackage().GetPackageInitFunc().getOrThrow()
     let cgInit = cgMod.GetOrInsertCGFunction(initFn)
-    let _ = irBuilder.CreateCallOrInvoke(cgInit)
+    let _ = irBuilder.CreateCallOrInvoke(cgInit.GetRawFunction(), ArrayList<LLVMValueRef>())
 
     let userMainArgs = ArrayList<LLVMValueRef>()
     if (unsafe { LLVMCountParams(userMain) } > 0u32) {
@@ -485,8 +485,7 @@ private func CreateCJEntryTryScope(cgMod: CGModule, irBuilder: IRBuilder2, userM
         userMainArgs.add(irBuilder.CreatePointerCast(commandLineArgs,
             unsafe { LLVMTypeOf(LLVMGetParam(userMain, 0u32)) }))
     }
-    let userMainRetVal = irBuilder.CreateCallOrInvoke(userMain, unsafe { LLVMGlobalGetValueType(userMain) },
-        userMainArgs)
+    let userMainRetVal = irBuilder.CreateCallOrInvoke(userMain, userMainArgs)
     irBuilder.CreateExecAtExitCallbacksCall()
     let _ = irBuilder.CreateRet(GenerateMainRetVal(irBuilder, userMainRetVal, i32Type))
 }
@@ -696,15 +695,14 @@ private func CreatePackageInitResetFunction(cgMod: CGModule): Unit {
         let entry = irBuilder.CreateEntryBasicBlock(resetFunc, "entry")
         unsafe { LLVMPositionBuilderAtEnd(irBuilder.GetBuilder().raw, entry) }
         let flagResetFunc = CreatePackageInitFlagResetFunction(cgMod)
-        let voidFnType = unsafe { LLVMFunctionType(voidType, CPointer<LLVMTypeRef>(), 0u32, 0) }
-        let _ = irBuilder.CreateCallOrInvoke(flagResetFunc, voidFnType, ArrayList<LLVMValueRef>())
+        let _ = irBuilder.CreateCallOrInvoke(flagResetFunc, ArrayList<LLVMValueRef>())
 
         if (let Some(literalInitFunc) <- GetPackageInitSiblingFunction(cgMod, pkgInitFuncName,
             SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION)) {
-            let _ = irBuilder.CreateCallOrInvoke(literalInitFunc, voidFnType, ArrayList<LLVMValueRef>())
+            let _ = irBuilder.CreateCallOrInvoke(literalInitFunc, ArrayList<LLVMValueRef>())
         }
         if (let Some(gvInitFunc) <- GetNamedFunctionOpt(cgMod, pkgInitFuncName)) {
-            let _ = irBuilder.CreateCallOrInvoke(gvInitFunc, voidFnType, ArrayList<LLVMValueRef>())
+            let _ = irBuilder.CreateCallOrInvoke(gvInitFunc, ArrayList<LLVMValueRef>())
         }
 
         let cFuncType = BuildLLVMFunctionType(voidType, SingleTypeList(i8PtrType))
@@ -719,8 +717,7 @@ private func CreatePackageInitResetFunction(cgMod: CGModule): Unit {
         let wrapperArgs = ArrayList<LLVMValueRef>()
         wrapperArgs.add(irBuilder.CreateLoad(paramFields[0], irBuilder.CreateStructGEP(paramType, castParam, 0u32)))
         wrapperArgs.add(irBuilder.CreateLoad(paramFields[1], irBuilder.CreateStructGEP(paramType, castParam, 1u32)))
-        let wrapperType = BuildLLVMFunctionType(voidType, paramFields)
-        let _ = irBuilder.CreateCallOrInvoke(wrapperFunc, wrapperType, wrapperArgs)
+        let _ = irBuilder.CreateCallOrInvoke(wrapperFunc, wrapperArgs)
         let _ = unsafe { LLVMBuildRetVoid(irBuilder.GetBuilder().raw) }
     }
 }
