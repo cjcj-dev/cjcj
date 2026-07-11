@@ -49,9 +49,10 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
     private let diag: BasicDiagnosticEngine
 
     public init(functionValue: Function, builder: CHIRBuilder,
-        globals: ValueAnalysisGlobals<ConstValueDomain, Pool>, diag: BasicDiagnosticEngine,
+        globals: ValueAnalysisGlobals<ConstValueDomain, Pool>,
+        handleNonNullLiteralValue: (LiteralValue) -> ConstValueDomain, diag: BasicDiagnosticEngine,
         isDebug!: Bool = false) {
-        super(functionValue, builder, globals, isDebug: isDebug)
+        super(functionValue, builder, globals, handleNonNullLiteralValue, isDebug: isDebug)
         this.diag = diag
     }
 

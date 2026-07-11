@@ -30,20 +30,25 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
     private let absObjPool: ArrayList<AbstractObject> = ArrayList<AbstractObject>()
     protected let builder: CHIRBuilder
     protected let globals: ValueAnalysisGlobals<VD, Pool>
+    // C++ ValueAnalysis.h:701-714 free-function template specializations are
+    // selected independently at each concrete ValueAnalysis instantiation.
+    private let handleNonNullLiteralValue: (LiteralValue) -> VD
 
     public init(functionValue: Function, builder: CHIRBuilder, globals: ValueAnalysisGlobals<VD, Pool>,
+        handleNonNullLiteralValue: (LiteralValue) -> VD,
         isDebug!: Bool = false) {
         super(functionValue, isDebug: isDebug)
         this.builder = builder
         this.globals = globals
+        this.handleNonNullLiteralValue = handleNonNullLiteralValue
     }
 
     public static func InitialiseLetGVState(pkg: Package, builder: CHIRBuilder,
-        globals: ValueAnalysisGlobals<VD, Pool>): Unit {
+        globals: ValueAnalysisGlobals<VD, Pool>, isTrackedGV: (GlobalVar) -> Bool): Unit {
         let globalState = globals.globalState
         globalState.SetReachable(true)
         for (gv in pkg.GetGlobalVarsWithInit()) {
-            if (!gv.TestAttr(Attribute.READONLY) || gv.GetInitFunc().isNone() || !VD.IsTrackedGV(gv)) {
+            if (!gv.TestAttr(Attribute.READONLY) || gv.GetInitFunc().isNone() || !isTrackedGV(gv)) {
                 continue
             }
             let realTy = (gv.GetType().getOrThrow() as RefType).getOrThrow().GetBaseType()
@@ -238,7 +243,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
                 state.programState.SetBound(dest, true)
             }
         } else {
-            state.programState.Insert(dest, VD.HandleNonNullLiteralValue(constant.GetValue()))
+            state.programState.Insert(dest, handleNonNullLiteralValue(constant.GetValue()))
         }
     }
 
@@ -406,7 +411,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         }
         if (let Some(initializer) <- globalVar.GetInitializer()) {
             CJC_ASSERT(!initializer.IsNullLit())
-            state.programState.Insert(dest, VD.HandleNonNullLiteralValue(initializer))
+            state.programState.Insert(dest, handleNonNullLiteralValue(initializer))
         } else {
             let gvDomain = globalState.CheckAbstractValueWithTopBottom(globalVar)
             if (gvDomain.isNone()) {

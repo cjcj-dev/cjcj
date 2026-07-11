@@ -44,13 +44,15 @@ public class ConstAnalysisWrapper {
 
     public func RunOnFunc(funcValue: Function, diag: BasicDiagnosticEngine,
         isDebug!: Bool = false): Option<Results<ConstDomain>> {
-        let analysis = ConstAnalysis<ConstStatePool>(funcValue, builder, constStateGlobals, diag, isDebug: isDebug)
+        let analysis = ConstAnalysis<ConstStatePool>(funcValue, builder, constStateGlobals,
+            { literalValue: LiteralValue => HandleNonNullLiteralValue(literalValue) }, diag, isDebug: isDebug)
         return Engine<ConstDomain>(funcValue, analysis).IterateToFixpoint()
     }
 
     public func RunOnFuncWithPool(funcValue: Function, diag: BasicDiagnosticEngine,
         isDebug!: Bool = false): Option<Results<ConstPoolDomain>> {
-        let analysis = ConstAnalysis<ConstActivePool>(funcValue, builder, constActiveGlobals, diag, isDebug: isDebug)
+        let analysis = ConstAnalysis<ConstActivePool>(funcValue, builder, constActiveGlobals,
+            { literalValue: LiteralValue => HandleNonNullLiteralValue(literalValue) }, diag, isDebug: isDebug)
         return Engine<ConstPoolDomain>(funcValue, analysis).IterateToFixpoint()
     }
 
@@ -84,7 +86,8 @@ public class ConstAnalysisWrapper {
     }
 
     private func SetUpGlobalVarState(pkg: Package, diag: BasicDiagnosticEngine, isDebug!: Bool = false): Unit {
-        ConstAnalysis<ConstStatePool>.InitialiseLetGVState(pkg, builder, constStateGlobals)
+        ConstAnalysis<ConstStatePool>.InitialiseLetGVState(pkg, builder, constStateGlobals,
+            { gv: GlobalVar => IsTrackedGV(gv) })
         for (gv in pkg.GetGlobalVarsWithInit()) {
             if (let Some(initFunc) <- gv.GetInitFunc()) {
                 if (gv.TestAttr(Attribute.READONLY) && !resultsMap.contains(initFunc)) {

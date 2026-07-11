@@ -51,21 +51,6 @@ public open class ValueRange <: HasEqual<ValueRange> {
         return ""
     }
 
-    public static func IsTrackedGV(gv: GlobalVar): Bool {
-        let baseTy = (gv.GetType().getOrThrow() as RefType).getOrThrow().GetBaseType()
-        return baseTy.IsInteger() || baseTy.IsBoolean() || baseTy.IsEnum()
-    }
-
-    public static func HandleNonNullLiteralValue(literal: LiteralValue): ValueDomain<ValueRange> {
-        if (let Some(boolLiteral) <- (literal as BoolLiteral)) {
-            return ValueDomain<ValueRange>(BoolRange(BoolDomain.FromBool(boolLiteral.value)))
-        }
-        if (let Some(intLiteral) <- (literal as IntLiteral)) {
-            let intType = literal.GetType().getOrThrow()
-            return ValueDomain<ValueRange>(SIntRange(SIntDomain.FromIntLiteral(intLiteral, intType)))
-        }
-        return ValueDomain<ValueRange>(true)
-    }
 }
 
 public class BoolRange <: ValueRange {
@@ -143,7 +128,8 @@ public type RangeValueDomain = ValueDomain<ValueRange>
 public type RangeStatePool = FullStatePool<RangeValueDomain>
 public type RangeDomain = State<RangeValueDomain, RangeStatePool>
 
-// C++ ValueRangeAnalysis.h:94-101 explicit Range template instantiation.
+// C++ ValueRangeAnalysis.h:94-101 explicit Range template instantiation;
+// ValueRangeAnalysis.cpp:90-107 supplies its two free-function specializations.
 public let rangeStateGlobals = ValueAnalysisGlobals<RangeValueDomain, RangeStatePool>()
 
 public func HandleNonNullLiteralValue(literal: LiteralValue, ty: Option<Type>): RangeValueDomain {
@@ -203,7 +189,9 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
 
     public init(functionValue: Function, builder: CHIRBuilder, diag: BasicDiagnosticEngine,
         isDebug!: Bool = false) {
-        super(functionValue, builder, rangeStateGlobals, isDebug: isDebug)
+        super(functionValue, builder, rangeStateGlobals,
+            { literal: LiteralValue => HandleNonNullLiteralValue(literal, Some(literal.GetType().getOrThrow())) },
+            isDebug: isDebug)
         this.diag = diag
     }
 
