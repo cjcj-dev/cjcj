@@ -105,7 +105,7 @@ public func SynAsExpr(typeManager: TypeManager, ae: AsExpr, optionDecl: Option<E
                     ae.SetTy(optionTy)
                     return optionTy
                 } else if (let Some(diagValue) <- diag) {
-                    let builder = diagValue.Diagnose(ae.begin, ae.end, BasicDiagKind.sema_no_core_object)
+                    let builder = Diagnose(diagValue, ae, BasicDiagKind.sema_no_core_object)
                     builder.Emit()
                 }
             }
