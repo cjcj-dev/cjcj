@@ -26,6 +26,7 @@ import cjcj::utils.CTYPE_NAME as UtilsCTypeName
 import cjcj::utils.CJC_ASSERT
 import cjcj::utils.MAIN_INVOKE
 import cjcj::utils.OBJECT_NAME
+import cjcj::utils.ProfileRecorder
 import cjcj::utils.RAW_ARRAY_NAME
 import cjcj::utils.VARRAY_NAME
 
@@ -569,6 +570,7 @@ public class TypeChecker {
         ctx.Reset()
         ctx.curPackage = pkg
         ctx.fullPackageName = pkg.fullPackageName
+        CheckPrimaryCtorBeforeMerge(pkg)
         SeedImportedPackageDecls(ctx)
         AddDefaultFunction(pkg)
         if (pkg.fullPackageName == UTILS_CORE_PACKAGE_NAME && !pkg.files.isEmpty() &&
@@ -586,6 +588,70 @@ public class TypeChecker {
         AddCurFile(pkg)
         MarkParamWithInitialValue(pkg)
         impl.WarmupCache(ctx)
+    }
+
+    private func CheckPrimaryCtorBeforeMerge(root: Node): Unit {
+        try (recorder = ProfileRecorder("PrepareTypeCheck", "CheckPrimaryCtorBeforeMerge")) {
+            if (root.TestAttr(Attribute.TOOL_ADD)) {
+                return
+            }
+            let walker = Walker(root, visitPre: { node: Node =>
+                if (let Some(file) <- (node as File)) {
+                    for (decl in file.decls) {
+                        if (let Some(inheritableDecl) <- (decl as InheritableDecl)) {
+                            if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.STRUCT_DECL) {
+                                CheckPrimaryCtorForClassOrStruct(inheritableDecl)
+                            }
+                        }
+                    }
+                    return VisitAction.SKIP_CHILDREN
+                }
+                return VisitAction.WALK_CHILDREN
+            })
+            let _ = walker.Walk()
+        }
+    }
+
+    private func CheckPrimaryCtorForClassOrStruct(inheritableDecl: InheritableDecl): Unit {
+        if (inheritableDecl.TestAttr(Attribute.IMPORTED)) {
+            return
+        }
+        var primaryCtor = false
+        var hasDesugared = false
+        var target: Option<PrimaryCtorDecl> = None
+        for (decl in inheritableDecl.GetMemberDecls()) {
+            if (let Some(primaryCtorDecl) <- (decl as PrimaryCtorDecl)) {
+                if (primaryCtor) {
+                    let typeName = if (inheritableDecl.astKind == ASTKind.CLASS_DECL) { "class" } else { "struct" }
+                    Diagnose(impl.diag.getOrThrow(), primaryCtorDecl,
+                        BasicDiagKind.sema_multiple_primary_constructors,
+                        args: [BasicDiagArgument(typeName),
+                            BasicDiagArgument(inheritableDecl.identifier.Val())]).Emit()
+                } else {
+                    primaryCtor = true
+                    target = primaryCtorDecl
+                }
+                if (let Some(funcBody) <- primaryCtorDecl.funcBody) {
+                    if (funcBody.generic.isSome()) {
+                        Diagnose(impl.diag.getOrThrow(), decl, BasicDiagKind.sema_forbid_generic_constructor,
+                            args: [BasicDiagArgument(decl.identifier.Val())]).Emit()
+                    }
+                    if (funcBody.paramLists.size > 1) {
+                        Diagnose(impl.diag.getOrThrow(), funcBody.paramLists[0],
+                            BasicDiagKind.sema_cannot_currying,
+                            args: [BasicDiagArgument("constructor")]).Emit()
+                    }
+                }
+            }
+            if (decl.TestAttr(Attribute.PRIMARY_CONSTRUCTOR) && decl.astKind == ASTKind.FUNC_DECL) {
+                hasDesugared = true
+            }
+        }
+        if (let Some(primaryCtorDecl) <- target) {
+            if (!hasDesugared) {
+                DesugarPrimaryCtor(inheritableDecl, primaryCtorDecl)
+            }
+        }
     }
 
     private func AddBuiltInArrayDecl(pkg: Package): Unit {
