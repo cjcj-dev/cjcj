@@ -21,7 +21,7 @@ private let PR_SET_PDEATHSIG: Int32 = 1
 
 @When[os != "Windows"]
 foreign {
-    func signal(sig: Int32, handler: CFunc<(Int32) -> Unit>): CFunc<(Int32) -> Unit>
+    func signal(sig: Int32, handler: CPointer<Unit>): CPointer<Unit>
     func _exit(status: Int32): Unit
     func waitpid(pid: Int32, status: CPointer<Int32>, options: Int32): Int32
     func dup2(oldfd: Int32, newfd: Int32): Int32
@@ -195,6 +195,7 @@ foreign {
 }
 
 @When[os != "Windows"]
+@C
 private func SignalHandler(_: Int32): Unit {
     MacroProcMsger.GetInstance().CloseMacroSrv()
     unsafe { _exit(1) }
@@ -203,10 +204,11 @@ private func SignalHandler(_: Int32): Unit {
 @When[os != "Windows"]
 private func SetExitSignal(): Unit {
     unsafe {
-        let _ = signal(SIGABRT, { value: Int32 => SignalHandler(value) })
-        let _ = signal(SIGINT, { value: Int32 => SignalHandler(value) })
-        let _ = signal(SIGTERM, { value: Int32 => SignalHandler(value) })
-        let _ = signal(SIGSEGV, { value: Int32 => SignalHandler(value) })
+        let handler = CPointer<Unit>(SignalHandler)
+        let _ = signal(SIGABRT, handler)
+        let _ = signal(SIGINT, handler)
+        let _ = signal(SIGTERM, handler)
+        let _ = signal(SIGSEGV, handler)
     }
 }
 
