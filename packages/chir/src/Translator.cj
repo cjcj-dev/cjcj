@@ -1648,9 +1648,6 @@ public class Translator {
                 return TranslatePropertyGetter(expr, propDecl)
             }
             if (let Some(varDecl) <- (target as AstVarDecl)) {
-                if (let Some(value) <- TranslateMemberAccessFromRValueBase(expr, varDecl)) {
-                    return value
-                }
                 let leftValueInfo = TranslateMemberAccessAsLeftValue(expr)
                 return LoadLeftValue(leftValueInfo, MemberAccessValueType(expr, target))
             }
@@ -1659,21 +1656,6 @@ public class Translator {
             }
         }
         throw IllegalArgumentException("not yet ported in faithful AST2CHIR: unsupported member access")
-    }
-
-    private func TranslateMemberAccessFromRValueBase(expr: AstMemberAccess, varDecl: AstVarDecl): Option<Value> {
-        if (let Some(baseExpr) <- expr.baseExpr) {
-            if (CanTranslateExprAsLeftValue(baseExpr)) {
-                return None
-            }
-            let baseValue = Translator.TranslateASTNode(baseExpr, this) ??
-                throw IllegalStateException("faithful AST2CHIR member rvalue base produced no value")
-            let path = ArrayList<String>()
-            path.add(varDecl.identifier.Val())
-            return RequireResult(builder.CreateFieldByName(MemberAccessValueType(expr, varDecl),
-                baseValue, path, CurrentBlock()))
-        }
-        return None
     }
 
     private func TranslateFuncMemberAccess(member: AstMemberAccess, funcDecl: AstFuncDecl): Value {
@@ -2184,11 +2166,6 @@ public class Translator {
             idx++
         }
         return true
-    }
-
-    private static func CanTranslateExprAsLeftValue(expr: AstExpr): Bool {
-        let nodePtr = Translator.GetDesugaredExpr(expr)
-        return (nodePtr as AstRefExpr).isSome() || (nodePtr as AstMemberAccess).isSome()
     }
 
     private func TranslatePropertyGetter(expr: AstMemberAccess, propDecl: AstPropDecl): Value {
