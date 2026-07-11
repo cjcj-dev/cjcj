@@ -313,12 +313,10 @@ public class IntLiteral {
             return
         }
         if (IsUnsigned()) {
-            uint64Val = wuint64Val
-            int64Val = Int64(wuint64Val)
-        } else {
-            int64Val = wint64Val
-            uint64Val = UInt64(wint64Val)
+            SetUint64(wuint64Val)
+            return
         }
+        SetInt64(wint64Val)
     }
 
     public func SetSaturatingValue(): Unit {
@@ -326,12 +324,10 @@ public class IntLiteral {
             return
         }
         if (IsUnsigned()) {
-            uint64Val = suint64Val
-            int64Val = Int64(suint64Val)
-        } else {
-            int64Val = sint64Val
-            uint64Val = UInt64(sint64Val)
+            SetUint64(suint64Val)
+            return
         }
+        SetInt64(sint64Val)
     }
 
     public func SetOutOfRange(ty: Ty): Unit {
