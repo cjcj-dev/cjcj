@@ -29,8 +29,8 @@ public func SynNumTypeConvExpr(tce: TypeConvExpr,
                     }
                     if (!CanSkipDiag(exprNode)) {
                         if (let Some(diagValue) <- diag) {
-                            let builder = diagValue.Diagnose(
-                                exprNode.begin, exprNode.end, BasicDiagKind.sema_numeric_convert_must_be_numeric)
+                            let builder = Diagnose(
+                                diagValue, exprNode, BasicDiagKind.sema_numeric_convert_must_be_numeric)
                             builder.Emit()
                         }
                     }
