@@ -99,7 +99,7 @@ public class UpdateMemberVarPath {
     private func GetIndexByName(baseType: CustomType, name: String): (Type, UInt64) {
         var memberVarInstType: Option<Type> = None
         let allMemberVars = baseType.GetCustomTypeDef().GetAllInstanceVars()
-        let memberVarInstTypes = baseType.GetInstantiatedMemberTys()
+        let memberVarInstTypes = baseType.GetInstantiatedMemberTys(builder)
         var index = allMemberVars.size
         while (index > 0) {
             index--

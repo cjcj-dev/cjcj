@@ -533,7 +533,7 @@ public open class ValueAnalysis<AV, Pool> <: Analysis<State<AV, Pool>> where AV 
                 childrenTypes.add(false)
                 childrenTypes.add(false)
             } else if (!structDef.IsCStruct()) {
-                for (ty in structTy.GetInstantiatedMemberTys()) {
+                for (ty in structTy.GetInstantiatedMemberTys(builder)) {
                     childrenTypes.add(ty.IsRef())
                 }
             }

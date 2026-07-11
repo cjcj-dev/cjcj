@@ -284,7 +284,7 @@ private class IVal2CHIR {
         }
         let elementTys = if (ty.GetTypeKind() == TypeKind.TYPE_STRUCT) {
             if (let Some(customTy) <- (ty as CustomType)) {
-                customTy.GetInstantiatedMemberTys()
+                customTy.GetInstantiatedMemberTys(builder)
             } else {
                 ArrayList<Type>()
             }

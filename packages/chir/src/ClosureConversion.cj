@@ -3,7 +3,7 @@ package cjcj::chir
 import std.collection.*
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::option.GlobalOptions
-import cjcj::utils.{CJC_ASSERT, StaticCast}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, StaticCast}
 import cjcj::utils.ProfileRecorder
 
 private let GENERIC_VIRTUAL_FUNC: String = "$GenericVirtualFunc"
@@ -40,8 +40,8 @@ public class ClosureConversion {
     private let boxClassMap: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
     private let convertedCache: HashMap<Int64, Function> = HashMap<Int64, Function>()
     private let duplicateLambdaName: HashMap<String, Int64> = HashMap<String, Int64>()
-    private let typeConvertMap: HashMap<String, Type> = HashMap<String, Type>()
-    private let needConvertedGenericTys: HashMap<Int64, GenericType> = HashMap<Int64, GenericType>()
+    private let typeConvertMap: HashMap<Type, Type> = HashMap<Type, Type>()
+    private let needConvertedGenericTys: HashSet<Type> = HashSet<Type>()
     private let srcCodeImportedFuncs: ArrayList<Function> = ArrayList<Function>()
     private let uselessClasses: ArrayList<ClassDef> = ArrayList<ClassDef>()
     private let uselessLambda: ArrayList<Function> = ArrayList<Function>()
@@ -217,8 +217,8 @@ public class ClosureConversion {
             converter.VisitDef(def)
         }
         LiftGenericTypes()
-        for ((_, ty) in builder.GetAllCustomTypes()) {
-            ty.ResetAllInstantiatedType()
+        for (ty in builder.GetAllCustomTypes()) {
+            StaticCast<CustomType>(ty).ResetAllInstantiatedType()
         }
     }
 
@@ -304,6 +304,33 @@ public class ClosureConversion {
         }
     }
 
+    private func ConvertCompositionalType(ty: Type): Type {
+        if (let Some(tupleTy) <- (ty as TupleType)) {
+            return builder.context.GetTupleTy(ConvertTypeArgs(tupleTy.GetTypeArgs()))
+        } else if (let Some(funcTy) <- (ty as FuncType)) {
+            return ConvertFuncType(funcTy)
+        } else if (let Some(enumTy) <- (ty as EnumType)) {
+            return builder.context.GetEnumTy(enumTy.GetEnumDef(), ConvertTypeArgs(enumTy.GetGenericArgs()))
+        } else if (let Some(structTy) <- (ty as StructType)) {
+            return builder.context.GetStructTy(structTy.GetStructDef(), ConvertTypeArgs(structTy.GetGenericArgs()))
+        } else if (let Some(classTy) <- (ty as ClassType)) {
+            return builder.context.GetClassTy(classTy.GetClassDef(), ConvertTypeArgs(classTy.GetGenericArgs()))
+        } else if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
+            return builder.context.GetRawArrayTy(ConvertTypeToClosureType(rawArrayTy.GetElementType()),
+                dims: rawArrayTy.GetDims())
+        } else if (let Some(varrayTy) <- (ty as VArrayType)) {
+            return builder.context.GetVArrayTy(ConvertTypeToClosureType(varrayTy.GetElementType()), varrayTy.size)
+        } else if (let Some(pointerTy) <- (ty as CPointerType)) {
+            return builder.context.GetCPointerTy(ConvertTypeToClosureType(pointerTy.GetElementType()))
+        } else if (let Some(refTy) <- (ty as RefType)) {
+            return builder.context.GetRefTy(ConvertTypeToClosureType(refTy.GetBaseType()))
+        } else if (let Some(boxTy) <- (ty as BoxType)) {
+            return builder.context.GetBoxTy(ConvertTypeToClosureType(boxTy.GetBaseType()))
+        }
+        CJC_ABORT()
+        throw IllegalStateException("unsupported compositional type")
+    }
+
     private func ConvertTypeToClosureType(ty: Type): Type {
         if (ty.IsPrimitive() || ty.IsInvalid() || ty.IsAny() || ty.IsVoid() || ty.IsCFunc() ||
             ty.IsCString() || ty.IsThis()) {
@@ -311,49 +338,26 @@ public class ClosureConversion {
         }
         if (ty.IsGeneric()) {
             let genericTy = StaticCast<GenericType>(ty)
-            needConvertedGenericTys[genericTy.objectId] = genericTy
+            needConvertedGenericTys.add(genericTy)
             return ty
         }
-        let key = "cc:" + ty.ToString()
-        if (let Some(cached) <- typeConvertMap.get(key)) {
+        if (let Some(cached) <- typeConvertMap.get(ty)) {
             return cached
         }
-        var converted: Type = ty
-        if (let Some(tupleTy) <- (ty as TupleType)) {
-            converted = builder.context.GetTupleTy(ConvertTypeArgs(tupleTy.GetTypeArgs()))
-        } else if (let Some(funcTy) <- (ty as FuncType)) {
-            converted = ConvertFuncType(funcTy)
-        } else if (let Some(structTy) <- (ty as StructType)) {
-            converted = builder.context.GetStructTy(structTy.GetStructDef(), ConvertTypeArgs(structTy.GetGenericArgs()))
-        } else if (let Some(classTy) <- (ty as ClassType)) {
-            converted = builder.context.GetClassTy(classTy.GetClassDef(), ConvertTypeArgs(classTy.GetGenericArgs()))
-        } else if (let Some(enumTy) <- (ty as EnumType)) {
-            converted = builder.context.GetEnumTy(enumTy.GetEnumDef(), ConvertTypeArgs(enumTy.GetGenericArgs()))
-        } else if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
-            converted = builder.context.GetRawArrayTy(ConvertTypeToClosureType(rawArrayTy.GetElementType()),
-                dims: rawArrayTy.GetDims())
-        } else if (let Some(varrayTy) <- (ty as VArrayType)) {
-            converted = builder.context.GetVArrayTy(ConvertTypeToClosureType(varrayTy.GetElementType()),
-                varrayTy.size)
-        } else if (let Some(pointerTy) <- (ty as CPointerType)) {
-            converted = builder.context.GetCPointerTy(ConvertTypeToClosureType(pointerTy.GetElementType()))
-        } else if (let Some(refTy) <- (ty as RefType)) {
-            converted = builder.context.GetRefTy(ConvertTypeToClosureType(refTy.GetBaseType()))
-        } else if (let Some(boxTy) <- (ty as BoxType)) {
-            converted = builder.context.GetBoxTy(ConvertTypeToClosureType(boxTy.GetBaseType()))
-        }
-        typeConvertMap[key] = converted
+        let converted = ConvertCompositionalType(ty)
+        typeConvertMap[ty] = converted
         return converted
     }
 
     private func LiftGenericTypes(): Unit {
         let temp = needConvertedGenericTys.clone()
-        for ((_, ty) in temp) {
+        for (ty in temp) {
+            let genericTy = StaticCast<GenericType>(ty)
             let newUpperBounds = ArrayList<Type>()
-            for (upperBound in ty.GetUpperBounds()) {
+            for (upperBound in genericTy.GetUpperBounds()) {
                 newUpperBounds.add(ConvertTypeToClosureType(upperBound))
             }
-            ty.SetUpperBounds(newUpperBounds)
+            genericTy.SetUpperBounds(newUpperBounds)
         }
     }
 

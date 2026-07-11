@@ -533,7 +533,8 @@ public func GenerateGetElementRef(irBuilder: IRBuilder2, chirExpr: Expression): 
     }
     if (let Some(elementByName) <- (chirExpr as GetElementByName)) {
         if (let Some(locationTy) <- elementByName.GetLocation().GetType()) {
-            if (let Some(path) <- ResolveElementPathByNames(locationTy, elementByName.GetNames())) {
+            if (let Some(path) <- ResolveElementPathByNames(
+                irBuilder.GetCGModule(), locationTy, elementByName.GetNames())) {
                 if (path.isEmpty()) {
                     return LLVMNullValue()
                 }
@@ -588,7 +589,8 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
     }
     if (let Some(storeByName) <- (chirExpr as StoreElementByName)) {
         if (let Some(locationTy) <- storeByName.GetLocation().GetType()) {
-            if (let Some(path) <- ResolveElementPathByNames(locationTy, storeByName.GetNames())) {
+            if (let Some(path) <- ResolveElementPathByNames(
+                irBuilder.GetCGModule(), locationTy, storeByName.GetNames())) {
                 if (ShouldSkipNoOpStore(storeByName.GetValue(), storeByName.GetLocation())) {
                     return LLVMNullValue()
                 }
@@ -713,7 +715,8 @@ private func BuildElementIndices(irBuilder: IRBuilder2, chirExpr: Expression): A
     }
     if (let Some(elementByName) <- (chirExpr as GetElementByName)) {
         if (let Some(locationTy) <- elementByName.GetLocation().GetType()) {
-            if (let Some(path) <- ResolveElementPathByNames(locationTy, elementByName.GetNames())) {
+            if (let Some(path) <- ResolveElementPathByNames(
+                irBuilder.GetCGModule(), locationTy, elementByName.GetNames())) {
                 return BuildStaticElementIndices(irBuilder, path)
             }
         }
@@ -810,7 +813,8 @@ private func AutoEnvCallableAbiFieldCount(baseTy: Type): UInt64 {
     return if (IsAutoEnvType(baseTy)) { 2u64 } else { 0u64 }
 }
 
-private func ResolveElementPathByNames(baseTy: Type, names: ArrayList<String>): Option<ArrayList<UInt64>> {
+private func ResolveElementPathByNames(cgMod: CGModule, baseTy: Type,
+    names: ArrayList<String>): Option<ArrayList<UInt64>> {
     if (names.isEmpty()) {
         return None
     }
@@ -819,7 +823,7 @@ private func ResolveElementPathByNames(baseTy: Type, names: ArrayList<String>): 
     for (name in names) {
         if (let Some(customTy) <- (currentTy as CustomType)) {
             let fields = customTy.GetCustomTypeDef().GetAllInstanceVars()
-            let fieldTypes = customTy.GetInstantiatedMemberTys()
+            let fieldTypes = customTy.GetInstantiatedMemberTys(cgMod.GetCGContext().GetCHIRBuilder())
             var fieldIdx: Int64 = 0
             var found = false
             while (fieldIdx < fields.size) {

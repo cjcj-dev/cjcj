@@ -1001,7 +1001,8 @@ private func GetTypeTemplateFieldTypes(cgMod: CGModule, customTy: CustomType): A
         result.add(intNativeTy)
         result.add(intNativeTy)
     }
-    for (fieldTy in SourceCustomType(customTy).GetInstantiatedMemberTys()) {
+    for (fieldTy in SourceCustomType(customTy).GetInstantiatedMemberTys(
+        cgMod.GetCGContext().GetCHIRBuilder())) {
         result.add(fieldTy)
     }
     return result
@@ -1311,7 +1312,7 @@ public func GetInstanceFieldTypes(cgMod: CGModule, chirTy: Type): ArrayList<Type
             result.add(intNativeTy)
             result.add(intNativeTy)
         }
-        for (fieldTy in customTy.GetInstantiatedMemberTys()) {
+        for (fieldTy in customTy.GetInstantiatedMemberTys(cgMod.GetCGContext().GetCHIRBuilder())) {
             result.add(fieldTy)
         }
     }

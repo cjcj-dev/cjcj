@@ -12,19 +12,19 @@ public class CHIRBuilder {
         this.context = context
     }
 
-    public func GetAllCustomTypes(): HashMap<Int64, CustomType> {
-        let result = HashMap<Int64, CustomType>()
+    public func GetAllCustomTypes(): HashSet<Type> {
+        let result = HashSet<Type>()
         for ((_, bucket) in context.dynamicAllocatedTys) {
             for (ty in bucket) {
                 if (let Some(customTy) <- (ty as CustomType)) {
-                    result[customTy.objectId] = customTy
+                    result.add(customTy)
                 }
             }
         }
         for ((_, bucket) in context.constAllocatedTys) {
             for (ty in bucket) {
                 if (let Some(customTy) <- (ty as CustomType)) {
-                    result[customTy.objectId] = customTy
+                    result.add(customTy)
                 }
             }
         }

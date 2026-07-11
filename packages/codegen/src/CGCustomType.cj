@@ -42,7 +42,7 @@ public open class CGCustomType <: CGType {
 
     protected func IsSized(): Bool {
         let customType = StaticCast<CustomType>(chirType)
-        let memberVars = customType.GetInstantiatedMemberTys()
+        let memberVars = customType.GetInstantiatedMemberTys(cgMod.GetCGContext().GetCHIRBuilder())
         for (memberVar in memberVars) {
             if (memberVar.IsRef() || memberVar.IsCPointer() || memberVar.IsCFunc()) {
                 continue

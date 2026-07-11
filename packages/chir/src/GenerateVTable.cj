@@ -1107,7 +1107,7 @@ public class WrapMutFunc {
         builder.CreateStore(apply.GetResult().getOrThrow(), wrapperFn.GetReturnValue().getOrThrow(), entry)
         let tempThis = TypeCastOrBoxIfNeeded(args[0], wrapperParamsTy[0], builder, entry)
         let load = builder.CreateLoad(parentDefType, tempThis, entry).GetResult().getOrThrow()
-        let structMemberTypes = (parentDefType as StructType).getOrThrow().GetInstantiatedMemberTys()
+        let structMemberTypes = (parentDefType as StructType).getOrThrow().GetInstantiatedMemberTys(builder)
         var idx: Int64 = 0
         while (idx < structMemberTypes.size) {
             let path = ArrayList<UInt64>()

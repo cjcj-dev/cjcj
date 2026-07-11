@@ -1057,8 +1057,11 @@ public class ThisType <: Type {
 public open class CustomType <: Type {
     public let def: CustomTypeDef
     private let implementedInterfaceTys: ArrayList<ClassType> = ArrayList<ClassType>()
+    private let instantiatedMemberTys: ArrayList<Type> = ArrayList<Type>()
     private var hasSetSuperInterface: Bool = false
+    private var hasSetInstMemberTy: Bool = false
     private let setSuperInterfaceMtx: Mutex = Mutex()
+    private let setInstMemberTyMtx: Mutex = Mutex()
 
     public init(kind: TypeKind, def: CustomTypeDef, typeArgs: ArrayList<Type>) {
         super(kind)
@@ -1078,7 +1081,9 @@ public open class CustomType <: Type {
 
     public open func ResetAllInstantiatedType(): Unit {
         implementedInterfaceTys.clear()
+        instantiatedMemberTys.clear()
         hasSetSuperInterface = false
+        hasSetInstMemberTy = false
     }
 
     public override func GetExtends(): ArrayList<ExtendDef> {
@@ -1266,19 +1271,45 @@ public open class CustomType <: Type {
         return (memberTy, isReadOnly)
     }
 
-    public func GetInstantiatedMemberTys(): ArrayList<Type> {
+    private func CalculateCurDefInstantiatedMemberTys(builder: CHIRBuilder): ArrayList<Type> {
+        let genericTypes = def.GetGenericTypeParams()
+        if (!genericTypes.isEmpty()) {
+            CJC_ASSERT(argTys.size == genericTypes.size)
+        }
+        let replaceTable = HashMap<Type, Type>()
+        var typeIdx: Int64 = 0
+        while (typeIdx < genericTypes.size) {
+            replaceTable[genericTypes[typeIdx]] = argTys[typeIdx]
+            typeIdx++
+        }
+        let result = ArrayList<Type>()
+        for (member in def.GetDirectInstanceVars()) {
+            result.add(ReplaceRawGenericArgType(member.ty, replaceTable, builder))
+        }
+        return result
+    }
+
+    public func GetInstantiatedMemberTys(builder: CHIRBuilder): ArrayList<Type> {
         let out = ArrayList<Type>()
         if (let Some(classTy) <- (this as ClassType)) {
-            if (let Some(superTy) <- classTy.GetSuperClassTy()) {
-                for (fieldTy in superTy.GetInstantiatedMemberTys()) {
+            if (let Some(superTy) <- classTy.GetSuperClassTy(builder: builder)) {
+                for (fieldTy in superTy.GetInstantiatedMemberTys(builder)) {
                     out.add(fieldTy)
                 }
             }
         }
 
-        let genericParams = def.GetGenericTypeParams()
-        for (member in def.GetDirectInstanceVars()) {
-            out.add(ReplaceRawGenericArgType(member.ty, genericParams, GetGenericArgs()))
+        synchronized(setInstMemberTyMtx) {
+            if (!hasSetInstMemberTy) {
+                instantiatedMemberTys.clear()
+                for (memberTy in CalculateCurDefInstantiatedMemberTys(builder)) {
+                    instantiatedMemberTys.add(memberTy)
+                }
+                hasSetInstMemberTy = true
+            }
+            for (memberTy in instantiatedMemberTys) {
+                out.add(memberTy)
+            }
         }
         return out
     }
@@ -1573,6 +1604,23 @@ public func CreateNewTypeWithArgs(oldType: Type, newArgs: ArrayList<Type>, build
     throw IllegalStateException("CreateNewTypeWithArgs unsupported for " + oldType.ToString())
 }
 
+public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Type, Type>, builder: CHIRBuilder): Type {
+    if (replaceTable.isEmpty()) {
+        return ty
+    }
+    if (let Some(genericTy) <- (ty as GenericType)) {
+        if (let Some(instTy) <- replaceTable.get(genericTy)) {
+            return instTy
+        }
+        return ty
+    }
+    let newArgs = ArrayList<Type>()
+    for (argTy in ty.GetTypeArgs()) {
+        newArgs.add(ReplaceRawGenericArgType(argTy, replaceTable, builder))
+    }
+    return CreateNewTypeWithArgs(ty, newArgs, builder)
+}
+
 public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type>, builder: CHIRBuilder): Type {
     if (replaceTable.isEmpty()) {
         return ty
@@ -1794,12 +1842,12 @@ public func GetFieldOfType(baseTy: Type, index: UInt64, builder: CHIRBuilder): O
             ty = tupleTy.GetElementType(Int64(index))
         }
     } else if (let Some(structTy) <- (baseTy as StructType)) {
-        let memberTys = structTy.GetInstantiatedMemberTys()
+        let memberTys = structTy.GetInstantiatedMemberTys(builder)
         if (index < UInt64(memberTys.size)) {
             ty = memberTys[Int64(index)]
         }
     } else if (let Some(classTy) <- (baseTy as ClassType)) {
-        let memberTys = classTy.GetInstantiatedMemberTys()
+        let memberTys = classTy.GetInstantiatedMemberTys(builder)
         if (index < UInt64(memberTys.size)) {
             ty = memberTys[Int64(index)]
         }

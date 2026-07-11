@@ -42,7 +42,7 @@ public class CGClassType <: CGCustomType {
                 fieldTypes.add(i8PtrTy)
             }
             if (let Some(customTy) <- (chirType as CustomType)) {
-                for (fieldTy in customTy.GetInstantiatedMemberTys()) {
+                for (fieldTy in customTy.GetInstantiatedMemberTys(cgMod.GetCGContext().GetCHIRBuilder())) {
                     fieldTypes.add(CGType.GetOrCreate(cgMod, fieldTy).GetLLVMType())
                 }
             }
@@ -59,7 +59,7 @@ public class CGClassType <: CGCustomType {
             containedCGTypes.add(CGType.GetOrCreate(cgMod, pointerTy))
         }
         if (let Some(customTy) <- (chirType as CustomType)) {
-            for (fieldTy in customTy.GetInstantiatedMemberTys()) {
+            for (fieldTy in customTy.GetInstantiatedMemberTys(cgMod.GetCGContext().GetCHIRBuilder())) {
                 containedCGTypes.add(CGType.GetOrCreate(cgMod, fieldTy))
             }
         }

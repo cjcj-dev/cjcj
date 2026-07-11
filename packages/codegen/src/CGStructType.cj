@@ -34,7 +34,8 @@ public class CGStructType <: CGCustomType {
             let fieldTypes = ArrayList<LLVMTypeRef>()
             let litStructPtrIndices = ArrayList<Int64>()
             var idx: Int64 = 0
-            for (fieldTy in structType.GetInstantiatedMemberTys()) {
+            let memberVarTypes = structType.GetInstantiatedMemberTys(cgMod.GetCGContext().GetCHIRBuilder())
+            for (fieldTy in memberVarTypes) {
                 let fieldType = CGType.GetOrCreate(cgMod, fieldTy).GetLLVMType()
                 fieldTypes.add(fieldType)
                 if (fieldTy.IsCFunc() && IsLitStructPtrType(fieldType)) {
@@ -44,8 +45,8 @@ public class CGStructType <: CGCustomType {
             }
             SetStructTypeBody(structLayout, fieldTypes)
             for (litStructPtrIdx in litStructPtrIndices) {
-                let memberTys = structType.GetInstantiatedMemberTys()
-                fieldTypes[litStructPtrIdx] = CGType.GetOrCreate(cgMod, memberTys[litStructPtrIdx]).GetLLVMType()
+                fieldTypes[litStructPtrIdx] =
+                    CGType.GetOrCreate(cgMod, memberVarTypes[litStructPtrIdx]).GetLLVMType()
             }
             SetStructTypeBody(structLayout, fieldTypes)
         }
@@ -54,7 +55,7 @@ public class CGStructType <: CGCustomType {
 
     protected override func GenContainedCGTypes(): Unit {
         let structType = StaticCast<StructType>(chirType)
-        for (fieldTy in structType.GetInstantiatedMemberTys()) {
+        for (fieldTy in structType.GetInstantiatedMemberTys(cgMod.GetCGContext().GetCHIRBuilder())) {
             containedCGTypes.add(CGType.GetOrCreate(cgMod, fieldTy))
         }
     }
