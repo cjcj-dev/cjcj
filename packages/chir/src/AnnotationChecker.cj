@@ -15,12 +15,6 @@ private let GLOBAL_FUNCTION_TARGET = "GlobalFunction"
 private let GLOBAL_VARIABLE_TARGET = "GlobalVariable"
 private let EXTENSION_TARGET = "Extension"
 
-private let CUSTOM_ANNO_METADATA_KEYS: Array<String> = [
-    "customAnnotations",
-    "annotations",
-    "annos"
-]
-
 public class AnnotationChecker {
     private let pkg: Package
     private let annotationTargets: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
@@ -174,59 +168,7 @@ public class AnnotationChecker {
 }
 
 private func GetDefCustomAnnotations(def: CustomTypeDef): ArrayList<String> {
-    let out = def.GetAnnoInfo().GetAnnotations()
-    for (annotation in GetMetadataCustomAnnotations(def)) {
-        AddAnnotationIfMissing(out, annotation)
-    }
-    return out
-}
-
-private func GetMetadataCustomAnnotations(def: CustomTypeDef): ArrayList<String> {
-    for (key in CUSTOM_ANNO_METADATA_KEYS) {
-        if (let Some(rawAnnotations) <- def.GetAnnotation(key)) {
-            return ParseStringList(rawAnnotations)
-        }
-    }
-    return ArrayList<String>()
-}
-
-private func AddAnnotationIfMissing(values: ArrayList<String>, annotation: String): Unit {
-    for (value in values) {
-        if (value == annotation) {
-            return
-        }
-    }
-    values.add(annotation)
-}
-
-private func ParseStringList(rawValue: String): ArrayList<String> {
-    let out = ArrayList<String>()
-    var current = ""
-    var idx: Int64 = 0
-    while (idx < rawValue.size) {
-        let byte = rawValue[idx]
-        if (IsAnnotationListDelimiter(byte)) {
-            AddTrimmedIfNotEmpty(out, current)
-            current = ""
-        } else {
-            current += rawValue[idx..idx + 1]
-        }
-        idx++
-    }
-    AddTrimmedIfNotEmpty(out, current)
-    return out
-}
-
-private func AddTrimmedIfNotEmpty(values: ArrayList<String>, rawValue: String): Unit {
-    let value = rawValue.trimAscii()
-    if (!value.isEmpty()) {
-        values.add(value)
-    }
-}
-
-private func IsAnnotationListDelimiter(byte: UInt8): Bool {
-    return byte == b',' || byte == b';' || byte == b'|' || byte == b' ' || byte == b'\t' ||
-        byte == b'\n' || byte == b'\r'
+    return def.GetAnnoInfo().GetAnnotations()
 }
 
 private func NormalizeAnnotationName(annotation: String): String {

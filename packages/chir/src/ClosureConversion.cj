@@ -15,11 +15,6 @@ private let CC_LAMBDA_IMPL_PREFIX: String = "$Cl"
 private let CC_CAPTURED_PREFIX: String = "$Captured_"
 private let CC_FUNC_PREFIX: String = "_CC"
 private let MANGLE_CANGJIE_PREFIX: String = "_C"
-private let CC_AUTO_ENV_CLASS_ANNOTATION: String = "IsAutoEnvClass"
-private let CC_AUTO_ENV_BASE_ANNOTATION: String = "IsAutoEnvBase"
-private let CC_AUTO_ENV_GENERIC_BASE_ANNOTATION: String = "IsAutoEnvGenericBase"
-private let CC_AUTO_ENV_INST_BASE_ANNOTATION: String = "IsAutoEnvInstBase"
-private let CC_AUTO_ENV_IMPL_ANNOTATION: String = "IsAutoEnvImpl"
 private let GENERIC_THIS_SRC_NAME: String = "This"
 
 private func LiftCustomDefType(def: CustomTypeDef, converter: TypeConverterForCC): Unit {
@@ -415,8 +410,6 @@ public class ClosureConversion {
         classDef.SetType(classTy)
         SetAutoEnvBaseDefAttr(classDef)
         classDef.EnableAttr(Attribute.GENERIC)
-        classDef.SetAnnotation(CC_AUTO_ENV_BASE_ANNOTATION, "true")
-        classDef.SetAnnotation(CC_AUTO_ENV_GENERIC_BASE_ANNOTATION, "true")
         AddClassToPackage(classDef)
         CreateVirtualFuncInAutoEnvBaseDef(classDef, GENERIC_VIRTUAL_FUNC, paramsAndRet)
         genericAutoEnvBaseDefs[className] = classDef
@@ -433,8 +426,6 @@ public class ClosureConversion {
         classDef.SetType(classTy)
         classDef.SetSuperClassTy(builder.context.GetClassTy(superClass, funcTy.GetTypeArgs()))
         SetAutoEnvBaseDefAttr(classDef)
-        classDef.SetAnnotation(CC_AUTO_ENV_BASE_ANNOTATION, "true")
-        classDef.SetAnnotation(CC_AUTO_ENV_INST_BASE_ANNOTATION, "true")
         AddClassToPackage(classDef)
         CreateVirtualFuncInAutoEnvBaseDef(classDef, INST_VIRTUAL_FUNC, funcTy.GetTypeArgs())
         instAutoEnvBaseDefs[className] = classDef
@@ -551,7 +542,6 @@ public class ClosureConversion {
         if (!classTypeArgs.isEmpty()) {
             classDef.EnableAttr(Attribute.GENERIC)
         }
-        classDef.SetAnnotation(CC_AUTO_ENV_IMPL_ANNOTATION, "true")
         AddClassToPackage(classDef)
         return classDef
     }
@@ -649,7 +639,8 @@ public class ClosureConversion {
     }
 
     private func GetMethodTypeInAutoEnvGenericDef(def: ClassDef): FuncType {
-        if (def.GetAnnotation(CC_AUTO_ENV_GENERIC_BASE_ANNOTATION).isSome()) {
+        // ClosureConversion.cpp:371 GetMethodTypeInAutoEnvGenericDef: def.GetType()->IsAutoEnvGenericBase().
+        if (def.GetType().getOrThrow().IsAutoEnvGenericBase()) {
             let methods = def.GetMethods()
             if (methods.size != 1) {
                 throw IllegalStateException("ClosureConversion AutoEnv generic base must have one method")
@@ -2594,7 +2585,8 @@ public class ClosureConversion {
     }
 
     private func MarkAutoEnvClass(classDef: ClassDef): Unit {
-        classDef.SetAnnotation(CC_AUTO_ENV_CLASS_ANNOTATION, "true")
+        // ClosureConversion.cpp:113 SetAutoEnvImplDefAttr: def.Set<IsAutoEnvClass>(true).
+        classDef.Set<IsAutoEnvClass, Bool>(true)
     }
 
     private func SetAutoEnvImplDefAttr(classDef: ClassDef): Unit {
@@ -2636,7 +2628,8 @@ public class ClosureConversion {
     }
 
     private func IsInstAutoEnvBaseDef(def: ClassDef): Bool {
-        return def.GetAnnotation(CC_AUTO_ENV_INST_BASE_ANNOTATION).isSome()
+        // Type.cpp:80 IsAutoEnvInstBase = IsAutoEnvBase && argTys.empty().
+        return def.GetType().getOrThrow().IsAutoEnvInstBase()
     }
 
     private func GenericOverrideFuncName(srcFunc: Function): String {

@@ -65,10 +65,8 @@ private func IsConstantNullValue(value: Value): Bool {
 
 private func IsAutoEnvValue(value: Value): Bool {
     if (let Some(valueTy) <- value.GetType()) {
-        if (let Some(classTy) <- (valueTy.StripAllRefs() as ClassType)) {
-            let classDef = classTy.GetClassDef()
-            return classDef.GetAnnotation("IsAutoEnvBase").isSome()
-        }
+        // Type.cpp:71 IsAutoEnvBase = IsClosureConversionEnvClass(classDef) && classDef->TestAttr(ABSTRACT).
+        return valueTy.StripAllRefs().IsAutoEnvBase()
     }
     return false
 }

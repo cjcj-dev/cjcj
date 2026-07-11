@@ -263,15 +263,10 @@ func CHIRApplyBaseAnnotations(base: Base, value: String): Unit {
             base.Set<LinkTypeInfo, BasicLinkage>(LinkTypeInfo.Extract(line))
             continue
         }
-        if (!line.startsWith("@")) {
+        // Annotation.h:250 IsAutoEnvClass::ToString.
+        if (line == "IsAutoEnvClass: true") {
+            base.Set<IsAutoEnvClass, Bool>(true)
             continue
-        }
-        if (let Some(openPos) <- line.indexOf("(")) {
-            if (let Some(closePos) <- line.lastIndexOf(")")) {
-                if (openPos > 1 && closePos > openPos) {
-                    base.SetAnnotation(line[1..openPos], line[openPos + 1..closePos])
-                }
-            }
         }
     }
 }

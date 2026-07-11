@@ -198,8 +198,9 @@ private func GetRuntimeTypeFromFunc(retVal: Option<LocalVar>, isInLambda!: Bool 
     return None
 }
 
+// Utils.cpp:1025 IsClosureConversionEnvClass(def) = def.Get<IsAutoEnvClass>().
 private func IsClosureConversionEnvClass(classDef: ClassDef): Bool {
-    return classDef.GetAnnotation("IsAutoEnvClass").isSome()
+    return classDef.Get<IsAutoEnvClass, Bool>()
 }
 
 private func IsCoreObject(classDef: ClassDef): Bool {

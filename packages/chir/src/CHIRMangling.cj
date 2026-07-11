@@ -334,7 +334,8 @@ private func PackageNameForQualifiedName(def: CustomTypeDef): String {
 
 public func GetTypeQualifiedNameOfCustomType(typeInfo: CustomType, forNameFieldOfTi!: Bool = false): String {
     let def = typeInfo.GetCustomTypeDef()
-    if (def.GetAnnotation("IsAutoEnvGenericBase").isSome()) {
+    // Type.cpp:85 IsAutoEnvGenericBase = IsAutoEnvBase && !argTys.empty().
+    if (typeInfo.IsAutoEnvGenericBase()) {
         let typeArgs = typeInfo.GetGenericArgs()
         if (typeArgs.isEmpty()) {
             throw IllegalArgumentException("AutoEnv generic base type has no type arguments")
