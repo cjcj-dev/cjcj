@@ -2,6 +2,7 @@ package cjcj::ast
 
 import std.collection.*
 import std.sync.AtomicInt64
+import cjcj::utils.Identifiable
 
 private let CORE_PACKAGE_NAME: String = "std.core"
 private let STD_LIB_OPTION: String = "Option"
@@ -206,7 +207,7 @@ private func anyChildTypeMatches(ty: Ty, pred: (Ty) -> Bool): Bool {
 }
 
 private func sameGenericArg(left: Ty, right: Ty): Bool {
-    return left.objectId == right.objectId
+    return Ptr<Ty>(left) == Ptr<Ty>(right)
 }
 
 private func containsGenericArg(values: ArrayList<Ty>, ty: Ty): Bool {
@@ -275,11 +276,14 @@ private func hashNominalTy(kind: TypeKind, name: String, typeArgs: ArrayList<Ty>
     return out
 }
 
-public open class Ty {
+public open class Ty <: Identifiable {
     private static let nextObjectId = AtomicInt64(1)
     private static let initialTy: Ty = InitialTy()
 
-    public let objectId: Int64
+    private let objectIdValue: Int64
+    public prop objectId: Int64 {
+        get() { objectIdValue }
+    }
     public let kind: TypeKind
     public var name: String = ""
     public let typeArgs: ArrayList<Ty> = ArrayList<Ty>()
@@ -288,7 +292,7 @@ public open class Ty {
     protected var generic: Bool = false
 
     public init(kind: TypeKind) {
-        objectId = nextObjectId.fetchAdd(1)
+        objectIdValue = nextObjectId.fetchAdd(1)
         this.kind = kind
     }
 

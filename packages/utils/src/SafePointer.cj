@@ -13,6 +13,10 @@ public class NullPointerException <: Exception {
     }
 }
 
+public interface Identifiable {
+    prop objectId: Int64
+}
+
 public class Ptr<T> {
     private var ptr: Option<T>
 
@@ -46,6 +50,7 @@ public class Ptr<T> {
     public func isSome(): Bool {
         return ptr.isSome()
     }
+
 }
 
 public class OwnedPtr<T> {

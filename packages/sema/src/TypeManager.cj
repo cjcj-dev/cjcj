@@ -89,7 +89,7 @@ public class TyVarScope {
 
     public func ContainsTyVar(tyVar: GenericsTy): Bool {
         for (value in tyVars) {
-            if (value.objectId == tyVar.objectId) {
+            if (Ptr<GenericsTy>(value) == Ptr<GenericsTy>(tyVar)) {
                 return true
             }
         }
@@ -99,7 +99,7 @@ public class TyVarScope {
     public func AddUnsolvedTyVars(out: ArrayList<GenericsTy>, unsolved: ArrayList<GenericsTy>): Unit {
         for (tyVar in tyVars) {
             for (candidate in unsolved) {
-                if (tyVar.objectId == candidate.objectId) {
+                if (Ptr<GenericsTy>(tyVar) == Ptr<GenericsTy>(candidate)) {
                     out.add(tyVar)
                     break
                 }
@@ -2546,7 +2546,7 @@ public class TypeManager {
         tv.lowerBound = None
         var idx: Int64 = 0
         while (idx < unsolvedTyVars.size) {
-            if (unsolvedTyVars[idx].objectId == tv.objectId) {
+            if (Ptr<GenericsTy>(unsolvedTyVars[idx]) == Ptr<GenericsTy>(tv)) {
                 unsolvedTyVars.remove(at: idx)
             } else {
                 idx++
@@ -3492,7 +3492,7 @@ public class TypeManager {
 
     private func containsGeneric(values: ArrayList<GenericsTy>, ty: GenericsTy): Bool {
         for (value in values) {
-            if (value.objectId == ty.objectId) {
+            if (Ptr<GenericsTy>(value) == Ptr<GenericsTy>(ty)) {
                 return true
             }
         }
@@ -3502,7 +3502,7 @@ public class TypeManager {
     private func removeTypeSubst(mapping: TypeSubst, tyVar: GenericsTy): Unit {
         var idx: Int64 = 0
         while (idx < mapping.entries.size) {
-            if (mapping.entries[idx].tyVar.objectId == tyVar.objectId) {
+            if (Ptr<GenericsTy>(mapping.entries[idx].tyVar) == Ptr<GenericsTy>(tyVar)) {
                 mapping.entries.remove(at: idx)
                 return
             }

@@ -58,7 +58,7 @@ public class CacheKey <: Hashable & Equatable<CacheKey> {
     private func sameTy(left: Option<Ty>, right: Option<Ty>): Bool {
         if (let Some(l) <- left) {
             if (let Some(r) <- right) {
-                return l.objectId == r.objectId
+                return Ptr<Ty>(l) == Ptr<Ty>(r)
             }
             return false
         }
