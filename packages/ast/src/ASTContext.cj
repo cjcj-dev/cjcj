@@ -159,6 +159,8 @@ public class Names <: Hashable & Equatable<Names> {
     }
 }
 
+public type GCBlames = HashMap<Ptr<Ty>, HashMap<Ptr<Ty>, HashSet<Node>>>
+
 public class Candidate {
     public let decls: ArrayList<Decl> = ArrayList<Decl>()
     public let tys: ArrayList<Ty> = ArrayList<Ty>()
@@ -202,6 +204,7 @@ public class ASTContext {
     public let targetTypeMap: HashMap<Node, Ty> = HashMap<Node, Ty>()
     public let lastTargetTypeMap: HashMap<Node, Ty> = HashMap<Node, Ty>()
     public let typeCheckCache: HashMap<Node, TypeCheckCache> = HashMap<Node, TypeCheckCache>()
+    public let gcBlames: GCBlames = GCBlames()
     public let funcArgReachable: HashMap<Node, Bool> = HashMap<Node, Bool>()
     public var searcher: Searcher = Searcher()
     public let packageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()

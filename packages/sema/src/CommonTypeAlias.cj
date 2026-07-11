@@ -2,6 +2,7 @@ package cjcj::sema
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::ast.TyVarEnv
 import cjcj::utils.{CJC_ASSERT, PData, VersionID}
 
 public enum BlameStyle {
@@ -283,6 +284,7 @@ public class TySet {
 
 public type LowerBounds = TySet
 public type UpperBounds = TySet
+public type TyVarUB = TyVarEnv
 
 private func AddTyVarUnique(values: TyVars, tyVar: GenericsTy): Bool {
     for (value in values) {

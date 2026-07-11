@@ -1,6 +1,7 @@
 package cjcj::sema
 
 import std.collection.*
+import std.sort.*
 import cjcj::ast.*
 import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
@@ -559,19 +560,197 @@ private func shouldCollectAssumption(decl: Decl): Bool {
     }
 }
 
-private func collectAssumption(typeManager: TypeManager, decl: Decl): Unit {
-    if (!shouldCollectAssumption(decl)) {
-        return
-    }
-    if (let Some(_) <- decl.GetGeneric()) {
-        let assumptions = AssumptionSet()
-        Assumption(typeManager, assumptions, decl)
+private func CreateGenericConstraints(generic: Generic): Unit {
+    for (param in generic.typeParameters) {
+        if (let Some(genericTy) <- (param.GetTy() as GenericsTy)) {
+            let genericKey = Ptr<GenericsTy>(genericTy)
+            if (!generic.assumptionCollection.contains(genericKey)) {
+                let upperBounds = HashSet<Ptr<Ty>>()
+                for (upper in genericTy.upperBounds) {
+                    upperBounds.add(Ptr<Ty>(upper))
+                }
+                generic.assumptionCollection[genericKey] = upperBounds
+            }
+            let gc = GenericConstraint()
+            CopyBasicInfo(generic, gc)
+            let sortedUpperTys = ArrayList<Ty>()
+            for (upper in genericTy.upperBounds) {
+                sortedUpperTys.add(upper)
+            }
+            sort(sortedUpperTys, by: { left: Ty, right: Ty =>
+                if (CompTyByNames(Some(left), Some(right))) {
+                    Ordering.LT
+                } else if (CompTyByNames(Some(right), Some(left))) {
+                    Ordering.GT
+                } else {
+                    Ordering.EQ
+                }
+            }, stable: true)
+            var previousUpper: Option<Ty> = None
+            for (upperTy in sortedUpperTys) {
+                if (let Some(previous) <- previousUpper) {
+                    if (!CompTyByNames(Some(previous), Some(upperTy)) &&
+                        !CompTyByNames(Some(upperTy), Some(previous))) {
+                        continue
+                    }
+                }
+                let sub = RefType()
+                sub.SetTy(genericTy)
+                CopyBasicInfo(generic, sub)
+                let upper = RefType()
+                upper.SetTy(upperTy)
+                CopyBasicInfo(generic, upper)
+                gc.refType = Some(sub)
+                gc.upperBounds.add(upper)
+                previousUpper = Some(upperTy)
+            }
+            if (!gc.upperBounds.isEmpty()) {
+                generic.genericConstraints.add(gc)
+            }
+        }
     }
 }
 
-private func collectAndCheckAssumption(typeManager: TypeManager, pkg: Package): Unit {
-    for (decl in collectPackageDeclsForAssumption(pkg)) {
-        collectAssumption(typeManager, decl)
+private func AddUpperBoundOnTypeParameters(typeManager: TypeManager, ctx: ASTContext, generic: Generic,
+    typeTarget: Decl, revTypeMapping: MultiTypeSubst, allAssumptionMap: TyVarUB,
+    typeArgAppliedMap: TypeSubst): Unit {
+    for (typeParameter in generic.typeParameters) {
+        if (let Some(genericTy) <- (typeParameter.GetTy() as GenericsTy)) {
+            if (let Some(aliasedTypeGeneric) <- typeTarget.GetGeneric()) {
+                GetAllAssumptions(aliasedTypeGeneric.assumptionCollection, allAssumptionMap)
+                if (let Some(constraintTys) <- revTypeMapping.Get(genericTy)) {
+                    let constraints = UpperBounds()
+                    for (constraintTy in constraintTys.values) {
+                        if (let Some(upperKeys) <-
+                            allAssumptionMap.get(Ptr<GenericsTy>((constraintTy as GenericsTy).getOrThrow()))) {
+                            for (upperKey in upperKeys) {
+                                constraints.Add(upperKey.value)
+                            }
+                        }
+                    }
+                    let upperBoundsForParam = HashSet<Ptr<Ty>>()
+                    for (constraint in constraints.values) {
+                        let instTy = typeManager.GetInstantiatedTy(constraint, typeArgAppliedMap)
+                        if (Ty.IsTyCorrect(instTy)) {
+                            upperBoundsForParam.add(Ptr<Ty>(instTy))
+                            for (constraintTy in constraintTys.values) {
+                                let constraintKey = Ptr<Ty>(constraintTy)
+                                let constraintUpperKey = Ptr<Ty>(constraint)
+                                if (!ctx.gcBlames.contains(constraintKey)) {
+                                    ctx.gcBlames[constraintKey] = HashMap<Ptr<Ty>, HashSet<Node>>()
+                                }
+                                let sourceUpperMap = ctx.gcBlames[constraintKey]
+                                if (!sourceUpperMap.contains(constraintUpperKey)) {
+                                    sourceUpperMap[constraintUpperKey] = HashSet<Node>()
+                                }
+                                let sourceBlames = sourceUpperMap[constraintUpperKey]
+                                let genericKey = Ptr<Ty>(genericTy)
+                                let instKey = Ptr<Ty>(instTy)
+                                if (!ctx.gcBlames.contains(genericKey)) {
+                                    ctx.gcBlames[genericKey] = HashMap<Ptr<Ty>, HashSet<Node>>()
+                                }
+                                let destinationUpperMap = ctx.gcBlames[genericKey]
+                                if (!destinationUpperMap.contains(instKey)) {
+                                    destinationUpperMap[instKey] = HashSet<Node>()
+                                }
+                                for (blame in sourceBlames) {
+                                    destinationUpperMap[instKey].add(blame)
+                                }
+                            }
+                        }
+                    }
+                    for (upperKey in upperBoundsForParam) {
+                        var foundUpper = false
+                        for (upper in genericTy.upperBounds) {
+                            if (Ptr<Ty>(upper) == upperKey) {
+                                foundUpper = true
+                                break
+                            }
+                        }
+                        if (!foundUpper) {
+                            genericTy.upperBounds.add(upperKey.value)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private func AddAssumptionForType(typeManager: TypeManager, ctx: ASTContext, typeNode: Type,
+    generic: Generic): Unit {
+    if (typeNode.astKind != ASTKind.REF_TYPE && typeNode.astKind != ASTKind.QUALIFIED_TYPE) {
+        return
+    }
+    if (let Some(aliasedTypeTarget) <- typeNode.GetTarget()) {
+        if (let Some(typeTy) <- typeNode.GetTy()) {
+            if (typeTy.typeArgs.isEmpty()) {
+                return
+            }
+            let originalConstraintCount = generic.genericConstraints.size
+            let revTypeMapping = MultiTypeSubst()
+            let allAssumptionMap = TyVarUB()
+            let targetTy = aliasedTypeTarget.GetTy().getOrThrow()
+            GetRevTypeMapping(targetTy.typeArgs, typeTy.typeArgs, revTypeMapping)
+            let typeArgAppliedMap = GetGenericTysToInstTysMapping(targetTy, typeTy)
+            AddUpperBoundOnTypeParameters(typeManager, ctx, generic, aliasedTypeTarget,
+                revTypeMapping, allAssumptionMap, typeArgAppliedMap)
+            CreateGenericConstraints(generic)
+            var idx = originalConstraintCount
+            while (idx < generic.genericConstraints.size) {
+                generic.genericConstraints[idx].isImplicitlyIntroduced = true
+                idx++
+            }
+        }
+    }
+}
+
+private func IgnoreAssumptionForTypeAliasDecls(decls: ArrayList<Decl>): Unit {
+    for (decl in decls) {
+        if (let Some(typeAliasDecl) <- (decl as TypeAliasDecl)) {
+            if (let Some(_) <- typeAliasDecl.typeNode) {
+                if (let Some(generic) <- typeAliasDecl.generic) {
+                    for (typeParameter in generic.typeParameters) {
+                        if (let Some(genericTy) <- (typeParameter.GetTy() as GenericsTy)) {
+                            genericTy.isAliasParam = true
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private func AddAssumptionForExtendDecls(typeManager: TypeManager, ctx: ASTContext,
+    decls: ArrayList<Decl>): Unit {
+    for (decl in decls) {
+        if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            if (let Some(extendedType) <- extendDecl.extendedType) {
+                if (let Some(generic) <- extendDecl.generic) {
+                    AddAssumptionForType(typeManager, ctx, extendedType, generic)
+                }
+            }
+        }
+    }
+}
+
+private func collectAssumption(typeManager: TypeManager, ctx: ASTContext, decl: Decl): Unit {
+    if (!shouldCollectAssumption(decl)) {
+        return
+    }
+    if (let Some(generic) <- decl.GetGeneric()) {
+        Assumption(typeManager, generic.assumptionCollection, ctx.gcBlames, decl)
+    }
+}
+
+private func collectAndCheckAssumption(typeManager: TypeManager, ctx: ASTContext, pkg: Package): Unit {
+    let decls = collectPackageDeclsForAssumption(pkg)
+    for (decl in decls) {
+        collectAssumption(typeManager, ctx, decl)
+    }
+    IgnoreAssumptionForTypeAliasDecls(decls)
+    AddAssumptionForExtendDecls(typeManager, ctx, decls)
+    for (decl in decls) {
         if (let Some(generic) <- decl.GetGeneric()) {
             let _ = CheckGenericConstraints(generic)
         }
@@ -655,7 +834,7 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeMan
     collectLetPatternDecls(ctx, pkg)
     PreSetDeclType(typeManager, ctx, importManager: importManager, diag: diag)
     addSuperClassObjectForClassDecl(ctx, pkg, diag.getOrThrow())
-    collectAndCheckAssumption(typeManager, pkg)
+    collectAndCheckAssumption(typeManager, ctx, pkg)
     return valid
 }
 
