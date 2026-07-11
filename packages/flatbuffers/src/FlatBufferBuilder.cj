@@ -378,6 +378,7 @@ public class FlatBufferBuilder {
     // the just-finished table. `field` is the field's vtable offset (voffset_t).
     // The table lives at buffer position size-table (data_at(o) in the downward
     // buffer); its soffset points back to the vtable, matching GetOptionalFieldOffset.
+    @OverflowWrapping
     public func Required(table: FlatBufferOffset, field: UInt16): Unit {
         let tablePos = buffer.size - Int64(table)
         let soffset = Int32(BufferReadU32(tablePos))
