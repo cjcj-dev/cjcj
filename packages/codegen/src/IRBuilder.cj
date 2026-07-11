@@ -1169,6 +1169,25 @@ public class IRBuilder2 <: Resource {
         return result
     }
 
+    public func CreateAnd(left: LLVMValueRef, right: LLVMValueRef): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
+            result = unsafe { LLVMBuildAnd(builder.raw, left, right, nameCString.value) }
+        }
+        return result
+    }
+
+    public func CreateFCmpOLT(left: LLVMValueRef, right: LLVMValueRef, name!: String = ""): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe {
+                LLVMBuildFCmp(builder.raw, LLVMRealPredicateValue(LLVMRealPredicate.OLT), left, right,
+                    nameCString.value)
+            }
+        }
+        return result
+    }
+
     public func CreateRetVoid(): LLVMValueRef {
         return unsafe { LLVMBuildRetVoid(builder.raw) }
     }
@@ -1568,26 +1587,21 @@ public class IRBuilder2 <: Resource {
                     unsafe { LLVMMoveBasicBlockAfter(normalDest, currentBlock) }
                     let invokeValue = CreateInvoke(callee, calleeType, normalDest, unwindBlock, args, name: name)
                     SetInsertPoint(normalDest)
-                    if (!unsafe { LLVMIsAFunction(callee) }.isNull() &&
-                        unsafe { LLVMSelfhostFunctionHasStructRetAttr(callee) } != 0) {
-                        AddNoAliasAttribute(invokeValue)
-                        if (let Some(sretType) <- GetTypeAttributeValueAtIndex(callee, 1u32, "sret")) {
-                            AddSRetAttribute(invokeValue, sretType)
-                        }
-                    }
                     return invokeValue
                 }
             }
         }
-        let callValue = CreateCall(callee, calleeType, args, name: name)
-        if (!unsafe { LLVMIsAFunction(callee) }.isNull() &&
-            unsafe { LLVMSelfhostFunctionHasStructRetAttr(callee) } != 0) {
-            AddNoAliasAttribute(callValue)
-            if (let Some(sretType) <- GetTypeAttributeValueAtIndex(callee, 1u32, "sret")) {
-                AddSRetAttribute(callValue, sretType)
-            }
+        return CreateCall(callee, calleeType, args, name: name)
+    }
+
+    public func CreateCallOrInvoke(callee: LLVMValueRef, args: ArrayList<LLVMValueRef>,
+        name!: String = ""): LLVMValueRef {
+        let callBase = CreateCallOrInvoke(callee, unsafe { LLVMGlobalGetValueType(callee) }, args, name: name)
+        if (unsafe { LLVMSelfhostFunctionHasStructRetAttr(callee) } != 0) {
+            AddNoAliasAttribute(callBase)
+            AddSRetAttribute(callBase, GetTypeAttributeValueAtIndex(callee, 1u32, "sret").getOrThrow())
         }
-        return callValue
+        return callBase
     }
 
     public func CreateCallOrInvoke(calleeType: CGFunctionType, callee: LLVMValueRef, args: ArrayList<CGValue>,
@@ -2245,6 +2259,15 @@ public class IRBuilder2 <: Resource {
         return result
     }
 
+    public func CallIntrinsicFloatToIntegerSat(destTy: LLVMTypeRef, sourceValue: LLVMValueRef,
+        isSigned: Bool): LLVMValueRef {
+        let intrinsicName = if (isSigned) { "llvm.fptosi.sat" } else { "llvm.fptoui.sat" }
+        let overloadedTypes = ArrayList<LLVMTypeRef>([destTy, unsafe { LLVMTypeOf(sourceValue) }])
+        let function = GetOrInsertIntrinsicDeclaration(intrinsicName, overloadedTypes)
+        return CreateCall(function, unsafe { LLVMGlobalGetValueType(function) },
+            ArrayList<LLVMValueRef>([sourceValue]))
+    }
+
     public func CreateIntrinsicCall(intrinsicName: String, overloadedTypes: ArrayList<LLVMTypeRef>,
         args: ArrayList<LLVMValueRef>, name!: String = ""): LLVMValueRef {
         let callee = GetOrInsertIntrinsicDeclaration(intrinsicName, overloadedTypes)
@@ -2255,7 +2278,7 @@ public class IRBuilder2 <: Resource {
         if (calleeType.isNull()) {
             return LLVMNullValue()
         }
-        return CreateCallOrInvoke(callee, calleeType, args, name: name)
+        return CreateCallOrInvoke(callee, args, name: name)
     }
 
     public func CreateIntrinsicCallNoInvoke(intrinsicName: String, overloadedTypes: ArrayList<LLVMTypeRef>,
@@ -2417,12 +2440,7 @@ public class IRBuilder2 <: Resource {
         let functionType = BuildIntrinsicFunctionType(retType, parameterTypes, hasSRet)
         let functionValue = GetOrCreateIntrinsicFunction(name, functionType, retType, hasSRet, attributes)
         let callArgs = BuildIntrinsicFunctionCallArgs(name, retType, hasSRet, parameters)
-        var callFunctionType = functionType
-        let functionValueType = unsafe { LLVMTypeOf(functionValue) }
-        if (!functionValueType.isNull() && unsafe { LLVMGetTypeKind(functionValueType) } == LLVM_POINTER_TYPE_KIND) {
-            callFunctionType = GetPointerElementType(functionValueType)
-        }
-        let callInst = CreateCallOrInvoke(functionValue, callFunctionType, callArgs)
+        let callInst = CreateCallOrInvoke(functionValue, callArgs)
         if (hasSRet) {
             return callArgs[0]
         }
@@ -4297,10 +4315,10 @@ public class IRBuilder2 <: Resource {
         // param is now address space 0 too, so pass it directly — mirror C++ DoSimpleCast
         // (CJNativeIRBuilder.cpp:27) which emits no cast when the address spaces already match.
         let literal = CreateStringLiteral(ident)
-        let (helperFunction, helperType) = GetOrInsertRuntimeExceptionHelper(helperName)
+        let (helperFunction, _) = GetOrInsertRuntimeExceptionHelper(helperName)
         let helperArgs = ArrayList<LLVMValueRef>()
         helperArgs.add(literal)
-        let exceptionValue = CreateCallOrInvoke(helperFunction, helperType, helperArgs, name: "exception")
+        let exceptionValue = CreateCallOrInvoke(helperFunction, helperArgs, name: "exception")
         CallExceptionIntrinsicThrow(exceptionValue)
     }
 
@@ -4334,7 +4352,7 @@ public class IRBuilder2 <: Resource {
         if (intrinsicCall.isNull()) {
             let throwType = GetThrowExceptionFunctionType()
             let throwFunction = GetOrInsertRuntimeFunction(THROW_EXCEPTION_FUNC_NAME, throwType)
-            let _ = CreateCallOrInvoke(throwFunction, throwType, throwArgs)
+            let _ = CreateCallOrInvoke(throwFunction, throwArgs)
         }
         let _ = CreateUnreachable()
     }
@@ -4348,8 +4366,8 @@ public class IRBuilder2 <: Resource {
         }
         let fallbackType = MakeFunctionType(unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) },
             ArrayList<LLVMTypeRef>())
-        return CreateCallOrInvoke(GetOrInsertRuntimeFunction("CJ_MCC_GetExceptionWrapper", fallbackType), fallbackType,
-            args, name: "exception.wrapper")
+        return CreateCallOrInvoke(GetOrInsertRuntimeFunction("CJ_MCC_GetExceptionWrapper", fallbackType), args,
+            name: "exception.wrapper")
     }
 
     public func CallPostThrowExceptionIntrinsic(exceptionValue: LLVMValueRef): LLVMValueRef {
@@ -4363,8 +4381,8 @@ public class IRBuilder2 <: Resource {
         let paramTypes = ArrayList<LLVMTypeRef>()
         paramTypes.add(unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) })
         let fallbackType = MakeFunctionType(CGType.GetRefType(GetLLVMContext()), paramTypes)
-        return CreateCallOrInvoke(GetOrInsertRuntimeFunction("CJ_MCC_PostThrowException", fallbackType), fallbackType,
-            args, name: "post.throw")
+        return CreateCallOrInvoke(GetOrInsertRuntimeFunction("CJ_MCC_PostThrowException", fallbackType), args,
+            name: "post.throw")
     }
 
     public func CallSpawnIntrinsic(obj: CGValue, cgFunc: CGFunction, threadCtx: Option<CGValue>,
@@ -4393,8 +4411,7 @@ public class IRBuilder2 <: Resource {
         }
         let runtimeName = if (spawnWithFuture) { NEW_CJ_THREAD_FUNC_NAME } else { NEW_CJ_THREAD_NO_RETURN_FUNC_NAME }
         let runtimeType = MakeFunctionTypeFromArgs(i8PtrTy, args)
-        return CreateCallOrInvoke(GetOrInsertRuntimeFunction(runtimeName, runtimeType), runtimeType, args,
-            name: "spawn.thread")
+        return CreateCallOrInvoke(GetOrInsertRuntimeFunction(runtimeName, runtimeType), args, name: "spawn.thread")
     }
 
     public func CreateSpawnException(): Unit {
@@ -4405,22 +4422,20 @@ public class IRBuilder2 <: Resource {
         let helperName = "_CNat6Thread24setRuntimeCJThreadHandleHPu"
         if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
             let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
-            if (let Some(helperFuncType) <- helperFunc.GetCGFunctionType()) {
-                return CreateCallOrInvoke(helperFunc.GetRawFunction(), helperFuncType.GetLLVMFunctionType(), args)
-            }
+            return CreateCallOrInvoke(helperFunc.GetRawFunction(), args)
         }
         let helperType = MakeFunctionTypeFromArgs(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, args)
-        return CreateCallOrInvoke(GetOrInsertRuntimeFunction(helperName, helperType), helperType, args)
+        return CreateCallOrInvoke(GetOrInsertRuntimeFunction(helperName, helperType), args)
     }
 
     public func CreateExecAtExitCallbacksCall(): LLVMValueRef {
         let helperName = "_CNat27CJ_CORE_ExecAtexitCallbacksHv"
-        if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
-            let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
-            return CreateCallOrInvoke(helperFunc)
-        }
         let args = ArrayList<LLVMValueRef>()
         args.add(CreateEntryAlloca(CGType.GetUnitType(GetLLVMContext())))
+        if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
+            let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
+            return CreateCallOrInvoke(helperFunc.GetRawFunction(), args)
+        }
         return CreateImplicitUsedFunctionCall(helperName, args)
     }
 
@@ -4434,9 +4449,11 @@ public class IRBuilder2 <: Resource {
             let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
             if (let Some(helperFuncType) <- helperFunc.GetCGFunctionType()) {
                 if (let Some(funcTy) <- helperNode.GetFuncType()) {
-                    let args = ArrayList<CGValue>()
-                    args.add(CGValue(exceptionValue, CGType.GetOrCreate(cgMod, funcTy.GetParamType(0))))
-                    return CreateCallOrInvoke(helperFuncType, helperFunc.GetRawFunction(), args)
+                    let args = ArrayList<LLVMValueRef>()
+                    args.add(CreateEntryAlloca(CGType.GetUnitType(GetLLVMContext())))
+                    args.add(FixFuncArg(CGValue(exceptionValue, CGType.GetOrCreate(cgMod, funcTy.GetParamType(0))),
+                        helperFuncType.GetParamType(0)))
+                    return CreateCallOrInvoke(helperFunc.GetRawFunction(), args)
                 }
             }
         }
@@ -4453,9 +4470,11 @@ public class IRBuilder2 <: Resource {
             if (let Some(helperFuncType) <- helperFunc.GetCGFunctionType()) {
                 if (let Some(funcTy) <- helperNode.GetFuncType()) {
                     let paramRefTy = GetCGContext().GetCHIRBuilder().context.GetRefTy(funcTy.GetParamType(0))
-                    let args = ArrayList<CGValue>()
-                    args.add(CGValue(CreateStringLiteral(message), CGType.GetOrCreate(cgMod, paramRefTy)))
-                    return CreateCallOrInvoke(helperFuncType, helperFunc.GetRawFunction(), args)
+                    let args = ArrayList<LLVMValueRef>()
+                    args.add(CreateEntryAlloca(CGType.GetUnitType(GetLLVMContext())))
+                    args.add(FixFuncArg(CGValue(CreateStringLiteral(message), CGType.GetOrCreate(cgMod, paramRefTy)),
+                        helperFuncType.GetParamType(0)))
+                    return CreateCallOrInvoke(helperFunc.GetRawFunction(), args)
                 }
             }
         }
@@ -4531,7 +4550,7 @@ public class IRBuilder2 <: Resource {
         } else {
             GetOrInsertRuntimeFunction(THROW_NEGATIVE_ARRAY_SIZE_EXCEPTION_FUNC_NAME, helperType)
         }
-        let _ = CreateCallOrInvoke(helper, helperType, ArrayList<LLVMValueRef>())
+        let _ = CreateCallOrInvoke(helper, ArrayList<LLVMValueRef>())
         let _ = CreateUnreachable()
     }
 
@@ -4587,9 +4606,7 @@ public class IRBuilder2 <: Resource {
                 initArgs.add(exceptionValue)
                 initArgs.add(CGType.GetOrCreate(cgMod, exceptionTy).GetOrCreateTypeInfo())
                 let initFunc = cgMod.GetOrInsertCGFunction(initFuncNode)
-                if (let Some(initFuncType) <- initFunc.GetCGFunctionType()) {
-                    let _ = CreateCallOrInvoke(initFunc.GetRawFunction(), initFuncType.GetLLVMFunctionType(), initArgs)
-                }
+                let _ = CreateCallOrInvoke(initFunc.GetRawFunction(), initArgs)
                 CallExceptionIntrinsicThrow(exceptionValue)
                 return
             }
@@ -4601,11 +4618,11 @@ public class IRBuilder2 <: Resource {
         if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
             let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
             if (let Some(helperFuncType) <- helperFunc.GetCGFunctionType()) {
-                return CreateCallOrInvoke(helperFunc.GetRawFunction(), helperFuncType.GetLLVMFunctionType(), args)
+                return CreateCallOrInvoke(helperFunc.GetRawFunction(), args)
             }
         }
         let helperType = MakeFunctionTypeFromArgs(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, args)
-        return CreateCallOrInvoke(GetOrInsertRuntimeFunction(helperName, helperType), helperType, args)
+        return CreateCallOrInvoke(GetOrInsertRuntimeFunction(helperName, helperType), args)
     }
 
     private func TryGetFirstParamClassType(fn: Function): Option<Type> {

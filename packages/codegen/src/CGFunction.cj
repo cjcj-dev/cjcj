@@ -109,7 +109,7 @@ private func CreateFunctionWrapperForNormalCases(function: LLVMValueRef, wrapper
             }
             argIdx++
         }
-        let res = builder.CreateCallOrInvoke(function, unsafe { LLVMGlobalGetValueType(function) }, callArgs)
+        let res = builder.CreateCallOrInvoke(function, callArgs)
         let retInst = if (unsafe { LLVMGetTypeKind(LLVMGetReturnType(LLVMGlobalGetValueType(function))) } == 0) {
             builder.CreateRetVoid()
         } else {

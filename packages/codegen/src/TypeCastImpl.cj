@@ -4,6 +4,7 @@ import std.collection.*
 import cjcj::chir.Box as ChirBox
 import cjcj::chir.Expression
 import cjcj::chir.ExprKind
+import cjcj::chir.FloatType
 import cjcj::chir.IntType
 import cjcj::chir.NumericType
 import cjcj::chir.Type
@@ -15,8 +16,58 @@ import cjcj::chir.TransformToGeneric
 import cjcj::chir.UnBox
 import cjcj::chir.UnBoxToRef
 import cjcj::utils.{CJC_ASSERT_WITH_MSG, OverflowStrategy, StaticCast}
+import cjcj::option.ArchType
 
 private let LLVM_POINTER_TYPE_KIND: Int32 = 12
+
+private let G_FLOAT2INT_BOUND_MAP: HashMap<String, (UInt64, UInt64)> = { =>
+    let bounds = HashMap<String, (UInt64, UInt64)>()
+    bounds["Float16Int8"] = (0xC060200000000000u64, 0x4060000000000000u64)
+    bounds["Float16Int16"] = (0xC0E0040000000000u64, 0x40E0000000000000u64)
+    bounds["Float16Int32"] = (0u64, 0u64)
+    bounds["Float16Int64"] = (0u64, 0u64)
+    bounds["Float16UInt8"] = (0xBFF0000000000000u64, 0x4070000000000000u64)
+    bounds["Float16UInt16"] = (0xBFF0000000000000u64, 0x40F0000000000000u64)
+    bounds["Float16UInt32"] = (0xBFF0000000000000u64, 0u64)
+    bounds["Float16UInt64"] = (0xBFF0000000000000u64, 0u64)
+    bounds["Float32Int8"] = (0xC060200000000000u64, 0x4060000000000000u64)
+    bounds["Float32Int16"] = (0xC0E0002000000000u64, 0x40E0000000000000u64)
+    bounds["Float32Int32"] = (0xC1E0000020000000u64, 0x41E0000000000000u64)
+    bounds["Float32Int64"] = (0xC3E0000020000000u64, 0x43E0000000000000u64)
+    bounds["Float32UInt8"] = (0xBFF0000000000000u64, 0x4070000000000000u64)
+    bounds["Float32UInt16"] = (0xBFF0000000000000u64, 0x40F0000000000000u64)
+    bounds["Float32UInt32"] = (0xBFF0000000000000u64, 0x41F0000000000000u64)
+    bounds["Float32UInt64"] = (0xBFF0000000000000u64, 0x43F0000000000000u64)
+    bounds["Float64Int8"] = (0xC060200000000000u64, 0x4060000000000000u64)
+    bounds["Float64Int16"] = (0xC0E0002000000000u64, 0x40E0000000000000u64)
+    bounds["Float64Int32"] = (0xC1E0000000200000u64, 0x41E0000000000000u64)
+    bounds["Float64Int64"] = (0xC3E0000000000001u64, 0x43E0000000000000u64)
+    bounds["Float64UInt8"] = (0xBFF0000000000000u64, 0x4070000000000000u64)
+    bounds["Float64UInt16"] = (0xBFF0000000000000u64, 0x40F0000000000000u64)
+    bounds["Float64UInt32"] = (0xBFF0000000000000u64, 0x41F0000000000000u64)
+    bounds["Float64UInt64"] = (0xBFF0000000000000u64, 0x43F0000000000000u64)
+    bounds
+}()
+
+private func StringIntX(archType: ArchType, intTy: IntType): String {
+    if (archType == ArchType.X86_64 || archType == ArchType.AARCH64) {
+        if (intTy.IsIntNative()) {
+            return "Int64"
+        } else if (intTy.IsUIntNative()) {
+            return "UInt64"
+        }
+        return intTy.ToString()
+    } else if (archType == ArchType.ARM32) {
+        if (intTy.IsIntNative()) {
+            return "Int32"
+        } else if (intTy.IsUIntNative()) {
+            return "UInt32"
+        }
+        return intTy.ToString()
+    }
+    CJC_ASSERT_WITH_MSG(false, "Unsupported ArchType.")
+    return intTy.ToString()
+}
 
 public func EmitTypeCastExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (chirExpr.GetNumOfOperands() == 0) {
@@ -430,12 +481,9 @@ public func CastValueToType(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, so
             irBuilder.CreateUIToFP(sourceValue, targetLLVMType)
         }
     }
-    if (sourceTy.IsFloat() && IsIntegerLikeType(targetTy)) {
-        return if (IsSignedIntegerLikeType(targetTy)) {
-            irBuilder.CreateFPToSI(sourceValue, targetLLVMType)
-        } else {
-            irBuilder.CreateFPToUI(sourceValue, targetLLVMType)
-        }
+    if (sourceTy.IsFloat() && targetTy.IsInteger()) {
+        return GenerateFloatToIntegerConvExpr(irBuilder, overflowStrategy, sourceValue,
+            CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy), StaticCast<FloatType>(sourceTy))
     }
     if (IsPointerLikeType(sourceTy) && IsIntegerLikeType(targetTy)) {
         return irBuilder.CreatePtrToInt(sourceValue, targetLLVMType)
@@ -507,6 +555,23 @@ private func GenerateOverflowThrowingBasicBlock(irBuilder: IRBuilder2,
     return typecastValue
 }
 
+private func GenerateCondCheckInfiniteOrNaN(irBuilder: IRBuilder2, sourceValue: LLVMValueRef,
+    sourceTy: NumericType): LLVMValueRef {
+    let llvmContext = irBuilder.GetLLVMContext()
+    let floatInIEEE754 = HashMap<TypeKind, (UInt32, UInt64, LLVMTypeRef)>()
+    floatInIEEE754[TypeKind.TYPE_FLOAT16] =
+        (16u32, 0x7C00u64, unsafe { LLVMInt16TypeInContext(llvmContext.raw) })
+    floatInIEEE754[TypeKind.TYPE_FLOAT32] =
+        (32u32, 0x7F800000u64, unsafe { LLVMInt32TypeInContext(llvmContext.raw) })
+    floatInIEEE754[TypeKind.TYPE_FLOAT64] =
+        (64u32, 0x7FF0000000000000u64, unsafe { LLVMInt64TypeInContext(llvmContext.raw) })
+    let (_, magicValue, integerType) = floatInIEEE754[irBuilder.GetTypeKindFromType(sourceTy)]
+    let integerValue = irBuilder.CreateBitCast(sourceValue, integerType)
+    let exponentValue = unsafe { LLVMConstInt(integerType, magicValue, 0) }
+    let andValue = irBuilder.CreateAnd(integerValue, exponentValue)
+    return irBuilder.CreateICmp(LLVMIntPredicate.NE, andValue, exponentValue, name: "notInfOrNan")
+}
+
 private func GenerateCondCheckLowerBound(irBuilder: IRBuilder2, targetType: CGType,
     sourceValue: LLVMValueRef, sourceTy: IntType): LLVMValueRef {
     let targetTy = StaticCast<IntType>(targetType.GetOriginal())
@@ -526,6 +591,18 @@ private func GenerateCondCheckLowerBound(irBuilder: IRBuilder2, targetType: CGTy
     }
     CJC_ASSERT_WITH_MSG(IsUInt2UInt(sourceTy, targetTy), "expected UInt-to-UInt conversion")
     return irBuilder.GetTrue()
+}
+
+private func GenerateCondCheckLowerBound(irBuilder: IRBuilder2, targetType: CGType,
+    sourceValue: LLVMValueRef, sourceTy: FloatType): LLVMValueRef {
+    let targetTy = StaticCast<IntType>(targetType.GetOriginal())
+    let archType = irBuilder.GetCGContext().GetCompileOptions().target.GetArchType()
+    let lowerBound = G_FLOAT2INT_BOUND_MAP[sourceTy.ToString() + StringIntX(archType, targetTy)][0]
+    if (lowerBound == 0u64) {
+        return irBuilder.GetTrue()
+    }
+    let lowerBoundValue = unsafe { LLVMConstReal(LLVMTypeOf(sourceValue), Float64.fromBits(lowerBound)) }
+    return irBuilder.CreateFCmpOLT(lowerBoundValue, sourceValue, name: "f2i.lt.min")
 }
 
 private func NeedsIntToUIntConversion(irBuilder: IRBuilder2, sourceTy: IntType, targetTyKind: TypeKind): Bool {
@@ -590,6 +667,39 @@ private func GenerateCondCheckUpperBound(irBuilder: IRBuilder2, sourceValue: LLV
     }
     let maxVal = UnsignedIntegerConst(unsafe { LLVMTypeOf(sourceValue) }, GetUIntMax(irBuilder, targetTy))
     return irBuilder.CreateICmp(LLVMIntPredicate.ULE, sourceValue, maxVal, name: "ui2ui.upper")
+}
+
+private func GenerateCondCheckUpperBound(irBuilder: IRBuilder2, targetType: CGType,
+    sourceValue: LLVMValueRef, sourceTy: FloatType): LLVMValueRef {
+    let targetTy = StaticCast<IntType>(targetType.GetOriginal())
+    let archType = irBuilder.GetCGContext().GetCompileOptions().target.GetArchType()
+    let upperBound = G_FLOAT2INT_BOUND_MAP[sourceTy.ToString() + StringIntX(archType, targetTy)][1]
+    if (upperBound == 0u64) {
+        return irBuilder.GetTrue()
+    }
+    let upperBoundValue = unsafe { LLVMConstReal(LLVMTypeOf(sourceValue), Float64.fromBits(upperBound)) }
+    return irBuilder.CreateFCmpOLT(sourceValue, upperBoundValue, name: "f2i.gt.max")
+}
+
+private func GenerateFloatToIntegerConvExpr(irBuilder: IRBuilder2, strategy: OverflowStrategy,
+    sourceValue: LLVMValueRef, targetType: CGType, sourceTy: FloatType): LLVMValueRef {
+    if (strategy == OverflowStrategy.THROWING) {
+        let checkInfOrNaN = { => GenerateCondCheckInfiniteOrNaN(irBuilder, sourceValue, sourceTy) }
+        let checkLowerBound = { => GenerateCondCheckLowerBound(irBuilder, targetType, sourceValue, sourceTy) }
+        let checkUpperBound = { => GenerateCondCheckUpperBound(irBuilder, targetType, sourceValue, sourceTy) }
+        let typecast = { builder: IRBuilder2 =>
+            let targetTy = StaticCast<IntType>(targetType.GetOriginal())
+            if (targetTy.IsSigned()) {
+                builder.CreateFPToSI(sourceValue, targetType.GetLLVMType())
+            } else {
+                builder.CreateFPToUI(sourceValue, targetType.GetLLVMType())
+            }
+        }
+        return GenerateOverflowThrowingBasicBlock(irBuilder, Some(checkInfOrNaN), checkLowerBound, checkUpperBound,
+            typecast, targetType.GetOriginal().ToString())
+    }
+    let targetTy = StaticCast<IntType>(targetType.GetOriginal())
+    return irBuilder.CallIntrinsicFloatToIntegerSat(targetType.GetLLVMType(), sourceValue, targetTy.IsSigned())
 }
 
 private func GenerateOverflowSaturatingBasicBlock(irBuilder: IRBuilder2, targetType: CGType,
