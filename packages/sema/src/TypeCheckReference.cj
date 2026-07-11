@@ -9,6 +9,7 @@ import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticBuilder as BasicDiagnosticBuilder
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Range as BasicRange
+import cjcj::macro_pkg.TestEntryConstructor
 import cjcj::modules.GetPackageRelation as ModulesGetPackageRelation
 import cjcj::modules.PackageRelation as ModulesPackageRelation
 import cjcj::modules.SemaImportManager
@@ -481,27 +482,45 @@ private func TypeCheckReferenceDiagMemberAccessNotFound(
     ma: MemberAccess,
     importManager: Option<SemaImportManager>
 ): Unit {
-    if (let Some(baseExpr) <- ma.baseExpr) {
-        if (let Some(baseTy) <- baseExpr.GetTy()) {
-            if (!Ty.IsTyCorrect(baseTy)) {
-                return
-            }
-            if (baseTy.IsNominal()) {
-                let builder = diag.DiagnoseRefactor(
-                    BasicDiagKindRefactor.sema_not_member_of,
-                    TypeCheckReferenceFieldRange(ma),
-                    arguments: [
-                        ma.field.Val(),
-                        TypeCheckReferenceNominalKindName(baseTy),
-                        TypeCheckReferenceDisplayTyName(baseTy)
-                    ])
-                TypeCheckReferenceRecommendImportForMemberAccess(tm, importManager, ma, builder)
-                builder.Emit()
+    if (IsFieldOperator(ma.field.Val())) {
+        return
+    }
+    if (tm.compileTestsOnly) {
+        if (let Some(target) <- ma.target) {
+            if (TestEntryConstructor.IsTestRegistrationFunction(target)) {
                 return
             }
         }
     }
-    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_undeclared_identifier,
+    let baseExpr = ma.baseExpr.getOrThrow()
+    if (!Ty.IsTyCorrect(baseExpr.GetTy())) {
+        return
+    }
+    let baseTy = baseExpr.GetTy().getOrThrow()
+    if (ma.isExposedAccess) {
+        let builder = DiagnoseRefactor(diag,
+            BasicDiagKindRefactor.sema_not_found_from_generic_upper_bounds, ma,
+            TypeCheckReferenceFieldRange(ma),
+            arguments: [ma.field.Val(), baseTy.name])
+        builder.Emit()
+        return
+    } else if (baseTy.IsNominal()) {
+        let builder = DiagnoseRefactor(diag,
+            BasicDiagKindRefactor.sema_not_member_of, ma,
+            TypeCheckReferenceFieldRange(ma),
+            arguments: [
+                ma.field.Val(),
+                TypeCheckReferenceNominalKindName(baseTy),
+                TypeCheckReferenceDisplayTyName(baseTy)
+            ])
+        TypeCheckReferenceRecommendImportForMemberAccess(tm, importManager, ma, builder)
+        builder.Emit()
+        return
+    }
+    if (!ma.ShouldDiagnose(allowCompilerAdd: true)) {
+        return
+    }
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_undeclared_identifier, ma,
         TypeCheckReferenceFieldRange(ma),
         arguments: [ma.field.Val()])
     TypeCheckReferenceRecommendImportForMemberAccess(tm, importManager, ma, builder)
