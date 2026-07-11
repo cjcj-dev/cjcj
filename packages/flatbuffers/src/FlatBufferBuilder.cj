@@ -294,6 +294,22 @@ public class FlatBufferBuilder {
         Slot(field)
     }
 
+    // flatbuffer_builder.h:648-655 (CreateStruct): write a standalone struct into
+    // the buffer and return its offset. Used for struct members of a union, whose
+    // value field is a uoffset to the struct rather than an inline table field.
+    public func CreateStructBytes(bytes: ArrayList<UInt8>, alignment: Int64): FlatBufferOffset {
+        if (currentTable.isSome()) {
+            throw IllegalStateException("flatbuffer object is nested")
+        }
+        Prep(alignment, bytes.size)
+        var idx = bytes.size - 1
+        while (idx >= 0) {
+            PrependRawByte(bytes[idx])
+            idx--
+        }
+        return UInt32(buffer.size)
+    }
+
     // flatbuffer_builder.h:353-358 (AddStruct).
     public func AddStruct(field: Int64, bytes: ArrayList<UInt8>, alignment: Int64): Unit {
         if (bytes.isEmpty()) {
