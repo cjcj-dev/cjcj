@@ -335,8 +335,8 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
             if (lhsTy.IsInteger()) {
                 let lhsRange = RangeAnalysis.GetSIntDomainFromState(state, lhs)
                 let rhsRange = RangeAnalysis.GetSIntDomainFromState(state, rhs)
-                return ComputeRelIntBinop(CHIRRelIntBinopArgs(lhsRange, rhsRange, lhs, rhs, binaryExpr.GetExprKind(),
-                    IsUnsignedArithmetic(binaryExpr)))
+                return ComputeRelIntBinop(CHIRRelIntBinopArgs(lhsRange, rhsRange, Some(lhs), Some(rhs),
+                    binaryExpr.GetExprKind(), IsUnsignedArithmetic(binaryExpr)))
             }
         }
         let lhsBool = RangeAnalysis.GetBoolDomainFromState(state, lhs)
