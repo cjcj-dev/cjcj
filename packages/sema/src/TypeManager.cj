@@ -1,6 +1,7 @@
 package cjcj::sema
 
 import std.collection.*
+import std.env.getVariable
 import std.sort.*
 import cjcj::ast.*
 import cjcj::modules.GetPackageRelation as ModulesGetPackageRelation
@@ -318,7 +319,9 @@ public class TypeManager {
     private let declInstantiationStatus: ArrayList<DeclInstantiationStatusEntry> =
         ArrayList<DeclInstantiationStatusEntry>()
     private let allocatedTyCache: HashMap<String, Ty> = HashMap<String, Ty>()
+    private var allocatedTyConstructionTraces: Option<HashMap<Int64, String>> = None
     private let allocatedClassLikeTys: ArrayList<Ty> = ArrayList<Ty>()
+    private var validateTypeManagerInterning: Bool = false
     private let unsolvedTyVars: ArrayList<GenericsTy> = ArrayList<GenericsTy>()
     private let tyVarScopes: ArrayList<TyVarScope> = ArrayList<TyVarScope>()
     private let declToExtendIndex: HashMap<Int64, DeclExtendsEntry> = HashMap<Int64, DeclExtendsEntry>()
@@ -332,6 +335,12 @@ public class TypeManager {
 
     public init() {
         tyVarScopes.add(TyVarScope())
+        if (let Some(value) <- getVariable("CJC_VALIDATE_TY_INTERNING")) {
+            validateTypeManagerInterning = value == "1"
+            if (validateTypeManagerInterning) {
+                allocatedTyConstructionTraces = Some(HashMap<Int64, String>())
+            }
+        }
     }
 
     public func AddResolvedImportedDecls(fileHash: UInt64, name: String, decls: ArrayList<Decl>): Unit {
@@ -577,10 +586,54 @@ public class TypeManager {
             return cached
         }
         allocatedTyCache[key] = ty
+        if (validateTypeManagerInterning && ty.Hash() % 16 == 0) {
+            if (let Some(traces) <- allocatedTyConstructionTraces) {
+                traces[ty.objectId] = ThreadSnapshot.dumpCurrentThread().toString()
+            }
+        }
         if (classLike) {
             allocatedClassLikeTys.add(ty)
         }
         return ty
+    }
+
+    private func ValidateTypeManagerInterning(): Bool {
+        let tysByHash = HashMap<Int64, ArrayList<Ty>>()
+        var sampled: Int64 = 0
+        var violations: Int64 = 0
+        for ((_, ty) in allocatedTyCache) {
+            let hash = ty.Hash()
+            if (hash % 16 != 0) {
+                continue
+            }
+            sampled++
+            if (let Some(tys) <- tysByHash.get(hash)) {
+                for (other in tys) {
+                    if (ty == other && ty.objectId != other.objectId) {
+                        violations++
+                        eprintln("TY-INTERN-VIOLATION hash=${hash} left=${other.objectId} right=${ty.objectId}")
+                        eprintln("TY-INTERN-LEFT ${other.String()}")
+                        if (let Some(traces) <- allocatedTyConstructionTraces) {
+                            if (let Some(trace) <- traces.get(other.objectId)) {
+                                eprintln(trace)
+                            }
+                        }
+                        eprintln("TY-INTERN-RIGHT ${ty.String()}")
+                        if (let Some(traces) <- allocatedTyConstructionTraces) {
+                            if (let Some(trace) <- traces.get(ty.objectId)) {
+                                eprintln(trace)
+                            }
+                        }
+                    }
+                }
+                tys.add(ty)
+            } else {
+                tysByHash[hash] = ArrayList<Ty>([ty])
+            }
+        }
+        eprintln("TY-INTERN-VALIDATION TOTAL=${allocatedTyCache.size} SAMPLED=${sampled} " +
+            "VIOLATIONS=${violations}")
+        return violations == 0
     }
 
     public func GetInstantiatedTys(ty: Ty, mts: MultiTypeSubst): TySet {
@@ -1964,6 +2017,9 @@ public class TypeManager {
         constraints.Clear()
         ClearMapCache()
         allocatedTyCache.clear()
+        if (let Some(traces) <- allocatedTyConstructionTraces) {
+            traces.clear()
+        }
         allocatedClassLikeTys.clear()
         unsolvedTyVars.clear()
         subtypeCache.clear()
@@ -2013,6 +2069,12 @@ public class TypeManager {
     }
 
     public func ReleasePostSemaCaches(): Unit {
+        if (validateTypeManagerInterning) {
+            let interningValid = ValidateTypeManagerInterning()
+            if (!interningValid) {
+                throw IllegalStateException("Ty interning invariant violation")
+            }
+        }
         ReleaseSemaQueryCaches()
         ClearRecordUsedExtends()
         boxedNonGenericDecls.clear()
