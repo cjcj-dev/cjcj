@@ -7,7 +7,7 @@ import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.MakeRange as BasicMakeRange
 import cjcj::basic.Position as BasicPosition
 import cjcj::basic.Range as BasicRange
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, FileUtil}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, FileUtil}
 
 public let ANY_TYPE: String = "ANY_TYPE"
 public let NOT_CARE: String = "NOT_CARE"
@@ -111,6 +111,76 @@ public func ReplaceThisTypeToConcreteType(ty: Type, concreteType: Type, builder:
         newArgs.add(ReplaceThisTypeToConcreteType(argTy, concreteType, builder))
     }
     return CreateNewTypeWithArgs(ty, newArgs, builder)
+}
+
+private func GetMemberVarByName(def: CustomTypeDef, varName: String): MemberVarInfo {
+    let vars = def.GetAllInstanceVars()
+    var idx = vars.size
+    while (idx > 0) {
+        idx--
+        if (vars[idx].name == varName) {
+            return vars[idx]
+        }
+    }
+    CJC_ABORT()
+    throw IllegalStateException("member variable is not available")
+}
+
+public func GetInstMemberTypeByName(rootType: CustomType, names: ArrayList<String>,
+    builder: CHIRBuilder): Type {
+    return GetInstMemberTypeByNameCheckingReadOnly(rootType, names, builder)[0]
+}
+
+public func GetInstMemberTypeByNameCheckingReadOnly(rootType: CustomType, names: ArrayList<String>,
+    builder: CHIRBuilder): (Type, Bool) {
+    if (names.isEmpty()) {
+        CJC_ABORT()
+        return (rootType, false)
+    }
+    let customTypeDef = rootType.GetCustomTypeDef()
+    let instMap = HashMap<Int64, (GenericType, Type)>()
+    rootType.GetInstMap(instMap, builder)
+    let currentName = names[0]
+    let member = GetMemberVarByName(customTypeDef, currentName)
+    let isReadOnly = member.TestAttr(Attribute.READONLY)
+    let memberTy = ReplaceRawGenericArgType(member.ty, instMap, builder)
+    if (names.size > 1) {
+        let pureMemberTy = memberTy.StripAllRefs()
+        if (pureMemberTy.IsNominal()) {
+            let subNames = names.clone()
+            subNames.remove(at: 0)
+            let (memberType, isMemberReadOnly) = GetInstMemberTypeByNameCheckingReadOnly(
+                (pureMemberTy as CustomType).getOrThrow(), subNames, builder)
+            return (memberType, isReadOnly || isMemberReadOnly)
+        } else if (pureMemberTy.IsGeneric()) {
+            let subNames = names.clone()
+            subNames.remove(at: 0)
+            let (memberType, isMemberReadOnly) = GetInstMemberTypeByNameCheckingReadOnly(
+                (pureMemberTy as GenericType).getOrThrow(), subNames, builder)
+            return (memberType, isReadOnly || isMemberReadOnly)
+        } else {
+            CJC_ABORT()
+        }
+    }
+    return (memberTy, isReadOnly)
+}
+
+public func GetInstMemberTypeByNameCheckingReadOnly(rootType: GenericType, names: ArrayList<String>,
+    builder: CHIRBuilder): (Type, Bool) {
+    var concreteType: Option<Type> = None
+    for (upperBound in rootType.GetUpperBounds()) {
+        let upperBoundCustomType = (upperBound.StripAllRefs() as CustomType).getOrThrow()
+        if (upperBoundCustomType.GetCustomTypeDef().IsClassLike()) {
+            if (concreteType.isNone()) {
+                concreteType = upperBound
+            } else if (upperBoundCustomType.IsEqualOrSubTypeOf(concreteType.getOrThrow(), builder)) {
+                concreteType = upperBound
+            }
+        }
+    }
+    CJC_NULLPTR_CHECK(concreteType)
+    return GetInstMemberTypeByNameCheckingReadOnly(
+        (concreteType.getOrThrow().StripAllRefs() as CustomType).getOrThrow(), names, builder)
 }
 
 public func IsExpectedFunction(fn: Function, funcInfo: FuncInfo): Bool {
