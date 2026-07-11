@@ -218,8 +218,9 @@ private class DeclAttributeCheckerImpl {
             classDecl.EnableAttr(Attribute.OPEN)
             classDecl.EnableAttr(Attribute.PUBLIC)
             if (!classDecl.TestAttr(Attribute.ABSTRACT)) {
-                diag.DiagnoseRefactor(
+                DiagnoseRefactor(diag,
                     BasicDiagKindRefactor.sema_non_abstract_class_cannot_be_sealed,
+                    classDecl,
                     MakeRange(classDecl.identifier.Begin(), classDecl.identifier.End())
                 ).Emit()
             }
