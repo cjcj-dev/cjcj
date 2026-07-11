@@ -88,7 +88,7 @@ public func ChkBlock(typeManager: TypeManager, target: Ty, b: Block,
         let ret = typeManager.IsSubtype(unitTy, target)
         if (!ret && b.TestAttr(Attribute.UNSAFE)) {
             if (let Some(diagValue) <- diag) {
-                let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_mismatched_types, b.begin,
+                let builder = DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_mismatched_types, b,
                     arguments: [target.String(), unitTy.String()])
                 builder.Emit()
             }
