@@ -1,6 +1,7 @@
 package cjcj::macro_pkg
 
 import std.collection.*
+import cjcj::ast.Diagnose
 
 public let TEST_REGISTER_ATTR: String = "TEST_REGISTER"
 public let TEST_ENTRY_NAME: String = "test_entry"
@@ -379,15 +380,15 @@ public class TestEntryConstructor {
         }
         if (let Some(classDecl) <- getClassFromMacro(med)) {
             if (findMacro(med, "Test") && findModifier(classDecl, "foreign")) {
-                diag.Diagnose(getMacroDecl(med, "Test").begin, DiagKind.macro_using_error,
+                Diagnose(diag, getMacroDecl(med, "Test"), DiagKind.macro_using_error,
                     args: [DiagArgument("@Test modified foreign class")]).Emit()
             }
             if (findMacro(med, "TestCase") && findModifier(classDecl, "foreign")) {
-                diag.Diagnose(getMacroDecl(med, "TestCase").begin, DiagKind.macro_using_error,
+                Diagnose(diag, getMacroDecl(med, "TestCase"), DiagKind.macro_using_error,
                     args: [DiagArgument("@TestCase modified foreign class")]).Emit()
             }
             if (findMacro(med, "Test") && !hasParameterlessConstructor(classDecl)) {
-                diag.Diagnose(getMacroDecl(med, "Test").begin, DiagKind.macro_using_error,
+                Diagnose(diag, getMacroDecl(med, "Test"), DiagKind.macro_using_error,
                     args: [DiagArgument("Class modified by @Test must contain a parameterless construction.")]).Emit()
             }
         }
@@ -399,19 +400,19 @@ public class TestEntryConstructor {
         }
         if (let Some(fd) <- getFuncFromMacro(med)) {
             if (macroName == "Test" && !containsFunc(funcs, fd)) {
-                diag.Diagnose(getMacroDecl(med, macroName).begin, DiagKind.macro_using_error,
+                Diagnose(diag, getMacroDecl(med, macroName), DiagKind.macro_using_error,
                     args: [DiagArgument("@" + macroName + " modified function is not top level")]).Emit()
             }
             if (macroName == "TestCase" && containsFunc(funcs, fd)) {
-                diag.Diagnose(getMacroDecl(med, macroName).begin, DiagKind.macro_using_error,
+                Diagnose(diag, getMacroDecl(med, macroName), DiagKind.macro_using_error,
                     args: [DiagArgument("@" + macroName + " modified top level function")]).Emit()
             }
             if (!isUnitFunction(fd)) {
-                diag.Diagnose(getMacroDecl(med, macroName).begin, DiagKind.macro_using_error,
+                Diagnose(diag, getMacroDecl(med, macroName), DiagKind.macro_using_error,
                     args: [DiagArgument("@" + macroName + " modified function type is not ()->Unit")]).Emit()
             }
             if (findModifier(fd, "foreign")) {
-                diag.Diagnose(getMacroDecl(med, macroName).begin, DiagKind.macro_using_error,
+                Diagnose(diag, getMacroDecl(med, macroName), DiagKind.macro_using_error,
                     args: [DiagArgument("@" + macroName + " modified foreign function")]).Emit()
             }
         }
