@@ -1008,15 +1008,11 @@ public class Translator {
         if (let Some(astTy) <- enumDecl.GetTy()) {
             def.SetType(RequireEnumType(chirTy.TranslateType(astTy)))
         }
-        var enumTiLinkage = if (enumDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) {
+        def.SetLinkTypeInfo(if (enumDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) {
             BasicLinkage.INTERNAL
         } else {
             enumDecl.linkage
-        }
-        if (enumTiLinkage == BasicLinkage.INTERNAL) {
-            enumTiLinkage = BasicLinkage.LINKONCE_ODR
-        }
-        def.SetLinkTypeInfo(enumTiLinkage)
+        })
         SetImplementedInterfaces(def, enumDecl)
         for (ctor in enumDecl.constructors) {
             let payloadTypes = ArrayList<Type>()
@@ -2848,15 +2844,11 @@ public class Translator {
         }
         let isImportedInstantiated = decl.TestAttr(AstAttribute.IMPORTED) &&
             decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)
-        var tiLinkage = if (isImportedInstantiated) {
+        def.SetLinkTypeInfo(if (isImportedInstantiated) {
             BasicLinkage.INTERNAL
         } else {
             decl.linkage
-        }
-        if (tiLinkage == BasicLinkage.INTERNAL) {
-            tiLinkage = BasicLinkage.LINKONCE_ODR
-        }
-        def.SetLinkTypeInfo(tiLinkage)
+        })
         let needInitialSuperClassSetup = !decl.TestAttr(AstAttribute.SPECIFIC) ||
             decl.TestAttr(AstAttribute.IMPORTED) || decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)
         if (needInitialSuperClassSetup) {
