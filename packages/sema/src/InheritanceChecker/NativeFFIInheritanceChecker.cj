@@ -166,7 +166,7 @@ private func DiagConflictingAnnotation(
             MakeRange(anno.GetBegin(), declWithAnno.identifier.End()),
             arguments: [declWithAnno.identifier.Val(), anno.identifier.Val()])
     } else {
-        diag.DiagnoseRefactor(
+        DiagnoseRefactor(diag,
             DiagKindRefactor.sema_foreign_name_conflicting_derived_annotation,
             declWithAnno,
             MakeRange(declWithAnno.identifier.Begin(), declWithAnno.identifier.End()),
@@ -264,7 +264,7 @@ func CheckAnnotation(
     }
 
     if (childAnno.isSome() && !childAnno.getOrThrow().TestAttr(Attribute.COMPILER_ADD)) {
-        diag.DiagnoseRefactor(
+        DiagnoseRefactor(diag,
             DiagKindRefactor.sema_foreign_name_appeared_in_child,
             childDecl,
             MakeRange(childAnno.getOrThrow().GetBegin(), childDecl.identifier.End()),
