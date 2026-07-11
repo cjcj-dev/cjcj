@@ -133,7 +133,7 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr, ctx: ASTConte
                 ok = false
                 if (!CanSkipDiag(inExpression)) {
                     if (let Some(diagValue) <- diag) {
-                        diagValue.Diagnose(inExpression.begin, inExpression.end,
+                        Diagnose(diagValue, inExpression,
                             BasicDiagKind.sema_expr_in_forin_must_has_iterator,
                             args: [BasicDiagArgument(Ty.ToString(inExpression.GetTy()))]).Emit()
                     }
@@ -143,7 +143,7 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr, ctx: ASTConte
             ok = false
             if (!CanSkipDiag(inExpression)) {
                 if (let Some(diagValue2) <- diag) {
-                    diagValue2.Diagnose(inExpression.begin, inExpression.end,
+                    Diagnose(diagValue2, inExpression,
                         BasicDiagKind.sema_expr_in_forin_must_has_iterator,
                         args: [BasicDiagArgument(Ty.ToString(inExpression.GetTy()))]).Emit()
                 }
@@ -176,7 +176,7 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr, ctx: ASTConte
             ok = false
             if (!CanSkipDiag(patternGuard)) {
                 if (let Some(diagValue3) <- diag) {
-                    diagValue3.Diagnose(patternGuard.begin, patternGuard.end,
+                    Diagnose(diagValue3, patternGuard,
                         BasicDiagKind.sema_wrong_forin_guard).Emit()
                 }
             }
@@ -200,7 +200,7 @@ public func SynForInExpr(typeManager: TypeManager, fie: ForInExpr, ctx: ASTConte
         if (!IsIrrefutablePattern(pattern)) {
             ok = false
             if (let Some(diagValue4) <- diag) {
-                diagValue4.Diagnose(fie.begin, fie.end,
+                Diagnose(diagValue4, fie,
                     BasicDiagKind.sema_forin_pattern_must_be_irrefutable).Emit()
             }
         }
