@@ -2,7 +2,7 @@ package cjcj::chir
 
 import std.collection.*
 
-import cjcj::utils.{CJC_ASSERT, STATIC_INIT_FUNC}
+import cjcj::utils.{CJC_ASSERT, OverflowStrategy, STATIC_INIT_FUNC}
 import cjcj::option.{GlobalOptions, OptimizationFlag}
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::ast.ASTKind
@@ -53,6 +53,7 @@ import cjcj::ast.MatchExpr as AstMatchExpr
 import cjcj::ast.MemberAccess as AstMemberAccess
 import cjcj::ast.NameReferenceExpr as AstNameReferenceExpr
 import cjcj::ast.Node as AstNode
+import cjcj::ast.OverloadableExpr as AstOverloadableExpr
 import cjcj::ast.ParenExpr as AstParenExpr
 import cjcj::ast.Pattern as AstPattern
 import cjcj::ast.PointerExpr as AstPointerExpr
@@ -68,6 +69,7 @@ import cjcj::ast.StructTy as AstStructTy
 import cjcj::ast.SubscriptExpr as AstSubscriptExpr
 import cjcj::ast.SugarKind as AstSugarKind
 import cjcj::ast.TokenKind as AstTokenKind
+import cjcj::ast.TokenKindLiteral as AstTokenKindLiteral
 import cjcj::ast.TokenKindValue as AstTokenKindValue
 import cjcj::ast.Ty as AstTy
 import cjcj::ast.TypeKind as AstTypeKind
@@ -1193,7 +1195,8 @@ public class Translator {
     }
 
     public func Visit(expr: AstBinaryExpr): Option<Value> {
-        let lhs = Translator.TranslateASTNode(RequireExpr(expr.leftExpr, "binary lhs"), this) ??
+        let leftExpr = RequireExpr(expr.leftExpr, "binary lhs")
+        let lhs = Translator.TranslateASTNode(leftExpr, this) ??
             throw IllegalStateException("faithful AST2CHIR binary lhs produced no value")
         if (expr.op == AstTokenKind.AND) {
             return TransShortCircuitAnd(lhs, RequireExpr(expr.rightExpr, "binary rhs"))
@@ -1201,11 +1204,35 @@ public class Translator {
         if (expr.op == AstTokenKind.OR) {
             return TransShortCircuitOr(lhs, RequireExpr(expr.rightExpr, "binary rhs"))
         }
-        let rhs = Translator.TranslateASTNode(RequireExpr(expr.rightExpr, "binary rhs"), this) ??
+        let rightExpr = RequireExpr(expr.rightExpr, "binary rhs")
+        let rhs = Translator.TranslateASTNode(rightExpr, this) ??
             throw IllegalStateException("faithful AST2CHIR binary rhs produced no value")
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
-        let binary = builder.CreateBinaryExpression(ToCHIRBinaryOp(expr.op), resultTy, lhs, rhs, CurrentBlock(),
+        let binaryKind = ToCHIRBinaryOp(expr.op)
+        let mayHaveException = OverloadableExprMayThrowException(expr, resultTy)
+        let loc = if (RequireAstTy(leftExpr).IsNothing()) {
+            TranslateLocation(rightExpr)
+        } else {
+            GetOperatorLoc(expr)
+        }
+        if (let Some(errorBlock) <- CurrentTryCatchBlock() && mayHaveException) {
+            let successBlock = CreateBlock()
+            let exceptionBlock = DelayExitExceptionBlock(errorBlock)
+            let targetBlock = match (exceptionBlock) {
+                case Some(exceptBlock) => exceptBlock
+                case None => errorBlock
+            }
+            let binary = builder.CreateBinaryIntOpWithException(resultTy, binaryKind, lhs, rhs, successBlock,
+                targetBlock, CurrentBlock())
+            binary.SetOverflowStrategy(expr.overflowStrategy)
+            binary.SetDebugLocation(loc)
+            let result = RequireResult(binary)
+            FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
+            return result
+        }
+        let binary = builder.CreateBinaryExpression(binaryKind, resultTy, lhs, rhs, CurrentBlock(),
             overflowStrategy: expr.overflowStrategy)
+        binary.SetDebugLocation(loc)
         return RequireResult(binary)
     }
 
@@ -4112,6 +4139,18 @@ public class Translator {
             return None
         }
         return tryCatchContext[tryCatchContext.size - 1]
+    }
+
+    private func OverloadableExprMayThrowException(expr: AstOverloadableExpr, leftValTy: Type): Bool {
+        let mayOverflow = leftValTy.IsInteger() && expr.overflowStrategy == OverflowStrategy.THROWING
+        let mayDivZero = (expr.op == AstTokenKind.DIV || expr.op == AstTokenKind.DIV_ASSIGN ||
+            expr.op == AstTokenKind.MOD || expr.op == AstTokenKind.MOD_ASSIGN) && leftValTy.IsInteger()
+        let mayOverShift = expr.op == AstTokenKind.LSHIFT || expr.op == AstTokenKind.LSHIFT_ASSIGN ||
+            expr.op == AstTokenKind.RSHIFT || expr.op == AstTokenKind.RSHIFT_ASSIGN
+        let noException = expr.op == AstTokenKind.BITAND || expr.op == AstTokenKind.BITAND_ASSIGN ||
+            expr.op == AstTokenKind.BITOR || expr.op == AstTokenKind.BITOR_ASSIGN ||
+            expr.op == AstTokenKind.BITXOR || expr.op == AstTokenKind.BITXOR_ASSIGN || expr.op == AstTokenKind.NOT
+        return (mayOverflow || mayDivZero || mayOverShift) && !noException
     }
 
     private func ExceptionValueTypeForTry(expr: AstTryExpr): Type {
@@ -8112,6 +8151,15 @@ public class Translator {
 
     private func TranslateLocation(node: AstNode): DebugLocation {
         return TranslateLocation(node.begin, node.end)
+    }
+
+    private func GetOperatorLoc(expr: AstBinaryExpr): DebugLocation {
+        let begin = if (expr.operatorPos.line == 0 && expr.operatorPos.column == 0) {
+            expr.begin
+        } else {
+            expr.operatorPos
+        }
+        return TranslateLocation(begin, begin + AstTokenKindLiteral(expr.op).size)
     }
 
     private func TranslateLocation(beginPos: AstPosition, endPos: AstPosition): DebugLocation {
