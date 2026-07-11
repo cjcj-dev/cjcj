@@ -639,8 +639,11 @@ public class CHIRBuilder {
             srcCodeIdentifier: srcCodeIdentifier, genericTypeParams: genericTypeParams)
         parent.AppendExpression(expr)
         context.RegisterExpression(expr)
-        StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
-        CreateLocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        let bg = parent.GetFuncOrLambdaBody().getOrThrow()
+        StoreAllocatedPtrInFuncOrLambda(bg, ptr: Some(expr))
+        let res = LocalVar(resultTy, "%${context.GetAllNodesNum()}", expr)
+        context.RegisterValue(res)
+        StoreAllocatedPtrInFuncOrLambda(bg, ptr: Some(res))
         return expr
     }
 
