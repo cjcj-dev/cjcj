@@ -149,6 +149,7 @@ public struct Position <: Hashable & Equatable<Position> {
         return (Int64(hash >> 16), Int64(hash & 0xffffu32))
     }
 
+    @OverflowWrapping
     public func hashCode(): Int64 {
         return Int64(Hash64())
     }
