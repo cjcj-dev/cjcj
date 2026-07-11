@@ -189,9 +189,10 @@ public func TypeCheckClassLikeCheckThreadContextInheritance(
         return true
     }
     if (decl.TestAttr(Attribute.OPEN)) {
-        let builder = diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(diag,
             BasicDiagKindRefactor.sema_inherit_thread_context_not_open,
-            TypeCheckClassLikeRange(decl),
+            decl,
+            TypeCheckClassLikeIdentifierRange(decl),
             arguments: [decl.identifier.Val()])
         builder.Emit()
         return false
@@ -204,9 +205,10 @@ public func TypeCheckClassLikeCheckThreadContextInheritance(
         whitelisted = true
     }
     if (!whitelisted) {
-        let builder = diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(diag,
             BasicDiagKindRefactor.sema_inherit_thread_context_invalid,
-            TypeCheckClassLikeRange(decl),
+            decl,
+            TypeCheckClassLikeIdentifierRange(decl),
             arguments: [decl.identifier.Val()])
         builder.Emit()
         return false
