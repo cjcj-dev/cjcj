@@ -1843,6 +1843,7 @@ private class CjoSignatureMaterializer {
         if (root < 0 || reader.StringField(root, 8) != packageName) {
             return
         }
+        pkg.EnableAttr(Attribute.IMPORTED)
         pkg.isMacroPackage = reader.U8Field(root, 26, 0u8) != 0u8
         let packageAccess = reader.U8Field(root, 28, 0u8)
         pkg.accessible = if (packageAccess == 0u8) {
