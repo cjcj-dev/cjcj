@@ -289,9 +289,10 @@ public class TestManager {
                 if (funcDecl.TestAttr(Attribute.CONTAINS_MOCK_CREATION_CALL) && IsGenericFuncDecl(funcDecl) &&
                     !funcDecl.HasAnno(AstAnnotationKind.FROZEN)) {
                     // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                    let _ = diag.DiagnoseRefactor(
+                    let _ = DiagnoseRefactor(diag,
                         BasicDiagKindRefactor.sema_mock_frozen_required,
-                        funcDecl.begin,
+                        funcDecl,
+                        MakeRange(funcDecl.identifier.Begin(), funcDecl.identifier.End()),
                         arguments: [funcDecl.identifier.Val()]
                     )
                 }
@@ -346,7 +347,8 @@ public class TestManager {
                     let typeArgument = baseTy.typeArgs[1]
                     if (!typeArgument.IsClass() && !typeArgument.IsInterface()) {
                         // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                        let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_unsupported_type, callExpr.begin)
+                        let _ = DiagnoseRefactor(diag,
+                            BasicDiagKindRefactor.sema_mock_unsupported_type, callExpr)
                         callExpr.EnableAttr(Attribute.IS_BROKEN)
                         return VisitAction.SKIP_CHILDREN
                     }
@@ -358,11 +360,11 @@ public class TestManager {
         }
         if (!testEnabled) {
             // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-            let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_not_in_test_mode, callExpr.begin,
+            let _ = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_not_in_test_mode, callExpr,
                 arguments: ["--test"])
         } else if (mockMode != MockMode.RUNTIME_ERROR) {
             // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-            let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_disabled, callExpr.begin,
+            let _ = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_disabled, callExpr,
                 arguments: ["--mock=on"])
         }
         callExpr.EnableAttr(Attribute.IS_BROKEN)
