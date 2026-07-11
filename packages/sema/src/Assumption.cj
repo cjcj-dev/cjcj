@@ -2,58 +2,45 @@ package cjcj::sema
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::ast.{GCBlames, TyVarEnv}
 
-public class GenericConstraintBlame {
-    public var subTy: Ty
-    public var upperBoundTy: Ty
-    public var constraint: GenericConstraint
-
-    public init(subTy: Ty, upperBoundTy: Ty, constraint: GenericConstraint) {
-        this.subTy = subTy
-        this.upperBoundTy = upperBoundTy
-        this.constraint = constraint
-    }
-}
-
-public class AssumptionSet {
-    public let constraints: Constraint = Constraint()
-    public let blames: ArrayList<GenericConstraintBlame> = ArrayList<GenericConstraintBlame>()
-
-    public init() {}
-}
-
-private func addConstraint(collection: Constraint, subTy: Ty, upperBoundTy: Ty): Unit {
+private func AddConstraint(typeConstraintCollection: TyVarEnv, subTy: Ty, upperBoundTy: Ty): Unit {
     if (let Some(subGen) <- (subTy as GenericsTy)) {
-        var alreadyBound = false
+        var foundUpperBound = false
         for (upper in subGen.upperBounds) {
-            if (SameTy(upper, upperBoundTy)) {
-                alreadyBound = true
+            if (Ptr<Ty>(upper) == Ptr<Ty>(upperBoundTy)) {
+                foundUpperBound = true
                 break
             }
         }
-        if (!alreadyBound) {
+        if (!foundUpperBound) {
             subGen.upperBounds.add(upperBoundTy)
         }
-        let bounds = collection.GetOrCreate(subGen)
-        bounds.ubs.Add(upperBoundTy)
+        let key = Ptr<GenericsTy>(subGen)
+        if (let Some(upperBounds) <- typeConstraintCollection.get(key)) {
+            upperBounds.add(Ptr<Ty>(upperBoundTy))
+        } else {
+            let upperBounds = HashSet<Ptr<Ty>>()
+            upperBounds.add(Ptr<Ty>(upperBoundTy))
+            typeConstraintCollection[key] = upperBounds
+        }
     }
 }
 
-private func lookupConstraintCollection(subTy: Ty, baseTy: Ty, collection: Constraint): Bool {
-    if (SameTy(subTy, baseTy)) {
+private func LookUpConstraintCollection(subTy: Ty, baseTy: Ty,
+    typeConstraintCollection: TyVarEnv): Bool {
+    if (Ptr<Ty>(subTy) == Ptr<Ty>(baseTy)) {
         return true
     }
     if (let Some(subGen) <- (subTy as GenericsTy)) {
-        for (entry in collection.entries) {
-            if (SameTy(entry.tyVar, subGen)) {
-                return entry.bounds.ubs.Contains(baseTy)
-            }
+        if (let Some(upperBounds) <- typeConstraintCollection.get(Ptr<GenericsTy>(subGen))) {
+            return upperBounds.contains(Ptr<Ty>(baseTy))
         }
     }
     return false
 }
 
-private func upperBoundsValid(upperBounds: ArrayList<Type>): Bool {
+private func IsUpperBoundsValid(upperBounds: ArrayList<Type>): Bool {
     for (upper in upperBounds) {
         if (!Ty.IsTyCorrect(upper.GetTy())) {
             return false
@@ -62,27 +49,31 @@ private func upperBoundsValid(upperBounds: ArrayList<Type>): Bool {
     return true
 }
 
-private func performAssumeReferenceTypeUpperBound(typeManager: TypeManager, assumptionSet: AssumptionSet,
-    referenceTypeUpperBound: Type, typeMapping: TypeSubst): Unit {
+private func PerformAssumeReferenceTypeUpperBound(typeManager: TypeManager,
+    typeConstraintCollection: TyVarEnv, blames: GCBlames, referenceTypeUpperBound: Type,
+    typeMapping: TypeSubst): Unit {
     if (let Some(upperBoundTy) <- referenceTypeUpperBound.GetTy()) {
         if (let Some(baseDecl) <- Ty.GetDeclPtrOfTy(upperBoundTy)) {
             if (Ty.IsTyCorrect(upperBoundTy) && upperBoundTy.HasGeneric()) {
                 let substituteMap = typeManager.GetSubstituteMapping(upperBoundTy, typeMapping)
-                Assumption(typeManager, assumptionSet, baseDecl, typeMapping: substituteMap)
+                Assumption(typeManager, typeConstraintCollection, blames, baseDecl,
+                    typeMapping: substituteMap)
             }
         }
     }
 }
 
-private func assumeOneUpperBound(typeManager: TypeManager, assumptionSet: AssumptionSet, upperBound: Type,
-    typeMapping: TypeSubst): Unit {
+private func AssumeOneUpperBound(typeManager: TypeManager, typeConstraintCollection: TyVarEnv,
+    blames: GCBlames, upperBound: Type, typeMapping: TypeSubst): Unit {
     if (upperBound.astKind == ASTKind.REF_TYPE || upperBound.astKind == ASTKind.QUALIFIED_TYPE) {
-        performAssumeReferenceTypeUpperBound(typeManager, assumptionSet, upperBound, typeMapping)
+        PerformAssumeReferenceTypeUpperBound(typeManager, typeConstraintCollection, blames, upperBound,
+            typeMapping)
     }
 }
 
-private func performAssumptionForOneGenericConstraint(typeManager: TypeManager, assumptionSet: AssumptionSet,
-    gc: GenericConstraint, typeMapping: TypeSubst): Unit {
+private func PerformAssumptionForOneGenericConstraint(typeManager: TypeManager,
+    typeConstraintCollection: TyVarEnv, blames: GCBlames, gc: GenericConstraint,
+    typeMapping: TypeSubst): Unit {
     if (let Some(refType) <- gc.refType) {
         if (let Some(subTypeTy) <- refType.GetTy()) {
             if (!Ty.IsTyCorrect(subTypeTy)) {
@@ -95,25 +86,37 @@ private func performAssumptionForOneGenericConstraint(typeManager: TypeManager, 
                         continue
                     }
                     let baseTy = typeManager.GetInstantiatedTy(upperBoundTy, typeMapping)
-                    if (!subTy.IsGeneric() || lookupConstraintCollection(subTy, baseTy, assumptionSet.constraints)) {
+                    if (!subTy.IsGeneric() ||
+                        LookUpConstraintCollection(subTy, baseTy, typeConstraintCollection)) {
                         continue
                     }
-                    addConstraint(assumptionSet.constraints, subTy, baseTy)
-                    assumptionSet.blames.add(GenericConstraintBlame(subTy, baseTy, gc))
-                    assumeOneUpperBound(typeManager, assumptionSet, upperBound, typeMapping)
+                    AddConstraint(typeConstraintCollection, subTy, baseTy)
+                    let subKey = Ptr<Ty>(subTy)
+                    let upperKey = Ptr<Ty>(baseTy)
+                    if (!blames.contains(subKey)) {
+                        blames[subKey] = HashMap<Ptr<Ty>, HashSet<Node>>()
+                    }
+                    let upperToBlames = blames[subKey]
+                    if (!upperToBlames.contains(upperKey)) {
+                        upperToBlames[upperKey] = HashSet<Node>()
+                    }
+                    upperToBlames[upperKey].add(gc)
+                    AssumeOneUpperBound(typeManager, typeConstraintCollection, blames, upperBound,
+                        typeMapping)
                 }
             }
         }
     }
 }
 
-public func Assumption(typeManager: TypeManager, assumptionSet: AssumptionSet, decl: Decl,
-    typeMapping!: TypeSubst = TypeSubst()): Unit {
+public func Assumption(typeManager: TypeManager, typeConstraintCollection: TyVarEnv,
+    blames: GCBlames, decl: Decl, typeMapping!: TypeSubst = TypeSubst()): Unit {
     if (let Some(generic) <- decl.GetGeneric()) {
         for (gc in generic.genericConstraints) {
             if (let Some(_) <- gc.refType) {
-                if (!gc.upperBounds.isEmpty() && upperBoundsValid(gc.upperBounds)) {
-                    performAssumptionForOneGenericConstraint(typeManager, assumptionSet, gc, typeMapping)
+                if (!gc.upperBounds.isEmpty() && IsUpperBoundsValid(gc.upperBounds)) {
+                    PerformAssumptionForOneGenericConstraint(typeManager, typeConstraintCollection, blames,
+                        gc, typeMapping)
                 }
             }
         }

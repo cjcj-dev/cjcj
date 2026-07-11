@@ -101,6 +101,59 @@ public func TypeCheckDeclGetTypeArgsOfType(typeNode: Option<Type>): ArrayList<Ty
     return out
 }
 
+public func GetRevTypeMapping(params: ArrayList<Ty>, args: ArrayList<Ty>, revTyMap: MultiTypeSubst): Unit {
+    if (args.size != params.size) {
+        return
+    }
+    var idx: Int64 = 0
+    while (idx < args.size) {
+        let arg = args[idx]
+        if (let Some(genericTy) <- (arg as GenericsTy)) {
+            revTyMap.Put(genericTy, params[idx])
+        } else if (let Some(decl) <- Ty.GetDeclPtrOfTy(arg)) {
+            if (let Some(declTy) <- decl.GetTy()) {
+                if (Ty.IsTyCorrect(declTy)) {
+                    GetRevTypeMapping(declTy.typeArgs, arg.typeArgs, revTyMap)
+                }
+            }
+        }
+        idx++
+    }
+}
+
+public func GetGenericTysToInstTysMapping(genericTy: Ty, instTy: Ty): TypeSubst {
+    let mapping = TypeSubst()
+    if (genericTy.typeArgs.size > instTy.typeArgs.size) {
+        return mapping
+    }
+    var idx: Int64 = 0
+    while (idx < genericTy.typeArgs.size) {
+        mapping.Put((genericTy.typeArgs[idx] as GenericsTy).getOrThrow(), instTy.typeArgs[idx])
+        idx++
+    }
+    return mapping
+}
+
+public func GetAllAssumptions(source: TyVarUB, newMap: TyVarUB): Unit {
+    for ((genericKey, upperBounds) in source) {
+        if (newMap.contains(genericKey)) {
+            continue
+        }
+        let copiedUpperBounds = HashSet<Ptr<Ty>>()
+        for (upperKey in upperBounds) {
+            copiedUpperBounds.add(upperKey)
+        }
+        newMap[genericKey] = copiedUpperBounds
+        for (upperKey in upperBounds) {
+            if (let Some(decl) <- Ty.GetDeclPtrOfTy(upperKey.value)) {
+                if (let Some(genericDecl) <- decl.GetGeneric()) {
+                    GetAllAssumptions(genericDecl.assumptionCollection, newMap)
+                }
+            }
+        }
+    }
+}
+
 public func TypeCheckDeclInsertEnumConstructors(
     ctx: ASTContext,
     ed: EnumDecl,

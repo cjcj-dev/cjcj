@@ -400,11 +400,14 @@ public class GenericConstraint <: Node {
     }
 }
 
+public type TyVarEnv = HashMap<Ptr<GenericsTy>, HashSet<Ptr<Ty>>>
+
 public class Generic <: Node {
     public var leftAnglePos: Position = INVALID_POSITION
     public let typeParameters: ArrayList<GenericParamDecl> = ArrayList<GenericParamDecl>()
     public var rightAnglePos: Position = INVALID_POSITION
     public let genericConstraints: ArrayList<GenericConstraint> = ArrayList<GenericConstraint>()
+    public let assumptionCollection: TyVarEnv = TyVarEnv()
 
     public init() {
         super(ASTKind.GENERIC)
