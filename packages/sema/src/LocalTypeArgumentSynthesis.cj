@@ -684,8 +684,10 @@ public class LocalTypeArgumentSynthesis {
             let ub2Blames = cloneTyBlameEntries(tyVarBounds.ub2Blames)
             var lbTy = lb
             if (!deterministic) {
-                let joinedLb = JoinAsVisibleTy(tyMgr, tyVarBounds.lbs, ignoredTyVars: ToTySet(argPack.tyVarsToSolve))
-                if (!joinedLb.IsAny()) {
+                let joinRes = JoinAsVisibleTy(tyMgr, tyVarBounds.lbs,
+                    ignoredTyVars: ToTySet(argPack.tyVarsToSolve))
+                let (joinErr, joinedLb) = SetJoinedType(lbTy, joinRes)
+                if (joinErr.isNone() && !joinedLb.IsAny()) {
                     lbTy = joinedLb
                 }
             }
@@ -1042,7 +1044,9 @@ public class LocalTypeArgumentSynthesis {
                     msg = MakeMsgNoConstraint(entry.tyVar)
                     break
                 }
-                var tyJ = JoinAsVisibleTy(tyMgr, entry.bounds.lbs, ignoredTyVars: ToTySet(tyVarsOfThisM))
+                let joinRes = JoinAsVisibleTy(tyMgr, entry.bounds.lbs, ignoredTyVars: ToTySet(tyVarsOfThisM))
+                let (_, joinedTy) = SetJoinedType(TypeManager.GetInvalidTy(), joinRes)
+                var tyJ = joinedTy
                 var tyM = MeetUpperBounds(entry.tyVar, entry.bounds.ubs, tyVarsOfThisM) ??
                     TypeManager.GetInvalidTy()
                 let validAnyTy = hasAnyTy || (deterministic && entry.bounds.ubs.Contains(tyMgr.GetAnyTy()))
@@ -1284,7 +1288,9 @@ public class LocalTypeArgumentSynthesis {
         if (values.values.isEmpty()) {
             return None
         }
-        return MeetAsVisibleTy(tyMgr, values, ignoredTyVars: ToTySet(ignoredTyVars))
+        let meetRes = MeetAsVisibleTy(tyMgr, values, ignoredTyVars: ToTySet(ignoredTyVars))
+        let (_, metTy) = SetMetType(TypeManager.GetInvalidTy(), meetRes)
+        return Some(metTy)
     }
 
     private func IsValidSolution(ty: Ty, hasNothingTy: Bool, hasAnyTy: Bool): Bool {

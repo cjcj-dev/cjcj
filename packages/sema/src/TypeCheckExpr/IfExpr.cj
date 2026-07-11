@@ -1,6 +1,8 @@
 package cjcj::sema.TypeCheckExpr
 
 import cjcj::ast.*
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::sema.*
 
@@ -20,15 +22,15 @@ private func IsIfExprWithoutElse(ie: IfExpr): Bool {
     return false
 }
 
-private func JoinIfBranchTys(typeManager: TypeManager, thenTy: Ty, elseTy: Ty, curFile: Option<File>): Ty {
+private func JoinIfBranchTys(typeManager: TypeManager, thenTy: Ty, elseTy: Ty, curFile: Option<File>): ErrOrTy {
     if (!Ty.IsTyCorrect(thenTy) || !Ty.IsTyCorrect(elseTy)) {
-        return TypeManager.GetInvalidTy()
+        return ErrOrTy.TY(TypeManager.GetInvalidTy())
     }
     if (thenTy.IsNothing()) {
-        return elseTy
+        return ErrOrTy.TY(elseTy)
     }
     if (elseTy.IsNothing()) {
-        return thenTy
+        return ErrOrTy.TY(thenTy)
     }
     let tys = TySet()
     tys.Add(thenTy)
@@ -36,7 +38,8 @@ private func JoinIfBranchTys(typeManager: TypeManager, thenTy: Ty, elseTy: Ty, c
     return JoinAsVisibleTy(typeManager, tys, curFile: curFile)
 }
 
-public func SynIfExpr(typeManager: TypeManager, ie: IfExpr, pos!: SynPos = SynPos.NONE): Ty {
+public func SynIfExpr(typeManager: TypeManager, ie: IfExpr, pos!: SynPos = SynPos.NONE,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
     var ok = true
     if (let Some(condExpr) <- ie.condExpr) {
         ok = TcCheckCondition(typeManager, condExpr) && ok
@@ -70,7 +73,26 @@ public func SynIfExpr(typeManager: TypeManager, ie: IfExpr, pos!: SynPos = SynPo
                 ie.SetTy(unitTy2)
                 return unitTy2
             }
-            let joinedTy = JoinIfBranchTys(typeManager, thenTy, elseTy, ie.curFile)
+            let joinRes = JoinIfBranchTys(typeManager, thenTy, elseTy, ie.curFile)
+            let (optErrs, joinedTy) = SetJoinedType(ie.GetTy() ?? TypeManager.GetInvalidTy(), joinRes)
+            if (let Some(errMsg) <- optErrs) {
+                if (let Some(engine) <- diag) {
+                    var diagMessage = "types " + Ty.ToString(Some(thenTy)) + " and " + Ty.ToString(Some(elseTy))
+                    diagMessage += if (let Some(sourceExpr) <- ie.sourceExpr) {
+                        if (sourceExpr.astKind == ASTKind.IF_AVAILABLE_EXPR) {
+                            " of the two lambda of this '@IfAvailable' expression mismatch"
+                        } else {
+                            " of the two branches of this 'if' expression mismatch"
+                        }
+                    } else {
+                        " of the two branches of this 'if' expression mismatch"
+                    }
+                    let builder = Diagnose(engine, ie, BasicDiagKind.sema_diag_report_error_message,
+                        args: [BasicDiagArgument(diagMessage)])
+                    builder.AddNote(errMsg)
+                    builder.Emit()
+                }
+            }
             if (Ty.IsTyCorrect(joinedTy)) {
                 ie.SetTy(joinedTy)
                 return joinedTy

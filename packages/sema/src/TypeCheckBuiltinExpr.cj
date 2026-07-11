@@ -335,7 +335,8 @@ public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit): Ty {
     return SynArrayLit(typeManager, arrayLit, None)
 }
 
-public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit, arrayStruct: Option<StructDecl>): Ty {
+public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit, arrayStruct: Option<StructDecl>,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (arrayLit.children.isEmpty()) {
         return InvalidExprTy(arrayLit)
     }
@@ -350,9 +351,20 @@ public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit, arrayStruc
             return InvalidExprTy(arrayLit)
         }
     }
-    let elemTy = JoinCaseTysForBuiltin(typeManager, elemTys, arrayLit.curFile)
     if (let None <- arrayStruct) {
         return InvalidExprTy(arrayLit)
+    }
+    let joinRes = JoinCaseTysForBuiltin(typeManager, elemTys, arrayLit.curFile)
+    let (optErrs, elemTy) = SetJoinedType(TypeManager.GetInvalidTy(), joinRes)
+    if (let Some(errMsg) <- optErrs) {
+        arrayLit.SetTy(TypeManager.GetInvalidTy())
+        if (let Some(diagValue) <- diag) {
+            let builder = Diagnose(diagValue, arrayLit, BasicDiagKind.sema_inconsistency_elemType,
+                args: [BasicDiagArgument("array")])
+            builder.AddNote(errMsg)
+            builder.Emit()
+        }
+        return TypeManager.GetInvalidTy()
     }
     let resultTy = typeManager.GetStructTy(arrayStruct.getOrThrow(), [elemTy])
     arrayLit.SetTy(resultTy)
@@ -361,7 +373,7 @@ public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit, arrayStruc
 }
 
 public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit,
-    arrayStruct!: Option<StructDecl> = None): Bool {
+    arrayStruct!: Option<StructDecl> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     var targetTy = UnboxOptionType(target)
     arrayLit.SetTy(TypeManager.GetInvalidTy())
     if (targetTy.IsInterface()) {
@@ -370,7 +382,7 @@ public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit
             if (arrayLit.children.isEmpty()) {
                 return false
             }
-            let synTy = SynArrayLit(typeManager, arrayLit, arrayStruct)
+            let synTy = SynArrayLit(typeManager, arrayLit, arrayStruct, diag: diag)
             return typeManager.IsSubtype(synTy, target)
         }
     } else if (!Ty.IsTyCorrect(targetTy) || (!targetTy.IsStructArray() && (let None <- (targetTy as VArrayTy)))) {
@@ -388,7 +400,7 @@ public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit
         hasElementTy = true
     }
     if (!hasElementTy) {
-        let synTy = SynArrayLit(typeManager, arrayLit)
+        let synTy = SynArrayLit(typeManager, arrayLit, None, diag: diag)
         return typeManager.CheckTypeCompatibility(targetTy, synTy) != TypeCompatibility.INCOMPATIBLE
     }
     if (let Some(varrayTy) <- (targetTy as VArrayTy)) {
@@ -949,9 +961,9 @@ public func ChkBuiltinCall(typeManager: TypeManager, ctx: Option<ASTContext>, ta
     return false
 }
 
-private func JoinCaseTysForBuiltin(typeManager: TypeManager, tys: ArrayList<Ty>, curFile: Option<File>): Ty {
+private func JoinCaseTysForBuiltin(typeManager: TypeManager, tys: ArrayList<Ty>, curFile: Option<File>): ErrOrTy {
     if (tys.isEmpty()) {
-        return TypeManager.GetInvalidTy()
+        return ErrOrTy.TY(TypeManager.GetInvalidTy())
     }
     let tySet = TySet()
     for (ty in tys) {

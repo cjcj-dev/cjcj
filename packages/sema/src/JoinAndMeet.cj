@@ -1,7 +1,16 @@
 package cjcj::sema
 
 import std.collection.*
+import std.sort.*
 import cjcj::ast.*
+import cjcj::utils.CJC_ASSERT
+
+public type ErrMsg = ArrayList<String>
+
+public enum ErrOrTy {
+    | ERR(ErrMsg)
+    | TY(Ty)
+}
 
 private enum Uniformity {
     | UNIFORMED
@@ -414,30 +423,129 @@ private func ToUserVisibleTy(tm: TypeManager, ty: Ty, curFile: Option<File>): Ty
     return ty
 }
 
-public func JoinAsVisibleTy(tm: TypeManager, tys: TySet, ignoredTyVars!: TySet = TySet(),
-    curFile!: Option<File> = None): Ty {
-    if (!IsInputValid(tys)) {
-        return TypeManager.GetInvalidTy()
+public func CombineErrMsg(msgs: ErrMsg): String {
+    var res = "Traces:\n"
+    while (!msgs.isEmpty()) {
+        res += msgs[msgs.size - 1] + "\n"
+        msgs.remove(at: msgs.size - 1)
     }
-    return ToUserVisibleTy(tm, BatchJoin(tm, tys, ignoredTyVars, curFile: curFile), curFile)
+    return res
+}
+
+private func AddFinalErrMsgs(tys: TySet, errMsg: ErrMsg, ty: Ty, isJoin: Bool): Unit {
+    if (ty.IsInvalid()) {
+        CJC_ASSERT(!tys.values.isEmpty())
+        let tyList = ArrayList<Ty>()
+        for (item in tys.values) {
+            tyList.add(item)
+        }
+        let tyVec = tyList.toArray()
+        sort(tyVec, by: { left: Ty, right: Ty =>
+            if (CompTyByNames(Some(left), Some(right))) {
+                Ordering.LT
+            } else if (CompTyByNames(Some(right), Some(left))) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        }, stable: false)
+        var tysStr = ""
+        var idx: Int64 = 0
+        while (idx < tyVec.size - 1) {
+            tysStr += (if (idx == 0) { "" } else { ", " }) + "'" + Ty.ToString(Some(tyVec[idx])) + "'"
+            idx++
+        }
+        if (tyVec.size > 1) {
+            tysStr += " and '" + tyVec[tyVec.size - 1].String() + "'"
+        }
+        var newErrMsg = "The types " + tysStr + " do not have "
+        newErrMsg += if (isJoin) { "the smallest common supertype" } else { "the greatest common subtype" }
+        errMsg.add(newErrMsg)
+    }
+}
+
+public func SetJoinedType(ty: Ty, joinRes: ErrOrTy): (Option<String>, Ty) {
+    var resultTy = ty
+    return match (joinRes) {
+        case ErrOrTy.TY(joinedTy) =>
+            resultTy = joinedTy
+            (None, resultTy)
+        case ErrOrTy.ERR(messages) =>
+            resultTy = TypeManager.GetInvalidTy()
+            let errMsgs = ErrMsg()
+            for (message in messages) {
+                errMsgs.add(message)
+            }
+            (Some(CombineErrMsg(errMsgs)), resultTy)
+    }
+}
+
+public func SetMetType(ty: Ty, metRes: ErrOrTy): (Option<String>, Ty) {
+    return SetJoinedType(ty, metRes)
+}
+
+public func Join(tm: TypeManager, tys: TySet, ignoredTyVars!: TySet = TySet(),
+    curFile!: Option<File> = None, sprsErr!: Bool = true): ErrOrTy {
+    if (!IsInputValid(tys)) {
+        return ErrOrTy.TY(TypeManager.GetInvalidTy())
+    }
+    let errMsg = ErrMsg()
+    let joinedTy = BatchJoin(tm, tys, ignoredTyVars, curFile: curFile)
+    if (sprsErr || errMsg.isEmpty()) {
+        return ErrOrTy.TY(joinedTy)
+    }
+    return ErrOrTy.ERR(errMsg)
+}
+
+public func Meet(tm: TypeManager, tys: TySet, ignoredTyVars!: TySet = TySet(),
+    curFile!: Option<File> = None, sprsErr!: Bool = true): ErrOrTy {
+    if (!IsInputValid(tys)) {
+        return ErrOrTy.TY(TypeManager.GetInvalidTy())
+    }
+    let errMsg = ErrMsg()
+    let metTy = BatchMeet(tm, tys, ignoredTyVars, curFile: curFile)
+    if (sprsErr || errMsg.isEmpty()) {
+        return ErrOrTy.TY(metTy)
+    }
+    return ErrOrTy.ERR(errMsg)
+}
+
+public func JoinAsVisibleTy(tm: TypeManager, tys: TySet, ignoredTyVars!: TySet = TySet(),
+    curFile!: Option<File> = None): ErrOrTy {
+    if (!IsInputValid(tys)) {
+        return ErrOrTy.TY(TypeManager.GetInvalidTy())
+    }
+    let errMsg = ErrMsg()
+    let joinedTy = ToUserVisibleTy(tm, BatchJoin(tm, tys, ignoredTyVars, curFile: curFile), curFile)
+    AddFinalErrMsgs(tys, errMsg, joinedTy, true)
+    if (errMsg.isEmpty()) {
+        return ErrOrTy.TY(joinedTy)
+    }
+    return ErrOrTy.ERR(errMsg)
 }
 
 public func MeetAsVisibleTy(tm: TypeManager, tys: TySet, ignoredTyVars!: TySet = TySet(),
-    curFile!: Option<File> = None): Ty {
+    curFile!: Option<File> = None): ErrOrTy {
     if (!IsInputValid(tys)) {
-        return TypeManager.GetInvalidTy()
+        return ErrOrTy.TY(TypeManager.GetInvalidTy())
     }
-    return ToUserVisibleTy(tm, BatchMeet(tm, tys, ignoredTyVars, curFile: curFile), curFile)
+    let errMsg = ErrMsg()
+    let metTy = ToUserVisibleTy(tm, BatchMeet(tm, tys, ignoredTyVars, curFile: curFile), curFile)
+    AddFinalErrMsgs(tys, errMsg, metTy, false)
+    if (errMsg.isEmpty()) {
+        return ErrOrTy.TY(metTy)
+    }
+    return ErrOrTy.ERR(errMsg)
 }
 
-public func Join(tm: TypeManager, lhs: Ty, rhs: Ty): Ty {
+public func Join(tm: TypeManager, lhs: Ty, rhs: Ty): ErrOrTy {
     let tys = TySet()
     tys.Add(lhs)
     tys.Add(rhs)
     return JoinAsVisibleTy(tm, tys)
 }
 
-public func Meet(tm: TypeManager, lhs: Ty, rhs: Ty): Ty {
+public func Meet(tm: TypeManager, lhs: Ty, rhs: Ty): ErrOrTy {
     let tys = TySet()
     tys.Add(lhs)
     tys.Add(rhs)

@@ -2,6 +2,7 @@ package cjcj::sema
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
@@ -63,9 +64,9 @@ private func BlockTy(block: Block): Ty {
     return invalidTy
 }
 
-private func JoinCaseTys(typeManager: TypeManager, tys: ArrayList<Ty>, curFile: Option<File>): Ty {
+private func JoinCaseTys(typeManager: TypeManager, tys: ArrayList<Ty>, curFile: Option<File>): ErrOrTy {
     if (tys.isEmpty()) {
-        return TypeManager.GetInvalidTy()
+        return ErrOrTy.TY(TypeManager.GetInvalidTy())
     }
     let tySet = TySet()
     for (ty in tys) {
@@ -375,8 +376,24 @@ public func SynNormalMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
                 exprChecker: exprChecker, desugarCallExpr: desugarCallExpr)
         }
     }
-    let joinedTy = JoinCaseTys(typeManager, caseTys, me.curFile)
+    let joinRes = JoinCaseTys(typeManager, caseTys, me.curFile)
+    let (optErrs, joinedTy) = SetJoinedType(me.GetTy() ?? TypeManager.GetInvalidTy(), joinRes)
     me.SetTy(joinedTy)
+    if (let Some(errMsg) <- optErrs) {
+        if (let Some(engine) <- diag) {
+            let builder = if (SugarKindEq(me.sugarKind, SugarKind.IF_LET)) {
+                Diagnose(engine, me, BasicDiagKind.sema_diag_report_error_message,
+                    args: [BasicDiagArgument("types " + Ty.ToString(me.matchCases[0].GetTy()) + " and " +
+                        Ty.ToString(me.matchCases[1].GetTy()) +
+                        " of the two branches of this 'if' expression mismatch")])
+            } else {
+                Diagnose(engine, me, BasicDiagKind.sema_type_incompatible,
+                    args: [BasicDiagArgument("MatchCase")])
+            }
+            builder.AddNote(errMsg)
+            builder.Emit()
+        }
+    }
     if (SugarKindEq(me.sugarKind, SugarKind.NO_SUGAR)) {
         if (let Some(engine) <- diag) {
             if (!CheckMatchExprHasSelectorExhaustivenessAndReachability(engine, typeManager, me)) {
@@ -448,8 +465,17 @@ public func SynMatchExprNoSelector(typeManager: TypeManager, ctx: ASTContext, me
     if (hasInvalidCase || !CheckMatchExprNoSelectorExhaustiveness(me, diag: diag)) {
         return InvalidMatchTy(me)
     }
-    let joinedTy = JoinCaseTys(typeManager, caseTys, me.curFile)
+    let joinRes = JoinCaseTys(typeManager, caseTys, me.curFile)
+    let (optErrs, joinedTy) = SetJoinedType(me.GetTy() ?? TypeManager.GetInvalidTy(), joinRes)
     me.SetTy(joinedTy)
+    if (let Some(errMsg) <- optErrs) {
+        if (let Some(engine) <- diag) {
+            let builder = Diagnose(engine, me, BasicDiagKind.sema_type_incompatible,
+                args: [BasicDiagArgument("MatchCase")])
+            builder.AddNote(errMsg)
+            builder.Emit()
+        }
+    }
     return joinedTy
 }
 
@@ -497,7 +523,11 @@ public func ChkMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
         if (caseTysContains(typeManager, caseTys, target)) {
             me.SetTy(target)
         } else {
-            me.SetTy(JoinCaseTys(typeManager, caseTys, me.curFile))
+            let joinRes = JoinCaseTys(typeManager, caseTys, me.curFile)
+            match (joinRes) {
+                case ErrOrTy.TY(joinedTy) => me.SetTy(joinedTy)
+                case ErrOrTy.ERR(_) => me.SetTy(target)
+            }
         }
         if (SugarKindEq(me.sugarKind, SugarKind.NO_SUGAR)) {
             if (let Some(engine) <- diag) {
@@ -528,7 +558,11 @@ public func ChkMatchExprNoSelector(typeManager: TypeManager, ctx: ASTContext, ta
         if (caseTysContains(typeManager, caseTys, target)) {
             me.SetTy(target)
         } else {
-            me.SetTy(JoinCaseTys(typeManager, caseTys, me.curFile))
+            let joinRes = JoinCaseTys(typeManager, caseTys, me.curFile)
+            match (joinRes) {
+                case ErrOrTy.TY(joinedTy) => me.SetTy(joinedTy)
+                case ErrOrTy.ERR(_) => me.SetTy(target)
+            }
         }
         ok = CheckMatchExprNoSelectorExhaustiveness(me, diag: diag)
     }

@@ -3245,7 +3245,17 @@ public class TypeChecker {
         if (!Ty.IsTyCorrect(bodyTy)) {
             return TypeManager.GetInvalidTy()
         }
-        retTy = JoinAsVisibleTy(impl.typeManager, retTys, curFile: fb.curFile)
+        let joinRes = JoinAsVisibleTy(impl.typeManager, retTys, curFile: fb.curFile)
+        let (optErrs, joinedRet) = SetJoinedType(retTy, joinRes)
+        retTy = joinedRet
+        if (let Some(errMsg) <- optErrs) {
+            if (let Some(diagValue) <- impl.diag) {
+                let builder = Diagnose(diagValue, lastNode,
+                    BasicDiagKind.sema_incompatible_func_body_and_return_type)
+                builder.AddNote(errMsg)
+                builder.Emit()
+            }
+        }
         return retTy
     }
 
@@ -4256,15 +4266,15 @@ public class TypeChecker {
         return false
     }
 
-    private func JoinSynthesizedIfBranchTys(thenTy: Ty, elseTy: Ty, curFile: Option<File>): Ty {
+    private func JoinSynthesizedIfBranchTys(thenTy: Ty, elseTy: Ty, curFile: Option<File>): ErrOrTy {
         if (!Ty.IsTyCorrect(thenTy) || !Ty.IsTyCorrect(elseTy)) {
-            return TypeManager.GetInvalidTy()
+            return ErrOrTy.TY(TypeManager.GetInvalidTy())
         }
         if (thenTy.IsNothing()) {
-            return elseTy
+            return ErrOrTy.TY(elseTy)
         }
         if (elseTy.IsNothing()) {
-            return thenTy
+            return ErrOrTy.TY(thenTy)
         }
         let tys = TySet()
         tys.Add(thenTy)
@@ -4321,8 +4331,27 @@ public class TypeChecker {
                     ifExpr.SetTy(unitTy)
                     return FinishSynthesize(ctx, ifExpr, unitTy)
                 }
-                let joinedTy = JoinSynthesizedIfBranchTys(thenTy, elseTy, ifExpr.curFile)
+                let joinRes = JoinSynthesizedIfBranchTys(thenTy, elseTy, ifExpr.curFile)
+                let (optErrs, joinedTy) = SetJoinedType(ifExpr.GetTy() ?? TypeManager.GetInvalidTy(), joinRes)
                 ifExpr.SetTy(joinedTy)
+                if (let Some(errMsg) <- optErrs) {
+                    var diagMessage = "types " + Ty.ToString(Some(thenTy)) + " and " + Ty.ToString(Some(elseTy))
+                    diagMessage += if (let Some(sourceExpr) <- ifExpr.sourceExpr) {
+                        if (sourceExpr.astKind == ASTKind.IF_AVAILABLE_EXPR) {
+                            " of the two lambda of this '@IfAvailable' expression mismatch"
+                        } else {
+                            " of the two branches of this 'if' expression mismatch"
+                        }
+                    } else {
+                        " of the two branches of this 'if' expression mismatch"
+                    }
+                    if (let Some(diagValue) <- impl.diag) {
+                        let builder = Diagnose(diagValue, ifExpr, BasicDiagKind.sema_diag_report_error_message,
+                            args: [BasicDiagArgument(diagMessage)])
+                        builder.AddNote(errMsg)
+                        builder.Emit()
+                    }
+                }
                 return FinishSynthesize(ctx, ifExpr, joinedTy)
             }
         }
@@ -5409,7 +5438,7 @@ public class TypeChecker {
                 }
             }
         }
-        if (!ChkArrayLit(impl.typeManager, target, arrayLit, arrayStruct: arrayStruct)) {
+        if (!ChkArrayLit(impl.typeManager, target, arrayLit, arrayStruct: arrayStruct, diag: impl.diag)) {
             matched = false
         }
         return matched
@@ -5688,7 +5717,7 @@ public class TypeChecker {
             if (let Some(manager4) <- impl.importManager) {
                 arrayStruct = manager4.GetCoreDecl<StructDecl>("Array")
             }
-            let arrayTy = SynArrayLit(impl.typeManager, arrayLit, arrayStruct)
+            let arrayTy = SynArrayLit(impl.typeManager, arrayLit, arrayStruct, diag: impl.diag)
             return FinishSynthesize(ctx, arrayLit, arrayTy)
         }
         if (let Some(spawnExpr) <- (expr as SpawnExpr)) {

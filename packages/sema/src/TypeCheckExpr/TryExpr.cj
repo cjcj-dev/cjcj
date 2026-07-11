@@ -16,15 +16,15 @@ private func TryInvalid(te: TryExpr): Ty {
     return TcInvalid(te)
 }
 
-private func JoinTryTy(typeManager: TypeManager, currentTy: Ty, branchTy: Ty, curFile: Option<File>): Ty {
+private func JoinTryTy(typeManager: TypeManager, currentTy: Ty, branchTy: Ty, curFile: Option<File>): ErrOrTy {
     if (!Ty.IsTyCorrect(currentTy) || !Ty.IsTyCorrect(branchTy)) {
-        return TypeManager.GetInvalidTy()
+        return ErrOrTy.TY(TypeManager.GetInvalidTy())
     }
     if (currentTy.IsNothing()) {
-        return branchTy
+        return ErrOrTy.TY(branchTy)
     }
     if (branchTy.IsNothing()) {
-        return currentTy
+        return ErrOrTy.TY(currentTy)
     }
     let tys = TySet()
     tys.Add(currentTy)
@@ -139,15 +139,18 @@ private func ChkExceptTypePattern(typeManager: TypeManager, exceptPattern: Excep
         exceptPattern.SetTy(TypeManager.GetInvalidTy())
         return false
     }
-    var joinedTy: Ty = TypeManager.GetNothingTy()
+    let typeTySet = TySet()
     for (typeTy2 in typeTys) {
-        joinedTy = JoinTryTy(typeManager, joinedTy, typeTy2, exceptPattern.curFile)
+        typeTySet.Add(typeTy2)
     }
+    let joinRes = JoinAsVisibleTy(typeManager, typeTySet, curFile: exceptPattern.curFile)
+    let (optErrs, joinedTy) = SetJoinedType(exceptPattern.GetTy() ?? TypeManager.GetInvalidTy(), joinRes)
     exceptPattern.SetTy(joinedTy)
-    if (!Ty.IsTyCorrect(joinedTy)) {
+    if (let Some(errMsg) <- optErrs) {
         if (let Some(diagValue3) <- diag) {
-            let builder3 = diagValue3.Diagnose(exceptPattern.begin, exceptPattern.end,
+            let builder3 = Diagnose(diagValue3, exceptPattern,
                 BasicDiagKind.sema_type_incompatible, args: [BasicDiagArgument("pattern")])
+            builder3.AddNote(errMsg)
             builder3.Emit()
         }
         return false
@@ -490,8 +493,25 @@ private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, 
         }
         let catchTy = SynBlock(typeManager, catchBlock)
         if (Ty.IsTyCorrect(catchTy)) {
-            joinedTy = JoinTryTy(typeManager, joinedTy, catchTy, te.curFile)
-            ok = Ty.IsTyCorrect(joinedTy) && ok
+            let joinRes = JoinTryTy(typeManager, joinedTy, catchTy, te.curFile)
+            let (optErrs, tmpJoinedTy) = SetJoinedType(joinedTy, joinRes)
+            if (let Some(errMsg) <- optErrs) {
+                ok = false
+                if (te.ShouldDiagnose()) {
+                    if (let Some(diagValue) <- diag) {
+                        let builder = Diagnose(diagValue, catchBlock,
+                            BasicDiagKind.sema_diag_report_error_message,
+                            args: [BasicDiagArgument("The type of this catch block is '" +
+                                Ty.ToString(Some(catchTy)) +
+                                "', which mismatches the smallest common supertype '" + joinedTy.String() +
+                                "' of previous branches.")])
+                        AddNote(builder, te, errMsg)
+                        builder.Emit()
+                    }
+                }
+            } else {
+                joinedTy = tmpJoinedTy
+            }
         } else {
             ok = false
         }
@@ -502,8 +522,22 @@ private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, 
         } else if (let Some(block) <- handler.block) {
             let handlerTy = SynBlock(typeManager, block)
             if (Ty.IsTyCorrect(handlerTy)) {
-                joinedTy = JoinTryTy(typeManager, joinedTy, handlerTy, te.curFile)
-                ok = Ty.IsTyCorrect(joinedTy) && ok
+                let joinRes = JoinTryTy(typeManager, joinedTy, handlerTy, te.curFile)
+                let (optErrs, tmpJoinedTy) = SetJoinedType(joinedTy, joinRes)
+                if (let Some(errMsg) <- optErrs) {
+                    ok = false
+                    if (te.ShouldDiagnose()) {
+                        if (let Some(diagValue) <- diag) {
+                            let builder = DiagnoseRefactor(diagValue,
+                                BasicDiagKindRefactor.sema_mismatching_handle_block, block,
+                                Ty.ToString(Some(handlerTy)), joinedTy.String())
+                            AddNote(builder, te, errMsg)
+                            builder.Emit()
+                        }
+                    }
+                } else {
+                    joinedTy = tmpJoinedTy
+                }
             } else {
                 ok = false
             }
