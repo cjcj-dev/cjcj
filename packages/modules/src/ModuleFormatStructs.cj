@@ -46,32 +46,32 @@ func MFAppendI64(bytes: ArrayList<UInt8>, value: Int64): Unit {
 }
 
 // ModuleFormat_generated.h:1676-1724 (Position struct, 20 bytes, align 4).
-class PackageFormat_Position {
+public class PackageFormat_Position {
     let data: Array<UInt8>
     let pos: Int64
 
-    init(data: Array<UInt8>, pos: Int64) {
+    public init(data: Array<UInt8>, pos: Int64) {
         this.data = data
         this.pos = pos
     }
 
-    func GetFile(): UInt32 {
+    public func GetFile(): UInt32 {
         return ReadScalar<UInt32>(data, pos + 0)
     }
 
-    func GetPkgId(): UInt32 {
+    public func GetPkgId(): UInt32 {
         return ReadScalar<UInt32>(data, pos + 4)
     }
 
-    func GetLine(): Int32 {
+    public func GetLine(): Int32 {
         return ReadScalar<Int32>(data, pos + 8)
     }
 
-    func GetColumn(): Int32 {
+    public func GetColumn(): Int32 {
         return ReadScalar<Int32>(data, pos + 12)
     }
 
-    func GetIgnore(): Bool {
+    public func GetIgnore(): Bool {
         return ReadScalar<UInt8>(data, pos + 16) != 0u8
     }
 }

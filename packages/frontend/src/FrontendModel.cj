@@ -8,6 +8,7 @@ public import cjcj::basic.{
 public import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.StringConvertor
+import cjcj::flatbuffers.FlatBufferString
 import cjcj::basic.Diagnostic as BasicDiagnostic
 import cjcj::basic.DiagFormat as BasicDiagFormat
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
@@ -18,13 +19,35 @@ import cjcj::chir.Package as RealCHIRPackage
 import cjcj::modules.SemaCjoManager
 import cjcj::modules.SemaImportManager
 import cjcj::modules.MacroHostImportManager
+import cjcj::modules.{GetPackage, PackageFormat_AliasInfo, PackageFormat_Anno, PackageFormat_ArrayInfo,
+    PackageFormat_ArrayTyInfo, PackageFormat_ClassInfo, PackageFormat_CompositeTyInfo, PackageFormat_Constraint,
+    PackageFormat_Decl, PackageFormat_EnumInfo, PackageFormat_Expr, PackageFormat_ExtendInfo,
+    PackageFormat_ForInInfo, PackageFormat_FullId, PackageFormat_FuncBody, PackageFormat_FuncInfo,
+    PackageFormat_FuncTyInfo, PackageFormat_Generic, PackageFormat_GenericTyInfo, PackageFormat_InterfaceInfo,
+    PackageFormat_LetPatternDestructorInfo, PackageFormat_MatchCaseInfo, PackageFormat_Package,
+    PackageFormat_Pattern, PackageFormat_Position, PackageFormat_ReferenceInfo, PackageFormat_SemaTy,
+    PackageFormat_StructInfo, PackageFormat_TryInfo, PackageFormat_VarWithPatternInfo,
+    MF_DECL_KIND_CLASS_DECL, MF_DECL_KIND_ENUM_DECL, MF_DECL_KIND_EXTEND_DECL, MF_DECL_KIND_FUNC_DECL,
+    MF_DECL_KIND_FUNC_PARAM, MF_DECL_KIND_INTERFACE_DECL, MF_DECL_KIND_PROP_DECL, MF_DECL_KIND_STRUCT_DECL,
+    MF_DECL_KIND_TYPE_ALIAS_DECL, MF_DECL_KIND_VAR_DECL, MF_DECL_KIND_VAR_WITH_PATTERN_DECL,
+    MF_EXPR_KIND_ARRAY_EXPR, MF_EXPR_KIND_ARRAY_LIT, MF_EXPR_KIND_CALL_EXPR, MF_EXPR_KIND_FOR_IN_EXPR,
+    MF_EXPR_KIND_JUMP_EXPR, MF_EXPR_KIND_LAMBDA_EXPR, MF_EXPR_KIND_LET_PATTERN_DESTRUCTOR,
+    MF_EXPR_KIND_LIT_CONST_EXPR, MF_EXPR_KIND_MATCH_EXPR, MF_EXPR_KIND_MEMBER_ACCESS, MF_EXPR_KIND_REF_EXPR,
+    MF_EXPR_KIND_TRY_EXPR, MF_PATTERN_KIND_COMMAND_TYPE_PATTERN, MF_PATTERN_KIND_ENUM_PATTERN,
+    MF_PATTERN_KIND_EXCEPT_TYPE_PATTERN, MF_PATTERN_KIND_TUPLE_PATTERN, MF_PATTERN_KIND_TYPE_PATTERN,
+    MF_TYPE_KIND_ARRAY, MF_TYPE_KIND_BOOL, MF_TYPE_KIND_CLASS, MF_TYPE_KIND_C_POINTER, MF_TYPE_KIND_C_STRING,
+    MF_TYPE_KIND_ENUM, MF_TYPE_KIND_FLOAT16, MF_TYPE_KIND_FLOAT32, MF_TYPE_KIND_FLOAT64, MF_TYPE_KIND_FUNC,
+    MF_TYPE_KIND_GENERIC, MF_TYPE_KIND_INT16, MF_TYPE_KIND_INT32, MF_TYPE_KIND_INT64, MF_TYPE_KIND_INT8,
+    MF_TYPE_KIND_INTERFACE, MF_TYPE_KIND_INT_NATIVE, MF_TYPE_KIND_NOTHING, MF_TYPE_KIND_RUNE,
+    MF_TYPE_KIND_STRUCT, MF_TYPE_KIND_TUPLE, MF_TYPE_KIND_TYPE, MF_TYPE_KIND_UINT16, MF_TYPE_KIND_UINT32,
+    MF_TYPE_KIND_UINT64, MF_TYPE_KIND_UINT8, MF_TYPE_KIND_UINT_NATIVE, MF_TYPE_KIND_UNIT, MF_TYPE_KIND_V_ARRAY}
 import cjcj::option.OptimizationLevel
 import cjcj::option.enumIndex
 public import cjcj::mangle.BaseMangler
 import cjcj::sema.TypeManager as FaithfulSemaTypeManager
 import cjcj::sema.Test.TestManager as RealTestManager
 import cjcj::utils.{AST_PACKAGE_NAME, CORE_PACKAGE_NAME, DynamicCast, EraseIf, JoinStrings, MAIN_INVOKE,
-    SYNC_PACKAGE_NAME}
+    SYNC_PACKAGE_NAME, CJC_ASSERT}
 import cjcj::utils.FileUtil
 import cjcj::utils.ProfileRecorder
 import cjcj::utils.STANDARD_LIBS
@@ -702,6 +725,147 @@ private class CjoFullId {
     }
 }
 
+// ReferenceLoader.cpp:25-35 SetFuncParentReference.
+private func SetFuncParentReference(funcDecl: FuncDecl, parentDecl: Decl): Unit {
+    let body = funcDecl.funcBody.getOrThrow()
+    if (parentDecl.IsClassLikeDecl()) {
+        body.parentClassLike = Some((parentDecl as ClassLikeDecl).getOrThrow())
+    } else if (let Some(structDecl) <- (parentDecl as StructDecl)) {
+        body.parentStruct = Some(structDecl)
+    } else if (let Some(enumDecl) <- (parentDecl as EnumDecl)) {
+        body.parentEnum = Some(enumDecl)
+    }
+}
+
+// ReferenceLoader.cpp:37-63 SetMemberDeclReference.
+private func SetMemberDeclReference(member: Decl, parentDecl: Decl): Unit {
+    var parentTypeDecl = parentDecl
+    if (let Some(extendDecl) <- (parentDecl as ExtendDecl)) {
+        if (let Some(extendedDecl) <- Ty.GetDeclPtrOfTy(extendDecl.GetTy())) {
+            parentTypeDecl = extendedDecl
+        }
+    }
+    if (let Some(propDecl) <- (member as PropDecl)) {
+        for (getter in propDecl.getters) { SetFuncParentReference(getter, parentTypeDecl) }
+        for (setter in propDecl.setters) { SetFuncParentReference(setter, parentTypeDecl) }
+    } else if (let Some(funcDecl) <- (member as FuncDecl)) {
+        SetFuncParentReference(funcDecl, parentTypeDecl)
+        let body = funcDecl.funcBody.getOrThrow()
+        if (body.paramLists.isEmpty()) { return }
+        for (param in body.paramLists[0].params) {
+            if (let Some(desugarDecl) <- param.desugarDecl) {
+                SetFuncParentReference(desugarDecl, parentTypeDecl)
+            }
+        }
+    }
+}
+
+// ReferenceLoader.cpp:66-109 Wrap2RefType.
+private func Wrap2RefType(ty: Ty): Option<RefType> {
+    let kind = ty.kind
+    if (!(kind == TypeKind.TYPE_ENUM || kind == TypeKind.TYPE_STRUCT || kind == TypeKind.TYPE_ARRAY ||
+        kind == TypeKind.TYPE_VARRAY || kind == TypeKind.TYPE_POINTER || kind == TypeKind.TYPE_CSTRING ||
+        kind == TypeKind.TYPE_CLASS || kind == TypeKind.TYPE_INTERFACE || kind == TypeKind.TYPE ||
+        kind == TypeKind.TYPE_GENERICS || kind == TypeKind.TYPE_NOTHING || kind == TypeKind.TYPE_INVALID)) {
+        return None
+    }
+    var hasTypeAlias = kind == TypeKind.TYPE
+    let refType = RefType()
+    for (typeArg in ty.typeArgs) {
+        let wrapped = WrapType(Some(typeArg)).getOrThrow()
+        refType.typeArguments.add(wrapped)
+        hasTypeAlias = hasTypeAlias || !Ty.IsInitialTy(wrapped.aliasTy)
+    }
+    refType.SetTy(ty)
+    refType.ref.identifier = SrcIdentifier(ty.name)
+    if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
+        refType.ref.target = Some(decl)
+        refType.ref.identifier = if ((ty as ClassThisTy).isSome()) { SrcIdentifier("This") } else { decl.identifier }
+    }
+    if (hasTypeAlias) { refType.aliasTy = Some(ty) }
+    refType.EnableAttr(Attribute.IMPORTED)
+    refType.EnableAttr(Attribute.COMPILER_ADD)
+    refType.EnableAttr(Attribute.IS_CHECK_VISITED)
+    return Some(refType)
+}
+
+// ReferenceLoader.cpp:111-153 WrapType.
+private func WrapType(tyOpt: Option<Ty>): Option<Type> {
+    let ty = tyOpt ?? return None
+    var hasTypeAlias = false
+    if (TypeKindIndex(ty.kind) <= TypeKindIndex(TypeKind.TYPE_BOOLEAN) && ty.kind != TypeKind.TYPE_NOTHING) {
+        let primitive = PrimitiveType()
+        primitive.str = ty.String()
+        primitive.SetTy(ty)
+        primitive.EnableAttr(Attribute.IMPORTED)
+        primitive.EnableAttr(Attribute.COMPILER_ADD)
+        primitive.EnableAttr(Attribute.IS_CHECK_VISITED)
+        return Some(primitive)
+    } else if (let Some(funcTy) <- (ty as FuncTy)) {
+        let funcType = FuncType()
+        for (paramTy in funcTy.paramTys) {
+            let paramType = WrapType(Some(paramTy)).getOrThrow()
+            funcType.paramTypes.add(paramType)
+            hasTypeAlias = hasTypeAlias || !Ty.IsInitialTy(paramType.aliasTy)
+        }
+        funcType.SetTy(ty)
+        let retType = WrapType(Some(funcTy.retTy)).getOrThrow()
+        funcType.retType = Some(retType)
+        hasTypeAlias = hasTypeAlias || !Ty.IsInitialTy(retType.aliasTy)
+        funcType.EnableAttr(Attribute.IMPORTED)
+        funcType.EnableAttr(Attribute.COMPILER_ADD)
+        funcType.EnableAttr(Attribute.IS_CHECK_VISITED)
+        if (hasTypeAlias) { funcType.aliasTy = Some(ty) }
+        return Some(funcType)
+    } else if (let Some(tupleTy) <- (ty as TupleTy)) {
+        let tupleType = TupleType()
+        for (typeArg in tupleTy.typeArgs) {
+            let fieldType = WrapType(Some(typeArg)).getOrThrow()
+            tupleType.fieldTypes.add(fieldType)
+            hasTypeAlias = hasTypeAlias || !Ty.IsInitialTy(fieldType.aliasTy)
+        }
+        tupleType.SetTy(ty)
+        tupleType.EnableAttr(Attribute.IMPORTED)
+        tupleType.EnableAttr(Attribute.COMPILER_ADD)
+        tupleType.EnableAttr(Attribute.IS_CHECK_VISITED)
+        if (hasTypeAlias) { tupleType.aliasTy = Some(ty) }
+        return Some(tupleType)
+    }
+    let refType = Wrap2RefType(ty) ?? return None
+    return refType
+}
+
+// ReferenceLoader.cpp:155-170 UpdateType.
+private func UpdateType(astType: Option<Type>, loadedType: Type): Type {
+    let existing = astType ?? return loadedType
+    if (Ty.IsTyCorrect(loadedType.GetTy())) {
+        existing.SetTy(loadedType.GetTy().getOrThrow())
+        existing.EnableAttr(Attribute.IS_CHECK_VISITED)
+        if (let Some(refType) <- (existing as RefType)) {
+            refType.ref.target = loadedType.GetTarget()
+        } else if (let Some(qualifiedType) <- (existing as QualifiedType)) {
+            qualifiedType.target = loadedType.GetTarget()
+        }
+    }
+    return existing
+}
+
+// ReferenceLoader.cpp:172-201 PostLoadReference.
+private func PostLoadReference(expr: Expr): Unit {
+    if (let Some(callExpr) <- (expr as CallExpr)) {
+        callExpr.resolvedFunction = callExpr.baseFunc.getOrThrow().GetTarget() as FuncDecl
+    } else if (let Some(arrayExpr) <- (expr as ArrayExpr)) {
+        for (arg in arrayExpr.args) { arg.SetTy(arg.expr.getOrThrow().GetTy().getOrThrow()) }
+    } else if (let Some(pointerExpr) <- (expr as PointerExpr)) {
+        if (let Some(arg) <- pointerExpr.arg) { arg.SetTy(arg.expr.getOrThrow().GetTy().getOrThrow()) }
+    }
+}
+
+// ASTSerializeUtils.h:43-45 package-index sentinels.
+private const INVALID_PACKAGE_INDEX: Int32 = -1
+private const CURRENT_PKG_INDEX: Int32 = -2
+private const PKG_REFERENCE_INDEX: Int32 = -3
+
 private class CjoSignatureMaterializer {
     private let packageName: String
     private var pkg: Package
@@ -709,6 +873,7 @@ private class CjoSignatureMaterializer {
     private var allFileIds: Array<UInt64> = Array<UInt64>()
     private var idToFileMap: HashMap<UInt64, File>
     private let importedPackages: ArrayList<Package>
+    private let importedFullPackageNames: ArrayList<String> = ArrayList<String>()
     private let packageDecls: HashMap<String, PackageDecl>
     private let exportIdDeclMaps: HashMap<String, HashMap<String, Decl>>
     private let diag: DiagnosticEngine
@@ -718,7 +883,11 @@ private class CjoSignatureMaterializer {
     private var flatAllExprs: Int64 = -1
     private var flatImports: Int64 = -1
     private var data: Option<Array<UInt8>> = None
+    private var packageTable: Option<PackageFormat_Package> = None
+    private var allTypes: Array<Option<Ty>> = Array<Option<Ty>>()
     private let typeManager: FaithfulSemaTypeManager
+    private let tyLoaderMap: HashMap<UInt16, (UInt32, PackageFormat_SemaTy) -> Unit> =
+        HashMap<UInt16, (UInt32, PackageFormat_SemaTy) -> Unit>()
     private let flatDecls: HashMap<UInt32, CjoFlatDecl> = HashMap<UInt32, CjoFlatDecl>()
     private let flatNominalKinds: HashMap<String, UInt8> = HashMap<String, UInt8>()
     private let flatTypeCache: HashMap<UInt32, Ty> = HashMap<UInt32, Ty>()
@@ -731,6 +900,7 @@ private class CjoSignatureMaterializer {
     private let deserializingCommon: Bool
     private let canInline: Bool
     private let isLoadCache: Bool
+    private var isChirNow: Bool = false
 
     public init(packageName: String, pkg: Package, filesByIndex: HashMap<UInt32, File>,
         idToFileMap: HashMap<UInt64, File>, importedPackages: ArrayList<Package>,
@@ -755,6 +925,7 @@ private class CjoSignatureMaterializer {
         if (!this.exportIdDeclMaps.contains(packageName)) {
             this.exportIdDeclMaps[packageName] = HashMap<String, Decl>()
         }
+        InitializeTypeLoader()
     }
 
     public func Materialize(data: Array<UInt8>): Unit {
@@ -765,6 +936,17 @@ private class CjoSignatureMaterializer {
 
     public func LoadPackageDependencies(newData: Array<UInt8>): Bool {
         data = Some(newData)
+        packageTable = Some(GetPackage(newData))
+        let allTypeTables = packageTable.getOrThrow().GetAllTypes().getOrThrow()
+        allTypes = Array<Option<Ty>>(Int64(allTypeTables.size()), repeat: None)
+        importedFullPackageNames.clear()
+        let importTables = packageTable.getOrThrow().GetImports().getOrThrow()
+        var importIndex: UInt32 = 0u32
+        while (importIndex < importTables.size()) {
+            importedFullPackageNames.add(
+                FlatBufferString(newData, (importTables.Get(importIndex) as Int64).getOrThrow()).str())
+            importIndex++
+        }
         PreLoadImportedPackageNode(newData)
         return flatAllTypes >= 0 && flatAllDecls >= 0
     }
@@ -775,31 +957,606 @@ private class CjoSignatureMaterializer {
     }
 
     public func LoadRefs(): Unit {
-        if ((let None <- flat) || flatAllDecls < 0) {
-            return
-        }
-        let reader = flat.getOrThrow()
+        let _ = packageTable.getOrThrow()
         for ((index, decl) in allLoadedDecls) {
-            if (let Some(record) <- flatDecls.get(index)) {
-                LoadFlatDeclRefs(reader, record, decl)
-                LoadFlatDeclDependencies(reader, record, decl)
-            }
+            let declObj = GetFormatDeclByIndex(index)
+            LoadDeclRefs(declObj, decl)
+            LoadDeclDependencies(declObj, decl)
         }
-        for ((index2, expr) in allLoadedExprs) {
-            let exprTable = FlatExprTable(reader, index2)
-            if (exprTable >= 0) {
-                LoadFlatExprRefs(reader, exprTable, expr)
-            }
+        for ((index, expr) in allLoadedExprs) {
+            LoadExprRefs(GetFormatExprByIndex(index), expr)
         }
         for (dummy in allDummyExprs) {
             let dummyExpr = (dummy as Expr).getOrThrow()
-            let desugar = dummyExpr.desugarExpr.getOrThrow()
-            if (let Some(ty) <- desugar.GetTy()) {
-                dummyExpr.SetTy(ty)
+            dummyExpr.SetTy(dummyExpr.desugarExpr.getOrThrow().GetTy().getOrThrow())
+        }
+        for ((_, expr) in allLoadedExprs) { PostLoadReference(expr) }
+    }
+
+    // ReferenceLoader.cpp:210-214 ASTLoader::SetIsChirNow.
+    public func SetIsChirNow(value!: Bool = false): Unit { isChirNow = value }
+
+    // ReferenceLoader.cpp:216-232 InitializeTypeLoader.
+    private func InitializeTypeLoader(): Unit {
+        tyLoaderMap.clear()
+        let setType = {tyIndex: UInt32, typeObj: PackageFormat_SemaTy => SetTypeTy(tyIndex, typeObj)}
+        tyLoaderMap[MF_TYPE_KIND_C_POINTER] = setType
+        tyLoaderMap[MF_TYPE_KIND_ARRAY] = setType
+        tyLoaderMap[MF_TYPE_KIND_V_ARRAY] = setType
+        tyLoaderMap[MF_TYPE_KIND_C_STRING] = setType
+        tyLoaderMap[MF_TYPE_KIND_STRUCT] = setType
+        tyLoaderMap[MF_TYPE_KIND_ENUM] = setType
+        tyLoaderMap[MF_TYPE_KIND_INTERFACE] = setType
+        tyLoaderMap[MF_TYPE_KIND_CLASS] = setType
+        tyLoaderMap[MF_TYPE_KIND_TYPE] = setType
+        tyLoaderMap[MF_TYPE_KIND_TUPLE] = setType
+        tyLoaderMap[MF_TYPE_KIND_FUNC] = setType
+        tyLoaderMap[MF_TYPE_KIND_GENERIC] = {tyIndex: UInt32, typeObj: PackageFormat_SemaTy =>
+            SetGenericTy(tyIndex, typeObj)
+        }
+    }
+
+    // ASTLoaderImpl.h:184-189 GetFormatDeclByIndex.
+    private func GetFormatDeclByIndex(declIndex: UInt32): PackageFormat_Decl {
+        CJC_ASSERT(declIndex != 0u32)
+        let tables = packageTable.getOrThrow().GetAllDecls().getOrThrow()
+        return PackageFormat_Decl(data.getOrThrow(), (tables.Get(declIndex - 1u32) as Int64).getOrThrow())
+    }
+
+    // ASTLoaderImpl.h:191-196 GetFormatExprByIndex.
+    private func GetFormatExprByIndex(exprIndex: UInt32): PackageFormat_Expr {
+        CJC_ASSERT(exprIndex != 0u32)
+        let tables = packageTable.getOrThrow().GetAllExprs().getOrThrow()
+        return PackageFormat_Expr(data.getOrThrow(), (tables.Get(exprIndex - 1u32) as Int64).getOrThrow())
+    }
+
+    // ASTLoaderImpl.h:347-351 GetExprByIndex.
+    private func GetExprByIndex(index: UInt32): Option<Expr> { return allLoadedExprs.get(index) }
+
+    // ASTLoader.cpp:432-457 LoadPos.
+    private func LoadPos(posObj: PackageFormat_Position): Position {
+        let fileIndex = posObj.GetFile()
+        let pkgIndex = posObj.GetPkgId()
+        let line = posObj.GetLine()
+        let column = posObj.GetColumn()
+        var fileId: UInt64 = 0u64
+        if (pkgIndex == 0u32) {
+            fileId = if (fileIndex == 0u32) { 0u64 } else { allFileIds[Int64(fileIndex - 1u32)] }
+        } else {
+            CJC_ASSERT(Int64(pkgIndex - 1u32) < importedFullPackageNames.size)
+            let fullPackageName = importedFullPackageNames[Int64(pkgIndex - 1u32)]
+            if (let Some(packageDecl) <- packageDecls.get(fullPackageName)) {
+                CJC_ASSERT(Int64(fileIndex) < packageDecl.srcPackage.files.size)
+                let file = packageDecl.srcPackage.files[Int64(fileIndex)]
+                fileId = file.begin.fileID
+                idToFileMap[fileId] = file
             }
         }
-        for ((_, expr2) in allLoadedExprs) {
-            PostLoadFlatReference(expr2)
+        return Position(fileId, Int64(line), Int64(column))
+    }
+
+    // ASTLoader.cpp:543-578 GetDeclFromIndex.
+    private func GetDeclFromIndex(fullId: Option<PackageFormat_FullId>): Option<Decl> {
+        let id = fullId ?? return None
+        let pkgIndex = id.GetPkgId()
+        if (pkgIndex == INVALID_PACKAGE_INDEX) { return None }
+        if (pkgIndex == PKG_REFERENCE_INDEX) {
+            if (let Some(packageDecl) <- packageDecls.get(id.GetDecl().getOrThrow().str())) {
+                return packageDecl
+            }
+            return None
+        } else if (pkgIndex == CURRENT_PKG_INDEX) {
+            return allLoadedDecls.get(id.GetIndex())
+        }
+        let fullPackageName = importedFullPackageNames[Int64(pkgIndex)]
+        let exportId = id.GetDecl().getOrThrow().str()
+        if (let Some(exportIdDeclMap) <- exportIdDeclMaps.get(fullPackageName)) {
+            if (let Some(decl) <- exportIdDeclMap.get(exportId)) { return Some(decl) }
+        }
+        if (!packageDecls.contains(fullPackageName) && !isLoadCache) {
+            diag.DiagnoseRefactor(DiagKindRefactor.package_invalid_cjo_dependency, DEFAULT_POSITION,
+                arguments: [packageName, fullPackageName])
+        }
+        return None
+    }
+
+    // ASTLoaderImpl.h:263-267 GetASTTypeKind.
+    private func GetASTTypeKind(kind: UInt16): TypeKind {
+        if (kind == MF_TYPE_KIND_UNIT) { return TypeKind.TYPE_UNIT }
+        if (kind == MF_TYPE_KIND_INT8) { return TypeKind.TYPE_INT8 }
+        if (kind == MF_TYPE_KIND_INT16) { return TypeKind.TYPE_INT16 }
+        if (kind == MF_TYPE_KIND_INT32) { return TypeKind.TYPE_INT32 }
+        if (kind == MF_TYPE_KIND_INT64) { return TypeKind.TYPE_INT64 }
+        if (kind == MF_TYPE_KIND_INT_NATIVE) { return TypeKind.TYPE_INT_NATIVE }
+        if (kind == MF_TYPE_KIND_UINT8) { return TypeKind.TYPE_UINT8 }
+        if (kind == MF_TYPE_KIND_UINT16) { return TypeKind.TYPE_UINT16 }
+        if (kind == MF_TYPE_KIND_UINT32) { return TypeKind.TYPE_UINT32 }
+        if (kind == MF_TYPE_KIND_UINT64) { return TypeKind.TYPE_UINT64 }
+        if (kind == MF_TYPE_KIND_UINT_NATIVE) { return TypeKind.TYPE_UINT_NATIVE }
+        if (kind == MF_TYPE_KIND_FLOAT16) { return TypeKind.TYPE_FLOAT16 }
+        if (kind == MF_TYPE_KIND_FLOAT32) { return TypeKind.TYPE_FLOAT32 }
+        if (kind == MF_TYPE_KIND_FLOAT64) { return TypeKind.TYPE_FLOAT64 }
+        if (kind == MF_TYPE_KIND_RUNE) { return TypeKind.TYPE_RUNE }
+        if (kind == MF_TYPE_KIND_NOTHING) { return TypeKind.TYPE_NOTHING }
+        if (kind == MF_TYPE_KIND_BOOL) { return TypeKind.TYPE_BOOLEAN }
+        return TypeKind.TYPE_INVALID
+    }
+
+    // ReferenceLoader.cpp:269-291 LoadType.
+    public func LoadType(tyIndex: UInt32): Ty {
+        if (tyIndex == 0u32) { return FaithfulSemaTypeManager.GetInvalidTy() }
+        let index = tyIndex - 1u32
+        if (let Some(ty) <- allTypes[Int64(index)]) { return ty }
+        let typeTables = packageTable.getOrThrow().GetAllTypes().getOrThrow()
+        let typeObj = PackageFormat_SemaTy(data.getOrThrow(), (typeTables.Get(index) as Int64).getOrThrow())
+        if (GetPrimitiveTy(index, typeObj)) { return allTypes[Int64(index)].getOrThrow() }
+        if (let Some(handler) <- tyLoaderMap.get(typeObj.GetKind())) {
+            handler(index, typeObj)
+        } else {
+            allTypes[Int64(index)] = Some(FaithfulSemaTypeManager.GetInvalidTy())
+        }
+        return allTypes[Int64(index)].getOrThrow()
+    }
+
+    // ReferenceLoader.cpp:293-304 GetPrimitiveTy.
+    private func GetPrimitiveTy(tyIndex: UInt32, typeObj: PackageFormat_SemaTy): Bool {
+        if (typeObj.GetKind() >= MF_TYPE_KIND_UNIT && typeObj.GetKind() <= MF_TYPE_KIND_BOOL) {
+            let astKind = GetASTTypeKind(typeObj.GetKind())
+            CJC_ASSERT(astKind != TypeKind.TYPE_INVALID)
+            allTypes[Int64(tyIndex)] = Some(FaithfulSemaTypeManager.GetPrimitiveTy(astKind))
+            return true
+        }
+        return false
+    }
+
+    // ReferenceLoader.cpp:306-332 SetGenericTy.
+    private func SetGenericTy(tyIndex: UInt32, typeObj: PackageFormat_SemaTy): Unit {
+        let info = typeObj.GetInfoAsGenericTyInfo().getOrThrow()
+        let decl = GetDeclFromIndex(info.GetDeclPtr()) ?? return
+        let genericParamDecl = (decl as GenericParamDecl).getOrThrow()
+        let genericTy = typeManager.GetGenericsTy(genericParamDecl)
+        allTypes[Int64(tyIndex)] = Some(genericTy)
+        if (isLoadCache) { return }
+        let upperBounds = info.GetUpperBounds().getOrThrow()
+        let upperBoundIdentities = HashSet<Ptr<Ty>>()
+        for (existing in genericTy.upperBounds) { upperBoundIdentities.add(Ptr<Ty>(existing)) }
+        var index: UInt32 = 0u32
+        while (index < upperBounds.size()) {
+            let upperTy = LoadType((upperBounds.Get(index) as UInt32).getOrThrow())
+            let upperKey = Ptr<Ty>(upperTy)
+            if (!upperBoundIdentities.contains(upperKey)) {
+                upperBoundIdentities.add(upperKey)
+                genericTy.upperBounds.add(upperTy)
+            }
+            index++
+        }
+        let generic = genericParamDecl.outerDecl.getOrThrow().GetGeneric().getOrThrow()
+        let storedBounds = HashSet<Ptr<Ty>>()
+        for (upperTy in genericTy.upperBounds) { storedBounds.add(Ptr<Ty>(upperTy)) }
+        generic.assumptionCollection[Ptr<GenericsTy>(genericTy)] = storedBounds
+    }
+
+    // ReferenceLoader.cpp:334-344 LoadTypeArgs.
+    private func LoadTypeArgs(typeObj: PackageFormat_SemaTy): Array<Ty> {
+        let typeArgs = ArrayList<Ty>()
+        let rawArgs = typeObj.GetTypeArgs().getOrThrow()
+        var index: UInt32 = 0u32
+        while (index < rawArgs.size()) {
+            typeArgs.add(LoadType((rawArgs.Get(index) as UInt32).getOrThrow()))
+            index++
+        }
+        return typeArgs.toArray()
+    }
+
+    // ReferenceLoader.cpp:346-398 SetTypeTy.
+    private func SetTypeTy(tyIndex: UInt32, typeObj: PackageFormat_SemaTy): Unit {
+        let kind = typeObj.GetKind()
+        var ty: Ty = FaithfulSemaTypeManager.GetInvalidTy()
+        if (kind == MF_TYPE_KIND_C_STRING) {
+            ty = FaithfulSemaTypeManager.GetCStringTy()
+        } else if (kind == MF_TYPE_KIND_C_POINTER) {
+            let args = typeObj.GetTypeArgs().getOrThrow()
+            CJC_ASSERT(args.size() == 1u32)
+            ty = typeManager.GetPointerTy(LoadType((args.Get(0u32) as UInt32).getOrThrow()))
+        } else if (kind == MF_TYPE_KIND_ARRAY) {
+            let info = typeObj.GetInfoAsArrayTyInfo().getOrThrow()
+            let args = typeObj.GetTypeArgs().getOrThrow()
+            CJC_ASSERT(args.size() == 1u32)
+            ty = typeManager.GetArrayTy(LoadType((args.Get(0u32) as UInt32).getOrThrow()), UInt64(info.GetDimsOrSize()))
+        } else if (kind == MF_TYPE_KIND_V_ARRAY) {
+            let info = typeObj.GetInfoAsArrayTyInfo().getOrThrow()
+            let args = typeObj.GetTypeArgs().getOrThrow()
+            CJC_ASSERT(args.size() == 1u32)
+            ty = typeManager.GetVArrayTy(LoadType((args.Get(0u32) as UInt32).getOrThrow()), info.GetDimsOrSize())
+        } else if (kind == MF_TYPE_KIND_TUPLE) {
+            ty = typeManager.GetTupleTy(LoadTypeArgs(typeObj))
+        } else if (kind == MF_TYPE_KIND_FUNC) {
+            let info = typeObj.GetInfoAsFuncTyInfo().getOrThrow()
+            let cfg = FuncTyConfig()
+            cfg.isC = info.GetIsC()
+            cfg.hasVariableLenArg = info.GetHasVariableLenArg()
+            ty = typeManager.GetFunctionTy(LoadTypeArgs(typeObj), LoadType(info.GetRetType()), cfg: cfg)
+        } else {
+            let info = typeObj.GetInfoAsCompositeTyInfo().getOrThrow()
+            let decl = GetDeclFromIndex(info.GetDeclPtr())
+            if (let None <- decl) { allTypes[Int64(tyIndex)] = Some(ty); return }
+            let typeArgs = LoadTypeArgs(typeObj)
+            if (kind == MF_TYPE_KIND_TYPE) {
+                ty = typeManager.GetTypeAliasTy((decl.getOrThrow() as TypeAliasDecl).getOrThrow(), typeArgs)
+            } else if (kind == MF_TYPE_KIND_CLASS) {
+                let classDecl = (decl.getOrThrow() as ClassDecl).getOrThrow()
+                ty = if (info.GetIsThisTy()) { typeManager.GetClassThisTy(classDecl, typeArgs) } else {
+                    typeManager.GetClassTy(classDecl, typeArgs)
+                }
+            } else if (kind == MF_TYPE_KIND_INTERFACE) {
+                ty = typeManager.GetInterfaceTy((decl.getOrThrow() as InterfaceDecl).getOrThrow(), typeArgs)
+            } else if (kind == MF_TYPE_KIND_STRUCT) {
+                ty = typeManager.GetStructTy((decl.getOrThrow() as StructDecl).getOrThrow(), typeArgs)
+            } else if (kind == MF_TYPE_KIND_ENUM) {
+                ty = typeManager.GetEnumTy((decl.getOrThrow() as EnumDecl).getOrThrow(), typeArgs: typeArgs)
+            }
+        }
+        allTypes[Int64(tyIndex)] = Some(ty)
+    }
+
+    // ReferenceLoader.cpp:400-430 LoadInheritedTypes.
+    private func LoadInheritedTypes(declObj: PackageFormat_Decl, inheritableDecl: InheritableDecl): Unit {
+        let inheritedTypes = if (let Some(_) <- (inheritableDecl as ClassDecl)) {
+            declObj.GetInfoAsClassInfo().getOrThrow().GetInheritedTypes().getOrThrow()
+        } else if (let Some(_) <- (inheritableDecl as InterfaceDecl)) {
+            declObj.GetInfoAsInterfaceInfo().getOrThrow().GetInheritedTypes().getOrThrow()
+        } else if (let Some(_) <- (inheritableDecl as EnumDecl)) {
+            declObj.GetInfoAsEnumInfo().getOrThrow().GetInheritedTypes().getOrThrow()
+        } else if (let Some(_) <- (inheritableDecl as StructDecl)) {
+            declObj.GetInfoAsStructInfo().getOrThrow().GetInheritedTypes().getOrThrow()
+        } else {
+            declObj.GetInfoAsExtendInfo().getOrThrow().GetInheritedTypes().getOrThrow()
+        }
+        let loadedTypes = ArrayList<Type>()
+        let directSubtypeIdentities = HashSet<Ptr<Ty>>()
+        var index: UInt32 = 0u32
+        while (index < inheritedTypes.size()) {
+            let serializedIndex = (inheritedTypes.Get(index) as UInt32).getOrThrow()
+            if (serializedIndex != 0u32) {
+                let loadedType = WrapType(Some(LoadType(serializedIndex))).getOrThrow()
+                if (!Ty.IsTyCorrect(loadedType.GetTy()) && isLoadCache) { return }
+                if (let Some(classLikeTy) <- (loadedType.GetTy() as ClassLikeTy)) {
+                    let subtype = inheritableDecl.GetTy().getOrThrow()
+                    directSubtypeIdentities.clear()
+                    for (existing in classLikeTy.directSubtypes) {
+                        directSubtypeIdentities.add(Ptr<Ty>(existing))
+                    }
+                    let subtypeKey = Ptr<Ty>(subtype)
+                    if (!directSubtypeIdentities.contains(subtypeKey)) { classLikeTy.directSubtypes.add(subtype) }
+                }
+                loadedTypes.add(loadedType)
+            }
+            index++
+        }
+        var loadedIndex: Int64 = 0
+        while (loadedIndex < loadedTypes.size) {
+            if (loadedIndex < inheritableDecl.inheritedTypes.size) {
+                inheritableDecl.inheritedTypes[loadedIndex] =
+                    UpdateType(Some(inheritableDecl.inheritedTypes[loadedIndex]), loadedTypes[loadedIndex])
+            } else {
+                inheritableDecl.inheritedTypes.add(loadedTypes[loadedIndex])
+            }
+            loadedIndex++
+        }
+        while (inheritableDecl.inheritedTypes.size > loadedTypes.size) {
+            inheritableDecl.inheritedTypes.remove(at: inheritableDecl.inheritedTypes.size - 1)
+        }
+    }
+
+    // ReferenceLoader.cpp:432-453 LoadGenericConstraintsRef.
+    private func LoadGenericConstraintsRef(genericRef: Option<PackageFormat_Generic>, generic: Option<Generic>): Unit {
+        let astGeneric = generic ?? return
+        let rawGeneric = genericRef ?? return
+        if (astGeneric.TestAttr(Attribute.INCRE_COMPILE)) { return }
+        let constraints = rawGeneric.GetConstraints().getOrThrow()
+        var index: UInt32 = 0u32
+        while (index < constraints.size()) {
+            let rawConstraint = PackageFormat_Constraint(
+                data.getOrThrow(), (constraints.Get(index) as Int64).getOrThrow())
+            let constraint = GenericConstraint()
+            constraint.begin = LoadPos(rawConstraint.GetBegin().getOrThrow())
+            constraint.end = LoadPos(rawConstraint.GetEnd().getOrThrow())
+            constraint.refType = Wrap2RefType(LoadType(rawConstraint.GetType()))
+            let upperBounds = rawConstraint.GetUppers().getOrThrow()
+            var upperIndex: UInt32 = 0u32
+            while (upperIndex < upperBounds.size()) {
+                constraint.upperBounds.add(WrapType(Some(
+                    LoadType((upperBounds.Get(upperIndex) as UInt32).getOrThrow()))).getOrThrow())
+                upperIndex++
+            }
+            constraint.isImplicitlyIntroduced = rawConstraint.GetIsImplicitlyIntroduced()
+            astGeneric.genericConstraints.add(constraint)
+            index++
+        }
+    }
+
+    // ReferenceLoader.cpp:455-469 LoadAnnotationBaseExpr.
+    private func LoadAnnotationBaseExpr(rawAnno: PackageFormat_Anno, annotation: Annotation): Unit {
+        if (annotation.kind != AstAnnotationKind.CUSTOM) { return }
+        if (let Some(targetCtr) <- GetDeclFromIndex(rawAnno.GetTarget())) {
+            let refExpr = RefExpr()
+            refExpr.ref.target = Some(targetCtr)
+            refExpr.ref.identifier = targetCtr.identifier
+            refExpr.SetTy(targetCtr.GetTy().getOrThrow())
+            annotation.baseExpr = Some(refExpr)
+        }
+    }
+
+    // ReferenceLoader.cpp:471-500 LoadNominalDeclRef.
+    private func LoadNominalDeclRef(declObj: PackageFormat_Decl, astDecl: Decl): Unit {
+        if (let Some(inheritableDecl) <- (astDecl as InheritableDecl)) {
+            for (member in inheritableDecl.GetMemberDeclPtrs()) {
+                SetMemberDeclReference(member, inheritableDecl)
+            }
+            if (!inheritableDecl.toBeCompiled) { LoadInheritedTypes(declObj, inheritableDecl) }
+        } else if (let Some(funcDecl) <- (astDecl as FuncDecl)) {
+            let funcBody = funcDecl.funcBody.getOrThrow()
+            let nonGenericCtor = funcDecl.TestAttr(Attribute.CONSTRUCTOR) && funcBody.body.isNone()
+            if (!nonGenericCtor) {
+                let loadedType = WrapType(Some(LoadType(declObj.GetInfoAsFuncInfo().getOrThrow()
+                    .GetFuncBody().getOrThrow().GetRetType()))).getOrThrow()
+                funcBody.retType = Some(UpdateType(funcBody.retType, loadedType))
+            }
+            funcBody.SetTy(funcDecl.GetTy().getOrThrow())
+        }
+        if (let Some(extendDecl) <- (astDecl as ExtendDecl)) {
+            extendDecl.extendedType = Some(UpdateType(
+                extendDecl.extendedType, WrapType(extendDecl.GetTy()).getOrThrow()))
+        }
+        if (astDecl.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+            astDecl.genericDecl = GetDeclFromIndex(declObj.GetGenericDecl())
+        }
+    }
+
+    // ReferenceLoader.cpp:502-507 LoadTypeAliasDeclRef.
+    private func LoadTypeAliasDeclRef(declObj: PackageFormat_Decl, typeAliasDecl: TypeAliasDecl): Unit {
+        typeAliasDecl.typeNode = WrapType(Some(LoadType(
+            declObj.GetInfoAsAliasInfo().getOrThrow().GetAliasedTy())))
+    }
+
+    // ReferenceLoader.cpp:509-521 LoadDeclDependencies.
+    private func LoadDeclDependencies(declObj: PackageFormat_Decl, astDecl: Decl): Unit {
+        if (!deserializingCommon) { return }
+        let rawDeps = declObj.GetDependencies() ?? return
+        var index: UInt32 = 0u32
+        while (index < rawDeps.size()) {
+            let fullId = PackageFormat_FullId(data.getOrThrow(), (rawDeps.Get(index) as Int64).getOrThrow())
+            astDecl.dependencies.add(GetDeclFromIndex(Some(fullId)))
+            index++
+        }
+    }
+
+    // ReferenceLoader.cpp:524-580 LoadDeclRefs.
+    private func LoadDeclRefs(declObj: PackageFormat_Decl, astDecl: Decl): Unit {
+        astDecl.SetTy(LoadType(declObj.GetType()))
+        if (!Ty.IsTyCorrect(astDecl.GetTy()) && isLoadCache) { return }
+        LoadGenericConstraintsRef(declObj.GetGeneric(), astDecl.GetGeneric())
+        let rawAnnotations = declObj.GetAnnotations().getOrThrow()
+        CJC_ASSERT(Int64(rawAnnotations.size()) == astDecl.annotations.size)
+        var annotationIndex: UInt32 = 0u32
+        while (annotationIndex < rawAnnotations.size()) {
+            LoadAnnotationBaseExpr(PackageFormat_Anno(data.getOrThrow(),
+                (rawAnnotations.Get(annotationIndex) as Int64).getOrThrow()), astDecl.annotations[Int64(annotationIndex)])
+            annotationIndex++
+        }
+        let kind = declObj.GetKind()
+        if (kind == MF_DECL_KIND_FUNC_DECL || kind == MF_DECL_KIND_STRUCT_DECL ||
+            kind == MF_DECL_KIND_ENUM_DECL || kind == MF_DECL_KIND_INTERFACE_DECL ||
+            kind == MF_DECL_KIND_CLASS_DECL || kind == MF_DECL_KIND_EXTEND_DECL) {
+            LoadNominalDeclRef(declObj, astDecl)
+        } else if (kind == MF_DECL_KIND_TYPE_ALIAS_DECL) {
+            LoadTypeAliasDeclRef(declObj, (astDecl as TypeAliasDecl).getOrThrow())
+        } else if (kind == MF_DECL_KIND_VAR_WITH_PATTERN_DECL) {
+            let rawPattern = declObj.GetInfoAsVarWithPatternInfo().getOrThrow().GetIrrefutablePattern().getOrThrow()
+            LoadPatternRefs(rawPattern, (astDecl as VarWithPatternDecl).getOrThrow()
+                .irrefutablePattern.getOrThrow())
+        } else if (kind == MF_DECL_KIND_FUNC_PARAM || kind == MF_DECL_KIND_VAR_DECL ||
+            kind == MF_DECL_KIND_PROP_DECL) {
+            let varDecl = (astDecl as VarDeclAbstract).getOrThrow()
+            let declTy = astDecl.GetTy().getOrThrow()
+            if (varDecl.typeNode.isNone() && (declTy.HasAliasTy() || declTy.IsFunc())) {
+                varDecl.typeNode = WrapType(Some(declTy))
+            }
+        }
+    }
+
+    // ReferenceLoader.cpp:582-655 LoadExprRefs.
+    private func LoadExprRefs(exprObj: PackageFormat_Expr, expr: Expr): Unit {
+        expr.SetTy(LoadType(exprObj.GetType()))
+        expr.mapExpr = GetExprByIndex(exprObj.GetMapExpr())
+        let kind = exprObj.GetKind()
+        if (kind == MF_EXPR_KIND_MEMBER_ACCESS) {
+            let info = exprObj.GetInfoAsReferenceInfo().getOrThrow()
+            let member = (expr as MemberAccess).getOrThrow()
+            member.target = GetDeclFromIndex(info.GetTarget())
+            let instTys = info.GetInstTys().getOrThrow()
+            var index: UInt32 = 0u32
+            while (index < instTys.size()) {
+                member.instTys.add(LoadType((instTys.Get(index) as UInt32).getOrThrow()))
+                index++
+            }
+            member.matchedParentTy = Some(LoadType(info.GetMatchedParentTy()))
+        } else if (kind == MF_EXPR_KIND_REF_EXPR) {
+            let info = exprObj.GetInfoAsReferenceInfo().getOrThrow()
+            let refExpr = (expr as RefExpr).getOrThrow()
+            refExpr.ref.target = GetDeclFromIndex(info.GetTarget())
+            let instTys = info.GetInstTys().getOrThrow()
+            var index: UInt32 = 0u32
+            while (index < instTys.size()) {
+                refExpr.instTys.add(LoadType((instTys.Get(index) as UInt32).getOrThrow()))
+                index++
+            }
+            refExpr.matchedParentTy = Some(LoadType(info.GetMatchedParentTy()))
+        } else if (kind == MF_EXPR_KIND_ARRAY_LIT) {
+            if (expr.TyKind() != TypeKind.TYPE_VARRAY) {
+                let arrayLit = (expr as ArrayLit).getOrThrow()
+                arrayLit.initFunc = GetDeclFromIndex(exprObj.GetInfoAsArrayInfo().getOrThrow().GetInitFunc()) as FuncDecl
+                CJC_ASSERT(arrayLit.initFunc.isSome())
+            }
+        } else if (kind == MF_EXPR_KIND_ARRAY_EXPR) {
+            if (expr.TyKind() != TypeKind.TYPE_VARRAY) {
+                let arrayExpr = (expr as ArrayExpr).getOrThrow()
+                arrayExpr.initFunc = GetDeclFromIndex(exprObj.GetInfoAsArrayInfo().getOrThrow().GetInitFunc()) as FuncDecl
+            }
+        } else if (kind == MF_EXPR_KIND_LAMBDA_EXPR) {
+            (expr as LambdaExpr).getOrThrow().funcBody.getOrThrow().SetTy(expr.GetTy().getOrThrow())
+        } else if (kind == MF_EXPR_KIND_LIT_CONST_EXPR) {
+            let litConstExpr = (expr as LitConstExpr).getOrThrow()
+            if (expr.GetTy().getOrThrow().IsString()) {
+                litConstExpr.ref = Wrap2RefType(expr.GetTy().getOrThrow())
+            }
+            InitializeLitConstValue(litConstExpr)
+        } else if (kind == MF_EXPR_KIND_JUMP_EXPR) {
+            let jumpExpr = (expr as JumpExpr).getOrThrow()
+            jumpExpr.refLoop = jumpExpr.mapExpr
+            jumpExpr.mapExpr = None
+        }
+        LoadSubNodeRefs(exprObj, expr)
+    }
+
+    // ReferenceLoader.cpp:661-712 LoadSubNodeRefs.
+    private func LoadSubNodeRefs(exprObj: PackageFormat_Expr, expr: Expr): Unit {
+        let kind = exprObj.GetKind()
+        if (kind == MF_EXPR_KIND_CALL_EXPR) {
+            let callExpr = (expr as CallExpr).getOrThrow()
+            let operands = exprObj.GetOperands().getOrThrow()
+            CJC_ASSERT(operands.size() - 1u32 == UInt32(callExpr.args.size))
+            var index: UInt32 = 1u32
+            while (index < operands.size()) {
+                let exprIndex = (operands.Get(index) as UInt32).getOrThrow()
+                CJC_ASSERT(exprIndex != 0u32)
+                let arg = callExpr.args[Int64(index - 1u32)]
+                arg.SetTy(LoadType(GetFormatExprByIndex(exprIndex).GetType()))
+                if (arg.TestAttr(Attribute.HAS_INITIAL)) {
+                    arg.expr.getOrThrow().SetTy(arg.GetTy().getOrThrow())
+                }
+                index++
+            }
+        } else if (kind == MF_EXPR_KIND_TRY_EXPR) {
+            let tryExpr = (expr as TryExpr).getOrThrow()
+            let patterns = exprObj.GetInfoAsTryInfo().getOrThrow().GetPatterns().getOrThrow()
+            CJC_ASSERT(Int64(patterns.size()) == tryExpr.catchPatterns.size)
+            var index: UInt32 = 0u32
+            while (index < patterns.size()) {
+                LoadPatternRefs(PackageFormat_Pattern(data.getOrThrow(),
+                    (patterns.Get(index) as Int64).getOrThrow()), tryExpr.catchPatterns[Int64(index)])
+                index++
+            }
+        } else if (kind == MF_EXPR_KIND_MATCH_EXPR) {
+            let matchExpr = (expr as MatchExpr).getOrThrow()
+            let operands = exprObj.GetOperands().getOrThrow()
+            if (matchExpr.matchMode) {
+                CJC_ASSERT(operands.size() - 1u32 == UInt32(matchExpr.matchCases.size))
+                var index: UInt32 = 1u32
+                while (index < operands.size()) {
+                    LoadMatchCaseRef((operands.Get(index) as UInt32).getOrThrow(),
+                        matchExpr.matchCases[Int64(index - 1u32)], matchExpr.selector.getOrThrow())
+                    index++
+                }
+            } else {
+                var index: UInt32 = 0u32
+                while (index < operands.size()) {
+                    let matchCaseObj = GetFormatExprByIndex((operands.Get(index) as UInt32).getOrThrow())
+                    matchExpr.matchCaseOthers[Int64(index)].SetTy(LoadType(matchCaseObj.GetType()))
+                    index++
+                }
+            }
+        } else if (kind == MF_EXPR_KIND_FOR_IN_EXPR) {
+            LoadPatternRefs(exprObj.GetInfoAsForInInfo().getOrThrow().GetPattern().getOrThrow(),
+                (expr as ForInExpr).getOrThrow().pattern.getOrThrow())
+        }
+        LoadSubNodeRefs2(exprObj, expr)
+    }
+
+    // ReferenceLoader.cpp:714-728 LoadSubNodeRefs2.
+    private func LoadSubNodeRefs2(exprObj: PackageFormat_Expr, expr: Expr): Unit {
+        if (exprObj.GetKind() != MF_EXPR_KIND_LET_PATTERN_DESTRUCTOR) { return }
+        let letPattern = (expr as LetPatternDestructor).getOrThrow()
+        let patterns = exprObj.GetInfoAsLetPatternDestructorInfo().getOrThrow().GetPatterns().getOrThrow()
+        var index: UInt32 = 0u32
+        while (index < patterns.size()) {
+            LoadPatternRefs(PackageFormat_Pattern(data.getOrThrow(),
+                (patterns.Get(index) as Int64).getOrThrow()), letPattern.patterns[Int64(index)])
+            index++
+        }
+        let operands = exprObj.GetOperands().getOrThrow()
+        letPattern.initializer.getOrThrow().SetTy(LoadType(GetFormatExprByIndex(
+            (operands.Get(0u32) as UInt32).getOrThrow()).GetType()))
+    }
+
+    // ReferenceLoader.cpp:730-743 LoadMatchCaseRef.
+    private func LoadMatchCaseRef(index: UInt32, matchCase: MatchCase, selector: Expr): Unit {
+        let matchCaseObj = GetFormatExprByIndex(index)
+        matchCase.SetTy(LoadType(matchCaseObj.GetType()))
+        let patterns = matchCaseObj.GetInfoAsMatchCaseInfo().getOrThrow().GetPatterns().getOrThrow()
+        CJC_ASSERT(Int64(patterns.size()) == matchCase.patterns.size)
+        var patternIndex: UInt32 = 0u32
+        while (patternIndex < patterns.size()) {
+            let pattern = matchCase.patterns[Int64(patternIndex)]
+            LoadPatternRefs(PackageFormat_Pattern(data.getOrThrow(),
+                (patterns.Get(patternIndex) as Int64).getOrThrow()), pattern)
+            pattern.ctxExpr = Some(selector)
+            patternIndex++
+        }
+    }
+
+    // ReferenceLoader.cpp:745-785 LoadPatternRefs.
+    private func LoadPatternRefs(patternObj: PackageFormat_Pattern, pattern: Pattern): Unit {
+        let types = patternObj.GetTypes().getOrThrow()
+        CJC_ASSERT(types.size() >= 1u32)
+        pattern.SetTy(LoadType((types.Get(0u32) as UInt32).getOrThrow()))
+        let kind = patternObj.GetKind()
+        if (kind == MF_PATTERN_KIND_TUPLE_PATTERN) {
+            let subPatterns = patternObj.GetPatterns().getOrThrow()
+            let tuplePattern = (pattern as TuplePattern).getOrThrow()
+            var index: UInt32 = 0u32
+            while (index < subPatterns.size()) {
+                LoadPatternRefs(PackageFormat_Pattern(data.getOrThrow(),
+                    (subPatterns.Get(index) as Int64).getOrThrow()), tuplePattern.patterns[Int64(index)])
+                index++
+            }
+        } else if (kind == MF_PATTERN_KIND_TYPE_PATTERN) {
+            let subPatterns = patternObj.GetPatterns().getOrThrow()
+            let typePattern = (pattern as TypePattern).getOrThrow()
+            LoadPatternRefs(PackageFormat_Pattern(data.getOrThrow(),
+                (subPatterns.Get(0u32) as Int64).getOrThrow()), typePattern.pattern.getOrThrow())
+            typePattern.typeNode = WrapType(pattern.GetTy())
+        } else if (kind == MF_PATTERN_KIND_ENUM_PATTERN) {
+            let subPatterns = patternObj.GetPatterns().getOrThrow()
+            let enumPattern = (pattern as EnumPattern).getOrThrow()
+            var index: UInt32 = 0u32
+            while (index < subPatterns.size()) {
+                LoadPatternRefs(PackageFormat_Pattern(data.getOrThrow(),
+                    (subPatterns.Get(index) as Int64).getOrThrow()), enumPattern.patterns[Int64(index)])
+                index++
+            }
+        } else if (kind == MF_PATTERN_KIND_EXCEPT_TYPE_PATTERN) {
+            let subPatterns = patternObj.GetPatterns().getOrThrow()
+            let exceptPattern = (pattern as ExceptTypePattern).getOrThrow()
+            LoadPatternRefs(PackageFormat_Pattern(data.getOrThrow(),
+                (subPatterns.Get(0u32) as Int64).getOrThrow()), exceptPattern.pattern.getOrThrow())
+            var index: UInt32 = 1u32
+            while (index < types.size()) {
+                exceptPattern.types.add(WrapType(Some(LoadType(
+                    (types.Get(index) as UInt32).getOrThrow()))).getOrThrow())
+                index++
+            }
+        } else if (kind == MF_PATTERN_KIND_COMMAND_TYPE_PATTERN) {
+            let subPatterns = patternObj.GetPatterns().getOrThrow()
+            let commandPattern = (pattern as CommandTypePattern).getOrThrow()
+            LoadPatternRefs(PackageFormat_Pattern(data.getOrThrow(),
+                (subPatterns.Get(0u32) as Int64).getOrThrow()), commandPattern.pattern.getOrThrow())
+            var index: UInt32 = 1u32
+            while (index < types.size()) {
+                commandPattern.types.add(WrapType(Some(LoadType(
+                    (types.Get(index) as UInt32).getOrThrow()))).getOrThrow())
+                index++
+            }
         }
     }
 
@@ -826,6 +1583,17 @@ private class CjoSignatureMaterializer {
 
     public func PreloadCommonPartOfPackage(targetPkg: Package, opts: GlobalOptions): Bool {
         let rawData = data.getOrThrow()
+        packageTable = Some(GetPackage(rawData))
+        let allTypeTables = packageTable.getOrThrow().GetAllTypes().getOrThrow()
+        allTypes = Array<Option<Ty>>(Int64(allTypeTables.size()), repeat: None)
+        importedFullPackageNames.clear()
+        let importTables = packageTable.getOrThrow().GetImports().getOrThrow()
+        var importIndex: UInt32 = 0u32
+        while (importIndex < importTables.size()) {
+            importedFullPackageNames.add(
+                FlatBufferString(rawData, (importTables.Get(importIndex) as Int64).getOrThrow()).str())
+            importIndex++
+        }
         flat = Some(CjoFlatBuffer(rawData))
         flatAllDecls = -1
         flatAllTypes = -1
