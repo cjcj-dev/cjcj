@@ -19,7 +19,7 @@ private let SIGHUP: Int32 = 1
 @When[os == "Linux"]
 private let PR_SET_PDEATHSIG: Int32 = 1
 
-@When[os != "Windows"]
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
 foreign {
     func signal(sig: Int32, handler: CPointer<Unit>): CPointer<Unit>
     func _exit(status: Int32): Unit
@@ -212,7 +212,7 @@ private func SetExitSignal(): Unit {
     }
 }
 
-@When[os != "Windows"]
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
 private func WaitProcessExit(pid: Int32): Unit {
     try (status = LibC.malloc<Int32>().asResource()) {
         let ret = unsafe { waitpid(pid, status.value, 0) }
@@ -223,7 +223,7 @@ private func WaitProcessExit(pid: Int32): Unit {
     }
 }
 
-@When[os != "Windows"]
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
 private func CloseBothEndsOfPipe(pipefd: CPointer<Int32>): Unit {
     unsafe {
         let _ = close(pipefd.read())
@@ -233,7 +233,7 @@ private func CloseBothEndsOfPipe(pipefd: CPointer<Int32>): Unit {
     }
 }
 
-@When[os != "Windows"]
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
 private func RedirectStdOutTOStdErr(): Unit {
     if (unsafe { dup2(2, 1) } == -1) {
         try (message = unsafe {
@@ -419,7 +419,7 @@ public func WaitMacroCallEvalResultFromServer(call: MacroCall): Unit {
 }
 
 extend MacroEvaluation {
-    @When[os != "Windows"]
+    @When[os == "Linux" || os == "macOS" || os == "iOS"]
     public func ExecMacroSrv(pid: Int32): Unit {
         let macSrvPath = FileUtil.JoinPath(FileUtil.GetDirPath(ci.GetGlobalOptions().executablePath),
             "../tools/bin/" + MACRO_SRV_NAME)
@@ -504,7 +504,7 @@ func CreateMacroSrvProcess(evaluation: MacroEvaluation): Unit {
         }
     }
 
-@When[os == "macOS"]
+@When[os == "macOS" || os == "iOS"]
 func CreateMacroSrvProcess(evaluation: MacroEvaluation): Unit {
         synchronized(MacroProcMsger.GetInstance().mutex) {
             let msger = MacroProcMsger.GetInstance()

@@ -20,7 +20,7 @@ struct FdSet {
     }
 }
 
-@When[os == "macOS"]
+@When[os == "macOS" || os == "iOS"]
 @C
 struct FdSet {
     var bits: VArray<UInt32, $32>
@@ -30,7 +30,7 @@ struct FdSet {
     }
 }
 
-@When[os != "Windows"]
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
 @C
 struct Timeval {
     var tvSec: IntNative
@@ -42,7 +42,7 @@ struct Timeval {
     }
 }
 
-@When[os != "Windows"]
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
 foreign {
     func close(fd: Int32): Int32
     func read(fd: Int32, buf: CPointer<UInt8>, count: UIntNative): IntNative
@@ -97,7 +97,7 @@ private func FD_ISSET(fd: Int32, set: CPointer<FdSet>): Bool {
     }
 }
 
-@When[os == "macOS"]
+@When[os == "macOS" || os == "iOS"]
 private func FD_ZERO(set: CPointer<FdSet>): Unit {
     var idx: Int64 = 0
     unsafe {
@@ -110,7 +110,7 @@ private func FD_ZERO(set: CPointer<FdSet>): Unit {
     }
 }
 
-@When[os == "macOS"]
+@When[os == "macOS" || os == "iOS"]
 private func FD_SET(fd: Int32, set: CPointer<FdSet>): Unit {
     unsafe {
         var value = set.read()
@@ -121,7 +121,7 @@ private func FD_SET(fd: Int32, set: CPointer<FdSet>): Unit {
     }
 }
 
-@When[os == "macOS"]
+@When[os == "macOS" || os == "iOS"]
 private func FD_ISSET(fd: Int32, set: CPointer<FdSet>): Bool {
     unsafe {
         let value = set.read()
