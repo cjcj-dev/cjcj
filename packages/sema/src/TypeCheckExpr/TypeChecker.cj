@@ -547,9 +547,15 @@ public class TypeChecker {
 
     private func PreTypeCheck(pkgs: ArrayList<Package>): ArrayList<ASTContext> {
         contexts.clear()
+        if (let Some(instance) <- ci) {
+            instance.pkgCtxMap.clear()
+        }
         for (pkg in pkgs) {
             let ctx = ASTContext(pkg)
             contexts.add(ctx)
+            if (let Some(instance) <- ci) {
+                instance.pkgCtxMap[pkg] = ctx
+            }
         }
         for (ctx in contexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
@@ -4659,20 +4665,6 @@ public class TypeChecker {
                 let _ = Synthesize(ctx, baseExpr)
                 ResolvePrimitiveStaticMemberAccess(ctx, memberAccess)
             }
-        } else if (let Some(refExpr) <- (nameRef as RefExpr)) {
-            if (refExpr.isThis || refExpr.isSuper) {
-                typeCheckExprCheckThisOrSuper(impl.typeManager, ctx, refExpr, currentFuncBody)
-            } else {
-                ResolveRefExpr(ctx, refExpr)
-                if (let Some(target) <- refExpr.ref.target) {
-                    if (let Some(cfunc) <- (target as BuiltInDecl)) {
-                        if (cfunc.IsType(BuiltInType.CFUNC)) {
-                            InferCFuncExpr(ctx, refExpr)
-                            return refExpr.GetTy() ?? TypeManager.GetInvalidTy()
-                        }
-                    }
-                }
-            }
         }
         let ty = SynNameReferenceExpr(impl.typeManager, nameRef, diag: impl.diag)
         if (Ty.IsTyCorrect(ty)) {
@@ -5731,6 +5723,10 @@ public class TypeChecker {
             }
             return FinishSynthesize(ctx, binaryExpr, binaryTy)
         }
+        if (let Some(refExpr) <- (expr as RefExpr)) {
+            this.InferRefExpr(ctx, refExpr)
+            return FinishSynthesize(ctx, refExpr, refExpr.GetTy().getOrThrow())
+        }
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
             return FinishSynthesize(ctx, nameRef, SynthesizeNameReference(ctx, nameRef))
         }
@@ -6038,7 +6034,11 @@ public class TypeChecker {
         }
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
             typeCheckExprPutTargetType(ctx, nameRef, target)
-            let _ = SynthesizeNameReference(ctx, nameRef)
+            if (let Some(refExpr) <- (nameRef as RefExpr)) {
+                InferRefExpr(ctx, refExpr)
+            } else {
+                let _ = SynthesizeNameReference(ctx, nameRef)
+            }
             let ok = ChkNameReferenceExpr(impl.typeManager, target, nameRef, diag: impl.diag)
             if (ok) {
                 ctx.SkipSynForCorrectTy(nameRef)
@@ -6210,7 +6210,11 @@ public class TypeChecker {
             return FinishCheck(ctx, returnExpr, Ty.IsTyCorrect(SynthesizeReturnExpr(ctx, returnExpr)))
         }
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
-            let _ = SynthesizeNameReference(ctx, nameRef)
+            if (let Some(refExpr) <- (nameRef as RefExpr)) {
+                InferRefExpr(ctx, refExpr)
+            } else {
+                let _ = SynthesizeNameReference(ctx, nameRef)
+            }
             return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx),
                 diag: impl.diag, importManager: impl.importManager))
         }
@@ -6311,26 +6315,256 @@ public class TypeChecker {
             diag: impl.diag, importManager: impl.importManager))
     }
 
-    private func ResolveRefExpr(ctx: ASTContext, refExpr: RefExpr): Unit {
-        if (let Some(_) <- refExpr.ref.target) {
-            return
+    func ReplaceWithGenericTyInInheritableDecl(ty: Ty, outerDecl: Decl, id: InheritableDecl): Ty {
+        if (!ty.HasGeneric()) {
+            return ty
         }
-        let targets = ArrayList<Option<Decl>>()
-        for (target in refExpr.ref.targets) {
-            targets.add(target)
+        var typeMapping = MultiTypeSubst()
+        if ((let Some(currentTy) <- outerDecl.GetTy()) && (let Some(idTy) <- id.GetTy())) {
+            typeMapping = Promotion(impl.typeManager).GetPromoteTypeMapping(currentTy, idTy)
         }
-        if (targets.isEmpty()) {
-            for (target in impl.Lookup(ctx, refExpr.ref.identifier.Val(), scopeNameOf(refExpr), refExpr,
-                isSetter: refExpr.TestAttr(Attribute.LEFT_VALUE))) {
-                targets.add(Some(target))
+        if (typeMapping.entries.isEmpty()) {
+            return ty
+        }
+        return impl.typeManager.GetBestInstantiatedTy(ty, typeMapping)
+    }
+
+    func InferTypeOfThis(re: RefExpr, objDecl: InheritableDecl): Ty {
+        let outerDecl = objDecl
+        var typeDecl = outerDecl
+        if (let Some(extendDecl) <- (typeDecl as ExtendDecl)) {
+            if ((let Some(extendedType) <- extendDecl.extendedType) &&
+                (let Some(extendedTy) <- extendedType.GetTy())) {
+                if (extendedTy.IsBuiltin()) {
+                    return extendedTy
+                }
+                if (let Some(realTypeDecl) <- Ty.GetDeclPtrOfTy(Some(extendedTy))) {
+                    if (let Some(inheritableDecl) <- (realTypeDecl as InheritableDecl)) {
+                        typeDecl = inheritableDecl
+                    } else {
+                        return TypeManager.GetInvalidTy()
+                    }
+                } else {
+                    return TypeManager.GetInvalidTy()
+                }
             }
         }
-        if (!refExpr.TestAttr(Attribute.MACRO_INVOKE_BODY) && typeCheckExprAllMacroFuncDecls(targets)) {
-            let checker = EnumSugarChecker(impl, ctx, refExpr)
-            let (resolved, resolvedTargets) = checker.Resolve()
+        ReplaceTarget(re, Some(typeDecl))
+        var ret = ReplaceWithGenericTyInInheritableDecl(
+            outerDecl.GetTy().getOrThrow(), outerDecl, typeDecl)
+        if (let Some(classTy) <- (ret as ClassTy)) {
+            ret = impl.typeManager.GetClassThisTy(classTy.decl.getOrThrow(), classTy.typeArgs.toArray())
+        }
+        return ret
+    }
+
+    func InferTypeOfSuper(re: RefExpr, objDecl: InheritableDecl): Ty {
+        if (let None <- (objDecl as ClassDecl)) {
+            return TypeManager.GetInvalidTy()
+        }
+        let classDecl = (objDecl as ClassDecl).getOrThrow()
+        if (let Some(rawTy) <- classDecl.GetTy()) {
+            if (let Some(classTy) <- (rawTy as ClassTy)) {
+                if (let Some(superClassTy) <- classTy.GetSuperClassTy()) {
+                    let superDecl = superClassTy.declPtr.getOrThrow()
+                    ReplaceTarget(re, Some(superDecl))
+                    return ReplaceWithGenericTyInInheritableDecl(
+                        superDecl.GetTy().getOrThrow(), objDecl, superDecl)
+                }
+            }
+        }
+        return TypeManager.GetInvalidTy()
+    }
+
+    func CheckThisOrSuper(ctx: ASTContext, re: RefExpr): Unit {
+        re.SetTy(TypeManager.GetInvalidTy())
+        let symbol = ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, re.scopeName)
+        if (let None <- symbol) {
+            Diagnose(impl.diag.getOrThrow(), re, BasicDiagKind.sema_this_super_use_error_outside_class,
+                args: [BasicDiagArgument(re.ref.identifier.Val())]).Emit()
+            return
+        }
+        let node = symbol.getOrThrow().node.getOrThrow()
+        if (let None <- (node as InheritableDecl)) {
+            Diagnose(impl.diag.getOrThrow(), re, BasicDiagKind.sema_this_super_use_error_outside_class,
+                args: [BasicDiagArgument(re.ref.identifier.Val())]).Emit()
+            return
+        }
+        let decl = (node as InheritableDecl).getOrThrow()
+        if (re.isThis) {
+            re.SetTy(InferTypeOfThis(re, decl))
+        } else {
+            re.SetTy(InferTypeOfSuper(re, decl))
+        }
+    }
+
+    func GetDeclOfThisType(expr: Expr): Option<Decl> {
+        if (let Some(memberAccess) <- (expr as MemberAccess)) {
+            if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                if (let Some(baseTy) <- baseExpr.GetTy()) {
+                    if (let Some(classTy) <- (baseTy as ClassTy)) {
+                        if (let Some(classDecl) <- classTy.declPtr) {
+                            return Some(classDecl)
+                        }
+                    }
+                }
+            }
+        } else if (let Some(refExpr) <- (expr as RefExpr)) {
+            let baseFunc = refExpr.GetTarget()
+            if (let Some(targetDecl) <- baseFunc) {
+                if ((let Some(varDecl) <- (targetDecl as VarDecl)) &&
+                    (let Some(initializer) <- varDecl.initializer) &&
+                    (let Some(memberInitializer) <- (initializer as MemberAccess))) {
+                    let baseTarget = memberInitializer.baseExpr.getOrThrow().GetTarget()
+                    if ((let Some(target) <- baseTarget) && (let Some(targetTy) <- target.GetTy()) &&
+                        (let Some(classTy) <- (targetTy as ClassTy))) {
+                        if (let Some(classDecl) <- classTy.declPtr) {
+                            return Some(classDecl)
+                        }
+                    }
+                    return None
+                }
+            }
+            let file = expr.curFile.getOrThrow()
+            let ctx = ci.getOrThrow().GetASTContextByPackage(file.curPackage.getOrThrow()).getOrThrow()
+            if (let Some(outMostFunc) <- ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC, expr.scopeName)) {
+                let funcDecl = (outMostFunc.node.getOrThrow() as FuncDecl).getOrThrow()
+                if (let Some(parentClassLike) <- funcDecl.funcBody.getOrThrow().parentClassLike) {
+                    return Some(parentClassLike)
+                }
+            }
+        }
+        return None
+    }
+
+    func DynamicBindingThisType(baseExpr: Expr, fd: FuncDecl,
+        typeMapping!: SubstPack = SubstPack()): Option<Ty> {
+        if (!IsFuncReturnThisType(fd)) {
+            return None
+        }
+        let rawFuncTy = if (Ty.IsTyCorrect(baseExpr.GetTy()) && baseExpr.GetTy().getOrThrow().IsFunc()) {
+            baseExpr.GetTy()
+        } else {
+            fd.GetTy()
+        }
+        if (let None <- rawFuncTy) {
+            return None
+        }
+        if (let None <- (rawFuncTy.getOrThrow() as FuncTy)) {
+            return None
+        }
+        let funcTy = (rawFuncTy.getOrThrow() as FuncTy).getOrThrow()
+        if (let Some(thisDecl) <- GetDeclOfThisType(baseExpr)) {
+            if (let Some(classDecl) <- (thisDecl as ClassDecl)) {
+                if (Ty.IsTyCorrect(classDecl.GetTy())) {
+                    let classTy = classDecl.GetTy().getOrThrow()
+                    let instTy = impl.typeManager.ApplySubstPack(
+                        impl.typeManager.GetClassThisTy(classDecl, classTy.typeArgs.toArray()), typeMapping)
+                    baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), instTy))
+                    return Some(instTy)
+                }
+            }
+        }
+        if ((let Some(memberAccess) <- (baseExpr as MemberAccess)) &&
+            (let Some(memberBase) <- memberAccess.baseExpr) && (let Some(memberBaseTy) <- memberBase.GetTy())) {
+            if (let Some(genericTy) <- (memberBaseTy as GenericsTy)) {
+                baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), genericTy))
+                return Some(genericTy)
+            }
+        }
+        return None
+    }
+
+    func InstantiateReferenceType(ctx: ASTContext, expr: NameReferenceExpr,
+        instantiateMap!: TypeSubst = TypeSubst()): Unit {
+        if (expr.compilerAddedTyArgs) {
+            expr.typeArguments.clear()
+        }
+        let target = expr.GetTarget()
+        if (!expr.GetTypeArgs().isEmpty()) {
+            if ((let Some(targetDecl) <- target) && targetDecl.astKind != ASTKind.TYPE_ALIAS_DECL) {
+                let _ = UpdateInstTysWithTypeArgs(expr)
+            }
+            impl.CheckGenericExpr(expr)
+        }
+        var typeMapping = SubstPack()
+        if (instantiateMap.entries.isEmpty()) {
+            typeMapping = impl.GenerateGenericTypeMapping(ctx, expr)
+            let tys = impl.typeManager.ApplySubstPackNonUniq(
+                expr.GetTy().getOrThrow(), typeMapping, ignoreUnsolved: true)
+            var targetIsFunc = false
+            if (let Some(targetDecl) <- target) {
+                if (let Some(_) <- (targetDecl as FuncDecl)) {
+                    targetIsFunc = true
+                }
+            }
+            if (tys.values.size != 1 && targetIsFunc && !ctx.HasTargetTy(expr)) {
+                Diagnose(impl.diag.getOrThrow(), expr, BasicDiagKind.sema_ambiguous_func_ref,
+                    args: [BasicDiagArgument(target.getOrThrow().identifier.Val())]).Emit()
+            }
+            expr.SetTy(tys.values[0])
+        } else {
+            impl.typeManager.PackMapping(typeMapping, instantiateMap)
+            expr.SetTy(impl.typeManager.GetInstantiatedTy(expr.GetTy().getOrThrow(), instantiateMap))
+        }
+        if (!Ty.IsTyCorrect(expr.GetTy())) {
+            expr.SetTy(TypeManager.GetInvalidTy())
+        } else if (let Some(targetDecl) <- target) {
+            if (let Some(funcDecl) <- (targetDecl as FuncDecl)) {
+                let _ = DynamicBindingThisType(expr, funcDecl, typeMapping: typeMapping)
+            }
+        }
+    }
+
+    func SynTargetOnUsed(ctx: ASTContext, nre: NameReferenceExpr, target: Decl): Bool {
+        if (NeedSynOnUsed(target)) {
+            var declToSyn = target
+            if (let Some(varDecl) <- (target as VarDecl)) {
+                let varDeclAbstract = ctx.GetOuterVarDeclAbstract(varDecl)
+                declToSyn = if (varDeclAbstract.TestAttr(Attribute.GLOBAL)) { varDeclAbstract } else { varDecl }
+            }
+            let targetTy = SynthesizeNode(ctx, SynPos.EXPR_ARG, declToSyn)
+            if ((let Some(funcDecl) <- (declToSyn as FuncDecl)) && targetTy.HasQuestTy()) {
+                DiagUnableToInferReturnType(impl.diag.getOrThrow(), funcDecl, nre)
+                return false
+            }
+        }
+        return true
+    }
+
+    func InferRefExpr(ctx: ASTContext, re: RefExpr): Unit {
+        if ((let Some(target) <- re.ref.target) && Ty.IsTyCorrect(re.GetTy()) &&
+            !target.GetTy().getOrThrow().IsPlaceholder()) {
+            return
+        }
+        var isWellTyped = true
+        for (typeArgument in re.typeArguments) {
+            isWellTyped = Ty.IsTyCorrect(SynthesizeNode(ctx, SynPos.EXPR_ARG, typeArgument)) && isWellTyped
+        }
+        if (re.isThis || re.isSuper) {
+            CheckThisOrSuper(ctx, re)
+            return
+        }
+        var isCustomAnnotation = false
+        if ((let Some(callOrPattern) <- re.callOrPattern) &&
+            (let Some(callExpr) <- (callOrPattern as CallExpr)) && callExpr.callKind == CallKind.CALL_ANNOTATION) {
+            isCustomAnnotation = true
+        }
+        let lookupScope = if (isCustomAnnotation) { TOPLEVEL_SCOPE_NAME } else { re.scopeName }
+        var targets = impl.Lookup(ctx, re.ref.identifier.Val(), lookupScope, re,
+            isSetter: re.TestAttr(Attribute.LEFT_VALUE))
+        var allMacroFuncs = true
+        for (target in targets) {
+            if (!target.TestAttr(Attribute.MACRO_FUNC)) {
+                allMacroFuncs = false
+                break
+            }
+        }
+        if (!isCustomAnnotation && !re.TestAttr(Attribute.MACRO_INVOKE_BODY) && allMacroFuncs) {
+            let (resolved, resolvedTargets) = EnumSugarChecker(impl, ctx, re).Resolve()
             if (resolved) {
                 if (resolvedTargets.isEmpty()) {
-                    refExpr.SetTy(TypeManager.GetInvalidTy())
+                    re.SetTy(TypeManager.GetInvalidTy())
                 }
                 return
             }
@@ -6339,26 +6573,45 @@ public class TypeChecker {
                 targets.add(Some(target))
             }
         }
-        if (let Some(diagValue) <- impl.diag) {
-            if (!TypeCheckReferenceFilterAndCheckTargetsOfRef(diagValue, impl.typeManager, ctx, refExpr, targets)) {
-                refExpr.SetTy(TypeManager.GetInvalidTy())
-                refExpr.ref.targets.clear()
-                return
-            }
-        }
-        if (targets.isEmpty()) {
-            refExpr.SetTy(TypeManager.GetInvalidTy())
-            refExpr.ref.targets.clear()
+        if (!TypeCheckReferenceFilterAndCheckTargetsOfRef(
+            impl.diag.getOrThrow(), impl.typeManager, ctx, re, targets) || !isWellTyped) {
+            re.SetTy(TypeManager.GetInvalidTy())
             return
         }
         let nonNullTargets = ArrayList<Decl>()
         for (candidate in targets) {
             if (let Some(value) <- candidate) { nonNullTargets.add(value) }
         }
-        var decl = GetAccessibleDecl(impl.typeManager, ctx, refExpr, nonNullTargets)
+        var decl = GetAccessibleDecl(impl.typeManager, ctx, re, nonNullTargets)
         if (let None <- decl) {
             decl = targets[0]
         }
-        ModifyTargetOfRef(refExpr, decl.getOrThrow(), targets)
+        ModifyTargetOfRef(re, decl.getOrThrow(), targets)
+        let target = re.ref.target.getOrThrow()
+        if (target.IsBuiltIn()) {
+            if ((let Some(builtInDecl) <- (target as BuiltInDecl)) && builtInDecl.IsType(BuiltInType.CFUNC)) {
+                InferCFuncExpr(ctx, re)
+                return
+            }
+        }
+        var hasCallOrPattern = false
+        if (let Some(_) <- re.callOrPattern) {
+            hasCallOrPattern = true
+        }
+        if (IsAllFuncDecl(targets) && targets.size > 1 && (hasCallOrPattern || ctx.HasTargetTy(re))) {
+            re.SetTy(TypeManager.GetQuestTy())
+            return
+        }
+        if (!SynTargetOnUsed(ctx, re, target)) {
+            re.SetTy(TypeManager.GetInvalidTy())
+            return
+        }
+        re.SetTy(impl.typeManager.SubstituteTypeAliasInTy(target.GetTy().getOrThrow()))
+        if (!decl.getOrThrow().IsFunc() || re.isAlone) {
+            InstantiateReferenceType(ctx, re)
+        }
+        if (Ty.IsInitialTy(re.GetTy())) {
+            re.SetTy(TypeManager.GetInvalidTy())
+        }
     }
 }

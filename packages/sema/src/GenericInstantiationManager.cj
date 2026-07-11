@@ -29,7 +29,12 @@ public class CompilerInstance {
         HashMap<String, HashMap<String, ArrayList<Decl>>>()
     public let resolvedUsedMacroDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
+    public let pkgCtxMap: HashMap<Node, ASTContext> = HashMap<Node, ASTContext>()
     public init() {}
+
+    public func GetASTContextByPackage(pkg: Package): Option<ASTContext> {
+        return pkgCtxMap.get(pkg)
+    }
 
     public func AddResolvedImportedDecls(fileHash: UInt64, name: String, decls: ArrayList<Decl>): Unit {
         if (!resolvedImportedDeclsMap.contains(fileHash)) {

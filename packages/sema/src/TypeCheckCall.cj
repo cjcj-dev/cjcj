@@ -1889,18 +1889,6 @@ private func AllCallArgsHaveCorrectTy(ce: CallExpr): Bool {
     return true
 }
 
-private func NeedSynOnUsed(target: Decl): Bool {
-    // C++ TypeCheckUtil.h:106-112: type decls, func params and already well-typed imported decls do not need
-    // recursive synthesis on use; source imported or still-quest declarations do.
-    if (target.IsTypeDecl() || target.astKind == ASTKind.FUNC_PARAM) {
-        return false
-    }
-    if (!Ty.IsTyCorrect(target.GetTy())) {
-        return true
-    }
-    return (target.GetTy() ?? TypeManager.GetInvalidTy()).HasQuestTy()
-}
-
 private func ShouldReportCallInferenceFailure(target: Option<Ty>): Bool {
     if (let Some(targetTy) <- target) {
         return !targetTy.IsQuest() && !targetTy.HasGeneric()

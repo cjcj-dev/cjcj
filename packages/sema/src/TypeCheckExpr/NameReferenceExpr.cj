@@ -848,31 +848,6 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     return false
 }
 
-private func SynRefExpr(typeManager: TypeManager, re: RefExpr): Ty {
-    if (re.isThis || re.isSuper) {
-        if (Ty.IsTyCorrect(re.GetTy())) {
-            return TcTyOrInvalid(re)
-        }
-    }
-    var targetOpt = re.ref.target
-    if ((let None <- targetOpt) && !re.ref.targets.isEmpty()) {
-        targetOpt = Some(GetRealTarget(re.ref.targets[0].getOrThrow()))
-    }
-    if (let Some(target) <- targetOpt) {
-        ModifyTargetOfRef(re, target, re.ref.targets)
-        if (!target.IsFunc() || re.isAlone || re.ref.targets.size <= 1) {
-            return TcSetTyFromTarget(typeManager, re, target)
-        }
-        re.SetTy(TypeManager.GetQuestTy())
-        return TypeManager.GetQuestTy()
-    }
-    if (Ty.IsTyCorrect(re.GetTy())) {
-        return TcTyOrInvalid(re)
-    }
-    let _ = typeManager
-    return TcInvalid(re)
-}
-
 private func SynMemberAccess(typeManager: TypeManager, ma: MemberAccess,
     diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (let Some(baseExpr) <- ma.baseExpr) {
@@ -939,9 +914,6 @@ public func SynNameReferenceExpr(typeManager: TypeManager, nre: NameReferenceExp
                 nre.instTys.add(typeArgTy)
             }
         }
-    }
-    if (let Some(refExpr) <- (nre as RefExpr)) {
-        return ApplyExplicitGenericArgs(typeManager, nre, SynRefExpr(typeManager, refExpr))
     }
     if (let Some(memberAccess) <- (nre as MemberAccess)) {
         return ApplyExplicitGenericArgs(typeManager, nre, SynMemberAccess(typeManager, memberAccess, diag: diag))

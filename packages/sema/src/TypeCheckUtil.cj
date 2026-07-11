@@ -6,6 +6,20 @@ import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::utils.GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME
 import cjcj::utils.IS_SUBTYPE_TYPES_FUNC_NAME
 
+public func IsAllFuncDecl(results: ArrayList<Decl>): Bool {
+    for (result in results) {
+        if (result.astKind != ASTKind.FUNC_DECL && result.astKind != ASTKind.MACRO_DECL) {
+            return false
+        }
+    }
+    return true
+}
+
+public func NeedSynOnUsed(target: Decl): Bool {
+    return !target.IsTypeDecl() && target.astKind != ASTKind.FUNC_PARAM &&
+        (!Ty.IsTyCorrect(target.GetTy()) || target.GetTy().getOrThrow().HasQuestTy())
+}
+
 public class RealMemberDecl {
     public var isGetter: Bool
     public var decl: Decl
