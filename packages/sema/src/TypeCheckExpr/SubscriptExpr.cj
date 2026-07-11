@@ -2,204 +2,190 @@ package cjcj::sema.TypeCheckExpr
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::sema.*
 import cjcj::sema.Desugar.*
+import cjcj::utils.CJC_ASSERT
 
-private func SubscriptInvalid(se: SubscriptExpr): Ty {
-    return TcInvalid(se)
-}
-
-private func PropagateSubscriptDesugarTarget(se: SubscriptExpr, desugar: Expr): Unit {
-    if (let Some(callExpr) <- (desugar as CallExpr)) {
-        if (let Some(resolved) <- callExpr.resolvedFunction) {
-            ReplaceTarget(se, Some(resolved))
+public func ChkSubscriptExpr(typeManager: TypeManager, ctx: ASTContext, target: Option<Ty>,
+    se: SubscriptExpr, synthesizer: (SynPos, Expr) -> Ty, checker: (Ty, Expr) -> Bool,
+    diag: BasicDiagnosticEngine): Bool {
+    if (let Some(desugarExpr) <- se.desugarExpr) {
+        if (let Some(targetTy) <- target) {
+            return typeManager.IsSubtype(desugarExpr.GetTy().getOrThrow(), targetTy)
         }
-    }
-}
-
-private func CheckIndexAsInt64(typeManager: TypeManager, expr: Expr): Bool {
-    let int64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
-    return ChkExprShallow(typeManager, int64Ty, expr)
-}
-
-private func TupleIndex(typeManager: TypeManager, expr: Expr): Option<Int64> {
-    if (let Some(lit) <- (expr as LitConstExpr)) {
-        if (!CheckIndexAsInt64(typeManager, expr)) {
-            return None
-        }
-        InitializeLitConstValue(lit)
-        if (lit.constNumValue.asInt.IsNegativeNum()) {
-            return None
-        }
-        return Some(Int64(lit.constNumValue.asInt.Uint64()))
-    }
-    return None
-}
-
-private func ChkTupleAccess(typeManager: TypeManager, target: Option<Ty>, se: SubscriptExpr, tupleTy: TupleTy): Bool {
-    if (se.indexExprs.size != 1) {
-        let _ = SubscriptInvalid(se)
         return false
     }
-    if (let Some(index) <- TupleIndex(typeManager, se.indexExprs[0])) {
-        if (index < 0 || index >= tupleTy.typeArgs.size) {
-            let _ = SubscriptInvalid(se)
-            return false
+    se.SetTy(TypeManager.GetInvalidTy())
+    if (se.baseExpr.isNone() || se.indexExprs.isEmpty()) {
+        return false
+    }
+    let baseExpr = se.baseExpr.getOrThrow()
+    SetIsNotAlone(baseExpr)
+    var baseTy = synthesizer(SynPos.EXPR_ARG, baseExpr)
+    let indexTys = ArrayList<Ty>()
+    for (indexExpr in se.indexExprs) {
+        indexTys.add(synthesizer(SynPos.EXPR_ARG, indexExpr))
+    }
+    if (!Ty.IsTyCorrect(baseTy) || !Ty.AreTysCorrect(indexTys)) {
+        return false
+    }
+    if (let Some(tupleTy) <- (baseTy as TupleTy)) {
+        if (se.indexExprs.size == 1) {
+            se.isTupleAccess = true
+            return ChkTupleAccess(typeManager, ctx, target, se, tupleTy, checker, diag)
         }
-        let elementTy = tupleTy.typeArgs[index]
-        if (let Some(targetTy) <- target) {
-            if (let Some(baseTupleLit) <- (se.baseExpr.getOrThrow() as TupleLit)) {
-                if (index < baseTupleLit.children.size) {
-                    if (!ChkExprShallow(typeManager, targetTy, baseTupleLit.children[index])) {
-                        baseTupleLit.SetTy(TypeManager.GetInvalidTy())
-                        let _ = SubscriptInvalid(se)
-                        return false
-                    }
-                    let elemTys = ArrayList<Ty>()
-                    for (child in baseTupleLit.children) {
-                        elemTys.add(TcReplaceIdeal(typeManager, child))
-                    }
-                    baseTupleLit.SetTy(typeManager.GetTupleTy(elemTys.toArray()))
-                    let updatedTy = elemTys[index]
-                    se.isTupleAccess = true
-                    se.SetTy(updatedTy)
-                    return true
-                }
-            } else if (typeManager.CheckTypeCompatibility(targetTy, elementTy) == TypeCompatibility.INCOMPATIBLE) {
-                let _ = SubscriptInvalid(se)
-                return false
+    }
+    if (let Some(varrayTy) <- (baseTy as VArrayTy)) {
+        return ChkVArrayAccess(typeManager, ctx, target, se, varrayTy, checker, diag)
+    }
+    try (ds = DiagSuppressor(diag)) {
+        DesugarOperatorOverloadExpr(ctx, se)
+        let desugarExpr = se.desugarExpr.getOrThrow()
+        let isWellTyped = if (let Some(targetTy) <- target) {
+            checker(targetTy, desugarExpr)
+        } else {
+            Ty.IsTyCorrect(synthesizer(SynPos.EXPR_ARG, desugarExpr))
+        }
+        if (isWellTyped) {
+            ds.ReportDiag()
+            se.SetTy(desugarExpr.GetTy().getOrThrow())
+            CJC_ASSERT((desugarExpr as CallExpr).isSome())
+            let desugaredCall = (desugarExpr as CallExpr).getOrThrow()
+            CJC_ASSERT(desugaredCall.resolvedFunction.isSome())
+            let resolvedFunction: Decl = desugaredCall.resolvedFunction.getOrThrow()
+            ReplaceTarget(se, Some(resolvedFunction))
+            return true
+        }
+        let synTy = synthesizer(SynPos.EXPR_ARG, desugarExpr)
+        let retTyMismatch = target.isSome() && Ty.IsTyCorrect(target.getOrThrow()) && Ty.IsTyCorrect(synTy)
+        RecoverToSubscriptExpr(se)
+        baseTy = typeManager.ReplaceIdealTy(baseTy)
+        let recoveredBase = se.baseExpr.getOrThrow()
+        recoveredBase.SetTy(recoveredBase.GetTy() ?? baseTy)
+        for (idx in 0..se.indexExprs.size) {
+            indexTys[idx] = typeManager.ReplaceIdealTy(indexTys[idx])
+            let indexExpr = se.indexExprs[idx]
+            indexExpr.SetTy(if (Ty.IsTyCorrect(indexExpr.GetTy())) {
+                indexExpr.GetTy().getOrThrow()
+            } else {
+                indexTys[idx]
+            })
+        }
+        if (!ds.HasError() && se.ShouldDiagnose(allowCompilerAdd: true)) {
+            ds.ReportDiag()
+            if (retTyMismatch) {
+                DiagMismatchedTypesWithFoundTy(diag, se, target.getOrThrow(), synTy)
+            } else {
+                DiagInvalidSubscriptExpr(diag, se, baseTy, indexTys)
             }
         }
-        se.isTupleAccess = true
-        se.SetTy(elementTy)
-        return true
+        ds.ReportDiag()
     }
-    let _ = SubscriptInvalid(se)
     return false
 }
 
-private func ChkVArrayAccess(typeManager: TypeManager, target: Option<Ty>, se: SubscriptExpr, varrayTy: VArrayTy): Bool {
-    if (se.indexExprs.size != 1) {
-        let _ = SubscriptInvalid(se)
+private func ChkTupleAccess(typeManager: TypeManager, ctx: ASTContext, target: Option<Ty>,
+    se: SubscriptExpr, tupleTy: TupleTy, checker: (Ty, Expr) -> Bool,
+    diag: BasicDiagnosticEngine): Bool {
+    if (se.baseExpr.isNone() || se.indexExprs.size != 1) {
         return false
     }
-    if (!CheckIndexAsInt64(typeManager, se.indexExprs[0])) {
-        let _ = SubscriptInvalid(se)
+    let indexExpr = se.indexExprs[0]
+    if ((indexExpr as LitConstExpr).isNone()) {
+        let builder = Diagnose(diag, indexExpr, BasicDiagKind.sema_builtin_invalid_index,
+            args: [BasicDiagArgument("tuple")])
+        builder.Emit()
         return false
     }
-    if (varrayTy.typeArgs.size != 1) {
-        let _ = SubscriptInvalid(se)
+    if (!checker(TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64), indexExpr)) {
+        let builder = Diagnose(diag, indexExpr, BasicDiagKind.sema_builtin_invalid_index,
+            args: [BasicDiagArgument("tuple")])
+        builder.Emit()
         return false
     }
-    let elementTy = varrayTy.typeArgs[0]
-    if (let Some(targetTy) <- target) {
-        if (typeManager.CheckTypeCompatibility(targetTy, elementTy) == TypeCompatibility.INCOMPATIBLE) {
-            let _ = SubscriptInvalid(se)
+    let literalIndex = (indexExpr as LitConstExpr).getOrThrow()
+    let index = literalIndex.constNumValue.asInt.Uint64()
+    if (index >= UInt64(tupleTy.typeArgs.size)) {
+        if (se.ShouldDiagnose(allowCompilerAdd: true)) {
+            let builder = Diagnose(diag, indexExpr, BasicDiagKind.sema_builtin_index_in_bound,
+                args: [BasicDiagArgument("tuple")])
+            builder.Emit()
+        }
+        return false
+    }
+    let indexValue = Int64(index)
+    if (let None <- target) {
+        se.SetTy(tupleTy.typeArgs[indexValue])
+        return true
+    }
+    let targetTy = target.getOrThrow()
+    if (let Some(tupleLit) <- (se.baseExpr.getOrThrow() as TupleLit)) {
+        CJC_ASSERT(indexValue < tupleLit.children.size)
+        if (!checker(targetTy, tupleLit.children[indexValue])) {
+            tupleLit.SetTy(TypeManager.GetInvalidTy())
             return false
         }
+        let elementTys = ArrayList<Ty>()
+        for (element in tupleLit.children) {
+            if (ReplaceIdealTy(typeManager, element)) {
+                elementTys.add(element.GetTy().getOrThrow())
+            } else {
+                elementTys.add(TypeManager.GetInvalidTy())
+            }
+        }
+        tupleLit.SetTy(typeManager.GetTupleTy(elementTys.toArray()))
+        se.SetTy(elementTys[indexValue])
+    } else {
+        if (!typeManager.IsSubtype(tupleTy.typeArgs[indexValue], targetTy)) {
+            DiagMismatchedTypesWithFoundTy(diag, se, targetTy, tupleTy.typeArgs[indexValue])
+            return false
+        }
+        se.SetTy(tupleTy.typeArgs[indexValue])
     }
-    se.SetTy(elementTy)
     return true
 }
 
-private func SynIndexExprs(typeManager: TypeManager, se: SubscriptExpr): Bool {
-    var ok = true
-    for (indexExpr in se.indexExprs) {
-        if (Ty.IsTyCorrect(indexExpr.GetTy())) {
-            continue
-        }
-        ok = Ty.IsTyCorrect(SynExprShallow(typeManager, indexExpr)) && ok
-    }
-    return ok
-}
-
-private func ChkSubscriptOverload(typeManager: TypeManager, target: Option<Ty>, se: SubscriptExpr): Bool {
-    DesugarOperatorOverloadExpr(se)
-    if (let Some(desugar) <- se.desugarExpr) {
-        let ok = if (let Some(targetTy) <- target) {
-            ChkExprShallow(typeManager, targetTy, desugar)
-        } else {
-            Ty.IsTyCorrect(SynExprShallow(typeManager, desugar))
-        }
-        if (ok) {
-            PropagateSubscriptDesugarTarget(se, desugar)
-            se.SetTy(TcTyOrInvalid(desugar))
-            return true
-        }
-        RecoverToSubscriptExpr(se)
-    }
-    let _ = SubscriptInvalid(se)
-    return false
-}
-
-public func ChkSubscriptExpr(typeManager: TypeManager, target: Ty, se: SubscriptExpr,
-    ctx!: Option<ASTContext> = None): Bool {
-    if (let Some(desugar) <- se.desugarExpr) {
-        if (ChkExprShallow(typeManager, target, desugar, ctx: ctx)) {
-            PropagateSubscriptDesugarTarget(se, desugar)
-            se.SetTy(TcTyOrInvalid(desugar))
-            return true
-        }
-    }
-    if (let None <- se.baseExpr) {
-        let _ = SubscriptInvalid(se)
+private func ChkVArrayAccess(typeManager: TypeManager, ctx: ASTContext, target: Option<Ty>,
+    se: SubscriptExpr, varrayTy: VArrayTy, checker: (Ty, Expr) -> Bool,
+    diag: BasicDiagnosticEngine): Bool {
+    if (se.indexExprs.size != 1) {
+        let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_varray_subscript_num, se)
+        builder.Emit()
         return false
     }
-    if (se.indexExprs.isEmpty()) {
-        let _ = SubscriptInvalid(se)
+    try (ds = DiagSuppressor(diag)) {
+        let int64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+        let indexExpr = se.indexExprs[0]
+        if (!checker(int64Ty, indexExpr)) {
+            if (!ds.HasError()) {
+                DiagMismatchedTypesWithFoundTy(diag, indexExpr, int64Ty, indexExpr.GetTy().getOrThrow())
+            }
+            ds.ReportDiag()
+            return false
+        }
+        ds.ReportDiag()
+    }
+    CJC_ASSERT(!varrayTy.typeArgs.isEmpty())
+    if (let None <- target) {
+        se.SetTy(varrayTy.typeArgs[0])
+        return true
+    }
+    let targetTy = target.getOrThrow()
+    if (!typeManager.IsSubtype(varrayTy.typeArgs[0], targetTy)) {
+        DiagMismatchedTypesWithFoundTy(diag, se, targetTy, varrayTy.typeArgs[0])
         return false
     }
-    let baseExpr = se.baseExpr.getOrThrow()
-    SetIsNotAlone(baseExpr)
-    let baseTy = SynExprShallow(typeManager, baseExpr, ctx: ctx)
-    if (!Ty.IsTyCorrect(baseTy) || !SynIndexExprs(typeManager, se)) {
-        let _ = SubscriptInvalid(se)
-        return false
-    }
-    if (let Some(tupleTy) <- (baseTy as TupleTy)) {
-        return ChkTupleAccess(typeManager, Some(target), se, tupleTy)
-    }
-    if (let Some(varrayTy) <- (baseTy as VArrayTy)) {
-        return ChkVArrayAccess(typeManager, Some(target), se, varrayTy)
-    }
-    return ChkSubscriptOverload(typeManager, Some(target), se)
+    se.SetTy(varrayTy.typeArgs[0])
+    return true
 }
 
-public func SynSubscriptExpr(typeManager: TypeManager, se: SubscriptExpr, ctx!: Option<ASTContext> = None): Ty {
-    if (let Some(desugar) <- se.desugarExpr) {
-        let desugarTy = SynExprShallow(typeManager, desugar, ctx: ctx)
-        if (Ty.IsTyCorrect(desugarTy)) {
-            PropagateSubscriptDesugarTarget(se, desugar)
-            se.SetTy(desugarTy)
-            return desugarTy
-        }
-    }
-    if (let None <- se.baseExpr) {
-        return SubscriptInvalid(se)
-    }
-    if (se.indexExprs.isEmpty()) {
-        return SubscriptInvalid(se)
-    }
-    let baseExpr = se.baseExpr.getOrThrow()
-    SetIsNotAlone(baseExpr)
-    let baseTy = SynExprShallow(typeManager, baseExpr, ctx: ctx)
-    if (!Ty.IsTyCorrect(baseTy) || !SynIndexExprs(typeManager, se)) {
-        return SubscriptInvalid(se)
-    }
-    if (let Some(tupleTy) <- (baseTy as TupleTy)) {
-        if (ChkTupleAccess(typeManager, None, se, tupleTy)) {
-            return TcTyOrInvalid(se)
-        }
-        return SubscriptInvalid(se)
-    }
-    if (let Some(varrayTy) <- (baseTy as VArrayTy)) {
-        if (ChkVArrayAccess(typeManager, None, se, varrayTy)) {
-            return TcTyOrInvalid(se)
-        }
-        return SubscriptInvalid(se)
-    }
-    if (ChkSubscriptOverload(typeManager, None, se)) {
-        return TcTyOrInvalid(se)
-    }
-    return SubscriptInvalid(se)
+public func SynSubscriptExpr(typeManager: TypeManager, ctx: ASTContext, se: SubscriptExpr,
+    synthesizer: (SynPos, Expr) -> Ty, checker: (Ty, Expr) -> Bool,
+    diag: BasicDiagnosticEngine): Ty {
+    let _ = ChkSubscriptExpr(typeManager, ctx, None, se, synthesizer, checker, diag)
+    return se.GetTy().getOrThrow()
 }
