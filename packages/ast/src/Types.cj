@@ -1134,7 +1134,7 @@ public class FuncTyConfig {
 
 public class FuncTy <: Ty {
     public let paramTys: ArrayList<Ty> = ArrayList<Ty>()
-    public var retTy: Ty = InvalidTy()
+    public var retTy: Ty
     public var isC: Bool = false
     public var isClosureTy: Bool = false
     public var hasVariableLenArg: Bool = false
