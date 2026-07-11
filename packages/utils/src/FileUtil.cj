@@ -48,8 +48,16 @@ private let EACCES_ERRNO: Int32 = 13
 private let SHORT_HASH_NUM: Int64 = 8
 private let BOM_ENCODING_LEN: Int64 = 3
 private let TEST_FILE_NAME: String = "_test.cj"
+@When[arch == "arm"]
+private let FILE_LEN_LIMIT: Int64 = 2 * 1024 * 1024 * 1024
+
+@When[arch != "arm"]
 private let FILE_LEN_LIMIT: Int64 = 4 * 1024 * 1024 * 1024
 
+@When[arch == "arm"]
+private let FILE_LEN_LIMIT_STR: String = "2 GB"
+
+@When[arch != "arm"]
 private let FILE_LEN_LIMIT_STR: String = "4 GB"
 
 @When[os == "Windows"]
