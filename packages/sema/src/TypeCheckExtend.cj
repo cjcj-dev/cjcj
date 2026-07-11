@@ -214,9 +214,9 @@ public func TypeCheckExtendCheckExtendGenerics(
     if (unused.size > 1) {
         typeStr = "s" + typeStr
     }
-    let builder = diag.DiagnoseRefactor(
+    let builder = DiagnoseRefactor(diag,
         BasicDiagKindRefactor.sema_extend_generic_must_be_used,
-        TypeCheckExtendRange(extendedType),
+        extendedType,
         arguments: [typeStr])
     builder.Emit()
     return false
@@ -233,9 +233,9 @@ public func TypeCheckExtendCheckExtendedTypeValidity(
     if (ty.IsExtendable()) {
         return true
     }
-    let builder = diag.DiagnoseRefactor(
+    let builder = DiagnoseRefactor(diag,
         BasicDiagKindRefactor.sema_illegal_extended_type,
-        TypeCheckExtendRange(extendedType),
+        extendedType,
         arguments: [ty.String()])
     builder.Emit()
     return false
@@ -252,9 +252,9 @@ public func TypeCheckExtendPreCheckExtend(
         if (let Some(extendedTy) <- extendedType.GetTy()) {
             if (let Some(decl) <- Ty.GetDeclOfTy(Some(extendedTy))) {
                 if (decl.TestAttr(Attribute.C)) {
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(diag,
                         BasicDiagKindRefactor.sema_c_type_cannot_extend_interface,
-                        TypeCheckExtendRange(extendedType),
+                        extendedType,
                         arguments: [decl.identifier.Val()])
                     builder.Emit()
                     valid = false
@@ -270,9 +270,9 @@ public func TypeCheckExtendPreCheckExtend(
     while (idx < extendDecl.inheritedTypes.size) {
         let inheritedType = extendDecl.inheritedTypes[idx]
         if (!Ty.IsTyCorrect(inheritedType.GetTy()) || inheritedType.TyKind() != TypeKind.TYPE_INTERFACE) {
-            let builder = diag.DiagnoseRefactor(
+            let builder = DiagnoseRefactor(diag,
                 BasicDiagKindRefactor.sema_extend_not_interface,
-                TypeCheckExtendRange(inheritedType))
+                inheritedType)
             builder.Emit()
             ctx.DeleteInvertedIndexes(inheritedType)
             extendDecl.inheritedTypes.remove(at: idx)
@@ -454,9 +454,9 @@ public func TypeCheckExtendCheckOrphanRule(
             extendedTy.String()
         }
         let extendedKind = if (let Some(_) <- extendedTypeTarget) { "imported" } else { "primitive" }
-        let builder = diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(diag,
             BasicDiagKindRefactor.sema_type_cannot_extend_imported_interface,
-            TypeCheckExtendRange(extendedType),
+            extendedType,
             arguments: [extendedKind, extendedTypeName])
         builder.AddNote("used external interface: " + Ty.GetTypesToStr(externalDecls.values, " "))
         builder.Emit()
@@ -1006,22 +1006,20 @@ public func CheckExtendDecl(
         if (Ty.IsTyCorrect(extendDecl.GetTy()) && extendDecl.GetTy().getOrThrow().IsImmutableType()) {
             if (let Some(funcDecl) <- (member as FuncDecl)) {
                 if (!extendDecl.GetTy().getOrThrow().IsEnum() && IsIndexAssignmentOperator(funcDecl)) {
-                    diag.DiagnoseRefactor(
+                    DiagnoseRefactor(diag,
                         BasicDiagKindRefactor.sema_immutable_type_extend_assignment_index_operator,
+                        funcDecl,
                         TypeCheckExtendIdentifierRange(funcDecl)).Emit()
                     valid = false
                 }
             }
             if (let Some(propDecl) <- (member as PropDecl)) {
                 if (propDecl.isVar) {
-                    let range = if (let Some(modifier) <- FindModifier(propDecl, TokenKind.MUT)) {
-                        MakeRange(modifier.begin, modifier.end)
-                    } else {
-                        TypeCheckExtendIdentifierRange(propDecl)
+                    if (let Some(modifier) <- FindModifier(propDecl, TokenKind.MUT)) {
+                        DiagnoseRefactor(diag,
+                            BasicDiagKindRefactor.sema_immutable_type_illegal_property,
+                            modifier).Emit()
                     }
-                    diag.DiagnoseRefactor(
-                        BasicDiagKindRefactor.sema_immutable_type_illegal_property,
-                        range).Emit()
                     valid = false
                 }
             }
@@ -1073,8 +1071,9 @@ public func TypeCheckExtendCheckDecl(
         if (Ty.IsTyCorrect(extendDecl.GetTy()) && extendDecl.GetTy().getOrThrow().IsImmutableType()) {
             if (let Some(funcDecl) <- (member as FuncDecl)) {
                 if (!extendDecl.GetTy().getOrThrow().IsEnum() && IsIndexAssignmentOperator(funcDecl)) {
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(diag,
                         BasicDiagKindRefactor.sema_immutable_type_extend_assignment_index_operator,
+                        funcDecl,
                         TypeCheckExtendIdentifierRange(funcDecl))
                     builder.Emit()
                     valid = false
@@ -1082,15 +1081,12 @@ public func TypeCheckExtendCheckDecl(
             }
             if (let Some(propDecl) <- (member as PropDecl)) {
                 if (propDecl.isVar) {
-                    let range = if (let Some(modifier) <- FindModifier(propDecl, TokenKind.MUT)) {
-                        MakeRange(modifier.begin, modifier.end)
-                    } else {
-                        TypeCheckExtendIdentifierRange(propDecl)
+                    if (let Some(modifier) <- FindModifier(propDecl, TokenKind.MUT)) {
+                        let builder = DiagnoseRefactor(diag,
+                            BasicDiagKindRefactor.sema_immutable_type_illegal_property,
+                            modifier)
+                        builder.Emit()
                     }
-                    let builder = diag.DiagnoseRefactor(
-                        BasicDiagKindRefactor.sema_immutable_type_illegal_property,
-                        range)
-                    builder.Emit()
                     valid = false
                 }
             }
