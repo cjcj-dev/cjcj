@@ -193,7 +193,7 @@ public open class DefaultCompilerInstance {
         let depInfos = core.importManager.GeneratePkgDepInfo(pkgs)
         let packageDepInfo = if (depInfos.isEmpty()) { "" } else { depInfos[0] }
         let data = SerializePackageToCjoFlatBuffer(pkg, packageDepInfo, core.importManager.GetCjoManager(),
-            invocation.globalOptions.enableCompileDebug, invocation.globalOptions.optimizationLevel, diag: Some(diag),
+            invocation.globalOptions.enableCompileDebug, invocation.globalOptions.optimizationLevel, diag: diag,
             serializingCommon: invocation.globalOptions.outputMode == OutputMode.CHIR,
             exportContent: core.importManager.IsSourceCodeImported(), exportFuncBody: true)
         if (!FileUtil.WriteBufferToASTFile(cjoPath, data)) {

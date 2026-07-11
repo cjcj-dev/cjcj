@@ -13,7 +13,7 @@ import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
 // the builder. FlatBufferBuilder uses 0-based field indexes (Slot).
 
 // ModuleFormat_generated.h:2124-2138 (CreateFullId).
-func CreateFullId(builder: FlatBufferBuilder, pkgId: Int64, decl: FlatBufferOffset, index: UInt32): FlatBufferOffset {
+public func CreateFullId(builder: FlatBufferBuilder, pkgId: Int64, decl: FlatBufferOffset, index: UInt32): FlatBufferOffset {
     builder.StartTable(3)
     builder.AddU32(2, index, defaultValue: 0u32)
     builder.AddOffset(1, decl)
@@ -275,7 +275,7 @@ func CreateAnnoArg(builder: FlatBufferBuilder, name: FlatBufferOffset, expr: UIn
 }
 
 // ModuleFormat_generated.h (CreateCallInfo). callKind default CallKind.NA.
-func CreateCallInfo(builder: FlatBufferBuilder, hasSideEffect: Bool, callKind: UInt8): FlatBufferOffset {
+public func CreateCallInfo(builder: FlatBufferBuilder, hasSideEffect: Bool, callKind: UInt8): FlatBufferOffset {
     builder.StartTable(2)
     builder.AddBool(0, hasSideEffect, defaultValue: false)
     builder.AddU8(1, callKind, defaultValue: MF_CALL_KIND_NA)
@@ -283,28 +283,28 @@ func CreateCallInfo(builder: FlatBufferBuilder, hasSideEffect: Bool, callKind: U
 }
 
 // ModuleFormat_generated.h (CreateUnaryInfo).
-func CreateUnaryInfo(builder: FlatBufferBuilder, op: UInt8): FlatBufferOffset {
+public func CreateUnaryInfo(builder: FlatBufferBuilder, op: UInt8): FlatBufferOffset {
     builder.StartTable(1)
     builder.AddU8(0, op, defaultValue: 0u8)
     return builder.EndTable()
 }
 
 // ModuleFormat_generated.h (CreateBinaryInfo).
-func CreateBinaryInfo(builder: FlatBufferBuilder, op: UInt8): FlatBufferOffset {
+public func CreateBinaryInfo(builder: FlatBufferBuilder, op: UInt8): FlatBufferOffset {
     builder.StartTable(1)
     builder.AddU8(0, op, defaultValue: 0u8)
     return builder.EndTable()
 }
 
 // ModuleFormat_generated.h (CreateIncOrDecInfo).
-func CreateIncOrDecInfo(builder: FlatBufferBuilder, op: UInt8): FlatBufferOffset {
+public func CreateIncOrDecInfo(builder: FlatBufferBuilder, op: UInt8): FlatBufferOffset {
     builder.StartTable(1)
     builder.AddU8(0, op, defaultValue: 0u8)
     return builder.EndTable()
 }
 
 // ModuleFormat_generated.h (CreateLitConstInfo).
-func CreateLitConstInfo(builder: FlatBufferBuilder, strValue: FlatBufferOffset, constKind: UInt8, strKind: UInt8): FlatBufferOffset {
+public func CreateLitConstInfo(builder: FlatBufferBuilder, strValue: FlatBufferOffset, constKind: UInt8, strKind: UInt8): FlatBufferOffset {
     builder.StartTable(3)
     builder.AddU8(2, strKind, defaultValue: 0u8)
     builder.AddU8(1, constKind, defaultValue: 0u8)
@@ -313,7 +313,7 @@ func CreateLitConstInfo(builder: FlatBufferBuilder, strValue: FlatBufferOffset, 
 }
 
 // ModuleFormat_generated.h (CreateReferenceInfo).
-func CreateReferenceInfo(builder: FlatBufferBuilder, reference: FlatBufferOffset, target: FlatBufferOffset,
+public func CreateReferenceInfo(builder: FlatBufferBuilder, reference: FlatBufferOffset, target: FlatBufferOffset,
     instTys: FlatBufferOffset, matchedParentTy: UInt32): FlatBufferOffset {
     builder.StartTable(4)
     builder.AddU32(3, matchedParentTy, defaultValue: 0u32)
@@ -325,7 +325,7 @@ func CreateReferenceInfo(builder: FlatBufferBuilder, reference: FlatBufferOffset
 
 // ModuleFormat_generated.h:4739-4759 (CreateLambdaInfo). funcBody is required;
 // CreateLambdaInfo ends with fbb_.Required(o, LambdaInfo::VT_FUNCBODY).
-func CreateLambdaInfo(builder: FlatBufferBuilder, funcBody: FlatBufferOffset, supportMock: Bool): FlatBufferOffset {
+public func CreateLambdaInfo(builder: FlatBufferBuilder, funcBody: FlatBufferOffset, supportMock: Bool): FlatBufferOffset {
     builder.StartTable(2)
     builder.AddOffset(0, funcBody)
     builder.AddBool(1, supportMock, defaultValue: false)
@@ -335,7 +335,7 @@ func CreateLambdaInfo(builder: FlatBufferBuilder, funcBody: FlatBufferOffset, su
 }
 
 // ModuleFormat_generated.h (CreateAssignInfo).
-func CreateAssignInfo(builder: FlatBufferBuilder, isCompound: Bool, op: UInt8): FlatBufferOffset {
+public func CreateAssignInfo(builder: FlatBufferBuilder, isCompound: Bool, op: UInt8): FlatBufferOffset {
     builder.StartTable(2)
     builder.AddU8(1, op, defaultValue: 0u8)
     builder.AddBool(0, isCompound, defaultValue: false)
@@ -343,7 +343,7 @@ func CreateAssignInfo(builder: FlatBufferBuilder, isCompound: Bool, op: UInt8): 
 }
 
 // ModuleFormat_generated.h (CreateArrayInfo).
-func CreateArrayInfo(builder: FlatBufferBuilder, initFunc: FlatBufferOffset, isValueArray: Bool): FlatBufferOffset {
+public func CreateArrayInfo(builder: FlatBufferBuilder, initFunc: FlatBufferOffset, isValueArray: Bool): FlatBufferOffset {
     builder.StartTable(2)
     builder.AddOffset(0, initFunc)
     builder.AddBool(1, isValueArray, defaultValue: false)
@@ -351,14 +351,14 @@ func CreateArrayInfo(builder: FlatBufferBuilder, initFunc: FlatBufferOffset, isV
 }
 
 // ModuleFormat_generated.h (CreateJumpInfo).
-func CreateJumpInfo(builder: FlatBufferBuilder, isBreak: Bool): FlatBufferOffset {
+public func CreateJumpInfo(builder: FlatBufferBuilder, isBreak: Bool): FlatBufferOffset {
     builder.StartTable(1)
     builder.AddBool(0, isBreak, defaultValue: false)
     return builder.EndTable()
 }
 
 // ModuleFormat_generated.h (CreateFuncArgInfo).
-func CreateFuncArgInfo(builder: FlatBufferBuilder, withInout: Bool, isDefaultVal: Bool): FlatBufferOffset {
+public func CreateFuncArgInfo(builder: FlatBufferBuilder, withInout: Bool, isDefaultVal: Bool): FlatBufferOffset {
     builder.StartTable(2)
     builder.AddBool(1, isDefaultVal, defaultValue: false)
     builder.AddBool(0, withInout, defaultValue: false)
@@ -366,28 +366,28 @@ func CreateFuncArgInfo(builder: FlatBufferBuilder, withInout: Bool, isDefaultVal
 }
 
 // ModuleFormat_generated.h (CreateSubscriptInfo).
-func CreateSubscriptInfo(builder: FlatBufferBuilder, isTupleAccess: Bool): FlatBufferOffset {
+public func CreateSubscriptInfo(builder: FlatBufferBuilder, isTupleAccess: Bool): FlatBufferOffset {
     builder.StartTable(1)
     builder.AddBool(0, isTupleAccess, defaultValue: false)
     return builder.EndTable()
 }
 
 // ModuleFormat_generated.h (CreateMatchInfo).
-func CreateMatchInfo(builder: FlatBufferBuilder, matchMode: Bool): FlatBufferOffset {
+public func CreateMatchInfo(builder: FlatBufferBuilder, matchMode: Bool): FlatBufferOffset {
     builder.StartTable(1)
     builder.AddBool(0, matchMode, defaultValue: false)
     return builder.EndTable()
 }
 
 // ModuleFormat_generated.h (CreateBlockInfo).
-func CreateBlockInfo(builder: FlatBufferBuilder, isExpr: FlatBufferOffset): FlatBufferOffset {
+public func CreateBlockInfo(builder: FlatBufferBuilder, isExpr: FlatBufferOffset): FlatBufferOffset {
     builder.StartTable(1)
     builder.AddOffset(0, isExpr)
     return builder.EndTable()
 }
 
 // ModuleFormat_generated.h (CreateTryInfo).
-func CreateTryInfo(builder: FlatBufferBuilder, resources: FlatBufferOffset, patterns: FlatBufferOffset): FlatBufferOffset {
+public func CreateTryInfo(builder: FlatBufferBuilder, resources: FlatBufferOffset, patterns: FlatBufferOffset): FlatBufferOffset {
     builder.StartTable(2)
     builder.AddOffset(1, patterns)
     builder.AddOffset(0, resources)
@@ -395,14 +395,14 @@ func CreateTryInfo(builder: FlatBufferBuilder, resources: FlatBufferOffset, patt
 }
 
 // ModuleFormat_generated.h (CreateLetPatternDestructorInfo).
-func CreateLetPatternDestructorInfo(builder: FlatBufferBuilder, patterns: FlatBufferOffset): FlatBufferOffset {
+public func CreateLetPatternDestructorInfo(builder: FlatBufferBuilder, patterns: FlatBufferOffset): FlatBufferOffset {
     builder.StartTable(1)
     builder.AddOffset(0, patterns)
     return builder.EndTable()
 }
 
 // ModuleFormat_generated.h (CreateForInInfo). forInKind default ForInKind.NA.
-func CreateForInInfo(builder: FlatBufferBuilder, pattern: FlatBufferOffset, forInKind: UInt8): FlatBufferOffset {
+public func CreateForInInfo(builder: FlatBufferBuilder, pattern: FlatBufferOffset, forInKind: UInt8): FlatBufferOffset {
     builder.StartTable(2)
     builder.AddOffset(0, pattern)
     builder.AddU8(1, forInKind, defaultValue: MF_FOR_IN_KIND_NA)
@@ -410,21 +410,21 @@ func CreateForInInfo(builder: FlatBufferBuilder, pattern: FlatBufferOffset, forI
 }
 
 // ModuleFormat_generated.h (CreateMatchCaseInfo).
-func CreateMatchCaseInfo(builder: FlatBufferBuilder, patterns: FlatBufferOffset): FlatBufferOffset {
+public func CreateMatchCaseInfo(builder: FlatBufferBuilder, patterns: FlatBufferOffset): FlatBufferOffset {
     builder.StartTable(1)
     builder.AddOffset(0, patterns)
     return builder.EndTable()
 }
 
 // ModuleFormat_generated.h (CreateSpawnInfo).
-func CreateSpawnInfo(builder: FlatBufferBuilder, future: FlatBufferOffset): FlatBufferOffset {
+public func CreateSpawnInfo(builder: FlatBufferBuilder, future: FlatBufferOffset): FlatBufferOffset {
     builder.StartTable(1)
     builder.AddOffset(0, future)
     return builder.EndTable()
 }
 
 // ModuleFormat_generated.h (CreateExpr). info is ExprInfo union.
-func CreateExpr(builder: FlatBufferBuilder, kind: UInt16, begin: ArrayList<UInt8>, end: ArrayList<UInt8>, mapExpr: UInt32,
+public func CreateExpr(builder: FlatBufferBuilder, kind: UInt16, begin: ArrayList<UInt8>, end: ArrayList<UInt8>, mapExpr: UInt32,
     operands: FlatBufferOffset, ty: UInt32, overflowPolicy: UInt8, infoType: UInt8, info: FlatBufferOffset): FlatBufferOffset {
     builder.StartTable(9)
     builder.AddOffset(8, info)
@@ -440,7 +440,7 @@ func CreateExpr(builder: FlatBufferBuilder, kind: UInt16, begin: ArrayList<UInt8
 }
 
 // ModuleFormat_generated.h (CreatePattern). values is [ConstValue], kind is int8.
-func CreatePattern(builder: FlatBufferBuilder, kind: Int64, begin: ArrayList<UInt8>, end: ArrayList<UInt8>,
+public func CreatePattern(builder: FlatBufferBuilder, kind: Int64, begin: ArrayList<UInt8>, end: ArrayList<UInt8>,
     patterns: FlatBufferOffset, types: FlatBufferOffset, exprs: FlatBufferOffset, valuesType: FlatBufferOffset,
     values: FlatBufferOffset, matchBeforeRuntime: Bool, needRuntimeTypeCheck: Bool): FlatBufferOffset {
     builder.StartTable(10)

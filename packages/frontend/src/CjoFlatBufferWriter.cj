@@ -8,14 +8,35 @@ import cjcj::basic.Linkage
 import cjcj::mangle.BaseMangler as RealBaseMangler
 import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
 import cjcj::modules.SemaCjoManager
+import cjcj::modules.CreateFullId as CreateModuleFullId
+import cjcj::modules.{CreateArrayInfo, CreateAssignInfo, CreateBinaryInfo, CreateBlockInfo, CreateCallInfo,
+    CreateExpr, CreateForInInfo, CreateFuncArgInfo, CreateIncOrDecInfo, CreateJumpInfo, CreateLambdaInfo,
+    CreateLetPatternDestructorInfo, CreateLitConstInfo, CreateMatchCaseInfo, CreateMatchInfo, CreatePattern,
+    CreateReferenceInfo, CreateSpawnInfo, CreateSubscriptInfo, CreateTryInfo, CreateUnaryInfo}
 import cjcj::option.OptimizationLevel
 import cjcj::sema.TypeManager as FaithfulSemaTypeManager
 import cjcj::utils.FileUtil
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 import cjcj::utils.{MAIN_INVOKE, STATIC_INIT_FUNC}
 
 private let CJO_FILE_IDENTIFIER: String = "CJOF"
 private let INVALID_PACKAGE_INDEX: Int64 = -1
 private let LOCAL_PACKAGE_INDEX: Int64 = -2
+
+// ASTWriterImpl.h:44-50 NodeInfo.
+private class NodeInfo {
+    let begin: ArrayList<UInt8>
+    let end: ArrayList<UInt8>
+    let ty: UInt32
+    var mapExpr: UInt32 = 0u32
+    var ov: UInt8 = 0u8
+
+    init(begin: ArrayList<UInt8>, end: ArrayList<UInt8>, ty: UInt32) {
+        this.begin = begin
+        this.end = end
+        this.ty = ty
+    }
+}
 
 public func SerializePackageToCjoFlatBuffer(
     pkg: Package,
@@ -24,7 +45,7 @@ public func SerializePackageToCjoFlatBuffer(
     debug: Bool,
     optimizationLevel: OptimizationLevel,
     saveFileWithAbsPath!: Bool = false,
-    diag!: Option<DiagnosticEngine> = None,
+    diag!: DiagnosticEngine,
     serializingCommon!: Bool = false,
     exportContent!: Bool = true,
     exportFuncBody!: Bool = true
@@ -42,7 +63,7 @@ private class FrontendCjoFlatBufferWriter {
     private let debugOption: Bool
     private let optimizationLevel: OptimizationLevel
     private let saveFileWithAbsPath: Bool
-    private let diag: Option<DiagnosticEngine>
+    private let diag: DiagnosticEngine
     private var serializingCommon: Bool
     private let exportContent: Bool
     private let exportFuncBody: Bool
@@ -62,13 +83,8 @@ private class FrontendCjoFlatBufferWriter {
     private let completedDeclKeys: HashSet<Node> = HashSet<Node>()
     private let allDecls: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let allExprs: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
-    // Mirrors ASTWriterImpl's savedExprMap (std::map<const Expr*, FormattedIndex>, ASTWriterImpl.h):
-    // expr-identity -> preassigned 1-based index, for dedup + cycle-safety in SaveExpr
-    // (ExprWriter.cpp:59-85). Cangjie has no object-identity hash for arbitrary Expr nodes, so the
-    // pointer-keyed map is modelled as parallel key/value lists probed with refEq (faithful in
-    // behaviour: pointer-identity dedup). Expr counts per func body are small in this slice.
-    private let savedExprKeys: ArrayList<Expr> = ArrayList<Expr>()
-    private let savedExprIndexes: ArrayList<UInt32> = ArrayList<UInt32>()
+    // ASTWriterImpl.h:120 savedExprMap. Node Hashable/Equatable preserves AST object identity.
+    private let savedExprMap: HashMap<Node, UInt32> = HashMap<Node, UInt32>()
     private let paramOwnerMangles: HashMap<String, String> = HashMap<String, String>()
 
     public init(
@@ -77,7 +93,7 @@ private class FrontendCjoFlatBufferWriter {
         debug: Bool,
         optimizationLevel: OptimizationLevel,
         saveFileWithAbsPath!: Bool,
-        diag!: Option<DiagnosticEngine>,
+        diag!: DiagnosticEngine,
         serializingCommon!: Bool,
         exportContent!: Bool,
         exportFuncBody!: Bool
@@ -794,23 +810,29 @@ private class FrontendCjoFlatBufferWriter {
             realExpr = desugar
         }
         if (let Some(pe) <- (realExpr as ParenExpr)) {
-            if (let Some(inner) <- pe.expr) {
-                return GetRealExpr(inner)
-            }
+            return GetRealExpr(pe.expr.getOrThrow())
         }
         return realExpr
     }
 
-    // savedExprMap probe (refEq pointer-identity); returns the preassigned index if already saved.
-    private func FindSavedExpr(realExpr: Expr): Option<UInt32> {
-        var idx = 0
-        while (idx < savedExprKeys.size) {
-            if (refEq(savedExprKeys[idx], realExpr)) {
-                return savedExprIndexes[idx]
-            }
-            idx++
-        }
-        return None
+    // ASTWriterImpl.h:336-343 GetExprIndex.
+    private func GetExprIndex(expr: Expr): UInt32 {
+        let found = savedExprMap.get(GetRealExpr(expr))
+        CJC_ASSERT(found.isSome())
+        return found.getOrThrow()
+    }
+
+    // ExprWriter.cpp:33-43 PackNodeInfo.
+    private func PackNodeInfo(node: Node): NodeInfo {
+        let ty = if (let Some(nodeTy) <- node.GetTy()) { SaveType(nodeTy) } else { 0u32 }
+        return NodeInfo(PositionBytes(node.begin), PositionBytes(node.end), ty)
+    }
+
+    // ExprWriter.cpp:23-31 SaveBasicNodeInfo, expressed through the generated CreateExpr binding.
+    private func SaveBasicNodeInfo(kind: UInt16, operands: FlatBufferOffset, infoType: UInt8,
+        exprInfo: FlatBufferOffset, info: NodeInfo): FlatBufferOffset {
+        return CreateExpr(builder, kind, info.begin, info.end, info.mapExpr, operands, info.ty, info.ov,
+            infoType, exprInfo)
     }
 
     // Recursive EXPR-serialization dispatcher. Mirrors ASTWriter::ASTWriterImpl::SaveExpr
@@ -820,13 +842,12 @@ private class FrontendCjoFlatBufferWriter {
     // opened — honouring FlatBufferBuilder.StartTable's one-open-table constraint.
     private func SaveExpr(expr: Expr): UInt32 {
         let realExpr = GetRealExpr(expr)
-        if (let Some(found) <- FindSavedExpr(realExpr)) {
+        if (let Some(found) <- savedExprMap.get(realExpr)) {
             return found
         }
         let exprIndex = UInt32(allExprs.size + 1)
         allExprs.add(0u32)
-        savedExprKeys.add(realExpr)
-        savedExprIndexes.add(exprIndex)
+        savedExprMap[realExpr] = exprIndex
         let offset = SaveExprByKind(realExpr, expr.overflowStrategy)
         // Overwrite the slot with the actual expr.
         allExprs[Int64(exprIndex) - 1] = offset
@@ -838,165 +859,138 @@ private class FrontendCjoFlatBufferWriter {
     // MatchExpr, ForInExpr, IfExpr, Block, ReturnExpr, LitConstExpr, ArrayLit, TupleLit. Other kinds throw
     // a package_unsupport_save diagnostic through SaveUnsupportExpr.
     private func SaveExprByKind(realExpr: Expr, overflowStrategy: OverflowStrategy): FlatBufferOffset {
+        let nodeInfo = PackNodeInfo(realExpr)
+        nodeInfo.mapExpr = if (let Some(jump) <- (realExpr as JumpExpr)) {
+            if (let Some(refLoop) <- jump.refLoop) { GetExprIndex(refLoop) } else { 0u32 }
+        } else if (let Some(mapExpr) <- realExpr.mapExpr) {
+            GetExprIndex(mapExpr)
+        } else {
+            0u32
+        }
+        nodeInfo.ov = OverflowPolicyToFlat(overflowStrategy)
         if (let Some(pte) <- (realExpr as PrimitiveTypeExpr)) {
-            return SavePrimitiveTypeExpr(pte)
+            return SaveExpression(pte, nodeInfo)
         }
         if (let Some(we) <- (realExpr as WildcardExpr)) {
-            return SaveWildcardExpr(we)
+            return SaveExpression(we, nodeInfo)
         }
         if (let Some(block) <- (realExpr as Block)) {
-            return SaveBlock(block)
+            return SaveExpression(block, nodeInfo)
         }
         if (let Some(ce) <- (realExpr as CallExpr)) {
-            return SaveCallExpr(ce)
+            return SaveExpression(ce, nodeInfo)
         }
         if (let Some(ue) <- (realExpr as UnaryExpr)) {
-            return SaveUnaryExpr(ue)
+            return SaveExpression(ue, nodeInfo)
         }
         if (let Some(ide) <- (realExpr as IncOrDecExpr)) {
-            return SaveIncOrDecExpr(ide)
+            return SaveExpression(ide, nodeInfo)
         }
         if (let Some(be) <- (realExpr as BinaryExpr)) {
-            return SaveBinaryExpr(be)
+            return SaveExpression(be, nodeInfo)
         }
         if (let Some(se) <- (realExpr as SubscriptExpr)) {
-            return SaveSubscriptExpr(se)
+            return SaveExpression(se, nodeInfo)
         }
         if (let Some(ae) <- (realExpr as AssignExpr)) {
-            return SaveAssignExpr(ae)
+            return SaveExpression(ae, nodeInfo)
         }
         if (let Some(je) <- (realExpr as JumpExpr)) {
-            return SaveJumpExpr(je)
+            return SaveExpression(je, nodeInfo)
         }
         if (let Some(pe) <- (realExpr as PointerExpr)) {
-            return SavePointerExpr(pe)
+            return SaveExpression(pe, nodeInfo)
         }
         if (let Some(tce) <- (realExpr as TypeConvExpr)) {
-            return SaveTypeConvExpr(tce)
+            return SaveExpression(tce, nodeInfo)
         }
         if (let Some(te) <- (realExpr as ThrowExpr)) {
-            return SaveThrowExpr(te)
+            return SaveExpression(te, nodeInfo)
         }
         if (let Some(se) <- (realExpr as SpawnExpr)) {
-            return SaveSpawnExpr(se)
+            return SaveExpression(se, nodeInfo)
         }
         if (let Some(te) <- (realExpr as TryExpr)) {
-            return SaveTryExpr(te)
+            return SaveExpression(te, nodeInfo)
         }
         if (let Some(ie) <- (realExpr as IfExpr)) {
-            return SaveIfExpr(ie)
+            return SaveExpression(ie, nodeInfo)
         }
         if (let Some(we) <- (realExpr as WhileExpr)) {
-            return SaveWhileExpr(we)
+            return SaveExpression(we, nodeInfo)
         }
         if (let Some(dwe) <- (realExpr as DoWhileExpr)) {
-            return SaveDoWhileExpr(dwe)
+            return SaveExpression(dwe, nodeInfo)
         }
         if (let Some(me) <- (realExpr as MatchExpr)) {
-            return SaveMatchExpr(me)
+            return SaveExpression(me, nodeInfo)
         }
         if (let Some(lpd) <- (realExpr as LetPatternDestructor)) {
-            return SaveLetPatternDestructor(lpd)
+            return SaveExpression(lpd, nodeInfo)
         }
         if (let Some(fie) <- (realExpr as ForInExpr)) {
-            return SaveForInExpr(fie)
+            return SaveExpression(fie, nodeInfo)
         }
         if (let Some(ae2) <- (realExpr as ArrayExpr)) {
-            return SaveArrayExpr(ae2)
+            return SaveExpression(ae2, nodeInfo)
         }
         if (let Some(al) <- (realExpr as ArrayLit)) {
-            return SaveArrayLit(al)
+            return SaveExpression(al, nodeInfo)
         }
         if (let Some(tl) <- (realExpr as TupleLit)) {
-            return SaveTupleLit(tl)
+            return SaveExpression(tl, nodeInfo)
         }
         if (let Some(le) <- (realExpr as LambdaExpr)) {
-            return SaveLambdaExpr(le)
+            return SaveExpression(le, nodeInfo)
         }
         if (let Some(ma) <- (realExpr as MemberAccess)) {
-            return SaveMemberAccess(ma)
+            return SaveExpression(ma, nodeInfo)
         }
         if (let Some(refExpr) <- (realExpr as RefExpr)) {
-            return SaveRefExpr(refExpr)
+            return SaveExpression(refExpr, nodeInfo)
         }
         if (let Some(re) <- (realExpr as ReturnExpr)) {
-            return SaveReturnExpr(re)
+            return SaveExpression(re, nodeInfo)
         }
         if (let Some(lce) <- (realExpr as LitConstExpr)) {
-            return SaveLitConstExpr(lce)
+            return SaveExpression(lce, nodeInfo)
         }
         if (let Some(pe2) <- (realExpr as PerformExpr)) {
-            return SavePerformExpr(pe2)
+            return SaveExpression(pe2, nodeInfo)
         }
-        return SaveUnsupportExpr(realExpr, overflowStrategy)
+        return SaveUnsupportExpr(realExpr, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:87-95 SaveUnsupportExpr: diagnose the unsupported expression and
     // finish a PackageFormat::Expr with SaveBasicNodeInfo fields, leaving kind as the schema default.
-    private func SaveUnsupportExpr(expr: Expr, overflowStrategy: OverflowStrategy): FlatBufferOffset {
-        if (let Some(writerDiag) <- diag) {
-            DiagnoseRefactor(writerDiag.AsBasicDiagnosticEngine(), DiagKindRefactor.package_unsupport_save,
-                expr, arguments: ["expression", ASTKindName(expr.astKind)]).Emit()
-        }
-        let begin = PositionBytes(expr.begin)
-        let end = PositionBytes(expr.end)
-        let typeIndex = SaveExprType(expr)
-        let mapExprIndex = if (let Some(jump) <- (expr as JumpExpr)) {
-            if (let Some(refLoop) <- jump.refLoop) { SaveExpr(refLoop) } else { 0u32 }
-        } else if (let Some(mapExpr) <- expr.mapExpr) {
-            SaveExpr(mapExpr)
-        } else {
-            0u32
-        }
-        builder.StartTable(9)
-        builder.AddU8(6, OverflowPolicyToFlat(overflowStrategy))
-        builder.AddU32(5, typeIndex)
-        builder.AddU32(3, mapExprIndex)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        return builder.EndTable()
+    private func SaveUnsupportExpr(expr: Expr, nodeInfo: NodeInfo): FlatBufferOffset {
+        DiagnoseRefactor(diag.AsBasicDiagnosticEngine(), DiagKindRefactor.package_unsupport_save,
+            expr, arguments: ["expression", ASTKindName(expr.astKind)]).Emit()
+        return SaveBasicNodeInfo(0u16, 0u32, 0u8, 0u32, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:97-103 SaveExpression(PrimitiveTypeExpr). It carries only basic Expr fields.
-    private func SavePrimitiveTypeExpr(pte: PrimitiveTypeExpr): FlatBufferOffset {
-        let begin = PositionBytes(pte.begin)
-        let end = PositionBytes(pte.end)
-        let typeIndex = SaveExprType(pte)
-        builder.StartTable(9)
-        builder.AddU32(5, typeIndex)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_PrimitiveTypeExpr is index 2 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 2u16)
-        return builder.EndTable()
+    private func SaveExpression(_pte: PrimitiveTypeExpr, nodeInfo: NodeInfo): FlatBufferOffset {
+        return SaveBasicNodeInfo(2u16, 0u32, 0u8, 0u32, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:320-332 SaveExpression(PointerExpr): optional operand 0 is
     // a FuncArg, serialized via SaveFuncArg. PointerExpr has no ExprInfo union.
     // ExprKind_PointerExpr is index 15 of enum ExprKind (ModuleFormat.fbs:333-373).
-    private func SavePointerExpr(pe: PointerExpr): FlatBufferOffset {
+    private func SaveExpression(pe: PointerExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         let operands = ArrayList<UInt32>()
         if (let Some(arg) <- pe.arg) {
             operands.add(SaveFuncArg(arg))
         }
         let operandsVec = builder.CreateVectorU32(operands)
 
-        let begin = PositionBytes(pe.begin)
-        let end = PositionBytes(pe.end)
-        let typeIndex = SaveExprType(pe)
-        builder.StartTable(9)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        builder.AddU16(0, 15u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(15u16, operandsVec, 0u8, 0u32, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:520-549 SaveExpression(Block) + BlockInfo (fbs:483-485).
     // Child offsets (operands, isExpr bool vector, BlockInfo table) are all built and CLOSED
     // before the Block's Expr table is opened.
-    private func SaveBlock(block: Block): FlatBufferOffset {
+    private func SaveExpression(block: Block, nodeInfo: NodeInfo): FlatBufferOffset {
         let operands = ArrayList<UInt32>()
         let childrenCond = ArrayList<Bool>()
         for (node in block.body) {
@@ -1007,118 +1001,58 @@ private class FrontendCjoFlatBufferWriter {
                 operands.add(SaveDeclIndex(childDecl, false))
                 childrenCond.add(false)
             } else {
-                throw IllegalArgumentException("Block child is neither Expr nor Decl")
+                CJC_ABORT()
             }
         }
         // Save the 'unsafe' condition as the last value (childrenCond has size+1 entries).
         childrenCond.add(block.TestAttr(Attribute.UNSAFE))
         let operandsVec = builder.CreateVectorU32(operands)
         let condVec = builder.CreateVectorBool(childrenCond)
-        // BlockInfo: field 0 (slot 4) isExpr (bool vector).
-        builder.StartTable(1)
-        builder.AddOffset(0, condVec)
-        let info = builder.EndTable()
+        let info = CreateBlockInfo(builder, condVec)
 
-        let begin = PositionBytes(block.begin)
-        let end = PositionBytes(block.end)
-        let typeIndex = SaveExprType(block)
-        // Expr: 0 kind, 1 begin, 2 end, 3 mapExpr, 4 operands, 5 type, 6 overflowPolicy,
-        //       7 info_type, 8 info. (fbs:504-513)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        // ExprInfo union (fbs:412-432): BlockInfo is the 14th member, union tag value 14.
-        builder.AddU8(7, 14u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_Block is index 28 of enum ExprKind (fbs:333-373; LambdaExpr=27, Block=28).
-        builder.AddU16(0, 28u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(28u16, operandsVec, 14u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:507-517 SaveExpression(LambdaExpr): LambdaInfo carries the
     // nested FuncBody and supportMock flag; ExprInfo_LambdaInfo's union tag value is 7.
-    private func SaveLambdaExpr(le: LambdaExpr): FlatBufferOffset {
+    private func SaveExpression(le: LambdaExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- le.funcBody) {
             throw IllegalArgumentException("LambdaExpr without FuncBody is not supported in faithful .cjo writer")
         }
         let funcBody = SaveFuncBody(le.funcBody.getOrThrow())
-        builder.StartTable(2)
-        builder.AddBool(1, le.TestAttr(Attribute.MOCK_SUPPORTED))
-        builder.AddOffset(0, funcBody)
-        let info = builder.EndTable()
+        let info = CreateLambdaInfo(builder, funcBody, le.TestAttr(Attribute.MOCK_SUPPORTED))
 
-        let begin = PositionBytes(le.begin)
-        let end = PositionBytes(le.end)
-        let typeIndex = SaveExprType(le)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        builder.AddU8(7, 7u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_LambdaExpr is index 27 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 27u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(27u16, 0u32, 7u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:203-215 SaveExpression(UnaryExpr): operand 0 is expr and UnaryInfo
     // carries only OP_KIND_MAP.at(ue.op). ExprInfo_UnaryInfo's union tag value is 2 (fbs:412-438).
-    private func SaveUnaryExpr(ue: UnaryExpr): FlatBufferOffset {
+    private func SaveExpression(ue: UnaryExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- ue.expr) {
             throw IllegalArgumentException("UnaryExpr without operand is not supported in faithful .cjo writer")
         }
         let operands = ArrayList<UInt32>()
         operands.add(SaveExpr(ue.expr.getOrThrow()))
         let operandsVec = builder.CreateVectorU32(operands)
-        builder.StartTable(1)
-        builder.AddU8(0, OperatorKindToFlat(ue.op))
-        let info = builder.EndTable()
+        let info = CreateUnaryInfo(builder, OperatorKindToFlat(ue.op))
 
-        let begin = PositionBytes(ue.begin)
-        let end = PositionBytes(ue.end)
-        let typeIndex = SaveExprType(ue)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        builder.AddU8(7, 2u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_UnaryExpr is index 8 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 8u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(8u16, operandsVec, 2u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:218-230 SaveExpression(IncOrDecExpr): operand 0 is expr and IncOrDecInfo
     // carries only OP_KIND_MAP.at(ide.op). ExprInfo_IncOrDecInfo's union tag value is 4.
-    private func SaveIncOrDecExpr(ide: IncOrDecExpr): FlatBufferOffset {
+    private func SaveExpression(ide: IncOrDecExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         let operands = ArrayList<UInt32>()
         operands.add(SaveExpr(ide.expr.getOrThrow()))
         let operandsVec = builder.CreateVectorU32(operands)
-        builder.StartTable(1)
-        builder.AddU8(0, OperatorKindToFlat(ide.op))
-        let info = builder.EndTable()
+        let info = CreateIncOrDecInfo(builder, OperatorKindToFlat(ide.op))
 
-        let begin = PositionBytes(ide.begin)
-        let end = PositionBytes(ide.end)
-        let typeIndex = SaveExprType(ide)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        builder.AddU8(7, 4u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_IncOrDecExpr is index 9 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 9u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(9u16, operandsVec, 4u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:427-441 SaveExpression(IfExpr): operands are condExpr, thenBody, and
     // elseBody-or-INVALID_FORMAT_INDEX. There is no IfExprInfo table in ModuleFormat.fbs.
-    private func SaveIfExpr(ie: IfExpr): FlatBufferOffset {
+    private func SaveExpression(ie: IfExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- ie.condExpr) {
             throw IllegalArgumentException("IfExpr without condition is not supported in faithful .cjo writer")
         }
@@ -1132,22 +1066,12 @@ private class FrontendCjoFlatBufferWriter {
         operands.add(elseIdx)
         let operandsVec = builder.CreateVectorU32(operands)
 
-        let begin = PositionBytes(ie.begin)
-        let end = PositionBytes(ie.end)
-        let typeIndex = SaveExprType(ie)
-        builder.StartTable(9)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_IfExpr is index 23 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 23u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(23u16, operandsVec, 0u8, 0u32, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:347-357 SaveExpression(ThrowExpr): operand 0 is the thrown expr.
     // ExprKind_ThrowExpr is index 17 of enum ExprKind (ModuleFormat.fbs:333-373).
-    private func SaveThrowExpr(te: ThrowExpr): FlatBufferOffset {
+    private func SaveExpression(te: ThrowExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- te.expr) {
             throw IllegalArgumentException("ThrowExpr without expr is not supported in faithful .cjo writer")
         }
@@ -1155,41 +1079,22 @@ private class FrontendCjoFlatBufferWriter {
         operands.add(SaveExpr(te.expr.getOrThrow()))
         let operandsVec = builder.CreateVectorU32(operands)
 
-        let begin = PositionBytes(te.begin)
-        let end = PositionBytes(te.end)
-        let typeIndex = SaveExprType(te)
-        builder.StartTable(9)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        builder.AddU16(0, 17u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(17u16, operandsVec, 0u8, 0u32, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:360-370 SaveExpression(PerformExpr): operand 0 is the performed expr.
-    private func SavePerformExpr(pe: PerformExpr): FlatBufferOffset {
+    private func SaveExpression(pe: PerformExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         let operands = ArrayList<UInt32>()
         operands.add(SaveExpr(pe.expr.getOrThrow()))
         let operandsVec = builder.CreateVectorU32(operands)
 
-        let begin = PositionBytes(pe.begin)
-        let end = PositionBytes(pe.end)
-        let typeIndex = SaveExprType(pe)
-        builder.StartTable(9)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_PerformExpr is index 37 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 37u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(37u16, operandsVec, 0u8, 0u32, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:444-474 SaveExpression(TryExpr): operands are tryBlock, each catch block,
     // then a mandatory finallyBlock-or-0 slot. TryInfo owns resource FullIds and catch patterns
     // (ModuleFormat.fbs:486-489); ExprInfo_TryInfo's union tag value is 15.
-    private func SaveTryExpr(te: TryExpr): FlatBufferOffset {
+    private func SaveExpression(te: TryExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- te.tryBlock) {
             throw IllegalArgumentException("TryExpr without tryBlock is not supported in faithful .cjo writer")
         }
@@ -1213,64 +1118,28 @@ private class FrontendCjoFlatBufferWriter {
         let operandsVec = builder.CreateVectorU32(operands)
         let patternsVec = builder.CreateVectorOffsets(patterns)
 
-        builder.StartTable(2)
-        builder.AddOffset(1, patternsVec)
-        builder.AddOffset(0, resourcesVec)
-        let info = builder.EndTable()
+        let info = CreateTryInfo(builder, resourcesVec, patternsVec)
 
-        let begin = PositionBytes(te.begin)
-        let end = PositionBytes(te.end)
-        let typeIndex = SaveExprType(te)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        builder.AddU8(7, 15u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_TryExpr is index 24 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 24u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(24u16, operandsVec, 15u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:105-111 SaveExpression(WildcardExpr). It carries only basic Expr fields.
-    private func SaveWildcardExpr(we: WildcardExpr): FlatBufferOffset {
-        let begin = PositionBytes(we.begin)
-        let end = PositionBytes(we.end)
-        let typeIndex = SaveExprType(we)
-        builder.StartTable(9)
-        builder.AddU32(5, typeIndex)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_WildcardExpr is index 1 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 1u16)
-        return builder.EndTable()
+    private func SaveExpression(_we: WildcardExpr, nodeInfo: NodeInfo): FlatBufferOffset {
+        return SaveBasicNodeInfo(1u16, 0u32, 0u8, 0u32, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:125-134 SaveExpression(JumpExpr): no operands; JumpInfo carries isBreak.
     // ExprKind_JumpExpr is index 4 and ExprInfo_JumpInfo is union tag 10 (ModuleFormat.fbs:333-373, 412-432).
-    private func SaveJumpExpr(je: JumpExpr): FlatBufferOffset {
-        builder.StartTable(1)
-        builder.AddBool(0, je.isBreak)
-        let info = builder.EndTable()
+    private func SaveExpression(je: JumpExpr, nodeInfo: NodeInfo): FlatBufferOffset {
+        let info = CreateJumpInfo(builder, je.isBreak)
 
-        let begin = PositionBytes(je.begin)
-        let end = PositionBytes(je.end)
-        let typeIndex = SaveExprType(je)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        builder.AddU8(7, 10u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        builder.AddU16(0, 4u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(4u16, 0u32, 10u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:551-577 SaveExpression(MatchExpr). MatchInfo carries matchMode
     // (ModuleFormat.fbs:480-482, union tag 13). With a selector, operands are selector followed by
     // MatchCase wrapper indexes; without a selector, operands are MatchCaseOther wrapper indexes.
-    private func SaveMatchExpr(me: MatchExpr): FlatBufferOffset {
+    private func SaveExpression(me: MatchExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         let operands = ArrayList<UInt32>()
         if (me.matchMode) {
             if (let None <- me.selector) {
@@ -1286,23 +1155,9 @@ private class FrontendCjoFlatBufferWriter {
             }
         }
         let operandsVec = builder.CreateVectorU32(operands)
-        builder.StartTable(1)
-        builder.AddBool(0, me.matchMode)
-        let info = builder.EndTable()
+        let info = CreateMatchInfo(builder, me.matchMode)
 
-        let begin = PositionBytes(me.begin)
-        let end = PositionBytes(me.end)
-        let typeIndex = SaveExprType(me)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        builder.AddU8(7, 13u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_MatchExpr is index 21 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 21u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(21u16, operandsVec, 13u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:620-645 SaveMatchCase. MatchCase is stored in allExprs as an Expr table
@@ -1310,6 +1165,7 @@ private class FrontendCjoFlatBufferWriter {
     private func SaveMatchCase(mc: MatchCase): UInt32 {
         let exprIndex = UInt32(allExprs.size + 1)
         allExprs.add(0u32)
+        let nodeInfo = PackNodeInfo(mc)
         let operands = ArrayList<UInt32>()
         let guardIndex = if (let Some(guard) <- mc.patternGuard) { SaveExpr(guard) } else { 0u32 }
         operands.add(guardIndex)
@@ -1323,23 +1179,9 @@ private class FrontendCjoFlatBufferWriter {
         operands.add(SaveExpr(mc.exprOrDecls.getOrThrow()))
         let operandsVec = builder.CreateVectorU32(operands)
         let patternsVec = builder.CreateVectorOffsets(patterns)
-        builder.StartTable(1)
-        builder.AddOffset(0, patternsVec)
-        let info = builder.EndTable()
+        let info = CreateMatchCaseInfo(builder, patternsVec)
 
-        let begin = PositionBytes(mc.begin)
-        let end = PositionBytes(mc.end)
-        let typeIndex = if (let Some(ty) <- mc.GetTy()) { SaveType(ty) } else { 0u32 }
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        builder.AddU8(7, 18u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_MatchCase is index 29 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 29u16)
-        allExprs[Int64(exprIndex) - 1] = builder.EndTable()
+        allExprs[Int64(exprIndex) - 1] = SaveBasicNodeInfo(29u16, operandsVec, 18u8, info, nodeInfo)
         return exprIndex
     }
 
@@ -1348,6 +1190,7 @@ private class FrontendCjoFlatBufferWriter {
     private func SaveMatchCaseOther(mco: MatchCaseOther): UInt32 {
         let exprIndex = UInt32(allExprs.size + 1)
         allExprs.add(0u32)
+        let nodeInfo = PackNodeInfo(mco)
         if (let None <- mco.matchExpr) {
             throw IllegalArgumentException("MatchCaseOther without condition is not supported")
         }
@@ -1359,23 +1202,13 @@ private class FrontendCjoFlatBufferWriter {
         operands.add(SaveExpr(mco.exprOrDecls.getOrThrow()))
         let operandsVec = builder.CreateVectorU32(operands)
 
-        let begin = PositionBytes(mco.begin)
-        let end = PositionBytes(mco.end)
-        let typeIndex = if (let Some(ty) <- mco.GetTy()) { SaveType(ty) } else { 0u32 }
-        builder.StartTable(9)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_MatchCaseOther is index 30 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 30u16)
-        allExprs[Int64(exprIndex) - 1] = builder.EndTable()
+        allExprs[Int64(exprIndex) - 1] = SaveBasicNodeInfo(30u16, operandsVec, 0u8, 0u32, nodeInfo)
         return exprIndex
     }
 
     // Mirrors ExprWriter.cpp:579-595 SaveExpression(LetPatternDestructor): operand 0 is the
     // initializer, and LetPatternDestructorInfo owns the serialized pattern list (fbs:490-492).
-    private func SaveLetPatternDestructor(lpd: LetPatternDestructor): FlatBufferOffset {
+    private func SaveExpression(lpd: LetPatternDestructor, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- lpd.initializer) {
             throw IllegalArgumentException(
                 "LetPatternDestructor without initializer is not supported in faithful .cjo writer")
@@ -1390,31 +1223,16 @@ private class FrontendCjoFlatBufferWriter {
         operands.add(initializer)
         let operandsVec = builder.CreateVectorU32(operands)
 
-        builder.StartTable(1)
-        builder.AddOffset(0, patternsVec)
-        let info = builder.EndTable()
+        let info = CreateLetPatternDestructorInfo(builder, patternsVec)
 
-        let begin = PositionBytes(lpd.begin)
-        let end = PositionBytes(lpd.end)
-        let typeIndex = SaveExprType(lpd)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        // ExprInfo_LetPatternDestructorInfo is union tag 16 (ModuleFormat.fbs:412-432).
-        builder.AddU8(7, 16u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_LetPatternDestructor is index 22 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 22u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(22u16, operandsVec, 16u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:598-617 SaveExpression(ForInExpr): operands are inExpression,
     // patternGuard-or-0, then body. ForInInfo owns the loop pattern and ForInKind
     // (ModuleFormat.fbs:493-496, union tag 17). C++ SaveExpr has already unwrapped desugarExpr
     // (ExprWriter.cpp:45-56), so this is the original ForInExpr only when it has no desugarExpr.
-    private func SaveForInExpr(fie: ForInExpr): FlatBufferOffset {
+    private func SaveExpression(fie: ForInExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- fie.pattern) {
             throw IllegalArgumentException("ForInExpr without pattern is not supported in faithful .cjo writer")
         }
@@ -1432,30 +1250,14 @@ private class FrontendCjoFlatBufferWriter {
         operands.add(SaveExpr(fie.body.getOrThrow()))
         let operandsVec = builder.CreateVectorU32(operands)
 
-        builder.StartTable(2)
-        builder.AddU8(1, ForInKindToFlat(fie.forInKind))
-        builder.AddOffset(0, pattern)
-        let info = builder.EndTable()
+        let info = CreateForInInfo(builder, pattern, ForInKindToFlat(fie.forInKind))
 
-        let begin = PositionBytes(fie.begin)
-        let end = PositionBytes(fie.end)
-        let typeIndex = SaveExprType(fie)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        // ExprInfo_ForInInfo is union tag 17 (ModuleFormat.fbs:412-432).
-        builder.AddU8(7, 17u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_ForInExpr is index 35 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 35u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(35u16, operandsVec, 17u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:284-299 SaveExpression(AssignExpr): operands are leftValue and
     // rightExpr; AssignInfo carries isCompound plus OP_KIND_MAP.at(ae.op).
-    private func SaveAssignExpr(ae: AssignExpr): FlatBufferOffset {
+    private func SaveExpression(ae: AssignExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- ae.leftValue) {
             throw IllegalArgumentException("AssignExpr without leftValue is not supported in faithful .cjo writer")
         }
@@ -1466,30 +1268,14 @@ private class FrontendCjoFlatBufferWriter {
         operands.add(SaveExpr(ae.leftValue.getOrThrow()))
         operands.add(SaveExpr(ae.rightExpr.getOrThrow()))
         let operandsVec = builder.CreateVectorU32(operands)
-        builder.StartTable(2)
-        builder.AddU8(1, OperatorKindToFlat(ae.op))
-        builder.AddBool(0, ae.isCompound)
-        let info = builder.EndTable()
+        let info = CreateAssignInfo(builder, ae.isCompound, OperatorKindToFlat(ae.op))
 
-        let begin = PositionBytes(ae.begin)
-        let end = PositionBytes(ae.end)
-        let typeIndex = SaveExprType(ae)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        // ExprInfo_AssignInfo is union tag 8 (ModuleFormat.fbs:412-432).
-        builder.AddU8(7, 8u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_AssignExpr is index 13 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 13u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(13u16, operandsVec, 8u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:334-345 SaveExpression(TypeConvExpr): operand 0 is the converted expr.
     // ExprKind_TypeConvExpr is index 16 of enum ExprKind (ModuleFormat.fbs:333-373).
-    private func SaveTypeConvExpr(tce: TypeConvExpr): FlatBufferOffset {
+    private func SaveExpression(tce: TypeConvExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- tce.expr) {
             throw IllegalArgumentException("TypeConvExpr without expr is not supported in faithful .cjo writer")
         }
@@ -1497,21 +1283,12 @@ private class FrontendCjoFlatBufferWriter {
         operands.add(SaveExpr(tce.expr.getOrThrow()))
         let operandsVec = builder.CreateVectorU32(operands)
 
-        let begin = PositionBytes(tce.begin)
-        let end = PositionBytes(tce.end)
-        let typeIndex = SaveExprType(tce)
-        builder.StartTable(9)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        builder.AddU16(0, 16u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(16u16, operandsVec, 0u8, 0u32, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:373-392 SaveExpression(SpawnExpr): optional operand 0 is the
     // thread-context arg. SpawnInfo owns futureObj as a local FullId after the VarDecl is serialized.
-    private func SaveSpawnExpr(se: SpawnExpr): FlatBufferOffset {
+    private func SaveExpression(se: SpawnExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- se.futureObj) {
             throw IllegalArgumentException("SpawnExpr without futureObj is not supported in faithful .cjo writer")
         }
@@ -1522,28 +1299,13 @@ private class FrontendCjoFlatBufferWriter {
         let operandsVec = builder.CreateVectorU32(operands)
         let futureIndex = SaveDeclIndex(se.futureObj.getOrThrow(), false)
         let future = CreateFullId(LOCAL_PACKAGE_INDEX, "", futureIndex)
-        builder.StartTable(1)
-        builder.AddOffset(0, future)
-        let info = builder.EndTable()
+        let info = CreateSpawnInfo(builder, future)
 
-        let begin = PositionBytes(se.begin)
-        let end = PositionBytes(se.end)
-        let typeIndex = SaveExprType(se)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        // ExprInfo_SpawnInfo is union tag 19 (ModuleFormat.fbs:412-432).
-        builder.AddU8(7, 19u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_SpawnExpr is index 18 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 18u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(18u16, operandsVec, 19u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:477-490 SaveExpression(WhileExpr): operands are condExpr and body.
-    private func SaveWhileExpr(we: WhileExpr): FlatBufferOffset {
+    private func SaveExpression(we: WhileExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- we.condExpr) {
             throw IllegalArgumentException("WhileExpr without condition is not supported in faithful .cjo writer")
         }
@@ -1555,21 +1317,11 @@ private class FrontendCjoFlatBufferWriter {
         operands.add(SaveExpr(we.body.getOrThrow()))
         let operandsVec = builder.CreateVectorU32(operands)
 
-        let begin = PositionBytes(we.begin)
-        let end = PositionBytes(we.end)
-        let typeIndex = SaveExprType(we)
-        builder.StartTable(9)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_WhileExpr is index 25 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 25u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(25u16, operandsVec, 0u8, 0u32, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:492-505 SaveExpression(DoWhileExpr): operands are body and condExpr.
-    private func SaveDoWhileExpr(dwe: DoWhileExpr): FlatBufferOffset {
+    private func SaveExpression(dwe: DoWhileExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- dwe.body) {
             throw IllegalArgumentException("DoWhileExpr without body is not supported in faithful .cjo writer")
         }
@@ -1581,22 +1333,12 @@ private class FrontendCjoFlatBufferWriter {
         operands.add(SaveExpr(dwe.condExpr.getOrThrow()))
         let operandsVec = builder.CreateVectorU32(operands)
 
-        let begin = PositionBytes(dwe.begin)
-        let end = PositionBytes(dwe.end)
-        let typeIndex = SaveExprType(dwe)
-        builder.StartTable(9)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_DoWhileExpr is index 26 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 26u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(26u16, operandsVec, 0u8, 0u32, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:246-261 SaveExpression(BinaryExpr): operands are left then right, and
     // BinaryInfo carries only OP_KIND_MAP.at(be.op). ExprInfo_BinaryInfo's union tag value is 3.
-    private func SaveBinaryExpr(be: BinaryExpr): FlatBufferOffset {
+    private func SaveExpression(be: BinaryExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- be.leftExpr) {
             throw IllegalArgumentException("BinaryExpr without left operand is not supported in faithful .cjo writer")
         }
@@ -1607,33 +1349,16 @@ private class FrontendCjoFlatBufferWriter {
         operands.add(SaveExpr(be.leftExpr.getOrThrow()))
         operands.add(SaveExpr(be.rightExpr.getOrThrow()))
         let operandsVec = builder.CreateVectorU32(operands)
-        builder.StartTable(1)
-        builder.AddU8(0, OperatorKindToFlat(be.op))
-        let info = builder.EndTable()
+        let info = CreateBinaryInfo(builder, OperatorKindToFlat(be.op))
 
-        let begin = PositionBytes(be.begin)
-        let end = PositionBytes(be.end)
-        let typeIndex = SaveExprType(be)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        builder.AddU8(7, 3u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_BinaryExpr is index 11 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 11u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(11u16, operandsVec, 3u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:264-281 SaveExpression(SubscriptExpr): operands are baseExpr followed by
     // indexExprs; SubscriptInfo carries isTupleAccess (ExprInfo union tag 12).
-    private func SaveSubscriptExpr(se: SubscriptExpr): FlatBufferOffset {
+    private func SaveExpression(se: SubscriptExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- se.baseExpr) {
             throw IllegalArgumentException("SubscriptExpr without baseExpr is not supported in faithful .cjo writer")
-        }
-        if (se.indexExprs.isEmpty()) {
-            throw IllegalArgumentException("SubscriptExpr without indexExprs is not supported in faithful .cjo writer")
         }
         let operands = ArrayList<UInt32>()
         operands.add(SaveExpr(se.baseExpr.getOrThrow()))
@@ -1641,108 +1366,55 @@ private class FrontendCjoFlatBufferWriter {
             operands.add(SaveExpr(indexExpr))
         }
         let operandsVec = builder.CreateVectorU32(operands)
-        builder.StartTable(1)
-        builder.AddBool(0, se.isTupleAccess)
-        let info = builder.EndTable()
+        let info = CreateSubscriptInfo(builder, se.isTupleAccess)
 
-        let begin = PositionBytes(se.begin)
-        let end = PositionBytes(se.end)
-        let typeIndex = SaveExprType(se)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        builder.AddU8(7, 12u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_SubscriptExpr is index 12 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 12u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(12u16, operandsVec, 12u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:302-317 SaveExpression(ArrayExpr): operands are FuncArg wrapper indexes,
     // ArrayInfo carries initFunc and isValueArray.
-    private func SaveArrayExpr(ae: ArrayExpr): FlatBufferOffset {
+    private func SaveExpression(ae: ArrayExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         let operands = ArrayList<UInt32>()
         for (arg in ae.args) {
             operands.add(SaveFuncArg(arg))
         }
         let operandsVec = builder.CreateVectorU32(operands)
         let initFunc = if (let Some(decl) <- ae.initFunc) { CreateFullIdForDecl(decl) } else { CreateInvalidFullId() }
-        builder.StartTable(2)
-        builder.AddBool(1, ae.isValueArray)
-        builder.AddOffset(0, initFunc)
-        let info = builder.EndTable()
+        let info = CreateArrayInfo(builder, initFunc, ae.isValueArray)
 
-        let begin = PositionBytes(ae.begin)
-        let end = PositionBytes(ae.end)
-        let typeIndex = SaveExprType(ae)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        builder.AddU8(7, 9u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_ArrayExpr is index 14 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 14u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(14u16, operandsVec, 9u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:395-410 SaveExpression(ArrayLit): operands are element expressions and
     // ArrayInfo carries initFunc. isValueArray remains the schema default false for ArrayLit.
-    private func SaveArrayLit(al: ArrayLit): FlatBufferOffset {
+    private func SaveExpression(al: ArrayLit, nodeInfo: NodeInfo): FlatBufferOffset {
         let operands = ArrayList<UInt32>()
         for (child in al.children) {
             operands.add(SaveExpr(child))
         }
         let operandsVec = builder.CreateVectorU32(operands)
         let initFunc = if (let Some(decl) <- al.initFunc) { CreateFullIdForDecl(decl) } else { CreateInvalidFullId() }
-        builder.StartTable(2)
-        builder.AddOffset(0, initFunc)
-        let info = builder.EndTable()
+        let info = CreateArrayInfo(builder, initFunc, false)
 
-        let begin = PositionBytes(al.begin)
-        let end = PositionBytes(al.end)
-        let typeIndex = SaveExprType(al)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        builder.AddU8(7, 9u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_ArrayLit is index 19 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 19u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(19u16, operandsVec, 9u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:413-424 SaveExpression(TupleLit): operands are element expressions; no
     // ExprInfo table is used.
-    private func SaveTupleLit(tl: TupleLit): FlatBufferOffset {
+    private func SaveExpression(tl: TupleLit, nodeInfo: NodeInfo): FlatBufferOffset {
         let operands = ArrayList<UInt32>()
         for (child in tl.children) {
             operands.add(SaveExpr(child))
         }
         let operandsVec = builder.CreateVectorU32(operands)
 
-        let begin = PositionBytes(tl.begin)
-        let end = PositionBytes(tl.end)
-        let typeIndex = SaveExprType(tl)
-        builder.StartTable(9)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_TupleLit is index 20 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 20u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(20u16, operandsVec, 0u8, 0u32, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:179-200 SaveExpression(CallExpr): operand 0 is baseFunc, following
     // operands are FuncArg wrapper indices from desugarArgs if present, else args. CallInfo follows
     // ModuleFormat.fbs:433-436 and ExprInfo_CallInfo's union tag value is 1 (fbs:412-432).
-    private func SaveCallExpr(ce: CallExpr): FlatBufferOffset {
+    private func SaveExpression(ce: CallExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- ce.baseFunc) {
             throw IllegalArgumentException("CallExpr without baseFunc is not supported in faithful .cjo writer")
         }
@@ -1758,25 +1430,9 @@ private class FrontendCjoFlatBufferWriter {
             }
         }
         let operandsVec = builder.CreateVectorU32(operands)
-        // CallInfo field 0 hasSideEffect, field 1 callKind (ModuleFormat.fbs:433-436).
-        builder.StartTable(2)
-        builder.AddU8(1, CallKindToFlat(ce.callKind))
-        builder.AddBool(0, ce.TestAttr(Attribute.SIDE_EFFECT))
-        let info = builder.EndTable()
+        let info = CreateCallInfo(builder, ce.TestAttr(Attribute.SIDE_EFFECT), CallKindToFlat(ce.callKind))
 
-        let begin = PositionBytes(ce.begin)
-        let end = PositionBytes(ce.end)
-        let typeIndex = SaveExprType(ce)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        builder.AddU8(7, 1u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_CallExpr is index 7 of enum ExprKind (ModuleFormat.fbs:333-373).
-        builder.AddU16(0, 7u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(7u16, operandsVec, 1u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:667-687 SaveFuncArg. FuncArg is stored in allExprs as an Expr table
@@ -1784,6 +1440,7 @@ private class FrontendCjoFlatBufferWriter {
     private func SaveFuncArg(arg: FuncArg): UInt32 {
         let exprIndex = UInt32(allExprs.size + 1)
         allExprs.add(0u32)
+        let nodeInfo = PackNodeInfo(arg)
         let isDefaultVal = arg.TestAttr(Attribute.HAS_INITIAL)
         let operands = ArrayList<UInt32>()
         if (!isDefaultVal) {
@@ -1793,22 +1450,9 @@ private class FrontendCjoFlatBufferWriter {
             operands.add(SaveExpr(arg.expr.getOrThrow()))
         }
         let operandsVec = builder.CreateVectorU32(operands)
-        builder.StartTable(2)
-        builder.AddBool(1, isDefaultVal)
-        builder.AddBool(0, arg.withInout)
-        let info = builder.EndTable()
+        let info = CreateFuncArgInfo(builder, arg.withInout, isDefaultVal)
 
-        let begin = PositionBytes(arg.begin)
-        let end = PositionBytes(arg.end)
-        let typeIndex = if (let Some(ty) <- arg.GetTy()) { SaveType(ty) } else { 0u32 }
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        builder.AddU8(7, 11u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        allExprs[Int64(exprIndex) - 1] = builder.EndTable()
+        allExprs[Int64(exprIndex) - 1] = SaveBasicNodeInfo(0u16, operandsVec, 11u8, info, nodeInfo)
         return exprIndex
     }
 
@@ -1844,7 +1488,8 @@ private class FrontendCjoFlatBufferWriter {
                 return SavePattern(realPattern)
             }
         }
-        throw IllegalArgumentException("not yet serialized in faithful .cjo writer: " + ASTKindName(pattern.astKind))
+        CJC_ABORT()
+        return 0u32
     }
 
     // Mirrors ExprWriter.cpp:720-737 SaveConstPattern: exprs contains literal and optional
@@ -1875,27 +1520,11 @@ private class FrontendCjoFlatBufferWriter {
             throw IllegalArgumentException("VarPattern without VarDecl is not supported in faithful .cjo writer")
         }
         let varDecl = vp.varDecl.getOrThrow()
-        SyncVarPatternDeclTy(vp, varDecl)
         let declIndex = SaveDeclIndex(varDecl, false)
         let exprs = ArrayList<UInt32>()
         exprs.add(declIndex)
         let exprsVec = builder.CreateVectorU32(exprs)
         return SavePatternTable(3u8, vp, types: SavePatternTypeVector(vp), exprs: exprsVec)
-    }
-
-    // C++ TypeCheckPattern.cpp:340-366 keeps VarPattern.ty and varDecl.ty synchronized before
-    // ExprWriter.cpp:752-765 serializes the VarDecl through Pattern.exprs[0].
-    private func SyncVarPatternDeclTy(vp: VarPattern, varDecl: VarDecl): Unit {
-        if (let Some(patternTy) <- vp.GetTy()) {
-            if (let Some(declTy) <- varDecl.GetTy()) {
-                if (Ty.IsTyCorrect(declTy) && !declTy.IsAny()) {
-                    return
-                }
-            }
-            if (Ty.IsTyCorrect(patternTy) && !patternTy.IsAny()) {
-                varDecl.SetTy(patternTy)
-            }
-        }
     }
 
     // Mirrors ExprWriter.cpp:768-783 SaveTuplePattern.
@@ -1944,7 +1573,7 @@ private class FrontendCjoFlatBufferWriter {
         let types = ArrayList<UInt32>()
         types.add(SavePatternTy(etp))
         for (typeNode in etp.types) {
-            types.add(SaveType(typeManager.ObtainsAliasType(Some(typeNode)) ?? TypeNodeTyForSerialization(typeNode)))
+            types.add(SaveType(typeManager.ObtainsAliasType(Some(typeNode)).getOrThrow()))
         }
         let typesVec = builder.CreateVectorU32(types)
         return SavePatternTable(7u8, etp, patterns: patternsVec, types: typesVec)
@@ -1958,7 +1587,7 @@ private class FrontendCjoFlatBufferWriter {
         let types = ArrayList<UInt32>()
         types.add(SavePatternTy(ctp))
         for (typeNode in ctp.types) {
-            types.add(SaveType(typeManager.ObtainsAliasType(Some(typeNode)) ?? TypeNodeTyForSerialization(typeNode)))
+            types.add(SaveType(typeManager.ObtainsAliasType(Some(typeNode)).getOrThrow()))
         }
         let typesVec = builder.CreateVectorU32(types)
         return SavePatternTable(8u8, ctp, patterns: patternsVec, types: typesVec)
@@ -1980,24 +1609,15 @@ private class FrontendCjoFlatBufferWriter {
     private func SavePatternTable(kind: UInt8, pattern: Pattern, patterns!: FlatBufferOffset = 0u32,
         types!: FlatBufferOffset = 0u32, exprs!: FlatBufferOffset = 0u32, matchBeforeRuntime!: Bool = false,
         needRuntimeTypeCheck!: Bool = false): FlatBufferOffset {
-        let begin = PositionBytes(pattern.begin)
-        let end = PositionBytes(pattern.end)
-        builder.StartTable(9)
-        builder.AddBool(8, needRuntimeTypeCheck)
-        builder.AddBool(7, matchBeforeRuntime)
-        builder.AddOffset(5, exprs)
-        builder.AddOffset(4, types)
-        builder.AddOffset(3, patterns)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        builder.AddU8(0, kind)
-        return builder.EndTable()
+        let nodeInfo = PackNodeInfo(pattern)
+        return CreatePattern(builder, Int64(kind), nodeInfo.begin, nodeInfo.end, patterns, types, exprs, 0u32, 0u32,
+            matchBeforeRuntime, needRuntimeTypeCheck)
     }
 
     // Mirrors ExprWriter.cpp:136-157 SaveExpression(MemberAccess), using ReferenceInfo from
     // ModuleFormat.fbs:451-457. Base expr, target FullId, instTys vector, and info table are all
     // built and closed before the parent Expr table opens.
-    private func SaveMemberAccess(ma: MemberAccess): FlatBufferOffset {
+    private func SaveExpression(ma: MemberAccess, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- ma.baseExpr) {
             throw IllegalArgumentException("MemberAccess without base expr is not supported in faithful .cjo writer")
         }
@@ -2007,25 +1627,12 @@ private class FrontendCjoFlatBufferWriter {
         let operandsVec = builder.CreateVectorU32(operands)
         let info = SaveReferenceInfo(ma.field.Val(), ma.target, ma.instTys, ma.matchedParentTy)
 
-        let begin = PositionBytes(ma.begin)
-        let end = PositionBytes(ma.end)
-        let typeIndex = SaveExprType(ma)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        // ExprInfo union (fbs:412-432): ReferenceInfo is the 6th member, union tag value 6.
-        builder.AddU8(7, 6u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_MemberAccess is index 5 of enum ExprKind (fbs:333-373).
-        builder.AddU16(0, 5u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(5u16, operandsVec, 6u8, info, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:159-177 SaveExpression(RefExpr), including the genericDecl target
     // normalization at ExprWriter.cpp:162 before writing ReferenceInfo (fbs:451-457).
-    private func SaveRefExpr(re: RefExpr): FlatBufferOffset {
+    private func SaveExpression(re: RefExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         let refTarget: Option<Decl> = if (let Some(target) <- re.ref.target) {
             if (let Some(genericDecl) <- target.genericDecl) {
                 Some(genericDecl)
@@ -2037,19 +1644,7 @@ private class FrontendCjoFlatBufferWriter {
         }
         let info = SaveReferenceInfo(re.ref.identifier.Val(), refTarget, re.instTys, re.matchedParentTy)
 
-        let begin = PositionBytes(re.begin)
-        let end = PositionBytes(re.end)
-        let typeIndex = SaveExprType(re)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        // ExprInfo union (fbs:412-432): ReferenceInfo is the 6th member, union tag value 6.
-        builder.AddU8(7, 6u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_RefExpr is index 6 of enum ExprKind (fbs:333-373).
-        builder.AddU16(0, 6u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(6u16, 0u32, 6u8, info, nodeInfo)
     }
 
     private func SaveReferenceInfo(reference: String, target: Option<Decl>, instTys: ArrayList<Ty>,
@@ -2066,18 +1661,12 @@ private class FrontendCjoFlatBufferWriter {
         }
         let tyVec = builder.CreateVectorU32(types)
         let parentTy = if (let Some(ty) <- matchedParentTy) { SaveType(ty) } else { 0u32 }
-        // ReferenceInfo fields (fbs:451-457): 0 reference, 1 target, 2 instTys, 3 matchedParentTy.
-        builder.StartTable(4)
-        builder.AddU32(3, parentTy)
-        builder.AddOffset(2, tyVec)
-        builder.AddOffset(1, targetOffset)
-        builder.AddOffset(0, referenceOffset)
-        return builder.EndTable()
+        return CreateReferenceInfo(builder, referenceOffset, targetOffset, tyVec, parentTy)
     }
 
     // Mirrors ExprWriter.cpp:113-123 SaveExpression(ReturnExpr).
     // The operand (return value) sub-expr is saved (and closed) before the Expr table is opened.
-    private func SaveReturnExpr(re: ReturnExpr): FlatBufferOffset {
+    private func SaveExpression(re: ReturnExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         if (let None <- re.expr) {
             throw IllegalArgumentException("ReturnExpr without operand is not supported in this slice")
         }
@@ -2086,51 +1675,16 @@ private class FrontendCjoFlatBufferWriter {
         operands.add(subExprIdx)
         let operandsVec = builder.CreateVectorU32(operands)
 
-        let begin = PositionBytes(re.begin)
-        let end = PositionBytes(re.end)
-        let typeIndex = SaveExprType(re)
-        builder.StartTable(9)
-        builder.AddU32(5, typeIndex)
-        builder.AddOffset(4, operandsVec)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_ReturnExpr is index 3 of enum ExprKind (fbs:333-373).
-        builder.AddU16(0, 3u16)
-        return builder.EndTable()
+        return SaveBasicNodeInfo(3u16, operandsVec, 0u8, 0u32, nodeInfo)
     }
 
     // Mirrors ExprWriter.cpp:233-244 SaveExpression(LitConstExpr) + LitConstInfo (fbs:446-450).
-    private func SaveLitConstExpr(lce: LitConstExpr): FlatBufferOffset {
+    private func SaveExpression(lce: LitConstExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         let strValue = builder.CreateString(lce.stringValue)
-        // LitConstInfo: field 0 strValue, 1 constKind (uint8), 2 strKind (uint8).
-        builder.StartTable(3)
-        builder.AddU8(2, StringKindToFlat(lce.stringKind))
-        builder.AddU8(1, LitConstKindToFlat(lce.kind))
-        builder.AddOffset(0, strValue)
-        let info = builder.EndTable()
+        let info = CreateLitConstInfo(builder, strValue, LitConstKindToFlat(lce.kind),
+            StringKindToFlat(lce.stringKind))
 
-        let begin = PositionBytes(lce.begin)
-        let end = PositionBytes(lce.end)
-        let typeIndex = SaveExprType(lce)
-        // Expr: 0 kind(uint16), 1 begin, 2 end, 3 mapExpr, 4 operands, 5 type,
-        //       6 overflowPolicy, 7 info_type(union byte), 8 info(union value). (fbs:504-513)
-        builder.StartTable(9)
-        builder.AddOffset(8, info)
-        // ExprInfo union (fbs:412-432): LitConstInfo is the 5th member, union tag value 5.
-        builder.AddU8(7, 5u8)
-        builder.AddU32(5, typeIndex)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        // ExprKind_LitConstExpr is index 10 of enum ExprKind (fbs:333-373).
-        builder.AddU16(0, 10u16)
-        return builder.EndTable()
-    }
-
-    private func SaveExprType(expr: Expr): UInt32 {
-        if (let Some(ty) <- expr.GetTy()) {
-            return SaveType(ty)
-        }
-        return 0u32
+        return SaveBasicNodeInfo(10u16, 0u32, 5u8, info, nodeInfo)
     }
 
     private func ForInKindToFlat(kind: ForInKind): UInt8 {
@@ -2644,12 +2198,8 @@ private class FrontendCjoFlatBufferWriter {
     }
 
     private func CreateFullId(pkgId: Int64, decl: String, index: UInt32): FlatBufferOffset {
-        let declOffset = builder.CreateString(decl)
-        builder.StartTable(3)
-        builder.AddU32(2, index)
-        builder.AddOffset(1, declOffset)
-        builder.AddI32(0, pkgId)
-        return builder.EndTable()
+        let declOffset = if (decl.isEmpty()) { 0u32 } else { builder.CreateString(decl) }
+        return CreateModuleFullId(builder, pkgId, declOffset, index)
     }
 
     private func SavePackageName(name: String): UInt32 {
@@ -2978,7 +2528,14 @@ private func ShouldEmitTypeArgsVector(kind: UInt16, infoType: UInt8, typeArgs: A
 }
 
 private func OverflowPolicyToFlat(strategy: OverflowStrategy): UInt8 {
-    return UInt8(OverflowStrategyIndex(strategy))
+    return match (strategy) {
+        case OverflowStrategy.NA => 0u8
+        case OverflowStrategy.CHECKED => 1u8
+        case OverflowStrategy.WRAPPING => 2u8
+        case OverflowStrategy.THROWING => 3u8
+        case OverflowStrategy.SATURATING => 4u8
+        case OverflowStrategy.OVERFLOW_STRATEGY_END => CJC_ABORT(); return 0u8
+    }
 }
 
 // ModuleFormat.fbs enum LitConstKind (fbs:388-397): Integer=0,RuneByte=1,Float=2,Rune=3,
@@ -2993,7 +2550,7 @@ private func LitConstKindToFlat(kind: LitConstKind): UInt8 {
         case LitConstKind.JSTRING => 5u8
         case LitConstKind.BOOL => 6u8
         case LitConstKind.UNIT => 7u8
-        case LitConstKind.NONE => 0u8
+        case LitConstKind.NONE => CJC_ABORT(); return 0u8
     }
 }
 
