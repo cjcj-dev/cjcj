@@ -10,19 +10,38 @@ LLVM_SRC_INC="$CPP/third_party/llvm-project/llvm/include"
 LLVM_GEN_INC="$CPP/build/build/third_party/llvm/include"
 FLATBUFFERS_INC="$CPP/build/build/include"
 SCHEMA_GEN_INC="$CPP/build/build/schema"
+CXX="${CXX:-clang++}"
+if ! command -v "$CXX" >/dev/null 2>&1 && command -v clang++-15 >/dev/null 2>&1; then
+    CXX=clang++-15
+fi
 
-[ -d "$LLVM_SRC_INC" ] || { echo "ERR: LLVM source headers not found: $LLVM_SRC_INC" >&2; exit 1; }
-[ -d "$LLVM_GEN_INC" ] || { echo "ERR: LLVM generated headers not found: $LLVM_GEN_INC" >&2; exit 1; }
-[ -d "$FLATBUFFERS_INC" ] || { echo "ERR: flatbuffers headers not found: $FLATBUFFERS_INC" >&2; exit 1; }
-[ -d "$SCHEMA_GEN_INC/flatbuffers" ] || { echo "ERR: schema headers not found: $SCHEMA_GEN_INC/flatbuffers" >&2; exit 1; }
+if [ -d "$LLVM_SRC_INC" ] && [ -d "$LLVM_GEN_INC" ]; then
+    LLVM_INCLUDE_ARGS=(-I"$LLVM_SRC_INC" -I"$LLVM_GEN_INC")
+elif command -v llvm-config-15 >/dev/null 2>&1; then
+    LLVM_INCLUDE_ARGS=(-I"$(llvm-config-15 --includedir)")
+else
+    echo "ERR: LLVM 15 headers not found" >&2
+    exit 1
+fi
 
 # -fno-rtti / -fno-exceptions to match the LLVM build ABI.
-clang++ -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
-  -c "$HERE/cjselfhost_llvmshim.cpp" -o "$HERE/cjselfhost_llvmshim.o" \
-  -I"$LLVM_SRC_INC" -I"$LLVM_GEN_INC" -I"$FLATBUFFERS_INC" -I"$SCHEMA_GEN_INC"
+"$CXX" -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
+  -c "$HERE/binsecinfo_llvmshim.cpp" -o "$HERE/binsecinfo_llvmshim.o" \
+  "${LLVM_INCLUDE_ARGS[@]}"
+
+if [ -d "$FLATBUFFERS_INC" ] && [ -d "$SCHEMA_GEN_INC/flatbuffers" ]; then
+    "$CXX" -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
+      -c "$HERE/cjselfhost_llvmshim.cpp" -o "$HERE/cjselfhost_llvmshim.o" \
+      "${LLVM_INCLUDE_ARGS[@]}" -I"$FLATBUFFERS_INC" -I"$SCHEMA_GEN_INC"
+elif [ ! -f "$HERE/cjselfhost_llvmshim.o" ]; then
+    echo "ERR: generated FlatBuffers headers and existing cjselfhost_llvmshim.o are both absent" >&2
+    exit 1
+fi
 
 echo "built: $HERE/cjselfhost_llvmshim.o"
+echo "built: $HERE/binsecinfo_llvmshim.o"
 nm -C "$HERE/cjselfhost_llvmshim.o" | grep -E ' T (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost)' || true
+nm -C "$HERE/binsecinfo_llvmshim.o" | grep -E ' T LLVMSelfhost' || true
 
 # Macro runtime layout. The self-host cjc resolves the Cangjie runtime lib relative to its own
 # binary (CompilerInvocation.GetRuntimeLibPath: <cjc>/../runtime/lib/<host>, a faithful 1:1 port of

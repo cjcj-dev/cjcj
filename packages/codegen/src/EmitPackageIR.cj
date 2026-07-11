@@ -85,6 +85,7 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         GenerateReflectionMetadata(cgModToEmit, subPackageToEmit)
         cgModToEmit.GenTypeInfo()
         InitializeCjStringLiteral(cgModToEmit)
+        GenerateBinarySectionInfo(cgModToEmit)
         KeepSomeTypesManually(cgModToEmit)
         cgModToEmit.EraseUselessInstsAndDeclarations()
         SetSymbolLinkageType(cgModToEmit)
@@ -820,6 +821,82 @@ private func CollectDependentPackages(llvmFunc: LLVMValueRef, giList: ArrayList<
         }
         block = unsafe { LLVMGetNextBasicBlock(block) }
     }
+}
+
+private func TraverseAndGenerateCallSetFrom(
+    ret: HashMap<UIntNative, LLVMSelfhostCallGraphNodeRef>, root: LLVMSelfhostCallGraphNodeRef): Unit {
+    let queue = ArrayList<LLVMSelfhostCallGraphNodeRef>()
+    queue.add(root)
+    var queueIndex: Int64 = 0
+    while (queueIndex < queue.size) {
+        let node = queue[queueIndex]
+        queueIndex++
+        let nodeKey = node.toUIntNative()
+        if (ret.contains(nodeKey)) {
+            continue
+        }
+        ret[nodeKey] = node
+        let calleeCount = unsafe { LLVMSelfhostCallGraphNodeSize(node) }
+        var calleeIndex: UInt32 = 0u32
+        while (calleeIndex < calleeCount) {
+            let calleeNode = unsafe { LLVMSelfhostCallGraphNodeGetCallee(node, calleeIndex) }
+            if (!ret.contains(calleeNode.toUIntNative())) {
+                queue.add(calleeNode)
+            }
+            calleeIndex++
+        }
+    }
+}
+
+private func GenerateBinarySectionInfo(cgMod: CGModule): Unit {
+    if (cgMod.GetCGContext().GetCGPkgContext().IsCGParallelEnabled()) {
+        return
+    }
+    let moduleHandle = cgMod.GetLLVMModule().getOrThrow()
+    let cjInitAttrStr = "cjinit"
+    let callGraph = unsafe { LLVMSelfhostCreateCallGraphWrapperPass(moduleHandle.raw) }
+    let globalInitFuncName = cgMod.GetCGContext().GetCHIRPackage().GetPackageInitFunc().getOrThrow()
+        .GetIdentifierWithoutPrefix()
+    let pkgInitFunc = GetNamedFunction(moduleHandle, globalInitFuncName)
+    CJC_ASSERT(!pkgInitFunc.isNull())
+    let pkgInitNode = unsafe { LLVMSelfhostCallGraphGetNode(callGraph, pkgInitFunc) }
+    let callSet = HashMap<UIntNative, LLVMSelfhostCallGraphNodeRef>()
+    TraverseAndGenerateCallSetFrom(callSet, pkgInitNode)
+    if (unsafe { LLVMSelfhostGlobalObjectHasEmptySection(pkgInitFunc) } != 0) {
+        AddFnAttr(pkgInitFunc, cjInitAttrStr)
+    }
+    let mainFuncs = [CJ_ENTRY_FUNC_NAME, "main"]
+    for (functionName in mainFuncs) {
+        let functionValue = GetNamedFunction(moduleHandle, functionName)
+        if (!functionValue.isNull() && unsafe { LLVMSelfhostGlobalObjectHasEmptySection(functionValue) } != 0) {
+            AddFnAttr(functionValue, cjInitAttrStr)
+        }
+    }
+    let userMainFunc = GetNamedFunction(moduleHandle, USER_MAIN_MANGLED_NAME)
+    if (!userMainFunc.isNull() && unsafe { LLVMSelfhostGlobalObjectHasEmptySection(userMainFunc) } != 0) {
+        AddFnAttr(userMainFunc, cjInitAttrStr)
+        let userMainNode = unsafe { LLVMSelfhostCallGraphGetNode(callGraph, userMainFunc) }
+        let calleeCount = unsafe { LLVMSelfhostCallGraphNodeSize(userMainNode) }
+        var calleeIndex: UInt32 = 0u32
+        while (calleeIndex < calleeCount) {
+            let calleeNode = unsafe { LLVMSelfhostCallGraphNodeGetCallee(userMainNode, calleeIndex) }
+            let calleeFunc = unsafe { LLVMSelfhostCallGraphNodeGetFunction(calleeNode) }
+            if (!calleeFunc.isNull() && unsafe { LLVMSelfhostGlobalObjectHasEmptySection(calleeFunc) } != 0) {
+                AddFnAttr(calleeFunc, cjInitAttrStr)
+            }
+            calleeIndex++
+        }
+    }
+    for ((_, node) in callSet) {
+        let functionValue = unsafe { LLVMSelfhostCallGraphNodeGetFunction(node) }
+        if (functionValue.isNull()) {
+            continue
+        }
+        if (unsafe { LLVMSelfhostGlobalObjectHasEmptySection(functionValue) } != 0) {
+            AddFnAttr(functionValue, cjInitAttrStr)
+        }
+    }
+    unsafe { LLVMSelfhostDisposeCallGraphWrapperPass(callGraph) }
 }
 
 private func CollectDependentPackageByCalleeName(callee: LLVMValueRef, calleeName: String,

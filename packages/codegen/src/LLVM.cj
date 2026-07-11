@@ -17,6 +17,8 @@ public type LLVMUseRef = CPointer<Unit>
 public type LLVMDIBuilderRef = CPointer<Unit>
 public type LLVMSelfhostLoopInfoRef = CPointer<Unit>
 public type LLVMSelfhostLoopRef = CPointer<Unit>
+public type LLVMSelfhostCallGraphRef = CPointer<Unit>
+public type LLVMSelfhostCallGraphNodeRef = CPointer<Unit>
 
 @When[os != "Windows"]
 foreign {
@@ -301,6 +303,15 @@ foreign {
     func LLVMSelfhostCallBaseArgSize(callBase: LLVMValueRef): UInt32
     func LLVMSelfhostCallBaseGetArgOperand(callBase: LLVMValueRef, index: UInt32): LLVMValueRef
     func LLVMSelfhostCallBaseGetStructRetAttr(callBase: LLVMValueRef): LLVMAttributeRef
+    func LLVMSelfhostCreateCallGraphWrapperPass(module: LLVMModuleRef): LLVMSelfhostCallGraphRef
+    func LLVMSelfhostDisposeCallGraphWrapperPass(callGraph: LLVMSelfhostCallGraphRef): Unit
+    func LLVMSelfhostCallGraphGetNode(callGraph: LLVMSelfhostCallGraphRef,
+        function: LLVMValueRef): LLVMSelfhostCallGraphNodeRef
+    func LLVMSelfhostCallGraphNodeSize(node: LLVMSelfhostCallGraphNodeRef): UInt32
+    func LLVMSelfhostCallGraphNodeGetCallee(node: LLVMSelfhostCallGraphNodeRef,
+        index: UInt32): LLVMSelfhostCallGraphNodeRef
+    func LLVMSelfhostCallGraphNodeGetFunction(node: LLVMSelfhostCallGraphNodeRef): LLVMValueRef
+    func LLVMSelfhostGlobalObjectHasEmptySection(globalObject: LLVMValueRef): Int32
     func LLVMSelfhostCallBaseAddAttributeAtIndex(callBase: LLVMValueRef, index: UInt32,
         attr: LLVMAttributeRef): Unit
     func LLVMSelfhostInvokeGetNormalDest(invokeInst: LLVMValueRef): LLVMBasicBlockRef
