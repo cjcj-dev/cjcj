@@ -416,6 +416,46 @@ class PackageFormat_VarInfo <: Table {
     func GetValueType(): UInt8 { return GetField<UInt8>(MF_VAR_INFO_VT_VALUE_TYPE, 0u8) }
     func GetValue(): Option<Int64> { return GetPointer(MF_VAR_INFO_VT_VALUE) }
 
+    func GetValueAsInt8Value(): Option<PackageFormat_Int8Value> {
+        return if (GetValueType() == MF_CONST_VALUE_INT8_VALUE) { WrapInt8Value(data, GetValue()) } else { None }
+    }
+    func GetValueAsUInt8Value(): Option<PackageFormat_UInt8Value> {
+        return if (GetValueType() == MF_CONST_VALUE_UINT8_VALUE) { WrapUInt8Value(data, GetValue()) } else { None }
+    }
+    func GetValueAsInt16Value(): Option<PackageFormat_Int16Value> {
+        return if (GetValueType() == MF_CONST_VALUE_INT16_VALUE) { WrapInt16Value(data, GetValue()) } else { None }
+    }
+    func GetValueAsUInt16Value(): Option<PackageFormat_UInt16Value> {
+        return if (GetValueType() == MF_CONST_VALUE_UINT16_VALUE) { WrapUInt16Value(data, GetValue()) } else { None }
+    }
+    func GetValueAsInt32Value(): Option<PackageFormat_Int32Value> {
+        return if (GetValueType() == MF_CONST_VALUE_INT32_VALUE) { WrapInt32Value(data, GetValue()) } else { None }
+    }
+    func GetValueAsUInt32Value(): Option<PackageFormat_UInt32Value> {
+        return if (GetValueType() == MF_CONST_VALUE_UINT32_VALUE) { WrapUInt32Value(data, GetValue()) } else { None }
+    }
+    func GetValueAsInt64Value(): Option<PackageFormat_Int64Value> {
+        return if (GetValueType() == MF_CONST_VALUE_INT64_VALUE) { WrapInt64Value(data, GetValue()) } else { None }
+    }
+    func GetValueAsUInt64Value(): Option<PackageFormat_UInt64Value> {
+        return if (GetValueType() == MF_CONST_VALUE_UINT64_VALUE) { WrapUInt64Value(data, GetValue()) } else { None }
+    }
+    func GetValueAsFloat32Value(): Option<PackageFormat_Float32Value> {
+        return if (GetValueType() == MF_CONST_VALUE_FLOAT32_VALUE) { WrapFloat32Value(data, GetValue()) } else { None }
+    }
+    func GetValueAsFloat64Value(): Option<PackageFormat_Float64Value> {
+        return if (GetValueType() == MF_CONST_VALUE_FLOAT64_VALUE) { WrapFloat64Value(data, GetValue()) } else { None }
+    }
+    func GetValueAsArrayValue(): Option<PackageFormat_ArrayValue> {
+        return if (GetValueType() == MF_CONST_VALUE_ARRAY_VALUE) { WrapArrayValue(data, GetValue()) } else { None }
+    }
+    func GetValueAsStringValue(): Option<FlatBufferString> {
+        return if (GetValueType() == MF_CONST_VALUE_STRING_VALUE) { WrapFbString(data, GetValue()) } else { None }
+    }
+    func GetValueAsCompositeValue(): Option<PackageFormat_CompositeValueIndex> {
+        return if (GetValueType() == MF_CONST_VALUE_COMPOSITE_VALUE) { WrapCompositeValueIndex(data, GetValue()) } else { None }
+    }
+
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<Bool>(verifier, MF_VAR_INFO_VT_ISVAR, 1) &&
@@ -603,6 +643,43 @@ class PackageFormat_Decl <: Table {
     func GetInfo(): Option<Int64> { return GetPointer(MF_DECL_VT_INFO) }
     func GetDependencies(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(MF_DECL_VT_DEPENDENCIES)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
+    }
+
+    func GetInfoAsClassInfo(): Option<PackageFormat_ClassInfo> {
+        return if (GetInfoType() == MF_DECL_INFO_CLASS_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_ClassInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsInterfaceInfo(): Option<PackageFormat_InterfaceInfo> {
+        return if (GetInfoType() == MF_DECL_INFO_INTERFACE_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_InterfaceInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsStructInfo(): Option<PackageFormat_StructInfo> {
+        return if (GetInfoType() == MF_DECL_INFO_STRUCT_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_StructInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsEnumInfo(): Option<PackageFormat_EnumInfo> {
+        return if (GetInfoType() == MF_DECL_INFO_ENUM_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_EnumInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsExtendInfo(): Option<PackageFormat_ExtendInfo> {
+        return if (GetInfoType() == MF_DECL_INFO_EXTEND_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_ExtendInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsPropInfo(): Option<PackageFormat_PropInfo> {
+        return if (GetInfoType() == MF_DECL_INFO_PROP_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_PropInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsVarInfo(): Option<PackageFormat_VarInfo> {
+        return if (GetInfoType() == MF_DECL_INFO_VAR_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_VarInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsVarWithPatternInfo(): Option<PackageFormat_VarWithPatternInfo> {
+        return if (GetInfoType() == MF_DECL_INFO_VAR_WITH_PATTERN_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_VarWithPatternInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsParamInfo(): Option<PackageFormat_ParamInfo> {
+        return if (GetInfoType() == MF_DECL_INFO_PARAM_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_ParamInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsFuncInfo(): Option<PackageFormat_FuncInfo> {
+        return if (GetInfoType() == MF_DECL_INFO_FUNC_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_FuncInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsBuiltInInfo(): Option<PackageFormat_BuiltInInfo> {
+        return if (GetInfoType() == MF_DECL_INFO_BUILT_IN_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_BuiltInInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsAliasInfo(): Option<PackageFormat_AliasInfo> {
+        return if (GetInfoType() == MF_DECL_INFO_ALIAS_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_AliasInfo(data, p)) } else { None } } else { None }
     }
 
     func Verify(verifier: VerifierTemplate): Bool {
@@ -1025,6 +1102,64 @@ class PackageFormat_Expr <: Table {
     func GetInfoType(): UInt8 { return GetField<UInt8>(MF_EXPR_VT_INFO_TYPE, 0u8) }
     func GetInfo(): Option<Int64> { return GetPointer(MF_EXPR_VT_INFO) }
 
+    func GetInfoAsCallInfo(): Option<PackageFormat_CallInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_CALL_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_CallInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsUnaryInfo(): Option<PackageFormat_UnaryInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_UNARY_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_UnaryInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsBinaryInfo(): Option<PackageFormat_BinaryInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_BINARY_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_BinaryInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsIncOrDecInfo(): Option<PackageFormat_IncOrDecInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_INC_OR_DEC_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_IncOrDecInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsLitConstInfo(): Option<PackageFormat_LitConstInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_LIT_CONST_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_LitConstInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsReferenceInfo(): Option<PackageFormat_ReferenceInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_REFERENCE_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_ReferenceInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsLambdaInfo(): Option<PackageFormat_LambdaInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_LAMBDA_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_LambdaInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsAssignInfo(): Option<PackageFormat_AssignInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_ASSIGN_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_AssignInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsArrayInfo(): Option<PackageFormat_ArrayInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_ARRAY_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_ArrayInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsJumpInfo(): Option<PackageFormat_JumpInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_JUMP_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_JumpInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsFuncArgInfo(): Option<PackageFormat_FuncArgInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_FUNC_ARG_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_FuncArgInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsSubscriptInfo(): Option<PackageFormat_SubscriptInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_SUBSCRIPT_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_SubscriptInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsMatchInfo(): Option<PackageFormat_MatchInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_MATCH_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_MatchInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsBlockInfo(): Option<PackageFormat_BlockInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_BLOCK_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_BlockInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsTryInfo(): Option<PackageFormat_TryInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_TRY_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_TryInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsLetPatternDestructorInfo(): Option<PackageFormat_LetPatternDestructorInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_LET_PATTERN_DESTRUCTOR_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_LetPatternDestructorInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsForInInfo(): Option<PackageFormat_ForInInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_FOR_IN_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_ForInInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsMatchCaseInfo(): Option<PackageFormat_MatchCaseInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_MATCH_CASE_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_MatchCaseInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsSpawnInfo(): Option<PackageFormat_SpawnInfo> {
+        return if (GetInfoType() == MF_EXPR_INFO_SPAWN_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_SpawnInfo(data, p)) } else { None } } else { None }
+    }
+
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<UInt16>(verifier, MF_EXPR_VT_KIND, 2) &&
@@ -1176,6 +1311,19 @@ class PackageFormat_SemaTy <: Table {
     }
     func GetInfoType(): UInt8 { return GetField<UInt8>(MF_SEMA_TY_VT_INFO_TYPE, 0u8) }
     func GetInfo(): Option<Int64> { return GetPointer(MF_SEMA_TY_VT_INFO) }
+
+    func GetInfoAsFuncTyInfo(): Option<PackageFormat_FuncTyInfo> {
+        return if (GetInfoType() == MF_SEMA_TY_INFO_FUNC_TY_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_FuncTyInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsCompositeTyInfo(): Option<PackageFormat_CompositeTyInfo> {
+        return if (GetInfoType() == MF_SEMA_TY_INFO_COMPOSITE_TY_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_CompositeTyInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsGenericTyInfo(): Option<PackageFormat_GenericTyInfo> {
+        return if (GetInfoType() == MF_SEMA_TY_INFO_GENERIC_TY_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_GenericTyInfo(data, p)) } else { None } } else { None }
+    }
+    func GetInfoAsArrayTyInfo(): Option<PackageFormat_ArrayTyInfo> {
+        return if (GetInfoType() == MF_SEMA_TY_INFO_ARRAY_TY_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_ArrayTyInfo(data, p)) } else { None } } else { None }
+    }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&

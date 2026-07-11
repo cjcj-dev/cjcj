@@ -374,6 +374,32 @@ public class FlatBufferBuilder {
         return UInt32(tableOffset)
     }
 
+    // flatbuffer_builder.h:493-499 (Required): assert a required field was set on
+    // the just-finished table. `field` is the field's vtable offset (voffset_t).
+    // The table lives at buffer position size-table (data_at(o) in the downward
+    // buffer); its soffset points back to the vtable, matching GetOptionalFieldOffset.
+    public func Required(table: FlatBufferOffset, field: UInt16): Unit {
+        let tablePos = buffer.size - Int64(table)
+        let soffset = Int32(BufferReadU32(tablePos))
+        let vtable = tablePos - Int64(soffset)
+        let vtsize = BufferReadU16(vtable)
+        let fieldOffset = if (field < vtsize) { BufferReadU16(vtable + Int64(field)) } else { 0u16 }
+        if (fieldOffset == 0u16) {
+            throw IllegalStateException("flatbuffer required field missing")
+        }
+    }
+
+    // base.h:416-422 little-endian scalar reads over the in-progress buffer.
+    private func BufferReadU16(pos: Int64): UInt16 {
+        return UInt16(buffer[pos]) | (UInt16(buffer[pos + 1]) << 8)
+    }
+
+    @OverflowWrapping
+    private func BufferReadU32(pos: Int64): UInt32 {
+        return UInt32(buffer[pos]) | (UInt32(buffer[pos + 1]) << 8) |
+            (UInt32(buffer[pos + 2]) << 16) | (UInt32(buffer[pos + 3]) << 24)
+    }
+
     // flatbuffer_builder.h:1224-1229,1258-1282 (Finish with four-byte identifier).
     public func Finish(root: FlatBufferOffset, fileIdentifier: String): Array<UInt8> {
         CheckFinishState()

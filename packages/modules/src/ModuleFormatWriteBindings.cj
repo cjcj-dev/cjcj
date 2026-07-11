@@ -323,12 +323,15 @@ func CreateReferenceInfo(builder: FlatBufferBuilder, reference: FlatBufferOffset
     return builder.EndTable()
 }
 
-// ModuleFormat_generated.h (CreateLambdaInfo). funcBody is required.
+// ModuleFormat_generated.h:4739-4759 (CreateLambdaInfo). funcBody is required;
+// CreateLambdaInfo ends with fbb_.Required(o, LambdaInfo::VT_FUNCBODY).
 func CreateLambdaInfo(builder: FlatBufferBuilder, funcBody: FlatBufferOffset, supportMock: Bool): FlatBufferOffset {
     builder.StartTable(2)
     builder.AddOffset(0, funcBody)
     builder.AddBool(1, supportMock, defaultValue: false)
-    return builder.EndTable()
+    let o = builder.EndTable()
+    builder.Required(o, MF_LAMBDA_INFO_VT_FUNCBODY)
+    return o
 }
 
 // ModuleFormat_generated.h (CreateAssignInfo).
