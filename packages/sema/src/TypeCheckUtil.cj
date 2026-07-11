@@ -24,6 +24,24 @@ public class ParamTyAtIndex {
     }
 }
 
+// C++ src/Sema/Utils.cpp:349-365 TypeCheckUtil::GetCurFuncBody.
+public func GetCurFuncBody(ctx: ASTContext, scopeName: String): Option<FuncBody> {
+    if (let Some(symbol) <- ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, scopeName)) {
+        if (let Some(node) <- symbol.node) {
+            if (let Some(funcDecl) <- (node as FuncDecl)) {
+                return funcDecl.funcBody
+            } else if (let Some(lambdaExpr) <- (node as LambdaExpr)) {
+                return lambdaExpr.funcBody
+            } else if (let Some(macroDecl) <- (node as MacroDecl)) {
+                return macroDecl.desugarDecl.getOrThrow().funcBody
+            } else if (let Some(primaryCtorDecl) <- (node as PrimaryCtorDecl)) {
+                return primaryCtorDecl.funcBody
+            }
+        }
+    }
+    return None
+}
+
 private class TypeCheckUtilBoolBox {
     public var value: Bool
 

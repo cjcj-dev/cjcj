@@ -1591,9 +1591,67 @@ public class TypeChecker {
                     PreCheckFuncRedefinition(pkg, impl.GetSymsByASTKind(ctx, ASTKind.FUNC_DECL), diagValue,
                         impl.typeManager)
                 }
+                CheckReturnAndJump(ctx)
             }
         }
         impl.typeManager.ClearMapCache()
+    }
+
+    // C++ src/Sema/PreCheck.cpp:1692-1707 GetDanglingReturn.
+    private func GetDanglingReturn(fp: FuncParam): Option<ReturnExpr> {
+        let assignment = fp.assignment ?? return None
+        let result = Box<Option<ReturnExpr>>(None)
+        let walker = Walker(assignment, visitPre: { node: Node =>
+            if (node.astKind == ASTKind.FUNC_BODY) {
+                return VisitAction.SKIP_CHILDREN
+            } else if (let Some(returnExpr) <- (node as ReturnExpr)) {
+                result.value = Some(returnExpr)
+                return VisitAction.STOP_NOW
+            }
+            return VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+        return result.value
+    }
+
+    // C++ src/Sema/PreCheck.cpp:1710-1749 TypeChecker::TypeCheckerImpl::CheckReturnAndJump.
+    private func CheckReturnAndJump(ctx: ASTContext): Unit {
+        let diag = impl.diag.getOrThrow()
+        for (sym in impl.GetSymsByASTKind(ctx, ASTKind.RETURN_EXPR)) {
+            let node = sym.node.getOrThrow()
+            let returnExpr = (node as ReturnExpr).getOrThrow()
+            if (let Some(refFuncBody) <- GetCurFuncBody(ctx, sym.scopeName)) {
+                if (let Some(funcDecl) <- refFuncBody.funcDecl) {
+                    if (IsStaticInitializer(funcDecl)) {
+                        returnExpr.SetTy(TypeManager.GetInvalidTy())
+                        diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_invalid_return_in_static_init,
+                            MakeRange(node.begin, node.end)).Emit()
+                        continue
+                    }
+                }
+                returnExpr.refFuncBody = Some(refFuncBody)
+            } else {
+                returnExpr.SetTy(TypeManager.GetInvalidTy())
+                diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_invalid_return,
+                    MakeRange(node.begin, node.end)).Emit()
+            }
+        }
+        for (sym in impl.GetSymsByASTKind(ctx, ASTKind.FUNC_PARAM)) {
+            let param = (sym.node.getOrThrow() as FuncParam).getOrThrow()
+            if (let Some(returnExpr2) <- GetDanglingReturn(param)) {
+                returnExpr2.refFuncBody = None
+                returnExpr2.SetTy(TypeManager.GetInvalidTy())
+                diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_invalid_return,
+                    MakeRange(returnExpr2.begin, returnExpr2.end)).Emit()
+            }
+        }
+        for (sym in impl.GetSymsByASTKind(ctx, ASTKind.JUMP_EXPR)) {
+            let node2 = sym.node.getOrThrow()
+            if (let None <- GetRefLoopSymbol(ctx, node2)) {
+                diag.Diagnose(node2.begin, node2.end, BasicDiagKind.sema_invalid_loop_control).Emit()
+                node2.SetTy(TypeManager.GetInvalidTy())
+            }
+        }
     }
 
     private func CheckCHIRClassDependencies(): Unit {

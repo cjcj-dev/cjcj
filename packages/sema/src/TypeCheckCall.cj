@@ -3589,24 +3589,6 @@ private func DynamicBindingThisType(typeManager: TypeManager, ce: CallExpr, fd: 
     return None
 }
 
-// C++ src/Sema/Utils.cpp:349 GetCurFuncBody.
-private func GetCurFuncBody(ctx: ASTContext, scopeName: String): Option<FuncBody> {
-    if (let Some(symbol) <- ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, scopeName)) {
-        if (let Some(node) <- symbol.node) {
-            if (let Some(funcDecl) <- (node as FuncDecl)) {
-                return funcDecl.funcBody
-            } else if (let Some(lambdaExpr) <- (node as LambdaExpr)) {
-                return lambdaExpr.funcBody
-            } else if (let Some(macroDecl) <- (node as MacroDecl)) {
-                return macroDecl.desugarDecl.getOrThrow().funcBody
-            } else if (let Some(primaryCtorDecl) <- (node as PrimaryCtorDecl)) {
-                return primaryCtorDecl.funcBody
-            }
-        }
-    }
-    return None
-}
-
 private func diagForInvalidAccess(diag: BasicDiagnosticEngine, re: RefExpr, decl: Decl,
     curFuncBody: FuncBody): Unit {
     if (let Some(funcDecl) <- curFuncBody.funcDecl) {
