@@ -2,6 +2,9 @@ package cjcj::sema.TypeCheckExpr
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::sema.*
 import cjcj::sema.Desugar.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
@@ -131,18 +134,27 @@ private func CheckMultipleAssignExpr(diag: BasicDiagnosticEngine, typeManager: T
     }
 }
 
-private func PreCheckCompoundAssign(leftTy: Ty, ae: AssignExpr): Bool {
+private func PreCheckCompoundAssign(leftTy: Ty, ae: AssignExpr,
+    diag: Option<BasicDiagnosticEngine>): Bool {
     if (!ae.isCompound) {
         return true
     }
+    var isSupported = false
     if (IsCompoundBoolAssign(ae.op)) {
-        return leftTy.IsBooleanSubType()
+        isSupported = leftTy.IsBooleanSubType()
+    } else if (IsCompoundIntegerAssign(ae.op)) {
+        isSupported = leftTy.IsIntegerSubType()
+    } else if (IsCompoundNumericAssign(ae.op)) {
+        isSupported = leftTy.IsNumeric()
     }
-    if (IsCompoundIntegerAssign(ae.op)) {
-        return leftTy.IsIntegerSubType()
+    if (isSupported) {
+        return true
     }
-    if (IsCompoundNumericAssign(ae.op)) {
-        return leftTy.IsNumeric()
+    if (ae.ShouldDiagnose()) {
+        if (let Some(diagValue) <- diag) {
+            Diagnose(diagValue, ae, BasicDiagKind.sema_type_incompatible,
+                args: [BasicDiagArgument("compound assignment expression")]).Emit()
+        }
     }
     return false
 }
@@ -320,7 +332,7 @@ public func SynAssignExpr(typeManager: TypeManager, ae: AssignExpr,
         return AssignInvalid(ae)
     }
     let concreteLeftTy = Ty.GetPrimitiveUpperBound(TcReplaceIdeal(typeManager, leftExpr))
-    if (!PreCheckCompoundAssign(concreteLeftTy, ae)) {
+    if (!PreCheckCompoundAssign(concreteLeftTy, ae, diag)) {
         let _ = SynExprShallow(typeManager, rightExpr)
         return AssignInvalid(ae)
     }

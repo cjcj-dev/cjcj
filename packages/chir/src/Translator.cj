@@ -1213,7 +1213,12 @@ public class Translator {
         let operand = Translator.TranslateASTNode(RequireExpr(expr.expr, "unary operand"), this) ??
             throw IllegalStateException("faithful AST2CHIR unary operand produced no value")
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
-        let unary = builder.CreateUnaryExpression(ToCHIRUnaryOp(expr.op), resultTy, operand, CurrentBlock(),
+        let kind = if (expr.op == AstTokenKind.NOT) {
+            if (RequireAstTy(expr).IsBoolean()) { ExprKind.NOT } else { ExprKind.BITNOT }
+        } else {
+            ToCHIRUnaryOp(expr.op)
+        }
+        let unary = builder.CreateUnaryExpression(kind, resultTy, operand, CurrentBlock(),
             overflowStrategy: expr.overflowStrategy)
         return RequireResult(unary)
     }
