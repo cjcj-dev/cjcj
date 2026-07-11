@@ -5,6 +5,8 @@ import cjcj::utils.{CJC_ABORT, StaticCast}
 
 public type ConvertTypeFunc = (Type) -> Type
 
+private let GENERIC_VIRTUAL_FUNC: String = "$GenericVirtualFunc"
+
 public interface ExprTypeFunctor {
     func VisitExpr(o: Expression): Unit {
         match (o.GetExprKind()) {
@@ -345,6 +347,84 @@ public open class PrivateTypeConverter <: ExprTypeConverter & ValueTypeConverter
             case ValueKind.KIND_FUNC => VisitSubValue(StaticCast<Function>(o))
             case _ => VisitValueDefaultImpl(o)
         }
+    }
+}
+
+public class TypeConverterForCC <: ExprTypeConverter & ValueTypeConverter & CustomDefTypeConverter {
+    private let funcConverter: ConvertTypeFunc
+
+    public init(normalConverter: ConvertTypeFunc, funcConverter: ConvertTypeFunc, builder: CHIRBuilder) {
+        super(normalConverter, builder)
+        this.funcConverter = funcConverter
+    }
+
+    public override func VisitValue(o: Value): Unit {
+        match (o.GetValueKind()) {
+            case ValueKind.KIND_FUNC => VisitSubValue(StaticCast<Function>(o))
+            case _ => VisitValueDefaultImpl(o)
+        }
+    }
+
+    public override func ConvertType(ty: Type): Type {
+        if (let Some(refTy) <- (ty as RefType)) {
+            return builder.context.GetRefTy(ConvertType(refTy.GetBaseType()))
+        } else if (ty.IsCJFunc()) {
+            return funcConverter(ty)
+        } else {
+            return converter(ty)
+        }
+    }
+
+    public override func VisitSubExpression(o: RawArrayAllocate): Unit {
+        VisitExprDefaultImpl(o)
+        o.SetElementType(converter(o.GetElementType()))
+    }
+
+    public override func VisitSubExpression(o: RawArrayAllocateWithException): Unit {
+        VisitExprDefaultImpl(o)
+        o.SetElementType(converter(o.GetElementType()))
+    }
+
+    public override func VisitSubValue(o: Function): Unit {
+        if (o.GetSrcCodeIdentifier() == GENERIC_VIRTUAL_FUNC) {
+            let funcType = o.GetFuncType().getOrThrow()
+            let newParamTys = ArrayList<Type>()
+            for (oldParamTy in funcType.GetParamTypes()) {
+                if (oldParamTy.IsCJFunc()) {
+                    newParamTys.add(converter(oldParamTy))
+                } else {
+                    newParamTys.add(ConvertType(oldParamTy))
+                }
+            }
+            let newRetTy = ConvertType(funcType.GetReturnType())
+            o.SetType(builder.context.GetFuncTy(newParamTys, newRetTy,
+                hasVarLenParam: funcType.HasVarArg(), isCFunc: funcType.IsCFunc()))
+            let genericTypeParams = o.GetGenericTypeParamsRef()
+            for (idx in 0..genericTypeParams.size) {
+                genericTypeParams[idx] = StaticCast<GenericType>(ConvertType(genericTypeParams[idx]))
+            }
+            for (param in o.GetParams()) {
+                VisitValue(param)
+            }
+        } else {
+            VisitFuncBase(o)
+            for (param in o.GetParams()) {
+                VisitValue(param)
+            }
+        }
+    }
+
+    public override func VisitValueDefaultImpl(o: Value): Unit {
+        if (let Some(param) <- o.AsParameter()) {
+            if (let Some(ownerFunc) <- param.GetOwnerFunc()) {
+                if (ownerFunc.GetSrcCodeIdentifier() == GENERIC_VIRTUAL_FUNC &&
+                    o.GetType().getOrThrow().IsCJFunc()) {
+                    o.SetType(converter(o.GetType().getOrThrow()))
+                    return
+                }
+            }
+        }
+        o.SetType(ConvertType(o.GetType().getOrThrow()))
     }
 }
 
