@@ -8096,8 +8096,15 @@ public class Translator {
         let kind = RequireAstTy(expr).kind
         return match (kind) {
             case AstTypeKind.TYPE_UNIT => UnitLiteral()
-            case AstTypeKind.TYPE_FLOAT16 | AstTypeKind.TYPE_FLOAT32 | AstTypeKind.TYPE_FLOAT64 |
-                AstTypeKind.TYPE_IDEAL_FLOAT => FloatLiteral(expr.constNumValue.asFloat.value)
+            case AstTypeKind.TYPE_FLOAT16 | AstTypeKind.TYPE_FLOAT64 | AstTypeKind.TYPE_IDEAL_FLOAT =>
+                FloatLiteral(expr.constNumValue.asFloat.value)
+            case AstTypeKind.TYPE_FLOAT32 =>
+                let stringVal = expr.stringValue.replace("_", "")
+                var value = 0.0
+                try (cStringVal = unsafe { LibC.mallocCString(stringVal) }.asResource()) {
+                    value = unsafe { CJSelfhostStrtoldToFloat32(cStringVal.value) }
+                }
+                FloatLiteral(value)
             case AstTypeKind.TYPE_UINT8 | AstTypeKind.TYPE_UINT16 | AstTypeKind.TYPE_UINT32 |
                 AstTypeKind.TYPE_UINT64 | AstTypeKind.TYPE_UINT_NATIVE | AstTypeKind.TYPE_INT8 |
                 AstTypeKind.TYPE_INT16 | AstTypeKind.TYPE_INT32 | AstTypeKind.TYPE_INT64 |

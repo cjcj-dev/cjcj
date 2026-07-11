@@ -30,6 +30,7 @@
 #include <llvm-c/Core.h>
 #include <llvm-c/DebugInfo.h>
 
+#include <cstdlib>
 #include <vector>
 
 #include "llvm/ADT/StringRef.h"
@@ -124,6 +125,13 @@ LLVMValueRef CreateGCStaticAggCall(LLVMBuilderRef Builder, LLVMModuleRef Module,
 
 using LLVMSelfhostLoopInfoRef = LLVMSelfhostLoopInfoState*;
 using LLVMSelfhostLoopRef = Loop*;
+
+// Mirror TranslateLitConstant's `static_cast<float>(strtold(...))`
+// (src/CHIR/AST2CHIR/TranslateASTNode/TranslateLitConstExpr.cpp:25,80).
+extern "C" double CJSelfhostStrtoldToFloat32(const char *Value)
+{
+    return static_cast<float>(strtold(Value, nullptr));
+}
 
 // Mirror C++ `gv->addAttribute(Kind, Val)` (llvm/IR/GlobalVariable.h:239).
 // Val may be empty (KLen/VLen are explicit lengths; no NUL assumption).

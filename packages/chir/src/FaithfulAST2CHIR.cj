@@ -60,6 +60,10 @@ import cjcj::incremental_compilation.{CompilationCache, IncreKind, VirtualWrappe
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, ProfileRecorder, STATIC_INIT_VAR}
 
+foreign {
+    func CJSelfhostStrtoldToFloat32(value: CString): Float64
+}
+
 private let USER_MAIN_MANGLED_NAME: String = "user.main"
 
 private class FaithfulInitFileVars {
@@ -3650,8 +3654,15 @@ public class FaithfulAST2CHIR {
         let kind = RequireAstTy(expr).kind
         return match (kind) {
             case AstTypeKind.TYPE_UNIT => UnitLiteral()
-            case AstTypeKind.TYPE_FLOAT16 | AstTypeKind.TYPE_FLOAT32 | AstTypeKind.TYPE_FLOAT64 |
-                AstTypeKind.TYPE_IDEAL_FLOAT => FloatLiteral(expr.constNumValue.asFloat.value)
+            case AstTypeKind.TYPE_FLOAT16 | AstTypeKind.TYPE_FLOAT64 | AstTypeKind.TYPE_IDEAL_FLOAT =>
+                FloatLiteral(expr.constNumValue.asFloat.value)
+            case AstTypeKind.TYPE_FLOAT32 =>
+                let stringVal = expr.stringValue.replace("_", "")
+                var value = 0.0
+                try (cStringVal = unsafe { LibC.mallocCString(stringVal) }.asResource()) {
+                    value = unsafe { CJSelfhostStrtoldToFloat32(cStringVal.value) }
+                }
+                FloatLiteral(value)
             case AstTypeKind.TYPE_UINT8 | AstTypeKind.TYPE_UINT16 | AstTypeKind.TYPE_UINT32 |
                 AstTypeKind.TYPE_UINT64 | AstTypeKind.TYPE_UINT_NATIVE | AstTypeKind.TYPE_INT8 |
                 AstTypeKind.TYPE_INT16 | AstTypeKind.TYPE_INT32 | AstTypeKind.TYPE_INT64 |
@@ -3671,12 +3682,11 @@ public class FaithfulAST2CHIR {
                 builder.CreateLiteralValue(FloatLiteral(expr.constNumValue.asFloat.value), chirTyToTrans)
             case AstTypeKind.TYPE_FLOAT32 =>
                 let stringVal = expr.stringValue.replace("_", "")
-                let value = Float64.parse(if (stringVal.endsWith("f32")) {
-                    stringVal[0..stringVal.size - 3]
-                } else {
-                    stringVal
-                })
-                builder.CreateLiteralValue(FloatLiteral(Float64(Float32(value))), chirTyToTrans)
+                var value = 0.0
+                try (cStringVal = unsafe { LibC.mallocCString(stringVal) }.asResource()) {
+                    value = unsafe { CJSelfhostStrtoldToFloat32(cStringVal.value) }
+                }
+                builder.CreateLiteralValue(FloatLiteral(value), chirTyToTrans)
             case AstTypeKind.TYPE_UINT8 | AstTypeKind.TYPE_UINT16 | AstTypeKind.TYPE_UINT32 |
                 AstTypeKind.TYPE_UINT64 | AstTypeKind.TYPE_UINT_NATIVE =>
                 builder.CreateLiteralValue(
