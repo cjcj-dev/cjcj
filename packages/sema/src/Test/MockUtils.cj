@@ -4,8 +4,11 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::sema.GetUsableGetterForProperty
 import cjcj::sema.GetUsableSetterForProperty
+import cjcj::sema.GenerateTypeMapping
 import cjcj::sema.SameTy
+import cjcj::sema.TypeSubst
 import cjcj::sema.TypeManager
+import cjcj::utils.CJC_ASSERT
 
 foreign {
     func abort(): Unit
@@ -509,6 +512,87 @@ public class MockUtils {
 
     public static func GetForeignAccessorName(decl: FuncDecl): String {
         return decl.fullPackageName + "$" + decl.identifier.Val()
+    }
+
+    public static func PrependFuncGenericSubst(originalGeneric: Option<Generic>, mockedGeneric: Option<Generic>,
+        classSubsts: ArrayList<TypeSubst>): Unit {
+        if (originalGeneric.isNone() || mockedGeneric.isNone()) {
+            return
+        }
+        let original = originalGeneric.getOrThrow()
+        let mocked = mockedGeneric.getOrThrow()
+        CJC_ASSERT(original.typeParameters.size == mocked.typeParameters.size)
+        if (original.typeParameters.isEmpty() && classSubsts.isEmpty()) {
+            return
+        }
+        let subst = TypeSubst()
+        for (idx in 0..original.typeParameters.size) {
+            let originalTy = (original.typeParameters[idx].GetTy().getOrThrow() as GenericsTy).getOrThrow()
+            subst.Put(originalTy, mocked.typeParameters[idx].GetTy().getOrThrow())
+        }
+        classSubsts.add(subst, at: 0)
+    }
+
+    public static func BuildGenericSubsts(decl: InheritableDecl): ArrayList<TypeSubst> {
+        let genericSubsts = ArrayList<TypeSubst>()
+        let workList = ArrayList<InheritableDecl>()
+        workList.add(decl)
+        var workIdx: Int64 = 0
+        while (workIdx < workList.size) {
+            let curDecl = workList[workIdx]
+            workIdx++
+            for (inheritedType in curDecl.inheritedTypes) {
+                let inheritedTy = inheritedType.GetTy().getOrThrow()
+                if (refEq(inheritedTy, curDecl.GetTy().getOrThrow()) || !inheritedTy.HasGeneric()) {
+                    continue
+                }
+                if (let Some(inheritedDecl) <- Ty.GetInheritableDeclPtrOfTy(Some(inheritedTy))) {
+                    genericSubsts.add(GenerateTypeMapping(inheritedDecl, inheritedTy.typeArgs))
+                    workList.add(inheritedDecl)
+                }
+            }
+        }
+        var left: Int64 = 0
+        var right = genericSubsts.size - 1
+        while (left < right) {
+            let value = genericSubsts[left]
+            genericSubsts[left] = genericSubsts[right]
+            genericSubsts[right] = value
+            left++
+            right--
+        }
+        return genericSubsts
+    }
+
+    public static func GetIndexOfGenericTypeParam(ty: Ty, generic: Generic): Int64 {
+        var idx: Int64 = 0
+        for (typeParam in generic.typeParameters) {
+            if (let Some(typeParamTy) <- typeParam.GetTy()) {
+                if (refEq(typeParamTy, ty)) {
+                    return idx
+                }
+            }
+            idx++
+        }
+        return -1
+    }
+
+    public static func UpdateRefTypesTarget(typeNode: Type, oldGeneric: Generic, newGeneric: Generic): Unit {
+        if (let None <- (typeNode as RefType)) {
+            return
+        }
+        let refType = (typeNode as RefType).getOrThrow()
+        if (let Some(typeTy) <- refType.GetTy()) {
+            if (let Some(genericTy) <- (typeTy as GenericsTy)) {
+                let typeParamIndex = GetIndexOfGenericTypeParam(genericTy, oldGeneric)
+                if (typeParamIndex != -1) {
+                    refType.ref.target = newGeneric.typeParameters[typeParamIndex]
+                }
+            }
+        }
+        for (typeArg in refType.typeArguments) {
+            UpdateRefTypesTarget(typeArg, oldGeneric, newGeneric)
+        }
     }
 }
 
