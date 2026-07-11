@@ -2952,11 +2952,7 @@ public class TypeChecker {
             SynthesizeTypeNode(ctx, vd.typeNode)
             if (let Some(initializer) <- vd.initializer) {
                 if (let Some(typeNode) <- vd.typeNode) {
-                    if (let Some(targetTy) <- typeNode.GetTy()) {
-                        if (!Check(ctx, targetTy, initializer) && !IsGlobalOrMember(vd)) {
-                            vd.DisableAttr(Attribute.IS_CHECK_VISITED)
-                        }
-                    } else {
+                    if (let None <- typeNode.GetTy()) {
                         let _ = Synthesize(ctx, initializer)
                     }
                 } else {
@@ -2966,7 +2962,14 @@ public class TypeChecker {
                     }
                 }
             }
-            let declTy = TypeCheckDeclSynchronizeTypeAndInitializer(impl.typeManager, vd)
+            let declTy = TypeCheckDeclSynchronizeTypeAndInitializer(impl.typeManager, vd, diag: impl.diag,
+                checker: Some({ targetTy: Ty, initializer: Expr =>
+                    let isWellTyped = Check(ctx, targetTy, initializer)
+                    if (!isWellTyped && !IsGlobalOrMember(vd)) {
+                        vd.DisableAttr(Attribute.IS_CHECK_VISITED)
+                    }
+                    isWellTyped
+                }))
             if (let Some(varDecl) <- (vd as VarDecl)) {
                 if (let Some(initializer) <- varDecl.initializer) {
                     if (!Ty.IsInitialTy(initializer.GetTy())) {
@@ -3128,16 +3131,15 @@ public class TypeChecker {
         SynthesizeTypeNode(ctx, vpd.typeNode)
         if (let Some(initializer) <- vpd.initializer) {
             if (let Some(typeNode) <- vpd.typeNode) {
-                if (let Some(targetTy) <- typeNode.GetTy()) {
-                    let _ = Check(ctx, targetTy, initializer)
-                } else {
+                if (let None <- typeNode.GetTy()) {
                     let _ = Synthesize(ctx, initializer)
                 }
             } else {
                 let _ = Synthesize(ctx, initializer)
             }
         }
-        let declTy = TypeCheckDeclSynchronizeTypeAndInitializer(impl.typeManager, vpd)
+        let declTy = TypeCheckDeclSynchronizeTypeAndInitializer(impl.typeManager, vpd, diag: impl.diag,
+            checker: Some({ targetTy: Ty, initializer: Expr => Check(ctx, targetTy, initializer) }))
         BindLocalDeclIfNeeded(ctx, vpd)
         if (let Some(initializer2) <- vpd.initializer) {
             if (!Ty.IsTyCorrect(initializer2.GetTy())) {
@@ -5589,7 +5591,8 @@ public class TypeChecker {
             SynthesizeAssignChildren(ctx, assign)
             return FinishSynthesize(ctx, assign, SynAssignExpr(impl.typeManager, assign,
                 rightChecker: Some({ target: Ty, rightExpr: Expr => Check(ctx, target, rightExpr) }),
-                ctx: Some(ctx), synthesizer: Some({ desugar: Expr => Synthesize(ctx, SynPos.UNUSED, desugar) })))
+                ctx: Some(ctx), synthesizer: Some({ desugar: Expr => Synthesize(ctx, SynPos.UNUSED, desugar) }),
+                diag: impl.diag))
         }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             return SynthesizeThrowExpr(ctx, throwExpr)

@@ -78,11 +78,15 @@ public func ChkLitConstExprOfTypeBool(typeManager: TypeManager, target: Ty, lce:
     return false
 }
 
-public func ChkLitConstExprOfTypeUnit(typeManager: TypeManager, target: Ty, lce: LitConstExpr): Bool {
+public func ChkLitConstExprOfTypeUnit(typeManager: TypeManager, target: Ty, lce: LitConstExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
     if (target.IsAny() || target.IsUnit() || target.IsCType() || IsSameOrBoxable(typeManager, unitTy, target)) {
         lce.SetTy(unitTy)
         return true
+    }
+    if (let Some(diagValue) <- diag) {
+        DiagMismatchedTypesWithFoundTy(diagValue, lce, target.String(), "Unit")
     }
     let _ = InvalidLitConstExpr(lce)
     return false
@@ -333,7 +337,7 @@ public func ChkLitConstExpr(typeManager: TypeManager, target: Ty, lce: LitConstE
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let isWellTyped = match (lce.kind) {
         case LitConstKind.BOOL => ChkLitConstExprOfTypeBool(typeManager, target, lce)
-        case LitConstKind.UNIT => ChkLitConstExprOfTypeUnit(typeManager, target, lce)
+        case LitConstKind.UNIT => ChkLitConstExprOfTypeUnit(typeManager, target, lce, diag: diag)
         case LitConstKind.INTEGER => ChkLitConstExprOfTypeInteger(typeManager, target, lce, diag: diag)
         case LitConstKind.RUNE_BYTE => ChkLitConstExprOfTypeInteger(typeManager, target, lce, diag: diag)
         case LitConstKind.FLOAT => ChkLitConstExprOfTypeFloat(typeManager, target, lce, diag: diag)

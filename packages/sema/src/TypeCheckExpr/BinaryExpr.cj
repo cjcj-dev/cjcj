@@ -852,6 +852,11 @@ private func SynRelationalExpr(impl: TypeCheckerImpl, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     let typeManager = impl.typeManager
+    let relationTy = SynArithmeticOrRelationalExpr(impl, be, isArithmetic: false, ctx: ctx,
+        synthesizer: synthesizer, checker: checker, diag: diag)
+    if (Ty.IsTyCorrect(relationTy)) {
+        return relationTy
+    }
     if (let Some(tys) <- SynthesizeOperands(typeManager, be, synthesizer: synthesizer)) {
         let leftTy = tys[0]
         let rightTy = tys[1]
@@ -866,8 +871,7 @@ private func SynRelationalExpr(impl: TypeCheckerImpl, be: BinaryExpr,
             return BinaryInvalid(be)
         }
     }
-    return SynArithmeticOrRelationalExpr(impl, be, isArithmetic: false, ctx: ctx,
-        synthesizer: synthesizer, checker: checker, diag: diag)
+    return BinaryInvalid(be)
 }
 
 private func SynRelationalExpr(typeManager: TypeManager, be: BinaryExpr,
@@ -1290,11 +1294,12 @@ private func TargetAcceptsBool(typeManager: TypeManager, target: Ty): Bool {
 
 private func ChkRelationalExprBuiltin(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
-    checker!: Option<BinaryOperandChecker> = None): Bool {
+    checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (!TargetAcceptsBool(typeManager, target)) {
         return false
     }
-    let relationTy = SynRelationalExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
+    let relationTy = SynRelationalExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker,
+        diag: diag)
     if (Ty.IsTyCorrect(relationTy) && relationTy.IsBoolean()) {
         return true
     }
@@ -1357,13 +1362,13 @@ private func ChkShiftExprBuiltin(typeManager: TypeManager, target: Ty, be: Binar
 
 private func ChkBuiltinBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
-    checker!: Option<BinaryOperandChecker> = None): Bool {
+    checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (IsArithmeticOperator(be.op)) {
         return ChkArithmeticExprBuiltin(typeManager, target, be, ctx: ctx, checker: checker)
     }
     if (IsRelationalOperator(be.op)) {
         return ChkRelationalExprBuiltin(typeManager, target, be, ctx: ctx,
-            synthesizer: synthesizer, checker: checker)
+            synthesizer: synthesizer, checker: checker, diag: diag)
     }
     if (IsLogicalOperator(be.op)) {
         return ChkLogicalExprBuiltin(typeManager, target, be, ctx: ctx, checker: checker)
@@ -1389,9 +1394,12 @@ public func SynBinaryExpr(impl: TypeCheckerImpl, be: BinaryExpr,
         return BinaryInvalid(be)
     }
     if (IsLogicalOperator(be.op)) {
-        let logicalTy = SynLogicalExpr(typeManager, be, checker: checker)
-        if (Ty.IsTyCorrect(logicalTy)) {
-            return logicalTy
+        try (ds = DiagSuppressor(diag)) {
+            let logicalTy = SynLogicalExpr(typeManager, be, checker: checker)
+            if (Ty.IsTyCorrect(logicalTy)) {
+                ds.ReportDiag()
+                return logicalTy
+            }
         }
         if (be.TestAttr(Attribute.IS_OUTERMOST)) {
             SynBinaryLeafs(typeManager, be, synthesizer)
@@ -1404,10 +1412,13 @@ public func SynBinaryExpr(impl: TypeCheckerImpl, be: BinaryExpr,
             return be.GetTy() ?? TypeManager.GetInvalidTy()
         }
     } else if (IsArithmeticOperator(be.op)) {
-        let builtinTy = SynArithmeticExpr(impl, be, ctx: ctx, synthesizer: synthesizer, checker: checker,
-            diag: diag)
-        if (Ty.IsTyCorrect(builtinTy)) {
-            return builtinTy
+        try (ds2 = DiagSuppressor(diag)) {
+            let builtinTy = SynArithmeticExpr(impl, be, ctx: ctx, synthesizer: synthesizer, checker: checker,
+                diag: diag)
+            if (Ty.IsTyCorrect(builtinTy)) {
+                ds2.ReportDiag()
+                return builtinTy
+            }
         }
         if (be.TestAttr(Attribute.IS_OUTERMOST)) {
             SynBinaryLeafs(typeManager, be, synthesizer)
@@ -1424,10 +1435,13 @@ public func SynBinaryExpr(impl: TypeCheckerImpl, be: BinaryExpr,
             return overloadTy
         }
     } else if (IsRelationalOperator(be.op)) {
-        let builtinTy2 = SynRelationalExpr(impl, be, ctx: ctx, synthesizer: synthesizer, checker: checker,
-            diag: diag)
-        if (Ty.IsTyCorrect(builtinTy2)) {
-            return builtinTy2
+        try (ds3 = DiagSuppressor(diag)) {
+            let builtinTy2 = SynRelationalExpr(impl, be, ctx: ctx, synthesizer: synthesizer, checker: checker,
+                diag: diag)
+            if (Ty.IsTyCorrect(builtinTy2)) {
+                ds3.ReportDiag()
+                return builtinTy2
+            }
         }
         if (be.TestAttr(Attribute.IS_OUTERMOST)) {
             SynBinaryLeafs(typeManager, be, synthesizer)
@@ -1444,9 +1458,12 @@ public func SynBinaryExpr(impl: TypeCheckerImpl, be: BinaryExpr,
             return overloadTy2
         }
     } else if (IsShiftOperator(be.op)) {
-        let builtinTy3 = SynShiftExpr(typeManager, be, synthesizer: synthesizer)
-        if (Ty.IsTyCorrect(builtinTy3)) {
-            return builtinTy3
+        try (ds4 = DiagSuppressor(diag)) {
+            let builtinTy3 = SynShiftExpr(typeManager, be, synthesizer: synthesizer)
+            if (Ty.IsTyCorrect(builtinTy3)) {
+                ds4.ReportDiag()
+                return builtinTy3
+            }
         }
         if (be.TestAttr(Attribute.IS_OUTERMOST)) {
             SynBinaryLeafs(typeManager, be, synthesizer)
@@ -1493,27 +1510,23 @@ public func ChkBinaryExpr(impl: TypeCheckerImpl, target: Ty, be: BinaryExpr,
     if (IsFlowOperator(be.op)) {
         return ChkFlowExpr(typeManager, target, be)
     }
-    if (ChkBuiltinBinaryExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
-        return true
-    }
-    if (TryChkBinaryOverload(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
-        return true
-    }
-    if (!HasTupleEqualityOperands(be)) {
-        ClearExprKeepTargets(be)
-    }
-    let actualTy = SynBinaryExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker, diag: diag)
-    if (!Ty.IsTyCorrect(actualTy)) {
-        if (TryChkBinaryOverload(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
+    try (ds = DiagSuppressor(diag)) {
+        if (ChkBuiltinBinaryExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker,
+            diag: diag)) {
+            ds.ReportDiag()
             return true
         }
-        return false
-    }
-    if (typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
-        return true
     }
     if (TryChkBinaryOverload(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
         return true
+    }
+    ClearExprKeepTargets(be)
+    let actualTy = SynBinaryExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker, diag: diag)
+    if (Ty.IsTyCorrect(actualTy)) {
+        if (let Some(diagValue) <- diag) {
+            DiagMismatchedTypes(diagValue, be, target)
+        }
+        RecoverToBinaryExpr(be)
     }
     if (be.TestAttr(Attribute.IS_OUTERMOST)) {
         SynBinaryLeafs(typeManager, be, synthesizer)

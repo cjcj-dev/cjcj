@@ -498,8 +498,6 @@ private func DesugarAssignExpr(expr: AssignExpr): Unit {
                 let block = CreateBlock(nodes)
                 CopyBasicInfo(expr, block)
                 expr.desugarExpr = block
-                expr.leftValue = None
-                expr.rightExpr = None
             }
         }
     }

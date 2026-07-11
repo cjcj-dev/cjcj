@@ -445,7 +445,8 @@ public func TypeCheckDeclCheckIndexOperatorOverload(
 public func TypeCheckDeclSynchronizeTypeAndInitializer(
     tm: TypeManager,
     vd: VarDeclAbstract,
-    diag!: Option<BasicDiagnosticEngine> = None
+    diag!: Option<BasicDiagnosticEngine> = None,
+    checker!: Option<(Ty, Expr) -> Bool> = None
 ): Ty {
     if (let Some(typeNode) <- vd.typeNode) {
         if (let Some(typeTy) <- typeNode.GetTy()) {
@@ -458,6 +459,8 @@ public func TypeCheckDeclSynchronizeTypeAndInitializer(
                     if (let Some(lit) <- (initializer as LitConstExpr)) {
                         let _ = ChkLitConstExprRange(lit, diag: diag)
                     }
+                } else if (let Some(check) <- checker) {
+                    let _ = check(typeTy, initializer)
                 }
             }
             return typeTy

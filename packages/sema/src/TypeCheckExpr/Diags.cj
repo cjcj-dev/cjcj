@@ -67,8 +67,8 @@ public func DiagInvalidMultipleAssignExpr(
     let builder = DiagnoseRefactor(
         diag,
         BasicDiagKindRefactor.sema_mismatched_types_multiple_assign,
-        rightExpr,
-        arguments: [TyString(rightExpr.GetTy())])
+        rightExpr)
+    builder.AddMainHintArguments([TyString(rightExpr.GetTy())])
     AddHint(builder, leftNode, arguments: [because])
     builder.Emit()
 }

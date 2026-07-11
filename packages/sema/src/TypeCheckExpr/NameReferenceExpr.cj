@@ -638,7 +638,7 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
         return SynBinaryExpr(typeManager, value, ctx: ctx,
             synthesizer: Some({ operand: Expr => SynExprShallow(typeManager, operand, ctx: ctx) }), diag: diag)
     }
-    if (let Some(value) <- (expr as AssignExpr)) { return SynAssignExpr(typeManager, value, ctx: ctx) }
+    if (let Some(value) <- (expr as AssignExpr)) { return SynAssignExpr(typeManager, value, ctx: ctx, diag: diag) }
     if (let Some(value) <- (expr as IfExpr)) { return SynIfExpr(typeManager, value) }
     if (let Some(value) <- (expr as WhileExpr)) { return SynWhileExpr(typeManager, value, ctx: ctx) }
     if (let Some(value) <- (expr as DoWhileExpr)) { return SynDoWhileExpr(typeManager, value, ctx: ctx) }
@@ -705,7 +705,7 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
         return ChkBinaryExpr(typeManager, target, value, ctx: ctx,
             synthesizer: Some({ operand: Expr => SynExprShallow(typeManager, operand, ctx: ctx) }), diag: diag)
     }
-    if (let Some(value) <- (expr as AssignExpr)) { return ChkAssignExpr(typeManager, target, value) }
+    if (let Some(value) <- (expr as AssignExpr)) { return ChkAssignExpr(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as IfExpr)) { return ChkIfExpr(typeManager, target, value, ctx: ctx, diag: diag) }
     if (let Some(value) <- (expr as WhileExpr)) { return ChkWhileExpr(typeManager, target, value, ctx: ctx) }
     if (let Some(value) <- (expr as DoWhileExpr)) { return ChkDoWhileExpr(typeManager, target, value, ctx: ctx) }
@@ -990,6 +990,10 @@ public func ChkNameReferenceExpr(typeManager: TypeManager, target: Ty, nre: Name
     var actualTy = SynNameReferenceExpr(typeManager, nre, diag: diag)
     if (!Ty.IsTyCorrect(actualTy)) {
         return false
+    }
+    let targets = GetFuncTargets(nre)
+    if (targets.isEmpty()) {
+        return CheckNonFunctionReference(diag, typeManager, target, nre)
     }
     if (nre.callOrPattern.isNone()) {
         actualTy = InstantiateEnumConstructorRefFromTarget(typeManager, target, nre, actualTy)

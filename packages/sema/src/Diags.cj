@@ -211,8 +211,7 @@ public func DiagMismatchedTypesWithFoundTy(diag: BasicDiagnosticEngine, node: No
         return
     }
     CJC_ASSERT(expected != found)
-    let builder = diag.DiagnoseRefactor(
-        BasicDiagKindRefactor.sema_mismatched_types, MakeRange(node.begin, node.end))
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mismatched_types, node)
     builder.AddMainHintArguments([expected, found])
     if (!note.isEmpty()) {
         builder.AddNote(note)
@@ -230,8 +229,7 @@ public func DiagMismatchedTypesWithFoundTy(diag: BasicDiagnosticEngine, node: No
     var expectedStr = expected.String()
     var foundStr = found.String()
     if (expectedStr == foundStr) {
-        let builder = diag.DiagnoseRefactor(
-            BasicDiagKindRefactor.sema_mismatched_types, MakeRange(node.begin, node.end))
+        let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mismatched_types, node)
         if (let Some(expectedDecl) <- Ty.GetDeclPtrOfTy(Some(expected))) {
             expectedStr += "' in '" + expectedDecl.fullPackageName
             builder.AddNote(MakeRangeForDeclIdentifier(expectedDecl), "'" + expectedStr + "'")
