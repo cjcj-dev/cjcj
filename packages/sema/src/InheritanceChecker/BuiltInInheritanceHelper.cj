@@ -123,10 +123,10 @@ func IsBuiltInOperatorFuncInExtend(
                                         CreateBuiltInBinaryOperatorFunc(typeManager, fd.op, realFuncTy.paramTys[0], ed, expectedRetTy)
                                     } else {
                                         // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                                        diag.DiagnoseRefactor(
+                                        DiagnoseRefactor(diag,
                                             DiagKindRefactor.sema_return_type_incompatible,
-                                            fd.begin,
-                                            arguments: [fd.identifier.Val()]
+                                            structDecl,
+                                            MakeRange(fd.identifier.Begin(), fd.identifier.End())
                                         )
                                     }
                                     return true
@@ -140,10 +140,10 @@ func IsBuiltInOperatorFuncInExtend(
                                         CreateBuiltInUnaryOperatorFunc(typeManager, fd.op, ed, expectedUnaryRetTy)
                                     } else {
                                         // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                                        diag.DiagnoseRefactor(
+                                        DiagnoseRefactor(diag,
                                             DiagKindRefactor.sema_return_type_incompatible,
-                                            fd.begin,
-                                            arguments: [fd.identifier.Val()]
+                                            structDecl,
+                                            MakeRange(fd.identifier.Begin(), fd.identifier.End())
                                         )
                                     }
                                     return true
