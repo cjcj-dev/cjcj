@@ -329,23 +329,6 @@ public func SetZExtAttrForCFunc(callBase: LLVMValueRef, functionType: LLVMTypeRe
     }
 }
 
-private func PropagateZExtAttributeFromCallee(callee: LLVMValueRef, callBase: LLVMValueRef): Unit {
-    if (!IsLLVMFunction(callee) || callBase.isNull()) {
-        return
-    }
-    if (HasAttributeAtIndex(callee, 0u32, LLVM_ZEROEXT_ATTR)) {
-        AddRetAttr(callBase, LLVM_ZEROEXT_ATTR)
-    }
-    let paramCount = unsafe { LLVMCountParams(callee) }
-    var idx: UInt32 = 0u32
-    while (idx < paramCount) {
-        if (HasAttributeAtIndex(callee, idx + 1u32, LLVM_ZEROEXT_ATTR)) {
-            AddParamAttr(callBase, idx, LLVM_ZEROEXT_ATTR)
-        }
-        idx++
-    }
-}
-
 private func PropagateSRetAttributeFromCallee(callee: LLVMValueRef, callBase: LLVMValueRef): Unit {
     if (!IsLLVMFunction(callee) || callBase.isNull() ||
         unsafe { LLVMSelfhostFunctionHasStructRetAttr(callee) } == 0) {
@@ -359,7 +342,6 @@ private func PropagateSRetAttributeFromCallee(callee: LLVMValueRef, callBase: LL
 
 public func PropagateCallABIAttributesFromCallee(callee: LLVMValueRef, callBase: LLVMValueRef): Unit {
     PropagateSRetAttributeFromCallee(callee, callBase)
-    PropagateZExtAttributeFromCallee(callee, callBase)
 }
 
 public func ShouldReturnVoid(fn: Function): Bool {
