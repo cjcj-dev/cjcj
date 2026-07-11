@@ -556,13 +556,12 @@ private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, 
     return None
 }
 
-public func SynTryExpr(typeManager: TypeManager, te: TryExpr,
+public func SynTryExpr(typeManager: TypeManager, te: TryExpr, diag: BasicDiagnosticEngine,
     exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None, commandTy!: Option<Ty> = None,
-    diag!: Option<BasicDiagnosticEngine> = None,
     patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Ty {
     if (!te.resourceSpec.isEmpty()) {
         return SynTryWithResourcesExpr(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
-            diag: diag, patternChecker: patternChecker)
+            diag: Some(diag), patternChecker: patternChecker)
     }
     var ok = true
     var baseTy: Ty = TypeManager.GetNothingTy()
@@ -574,14 +573,14 @@ public func SynTryExpr(typeManager: TypeManager, te: TryExpr,
             ok = false
         }
     } else if (let Some(tryBlock) <- te.tryBlock) {
-        baseTy = SynBlock(typeManager, tryBlock)
+        baseTy = SynBlock(typeManager, tryBlock, diag: Some(diag))
         ok = Ty.IsTyCorrect(baseTy) && ok
     } else {
         ok = false
     }
     if (let Some(joinedTy) <- SynTryExprCatchesAndHandles(typeManager, te, baseTy, exceptionTy: exceptionTy,
-        errorTy: errorTy, commandTy: commandTy, diag: diag, patternChecker: patternChecker)) {
-        ok = ChkTryExprFinallyBlock(typeManager, te, diag: diag) && ok
+        errorTy: errorTy, commandTy: commandTy, diag: Some(diag), patternChecker: patternChecker)) {
+        ok = ChkTryExprFinallyBlock(typeManager, te, diag: Some(diag)) && ok
         if (ok) {
             te.SetTy(joinedTy)
             return joinedTy

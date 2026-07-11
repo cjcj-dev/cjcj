@@ -639,7 +639,9 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
             synthesizer: Some({ operand: Expr => SynExprShallow(typeManager, operand, ctx: ctx) }), diag: diag)
     }
     if (let Some(value) <- (expr as AssignExpr)) { return SynAssignExpr(typeManager, value, ctx: ctx, diag: diag) }
-    if (let Some(value) <- (expr as IfExpr)) { return SynIfExpr(typeManager, value) }
+    if (let Some(value) <- (expr as IfExpr)) {
+        return SynIfExpr(typeManager, value, diag.getOrThrow())
+    }
     if (let Some(value) <- (expr as WhileExpr)) { return SynWhileExpr(typeManager, value, ctx: ctx) }
     if (let Some(value) <- (expr as DoWhileExpr)) { return SynDoWhileExpr(typeManager, value, ctx: ctx) }
     if (let Some(value) <- (expr as ForInExpr)) {
@@ -649,8 +651,12 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
         return TcInvalid(value)
     }
     if (let Some(value) <- (expr as LambdaExpr)) { return SynLamExpr(typeManager, value, ctx: ctx) }
-    if (let Some(value) <- (expr as TryExpr)) { return SynTryExpr(typeManager, value) }
-    if (let Some(value) <- (expr as IfAvailableExpr)) { return SynIfAvailableExpr(typeManager, value) }
+    if (let Some(value) <- (expr as TryExpr)) {
+        return SynTryExpr(typeManager, value, diag.getOrThrow())
+    }
+    if (let Some(value) <- (expr as IfAvailableExpr)) {
+        return SynIfAvailableExpr(typeManager, value, diag.getOrThrow())
+    }
     if (let Some(value) <- (expr as SubscriptExpr)) { return SynSubscriptExpr(typeManager, value) }
     if (let Some(value) <- (expr as RangeExpr)) { return SynRangeExpr(typeManager, value) }
     if (let Some(value) <- (expr as IsExpr)) { return SynIsExpr(typeManager, value) }
@@ -718,7 +724,9 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     }
     if (let Some(value) <- (expr as LambdaExpr)) { return ChkLamExpr(typeManager, target, value, ctx: ctx) }
     if (let Some(value) <- (expr as TryExpr)) { return ChkTryExpr(typeManager, target, value) }
-    if (let Some(value) <- (expr as IfAvailableExpr)) { return ChkIfAvailableExpr(typeManager, target, value) }
+    if (let Some(value) <- (expr as IfAvailableExpr)) {
+        return ChkIfAvailableExpr(typeManager, target, value, diag.getOrThrow())
+    }
     if (let Some(value) <- (expr as SubscriptExpr)) { return ChkSubscriptExpr(typeManager, target, value, ctx: ctx) }
     if (let Some(value) <- (expr as RangeExpr)) { return ChkRangeExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as IsExpr)) { return ChkIsExpr(typeManager, target, value, diag: diag) }

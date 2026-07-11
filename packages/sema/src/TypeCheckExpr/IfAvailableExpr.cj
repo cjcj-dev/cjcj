@@ -1,6 +1,7 @@
 package cjcj::sema.TypeCheckExpr
 
 import cjcj::ast.*
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::sema.*
 import cjcj::sema.Plugin.*
 
@@ -87,7 +88,8 @@ private func CheckIfAvailableArg(iae: IfAvailableExpr, desugaredIf: IfExpr): Boo
     return false
 }
 
-public func SynIfAvailableExpr(typeManager: TypeManager, iae: IfAvailableExpr): Ty {
+public func SynIfAvailableExpr(typeManager: TypeManager, iae: IfAvailableExpr,
+    diag: BasicDiagnosticEngine): Ty {
     if (let Some(desugar) <- iae.desugarExpr) {
         if (let Some(desugaredIf) <- (desugar as IfExpr)) {
             var ok = CheckIfAvailableArg(iae, desugaredIf)
@@ -102,7 +104,7 @@ public func SynIfAvailableExpr(typeManager: TypeManager, iae: IfAvailableExpr): 
             } else {
                 ok = false
             }
-            let ifTy = SynIfExpr(typeManager, desugaredIf)
+            let ifTy = SynIfExpr(typeManager, desugaredIf, diag)
             ok = Ty.IsTyCorrect(ifTy) && ok
             if (ok) {
                 iae.SetTy(ifTy)
@@ -113,8 +115,9 @@ public func SynIfAvailableExpr(typeManager: TypeManager, iae: IfAvailableExpr): 
     return IfAvailableInvalid(iae)
 }
 
-public func ChkIfAvailableExpr(typeManager: TypeManager, target: Ty, iae: IfAvailableExpr): Bool {
-    let actualTy = SynIfAvailableExpr(typeManager, iae)
+public func ChkIfAvailableExpr(typeManager: TypeManager, target: Ty, iae: IfAvailableExpr,
+    diag: BasicDiagnosticEngine): Bool {
+    let actualTy = SynIfAvailableExpr(typeManager, iae, diag)
     if (Ty.IsTyCorrect(actualTy) &&
         typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
         return true

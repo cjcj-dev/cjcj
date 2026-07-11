@@ -5411,9 +5411,9 @@ public class TypeChecker {
         } else {
             None
         }
-        return FinishSynthesize(ctx, tryExpr, SynTryExpr(impl.typeManager, tryExpr,
+        return FinishSynthesize(ctx, tryExpr, SynTryExpr(impl.typeManager, tryExpr, impl.diag.getOrThrow(),
             exceptionTy: LookupCoreTy(ctx, "Exception"), errorTy: LookupCoreTy(ctx, "Error"),
-            commandTy: commandTy, diag: impl.diag,
+            commandTy: commandTy,
             patternChecker: Some({ targetTy: Ty, pattern: Pattern =>
                 ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false,
                     exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>

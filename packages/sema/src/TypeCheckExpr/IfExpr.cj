@@ -38,8 +38,8 @@ private func JoinIfBranchTys(typeManager: TypeManager, thenTy: Ty, elseTy: Ty, c
     return JoinAsVisibleTy(typeManager, tys, curFile: curFile)
 }
 
-public func SynIfExpr(typeManager: TypeManager, ie: IfExpr, pos!: SynPos = SynPos.NONE,
-    diag!: Option<BasicDiagnosticEngine> = None): Ty {
+public func SynIfExpr(typeManager: TypeManager, ie: IfExpr, diag: BasicDiagnosticEngine,
+    pos!: SynPos = SynPos.NONE): Ty {
     var ok = true
     if (let Some(condExpr) <- ie.condExpr) {
         ok = TcCheckCondition(typeManager, condExpr) && ok
@@ -47,12 +47,12 @@ public func SynIfExpr(typeManager: TypeManager, ie: IfExpr, pos!: SynPos = SynPo
         ok = false
     }
     if (let Some(thenBody) <- ie.thenBody) {
-        ok = Ty.IsTyCorrect(SynBlock(typeManager, thenBody, pos: SynPos.EXPR_ARG)) && ok
+        ok = Ty.IsTyCorrect(SynBlock(typeManager, thenBody, pos: SynPos.EXPR_ARG, diag: Some(diag))) && ok
     } else {
         ok = false
     }
     if (let Some(elseExpr) <- ie.elseBody) {
-        ok = Ty.IsTyCorrect(SynExprShallow(typeManager, elseExpr)) && ok
+        ok = Ty.IsTyCorrect(SynExprShallow(typeManager, elseExpr, diag: Some(diag))) && ok
     }
     if (!ok) {
         return IfInvalid(ie)
@@ -76,22 +76,20 @@ public func SynIfExpr(typeManager: TypeManager, ie: IfExpr, pos!: SynPos = SynPo
             let joinRes = JoinIfBranchTys(typeManager, thenTy, elseTy, ie.curFile)
             let (optErrs, joinedTy) = SetJoinedType(ie.GetTy() ?? TypeManager.GetInvalidTy(), joinRes)
             if (let Some(errMsg) <- optErrs) {
-                if (let Some(engine) <- diag) {
-                    var diagMessage = "types " + Ty.ToString(Some(thenTy)) + " and " + Ty.ToString(Some(elseTy))
-                    diagMessage += if (let Some(sourceExpr) <- ie.sourceExpr) {
-                        if (sourceExpr.astKind == ASTKind.IF_AVAILABLE_EXPR) {
-                            " of the two lambda of this '@IfAvailable' expression mismatch"
-                        } else {
-                            " of the two branches of this 'if' expression mismatch"
-                        }
+                var diagMessage = "types " + Ty.ToString(Some(thenTy)) + " and " + Ty.ToString(Some(elseTy))
+                diagMessage += if (let Some(sourceExpr) <- ie.sourceExpr) {
+                    if (sourceExpr.astKind == ASTKind.IF_AVAILABLE_EXPR) {
+                        " of the two lambda of this '@IfAvailable' expression mismatch"
                     } else {
                         " of the two branches of this 'if' expression mismatch"
                     }
-                    let builder = Diagnose(engine, ie, BasicDiagKind.sema_diag_report_error_message,
-                        args: [BasicDiagArgument(diagMessage)])
-                    builder.AddNote(errMsg)
-                    builder.Emit()
+                } else {
+                    " of the two branches of this 'if' expression mismatch"
                 }
+                let builder = Diagnose(diag, ie, BasicDiagKind.sema_diag_report_error_message,
+                    args: [BasicDiagArgument(diagMessage)])
+                builder.AddNote(errMsg)
+                builder.Emit()
             }
             if (Ty.IsTyCorrect(joinedTy)) {
                 ie.SetTy(joinedTy)
