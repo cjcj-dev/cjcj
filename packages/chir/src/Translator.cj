@@ -1566,10 +1566,13 @@ public class Translator {
         let elseBlock = builder.CreateBlock(group)
         let joinBlock = builder.CreateBlock(group)
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
-        let resultLoc: Option<Value> = if (resultTy.IsUnit() || resultTy.IsNothing()) {
+        let forceGenerateUnit = opts.enableCompileDebug && IsEmptyIf(expr)
+        let resultLoc: Option<Value> = if ((HasTypeOfNothing(expr) || resultTy.IsUnit()) && !forceGenerateUnit) {
             None
         } else {
-            RequireResult(builder.CreateAllocate(builder.context.GetRefTy(resultTy), resultTy, parentBlock))
+            let allocate = builder.CreateAllocate(builder.context.GetRefTy(resultTy), resultTy, parentBlock)
+            allocate.SetDebugLocation(TranslateLocation(expr))
+            RequireResult(allocate)
         }
         TranslateIfCondition(condExpr, thenBlock, elseBlock)
 
@@ -1603,9 +1606,46 @@ public class Translator {
 
         currentBlock = joinBlock
         if (let Some(location) <- resultLoc) {
-            return RequireResult(builder.CreateLoad(resultTy, location, joinBlock))
+            let load = builder.CreateLoad(resultTy, location, joinBlock)
+            load.SetDebugLocation(TranslateLocation(expr))
+            if (forceGenerateUnit) {
+                load.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+            }
+            return RequireResult(load)
         }
         return None
+    }
+
+    private func HasTypeOfNothing(expr: AstIfExpr): Bool {
+        let elseBody = expr.elseBody ?? return false
+        return RequireAstTy(RequireBlock(expr.thenBody, "if then body")).IsNothing() &&
+            RequireAstTy(elseBody).IsNothing()
+    }
+
+    private func IsEmptyIf(expr: AstIfExpr): Bool {
+        if (!IsEmptyBlock(RequireBlock(expr.thenBody, "if then body"))) {
+            return false
+        }
+        if (let Some(elseBody) <- expr.elseBody) {
+            if (let Some(block) <- (elseBody as AstBlock)) {
+                return IsEmptyBlock(block)
+            }
+            if (let Some(elseIf) <- (elseBody as AstIfExpr)) {
+                return IsEmptyIf(elseIf)
+            }
+            return false
+        }
+        return true
+    }
+
+    private func IsEmptyBlock(block: AstBlock): Bool {
+        if (block.body.size == 1) {
+            if (let Some(literal) <- (block.body[0] as AstLitConstExpr)) {
+                return RequireAstTy(literal).IsUnit()
+            }
+            return false
+        }
+        return block.body.isEmpty()
     }
 
     public func Visit(expr: AstAssignExpr): Option<Value> {
@@ -2405,7 +2445,9 @@ public class Translator {
         } else {
             TranslateLocation(tryAstBlock)
         }
-        StoreTryResult(resultLoc, tryValue, tryValueLoc)
+        if (!HasTypeOfNothing(expr)) {
+            StoreTryResult(resultLoc, tryValue, tryValueLoc)
+        }
         if (CurrentBlock().GetTerminator().isNone()) {
             builder.CreateGoTo(normalEndBlock, CurrentBlock())
         }
@@ -4049,21 +4091,11 @@ public class Translator {
     }
 
     private func HasTypeOfNothing(expr: AstTryExpr): Bool {
-        if (let Some(tryBlock) <- expr.tryBlock) {
-            if (let Some(tryTy) <- tryBlock.GetTy()) {
-                if (!tryTy.IsNothing()) {
-                    return false
-                }
-            } else {
-                return false
-            }
+        if (!RequireAstTy(RequireBlock(expr.tryBlock, "try block")).IsNothing()) {
+            return false
         }
         for (catchBlock in expr.catchBlocks) {
-            if (let Some(catchTy) <- catchBlock.GetTy()) {
-                if (!catchTy.IsNothing()) {
-                    return false
-                }
-            } else {
+            if (!RequireAstTy(catchBlock).IsNothing()) {
                 return false
             }
         }
