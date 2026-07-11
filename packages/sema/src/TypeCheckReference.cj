@@ -859,6 +859,69 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
     return TypeCheckReferenceCheckForQuestFuncRetType(diag, targets[0], ma, hasTarget)
 }
 
+public func TypeCheckReferenceFilterAndGetTargetsOfObjAccess(
+    diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    ctx: ASTContext,
+    ma: MemberAccess,
+    targets: ArrayList<Decl>,
+    importManager!: Option<SemaImportManager> = None
+): Option<Decl> {
+    if (targets.isEmpty()) {
+        TypeCheckReferenceDiagMemberAccessNotFound(diag, tm, ma, importManager)
+        return None
+    }
+    let baseExpr = ma.baseExpr.getOrThrow()
+    if (!TypeCheckReferenceFilterTargetsInExtend(tm, ma, baseExpr.GetTy(), targets)) {
+        TypeCheckReferenceDiagMemberAccessNotFound(diag, tm, ma, importManager)
+        return None
+    }
+    var idx: Int64 = 0
+    while (idx < targets.size) {
+        let decl = targets[idx]
+        if (decl.TestAttr(Attribute.STATIC)) {
+            targets.remove(at: idx)
+        } else {
+            if (decl.astKind == ASTKind.FUNC_DECL) {
+                ma.targets.add(decl)
+            }
+            idx++
+        }
+    }
+    if (targets.isEmpty()) {
+        let builder = Diagnose(diag, ma, BasicDiagKind.sema_object_cannot_access_static_member,
+            args: [BasicDiagArgument(ma.field.Val())])
+        builder.Emit()
+    }
+    var hasTarget = ctx.HasTargetTy(ma) || ma.isInFlowExpr
+    let referenceNeedTypeInfer = !hasTarget && (ma.isAlone || ma.callOrPattern.isNone())
+    if (referenceNeedTypeInfer) {
+        if (targets.isEmpty()) {
+            return None
+        }
+        let accessibleDecls = GetAccessibleDecls(tm, ctx, ma, targets)
+        if (!accessibleDecls.isEmpty() &&
+            !TypeCheckReferenceFilterTargetsForFuncReference(diag, ma, accessibleDecls)) {
+            return None
+        }
+        return if (accessibleDecls.isEmpty()) { Some(targets[0]) } else { Some(accessibleDecls[0]) }
+    }
+    var target = GetAccessibleDecl(tm, ctx, ma, targets)
+    if (let None <- target) {
+        if (targets.isEmpty()) {
+            return None
+        }
+        target = Some(targets[0])
+    }
+    hasTarget = hasTarget || ma.callOrPattern.isSome()
+    let selected = target.getOrThrow()
+    return if (TypeCheckReferenceCheckForQuestFuncRetType(diag, selected, ma, hasTarget)) {
+        Some(selected)
+    } else {
+        None
+    }
+}
+
 private func TypeCheckReferenceEmitGenericTypeWithoutTypeArg(diag: BasicDiagnosticEngine, expr: Expr): Unit {
     let builder = diag.Diagnose(expr.begin, expr.end, BasicDiagKind.sema_generic_type_without_type_argument)
     builder.Emit()
