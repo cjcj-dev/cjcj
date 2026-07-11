@@ -88,10 +88,10 @@ import cjcj::ast.WildcardPattern as AstWildcardPattern
 import cjcj::ast.WhileExpr as AstWhileExpr
 
 private class FaithfulLeftValueInfo {
-    public let base: Value
+    public let base: Option<Value>
     public let path: ArrayList<String> = ArrayList<String>()
 
-    public init(base: Value, path: ArrayList<String>) {
+    public init(base: Option<Value>, path: ArrayList<String>) {
         this.base = base
         for (item in path) {
             this.path.add(item)
@@ -6352,16 +6352,17 @@ public class Translator {
     }
 
     private func GenerateLeftValue(info: FaithfulLeftValueInfo, expectedTy: Type): Value {
+        let base = info.base.getOrThrow()
         if (info.path.isEmpty()) {
-            return info.base
+            return base
         }
-        let baseTy = info.base.GetType() ??
-            throw IllegalStateException("faithful AST2CHIR left value base has no type: ${info.base.GetIdentifier()}")
+        let baseTy = base.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR left value base has no type: ${base.GetIdentifier()}")
         if (baseTy.IsRef()) {
-            return RequireResult(builder.CreateGetElementByName(builder.context.GetRefTy(expectedTy), info.base,
+            return RequireResult(builder.CreateGetElementByName(builder.context.GetRefTy(expectedTy), base,
                 info.path, CurrentBlock()))
         }
-        return RequireResult(builder.CreateFieldByName(expectedTy, info.base, info.path, CurrentBlock()))
+        return RequireResult(builder.CreateFieldByName(expectedTy, base, info.path, CurrentBlock()))
     }
 
     private func BlackBoxModifyArgTypeToRef(args: ArrayList<Value>): Unit {
@@ -7014,7 +7015,7 @@ public class Translator {
                     if (calleeDecl.TestAttr(AstAttribute.MUT)) {
                         let leftValue = TranslateExprAsLeftValue(baseExpr)
                         if (leftValue.path.isEmpty()) {
-                            thisObj = leftValue.base
+                            thisObj = leftValue.base.getOrThrow()
                         } else {
                             thisObj = LoadLeftValue(leftValue, chirTy.TranslateType(RequireAstTy(baseExpr))) ??
                                 throw IllegalStateException("faithful AST2CHIR mut member call base produced no value")
@@ -7383,19 +7384,39 @@ public class Translator {
     }
 
     private func TranslateTrivialAssign(expr: AstAssignExpr, leftExpr: AstExpr, rightExpr: AstExpr): Option<Value> {
-        let _ = expr
-        var rhsValue: Value
-        var leftValueInfo: FaithfulLeftValueInfo
+        let loc = TranslateLocation(expr)
+        var rhs: Value
+        var path = ArrayList<String>()
+        var lhs: Option<Value> = None
         if (leftExpr.mapExpr.isSome()) {
-            leftValueInfo = TranslateExprAsLeftValue(leftExpr)
-            rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+            let info = TranslateExprAsLeftValue(leftExpr)
+            lhs = info.base
+            path = info.path
+            if (!path.isEmpty()) {
+                let base = info.base.getOrThrow()
+                let memberRef = RequireResult(
+                    builder.CreateGetElementByName(builder.context.GetRefTy(chirTy.TranslateType(RequireAstTy(leftExpr))),
+                        base, path, CurrentBlock()))
+                exprValueTable[leftExpr.objectId] = memberRef
+            }
+            rhs = Translator.TranslateASTNode(rightExpr, this) ??
                 throw IllegalStateException("faithful AST2CHIR assign rhs produced no value")
         } else {
-            rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
+            rhs = Translator.TranslateASTNode(rightExpr, this) ??
                 throw IllegalStateException("faithful AST2CHIR assign rhs produced no value")
-            leftValueInfo = TranslateExprAsLeftValue(leftExpr)
+            let info = TranslateExprAsLeftValue(leftExpr)
+            lhs = info.base
+            path = info.path
         }
-        StoreToLeftValue(leftValueInfo, rhsValue)
+        if (lhs.isNone()) {
+            return None
+        }
+        let lhsValue = lhs.getOrThrow()
+        if (!path.isEmpty()) {
+            CreateAndAppendWrappedStoreElementByName(loc, rhs, lhsValue, path)
+        } else {
+            CreateAndAppendWrappedStore(rhs, lhsValue, loc)
+        }
         return None
     }
 
@@ -7742,8 +7763,7 @@ public class Translator {
         if (let Some(_) <- (nodePtr as AstSubscriptExpr)) {
             throw IllegalArgumentException("not yet ported in faithful AST2CHIR: tuple/subscript left value")
         }
-        let value = Translator.TranslateASTNode(expr, this) ??
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR left value: ${ASTKindName(nodePtr.astKind)}")
+        let value = Translator.TranslateASTNode(expr, this)
         return FaithfulLeftValueInfo(value, ArrayList<String>())
     }
 
@@ -7805,8 +7825,9 @@ public class Translator {
                 if (!baseInfo.path.isEmpty()) {
                     return FaithfulLeftValueInfo(baseInfo.base, path)
                 }
-                let baseValueTy = baseInfo.base.GetType() ??
-                    throw IllegalStateException("faithful AST2CHIR member base has no type: ${baseInfo.base.GetIdentifier()}")
+                let baseValue = baseInfo.base.getOrThrow()
+                let baseValueTy = baseValue.GetType() ??
+                    throw IllegalStateException("faithful AST2CHIR member base has no type: ${baseValue.GetIdentifier()}")
                 var baseValRefDims = baseValueTy.GetRefDims()
                 let strippedBaseValueTy = baseValueTy.StripAllRefs()
                 let instMap = HashMap<Int64, (GenericType, Type)>()
@@ -7825,7 +7846,7 @@ public class Translator {
                     targetBaseTy = builder.context.GetRefTy(targetBaseTy)
                     refIdx++
                 }
-                let castedBase = CastValueIfNeeded(baseInfo.base, targetBaseTy)
+                let castedBase = CastValueIfNeeded(baseValue, targetBaseTy)
                 return FaithfulLeftValueInfo(castedBase, path)
             }
             return TranslateInstanceFieldRefAsLeftValue(varDecl)
@@ -7841,7 +7862,7 @@ public class Translator {
 
     private func NormalizeMemberBaseLeftValue(info: FaithfulLeftValueInfo, baseExpr: AstExpr,
         targetBaseAstTy: AstTy): FaithfulLeftValueInfo {
-        var base = info.base
+        var base = info.base.getOrThrow()
         var path = CopyStringList(info.path)
         let baseTy = base.GetType() ??
             throw IllegalStateException("faithful AST2CHIR member base has no type: ${base.GetIdentifier()}")
@@ -7939,41 +7960,44 @@ public class Translator {
     }
 
     private func AddressOfLeftValue(info: FaithfulLeftValueInfo, expectedTy: Type): Value {
+        let base = info.base.getOrThrow()
         if (info.path.isEmpty()) {
-            return info.base
+            return base
         }
-        let baseTy = info.base.GetType() ??
-            throw IllegalStateException("faithful AST2CHIR address base has no type: ${info.base.GetIdentifier()}")
+        let baseTy = base.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR address base has no type: ${base.GetIdentifier()}")
         if (baseTy.IsRef()) {
             let refTy = builder.context.GetRefTy(expectedTy)
-            return RequireResult(builder.CreateGetElementByName(refTy, info.base, info.path, CurrentBlock()))
+            return RequireResult(builder.CreateGetElementByName(refTy, base, info.path, CurrentBlock()))
         }
-        return RequireResult(builder.CreateFieldByName(expectedTy, info.base, info.path, CurrentBlock()))
+        return RequireResult(builder.CreateFieldByName(expectedTy, base, info.path, CurrentBlock()))
     }
 
     private func LoadLeftValue(info: FaithfulLeftValueInfo, expectedTy: Type): Option<Value> {
+        let base = info.base.getOrThrow()
         if (info.path.isEmpty()) {
-            return GetDerefedValue(info.base)
+            return GetDerefedValue(base)
         }
-        let baseTy = info.base.GetType() ??
-            throw IllegalStateException("faithful AST2CHIR left value base has no type: ${info.base.GetIdentifier()}")
+        let baseTy = base.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR left value base has no type: ${base.GetIdentifier()}")
         if (baseTy.IsReferenceTypeWithRefDims(1) || baseTy.IsValueOrGenericTypeWithRefDims(1)) {
             let refTy = builder.context.GetRefTy(expectedTy)
-            let memberRef = RequireResult(builder.CreateGetElementByName(refTy, info.base, info.path, CurrentBlock()))
+            let memberRef = RequireResult(builder.CreateGetElementByName(refTy, base, info.path, CurrentBlock()))
             return RequireResult(builder.CreateLoad(expectedTy, memberRef, CurrentBlock()))
         }
         if (baseTy.IsValueOrGenericTypeWithRefDims(0)) {
-            return RequireResult(builder.CreateFieldByName(expectedTy, info.base, info.path, CurrentBlock()))
+            return RequireResult(builder.CreateFieldByName(expectedTy, base, info.path, CurrentBlock()))
         }
         throw IllegalStateException("faithful AST2CHIR unsupported member left value base type: ${baseTy.ToString()}")
     }
 
     private func StoreToLeftValue(info: FaithfulLeftValueInfo, value: Value): Unit {
+        let base = info.base.getOrThrow()
         if (info.path.isEmpty()) {
-            builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(info.base)), info.base, CurrentBlock())
+            builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(base)), base, CurrentBlock())
             return
         }
-        builder.CreateStoreElementByName(value, info.base, info.path, CurrentBlock())
+        builder.CreateStoreElementByName(value, base, info.path, CurrentBlock())
     }
 
     private func TranslateStaticTargetOrPackageMemberAccess(expr: AstMemberAccess, target: AstDecl): Option<Value> {
@@ -8062,6 +8086,16 @@ public class Translator {
 
     private func CreateAndAppendWrappedStore(rhs: Value, lhs: Value, loc: DebugLocation): Unit {
         CreateAndAppendWrappedStore(rhs, lhs, CurrentBlock(), loc)
+    }
+
+    private func CreateAndAppendWrappedStoreElementByName(
+        loc: DebugLocation, rhs: Value, lhs: Value, path: ArrayList<String>
+    ): Unit {
+        let lhsCustomType = (lhs.GetType().getOrThrow().StripAllRefs() as CustomType).getOrThrow()
+        let memberType = GetInstMemberTypeByName(lhsCustomType, path, builder)
+        let castedRhs = TypeCastOrBoxIfNeeded(rhs, memberType, loc)
+        let store = builder.CreateStoreElementByName(castedRhs, lhs, path, CurrentBlock())
+        store.SetDebugLocation(loc)
     }
 
     private func CreateAndAppendWrappedStore(rhs: Value, lhs: Value): Unit {
@@ -8227,16 +8261,17 @@ public class Translator {
     }
 
     private func GeneratePointerInoutArg(info: FaithfulLeftValueInfo, expectedTy: Type): Value {
+        let base = info.base.getOrThrow()
         if (info.path.isEmpty()) {
-            return info.base
+            return base
         }
-        let baseTy = info.base.GetType() ??
-            throw IllegalStateException("faithful AST2CHIR pointer inout base has no type: ${info.base.GetIdentifier()}")
+        let baseTy = base.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR pointer inout base has no type: ${base.GetIdentifier()}")
         if (baseTy.IsRef()) {
-            return RequireResult(builder.CreateGetElementByName(builder.context.GetRefTy(expectedTy), info.base,
+            return RequireResult(builder.CreateGetElementByName(builder.context.GetRefTy(expectedTy), base,
                 info.path, CurrentBlock()))
         }
-        return RequireResult(builder.CreateFieldByName(expectedTy, info.base, info.path, CurrentBlock()))
+        return RequireResult(builder.CreateFieldByName(expectedTy, base, info.path, CurrentBlock()))
     }
 
     private func CurrentBlock(): Block {

@@ -1,6 +1,7 @@
 package cjcj::chir
 
 import std.collection.*
+import cjcj::basic.{DiagnosticEngine, DiagKindRefactor}
 import cjcj::utils.{STATIC_INIT_FUNC, TaskQueue, TaskResult}
 
 private class VarInitConstructorContext {
@@ -14,7 +15,11 @@ private class VarInitConstructorContext {
 }
 
 public class VarInitCheck {
-    public init() {}
+    private let diag: DiagnosticEngine
+
+    public init(diag: DiagnosticEngine) {
+        this.diag = diag
+    }
 
     public func RunOnPackage(pkg: Package, threadNum!: Int64 = 1): CHIRCheckResult {
         let checkResult = CHIRCheckResult()
@@ -221,7 +226,8 @@ public class VarInitCheck {
             if (targetVal.IsLocalVar() && targetVal.TestAttr(Attribute.READONLY)) {
                 if (let Some(isInited) <- state.IsMaybeInitedAllocation(targetVal)) {
                     if (isInited) {
-                        AddCannotAssignInitializedLetError(expr, fn, checkResult)
+                        diag.DiagnoseRefactor(DiagKindRefactor.chir_cannot_assign_initialized_let_variable,
+                            ToPosition(expr.GetDebugLocation())).Emit()
                     }
                 }
             }
@@ -410,8 +416,12 @@ public class VarInitCheck {
             let index = Int64(paths[0])
             if (members[index].TestAttr(Attribute.READONLY)) {
                 match (state.IsMaybeInitedMember(index)) {
-                    case MaybeInitMemberKind.SUPER_MEMBER => AddCannotAssignInitializedLetError(store, fn, checkResult)
-                    case MaybeInitMemberKind.LOCAL_MEMBER => AddCannotAssignInitializedLetError(store, fn, checkResult)
+                    case MaybeInitMemberKind.SUPER_MEMBER =>
+                        diag.DiagnoseRefactor(DiagKindRefactor.chir_cannot_assign_initialized_let_variable,
+                            ToPosition(store.GetDebugLocation())).Emit()
+                    case MaybeInitMemberKind.LOCAL_MEMBER =>
+                        diag.DiagnoseRefactor(DiagKindRefactor.chir_cannot_assign_initialized_let_variable,
+                            ToPosition(store.GetDebugLocation())).Emit()
                     case MaybeInitMemberKind.NA => return
                 }
             }
@@ -519,14 +529,6 @@ private func AddUseBeforeInitError(
 ): Unit {
     checkResult.AddError("variable '${identifier}' is used before initialization")
     AddMaybeInitedPosNote(checkResult, identifier, maybeInitedPos)
-}
-
-private func AddCannotAssignInitializedLetError(
-    expr: Expression,
-    fn: Function,
-    checkResult: CHIRCheckResult
-): Unit {
-    checkResult.AddError("cannot assign to value which is an initialized 'let' constant")
 }
 
 private func AddMaybeInitedPosNote(

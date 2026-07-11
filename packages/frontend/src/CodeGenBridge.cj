@@ -40,6 +40,7 @@ import cjcj::chir.ShouldReportUnusedCodeWarnings
 import cjcj::chir.UnitUnify
 import cjcj::chir.UpdateMemberVarPath
 import cjcj::chir.UselessAllocateElimination
+import cjcj::chir.VarInitCheck
 import cjcj::chir.Value as ChirValue
 import cjcj::ast.Package as RealASTPackage
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
@@ -443,6 +444,7 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     }
     let wrapper = ConstAnalysisWrapper(builder)
     wrapper.RunOnPackage(pkg, diag, isDebug: options.chirDebugOptimizer)
+    let _ = VarInitCheck(diag).RunOnPackage(pkg)
     let cp = ConstPropagation(builder: Some(builder), wrapper: wrapper, opts: options)
     MergeEffectMap(cp.GetEffectMap(), effectMap)
     cp.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer, isCJLint: false)

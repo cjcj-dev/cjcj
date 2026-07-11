@@ -495,6 +495,11 @@ public func ToPosInfo(loc: DebugLocation, isPrintFileName!: Bool = false): Strin
     return " at [" + fileName + beginPos.line.toString() + "," + beginPos.column.toString() + "]"
 }
 
+public func ToPosition(loc: DebugLocation): BasicPosition {
+    let begin = loc.GetBeginPos()
+    return BasicPosition(UInt64(loc.GetFileID()), Int64(begin.line), Int64(begin.column))
+}
+
 public func ToRange(loc: DebugLocation): BasicRange {
     let begin = loc.GetBeginPos()
     let end = loc.GetEndPos()
