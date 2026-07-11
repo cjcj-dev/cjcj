@@ -62,7 +62,11 @@ private func evalServerCalls(evaluation: MacroEvaluation, calls: ArrayList<Macro
             }
             continue
         }
-        evaluation.SaveUsedMacros(call)
+        if (evaluation.enableParallelMacro) {
+            evaluation.SaveUsedMacros(call)
+        } else {
+            evaluation.SaveUsedMacroPkgs(call.packageName)
+        }
         hasRunnable = true
     }
     if (!hasRunnable) {

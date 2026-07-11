@@ -2,10 +2,11 @@
 
 ## 结论
 
-L15 已按 C++ 调用路径补齐。普通宏展开路径原已在 `ResolveMacroCall` 成功后调用
-`SaveUsedMacros`；本次补齐 child-process/LSP 服务端路径，使其在
-`FindMacroDefMethod` 成功后也调用完整的 `SaveUsedMacros`，而不是只保存宏包名。
-同时删除数据源缺失期间的 frontend 回写和 unused-import 空表全放行补偿。
+L15 已按 C++ 调用路径补齐。普通宏展开路径在 `ResolveMacroCall` 成功后调用
+`SaveUsedMacros`；child-process/LSP 服务端仅在 `enableParallelMacro` 分支调用
+完整的 `SaveUsedMacros`。服务端串行分支与 C++ 一致，只调用
+`SaveUsedMacroPkgs`。同时删除数据源缺失期间的 frontend 回写和 unused-import
+空表全放行补偿。
 
 ## 逐符号 C++ 对照
 
@@ -23,9 +24,11 @@ L15 已按 C++ 调用路径补齐。普通宏展开路径原已在 `ResolveMacro
   `bool MacroEvaluation::EvalMacroCallsAndWaitResult()`，
   `/root/cj_build/cangjie_compiler/src/Macro/MacroEvaluationSrv.cpp:219-240`。
   仅处理 `status == INIT` 的调用；`FindMacroDefMethod(ci)` 失败时诊断并
-  `continue`，成功时在 `:233` 调 `SaveUsedMacros(*mc)`。selfhost 对应
-  `packages/macro/src/MacroEvaluationSrv.cj:51-67`，现为
-  `evaluation.SaveUsedMacros(call)`。
+  `continue`，成功时在 `:233` 调 `SaveUsedMacros(*mc)`。该函数只由
+  `EvalMacroCall` 的 `enableParallelMacro` 分支调用（`:315-317`）；串行分支
+  在 `:319-332` 调 `SaveUsedMacroPkgs(macCall->packageName)`。selfhost 共享
+  `evalServerCalls`，因此在 `packages/macro/src/MacroEvaluationSrv.cj:65-69`
+  以同一个 `enableParallelMacro` 条件选择这两个 named 调用。
 - 被调实体：`void MacroEvaluation::SaveUsedMacros(MacroCall& macCall)`，
   `/root/cj_build/cangjie_compiler/src/Macro/MacroEvaluation.cpp:737-746`。
   它先调 `SaveUsedMacroPkgs(macCall.packageName)`；随后取得 `GetNode()` 和
@@ -50,8 +53,10 @@ C++ named 实体。
   路径均已覆盖，来源为 `MacroEvaluation.cpp:742-745`。
 - 普通调用点：`ResolveMacroCall` 成功/失败 2 个结果均保持；只在成功结果保存，来源为
   `MacroEvaluation.cpp:792-804`。
-- 服务端调用点前缀：全部 3 个 `if`（非 INIT、方法查找失败、结果序列化失败）和
-  成功保存路径均保持，来源为 `MacroEvaluationSrv.cpp:223-233`。
+- 服务端调用点：全部并行/串行 2 个分支均保持。并行分支覆盖非 INIT、方法查找失败、
+  结果序列化失败 3 个 `if` 和成功 `SaveUsedMacros` 路径，来源为
+  `MacroEvaluationSrv.cpp:223-233`；串行分支只调 `SaveUsedMacroPkgs`，来源为
+  `MacroEvaluationSrv.cpp:315-332`。
 - `IsImportContentUsedInMacro`：全部 wildcard/package 与 named-decl 两大分支、3 个
   used-success return 和最终 false return 均保持，来源为
   `CheckUnusedImportImpl.cpp:203-227`；不存在 selfhost-only 空表成功分支。
@@ -74,7 +79,7 @@ CompileStrategy.cpp:243/253/579），故本 diff 不需新增 `@When`。
 
 ## 验证原始输出
 
-权威 full gate：
+复审 fixup 后权威 delta gate（manifest fail-closed 到完整 114+15）：
 
 ```text
 cjpm build success
@@ -82,7 +87,8 @@ difftest: TOTAL=114  PASS=114  MISMATCH=0  FAIL=0
 smoke15: PASS=15 FAIL=0
 bcgate: shared functions: 2490  |  byte-identical: 2490 (100.0%)  |  differing: 0 | fully-identical samples: 114/114  |  compile-errors: 0
 VERIFY-EXIT=0
-SELFHOST_BINARY=target/release/bin/cjcj::cjc SIZE=66179096
+DELTA: skipped=0 ran=129
+SELFHOST_BINARY=target/release/bin/cjcj::cjc SIZE=66170640
 ```
 
 build log 中 `error:` 检索为空。
