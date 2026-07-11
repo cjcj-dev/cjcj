@@ -304,6 +304,17 @@ public class Translator {
         annoFactoryFuncs!: ArrayList<(AstDecl, Function)> = ArrayList<(AstDecl, Function)>(),
         isComputingAnnos!: Bool = false,
         initFuncsForAnnoFactory!: ArrayList<Function> = ArrayList<Function>()) {
+        this(builder, chirTy, globalSymbolTable, localConstVars: localConstVars, localConstFuncs: localConstFuncs,
+            deserializedVals: deserializedVals, overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts,
+            mergingSpecific: opts.IsCompilingCJMPSpecific(), annoFactoryFuncs: annoFactoryFuncs,
+            isComputingAnnos: isComputingAnnos, initFuncsForAnnoFactory: initFuncsForAnnoFactory)
+    }
+
+    private init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap,
+        localConstVars!: ElementList, localConstFuncs!: ElementList, deserializedVals!: HashMap<String, Value>,
+        overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>>, opts!: GlobalOptions,
+        mergingSpecific!: Bool, annoFactoryFuncs!: ArrayList<(AstDecl, Function)>, isComputingAnnos!: Bool,
+        initFuncsForAnnoFactory!: ArrayList<Function>) {
         this.builder = builder
         this.chirTy = chirTy
         this.globalSymbolTable = globalSymbolTable
@@ -312,7 +323,7 @@ public class Translator {
         this.deserializedVals = deserializedVals
         this.overrideSrcFuncResolver = overrideSrcFuncResolver
         this.opts = opts
-        this.mergingSpecific = opts.IsCompilingCJMPSpecific()
+        this.mergingSpecific = mergingSpecific
         this.annoFactoryFuncs = annoFactoryFuncs
         this.isComputingAnnos = isComputingAnnos
         this.initFuncsForAnnoFactory = initFuncsForAnnoFactory
@@ -340,8 +351,9 @@ public class Translator {
     private func CopyForFork(): Translator {
         let copied = Translator(builder, chirTy, globalSymbolTable, localConstVars: localConstVars,
             localConstFuncs: localConstFuncs, deserializedVals: deserializedVals,
-            overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts, annoFactoryFuncs: annoFactoryFuncs,
-            isComputingAnnos: isComputingAnnos, initFuncsForAnnoFactory: initFuncsForAnnoFactory)
+            overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts, mergingSpecific: mergingSpecific,
+            annoFactoryFuncs: annoFactoryFuncs, isComputingAnnos: isComputingAnnos,
+            initFuncsForAnnoFactory: initFuncsForAnnoFactory)
         copied.astNodeSymbolTable = AST2CHIRNodeMap<Value>(astNodeSymbolTable)
         copied.localValSymbolTable = AST2CHIRNodeMap<Value>(localValSymbolTable)
         for ((key, value) in exprValueTable) {
@@ -4509,6 +4521,10 @@ public class Translator {
         var controlIndex: Int64 = 0
         while (controlIndex < finallyControlInfo.controlFlowBlocks.size) {
             let blocks = finallyControlInfo.controlFlowBlocks[controlIndex]
+            if (blocks.isEmpty()) {
+                controlIndex++
+                continue
+            }
             for ((prevBlock, nextBlock) in blocks) {
                 let normalTrans = CopyForFork()
                 let _ = Translator.TranslateASTNode(finallyBlock, normalTrans)
