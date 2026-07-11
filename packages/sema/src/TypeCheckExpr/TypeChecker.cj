@@ -5616,8 +5616,10 @@ public class TypeChecker {
             return FinishSynthesize(ctx, nameRef, SynthesizeNameReference(ctx, nameRef))
         }
         if (let Some(subscript) <- (expr as SubscriptExpr)) {
-            SynthesizeSubscriptChildren(ctx, subscript)
-            return FinishSynthesize(ctx, subscript, SynSubscriptExpr(impl.typeManager, subscript, ctx: Some(ctx)))
+            return FinishSynthesize(ctx, subscript, SynSubscriptExpr(impl.typeManager, ctx, subscript,
+                { subscriptPos: SynPos, child: Expr => Synthesize(ctx, subscriptPos, child) },
+                { subscriptTarget: Ty, child2: Expr => Check(ctx, subscriptTarget, child2) },
+                impl.diag.getOrThrow()))
         }
         if (let Some(assign) <- (expr as AssignExpr)) {
             SynthesizeAssignChildren(ctx, assign)
@@ -5927,6 +5929,12 @@ public class TypeChecker {
                 ctx.SkipSynForCorrectTy(nameRef)
             }
             return FinishCheck(ctx, expr, ok)
+        }
+        if (let Some(subscript) <- (expr as SubscriptExpr)) {
+            return FinishCheck(ctx, subscript, ChkSubscriptExpr(impl.typeManager, ctx, Some(target), subscript,
+                { subscriptPos: SynPos, child: Expr => Synthesize(ctx, subscriptPos, child) },
+                { subscriptTarget: Ty, child2: Expr => Check(ctx, subscriptTarget, child2) },
+                impl.diag.getOrThrow()))
         }
         if (let Some(callExpr) <- (expr as CallExpr)) {
             typeCheckExprPutTargetType(ctx, callExpr, target)
