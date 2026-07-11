@@ -2021,8 +2021,7 @@ public class StructInheritanceChecker {
             return
         }
         if (TyOptionsDiffer(parent.ty, child.GetTy()) || !parent.inconsistentTypes.IsEmpty()) {
-            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-            diag.Diagnose(child.begin, child.end, DiagKind.sema_property_override_implement_type_diff)
+            Diagnose(diag, child, DiagKind.sema_property_override_implement_type_diff).Emit()
         }
         if (let Some(parentProp) <- (parentDecl as PropDecl)) {
             if (let Some(childProp) <- (child as PropDecl)) {
