@@ -1,8 +1,9 @@
 package cjcj::frontend
 
 import std.collection.*
+import cjcj::ast.DiagnoseRefactor
 import cjcj::ast.AnnotationKind as AstAnnotationKind
-import cjcj::basic.{CANGJIE_VERSION, DiagKindRefactor, MakeRange}
+import cjcj::basic.{CANGJIE_VERSION, DiagKindRefactor}
 import cjcj::basic.Linkage
 import cjcj::mangle.BaseMangler as RealBaseMangler
 import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
@@ -934,8 +935,8 @@ private class FrontendCjoFlatBufferWriter {
     // finish a PackageFormat::Expr with SaveBasicNodeInfo fields, leaving kind as the schema default.
     private func SaveUnsupportExpr(expr: Expr, overflowStrategy: OverflowStrategy): FlatBufferOffset {
         if (let Some(writerDiag) <- diag) {
-            writerDiag.AsBasicDiagnosticEngine().DiagnoseRefactor(DiagKindRefactor.package_unsupport_save,
-                MakeRange(expr.begin, expr.end), arguments: ["expression", ASTKindName(expr.astKind)]).Emit()
+            DiagnoseRefactor(writerDiag.AsBasicDiagnosticEngine(), DiagKindRefactor.package_unsupport_save,
+                expr, arguments: ["expression", ASTKindName(expr.astKind)]).Emit()
         }
         let begin = PositionBytes(expr.begin)
         let end = PositionBytes(expr.end)
