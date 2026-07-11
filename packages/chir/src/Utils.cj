@@ -97,6 +97,19 @@ public func GetInstMapFromCurDefToCurType(curType: CustomType): HashMap<Int64, T
     return replaceTable
 }
 
+public func GetInstMapFromCurDefAndExDefToCurType(curType: CustomType): HashMap<Int64, Type> {
+    let replaceTable = GetInstMapFromCurDefToCurType(curType)
+    for (extendDef in curType.GetCustomTypeDef().GetExtends()) {
+        let tempTable = extendDef.GetExtendedType().getOrThrow().CalculateGenericTyMapping(curType)[1]
+        for ((key, value) in tempTable) {
+            if (!replaceTable.contains(key)) {
+                replaceTable[key] = value
+            }
+        }
+    }
+    return replaceTable
+}
+
 public func ReplaceThisTypeToConcreteType(ty: Type, concreteType: Type, builder: CHIRBuilder): Type {
     if (let Some(refTy) <- (ty as RefType)) {
         if (refTy.GetBaseType().IsThis()) {
