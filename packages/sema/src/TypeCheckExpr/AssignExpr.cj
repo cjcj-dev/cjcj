@@ -207,17 +207,13 @@ private func IsShiftAssignValid(ae: AssignExpr, leftTy: Ty): Bool {
 
 private func PropagateAssignDesugarTarget(ae: AssignExpr, desugar: Expr): Unit {
     if (let Some(callExpr) <- (desugar as CallExpr)) {
-        if (let Some(resolved) <- callExpr.resolvedFunction) {
-            ReplaceTarget(ae, Some(resolved))
-        }
+        ReplaceTarget(ae, callExpr.resolvedFunction)
         return
     }
     if (let Some(assignExpr) <- (desugar as AssignExpr)) {
         if (let Some(rightExpr) <- assignExpr.rightExpr) {
             if (let Some(callExpr2) <- (rightExpr as CallExpr)) {
-                if (let Some(resolved2) <- callExpr2.resolvedFunction) {
-                    ReplaceTarget(ae, Some(resolved2))
-                }
+                ReplaceTarget(ae, callExpr2.resolvedFunction)
             }
         }
     }
