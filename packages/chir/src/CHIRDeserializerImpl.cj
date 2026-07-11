@@ -3,6 +3,7 @@ package cjcj::chir
 import std.collection.*
 import std.convert.*
 import cjcj::basic.Linkage as BasicLinkage
+import cjcj::flatbuffers.{FlatBufferString, Offset, Vector}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, OverflowStrategy}
 
 private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {

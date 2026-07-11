@@ -4,6 +4,7 @@
   members = [
     "packages/basic",
     "packages/utils",
+    "packages/flatbuffers",
     "packages/option",
     "packages/lex",
     "packages/ast",
@@ -26,6 +27,7 @@
   build-members = [
     "packages/basic",
     "packages/utils",
+    "packages/flatbuffers",
     "packages/option",
     "packages/lex",
     "packages/ast",
@@ -48,6 +50,7 @@
   test-members = [
     "packages/basic",
     "packages/utils",
+    "packages/flatbuffers",
     "packages/option",
     "packages/lex",
     "packages/ast",

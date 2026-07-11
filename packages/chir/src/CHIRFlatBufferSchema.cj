@@ -1,5 +1,7 @@
 package cjcj::chir
 
+import cjcj::flatbuffers.ReadScalar
+
 // CHIR FlatBuffer root and file identifier. PackageFormat.fbs:9,1249;
 // PackageFormat_generated.h:8509-8542 (CHIRPackageIdentifier/GetCHIRPackage/FinishCHIRPackageBuffer).
 const CHIRFB_FILE_IDENTIFIER: String = "CHIR"

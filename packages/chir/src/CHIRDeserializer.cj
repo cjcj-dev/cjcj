@@ -1,6 +1,7 @@
 package cjcj::chir
 
 import cjcj::basic.CANGJIE_VERSION
+import cjcj::flatbuffers.{VerifierOptions, VerifierTemplate}
 import cjcj::utils.FileUtil
 import std.core.Box as CoreBox
 

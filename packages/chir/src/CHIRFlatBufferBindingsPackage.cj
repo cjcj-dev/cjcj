@@ -1,5 +1,7 @@
 package cjcj::chir
 
+import cjcj::flatbuffers.{FlatBufferString, Offset, Table, Vector, VerifierTemplate}
+
 // PackageFormat_generated.h:7931-8023. CHIRPackage read accessors and Verify.
 class PackageFormat_CHIRPackage <: Table {
     init(data: Array<UInt8>, pos: Int64) {

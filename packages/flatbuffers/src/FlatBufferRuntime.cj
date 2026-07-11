@@ -1,4 +1,4 @@
-package cjcj::chir
+package cjcj::flatbuffers
 
 import std.core.Box as CoreBox
 import cjcj::utils.CJC_ASSERT
@@ -7,7 +7,7 @@ import cjcj::utils.CJC_ASSERT
 // intrinsics branches are accounted for here; the GNU/Clang byte-swap path is
 // the implementation used by the little-endian Linux x86_64 self-host target.
 @OverflowWrapping
-func EndianSwap<T>(t: T): T {
+public func EndianSwap<T>(t: T): T {
     if (t is UInt8 || t is Int8 || t is Bool) {
         return t
     } else if (t is UInt16) {
@@ -67,14 +67,14 @@ func EndianSwap<T>(t: T): T {
 
 // flatbuffers/base.h:416-422. FlatBuffers wire data and the supported
 // Linux x86_64 target are both little-endian.
-func EndianScalar<T>(t: T): T {
+public func EndianScalar<T>(t: T): T {
     return t
 }
 
 // flatbuffers/base.h:424-429. A C++ byte pointer is represented by the byte
 // array plus its element offset.
 @OverflowWrapping
-func ReadScalar<T>(data: Array<UInt8>, pos: Int64): T {
+public func ReadScalar<T>(data: Array<UInt8>, pos: Int64): T {
     if (UInt8(0) is T) {
         return EndianScalar<T>((data[pos] as T).getOrThrow())
     } else if (Int8(0) is T) {
@@ -118,22 +118,22 @@ func ReadScalar<T>(data: Array<UInt8>, pos: Int64): T {
 
 // flatbuffers/buffer.h:28-37. Offset<T> is the four-byte uoffset_t wrapper
 // used to select IndirectHelper's vector-of-offsets read specialization.
-struct Offset<T> {
-    let o: UInt32
+public struct Offset<T> {
+    public let o: UInt32
 
-    init() {
+    public init() {
         o = 0u32
     }
 
-    init(o: UInt32) {
+    public init(o: UInt32) {
         this.o = o
     }
 
-    func Union(): Offset<Any> {
+    public func Union(): Offset<Any> {
         return Offset<Any>(o)
     }
 
-    func IsNull(): Bool {
+    public func IsNull(): Bool {
         return o == 0u32
     }
 }
@@ -141,8 +141,8 @@ struct Offset<T> {
 // flatbuffers/buffer.h:93-135. C++ template return_type is T for scalar
 // elements and const T* for Offset<T>; Any carries that type-dependent return
 // in Cangjie, with byte-array positions representing C++ byte pointers.
-class IndirectHelper<T> {
-    static func element_stride(): Int64 {
+public class IndirectHelper<T> {
+    public static func element_stride(): Int64 {
         if (UInt8(0) is T || Int8(0) is T || false is T) {
             return 1
         } else if (UInt16(0) is T || Int16(0) is T || Float16(0.0) is T) {
@@ -155,7 +155,7 @@ class IndirectHelper<T> {
         return 4
     }
 
-    static func Read(data: Array<UInt8>, p: Int64, i: UInt32): Any {
+    public static func Read(data: Array<UInt8>, p: Int64, i: UInt32): Any {
         let stride = element_stride()
         let elementPos = p + Int64(i) * stride
         if (UInt8(0) is T || Int8(0) is T || false is T || UInt16(0) is T || Int16(0) is T ||
@@ -170,26 +170,26 @@ class IndirectHelper<T> {
 // flatbuffers/table.h:27-74. The C++ data_ pointer is represented by data and
 // pos; nullable result pointers are represented by Option<Int64> offsets into
 // the same byte array.
-open class Table {
-    let data: Array<UInt8>
-    let pos: Int64
+public open class Table {
+    protected let data: Array<UInt8>
+    protected let pos: Int64
 
-    init(data: Array<UInt8>, pos: Int64) {
+    protected init(data: Array<UInt8>, pos: Int64) {
         this.data = data
         this.pos = pos
     }
 
-    func GetVTable(): Int64 {
+    public func GetVTable(): Int64 {
         return pos - Int64(ReadScalar<Int32>(data, pos))
     }
 
-    func GetOptionalFieldOffset(field: UInt16): UInt16 {
+    public func GetOptionalFieldOffset(field: UInt16): UInt16 {
         let vtable = GetVTable()
         let vtsize = ReadScalar<UInt16>(data, vtable)
         return if (field < vtsize) { ReadScalar<UInt16>(data, vtable + Int64(field)) } else { 0u16 }
     }
 
-    func GetField<T>(field: UInt16, defaultval: T): T {
+    public func GetField<T>(field: UInt16, defaultval: T): T {
         let fieldOffset = GetOptionalFieldOffset(field)
         return if (fieldOffset != 0u16) {
             ReadScalar<T>(data, pos + Int64(fieldOffset))
@@ -198,7 +198,7 @@ open class Table {
         }
     }
 
-    func GetPointer(field: UInt16): Option<Int64> {
+    public func GetPointer(field: UInt16): Option<Int64> {
         let fieldOffset = GetOptionalFieldOffset(field)
         let pointerPos = pos + Int64(fieldOffset)
         return if (fieldOffset != 0u16) {
@@ -208,7 +208,7 @@ open class Table {
         }
     }
 
-    func GetStruct(field: UInt16): Option<Int64> {
+    public func GetStruct(field: UInt16): Option<Int64> {
         let fieldOffset = GetOptionalFieldOffset(field)
         let pointerPos = pos + Int64(fieldOffset)
         return if (fieldOffset != 0u16) { Some(pointerPos) } else { None }
@@ -217,25 +217,25 @@ open class Table {
 
 // flatbuffers/vector.h:158-195,269-278. The C++ length_ address is represented
 // by pos; Data() is the first byte after its four-byte uoffset_t length.
-open class Vector<T> {
-    let data: Array<UInt8>
-    let pos: Int64
+public open class Vector<T> {
+    public let data: Array<UInt8>
+    public let pos: Int64
 
-    init(data: Array<UInt8>, pos: Int64) {
+    public init(data: Array<UInt8>, pos: Int64) {
         this.data = data
         this.pos = pos
     }
 
-    func size(): UInt32 {
+    public func size(): UInt32 {
         return EndianScalar<UInt32>(ReadScalar<UInt32>(data, pos))
     }
 
-    func Get(i: UInt32): Any {
+    public func Get(i: UInt32): Any {
         CJC_ASSERT(i < size())
         return IndirectHelper<T>.Read(data, Data(), i)
     }
 
-    func Data(): Int64 {
+    public func Data(): Int64 {
         return pos + 4
     }
 
@@ -246,32 +246,32 @@ open class Vector<T> {
 
 // flatbuffers/string.h:25-28. The namespace-qualified C++ name
 // flatbuffers::String is flattened to avoid shadowing Cangjie's core String.
-class FlatBufferString <: Vector<UInt8> {
-    init(data: Array<UInt8>, pos: Int64) {
+public class FlatBufferString <: Vector<UInt8> {
+    public init(data: Array<UInt8>, pos: Int64) {
         super(data, pos)
     }
 
-    func str(): String {
+    public func str(): String {
         return String.fromUtf8(data[Data()..Data() + Int64(size())])
     }
 }
 
 // flatbuffers/verifier.h:29-42. The namespace-qualified nested type
 // VerifierTemplate::Options is flattened for Cangjie.
-struct VerifierOptions {
-    var maxDepth: UInt32 = 64u32
-    var maxTables: UInt32 = 1000000u32
-    var checkAlignment: Bool = true
-    var checkNestedFlatbuffers: Bool = true
-    var maxSize: Int64 = Int64(Int32.Max)
+public struct VerifierOptions {
+    public var maxDepth: UInt32 = 64u32
+    public var maxTables: UInt32 = 1000000u32
+    public var checkAlignment: Bool = true
+    public var checkNestedFlatbuffers: Bool = true
+    public var maxSize: Int64 = Int64(Int32.Max)
 
-    init() {}
+    public init() {}
 }
 
 // flatbuffers/verifier.h:26-360. C++ byte pointers are byte-array positions;
 // the verifyRoot/verifyTable closures are the Cangjie form of T::Verify static
 // template dispatch and will be supplied by generated table bindings.
-class VerifierTemplate {
+public class VerifierTemplate {
     private let data: Array<UInt8>
     private let size_: Int64
     private let opts: VerifierOptions
@@ -280,7 +280,7 @@ class VerifierTemplate {
     private var depth: UInt32 = 0u32
     private var numTables: UInt32 = 0u32
 
-    init(data: Array<UInt8>, opts!: VerifierOptions = VerifierOptions(),
+    public init(data: Array<UInt8>, opts!: VerifierOptions = VerifierOptions(),
         trackVerifierBufferSize!: Bool = false) {
         this.data = data
         this.size_ = data.size
@@ -289,7 +289,7 @@ class VerifierTemplate {
         CJC_ASSERT(size_ < opts.maxSize)
     }
 
-    func Check(ok: Bool): Bool {
+    public func Check(ok: Bool): Bool {
         // FLATBUFFERS_DEBUG_VERIFICATION_FAILURE is not enabled for the
         // self-host target, matching verifier.h:65-69's compiled-out branch.
         if (trackVerifierBufferSize && !ok) {
@@ -298,7 +298,7 @@ class VerifierTemplate {
         return ok
     }
 
-    func Verify(elem: Int64, elemLen: Int64): Bool {
+    public func Verify(elem: Int64, elemLen: Int64): Bool {
         if (trackVerifierBufferSize) {
             let bound = elem + elemLen
             if (upperBound < bound) {
@@ -310,11 +310,11 @@ class VerifierTemplate {
         return Check(elem >= 0 && elemLen >= 0 && elemLen < size_ && elem <= size_ - elemLen)
     }
 
-    func VerifyAlignment(elem: Int64, align: Int64): Bool {
+    public func VerifyAlignment(elem: Int64, align: Int64): Bool {
         return Check((elem & (align - 1)) == 0 || !opts.checkAlignment)
     }
 
-    func Verify<T>(elem: Int64): Bool {
+    public func Verify<T>(elem: Int64): Bool {
         var scalarSize: Int64 = 0
         if (UInt8(0) is T || Int8(0) is T || false is T) {
             scalarSize = 1
@@ -330,16 +330,16 @@ class VerifierTemplate {
         return VerifyAlignment(elem, scalarSize) && Verify(elem, scalarSize)
     }
 
-    func VerifyFromPointer(pos: Int64, len: Int64): Bool {
+    public func VerifyFromPointer(pos: Int64, len: Int64): Bool {
         return Verify(pos, len)
     }
 
-    func VerifyFieldStruct(base: Int64, elemOff: UInt16, elemLen: Int64, align: Int64): Bool {
+    public func VerifyFieldStruct(base: Int64, elemOff: UInt16, elemLen: Int64, align: Int64): Bool {
         let field = base + Int64(elemOff)
         return VerifyAlignment(field, align) && Verify(field, elemLen)
     }
 
-    func VerifyField<T>(base: Int64, elemOff: UInt16, align: Int64): Bool {
+    public func VerifyField<T>(base: Int64, elemOff: UInt16, align: Int64): Bool {
         let field = base + Int64(elemOff)
         var scalarSize: Int64 = 0
         if (UInt8(0) is T || Int8(0) is T || false is T) {
@@ -356,15 +356,15 @@ class VerifierTemplate {
         return VerifyAlignment(field, align) && Verify(field, scalarSize)
     }
 
-    func VerifyTable(table: Option<Int64>, verifyTable: (Int64, VerifierTemplate) -> Bool): Bool {
+    public func VerifyTable(table: Option<Int64>, verifyTable: (Int64, VerifierTemplate) -> Bool): Bool {
         return if (let Some(tablePos) <- table) { verifyTable(tablePos, this) } else { true }
     }
 
-    func VerifyVector(vec: Option<Int64>, elemSize: Int64): Bool {
+    public func VerifyVector(vec: Option<Int64>, elemSize: Int64): Bool {
         return if (let Some(vecPos) <- vec) { VerifyVectorOrString(vecPos, elemSize) } else { true }
     }
 
-    func VerifyString(str: Option<Int64>): Bool {
+    public func VerifyString(str: Option<Int64>): Bool {
         if (let None <- str) {
             return true
         }
@@ -374,7 +374,7 @@ class VerifierTemplate {
             Check(data[end.value] == 0u8)
     }
 
-    func VerifyVectorOrString(vec: Int64, elemSize: Int64, end!: Option<CoreBox<Int64>> = None): Bool {
+    public func VerifyVectorOrString(vec: Int64, elemSize: Int64, end!: Option<CoreBox<Int64>> = None): Bool {
         if (!Verify<UInt32>(vec)) {
             return false
         }
@@ -390,7 +390,7 @@ class VerifierTemplate {
         return Verify(vec, byteSize)
     }
 
-    func VerifyVectorOfStrings(vec: Option<Int64>): Bool {
+    public func VerifyVectorOfStrings(vec: Option<Int64>): Bool {
         if (let Some(vecPos) <- vec) {
             let values = Vector<UInt32>(data, vecPos)
             var idx = 0u32
@@ -406,7 +406,7 @@ class VerifierTemplate {
         return true
     }
 
-    func VerifyVectorOfTables(vec: Option<Int64>, verifyTable: (Int64, VerifierTemplate) -> Bool): Bool {
+    public func VerifyVectorOfTables(vec: Option<Int64>, verifyTable: (Int64, VerifierTemplate) -> Bool): Bool {
         if (let Some(vecPos) <- vec) {
             let values = Vector<UInt32>(data, vecPos)
             var idx = 0u32
@@ -423,7 +423,7 @@ class VerifierTemplate {
     }
 
     @OverflowWrapping
-    func VerifyTableStart(table: Int64): Bool {
+    public func VerifyTableStart(table: Int64): Bool {
         if (!Verify<Int32>(table)) {
             return false
         }
@@ -436,7 +436,7 @@ class VerifierTemplate {
         return Check((vtableSize & 1u16) == 0u16) && Verify(vtable, Int64(vtableSize))
     }
 
-    func VerifyBufferFromStart(start: Int64, verifyRoot: (Int64, VerifierTemplate) -> Bool): Bool {
+    public func VerifyBufferFromStart(start: Int64, verifyRoot: (Int64, VerifierTemplate) -> Bool): Bool {
         if (!Check(size_ >= 12)) {
             return false
         }
@@ -455,7 +455,7 @@ class VerifierTemplate {
         return true
     }
 
-    func VerifyNestedFlatBuffer(buf: Option<Int64>, verifyRoot: (Int64, VerifierTemplate) -> Bool): Bool {
+    public func VerifyNestedFlatBuffer(buf: Option<Int64>, verifyRoot: (Int64, VerifierTemplate) -> Bool): Bool {
         if (!opts.checkNestedFlatbuffers) {
             return true
         }
@@ -473,17 +473,17 @@ class VerifierTemplate {
         return nested.VerifyBuffer(verifyRoot)
     }
 
-    func VerifyBuffer(verifyRoot: (Int64, VerifierTemplate) -> Bool): Bool {
+    public func VerifyBuffer(verifyRoot: (Int64, VerifierTemplate) -> Bool): Bool {
         return VerifyBufferFromStart(0, verifyRoot)
     }
 
-    func VerifySizePrefixedBuffer(verifyRoot: (Int64, VerifierTemplate) -> Bool): Bool {
+    public func VerifySizePrefixedBuffer(verifyRoot: (Int64, VerifierTemplate) -> Bool): Bool {
         return Verify<UInt32>(0) && Check(Int64(ReadScalar<UInt32>(data, 0)) + 4 <= size_) &&
             VerifyBufferFromStart(4, verifyRoot)
     }
 
     @OverflowWrapping
-    func VerifyOffset(start: Int64): Int64 {
+    public func VerifyOffset(start: Int64): Int64 {
         if (!Verify<UInt32>(start)) {
             return 0
         }
@@ -500,24 +500,24 @@ class VerifierTemplate {
         return Int64(offset)
     }
 
-    func VerifyOffset(base: Int64, start: UInt16): Int64 {
+    public func VerifyOffset(base: Int64, start: UInt16): Int64 {
         return VerifyOffset(base + Int64(start))
     }
 
     @OverflowWrapping
-    func VerifyComplexity(): Bool {
+    public func VerifyComplexity(): Bool {
         depth++
         numTables++
         return Check(depth <= opts.maxDepth && numTables <= opts.maxTables)
     }
 
     @OverflowWrapping
-    func EndTable(): Bool {
+    public func EndTable(): Bool {
         depth--
         return true
     }
 
-    func GetComputedSize(): Int64 {
+    public func GetComputedSize(): Int64 {
         if (trackVerifierBufferSize) {
             let computedSize = (upperBound - 1 + 4) & -4
             return if (computedSize > size_) { 0 } else { computedSize }
@@ -529,26 +529,26 @@ class VerifierTemplate {
 
 // flatbuffers/table.h:117-162 verifier-facing Table methods.
 extend Table {
-    func VerifyTableStart(verifier: VerifierTemplate): Bool {
+    public func VerifyTableStart(verifier: VerifierTemplate): Bool {
         return verifier.VerifyTableStart(pos)
     }
 
-    func VerifyField<T>(verifier: VerifierTemplate, field: UInt16, align: Int64): Bool {
+    public func VerifyField<T>(verifier: VerifierTemplate, field: UInt16, align: Int64): Bool {
         let fieldOffset = GetOptionalFieldOffset(field)
         return fieldOffset == 0u16 || verifier.VerifyField<T>(pos, fieldOffset, align)
     }
 
-    func VerifyFieldRequired<T>(verifier: VerifierTemplate, field: UInt16, align: Int64): Bool {
+    public func VerifyFieldRequired<T>(verifier: VerifierTemplate, field: UInt16, align: Int64): Bool {
         let fieldOffset = GetOptionalFieldOffset(field)
         return verifier.Check(fieldOffset != 0u16) && verifier.VerifyField<T>(pos, fieldOffset, align)
     }
 
-    func VerifyOffset(verifier: VerifierTemplate, field: UInt16): Bool {
+    public func VerifyOffset(verifier: VerifierTemplate, field: UInt16): Bool {
         let fieldOffset = GetOptionalFieldOffset(field)
         return fieldOffset == 0u16 || verifier.VerifyOffset(pos, fieldOffset) != 0
     }
 
-    func VerifyOffsetRequired(verifier: VerifierTemplate, field: UInt16): Bool {
+    public func VerifyOffsetRequired(verifier: VerifierTemplate, field: UInt16): Bool {
         let fieldOffset = GetOptionalFieldOffset(field)
         return verifier.Check(fieldOffset != 0u16) && verifier.VerifyOffset(pos, fieldOffset) != 0
     }
