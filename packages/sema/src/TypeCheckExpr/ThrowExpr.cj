@@ -85,7 +85,7 @@ public func SynThrowExpr(typeManager: TypeManager, te: ThrowExpr,
         }
     }
     if (let Some(diagValue) <- diag) {
-        let builder = diagValue.Diagnose(te.begin, te.end, BasicDiagKind.sema_throw_expr_with_wrong_type)
+        let builder = Diagnose(diagValue, te, BasicDiagKind.sema_throw_expr_with_wrong_type)
         builder.Emit()
     }
     let invalidTy = TypeManager.GetInvalidTy()
