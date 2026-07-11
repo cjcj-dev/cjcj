@@ -58,7 +58,7 @@ private func EmitRefactor(diag: BasicDiagnosticEngine, kind: BasicDiagKindRefact
 
 private func EmitLegacy(diag: BasicDiagnosticEngine, kind: BasicDiagKind, node: Node,
     args!: Array<BasicDiagArgument> = Array<BasicDiagArgument>()): Unit {
-    let builder = Diagnose(diag, node, kind, args: args)
+    let builder = diag.Diagnose(node.begin, kind, args: args)
     builder.Emit()
 }
 
@@ -367,9 +367,17 @@ public func CheckCFuncParam(param: FuncParam, diag: BasicDiagnosticEngine): Unit
     }
     if (let Some(ty) <- paramTy) {
         if (ty.IsUnit()) {
-            EmitLegacy(diag, BasicDiagKind.sema_cfunc_cannot_have_unit_args, param)
+            let builder = diag.Diagnose(
+                param.identifier.GetRawPos(),
+                param.typeNode.getOrThrow().end,
+                BasicDiagKind.sema_cfunc_cannot_have_unit_args)
+            builder.Emit()
         } else if (!Ty.IsMetCType(ty)) {
-            EmitLegacy(diag, BasicDiagKind.sema_invalid_cfunc_arg_type, param)
+            let builder = diag.Diagnose(
+                param.identifier.GetRawPos(),
+                param.typeNode.getOrThrow().end,
+                BasicDiagKind.sema_invalid_cfunc_arg_type)
+            builder.Emit()
         }
     }
 }
@@ -377,9 +385,13 @@ public func CheckCFuncParam(param: FuncParam, diag: BasicDiagnosticEngine): Unit
 public func CheckCFuncParamType(typeNode: Type, diag: BasicDiagnosticEngine): Unit {
     if (let Some(ty) <- typeNode.GetTy()) {
         if (ty.IsUnit()) {
-            EmitLegacy(diag, BasicDiagKind.sema_cfunc_cannot_have_unit_args, typeNode)
+            let builder = diag.Diagnose(
+                typeNode.begin, typeNode.end, BasicDiagKind.sema_cfunc_cannot_have_unit_args)
+            builder.Emit()
         } else if (!Ty.IsMetCType(ty)) {
-            EmitLegacy(diag, BasicDiagKind.sema_invalid_cfunc_arg_type, typeNode)
+            let builder = diag.Diagnose(
+                typeNode.begin, typeNode.end, BasicDiagKind.sema_invalid_cfunc_arg_type)
+            builder.Emit()
         }
     }
 }
@@ -472,24 +484,31 @@ public func CheckCTypeMember(decl: Decl, diag: BasicDiagnosticEngine): Unit {
                     return
                 }
             }
+            let rangeEnd = if (let Some(typeNode) <- varDecl.typeNode) {
+                typeNode.end
+            } else {
+                varDecl.identifier.GetRawEndPos()
+            }
             if (let Some(varTy) <- varDecl.GetTy()) {
                 if (varTy.IsUnit()) {
-                    EmitLegacy(
-                        diag,
+                    let builder = diag.Diagnose(
+                        varDecl.identifier.GetRawPos(),
+                        rangeEnd,
                         BasicDiagKind.sema_cstruct_cannot_have_unit_fields,
-                        varDecl,
                         args: [BasicDiagArgument(varDecl.identifier.Val())])
+                    builder.Emit()
                     return
                 }
                 if (Ty.IsMetCType(varTy)) {
                     return
                 }
             }
-            EmitLegacy(
-                diag,
+            let builder = diag.Diagnose(
+                varDecl.identifier.GetRawPos(),
+                rangeEnd,
                 BasicDiagKind.sema_illegal_member_of_cstruct,
-                varDecl,
                 args: [BasicDiagArgument(varDecl.identifier.Val()), BasicDiagArgument(outer.identifier.Val())])
+            builder.Emit()
         }
     }
 }
@@ -511,7 +530,8 @@ public func CheckUnsafeInvoke(
             isUnsafe = isUnsafe || funcTy.isC
         }
         if (isUnsafe && !call.TestAttr(Attribute.UNSAFE)) {
-            EmitLegacy(diag, BasicDiagKind.sema_unsafe_function_invoke_failed, call)
+            let builder = Diagnose(diag, call, BasicDiagKind.sema_unsafe_function_invoke_failed)
+            builder.Emit()
         }
     }
 }
