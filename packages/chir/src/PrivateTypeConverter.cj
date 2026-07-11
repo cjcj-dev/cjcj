@@ -67,6 +67,23 @@ public interface ValueTypeFunctor {
     }
 }
 
+public interface CustomDefTypeFunctor {
+    func VisitDef(o: CustomTypeDef): Unit {
+        match (o.GetCustomKind()) {
+            case CustomDefKind.TYPE_STRUCT => VisitSubDef(StaticCast<StructDef>(o))
+            case CustomDefKind.TYPE_ENUM => VisitSubDef(StaticCast<EnumDef>(o))
+            case CustomDefKind.TYPE_CLASS => VisitSubDef(StaticCast<ClassDef>(o))
+            case CustomDefKind.TYPE_EXTEND => VisitSubDef(StaticCast<ExtendDef>(o))
+        }
+    }
+
+    func VisitDefDefaultImpl(o: CustomTypeDef): Unit
+    func VisitSubDef(o: StructDef): Unit
+    func VisitSubDef(o: EnumDef): Unit
+    func VisitSubDef(o: ClassDef): Unit
+    func VisitSubDef(o: ExtendDef): Unit
+}
+
 public open class TypeConverter {
     protected let converter: ConvertTypeFunc
     protected let builder: CHIRBuilder
@@ -265,6 +282,55 @@ public interface ValueTypeConverter <: ValueTypeFunctor {
         VisitFuncBase(o)
         for (param in o.GetParams()) {
             VisitValue(param)
+        }
+    }
+}
+
+public interface CustomDefTypeConverter <: CustomDefTypeFunctor {
+    func ConvertType(ty: Type): Type
+    func ConvertFuncParamsAndRetType(input: FuncType): FuncType
+
+    func VisitDefDefaultImpl(o: CustomTypeDef): Unit {
+        if (let Some(ty) <- o.GetType()) {
+            o.SetType(StaticCast<CustomType>(ConvertType(ty)))
+        }
+
+        for (idx in 0..o.implementedInterfaceTys.size) {
+            o.implementedInterfaceTys[idx] =
+                StaticCast<ClassType>(ConvertType(o.implementedInterfaceTys[idx]))
+        }
+        for (member in o.GetDirectInstanceVars()) {
+            member.ty = ConvertType(member.ty)
+        }
+        o.GetModifiableDefVTable().ConvertPrivateType(
+            { ty: FuncType => ConvertFuncParamsAndRetType(ty) },
+            { ty: Type => ConvertType(ty) })
+    }
+
+    func VisitSubDef(o: StructDef): Unit {
+        VisitDefDefaultImpl(o)
+    }
+
+    func VisitSubDef(o: EnumDef): Unit {
+        VisitDefDefaultImpl(o)
+        for (ctor in o.GetCtors()) {
+            ctor.funcType = Some(ConvertFuncParamsAndRetType(ctor.funcType.getOrThrow()))
+        }
+    }
+
+    func VisitSubDef(o: ClassDef): Unit {
+        VisitDefDefaultImpl(o)
+        if (let Some(superClassTy) <- o.GetSuperClassTy()) {
+            o.SetSuperClassTy(StaticCast<ClassType>(ConvertType(superClassTy)))
+        }
+    }
+
+    func VisitSubDef(o: ExtendDef): Unit {
+        VisitDefDefaultImpl(o)
+        o.SetExtendedType(ConvertType(o.GetExtendedType().getOrThrow()))
+        let genericParams = o.GetGenericTypeParamsRef()
+        for (idx in 0..genericParams.size) {
+            genericParams[idx] = StaticCast<GenericType>(ConvertType(genericParams[idx]))
         }
     }
 }

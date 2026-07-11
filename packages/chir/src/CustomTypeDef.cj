@@ -414,7 +414,7 @@ public open class CustomTypeDef <: Base {
     private let instanceVars: ArrayList<MemberVarInfo> = ArrayList<MemberVarInfo>()
     private let staticVars: ArrayList<GlobalVar> = ArrayList<GlobalVar>()
     private let methods: ArrayList<Function> = ArrayList<Function>()
-    protected let implementedInterfaceTys: ArrayList<ClassType> = ArrayList<ClassType>()
+    public let implementedInterfaceTys: ArrayList<ClassType> = ArrayList<ClassType>()
     private let extends: ArrayList<ExtendDef> = ArrayList<ExtendDef>()
     private var vtable: VTableInDef = VTableInDef()
     private var varInitializationFunc: Option<Function> = None

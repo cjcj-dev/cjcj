@@ -5,7 +5,7 @@ import std.collection.*
 public class EnumCtorInfo {
     public let name: String
     public let mangledName: String
-    public let funcType: Option<FuncType>
+    public var funcType: Option<FuncType>
     public let annoInfo: AnnoInfo
     public let payloadTypes: ArrayList<Type> = ArrayList<Type>()
 
