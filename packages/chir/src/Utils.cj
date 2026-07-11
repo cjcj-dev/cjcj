@@ -414,6 +414,31 @@ private func GetInstParentType(candidate: ArrayList<ClassType>, callee: Function
     throw IllegalStateException("instantiated parent type of callee is not available")
 }
 
+public func GetInstParentType(instSubType: Type, genericParentType: Type, builder: CHIRBuilder): Type {
+    if (!genericParentType.IsGenericRelated()) {
+        return genericParentType
+    }
+    if (instSubType.objectId == genericParentType.objectId) {
+        return genericParentType
+    }
+    let parentDerefType = genericParentType.StripAllRefs()
+    var pair = parentDerefType.CalculateGenericTyMapping(instSubType)
+    var res = pair[0]
+    var replaceTable = pair[1]
+    if (!res) {
+        for (parent in GetSuperTypesRecusively(instSubType, builder)) {
+            pair = parentDerefType.CalculateGenericTyMapping(parent)
+            res = pair[0]
+            replaceTable = pair[1]
+            if (res) {
+                break
+            }
+        }
+    }
+    CJC_ASSERT(res)
+    return ReplaceRawGenericArgType(genericParentType, replaceTable, builder)
+}
+
 public func GetInstParentCustomTyOfCallee(value: Value, args: ArrayList<Value>, thisType: Option<Type>,
     builder: CHIRBuilder): Option<Type> {
     let callee = value.AsFunction() ?? return None
