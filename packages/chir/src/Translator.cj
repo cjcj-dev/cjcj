@@ -1289,17 +1289,17 @@ public class Translator {
     }
 
     public func Visit(expr: AstUnaryExpr): Option<Value> {
-        let operandExpr = RequireExpr(expr.expr, "unary operand")
-        let operand = Translator.TranslateASTNode(operandExpr, this) ??
-            throw IllegalStateException("faithful AST2CHIR unary operand produced no value")
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         let kind = if (expr.op == AstTokenKind.NOT) {
             if (RequireAstTy(expr).IsBoolean()) { ExprKind.NOT } else { ExprKind.BITNOT }
         } else {
             ToCHIRUnaryOp(expr.op)
         }
-        let mayHaveException = OverloadableExprMayThrowException(expr, resultTy)
+        let operandExpr = RequireExpr(expr.expr, "unary operand")
+        let operand = TranslateExprArg(operandExpr)
         let loc = TranslateLocation(expr)
+        let overflowStrategy = expr.overflowStrategy
+        let mayHaveException = OverloadableExprMayThrowException(expr, resultTy)
         let locForWarning = GetOperatorLoc(expr)
         if (let Some(errorBlock) <- CurrentTryCatchBlock() && mayHaveException) {
             let successBlock = CreateBlock()
@@ -1310,7 +1310,7 @@ public class Translator {
             }
             let unary = builder.CreateUnaryIntOpWithException(resultTy, kind, operand, successBlock,
                 targetBlock, CurrentBlock())
-            unary.SetOverflowStrategy(expr.overflowStrategy)
+            unary.SetOverflowStrategy(overflowStrategy)
             unary.SetDebugLocation(loc)
             unary.SetDebugLocationInfoForWarning(locForWarning)
             let result = RequireResult(unary)
@@ -1318,7 +1318,7 @@ public class Translator {
             return result
         }
         let unary = builder.CreateUnaryExpression(kind, resultTy, operand, CurrentBlock(),
-            overflowStrategy: expr.overflowStrategy)
+            overflowStrategy: overflowStrategy)
         unary.SetDebugLocation(loc)
         unary.SetDebugLocationInfoForWarning(locForWarning)
         return RequireResult(unary)
