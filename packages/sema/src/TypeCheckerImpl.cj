@@ -229,6 +229,89 @@ public class TypeCheckerImpl {
             "ast_kind : extend_decl", order: SearchOrder.POS_ASC)
     }
 
+    public func GetDupInterfaceRecursively(triggerNode: Node, interfaceTy: Ty, instantiateMap: TypeSubst,
+        res: ArrayList<InterfaceTy>, passedClassLikeDecls: ArrayList<ClassLikeDecl>): Option<Decl> {
+        let insTy = typeManager.GetInstantiatedTy(interfaceTy, instantiateMap)
+        if (!Ty.IsTyCorrect(insTy) || !insTy.IsInterface()) {
+            return None
+        }
+        let ity = (insTy as InterfaceTy).getOrThrow()
+        for (value in res) {
+            if (refEq(value, ity)) {
+                if (let Some(interfaceDecl) <- ity.declPtr) {
+                    return Some(interfaceDecl)
+                }
+                return None
+            }
+        }
+        res.add(ity)
+        let interfaceDecl = ity.declPtr.getOrThrow()
+        let superInstantiateMap = GenerateTypeMapping(interfaceDecl, ity.typeArgs)
+        if (superInstantiateMap.IsEmpty()) {
+            return None
+        }
+        return GetDupSuperInterface(triggerNode, interfaceDecl, superInstantiateMap, passedClassLikeDecls)
+    }
+
+    public func GetExtendDupSuperInterface(triggerNode: Node, decl: InheritableDecl, instantiateMap: TypeSubst,
+        res: ArrayList<InterfaceTy>, passedClassLikeDecls: ArrayList<ClassLikeDecl>): Option<Decl> {
+        if (!decl.TestAttr(Attribute.GENERIC) || !Ty.IsTyCorrect(decl.GetTy())) {
+            return None
+        }
+        let extends = typeManager.GetDeclExtends(decl)
+        for (extendDecl in extends) {
+            let extendInstMap = GenerateTypeMapping(extendDecl, decl.GetTy().getOrThrow().typeArgs)
+            if (extendInstMap.entries.size != instantiateMap.entries.size) {
+                continue
+            }
+            for (entry in instantiateMap.entries) {
+                if (!extendInstMap.Contains(entry.tyVar)) {
+                    extendInstMap.Put(entry.tyVar, entry.ty)
+                }
+            }
+            for (interfaceType in extendDecl.inheritedTypes) {
+                if (!Ty.IsTyCorrect(interfaceType.GetTy())) {
+                    continue
+                }
+                let ret = GetDupInterfaceRecursively(triggerNode, interfaceType.GetTy().getOrThrow(), extendInstMap,
+                    res, passedClassLikeDecls)
+                if (let Some(value) <- ret) {
+                    return Some(value)
+                }
+            }
+        }
+        return None
+    }
+
+    public func GetDupSuperInterface(triggerNode: Node, decl: InheritableDecl, instantiateMap: TypeSubst,
+        passedClassLikeDecls: ArrayList<ClassLikeDecl>, checkExtend!: Bool = true): Option<Decl> {
+        if (decl.IsClassLikeDecl()) {
+            let classLikeDecl = (decl as ClassLikeDecl).getOrThrow()
+            for (passedDecl in passedClassLikeDecls) {
+                if (refEq(passedDecl, classLikeDecl)) {
+                    return None
+                }
+            }
+            passedClassLikeDecls.add(classLikeDecl)
+        }
+        let instInterfaceTys = ArrayList<InterfaceTy>()
+        for (interfaceType in decl.inheritedTypes) {
+            if (!Ty.IsTyCorrect(interfaceType.GetTy())) {
+                continue
+            }
+            let ret = GetDupInterfaceRecursively(triggerNode, interfaceType.GetTy().getOrThrow(), instantiateMap,
+                instInterfaceTys, passedClassLikeDecls)
+            if (let Some(value) <- ret) {
+                return Some(value)
+            }
+        }
+        if (checkExtend) {
+            return GetExtendDupSuperInterface(triggerNode, decl, instantiateMap, instInterfaceTys,
+                passedClassLikeDecls)
+        }
+        return None
+    }
+
     public func GetSymsByASTKind(ctx: ASTContext, astKind: ASTKind,
         order!: SearchOrder = SearchOrder.POS_DESC): ArrayList<Symbol> {
         return ctx.searcher.Search(ctx, ASTKindQuery(astKind), order: order)

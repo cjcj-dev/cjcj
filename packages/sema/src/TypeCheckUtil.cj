@@ -3,6 +3,8 @@ package cjcj::sema
 import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::utils.GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME
+import cjcj::utils.IS_SUBTYPE_TYPES_FUNC_NAME
 
 public class RealMemberDecl {
     public var isGetter: Bool
@@ -541,6 +543,131 @@ public func GetTypesStr(decls: ArrayList<Decl>): String {
         }
     }
     return res
+}
+
+public func GetMemberDecl<T>(decl: Decl, identifier: String, paramTys: ArrayList<Ty>,
+    typeManager: TypeManager): Option<T> where T <: Decl {
+    for (member in decl.GetMemberDecls()) {
+        if (member.identifier.Val() != identifier) {
+            continue
+        }
+        var isSuitableDecl = true
+        if (let Some(funcMember) <- (member as FuncDecl)) {
+            let originalParamTys = (funcMember.GetTy().getOrThrow() as FuncTy).getOrThrow().paramTys
+            if (originalParamTys.size != paramTys.size) {
+                continue
+            }
+            var idx: Int64 = 0
+            while (idx < paramTys.size) {
+                if (originalParamTys[idx].IsObject() && paramTys[idx].IsClass()) {
+                    idx++
+                    continue
+                }
+                if (!typeManager.IsSubtype(paramTys[idx], originalParamTys[idx])) {
+                    isSuitableDecl = false
+                }
+                idx++
+            }
+        }
+        if (isSuitableDecl) {
+            return member as T
+        }
+    }
+    return None
+}
+
+public func FindInitDecl(decl: InheritableDecl, typeManager: TypeManager, valueArgs: ArrayList<Expr>,
+    instTys!: ArrayList<Ty> = ArrayList<Ty>()): Option<(FuncDecl, Ty)> {
+    let valueParamTys = ArrayList<Ty>()
+    for (arg in valueArgs) {
+        valueParamTys.add(arg.GetTy().getOrThrow())
+    }
+    return FindInitDecl(decl, typeManager, valueParamTys, instTys: instTys)
+}
+
+public func FindInitDecl(decl: InheritableDecl, typeManager: TypeManager, valueParamTys: ArrayList<Ty>,
+    instTys!: ArrayList<Ty> = ArrayList<Ty>()): Option<(FuncDecl, Ty)> {
+    let initFuncDecl = GetMemberDecl<FuncDecl>(decl, "init", valueParamTys, typeManager)
+    if (let None <- initFuncDecl) {
+        return None
+    }
+    let initDecl = initFuncDecl.getOrThrow()
+    return Some((initDecl, typeManager.GetInstantiatedTy(initDecl.GetTy().getOrThrow(),
+        GenerateTypeMapping(decl, instTys))))
+}
+
+public func CreateGenericParamDecl(decl: Decl, name: String, typeManager: TypeManager): GenericParamDecl {
+    let typeParam = GenericParamDecl()
+    typeParam.identifier = SrcIdentifier(name)
+    typeParam.SetTy(typeManager.GetGenericsTy(typeParam))
+    typeParam.outerDecl = decl
+    typeParam.fullPackageName = decl.fullPackageName
+    return typeParam
+}
+
+public func CreateGenericParamDecl(decl: Decl, typeManager: TypeManager): GenericParamDecl {
+    return CreateGenericParamDecl(decl, "T", typeManager)
+}
+
+public func GenerateGetTypeForTypeParamIntrinsic(pkg: Package, typeManager: TypeManager): FuncDecl {
+    let file = pkg.files[0]
+    let retTy = TypeManager.GetCStringTy()
+    let funcTy = typeManager.GetFunctionTy(Array<Ty>(), retTy)
+    let decl = FuncDecl()
+    let funcBody = FuncBody()
+    funcBody.paramLists.add(CreateFuncParamList(ArrayList<FuncParam>()))
+    let retType = RefType()
+    retType.SetTy(retTy)
+    retType.EnableAttr(Attribute.COMPILER_ADD)
+    funcBody.retType = retType
+    let generic = Generic()
+    generic.typeParameters.add(CreateGenericParamDecl(decl, typeManager))
+    funcBody.generic = generic
+    funcBody.SetTy(funcTy)
+
+    decl.curFile = file
+    decl.begin = file.begin
+    decl.end = file.begin
+    decl.identifier = SrcIdentifier(GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME)
+    decl.fullPackageName = pkg.fullPackageName
+    decl.SetTy(funcTy)
+    decl.funcBody = funcBody
+    decl.EnableAttr(Attribute.INTRINSIC)
+    decl.EnableAttr(Attribute.GENERIC)
+
+    file.decls.add(decl, at: 0)
+    return decl
+}
+
+public func GenerateIsSubtypeTypesIntrinsic(pkg: Package, typeManager: TypeManager): FuncDecl {
+    let file = pkg.files[0]
+    let retTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+    let funcTy = typeManager.GetFunctionTy(Array<Ty>(), retTy)
+    let decl = FuncDecl()
+    let funcBody = FuncBody()
+    funcBody.paramLists.add(CreateFuncParamList(ArrayList<FuncParam>()))
+    let retType = RefType()
+    retType.SetTy(retTy)
+    funcBody.retType = retType
+    let generic = Generic()
+    generic.typeParameters.add(CreateGenericParamDecl(decl, "T1", typeManager))
+    generic.typeParameters.add(CreateGenericParamDecl(decl, "T2", typeManager))
+    funcBody.generic = generic
+    funcBody.SetTy(funcTy)
+
+    AddCurFile(decl, file: file)
+    decl.begin = file.begin
+    decl.end = file.begin
+    decl.identifier = SrcIdentifier(IS_SUBTYPE_TYPES_FUNC_NAME)
+    decl.fullPackageName = pkg.fullPackageName
+    decl.SetTy(funcTy)
+    decl.funcBody = funcBody
+    decl.EnableAttr(Attribute.INTRINSIC)
+    decl.EnableAttr(Attribute.GENERIC)
+    decl.EnableAttr(Attribute.COMPILER_ADD)
+
+    file.decls.add(decl, at: 0)
+    return decl
 }
 
 private func FindValidPropAccessor(classDecl: ClassDecl, isGetter: Bool, name: String): Option<FuncDecl> {
