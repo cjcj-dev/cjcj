@@ -371,10 +371,7 @@ public class ClosureConversion {
     }
 
     private func ConvertFuncType(funcTy: FuncType): Type {
-        if (funcTy.IsCFunc()) {
-            return funcTy
-        }
-        let autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(funcTy)
+        let autoEnvBaseDef = GetOrCreateGenericAutoEnvBaseDef(funcTy.GetParamTypes().size)
         let convertedFuncType = ConvertFuncArgsAndRetType(funcTy)
         let autoEnvBaseTy = InstantiateAutoEnvBaseType(autoEnvBaseDef, convertedFuncType)
         return builder.context.GetRefTy(autoEnvBaseTy)
