@@ -16,7 +16,7 @@ import cjcj::modules.{CreateArrayInfo, CreateAssignInfo, CreateBinaryInfo, Creat
 import cjcj::option.OptimizationLevel
 import cjcj::sema.TypeManager as FaithfulSemaTypeManager
 import cjcj::utils.FileUtil
-import cjcj::utils.CJC_ASSERT
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 import cjcj::utils.{MAIN_INVOKE, STATIC_INIT_FUNC}
 
 private let CJO_FILE_IDENTIFIER: String = "CJOF"
@@ -45,7 +45,7 @@ public func SerializePackageToCjoFlatBuffer(
     debug: Bool,
     optimizationLevel: OptimizationLevel,
     saveFileWithAbsPath!: Bool = false,
-    diag!: Option<DiagnosticEngine> = None,
+    diag!: DiagnosticEngine,
     serializingCommon!: Bool = false,
     exportContent!: Bool = true,
     exportFuncBody!: Bool = true
@@ -63,7 +63,7 @@ private class FrontendCjoFlatBufferWriter {
     private let debugOption: Bool
     private let optimizationLevel: OptimizationLevel
     private let saveFileWithAbsPath: Bool
-    private let diag: Option<DiagnosticEngine>
+    private let diag: DiagnosticEngine
     private var serializingCommon: Bool
     private let exportContent: Bool
     private let exportFuncBody: Bool
@@ -93,7 +93,7 @@ private class FrontendCjoFlatBufferWriter {
         debug: Bool,
         optimizationLevel: OptimizationLevel,
         saveFileWithAbsPath!: Bool,
-        diag!: Option<DiagnosticEngine>,
+        diag!: DiagnosticEngine,
         serializingCommon!: Bool,
         exportContent!: Bool,
         exportFuncBody!: Bool
@@ -964,10 +964,8 @@ private class FrontendCjoFlatBufferWriter {
     // Mirrors ExprWriter.cpp:87-95 SaveUnsupportExpr: diagnose the unsupported expression and
     // finish a PackageFormat::Expr with SaveBasicNodeInfo fields, leaving kind as the schema default.
     private func SaveUnsupportExpr(expr: Expr, nodeInfo: NodeInfo): FlatBufferOffset {
-        if (let Some(writerDiag) <- diag) {
-            DiagnoseRefactor(writerDiag.AsBasicDiagnosticEngine(), DiagKindRefactor.package_unsupport_save,
-                expr, arguments: ["expression", ASTKindName(expr.astKind)]).Emit()
-        }
+        DiagnoseRefactor(diag.AsBasicDiagnosticEngine(), DiagKindRefactor.package_unsupport_save,
+            expr, arguments: ["expression", ASTKindName(expr.astKind)]).Emit()
         return SaveBasicNodeInfo(0u16, 0u32, 0u8, 0u32, nodeInfo)
     }
 
@@ -1003,7 +1001,7 @@ private class FrontendCjoFlatBufferWriter {
                 operands.add(SaveDeclIndex(childDecl, false))
                 childrenCond.add(false)
             } else {
-                throw IllegalArgumentException("Block child is neither Expr nor Decl")
+                CJC_ABORT()
             }
         }
         // Save the 'unsafe' condition as the last value (childrenCond has size+1 entries).
@@ -1490,7 +1488,8 @@ private class FrontendCjoFlatBufferWriter {
                 return SavePattern(realPattern)
             }
         }
-        throw IllegalArgumentException("not yet serialized in faithful .cjo writer: " + ASTKindName(pattern.astKind))
+        CJC_ABORT()
+        return 0u32
     }
 
     // Mirrors ExprWriter.cpp:720-737 SaveConstPattern: exprs contains literal and optional
@@ -2529,7 +2528,14 @@ private func ShouldEmitTypeArgsVector(kind: UInt16, infoType: UInt8, typeArgs: A
 }
 
 private func OverflowPolicyToFlat(strategy: OverflowStrategy): UInt8 {
-    return UInt8(OverflowStrategyIndex(strategy))
+    return match (strategy) {
+        case OverflowStrategy.NA => 0u8
+        case OverflowStrategy.CHECKED => 1u8
+        case OverflowStrategy.WRAPPING => 2u8
+        case OverflowStrategy.THROWING => 3u8
+        case OverflowStrategy.SATURATING => 4u8
+        case OverflowStrategy.OVERFLOW_STRATEGY_END => CJC_ABORT(); return 0u8
+    }
 }
 
 // ModuleFormat.fbs enum LitConstKind (fbs:388-397): Integer=0,RuneByte=1,Float=2,Rune=3,
@@ -2544,7 +2550,7 @@ private func LitConstKindToFlat(kind: LitConstKind): UInt8 {
         case LitConstKind.JSTRING => 5u8
         case LitConstKind.BOOL => 6u8
         case LitConstKind.UNIT => 7u8
-        case LitConstKind.NONE => 0u8
+        case LitConstKind.NONE => CJC_ABORT(); return 0u8
     }
 }
 
