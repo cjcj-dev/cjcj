@@ -63,6 +63,69 @@ private func IsAssignableSubScriptExpr(se: SubscriptExpr, isCompound: Bool,
     return true
 }
 
+private func IsAssignable(e: Expr, isCompound: Bool,
+    diags: Array<Diagnostic>, diag: BasicDiagnosticEngine): Bool {
+    if (let Some(leftRef) <- (e as RefExpr)) {
+        if (let Some(target) <- leftRef.ref.target) {
+            if (target.astKind == ASTKind.FUNC_DECL) {
+                for (diagnostic in diags) {
+                    diag.Diagnose(diagnostic).Emit()
+                }
+                let targetName = if (target.TestAttr(Attribute.MACRO_FUNC)) {
+                    "macro"
+                } else if (target.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                    "enum constructor"
+                } else {
+                    "func"
+                }
+                DiagInvalidAssign(diag, e, targetName)
+                return false
+            }
+        }
+        if (leftRef.isThis && leftRef.isAlone) {
+            for (diagnostic2 in diags) {
+                diag.Diagnose(diagnostic2).Emit()
+            }
+            Diagnose(diag, e, BasicDiagKind.sema_invalid_assignment_to_this_expr).Emit()
+            return false
+        }
+    } else if (let Some(memberAccess) <- (e as MemberAccess)) {
+        if (let Some(memberTarget) <- memberAccess.target) {
+            if (memberTarget.astKind == ASTKind.FUNC_DECL) {
+                for (diagnostic3 in diags) {
+                    diag.Diagnose(diagnostic3).Emit()
+                }
+                let memberTargetName = if (memberTarget.TestAttr(Attribute.MACRO_FUNC)) {
+                    "macro"
+                } else if (memberTarget.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                    "enum constructor"
+                } else {
+                    "func"
+                }
+                DiagInvalidAssign(diag, e, memberTargetName)
+                return false
+            }
+        }
+        let isVArraySize = memberAccess.baseExpr.isSome() &&
+            Ty.IsTyCorrect(memberAccess.baseExpr.getOrThrow().GetTy()) &&
+            (memberAccess.baseExpr.getOrThrow().GetTy().getOrThrow() as VArrayTy).isSome() &&
+            memberAccess.desugarExpr.isSome() &&
+            memberAccess.desugarExpr.getOrThrow().astKind == ASTKind.LIT_CONST_EXPR
+        if (isVArraySize) {
+            for (diagnostic4 in diags) {
+                diag.Diagnose(diagnostic4).Emit()
+            }
+            DiagCannotAssignToImmutable(diag, memberAccess, memberAccess)
+            return false
+        }
+    } else if (let Some(subscriptExpr) <- (e as SubscriptExpr)) {
+        if (!IsAssignableSubScriptExpr(subscriptExpr, isCompound, diags, diag)) {
+            return false
+        }
+    }
+    return true
+}
+
 private func IsAssignableExpr(expr: Expr): Bool {
     if (let Some(parenExpr) <- (expr as ParenExpr)) {
         if (let Some(innerExpr) <- parenExpr.expr) {

@@ -196,6 +196,20 @@ public func DiagInvalidAssign(diag: BasicDiagnosticEngine, node: Node, name: Str
         node, range, name).Emit()
 }
 
+public func DiagCannotAssignToImmutable(diag: BasicDiagnosticEngine, ae: Expr, perpetrator: Expr): Unit {
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_cannot_assign_to_immutable, ae)
+    if (let Some(target) <- perpetrator.GetTarget()) {
+        if (!target.identifier.Begin().IsZero()) {
+            AddNote(builder, target, MakeRange(target.identifier.Begin(), target.identifier.End()),
+                DeclKindToString(target) + " '" + target.identifier.Val() + "' is immutable")
+        }
+    } else if (perpetrator.astKind == ASTKind.CALL_EXPR) {
+        AddNote(builder, perpetrator, MakeRange(perpetrator.begin, perpetrator.end),
+            "function call returns immutable value")
+    }
+    builder.Emit()
+}
+
 public func DiagCannotHaveDefaultParam(diag: BasicDiagnosticEngine, fd: FuncDecl, fp: FuncParam): Unit {
     if (fp.TestAttr(Attribute.IS_BROKEN)) {
         return
