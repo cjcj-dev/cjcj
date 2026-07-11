@@ -553,6 +553,48 @@ public func DesugarSubscriptOverloadExpr(ctx: ASTContext, expr: AssignExpr): Uni
     AddCurFile(expr, file: expr.curFile)
 }
 
+public func DesugarOperatorOverloadExpr(ctx: ASTContext, expr: AssignExpr): Unit {
+    if (expr.leftValue.isNone() || expr.rightExpr.isNone()) {
+        return
+    }
+    let assignExpr = AssignExpr()
+    CopyBasicInfo(expr, assignExpr)
+    ctx.RemoveTypeCheckCache(assignExpr)
+    assignExpr.sourceExpr = expr
+    assignExpr.op = TokenKind.ASSIGN
+    assignExpr.leftValue = expr.leftValue
+    assignExpr.leftValue.getOrThrow().mapExpr = assignExpr.leftValue
+
+    let callBase = MemberAccess()
+    CopyBasicInfo(expr, callBase)
+    ctx.RemoveTypeCheckCache(callBase)
+    callBase.baseExpr = ASTCloner.Clone(assignExpr.leftValue.getOrThrow()) as Expr
+    ctx.ClearTypeCheckCache(callBase.baseExpr.getOrThrow())
+    callBase.baseExpr.getOrThrow().DisableAttr(Attribute.LEFT_VALUE)
+    callBase.baseExpr.getOrThrow().mapExpr = assignExpr.leftValue
+    callBase.field = SrcIdentifier(TokenKindLiteral(GetCompoundAssignBaseOp(expr.op)))
+
+    let funcArg = FuncArg()
+    CopyBasicInfo(expr, funcArg)
+    ctx.RemoveTypeCheckCache(funcArg)
+    funcArg.expr = expr.rightExpr
+
+    let callExpr = CallExpr()
+    CopyBasicInfo(expr, callExpr)
+    ctx.RemoveTypeCheckCache(callExpr)
+    callExpr.sourceExpr = expr
+    callExpr.baseFunc = callBase
+    callExpr.args.add(funcArg)
+    if (expr.TestAttr(Attribute.UNSAFE)) {
+        callExpr.EnableAttr(Attribute.UNSAFE)
+    }
+    assignExpr.rightExpr = callExpr
+    assignExpr.EnableAttr(Attribute.SIDE_EFFECT)
+
+    expr.desugarExpr = assignExpr
+    AddCurFile(expr, file: expr.curFile)
+}
+
 public func DesugarOperatorOverloadExpr(expr: AssignExpr): Unit {
     if (let Some(_) <- expr.desugarExpr) {
         return
