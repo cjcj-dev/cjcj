@@ -5,6 +5,8 @@ import cjcj::ast.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagSeverity
 import cjcj::basic.Diagnostic
 import cjcj::sema.*
 import cjcj::sema.Desugar.*
@@ -28,6 +30,28 @@ private func IsCompoundNumericAssign(op: TokenKind): Bool {
 
 private func IsCompoundBoolAssign(op: TokenKind): Bool {
     return op == TokenKind.AND_ASSIGN || op == TokenKind.OR_ASSIGN
+}
+
+private func DiagCannotAssignToSubscript(diag: BasicDiagnosticEngine,
+    se: SubscriptExpr, rightValue: Expr): Unit {
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_cannot_assign_to_subscript, se)
+    CJC_ASSERT(se.baseExpr.isSome() && Ty.IsTyCorrect(se.baseExpr.getOrThrow().GetTy()))
+    if (se.baseExpr.getOrThrow().GetTy().getOrThrow().IsExtendable()) {
+        let indexParams = StringBuilder()
+        for (idx in 0..se.indexExprs.size) {
+            CJC_ASSERT(Ty.IsTyCorrect(se.indexExprs[idx].GetTy()))
+            indexParams.append("index${idx}: ${se.indexExprs[idx].GetTy().getOrThrow().String()}, ")
+        }
+        builder.AddNote("you may want to implement 'operator func[](${indexParams.toString()}" +
+            "value!: ${rightValue.GetTy().getOrThrow().String()})' for type '" +
+            "${se.baseExpr.getOrThrow().GetTy().getOrThrow().String()}'")
+    }
+    builder.Emit()
+}
+
+private func MaySubscriptAssignOnlyBeOverload(baseExpr: Expr): Bool {
+    return Ty.IsTyCorrect(baseExpr.GetTy()) && !baseExpr.GetTy().getOrThrow().IsBuiltin() &&
+        !baseExpr.GetTy().getOrThrow().IsRange() && !baseExpr.GetTy().getOrThrow().IsTuple()
 }
 
 private func IsAssignableSubScriptExpr(se: SubscriptExpr, isCompound: Bool,
@@ -124,6 +148,38 @@ private func IsAssignable(e: Expr, isCompound: Bool,
         }
     }
     return true
+}
+
+private func DiagnoseForSubscriptAssignExpr(typeManager: TypeManager, ctx: ASTContext,
+    ae: AssignExpr, diags: Array<Diagnostic>, synthesizer: (SynPos, Expr) -> Ty,
+    diag: BasicDiagnosticEngine): Unit {
+    CJC_ASSERT(ae.leftValue.isSome())
+    CJC_ASSERT(ae.rightExpr.isSome())
+    let se = (ae.leftValue.getOrThrow() as SubscriptExpr).getOrThrow()
+    let baseTarget = se.baseExpr.getOrThrow().GetTarget()
+    var hasError = false
+    for (diagnostic in diags) {
+        if (diagnostic.diagSeverity == DiagSeverity.DS_ERROR) {
+            hasError = true
+        }
+    }
+    if (!hasError || baseTarget.isNone() || baseTarget.getOrThrow().astKind == ASTKind.VAR_DECL) {
+        var areChildrenValid = true
+        for (indexExpr in se.indexExprs) {
+            areChildrenValid = Ty.IsTyCorrect(synthesizer(SynPos.EXPR_ARG, indexExpr)) &&
+                ReplaceIdealTy(typeManager, indexExpr, diag: Some(diag)) && areChildrenValid
+        }
+        let rightExpr = ae.rightExpr.getOrThrow()
+        areChildrenValid = Ty.IsTyCorrect(synthesizer(SynPos.EXPR_ARG, rightExpr)) &&
+            ReplaceIdealTy(typeManager, rightExpr, diag: Some(diag)) && areChildrenValid
+        if (areChildrenValid) {
+            DiagCannotAssignToSubscript(diag, se, rightExpr)
+        }
+    } else {
+        for (diagnostic2 in diags) {
+            diag.Diagnose(diagnostic2).Emit()
+        }
+    }
 }
 
 private func IsAssignableExpr(expr: Expr): Bool {
