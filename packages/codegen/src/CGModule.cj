@@ -16,6 +16,7 @@ import cjcj::chir.GlobalVar
 import cjcj::chir.Type
 import cjcj::chir.Value
 import cjcj::chir.GetTypeArgsQualifiedName
+import cjcj::chir.GetCustomTypeDefIdentifier
 import cjcj::option.ArchType
 import cjcj::option.EnvironmentType
 import cjcj::option.OSType
@@ -247,7 +248,7 @@ public class CGModule {
 
     public func GetEnumCaseClassName(chirEnumType: EnumType, ctorIndex: Int64): String {
         let enumDef = chirEnumType.GetEnumDef()
-        var name = enumDef.GetPackageName() + ":" + enumDef.GetSrcCodeIdentifier() + ":" + ctorIndex.toString()
+        var name = enumDef.GetPackageName() + ":" + GetCustomTypeDefIdentifier(enumDef) + ":" + ctorIndex.toString()
         if (!CGType.GetOrCreate(this, chirEnumType).IsDynamicGI() && !chirEnumType.GetTypeArgs().isEmpty()) {
             name += "<" + GetTypeArgsQualifiedName(chirEnumType.GetTypeArgs()) + ">"
         }
