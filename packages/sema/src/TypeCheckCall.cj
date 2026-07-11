@@ -4078,8 +4078,7 @@ public func LookupShadowedTopLevelTypeByName(typeManager: TypeManager, ctx: ASTC
     }
     let topLevel = LookupTopLevel(typeManager, ctx, name, scopeName, node, importManager: importManager)
     var found: Option<Decl> = None
-    for (declOpt in topLevel) {
-        let decl = declOpt.getOrThrow()
+    for (decl in topLevel) {
         if (!decl.IsTypeDecl()) {
             continue
         }
@@ -4139,7 +4138,7 @@ private func ShadowedCallBaseTypeCandidate(typeManager: TypeManager, ctx: ASTCon
     if (nearest.isEmpty()) {
         return None
     }
-    let nearestDecl = nearest[0].getOrThrow()
+    let nearestDecl = nearest[0]
     if (nearestDecl.IsTypeDecl() || nearestDecl.TestAttr(Attribute.GLOBAL)) {
         return None
     }

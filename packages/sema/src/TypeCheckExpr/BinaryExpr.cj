@@ -59,7 +59,7 @@ private class TargetSnapshot {
             memberAccess.targets.clear()
             for (value2 in targets) {
                 match (value2) {
-                    case Some(decl) => memberAccess.targets.add(Some(decl))
+                    case Some(decl) => memberAccess.targets.add(Some((decl as FuncDecl).getOrThrow()))
                     case None => memberAccess.targets.add(None)
                 }
             }

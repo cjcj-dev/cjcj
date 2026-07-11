@@ -295,10 +295,6 @@ private func TypeCheckReferenceCheckAmbiguousImportedNonFuncs(
     let source = ArrayList<Option<Decl>>()
     let imported = ArrayList<Decl>()
     for (targetOpt in targets) {
-        if (let None <- targetOpt) {
-            source.add(None)
-            continue
-        }
         let target = targetOpt.getOrThrow()
         if (target.TestAttr(Attribute.IMPORTED)) {
             imported.add(target)
@@ -965,7 +961,7 @@ public func TypeCheckReferenceFilterAndGetTargetsOfObjAccess(
             targets.remove(at: idx)
         } else {
             if (decl.astKind == ASTKind.FUNC_DECL) {
-                ma.targets.add(Some(decl))
+                ma.targets.add(Some((decl as FuncDecl).getOrThrow()))
             }
             idx++
         }
@@ -1762,15 +1758,16 @@ public func TypeCheckReferenceAddFuncTargetsForMemberAccess(memberAccess: Member
     memberAccess.targets.clear()
     for (target in targets) {
         if (memberAccess.isPattern || target.astKind == ASTKind.FUNC_DECL) {
+            let funcTarget = (target as FuncDecl).getOrThrow()
             var exists = false
             for (candidate in memberAccess.targets) {
-                if (SameDecl(candidate.getOrThrow(), target)) {
+                if (SameDecl(candidate.getOrThrow(), funcTarget)) {
                     exists = true
                     break
                 }
             }
             if (!exists) {
-                memberAccess.targets.add(Some(target))
+                memberAccess.targets.add(Some(funcTarget))
             }
         }
     }

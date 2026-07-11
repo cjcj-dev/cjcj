@@ -398,7 +398,7 @@ private class TypeCheckerTargetSnapshot {
             memberAccess.targets.clear()
             for (value2 in targets) {
                 match (value2) {
-                    case Some(decl) => memberAccess.targets.add(Some(decl))
+                    case Some(decl) => memberAccess.targets.add(Some((decl as FuncDecl).getOrThrow()))
                     case None => memberAccess.targets.add(None)
                 }
             }
@@ -6322,7 +6322,7 @@ public class TypeChecker {
         if (targets.isEmpty()) {
             for (target in impl.Lookup(ctx, refExpr.ref.identifier.Val(), scopeNameOf(refExpr), refExpr,
                 isSetter: refExpr.TestAttr(Attribute.LEFT_VALUE))) {
-                targets.add(target)
+                targets.add(Some(target))
             }
         }
         if (!refExpr.TestAttr(Attribute.MACRO_INVOKE_BODY) && typeCheckExprAllMacroFuncDecls(targets)) {

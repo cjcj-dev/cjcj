@@ -318,12 +318,12 @@ public class TypeCheckerImpl {
     }
 
     public func Lookup(ctx: ASTContext, name: String, scopeName: String, node: Node,
-        isSetter!: Bool = false): ArrayList<Option<Decl>> {
+        isSetter!: Bool = false): ArrayList<Decl> {
         return Lookup(typeManager, ctx, name, scopeName, node, isSetter: isSetter, importManager: importManager)
     }
 
     public func LookupTopLevel(ctx: ASTContext, name: String, scopeName: String, node: Node,
-        isSetter!: Bool = false): ArrayList<Option<Decl>> {
+        isSetter!: Bool = false): ArrayList<Decl> {
         return LookupTopLevel(typeManager, ctx, name, scopeName, node, isSetter: isSetter, importManager: importManager)
     }
 
@@ -352,7 +352,7 @@ public class TypeCheckerImpl {
             let lookupScope = if (hasLocalDecl) { scopeName } else { GetParentScopeName(scopeName) }
             let decls = Lookup(ctx, refExpr.ref.identifier.Val(), lookupScope, refExpr)
             for (decl in decls) {
-                candidate.decls.add(decl.getOrThrow())
+                candidate.decls.add(decl)
             }
             candidate.hasDecl = !candidate.decls.isEmpty()
         } else if (let Some(memberAccess) <- (expr as MemberAccess)) {

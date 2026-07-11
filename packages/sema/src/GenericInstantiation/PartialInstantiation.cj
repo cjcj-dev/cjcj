@@ -1988,7 +1988,7 @@ public class PartialInstantiation {
                         while (targetIndex < sourceMemberAccess.targets.size) {
                             let capturedIndex = targetIndex
                             TargetAddrMapInsert(sourceMemberAccess.targets[capturedIndex],
-                                { value: Decl => targetMemberAccess.targets[capturedIndex] = Some(value) })
+                                { value: FuncDecl => targetMemberAccess.targets[capturedIndex] = Some(value) })
                             targetIndex++
                         }
                     }

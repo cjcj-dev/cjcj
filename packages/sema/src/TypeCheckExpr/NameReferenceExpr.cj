@@ -490,17 +490,6 @@ private func AddTargetIfMissing(targets: ArrayList<Decl>, candidate: Decl): Unit
     targets.add(candidate)
 }
 
-private func AddTargetIfMissing(targets: ArrayList<Option<Decl>>, candidate: Decl): Unit {
-    for (target in targets) {
-        if (let Some(value) <- target) {
-            if (sameImportedAwareDecl(value, candidate)) {
-                return
-            }
-        }
-    }
-    targets.add(Some(candidate))
-}
-
 private func sameImportedAwareDecl(left: Decl, right: Decl): Bool {
     if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
         if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
@@ -530,7 +519,19 @@ private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAcc
     let foundFields = FieldLookup(typeManager, Ty.GetDeclPtrOfTy(Some(baseTy)), ma.field.Val(), info: info)
     for (decl in foundFields) {
         if (decl.astKind == ASTKind.FUNC_DECL) {
-            AddTargetIfMissing(ma.targets, decl)
+            let funcCandidate = (decl as FuncDecl).getOrThrow()
+            var targetMissing = true
+            for (target in ma.targets) {
+                if (let Some(value) <- target) {
+                    if (sameImportedAwareDecl(value, funcCandidate)) {
+                        targetMissing = false
+                        break
+                    }
+                }
+            }
+            if (targetMissing) {
+                ma.targets.add(Some(funcCandidate))
+            }
         } else if (let None <- ma.target) {
             ReplaceTarget(ma, Some(decl))
         }
@@ -538,7 +539,19 @@ private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAcc
     if (let Some(file) <- ma.curFile) {
         for (decl in ExtendFieldLookup(typeManager, file, Some(baseTy), ma.field.Val())) {
             if (decl.astKind == ASTKind.FUNC_DECL) {
-                AddTargetIfMissing(ma.targets, decl)
+                let funcCandidate = (decl as FuncDecl).getOrThrow()
+                var targetMissing = true
+                for (target in ma.targets) {
+                    if (let Some(value) <- target) {
+                        if (sameImportedAwareDecl(value, funcCandidate)) {
+                            targetMissing = false
+                            break
+                        }
+                    }
+                }
+                if (targetMissing) {
+                    ma.targets.add(Some(funcCandidate))
+                }
             } else if (let None <- ma.target) {
                 ReplaceTarget(ma, Some(decl))
             }
@@ -576,7 +589,19 @@ private func PopulateIdealMemberAccessTargets(typeManager: TypeManager, ma: Memb
         }
         let candidate = candidates[0]
         if (candidate.astKind == ASTKind.FUNC_DECL) {
-            AddTargetIfMissing(ma.targets, candidate)
+            let funcCandidate = (candidate as FuncDecl).getOrThrow()
+            var targetMissing = true
+            for (target in ma.targets) {
+                if (let Some(value) <- target) {
+                    if (sameImportedAwareDecl(value, funcCandidate)) {
+                        targetMissing = false
+                        break
+                    }
+                }
+            }
+            if (targetMissing) {
+                ma.targets.add(Some(funcCandidate))
+            }
         } else if (let None <- ma.target) {
             ReplaceTarget(ma, Some(candidate))
         }
@@ -599,7 +624,19 @@ private func PopulateMemberAccessTargetsFromUpperBounds(typeManager: TypeManager
         }
         for (decl in targets) {
             if (decl.astKind == ASTKind.FUNC_DECL) {
-                AddTargetIfMissing(ma.targets, decl)
+                let funcCandidate = (decl as FuncDecl).getOrThrow()
+                var targetMissing = true
+                for (target in ma.targets) {
+                    if (let Some(value) <- target) {
+                        if (sameImportedAwareDecl(value, funcCandidate)) {
+                            targetMissing = false
+                            break
+                        }
+                    }
+                }
+                if (targetMissing) {
+                    ma.targets.add(Some(funcCandidate))
+                }
             } else if (let None <- ma.target) {
                 ReplaceTarget(ma, Some(decl))
             }

@@ -28,7 +28,7 @@ public interface SemaImportManager {
     func GetImportedPackageDecl(node: ASTNode, packageName: String): (Option<ASTPackageDecl>, Bool)
     func GetAllImportedDecls(file: ASTFile): ArrayList<ASTDecl>
     func GetUsedMacroDecls(file: ASTFile): HashMap<String, ArrayList<ASTDecl>>
-    func GetImportedDeclsByName(file: ASTFile, name: String): ArrayList<Option<ASTDecl>>
+    func GetImportedDeclsByName(file: ASTFile, name: String): ArrayList<ASTDecl>
     func GetPackageMembersByName(pkg: ASTPackage, name: String): ArrayList<ASTDecl>
     func IsExtendAccessible(file: ASTFile, ed: ASTExtendDecl, builder: Option<DiagnosticBuilder>): Bool
     func IsExtendMemberAccessible(file: ASTFile, member: ASTDecl, baseTy: ASTTy,

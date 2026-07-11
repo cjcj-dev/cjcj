@@ -344,7 +344,7 @@ public func AddFuncTargetsForMemberAccess<T>(memberAccess: MemberAccess, targets
     for (declOpt in copiedTargets) {
         if (let Some(decl) <- declOpt) {
             if (memberAccess.isPattern || decl.astKind == ASTKind.FUNC_DECL) {
-                memberAccess.targets.add(Some(decl))
+                memberAccess.targets.add(Some((decl as FuncDecl).getOrThrow()))
             }
         }
     }
@@ -763,11 +763,7 @@ public func GetFuncTargets(node: Node): ArrayList<Option<FuncDecl>> {
         }
     } else if (let Some(memberAccess) <- (node as MemberAccess)) {
         for (target in memberAccess.targets) {
-            match (target) {
-                case Some(decl) =>
-                    if (let Some(funcDecl) <- (decl as FuncDecl)) { out.add(Some(funcDecl)) }
-                case None => out.add(None)
-            }
+            out.add(target)
         }
     }
     return out

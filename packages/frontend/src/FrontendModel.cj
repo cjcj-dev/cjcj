@@ -5637,13 +5637,11 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             let decls = GetImportedDeclsByName(file, packageName)
             var ret: Option<PackageDecl> = None
             for (decl in decls) {
-                if (let Some(value) <- decl) {
-                    if (let Some(packageDecl) <- (value as PackageDecl)) {
-                        if (let None <- ret) {
-                            ret = Some(packageDecl)
-                        } else {
-                            return (ret, true)
-                        }
+                if (let Some(packageDecl) <- (decl as PackageDecl)) {
+                    if (let None <- ret) {
+                        ret = Some(packageDecl)
+                    } else {
+                        return (ret, true)
                     }
                 }
             }
@@ -5731,34 +5729,17 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return GetPackageMembersByName(pkg.fullPackageName, name)
     }
 
-    public func GetImportedDeclsByName(file: File, name: String): ArrayList<Option<Decl>> {
-        let out = ArrayList<Option<Decl>>()
+    public func GetImportedDeclsByName(file: File, name: String): ArrayList<Decl> {
+        let out = ArrayList<Decl>()
         if (let Some(decls) <- importedDeclsMap.get(name)) {
             for (decl in decls) {
-                var exists = false
-                for (candidate in out) {
-                    if (let Some(value) <- candidate) {
-                        if (value == decl) { exists = true; break }
-                    }
-                }
-                if (!exists) { out.add(Some(decl)) }
+                AddDeclIfMissing(out, decl)
             }
         }
         if (let Some(fileMap) <- fileImportedDeclsMap.get(file.fileHash)) {
             if (let Some(decls2) <- fileMap.get(name)) {
-                let fileCandidates = ArrayList<Decl>()
                 for (decl2 in decls2) {
-                    var exists = false
-                    for (candidate in out) {
-                        if (let Some(value) <- candidate) {
-                            if (value == decl2) { exists = true; break }
-                        }
-                    }
-                    if (!exists) { fileCandidates.add(decl2) }
-                }
-                if (!fileCandidates.isEmpty()) {
-                    if (!out.isEmpty()) { out.add(None) }
-                    for (decl in fileCandidates) { out.add(Some(decl)) }
+                    AddDeclIfMissing(out, decl2)
                 }
             }
         }

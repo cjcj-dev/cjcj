@@ -217,7 +217,7 @@ private func CreateStringElementCall(typeManager: TypeManager, forInExpr: ForInE
     let subscriptTargets = FieldLookup(typeManager, Ty.GetDeclPtrOfTy(tmpTy), SUBSCRIPT_OPERATOR_NAME,
         info: LookupInfo(baseTy: tmpTy, file: forInExpr.curFile))
     for (target in subscriptTargets) {
-        base.targets.add(Some(target))
+        base.targets.add(Some((target as FuncDecl).getOrThrow()))
     }
     let selectedTarget = SelectStringSubscriptTarget(typeManager, subscriptTargets, index, expectedElementTy)
     if (let Some(firstTarget) <- selectedTarget) {

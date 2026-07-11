@@ -330,9 +330,8 @@ private func ResolveEnumPatternRefBase(typeManager: TypeManager, ctx: ASTContext
             return Some(decl)
         }
     }
-    for (targetOpt in LookupTopLevel(typeManager, ctx, refExpr.ref.identifier.Val(),
+    for (target in LookupTopLevel(typeManager, ctx, refExpr.ref.identifier.Val(),
         BindingScopeName(refExpr.scopeName), refExpr)) {
-        let target = targetOpt.getOrThrow()
         if (IsEnumPatternBaseDecl(target)) {
             refExpr.ref.targets.add(Some(target))
             ReplaceTarget(refExpr, Some(target), insertTarget: false)
@@ -376,14 +375,18 @@ private func ResolveEnumPatternMemberAccess(typeManager: TypeManager, ctx: ASTCo
             }
         }
         for (candidate in candidates) {
-            member.targets.add(Some(candidate))
-        }
-        if (!member.targets.isEmpty()) {
-            let first = member.targets[0].getOrThrow()
-            ReplaceTarget(member, Some(first), insertTarget: false)
-            if (let Some(ty) <- first.GetTy()) {
-                member.SetTy(ty)
+            if (candidate.astKind == ASTKind.FUNC_DECL) {
+                member.targets.add(Some((candidate as FuncDecl).getOrThrow()))
+            } else if (let None <- member.target) {
+                ReplaceTarget(member, Some(candidate), insertTarget: false)
             }
+        }
+        if ((let None <- member.target) && !member.targets.isEmpty()) {
+            let first: Decl = member.targets[0].getOrThrow()
+            ReplaceTarget(member, Some(first), insertTarget: false)
+        }
+        if (let Some(first) <- member.target) {
+            if (let Some(ty) <- first.GetTy()) { member.SetTy(ty) }
         }
     }
 }
