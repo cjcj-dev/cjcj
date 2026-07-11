@@ -474,21 +474,25 @@ public func DesugarOperatorOverloadExpr(expr: UnaryExpr): Unit {
     }
 }
 
-public func DesugarOperatorOverloadExpr(expr: SubscriptExpr): Unit {
+public func DesugarOperatorOverloadExpr(ctx: ASTContext, expr: SubscriptExpr): Unit {
     if (let Some(_) <- expr.desugarExpr) {
         return
     }
-    if (let Some(baseExpr) <- expr.baseExpr) {
-        let callExpr = CallExpr()
-        CopyBasicInfo(expr, callExpr)
-        let callBase = CreateOperatorMemberAccess(expr, baseExpr, SUBSCRIPT_OPERATOR_NAME, expr.leftParenPos)
-        callExpr.baseFunc = callBase
-        MoveSubscriptIndicesIntoArgs(callExpr, expr)
-        callExpr.sourceExpr = expr
-        CopyUnsafeAttr(expr, callExpr)
-        AddCurFile(callExpr, file: expr.curFile)
-        expr.desugarExpr = callExpr
+    let callExpr = CallExpr()
+    CopyBasicInfo(expr, callExpr)
+    ctx.RemoveTypeCheckCache(callExpr)
+    let callBase = CreateOperatorMemberAccess(
+        expr, expr.baseExpr.getOrThrow(), SUBSCRIPT_OPERATOR_NAME, expr.leftParenPos)
+    ctx.RemoveTypeCheckCache(callBase)
+    callExpr.baseFunc = callBase
+    MoveSubscriptIndicesIntoArgs(callExpr, expr)
+    for (arg in callExpr.args) {
+        ctx.RemoveTypeCheckCache(arg)
     }
+    callExpr.sourceExpr = expr
+    CopyUnsafeAttr(expr, callExpr)
+    AddCurFile(callExpr, file: expr.curFile)
+    expr.desugarExpr = callExpr
 }
 
 public func DesugarSubscriptOverloadExpr(expr: AssignExpr): Unit {
