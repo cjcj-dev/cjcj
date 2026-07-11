@@ -75,7 +75,7 @@ public class EnumSugarChecker {
                     }
                 })
                 for (decl in varDeclTargets) {
-                    builder.AddNote(decl.begin, BasicDiagKind.sema_found_candidate_decl)
+                    AddNote(builder, decl, BasicDiagKind.sema_found_candidate_decl)
                 }
                 builder.Emit()
             }

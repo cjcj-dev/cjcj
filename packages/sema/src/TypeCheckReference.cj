@@ -887,9 +887,9 @@ private func TypeCheckReferenceEmitRefNotType(
     name: String,
     target: Decl
 ): Unit {
-    let builder = diag.Diagnose(usage.begin, usage.end, BasicDiagKind.sema_ref_not_be_type,
+    let builder = Diagnose(diag, usage, BasicDiagKind.sema_ref_not_be_type,
         args: [BasicDiagArgument(name)])
-    builder.AddNote(target.begin, BasicDiagKind.sema_found_candidate_decl)
+    AddNote(builder, target, BasicDiagKind.sema_found_candidate_decl)
     builder.Emit()
 }
 

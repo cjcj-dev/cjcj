@@ -256,6 +256,15 @@ public func AddNote(builder: DiagnosticBuilder, node: Node, note: String): Unit 
     builder.AddNote(subDiag)
 }
 
+public func AddNote(
+    builder: DiagnosticBuilder,
+    node: Node,
+    kind: DiagKind,
+    args!: Array<DiagArgument> = Array<DiagArgument>()
+): Unit {
+    builder.AddNote(node.GetBegin(), kind, args: args)
+}
+
 public func AddNote(builder: DiagnosticBuilder, node: Node, range: BasicRange, note: String): Unit {
     builder.diag.CheckRange(builder.diagnostic.GetDiagCategory(), range)
     let newRange = MakeRange(
