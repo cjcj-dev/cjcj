@@ -488,6 +488,24 @@ public class CHIRContext {
 
     public func FreeMemoryInFunc(funcBody: BlockGroup): Unit {
         if (let Some(ptrs) <- allocatedPtrInFuncOrLambda.get(funcBody.nodeId)) {
+            let allocatedIds = HashSet<Int64>()
+            for (ptr in ptrs) {
+                allocatedIds.add(ptr.nodeId)
+            }
+            var exprIdx = allocatedExpressions.size - 1
+            while (exprIdx >= 0) {
+                if (allocatedIds.contains(allocatedExpressions[exprIdx].nodeId)) {
+                    allocatedExpressions.remove(at: exprIdx)
+                }
+                exprIdx--
+            }
+            var valueIdx = allocatedValues.size - 1
+            while (valueIdx >= 0) {
+                if (allocatedIds.contains(allocatedValues[valueIdx].nodeId)) {
+                    allocatedValues.remove(at: valueIdx)
+                }
+                valueIdx--
+            }
             ptrs.clear()
         }
     }
