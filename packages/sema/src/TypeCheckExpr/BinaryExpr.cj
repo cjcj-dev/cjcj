@@ -712,7 +712,7 @@ private func ChkExpoExprExponent(typeManager: TypeManager, exponent: Expr, exTys
     return isWellTyped
 }
 
-private func CheckExponentByBaseTy(impl: TypeCheckerImpl, baseTy: Ty, base: Expr, exponent: Expr,
+func CheckExponentByBaseTy(impl: TypeCheckerImpl, baseTy: Ty, base: Expr, exponent: Expr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let typeManager = impl.typeManager

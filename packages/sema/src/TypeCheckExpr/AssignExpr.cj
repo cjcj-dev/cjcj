@@ -12,12 +12,6 @@ import cjcj::sema.*
 import cjcj::sema.Desugar.*
 import cjcj::utils.CJC_ASSERT
 
-public type AssignRightChecker = (Ty, Expr) -> Bool
-
-private func AssignInvalid(ae: AssignExpr): Ty {
-    return TcInvalid(ae)
-}
-
 private func DiagCannotAssignToSubscript(diag: BasicDiagnosticEngine,
     se: SubscriptExpr, rightValue: Expr): Unit {
     let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_cannot_assign_to_subscript, se)
@@ -73,7 +67,7 @@ private func IsAssignableSubScriptExpr(se: SubscriptExpr, isCompound: Bool,
     return true
 }
 
-private func IsAssignable(e: Expr, isCompound: Bool,
+func IsAssignable(e: Expr, isCompound: Bool,
     diags: Array<Diagnostic>, diag: BasicDiagnosticEngine): Bool {
     if (let Some(leftRef) <- (e as RefExpr)) {
         if (let Some(target) <- leftRef.ref.target) {
@@ -168,34 +162,6 @@ private func DiagnoseForSubscriptAssignExpr(typeManager: TypeManager, ctx: ASTCo
     }
 }
 
-private func IsAssignableExpr(expr: Expr): Bool {
-    if (let Some(parenExpr) <- (expr as ParenExpr)) {
-        if (let Some(innerExpr) <- parenExpr.expr) {
-            return IsAssignableExpr(innerExpr)
-        }
-        return false
-    }
-    if (let Some(refExpr) <- (expr as RefExpr)) {
-        if (refExpr.isThis && refExpr.isAlone) {
-            return false
-        }
-        if (let Some(target) <- refExpr.ref.target) {
-            return target.astKind != ASTKind.FUNC_DECL && !target.TestAttr(Attribute.ENUM_CONSTRUCTOR)
-        }
-        return true
-    }
-    if (let Some(memberAccess) <- (expr as MemberAccess)) {
-        if (let Some(target) <- memberAccess.target) {
-            return target.astKind != ASTKind.FUNC_DECL && !target.TestAttr(Attribute.ENUM_CONSTRUCTOR)
-        }
-        return true
-    }
-    if (let Some(subscriptExpr) <- (expr as SubscriptExpr)) {
-        return !subscriptExpr.isTupleAccess
-    }
-    return expr.TestAttr(Attribute.LEFT_VALUE) || expr.astKind == ASTKind.WILDCARD_EXPR
-}
-
 private func CheckMatchOfDimensionAndTypes(diag: BasicDiagnosticEngine, typeManager: TypeManager,
     tysOfExpr: ArrayList<Option<Ty>>, indexOfExprTys: Box<Int64>, tupleLit: TupleLit,
     tupleTy: TupleTy, rightExpr: Expr): Bool {
@@ -240,7 +206,7 @@ private func CheckMatchOfDimensionAndTypes(diag: BasicDiagnosticEngine, typeMana
     return true
 }
 
-private func CheckMultipleAssignExpr(diag: BasicDiagnosticEngine, typeManager: TypeManager,
+func CheckMultipleAssignExpr(diag: BasicDiagnosticEngine, typeManager: TypeManager,
     assignExpr: AssignExpr): Unit {
     let tupleLit = (assignExpr.leftValue.getOrThrow() as TupleLit).getOrThrow()
     let rightExpr = assignExpr.rightExpr.getOrThrow()
@@ -272,9 +238,8 @@ private func CheckMultipleAssignExpr(diag: BasicDiagnosticEngine, typeManager: T
     }
 }
 
-private func PreCheckCompoundAssign(typeManager: TypeManager, ae: AssignExpr, leftTy: Ty,
-    diags: Array<Diagnostic>, synthesizer: Option<(SynPos, Expr) -> Ty>,
-    diag: Option<BasicDiagnosticEngine>): Bool {
+func PreCheckCompoundAssign(ae: AssignExpr, leftTy: Ty, diags: Array<Diagnostic>,
+    synthesizer: (SynPos, Expr) -> Ty, diag: BasicDiagnosticEngine): Bool {
     if (ae.isCompound) {
         CJC_ASSERT(GetCompoundAssignBaseOp(ae.op) != TokenKind.ILLEGAL)
         let isInteger = leftTy.kind == TypeKind.TYPE_INT8 || leftTy.kind == TypeKind.TYPE_INT16 ||
@@ -296,19 +261,13 @@ private func PreCheckCompoundAssign(typeManager: TypeManager, ae: AssignExpr, le
         }
         if (Ty.IsInitialTy(Some(leftTy)) || !isSupported) {
             let rightExpr = ae.rightExpr.getOrThrow()
-            if (let Some(synthesize) <- synthesizer) {
-                let _ = synthesize(SynPos.EXPR_ARG, rightExpr)
-            } else {
-                let _ = SynExprShallow(typeManager, rightExpr, diag: diag)
-            }
+            let _ = synthesizer(SynPos.EXPR_ARG, rightExpr)
             if (ae.ShouldDiagnose()) {
-                if (let Some(diagValue) <- diag) {
-                    for (diagnostic in diags) {
-                        diagValue.Diagnose(diagnostic).Emit()
-                    }
-                    Diagnose(diagValue, ae, BasicDiagKind.sema_type_incompatible,
-                        args: [BasicDiagArgument("compound assignment expression")]).Emit()
+                for (diagnostic in diags) {
+                    diag.Diagnose(diagnostic).Emit()
                 }
+                Diagnose(diag, ae, BasicDiagKind.sema_type_incompatible,
+                    args: [BasicDiagArgument("compound assignment expression")]).Emit()
             }
             return false
         }
@@ -316,35 +275,7 @@ private func PreCheckCompoundAssign(typeManager: TypeManager, ae: AssignExpr, le
     return true
 }
 
-private func CheckAssignRight(typeManager: TypeManager, leftTy: Ty, ae: AssignExpr,
-    rightChecker: Option<AssignRightChecker>): Bool {
-    if (let Some(rightExpr) <- ae.rightExpr) {
-        if (ae.op == TokenKind.EXP_ASSIGN) {
-            let rightTy = SynExprShallow(typeManager, rightExpr)
-            if (!Ty.IsTyCorrect(rightTy)) {
-                return false
-            }
-            let i64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
-            let u64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT64)
-            let f64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_FLOAT64)
-            if (typeManager.IsSubtype(leftTy, i64Ty)) {
-                return typeManager.CheckTypeCompatibility(u64Ty, rightTy) != TypeCompatibility.INCOMPATIBLE
-            }
-            if (typeManager.IsSubtype(leftTy, f64Ty)) {
-                return typeManager.CheckTypeCompatibility(i64Ty, rightTy) != TypeCompatibility.INCOMPATIBLE ||
-                    typeManager.CheckTypeCompatibility(f64Ty, rightTy) != TypeCompatibility.INCOMPATIBLE
-            }
-            return false
-        }
-        if (let Some(checker) <- rightChecker) {
-            return checker(leftTy, rightExpr)
-        }
-        return ChkExprShallow(typeManager, leftTy, rightExpr)
-    }
-    return false
-}
-
-private func IsShiftAssignValid(ae: AssignExpr, leftTy: Ty): Bool {
+func IsShiftAssignValid(ae: AssignExpr, leftTy: Ty): Bool {
     if (ae.op != TokenKind.LSHIFT_ASSIGN && ae.op != TokenKind.RSHIFT_ASSIGN) {
         return true
     }
@@ -362,7 +293,7 @@ private func IsShiftAssignValid(ae: AssignExpr, leftTy: Ty): Bool {
     return true
 }
 
-private func InferAssignExprCheckCaseOverloading(typeManager: TypeManager, ctx: ASTContext,
+func InferAssignExprCheckCaseOverloading(typeManager: TypeManager, ctx: ASTContext,
     ae: AssignExpr, diags: ArrayList<Diagnostic>, synthesizer: (SynPos, Expr) -> Ty,
     diag: BasicDiagnosticEngine): Option<Ty> {
     try (ds = DiagSuppressor(diag)) {
@@ -424,132 +355,4 @@ private func InferAssignExprCheckCaseOverloading(typeManager: TypeManager, ctx: 
         }
     }
     return None
-}
-
-private func SynMultipleAssignExpr(typeManager: TypeManager, ae: AssignExpr,
-    diag: Option<BasicDiagnosticEngine>): Ty {
-    if (let Some(desugar) <- ae.desugarExpr) {
-        let desugarTy = SynExprShallow(typeManager, desugar)
-        ae.SetTy(desugarTy)
-    } else {
-        ae.SetTy(TcUnitTy())
-    }
-    if (let Some(rightExpr) <- ae.rightExpr) {
-        let rightTy = SynExprShallow(typeManager, rightExpr)
-        if (Ty.IsTyCorrect(rightTy)) {
-            rightExpr.SetTy(TcReplaceIdeal(typeManager, rightExpr))
-            if (let Some(diagValue) <- diag) {
-                try (ds = DiagSuppressor(diagValue)) {
-                    let _ = SynExprShallow(typeManager, ae.leftValue.getOrThrow(), diag: diag)
-                }
-                CheckMultipleAssignExpr(diagValue, typeManager, ae)
-            }
-        } else {
-            return TcTyOrInvalid(ae)
-        }
-    }
-    return TcTyOrInvalid(ae)
-}
-
-public func SynAssignExpr(typeManager: TypeManager, ae: AssignExpr,
-    rightChecker!: Option<AssignRightChecker> = None, ctx!: Option<ASTContext> = None,
-    synthesizer!: Option<(SynPos, Expr) -> Ty> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
-    if (let Some(desugar) <- ae.desugarExpr) {
-        if (let Some(leftValue) <- ae.leftValue) {
-            if (leftValue.astKind == ASTKind.TUPLE_LIT) {
-                return SynMultipleAssignExpr(typeManager, ae, diag)
-            }
-        }
-        if (let Some(desugarTy) <- desugar.GetTy()) {
-            ae.SetTy(desugarTy)
-            return desugarTy
-        }
-    }
-    if (let None <- ae.leftValue) {
-        return AssignInvalid(ae)
-    }
-    if (let None <- ae.rightExpr) {
-        return AssignInvalid(ae)
-    }
-    let diagsForOverload = ArrayList<Diagnostic>()
-    if (let Some(context) <- ctx) {
-        if (let Some(synthesize) <- synthesizer) {
-            if (let Some(diagValue) <- diag) {
-                if (let Some(overloadTy) <- InferAssignExprCheckCaseOverloading(
-                    typeManager, context, ae, diagsForOverload, synthesize, diagValue)) {
-                    return overloadTy
-                }
-            }
-        }
-    }
-    let unitTy = TcUnitTy()
-    ae.SetTy(unitTy)
-    let leftExpr = ae.leftValue.getOrThrow()
-    let rightExpr = ae.rightExpr.getOrThrow()
-    if (leftExpr.astKind == ASTKind.TUPLE_LIT) {
-        return SynMultipleAssignExpr(typeManager, ae, diag)
-    }
-    if (leftExpr.astKind == ASTKind.WILDCARD_EXPR) {
-        let rightTy = if (let Some(synthesize3) <- synthesizer) {
-            synthesize3(SynPos.EXPR_ARG, rightExpr)
-        } else {
-            SynExprShallow(typeManager, rightExpr)
-        }
-        if (Ty.IsTyCorrect(rightTy)) {
-            let concreteRightTy = TcReplaceIdeal(typeManager, rightExpr)
-            rightExpr.SetTy(concreteRightTy)
-        } else {
-            let _ = AssignInvalid(ae)
-        }
-        leftExpr.SetTy(rightExpr.GetTy().getOrThrow())
-        return TcTyOrInvalid(ae)
-    }
-    let leftTy = if (let Some(synthesize2) <- synthesizer) {
-        synthesize2(SynPos.LEFT_VALUE, leftExpr)
-    } else {
-        SynExprShallow(typeManager, leftExpr, ctx: ctx, diag: diag)
-    }
-    if (!Ty.IsTyCorrect(leftTy)) {
-        return AssignInvalid(ae)
-    }
-    let concreteLeftTy = Ty.GetPrimitiveUpperBound(TcReplaceIdeal(typeManager, leftExpr))
-    if (let Some(diagValue2) <- diag) {
-        if (!IsAssignable(leftExpr, ae.isCompound, diagsForOverload.toArray(), diagValue2)) {
-            return AssignInvalid(ae)
-        }
-    } else if (!IsAssignableExpr(leftExpr)) {
-        return AssignInvalid(ae)
-    }
-    if (!PreCheckCompoundAssign(typeManager, ae, concreteLeftTy,
-        diagsForOverload.toArray(), synthesizer, diag)) {
-        return AssignInvalid(ae)
-    }
-    if (!ae.isCompound && leftExpr.TyKind() == TypeKind.TYPE_RUNE && IsSingleRuneStringLiteral(rightExpr)) {
-        rightExpr.SetTy(leftTy)
-    } else if (!ae.isCompound && leftExpr.TyKind() == TypeKind.TYPE_UINT8 && IsSingleByteStringLiteral(rightExpr)) {
-        rightExpr.SetTy(leftTy)
-        if (let Some(lit) <- (rightExpr as LitConstExpr)) {
-            let _ = ChkLitConstExprRange(lit)
-        }
-    } else if (!CheckAssignRight(typeManager, concreteLeftTy, ae, rightChecker)) {
-        return AssignInvalid(ae)
-    }
-    if (!IsShiftAssignValid(ae, concreteLeftTy)) {
-        return AssignInvalid(ae)
-    }
-    ae.SetTy(unitTy)
-    return unitTy
-}
-
-public func ChkAssignExpr(typeManager: TypeManager, target: Ty, ae: AssignExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
-    let actualTy = SynAssignExpr(typeManager, ae, diag: diag)
-    if (!Ty.IsTyCorrect(actualTy)) {
-        return false
-    }
-    if (typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
-        return true
-    }
-    let _ = AssignInvalid(ae)
-    return false
 }

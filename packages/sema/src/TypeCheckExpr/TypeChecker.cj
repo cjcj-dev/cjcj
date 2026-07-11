@@ -7,6 +7,7 @@ import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
 import cjcj::basic.DiagnosticCache
+import cjcj::basic.Diagnostic
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::option.OutputMode as OptionOutputMode
@@ -5458,6 +5459,109 @@ public class TypeChecker {
             check: Some({ targetTy: Ty, child: Expr => Check(ctx, targetTy, child) }), diag: impl.diag)
     }
 
+    private func SynMultipleAssignExpr(ctx: ASTContext, ae: AssignExpr): Ty {
+        CJC_ASSERT(ae.desugarExpr.isSome() && ae.rightExpr.isSome() && ae.leftValue.isSome())
+        let desugar = ae.desugarExpr.getOrThrow()
+        let _ = Synthesize(ctx, SynPos.UNUSED, desugar)
+        ae.SetTy(desugar.GetTy().getOrThrow())
+        let rightExpr = ae.rightExpr.getOrThrow()
+        let _ = Synthesize(ctx, SynPos.EXPR_ARG, rightExpr)
+        if (!Ty.IsTyCorrect(rightExpr.GetTy())) {
+            return ae.GetTy().getOrThrow()
+        }
+        rightExpr.SetTy(TcReplaceIdeal(impl.typeManager, rightExpr))
+        try (ds = DiagSuppressor(impl.diag.getOrThrow())) {
+            let _ = Synthesize(ctx, SynPos.LEFT_VALUE, ae.leftValue.getOrThrow())
+        }
+        CheckMultipleAssignExpr(impl.diag.getOrThrow(), impl.typeManager, ae)
+        return ae.GetTy().getOrThrow()
+    }
+
+    private func SynAssignExpr(ctx: ASTContext, ae: AssignExpr): Ty {
+        if (let Some(desugar) <- ae.desugarExpr) {
+            if (ae.leftValue.isSome() && ae.leftValue.getOrThrow().astKind == ASTKind.TUPLE_LIT) {
+                return SynMultipleAssignExpr(ctx, ae)
+            }
+            return desugar.GetTy().getOrThrow()
+        }
+        let diagsForOverload = ArrayList<Diagnostic>()
+        if (let Some(overloadTy) <- InferAssignExprCheckCaseOverloading(impl.typeManager, ctx, ae,
+            diagsForOverload, { pos: SynPos, expr: Expr => Synthesize(ctx, pos, expr) },
+            impl.diag.getOrThrow())) {
+            return overloadTy
+        }
+        CJC_ASSERT(ae.leftValue.isSome() && ae.rightExpr.isSome())
+        ae.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        let leftExpr = ae.leftValue.getOrThrow()
+        let rightExpr = ae.rightExpr.getOrThrow()
+        if (leftExpr.astKind == ASTKind.WILDCARD_EXPR) {
+            if (Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, rightExpr))) {
+                rightExpr.SetTy(TcReplaceIdeal(impl.typeManager, rightExpr))
+            } else {
+                ae.SetTy(TypeManager.GetInvalidTy())
+            }
+            leftExpr.SetTy(rightExpr.GetTy().getOrThrow())
+            return ae.GetTy().getOrThrow()
+        }
+        let leftTy = Synthesize(ctx, SynPos.LEFT_VALUE, leftExpr)
+        if (leftTy.IsInvalid()) {
+            ae.SetTy(TypeManager.GetInvalidTy())
+            return TypeManager.GetInvalidTy()
+        }
+        let concreteLeftTy = Ty.GetPrimitiveUpperBound(TcReplaceIdeal(impl.typeManager, leftExpr))
+        if (!IsAssignable(leftExpr, ae.isCompound, diagsForOverload.toArray(), impl.diag.getOrThrow())) {
+            return TypeManager.GetInvalidTy()
+        }
+        if (!PreCheckCompoundAssign(ae, concreteLeftTy, diagsForOverload.toArray(),
+            { pos2: SynPos, expr2: Expr => Synthesize(ctx, pos2, expr2) }, impl.diag.getOrThrow())) {
+            return TypeManager.GetInvalidTy()
+        }
+        if (ae.op == TokenKind.EXP_ASSIGN) {
+            if (!CheckExponentByBaseTy(impl, concreteLeftTy, leftExpr, rightExpr, ctx: Some(ctx),
+                synthesizer: Some({ operand: Expr => Synthesize(ctx, SynPos.EXPR_ARG, operand) }),
+                checker: Some({ targetTy: Ty, operand2: Expr => Check(ctx, targetTy, operand2) }),
+                diag: impl.diag)) {
+                if (ae.ShouldDiagnose()) {
+                    Diagnose(impl.diag.getOrThrow(), ae, BasicDiagKind.sema_type_incompatible,
+                        args: [BasicDiagArgument("assignment")]).Emit()
+                }
+                ae.SetTy(TypeManager.GetInvalidTy())
+            }
+            return ae.GetTy().getOrThrow()
+        }
+        if (!ae.isCompound && leftExpr.GetTy().getOrThrow().IsRune() && IsSingleRuneStringLiteral(rightExpr)) {
+            rightExpr.SetTy(leftExpr.GetTy().getOrThrow())
+        } else if (!ae.isCompound && leftExpr.TyKind() == TypeKind.TYPE_UINT8 &&
+            IsSingleByteStringLiteral(rightExpr)) {
+            rightExpr.SetTy(leftExpr.GetTy().getOrThrow())
+            let _ = ChkLitConstExprRange((rightExpr as LitConstExpr).getOrThrow())
+        } else if (!Check(ctx, concreteLeftTy, rightExpr)) {
+            if (ae.ShouldDiagnose() && !CanSkipDiag(rightExpr)) {
+                Diagnose(impl.diag.getOrThrow(), ae, BasicDiagKind.sema_type_incompatible,
+                    args: [BasicDiagArgument("assignment")]).Emit()
+            }
+            return TypeManager.GetInvalidTy()
+        }
+        if (!IsShiftAssignValid(ae, concreteLeftTy)) {
+            return TypeManager.GetInvalidTy()
+        }
+        return ae.GetTy().getOrThrow()
+    }
+
+    private func ChkAssignExpr(ctx: ASTContext, target: Ty, ae: AssignExpr): Bool {
+        if (!Ty.IsTyCorrect(SynAssignExpr(ctx, ae))) {
+            return false
+        }
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        if (impl.typeManager.IsSubtype(ae.GetTy().getOrThrow(), target)) {
+            return true
+        }
+        DiagMismatchedTypesWithFoundTy(impl.diag.getOrThrow(), ae, target, unitTy,
+            note: "the type of an assignment expression is always 'Unit'")
+        ae.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+
     private func Synthesize(ctx: ASTContext, expr: Expr): Ty {
         return Synthesize(ctx, SynPos.NONE, expr)
     }
@@ -5628,11 +5732,7 @@ public class TypeChecker {
                 impl.diag.getOrThrow()))
         }
         if (let Some(assign) <- (expr as AssignExpr)) {
-            return FinishSynthesize(ctx, assign, SynAssignExpr(impl.typeManager, assign,
-                rightChecker: Some({ target: Ty, rightExpr: Expr => Check(ctx, target, rightExpr) }),
-                ctx: Some(ctx),
-                synthesizer: Some({ synPos: SynPos, desugar: Expr => Synthesize(ctx, synPos, desugar) }),
-                diag: impl.diag))
+            return FinishSynthesize(ctx, assign, SynAssignExpr(ctx, assign))
         }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             return SynthesizeThrowExpr(ctx, throwExpr)
@@ -5941,6 +6041,9 @@ public class TypeChecker {
                 { subscriptPos: SynPos, child: Expr => Synthesize(ctx, subscriptPos, child) },
                 { subscriptTarget: Ty, child2: Expr => Check(ctx, subscriptTarget, child2) },
                 impl.diag.getOrThrow()))
+        }
+        if (let Some(assign) <- (expr as AssignExpr)) {
+            return FinishCheck(ctx, assign, ChkAssignExpr(ctx, target, assign))
         }
         if (let Some(callExpr) <- (expr as CallExpr)) {
             typeCheckExprPutTargetType(ctx, callExpr, target)

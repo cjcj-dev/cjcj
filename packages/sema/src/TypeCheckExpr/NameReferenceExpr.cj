@@ -638,7 +638,6 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
         return SynBinaryExpr(typeManager, value, ctx: ctx,
             synthesizer: Some({ operand: Expr => SynExprShallow(typeManager, operand, ctx: ctx) }), diag: diag)
     }
-    if (let Some(value) <- (expr as AssignExpr)) { return SynAssignExpr(typeManager, value, ctx: ctx, diag: diag) }
     if (let Some(value) <- (expr as IfExpr)) {
         return SynIfExpr(typeManager, value, diag.getOrThrow())
     }
@@ -720,7 +719,6 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
         return ChkBinaryExpr(typeManager, target, value, ctx: ctx,
             synthesizer: Some({ operand: Expr => SynExprShallow(typeManager, operand, ctx: ctx) }), diag: diag)
     }
-    if (let Some(value) <- (expr as AssignExpr)) { return ChkAssignExpr(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as IfExpr)) { return ChkIfExpr(typeManager, target, value, ctx: ctx, diag: diag) }
     if (let Some(value) <- (expr as WhileExpr)) { return ChkWhileExpr(typeManager, target, value, ctx: ctx) }
     if (let Some(value) <- (expr as DoWhileExpr)) { return ChkDoWhileExpr(typeManager, target, value, ctx: ctx) }
