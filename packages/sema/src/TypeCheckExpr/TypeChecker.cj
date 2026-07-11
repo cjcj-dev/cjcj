@@ -2182,15 +2182,34 @@ public class TypeChecker {
 
     private func SynthesizeFuncArg(ctx: ASTContext, arg: FuncArg): Ty {
         if (let Some(expr) <- arg.expr) {
-            let exprTy = Synthesize(ctx, SynPos.EXPR_ARG, expr)
-            if (Ty.IsTyCorrect(exprTy)) {
-                arg.SetTy(exprTy)
-                return exprTy
+            let _ = Synthesize(ctx, SynPos.EXPR_ARG, expr)
+            if (arg.withInout) {
+                if (!Ty.IsTyCorrect(expr.GetTy()) || !ChkInoutFuncArg(arg)) {
+                    arg.SetTy(TypeManager.GetInvalidTy())
+                } else if (!Ty.IsMetCType(expr.GetTy().getOrThrow())) {
+                    if (let Some(diagValue) <- impl.diag) {
+                        DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_inout_modify_non_ctype, arg).Emit()
+                    }
+                    arg.SetTy(TypeManager.GetInvalidTy())
+                } else if (expr.GetTy().getOrThrow().IsCString()) {
+                    if (let Some(diagValue2) <- impl.diag) {
+                        DiagnoseRefactor(diagValue2,
+                            BasicDiagKindRefactor.sema_inout_modify_cstring_or_zerosized,
+                            arg, "type 'CString'").Emit()
+                    }
+                    arg.SetTy(TypeManager.GetInvalidTy())
+                } else if (let Some(varrayTy) <- (expr.GetTy().getOrThrow() as VArrayTy)) {
+                    arg.SetTy(impl.typeManager.GetPointerTy(varrayTy.typeArgs[0]))
+                } else {
+                    arg.SetTy(impl.typeManager.GetPointerTy(expr.GetTy().getOrThrow()))
+                }
+            } else {
+                arg.SetTy(expr.GetTy() ?? TypeManager.GetInvalidTy())
             }
+        } else {
+            arg.SetTy(TypeManager.GetInvalidTy())
         }
-        let invalidTy = TypeManager.GetInvalidTy()
-        arg.SetTy(invalidTy)
-        return invalidTy
+        return arg.GetTy() ?? TypeManager.GetInvalidTy()
     }
 
     private func SynthesizeNodeChildren(ctx: ASTContext, node: Node): Unit {
