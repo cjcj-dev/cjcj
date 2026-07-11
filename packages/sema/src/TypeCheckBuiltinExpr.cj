@@ -570,8 +570,8 @@ public func ChkVArrayArg(typeManager: TypeManager, arrayExpr: ArrayExpr,
     checker!: Option<CallArgChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (arrayExpr.args.size != 1) {
         if (let Some(diagValue) <- diag) {
-            let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_varray_args_number_mismatch,
-                MakeRange(arrayExpr.leftParenPos, arrayExpr.rightParenPos + 1))
+            let builder = DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_varray_args_number_mismatch,
+                arrayExpr, MakeRange(arrayExpr.leftParenPos, arrayExpr.rightParenPos + 1))
             builder.Emit()
         }
         return false
@@ -724,8 +724,8 @@ public func ChkPointerExpr(typeManager: TypeManager, target: Ty, pointerExpr: Po
     }
     if (Ty.IsTyCorrect(targetTy) && !typeManager.IsSubtype(pointerExpr.GetTy().getOrThrow(), targetTy)) {
         if (let Some(diagValue) <- diag) {
-            let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_mismatched_types,
-                MakeRange(pointerExpr.begin, pointerExpr.end))
+            let builder = DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_mismatched_types,
+                pointerExpr)
             builder.AddMainHintArguments([target.String(), Ty.ToString(pointerExpr.GetTy())])
             builder.Emit()
         }
