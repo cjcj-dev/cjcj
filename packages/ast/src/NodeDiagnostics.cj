@@ -34,6 +34,27 @@ public func AddMacroCallNote(
 public func Diagnose(
     diag: DiagnosticEngine,
     node: Node,
+    pos: Position,
+    kind: DiagKind,
+    args!: Array<DiagArgument> = Array<DiagArgument>()
+): DiagnosticBuilder {
+    if (node.isInMacroCall) {
+        let diagnostic = Diagnostic()
+        diagnostic.isInMacroCall = true
+        return DiagnosticBuilder(diag, diagnostic)
+    }
+    if (let Some(_) <- node.curMacroCall) {
+        let begin = node.GetMacroCallPos(pos)
+        let diagnostic = Diagnostic(begin, begin + 1, kind, args: args)
+        AddMacroCallNote(diag, diagnostic, node, pos)
+        return DiagnosticBuilder(diag, diagnostic)
+    }
+    return diag.Diagnose(pos, kind, args: args)
+}
+
+public func Diagnose(
+    diag: DiagnosticEngine,
+    node: Node,
     kind: DiagKind,
     args!: Array<DiagArgument> = Array<DiagArgument>()
 ): DiagnosticBuilder {

@@ -297,14 +297,14 @@ private func WillCauseInfiniteInstantiation(
 ): Bool {
     if (HaveCyclicSubstitution(checker.typeManager, typeMapping)) {
         // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-        checker.diag.Diagnose(triggerNode.begin, DiagKind.sema_generic_infinite_instantiation)
+        Diagnose(checker.diag, triggerNode, DiagKind.sema_generic_infinite_instantiation)
         checker.MarkInfiniteInstantiationOccurred()
         return true
     }
     if (let Some(currentMapping) <- checker.CurrentInstantiationTypeMap()) {
         if (HaveCyclicSubstitution(checker.typeManager, currentMapping)) {
             // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-            checker.diag.Diagnose(triggerNode.begin, DiagKind.sema_generic_infinite_instantiation)
+            Diagnose(checker.diag, triggerNode, DiagKind.sema_generic_infinite_instantiation)
             checker.MarkInfiniteInstantiationOccurred()
             return true
         }
@@ -322,7 +322,7 @@ private func WillCauseInfiniteInstantiation(
         if (let Some(genericTy) <- generic.typeParameters[idx].GetTy()) {
             if (HasSelfRecursiveInstantiation(checker, genericTy, instTys[idx], currentMapping, triggeredInside)) {
                 // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                checker.diag.Diagnose(triggerNode.begin, DiagKind.sema_generic_infinite_instantiation)
+                Diagnose(checker.diag, triggerNode, DiagKind.sema_generic_infinite_instantiation)
                 checker.MarkInfiniteInstantiationOccurred()
                 return true
             }
@@ -514,7 +514,9 @@ func CheckCStructArguments(
     }
     if (Ty.IsCStructType(ty)) {
         // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-        checker.diag.Diagnose(
+        Diagnose(
+            checker.diag,
+            node,
             leftAnglePos,
             DiagKind.sema_cffi_cannot_have_type_param,
             args: [DiagArgument("struct with @C")]
@@ -534,7 +536,7 @@ func CheckCStructArgument(checker: StructInheritanceChecker, ty: Ty, typeArg: Ty
         if (ty.IsPointer()) {
             if (!typeArgTy.IsGeneric() && !Ty.IsMetCType(typeArgTy)) {
                 // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                checker.diag.Diagnose(typeArg.begin, DiagKind.sema_illegal_cpointer_generic_type)
+                Diagnose(checker.diag, typeArg, DiagKind.sema_illegal_cpointer_generic_type)
             }
             return
         }
@@ -552,7 +554,7 @@ func CheckCStruct(checker: StructInheritanceChecker, ty: Ty, typeArg: Type): Uni
     if (ty.IsPointer()) {
         if (!ty.typeArgs.isEmpty() && !ty.typeArgs[0].IsGeneric() && !Ty.IsMetCType(ty.typeArgs[0])) {
             // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-            checker.diag.Diagnose(typeArg.begin, DiagKind.sema_illegal_cpointer_generic_type)
+            Diagnose(checker.diag, typeArg, DiagKind.sema_illegal_cpointer_generic_type)
         }
         return
     }
