@@ -1133,7 +1133,10 @@ private class CjoSignatureMaterializer {
         let generic = genericParamDecl.outerDecl.getOrThrow().GetGeneric().getOrThrow()
         let storedBounds = HashSet<Ptr<Ty>>()
         for (upperTy in genericTy.upperBounds) { storedBounds.add(Ptr<Ty>(upperTy)) }
-        generic.assumptionCollection[Ptr<GenericsTy>(genericTy)] = storedBounds
+        let genericKey = Ptr<GenericsTy>(genericTy)
+        if (!generic.assumptionCollection.contains(genericKey)) {
+            generic.assumptionCollection[genericKey] = storedBounds
+        }
     }
 
     // ReferenceLoader.cpp:334-344 LoadTypeArgs.
@@ -1540,6 +1543,7 @@ private class CjoSignatureMaterializer {
             let exceptPattern = (pattern as ExceptTypePattern).getOrThrow()
             LoadPatternRefs(PackageFormat_Pattern(data.getOrThrow(),
                 (subPatterns.Get(0u32) as Int64).getOrThrow()), exceptPattern.pattern.getOrThrow())
+            exceptPattern.types.clear()
             var index: UInt32 = 1u32
             while (index < types.size()) {
                 exceptPattern.types.add(WrapType(Some(LoadType(
@@ -1551,6 +1555,7 @@ private class CjoSignatureMaterializer {
             let commandPattern = (pattern as CommandTypePattern).getOrThrow()
             LoadPatternRefs(PackageFormat_Pattern(data.getOrThrow(),
                 (subPatterns.Get(0u32) as Int64).getOrThrow()), commandPattern.pattern.getOrThrow())
+            commandPattern.types.clear()
             var index: UInt32 = 1u32
             while (index < types.size()) {
                 commandPattern.types.add(WrapType(Some(LoadType(
