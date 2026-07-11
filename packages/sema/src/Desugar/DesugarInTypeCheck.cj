@@ -33,7 +33,7 @@ private func SetFieldPosition(field: SrcIdentifier, begin: Position, width: Int6
     field.SetPos(begin, begin + width)
 }
 
-private func GetCompoundAssignBaseOp(op: TokenKind): TokenKind {
+public func GetCompoundAssignBaseOp(op: TokenKind): TokenKind {
     return match (op) {
         case TokenKind.ADD_ASSIGN => TokenKind.ADD
         case TokenKind.SUB_ASSIGN => TokenKind.SUB
@@ -495,48 +495,62 @@ public func DesugarOperatorOverloadExpr(ctx: ASTContext, expr: SubscriptExpr): U
     expr.desugarExpr = callExpr
 }
 
-public func DesugarSubscriptOverloadExpr(expr: AssignExpr): Unit {
-    if (let Some(_) <- expr.desugarExpr) {
+public func DesugarSubscriptOverloadExpr(ctx: ASTContext, expr: AssignExpr): Unit {
+    if (expr.leftValue.isNone() || expr.rightExpr.isNone()) {
         return
     }
-    if (let Some(left) <- expr.leftValue) {
-        if (let Some(subscript) <- (left as SubscriptExpr)) {
-            if (let Some(baseExpr) <- subscript.baseExpr) {
-                let basePtr = baseExpr
-                let indexPtrs = ArrayList<Expr>()
-                for (indexExpr in subscript.indexExprs) {
-                    indexPtrs.add(indexExpr)
-                }
-                let callExpr = CallExpr()
-                CopyBasicInfo(expr, callExpr)
-                let callBase = CreateOperatorMemberAccess(expr, baseExpr, SUBSCRIPT_OPERATOR_NAME, subscript.leftParenPos)
-                if (expr.isCompound) {
-                    baseExpr.mapExpr = basePtr
-                }
-                callExpr.baseFunc = callBase
-                callExpr.sourceExpr = expr
-                MoveSubscriptIndicesIntoArgs(callExpr, subscript, preserveMapExpr: expr.isCompound)
-                let valueArg = FuncArg()
-                valueArg.name = SrcIdentifier(VARIADIC_VALUE_NAME)
-                let valueExpr = if (expr.isCompound) {
-                    CreateArgumentForCompoundAssignOverload(expr, callExpr, basePtr, indexPtrs)
-                } else {
-                    expr.rightExpr
-                }
-                if (let Some(actualValue) <- valueExpr) {
-                    CopyBasicInfo(actualValue, valueArg)
-                    valueArg.expr = actualValue
-                    callExpr.args.add(valueArg)
-                    CopyUnsafeAttr(expr, callExpr)
-                    if (expr.isCompound) {
-                        callExpr.EnableAttr(Attribute.SIDE_EFFECT)
-                    }
-                    AddCurFile(callExpr, file: expr.curFile)
-                    expr.desugarExpr = callExpr
-                }
-            }
-        }
+    if ((expr.leftValue.getOrThrow() as SubscriptExpr).isNone()) {
+        return
     }
+    let subscript = (expr.leftValue.getOrThrow() as SubscriptExpr).getOrThrow()
+    let basePtr = subscript.baseExpr.getOrThrow()
+    let indexPtrs = ArrayList<Expr>()
+    for (indexExpr in subscript.indexExprs) {
+        indexPtrs.add(indexExpr)
+    }
+    let callExpr = CallExpr()
+    CopyBasicInfo(expr, callExpr)
+    ctx.RemoveTypeCheckCache(callExpr)
+    let callBase = MemberAccess()
+    CopyBasicInfo(expr, callBase)
+    ctx.RemoveTypeCheckCache(callBase)
+    callBase.baseExpr = basePtr
+    if (expr.isCompound) {
+        callBase.baseExpr.getOrThrow().mapExpr = basePtr
+    }
+    callBase.field = SrcIdentifier(SUBSCRIPT_OPERATOR_NAME)
+    SetFieldPosition(callBase.field, subscript.leftParenPos, SUBSCRIPT_OPERATOR_NAME.size)
+    callExpr.baseFunc = callBase
+    callExpr.sourceExpr = expr
+    for (idx in 0..subscript.indexExprs.size) {
+        let funcArg = FuncArg()
+        CopyBasicInfo(subscript.indexExprs[idx], funcArg)
+        ctx.RemoveTypeCheckCache(funcArg)
+        funcArg.expr = subscript.indexExprs[idx]
+        if (expr.isCompound) {
+            funcArg.expr.getOrThrow().mapExpr = indexPtrs[idx]
+        }
+        funcArg.scopeName = funcArg.expr.getOrThrow().scopeName
+        callExpr.args.add(funcArg)
+    }
+    subscript.indexExprs.clear()
+    let valueArg = FuncArg()
+    ctx.RemoveTypeCheckCache(valueArg)
+    valueArg.name = SrcIdentifier(VARIADIC_VALUE_NAME)
+    valueArg.expr = if (expr.isCompound) {
+        CreateArgumentForCompoundAssignOverload(expr, callExpr, basePtr, indexPtrs)
+    } else {
+        expr.rightExpr
+    }
+    CopyBasicInfo(valueArg.expr.getOrThrow(), valueArg)
+    ctx.ClearTypeCheckCache(valueArg.expr.getOrThrow())
+    callExpr.args.add(valueArg)
+    CopyUnsafeAttr(expr, callExpr)
+    if (expr.isCompound) {
+        callExpr.EnableAttr(Attribute.SIDE_EFFECT)
+    }
+    expr.desugarExpr = callExpr
+    AddCurFile(expr, file: expr.curFile)
 }
 
 public func DesugarOperatorOverloadExpr(expr: AssignExpr): Unit {
