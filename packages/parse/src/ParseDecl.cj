@@ -1766,6 +1766,20 @@ extend ParserImpl {
         let leftCurl = lastToken.Begin()
         SetDeclBodyLeftCurl(ret, leftCurl)
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
+            if (DetectPrematureEnd()) {
+                if (let Some(classDecl) <- (ret as ClassDecl)) {
+                    classDecl.body.getOrThrow().EnableAttr(Attribute.IS_BROKEN)
+                } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+                    interfaceDecl.body.getOrThrow().EnableAttr(Attribute.IS_BROKEN)
+                } else if (let Some(structDecl) <- (ret as StructDecl)) {
+                    structDecl.body.getOrThrow().EnableAttr(Attribute.IS_BROKEN)
+                } else if (let Some(extendDecl) <- (ret as ExtendDecl)) {
+                    extendDecl.EnableAttr(Attribute.IS_BROKEN)
+                }
+                DiagExpectedRightDelimiter("{", leftCurl)
+                ret.end = lastToken.End()
+                return
+            }
             let member = ParseDecl(scopeKind)
             if (let Some(ctor) <- (member as FuncDecl)) {
                 if (ctor.TestAttr(Attribute.CONSTRUCTOR)) {
