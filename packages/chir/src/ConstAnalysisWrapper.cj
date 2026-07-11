@@ -30,9 +30,9 @@ extend ConstAnalysisStrategy <: Equatable<ConstAnalysisStrategy> {
 
 public class ConstAnalysisWrapper {
     private let builder: CHIRBuilder
-    private let resultsMap: HashMap<Int64, Results<ConstDomain>> = HashMap<Int64, Results<ConstDomain>>()
-    private let resultsPoolMap: HashMap<Int64, Results<ConstPoolDomain>> =
-        HashMap<Int64, Results<ConstPoolDomain>>()
+    private let resultsMap: HashMap<Function, Results<ConstDomain>> = HashMap<Function, Results<ConstDomain>>()
+    private let resultsPoolMap: HashMap<Function, Results<ConstPoolDomain>> =
+        HashMap<Function, Results<ConstPoolDomain>>()
 
     public init(builder: CHIRBuilder) {
         this.builder = builder
@@ -44,22 +44,24 @@ public class ConstAnalysisWrapper {
 
     public func RunOnFunc(funcValue: Function, diag: BasicDiagnosticEngine,
         isDebug!: Bool = false): Option<Results<ConstDomain>> {
-        let analysis = ConstAnalysis<FullStatePool<ConstValue>>(funcValue, builder, diag, isDebug: isDebug)
+        let analysis = ConstAnalysis<ConstStatePool>(funcValue, builder, constStateGlobals,
+            { literalValue: LiteralValue => HandleNonNullLiteralValue(literalValue) }, diag, isDebug: isDebug)
         return Engine<ConstDomain>(funcValue, analysis).IterateToFixpoint()
     }
 
     public func RunOnFuncWithPool(funcValue: Function, diag: BasicDiagnosticEngine,
         isDebug!: Bool = false): Option<Results<ConstPoolDomain>> {
-        let analysis = ConstAnalysis<ActiveStatePool<ConstValue>>(funcValue, builder, diag, isDebug: isDebug)
+        let analysis = ConstAnalysis<ConstActivePool>(funcValue, builder, constActiveGlobals,
+            { literalValue: LiteralValue => HandleNonNullLiteralValue(literalValue) }, diag, isDebug: isDebug)
         return Engine<ConstPoolDomain>(funcValue, analysis).IterateToFixpoint()
     }
 
     public func CheckFuncResult(funcValue: Function): Option<Results<ConstDomain>> {
-        return resultsMap.get(funcValue.nodeId)
+        return resultsMap.get(funcValue)
     }
 
     public func CheckFuncActiveResult(funcValue: Function): Option<Results<ConstPoolDomain>> {
-        return resultsPoolMap.get(funcValue.nodeId)
+        return resultsPoolMap.get(funcValue)
     }
 
     public func InvalidateAllAnalysisResults(): Unit {
@@ -73,23 +75,24 @@ public class ConstAnalysisWrapper {
             let strategy = ChooseAnalysisStrategy(funcValue)
             if (strategy == ConstAnalysisStrategy.ActiveStatePool) {
                 if (let Some(result) <- RunOnFuncWithPool(funcValue, diag, isDebug: isDebug)) {
-                    resultsPoolMap[funcValue.nodeId] = result
+                    resultsPoolMap[funcValue] = result
                 }
             } else if (strategy == ConstAnalysisStrategy.FullStatePool) {
                 if (let Some(result) <- RunOnFunc(funcValue, diag, isDebug: isDebug)) {
-                    resultsMap[funcValue.nodeId] = result
+                    resultsMap[funcValue] = result
                 }
             }
         }
     }
 
     private func SetUpGlobalVarState(pkg: Package, diag: BasicDiagnosticEngine, isDebug!: Bool = false): Unit {
-        ConstAnalysis<FullStatePool<ConstValue>>.InitialiseLetGVState(pkg, builder)
+        ConstAnalysis<ConstStatePool>.InitialiseLetGVState(pkg, builder, constStateGlobals,
+            { gv: GlobalVar => IsTrackedGV(gv) })
         for (gv in pkg.GetGlobalVarsWithInit()) {
             if (let Some(initFunc) <- gv.GetInitFunc()) {
-                if (gv.TestAttr(Attribute.READONLY) && !resultsMap.contains(initFunc.nodeId)) {
+                if (gv.TestAttr(Attribute.READONLY) && !resultsMap.contains(initFunc)) {
                     if (let Some(result) <- RunOnFunc(initFunc, diag, isDebug: isDebug)) {
-                        resultsMap[initFunc.nodeId] = result
+                        resultsMap[initFunc] = result
                     }
                 }
             }
@@ -97,10 +100,10 @@ public class ConstAnalysisWrapper {
     }
 
     private func ChooseAnalysisStrategy(funcValue: Function): ConstAnalysisStrategy {
-        if (resultsMap.contains(funcValue.nodeId) || resultsPoolMap.contains(funcValue.nodeId)) {
+        if (resultsMap.contains(funcValue) || resultsPoolMap.contains(funcValue)) {
             return ConstAnalysisStrategy.SkipAnalysis
         }
-        if (!ConstAnalysis<FullStatePool<ConstValue>>.Filter(funcValue)) {
+        if (!ConstAnalysis<ConstStatePool>.Filter(funcValue)) {
             return ConstAnalysisStrategy.SkipAnalysis
         }
         if (IsSTDFunction(funcValue)) {

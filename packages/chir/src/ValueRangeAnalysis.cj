@@ -1,5 +1,6 @@
 package cjcj::chir
 
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::utils.{CJC_ABORT, OverflowStrategy}
 import std.collection.*
 
@@ -26,7 +27,7 @@ extend ValueRangeKind <: Equatable<ValueRangeKind> {
     }
 }
 
-public open class ValueRange {
+public open class ValueRange <: HasEqual<ValueRange> {
     private let kind: ValueRangeKind
 
     public init(kind: ValueRangeKind) {
@@ -37,18 +38,19 @@ public open class ValueRange {
         return kind
     }
 
-    public open func Join(rhs: ValueRange): Option<ValueRange> {
+    public open func Join(rhs: ValueRange): Option<Option<ValueRange>> {
         let _ = rhs
         throw IllegalArgumentException("ValueRange.Join must be implemented by concrete range classes")
     }
 
-    public open func CloneRange(): ValueRange {
-        throw IllegalArgumentException("ValueRange.CloneRange must be implemented by concrete range classes")
+    public open func Clone(): ValueRange {
+        throw IllegalArgumentException("ValueRange.Clone must be implemented by concrete range classes")
     }
 
     public open func ToString(): String {
         return ""
     }
+
 }
 
 public class BoolRange <: ValueRange {
@@ -59,7 +61,7 @@ public class BoolRange <: ValueRange {
         this.domain = domain
     }
 
-    public override func Join(rhs: ValueRange): Option<ValueRange> {
+    public override func Join(rhs: ValueRange): Option<Option<ValueRange>> {
         if (rhs.GetRangeKind() != ValueRangeKind.BOOL) {
             throw IllegalArgumentException("BoolRange can only join another BoolRange")
         }
@@ -67,12 +69,13 @@ public class BoolRange <: ValueRange {
             if (domain.IsSame(rhsRange.domain)) {
                 return None
             }
-            return BoolRange(BoolDomain.Union(domain, rhsRange.domain))
+            let joined: ValueRange = BoolRange(BoolDomain.Union(domain, rhsRange.domain))
+            return Some(Some(joined))
         }
         return None
     }
 
-    public override func CloneRange(): ValueRange {
+    public override func Clone(): ValueRange {
         return BoolRange(domain)
     }
 
@@ -93,21 +96,22 @@ public class SIntRange <: ValueRange {
         this.domain = domain
     }
 
-    public override func Join(rhs: ValueRange): Option<ValueRange> {
+    public override func Join(rhs: ValueRange): Option<Option<ValueRange>> {
         if (rhs.GetRangeKind() != ValueRangeKind.SINT) {
             throw IllegalArgumentException("SIntRange can only join another SIntRange")
         }
         if (let Some(rhsRange) <- (rhs as SIntRange)) {
             if (!domain.IsSame(rhsRange.domain) ||
                 (domain.NumericBound().IsFullSet() && !domain.SymbolicBounds().isEmpty())) {
-                return SIntRange(SIntDomain.Unions(domain, rhsRange.domain))
+                let joined: ValueRange = SIntRange(SIntDomain.Unions(domain, rhsRange.domain))
+                return Some(Some(joined))
             }
             return None
         }
         return None
     }
 
-    public override func CloneRange(): ValueRange {
+    public override func Clone(): ValueRange {
         return SIntRange(SIntDomain(domain.NumericBound(), domain.SymbolicBounds(), domain.IsUnsigned()))
     }
 
@@ -120,252 +124,13 @@ public class SIntRange <: ValueRange {
     }
 }
 
-public enum RangeValueDomainKind {
-    | BOTTOM | VALUE | TOP
-}
+public type RangeValueDomain = ValueDomain<ValueRange>
+public type RangeStatePool = FullStatePool<RangeValueDomain>
+public type RangeDomain = State<RangeValueDomain, RangeStatePool>
 
-private func RangeValueDomainKindIndex(kind: RangeValueDomainKind): Int64 {
-    return match (kind) {
-        case RangeValueDomainKind.BOTTOM => 0
-        case RangeValueDomainKind.VALUE => 1
-        case RangeValueDomainKind.TOP => 2
-    }
-}
-
-extend RangeValueDomainKind <: Equatable<RangeValueDomainKind> {
-    public operator func ==(right: RangeValueDomainKind): Bool {
-        return RangeValueDomainKindIndex(this) == RangeValueDomainKindIndex(right)
-    }
-
-    public operator func !=(right: RangeValueDomainKind): Bool {
-        return !(this == right)
-    }
-}
-
-public class RangeValueDomain {
-    private var kind: RangeValueDomainKind
-    private var range: Option<ValueRange> = None
-
-    public init(isTop: Bool) {
-        kind = if (isTop) { RangeValueDomainKind.TOP } else { RangeValueDomainKind.BOTTOM }
-    }
-
-    public init(range: ValueRange) {
-        kind = RangeValueDomainKind.VALUE
-        this.range = range
-    }
-
-    public static func Top(): RangeValueDomain {
-        return RangeValueDomain(true)
-    }
-
-    public static func Bottom(): RangeValueDomain {
-        return RangeValueDomain(false)
-    }
-
-    public func IsTop(): Bool {
-        return kind == RangeValueDomainKind.TOP
-    }
-
-    public func IsBottom(): Bool {
-        return kind == RangeValueDomainKind.BOTTOM
-    }
-
-    public func IsValue(): Bool {
-        return kind == RangeValueDomainKind.VALUE
-    }
-
-    public func GetRange(): Option<ValueRange> {
-        return range
-    }
-
-    public func Clone(): RangeValueDomain {
-        if (let Some(value) <- range) {
-            return RangeValueDomain(value.CloneRange())
-        }
-        return RangeValueDomain(kind == RangeValueDomainKind.TOP)
-    }
-
-    public func Join(rhs: RangeValueDomain): Bool {
-        if (IsTop() || rhs.IsBottom()) {
-            return false
-        }
-        if (rhs.IsTop()) {
-            SetToBound(true)
-            return true
-        }
-        if (IsBottom()) {
-            CopyFrom(rhs)
-            return true
-        }
-        if (let Some(leftRange) <- range) {
-            if (let Some(rightRange) <- rhs.range) {
-                if (let Some(joined) <- leftRange.Join(rightRange)) {
-                    range = joined
-                    kind = RangeValueDomainKind.VALUE
-                    return true
-                }
-                return false
-            }
-        }
-        SetToBound(true)
-        return true
-    }
-
-    public func SetToBound(isTop: Bool): Unit {
-        kind = if (isTop) { RangeValueDomainKind.TOP } else { RangeValueDomainKind.BOTTOM }
-        range = None
-    }
-
-    public func IsSame(rhs: RangeValueDomain): Bool {
-        if (kind != rhs.kind) {
-            return false
-        }
-        if (kind != RangeValueDomainKind.VALUE) {
-            return true
-        }
-        if (let Some(leftRange) <- range) {
-            if (let Some(rightRange) <- rhs.range) {
-                if (leftRange.GetRangeKind() != rightRange.GetRangeKind()) {
-                    return false
-                }
-                return leftRange.Join(rightRange).isNone() && rightRange.Join(leftRange).isNone()
-            }
-        }
-        return false
-    }
-
-    public func ToString(): String {
-        return match (kind) {
-            case RangeValueDomainKind.BOTTOM => "Bottom"
-            case RangeValueDomainKind.TOP => "Top"
-            case RangeValueDomainKind.VALUE => if (let Some(value) <- range) {
-                value.ToString()
-            } else {
-                "Top"
-            }
-        }
-    }
-
-    private func CopyFrom(rhs: RangeValueDomain): Unit {
-        kind = rhs.kind
-        if (let Some(rhsRange) <- rhs.range) {
-            range = rhsRange.CloneRange()
-        } else {
-            range = None
-        }
-    }
-}
-
-public class RangeDomain {
-    private let keys: ArrayList<Value> = ArrayList<Value>()
-    private let values: ArrayList<RangeValueDomain> = ArrayList<RangeValueDomain>()
-
-    public init() {}
-
-    public init(other: RangeDomain) {
-        var idx: Int64 = 0
-        while (idx < other.keys.size) {
-            keys.add(other.keys[idx])
-            values.add(other.values[idx].Clone())
-            idx++
-        }
-    }
-
-    public func Clone(): RangeDomain {
-        return RangeDomain(this)
-    }
-
-    public func ClearState(): Unit {
-        keys.clear()
-        values.clear()
-    }
-
-    public func Size(): Int64 {
-        return keys.size
-    }
-
-    public func Update(value: Value, rangeValue: ValueRange): Unit {
-        SetDomain(value, RangeValueDomain(rangeValue.CloneRange()))
-    }
-
-    public func Update(value: Value, domain: RangeValueDomain): Unit {
-        SetDomain(value, domain)
-    }
-
-    public func SetToBound(value: Value, isTop: Bool): Unit {
-        SetDomain(value, RangeValueDomain(isTop))
-    }
-
-    public func SetToTopOrTopRef(value: Value, isRef: Bool): Unit {
-        let _ = isRef
-        SetToBound(value, true)
-    }
-
-    public func CheckAbstractValue(value: Value): Option<ValueRange> {
-        if (let Some(idx) <- FindIndex(value)) {
-            return values[idx].GetRange()
-        }
-        return None
-    }
-
-    public func CheckAbstractValueWithTopBottom(value: Value): Option<RangeValueDomain> {
-        if (let Some(idx) <- FindIndex(value)) {
-            return values[idx].Clone()
-        }
-        return None
-    }
-
-    public func Join(rhs: RangeDomain): Bool {
-        var changed = false
-        var idx: Int64 = 0
-        while (idx < rhs.keys.size) {
-            let rhsKey = rhs.keys[idx]
-            let rhsValue = rhs.values[idx]
-            if (let Some(localIdx) <- FindIndex(rhsKey)) {
-                if (values[localIdx].Join(rhsValue)) {
-                    changed = true
-                }
-            } else {
-                keys.add(rhsKey)
-                values.add(rhsValue.Clone())
-                changed = true
-            }
-            idx++
-        }
-        return changed
-    }
-
-    public func ToString(): String {
-        let parts = ArrayList<String>()
-        var idx: Int64 = 0
-        while (idx < keys.size) {
-            parts.add(keys[idx].GetIdentifier() + "=" + values[idx].ToString())
-            idx++
-        }
-        return "{" + JoinStrings(parts, ", ") + "}"
-    }
-
-    private func SetDomain(value: Value, domain: RangeValueDomain): Unit {
-        if (let Some(idx) <- FindIndex(value)) {
-            values[idx] = domain.Clone()
-            return
-        }
-        keys.add(value)
-        values.add(domain.Clone())
-    }
-
-    private func FindIndex(value: Value): Option<Int64> {
-        var idx: Int64 = 0
-        while (idx < keys.size) {
-            if (keys[idx].nodeId == value.nodeId) {
-                return idx
-            }
-            idx++
-        }
-        return None
-    }
-}
+// C++ ValueRangeAnalysis.h:94-101 explicit Range template instantiation;
+// ValueRangeAnalysis.cpp:90-107 supplies its two free-function specializations.
+public let rangeStateGlobals = ValueAnalysisGlobals<RangeValueDomain, RangeStatePool>()
 
 public func HandleNonNullLiteralValue(literal: LiteralValue, ty: Option<Type>): RangeValueDomain {
     if (let Some(boolLiteral) <- (literal as BoolLiteral)) {
@@ -378,7 +143,7 @@ public func HandleNonNullLiteralValue(literal: LiteralValue, ty: Option<Type>): 
             }
         }
     }
-    return RangeValueDomain.Top()
+    return RangeValueDomain(true)
 }
 
 public func HandleNonNullLiteralValue(constant: Constant): RangeValueDomain {
@@ -409,7 +174,7 @@ public func GetDefaultRangeForType(typeValue: Type): RangeValueDomain {
     if (typeValue.IsInteger()) {
         return RangeValueDomain(SIntRange(GetDefaultIntRange(typeValue)))
     }
-    return RangeValueDomain.Top()
+    return RangeValueDomain(true)
 }
 
 public func IsBasicBinaryExpr(expr: Expression): Bool {
@@ -417,11 +182,26 @@ public func IsBasicBinaryExpr(expr: Expression): Bool {
     return kindIndex >= ExprKindIndex(ExprKind.ADD) && kindIndex <= ExprKindIndex(ExprKind.MOD)
 }
 
-public class RangeAnalysis {
+public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
     private let inqueueBlocks: ArrayList<Block> = ArrayList<Block>()
     private let inqueueCounts: ArrayList<Int64> = ArrayList<Int64>()
+    private let diag: BasicDiagnosticEngine
 
-    public init() {}
+    public init(functionValue: Function, builder: CHIRBuilder, diag: BasicDiagnosticEngine,
+        isDebug!: Bool = false) {
+        super(functionValue, builder, rangeStateGlobals,
+            { literal: LiteralValue => HandleNonNullLiteralValue(literal, Some(literal.GetType().getOrThrow())) },
+            isDebug: isDebug)
+        this.diag = diag
+    }
+
+    public override func GetAnalysisName(): String {
+        return "range-analysis"
+    }
+
+    public override func GetBlockLimit(): Option<UInt32> {
+        return 80u32
+    }
 
     public static func GetBoolDomainFromState(state: RangeDomain, value: Value): BoolDomain {
         if (let Some(valueTy) <- value.GetType()) {
@@ -435,7 +215,7 @@ public class RangeAnalysis {
             if (domain.IsTop()) {
                 return BoolDomain.Top()
             }
-            if (let Some(absVal) <- domain.GetRange()) {
+            if (let Some(absVal) <- domain.CheckAbsVal()) {
                 if (absVal.GetRangeKind() == ValueRangeKind.BOOL) {
                     if (let Some(boolRange) <- (absVal as BoolRange)) {
                         return boolRange.GetVal()
@@ -458,7 +238,7 @@ public class RangeAnalysis {
             if (domain.IsTop()) {
                 return defaultRange
             }
-            if (let Some(absVal) <- domain.GetRange()) {
+            if (let Some(absVal) <- domain.CheckAbsVal()) {
                 if (absVal.GetRangeKind() == ValueRangeKind.SINT) {
                     if (let Some(intRange) <- (absVal as SIntRange)) {
                         return intRange.GetVal()
@@ -469,7 +249,7 @@ public class RangeAnalysis {
         return defaultRange
     }
 
-    public func CheckInQueueTimes(block: Block, curState: RangeDomain): Bool {
+    public override func CheckInQueueTimes(block: Block, curState: RangeDomain): Bool {
         if (let Some(idx) <- FindInqueueIndex(block)) {
             inqueueCounts[idx] = inqueueCounts[idx] + 1
             if (inqueueCounts[idx] >= RANGE_ANALYSIS_MAX_INQUEUE_TIMES) {
@@ -483,7 +263,7 @@ public class RangeAnalysis {
         return false
     }
 
-    public func HandleNormalExpressionEffect(state: RangeDomain, expression: Expression): Unit {
+    public override func HandleNormalExpressionEffect(state: RangeDomain, expression: Expression): Unit {
         match (expression.GetExprMajorKind()) {
             case ExprMajorKind.MEMORY_EXPR => return
             case ExprMajorKind.UNARY_EXPR => HandleUnaryExpr(state, expression)
@@ -629,7 +409,7 @@ public class RangeAnalysis {
         }
     }
 
-    public func HandleTerminatorEffect(state: RangeDomain, terminator: Terminator): Option<Block> {
+    public override func HandleTerminatorEffect(state: RangeDomain, terminator: Terminator): Option<Block> {
         let kind = terminator.GetExprKind()
         if (kind == ExprKind.GOTO || kind == ExprKind.EXIT) {
             return None

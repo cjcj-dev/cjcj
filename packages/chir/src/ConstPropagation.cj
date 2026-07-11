@@ -70,12 +70,12 @@ public class ConstPropagation {
     }
 
     private func VisitFunc<Pool>(funcValue: Function, isDebug: Bool, isCJLint: Bool,
-        result: Results<State<ConstValue, Pool>>): Unit where Pool <: ValueStatePool<ConstValue, Pool> {
+        result: Results<State<ConstValueDomain, Pool>>): Unit where Pool <: ValueStatePool<ConstValueDomain, Pool> {
         let toBeRewrited = ArrayList<RewriteInfo>()
         let targetSuccMap = ArrayList<TerminatorRewriteInfo>()
         result.VisitWith(
-            { _: State<ConstValue, Pool>, _: Expression, _: Int64 => () },
-            { state: State<ConstValue, Pool>, expr: Expression, index: Int64 =>
+            { _: State<ConstValueDomain, Pool>, _: Expression, _: Int64 => () },
+            { state: State<ConstValueDomain, Pool>, expr: Expression, index: Int64 =>
                 let exprResult = expr.GetResult() ?? return
                 let exprType = exprResult.GetType().getOrThrow()
                 if (expr.IsBinaryExpr()) {
@@ -106,7 +106,7 @@ public class ConstPropagation {
                     }
                 }
             },
-            { state: State<ConstValue, Pool>, terminator: Terminator, targetSucc: Option<Block> =>
+            { state: State<ConstValueDomain, Pool>, terminator: Terminator, targetSucc: Option<Block> =>
                 if (targetSucc.isNone()) {
                     return
                 }
@@ -181,8 +181,8 @@ public class ConstPropagation {
         return false
     }
 
-    private func TrySimplifyingBinaryExpr<Pool>(state: State<ConstValue, Pool>, binary: BinaryExpression,
-        isDebug: Bool): Unit where Pool <: ValueStatePool<ConstValue, Pool> {
+    private func TrySimplifyingBinaryExpr<Pool>(state: State<ConstValueDomain, Pool>, binary: BinaryExpression,
+        isDebug: Bool): Unit where Pool <: ValueStatePool<ConstValueDomain, Pool> {
         if (SkipCP(binary)) {
             return
         }

@@ -4,6 +4,27 @@ import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 import std.collection.*
 import std.sync.*
 
+// C++ ValueDomain.h:26-36 HasEqual checks exactly the three abstract-value
+// operations used by ValueDomain.
+public interface HasEqual<AV> where AV <: HasEqual<AV> {
+    func Join(rhs: AV): Option<Option<AV>>
+    func ToString(): String
+    func Clone(): AV
+}
+
+// C++ ValueDomain.h:99-370 is used as a template argument by State in
+// ValueAnalysis.h:43-718. This interface spells out that implicit C++ template
+// requirement for Cangjie generic constraints.
+public interface ValueDomainAccess<VD> where VD <: AbstractDomain<VD> {
+    static func Create(isTop: Bool): VD
+    static func Create(refValue: Ref): VD
+    func GetKind(): ValueDomainKind
+    func GetRef(): Option<Ref>
+    func SetRef(refValue: Ref): Unit
+    func SetSelfToBound(isTop: Bool): Unit
+    func IsRef(): Bool
+}
+
 public class AbstractObject <: Value {
     private static let ins = AbstractObject("TopObj")
 
@@ -180,7 +201,8 @@ extend ValueDomainKind <: Equatable<ValueDomainKind> {
     }
 }
 
-public class ValueDomain<AV> <: AbstractDomain<ValueDomain<AV>> where AV <: ConstValue {
+public class ValueDomain<AV> <: AbstractDomain<ValueDomain<AV>> & ValueDomainAccess<ValueDomain<AV>>
+    where AV <: HasEqual<AV> {
     private var valueKind: ValueDomainKind
     private var ref: Option<Ref> = None
     private var absVal: Option<AV> = None
@@ -200,6 +222,14 @@ public class ValueDomain<AV> <: AbstractDomain<ValueDomain<AV>> where AV <: Cons
         super()
         valueKind = ValueDomainKind.VAL
         absVal = value
+    }
+
+    public static func Create(isTop: Bool): ValueDomain<AV> {
+        return ValueDomain<AV>(isTop)
+    }
+
+    public static func Create(refValue: Ref): ValueDomain<AV> {
+        return ValueDomain<AV>(refValue)
     }
 
     public override func Clone(): ValueDomain<AV> {
@@ -329,7 +359,7 @@ public class ValueDomain<AV> <: AbstractDomain<ValueDomain<AV>> where AV <: Cons
                 let res = leftVal.Join(rightVal)
                 if (let Some(newVal) <- res) {
                     if (let Some(value) <- newVal) {
-                        absVal = CastAbsVal(value)
+                        absVal = value
                     } else {
                         SetSelfToBound(true)
                     }
@@ -343,11 +373,7 @@ public class ValueDomain<AV> <: AbstractDomain<ValueDomain<AV>> where AV <: Cons
     }
 
     private func CloneAbsVal(value: AV): AV {
-        return CastAbsVal(value.Clone())
-    }
-
-    private func CastAbsVal(value: ConstValue): AV {
-        return (value as AV).getOrThrow()
+        return value.Clone()
     }
 }
 

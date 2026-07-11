@@ -4,8 +4,14 @@ import cjcj::basic.{DiagnosticEngine as BasicDiagnosticEngine, DiagKindRefactor}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, InternalError, OverflowStrategy}
 import std.collection.*
 
-public type ConstDomain = State<ConstValue, FullStatePool<ConstValue>>
-public type ConstPoolDomain = State<ConstValue, ActiveStatePool<ConstValue>>
+public type ConstStatePool = FullStatePool<ConstValueDomain>
+public type ConstActivePool = ActiveStatePool<ConstValueDomain>
+public type ConstDomain = State<ConstValueDomain, ConstStatePool>
+public type ConstPoolDomain = State<ConstValueDomain, ConstActivePool>
+
+// C++ ConstAnalysis.h:173-192 explicit template instantiations.
+public let constStateGlobals = ValueAnalysisGlobals<ConstValueDomain, ConstStatePool>()
+public let constActiveGlobals = ValueAnalysisGlobals<ConstValueDomain, ConstActivePool>()
 
 private enum ConstExceptionKind {
     | SUCCESS | FAIL | NA
@@ -39,16 +45,18 @@ private let rangeInitFunc = FuncInfo("init", "Range", [NOT_CARE], NOT_CARE, "std
 private let thisArgIndex: Int64 = 0
 private let lenFieldIndex: Int64 = 2
 
-public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <: ValueStatePool<ConstValue, Pool> {
+public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where Pool <: ValueStatePool<ConstValueDomain, Pool> {
     private let diag: BasicDiagnosticEngine
 
-    public init(functionValue: Function, builder: CHIRBuilder, diag: BasicDiagnosticEngine,
+    public init(functionValue: Function, builder: CHIRBuilder,
+        globals: ValueAnalysisGlobals<ConstValueDomain, Pool>,
+        handleNonNullLiteralValue: (LiteralValue) -> ConstValueDomain, diag: BasicDiagnosticEngine,
         isDebug!: Bool = false) {
-        super(functionValue, builder, isDebug: isDebug)
+        super(functionValue, builder, globals, handleNonNullLiteralValue, isDebug: isDebug)
         this.diag = diag
     }
 
-    public override func HandleNormalExpressionEffect(state: State<ConstValue, Pool>, expression: Expression): Unit {
+    public override func HandleNormalExpressionEffect(state: State<ConstValueDomain, Pool>, expression: Expression): Unit {
         var exceptionKind = ConstExceptionKind.NA
         match (expression.GetExprMajorKind()) {
             case ExprMajorKind.MEMORY_EXPR => return
@@ -78,7 +86,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         }
     }
 
-    public override func HandleTerminatorEffect(state: State<ConstValue, Pool>, terminator: Terminator): Option<Block> {
+    public override func HandleTerminatorEffect(state: State<ConstValueDomain, Pool>, terminator: Terminator): Option<Block> {
         var res = ConstExceptionKind.NA
         match (terminator.GetExprKind()) {
             case ExprKind.GOTO => ()
@@ -107,12 +115,12 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return None
     }
 
-    public override func HandleApplyExpr(state: State<ConstValue, Pool>, apply: Apply, refObj: Option<Value>): Unit {
+    public override func HandleApplyExpr(state: State<ConstValueDomain, Pool>, apply: Apply, refObj: Option<Value>): Unit {
         let _ = refObj
         HandleApply(state, apply)
     }
 
-    public override func HandleApplyWithExceptionTerminator(state: State<ConstValue, Pool>,
+    public override func HandleApplyWithExceptionTerminator(state: State<ConstValueDomain, Pool>,
         apply: ApplyWithException, refObj: Option<Value>): Option<Block> {
         let _ = refObj
         let res = HandleApply(state, apply)
@@ -136,7 +144,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         }
     }
 
-    private func HandleUnaryExpr(state: State<ConstValue, Pool>, unaryExpr: UnaryExpression): ConstExceptionKind {
+    private func HandleUnaryExpr(state: State<ConstValueDomain, Pool>, unaryExpr: UnaryExpression): ConstExceptionKind {
         let operand = unaryExpr.GetOperand(0)
         let dest = unaryExpr.GetResult().getOrThrow()
         let absValOpt = state.CheckAbstractValue(operand)
@@ -183,7 +191,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.NA
     }
 
-    private func HandleBinaryExpr(state: State<ConstValue, Pool>, binaryExpr: BinaryExpression): ConstExceptionKind {
+    private func HandleBinaryExpr(state: State<ConstValueDomain, Pool>, binaryExpr: BinaryExpression): ConstExceptionKind {
         let kind = binaryExpr.GetExprKind()
         match (kind) {
             case ExprKind.ADD | ExprKind.SUB | ExprKind.MUL | ExprKind.DIV | ExprKind.MOD =>
@@ -204,7 +212,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         }
     }
 
-    private func HandleOthersExpr(state: State<ConstValue, Pool>, expression: Expression): ConstExceptionKind {
+    private func HandleOthersExpr(state: State<ConstValueDomain, Pool>, expression: Expression): ConstExceptionKind {
         match (expression.GetExprKind()) {
             case ExprKind.TYPECAST =>
                 return HandleTypeCast(state, (expression as TypeCast).getOrThrow())
@@ -219,7 +227,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         }
     }
 
-    private func HandleBranchTerminator(state: State<ConstValue, Pool>, branch: Branch): Option<Block> {
+    private func HandleBranchTerminator(state: State<ConstValueDomain, Pool>, branch: Branch): Option<Block> {
         if (let Some(condVal) <- state.CheckAbstractValue(branch.GetCondition())) {
             let boolVal = (condVal as ConstBoolVal).getOrThrow().GetVal()
             return if (boolVal) { branch.GetTrueBlock() } else { branch.GetFalseBlock() }
@@ -227,7 +235,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return None
     }
 
-    private func HandleMultiBranchTerminator(state: State<ConstValue, Pool>, multi: MultiBranch): Option<Block> {
+    private func HandleMultiBranchTerminator(state: State<ConstValueDomain, Pool>, multi: MultiBranch): Option<Block> {
         if (let Some(condVal) <- state.CheckAbstractValue(multi.GetCondition())) {
             let intVal = (condVal as ConstUIntVal).getOrThrow().GetVal()
             let cases = multi.GetCaseVals()
@@ -243,7 +251,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return None
     }
 
-    private func HandleIntOpWithExcepTerminator(state: State<ConstValue, Pool>, intOp: IntOpWithException): ConstExceptionKind {
+    private func HandleIntOpWithExcepTerminator(state: State<ConstValueDomain, Pool>, intOp: IntOpWithException): ConstExceptionKind {
         let kind = intOp.GetOpKind()
         if (kind == ExprKind.NEG) {
             let operand = intOp.GetOperand(0)
@@ -272,7 +280,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.NA
     }
 
-    private func HandleNegOpOfInt(state: State<ConstValue, Pool>, expr: Expression, constVal: ConstIntVal): ConstExceptionKind {
+    private func HandleNegOpOfInt(state: State<ConstValueDomain, Pool>, expr: Expression, constVal: ConstIntVal): ConstExceptionKind {
         let dest = expr.GetResult().getOrThrow()
         let result = OverflowChecker.IsIntOverflow(dest.GetType().getOrThrow().GetTypeKind(), ExprKind.NEG,
             0, constVal.GetVal(), GetOverflowStrategy(expr))
@@ -285,7 +293,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.SUCCESS
     }
 
-    private func HandleNegOpOfUInt(state: State<ConstValue, Pool>, expr: Expression, constVal: ConstUIntVal): ConstExceptionKind {
+    private func HandleNegOpOfUInt(state: State<ConstValueDomain, Pool>, expr: Expression, constVal: ConstUIntVal): ConstExceptionKind {
         let dest = expr.GetResult().getOrThrow()
         let result = OverflowChecker.IsUIntOverflow(dest.GetType().getOrThrow().GetTypeKind(), ExprKind.NEG,
             0u64, constVal.GetVal(), GetOverflowStrategy(expr))
@@ -298,7 +306,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.SUCCESS
     }
 
-    private func HandleArithmeticOp(state: State<ConstValue, Pool>, expr: Expression, kind: ExprKind): ConstExceptionKind {
+    private func HandleArithmeticOp(state: State<ConstValueDomain, Pool>, expr: Expression, kind: ExprKind): ConstExceptionKind {
         let lhs = GetLHSOperand(expr)
         let rhs = GetRHSOperand(expr)
         CJC_ASSERT(refEq(lhs.GetType().getOrThrow(), rhs.GetType().getOrThrow()))
@@ -320,7 +328,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.NA
     }
 
-    private func HandleArithmeticOpOfInt(state: State<ConstValue, Pool>, expr: Expression, kind: ExprKind,
+    private func HandleArithmeticOpOfInt(state: State<ConstValueDomain, Pool>, expr: Expression, kind: ExprKind,
         lhs: Option<ConstIntVal>, rhs: Option<ConstIntVal>): ConstExceptionKind {
         let dest = expr.GetResult().getOrThrow()
         let trivial = HandleTrivialArithmeticOpOfInt(state, expr, kind, lhs, rhs)
@@ -348,7 +356,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.SUCCESS
     }
 
-    private func HandleArithmeticOpOfUInt(state: State<ConstValue, Pool>, expr: Expression, kind: ExprKind,
+    private func HandleArithmeticOpOfUInt(state: State<ConstValueDomain, Pool>, expr: Expression, kind: ExprKind,
         lhs: Option<ConstUIntVal>, rhs: Option<ConstUIntVal>): ConstExceptionKind {
         let dest = expr.GetResult().getOrThrow()
         let trivial = HandleTrivialArithmeticOpOfUInt(state, expr, kind, lhs, rhs)
@@ -376,7 +384,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.SUCCESS
     }
 
-    private func HandleTrivialArithmeticOpOfInt(state: State<ConstValue, Pool>, expr: Expression, kind: ExprKind,
+    private func HandleTrivialArithmeticOpOfInt(state: State<ConstValueDomain, Pool>, expr: Expression, kind: ExprKind,
         lhs: Option<ConstIntVal>, rhs: Option<ConstIntVal>): ConstExceptionKind {
         let dest = expr.GetResult().getOrThrow()
         if (let Some(right) <- rhs) {
@@ -404,7 +412,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.NA
     }
 
-    private func HandleTrivialArithmeticOpOfUInt(state: State<ConstValue, Pool>, expr: Expression, kind: ExprKind,
+    private func HandleTrivialArithmeticOpOfUInt(state: State<ConstValueDomain, Pool>, expr: Expression, kind: ExprKind,
         lhs: Option<ConstUIntVal>, rhs: Option<ConstUIntVal>): ConstExceptionKind {
         let dest = expr.GetResult().getOrThrow()
         if (let Some(right) <- rhs) {
@@ -432,7 +440,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.NA
     }
 
-    private func HandleExpOp(state: State<ConstValue, Pool>, expr: Expression): ConstExceptionKind {
+    private func HandleExpOp(state: State<ConstValueDomain, Pool>, expr: Expression): ConstExceptionKind {
         let dest = expr.GetResult().getOrThrow()
         if (!dest.GetType().getOrThrow().IsInteger()) {
             state.SetToBound(dest, true)
@@ -468,7 +476,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.SUCCESS
     }
 
-    private func HandleArithmeticOpOfFloat(state: State<ConstValue, Pool>, binaryExpr: BinaryExpression,
+    private func HandleArithmeticOpOfFloat(state: State<ConstValueDomain, Pool>, binaryExpr: BinaryExpression,
         lhs: Option<ConstValue>, rhs: Option<ConstValue>): Unit {
         let dest = binaryExpr.GetResult().getOrThrow()
         if (lhs.isNone() || rhs.isNone()) {
@@ -494,7 +502,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         }
     }
 
-    private func HandleBitwiseOp(state: State<ConstValue, Pool>, expr: Expression, kind: ExprKind): ConstExceptionKind {
+    private func HandleBitwiseOp(state: State<ConstValueDomain, Pool>, expr: Expression, kind: ExprKind): ConstExceptionKind {
         let lhs = GetLHSOperand(expr)
         let rhs = GetRHSOperand(expr)
         let isLSigned = (lhs.GetType().getOrThrow() as IntType).getOrThrow().IsSigned()
@@ -538,7 +546,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.SUCCESS
     }
 
-    private func HandleRelationalOp(state: State<ConstValue, Pool>, binaryExpr: BinaryExpression): Unit {
+    private func HandleRelationalOp(state: State<ConstValueDomain, Pool>, binaryExpr: BinaryExpression): Unit {
         let kind = binaryExpr.GetExprKind()
         let dest = binaryExpr.GetResult().getOrThrow()
         let lhs = binaryExpr.GetOperand(0)
@@ -562,7 +570,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         state.Update(dest, ConstBoolVal(CompareConst(kind, lhsAbsVal.getOrThrow(), rhsAbsVal.getOrThrow())))
     }
 
-    private func HandleLogicalOp(state: State<ConstValue, Pool>, binaryExpr: BinaryExpression): Unit {
+    private func HandleLogicalOp(state: State<ConstValueDomain, Pool>, binaryExpr: BinaryExpression): Unit {
         let lhsVal = AsConstBool(state.CheckAbstractValue(binaryExpr.GetOperand(0)))
         let rhsVal = AsConstBool(state.CheckAbstractValue(binaryExpr.GetOperand(1)))
         let dest = binaryExpr.GetResult().getOrThrow()
@@ -587,17 +595,17 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         }
     }
 
-    private func HandleTypeCast(state: State<ConstValue, Pool>, cast: TypeCast): ConstExceptionKind {
+    private func HandleTypeCast(state: State<ConstValueDomain, Pool>, cast: TypeCast): ConstExceptionKind {
         return HandleTypeCastImpl(state, cast, cast.GetSourceValue(), cast.GetSourceTy().getOrThrow(),
             cast.GetTargetTy().getOrThrow(), cast.GetOverflowStrategy())
     }
 
-    private func HandleTypeCast(state: State<ConstValue, Pool>, cast: TypeCastWithException): ConstExceptionKind {
+    private func HandleTypeCast(state: State<ConstValueDomain, Pool>, cast: TypeCastWithException): ConstExceptionKind {
         return HandleTypeCastImpl(state, cast, cast.GetSourceValue(), cast.GetSourceTy().getOrThrow(),
             cast.GetTargetTy().getOrThrow(), cast.GetOverflowStrategy())
     }
 
-    private func HandleTypeCastImpl(state: State<ConstValue, Pool>, cast: Expression, sourceValue: Value, sourceTy: Type,
+    private func HandleTypeCastImpl(state: State<ConstValueDomain, Pool>, cast: Expression, sourceValue: Value, sourceTy: Type,
         targetTy: Type, overflowStrategy: OverflowStrategy): ConstExceptionKind {
         let dest = cast.GetResult().getOrThrow()
         if (sourceTy.IsInteger()) {
@@ -613,7 +621,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.NA
     }
 
-    private func HandleTypecastOfInt(state: State<ConstValue, Pool>, cast: Expression, sourceTy: Type, targetTy: Type,
+    private func HandleTypecastOfInt(state: State<ConstValueDomain, Pool>, cast: Expression, sourceTy: Type, targetTy: Type,
         overflowStrategy: OverflowStrategy, srcAbsVal: ConstValue): ConstExceptionKind {
         match (sourceTy.GetTypeKind()) {
             case TypeKind.TYPE_INT8 =>
@@ -662,7 +670,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         }
     }
 
-    private func HandleTypecastOfIntDispatcherSigned(state: State<ConstValue, Pool>, cast: Expression, value: Int64,
+    private func HandleTypecastOfIntDispatcherSigned(state: State<ConstValueDomain, Pool>, cast: Expression, value: Int64,
         targetTy: Type, overflowStrategy: OverflowStrategy): ConstExceptionKind {
         match (targetTy.GetTypeKind()) {
             case TypeKind.TYPE_INT8 =>
@@ -691,7 +699,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         }
     }
 
-    private func HandleTypecastOfIntDispatcherUnsigned(state: State<ConstValue, Pool>, cast: Expression, value: UInt64,
+    private func HandleTypecastOfIntDispatcherUnsigned(state: State<ConstValueDomain, Pool>, cast: Expression, value: UInt64,
         targetTy: Type, overflowStrategy: OverflowStrategy): ConstExceptionKind {
         match (targetTy.GetTypeKind()) {
             case TypeKind.TYPE_INT8 =>
@@ -720,7 +728,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         }
     }
 
-    private func CastOrRaiseExceptionForInt(state: State<ConstValue, Pool>, cast: Expression, value: Int64, targetTy: Type,
+    private func CastOrRaiseExceptionForInt(state: State<ConstValueDomain, Pool>, cast: Expression, value: Int64, targetTy: Type,
         overflowStrategy: OverflowStrategy): ConstExceptionKind {
         let result = OverflowChecker.IsTypecastOverflowForInt(value, targetTy.GetTypeKind(), overflowStrategy)
         if (result.isOverflow && overflowStrategy == OverflowStrategy.THROWING) {
@@ -732,7 +740,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.SUCCESS
     }
 
-    private func CastOrRaiseExceptionForUInt(state: State<ConstValue, Pool>, cast: Expression, value: UInt64, targetTy: Type,
+    private func CastOrRaiseExceptionForUInt(state: State<ConstValueDomain, Pool>, cast: Expression, value: UInt64, targetTy: Type,
         overflowStrategy: OverflowStrategy): ConstExceptionKind {
         let result = OverflowChecker.IsTypecastOverflowForInt(value, targetTy.GetTypeKind(), overflowStrategy)
         if (result.isOverflow && overflowStrategy == OverflowStrategy.THROWING) {
@@ -744,15 +752,15 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.SUCCESS
     }
 
-    private func HandleApply(state: State<ConstValue, Pool>, apply: Apply): ConstExceptionKind {
+    private func HandleApply(state: State<ConstValueDomain, Pool>, apply: Apply): ConstExceptionKind {
         return HandleApplyImpl(state, apply, apply.GetCallee(), apply.GetArgs())
     }
 
-    private func HandleApply(state: State<ConstValue, Pool>, apply: ApplyWithException): ConstExceptionKind {
+    private func HandleApply(state: State<ConstValueDomain, Pool>, apply: ApplyWithException): ConstExceptionKind {
         return HandleApplyImpl(state, apply, apply.GetCallee(), apply.GetArgs())
     }
 
-    private func HandleApplyImpl(state: State<ConstValue, Pool>, apply: Expression, callee: Value,
+    private func HandleApplyImpl(state: State<ConstValueDomain, Pool>, apply: Expression, callee: Value,
         args: ArrayList<Value>): ConstExceptionKind {
         let calleeFunc = callee.AsFunction() ?? return ConstExceptionKind.NA
         if (IsExpectedFunction(calleeFunc, arrayInitFunc)) {
@@ -770,7 +778,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.NA
     }
 
-    private func HandleArrayInit(state: State<ConstValue, Pool>, apply: Expression, args: ArrayList<Value>): Unit {
+    private func HandleArrayInit(state: State<ConstValueDomain, Pool>, apply: Expression, args: ArrayList<Value>): Unit {
         let _ = apply
         CJC_ASSERT(args.size > 0)
         let lenChild = state.GetChild(args[thisArgIndex], lenFieldIndex).getOrThrow()
@@ -796,14 +804,14 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         }
     }
 
-    private func HandleArraySlice(state: State<ConstValue, Pool>, apply: Expression, args: ArrayList<Value>): Unit {
+    private func HandleArraySlice(state: State<ConstValueDomain, Pool>, apply: Expression, args: ArrayList<Value>): Unit {
         CJC_ASSERT(args.size == 3)
         let lenChild = state.GetChild(apply.GetResult().getOrThrow(), lenFieldIndex).getOrThrow()
         let lenParameterIndex: Int64 = 2
         state.Propagate(args[lenParameterIndex], lenChild)
     }
 
-    private func HandleArraySizeGet(state: State<ConstValue, Pool>, apply: Expression, args: ArrayList<Value>): Unit {
+    private func HandleArraySizeGet(state: State<ConstValueDomain, Pool>, apply: Expression, args: ArrayList<Value>): Unit {
         let _ = apply
         CJC_ASSERT(args.size == 1)
         if (let Some(lenChild) <- state.GetChild(args[thisArgIndex], lenFieldIndex)) {
@@ -811,7 +819,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         }
     }
 
-    private func HandleArrayAccess(state: State<ConstValue, Pool>, apply: Expression, args: ArrayList<Value>): ConstExceptionKind {
+    private func HandleArrayAccess(state: State<ConstValueDomain, Pool>, apply: Expression, args: ArrayList<Value>): ConstExceptionKind {
         CJC_ASSERT(args.size >= 2)
         let lenNode = state.GetChild(args[0], 2) ?? return ConstExceptionKind.NA
         let lenVal = state.CheckAbstractValue(lenNode) ?? return ConstExceptionKind.NA
@@ -826,7 +834,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return RaiseOutOfBoundError(apply, UInt64(len), index)
     }
 
-    private func HandleRangeInit(state: State<ConstValue, Pool>, apply: Expression, args: ArrayList<Value>): ConstExceptionKind {
+    private func HandleRangeInit(state: State<ConstValueDomain, Pool>, apply: Expression, args: ArrayList<Value>): ConstExceptionKind {
         let _ = state
         CJC_ASSERT(args.size == 7)
         let stepParameterIndex: Int64 = 3
@@ -844,15 +852,15 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.NA
     }
 
-    private func HandleIntrinsic(state: State<ConstValue, Pool>, intrinsic: Intrinsic): ConstExceptionKind {
+    private func HandleIntrinsic(state: State<ConstValueDomain, Pool>, intrinsic: Intrinsic): ConstExceptionKind {
         return HandleIntrinsicImpl(state, intrinsic)
     }
 
-    private func HandleIntrinsic(state: State<ConstValue, Pool>, intrinsic: IntrinsicWithException): ConstExceptionKind {
+    private func HandleIntrinsic(state: State<ConstValueDomain, Pool>, intrinsic: IntrinsicWithException): ConstExceptionKind {
         return HandleIntrinsicImpl(state, intrinsic)
     }
 
-    private func HandleIntrinsicImpl(state: State<ConstValue, Pool>, intrinsic: Expression): ConstExceptionKind {
+    private func HandleIntrinsicImpl(state: State<ConstValueDomain, Pool>, intrinsic: Expression): ConstExceptionKind {
         let dest = intrinsic.GetResult().getOrThrow()
         state.SetToTopOrTopRef(dest, dest.GetType().getOrThrow().IsRef())
         let kind = if (let Some(normal) <- (intrinsic as Intrinsic)) {
@@ -869,7 +877,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return ConstExceptionKind.NA
     }
 
-    private func HandleVArrayGet(state: State<ConstValue, Pool>, intrinsic: Expression): ConstExceptionKind {
+    private func HandleVArrayGet(state: State<ConstValueDomain, Pool>, intrinsic: Expression): ConstExceptionKind {
         if (intrinsic.GetNumOfOperands() != 2) {
             return ConstExceptionKind.NA
         }
@@ -883,7 +891,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValue, Pool> where Pool <
         return RaiseOutOfBoundError(intrinsic, len, index)
     }
 
-    private func HandleVArraySet(state: State<ConstValue, Pool>, intrinsic: Expression): ConstExceptionKind {
+    private func HandleVArraySet(state: State<ConstValueDomain, Pool>, intrinsic: Expression): ConstExceptionKind {
         let _ = state
         CJC_ASSERT(intrinsic.GetNumOfOperands() == 3)
         let arrRefNode = intrinsic.GetOperand(0)
@@ -1181,8 +1189,8 @@ private func CompareString(kind: ExprKind, left: String, right: String): Bool {
     }
 }
 
-private func UpdateTypecastResult<Pool>(state: State<ConstValue, Pool>, dest: LocalVar, targetTy: Type,
-    rawValue: Int64): Unit where Pool <: ValueStatePool<ConstValue, Pool> {
+private func UpdateTypecastResult<Pool>(state: State<ConstValueDomain, Pool>, dest: LocalVar, targetTy: Type,
+    rawValue: Int64): Unit where Pool <: ValueStatePool<ConstValueDomain, Pool> {
     let kindIndex = TypeKindIndex(targetTy.GetTypeKind())
     if (kindIndex >= TypeKindIndex(TypeKind.TYPE_INT8) && kindIndex <= TypeKindIndex(TypeKind.TYPE_INT_NATIVE)) {
         state.Update(dest, ConstIntVal(rawValue))
