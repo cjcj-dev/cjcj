@@ -552,4 +552,12 @@ extend Table {
         let fieldOffset = GetOptionalFieldOffset(field)
         return verifier.Check(fieldOffset != 0u16) && verifier.VerifyOffset(pos, fieldOffset) != 0
     }
+
+    // table.h:117-162 VerifyField<StructT> resolves the inline struct size via
+    // sizeof(T) in C++; Cangjie passes structSize/align explicitly because the
+    // struct layout is described by the generated bindings, not the type system.
+    public func VerifyStructField(verifier: VerifierTemplate, field: UInt16, structSize: Int64, align: Int64): Bool {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return fieldOffset == 0u16 || verifier.VerifyFieldStruct(pos, fieldOffset, structSize, align)
+    }
 }
