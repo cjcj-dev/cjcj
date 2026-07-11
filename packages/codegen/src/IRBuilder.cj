@@ -29,6 +29,7 @@ import cjcj::chir.StructType
 import cjcj::chir.TupleType
 import cjcj::chir.Type
 import cjcj::chir.TypeCast
+import cjcj::chir.TypeKind
 import cjcj::chir.Value
 import cjcj::chir.VArrayType
 import cjcj::option.{ArchType, EnvironmentType, OptimizationLevel}
@@ -470,6 +471,17 @@ public class IRBuilder2 <: Resource {
         } else {
             unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
         }
+    }
+
+    public func GetTypeKindFromType(ty: Type): TypeKind {
+        var typeKind = ty.GetTypeKind()
+        let isArm32 = GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32
+        if (typeKind == TypeKind.TYPE_UINT_NATIVE) {
+            typeKind = if (isArm32) { TypeKind.TYPE_UINT32 } else { TypeKind.TYPE_UINT64 }
+        } else if (typeKind == TypeKind.TYPE_INT_NATIVE) {
+            typeKind = if (isArm32) { TypeKind.TYPE_INT32 } else { TypeKind.TYPE_INT64 }
+        }
+        return typeKind
     }
 
     public func GetPayloadOffset(): UInt64 {
@@ -1516,7 +1528,6 @@ public class IRBuilder2 <: Resource {
                 }
             }
         }
-        PropagateCallABIAttributesFromCallee(callee, result)
         return result
     }
 
@@ -1543,7 +1554,6 @@ public class IRBuilder2 <: Resource {
                 }
             }
         }
-        PropagateCallABIAttributesFromCallee(callee, result)
         return result
     }
 
@@ -1558,11 +1568,26 @@ public class IRBuilder2 <: Resource {
                     unsafe { LLVMMoveBasicBlockAfter(normalDest, currentBlock) }
                     let invokeValue = CreateInvoke(callee, calleeType, normalDest, unwindBlock, args, name: name)
                     SetInsertPoint(normalDest)
+                    if (!unsafe { LLVMIsAFunction(callee) }.isNull() &&
+                        unsafe { LLVMSelfhostFunctionHasStructRetAttr(callee) } != 0) {
+                        AddNoAliasAttribute(invokeValue)
+                        if (let Some(sretType) <- GetTypeAttributeValueAtIndex(callee, 1u32, "sret")) {
+                            AddSRetAttribute(invokeValue, sretType)
+                        }
+                    }
                     return invokeValue
                 }
             }
         }
-        return CreateCall(callee, calleeType, args, name: name)
+        let callValue = CreateCall(callee, calleeType, args, name: name)
+        if (!unsafe { LLVMIsAFunction(callee) }.isNull() &&
+            unsafe { LLVMSelfhostFunctionHasStructRetAttr(callee) } != 0) {
+            AddNoAliasAttribute(callValue)
+            if (let Some(sretType) <- GetTypeAttributeValueAtIndex(callee, 1u32, "sret")) {
+                AddSRetAttribute(callValue, sretType)
+            }
+        }
+        return callValue
     }
 
     public func CreateCallOrInvoke(calleeType: CGFunctionType, callee: LLVMValueRef, args: ArrayList<CGValue>,
@@ -4015,6 +4040,19 @@ public class IRBuilder2 <: Resource {
             result = unsafe { LLVMBuildSExt(builder.raw, value, destType, nameCString.value) }
         }
         return result
+    }
+
+    public func CreateSExtOrTrunc(value: LLVMValueRef, destType: LLVMTypeRef,
+        name!: String = "sextortrunc"): LLVMValueRef {
+        let valueWidth = unsafe { LLVMGetIntTypeWidth(LLVMTypeOf(value)) }
+        let destWidth = unsafe { LLVMGetIntTypeWidth(destType) }
+        if (valueWidth == destWidth) {
+            return value
+        }
+        if (valueWidth < destWidth) {
+            return CreateSExt(value, destType, name: name)
+        }
+        return CreateTrunc(value, destType, name: name)
     }
 
     public func CreateFPTrunc(value: LLVMValueRef, destType: LLVMTypeRef, name!: String = "fptrunc"): LLVMValueRef {
