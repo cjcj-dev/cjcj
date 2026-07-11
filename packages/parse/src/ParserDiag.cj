@@ -445,7 +445,7 @@ extend ParserImpl {
         if (handlerName == "DiagExpectedIdentifierTypeAliasDecl") { DiagExpectedIdentifierTypeAliasDecl(node); return }
         if (handlerName == "DiagExpectedIdentifierMacroExpandDecl") { DiagExpectedIdentifierMacroExpandDecl(node); return }
         if (handlerName == "DiagExpectedIdentifierMacroExpandExpr") { DiagExpectedIdentifierMacroExpandExpr(node); return }
-        DiagExpectedIdentifier(MakeRange(node.begin, node.end))
+        DiagExpectedIdentifier(MakeRange(lastToken.Begin(), lastToken.End()))
     }
 
     public func DiagNameLengthOverflow(range: BasicRange, target: String, maxLength: Int64, realLength: Int64): Unit {
