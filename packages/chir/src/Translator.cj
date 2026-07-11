@@ -585,6 +585,25 @@ public class Translator {
         return nodePtr
     }
 
+    private func GetMapExpr(node: AstNode): Option<AstExpr> {
+        if (let Some(nodeExpr) <- (node as AstExpr)) {
+            var expr: Option<AstExpr> = Some(nodeExpr)
+            while (let Some(currentExpr) <- expr) {
+                if (let Some(desugarExpr) <- currentExpr.desugarExpr) {
+                    expr = Some(desugarExpr)
+                } else {
+                    break
+                }
+            }
+            if (let Some(currentExpr) <- expr) {
+                if (let Some(mapExpr) <- currentExpr.mapExpr) {
+                    return Some(mapExpr)
+                }
+            }
+        }
+        return None
+    }
+
     public func TranslateType(ty: AstTy): Type {
         return chirTy.TranslateType(ty)
     }
@@ -1195,22 +1214,52 @@ public class Translator {
     }
 
     public func Visit(expr: AstBinaryExpr): Option<Value> {
-        let leftExpr = RequireExpr(expr.leftExpr, "binary lhs")
-        let lhs = Translator.TranslateASTNode(leftExpr, this) ??
-            throw IllegalStateException("faithful AST2CHIR binary lhs produced no value")
-        if (expr.op == AstTokenKind.AND) {
-            return TransShortCircuitAnd(lhs, RequireExpr(expr.rightExpr, "binary rhs"))
+        if (!expr.TestAttr(AstAttribute.SIDE_EFFECT)) {
+            return ProcessBinaryExpr(expr)
         }
-        if (expr.op == AstTokenKind.OR) {
-            return TransShortCircuitOr(lhs, RequireExpr(expr.rightExpr, "binary rhs"))
+        if (let Some(binaryRightExpr) <- expr.rightExpr) {
+            let rightBinaryExpr = (binaryRightExpr as AstBinaryExpr) ?? return ProcessBinaryExpr(expr)
+            var subscriptExpr: Option<AstSubscriptExpr> = None
+            if (let Some(rightBinaryLeftExpr) <- rightBinaryExpr.leftExpr) {
+                if (let Some(leftSubscriptExpr) <- (rightBinaryLeftExpr as AstSubscriptExpr)) {
+                    subscriptExpr = Some(leftSubscriptExpr)
+                }
+            }
+            if (subscriptExpr.isNone()) {
+                if (let Some(rightBinaryRightExpr) <- rightBinaryExpr.rightExpr) {
+                    if (let Some(rightSubscriptExpr) <- (rightBinaryRightExpr as AstSubscriptExpr)) {
+                        subscriptExpr = Some(rightSubscriptExpr)
+                    }
+                }
+            }
+            if (let Some(subscript) <- subscriptExpr) {
+                let baseExpr = RequireExpr(subscript.baseExpr, "side-effect subscript base")
+                if (let Some(mapExpr) <- GetMapExpr(baseExpr)) {
+                    if (TryGetExprValue(mapExpr).isNone()) {
+                        let chirNode = TranslateExprArg(baseExpr)
+                        SetExprValue(mapExpr, chirNode)
+                    }
+                }
+            }
         }
-        let rightExpr = RequireExpr(expr.rightExpr, "binary rhs")
-        let rhs = Translator.TranslateASTNode(rightExpr, this) ??
-            throw IllegalStateException("faithful AST2CHIR binary rhs produced no value")
+        return ProcessBinaryExpr(expr)
+    }
+
+    private func ProcessBinaryExpr(expr: AstBinaryExpr): Option<Value> {
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
-        let binaryKind = ToCHIRBinaryOp(expr.op)
-        let mayHaveException = OverloadableExprMayThrowException(expr, resultTy)
         let loc = TranslateLocation(expr)
+        let binaryKind = ToCHIRBinaryOp(expr.op)
+        let leftExpr = RequireExpr(expr.leftExpr, "binary lhs")
+        let lhs = TranslateExprArg(leftExpr)
+        let rightExpr = RequireExpr(expr.rightExpr, "binary rhs")
+        if (binaryKind == ExprKind.AND) {
+            return TransShortCircuitAnd(lhs, rightExpr, loc, expr.TestAttr(AstAttribute.COMPILER_ADD))
+        }
+        if (binaryKind == ExprKind.OR) {
+            return TransShortCircuitOr(lhs, rightExpr, loc, expr.TestAttr(AstAttribute.COMPILER_ADD))
+        }
+        let rhs = TranslateExprArg(rightExpr)
+        let mayHaveException = OverloadableExprMayThrowException(expr, resultTy)
         let locForWarning = if (RequireAstTy(leftExpr).IsNothing()) {
             TranslateLocation(rightExpr)
         } else {
@@ -3067,58 +3116,73 @@ public class Translator {
         return body
     }
 
-    private func TransShortCircuitAnd(leftValue: Value, rightExpr: AstExpr): Option<Value> {
+    private func TransShortCircuitAnd(leftValue: Value, rightExpr: AstExpr, loc: DebugLocation,
+        isImplicitAdd: Bool): Option<Value> {
         let boolTy = builder.context.GetBoolTy()
-        let resultLoc = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(boolTy), boolTy,
-            CurrentBlock()))
+        let allocate = builder.CreateAllocate(builder.context.GetRefTy(boolTy), boolTy, CurrentBlock())
+        allocate.SetDebugLocation(loc)
+        let resultLoc = RequireResult(allocate)
         let parentGroup = RequireParentBlockGroup(CurrentBlock(), "short-circuit and")
         let thenBlock = builder.CreateBlock(parentGroup)
         let elseBlock = builder.CreateBlock(parentGroup)
         let endBlock = builder.CreateBlock(parentGroup)
-        builder.CreateBranch(leftValue, thenBlock, elseBlock, CurrentBlock())
+        let leftType = leftValue.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR short-circuit lhs has no type")
+        CJC_ASSERT(leftType.IsBoolean() || leftType.IsNothing() || leftType.IsGeneric())
+        let rightLoc = TranslateLocation(rightExpr)
+        CreateWrappedBranch(SourceExpr.BINARY, loc, leftValue, thenBlock, elseBlock, CurrentBlock())
 
         currentBlock = thenBlock
-        let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
-            throw IllegalStateException("faithful AST2CHIR short-circuit and rhs produced no value")
-        builder.CreateStore(CastValueIfNeeded(rhsValue, boolTy), resultLoc, CurrentBlock())
-        if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateGoTo(endBlock, CurrentBlock())
+        if (!isImplicitAdd) {
+            CurrentBlock().SetDebugLocation(rightLoc)
         }
+        TranslateSubExprToLoc(rightExpr, Some(resultLoc), rightLoc)
+        builder.CreateGoTo(endBlock, CurrentBlock()).SetDebugLocation(loc)
 
         currentBlock = elseBlock
         let constantFalse = RequireResult(builder.CreateConstant(boolTy, BoolLiteral(false), CurrentBlock()))
-        builder.CreateStore(constantFalse, resultLoc, CurrentBlock())
-        builder.CreateGoTo(endBlock, CurrentBlock())
+        constantFalse.SetDebugLocation(loc)
+        CreateAndAppendWrappedStore(constantFalse, resultLoc, CurrentBlock(), loc)
+        builder.CreateGoTo(endBlock, CurrentBlock()).SetDebugLocation(loc)
 
         currentBlock = endBlock
-        return RequireResult(builder.CreateLoad(boolTy, resultLoc, CurrentBlock()))
+        let load = builder.CreateLoad(boolTy, resultLoc, CurrentBlock())
+        load.SetDebugLocation(loc)
+        return RequireResult(load)
     }
 
-    private func TransShortCircuitOr(leftValue: Value, rightExpr: AstExpr): Option<Value> {
+    private func TransShortCircuitOr(leftValue: Value, rightExpr: AstExpr, loc: DebugLocation,
+        isImplicitAdd: Bool): Option<Value> {
         let boolTy = builder.context.GetBoolTy()
-        let resultLoc = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(boolTy), boolTy,
-            CurrentBlock()))
+        let allocate = builder.CreateAllocate(builder.context.GetRefTy(boolTy), boolTy, CurrentBlock())
+        allocate.SetDebugLocation(loc)
+        let resultLoc = RequireResult(allocate)
         let parentGroup = RequireParentBlockGroup(CurrentBlock(), "short-circuit or")
         let thenBlock = builder.CreateBlock(parentGroup)
         let elseBlock = builder.CreateBlock(parentGroup)
         let endBlock = builder.CreateBlock(parentGroup)
-        builder.CreateBranch(leftValue, thenBlock, elseBlock, CurrentBlock())
+        let leftType = leftValue.GetType() ??
+            throw IllegalStateException("faithful AST2CHIR short-circuit lhs has no type")
+        CJC_ASSERT(leftType.IsBoolean() || leftType.IsNothing() || leftType.IsGeneric())
+        let rightLoc = TranslateLocation(rightExpr)
+        CreateWrappedBranch(SourceExpr.BINARY, loc, leftValue, thenBlock, elseBlock, CurrentBlock())
 
         currentBlock = thenBlock
         let constantTrue = RequireResult(builder.CreateConstant(boolTy, BoolLiteral(true), CurrentBlock()))
-        builder.CreateStore(constantTrue, resultLoc, CurrentBlock())
-        builder.CreateGoTo(endBlock, CurrentBlock())
+        CreateAndAppendWrappedStore(constantTrue, resultLoc, CurrentBlock(), rightLoc)
+        builder.CreateGoTo(endBlock, CurrentBlock()).SetDebugLocation(rightLoc)
 
         currentBlock = elseBlock
-        let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
-            throw IllegalStateException("faithful AST2CHIR short-circuit or rhs produced no value")
-        builder.CreateStore(CastValueIfNeeded(rhsValue, boolTy), resultLoc, CurrentBlock())
-        if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateGoTo(endBlock, CurrentBlock())
+        if (!isImplicitAdd) {
+            CurrentBlock().SetDebugLocation(rightLoc)
         }
+        TranslateSubExprToLoc(rightExpr, Some(resultLoc), rightLoc)
+        builder.CreateGoTo(endBlock, CurrentBlock()).SetDebugLocation(rightLoc)
 
         currentBlock = endBlock
-        return RequireResult(builder.CreateLoad(boolTy, resultLoc, CurrentBlock()))
+        let load = builder.CreateLoad(boolTy, resultLoc, CurrentBlock())
+        load.SetDebugLocation(loc)
+        return RequireResult(load)
     }
 
     private func TranslateForInRange(expr: AstForInExpr): Option<Value> {
@@ -5537,6 +5601,13 @@ public class Translator {
         branch.SetSourceExpr(sourceExpr)
     }
 
+    private func CreateWrappedBranch(sourceExpr: SourceExpr, loc: DebugLocation, cond: Value, trueBlock: Block,
+        falseBlock: Block, parent: Block): Unit {
+        let branch = builder.CreateBranch(cond, trueBlock, falseBlock, parent)
+        branch.SetDebugLocation(loc)
+        branch.SetSourceExpr(sourceExpr)
+    }
+
     private func CreateWrappedTypeCast(ty: Type, operand: Value, parent: Block): Value {
         return RequireResult(builder.CreateTypeCast(ty, operand, parent))
     }
@@ -7485,15 +7556,16 @@ public class Translator {
     }
 
     private func TranslateCompoundAssign(expr: AstAssignExpr, leftExpr: AstExpr, rightExpr: AstExpr): Option<Value> {
+        let loc = TranslateLocation(expr)
         let leftValueInfo = TranslateExprAsLeftValue(leftExpr)
         let lhsValue = LoadLeftValue(leftValueInfo, chirTy.TranslateType(RequireAstTy(leftExpr))) ??
             throw IllegalStateException("faithful AST2CHIR compound lhs produced no value")
         var compoundValue: Value
         if (expr.op == AstTokenKind.AND_ASSIGN) {
-            compoundValue = TransShortCircuitAnd(lhsValue, rightExpr) ??
+            compoundValue = TransShortCircuitAnd(lhsValue, rightExpr, loc, false) ??
                 throw IllegalStateException("faithful AST2CHIR compound &&= produced no value")
         } else if (expr.op == AstTokenKind.OR_ASSIGN) {
-            compoundValue = TransShortCircuitOr(lhsValue, rightExpr) ??
+            compoundValue = TransShortCircuitOr(lhsValue, rightExpr, loc, false) ??
                 throw IllegalStateException("faithful AST2CHIR compound ||= produced no value")
         } else {
             let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
@@ -7742,6 +7814,7 @@ public class Translator {
     }
 
     private func TranslateVArrayAssign(assign: AstAssignExpr, subscriptExpr: AstSubscriptExpr, rightExpr: AstExpr): Unit {
+        let loc = TranslateLocation(assign)
         if (subscriptExpr.indexExprs.size != 1) {
             throw IllegalArgumentException("faithful AST2CHIR VArray assignment expects exactly one index")
         }
@@ -7773,10 +7846,10 @@ public class Translator {
         let lhsValue = RequireResult(builder.CreateIntrinsic(elementTy, callContext, CurrentBlock()))
         var compoundValue: Value
         if (assign.op == AstTokenKind.AND_ASSIGN) {
-            compoundValue = TransShortCircuitAnd(lhsValue, rightExpr) ??
+            compoundValue = TransShortCircuitAnd(lhsValue, rightExpr, loc, false) ??
                 throw IllegalStateException("faithful AST2CHIR VArray &&= produced no value")
         } else if (assign.op == AstTokenKind.OR_ASSIGN) {
-            compoundValue = TransShortCircuitOr(lhsValue, rightExpr) ??
+            compoundValue = TransShortCircuitOr(lhsValue, rightExpr, loc, false) ??
                 throw IllegalStateException("faithful AST2CHIR VArray ||= produced no value")
         } else {
             let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
