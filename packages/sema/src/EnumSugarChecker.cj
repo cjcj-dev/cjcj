@@ -41,7 +41,11 @@ public class EnumSugarChecker {
             return (true, ArrayList<Decl>())
         }
         let target = CheckEnumSugarTargets()
-        ModifyTargetOfRef(refExpr, target, enumSugarTargets)
+        let nullableTargets = ArrayList<Option<Decl>>()
+        for (candidate in enumSugarTargets) {
+            nullableTargets.add(Some(candidate))
+        }
+        ModifyTargetOfRef(refExpr, target, nullableTargets)
         return (true, CloneResolvedTargets())
     }
 

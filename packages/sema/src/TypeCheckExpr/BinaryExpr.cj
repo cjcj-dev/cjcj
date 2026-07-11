@@ -38,7 +38,7 @@ private func BinaryInvalid(be: BinaryExpr): Ty {
 private class TargetSnapshot {
     let node: Node
     let target: Option<Decl>
-    let targets: ArrayList<Decl> = ArrayList<Decl>()
+    let targets: ArrayList<Option<Decl>> = ArrayList<Option<Decl>>()
 
     init(node: Node) {
         this.node = node
@@ -58,7 +58,10 @@ private class TargetSnapshot {
         } else if (let Some(memberAccess) <- (node as MemberAccess)) {
             memberAccess.targets.clear()
             for (value2 in targets) {
-                memberAccess.targets.add(value2)
+                match (value2) {
+                    case Some(decl) => memberAccess.targets.add(Some(decl))
+                    case None => memberAccess.targets.add(None)
+                }
             }
         } else if (let Some(refType) <- (node as RefType)) {
             refType.ref.targets.clear()

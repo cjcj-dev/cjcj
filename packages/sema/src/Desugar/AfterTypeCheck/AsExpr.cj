@@ -20,7 +20,7 @@ private func CreateAsExprSomeCall(someDecl: FuncDecl, asType: Type, varDecl: Var
     if (!someCtorTy.paramTys.isEmpty()) {
         someRef.instTys.add(someCtorTy.paramTys[0])
     }
-    someRef.ref.targets.add(someDecl)
+    someRef.ref.targets.add(Some(someDecl))
     someRef.isAlone = false
     someRef.SetTy(someCtorTy)
     let newVarRef = CreateRefExpr(varDecl)

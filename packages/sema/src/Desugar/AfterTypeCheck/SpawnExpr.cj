@@ -95,7 +95,7 @@ public func DesugarSpawnExpr(typeManager: TypeManager, expr: SpawnExpr): Unit {
                                 let refExpr = CreateRefExprInCore(FUTURE_CLASS_NAME)
                                 refExpr.isAlone = false
                                 refExpr.ref.target = initDecl
-                                refExpr.ref.targets.add(initDecl)
+                                refExpr.ref.targets.add(Some(initDecl))
                                 refExpr.instTys.add(funcTy.retTy)
                                 if (let Some(futureClassTy) <- futureClass.GetTy()) {
                                     if (futureClassTy.typeArgs.size != 1) {

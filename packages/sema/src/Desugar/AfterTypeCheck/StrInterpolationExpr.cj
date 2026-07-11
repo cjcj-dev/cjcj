@@ -219,7 +219,7 @@ private func CreateAppendCall(typeManager: TypeManager, pkg: Package, litConstEx
             let toStringFunc = CreateMemberAccess(block, toStringDecl)
             interpolation.block = None
             toStringFunc.target = toStringDecl
-            toStringFunc.targets.add(toStringDecl)
+            toStringFunc.targets.add(Some(toStringDecl))
             CopyBasicInfo(block, toStringFunc)
             let toStringCall = CreateCallExpr(toStringFunc, ArrayList<FuncArg>(),
                 AsFuncDecl(Some(toStringDecl)), FuncRetTy(toStringDecl), CallKind.CALL_DECLARED_FUNCTION)
@@ -243,7 +243,7 @@ private func CreateAppendCall(typeManager: TypeManager, pkg: Package, litConstEx
     let realAppendDecl = appendDecl.getOrThrow()
     let appendFunc = CreateMemberAccess(CreateRefExpr(sbItem, partExpr), realAppendDecl)
     appendFunc.target = realAppendDecl
-    appendFunc.targets.add(realAppendDecl)
+    appendFunc.targets.add(Some(realAppendDecl))
     CopyBasicInfo(partExpr, appendFunc)
     let appendCall = CreateCallExpr(appendFunc, appendArgs, AsFuncDecl(Some(realAppendDecl)),
         Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)), CallKind.CALL_DECLARED_FUNCTION)
@@ -318,7 +318,7 @@ public func DesugarStrInterpolationExpr(typeManager: TypeManager, pkg: Package, 
         let toStringDecl = toStringDecls[0]
         let toStringFunc = CreateMemberAccess(CreateRefExpr(sbItem, litConstExpr), toStringDecl)
         toStringFunc.target = toStringDecl
-        toStringFunc.targets.add(toStringDecl)
+        toStringFunc.targets.add(Some(toStringDecl))
         CopyBasicInfo(sbCtorCall, toStringFunc)
         let toStringCall = CreateCallExpr(toStringFunc, ArrayList<FuncArg>(), AsFuncDecl(Some(toStringDecl)),
             FuncRetTy(toStringDecl), CallKind.CALL_DECLARED_FUNCTION)

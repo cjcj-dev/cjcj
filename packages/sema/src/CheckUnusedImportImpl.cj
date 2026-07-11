@@ -253,7 +253,7 @@ private class CheckUnusedImportImpl {
         }
         AddUsedTarget(node, node.GetTarget().getOrThrow())
         for (target in node.GetTargets()) {
-            AddUsedTarget(node, target)
+            AddUsedTarget(node, target.getOrThrow())
         }
     }
 

@@ -75,22 +75,15 @@ private func TypeCheckReferenceFieldRange(ma: MemberAccess): BasicRange {
     return TypeCheckReferenceRange(ma)
 }
 
-private func TypeCheckReferenceAddUniqueDecl(values: ArrayList<Decl>, decl: Decl): Unit {
-    for (value in values) {
-        if (SameDecl(value, decl)) {
-            return
-        }
-    }
-    values.add(decl)
-}
-
-private func TypeCheckReferenceAllFuncDecl(values: ArrayList<Decl>): Bool {
+private func TypeCheckReferenceAllFuncDecl(values: ArrayList<Option<Decl>>): Bool {
     if (values.isEmpty()) {
         return false
     }
     for (value in values) {
-        if (value.astKind != ASTKind.FUNC_DECL) {
-            return false
+        if (let Some(decl) <- value) {
+            if (decl.astKind != ASTKind.FUNC_DECL) {
+                return false
+            }
         }
     }
     return true
@@ -106,10 +99,6 @@ private func TypeCheckReferenceAllMemberDecl(values: ArrayList<Decl>): Bool {
         }
     }
     return true
-}
-
-private func TypeCheckReferenceRemoveAt(values: ArrayList<Decl>, idx: Int64): Unit {
-    values.remove(at: idx)
 }
 
 private func TypeCheckReferenceFuncScopeLevel(funcDecl: FuncDecl): Int64 {
@@ -165,14 +154,16 @@ private func TypeCheckReferenceAddUniqueFunc(tm: TypeManager, values: ArrayList<
     values.add(decl)
 }
 
-private func TypeCheckReferenceFilterShadowedFuncs(tm: TypeManager, targets: ArrayList<Decl>): Unit {
+private func TypeCheckReferenceFilterShadowedFuncs(tm: TypeManager, targets: ArrayList<Option<Decl>>): Unit {
     if (!TypeCheckReferenceAllFuncDecl(targets)) {
         return
     }
     let funcs = ArrayList<FuncDecl>()
     for (target in targets) {
-        if (let Some(funcDecl) <- (target as FuncDecl)) {
-            TypeCheckReferenceAddUniqueFunc(tm, funcs, funcDecl)
+        if (let Some(decl) <- target) {
+            if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                TypeCheckReferenceAddUniqueFunc(tm, funcs, funcDecl)
+            }
         }
     }
     let filtered = ArrayList<FuncDecl>()
@@ -193,21 +184,42 @@ private func TypeCheckReferenceFilterShadowedFuncs(tm: TypeManager, targets: Arr
             }
         }
     }
-    targets.clear()
-    for (funcDecl in filtered) {
-        targets.add(funcDecl)
+    var idx: Int64 = 0
+    while (idx < targets.size) {
+        if (let Some(decl) <- targets[idx]) {
+            if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                var keep = false
+                for (filteredFunc in filtered) {
+                    if (SameDecl(funcDecl, filteredFunc)) {
+                        keep = true
+                        break
+                    }
+                }
+                if (!keep) {
+                    targets.remove(at: idx)
+                    continue
+                }
+            }
+        }
+        idx++
     }
 }
 
-private func TypeCheckReferenceFilterMacroFuncTargets(curFuncBody: Option<FuncBody>, targets: ArrayList<Decl>): Unit {
+private func TypeCheckReferenceFilterMacroFuncTargets(curFuncBody: Option<FuncBody>,
+    targets: ArrayList<Option<Decl>>): Unit {
     var idx: Int64 = 0
     while (idx < targets.size) {
+        if (let None <- targets[idx]) {
+            idx++
+            continue
+        }
+        let target = targets[idx].getOrThrow()
         var removeTarget = false
         if (let None <- curFuncBody) {
-            removeTarget = targets[idx].TestAttr(Attribute.MACRO_FUNC)
+            removeTarget = target.TestAttr(Attribute.MACRO_FUNC)
         } else {
             let funcBody = curFuncBody.getOrThrow()
-            removeTarget = !funcBody.TestAttr(Attribute.MACRO_INVOKE_BODY) && targets[idx].TestAttr(Attribute.MACRO_FUNC)
+            removeTarget = !funcBody.TestAttr(Attribute.MACRO_INVOKE_BODY) && target.TestAttr(Attribute.MACRO_FUNC)
         }
         if (removeTarget) {
             targets.remove(at: idx)
@@ -221,12 +233,30 @@ private func TypeCheckReferenceFilterCandidatesForRef(
     tm: TypeManager,
     ctx: ASTContext,
     re: RefExpr,
-    targets: ArrayList<Decl>
+    targets: ArrayList<Option<Decl>>
 ): Unit {
     let curFuncBody = TypeCheckReferenceGetCurFuncBody(ctx, re.scopeName)
     TypeCheckReferenceFilterMacroFuncTargets(curFuncBody, targets)
     if (let Some(outerDecl) <- TypeCheckReferenceGetCurInheritableDecl(ctx, re.scopeName)) {
-        let _ = TypeCheckReferenceFilterTargetsInExtend(tm, re, outerDecl.GetTy(), targets)
+        let nonNullTargets = ArrayList<Decl>()
+        for (target in targets) {
+            if (let Some(decl) <- target) { nonNullTargets.add(decl) }
+        }
+        let _ = TypeCheckReferenceFilterTargetsInExtend(tm, re, outerDecl.GetTy(), nonNullTargets)
+        var idx: Int64 = 0
+        while (idx < targets.size) {
+            if (let Some(decl) <- targets[idx]) {
+                var keep = false
+                for (candidate in nonNullTargets) {
+                    if (SameDecl(decl, candidate)) {
+                        keep = true
+                        break
+                    }
+                }
+                if (!keep) { targets.remove(at: idx); continue }
+            }
+            idx++
+        }
     }
     TypeCheckReferenceFilterShadowedFuncs(tm, targets)
 }
@@ -259,16 +289,21 @@ private func TypeCheckReferenceCheckForQuestFuncRetType(
 private func TypeCheckReferenceCheckAmbiguousImportedNonFuncs(
     diag: BasicDiagnosticEngine,
     expr: Expr,
-    targets: ArrayList<Decl>,
+    targets: ArrayList<Option<Decl>>,
     name: String
 ): Bool {
-    let source = ArrayList<Decl>()
+    let source = ArrayList<Option<Decl>>()
     let imported = ArrayList<Decl>()
-    for (target in targets) {
+    for (targetOpt in targets) {
+        if (let None <- targetOpt) {
+            source.add(None)
+            continue
+        }
+        let target = targetOpt.getOrThrow()
         if (target.TestAttr(Attribute.IMPORTED)) {
             imported.add(target)
         } else {
-            source.add(target)
+            source.add(Some(target))
         }
     }
     if (!source.isEmpty() && !TypeCheckReferenceAllFuncDecl(source)) {
@@ -536,13 +571,18 @@ public func TypeCheckReferenceCheckTargetTypeArgs(decl: Option<Decl>, numTypeArg
     return false
 }
 
-public func TypeCheckReferenceRemoveDuplicateTargets(tm: TypeManager, targets: ArrayList<Decl>): Unit {
+public func TypeCheckReferenceRemoveDuplicateTargets(tm: TypeManager, targets: ArrayList<Option<Decl>>): Unit {
     var idx: Int64 = 0
     while (idx < targets.size) {
         var seen = false
         var prev: Int64 = 0
         while (prev < idx) {
-            if (TypeCheckReferenceSameTarget(tm, targets[prev], targets[idx])) {
+            let same = match ((targets[prev], targets[idx])) {
+                case (None, None) => true
+                case (Some(left), Some(right)) => TypeCheckReferenceSameTarget(tm, left, right)
+                case _ => false
+            }
+            if (same) {
                 seen = true
                 break
             }
@@ -559,7 +599,7 @@ public func TypeCheckReferenceRemoveDuplicateTargets(tm: TypeManager, targets: A
 public func TypeCheckReferenceIsRefTypeArgSizeValid(
     diag: BasicDiagnosticEngine,
     expr: Expr,
-    targets: ArrayList<Decl>
+    targets: ArrayList<Option<Decl>>
 ): Bool {
     let typeArgs = expr.GetTypeArgs()
     if (typeArgs.isEmpty()) {
@@ -568,15 +608,14 @@ public func TypeCheckReferenceIsRefTypeArgSizeValid(
     let numTypeArgs = typeArgs.size
     var isValid = false
     let typeAliasSubstituted = typeArgs[0].TestAttr(Attribute.COMPILER_ADD) && !targets.isEmpty() &&
-        targets[0].astKind == ASTKind.TYPE_ALIAS_DECL
+        targets[0].getOrThrow().astKind == ASTKind.TYPE_ALIAS_DECL
     if (typeAliasSubstituted) {
-        let targetOpt: Option<Decl> = targets[0]
-        isValid = TypeCheckReferenceCheckTargetTypeArgs(GetRealTarget(targetOpt), numTypeArgs)
+        isValid = TypeCheckReferenceCheckTargetTypeArgs(GetRealTarget(targets[0]), numTypeArgs)
     } else {
         var idx: Int64 = 0
         while (idx < targets.size) {
-            if (!TypeCheckReferenceCheckTargetTypeArgs(Some(targets[idx]), numTypeArgs)) {
-                TypeCheckReferenceRemoveAt(targets, idx)
+            if (!TypeCheckReferenceCheckTargetTypeArgs(targets[idx], numTypeArgs)) {
+                targets.remove(at: idx)
             } else {
                 isValid = true
                 idx++
@@ -594,19 +633,23 @@ public func TypeCheckReferenceIsRefTypeArgSizeValid(
 public func TypeCheckReferenceFilterInvalidEnumTargets(
     diag: BasicDiagnosticEngine,
     nre: NameReferenceExpr,
-    targets: ArrayList<Decl>
+    targets: ArrayList<Option<Decl>>
 ): Bool {
     if (targets.isEmpty()) {
         return true
     }
-    let candidates = ArrayList<Decl>()
+    let candidates = ArrayList<Option<Decl>>()
     for (target in targets) {
         candidates.add(target)
     }
     let maOpt = nre as MemberAccess
     var idx: Int64 = 0
     while (idx < targets.size) {
-        let target = targets[idx]
+        if (let None <- targets[idx]) {
+            idx++
+            continue
+        }
+        let target = targets[idx].getOrThrow()
         var hasCallOrPattern = false
         if (let Some(_) <- nre.callOrPattern) {
             hasCallOrPattern = true
@@ -629,9 +672,9 @@ public func TypeCheckReferenceFilterInvalidEnumTargets(
         let builder = diag.DiagnoseRefactor(
             BasicDiagKindRefactor.sema_enum_constructor_with_param_must_have_args,
             TypeCheckReferenceRange(nre),
-            arguments: [candidates[0].identifier.Val()])
+            arguments: [candidates[0].getOrThrow().identifier.Val()])
         for (candidate in candidates) {
-            builder.AddNote(TypeCheckReferenceRange(candidate), "found candidate")
+            builder.AddNote(TypeCheckReferenceRange(candidate.getOrThrow()), "found candidate")
         }
         builder.Emit()
         return false
@@ -642,17 +685,22 @@ public func TypeCheckReferenceFilterInvalidEnumTargets(
 public func TypeCheckReferenceFilterTargetsForFuncReference(
     diag: BasicDiagnosticEngine,
     expr: Expr,
-    targets: ArrayList<Decl>
+    targets: ArrayList<Option<Decl>>
 ): Bool {
     let typeArgs = expr.GetTypeArgs()
     if (typeArgs.isEmpty() && !targets.isEmpty()) {
         var idx: Int64 = 0
         while (idx < targets.size) {
+            if (let None <- targets[idx]) {
+                idx++
+                continue
+            }
+            let target = targets[idx].getOrThrow()
             var hasGeneric = false
-            if (let Some(_) <- targets[idx].GetGeneric()) {
+            if (let Some(_) <- target.GetGeneric()) {
                 hasGeneric = true
             }
-            if (targets[idx].IsFunc() && hasGeneric) {
+            if (target.IsFunc() && hasGeneric) {
                 targets.remove(at: idx)
             } else {
                 idx++
@@ -670,7 +718,7 @@ public func TypeCheckReferenceFilterTargetsForFuncReference(
     if (targets.size > 1 && TypeCheckReferenceAllFuncDecl(targets)) {
         let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_ambiguous_use,
             TypeCheckReferenceRange(expr),
-            arguments: [targets[0].identifier.Val()])
+            arguments: [targets[0].getOrThrow().identifier.Val()])
         builder.Emit()
         targets.clear()
         return false
@@ -762,7 +810,7 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
     tm: TypeManager,
     ctx: ASTContext,
     re: RefExpr,
-    targets: ArrayList<Decl>
+    targets: ArrayList<Option<Decl>>
 ): Bool {
     TypeCheckReferenceRemoveDuplicateTargets(tm, targets)
     TypeCheckReferenceFilterCandidatesForRef(tm, ctx, re, targets)
@@ -773,7 +821,7 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
         builder.Emit()
         return false
     }
-    if (targets.size == 1 && targets[0].astKind == ASTKind.PACKAGE_DECL && re.isAlone) {
+    if (targets.size == 1 && targets[0].getOrThrow().astKind == ASTKind.PACKAGE_DECL && re.isAlone) {
         let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_cannot_ref_to_pkg_name,
             TypeCheckReferenceRange(re))
         builder.Emit()
@@ -799,7 +847,7 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
     if (targets.isEmpty()) {
         return false
     }
-    return TypeCheckReferenceCheckForQuestFuncRetType(diag, targets[0], re, hasTarget)
+    return TypeCheckReferenceCheckForQuestFuncRetType(diag, targets[0].getOrThrow(), re, hasTarget)
 }
 
 public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
@@ -832,7 +880,11 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
         builder.Emit()
         return false
     }
-    TypeCheckReferenceRemoveDuplicateTargets(tm, targets)
+    let nullableTargets = ArrayList<Option<Decl>>()
+    for (candidate in targets) { nullableTargets.add(Some(candidate)) }
+    TypeCheckReferenceRemoveDuplicateTargets(tm, nullableTargets)
+    targets.clear()
+    for (candidate in nullableTargets) { targets.add(candidate.getOrThrow()) }
     var baseTy: Option<Ty> = None
     if (let Some(baseExpr) <- ma.baseExpr) {
         baseTy = baseExpr.GetTy()
@@ -841,10 +893,16 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
         TypeCheckReferenceDiagMemberAccessNotFound(diag, tm, ma, importManager)
         return false
     }
-    if (!TypeCheckReferenceIsRefTypeArgSizeValid(diag, ma, targets) ||
-        !TypeCheckReferenceFilterInvalidEnumTargets(diag, ma, targets)) {
+    nullableTargets.clear()
+    for (candidate in targets) { nullableTargets.add(Some(candidate)) }
+    if (!TypeCheckReferenceIsRefTypeArgSizeValid(diag, ma, nullableTargets) ||
+        !TypeCheckReferenceFilterInvalidEnumTargets(diag, ma, nullableTargets)) {
+        targets.clear()
+        for (candidate in nullableTargets) { targets.add(candidate.getOrThrow()) }
         return false
     }
+    targets.clear()
+    for (candidate in nullableTargets) { targets.add(candidate.getOrThrow()) }
     if (targets.isEmpty()) {
         TypeCheckReferenceDiagMemberAccessNotFound(diag, tm, ma, importManager)
         return false
@@ -869,7 +927,12 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
                 }
             }
         }
-        return TypeCheckReferenceFilterTargetsForFuncReference(diag, ma, targets)
+        nullableTargets.clear()
+        for (candidate in targets) { nullableTargets.add(Some(candidate)) }
+        let valid = TypeCheckReferenceFilterTargetsForFuncReference(diag, ma, nullableTargets)
+        targets.clear()
+        for (candidate in nullableTargets) { targets.add(candidate.getOrThrow()) }
+        return valid
     }
     if (targets.isEmpty()) {
         return false
@@ -902,7 +965,7 @@ public func TypeCheckReferenceFilterAndGetTargetsOfObjAccess(
             targets.remove(at: idx)
         } else {
             if (decl.astKind == ASTKind.FUNC_DECL) {
-                ma.targets.add(decl)
+                ma.targets.add(Some(decl))
             }
             idx++
         }
@@ -919,9 +982,14 @@ public func TypeCheckReferenceFilterAndGetTargetsOfObjAccess(
             return None
         }
         let accessibleDecls = GetAccessibleDecls(tm, ctx, ma, targets)
-        if (!accessibleDecls.isEmpty() &&
-            !TypeCheckReferenceFilterTargetsForFuncReference(diag, ma, accessibleDecls)) {
-            return None
+        if (!accessibleDecls.isEmpty()) {
+            let nullableAccessibleDecls = ArrayList<Option<Decl>>()
+            for (candidate in accessibleDecls) { nullableAccessibleDecls.add(Some(candidate)) }
+            if (!TypeCheckReferenceFilterTargetsForFuncReference(diag, ma, nullableAccessibleDecls)) {
+                return None
+            }
+            accessibleDecls.clear()
+            for (candidate in nullableAccessibleDecls) { accessibleDecls.add(candidate.getOrThrow()) }
         }
         return if (accessibleDecls.isEmpty()) { Some(targets[0]) } else { Some(accessibleDecls[0]) }
     }
@@ -1068,7 +1136,10 @@ public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
     let declOpt: Option<Decl> = if (let Some(value) <- ma.target) {
         Some(value)
     } else if (!ma.targets.isEmpty()) {
-        Some(ma.targets[0])
+        match (ma.targets[0]) {
+            case Some(funcDecl) => Some(funcDecl)
+            case None => None
+        }
     } else {
         None
     }
@@ -1130,19 +1201,19 @@ private func TypeCheckReferencePrimaryTargetOfRefExpr(re: RefExpr): Option<Decl>
         return Some(target)
     }
     if (!re.ref.targets.isEmpty()) {
-        return Some(re.ref.targets[0])
+        return re.ref.targets[0]
     }
     return None
 }
 
-private func TypeCheckReferenceCopyTargetsOrSingle(targets: ArrayList<Decl>, fallback: Decl): ArrayList<Decl> {
+private func TypeCheckReferenceCopyTargetsOrSingle(targets: ArrayList<Option<Decl>>, fallback: Decl): ArrayList<Decl> {
     let out = ArrayList<Decl>()
     if (targets.isEmpty()) {
         out.add(fallback)
         return out
     }
     for (target in targets) {
-        out.add(target)
+        out.add(target.getOrThrow())
     }
     return out
 }
@@ -1691,7 +1762,16 @@ public func TypeCheckReferenceAddFuncTargetsForMemberAccess(memberAccess: Member
     memberAccess.targets.clear()
     for (target in targets) {
         if (memberAccess.isPattern || target.astKind == ASTKind.FUNC_DECL) {
-            TypeCheckReferenceAddUniqueDecl(memberAccess.targets, target)
+            var exists = false
+            for (candidate in memberAccess.targets) {
+                if (SameDecl(candidate.getOrThrow(), target)) {
+                    exists = true
+                    break
+                }
+            }
+            if (!exists) {
+                memberAccess.targets.add(Some(target))
+            }
         }
     }
 }

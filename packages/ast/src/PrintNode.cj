@@ -326,10 +326,10 @@ private class PrintState {
         }
     }
 
-    private func printTargets(indent: UInt64, values: ArrayList<Decl>): Unit {
+    private func printTargets<T>(indent: UInt64, values: ArrayList<Option<T>>): Unit where T <: Decl {
         printLine(indent, "targets [")
         for (target in values) {
-            printTarget(indent + 1u64, target, "target")
+            printTarget(indent + 1u64, target.getOrThrow(), "target")
         }
         printLine(indent, "]")
     }

@@ -97,7 +97,7 @@ private func CreateRefSome(someTy: FuncTy): Option<RefExpr> {
         if (let Some(enumDecl) <- enumTy.declPtr) {
             if (let Some(decl) <- LookupEnumMember(enumDecl, OPTION_SOME)) {
                 let refExpr = CreateRefExpr(decl)
-                refExpr.ref.targets.add(decl)
+                refExpr.ref.targets.add(Some(decl))
                 refExpr.SetTy(someTy)
                 for (typeArg in enumTy.typeArgs) {
                     refExpr.instTys.add(typeArg)
@@ -207,7 +207,7 @@ private func CopyResourceSource(resource: VarDecl, target: Node): Unit {
 
 private func CreateResourceCall(resource: VarDecl, funcDecl: FuncDecl): CallExpr {
     let baseFunc = CreateMemberAccess(CreateRefExpr(resource), funcDecl)
-    baseFunc.targets.add(funcDecl)
+    baseFunc.targets.add(Some(funcDecl))
     if (let Some(baseExpr) <- baseFunc.baseExpr) {
         CopyResourceSource(resource, baseExpr)
     }

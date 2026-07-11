@@ -321,18 +321,20 @@ private func ResolveEnumPatternRefBase(typeManager: TypeManager, ctx: ASTContext
         return Some(target)
     }
     for (target in refExpr.ref.targets) {
-        if (IsEnumPatternBaseDecl(target)) {
-            ReplaceTarget(refExpr, Some(target), insertTarget: false)
-            if (let Some(ty) <- target.GetTy()) {
+        let decl = target.getOrThrow()
+        if (IsEnumPatternBaseDecl(decl)) {
+            ReplaceTarget(refExpr, Some(decl), insertTarget: false)
+            if (let Some(ty) <- decl.GetTy()) {
                 refExpr.SetTy(ty)
             }
-            return Some(target)
+            return Some(decl)
         }
     }
-    for (target in LookupTopLevel(typeManager, ctx, refExpr.ref.identifier.Val(),
+    for (targetOpt in LookupTopLevel(typeManager, ctx, refExpr.ref.identifier.Val(),
         BindingScopeName(refExpr.scopeName), refExpr)) {
+        let target = targetOpt.getOrThrow()
         if (IsEnumPatternBaseDecl(target)) {
-            refExpr.ref.targets.add(target)
+            refExpr.ref.targets.add(Some(target))
             ReplaceTarget(refExpr, Some(target), insertTarget: false)
             if (let Some(ty) <- target.GetTy()) {
                 refExpr.SetTy(ty)
@@ -365,15 +367,19 @@ private func ResolveEnumPatternMemberAccess(typeManager: TypeManager, ctx: ASTCo
     let base = member.baseExpr.getOrThrow()
     if (let Some(baseDecl) <- ResolveEnumPatternMemberBase(typeManager, ctx, base)) {
         let info = LookupInfo(lookupExtend: false, file: member.curFile)
+        let candidates = ArrayList<Decl>()
         for (target in FieldLookup(typeManager, Some(baseDecl), member.field.Val(), info: info)) {
             if (resolveBase) {
-                AddEnumPatternBaseCandidate(member.targets, target)
+                AddEnumPatternBaseCandidate(candidates, target)
             } else {
-                AddEnumPatternCandidate(member.targets, target)
+                AddEnumPatternCandidate(candidates, target)
             }
         }
+        for (candidate in candidates) {
+            member.targets.add(Some(candidate))
+        }
         if (!member.targets.isEmpty()) {
-            let first = member.targets[0]
+            let first = member.targets[0].getOrThrow()
             ReplaceTarget(member, Some(first), insertTarget: false)
             if (let Some(ty) <- first.GetTy()) {
                 member.SetTy(ty)
@@ -405,7 +411,7 @@ private func FindEnumPatternTargets(typeManager: TypeManager, ctx: ASTContext,
                 AddEnumOwnedDecl(result, target)
             }
             for (target in member.targets) {
-                AddEnumOwnedDecl(result, target)
+                AddEnumOwnedDecl(result, target.getOrThrow())
             }
             return result
         }
@@ -423,7 +429,7 @@ private func FindEnumPatternTargets(typeManager: TypeManager, ctx: ASTContext,
                 AddEnumOwnedDecl(result, target)
             }
             for (target in refExpr.ref.targets) {
-                AddEnumOwnedDecl(result, target)
+                AddEnumOwnedDecl(result, target.getOrThrow())
             }
             return result
         }

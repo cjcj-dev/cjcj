@@ -109,7 +109,7 @@ private func FuncRetTy(decl: Option<Decl>): Option<Ty> {
 
 private func AddTargetIfFunc(memberAccess: MemberAccess): Unit {
     if (let Some(funcDecl) <- AsFuncDecl(memberAccess.target)) {
-        memberAccess.targets.add(funcDecl)
+        memberAccess.targets.add(Some(funcDecl))
     }
 }
 
@@ -171,7 +171,7 @@ private func CreateClassConstructorCall(typeManager: TypeManager, source: Node, 
         let ctorRef = CreateRefExpr(className)
         ctorRef.isAlone = false
         ctorRef.ref.target = initDecl
-        ctorRef.ref.targets.add(initDecl)
+        ctorRef.ref.targets.add(Some(initDecl))
         if (let Some(initTy) <- initDecl.GetTy()) {
             ctorRef.SetTy(initTy)
         }
@@ -198,7 +198,7 @@ private func CreateDefaultExceptionCall(typeManager: TypeManager, pkg: Package, 
             let ctorRef = CreateRefExpr(CLASS_EXCEPTION_NAME)
             ctorRef.isAlone = false
             ctorRef.ref.target = initDecl
-            ctorRef.ref.targets.add(initDecl)
+            ctorRef.ref.targets.add(Some(initDecl))
             if (let Some(initTy) <- initDecl.GetTy()) {
                 ctorRef.SetTy(initTy)
             }
@@ -224,7 +224,7 @@ private func CreateImmediateHandlerReturnRef(funcTy: FuncTy, ctorName: String): 
         if (let Some(enumDecl) <- enumTy.declPtr) {
             if (let Some(decl) <- LookupEnumMember(enumDecl, ctorName)) {
                 let refExpr = CreateRefExpr(decl)
-                refExpr.ref.targets.add(decl)
+                refExpr.ref.targets.add(Some(decl))
                 refExpr.SetTy(funcTy)
                 for (typeArg in enumTy.typeArgs) {
                     refExpr.instTys.add(typeArg)

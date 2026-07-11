@@ -1197,7 +1197,7 @@ public class MemberAccess <: NameReferenceExpr {
     public var baseExpr: Option<Expr> = None
     public var dotPos: Position = INVALID_POSITION
     public var field: SrcIdentifier = SrcIdentifier()
-    public let targets: ArrayList<Decl> = ArrayList<Decl>()
+    public let targets: ArrayList<Option<Decl>> = ArrayList<Option<Decl>>()
     public var target: Option<Decl> = None
     public let foundUpperBoundMap: ArrayList<(Decl, ArrayList<Ty>)> = ArrayList<(Decl, ArrayList<Ty>)>()
     public var isExposedAccess: Bool = false

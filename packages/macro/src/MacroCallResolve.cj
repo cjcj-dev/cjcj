@@ -158,7 +158,7 @@ private func getAllDeclsForMacroName(macCall: MacroCall, macroName: String, out:
                     }
                 } else {
                     for (importedDecl in instance.importManager.GetImportedDeclsByName(file, identifier)) {
-                        out.add(importedDecl)
+                        out.add(importedDecl.getOrThrow())
                     }
                 }
             }

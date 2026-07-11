@@ -279,15 +279,17 @@ private func CollectCallBaseFuncCandidates(ce: CallExpr): ArrayList<FuncDecl> {
         }
     }
     for (candidate in GetFuncTargets(base)) {
-        AddSpecificOrOriginalFunc(out, candidate)
+        AddSpecificOrOriginalFunc(out, candidate.getOrThrow())
     }
     if (let Some(member) <- (base as MemberAccess)) {
-        for (target in member.targets) {
-            if (let Some(funcDecl) <- (target as FuncDecl)) {
-                AddSpecificOrOriginalFunc(out, funcDecl)
-            } else if (let Some(propDecl) <- (target as PropDecl)) {
-                if (let Some(getter) <- GetUsableGetterForProperty(propDecl)) {
-                    AddSpecificOrOriginalFunc(out, getter)
+        for (targetOpt in member.targets) {
+            if (let Some(target) <- targetOpt) {
+                if (let Some(funcDecl) <- (target as FuncDecl)) {
+                    AddSpecificOrOriginalFunc(out, funcDecl)
+                } else if (let Some(propDecl) <- (target as PropDecl)) {
+                    if (let Some(getter) <- GetUsableGetterForProperty(propDecl)) {
+                        AddSpecificOrOriginalFunc(out, getter)
+                    }
                 }
             }
         }
@@ -537,10 +539,11 @@ private func IsPossibleEnumConstructor(candidates: ArrayList<FuncDecl>, baseExpr
         if (let Some(outer) <- candidates[0].outerDecl) {
             if ((outer as EnumDecl).isSome()) {
                 for (target in re.ref.targets) {
-                    if (let None <- target.GetTy()) {
+                    let decl = target.getOrThrow()
+                    if (let None <- decl.GetTy()) {
                         return true
                     }
-                    if (target.TyKind() != TypeKind.TYPE_FUNC) {
+                    if (decl.TyKind() != TypeKind.TYPE_FUNC) {
                         return true
                     }
                 }
@@ -3311,7 +3314,13 @@ private func GetArgTyPossibilities(typeManager: TypeManager, diag: Option<BasicD
             ceArgs.add(argCandidates)
             continue
         }
-        let validFuncTys = CollectValidFuncTys(typeManager, diag, ctx, targets, expr,
+        let nonNullTargets = ArrayList<FuncDecl>()
+        for (target in targets) {
+            if (let Some(funcDecl) <- target) {
+                nonNullTargets.add(funcDecl)
+            }
+        }
+        let validFuncTys = CollectValidFuncTys(typeManager, diag, ctx, nonNullTargets, expr,
             declSynthesizer: declSynthesizer)
         for (candidate in validFuncTys.candidates) {
             argCandidates.Add(candidate[1])
@@ -4069,7 +4078,8 @@ public func LookupShadowedTopLevelTypeByName(typeManager: TypeManager, ctx: ASTC
     }
     let topLevel = LookupTopLevel(typeManager, ctx, name, scopeName, node, importManager: importManager)
     var found: Option<Decl> = None
-    for (decl in topLevel) {
+    for (declOpt in topLevel) {
+        let decl = declOpt.getOrThrow()
         if (!decl.IsTypeDecl()) {
             continue
         }
@@ -4129,7 +4139,7 @@ private func ShadowedCallBaseTypeCandidate(typeManager: TypeManager, ctx: ASTCon
     if (nearest.isEmpty()) {
         return None
     }
-    let nearestDecl = nearest[0]
+    let nearestDecl = nearest[0].getOrThrow()
     if (nearestDecl.IsTypeDecl() || nearestDecl.TestAttr(Attribute.GLOBAL)) {
         return None
     }
@@ -4160,7 +4170,7 @@ private func RetryCallAsShadowedTypeConstructionWithType(typeManager: TypeManage
     }
     let savedTarget = base.GetTarget()
     let savedBaseTy = base.GetTy()
-    let savedRefTargets = ArrayList<Decl>()
+    let savedRefTargets = ArrayList<Option<Decl>>()
     var savedAlias: Option<TypeAliasDecl> = None
     if (let Some(refExpr) <- (base as RefExpr)) {
         for (decl in refExpr.ref.targets) {
@@ -4169,7 +4179,10 @@ private func RetryCallAsShadowedTypeConstructionWithType(typeManager: TypeManage
         savedAlias = refExpr.aliasTarget
     } else if (let Some(memberAccess) <- (base as MemberAccess)) {
         for (decl in memberAccess.targets) {
-            savedRefTargets.add(decl)
+            match (decl) {
+                case Some(funcDecl) => savedRefTargets.add(Some(funcDecl))
+                case None => savedRefTargets.add(None)
+            }
         }
         savedAlias = memberAccess.aliasTarget
     }
@@ -4219,8 +4232,12 @@ private func RetryCallAsShadowedTypeConstructionWithType(typeManager: TypeManage
         memberAccess3.aliasTarget = savedAlias
         memberAccess3.targets.clear()
         for (decl in savedRefTargets) {
-            if (let Some(funcDecl) <- (decl as FuncDecl)) {
-                memberAccess3.targets.add(funcDecl)
+            if (let Some(value) <- decl) {
+                if (let Some(funcDecl) <- (value as FuncDecl)) {
+                    memberAccess3.targets.add(Some(funcDecl))
+                }
+            } else {
+                memberAccess3.targets.add(None)
             }
         }
     }

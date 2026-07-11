@@ -45,7 +45,7 @@ private func FindSomeConstructor(target: EnumTy): Option<FuncDecl> {
 private func CreateSomeRef(typeManager: TypeManager, target: EnumTy, someDecl: FuncDecl): RefExpr {
     let baseFunc = CreateRefExpr(someDecl)
     baseFunc.EnableAttr(Attribute.IMPLICIT_ADD)
-    baseFunc.ref.targets.add(someDecl)
+    baseFunc.ref.targets.add(Some(someDecl))
     if (let Some(enumDecl) <- GetTargetEnumDecl(target)) {
         if (let Some(someTy) <- someDecl.GetTy()) {
             let typeMapping = GenerateTypeMapping(enumDecl, target.typeArgs)

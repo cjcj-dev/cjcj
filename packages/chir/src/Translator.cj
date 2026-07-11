@@ -8586,7 +8586,7 @@ public class Translator {
             return target
         }
         if (member.targets.size == 1) {
-            return member.targets[0]
+            return member.targets[0].getOrThrow()
         }
         if (let Some(target) <- ResolveMemberAccessTargetFromBase(member)) {
             return target

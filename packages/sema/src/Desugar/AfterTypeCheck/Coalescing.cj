@@ -63,7 +63,7 @@ public func ConstructOptionMatch(selector: Expr, someExpr: Block, otherExpr: Blo
                         matchExpr.selector = selector
                         let valueRef = CreateRefExpr(ctorDecl)
                         valueRef.SetTy(someTy)
-                        valueRef.ref.targets.add(ctorDecl)
+                        valueRef.ref.targets.add(Some(ctorDecl))
                         if (let Some(valCase) <- GetValueMatchCase(valueRef, someExpr, someVar, selector)) {
                             matchExpr.matchCases.add(valCase)
                             otherExpr.curFile = selector.curFile

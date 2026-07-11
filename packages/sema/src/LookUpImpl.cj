@@ -755,23 +755,34 @@ private func lookupSourcePackageName(ctx: ASTContext, node: Node): String {
     return ""
 }
 
-private func collectImportedDeclsByName(ctx: ASTContext, node: Node, name: String): ArrayList<Decl> {
-    let results = ArrayList<Decl>()
+private func collectImportedDeclsByName(ctx: ASTContext, node: Node, name: String): ArrayList<Option<Decl>> {
+    let reExportResults = ArrayList<Decl>()
     let sourcePkgName = lookupSourcePackageName(ctx, node)
     if (let Some(pkg) <- ctx.curPackage) {
         for (file in pkg.files) {
             for (importSpec in file.imports) {
                 if (importSpec.IsReExport()) {
-                    collectImportedDeclsFromSpec(ctx, sourcePkgName, importSpec, name, results)
+                    collectImportedDeclsFromSpec(ctx, sourcePkgName, importSpec, name, reExportResults)
                 }
             }
         }
     }
+    let importedResults = ArrayList<Decl>()
     if (let Some(file) <- node.curFile) {
         for (importSpec in file.imports) {
             if (!importSpec.IsReExport()) {
-                collectImportedDeclsFromSpec(ctx, sourcePkgName, importSpec, name, results)
+                collectImportedDeclsFromSpec(ctx, sourcePkgName, importSpec, name, importedResults)
             }
+        }
+    }
+    let results = ArrayList<Option<Decl>>()
+    for (decl in reExportResults) {
+        results.add(Some(decl))
+    }
+    if (!importedResults.isEmpty()) {
+        if (!reExportResults.isEmpty()) { results.add(None) }
+        for (decl in importedResults) {
+            results.add(Some(decl))
         }
     }
     return results
@@ -946,46 +957,71 @@ private func lookupImpl(typeManager: TypeManager, ctx: ASTContext, name: String,
 }
 
 public func Lookup(typeManager: TypeManager, ctx: ASTContext, name: String, scopeName: String, node: Node,
-    isSetter!: Bool = false, importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
+    isSetter!: Bool = false, importManager!: Option<SemaImportManager> = None): ArrayList<Option<Decl>> {
     return lookupCommon(typeManager, ctx, name, scopeName, node, false, isSetter, importManager: importManager)
 }
 
 public func LookupTopLevel(typeManager: TypeManager, ctx: ASTContext, name: String, scopeName: String, node: Node,
-    isSetter!: Bool = false, importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
+    isSetter!: Bool = false, importManager!: Option<SemaImportManager> = None): ArrayList<Option<Decl>> {
     return lookupCommon(typeManager, ctx, name, scopeName, node, true, isSetter, importManager: importManager)
 }
 
 private func lookupCommon(typeManager: TypeManager, ctx: ASTContext, name: String, scopeName: String, node: Node,
-    onlyLookUpTopLevel: Bool, isSetter: Bool, importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
-    let results = ArrayList<Decl>()
+    onlyLookUpTopLevel: Bool, isSetter: Bool, importManager!: Option<SemaImportManager> = None): ArrayList<Option<Decl>> {
+    let foundResults = ArrayList<Decl>()
     for (decl in stdLibFieldLookup(ctx, node, name, importManager: importManager)) {
-        results.add(decl)
+        foundResults.add(decl)
     }
-    if (!results.isEmpty() || name == INVALID_IDENTIFIER || scopeName.isEmpty()) {
+    if (!foundResults.isEmpty() || name == INVALID_IDENTIFIER || scopeName.isEmpty()) {
+        let results = ArrayList<Option<Decl>>()
+        for (decl in foundResults) { results.add(Some(decl)) }
         return results
     }
-    if (lookupImpl(typeManager, ctx, name, scopeName, node, onlyLookUpTopLevel, isSetter, results)) {
+    if (lookupImpl(typeManager, ctx, name, scopeName, node, onlyLookUpTopLevel, isSetter, foundResults)) {
+        let results = ArrayList<Option<Decl>>()
+        for (decl in foundResults) { results.add(Some(decl)) }
         return results
     }
-    if (!results.isEmpty() && !isAllFuncDecl(results)) {
+    if (!foundResults.isEmpty() && !isAllFuncDecl(foundResults)) {
+        let results = ArrayList<Option<Decl>>()
+        for (decl in foundResults) { results.add(Some(decl)) }
         return results
     }
+    let results = ArrayList<Option<Decl>>()
+    for (decl in foundResults) { results.add(Some(decl)) }
     if (let Some(manager) <- importManager) {
         if (let Some(file) <- node.curFile) {
-            for (decl in manager.GetImportedDeclsByName(file, name)) {
-                addDeclUnique(results, decl)
+            for (declOpt in manager.GetImportedDeclsByName(file, name)) {
+                if (let Some(decl) <- declOpt) {
+                    var exists = false
+                    for (candidate in results) {
+                        if (let Some(value) <- candidate) {
+                            if (sameImportedAwareDecl(value, decl)) {
+                                exists = true
+                                break
+                            }
+                        }
+                    }
+                    if (!exists) { results.add(Some(decl)) }
+                } else {
+                    results.add(None)
+                }
             }
         }
         return results
     }
-    for (decl in collectResolvedImportedDeclsByName(ctx, node, name)) {
-        addDeclUnique(results, decl)
+    let resolvedImported = collectResolvedImportedDeclsByName(ctx, node, name)
+    if (!resolvedImported.isEmpty() && !results.isEmpty()) {
+        results.add(None)
+    }
+    for (decl in resolvedImported) {
+        results.add(Some(decl))
     }
     if (!results.isEmpty()) {
         return results
     }
     for (decl in collectImportedDeclsByName(ctx, node, name)) {
-        addDeclUnique(results, decl)
+        results.add(decl)
     }
     return results
 }

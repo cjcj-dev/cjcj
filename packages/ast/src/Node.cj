@@ -298,14 +298,19 @@ public open class Node <: Hashable & Equatable<Node> {
         return true
     }
 
-    public func GetTargets(): ArrayList<Decl> {
-        let out = ArrayList<Decl>()
+    public func GetTargets(): ArrayList<Option<Decl>> {
+        let out = ArrayList<Option<Decl>>()
         if (let Some(refType) <- (this as RefType)) {
             for (target in refType.ref.targets) { out.add(target) }
         } else if (let Some(refExpr) <- (this as RefExpr)) {
             for (target in refExpr.ref.targets) { out.add(target) }
         } else if (let Some(member) <- (this as MemberAccess)) {
-            for (target in member.targets) { out.add(target) }
+            for (target in member.targets) {
+                match (target) {
+                    case Some(funcDecl) => out.add(Some(funcDecl))
+                    case None => out.add(None)
+                }
+            }
         }
         return out
     }
@@ -657,7 +662,7 @@ public class Annotation <: Node {
 public class Reference {
     public var identifier: SrcIdentifier = SrcIdentifier()
     public var target: Option<Decl> = None
-    public let targets: ArrayList<Decl> = ArrayList<Decl>()
+    public let targets: ArrayList<Option<Decl>> = ArrayList<Option<Decl>>()
 
     public init() {}
 

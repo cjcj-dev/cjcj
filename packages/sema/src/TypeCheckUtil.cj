@@ -323,9 +323,9 @@ public func ReplaceTarget(node: Node, target: Option<Decl>, insertTarget!: Bool 
     }
 }
 
-public func ModifyTargetOfRef(refExpr: RefExpr, target: Decl, targets: ArrayList<Decl>): Unit {
+public func ModifyTargetOfRef(refExpr: RefExpr, target: Decl, targets: ArrayList<Option<Decl>>): Unit {
     ReplaceTarget(refExpr, Some(target))
-    let copiedTargets = ArrayList<Decl>()
+    let copiedTargets = ArrayList<Option<Decl>>()
     for (candidate in targets) {
         copiedTargets.add(candidate)
     }
@@ -335,15 +335,17 @@ public func ModifyTargetOfRef(refExpr: RefExpr, target: Decl, targets: ArrayList
     }
 }
 
-public func AddFuncTargetsForMemberAccess(memberAccess: MemberAccess, targets: ArrayList<Decl>): Unit {
-    let copiedTargets = ArrayList<Decl>()
+public func AddFuncTargetsForMemberAccess<T>(memberAccess: MemberAccess, targets: ArrayList<Option<T>>): Unit where T <: Decl {
+    let copiedTargets = ArrayList<Option<T>>()
     for (decl in targets) {
         copiedTargets.add(decl)
     }
     memberAccess.targets.clear()
-    for (decl in copiedTargets) {
-        if (memberAccess.isPattern || decl.astKind == ASTKind.FUNC_DECL) {
-            memberAccess.targets.add(decl)
+    for (declOpt in copiedTargets) {
+        if (let Some(decl) <- declOpt) {
+            if (memberAccess.isPattern || decl.astKind == ASTKind.FUNC_DECL) {
+                memberAccess.targets.add(Some(decl))
+            }
         }
     }
 }
@@ -749,18 +751,22 @@ public func GetFullInheritedTy(`extend`: ExtendDecl): String {
     return fullType
 }
 
-public func GetFuncTargets(node: Node): ArrayList<FuncDecl> {
-    let out = ArrayList<FuncDecl>()
+public func GetFuncTargets(node: Node): ArrayList<Option<FuncDecl>> {
+    let out = ArrayList<Option<FuncDecl>>()
     if (let Some(refExpr) <- (node as RefExpr)) {
         for (target in refExpr.ref.targets) {
-            if (let Some(funcDecl) <- (target as FuncDecl)) {
-                out.add(funcDecl)
+            if (let Some(decl) <- target) {
+                if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                    out.add(Some(funcDecl))
+                }
             }
         }
     } else if (let Some(memberAccess) <- (node as MemberAccess)) {
         for (target in memberAccess.targets) {
-            if (let Some(funcDecl) <- (target as FuncDecl)) {
-                out.add(funcDecl)
+            match (target) {
+                case Some(decl) =>
+                    if (let Some(funcDecl) <- (decl as FuncDecl)) { out.add(Some(funcDecl)) }
+                case None => out.add(None)
             }
         }
     }

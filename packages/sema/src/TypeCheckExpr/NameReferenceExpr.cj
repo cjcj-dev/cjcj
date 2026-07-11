@@ -490,6 +490,17 @@ private func AddTargetIfMissing(targets: ArrayList<Decl>, candidate: Decl): Unit
     targets.add(candidate)
 }
 
+private func AddTargetIfMissing(targets: ArrayList<Option<Decl>>, candidate: Decl): Unit {
+    for (target in targets) {
+        if (let Some(value) <- target) {
+            if (sameImportedAwareDecl(value, candidate)) {
+                return
+            }
+        }
+    }
+    targets.add(Some(candidate))
+}
+
 private func sameImportedAwareDecl(left: Decl, right: Decl): Bool {
     if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
         if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
@@ -518,11 +529,19 @@ private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAcc
     let info = LookupInfo(baseTy: Some(baseTy), file: ma.curFile)
     let foundFields = FieldLookup(typeManager, Ty.GetDeclPtrOfTy(Some(baseTy)), ma.field.Val(), info: info)
     for (decl in foundFields) {
-        AddTargetIfMissing(ma.targets, decl)
+        if (decl.astKind == ASTKind.FUNC_DECL) {
+            AddTargetIfMissing(ma.targets, decl)
+        } else if (let None <- ma.target) {
+            ReplaceTarget(ma, Some(decl))
+        }
     }
     if (let Some(file) <- ma.curFile) {
         for (decl in ExtendFieldLookup(typeManager, file, Some(baseTy), ma.field.Val())) {
-            AddTargetIfMissing(ma.targets, decl)
+            if (decl.astKind == ASTKind.FUNC_DECL) {
+                AddTargetIfMissing(ma.targets, decl)
+            } else if (let None <- ma.target) {
+                ReplaceTarget(ma, Some(decl))
+            }
         }
     }
 }
@@ -555,7 +574,12 @@ private func PopulateIdealMemberAccessTargets(typeManager: TypeManager, ma: Memb
         if (let Some(baseExpr) <- ma.baseExpr) {
             baseExpr.SetTy(targetTys[targetTys.size - 1])
         }
-        AddTargetIfMissing(ma.targets, candidates[0])
+        let candidate = candidates[0]
+        if (candidate.astKind == ASTKind.FUNC_DECL) {
+            AddTargetIfMissing(ma.targets, candidate)
+        } else if (let None <- ma.target) {
+            ReplaceTarget(ma, Some(candidate))
+        }
     }
 }
 
@@ -574,7 +598,11 @@ private func PopulateMemberAccessTargetsFromUpperBounds(typeManager: TypeManager
             ma.matchedParentTy = Some(upperBound)
         }
         for (decl in targets) {
-            AddTargetIfMissing(ma.targets, decl)
+            if (decl.astKind == ASTKind.FUNC_DECL) {
+                AddTargetIfMissing(ma.targets, decl)
+            } else if (let None <- ma.target) {
+                ReplaceTarget(ma, Some(decl))
+            }
             AddUpperBoundTargetMap(ma, decl, upperBound)
         }
     }
@@ -791,7 +819,7 @@ private func SynRefExpr(typeManager: TypeManager, re: RefExpr): Ty {
     }
     var targetOpt = re.ref.target
     if ((let None <- targetOpt) && !re.ref.targets.isEmpty()) {
-        targetOpt = Some(GetRealTarget(re.ref.targets[0]))
+        targetOpt = Some(GetRealTarget(re.ref.targets[0].getOrThrow()))
     }
     if (let Some(target) <- targetOpt) {
         ModifyTargetOfRef(re, target, re.ref.targets)
@@ -831,7 +859,7 @@ private func SynMemberAccess(typeManager: TypeManager, ma: MemberAccess,
     }
     var targetOpt = ma.target
     if ((let None <- targetOpt) && !ma.targets.isEmpty()) {
-        targetOpt = Some(GetRealTarget(ma.targets[0]))
+        targetOpt = Some(GetRealTarget(ma.targets[0].getOrThrow()))
     }
     if (let Some(target) <- targetOpt) {
         ReplaceTarget(ma, Some(target))
@@ -1030,7 +1058,8 @@ public func ChkNameReferenceExpr(typeManager: TypeManager, target: Ty, nre: Name
     }
     if (actualTy.IsQuest()) {
         let funcs = GetFuncTargets(nre)
-        for (funcDecl in funcs) {
+        for (funcDeclOpt in funcs) {
+            let funcDecl = funcDeclOpt.getOrThrow()
             if (let Some(funcTy) <- funcDecl.GetTy()) {
                 if (typeManager.CheckTypeCompatibility(target, funcTy) != TypeCompatibility.INCOMPATIBLE) {
                     ReplaceTarget(nre, Some(funcDecl))

@@ -290,17 +290,34 @@ public class ImportManager {
         return out
     }
 
-    public func GetImportedDeclsByName(file: File, name: String): ArrayList<Decl> {
-        let ret = ArrayList<Decl>()
+    public func GetImportedDeclsByName(file: File, name: String): ArrayList<Option<Decl>> {
+        let ret = ArrayList<Option<Decl>>()
         if (let Some(decls) <- importedDeclsMap.get(name)) {
             for (decl in decls) {
-                AddDeclUnique(ret, decl)
+                var exists = false
+                for (candidate in ret) {
+                    if (let Some(value) <- candidate) {
+                        if (value == decl) { exists = true; break }
+                    }
+                }
+                if (!exists) { ret.add(Some(decl)) }
             }
         }
         if (let Some(fileMap) <- fileImportedDeclsMap.get(file.fileHash)) {
             if (let Some(decls) <- fileMap.get(name)) {
+                let fileCandidates = ArrayList<Decl>()
                 for (decl in decls) {
-                    AddDeclUnique(ret, decl)
+                    var exists = false
+                    for (candidate in ret) {
+                        if (let Some(value) <- candidate) {
+                            if (value == decl) { exists = true; break }
+                        }
+                    }
+                    if (!exists) { fileCandidates.add(decl) }
+                }
+                if (!fileCandidates.isEmpty()) {
+                    if (!ret.isEmpty()) { ret.add(None) }
+                    for (decl in fileCandidates) { ret.add(Some(decl)) }
                 }
             }
         }
@@ -347,8 +364,12 @@ public class ImportManager {
             accessible = decl.fullPackageName == filePackage.fullPackageName
             relation = GetPackageRelation(filePackage.fullPackageName, decl.fullPackageName)
         }
-        if (ContainsDecl(GetImportedDeclsByName(file, decl.identifier), decl)) {
-            return true
+        for (importedDecl in GetImportedDeclsByName(file, decl.identifier)) {
+            if (let Some(candidate) <- importedDecl) {
+                if (candidate == decl) {
+                    return true
+                }
+            }
         }
         let packageNames = SplitQualifiedName(decl.fullPackageName)
         var idx = packageNames.size - 1
@@ -373,11 +394,13 @@ public class ImportManager {
             let decls = GetImportedDeclsByName(file, packageName)
             var ret: Option<PackageDecl> = None
             for (decl in decls) {
-                if (let Some(pd) <- (decl as PackageDecl)) {
-                    if (let None <- ret) {
-                        ret = Some(pd)
-                    } else {
-                        return (ret, true)
+                if (let Some(value) <- decl) {
+                    if (let Some(pd) <- (value as PackageDecl)) {
+                        if (let None <- ret) {
+                            ret = Some(pd)
+                        } else {
+                            return (ret, true)
+                        }
                     }
                 }
             }
@@ -1959,15 +1982,6 @@ public class ImportManager {
         cloned.end = content.end
         cloned.CopyAttrsFrom(content)
         return cloned
-    }
-
-    private func ContainsDecl(values: ArrayList<Decl>, decl: Decl): Bool {
-        for (value in values) {
-            if (SameDecl(value, decl)) {
-                return true
-            }
-        }
-        return false
     }
 
     private func DeclAliasKey(decl: Decl): Int64 {

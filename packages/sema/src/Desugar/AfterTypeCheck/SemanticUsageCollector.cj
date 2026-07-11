@@ -62,7 +62,7 @@ private func AddNodeUsage(info: SemanticInfo, node: Node): VisitAction {
         AddDeclUsage(info, target)
     }
     for (target in node.GetTargets()) {
-        AddDeclUsage(info, target)
+        AddDeclUsage(info, target.getOrThrow())
     }
     return VisitAction.WALK_CHILDREN
 }

@@ -170,14 +170,17 @@ private func exprTarget(expr: Expr): Option<Decl> {
             return Some(target)
         }
         if (!refExpr.ref.targets.isEmpty()) {
-            return Some(refExpr.ref.targets[0])
+            return refExpr.ref.targets[0]
         }
     } else if (let Some(memberAccess) <- (expr as MemberAccess)) {
         if (let Some(target) <- memberAccess.target) {
             return Some(target)
         }
         if (!memberAccess.targets.isEmpty()) {
-            return Some(memberAccess.targets[0])
+            return match (memberAccess.targets[0]) {
+                case Some(funcDecl) => Some(funcDecl)
+                case None => None
+            }
         }
     }
     return None

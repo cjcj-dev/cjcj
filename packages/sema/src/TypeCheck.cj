@@ -591,7 +591,11 @@ public func GetTyFromASTRefType(typeManager: TypeManager, ctx: ASTContext, rt: R
     }
     let lookupScope = if (rt.scopeName.isEmpty()) { TOPLEVEL_SCOPE_NAME } else { rt.scopeName }
     let found = LookupTopLevel(typeManager, ctx, rt.ref.identifier.Val(), lookupScope, rt)
-    let targets = rankTypeLookupTargets(found)
+    let nonNullFound = ArrayList<Decl>()
+    for (candidate in found) {
+        nonNullFound.add(candidate.getOrThrow())
+    }
+    let targets = rankTypeLookupTargets(nonNullFound)
     if (targets.isEmpty()) {
         if (!ctx.packageDecls.isEmpty()) {
             return TypeManager.GetInvalidTy()

@@ -62,10 +62,12 @@ private func typeCheckExprClearTargetType(ctx: ASTContext, node: Node): Unit {
     ctx.targetTypeMap.remove(node)
 }
 
-private func typeCheckExprAllMacroFuncDecls(targets: ArrayList<Decl>): Bool {
+private func typeCheckExprAllMacroFuncDecls(targets: ArrayList<Option<Decl>>): Bool {
     for (target in targets) {
-        if (!target.TestAttr(Attribute.MACRO_FUNC)) {
-            return false
+        if (let Some(decl) <- target) {
+            if (!decl.TestAttr(Attribute.MACRO_FUNC)) {
+                return false
+            }
         }
     }
     return true
@@ -375,7 +377,7 @@ private func typeCheckExprConcreteBinaryCandidateKinds(op: TokenKind): ArrayList
 private class TypeCheckerTargetSnapshot {
     let node: Node
     let target: Option<Decl>
-    let targets: ArrayList<Decl> = ArrayList<Decl>()
+    let targets: ArrayList<Option<Decl>> = ArrayList<Option<Decl>>()
 
     init(node: Node) {
         this.node = node
@@ -395,7 +397,10 @@ private class TypeCheckerTargetSnapshot {
         } else if (let Some(memberAccess) <- (node as MemberAccess)) {
             memberAccess.targets.clear()
             for (value2 in targets) {
-                memberAccess.targets.add(value2)
+                match (value2) {
+                    case Some(decl) => memberAccess.targets.add(Some(decl))
+                    case None => memberAccess.targets.add(None)
+                }
             }
         } else if (let Some(refType) <- (node as RefType)) {
             refType.ref.targets.clear()
@@ -4766,7 +4771,11 @@ public class TypeChecker {
         }
         let target = GetAccessibleDecl(impl.typeManager, ctx, memberAccess, targets) ?? targets[0]
         ReplaceTarget(memberAccess, Some(target))
-        AddFuncTargetsForMemberAccess(memberAccess, targets)
+        let nullableTargets = ArrayList<Option<Decl>>()
+        for (candidate in targets) {
+            nullableTargets.add(Some(candidate))
+        }
+        AddFuncTargetsForMemberAccess(memberAccess, nullableTargets)
     }
 
     private func SynthesizeDesugarIfNeeded(ctx: ASTContext, expr: Expr): Unit {
@@ -6306,7 +6315,7 @@ public class TypeChecker {
         if (let Some(_) <- refExpr.ref.target) {
             return
         }
-        let targets = ArrayList<Decl>()
+        let targets = ArrayList<Option<Decl>>()
         for (target in refExpr.ref.targets) {
             targets.add(target)
         }
@@ -6327,7 +6336,7 @@ public class TypeChecker {
             }
             targets.clear()
             for (target in resolvedTargets) {
-                targets.add(target)
+                targets.add(Some(target))
             }
         }
         if (let Some(diagValue) <- impl.diag) {
@@ -6342,9 +6351,13 @@ public class TypeChecker {
             refExpr.ref.targets.clear()
             return
         }
-        var decl = GetAccessibleDecl(impl.typeManager, ctx, refExpr, targets)
+        let nonNullTargets = ArrayList<Decl>()
+        for (candidate in targets) {
+            if (let Some(value) <- candidate) { nonNullTargets.add(value) }
+        }
+        var decl = GetAccessibleDecl(impl.typeManager, ctx, refExpr, nonNullTargets)
         if (let None <- decl) {
-            decl = Some(targets[0])
+            decl = targets[0]
         }
         ModifyTargetOfRef(refExpr, decl.getOrThrow(), targets)
     }

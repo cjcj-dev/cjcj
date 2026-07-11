@@ -351,7 +351,7 @@ public class ASTCloner {
                             while (idx < sourceMember.targets.size) {
                                 let targetIdx = idx
                                 TargetAddrMapInsert(sourceMember.targets[targetIdx],
-                                    { value: Decl => targetMember.targets[targetIdx] = value })
+                                    { value: Decl => targetMember.targets[targetIdx] = Some(value) })
                                 idx++
                             }
                         }

@@ -217,7 +217,7 @@ private func CreateStringElementCall(typeManager: TypeManager, forInExpr: ForInE
     let subscriptTargets = FieldLookup(typeManager, Ty.GetDeclPtrOfTy(tmpTy), SUBSCRIPT_OPERATOR_NAME,
         info: LookupInfo(baseTy: tmpTy, file: forInExpr.curFile))
     for (target in subscriptTargets) {
-        base.targets.add(target)
+        base.targets.add(Some(target))
     }
     let selectedTarget = SelectStringSubscriptTarget(typeManager, subscriptTargets, index, expectedElementTy)
     if (let Some(firstTarget) <- selectedTarget) {
@@ -724,7 +724,7 @@ private func CreateOptionCtorRef(enumTy: EnumTy, ctorName: String, ctorTy: Ty): 
     if (let Some(enumDecl) <- enumTy.declPtr) {
         if (let Some(ctorDecl) <- LookupEnumMember(enumDecl, ctorName)) {
             let refExpr = CreateRefExpr(ctorDecl)
-            refExpr.ref.targets.add(ctorDecl)
+            refExpr.ref.targets.add(Some(ctorDecl))
             refExpr.SetTy(ctorTy)
             for (typeArg in enumTy.typeArgs) {
                 refExpr.instTys.add(typeArg)
