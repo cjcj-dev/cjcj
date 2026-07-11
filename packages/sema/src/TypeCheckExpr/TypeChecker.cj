@@ -2228,19 +2228,6 @@ public class TypeChecker {
         }
     }
 
-    private func SynthesizeAssignChildren(ctx: ASTContext, assign: AssignExpr): Unit {
-        if (let Some(leftExpr) <- assign.leftValue) {
-            if (let Some(subscript) <- (leftExpr as SubscriptExpr)) {
-                SynthesizeSubscriptChildren(ctx, subscript)
-                if (let Some(rightExpr) <- assign.rightExpr) {
-                    let _ = Synthesize(ctx, rightExpr)
-                }
-                return
-            }
-        }
-        SynthesizeNodeChildren(ctx, assign)
-    }
-
     private func SynthesizeBinaryChildren(ctx: ASTContext, binaryExpr: BinaryExpr): Unit {
         if (let Some(leftExpr) <- binaryExpr.leftExpr) {
             let _ = Synthesize(ctx, leftExpr)
@@ -5641,10 +5628,10 @@ public class TypeChecker {
                 impl.diag.getOrThrow()))
         }
         if (let Some(assign) <- (expr as AssignExpr)) {
-            SynthesizeAssignChildren(ctx, assign)
             return FinishSynthesize(ctx, assign, SynAssignExpr(impl.typeManager, assign,
                 rightChecker: Some({ target: Ty, rightExpr: Expr => Check(ctx, target, rightExpr) }),
-                ctx: Some(ctx), synthesizer: Some({ desugar: Expr => Synthesize(ctx, SynPos.UNUSED, desugar) }),
+                ctx: Some(ctx),
+                synthesizer: Some({ synPos: SynPos, desugar: Expr => Synthesize(ctx, synPos, desugar) }),
                 diag: impl.diag))
         }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {

@@ -18,20 +18,6 @@ private func AssignInvalid(ae: AssignExpr): Ty {
     return TcInvalid(ae)
 }
 
-private func IsCompoundIntegerAssign(op: TokenKind): Bool {
-    return op == TokenKind.MOD_ASSIGN || op == TokenKind.BITAND_ASSIGN || op == TokenKind.BITOR_ASSIGN ||
-        op == TokenKind.BITXOR_ASSIGN || op == TokenKind.LSHIFT_ASSIGN || op == TokenKind.RSHIFT_ASSIGN
-}
-
-private func IsCompoundNumericAssign(op: TokenKind): Bool {
-    return op == TokenKind.ADD_ASSIGN || op == TokenKind.SUB_ASSIGN || op == TokenKind.MUL_ASSIGN ||
-        op == TokenKind.EXP_ASSIGN || op == TokenKind.DIV_ASSIGN || IsCompoundIntegerAssign(op)
-}
-
-private func IsCompoundBoolAssign(op: TokenKind): Bool {
-    return op == TokenKind.AND_ASSIGN || op == TokenKind.OR_ASSIGN
-}
-
 private func DiagCannotAssignToSubscript(diag: BasicDiagnosticEngine,
     se: SubscriptExpr, rightValue: Expr): Unit {
     let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_cannot_assign_to_subscript, se)
@@ -286,29 +272,48 @@ private func CheckMultipleAssignExpr(diag: BasicDiagnosticEngine, typeManager: T
     }
 }
 
-private func PreCheckCompoundAssign(leftTy: Ty, ae: AssignExpr,
+private func PreCheckCompoundAssign(typeManager: TypeManager, ae: AssignExpr, leftTy: Ty,
+    diags: Array<Diagnostic>, synthesizer: Option<(SynPos, Expr) -> Ty>,
     diag: Option<BasicDiagnosticEngine>): Bool {
-    if (!ae.isCompound) {
-        return true
-    }
-    var isSupported = false
-    if (IsCompoundBoolAssign(ae.op)) {
-        isSupported = leftTy.IsBooleanSubType()
-    } else if (IsCompoundIntegerAssign(ae.op)) {
-        isSupported = leftTy.IsIntegerSubType()
-    } else if (IsCompoundNumericAssign(ae.op)) {
-        isSupported = leftTy.IsNumeric()
-    }
-    if (isSupported) {
-        return true
-    }
-    if (ae.ShouldDiagnose()) {
-        if (let Some(diagValue) <- diag) {
-            Diagnose(diagValue, ae, BasicDiagKind.sema_type_incompatible,
-                args: [BasicDiagArgument("compound assignment expression")]).Emit()
+    if (ae.isCompound) {
+        CJC_ASSERT(GetCompoundAssignBaseOp(ae.op) != TokenKind.ILLEGAL)
+        let isInteger = leftTy.kind == TypeKind.TYPE_INT8 || leftTy.kind == TypeKind.TYPE_INT16 ||
+            leftTy.kind == TypeKind.TYPE_INT32 || leftTy.kind == TypeKind.TYPE_INT64 ||
+            leftTy.kind == TypeKind.TYPE_INT_NATIVE || leftTy.kind == TypeKind.TYPE_UINT8 ||
+            leftTy.kind == TypeKind.TYPE_UINT16 || leftTy.kind == TypeKind.TYPE_UINT32 ||
+            leftTy.kind == TypeKind.TYPE_UINT64 || leftTy.kind == TypeKind.TYPE_UINT_NATIVE ||
+            leftTy.kind == TypeKind.TYPE_IDEAL_INT
+        let isNumeric = isInteger || leftTy.kind == TypeKind.TYPE_FLOAT16 ||
+            leftTy.kind == TypeKind.TYPE_FLOAT32 || leftTy.kind == TypeKind.TYPE_FLOAT64 ||
+            leftTy.kind == TypeKind.TYPE_IDEAL_FLOAT
+        let isSupported = match (ae.op) {
+            case TokenKind.ADD_ASSIGN | TokenKind.SUB_ASSIGN | TokenKind.MUL_ASSIGN |
+                TokenKind.EXP_ASSIGN | TokenKind.DIV_ASSIGN => isNumeric
+            case TokenKind.MOD_ASSIGN | TokenKind.BITAND_ASSIGN | TokenKind.BITOR_ASSIGN |
+                TokenKind.BITXOR_ASSIGN | TokenKind.LSHIFT_ASSIGN | TokenKind.RSHIFT_ASSIGN => isInteger
+            case TokenKind.AND_ASSIGN | TokenKind.OR_ASSIGN => leftTy.kind == TypeKind.TYPE_BOOLEAN
+            case _ => false
+        }
+        if (Ty.IsInitialTy(Some(leftTy)) || !isSupported) {
+            let rightExpr = ae.rightExpr.getOrThrow()
+            if (let Some(synthesize) <- synthesizer) {
+                let _ = synthesize(SynPos.EXPR_ARG, rightExpr)
+            } else {
+                let _ = SynExprShallow(typeManager, rightExpr, diag: diag)
+            }
+            if (ae.ShouldDiagnose()) {
+                if (let Some(diagValue) <- diag) {
+                    for (diagnostic in diags) {
+                        diagValue.Diagnose(diagnostic).Emit()
+                    }
+                    Diagnose(diagValue, ae, BasicDiagKind.sema_type_incompatible,
+                        args: [BasicDiagArgument("compound assignment expression")]).Emit()
+                }
+            }
+            return false
         }
     }
-    return false
+    return true
 }
 
 private func CheckAssignRight(typeManager: TypeManager, leftTy: Ty, ae: AssignExpr,
@@ -357,55 +362,65 @@ private func IsShiftAssignValid(ae: AssignExpr, leftTy: Ty): Bool {
     return true
 }
 
-private func PropagateAssignDesugarTarget(ae: AssignExpr, desugar: Expr): Unit {
-    if (let Some(callExpr) <- (desugar as CallExpr)) {
-        ReplaceTarget(ae, callExpr.resolvedFunction)
-        return
-    }
-    if (let Some(assignExpr) <- (desugar as AssignExpr)) {
-        if (let Some(rightExpr) <- assignExpr.rightExpr) {
-            if (let Some(callExpr2) <- (rightExpr as CallExpr)) {
-                ReplaceTarget(ae, callExpr2.resolvedFunction)
-            }
-        }
-    }
-}
-
-private func TrySynAssignOverload(typeManager: TypeManager, ae: AssignExpr,
-    ctx!: Option<ASTContext> = None, synthesizer!: Option<(Expr) -> Ty> = None): Option<Ty> {
-    if (let Some(leftValue) <- ae.leftValue) {
-        if (let Some(_) <- (leftValue as SubscriptExpr)) {
-            DesugarSubscriptOverloadExpr(ae)
-            if (let Some(desugar) <- ae.desugarExpr) {
-                let desugarTy = if (let Some(syn) <- synthesizer) {
-                    syn(desugar)
+private func InferAssignExprCheckCaseOverloading(typeManager: TypeManager, ctx: ASTContext,
+    ae: AssignExpr, diags: ArrayList<Diagnostic>, synthesizer: (SynPos, Expr) -> Ty,
+    diag: BasicDiagnosticEngine): Option<Ty> {
+    try (ds = DiagSuppressor(diag)) {
+        if (ae.desugarExpr.isNone() && ae.leftValue.isSome() &&
+            (ae.leftValue.getOrThrow() as SubscriptExpr).isSome()) {
+            let se = (ae.leftValue.getOrThrow() as SubscriptExpr).getOrThrow()
+            DesugarSubscriptOverloadExpr(ctx, ae)
+            if (Ty.IsTyCorrect(synthesizer(SynPos.UNUSED, ae.desugarExpr.getOrThrow()))) {
+                ds.ReportDiag()
+                let desugar = ae.desugarExpr.getOrThrow()
+                ae.SetTy(desugar.GetTy().getOrThrow())
+                CJC_ASSERT((desugar as CallExpr).isSome())
+                ReplaceTarget(ae, if (let Some(resolvedFunction) <-
+                    (desugar as CallExpr).getOrThrow().resolvedFunction) {
+                    Some(resolvedFunction)
                 } else {
-                    SynExprShallow(typeManager, desugar, ctx: ctx)
-                }
-                if (Ty.IsTyCorrect(desugarTy)) {
-                    PropagateAssignDesugarTarget(ae, desugar)
-                    ae.SetTy(desugarTy)
-                    return Some(desugarTy)
-                }
-                RecoverToAssignExpr(ae)
-            }
-            return None
-        }
-    }
-    if (ae.isCompound) {
-        DesugarOperatorOverloadExpr(ae)
-        if (let Some(desugar2) <- ae.desugarExpr) {
-            let desugarTy2 = if (let Some(syn2) <- synthesizer) {
-                syn2(desugar2)
-            } else {
-                SynExprShallow(typeManager, desugar2, ctx: ctx)
-            }
-            if (Ty.IsTyCorrect(desugarTy2)) {
-                PropagateAssignDesugarTarget(ae, desugar2)
-                ae.SetTy(desugarTy2)
-                return Some(desugarTy2)
+                    None
+                })
+                return Some(ae.GetTy().getOrThrow())
             }
             RecoverToAssignExpr(ae)
+            if (se.baseExpr.isSome() && MaySubscriptAssignOnlyBeOverload(se.baseExpr.getOrThrow())) {
+                let stashedDiags = ds.GetSuppressedDiag()
+                DiagnoseForSubscriptAssignExpr(typeManager, ctx, ae, stashedDiags, synthesizer, diag)
+                ds.ReportDiag()
+                return Some(TcTyOrInvalid(ae))
+            }
+            ctx.DeleteDesugarExpr(ae)
+        } else if (ae.isCompound) {
+            DesugarOperatorOverloadExpr(ctx, ae)
+            if (Ty.IsTyCorrect(synthesizer(SynPos.UNUSED, ae.desugarExpr.getOrThrow()))) {
+                ds.ReportDiag()
+                let desugarAssign = (ae.desugarExpr.getOrThrow() as AssignExpr).getOrThrow()
+                ae.SetTy(desugarAssign.GetTy().getOrThrow())
+                let callExpr = (desugarAssign.rightExpr.getOrThrow() as CallExpr).getOrThrow()
+                ReplaceTarget(ae, if (let Some(resolvedFunction) <- callExpr.resolvedFunction) {
+                    Some(resolvedFunction)
+                } else {
+                    None
+                })
+                let memberAccess = (callExpr.baseFunc.getOrThrow() as MemberAccess).getOrThrow()
+                CJC_ASSERT(memberAccess.baseExpr.isSome() &&
+                    Ty.IsTyCorrect(memberAccess.baseExpr.getOrThrow().GetTy()) && !callExpr.args.isEmpty() &&
+                    callExpr.args[0].expr.isSome() && Ty.IsTyCorrect(callExpr.args[0].expr.getOrThrow().GetTy()))
+                let baseOp = GetCompoundAssignBaseOp(ae.op)
+                CJC_ASSERT(baseOp != TokenKind.ILLEGAL)
+                if (IsBuiltinBinaryExpr(baseOp, memberAccess.baseExpr.getOrThrow().GetTy().getOrThrow(),
+                    callExpr.args[0].expr.getOrThrow().GetTy().getOrThrow())) {
+                    RecoverToAssignExpr(ae)
+                }
+                return Some(ae.GetTy().getOrThrow())
+            }
+            RecoverToAssignExpr(ae)
+            ctx.DeleteDesugarExpr(ae)
+        }
+        diags.clear()
+        for (diagnostic in ds.GetSuppressedDiag()) {
+            diags.add(diagnostic)
         }
     }
     return None
@@ -438,7 +453,7 @@ private func SynMultipleAssignExpr(typeManager: TypeManager, ae: AssignExpr,
 
 public func SynAssignExpr(typeManager: TypeManager, ae: AssignExpr,
     rightChecker!: Option<AssignRightChecker> = None, ctx!: Option<ASTContext> = None,
-    synthesizer!: Option<(Expr) -> Ty> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    synthesizer!: Option<(SynPos, Expr) -> Ty> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (let Some(desugar) <- ae.desugarExpr) {
         if (let Some(leftValue) <- ae.leftValue) {
             if (leftValue.astKind == ASTKind.TUPLE_LIT) {
@@ -456,8 +471,16 @@ public func SynAssignExpr(typeManager: TypeManager, ae: AssignExpr,
     if (let None <- ae.rightExpr) {
         return AssignInvalid(ae)
     }
-    if (let Some(overloadTy) <- TrySynAssignOverload(typeManager, ae, ctx: ctx, synthesizer: synthesizer)) {
-        return overloadTy
+    let diagsForOverload = ArrayList<Diagnostic>()
+    if (let Some(context) <- ctx) {
+        if (let Some(synthesize) <- synthesizer) {
+            if (let Some(diagValue) <- diag) {
+                if (let Some(overloadTy) <- InferAssignExprCheckCaseOverloading(
+                    typeManager, context, ae, diagsForOverload, synthesize, diagValue)) {
+                    return overloadTy
+                }
+            }
+        }
     }
     let unitTy = TcUnitTy()
     ae.SetTy(unitTy)
@@ -467,24 +490,38 @@ public func SynAssignExpr(typeManager: TypeManager, ae: AssignExpr,
         return SynMultipleAssignExpr(typeManager, ae, diag)
     }
     if (leftExpr.astKind == ASTKind.WILDCARD_EXPR) {
-        let rightTy = SynExprShallow(typeManager, rightExpr)
+        let rightTy = if (let Some(synthesize3) <- synthesizer) {
+            synthesize3(SynPos.EXPR_ARG, rightExpr)
+        } else {
+            SynExprShallow(typeManager, rightExpr)
+        }
         if (Ty.IsTyCorrect(rightTy)) {
             let concreteRightTy = TcReplaceIdeal(typeManager, rightExpr)
-            leftExpr.SetTy(concreteRightTy)
-            return unitTy
+            rightExpr.SetTy(concreteRightTy)
+        } else {
+            let _ = AssignInvalid(ae)
         }
-        return AssignInvalid(ae)
+        leftExpr.SetTy(rightExpr.GetTy().getOrThrow())
+        return TcTyOrInvalid(ae)
     }
-    let leftTy = SynExprShallow(typeManager, leftExpr)
+    let leftTy = if (let Some(synthesize2) <- synthesizer) {
+        synthesize2(SynPos.LEFT_VALUE, leftExpr)
+    } else {
+        SynExprShallow(typeManager, leftExpr, ctx: ctx, diag: diag)
+    }
     if (!Ty.IsTyCorrect(leftTy)) {
         return AssignInvalid(ae)
     }
     let concreteLeftTy = Ty.GetPrimitiveUpperBound(TcReplaceIdeal(typeManager, leftExpr))
-    if (!PreCheckCompoundAssign(concreteLeftTy, ae, diag)) {
-        let _ = SynExprShallow(typeManager, rightExpr)
+    if (let Some(diagValue2) <- diag) {
+        if (!IsAssignable(leftExpr, ae.isCompound, diagsForOverload.toArray(), diagValue2)) {
+            return AssignInvalid(ae)
+        }
+    } else if (!IsAssignableExpr(leftExpr)) {
         return AssignInvalid(ae)
     }
-    if (!IsAssignableExpr(leftExpr)) {
+    if (!PreCheckCompoundAssign(typeManager, ae, concreteLeftTy,
+        diagsForOverload.toArray(), synthesizer, diag)) {
         return AssignInvalid(ae)
     }
     if (!ae.isCompound && leftExpr.TyKind() == TypeKind.TYPE_RUNE && IsSingleRuneStringLiteral(rightExpr)) {
