@@ -2,6 +2,7 @@ package cjcj::macro_pkg
 
 import std.collection.*
 import std.sort.*
+import cjcj::ast.DiagnoseRefactor
 import cjcj::ast.AddMacroAttr
 import cjcj::ast.AnnotationKind as RealAnnotationKind
 import cjcj::ast.ExprKind as ParsedAstExprKind
@@ -130,8 +131,8 @@ private func checkWhenAfterMacroExpand(node: Node, diag: DiagnosticEngine): Unit
         if (let Some(decl) <- (curNode as Decl)) {
             for (anno in decl.annotations) {
                 if (isWhenAnnotation(anno)) {
-                    diag.DiagnoseRefactor(DiagKindRefactor.conditional_compilation_unexpected_after_macro,
-                        anno.begin).Emit()
+                    DiagnoseRefactor(diag,
+                        DiagKindRefactor.conditional_compilation_unexpected_after_macro, anno).Emit()
                 }
             }
         }
