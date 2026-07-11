@@ -3,6 +3,7 @@ package cjcj::codegen
 import std.collection.*
 import cjcj::chir.Box as ChirBox
 import cjcj::chir.Expression
+import cjcj::chir.ExprKind
 import cjcj::chir.NumericType
 import cjcj::chir.Type
 import cjcj::chir.TypeCast
@@ -206,20 +207,65 @@ private func EmitTransformToGenericExpression(irBuilder: IRBuilder2, transformEx
 
 private func EmitTransformToConcreteExpression(irBuilder: IRBuilder2,
     transformExpr: TransformToConcrete): LLVMValueRef {
-    let sourceCGValue = irBuilder.GetCGModule().GetMappedCGValue(transformExpr.GetSourceValue())
-    let sourceRawValue = sourceCGValue.GetRawValue()
-    let targetTy = transformExpr.GetTargetTy() ?? return sourceRawValue
-    let targetCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy)
-    if (targetCGType.IsReference()) {
-        return irBuilder.CreatePointerCast(sourceRawValue, targetCGType.GetLLVMType(), name: "generic.concrete.ref")
+    let cgMod = irBuilder.GetCGModule()
+    let sourceValue = transformExpr.GetSourceValue()
+    var cgValue = cgMod.GetMappedCGValue(sourceValue)
+    let targetTy = transformExpr.GetTargetTy().getOrThrow()
+    let targetCGType = CGType.GetOrCreate(cgMod, targetTy)
+    CJC_ASSERT_WITH_MSG(targetCGType.GetSize().isSome(), "target type must have size")
+    var sourceTy = transformExpr.GetSourceTy().getOrThrow()
+    var sourceCGType = CGType.GetOrCreate(cgMod, sourceTy)
+
+    if (IsGenericRef(sourceTy)) {
+        let sourceLocal = sourceValue.AsLocalVar().getOrThrow()
+        let sourceExpr = sourceLocal.GetExpr().getOrThrow()
+        if (sourceExpr.GetExprKind() == ExprKind.GET_ELEMENT_REF) {
+            sourceTy = sourceTy.GetTypeArgs()[0]
+            let blocks = irBuilder.CreateAndInsertBasicBlocks(
+                ArrayList<String>(["handle_ref", "handle_non_ref", "handle_end"]))
+            let handleRefBB = blocks[0]
+            let handleNonRefBB = blocks[1]
+            let handleEndBB = blocks[2]
+            let sourceTI = irBuilder.CreateTypeInfo(sourceTy)
+            irBuilder.CreateCondBr(irBuilder.CreateTypeInfoIsReferenceCall(sourceTI), handleRefBB, handleNonRefBB)
+
+            irBuilder.SetInsertPoint(handleRefBB)
+            sourceCGType = sourceCGType.GetPointerElementType().getOrThrow()
+            let refValue = irBuilder.CreateLoad(sourceCGType.GetLLVMType(), cgValue.GetRawValue())
+            irBuilder.CreateBr(handleEndBB)
+
+            irBuilder.SetInsertPoint(handleNonRefBB)
+            let sizeOfSource = irBuilder.GetSizeFromTypeInfo(sourceTI)
+            let boxedValue = irBuilder.CallIntrinsicAllocaGeneric(
+                ArrayList<LLVMValueRef>([sourceTI, sizeOfSource]))
+            let sourceRawValue = cgValue.GetRawValue()
+            let basePtrOfSource = cgMod.GetCGContext().GetBasePtrOf(sourceRawValue).getOrThrow()
+            irBuilder.CallGCReadGeneric(boxedValue, basePtrOfSource, sourceRawValue, sizeOfSource)
+            irBuilder.CreateBr(handleEndBB)
+
+            irBuilder.SetInsertPoint(handleEndBB)
+            let phi = irBuilder.CreatePHI(targetCGType.GetLLVMType())
+            irBuilder.AddIncoming(phi, ArrayList<LLVMValueRef>([refValue, boxedValue]),
+                ArrayList<LLVMBasicBlockRef>([handleRefBB, handleNonRefBB]))
+            cgMod.GetCGContext().SetBoxedValueMap(phi, sourceRawValue)
+            cgValue = CGValue(phi, sourceCGType)
+        } else {
+            sourceTy = sourceTy.GetTypeArgs()[0]
+            sourceCGType = sourceCGType.GetPointerElementType().getOrThrow()
+            cgValue = CGValue(irBuilder.CreateLoad(sourceCGType.GetLLVMType(), cgValue.GetRawValue()), sourceCGType)
+        }
     }
-    if (targetCGType.GetSize().isSome()) {
-        let payload = irBuilder.GetPayloadFromObject(sourceRawValue)
-        let payloadType = unsafe { LLVMPointerType(targetCGType.GetLLVMType(), 1u32) }
-        let typedPayload = irBuilder.CreateBitCast(payload, payloadType, name: "generic.concrete.payload")
-        return irBuilder.CreateLoad(targetCGType.GetLLVMType(), typedPayload, name: "generic.concrete.value")
+
+    if (sourceTy.IsGeneric() && targetCGType.IsReference()) {
+        return cgValue.GetRawValue()
     }
-    return sourceRawValue
+    if (targetCGType.GetSize() == sourceCGType.GetSize()) {
+        return cgValue.GetRawValue()
+    }
+    let elementType = targetCGType.GetLLVMType()
+    let sourcePayload = irBuilder.CreateBitCast(irBuilder.GetPayloadFromObject(cgValue.GetRawValue()),
+        unsafe { LLVMPointerType(elementType, 1u32) })
+    return irBuilder.CreateLoad(elementType, sourcePayload)
 }
 
 private func GenerateGenericTypeCast(irBuilder: IRBuilder2, sourceCGValue: CGValue, sourceTy: Type,
