@@ -128,6 +128,8 @@ private func UNARY_EXPR_TYPE_MAP(op: TokenKind): ArrayList<(TypeKind, TypeKind)>
         let out = GENERAL_ARITHMIC_INT_TYPE_MAP()
         out.add((TypeKind.TYPE_BOOLEAN, TypeKind.TYPE_BOOLEAN))
         return out
+    } else if (op == TokenKind.BITNOT) {
+        return GENERAL_ARITHMIC_INT_TYPE_MAP()
     } else if (op == TokenKind.INCR || op == TokenKind.DECR) {
         return GENERAL_ARITHMIC_INT_TYPE_MAP()
     }
