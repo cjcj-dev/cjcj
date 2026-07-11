@@ -15,6 +15,7 @@ private func appendUInt32(out: ArrayList<UInt8>, value: UInt32): Unit {
     out.add(UInt8((UInt64(value) >> 24) & 0xff))
 }
 
+@OverflowWrapping
 private func appendInt32(out: ArrayList<UInt8>, value: Int64): Unit {
     appendUInt32(out, UInt32(value))
 }
@@ -54,8 +55,9 @@ private func readNativeUInt32(ptr: CPointer<UInt8>, cursor: Box<Int64>): UInt32 
     return b0 | b1 | b2 | b3
 }
 
+@OverflowWrapping
 private func readNativeInt32(ptr: CPointer<UInt8>, cursor: Box<Int64>): Int64 {
-    return Int64(readNativeUInt32(ptr, cursor))
+    return Int64(Int32(readNativeUInt32(ptr, cursor)))
 }
 
 private func readNativeString(ptr: CPointer<UInt8>, cursor: Box<Int64>, len: Int64): String {
@@ -73,8 +75,9 @@ private func readNativeString(ptr: CPointer<UInt8>, cursor: Box<Int64>, len: Int
     return builder.toString()
 }
 
+@OverflowWrapping
 private func readInt32(bytes: ArrayList<UInt8>, cursor: Box<Int64>): Int64 {
-    return Int64(readUInt32(bytes, cursor))
+    return Int64(Int32(readUInt32(bytes, cursor)))
 }
 
 private func readString(bytes: ArrayList<UInt8>, cursor: Box<Int64>, len: Int64): String {

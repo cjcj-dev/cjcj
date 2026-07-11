@@ -119,6 +119,7 @@ private struct CollectedInfo <: Hashable & Equatable<CollectedInfo> {
         return !(this == right)
     }
 
+    @OverflowWrapping
     public func hashCode(): Int64 {
         let mainBit = if (isMain) { 1u64 } else { 0u64 }
         let multiBit = if (isMultiLine) { 1u64 } else { 0u64 }
