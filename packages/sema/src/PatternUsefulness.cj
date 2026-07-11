@@ -806,8 +806,8 @@ private class UsefulnessChecker {
         if (!totalWitnesses.isEmpty()) {
             for (unreachable in unreachables) {
                 unreachable.EnableAttr(Attribute.UNREACHABLE)
-                let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unreachable_pattern,
-                    MakeBasicRange(unreachable.begin, unreachable.end))
+                let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_unreachable_pattern,
+                    unreachable)
                 builder.Emit()
             }
         }
@@ -938,9 +938,8 @@ public func CheckMatchExprHasSelectorExhaustivenessAndReachability(
             }
         } else {
             mc.EnableAttr(Attribute.UNREACHABLE)
-            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-            let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_unreachable_pattern,
-                MatchCasePatternRange(mc))
+            DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_unreachable_pattern,
+                mc, MatchCasePatternRange(mc)).Emit()
         }
     }
     let stack = PatternStack(DestructedPattern(PatternCtor.Wildcard(),
@@ -949,13 +948,13 @@ public func CheckMatchExprHasSelectorExhaustivenessAndReachability(
     if (witnesses.isEmpty()) {
         return true
     }
-    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_nonexhuastive_patterns,
-        MakeBasicRange(selector.begin, selector.end))
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_nonexhuastive_patterns,
+        selector)
     builder.AddMainHintArguments([selectorTy.String()])
     for (witness in witnesses) {
         CJC_ASSERT(witness.Size() == 1)
         builder.AddNote(witness.Head().ToString() + " is not covered")
     }
-    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+    builder.Emit()
     return false
 }
