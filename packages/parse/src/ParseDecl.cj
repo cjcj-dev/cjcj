@@ -1028,7 +1028,7 @@ extend ParserImpl {
             if (let Some(generic) <- ParseOptionalGeneric()) {
                 body.generic = generic
             }
-            body.paramLists.add(ParseParameterList(scopeKind))
+            ParseFuncParameters(scopeKind, body)
             let paramsEnd = lastToken.End()
             if (ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY) ||
                 ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_GETTER_BODY)) {
@@ -1056,6 +1056,34 @@ extend ParserImpl {
             }
         }
         return body
+    }
+
+    public func ParseFuncParameters(scopeKind: ScopeKind, body: FuncBody): Unit {
+        if (Seeing(TokenKind.LPAREN)) {
+            do {
+                if (ScopeKindEquals(scopeKind, ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS) ||
+                    ScopeKindEquals(scopeKind, ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT) ||
+                    ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY) ||
+                    ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_GETTER_BODY)) {
+                    body.paramLists.add(ParseParameterList(scopeKind))
+                } else {
+                    body.paramLists.add(ParseParameterList(ScopeKind.UNKNOWN_SCOPE))
+                }
+            } while (Seeing(TokenKind.LPAREN))
+        } else {
+            let invalid = FuncParamList()
+            invalid.EnableAttr(Attribute.IS_BROKEN)
+            invalid.begin = Peek().Begin()
+            invalid.end = Peek().Begin()
+            body.paramLists.add(invalid)
+            let kind = if (ScopeKindEquals(scopeKind, ScopeKind.MAIN_BODY)) {
+                DiagKindRefactor.parse_expected_left_paren
+            } else {
+                DiagKindRefactor.parse_expected_lt_paren
+            }
+            ParseDiagnoseRefactor(kind, Peek(), ConvertToken(Peek())).Emit()
+            body.EnableAttr(Attribute.HAS_BROKEN)
+        }
     }
 
     private func EnsureFuncBodyGeneric(body: FuncBody): Generic {
