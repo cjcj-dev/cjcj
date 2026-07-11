@@ -27,7 +27,7 @@ extend ConstKind <: Equatable<ConstKind> {
     }
 }
 
-public abstract class ConstValue {
+public abstract class ConstValue <: HasEqual<ConstValue> {
     protected let kind: ConstKind
 
     protected init(kind: ConstKind) {
@@ -43,6 +43,41 @@ public abstract class ConstValue {
     public func ToString(): String
 
     public func Clone(): ConstValue
+
+    public static func IsTrackedGV(gv: GlobalVar): Bool {
+        let ty = gv.GetType().getOrThrow()
+        let baseTy = if (let Some(refTy) <- (ty as RefType)) { refTy.GetBaseType() } else { ty }
+        let kind = baseTy.GetTypeKind()
+        let kindIndex = TypeKindIndex(kind)
+        return (kindIndex >= TypeKindIndex(TypeKind.TYPE_INT8) && kindIndex <= TypeKindIndex(TypeKind.TYPE_UNIT)) ||
+            kind == TypeKind.TYPE_TUPLE || kind == TypeKind.TYPE_STRUCT || kind == TypeKind.TYPE_ENUM
+    }
+
+    public static func HandleNonNullLiteralValue(literalValue: LiteralValue): ValueDomain<ConstValue> {
+        if (literalValue.IsBoolLit()) {
+            return ValueDomain<ConstValue>(ConstBoolVal((literalValue as BoolLiteral).getOrThrow().GetVal()))
+        } else if (literalValue.IsFloatLit()) {
+            if (literalValue.GetType().getOrThrow().GetTypeKind() != TypeKind.TYPE_FLOAT16) {
+                return ValueDomain<ConstValue>(ConstFloatVal((literalValue as FloatLiteral).getOrThrow().GetVal()))
+            }
+            return ValueDomain<ConstValue>(true)
+        } else if (literalValue.IsIntLit()) {
+            let intLiteral = (literalValue as IntLiteral).getOrThrow()
+            let intTy = (literalValue.GetType().getOrThrow() as IntType).getOrThrow()
+            if (intTy.IsSigned()) {
+                return ValueDomain<ConstValue>(ConstIntVal(intLiteral.GetSignedVal()))
+            }
+            return ValueDomain<ConstValue>(ConstUIntVal(intLiteral.GetUnsignedVal()))
+        } else if (literalValue.IsRuneLit()) {
+            return ValueDomain<ConstValue>(ConstRuneVal((literalValue as RuneLiteral).getOrThrow().GetVal()))
+        } else if (literalValue.IsStringLit()) {
+            return ValueDomain<ConstValue>(ConstStrVal((literalValue as StringLiteral).getOrThrow().GetVal()))
+        } else if (literalValue.IsUnitLit()) {
+            return ValueDomain<ConstValue>(true)
+        }
+        CJC_ABORT()
+        return ValueDomain<ConstValue>(true)
+    }
 }
 
 public class ConstBoolVal <: ConstValue {
@@ -216,42 +251,9 @@ public class ConstFloatVal <: ConstValue {
 public type ConstValueDomain = ValueDomain<ConstValue>
 
 public func IsTrackedGV(gv: GlobalVar): Bool {
-    let ty = gv.GetType().getOrThrow()
-    let baseTy = if (let Some(refTy) <- (ty as RefType)) { refTy.GetBaseType() } else { ty }
-    let kind = baseTy.GetTypeKind()
-    let kindIndex = TypeKindIndex(kind)
-    return (kindIndex >= TypeKindIndex(TypeKind.TYPE_INT8) && kindIndex <= TypeKindIndex(TypeKind.TYPE_UNIT)) ||
-        kind == TypeKind.TYPE_TUPLE || kind == TypeKind.TYPE_STRUCT || kind == TypeKind.TYPE_ENUM
+    return ConstValue.IsTrackedGV(gv)
 }
 
 public func HandleNonNullLiteralValue(literalValue: LiteralValue): ConstValueDomain {
-    return HandleNonNullLiteralValue<ConstValue>(literalValue, typed: true)
-}
-
-public func HandleNonNullLiteralValue<AV>(literalValue: LiteralValue, typed!: Bool): ValueDomain<AV>
-    where AV <: ConstValue {
-    let _ = typed
-    if (literalValue.IsBoolLit()) {
-        return ValueDomain<AV>((ConstBoolVal((literalValue as BoolLiteral).getOrThrow().GetVal()) as AV).getOrThrow())
-    } else if (literalValue.IsFloatLit()) {
-        if (literalValue.GetType().getOrThrow().GetTypeKind() != TypeKind.TYPE_FLOAT16) {
-            return ValueDomain<AV>((ConstFloatVal((literalValue as FloatLiteral).getOrThrow().GetVal()) as AV).getOrThrow())
-        }
-        return ValueDomain<AV>(true)
-    } else if (literalValue.IsIntLit()) {
-        let intLiteral = (literalValue as IntLiteral).getOrThrow()
-        let intTy = (literalValue.GetType().getOrThrow() as IntType).getOrThrow()
-        if (intTy.IsSigned()) {
-            return ValueDomain<AV>((ConstIntVal(intLiteral.GetSignedVal()) as AV).getOrThrow())
-        }
-        return ValueDomain<AV>((ConstUIntVal(intLiteral.GetUnsignedVal()) as AV).getOrThrow())
-    } else if (literalValue.IsRuneLit()) {
-        return ValueDomain<AV>((ConstRuneVal((literalValue as RuneLiteral).getOrThrow().GetVal()) as AV).getOrThrow())
-    } else if (literalValue.IsStringLit()) {
-        return ValueDomain<AV>((ConstStrVal((literalValue as StringLiteral).getOrThrow().GetVal()) as AV).getOrThrow())
-    } else if (literalValue.IsUnitLit()) {
-        return ValueDomain<AV>(true)
-    }
-    CJC_ABORT()
-    return ValueDomain<AV>(true)
+    return ConstValue.HandleNonNullLiteralValue(literalValue)
 }

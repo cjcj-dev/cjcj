@@ -4,9 +4,9 @@ import cjcj::utils.CJC_ASSERT
 import std.collection.*
 import std.reflect.TypeInfo
 
-func IsInstanceOfValue<AV, Pool>(): Bool where AV <: ConstValue,
-    Pool <: ValueStatePool<AV, Pool> {
-    return TypeInfo.of<Pool>() == TypeInfo.of<ActiveStatePool<AV>>()
+func IsInstanceOfValue<VD, Pool>(): Bool where VD <: AbstractDomain<VD> & ValueDomainAccess<VD>,
+    Pool <: ValueStatePool<VD, Pool> {
+    return TypeInfo.of<Pool>() == TypeInfo.of<ActiveStatePool<VD>>()
 }
 
 public func GetRefName(index: Int64): String {
@@ -21,29 +21,29 @@ public func GetObjChildName(parentName: String, fieldIdx: Int64): String {
     return parentName + "." + fieldIdx.toString()
 }
 
-public interface ValueStatePool<AV, Pool> where AV <: ConstValue {
+public interface ValueStatePool<VD, Pool> where VD <: AbstractDomain<VD> & ValueDomainAccess<VD> {
     static func Create(): Pool
     func Clone(): Pool
     func Size(): Int64
     func Clear(): Unit
     func Find(value: Value): Option<Int64>
     func Contains(value: Value): Bool
-    func At(value: Value): ValueDomain<AV>
-    func GetAt(index: Int64): (Value, ValueDomain<AV>)
-    func Insert(value: Value, domain: ValueDomain<AV>): Unit
+    func At(value: Value): VD
+    func GetAt(index: Int64): (Value, VD)
+    func Insert(value: Value, domain: VD): Unit
     func SetRef(value: Value, refValue: Ref): Unit
-    func SetValue(value: Value, absVal: AV): Unit
     func SetBound(value: Value, isTop: Bool): Unit
     func Join(rhs: Pool): Bool
 }
 
-public class FullStatePool<AV> <: ValueStatePool<AV, FullStatePool<AV>> where AV <: ConstValue {
+public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
+    where VD <: AbstractDomain<VD> & ValueDomainAccess<VD> {
     private let keys: ArrayList<Value> = ArrayList<Value>()
-    private let values: ArrayList<ValueDomain<AV>> = ArrayList<ValueDomain<AV>>()
+    private let values: ArrayList<VD> = ArrayList<VD>()
 
     public init() {}
 
-    public init(other: FullStatePool<AV>) {
+    public init(other: FullStatePool<VD>) {
         var idx: Int64 = 0
         while (idx < other.keys.size) {
             keys.add(other.keys[idx])
@@ -52,12 +52,12 @@ public class FullStatePool<AV> <: ValueStatePool<AV, FullStatePool<AV>> where AV
         }
     }
 
-    public static func Create(): FullStatePool<AV> {
-        return FullStatePool<AV>()
+    public static func Create(): FullStatePool<VD> {
+        return FullStatePool<VD>()
     }
 
-    public func Clone(): FullStatePool<AV> {
-        return FullStatePool<AV>(this)
+    public func Clone(): FullStatePool<VD> {
+        return FullStatePool<VD>(this)
     }
 
     public func Size(): Int64 {
@@ -84,18 +84,18 @@ public class FullStatePool<AV> <: ValueStatePool<AV, FullStatePool<AV>> where AV
         return Find(value).isSome()
     }
 
-    public func At(value: Value): ValueDomain<AV> {
+    public func At(value: Value): VD {
         if (let Some(idx) <- Find(value)) {
             return values[idx]
         }
         throw IllegalStateException("ValueAnalysis state missing value: " + value.GetIdentifier())
     }
 
-    public func GetAt(index: Int64): (Value, ValueDomain<AV>) {
+    public func GetAt(index: Int64): (Value, VD) {
         return (keys[index], values[index])
     }
 
-    public func Insert(value: Value, domain: ValueDomain<AV>): Unit {
+    public func Insert(value: Value, domain: VD): Unit {
         if (let Some(idx) <- Find(value)) {
             values[idx] = domain.Clone()
             return
@@ -105,11 +105,7 @@ public class FullStatePool<AV> <: ValueStatePool<AV, FullStatePool<AV>> where AV
     }
 
     public func SetRef(value: Value, refValue: Ref): Unit {
-        Insert(value, ValueDomain<AV>(refValue))
-    }
-
-    public func SetValue(value: Value, absVal: AV): Unit {
-        Insert(value, ValueDomain<AV>(absVal))
+        Insert(value, VD.Create(refValue))
     }
 
     public func SetBound(value: Value, isTop: Bool): Unit {
@@ -118,10 +114,10 @@ public class FullStatePool<AV> <: ValueStatePool<AV, FullStatePool<AV>> where AV
             return
         }
         keys.add(value)
-        values.add(ValueDomain<AV>(isTop))
+        values.add(VD.Create(isTop))
     }
 
-    public func Join(rhs: FullStatePool<AV>): Bool {
+    public func Join(rhs: FullStatePool<VD>): Bool {
         var changed = false
         var idx: Int64 = 0
         while (idx < rhs.keys.size) {
@@ -150,21 +146,22 @@ public class ActiveStateNode {
     }
 }
 
-public class ActiveStatePool<AV> <: ValueStatePool<AV, ActiveStatePool<AV>> where AV <: ConstValue {
+public class ActiveStatePool<VD> <: ValueStatePool<VD, ActiveStatePool<VD>>
+    where VD <: AbstractDomain<VD> & ValueDomainAccess<VD> {
     private static let MAX_STATE_POOL_SIZE: Int64 = 120
     private static let BASE_STATE_POOL_SIZE: Int64 = 80
 
-    private let data: HashMap<Value, ValueDomain<AV>> = HashMap<Value, ValueDomain<AV>>()
+    private let data: HashMap<Value, VD> = HashMap<Value, VD>()
     private let keys: ArrayList<Value> = ArrayList<Value>()
     private let obj2StateNode: HashMap<Value, ActiveStateNode> = HashMap<Value, ActiveStateNode>()
     private var first: Option<ActiveStateNode> = None
     private var tails: Option<ActiveStateNode> = None
-    private let topState: ValueDomain<AV> = ValueDomain<AV>(true)
-    private let topRefState: ValueDomain<AV> = ValueDomain<AV>(Ref.GetTopRefInstance())
+    private let topState: VD = VD.Create(true)
+    private let topRefState: VD = VD.Create(Ref.GetTopRefInstance())
 
     public init() {}
 
-    public init(other: ActiveStatePool<AV>) {
+    public init(other: ActiveStatePool<VD>) {
         if (other.first.isNone()) {
             return
         }
@@ -191,12 +188,12 @@ public class ActiveStatePool<AV> <: ValueStatePool<AV, ActiveStatePool<AV>> wher
         }
     }
 
-    public static func Create(): ActiveStatePool<AV> {
-        return ActiveStatePool<AV>()
+    public static func Create(): ActiveStatePool<VD> {
+        return ActiveStatePool<VD>()
     }
 
-    public func Clone(): ActiveStatePool<AV> {
-        return ActiveStatePool<AV>(this)
+    public func Clone(): ActiveStatePool<VD> {
+        return ActiveStatePool<VD>(this)
     }
 
     public func Size(): Int64 {
@@ -226,19 +223,19 @@ public class ActiveStatePool<AV> <: ValueStatePool<AV, ActiveStatePool<AV>> wher
         return data.contains(value)
     }
 
-    public func At(value: Value): ValueDomain<AV> {
+    public func At(value: Value): VD {
         if (let Some(domain) <- data.get(value)) {
             return domain
         }
         return GetTopState(value)
     }
 
-    public func GetAt(index: Int64): (Value, ValueDomain<AV>) {
+    public func GetAt(index: Int64): (Value, VD) {
         let key = keys[index]
         return (key, data[key])
     }
 
-    public func Insert(value: Value, domain: ValueDomain<AV>): Unit {
+    public func Insert(value: Value, domain: VD): Unit {
         if (data.contains(value)) {
             return
         }
@@ -263,15 +260,7 @@ public class ActiveStatePool<AV> <: ValueStatePool<AV, ActiveStatePool<AV>> wher
         if (let Some(domain) <- data.get(value)) {
             domain.SetRef(refValue)
         } else {
-            Insert(value, ValueDomain<AV>(refValue))
-        }
-    }
-
-    public func SetValue(value: Value, absVal: AV): Unit {
-        if (let Some(domain) <- data.get(value)) {
-            domain.SetValue(absVal)
-        } else {
-            Insert(value, ValueDomain<AV>(absVal))
+            Insert(value, VD.Create(refValue))
         }
     }
 
@@ -279,11 +268,11 @@ public class ActiveStatePool<AV> <: ValueStatePool<AV, ActiveStatePool<AV>> wher
         if (let Some(domain) <- data.get(value)) {
             domain.SetSelfToBound(isTop)
         } else {
-            Insert(value, ValueDomain<AV>(isTop))
+            Insert(value, VD.Create(isTop))
         }
     }
 
-    public func Join(other: ActiveStatePool<AV>): Bool {
+    public func Join(other: ActiveStatePool<VD>): Bool {
         var changed = false
         for ((_, value) in data) {
             if (value.IsRef()) {
@@ -317,7 +306,7 @@ public class ActiveStatePool<AV> <: ValueStatePool<AV, ActiveStatePool<AV>> wher
         }
     }
 
-    private func GetTopState(value: Value): ValueDomain<AV> {
+    private func GetTopState(value: Value): VD {
         if (let Some(typeValue) <- value.GetType()) {
             if (typeValue.IsRef()) {
                 return topRefState
@@ -515,20 +504,20 @@ public class AllocatedObjMap {
     }
 }
 
-public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: ConstValue,
-    Pool <: ValueStatePool<AV, Pool> {
+public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: AbstractDomain<VD> & ValueDomainAccess<VD>,
+    Pool <: ValueStatePool<VD, Pool> {
     public var programState: Pool = Pool.Create()
     public var refMap: RefMap = RefMap()
     public let childrenMap: ChildrenMap
     public let allocatedRefMap: AllocatedRefMap
-    public let allocatedTwoLevelRefMap: AllocatedRefMap
+    public let allocatedTwoLevelRefMap: Option<AllocatedRefMap>
     public let allocatedObjMap: AllocatedObjMap
     public let refPool: ArrayList<Ref>
     public let absObjPool: ArrayList<AbstractObject>
     private let isGlobalState: Bool
 
     public init(childrenMap: ChildrenMap, allocatedRefMap: AllocatedRefMap,
-        allocatedTwoLevelRefMap: AllocatedRefMap, allocatedObjMap: AllocatedObjMap,
+        allocatedTwoLevelRefMap: Option<AllocatedRefMap>, allocatedObjMap: AllocatedObjMap,
         refPool: ArrayList<Ref>, absObjPool: ArrayList<AbstractObject>, isGlobalState!: Bool = false) {
         super()
         this.childrenMap = childrenMap
@@ -540,7 +529,7 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
         this.isGlobalState = isGlobalState
     }
 
-    public init(other: State<AV, Pool>) {
+    public init(other: State<VD, Pool>) {
         super()
         kind = other.kind
         programState = other.programState.Clone()
@@ -554,21 +543,21 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
         isGlobalState = other.isGlobalState
     }
 
-    public override func Clone(): State<AV, Pool> {
-        return State<AV, Pool>(this)
+    public override func Clone(): State<VD, Pool> {
+        return State<VD, Pool>(this)
     }
 
     public func SetReachable(value: Bool): Unit {
         kind = if (value) { ReachableKind.REACHABLE } else { ReachableKind.UNREACHABLE }
     }
 
-    public func CopyFrom(rhs: State<AV, Pool>): Unit {
+    public func CopyFrom(rhs: State<VD, Pool>): Unit {
         kind = rhs.kind
         programState = rhs.programState.Clone()
         refMap = rhs.refMap.Clone()
     }
 
-    public override func Join(rhs: State<AV, Pool>): Bool {
+    public override func Join(rhs: State<VD, Pool>): Bool {
         if (rhs.IsBottom()) {
             return false
         }
@@ -606,15 +595,11 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
         return out + "}"
     }
 
-    public func Update(dest: Value, absVal: AV): Unit {
-        programState.SetValue(dest, absVal)
-    }
-
     public func Update(dest: Value, refValue: Ref): Unit {
         programState.SetRef(dest, refValue)
     }
 
-    public func Update(dest: Value, domain: ValueDomain<AV>): Unit {
+    public func Update(dest: Value, domain: VD): Unit {
         programState.Insert(dest, domain)
     }
 
@@ -637,14 +622,7 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
         }
     }
 
-    public func CheckAbstractValue(obj: Value): Option<AV> {
-        if (let Some(idx) <- programState.Find(obj)) {
-            return programState.GetAt(idx)[1].CheckAbsVal()
-        }
-        return None
-    }
-
-    public func GetAbstractDomain(obj: Value): Option<ValueDomain<AV>> {
+    public func GetAbstractDomain(obj: Value): Option<VD> {
         var absObj: Option<Value> = obj
         if (let Some(ty) <- obj.GetType()) {
             if (ty.IsRef()) {
@@ -660,14 +638,14 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
         return None
     }
 
-    public func CheckAbstractValueWithTopBottom(obj: Value): Option<ValueDomain<AV>> {
+    public func CheckAbstractValueWithTopBottom(obj: Value): Option<VD> {
         if (let Some(idx) <- programState.Find(obj)) {
             return programState.GetAt(idx)[1]
         }
         return None
     }
 
-    public func Propagate(src: Value, dest: Value, state!: Option<State<AV, Pool>> = None): Unit {
+    public func Propagate(src: Value, dest: Value, state!: Option<State<VD, Pool>> = None): Unit {
         let targetState = state ?? this
         targetState.PropagateWithoutChildren(src, dest, targetProgramState: Some(targetState.programState))
 
@@ -807,7 +785,7 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
     }
 
     public func CreateNewRef(expr!: Option<Expression> = None, createTwoLevelRef!: Bool = false): Ref {
-        let allocateMap = if (createTwoLevelRef) { allocatedTwoLevelRefMap } else { allocatedRefMap }
+        let allocateMap = if (createTwoLevelRef) { allocatedTwoLevelRefMap.getOrThrow() } else { allocatedRefMap }
         if (let Some(expression) <- expr) {
             if (let Some(existing) <- allocateMap.Find(expression)) {
                 return existing
@@ -857,7 +835,7 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
             }
             return
         }
-        if (IsInstanceOfValue<AV, Pool>() && !state.Contains(src)) {
+        if (IsInstanceOfValue<VD, Pool>() && !state.Contains(src)) {
             return
         }
         if (state.Contains(dest)) {
@@ -903,7 +881,7 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
             let domain = match (CheckAbstractValueWithTopBottom(child)) {
                 case Some(value) => value
                 case None =>
-                    if (IsInstanceOfValue<AV, Pool>()) {
+                    if (IsInstanceOfValue<VD, Pool>()) {
                         continue
                     }
                     throw IllegalStateException("ValueAnalysis child state missing")
@@ -914,7 +892,7 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
         }
     }
 
-    public func StoreGVChildrenState(src: Value, dest: AbstractObject, globalState: State<AV, Pool>): Unit {
+    public func StoreGVChildrenState(src: Value, dest: AbstractObject, globalState: State<VD, Pool>): Unit {
         let srcChildren = childrenMap.Get(src) ?? return
         let destChildren = globalState.GetChildren(dest)
         CJC_ASSERT(srcChildren.size == destChildren.size)
@@ -933,7 +911,7 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
         }
     }
 
-    public func LoadGVChildrenState(src: AbstractObject, dest: LocalVar, globalState: State<AV, Pool>): Unit {
+    public func LoadGVChildrenState(src: AbstractObject, dest: LocalVar, globalState: State<VD, Pool>): Unit {
         let objChildren = globalState.childrenMap.Get(src) ?? return
         let setChildState = { child: AbstractObject, index: Int64 =>
             let srcState = globalState.programState.At(objChildren[index])
@@ -965,7 +943,7 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
         }
     }
 
-    private func RefMapJoin(rhs: State<AV, Pool>): Bool {
+    private func RefMapJoin(rhs: State<VD, Pool>): Bool {
         var changed = false
         var idx: Int64 = 0
         while (idx < rhs.refMap.Size()) {
@@ -981,7 +959,7 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
         return changed
     }
 
-    private func JoinRefMapValue(lhsIdx: Int64, rhsValue: RefMapValue, rhs: State<AV, Pool>): Bool {
+    private func JoinRefMapValue(lhsIdx: Int64, rhsValue: RefMapValue, rhs: State<VD, Pool>): Bool {
         let lhsEntry = refMap.GetAt(lhsIdx)
         match (lhsEntry[1]) {
             case RefMapValue.RefTarget(ref1) =>
@@ -1016,7 +994,7 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
                     case RefMapValue.RefTarget(_) =>
                         throw IllegalStateException("ValueAnalysis ref-map kind mismatch")
                 }
-                if (!IsInstanceOfValue<AV, Pool>()) {
+                if (!IsInstanceOfValue<VD, Pool>()) {
                     CJC_ASSERT(refEq(obj1, obj2))
                 }
         }
@@ -1043,6 +1021,22 @@ public class State<AV, Pool> <: AbstractDomain<State<AV, Pool>> where AV <: Cons
                 case RefMapValue.ObjectTarget(obj) => return obj
                 case RefMapValue.RefTarget(_) => return None
             }
+        }
+        return None
+    }
+}
+
+// C++ State::Update and State::CheckAbstractValue at ValueAnalysis.h:166-179,
+// :226-232 preserve the concrete AbstractValue type carried by ValueDomain.
+extend<AV, Pool> State<ValueDomain<AV>, Pool> where AV <: HasEqual<AV>,
+    Pool <: ValueStatePool<ValueDomain<AV>, Pool> {
+    public func Update(dest: Value, absVal: AV): Unit {
+        programState.Insert(dest, ValueDomain<AV>(absVal))
+    }
+
+    public func CheckAbstractValue(obj: Value): Option<AV> {
+        if (let Some(idx) <- programState.Find(obj)) {
+            return programState.GetAt(idx)[1].CheckAbsVal()
         }
         return None
     }

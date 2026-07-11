@@ -1077,7 +1077,9 @@ public class GlobalVar <: GlobalValue {
     }
 }
 
-public class Function <: GlobalValue {
+// C++ AnalysisWrapper.h:179 keys results by const Function* identity. The
+// Equatable/Hashable view exposes that pointer identity as the inherited nodeId.
+public class Function <: GlobalValue & Hashable & Equatable<Function> {
     private var funcKind: FuncKind = FuncKind.DEFAULT
     private var body: Option<BlockGroup> = None
     private let params: ArrayList<Parameter> = ArrayList<Parameter>()
@@ -1098,6 +1100,14 @@ public class Function <: GlobalValue {
         for (param in genericTypeParams) {
             this.genericTypeParams.add(param)
         }
+    }
+
+    public operator func ==(right: Function): Bool {
+        return nodeId == right.nodeId
+    }
+
+    public operator func !=(right: Function): Bool {
+        return nodeId != right.nodeId
     }
 
     public override func AsFunction(): Option<Function> { return this }
