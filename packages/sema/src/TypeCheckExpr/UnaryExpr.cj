@@ -157,3 +157,6 @@ public func ChkUnaryExpr(impl: TypeCheckerImpl, target: Ty, ue: UnaryExpr): Bool
 public func ChkUnaryExpr(typeManager: TypeManager, target: Ty, ue: UnaryExpr): Bool {
     return ChkUnaryExpr(TypeCheckerImpl(typeManager: typeManager), target, ue)
 }
+
+extend TypeChecker {
+}

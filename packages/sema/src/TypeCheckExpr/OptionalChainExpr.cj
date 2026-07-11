@@ -78,3 +78,6 @@ public func ChkOptionalChainExpr(typeManager: TypeManager, target: Ty, oce: Opti
     }
     return true
 }
+
+extend TypeChecker {
+}

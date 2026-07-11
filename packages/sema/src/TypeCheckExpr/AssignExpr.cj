@@ -356,3 +356,6 @@ func InferAssignExprCheckCaseOverloading(typeManager: TypeManager, ctx: ASTConte
     }
     return None
 }
+
+extend TypeChecker {
+}

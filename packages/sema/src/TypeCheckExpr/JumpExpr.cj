@@ -32,3 +32,6 @@ public func ChkLoopControlExpr(je: JumpExpr): Bool {
     let ty = SynLoopControlExpr(je)
     return !ty.HasInvalidTy()
 }
+
+extend TypeChecker {
+}

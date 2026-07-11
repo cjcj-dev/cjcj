@@ -230,3 +230,6 @@ public func ChkForInExpr(typeManager: TypeManager, target: Ty, fie: ForInExpr, c
     }
     return isWellTyped
 }
+
+extend TypeChecker {
+}

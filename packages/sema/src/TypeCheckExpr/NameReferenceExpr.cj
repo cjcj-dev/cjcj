@@ -1057,3 +1057,6 @@ private func containsTy(values: ArrayList<Ty>, ty: Ty): Bool {
     }
     return false
 }
+
+extend TypeChecker {
+}

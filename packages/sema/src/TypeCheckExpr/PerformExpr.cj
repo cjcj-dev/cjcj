@@ -46,3 +46,6 @@ public func SynPerformExpr(typeManager: TypeManager, pe: PerformExpr, commandTy!
     }
     return invalidPerformExpr(pe)
 }
+
+extend TypeChecker {
+}

@@ -125,3 +125,6 @@ public func ChkIfAvailableExpr(typeManager: TypeManager, target: Ty, iae: IfAvai
     let _ = IfAvailableInvalid(iae)
     return false
 }
+
+extend TypeChecker {
+}

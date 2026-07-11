@@ -47,3 +47,6 @@ public func ChkIncOrDecExpr(typeManager: TypeManager, target: Ty, ide: IncOrDecE
     ide.SetTy(TypeManager.GetInvalidTy())
     return false
 }
+
+extend TypeChecker {
+}

@@ -92,3 +92,6 @@ public func SynThrowExpr(typeManager: TypeManager, te: ThrowExpr,
     te.SetTy(invalidTy)
     return invalidTy
 }
+
+extend TypeChecker {
+}

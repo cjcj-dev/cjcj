@@ -1541,3 +1541,6 @@ public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     return ChkBinaryExpr(TypeCheckerImpl(typeManager: typeManager, diag: diag), target, be, ctx: ctx,
         synthesizer: synthesizer, checker: checker, diag: diag)
 }
+
+extend TypeChecker {
+}

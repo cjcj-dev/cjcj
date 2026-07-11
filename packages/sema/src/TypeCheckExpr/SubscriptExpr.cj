@@ -189,3 +189,6 @@ public func SynSubscriptExpr(typeManager: TypeManager, ctx: ASTContext, se: Subs
     let _ = ChkSubscriptExpr(typeManager, ctx, None, se, synthesizer, checker, diag)
     return se.GetTy().getOrThrow()
 }
+
+extend TypeChecker {
+}

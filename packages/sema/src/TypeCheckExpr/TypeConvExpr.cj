@@ -73,3 +73,6 @@ public func ChkTypeConvExpr(typeManager: TypeManager, targetTy: Ty, tce: TypeCon
     let _ = invalidTypeConvExpr(tce)
     return false
 }
+
+extend TypeChecker {
+}

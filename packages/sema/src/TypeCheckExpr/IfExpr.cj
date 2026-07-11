@@ -166,3 +166,6 @@ public func ChkIfExpr(typeManager: TypeManager, target: Ty, ie: IfExpr,
     }
     return ok
 }
+
+extend TypeChecker {
+}

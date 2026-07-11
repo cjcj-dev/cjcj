@@ -140,3 +140,6 @@ public func ChkBlock(typeManager: TypeManager, target: Ty, b: Block,
     let _ = InvalidBlock(b)
     return false
 }
+
+extend TypeChecker {
+}

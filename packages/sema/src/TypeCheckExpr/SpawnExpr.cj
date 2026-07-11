@@ -134,3 +134,6 @@ public func ChkSpawnExpr(typeManager: TypeManager, target: Ty, se: SpawnExpr,
     }
     return true
 }
+
+extend TypeChecker {
+}

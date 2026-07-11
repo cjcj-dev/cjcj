@@ -209,3 +209,6 @@ public func ChkRangeExpr(typeManager: TypeManager, target: Ty, re: RangeExpr,
     }
     return isWellTyped
 }
+
+extend TypeChecker {
+}

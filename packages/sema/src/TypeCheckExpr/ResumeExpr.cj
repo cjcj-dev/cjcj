@@ -79,3 +79,6 @@ public func SynResumeExpr(typeManager: TypeManager, re: ResumeExpr,
     }
     return re.GetTy() ?? TypeManager.GetInvalidTy()
 }
+
+extend TypeChecker {
+}

@@ -484,9 +484,9 @@ private func CollectGenericParam(funcDecl: FuncDecl, desugared: FuncDecl): Unit 
 
 public class TypeChecker {
     private var ci: Option<CompilerInstance> = None
-    private var impl: TypeCheckerImpl = TypeCheckerImpl()
+    internal var impl: TypeCheckerImpl = TypeCheckerImpl()
     private let contexts: ArrayList<ASTContext> = ArrayList<ASTContext>()
-    private var currentFuncBody: Option<FuncBody> = None
+    internal var currentFuncBody: Option<FuncBody> = None
     private let activeEnumConstructorRegistrations: ArrayList<EnumDecl> = ArrayList<EnumDecl>()
     private let mainFunctionMap: HashMap<Node, ArrayList<Decl>> = HashMap<Node, ArrayList<Decl>>()
 
@@ -2117,11 +2117,11 @@ public class TypeChecker {
         return ret
     }
 
-    private func SynthesizeNode(ctx: ASTContext, node: Node): Ty {
+    internal func SynthesizeNode(ctx: ASTContext, node: Node): Ty {
         return SynthesizeNode(ctx, SynPos.NONE, node)
     }
 
-    private func SynthesizeNode(ctx: ASTContext, pos: SynPos, node: Node): Ty {
+    internal func SynthesizeNode(ctx: ASTContext, pos: SynPos, node: Node): Ty {
         if (let Some(typeNode) <- (node as Type)) {
             impl.SetTypeTy(ctx, typeNode)
             return tyOrInvalid(typeNode)
@@ -4808,7 +4808,7 @@ public class TypeChecker {
         let _ = walker.Walk()
     }
 
-    private func FinishSynthesize(ctx: ASTContext, expr: Expr, ty: Ty): Ty {
+    internal func FinishSynthesize(ctx: ASTContext, expr: Expr, ty: Ty): Ty {
         SynthesizeDesugarsInTree(ctx, expr)
         RefreshNameReferencesInTree(ctx, expr)
         ctx.SkipSynForCorrectTy(expr)
@@ -4932,7 +4932,7 @@ public class TypeChecker {
         return ret
     }
 
-    private func SynthesizeWithCache(ctx: ASTContext, pos: SynPos, expr: Expr): Ty {
+    internal func SynthesizeWithCache(ctx: ASTContext, pos: SynPos, expr: Expr): Ty {
         if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
             return Synthesize(ctx, pos, expr)
         }
@@ -5562,11 +5562,11 @@ public class TypeChecker {
         return false
     }
 
-    private func Synthesize(ctx: ASTContext, expr: Expr): Ty {
+    internal func Synthesize(ctx: ASTContext, expr: Expr): Ty {
         return Synthesize(ctx, SynPos.NONE, expr)
     }
 
-    private func Synthesize(ctx: ASTContext, pos: SynPos, expr: Expr): Ty {
+    internal func Synthesize(ctx: ASTContext, pos: SynPos, expr: Expr): Ty {
         if (expr.TestAttr(Attribute.IS_BROKEN)) {
             expr.SetTy(TypeManager.GetInvalidTy())
             return expr.GetTy() ?? TypeManager.GetInvalidTy()
@@ -6003,7 +6003,7 @@ public class TypeChecker {
         return None
     }
 
-    private func Check(ctx: ASTContext, target: Ty, expr: Expr, clearInferredCallTypes!: Bool = true): Bool {
+    internal func Check(ctx: ASTContext, target: Ty, expr: Expr, clearInferredCallTypes!: Bool = true): Bool {
         if (!Ty.IsTyCorrect(target)) {
             expr.SetTy(TypeManager.GetInvalidTy())
             typeCheckExprClearTargetType(ctx, expr)

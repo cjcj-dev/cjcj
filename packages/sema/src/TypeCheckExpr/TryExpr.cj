@@ -660,3 +660,6 @@ public func ChkTryExpr(typeManager: TypeManager, target: Ty, te: TryExpr,
     let _ = TryInvalid(te)
     return false
 }
+
+extend TypeChecker {
+}

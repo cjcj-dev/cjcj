@@ -117,3 +117,6 @@ public func SynReturnExpr(typeManager: TypeManager, re: ReturnExpr): Ty {
 public func ChkReturnExpr(typeManager: TypeManager, re: ReturnExpr): Bool {
     return !SynReturnExpr(typeManager, re).HasInvalidTy()
 }
+
+extend TypeChecker {
+}

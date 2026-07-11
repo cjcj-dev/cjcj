@@ -299,3 +299,6 @@ public func ChkLamExpr(typeManager: TypeManager, target: Ty, le: LambdaExpr, ctx
     let _ = LambdaInvalid(le)
     return false
 }
+
+extend TypeChecker {
+}

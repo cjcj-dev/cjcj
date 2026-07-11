@@ -129,3 +129,6 @@ public func ChkAsExpr(typeManager: TypeManager, target: Ty, ae: AsExpr, optionDe
     }
     return true
 }
+
+extend TypeChecker {
+}

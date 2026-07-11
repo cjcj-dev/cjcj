@@ -384,3 +384,6 @@ public func SynLitConstExpr(lce: LitConstExpr, stringTy!: Option<Ty> = None,
     }
     return lce.GetTy() ?? TypeManager.GetInvalidTy()
 }
+
+extend TypeChecker {
+}

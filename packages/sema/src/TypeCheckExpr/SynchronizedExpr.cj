@@ -110,3 +110,6 @@ public func SynSyncExpr(typeManager: TypeManager, se: SynchronizedExpr, lockTy!:
     }
     return invalidSyncExpr(se)
 }
+
+extend TypeChecker {
+}

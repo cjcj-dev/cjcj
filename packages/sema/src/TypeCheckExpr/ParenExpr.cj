@@ -62,3 +62,6 @@ public func ChkParenExpr(typeManager: TypeManager, target: Ty, pe: ParenExpr,
     let _ = invalidParenExpr(pe)
     return false
 }
+
+extend TypeChecker {
+}

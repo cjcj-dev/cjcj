@@ -129,3 +129,6 @@ public func ChkTupleLit(typeManager: TypeManager, target: Ty, tl: TupleLit,
     let _ = invalidTupleLit(tl)
     return false
 }
+
+extend TypeChecker {
+}

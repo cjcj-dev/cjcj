@@ -43,3 +43,6 @@ public func ChkQuoteExpr(typeManager: TypeManager, target: Ty, qe: QuoteExpr): B
     }
     return true
 }
+
+extend TypeChecker {
+}
