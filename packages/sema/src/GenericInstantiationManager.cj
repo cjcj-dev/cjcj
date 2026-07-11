@@ -32,8 +32,11 @@ public class CompilerInstance {
     public let pkgCtxMap: HashMap<Node, ASTContext> = HashMap<Node, ASTContext>()
     public init() {}
 
-    public func GetASTContextByPackage(pkg: Package): Option<ASTContext> {
-        return pkgCtxMap.get(pkg)
+    public func GetASTContextByPackage(pkg: Option<Package>): Option<ASTContext> {
+        if (let None <- pkg) {
+            return None
+        }
+        return pkgCtxMap.get(pkg.getOrThrow())
     }
 
     public func AddResolvedImportedDecls(fileHash: UInt64, name: String, decls: ArrayList<Decl>): Unit {

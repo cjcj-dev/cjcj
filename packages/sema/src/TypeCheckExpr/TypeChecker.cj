@@ -6315,8 +6315,9 @@ public class TypeChecker {
             diag: impl.diag, importManager: impl.importManager))
     }
 
-    func ReplaceWithGenericTyInInheritableDecl(ty: Ty, outerDecl: Decl, id: InheritableDecl): Ty {
-        if (!ty.HasGeneric()) {
+    func ReplaceWithGenericTyInInheritableDecl(
+        ty: Option<Ty>, outerDecl: Decl, id: InheritableDecl): Option<Ty> {
+        if ((let None <- ty) || !ty.getOrThrow().HasGeneric()) {
             return ty
         }
         var typeMapping = MultiTypeSubst()
@@ -6326,10 +6327,10 @@ public class TypeChecker {
         if (typeMapping.entries.isEmpty()) {
             return ty
         }
-        return impl.typeManager.GetBestInstantiatedTy(ty, typeMapping)
+        return impl.typeManager.GetBestInstantiatedTy(ty.getOrThrow(), typeMapping)
     }
 
-    func InferTypeOfThis(re: RefExpr, objDecl: InheritableDecl): Ty {
+    func InferTypeOfThis(re: RefExpr, objDecl: InheritableDecl): Option<Ty> {
         let outerDecl = objDecl
         var typeDecl = outerDecl
         if (let Some(extendDecl) <- (typeDecl as ExtendDecl)) {
@@ -6350,15 +6351,15 @@ public class TypeChecker {
             }
         }
         ReplaceTarget(re, Some(typeDecl))
-        var ret = ReplaceWithGenericTyInInheritableDecl(
-            outerDecl.GetTy().getOrThrow(), outerDecl, typeDecl)
-        if (let Some(classTy) <- (ret as ClassTy)) {
-            ret = impl.typeManager.GetClassThisTy(classTy.decl.getOrThrow(), classTy.typeArgs.toArray())
+        var ret = ReplaceWithGenericTyInInheritableDecl(outerDecl.GetTy(), outerDecl, typeDecl)
+        if ((let Some(rawRet) <- ret) && (let Some(classTy) <- (rawRet as ClassTy))) {
+            ret = Some(impl.typeManager.GetClassThisTy(
+                classTy.decl.getOrThrow(), classTy.typeArgs.toArray()))
         }
         return ret
     }
 
-    func InferTypeOfSuper(re: RefExpr, objDecl: InheritableDecl): Ty {
+    func InferTypeOfSuper(re: RefExpr, objDecl: InheritableDecl): Option<Ty> {
         if (let None <- (objDecl as ClassDecl)) {
             return TypeManager.GetInvalidTy()
         }
@@ -6368,8 +6369,7 @@ public class TypeChecker {
                 if (let Some(superClassTy) <- classTy.GetSuperClassTy()) {
                     let superDecl = superClassTy.declPtr.getOrThrow()
                     ReplaceTarget(re, Some(superDecl))
-                    return ReplaceWithGenericTyInInheritableDecl(
-                        superDecl.GetTy().getOrThrow(), objDecl, superDecl)
+                    return ReplaceWithGenericTyInInheritableDecl(superDecl.GetTy(), objDecl, superDecl)
                 }
             }
         }
@@ -6379,22 +6379,18 @@ public class TypeChecker {
     func CheckThisOrSuper(ctx: ASTContext, re: RefExpr): Unit {
         re.SetTy(TypeManager.GetInvalidTy())
         let symbol = ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, re.scopeName)
-        if (let None <- symbol) {
+        if ((let None <- symbol) || (let None <- symbol.getOrThrow().node) ||
+            (let None <- (symbol.getOrThrow().node.getOrThrow() as InheritableDecl))) {
             Diagnose(impl.diag.getOrThrow(), re, BasicDiagKind.sema_this_super_use_error_outside_class,
                 args: [BasicDiagArgument(re.ref.identifier.Val())]).Emit()
             return
         }
         let node = symbol.getOrThrow().node.getOrThrow()
-        if (let None <- (node as InheritableDecl)) {
-            Diagnose(impl.diag.getOrThrow(), re, BasicDiagKind.sema_this_super_use_error_outside_class,
-                args: [BasicDiagArgument(re.ref.identifier.Val())]).Emit()
-            return
-        }
         let decl = (node as InheritableDecl).getOrThrow()
         if (re.isThis) {
-            re.SetTy(InferTypeOfThis(re, decl))
+            re.SetTy(InferTypeOfThis(re, decl).getOrThrow())
         } else {
-            re.SetTy(InferTypeOfSuper(re, decl))
+            re.SetTy(InferTypeOfSuper(re, decl).getOrThrow())
         }
     }
 
@@ -6426,7 +6422,7 @@ public class TypeChecker {
                 }
             }
             let file = expr.curFile.getOrThrow()
-            let ctx = ci.getOrThrow().GetASTContextByPackage(file.curPackage.getOrThrow()).getOrThrow()
+            let ctx = ci.getOrThrow().GetASTContextByPackage(file.curPackage).getOrThrow()
             if (let Some(outMostFunc) <- ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC, expr.scopeName)) {
                 let funcDecl = (outMostFunc.node.getOrThrow() as FuncDecl).getOrThrow()
                 if (let Some(parentClassLike) <- funcDecl.funcBody.getOrThrow().parentClassLike) {
