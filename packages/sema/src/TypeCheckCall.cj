@@ -2581,7 +2581,7 @@ private func RecoverCallArgs(ce: CallExpr, argsTys: ArrayList<Option<Ty>>, argCh
 }
 
 private func EmitGenericInstantiationFailureForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
-    decl: Decl, typeArgs: ArrayList<Ty>, checkNode: Node): Unit {
+    decl: Decl, typeArgs: ArrayList<Ty>, checkNode: Node, typeNodes!: Option<ArrayList<Type>> = None): Unit {
     if (let None <- diag) {
         return
     }
@@ -2630,10 +2630,14 @@ private func EmitGenericInstantiationFailureForCall(typeManager: TypeManager, di
             if (!typeManager.IsSubtype(instTy, upperBoundTy, implicitBoxed: true, allowOptionBox: false) ||
                 sameTyButCType) {
                 let declTy = decl.GetTy() ?? TypeManager.GetInvalidTy()
-                let builder = diagValue.Diagnose(ToBasicPosition(checkNode.begin), ToBasicPosition(checkNode.end),
+                let diagNode = match (typeNodes) {
+                    case Some(nodes) => getGenericConstraintDiagNode(checkNode, nodes, instTy)
+                    case None => checkNode
+                }
+                let builder = Diagnose(diagValue, diagNode,
                     BasicDiagKind.sema_generic_type_argument_not_match_constraint,
                     args: [BasicDiagArgument(declTy.String())])
-                builder.AddNote(ToBasicPosition(constraint.begin), BasicDiagKind.sema_which_constraint_not_match,
+                AddNote(builder, constraint, BasicDiagKind.sema_which_constraint_not_match,
                     args: [BasicDiagArgument(instTy.String()), BasicDiagArgument("'" + upperBoundTy.String() + "'")])
                 builder.Emit()
                 return
@@ -2671,7 +2675,7 @@ private func CheckGenericDeclInstantiationForCall(typeManager: TypeManager, diag
         }
     }
     if (checkNode.ShouldDiagnose()) {
-        EmitGenericInstantiationFailureForCall(typeManager, diag, decl, typeArgs, checkNode)
+        EmitGenericInstantiationFailureForCall(typeManager, diag, decl, typeArgs, checkNode, typeNodes: typeNodes)
     }
     return false
 }

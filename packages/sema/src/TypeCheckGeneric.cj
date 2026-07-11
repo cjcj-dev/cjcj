@@ -241,7 +241,7 @@ private func emitGenericConstraintMismatch(diag: Option<BasicDiagnosticEngine>, 
     }
 }
 
-private func getGenericConstraintDiagNode(checkNode: Node, typeNodes: ArrayList<Type>, instTy: Ty): Node {
+public func getGenericConstraintDiagNode(checkNode: Node, typeNodes: ArrayList<Type>, instTy: Ty): Node {
     for (typeNode in typeNodes) {
         if (!typeNode.TestAttr(Attribute.COMPILER_ADD)) {
             if (let Some(typeNodeTy) <- typeNode.GetTy()) {
