@@ -597,7 +597,7 @@ public func ChkVArrayArg(typeManager: TypeManager, arrayExpr: ArrayExpr,
         } else {
             if (arg.name.Val() != "repeat") {
                 if (let Some(diagValue) <- diag) {
-                    let builder = diagValue.Diagnose(ToBasicPosition(arg.begin), ToBasicPosition(arg.end),
+                    let builder = Diagnose(diagValue, arg,
                         BasicDiagKind.sema_unknown_named_argument, args: [BasicDiagArgument(arg.name.Val())])
                     builder.AddNote("expect the name of the named parameter is 'item'")
                     builder.Emit()
@@ -637,8 +637,8 @@ public func ChkVArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: Array
     }
     if (!typeManager.IsSubtype(arrayTy, targetTy)) {
         if (let Some(diagValue) <- diag) {
-            let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_mismatched_types,
-                MakeRange(arrayExpr.begin, arrayExpr.end))
+            let builder = DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_mismatched_types,
+                arrayExpr)
             builder.AddMainHintArguments([targetTy.String(), arrayTy.String()])
             builder.Emit()
         }
