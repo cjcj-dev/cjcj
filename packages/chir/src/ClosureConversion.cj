@@ -827,6 +827,9 @@ public class ClosureConversion {
         let globalFunc = CreateCCFunction(funcTy, GenerateGlobalFuncIdentifier(lambda), lambda.GetSrcCodeIdentifier(),
             genericTypeParams: convertedGenericParams)
         SetLiftedLambdaAttr(globalFunc, lambda)
+        let sigInfo = FuncSigInfo(lambdaTy, funcName: lambda.GetSrcCodeIdentifier(),
+            genericTypeParams: lambda.GetGenericTypeParams())
+        globalFunc.SetOriginalLambdaInfo(sigInfo)
         if (let Some(parentFunc) <- lambda.GetTopLevelFunc()) {
             globalFunc.InheritIDFromFunc(parentFunc)
         }
@@ -1053,6 +1056,9 @@ public class ClosureConversion {
         let globalFunc = CreateCCFunction(funcTy, GenerateGlobalFuncIdentifier(lambda), lambda.GetSrcCodeIdentifier(),
             genericTypeParams: lambda.GetGenericTypeParams())
         SetLiftedLambdaAttr(globalFunc, lambda)
+        let sigInfo = FuncSigInfo(lambda.GetFuncType().getOrThrow(), funcName: lambda.GetSrcCodeIdentifier(),
+            genericTypeParams: lambda.GetGenericTypeParams())
+        globalFunc.SetOriginalLambdaInfo(sigInfo)
         if (let Some(parentFunc) <- lambda.GetTopLevelFunc()) {
             globalFunc.InheritIDFromFunc(parentFunc)
         }
