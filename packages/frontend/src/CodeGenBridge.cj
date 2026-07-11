@@ -215,7 +215,10 @@ private class ToCHIR {
         let builderTaskQueue = TaskQueue(threadNum)
         var index: Int64 = 0
         while (index < funcNum) {
-            results.add(builderTaskQueue.AddTask<ChirBuilder>({ => ChirBuilder(builder.context) }))
+            let builderIndex = index
+            results.add(builderTaskQueue.AddTask<ChirBuilder>({ =>
+                ChirBuilder(builder.context, threadIdx: builderIndex)
+            }))
             index++
         }
         builderTaskQueue.RunAndWaitForAllTasksCompleted()
