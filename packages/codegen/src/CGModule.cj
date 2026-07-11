@@ -503,7 +503,7 @@ public class CGModule {
 
     private func CollectGenericTypeInfoPath(srcTy: Type, genericTy: GenericType, path: ArrayList<Int64>): Bool {
         let baseTy = srcTy.StripAllRefs()
-        if (baseTy.objectId == genericTy.objectId) {
+        if (baseTy == genericTy) {
             return true
         }
         let typeArgs = baseTy.GetTypeArgs()

@@ -168,7 +168,7 @@ private class CGExtensionDef {
         let vTable = chirDef.GetDefVTable().GetExpectedTypeVTable(inheritedType)
         let funcTableSize = if (vTable.IsEmpty()) { 0 } else { vTable.GetMethodNum() }
         if (funcTableSize == 0 && inheritedType.GetClassDef().IsInterface() &&
-            inheritedType.objectId == targetType.objectId) {
+            inheritedType == targetType) {
             return false
         }
         extendDefName = typeMangle + "_ed_" + GetTypeQualifiedName(inheritedType)
@@ -398,7 +398,7 @@ private class CGExtensionDef {
     }
 
     private func FoundGenericTypeAndCollectPath(srcType: Type, gt: GenericType, path: ArrayList<Int64>): Bool {
-        if (srcType.objectId == gt.objectId) {
+        if (srcType == gt) {
             return true
         }
         let typeArgs = DeRef(srcType).GetTypeArgs()
@@ -674,7 +674,7 @@ private func GetOrderedParentTypesRecusively(classType: ClassType, parents: Arra
         let instType = (ReplaceRawGenericArgType(interfaceTy, res[1], builder) as ClassType).getOrThrow()
         var found = false
         for (parentType in parents) {
-            if (parentType.objectId == instType.objectId) {
+            if (parentType == instType) {
                 found = true
                 break
             }
@@ -703,7 +703,7 @@ private func GetOrderedParentTypesRecusively(def: CustomTypeDef, parents: ArrayL
     for (interfaceTy in def.GetImplementedInterfaceTys()) {
         var found = false
         for (parentType in parents) {
-            if (parentType.objectId == interfaceTy.objectId) {
+            if (parentType == interfaceTy) {
                 found = true
                 break
             }
@@ -725,7 +725,7 @@ private func IsSameTypeArgs(left: ArrayList<Type>, right: ArrayList<Type>): Bool
     }
     var idx: Int64 = 0
     while (idx < left.size) {
-        if (left[idx].objectId != right[idx].objectId) {
+        if (left[idx] != right[idx]) {
             return false
         }
         idx++

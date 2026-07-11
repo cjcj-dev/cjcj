@@ -1334,7 +1334,7 @@ class GenericInstantiationManagerImpl {
         }
         for (packageDecl in ci.importedPackageDecls) {
             let importPkg = packageDecl.srcPackage
-            let ignore = importPkg.objectId == currentPkg.objectId || !importPkg.TestAttr(Attribute.IMPORTED)
+            let ignore = importPkg == currentPkg || !importPkg.TestAttr(Attribute.IMPORTED)
             if (ignore) {
                 continue
             }

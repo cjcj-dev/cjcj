@@ -561,7 +561,7 @@ public class Translator {
                 "not yet ported in faithful AST2CHIR: ${ASTKindName(nodePtr.astKind)}")
         }
         if (let Some(block) <- (nodePtr as AstBlock)) {
-            if (nodePtr.objectId != node.objectId || nodePtr.TestAttr(AstAttribute.UNSAFE)) {
+            if (nodePtr != node || nodePtr.TestAttr(AstAttribute.UNSAFE)) {
                 let sourceBlock = backBlock ??
                     throw IllegalStateException("faithful AST2CHIR desugar block has no source block")
                 trans.builder.CreateGoTo(trans.GetBlockByAST(block), sourceBlock)

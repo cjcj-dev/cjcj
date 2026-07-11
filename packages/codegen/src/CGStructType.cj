@@ -18,7 +18,7 @@ public class CGStructType <: CGCustomType {
         let structType = StaticCast<StructType>(chirType)
         var layoutName = STRUCT_TYPE_PREFIX
         if (let Some(defTy) <- structType.GetStructDef().GetType()) {
-            if (chirType.objectId != defTy.objectId && CGType.GetOrCreate(cgMod, defTy).GetSize().isSome()) {
+            if (chirType != defTy && CGType.GetOrCreate(cgMod, defTy).GetSize().isSome()) {
                 layoutName += GetTypeQualifiedName(defTy)
             } else {
                 layoutName += GetTypeQualifiedName(structType)

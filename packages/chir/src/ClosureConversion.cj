@@ -738,7 +738,7 @@ public class ClosureConversion {
             let paramTy = params[idx].GetType() ??
                 throw IllegalStateException("ClosureConversion parameter has no type")
             if (paramTy.IsCJFunc()) {
-                CJC_ASSERT(expectedTy.objectId == paramTy.objectId)
+                CJC_ASSERT(expectedTy == paramTy)
                 applyArgs.add(RequireResult(builder.CreateTypeCast(paramTy, params[idx], entry)))
             } else {
                 applyArgs.add(TypeCastOrBoxIfNeeded(params[idx], expectedTy, builder, entry, INVALID_LOCATION))

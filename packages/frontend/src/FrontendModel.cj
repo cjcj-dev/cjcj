@@ -4435,7 +4435,7 @@ private class CjoSignatureMaterializer {
     private func FlatDeclaredInDifferentFiles(left: Decl, right: Decl): Bool {
         if (let Some(leftFile) <- left.curFile) {
             if (let Some(rightFile) <- right.curFile) {
-                return leftFile.objectId != rightFile.objectId
+                return leftFile != rightFile
             }
         }
         return false

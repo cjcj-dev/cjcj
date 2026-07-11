@@ -10,7 +10,7 @@ private class BaseIdAllocator {
     }
 }
 
-public open class Base {
+public open class Base <: Hashable & Equatable<Base> {
     public let nodeId: Int64
     private let annotationMap: AnnotationMap = AnnotationMap()
     var loc: DebugLocation = DebugLocation()
@@ -18,6 +18,18 @@ public open class Base {
 
     public init() {
         nodeId = BaseIdAllocator.Next()
+    }
+
+    public operator func ==(right: Base): Bool {
+        return nodeId == right.nodeId
+    }
+
+    public operator func !=(right: Base): Bool {
+        return nodeId != right.nodeId
+    }
+
+    public open func hashCode(): Int64 {
+        return nodeId.hashCode()
     }
 
     public func SetAnnotation(key: String, value: String): Unit {

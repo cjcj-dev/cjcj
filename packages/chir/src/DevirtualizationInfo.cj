@@ -190,7 +190,7 @@ private func GetRuntimeTypeFromFunc(retVal: Option<LocalVar>, isInLambda!: Bool 
             }
         }
         srcTy = srcTy.StripAllRefs()
-        if (srcTy.objectId == rtTy.objectId) {
+        if (srcTy == rtTy) {
             return None
         }
         return Some(srcTy)

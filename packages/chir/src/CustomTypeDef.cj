@@ -359,7 +359,7 @@ public class VTableInDef {
         newParentTy: Option<Type>, newName: String): Unit {
         for (vtableIt in vtables) {
             let srcParentType = vtableIt.GetSrcParentType() ?? continue
-            if (srcParentType.objectId != srcClassTy.objectId) {
+            if (srcParentType != srcClassTy) {
                 continue
             }
             let methodInfo = vtableIt.GetModifiableVirtualMethods()[index]
@@ -403,7 +403,7 @@ public class VTableSearchRes {
     public init() {}
 }
 
-public open class CustomTypeDef <: Base {
+public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
     private let customKind: CustomDefKind
     public let packageName: String
     public let identifier: String
@@ -430,6 +430,14 @@ public open class CustomTypeDef <: Base {
         this.packageName = packageName
         this.identifier = identifier
         this.srcCodeIdentifier = srcCodeIdentifier
+    }
+
+    public operator func ==(right: CustomTypeDef): Bool {
+        return nodeId == right.nodeId
+    }
+
+    public operator func !=(right: CustomTypeDef): Bool {
+        return nodeId != right.nodeId
     }
 
     public func GetCustomKind(): CustomDefKind {
@@ -729,7 +737,7 @@ public open class CustomTypeDef <: Base {
     public func AddVtableItem(srcClassTy: ClassType, info: VirtualMethodInfo): Unit {
         for (vtableIt in vtable.GetModifiableTypeVTables()) {
             let srcParentType = vtableIt.GetSrcParentType() ?? continue
-            if (srcParentType.objectId == srcClassTy.objectId) {
+            if (srcParentType == srcClassTy) {
                 vtableIt.AppendNewMethod(info)
             }
         }

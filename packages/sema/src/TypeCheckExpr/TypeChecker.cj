@@ -1817,7 +1817,7 @@ public class TypeChecker {
             mainFunctionMap[file] = ArrayList<Decl>()
         }
         for (value in mainFunctionMap[file]) {
-            if (value.objectId == decl.objectId) {
+            if (value == decl) {
                 return
             }
         }
@@ -1827,7 +1827,7 @@ public class TypeChecker {
     private func ContainsMainFunction(file: File, decl: Decl): Bool {
         if (let Some(values) <- mainFunctionMap.get(file)) {
             for (value in values) {
-                if (value.objectId == decl.objectId) {
+                if (value == decl) {
                     return true
                 }
             }

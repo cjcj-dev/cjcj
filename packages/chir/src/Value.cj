@@ -25,7 +25,7 @@ public open class Value <: Base & Hashable & Equatable<Value> {
         return nodeId != right.nodeId
     }
 
-    public func hashCode(): Int64 {
+    public override func hashCode(): Int64 {
         return nodeId.hashCode()
     }
 
@@ -631,7 +631,7 @@ public class Block <: Value {
     }
 }
 
-public class BlockGroup <: Value {
+public class BlockGroup <: Value & Hashable & Equatable<BlockGroup> {
     private var entryBlock: Option<Block> = None
     private let blocks: ArrayList<Block> = ArrayList<Block>()
     private var ownerFunc: Option<Function> = None
@@ -639,6 +639,14 @@ public class BlockGroup <: Value {
 
     public init(identifier: String) {
         super(None, identifier, ValueKind.KIND_BLOCK_GROUP)
+    }
+
+    public operator func ==(right: BlockGroup): Bool {
+        return nodeId == right.nodeId
+    }
+
+    public operator func !=(right: BlockGroup): Bool {
+        return nodeId != right.nodeId
     }
 
     public override func AsBlockGroup(): Option<BlockGroup> { return this }

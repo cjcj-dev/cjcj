@@ -254,7 +254,7 @@ private class ModulesObjectIdAllocator {
     }
 }
 
-public open class Node {
+public open class Node <: Hashable & Equatable<Node> {
     public var begin: Position = INVALID_POSITION
     public var end: Position = INVALID_POSITION
     public var curFile: Option<File> = None
@@ -270,6 +270,18 @@ public open class Node {
     public init(kind: ASTKind) {
         objectId = ModulesObjectIdAllocator.Next()
         astKind = kind
+    }
+
+    public operator func ==(right: Node): Bool {
+        return objectId == right.objectId
+    }
+
+    public operator func !=(right: Node): Bool {
+        return objectId != right.objectId
+    }
+
+    public func hashCode(): Int64 {
+        return objectId.hashCode()
     }
 
     public open func ToString(): String {
@@ -334,7 +346,7 @@ public open class Node {
     }
 }
 
-public open class Decl <: Node {
+public open class Decl <: Node & Hashable & Equatable<Decl> {
     public var identifier: String = ""
     public var fullPackageName: String = ""
     public var rawMangleName: String = ""
@@ -349,6 +361,14 @@ public open class Decl <: Node {
 
     public init(kind: ASTKind) {
         super(kind)
+    }
+
+    public operator func ==(right: Decl): Bool {
+        return objectId == right.objectId
+    }
+
+    public operator func !=(right: Decl): Bool {
+        return objectId != right.objectId
     }
 
     public init(identifier: String, fullPackageName: String) {
@@ -920,7 +940,7 @@ public func AddDeclUnique(values: ArrayList<Decl>, decl: Decl): Unit {
 }
 
 public func SameDecl(left: Decl, right: Decl): Bool {
-    return left.objectId == right.objectId
+    return left == right
 }
 
 public func CloneDeclArray(values: ArrayList<Decl>): ArrayList<Decl> {

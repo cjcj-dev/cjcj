@@ -206,7 +206,7 @@ public func GetInstSubType(genericSubType: Type, instParentType: ClassType, buil
     if (!genericSubType.IsGenericRelated()) {
         return genericSubType
     }
-    if (genericSubType.objectId == instParentType.objectId) {
+    if (genericSubType == instParentType) {
         return genericSubType
     }
     var pair = genericSubType.CalculateGenericTyMapping(instParentType)
@@ -338,7 +338,7 @@ private func UpdateInstanceAttr(vtable: VTableInDef): Unit {
 }
 
 private func TypeIsMatchedForVTable(type1: Type, type2: Type): Bool {
-    if (type1.objectId == type2.objectId) {
+    if (type1 == type2) {
         return true
     }
     if (type1.IsGeneric() || type2.IsGeneric()) {
@@ -477,7 +477,7 @@ public class VTableGenerator {
             GetAllInstantiatedParentType(superClass, builder, inheritanceList)
         }
         for (parent in inheritanceList) {
-            if (parent.objectId == alreadyIn.objectId) {
+            if (parent == alreadyIn) {
                 return false
             }
         }
@@ -525,7 +525,7 @@ public class VTableGenerator {
         var done = false
         for (vtableIt in vtable.GetModifiableTypeVTables()) {
             let srcParent = vtableIt.GetSrcParentType().getOrThrow()
-            if (srcParent.GetClassDef().IsClass() || srcParent.objectId == curParentTy.objectId) {
+            if (srcParent.GetClassDef().IsClass() || srcParent == curParentTy) {
                 continue
             }
             for (funcInfo in vtableIt.GetModifiableVirtualMethods()) {
@@ -677,7 +677,7 @@ private func JudgeIfNeedVirtualWrapper(parentFuncInfo: VirtualMethodInfo, virtua
         return true
     }
     let funcParentType = virtualFunc.GetParentCustomTypeDef().getOrThrow().GetType().getOrThrow()
-    if (funcParentType.objectId != selfTy.objectId && funcParentType.IsGenericRelated() &&
+    if (funcParentType != selfTy && funcParentType.IsGenericRelated() &&
         !funcParentType.IsEqualOrSubTypeOf(parentFuncInfo.GetInstParentType(), builder)) {
         return true
     }
@@ -737,7 +737,7 @@ public class WrapVirtualFunc {
         let selfTy = customTypeDef.GetType().getOrThrow()
         for (vtableIt in customTypeDef.GetDefVTable().GetTypeVTables()) {
             let parentTy = vtableIt.GetSrcParentType().getOrThrow()
-            if (parentTy.objectId == selfTy.objectId) {
+            if (parentTy == selfTy) {
                 continue
             }
             let parentDef = parentTy.GetClassDef()
@@ -981,7 +981,7 @@ public class WrapVirtualFunc {
 
 private func FindPathToTarget(cur: ClassType, targetParent: ClassType, builder: CHIRBuilder,
     replaceTable: HashMap<Int64, Type>, outPath: ArrayList<ClassType>, onPath: HashSet<Int64>): Bool {
-    if (cur.objectId == targetParent.objectId) {
+    if (cur == targetParent) {
         outPath.add((ReplaceRawGenericArgType(cur, replaceTable, builder) as ClassType).getOrThrow())
         return true
     }

@@ -130,7 +130,7 @@ private func SameFaithfulAstDecl(left: AstDecl, right: AstDecl): Bool {
     // A structural (kind+name+position) key wrongly merges distinct COMPILER_ADD desugar temporaries
     // that share an identifier and a (0,0,0) position (e.g. the `v-compiler` temps from `as`-cast
     // desugar), corrupting the value table.
-    return left.objectId == right.objectId
+    return left == right
 }
 
 public class FaithfulAST2CHIRNodeMapEntry {

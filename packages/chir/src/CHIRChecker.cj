@@ -1622,7 +1622,7 @@ public class CHIRChecker {
                 } else {
                     let strippedTy = targetTy.StripAllRefs()
                     if (let Some(boxTy) <- (strippedTy as BoxType)) {
-                        if (boxTy.GetBaseType().objectId != sourceTy.objectId) {
+                        if (boxTy.GetBaseType() != sourceTy) {
                             result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
                                 "${GetExpressionString(expr)}`, the target type is ${targetTy.ToString()}, " +
                                 "then source type must be its base type, can't be ${sourceTy.ToString()}.")
@@ -1654,7 +1654,7 @@ public class CHIRChecker {
                 } else {
                     let strippedTy = sourceTy.StripAllRefs()
                     if (let Some(boxTy) <- (strippedTy as BoxType)) {
-                        if (boxTy.GetBaseType().objectId != targetTy.objectId) {
+                        if (boxTy.GetBaseType() != targetTy) {
                             result.AddError("in function ${topLevelFunc.GetIdentifier()}, in `" +
                                 "${GetExpressionString(expr)}`, the source type is ${sourceTy.ToString()}, " +
                                 "then target type must be its base type, can't be ${targetTy.ToString()}.")
@@ -2964,7 +2964,7 @@ private func IsCTypeInInout(ty: Type): Bool {
 private func GenericTypeIsInContainer(ty: Type, container: ArrayList<GenericType>): Bool {
     if (let Some(genericTy) <- (ty as GenericType)) {
         for (item in container) {
-            if (item.objectId == genericTy.objectId) {
+            if (item == genericTy) {
                 return true
             }
         }
@@ -3024,7 +3024,7 @@ private func CalculateAllUpperBounds(genericType: GenericType, builder: CHIRBuil
         for (originalArg in originalType.GetTypeArgsRef()) {
             if (let Some(mappedGeneric) <- (originalArg as GenericType)) {
                 let instType = mapping[1].get(mappedGeneric.objectId) ?? continue
-                if (instType.objectId != genericType.objectId) {
+                if (instType != genericType) {
                     continue
                 }
                 let temp = mappedGeneric.GetUpperBounds()

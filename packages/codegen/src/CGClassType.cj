@@ -23,7 +23,7 @@ public class CGClassType <: CGCustomType {
         }
         let classType = (chirType as ClassType).getOrThrow()
         let layoutName = if (let Some(defTy) <- classType.GetClassDef().GetType()) {
-            if (chirType.objectId != defTy.objectId && CGType.GetOrCreate(cgMod, defTy).GetSize().isSome()) {
+            if (chirType != defTy && CGType.GetOrCreate(cgMod, defTy).GetSize().isSome()) {
                 GetClassObjLayoutName(GetTypeQualifiedName(defTy))
             } else {
                 GetClassObjLayoutName(GetTypeQualifiedName(classType))

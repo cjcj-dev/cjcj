@@ -13,7 +13,7 @@ public class DeclHash {
     public init() {}
 }
 
-public open class Decl <: Node {
+public open class Decl <: Node & Hashable & Equatable<Decl> {
     public let modifiers: ArrayList<Modifier> = ArrayList<Modifier>()
     public let annotations: ArrayList<Annotation> = ArrayList<Annotation>()
     public var annotationsArray: Option<ArrayLit> = None
@@ -43,6 +43,14 @@ public open class Decl <: Node {
 
     public init(kind: ASTKind) {
         super(kind)
+    }
+
+    public operator func ==(right: Decl): Bool {
+        return objectId == right.objectId
+    }
+
+    public operator func !=(right: Decl): Bool {
+        return objectId != right.objectId
     }
 
     public func IsMemberDecl(): Bool {

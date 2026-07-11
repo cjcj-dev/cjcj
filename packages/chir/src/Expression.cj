@@ -6,7 +6,7 @@ import std.sync.AtomicInt64
 
 private let gLambdaClonedIdx = AtomicInt64(0)
 
-public open class Expression <: Base {
+public open class Expression <: Base & Hashable & Equatable<Expression> {
     private let kind: ExprKind
     private let operands: ArrayList<Value> = ArrayList<Value>()
     private let blockGroups: ArrayList<BlockGroup> = ArrayList<BlockGroup>()
@@ -34,6 +34,14 @@ public open class Expression <: Base {
             this.operands.add(operand)
         }
         this.parent = parent
+    }
+
+    public operator func ==(right: Expression): Bool {
+        return nodeId == right.nodeId
+    }
+
+    public operator func !=(right: Expression): Bool {
+        return nodeId != right.nodeId
     }
 
     public func GetExprKind(): ExprKind { return kind }

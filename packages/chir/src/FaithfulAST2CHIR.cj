@@ -328,13 +328,13 @@ private class FileDepMap {
             createdDeps
         }
         for (existing in deps) {
-            if (existing.objectId == dep.objectId) {
+            if (existing == dep) {
                 return
             }
         }
         deps.add(dep)
         for (entry in stableOrderValue) {
-            if (entry.file.objectId == root.objectId) {
+            if (entry.file == root) {
                 entry.deps.add(dep)
                 return
             }
@@ -365,7 +365,7 @@ private class DepsUnit<T> where T <: AstNode {
 
     public func AddDeps(unit: DepsUnit<T>): Unit {
         for (existing in depsUnits) {
-            if (existing.element.objectId == unit.element.objectId) {
+            if (existing.element == unit.element) {
                 return
             }
         }
@@ -374,7 +374,7 @@ private class DepsUnit<T> where T <: AstNode {
 
     public func AddUsers(unit: DepsUnit<T>): Unit {
         for (existing in userUnits) {
-            if (existing.element.objectId == unit.element.objectId) {
+            if (existing.element == unit.element) {
                 return
             }
         }
@@ -456,7 +456,7 @@ private abstract class TarjanSort<T> where T <: AstNode {
             let newSccUnit = DepsUnit<T>(unit.element)
             SetSccUnit(unit.element, newSccUnit)
             newSccUnit.circularDepElements.add(unit.element)
-            while (stack[stack.size - 1].element.objectId != unit.element.objectId) {
+            while (stack[stack.size - 1].element != unit.element) {
                 let topUnit = stack[stack.size - 1]
                 topUnit.stackMember = false
                 diagUnits.add(topUnit)
@@ -532,7 +532,7 @@ private abstract class TarjanSort<T> where T <: AstNode {
                 var idx: Int64 = 0
                 var erased = false
                 while (idx < unit.depsUnits.size) {
-                    if (unit.depsUnits[idx].element.objectId == curFreeUnit.element.objectId) {
+                    if (unit.depsUnits[idx].element == curFreeUnit.element) {
                         unit.depsUnits.remove(at: idx)
                         erased = true
                         break
@@ -558,7 +558,7 @@ private abstract class TarjanSort<T> where T <: AstNode {
 
     private func GetUnit(element: T): DepsUnit<T> {
         for (unit in units) {
-            if (unit.element.objectId == element.objectId) {
+            if (unit.element == element) {
                 return unit
             }
         }
@@ -568,7 +568,7 @@ private abstract class TarjanSort<T> where T <: AstNode {
     private func SetSccUnit(element: T, unit: DepsUnit<T>): Unit {
         var idx: Int64 = 0
         while (idx < node2SccUnitMap.size) {
-            if (node2SccUnitMap[idx].element.objectId == element.objectId) {
+            if (node2SccUnitMap[idx].element == element) {
                 node2SccUnitMap[idx] = unit
                 return
             }
@@ -580,7 +580,7 @@ private abstract class TarjanSort<T> where T <: AstNode {
     private func GetSccUnit(element: T): DepsUnit<T> {
         for (unit in node2SccUnitMap) {
             for (item in unit.circularDepElements) {
-                if (item.objectId == element.objectId) {
+                if (item == element) {
                     return unit
                 }
             }
@@ -590,7 +590,7 @@ private abstract class TarjanSort<T> where T <: AstNode {
 
     private func ContainsUnit(values: ArrayList<DepsUnit<T>>, unit: DepsUnit<T>): Bool {
         for (value in values) {
-            if (value.element.objectId == unit.element.objectId) {
+            if (value.element == unit.element) {
                 return true
             }
         }
@@ -599,7 +599,7 @@ private abstract class TarjanSort<T> where T <: AstNode {
 
     private func ContainsElement(values: ArrayList<T>, element: T): Bool {
         for (value in values) {
-            if (value.objectId == element.objectId) {
+            if (value == element) {
                 return true
             }
         }
@@ -756,7 +756,7 @@ private func FaithfulInitSameDecl(left: AstDecl, right: AstDecl): Bool {
             return left.mangledName == right.mangledName
         }
     }
-    return left.objectId == right.objectId
+    return left == right
 }
 
 private func FaithfulInitDefaultParamDeclIdentity(decl: AstDecl): Option<String> {
@@ -2482,7 +2482,7 @@ public class FaithfulAST2CHIR {
             if (dep.astKind == ASTKind.VAR_DECL || dep.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
                 let rootFile = rootDecl.curFile.getOrThrow()
                 let depFile = dep.curFile.getOrThrow()
-                if (rootFile.objectId == depFile.objectId) {
+                if (rootFile == depFile) {
                     var2varDepsInFile.AddDep(rootDecl, dep)
                 } else {
                     fileDependencyMap.AddDep(rootFile, depFile)

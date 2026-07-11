@@ -18,7 +18,7 @@ public func SameTypeArgs(lhs: ArrayList<Ty>, rhs: ArrayList<Ty>): Bool {
 private func SameClassDeclIdentity(lhs: Option<ClassDecl>, rhs: Option<ClassDecl>): Bool {
     if (let Some(left) <- lhs) {
         if (let Some(right) <- rhs) {
-            return left.objectId == right.objectId
+            return left == right
         }
         return false
     }
@@ -31,7 +31,7 @@ private func SameClassDeclIdentity(lhs: Option<ClassDecl>, rhs: Option<ClassDecl
 private func SameInterfaceDeclIdentity(lhs: Option<InterfaceDecl>, rhs: Option<InterfaceDecl>): Bool {
     if (let Some(left) <- lhs) {
         if (let Some(right) <- rhs) {
-            return left.objectId == right.objectId
+            return left == right
         }
         return false
     }
@@ -44,7 +44,7 @@ private func SameInterfaceDeclIdentity(lhs: Option<InterfaceDecl>, rhs: Option<I
 private func SameStructDeclIdentity(lhs: Option<StructDecl>, rhs: Option<StructDecl>): Bool {
     if (let Some(left) <- lhs) {
         if (let Some(right) <- rhs) {
-            return left.objectId == right.objectId
+            return left == right
         }
         return false
     }
@@ -57,7 +57,7 @@ private func SameStructDeclIdentity(lhs: Option<StructDecl>, rhs: Option<StructD
 private func SameEnumDeclIdentity(lhs: Option<EnumDecl>, rhs: Option<EnumDecl>): Bool {
     if (let Some(left) <- lhs) {
         if (let Some(right) <- rhs) {
-            return left.objectId == right.objectId
+            return left == right
         }
         return false
     }
@@ -70,7 +70,7 @@ private func SameEnumDeclIdentity(lhs: Option<EnumDecl>, rhs: Option<EnumDecl>):
 private func SameTypeAliasDeclIdentity(lhs: Option<TypeAliasDecl>, rhs: Option<TypeAliasDecl>): Bool {
     if (let Some(left) <- lhs) {
         if (let Some(right) <- rhs) {
-            return left.objectId == right.objectId
+            return left == right
         }
         return false
     }
@@ -145,7 +145,7 @@ public func SameTy(lhs: Ty, rhs: Ty): Bool {
         if (let Some(rightGen) <- (rhs as GenericsTy)) {
             if (let Some(ld) <- leftGen.decl) {
                 if (let Some(rd) <- rightGen.decl) {
-                    return ld.objectId == rd.objectId
+                    return ld == rd
                 }
             }
         }

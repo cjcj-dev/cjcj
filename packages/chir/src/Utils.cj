@@ -366,7 +366,7 @@ public func GetSuperTypesRecusively(subType: Type, builder: CHIRBuilder): ArrayL
             for (parent in GetSuperTypesRecusively(classType, builder)) {
                 var containsParent = false
                 for (item in result) {
-                    if (item.objectId == parent.objectId) {
+                    if (item == parent) {
                         containsParent = true
                         break
                     }
@@ -431,7 +431,7 @@ public func GetInstParentType(instSubType: Type, genericParentType: Type, builde
     if (!genericParentType.IsGenericRelated()) {
         return genericParentType
     }
-    if (instSubType.objectId == genericParentType.objectId) {
+    if (instSubType == genericParentType) {
         return genericParentType
     }
     let parentDerefType = genericParentType.StripAllRefs()
@@ -473,7 +473,7 @@ public func GetInstParentCustomTyOfCallee(value: Value, args: ArrayList<Value>, 
         if (typeDef.nodeId == def.nodeId) {
             true
         } else if (let Some(defTy) <- def.GetType()) {
-            ty.objectId == defTy.objectId || typeDef.GetIdentifier() == def.GetIdentifier()
+            ty == defTy || typeDef.GetIdentifier() == def.GetIdentifier()
         } else {
             typeDef.GetIdentifier() == def.GetIdentifier()
         }

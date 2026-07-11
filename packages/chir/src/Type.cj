@@ -52,7 +52,7 @@ func TypeArgsAreEqual(left: ArrayList<Type>, right: ArrayList<Type>): Bool {
     return true
 }
 
-public open class Type {
+public open class Type <: Hashable & Equatable<Type> {
     private static let nextObjectId = AtomicInt64(1)
 
     public let objectId: Int64
@@ -62,6 +62,18 @@ public open class Type {
     public init(kind: TypeKind) {
         objectId = nextObjectId.fetchAdd(1)
         this.kind = kind
+    }
+
+    public operator func ==(right: Type): Bool {
+        return objectId == right.objectId
+    }
+
+    public operator func !=(right: Type): Bool {
+        return objectId != right.objectId
+    }
+
+    public func hashCode(): Int64 {
+        return objectId.hashCode()
     }
 
     public open func ToString(): String {

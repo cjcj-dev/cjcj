@@ -502,5 +502,5 @@ public func SameSymbol(left: Symbol, right: Symbol): Bool {
 }
 
 public func SameDecl(left: Decl, right: Decl): Bool {
-    return left.objectId == right.objectId
+    return left == right
 }
