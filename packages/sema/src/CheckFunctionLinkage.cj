@@ -543,7 +543,7 @@ private class ExternalLinkageAnalyzer {
     }
 
     private func SetVarTargetLinkage(vd: VarDecl, byTy!: Bool = false, isConstInCJMP!: Bool = false): Unit {
-        let isPrivateStatic = vd.TestAnyAttr(Attribute.PRIVATE, Attribute.STATIC)
+        let isPrivateStatic = vd.TestAttr(Attribute.PRIVATE) && vd.TestAttr(Attribute.STATIC)
         if (!IsGlobalOrMember(vd) || (byTy && vd.astKind == ASTKind.VAR_DECL && isPrivateStatic && !isConstInCJMP)) {
             return
         }
