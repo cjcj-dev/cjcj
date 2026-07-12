@@ -36,6 +36,7 @@ private func CheckExtendDecl(diag: BasicDiagnosticEngine, decl: ExtendDecl): Uni
 public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
     context!: Option<ASTContext> = None, options!: GlobalOptions = GlobalOptions(),
     synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None,
+    callChecker!: Option<(ASTContext, Ty, CallExpr) -> Bool> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Unit {
     if (let Some(diagValue) <- diag) {
         for (file in pkg.files) {
@@ -101,15 +102,18 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
             case ASTKind.TRY_EXPR =>
                 if (let Some(tryExpr) <- (node as TryExpr)) {
                     DesugarTryWithResourcesExpr(typeManager, pkg, tryExpr, context: context, synthesizer: synthesizer)
-                    DesugarTryToFrame(typeManager, pkg, tryExpr)
+                    DesugarTryToFrame(typeManager, pkg, tryExpr,
+                        { target: Ty, call: CallExpr => callChecker.getOrThrow()(context.getOrThrow(), target, call) })
                 }
             case ASTKind.PERFORM_EXPR =>
                 if (let Some(performExpr) <- (node as PerformExpr)) {
-                    DesugarPerformExpr(typeManager, pkg, performExpr)
+                    DesugarPerformExpr(typeManager, pkg, performExpr,
+                        { target: Ty, call: CallExpr => callChecker.getOrThrow()(context.getOrThrow(), target, call) })
                 }
             case ASTKind.RESUME_EXPR =>
                 if (let Some(resumeExpr) <- (node as ResumeExpr)) {
-                    DesugarResumeExpr(typeManager, pkg, resumeExpr)
+                    DesugarResumeExpr(typeManager, pkg, resumeExpr,
+                        { target: Ty, call: CallExpr => callChecker.getOrThrow()(context.getOrThrow(), target, call) })
                 }
             case ASTKind.LIT_CONST_EXPR =>
                 if (let Some(litConstExpr) <- (node as LitConstExpr)) {

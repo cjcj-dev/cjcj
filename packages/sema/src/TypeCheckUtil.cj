@@ -364,6 +364,15 @@ public func AddFuncTargetsForMemberAccess<T>(memberAccess: MemberAccess, targets
     }
 }
 
+public func AddFuncTargetsForMemberAccess(memberAccess: MemberAccess, targets: ArrayList<Decl>): Unit {
+    memberAccess.targets.clear()
+    for (decl in targets) {
+        if (memberAccess.isPattern || decl.astKind == ASTKind.FUNC_DECL) {
+            memberAccess.targets.add(Some((decl as FuncDecl).getOrThrow()))
+        }
+    }
+}
+
 public func IsFuncReturnThisType(fd: FuncDecl): Bool {
     if (let Some(body) <- fd.funcBody) {
         if (let Some(retType) <- body.retType) {

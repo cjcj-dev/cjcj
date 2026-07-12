@@ -507,7 +507,7 @@ private func TypeCheckReferenceRecommendImportForMemberAccess(
     }
 }
 
-private func TypeCheckReferenceDiagMemberAccessNotFound(
+public func TypeCheckReferenceDiagMemberAccessNotFound(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
     ma: MemberAccess,

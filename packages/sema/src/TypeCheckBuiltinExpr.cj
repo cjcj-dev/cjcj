@@ -229,7 +229,7 @@ private func CollectionElementTy(typeManager: TypeManager, ty: Ty): Option<Ty> {
     return None
 }
 
-private func IsBuiltinTypeAlias(decl: Decl, kind: TypeKind): Bool {
+internal func IsBuiltinTypeAlias(decl: Decl, kind: TypeKind): Bool {
     if (let Some(aliasDecl) <- (decl as TypeAliasDecl)) {
         if (let Some(typeNode) <- aliasDecl.typeNode) {
             if (let Some(origTy) <- typeNode.GetTy()) {

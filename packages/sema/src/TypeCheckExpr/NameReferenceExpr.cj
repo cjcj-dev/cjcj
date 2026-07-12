@@ -1,8 +1,11 @@
 package cjcj::sema.TypeCheckExpr
 
 import std.collection.*
+import std.sort.*
 import cjcj::ast.*
+import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::modules.SemaImportManager
 import cjcj::sema.*
@@ -418,263 +421,289 @@ func TcCheckCondition(typeManager: TypeManager, expr: Expr, ctx!: Option<ASTCont
     return TcCheckConditionInternal(typeManager, expr, false, ctx: ctx)
 }
 
-private func SynCallArg(typeManager: TypeManager, arg: FuncArg): Bool {
-    if (let Some(expr) <- arg.expr) {
-        if (Ty.IsTyCorrect(expr.GetTy())) {
-            let concreteExistingTy = TcReplaceIdeal(typeManager, expr)
-            arg.SetTy(concreteExistingTy)
-            return true
-        }
-        let exprTy = SynExprShallow(typeManager, expr)
-        if (Ty.IsTyCorrect(exprTy)) {
-            let concreteTy = TcReplaceIdeal(typeManager, expr)
-            arg.SetTy(concreteTy)
-            return true
-        }
-    }
-    arg.SetTy(TypeManager.GetInvalidTy())
-    return false
-}
-
-private func SynCallChildren(typeManager: TypeManager, ce: CallExpr): Bool {
-    var ok = true
-    if (let Some(baseFunc) <- ce.baseFunc) {
-        SetIsNotAlone(baseFunc)
-        let baseTy = SynExprShallow(typeManager, baseFunc)
-        ok = (Ty.IsTyCorrect(baseTy) || (baseTy.IsQuest() && !GetFuncTargets(baseFunc).isEmpty())) && ok
-    }
-    for (arg in ce.args) {
-        ok = SynCallArg(typeManager, arg) && ok
-    }
-    return ok
-}
-
-private func SynCallExprShallow(typeManager: TypeManager, ce: CallExpr, ctx!: Option<ASTContext> = None,
-    importManager!: Option<SemaImportManager> = None): Ty {
-    if (!SynCallChildren(typeManager, ce)) {
-        return TcInvalid(ce)
-    }
-    let callTy = SynCallExpr(typeManager, ce, ctx: ctx,
-        desugarCallExpr: Some({ callExprForDesugar: CallExpr => DesugarCallExpr(callExprForDesugar) }),
-        importManager: importManager)
-    if (Ty.IsTyCorrect(callTy)) {
-        return callTy
-    }
-    return TcInvalid(ce)
-}
-
-private func ChkCallExprShallow(typeManager: TypeManager, target: Ty, ce: CallExpr, ctx!: Option<ASTContext> = None,
-    importManager!: Option<SemaImportManager> = None): Bool {
-    if (!SynCallChildren(typeManager, ce)) {
-        let _ = TcInvalid(ce)
-        return false
-    }
-    if (ChkCallExpr(typeManager, None, Some(target), ce, ctx: ctx,
-        desugarCallExpr: Some({ callExprForDesugar: CallExpr => DesugarCallExpr(callExprForDesugar) }),
-        importManager: importManager)) {
-        return true
-    }
-    if (Ty.IsTyCorrect(ce.GetTy())) {
-        return false
-    }
-    let _ = TcInvalid(ce)
-    return false
-}
-
-private func AddTargetIfMissing(targets: ArrayList<Decl>, candidate: Decl): Unit {
+func GetTargetsSameASTKind(targets: ArrayList<Decl>): ASTKind {
+    var result = ASTKind.INVALID_DECL
     for (target in targets) {
-        if (sameImportedAwareDecl(target, candidate)) {
-            return
+        if (result == ASTKind.INVALID_DECL && target.astKind != ASTKind.INVALID_DECL) {
+            result = target.astKind
+        }
+        if (result != target.astKind) {
+            return ASTKind.INVALID_DECL
         }
     }
-    targets.add(candidate)
+    return result
 }
 
-private func sameImportedAwareDecl(left: Decl, right: Decl): Bool {
-    if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
-        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
-            return left.rawMangleName == right.rawMangleName
+func GetTargetsSameASTKind(allTargets: ArrayList<(Ty, ArrayList<Decl>)>): ASTKind {
+    var result = ASTKind.INVALID_DECL
+    for ((_, targets) in allTargets) {
+        let kind = GetTargetsSameASTKind(targets)
+        if (kind == ASTKind.INVALID_DECL || (result != ASTKind.INVALID_DECL && result != kind)) {
+            return ASTKind.INVALID_DECL
         }
-        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
-            return left.mangledName == right.mangledName
-        }
+        result = kind
     }
-    return SameDecl(left, right)
+    return result
 }
 
-private func PopulateMemberAccessTargets(typeManager: TypeManager, ma: MemberAccess, baseTy: Ty,
-    diag!: Option<BasicDiagnosticEngine> = None): Unit {
-    if ((let Some(_) <- ma.target) || !ma.targets.isEmpty() || !Ty.IsTyCorrect(baseTy)) {
-        return
-    }
-    if (let Some(genericTy) <- (baseTy as GenericsTy)) {
-        PopulateMemberAccessTargetsFromUpperBounds(typeManager, ma, genericTy)
-        return
-    }
-    if (baseTy.IsIdeal()) {
-        PopulateIdealMemberAccessTargets(typeManager, ma, baseTy, diag: diag)
-        return
-    }
-    let info = LookupInfo(baseTy: Some(baseTy), file: ma.curFile)
-    let foundFields = FieldLookup(typeManager, Ty.GetDeclPtrOfTy(Some(baseTy)), ma.field.Val(), info: info)
-    for (decl in foundFields) {
-        if (decl.astKind == ASTKind.FUNC_DECL) {
-            let funcCandidate = (decl as FuncDecl).getOrThrow()
-            var targetMissing = true
-            for (target in ma.targets) {
-                if (let Some(value) <- target) {
-                    if (sameImportedAwareDecl(value, funcCandidate)) {
-                        targetMissing = false
-                        break
-                    }
+func GetUpperBoundTargetsWithGivenKind(allTargets: ArrayList<(Ty, ArrayList<Decl>)>,
+    kinds: ArrayList<ASTKind>): ArrayList<(Decl, ArrayList<Ty>)> {
+    let results = ArrayList<(Decl, ArrayList<Ty>)>()
+    for ((ty, targets) in allTargets) {
+        for (target in targets) {
+            if (!kinds.contains(target.astKind)) {
+                continue
+            }
+            var found = false
+            for ((resultTarget, upperBounds) in results) {
+                if (resultTarget == target) {
+                    upperBounds.add(ty)
+                    found = true
+                    break
                 }
             }
-            if (targetMissing) {
-                ma.targets.add(Some(funcCandidate))
+            if (!found) {
+                let upperBounds = ArrayList<Ty>()
+                upperBounds.add(ty)
+                results.add((target, upperBounds))
             }
-        } else if (let None <- ma.target) {
-            ReplaceTarget(ma, Some(decl))
         }
     }
-    if (let Some(file) <- ma.curFile) {
-        for (decl in ExtendFieldLookup(typeManager, file, Some(baseTy), ma.field.Val())) {
-            if (decl.astKind == ASTKind.FUNC_DECL) {
-                let funcCandidate = (decl as FuncDecl).getOrThrow()
-                var targetMissing = true
-                for (target in ma.targets) {
-                    if (let Some(value) <- target) {
-                        if (sameImportedAwareDecl(value, funcCandidate)) {
-                            targetMissing = false
-                            break
-                        }
-                    }
-                }
-                if (targetMissing) {
-                    ma.targets.add(Some(funcCandidate))
-                }
-            } else if (let None <- ma.target) {
-                ReplaceTarget(ma, Some(decl))
+    return results
+}
+
+func IsCloserToImpl(source: Decl, target: Decl): Bool {
+    let updateAbstract = source.TestAttr(Attribute.ABSTRACT) && !target.TestAttr(Attribute.ABSTRACT)
+    let updateNonInterface = !source.TestAttr(Attribute.ABSTRACT) && !target.TestAttr(Attribute.ABSTRACT) &&
+        target.outerDecl.isSome() && target.outerDecl.getOrThrow().astKind != ASTKind.INTERFACE_DECL
+    return updateAbstract || updateNonInterface
+}
+
+func DiagForGenericParamMemberNotFound(diag: BasicDiagnosticEngine, ma: MemberAccess,
+    genericParamDecl: GenericParamDecl): Unit {
+    if (Ty.IsTyCorrect(genericParamDecl.GetTy()) && genericParamDecl.GetTy().getOrThrow().IsGeneric()) {
+        if (let Some(genericTy) <- (genericParamDecl.GetTy().getOrThrow() as GenericsTy)) {
+            if (genericTy.isUpperBoundLegal) {
+                let baseExpr = ma.baseExpr.getOrThrow()
+                let builder = Diagnose(diag, baseExpr, BasicDiagKind.sema_invalid_field_expose_access,
+                    args: [BasicDiagArgument(ma.field.Val()), BasicDiagArgument("exposed generic parameter"),
+                        BasicDiagArgument(genericParamDecl.identifier.Val())])
+                builder.Emit()
             }
         }
     }
 }
 
-private func PopulateIdealMemberAccessTargets(typeManager: TypeManager, ma: MemberAccess, baseTy: Ty,
-    diag!: Option<BasicDiagnosticEngine> = None): Unit {
-    let candidates = ArrayList<Decl>()
-    let targetTys = ArrayList<Ty>()
-    if (let Some(file) <- ma.curFile) {
-        for (tyKind in GetIdealTypesByKind(baseTy.kind)) {
-            let concreteTy = TypeManager.GetPrimitiveTy(tyKind)
-            for (decl in ExtendFieldLookup(typeManager, file, Some(concreteTy), ma.field.Val())) {
-                if (!decl.TestAttr(Attribute.STATIC)) {
-                    AddTargetIfMissing(candidates, decl)
-                    targetTys.add(concreteTy)
-                }
-            }
+func DiagAmbiguousUpperBoundTargets(diag: BasicDiagnosticEngine, ma: MemberAccess,
+    targets: ArrayList<Decl>): Unit {
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_ambiguous_use, ma,
+        MakeRange(ma.field.Begin(), ma.field.End()), arguments: [ma.field.Val()])
+    for (target in targets) {
+        let outerDecl = target.outerDecl.getOrThrow()
+        var message = "found "
+        if (outerDecl.astKind == ASTKind.EXTEND_DECL) {
+            message += "extended "
         }
+        message += DeclKindToString(target) + " member of '" + outerDecl.GetTy().getOrThrow().String() + "'"
+        AddNote(builder, target, MakeRangeForDeclIdentifier(target), message)
     }
-    if (candidates.size > 1) {
-        if (let Some(baseExpr) <- ma.baseExpr) {
-            let _ = ReplaceIdealTy(typeManager, baseExpr, diag: diag)
-            if (let Some(replacedTy) <- baseExpr.GetTy()) {
-                PopulateMemberAccessTargets(typeManager, ma, replacedTy, diag: diag)
-            }
-        }
-        return
-    }
-    if (candidates.size == 1) {
-        if (let Some(baseExpr) <- ma.baseExpr) {
-            baseExpr.SetTy(targetTys[targetTys.size - 1])
-        }
-        let candidate = candidates[0]
-        if (candidate.astKind == ASTKind.FUNC_DECL) {
-            let funcCandidate = (candidate as FuncDecl).getOrThrow()
-            var targetMissing = true
-            for (target in ma.targets) {
-                if (let Some(value) <- target) {
-                    if (sameImportedAwareDecl(value, funcCandidate)) {
-                        targetMissing = false
-                        break
-                    }
-                }
-            }
-            if (targetMissing) {
-                ma.targets.add(Some(funcCandidate))
-            }
-        } else if (let None <- ma.target) {
-            ReplaceTarget(ma, Some(candidate))
-        }
-    }
+    builder.Emit()
 }
 
-private func PopulateMemberAccessTargetsFromUpperBounds(typeManager: TypeManager, ma: MemberAccess,
-    genericTy: GenericsTy): Unit {
-    ma.isExposedAccess = true
-    if (!genericTy.isUpperBoundLegal) {
-        return
+func FoundSameSignatureMember(typeManager: TypeManager, decl: Decl, funcTy: FuncTy,
+    methodSigs: ArrayList<(String, ArrayList<Ty>, Decl)>): Option<Int64> {
+    for (idx in 0..methodSigs.size) {
+        var sameParams = methodSigs[idx][1].size == funcTy.paramTys.size
+        if (sameParams) {
+            for (paramIdx in 0..funcTy.paramTys.size) {
+                if (!(methodSigs[idx][1][paramIdx] == funcTy.paramTys[paramIdx])) {
+                    sameParams = false
+                    break
+                }
+            }
+        }
+        if (methodSigs[idx][0] == decl.identifier.Val() && sameParams) {
+            return Some(idx)
+        }
     }
-    for (upperBound in genericTy.upperBounds) {
-        if (!Ty.IsTyCorrect(upperBound)) {
+    if (!decl.TestAttr(Attribute.GENERIC)) {
+        return None
+    }
+    for ((_, _, method) in methodSigs) {
+        if (!method.TestAttr(Attribute.GENERIC)) {
             continue
         }
-        let targets = GetUpperBoundTargets(typeManager, ma, upperBound, false)
-        if (!targets.isEmpty() && ma.matchedParentTy.isNone()) {
-            ma.matchedParentTy = Some(upperBound)
-        }
-        for (decl in targets) {
-            if (decl.astKind == ASTKind.FUNC_DECL) {
-                let funcCandidate = (decl as FuncDecl).getOrThrow()
-                var targetMissing = true
-                for (target in ma.targets) {
-                    if (let Some(value) <- target) {
-                        if (sameImportedAwareDecl(value, funcCandidate)) {
-                            targetMissing = false
+        let typeMapping = typeManager.GenerateGenericMappingFromGeneric(decl, method)
+        if (let Some(instTy) <- (typeManager.GetInstantiatedTy(funcTy, typeMapping) as FuncTy)) {
+            for (idx in 0..methodSigs.size) {
+                var sameParams = methodSigs[idx][1].size == instTy.paramTys.size
+                if (sameParams) {
+                    for (paramIdx in 0..instTy.paramTys.size) {
+                        if (!(methodSigs[idx][1][paramIdx] == instTy.paramTys[paramIdx])) {
+                            sameParams = false
                             break
                         }
                     }
                 }
-                if (targetMissing) {
-                    ma.targets.add(Some(funcCandidate))
+                if (methodSigs[idx][0] == decl.identifier.Val() && sameParams) {
+                    return Some(idx)
                 }
-            } else if (let None <- ma.target) {
-                ReplaceTarget(ma, Some(decl))
             }
-            AddUpperBoundTargetMap(ma, decl, upperBound)
         }
     }
+    return None
 }
 
-private func GetUpperBoundTargets(typeManager: TypeManager, ma: MemberAccess, upperBound: Ty,
-    isStaticAccess: Bool): ArrayList<Decl> {
-    let targets = ArrayList<Decl>()
-    if (upperBound.IsClassLike() || upperBound.IsStruct() || upperBound.IsEnum()) {
-        let info = LookupInfo(baseTy: Some(upperBound), file: ma.curFile)
-        for (decl in FieldLookup(typeManager, Ty.GetDeclPtrOfTy(Some(upperBound)), ma.field.Val(), info: info)) {
-            if (IsUpperBoundTargetValidForAccess(decl, isStaticAccess)) {
-                AddTargetIfMissing(targets, decl)
+func FoundSameSignatureMember(typeManager: TypeManager, decl: Decl, funcTy: FuncTy,
+    methodSigs: ArrayList<(FuncTy, Decl)>): Option<Int64> {
+    for (idx in 0..methodSigs.size) {
+        if (methodSigs[idx][0] == funcTy) {
+            return Some(idx)
+        }
+    }
+    if (!decl.TestAttr(Attribute.GENERIC)) {
+        return None
+    }
+    for ((_, method) in methodSigs) {
+        if (!method.TestAttr(Attribute.GENERIC)) {
+            continue
+        }
+        let typeMapping = typeManager.GenerateGenericMappingFromGeneric(decl, method)
+        if (let Some(instTy) <- (typeManager.GetInstantiatedTy(funcTy, typeMapping) as FuncTy)) {
+            for (idx in 0..methodSigs.size) {
+                if (methodSigs[idx][0] == instTy) {
+                    return Some(idx)
+                }
             }
         }
-        return targets
     }
-    if (let Some(file) <- ma.curFile) {
-        for (decl in ExtendFieldLookup(typeManager, file, Some(upperBound), ma.field.Val())) {
-            if (IsUpperBoundTargetValidForAccess(decl, isStaticAccess)) {
-                AddTargetIfMissing(targets, decl)
+    return None
+}
+
+func CompNodeByPos(left: Decl, right: Decl): Bool {
+    return left.begin.fileID < right.begin.fileID ||
+        (left.begin.fileID == right.begin.fileID && left.begin < right.begin) ||
+        (left.begin.fileID == right.begin.fileID && left.begin == right.begin && left.objectId < right.objectId)
+}
+
+func MergeFuncTargetsInUpperBounds(typeManager: TypeManager, ma: MemberAccess): ArrayList<Decl> {
+    let methodSigs = ArrayList<(String, ArrayList<Ty>, Decl)>()
+    let upperDecls = ArrayList<Decl>()
+    for ((decl, _) in ma.foundUpperBoundMap) {
+        var found = false
+        for (existing in upperDecls) {
+            if (existing == decl) {
+                found = true
+                break
             }
+        }
+        if (!found) {
+            upperDecls.add(decl)
+        }
+    }
+    sort(upperDecls, by: { left: Decl, right: Decl =>
+        if (CompNodeByPos(left, right)) { Ordering.LT } else if (CompNodeByPos(right, left)) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    })
+    for (decl in upperDecls) {
+        if (decl.astKind != ASTKind.FUNC_DECL || !Ty.IsTyCorrect(decl.GetTy())) {
+            continue
+        }
+        let mappings = MultiTypeSubst()
+        typeManager.GenerateTypeMappingForUpperBounds(mappings, ma, decl)
+        for (ty in typeManager.GetInstantiatedTys(decl.GetTy().getOrThrow(), mappings).values) {
+            if (let Some(funcTy) <- (ty as FuncTy)) {
+                if (!Ty.IsTyCorrect(funcTy)) {
+                    continue
+                }
+                if (let Some(found) <- FoundSameSignatureMember(typeManager, decl, funcTy, methodSigs)) {
+                    if (IsCloserToImpl(methodSigs[found][2], decl)) {
+                        methodSigs.remove(at: found)
+                        methodSigs.add((decl.identifier.Val(), funcTy.paramTys, decl))
+                    }
+                } else {
+                    methodSigs.add((decl.identifier.Val(), funcTy.paramTys, decl))
+                }
+            }
+        }
+    }
+    let targets = ArrayList<Decl>()
+    for ((_, _, target) in methodSigs) {
+        var found = false
+        for (existing in targets) {
+            if (existing == target) {
+                found = true
+                break
+            }
+        }
+        if (!found) {
+            targets.add(target)
         }
     }
     return targets
 }
 
-private func IsUpperBoundTargetValidForAccess(decl: Decl, isStaticAccess: Bool): Bool {
-    return if (isStaticAccess) { decl.TestAttr(Attribute.STATIC) } else { !decl.TestAttr(Attribute.STATIC) }
-}
-
-private func AddUpperBoundTargetMap(ma: MemberAccess, target: Decl, upperBound: Ty): Unit {
-    let uppers = ArrayList<Ty>()
-    uppers.add(upperBound)
-    ma.foundUpperBoundMap.add((target, uppers))
+func MergeFuncTargetsInSum(typeManager: TypeManager, ma: MemberAccess): ArrayList<Decl> {
+    let methodSigs = ArrayList<(FuncTy, Decl)>()
+    let upperDecls = ArrayList<Decl>()
+    for ((decl, _) in ma.foundUpperBoundMap) {
+        var found = false
+        for (existing in upperDecls) {
+            if (existing == decl) {
+                found = true
+                break
+            }
+        }
+        if (!found) {
+            upperDecls.add(decl)
+        }
+    }
+    sort(upperDecls, by: { left: Decl, right: Decl =>
+        if (CompNodeByPos(left, right)) { Ordering.LT } else if (CompNodeByPos(right, left)) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    })
+    for (decl in upperDecls) {
+        if (decl.astKind != ASTKind.FUNC_DECL || !Ty.IsTyCorrect(decl.GetTy())) {
+            continue
+        }
+        let mappings = MultiTypeSubst()
+        typeManager.GenerateTypeMappingForUpperBounds(mappings, ma, decl)
+        for (ty in typeManager.GetInstantiatedTys(decl.GetTy().getOrThrow(), mappings).values) {
+            if (let Some(funcTy) <- (ty as FuncTy)) {
+                if (!Ty.IsTyCorrect(funcTy)) {
+                    continue
+                }
+                if (let Some(found) <- FoundSameSignatureMember(typeManager, decl, funcTy, methodSigs)) {
+                    if (IsCloserToImpl(methodSigs[found][1], decl)) {
+                        methodSigs.remove(at: found)
+                        methodSigs.add((funcTy, decl))
+                    }
+                } else {
+                    methodSigs.add((funcTy, decl))
+                }
+            }
+        }
+    }
+    let targets = ArrayList<Decl>()
+    for ((_, target) in methodSigs) {
+        var found = false
+        for (existing in targets) {
+            if (existing == target) {
+                found = true
+                break
+            }
+        }
+        if (!found) {
+            targets.add(target)
+        }
+    }
+    return targets
 }
 
 public func SynExprShallow(typeManager: TypeManager, expr: Expr,
@@ -694,9 +723,6 @@ public func SynExprShallow(typeManager: TypeManager, expr: Expr,
     if (let Some(value) <- (expr as LitConstExpr)) { return SynLitConstExpr(value, diag: diag) }
     if (let Some(value) <- (expr as ParenExpr)) { return SynParenExpr(typeManager, value) }
     if (let Some(value) <- (expr as TupleLit)) { return SynTupleLit(typeManager, value) }
-    if (let Some(value) <- (expr as CallExpr)) {
-        return SynCallExprShallow(typeManager, value, ctx: ctx, importManager: importManager)
-    }
     if (let Some(value) <- (expr as Block)) { return SynBlock(typeManager, value, diag: diag) }
     if (let Some(value) <- (expr as UnaryExpr)) { return SynUnaryExpr(typeManager, value) }
     if (let Some(value) <- (expr as BinaryExpr)) {
@@ -775,9 +801,6 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     if (let Some(value) <- (expr as LitConstExpr)) { return ChkLitConstExpr(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as ParenExpr)) { return ChkParenExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as TupleLit)) { return ChkTupleLit(typeManager, target, value, diag: diag) }
-    if (let Some(value) <- (expr as CallExpr)) {
-        return ChkCallExprShallow(typeManager, target, value, ctx: ctx, importManager: importManager)
-    }
     if (let Some(value) <- (expr as Block)) { return ChkBlock(typeManager, target, value, diag: diag) }
     if (let Some(value) <- (expr as UnaryExpr)) { return ChkUnaryExpr(typeManager, target, value) }
     if (let Some(value) <- (expr as BinaryExpr)) {
@@ -848,46 +871,6 @@ public func ChkExprShallow(typeManager: TypeManager, target: Ty, expr: Expr,
     return false
 }
 
-private func SynMemberAccess(typeManager: TypeManager, ma: MemberAccess,
-    diag!: Option<BasicDiagnosticEngine> = None): Ty {
-    if (let Some(baseExpr) <- ma.baseExpr) {
-        SetIsNotAlone(baseExpr)
-        if (!Ty.IsTyCorrect(baseExpr.GetTy())) {
-            let _ = SynExprShallow(typeManager, baseExpr, diag: diag)
-        }
-        if (let Some(baseTy) <- baseExpr.GetTy()) {
-            if (let Some(varrayTy) <- (baseTy as VArrayTy)) {
-                if (ma.field.Val() == "size") {
-                    let sizeTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
-                    ma.SetTy(sizeTy)
-                    let literalExpr = CreateLitConstExpr(LitConstKind.INTEGER, "${varrayTy.size}", sizeTy)
-                    literalExpr.SetTy(sizeTy)
-                    ma.desugarExpr = literalExpr
-                    return sizeTy
-                }
-            }
-            PopulateMemberAccessTargets(typeManager, ma, baseTy, diag: diag)
-        }
-    }
-    var targetOpt = ma.target
-    if ((let None <- targetOpt) && !ma.targets.isEmpty()) {
-        targetOpt = Some(GetRealTarget(ma.targets[0].getOrThrow()))
-    }
-    if (let Some(target) <- targetOpt) {
-        ReplaceTarget(ma, Some(target))
-        AddFuncTargetsForMemberAccess(ma, ma.targets)
-        if (!target.IsFunc() || ma.isAlone || ma.targets.size <= 1) {
-            return TcSetTyFromTarget(typeManager, ma, target)
-        }
-        ma.SetTy(TypeManager.GetQuestTy())
-        return TypeManager.GetQuestTy()
-    }
-    if (Ty.IsTyCorrect(ma.GetTy())) {
-        return TcTyOrInvalid(ma)
-    }
-    return TcInvalid(ma)
-}
-
 private func ApplyExplicitGenericArgs(typeManager: TypeManager, nre: NameReferenceExpr, fallback: Ty): Ty {
     if (nre.GetTypeArgs().isEmpty()) {
         return fallback
@@ -914,9 +897,6 @@ public func SynNameReferenceExpr(typeManager: TypeManager, nre: NameReferenceExp
                 nre.instTys.add(typeArgTy)
             }
         }
-    }
-    if (let Some(memberAccess) <- (nre as MemberAccess)) {
-        return ApplyExplicitGenericArgs(typeManager, nre, SynMemberAccess(typeManager, memberAccess, diag: diag))
     }
     if (Ty.IsTyCorrect(nre.GetTy())) {
         return TcTyOrInvalid(nre)

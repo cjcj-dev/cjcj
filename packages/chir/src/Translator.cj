@@ -7907,9 +7907,6 @@ public class Translator {
         if (let Some(callExpr) <- (nodePtr as AstCallExpr)) {
             return TranslateCallExprAsLeftValue(callExpr)
         }
-        if (let Some(_) <- (nodePtr as AstSubscriptExpr)) {
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: tuple/subscript left value")
-        }
         let value = Translator.TranslateASTNode(expr, this)
         return FaithfulLeftValueInfo(value, ArrayList<String>())
     }

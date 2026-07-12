@@ -1,6 +1,7 @@
 package cjcj::sema.TypeCheckExpr
 
 import std.collection.*
+import std.sort.*
 import cjcj::ast.*
 import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
@@ -13,6 +14,7 @@ import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::option.OutputMode as OptionOutputMode
 import cjcj::option.IsUnsafeBackend as OptionIsUnsafeBackend
 import cjcj::sema.*
+import cjcj::sema.CJMP.*
 import cjcj::sema.Desugar.*
 import cjcj::sema.Desugar.AfterTypeCheck.*
 import cjcj::sema.FFI.*
@@ -50,6 +52,104 @@ private func questTy(): Ty {
     return TypeManager.GetQuestTy()
 }
 
+// C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:40-47 IsAnyParamTypeOmitted.
+private func IsAnyParamTypeOmitted(le: LambdaExpr): Bool {
+    CJC_ASSERT(le.funcBody.isSome() && !le.funcBody.getOrThrow().paramLists.isEmpty())
+    for (param in le.funcBody.getOrThrow().paramLists[0].params) {
+        if (param.typeNode.isNone()) {
+            return true
+        }
+    }
+    return false
+}
+
+// C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:49-100 ClearCacheForNames.
+private func ClearCacheForNames(ctx: ASTContext, le: LambdaExpr, paramNames: ArrayList<String>): Unit {
+    let parentStack = ArrayList<Node>()
+    let clearedNodes = HashSet<Node>()
+    let aliases = HashSet<String>()
+    for (name in paramNames) {
+        aliases.add(name)
+    }
+    let aliasDecl = HashMap<Node, ArrayList<String>>()
+    let aliasShadow = HashMap<Node, ArrayList<String>>()
+    let shadowName = { lambda: LambdaExpr =>
+        CJC_ASSERT(lambda.funcBody.isSome() && !lambda.funcBody.getOrThrow().paramLists.isEmpty())
+        for (param in lambda.funcBody.getOrThrow().paramLists[0].params) {
+            let id = param.identifier.Val()
+            if (aliases.contains(id)) {
+                if (!aliasShadow.contains(lambda)) {
+                    aliasShadow[lambda] = ArrayList<String>()
+                }
+                aliasShadow.get(lambda).getOrThrow().add(id)
+                let _ = aliases.remove(id)
+            }
+        }
+    }
+    let body = le.funcBody.getOrThrow().body.getOrThrow()
+    let walker = Walker(body, visitPre: { node: Node =>
+        parentStack.add(node)
+        if ((let Some(refExpr) <- (node as RefExpr)) && aliases.contains(refExpr.ref.identifier.Val())) {
+            var idx = parentStack.size
+            while (idx > 0) {
+                idx--
+                let parent = parentStack[idx]
+                if (clearedNodes.contains(parent)) {
+                    break
+                }
+                ctx.RemoveTypeCheckCache(parent)
+                clearedNodes.add(parent)
+            }
+        } else if (let Some(lambda) <- (node as LambdaExpr)) {
+            shadowName(lambda)
+        }
+        if (aliases.isEmpty()) { VisitAction.SKIP_CHILDREN } else { VisitAction.WALK_CHILDREN }
+    }, visitPost: { _: Node =>
+        let top = parentStack[parentStack.size - 1]
+        parentStack.remove(at: parentStack.size - 1)
+        if ((let Some(decl) <- (top as VarDecl)) && clearedNodes.contains(decl)) {
+            aliases.add(decl.identifier.Val())
+            let parent = parentStack[parentStack.size - 1]
+            if (!aliasDecl.contains(parent)) {
+                aliasDecl[parent] = ArrayList<String>()
+            }
+            aliasDecl.get(parent).getOrThrow().add(decl.identifier.Val())
+        }
+        if (let Some(names) <- aliasShadow.get(top)) {
+            for (name in names) {
+                aliases.add(name)
+            }
+        }
+        if (let Some(names2) <- aliasDecl.get(top)) {
+            for (name2 in names2) {
+                let _ = aliases.remove(name2)
+            }
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
+}
+
+// C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:102-116 ClearInvalidTypeCheckCache.
+private func ClearInvalidTypeCheckCache(ctx: ASTContext, le: LambdaExpr, target: Ty): Unit {
+    let targetChanged = if (let Some(lastTarget) <- ctx.lastTargetTypeMap.get(le)) {
+        Ptr<Ty>(lastTarget) != Ptr<Ty>(target)
+    } else {
+        true
+    }
+    if (targetChanged && IsAnyParamTypeOmitted(le)) {
+        let names = ArrayList<String>()
+        let funcBody = le.funcBody.getOrThrow()
+        CJC_ASSERT(!funcBody.paramLists.isEmpty())
+        for (param in funcBody.paramLists[0].params) {
+            if (param.typeNode.isNone()) {
+                names.add(param.identifier.Val())
+            }
+        }
+        ClearCacheForNames(ctx, le, names)
+    }
+}
+
 private func typeCheckExprTargetTypeOf(ctx: ASTContext, node: Node): Option<Ty> {
     return ctx.targetTypeMap.get(node)
 }
@@ -60,17 +160,6 @@ func typeCheckExprPutTargetType(ctx: ASTContext, node: Node, ty: Ty): Unit {
 
 private func typeCheckExprClearTargetType(ctx: ASTContext, node: Node): Unit {
     ctx.targetTypeMap.remove(node)
-}
-
-private func typeCheckExprAllMacroFuncDecls(targets: ArrayList<Option<Decl>>): Bool {
-    for (target in targets) {
-        if (let Some(decl) <- target) {
-            if (!decl.TestAttr(Attribute.MACRO_FUNC)) {
-                return false
-            }
-        }
-    }
-    return true
 }
 
 private func typeCheckExprGetCurInheritableDecl(ctx: ASTContext, scopeName: String,
@@ -105,88 +194,6 @@ private func typeCheckExprGetCurInheritableDecl(ctx: ASTContext, scopeName: Stri
         }
     }
     return None
-}
-
-private func typeCheckExprReplaceWithGenericTyInInheritableDecl(typeManager: TypeManager, ty: Option<Ty>,
-    outerDecl: InheritableDecl, targetDecl: InheritableDecl): Ty {
-    let rawTy = ty ?? TypeManager.GetInvalidTy()
-    if (!Ty.IsTyCorrect(rawTy) || !rawTy.HasGeneric()) {
-        return rawTy
-    }
-    if (let Some(currentTy) <- outerDecl.GetTy()) {
-        if (let Some(targetTy) <- targetDecl.GetTy()) {
-            let mapping = Promotion(typeManager).GetPromoteTypeMapping(currentTy, targetTy)
-            if (!mapping.entries.isEmpty()) {
-                return typeManager.GetBestInstantiatedTy(rawTy, mapping)
-            }
-        }
-    }
-    return rawTy
-}
-
-private func typeCheckExprInferTypeOfThis(typeManager: TypeManager, re: RefExpr, outerDecl: InheritableDecl): Ty {
-    var targetDecl = outerDecl
-    if (let Some(extendDecl) <- (targetDecl as ExtendDecl)) {
-        if (let Some(extendedType) <- extendDecl.extendedType) {
-            if (let Some(extendedTy) <- extendedType.GetTy()) {
-                if (extendedTy.IsBuiltin()) {
-                    return extendedTy
-                }
-                if (let Some(realDecl) <- Ty.GetInheritableDeclPtrOfTy(Some(extendedTy))) {
-                    targetDecl = realDecl
-                } else {
-                    return TypeManager.GetInvalidTy()
-                }
-            }
-        }
-    }
-    ReplaceTarget(re, Some(targetDecl))
-    let inferredTy = typeCheckExprReplaceWithGenericTyInInheritableDecl(typeManager, targetDecl.GetTy(),
-        outerDecl, targetDecl)
-    if (let Some(classTy) <- (inferredTy as ClassTy)) {
-        if (let Some(classDecl) <- classTy.decl) {
-            return typeManager.GetClassThisTy(classDecl, classTy.typeArgs.toArray())
-        }
-    }
-    return inferredTy
-}
-
-private func typeCheckExprInferTypeOfSuper(typeManager: TypeManager, re: RefExpr, outerDecl: InheritableDecl): Ty {
-    if (let None <- (outerDecl as ClassDecl)) {
-        return TypeManager.GetInvalidTy()
-    }
-    let classDecl = (outerDecl as ClassDecl).getOrThrow()
-    if (let Some(rawTy) <- classDecl.GetTy()) {
-        if (let Some(classTy) <- (rawTy as ClassTy)) {
-            if (let Some(superClassTy) <- classTy.GetSuperClassTy()) {
-                if (let Some(superDecl) <- superClassTy.declPtr) {
-                    ReplaceTarget(re, Some(superDecl))
-                    return typeCheckExprReplaceWithGenericTyInInheritableDecl(typeManager, superDecl.GetTy(),
-                        outerDecl, superDecl)
-                }
-            }
-        }
-    }
-    return TypeManager.GetInvalidTy()
-}
-
-private func typeCheckExprCheckThisOrSuper(typeManager: TypeManager, ctx: ASTContext, re: RefExpr,
-    currentFuncBody: Option<FuncBody>): Unit {
-    if (!re.isThis && !re.isSuper) {
-        return
-    }
-    if ((let Some(_) <- re.ref.target) || !re.ref.targets.isEmpty()) {
-        return
-    }
-    re.SetTy(TypeManager.GetInvalidTy())
-    if (let Some(outerDecl) <- typeCheckExprGetCurInheritableDecl(ctx, scopeNameOf(re), currentFuncBody)) {
-        let inferredTy = if (re.isThis) {
-            typeCheckExprInferTypeOfThis(typeManager, re, outerDecl)
-        } else {
-            typeCheckExprInferTypeOfSuper(typeManager, re, outerDecl)
-        }
-        re.SetTy(inferredTy)
-    }
 }
 
 private func lookupResolvedPackageDecl(ctx: ASTContext, packageName: String, name: String): Option<Decl> {
@@ -494,6 +501,7 @@ public class TypeChecker {
     internal var currentFuncBody: Option<FuncBody> = None
     private let activeEnumConstructorRegistrations: ArrayList<EnumDecl> = ArrayList<EnumDecl>()
     private let mainFunctionMap: HashMap<Node, ArrayList<Decl>> = HashMap<Node, ArrayList<Decl>>()
+    private var mpImpl: MPTypeCheckerImpl = MPTypeCheckerImpl(impl.typeManager)
 
     public init(ci: Option<CompilerInstance>) {
         this.ci = ci
@@ -505,6 +513,11 @@ public class TypeChecker {
             TypeCheckerImpl(typeManager: tm, diag: instance.diag, importManager: instance.importManager)
         } else {
             TypeCheckerImpl(typeManager: tm)
+        }
+        mpImpl = if (let Some(diag) <- impl.diag) {
+            MPTypeCheckerImpl(impl.typeManager, diag)
+        } else {
+            MPTypeCheckerImpl(impl.typeManager)
         }
     }
 
@@ -1763,6 +1776,8 @@ public class TypeChecker {
                 PerformDesugarAfterTypeCheck(impl.typeManager, pkg, context: Some(ctx), options: GlobalOptions(),
                     synthesizer: Some({ synCtx: ASTContext, pos: SynPos, node: Node =>
                         SynthesizeWithoutRecover(synCtx, pos, node)
+                    }), callChecker: Some({ checkCtx: ASTContext, target: Ty, call: CallExpr =>
+                        ChkCallExpr(checkCtx, Some(target), call)
                     }), diag: impl.diag)
                 DesugarAfterInstantiation(impl.typeManager, recursivePkgs, pkg,
                     implicitUsedDecls: Some(implicitUsedDecls))
@@ -3471,22 +3486,764 @@ public class TypeChecker {
         return false
     }
 
-    private func SynthesizeCallChildren(ctx: ASTContext, callExpr: CallExpr): Unit {
-        if (let Some(baseFunc) <- callExpr.baseFunc) {
-            SetIsNotAlone(baseFunc)
-            SetCallOrPattern(baseFunc, callExpr)
-            var copiedTargetToBase = false
-            if (let Some(baseRef) <- (baseFunc as RefExpr)) {
-                if (let Some(targetTy) <- typeCheckExprTargetTypeOf(ctx, callExpr)) {
-                    typeCheckExprPutTargetType(ctx, baseRef, targetTy)
-                    copiedTargetToBase = true
+    // C++ src/Sema/TypeCheckUtil.h:92-102 RemoveDuplicateElements.
+    private func RemoveDuplicateElements(candidates: ArrayList<Option<FuncDecl>>): Unit {
+        let uniqueCandidates = ArrayList<FuncDecl>()
+        var hasNull = false
+        var idx: Int64 = 0
+        while (idx < candidates.size) {
+            var duplicate = false
+            if (let Some(candidate) <- candidates[idx]) {
+                for (uniqueCandidate in uniqueCandidates) {
+                    if (uniqueCandidate == candidate) {
+                        duplicate = true
+                        break
+                    }
                 }
+                if (!duplicate) {
+                    uniqueCandidates.add(candidate)
+                }
+            } else if (hasNull) {
+                duplicate = true
+            } else {
+                hasNull = true
             }
-            let _ = Synthesize(ctx, baseFunc)
-            if (copiedTargetToBase) {
-                typeCheckExprClearTargetType(ctx, baseFunc)
+            if (duplicate) {
+                candidates.remove(at: idx)
+            } else {
+                idx++
             }
         }
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:582-594 RemoveNonAnnotationCandidates.
+    private func RemoveNonAnnotationCandidates(candidates: ArrayList<Option<FuncDecl>>): Unit {
+        var idx: Int64 = 0
+        while (idx < candidates.size) {
+            let isCustomAnnotation = if (let Some(candidate) <- candidates[idx]) {
+                IsInstanceConstructor(candidate) && candidate.TestAttr(Attribute.IN_CLASSLIKE) &&
+                    candidate.outerDecl.isSome() && candidate.outerDecl.getOrThrow().TestAttr(Attribute.IS_ANNOTATION)
+            } else {
+                false
+            }
+            if (isCustomAnnotation) {
+                idx++
+            } else {
+                candidates.remove(at: idx)
+            }
+        }
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:1913-1943 TypeCheckerImpl::FilterCandidatesWithReExport.
+    private func FilterCandidatesWithReExport(ctx: ASTContext, inCandidates: ArrayList<Option<FuncDecl>>,
+        ce: CallExpr): ArrayList<FuncDecl> {
+        if (inCandidates.isEmpty()) {
+            return ArrayList<FuncDecl>()
+        }
+        var first: Int64 = 0
+        while (first < inCandidates.size && inCandidates[first].isSome()) {
+            first++
+        }
+        if (first == inCandidates.size) {
+            let candidates = ArrayList<FuncDecl>()
+            for (candidate in inCandidates) {
+                candidates.add(candidate.getOrThrow())
+            }
+            return FilterCandidates(impl.typeManager, impl.diag, Some(ctx), ce, candidates)
+        }
+        let reExportFuncTargets = ArrayList<FuncDecl>()
+        let importedFuncTargets = ArrayList<FuncDecl>()
+        var idx: Int64 = 0
+        while (idx < first) {
+            reExportFuncTargets.add(inCandidates[idx].getOrThrow())
+            idx++
+        }
+        idx = first + 1
+        while (idx < inCandidates.size) {
+            importedFuncTargets.add(inCandidates[idx].getOrThrow())
+            idx++
+        }
+        let filteredImported = FilterCandidates(impl.typeManager, impl.diag, Some(ctx), ce, importedFuncTargets)
+        let filteredReExport = FilterCandidates(impl.typeManager, impl.diag, Some(ctx), ce, reExportFuncTargets)
+        if (!(filteredImported.isEmpty() && filteredReExport.isEmpty())) {
+            for (candidate in filteredImported) {
+                filteredReExport.add(candidate)
+            }
+            return filteredReExport
+        }
+        if (filteredImported.isEmpty()) {
+            return filteredReExport
+        }
+        return filteredImported
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:2311-2360 TypeCheckerImpl::GetCallBaseCandidates.
+    private func GetCallBaseCandidates(ctx: ASTContext, ce: CallExpr, expr: Expr):
+        (Bool, Option<Decl>, ArrayList<FuncDecl>) {
+        var target = GetRealTarget(expr, expr.GetTarget()).getOrThrow()
+        if (target.TestAttr(Attribute.COMMON) && target.specificImplementation.isSome()) {
+            target = target.specificImplementation.getOrThrow()
+        }
+        if (IsBuiltinTypeAlias(target, TypeKind.TYPE_ANY) || target.IsBuiltIn()) {
+            return (false, Some(target), ArrayList<FuncDecl>())
+        }
+        var isFunctionCall = true
+        if (IsInstanceConstructor(target) && target.outerDecl.isSome()) {
+            target = target.outerDecl.getOrThrow()
+        }
+        let nullableCandidates = ArrayList<Option<FuncDecl>>()
+        if (target.IsStructOrClassDecl()) {
+            for (member in target.GetMemberDeclPtrs()) {
+                let originalCtor = IsInstanceConstructor(member) && member.astKind == ASTKind.FUNC_DECL &&
+                    member.identifier.Val() == "init"
+                if (originalCtor) {
+                    nullableCandidates.add(Some((member as FuncDecl).getOrThrow()))
+                }
+            }
+            isFunctionCall = false
+        } else {
+            for (candidate in GetFuncTargets(expr)) {
+                nullableCandidates.add(candidate)
+            }
+        }
+        RemoveDuplicateElements(nullableCandidates)
+        if (ce.callKind == CallKind.CALL_ANNOTATION) {
+            RemoveNonAnnotationCandidates(nullableCandidates)
+        }
+        let cjmpCandidates = ArrayList<FuncDecl>()
+        for (candidate in nullableCandidates) {
+            if (let Some(funcDecl) <- candidate) {
+                cjmpCandidates.add(funcDecl)
+            }
+        }
+        mpImpl.RemoveCommonCandidatesIfHasSpecific(cjmpCandidates)
+        var candidateIdx: Int64 = 0
+        while (candidateIdx < nullableCandidates.size) {
+            if (let Some(funcDecl2) <- nullableCandidates[candidateIdx]) {
+                var retained = false
+                for (cjmpCandidate in cjmpCandidates) {
+                    if (cjmpCandidate == funcDecl2) {
+                        retained = true
+                        break
+                    }
+                }
+                if (!retained) {
+                    nullableCandidates.remove(at: candidateIdx)
+                    continue
+                }
+            }
+            candidateIdx++
+        }
+        var candidates = ArrayList<FuncDecl>()
+        var hasError = false
+        try (ds = DiagSuppressor(impl.diag)) {
+            candidates = FilterCandidatesWithReExport(ctx, nullableCandidates, ce)
+            if (expr.astKind == ASTKind.REF_EXPR && candidates.isEmpty() && target.astKind == ASTKind.PACKAGE_DECL) {
+                if (let Some(diag) <- impl.diag) {
+                    DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_cannot_ref_to_pkg_name, expr).Emit()
+                }
+            }
+            hasError = ds.HasError()
+            ds.ReportDiag()
+        }
+        if (hasError) {
+            return (false, Some(target), candidates)
+        }
+        if (!candidates.isEmpty() && isFunctionCall) {
+            target = candidates[0]
+        }
+        return (true, Some(target), candidates)
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:2362-2377 TypeCheckerImpl::CheckRefConstructor.
+    private func CheckRefConstructor(ctx: ASTContext, ce: CallExpr, re: RefExpr): Bool {
+        if (re.isSuper || re.isThis) {
+            let curFuncBody = GetCurFuncBody(ctx, re.scopeName)
+            let insideCtor = if (let Some(funcBody) <- curFuncBody) {
+                funcBody.funcDecl.isSome() && funcBody.funcDecl.getOrThrow().TestAttr(Attribute.CONSTRUCTOR)
+            } else {
+                false
+            }
+            if (!insideCtor) {
+                if (let Some(diag) <- impl.diag) {
+                    Diagnose(diag, ce, BasicDiagKind.sema_invalid_this_call_outside_ctor,
+                        args: [BasicDiagArgument(re.ref.identifier.Val())]).Emit()
+                }
+                return false
+            }
+        }
+        return true
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:2379-2397 TypeCheckerImpl::ChkCallBaseRefExpr.
+    private func ChkCallBaseRefExpr(ctx: ASTContext, ce: CallExpr):
+        (Bool, Option<Decl>, ArrayList<FuncDecl>) {
+        let baseFunc = ce.baseFunc.getOrThrow()
+        let re = (baseFunc as RefExpr).getOrThrow()
+        re.isAlone = false
+        re.callOrPattern = Some(ce)
+        if (let Some(targetTy) <- ctx.targetTypeMap.get(ce)) {
+            ctx.targetTypeMap[re] = targetTy
+        } else {
+            ctx.targetTypeMap.remove(re)
+        }
+        let _ = Synthesize(ctx, SynPos.EXPR_ARG, re)
+        if (let Some(target) <- re.ref.target) {
+            if (let Some(builtin) <- (target as BuiltInDecl)) {
+                if (builtin.IsType(BuiltInType.CFUNC)) {
+                    return (SynCFuncCall(impl.typeManager, ce,
+                        argSynthesizer: Some({ arg: FuncArg => SynthesizeFuncArg(ctx, arg) }), diag: impl.diag),
+                        Some(builtin), ArrayList<FuncDecl>())
+                }
+            }
+        }
+        if (re.ref.target.isNone() && re.ref.targets.isEmpty()) {
+            return (false, None, ArrayList<FuncDecl>())
+        }
+        if (!CheckRefConstructor(ctx, ce, re)) {
+            return (false, re.GetTarget(), ArrayList<FuncDecl>())
+        }
+        return GetCallBaseCandidates(ctx, ce, re)
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:2399-2421 TypeCheckerImpl::ChkCallBaseMemberAccess.
+    private func ChkCallBaseMemberAccess(ctx: ASTContext, ce: CallExpr):
+        (Bool, Option<Decl>, ArrayList<FuncDecl>) {
+        let ma = (ce.baseFunc.getOrThrow() as MemberAccess).getOrThrow()
+        ma.callOrPattern = Some(ce)
+        ma.isAlone = false
+        let baseExpr = ma.baseExpr.getOrThrow()
+        ctx.targetTypeMap[baseExpr] = TypeManager.GetQuestTy()
+        let _ = Synthesize(ctx, SynPos.EXPR_ARG, ma)
+        ctx.targetTypeMap.remove(baseExpr)
+        if (Ty.IsTyCorrect(ma.GetTy()) && ma.GetTy().getOrThrow().IsNothing()) {
+            return (true, ma.GetTarget(), ArrayList<FuncDecl>())
+        }
+        if (ma.target.isNone() && ma.targets.isEmpty()) {
+            if ((baseExpr.GetTy() as VArrayTy).isSome() && ma.field.Val() == "size") {
+                if (let Some(diag) <- impl.diag) {
+                    Diagnose(diag, ce, BasicDiagKind.sema_no_match_operator_function_call).Emit()
+                }
+                ma.SetTy(TypeManager.GetInvalidTy())
+            }
+            return (false, None, ArrayList<FuncDecl>())
+        }
+        return GetCallBaseCandidates(ctx, ce, ma)
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:2424-2439 CanReachFuncCallByQuestable.
+    private func CanReachFuncCallByQuestable(root: Node): Bool {
+        let canReachFuncCall = Box<Bool>(false)
+        let walker = Walker(root, visitPre: { node: Node =>
+            if ((node as TrailingClosureExpr).isSome() || (node as CallExpr).isSome()) {
+                canReachFuncCall.value = true
+                return VisitAction.STOP_NOW
+            }
+            if (!IsQuestableNode(node)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            return VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+        return canReachFuncCall.value
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:2459-2478 TypeCheckerImpl::ChkCurryCallBase.
+    private func ChkCurryCallBase(ctx: ASTContext, ce: CallExpr, targetRet: Option<Ty>): Bool {
+        let paramTys = ArrayList<Ty>()
+        let retTy = targetRet ?? TypeManager.GetQuestTy()
+        try (ds = DiagSuppressor(impl.diag)) {
+            for (arg in ce.args) {
+                if (Ty.IsInitialTy(arg.GetTy())) {
+                    let _ = SynthesizeWithCache(ctx, SynPos.EXPR_ARG, arg.expr.getOrThrow())
+                }
+                if (Ty.IsTyCorrect(arg.GetTy())) {
+                    paramTys.add(arg.GetTy().getOrThrow())
+                } else {
+                    paramTys.add(TypeManager.GetQuestTy())
+                }
+            }
+        }
+        let cfg = FuncTyConfig()
+        cfg.noCast = true
+        let targetForBase = impl.typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
+        return Check(ctx, targetForBase, ce.baseFunc.getOrThrow())
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:2480-2527 TypeCheckerImpl::ChkCallBaseExpr.
+    private func ChkCallBaseExpr(ctx: ASTContext, ce: CallExpr, targetRet: Option<Ty>):
+        (Bool, Option<Decl>, ArrayList<FuncDecl>) {
+        let setFuncArgsInvalidTy = { =>
+            ce.SetTy(TypeManager.GetInvalidTy())
+            for (arg in ce.args) {
+                let expr = arg.expr.getOrThrow()
+                if (!Ty.IsTyCorrect(expr.GetTy())) {
+                    expr.SetTy(TypeManager.GetInvalidTy())
+                }
+                arg.SetTy(TypeManager.GetInvalidTy())
+            }
+        }
+        let baseFunc = ce.baseFunc.getOrThrow()
+        if (baseFunc.desugarExpr.isSome() && (baseFunc as TrailingClosureExpr).isNone()) {
+            if (!Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, baseFunc))) {
+                setFuncArgsInvalidTy()
+                return (false, None, ArrayList<FuncDecl>())
+            }
+            return (true, None, ArrayList<FuncDecl>())
+        }
+        var result: (Bool, Option<Decl>, ArrayList<FuncDecl>) =
+            (true, None, ArrayList<FuncDecl>())
+        try (cs = impl.typeManager.constraints.CommitScope()) {
+            if (let Some(_) <- (baseFunc as RefExpr)) {
+                result = ChkCallBaseRefExpr(ctx, ce)
+            } else if (let Some(_) <- (baseFunc as MemberAccess)) {
+                result = ChkCallBaseMemberAccess(ctx, ce)
+            } else {
+                var mayCurry = false
+                if (CanReachFuncCallByQuestable(baseFunc)) {
+                    try (ds = DiagSuppressor(impl.diag)) {
+                        mayCurry = ChkCurryCallBase(ctx, ce, targetRet)
+                    }
+                }
+                if (!mayCurry) {
+                    impl.typeManager.constraints.Reset()
+                    baseFunc.Clear()
+                    let _ = Synthesize(ctx, SynPos.EXPR_ARG, baseFunc)
+                }
+            }
+            if (!result[0] && !Ty.IsTyCorrect(baseFunc.GetTy())) {
+                setFuncArgsInvalidTy()
+            }
+        }
+        return result
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:3289-3304 TypeCheckerImpl::ChkDesugarExprOfCallExpr.
+    private func ChkDesugarExprOfCallExpr(ctx: ASTContext, target: Option<Ty>, ce: CallExpr): Bool {
+        let desugarExpr = ce.desugarExpr.getOrThrow()
+        if (Ty.IsTyCorrect(desugarExpr.GetTy())) {
+            ce.SetTy(desugarExpr.GetTy().getOrThrow())
+            return target.isNone() || impl.typeManager.IsSubtype(desugarExpr.GetTy().getOrThrow(), target.getOrThrow())
+        }
+        let isWellTyped = if (Ty.IsTyCorrect(target)) {
+            Check(ctx, target.getOrThrow(), desugarExpr)
+        } else {
+            Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, desugarExpr))
+        }
+        ce.SetTy(desugarExpr.GetTy().getOrThrow())
+        return isWellTyped && Ty.IsTyCorrect(ce.GetTy())
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:3306-3316 TypeCheckerImpl::SynArgsOfNothingBaseExpr.
+    private func SynArgsOfNothingBaseExpr(ctx: ASTContext, ce: CallExpr): Bool {
+        var isWellTyped = true
+        for (arg in ce.args) {
+            isWellTyped = isWellTyped && Ty.IsTyCorrect(SynthesizeFuncArg(ctx, arg))
+            let _ = ReplaceIdealTy(impl.typeManager, arg, diag: impl.diag)
+            let _ = ReplaceIdealTy(impl.typeManager, arg.expr.getOrThrow(), diag: impl.diag)
+        }
+        ce.SetTy(if (isWellTyped) { TypeManager.GetNothingTy() } else { TypeManager.GetInvalidTy() })
+        return isWellTyped
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:3389-3405 TypeCheckerImpl::CheckToTokensImpCallExpr.
+    private func CheckToTokensImpCallExpr(ce: CallExpr): Unit {
+        let toTokensDecl: Option<InterfaceDecl> = if (let Some(importManager) <- impl.importManager) {
+            importManager.GetAstDecl<InterfaceDecl>("ToTokens")
+        } else {
+            None
+        }
+        if (ce.astKind != ASTKind.CALL_EXPR || toTokensDecl.isNone()) {
+            return
+        }
+        let memberAccess = (ce.baseFunc.getOrThrow() as MemberAccess).getOrThrow()
+        if (let Some(baseExpr) <- memberAccess.baseExpr) {
+            let promotedTys = Promotion(impl.typeManager).Promote(baseExpr.GetTy().getOrThrow(),
+                toTokensDecl.getOrThrow().GetTy().getOrThrow())
+            let ty = if (promotedTys.values.isEmpty()) {
+                TypeManager.GetInvalidTy()
+            } else {
+                promotedTys.values[0]
+            }
+            if (!impl.typeManager.IsTyEqual(ty, toTokensDecl.getOrThrow().GetTy().getOrThrow())) {
+                if (let Some(diag) <- impl.diag) {
+                    Diagnose(diag, ce, BasicDiagKind.sema_invalid_tokens_implementation,
+                        args: [BasicDiagArgument(baseExpr.GetTy().getOrThrow().String())]).Emit()
+                }
+            }
+        }
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:2950-2961 TypeCheckerImpl::PostProcessForLSP.
+    private func PostProcessForLSP(ce: CallExpr, result: ArrayList<FuncDecl>): Unit {
+        if (result.size > 1) {
+            UpdateCallTargets(ce, result[0])
+            ce.resolvedFunction = Some(result[0])
+        } else {
+            ReplaceTarget(ce.baseFunc.getOrThrow(), None)
+            ce.baseFunc.getOrThrow().SetTy(TypeManager.GetInvalidTy())
+        }
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:2075-2088 TypeCheckerImpl::RecoverCallArgs.
+    private func RecoverCallArgs(ctx: ASTContext, ce: CallExpr, argsTys: ArrayList<Option<Ty>>): Unit {
+        if (argsTys.isEmpty() || argsTys.size != ce.args.size) {
+            return
+        }
+        if (let Some(resolvedFunction) <- ce.resolvedFunction) {
+            UpdateCallTargets(ce, resolvedFunction)
+        }
+        var idx: Int64 = 0
+        while (idx < argsTys.size) {
+            let _ = CheckWithEffectiveCache(ctx, argsTys[idx].getOrThrow(), ce.args[idx], false)
+            idx++
+        }
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:2968-2989 GetUnqualifiedCallBaseName.
+    private func GetUnqualifiedCallBaseName(ce: CallExpr): (Bool, String) {
+        if (ce.sourceExpr.isSome() || ce.desugarExpr.isSome() || ce.baseFunc.isNone() ||
+            ce.baseFunc.getOrThrow().TestAttr(Attribute.MACRO_INVOKE_BODY)) {
+            return (false, "")
+        }
+        let baseFunc = ce.baseFunc.getOrThrow()
+        if (let Some(refExpr) <- (baseFunc as RefExpr)) {
+            return (true, refExpr.ref.identifier.Val())
+        }
+        if ((let Some(memberAccess) <- (baseFunc as MemberAccess)) &&
+            (let Some(baseExpr) <- memberAccess.baseExpr) &&
+            (let Some(baseRef) <- (baseExpr as RefExpr)) && baseRef.isThis) {
+            return (true, memberAccess.field.Val())
+        }
+        return (false, "")
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:2991-3022 TypeCheckerImpl::ShadowedCallBaseTypeCandidate.
+    private func ShadowedCallBaseTypeCandidate(ctx: ASTContext, ce: CallExpr): Option<Decl> {
+        let (ok, name) = GetUnqualifiedCallBaseName(ce)
+        if (!ok || ce.baseFunc.getOrThrow().scopeName.isEmpty()) {
+            return None
+        }
+        let baseFunc = ce.baseFunc.getOrThrow()
+        let nearest = impl.Lookup(ctx, name, baseFunc.scopeName, baseFunc)
+        if (nearest.isEmpty()) {
+            return None
+        }
+        let nearestDecl = nearest[0]
+        if (nearestDecl.IsTypeDecl() || nearestDecl.TestAttr(Attribute.GLOBAL)) {
+            return None
+        }
+        if (nearestDecl.astKind != ASTKind.FUNC_DECL && nearestDecl.astKind != ASTKind.PROP_DECL &&
+            nearestDecl.astKind != ASTKind.VAR_DECL) {
+            return None
+        }
+        return LookupShadowedTopLevelTypeByName(ctx, name, baseFunc.scopeName, baseFunc)
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:3024-3107 TypeCheckerImpl::RetryCallAsShadowedTypeConstructionWithType.
+    private func RetryCallAsShadowedTypeConstructionWithType(ctx: ASTContext, target: Option<Ty>, ce: CallExpr,
+        typeDecl: Decl): Bool {
+        if (ce.baseFunc.isNone() || !Ty.IsTyCorrect(typeDecl.GetTy())) {
+            return false
+        }
+        let base = ce.baseFunc.getOrThrow()
+        if (base.astKind != ASTKind.REF_EXPR && base.astKind != ASTKind.MEMBER_ACCESS) {
+            return false
+        }
+        let savedTarget = base.GetTarget()
+        let savedBaseTy = base.GetTy()
+        let savedRefTargets = ArrayList<Option<Decl>>()
+        var savedAlias: Option<TypeAliasDecl> = None
+        if (let Some(refExpr) <- (base as RefExpr)) {
+            for (decl in refExpr.ref.targets) { savedRefTargets.add(decl) }
+            savedAlias = refExpr.aliasTarget
+        } else if (let Some(memberAccess) <- (base as MemberAccess)) {
+            for (decl in memberAccess.targets) {
+                if (let Some(funcDecl) <- decl) { savedRefTargets.add(Some(funcDecl)) } else { savedRefTargets.add(None) }
+            }
+            savedAlias = memberAccess.aliasTarget
+        }
+        let savedCallKind = ce.callKind
+        let savedResolvedFunc = ce.resolvedFunction
+        let savedCeTy = ce.GetTy()
+        var retryOk = false
+        try (ds = DiagSuppressor(impl.diag)) {
+            if (let Some(refExpr2) <- (base as RefExpr)) {
+                ReplaceTarget(refExpr2, Some(typeDecl))
+                refExpr2.aliasTarget = None
+                refExpr2.ref.targets.clear()
+                refExpr2.callOrPattern = Some(ce)
+                refExpr2.isAlone = false
+            } else if (let Some(memberAccess2) <- (base as MemberAccess)) {
+                ReplaceTarget(memberAccess2, Some(typeDecl))
+                memberAccess2.aliasTarget = None
+                memberAccess2.targets.clear()
+                memberAccess2.callOrPattern = Some(ce)
+                memberAccess2.isAlone = false
+            }
+            base.SetTy(typeDecl.GetTy().getOrThrow())
+            ce.callKind = CallKind.CALL_INVALID
+            ce.resolvedFunction = None
+            ce.SetTy(Ty.GetInitialTy())
+            impl.typeManager.constraints.Reset()
+            retryOk = ChkCallExpr(ctx, target, ce) && Ty.IsTyCorrect(ce.GetTy())
+        }
+        if (retryOk) {
+            return true
+        }
+        if (let Some(refExpr3) <- (base as RefExpr)) {
+            ReplaceTarget(refExpr3, savedTarget)
+            refExpr3.aliasTarget = savedAlias
+            refExpr3.ref.targets.clear()
+            for (decl in savedRefTargets) { refExpr3.ref.targets.add(decl) }
+        } else if (let Some(memberAccess3) <- (base as MemberAccess)) {
+            ReplaceTarget(memberAccess3, savedTarget)
+            memberAccess3.aliasTarget = savedAlias
+            memberAccess3.targets.clear()
+            for (decl in savedRefTargets) {
+                if (let Some(value) <- decl) {
+                    if (let Some(funcDecl) <- (value as FuncDecl)) { memberAccess3.targets.add(Some(funcDecl)) }
+                } else {
+                    memberAccess3.targets.add(None)
+                }
+            }
+        }
+        base.SetTy(savedBaseTy.getOrThrow())
+        ce.callKind = savedCallKind
+        ce.resolvedFunction = savedResolvedFunc
+        ce.SetTy(savedCeTy.getOrThrow())
+        impl.typeManager.constraints.Reset()
+        return false
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:3109-3129 TypeCheckerImpl::MayRetryCallAsShadowedTypeConstruction.
+    private func MayRetryCallAsShadowedTypeConstruction(ctx: ASTContext, ce: CallExpr): Bool {
+        let _ = ctx
+        let (ok, _) = GetUnqualifiedCallBaseName(ce)
+        if (!ok) { return false }
+        let target = ce.baseFunc.getOrThrow().GetTarget()
+        if (target.isNone() || target.getOrThrow().IsTypeDecl() || target.getOrThrow().TestAttr(Attribute.GLOBAL)) {
+            return false
+        }
+        let targetDecl = target.getOrThrow()
+        return targetDecl.astKind == ASTKind.FUNC_DECL || targetDecl.astKind == ASTKind.PROP_DECL ||
+            targetDecl.astKind == ASTKind.VAR_DECL
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:3131-3145 TypeCheckerImpl::RetryCallAsShadowedTypeConstruction.
+    private func RetryCallAsShadowedTypeConstruction(ctx: ASTContext, target: Option<Ty>, ce: CallExpr): Bool {
+        let (ok, name) = GetUnqualifiedCallBaseName(ce)
+        if (!ok || ce.baseFunc.getOrThrow().scopeName.isEmpty()) { return false }
+        let baseFunc = ce.baseFunc.getOrThrow()
+        let typeDecl = LookupShadowedTopLevelTypeByName(ctx, name, baseFunc.scopeName, baseFunc)
+        if (let None <- typeDecl) { return false }
+        return RetryCallAsShadowedTypeConstructionWithType(ctx, target, ce, typeDecl.getOrThrow())
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:3318-3331 TypeCheckerImpl::ChkFunctionCallExpr.
+    private func ChkFunctionCallExpr(ctx: ASTContext, target: Option<Ty>, ce: CallExpr): Bool {
+        DesugarCallExpr(ce)
+        let desugarCallExpr = (ce.desugarExpr.getOrThrow() as CallExpr).getOrThrow()
+        if (!ChkCallExpr(ctx, target, desugarCallExpr)) {
+            RecoverToCallExpr(ce)
+            if (let Some(diag) <- impl.diag) {
+                Diagnose(diag, ce, BasicDiagKind.sema_no_match_operator_function_call).Emit()
+            }
+            ce.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
+        ce.callKind = desugarCallExpr.callKind
+        ce.SetTy(desugarCallExpr.GetTy().getOrThrow())
+        return true
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:3148-3287 TypeCheckerImpl::ChkCallExpr.
+    private func ChkCallExpr(ctx: ASTContext, target: Option<Ty>, ce: CallExpr): Bool {
+        if (ce.desugarExpr.isSome()) {
+            return ChkDesugarExprOfCallExpr(ctx, target, ce)
+        }
+        if (ce.baseFunc.isNone()) {
+            return false
+        }
+        let prevCheckTrue = ce.callKind != CallKind.CALL_INVALID && Ty.IsTyCorrect(ce.GetTy()) &&
+            impl.typeManager.GetUnsolvedTyVars().isEmpty()
+        let argsTys = ArrayList<Option<Ty>>()
+        if (prevCheckTrue) {
+            for (arg in ce.args) {
+                argsTys.add(arg.GetTy())
+            }
+        }
+        ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy().getOrThrow()))
+
+        let ctorTypeCandidate = ShadowedCallBaseTypeCandidate(ctx, ce)
+        var baseDiags = Array<Diagnostic>()
+        var baseResult: (Bool, Option<Decl>, ArrayList<FuncDecl>) =
+            (false, None, ArrayList<FuncDecl>())
+        if (let Some(typeCandidate) <- ctorTypeCandidate) {
+            try (ds = DiagSuppressor(impl.diag)) {
+                baseResult = ChkCallBaseExpr(ctx, ce, target)
+                baseDiags = ds.GetSuppressedDiag()
+            }
+            if (!baseResult[0] && RetryCallAsShadowedTypeConstructionWithType(ctx, target, ce, typeCandidate)) {
+                return true
+            }
+            if (let Some(diag) <- impl.diag) {
+                for (diagnostic in baseDiags) {
+                    diag.Diagnose(diagnostic).Emit()
+                }
+            }
+        } else {
+            baseResult = ChkCallBaseExpr(ctx, ce, target)
+        }
+        if (!baseResult[0]) {
+            let builtinTarget = match (target) {
+                case Some(value) => value
+                case None => TypeManager.GetInvalidTy()
+            }
+            return ChkBuiltinCall(impl.typeManager, Some(ctx),
+                TypeManager.GetNonNullTy(builtinTarget), ce, diag: impl.diag,
+                checker: Some({ expectedTy2: Ty, arg4: FuncArg => CheckCallArgFromContext(ctx, expectedTy2, arg4) }),
+                typeChecker: Some({ targetTy3: Ty, typeNode3: Type => Check(ctx, targetTy3, typeNode3) }),
+                typeSynthesizer: Some({ typeNode4: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode4) }),
+                argSynthesizer: Some({ arg5: FuncArg => SynthesizeFuncArg(ctx, arg5) }))
+        }
+        let baseFunc = ce.baseFunc.getOrThrow()
+        if (!Ty.IsTyCorrect(baseFunc.GetTy())) {
+            return false
+        }
+        if (baseFunc.GetTy().getOrThrow().IsNothing()) {
+            return SynArgsOfNothingBaseExpr(ctx, ce)
+        }
+        if (ce.needCheckToTokens) {
+            CheckToTokensImpCallExpr(ce)
+        }
+
+        let candidates = baseResult[2]
+        let mayRetryAsTypeCtor = MayRetryCallAsShadowedTypeConstruction(ctx, ce)
+        if (let None <- baseResult[1]) {
+            return CheckNonNormalCall(impl.typeManager, impl.diag, target, ce,
+                argChecker: Some({ expectedTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, expectedTy, arg) }))
+        }
+        let decl = baseResult[1].getOrThrow()
+        if (!CheckCallKind(impl.diag, ce, decl)) {
+            if (mayRetryAsTypeCtor && RetryCallAsShadowedTypeConstruction(ctx, target, ce)) {
+                return true
+            }
+            return CheckNonNormalCall(impl.typeManager, impl.diag, target, ce,
+                argChecker: Some({ expectedTy4: Ty, arg9: FuncArg => CheckCallArgFromContext(ctx, expectedTy4, arg9) }))
+        }
+        if (ce.callKind == CallKind.CALL_INVALID) {
+            return false
+        }
+        if (candidates.isEmpty()) {
+            DiagnoseForCall(impl.diag, candidates, candidates, ce, decl)
+            return false
+        }
+        let maybeEnumOverloadOP = IsPossibleEnumConstructor(candidates, baseFunc)
+        let maybeVariadicFunction = IsPossibleVariadicFunctionInList(candidates, ce)
+        let maybeEnumOrVariadic = maybeEnumOverloadOP || maybeVariadicFunction
+        let diagnostics = ArrayList<Diagnostic>()
+        var result = ArrayList<FuncDecl>()
+        try (cs = impl.typeManager.constraints.CommitScope()) {
+            if (maybeEnumOrVariadic || mayRetryAsTypeCtor) {
+                try (ds = DiagSuppressor(impl.diag)) {
+                    result = MatchFunctionForCall(impl.typeManager, impl.diag, Some(ctx), candidates, ce, target,
+                        argChecker: Some({ expectedTy5: Ty, arg10: FuncArg => CheckCallArgFromContext(ctx, expectedTy5, arg10) }),
+                        declSynthesizer: Some({ fd3: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd3)) }),
+                        argSynthesizer: Some({ arg11: FuncArg => SynthesizeFuncArg(ctx, arg11) }),
+                        exprSynthesizer: Some({ child3: Expr => SynthesizeWithCache(ctx, SynPos.EXPR_ARG, child3) }),
+                        effectiveArgChecker: Some({ expectedTy6: Ty, arg12: FuncArg =>
+                            CheckWithEffectiveCache(ctx, expectedTy6, arg12, false)
+                        }))
+                    for (diagnostic2 in ds.GetSuppressedDiag()) {
+                        diagnostics.add(diagnostic2)
+                    }
+                }
+            } else {
+                result = MatchFunctionForCall(impl.typeManager, impl.diag, Some(ctx), candidates, ce, target,
+                    argChecker: Some({ expectedTy7: Ty, arg13: FuncArg => CheckCallArgFromContext(ctx, expectedTy7, arg13) }),
+                    declSynthesizer: Some({ fd4: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd4)) }),
+                    argSynthesizer: Some({ arg14: FuncArg => SynthesizeFuncArg(ctx, arg14) }),
+                    exprSynthesizer: Some({ child4: Expr => SynthesizeWithCache(ctx, SynPos.EXPR_ARG, child4) }),
+                    effectiveArgChecker: Some({ expectedTy8: Ty, arg15: FuncArg =>
+                        CheckWithEffectiveCache(ctx, expectedTy8, arg15, false)
+                    }))
+            }
+            ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy().getOrThrow()))
+            if (result.size == 1) {
+                return true
+            }
+            impl.typeManager.constraints.Reset()
+            baseFunc.SetTy(if (maybeEnumOrVariadic) {
+                TypeManager.GetInvalidTy()
+            } else {
+                baseFunc.GetTy().getOrThrow()
+            })
+            let ret = (maybeEnumOverloadOP && ChkFunctionCallExpr(ctx, target, ce)) ||
+                (maybeVariadicFunction && result.isEmpty() && ChkVariadicCallExpr(impl.typeManager, impl.diag,
+                    Some(ctx), target, ce, candidates, diagnostics,
+                    { call7: CallExpr, arity4: Int64 => DesugarVariadicCallExpr(call7, arity4) },
+                    argChecker: Some({ expectedTy11: Ty, arg19: FuncArg => CheckCallArgFromContext(ctx, expectedTy11, arg19) }),
+                    declSynthesizer: Some({ fd6: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd6)) }),
+                    argSynthesizer: Some({ arg20: FuncArg => SynthesizeFuncArg(ctx, arg20) }),
+                    exprSynthesizer: Some({ child6: Expr => SynthesizeWithCache(ctx, SynPos.EXPR_ARG, child6) }),
+                    effectiveArgChecker: Some({ expectedTy12: Ty, arg21: FuncArg =>
+                        CheckWithEffectiveCache(ctx, expectedTy12, arg21, false)
+                    })))
+            if (ret) {
+                return true
+            }
+            if (mayRetryAsTypeCtor && RetryCallAsShadowedTypeConstruction(ctx, target, ce)) {
+                return true
+            }
+            if (mayRetryAsTypeCtor && !maybeEnumOrVariadic && !diagnostics.isEmpty()) {
+                if (let Some(diag) <- impl.diag) {
+                    for (diagnostic3 in diagnostics) {
+                        diag.Diagnose(diagnostic3).Emit()
+                    }
+                }
+            }
+            if (diagnostics.isEmpty()) {
+                DiagnoseForCall(impl.diag, candidates, result, ce, decl)
+            }
+            RecoverCallArgs(ctx, ce, argsTys)
+            if (impl.diag.getOrThrow().GetDiagnoseStatus()) {
+                PostProcessForLSP(ce, result)
+            } else if (!prevCheckTrue) {
+                ce.callKind = CallKind.CALL_INVALID
+            }
+            return false
+        }
+        return false
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:2278-2284 TypeCheckerImpl::SynCallExpr.
+    private func SynCallExpr(ctx: ASTContext, ce: CallExpr): Option<Ty> {
+        if (!ChkCallExpr(ctx, None, ce)) {
+            return Some(TypeManager.GetInvalidTy())
+        }
+        return ce.GetTy()
+    }
+
+    private func Check(ctx: ASTContext, target: Ty, typeNode: Type): Bool {
+        if (!Ty.IsTyCorrect(target)) {
+            typeNode.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
+        typeCheckExprPutTargetType(ctx, typeNode, target)
+        let checkRet = if (typeNode.TestAttr(Attribute.IS_BROKEN)) {
+            typeNode.SetTy(TypeManager.GetInvalidTy())
+            false
+        } else if (target.HasQuestTy() && !IsQuestableNode(typeNode)) {
+            false
+        } else {
+            let _ = SynthesizeNode(ctx, SynPos.NONE, typeNode)
+            let _ = ReplaceIdealTy(impl.typeManager, typeNode, diag: impl.diag)
+            impl.typeManager.IsSubtype(typeNode.GetTy().getOrThrow(), target)
+        }
+        typeCheckExprClearTargetType(ctx, typeNode)
+        typeNode.SetTy(impl.typeManager.TryGreedySubst(typeNode.GetTy().getOrThrow()))
+        return checkRet
     }
 
     private func ClearLambdaBodyForContextCheck(le: LambdaExpr): Unit {
@@ -3836,6 +4593,9 @@ public class TypeChecker {
             let _ = TcInvalid(le)
             return false
         }
+        CJC_ASSERT(!le.funcBody.getOrThrow().paramLists.isEmpty())
+        ClearInvalidTypeCheckCache(ctx, le, target)
+        ctx.lastTargetTypeMap[le] = target
         let targetTy = UnboxOptionType(target)
         if (let Some(targetFuncTy) <- (targetTy as FuncTy)) {
             try (ds = DiagSuppressor(impl.diag)) {
@@ -4652,6 +5412,1134 @@ public class TypeChecker {
         return ty
     }
 
+    private func SubstituteTypeForTypeAliasTypeMapping(tad: TypeAliasDecl, typeArgs: ArrayList<Ty>,
+        typeMapping: TypeSubst): Unit {
+        if (let None <- tad.generic) {
+            return
+        }
+        let typeParameters = tad.generic.getOrThrow().typeParameters
+        if (typeParameters.size != typeArgs.size) {
+            return
+        }
+        let aliasParamMapping = TypeSubst()
+        for (idx in 0..typeArgs.size) {
+            if (Ty.IsTyCorrect(typeParameters[idx].GetTy()) && Ty.IsTyCorrect(typeArgs[idx])) {
+                if (let Some(declGenParam) <- (typeParameters[idx].GetTy().getOrThrow() as GenericsTy)) {
+                    aliasParamMapping.Put(declGenParam, typeArgs[idx])
+                }
+            }
+        }
+        for (entry in typeMapping.entries) {
+            entry.ty = impl.typeManager.SubstituteTypeAliasInTy(entry.ty, needSubstituteGeneric: true,
+                typeMapping: aliasParamMapping)
+        }
+    }
+
+    private func GenerateTypeMappingForTypeAliasDecl(tad: TypeAliasDecl): TypeSubst {
+        return GenerateTypeMappingForTypeAliasDeclVisit(tad, HashSet<Decl>())
+    }
+
+    private func GenerateTypeMappingForTypeAliasDeclVisit(tad: TypeAliasDecl,
+        visited: HashSet<Decl>): TypeSubst {
+        let typeMapping = TypeSubst()
+        if (let None <- tad.typeNode) {
+            return typeMapping
+        }
+        if (visited.contains(tad)) {
+            return typeMapping
+        }
+        visited.add(tad)
+        let typeNode = tad.typeNode.getOrThrow()
+        if ((let None <- typeNode.GetTarget()) || !Ty.IsTyCorrect(typeNode.GetTy())) {
+            return typeMapping
+        }
+        let target = typeNode.GetTarget().getOrThrow()
+        if (target.astKind != ASTKind.TYPE_ALIAS_DECL) {
+            for (ty in typeNode.GetTy().getOrThrow().typeArgs) {
+                if (let Some(genericTy) <- (ty as GenericsTy)) {
+                    typeMapping.Put(genericTy, ty)
+                }
+            }
+            return typeMapping
+        }
+        let targetTad = (target as TypeAliasDecl).getOrThrow()
+        let nestedMapping = GenerateTypeMappingForTypeAliasDeclVisit(targetTad, visited)
+        let typeArgs = ArrayList<Ty>()
+        for (typeArg in typeNode.GetTypeArgs()) {
+            typeArgs.add(typeArg.GetTy() ?? TypeManager.GetInvalidTy())
+        }
+        SubstituteTypeForTypeAliasTypeMapping(targetTad, typeArgs, nestedMapping)
+        return nestedMapping
+    }
+
+    private func GenerateTypeMappingForTypeAliasUse(tad: TypeAliasDecl, usage: NameReferenceExpr): TypeSubst {
+        let typeMapping = TypeSubst()
+        if (let None <- tad.typeNode) {
+            return typeMapping
+        }
+        let typeArgs = ArrayList<Ty>()
+        for (typeArg in usage.GetTypeArgs()) {
+            typeArgs.add(typeArg.GetTy() ?? TypeManager.GetInvalidTy())
+        }
+        let target = tad.typeNode.getOrThrow().GetTarget()
+        if ((let None <- target) || target.getOrThrow().astKind != ASTKind.TYPE_ALIAS_DECL) {
+            return GenerateTypeMapping(tad, typeArgs)
+        }
+        let nestedMapping = GenerateTypeMappingForTypeAliasDecl(tad)
+        SubstituteTypeForTypeAliasTypeMapping(tad, typeArgs, nestedMapping)
+        let directMapping = GenerateTypeMapping(tad, typeArgs)
+        for (entry in directMapping.entries) {
+            nestedMapping.Put(entry.tyVar, entry.ty)
+        }
+        return nestedMapping
+    }
+
+    private func GetLastTypeAliasTarget(decl: TypeAliasDecl): TypeAliasDecl {
+        return GetLastTypeAliasTargetVisit(decl, HashSet<Decl>())
+    }
+
+    private func GetLastTypeAliasTargetVisit(decl: TypeAliasDecl, visited: HashSet<Decl>): TypeAliasDecl {
+        if (visited.contains(decl)) {
+            return decl
+        }
+        visited.add(decl)
+        if (let Some(typeNode) <- decl.typeNode) {
+            if (let Some(realTarget) <- typeNode.GetTarget()) {
+                if (let Some(innerAlias) <- (realTarget as TypeAliasDecl)) {
+                    if (innerAlias.typeNode.isSome()) {
+                        return GetLastTypeAliasTargetVisit(innerAlias, visited)
+                    }
+                }
+            }
+        }
+        return decl
+    }
+
+    private func SubstituteTypeArguments(typeArguments: ArrayList<Type>, sourceType: Type,
+        typeMapping: TypeSubst): Unit {
+        if (!typeArguments.isEmpty()) {
+            let file = typeArguments[0].curFile.getOrThrow()
+            for (typeArgument in typeArguments) {
+                file.trashBin.add(typeArgument)
+            }
+            typeArguments.clear()
+        }
+        for (sourceTypeArgument in sourceType.GetTypeArgs()) {
+            let newTypeArg = (ASTCloner.Clone(sourceTypeArgument) as Type).getOrThrow()
+            newTypeArg.SetTy(if (let Some(newTy) <- newTypeArg.GetTy()) {
+                impl.typeManager.SubstituteTypeAliasInTy(newTy, needSubstituteGeneric: true,
+                    typeMapping: typeMapping)
+            } else {
+                TypeManager.GetInvalidTy()
+            })
+            if (let Some(intersectionTy) <- (newTypeArg.GetTy().getOrThrow() as IntersectionTy)) {
+                if (intersectionTy.tys.isEmpty()) {
+                    continue
+                }
+            }
+            newTypeArg.EnableAttr(Attribute.COMPILER_ADD)
+            typeArguments.add(newTypeArg)
+        }
+    }
+
+    private func SubstituteTypeArguments(tad: TypeAliasDecl, typeArguments: ArrayList<Type>,
+        typeMapping: TypeSubst): Unit {
+        if (!typeArguments.isEmpty() && typeArguments[0].TestAttr(Attribute.COMPILER_ADD)) {
+            return
+        }
+        if (let Some(typeNode) <- tad.typeNode) {
+            if (let Some(refType) <- (typeNode as RefType)) {
+                SubstituteTypeArguments(typeArguments, refType, typeMapping)
+            }
+            if (let Some(qualifiedType) <- (typeNode as QualifiedType)) {
+                SubstituteTypeArguments(typeArguments, qualifiedType, typeMapping)
+            }
+        }
+    }
+
+
+    private func HandleAlias(expr: Expr, targets: ArrayList<Decl>): Unit {
+        var idx: Int64 = 0
+        while (idx < targets.size) {
+            if (let Some(aliasDecl) <- (targets[idx] as TypeAliasDecl)) {
+                if (aliasDecl.typeNode.isSome()) {
+                    let innerTypeAliasTarget = GetLastTypeAliasTarget(aliasDecl)
+                    if (let Some(innerType) <- innerTypeAliasTarget.typeNode) {
+                        if (let Some(realTarget) <- innerType.GetTarget()) {
+                            targets[idx] = realTarget
+                            if (let Some(reference) <- (expr as NameReferenceExpr)) {
+                                let wasEmpty = reference.typeArguments.isEmpty()
+                                let typeMapping = GenerateTypeMappingForTypeAliasUse(aliasDecl, reference)
+                                SubstituteTypeArguments(innerTypeAliasTarget, reference.typeArguments, typeMapping)
+                                let _ = UpdateInstTysWithTypeArgs(reference)
+                                if (wasEmpty && !reference.typeArguments.isEmpty()) {
+                                    reference.compilerAddedTyArgs = true
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            idx++
+        }
+    }
+
+    private func GetRealTarget(node: Expr, target: Option<Decl>): Option<Decl> {
+        if (let None <- target) {
+            return None
+        }
+        let targets = ArrayList<Decl>()
+        targets.add(target.getOrThrow())
+        HandleAlias(node, targets)
+        return Some(targets[0])
+    }
+
+    private func TryInitializeBaseSum(ctx: ASTContext, ma: MemberAccess): Unit {
+        let baseTy = ma.baseExpr.getOrThrow().GetTy().getOrThrow()
+        if (!baseTy.IsPlaceholder()) {
+            return
+        }
+        let typeVar = (baseTy as GenericsTy).getOrThrow()
+        let sum = impl.typeManager.constraints.GetOrCreate(typeVar).sum
+        if (sum.values.size != 1 || !sum.values[0].IsAny()) {
+            return
+        }
+        let signature = if (let Some(callExpr) <- (ma.callOrPattern as CallExpr)) {
+            MemSig(ma.field.Val(), false, UInt64(callExpr.args.size), UInt64(ma.typeArguments.size))
+        } else {
+            MemSig(ma.field.Val(), true, 0u64, 0u64)
+        }
+        TryEnforceCandidate(typeVar, ctx.Mem2Decls(signature), impl.typeManager)
+    }
+
+    private func LookupShadowedTopLevelTypeByName(ctx: ASTContext, name: String, scopeName: String,
+        node: Node): Option<Decl> {
+        if (scopeName.isEmpty() || name.isEmpty()) {
+            return None
+        }
+        let topLevel = impl.LookupTopLevel(ctx, name, scopeName, node)
+        var found: Option<Decl> = None
+        for (decl in topLevel) {
+            if (!decl.IsTypeDecl()) {
+                continue
+            }
+            if (!decl.IsStructOrClassDecl() && decl.astKind != ASTKind.ENUM_DECL) {
+                continue
+            }
+            if (let Some(foundDecl) <- found) {
+                if (!(foundDecl == decl)) {
+                    return None
+                }
+            }
+            found = Some(decl)
+        }
+        return found
+    }
+
+    private func LookupShadowedTopLevelType(ctx: ASTContext, base: RefExpr): Option<Decl> {
+        if (let None <- base.ref.target) {
+            return None
+        }
+        let target = base.ref.target.getOrThrow()
+        if (target.IsTypeDecl() || target.TestAttr(Attribute.GLOBAL)) {
+            return None
+        }
+        if (target.astKind != ASTKind.FUNC_DECL && target.astKind != ASTKind.PROP_DECL &&
+            target.astKind != ASTKind.VAR_DECL) {
+            return None
+        }
+        return LookupShadowedTopLevelTypeByName(ctx, base.ref.identifier.Val(), base.scopeName, base)
+    }
+
+    private func CheckExtendField(ctx: ASTContext, ma: MemberAccess): Unit {
+        ma.SetTy(TypeManager.GetInvalidTy())
+        let file = ma.curFile.getOrThrow()
+        let targets = impl.ExtendFieldLookup(ctx, file, ma.baseExpr.getOrThrow().GetTy(), ma.field.Val())
+        if (!TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(impl.diag.getOrThrow(), impl.typeManager,
+            ctx, ma, targets, importManager: impl.importManager)) {
+            return
+        }
+        let target = GetAccessibleDecl(impl.typeManager, ctx, ma, targets) ?? targets[0]
+        ReplaceTarget(ma, Some(target))
+        AddFuncTargetsForMemberAccess(ma, targets)
+    }
+
+    private func InferBuiltInStaticAccess(ctx: ASTContext, ma: MemberAccess, builtInDecl: BuiltInDecl): Unit {
+        if (builtInDecl.IsType(BuiltInType.ARRAY)) {
+            InferArrayStaticAccess(ctx, ma)
+        } else if (builtInDecl.IsType(BuiltInType.POINTER) || builtInDecl.IsType(BuiltInType.CSTRING)) {
+            CheckExtendField(ctx, ma)
+        }
+    }
+
+    private func InferArrayStaticAccess(ctx: ASTContext, ma: MemberAccess): Unit {
+        let baseExpr = ma.baseExpr.getOrThrow()
+        let typeArgs = baseExpr.GetTypeArgs()
+        if (typeArgs.isEmpty()) {
+            let builder = Diagnose(impl.diag.getOrThrow(), ma,
+                BasicDiagKind.sema_generic_type_without_type_argument)
+            builder.Emit()
+            ma.SetTy(TypeManager.GetInvalidTy())
+            return
+        }
+        baseExpr.SetTy(impl.typeManager.GetArrayTy(typeArgs[0].GetTy().getOrThrow(), 1u64))
+        let targets = impl.ExtendFieldLookup(ctx, ma.curFile.getOrThrow(), baseExpr.GetTy(), ma.field.Val())
+        if (!TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(impl.diag.getOrThrow(), impl.typeManager,
+            ctx, ma, targets, importManager: impl.importManager)) {
+            return
+        }
+        let target = GetAccessibleDecl(impl.typeManager, ctx, ma, targets) ?? targets[0]
+        ReplaceTarget(ma, Some(target))
+        AddFuncTargetsForMemberAccess(ma, targets)
+    }
+
+    private func GetUpperBoundTargets(ctx: ASTContext, ma: MemberAccess, baseExprTy: Ty,
+        isStaticAccess: Bool): ArrayList<Decl> {
+        let file = ma.curFile.getOrThrow()
+        let targets = if (let Some(classTy) <- (baseExprTy as ClassTy)) {
+            let decl: Decl = classTy.decl.getOrThrow()
+            impl.FieldLookup(ctx, Some(decl), ma.field.Val(),
+                info: LookupInfo(baseTy: Some(classTy), file: Some(file)))
+        } else if (let Some(interfaceTy) <- (baseExprTy as InterfaceTy)) {
+            let decl: Decl = interfaceTy.decl.getOrThrow()
+            impl.FieldLookup(ctx, Some(decl), ma.field.Val(),
+                info: LookupInfo(baseTy: Some(interfaceTy), file: Some(file)))
+        } else if (let Some(structTy) <- (baseExprTy as StructTy)) {
+            let decl: Decl = structTy.decl.getOrThrow()
+            impl.FieldLookup(ctx, Some(decl), ma.field.Val(), info: LookupInfo(file: Some(file)))
+        } else if (let Some(enumTy) <- (baseExprTy as EnumTy)) {
+            let decl: Decl = enumTy.decl.getOrThrow()
+            impl.FieldLookup(ctx, Some(decl), ma.field.Val(), info: LookupInfo(file: Some(file)))
+        } else {
+            impl.ExtendFieldLookup(ctx, file, Some(baseExprTy), ma.field.Val())
+        }
+        var idx: Int64 = 0
+        while (idx < targets.size) {
+            let remove = (!isStaticAccess && targets[idx].TestAttr(Attribute.STATIC)) ||
+                (isStaticAccess && !targets[idx].TestAttr(Attribute.STATIC))
+            if (remove) {
+                targets.remove(at: idx)
+            } else {
+                idx++
+            }
+        }
+        return targets
+    }
+
+    private func GetIdealTypeFuncTargetFromExtend(ctx: ASTContext, ma: MemberAccess,
+        baseExprTy: Ty): Option<Decl> {
+        let candidates = ArrayList<Decl>()
+        let targetTys = ArrayList<Ty>()
+        for (typeKind in GetIdealTypesByKind(baseExprTy.kind)) {
+            let primitiveTy = TypeManager.GetPrimitiveTy(typeKind)
+            for (target in impl.ExtendFieldLookup(ctx, ma.curFile.getOrThrow(), Some(primitiveTy), ma.field.Val())) {
+                if (!target.TestAttr(Attribute.STATIC)) {
+                    var found = false
+                    for (candidate in candidates) {
+                        if (candidate == target) {
+                            found = true
+                            break
+                        }
+                    }
+                    if (!found) {
+                        candidates.add(target)
+                    }
+                    targetTys.add(primitiveTy)
+                }
+            }
+        }
+        if (candidates.size > 1) {
+            let baseExpr = ma.baseExpr.getOrThrow()
+            let _ = ReplaceIdealTy(impl.typeManager, baseExpr, diag: impl.diag)
+            if (let Some(literalExpr) <- (baseExpr as LitConstExpr)) {
+                InitializeLitConstValue(literalExpr)
+            }
+            var target: Option<Decl> = None
+            try (diagSuppressor = DiagSuppressor(impl.diag)) {
+                target = GetObjMemberAccessTarget(ctx, ma, baseExpr.GetTy().getOrThrow())
+            }
+            if (Ty.IsTyCorrect(baseExpr.GetTy()) && target.isNone()) {
+                let typeStrings = ArrayList<String>()
+                for (ty in targetTys) {
+                    typeStrings.add(ty.String())
+                }
+                let builder = DiagnoseRefactor(impl.diag.getOrThrow(),
+                    BasicDiagKindRefactor.sema_ambiguous_match_primitive_extend, ma,
+                    MakeRange(ma.field.Begin(), ma.field.End()),
+                    arguments: [ma.field.Val(), JoinStrings(typeStrings, " ")])
+                builder.Emit()
+            }
+            return target
+        } else if (candidates.size == 1) {
+            ma.baseExpr.getOrThrow().SetTy(targetTys[targetTys.size - 1])
+            ReplaceTarget(ma, Some(candidates[0]))
+            if (candidates[0].astKind == ASTKind.FUNC_DECL) {
+                ma.targets.add(Some((candidates[0] as FuncDecl).getOrThrow()))
+            }
+            return Some(candidates[0])
+        }
+        TypeCheckReferenceDiagMemberAccessNotFound(impl.diag.getOrThrow(), impl.typeManager, ma, impl.importManager)
+        return None
+    }
+
+    private func GetObjMemberAccessTarget(ctx: ASTContext, ma: MemberAccess, baseExprTy: Ty): Option<Decl> {
+        let baseRef = ma.baseExpr.getOrThrow() as RefExpr
+        let outerDecl = typeCheckExprGetCurInheritableDecl(ctx, ma.scopeName, currentFuncBody)
+        let searchExtend = baseRef.isNone() || !baseRef.getOrThrow().isThis || outerDecl.isNone() ||
+            outerDecl.getOrThrow().astKind == ASTKind.EXTEND_DECL
+        let file = ma.curFile.getOrThrow()
+        if (let Some(classTy) <- (baseExprTy as ClassTy)) {
+            let info = LookupInfo(baseTy: Some(classTy), file: Some(file), lookupInherit: true,
+                lookupExtend: searchExtend, isSetter: ma.TestAttr(Attribute.LEFT_VALUE))
+            let decl: Decl = classTy.declPtr.getOrThrow()
+            let targets = impl.FieldLookup(ctx, Some(decl), ma.field.Val(), info: info)
+            return TypeCheckReferenceFilterAndGetTargetsOfObjAccess(impl.diag.getOrThrow(), impl.typeManager,
+                ctx, ma, targets, importManager: impl.importManager)
+        }
+        if (let Some(interfaceTy) <- (baseExprTy as InterfaceTy)) {
+            let decl: Decl = interfaceTy.declPtr.getOrThrow()
+            let targets = impl.FieldLookup(ctx, Some(decl), ma.field.Val(),
+                info: LookupInfo(baseTy: Some(interfaceTy), file: Some(file)))
+            return TypeCheckReferenceFilterAndGetTargetsOfObjAccess(impl.diag.getOrThrow(), impl.typeManager,
+                ctx, ma, targets, importManager: impl.importManager)
+        }
+        if (let Some(structTy) <- (baseExprTy as StructTy)) {
+            let decl: Decl = structTy.declPtr.getOrThrow()
+            let targets = impl.FieldLookup(ctx, Some(decl), ma.field.Val(),
+                info: LookupInfo(file: Some(file), lookupExtend: searchExtend))
+            return TypeCheckReferenceFilterAndGetTargetsOfObjAccess(impl.diag.getOrThrow(), impl.typeManager,
+                ctx, ma, targets, importManager: impl.importManager)
+        }
+        if (let Some(enumTy) <- (baseExprTy as EnumTy)) {
+            let decl: Decl = enumTy.declPtr.getOrThrow()
+            let targets = impl.FieldLookup(ctx, Some(decl), ma.field.Val(),
+                info: LookupInfo(file: Some(file), lookupExtend: searchExtend))
+            return TypeCheckReferenceFilterAndGetTargetsOfObjAccess(impl.diag.getOrThrow(), impl.typeManager,
+                ctx, ma, targets, importManager: impl.importManager)
+        }
+        if (let Some(arrayTy) <- (baseExprTy as ArrayTy)) {
+            let targets = impl.ExtendFieldLookup(ctx, file, Some(arrayTy), ma.field.Val())
+            return TypeCheckReferenceFilterAndGetTargetsOfObjAccess(impl.diag.getOrThrow(), impl.typeManager,
+                ctx, ma, targets, importManager: impl.importManager)
+        }
+        if (let Some(varrayTy) <- (baseExprTy as VArrayTy)) {
+            if (ma.field.Val() == "size") {
+                ma.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
+                let literalExpr = CreateLitConstExpr(LitConstKind.INTEGER, varrayTy.size.toString(),
+                    ma.GetTy().getOrThrow())
+                ma.desugarExpr = literalExpr
+                literalExpr.SetTy(ma.GetTy().getOrThrow())
+            } else {
+                TypeCheckReferenceDiagMemberAccessNotFound(
+                    impl.diag.getOrThrow(), impl.typeManager, ma, impl.importManager)
+            }
+            return None
+        }
+        if (let Some(pointerTy) <- (baseExprTy as PointerTy)) {
+            let targets = impl.ExtendFieldLookup(ctx, file, Some(pointerTy), ma.field.Val())
+            return TypeCheckReferenceFilterAndGetTargetsOfObjAccess(impl.diag.getOrThrow(), impl.typeManager,
+                ctx, ma, targets, importManager: impl.importManager)
+        }
+        if (let Some(genericsTy) <- (baseExprTy as GenericsTy)) {
+            if (genericsTy.isPlaceholder) {
+                let maybeSolution = impl.typeManager.TryGreedySubst(genericsTy)
+                if (!maybeSolution.IsPlaceholder()) {
+                    ma.baseExpr.getOrThrow().SetTy(maybeSolution)
+                    return GetObjMemberAccessTarget(ctx, ma, maybeSolution)
+                }
+                let constraint = impl.typeManager.constraints.GetOrCreate(genericsTy)
+                genericsTy.upperBounds.clear()
+                for (upperBound in constraint.ubs.values) {
+                    genericsTy.upperBounds.add(upperBound)
+                }
+                for (sumTy in constraint.sum.values) {
+                    var found = false
+                    for (upperBound in genericsTy.upperBounds) {
+                        if (upperBound == sumTy) {
+                            found = true
+                            break
+                        }
+                    }
+                    if (!found) {
+                        genericsTy.upperBounds.add(sumTy)
+                    }
+                }
+            }
+            return GetMemberAccessExposedTarget(ctx, ma, genericsTy, false)
+        }
+        if (baseExprTy.IsIdeal()) {
+            return GetIdealTypeFuncTargetFromExtend(ctx, ma, baseExprTy)
+        }
+        let targets = impl.ExtendFieldLookup(ctx, file, Some(baseExprTy), ma.field.Val())
+        return TypeCheckReferenceFilterAndGetTargetsOfObjAccess(impl.diag.getOrThrow(), impl.typeManager,
+            ctx, ma, targets, importManager: impl.importManager)
+    }
+
+    private func CheckUpperBoundTargetsCaseFuncCall(ctx: ASTContext, ma: MemberAccess,
+        allTargets: ArrayList<(Ty, ArrayList<Decl>)>): Option<Decl> {
+        ma.targets.clear()
+        ma.foundUpperBoundMap.clear()
+        let funcKinds = ArrayList<ASTKind>()
+        funcKinds.add(ASTKind.FUNC_DECL)
+        for (entry in GetUpperBoundTargetsWithGivenKind(allTargets, funcKinds)) {
+            ma.foundUpperBoundMap.add(entry)
+        }
+        let functionTargets = if (ma.baseExpr.getOrThrow().GetTy().getOrThrow().IsPlaceholder()) {
+            MergeFuncTargetsInSum(impl.typeManager, ma)
+        } else {
+            MergeFuncTargetsInUpperBounds(impl.typeManager, ma)
+        }
+        sort(functionTargets, by: { left: Decl, right: Decl =>
+            if (CompNodeByPos(left, right)) { Ordering.LT } else if (CompNodeByPos(right, left)) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        })
+        if (let Some(target) <- ma.baseExpr.getOrThrow().GetTarget()) {
+            if (target.astKind == ASTKind.GENERIC_PARAM_DECL) {
+                let _ = TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(impl.diag.getOrThrow(), impl.typeManager,
+                    ctx, ma, functionTargets, importManager: impl.importManager)
+            } else {
+                let _ = TypeCheckReferenceFilterAndGetTargetsOfObjAccess(impl.diag.getOrThrow(), impl.typeManager,
+                    ctx, ma, functionTargets, importManager: impl.importManager)
+            }
+        } else {
+            let _ = TypeCheckReferenceFilterAndGetTargetsOfObjAccess(impl.diag.getOrThrow(), impl.typeManager,
+                ctx, ma, functionTargets, importManager: impl.importManager)
+        }
+        if (functionTargets.isEmpty()) {
+            return None
+        }
+        for (target in functionTargets) {
+            ma.targets.add(Some((target as FuncDecl).getOrThrow()))
+        }
+        for ((target, upperBounds) in ma.foundUpperBoundMap) {
+            if (target == functionTargets[0]) {
+                ma.matchedParentTy = Some(upperBounds[0])
+                break
+            }
+        }
+        return Some(functionTargets[0])
+    }
+
+    private func FilterSumUpperbound(ctx: ASTContext, ma: MemberAccess, typeVar: GenericsTy,
+        targets: ArrayList<Decl>, allTargets: ArrayList<(Ty, ArrayList<Decl>)>): Unit {
+        var targetTy = ctx.targetTypeMap.get(ma)
+        if (let Some(target) <- targetTy) {
+            if (target.HasQuestTy()) {
+                targetTy = None
+            }
+        }
+        if (let Some(expectedTy) <- targetTy) {
+            let declToUpperBound = ArrayList<(Decl, Ty)>()
+            for ((upperBound, decls) in allTargets) {
+                for (decl in decls) {
+                    declToUpperBound.add((decl, upperBound))
+                }
+            }
+            let filteredTargets = ArrayList<Decl>()
+            var validTy: Option<Ty> = None
+            for (decl in targets) {
+                var upperBound: Option<Ty> = None
+                for ((mappedDecl, mappedUpperBound) in declToUpperBound) {
+                    if (mappedDecl == decl) {
+                        upperBound = Some(mappedUpperBound)
+                        break
+                    }
+                }
+                var isUnfilteredUpperBound = false
+                if (let None <- decl.outerDecl) {
+                    isUnfilteredUpperBound = true
+                } else {
+                    for (constraintUpperBound in impl.typeManager.constraints.GetOrCreate(typeVar).ubs.values) {
+                        if (constraintUpperBound == upperBound.getOrThrow()) {
+                            isUnfilteredUpperBound = true
+                            break
+                        }
+                    }
+                }
+                if (isUnfilteredUpperBound) {
+                    filteredTargets.add(decl)
+                    continue
+                }
+                let instCtx = InstCtxScope(impl.typeManager)
+                instCtx.SetRefDecl(decl.outerDecl.getOrThrow(), upperBound.getOrThrow())
+                let instantiatedTy = impl.typeManager.InstOf(decl.GetTy().getOrThrow())
+                if (impl.typeManager.IsSubtype(instantiatedTy, expectedTy)) {
+                    if (let Some(previousTy) <- validTy) {
+                        if (!(instantiatedTy == previousTy)) {
+                            instCtx.Close()
+                            return
+                        }
+                    }
+                    filteredTargets.add(decl)
+                    validTy = Some(instantiatedTy)
+                }
+                instCtx.Close()
+            }
+            targets.clear()
+            for (target in filteredTargets) {
+                targets.add(target)
+            }
+        }
+        if (targets.size == 1 && !FilterSumUpperbound(ma, typeVar, targets[0])) {
+            ma.SetTy(TypeManager.GetInvalidTy())
+            DiagMismatchedTypesWithFoundTy(impl.diag.getOrThrow(), ma,
+                targetTy.getOrThrow(), ma.GetTy().getOrThrow())
+        }
+    }
+
+    private func FilterSumUpperbound(ma: MemberAccess, typeVar: GenericsTy, decl: Decl): Bool {
+        let constraint = impl.typeManager.constraints.GetOrCreate(typeVar)
+        let sum = constraint.sum
+        var idx: Int64 = 0
+        while (idx < sum.values.size) {
+            let sumTy = sum.values[idx]
+            var hasMemberOfTargetSignature = false
+            for ((foundDecl, upperBounds) in ma.foundUpperBoundMap) {
+                var containsUpperBound = false
+                for (upperBound in upperBounds) {
+                    if (upperBound == sumTy) {
+                        containsUpperBound = true
+                        break
+                    }
+                }
+                if (containsUpperBound && impl.typeManager.IsTyEqual(decl.GetTy().getOrThrow(),
+                    foundDecl.GetTy().getOrThrow())) {
+                    hasMemberOfTargetSignature = true
+                    break
+                }
+            }
+            if (!hasMemberOfTargetSignature) {
+                let _ = sum.Remove(sumTy)
+            } else {
+                idx++
+            }
+        }
+        if (sum.values.size == 1 && !sum.values[0].IsAny()) {
+            let equalTy = sum.values[0]
+            if (constraint.eq.values.isEmpty()) {
+                let _ = constraint.eq.Add(equalTy)
+            }
+            if (!impl.typeManager.IsTyEqual(typeVar, equalTy)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func CheckUpperBoundTargetsCaseOthers(ctx: ASTContext, ma: MemberAccess,
+        allTargets: ArrayList<(Ty, ArrayList<Decl>)>): Option<Decl> {
+        ma.foundUpperBoundMap.clear()
+        let otherKinds = ArrayList<ASTKind>()
+        otherKinds.add(ASTKind.VAR_DECL)
+        otherKinds.add(ASTKind.PROP_DECL)
+        for (entry in GetUpperBoundTargetsWithGivenKind(allTargets, otherKinds)) {
+            ma.foundUpperBoundMap.add(entry)
+        }
+        let upperDecls = ArrayList<Decl>()
+        for ((decl, _) in ma.foundUpperBoundMap) {
+            upperDecls.add(decl)
+        }
+        sort(upperDecls, by: { left: Decl, right: Decl =>
+            if (CompNodeByPos(left, right)) { Ordering.LT } else if (CompNodeByPos(right, left)) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        })
+        let tempTargets = ArrayList<Decl>()
+        for (decl in upperDecls) {
+            var found: Option<Int64> = None
+            for (idx in 0..tempTargets.size) {
+                if (impl.typeManager.IsTyEqual(tempTargets[idx].GetTy().getOrThrow(), decl.GetTy().getOrThrow())) {
+                    found = Some(idx)
+                    break
+                }
+            }
+            if (let Some(foundIdx) <- found) {
+                if (IsCloserToImpl(tempTargets[foundIdx], decl)) {
+                    tempTargets[foundIdx] = decl
+                }
+            } else {
+                tempTargets.add(decl)
+            }
+        }
+        if (let Some(typeVar) <- (ma.baseExpr.getOrThrow().GetTy().getOrThrow() as GenericsTy)) {
+            if (typeVar.isPlaceholder) {
+                FilterSumUpperbound(ctx, ma, typeVar, tempTargets, allTargets)
+            }
+        }
+        if (tempTargets.isEmpty()) {
+            let builder = Diagnose(impl.diag.getOrThrow(), ma, ma.field.Begin(),
+                BasicDiagKind.sema_generic_no_member_match_in_upper_bounds)
+            builder.Emit()
+            return None
+        }
+        if (tempTargets.size == 1) {
+            for ((decl, upperBounds) in ma.foundUpperBoundMap) {
+                if (decl == tempTargets[0]) {
+                    ma.matchedParentTy = Some(upperBounds[0])
+                    return Some(tempTargets[0])
+                }
+            }
+        }
+        let candidates = ArrayList<Decl>()
+        for (target in tempTargets) {
+            candidates.add(target)
+        }
+        sort(candidates, by: { left: Decl, right: Decl =>
+            if (CompNodeByPos(left, right)) { Ordering.LT } else if (CompNodeByPos(right, left)) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        })
+        DiagAmbiguousUpperBoundTargets(impl.diag.getOrThrow(), ma, candidates)
+        return None
+    }
+
+    private func GetMemberAccessExposedTarget(ctx: ASTContext, ma: MemberAccess, genericsTy: GenericsTy,
+        isStaticAccess: Bool): Option<Decl> {
+        ma.isExposedAccess = true
+        if (!genericsTy.isUpperBoundLegal) {
+            return None
+        }
+        let allTargets = ArrayList<(Ty, ArrayList<Decl>)>()
+        for (upperBound in genericsTy.upperBounds) {
+            if (!Ty.IsTyCorrect(upperBound)) {
+                continue
+            }
+            let targets = GetUpperBoundTargets(ctx, ma, upperBound, isStaticAccess)
+            if (!targets.isEmpty()) {
+                allTargets.add((upperBound, targets))
+            }
+        }
+        if (allTargets.isEmpty()) {
+            if (isStaticAccess) {
+                DiagForGenericParamMemberNotFound(impl.diag.getOrThrow(), ma, genericsTy.decl.getOrThrow())
+            } else {
+                TypeCheckReferenceDiagMemberAccessNotFound(
+                    impl.diag.getOrThrow(), impl.typeManager, ma, impl.importManager)
+            }
+            return None
+        }
+        let kind = GetTargetsSameASTKind(allTargets)
+        if (kind == ASTKind.INVALID_DECL) {
+            let candidates = ArrayList<Decl>()
+            for ((_, targets) in allTargets) {
+                for (target in targets) {
+                    var found = false
+                    for (candidate in candidates) {
+                        if (candidate == target) {
+                            found = true
+                            break
+                        }
+                    }
+                    if (!found) {
+                        candidates.add(target)
+                    }
+                }
+            }
+            sort(candidates, by: { left: Decl, right: Decl =>
+                if (CompNodeByPos(left, right)) { Ordering.LT } else if (CompNodeByPos(right, left)) {
+                    Ordering.GT
+                } else {
+                    Ordering.EQ
+                }
+            })
+            DiagAmbiguousUpperBoundTargets(impl.diag.getOrThrow(), ma, candidates)
+            return None
+        }
+        return if (kind == ASTKind.FUNC_DECL) {
+            CheckUpperBoundTargetsCaseFuncCall(ctx, ma, allTargets)
+        } else {
+            CheckUpperBoundTargetsCaseOthers(ctx, ma, allTargets)
+        }
+    }
+
+    private func DiagPackageMemberNotFound(ma: MemberAccess, packageDecl: PackageDecl): Unit {
+        let memberRange = if (ma.field.ZeroPos()) { MakeRange(ma.begin, ma.end) } else {
+            MakeRange(ma.field.Begin(), ma.field.End())
+        }
+        let decls = impl.importManager.getOrThrow().GetPackageMembersByName(
+            packageDecl.srcPackage, ma.field.Val())
+        let builder = if (decls.isEmpty()) {
+            DiagnoseRefactor(impl.diag.getOrThrow(), BasicDiagKindRefactor.sema_not_member_of, ma, memberRange,
+                arguments: [ma.field.Val(), "package", packageDecl.identifier.Val()])
+        } else {
+            DiagnoseRefactor(impl.diag.getOrThrow(), BasicDiagKindRefactor.sema_member_not_imported, ma, memberRange,
+                arguments: [packageDecl.identifier.Val() + "." + ma.field.Val()])
+        }
+        builder.Emit()
+    }
+
+    private func InferStaticAccess(ctx: ASTContext, ma: MemberAccess, targetOfBaseExpr: Decl): Unit {
+        ma.SetTy(TypeManager.GetInvalidTy())
+        let targets = ArrayList<Decl>()
+        let baseExpr = ma.baseExpr.getOrThrow()
+        if (targetOfBaseExpr.astKind != ASTKind.GENERIC_PARAM_DECL) {
+            for (target in impl.FieldLookup(ctx, Some(targetOfBaseExpr), ma.field.Val(),
+                info: LookupInfo(baseTy: baseExpr.GetTy(), file: ma.curFile, lookupInherit: true,
+                    lookupExtend: true, isSetter: ma.TestAttr(Attribute.LEFT_VALUE)))) {
+                targets.add(target)
+            }
+            var hasRemovedMacros = !targets.isEmpty()
+            let isCustomAnnotation = if (let Some(callExpr) <- (ma.callOrPattern as CallExpr)) {
+                callExpr.callKind == CallKind.CALL_ANNOTATION
+            } else {
+                false
+            }
+            if (!isCustomAnnotation && targetOfBaseExpr.astKind == ASTKind.PACKAGE_DECL &&
+                !ma.TestAttr(Attribute.MACRO_INVOKE_BODY)) {
+                var idx: Int64 = 0
+                while (idx < targets.size) {
+                    if (targets[idx].TestAttr(Attribute.MACRO_FUNC)) {
+                        targets.remove(at: idx)
+                    } else {
+                        idx++
+                    }
+                }
+                if (!targets.isEmpty()) {
+                    hasRemovedMacros = false
+                }
+            }
+            if (targets.isEmpty()) {
+                if (targetOfBaseExpr.astKind == ASTKind.PACKAGE_DECL) {
+                    if (hasRemovedMacros) {
+                        let memberRange = MakeRange(ma.field.Begin(), ma.field.End())
+                        let builder = impl.diag.getOrThrow().DiagnoseRefactor(
+                            BasicDiagKindRefactor.sema_undeclared_identifier, memberRange,
+                            arguments: [ma.field.Val()])
+                        builder.Emit()
+                    } else {
+                        DiagPackageMemberNotFound(ma, (targetOfBaseExpr as PackageDecl).getOrThrow())
+                    }
+                } else {
+                    TypeCheckReferenceDiagMemberAccessNotFound(
+                        impl.diag.getOrThrow(), impl.typeManager, ma, impl.importManager)
+                }
+                return
+            }
+            if (!TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(impl.diag.getOrThrow(), impl.typeManager,
+                ctx, ma, targets, importManager: impl.importManager)) {
+                return
+            }
+            let target = GetAccessibleDecl(impl.typeManager, ctx, ma, targets) ?? targets[0]
+            ReplaceTarget(ma, Some(target))
+            AddFuncTargetsForMemberAccess(ma, targets)
+            return
+        }
+        if (let None <- (baseExpr.GetTy().getOrThrow() as GenericsTy)) {
+            return
+        }
+        let genericTy = (baseExpr.GetTy().getOrThrow() as GenericsTy).getOrThrow()
+        let target = GetMemberAccessExposedTarget(ctx, ma, genericTy, true)
+        if (let None <- target) {
+            return
+        }
+        ReplaceTarget(ma, target)
+        let selected = target.getOrThrow()
+        if (selected.astKind == ASTKind.FUNC_DECL) {
+            for (functionTarget in ma.targets) {
+                if (let Some(value) <- functionTarget) {
+                    targets.add(value)
+                }
+            }
+        }
+        if (selected.astKind == ASTKind.VAR_DECL || selected.astKind == ASTKind.PROP_DECL) {
+            targets.add(selected)
+        }
+    }
+
+    private func InferInstanceAccess(ctx: ASTContext, ma: MemberAccess): Unit {
+        if (let None <- ma.baseExpr) {
+            return
+        }
+        let baseExpr = ma.baseExpr.getOrThrow()
+        if (Ty.IsInitialTy(baseExpr.GetTy())) {
+            return
+        }
+        ma.SetTy(TypeManager.GetInvalidTy())
+        let target = GetObjMemberAccessTarget(ctx, ma, baseExpr.GetTy().getOrThrow())
+        if (let None <- target) {
+            return
+        }
+        ReplaceTarget(ma, target)
+    }
+
+    private func NeedSynOnUsed(target: Decl): Bool {
+        if (target.IsTypeDecl() || target.astKind == ASTKind.FUNC_PARAM) {
+            return false
+        }
+        if (!Ty.IsTyCorrect(target.GetTy())) {
+            return true
+        }
+        return target.GetTy().getOrThrow().HasQuestTy()
+    }
+
+    private func SynTargetOnUsed(ctx: ASTContext, nameReference: NameReferenceExpr, target: Decl): Bool {
+        if (NeedSynOnUsed(target)) {
+            var declToSynthesize = target
+            if (let Some(varDecl) <- (target as VarDecl)) {
+                let outerVarDecl = ctx.GetOuterVarDeclAbstract(varDecl)
+                declToSynthesize = if (outerVarDecl.TestAttr(Attribute.GLOBAL)) { outerVarDecl } else { varDecl }
+            }
+            let targetTy = SynthesizeDecl(ctx, declToSynthesize)
+            if (let Some(funcDecl) <- (declToSynthesize as FuncDecl)) {
+                if (targetTy.HasQuestTy()) {
+                    DiagUnableToInferReturnType(impl.diag.getOrThrow(), funcDecl, nameReference)
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    private func GetDeclOfThisType(ctx: ASTContext, expr: Expr): Option<Decl> {
+        if (let Some(memberAccess) <- (expr as MemberAccess)) {
+            if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                if (let Some(classTy) <- (baseExpr.GetTy().getOrThrow() as ClassTy)) {
+                    if (let Some(classDecl) <- classTy.declPtr) {
+                        let decl: Decl = classDecl
+                        return Some(decl)
+                    }
+                }
+            }
+            return None
+        }
+        if (let Some(refExpr) <- (expr as RefExpr)) {
+            if (let Some(varDecl) <- (refExpr.GetTarget() as VarDecl)) {
+                if (let Some(initializer) <- varDecl.initializer) {
+                    if (let Some(memberInitializer) <- (initializer as MemberAccess)) {
+                        if (let Some(initializerBase) <- memberInitializer.baseExpr) {
+                            if (let Some(baseTarget) <- initializerBase.GetTarget()) {
+                                if (let Some(classTy) <- (baseTarget.GetTy().getOrThrow() as ClassTy)) {
+                                    if (let Some(classDecl) <- classTy.declPtr) {
+                                        let decl: Decl = classDecl
+                                        return Some(decl)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (let Some(outMostFunc) <- ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC,
+                expr.scopeName)) {
+                if (let Some(funcDecl) <- (outMostFunc.node.getOrThrow() as FuncDecl)) {
+                    if (let Some(funcBody) <- funcDecl.funcBody) {
+                        if (let Some(classLikeDecl) <- funcBody.parentClassLike) {
+                            let decl: Decl = classLikeDecl
+                            return Some(decl)
+                        }
+                    }
+                }
+            }
+        }
+        return None
+    }
+
+    private func DynamicBindingThisType(ctx: ASTContext, baseExpr: Expr, funcDecl: FuncDecl,
+        typeMapping: SubstPack): Option<Ty> {
+        if (!IsFuncReturnThisType(funcDecl)) {
+            return None
+        }
+        let rawFuncTy = if (Ty.IsTyCorrect(baseExpr.GetTy()) && baseExpr.GetTy().getOrThrow().IsFunc()) {
+            baseExpr.GetTy().getOrThrow()
+        } else {
+            funcDecl.GetTy().getOrThrow()
+        }
+        if (let None <- (rawFuncTy as FuncTy)) {
+            return None
+        }
+        let funcTy = (rawFuncTy as FuncTy).getOrThrow()
+        if (let Some(classDecl) <- (GetDeclOfThisType(ctx, baseExpr) as ClassDecl)) {
+            if (Ty.IsTyCorrect(classDecl.GetTy())) {
+                let thisTy = impl.typeManager.ApplySubstPack(
+                    impl.typeManager.GetClassThisTy(classDecl, classDecl.GetTy().getOrThrow().typeArgs.toArray()),
+                    typeMapping)
+                baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), thisTy))
+                return Some(thisTy)
+            }
+        } else if (let Some(memberAccess) <- (baseExpr as MemberAccess)) {
+            if (let Some(memberBase) <- memberAccess.baseExpr) {
+                if (let Some(genericTy) <- (memberBase.GetTy().getOrThrow() as GenericsTy)) {
+                    baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), genericTy))
+                    return Some(genericTy)
+                }
+            }
+        }
+        return None
+    }
+
+    private func InstantiateReferenceType(ctx: ASTContext, expr: NameReferenceExpr,
+        instantiateMap!: TypeSubst = TypeSubst()): Unit {
+        if (expr.compilerAddedTyArgs) {
+            expr.typeArguments.clear()
+        }
+        let target = expr.GetTarget()
+        if (!expr.GetTypeArgs().isEmpty()) {
+            if (let Some(targetDecl) <- target) {
+                if (targetDecl.astKind != ASTKind.TYPE_ALIAS_DECL) {
+                    let _ = UpdateInstTysWithTypeArgs(expr)
+                }
+            }
+            impl.CheckGenericExpr(expr)
+        }
+        let typeMapping = SubstPack()
+        if (instantiateMap.IsEmpty()) {
+            typeMapping.Merge(impl.GenerateGenericTypeMapping(ctx, expr))
+            let tys = impl.typeManager.ApplySubstPackNonUniq(expr.GetTy().getOrThrow(), typeMapping,
+                ignoreUnsolved: true)
+            let cannotInfer = tys.values.size != 1 && target.isSome() &&
+                target.getOrThrow().astKind == ASTKind.FUNC_DECL && !ctx.HasTargetTy(expr)
+            if (cannotInfer) {
+                let builder = Diagnose(impl.diag.getOrThrow(), expr, BasicDiagKind.sema_ambiguous_func_ref,
+                    args: [BasicDiagArgument(target.getOrThrow().identifier.Val())])
+                builder.Emit()
+            }
+            expr.SetTy(tys.values[0])
+        } else {
+            impl.typeManager.PackMapping(typeMapping, instantiateMap)
+            expr.SetTy(impl.typeManager.GetInstantiatedTy(expr.GetTy().getOrThrow(), instantiateMap))
+        }
+        if (!Ty.IsTyCorrect(expr.GetTy())) {
+            expr.SetTy(TypeManager.GetInvalidTy())
+        } else if (let Some(funcDecl) <- (target as FuncDecl)) {
+            let _ = DynamicBindingThisType(ctx, expr, funcDecl, typeMapping)
+        }
+    }
+
+    private func GetBaseDeclInMemberAccess(ctx: ASTContext, ma: MemberAccess): Option<Decl> {
+        if (let None <- ma.baseExpr) {
+            return None
+        }
+        let baseExpr = ma.baseExpr.getOrThrow()
+        let _ = SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, baseExpr)
+        return GetRealTarget(baseExpr, baseExpr.GetTarget())
+    }
+
+    private func IsAllFuncDecl(results: ArrayList<Option<FuncDecl>>): Bool {
+        for (target in results) {
+            if (let Some(value) <- target) {
+                if (value.astKind != ASTKind.FUNC_DECL && value.astKind != ASTKind.MACRO_DECL) {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    private func IsAllFuncDecl(results: ArrayList<Option<Decl>>): Bool {
+        for (target in results) {
+            if (let Some(value) <- target) {
+                if (value.astKind != ASTKind.FUNC_DECL && value.astKind != ASTKind.MACRO_DECL) {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    private func InferMemberAccess(ctx: ASTContext, ma: MemberAccess): Unit {
+        if (ma.target.isSome() && Ty.IsTyCorrect(ma.GetTy())) {
+            return
+        }
+        var isWellTyped = true
+        for (typeArgument in ma.typeArguments) {
+            isWellTyped = Ty.IsTyCorrect(GetTyFromASTType(impl.typeManager, ctx, typeArgument)) && isWellTyped
+        }
+        if (ma.baseExpr.isNone() || !isWellTyped) {
+            ma.SetTy(TypeManager.GetInvalidTy())
+            return
+        }
+        let baseExpr = ma.baseExpr.getOrThrow()
+        SetIsNotAlone(baseExpr)
+        let targetOfBase = GetBaseDeclInMemberAccess(ctx, ma)
+        TryInitializeBaseSum(ctx, ma)
+        let isPrimitiveTypeAlias = if (let Some(baseTarget) <- targetOfBase) {
+            baseTarget.astKind == ASTKind.TYPE_ALIAS_DECL && baseExpr.GetTy().isSome() &&
+                baseExpr.GetTy().getOrThrow().IsPrimitive()
+        } else {
+            false
+        }
+        let isStaticAccessByName = if (let Some(baseTarget) <- targetOfBase) {
+            !IsThisOrSuper(baseExpr) &&
+                (baseTarget.IsTypeDecl() || baseTarget.astKind == ASTKind.PACKAGE_DECL)
+        } else {
+            false
+        }
+        let isBuiltInStaticAccess = if (let Some(baseTarget) <- targetOfBase) {
+            baseTarget.IsBuiltIn()
+        } else {
+            false
+        }
+        let isPartialPackagePath = targetOfBase.isNone() && Ty.IsInitialTy(baseExpr.GetTy()) &&
+            (ma.isAlone || ma.callOrPattern.isSome())
+        if (isBuiltInStaticAccess) {
+            InferBuiltInStaticAccess(ctx, ma, (targetOfBase.getOrThrow() as BuiltInDecl).getOrThrow())
+        } else if (baseExpr.astKind == ASTKind.PRIMITIVE_TYPE_EXPR || isPrimitiveTypeAlias) {
+            CheckExtendField(ctx, ma)
+        } else if (isStaticAccessByName) {
+            InferStaticAccess(ctx, ma, targetOfBase.getOrThrow())
+        } else if (isPartialPackagePath) {
+            let memberRange = if (ma.field.ZeroPos()) { MakeRange(ma.begin, ma.end) } else {
+                MakeRange(ma.field.Begin(), ma.field.End())
+            }
+            let builder = DiagnoseRefactor(impl.diag.getOrThrow(),
+                BasicDiagKindRefactor.sema_undeclared_identifier, ma, memberRange, arguments: [ma.field.Val()])
+            builder.Emit()
+        } else {
+            var shadowedType: Option<Decl> = None
+            try (diagSuppressor = DiagSuppressor(impl.diag)) {
+                InferInstanceAccess(ctx, ma)
+                if (ma.target.isNone() && ma.targets.isEmpty()) {
+                    if (let Some(baseRef) <- (baseExpr as RefExpr)) {
+                        if (let Some(typeDecl) <- LookupShadowedTopLevelType(ctx, baseRef)) {
+                            if (Ty.IsTyCorrect(typeDecl.GetTy())) {
+                                shadowedType = Some(typeDecl)
+                            }
+                        }
+                    }
+                }
+                if (shadowedType.isNone()) {
+                    diagSuppressor.ReportDiag()
+                }
+            }
+            if (let Some(typeDecl) <- shadowedType) {
+                let baseRef = (baseExpr as RefExpr).getOrThrow()
+                ReplaceTarget(baseRef, Some(typeDecl))
+                baseRef.aliasTarget = None
+                baseRef.ref.targets.clear()
+                baseRef.SetTy(typeDecl.GetTy().getOrThrow())
+                ma.targets.clear()
+                ReplaceTarget(ma, None)
+                ma.SetTy(Ty.GetInitialTy())
+                InferStaticAccess(ctx, ma, typeDecl)
+            }
+        }
+        if (ma.target.isNone()) {
+            return
+        }
+        let checkedLater = IsAllFuncDecl(ma.targets) && ma.targets.size > 1 &&
+            (ma.callOrPattern.isSome() || ctx.HasTargetTy(ma))
+        if (checkedLater) {
+            ma.SetTy(TypeManager.GetQuestTy())
+            return
+        }
+        let target = ma.target.getOrThrow()
+        if (!SynTargetOnUsed(ctx, ma, target)) {
+            ma.SetTy(TypeManager.GetInvalidTy())
+            return
+        }
+        ma.SetTy(impl.typeManager.SubstituteTypeAliasInTy(target.GetTy().getOrThrow()))
+        if (!target.IsFunc() || ma.isAlone) {
+            InstantiateReferenceType(ctx, ma)
+        }
+    }
+
+
     private func SynthesizeNameReference(ctx: ASTContext, nameRef: NameReferenceExpr): Ty {
         if (impl.typeManager.GetUnsolvedTyVars().isEmpty() && ctx.IsSynSkippedForCorrectTy(nameRef)) {
             return nameRef.GetTy() ?? TypeManager.GetInvalidTy()
@@ -4660,11 +6548,8 @@ public class TypeChecker {
             impl.SetTypeTy(ctx, typeArg)
         }
         if (let Some(memberAccess) <- (nameRef as MemberAccess)) {
-            if (let Some(baseExpr) <- memberAccess.baseExpr) {
-                SetIsNotAlone(baseExpr)
-                let _ = Synthesize(ctx, baseExpr)
-                ResolvePrimitiveStaticMemberAccess(ctx, memberAccess)
-            }
+            InferMemberAccess(ctx, memberAccess)
+            return memberAccess.GetTy() ?? TypeManager.GetInvalidTy()
         }
         let ty = SynNameReferenceExpr(impl.typeManager, nameRef, diag: impl.diag)
         if (Ty.IsTyCorrect(ty)) {
@@ -4733,41 +6618,6 @@ public class TypeChecker {
         let resTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), retType.GetTy() ?? TypeManager.GetInvalidTy(),
             cfg: cfg)
         re.SetTy(resTy)
-    }
-
-    private func ResolvePrimitiveStaticMemberAccess(ctx: ASTContext, memberAccess: MemberAccess): Unit {
-        if ((let Some(_) <- memberAccess.target) || !memberAccess.targets.isEmpty()) {
-            return
-        }
-        if (let None <- memberAccess.baseExpr) {
-            return
-        }
-        let baseExpr = memberAccess.baseExpr.getOrThrow()
-        if (!(baseExpr is PrimitiveTypeExpr)) {
-            return
-        }
-        if (let None <- memberAccess.curFile) {
-            return
-        }
-        let file = memberAccess.curFile.getOrThrow()
-        memberAccess.SetTy(TypeManager.GetInvalidTy())
-        let targets = ExtendFieldLookup(impl.typeManager, file, baseExpr.GetTy(), memberAccess.field.Val())
-        if (let Some(diagValue) <- impl.diag) {
-            if (!TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
-                diagValue, impl.typeManager, ctx, memberAccess, targets, importManager: impl.importManager)) {
-                return
-            }
-        }
-        if (targets.isEmpty()) {
-            return
-        }
-        let target = GetAccessibleDecl(impl.typeManager, ctx, memberAccess, targets) ?? targets[0]
-        ReplaceTarget(memberAccess, Some(target))
-        let nullableTargets = ArrayList<Option<Decl>>()
-        for (candidate in targets) {
-            nullableTargets.add(Some(candidate))
-        }
-        AddFuncTargetsForMemberAccess(memberAccess, nullableTargets)
     }
 
     private func SynthesizeDesugarIfNeeded(ctx: ASTContext, expr: Expr): Unit {
@@ -5602,41 +7452,7 @@ public class TypeChecker {
             return SynthesizeBlock(ctx, pos, block)
         }
         if (let Some(callExpr) <- (expr as CallExpr)) {
-            SynthesizeCallChildren(ctx, callExpr)
-            let callTy = SynCallExprWithArgChecker(impl.typeManager, callExpr,
-                Some({ target: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, target, arg) }), diag: impl.diag,
-                declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }), ctx: Some(ctx),
-                variadicDesugar: Some({ vce: CallExpr, arity: Int64 => DesugarVariadicCallExpr(vce, arity) }),
-                desugarCallExpr: Some({ callExprForDesugar: CallExpr => DesugarCallExpr(callExprForDesugar) }),
-                importManager: impl.importManager,
-                typeChecker: Some({ targetTy: Ty, typeNode: Type =>
-                    if (!Ty.IsTyCorrect(targetTy)) {
-                        typeNode.SetTy(TypeManager.GetInvalidTy())
-                        false
-                    } else {
-                        typeCheckExprPutTargetType(ctx, typeNode, targetTy)
-                        let checkRet = if (typeNode.TestAttr(Attribute.IS_BROKEN)) {
-                            typeNode.SetTy(TypeManager.GetInvalidTy())
-                            false
-                        } else if (targetTy.HasQuestTy() && !IsQuestableNode(typeNode)) {
-                            false
-                        } else {
-                            let _ = SynthesizeNode(ctx, SynPos.NONE, typeNode)
-                            let _ = ReplaceIdealTy(impl.typeManager, typeNode, diag: impl.diag)
-                            impl.typeManager.IsSubtype(typeNode.GetTy() ?? TypeManager.GetInvalidTy(), targetTy)
-                        }
-                        typeCheckExprClearTargetType(ctx, typeNode)
-                        typeNode.SetTy(impl.typeManager.TryGreedySubst(typeNode.GetTy() ?? TypeManager.GetInvalidTy()))
-                        checkRet
-                    }
-                }),
-                typeSynthesizer: Some({ typeNode: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode) }),
-                argSynthesizer: Some({ arg: FuncArg => SynthesizeFuncArg(ctx, arg) }),
-                exprSynthesizer: Some({ child: Expr => SynthesizeWithCache(ctx, SynPos.EXPR_ARG, child) }),
-                effectiveArgChecker: Some({ expectedTy: Ty, arg: FuncArg =>
-                    CheckWithEffectiveCache(ctx, expectedTy, arg, false)
-                }))
-            return FinishSynthesize(ctx, callExpr, callTy)
+            return FinishSynthesize(ctx, callExpr, SynCallExpr(ctx, callExpr).getOrThrow())
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
             return SynthesizeIfExpr(ctx, pos, ifExpr)
@@ -5698,7 +7514,13 @@ public class TypeChecker {
             return FinishSynthesize(ctx, returnExpr, SynthesizeReturnExpr(ctx, returnExpr))
         }
         if (let Some(lambdaExpr) <- (expr as LambdaExpr)) {
-            return FinishSynthesize(ctx, lambdaExpr, SynLamExpr(ctx, lambdaExpr))
+            let lambdaTy = SynLamExpr(ctx, lambdaExpr)
+            // C++ src/Sema/TypeChecker.cpp:814-817 returns immediately after a rejected SynLamExpr;
+            // do not let the selfhost recursive-refresh compatibility path enter its disabled body.
+            if (!Ty.IsTyCorrect(lambdaTy)) {
+                return lambdaTy
+            }
+            return FinishSynthesize(ctx, lambdaExpr, lambdaTy)
         }
         if (let Some(parenExpr) <- (expr as ParenExpr)) {
             return FinishSynthesize(ctx, parenExpr, SynParenExpr(impl.typeManager, parenExpr,
@@ -6056,42 +7878,7 @@ public class TypeChecker {
         }
         if (let Some(callExpr) <- (expr as CallExpr)) {
             typeCheckExprPutTargetType(ctx, callExpr, target)
-            SynthesizeCallChildren(ctx, callExpr)
-            let ok = ChkCallExprWithArgChecker(impl.typeManager, impl.diag, Some(target), callExpr,
-                Some({ paramTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, paramTy, arg) }),
-                desugarChecker: Some({ target2: Ty, expr2: Expr => Check(ctx, target2, expr2) }),
-                clearInferredForTarget: clearInferredCallTypes,
-                declSynthesizer: Some({ fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }), ctx: Some(ctx),
-                variadicDesugar: Some({ vce: CallExpr, arity: Int64 => DesugarVariadicCallExpr(vce, arity) }),
-                desugarCallExpr: Some({ callExprForDesugar: CallExpr => DesugarCallExpr(callExprForDesugar) }),
-                importManager: impl.importManager,
-                typeChecker: Some({ targetTy: Ty, typeNode: Type =>
-                    if (!Ty.IsTyCorrect(targetTy)) {
-                        typeNode.SetTy(TypeManager.GetInvalidTy())
-                        false
-                    } else {
-                        typeCheckExprPutTargetType(ctx, typeNode, targetTy)
-                        let checkRet = if (typeNode.TestAttr(Attribute.IS_BROKEN)) {
-                            typeNode.SetTy(TypeManager.GetInvalidTy())
-                            false
-                        } else if (targetTy.HasQuestTy() && !IsQuestableNode(typeNode)) {
-                            false
-                        } else {
-                            let _ = SynthesizeNode(ctx, SynPos.NONE, typeNode)
-                            let _ = ReplaceIdealTy(impl.typeManager, typeNode, diag: impl.diag)
-                            impl.typeManager.IsSubtype(typeNode.GetTy() ?? TypeManager.GetInvalidTy(), targetTy)
-                        }
-                        typeCheckExprClearTargetType(ctx, typeNode)
-                        typeNode.SetTy(impl.typeManager.TryGreedySubst(typeNode.GetTy() ?? TypeManager.GetInvalidTy()))
-                        checkRet
-                    }
-                }),
-                typeSynthesizer: Some({ typeNode: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode) }),
-                argSynthesizer: Some({ arg: FuncArg => SynthesizeFuncArg(ctx, arg) }),
-                exprSynthesizer: Some({ child: Expr => SynthesizeWithCache(ctx, SynPos.EXPR_ARG, child) }),
-                effectiveArgChecker: Some({ expectedTy: Ty, arg: FuncArg =>
-                    CheckWithEffectiveCache(ctx, expectedTy, arg, false)
-                }))
+            let ok = ChkCallExpr(ctx, Some(target), callExpr)
             return FinishCheck(ctx, callExpr, ok)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
@@ -6394,140 +8181,6 @@ public class TypeChecker {
         }
     }
 
-    func GetDeclOfThisType(expr: Expr): Option<Decl> {
-        if (let Some(memberAccess) <- (expr as MemberAccess)) {
-            if (let Some(baseExpr) <- memberAccess.baseExpr) {
-                if (let Some(baseTy) <- baseExpr.GetTy()) {
-                    if (let Some(classTy) <- (baseTy as ClassTy)) {
-                        if (let Some(classDecl) <- classTy.declPtr) {
-                            return Some(classDecl)
-                        }
-                    }
-                }
-            }
-        } else if (let Some(refExpr) <- (expr as RefExpr)) {
-            let baseFunc = refExpr.GetTarget()
-            if (let Some(targetDecl) <- baseFunc) {
-                if ((let Some(varDecl) <- (targetDecl as VarDecl)) &&
-                    (let Some(initializer) <- varDecl.initializer) &&
-                    (let Some(memberInitializer) <- (initializer as MemberAccess))) {
-                    let baseTarget = memberInitializer.baseExpr.getOrThrow().GetTarget()
-                    if ((let Some(target) <- baseTarget) && (let Some(targetTy) <- target.GetTy()) &&
-                        (let Some(classTy) <- (targetTy as ClassTy))) {
-                        if (let Some(classDecl) <- classTy.declPtr) {
-                            return Some(classDecl)
-                        }
-                    }
-                    return None
-                }
-            }
-            let file = expr.curFile.getOrThrow()
-            let ctx = ci.getOrThrow().GetASTContextByPackage(file.curPackage).getOrThrow()
-            if (let Some(outMostFunc) <- ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC, expr.scopeName)) {
-                let funcDecl = (outMostFunc.node.getOrThrow() as FuncDecl).getOrThrow()
-                if (let Some(parentClassLike) <- funcDecl.funcBody.getOrThrow().parentClassLike) {
-                    return Some(parentClassLike)
-                }
-            }
-        }
-        return None
-    }
-
-    func DynamicBindingThisType(baseExpr: Expr, fd: FuncDecl,
-        typeMapping!: SubstPack = SubstPack()): Option<Ty> {
-        if (!IsFuncReturnThisType(fd)) {
-            return None
-        }
-        let rawFuncTy = if (Ty.IsTyCorrect(baseExpr.GetTy()) && baseExpr.GetTy().getOrThrow().IsFunc()) {
-            baseExpr.GetTy()
-        } else {
-            fd.GetTy()
-        }
-        if (let None <- rawFuncTy) {
-            return None
-        }
-        if (let None <- (rawFuncTy.getOrThrow() as FuncTy)) {
-            return None
-        }
-        let funcTy = (rawFuncTy.getOrThrow() as FuncTy).getOrThrow()
-        if (let Some(thisDecl) <- GetDeclOfThisType(baseExpr)) {
-            if (let Some(classDecl) <- (thisDecl as ClassDecl)) {
-                if (Ty.IsTyCorrect(classDecl.GetTy())) {
-                    let classTy = classDecl.GetTy().getOrThrow()
-                    let instTy = impl.typeManager.ApplySubstPack(
-                        impl.typeManager.GetClassThisTy(classDecl, classTy.typeArgs.toArray()), typeMapping)
-                    baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), instTy))
-                    return Some(instTy)
-                }
-            }
-        }
-        if ((let Some(memberAccess) <- (baseExpr as MemberAccess)) &&
-            (let Some(memberBase) <- memberAccess.baseExpr) && (let Some(memberBaseTy) <- memberBase.GetTy())) {
-            if (let Some(genericTy) <- (memberBaseTy as GenericsTy)) {
-                baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), genericTy))
-                return Some(genericTy)
-            }
-        }
-        return None
-    }
-
-    func InstantiateReferenceType(ctx: ASTContext, expr: NameReferenceExpr,
-        instantiateMap!: TypeSubst = TypeSubst()): Unit {
-        if (expr.compilerAddedTyArgs) {
-            expr.typeArguments.clear()
-        }
-        let target = expr.GetTarget()
-        if (!expr.GetTypeArgs().isEmpty()) {
-            if ((let Some(targetDecl) <- target) && targetDecl.astKind != ASTKind.TYPE_ALIAS_DECL) {
-                let _ = UpdateInstTysWithTypeArgs(expr)
-            }
-            impl.CheckGenericExpr(expr)
-        }
-        var typeMapping = SubstPack()
-        if (instantiateMap.entries.isEmpty()) {
-            typeMapping = impl.GenerateGenericTypeMapping(ctx, expr)
-            let tys = impl.typeManager.ApplySubstPackNonUniq(
-                expr.GetTy().getOrThrow(), typeMapping, ignoreUnsolved: true)
-            var targetIsFunc = false
-            if (let Some(targetDecl) <- target) {
-                if (let Some(_) <- (targetDecl as FuncDecl)) {
-                    targetIsFunc = true
-                }
-            }
-            if (tys.values.size != 1 && targetIsFunc && !ctx.HasTargetTy(expr)) {
-                Diagnose(impl.diag.getOrThrow(), expr, BasicDiagKind.sema_ambiguous_func_ref,
-                    args: [BasicDiagArgument(target.getOrThrow().identifier.Val())]).Emit()
-            }
-            expr.SetTy(tys.values[0])
-        } else {
-            impl.typeManager.PackMapping(typeMapping, instantiateMap)
-            expr.SetTy(impl.typeManager.GetInstantiatedTy(expr.GetTy().getOrThrow(), instantiateMap))
-        }
-        if (!Ty.IsTyCorrect(expr.GetTy())) {
-            expr.SetTy(TypeManager.GetInvalidTy())
-        } else if (let Some(targetDecl) <- target) {
-            if (let Some(funcDecl) <- (targetDecl as FuncDecl)) {
-                let _ = DynamicBindingThisType(expr, funcDecl, typeMapping: typeMapping)
-            }
-        }
-    }
-
-    func SynTargetOnUsed(ctx: ASTContext, nre: NameReferenceExpr, target: Decl): Bool {
-        if (NeedSynOnUsed(target)) {
-            var declToSyn = target
-            if (let Some(varDecl) <- (target as VarDecl)) {
-                let varDeclAbstract = ctx.GetOuterVarDeclAbstract(varDecl)
-                declToSyn = if (varDeclAbstract.TestAttr(Attribute.GLOBAL)) { varDeclAbstract } else { varDecl }
-            }
-            let targetTy = SynthesizeNode(ctx, SynPos.EXPR_ARG, declToSyn)
-            if ((let Some(funcDecl) <- (declToSyn as FuncDecl)) && targetTy.HasQuestTy()) {
-                DiagUnableToInferReturnType(impl.diag.getOrThrow(), funcDecl, nre)
-                return false
-            }
-        }
-        return true
-    }
-
     func InferRefExpr(ctx: ASTContext, re: RefExpr): Unit {
         if ((let Some(target) <- re.ref.target) && Ty.IsTyCorrect(re.GetTy()) &&
             !target.GetTy().getOrThrow().IsPlaceholder()) {
@@ -6547,11 +8200,14 @@ public class TypeChecker {
             isCustomAnnotation = true
         }
         let lookupScope = if (isCustomAnnotation) { TOPLEVEL_SCOPE_NAME } else { re.scopeName }
-        var targets = impl.Lookup(ctx, re.ref.identifier.Val(), lookupScope, re,
-            isSetter: re.TestAttr(Attribute.LEFT_VALUE))
+        let targets = ArrayList<Option<Decl>>()
+        for (target in impl.Lookup(ctx, re.ref.identifier.Val(), lookupScope, re,
+            isSetter: re.TestAttr(Attribute.LEFT_VALUE))) {
+            targets.add(Some(target))
+        }
         var allMacroFuncs = true
         for (target in targets) {
-            if (!target.TestAttr(Attribute.MACRO_FUNC)) {
+            if (!target.getOrThrow().TestAttr(Attribute.MACRO_FUNC)) {
                 allMacroFuncs = false
                 break
             }
