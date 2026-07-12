@@ -8292,52 +8292,139 @@ public class Translator {
 
     private func TranslateMemberAccessAsLeftValue(member: AstMemberAccess): FaithfulLeftValueInfo {
         let target = ResolveMemberAccessTarget(member, "faithful AST2CHIR MemberAccess left value")
+        CJC_ASSERT(target.astKind == ASTKind.VAR_DECL)
+        let loc = TranslateLocation(member)
         if (target.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
-            let value = Visit(member) ??
+            let value = TranslateASTNode(member, this) ??
                 throw IllegalStateException("faithful AST2CHIR enum member access produced no value")
             return FaithfulLeftValueInfo(value, ArrayList<String>())
         }
         if (target.TestAttr(AstAttribute.STATIC) || IsPackageMemberAccess(member)) {
             return FaithfulLeftValueInfo(GetSymbolTable(target), ArrayList<String>())
         }
-        if (let Some(varDecl) <- (target as AstVarDecl)) {
-            if (let Some(baseExpr) <- member.baseExpr) {
-                let targetBaseAstTy = RequireAstTy(varDecl.outerDecl ??
-                    throw IllegalStateException("faithful AST2CHIR member target has no outer declaration"))
-                let baseInfo = NormalizeMemberBaseLeftValue(TranslateExprAsLeftValue(baseExpr), baseExpr,
-                    targetBaseAstTy)
-                let path = CopyStringList(baseInfo.path)
-                path.add(varDecl.identifier.Val())
-                if (!baseInfo.path.isEmpty()) {
-                    return FaithfulLeftValueInfo(baseInfo.base, path)
+        if (!target.TestAttr(AstAttribute.STATIC) && target.outerDecl.isSome()) {
+            var base: Option<AstExpr> = Some(member)
+            var targetBaseAstTy: Option<AstTy> = None
+            let path = ArrayList<String>()
+            var readOnly = false
+            while (base.isSome()) {
+                let baseExpr = base.getOrThrow()
+                let desugarBaseExpr = (Translator.GetDesugaredExpr(baseExpr) as AstExpr) ??
+                    throw IllegalStateException("faithful AST2CHIR member access base is not an expression")
+                if (let Some(ma) <- (desugarBaseExpr as AstMemberAccess)) {
+                    let maTy = RequireAstTy(ma)
+                    let isTargetClassOrClassUpper = maTy.IsClassLike() || maTy.IsGeneric()
+                    let maTarget = ma.target ??
+                        throw IllegalStateException("faithful AST2CHIR member access target is missing")
+                    if ((!isTargetClassOrClassUpper || path.isEmpty()) && !maTarget.TestAttr(AstAttribute.STATIC) &&
+                        maTarget.astKind != ASTKind.PROP_DECL && !IsPackageMemberAccess(ma)) {
+                        path.add((maTarget as AstVarDecl).getOrThrow().identifier.Val(), at: 0)
+                        readOnly = readOnly || !(maTarget as AstVarDecl).getOrThrow().isVar
+                        targetBaseAstTy = Some(RequireAstTy((maTarget.outerDecl ??
+                            throw IllegalStateException("faithful AST2CHIR member target has no outer declaration"))))
+                        CJC_ASSERT(targetBaseAstTy.getOrThrow().IsStruct() || targetBaseAstTy.getOrThrow().IsClass())
+                        base = ma.baseExpr
+                        continue
+                    }
+                } else if (let Some(refExpr) <- (desugarBaseExpr as AstRefExpr)) {
+                    let refTy = RequireAstTy(refExpr)
+                    if (!refExpr.isThis && !refExpr.isSuper && !refTy.IsClassLike() && !refTy.IsGeneric()) {
+                        if (let Some(refTarget) <- refExpr.ref.target) {
+                            if (let Some(refTargetOuterDecl) <- refTarget.outerDecl) {
+                                if ((refTargetOuterDecl.astKind == ASTKind.STRUCT_DECL ||
+                                    refTargetOuterDecl.astKind == ASTKind.CLASS_DECL) &&
+                                    !refTarget.TestAttr(AstAttribute.STATIC)) {
+                                    path.add((refTarget as AstVarDecl).getOrThrow().identifier.Val(), at: 0)
+                                    readOnly = readOnly || !(refTarget as AstVarDecl).getOrThrow().isVar
+                                    targetBaseAstTy = Some(RequireAstTy(refTargetOuterDecl))
+                                    CJC_ASSERT(targetBaseAstTy.getOrThrow().IsStruct() || targetBaseAstTy.getOrThrow().IsClass())
+                                    base = None
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    break
                 }
-                let baseValue = baseInfo.base.getOrThrow()
-                let baseValueTy = baseValue.GetType() ??
-                    throw IllegalStateException("faithful AST2CHIR member base has no type: ${baseValue.GetIdentifier()}")
-                var baseValRefDims = baseValueTy.GetRefDims()
-                let strippedBaseValueTy = baseValueTy.StripAllRefs()
-                let instMap = HashMap<Int64, (GenericType, Type)>()
-                if (let Some(baseValCustomTy) <- (strippedBaseValueTy as CustomType)) {
-                    baseValCustomTy.GetInstMap(instMap, builder)
-                } else if (let Some(baseValGenericTy) <- (strippedBaseValueTy as GenericType)) {
-                    baseValGenericTy.GetInstMap(instMap, builder)
-                }
-                var targetBaseTy = chirTy.TranslateType(targetBaseAstTy)
-                if (targetBaseTy.GetRefDims() > baseValRefDims) {
-                    baseValRefDims = targetBaseTy.GetRefDims()
-                }
-                targetBaseTy = ReplaceRawGenericArgType(targetBaseTy.StripAllRefs(), instMap, builder)
-                var refIdx: Int64 = 0
-                while (refIdx < baseValRefDims) {
-                    targetBaseTy = builder.context.GetRefTy(targetBaseTy)
-                    refIdx++
-                }
-                let castedBase = CastValueIfNeeded(baseValue, targetBaseTy)
-                return FaithfulLeftValueInfo(castedBase, path)
+                break
             }
-            return TranslateInstanceFieldRefAsLeftValue(varDecl)
+
+            var baseVal: Value
+            if (let Some(baseExpr) <- base) {
+                let baseLeftValueInfo = TranslateExprAsLeftValue(baseExpr)
+                var baseLeftValue = baseLeftValueInfo.base.getOrThrow()
+                var baseLeftValueTy = baseLeftValue.GetType() ??
+                    throw IllegalStateException("faithful AST2CHIR member base has no type: ${baseLeftValue.GetIdentifier()}")
+                let baseLeftValuePath = baseLeftValueInfo.path
+                if (baseLeftValueTy.IsReferenceTypeWithRefDims(CLASS_REF_DIM)) {
+                    let baseRefTy = RequireRefBaseType(baseLeftValue)
+                    baseLeftValueTy = baseRefTy
+                    let loadBaseValue = builder.CreateLoad(baseRefTy, baseLeftValue, CurrentBlock())
+                    loadBaseValue.SetDebugLocation(loc)
+                    baseLeftValue = RequireResult(loadBaseValue)
+                }
+                if (!baseLeftValuePath.isEmpty()) {
+                    let baseCustomType = (baseLeftValueTy.StripAllRefs() as CustomType) ??
+                        throw IllegalStateException("faithful AST2CHIR member base is not custom type: ${baseLeftValueTy.ToString()}")
+                    let (pathMemberTy, isReadOnly) = GetInstMemberTypeByNameCheckingReadOnly(baseCustomType, baseLeftValuePath,
+                        builder)
+                    CJC_ASSERT(pathMemberTy.IsReferenceTypeWithRefDims(1) ||
+                        pathMemberTy.IsValueOrGenericTypeWithRefDims(0))
+                    if (baseLeftValueTy.IsReferenceTypeWithRefDims(1) ||
+                        baseLeftValueTy.IsValueOrGenericTypeWithRefDims(1)) {
+                        let memberRefTy = builder.context.GetRefTy(pathMemberTy)
+                        var getMemberRef =
+                            RequireResult(builder.CreateGetElementByName(memberRefTy, baseLeftValue,
+                                baseLeftValuePath, CurrentBlock()))
+                        getMemberRef.SetDebugLocation(loc)
+                        if (baseLeftValue.TestAttr(Attribute.READONLY) || readOnly || isReadOnly) {
+                            getMemberRef.EnableAttr(Attribute.READONLY)
+                        }
+                        let loadMemberValue = builder.CreateLoad(pathMemberTy, getMemberRef, CurrentBlock())
+                        loadMemberValue.SetDebugLocation(loc)
+                        baseVal = RequireResult(loadMemberValue)
+                    } else if (baseLeftValueTy.IsValueOrGenericTypeWithRefDims(0)) {
+                        let fieldValue = builder.CreateFieldByName(pathMemberTy, baseLeftValue,
+                            baseLeftValuePath, CurrentBlock())
+                        fieldValue.SetDebugLocation(loc)
+                        baseVal = RequireResult(fieldValue)
+                    } else {
+                        throw IllegalStateException("faithful AST2CHIR unsupported member base type: ${baseLeftValueTy.ToString()}")
+                    }
+                } else {
+                    CJC_ASSERT(baseLeftValueTy.IsReferenceTypeWithRefDims(1) ||
+                        baseLeftValueTy.IsValueOrGenericTypeWithRefDims(1) ||
+                        baseLeftValueTy.IsValueOrGenericTypeWithRefDims(0))
+                    baseVal = baseLeftValue
+                }
+            } else {
+                baseVal = GetCurrentThisObject()
+            }
+
+            let baseValTy = baseVal.GetType() ??
+                throw IllegalStateException("faithful AST2CHIR member base value has no type: ${baseVal.GetIdentifier()}")
+            var baseValRefDims = baseValTy.GetRefDims()
+            let strippedBaseValueTy = baseValTy.StripAllRefs()
+            let instMap = HashMap<Int64, (GenericType, Type)>()
+            if (let Some(baseValCustomTy) <- (strippedBaseValueTy as CustomType)) {
+                baseValCustomTy.GetInstMap(instMap, builder)
+            } else if (let Some(baseValGenericTy) <- (strippedBaseValueTy as GenericType)) {
+                baseValGenericTy.GetInstMap(instMap, builder)
+            }
+            var targetBaseTy = chirTy.TranslateType(targetBaseAstTy.getOrThrow())
+            if (targetBaseTy.GetRefDims() > baseValRefDims) {
+                baseValRefDims = targetBaseTy.GetRefDims()
+            }
+            targetBaseTy = ReplaceRawGenericArgType(targetBaseTy.StripAllRefs(), instMap, builder)
+            var refIdx: Int64 = 0
+            while (refIdx < baseValRefDims) {
+                targetBaseTy = builder.context.GetRefTy(targetBaseTy)
+                refIdx++
+            }
+            let castedBase = TypeCastOrBoxIfNeeded(baseVal, targetBaseTy, loc)
+            return FaithfulLeftValueInfo(castedBase, path)
         }
-        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: member function left value")
+        throw IllegalStateException("faithful AST2CHIR member access no instance base")
     }
 
     private func TranslateInstanceFieldRefAsLeftValue(varDecl: AstVarDecl): FaithfulLeftValueInfo {
