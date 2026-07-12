@@ -1096,10 +1096,19 @@ extend ParserImpl {
     }
 
     public func ParseParameterList(scopeKind: ScopeKind): FuncParamList {
+        if (!Skip(TokenKind.LPAREN)) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_paren, lookahead,
+                ConvertToken(lookahead)).Emit()
+            let invalid = FuncParamList()
+            invalid.EnableAttr(Attribute.IS_BROKEN)
+            invalid.begin = lookahead.Begin()
+            invalid.end = lookahead.Begin()
+            return invalid
+        }
         let list = FuncParamList()
-        list.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' for parameter list").Begin()
-        list.begin = list.leftParenPos
         try (cs = ChainScope(this, list)) {
+            list.begin = lookahead.Begin()
+            list.leftParenPos = lookahead.Begin()
             var namedParameter: Option<FuncParam> = None
             var memberParameter: Option<FuncParam> = None
             while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
@@ -1118,8 +1127,12 @@ extend ParserImpl {
                     break
                 }
             }
-            list.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after parameters").Begin()
-            list.end = list.rightParenPos + 1
+            if (!Skip(TokenKind.RPAREN)) {
+                DiagExpectedRightDelimiter("(", list.leftParenPos)
+                list.end = lookahead.End()
+                list.EnableAttr(Attribute.IS_BROKEN)
+                return list
+            }
             if (ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY)) {
                 if (list.params.isEmpty()) {
                     ParseDiagnoseRefactor(DiagKindRefactor.parse_setter_must_contain_one_parameter, list.begin).Emit()
@@ -1128,6 +1141,8 @@ extend ParserImpl {
                         list.params[1].begin).Emit()
                 }
             }
+            list.rightParenPos = lastToken.Begin()
+            list.end = lastToken.End()
         }
         return list
     }
@@ -1717,6 +1732,35 @@ extend ParserImpl {
 
     public func ParseClassLikeBody(ret: InheritableDecl, scopeKind: ScopeKind): Unit {
         if (!Skip(TokenKind.LCURL)) {
+            if (let Some(classDecl) <- (ret as ClassDecl)) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, lookahead,
+                    ConvertToken(lookahead)).Emit()
+                ConsumeUntilDecl(TokenKind.LCURL)
+                Skip(TokenKind.LCURL)
+                let body = ClassBody()
+                body.EnableAttr(Attribute.HAS_BROKEN)
+                body.EnableAttr(Attribute.IS_BROKEN)
+                classDecl.body = body
+            } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, lookahead,
+                    ConvertToken(lookahead)).Emit()
+                let body = InterfaceBody()
+                body.EnableAttr(Attribute.IS_BROKEN)
+                body.begin = lastToken.End()
+                body.end = lastToken.End()
+                interfaceDecl.body = body
+            } else if (let Some(structDecl) <- (ret as StructDecl)) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, lookahead,
+                    ConvertToken(lookahead)).Emit()
+                let body = StructBody()
+                body.EnableAttr(Attribute.IS_BROKEN)
+                body.begin = lastToken.End()
+                body.end = lastToken.End()
+                structDecl.body = body
+            } else if (let Some(extendDecl) <- (ret as ExtendDecl)) {
+                DiagExpectCharacter("'{'", noteStr: "extend declaration must have body")
+                extendDecl.EnableAttr(Attribute.HAS_BROKEN)
+            }
             return
         }
         let leftCurl = lastToken.Begin()

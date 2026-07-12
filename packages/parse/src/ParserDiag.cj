@@ -319,7 +319,23 @@ extend ParserImpl {
     }
 
     public func DiagExpectedIdentifierFuncParam(_: Node): Unit {
-        DiagExpectedIdentifier(MakeRange(lastToken.Begin(), lastToken.End()))
+        if (let Some(node) <- TraceBackNode(chainedAST, [ASTKind.FUNC_PARAM_LIST])) {
+            let list = (node as FuncParamList).getOrThrow()
+            if (list.params.isEmpty()) {
+                DiagExpectedIdentifier(MakeRange(list.leftParenPos, list.leftParenPos + "(".size),
+                    "a argument name", "after '(' in parameter list")
+            } else {
+                let param = list.params[list.params.size - 1]
+                if (!param.commaPos.IsZero()) {
+                    DiagExpectedIdentifier(MakeRange(param.commaPos, param.commaPos + "(".size),
+                        "a argument name", "after ',' in parameter list")
+                } else {
+                    DiagExpectedIdentifier(MakeRange(lastToken.Begin(), lastToken.End()))
+                }
+            }
+        } else {
+            DiagExpectedIdentifier(MakeRange(lastToken.Begin(), lastToken.End()))
+        }
     }
 
     public func DiagExpectedIdentifierRefType(_: Node): Unit {

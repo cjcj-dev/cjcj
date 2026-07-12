@@ -149,8 +149,12 @@ extend ParserImpl {
                         call.args.add(ParseFuncArg())
                         if (!Skip(TokenKind.COMMA)) { break }
                     }
-                    call.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after arguments").Begin()
-                    call.end = call.rightParenPos + 1
+                    if (!Skip(TokenKind.RPAREN) && !call.TestAttr(Attribute.HAS_BROKEN)) {
+                        call.EnableAttr(Attribute.HAS_BROKEN)
+                        DiagExpectedRightDelimiter("(", call.leftParenPos)
+                    }
+                    call.rightParenPos = lastToken.Begin()
+                    call.end = lastToken.End()
                 }
                 base = call
                 continue
@@ -186,8 +190,12 @@ extend ParserImpl {
                         sub.indexExprs.add(ParseExpr(ExprKind.INDEX_EXPR))
                         if (!Skip(TokenKind.COMMA)) { break }
                     }
-                    sub.rightParenPos = Expect(TokenKind.RSQUARE, "expected ']' after subscript").Begin()
-                    sub.end = sub.rightParenPos + 1
+                    if (!Skip(TokenKind.RSQUARE)) {
+                        DiagExpectedRightDelimiter("[", sub.leftParenPos)
+                        sub.EnableAttr(Attribute.HAS_BROKEN)
+                    }
+                    sub.rightParenPos = lastToken.Begin()
+                    sub.end = lastToken.End()
                 }
                 base = sub
                 continue

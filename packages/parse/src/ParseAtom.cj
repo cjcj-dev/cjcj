@@ -205,10 +205,19 @@ extend ParserImpl {
         ret.typeNode = primitive
         ret.begin = token.Begin()
         Next()
-        ret.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' after primitive type").Begin()
+        if (!Skip(TokenKind.LPAREN)) {
+            DiagExpectedLeftParenAfter(ret.begin, lastToken.Value())
+            return InvalidExpr(lookahead.Begin())
+        }
+        ret.leftParenPos = lastToken.Begin()
         ret.expr = ParseExpr()
-        ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after type conversion expression").Begin()
-        ret.end = ret.rightParenPos + 1
+        if (!Skip(TokenKind.RPAREN)) {
+            DiagExpectedRightDelimiter("(", ret.leftParenPos)
+            ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RPAREN])
+            return InvalidExpr(lookahead.Begin())
+        }
+        ret.rightParenPos = lastToken.Begin()
+        ret.end = lastToken.End()
         return ret
     }
 
@@ -400,16 +409,26 @@ extend ParserImpl {
                     break
                 }
             }
-            tuple.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after tuple literal").Begin()
-            tuple.end = tuple.rightParenPos + 1
+            if (!Skip(TokenKind.RPAREN)) {
+                DiagExpectedRightDelimiter("(", tuple.leftParenPos)
+                ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RPAREN])
+            }
+            tuple.rightParenPos = lastToken.Begin()
+            tuple.end = lastToken.End()
             return tuple
         }
         let paren = ParenExpr()
         paren.leftParenPos = left.Begin()
         paren.expr = first
-        paren.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after expression").Begin()
+        if (!Skip(TokenKind.RPAREN)) {
+            if (!(first is InvalidExpr)) {
+                DiagExpectedRightDelimiter("(", left.Begin())
+            }
+            ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RPAREN])
+        }
+        paren.rightParenPos = lastToken.Begin()
         paren.begin = left.Begin()
-        paren.end = paren.rightParenPos + 1
+        paren.end = lastToken.End()
         return paren
     }
 
