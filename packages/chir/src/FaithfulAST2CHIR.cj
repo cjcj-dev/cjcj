@@ -3665,7 +3665,6 @@ public class FaithfulAST2CHIR {
     private func TranslateLiteralValue(expr: AstLitConstExpr): LiteralValue {
         let kind = RequireAstTy(expr).kind
         return match (kind) {
-            case AstTypeKind.TYPE_UNIT => UnitLiteral()
             case AstTypeKind.TYPE_FLOAT16 | AstTypeKind.TYPE_FLOAT64 | AstTypeKind.TYPE_IDEAL_FLOAT =>
                 FloatLiteral(expr.constNumValue.asFloat.value)
             case AstTypeKind.TYPE_FLOAT32 =>
@@ -3676,14 +3675,22 @@ public class FaithfulAST2CHIR {
                 }
                 FloatLiteral(value)
             case AstTypeKind.TYPE_UINT8 | AstTypeKind.TYPE_UINT16 | AstTypeKind.TYPE_UINT32 |
-                AstTypeKind.TYPE_UINT64 | AstTypeKind.TYPE_UINT_NATIVE | AstTypeKind.TYPE_INT8 |
-                AstTypeKind.TYPE_INT16 | AstTypeKind.TYPE_INT32 | AstTypeKind.TYPE_INT64 |
-                AstTypeKind.TYPE_INT_NATIVE | AstTypeKind.TYPE_IDEAL_INT => TranslateIntegerLiteralValue(expr)
+                AstTypeKind.TYPE_UINT64 | AstTypeKind.TYPE_UINT_NATIVE =>
+                IntLiteral(expr.constNumValue.asInt.Uint64())
+            case AstTypeKind.TYPE_INT8 | AstTypeKind.TYPE_INT16 | AstTypeKind.TYPE_INT32 |
+                AstTypeKind.TYPE_INT64 | AstTypeKind.TYPE_INT_NATIVE | AstTypeKind.TYPE_IDEAL_INT =>
+                IntLiteral(UInt64(expr.constNumValue.asInt.`Int64`()))
             case AstTypeKind.TYPE_RUNE => RuneLiteral(Rune(expr.codepoint[0]))
             case AstTypeKind.TYPE_BOOLEAN => BoolLiteral(expr.stringValue == "true")
-            case AstTypeKind.TYPE_STRUCT => StringLiteral(expr.stringValue)
+            case AstTypeKind.TYPE_STRUCT =>
+                CJC_ASSERT(expr.kind == AstLitConstKind.STRING)
+                StringLiteral(expr.stringValue)
+            case AstTypeKind.TYPE_UNIT =>
+                CJC_ABORT()
+                UnitLiteral()
             case _ =>
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: literal type")
+                CJC_ABORT()
+                UnitLiteral()
         }
     }
 
