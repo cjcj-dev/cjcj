@@ -2945,7 +2945,9 @@ public class Translator {
 
     public func Visit(expr: AstArrayExpr): Option<Value> {
         let arrayTy = chirTy.TranslateType(RequireAstTy(expr))
-        if (expr.isValueArray || arrayTy.IsVArray()) {
+        if (expr.isValueArray) {
+            CJC_ASSERT(expr.args.size == 1)
+            CJC_ASSERT(!arrayTy.GetTypeArgs().isEmpty())
             return TranslateVArrayExpr(expr, RequireVArrayType(arrayTy))
         }
         let rawArrayTy = RequireRawArrayType(arrayTy.StripAllRefs())
@@ -2961,7 +2963,8 @@ public class Translator {
         if (expr.args.size == 1) {
             return TranslateRawArrayByCollection(expr, arrayTy, rawArrayTy)
         }
-        if (expr.args.size == 2 && expr.initFunc.isNone()) {
+        CJC_ASSERT(expr.args.size == 2)
+        if (expr.initFunc.isNone()) {
             let sizeValue = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[0], "RawArray size"), this) ??
                 throw IllegalStateException("faithful AST2CHIR RawArray size produced no value")
             let initValue = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[1], "RawArray init value"), this) ??
@@ -2972,10 +2975,7 @@ public class Translator {
                 CurrentBlock())
             return rawArrayRef
         }
-        if (expr.args.size == 2) {
-            return TranslateRawArrayByLambda(expr, arrayTy, rawArrayTy)
-        }
-        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: unsupported RawArray ArrayExpr arity")
+        return TranslateRawArrayByLambda(expr, arrayTy, rawArrayTy)
     }
 
     public func Visit(expr: AstTupleLit): Option<Value> {
