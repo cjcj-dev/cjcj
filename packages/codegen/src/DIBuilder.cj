@@ -14,7 +14,8 @@ import cjcj::chir.Type
 import cjcj::mangle.MANGLE_CANGJIE_PREFIX
 import cjcj::mangle.MANGLE_FUNC_PARA_INIT_PREFIX
 import cjcj::mangle.MANGLE_GLOBAL_VARIABLE_INIT_PREFIX
-import cjcj::utils.CJC_ASSERT
+import cjcj::chir.ClassType
+import cjcj::utils.{CJC_ASSERT, StaticCast}
 
 // GAP_TODO(C07-debug-location-parity):
 // - EmitExpressionIR.cpp:64-66 enableCompileDebug parameter loads
@@ -52,6 +53,7 @@ public class DIBuilder {
     private var curLocation: Position = Position()
     private var needSubprogram: Bool = false
     private var paramNo: UIntNative = 0
+    private var genericID: UInt64 = 0
     private let lexicalBlocks: HashMap<String, LLVMMetadataRef> = HashMap<String, LLVMMetadataRef>()
     private let typeCache: HashMap<Int64, LLVMMetadataRef> = HashMap<Int64, LLVMMetadataRef>()
 
@@ -151,6 +153,31 @@ public class DIBuilder {
             flags, SPFlagDefinition, LLVMNullMetadata(), LLVMNullMetadata())
         unsafe { LLVMSetSubprogram(function, subprogram) }
         curScope = subprogram
+    }
+
+    public func CreateAnonymousTypeForGenericType(typeTemplate: LLVMValueRef, ty: Type): Unit {
+        if (!cgMod.GetCGContext().GetCompileOptions().enableCompileDebug) {
+            return
+        }
+        let isInterface = ty.IsClass() && StaticCast<ClassType>(ty).GetClassDef().IsInterface()
+        if (!ty.IsEnum() && !isInterface) {
+            return
+        }
+        genericID++
+        let diType = GetOrCreateType(ty)
+        let genericName = "$" + genericID.toString()
+        var globalVar = LLVMNullMetadata()
+        try (
+            nameCString = unsafe { LibC.mallocCString(genericName) }.asResource(),
+            linkageCString = unsafe { LibC.mallocCString(genericName) }.asResource()
+        ) {
+            globalVar = unsafe {
+                LLVMDIBuilderCreateGlobalVariableExpression(raw, namespaceScope, nameCString.value,
+                    UIntNative(genericName.size), linkageCString.value, UIntNative(genericName.size), defaultFile, 0u32,
+                    diType, 0, LLVMNullMetadata(), LLVMNullMetadata(), 0u32)
+            }
+        }
+        LLVMSetGlobalMetadata(cgMod.GetLLVMContext(), typeTemplate, "dbg", globalVar)
     }
 
     public func FinalizeSubProgram(function: LLVMValueRef): Unit {

@@ -551,6 +551,10 @@ foreign {
         nameLen: UIntNative, linkageName: CString, linkageNameLen: UIntNative, file: LLVMMetadataRef,
         lineNo: UInt32, ty: LLVMMetadataRef, isLocalToUnit: Int32, isDefinition: Int32, scopeLine: UInt32,
         flags: UInt32, isOptimized: Int32): LLVMMetadataRef
+    func LLVMDIBuilderCreateGlobalVariableExpression(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef,
+        name: CString, nameLen: UIntNative, linkageName: CString, linkageNameLen: UIntNative,
+        file: LLVMMetadataRef, lineNo: UInt32, ty: LLVMMetadataRef, localToUnit: Int32,
+        expression: LLVMMetadataRef, declaration: LLVMMetadataRef, alignInBits: UInt32): LLVMMetadataRef
     func LLVMDIBuilderCreateBasicType(builder: LLVMDIBuilderRef, name: CString, nameLen: UIntNative,
         sizeInBits: UInt64, encoding: UInt32, flags: UInt32): LLVMMetadataRef
     func LLVMDIBuilderCreatePointerType(builder: LLVMDIBuilderRef, pointeeTy: LLVMMetadataRef, sizeInBits: UInt64,

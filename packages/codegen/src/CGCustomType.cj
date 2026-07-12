@@ -142,8 +142,9 @@ public open class CGCustomType <: CGType {
                 return
             }
             DefineCustomTypeTemplateIfNeeded(cgMod, customType, rawTypeTemplate)
-            // GAP_TODO: C++ tail calls diBuilder->CreateAnonymousTypeForGenericType(typeTemplate, chirType)
-            // (CGCustomType.cpp:315); debug-info only, DIBuilder anonymous-type facility not yet ported.
+            if (let Some(diBuilder) <- cgMod.GetDIBuilder()) {
+                diBuilder.CreateAnonymousTypeForGenericType(rawTypeTemplate, chirType)
+            }
             PostActionOfGenTypeTemplate()
         }
     }
