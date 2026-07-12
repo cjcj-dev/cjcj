@@ -145,7 +145,7 @@ public func IsAutoBoxedBaseDecl(decl: Decl): Bool {
 
 public func MangleEnumElement(enumDeclMangledName: String, decl: MangleDecl): String {
     var elementClassName = enumDeclMangledName + MANGLE_DOLLAR_PREFIX + decl.identifier
-    if (let Some(ty) <- decl.semaTy) {
+    if (let Some(ty) <- decl.semaTy()) {
         if (ty.kind == TypeKind.TYPE_FUNC) {
             elementClassName += MANGLE_DOLLAR_PREFIX + "${ty.paramTys.size}"
         }
