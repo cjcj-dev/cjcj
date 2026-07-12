@@ -1,8 +1,282 @@
 package cjcj::sema
 
 import std.collection.*
+import std.sort.*
 import cjcj::ast.*
 import cjcj::ast.{GCBlames, TyVarEnv}
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+
+func IsGenericParamExistInUpperBounds(gTy: GenericsTy, upper: Ty): Bool {
+    if (!Ty.IsTyCorrect(upper)) {
+        return false
+    }
+    let genericDecl = gTy.decl.getOrThrow()
+    let visited = HashSet<Ptr<Ty>>()
+    visited.add(Ptr<Ty>(gTy))
+    let queue = ArrayList<Ty>()
+    queue.add(upper)
+    var index: Int64 = 0
+    while (index < queue.size) {
+        let curTy = queue[index]
+        index++
+        if (Ptr<Ty>(curTy) == Ptr<Ty>(gTy)) {
+            return true
+        }
+        let curKey = Ptr<Ty>(curTy)
+        if (visited.contains(curKey)) {
+            continue
+        }
+        visited.add(curKey)
+        for (arg in curTy.typeArgs) {
+            if (!arg.IsGeneric()) {
+                queue.add(arg)
+                continue
+            }
+            let genericTy = (arg as GenericsTy).getOrThrow()
+            if (Ptr<Ty>(genericTy) == Ptr<Ty>(gTy)) {
+                return true
+            }
+            let upperGenericDecl = genericTy.decl.getOrThrow()
+            if (upperGenericDecl.outerDecl != genericDecl.outerDecl) {
+                continue
+            }
+            for (it in genericTy.upperBounds) {
+                queue.add(it)
+            }
+        }
+    }
+    return false
+}
+
+func AreUpperBoundsDirectlyRecursive(visitedGenerics: HashSet<Ptr<GenericsTy>>, upperBound: Ty): Bool {
+    if (!upperBound.IsGeneric()) {
+        return false
+    }
+    let genericTy = (upperBound as GenericsTy).getOrThrow()
+    if (visitedGenerics.contains(Ptr<GenericsTy>(genericTy))) {
+        return true
+    }
+    let visited = HashSet<Ptr<GenericsTy>>()
+    for (value in visitedGenerics) {
+        visited.add(value)
+    }
+    visited.add(Ptr<GenericsTy>(genericTy))
+    for (it in genericTy.upperBounds) {
+        if (AreUpperBoundsDirectlyRecursive(visited, it)) {
+            return true
+        }
+    }
+    return false
+}
+
+func CheckAndReduceUpperBounds(typeManager: TypeManager, genericTy: GenericsTy,
+    upperBounds: TySet): Bool {
+    if (!Ty.AreTysCorrect(upperBounds.values)) {
+        return false
+    }
+    if (upperBounds.Size() <= 1) {
+        return true
+    }
+    let meetRes = MeetAsVisibleTy(typeManager, upperBounds)
+    if (let ErrOrTy.TY(maxCommonChildTy) <- meetRes) {
+        for (it in upperBounds.values) {
+            if (Ptr<Ty>(it) != Ptr<Ty>(maxCommonChildTy)) {
+                var index: Int64 = 0
+                while (index < genericTy.upperBounds.size) {
+                    if (Ptr<Ty>(genericTy.upperBounds[index]) == Ptr<Ty>(it)) {
+                        genericTy.upperBounds.remove(at: index)
+                        break
+                    }
+                    index++
+                }
+            }
+        }
+        return true
+    }
+    genericTy.isUpperBoundLegal = false
+    genericTy.upperBounds.clear()
+    return false
+}
+
+func ValidRecursiveConstraintCheck(diag: BasicDiagnosticEngine, generic: Generic): Bool {
+    for (it in generic.typeParameters) {
+        if (let Some(itTy) <- it.GetTy()) {
+            let genericTy = (itTy as GenericsTy) ?? continue
+            for (upper in genericTy.upperBounds) {
+                if (upper.IsGeneric() &&
+                    AreUpperBoundsDirectlyRecursive(HashSet<Ptr<GenericsTy>>(), upper)) {
+                    let upperGenericTy = (upper as GenericsTy).getOrThrow()
+                    upperGenericTy.isUpperBoundLegal = false
+                    let genericDecl = genericTy.decl.getOrThrow()
+                    let builder = DiagnoseRefactor(diag,
+                        BasicDiagKindRefactor.sema_generic_param_directly_recursive, genericDecl,
+                        arguments: [genericDecl.identifier.Val(), upperGenericTy.String()])
+                    builder.Emit()
+                    return false
+                }
+                if (!upper.IsClassLike() && IsGenericParamExistInUpperBounds(genericTy, upper)) {
+                    genericTy.isUpperBoundLegal = false
+                    let genericDecl = genericTy.decl.getOrThrow()
+                    let builder = DiagnoseRefactor(diag,
+                        BasicDiagKindRefactor.sema_generic_param_exist_in_class_irrelevant_upperbound_recursively,
+                        genericDecl, arguments: [genericDecl.identifier.Val(), upper.String()])
+                    builder.Emit()
+                    return false
+                }
+            }
+        }
+    }
+    return true
+}
+
+func CheckUpperBoundsLegalityRecursively(typeManager: TypeManager, upper: Ty): Bool {
+    if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(upper))) {
+        let typeArgs = upper.typeArgs
+        if (!typeManager.CheckGenericDeclInstantiation(Some(decl), typeArgs)) {
+            return false
+        }
+        for (it in typeArgs) {
+            if (!CheckUpperBoundsLegalityRecursively(typeManager, it)) {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+func CheckUpperBoundsLegality(typeManager: TypeManager, generic: Generic): Bool {
+    for (gp in generic.typeParameters) {
+        if (let Some(gpTy) <- gp.GetTy()) {
+            let genericsTy = (gpTy as GenericsTy) ?? return false
+            for (upper in genericsTy.upperBounds) {
+                if (!CheckUpperBoundsLegalityRecursively(typeManager, upper)) {
+                    return false
+                }
+            }
+        } else {
+            return false
+        }
+    }
+    return true
+}
+
+func SanityCheckForClassUpperBounds(typeManager: TypeManager, diag: BasicDiagnosticEngine,
+    genericTy: GenericsTy, classUpperBounds: TySet): Unit {
+    if (!CheckAndReduceUpperBounds(typeManager, genericTy, classUpperBounds)) {
+        let diagInfo = Ty.GetTypesToStableStr(classUpperBounds.values, ", ")
+        let genericDecl = genericTy.decl.getOrThrow()
+        let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_multiple_class_upperbounds,
+            genericDecl, arguments: [genericDecl.identifier.Val(), diagInfo])
+        builder.Emit()
+        genericDecl.EnableAttr(Attribute.IN_REFERENCE_CYCLE)
+    }
+}
+
+func SanityCheckForOneGenericTy(typeManager: TypeManager, diag: BasicDiagnosticEngine,
+    genericTy: GenericsTy): Unit {
+    let classUpperBounds = TySet()
+    var invalidUpperbound = false
+    let sortedUpperTys = ArrayList<Ty>()
+    for (upper in genericTy.upperBounds) {
+        sortedUpperTys.add(upper)
+    }
+    sort(sortedUpperTys, by: { left: Ty, right: Ty =>
+        if (CompTyByNames(Some(left), Some(right))) {
+            Ordering.LT
+        } else if (CompTyByNames(Some(right), Some(left))) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    }, stable: true)
+    for (upper in sortedUpperTys) {
+        if (upper.IsAny() || upper.IsCType()) {
+            continue
+        }
+        if (upper.kind == TypeKind.TYPE_CLASS) {
+            classUpperBounds.Add(upper)
+        } else if (upper.kind != TypeKind.TYPE_INTERFACE) {
+            let genericDecl = genericTy.decl.getOrThrow()
+            let builder = DiagnoseRefactor(diag,
+                BasicDiagKindRefactor.sema_upper_bound_must_be_class_or_interface, genericDecl,
+                arguments: [upper.String(), genericTy.String()])
+            builder.Emit()
+            invalidUpperbound = true
+        }
+    }
+    if (invalidUpperbound) {
+        return
+    }
+    SanityCheckForClassUpperBounds(typeManager, diag, genericTy, classUpperBounds)
+}
+
+func AssumptionSanityCheck(typeManager: TypeManager, diag: BasicDiagnosticEngine, generic: Generic): Unit {
+    if (!ValidRecursiveConstraintCheck(diag, generic)) {
+        return
+    }
+    for (it in generic.typeParameters) {
+        if (let Some(itTy) <- it.GetTy()) {
+            let genericTy = (itTy as GenericsTy) ?? continue
+            SanityCheckForOneGenericTy(typeManager, diag, genericTy)
+        }
+    }
+}
+
+func ExposeGenericUpperBounds(ctx: ASTContext, generic: Generic): Unit {
+    for (it in generic.typeParameters) {
+        if (let Some(itTy) <- it.GetTy()) {
+            let genericTy = (itTy as GenericsTy) ?? continue
+            let exposedUpperBounds = HashSet<Ptr<Ty>>()
+            for (upper in genericTy.upperBounds) {
+                exposedUpperBounds.add(Ptr<Ty>(upper))
+            }
+            let queue = ArrayList<GenericsTy>()
+            queue.add(genericTy)
+            let visited = HashSet<Ptr<GenericsTy>>()
+            var index: Int64 = 0
+            while (index < queue.size) {
+                let gTy = queue[index]
+                index++
+                let genericKey = Ptr<GenericsTy>(gTy)
+                if (visited.contains(genericKey)) {
+                    continue
+                }
+                visited.add(genericKey)
+                for (upper in gTy.upperBounds) {
+                    if (let Some(upperGenericTy) <- (upper as GenericsTy)) {
+                        queue.add(upperGenericTy)
+                    } else {
+                        exposedUpperBounds.add(Ptr<Ty>(upper))
+                        let sourceGenericKey = Ptr<Ty>(gTy)
+                        let upperKey = Ptr<Ty>(upper)
+                        if (!ctx.gcBlames.contains(sourceGenericKey)) {
+                            ctx.gcBlames[sourceGenericKey] = HashMap<Ptr<Ty>, HashSet<Node>>()
+                        }
+                        if (!ctx.gcBlames[sourceGenericKey].contains(upperKey)) {
+                            ctx.gcBlames[sourceGenericKey][upperKey] = HashSet<Node>()
+                        }
+                        let destinationGenericKey = Ptr<Ty>(genericTy)
+                        if (!ctx.gcBlames.contains(destinationGenericKey)) {
+                            ctx.gcBlames[destinationGenericKey] = HashMap<Ptr<Ty>, HashSet<Node>>()
+                        }
+                        if (!ctx.gcBlames[destinationGenericKey].contains(upperKey)) {
+                            ctx.gcBlames[destinationGenericKey][upperKey] = HashSet<Node>()
+                        }
+                        for (blame in ctx.gcBlames[sourceGenericKey][upperKey]) {
+                            ctx.gcBlames[destinationGenericKey][upperKey].add(blame)
+                        }
+                    }
+                }
+            }
+            let _ = exposedUpperBounds.remove(Ptr<Ty>(genericTy))
+            genericTy.upperBounds.clear()
+            for (upper in exposedUpperBounds) {
+                genericTy.upperBounds.add(upper.value)
+            }
+        }
+    }
+}
 
 private func AddConstraint(typeConstraintCollection: TyVarEnv, subTy: Ty, upperBoundTy: Ty): Unit {
     if (let Some(subGen) <- (subTy as GenericsTy)) {
