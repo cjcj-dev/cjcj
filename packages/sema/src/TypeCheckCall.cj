@@ -3854,6 +3854,31 @@ private func CheckMatchResult(typeManager: TypeManager, diag: Option<BasicDiagno
     return (result, selected.typeMapping)
 }
 
+// Mirrors C++ TypeCheckCall.cpp:1719-1734.
+private func CheckFunctionMatch(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    ctx: Option<ASTContext>, candidate: FunctionCandidate, target: Option<Ty>, argChecker: Option<CallArgChecker>,
+    declSynthesizer: Option<CallDeclSynthesizer>, argSynthesizer: Option<(FuncArg) -> Ty>,
+    effectiveArgChecker: Option<CallArgChecker>): (ArrayList<FuncDecl>, SubstPack) {
+    let matched = CheckCandidate(typeManager, diag, ctx, candidate, target, argChecker: argChecker,
+        inferenceFailure: None, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer)
+    if (matched.isNone()) {
+        return (ArrayList<FuncDecl>(), SubstPack())
+    }
+    let unit = matched.getOrThrow()
+    if (let Some(outerDecl) <- candidate.fd.outerDecl) {
+        if (outerDecl.astKind == ASTKind.INTERFACE_DECL) {
+            if (let Some(base) <- candidate.ce.baseFunc) {
+                if (let Some(refExpr) <- (base as NameReferenceExpr)) {
+                    refExpr.matchedParentTy = outerDecl.GetTy()
+                }
+            }
+        }
+    }
+    ReInferCallArgs(typeManager, candidate.ce, unit, effectiveArgChecker)
+    let result = ReorderCallArgument(typeManager, ctx, unit, candidate.ce, effectiveArgChecker)
+    return (result, unit.typeMapping)
+}
+
 internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: Option<ASTContext>,
     candidates: ArrayList<FuncDecl>, ce: CallExpr, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
     declSynthesizer!: Option<CallDeclSynthesizer> = None, argSynthesizer!: Option<(FuncArg) -> Ty> = None,
@@ -3879,24 +3904,8 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
     }
     if (candidates.size == 1) {
         let candidate = FunctionCandidate(candidates[0], ce, argCombinations)
-        let checked = CheckCandidate(typeManager, diag, ctx, candidate, target, argChecker: argChecker,
-            inferenceFailure: None, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer)
-        if (let None <- checked) {
-            return (ArrayList<FuncDecl>(), SubstPack())
-        }
-        let unit = checked.getOrThrow()
-        if (let Some(outerDecl) <- unit.fd.outerDecl) {
-            if (outerDecl.astKind == ASTKind.INTERFACE_DECL) {
-                if (let Some(base) <- ce.baseFunc) {
-                    if (let Some(refExpr) <- (base as NameReferenceExpr)) {
-                        refExpr.matchedParentTy = outerDecl.GetTy()
-                    }
-                }
-            }
-        }
-        ReInferCallArgs(typeManager, ce, unit, effectiveArgChecker)
-        let result = ReorderCallArgument(typeManager, ctx, unit, ce, effectiveArgChecker)
-        return (result, unit.typeMapping)
+        return CheckFunctionMatch(typeManager, diag, ctx, candidate, target, argChecker, declSynthesizer,
+            argSynthesizer, effectiveArgChecker)
     }
     let fdScopeLevelMap = HashMap<Node, Int64>()
     let orderedCandidates = GetOrderedCandidates(ctx, ce, candidates, fdScopeLevelMap)
