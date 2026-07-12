@@ -33,6 +33,7 @@ import cjcj::chir.NoWriteBarrierRecChecker
 import cjcj::chir.OptFuncRetType
 import cjcj::chir.OptEffectCHIRMap as ChirOptEffectCHIRMap
 import cjcj::chir.Package as RealCHIRPackage
+import cjcj::chir.UnreachableBranchCheck
 import cjcj::chir.RedundantFutureRemoval
 import cjcj::chir.RedundantGetOrThrowElimination
 import cjcj::chir.RedundantLoadElimination
@@ -515,6 +516,10 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
         enableCoverage: options.enableCoverage)
     DeadCodeElimination(builder).NothingTypeExprElimination(pkg, isDebug: options.chirDebugOptimizer)
+    let wrapper = ConstAnalysisWrapper(builder)
+    wrapper.RunOnPackage(pkg, diag, isDebug: options.chirDebugOptimizer)
+    let _ = VarInitCheck(diag).RunOnPackage(pkg)
+    UnreachableBranchCheck(wrapper, diag, pkg.GetName()).RunOnPackage(pkg, Int64(options.GetJobs()))
     DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(pkg, isDebug: options.chirDebugOptimizer)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
         enableCoverage: options.enableCoverage)
@@ -528,9 +533,6 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     if (options.IsCHIROptimizationLevelOverO2()) {
         DeadCodeElimination(builder).RunOnPackage(pkg)
     }
-    let wrapper = ConstAnalysisWrapper(builder)
-    wrapper.RunOnPackage(pkg, diag, isDebug: options.chirDebugOptimizer)
-    let _ = VarInitCheck(diag).RunOnPackage(pkg)
     let cp = ConstPropagation(builder: Some(builder), wrapper: wrapper, opts: options)
     MergeEffectMap(cp.GetEffectMap(), effectMap)
     cp.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer, isCJLint: false)
