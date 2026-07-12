@@ -204,7 +204,7 @@ private func GenerateOverflowCheckedFunc(irBuilder: IRBuilder2, kind: ExprKind, 
     let args = ArrayList<LLVMValueRef>()
     args.add(lhsValue)
     args.add(rhsValue)
-    return irBuilder.CreateIntrinsicCall(intrinsicName, overloadedTypes, args,
+    return irBuilder.CreateIntrinsicCallNoInvoke(intrinsicName, overloadedTypes, args,
         name: ExprKindNameForIR(kind) + ".overflow")
 }
 
