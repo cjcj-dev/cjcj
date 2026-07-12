@@ -1,0 +1,61 @@
+file:line	rule	reason
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:167	R2-invented-symbol	Pre-existing selfhost extraction; callback signature now carries the enclosing checker used by C++ EffectHandlers.cpp:484 CreateFrame and EffectHandlers.cpp:1005 DesugarPerform.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:195	R2-invented-symbol	Pre-existing constructor extraction for the default exception path in C++ EffectHandlers.cpp:1052 DesugarImmediateResume.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:264	R2-invented-symbol	Pre-existing extraction of helper-frame method construction from C++ EffectHandlers.cpp:982 GetHelperFrameMethod.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:278	R2-invented-symbol	Pre-existing extraction of the ChkCallExpr and DesugarForPropDecl sequence in C++ EffectHandlers.cpp:1005 DesugarPerform.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:288	R2-invented-symbol	Selfhost public spelling of C++ EffectHandlers.cpp:1005 TypeCheckerImpl::DesugarPerform; only checker injection changed.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:318	R2-invented-symbol	Pre-existing extraction of the Result constructor branch in C++ EffectHandlers.cpp:1052 DesugarImmediateResume.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:338	R2-invented-symbol	Pre-existing extraction of the exception/error constructor branch in C++ EffectHandlers.cpp:1052 DesugarImmediateResume.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:382	R2-invented-symbol	Selfhost public spelling of C++ EffectHandlers.cpp:1031 TypeCheckerImpl::DesugarResume; only checker injection changed.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:452	R2-invented-symbol	Pre-existing extraction of generated member-call construction in C++ EffectHandlers.cpp:124 EncloseTryLambda.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:469	R2-invented-symbol	Pre-existing extraction of HandlerFrame.getActiveFrame().parent generation in C++ EffectHandlers.cpp:145 EncloseTryLambda.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:482	R2-invented-symbol	Pre-existing extraction of active-frame equality guard generation in C++ EffectHandlers.cpp:168 EncloseTryLambda.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:495	R2-invented-symbol	Pre-existing extraction of immediate-wrapper guarded catch generation in C++ EffectHandlers.cpp:192 EncloseTryLambda.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:520	R2-invented-symbol	Pre-existing extraction of the early-return match generated in C++ EffectHandlers.cpp:304 EncloseTryLambda.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:557	R2-invented-symbol	Pre-existing extraction of ImmediateEarlyReturn guarded catch in C++ EffectHandlers.cpp:323 EncloseTryLambda.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:583	R2-invented-symbol	Pre-existing extraction of the immediate-wrapper enclosure implemented by C++ EffectHandlers.cpp:124 EncloseTryLambda.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:657	R2-invented-symbol	Pre-existing extraction of exception/error wrapper catch clauses in C++ EffectHandlers.cpp:219 EncloseTryLambda.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:738	R2-invented-symbol	Pre-existing extraction of immediate handler-lambda wrapping in C++ EffectHandlers.cpp:558 CreateSetHandler.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:882	R2-invented-symbol	Selfhost extraction of C++ EffectHandlers.cpp:535 TypeCheckerImpl::CreateSetFinally; only checker injection changed.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:903	R2-invented-symbol	Selfhost per-handler extraction of C++ EffectHandlers.cpp:558 TypeCheckerImpl::CreateSetHandler.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:954	R2-invented-symbol	Selfhost loop extraction of C++ EffectHandlers.cpp:558 TypeCheckerImpl::CreateSetHandler.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:971	R2-invented-symbol	Selfhost extraction of start-result construction in C++ EffectHandlers.cpp:900 TypeCheckerImpl::CreateResult.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4255	R2-invented-symbol	Selfhost spelling of C++ LambdaExpr.cpp:22 ClearLambdaBodyForReCheck; helper predates this chain and was moved by the port.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4526	R2-invented-symbol	Selfhost extraction of lambda param-list preconditions in C++ LambdaExpr.cpp:314 ChkLamExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4535	R2-invented-symbol	Selfhost extraction of FuncTyConfig propagation in C++ LambdaExpr.cpp:355 ChkLamExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4544	R2-invented-symbol	Selfhost spelling of parameter checking in C++ LambdaExpr.cpp:380 ChkLamParamTys.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4571	R2-invented-symbol	Selfhost extraction of target return-type node setup in C++ LambdaExpr.cpp:338 ChkLamExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4584	R2-invented-symbol	Selfhost spelling of C++ LambdaExpr.cpp:410 ChkLamBody.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4597	R2-invented-symbol	Selfhost decomposition of C++ LambdaExpr.cpp:314 ChkLamExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4648	R2-invented-symbol	Callback adapter for the direct Check operation consumed by C++ TypeCheckCall.cpp:2008 MatchFunctionForCall.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4652	R2-invented-symbol	Selfhost extraction of ImportManager.GetCoreDecl calls in C++ TypeCheckExpr/SpawnExpr.cpp:14 SynSpawnExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4660	R2-invented-symbol	Selfhost extraction of Future lookup in C++ TypeCheckExpr/SpawnExpr.cpp:14 SynSpawnExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4668	R2-invented-symbol	Selfhost extraction of ThreadContext lookup in C++ TypeCheckExpr/SpawnExpr.cpp:40 CheckSpawnArgValid.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4675	R2-invented-symbol	Selfhost spelling of C++ TypeCheckExpr/SpawnExpr.cpp:14 SynSpawnExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4698	R2-invented-symbol	Selfhost extraction of Future target selection in C++ TypeCheckExpr/SpawnExpr.cpp:84 ChkSpawnExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4713	R2-invented-symbol	Selfhost decomposition of C++ TypeCheckExpr/SpawnExpr.cpp:84 ChkSpawnExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4757	R2-invented-symbol	Selfhost extraction of constructor return-this adjustment in C++ ReturnExpr.cpp:18 SynReturnExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4776	R2-invented-symbol	Selfhost spelling of C++ ReturnExpr.cpp:18 SynReturnExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4824	R2-invented-symbol	Selfhost identity-dedup extraction used while binding conditions in C++ TypeCheckExpr/IfExpr.cpp:133 SynLetPatternDestructor.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4833	R2-invented-symbol	Selfhost recursive spelling of C++ TypeCheckExpr/IfExpr.cpp:118 PropagateCtxExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4870	R2-invented-symbol	Selfhost extraction of binding discovery used by C++ TypeCheckExpr/IfExpr.cpp:99 CollectVariables.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4910	R2-invented-symbol	Selfhost decomposition of condition binding checks in C++ TypeCheckExpr/IfExpr.cpp:166 CheckCondition.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4938	R2-invented-symbol	Selfhost extraction of condition-name binding in C++ TypeCheckExpr/IfExpr.cpp:133 SynLetPatternDestructor.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4948	R2-invented-symbol	Selfhost spelling of C++ TypeCheckExpr/IfExpr.cpp:133 SynLetPatternDestructor.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:4987	R2-invented-symbol	Selfhost decomposition of C++ TypeCheckExpr/IfExpr.cpp:166 CheckCondition.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5029	R2-invented-symbol	Selfhost decomposition of C++ UnaryExpr.cpp:137 ChkUnaryExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5044	R2-invented-symbol	Selfhost spelling of C++ TypeCheckExpr/IfExpr.cpp:21 IsIfExprWithoutElse.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5056	R2-invented-symbol	Selfhost extraction of branch joining in C++ TypeCheckExpr/IfExpr.cpp:33 SynIfExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5072	R2-invented-symbol	Selfhost spelling of C++ TypeCheckExpr/IfExpr.cpp:33 SynIfExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5150	R2-invented-symbol	Selfhost spelling of C++ TypeCheckExpr/IfExpr.cpp:227 ChkIfExprNoElse.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5172	R2-invented-symbol	Selfhost decomposition of C++ TypeCheckExpr/IfExpr.cpp:80 ChkIfExpr and TypeCheckExpr/IfExpr.cpp:243 ChkIfExprTwoBranches.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5206	R2-invented-symbol	Selfhost extraction of child synthesis in C++ TypeCheckMatchExpr.cpp:60 SynMatchExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5248	R2-invented-symbol	Selfhost recursive extraction of pattern bindings used by C++ TypeCheckMatchExpr.cpp:76 SynMatchExprHasSelector.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5286	R2-invented-symbol	Selfhost list wrapper around pattern binding collection in C++ TypeCheckMatchExpr.cpp:76 SynMatchExprHasSelector.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5292	R2-invented-symbol	Selfhost scope cleanup extraction from C++ TypeCheckMatchExpr.cpp:76 SynMatchExprHasSelector.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5301	R2-invented-symbol	Selfhost node-diagnostic extraction from C++ LoopExprs.cpp:94 SynForInExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5313	R2-invented-symbol	Selfhost guard-diagnostic extraction from C++ LoopExprs.cpp:94 SynForInExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5323	R2-invented-symbol	Selfhost pattern-diagnostic extraction from C++ LoopExprs.cpp:94 SynForInExpr.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5331	R2-invented-symbol	Selfhost spelling of C++ LoopExprs.cpp:17 GetIterableTy.
+packages/sema/src/TypeCheckExpr/TypeChecker.cj:5360	R2-invented-symbol	Selfhost spelling of C++ LoopExprs.cpp:94 SynForInExpr.
+packages/sema/src/TypeCheckReference.cj:510	R2-invented-symbol	Visibility-only change to the pre-existing selfhost spelling of C++ NameReferenceExpr.cpp:296 DiagMemberAccessNotFound.
