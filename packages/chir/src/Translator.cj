@@ -613,8 +613,7 @@ public class Translator {
             case ASTKind.PAREN_EXPR => trans.Visit(RequireNodeAsParenExpr(nodePtr))
             case ASTKind.POINTER_EXPR => trans.Visit(RequireNodeAsPointerExpr(nodePtr))
             case ASTKind.SPAWN_EXPR => trans.Visit(RequireNodeAsSpawnExpr(nodePtr))
-            case _ => throw IllegalArgumentException(
-                "not yet ported in faithful AST2CHIR: ${ASTKindName(nodePtr.astKind)}")
+            case _ => trans.Visit(nodePtr)
         }
         if (let Some(block) <- (nodePtr as AstBlock)) {
             if (nodePtr != node || nodePtr.TestAttr(AstAttribute.UNSAFE)) {
@@ -624,6 +623,14 @@ public class Translator {
             }
         }
         return result
+    }
+
+    private func Visit(node: AstNode): Option<Value> {
+        if (this.isComputingAnnos && node.astKind == ASTKind.IF_AVAILABLE_EXPR) {
+            return None
+        }
+        CJC_ASSERT(false)
+        return None
     }
 
     public static func GetDesugaredExpr(node: AstNode): AstNode {
