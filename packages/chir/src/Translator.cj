@@ -2167,6 +2167,94 @@ public class Translator {
             TranslateMemberAccessInstArgs(member), ShouldUseVirtualMemberDispatchForMemberAccess(member, funcDecl))
     }
 
+    private func GetInstCalleeInfoFromVarInit(expr: AstRefExpr, calleeDecl: AstFuncDecl): FaithfulInstCalleeInfo {
+        let thisType = TranslateMemberOwnerType(calleeDecl)
+        let funcType = RequireFuncType(chirTy.TranslateType(RequireAstTy(expr)))
+        let paramTys = ArrayList<Type>()
+        for (paramTy in funcType.GetParamTypes()) {
+            paramTys.add(paramTy)
+        }
+        let instantiatedTypeArgs = ArrayList<Type>()
+        for (instTy in expr.instTys) {
+            instantiatedTypeArgs.add(chirTy.TranslateType(instTy))
+        }
+        CJC_ASSERT(calleeDecl.TestAttr(AstAttribute.STATIC))
+        return FaithfulInstCalleeInfo(thisType, thisType, paramTys, funcType.GetReturnType(),
+            instantiatedTypeArgs, false)
+    }
+
+    private func GetExactParentTypeAndFuncType(expr: AstRefExpr, thisType: Type, calleeDecl: AstFuncDecl,
+        isVirtualFuncCall: Bool): (Type, FuncType, ArrayList<Type>, Bool) {
+        let funcType = RequireFuncType(chirTy.TranslateType(RequireAstTy(expr)))
+        let paramTys = ArrayList<Type>()
+        for (paramTy in funcType.GetParamTypes()) {
+            paramTys.add(paramTy)
+        }
+        if (!calleeDecl.TestAttr(AstAttribute.STATIC)) {
+            paramTys.add(thisType, at: 0)
+        }
+        var calleeFuncTy = builder.context.GetFuncTy(paramTys, funcType.GetReturnType())
+        let funcInstArgs = ArrayList<Type>()
+        for (instTy in expr.instTys) {
+            funcInstArgs.add(chirTy.TranslateType(instTy))
+        }
+        let thisDerefTy = thisType.StripAllRefs()
+        var parentTypeOpt = GetExactParentType(thisDerefTy, calleeDecl, calleeFuncTy, funcInstArgs, isVirtualFuncCall)
+        var virtualCall = isVirtualFuncCall
+        if (parentTypeOpt.isNone()) {
+            CJC_ASSERT(!virtualCall)
+            parentTypeOpt = GetExactParentType(thisDerefTy, calleeDecl, calleeFuncTy, funcInstArgs, true)
+            virtualCall = true
+        }
+        if (parentTypeOpt.isNone()) {
+            throw IllegalStateException("faithful AST2CHIR GetExactParentTypeAndFuncType failed to find parent type: " +
+                "callee=${calleeDecl.identifier.Val()}, this=${thisType.ToString()}, thisDeref=${thisDerefTy.ToString()}, " +
+                "virtual=${virtualCall}, isStatic=${calleeDecl.TestAttr(AstAttribute.STATIC)}")
+        }
+        let parentType = if (let Some(resolvedParentType) <- parentTypeOpt) {
+            resolvedParentType
+        } else {
+            throw IllegalStateException("faithful AST2CHIR impossible: GetExactParentTypeAndFuncType parent type changed after check")
+        }
+        if (!calleeDecl.TestAttr(AstAttribute.STATIC)) {
+            CJC_ASSERT(!paramTys.isEmpty())
+            if (thisDerefTy.IsStruct() && parentType != thisDerefTy && calleeDecl.TestAttr(AstAttribute.MUT)) {
+                paramTys[0] = thisType
+            } else if (parentType.IsClass()) {
+                paramTys[0] = AddRefIfFuncIsMutOrClass(parentType, calleeDecl)
+            }
+            calleeFuncTy = builder.context.GetFuncTy(paramTys, calleeFuncTy.GetReturnType())
+        }
+        return (parentType, calleeFuncTy, funcInstArgs, virtualCall)
+    }
+
+    private func GetInstCalleeInfoFromRefExpr(expr: AstRefExpr, calleeDecl: AstFuncDecl): FaithfulInstCalleeInfo {
+        let currentFunc = CurrentFunction()
+        if (currentFunc.IsGVInit() || currentFunc.IsStaticInit()) {
+            return GetInstCalleeInfoFromVarInit(expr, calleeDecl)
+        }
+
+        let thisType = currentFunc.GetParentCustomTypeOrExtendedType() ??
+            throw IllegalStateException("faithful AST2CHIR expected parent custom/extended type when translating member call")
+        let thisTypeRef = AddRefIfFuncIsMutOrClass(thisType, calleeDecl)
+        var caller = currentFunc.GetParentCustomTypeDef() ??
+            throw IllegalStateException("faithful AST2CHIR member call has no parent custom type def")
+        if (let Some(customTy) <- (thisType as CustomType)) {
+            caller = customTy.GetCustomTypeDef()
+        }
+        var isVirtualFuncCall = IsVirtualFuncCall(caller, calleeDecl, false)
+        let (parentType, calleeFuncTy, instantiatedTypeArgs, isVirtualFromHelper) =
+            GetExactParentTypeAndFuncType(expr, thisTypeRef, calleeDecl, isVirtualFuncCall)
+        isVirtualFuncCall = isVirtualFromHelper
+        let finalThisType = if (isVirtualFuncCall) {
+            builder.context.GetRefTy(builder.context.GetThisTy())
+        } else {
+            thisTypeRef
+        }
+        return FaithfulInstCalleeInfo(parentType, finalThisType, calleeFuncTy.GetParamTypes(),
+            calleeFuncTy.GetReturnType(), instantiatedTypeArgs, isVirtualFuncCall)
+    }
+
     private func MemberAccessFuncType(member: AstMemberAccess): FuncType {
         let astTy = RequireAstTy(member)
         return RequireFuncType(chirTy.TranslateType(astTy))
@@ -2409,7 +2497,7 @@ public class Translator {
                     typeIdx++
                 }
                 if (let Some(found) <- GetExpectedFuncFromDef(extendDef, funcName, instFuncType, true,
-                    replaceTable, funcInstTypeArgs)) {
+                    replaceTable, funcInstTypeArgs, checkAbstractMethod: false)) {
                     return found
                 }
             }
@@ -2431,7 +2519,7 @@ public class Translator {
             classArgIdx++
         }
         if (let Some(found) <- GetExpectedFuncFromDef(customTy.GetCustomTypeDef(), funcName, instFuncType, isStatic,
-            replaceTable, funcInstTypeArgs)) {
+            replaceTable, funcInstTypeArgs, checkAbstractMethod: false)) {
             return found
         }
         for (extendDef in customTy.GetCustomTypeDef().GetExtends()) {
@@ -2441,7 +2529,7 @@ public class Translator {
                 continue
             }
             if (let Some(found) <- GetExpectedFuncFromDef(extendDef, funcName, instFuncType, isStatic,
-                replaceTable, funcInstTypeArgs)) {
+                replaceTable, funcInstTypeArgs, checkAbstractMethod: false)) {
                 return found
             }
         }
@@ -2474,9 +2562,10 @@ public class Translator {
     }
 
     private func GetExpectedFuncFromDef(def: CustomTypeDef, funcName: String, instFuncType: FuncType, isStatic: Bool,
-        replaceTable: HashMap<Int64, Type>, funcInstTypeArgs: ArrayList<Type>): Option<Function> {
+        replaceTable: HashMap<Int64, Type>, funcInstTypeArgs: ArrayList<Type>,
+        checkAbstractMethod!: Bool = false): Option<Function> {
         if (let Some(found) <- def.GetExpectedFunc(funcName, instFuncType, isStatic, replaceTable, funcInstTypeArgs,
-            builder, false)) {
+            builder, checkAbstractMethod)) {
             return found
         }
         return None
@@ -2530,7 +2619,7 @@ public class Translator {
                 typeIdx++
             }
             if (let Some(found) <- GetExpectedFuncFromDef(extendDef, funcName, funcType, isStatic, replaceTable,
-                funcInstTypeArgs)) {
+                funcInstTypeArgs, checkAbstractMethod: checkAbstractMethod)) {
                 if (found.GetWrappedRawMethod().isNone()) {
                     return ReplaceRawGenericArgType(extendDef.GetExtendedType().getOrThrow(), replaceTable, builder)
                 }
@@ -2563,7 +2652,7 @@ public class Translator {
             classArgIdx++
         }
         if (GetExpectedFuncFromDef(customTy.GetCustomTypeDef(), funcName, funcType, isStatic, replaceTable,
-            funcInstTypeArgs).isSome()) {
+            funcInstTypeArgs, checkAbstractMethod: checkAbstractMethod).isSome()) {
             return customTy
         }
         for (extendDef in customTy.GetCustomTypeDef().GetExtends()) {
@@ -2572,7 +2661,8 @@ public class Translator {
             if (!matchResult) {
                 continue
             }
-            if (GetExpectedFuncFromDef(extendDef, funcName, funcType, isStatic, replaceTable, funcInstTypeArgs).isSome()) {
+            if (GetExpectedFuncFromDef(extendDef, funcName, funcType, isStatic, replaceTable, funcInstTypeArgs,
+                checkAbstractMethod: checkAbstractMethod).isSome()) {
                 return ReplaceRawGenericArgType(extendDef.GetExtendedType().getOrThrow(), replaceTable, builder)
             }
         }
@@ -7271,36 +7361,49 @@ public class Translator {
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         let argValues = ArrayList<Value>()
         let callee = globalSymbolTable.Get(calleeDecl)
-        var thisType: Option<Type> = if (calleeDecl.TestAttr(AstAttribute.STATIC)) {
-            MemberCallInstantiatedThisType(expr, calleeDecl)
+        let calleeInfo = if (let Some(base) <- expr.baseFunc) {
+            if (let Some(member) <- (base as AstMemberAccess)) {
+                GetInstCalleeInfoFromMemberAccess(member, calleeDecl)
+            } else if (let Some(refExpr) <- (base as AstRefExpr)) {
+                GetInstCalleeInfoFromRefExpr(refExpr, calleeDecl)
+            } else {
+                throw IllegalStateException("faithful AST2CHIR unsupported member call base")
+            }
         } else {
-            None
+            throw IllegalStateException("faithful AST2CHIR member call has no base")
+        }
+        var thisType: Option<Type> = Some(calleeInfo.thisType)
+        if (calleeDecl.TestAttr(AstAttribute.STATIC)) {
+            thisType = MemberCallInstantiatedThisType(expr, calleeDecl)
         }
         var dispatchReceiverType: Option<Type> = None
         var funcCallThisType: Option<Type> = None
         var thisObj: Option<Value> = None
+        var expectedThisObjTy: Option<Type> = None
         if (!calleeDecl.TestAttr(AstAttribute.STATIC)) {
             let rawObj = TranslateThisObjectForMemberFuncCall(expr, calleeDecl)
             dispatchReceiverType = rawObj.GetType()
             funcCallThisType = rawObj.GetType()
-            let obj = CoerceThisObjectForCallee(calleeDecl, callee, rawObj)
-            thisObj = obj
-            thisType = obj.GetType()
-            // For a builtin generic owner (CPointer<T>/CFunc<T>/VArray<T>) whose generic parameter is not exposed
-            // through outerDecl.GetGeneric(), CoerceThisObjectForCallee generifies the concrete receiver, leaving
-            // the coerced this-object (and hence the Apply's this-type) uninstantiated, which breaks runtime-TypeInfo
-            // lowering. In exactly that case, recover the instantiated this-type from the base expression, mirroring
-            // C++ GetInstCalleeInfoFromMemberAccess (TranslateMemberAccess.cpp:272). Normal calls keep the coerced
-            // this-object type unchanged.
-            if (let Some(coercedTy) <- thisType) {
-                if (coercedTy.StripAllRefs().IsGenericRelated()) {
-                    if (let Some(faithful) <- MemberCallInstantiatedThisType(expr, calleeDecl)) {
-                        if (!faithful.StripAllRefs().IsGenericRelated()) {
-                            thisType = Some(faithful)
-                        }
-                    }
+            expectedThisObjTy = if (calleeInfo.isVirtualFuncCall) {
+                var virtualTy = calleeInfo.instParentCustomTy
+                if (virtualTy.IsClassOrArray() || (virtualTy.IsStruct() && calleeDecl.TestAttr(AstAttribute.MUT))) {
+                    virtualTy = builder.context.GetRefTy(virtualTy)
+                }
+                Some(virtualTy)
+            } else {
+                if (calleeInfo.instParamTys.isEmpty()) {
+                    None
+                } else {
+                    Some(calleeInfo.instParamTys[0])
                 }
             }
+            thisType = expectedThisObjTy
+            let obj = if (let Some(expectedTy) <- expectedThisObjTy) {
+                CoerceValueForExpectedType(rawObj, expectedTy)
+            } else {
+                rawObj
+            }
+            thisObj = obj
         }
         let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: thisType)
         let previousDefaultArgs = ArrayList<Value>()
@@ -7313,7 +7416,7 @@ public class Translator {
                 let parentTy = thisType ?? TranslateMemberOwnerType(calleeDecl)
                 let rtti = RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
                     parentTy.StripAllRefs(), CurrentBlock()))
-                let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
+                let instTypeArgs = calleeInfo.instantiatedTypeArgs
                 let invokeCtx = InvokeCallContext(rtti, FuncCallContext(args: argValues,
                     instTypeArgs: instTypeArgs, thisType: parentTy),
                     FuncSigInfo(BuildMethodFuncTypeForMemberAccess(calleeDecl), funcName: calleeDecl.identifier.Val()))
@@ -7327,7 +7430,7 @@ public class Translator {
             let obj = thisObj ?? throw IllegalStateException("faithful AST2CHIR virtual member call has no this object")
             let objTy = thisType ?? throw IllegalStateException("faithful AST2CHIR virtual member call this has no type")
             let callThisTy = funcCallThisType ?? objTy
-            let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
+            let instTypeArgs = calleeInfo.instantiatedTypeArgs
             let invokeCtx = InvokeCallContext(obj, FuncCallContext(args: argValues,
                 instTypeArgs: instTypeArgs, thisType: callThisTy),
                 FuncSigInfo(BuildMethodFuncTypeForMemberAccess(calleeDecl), funcName: calleeDecl.identifier.Val()))
@@ -7341,7 +7444,7 @@ public class Translator {
         if (let Some(obj) <- thisObj) {
             argValues.add(obj, at: 0)
         }
-        let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
+        let instTypeArgs = calleeInfo.instantiatedTypeArgs
         let applyThisType = match (funcCallThisType) {
             case Some(value) => Some(value)
             case None => thisType
@@ -7601,6 +7704,74 @@ public class Translator {
             }
         }
         return true
+    }
+
+    private func InheritedChainHasCommon(def: CustomTypeDef): Bool {
+        if (def.TestAttr(Attribute.COMMON)) {
+            return true
+        }
+        for (parent in def.GetSuperTypesInCurDef()) {
+            if (InheritedChainHasCommon(parent.GetClassDef())) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func FuncDeclIsOpen(funcDecl: AstFuncDecl): Bool {
+        if (funcDecl.TestAnyAttr(AstAttribute.GENERIC_INSTANTIATED, AstAttribute.PRIMARY_CONSTRUCTOR) ||
+            funcDecl.TestAttr(AstAttribute.CONSTRUCTOR) ||
+            funcDecl.TestAttr(AstAttribute.FINALIZER)) {
+            return false
+        }
+        let funcHasOpenFlag = funcDecl.TestAnyAttr(AstAttribute.OPEN, AstAttribute.ABSTRACT) ||
+            if (let Some(outerDecl) <- funcDecl.outerDecl) {
+                outerDecl.astKind == ASTKind.INTERFACE_DECL
+            } else {
+                false
+            }
+        let instanceMethodIsOpen = funcHasOpenFlag &&
+            (funcDecl.TestAnyAttr(AstAttribute.PUBLIC, AstAttribute.PROTECTED))
+        let staticMethodIsOpen = if (let Some(outerDecl) <- funcDecl.outerDecl) {
+            outerDecl.IsClassLikeDecl() && funcDecl.TestAttr(AstAttribute.STATIC) && !funcDecl.TestAttr(AstAttribute.PRIVATE)
+        } else {
+            false
+        }
+        return instanceMethodIsOpen || staticMethodIsOpen
+    }
+
+    private func IsInsideCFuncLambda(): Bool {
+        var ownerBlockGroup = CurrentBlock().GetParentBlockGroup()
+        while (let Some(blockGroup) <- ownerBlockGroup) {
+            if (let Some(ownerExpr) <- blockGroup.GetOwnerExpression()) {
+                if (let Some(lambda) <- (ownerExpr as Lambda)) {
+                    if (let Some(funcTy) <- lambda.GetFuncType()) {
+                        if (funcTy.IsCFunc()) {
+                            return true
+                        }
+                    }
+                }
+                ownerBlockGroup = ownerExpr.GetParentBlockGroup()
+                continue
+            }
+            return false
+        }
+        return false
+    }
+
+    private func IsVirtualFuncCall(owner: CustomTypeDef, funcDecl: AstFuncDecl, baseExprIsSuper: Bool): Bool {
+        if (baseExprIsSuper || IsInsideCFuncLambda()) {
+            return false
+        }
+        if (owner.CanBeInherited() && FuncDeclIsOpen(funcDecl)) {
+            return true
+        }
+        let outerOpen = if (let Some(outerDecl) <- funcDecl.outerDecl) {
+            outerDecl.IsOpen()
+        } else {
+            false
+        }
+        return FuncDeclIsOpen(funcDecl) && outerOpen && InheritedChainHasCommon(owner)
     }
 
     private func TranslateMemberOwnerType(funcDecl: AstFuncDecl): Type {
