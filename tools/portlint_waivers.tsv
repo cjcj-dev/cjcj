@@ -1,6 +1,6 @@
 file:line	rule	reason
 packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:167	R2-invented-symbol	Pre-existing selfhost extraction; callback signature now carries the enclosing checker used by C++ EffectHandlers.cpp:484 CreateFrame and EffectHandlers.cpp:1005 DesugarPerform.
-packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:195	R2-invented-symbol	Pre-existing constructor extraction for the default exception path in C++ EffectHandlers.cpp:1052 DesugarImmediateResume.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:195	R2-invented-symbol	Pre-existing constructor extraction for the Exception() object-creation and wildcard throw path in C++ EffectHandlers.cpp:373-394 EncloseTryLambda.
 packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:264	R2-invented-symbol	Pre-existing extraction of helper-frame method construction from C++ EffectHandlers.cpp:982 GetHelperFrameMethod.
 packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:278	R2-invented-symbol	Pre-existing extraction of the ChkCallExpr and DesugarForPropDecl sequence in C++ EffectHandlers.cpp:1005 DesugarPerform.
 packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:288	R2-invented-symbol	Selfhost public spelling of C++ EffectHandlers.cpp:1005 TypeCheckerImpl::DesugarPerform; only checker injection changed.
@@ -8,13 +8,13 @@ packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:318	R2-invented-symbo
 packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:338	R2-invented-symbol	Pre-existing extraction of the exception/error constructor branch in C++ EffectHandlers.cpp:1052 DesugarImmediateResume.
 packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:382	R2-invented-symbol	Selfhost public spelling of C++ EffectHandlers.cpp:1031 TypeCheckerImpl::DesugarResume; only checker injection changed.
 packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:452	R2-invented-symbol	Pre-existing extraction of generated member-call construction in C++ EffectHandlers.cpp:124 EncloseTryLambda.
-packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:469	R2-invented-symbol	Pre-existing extraction of HandlerFrame.getActiveFrame().parent generation in C++ EffectHandlers.cpp:145 EncloseTryLambda.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:469	R2-invented-symbol	Pre-existing extraction of HandlerFrame.getActiveFrame().getOrThrow().parent generation in C++ EffectHandlers.cpp:160-166,245-251,332-338 EncloseTryLambda.
 packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:482	R2-invented-symbol	Pre-existing extraction of active-frame equality guard generation in C++ EffectHandlers.cpp:168 EncloseTryLambda.
 packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:495	R2-invented-symbol	Pre-existing extraction of immediate-wrapper guarded catch generation in C++ EffectHandlers.cpp:192 EncloseTryLambda.
-packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:520	R2-invented-symbol	Pre-existing extraction of the early-return match generated in C++ EffectHandlers.cpp:304 EncloseTryLambda.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:520	R2-invented-symbol	Pre-existing extraction of the ImmediateEarlyReturn result match and wildcard Exception() throw in C++ EffectHandlers.cpp:320-402 EncloseTryLambda.
 packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:557	R2-invented-symbol	Pre-existing extraction of ImmediateEarlyReturn guarded catch in C++ EffectHandlers.cpp:323 EncloseTryLambda.
 packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:583	R2-invented-symbol	Pre-existing extraction of the immediate-wrapper enclosure implemented by C++ EffectHandlers.cpp:124 EncloseTryLambda.
-packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:657	R2-invented-symbol	Pre-existing extraction of exception/error wrapper catch clauses in C++ EffectHandlers.cpp:219 EncloseTryLambda.
+packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:657	R2-invented-symbol	Pre-existing extraction of Exception/Error catch clauses that throw immediate wrappers in C++ EffectHandlers.cpp:661-795 CreateSetHandler.
 packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:738	R2-invented-symbol	Pre-existing extraction of immediate handler-lambda wrapping in C++ EffectHandlers.cpp:558 CreateSetHandler.
 packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:882	R2-invented-symbol	Selfhost extraction of C++ EffectHandlers.cpp:535 TypeCheckerImpl::CreateSetFinally; only checker injection changed.
 packages/sema/src/Desugar/AfterTypeCheck/EffectHandlers.cj:903	R2-invented-symbol	Selfhost per-handler extraction of C++ EffectHandlers.cpp:558 TypeCheckerImpl::CreateSetHandler.
