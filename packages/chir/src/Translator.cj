@@ -3778,8 +3778,10 @@ public class Translator {
         if (let Some(_) <- (pattern as AstWildcardPattern)) {
             return
         }
-        throw IllegalArgumentException(
-            "not yet ported in faithful AST2CHIR: non-var range ForInExpr pattern")
+        if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
+            HandleTupleOrEnumPatternDecl(enumPattern, enumPattern.patterns, None, isLocalPattern: true)
+            return
+        }
     }
 
     private func ForInPatternVarDecl(pattern: AstPattern): Option<AstVarDecl> {
