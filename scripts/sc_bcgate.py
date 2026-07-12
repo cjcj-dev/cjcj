@@ -3,15 +3,17 @@
 baseline (reference C++) cjc, compare emitted bitcode function-by-function. A FAR broader faithfulness
 signal than the 113 single-file difftest corpus (packages exercise generics/casts/closures/imports/...).
 
-Usage: python3 scripts/sc_bcgate.py <pkg> [<pkg2> ...] [--self PATH] [--timeout N]
+Usage: python3 scripts/sc_bcgate.py <pkg> [<pkg2> ...] [--self PATH] [--timeout N] [--jobs K] [--no-cache]
   default --self = ./target/release/bin/<module>::cjc (auto-detected) ; baseline = $CANGJIE_HOME/bin/cjc
 Reuses bcgate.py's IR normalization (function-by-function, module-layout independent).
 """
-import os, sys, subprocess, hashlib, tempfile, pathlib, importlib.util
+import os, sys, subprocess, hashlib, tempfile, pathlib, importlib.util, json, re
+from concurrent.futures import ThreadPoolExecutor
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CANGJIE_HOME = os.environ.get("CANGJIE_HOME", "/root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029")
 DIS = f"{CANGJIE_HOME}/third_party/llvm/bin/llvm-dis"
+CACHE_DIR = pathlib.Path("/root/cj_build/audit_persist/scb_cache")
 
 # reuse bcgate.py's normalization + function extraction
 spec = importlib.util.spec_from_file_location("bcgate", str(ROOT / "scripts" / "bcgate.py"))
@@ -53,23 +55,93 @@ def emit_pkg_funcs(compiler, pkg, workdir, e, timeout):
                 funcs[name] = "\n".join(cur); cur = None
     return funcs, None
 
+def hash_files(paths, relative_to):
+    digest = hashlib.sha256()
+    for path in sorted(paths):
+        digest.update(str(path.relative_to(relative_to)).encode())
+        digest.update(b"\0")
+        with path.open("rb") as src:
+            for chunk in iter(lambda: src.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+def reference_cache_context(base_cc, e):
+    version = subprocess.run(
+        [base_cc, "--version"], env=e, capture_output=True, check=True
+    ).stdout
+    return {
+        "cangjie_home": str(pathlib.Path(CANGJIE_HOME).resolve()),
+        "compiler_version_sha256": hashlib.sha256(version).hexdigest(),
+    }
+
+def reference_cache_path(pkg, cache_context):
+    source_root = ROOT / "packages" / pkg / "src"
+    source_hash = hash_files((p for p in source_root.rglob("*") if p.is_file()), source_root)
+    manifest = (ROOT / "packages" / pkg / "cjpm.toml").read_text(encoding="utf-8")
+    dependency_section = manifest.partition("[dependencies]")[2].partition("\n[")[0]
+    dependencies = re.findall(r'^\s*"([^"]+)"\s*=', dependency_section, re.MULTILINE)
+    cjo_paths = []
+    for name in dependencies:
+        organization, package = name.split("::", 1)
+        dependency_dir = ROOT / "target/release" / f"{package}@{organization}"
+        cjo_paths.extend(dependency_dir.glob("*.cjo"))
+    import_hash = hash_files(cjo_paths, ROOT / "target/release")
+    key_data = dict(
+        cache_context, package=pkg, source_hash=source_hash, import_cjo_hash=import_hash
+    )
+    key = hashlib.sha256(json.dumps(key_data, sort_keys=True).encode()).hexdigest()
+    return CACHE_DIR / f"{key}.json"
+
+def emit_reference_funcs(base_cc, pkg, workdir, e, timeout, cache_context):
+    if cache_context is None:
+        return emit_pkg_funcs(base_cc, pkg, workdir, e, timeout)
+    try:
+        cache_path = reference_cache_path(pkg, cache_context)
+        with cache_path.open(encoding="utf-8") as src:
+            return json.load(src), None
+    except FileNotFoundError:
+        pass
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return emit_pkg_funcs(base_cc, pkg, workdir, e, timeout)
+    funcs, error = emit_pkg_funcs(base_cc, pkg, workdir, e, timeout)
+    if funcs is not None:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        temporary = cache_path.with_suffix(f".{os.getpid()}.tmp")
+        with temporary.open("w", encoding="utf-8") as dst:
+            json.dump(funcs, dst, sort_keys=True, separators=(",", ":"))
+        os.replace(temporary, cache_path)
+    return funcs, error
+
+def compile_pkg(base_cc, self_cc, pkg, workdir, e, timeout, cache_context):
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        ref = pool.submit(emit_reference_funcs, base_cc, pkg, workdir / f"ref_{pkg}", e, timeout, cache_context)
+        selfhost = pool.submit(emit_pkg_funcs, self_cc, pkg, workdir / f"self_{pkg}", e, timeout)
+        return ref.result(), selfhost.result()
+
 def main():
     args = sys.argv[1:]
     self_cc_candidates = sorted((ROOT / "target/release/bin").glob("*::cjc")) if (ROOT / "target/release/bin").exists() else []
     self_cc = str(self_cc_candidates[0]) if self_cc_candidates else str(ROOT / "target/release/bin/cjcj::cjc")
-    base_cc = f"{CANGJIE_HOME}/bin/cjc"; timeout = 600; pkgs = []
+    base_cc = f"{CANGJIE_HOME}/bin/cjc"; timeout = 600; jobs = 1; use_cache = True; pkgs = []
     i = 0
     while i < len(args):
         if args[i] == "--self": self_cc = args[i+1]; i += 2
         elif args[i] == "--timeout": timeout = int(args[i+1]); i += 2
+        elif args[i] == "--jobs": jobs = int(args[i+1]); i += 2
+        elif args[i] == "--no-cache": use_cache = False; i += 1
         else: pkgs.append(args[i]); i += 1
     if not pkgs:
         print("usage: sc_bcgate.py <pkg> [...]"); return 2
+    if jobs < 1:
+        print("--jobs must be at least 1", file=sys.stderr); return 2
     e = env(); wd = pathlib.Path(tempfile.mkdtemp(prefix="sc_bcgate_"))
+    cache_context = reference_cache_context(base_cc, e) if use_cache else None
     tot_id = tot_diff = tot_shared = 0
-    for pkg in pkgs:
-        rf, rerr = emit_pkg_funcs(base_cc, pkg, wd / f"ref_{pkg}", e, timeout)
-        sf, serr = emit_pkg_funcs(self_cc, pkg, wd / f"self_{pkg}", e, timeout)
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        results = list(pool.map(
+            lambda pkg: compile_pkg(base_cc, self_cc, pkg, wd, e, timeout, cache_context), pkgs
+        ))
+    for pkg, ((rf, rerr), (sf, serr)) in zip(pkgs, results):
         if rf is None: print(f"{pkg}: REF compile failed: {rerr}"); continue
         if sf is None: print(f"{pkg}: SELF compile failed: {serr}"); continue
         shared = set(rf) & set(sf)
