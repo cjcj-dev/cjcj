@@ -278,7 +278,12 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             if (pkg.IsEmpty()) {
                 continue
             }
-            ret = SaveCjo(pkg) && ret
+            let cjoPath = invocation.globalOptions.GenerateCachedPathName(
+                pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
+            let data = SerializePackageToCjoFlatBuffer(pkg, "", core.importManager.GetCjoManager(),
+                invocation.globalOptions.enableCompileDebug, invocation.globalOptions.optimizationLevel,
+                diag: diag, exportContent: true, exportForIncr: true, exportFuncBody: true)
+            ret = FileUtil.WriteBufferToASTFile(cjoPath, data) && ret
         }
         return ret
     }
