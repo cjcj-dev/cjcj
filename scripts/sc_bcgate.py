@@ -7,7 +7,7 @@ Usage: python3 scripts/sc_bcgate.py <pkg> [<pkg2> ...] [--self PATH] [--timeout 
   default --self = ./target/release/bin/<module>::cjc (auto-detected) ; baseline = $CANGJIE_HOME/bin/cjc
 Reuses bcgate.py's IR normalization (function-by-function, module-layout independent).
 """
-import os, sys, subprocess, hashlib, tempfile, pathlib, importlib.util, json, re
+import os, sys, subprocess, hashlib, tempfile, pathlib, importlib.util, json, re, shutil
 from concurrent.futures import ThreadPoolExecutor
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -135,6 +135,18 @@ def main():
     if jobs < 1:
         print("--jobs must be at least 1", file=sys.stderr); return 2
     e = env(); wd = pathlib.Path(tempfile.mkdtemp(prefix="sc_bcgate_"))
+    try:
+        return _run(base_cc, self_cc, pkgs, wd, e, timeout, jobs, use_cache)
+    finally:
+        # 0713: 此前从不清理，169 个残留目录堆积 47G 撑爆根分区（lane 门跑到一半报 No space left on device）。
+        # 需要保留失败现场时设 SC_BCGATE_KEEP_TMP=1。
+        if os.environ.get("SC_BCGATE_KEEP_TMP") == "1":
+            print(f"[sc_bcgate] kept temp dir: {wd}", file=sys.stderr)
+        else:
+            shutil.rmtree(wd, ignore_errors=True)
+
+
+def _run(base_cc, self_cc, pkgs, wd, e, timeout, jobs, use_cache):
     cache_context = reference_cache_context(base_cc, e) if use_cache else None
     tot_id = tot_diff = tot_shared = 0
     with ThreadPoolExecutor(max_workers=jobs) as pool:
