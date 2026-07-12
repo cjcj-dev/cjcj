@@ -1041,6 +1041,32 @@ public class MacAArch64CJNativeCGCFFI <: LinuxAarch64CJNativeCGCFFI {
         super(cgMod)
     }
 
+    public override func GetCFuncType(chirFuncTy: FuncType): LLVMTypeRef {
+        if (let Some(found) <- FindCFuncInfo(chirFuncTy)) {
+            return found.llvmFunctionType
+        }
+        CJC_ASSERT(chirFuncTy.IsCFunc())
+        let paramTys = ArrayList<LLVMTypeRef>()
+        let kinds = ArrayList<ProcessKind>()
+        let retTy = GetReturnType(chirFuncTy.GetReturnType(), paramTys)
+        if (retTy.isNull()) {
+            return LLVMNullType()
+        }
+        for (paramTy in chirFuncTy.GetParamTypes()) {
+            CJC_ASSERT(IsMetCType(paramTy))
+            if (IsUnsizedStructTy(paramTy)) {
+                return LLVMNullType()
+            }
+            let typeSize = GetTypeSize(cgMod, paramTy)
+            if (IsUnitOrNothing(paramTy) || typeSize == 0u64) {
+                kinds.add(ProcessKind.SKIP)
+                continue
+            }
+            kinds.add(GetParamType(paramTy, paramTys))
+        }
+        return SetCFuncInfo(chirFuncTy, CreateFunctionType(retTy, paramTys, chirFuncTy.HasVarArg()), kinds)
+    }
+
     public override func AddFunctionAttr(chirFuncTy: FuncType, llvmFunc: LLVMValueRef): Unit {
         CJC_ASSERT(chirFuncTy.IsCFunc())
         let found = match (FindCFuncInfo(chirFuncTy)) {
