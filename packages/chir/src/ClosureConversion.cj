@@ -3,6 +3,7 @@ package cjcj::chir
 import std.collection.*
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::option.GlobalOptions
+import cjcj::option.OptimizationFlag
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, StaticCast}
 import cjcj::utils.ProfileRecorder
 
@@ -27,6 +28,157 @@ private func LiftCustomDefType(def: CustomTypeDef, converter: TypeConverterForCC
         converter.VisitValue(method)
     }
     converter.VisitDef(def)
+}
+
+private func LambdaIsUnused(lambda: Lambda): Bool {
+    let lambdaResult = lambda.GetResult().getOrThrow()
+    let users = lambdaResult.GetUsers()
+    let lambdaBody = lambda.GetBody().getOrThrow()
+    var isUnused = true
+    for (user in users) {
+        if (user.IsDebug()) {
+            continue
+        }
+        var currentGroup = user.GetParentBlockGroup()
+        var isInLambdaBody = false
+        while (currentGroup.isSome()) {
+            let actualGroup = currentGroup.getOrThrow()
+            if (actualGroup == lambdaBody) {
+                isInLambdaBody = true
+                break
+            }
+            if (let Some(ownerExpr) <- actualGroup.GetOwnerExpression()) {
+                currentGroup = ownerExpr.GetParentBlockGroup()
+            } else {
+                break
+            }
+        }
+        if (!isInLambdaBody) {
+            isUnused = false
+            break
+        }
+    }
+    return isUnused
+}
+
+private func GetNonDebugUsers(value: Value): ArrayList<Expression> {
+    let nonDebugUsers = ArrayList<Expression>()
+    for (user in value.GetUsers()) {
+        if (!user.IsDebug()) {
+            nonDebugUsers.add(user)
+        }
+    }
+    return nonDebugUsers
+}
+
+private func CheckLambdaUsingForMultiThread(lambda: Lambda): Bool {
+    let returnTy = lambda.GetReturnType()
+    if (returnTy.isNone()) {
+        return false
+    }
+    let returnNoRef = returnTy.getOrThrow().StripAllRefs()
+    if (!returnNoRef.IsClass()) {
+        return false
+    }
+    let classTy = returnNoRef as ClassType
+    if (classTy.isNone()) {
+        return false
+    }
+    let classDef = classTy.getOrThrow().GetClassDef()
+    return classDef.GetPackageName() == "std.core" && classDef.GetSrcCodeIdentifier() == "Future"
+}
+
+private class LambdaInline {
+    private let opts: GlobalOptions
+    private let inlinePass: FunctionInline
+
+    public init(builder: CHIRBuilder, opts: GlobalOptions) {
+        this.opts = opts
+        inlinePass = FunctionInline(builder, opts.optimizationLevel, opts.chirDebugOptimizer)
+    }
+
+    public func InlineLambda(funcs: ArrayList<Lambda>): Unit {
+        if (!opts.IsOptimizationExisted(OptimizationFlag.FUNC_INLINING)) {
+            return
+        }
+        for (lambdaFunc in funcs) {
+            let funcTy = lambdaFunc.GetFuncType()
+            if (funcTy.isNone() || funcTy.getOrThrow().IsCFunc()) {
+                continue
+            }
+            RunOnLambda(lambdaFunc)
+        }
+    }
+
+    private func RunOnLambda(lambda: Lambda): Unit {
+        let lambdaResult = lambda.GetResult().getOrThrow()
+        if (LambdaIsUnused(lambda) && !opts.enableCompileDebug) {
+            for (user in lambdaResult.GetUsers()) {
+                user.RemoveSelfFromBlock()
+            }
+            lambda.RemoveSelfFromBlock()
+            PrintOptInfo(lambda, opts.chirDebugOptimizer, "EraseUselessLambdas")
+            return
+        }
+        let users = lambdaResult.GetUsers()
+        if (users.size != 1 || !users[0].IsApply()) {
+            return
+        }
+        let apply = (users[0] as Apply).getOrThrow()
+        if (apply.GetCallee() == lambdaResult) {
+            inlinePass.DoFunctionInline(apply, "functionInlineForLambda")
+            if (!opts.enableCompileDebug) {
+                lambda.RemoveSelfFromBlock()
+            }
+            return
+        }
+        if (IsLambdaPassToEasyFunc(lambda)) {
+            inlinePass.DoFunctionInline(apply, "functionInlineForLambda")
+            let newUsers = lambdaResult.GetUsers()
+            if (newUsers[0].IsApply() && (newUsers[0] as Apply).getOrThrow().GetCallee() == lambdaResult) {
+                inlinePass.DoFunctionInline((newUsers[0] as Apply).getOrThrow(), "functionInlineForLambda")
+            }
+            if (!opts.enableCompileDebug) {
+                lambda.RemoveSelfFromBlock()
+            }
+        }
+    }
+
+    private func IsLambdaPassToEasyFunc(lambda: Lambda): Bool {
+        if (CheckLambdaUsingForMultiThread(lambda)) {
+            return false
+        }
+        let lambdaResult = lambda.GetResult().getOrThrow()
+        let users = lambdaResult.GetUsers()
+        CJC_ASSERT(users.size == 1 && users[0].IsApply())
+        let apply = (users[0] as Apply).getOrThrow()
+        var index = apply.GetArgs().size
+        let args = apply.GetArgs()
+        var i: Int64 = 0
+        while (i < args.size) {
+            if (args[i] == lambdaResult) {
+                index = i
+                break
+            }
+            i++
+        }
+        if (index == args.size || !apply.GetCallee().IsFuncWithBody()) {
+            return false
+        }
+        let callee = apply.GetCallee().AsFunction().getOrThrow()
+        CJC_ASSERT(index < callee.GetParams().size)
+        let lambdaArg = callee.GetParams()[index]
+        let lambdaArgUsers = GetNonDebugUsers(lambdaArg)
+        if (lambdaArgUsers.size != 1) {
+            return false
+        }
+        let onlyUser = lambdaArgUsers[0]
+        if (!onlyUser.IsApply()) {
+            return false
+        }
+        let onlyApply = (onlyUser as Apply).getOrThrow()
+        return onlyApply.GetCallee() == lambdaArg
+    }
 }
 
 public class ClosureConversion {
@@ -66,10 +218,7 @@ public class ClosureConversion {
     public func RunOnPackage(pkg: Package): Unit {
         this.pkg = pkg
         ConvertGlobalFunctions(pkg)
-        // GAP_TODO: C++ runs DoFunctionInlineForLambda(InlineLambda) here on this collection
-        // (ClosureConversion.cpp:3160-3162), gated by FUNC_INLINING at O2 (LambdaInline.cpp:61);
-        // InlineLambda is not yet ported, so this first collection's result is unused.
-        let _ = CollectNestedFunctions(pkg)
+        InlineLambda(CollectNestedFunctions(pkg))
         let nestedFuncs = CollectNestedFunctions(pkg)
         ConvertNestedFunctions(nestedFuncs)
         ConvertExpressions(pkg)
@@ -77,6 +226,10 @@ public class ClosureConversion {
         ModifyTypeMismatchInVTable()
         ModifyTypeMismatchInExpr()
         CreateVTableForAutoEnvDef()
+    }
+
+    private func InlineLambda(funcs: ArrayList<Lambda>): Unit {
+        LambdaInline(builder, opts).InlineLambda(funcs)
     }
 
     private func CurrentPackage(): Package {
