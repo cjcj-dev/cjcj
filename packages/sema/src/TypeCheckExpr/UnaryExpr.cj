@@ -1,13 +1,8 @@
 package cjcj::sema.TypeCheckExpr
 
 import cjcj::ast.*
-import cjcj::sema.TypeCompatibility
-import cjcj::sema.TypeCheckerImpl
-import cjcj::sema.TypeManager
-import cjcj::sema.GetUnaryOpTypeCandidates
-import cjcj::sema.IsUnaryOperator
-import cjcj::sema.MatchResult
-import cjcj::sema.TypeMapToTys
+import cjcj::sema.*
+import cjcj::sema.Desugar.*
 
 private func GetNonParenExpr(expr: Expr): Expr {
     var current = expr
@@ -48,115 +43,146 @@ public func GetLeafUnaryExpr(ue: UnaryExpr): UnaryExpr {
     return leaf
 }
 
-public func SynBuiltinUnaryExpr(impl: TypeCheckerImpl, ue: UnaryExpr): Ty {
-    let typeManager = impl.typeManager
-    if (let Some(innerExpr) <- ue.expr) {
-        // Mirror C++ SynBuiltinUnaryExpr's `Synthesize(ctx, ue.expr)`: an operand reset by Clear()
-        // has Initial type and must be synthesized again, but already-typed operands must not be
-        // re-derived by this context-free shallow path.
-        if (innerExpr.GetTy().isNone() || Ty.IsInitialTy(innerExpr.GetTy())) {
-            let _ = SynExprShallow(typeManager, innerExpr)
+extend TypeChecker {
+    private func DiagnoseForUnaryExprWithTarget(ctx: ASTContext, ue: UnaryExpr, target: Ty): Unit {
+        let leaf = GetLeafUnaryExpr(ue)
+        if ((let Some(operand) <- leaf.expr) && Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, operand)) &&
+            ReplaceIdealTy(impl.typeManager, operand, diag: impl.diag)) {
+            if (let Some(diag) <- impl.diag) {
+                DiagInvalidUnaryExprWithTarget(diag, leaf, target)
+            }
         }
-        if (!Ty.IsTyCorrect(innerExpr.GetTy())) {
+    }
+
+    private func DiagnoseForUnaryExpr(ctx: ASTContext, ue: UnaryExpr): Unit {
+        let leaf = GetLeafUnaryExpr(ue)
+        if ((let Some(operand) <- leaf.expr) && Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, operand)) &&
+            ReplaceIdealTy(impl.typeManager, operand, diag: impl.diag)) {
+            if (let Some(diag) <- impl.diag) {
+                DiagInvalidUnaryExpr(diag, leaf)
+            }
+        }
+    }
+
+    private func SynBuiltinUnaryExpr(ctx: ASTContext, ue: UnaryExpr): Ty {
+        if (let None <- ue.expr) {
+            return TypeManager.GetInvalidTy()
+        }
+        let ty = Synthesize(ctx, SynPos.EXPR_ARG, ue.expr.getOrThrow())
+        if (!Ty.IsTyCorrect(ty) || !IsUnaryOperator(ue.op)) {
+            return TypeManager.GetInvalidTy()
+        }
+        let typeCandidates = GetUnaryOpTypeCandidates(ue.op)
+        if (let Some(tv) <- (ty as GenericsTy)) {
+            if (tv.isPlaceholder) {
+                match (impl.PickConstaintFromTys(tv, TypeMapToTys(typeCandidates, true), true)) {
+                    case MatchResult.UNIQUE =>
+                        let result = impl.typeManager.TryGreedySubst(tv)
+                        ue.SetTy(result)
+                        return result
+                    case MatchResult.AMBIGUOUS => return TypeManager.GetInvalidTy()
+                    case MatchResult.NONE => return TypeManager.GetInvalidTy()
+                }
+            }
+        }
+        for (typeCandidate in typeCandidates) {
+            let primitiveTy = TypeManager.GetPrimitiveTy(typeCandidate[1])
+            if (impl.typeManager.IsSubtype(ty, primitiveTy)) {
+                ue.SetTy(ty)
+                return ty
+            }
+        }
+        return TypeManager.GetInvalidTy()
+    }
+
+    public func SynUnaryExpr(ctx: ASTContext, ue: UnaryExpr): Ty {
+        if (let Some(desugar) <- ue.desugarExpr) {
+            return desugar.GetTy().getOrThrow()
+        }
+        if ((let None <- ue.expr) || !Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, ue.expr.getOrThrow()))) {
             ue.SetTy(TypeManager.GetInvalidTy())
             return TypeManager.GetInvalidTy()
         }
-    }
-    if (!IsUnaryOperator(ue.op)) {
-        ue.SetTy(TypeManager.GetInvalidTy())
-        return TypeManager.GetInvalidTy()
-    }
-    if (let Some(innerExpr) <- ue.expr) {
-        if (let Some(innerTy) <- innerExpr.GetTy()) {
-            if (!Ty.IsTyCorrect(innerTy)) {
-                ue.SetTy(TypeManager.GetInvalidTy())
-                return TypeManager.GetInvalidTy()
-            }
-            let typeCandidate = GetUnaryOpTypeCandidates(ue.op)
-            if (typeCandidate.isEmpty()) {
-                ue.SetTy(TypeManager.GetInvalidTy())
-                return TypeManager.GetInvalidTy()
-            }
-            if (let Some(tv) <- (innerTy as GenericsTy)) {
-                if (tv.isPlaceholder) {
-                    match (impl.PickConstaintFromTys(tv, TypeMapToTys(typeCandidate, true), true)) {
-                        case MatchResult.UNIQUE =>
-                            let resultTy = typeManager.TryGreedySubst(tv)
-                            ue.SetTy(resultTy)
-                            return resultTy
-                        case MatchResult.AMBIGUOUS =>
-                            ue.SetTy(TypeManager.GetInvalidTy())
-                            return TypeManager.GetInvalidTy()
-                        case MatchResult.NONE =>
-                            ue.SetTy(TypeManager.GetInvalidTy())
-                            return TypeManager.GetInvalidTy()
-                    }
+        if (Ty.IsTyCorrect(SynBuiltinUnaryExpr(ctx, ue))) {
+            let operand = ue.expr.getOrThrow()
+            let _ = ReplaceIdealTy(impl.typeManager, operand, diag: impl.diag)
+            ue.SetTy(operand.GetTy().getOrThrow())
+            return ue.GetTy().getOrThrow()
+        }
+        DesugarOperatorOverloadExpr(ctx, ue)
+        if ((let Some(desugar2) <- ue.desugarExpr) &&
+            Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, desugar2))) {
+            ue.SetTy(desugar2.GetTy().getOrThrow())
+            if (let Some(callExpr) <- (desugar2 as CallExpr)) {
+                if (let Some(resolved) <- callExpr.resolvedFunction) {
+                    ReplaceTarget(ue, Some<Decl>(resolved))
                 }
             }
-            for (typeValue in typeCandidate) {
-                let primitiveTy = TypeManager.GetPrimitiveTy(typeValue[1])
-                if (typeManager.IsSubtype(innerTy, primitiveTy)) {
-                    ue.SetTy(innerTy)
-                    return innerTy
+        } else {
+            RecoverToUnaryExpr(ue)
+            DiagnoseForUnaryExpr(ctx, ue)
+            ue.SetTy(TypeManager.GetInvalidTy())
+        }
+        return ue.GetTy().getOrThrow()
+    }
+
+    public func ChkUnaryExpr(ctx: ASTContext, target: Ty, ue: UnaryExpr): Bool {
+        if (let Some(desugar) <- ue.desugarExpr) {
+            return impl.typeManager.IsSubtype(desugar.GetTy().getOrThrow(), target)
+        }
+        var isWellTyped = true
+        let unboxedTy = UnboxOptionType(target)
+        var retTy: Ty = TypeManager.GetInvalidTy()
+        if (unboxedTy.IsBuiltin()) {
+            try (ds = DiagSuppressor(impl.diag)) {
+                isWellTyped = if (let Some(operand) <- ue.expr) { Check(ctx, unboxedTy, operand) } else { false }
+                if (let Some(operand2) <- ue.expr) {
+                    operand2.SetTy(impl.typeManager.TryGreedySubst(
+                        operand2.GetTy().getOrThrow()))
+                }
+                retTy = SynBuiltinUnaryExpr(ctx, ue)
+                isWellTyped = isWellTyped && Ty.IsTyCorrect(retTy) && Ty.IsTyCorrect(target)
+            }
+        } else {
+            retTy = SynBuiltinUnaryExpr(ctx, ue)
+            isWellTyped = Ty.IsTyCorrect(retTy) && Ty.IsTyCorrect(target) &&
+                impl.typeManager.IsSubtype(retTy, target)
+        }
+        if (isWellTyped) {
+            let operand3 = ue.expr.getOrThrow()
+            let _ = ReplaceIdealTy(impl.typeManager, operand3, diag: impl.diag)
+            ue.SetTy(operand3.GetTy().getOrThrow())
+            return true
+        }
+        DesugarOperatorOverloadExpr(ctx, ue)
+        if ((let Some(desugar3) <- ue.desugarExpr) && Check(ctx, target, desugar3)) {
+            ue.SetTy(desugar3.GetTy().getOrThrow())
+            if (let Some(callExpr2) <- (desugar3 as CallExpr)) {
+                if (let Some(resolved2) <- callExpr2.resolvedFunction) {
+                    ReplaceTarget(ue, Some<Decl>(resolved2))
                 }
             }
+            return true
         }
-    }
-    ue.SetTy(TypeManager.GetInvalidTy())
-    return TypeManager.GetInvalidTy()
-}
-
-public func SynBuiltinUnaryExpr(typeManager: TypeManager, ue: UnaryExpr): Ty {
-    return SynBuiltinUnaryExpr(TypeCheckerImpl(typeManager: typeManager), ue)
-}
-
-public func SynUnaryExpr(impl: TypeCheckerImpl, ue: UnaryExpr): Ty {
-    let typeManager = impl.typeManager
-    if (let Some(desugar) <- ue.desugarExpr) {
-        if (let Some(desugarTy) <- desugar.GetTy()) {
-            ue.SetTy(desugarTy)
-            return desugarTy
+        let synTy = if (let Some(desugar4) <- ue.desugarExpr) {
+            Synthesize(ctx, SynPos.EXPR_ARG, desugar4)
+        } else { TypeManager.GetInvalidTy() }
+        if (let Some(desugar5) <- ue.desugarExpr) {
+            RecoverToUnaryExpr(ue)
+            ctx.DeleteDesugarExpr(desugar5)
         }
-    }
-    let builtinTy = SynBuiltinUnaryExpr(impl, ue)
-    if (Ty.IsTyCorrect(builtinTy)) {
-        if (let Some(innerExpr) <- ue.expr) {
-            if (let Some(innerTy) <- innerExpr.GetTy()) {
-                if (innerTy.IsIdeal()) {
-                    let replacedTy = typeManager.ReplaceIdealTy(innerTy)
-                    innerExpr.SetTy(replacedTy)
-                    ue.SetTy(replacedTy)
-                    return replacedTy
-                }
+        retTy = impl.typeManager.ReplaceIdealTy(retTy)
+        let retTyMismatch = isWellTyped || (Ty.IsTyCorrect(target) && Ty.IsTyCorrect(synTy))
+        if (retTyMismatch) {
+            if (let Some(diag) <- impl.diag) {
+                DiagMismatchedTypesWithFoundTy(diag, ue, target, if (isWellTyped) { retTy } else { synTy })
             }
+        } else if (Ty.IsTyCorrect(target)) {
+            DiagnoseForUnaryExprWithTarget(ctx, ue, target)
+        } else {
+            DiagnoseForUnaryExpr(ctx, ue)
         }
-        return builtinTy
-    }
-    ue.SetTy(TypeManager.GetInvalidTy())
-    return TypeManager.GetInvalidTy()
-}
-
-public func SynUnaryExpr(typeManager: TypeManager, ue: UnaryExpr): Ty {
-    return SynUnaryExpr(TypeCheckerImpl(typeManager: typeManager), ue)
-}
-
-public func ChkUnaryExpr(impl: TypeCheckerImpl, target: Ty, ue: UnaryExpr): Bool {
-    let typeManager = impl.typeManager
-    let retTy = SynUnaryExpr(impl, ue)
-    if (!Ty.IsTyCorrect(retTy) || !Ty.IsTyCorrect(target)) {
         ue.SetTy(TypeManager.GetInvalidTy())
         return false
     }
-    if (typeManager.CheckTypeCompatibility(target, retTy) == TypeCompatibility.INCOMPATIBLE) {
-        ue.SetTy(TypeManager.GetInvalidTy())
-        return false
-    }
-    return true
-}
-
-public func ChkUnaryExpr(typeManager: TypeManager, target: Ty, ue: UnaryExpr): Bool {
-    return ChkUnaryExpr(TypeCheckerImpl(typeManager: typeManager), target, ue)
-}
-
-extend TypeChecker {
 }

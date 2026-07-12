@@ -6,17 +6,6 @@ import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::sema.*
 
-private func ValidExprTy(expr: Option<Expr>): Option<Ty> {
-    if (let Some(realExpr) <- expr) {
-        if (let Some(exprTy) <- realExpr.GetTy()) {
-            if (Ty.IsTyCorrect(exprTy)) {
-                return exprTy
-            }
-        }
-    }
-    return None
-}
-
 private func IsLitConstExpr(expr: Option<Expr>): Bool {
     if (let Some(realExpr) <- expr) {
         if (let Some(_) <- (realExpr as LitConstExpr)) {
@@ -25,190 +14,128 @@ private func IsLitConstExpr(expr: Option<Expr>): Bool {
     }
     return false
 }
-
-private func BindRangeDecl(re: RangeExpr, rangeDecl: Option<StructDecl>): Bool {
-    if (let Some(decl) <- rangeDecl) {
-        re.decl = Some(decl)
+extend TypeChecker {
+    private func SynRangeExprInferElemTy(re: RangeExpr, ctx: ASTContext): Ty {
+        let startTy = if (let Some(start) <- re.startExpr) {
+            Synthesize(ctx, SynPos.EXPR_ARG, start)
+        } else { TypeManager.GetInvalidTy() }
+        let useStartLit = !IsLitConstExpr(re.startExpr) || IsLitConstExpr(re.stopExpr)
+        if (Ty.IsTyCorrect(startTy) && !startTy.IsNothing() && useStartLit) {
+            return startTy
+        }
+        let stopTy = if (let Some(stop) <- re.stopExpr) {
+            Synthesize(ctx, SynPos.EXPR_ARG, stop)
+        } else { TypeManager.GetInvalidTy() }
+        if (Ty.IsTyCorrect(stopTy) && !stopTy.IsNothing()) {
+            return stopTy
+        } else if (Ty.IsTyCorrect(startTy)) {
+            return startTy
+        }
+        return TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
     }
-    return re.decl.isSome()
-}
 
-private func CheckRangeGenericInstantiation(typeManager: TypeManager, re: RangeExpr, elemTy: Ty,
-    checkGenericDeclInstantiation!: Option<(Option<Decl>, ArrayList<Ty>, Node) -> Bool> = None): Bool {
-    if (let Some(rangeDecl) <- re.decl) {
+    private func CheckRangeElements(ctx: ASTContext, elemTy: Ty, re: RangeExpr): Bool {
+        var isWellTyped = if (let Some(start) <- re.startExpr) { Check(ctx, elemTy, start) } else { true }
+        isWellTyped = (if (let Some(stop) <- re.stopExpr) { Check(ctx, elemTy, stop) } else { true }) && isWellTyped
+        let inconsistent = !ctx.HasTargetTy(re) && re.startExpr.isSome() && re.stopExpr.isSome() && !isWellTyped
+        if (inconsistent && !CanSkipDiag(re.startExpr.getOrThrow()) && !CanSkipDiag(re.stopExpr.getOrThrow())) {
+            if (let Some(diag) <- impl.diag) {
+                diag.Diagnose(re.begin, re.end, BasicDiagKind.sema_inconsistency_range_elemType).Emit()
+            }
+        }
         let typeArgs = ArrayList<Ty>()
         typeArgs.add(elemTy)
-        if (let Some(checker) <- checkGenericDeclInstantiation) {
-            let declOpt: Option<Decl> = rangeDecl
-            return checker(declOpt, typeArgs, re)
+        var rangeDecl: Option<Decl> = None
+        if (let Some(decl) <- re.decl) {
+            rangeDecl = Some<Decl>(decl)
         }
-        return typeManager.CheckGenericDeclInstantiation(rangeDecl, typeArgs)
-    }
-    return false
-}
-
-public func SynRangeExprInferElemTy(re: RangeExpr): Ty {
-    let startTy = ValidExprTy(re.startExpr)
-    let useStartLit = !IsLitConstExpr(re.startExpr) || IsLitConstExpr(re.stopExpr)
-    if (let Some(realStartTy) <- startTy) {
-        if (!realStartTy.IsNothing() && useStartLit) {
-            return realStartTy
-        }
-    }
-    if (let Some(stopTy) <- ValidExprTy(re.stopExpr)) {
-        if (!stopTy.IsNothing()) {
-            return stopTy
-        }
-    } else if (let Some(realStartTy) <- startTy) {
-        return realStartTy
-    }
-    return TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
-}
-
-public func CheckRangeElements(typeManager: TypeManager, elemTy: Ty, re: RangeExpr,
-    ctx!: Option<ASTContext> = None, checker!: Option<(Ty, Expr) -> Bool> = None,
-    checkGenericDeclInstantiation!: Option<(Option<Decl>, ArrayList<Ty>, Node) -> Bool> = None,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
-    var isWellTyped = true
-    if (let Some(start) <- re.startExpr) {
-        isWellTyped = if (let Some(check) <- checker) { check(elemTy, start) } else {
-            ChkExprShallow(typeManager, elemTy, start, ctx: ctx, diag: diag)
-        }
-    }
-    if (let Some(stop) <- re.stopExpr) {
-        let stopWellTyped = if (let Some(check) <- checker) { check(elemTy, stop) } else {
-            ChkExprShallow(typeManager, elemTy, stop, ctx: ctx, diag: diag)
-        }
-        isWellTyped = stopWellTyped && isWellTyped
-    }
-    if (let Some(realCtx) <- ctx) {
-        let inconsistent = !realCtx.HasTargetTy(re) && re.startExpr.isSome() && re.stopExpr.isSome() && !isWellTyped
-        if (inconsistent) {
-            if (!CanSkipDiag(re.startExpr.getOrThrow()) && !CanSkipDiag(re.stopExpr.getOrThrow())) {
-                if (let Some(diagValue) <- diag) {
-                    let builder = diagValue.Diagnose(re.begin, re.end, BasicDiagKind.sema_inconsistency_range_elemType)
-                    builder.Emit()
-                }
-            }
-        }
-    }
-    if (isWellTyped && !CheckRangeGenericInstantiation(typeManager, re, elemTy,
-        checkGenericDeclInstantiation: checkGenericDeclInstantiation)) {
-        isWellTyped = false
-    }
-    if (let Some(stepExpr) <- re.stepExpr) {
-        let int64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
-        let stepWellTyped = if (let Some(check) <- checker) { check(int64Ty, stepExpr) } else {
-            ChkExprShallow(typeManager, int64Ty, stepExpr, ctx: ctx, diag: diag)
-        }
-        if (!stepWellTyped) {
-            if (!CanSkipDiag(stepExpr)) {
-                if (let Some(diagValue2) <- diag) {
-                    let builder2 = diagValue2.Diagnose(re.begin, re.end, BasicDiagKind.sema_range_step_not_int64)
-                    builder2.Emit()
-                }
-            }
+        if (isWellTyped && !impl.CheckGenericDeclInstantiation(rangeDecl, typeArgs, re)) {
             isWellTyped = false
-        } else if (stepExpr.isConst) {
-            if (stepExpr.constNumValue.asInt.Uint64() == 0u64) {
-                if (let Some(diagValue3) <- diag) {
-                    let builder3 = diagValue3.Diagnose(stepExpr.begin, stepExpr.end,
-                        BasicDiagKind.sema_step_non_zero_range)
-                    builder3.Emit()
+        }
+        if (let Some(stepExpr) <- re.stepExpr) {
+            if (!Check(ctx, TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64), stepExpr)) {
+                if (!CanSkipDiag(stepExpr)) {
+                    if (let Some(diag2) <- impl.diag) {
+                        diag2.Diagnose(re.begin, re.end, BasicDiagKind.sema_range_step_not_int64).Emit()
+                    }
+                }
+                isWellTyped = false
+            } else if (stepExpr.isConst && stepExpr.constNumValue.asInt.Uint64() == 0u64) {
+                if (let Some(diag3) <- impl.diag) {
+                    diag3.Diagnose(stepExpr.begin, stepExpr.end, BasicDiagKind.sema_step_non_zero_range).Emit()
                 }
             }
         }
+        return isWellTyped
     }
-    return isWellTyped
-}
 
-public func SynRangeExpr(typeManager: TypeManager, re: RangeExpr, rangeDecl!: Option<StructDecl> = None,
-    ctx!: Option<ASTContext> = None, checker!: Option<(Ty, Expr) -> Bool> = None,
-    checkGenericDeclInstantiation!: Option<(Option<Decl>, ArrayList<Ty>, Node) -> Bool> = None,
-    diag!: Option<BasicDiagnosticEngine> = None): Ty {
-    let invalidTy = TypeManager.GetInvalidTy()
-    re.SetTy(invalidTy)
-    if (!BindRangeDecl(re, rangeDecl)) {
-        return invalidTy
-    }
-    let resolvedRangeDecl = re.decl.getOrThrow()
-    var elemTy = SynRangeExprInferElemTy(re)
-    if (Ty.IsTyCorrect(elemTy) && elemTy.IsIdeal() && elemTy.IsInteger()) {
-        elemTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
-    }
-    if (!CheckRangeElements(typeManager, elemTy, re, ctx: ctx, checker: checker,
-        checkGenericDeclInstantiation: checkGenericDeclInstantiation, diag: diag)) {
-        return invalidTy
-    }
-    let rangeTy = typeManager.GetStructTy(resolvedRangeDecl, [elemTy])
-    re.SetTy(rangeTy)
-    return rangeTy
-}
-
-public func ChkRangeExpr(typeManager: TypeManager, target: Ty, re: RangeExpr,
-    rangeDecl!: Option<StructDecl> = None, ctx!: Option<ASTContext> = None,
-    checker!: Option<(Ty, Expr) -> Bool> = None,
-    checkGenericDeclInstantiation!: Option<(Option<Decl>, ArrayList<Ty>, Node) -> Bool> = None,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
-    re.SetTy(TypeManager.GetInvalidTy())
-    if (!BindRangeDecl(re, rangeDecl)) {
-        if (let Some(diagValue) <- diag) {
-            let builder = diagValue.Diagnose(re.begin, re.end, BasicDiagKind.sema_no_core_object)
-            builder.Emit()
-        }
-        return false
-    }
-    if (!Ty.IsTyCorrect(target)) {
-        return false
-    }
-    let synAndCheckRangeTy = { =>
-        re.SetTy(SynRangeExpr(typeManager, re, ctx: ctx, checker: checker,
-            checkGenericDeclInstantiation: checkGenericDeclInstantiation, diag: diag))
-        let synTy = re.GetTy() ?? TypeManager.GetInvalidTy()
-        let synWellTyped = typeManager.IsSubtype(synTy, target)
-        if (!synWellTyped && Ty.IsTyCorrect(synTy)) {
-            if (let Some(diagValue2) <- diag) {
-                DiagMismatchedTypes(diagValue2, re, target)
-            }
-        }
-        synWellTyped
-    }
-    let targetTy = UnboxOptionType(target)
-    if (!Ty.IsTyCorrect(targetTy) || (!targetTy.IsStruct() && !targetTy.IsInterface())) {
-        let _ = synAndCheckRangeTy()
+    func SynRangeExpr(ctx: ASTContext, re: RangeExpr): Ty {
         re.SetTy(TypeManager.GetInvalidTy())
-        return false
+        re.decl = if (let Some(manager) <- impl.importManager) {
+            manager.GetCoreDecl<StructDecl>("Range")
+        } else { GetCoreDecl(ctx, "Range") as StructDecl }
+        if (re.decl.isNone()) {
+            return re.GetTy().getOrThrow()
+        }
+        var elemTy = SynRangeExprInferElemTy(re, ctx)
+        if (Ty.IsTyCorrect(elemTy) && elemTy.IsIdeal() && elemTy.IsInteger()) {
+            elemTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+        }
+        if (!CheckRangeElements(ctx, elemTy, re)) {
+            return re.GetTy().getOrThrow()
+        }
+        let rangeTy = impl.typeManager.GetStructTy(re.decl.getOrThrow(), [elemTy])
+        re.SetTy(rangeTy)
+        return rangeTy
     }
-    var rangeTy = targetTy
-    if (targetTy.IsInterface()) {
-        let rangeDeclTy = re.decl.getOrThrow().GetTy() ?? TypeManager.GetInvalidTy()
-        let candiTys = Promotion(typeManager).Downgrade(rangeDeclTy, target)
-        if (candiTys.IsEmpty()) {
-            if (synAndCheckRangeTy()) {
-                return true
-            }
-            if (let Some(diagValue3) <- diag) {
-                DiagUnableToInferExpr(diagValue3, re)
+
+    func ChkRangeExpr(ctx: ASTContext, target: Ty, re: RangeExpr): Bool {
+        re.SetTy(TypeManager.GetInvalidTy())
+        re.decl = if (let Some(manager) <- impl.importManager) {
+            manager.GetCoreDecl<StructDecl>("Range")
+        } else { GetCoreDecl(ctx, "Range") as StructDecl }
+        if (re.decl.isNone()) {
+            if (let Some(diag) <- impl.diag) {
+                diag.Diagnose(re.begin, re.end, BasicDiagKind.sema_no_core_object).Emit()
             }
             return false
         }
-        rangeTy = candiTys.values[0]
-    } else if (!targetTy.IsRange() || rangeTy.typeArgs.size != 1) {
-        return synAndCheckRangeTy()
-    }
-    if (!CheckRangeElements(typeManager, rangeTy.typeArgs[0], re, ctx: ctx, checker: checker,
-        checkGenericDeclInstantiation: checkGenericDeclInstantiation, diag: diag)) {
-        return false
-    }
-    re.SetTy(rangeTy)
-    let isWellTyped = typeManager.IsSubtype(re.GetTy() ?? TypeManager.GetInvalidTy(), target)
-    if (!isWellTyped) {
-        if (let Some(diagValue4) <- diag) {
-            DiagMismatchedTypes(diagValue4, re, target)
+        if (!Ty.IsTyCorrect(target)) {
+            return false
         }
+        let synAndCheckRangeTy = { =>
+            re.SetTy(SynRangeExpr(ctx, re))
+            let isWellTyped = impl.typeManager.IsSubtype(re.GetTy().getOrThrow(), target)
+            if (!isWellTyped && Ty.IsTyCorrect(re.GetTy())) {
+                if (let Some(diag2) <- impl.diag) { DiagMismatchedTypes(diag2, re, target) }
+            }
+            isWellTyped
+        }
+        let targetTy = UnboxOptionType(target)
+        if (!Ty.IsTyCorrect(targetTy) || (!targetTy.IsStruct() && !targetTy.IsInterface())) {
+            let _ = synAndCheckRangeTy()
+            re.SetTy(TypeManager.GetInvalidTy())
+            return false
+        }
+        var rangeTy = targetTy
+        if (targetTy.IsInterface()) {
+            let candiTys = Promotion(impl.typeManager).Downgrade(
+                re.decl.getOrThrow().GetTy().getOrThrow(), target)
+            if (candiTys.IsEmpty()) {
+                if (synAndCheckRangeTy()) { return true }
+                if (let Some(diag3) <- impl.diag) { DiagUnableToInferExpr(diag3, re) }
+                return false
+            }
+            rangeTy = candiTys.values[0]
+        } else if (!targetTy.IsRange() || rangeTy.typeArgs.size != 1) {
+            return synAndCheckRangeTy()
+        }
+        if (!CheckRangeElements(ctx, rangeTy.typeArgs[0], re)) { return false }
+        re.SetTy(rangeTy)
+        let isWellTyped2 = impl.typeManager.IsSubtype(re.GetTy().getOrThrow(), target)
+        if (!isWellTyped2) {
+            if (let Some(diag4) <- impl.diag) { DiagMismatchedTypes(diag4, re, target) }
+        }
+        return isWellTyped2
     }
-    return isWellTyped
-}
-
-extend TypeChecker {
 }

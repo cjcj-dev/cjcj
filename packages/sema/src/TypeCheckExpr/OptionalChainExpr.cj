@@ -52,32 +52,27 @@ private func diagMismatchedTypes(diag: Option<BasicDiagnosticEngine>, oce: Optio
     }
 }
 
-public func SynOptionalChainExpr(typeManager: TypeManager, oce: OptionalChainExpr,
-    synthesizer!: Option<(Expr) -> Ty> = None): Ty {
-    CJC_NULLPTR_CHECK(oce.desugarExpr)
-    let innerExpr = oce.desugarExpr.getOrThrow()
-    let innerTy = if (let Some(syn) <- synthesizer) {
-        syn(innerExpr)
-    } else {
-        SynExprShallow(typeManager, innerExpr)
-    }
-    oce.SetTy(innerTy)
-    return innerTy
-}
-
-public func ChkOptionalChainExpr(typeManager: TypeManager, target: Ty, oce: OptionalChainExpr,
-    synthesizer!: Option<(Expr) -> Ty> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
-    let actualTy = SynOptionalChainExpr(typeManager, oce, synthesizer: synthesizer)
-    if (actualTy.HasInvalidTy()) {
-        return false
-    }
-    if (!checkOptionBox(typeManager, target, actualTy)) {
-        diagMismatchedTypes(diag, oce, target)
-        let _ = invalidOptionalChainExpr(oce)
-        return false
-    }
-    return true
-}
-
 extend TypeChecker {
+    func SynOptionalChainExpr(ctx: CheckerContext, oce: OptionalChainExpr): Ty {
+        if (let None <- oce.desugarExpr) {
+            return invalidOptionalChainExpr(oce)
+        }
+        let ty = Synthesize(ctx.Ctx(), ctx.SynthPos(), oce.desugarExpr.getOrThrow())
+        oce.SetTy(ty)
+        return ty
+    }
+
+    func ChkOptionalChainExpr(ctx: ASTContext, target: Ty, oce: OptionalChainExpr): Bool {
+        if ((let None <- oce.desugarExpr) ||
+            !Ty.IsTyCorrect(SynOptionalChainExpr(CheckerContext(ctx, SynPos.EXPR_ARG), oce))) {
+            return false
+        }
+        let innerExpr = oce.desugarExpr.getOrThrow()
+        if (!CheckOptionBox(impl.typeManager, target, innerExpr.GetTy().getOrThrow())) {
+            if (let Some(diag) <- impl.diag) { DiagMismatchedTypes(diag, oce, target) }
+            let _ = invalidOptionalChainExpr(oce)
+            return false
+        }
+        return true
+    }
 }

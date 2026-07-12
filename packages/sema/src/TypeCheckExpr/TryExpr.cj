@@ -15,7 +15,6 @@ private let RESOURCE_TYPE_NAME: String = "Resource"
 private func TryInvalid(te: TryExpr): Ty {
     return TcInvalid(te)
 }
-
 private func JoinTryTy(typeManager: TypeManager, currentTy: Ty, branchTy: Ty, curFile: Option<File>): ErrOrTy {
     if (!Ty.IsTyCorrect(currentTy) || !Ty.IsTyCorrect(branchTy)) {
         return ErrOrTy.TY(TypeManager.GetInvalidTy())
@@ -144,7 +143,7 @@ private func ChkExceptTypePattern(typeManager: TypeManager, exceptPattern: Excep
         typeTySet.Add(typeTy2)
     }
     let joinRes = JoinAsVisibleTy(typeManager, typeTySet, curFile: exceptPattern.curFile)
-    let (optErrs, joinedTy) = SetJoinedType(exceptPattern.GetTy() ?? TypeManager.GetInvalidTy(), joinRes)
+    let (optErrs, joinedTy) = SetJoinedType(exceptPattern.GetTy().getOrThrow(), joinRes)
     exceptPattern.SetTy(joinedTy)
     if (let Some(errMsg) <- optErrs) {
         if (let Some(diagValue3) <- diag) {
@@ -156,11 +155,7 @@ private func ChkExceptTypePattern(typeManager: TypeManager, exceptPattern: Excep
         return false
     }
     if (let Some(innerPattern) <- exceptPattern.pattern) {
-        return if (let Some(checker) <- patternChecker) {
-            checker(joinedTy, innerPattern)
-        } else {
-            TcPatternCheck(typeManager, joinedTy, innerPattern)
-        }
+        return patternChecker.getOrThrow()(joinedTy, innerPattern)
     }
     return true
 }
@@ -230,11 +225,7 @@ private func ChkHandlePatterns(typeManager: TypeManager, handler: Handler, inclu
     handler.commandResultTy = commandTyAsCommand.typeArgs[0]
     if (let Some(innerPattern) <- commandTypePattern.pattern) {
         let targetTy = commandTypePattern.GetTy() ?? TypeManager.GetInvalidTy()
-        return if (let Some(checker) <- patternChecker) {
-            checker(targetTy, innerPattern)
-        } else {
-            TcPatternCheck(typeManager, targetTy, innerPattern)
-        }
+        return patternChecker.getOrThrow()(targetTy, innerPattern)
     }
     return true
 }
@@ -368,24 +359,26 @@ private func HandlerPatternTy(typeManager: TypeManager, handler: Handler): Ty {
 }
 
 private func ChkTryExprFinallyBlock(typeManager: TypeManager, te: TryExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    diag!: Option<BasicDiagnosticEngine> = None,
+    synthesizer!: Option<(SynPos, Expr) -> Ty> = None,
+    checker!: Option<(Ty, Expr) -> Bool> = None): Bool {
     if (let Some(finallyBlock) <- te.finallyBlock) {
         var isWellTyped = true
         if (te.isDesugaredFromSyncBlock) {
             try (ds = DiagSuppressor(diag)) {
-                if (Ty.IsTyCorrect(SynBlock(typeManager, finallyBlock, pos: SynPos.UNUSED))) {
+                if (Ty.IsTyCorrect(synthesizer.getOrThrow()(SynPos.UNUSED, finallyBlock))) {
                     ds.ReportDiag()
                 } else {
                     isWellTyped = false
                 }
             }
         } else {
-            isWellTyped = Ty.IsTyCorrect(SynBlock(typeManager, finallyBlock, pos: SynPos.UNUSED, diag: diag)) &&
+            isWellTyped = Ty.IsTyCorrect(synthesizer.getOrThrow()(SynPos.UNUSED, finallyBlock)) &&
                 isWellTyped
             if (!te.handlers.isEmpty()) {
                 if (let Some(finallyLambda) <- te.finallyLambda) {
                     let finallyLamTy = typeManager.GetFunctionTy(Array<Ty>(), TcUnitTy())
-                    isWellTyped = ChkLamExpr(typeManager, finallyLamTy, finallyLambda) && isWellTyped
+                    isWellTyped = checker.getOrThrow()(finallyLamTy, finallyLambda) && isWellTyped
                 }
             }
         }
@@ -395,7 +388,8 @@ private func ChkTryExprFinallyBlock(typeManager: TypeManager, te: TryExpr,
     return true
 }
 
-private func ChkResourceSpec(typeManager: TypeManager, resource: VarDecl): Bool {
+private func SynthesizeAndReplaceIdealTy(typeManager: TypeManager, resource: VarDecl,
+    synthesizer: (Expr) -> Ty): Bool {
     var ok = true
     var declaredTy: Option<Ty> = None
     if (let Some(typeNode) <- resource.typeNode) {
@@ -411,10 +405,10 @@ private func ChkResourceSpec(typeManager: TypeManager, resource: VarDecl): Bool 
             if (Ty.IsTyCorrect(existingTy)) {
                 existingTy
             } else {
-                SynExprShallow(typeManager, initializer)
+                synthesizer(initializer)
             }
         } else {
-            SynExprShallow(typeManager, initializer)
+            synthesizer(initializer)
         }
         if (Ty.IsTyCorrect(initTy)) {
             let concreteInitTy = TcReplaceIdeal(typeManager, initializer)
@@ -448,22 +442,25 @@ private func ChkResourceSpec(typeManager: TypeManager, resource: VarDecl): Bool 
 private func SynTryWithResourcesExpr(typeManager: TypeManager, te: TryExpr,
     exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None,
     diag!: Option<BasicDiagnosticEngine> = None,
-    patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Ty {
+    patternChecker!: Option<(Ty, Pattern) -> Bool> = None,
+    synthesizer!: Option<(SynPos, Expr) -> Ty> = None,
+    checker!: Option<(Ty, Expr) -> Bool> = None): Ty {
     var ok = true
     for (resource in te.resourceSpec) {
-        ok = ChkResourceSpec(typeManager, resource) && ok
+        ok = SynthesizeAndReplaceIdealTy(typeManager, resource,
+            { expr: Expr => synthesizer.getOrThrow()(SynPos.EXPR_ARG, expr) }) && ok
     }
     if (let Some(tryBlock) <- te.tryBlock) {
-        ok = Ty.IsTyCorrect(SynBlock(typeManager, tryBlock)) && ok
+        ok = Ty.IsTyCorrect(synthesizer.getOrThrow()(SynPos.EXPR_ARG, tryBlock)) && ok
     } else {
         ok = false
     }
     ok = ChkTryExprCatchPatterns(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
         diag: diag, patternChecker: patternChecker) && ok
     for (catchBlock in te.catchBlocks) {
-        ok = Ty.IsTyCorrect(SynBlock(typeManager, catchBlock)) && ok
+        ok = Ty.IsTyCorrect(synthesizer.getOrThrow()(SynPos.EXPR_ARG, catchBlock)) && ok
     }
-    ok = ChkTryExprFinallyBlock(typeManager, te, diag: diag) && ok
+    ok = ChkTryExprFinallyBlock(typeManager, te, diag: diag, synthesizer: synthesizer, checker: checker) && ok
     if (ok) {
         let unitTy = TcUnitTy()
         te.SetTy(unitTy)
@@ -475,7 +472,9 @@ private func SynTryWithResourcesExpr(typeManager: TypeManager, te: TryExpr,
 private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, baseTy: Ty,
     exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None, commandTy!: Option<Ty> = None,
     diag!: Option<BasicDiagnosticEngine> = None,
-    patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Option<Ty> {
+    patternChecker!: Option<(Ty, Pattern) -> Bool> = None,
+    synthesizer!: Option<(SynPos, Expr) -> Ty> = None,
+    checker!: Option<(Ty, Expr) -> Bool> = None): Option<Ty> {
     var ok = ChkTryExprCatchPatterns(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
         diag: diag, patternChecker: patternChecker) &&
         ChkTryExprHandlePatterns(typeManager, te, commandTy: commandTy, diag: diag, patternChecker: patternChecker)
@@ -491,7 +490,7 @@ private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, 
         if (!te.handlers.isEmpty()) {
             ok = ValidateBlockInTryHandle(catchBlock, diag: diag) && ok
         }
-        let catchTy = SynBlock(typeManager, catchBlock)
+        let catchTy = synthesizer.getOrThrow()(SynPos.EXPR_ARG, catchBlock)
         if (Ty.IsTyCorrect(catchTy)) {
             let joinRes = JoinTryTy(typeManager, joinedTy, catchTy, te.curFile)
             let (optErrs, tmpJoinedTy) = SetJoinedType(joinedTy, joinRes)
@@ -520,7 +519,7 @@ private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, 
         if (!ValidateHandler(handler, diag: diag)) {
             ok = false
         } else if (let Some(block) <- handler.block) {
-            let handlerTy = SynBlock(typeManager, block)
+            let handlerTy = synthesizer.getOrThrow()(SynPos.EXPR_ARG, block)
             if (Ty.IsTyCorrect(handlerTy)) {
                 let joinRes = JoinTryTy(typeManager, joinedTy, handlerTy, te.curFile)
                 let (optErrs, tmpJoinedTy) = SetJoinedType(joinedTy, joinRes)
@@ -547,7 +546,7 @@ private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, 
         if (let Some(lambda) <- handler.desugaredLambda) {
             let patternTy = HandlerPatternTy(typeManager, handler)
             let handleTy = typeManager.GetFunctionTy([patternTy], joinedTy)
-            ok = ChkLamExpr(typeManager, handleTy, lambda) && ok
+            ok = checker.getOrThrow()(handleTy, lambda) && ok
         }
     }
     if (ok) {
@@ -558,29 +557,33 @@ private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, 
 
 public func SynTryExpr(typeManager: TypeManager, te: TryExpr, diag: BasicDiagnosticEngine,
     exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None, commandTy!: Option<Ty> = None,
-    patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Ty {
+    patternChecker!: Option<(Ty, Pattern) -> Bool> = None,
+    synthesizer!: Option<(SynPos, Expr) -> Ty> = None,
+    checker!: Option<(Ty, Expr) -> Bool> = None): Ty {
     if (!te.resourceSpec.isEmpty()) {
         return SynTryWithResourcesExpr(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
-            diag: Some(diag), patternChecker: patternChecker)
+            diag: Some(diag), patternChecker: patternChecker, synthesizer: synthesizer, checker: checker)
     }
     var ok = true
     var baseTy: Ty = TypeManager.GetNothingTy()
     if (!te.handlers.isEmpty() && (let Some(lambda) <- te.tryLambda)) {
-        let lambdaTy = SynLamExpr(typeManager, lambda)
+        let lambdaTy = synthesizer.getOrThrow()(SynPos.EXPR_ARG, lambda)
         if (let Some(funcTy) <- (lambdaTy as FuncTy)) {
             baseTy = funcTy.retTy
         } else {
             ok = false
         }
     } else if (let Some(tryBlock) <- te.tryBlock) {
-        baseTy = SynBlock(typeManager, tryBlock, diag: Some(diag))
+        baseTy = synthesizer.getOrThrow()(SynPos.EXPR_ARG, tryBlock)
         ok = Ty.IsTyCorrect(baseTy) && ok
     } else {
         ok = false
     }
     if (let Some(joinedTy) <- SynTryExprCatchesAndHandles(typeManager, te, baseTy, exceptionTy: exceptionTy,
-        errorTy: errorTy, commandTy: commandTy, diag: Some(diag), patternChecker: patternChecker)) {
-        ok = ChkTryExprFinallyBlock(typeManager, te, diag: Some(diag)) && ok
+        errorTy: errorTy, commandTy: commandTy, diag: Some(diag), patternChecker: patternChecker,
+        synthesizer: synthesizer, checker: checker)) {
+        ok = ChkTryExprFinallyBlock(typeManager, te, diag: Some(diag), synthesizer: synthesizer,
+            checker: checker) && ok
         if (ok) {
             te.SetTy(joinedTy)
             return joinedTy
@@ -592,7 +595,8 @@ public func SynTryExpr(typeManager: TypeManager, te: TryExpr, diag: BasicDiagnos
 private func ChkTryExprCatchesAndHandles(typeManager: TypeManager, target: Ty, te: TryExpr,
     exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None, commandTy!: Option<Ty> = None,
     diag!: Option<BasicDiagnosticEngine> = None,
-    patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Bool {
+    patternChecker!: Option<(Ty, Pattern) -> Bool> = None,
+    checker!: Option<(Ty, Expr) -> Bool> = None): Bool {
     var ok = ChkTryExprCatchPatterns(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
         diag: diag, patternChecker: patternChecker) &&
         ChkTryExprHandlePatterns(typeManager, te, commandTy: commandTy, diag: diag, patternChecker: patternChecker)
@@ -600,19 +604,19 @@ private func ChkTryExprCatchesAndHandles(typeManager: TypeManager, target: Ty, t
         if (!te.handlers.isEmpty()) {
             ok = ValidateBlockInTryHandle(catchBlock, diag: diag) && ok
         }
-        ok = ChkBlock(typeManager, target, catchBlock) && ok
+        ok = checker.getOrThrow()(target, catchBlock) && ok
     }
     for (handler in te.handlers) {
         if (!ValidateHandler(handler, diag: diag)) {
             ok = false
         } else if (let Some(block) <- handler.block) {
-            ok = ChkBlock(typeManager, target, block) && ok
+            ok = checker.getOrThrow()(target, block) && ok
         } else {
             ok = false
         }
         if (let Some(lambda) <- handler.desugaredLambda) {
             let handleTy = typeManager.GetFunctionTy([HandlerPatternTy(typeManager, handler)], target)
-            ok = ChkLamExpr(typeManager, handleTy, lambda) && ok
+            ok = checker.getOrThrow()(handleTy, lambda) && ok
         }
     }
     return ok
@@ -621,10 +625,12 @@ private func ChkTryExprCatchesAndHandles(typeManager: TypeManager, target: Ty, t
 public func ChkTryExpr(typeManager: TypeManager, target: Ty, te: TryExpr,
     exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None, commandTy!: Option<Ty> = None,
     diag!: Option<BasicDiagnosticEngine> = None,
-    patternChecker!: Option<(Ty, Pattern) -> Bool> = None): Bool {
+    patternChecker!: Option<(Ty, Pattern) -> Bool> = None,
+    synthesizer!: Option<(SynPos, Expr) -> Ty> = None,
+    checker!: Option<(Ty, Expr) -> Bool> = None): Bool {
     if (!te.resourceSpec.isEmpty()) {
         let actualTy = SynTryWithResourcesExpr(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
-            diag: diag, patternChecker: patternChecker)
+            diag: diag, patternChecker: patternChecker, synthesizer: synthesizer, checker: checker)
         if (Ty.IsTyCorrect(actualTy) &&
             typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
             return true
@@ -639,27 +645,24 @@ public func ChkTryExpr(typeManager: TypeManager, target: Ty, te: TryExpr,
         }
         let tryLambdaTy = typeManager.GetFunctionTy(Array<Ty>(), target)
         if (let Some(lambda) <- te.tryLambda) {
-            ok = ChkLamExpr(typeManager, tryLambdaTy, lambda) && ok
+            ok = checker.getOrThrow()(tryLambdaTy, lambda) && ok
         } else if (let Some(tryBlock) <- te.tryBlock) {
-            ok = ChkBlock(typeManager, target, tryBlock) && ok
+            ok = checker.getOrThrow()(target, tryBlock) && ok
         } else {
             ok = false
         }
     } else if (let Some(tryBlock) <- te.tryBlock) {
-        ok = ChkBlock(typeManager, target, tryBlock) && ok
+        ok = checker.getOrThrow()(target, tryBlock) && ok
     } else {
         ok = false
     }
     ok = ChkTryExprCatchesAndHandles(typeManager, target, te, exceptionTy: exceptionTy, errorTy: errorTy,
-        commandTy: commandTy, diag: diag, patternChecker: patternChecker) && ok
-    ok = ChkTryExprFinallyBlock(typeManager, te, diag: diag) && ok
+        commandTy: commandTy, diag: diag, patternChecker: patternChecker, checker: checker) && ok
+    ok = ChkTryExprFinallyBlock(typeManager, te, diag: diag, synthesizer: synthesizer, checker: checker) && ok
     if (ok) {
         te.SetTy(target)
         return true
     }
     let _ = TryInvalid(te)
     return false
-}
-
-extend TypeChecker {
 }

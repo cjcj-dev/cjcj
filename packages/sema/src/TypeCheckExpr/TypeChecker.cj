@@ -27,6 +27,7 @@ import cjcj::utils.CPOINTER_NAME
 import cjcj::utils.CSTRING_NAME
 import cjcj::utils.CTYPE_NAME as UtilsCTypeName
 import cjcj::utils.CJC_ASSERT
+import cjcj::utils.CJC_ABORT
 import cjcj::utils.MAIN_INVOKE
 import cjcj::utils.OBJECT_NAME
 import cjcj::utils.ProfileRecorder
@@ -495,13 +496,13 @@ private func CollectGenericParam(funcDecl: FuncDecl, desugared: FuncDecl): Unit 
 }
 
 public class TypeChecker {
-    private var ci: Option<CompilerInstance> = None
+    internal var ci: Option<CompilerInstance> = None
     internal var impl: TypeCheckerImpl = TypeCheckerImpl()
-    private let contexts: ArrayList<ASTContext> = ArrayList<ASTContext>()
+    internal let contexts: ArrayList<ASTContext> = ArrayList<ASTContext>()
     internal var currentFuncBody: Option<FuncBody> = None
-    private let activeEnumConstructorRegistrations: ArrayList<EnumDecl> = ArrayList<EnumDecl>()
-    private let mainFunctionMap: HashMap<Node, ArrayList<Decl>> = HashMap<Node, ArrayList<Decl>>()
-    private var mpImpl: MPTypeCheckerImpl = MPTypeCheckerImpl(impl.typeManager)
+    internal let activeEnumConstructorRegistrations: ArrayList<EnumDecl> = ArrayList<EnumDecl>()
+    internal let mainFunctionMap: HashMap<Node, ArrayList<Decl>> = HashMap<Node, ArrayList<Decl>>()
+    internal var mpImpl: MPTypeCheckerImpl = MPTypeCheckerImpl(impl.typeManager)
 
     public init(ci: Option<CompilerInstance>) {
         this.ci = ci
@@ -521,6 +522,9 @@ public class TypeChecker {
         }
     }
 
+}
+
+extend TypeChecker {
     public func TypeCheckForPackages(pkgs: ArrayList<Package>): Unit {
         let activeContexts = PreTypeCheck(pkgs)
         for (ctx in activeContexts) {
@@ -3438,7 +3442,7 @@ public class TypeChecker {
 
     private func CheckBlock(ctx: ASTContext, target: Ty, block: Block): Bool {
         if (block.body.isEmpty()) {
-            return ChkBlock(impl.typeManager, target, block, diag: impl.diag)
+            return this.ChkBlock(ctx, target, block)
         }
         MarkUnsafeBlockChildren(block)
         let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
@@ -5024,21 +5028,6 @@ public class TypeChecker {
             }
         }
         return Check(ctx, TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN), expr)
-    }
-
-    private func CheckUnaryExprWithTarget(ctx: ASTContext, target: Ty, unaryExpr: UnaryExpr): Bool {
-        if (let Some(innerExpr) <- unaryExpr.expr) {
-            let unboxedTarget = UnboxOptionType(target)
-            if (Ty.IsTyCorrect(unboxedTarget) && unboxedTarget.IsBuiltin()) {
-                let _ = Check(ctx, unboxedTarget, innerExpr)
-                if (let Some(innerTy) <- innerExpr.GetTy()) {
-                    innerExpr.SetTy(impl.typeManager.TryGreedySubst(innerTy))
-                }
-            } else {
-                let _ = Synthesize(ctx, innerExpr)
-            }
-        }
-        return ChkUnaryExpr(impl, target, unaryExpr)
     }
 
     private func SynthesizedIfHasMissingElse(ifExpr: IfExpr): Bool {
@@ -6646,41 +6635,14 @@ public class TypeChecker {
         let _ = walker.Walk()
     }
 
-    private func RefreshNameReferencesInTree(ctx: ASTContext, expr: Expr): Unit {
-        let walker = Walker(expr, visitPost: { node: Node =>
-            if (let Some(nameRef) <- (node as NameReferenceExpr)) {
-                let _ = SynthesizeNameReference(ctx, nameRef)
-                ctx.SkipSynForCorrectTy(nameRef)
-            }
-            VisitAction.WALK_CHILDREN
-        })
-        let _ = walker.Walk()
-    }
-
-    private func RefreshUnsetExprTypesInTree(expr: Expr): Unit {
-        let walker = Walker(expr, visitPost: { node: Node =>
-            if (let Some(innerExpr) <- (node as Expr)) {
-                if (Ty.IsInitialTy(innerExpr.GetTy()) || !Ty.IsTyCorrect(innerExpr.GetTy())) {
-                    let _ = SynExprShallow(impl.typeManager, innerExpr, diag: impl.diag)
-                }
-            }
-            VisitAction.WALK_CHILDREN
-        })
-        let _ = walker.Walk()
-    }
-
     internal func FinishSynthesize(ctx: ASTContext, expr: Expr, ty: Ty): Ty {
         SynthesizeDesugarsInTree(ctx, expr)
-        RefreshNameReferencesInTree(ctx, expr)
         ctx.SkipSynForCorrectTy(expr)
         return ty
     }
 
     private func FinishCheck(ctx: ASTContext, expr: Expr, ok: Bool): Bool {
         SynthesizeDesugarsInTree(ctx, expr)
-        RefreshNameReferencesInTree(ctx, expr)
-        RefreshUnsetExprTypesInTree(expr)
-        RefreshNameReferencesInTree(ctx, expr)
         if (ok) {
             ctx.SkipSynForCorrectTy(expr)
         }
@@ -6833,7 +6795,7 @@ public class TypeChecker {
         return CheckAndCache(ctx, target, arg, key)
     }
 
-    private func SynthesizeWithNegCache(ctx: ASTContext, pos: SynPos, expr: Expr): Ty {
+    internal func SynthesizeWithNegCache(ctx: ASTContext, pos: SynPos, expr: Expr): Ty {
         if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
             return Synthesize(ctx, pos, expr)
         }
@@ -6848,7 +6810,7 @@ public class TypeChecker {
         return SynthesizeAndCache(ctx, pos, expr, key)
     }
 
-    private func CheckWithNegCache(ctx: ASTContext, target: Ty, expr: Expr): Bool {
+    internal func CheckWithNegCache(ctx: ASTContext, target: Ty, expr: Expr): Bool {
         if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
             return Check(ctx, target, expr)
         }
@@ -7231,68 +7193,6 @@ public class TypeChecker {
         return LookupCoreTy(ctx, "Exception") ?? impl.typeManager.GetAnyTy()
     }
 
-    private func SynthesizeTryExprChildren(ctx: ASTContext, tryExpr: TryExpr): Unit {
-        let _ = LookupCoreTy(ctx, "Object")
-        let _ = LookupCoreTy(ctx, "Exception")
-        let _ = LookupCoreTy(ctx, "Error")
-        for (resource in tryExpr.resourceSpec) {
-            let _ = SynthesizeDecl(ctx, resource)
-        }
-        if (let Some(tryBlock) <- tryExpr.tryBlock) {
-            let _ = SynthesizeBlock(ctx, tryBlock)
-        }
-        var idx: Int64 = 0
-        while (idx < tryExpr.catchPatterns.size) {
-            let boundDecls = ArrayList<Decl>()
-            let pattern = tryExpr.catchPatterns[idx]
-            SynthesizeTryCatchPatternTypes(ctx, pattern)
-            CollectPatternBinding(pattern, boundDecls)
-            for (decl in boundDecls) {
-                BindLocalDeclIfAbsent(ctx, decl)
-            }
-            if (idx < tryExpr.catchBlocks.size) {
-                let _ = SynthesizeBlock(ctx, tryExpr.catchBlocks[idx])
-            }
-            RemovePatternBindings(ctx, boundDecls)
-            idx++
-        }
-        for (handler in tryExpr.handlers) {
-            if (let Some(commandPattern) <- handler.commandPattern) {
-                SynthesizeTryCatchPatternTypes(ctx, commandPattern)
-            }
-            if (let Some(block) <- handler.block) {
-                let _ = SynthesizeBlock(ctx, block)
-            }
-        }
-        if (let Some(finallyBlock) <- tryExpr.finallyBlock) {
-            let _ = SynthesizeBlock(ctx, finallyBlock)
-        }
-        if (let Some(tryLambda) <- tryExpr.tryLambda) {
-            let _ = Synthesize(ctx, tryLambda)
-        }
-        if (let Some(finallyLambda) <- tryExpr.finallyLambda) {
-            let _ = Synthesize(ctx, finallyLambda)
-        }
-    }
-
-    private func SynthesizeTryExpr(ctx: ASTContext, tryExpr: TryExpr): Ty {
-        SynthesizeTryExprChildren(ctx, tryExpr)
-        let commandTy: Option<Ty> = if (let Some(commandDecl) <- lookupResolvedPackageDecl(ctx, "stdx.effect", "Command")) {
-            commandDecl.GetTy()
-        } else {
-            None
-        }
-        return FinishSynthesize(ctx, tryExpr, SynTryExpr(impl.typeManager, tryExpr, impl.diag.getOrThrow(),
-            exceptionTy: LookupCoreTy(ctx, "Exception"), errorTy: LookupCoreTy(ctx, "Error"),
-            commandTy: commandTy,
-            patternChecker: Some({ targetTy: Ty, pattern: Pattern =>
-                ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false,
-                    exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
-                        Check(ctx, patternExpectedTy, patternExpr)
-                    }), diag: impl.diag)
-            })))
-    }
-
     private func CheckArrayLit(ctx: ASTContext, target: Ty, arrayLit: ArrayLit): Bool {
         let targetTy = UnboxOptionType(target)
         var arrayStruct: Option<StructDecl> = None
@@ -7423,6 +7323,10 @@ public class TypeChecker {
         return false
     }
 
+
+
+
+
     internal func Synthesize(ctx: ASTContext, expr: Expr): Ty {
         return Synthesize(ctx, SynPos.NONE, expr)
     }
@@ -7459,13 +7363,19 @@ public class TypeChecker {
             let _ = Synthesize(ctx, pos, desugar)
         }
         if (let Some(block) <- (expr as Block)) {
-            return SynthesizeBlock(ctx, pos, block)
+            MarkUnsafeBlockChildren(block)
+            return this.SynBlock(CheckerContext(ctx, pos), block)
+        }
+        if (let Some(primitiveTypeExpr) <- (expr as PrimitiveTypeExpr)) {
+            let primitiveTy = TypeManager.GetPrimitiveTy(primitiveTypeExpr.typeKind)
+            primitiveTypeExpr.SetTy(primitiveTy)
+            return FinishSynthesize(ctx, primitiveTypeExpr, primitiveTy)
         }
         if (let Some(callExpr) <- (expr as CallExpr)) {
             return FinishSynthesize(ctx, callExpr, SynCallExpr(ctx, callExpr).getOrThrow())
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
-            return SynthesizeIfExpr(ctx, pos, ifExpr)
+            return this.SynIfExpr(CheckerContext(ctx, pos), ifExpr)
         }
         if (let Some(matchExpr) <- (expr as MatchExpr)) {
             let boundDecls = SynthesizeMatchChildren(ctx, matchExpr)
@@ -7483,39 +7393,13 @@ public class TypeChecker {
             return FinishSynthesize(ctx, jumpExpr, SynLoopControlExpr(ctx, jumpExpr))
         }
         if (let Some(forInExpr) <- (expr as ForInExpr)) {
-            return FinishSynthesize(ctx, forInExpr, SynthesizeForInExpr(ctx, forInExpr))
+            return FinishSynthesize(ctx, forInExpr, this.SynForInExpr(ctx, forInExpr))
         }
         if (let Some(whileExpr) <- (expr as WhileExpr)) {
-            let conditionBindings = ArrayList<Decl>()
-            var isWellTyped = true
-            isWellTyped = CheckConditionWithBindings(ctx, whileExpr.condExpr.getOrThrow(),
-                conditionBindings, false) && isWellTyped
-            isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, whileExpr.body.getOrThrow())) &&
-                isWellTyped
-            RemovePatternBindings(ctx, conditionBindings)
-            let whileTy = if (isWellTyped) {
-                TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
-            } else {
-                TypeManager.GetInvalidTy()
-            }
-            whileExpr.SetTy(whileTy)
-            return FinishSynthesize(ctx, whileExpr, whileTy)
+            return FinishSynthesize(ctx, whileExpr, this.SynWhileExpr(ctx, whileExpr))
         }
         if (let Some(doWhileExpr) <- (expr as DoWhileExpr)) {
-            var isWellTyped2 = true
-            isWellTyped2 = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, doWhileExpr.body.getOrThrow())) &&
-                isWellTyped2
-            let conditionBindings2 = ArrayList<Decl>()
-            isWellTyped2 = CheckConditionWithBindings(ctx, doWhileExpr.condExpr.getOrThrow(),
-                conditionBindings2, false) && isWellTyped2
-            RemovePatternBindings(ctx, conditionBindings2)
-            let doWhileTy = if (isWellTyped2) {
-                TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
-            } else {
-                TypeManager.GetInvalidTy()
-            }
-            doWhileExpr.SetTy(doWhileTy)
-            return FinishSynthesize(ctx, doWhileExpr, doWhileTy)
+            return FinishSynthesize(ctx, doWhileExpr, this.SynDoWhileExpr(ctx, doWhileExpr))
         }
         if (let Some(returnExpr) <- (expr as ReturnExpr)) {
             if (let Some(fb) <- currentFuncBody) {
@@ -7532,28 +7416,18 @@ public class TypeChecker {
             }
             return FinishSynthesize(ctx, lambdaExpr, lambdaTy)
         }
+        if (let Some(ifAvailableExpr) <- (expr as IfAvailableExpr)) {
+            return FinishSynthesize(ctx, ifAvailableExpr, this.SynIfAvailableExpr(ctx, ifAvailableExpr))
+        }
         if (let Some(parenExpr) <- (expr as ParenExpr)) {
             return FinishSynthesize(ctx, parenExpr, SynParenExpr(impl.typeManager, parenExpr,
                 synthesizer: Some({ innerExpr: Expr => Synthesize(ctx, pos, innerExpr) })))
         }
+        if (let Some(unaryExpr) <- (expr as UnaryExpr)) {
+            return FinishSynthesize(ctx, unaryExpr, this.SynUnaryExpr(ctx, unaryExpr))
+        }
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
-            if (typeCheckExprIsLogicalOperator(binaryExpr.op)) {
-                if (let None <- binaryExpr.desugarExpr) {
-                    return FinishSynthesize(ctx, binaryExpr, SynthesizeLogicalBinaryExpr(ctx, binaryExpr))
-                }
-            }
-            SynthesizeBinaryChildren(ctx, binaryExpr)
-            let binaryTy = SynBinaryExpr(impl, binaryExpr, ctx: Some(ctx),
-                synthesizer: Some({ operand: Expr => SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand) }),
-                checker: Some({ targetTy: Ty, operand2: Expr => CheckWithNegCache(ctx, targetTy, operand2) }),
-                diag: impl.diag)
-            if (Ty.IsTyCorrect(binaryTy)) {
-                return FinishSynthesize(ctx, binaryExpr, binaryTy)
-            }
-            if (let Some(overloadTy) <- TrySynthesizeBinaryOperatorOverload(ctx, binaryExpr)) {
-                return FinishSynthesize(ctx, binaryExpr, overloadTy)
-            }
-            return FinishSynthesize(ctx, binaryExpr, binaryTy)
+            return FinishSynthesize(ctx, binaryExpr, SynBinaryExpr(ctx, binaryExpr))
         }
         if (let Some(refExpr) <- (expr as RefExpr)) {
             this.InferRefExpr(ctx, refExpr)
@@ -7577,7 +7451,7 @@ public class TypeChecker {
             return SynthesizeThrowExpr(ctx, throwExpr)
         }
         if (let Some(tryExpr) <- (expr as TryExpr)) {
-            return SynthesizeTryExpr(ctx, tryExpr)
+            return SynTryExpr(ctx, tryExpr)
         }
         if (let Some(resumeExpr) <- (expr as ResumeExpr)) {
             return FinishSynthesize(ctx, resumeExpr, SynResumeExpr(impl.typeManager, resumeExpr,
@@ -7587,17 +7461,14 @@ public class TypeChecker {
                 diag: impl.diag))
         }
         if (let Some(typeConv) <- (expr as TypeConvExpr)) {
-            return FinishSynthesize(ctx, typeConv, SynTypeConvExpr(impl.typeManager, typeConv,
-                synthesizer: Some({ innerExpr: Expr => Synthesize(ctx, SynPos.EXPR_ARG, innerExpr) }),
-                diag: impl.diag))
+            return FinishSynthesize(ctx, typeConv, SynTypeConvExpr(ctx, typeConv))
         }
         if (let Some(isExpr) <- (expr as IsExpr)) {
             SynthesizeTypeNode(ctx, isExpr.isType)
             if (let Some(leftExpr) <- isExpr.leftExpr) {
                 let _ = Synthesize(ctx, leftExpr)
             }
-            return FinishSynthesize(ctx, isExpr, SynExprShallow(impl.typeManager, isExpr, ctx: Some(ctx),
-                diag: impl.diag, importManager: impl.importManager))
+            return FinishSynthesize(ctx, isExpr, SynIsExpr(impl.typeManager, isExpr))
         }
         if (let Some(asExpr) <- (expr as AsExpr)) {
             SynthesizeTypeNode(ctx, asExpr.asType)
@@ -7608,8 +7479,8 @@ public class TypeChecker {
                 LookupCoreEnumDecl(ctx, "Option"), diag: impl.diag))
         }
         if (let Some(optionalChain) <- (expr as OptionalChainExpr)) {
-            return FinishSynthesize(ctx, optionalChain, SynOptionalChainExpr(impl.typeManager, optionalChain,
-                synthesizer: Some({ innerExpr: Expr => Synthesize(ctx, pos, innerExpr) })))
+            return FinishSynthesize(ctx, optionalChain,
+                SynOptionalChainExpr(CheckerContext(ctx, pos), optionalChain))
         }
         if (let Some(arrayExpr) <- (expr as ArrayExpr)) {
             SynthesizeTypeNode(ctx, arrayExpr.typeNode)
@@ -7628,8 +7499,7 @@ public class TypeChecker {
                 typeSynthesizer: Some({ typeNode: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode) }),
                 argSynthesizer: Some({ arg: FuncArg => SynthesizeFuncArg(ctx, arg) }), diag: impl.diag))
         }
-        if (isStringLiteral(expr)) {
-            if (let Some(lit) <- (expr as LitConstExpr)) {
+        if (let Some(lit) <- (expr as LitConstExpr)) {
                 var stringTy: Option<Ty> = None
                 if (let Some(manager) <- impl.importManager) {
                     if (let Some(stringDecl) <- manager.GetCoreDecl<Decl>("String")) {
@@ -7648,19 +7518,13 @@ public class TypeChecker {
                         synthesizer: Some({ block: Block => Synthesize(ctx, SynPos.EXPR_ARG, block) }),
                         checker: Some({ targetTy: Ty, partExpr: Expr => Check(ctx, targetTy, partExpr) }),
                         diag: impl.diag))
-            }
         }
         SynthesizeNodeChildren(ctx, expr)
+        if (let Some(tupleLit) <- (expr as TupleLit)) {
+            return FinishSynthesize(ctx, tupleLit, SynTupleLit(impl.typeManager, tupleLit))
+        }
         if (let Some(rangeExpr) <- (expr as RangeExpr)) {
-            var rangeStruct: Option<StructDecl> = None
-            if (let Some(manager3) <- impl.importManager) {
-                rangeStruct = manager3.GetCoreDecl<StructDecl>("Range")
-            }
-            return FinishSynthesize(ctx, rangeExpr, SynRangeExpr(impl.typeManager, rangeExpr, rangeDecl: rangeStruct,
-                ctx: Some(ctx), checker: Some({ targetTy: Ty, child: Expr => Check(ctx, targetTy, child) }),
-                checkGenericDeclInstantiation: Some({ decl: Option<Decl>, typeArgs: ArrayList<Ty>, node: Node =>
-                    impl.CheckGenericDeclInstantiation(decl, typeArgs, node)
-                }), diag: impl.diag))
+            return FinishSynthesize(ctx, rangeExpr, SynRangeExpr(ctx, rangeExpr))
         }
         if (let Some(arrayLit) <- (expr as ArrayLit)) {
             var arrayStruct: Option<StructDecl> = None
@@ -7673,173 +7537,8 @@ public class TypeChecker {
         if (let Some(spawnExpr) <- (expr as SpawnExpr)) {
             return SynthesizeSpawnExpr(ctx, spawnExpr)
         }
-        return FinishSynthesize(ctx, expr,
-            SynExprShallow(impl.typeManager, expr, diag: impl.diag, importManager: impl.importManager))
-    }
-
-    private func SynthesizeLogicalBinaryExpr(ctx: ASTContext, be: BinaryExpr): Ty {
-        if (let None <- be.leftExpr) {
-            let invalidTy = TypeManager.GetInvalidTy()
-            be.SetTy(invalidTy)
-            return invalidTy
-        }
-        if (let None <- be.rightExpr) {
-            let invalidTy2 = TypeManager.GetInvalidTy()
-            be.SetTy(invalidTy2)
-            return invalidTy2
-        }
-        let leftExpr = be.leftExpr.getOrThrow()
-        let rightExpr = be.rightExpr.getOrThrow()
-        let leftTy = Synthesize(ctx, leftExpr)
-        let rightTy = Synthesize(ctx, rightExpr)
-        if (!Ty.IsTyCorrect(leftTy) || !Ty.IsTyCorrect(rightTy)) {
-            let invalidTy3 = TypeManager.GetInvalidTy()
-            be.SetTy(invalidTy3)
-            return invalidTy3
-        }
-        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
-        if (impl.typeManager.IsSubtype(leftTy, boolTy) && impl.typeManager.IsSubtype(rightTy, boolTy)) {
-            be.SetTy(boolTy)
-            return boolTy
-        }
-        let invalidTy4 = TypeManager.GetInvalidTy()
-        be.SetTy(invalidTy4)
-        return invalidTy4
-    }
-
-    private func CheckLogicalBinaryExpr(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
-        if (let None <- be.leftExpr) {
-            be.SetTy(TypeManager.GetInvalidTy())
-            return false
-        }
-        if (let None <- be.rightExpr) {
-            be.SetTy(TypeManager.GetInvalidTy())
-            return false
-        }
-        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
-        if (!target.IsBoolean()) {
-            if (!impl.typeManager.IsLitBoxableType(boolTy, target)) {
-                be.SetTy(TypeManager.GetInvalidTy())
-                return false
-            }
-        }
-        let leftExpr = be.leftExpr.getOrThrow()
-        let rightExpr = be.rightExpr.getOrThrow()
-        var ok = true
-        if (!CheckWithNegCache(ctx, boolTy, leftExpr)) {
-            ok = false
-        }
-        if (!CheckWithNegCache(ctx, boolTy, rightExpr)) {
-            ok = false
-        }
-        if (ok) {
-            be.SetTy(boolTy)
-            return true
-        }
-        be.SetTy(TypeManager.GetInvalidTy())
-        return false
-    }
-
-    private func CheckArithmeticBinaryExpr(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
-        if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
-            be.SetTy(TypeManager.GetInvalidTy())
-            return false
-        }
-        let targetTy = UnboxOptionType(target)
-        if (!Ty.IsTyCorrect(targetTy)) {
-            return false
-        }
-        let leftExpr = be.leftExpr.getOrThrow()
-        let rightExpr = be.rightExpr.getOrThrow()
-        for (kindValue in typeCheckExprConcreteBinaryCandidateKinds(be.op)) {
-            let candidateTy = TypeManager.GetPrimitiveTy(kindValue)
-            if (!impl.typeManager.IsSubtype(candidateTy, targetTy)) {
-                continue
-            }
-            typeCheckExprClearKeepTargets(leftExpr)
-            typeCheckExprClearKeepTargets(rightExpr)
-            let leftOk = CheckWithNegCache(ctx, candidateTy, leftExpr)
-            let rightOk = CheckWithNegCache(ctx, candidateTy, rightExpr)
-            if (leftOk && rightOk) {
-                be.SetTy(candidateTy)
-                return true
-            }
-        }
-        be.SetTy(TypeManager.GetInvalidTy())
-        return false
-    }
-
-    private func CheckBinaryExpr(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
-        if (let Some(desugar) <- be.desugarExpr) {
-            if (let Some(desugarTy) <- desugar.GetTy()) {
-                return impl.typeManager.CheckTypeCompatibility(target, desugarTy) != TypeCompatibility.INCOMPATIBLE
-            }
-        }
-        return ChkBinaryExpr(impl, target, be, ctx: Some(ctx),
-            synthesizer: Some({ operand: Expr => SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand) }),
-            checker: Some({ targetTy: Ty, operand2: Expr => CheckWithNegCache(ctx, targetTy, operand2) }),
-            diag: impl.diag)
-    }
-
-    private func ShouldTryBinaryOperatorOverload(be: BinaryExpr): Bool {
-        if (!IsOverloadableOperator(be.op)) {
-            return false
-        }
-        if (be.op != TokenKind.EQUAL && be.op != TokenKind.NOTEQ) {
-            return true
-        }
-        if (let Some(leftExpr) <- be.leftExpr) {
-            if (let Some(rightExpr) <- be.rightExpr) {
-                if (let Some(leftTy) <- leftExpr.GetTy()) {
-                    if (let Some(rightTy) <- rightExpr.GetTy()) {
-                        return !(leftTy.IsTuple() && rightTy.IsTuple())
-                    }
-                }
-            }
-        }
-        return true
-    }
-
-    private func PropagateBinaryOperatorTarget(be: BinaryExpr, desugar: Expr): Unit {
-        if (let Some(callExpr) <- (desugar as CallExpr)) {
-            if (let Some(resolved) <- callExpr.resolvedFunction) {
-                ReplaceTarget(be, Some(resolved))
-            }
-        }
-    }
-
-    private func TryCheckBinaryOperatorOverload(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
-        if (!ShouldTryBinaryOperatorOverload(be)) {
-            return false
-        }
-        DesugarOperatorOverloadExpr(be, ctx: Some(ctx))
-        if (let Some(desugar) <- be.desugarExpr) {
-            if (Check(ctx, target, desugar)) {
-                be.SetTy(desugar.GetTy() ?? TypeManager.GetInvalidTy())
-                PropagateBinaryOperatorTarget(be, desugar)
-                return true
-            }
-        }
-        RecoverToBinaryExpr(be)
-        return false
-    }
-
-    private func TrySynthesizeBinaryOperatorOverload(ctx: ASTContext, be: BinaryExpr): Option<Ty> {
-        if (!ShouldTryBinaryOperatorOverload(be)) {
-            return None
-        }
-        DesugarOperatorOverloadExpr(be, ctx: Some(ctx))
-        if (let Some(desugar) <- be.desugarExpr) {
-            let desugarTy = Synthesize(ctx, desugar)
-            if (Ty.IsTyCorrect(desugarTy)) {
-                be.SetTy(desugarTy)
-                PropagateBinaryOperatorTarget(be, desugar)
-                return Some(desugarTy)
-            }
-        }
-        RecoverToBinaryExpr(be)
-        be.SetTy(TypeManager.GetInvalidTy())
-        return None
+        CJC_ABORT()
+        return FinishSynthesize(ctx, expr, expr.GetTy().getOrThrow())
     }
 
     internal func Check(ctx: ASTContext, target: Ty, expr: Expr, clearInferredCallTypes!: Bool = true): Bool {
@@ -7862,7 +7561,8 @@ public class TypeChecker {
             return FinishCheck(ctx, lambda, CheckLambdaExprWithTarget(ctx, target, lambda))
         }
         if (let Some(block) <- (expr as Block)) {
-            let ok = CheckBlock(ctx, target, block)
+            MarkUnsafeBlockChildren(block)
+            let ok = ChkBlock(ctx, target, block)
             typeCheckExprClearTargetType(ctx, expr)
             return ok
         }
@@ -7873,7 +7573,7 @@ public class TypeChecker {
             } else {
                 let _ = SynthesizeNameReference(ctx, nameRef)
             }
-            let ok = ChkNameReferenceExpr(impl.typeManager, target, nameRef, diag: impl.diag)
+            let ok = this.ChkRefExpr(ctx, target, nameRef)
             if (ok) {
                 ctx.SkipSynForCorrectTy(nameRef)
             }
@@ -7894,7 +7594,7 @@ public class TypeChecker {
             return FinishCheck(ctx, callExpr, ok)
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
-            return FinishCheck(ctx, ifExpr, CheckIfExprWithTarget(ctx, target, ifExpr))
+            return FinishCheck(ctx, ifExpr, ChkIfExpr(ctx, target, ifExpr))
         }
         if (let Some(matchExpr) <- (expr as MatchExpr)) {
             let boundDecls = SynthesizeMatchChildren(ctx, matchExpr)
@@ -7919,49 +7619,16 @@ public class TypeChecker {
             return FinishCheck(ctx, jumpExpr, ChkLoopControlExpr(ctx, jumpExpr))
         }
         if (let Some(forInExpr) <- (expr as ForInExpr)) {
-            let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
-            var isWellTyped = impl.typeManager.IsSubtype(unitTy, target)
-            if (!isWellTyped) {
-                if (let Some(diagValue) <- impl.diag) {
-                    DiagMismatchedTypesWithFoundTy(diagValue, forInExpr, target, unitTy)
-                }
-            }
-            isWellTyped = Ty.IsTyCorrect(SynthesizeForInExpr(ctx, forInExpr)) && isWellTyped
-            return FinishCheck(ctx, forInExpr, isWellTyped)
+            return FinishCheck(ctx, forInExpr, ChkForInExpr(ctx, target, forInExpr))
         }
         if (let Some(whileExpr) <- (expr as WhileExpr)) {
-            let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
-            var isWellTyped = impl.typeManager.IsSubtype(unitTy, target)
-            if (!isWellTyped) {
-                if (let Some(diagValue) <- impl.diag) {
-                    DiagMismatchedTypesWithFoundTy(diagValue, whileExpr, target, unitTy)
-                }
-            }
-            isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, whileExpr)) && isWellTyped
-            return FinishCheck(ctx, whileExpr, isWellTyped)
+            return FinishCheck(ctx, whileExpr, ChkWhileExpr(ctx, target, whileExpr))
         }
         if (let Some(doWhileExpr) <- (expr as DoWhileExpr)) {
-            let unitTy2 = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
-            var isWellTyped2 = impl.typeManager.IsSubtype(unitTy2, target)
-            if (!isWellTyped2) {
-                if (let Some(diagValue2) <- impl.diag) {
-                    DiagMismatchedTypesWithFoundTy(diagValue2, doWhileExpr, target, unitTy2)
-                }
-            }
-            isWellTyped2 = Ty.IsTyCorrect(Synthesize(ctx, doWhileExpr)) && isWellTyped2
-            return FinishCheck(ctx, doWhileExpr, isWellTyped2)
+            return FinishCheck(ctx, doWhileExpr, ChkDoWhileExpr(ctx, target, doWhileExpr))
         }
         if (let Some(rangeExpr) <- (expr as RangeExpr)) {
-            var rangeStruct: Option<StructDecl> = None
-            if (let Some(manager) <- impl.importManager) {
-                rangeStruct = manager.GetCoreDecl<StructDecl>("Range")
-            }
-            return FinishCheck(ctx, rangeExpr, ChkRangeExpr(impl.typeManager, target, rangeExpr,
-                rangeDecl: rangeStruct, ctx: Some(ctx),
-                checker: Some({ targetTy: Ty, child: Expr => Check(ctx, targetTy, child) }),
-                checkGenericDeclInstantiation: Some({ decl: Option<Decl>, typeArgs: ArrayList<Ty>, node: Node =>
-                    impl.CheckGenericDeclInstantiation(decl, typeArgs, node)
-                }), diag: impl.diag))
+            return FinishCheck(ctx, rangeExpr, ChkRangeExpr(ctx, target, rangeExpr))
         }
         if (let Some(lit) <- (expr as LitConstExpr)) {
             var stringTy: Option<Ty> = None
@@ -8000,7 +7667,7 @@ public class TypeChecker {
                 diag: impl.diag))
         }
         if (let Some(unaryExpr) <- (expr as UnaryExpr)) {
-            return FinishCheck(ctx, unaryExpr, CheckUnaryExprWithTarget(ctx, target, unaryExpr))
+            return FinishCheck(ctx, unaryExpr, ChkUnaryExpr(ctx, target, unaryExpr))
         }
         if (let Some(returnExpr) <- (expr as ReturnExpr)) {
             if (let Some(fb) <- currentFuncBody) {
@@ -8014,8 +7681,7 @@ public class TypeChecker {
             } else {
                 let _ = SynthesizeNameReference(ctx, nameRef)
             }
-            return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx),
-                diag: impl.diag, importManager: impl.importManager))
+            return FinishCheck(ctx, expr, this.ChkRefExpr(ctx, target, nameRef))
         }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             let throwTy = SynthesizeThrowExpr(ctx, throwExpr)
@@ -8023,26 +7689,13 @@ public class TypeChecker {
                 impl.typeManager.CheckTypeCompatibility(target, throwTy) != TypeCompatibility.INCOMPATIBLE)
         }
         if (let Some(tryExpr) <- (expr as TryExpr)) {
-            SynthesizeTryExprChildren(ctx, tryExpr)
-            let commandTy: Option<Ty> = if (let Some(commandDecl) <- lookupResolvedPackageDecl(ctx, "stdx.effect", "Command")) {
-                commandDecl.GetTy()
-            } else {
-                None
-            }
-            return FinishCheck(ctx, tryExpr, ChkTryExpr(impl.typeManager, target, tryExpr,
-                exceptionTy: LookupCoreTy(ctx, "Exception"), errorTy: LookupCoreTy(ctx, "Error"),
-                commandTy: commandTy, diag: impl.diag,
-                patternChecker: Some({ targetTy: Ty, pattern: Pattern =>
-                    ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false,
-                        exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
-                            Check(ctx, patternExpectedTy, patternExpr)
-                        }), diag: impl.diag)
-                })))
+            return FinishCheck(ctx, tryExpr, ChkTryExpr(ctx, target, tryExpr))
+        }
+        if (let Some(ifAvailableExpr) <- (expr as IfAvailableExpr)) {
+            return FinishCheck(ctx, ifAvailableExpr, ChkIfAvailableExpr(ctx, target, ifAvailableExpr))
         }
         if (let Some(typeConv) <- (expr as TypeConvExpr)) {
-            return FinishCheck(ctx, typeConv, ChkTypeConvExpr(impl.typeManager, target, typeConv,
-                synthesizer: Some({ innerExpr: Expr => Synthesize(ctx, SynPos.EXPR_ARG, innerExpr) }),
-                diag: impl.diag))
+            return FinishCheck(ctx, typeConv, ChkTypeConvExpr(ctx, target, typeConv))
         }
         if (let Some(syncExpr) <- (expr as SynchronizedExpr)) {
             var lockTy: Option<Ty> = None
@@ -8105,13 +7758,26 @@ public class TypeChecker {
                 LookupCoreEnumDecl(ctx, "Option"), diag: impl.diag))
         }
         if (let Some(optionalChain) <- (expr as OptionalChainExpr)) {
-            return FinishCheck(ctx, optionalChain, ChkOptionalChainExpr(impl.typeManager, target, optionalChain,
-                synthesizer: Some({ innerExpr: Expr => Synthesize(ctx, SynPos.EXPR_ARG, innerExpr) }),
-                diag: impl.diag))
+            return FinishCheck(ctx, optionalChain, ChkOptionalChainExpr(ctx, target, optionalChain))
         }
-        let _ = Synthesize(ctx, expr)
-        return FinishCheck(ctx, expr, ChkExprShallow(impl.typeManager, target, expr, ctx: Some(ctx),
-            diag: impl.diag, importManager: impl.importManager))
+        let actualTy = Synthesize(ctx, expr)
+        let ok = Ty.IsTyCorrect(actualTy) && impl.typeManager.IsSubtype(actualTy, target)
+        if (!ok && Ty.IsTyCorrect(actualTy)) {
+            if (let Some(diag) <- impl.diag) { DiagMismatchedTypes(diag, expr, target) }
+        }
+        return FinishCheck(ctx, expr, ok)
+    }
+
+    private func CheckBinaryExpr(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
+        if (let Some(desugar) <- be.desugarExpr) {
+            if (let Some(desugarTy) <- desugar.GetTy()) {
+                return impl.typeManager.CheckTypeCompatibility(target, desugarTy) != TypeCompatibility.INCOMPATIBLE
+            }
+        }
+        return ChkBinaryExpr(impl, target, be, ctx: Some(ctx),
+            synthesizer: Some({ operand: Expr => SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand) }),
+            checker: Some({ targetTy: Ty, operand2: Expr => CheckWithNegCache(ctx, targetTy, operand2) }),
+            diag: impl.diag)
     }
 
     func ReplaceWithGenericTyInInheritableDecl(
@@ -8277,5 +7943,203 @@ public class TypeChecker {
         if (Ty.IsInitialTy(re.GetTy())) {
             re.SetTy(TypeManager.GetInvalidTy())
         }
+    }
+
+    public func SynIfExpr(ctx: CheckerContext, ie: IfExpr): Ty {
+        return SynthesizeIfExpr(ctx.Ctx(), ctx.SynthPos(), ie)
+    }
+
+    public func ChkIfExpr(ctx: ASTContext, target: Ty, ie: IfExpr): Bool {
+        return CheckIfExprWithTarget(ctx, target, ie)
+    }
+
+    public func ChkIfExprNoElse(ctx: ASTContext, target: Ty, ie: IfExpr): Bool {
+        return CheckIfExprNoElseWithTarget(ctx, target, ie)
+    }
+
+    public func ChkIfExprTwoBranches(ctx: ASTContext, target: Ty, ie: IfExpr): Bool {
+        var isWellTyped = true
+        if (let Some(thenBody) <- ie.thenBody) {
+            if (!Check(ctx, target, thenBody)) {
+                isWellTyped = false
+                if (ie.ShouldDiagnose() && !CanSkipDiag(thenBody) &&
+                    !impl.typeManager.IsSubtype(thenBody.GetTy().getOrThrow(), target)) {
+                    if (let Some(diag) <- impl.diag) { DiagMismatchedTypes(diag, thenBody, target) }
+                }
+            }
+        } else { isWellTyped = false }
+        if (let Some(elseBody) <- ie.elseBody) {
+            if (!Check(ctx, target, elseBody)) {
+                isWellTyped = false
+                if (ie.ShouldDiagnose() && !CanSkipDiag(elseBody) &&
+                    !impl.typeManager.IsSubtype(elseBody.GetTy().getOrThrow(), target)) {
+                    if (let Some(diag2) <- impl.diag) { DiagMismatchedTypes(diag2, elseBody, target) }
+                }
+            }
+        } else { isWellTyped = false }
+        if (!isWellTyped || !Ty.IsTyCorrect(ie.thenBody.getOrThrow().GetTy()) ||
+            !Ty.IsTyCorrect(ie.elseBody.getOrThrow().GetTy())) {
+            return false
+        }
+        ie.SetTy(target)
+        return true
+    }
+
+    public func ChkWhileExpr(ctx: ASTContext, target: Ty, we: WhileExpr): Bool {
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        var isWellTyped = impl.typeManager.IsSubtype(unitTy, target)
+        if (!isWellTyped) {
+            if (let Some(diag) <- impl.diag) { DiagMismatchedTypesWithFoundTy(diag, we, target, unitTy) }
+        }
+        isWellTyped = Ty.IsTyCorrect(SynWhileExpr(ctx, we)) && isWellTyped
+        return isWellTyped
+    }
+
+    public func SynWhileExpr(ctx: ASTContext, we: WhileExpr): Ty {
+        if ((let None <- we.condExpr) || (let None <- we.body)) {
+            return TcInvalid(we)
+        }
+        let bindings = ArrayList<Decl>()
+        var isWellTyped = CheckConditionWithBindings(ctx, we.condExpr.getOrThrow(), bindings, false)
+        isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, we.body.getOrThrow())) && isWellTyped
+        RemovePatternBindings(ctx, bindings)
+        let ty = if (isWellTyped) { TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT) }
+            else { TypeManager.GetInvalidTy() }
+        we.SetTy(ty)
+        return ty
+    }
+
+    public func ChkDoWhileExpr(ctx: ASTContext, target: Ty, dwe: DoWhileExpr): Bool {
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        var isWellTyped = impl.typeManager.IsSubtype(unitTy, target)
+        if (!isWellTyped) {
+            if (let Some(diag) <- impl.diag) { DiagMismatchedTypesWithFoundTy(diag, dwe, target, unitTy) }
+        }
+        isWellTyped = Ty.IsTyCorrect(SynDoWhileExpr(ctx, dwe)) && isWellTyped
+        return isWellTyped
+    }
+
+    public func SynDoWhileExpr(ctx: ASTContext, dwe: DoWhileExpr): Ty {
+        if ((let None <- dwe.body) || (let None <- dwe.condExpr)) {
+            return TcInvalid(dwe)
+        }
+        var isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, dwe.body.getOrThrow()))
+        let bindings = ArrayList<Decl>()
+        isWellTyped = CheckConditionWithBindings(ctx, dwe.condExpr.getOrThrow(), bindings, false) && isWellTyped
+        RemovePatternBindings(ctx, bindings)
+        let ty = if (isWellTyped) { TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT) }
+            else { TypeManager.GetInvalidTy() }
+        dwe.SetTy(ty)
+        return ty
+    }
+
+    public func SynForInExpr(ctx: ASTContext, fie: ForInExpr): Ty {
+        return SynthesizeForInExpr(ctx, fie)
+    }
+
+    public func ChkForInExpr(ctx: ASTContext, target: Ty, fie: ForInExpr): Bool {
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        var isWellTyped = impl.typeManager.IsSubtype(unitTy, target)
+        if (!isWellTyped) {
+            if (let Some(diag) <- impl.diag) { DiagMismatchedTypesWithFoundTy(diag, fie, target, unitTy) }
+        }
+        isWellTyped = Ty.IsTyCorrect(SynForInExpr(ctx, fie)) && isWellTyped
+        if (!isWellTyped) { fie.SetTy(TypeManager.GetInvalidTy()) }
+        return isWellTyped
+    }
+
+    func SynTryExpr(ctx: ASTContext, te: TryExpr): Ty {
+        let boundDecls = ArrayList<Decl>()
+        let _ = LookupCoreTy(ctx, "Object")
+        let _ = LookupCoreTy(ctx, "Exception")
+        let _ = LookupCoreTy(ctx, "Error")
+        for (resource in te.resourceSpec) { let _ = SynthesizeDecl(ctx, resource) }
+        if (let Some(tryBlock) <- te.tryBlock) { let _ = SynthesizeBlock(ctx, tryBlock) }
+        var idx: Int64 = 0
+        while (idx < te.catchPatterns.size) {
+            let pattern = te.catchPatterns[idx]
+            SynthesizeTryCatchPatternTypes(ctx, pattern)
+            let patternBindings = ArrayList<Decl>()
+            CollectPatternBinding(pattern, patternBindings)
+            for (decl in patternBindings) {
+                BindLocalDeclIfAbsent(ctx, decl)
+                AddUniqueBoundDecl(boundDecls, decl)
+            }
+            if (idx < te.catchBlocks.size) { let _ = SynthesizeBlock(ctx, te.catchBlocks[idx]) }
+            idx++
+        }
+        for (handler in te.handlers) {
+            if (let Some(commandPattern) <- handler.commandPattern) {
+                SynthesizeTryCatchPatternTypes(ctx, commandPattern)
+            }
+            if (let Some(block) <- handler.block) { let _ = SynthesizeBlock(ctx, block) }
+        }
+        if (let Some(finallyBlock) <- te.finallyBlock) { let _ = SynthesizeBlock(ctx, finallyBlock) }
+        if (let Some(tryLambda) <- te.tryLambda) { let _ = Synthesize(ctx, tryLambda) }
+        if (let Some(finallyLambda) <- te.finallyLambda) { let _ = Synthesize(ctx, finallyLambda) }
+        let commandTy: Option<Ty> = if (let Some(commandDecl) <-
+            lookupResolvedPackageDecl(ctx, "stdx.effect", "Command")) {
+            commandDecl.GetTy()
+        } else { None }
+        let tryTy = SynTryExpr(impl.typeManager, te, impl.diag.getOrThrow(),
+            exceptionTy: LookupCoreTy(ctx, "Exception"), errorTy: LookupCoreTy(ctx, "Error"),
+            commandTy: commandTy,
+            patternChecker: Some({ targetTy: Ty, pattern: Pattern =>
+                ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false,
+                    exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
+                        Check(ctx, patternExpectedTy, patternExpr)
+                    }), diag: impl.diag)
+            }), synthesizer: Some({ pos: SynPos, expr: Expr => Synthesize(ctx, pos, expr) }),
+            checker: Some({ target: Ty, expr: Expr => Check(ctx, target, expr) }))
+        RemovePatternBindings(ctx, boundDecls)
+        return FinishSynthesize(ctx, te, tryTy)
+    }
+
+    func ChkTryExpr(ctx: ASTContext, target: Ty, te: TryExpr): Bool {
+        let boundDecls = ArrayList<Decl>()
+        let _ = LookupCoreTy(ctx, "Object")
+        let _ = LookupCoreTy(ctx, "Exception")
+        let _ = LookupCoreTy(ctx, "Error")
+        for (resource in te.resourceSpec) { let _ = SynthesizeDecl(ctx, resource) }
+        if (let Some(tryBlock) <- te.tryBlock) { let _ = SynthesizeBlock(ctx, tryBlock) }
+        var idx: Int64 = 0
+        while (idx < te.catchPatterns.size) {
+            let pattern = te.catchPatterns[idx]
+            SynthesizeTryCatchPatternTypes(ctx, pattern)
+            let patternBindings = ArrayList<Decl>()
+            CollectPatternBinding(pattern, patternBindings)
+            for (decl in patternBindings) {
+                BindLocalDeclIfAbsent(ctx, decl)
+                AddUniqueBoundDecl(boundDecls, decl)
+            }
+            if (idx < te.catchBlocks.size) { let _ = SynthesizeBlock(ctx, te.catchBlocks[idx]) }
+            idx++
+        }
+        for (handler in te.handlers) {
+            if (let Some(commandPattern) <- handler.commandPattern) {
+                SynthesizeTryCatchPatternTypes(ctx, commandPattern)
+            }
+            if (let Some(block) <- handler.block) { let _ = SynthesizeBlock(ctx, block) }
+        }
+        if (let Some(finallyBlock) <- te.finallyBlock) { let _ = SynthesizeBlock(ctx, finallyBlock) }
+        if (let Some(tryLambda) <- te.tryLambda) { let _ = Synthesize(ctx, tryLambda) }
+        if (let Some(finallyLambda) <- te.finallyLambda) { let _ = Synthesize(ctx, finallyLambda) }
+        let commandTy: Option<Ty> = if (let Some(manager) <- impl.importManager) {
+            if (let Some(commandDecl) <- manager.GetImportedDecl("stdx.effect", "Command")) {
+                commandDecl.GetTy()
+            } else { None }
+        } else { None }
+        let ok = ChkTryExpr(impl.typeManager, target, te,
+            exceptionTy: LookupCoreTy(ctx, "Exception"), errorTy: LookupCoreTy(ctx, "Error"),
+            commandTy: commandTy, diag: impl.diag,
+            patternChecker: Some({ targetTy: Ty, pattern: Pattern =>
+                ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false,
+                    exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
+                        Check(ctx, patternExpectedTy, patternExpr)
+                    }), diag: impl.diag)
+            }), synthesizer: Some({ pos: SynPos, expr: Expr => Synthesize(ctx, pos, expr) }),
+            checker: Some({ expected: Ty, expr: Expr => Check(ctx, expected, expr) }))
+        RemovePatternBindings(ctx, boundDecls)
+        return ok
     }
 }
