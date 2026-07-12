@@ -8,6 +8,7 @@ import cjcj::basic.Linkage as BasicLinkage
 import cjcj::ast.ASTKind
 import cjcj::ast.IsInstanceConstructor as AstIsInstanceConstructor
 import cjcj::ast.IsValidCFuncConstructorCall
+import cjcj::ast.IsCondition as AstIsCondition
 import cjcj::ast.GetVarsInitializationOrderWithPositions as AstGetVarsInitializationOrderWithPositions
 import cjcj::ast.BuiltInDecl
 import cjcj::ast.BuiltInType
@@ -117,6 +118,34 @@ private class EnumMatchInfo {
     public let firstSwitchBlocks: TreeMap<UInt64, Block> = TreeMap<UInt64, Block>()
     public let innerDefaultInfos: TreeMap<UInt64, ArrayList<SecondSwitchInfo>> =
         TreeMap<UInt64, ArrayList<SecondSwitchInfo>>()
+}
+
+private class DanglingBlock {
+    public var tb: Option<Block>
+    public var fb: Option<Block>
+
+    public init(tb!: Option<Block> = None, fb!: Option<Block> = None) {
+        this.tb = tb
+        this.fb = fb
+    }
+}
+
+private open class TranslateCondCtrlExpr {
+    public var endBlock: Option<Block> = None
+
+    public init() {}
+}
+
+private class TranslateIfExpr <: TranslateCondCtrlExpr {
+    public var trueBlock: Option<Block> = None
+    public var falseBlock: Option<Block> = None
+    public var retVal: Option<Value> = None
+    public let e: AstIfExpr
+
+    public init(e: AstIfExpr) {
+        super()
+        this.e = e
+    }
 }
 
 // Static member func and global func should create alloc node for print `unused variable` warning.
@@ -1694,63 +1723,331 @@ public class Translator {
         return (trueBlock, if (isStillReachable) { Some(realDefaultBlock) } else { None })
     }
 
-    public func Visit(expr: AstIfExpr): Option<Value> {
-        let condExpr = RequireExpr(expr.condExpr, "if condition")
-        let parentBlock = CurrentBlock()
-        let group = parentBlock.GetParentBlockGroup() ??
-            throw IllegalStateException("faithful AST2CHIR if requires parent block group")
-        let thenBlock = builder.CreateBlock(group)
-        let elseBlock = builder.CreateBlock(group)
-        let joinBlock = builder.CreateBlock(group)
-        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
-        let forceGenerateUnit = opts.enableCompileDebug && IsEmptyIf(expr)
-        let resultLoc: Option<Value> = if ((HasTypeOfNothing(expr) || resultTy.IsUnit()) && !forceGenerateUnit) {
-            None
+    private func TranslateCondition(cond: AstExpr, isRightmost: Bool,
+        impl: TranslateIfExpr): DanglingBlock {
+        if (let Some(parenExpr) <- (cond as AstParenExpr)) {
+            return TranslateCondition(RequireExpr(parenExpr.expr, "parenthesized if condition"), isRightmost, impl)
+        }
+        if (let Some(letPattern) <- (cond as AstLetPatternDestructor)) {
+            return TranslateLetPattern(letPattern, isRightmost, impl)
+        }
+        if (let Some(binaryExpr) <- (cond as AstBinaryExpr)) {
+            if ((binaryExpr.op == AstTokenKind.AND || binaryExpr.op == AstTokenKind.OR) &&
+                (AstIsCondition(RequireExpr(binaryExpr.leftExpr, "if condition left operand")) ||
+                AstIsCondition(RequireExpr(binaryExpr.rightExpr, "if condition right operand")))) {
+                return TranslateBinary(binaryExpr, isRightmost, impl)
+            }
+        }
+        return TranslateNormalCondition(cond, isRightmost, impl)
+    }
+
+    private func TranslateNormalCondition(cond: AstExpr, isRightmost: Bool,
+        impl: TranslateIfExpr): DanglingBlock {
+        let value = TranslateExprArg(cond)
+        let loc = TranslateLocation(cond.begin, cond.end)
+        let current = CurrentBlock()
+        if (isRightmost) {
+            let trueBlock = TranslateTrueBlock(impl)
+            let falseBlock = TranslateFalseBlock(impl)
+            currentBlock = current
+            let branch = CreateBranch(value, current, trueBlock, falseBlock, impl)
+            branch.SetDebugLocation(TranslateLocation(GetExpr(impl)))
+            return DanglingBlock()
+        }
+        let trueBlock = CreateBlock()
+        let falseBlock = CreateBlock()
+        currentBlock = current
+        let branch = CreateBranch(GetDerefedValue(value, loc), current, trueBlock, falseBlock, impl)
+        branch.SetDebugLocation(loc)
+        return DanglingBlock(tb: Some(trueBlock), fb: Some(falseBlock))
+    }
+
+    private func MergeBlocks(left: Option<Block>, right: Option<Block>): Option<Block> {
+        if (let Some(leftBlock) <- left) {
+            if (let Some(rightBlock) <- right) {
+                let _ = CreateGoto(rightBlock, leftBlock)
+                return Some(rightBlock)
+            }
+            return Some(leftBlock)
+        }
+        return right
+    }
+
+    private func TranslateBinary(binaryExpr: AstBinaryExpr, isRightmost: Bool,
+        impl: TranslateIfExpr): DanglingBlock {
+        let left = TranslateCondition(RequireExpr(binaryExpr.leftExpr, "if condition left operand"), false, impl)
+        let branchBlock = CreateBlock()
+        currentBlock = branchBlock
+        let right = TranslateCondition(RequireExpr(binaryExpr.rightExpr, "if condition right operand"),
+            isRightmost, impl)
+        let _ = TranslateLocation(binaryExpr)
+        if (binaryExpr.op == AstTokenKind.AND) {
+            let _ = CreateGoto(branchBlock, left.tb.getOrThrow())
+            if (left.fb.isSome()) {
+                right.fb = MergeBlocks(left.fb, right.fb)
+            }
         } else {
-            let allocate = builder.CreateAllocate(builder.context.GetRefTy(resultTy), resultTy, parentBlock)
-            allocate.SetDebugLocation(TranslateLocation(expr))
-            RequireResult(allocate)
+            if (let Some(leftFalseBlock) <- left.fb) {
+                let _ = CreateGoto(branchBlock, leftFalseBlock)
+            } else {
+                branchBlock.EnableAttr(Attribute.UNREACHABLE)
+            }
+            right.tb = MergeBlocks(left.tb, right.tb)
         }
-        TranslateIfCondition(condExpr, thenBlock, elseBlock)
+        return right
+    }
 
-        currentBlock = thenBlock
-        let thenAstBlock = RequireBlock(expr.thenBody, "if then body")
-        let thenValue = Translator.TranslateASTNode(thenAstBlock, this)
-        if (thenBlock.GetTerminator().isNone()) {
-            builder.CreateGoTo(GetBlockByAST(thenAstBlock), thenBlock)
+    private func TranslateLetPattern(letPattern: AstLetPatternDestructor, isRightmost: Bool,
+        impl: TranslateIfExpr): DanglingBlock {
+        if (CanOptimizeLetPatternToSwitch(letPattern)) {
+            return TranslateLetPatternAsTable(letPattern, isRightmost, impl)
         }
-        StoreIfResult(resultLoc, thenValue)
-        if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateGoTo(joinBlock, CurrentBlock())
-        }
+        return TranslateLetPatternAsMatch(letPattern, isRightmost, impl)
+    }
 
-        currentBlock = elseBlock
-        let elseValue: Option<Value> = if (let Some(elseExpr) <- expr.elseBody) {
-            let value = Translator.TranslateASTNode(elseExpr, this)
-            if (let Some(elseAstBlock) <- (elseExpr as AstBlock)) {
-                if (elseBlock.GetTerminator().isNone()) {
-                    builder.CreateGoTo(GetBlockByAST(elseAstBlock), elseBlock)
+    private func TranslateLetPatternAsMatch(letPattern: AstLetPatternDestructor, isRightmost: Bool,
+        impl: TranslateIfExpr): DanglingBlock {
+        let selectorValue = TranslateExprArg(RequireExpr(letPattern.initializer, "if-let initializer"))
+        let originLoc = TranslateLocation(letPattern)
+        var result = DanglingBlock()
+        try (context = ScopeContext(scopeInfo)) {
+            context.ScopePlus()
+            let (patternFalseBlock, patternTrueBlock) = if (letPattern.patterns.size == 1) {
+                TranslateNestingCasePattern(letPattern.patterns[0], selectorValue, originLoc,
+                    sourceExpr: SourceExpr.IF_EXPR)
+            } else {
+                TranslateOrPattern(letPattern.patterns, selectorValue, originLoc)
+            }
+            if (isRightmost) {
+                let trueBlock = TranslateTrueBlock(impl)
+                let falseBlock = TranslateFalseBlock(impl)
+                let _ = CreateGoto(trueBlock, patternTrueBlock)
+                let _ = CreateGoto(falseBlock, patternFalseBlock)
+            } else {
+                result = DanglingBlock(tb: Some(patternTrueBlock), fb: Some(patternFalseBlock))
+            }
+        }
+        return result
+    }
+
+    private func TranslateLetPatternAsTable(letPattern: AstLetPatternDestructor, isRightmost: Bool,
+        impl: TranslateIfExpr): DanglingBlock {
+        let selectorTy = RequireAstTy(RequireExpr(letPattern.initializer, "if-let initializer"))
+        let selectorValue = TranslateExprArg(RequireExpr(letPattern.initializer, "if-let initializer"))
+        let enumDecl = AstTy.GetDeclOfTy(Some(selectorTy)) as AstEnumDecl
+        let result = if (let None <- enumDecl) {
+            TranslateTrivialPatternAsTable(letPattern, selectorValue, 0, impl)
+        } else if (!enumDecl.getOrThrow().hasArguments || DoesNotHaveEnumSubpattern(letPattern)) {
+            TranslateTrivialPatternAsTable(letPattern, GetEnumIDValue(selectorTy, selectorValue),
+                enumDecl.getOrThrow().constructors.size, impl)
+        } else {
+            TranslateEnumPatternMatchAsTable(letPattern, selectorValue)
+        }
+        if (isRightmost) {
+            let trueBlock = TranslateTrueBlock(impl)
+            let falseBlock = TranslateFalseBlock(impl)
+            let _ = CreateGoto(trueBlock, result.tb.getOrThrow())
+            if (let Some(resultFalseBlock) <- result.fb) {
+                let _ = CreateGoto(falseBlock, resultFalseBlock)
+            }
+            return DanglingBlock()
+        }
+        return result
+    }
+
+    private func TranslateEnumPatternMatchAsTable(letPattern: AstLetPatternDestructor,
+        enumValue: Value): DanglingBlock {
+        var isStillReachable = true
+        let baseBlock = CurrentBlock()
+        let trueBlock = CreateBlock()
+        let falseBlock = CreateBlock()
+        var firstDefaultBlock = falseBlock
+        let firstSelectorValue = GetEnumIDValue(
+            RequireAstTy(RequireExpr(letPattern.initializer, "if-let initializer")), enumValue)
+        let matchInfo = EnumMatchInfo()
+        try (context = ScopeContext(scopeInfo)) {
+            context.ScopePlus()
+            if (letPattern.patterns[0].astKind == ASTKind.WILDCARD_PATTERN) {
+                isStillReachable = false
+                firstDefaultBlock = trueBlock
+                firstDefaultBlock.SetDebugLocation(TranslateLocation(letPattern.patterns[0]))
+            }
+            for (pattern in letPattern.patterns) {
+                CollectEnumPatternInfo(pattern, matchInfo, 0)
+            }
+        }
+        let indexes = ArrayList<UInt64>()
+        let blocks = ArrayList<Block>()
+        for (key in matchInfo.firstSwitchBlocks.keys()) {
+            indexes.add(key)
+            blocks.add(matchInfo.firstSwitchBlocks.get(key).getOrThrow())
+        }
+        let _ = builder.CreateMultiBranch(firstSelectorValue, firstDefaultBlock, indexes, blocks, baseBlock)
+        let branchInfos = TranslateSecondLevelAsTable(matchInfo, enumValue, firstDefaultBlock)
+        if (let Some(branchBlocks) <- branchInfos.get(0)) {
+            for (block in branchBlocks) {
+                let _ = CreateGoto(trueBlock, block)
+            }
+        }
+        currentBlock = falseBlock
+        return DanglingBlock(tb: Some(trueBlock),
+            fb: if (isStillReachable) { Some(falseBlock) } else { None })
+    }
+
+    private func TranslateTrivialPatternAsTable(letPattern: AstLetPatternDestructor, value: Value,
+        countOfPatterns: Int64, impl: TranslateIfExpr): DanglingBlock {
+        let indexToBodies = TreeMap<UInt64, Block>()
+        let baseBlock = currentBlock
+        let trueBlock = CreateBlock()
+        var defaultBlock: Option<Block> = None
+        var isStillReachable = true
+        try (context = ScopeContext(scopeInfo)) {
+            context.ScopePlus()
+            CJC_ASSERT(!letPattern.patterns.isEmpty())
+            if (letPattern.patterns[0].astKind == ASTKind.WILDCARD_PATTERN) {
+                let _ = TranslateLocation(letPattern.patterns[0])
+                let patternBlock = CreateBlock()
+                isStillReachable = false
+                defaultBlock = Some(patternBlock)
+            } else {
+                for (pattern in letPattern.patterns) {
+                    let patternValue = GetJumpablePatternVal(pattern)
+                    let loc = TranslateLocation(pattern)
+                    let patternBlock = CreateBlock()
+                    patternBlock.SetDebugLocation(loc)
+                    let _ = CreateGoto(trueBlock, patternBlock)
+                    if (indexToBodies.contains(patternValue)) {
+                        continue
+                    }
+                    indexToBodies[patternValue] = patternBlock
+                    if (Int64(indexToBodies.size) == countOfPatterns) {
+                        isStillReachable = false
+                        defaultBlock = Some(patternBlock)
+                    }
                 }
             }
-            value
+        }
+        if (let None <- defaultBlock) {
+            defaultBlock = Some(CreateBlock())
+        }
+        let realDefaultBlock = defaultBlock.getOrThrow()
+        let indexes = ArrayList<UInt64>()
+        let blocks = ArrayList<Block>()
+        for (key in indexToBodies.keys()) {
+            indexes.add(key)
+            blocks.add(indexToBodies.get(key).getOrThrow())
+        }
+        currentBlock = baseBlock
+        let targetType = if (let Some(enumTy) <- (RequireAstTy(RequireExpr(letPattern.initializer,
+            "if-let initializer")) as AstEnumTy)) {
+            GetSelectorType(enumTy)
         } else {
-            None
+            builder.context.GetUInt64Ty()
         }
-        StoreIfResult(resultLoc, elseValue)
-        if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateGoTo(joinBlock, CurrentBlock())
-        }
+        let castedValue = TypeCastOrBoxIfNeeded(value, targetType, DebugLocation())
+        let term = builder.CreateMultiBranch(castedValue, realDefaultBlock, indexes, blocks, baseBlock.getOrThrow())
+        term.SetDebugLocation(TranslateLocation(letPattern))
+        currentBlock = impl.endBlock
+        return DanglingBlock(tb: Some(trueBlock),
+            fb: if (isStillReachable) { Some(realDefaultBlock) } else { None })
+    }
 
-        currentBlock = joinBlock
-        if (let Some(location) <- resultLoc) {
-            let load = builder.CreateLoad(resultTy, location, joinBlock)
-            load.SetDebugLocation(TranslateLocation(expr))
-            if (forceGenerateUnit) {
-                load.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+    private func CreateBranch(value: Value, current: Block, trueBlock: Block, falseBlock: Block,
+        impl: TranslateIfExpr): Branch {
+        let result = builder.CreateBranch(value, trueBlock, falseBlock, current)
+        result.SetSourceExpr(GetSourceExpr(impl))
+        return result
+    }
+
+    private func CreateGoto(destination: Block, source: Block): GoTo {
+        return builder.CreateGoTo(destination, source)
+    }
+
+    private func GetExpr(impl: TranslateIfExpr): AstExpr {
+        return impl.e
+    }
+
+    private func GetSourceExpr(impl: TranslateIfExpr): SourceExpr {
+        return match (impl.e.sugarKind) {
+            case AstSugarKind.FOR_IN_EXPR => SourceExpr.FOR_IN_EXPR
+            case _ => SourceExpr.IF_EXPR
+        }
+    }
+
+    private func TranslateTrueBlock(impl: TranslateIfExpr): Block {
+        CJC_ASSERT(impl.trueBlock.isNone())
+        CJC_ASSERT(impl.endBlock.isNone())
+        impl.endBlock = Some(CreateBlock())
+        TranslateSubExprToLoc(RequireBlock(impl.e.thenBody, "if then body"), impl.retVal)
+        impl.trueBlock = Some(GetBlockByAST(RequireBlock(impl.e.thenBody, "if then body")))
+        let trueBlock = impl.trueBlock.getOrThrow()
+        trueBlock.SetDebugLocation(TranslateLocation(RequireBlock(impl.e.thenBody, "if then body")))
+        if (impl.e.TestAttr(AstAttribute.IMPLICIT_ADD) &&
+            RequireExpr(impl.e.condExpr, "if condition").TestAttr(AstAttribute.COMPILER_ADD)) {
+            if (let Some(condition) <- (RequireExpr(impl.e.condExpr, "if condition") as AstLitConstExpr)) {
+                if (RequireAstTy(condition).IsBoolean() && condition.constNumValue.asBoolean) {
+                    trueBlock.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+                }
             }
-            return RequireResult(load)
+        }
+        CreateGoto(impl.endBlock.getOrThrow(), CurrentBlock()).SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+        return trueBlock
+    }
+
+    private func TranslateFalseBlock(impl: TranslateIfExpr): Block {
+        CJC_ASSERT(impl.falseBlock.isNone())
+        CJC_ASSERT(impl.endBlock.isSome())
+        if (let Some(elseBody) <- impl.e.elseBody) {
+            let _ = TranslateLocation(impl.e)
+            if (let Some(block) <- (elseBody as AstBlock)) {
+                TranslateSubExprToLoc(block, impl.retVal)
+                impl.falseBlock = Some(GetBlockByAST(block))
+            } else {
+                impl.falseBlock = Some(CreateBlock())
+                currentBlock = impl.falseBlock
+                TranslateSubExprToLoc(elseBody, impl.retVal)
+            }
+            let falseBlock = impl.falseBlock.getOrThrow()
+            falseBlock.SetDebugLocation(TranslateLocation(elseBody))
+            CreateGoto(impl.endBlock.getOrThrow(), CurrentBlock()).SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+        } else {
+            impl.falseBlock = impl.endBlock
+        }
+        return impl.falseBlock.getOrThrow()
+    }
+
+    private func Translate(expr: AstIfExpr, impl: TranslateIfExpr): Option<Value> {
+        let ifType = chirTy.TranslateType(RequireAstTy(expr))
+        let forceGenerateUnit = opts.enableCompileDebug && IsEmptyIf(expr)
+        if ((!HasTypeOfNothing(expr) && !ifType.IsUnit()) || forceGenerateUnit) {
+            let allocate = builder.CreateAllocate(builder.context.GetRefTy(ifType), ifType, CurrentBlock())
+            allocate.SetDebugLocation(TranslateLocation(expr))
+            impl.retVal = Some(RequireResult(allocate))
+        }
+        let topResult = TranslateCondition(RequireExpr(impl.e.condExpr, "if condition"), true, impl)
+        if (let Some(topTrueBlock) <- topResult.tb) {
+            let _ = CreateGoto(impl.trueBlock.getOrThrow(), topTrueBlock)
+        }
+        if (let Some(topFalseBlock) <- topResult.fb) {
+            let _ = CreateGoto(impl.falseBlock.getOrThrow(), topFalseBlock)
+        }
+        currentBlock = impl.endBlock
+        if (let Some(returnLocation) <- impl.retVal) {
+            let result = GetDerefedValue(returnLocation, TranslateLocation(expr))
+            if (forceGenerateUnit) {
+                let localVar = (result as LocalVar) ??
+                    throw IllegalStateException("faithful AST2CHIR debug if result is not LocalVar")
+                localVar.GetExpr().getOrThrow().SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+            }
+            return Some(result)
         }
         return None
+    }
+
+    public func Visit(expr: AstIfExpr): Option<Value> {
+        CJC_ASSERT(expr.thenBody.isSome())
+        let impl = TranslateIfExpr(expr)
+        return Translate(expr, impl)
     }
 
     private func HasTypeOfNothing(expr: AstIfExpr): Bool {
@@ -4226,14 +4523,6 @@ public class Translator {
         if (let Some(returnLocation) <- fn.GetReturnValue()) {
             builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(returnLocation)), returnLocation,
                 CurrentBlock())
-        }
-    }
-
-    private func StoreIfResult(location: Option<Value>, value: Option<Value>): Unit {
-        if (let Some(loc) <- location) {
-            if (let Some(result) <- value) {
-                builder.CreateStore(CastValueIfNeeded(result, RequireRefBaseType(loc)), loc, CurrentBlock())
-            }
         }
     }
 
