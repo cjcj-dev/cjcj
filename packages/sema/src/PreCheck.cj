@@ -743,7 +743,31 @@ private func collectAssumption(typeManager: TypeManager, ctx: ASTContext, decl: 
     }
 }
 
-private func collectAndCheckAssumption(typeManager: TypeManager, ctx: ASTContext, pkg: Package): Unit {
+private func CheckAssumption(typeManager: TypeManager, ctx: ASTContext, diag: BasicDiagnosticEngine,
+    decl: Decl): Unit {
+    if (decl.TestAttr(Attribute.FROM_COMMON_PART)) {
+        return
+    }
+    if (let Some(generic) <- decl.GetGeneric()) {
+        if (decl.TestAttr(Attribute.TOOL_ADD)) {
+            ExposeGenericUpperBounds(ctx, generic)
+            return
+        }
+        let _ = CheckGenericConstraints(generic)
+        if (!CheckUpperBoundsLegality(typeManager, generic)) {
+            let declTy = decl.GetTy().getOrThrow()
+            let builder = Diagnose(diag, decl,
+                BasicDiagKind.sema_generic_type_argument_not_match_constraint,
+                args: [BasicDiagArgument(declTy.String())])
+            builder.Emit()
+        }
+        ExposeGenericUpperBounds(ctx, generic)
+        AssumptionSanityCheck(typeManager, diag, generic)
+    }
+}
+
+private func CollectAndCheckAssumption(typeManager: TypeManager, ctx: ASTContext, pkg: Package,
+    diag: BasicDiagnosticEngine): Unit {
     let decls = collectPackageDeclsForAssumption(pkg)
     for (decl in decls) {
         collectAssumption(typeManager, ctx, decl)
@@ -751,9 +775,7 @@ private func collectAndCheckAssumption(typeManager: TypeManager, ctx: ASTContext
     IgnoreAssumptionForTypeAliasDecls(decls)
     AddAssumptionForExtendDecls(typeManager, ctx, decls)
     for (decl in decls) {
-        if (let Some(generic) <- decl.GetGeneric()) {
-            let _ = CheckGenericConstraints(generic)
-        }
+        CheckAssumption(typeManager, ctx, diag, decl)
     }
 }
 
@@ -834,7 +856,7 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeMan
     collectLetPatternDecls(ctx, pkg)
     PreSetDeclType(typeManager, ctx, importManager: importManager, diag: diag)
     addSuperClassObjectForClassDecl(ctx, pkg, diag.getOrThrow())
-    collectAndCheckAssumption(typeManager, ctx, pkg)
+    CollectAndCheckAssumption(typeManager, ctx, pkg, diag.getOrThrow())
     return valid
 }
 
