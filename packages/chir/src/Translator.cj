@@ -2,7 +2,7 @@ package cjcj::chir
 
 import std.collection.*
 
-import cjcj::utils.{CJC_ASSERT, OverflowStrategy, STATIC_INIT_FUNC}
+import cjcj::utils.{CJC_ASSERT, InternalError, OverflowStrategy, STATIC_INIT_FUNC}
 import cjcj::option.{GlobalOptions, OptimizationFlag}
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::ast.ASTKind
@@ -2111,11 +2111,11 @@ public class Translator {
 
     public func Visit(expr: AstMemberAccess): Option<Value> {
         let target = ResolveMemberAccessTarget(expr, "faithful AST2CHIR MemberAccess")
-        if (target.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
-            return TranslateEnumCtorRef(target, RequireAstTy(expr))
-        }
         if (target.TestAttr(AstAttribute.STATIC) || IsPackageMemberAccess(expr)) {
             return TranslateStaticTargetOrPackageMemberAccess(expr, target)
+        }
+        if (target.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
+            return TranslateEnumCtorRef(target, RequireAstTy(expr))
         }
         if (IsInstanceMember(target)) {
             if (let Some(propDecl) <- (target as AstPropDecl)) {
@@ -2129,7 +2129,8 @@ public class Translator {
                 return Some(TranslateFuncMemberAccess(expr, funcDecl))
             }
         }
-        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: unsupported member access")
+        InternalError("translating unsupported MemberAccess")
+        return None
     }
 
     private func TranslateFuncMemberAccess(member: AstMemberAccess, funcDecl: AstFuncDecl): Value {
