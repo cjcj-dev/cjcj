@@ -60,7 +60,10 @@ def build_env():
 _DROP_LINE = re.compile(r"^(;|![0-9]|source_filename|target |attributes #)")
 _SUBS = [
     (re.compile(r",? ?!dbg ![0-9]+"), ""),
-    (re.compile(r", ![a-zA-Z.]+ ![0-9]+"), ""),
+    # 0713: 原字符类 [a-zA-Z.] 不含下划线，导致 `!untrusted_ref !N` 漏网 —— 288 个 codegen 函数
+    # (差异的 40%) 因此被误判成真差异。已核实这些 metadata 的内容恒为空 `!{}`，编号纯粹由 LLVM
+    # 按出现顺序分配、无语义，与 !dbg 同理，应当归一化。
+    (re.compile(r", ![a-zA-Z._]+ ![0-9]+"), ""),
     (re.compile(r" #[0-9]+ "), " "),
     # collapse the alignment padding before an inline `; preds = ...` comment (its width depends on the
     # original block-label length, which differs between the two backends) to a single space

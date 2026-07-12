@@ -69,9 +69,19 @@ def reference_cache_context(base_cc, e):
     version = subprocess.run(
         [base_cc, "--version"], env=e, capture_output=True, check=True
     ).stdout
+    # 0713: 缓存的是【归一化之后】的函数体，所以缓存键必须包含归一化代码的指纹。
+    # 此前只认编译器版本 —— 改了 cmpir.py 的归一化规则后，缓存里的 ref 仍是旧口径，
+    # 与新口径现算的 self 对撞，量出鬼数字（差异从 994 虚增到 1251，方向完全相反）。
+    norm_src = b""
+    for f in ("cmpir.py", "bcgate.py"):
+        try:
+            norm_src += (pathlib.Path(__file__).resolve().parent / f).read_bytes()
+        except OSError:
+            pass
     return {
         "cangjie_home": str(pathlib.Path(CANGJIE_HOME).resolve()),
         "compiler_version_sha256": hashlib.sha256(version).hexdigest(),
+        "normalizer_sha256": hashlib.sha256(norm_src).hexdigest(),
     }
 
 def reference_cache_path(pkg, cache_context):
