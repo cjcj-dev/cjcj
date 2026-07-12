@@ -80,7 +80,7 @@ private class FuncTyPair {
     public init() {}
 }
 
-internal class CallInferenceFailure {
+private class CallInferenceFailure {
     public var failed: Bool = false
     public var candidate: Option<FuncDecl> = None
 
