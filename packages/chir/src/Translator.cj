@@ -2940,7 +2940,8 @@ public class Translator {
         if (arrayTy.IsStructArray()) {
             return TranslateStructArrayLit(expr, RequireStructType(arrayTy))
         }
-        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: unsupported ArrayLit type")
+        CJC_ASSERT(false)
+        return None
     }
 
     public func Visit(expr: AstArrayExpr): Option<Value> {
