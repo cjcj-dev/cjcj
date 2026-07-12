@@ -2,7 +2,7 @@ package cjcj::chir
 
 import std.collection.*
 
-import cjcj::utils.{CJC_ASSERT, OverflowStrategy, STATIC_INIT_FUNC}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, OverflowStrategy, STATIC_INIT_FUNC}
 import cjcj::option.{GlobalOptions, OptimizationFlag}
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::ast.ASTKind
@@ -8487,22 +8487,22 @@ public class Translator {
     }
 
     private func TranslateStaticTargetOrPackageMemberAccess(expr: AstMemberAccess, target: AstDecl): Option<Value> {
-        if (let Some(propDecl) <- (target as AstPropDecl)) {
-            return Some(TranslatePropertyGetter(expr, propDecl))
+        if (let Some(funcDecl) <- (target as AstFuncDecl)) {
+            if (funcDecl.outerDecl.isSome()) {
+                return Some(WrapMemberMethodByLambda(funcDecl, GetInstCalleeInfoFromMemberAccess(expr, funcDecl), None))
+            }
         }
         let targetNode = GetSymbolTable(target)
         if (let Some(_) <- (target as AstVarDecl)) {
             let targetTy = chirTy.TranslateType(RequireAstTy(target))
             let loaded = RequireResult(builder.CreateLoad(targetTy, targetNode, CurrentBlock()))
-            return CastValueIfNeeded(loaded, chirTy.TranslateType(RequireAstTy(expr)))
+            return Some(TypeCastOrBoxIfNeeded(loaded, chirTy.TranslateType(RequireAstTy(expr)), TranslateLocation(expr)))
         }
-        if (let Some(funcDecl) <- (target as AstFuncDecl)) {
-            if (target.outerDecl.isSome()) {
-                return Some(WrapMemberMethodByLambda(funcDecl, GetInstCalleeInfoFromMemberAccess(expr, funcDecl), None))
-            }
+        if ((target as AstFuncDecl).isSome()) {
             return targetNode
         }
-        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: static/package member target")
+        CJC_ABORT()
+        return None
     }
 
     private func IsPackageMemberAccess(expr: AstMemberAccess): Bool {
