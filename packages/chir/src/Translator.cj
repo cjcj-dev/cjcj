@@ -2711,10 +2711,35 @@ public class Translator {
     }
 
     public func Visit(expr: AstTypeConvExpr): Option<Value> {
-        let operand = Translator.TranslateASTNode(RequireExpr(expr.expr, "type conversion operand"), this) ??
-            throw IllegalStateException("faithful AST2CHIR type conversion operand produced no value")
-        return RequireResult(builder.CreateTypeCast(chirTy.TranslateType(RequireAstTy(expr)), operand, CurrentBlock(),
-            overflowStrategy: expr.overflowStrategy))
+        let loc = TranslateLocation(expr)
+        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let operandExpr = RequireExpr(expr.expr, "type conversion operand")
+        let operand = TranslateExprArg(operandExpr)
+        let sourceTy = RequireAstTy(operandExpr)
+        let targetTy = RequireAstTy(expr)
+        if (sourceTy.IsFunc() || sourceTy.IsTuple()) {
+            return CreateWrappedTypeCast(loc, resultTy, operand, CurrentBlock())
+        }
+        let overflowStrategy = expr.overflowStrategy
+        let mayHaveException = !(targetTy.IsInteger() && overflowStrategy != OverflowStrategy.THROWING)
+        if (let Some(errorBlock) <- CurrentTryCatchBlock() && mayHaveException) {
+            let successBlock = CreateBlock()
+            let exceptionBlock = DelayExitExceptionBlock(errorBlock)
+            let targetBlock = match (exceptionBlock) {
+                case Some(exceptBlock) => exceptBlock
+                case None => errorBlock
+            }
+            let typeCast = builder.CreateTypeCastWithException(resultTy, operand, successBlock, targetBlock,
+                CurrentBlock())
+            typeCast.SetDebugLocation(loc)
+            let result = RequireResult(typeCast)
+            FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
+            return result
+        }
+        let typeCast = builder.CreateTypeCast(resultTy, operand, CurrentBlock(),
+            overflowStrategy: overflowStrategy)
+        typeCast.SetDebugLocation(loc)
+        return RequireResult(typeCast)
     }
 
     public func Visit(decl: AstVarWithPatternDecl): Option<Value> {
@@ -5614,6 +5639,12 @@ public class Translator {
         return RequireResult(builder.CreateTypeCast(ty, operand, parent))
     }
 
+    private func CreateWrappedTypeCast(loc: DebugLocation, ty: Type, operand: Value, parent: Block): Value {
+        let typeCast = builder.CreateTypeCast(ty, operand, parent)
+        typeCast.SetDebugLocation(loc)
+        return RequireResult(typeCast)
+    }
+
     private func SetSkipPrintWarning(value: Value): Unit {
         value.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
     }
@@ -7572,10 +7603,27 @@ public class Translator {
         } else {
             let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
                 throw IllegalStateException("faithful AST2CHIR compound rhs produced no value")
-            let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(expr.op),
-                lhsValue.GetType() ?? chirTy.TranslateType(RequireAstTy(leftExpr)), lhsValue, rhsValue, CurrentBlock(),
-                overflowStrategy: expr.overflowStrategy)
-            compoundValue = RequireResult(opResult)
+            let resultTy = lhsValue.GetType().getOrThrow()
+            let mayHaveException = OverloadableExprMayThrowException(expr, resultTy)
+            if (let Some(errorBlock) <- CurrentTryCatchBlock() && mayHaveException) {
+                let successBlock = CreateBlock()
+                let exceptionBlock = DelayExitExceptionBlock(errorBlock)
+                let targetBlock = match (exceptionBlock) {
+                    case Some(exceptBlock) => exceptBlock
+                    case None => errorBlock
+                }
+                let opResult = builder.CreateBinaryIntOpWithException(resultTy, ToCHIRCompoundAssignOp(expr.op),
+                    lhsValue, rhsValue, successBlock, targetBlock, CurrentBlock())
+                opResult.SetOverflowStrategy(expr.overflowStrategy)
+                opResult.SetDebugLocation(loc)
+                compoundValue = RequireResult(opResult)
+                FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
+            } else {
+                let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(expr.op), resultTy, lhsValue,
+                    rhsValue, CurrentBlock(), overflowStrategy: expr.overflowStrategy)
+                opResult.SetDebugLocation(loc)
+                compoundValue = RequireResult(opResult)
+            }
         }
         StoreToLeftValue(leftValueInfo, compoundValue)
         return None
@@ -7856,10 +7904,27 @@ public class Translator {
         } else {
             let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
                 throw IllegalStateException("faithful AST2CHIR VArray compound rhs produced no value")
-            let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(assign.op),
-                lhsValue.GetType() ?? elementTy, lhsValue, rhsValue, CurrentBlock(),
-                overflowStrategy: assign.overflowStrategy)
-            compoundValue = RequireResult(opResult)
+            let resultTy = lhsValue.GetType().getOrThrow()
+            let mayHaveException = OverloadableExprMayThrowException(assign, resultTy)
+            if (let Some(errorBlock) <- CurrentTryCatchBlock() && mayHaveException) {
+                let successBlock = CreateBlock()
+                let exceptionBlock = DelayExitExceptionBlock(errorBlock)
+                let targetBlock = match (exceptionBlock) {
+                    case Some(exceptBlock) => exceptBlock
+                    case None => errorBlock
+                }
+                let opResult = builder.CreateBinaryIntOpWithException(resultTy, ToCHIRCompoundAssignOp(assign.op),
+                    lhsValue, rhsValue, successBlock, targetBlock, CurrentBlock())
+                opResult.SetOverflowStrategy(assign.overflowStrategy)
+                opResult.SetDebugLocation(loc)
+                compoundValue = RequireResult(opResult)
+                FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
+            } else {
+                let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(assign.op), resultTy, lhsValue,
+                    rhsValue, CurrentBlock(), overflowStrategy: assign.overflowStrategy)
+                opResult.SetDebugLocation(loc)
+                compoundValue = RequireResult(opResult)
+            }
         }
         CreateVArraySet(lhsBase, compoundValue, index, elementTy)
     }
