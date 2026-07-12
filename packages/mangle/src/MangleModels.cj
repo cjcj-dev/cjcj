@@ -158,7 +158,7 @@ public class MangleDecl {
     public var curFile: Option<MangleFile> = None
     public var outerDecl: Option<MangleDecl> = None
     public var genericDecl: Option<MangleDecl> = None
-    public var linkage: Linkage = Linkage.EXTERNAL
+    public var linkage: () -> Linkage = { => Linkage.EXTERNAL }
     public var generic: Option<MangleGeneric> = None
     public var semaTy: Option<MangleType> = None
     public var typeAnnotation: Option<MangleTypeAnnotation> = None

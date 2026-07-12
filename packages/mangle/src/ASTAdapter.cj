@@ -221,7 +221,7 @@ public class MangleAstAdapter {
         target.mangledName = source.mangledName
         target.exportId = source.exportId
         target.moduleName = source.moduleName
-        target.linkage = source.linkage
+        target.linkage = { => source.linkage }
         if (let Some(file) <- source.curFile) {
             target.curFile = ConvertFile(file)
         }

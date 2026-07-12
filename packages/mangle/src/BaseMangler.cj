@@ -1092,7 +1092,7 @@ public open class BaseMangler {
         } else {
             mangledName += MangleFullPackageName(decl)
         }
-        if (decl.TestAttr(Attribute.PRIVATE) && decl.linkage == Linkage.INTERNAL) {
+        if (decl.TestAttr(Attribute.PRIVATE) && decl.linkage() == Linkage.INTERNAL) {
             if (let Some(file) <- decl.curFile) {
                 mangledName += MANGLE_FILE_ID_PREFIX + fileIdFor(file)
             } else {
