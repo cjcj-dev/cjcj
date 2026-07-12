@@ -5983,7 +5983,7 @@ public class Translator {
             TranslateTypePatternBranch(typePattern, selector, trueBlock, falseBlock)
             return
         }
-        throw IllegalArgumentException("not yet ported in faithful AST2CHIR match pattern: ${ASTKindName(pattern.astKind)}")
+        InternalError("translating unsupported pattern")
     }
 
     private func BindPatternValues(pattern: AstPattern, selector: Value): Unit {
