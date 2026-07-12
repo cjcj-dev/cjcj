@@ -463,6 +463,22 @@ public class CHIRContext {
         return allocatedExpressions
     }
 
+    public func GetAllocatedStructs(): ArrayList<StructDef> {
+        return allocatedStructs
+    }
+
+    public func GetAllocatedClasses(): ArrayList<ClassDef> {
+        return allocatedClasses
+    }
+
+    public func GetAllocatedEnums(): ArrayList<EnumDef> {
+        return allocatedEnums
+    }
+
+    public func GetAllocatedExtends(): ArrayList<ExtendDef> {
+        return allocatedExtends
+    }
+
     public func GetTypesNum(): Int64 {
         var count: Int64 = 0
         for ((_, bucket) in dynamicAllocatedTys) {

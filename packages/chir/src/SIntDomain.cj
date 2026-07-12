@@ -328,12 +328,12 @@ public class CHIRArithmeticBinopArgs {
 public class CHIRRelIntBinopArgs {
     public let left: SIntDomain
     public let right: SIntDomain
-    public let leftSymbol: Value
-    public let rightSymbol: Value
+    public let leftSymbol: Option<Value>
+    public let rightSymbol: Option<Value>
     public let op: ExprKind
     public let isUnsigned: Bool
 
-    public init(left: SIntDomain, right: SIntDomain, leftSymbol: Value, rightSymbol: Value, op: ExprKind,
+    public init(left: SIntDomain, right: SIntDomain, leftSymbol: Option<Value>, rightSymbol: Option<Value>, op: ExprKind,
         isUnsigned: Bool) {
         this.left = left
         this.right = right
@@ -356,7 +356,7 @@ public func ComputeArithmeticBinop(args: CHIRArithmeticBinopArgs): SIntDomain {
 }
 
 public func ComputeRelIntBinop(args: CHIRRelIntBinopArgs): BoolDomain {
-    if (args.leftSymbol.nodeId == args.rightSymbol.nodeId) {
+    if (args.leftSymbol == args.rightSymbol) {
         return BoolDomain.FromBool(TrueOnSameSymbol(args.op))
     }
     if (let Some(rel) <- RelationalOperationFromExprKind(args.op)) {
@@ -662,16 +662,21 @@ private func ComputeTotalOrderingIntBinop(args: CHIRRelIntBinopArgs, rel: Relati
     if (numericResult != CompareResult.UNO) {
         return BoolDomain.FromBool(ToBool(numericResult))
     }
-    if (let Some(leftAgainstRight) <- leftDomain.FindSymbolicBound(args.rightSymbol)) {
-        let symbolicResult = CompareRanges(rel, leftAgainstRight, ConstantRange(SInt.Zero(width)), false)
-        if (symbolicResult != CompareResult.UNO) {
-            return BoolDomain.FromBool(ToBool(symbolicResult))
+    if (let Some(rightSymbol) <- args.rightSymbol) {
+        if (let Some(leftAgainstRight) <- leftDomain.FindSymbolicBound(rightSymbol)) {
+            let symbolicResult = CompareRanges(rel, leftAgainstRight, ConstantRange(SInt.Zero(width)), false)
+            if (symbolicResult != CompareResult.UNO) {
+                return BoolDomain.FromBool(ToBool(symbolicResult))
+            }
         }
     }
-    if (let Some(rightAgainstLeft) <- rightDomain.FindSymbolicBound(args.leftSymbol)) {
-        let symbolicResult2 = CompareRanges(SymbolicNeg(rel), rightAgainstLeft, ConstantRange(SInt.Zero(width)), false)
-        if (symbolicResult2 != CompareResult.UNO) {
-            return BoolDomain.FromBool(ToBool(symbolicResult2))
+    if (let Some(leftSymbol) <- args.leftSymbol) {
+        if (let Some(rightAgainstLeft) <- rightDomain.FindSymbolicBound(leftSymbol)) {
+            let symbolicResult2 = CompareRanges(SymbolicNeg(rel), rightAgainstLeft,
+                ConstantRange(SInt.Zero(width)), false)
+            if (symbolicResult2 != CompareResult.UNO) {
+                return BoolDomain.FromBool(ToBool(symbolicResult2))
+            }
         }
     }
     for (leftBound in leftDomain.SymbolicBounds()) {
@@ -701,8 +706,8 @@ private func CompareTransitiveEquality(left: SIntDomain, right: SIntDomain, comp
     return BoolDomain.Top()
 }
 
-private func ComputeEqualityIntBinop(left: SIntDomain, right: SIntDomain, leftSymbol: Value, rightSymbol: Value,
-    compareNotEqual: Bool): BoolDomain {
+private func ComputeEqualityIntBinop(left: SIntDomain, right: SIntDomain, leftSymbol: Option<Value>,
+    rightSymbol: Option<Value>, compareNotEqual: Bool): BoolDomain {
     if (left.IsBottom() || right.IsBottom()) {
         return BoolDomain.Bottom()
     }
@@ -715,20 +720,24 @@ private func ComputeEqualityIntBinop(left: SIntDomain, right: SIntDomain, leftSy
         .IsEmptySet()) {
         return BoolDomain.FromBool(compareNotEqual)
     }
-    if (let Some(leftAgainstRight) <- left.FindSymbolicBound(rightSymbol)) {
-        if (leftAgainstRight.IsSingleElement()) {
-            return BoolDomain.FromBool(leftAgainstRight.GetSingleElement().IsZero() != compareNotEqual)
-        }
-        if (!leftAgainstRight.Contains(SInt.Zero(left.Width()))) {
-            return BoolDomain.FromBool(compareNotEqual)
+    if (let Some(realRightSymbol) <- rightSymbol) {
+        if (let Some(leftAgainstRight) <- left.FindSymbolicBound(realRightSymbol)) {
+            if (leftAgainstRight.IsSingleElement()) {
+                return BoolDomain.FromBool(leftAgainstRight.GetSingleElement().IsZero() != compareNotEqual)
+            }
+            if (!leftAgainstRight.Contains(SInt.Zero(left.Width()))) {
+                return BoolDomain.FromBool(compareNotEqual)
+            }
         }
     }
-    if (let Some(rightAgainstLeft) <- right.FindSymbolicBound(leftSymbol)) {
-        if (rightAgainstLeft.IsSingleElement()) {
-            return BoolDomain.FromBool(rightAgainstLeft.GetSingleElement().IsZero() != compareNotEqual)
-        }
-        if (!rightAgainstLeft.Contains(SInt.Zero(left.Width()))) {
-            return BoolDomain.FromBool(compareNotEqual)
+    if (let Some(realLeftSymbol) <- leftSymbol) {
+        if (let Some(rightAgainstLeft) <- right.FindSymbolicBound(realLeftSymbol)) {
+            if (rightAgainstLeft.IsSingleElement()) {
+                return BoolDomain.FromBool(rightAgainstLeft.GetSingleElement().IsZero() != compareNotEqual)
+            }
+            if (!rightAgainstLeft.Contains(SInt.Zero(left.Width()))) {
+                return BoolDomain.FromBool(compareNotEqual)
+            }
         }
     }
     let transitive = CompareTransitiveEquality(left, right, compareNotEqual)

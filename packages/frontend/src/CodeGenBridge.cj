@@ -4,6 +4,7 @@ import std.collection.*
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::chir.Apply as ChirApply
 import cjcj::chir.ApplyWithException as ChirApplyWithException
+import cjcj::chir.AnalysisWrapper
 import cjcj::chir.Attribute as ChirAttribute
 import cjcj::chir.CHIRBuilder as ChirBuilder
 import cjcj::chir.CHIRPrinter as ChirCHIRPrinter
@@ -35,6 +36,11 @@ import cjcj::chir.Package as RealCHIRPackage
 import cjcj::chir.RedundantFutureRemoval
 import cjcj::chir.RedundantGetOrThrowElimination
 import cjcj::chir.RedundantLoadElimination
+import cjcj::chir.RangeAnalysis
+import cjcj::chir.RangeDomain
+import cjcj::chir.RangePropagation
+import cjcj::chir.IsTrackedGVForRangeAnalysis
+import cjcj::chir.rangeStateGlobals
 import cjcj::chir.ReplaceUsesWithWrapper
 import cjcj::chir.ShouldReportUnusedCodeWarnings
 import cjcj::chir.UnitUnify
@@ -59,6 +65,7 @@ import cjcj::utils.DEFAULT_PACKAGE_NAME
 import cjcj::utils.FileUtil
 import cjcj::utils.ProfileRecorder
 import cjcj::utils.REFLECT_PACKAGE_NAME
+import cjcj::utils.{TaskQueue, TaskResult}
 
 public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTPackage): Option<RealCHIRPackage> {
     return ToCHIR(instance, pkg).Run()
@@ -187,7 +194,7 @@ private class ToCHIR {
             if (options.enableChirRGetOrThrowE) {
                 RedundantGetOrThrowElimination().RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
             }
-            // C++ 此处有 RunRangePropagation，selfhost 未移植，待补。
+            RunRangePropagation(currentPackage)
             if (options.IsCHIROptimizationLevelOverO2()) {
                 UselessAllocateElimination.RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
             }
@@ -200,6 +207,85 @@ private class ToCHIR {
                 GetRefToArrayElem.RunOnPackage(currentPackage, builder)
             }
         }
+    }
+
+    // C++ CHIR.h:80-96.
+    private func ConstructSubBuilders(threadNum: Int64, funcNum: Int64): ArrayList<ChirBuilder> {
+        let results = ArrayList<TaskResult<ChirBuilder>>()
+        let builderTaskQueue = TaskQueue(threadNum)
+        var index: Int64 = 0
+        while (index < funcNum) {
+            let builderIndex = index
+            results.add(builderTaskQueue.AddTask<ChirBuilder>({ =>
+                ChirBuilder(builder.context, threadIdx: builderIndex)
+            }))
+            index++
+        }
+        builderTaskQueue.RunAndWaitForAllTasksCompleted()
+        let builderList = ArrayList<ChirBuilder>()
+        for (result in results) {
+            builderList.add(result.get())
+        }
+        return builderList
+    }
+
+    // C++ CHIR.cpp:525-570.
+    private func RunRangePropagation(currentPackage: RealCHIRPackage): Unit {
+        let options = instance.invocation.globalOptions
+        if (!options.IsCHIROptimizationLevelOverO2()) {
+            return
+        }
+        try (recorder = ProfileRecorder("CHIR Opt", "Range Propagation")) {
+            let rangeAnalysisWrapper = AnalysisWrapper<RangeAnalysis, RangeDomain>(builder,
+                { analysisPackage: RealCHIRPackage, analysisBuilder: ChirBuilder =>
+                    RangeAnalysis.InitialiseLetGVState(analysisPackage, analysisBuilder, rangeStateGlobals,
+                        { globalVar => IsTrackedGVForRangeAnalysis(globalVar) })
+                })
+            let threadNum = Int64(options.GetJobs())
+            rangeAnalysisWrapper.RunOnPackage(currentPackage, options.chirDebugOptimizer, threadNum,
+                { funcValue: ChirFunction, analysisBuilder: ChirBuilder, isDebug: Bool =>
+                    RangeAnalysis(funcValue, analysisBuilder, instance.diag.AsBasicDiagnosticEngine(),
+                        isDebug: isDebug)
+                })
+            let dce = DeadCodeElimination(builder, instance.diag.AsBasicDiagnosticEngine(), currentPackage)
+            if (threadNum == 1) {
+                let rangePropagation = RangePropagation(builder, rangeAnalysisWrapper,
+                    instance.diag.AsBasicDiagnosticEngine(), options.enIncrementalCompilation)
+                rangePropagation.RunOnPackage(currentPackage, options.chirDebugOptimizer)
+                MergeEffectMap(rangePropagation.GetEffectMap(), effectMap)
+                dce.UnreachableBlockElimination(rangePropagation.GetFuncsNeedRemoveBlocks(),
+                    isDebug: options.chirDebugOptimizer)
+            } else {
+                let globalFuncs = currentPackage.GetGlobalFuncsWithBody()
+                let funcNum = globalFuncs.size
+                let builderList = ConstructSubBuilders(threadNum, funcNum)
+                let taskQueue = TaskQueue(threadNum)
+                let propagationList = ArrayList<RangePropagation>()
+                var index: Int64 = 0
+                while (index < funcNum) {
+                    let funcValue = globalFuncs[index]
+                    let rangePropagation = RangePropagation(builderList[index], rangeAnalysisWrapper,
+                        instance.diag.AsBasicDiagnosticEngine(), options.enIncrementalCompilation)
+                    let _ = taskQueue.AddTask<Unit>({ =>
+                        rangePropagation.RunOnFunc(funcValue, options.chirDebugOptimizer)
+                    })
+                    propagationList.add(rangePropagation)
+                    index++
+                }
+                taskQueue.RunAndWaitForAllTasksCompleted()
+                for (rangePropagation in propagationList) {
+                    MergeEffectMap(rangePropagation.GetEffectMap(), effectMap)
+                    dce.UnreachableBlockElimination(rangePropagation.GetFuncsNeedRemoveBlocks(),
+                        isDebug: options.chirDebugOptimizer)
+                }
+                for (subBuilder in builderList) {
+                    subBuilder.MergeAllocatedInstance()
+                }
+                builder.context.MergeTypes()
+            }
+            DumpCHIRToFile("RangePropagation")
+        }
+        RunMergingBlocks(currentPackage, "CHIR Opt", "MergingBlockAfterRangeAnalysis")
     }
 
     private func CollectDevirtualizationInfo(currentPackage: RealCHIRPackage): DevirtualizationInfo {
