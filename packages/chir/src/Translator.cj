@@ -4742,19 +4742,21 @@ public class Translator {
             builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
             return (falseBlock, trueBlock)
         }
-        if (let Some(exceptPattern) <- (pattern as AstExceptTypePattern)) {
-            for (typeNode in exceptPattern.types) {
-                let falseBlock = builder.CreateBlock(group)
-                let targetTy = chirTy.TranslateType(typeNode.GetTy() ??
-                    throw IllegalStateException("faithful AST2CHIR catch type has no Sema type"))
-                let cond = RequireResult(builder.CreateInstanceOf(builder.context.GetBoolTy(), exceptionValue, targetTy,
-                    CurrentBlock()))
-                builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
-                currentBlock = falseBlock
-            }
-            return (CurrentBlock(), trueBlock)
+        let exceptPattern = (pattern as AstExceptTypePattern).getOrThrow()
+        CJC_ASSERT(exceptPattern.pattern.isSome())
+        if (let Some(varPattern) <- (exceptPattern.pattern as AstVarPattern)) {
+            HandleVarPattern(varPattern, exceptionValue, trueBlock)
         }
-        throw IllegalArgumentException("not yet ported in faithful AST2CHIR catch pattern: ${ASTKindName(pattern.astKind)}")
+        for (typeNode in exceptPattern.types) {
+            let falseBlock = builder.CreateBlock(group)
+            let targetTy = chirTy.TranslateType(typeNode.GetTy() ??
+                throw IllegalStateException("faithful AST2CHIR catch type has no Sema type"))
+            let cond = RequireResult(builder.CreateInstanceOf(builder.context.GetBoolTy(), exceptionValue, targetTy,
+                CurrentBlock()))
+            builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+            currentBlock = falseBlock
+        }
+        return (CurrentBlock(), trueBlock)
     }
 
     private func BindExceptionPatternValues(pattern: AstPattern, exceptionValue: Value): Unit {
