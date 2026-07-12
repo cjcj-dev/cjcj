@@ -7569,7 +7569,9 @@ public class TypeChecker {
                 impl.diag.getOrThrow()))
         }
         if (let Some(assign) <- (expr as AssignExpr)) {
-            return FinishSynthesize(ctx, assign, SynAssignExpr(ctx, assign))
+            let assignTy = SynAssignExpr(ctx, assign)
+            assign.SetTy(assignTy)
+            return FinishSynthesize(ctx, assign, assignTy)
         }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             return SynthesizeThrowExpr(ctx, throwExpr)
