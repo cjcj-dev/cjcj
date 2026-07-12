@@ -3009,7 +3009,8 @@ public class Translator {
         if (expr.IsVArrayAccess()) {
             return TranslateVArrayAccess(expr)
         }
-        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: non-tuple/non-VArray subscript")
+        CJC_ASSERT(false)
+        return None
     }
 
     public func Visit(expr: AstTypeConvExpr): Option<Value> {
