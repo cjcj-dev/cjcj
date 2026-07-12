@@ -1150,7 +1150,10 @@ public class TypeManager {
     public func IsFuncSubtype(leaf: Ty, root: Ty): Bool {
         if (let Some(leftFunc) <- (leaf as FuncTy)) {
             if (let Some(rightFunc) <- (root as FuncTy)) {
-                return IsFuncTySubType(leftFunc, rightFunc)
+                if (IsFuncParametersSubtype(leftFunc, rightFunc)) {
+                    let noCast = leftFunc.noCast || rightFunc.noCast
+                    return IsSubtype(leftFunc.retTy, rightFunc.retTy, implicitBoxed: noCast)
+                }
             }
         }
         return false
