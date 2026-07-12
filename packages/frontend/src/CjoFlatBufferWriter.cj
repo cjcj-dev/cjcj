@@ -48,11 +48,12 @@ public func SerializePackageToCjoFlatBuffer(
     diag!: DiagnosticEngine,
     serializingCommon!: Bool = false,
     exportContent!: Bool = true,
+    exportForIncr!: Bool = false,
     exportFuncBody!: Bool = true
 ): Array<UInt8> {
     let writer = FrontendCjoFlatBufferWriter(packageDepInfo, cjoManager, debug, optimizationLevel,
         saveFileWithAbsPath: saveFileWithAbsPath, diag: diag, serializingCommon: serializingCommon,
-        exportContent: exportContent, exportFuncBody: exportFuncBody)
+        exportContent: exportContent, exportForIncr: exportForIncr, exportFuncBody: exportFuncBody)
     return writer.Write(pkg)
 }
 
@@ -66,6 +67,7 @@ private class FrontendCjoFlatBufferWriter {
     private let diag: DiagnosticEngine
     private var serializingCommon: Bool
     private let exportContent: Bool
+    private let exportForIncr: Bool
     private let exportFuncBody: Bool
     private let mangler: RealBaseMangler = RealBaseMangler()
     private let typeManager: FaithfulSemaTypeManager = FaithfulSemaTypeManager()
@@ -96,6 +98,7 @@ private class FrontendCjoFlatBufferWriter {
         diag!: DiagnosticEngine,
         serializingCommon!: Bool,
         exportContent!: Bool,
+        exportForIncr!: Bool,
         exportFuncBody!: Bool
     ) {
         this.packageDepInfo = packageDepInfo
@@ -106,6 +109,7 @@ private class FrontendCjoFlatBufferWriter {
         this.diag = diag
         this.serializingCommon = serializingCommon
         this.exportContent = exportContent
+        this.exportForIncr = exportForIncr
         this.exportFuncBody = exportFuncBody
     }
 
@@ -1812,7 +1816,7 @@ private class FrontendCjoFlatBufferWriter {
 
     private func SaveClassInfo(classDecl: ClassDecl): FlatBufferOffset {
         let inheritedTypes = SaveInheritedTypes(classDecl)
-        let body = SaveBody(classDecl)
+        let body = GetBody(classDecl)
         // ModuleFormat.fbs ClassInfo fields: 0 inheritedTypes, 1 body, 3 isAnno,
         // 4/6 annotation target bytes, 5 runtimeVisible.
         builder.StartTable(7)
@@ -1832,7 +1836,7 @@ private class FrontendCjoFlatBufferWriter {
 
     private func SaveInterfaceInfo(interfaceDecl: InterfaceDecl): FlatBufferOffset {
         let inheritedTypes = SaveInheritedTypes(interfaceDecl)
-        let body = SaveBody(interfaceDecl)
+        let body = GetBody(interfaceDecl)
         // ModuleFormat.fbs InterfaceInfo fields: 0 inheritedTypes, 1 body.
         builder.StartTable(2)
         builder.AddOffset(1, body)
@@ -1842,7 +1846,7 @@ private class FrontendCjoFlatBufferWriter {
 
     private func SaveEnumInfo(enumDecl: EnumDecl): FlatBufferOffset {
         let inheritedTypes = SaveInheritedTypes(enumDecl)
-        let body = SaveBody(enumDecl)
+        let body = GetBody(enumDecl)
         let ellipsisPos = PositionBytes(enumDecl.ellipsisPos)
         // ModuleFormat.fbs EnumInfo fields: 0 inheritedTypes, 1 body,
         // 3 hasArguments, 4 nonExhaustive/hasEllipsis, 5 ellipsisPos.
@@ -1857,7 +1861,7 @@ private class FrontendCjoFlatBufferWriter {
 
     private func SaveStructInfo(structDecl: StructDecl): FlatBufferOffset {
         let inheritedTypes = SaveInheritedTypes(structDecl)
-        let body = SaveBody(structDecl)
+        let body = GetBody(structDecl)
         // ModuleFormat.fbs StructInfo fields: 0 inheritedTypes, 1 body, 2 adInfo.
         builder.StartTable(3)
         builder.AddOffset(1, body)
@@ -1867,7 +1871,7 @@ private class FrontendCjoFlatBufferWriter {
 
     private func SaveExtendInfo(extendDecl: ExtendDecl): FlatBufferOffset {
         let inheritedTypes = SaveInheritedTypes(extendDecl)
-        let body = SaveBody(extendDecl)
+        let body = GetBody(extendDecl)
         // ModuleFormat.fbs ExtendInfo fields: 0 inheritedTypes, 1 body.
         builder.StartTable(2)
         builder.AddOffset(1, body)
@@ -1903,40 +1907,46 @@ private class FrontendCjoFlatBufferWriter {
         return builder.CreateVectorU32(types)
     }
 
-    private func SaveBody(decl: InheritableDecl): FlatBufferOffset {
+    private func GetBody<T>(decl: T): FlatBufferOffset where T <: InheritableDecl {
         let body = ArrayList<UInt32>()
-        let addedPlatformImpls = HashSet<String>()
-        if (decl.TestAttr(Attribute.PRIVATE) && (decl as ExtendDecl).isNone()) {
+        let addedPlatformImpls = HashSet<Decl>()
+        let onlyVisibleSig = !exportForIncr && !exportContent
+        if (onlyVisibleSig && decl.TestAttr(Attribute.PRIVATE)) {
             return builder.CreateVectorU32(body)
         }
+        let shouldExportDecl = { member: Decl =>
+            let isInstMemberVar = member.astKind == ASTKind.VAR_DECL && !member.TestAttr(Attribute.STATIC)
+            if (member.doNotExport || member.astKind == ASTKind.VAR_WITH_PATTERN_DECL ||
+                (onlyVisibleSig && !member.IsExportedDecl())) {
+                return false
+            }
+            if (decl.astKind == ASTKind.EXTEND_DECL && serializingCommon) {
+                return true
+            }
+            if (IsGenericInCommonSerialization(member)) {
+                return true
+            }
+            if (!exportForIncr && !decl.TestAttr(Attribute.COMMON) && !isInstMemberVar &&
+                member.linkage == Linkage.INTERNAL) {
+                return false
+            }
+            return true
+        }
         for (member in decl.GetMemberDeclPtrs()) {
-            let memberKey = DeclKey(member)
-            if (member.TestAttr(Attribute.SPECIFIC) && addedPlatformImpls.contains(memberKey)) {
+            if (member.TestAttr(Attribute.SPECIFIC) && addedPlatformImpls.contains(member)) {
                 continue
             }
             if (let Some(specific) <- member.specificImplementation) {
-                addedPlatformImpls.add(DeclKey(specific))
-                if (ShouldExportMember(decl, specific)) {
+                addedPlatformImpls.add(specific)
+                if (shouldExportDecl(specific)) {
                     body.add(SaveDeclIndex(specific, false))
                 }
             }
-            if (ShouldExportMember(decl, member)) {
+            if (shouldExportDecl(member)) {
                 body.add(SaveDeclIndex(member, false))
             }
         }
         return builder.CreateVectorU32(body)
-    }
-
-    private func ShouldExportMember(parent: InheritableDecl, member: Decl): Bool {
-        let isInstMemberVar = member.astKind == ASTKind.VAR_DECL && !member.TestAttr(Attribute.STATIC)
-        if (member.doNotExport || member.astKind == ASTKind.VAR_WITH_PATTERN_DECL || !member.IsExportedDecl()) {
-            return false
-        }
-        if (!parent.TestAttr(Attribute.COMMON) && (parent as ExtendDecl).isNone() && !isInstMemberVar &&
-            member.linkage == Linkage.INTERNAL) {
-            return false
-        }
-        return true
     }
 
     private func AddClassAnnotationTargets(targets: UInt16): Unit {
