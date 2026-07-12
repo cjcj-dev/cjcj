@@ -8983,20 +8983,30 @@ public class Translator {
     }
 
     private func ToCHIRCompoundAssignOp(op: AstTokenKind): ExprKind {
-        return match (op) {
-            case AstTokenKind.ADD_ASSIGN => ExprKind.ADD
-            case AstTokenKind.SUB_ASSIGN => ExprKind.SUB
-            case AstTokenKind.MUL_ASSIGN => ExprKind.MUL
-            case AstTokenKind.EXP_ASSIGN => ExprKind.EXP
-            case AstTokenKind.DIV_ASSIGN => ExprKind.DIV
-            case AstTokenKind.MOD_ASSIGN => ExprKind.MOD
-            case AstTokenKind.BITAND_ASSIGN => ExprKind.BITAND
-            case AstTokenKind.BITOR_ASSIGN => ExprKind.BITOR
-            case AstTokenKind.BITXOR_ASSIGN => ExprKind.BITXOR
-            case AstTokenKind.LSHIFT_ASSIGN => ExprKind.LSHIFT
-            case AstTokenKind.RSHIFT_ASSIGN => ExprKind.RSHIFT
-            case _ => throw IllegalArgumentException(
-                "not yet ported in faithful AST2CHIR compound assign op: ${AstTokenKindValue(op)}")
+        CJC_ASSERT(IsCompoundAssignOp(op))
+        return if (op == AstTokenKind.ADD_ASSIGN) {
+            ExprKind.ADD
+        } else if (op == AstTokenKind.SUB_ASSIGN) {
+            ExprKind.SUB
+        } else if (op == AstTokenKind.MUL_ASSIGN) {
+            ExprKind.MUL
+        } else if (op == AstTokenKind.EXP_ASSIGN) {
+            ExprKind.EXP
+        } else if (op == AstTokenKind.DIV_ASSIGN) {
+            ExprKind.DIV
+        } else if (op == AstTokenKind.MOD_ASSIGN) {
+            ExprKind.MOD
+        } else if (op == AstTokenKind.BITAND_ASSIGN) {
+            ExprKind.BITAND
+        } else if (op == AstTokenKind.BITOR_ASSIGN) {
+            ExprKind.BITOR
+        } else if (op == AstTokenKind.BITXOR_ASSIGN) {
+            ExprKind.BITXOR
+        } else if (op == AstTokenKind.LSHIFT_ASSIGN) {
+            ExprKind.LSHIFT
+        } else {
+            CJC_ASSERT(op == AstTokenKind.RSHIFT_ASSIGN)
+            ExprKind.RSHIFT
         }
     }
 
