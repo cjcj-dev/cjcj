@@ -6253,14 +6253,7 @@ public class Translator {
         if (let Some(target) <- constructorExpr.GetTarget()) {
             return target
         }
-        if (let Some(refExpr) <- (constructorExpr as AstRefExpr)) {
-            return refExpr.ref.target ??
-                throw IllegalStateException("faithful AST2CHIR enum pattern RefExpr has no target")
-        }
-        if (let Some(member) <- (constructorExpr as AstMemberAccess)) {
-            return ResolveMemberAccessTarget(member, "faithful AST2CHIR enum pattern MemberAccess")
-        }
-        throw IllegalArgumentException("not yet ported in faithful AST2CHIR: enum pattern constructor expression")
+        throw IllegalArgumentException("faithful AST2CHIR enum pattern constructor expression has no target")
     }
 
     private func TranslateVArrayExpr(expr: AstArrayExpr, arrayTy: VArrayType): Value {
