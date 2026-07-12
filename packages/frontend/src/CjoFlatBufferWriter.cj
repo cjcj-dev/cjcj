@@ -296,7 +296,8 @@ private class FrontendCjoFlatBufferWriter {
         if (decl.doNotExport || decl.TestAttr(Attribute.COMPILER_ADD)) {
             return false
         }
-        return decl.IsExportedDecl()
+        return decl.IsExportedDecl() ||
+            (decl.TestAttr(Attribute.GLOBAL) && decl.linkage != Linkage.INTERNAL)
     }
 
     private func IsSupportedTopLevelDecl(decl: Decl): Bool {
