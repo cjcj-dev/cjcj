@@ -8900,8 +8900,7 @@ public class Translator {
             case AstTypeKind.TYPE_RUNE => RuneLiteral(Rune(expr.codepoint[0]))
             case AstTypeKind.TYPE_BOOLEAN => BoolLiteral(expr.stringValue == "true")
             case AstTypeKind.TYPE_STRUCT => StringLiteral(expr.stringValue)
-            case _ =>
-                throw IllegalArgumentException("not yet ported in faithful AST2CHIR: literal type")
+            case _ => CJC_ASSERT(false); FloatLiteral(0.0)
         }
     }
 
