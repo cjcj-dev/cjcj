@@ -1360,10 +1360,7 @@ private func ReorderCallArgument(typeManager: TypeManager, ctx: Option<ASTContex
     let out = ArrayList<FuncDecl>()
     ce.defaultArgs.clear()
     ce.desugarArgs = None
-    let bodyParams = match (BodyParamList(fmu.fd)) {
-        case Some(value) => value.params
-        case None => return out
-    }
+    let bodyParams = BodyParamList(fmu.fd).getOrThrow().params
     let desugarArgs = ArrayList<FuncArg>()
     for (param in bodyParams) {
         if (param.TestAttr(Attribute.HAS_INITIAL)) {
@@ -1385,13 +1382,7 @@ private func ReorderCallArgument(typeManager: TypeManager, ctx: Option<ASTContex
     }
     SortCallArgumentByParamOrder(fmu.fd, ce, desugarArgs)
     ce.desugarArgs = Some(desugarArgs)
-    let funcTy = match (fmu.fd.GetTy()) {
-        case Some(value) => match (value as FuncTy) {
-            case Some(funcValue) => funcValue
-            case None => return out
-        }
-        case None => return out
-    }
+    let funcTy = (fmu.fd.GetTy().getOrThrow() as FuncTy).getOrThrow()
     if (IsGenericCall(ctx, ce, fmu.fd)) {
         return UpdateFuncGenericType(typeManager, ctx, fmu, ce)
     }
@@ -1402,10 +1393,8 @@ private func ReorderCallArgument(typeManager: TypeManager, ctx: Option<ASTContex
             idx++
             continue
         }
-        if (let Some(argTy) <- arg.GetTy()) {
-            if (argTy.IsIdeal()) {
-                return out
-            }
+        if (arg.GetTy().isSome() && arg.GetTy().getOrThrow().IsIdeal()) {
+            return out
         }
         idx++
     }
