@@ -4140,14 +4140,15 @@ public class TypeChecker {
             return false
         }
         let maybeEnumOverloadOP = IsPossibleEnumConstructor(candidates, baseFunc)
-        let maybeVariadicFunction = IsPossibleVariadicFunctionInList(candidates, ce)
+        let maybeVariadicFunction = IsPossibleVariadicFunction(candidates, ce)
         let maybeEnumOrVariadic = maybeEnumOverloadOP || maybeVariadicFunction
         let diagnostics = ArrayList<Diagnostic>()
         var result = ArrayList<FuncDecl>()
+        var typeMapping = SubstPack()
         try (cs = impl.typeManager.constraints.CommitScope()) {
             if (maybeEnumOrVariadic || mayRetryAsTypeCtor) {
                 try (ds = DiagSuppressor(impl.diag)) {
-                    result = MatchFunctionForCall(impl.typeManager, impl.diag, Some(ctx), candidates, ce, target,
+                    (result, typeMapping) = MatchFunctionForCall(impl.typeManager, impl.diag, Some(ctx), candidates, ce, target,
                         argChecker: Some({ expectedTy5: Ty, arg10: FuncArg => CheckCallArgFromContext(ctx, expectedTy5, arg10) }),
                         declSynthesizer: Some({ fd3: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd3)) }),
                         argSynthesizer: Some({ arg11: FuncArg => SynthesizeFuncArg(ctx, arg11) }),
@@ -4160,7 +4161,7 @@ public class TypeChecker {
                     }
                 }
             } else {
-                result = MatchFunctionForCall(impl.typeManager, impl.diag, Some(ctx), candidates, ce, target,
+                (result, typeMapping) = MatchFunctionForCall(impl.typeManager, impl.diag, Some(ctx), candidates, ce, target,
                     argChecker: Some({ expectedTy7: Ty, arg13: FuncArg => CheckCallArgFromContext(ctx, expectedTy7, arg13) }),
                     declSynthesizer: Some({ fd4: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd4)) }),
                     argSynthesizer: Some({ arg14: FuncArg => SynthesizeFuncArg(ctx, arg14) }),
@@ -4171,7 +4172,10 @@ public class TypeChecker {
             }
             ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy().getOrThrow()))
             if (result.size == 1) {
-                return true
+                return PostCheckCallExpr(impl.typeManager, impl.diag, Some(ctx), ce, result[0], typeMapping,
+                    genericChecker: Some({ decl5: Decl, typeArgs2: ArrayList<Type>, node2: Expr =>
+                        impl.CheckCallGenericDeclInstantiation(Some(decl5), typeArgs2, node2)
+                    }))
             }
             impl.typeManager.constraints.Reset()
             baseFunc.SetTy(if (maybeEnumOrVariadic) {
@@ -4189,6 +4193,8 @@ public class TypeChecker {
                     exprSynthesizer: Some({ child6: Expr => SynthesizeWithCache(ctx, SynPos.EXPR_ARG, child6) }),
                     effectiveArgChecker: Some({ expectedTy12: Ty, arg21: FuncArg =>
                         CheckWithEffectiveCache(ctx, expectedTy12, arg21, false)
+                    }), genericChecker: Some({ decl6: Decl, typeArgs3: ArrayList<Type>, node3: Expr =>
+                        impl.CheckCallGenericDeclInstantiation(Some(decl6), typeArgs3, node3)
                     })))
             if (ret) {
                 return true
@@ -4350,7 +4356,7 @@ public class TypeChecker {
         if (let Some(funcBody) <- le.funcBody) {
             if (!funcBody.paramLists.isEmpty()) {
                 for (param in funcBody.paramLists[0].params) {
-                    if ((param.GetTy() ?? TypeManager.GetInvalidTy()).IsPlaceholder()) {
+                    if (param.GetTy().getOrThrow().IsPlaceholder()) {
                         unsolvedParams[param.identifier.Val()] = param
                     }
                 }
@@ -4415,7 +4421,7 @@ public class TypeChecker {
 
         for (id in candidateIds) {
             if (let Some(param) <- unsolvedParams.get(id)) {
-                if (let Some(tyVar) <- ((param.GetTy() ?? TypeManager.GetInvalidTy()) as GenericsTy)) {
+                if (let Some(tyVar) <- (param.GetTy().getOrThrow() as GenericsTy)) {
                     TryEnforceCandidate(tyVar, candidates.get(id) ?? ArrayList<Decl>(), impl.typeManager)
                 }
             }
@@ -4439,7 +4445,7 @@ public class TypeChecker {
                     }
                     if (Ty.IsTyCorrect(SynthesizeNode(ctx, SynPos.EXPR_ARG, funcBody)) &&
                         (let Some(body) <- funcBody.body) && Ty.IsTyCorrect(body.GetTy())) {
-                        le.SetTy(funcBody.GetTy() ?? TypeManager.GetInvalidTy())
+                        le.SetTy(funcBody.GetTy().getOrThrow())
                         successful = true
                     }
                 }
@@ -4481,7 +4487,7 @@ public class TypeChecker {
                 }
                 le.SetTy(TypeManager.GetInvalidTy())
                 EndTyVarScope(tyVarScope)
-                return le.GetTy() ?? TypeManager.GetInvalidTy()
+                return le.GetTy().getOrThrow()
             }
         }
         TryInferFromSyntaxInfo(ctx, le)
@@ -4498,23 +4504,23 @@ public class TypeChecker {
             le.SetTy(TypeManager.GetInvalidTy())
             if (DiagInferParamTyFail(le)) {
                 EndTyVarScope(tyVarScope)
-                return le.GetTy() ?? TypeManager.GetInvalidTy()
+                return le.GetTy().getOrThrow()
             }
         } else {
             if (skipSolving) {
-                le.SetTy(funcBody.GetTy() ?? TypeManager.GetInvalidTy())
+                le.SetTy(funcBody.GetTy().getOrThrow())
             } else if (!SolveLamExprParamTys(ctx, le)) {
                 EndTyVarScope(tyVarScope)
-                return le.GetTy() ?? TypeManager.GetInvalidTy()
+                return le.GetTy().getOrThrow()
             }
         }
-        if (let Some(funcTy) <- ((le.GetTy() ?? TypeManager.GetInvalidTy()) as FuncTy)) {
+        if (let Some(funcTy) <- (le.GetTy().getOrThrow() as FuncTy)) {
             retType.SetTy(funcTy.retTy)
         } else {
             retType.SetTy(TypeManager.GetInvalidTy())
         }
         EndTyVarScope(tyVarScope)
-        return le.GetTy() ?? TypeManager.GetInvalidTy()
+        return le.GetTy().getOrThrow()
     }
 
     private func LambdaParamListForCheck(le: LambdaExpr): Option<FuncParamList> {
@@ -4577,9 +4583,9 @@ public class TypeChecker {
 
     private func CheckLambdaBody(ctx: ASTContext, funcBody: FuncBody): Bool {
         let _ = SynthesizeFuncBody(ctx, funcBody)
-        if (Ty.IsTyCorrect(funcBody.GetTy() ?? TypeManager.GetInvalidTy())) {
+        if (Ty.IsTyCorrect(funcBody.GetTy().getOrThrow())) {
             if (let Some(body) <- funcBody.body) {
-                if (Ty.IsTyCorrect(body.GetTy() ?? TypeManager.GetInvalidTy())) {
+                if (Ty.IsTyCorrect(body.GetTy().getOrThrow())) {
                     return true
                 }
             }
@@ -4625,7 +4631,7 @@ public class TypeChecker {
                     return true
                 }
                 funcBody.SetTy(TypeManager.GetInvalidTy())
-                le.SetTy(funcBody.GetTy() ?? TypeManager.GetInvalidTy())
+                le.SetTy(funcBody.GetTy().getOrThrow())
             }
             let _ = TcInvalid(le)
             return false
@@ -4953,7 +4959,7 @@ public class TypeChecker {
         let selectorTy = if (Ty.IsTyCorrect(initializer.GetTy())) {
             TcReplaceIdeal(impl.typeManager, initializer)
         } else {
-            initializer.GetTy() ?? TypeManager.GetInvalidTy()
+            initializer.GetTy().getOrThrow()
         }
         if (!ChkPatternsSameASTKind(ctx, letPattern.patterns, diag: impl.diag)) {
             let _ = TcInvalid(letPattern)
@@ -4986,7 +4992,7 @@ public class TypeChecker {
         if (let Some(parenExpr) <- (expr as ParenExpr)) {
             if (let Some(inner) <- parenExpr.expr) {
                 let ok = CheckConditionWithBindings(ctx, inner, boundDecls, suppressIntroducingVariableError)
-                parenExpr.SetTy(inner.GetTy() ?? TypeManager.GetInvalidTy())
+        parenExpr.SetTy(inner.GetTy().getOrThrow())
                 return ok
             }
             let _ = TcInvalid(parenExpr)
@@ -5103,8 +5109,8 @@ public class TypeChecker {
             if (let Some(elseBody3) <- ifExpr.elseBody) {
                 let _ = ReplaceIdealTy(impl.typeManager, thenBody2, diag: impl.diag)
                 let _ = ReplaceIdealTy(impl.typeManager, elseBody3, diag: impl.diag)
-                let thenTy = impl.typeManager.GetThisRealTy(thenBody2.GetTy() ?? TypeManager.GetInvalidTy())
-                let elseTy = impl.typeManager.GetThisRealTy(elseBody3.GetTy() ?? TypeManager.GetInvalidTy())
+        let thenTy = impl.typeManager.GetThisRealTy(thenBody2.GetTy().getOrThrow())
+        let elseTy = impl.typeManager.GetThisRealTy(elseBody3.GetTy().getOrThrow())
                 thenBody2.SetTy(thenTy)
                 elseBody3.SetTy(elseTy)
                 if (pos == SynPos.UNUSED) {
@@ -5113,7 +5119,7 @@ public class TypeChecker {
                     return FinishSynthesize(ctx, ifExpr, unitTy)
                 }
                 let joinRes = JoinSynthesizedIfBranchTys(thenTy, elseTy, ifExpr.curFile)
-                let (optErrs, joinedTy) = SetJoinedType(ifExpr.GetTy() ?? TypeManager.GetInvalidTy(), joinRes)
+        let (optErrs, joinedTy) = SetJoinedType(ifExpr.GetTy().getOrThrow(), joinRes)
                 ifExpr.SetTy(joinedTy)
                 if (let Some(errMsg) <- optErrs) {
                     var diagMessage = "types " + Ty.ToString(Some(thenTy)) + " and " + Ty.ToString(Some(elseTy))
@@ -5297,7 +5303,7 @@ public class TypeChecker {
             return
         }
         if (let Some(diagValue) <- impl.diag) {
-            let tyStr = (expr.GetTy() ?? TypeManager.GetInvalidTy()).String()
+            let tyStr = expr.GetTy().getOrThrow().String()
             let builder = diagValue.Diagnose(expr.begin, expr.end,
                 BasicDiagKind.sema_expr_in_forin_must_has_iterator, args: [BasicDiagArgument(tyStr)])
             builder.Emit()
@@ -5334,7 +5340,11 @@ public class TypeChecker {
         if (let Some(genericTy) <- (inTy as GenericsTy)) {
             if (genericTy.isPlaceholder) {
                 let iterableTy = iterableDecl.getOrThrow().GetTy().getOrThrow()
-                return impl.typeManager.ConstrainByCtor(genericTy, iterableTy) ?? TypeManager.GetInvalidTy()
+                if (let Some(placeholderIterableTy) <- impl.typeManager.ConstrainByCtor(genericTy, iterableTy)) {
+                    return placeholderIterableTy
+                } else {
+                    return TypeManager.GetInvalidTy()
+                }
             }
         }
         if (let Some(interfaceDecl) <- iterableDecl) {
@@ -5466,7 +5476,7 @@ public class TypeChecker {
         let nestedMapping = GenerateTypeMappingForTypeAliasDeclVisit(targetTad, visited)
         let typeArgs = ArrayList<Ty>()
         for (typeArg in typeNode.GetTypeArgs()) {
-            typeArgs.add(typeArg.GetTy() ?? TypeManager.GetInvalidTy())
+            typeArgs.add(typeArg.GetTy().getOrThrow())
         }
         SubstituteTypeForTypeAliasTypeMapping(targetTad, typeArgs, nestedMapping)
         return nestedMapping
@@ -5479,7 +5489,7 @@ public class TypeChecker {
         }
         let typeArgs = ArrayList<Ty>()
         for (typeArg in usage.GetTypeArgs()) {
-            typeArgs.add(typeArg.GetTy() ?? TypeManager.GetInvalidTy())
+            typeArgs.add(typeArg.GetTy().getOrThrow())
         }
         let target = tad.typeNode.getOrThrow().GetTarget()
         if ((let None <- target) || target.getOrThrow().astKind != ASTKind.TYPE_ALIAS_DECL) {
@@ -6549,7 +6559,7 @@ public class TypeChecker {
         }
         if (let Some(memberAccess) <- (nameRef as MemberAccess)) {
             InferMemberAccess(ctx, memberAccess)
-            return memberAccess.GetTy() ?? TypeManager.GetInvalidTy()
+            return memberAccess.GetTy().getOrThrow()
         }
         let ty = SynNameReferenceExpr(impl.typeManager, nameRef, diag: impl.diag)
         if (Ty.IsTyCorrect(ty)) {

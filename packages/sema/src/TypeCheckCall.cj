@@ -520,7 +520,7 @@ private func CheckArgsOrder(diag: Option<BasicDiagnosticEngine>, ce: CallExpr): 
 
 // Mirror C++ IsPossibleVariadicFunction(candidates, ce) (TypeCheckCall.cpp:443): the call may target a
 // variadic function if any candidate is itself a possible variadic match for this call.
-internal func IsPossibleVariadicFunctionInList(candidates: ArrayList<FuncDecl>, ce: CallExpr): Bool {
+internal func IsPossibleVariadicFunction(candidates: ArrayList<FuncDecl>, ce: CallExpr): Bool {
     for (fd in candidates) {
         if (IsPossibleVariadicFunction(fd, ce)) {
             return true
@@ -586,7 +586,8 @@ internal func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDi
     diagnostics: ArrayList<BasicDiagnostic>, variadicDesugar: (CallExpr, Int64) -> Unit,
     argChecker!: Option<CallArgChecker> = None,
     declSynthesizer!: Option<CallDeclSynthesizer> = None, argSynthesizer!: Option<(FuncArg) -> Ty> = None,
-    exprSynthesizer!: Option<(Expr) -> Ty> = None, effectiveArgChecker!: Option<CallArgChecker> = None): Bool {
+    exprSynthesizer!: Option<(Expr) -> Ty> = None, effectiveArgChecker!: Option<CallArgChecker> = None,
+    genericChecker!: Option<(Decl, ArrayList<Type>, Expr) -> Bool> = None): Bool {
     if (!CheckArgsOrder(diag, ce)) {
         return false
     }
@@ -597,7 +598,7 @@ internal func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDi
         try (ds = DiagSuppressor(diag)) {
             if (let Some(desugar) <- ce.desugarExpr) {
                 if (let Some(desugarCall) <- (desugar as CallExpr)) {
-                    let matchResults = MatchFunctionForCall(typeManager, diag, ctx, group, desugarCall, target,
+                    let (matchResults, _) = MatchFunctionForCall(typeManager, diag, ctx, group, desugarCall, target,
                         argChecker: argChecker, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer,
                         exprSynthesizer: exprSynthesizer, effectiveArgChecker: effectiveArgChecker)
                     if (matchResults.size == 1) {
@@ -618,10 +619,11 @@ internal func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDi
         variadicDesugar(ce, fixedPositionalArity)
         if (let Some(desugar) <- ce.desugarExpr) {
             if (let Some(desugarCall) <- (desugar as CallExpr)) {
-                let matchResults = MatchFunctionForCall(typeManager, diag, ctx, results, desugarCall, target,
+                let (matchResults, typeMapping) = MatchFunctionForCall(typeManager, diag, ctx, results, desugarCall, target,
                     argChecker: argChecker, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer,
                     exprSynthesizer: exprSynthesizer, effectiveArgChecker: effectiveArgChecker)
-                if (matchResults.size == 1) {
+                if (matchResults.size == 1 && PostCheckCallExpr(typeManager, diag, ctx, desugarCall,
+                    matchResults[0], typeMapping, genericChecker: genericChecker)) {
                     ce.SetTy(desugarCall.GetTy() ?? TypeManager.GetInvalidTy())
                     ce.resolvedFunction = desugarCall.resolvedFunction
                     return true
@@ -3605,17 +3607,33 @@ private func CheckStaticCallNonStatic(typeManager: TypeManager, diag: Option<Bas
     return true
 }
 
-private func PostCheckCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: Option<ASTContext>,
-    ce: CallExpr, unit: FunctionMatchingUnit): Bool {
-    let fd = unit.fd
+internal func PostCheckCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: Option<ASTContext>,
+    ce: CallExpr, fd: FuncDecl, typeMapping: SubstPack,
+    genericChecker!: Option<(Decl, ArrayList<Type>, Expr) -> Bool> = None): Bool {
     if (!fd.TestAttr(Attribute.CONSTRUCTOR) && !CheckStaticCallNonStatic(typeManager, diag, ctx, ce, fd)) {
         ce.SetTy(TypeManager.GetInvalidTy())
         ce.callKind = CallKind.CALL_INVALID
         return false
     }
+    if (fd.TestAttr(Attribute.GENERIC)) {
+        let base = ce.baseFunc.getOrThrow()
+        let typeArgs = base.GetTypeArgs()
+        let noTypeArgs = if (let Some(refExpr) <- (base as NameReferenceExpr)) {
+            typeArgs.isEmpty() && refExpr.instTys.isEmpty()
+        } else {
+            false
+        }
+        let legal = !noTypeArgs && genericChecker.isSome() &&
+            genericChecker.getOrThrow()(fd, typeArgs, base)
+        if (!legal) {
+            ce.SetTy(TypeManager.GetInvalidTy())
+            ce.callKind = CallKind.CALL_INVALID
+            return false
+        }
+    }
     ce.resolvedFunction = Some(fd)
     UpdateCallTargets(ce, fd)
-    let _ = DynamicBindingThisType(typeManager, ce, fd, unit.typeMapping)
+    let _ = DynamicBindingThisType(typeManager, ce, fd, typeMapping)
     if (!fd.TestAttr(Attribute.FOREIGN) && !fd.TestAttr(Attribute.C)) {
         var valid = true
         for (arg in ce.args) {
@@ -3655,9 +3673,9 @@ private func PostCheckCallExpr(typeManager: TypeManager, diag: Option<BasicDiagn
 
 internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: Option<ASTContext>,
     candidates: ArrayList<FuncDecl>, ce: CallExpr, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
-    inferenceFailure!: Option<CallInferenceFailure> = None,
     declSynthesizer!: Option<CallDeclSynthesizer> = None, argSynthesizer!: Option<(FuncArg) -> Ty> = None,
-    exprSynthesizer!: Option<(Expr) -> Ty> = None, effectiveArgChecker!: Option<CallArgChecker> = None): ArrayList<FuncDecl> {
+    exprSynthesizer!: Option<(Expr) -> Ty> = None,
+    effectiveArgChecker!: Option<CallArgChecker> = None): (ArrayList<FuncDecl>, SubstPack) {
     let legals = ArrayList<FunctionMatchingUnit>()
     let argCombinations = if (let Some(ctxValue) <- ctx) {
         GetArgsCombination(typeManager, diag, ctxValue, ce, argSynthesizer, exprSynthesizer, declSynthesizer)
@@ -3671,7 +3689,7 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
         fallbackCombinations
     }
     if (!ce.args.isEmpty() && argCombinations.isEmpty()) {
-        return ArrayList<FuncDecl>()
+        return (ArrayList<FuncDecl>(), SubstPack())
     }
     if (ce.args.isEmpty() && argCombinations.isEmpty()) {
         argCombinations.add(ArrayList<Ty>())
@@ -3681,11 +3699,11 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
         let candidate = FunctionCandidate(candidates[0], ce, argCombinations)
         try (ds = DiagSuppressor(diag)) {
             checked = CheckCandidate(typeManager, diag, ctx, candidate, target, argChecker: argChecker,
-                inferenceFailure: inferenceFailure, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer)
+                inferenceFailure: None, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer)
         }
         let out = ArrayList<FuncDecl>()
         if (let None <- checked) {
-            return out
+            return (out, SubstPack())
         }
         let unit = checked.getOrThrow()
         ReInferCallArgs(typeManager, ce, unit, effectiveArgChecker)
@@ -3693,7 +3711,7 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
         if (let Some(fdTy) <- unit.fd.GetTy()) {
             if (IsGenericCall(ctx, ce, unit.fd)) {
                 if (UpdateFuncGenericType(typeManager, ctx, unit, ce).isEmpty()) {
-                    return out
+                    return (out, SubstPack())
                 }
             } else {
                 ce.baseFunc.getOrThrow().SetTy(fdTy)
@@ -3705,10 +3723,8 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
         ce.resolvedFunction = Some(unit.fd)
         UpdateCallTargets(ce, unit.fd)
         FillTypeArgumentsTy(typeManager, unit.fd, ce, unit.typeMapping)
-        if (PostCheckCallExpr(typeManager, diag, ctx, ce, unit)) {
-            out.add(unit.fd)
-        }
-        return out
+        out.add(unit.fd)
+        return (out, unit.typeMapping)
     }
     let fdScopeLevelMap = HashMap<Node, Int64>()
     let orderedCandidates = GetOrderedCandidates(ctx, ce, candidates, fdScopeLevelMap)
@@ -3735,7 +3751,7 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
             let candidate = FunctionCandidate(fd, ce, argCombinations)
             try (ds = DiagSuppressor(diag)) {
                 checked = CheckCandidate(typeManager, diag, ctx, candidate, target, argChecker: argChecker,
-                    inferenceFailure: inferenceFailure, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer)
+                    inferenceFailure: None, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer)
                 suppressedDiags = ds.GetSuppressedDiag()
             }
             if (let None <- checked) {
@@ -3758,7 +3774,7 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
         }
         let out = ArrayList<FuncDecl>()
         if (legals.isEmpty()) {
-            return out
+            return (out, SubstPack())
         }
         var selected: Option<FunctionMatchingUnit> = None
         if (legals.size == 1) {
@@ -3772,7 +3788,7 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
                 }
             }
             if (hasEnumCtor) {
-                return out
+                return (out, SubstPack())
             }
             let resolved = ResolveOverload(typeManager, legals, ce)
             if (resolved.size == 1) {
@@ -3781,7 +3797,7 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
                 for (unit in legals) {
                     out.add(unit.fd)
                 }
-                return out
+                return (out, SubstPack())
             }
         }
         if (let Some(unit) <- selected) {
@@ -3796,14 +3812,14 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
                 }
             }
             if (funcHasError) {
-                return out
+                return (out, SubstPack())
             }
             ReInferCallArgs(typeManager, ce, unit, effectiveArgChecker)
             BuildDesugaredCallArgs(typeManager, unit.fd, ce, unit.typeMapping)
             if (let Some(fdTy) <- unit.fd.GetTy()) {
                 if (IsGenericCall(ctx, ce, unit.fd)) {
                     if (UpdateFuncGenericType(typeManager, ctx, unit, ce).isEmpty()) {
-                        return out
+                        return (out, SubstPack())
                     }
                 } else {
                     ce.baseFunc.getOrThrow().SetTy(fdTy)
@@ -3815,13 +3831,12 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
             ce.resolvedFunction = Some(unit.fd)
             UpdateCallTargets(ce, unit.fd)
             FillTypeArgumentsTy(typeManager, unit.fd, ce, unit.typeMapping)
-            if (PostCheckCallExpr(typeManager, diag, ctx, ce, unit)) {
-                out.add(unit.fd)
-            }
+            out.add(unit.fd)
+            return (out, unit.typeMapping)
         }
-        return out
+        return (out, SubstPack())
     }
-    return ArrayList<FuncDecl>()
+    return (ArrayList<FuncDecl>(), SubstPack())
 }
 
 private func CheckCallArgs(diag: Option<BasicDiagnosticEngine>, typeManager: TypeManager, ce: CallExpr, funcTy: FuncTy): Option<ArrayList<Ty>> {
