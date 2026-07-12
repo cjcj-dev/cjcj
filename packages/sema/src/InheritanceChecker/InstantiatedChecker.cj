@@ -397,7 +397,10 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
             var instTys = checker.typeManager.GetTypeArgs(baseTy)
             if (let Some(nameRef) <- (node as NameReferenceExpr)) {
                 if (!nameRef.instTys.isEmpty()) {
-                    instTys = nameRef.instTys
+                    instTys = ArrayList<Ty>()
+                    for (ty in nameRef.instTys) {
+                        instTys.add(ty)
+                    }
                 }
             }
             let typeMapping = GenerateTypeMapping(target, instTys)
