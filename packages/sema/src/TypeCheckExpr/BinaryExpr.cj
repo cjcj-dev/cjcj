@@ -2,6 +2,7 @@ package cjcj::sema.TypeCheckExpr
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::basic.Diagnostic
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::sema.*
@@ -1270,7 +1271,8 @@ private func ChkExpoExprWithTarget(typeManager: TypeManager, target: Ty, be: Bin
 }
 
 private func ChkArithmeticExprBuiltin(typeManager: TypeManager, target: Ty, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None, checker!: Option<BinaryOperandChecker> = None): Bool {
+    ctx!: Option<ASTContext> = None, checker!: Option<BinaryOperandChecker> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let targetTy = UnboxOptionType(target)
     if (!Ty.IsTyCorrect(targetTy)) {
         return false
@@ -1279,11 +1281,25 @@ private func ChkArithmeticExprBuiltin(typeManager: TypeManager, target: Ty, be: 
         return ChkExpoExprWithTarget(typeManager, targetTy, be, ctx: ctx, checker: checker)
     }
     let candidateKinds = GetConcreteBinaryCandidateKinds(be.op)
+    let thisDiags = ArrayList<Diagnostic>()
     for (kindValue in candidateKinds) {
         let candidateTy = TypeManager.GetPrimitiveTy(kindValue)
-        if (typeManager.IsSubtype(candidateTy, targetTy) &&
-            ChkConcreteBinaryOperandPair(typeManager, candidateTy, be, ctx: ctx, checker: checker)) {
-            return true
+        if (!typeManager.IsSubtype(candidateTy, targetTy)) {
+            continue
+        }
+        try (ds = DiagSuppressor(diag)) {
+            if (ChkConcreteBinaryOperandPair(typeManager, candidateTy, be, ctx: ctx, checker: checker)) {
+                ds.ReportDiag()
+                return true
+            }
+            for (diagnostic in ds.GetSuppressedDiag()) {
+                thisDiags.add(diagnostic)
+            }
+        }
+    }
+    if (let Some(diagValue) <- diag) {
+        for (diagnostic in thisDiags) {
+            diagValue.Diagnose(diagnostic).Emit()
         }
     }
     let _ = BinaryInvalid(be)
@@ -1367,7 +1383,7 @@ private func ChkBuiltinBinaryExpr(typeManager: TypeManager, target: Ty, be: Bina
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (IsArithmeticOperator(be.op)) {
-        return ChkArithmeticExprBuiltin(typeManager, target, be, ctx: ctx, checker: checker)
+        return ChkArithmeticExprBuiltin(typeManager, target, be, ctx: ctx, checker: checker, diag: diag)
     }
     if (IsRelationalOperator(be.op)) {
         return ChkRelationalExprBuiltin(typeManager, target, be, ctx: ctx,
