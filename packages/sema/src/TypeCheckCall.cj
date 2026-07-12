@@ -1112,7 +1112,7 @@ private func CompareGenericCandidate(typeManager: TypeManager, left: FunctionMat
         pack.paramTys.add(typeManager.ApplySubstPack(right.tysInArgOrder[idx], typeMapping))
         idx++
     }
-    if (let None <- LocalTypeArgumentSynthesis(typeManager, pack).SynthesizeTypeArguments()) {
+    if (let None <- LocalTypeArgumentSynthesis(typeManager, pack, GCBlames()).SynthesizeTypeArguments()) {
         return Some(false)
     }
     var pos: Int64 = 0
@@ -2317,7 +2317,7 @@ private func PrepareTyArgsSynthesis(typeManager: TypeManager, diag: Option<Basic
                 argPack.funcRetTy = Some(funcRetTy)
                 argPack.retTyUB = stat.retTarget
                 argPack.retBlame = retBlame
-                let synCtx = LocalTypeArgumentSynthesis(typeManager, argPack, needDiagMsg: false)
+                let synCtx = LocalTypeArgumentSynthesis(typeManager, argPack, ctx.gcBlames, needDiagMsg: false)
                 stat.solution = synCtx.SynthesizeTypeArguments(allowPartial: true)
                 let newUnsolvedCount = if (let Some(solution) <- stat.solution) {
                     synCtx.CountUnsolvedTyVars(solution)
@@ -2351,7 +2351,7 @@ private func PrepareTyArgsSynthesis(typeManager: TypeManager, diag: Option<Basic
                     }
                 }
                 ds.ReportDiag()
-                let diagSyn = LocalTypeArgumentSynthesis(typeManager, argPack, needDiagMsg: true)
+                let diagSyn = LocalTypeArgumentSynthesis(typeManager, argPack, ctx.gcBlames, needDiagMsg: true)
                 let _ = diagSyn.SynthesizeTypeArguments(allowPartial: false)
                 return ErrOrSubst(diagSyn.GetErrInfo())
             }

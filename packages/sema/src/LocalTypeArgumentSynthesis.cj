@@ -225,14 +225,18 @@ private func getOrderedCheckingIndexes(tys: ArrayList<Ty>): ArrayList<Int64> {
 public class LocalTypeArgumentSynthesis {
     private var tyMgr: TypeManager
     private var argPack: LocTyArgSynArgPack
+    private var gcBlames: GCBlames
+    private var gcBlamesInst: GCBlames = GCBlames()
     private var needDiagMsg: Bool
     private var cms: ConstraintWithMemos = ConstraintWithMemos()
     private var errMsg: SolvingErrInfo = SolvingErrInfo()
     private var curTyVar: Option<GenericsTy> = None
     private var deterministic: Bool = false
 
-    public init(typeManager: TypeManager, argPack: LocTyArgSynArgPack, needDiagMsg!: Bool = false) {
+    public init(typeManager: TypeManager, argPack: LocTyArgSynArgPack, gcBlames: GCBlames,
+        needDiagMsg!: Bool = false) {
         tyMgr = typeManager
+        this.gcBlames = gcBlames
         this.argPack = LocTyArgSynArgPack()
         for (tyVar in argPack.tyVarsToSolve) {
             this.argPack.tyVarsToSolve.add(tyVar)
@@ -380,7 +384,7 @@ public class LocalTypeArgumentSynthesis {
         for (entry in cst.entries) {
             pack.tyVarsToSolve.add(entry.tyVar)
         }
-        let synthesis = LocalTypeArgumentSynthesis(typeManager, pack)
+        let synthesis = LocalTypeArgumentSynthesis(typeManager, pack, GCBlames())
         synthesis.cms = ConstraintWithMemos()
         synthesis.cms.Add(ConstraintWithMemo(constraint: cloneConstraint(cst)))
         synthesis.deterministic = true
@@ -405,7 +409,7 @@ public class LocalTypeArgumentSynthesis {
         for (tyVar in typeManager.GetUnsolvedTyVars()) {
             pack.tyVarsToSolve.add(tyVar)
         }
-        let synthesis = LocalTypeArgumentSynthesis(typeManager, pack)
+        let synthesis = LocalTypeArgumentSynthesis(typeManager, pack, GCBlames())
         synthesis.cms = ConstraintWithMemos()
         synthesis.cms.Add(ConstraintWithMemo(constraint: cloneConstraint(cst)))
         synthesis.deterministic = true
@@ -418,6 +422,15 @@ public class LocalTypeArgumentSynthesis {
             let bounds = out.GetOrCreate(tyVar)
             for (upper in tyVar.upperBounds) {
                 bounds.ubs.Add(upper)
+                if (let Some(upperToBlames) <- gcBlamesInst.get(Ptr<Ty>(tyVar))) {
+                    if (let Some(nodes) <- upperToBlames.get(Ptr<Ty>(upper))) {
+                        let blames = BlameSet()
+                        for (node in nodes) {
+                            blames.Add(Blame(src: Some(node), style: BlameStyle.CONSTRAINT))
+                        }
+                        bounds.ub2Blames.add(TyBlameEntry(upper, blames: blames))
+                    }
+                }
             }
             if (let Some(lower) <- tyVar.lowerBound) {
                 bounds.lbs.Add(lower)
@@ -437,6 +450,21 @@ public class LocalTypeArgumentSynthesis {
                     let instUpper = tyMgr.InstOf(upper)
                     if (!containsTy(instTyVar.upperBounds, instUpper)) {
                         instTyVar.upperBounds.add(instUpper)
+                    }
+                    let univKey = Ptr<Ty>(entry.tyVar)
+                    let upperKey = Ptr<Ty>(upper)
+                    if (let Some(upperToBlames) <- gcBlames.get(univKey)) {
+                        if (let Some(sourceBlames) <- upperToBlames.get(upperKey)) {
+                            let instTyVarKey = Ptr<Ty>(instTyVar)
+                            if (!gcBlamesInst.contains(instTyVarKey)) {
+                                gcBlamesInst[instTyVarKey] = HashMap<Ptr<Ty>, HashSet<Node>>()
+                            }
+                            let copiedBlames = HashSet<Node>()
+                            for (node in sourceBlames) {
+                                copiedBlames.add(node)
+                            }
+                            gcBlamesInst[instTyVarKey][Ptr<Ty>(instUpper)] = copiedBlames
+                        }
                     }
                 }
             }
@@ -499,7 +527,8 @@ public class LocalTypeArgumentSynthesis {
         let res = ConstraintWithMemos()
         var msg = SolvingErrInfo()
         for (cm in newCMS.values) {
-            let newSynIns = LocalTypeArgumentSynthesis(syn.tyMgr, dummyArgPack, needDiagMsg: syn.needDiagMsg)
+            let newSynIns = LocalTypeArgumentSynthesis(syn.tyMgr, dummyArgPack, GCBlames(),
+                needDiagMsg: syn.needDiagMsg)
             newSynIns.cms = ConstraintWithMemos()
             newSynIns.cms.Add(cm.Clone())
             newSynIns.deterministic = syn.deterministic
