@@ -596,15 +596,18 @@ public class DiagnosticEmitter {
             var combinedLine = combinedVec[combinedIndex]
             let sourceCode = combinedLine.meta
             let bytes = sourceCode.toArray()
-            let result = StringBuilder()
+            let result = ArrayList<UInt8>()
             var forwardIndex: Int64 = 0
             while (forwardIndex < bytes.size) {
                 let forwardChar = bytes[forwardIndex]
                 if (forwardChar <= 0x08u8 || (forwardChar >= 0x0bu8 && forwardChar <= 0x1fu8) ||
                     forwardChar == 0x7fu8) {
-                    result.append("\\u{" + ToHexString(forwardChar, len: NORMAL_CODEPOINT_LEN) + "}")
+                    for (replacementByte in ("\\u{" + ToHexString(forwardChar, len: NORMAL_CODEPOINT_LEN) +
+                        "}").toArray()) {
+                        result.add(replacementByte)
+                    }
                 } else {
-                    result.append(sourceCode[forwardIndex..forwardIndex + 1])
+                    result.add(forwardChar)
                 }
                 forwardIndex++
             }
@@ -626,7 +629,7 @@ public class DiagnosticEmitter {
                 }
                 backwardOffset++
             }
-            combinedLine.meta = result.toString()
+            combinedLine.meta = String.fromUtf8(result.toArray())
             combinedVec[combinedIndex] = combinedLine
             combinedIndex++
         }
@@ -969,20 +972,27 @@ public class DiagnosticEmitter {
                 }
             }
             let raw = combinedLine.meta
-            let colorized = StringBuilder()
+            let rawBytes = raw.toArray()
+            let colorized = ArrayList<UInt8>()
             if (!vec.isEmpty() && vec[0] != DiagColor.RESET) {
-                colorized.append(colorToAnsi(vec[0]))
+                for (colorByte in colorToAnsi(vec[0]).toArray()) {
+                    colorized.add(colorByte)
+                }
             }
             idx = 0
             while (idx < raw.size) {
                 if (idx > 0 && vec[idx - 1] != vec[idx]) {
-                    colorized.append(colorToAnsi(vec[idx]))
+                    for (colorByte in colorToAnsi(vec[idx]).toArray()) {
+                        colorized.add(colorByte)
+                    }
                 }
-                colorized.append(raw[idx..idx + 1])
+                colorized.add(rawBytes[idx])
                 idx++
             }
-            colorized.append(colorToAnsi(DiagColor.RESET))
-            combinedLine.meta = colorized.toString()
+            for (colorByte in colorToAnsi(DiagColor.RESET).toArray()) {
+                colorized.add(colorByte)
+            }
+            combinedLine.meta = String.fromUtf8(colorized.toArray())
             combinedVec[combinedIndex] = combinedLine
             combinedIndex++
         }
