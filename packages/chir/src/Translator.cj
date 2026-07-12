@@ -2,7 +2,7 @@ package cjcj::chir
 
 import std.collection.*
 
-import cjcj::utils.{CJC_ASSERT, InternalError, OverflowStrategy, STATIC_INIT_FUNC}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, InternalError, OverflowStrategy, STATIC_INIT_FUNC}
 import cjcj::option.{GlobalOptions, OptimizationFlag}
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::ast.ASTKind
@@ -8235,10 +8235,35 @@ public class Translator {
     }
 
     private func TranslateExprAsLeftValue(expr: AstExpr): FaithfulLeftValueInfo {
+        var base = expr
+        let backBlock = currentBlock
         let nodePtr = Translator.GetDesugaredExpr(expr)
+        if (let Some(mapExpr) <- GetMapExpr(nodePtr)) {
+            base = mapExpr
+        }
+        if (let Some(res) <- TryGetExprValue(base)) {
+            return FaithfulLeftValueInfo(res, ArrayList<String>())
+        }
+
+        if (nodePtr != expr) {
+            var res = FaithfulLeftValueInfo(None, ArrayList<String>())
+            if (let Some(desugaredExpr) <- (nodePtr as AstExpr)) {
+                res = TranslateExprAsLeftValue(desugaredExpr)
+            } else {
+                let value = Translator.TranslateASTNode(nodePtr, this) ??
+                    throw IllegalStateException("faithful AST2CHIR left value produced no value")
+                res = FaithfulLeftValueInfo(value, ArrayList<String>())
+            }
+            if (let Some(subBlock) <- (nodePtr as AstBlock)) {
+                if (nodePtr != expr || nodePtr.TestAttr(AstAttribute.UNSAFE)) {
+                    builder.CreateGoTo(GetBlockByAST(subBlock), backBlock.getOrThrow())
+                }
+            }
+            return res
+        }
+
         if (let Some(refExpr) <- (nodePtr as AstRefExpr)) {
-            let refName = refExpr.ref.identifier.Val()
-            if (refExpr.isThis || refExpr.isSuper || refName == "this" || refName == "super") {
+            if (refExpr.isThis || refExpr.isSuper) {
                 return FaithfulLeftValueInfo(GetCurrentThisObject(), ArrayList<String>())
             }
             if (let Some(target) <- refExpr.ref.target) {
@@ -8248,8 +8273,12 @@ public class Translator {
                     }
                     return FaithfulLeftValueInfo(GetSymbolTable(target), ArrayList<String>())
                 }
+                if (target.astKind == ASTKind.FUNC_PARAM) {
+                    return FaithfulLeftValueInfo(GetSymbolTable(target), ArrayList<String>())
+                }
             }
-            throw IllegalArgumentException("not yet ported in faithful AST2CHIR: non-variable RefExpr left value")
+            CJC_ABORT()
+            return FaithfulLeftValueInfo(None, ArrayList<String>())
         }
         if (let Some(member) <- (nodePtr as AstMemberAccess)) {
             return TranslateMemberAccessAsLeftValue(member)
