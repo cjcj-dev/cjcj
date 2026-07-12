@@ -6,7 +6,7 @@ import cjcj::ast.*
 import cjcj::modules.GetPackageRelation as ModulesGetPackageRelation
 import cjcj::modules.PackageRelation as ModulesPackageRelation
 import cjcj::modules.SplitQualifiedName as ModulesSplitQualifiedName
-import cjcj::utils.CJC_ASSERT
+import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 
 public enum TypeCompatibility {
     | INCOMPATIBLE
@@ -2707,15 +2707,115 @@ public class TypeManager {
         return ReplaceThisTy(now)
     }
 
+    private func ObtainsAliasTypeOfRefType(rt: RefType): Option<Ty> {
+        let rtTy = rt.GetTy()
+        CJC_NULLPTR_CHECK(rtTy)
+        if (rtTy.getOrThrow().IsCFunc()) {
+            CJC_ASSERT(rt.typeArguments.size == 1)
+            let funcType = rt.typeArguments[0] as FuncType
+            CJC_NULLPTR_CHECK(funcType)
+            funcType.getOrThrow().isC = true
+            return ObtainsAliasType(Some(funcType.getOrThrow()))
+        }
+        if ((rtTy.getOrThrow() as ClassThisTy).isSome()) {
+            return rtTy
+        }
+        let typeArgs = ArrayList<Ty>()
+        for (typeArg in rt.typeArguments) {
+            typeArgs.add(ObtainsAliasType(Some(typeArg)).getOrThrow())
+        }
+        return substituteTypeArgs(rtTy.getOrThrow(), typeArgs.toArray())
+    }
+
+    private func ObtainsAliasTypeOfFuncDecl(fd: FuncDecl): Option<Ty> {
+        CJC_NULLPTR_CHECK(fd.funcBody)
+        let fb = fd.funcBody.getOrThrow()
+        let typeArgs = ArrayList<Ty>()
+        for (param in fb.paramLists[0].params) {
+            typeArgs.add(ObtainsAliasType(Some(param)).getOrThrow())
+        }
+        if (let Some(retType) <- fb.retType) {
+            typeArgs.add(ObtainsAliasType(Some(retType)).getOrThrow())
+        } else {
+            let funcTy = fd.GetTy().flatMap({ ty => ty as FuncTy })
+            CJC_NULLPTR_CHECK(funcTy)
+            typeArgs.add(funcTy.getOrThrow().retTy)
+        }
+        CJC_NULLPTR_CHECK(fd.GetTy())
+        return substituteTypeArgs(fd.GetTy().getOrThrow(), typeArgs.toArray())
+    }
+
     public func ObtainsAliasType(node: Option<Node>): Option<Ty> {
-        if (let Some(value) <- node) {
-            if (let Some(ty) <- value.GetTy()) {
-                if (ty.HasAliasTy()) {
-                    return ty
+        if (node.isNone() || !Ty.IsTyCorrect(node.getOrThrow().GetTy())) {
+            return GetInvalidTy()
+        }
+        let value = node.getOrThrow()
+        let valueTy = value.GetTy().getOrThrow()
+        if (value.TestAttr(Attribute.COMPILER_ADD)) {
+            return valueTy
+        }
+        if (let Some(typeNode) <- (value as Type)) {
+            if (!Ty.IsInitialTy(typeNode.aliasTy)) {
+                let typeAliasDecl = Ty.GetDeclPtrOfTy(typeNode.aliasTy)
+                CJC_NULLPTR_CHECK(typeAliasDecl)
+                let aliasDecl = typeAliasDecl.getOrThrow()
+                if (!aliasDecl.IsExportedDecl() && !aliasDecl.TestAttr(Attribute.IMPLICIT_USED)) {
+                    return valueTy
                 }
+                return typeNode.aliasTy
             }
         }
-        return None
+        if (value.astKind == ASTKind.REF_TYPE) {
+            return ObtainsAliasTypeOfRefType((value as RefType).getOrThrow())
+        }
+        if (value.astKind == ASTKind.PAREN_TYPE) {
+            let innerType = (value as ParenType).getOrThrow().innerType
+            return ObtainsAliasType(if (let Some(inner) <- innerType) { Some(inner) } else { None })
+        }
+        if (value.astKind == ASTKind.VARRAY_TYPE) {
+            let varrayType = (value as VArrayType).getOrThrow()
+            let typeArgument: Option<Node> = if (let Some(arg) <- varrayType.typeArgument) { Some(arg) } else { None }
+            let typeArgs = [ObtainsAliasType(typeArgument).getOrThrow()]
+            return substituteTypeArgs(valueTy, typeArgs)
+        }
+        if (value.astKind == ASTKind.FUNC_TYPE) {
+            let funcType = (value as FuncType).getOrThrow()
+            let funcTy = (valueTy as FuncTy).getOrThrow()
+            let params = ArrayList<Ty>()
+            for (param in funcType.paramTypes) {
+                params.add(ObtainsAliasType(Some(param)).getOrThrow())
+            }
+            let retType: Option<Node> = if (let Some(ret) <- funcType.retType) { Some(ret) } else { None }
+            let retTy = ObtainsAliasType(retType).getOrThrow()
+            let cfg = FuncTyConfig()
+            cfg.isC = funcType.isC
+            cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+            return GetFunctionTy(params.toArray(), retTy, cfg: cfg)
+        }
+        if (value.astKind == ASTKind.TUPLE_TYPE) {
+            let tupleType = (value as TupleType).getOrThrow()
+            let typeArgs = ArrayList<Ty>()
+            for (field in tupleType.fieldTypes) {
+                typeArgs.add(ObtainsAliasType(Some(field)).getOrThrow())
+            }
+            return substituteTypeArgs(valueTy, typeArgs.toArray())
+        }
+        if (value.astKind == ASTKind.VAR_DECL || value.astKind == ASTKind.FUNC_PARAM ||
+            value.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
+            let varDecl = (value as VarDeclAbstract).getOrThrow()
+            if (let Some(typeNode) <- varDecl.typeNode) {
+                return ObtainsAliasType(Some(typeNode))
+            }
+            return valueTy
+        }
+        if (value.astKind == ASTKind.FUNC_DECL) {
+            return ObtainsAliasTypeOfFuncDecl((value as FuncDecl).getOrThrow())
+        }
+        if (value.astKind == ASTKind.EXTEND_DECL) {
+            let extendedType = (value as ExtendDecl).getOrThrow().extendedType
+            return ObtainsAliasType(if (let Some(typeNode) <- extendedType) { Some(typeNode) } else { None })
+        }
+        return valueTy
     }
 
     public func SubstituteTypeAliasInTy(ty: Ty, needSubstituteGeneric!: Bool = false,
@@ -3230,13 +3330,11 @@ public class TypeManager {
             }
             let cfg = FuncTyConfig()
             cfg.isC = funcTy.isC
-            cfg.isClosureTy = funcTy.isClosureTy
             cfg.hasVariableLenArg = funcTy.hasVariableLenArg
-            cfg.noCast = funcTy.noCast
             return GetFunctionTy(params.toArray(), typeArgs[typeArgs.size - 1], cfg: cfg)
         }
-        if (let Some(tupleTy) <- (ty as TupleTy)) {
-            return GetTupleTy(typeArgs, isClosureTy: tupleTy.isClosureTy)
+        if (ty is TupleTy) {
+            return GetTupleTy(typeArgs)
         }
         if (let Some(arrayTy) <- (ty as ArrayTy)) {
             if (!typeArgs.isEmpty()) {
