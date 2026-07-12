@@ -14,48 +14,9 @@ private class AstDeclPair {
     }
 }
 
-private func AddAttrIf(target: MangleDecl, condition: Bool, attr: Attribute): Unit {
-    if (condition) {
-        target.attrs.add(attr)
-    }
-}
-
 private func AddParamAttrIf(target: MangleFuncParam, condition: Bool, attr: Attribute): Unit {
     if (condition) {
         target.attrs.add(attr)
-    }
-}
-
-private func CopyDeclAttributes(source: Decl, target: MangleDecl): Unit {
-    AddAttrIf(target, source.TestAttr(Attribute.GLOBAL), Attribute.GLOBAL)
-    AddAttrIf(target, source.TestAttr(Attribute.STATIC), Attribute.STATIC)
-    AddAttrIf(target, source.TestAttr(Attribute.PUBLIC), Attribute.PUBLIC)
-    AddAttrIf(target, source.TestAttr(Attribute.PRIVATE), Attribute.PRIVATE)
-    AddAttrIf(target, source.TestAttr(Attribute.PROTECTED), Attribute.PROTECTED)
-    AddAttrIf(target, source.TestAttr(Attribute.INTERNAL), Attribute.INTERNAL)
-    AddAttrIf(target, source.TestAttr(Attribute.NO_MANGLE), Attribute.NO_MANGLE)
-    AddAttrIf(target, source.TestAttr(Attribute.GENERIC), Attribute.GENERIC)
-    AddAttrIf(target, source.TestAttr(Attribute.GENERIC_INSTANTIATED), Attribute.GENERIC_INSTANTIATED)
-    AddAttrIf(target, source.TestAttr(Attribute.HAS_INITIAL), Attribute.HAS_INITIAL)
-    AddAttrIf(target, source.TestAttr(Attribute.CONSTRUCTOR), Attribute.CONSTRUCTOR)
-    AddAttrIf(target, source.TestAttr(Attribute.ENUM_CONSTRUCTOR), Attribute.ENUM_CONSTRUCTOR)
-    AddAttrIf(target, source.TestAttr(Attribute.MAIN_ENTRY), Attribute.MAIN_ENTRY)
-    AddAttrIf(target, source.TestAttr(Attribute.OPERATOR), Attribute.OPERATOR)
-    AddAttrIf(target, source.TestAttr(Attribute.DEFAULT), Attribute.DEFAULT)
-    AddAttrIf(target, source.TestAttr(Attribute.ABSTRACT), Attribute.ABSTRACT)
-    AddAttrIf(target, source.TestAttr(Attribute.COMMON), Attribute.COMMON)
-    AddAttrIf(target, source.TestAttr(Attribute.SPECIFIC), Attribute.SPECIFIC)
-    AddAttrIf(target, source.TestAttr(Attribute.FOR_TEST), Attribute.FOR_TEST)
-    for (modifier in source.modifiers) {
-        if (modifier.modifier == TokenKind.PUBLIC) {
-            AddAttrIf(target, true, Attribute.PUBLIC)
-        } else if (modifier.modifier == TokenKind.PRIVATE) {
-            AddAttrIf(target, true, Attribute.PRIVATE)
-        } else if (modifier.modifier == TokenKind.PROTECTED) {
-            AddAttrIf(target, true, Attribute.PROTECTED)
-        } else if (modifier.modifier == TokenKind.INTERNAL) {
-            AddAttrIf(target, true, Attribute.INTERNAL)
-        }
     }
 }
 
@@ -231,12 +192,18 @@ public class MangleAstAdapter {
         if (let Some(genericSource) <- source.genericDecl) {
             target.genericDecl = ConvertDecl(genericSource)
         }
-        CopyDeclAttributes(source, target)
-        if (let Some(generic) <- source.generic) {
-            target.generic = ConvertGeneric(generic)
+        target.attrs = { attr => source.TestAttr(attr) }
+        target.generic = { =>
+            if (let Some(generic) <- source.generic) {
+                return Some(ConvertGeneric(generic))
+            }
+            return None
         }
-        if (let Some(sourceTy) <- source.GetTy()) {
-            target.semaTy = ConvertTy(sourceTy)
+        target.semaTy = { =>
+            if (let Some(ty) <- source.GetTy()) {
+                return Some(ConvertTy(ty))
+            }
+            return None
         }
         FillDeclSubclassFields(source, target)
         for (memberSource in source.GetMemberDeclPtrs()) {
@@ -265,8 +232,11 @@ public class MangleAstAdapter {
         if (let Some(file) <- source.curFile) {
             target.curFile = ConvertFile(file)
         }
-        if (let Some(lambdaTy) <- source.GetTy()) {
-            target.semaTy = ConvertTy(lambdaTy)
+        target.semaTy = { =>
+            if (let Some(ty) <- source.GetTy()) {
+                return Some(ConvertTy(ty))
+            }
+            return None
         }
         if (let Some(body) <- source.funcBody) {
             target.funcBody = ConvertFuncBody(body)
@@ -571,8 +541,11 @@ public class MangleAstAdapter {
         if (let Some(retType) <- body.retType) {
             target.retType = ConvertTypeAnnotation(retType)
         }
-        if (let Some(generic) <- body.generic) {
-            target.generic = ConvertGeneric(generic)
+        target.generic = { =>
+            if (let Some(generic) <- body.generic) {
+                return Some(ConvertGeneric(generic))
+            }
+            return None
         }
         if (let Some(parentClassLike) <- body.parentClassLike) {
             target.parentClassLike = ConvertDecl(parentClassLike)
@@ -591,8 +564,11 @@ public class MangleAstAdapter {
         if (let Some(typeNode) <- param.typeNode) {
             target.typeAnnotation = ConvertTypeAnnotation(typeNode)
         }
-        if (let Some(paramTy) <- param.GetTy()) {
-            target.semaTy = ConvertTy(paramTy)
+        target.semaTy = { =>
+            if (let Some(ty) <- param.GetTy()) {
+                return Some(ConvertTy(ty))
+            }
+            return None
         }
         target.assignment = if (let Some(_) <- param.assignment) { true } else { false }
         target.isMemberParam = param.isMemberParam
@@ -745,19 +721,19 @@ public class MangleAstAdapter {
                 target.decl = ConvertDecl(decl)
             }
         } else if (let Some(classTy) <- (source as ClassTy)) {
-            if (let Some(decl) <- classTy.declPtr) {
+            if (let Some(decl) <- classTy.decl) {
                 target.decl = ConvertDecl(decl)
             }
         } else if (let Some(interfaceTy) <- (source as InterfaceTy)) {
-            if (let Some(decl) <- interfaceTy.declPtr) {
+            if (let Some(decl) <- interfaceTy.decl) {
                 target.decl = ConvertDecl(decl)
             }
         } else if (let Some(enumTy) <- (source as EnumTy)) {
-            if (let Some(decl) <- enumTy.declPtr) {
+            if (let Some(decl) <- enumTy.decl) {
                 target.decl = ConvertDecl(decl)
             }
         } else if (let Some(structTy) <- (source as StructTy)) {
-            if (let Some(decl) <- structTy.declPtr) {
+            if (let Some(decl) <- structTy.decl) {
                 target.decl = ConvertDecl(decl)
             }
         }

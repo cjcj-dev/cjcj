@@ -410,13 +410,13 @@ public class ASTMangler {
         let args = ArrayList<String>()
         if (decl.astKind == ASTKind.FUNC_DECL) {
             if (let Some(body) <- decl.funcBody) {
-                if (let Some(generic) <- body.generic) {
+                if (let Some(generic) <- body.generic()) {
                     for (arg in generic.typeParameters) {
                         args.add(arg.identifier)
                     }
                 }
             }
-        } else if (let Some(generic) <- decl.generic) {
+        } else if (let Some(generic) <- decl.generic()) {
             if (decl.astKind == ASTKind.EXTEND_DECL) {
                 for (arg in generic.typeParameters) {
                     args.add(arg.identifier)
@@ -477,7 +477,7 @@ public class ASTMangler {
             first = false
             mangled += item
         }
-        if (let Some(generic) <- decl.generic) {
+        if (let Some(generic) <- decl.generic()) {
             mangled += MangleGenericConstraints(generic)
         }
         mangled += MangleDeclAstKind(ASTKind.EXTEND_DECL)

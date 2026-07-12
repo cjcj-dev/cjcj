@@ -762,7 +762,7 @@ public open class BaseMangler {
                     if (let Some(outer) <- decl.outerDecl) {
                         if (outer.TestAnyAttr(Attribute.COMMON, Attribute.SPECIFIC) &&
                             outer.TestAttr(Attribute.GENERIC)) {
-                            if (let Some(genericsTy) <- decl.semaTy) {
+                            if (let Some(genericsTy) <- decl.semaTy()) {
                                 var found = false
                                 var reverseIndex: Int64 = genericsTypeStack.size - 1
                                 while (reverseIndex >= 0) {
@@ -1118,7 +1118,7 @@ public open class BaseMangler {
         isCollectGTy!: Bool = true): String {
         let args = ArrayList<MangleType>()
         var collectFuncGeneric = decl.astKind == ASTKind.FUNC_DECL
-        if (let Some(ty) <- decl.semaTy) {
+        if (let Some(ty) <- decl.semaTy()) {
             if (!ty.IsFunc()) {
                 collectFuncGeneric = false
                 for (arg in ty.typeArgs) {
@@ -1128,9 +1128,9 @@ public open class BaseMangler {
         }
         if (collectFuncGeneric) {
             let body = decl.funcBody.getOrThrow()
-            if (let Some(generic) <- body.generic) {
+            if (let Some(generic) <- body.generic()) {
                 for (arg in generic.typeParameters) {
-                    if (let Some(ty) <- arg.semaTy) {
+                    if (let Some(ty) <- arg.semaTy()) {
                         args.add(ty)
                     }
                 }
@@ -1216,7 +1216,7 @@ public open class BaseMangler {
             }
             var mangled = ""
             for (param in body.params) {
-                if (let Some(ty) <- param.semaTy) {
+                if (let Some(ty) <- param.semaTy()) {
                     if (ty.kind != TypeKind.TYPE_INITIAL) {
                         mangled += MangleSemaType(ty, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
                     }
@@ -1752,7 +1752,7 @@ public open class BaseMangler {
                 } else {
                     throw IllegalArgumentException("Generic parameter has no outer declaration: " + gpd.identifier)
                 }
-                let ty = if (let Some(value) <- gpd.semaTy) {
+                let ty = if (let Some(value) <- gpd.semaTy()) {
                     value
                 } else {
                     throw IllegalArgumentException("Generic parameter has no semantic type: " + gpd.identifier)

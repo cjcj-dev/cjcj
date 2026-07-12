@@ -99,7 +99,7 @@ public class MangleGeneric {
 public class MangleFuncParam {
     public var identifier: String = ""
     public var typeAnnotation: Option<MangleTypeAnnotation> = None
-    public var semaTy: Option<MangleType> = None
+    public var semaTy: () -> Option<MangleType> = { => None }
     public var assignment: Bool = false
     public var isMemberParam: Bool = false
     public var isNamedParam: Bool = false
@@ -128,7 +128,7 @@ public class MangleFuncParam {
 public class MangleFuncBody {
     public let params: ArrayList<MangleFuncParam> = ArrayList<MangleFuncParam>()
     public var retType: Option<MangleTypeAnnotation> = None
-    public var generic: Option<MangleGeneric> = None
+    public var generic: () -> Option<MangleGeneric> = { => None }
     public var parentClassLike: Option<MangleDecl> = None
     public var parentStruct: Option<MangleDecl> = None
     public var parentEnum: Option<MangleDecl> = None
@@ -159,8 +159,8 @@ public class MangleDecl {
     public var outerDecl: Option<MangleDecl> = None
     public var genericDecl: Option<MangleDecl> = None
     public var linkage: () -> Linkage = { => Linkage.EXTERNAL }
-    public var generic: Option<MangleGeneric> = None
-    public var semaTy: Option<MangleType> = None
+    public var generic: () -> Option<MangleGeneric> = { => None }
+    public var semaTy: () -> Option<MangleType> = { => None }
     public var typeAnnotation: Option<MangleTypeAnnotation> = None
     public var funcBody: Option<MangleFuncBody> = None
     public var ownerFunc: Option<MangleDecl> = None
@@ -171,7 +171,7 @@ public class MangleDecl {
     public let members: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
     public let getters: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
     public let setters: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
-    public let attrs: ArrayList<Attribute> = ArrayList<Attribute>()
+    public var attrs: (Attribute) -> Bool = { _ => false }
 
     public init(astKind: ASTKind) {
         this.astKind = astKind
@@ -184,12 +184,7 @@ public class MangleDecl {
     }
 
     public func TestAttr(attr: Attribute): Bool {
-        for (item in attrs) {
-            if (item == attr) {
-                return true
-            }
-        }
-        return false
+        return attrs(attr)
     }
 
     public func TestAnyAttr(first: Attribute, second: Attribute): Bool {
@@ -224,12 +219,12 @@ public class MangleDecl {
 
     public func GetGeneric(): Option<MangleGeneric> {
         if (let Some(body) <- funcBody) {
-            if (let Some(value) <- body.generic) {
+            if (let Some(value) <- body.generic()) {
                 return value
             }
             if (let Some(parentEnum) <- body.parentEnum) {
                 if (TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
-                    return parentEnum.generic
+                    return parentEnum.generic()
                 }
             }
             return None
@@ -237,11 +232,11 @@ public class MangleDecl {
         if (astKind == ASTKind.VAR_DECL) {
             if (let Some(outer) <- outerDecl) {
                 if (outer.astKind == ASTKind.ENUM_DECL) {
-                    return outer.generic
+                    return outer.generic()
                 }
             }
         }
-        return generic
+        return generic()
     }
 
     public func GetMemberDecls(): ArrayList<MangleDecl> {
