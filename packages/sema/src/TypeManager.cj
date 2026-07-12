@@ -3331,13 +3331,11 @@ public class TypeManager {
             }
             let cfg = FuncTyConfig()
             cfg.isC = funcTy.isC
-            cfg.isClosureTy = funcTy.isClosureTy
             cfg.hasVariableLenArg = funcTy.hasVariableLenArg
-            cfg.noCast = funcTy.noCast
             return GetFunctionTy(params.toArray(), typeArgs[typeArgs.size - 1], cfg: cfg)
         }
-        if (let Some(tupleTy) <- (ty as TupleTy)) {
-            return GetTupleTy(typeArgs, isClosureTy: tupleTy.isClosureTy)
+        if (ty is TupleTy) {
+            return GetTupleTy(typeArgs)
         }
         if (let Some(arrayTy) <- (ty as ArrayTy)) {
             if (!typeArgs.isEmpty()) {
