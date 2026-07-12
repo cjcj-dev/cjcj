@@ -1356,11 +1356,15 @@ public class Translator {
     }
 
     public func Visit(expr: AstUnaryExpr): Option<Value> {
-        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let astTy = RequireAstTy(expr)
+        let resultTy = chirTy.TranslateType(astTy)
         let kind = if (expr.op == AstTokenKind.NOT) {
-            if (RequireAstTy(expr).IsBoolean()) { ExprKind.NOT } else { ExprKind.BITNOT }
+            if (astTy.IsBoolean()) { ExprKind.NOT } else { ExprKind.BITNOT }
+        } else if (expr.op == AstTokenKind.SUB) {
+            ExprKind.NEG
         } else {
-            ToCHIRUnaryOp(expr.op)
+            CJC_ASSERT(false)
+            ExprKind.INVALID
         }
         let operandExpr = RequireExpr(expr.expr, "unary operand")
         let operand = TranslateExprArg(operandExpr)
@@ -8953,8 +8957,9 @@ public class Translator {
             case AstTokenKind.SUB => ExprKind.NEG
             case AstTokenKind.NOT => ExprKind.NOT
             case AstTokenKind.BITNOT => ExprKind.BITNOT
-            case _ => throw IllegalArgumentException(
-                "not yet ported in faithful AST2CHIR unary op: ${AstTokenKindValue(op)}")
+            case _ =>
+                CJC_ASSERT(false)
+                ExprKind.INVALID
         }
     }
 
