@@ -8942,8 +8942,9 @@ public class Translator {
             case AstTokenKind.NOTEQ => ExprKind.NOTEQUAL
             case AstTokenKind.AND => ExprKind.AND
             case AstTokenKind.OR => ExprKind.OR
-            case _ => throw IllegalArgumentException(
-                "not yet ported in faithful AST2CHIR binary op: ${AstTokenKindValue(op)}")
+            case _ =>
+                CJC_ASSERT(false)
+                ExprKind.ADD
         }
     }
 
