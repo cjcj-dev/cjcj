@@ -139,7 +139,12 @@ private func ChkOpOverloadForConstPattern(typeManager: TypeManager, ctx: ASTCont
     baseExpr.end = pattern.end
     baseExpr.SetTy(target)
     ctx.SkipSynForCorrectTy(baseExpr)
-    let callBase = CreateMemberAccess(baseExpr, "==")
+    // C++ TypeCheckPattern.cpp:285-295 constructs a fresh unresolved MemberAccess. CreateMemberAccess
+    // eagerly installs a nominal member target and would bypass InferMemberAccess before its overload
+    // target list is populated.
+    let callBase = MemberAccess()
+    callBase.baseExpr = Some(baseExpr)
+    callBase.field = SrcIdentifier("==")
     ctx.RemoveTypeCheckCache(callBase)
     callBase.scopeName = pattern.scopeName
     let arg = CreateFuncArg(clonedLiteral.getOrThrow())
@@ -151,11 +156,7 @@ private func ChkOpOverloadForConstPattern(typeManager: TypeManager, ctx: ASTCont
     callExpr.scopeName = pattern.scopeName
     callExpr.scopeLevel = pattern.scopeLevel
     AddCurFile(callExpr, file: pattern.curFile)
-    let ok = match (exprChecker) {
-        case Some(checker) => checker(TypeManager.GetBoolTy(), callExpr)
-        case None => ChkCallExpr(typeManager, None, Some(TypeManager.GetBoolTy()), callExpr,
-            ctx: Some(ctx), desugarCallExpr: desugarCallExpr)
-    }
+    let ok = exprChecker.getOrThrow()(TypeManager.GetBoolTy(), callExpr)
     if (ok) {
         pattern.operatorCallExpr = callExpr
         return true

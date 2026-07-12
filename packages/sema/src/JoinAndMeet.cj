@@ -326,33 +326,34 @@ private func BatchJoin(tm: TypeManager, tys: TySet, ignoredTyVars: TySet,
         InsertRealJoinTy(tm, realTys, ty, ignoredTyVars)
     }
 
-    let savedConstraints = tm.cloneTypeManagerConstraint()
-    let direct = FindSmallestTy(tm, realTys, TyOrder.SUPERTYPE)
-    if (!direct.IsInvalid()) {
-        return direct
-    }
+    try (cs = tm.constraints.CommitScope()) {
+        let direct = FindSmallestTy(tm, realTys, TyOrder.SUPERTYPE)
+        if (!direct.IsInvalid()) {
+            return direct
+        }
 
-    tm.restoreTypeManagerConstraint(savedConstraints)
-    if (let Some(funcTyJoin) <- JoinOrMeetFuncTy(tm, JoinMeetMode.JOIN, realTys, ignoredTyVars, curFile)) {
-        return funcTyJoin
-    }
-    tm.restoreTypeManagerConstraint(savedConstraints)
-    if (let Some(tupleTyJoin) <- JoinOrMeetTupleTy(tm, JoinMeetMode.JOIN, realTys, ignoredTyVars, curFile)) {
-        return tupleTyJoin
-    }
+        tm.constraints.Reset()
+        if (let Some(funcTyJoin) <- JoinOrMeetFuncTy(tm, JoinMeetMode.JOIN, realTys, ignoredTyVars, curFile)) {
+            return funcTyJoin
+        }
+        tm.constraints.Reset()
+        if (let Some(tupleTyJoin) <- JoinOrMeetTupleTy(tm, JoinMeetMode.JOIN, realTys, ignoredTyVars, curFile)) {
+            return tupleTyJoin
+        }
 
-    tm.restoreTypeManagerConstraint(savedConstraints)
-    let common = FilterAccessibleTys(tm, tm.GetAllCommonSuperTys(realTys), curFile)
-    if (common.values.isEmpty()) {
-        return tm.GetAnyTy()
-    }
-    let ret = FindSmallestTy(tm, common, TyOrder.SUBTYPE)
-    tm.restoreTypeManagerConstraint(savedConstraints)
-    if (ret.IsInvalid() || !LessThanAll(tm, ret, realTys, TyOrder.SUPERTYPE)) {
-        tm.restoreTypeManagerConstraint(savedConstraints)
+        tm.constraints.Reset()
+        let common = FilterAccessibleTys(tm, tm.GetAllCommonSuperTys(realTys), curFile)
+        if (common.values.isEmpty()) {
+            return tm.GetAnyTy()
+        }
+        let ret = FindSmallestTy(tm, common, TyOrder.SUBTYPE)
+        tm.constraints.Reset()
+        if (ret.IsInvalid() || !LessThanAll(tm, ret, realTys, TyOrder.SUPERTYPE)) {
+            tm.constraints.Reset()
+        }
         return ret
     }
-    return ret
+    return TypeManager.GetInvalidTy()
 }
 
 private func BatchMeet(tm: TypeManager, tys: TySet, ignoredTyVars: TySet,
@@ -362,22 +363,24 @@ private func BatchMeet(tm: TypeManager, tys: TySet, ignoredTyVars: TySet,
         InsertRealMeetTy(tm, realTys, ty, ignoredTyVars, curFile)
     }
 
-    let savedConstraints = tm.cloneTypeManagerConstraint()
-    let direct = FindSmallestTy(tm, realTys, TyOrder.SUBTYPE)
-    if (!direct.IsInvalid()) {
-        return direct
-    }
+    try (cs = tm.constraints.CommitScope()) {
+        let direct = FindSmallestTy(tm, realTys, TyOrder.SUBTYPE)
+        if (!direct.IsInvalid()) {
+            return direct
+        }
 
-    tm.restoreTypeManagerConstraint(savedConstraints)
-    if (let Some(funcTyMeet) <- JoinOrMeetFuncTy(tm, JoinMeetMode.MEET, realTys, ignoredTyVars, curFile)) {
-        return funcTyMeet
-    }
-    tm.restoreTypeManagerConstraint(savedConstraints)
-    if (let Some(tupleTyMeet) <- JoinOrMeetTupleTy(tm, JoinMeetMode.MEET, realTys, ignoredTyVars, curFile)) {
-        return tupleTyMeet
-    }
+        tm.constraints.Reset()
+        if (let Some(funcTyMeet) <- JoinOrMeetFuncTy(tm, JoinMeetMode.MEET, realTys, ignoredTyVars, curFile)) {
+            return funcTyMeet
+        }
+        tm.constraints.Reset()
+        if (let Some(tupleTyMeet) <- JoinOrMeetTupleTy(tm, JoinMeetMode.MEET, realTys, ignoredTyVars, curFile)) {
+            return tupleTyMeet
+        }
 
-    tm.restoreTypeManagerConstraint(savedConstraints)
+        tm.constraints.Reset()
+        return TypeManager.GetInvalidTy()
+    }
     return TypeManager.GetInvalidTy()
 }
 

@@ -1187,11 +1187,15 @@ public class TypeManager {
     }
 
     public func IsTyEqual(subTy: Ty, baseTy: Ty): Bool {
-        let savedConstraints = cloneTypeManagerConstraint()
-        let result = IsSubtype(subTy, baseTy, implicitBoxed: false, allowOptionBox: false) &&
-            IsSubtype(baseTy, subTy, implicitBoxed: false, allowOptionBox: false)
-        restoreTypeManagerConstraint(savedConstraints)
-        return result
+        try (cs = constraints.CommitScope()) {
+            if (IsSubtype(subTy, baseTy, implicitBoxed: false, allowOptionBox: false) &&
+                IsSubtype(baseTy, subTy, implicitBoxed: false, allowOptionBox: false)) {
+                return true
+            }
+            constraints.Reset()
+            return false
+        }
+        return false
     }
 
     public func IsPlaceholderEqual(leaf: Ty, root: Ty): Bool {
@@ -1637,6 +1641,28 @@ public class TypeManager {
     public func GenerateGenericMapping(m: SubstPack, baseType: Ty): Unit {
         let visited = HashSet<Int64>()
         generateGenericMappingVisit(m, baseType, visited, true)
+    }
+
+    public func GenerateTypeMappingForUpperBounds(m: SubstPack, ma: MemberAccess, target: Decl): Unit {
+        for ((foundTarget, upperBounds) in ma.foundUpperBoundMap) {
+            if (foundTarget == target) {
+                for (upperBound in upperBounds) {
+                    GenerateGenericMapping(m, upperBound)
+                }
+                return
+            }
+        }
+    }
+
+    public func GenerateTypeMappingForUpperBounds(m: MultiTypeSubst, ma: MemberAccess, target: Decl): Unit {
+        for ((foundTarget, upperBounds) in ma.foundUpperBoundMap) {
+            if (foundTarget == target) {
+                for (upperBound in upperBounds) {
+                    GenerateGenericMapping(m, upperBound)
+                }
+                return
+            }
+        }
     }
 
     public func GenerateGenericMappingFromGeneric(parentDecl: Decl, childDecl: Decl): TypeSubst {
@@ -2806,33 +2832,6 @@ public class TypeManager {
         if (let Some(rootMap) <- subtypeCache.get(leaf.objectId)) {
             if (let Some(flagMap) <- rootMap.get(root.objectId)) {
                 flagMap.remove(subtypeCacheFlagKey(implicitBoxed, allowOptionBox))
-            }
-        }
-    }
-
-    public func cloneTypeManagerConstraint(): Constraint {
-        let out = Constraint()
-        copyConstraintEntries(out, constraints)
-        return out
-    }
-
-    public func restoreTypeManagerConstraint(saved: Constraint): Unit {
-        constraints.Clear()
-        copyConstraintEntries(constraints, saved)
-    }
-
-    private func copyConstraintEntries(target: Constraint, source: Constraint): Unit {
-        for (entry in source.entries) {
-            let bounds = target.GetOrCreate(entry.tyVar)
-            bounds.lbs.AddAll(entry.bounds.lbs)
-            bounds.ubs.AddAll(entry.bounds.ubs)
-            bounds.sum.AddAll(entry.bounds.sum)
-            bounds.eq.AddAll(entry.bounds.eq)
-            for (blameEntry in entry.bounds.lb2Blames) {
-                bounds.lb2Blames.add(TyBlameEntry(blameEntry.ty, blames: blameEntry.blames.Clone()))
-            }
-            for (blameEntry in entry.bounds.ub2Blames) {
-                bounds.ub2Blames.add(TyBlameEntry(blameEntry.ty, blames: blameEntry.blames.Clone()))
             }
         }
     }
