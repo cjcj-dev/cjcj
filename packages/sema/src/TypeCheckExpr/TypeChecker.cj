@@ -2992,7 +2992,7 @@ public class TypeChecker {
                         let _ = Synthesize(ctx, initializer)
                     }
                 } else {
-                    let _ = Synthesize(ctx, initializer)
+                    let _ = SynthesizeAndReplaceIdealTy(ctx, SynPos.EXPR_ARG, initializer)
                     if (!Ty.IsTyCorrect(initializer.GetTy()) && !IsGlobalOrMember(vd)) {
                         vd.DisableAttr(Attribute.IS_CHECK_VISITED)
                     }
@@ -3171,7 +3171,7 @@ public class TypeChecker {
                     let _ = Synthesize(ctx, initializer)
                 }
             } else {
-                let _ = Synthesize(ctx, initializer)
+                let _ = SynthesizeAndReplaceIdealTy(ctx, SynPos.EXPR_ARG, initializer)
             }
         }
         let declTy = TypeCheckDeclSynchronizeTypeAndInitializer(impl.typeManager, vpd, diag: impl.diag,
