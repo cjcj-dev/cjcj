@@ -74,6 +74,44 @@ public class Collector {
             } else if (let Some(mainDecl) <- (node as MainDecl)) {
                 collector.CollectMainDecl(ctx, mainDecl, walkerBox.value.getOrThrow(), buildTrie: buildTrie)
                 return VisitAction.SKIP_CHILDREN
+            } else if (let Some(extendDecl) <- (node as ExtendDecl)) {
+                let currentWalker = walkerBox.value.getOrThrow()
+                for (annotation in extendDecl.annotations) {
+                    if (currentWalker.WalkNode(annotation) == VisitAction.STOP_NOW) {
+                        return VisitAction.STOP_NOW
+                    }
+                }
+                collector.AddSymbol(ctx, extendDecl, buildTrie: buildTrie)
+                if (let Some(generic) <- extendDecl.generic) {
+                    for (typeParameter in generic.typeParameters) {
+                        typeParameter.outerDecl = Some(extendDecl)
+                        if (currentWalker.WalkNode(typeParameter) == VisitAction.STOP_NOW) {
+                            return VisitAction.STOP_NOW
+                        }
+                    }
+                    for (constraint in generic.genericConstraints) {
+                        if (currentWalker.WalkNode(constraint) == VisitAction.STOP_NOW) {
+                            return VisitAction.STOP_NOW
+                        }
+                    }
+                }
+                if (let Some(extendedType) <- extendDecl.extendedType) {
+                    if (currentWalker.WalkNode(extendedType) == VisitAction.STOP_NOW) {
+                        return VisitAction.STOP_NOW
+                    }
+                }
+                for (inheritedType in extendDecl.inheritedTypes) {
+                    if (currentWalker.WalkNode(inheritedType) == VisitAction.STOP_NOW) {
+                        return VisitAction.STOP_NOW
+                    }
+                }
+                collector.AddSymbol(ctx, extendDecl.bodyScope.getOrThrow(), buildTrie: buildTrie)
+                for (member in extendDecl.members) {
+                    if (currentWalker.WalkNode(member) == VisitAction.STOP_NOW) {
+                        return VisitAction.STOP_NOW
+                    }
+                }
+                return VisitAction.SKIP_CHILDREN
             } else if (let Some(macroDecl) <- (node as MacroDecl)) {
                 // Faithful port of C++ Collector::BuildSymbolTable MACRO_DECL case
                 // (src/Sema/Collector.cpp:770-776). DesugarMacroDecl rewrites a macro
@@ -208,10 +246,6 @@ public class Collector {
         ctx.invertedIndex.Index(symbol, withTrie: buildTrie)
         if (let Some(enumDecl) <- (node as EnumDecl)) {
             if (let Some(bodyScope) <- enumDecl.bodyScope) {
-                AddSymbol(ctx, bodyScope, buildTrie: buildTrie)
-            }
-        } else if (let Some(extendDecl) <- (node as ExtendDecl)) {
-            if (let Some(bodyScope) <- extendDecl.bodyScope) {
                 AddSymbol(ctx, bodyScope, buildTrie: buildTrie)
             }
         }

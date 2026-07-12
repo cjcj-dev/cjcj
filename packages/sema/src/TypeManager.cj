@@ -1339,26 +1339,6 @@ public class TypeManager {
         return false
     }
 
-    public func GetDeclTypeParams(decl: Decl): ArrayList<Ty> {
-        let out = ArrayList<Ty>()
-        if (let Some(generic) <- decl.GetGeneric()) {
-            for (param in generic.typeParameters) {
-                if (let Some(paramTy) <- param.GetTy()) {
-                    out.add(paramTy)
-                }
-            }
-        } else if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-            if (let Some(extendedType) <- extendDecl.extendedType) {
-                if (let Some(extendedTy) <- extendedType.GetTy()) {
-                    for (typeArg in extendedTy.typeArgs) {
-                        out.add(typeArg)
-                    }
-                }
-            }
-        }
-        return out
-    }
-
     private func typeManagerTyKey(ty: Ty): String {
         if (let Some(genericTy) <- (ty as GenericsTy)) {
             if (let Some(genericDecl) <- genericTy.decl) {
@@ -3806,22 +3786,6 @@ public class TypeManager {
                 idx++
             }
         }
-    }
-
-    private func GenerateTypeMapping(decl: Decl, typeArgs: ArrayList<Ty>): TypeSubst {
-        let out = TypeSubst()
-        if (let Some(generic) <- decl.GetGeneric()) {
-            var idx: Int64 = 0
-            while (idx < generic.typeParameters.size && idx < typeArgs.size) {
-                if (let Some(paramTy) <- generic.typeParameters[idx].GetTy()) {
-                    if (let Some(genericTy) <- (paramTy as GenericsTy)) {
-                        out.Put(genericTy, typeArgs[idx])
-                    }
-                }
-                idx++
-            }
-        }
-        return out
     }
 
     private func CheckGenericConstraints(decl: Decl, instantiateMap: TypeSubst): Bool {
