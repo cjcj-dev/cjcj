@@ -2337,21 +2337,14 @@ private class CjoSignatureMaterializer {
     }
 
     private func PostLoadFlatReference(expr: Expr): Unit {
-        if (let Some(call) <- (expr as CallExpr)) {
-            let base = call.baseFunc.getOrThrow()
-            if (let Some(target) <- base.GetTarget()) {
-                call.resolvedFunction = target as FuncDecl
-            }
+        if (let Some(callExpr) <- (expr as CallExpr)) {
+            callExpr.resolvedFunction = if (let Some(target) <- callExpr.baseFunc.getOrThrow().GetTarget()) {
+                target as FuncDecl
+            } else { None }
         } else if (let Some(arrayExpr) <- (expr as ArrayExpr)) {
-            for (arg in arrayExpr.args) {
-                let argExpr = arg.expr.getOrThrow()
-                arg.SetTy(argExpr.GetTy() ?? FaithfulSemaTypeManager.GetInvalidTy())
-            }
+            for (arg in arrayExpr.args) { arg.SetTy(arg.expr.getOrThrow().GetTy().getOrThrow()) }
         } else if (let Some(pointerExpr) <- (expr as PointerExpr)) {
-            if (let Some(arg) <- pointerExpr.arg) {
-                let argExpr = arg.expr.getOrThrow()
-                arg.SetTy(argExpr.GetTy() ?? FaithfulSemaTypeManager.GetInvalidTy())
-            }
+            if (let Some(arg) <- pointerExpr.arg) { arg.SetTy(arg.expr.getOrThrow().GetTy().getOrThrow()) }
         }
     }
 
@@ -2551,6 +2544,7 @@ private class CjoSignatureMaterializer {
             }
             idx++
         }
+        for ((_, expr) in allLoadedExprs) { PostLoadFlatReference(expr) }
         FinalizeSourceImportedDecls()
     }
 
