@@ -474,6 +474,27 @@ public func DesugarOperatorOverloadExpr(expr: UnaryExpr): Unit {
     }
 }
 
+public func DesugarOperatorOverloadExpr(ctx: ASTContext, expr: UnaryExpr): Unit {
+    if (expr.desugarExpr.isSome()) {
+        return
+    }
+    let callExpr = CallExpr()
+    ctx.RemoveTypeCheckCache(callExpr)
+    let callBase = MemberAccess()
+    CopyBasicInfo(expr, callBase)
+    ctx.RemoveTypeCheckCache(callBase)
+    callBase.baseExpr = expr.expr
+    callBase.field = SrcIdentifier(TokenKindLiteral(expr.op))
+    callBase.field.SetPos(expr.operatorPos, expr.operatorPos + TokenKindLiteral(expr.op).size)
+    callExpr.baseFunc = callBase
+    callExpr.sourceExpr = expr
+    callExpr.begin = expr.begin
+    callExpr.end = expr.end
+    CopyUnsafeAttr(expr, callExpr)
+    expr.desugarExpr = callExpr
+    AddCurFile(expr, file: expr.curFile)
+}
+
 public func DesugarOperatorOverloadExpr(ctx: ASTContext, expr: SubscriptExpr): Unit {
     if (let Some(_) <- expr.desugarExpr) {
         return

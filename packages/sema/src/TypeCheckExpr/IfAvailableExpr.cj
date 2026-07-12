@@ -88,43 +88,39 @@ private func CheckIfAvailableArg(iae: IfAvailableExpr, desugaredIf: IfExpr): Boo
     return false
 }
 
-public func SynIfAvailableExpr(typeManager: TypeManager, iae: IfAvailableExpr,
-    diag: BasicDiagnosticEngine): Ty {
-    if (let Some(desugar) <- iae.desugarExpr) {
-        if (let Some(desugaredIf) <- (desugar as IfExpr)) {
-            var ok = CheckIfAvailableArg(iae, desugaredIf)
-            let lambdaTy = typeManager.GetFunctionTy(Array<Ty>(), TcUnitTy())
-            if (let Some(lambda1) <- iae.GetLambda1()) {
-                ok = ChkLamExpr(typeManager, lambdaTy, lambda1) && ok
-            } else {
-                ok = false
-            }
-            if (let Some(lambda2) <- iae.GetLambda2()) {
-                ok = ChkLamExpr(typeManager, lambdaTy, lambda2) && ok
-            } else {
-                ok = false
-            }
-            let ifTy = SynIfExpr(typeManager, desugaredIf, diag)
-            ok = Ty.IsTyCorrect(ifTy) && ok
-            if (ok) {
-                iae.SetTy(ifTy)
-                return ifTy
+extend TypeChecker {
+    public func SynIfAvailableExpr(ctx: ASTContext, iae: IfAvailableExpr): Ty {
+        if (let Some(desugar) <- iae.desugarExpr) {
+            if (let Some(desugaredIf) <- (desugar as IfExpr)) {
+                var ok = CheckIfAvailableArg(iae, desugaredIf)
+                let lambdaTy = impl.typeManager.GetFunctionTy(Array<Ty>(), TcUnitTy())
+                if (let Some(lambda1) <- iae.GetLambda1()) {
+                    ok = Check(ctx, lambdaTy, lambda1) && ok
+                } else {
+                    ok = false
+                }
+                if (let Some(lambda2) <- iae.GetLambda2()) {
+                    ok = Check(ctx, lambdaTy, lambda2) && ok
+                } else {
+                    ok = false
+                }
+                let ifTy = SynIfExpr(CheckerContext(ctx, SynPos.EXPR_ARG), desugaredIf)
+                ok = Ty.IsTyCorrect(ifTy) && ok
+                if (ok) {
+                    iae.SetTy(ifTy)
+                    return ifTy
+                }
             }
         }
+        return IfAvailableInvalid(iae)
     }
-    return IfAvailableInvalid(iae)
-}
 
-public func ChkIfAvailableExpr(typeManager: TypeManager, target: Ty, iae: IfAvailableExpr,
-    diag: BasicDiagnosticEngine): Bool {
-    let actualTy = SynIfAvailableExpr(typeManager, iae, diag)
-    if (Ty.IsTyCorrect(actualTy) &&
-        typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
-        return true
+    public func ChkIfAvailableExpr(ctx: ASTContext, target: Ty, iae: IfAvailableExpr): Bool {
+        let actualTy = SynIfAvailableExpr(ctx, iae)
+        if (Ty.IsTyCorrect(actualTy) && impl.typeManager.IsSubtype(actualTy, target)) {
+            return true
+        }
+        let _ = IfAvailableInvalid(iae)
+        return false
     }
-    let _ = IfAvailableInvalid(iae)
-    return false
-}
-
-extend TypeChecker {
 }

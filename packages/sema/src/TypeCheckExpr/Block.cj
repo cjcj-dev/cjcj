@@ -43,103 +43,86 @@ private func SynthesizeAndReplaceIdealTy(typeManager: TypeManager, pos: SynPos, 
     return Ty.IsTyCorrect(node.GetTy()) && ReplaceIdealTy(typeManager, node, diag: diag)
 }
 
-public func SynBlock(typeManager: TypeManager, b: Block, pos!: SynPos = SynPos.NONE,
-    synthesizer!: Option<(SynPos, Node) -> Ty> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
-    if (b.body.isEmpty()) {
-        let unitTy = UnitTy()
-        b.SetTy(unitTy)
-        return unitTy
+extend TypeChecker {
+    public func SynthesizeAndReplaceIdealTy(ctx: CheckerContext, node: Node): Bool {
+        var valid = false
+        try (ds = DiagSuppressor(impl.diag)) {
+            valid = Ty.IsTyCorrect(SynthesizeNode(ctx.Ctx(), ctx.SynthPos(), node)) &&
+                ReplaceIdealTy(impl.typeManager, node, diag: impl.diag) && !ds.HasError()
+            ds.ReportDiag()
+        }
+        return valid
     }
-    var existInvalid = false
-    for (idx in 0..b.body.size) {
-        let node = b.body[idx]
-        let exprPos = if (idx == b.body.size - 1 && pos != SynPos.UNUSED) {
-            SynPos.IMPLICIT_RETURN
+
+    public func SynBlock(ctx: CheckerContext, b: Block): Ty {
+        if (b.body.isEmpty()) {
+            b.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+            return b.GetTy().getOrThrow()
+        }
+        var existInvalid = false
+        for (idx in 0..b.body.size) {
+            let exprPos = if (idx == b.body.size - 1 && ctx.SynthPos() != SynPos.UNUSED) {
+                SynPos.IMPLICIT_RETURN
+            } else { SynPos.UNUSED }
+            existInvalid = !SynthesizeAndReplaceIdealTy(ctx.With(exprPos), b.body[idx]) || existInvalid
+        }
+        let lastNode = b.body[b.body.size - 1]
+        if (existInvalid) {
+            b.SetTy(TypeManager.GetInvalidTy())
+        } else if (lastNode.IsDecl()) {
+            b.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
         } else {
-            SynPos.UNUSED
+            b.SetTy(lastNode.GetTy().getOrThrow())
         }
-        if (!SynthesizeAndReplaceIdealTy(typeManager, exprPos, node, synthesizer, diag)) {
-            existInvalid = true
-        }
+        return b.GetTy().getOrThrow()
     }
-    if (existInvalid) {
-        return InvalidBlock(b)
-    }
-    if (let Some(lastNode) <- b.GetLastExprOrDecl()) {
-        if (lastNode.IsDecl()) {
-            let unitTy = UnitTy()
+
+    public func ChkBlock(ctx: ASTContext, target: Ty, b: Block): Bool {
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        if (b.body.isEmpty()) {
             b.SetTy(unitTy)
-            return unitTy
+            let ret = impl.typeManager.IsSubtype(b.GetTy().getOrThrow(), target)
+            if (!ret && b.TestAttr(Attribute.UNSAFE)) {
+                if (let Some(diag) <- impl.diag) { DiagMismatchedTypes(diag, b, target) }
+            }
+            return ret
         }
-        if (let Some(lastTy) <- lastNode.GetTy()) {
-            b.SetTy(lastTy)
-            return lastTy
-        }
-    }
-    return InvalidBlock(b)
-}
-
-public func ChkBlock(typeManager: TypeManager, target: Ty, b: Block,
-    synthesizer!: Option<(SynPos, Node) -> Ty> = None, checker!: Option<(Ty, Expr) -> Bool> = None,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
-    let unitTy = UnitTy()
-    if (b.body.isEmpty()) {
-        b.SetTy(unitTy)
-        let ret = typeManager.IsSubtype(unitTy, target)
-        if (!ret && b.TestAttr(Attribute.UNSAFE)) {
-            if (let Some(diagValue) <- diag) {
-                let builder = DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_mismatched_types, b,
-                    arguments: [target.String(), unitTy.String()])
-                builder.Emit()
+        var isWellTyped = true
+        if (b.body.size > 1) {
+            for (idx in 0..b.body.size - 1) {
+                isWellTyped = SynthesizeAndReplaceIdealTy(
+                    CheckerContext(ctx, SynPos.UNUSED), b.body[idx]) && isWellTyped
             }
         }
-        return ret
-    }
-
-    var isWellTyped = true
-    if (b.body.size > 1) {
-        for (idx in 0..b.body.size - 1) {
-            if (!SynthesizeAndReplaceIdealTy(typeManager, SynPos.UNUSED, b.body[idx], synthesizer, diag)) {
-                isWellTyped = false
+        var lastNode = b.body[b.body.size - 1]
+        if (!b.TestAttr(Attribute.COMPILER_ADD) && lastNode.TestAttr(Attribute.COMPILER_ADD) &&
+            lastNode.astKind == ASTKind.RETURN_EXPR) {
+            if ((let Some(returnExpr) <- (lastNode as ReturnExpr)) && (let Some(innerExpr) <- returnExpr.expr)) {
+                lastNode = innerExpr
             }
         }
-    }
-
-    if (let Some(lastNode) <- LastNodeForCheck(b)) {
         if (lastNode.IsDecl()) {
-            let typeMatched = typeManager.IsSubtype(unitTy, target)
-            isWellTyped = SynthesizeAndReplaceIdealTy(typeManager, SynPos.IMPLICIT_RETURN, lastNode, synthesizer, diag) &&
-                typeMatched && isWellTyped
+            let typeMatched = impl.typeManager.IsSubtype(unitTy, target)
+            isWellTyped = SynthesizeAndReplaceIdealTy(
+                CheckerContext(ctx, SynPos.IMPLICIT_RETURN), lastNode) && typeMatched && isWellTyped
             if (isWellTyped) {
                 b.SetTy(unitTy)
                 return true
             }
+            b.SetTy(TypeManager.GetInvalidTy())
             if (!typeMatched) {
-                if (let Some(diagValue2) <- diag) {
-                    DiagMismatchedTypesWithFoundTy(diagValue2, lastNode, target, unitTy,
+                if (let Some(diag2) <- impl.diag) {
+                    DiagMismatchedTypesWithFoundTy(diag2, lastNode, target, unitTy,
                         note: "definitions and declarations are always of type 'Unit'")
                 }
             }
-            let _ = InvalidBlock(b)
             return false
         }
-        if (let Some(lastExpr) <- (lastNode as Expr)) {
-            let checked = if (let Some(check) <- checker) {
-                check(target, lastExpr)
-            } else {
-                ChkExprShallow(typeManager, target, lastExpr, diag: diag)
-            }
-            if (isWellTyped && checked) {
-                if (let Some(lastTy) <- lastExpr.GetTy()) {
-                    b.SetTy(lastTy)
-                    return true
-                }
-            }
+        if ((let Some(lastExpr) <- (lastNode as Expr)) && Check(ctx, target, lastExpr) && isWellTyped) {
+            b.SetTy(lastExpr.GetTy().getOrThrow())
+            return true
         }
+        b.SetTy(TypeManager.GetInvalidTy())
+        return false
     }
-    let _ = InvalidBlock(b)
-    return false
-}
-
-extend TypeChecker {
 }
