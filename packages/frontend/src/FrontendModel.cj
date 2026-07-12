@@ -853,7 +853,9 @@ private func UpdateType(astType: Option<Type>, loadedType: Type): Type {
 // ReferenceLoader.cpp:172-201 PostLoadReference.
 private func PostLoadReference(expr: Expr): Unit {
     if (let Some(callExpr) <- (expr as CallExpr)) {
-        callExpr.resolvedFunction = callExpr.baseFunc.getOrThrow().GetTarget() as FuncDecl
+        callExpr.resolvedFunction = if (let Some(target) <- callExpr.baseFunc.getOrThrow().GetTarget()) {
+            target as FuncDecl
+        } else { None }
     } else if (let Some(arrayExpr) <- (expr as ArrayExpr)) {
         for (arg in arrayExpr.args) { arg.SetTy(arg.expr.getOrThrow().GetTy().getOrThrow()) }
     } else if (let Some(pointerExpr) <- (expr as PointerExpr)) {
@@ -1398,13 +1400,19 @@ private class CjoSignatureMaterializer {
         } else if (kind == MF_EXPR_KIND_ARRAY_LIT) {
             if (expr.TyKind() != TypeKind.TYPE_VARRAY) {
                 let arrayLit = (expr as ArrayLit).getOrThrow()
-                arrayLit.initFunc = GetDeclFromIndex(exprObj.GetInfoAsArrayInfo().getOrThrow().GetInitFunc()) as FuncDecl
+                arrayLit.initFunc = if (let Some(initDecl) <-
+                    GetDeclFromIndex(exprObj.GetInfoAsArrayInfo().getOrThrow().GetInitFunc())) {
+                    initDecl as FuncDecl
+                } else { None }
                 CJC_ASSERT(arrayLit.initFunc.isSome())
             }
         } else if (kind == MF_EXPR_KIND_ARRAY_EXPR) {
             if (expr.TyKind() != TypeKind.TYPE_VARRAY) {
                 let arrayExpr = (expr as ArrayExpr).getOrThrow()
-                arrayExpr.initFunc = GetDeclFromIndex(exprObj.GetInfoAsArrayInfo().getOrThrow().GetInitFunc()) as FuncDecl
+                arrayExpr.initFunc = if (let Some(initDecl) <-
+                    GetDeclFromIndex(exprObj.GetInfoAsArrayInfo().getOrThrow().GetInitFunc())) {
+                    initDecl as FuncDecl
+                } else { None }
             }
         } else if (kind == MF_EXPR_KIND_LAMBDA_EXPR) {
             (expr as LambdaExpr).getOrThrow().funcBody.getOrThrow().SetTy(expr.GetTy().getOrThrow())
