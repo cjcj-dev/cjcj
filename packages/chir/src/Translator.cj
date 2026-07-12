@@ -2,7 +2,7 @@ package cjcj::chir
 
 import std.collection.*
 
-import cjcj::utils.{CJC_ASSERT, OverflowStrategy, STATIC_INIT_FUNC}
+import cjcj::utils.{CJC_ASSERT, InternalError, OverflowStrategy, STATIC_INIT_FUNC}
 import cjcj::option.{GlobalOptions, OptimizationFlag}
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::ast.ASTKind
@@ -5969,7 +5969,7 @@ public class Translator {
             TranslateTypePatternBranch(typePattern, selector, trueBlock, falseBlock)
             return
         }
-        throw IllegalArgumentException("not yet ported in faithful AST2CHIR match pattern: ${ASTKindName(pattern.astKind)}")
+        InternalError("translating unsupported pattern")
     }
 
     private func BindPatternValues(pattern: AstPattern, selector: Value): Unit {
