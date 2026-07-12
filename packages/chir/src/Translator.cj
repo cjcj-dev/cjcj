@@ -2566,17 +2566,13 @@ public class Translator {
             }
             let baseBlock = CurrentBlock()
             let tryAstBlock = RequireBlock(expr.tryBlock, "try block")
-            let tryValue = Translator.TranslateASTNode(tryAstBlock, this)
+            let tryValue = TranslateExprArg(tryAstBlock)
             if (baseBlock.GetTerminator().isNone()) {
                 builder.CreateGoTo(GetBlockByAST(tryAstBlock), baseBlock)
             }
-            let tryValueLoc = if (let Some(value) <- tryValue) {
-                if (let Some(localVar) <- value.AsLocalVar()) {
-                    if (let Some(ownerExpr) <- localVar.GetExpr()) {
-                        ownerExpr.GetDebugLocation()
-                    } else {
-                        TranslateLocation(tryAstBlock)
-                    }
+            let tryValueLoc = if (let Some(localVar) <- tryValue.AsLocalVar()) {
+                if (let Some(ownerExpr) <- localVar.GetExpr()) {
+                    ownerExpr.GetDebugLocation()
                 } else {
                     TranslateLocation(tryAstBlock)
                 }
@@ -2584,7 +2580,7 @@ public class Translator {
                 TranslateLocation(tryAstBlock)
             }
             if (!HasTypeOfNothing(expr)) {
-                StoreTryResult(resultLoc, tryValue, tryValueLoc)
+                StoreTryResult(resultLoc, Some(tryValue), tryValueLoc)
             }
             if (CurrentBlock().GetTerminator().isNone()) {
                 builder.CreateGoTo(endBlock, CurrentBlock())
