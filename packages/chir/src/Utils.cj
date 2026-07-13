@@ -645,6 +645,20 @@ public func IsApplyToLambda(expr: Expression): Option<Lambda> {
     return None
 }
 
+// C++: CHIR/Utils/Utils.cpp:1159-1177.
+public func IsStructOrExtendMethod(value: Value): Bool {
+    let functionValue = (value as Function) ?? return false
+    let declaredParent = functionValue.GetParentCustomTypeDef() ?? return false
+    if (declaredParent.GetCustomKind() == CustomDefKind.TYPE_STRUCT) {
+        return true
+    } else if (let Some(extendDef) <- (declaredParent as ExtendDef)) {
+        if (let Some(extendedType) <- extendDef.GetExtendedType()) {
+            return extendedType.IsStruct()
+        }
+    }
+    return false
+}
+
 public func IsInitialisingMemberVar(functionValue: Function, store: StoreElementRef): Option<Int64> {
     let location = store.GetLocation()
     if ((functionValue.IsConstructor() || functionValue.GetFuncKind() == FuncKind.INSTANCEVAR_INIT) &&

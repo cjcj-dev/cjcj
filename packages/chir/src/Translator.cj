@@ -102,6 +102,22 @@ private class FaithfulLeftValueInfo {
     }
 }
 
+// C++: CHIR/AST2CHIR/TranslateASTNode/TranslateCallExpr.cpp:48-58.
+private func IsCallRegularInit(expr: AstCallExpr): Bool {
+    if (let Some(resolvedFunction) <- expr.resolvedFunction) {
+        if (AstIsInstanceConstructor(resolvedFunction)) {
+            var callOtherInit = false
+            if (let Some(baseFunc) <- expr.baseFunc) {
+                if (let Some(refExpr) <- (baseFunc as AstRefExpr)) {
+                    callOtherInit = refExpr.isThis || refExpr.isSuper
+                }
+            }
+            return !callOtherInit
+        }
+    }
+    return false
+}
+
 private class SecondSwitchInfo {
     public let ep: AstEnumPattern
     public let caseId: Int64
@@ -2314,7 +2330,7 @@ public class Translator {
     private func TranslateThisObjectForFuncMemberAccess(member: AstMemberAccess, funcDecl: AstFuncDecl): Value {
         let baseExpr = RequireExpr(member.baseExpr, "member function reference receiver")
         if (IsThisOrSuperRef(baseExpr)) {
-            return GetCurrentThisObjectForMember(funcDecl)
+            return GetCurrentThisObject(funcDecl)
         }
         var thisObj = Translator.TranslateASTNode(baseExpr, this) ??
             throw IllegalStateException("faithful AST2CHIR member function reference receiver produced no value")
@@ -6814,7 +6830,8 @@ public class Translator {
         if (let Some(callee) <- expr.resolvedFunction) {
             if (callee.IsMemberDecl() && !callee.TestAttr(AstAttribute.CONSTRUCTOR) &&
                 !callee.TestAttr(AstAttribute.STATIC)) {
-                let thisObj = TranslateThisObjectForMemberFuncCall(expr, callee)
+                let thisObj = TranslateThisObjectForNonStaticMemberFuncCall(expr,
+                    callee.TestAttr(AstAttribute.MUT))
                 args.add(thisObj)
                 previousDefaultArgs.add(thisObj)
             }
@@ -7406,7 +7423,8 @@ public class Translator {
         var thisObj: Option<Value> = None
         var expectedThisObjTy: Option<Type> = None
         if (!calleeDecl.TestAttr(AstAttribute.STATIC)) {
-            let rawObj = TranslateThisObjectForMemberFuncCall(expr, calleeDecl)
+            let rawObj = TranslateThisObjectForNonStaticMemberFuncCall(expr,
+                calleeDecl.TestAttr(AstAttribute.MUT))
             dispatchReceiverType = rawObj.GetType()
             funcCallThisType = rawObj.GetType()
             expectedThisObjTy = if (calleeInfo.isVirtualFuncCall) {
@@ -7594,36 +7612,103 @@ public class Translator {
         return None
     }
 
-    private func TranslateThisObjectForMemberFuncCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
-        var thisObj: Value
-        if (let Some(base) <- expr.baseFunc) {
-            if (let Some(member) <- (base as AstMemberAccess)) {
-                if (let Some(baseExpr) <- member.baseExpr) {
-                    if (IsThisOrSuperRef(baseExpr)) {
-                        thisObj = GetCurrentThisObjectForMember(calleeDecl)
-                        return NormalizeThisObjectForNonStaticMemberFuncCall(thisObj,
-                            calleeDecl.TestAttr(AstAttribute.MUT))
-                    }
-                    if (calleeDecl.TestAttr(AstAttribute.MUT)) {
-                        let leftValue = TranslateExprAsLeftValue(baseExpr)
-                        if (leftValue.path.isEmpty()) {
-                            thisObj = leftValue.base.getOrThrow()
+    // C++: CHIR/AST2CHIR/TranslateASTNode/Translator.cpp:204-215.
+    private func CreateGetElementRefWithPath(loc: DebugLocation, lhsBase: Value, path: ArrayList<String>,
+        block: Block, customType: CustomType): Value {
+        let (memberType, isReadOnly) = GetInstMemberTypeByNameCheckingReadOnly(customType, path, builder)
+        let memberRefType = builder.context.GetRefTy(memberType)
+        let getMemberRef = builder.CreateGetElementByName(memberRefType, lhsBase, path, block)
+        getMemberRef.SetDebugLocation(loc)
+        let result = RequireResult(getMemberRef)
+        if (lhsBase.TestAttr(Attribute.READONLY) || isReadOnly) {
+            result.EnableAttr(Attribute.READONLY)
+        }
+        return result
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateCallExpr.cpp:221-294.
+    private func TranslateThisObjectForNonStaticMemberFuncCall(expr: AstCallExpr,
+        needsMutableThis: Bool): Value {
+        CJC_ASSERT(expr.resolvedFunction.isSome())
+        let resolved = expr.resolvedFunction.getOrThrow()
+        CJC_ASSERT(IsInstanceMember(resolved))
+        CJC_ASSERT(resolved.outerDecl.isSome())
+        CJC_ASSERT(!IsCallRegularInit(expr))
+
+        var thisObj: Option<Value> = None
+        let loc = TranslateLocation(expr)
+        if (let Some(baseFunc) <- expr.baseFunc) {
+            if (let Some(memberAccess) <- (baseFunc as AstMemberAccess)) {
+                CJC_ASSERT(memberAccess.baseExpr.isSome())
+                let baseExpr = memberAccess.baseExpr.getOrThrow()
+                if (IsThisOrSuperRef(baseExpr)) {
+                    thisObj = Some(GetCurrentThisObject(resolved))
+                } else {
+                    let thisObjValueInfo = TranslateExprAsLeftValue(baseExpr)
+                    thisObj = thisObjValueInfo.base
+                    if (!thisObjValueInfo.path.isEmpty()) {
+                        let base = thisObj.getOrThrow()
+                        let baseType = base.GetType().getOrThrow()
+                        let lhsCustomType = (baseType.StripAllRefs() as CustomType).getOrThrow()
+                        if (baseType.IsRef()) {
+                            thisObj = Some(CreateGetElementRefWithPath(loc, base, thisObjValueInfo.path,
+                                CurrentBlock(), lhsCustomType))
                         } else {
-                            thisObj = LoadLeftValue(leftValue, chirTy.TranslateType(RequireAstTy(baseExpr))) ??
-                                throw IllegalStateException("faithful AST2CHIR mut member call base produced no value")
+                            let memberType = GetInstMemberTypeByName(lhsCustomType, thisObjValueInfo.path, builder)
+                            let getMember = builder.CreateFieldByName(memberType, base, thisObjValueInfo.path,
+                                CurrentBlock())
+                            getMember.SetDebugLocation(loc)
+                            thisObj = Some(RequireResult(getMember))
                         }
-                        return NormalizeThisObjectForNonStaticMemberFuncCall(thisObj,
-                            calleeDecl.TestAttr(AstAttribute.MUT))
                     }
-                    thisObj = Translator.TranslateASTNode(baseExpr, this) ??
-                        throw IllegalStateException("faithful AST2CHIR member call base produced no value")
-                    return NormalizeThisObjectForNonStaticMemberFuncCall(thisObj,
-                        calleeDecl.TestAttr(AstAttribute.MUT))
+                }
+                if (thisObj.isNone()) {
+                    let baseAstType = RequireAstTy(baseExpr)
+                    if (baseAstType.IsUnit()) {
+                        thisObj = Some(RequireResult(builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(),
+                            CurrentBlock())))
+                    } else if (baseAstType.IsNothing()) {
+                        thisObj = Some(RequireResult(builder.CreateConstant(builder.context.GetNothingType(),
+                            NullLiteral(), CurrentBlock())))
+                    } else {
+                        CJC_ABORT()
+                    }
                 }
             }
         }
-        thisObj = GetCurrentThisObjectForMember(calleeDecl)
-        return NormalizeThisObjectForNonStaticMemberFuncCall(thisObj, calleeDecl.TestAttr(AstAttribute.MUT))
+        if (thisObj.isNone()) {
+            thisObj = Some(GetCurrentThisObject(resolved))
+        }
+
+        var result = thisObj.getOrThrow()
+        let thisObjType = result.GetType().getOrThrow()
+        CJC_ASSERT(thisObjType.IsReferenceTypeWithRefDims(CLASS_REF_DIM) ||
+            thisObjType.IsReferenceTypeWithRefDims(1) ||
+            thisObjType.IsValueOrGenericTypeWithRefDims(1) ||
+            thisObjType.IsValueOrGenericTypeWithRefDims(0))
+        if (!needsMutableThis) {
+            if (thisObjType.IsReferenceTypeWithRefDims(CLASS_REF_DIM) ||
+                thisObjType.IsValueOrGenericTypeWithRefDims(1)) {
+                let pureThisObjType = thisObjType.StripAllRefs()
+                var targetType = pureThisObjType
+                if (pureThisObjType.IsReferenceType()) {
+                    targetType = builder.context.GetRefTy(pureThisObjType)
+                }
+                let load = builder.CreateLoad(targetType, result, CurrentBlock())
+                load.SetDebugLocation(loc)
+                result = RequireResult(load)
+            }
+        } else {
+            CJC_ASSERT(!thisObjType.IsValueOrGenericTypeWithRefDims(0))
+            if (thisObjType.IsReferenceTypeWithRefDims(CLASS_REF_DIM)) {
+                let pureThisObjType = thisObjType.StripAllRefs()
+                let targetType = builder.context.GetRefTy(pureThisObjType)
+                let load = builder.CreateLoad(targetType, result, CurrentBlock())
+                load.SetDebugLocation(loc)
+                result = RequireResult(load)
+            }
+        }
+        return result
     }
 
     private func NormalizeThisObjectForNonStaticMemberFuncCall(rawThisObj: Value, needsMutableThis: Bool): Value {
@@ -7659,9 +7744,23 @@ public class Translator {
         return thisObj
     }
 
-    private func GetCurrentThisObjectForMember(calleeDecl: AstFuncDecl): Value {
-        let _ = calleeDecl
-        return GetCurrentThisObject()
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateCallExpr.cpp:76-94.
+    private func GetCurrentThisObject(resolved: AstFuncDecl): Value {
+        let currentFunction = CurrentFunction()
+        let thisVariable = currentFunction.GetParam(0)
+        let isThisRef = currentFunction.IsConstructor() || currentFunction.TestAttr(Attribute.MUT) ||
+            currentFunction.GetFuncKind() == FuncKind.SETTER
+        let needThisRef = resolved.TestAttr(AstAttribute.MUT) ||
+            resolved.TestAttr(AstAttribute.CONSTRUCTOR) || resolved.isSetter
+        if (IsStructOrExtendMethod(currentFunction) && isThisRef && !needThisRef) {
+            let objectType = thisVariable.GetType().getOrThrow()
+            CJC_ASSERT(objectType.IsRef())
+            let objectBaseType = (objectType as RefType).getOrThrow().GetBaseType()
+            CJC_ASSERT(!objectBaseType.IsRef())
+            CJC_ASSERT(objectBaseType.IsStruct())
+            return RequireResult(builder.CreateLoad(objectBaseType, thisVariable, CurrentBlock()))
+        }
+        return thisVariable
     }
 
     private func GetCurrentThisObject(): Value {
@@ -8457,22 +8556,7 @@ public class Translator {
         }
 
         if (let Some(refExpr) <- (nodePtr as AstRefExpr)) {
-            if (refExpr.isThis || refExpr.isSuper) {
-                return FaithfulLeftValueInfo(GetCurrentThisObject(), ArrayList<String>())
-            }
-            if (let Some(target) <- refExpr.ref.target) {
-                if (let Some(varDecl) <- (target as AstVarDecl)) {
-                    if (IsInstanceMember(varDecl)) {
-                        return TranslateInstanceFieldRefAsLeftValue(varDecl)
-                    }
-                    return FaithfulLeftValueInfo(GetSymbolTable(target), ArrayList<String>())
-                }
-                if (target.astKind == ASTKind.FUNC_PARAM) {
-                    return FaithfulLeftValueInfo(GetSymbolTable(target), ArrayList<String>())
-                }
-            }
-            CJC_ABORT()
-            return FaithfulLeftValueInfo(None, ArrayList<String>())
+            return TranslateRefExprAsLeftValue(refExpr)
         }
         if (let Some(member) <- (nodePtr as AstMemberAccess)) {
             return TranslateMemberAccessAsLeftValue(member)
@@ -8522,6 +8606,109 @@ public class Translator {
         let _ = CreateAndAppendApplyCallFromCallExpr(builder.context.GetUnitTy(), callee,
             FuncCallContext(args: args, thisType: thisRefTy), expr)
         return FaithfulLeftValueInfo(args[0], ArrayList<String>())
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/Translator.cpp:142-147.
+    private func GetImplicitThisParam(): Value {
+        return CurrentFunction().GetParam(0)
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:18-30.
+    private func TranslateThisOrSuperRefAsLeftValue(refExpr: AstRefExpr): FaithfulLeftValueInfo {
+        CJC_ASSERT(refExpr.isThis || refExpr.isSuper)
+        var thisParam = GetImplicitThisParam()
+        if (refExpr.isSuper) {
+            let superType = chirTy.TranslateType(RequireAstTy(refExpr))
+            thisParam = TypeCastOrBoxIfNeeded(thisParam, superType, TranslateLocation(refExpr))
+        }
+        return FaithfulLeftValueInfo(thisParam, ArrayList<String>())
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:32-42.
+    private func TranslateStructMemberVarRefAsLeftValue(refExpr: AstRefExpr): FaithfulLeftValueInfo {
+        let target = refExpr.ref.target.getOrThrow()
+        CJC_ASSERT(target.astKind == ASTKind.VAR_DECL)
+        CJC_ASSERT(target.outerDecl.getOrThrow().astKind == ASTKind.STRUCT_DECL)
+        let name = (target as AstVarDecl).getOrThrow().identifier.Val()
+        CJC_ASSERT(!name.isEmpty())
+        let path = ArrayList<String>()
+        path.add(name)
+        return FaithfulLeftValueInfo(GetImplicitThisParam(), path)
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:44-55.
+    private func TranslateClassMemberVarRefAsLeftValue(refExpr: AstRefExpr): FaithfulLeftValueInfo {
+        let target = refExpr.ref.target.getOrThrow()
+        CJC_ASSERT(target.astKind == ASTKind.VAR_DECL)
+        CJC_ASSERT(target.outerDecl.getOrThrow().astKind == ASTKind.CLASS_DECL)
+        let implicitThis = GetImplicitThisParam()
+        CJC_ASSERT(implicitThis.GetType().getOrThrow().IsReferenceTypeWithRefDims(1))
+        let name = (target as AstVarDecl).getOrThrow().identifier.Val()
+        CJC_ASSERT(!name.isEmpty())
+        let path = ArrayList<String>()
+        path.add(name)
+        return FaithfulLeftValueInfo(implicitThis, path)
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:57-87.
+    private func TranslateEnumMemberVarRef(refExpr: AstRefExpr): FaithfulLeftValueInfo {
+        let target = refExpr.ref.target.getOrThrow()
+        CJC_ASSERT(target.astKind == ASTKind.VAR_DECL)
+        CJC_ASSERT(target.outerDecl.getOrThrow().astKind == ASTKind.ENUM_DECL)
+        CJC_ASSERT(target.TestAttr(AstAttribute.ENUM_CONSTRUCTOR))
+        let loc = TranslateLocation(refExpr)
+        let enumType = (chirTy.TranslateType(RequireAstTy(refExpr)) as EnumType).getOrThrow()
+        let enumId = GetEnumCtorId(target)
+        let enumAstType = (RequireAstTy(refExpr) as AstEnumTy).getOrThrow()
+        let selectorType = GetSelectorType(enumAstType)
+        let enumDecl = enumAstType.decl.getOrThrow()
+        if (enumDecl.hasArguments) {
+            let args = ArrayList<Value>()
+            if (selectorType.IsBoolean()) {
+                args.add(RequireResult(builder.CreateConstant(selectorType, BoolLiteral(enumId != 0), CurrentBlock())))
+            } else {
+                args.add(RequireResult(builder.CreateConstant(selectorType, IntLiteral(enumId), CurrentBlock())))
+            }
+            let tupleExpr = builder.CreateTuple(enumType, args, CurrentBlock())
+            tupleExpr.SetDebugLocation(loc)
+            return FaithfulLeftValueInfo(RequireResult(tupleExpr), ArrayList<String>())
+        }
+        let intExpr = builder.CreateConstant(selectorType, IntLiteral(enumId), CurrentBlock())
+        intExpr.SetDebugLocation(loc)
+        let castedIntExpr = TypeCastOrBoxIfNeeded(RequireResult(intExpr), enumType, loc)
+        return FaithfulLeftValueInfo(castedIntExpr, ArrayList<String>())
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:89-114.
+    private func TranslateVarRefAsLeftValue(refExpr: AstRefExpr): FaithfulLeftValueInfo {
+        let target = refExpr.ref.target.getOrThrow()
+        CJC_ASSERT(target.astKind == ASTKind.VAR_DECL || target.astKind == ASTKind.FUNC_PARAM)
+        if (target.outerDecl.isSome() && !target.TestAttr(AstAttribute.STATIC)) {
+            let outerKind = target.outerDecl.getOrThrow().astKind
+            if (outerKind == ASTKind.STRUCT_DECL) {
+                return TranslateStructMemberVarRefAsLeftValue(refExpr)
+            }
+            if (outerKind == ASTKind.CLASS_DECL) {
+                return TranslateClassMemberVarRefAsLeftValue(refExpr)
+            }
+            if (outerKind == ASTKind.ENUM_DECL) {
+                return TranslateEnumMemberVarRef(refExpr)
+            }
+        }
+        return FaithfulLeftValueInfo(GetSymbolTable(target), ArrayList<String>())
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:116-130.
+    private func TranslateRefExprAsLeftValue(refExpr: AstRefExpr): FaithfulLeftValueInfo {
+        if (refExpr.isThis || refExpr.isSuper) {
+            return TranslateThisOrSuperRefAsLeftValue(refExpr)
+        }
+        let target = refExpr.ref.target.getOrThrow()
+        if (target.astKind == ASTKind.VAR_DECL || target.astKind == ASTKind.FUNC_PARAM) {
+            return TranslateVarRefAsLeftValue(refExpr)
+        }
+        CJC_ABORT()
+        return FaithfulLeftValueInfo(None, ArrayList<String>())
     }
 
     private func TranslateMemberAccessAsLeftValue(member: AstMemberAccess): FaithfulLeftValueInfo {
