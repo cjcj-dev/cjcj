@@ -435,8 +435,9 @@ public class Searcher {
 
     public func Search(ctx: ASTContext, query: Query, order!: SearchOrder = SearchOrder.POS_DESC): ArrayList<Symbol> {
         let key = NormalizeQuery(query, order: order)
-        if (let Some(values) <- cache.get(key)) {
-            return FilterCachedSearchResult(values, query)
+        let cached = FindInSearchCache(query, key)
+        if (cached[1]) {
+            return cached[0]
         }
         let ids = PerformSearch(ctx, query)
         let out = FilterAndSortSearchResult(ids, query, order: order)
@@ -501,17 +502,21 @@ public class Searcher {
         return normalized
     }
 
-    private func FilterCachedSearchResult(values: ArrayList<Symbol>, query: Query): ArrayList<Symbol> {
-        if (!query.HasFileHashFilter()) {
-            return values
-        }
-        let out = ArrayList<Symbol>()
-        for (symbol in values) {
-            if (!symbol.invertedIndexBeenDeleted && InFiles(query, symbol)) {
-                out.add(symbol)
+    // Mirrors AST/Searcher.cpp:307-328 Searcher::FindInSearchCache.
+    private func FindInSearchCache(query: Query, normalizedQuery: String): (ArrayList<Symbol>, Bool) {
+        let results = ArrayList<Symbol>()
+        if (let Some(values) <- cache.get(normalizedQuery)) {
+            if (!query.HasFileHashFilter()) {
+                return (values, true)
             }
+            for (symbol in values) {
+                if (InFiles(query, symbol)) {
+                    results.add(symbol)
+                }
+            }
+            return (results, true)
         }
-        return out
+        return (results, false)
     }
 
     private func FilterAndSortSearchResult(ids: ArrayList<Symbol>, query: Query,
@@ -533,6 +538,11 @@ public class Searcher {
         if (let Some(compound) <- (query as CompoundQuery)) {
             return PerformCompoundSearch(ctx, compound)
         }
+        return GetIDs(ctx, query)
+    }
+
+    // Mirrors AST/Searcher.cpp:634-656 Searcher::GetIDs.
+    private func GetIDs(ctx: ASTContext, query: Query): ArrayList<Symbol> {
         if (let Some(nameQuery) <- (query as NameQuery)) {
             return GetIDsByName(ctx, nameQuery)
         }
@@ -590,12 +600,20 @@ public class Searcher {
         if (query.matchKind == MatchKind.PRECISE) {
             return SymbolsForKey(ctx.invertedIndex.nameIndexes, query.value)
         }
-        let names = if (query.matchKind == MatchKind.PREFIX) {
-            ctx.invertedIndex.nameTrie.PrefixMatch(query.value)
-        } else {
-            ctx.invertedIndex.nameTrie.SuffixMatch(query.value)
+        if (query.matchKind == MatchKind.PREFIX) {
+            return GetIDsByNamePrefix(ctx, query.value)
         }
-        return SymbolsForKeys(ctx.invertedIndex.nameIndexes, names)
+        return GetIDsByNameSuffix(ctx, query.value)
+    }
+
+    // Mirrors AST/Searcher.cpp:384-392 Searcher::GetIDsByNamePrefix.
+    private func GetIDsByNamePrefix(ctx: ASTContext, prefix: String): ArrayList<Symbol> {
+        return SymbolsForKeys(ctx.invertedIndex.nameIndexes, ctx.invertedIndex.nameTrie.PrefixMatch(prefix))
+    }
+
+    // Mirrors AST/Searcher.cpp:394-402 Searcher::GetIDsByNameSuffix.
+    private func GetIDsByNameSuffix(ctx: ASTContext, suffix: String): ArrayList<Symbol> {
+        return SymbolsForKeys(ctx.invertedIndex.nameIndexes, ctx.invertedIndex.nameTrie.SuffixMatch(suffix))
     }
 
     private func GetIDsByScopeName(ctx: ASTContext, query: ScopeQuery): ArrayList<Symbol> {
@@ -657,7 +675,12 @@ public class Searcher {
         if (query.matchKind == MatchKind.PRECISE) {
             return SymbolsForKey(ctx.invertedIndex.astKindIndexes, query.valueText)
         }
-        return SymbolsForKeys(ctx.invertedIndex.astKindIndexes, ctx.invertedIndex.astKindTrie.SuffixMatch(query.valueText))
+        return SymbolsForKeys(ctx.invertedIndex.astKindIndexes, GetAstKindsBySuffix(ctx, query.valueText))
+    }
+
+    // Mirrors AST/Searcher.cpp:450-453 Searcher::GetAstKindsBySuffix.
+    private func GetAstKindsBySuffix(ctx: ASTContext, suffix: String): ArrayList<String> {
+        return ctx.invertedIndex.astKindTrie.SuffixMatch(suffix)
     }
 
     private func GetIDsByPos(ctx: ASTContext, query: PositionQuery): ArrayList<Symbol> {
