@@ -394,6 +394,28 @@ private func InitArrayData(irBuilder: IRBuilder2, arrPtr: LLVMValueRef, arrayLen
     irBuilder.SetInsertPoint(endBB)
 }
 
+// Mirrors CodeGen/IRBuilder.h:267-286 IRBuilder2::CodeGenFieldInfo.
+public class CodeGenFieldInfo {
+    public var className: String
+    public var qualifiedName: String
+    public var fieldName: String
+    public var fieldChirType: Option<Type>
+    public var fieldType: Option<CGType>
+    public var instance: LLVMValueRef
+    public let baseTy: Type
+
+    public init(className: String, qualifiedName: String, fieldName: String, fieldChirType: Option<Type>,
+        fieldType: Option<CGType>, instance: LLVMValueRef, baseTy: Type) {
+        this.className = className
+        this.qualifiedName = qualifiedName
+        this.fieldName = fieldName
+        this.fieldChirType = fieldChirType
+        this.fieldType = fieldType
+        this.instance = instance
+        this.baseTy = baseTy
+    }
+}
+
 public class IRBuilder2 <: Resource {
     private let cgMod: CGModule
     private let builder: LLVMBuilderHandle
