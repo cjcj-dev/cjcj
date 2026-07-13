@@ -8059,11 +8059,9 @@ public class Translator {
                         base, path, CurrentBlock()))
                 exprValueTable[leftExpr.objectId] = memberRef
             }
-            rhs = Translator.TranslateASTNode(rightExpr, this) ??
-                throw IllegalStateException("faithful AST2CHIR assign rhs produced no value")
+            rhs = TranslateExprArg(rightExpr)
         } else {
-            rhs = Translator.TranslateASTNode(rightExpr, this) ??
-                throw IllegalStateException("faithful AST2CHIR assign rhs produced no value")
+            rhs = TranslateExprArg(rightExpr)
             let info = TranslateExprAsLeftValue(leftExpr)
             lhs = info.base
             path = info.path
