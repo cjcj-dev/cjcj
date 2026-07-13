@@ -443,6 +443,14 @@ public class BinaryExpression <: Expression {
         this.overflowStrategy = overflowStrategy
     }
 
+    public func GetLHSOperand(): Value {
+        return GetOperand(0)
+    }
+
+    public func GetRHSOperand(): Value {
+        return GetOperand(1)
+    }
+
     public func GetOverflowStrategy(): OverflowStrategy {
         return overflowStrategy
     }

@@ -6,6 +6,8 @@ import cjcj::chir.CHIRBuilder
 import cjcj::chir.Constant
 import cjcj::chir.Expression
 import cjcj::chir.ExprKind
+import cjcj::chir.ExprMajorKind
+import cjcj::chir.IntOpWithException
 import cjcj::chir.Apply
 import cjcj::chir.ApplyWithException
 import cjcj::chir.Attribute
@@ -18,7 +20,7 @@ import cjcj::chir.InvokeWithException
 import cjcj::chir.Type
 import cjcj::chir.UnaryExpression
 import cjcj::chir.Value
-import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
+import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, OverflowStrategy}
 
 public open class CHIRExprWrapper {
     public let expr: Expression
@@ -45,10 +47,40 @@ public class CHIRUnaryExprWrapper <: CHIRExprWrapper {
 }
 
 public class CHIRBinaryExprWrapper <: CHIRExprWrapper {
-    public let binaryExpr: BinaryExpression
-    public init(expr: BinaryExpression) {
-        super(expr)
-        binaryExpr = expr
+    public init(binaryExpr: BinaryExpression) {
+        super(binaryExpr)
+    }
+
+    public init(binaryExprWithException: IntOpWithException) {
+        super(binaryExprWithException)
+    }
+
+    public func GetLHSOperand(): Value {
+        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
+            return (expr as BinaryExpression).getOrThrow().GetLHSOperand()
+        }
+        return (expr as IntOpWithException).getOrThrow().GetOperand(0)
+    }
+
+    public func GetRHSOperand(): Value {
+        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
+            return (expr as BinaryExpression).getOrThrow().GetRHSOperand()
+        }
+        return (expr as IntOpWithException).getOrThrow().GetOperand(1)
+    }
+
+    public func GetOverflowStrategy(): OverflowStrategy {
+        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
+            return (expr as BinaryExpression).getOrThrow().GetOverflowStrategy()
+        }
+        return (expr as IntOpWithException).getOrThrow().GetOverflowStrategy()
+    }
+
+    public func GetBinaryExprKind(): ExprKind {
+        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
+            return (expr as BinaryExpression).getOrThrow().GetExprKind()
+        }
+        return (expr as IntOpWithException).getOrThrow().GetOpKind()
     }
 }
 

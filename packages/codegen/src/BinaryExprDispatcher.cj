@@ -5,16 +5,16 @@ import cjcj::chir.ExprKindIndex
 import cjcj::utils.{CJC_ASSERT_WITH_MSG, OverflowStrategy}
 
 public func HandleBinaryExpression(irBuilder: IRBuilder2, chirExpr: CHIRBinaryExprWrapper): LLVMValueRef {
-    let kind = chirExpr.binaryExpr.GetExprKind()
+    let kind = chirExpr.GetBinaryExprKind()
     if (IsBooleanBinaryExprKind(kind)) {
         return GenerateBooleanOperation(irBuilder, chirExpr)
     }
-    let overflowStrategy = chirExpr.binaryExpr.GetOverflowStrategy()
+    let overflowStrategy = chirExpr.GetOverflowStrategy()
     if (ShouldUseOverflowBinary(kind, overflowStrategy)) {
-        if (let Some(resultTy) <- chirExpr.binaryExpr.GetResultType()) {
+        if (let Some(resultTy) <- chirExpr.expr.GetResultType()) {
             if (resultTy.IsInteger()) {
-                return GenerateOverflowBinary(irBuilder, overflowStrategy, kind, chirExpr.binaryExpr.GetOperand(0),
-                    chirExpr.binaryExpr.GetOperand(1), chirExpr.binaryExpr.GetResultType())
+                return GenerateOverflowBinary(irBuilder, overflowStrategy, kind, chirExpr.GetLHSOperand(),
+                    chirExpr.GetRHSOperand(), chirExpr.expr.GetResultType())
             }
         }
     }
@@ -26,7 +26,7 @@ public func HandleBinaryExpression(irBuilder: IRBuilder2, chirExpr: CHIRBinaryEx
 
 private func HandleNonOverflowBinaryExpression(irBuilder: IRBuilder2,
     chirExpr: CHIRBinaryExprWrapper): LLVMValueRef {
-    let kind = chirExpr.binaryExpr.GetExprKind()
+    let kind = chirExpr.GetBinaryExprKind()
     if (kind == ExprKind.ADD || kind == ExprKind.SUB || kind == ExprKind.MUL || kind == ExprKind.DIV ||
         kind == ExprKind.MOD) {
         return GenerateArithmeticOperation(irBuilder, chirExpr)

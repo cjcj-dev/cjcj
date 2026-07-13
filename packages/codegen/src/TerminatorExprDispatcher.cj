@@ -63,7 +63,10 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
     if (kind == ExprKind.INT_OP_WITH_EXCEPTION) {
         return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
             if (let Some(intOp) <- (expr as IntOpWithException)) {
-                return GenerateIntOpWithException(builder, intOp)
+                if (intOp.GetNumOfOperands() == 1) {
+                    return GenerateIntOpWithException(builder, intOp)
+                }
+                return HandleBinaryExpression(builder, CHIRBinaryExprWrapper(intOp))
             }
             return LLVMNullValue()
         })

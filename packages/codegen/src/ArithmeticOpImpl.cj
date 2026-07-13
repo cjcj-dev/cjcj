@@ -3,6 +3,7 @@ package cjcj::codegen
 import std.collection.*
 import cjcj::chir.ExprKind
 import cjcj::chir.ExprKindIndex
+import cjcj::chir.ExprKindName
 import cjcj::chir.IntType
 import cjcj::chir.TypeKindIndex
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_ASSERT_WITH_MSG}
@@ -194,8 +195,8 @@ private func CreateFastPowerCallForInt64PowerUInt64(irBuilder: IRBuilder2, leftV
 
 private func GenerateIntegerConvExpr(irBuilder: IRBuilder2, binOp: CHIRBinaryExprWrapper,
     srcValue: LLVMValueRef): LLVMValueRef {
-    let leftArg = binOp.binaryExpr.GetOperand(0)
-    let rightArg = binOp.binaryExpr.GetOperand(1)
+    let leftArg = binOp.GetLHSOperand()
+    let rightArg = binOp.GetRHSOperand()
 
     let targetTy = leftArg.GetType().getOrThrow()
     let srcTy = rightArg.GetType().getOrThrow()
@@ -258,7 +259,7 @@ private func GenerateIntegerConvExpr(irBuilder: IRBuilder2, binOp: CHIRBinaryExp
 private func GenerateOverShiftCheck(irBuilder: IRBuilder2, binOp: CHIRBinaryExprWrapper, lValue: CGValue,
     rValue: CGValue): LLVMValueRef {
     let cgMod = irBuilder.GetCGModule()
-    let rightTy = binOp.binaryExpr.GetOperand(1).GetType().getOrThrow()
+    let rightTy = binOp.GetRHSOperand().GetType().getOrThrow()
     // cond: if right value of the right operand is negative
     let zero = unsafe { LLVMConstInt(CGType.GetOrCreate(cgMod, rightTy).GetLLVMType(), 0u64, 0) }
     let cmpResult = irBuilder.CreateICmp(LLVMIntPredicate.SLT, rValue.GetRawValue(), zero,
@@ -303,10 +304,10 @@ private func GenerateOverShiftCheck(irBuilder: IRBuilder2, binOp: CHIRBinaryExpr
     irBuilder.SetInsertPoint(else1BB)
     var ret = LLVMNullValue()
     let rConvValue = GenerateIntegerConvExpr(irBuilder, binOp, rValue.GetRawValue())
-    if (binOp.binaryExpr.GetExprKind() == ExprKind.LSHIFT) {
+    if (binOp.GetBinaryExprKind() == ExprKind.LSHIFT) {
         ret = irBuilder.CreateBinaryTyped(ExprKind.LSHIFT, lValue.GetRawValue(), rConvValue, None, None, name: "shl")
-    } else if (binOp.binaryExpr.GetExprKind() == ExprKind.RSHIFT) {
-        let opTy = binOp.binaryExpr.GetResult().getOrThrow().GetType().getOrThrow()
+    } else if (binOp.GetBinaryExprKind() == ExprKind.RSHIFT) {
+        let opTy = binOp.expr.GetResult().getOrThrow().GetType().getOrThrow()
         if (opTy.IsInteger() && (opTy as IntType).getOrThrow().IsSigned()) {
             ret = irBuilder.CreateBinaryTyped(ExprKind.RSHIFT, lValue.GetRawValue(), rConvValue, Some(opTy), Some(opTy),
                 name: "ashr")
@@ -326,10 +327,10 @@ private func GenerateOverShiftCheck(irBuilder: IRBuilder2, binOp: CHIRBinaryExpr
 
 public func GenerateBitwiseOperation(irBuilder: IRBuilder2, binExpr: CHIRBinaryExprWrapper): LLVMValueRef {
     let cgMod = irBuilder.GetCGModule()
-    let valLeft = cgMod.GetMappedCGValue(binExpr.binaryExpr.GetOperand(0))
-    let valRight = cgMod.GetMappedCGValue(binExpr.binaryExpr.GetOperand(1))
+    let valLeft = cgMod.GetMappedCGValue(binExpr.GetLHSOperand())
+    let valRight = cgMod.GetMappedCGValue(binExpr.GetRHSOperand())
     irBuilder.EmitLocation(binExpr)
-    let kind = binExpr.binaryExpr.GetExprKind()
+    let kind = binExpr.GetBinaryExprKind()
     if (kind == ExprKind.BITAND) {
         return irBuilder.CreateBinaryTyped(kind, valLeft.GetRawValue(), valRight.GetRawValue(), None, None, name: "and")
     }
@@ -347,23 +348,23 @@ public func GenerateBitwiseOperation(irBuilder: IRBuilder2, binExpr: CHIRBinaryE
 }
 
 public func GenerateArithmeticOperation(irBuilder: IRBuilder2, chirExpr: CHIRBinaryExprWrapper): LLVMValueRef {
-    if (chirExpr.binaryExpr.GetNumOfOperands() < 2) {
+    if (chirExpr.expr.GetNumOfOperands() < 2) {
         return LLVMNullValue()
     }
-    let leftOperand = chirExpr.binaryExpr.GetOperand(0)
-    let rightOperand = chirExpr.binaryExpr.GetOperand(1)
+    let leftOperand = chirExpr.GetLHSOperand()
+    let rightOperand = chirExpr.GetRHSOperand()
     let leftValue = irBuilder.GetCGModule().GetMappedCGValue(leftOperand)
     let rightValue = irBuilder.GetCGModule().GetMappedCGValue(rightOperand)
     let operandType = leftOperand.GetType()
-    let resultType = chirExpr.binaryExpr.GetResultType()
-    let kind = chirExpr.binaryExpr.GetExprKind()
+    let resultType = chirExpr.expr.GetResultType()
+    let kind = chirExpr.GetBinaryExprKind()
     return irBuilder.CreateBinaryTyped(kind, leftValue.GetRawValue(), rightValue.GetRawValue(), operandType, resultType,
-        name: chirExpr.binaryExpr.GetExprKindName())
+        name: ExprKindName(chirExpr.GetBinaryExprKind()))
 }
 
 public func GenerateBinaryExpOperation(irBuilder: IRBuilder2, chirExpr: CHIRBinaryExprWrapper): LLVMValueRef {
-    let leftArg = chirExpr.binaryExpr.GetOperand(0)
-    let rightArg = chirExpr.binaryExpr.GetOperand(1)
+    let leftArg = chirExpr.GetLHSOperand()
+    let rightArg = chirExpr.GetRHSOperand()
     let valLeft = irBuilder.GetCGModule().GetMappedCGValue(leftArg)
     let valRight = irBuilder.GetCGModule().GetMappedCGValue(rightArg)
     return GenerateBinaryExpOperation(irBuilder, valLeft, valRight)

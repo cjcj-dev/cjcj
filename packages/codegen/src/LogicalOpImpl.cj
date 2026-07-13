@@ -1,14 +1,15 @@
 package cjcj::codegen
 
 import cjcj::chir.ExprKind
+import cjcj::chir.ExprKindName
 
 public func GenerateBooleanOperation(irBuilder: IRBuilder2, chirExpr: CHIRBinaryExprWrapper): LLVMValueRef {
-    if (chirExpr.binaryExpr.GetNumOfOperands() < 2) {
+    if (chirExpr.expr.GetNumOfOperands() < 2) {
         return LLVMNullValue()
     }
-    let leftOperand = chirExpr.binaryExpr.GetOperand(0)
-    let rightOperand = chirExpr.binaryExpr.GetOperand(1)
-    let kind = chirExpr.binaryExpr.GetExprKind()
+    let leftOperand = chirExpr.GetLHSOperand()
+    let rightOperand = chirExpr.GetRHSOperand()
+    let kind = chirExpr.GetBinaryExprKind()
     if (let Some(leftTy) <- leftOperand.GetType()) {
         if ((leftTy.IsUnit() || leftTy.IsNothing()) && kind == ExprKind.EQUAL) {
             return irBuilder.GetTrue()
@@ -30,7 +31,7 @@ public func GenerateBooleanOperation(irBuilder: IRBuilder2, chirExpr: CHIRBinary
         }
     }
     return irBuilder.CreateBinaryTyped(kind, leftValue.GetRawValue(), rightRawValue, leftOperand.GetType(),
-        chirExpr.binaryExpr.GetResultType(), name: chirExpr.binaryExpr.GetExprKindName())
+        chirExpr.expr.GetResultType(), name: ExprKindName(chirExpr.GetBinaryExprKind()))
 }
 
 public func IsBooleanBinaryExprKind(kind: ExprKind): Bool {
