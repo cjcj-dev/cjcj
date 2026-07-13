@@ -1,5 +1,7 @@
 package cjcj::chir
 
+import cjcj::utils.StaticCast
+
 public func TranslateValue(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext, value: Value): Unit {
     if (value.IsParameter()) {
         BCHIRPushOpWithName(context.definition, OpCode.LVAR, BCHIRMangledName(value))
@@ -7,6 +9,8 @@ public func TranslateValue(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext, val
     } else if (value.IsLocalVar()) {
         BCHIRPushOpWithName(context.definition, OpCode.LVAR, BCHIRMangledName(value))
         context.definition.PushCell(compiler.LVarId(context, value))
+    } else if (value.IsLiteral()) {
+        compiler.TranslateLiteralValue(context, StaticCast<LiteralValue>(value))
     } else if (value.IsImportedFunc() && value.GetAttributeInfo().Test(Attribute.FOREIGN)) {
         context.definition.PushOp(OpCode.NULLPTR)
     } else if (value.IsFuncWithBody()) {

@@ -1,5 +1,7 @@
 package cjcj::chir
 
+import cjcj::utils.CJC_ASSERT
+
 public func BCHIRMangledName(value: Value): String {
     let identifier = value.GetIdentifier()
     if (identifier.size > 0) {
@@ -42,7 +44,7 @@ public func BCHIRUnaryExprKindToOpCode(kind: ExprKind): OpCode {
         case ExprKind.NEG => OpCode.UN_NEG
         case ExprKind.NOT => OpCode.UN_NOT
         case ExprKind.BITNOT => OpCode.UN_BITNOT
-        case _ => OpCode.INVALID
+        case _ => CJC_ASSERT(false); OpCode.INVALID
     }
 }
 
@@ -65,9 +67,9 @@ public func BCHIRBinaryExprKindToOpCode(kind: ExprKind): OpCode {
         case ExprKind.GE => OpCode.BIN_GE
         case ExprKind.EQUAL => OpCode.BIN_EQUAL
         case ExprKind.NOTEQUAL => OpCode.BIN_NOTEQ
-        case ExprKind.AND => OpCode.BIN_BITAND
-        case ExprKind.OR => OpCode.BIN_BITOR
-        case _ => OpCode.INVALID
+        case ExprKind.AND => CJC_ASSERT(false); OpCode.INVALID
+        case ExprKind.OR => CJC_ASSERT(false); OpCode.INVALID
+        case _ => CJC_ASSERT(false); OpCode.INVALID
     }
 }
 
