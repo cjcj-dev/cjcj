@@ -4,14 +4,16 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
+import cjcj::sema.AddArrayLitConstructor
+import cjcj::sema.GenerateGetTypeForTypeParamIntrinsic
 import cjcj::sema.GetUsableGetterForProperty
 import cjcj::sema.GetUsableSetterForProperty
 import cjcj::sema.GenerateTypeMapping
 import cjcj::sema.SameTy
 import cjcj::sema.TypeSubst
 import cjcj::sema.TypeManager
-import cjcj::utils.{CLASS_EXCEPTION, CJC_ABORT, CJC_ASSERT, GetRootPackageName, OBJECT_NAME, STD_LIB_ARRAY,
-    STD_LIB_OPTION, STD_LIB_STRING, TOSTRING_NAME}
+import cjcj::utils.{CLASS_EXCEPTION, CJC_ABORT, CJC_ASSERT, GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME,
+    GetRootPackageName, OBJECT_NAME, STD_LIB_ARRAY, STD_LIB_OPTION, STD_LIB_STRING, TOSTRING_NAME}
 import cjcj::utils.DynamicCast
 
 foreign {
@@ -131,6 +133,24 @@ public class MockUtils {
     // C++: Sema/Test/MockUtils.h:61-66.
     public func WrapTy2CPointer(ty: Ty): PointerTy {
         return typeManager.GetPointerTy(ty)
+    }
+
+    // C++: Sema/Test/MockUtils.cpp:69-87.
+    public func WrapCallArgsIntoArray(mockedFunc: FuncDecl): ArrayLit {
+        let mockedMethodArgRefs = ArrayList<Expr>()
+        for (param in mockedFunc.funcBody.getOrThrow().paramLists[0].params) {
+            let paramRef = RefExpr()
+            paramRef.ref.identifier = param.identifier
+            paramRef.ref.target = param
+            paramRef.SetTy(param.GetTy().getOrThrow())
+            paramRef.curFile = mockedFunc.curFile
+            mockedMethodArgRefs.add(paramRef)
+        }
+        let baseTy = typeManager.GetStructTy(arrayDecl.getOrThrow(), [typeManager.GetAnyTy()])
+        let argRefsArray = CreateArrayLit(mockedMethodArgRefs, baseTy)
+        AddArrayLitConstructor(argRefsArray)
+        argRefsArray.curFile = mockedFunc.curFile
+        return argRefsArray
     }
 
     public static func CanMock(node: Node): Bool {
@@ -707,6 +727,54 @@ public class MockUtils {
         zeroValueCall.resolvedFunction = zeroValueDecl
         zeroValueCall.curFile = curFile
         return zeroValueCall
+    }
+
+    // C++: Sema/Test/MockUtils.cpp:532-546.
+    public func CreateGetTypeForTypeParameterCall(genericParam: GenericParamDecl): Expr {
+        let funcDecl = getTypeForTypeParamDecl.getOrThrow()
+        let funcTy = (funcDecl.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let args = ArrayList<FuncArg>()
+        let refExpr = CreateRefExpr(funcDecl)
+        refExpr.instTys.add(genericParam.GetTy().getOrThrow())
+        refExpr.curFile = genericParam.curFile
+        let res = CreateCallExpr(refExpr, args, Some(funcDecl), Some(funcTy.retTy),
+            CallKind.CALL_INTRINSIC_FUNCTION)
+        res.curFile = genericParam.curFile
+        return res
+    }
+
+    // C++: Sema/Test/MockUtils.cpp:548-572.
+    public func WrapCallTypeArgsIntoArray(decl: Decl): Expr {
+        let getTypeCalls = ArrayList<Expr>()
+        if (let Some(outerDecl) <- decl.outerDecl) {
+            if (let Some(generic) <- outerDecl.GetGeneric()) {
+                for (genericParam in generic.typeParameters) {
+                    getTypeCalls.add(CreateGetTypeForTypeParameterCall(genericParam))
+                }
+            }
+        }
+        if (let Some(generic) <- decl.GetGeneric()) {
+            for (genericParam in generic.typeParameters) {
+                getTypeCalls.add(CreateGetTypeForTypeParameterCall(genericParam))
+            }
+        }
+        let baseTy = typeManager.GetStructTy(arrayDecl.getOrThrow(),
+            [toStringDecl.getOrThrow().GetTy().getOrThrow()])
+        let arrayLitOfGetTypeCalls = CreateArrayLit(getTypeCalls, baseTy)
+        AddArrayLitConstructor(arrayLitOfGetTypeCalls)
+        arrayLitOfGetTypeCalls.curFile = decl.curFile
+        return arrayLitOfGetTypeCalls
+    }
+
+    // C++: Sema/Test/MockUtils.cpp:735-743.
+    public func SetGetTypeForTypeParamDecl(pkg: Package): Unit {
+        getTypeForTypeParamDecl = FindGlobalDecl<FuncDecl>(pkg.files[0], GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME)
+        if (getTypeForTypeParamDecl.isNone()) {
+            let generatedDecl = GenerateGetTypeForTypeParamIntrinsic(pkg, typeManager)
+            getTypeForTypeParamDecl = generatedDecl
+            DemandIndex(pkg)[GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME] = generatedDecl
+            DemandIndex(pkg.files[0])[GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME] = generatedDecl
+        }
     }
 
     public static func PrependFuncGenericSubst(originalGeneric: Option<Generic>, mockedGeneric: Option<Generic>,

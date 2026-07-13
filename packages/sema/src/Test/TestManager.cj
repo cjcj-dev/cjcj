@@ -275,6 +275,8 @@ public class TestManager {
         }
         if (ShouldMarkMockSupported(pkg)) {
             ctx.PrepareManglerContext(pkg)
+            // C++: Sema/Test/TestManager.cpp:845.
+            mockUtils.getOrThrow().SetGetTypeForTypeParamDecl(pkg)
             pkg.EnableAttr(Attribute.MOCK_SUPPORTED)
             MarkNodesMockSupported(pkg)
         } else {
