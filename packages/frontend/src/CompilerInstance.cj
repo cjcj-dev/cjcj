@@ -26,6 +26,17 @@ import cjcj::chir.ToCHIRPhase as ChirToCHIRPhase
 import std.collection.*
 import std.core.Box as CoreBox
 
+// Faithful port of C++ RegisterMacroCallDiagInfos (Frontend/CompilerInstance.cpp:935-947).
+func RegisterMacroCallDiagInfos(diag: DiagnosticEngine, pkg: Package): Unit {
+    for (file in pkg.files) {
+        for (macroCall in file.originalMacroCallNodes) {
+            if (let Some(invocation) <- macroCall.GetInvocation()) {
+                diag.AsBasicDiagnosticEngine().RegisterMacroCallDiagInfo(invocation.macroCallDiagInfo)
+            }
+        }
+    }
+}
+
 private class PendingMangledDecl {
     public let astDecl: Decl
     public let mangleDecl: RealMangleDecl
@@ -584,6 +595,7 @@ public class CompilerInstance {
         if (pkg.files.isEmpty()) {
             return true
         }
+        RegisterMacroCallDiagInfos(diag, pkg)
         let realASTPkg = match (realASTPkgs.get(pkg.fullPackageName)) {
             case Some(value) => value
             case None =>
