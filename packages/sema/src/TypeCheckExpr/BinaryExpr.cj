@@ -1030,18 +1030,15 @@ private func SynCompositionExpr(typeManager: TypeManager, be: BinaryExpr,
 }
 
 private func SynFlowExpr(typeManager: TypeManager, be: BinaryExpr,
-    synthesizer!: Option<BinaryOperandSynthesizer> = None): Ty {
+    synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Ty {
     let desugarResult = SynFlowExpr(typeManager, be, synthesizer.getOrThrow())
     if (desugarResult[0]) {
         return desugarResult[1]
     }
-    if (be.op == TokenKind.PIPELINE) {
-        return SynPipelineExpr(typeManager, be, synthesizer: synthesizer)
-    }
-    if (be.op == TokenKind.COMPOSITION) {
-        return SynCompositionExpr(typeManager, be, synthesizer: synthesizer)
-    }
-    return BinaryInvalid(be)
+    let _ = BinaryInvalid(be)
+    DiagnoseForBinaryExpr(typeManager, be, synthesizer, diag)
+    return TypeManager.GetInvalidTy()
 }
 
 private func ChkFlowExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
@@ -1488,7 +1485,7 @@ public func SynBinaryExpr(impl: TypeCheckerImpl, be: BinaryExpr,
     } else if (be.op == TokenKind.COALESCING) {
         return SynCoalescingExpr(impl, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
     } else if (IsFlowOperator(be.op)) {
-        return SynFlowExpr(typeManager, be, synthesizer: synthesizer)
+        return SynFlowExpr(typeManager, be, synthesizer: synthesizer, diag: diag)
     } else {
         be.SetTy(TypeManager.GetInvalidTy())
     }
@@ -1652,7 +1649,7 @@ extend TypeChecker {
         } else if (IsShiftOperator(be.op)) {
             inferRet = SynShiftExpr(impl.typeManager, be, synthesizer: Some(synthesizer))
         } else if (IsFlowOperator(be.op)) {
-            inferRet = SynFlowExpr(impl.typeManager, be, synthesizer: Some(synthesizer))
+            inferRet = SynFlowExpr(impl.typeManager, be, synthesizer: Some(synthesizer), diag: impl.diag)
             return (Some(be.GetTy().getOrThrow()), inferRet)
         } else if (be.op == TokenKind.COALESCING) {
             let ty = SynCoalescingExpr(impl, be, ctx: Some(ctx), synthesizer: Some(synthesizer),
