@@ -349,16 +349,6 @@ private func ignoredInstantiationKind(decl: Decl): Bool {
         decl.astKind == ASTKind.GENERIC_PARAM_DECL || decl.astKind == ASTKind.PACKAGE_DECL
 }
 
-private func addTyUnique(values: ArrayList<Ty>, ty: Ty): Bool {
-    for (value in values) {
-        if (SameTy(value, ty)) {
-            return false
-        }
-    }
-    values.add(ty)
-    return true
-}
-
 private func HasJavaTargetAttr(target: Decl): Bool {
     if (let Some(_) <- HasJavaAttr(target)) {
         return true
@@ -1570,7 +1560,12 @@ class GenericInstantiationManagerImpl {
             }
         }
         curTriggerNode = node
-        InstantiateGenericTysForNode(node, pkg)
+        if (let Some(ty) <- node.GetTy()) {
+            if (Ty.IsTyCorrect(ty) && !ty.HasIntersectionTy()) {
+                InstantiateGenericTysForMemoryLayout(ty, pkg)
+                GenericTyExtendInstantiate(ty, pkg)
+            }
+        }
         if (let Some(refExpr) <- (node as RefExpr)) {
             GenericRefExprInstantiate(refExpr, pkg)
             return VisitAction.SKIP_CHILDREN
@@ -1642,31 +1637,46 @@ class GenericInstantiationManagerImpl {
         return false
     }
 
-    private func InstantiateGenericTysForNode(node: Node, pkg: Package): Unit {
-        if (let Some(ty) <- node.GetTy()) {
-            if (Ty.IsTyCorrect(ty) && !ty.HasIntersectionTy()) {
-                let visited = ArrayList<Ty>()
-                InstantiateGenericTy(ty, pkg, visited)
+    private func GenericTyExtendInstantiate(ty: Ty, pkg: Package): Unit {
+        if (ty.HasGeneric()) {
+            return
+        }
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(ty)) {
+            InstantiateGenericDeclWithInstTys(decl, copyTypeArgs(Some(ty)), pkg)
+        }
+        let extends = ArrayList<ExtendDecl>()
+        for (extendDecl in ci.typeManager.GetTyUsedExtends(ty)) {
+            extends.add(extendDecl)
+        }
+        if (extends.isEmpty()) {
+            return
+        }
+        for (extendDecl in extends) {
+            if (!RequireInstantiation(extendDecl)) {
+                continue
             }
+            let extendTy = GetDeclTy(extendDecl).getOrThrow()
+            let promotedTys = promotion.Promote(ty, extendTy)
+            CJC_ASSERT(!promotedTys.IsEmpty())
+            if (!ci.typeManager.CheckExtendWithConstraint(ty, Some(extendDecl))) {
+                continue
+            }
+            InstantiateGenericDeclWithInstTys(extendDecl,
+                ci.typeManager.GetTypeArgs(promotedTys.values[0]), pkg)
         }
     }
 
-    private func InstantiateGenericTy(ty: Ty, pkg: Package, visited: ArrayList<Ty>): Unit {
-        if (!Ty.IsTyCorrect(ty) || ty.HasGeneric() || !addTyUnique(visited, ty)) {
+    private func InstantiateGenericTysForMemoryLayout(ty: Ty, pkg: Package): Unit {
+        if (ty.HasGeneric()) {
             return
         }
         for (arg in ty.typeArgs) {
-            InstantiateGenericTy(arg, pkg, visited)
-        }
-        if (let Some(target) <- Ty.GetDeclPtrOfTy(ty)) {
-            InstantiateGenericDeclWithInstTys(target, copyTypeArgs(Some(ty)), pkg)
-        }
-        for (extendDecl in ci.typeManager.GetTyUsedExtends(ty)) {
-            if (let Some(extendTy) <- GetDeclTy(extendDecl)) {
-                if (!extendTy.HasGeneric() && ci.typeManager.CheckExtendWithConstraint(ty, Some(extendDecl))) {
-                    InstantiateGenericDeclWithInstTys(extendDecl, copyTypeArgs(Some(extendTy)), pkg)
-                }
+            if (!arg.typeArgs.isEmpty()) {
+                InstantiateGenericTysForMemoryLayout(arg, pkg)
             }
+        }
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(ty)) {
+            InstantiateGenericDeclWithInstTys(decl, copyTypeArgs(Some(ty)), pkg)
         }
     }
 
