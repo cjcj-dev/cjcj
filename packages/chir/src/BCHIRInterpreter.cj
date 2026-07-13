@@ -11,6 +11,8 @@ public class BCHIRInterpreter {
     private let interpStack: InterpreterStack = InterpreterStack()
     private let arena: InterpreterArena = InterpreterArena()
     private let env: InterpreterEnv
+    // Mirrors C++ BCHIRInterpreter.h:139-141.
+    private var interpreterError: Bool = false
     private var lastResult: IResult = INotRun
     private var currentException: Option<InterpreterValue> = None
 
@@ -456,6 +458,11 @@ public class BCHIRInterpreter {
     private func Finish(result: IResult): IResult {
         lastResult = result
         return result
+    }
+
+    // Mirrors C++ BCHIRInterpreter.cpp:738-741.
+    private func RaiseError(_opIndex: Int64, _message: String): Unit {
+        interpreterError = true
     }
 
     private func CurrentFrameName(code: BCHIRDefinition, pc: Int64): String {
