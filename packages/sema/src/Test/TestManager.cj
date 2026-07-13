@@ -92,6 +92,11 @@ public func ShouldBeMarkedAsContainingMockCreationCall(callExpr: CallExpr, enclo
     return false
 }
 
+// C++: Sema/Test/TestManager.cpp:557-560.
+public func IsMockAnnotedLambda(node: Node): Bool {
+    return node.astKind == ASTKind.LAMBDA_EXPR && node.TestAttr(Attribute.MOCK_SUPPORTED)
+}
+
 private func NodeBelongsToPackage(node: Node, pkg: Package): Bool {
     if (let Some(fileNode) <- node.curFile) {
         if (let Some(curPkg) <- fileNode.curPackage) {
@@ -260,6 +265,18 @@ public class TestManager {
 
     public static func TestCompilationOption(): String {
         return TEST_COMPILATION_OPTION
+    }
+
+    // C++: Sema/Test/TestManager.cpp:87-96.
+    public func ReportDoesntSupportMocking(reportOn: Expr, name: String, pkg: String): Unit {
+        DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_doesnt_support_mocking, reportOn,
+            arguments: [name, pkg, MOCK_ON_COMPILATION_OPTION]).Emit()
+    }
+
+    // C++: Sema/Test/TestManager.cpp:118-121.
+    public func ReportMockDisabled(reportOn: Expr): Unit {
+        DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_disabled, reportOn,
+            arguments: [MOCK_ON_COMPILATION_OPTION]).Emit()
     }
 
     public func PrepareToMock(pkg: Package): Unit {
