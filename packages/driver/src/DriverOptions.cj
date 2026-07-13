@@ -1,11 +1,13 @@
 package cjcj::driver
 
 import std.collection.*
+import std.sort.*
 import cjcj::option.Backend as OptionBackend
 import cjcj::option.BackendToString as OptionBackendToString
 import cjcj::option.GetDefaultOutputNameLength
 import cjcj::option.GetHardwareConcurrency
-import cjcj::utils.{AccessResultType, FILE_PATH_MAX_LENGTH, FileMode}
+import cjcj::option.StableHashString
+import cjcj::utils.{AccessResultType, CJC_ASSERT, FILE_PATH_MAX_LENGTH, FileMode}
 import cjcj::utils.Semaphore as UtilsSemaphore
 
 public let OBFUCATION_LEVEL_MIN: Int64 = 1
@@ -400,30 +402,53 @@ public class DriverOptions {
     }
 
     public func SetCompilationCachedPath(): Unit {
-        if (!compilationCachedPath.isEmpty()) {
-            return
+        if (let Some(dir) <- outputDir) {
+            compilationCachedPath = dir
+        } else if (FileUtil.IsDir(output)) {
+            compilationCachedPath = output
+        } else {
+            compilationCachedPath = FileUtil.GetDirPath(output)
         }
-        let baseDir = outputDir ?? FileUtil.GetDirPath(output)
-        compilationCachedDir = FileUtil.JoinPath(baseDir, ".cangjie_cache")
-        compilationCachedFileName = moduleName
-        compilationCachedPath = FileUtil.JoinPath(compilationCachedDir, compilationCachedFileName)
+        CJC_ASSERT(!compilationCachedPath.isEmpty())
+    }
+
+    public func GetCacheRelativeFilePath(filePath: String): String {
+        let absFilePath = FileUtil.GetAbsPath(filePath)
+        if (let Some(absPath) <- absFilePath) {
+            let relativePath = FileUtil.GetRelativePath(FileUtil.JoinPath(compilationCachedPath, ""), absPath)
+            if (let Some(path) <- relativePath) {
+                return path
+            }
+        }
+        return FileUtil.GetFileName(filePath)
+    }
+
+    public func GenerateNamesOfCachedDirAndFile(fullPackageName: String): (String, String) {
+        var fileName = ""
+        if (compilePackage) {
+            fileName = fullPackageName
+        } else {
+            let sortedSrcFiles = ArrayList<String>()
+            for (srcFile in srcFiles) {
+                sortedSrcFiles.add(GetCacheRelativeFilePath(srcFile))
+            }
+            sort(sortedSrcFiles, by: { left: String, right: String =>
+                if (left < right) { Ordering.LT } else if (left > right) { Ordering.GT } else { Ordering.EQ }
+            }, stable: true)
+            for (srcFile in sortedSrcFiles) {
+                fileName += srcFile
+            }
+        }
+        return (FileUtil.JoinPath(compilationCachedPath, ".cached"), StableHashString(fileName))
     }
 
     public func GetHashedObjFileName(fileName: String): String {
-        if (compilationCachedPath.isEmpty()) {
-            SetCompilationCachedPath()
-        }
-        return FileUtil.JoinPath(compilationCachedDir, fileName)
+        return FileUtil.JoinPath(compilationCachedDir, StableHashString(compilationCachedFileName + fileName))
     }
 
     public func GetHashedObjFileNameForPackage(fullPackageName: String, fileName: String): String {
-        if (compilationCachedPath.isEmpty()) {
-            SetCompilationCachedPath()
-        }
-        if (!compilePackage || fullPackageName == fileName) {
-            return FileUtil.JoinPath(compilationCachedDir, fileName)
-        }
-        return FileUtil.JoinPath(compilationCachedDir, fullPackageName + "-" + fileName)
+        let (dir, cachedFileName) = GenerateNamesOfCachedDirAndFile(fullPackageName)
+        return FileUtil.JoinPath(dir, StableHashString(cachedFileName + fileName))
     }
 
     private func PerformPostActions(): Bool {

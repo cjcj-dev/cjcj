@@ -792,8 +792,7 @@ private func emitPackageModules(
     var moduleIndex: Int64 = 0
     while (moduleIndex < modules.size) {
         let fileName = outputFileNameForModule(instance.invocation.globalOptions, pkg, moduleIndex, modules.size)
-        let path = outputPathForModule(instance.invocation.globalOptions, pkg, modules[moduleIndex],
-            packageIndex, moduleIndex, modules.size, fileName)
+        let path = outputPathForModule(instance.invocation.globalOptions, packageIndex, modules.size, fileName)
         var saved = false
         if (!ensureOutputDirectory(path)) {
             instance.diag.Diagnose(DiagCategory.OTHER, DEFAULT_POSITION,
@@ -825,21 +824,14 @@ private func registerFrontendOutput(options: GlobalOptions, moduleName: String, 
 
 private func outputPathForModule(
     options: GlobalOptions,
-    pkg: RealCHIRPackage,
-    module: LLVMModuleHandle,
     packageIndex: Int64,
-    moduleIndex: Int64,
     moduleCount: Int64,
     fileName: String
 ): String {
     if (packageIndex == 0 && moduleCount == 1 && !options.output.isEmpty() && !IsDir(options.output)) {
         return options.output
     }
-    if (options.saveTemps) {
-        return FileUtil.JoinPath(options.tempFolderPath, fileName + ".bc")
-    }
-    let moduleName = outputCacheNameForModule(pkg, module, moduleIndex)
-    return options.GenerateCachedPathNameForCodeGen(moduleName, ".bc")
+    return FileUtil.JoinPath(options.tempFolderPath, fileName + ".bc")
 }
 
 private func outputFileNameForModule(options: GlobalOptions, pkg: RealCHIRPackage, moduleIndex: Int64,
@@ -852,19 +844,6 @@ private func outputFileNameForModule(options: GlobalOptions, pkg: RealCHIRPackag
         return prefix + FileUtil.GetFileNameWithoutExtension(options.srcFiles[0])
     }
     return prefix + FileUtil.ToCjoFileName(pkg.GetName())
-}
-
-private func outputCacheNameForModule(
-    pkg: RealCHIRPackage,
-    module: LLVMModuleHandle,
-    moduleIndex: Int64
-): String {
-    let moduleName = if (module.name.isEmpty()) {
-        pkg.GetName() + "." + moduleIndex.toString()
-    } else {
-        module.name
-    }
-    return moduleName
 }
 
 private func ensureOutputDirectory(path: String): Bool {
