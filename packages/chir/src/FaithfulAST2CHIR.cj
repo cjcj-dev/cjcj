@@ -718,24 +718,11 @@ private class FaithfulInitDeclOwnerMap {
     }
 }
 
-@OverflowWrapping
-private func FaithfulInitHashCombine(seed: Int64, value: Int64): Int64 {
-    return seed * 1315423911 + value + 0x9e3779b9
-}
-
 private func FaithfulInitDeclHash(decl: AstDecl): Int64 {
     if (let Some(defaultKey) <- FaithfulInitDefaultParamDeclIdentity(decl)) {
         return defaultKey.hashCode()
     }
-    if (decl.TestAttr(AstAttribute.IMPORTED)) {
-        if (!decl.rawMangleName.isEmpty()) {
-            return FaithfulInitHashCombine(17, decl.rawMangleName.hashCode())
-        }
-        if (!decl.mangledName.isEmpty()) {
-            return FaithfulInitHashCombine(31, decl.mangledName.hashCode())
-        }
-    }
-    return decl.objectId
+    return decl.hashCode()
 }
 
 private func FaithfulInitSameDecl(left: AstDecl, right: AstDecl): Bool {
@@ -747,14 +734,6 @@ private func FaithfulInitSameDecl(left: AstDecl, right: AstDecl): Bool {
     }
     if (FaithfulInitDefaultParamDeclIdentity(right).isSome()) {
         return false
-    }
-    if (left.TestAttr(AstAttribute.IMPORTED) && right.TestAttr(AstAttribute.IMPORTED)) {
-        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
-            return left.rawMangleName == right.rawMangleName
-        }
-        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
-            return left.mangledName == right.mangledName
-        }
     }
     return left == right
 }
