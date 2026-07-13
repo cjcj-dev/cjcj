@@ -200,7 +200,7 @@ private func IntrinsicLLVMName(kind: IntrinsicKind): Option<String> {
     }
 }
 
-private func IntrinsicIsPlatformDependent(kind: IntrinsicKind): Bool {
+private func IsPlatformDependent(kind: IntrinsicKind): Bool {
     return kind == IntrinsicKind.GET_MAX_HEAP_SIZE ||
         kind == IntrinsicKind.GET_ALLOCATE_HEAP_SIZE ||
         kind == IntrinsicKind.GET_REAL_HEAP_SIZE ||
@@ -2578,7 +2578,7 @@ public class IRBuilder2 <: Resource {
         overloadedTypes: ArrayList<LLVMTypeRef>): LLVMValueRef {
         if (let Some(intrinsicName) <- IntrinsicLLVMName(kind)) {
             let finalOverloadedTypes = ArrayList<LLVMTypeRef>()
-            if (IntrinsicIsPlatformDependent(kind)) {
+            if (IsPlatformDependent(kind)) {
                 finalOverloadedTypes.add(GetSizetLLVMType())
             } else {
                 for (overloadedType in overloadedTypes) {

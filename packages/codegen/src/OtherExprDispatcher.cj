@@ -45,7 +45,7 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         return GenerateVArrayExpression(irBuilder, chirExpr)
     }
     if (kind == ExprKind.VARRAY_BUILDER) {
-        return GenerateVArrayBuilderExpression(irBuilder, chirExpr)
+        return GenerateVArrayBuilder(irBuilder, chirExpr)
     }
     if (kind == ExprKind.FIELD || kind == ExprKind.FIELD_BY_NAME) {
         return GenerateFieldExpression(irBuilder, chirExpr)

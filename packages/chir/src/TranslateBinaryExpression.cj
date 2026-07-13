@@ -2,7 +2,7 @@ package cjcj::chir
 
 import cjcj::utils.{OverflowStrategy, OverflowStrategyIndex}
 
-public func CHIR2BCHIRTranslateBinaryExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
+public func TranslateBinaryExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
     let opCode = BCHIRBinaryExprKindToOpCode(expr.GetExprKind())
     if (opCode == OpCode.INVALID) {
         context.definition.PushOp(OpCode.NOT_SUPPORTED)

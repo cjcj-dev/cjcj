@@ -14,10 +14,10 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
         case ExprKind.TUPLE =>
             context.definition.PushOp(OpCode.TUPLE)
             context.definition.PushCell(expr.GetNumOfOperands())
-        case ExprKind.FIELD => TranslateFieldExpression(context, expr)
+        case ExprKind.FIELD => TranslateField(context, expr)
         case ExprKind.APPLY => TranslateApplyExpression(context, expr)
         case ExprKind.INVOKE => TranslateInvokeExpression(context, expr, false)
-        case ExprKind.INSTANCEOF => TranslateInstanceOfExpression(context, expr)
+        case ExprKind.INSTANCEOF => TranslateInstanceOf(context, expr)
         case ExprKind.TYPECAST => TranslateTypecastExpression(context, expr, false)
         case ExprKind.INTRINSIC => TranslateIntrinsicExpression(compiler, context, expr, false)
         case ExprKind.GET_EXCEPTION => context.definition.PushOp(OpCode.GET_EXCEPTION)
@@ -29,7 +29,7 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
         case ExprKind.VARRAY =>
             context.definition.PushOp(OpCode.VARRAY)
             context.definition.PushCell(expr.GetNumOfOperands())
-        case ExprKind.BOX => TranslateBoxExpression(context, expr)
+        case ExprKind.BOX => TranslateBox(context, expr)
         case ExprKind.UNBOX => context.definition.PushOp(OpCode.UNBOX)
         case ExprKind.UNBOX_TO_REF => context.definition.PushOp(OpCode.UNBOX_REF)
         case ExprKind.VARRAY_BUILDER | ExprKind.SPAWN | ExprKind.INVOKESTATIC | ExprKind.GET_RTTI |
@@ -55,7 +55,7 @@ private func TranslateApplyExpression(context: CHIR2BCHIRContext, expr: Expressi
     context.definition.PushCell(expr.GetNumOfOperands())
 }
 
-private func TranslateFieldExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
+private func TranslateField(context: CHIR2BCHIRContext, expr: Expression): Unit {
     if (let Some(field) <- (expr as Field)) {
         let path = field.GetPath()
         if (path.size == 1) {
@@ -125,7 +125,7 @@ public func TranslateTypecastExpression(context: CHIR2BCHIRContext, expr: Expres
     }
 }
 
-private func TranslateInstanceOfExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
+private func TranslateInstanceOf(context: CHIR2BCHIRContext, expr: Expression): Unit {
     if (let Some(instanceOf) <- (expr as InstanceOf)) {
         let opIndex = context.definition.NextIndex()
         context.definition.PushOp(OpCode.INSTANCEOF)
@@ -149,7 +149,7 @@ private func TranslateInstanceOfExpression(context: CHIR2BCHIRContext, expr: Exp
     }
 }
 
-private func TranslateBoxExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
+private func TranslateBox(context: CHIR2BCHIRContext, expr: Expression): Unit {
     if (let Some(box) <- (expr as Box)) {
         if (let Some(sourceTy) <- box.GetSourceTy()) {
             let opIndex = context.definition.NextIndex()

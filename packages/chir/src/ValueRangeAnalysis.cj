@@ -150,7 +150,7 @@ public func HandleNonNullLiteralValue(constant: Constant): RangeValueDomain {
     return HandleNonNullLiteralValue(constant.literal, constant.GetResultType())
 }
 
-public func CanAnalyseRange(typeValue: Type): Bool {
+public func CanAnalyse(typeValue: Type): Bool {
     return typeValue.IsInteger() || typeValue.IsBoolean()
 }
 
@@ -487,7 +487,7 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
         if (let Some(destTy) <- dest.GetType()) {
             if (let Some(lhsTy) <- lhs.GetType()) {
                 if (let Some(rhsTy) <- rhs.GetType()) {
-                    return CanAnalyseRange(destTy) && CanAnalyseRange(lhsTy) && CanAnalyseRange(rhsTy)
+                    return CanAnalyse(destTy) && CanAnalyse(lhsTy) && CanAnalyse(rhsTy)
                 }
             }
         }

@@ -24,7 +24,7 @@ public func GenerateVArrayExpression(irBuilder: IRBuilder2, chirExpr: Expression
     return LLVMNullValue()
 }
 
-public func GenerateVArrayBuilderExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+public func GenerateVArrayBuilder(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(varrayBuilder) <- (chirExpr as VArrayBuilder)) {
         let varrayTy = (RequiredVArrayBuilderResultType(varrayBuilder) as VArrayType).getOrThrow()
         let cgMod = irBuilder.GetCGModule()

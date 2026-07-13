@@ -113,7 +113,7 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
         return LLVMNullValue()
     }
     if (kind == IntrinsicKind.CPOINTER_ADD) {
-        return GenerateCPointerAdd(irBuilder, args, resultType)
+        return CPointerAdd(irBuilder, args, resultType)
     }
     if (kind == IntrinsicKind.CPOINTER_READ) {
         return CPointerRead(irBuilder, args, typeArgs, resultType)
@@ -477,7 +477,7 @@ private func GetRawArrayTypeFromArrayArg(arg: Value): Option<RawArrayType> {
     return None
 }
 
-private func GenerateCPointerAdd(irBuilder: IRBuilder2, args: ArrayList<Value>,
+private func CPointerAdd(irBuilder: IRBuilder2, args: ArrayList<Value>,
     resultType: Option<Type>): LLVMValueRef {
     if (args.size < 2 || resultType.isNone()) {
         return LLVMNullValue()

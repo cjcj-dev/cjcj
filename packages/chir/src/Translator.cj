@@ -3047,7 +3047,7 @@ public class Translator {
             return RequireResult(builder.CreateVArray(arrayTy, elements, CurrentBlock()))
         }
         if (arrayTy.IsStructArray()) {
-            return TranslateStructArrayLit(expr, RequireStructType(arrayTy))
+            return TranslateStructArray(expr, RequireStructType(arrayTy))
         }
         CJC_ASSERT(false)
         return None
@@ -3058,7 +3058,7 @@ public class Translator {
         if (expr.isValueArray) {
             CJC_ASSERT(expr.args.size == 1)
             CJC_ASSERT(!arrayTy.GetTypeArgs().isEmpty())
-            return TranslateVArrayExpr(expr, RequireVArrayType(arrayTy))
+            return TranslateVArray(expr, RequireVArrayType(arrayTy))
         }
         let rawArrayTy = RequireRawArrayType(arrayTy.StripAllRefs())
         if (expr.args.isEmpty()) {
@@ -6371,7 +6371,7 @@ public class Translator {
         throw IllegalArgumentException("faithful AST2CHIR enum pattern constructor expression has no target")
     }
 
-    private func TranslateVArrayExpr(expr: AstArrayExpr, arrayTy: VArrayType): Value {
+    private func TranslateVArray(expr: AstArrayExpr, arrayTy: VArrayType): Value {
         if (expr.args.size != 1) {
             throw IllegalArgumentException("faithful AST2CHIR VArray expression expects one argument")
         }
@@ -6392,7 +6392,7 @@ public class Translator {
         return RequireResult(builder.CreateVArrayBuilder(arrayTy, sizeValue, argValue, nullFn, CurrentBlock()))
     }
 
-    private func TranslateStructArrayLit(expr: AstArrayLit, arrayTy: StructType): Value {
+    private func TranslateStructArray(expr: AstArrayLit, arrayTy: StructType): Value {
         let genericArgs = arrayTy.GetGenericArgs()
         if (genericArgs.isEmpty()) {
             throw IllegalStateException("faithful AST2CHIR std.core.Array type has no element type")

@@ -66,9 +66,9 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
             // required for a shared/static library to be loadable by the runtime (the runtime reads
             // the SDK version at dlopen time via CheckPackageCompatibility). Only the executable
             // entry (main/cj_entry$) is output-type-specific, so its guard lives inside
-            // EmitMainFunctionIR (mirroring C++ EmitMain's internal CompileExecutable() early-return).
+            // EmitMain (mirroring C++ EmitMain's internal CompileExecutable() early-return).
             EmitCJSDKVersion(cgModToEmit)
-            EmitMainFunctionIR(cgModToEmit)
+            EmitMain(cgModToEmit)
             RegisterExceptionRaiser(cgModToEmit)
             CreatePackageInitResetFunction(cgModToEmit)
             SpecifyPackageInitFunc(cgModToEmit)
@@ -358,7 +358,7 @@ private func EmitCJSDKVersion(cgMod: CGModule): Unit {
     }
 }
 
-private func EmitMainFunctionIR(cgMod: CGModule): Unit {
+private func EmitMain(cgMod: CGModule): Unit {
     // Mirror C++ EmitMain (EmitPackageIR.cpp:253): the executable entry is only emitted when
     // compiling an executable; for a library the runtime provides no `main`.
     if (!cgMod.GetCGContext().GetCompileOptions().CompileExecutable()) {

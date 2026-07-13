@@ -3,18 +3,18 @@ package cjcj::chir
 import cjcj::utils.{OverflowStrategy, OverflowStrategyIndex}
 import std.collection.*
 
-public func CHIR2BCHIRTranslateTerminatorExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
+public func TranslateTerminatorExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     match (expr.GetExprKind()) {
         case ExprKind.GOTO => TranslateGotoTerminator(compiler, context, expr)
         case ExprKind.BRANCH => TranslateBranchTerminator(compiler, context, expr)
-        case ExprKind.MULTIBRANCH => TranslateMultiBranchTerminator(compiler, context, expr)
+        case ExprKind.MULTIBRANCH => TranslateMultiBranch(compiler, context, expr)
         case ExprKind.EXIT => TranslateExitTerminator(compiler, context, expr)
         case ExprKind.RAISE_EXCEPTION => TranslateRaiseTerminator(compiler, context, expr)
         case ExprKind.APPLY_WITH_EXCEPTION => TranslateApplyWithExceptionTerminator(compiler, context, expr)
         case ExprKind.INVOKE_WITH_EXCEPTION => TranslateInvokeWithExceptionTerminator(compiler, context, expr)
         case ExprKind.INVOKESTATIC_WITH_EXCEPTION => context.definition.PushOp(OpCode.ABORT)
-        case ExprKind.INT_OP_WITH_EXCEPTION => TranslateIntOpWithExceptionTerminator(compiler, context, expr)
+        case ExprKind.INT_OP_WITH_EXCEPTION => TranslateIntOpWithException(compiler, context, expr)
         case ExprKind.ALLOCATE_WITH_EXCEPTION => TranslateAllocateWithExceptionTerminator(compiler, context, expr)
         case _ => context.definition.PushOp(OpCode.ABORT)
     }
@@ -42,7 +42,7 @@ private func TranslateBranchTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIR
     }
 }
 
-private func TranslateMultiBranchTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
+private func TranslateMultiBranch(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     if (let Some(multi) <- (expr as MultiBranch)) {
         let selectorTy: Option<Type> = if (expr.GetNumOfOperands() > 0) {
@@ -137,7 +137,7 @@ private func TranslateInvokeWithExceptionTerminator(compiler: CHIR2BCHIR, contex
     TranslateTryTerminatorJumps(compiler, context, expr.AsTerminator().getOrThrow())
 }
 
-private func TranslateIntOpWithExceptionTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
+private func TranslateIntOpWithException(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     if (let Some(intOp) <- (expr as IntOpWithException)) {
         let opCode = BCHIRBinaryExprKindWithExceptionToOpCode(intOp.GetOpKind())

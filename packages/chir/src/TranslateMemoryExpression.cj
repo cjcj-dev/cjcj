@@ -2,7 +2,7 @@ package cjcj::chir
 
 import cjcj::utils.CJC_ASSERT
 
-public func CHIR2BCHIRTranslateMemoryExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
+public func TranslateMemoryExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
     match (expr.GetExprKind()) {
         case ExprKind.ALLOCATE => TranslateAllocateExpression(context, expr, false)
         case ExprKind.LOAD => context.definition.PushOp(OpCode.DEREF)

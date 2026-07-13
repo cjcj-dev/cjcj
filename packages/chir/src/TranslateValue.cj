@@ -1,6 +1,6 @@
 package cjcj::chir
 
-public func CHIR2BCHIRTranslateValue(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext, value: Value): Unit {
+public func TranslateValue(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext, value: Value): Unit {
     if (value.IsParameter()) {
         BCHIRPushOpWithName(context.definition, OpCode.LVAR, BCHIRMangledName(value))
         context.definition.PushCell(compiler.LVarId(context, value))

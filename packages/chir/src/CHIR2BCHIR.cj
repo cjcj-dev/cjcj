@@ -296,13 +296,13 @@ public class CHIR2BCHIR {
             context.definition.PushOp(OpCode.NULLPTR)
         }
         for (operand in expr.GetOperands()) {
-            CHIR2BCHIRTranslateValue(this, context, operand)
+            TranslateValue(this, context, operand)
         }
         match (expr.GetExprMajorKind()) {
-            case ExprMajorKind.TERMINATOR => CHIR2BCHIRTranslateTerminatorExpression(this, context, expr)
-            case ExprMajorKind.UNARY_EXPR => CHIR2BCHIRTranslateUnaryExpression(context, expr)
-            case ExprMajorKind.BINARY_EXPR => CHIR2BCHIRTranslateBinaryExpression(context, expr)
-            case ExprMajorKind.MEMORY_EXPR => CHIR2BCHIRTranslateMemoryExpression(context, expr)
+            case ExprMajorKind.TERMINATOR => TranslateTerminatorExpression(this, context, expr)
+            case ExprMajorKind.UNARY_EXPR => TranslateUnaryExpression(context, expr)
+            case ExprMajorKind.BINARY_EXPR => TranslateBinaryExpression(context, expr)
+            case ExprMajorKind.MEMORY_EXPR => TranslateMemoryExpression(context, expr)
             case ExprMajorKind.STRUCTURED_CTRL_FLOW_EXPR => CHIR2BCHIRTranslateStructuredExpression(context, expr)
             case ExprMajorKind.OTHERS => CHIR2BCHIRTranslateOtherExpression(this, context, expr)
         }

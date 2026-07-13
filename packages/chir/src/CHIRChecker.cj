@@ -960,7 +960,7 @@ public class CHIRChecker {
             if (let Some(retTy) <- ExpectedExitReturnType(term, topLevelFunc)) {
                 let value = term.GetOperand(0)
                 if (let Some(valueTy) <- value.GetType()) {
-                    if (!CHIRCheckerTypeIsExpected(valueTy, retTy)) {
+                    if (!TypeIsExpected(valueTy, retTy)) {
                         TypeCheckError(term, value, retTy.ToString(), topLevelFunc, result)
                     }
                 }
@@ -1007,7 +1007,7 @@ public class CHIRChecker {
         if (!CheckOperandNumEqual(1, term, topLevelFunc, result)) {
             return
         }
-        if (!CheckSuccessorNumAtLeast(2, term, topLevelFunc, result)) {
+        if (!SuccessorNumAtLeast(2, term, topLevelFunc, result)) {
             return
         }
         if (let Some(condTy) <- term.GetOperand(0).GetType()) {
@@ -1031,7 +1031,7 @@ public class CHIRChecker {
 
     private func CheckRaiseException(term: Terminator, topLevelFunc: Function, result: CHIRCheckResult): Unit {
         ShouldNotHaveResult(term, topLevelFunc, result)
-        if (!CheckOperandNumAtLeast(1, term, topLevelFunc, result)) {
+        if (!OperandNumAtLeast(1, term, topLevelFunc, result)) {
             return
         }
         let exceptionValue = term.GetOperand(0)
@@ -1048,7 +1048,7 @@ public class CHIRChecker {
         if (!CheckHaveResult(term, topLevelFunc, result)) {
             return
         }
-        CheckOperandNumAtLeast(1, term, topLevelFunc, result)
+        OperandNumAtLeast(1, term, topLevelFunc, result)
         CheckSuccessorNumEqual(2, term, topLevelFunc, result)
     }
 
@@ -1207,10 +1207,10 @@ public class CHIRChecker {
             case ExprKind.LOAD => CheckLoad(expr, topLevelFunc, result)
             case ExprKind.STORE => CheckStore(expr, topLevelFunc, result)
             case ExprKind.GET_ELEMENT_REF | ExprKind.GET_ELEMENT_BY_NAME =>
-                CheckOperandNumAtLeast(1, expr, topLevelFunc, result)
+                OperandNumAtLeast(1, expr, topLevelFunc, result)
                 CheckHaveResult(expr, topLevelFunc, result)
             case ExprKind.STORE_ELEMENT_REF | ExprKind.STORE_ELEMENT_BY_NAME =>
-                CheckOperandNumAtLeast(2, expr, topLevelFunc, result)
+                OperandNumAtLeast(2, expr, topLevelFunc, result)
                 CheckUnitResult(expr, topLevelFunc, result)
             case _ => result.AddError("in function ${topLevelFunc.GetIdentifier()}, in " +
                 "`${GetExpressionString(expr)}`, find unrecongnized ExprKind `${expr.GetExprKindName()}`.")
@@ -1244,7 +1244,7 @@ public class CHIRChecker {
         if (let Some(locationTy) <- location.GetType()) {
             if (let Some(valueTy) <- value.GetType()) {
                 if (let Some(refTy) <- (locationTy as RefType)) {
-                    if (!CHIRCheckerTypeIsExpected(valueTy, refTy.GetBaseType())) {
+                    if (!TypeIsExpected(valueTy, refTy.GetBaseType())) {
                         TypeCheckError(expr, value, refTy.GetBaseType().ToString(), topLevelFunc, result)
                     }
                 } else {
@@ -1354,7 +1354,7 @@ public class CHIRChecker {
                     CheckIntrinsic(intrinsicExpr, topLevelFunc, result)
                 }
             case ExprKind.RAW_ARRAY_LITERAL_INIT =>
-                CheckOperandNumAtLeast(1, expr, topLevelFunc, result)
+                OperandNumAtLeast(1, expr, topLevelFunc, result)
                 CheckHaveResult(expr, topLevelFunc, result)
             case ExprKind.GET_INSTANTIATE_VALUE => CheckGetInstantiateValue(expr, topLevelFunc, result)
             case _ => result.AddError("in function ${topLevelFunc.GetIdentifier()}, in " +
@@ -1390,7 +1390,7 @@ public class CHIRChecker {
     }
 
     private func CheckTuple(expr: Expression, topLevelFunc: Function, result: CHIRCheckResult): Unit {
-        if (!CheckOperandNumAtLeast(1, expr, topLevelFunc, result) || !CheckHaveResult(expr, topLevelFunc, result)) {
+        if (!OperandNumAtLeast(1, expr, topLevelFunc, result) || !CheckHaveResult(expr, topLevelFunc, result)) {
             return
         }
         if (let Some(resultTy) <- expr.GetResultType()) {
@@ -1453,7 +1453,7 @@ public class CHIRChecker {
                         if (let Some(operandTy) <- operand.GetType()) {
                             let expectedTy = SubstituteGenericType(payloadTypes[idx - 1],
                                 enumTy.GetEnumDef().GetGenericTypeParams(), enumTy.GetGenericArgs())
-                            if (!CHIRCheckerTypeIsExpected(operandTy, expectedTy)) {
+                            if (!TypeIsExpected(operandTy, expectedTy)) {
                                 result.AddError("in function ${topLevelFunc.GetIdentifier()}, type mismatched, the " +
                                     "${idx - 1}-th parameter type is ${expectedTy.ToString()}, but " +
                                     "${operand.GetIdentifier()}'s type is ${operandTy.ToString()} in `" +
@@ -1483,7 +1483,7 @@ public class CHIRChecker {
                 let operand = expr.GetOperand(idx)
                 if (let Some(operandTy) <- operand.GetType()) {
                     let expectedTy = elementTypes[idx]
-                    if (!CHIRCheckerTypeIsExpected(operandTy, expectedTy)) {
+                    if (!TypeIsExpected(operandTy, expectedTy)) {
                         result.AddError("in function ${topLevelFunc.GetIdentifier()}, type mismatched, the ${idx}-th " +
                             "element type in tuple type `${resultTy.ToString()}` is ${expectedTy.ToString()}, but " +
                             "${operand.GetIdentifier()}'s type is ${operandTy.ToString()} in `" +
@@ -1512,7 +1512,7 @@ public class CHIRChecker {
                     let operand = expr.GetOperand(idx)
                     if (let Some(operandTy) <- operand.GetType()) {
                         let memberTy = memberVars[idx].ty
-                        if (!CHIRCheckerTypeIsExpected(operandTy, memberTy)) {
+                        if (!TypeIsExpected(operandTy, memberTy)) {
                             result.AddError("in function ${topLevelFunc.GetIdentifier()}, type mismatched, the " +
                                 "${idx}-th member var type in struct ${structDef.GetIdentifier()} is " +
                                 "${memberTy.ToString()}, but ${operand.GetIdentifier()}'s type is " +
@@ -1541,7 +1541,7 @@ public class CHIRChecker {
                 }
                 for (operand in expr.GetOperands()) {
                     if (let Some(operandTy) <- operand.GetType()) {
-                        if (!CHIRCheckerTypeIsExpected(operandTy, elementTy)) {
+                        if (!TypeIsExpected(operandTy, elementTy)) {
                             TypeCheckError(expr, operand, elementTy.ToString(), topLevelFunc, result)
                         }
                     }
@@ -1776,7 +1776,7 @@ public class CHIRChecker {
     }
 
     private func CheckApply(expr: Apply, topLevelFunc: Function, result: CHIRCheckResult): Unit {
-        if (!CheckOperandNumAtLeast(1, expr, topLevelFunc, result) || !CheckHaveResult(expr, topLevelFunc, result)) {
+        if (!OperandNumAtLeast(1, expr, topLevelFunc, result) || !CheckHaveResult(expr, topLevelFunc, result)) {
             return
         }
         let callee = expr.GetCallee()
@@ -1797,7 +1797,7 @@ public class CHIRChecker {
     }
 
     private func CheckInvoke(expr: Invoke, topLevelFunc: Function, result: CHIRCheckResult): Unit {
-        if (!CheckOperandNumAtLeast(1, expr, topLevelFunc, result) || !CheckHaveResult(expr, topLevelFunc, result)) {
+        if (!OperandNumAtLeast(1, expr, topLevelFunc, result) || !CheckHaveResult(expr, topLevelFunc, result)) {
             return
         }
         if (!CheckInstantiatedTypeArgs(expr.GetInstantiatedTypeArgs(), expr.GetGenericTypeParams(), expr,
@@ -1812,7 +1812,7 @@ public class CHIRChecker {
     }
 
     private func CheckInvokeStatic(expr: InvokeStatic, topLevelFunc: Function, result: CHIRCheckResult): Unit {
-        if (!CheckOperandNumAtLeast(1, expr, topLevelFunc, result) || !CheckHaveResult(expr, topLevelFunc, result)) {
+        if (!OperandNumAtLeast(1, expr, topLevelFunc, result) || !CheckHaveResult(expr, topLevelFunc, result)) {
             return
         }
         if (!CheckInstantiatedTypeArgs(expr.GetInstantiatedTypeArgs(), expr.GetGenericTypeParams(), expr,
@@ -2192,7 +2192,7 @@ public class CHIRChecker {
             let arg = args[idx]
             if (let Some(argTy) <- arg.GetType()) {
                 let paramTy = funcTy.GetParamType(idx)
-                if (!CHIRCheckerTypeIsExpected(argTy, paramTy)) {
+                if (!TypeIsExpected(argTy, paramTy)) {
                     TypeCheckError(expr, arg, paramTy.ToString(), topLevelFunc, result)
                 }
             }
@@ -2213,7 +2213,7 @@ public class CHIRChecker {
             let arg = args[idx]
             if (let Some(argTy) <- arg.GetType()) {
                 let paramTy = funcTy.GetParamType(idx)
-                if (!CHIRCheckerTypeIsExpected(argTy, paramTy)) {
+                if (!TypeIsExpected(argTy, paramTy)) {
                     TypeCheckError(expr, arg, paramTy.ToString(), topLevelFunc, result)
                 }
             }
@@ -2224,8 +2224,8 @@ public class CHIRChecker {
     private func CheckCallReturnType(expectedRetTy: Type, expr: Expression, topLevelFunc: Function,
         result: CHIRCheckResult): Unit {
         if (let Some(resultTy) <- expr.GetResultType()) {
-            if (!CHIRCheckerTypeIsExpected(expectedRetTy, resultTy) &&
-                !CHIRCheckerTypeIsExpected(resultTy, expectedRetTy)) {
+            if (!TypeIsExpected(expectedRetTy, resultTy) &&
+                !TypeIsExpected(resultTy, expectedRetTy)) {
                 TypeCheckResultError(expr, expectedRetTy.ToString(), topLevelFunc, result)
             }
         }
@@ -2408,7 +2408,7 @@ public class CHIRChecker {
         return true
     }
 
-    private func CheckOperandNumAtLeast(expectedNum: Int64, expr: Expression, topLevelFunc: Function,
+    private func OperandNumAtLeast(expectedNum: Int64, expr: Expression, topLevelFunc: Function,
         result: CHIRCheckResult): Bool {
         let realNum = expr.GetNumOfOperands()
         if (expectedNum > realNum) {
@@ -2443,7 +2443,7 @@ public class CHIRChecker {
         return true
     }
 
-    private func CheckSuccessorNumAtLeast(expectedNum: Int64, term: Terminator, topLevelFunc: Function,
+    private func SuccessorNumAtLeast(expectedNum: Int64, term: Terminator, topLevelFunc: Function,
         result: CHIRCheckResult): Bool {
         let realNum = term.GetSuccessors().size
         if (expectedNum > realNum) {
@@ -2803,7 +2803,7 @@ private func CHIRCheckerTypesEqual(left: Type, right: Type): Bool {
     return left.IsEqual(right)
 }
 
-private func CHIRCheckerTypeIsExpected(srcType: Type, dstType: Type): Bool {
+private func TypeIsExpected(srcType: Type, dstType: Type): Bool {
     if (CHIRCheckerTypesEqual(srcType, dstType)) {
         return true
     }
