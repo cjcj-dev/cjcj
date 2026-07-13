@@ -2574,6 +2574,17 @@ public class IRBuilder2 <: Resource {
         return uuid
     }
 
+    public func GetTypeKindFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {
+        let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
+        let typeInfoPtrType = unsafe { LLVMPointerType(typeInfoType, 0u32) }
+        let ptr = CreateStructGEP(typeInfoType, CreateBitCast(typeInfo, typeInfoPtrType),
+            1u32, name: "ti.kind")
+        let kind = CreateLoad(unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }, ptr, name: "ti.kind")
+        LLVMSetInstructionMetadata(GetLLVMContext(), kind, "invariant.load",
+            LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>()))
+        return kind
+    }
+
     public func CallIntrinsicFuncRefEq(parameters: ArrayList<CGValue>): LLVMValueRef {
         CJC_ASSERT(parameters.size == 2)
         let realUUID0 = GetRealUUIDForAutoEnvClass(parameters[0].GetRawValue())
@@ -4529,6 +4540,32 @@ public class IRBuilder2 <: Resource {
         args.add(CreateBitCast(parameters[0], i8PtrType))
         args.add(CreateBitCast(parameters[1], i8PtrType))
         return CreateIntrinsicCallNoInvoke("llvm.cj.is.subtype", ArrayList<LLVMTypeRef>(), args)
+    }
+
+    public func CallIntrinsicIsTupleTypeOf(parameters: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(parameters.size == 3)
+        let boolType = unsafe { LLVMInt1TypeInContext(GetLLVMContext().raw) }
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let i8PtrType1 = unsafe { LLVMPointerType(i8Type, 1u32) }
+        let objectLLVMType = unsafe { LLVMTypeOf(parameters[0]) }
+        let isRefType = unsafe { LLVMGetTypeKind(objectLLVMType) } == LLVM_POINTER_TYPE_KIND &&
+            unsafe { LLVMGetPointerAddressSpace(objectLLVMType) } == 1u32
+        let objectParamType = if (isRefType) { i8PtrType1 } else { i8PtrType }
+        let functionName = if (isRefType) {
+            "llvm.cj.is.tupletype.of.p1i8"
+        } else {
+            "llvm.cj.is.tupletype.of.p0i8"
+        }
+        let functionType = MakeFunctionType(boolType,
+            ArrayList<LLVMTypeRef>([objectParamType, i8PtrType, i8PtrType]))
+        let function = cgMod.GetOrInsertFunction(functionName, functionType)
+        let args = ArrayList<LLVMValueRef>([
+            CreateBitCast(parameters[0], objectParamType),
+            CreateBitCast(parameters[1], i8PtrType),
+            CreateBitCast(parameters[2], i8PtrType)
+        ])
+        return CreateCall(function, functionType, args)
     }
 
     public func CallIntrinsicIsTypeEqualTo(parameters: ArrayList<LLVMValueRef>): LLVMValueRef {
