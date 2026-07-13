@@ -9,6 +9,7 @@ import cjcj::sema.SameTy
 import cjcj::sema.TypeSubst
 import cjcj::sema.TypeManager
 import cjcj::utils.CJC_ASSERT
+import cjcj::utils.DynamicCast
 
 foreign {
     func abort(): Unit
@@ -75,6 +76,14 @@ public class MockUtils {
     public static let spyObjVarName: String = "spiedObjectRef"
     public static let spyCallMarkerVarName: String = "shouldReturnZeroForSpy"
     public static let defaultAccessorSuffix: String = "$Buddy"
+
+    // C++: Sema/Test/MockUtils.h:104-106.
+    private let globalsByPackage: HashMap<Node, HashMap<String, Decl>> =
+        HashMap<Node, HashMap<String, Decl>>()
+    private let globalsByFile: HashMap<Node, HashMap<String, Decl>> =
+        HashMap<Node, HashMap<String, Decl>>()
+    private let localsByOuter: HashMap<Decl, HashMap<String, Decl>> =
+        HashMap<Decl, HashMap<String, Decl>>()
 
     public init() {}
 
@@ -373,34 +382,75 @@ public class MockUtils {
             kind == AccessorKind.TOP_LEVEL_VARIABLE_GETTER
     }
 
-    private static func FindMemberDeclByIdentifier(outerDecl: Decl, identifier: String): Option<Decl> {
-        for (member in outerDecl.GetMemberDecls()) {
-            if (member.identifier.Val() == identifier) {
-                return Some(member)
+    // C++: Sema/Test/MockUtils.cpp:142-154.
+    public func DemandIndex(pkg: Package): HashMap<String, Decl> {
+        if (let Some(index) <- globalsByPackage.get(pkg)) {
+            return index
+        }
+        let index = HashMap<String, Decl>()
+        globalsByPackage[pkg] = index
+        for (file in pkg.files) {
+            for (decl in file.decls) {
+                index[decl.identifier.Val()] = decl
             }
         }
-        return None
+        return index
     }
 
-    private static func FindGlobalDeclByIdentifier(file: File, identifier: String): Option<Decl> {
+    // C++: Sema/Test/MockUtils.cpp:156-166.
+    public func DemandIndex(file: File): HashMap<String, Decl> {
+        if (let Some(index) <- globalsByFile.get(file)) {
+            return index
+        }
+        let index = HashMap<String, Decl>()
+        globalsByFile[file] = index
         for (decl in file.decls) {
-            if (decl.identifier.Val() == identifier) {
-                return Some(decl)
+            index[decl.identifier.Val()] = decl
+        }
+        return index
+    }
+
+    // C++: Sema/Test/MockUtils.cpp:168-181.
+    public func DemandIndex(decl: Decl): HashMap<String, Decl> {
+        if (let Some(index) <- localsByOuter.get(decl)) {
+            return index
+        }
+        let index = HashMap<String, Decl>()
+        localsByOuter[decl] = index
+        for (memberDecl in decl.GetMemberDecls()) {
+            index[memberDecl.identifier.Val()] = memberDecl
+            if (let Some(funcDecl) <- (memberDecl as FuncDecl)) {
+                index[memberDecl.identifier.Val() + BuildArgumentList(funcDecl)] = memberDecl
             }
         }
-        if (let Some(pkg) <- file.curPackage) {
-            for (pkgFile in pkg.files) {
-                for (decl in pkgFile.decls) {
-                    if (decl.identifier.Val() == identifier) {
-                        return Some(decl)
-                    }
-                }
-            }
+        return index
+    }
+
+    // C++: Sema/Test/MockUtils.h:83-95.
+    public func FindGlobalDecl<T>(file: File, identifier: String): Option<T> where T <: Decl {
+        if (let Some(decl) <- DemandIndex(file).get(identifier)) {
+            return DynamicCast<T>(decl)
         }
         return None
     }
 
-    public static func FindAccessor(outerClass: ClassDecl, member: Decl, kind: AccessorKind): Option<Decl> {
+    // C++: Sema/Test/MockUtils.h:90-95.
+    public func FindGlobalDecl<T>(pkg: Package, identifier: String): Option<T> where T <: Decl {
+        if (let Some(decl) <- DemandIndex(pkg).get(identifier)) {
+            return DynamicCast<T>(decl)
+        }
+        return None
+    }
+
+    // C++: Sema/Test/MockUtils.h:97-102.
+    public func FindMemberDecl<T>(decl: Decl, identifier: String): Option<T> where T <: Decl {
+        if (let Some(member) <- DemandIndex(decl).get(identifier)) {
+            return DynamicCast<T>(member)
+        }
+        return None
+    }
+
+    public func FindAccessor(outerClass: ClassDecl, member: Decl, kind: AccessorKind): Option<Decl> {
         if (member.TestAttr(Attribute.IN_EXTEND)) {
             return None
         }
@@ -412,14 +462,14 @@ public class MockUtils {
             if (superDecl.astKind != ASTKind.CLASS_DECL) {
                 continue
             }
-            if (let Some(accessorDecl) <- FindMemberDeclByIdentifier(superDecl, accessorIdentifier)) {
+            if (let Some(accessorDecl) <- FindMemberDecl<Decl>(superDecl, accessorIdentifier)) {
                 return accessorDecl
             }
         }
         return None
     }
 
-    public static func FindAccessorForMemberAccess(ty: Option<Ty>, resolvedMember: Option<Decl>,
+    public func FindAccessorForMemberAccess(ty: Option<Ty>, resolvedMember: Option<Decl>,
         kind: AccessorKind): Option<Decl> {
         if (let None <- resolvedMember) {
             return None
@@ -447,17 +497,17 @@ public class MockUtils {
         return None
     }
 
-    public static func FindTopLevelAccessor(member: Decl, kind: AccessorKind): Option<FuncDecl> {
+    public func FindTopLevelAccessor(member: Decl, kind: AccessorKind): Option<FuncDecl> {
         if (let Some(file) <- member.curFile) {
             let accessorIdentifier = BuildMockAccessorIdentifier(member, kind)
-            if (let Some(decl) <- FindGlobalDeclByIdentifier(file, accessorIdentifier)) {
+            if (let Some(decl) <- FindGlobalDecl<FuncDecl>(file, accessorIdentifier)) {
                 return decl as FuncDecl
             }
         }
         return None
     }
 
-    public static func FindAccessor(memberAccess: Option<MemberAccess>, target: Option<Decl>,
+    public func FindAccessor(memberAccess: Option<MemberAccess>, target: Option<Decl>,
         kind: AccessorKind): Option<FuncDecl> {
         if (kind == AccessorKind.FIELD_GETTER || kind == AccessorKind.FIELD_SETTER ||
             kind == AccessorKind.STATIC_FIELD_GETTER || kind == AccessorKind.STATIC_FIELD_SETTER) {
@@ -481,7 +531,7 @@ public class MockUtils {
         return None
     }
 
-    public static func IsGetterForMutField(accessorDecl: FuncDecl): Bool {
+    public func IsGetterForMutField(accessorDecl: FuncDecl): Bool {
         let accessorKind = ComputeAccessorKind(accessorDecl)
         if (accessorKind != AccessorKind.FIELD_GETTER &&
             accessorKind != AccessorKind.STATIC_FIELD_GETTER &&
@@ -495,17 +545,17 @@ public class MockUtils {
             return false
         }
         if (let Some(outer) <- accessorDecl.outerDecl) {
-            return FindMemberDeclByIdentifier(outer, setterDeclId).isSome()
+            return FindMemberDecl<Decl>(outer, setterDeclId).isSome()
         }
         if (let Some(file) <- accessorDecl.curFile) {
-            return FindGlobalDeclByIdentifier(file, setterDeclId).isSome()
+            return FindGlobalDecl<Decl>(file, setterDeclId).isSome()
         }
         return false
     }
 
-    public static func FindMockGlobalDecl(decl: Decl, name: String): Option<Decl> {
+    public func FindMockGlobalDecl(decl: Decl, name: String): Option<Decl> {
         if (let Some(file) <- decl.curFile) {
-            return FindGlobalDeclByIdentifier(file, name + MOCKED_ACCESSOR_SUFFIX)
+            return FindGlobalDecl<Decl>(file, name + MOCKED_ACCESSOR_SUFFIX)
         }
         return None
     }
