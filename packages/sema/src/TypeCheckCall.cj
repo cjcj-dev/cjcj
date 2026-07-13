@@ -3581,16 +3581,16 @@ private func diagForInvalidAccess(diag: BasicDiagnosticEngine, re: RefExpr, decl
             let propDeclName = "*et"
             identifierName = funcDecl.identifier.Val()[identifierName.size - propDeclName.size..]
         }
-        DiagOldStrings(diag, re, BasicDiagKind.sema_static_function_cannot_access_non_static_member,
-            [decl.identifier.Val(), identifierName])
+        Diagnose(diag, re, BasicDiagKind.sema_static_function_cannot_access_non_static_member,
+            args: StringDiagArgs([decl.identifier.Val(), identifierName])).Emit()
     } else {
-        DiagOldStrings(diag, re, BasicDiagKind.sema_static_lambdaExpr_cannot_access_non_static,
-            [decl.identifier.Val()])
+        Diagnose(diag, re, BasicDiagKind.sema_static_lambdaExpr_cannot_access_non_static,
+            args: StringDiagArgs([decl.identifier.Val()])).Emit()
     }
 }
 
 // C++ src/Sema/TypeCheckExpr.cpp:52 IsLegalAccessFromStaticFunc.
-private func IsLegalAccessFromStaticFunc(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+internal func IsLegalAccessFromStaticFunc(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
     ctx: ASTContext, re: RefExpr, decl: Decl): Bool {
     let curFuncBody = match (GetCurFuncBody(ctx, re.scopeName)) {
         case Some(value) => value

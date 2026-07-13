@@ -1253,6 +1253,10 @@ public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
     } else if (!CheckNonFuncAccessControl(diag, tm, ctx, re, decl)) {
         valid = false
     }
+    // C++ src/Sema/TypeCheckReference.cpp:621-628 CheckAccessLegalityOfRefExpr.
+    if (re.ref.targets.size <= 1) {
+        let _ = IsLegalAccessFromStaticFunc(tm, Some(diag), ctx, re, decl)
+    }
     if (re.isAlone && decl.IsTypeDecl()) {
         TypeCheckReferenceEmitRefNotType(diag, re, re.ref.identifier.Val(), decl)
         valid = false
