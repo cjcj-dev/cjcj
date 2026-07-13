@@ -31,6 +31,7 @@ import cjcj::chir.Type
 import cjcj::chir.TypeCast
 import cjcj::chir.TypeKind
 import cjcj::chir.Value
+import cjcj::chir.VArrayBuilder
 import cjcj::chir.VArrayType
 import cjcj::option.{ArchType, EnvironmentType, OptimizationLevel}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, StaticCast}
@@ -564,7 +565,7 @@ public class IRBuilder2 <: Resource {
             }
             if ((unsafe { LLVMGetTypeKind(allocatedType) } == LLVM_STRUCT_TYPE_KIND && options.enableCompileDebug &&
                 options.optimizationLevel == OptimizationLevel.O0) || (options.cjdbMode && isOptionLikeNonRef)) {
-                CreateCJMemsetStructWith0(allocaInst, allocatedType)
+                CreateMemsetStructWith0(allocaInst, allocatedType)
             }
             let target = GetCGContext().GetCompileOptions().target
             if (target.arch == ArchType.ARM32 && target.env == EnvironmentType.ANDROID &&
@@ -1144,6 +1145,33 @@ public class IRBuilder2 <: Resource {
         return memsetCall
     }
 
+    public func CreateMemsetStructWith0(addr: LLVMValueRef, allocatedType: LLVMTypeRef): LLVMValueRef {
+        let currentBlock = unsafe { LLVMGetInsertBlock(builder.raw) }
+        CJC_ASSERT(!currentBlock.isNull())
+        let currentInsertPoint = unsafe { LLVMSelfhostGetInsertPointInstruction(builder.raw) }
+        let currentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
+        CJC_ASSERT(!currentFunction.isNull())
+        let currentLocation = unsafe { LLVMGetCurrentDebugLocation2(builder.raw) }
+        SetInsertPointToAllocas(currentFunction)
+        let entryBlock = unsafe { LLVMGetEntryBasicBlock(currentFunction) }
+        let terminator = unsafe { LLVMGetBasicBlockTerminator(entryBlock) }
+        CJC_ASSERT(!terminator.isNull())
+        SetInsertPointBefore(terminator)
+
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let pointerType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let dest = CreateBitCast(addr, pointerType, name: "memset.addr")
+        let len = unsafe {
+            LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(allocatedType), 0)
+        }
+        let align = cgMod.GetABITypeAlignment(allocatedType)
+        let result = CreateMemSet(dest, unsafe { LLVMConstInt(i8Type, 0u64, 0) }, len, align: align)
+
+        RestoreInsertPoint(currentBlock, currentInsertPoint)
+        unsafe { LLVMSetCurrentDebugLocation2(builder.raw, currentLocation) }
+        return result
+    }
+
     public func CreateBr(dest: LLVMBasicBlockRef): LLVMValueRef {
         return unsafe { LLVMBuildBr(builder.raw, dest) }
     }
@@ -1444,7 +1472,7 @@ public class IRBuilder2 <: Resource {
         if (llvmKind == LLVM_STRUCT_TYPE_KIND) {
             let allocaInst = CreateEntryAlloca(llvmTy)
             if (!IsLLVMTypeContainsRef(llvmTy)) {
-                CreateCJMemsetStructWith0(allocaInst, llvmTy)
+                CreateMemsetStructWith0(allocaInst, llvmTy)
             }
             return allocaInst
         }
@@ -1664,16 +1692,7 @@ public class IRBuilder2 <: Resource {
             if (funcType.IsCFunc()) {
                 SetZExtAttrForCFunc(callBase, calleeType.GetLLVMFunctionType())
             }
-            if (calleeType.HasSRet() && !callArgs.isEmpty()) {
-                return GetReturnValueFromSRet(callBase, callArgs, funcType)
-            }
-            if (funcType.GetReturnType().IsUnit()) {
-                return cgMod.GenerateUnitTypeValue()
-            }
-            if (retTy.IsGeneric()) {
-                return ConvertGenericReturnValue(callBase, retTy)
-            }
-            return callBase
+            return GetReturnValue(calleeType, callBase, callArgs)
         }
         return CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), llvmCallArgs, name: name)
     }
@@ -1975,27 +1994,6 @@ public class IRBuilder2 <: Resource {
         return None
     }
 
-    private func ConvertGenericReturnValue(retValue: LLVMValueRef, returnTy: Type): LLVMValueRef {
-        let resultTy = CurrentExpressionResultType() ?? returnTy
-        if (resultTy.IsEqual(returnTy) || resultTy.IsGeneric()) {
-            return retValue
-        }
-        if (resultTy.IsUnit() || resultTy.IsVoid() || resultTy.IsNothing()) {
-            return cgMod.GenerateUnitTypeValue()
-        }
-        let resultCGType = CGType.GetOrCreate(cgMod, resultTy)
-        if (resultCGType.IsReference()) {
-            return CreatePointerCast(retValue, resultCGType.GetLLVMType(), name: "generic.ret.ref")
-        }
-        if (resultCGType.GetSize().isSome()) {
-            let payload = GetPayloadFromObject(retValue)
-            let payloadType = unsafe { LLVMPointerType(resultCGType.GetLLVMType(), 1u32) }
-            let typedPayload = CreateBitCast(payload, payloadType, name: "generic.ret.payload")
-            return CreateLoad(resultCGType.GetLLVMType(), typedPayload, name: "generic.ret.value")
-        }
-        return retValue
-    }
-
     private func CreateSRetForUnknownSize(returnTy: Type, resultTy: Type, sretTypeInfoArg: Option<LLVMValueRef>,
         name!: String = "sret"): LLVMValueRef {
         let returnCGType = CGType.GetOrCreate(cgMod, returnTy)
@@ -2128,28 +2126,43 @@ public class IRBuilder2 <: Resource {
         LLVMSetGlobalStringMetadata(GetLLVMContext(), typeInfoValue, GC_TYPE_META_NAME, layoutName)
     }
 
-    private func GetReturnValueFromSRet(callBase: LLVMValueRef, callArgs: ArrayList<LLVMValueRef>,
-        funcType: FuncType): LLVMValueRef {
+    private func GetReturnValue(calleeType: CGFunctionType, callBase: LLVMValueRef,
+        callArgs: ArrayList<LLVMValueRef>): LLVMValueRef {
+        let funcType = (calleeType.GetOriginal() as FuncType).getOrThrow()
         let returnTy = funcType.GetReturnType()
         let returnCGType = CGType.GetOrCreate(cgMod, returnTy)
-        AddSRetAttribute(callBase, GetSRetAttributeType(returnTy, returnCGType))
-        AddNoAliasAttribute(callBase)
-        var retValue = callArgs[0]
-        if (returnCGType.GetSize().isNone()) {
-            let resultTy = CurrentExpressionResultType() ?? returnTy
-            let resultCGType = CGType.GetOrCreate(cgMod, resultTy)
-            if (returnTy.IsGeneric()) {
-                retValue = CreateLoad(returnCGType.GetLLVMType(), retValue, name: "sret.load")
-            }
-            if (resultCGType.GetSize().isNone() && !resultTy.IsGeneric()) {
-                return CopyUnknownSizeSRetReturn(retValue, resultTy)
-            }
-            if (resultCGType.GetSize().isSome() && !resultCGType.IsReference()) {
-                return LoadSRetPayloadValue(retValue, resultCGType)
+        var retValue = callBase
+        if (calleeType.HasSRet()) {
+            AddNoAliasAttribute(callBase)
+            AddSRetAttribute(callBase, GetSRetAttributeType(returnTy, returnCGType))
+            retValue = callArgs[0]
+            if (returnCGType.GetSize().isNone()) {
+                let expression = chirExpr.getOrThrow().GetExpression()
+                let resultTy = if (expression.GetExprKind() == ExprKind.VARRAY_BUILDER) {
+                    let varrayBuilder = (expression as VArrayBuilder).getOrThrow()
+                    let varrayType = (varrayBuilder.GetResult().getOrThrow().GetType().getOrThrow() as
+                        VArrayType).getOrThrow()
+                    varrayType.GetElementType()
+                } else {
+                    expression.GetResult().getOrThrow().GetType().getOrThrow()
+                }
+                let resultCGType = CGType.GetOrCreate(cgMod, resultTy)
+                if (returnTy.IsGeneric()) {
+                    retValue = CreateLoad(returnCGType.GetLLVMType(), retValue, name: "sret.load")
+                }
+                if (resultCGType.GetSize().isNone() && !resultTy.IsGeneric()) {
+                    retValue = CopyUnknownSizeSRetReturn(retValue, resultTy)
+                } else if (resultCGType.GetSize().isSome() && !resultCGType.IsReference()) {
+                    let elementType = resultCGType.GetLLVMType()
+                    let payload = GetPayloadFromObject(retValue)
+                    let payloadType = unsafe { LLVMPointerType(elementType, 1u32) }
+                    let typedPayload = CreateBitCast(payload, payloadType, name: "sret.payload")
+                    return CreateLoad(elementType, typedPayload)
+                }
             }
         }
         if (returnTy.IsUnit()) {
-            return cgMod.GenerateUnitTypeValue()
+            retValue = cgMod.GenerateUnitTypeValue()
         }
         return retValue
     }
@@ -2159,35 +2172,6 @@ public class IRBuilder2 <: Resource {
         let tmp = CallAllocaGenericWithTypeInfo(resultTy, typeInfo)
         CallAssignGeneric(tmp, retValue, typeInfo)
         return tmp
-    }
-
-    private func LoadSRetPayloadValue(retValue: LLVMValueRef, resultCGType: CGType): LLVMValueRef {
-        let elementType = resultCGType.GetLLVMType()
-        let payload = GetPayloadFromObject(retValue)
-        let payloadType = unsafe { LLVMPointerType(elementType, 1u32) }
-        let typedPayload = CreateBitCast(payload, payloadType, name: "sret.payload")
-        if (IsGCReferenceLLVMType(elementType)) {
-            return CallGCReadRef(retValue, typedPayload)
-        }
-        if (resultCGType.GetOriginal().IsTuple() && IsLLVMTypeContainsRef(elementType)) {
-            let destPtr = CreateEntryAlloca(resultCGType, name: "sret.tuple")
-            let size = unsafe {
-                LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(elementType), 0)
-            }
-            CallGCReadStruct(destPtr, retValue, typedPayload, size, resultCGType.GetOriginal().ToString())
-            return CreateLoad(elementType, destPtr, name: "sret.value")
-        }
-        return CreateLoad(elementType, typedPayload, name: "sret.value")
-    }
-
-    private func IsGCReferenceLLVMType(llvmTy: LLVMTypeRef): Bool {
-        if (llvmTy.isNull()) {
-            return false
-        }
-        if (unsafe { LLVMGetTypeKind(llvmTy) } != 12) {
-            return false
-        }
-        return unsafe { LLVMGetPointerAddressSpace(llvmTy) } == 1u32
     }
 
     private func GetSRetAttributeType(retType: Type, retCGType: CGType): LLVMTypeRef {
