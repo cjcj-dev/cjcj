@@ -59,7 +59,7 @@ import cjcj::ast.IsImpl as AstIsImpl
 import cjcj::ast.IsMirror as AstIsMirror
 import cjcj::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, ProfileRecorder, STATIC_INIT_VAR}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, ProfileRecorder, STATIC_INIT_FUNC, STATIC_INIT_VAR}
 
 foreign {
     func CJSelfhostStrtoldToFloat32(value: CString): Float64
@@ -907,6 +907,11 @@ private func GetFuncLinkage(opts: GlobalOptions, funcDecl: AstFuncDecl): BasicLi
         }
     }
     return funcDecl.linkage
+}
+
+private func IsStaticInit(funcDecl: AstFuncDecl): Bool {
+    return funcDecl.TestAttr(AstAttribute.STATIC) && funcDecl.TestAttr(AstAttribute.CONSTRUCTOR) &&
+        funcDecl.identifier.Val() == STATIC_INIT_FUNC
 }
 
 private func SetGlobalVarLinkageType(value: GlobalValue, decl: AstVarDecl, isLiftedLocalConst: Bool, isWin: Bool): Unit {
@@ -3499,11 +3504,11 @@ public class FaithfulAST2CHIR {
         }
         if (IsIncrementalNoChange(varDecl) && !IsSrcCodeImportedGlobalDecl(varDecl)) {
             if (varDecl.identifier.Val() == STATIC_INIT_VAR) {
-                return CreateGlobalVarStoreInitFunc(varDecl, suffix: "")
+                return TranslateInitializerToFunction(varDecl, suffix: "")
             }
             return TranslateIncrementalNoChangeVar(varDecl)
         }
-        return CreateGlobalVarStoreInitFunc(varDecl, suffix: "")
+        return TranslateInitializerToFunction(varDecl, suffix: "")
     }
 
     private func CanInitBeGenerated(varDecl: AstVarDecl): Bool {
@@ -3565,7 +3570,7 @@ public class FaithfulAST2CHIR {
             "faithful AST2CHIR unsupported global var-with-pattern: ${ASTKindName(pattern.astKind)}")
     }
 
-    private func CreateGlobalVarStoreInitFunc(varDecl: AstVarDecl, suffix!: String): Function {
+    private func TranslateInitializerToFunction(varDecl: AstVarDecl, suffix!: String): Function {
         let initFn = CreateEmptyGVInitFunc(GlobalVarInitFuncName(varDecl),
             "gv$_" + varDecl.identifier.Val() + suffix, EffectiveRawMangledName(varDecl),
             EffectivePackageName(varDecl), BasicLinkage.INTERNAL)
@@ -3579,7 +3584,7 @@ public class FaithfulAST2CHIR {
         if (suffix != "$literal") {
             globalVar.SetInitFunc(initFn)
         }
-        CreateTranslator().TranslateGlobalVarInitializer(initFn, varDecl, globalVar)
+        CreateTranslator().TranslateInitializerToFunctionImpl(initFn, varDecl, globalVar)
         return initFn
     }
 
@@ -4339,6 +4344,13 @@ public class FaithfulAST2CHIR {
     private func ApplyDeclAttrs(target: Base, decl: AstDecl): Unit {
         target.AppendAttributeInfo(BuildAttr(decl.GetAttrs()))
         if (let Some(fn) <- (target as Function)) {
+            if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+                if (IsStaticInit(funcDecl)) {
+                    fn.DisableAttr(Attribute.STATIC)
+                    fn.DisableAttr(Attribute.PRIVATE)
+                    fn.EnableAttr(Attribute.INTERNAL)
+                }
+            }
             if (decl.HasAnno(AstAnnotationKind.NO_HEAP_ALLOC)) { fn.EnableAttr(Attribute.NO_HEAP_ALLOC) }
             if (decl.HasAnno(AstAnnotationKind.NO_WRITE_BARRIER)) { fn.EnableAttr(Attribute.NO_WRITE_BARRIER) }
             if (decl.HasAnno(AstAnnotationKind.NO_WRITE_BARRIER_REC)) {

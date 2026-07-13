@@ -425,7 +425,7 @@ public class Translator {
         return copied
     }
 
-    public func TranslateGlobalVarInitializer(fn: Function, decl: AstVarDecl, globalVar: GlobalVar): Unit {
+    public func TranslateInitializerToFunctionImpl(fn: Function, decl: AstVarDecl, globalVar: GlobalVar): Unit {
         let body = fn.GetBody() ??
             throw IllegalStateException("faithful AST2CHIR global initializer function has no body")
         let entry = body.GetEntryBlock() ??
@@ -438,9 +438,14 @@ public class Translator {
         currentBlock = entry
         blockGroupStack.add(body)
         let initExpr = RequireExpr(decl.initializer, "global variable initializer")
-        let initValue = Translator.TranslateASTNode(initExpr, this) ??
-            throw IllegalStateException("faithful AST2CHIR global variable initializer produced no value")
-        builder.CreateStore(CastValueIfNeeded(initValue, RequireRefBaseType(globalVar)), globalVar, CurrentBlock())
+        let initValue = TranslateExprArg(initExpr, RequireRefBaseType(globalVar))
+        if (decl.IsConst()) {
+            for (expr in CurrentBlock().GetExpressions()) {
+                expr.SetDebugLocation(INVALID_LOCATION)
+            }
+        }
+        let loc = if (decl.IsConst()) { INVALID_LOCATION } else { TranslateLocation(decl) }
+        CreateAndAppendWrappedStore(initValue, globalVar, loc)
         if (CurrentBlock().GetTerminator().isNone()) {
             builder.CreateExit(None, CurrentBlock())
         }
