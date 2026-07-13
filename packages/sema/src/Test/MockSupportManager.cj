@@ -226,6 +226,17 @@ public class MockSupportManager {
         return true
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1167-1180.
+    public func IsMemberAccessOnThis(memberAccess: MemberAccess): Bool {
+        if (let None <- memberAccess.baseExpr) {
+            return false
+        }
+        if (let Some(refBaseExpr) <- (memberAccess.baseExpr.getOrThrow() as RefExpr)) {
+            return refBaseExpr.isThis
+        }
+        return false
+    }
+
     public static func MarkNodeMockSupportedIfNeeded(node: Node): Unit {
         if (let Some(decl) <- (node as Decl)) {
             if (!MockUtils.CanMock(node)) {
