@@ -845,7 +845,6 @@ private func GenerateOverflowSaturatingBasicBlock(irBuilder: IRBuilder2, targetT
 
 private func GenerateIntegerConversionExpr(irBuilder: IRBuilder2, strategy: OverflowStrategy,
     sourceValue: LLVMValueRef, targetType: CGType, sourceTy: IntType): LLVMValueRef {
-    let targetTy = StaticCast<IntType>(targetType.GetOriginal())
     let typecast = { builder: IRBuilder2 =>
         if (sourceTy.IsSigned()) {
             builder.CreateSExtOrTrunc(sourceValue, targetType.GetLLVMType())
