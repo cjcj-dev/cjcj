@@ -5,6 +5,7 @@ import cjcj::ast.*
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::sema.AddArrayLitConstructor
+import cjcj::sema.CreateThrowException
 import cjcj::sema.GenerateGetTypeForTypeParamIntrinsic
 import cjcj::sema.GetUsableGetterForProperty
 import cjcj::sema.GetUsableSetterForProperty
@@ -727,6 +728,22 @@ public class MockUtils {
         zeroValueCall.resolvedFunction = zeroValueDecl
         zeroValueCall.curFile = curFile
         return zeroValueCall
+    }
+
+    // C++: Sema/Test/MockUtils.cpp:789-796.
+    public func CreateThrowExpr(message: String, curFile: File): Expr {
+        let exceptionCallArgs = ArrayList<Expr>()
+        let messageExpr = CreateLitConstExpr(LitConstKind.STRING, message, stringDecl.getOrThrow().GetTy().getOrThrow())
+        messageExpr.curFile = curFile
+        exceptionCallArgs.add(messageExpr)
+        return CreateThrowException(exceptionClassDecl.getOrThrow(), exceptionCallArgs, curFile, typeManager)
+    }
+
+    // C++: Sema/Test/MockUtils.cpp:820-828.
+    public func CreateTypeCastOrThrow(selector: Expr, castTy: Ty, message: String): Expr {
+        let createValueBranch = { varDecl: VarDecl => CreateRefExpr(varDecl) }
+        let throwExpression = CreateThrowExpr(message, selector.curFile.getOrThrow())
+        return CreateTypeCast(selector, castTy, createValueBranch, throwExpression, castTy)
     }
 
     // C++: Sema/Test/MockUtils.cpp:830-837.

@@ -3,6 +3,7 @@ package cjcj::sema
 import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::utils.CJC_ASSERT
 import cjcj::utils.GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME
 import cjcj::utils.IS_SUBTYPE_TYPES_FUNC_NAME
 
@@ -627,6 +628,43 @@ public func FindInitDecl(decl: InheritableDecl, typeManager: TypeManager, valueP
     let initDecl = initFuncDecl.getOrThrow()
     return Some((initDecl, typeManager.GetInstantiatedTy(initDecl.GetTy().getOrThrow(),
         GenerateTypeMapping(decl, instTys))))
+}
+
+// C++: Sema/TypeCheckUtil.cpp:1075-1096.
+public func CreateInitCall(initDeclInfo: (FuncDecl, Ty), valueArgs: ArrayList<Expr>, curFile: File,
+    instTys!: ArrayList<Ty> = ArrayList<Ty>()): CallExpr {
+    let valueFuncArgs = ArrayList<FuncArg>()
+    for (arg in valueArgs) {
+        valueFuncArgs.add(CreateFuncArg(arg))
+    }
+    let call = CallExpr()
+    let initDecl = initDeclInfo[0]
+    let ty = initDeclInfo[1]
+    let refExpr = CreateRefExpr(initDecl)
+    refExpr.SetTy(ty)
+    refExpr.curFile = curFile
+    for (instTy in instTys) {
+        refExpr.instTys.add(instTy)
+    }
+    call.baseFunc = refExpr
+    call.curFile = curFile
+    call.resolvedFunction = initDecl
+    CJC_ASSERT(ty.IsFunc())
+    call.SetTy((ty as FuncTy).getOrThrow().retTy)
+    for (valueFuncArg in valueFuncArgs) {
+        call.args.add(valueFuncArg)
+    }
+    return call
+}
+
+// C++: Sema/TypeCheckUtil.cpp:1098-1106.
+public func CreateThrowException(exceptionDecl: ClassDecl, args: ArrayList<Expr>, curFile: File,
+    typeManager: TypeManager): ThrowExpr {
+    let throwExpr = ThrowExpr()
+    throwExpr.expr = CreateInitCall(FindInitDecl(exceptionDecl, typeManager, args).getOrThrow(), args, curFile)
+    throwExpr.SetTy(TypeManager.GetNothingTy())
+    throwExpr.curFile = curFile
+    return throwExpr
 }
 
 public func CreateGenericParamDecl(decl: Decl, name: String, typeManager: TypeManager): GenericParamDecl {
