@@ -2,7 +2,7 @@ package cjcj::sema.InheritanceChecker
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::basic.{DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, MakeRange}
+import cjcj::basic.{DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor}
 import cjcj::sema.*
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
 
@@ -188,7 +188,7 @@ public func CheckGenericTypeBoundsMapped(
             let diagNode = GetConstraintNodeByIndex(i, childGenericNode)
             let builder = DiagnoseRefactor(diag, DiagKindRefactor.sema_generic_constraint_not_looser, diagNode)
             builder.AddNote("parent constraint is " + parentConstraints)
-            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+            builder.Emit()
         }
     }
 }
