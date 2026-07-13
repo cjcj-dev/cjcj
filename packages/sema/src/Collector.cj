@@ -2,6 +2,9 @@ package cjcj::sema
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
 
 private func WalkMacroCall(macrocall: Node, decl: Decl): Unit {
     let walker = Walker(decl, visitPre: { curNode: Node =>
@@ -21,7 +24,8 @@ public class Collector {
         this.enableMacroInLsp = enableMacroInLsp
     }
 
-    public func BuildSymbolTable(ctx: ASTContext, pkg: Package, buildTrie!: Bool = true): Unit {
+    public func BuildSymbolTable(ctx: ASTContext, pkg: Package, diag: Option<BasicDiagnosticEngine>,
+        buildTrie!: Bool = true): Unit {
         ctx.curPackage = pkg
         ctx.fullPackageName = pkg.fullPackageName
         UpdatePosLimit(pkg)
@@ -75,6 +79,10 @@ public class Collector {
                 collector.CollectMainDecl(ctx, mainDecl, walkerBox.value.getOrThrow(), buildTrie: buildTrie)
                 return VisitAction.SKIP_CHILDREN
             } else if (let Some(extendDecl) <- (node as ExtendDecl)) {
+                if (extendDecl.scopeLevel != 0u32) {
+                    Diagnose(diag.getOrThrow(), extendDecl, BasicDiagKind.sema_type_must_toplevel,
+                        args: [BasicDiagArgument("extend")]).Emit()
+                }
                 let currentWalker = walkerBox.value.getOrThrow()
                 for (annotation in extendDecl.annotations) {
                     if (currentWalker.WalkNode(annotation) == VisitAction.STOP_NOW) {

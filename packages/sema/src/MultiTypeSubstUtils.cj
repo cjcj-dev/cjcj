@@ -460,23 +460,14 @@ public func RelayMappingFromExtendToExtended(typeManager: TypeManager, maps: Sub
 
 public func GenerateTypeMapping(decl: Decl, typeArgs: ArrayList<Ty>): TypeSubst {
     let substituteMapping = TypeSubst()
+    let generic = if (let Some(value) <- decl.GetGeneric()) { value } else { return substituteMapping }
     if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-        if (let None <- decl.GetGeneric()) {
-            return substituteMapping
-        }
-        if (let Some(extendedType) <- extendDecl.extendedType) {
-            if (let Some(extendedTy) <- extendedType.GetTy()) {
-                return generateTypeMappingByArgs(extendedTy.typeArgs, typeArgs)
-            }
-        }
-        return substituteMapping
+        let extendedTypeArgs = extendDecl.extendedType.getOrThrow().GetTy().getOrThrow().typeArgs
+        return generateTypeMappingByArgs(extendedTypeArgs, typeArgs)
     }
-    if (let Some(generic) <- decl.GetGeneric()) {
-        if (generic.typeParameters.size != typeArgs.size) {
-            return substituteMapping
-        }
+    if (generic.typeParameters.size == typeArgs.size) {
         for (idx in 0..typeArgs.size) {
-            if (Ty.IsTyCorrect(typeArgs[idx])) {
+            if (Ty.IsTyCorrect(generic.typeParameters[idx].GetTy()) && Ty.IsTyCorrect(typeArgs[idx])) {
                 if (let Some(genTy) <- genericParamType(generic.typeParameters[idx])) {
                     substituteMapping.Put(genTy, typeArgs[idx])
                 }
