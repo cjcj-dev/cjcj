@@ -1,9 +1,9 @@
 package cjcj::chir
 
 import std.collection.*
+import std.core.Box as CoreBox
 import cjcj::basic.Linkage as BasicLinkage
-import cjcj::option.GlobalOptions
-import cjcj::option.OptimizationFlag
+import cjcj::option.{GlobalOptions, OptimizationFlag, OptimizationLevel}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, StaticCast}
 import cjcj::utils.ProfileRecorder
 
@@ -306,6 +306,53 @@ public class ClosureConversion {
             }
             RemoveGetInstantiateValue(users)
             lambdaFunc.DetachLiftedBodyAndRemoveSelf()
+        }
+
+        DoFunctionInlineForLambda()
+    }
+
+    private func LambdaCanBeInlined(user: Expression, lambda: Function): Bool {
+        if (user.GetExprKind() != ExprKind.APPLY) {
+            return false
+        }
+        let callee = (user as Apply).getOrThrow().GetCallee()
+        if (lambda != callee) {
+            return false
+        }
+
+        let isRecursive = CoreBox<Bool>(false)
+        let preVisit: VisitExprActionFunc = { expr =>
+            if (expr.GetExprKind() == ExprKind.APPLY &&
+                (expr as Apply).getOrThrow().GetCallee() == callee) {
+                isRecursive.value = true
+                return VisitResult.STOP
+            } else if (expr.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION &&
+                (expr as ApplyWithException).getOrThrow().GetCallee() == callee) {
+                isRecursive.value = true
+                return VisitResult.STOP
+            }
+            return VisitResult.CONTINUE
+        }
+        Visitor.Visit(callee.AsFunction().getOrThrow(), preVisit)
+        return !isRecursive.value
+    }
+
+    private func DoFunctionInlineForLambda(): Unit {
+        if (!opts.IsOptimizationExisted(OptimizationFlag.FUNC_INLINING)) {
+            return
+        }
+        let funcInline = FunctionInline(builder, OptimizationLevel.O2, opts.chirDebugOptimizer)
+        for ((_, autoEnvImplDef) in autoEnvImplDefs) {
+            for (lambda in autoEnvImplDef.GetMethods()) {
+                if (lambda.GetSrcCodeIdentifier() == GENERIC_VIRTUAL_FUNC) {
+                    continue
+                }
+                for (user in lambda.GetUsers()) {
+                    if (LambdaCanBeInlined(user, lambda)) {
+                        funcInline.DoFunctionInline((user as Apply).getOrThrow(), "functionInlineForLambda")
+                    }
+                }
+            }
         }
     }
 
