@@ -118,6 +118,31 @@ extend ParserImpl {
         return ek
     }
 
+    private func IsCompoundAssign(token: TokenKind): Bool {
+        return token != TokenKind.ASSIGN && IsAssignment(token)
+    }
+
+    private func IsNeedToCreateOptionalChain(token: TokenKind, expr: Expr): Bool {
+        if (!IsCompoundAssign(token) && token != TokenKind.ASSIGN && expr.hasQuestSuffix) {
+            return true
+        }
+        if (let Some(incDecl) <- (expr as IncOrDecExpr)) {
+            if (let Some(innerExpr) <- incDecl.expr) {
+                return innerExpr.hasQuestSuffix
+            }
+        }
+        return false
+    }
+
+    private func GetExprOperator(): Token {
+        var token = Peek()
+        if (let Some(combInfo) <- LookupSeenCombinator()) {
+            token.kind = combInfo.kind
+            token.SetValuePos(combInfo.Value(), token.Begin(), token.Begin() + combInfo.Value().size)
+        }
+        return token
+    }
+
     public func ParseBaseExpr(expr: Expr): Expr {
         return ParseBaseExpr(expr, ExprKind.ALL)
     }
@@ -225,12 +250,14 @@ extend ParserImpl {
             break
         }
         if (hasQuestSuffix) {
+            base.hasQuestSuffix = true
+        }
+        if (IsNeedToCreateOptionalChain(GetExprOperator().kind, base)) {
             let chain = OptionalChainExpr()
             chain.expr = base
             chain.begin = base.begin
             chain.end = base.end
             base = chain
-            base.hasQuestSuffix = true
         }
         return base
     }
