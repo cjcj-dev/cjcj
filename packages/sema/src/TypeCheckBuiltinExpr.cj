@@ -710,7 +710,9 @@ public func ChkPointerExpr(typeManager: TypeManager, target: Ty, pointerExpr: Po
         if (!Ty.IsTyCorrect(argTy) || (!argTy.IsPointer() && !argTy.IsCFunc())) {
             if (let Some(diagValue) <- diag) {
                 if (!CanSkipDiag(arg)) {
-                    DiagOld(diagValue, pointerExpr, BasicDiagKind.sema_pointer_single_element_type_error)
+                    let builder = Diagnose(diagValue, pointerExpr,
+                        BasicDiagKind.sema_pointer_single_element_type_error)
+                    builder.Emit()
                 }
             }
             return false

@@ -2521,6 +2521,9 @@ extend TypeChecker {
     internal func SynthesizeNode(ctx: ASTContext, pos: SynPos, node: Node): Ty {
         if (let Some(typeNode) <- (node as Type)) {
             impl.SetTypeTy(ctx, typeNode)
+            if (let Some(diagValue) <- impl.diag) {
+                let _ = TypeCheckTypeCheckReferenceTypeLegality(diagValue, impl.typeManager, typeNode)
+            }
             return tyOrInvalid(typeNode)
         }
         if (let Some(funcArg) <- (node as FuncArg)) {
@@ -2540,7 +2543,7 @@ extend TypeChecker {
 
     private func SynthesizeTypeNode(ctx: ASTContext, typeNode: Option<Type>): Unit {
         if (let Some(value) <- typeNode) {
-            impl.SetTypeTy(ctx, value)
+            let _ = SynthesizeNode(ctx, SynPos.NONE, value)
             if (!Ty.IsTyCorrect(value.GetTy())) {
                 if (let Some(diagValue) <- impl.diag) {
                     let _ = DiagnoseInvalidTypeName(diagValue, value)
