@@ -1,8 +1,9 @@
 package cjcj::chir
 
 import std.collection.*
+import std.sort.*
 
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, InternalError, OverflowStrategy, STATIC_INIT_FUNC}
+import cjcj::utils.{CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, InternalError, OverflowStrategy, STATIC_INIT_FUNC}
 import cjcj::option.{GlobalOptions, OptimizationFlag}
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::ast.ASTKind
@@ -24,6 +25,7 @@ import cjcj::ast.CallKind as AstCallKind
 import cjcj::ast.ClassDecl as AstClassDecl
 import cjcj::ast.ClassLikeDecl as AstClassLikeDecl
 import cjcj::ast.ClassTy as AstClassTy
+import cjcj::ast.CompNodeByPos as AstCompNodeByPos
 import cjcj::ast.ConstPattern as AstConstPattern
 import cjcj::ast.Decl as AstDecl
 import cjcj::ast.DoWhileExpr as AstDoWhileExpr
@@ -87,6 +89,8 @@ import cjcj::ast.VarDecl as AstVarDecl
 import cjcj::ast.VarWithPatternDecl as AstVarWithPatternDecl
 import cjcj::ast.VarOrEnumPattern as AstVarOrEnumPattern
 import cjcj::ast.VarPattern as AstVarPattern
+import cjcj::ast.VisitAction as AstVisitAction
+import cjcj::ast.Walker as AstWalker
 import cjcj::ast.WildcardPattern as AstWildcardPattern
 import cjcj::ast.WhileExpr as AstWhileExpr
 
@@ -1529,58 +1533,98 @@ public class Translator {
     public func Visit(expr: AstLambdaExpr): Option<Value> {
         let funcBody = expr.funcBody ??
             throw IllegalStateException("faithful AST2CHIR LambdaExpr has no FuncBody")
+        let astBody = funcBody.body ??
+            throw IllegalStateException("faithful AST2CHIR LambdaExpr FuncBody has no body")
+        let lambdaTrans = SetupContextForLambda(astBody)
         let funcTy = RequireFuncType(chirTy.TranslateType(RequireAstTy(expr)))
         let parentFunc = CurrentFunction()
         let body = builder.CreateBlockGroup(parentFunc)
+        var mangledName = LambdaIdentifier(expr)
+        if (funcTy.IsCFunc()) {
+            mangledName += CFFI_FUNC_SUFFIX
+        }
         let lambda = builder.CreateLambda(funcTy, funcTy, CurrentBlock(), isLocalFunc: true,
-            identifier: LambdaIdentifier(expr), srcCodeIdentifier: "$lambda")
+            identifier: mangledName, srcCodeIdentifier: "$lambda")
+        lambda.SetDebugLocation(TranslateLocation(expr))
         lambda.InitBody(body)
-        BindLambdaParams(funcBody, lambda, funcTy)
+        lambdaTrans.BindLambdaParams(funcBody, lambda, funcTy)
+        if (expr.TestAttr(AstAttribute.MOCK_SUPPORTED)) {
+            body.EnableAttr(Attribute.NO_INLINE)
+        }
+        return lambdaTrans.TranslateLambdaBody(lambda, funcBody)
+    }
 
-        let savedBlock = currentBlock
-        let savedLambda = currentLambda
-        let savedDelayExitSignal = delayExitSignal
-        let savedTryCatchContext = tryCatchContext.clone()
-        let savedTryBodyContext = tryBodyContext.clone()
-        let savedFinallyContext = finallyContext.clone()
-        delayExitSignal = None
-        tryCatchContext.clear()
-        tryBodyContext.clear()
-        finallyContext.clear()
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateLambdaExpr.cpp:62-103.
+    private func SetupContextForLambda(body: AstBlock): Translator {
+        let trans = Copy()
+        let usedCapturedDecls = HashSet<AstNode>()
+        AstWalker(body, visitPre: { node: AstNode =>
+            if (let Some(target) <- node.GetTarget()) {
+                if ((target.astKind == ASTKind.VAR_DECL && target.TestAttr(AstAttribute.IS_CAPTURE)) ||
+                    target.astKind == ASTKind.FUNC_DECL) {
+                    usedCapturedDecls.add(target)
+                }
+            }
+            AstVisitAction.WALK_CHILDREN
+        }).Walk()
+        let capturedSymbol = ArrayList<(AstNode, Value)>()
+        for ((node, symbol) in localValSymbolTable.GetALL()) {
+            if (node.astKind != ASTKind.VAR_DECL) {
+                trans.SetSymbolTable(node, symbol)
+                continue
+            }
+            let varDecl = (node as AstVarDecl).getOrThrow()
+            if (!varDecl.TestAttr(AstAttribute.IS_CAPTURE) || varDecl.isVar) {
+                trans.SetSymbolTable(node, symbol)
+                continue
+            }
+            if (!usedCapturedDecls.contains(node)) {
+                continue
+            }
+            capturedSymbol.add((node, symbol))
+        }
+        sort(capturedSymbol, by: { left: (AstNode, Value), right: (AstNode, Value) =>
+            if (AstCompNodeByPos(left[0], right[0])) {
+                Ordering.LT
+            } else if (AstCompNodeByPos(right[0], left[0])) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        }, stable: false)
+        for ((node, symbol) in capturedSymbol) {
+            trans.SetSymbolTable(node, GetDerefedValue(symbol))
+        }
+        for (blockGroup in blockGroupStack) {
+            trans.blockGroupStack.add(blockGroup)
+        }
+        trans.currentBlock = currentBlock
+        trans.currentFunc = currentFunc
+        for ((nodeId, value) in exprValueTable) {
+            trans.exprValueTable[nodeId] = value
+        }
+        return trans
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateLambdaExpr.cpp:105-124.
+    private func TranslateLambdaBody(lambda: Lambda, funcBody: AstFuncBody): Option<Value> {
+        let body = lambda.GetBody().getOrThrow()
         blockGroupStack.add(body)
         currentLambda = lambda
         let entry = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
         currentBlock = entry
         CreateLambdaParamDebugs(funcBody, lambda, entry)
-        let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(funcTy.GetReturnType()),
-            funcTy.GetReturnType(), entry))
+        let retType = lambda.GetReturnType().getOrThrow()
+        let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(retType), retType, entry))
         lambda.SetReturnValue(retSlot)
-        if (let Some(astBody) <- funcBody.body) {
-            let result = Translator.TranslateASTNode(astBody, this)
-            if (entry.GetTerminator().isNone()) {
-                builder.CreateGoTo(GetBlockByAST(astBody), entry)
-            }
-            if (CurrentBlock().GetTerminator().isNone()) {
-                EmitImplicitLambdaExit(lambda, result)
-            }
-        } else if (CurrentBlock().GetTerminator().isNone()) {
-            EmitImplicitLambdaExit(lambda, None)
+        let astBody = funcBody.body.getOrThrow()
+        let result = Translator.TranslateASTNode(astBody, this)
+        if (entry.GetTerminator().isNone()) {
+            builder.CreateGoTo(GetBlockByAST(astBody), entry)
         }
-        currentBlock = savedBlock
-        currentLambda = savedLambda
-        delayExitSignal = savedDelayExitSignal
-        tryCatchContext.clear()
-        for (block in savedTryCatchContext) {
-            tryCatchContext.add(block)
-        }
-        tryBodyContext.clear()
-        for (tryExpr in savedTryBodyContext) {
-            tryBodyContext.add(tryExpr)
-        }
-        finallyContext.clear()
-        for (context in savedFinallyContext) {
-            finallyContext.add(context)
+        if (CurrentBlock().GetTerminator().isNone()) {
+            EmitImplicitLambdaExit(lambda, result)
         }
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         if (let Some(result) <- lambda.GetResult()) {

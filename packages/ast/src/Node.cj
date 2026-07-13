@@ -478,6 +478,13 @@ public open class Node <: Hashable & Equatable<Node> {
     }
 }
 
+// C++: include/cangjie/AST/Node.h:3181-3191.
+public func CompNodeByPos(n1: Node, n2: Node): Bool {
+    return n1.begin.fileID < n2.begin.fileID ||
+        (n1.begin.fileID == n2.begin.fileID && n1.begin < n2.begin) ||
+        (n1.begin.fileID == n2.begin.fileID && n1.begin == n2.begin && n1.objectId < n2.objectId)
+}
+
 public class Modifier <: Node {
     public var modifier: TokenKind = TokenKind.ILLEGAL
     public var isExplicit: Bool = false

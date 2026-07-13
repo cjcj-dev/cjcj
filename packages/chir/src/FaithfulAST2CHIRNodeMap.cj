@@ -11,8 +11,8 @@ import cjcj::ast.Node as AstNode
 
 // Mirrors C++ AST2CHIRNodeMap<T> (include/cangjie/CHIR/AST2CHIR/AST2CHIRNodeMap.h:23-66).
 public class AST2CHIRNodeMap<T> {
-    private let cache: HashMap<Int64, T> = HashMap<Int64, T>()
-    private let keys: ArrayList<Int64> = ArrayList<Int64>()
+    private let cache: HashMap<AstNode, T> = HashMap<AstNode, T>()
+    private let keys: ArrayList<AstNode> = ArrayList<AstNode>()
 
     public init() {}
 
@@ -26,15 +26,15 @@ public class AST2CHIRNodeMap<T> {
     }
 
     public func Has(node: AstNode): Bool {
-        return cache.contains(node.objectId)
+        return cache.contains(node)
     }
 
     public func Set(node: AstNode, chirNode: T): Unit {
-        if (cache.contains(node.objectId)) {
+        if (cache.contains(node)) {
             throw IllegalStateException("AST2CHIRNodeMap duplicate node: ${ASTKindName(node.astKind)}")
         }
-        cache[node.objectId] = chirNode
-        keys.add(node.objectId)
+        cache[node] = chirNode
+        keys.add(node)
     }
 
     public func Get(node: AstNode): T {
@@ -43,11 +43,11 @@ public class AST2CHIRNodeMap<T> {
     }
 
     public func TryGet(node: AstNode): Option<T> {
-        return cache.get(node.objectId)
+        return cache.get(node)
     }
 
-    public func GetALL(): HashMap<Int64, T> {
-        let out = HashMap<Int64, T>()
+    public func GetALL(): HashMap<AstNode, T> {
+        let out = HashMap<AstNode, T>()
         for (key in keys) {
             if (let Some(value) <- cache.get(key)) {
                 out[key] = value
@@ -57,10 +57,10 @@ public class AST2CHIRNodeMap<T> {
     }
 
     public func Erase(node: AstNode): Unit {
-        cache.remove(node.objectId)
+        cache.remove(node)
         var idx = keys.size - 1
         while (idx >= 0) {
-            if (keys[idx] == node.objectId) {
+            if (keys[idx] == node) {
                 keys.remove(at: idx)
                 return
             }
