@@ -3519,7 +3519,7 @@ private class CjoSignatureMaterializer {
             if (!allLoadedExprs.contains(exprIndex)) {
                 allLoadedExprs.add(exprIndex, ce)
             }
-            LoadFlatExprBasicInfo(reader, exprTable, ce)
+            CreateAndLoadBasicInfo(reader, exprTable, ce)
             let operands = reader.VectorField(exprTable, 12)
             if (operands < 0 || reader.VectorLength(operands) < 1) {
                 return None
@@ -3595,7 +3595,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, invalidExpr)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, invalidExpr)
+        CreateAndLoadBasicInfo(reader, exprTable, invalidExpr)
         return invalidExpr
     }
 
@@ -3607,7 +3607,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, le)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, le)
+        CreateAndLoadBasicInfo(reader, exprTable, le)
         let infoTable = reader.OffsetField(exprTable, 20)
         if (infoTable >= 0) {
             let bodyTable = reader.OffsetField(infoTable, 4)
@@ -3628,7 +3628,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, we)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, we)
+        CreateAndLoadBasicInfo(reader, exprTable, we)
         we.EnableAttr(Attribute.IMPORTED)
         return we
     }
@@ -3642,7 +3642,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, pte)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, pte)
+        CreateAndLoadBasicInfo(reader, exprTable, pte)
         pte.EnableAttr(Attribute.IMPORTED)
         return pte
     }
@@ -3668,7 +3668,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, je)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, je)
+        CreateAndLoadBasicInfo(reader, exprTable, je)
         let infoTable = reader.OffsetField(exprTable, 20)
         if (infoTable >= 0) {
             je.isBreak = reader.U8Field(infoTable, 4, 0u8) != 0u8
@@ -3684,7 +3684,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, ide)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, ide)
+        CreateAndLoadBasicInfo(reader, exprTable, ide)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
             ide.expr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
@@ -3703,7 +3703,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, tce)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, tce)
+        CreateAndLoadBasicInfo(reader, exprTable, tce)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
             tce.expr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
@@ -3718,7 +3718,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, te)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, te)
+        CreateAndLoadBasicInfo(reader, exprTable, te)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
             te.expr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
@@ -3733,7 +3733,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, pe)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, pe)
+        CreateAndLoadBasicInfo(reader, exprTable, pe)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
             pe.expr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
@@ -3749,7 +3749,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, re)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, re)
+        CreateAndLoadBasicInfo(reader, exprTable, re)
         re.EnableAttr(Attribute.IMPORTED)
         return re
     }
@@ -3761,7 +3761,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, se)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, se)
+        CreateAndLoadBasicInfo(reader, exprTable, se)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) > 0) {
             se.arg = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
@@ -3783,7 +3783,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, ae)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, ae)
+        CreateAndLoadBasicInfo(reader, exprTable, ae)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0) {
             var idx: Int64 = 0
@@ -3809,7 +3809,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, pe)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, pe)
+        CreateAndLoadBasicInfo(reader, exprTable, pe)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) == 1) {
             pe.arg = LoadFlatFuncArg(reader, reader.VectorU32(operands, 0))
@@ -3826,7 +3826,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, te)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, te)
+        CreateAndLoadBasicInfo(reader, exprTable, te)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
             if (let Some(tryExpr) <- LoadFlatExprRaw(reader, reader.VectorU32(operands, 0))) {
@@ -3886,7 +3886,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, ie)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, ie)
+        CreateAndLoadBasicInfo(reader, exprTable, ie)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 2) {
             ie.condExpr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
@@ -3916,7 +3916,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, we)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, we)
+        CreateAndLoadBasicInfo(reader, exprTable, we)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) == 2) {
             we.condExpr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
@@ -3935,7 +3935,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, dwe)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, dwe)
+        CreateAndLoadBasicInfo(reader, exprTable, dwe)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) == 2) {
             if (let Some(bodyExpr) <- LoadFlatExprRaw(reader, reader.VectorU32(operands, 0))) {
@@ -3954,7 +3954,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, me)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, me)
+        CreateAndLoadBasicInfo(reader, exprTable, me)
         let infoTable = reader.OffsetField(exprTable, 20)
         if (infoTable >= 0) {
             me.matchMode = reader.U8Field(infoTable, 4, 0u8) != 0u8
@@ -4052,7 +4052,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, lpd)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, lpd)
+        CreateAndLoadBasicInfo(reader, exprTable, lpd)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
             lpd.initializer = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
@@ -4082,7 +4082,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, fie)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, fie)
+        CreateAndLoadBasicInfo(reader, exprTable, fie)
         let infoTable = reader.OffsetField(exprTable, 20)
         if (infoTable >= 0) {
             fie.forInKind = FlatToForInKind(reader.U8Field(infoTable, 6, 0u8))
@@ -4133,7 +4133,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, ue)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, ue)
+        CreateAndLoadBasicInfo(reader, exprTable, ue)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
             ue.expr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
@@ -4153,7 +4153,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, be)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, be)
+        CreateAndLoadBasicInfo(reader, exprTable, be)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 2) {
             be.leftExpr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
@@ -4174,7 +4174,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, se)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, se)
+        CreateAndLoadBasicInfo(reader, exprTable, se)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) > 1) {
             se.baseExpr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
@@ -4207,7 +4207,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, ae)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, ae)
+        CreateAndLoadBasicInfo(reader, exprTable, ae)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 2) {
             ae.leftValue = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
@@ -4229,7 +4229,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, al)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, al)
+        CreateAndLoadBasicInfo(reader, exprTable, al)
         LoadFlatExprOperands(reader, exprTable, al.children)
         al.EnableAttr(Attribute.IMPORTED)
         return al
@@ -4241,7 +4241,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, tl)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, tl)
+        CreateAndLoadBasicInfo(reader, exprTable, tl)
         LoadFlatExprOperands(reader, exprTable, tl.children)
         tl.EnableAttr(Attribute.IMPORTED)
         return tl
@@ -4269,7 +4269,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, ma)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, ma)
+        CreateAndLoadBasicInfo(reader, exprTable, ma)
         let operands = reader.VectorField(exprTable, 12)
         if (operands >= 0 && reader.VectorLength(operands) >= 1) {
             ma.baseExpr = LoadFlatExpr(reader, reader.VectorU32(operands, 0))
@@ -4294,7 +4294,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, re)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, re)
+        CreateAndLoadBasicInfo(reader, exprTable, re)
         let infoTable = reader.OffsetField(exprTable, 20)
         if (infoTable >= 0) {
             let name = reader.StringField(infoTable, 4)
@@ -4306,8 +4306,9 @@ private class CjoSignatureMaterializer {
         return re
     }
 
-    private func LoadFlatExprBasicInfo(reader: CjoFlatBuffer, exprTable: Int64, expr: Expr): Unit {
+    private func CreateAndLoadBasicInfo(reader: CjoFlatBuffer, exprTable: Int64, expr: Expr): Unit {
         LoadFlatNodeBasicInfo(reader, exprTable, expr)
+        expr.overflowStrategy = FlatOverflowStrategy(reader.U8Field(exprTable, 16, 0u8))
     }
 
     private func LoadFlatNodeBasicInfo(reader: CjoFlatBuffer, exprTable: Int64, node: Node): Unit {
@@ -4440,7 +4441,7 @@ private class CjoSignatureMaterializer {
         if (!allLoadedExprs.contains(exprIndex)) {
             allLoadedExprs.add(exprIndex, lce)
         }
-        LoadFlatExprBasicInfo(reader, exprTable, lce)
+        CreateAndLoadBasicInfo(reader, exprTable, lce)
         if (infoTable >= 0) {
             // LitConstInfo field 0 (slot 4) strValue, 1 (slot 6) constKind, 2 (slot 8) strKind.
             lce.stringValue = reader.StringField(infoTable, 4)
