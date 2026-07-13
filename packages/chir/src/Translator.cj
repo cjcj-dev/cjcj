@@ -2847,8 +2847,7 @@ public class Translator {
         }
 
         currentBlock = conditionBlock
-        let condValue = Translator.TranslateASTNode(RequireExpr(expr.condExpr, "do-while condition"), this) ??
-            throw IllegalStateException("faithful AST2CHIR do-while condition produced no value")
+        let condValue = TranslateExprArg(RequireExpr(expr.condExpr, "do-while condition"))
         if (CurrentBlock().GetTerminator().isNone()) {
             builder.CreateBranch(condValue, bodyBlock, endBlock, CurrentBlock())
         }
