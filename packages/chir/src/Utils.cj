@@ -7,11 +7,26 @@ import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.MakeRange as BasicMakeRange
 import cjcj::basic.Position as BasicPosition
 import cjcj::basic.Range as BasicRange
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, FileUtil}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, CORE_PACKAGE_NAME, FileUtil, STD_LIB_FUTURE}
 
 public let ANY_TYPE: String = "ANY_TYPE"
 public let NOT_CARE: String = "NOT_CARE"
 private let STD_PACKAGE_PREFIX: String = "std."
+
+public func IsCoreFuture(def: CustomTypeDef): Bool {
+    return CheckCustomTypeDefIsExpected(def, CORE_PACKAGE_NAME, STD_LIB_FUTURE)
+}
+
+public func GetBuiltinTypeWithVTable(ty: BuiltinType, builder: CHIRBuilder): BuiltinType {
+    if (ty.IsCPointer()) {
+        return builder.context.GetCPointerTy(builder.context.GetUnitTy())
+    }
+    return ty
+}
+
+public func IsEnumSelectorType(ty: Type): Bool {
+    return ty.GetTypeKind() == TypeKind.TYPE_UINT32 || ty.GetTypeKind() == TypeKind.TYPE_BOOLEAN
+}
 
 public func TryGetFromCache<T>(key: String, cache: HashMap<String, Value>): Option<T> where T <: Value {
     let value = cache.get(key) ?? return None

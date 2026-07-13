@@ -155,9 +155,6 @@ public class RedundantFutureRemoval {
     }
 }
 
-private func IsCoreFuture(def: CustomTypeDef): Bool {
-    return def.GetPackageName() == "std.core" && def.GetSrcCodeIdentifier() == "Future"
-}
 
 private func UniqueUsers(users: ArrayList<Expression>): ArrayList<Expression> {
     let out = ArrayList<Expression>()

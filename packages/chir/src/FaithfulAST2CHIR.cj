@@ -2002,13 +2002,6 @@ public class FaithfulAST2CHIR {
         }
     }
 
-    private func GetBuiltinTypeWithVTable(builtinType: BuiltinType, builder: CHIRBuilder): BuiltinType {
-        if (builtinType.IsCPointer()) {
-            return builder.context.GetCPointerTy(builder.context.GetUnitTy())
-        }
-        return builtinType
-    }
-
     private func TranslateOtherTopLevelDecls(node: AstPackage): Unit {
         let _ = node
         for (decl in globalAndMemberFuncs) {
@@ -2094,10 +2087,15 @@ public class FaithfulAST2CHIR {
                     entry.value.Dump()
                 }
             }
-            let result = CHIRChecker().CheckPackage(CurrentPackage())
-            if (!result.ok) {
+            let rules = ArrayList<CHIRCheckerRule>()
+            rules.add(CHIRCheckerRule.CHIR_GET_RTTI_STATIC_TYPE)
+            rules.add(CHIRCheckerRule.IMPORTED_CONST_VAR_SHOULD_HAVE_INITIALIZER)
+            if (opts.commonPartCjos.isEmpty()) {
+                rules.add(CHIRCheckerRule.CHECK_FUNC_BODY)
+            }
+            if (!CHIRChecker(CurrentPackage(), opts, builder).CheckPackage(rules)) {
                 failure = true
-                failureReason = result.ToString()
+                failureReason = "chir checker failed"
             }
         }
     }
