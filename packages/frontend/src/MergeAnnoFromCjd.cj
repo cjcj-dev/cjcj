@@ -182,6 +182,84 @@ public func IsSameType(left: Type, rightTy: Ty): Bool {
     return true
 }
 
+// Faithful port of C++ IsSameGeneric (Frontend/MergeAnnoFromCjd.cpp:236-269).
+public func IsSameGeneric(left: Generic, right: Generic): Bool {
+    if (left.typeParameters.size != right.typeParameters.size) {
+        return false
+    }
+    for (idx in 0..left.typeParameters.size) {
+        if (left.typeParameters[idx].identifier.Val() != right.typeParameters[idx].identifier.Val()) {
+            return false
+        }
+    }
+    if (left.genericConstraints.isEmpty() != right.genericConstraints.isEmpty()) {
+        return false
+    }
+    if (left.genericConstraints.size > right.genericConstraints.size) {
+        return false
+    }
+    let leftGenericConstraints = left.genericConstraints
+    let rightGenericConstraints = right.genericConstraints
+    for (idx in 0..left.genericConstraints.size) {
+        if (!IsSameType(leftGenericConstraints[idx].refType.getOrThrow(),
+            rightGenericConstraints[idx].refType.getOrThrow().GetTy().getOrThrow())) {
+            return false
+        }
+        if (leftGenericConstraints[idx].upperBounds.size != rightGenericConstraints[idx].upperBounds.size) {
+            return false
+        }
+        for (boundIdx in 0..leftGenericConstraints[idx].upperBounds.size) {
+            if (!IsSameType(leftGenericConstraints[idx].upperBounds[boundIdx],
+                rightGenericConstraints[idx].upperBounds[boundIdx].GetTy().getOrThrow())) {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+// Faithful port of C++ IsSameFuncByIdentifier (Frontend/MergeAnnoFromCjd.cpp:271-303).
+public func IsSameFuncByIdentifier(leftBody: FuncBody, rightBody: FuncBody): Bool {
+    if (leftBody.generic.isSome() != rightBody.generic.isSome()) {
+        return false
+    }
+    if (let Some(leftGeneric) <- leftBody.generic) {
+        if (!IsSameGeneric(leftGeneric, rightBody.generic.getOrThrow())) {
+            return false
+        }
+    }
+    if (leftBody.paramLists[0].params.size != rightBody.paramLists[0].params.size) {
+        return false
+    }
+    for (idx in 0..leftBody.paramLists[0].params.size) {
+        var expandedParam = leftBody.paramLists[0].params[idx]
+        if (let Some(macroExpandParam) <- (leftBody.paramLists[0].params[idx] as MacroExpandParam)) {
+            if (macroExpandParam.invocation.macroCallDiagInfo.identifier == "APILevel") {
+                ExpandToAPILevel(macroExpandParam.invocation)
+                let expandedDecl = macroExpandParam.invocation.decl.getOrThrow()
+                CopyBasicInfo(macroExpandParam,
+                    expandedDecl.annotations[expandedDecl.annotations.size - 1])
+                expandedParam = (expandedDecl as FuncParam).getOrThrow()
+            }
+        }
+        if (expandedParam.identifier.Val() != rightBody.paramLists[0].params[idx].identifier.Val()) {
+            return false
+        }
+        if (!IsSameType(expandedParam.typeNode.getOrThrow(),
+            rightBody.paramLists[0].params[idx].GetTy().getOrThrow())) {
+            return false
+        }
+        CJC_ASSERT(rightBody.GetTy().getOrThrow().IsFunc())
+        let leftFuncTy = (rightBody.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        if (let Some(leftRetType) <- leftBody.retType) {
+            if (!IsSameType(leftRetType, leftFuncTy.retTy)) {
+                return false
+            }
+        }
+    }
+    return true
+}
+
 // Faithful port of C++ ColllectPattern (Frontend/MergeAnnoFromCjd.cpp:307-344).
 public func ColllectPattern(pattern: Pattern, topDeclMapping: HashMap<Decl, Option<Decl>>,
     annos: ArrayList<Annotation>): Unit {
