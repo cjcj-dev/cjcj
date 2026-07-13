@@ -565,7 +565,7 @@ public class IRBuilder2 <: Resource {
             }
             if ((unsafe { LLVMGetTypeKind(allocatedType) } == LLVM_STRUCT_TYPE_KIND && options.enableCompileDebug &&
                 options.optimizationLevel == OptimizationLevel.O0) || (options.cjdbMode && isOptionLikeNonRef)) {
-                CreateMemsetStructWith0(allocaInst, allocatedType)
+                CreateMemsetStructWith0(allocaInst)
             }
             let target = GetCGContext().GetCompileOptions().target
             if (target.arch == ArchType.ARM32 && target.env == EnvironmentType.ANDROID &&
@@ -1172,6 +1172,13 @@ public class IRBuilder2 <: Resource {
         return result
     }
 
+    // Mirrors CodeGen/CJNative/CJNativeIRBuilder.cpp:899-921 IRBuilder2::CreateMemsetStructWith0.
+    public func CreateMemsetStructWith0(addr: LLVMValueRef): LLVMValueRef {
+        let allocatedType = unsafe { LLVMGetAllocatedType(addr) }
+        CJC_ASSERT(unsafe { LLVMGetTypeKind(allocatedType) } == LLVM_STRUCT_TYPE_KIND)
+        return CreateMemsetStructWith0(addr, allocatedType)
+    }
+
     public func CreateBr(dest: LLVMBasicBlockRef): LLVMValueRef {
         return unsafe { LLVMBuildBr(builder.raw, dest) }
     }
@@ -1480,7 +1487,7 @@ public class IRBuilder2 <: Resource {
         if (llvmKind == LLVM_STRUCT_TYPE_KIND) {
             let allocaInst = CreateEntryAlloca(llvmTy)
             if (!IsLLVMTypeContainsRef(llvmTy)) {
-                CreateMemsetStructWith0(allocaInst, llvmTy)
+                CreateMemsetStructWith0(allocaInst)
             }
             return allocaInst
         }
@@ -4818,6 +4825,15 @@ public class IRBuilder2 <: Resource {
         return CreateSExt(GetSize_32(chirTy), unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) })
     }
 
+    // Mirrors CodeGen/CJNative/CJNativeIRBuilder.cpp:1876-1879 IRBuilder2::GetSize_Native.
+    public func GetSize_Native(chirTy: Type): LLVMValueRef {
+        return if (GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) {
+            GetSize_32(chirTy)
+        } else {
+            GetSize_64(chirTy)
+        }
+    }
+
     public func GetSizeFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {
         let currentBlock = GetInsertBlock()
         let blockKey = currentBlock.toUIntNative()
@@ -5025,6 +5041,19 @@ public class IRBuilder2 <: Resource {
             }
         }
         return typedTypeArgs
+    }
+
+    // Mirrors CodeGen/CJNative/CJNativeIRBuilder.cpp:1929-1939 IRBuilder2::GetTypeForTypeParameter.
+    public func GetTypeForTypeParameter(typeInfo: LLVMValueRef): LLVMValueRef {
+        let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
+        let typeInfoPtrType = unsafe { LLVMPointerType(typeInfoType, 0u32) }
+        let typedTypeInfo = CreateBitCast(typeInfo, typeInfoPtrType)
+        let namePtr = CreateStructGEP(typeInfoType, typedTypeInfo, 0u32)
+        let nameType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let typeInfoName = CreateLoad(nameType, namePtr, name: "ti.typeInfoName")
+        LLVMSetInstructionMetadata(GetLLVMContext(), typeInfoName, "invariant.load",
+            LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>()))
+        return typeInfoName
     }
 
     public func GetTypeInfoFromTiArray(tiArray: LLVMValueRef, index: Int64, name!: String = ""): LLVMValueRef {

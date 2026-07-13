@@ -62,7 +62,7 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     }
     if (kind == IntrinsicKind.SIZE_OF) {
         if (!typeArgs.isEmpty()) {
-            return SizeOfType(irBuilder, typeArgs[0], resultType)
+            return irBuilder.GetSize_Native(typeArgs[0])
         }
         return LLVMNullValue()
     }
@@ -74,7 +74,7 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     }
     if (kind == IntrinsicKind.GET_TYPE_FOR_TYPE_PARAMETER) {
         if (!typeArgs.isEmpty()) {
-            return GenerateGetTypeForTypeParameter(irBuilder, typeArgs[0])
+            return irBuilder.GetTypeForTypeParameter(irBuilder.CreateTypeInfo(typeArgs[0]))
         }
         return LLVMNullValue()
     }
@@ -628,22 +628,9 @@ private func CPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>,
     return LLVMNullValue()
 }
 
-private func SizeOfType(irBuilder: IRBuilder2, ty: Type, resultType: Option<Type>): LLVMValueRef {
-    let sizeValue = if (let Some(size) <- CGType.GetOrCreate(irBuilder.GetCGModule(), ty).GetSize()) { size } else { 0 }
-    return IntegerConstantForResult(irBuilder, sizeValue, resultType)
-}
-
 private func AlignOfType(irBuilder: IRBuilder2, ty: Type, resultType: Option<Type>): LLVMValueRef {
     let alignValue = if (let Some(align) <- CGType.GetOrCreate(irBuilder.GetCGModule(), ty).GetAlign()) { align } else { 1 }
     return IntegerConstantForResult(irBuilder, alignValue, resultType)
-}
-
-private func GenerateGetTypeForTypeParameter(irBuilder: IRBuilder2, ty: Type): LLVMValueRef {
-    let typeInfoValue = CreateStaticTypeInfo(irBuilder, ty)
-    let typeInfoType = CGType.GetOrCreateTypeInfoType(irBuilder.GetLLVMContext())
-    let namePtr = irBuilder.CreateStructGEP(typeInfoType, typeInfoValue, 0u32, name: "ti.name.ptr")
-    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) }
-    return irBuilder.CreateLoad(i8PtrType, namePtr, name: "ti.name")
 }
 
 private func GenerateIsSubtypeTypes(irBuilder: IRBuilder2, leftTy: Type, rightTy: Type): LLVMValueRef {
