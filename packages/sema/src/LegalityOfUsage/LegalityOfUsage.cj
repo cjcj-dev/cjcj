@@ -238,16 +238,6 @@ public func SetFuncBodyCaptureKind(fb: FuncBody): Unit {
     }
 }
 
-public func SetAllFuncBodyCaptureKinds(root: Node): Unit {
-    let walker = Walker(root, visitPost: { node: Node =>
-        if (let Some(body) <- (node as FuncBody)) {
-            SetFuncBodyCaptureKind(body)
-        }
-        VisitAction.WALK_CHILDREN
-    })
-    walker.Walk()
-}
-
 private func AppendInitializationIssues(dst: ArrayList<InitializationIssue>, src: ArrayList<InitializationIssue>): Unit {
     for (issue in src) {
         dst.add(issue)
