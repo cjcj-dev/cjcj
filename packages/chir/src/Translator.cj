@@ -3064,8 +3064,10 @@ public class Translator {
         if (expr.args.isEmpty()) {
             let sizeValue = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0),
                 CurrentBlock()))
-            let rawArrayRef = RequireResult(builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(),
-                sizeValue, CurrentBlock()))
+            let rawArrayExpr = builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(), sizeValue,
+                CurrentBlock())
+            rawArrayExpr.SetDebugLocation(TranslateLocation(expr))
+            let rawArrayRef = RequireResult(rawArrayExpr)
             builder.CreateRawArrayLiteralInit(builder.context.GetUnitTy(), rawArrayRef, ArrayList<Value>(),
                 CurrentBlock())
             return rawArrayRef
@@ -3079,8 +3081,10 @@ public class Translator {
                 throw IllegalStateException("faithful AST2CHIR RawArray size produced no value")
             let initValue = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[1], "RawArray init value"), this) ??
                 throw IllegalStateException("faithful AST2CHIR RawArray init value produced no value")
-            let rawArrayRef = RequireResult(builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(),
-                sizeValue, CurrentBlock()))
+            let rawArrayExpr = builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(), sizeValue,
+                CurrentBlock())
+            rawArrayExpr.SetDebugLocation(TranslateLocation(expr))
+            let rawArrayRef = RequireResult(rawArrayExpr)
             builder.CreateRawArrayInitByValue(builder.context.GetUnitTy(), rawArrayRef, sizeValue, initValue,
                 CurrentBlock())
             return rawArrayRef
@@ -6402,8 +6406,9 @@ public class Translator {
             IntLiteral(Int64(expr.children.size)), CurrentBlock()))
         let rawArrayTy = builder.context.GetRawArrayTy(elementTy)
         let rawArrayRefTy = builder.context.GetRefTy(rawArrayTy)
-        let rawArrayRef = RequireResult(builder.CreateRawArrayAllocate(rawArrayRefTy, elementTy, elementSize,
-            CurrentBlock()))
+        let rawArrayExpr = builder.CreateRawArrayAllocate(rawArrayRefTy, elementTy, elementSize, CurrentBlock())
+        rawArrayExpr.SetDebugLocation(TranslateLocation(expr))
+        let rawArrayRef = RequireResult(rawArrayExpr)
         if (IsArrayElementPrimitiveForLiteral(elementTy)) {
             let elements = ArrayList<Value>()
             for (child in expr.children) {
@@ -6455,8 +6460,10 @@ public class Translator {
             FuncSigInfo(sizeFuncTy, funcName: "$sizeget"))
         let sizeValue = CreateInvokeMaybeWithException(sizeTy, invokeCtx)
 
-        let rawArrayRef = RequireResult(builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(),
-            sizeValue, CurrentBlock()))
+        let rawArrayExpr = builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(), sizeValue,
+            CurrentBlock())
+        rawArrayExpr.SetDebugLocation(TranslateLocation(expr))
+        let rawArrayRef = RequireResult(rawArrayExpr)
         let initFunc = expr.initFunc ??
             throw IllegalStateException("faithful AST2CHIR RawArray(collection) missing initFunc")
         let args = ArrayList<Value>()
@@ -6475,8 +6482,10 @@ public class Translator {
     private func TranslateRawArrayByLambda(expr: AstArrayExpr, arrayTy: Type, rawArrayTy: RawArrayType): Value {
         let sizeValue = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[0], "RawArray lambda size"), this) ??
             throw IllegalStateException("faithful AST2CHIR RawArray lambda size produced no value")
-        let rawArrayRef = RequireResult(builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(),
-            sizeValue, CurrentBlock()))
+        let rawArrayExpr = builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(), sizeValue,
+            CurrentBlock())
+        rawArrayExpr.SetDebugLocation(TranslateLocation(expr))
+        let rawArrayRef = RequireResult(rawArrayExpr)
         let userInitFn = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[1], "RawArray lambda init"), this) ??
             throw IllegalStateException("faithful AST2CHIR RawArray lambda init produced no value")
         let initFunc = expr.initFunc ??

@@ -1333,6 +1333,8 @@ public class ClosureConversion {
         let instantiateClassTy = GenerateInstantiatedClassType(autoEnvImplType, user, srcFunc)
         let refType = builder.context.GetRefTy(instantiateClassTy)
         let allocate = builder.CreateAllocate(refType, instantiateClassTy, parent)
+        allocate.SetDebugLocation(user.GetDebugLocation())
+        allocate.SetDebugLocationInfoForWarning(user.GetDebugLocationInfoForWarning())
         let obj = RequireResult(allocate)
         var idx: UInt64 = 0u64
         for (env in envs) {

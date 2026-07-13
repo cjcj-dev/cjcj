@@ -260,6 +260,17 @@ public func CheckAnnoNoHeapAlloc(decl: Decl, annotation: Annotation, diag: Basic
     }
 }
 
+public func CheckAnnoNoWriteBarrier(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
+    if (!annotation.args.isEmpty()) {
+        EmitLegacy(diag, BasicDiagKind.sema_annotation_error_arg_num, annotation.args[0],
+            args: [BasicDiagArgument("@NoWriteBarrier"), BasicDiagArgument("no")])
+    }
+    if (decl.astKind != ASTKind.FUNC_DECL) {
+        EmitLegacy(diag, BasicDiagKind.sema_illegal_use_of_annotation, annotation,
+            args: [BasicDiagArgument(DeclKindToString(decl)), BasicDiagArgument("@NoWriteBarrier")])
+    }
+}
+
 public func CheckAnnoNoWriteBarrierRec(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
     if (!annotation.args.isEmpty()) {
         EmitLegacy(diag, BasicDiagKind.sema_annotation_error_arg_num, annotation.args[0],
@@ -279,6 +290,17 @@ public func CheckAnnoNoStackGrow(decl: Decl, annotation: Annotation, diag: Basic
     if (decl.astKind != ASTKind.FUNC_DECL) {
         EmitLegacy(diag, BasicDiagKind.sema_illegal_use_of_annotation, annotation,
             args: [BasicDiagArgument(DeclKindToString(decl)), BasicDiagArgument("@NoStackGrow")])
+    }
+}
+
+public func CheckAnnoSystemStack(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
+    if (!annotation.args.isEmpty()) {
+        EmitLegacy(diag, BasicDiagKind.sema_annotation_error_arg_num, annotation.args[0],
+            args: [BasicDiagArgument("@SystemStack"), BasicDiagArgument("no")])
+    }
+    if (decl.astKind != ASTKind.FUNC_DECL) {
+        EmitLegacy(diag, BasicDiagKind.sema_illegal_use_of_annotation, annotation,
+            args: [BasicDiagArgument(DeclKindToString(decl)), BasicDiagArgument("@SystemStack")])
     }
 }
 
@@ -344,8 +366,10 @@ public func PreCheckAnnoForCFFI(decl: Decl, diag: BasicDiagnosticEngine): Unit {
             case AstAnnotationKind.FASTNATIVE => CheckAnnoFastNative(decl, annotation, diag)
             case AstAnnotationKind.FROZEN => CheckAnnoFrozen(decl, annotation, diag)
             case AstAnnotationKind.NO_HEAP_ALLOC => CheckAnnoNoHeapAlloc(decl, annotation, diag)
+            case AstAnnotationKind.NO_WRITE_BARRIER => CheckAnnoNoWriteBarrier(decl, annotation, diag)
             case AstAnnotationKind.NO_WRITE_BARRIER_REC => CheckAnnoNoWriteBarrierRec(decl, annotation, diag)
             case AstAnnotationKind.NO_STACK_GROW => CheckAnnoNoStackGrow(decl, annotation, diag)
+            case AstAnnotationKind.SYSTEM_STACK => CheckAnnoSystemStack(decl, annotation, diag)
             case _ => ()
         }
     }

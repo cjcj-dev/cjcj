@@ -4342,10 +4342,12 @@ public class FaithfulAST2CHIR {
         target.AppendAttributeInfo(BuildAttr(decl.GetAttrs()))
         if (let Some(fn) <- (target as Function)) {
             if (decl.HasAnno(AstAnnotationKind.NO_HEAP_ALLOC)) { fn.EnableAttr(Attribute.NO_HEAP_ALLOC) }
+            if (decl.HasAnno(AstAnnotationKind.NO_WRITE_BARRIER)) { fn.EnableAttr(Attribute.NO_WRITE_BARRIER) }
             if (decl.HasAnno(AstAnnotationKind.NO_WRITE_BARRIER_REC)) {
                 fn.EnableAttr(Attribute.NO_WRITE_BARRIER_REC)
             }
             if (decl.HasAnno(AstAnnotationKind.NO_STACK_GROW)) { fn.EnableAttr(Attribute.NO_STACK_GROW) }
+            if (decl.HasAnno(AstAnnotationKind.SYSTEM_STACK)) { fn.EnableAttr(Attribute.SYSTEM_STACK) }
         }
         if (decl.TestAttr(AstAttribute.C)) {
             if (let Some(structDef) <- (target as StructDef)) {

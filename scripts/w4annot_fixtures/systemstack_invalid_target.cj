@@ -1,0 +1,4 @@
+@SystemStack
+class InvalidSystemStackTarget {}
+
+main() {}

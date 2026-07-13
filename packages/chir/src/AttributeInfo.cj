@@ -75,7 +75,8 @@ public class AttributeInfo {
             Attribute.UNSAFE, Attribute.JAVA_MIRROR, Attribute.JAVA_IMPL,
             Attribute.OBJ_C_MIRROR, Attribute.HAS_INITED_FIELD, Attribute.JAVA_HAS_DEFAULT,
             Attribute.PREVIOUSLY_DESERIALIZED, Attribute.NO_HEAP_ALLOC,
-            Attribute.NO_WRITE_BARRIER_REC, Attribute.NO_STACK_GROW
+            Attribute.NO_WRITE_BARRIER, Attribute.NO_WRITE_BARRIER_REC, Attribute.NO_STACK_GROW,
+            Attribute.SYSTEM_STACK
         ]
         for (attr in attrsInOrder) {
             if (Test(attr)) {

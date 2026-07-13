@@ -121,14 +121,14 @@ public class NoWriteBarrierRecChecker {
         cycles.clear()
         reportedExpressions.clear()
         reportedFunctions.clear()
-        var hasNoWriteBarrierRec = false
+        var hasNoWriteBarrier = false
         for (fn in pkg.GetGlobalFuncsWithBody()) {
-            if (fn.TestAttr(Attribute.NO_WRITE_BARRIER_REC)) {
-                hasNoWriteBarrierRec = true
+            if (fn.TestAttr(Attribute.NO_WRITE_BARRIER) || fn.TestAttr(Attribute.NO_WRITE_BARRIER_REC)) {
+                hasNoWriteBarrier = true
                 break
             }
         }
-        if (!hasNoWriteBarrierRec) {
+        if (!hasNoWriteBarrier) {
             return
         }
         let callGraph = CallGraph(pkg)
@@ -136,6 +136,9 @@ public class NoWriteBarrierRecChecker {
             if (let Some(fn) <- root.GetFunction()) {
                 if (fn.TestAttr(Attribute.NO_WRITE_BARRIER_REC)) {
                     CheckStaticCallClosure(root)
+                } else if (fn.TestAttr(Attribute.NO_WRITE_BARRIER)) {
+                    constrainedRoots[fn.nodeId] = fn
+                    paths[fn.nodeId] = FunctionName(fn)
                 }
             }
         }
@@ -201,13 +204,18 @@ public class NoWriteBarrierRecChecker {
         }
         let fnPos = GetDebugPos(fn)
         let rootPos = GetDebugPos(root)
+        let annotationName = if (root.TestAttr(Attribute.NO_WRITE_BARRIER_REC)) {
+            "NoWriteBarrierRec"
+        } else {
+            "NoWriteBarrier"
+        }
         let reportRange = if (reportPos[0]) { reportPos[1] } else { fnPos[1] }
         let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_annotation_not_applicable,
             reportRange,
-            arguments: ["NoWriteBarrierRec", "static call closure emitted write barrier while lowering '" +
+            arguments: [annotationName, "static call closure emitted write barrier while lowering '" +
                 operation + "'"])
         builder.AddNote(if (rootPos[0]) { rootPos[1] } else { reportRange },
-            "@NoWriteBarrierRec root is '" + FunctionName(root) + "'")
+            "@" + annotationName + " root is '" + FunctionName(root) + "'")
         builder.AddNote(if (fnPos[0]) { fnPos[1] } else { reportRange },
             "static call path: " + (paths.get(fn.nodeId) ?? FunctionName(fn)))
         for (cycle in cycles) {

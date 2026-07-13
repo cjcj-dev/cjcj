@@ -219,6 +219,8 @@ private class ASTHasherImpl {
             case AnnotationKind.NO_HEAP_ALLOC => 26
             case AnnotationKind.NO_WRITE_BARRIER_REC => 27
             case AnnotationKind.NO_STACK_GROW => 28
+            case AnnotationKind.NO_WRITE_BARRIER => 29
+            case AnnotationKind.SYSTEM_STACK => 30
         }
         CombineHash(Int64(value))
     }
@@ -1159,8 +1161,9 @@ private class ASTHasherImpl {
                 AnnotationKind.WHEN | AnnotationKind.DEPRECATED => return true
             case AnnotationKind.ATTRIBUTE | AnnotationKind.NUMERIC_OVERFLOW | AnnotationKind.FASTNATIVE |
                 AnnotationKind.ANNOTATION | AnnotationKind.CUSTOM | AnnotationKind.FROZEN |
-                AnnotationKind.NO_HEAP_ALLOC | AnnotationKind.NO_WRITE_BARRIER_REC |
-                AnnotationKind.NO_STACK_GROW => return false
+                AnnotationKind.NO_HEAP_ALLOC | AnnotationKind.NO_WRITE_BARRIER |
+                AnnotationKind.NO_WRITE_BARRIER_REC | AnnotationKind.NO_STACK_GROW |
+                AnnotationKind.SYSTEM_STACK => return false
             case _ =>
                 CJC_ASSERT(false)
                 return false
@@ -1172,8 +1175,9 @@ private class ASTHasherImpl {
             case AnnotationKind.ATTRIBUTE => return false
             case AnnotationKind.NUMERIC_OVERFLOW | AnnotationKind.FASTNATIVE | AnnotationKind.ANNOTATION |
                 AnnotationKind.CUSTOM | AnnotationKind.DEPRECATED | AnnotationKind.FROZEN |
-                AnnotationKind.NO_HEAP_ALLOC | AnnotationKind.NO_WRITE_BARRIER_REC |
-                AnnotationKind.NO_STACK_GROW => return true
+                AnnotationKind.NO_HEAP_ALLOC | AnnotationKind.NO_WRITE_BARRIER |
+                AnnotationKind.NO_WRITE_BARRIER_REC | AnnotationKind.NO_STACK_GROW |
+                AnnotationKind.SYSTEM_STACK => return true
             case AnnotationKind.C | AnnotationKind.CALLING_CONV | AnnotationKind.INTRINSIC |
                 AnnotationKind.JAVA | AnnotationKind.JAVA_MIRROR | AnnotationKind.JAVA_IMPL |
                 AnnotationKind.OBJ_C_MIRROR | AnnotationKind.OBJ_C_IMPL | AnnotationKind.FOREIGN_NAME |

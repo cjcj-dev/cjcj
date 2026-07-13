@@ -170,7 +170,7 @@ public enum Attribute {
     | FAST_NATIVE
     // FEATURE_DEBT(CJCJ_RUNTIME_SPEC §3.2/§7): selfhost-only extension domain;
     // upstream CHIR AttributeInfo.h still ends its C++ attribute domain at 38.
-    | NO_HEAP_ALLOC | NO_WRITE_BARRIER_REC | NO_STACK_GROW
+    | NO_HEAP_ALLOC | NO_WRITE_BARRIER | NO_WRITE_BARRIER_REC | NO_STACK_GROW | SYSTEM_STACK
 }
 
 public func AttributeIndex(attr: Attribute): Int64 {
@@ -217,6 +217,8 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.NO_HEAP_ALLOC => 76
         case Attribute.NO_WRITE_BARRIER_REC => 77
         case Attribute.NO_STACK_GROW => 78
+        case Attribute.NO_WRITE_BARRIER => 79
+        case Attribute.SYSTEM_STACK => 80
     }
 }
 
@@ -258,8 +260,10 @@ public func AttributeName(attr: Attribute): String {
         case Attribute.SPECIFIC => "specific"
         case Attribute.STATIC => "static"
         case Attribute.NO_HEAP_ALLOC => "noHeapAlloc"
+        case Attribute.NO_WRITE_BARRIER => "noWriteBarrier"
         case Attribute.NO_WRITE_BARRIER_REC => "noWriteBarrierRec"
         case Attribute.NO_STACK_GROW => "noStackGrow"
+        case Attribute.SYSTEM_STACK => "systemStack"
         case Attribute.UNREACHABLE => "unreachable"
         case Attribute.UNSAFE => "unsafe"
         case Attribute.OVERRIDE => "override"

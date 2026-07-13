@@ -35,8 +35,10 @@ private func AnnotationKindName(kind: AstAnnotationKind): String {
         case AstAnnotationKind.NON_PRODUCT => "NonProduct"
         case AstAnnotationKind.UNKNOWN => "Unknown"
         case AstAnnotationKind.NO_HEAP_ALLOC => "NoHeapAlloc"
+        case AstAnnotationKind.NO_WRITE_BARRIER => "NoWriteBarrier"
         case AstAnnotationKind.NO_WRITE_BARRIER_REC => "NoWriteBarrierRec"
         case AstAnnotationKind.NO_STACK_GROW => "NoStackGrow"
+        case AstAnnotationKind.SYSTEM_STACK => "SystemStack"
     }
 }
 

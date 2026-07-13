@@ -313,8 +313,10 @@ func CHIRKnownAttributes(): ArrayList<Attribute> {
     attrs.add(Attribute.PREVIOUSLY_DESERIALIZED)
     attrs.add(Attribute.FAST_NATIVE)
     attrs.add(Attribute.NO_HEAP_ALLOC)
+    attrs.add(Attribute.NO_WRITE_BARRIER)
     attrs.add(Attribute.NO_WRITE_BARRIER_REC)
     attrs.add(Attribute.NO_STACK_GROW)
+    attrs.add(Attribute.SYSTEM_STACK)
     return attrs
 }
 
@@ -362,6 +364,8 @@ func CHIRAttributeFromIndex(index: Int64): Attribute {
         case 76 => Attribute.NO_HEAP_ALLOC
         case 77 => Attribute.NO_WRITE_BARRIER_REC
         case 78 => Attribute.NO_STACK_GROW
+        case 79 => Attribute.NO_WRITE_BARRIER
+        case 80 => Attribute.SYSTEM_STACK
         case _ => throw IllegalArgumentException("invalid CHIR attribute index")
     }
 }

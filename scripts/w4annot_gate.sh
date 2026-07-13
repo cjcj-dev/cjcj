@@ -52,6 +52,17 @@ expect_failure_exact() {
         fi
         index=$((index + 1))
     done
+    local expected_location=""
+    if [ "$name" = "noheap_array_bad" ]; then
+        expected_location="noheap_array_bad.cj:3:"
+    elif [ "$name" = "noheap_closure_bad" ]; then
+        expected_location="noheap_closure_bad.cj:5:"
+    fi
+    if [ -n "$expected_location" ] && ! grep -F "$expected_location" "$output" >/dev/null; then
+        fail "$name missing allocation-site location $expected_location"
+        sed -n '1,40p' "$output"
+        return
+    fi
     pass "$name rejected with exact diagnostics"
 }
 
@@ -75,6 +86,14 @@ expect_failure_exact noheap_box_bad \
     "error: '@NoHeapAlloc' not applicable to static call closure emitted heap allocation 'llvm.cj.malloc.object'" \
     "note: @NoHeapAlloc root is 'noHeapBox'" \
     "note: static call path: noHeapBox -> boxInteger"
+expect_failure_exact noheap_closure_bad \
+    "error: '@NoHeapAlloc' not applicable to static call closure emitted heap allocation 'llvm.cj.malloc.object'" \
+    "note: @NoHeapAlloc root is 'makeClosure'" \
+    "note: static call path: makeClosure"
+expect_failure_exact nowritebarrier_bad \
+    "error: '@NoWriteBarrier' not applicable to static call closure emitted write barrier while lowering 'StoreElementRef'" \
+    "note: @NoWriteBarrier root is 'barrier'" \
+    "note: static call path: barrier"
 expect_failure_exact nowritebarrierrec_bad \
     "error: '@NoWriteBarrierRec' not applicable to static call closure emitted write barrier while lowering 'StoreElementRef'" \
     "note: @NoWriteBarrierRec root is 'barrierRoot'" \
@@ -98,6 +117,8 @@ expect_failure_exact nowritebarrierrec_box_bad \
     "note: static call path: boxBarrier"
 expect_failure_exact invalid_target \
     "error: class cannot be modified with '@NoStackGrow'"
+expect_failure_exact systemstack_invalid_target \
+    "error: class cannot be modified with '@SystemStack'"
 
 if (cd "$WORK" && "$CJC" "$FIXTURES/nostackgrow.cj" --output-type=staticlib \
     -o "$WORK/libnostackgrow.a") >"$WORK/nostackgrow.out" 2>&1; then
