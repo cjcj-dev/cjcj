@@ -9,9 +9,54 @@ import cjcj::basic.GetHash
 import cjcj::basic.DiagCategory
 import cjcj::macro_pkg.MacroExpansion
 import cjcj::utils.FileUtil
+import cjcj::utils.CJ_D_FILE_EXTENSION
+import cjcj::utils.InternalError
 import cjcj::utils.ProfileRecorder
 import std.collection.*
 import std.sort.*
+import std.sync.*
+
+// Faithful ports of the C++ .cj.d process-wide caches (Frontend/CompileStrategy.cpp:464-467).
+private let g_cjdAstCache = HashMap<String, Option<Package>>()
+private let g_cjdAstCacheLock = Mutex()
+private let g_sourceManageLock = Mutex()
+
+// Faithful port of C++ ParseAndMergeCjd (Frontend/CompileStrategy.cpp:469-512).
+func ParseAndMergeCjd(ci: CompilerInstance, cjdInfo: (String, String)): Unit {
+    let cjoPath = cjdInfo[1]
+    var sourceCode = ReadFileContent(cjoPath)
+    if (!sourceCode[0]) {
+        let searchPath = ci.importManager.GetSearchPath()
+        let cjdPath = FileUtil.FindSerializationFile(cjdInfo[0], CJ_D_FILE_EXTENSION, searchPath.toArray())
+        if (cjdPath.isEmpty()) {
+            return
+        }
+        sourceCode = ReadFileContent(cjdPath)
+        if (!sourceCode[0]) {
+            return
+        }
+    }
+
+    let sourceManager = ci.diag.GetSourceManager()
+    let fileId = synchronized(g_sourceManageLock) {
+        let isCjmpFile = ci.invocation.globalOptions.IsCompilingCJMP() ||
+            !ci.invocation.globalOptions.commonPartCjos.isEmpty()
+        sourceManager.AddSource(cjoPath, sourceCode[1], packageName: Some(cjdInfo[0]), isCjmpFile: isCjmpFile)
+    }
+    let fileAst = RealParser(fileId, sourceCode[1], ci.diag.AsBasicDiagnosticEngine(),
+        ci.diag.GetSourceManager(), parseDeclFile: true).ParseTopLevel()
+    let pkg = Package(cjdInfo[0])
+    fileAst.curPackage = Some(pkg)
+    pkg.files.add(fileAst)
+    if (let Some(originPkg) <- ci.importManager.GetPackage(cjdInfo[0])) {
+        MergeCusAnno(originPkg, pkg)
+    } else {
+        InternalError(cjdInfo[0] + " cannot find origin ast")
+    }
+    synchronized(g_cjdAstCacheLock) {
+        g_cjdAstCache[cjdInfo[0]] = Some(pkg)
+    }
+}
 
 public enum StrategyType {
     | DEFAULT
@@ -79,7 +124,52 @@ public open class CompileStrategy {
     }
 
     public func ImportPackages(): Bool {
-        return ci.ImportPackages()
+        let result = ci.ImportPackages()
+        ParseAndMergeCjds()
+        return result
+    }
+
+    // Faithful port of C++ CompileStrategy::ParseAndMergeCjds (Frontend/CompileStrategy.cpp:514-560).
+    public func ParseAndMergeCjds(): Unit {
+        let option = ci.invocation.globalOptions
+        let hasLevelFlag = option.passedWhenKeyValue.contains("APILevel_level")
+        let hasSyscapFlag = option.passedWhenKeyValue.contains("APILevel_syscap")
+        if (!hasLevelFlag && !hasSyscapFlag) {
+            return
+        }
+        ProfileRecorder.Start("ImportPackages", "ParseAndMergeCjds")
+        let cjdInfos = ci.importManager.GetDepPkgCjdPaths()
+        let futures = ArrayList<Future<Unit>>()
+        option.compileCjd = true
+        for ((packageName, cjdPath) in cjdInfos) {
+            let cjdInfo = (packageName, cjdPath)
+            if (option.jobs.hasValue && option.jobs.value == 1u64) {
+                ParseAndMergeCjd(ci, cjdInfo)
+            } else {
+                synchronized(g_cjdAstCacheLock) {
+                    if (let Some(cachedPackage) <- g_cjdAstCache.get(packageName)) {
+                        if (let Some(cachedPackageValue) <- cachedPackage) {
+                            if (let Some(originPkg) <- ci.importManager.GetPackage(packageName)) {
+                                MergeCusAnno(originPkg, cachedPackageValue)
+                            } else {
+                                InternalError(packageName + " cannot find origin ast")
+                            }
+                        } else {
+                            futures.add(spawn { ParseAndMergeCjd(ci, cjdInfo) })
+                        }
+                    } else {
+                        g_cjdAstCache[packageName] = None
+                        futures.add(spawn { ParseAndMergeCjd(ci, cjdInfo) })
+                    }
+                }
+            }
+        }
+        for (future in futures) {
+            future.get()
+        }
+        ci.diag.EmitCategoryGroup()
+        option.compileCjd = false
+        ProfileRecorder.Stop("ImportPackages", "ParseAndMergeCjds")
     }
 
     public func MacroExpand(): Bool {
