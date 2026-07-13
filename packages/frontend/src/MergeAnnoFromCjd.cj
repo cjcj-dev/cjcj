@@ -289,3 +289,67 @@ public func ColllectPattern(pattern: Pattern, topDeclMapping: HashMap<Decl, Opti
         case _ => ()
     }
 }
+
+// Faithful port of C++ IsSameDeclByIdentifier (Frontend/MergeAnnoFromCjd.cpp:346-419).
+public func IsSameDeclByIdentifier(left: Decl, right: Decl): Bool {
+    let leftIdentifier = if (left.astKind == ASTKind.PRIMARY_CTOR_DECL) { "init" } else { left.identifier.Val() }
+    let leftKind = if (left.astKind == ASTKind.PRIMARY_CTOR_DECL) { ASTKind.FUNC_DECL } else { left.astKind }
+    let fastQuit = leftIdentifier != right.identifier.Val() || leftKind != right.astKind ||
+        left.generic.isSome() != right.generic.isSome()
+    if (fastQuit) {
+        return false
+    }
+    if (let Some(leftGeneric) <- left.generic) {
+        if (!IsSameGeneric(leftGeneric, right.generic.getOrThrow())) {
+            return false
+        }
+    }
+    match (left.astKind) {
+        case ASTKind.FUNC_DECL =>
+            let leftFuncDecl = (left as FuncDecl).getOrThrow()
+            let rightFuncDecl = (right as FuncDecl).getOrThrow()
+            if (!IsSameFuncByIdentifier(leftFuncDecl.funcBody.getOrThrow(), rightFuncDecl.funcBody.getOrThrow())) {
+                return false
+            }
+        case ASTKind.PRIMARY_CTOR_DECL =>
+            let leftPrimaryCtorDecl = (left as PrimaryCtorDecl).getOrThrow()
+            let rightFuncDecl = (right as FuncDecl).getOrThrow()
+            if (!IsSameFuncByIdentifier(leftPrimaryCtorDecl.funcBody.getOrThrow(),
+                rightFuncDecl.funcBody.getOrThrow())) {
+                return false
+            }
+        case ASTKind.EXTEND_DECL =>
+            let leftExtendDecl = (left as ExtendDecl).getOrThrow()
+            let rightExtendDecl = (right as ExtendDecl).getOrThrow()
+            if (!IsSameType(leftExtendDecl.extendedType.getOrThrow(), rightExtendDecl.extendedType.getOrThrow())) {
+                return false
+            }
+            if (leftExtendDecl.inheritedTypes.size != rightExtendDecl.inheritedTypes.size) {
+                return false
+            }
+            for (idx in 0..leftExtendDecl.inheritedTypes.size) {
+                if (!IsSameType(leftExtendDecl.inheritedTypes[idx], rightExtendDecl.inheritedTypes[idx])) {
+                    return false
+                }
+            }
+        case ASTKind.MACRO_EXPAND_DECL =>
+            let leftMacroExpandDecl = (left as MacroExpandDecl).getOrThrow()
+            let rightMacroExpandDecl = (right as MacroExpandDecl).getOrThrow()
+            if (leftMacroExpandDecl.invocation.macroCallDiagInfo.fullName !=
+                rightMacroExpandDecl.invocation.macroCallDiagInfo.fullName ||
+                leftMacroExpandDecl.invocation.macroCallDiagInfo.identifier !=
+                rightMacroExpandDecl.invocation.macroCallDiagInfo.identifier) {
+                return false
+            }
+        case ASTKind.VAR_DECL | ASTKind.PROP_DECL =>
+            let leftVarDecl = (left as VarDecl).getOrThrow()
+            let rightVarDecl = (right as VarDecl).getOrThrow()
+            if (let Some(leftType) <- leftVarDecl.typeNode) {
+                if (!IsSameType(leftType, rightVarDecl.GetTy().getOrThrow())) {
+                    return false
+                }
+            }
+        case _ => ()
+    }
+    return true
+}
