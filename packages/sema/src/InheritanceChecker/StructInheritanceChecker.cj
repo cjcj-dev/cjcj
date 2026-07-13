@@ -183,8 +183,11 @@ private func ParamIdentifierRange(param: FuncParam): BasicRange {
 }
 
 private func DiagnoseParameterName(diag: DiagnosticEngine, parent: FuncDecl, child: FuncDecl): Unit {
-    let builder = diag.DiagnoseRefactor(
+    // C++: StructInheritanceChecker.cpp:97-123 uses the node-and-range diagnostic overload.
+    let builder = DiagnoseRefactor(
+        diag,
         DiagKindRefactor.sema_param_named_mismatched,
+        child,
         DeclIdentifierRange(child)
     )
     if (let Some(parentBody) <- parent.funcBody) {
@@ -226,7 +229,8 @@ private func DiagnoseParameterName(diag: DiagnosticEngine, parent: FuncDecl, chi
         }
     }
     builder.AddNote(DeclIdentifierRange(parent), "the corresponding function of the supertype is")
-    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+    // C++: DiagnosticEngine.cpp:314-338 emits DiagnosticBuilder on destruction.
+    builder.Emit()
 }
 
 private func VisibilityToString(decl: Decl): String {
