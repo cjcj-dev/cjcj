@@ -2147,21 +2147,16 @@ public class FaithfulAST2CHIR {
             let staticVars = ArrayList<AstDecl>()
             var staticInitVar: Option<AstDecl> = None
             let outerDecl = funcDecl.outerDecl.getOrThrow()
-            for (member in outerDecl.GetMemberDecls()) {
-                if (let Some(memberVar) <- (member as AstVarDecl)) {
-                    if (!memberVar.TestAttr(AstAttribute.STATIC)) {
-                        continue
-                    }
-                    if (memberVar.identifier.Val() == STATIC_INIT_VAR) {
-                        staticInitVar = memberVar
-                        continue
-                    }
-                    if (memberVar.initializer.isSome()) {
-                        continue
-                    }
-                    staticVars.add(memberVar)
-                    varsInitedByStaticInitFunc.Add(memberVar)
+            for (memberVar in GetStaticMemberVars(outerDecl)) {
+                if (memberVar.identifier.Val() == STATIC_INIT_VAR) {
+                    staticInitVar = memberVar
+                    continue
                 }
+                if (memberVar.initializer.isSome()) {
+                    continue
+                }
+                staticVars.add(memberVar)
+                varsInitedByStaticInitFunc.Add(memberVar)
             }
             staticInitFuncInfoMap.Set(outerDecl, StaticInitInfo(RequireFuncDecl(funcDecl), staticInitVar, staticVars))
         }
@@ -2906,7 +2901,8 @@ public class FaithfulAST2CHIR {
     private func GetStaticMemberVars(decl: AstDecl): ArrayList<AstVarDecl> {
         let out = ArrayList<AstVarDecl>()
         for (member in decl.GetMemberDeclPtrs()) {
-            if (let Some(varDecl) <- (member as AstVarDecl)) {
+            if (member.astKind == ASTKind.VAR_DECL) {
+                let varDecl = (member as AstVarDecl).getOrThrow()
                 if (varDecl.TestAttr(AstAttribute.STATIC)) {
                     out.add(varDecl)
                 }
@@ -2918,7 +2914,8 @@ public class FaithfulAST2CHIR {
     private func GetNonStaticMemberVars(decl: AstDecl): ArrayList<AstVarDecl> {
         let out = ArrayList<AstVarDecl>()
         for (member in decl.GetMemberDeclPtrs()) {
-            if (let Some(varDecl) <- (member as AstVarDecl)) {
+            if (member.astKind == ASTKind.VAR_DECL) {
+                let varDecl = (member as AstVarDecl).getOrThrow()
                 if (!varDecl.TestAttr(AstAttribute.STATIC)) {
                     out.add(varDecl)
                 }
