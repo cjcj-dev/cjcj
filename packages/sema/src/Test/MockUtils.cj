@@ -665,6 +665,50 @@ public class MockUtils {
         return decl.fullPackageName + "$" + decl.identifier.Val()
     }
 
+    // C++: Sema/Test/MockUtils.cpp:757-766.
+    public func CreateRefExprWithInstTys(target: Decl, instTys: ArrayList<Ty>, refName: String,
+        curFile: File): RefExpr {
+        let refExpr = CreateRefExpr(target)
+        refExpr.ref.identifier = SrcIdentifier(refName)
+        refExpr.curFile = curFile
+        refExpr.SetTy(typeManager.GetInstantiatedTy(target.GetTy().getOrThrow(),
+            GenerateTypeMapping(target, instTys)))
+        for (instTy in instTys) {
+            refExpr.instTys.add(instTy)
+        }
+        return refExpr
+    }
+
+    // C++: Sema/Test/MockUtils.cpp:768-787.
+    public func CreateDeclBasedReferenceExpr(target: Decl, instTys: ArrayList<Ty>, refName: String,
+        curFile: File): RefExpr {
+        var ty: Option<Ty> = None
+        if (target.astKind == ASTKind.FUNC_DECL || target.astKind == ASTKind.VAR_DECL) {
+            let paramTys = ArrayList<Ty>()
+            for (idx in 0..instTys.size - 1) {
+                paramTys.add(instTys[idx])
+            }
+            ty = typeManager.GetFunctionTy(paramTys.toArray(), instTys[instTys.size - 1])
+        } else if (target.astKind == ASTKind.CLASS_DECL) {
+            ty = typeManager.GetClassTy((target as ClassDecl).getOrThrow(), instTys.toArray())
+        }
+        return CreateRefExprWithInstTys(target, ty.getOrThrow().typeArgs, refName, curFile)
+    }
+
+    // C++: Sema/Test/MockUtils.cpp:745-755.
+    public func CreateZeroValue(ty: Ty, curFile: File): CallExpr {
+        let zeroValueCall = CallExpr()
+        let instTys = ArrayList<Ty>()
+        instTys.add(ty)
+        zeroValueCall.baseFunc = CreateDeclBasedReferenceExpr(zeroValueDecl.getOrThrow(), instTys,
+            ZERO_VALUE_INTRINSIC_NAME, curFile)
+        zeroValueCall.SetTy(ty)
+        zeroValueCall.callKind = CallKind.CALL_INTRINSIC_FUNCTION
+        zeroValueCall.resolvedFunction = zeroValueDecl
+        zeroValueCall.curFile = curFile
+        return zeroValueCall
+    }
+
     public static func PrependFuncGenericSubst(originalGeneric: Option<Generic>, mockedGeneric: Option<Generic>,
         classSubsts: ArrayList<TypeSubst>): Unit {
         if (originalGeneric.isNone() || mockedGeneric.isNone()) {
