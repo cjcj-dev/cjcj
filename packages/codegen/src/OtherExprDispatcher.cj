@@ -5,6 +5,7 @@ import cjcj::chir.ExprKind
 import cjcj::chir.GetRTTI
 import cjcj::chir.GetRTTIStatic
 import cjcj::chir.Lambda
+import cjcj::chir.TypeCast
 
 public func HandleStructedControlFlowExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (chirExpr.GetExprKind() == ExprKind.LAMBDA) {
@@ -50,7 +51,10 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     if (kind == ExprKind.FIELD || kind == ExprKind.FIELD_BY_NAME) {
         return GenerateFieldExpression(irBuilder, chirExpr)
     }
-    if (kind == ExprKind.TYPECAST || kind == ExprKind.BOX || kind == ExprKind.UNBOX ||
+    if (kind == ExprKind.TYPECAST) {
+        return HandleTypecastExpr(irBuilder, chirExpr)
+    }
+    if (kind == ExprKind.BOX || kind == ExprKind.UNBOX ||
         kind == ExprKind.TRANSFORM_TO_GENERIC || kind == ExprKind.TRANSFORM_TO_CONCRETE ||
         kind == ExprKind.UNBOX_TO_REF) {
         return EmitTypeCastExpression(irBuilder, chirExpr)
@@ -79,6 +83,11 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         }
     }
     return LLVMNullValue()
+}
+
+private func HandleTypecastExpr(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+    let typeCast = (chirExpr as TypeCast).getOrThrow()
+    return GenerateTypeCast(irBuilder, CHIRTypeCastWrapper(typeCast))
 }
 
 private func GenerateRTTIExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {

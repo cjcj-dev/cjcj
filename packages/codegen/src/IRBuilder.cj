@@ -1205,6 +1205,14 @@ public class IRBuilder2 <: Resource {
         return result
     }
 
+    public func CreateOr(left: LLVMValueRef, right: LLVMValueRef): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
+            result = unsafe { LLVMBuildOr(builder.raw, left, right, nameCString.value) }
+        }
+        return result
+    }
+
     public func CreateFCmpOLT(left: LLVMValueRef, right: LLVMValueRef, name!: String = ""): LLVMValueRef {
         var result = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
@@ -4125,6 +4133,16 @@ public class IRBuilder2 <: Resource {
         }
         PropagateBasePtr(value, result)
         return result
+    }
+
+    public func CreateBitOrPointerCast(value: LLVMValueRef, destType: LLVMTypeRef,
+        name!: String = ""): LLVMValueRef {
+        let sourceType = unsafe { LLVMTypeOf(value) }
+        if (unsafe { LLVMGetTypeKind(sourceType) } == LLVM_POINTER_TYPE_KIND &&
+            unsafe { LLVMGetTypeKind(destType) } == LLVM_POINTER_TYPE_KIND) {
+            return CreatePointerCast(value, destType, name: name)
+        }
+        return CreateBitCast(value, destType, name: name)
     }
 
     public func CreateAddrSpaceCast(value: LLVMValueRef, destType: LLVMTypeRef, name!: String = "addrspacecast"): LLVMValueRef {

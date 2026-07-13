@@ -15,7 +15,7 @@ import cjcj::chir.TransformToConcrete
 import cjcj::chir.TransformToGeneric
 import cjcj::chir.UnBox
 import cjcj::chir.UnBoxToRef
-import cjcj::utils.{CJC_ASSERT_WITH_MSG, OverflowStrategy, StaticCast}
+import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, OverflowStrategy, StaticCast}
 import cjcj::option.ArchType
 
 private let LLVM_POINTER_TYPE_KIND: Int32 = 12
@@ -67,6 +67,22 @@ private func StringIntX(archType: ArchType, intTy: IntType): String {
     }
     CJC_ASSERT_WITH_MSG(false, "Unsupported ArchType.")
     return intTy.ToString()
+}
+
+private func GenerateIntegerToFloatConvExpr(irBuilder: IRBuilder2, sourceValue: LLVMValueRef,
+    targetType: LLVMTypeRef, sourceTy: IntType): LLVMValueRef {
+    if (sourceTy.IsSigned()) {
+        return irBuilder.CreateSIToFP(sourceValue, targetType)
+    }
+    return irBuilder.CreateUIToFP(sourceValue, targetType)
+}
+
+private func GenerateFloatConvExpr(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, targetType: LLVMTypeRef,
+    sourceTy: NumericType, targetTy: NumericType): LLVMValueRef {
+    if (targetTy.GetBitness() > sourceTy.GetBitness()) {
+        return irBuilder.CreateFPExt(sourceValue, targetType)
+    }
+    return irBuilder.CreateFPTrunc(sourceValue, targetType)
 }
 
 public func EmitTypeCastExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
@@ -443,6 +459,91 @@ private func GenerateGenericTypeCast(irBuilder: IRBuilder2, sourceCGValue: CGVal
     return None
 }
 
+public func GenerateTupleTypeCast(irBuilder: IRBuilder2, sourceCGValue: CGValue,
+    targetCGType: CGType): LLVMValueRef {
+    let sourceLLVMType = sourceCGValue.GetLLVMType()
+    let addressSpace = unsafe { LLVMGetPointerAddressSpace(sourceLLVMType) }
+    let targetPointerType = unsafe { LLVMPointerType(targetCGType.GetLLVMType(), addressSpace) }
+    return irBuilder.CreateBitOrPointerCast(sourceCGValue.GetRawValue(), targetPointerType)
+}
+
+public func GenerateTypeCast(irBuilder: IRBuilder2, typeCast: CHIRTypeCastWrapper): LLVMValueRef {
+    let targetTyOption = typeCast.GetTargetTy()
+    let sourceTyOption = typeCast.GetSourceTy()
+    CJC_ASSERT(sourceTyOption.isSome() && targetTyOption.isSome())
+    let targetTy = targetTyOption.getOrThrow()
+    let sourceTy = sourceTyOption.getOrThrow()
+
+    let cgMod = irBuilder.GetCGModule()
+    let sourceCGValue = cgMod.GetMappedCGValue(typeCast.GetSourceValue())
+    let sourceValue = sourceCGValue.GetRawValue()
+    if (sourceTy == targetTy) {
+        return sourceValue
+    }
+
+    if (let Some(result) <- GenerateGenericTypeCast(irBuilder, sourceCGValue, sourceTy, targetTy)) {
+        return result
+    }
+
+    if (sourceTy.IsEnum() && targetTy.IsTuple()) {
+        return sourceValue
+    }
+
+    let sourceType = CGType.GetOrCreate(cgMod, sourceTy)
+    let targetType = CGType.GetOrCreate(cgMod, targetTy)
+    if ((targetTy.IsEnum() && sourceTy.IsInteger()) || (targetTy.IsInteger() && sourceTy.IsEnum())) {
+        let enumTy = if (targetTy.IsEnum()) { targetTy } else { sourceTy }
+        if (StaticCast<CGEnumType>(CGType.GetOrCreate(cgMod, enumTy)).IsTrivial()) {
+            return sourceValue
+        }
+        return irBuilder.CreateNullValue(targetTy)
+    }
+
+    if (sourceType.IsPointerType(addrSpace: 1u32) && targetType.IsPointerType(addrSpace: 1u32)) {
+        return sourceValue
+    }
+
+    if (targetTy.IsFloat() && sourceTy.IsFloat()) {
+        return GenerateFloatConvExpr(irBuilder, sourceValue, targetType.GetLLVMType(),
+            StaticCast<NumericType>(sourceTy), StaticCast<NumericType>(targetTy))
+    } else if (targetTy.IsFloat() && sourceTy.IsInteger()) {
+        return GenerateIntegerToFloatConvExpr(irBuilder, sourceValue, targetType.GetLLVMType(),
+            StaticCast<IntType>(sourceTy))
+    } else if (targetTy.IsInteger() && sourceTy.IsFloat()) {
+        return GenerateFloatToIntegerConvExpr(irBuilder, typeCast.GetOverflowStrategy(), sourceValue, targetType,
+            StaticCast<FloatType>(sourceTy))
+    } else if (irBuilder.GetTypeKindFromType(targetTy) == TypeKind.TYPE_UINT32 && sourceTy.IsRune()) {
+        return sourceValue
+    } else if (targetTy.IsRune() && sourceTy.IsInteger()) {
+        return GenerateIntegerToRuneTypeCast(irBuilder, sourceValue, sourceTy)
+    } else if (targetTy.IsInteger() && sourceTy.IsRune()) {
+        return irBuilder.CreateZExtOrTrunc(sourceValue, targetType.GetLLVMType())
+    } else if (targetTy.IsTuple() && sourceTy.IsTuple()) {
+        return GenerateTupleTypeCast(irBuilder, sourceCGValue, targetType)
+    } else if (targetTy.IsFunc() && sourceTy.IsFunc()) {
+        CJC_ASSERT(targetTy.GetTypeArgs().size == sourceTy.GetTypeArgs().size)
+        let functionType = StaticCast<CGFunctionType>(targetType).GetLLVMFunctionType()
+        let addressSpace = unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(sourceValue)) }
+        let castedTo = unsafe { LLVMPointerType(functionType, addressSpace) }
+        return irBuilder.CreateBitOrPointerCast(sourceValue, castedTo)
+    } else if (targetTy.IsInteger() && sourceTy.IsInteger()) {
+        return GenerateIntegerConversionExpr(irBuilder, typeCast.GetOverflowStrategy(), sourceValue, targetType,
+            StaticCast<IntType>(sourceTy))
+    } else if (targetType.GetLLVMType().toUIntNative() == sourceType.GetLLVMType().toUIntNative()) {
+        return sourceValue
+    } else if (targetTy.IsCFunc() && sourceTy.IsCPointer()) {
+        return irBuilder.CreateBitOrPointerCast(sourceValue, targetType.GetLLVMType())
+    } else if (targetTy.IsInteger() && sourceTy.IsBoolean()) {
+        return irBuilder.CreateZExtOrTrunc(sourceValue, targetType.GetLLVMType())
+    }
+
+    if (IsVArrayRef(targetTy) && sourceTy.IsCPointer()) {
+        return irBuilder.CreateBitOrPointerCast(sourceValue, targetType.GetLLVMType())
+    }
+
+    return irBuilder.CreateNullValue(targetTy)
+}
+
 public func CastValueToType(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: Type, targetTy: Type,
     targetLLVMType: LLVMTypeRef, overflowStrategy!: OverflowStrategy = OverflowStrategy.NA): LLVMValueRef {
     if (sourceTy.IsEqual(targetTy)) {
@@ -765,6 +866,65 @@ private func GenerateIntegerConversionExpr(irBuilder: IRBuilder2, strategy: Over
             targetType.GetOriginal().ToString())
     }
     return typecast(irBuilder)
+}
+
+private func GenerateUnicodeScalarValueCheck(irBuilder: IRBuilder2, sourceValue: LLVMValueRef,
+    sourceTy: Type): Unit {
+    let sourceTyKind = irBuilder.GetTypeKindFromType(sourceTy)
+    if (sourceTyKind == TypeKind.TYPE_UINT8) {
+        return
+    }
+    let llvmType = CGType.GetOrCreate(irBuilder.GetCGModule(), sourceTy).GetLLVMType()
+    let bound1 = unsafe { LLVMConstInt(llvmType, 0u64, 0) }
+    let bound2 = unsafe { LLVMConstInt(llvmType, 0xD7FFu64, 0) }
+    let bound3 = unsafe { LLVMConstInt(llvmType, 0xE000u64, 0) }
+    let bound4 = unsafe { LLVMConstInt(llvmType, 0x10FFFFu64, 0) }
+
+    var compareResult = LLVMNullValue()
+    if (sourceTy.IsInteger() && StaticCast<IntType>(sourceTy).IsSigned()) {
+        let cond1 = irBuilder.CreateICmp(LLVMIntPredicate.SLT, sourceValue, bound1)
+        if (sourceTyKind == TypeKind.TYPE_INT8 || sourceTyKind == TypeKind.TYPE_INT16) {
+            compareResult = cond1
+        } else {
+            let cond2 = irBuilder.CreateICmp(LLVMIntPredicate.SGT, sourceValue, bound2)
+            let cond3 = irBuilder.CreateICmp(LLVMIntPredicate.SLT, sourceValue, bound3)
+            let cond4 = irBuilder.CreateICmp(LLVMIntPredicate.SGT, sourceValue, bound4)
+            let combo1 = irBuilder.CreateAnd(cond2, cond3)
+            let combo2 = irBuilder.CreateOr(cond1, combo1)
+            compareResult = irBuilder.CreateOr(combo2, cond4)
+        }
+    } else {
+        let cond1 = irBuilder.CreateICmp(LLVMIntPredicate.UGT, sourceValue, bound2)
+        let cond2 = irBuilder.CreateICmp(LLVMIntPredicate.ULT, sourceValue, bound3)
+        let combo1 = irBuilder.CreateAnd(cond1, cond2)
+        if (sourceTyKind == TypeKind.TYPE_UINT16) {
+            compareResult = combo1
+        } else {
+            let cond3 = irBuilder.CreateICmp(LLVMIntPredicate.UGT, sourceValue, bound4)
+            compareResult = irBuilder.CreateOr(combo1, cond3)
+        }
+    }
+
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(
+        ArrayList<String>([GenNameForBB("if.else"), GenNameForBB("if.end")]))
+    let throwBlock = blocks[0]
+    let endBlock = blocks[1]
+    irBuilder.CreateCondBr(compareResult, throwBlock, endBlock)
+    irBuilder.SetInsertPoint(throwBlock)
+    irBuilder.CreateOverflowOrArithmeticException(
+        "in Rune(num), num is not a valid Unicode scalar value!", isOverflow: true)
+    irBuilder.CreateUnreachable()
+    irBuilder.SetInsertPoint(endBlock)
+}
+
+private func GenerateIntegerToRuneTypeCast(irBuilder: IRBuilder2, sourceValue: LLVMValueRef,
+    sourceTy: Type): LLVMValueRef {
+    GenerateUnicodeScalarValueCheck(irBuilder, sourceValue, sourceTy)
+    let targetType = CGType.GetUInt32CGType(irBuilder.GetCGModule())
+    if (irBuilder.GetTypeKindFromType(sourceTy) == TypeKind.TYPE_UINT32) {
+        return sourceValue
+    }
+    return irBuilder.CreateZExtOrTrunc(sourceValue, targetType.GetLLVMType())
 }
 
 private func SignedIntegerConst(llvmType: LLVMTypeRef, value: Int64): LLVMValueRef {

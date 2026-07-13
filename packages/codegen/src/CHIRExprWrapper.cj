@@ -18,6 +18,8 @@ import cjcj::chir.InvokeStatic
 import cjcj::chir.InvokeStaticWithException
 import cjcj::chir.InvokeWithException
 import cjcj::chir.Type
+import cjcj::chir.TypeCast
+import cjcj::chir.TypeCastWithException
 import cjcj::chir.UnaryExpression
 import cjcj::chir.Value
 import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, OverflowStrategy}
@@ -81,6 +83,44 @@ public class CHIRBinaryExprWrapper <: CHIRExprWrapper {
             return (expr as BinaryExpression).getOrThrow().GetExprKind()
         }
         return (expr as IntOpWithException).getOrThrow().GetOpKind()
+    }
+}
+
+public class CHIRTypeCastWrapper <: CHIRExprWrapper {
+    public init(typeCast: TypeCast) {
+        super(typeCast)
+    }
+
+    public init(typeCastWithException: TypeCastWithException) {
+        super(typeCastWithException)
+    }
+
+    public func GetSourceValue(): Value {
+        if (expr.GetExprKind() == ExprKind.TYPECAST) {
+            return (expr as TypeCast).getOrThrow().GetSourceValue()
+        }
+        return (expr as TypeCastWithException).getOrThrow().GetSourceValue()
+    }
+
+    public func GetSourceTy(): Option<Type> {
+        if (expr.GetExprKind() == ExprKind.TYPECAST) {
+            return (expr as TypeCast).getOrThrow().GetSourceTy()
+        }
+        return (expr as TypeCastWithException).getOrThrow().GetSourceTy()
+    }
+
+    public func GetTargetTy(): Option<Type> {
+        if (expr.GetExprKind() == ExprKind.TYPECAST) {
+            return (expr as TypeCast).getOrThrow().GetTargetTy()
+        }
+        return (expr as TypeCastWithException).getOrThrow().GetTargetTy()
+    }
+
+    public func GetOverflowStrategy(): OverflowStrategy {
+        if (expr.GetExprKind() == ExprKind.TYPECAST) {
+            return (expr as TypeCast).getOrThrow().GetOverflowStrategy()
+        }
+        return OverflowStrategy.THROWING
     }
 }
 

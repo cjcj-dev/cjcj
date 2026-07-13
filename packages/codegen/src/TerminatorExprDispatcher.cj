@@ -12,6 +12,7 @@ import cjcj::chir.IntOpWithException
 import cjcj::chir.LocalVar
 import cjcj::chir.MultiBranch
 import cjcj::chir.Type
+import cjcj::chir.TypeCastWithException
 import cjcj::utils.CJC_ASSERT
 
 public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
@@ -83,7 +84,8 @@ public func HandleTerminatorExpression(irBuilder: IRBuilder2, chirExpr: Expressi
     }
     if (kind == ExprKind.TYPECAST_WITH_EXCEPTION) {
         return HandleWithExceptionTerminator(irBuilder, chirExpr, { builder: IRBuilder2, expr: Expression =>
-            EmitTypeCastExpression(builder, expr)
+            let typeCastWithException = (expr as TypeCastWithException).getOrThrow()
+            GenerateTypeCast(builder, CHIRTypeCastWrapper(typeCastWithException))
         })
     }
     if (kind == ExprKind.ALLOCATE_WITH_EXCEPTION) {
