@@ -958,7 +958,7 @@ private func makeMirrorPropFromVar(varDecl: VarDecl, attrToBeSet: Attribute): Pr
     return propNode
 }
 
-private func setPositionAndCurFileByProvidedNode(consumer: Node, provider: Node): Unit {
+private func SetPositionAndCurFileByProvidedNode(consumer: Node, provider: Node): Unit {
     consumer.curFile = provider.curFile
     consumer.begin = provider.begin
     consumer.end = provider.end
@@ -1044,43 +1044,49 @@ public func InsertJavaRefGetterStubWithBody(decl: ClassDecl): Unit {
     }
 }
 
-public func IsJavaDeclAppropriateForSyntheticClassGeneration(node: Node): Bool {
-    return IsMirror(node) && (node.astKind == ASTKind.INTERFACE_DECL ||
-        (node.astKind == ASTKind.CLASS_DECL && node.TestAttr(Attribute.ABSTRACT)))
+public func IsDeclAppropriateForSyntheticClassGeneration(node: Node): Bool {
+    return IsMirror(node) && (node.IsInterfaceDecl() || node.IsAbstractClass())
 }
 
-public func GetJavaSyntheticNameFromClassLike(decl: ClassLikeDecl): String {
+public func GetSyntheticNameFromClassLike(decl: ClassLikeDecl): String {
     return decl.identifier.Val() + "$impl"
 }
 
-public func InsertJavaSyntheticClassDecl(decl: ClassLikeDecl, file: File): ClassDecl {
+public func InsertSyntheticClassDecl(decl: ClassLikeDecl, file: File): Unit {
     let synthetic = ClassDecl()
-    copyAccessAttr(decl, synthetic)
+    if (decl.TestAttr(Attribute.PUBLIC)) {
+        synthetic.EnableAttr(Attribute.PUBLIC)
+    } else if (decl.TestAttr(Attribute.INTERNAL)) {
+        synthetic.EnableAttr(Attribute.INTERNAL)
+    } else if (decl.TestAttr(Attribute.PROTECTED)) {
+        synthetic.EnableAttr(Attribute.PROTECTED)
+    } else if (decl.TestAttr(Attribute.PRIVATE)) {
+        synthetic.EnableAttr(Attribute.PRIVATE)
+    }
     synthetic.EnableAttr(Attribute.JAVA_MIRROR)
     synthetic.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
     synthetic.EnableAttr(Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER)
     synthetic.EnableAttr(Attribute.COMPILER_ADD)
     synthetic.EnableAttr(Attribute.ABSTRACT)
-    synthetic.identifier = SrcIdentifier(GetJavaSyntheticNameFromClassLike(decl), decl.identifier.Begin(),
+    synthetic.identifier = SrcIdentifier(GetSyntheticNameFromClassLike(decl), decl.identifier.Begin(),
         decl.identifier.End(), decl.identifier.IsRaw())
 
     if (decl.astKind == ASTKind.INTERFACE_DECL) {
         let jobject = CreateRefType(INTEROP_JOBJECT_NAME)
-        setPositionAndCurFileByProvidedNode(jobject, decl)
+        SetPositionAndCurFileByProvidedNode(jobject, decl)
         synthetic.inheritedTypes.add(jobject)
     }
     synthetic.inheritedTypes.add(CreateRefType(decl))
 
     synthetic.fullPackageName = decl.fullPackageName
-    setPositionAndCurFileByProvidedNode(synthetic, decl)
+    SetPositionAndCurFileByProvidedNode(synthetic, decl)
 
     let body = ClassBody()
-    setPositionAndCurFileByProvidedNode(body, synthetic)
+    SetPositionAndCurFileByProvidedNode(body, synthetic)
     synthetic.body = body
 
     synthetic.moduleName = GetRootPackageName(decl.fullPackageName)
     file.decls.add(synthetic)
-    return synthetic
 }
 
 public func IsObjCDeclAppropriateForSyntheticClassGeneration(decl: Decl): Bool {
@@ -1102,25 +1108,13 @@ public func InsertObjCSyntheticClassDecl(decl: ClassLikeDecl, file: File): Class
         decl.identifier.End(), decl.identifier.IsRaw())
     synthetic.inheritedTypes.add(CreateRefType(decl))
     synthetic.fullPackageName = decl.fullPackageName
-    setPositionAndCurFileByProvidedNode(synthetic, decl)
+    SetPositionAndCurFileByProvidedNode(synthetic, decl)
 
     let body = ClassBody()
-    setPositionAndCurFileByProvidedNode(body, synthetic)
+    SetPositionAndCurFileByProvidedNode(body, synthetic)
     synthetic.body = body
 
     synthetic.moduleName = GetRootPackageName(decl.fullPackageName)
     file.decls.add(synthetic)
     return synthetic
-}
-
-private func copyAccessAttr(source: Node, target: Node): Unit {
-    if (source.TestAttr(Attribute.PUBLIC)) {
-        target.EnableAttr(Attribute.PUBLIC)
-    } else if (source.TestAttr(Attribute.INTERNAL)) {
-        target.EnableAttr(Attribute.INTERNAL)
-    } else if (source.TestAttr(Attribute.PROTECTED)) {
-        target.EnableAttr(Attribute.PROTECTED)
-    } else if (source.TestAttr(Attribute.PRIVATE)) {
-        target.EnableAttr(Attribute.PRIVATE)
-    }
 }
