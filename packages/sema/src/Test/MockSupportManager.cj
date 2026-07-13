@@ -89,6 +89,21 @@ public func CreateThisRefForMockSupport(targetClass: ClassLikeDecl): RefExpr {
     return thisRef
 }
 
+// C++: Sema/Test/MockSupportManager.cpp:949-965.
+public func CreateRefForFieldAccess(outerDecl: Decl, kind: AccessorKind): RefExpr {
+    let outerClassDecl = (outerDecl as ClassDecl).getOrThrow()
+    if (kind == AccessorKind.STATIC_FIELD_GETTER || kind == AccessorKind.STATIC_FIELD_SETTER) {
+        let refExpr = CreateRefExpr(outerClassDecl)
+        if (let Some(generic) <- outerDecl.generic) {
+            for (param in generic.typeParameters) {
+                refExpr.instTys.add(param.GetTy().getOrThrow())
+            }
+        }
+        return refExpr
+    }
+    return CreateThisRefForMockSupport(outerClassDecl)
+}
+
 public func IsFieldOrVariable(kind: AccessorKind): Bool {
     return kind == AccessorKind.FIELD_GETTER || kind == AccessorKind.FIELD_SETTER ||
         kind == AccessorKind.STATIC_FIELD_GETTER || kind == AccessorKind.STATIC_FIELD_SETTER ||
