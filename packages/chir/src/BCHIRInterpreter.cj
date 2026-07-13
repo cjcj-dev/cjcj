@@ -97,11 +97,13 @@ public class BCHIRInterpreter {
                     items.add(InterpreterValue.MakeNull())
                     itemIdx++
                 }
-                interpStack.ArgsPush(arena.Allocate(InterpreterValue.MakeArray(items)))
+                // Mirrors C++ BCHIRInterpreter.cpp:1742-1744.
+                interpStack.ArgsPush(AllocateValue(InterpreterValue.MakeArray(items)))
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (opCode == OpCode.ALLOCATE_RAW_ARRAY_LITERAL ||
                 opCode == OpCode.ALLOCATE_RAW_ARRAY_LITERAL_EXC) {
-                interpStack.ArgsPush(arena.Allocate(InterpreterValue.MakeArray(interpStack.ArgsPop(code.Get(pc + 1)))))
+                // Mirrors C++ BCHIRInterpreter.cpp:1717-1744.
+                interpStack.ArgsPush(AllocateValue(InterpreterValue.MakeArray(interpStack.ArgsPop(code.Get(pc + 1)))))
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (opCode == OpCode.RAW_ARRAY_LITERAL_INIT) {
                 if (!RawArrayLiteralInit(code.Get(pc + 1))) {
@@ -120,7 +122,8 @@ public class BCHIRInterpreter {
                     fields.add(InterpreterValue.MakeNull())
                     fieldIdx++
                 }
-                interpStack.ArgsPush(arena.Allocate(InterpreterValue.MakeTuple(fields)))
+                // Mirrors C++ BCHIRInterpreter.cpp:77-83.
+                interpStack.ArgsPush(AllocateValue(InterpreterValue.MakeTuple(fields)))
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (opCode == OpCode.ALLOCATE_CLASS || opCode == OpCode.ALLOCATE_CLASS_EXC) {
                 let classId = code.Get(pc + 1)
@@ -131,10 +134,12 @@ public class BCHIRInterpreter {
                     fields.add(InterpreterValue.MakeNull())
                     fieldIdx++
                 }
-                interpStack.ArgsPush(arena.Allocate(InterpreterValue.MakeObject(classId, fields)))
+                // Mirrors C++ BCHIRInterpreter.cpp:91-100.
+                interpStack.ArgsPush(AllocateValue(InterpreterValue.MakeObject(classId, fields)))
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (opCode == OpCode.ALLOCATE || opCode == OpCode.ALLOCATE_EXC) {
-                interpStack.ArgsPush(arena.Allocate(InterpreterValue.MakeNull()))
+                // Mirrors C++ BCHIRInterpreter.cpp:62-67.
+                interpStack.ArgsPush(AllocateValue(InterpreterValue.MakeNull()))
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (opCode == OpCode.FRAME) {
                 env.AllocateLocalVarsForFrame(code.Get(pc + 1))
@@ -261,7 +266,8 @@ public class BCHIRInterpreter {
             } else if (opCode == OpCode.BOX) {
                 let fields = ArrayList<InterpreterValue>()
                 fields.add(interpStack.ArgsPopIVal())
-                interpStack.ArgsPush(arena.Allocate(InterpreterValue.MakeObject(code.Get(pc + 1), fields)))
+                // Mirrors C++ BCHIRInterpreter.cpp:516-523.
+                interpStack.ArgsPush(AllocateValue(InterpreterValue.MakeObject(code.Get(pc + 1), fields)))
                 pc += 2
             } else if (opCode == OpCode.UNBOX) {
                 if (let Some(value) <- UnboxValue(interpStack.ArgsPopIVal())) {
@@ -406,7 +412,21 @@ public class BCHIRInterpreter {
     public func GetBCHIR(): BCHIR { return bchir }
 
     public func ToArena(value: InterpreterValue): InterpreterValue {
-        return arena.Allocate(value)
+        // Mirrors C++ BCHIRInterpreter.cpp:1079-1083.
+        return AllocateValue(value)
+    }
+
+    // Mirrors C++ BCHIRInterpreter.cpp:1653-1664.
+    private func AllocateValue(value: InterpreterValue): InterpreterValue {
+        let pointer = arena.Allocate(value)
+        if (value.kind != InterpreterValueKind.IOBJECT) {
+            return pointer
+        }
+        let finalizerIndex = bchir.GetClassFinalizer(value.GetClassId())
+        if (finalizerIndex != 0) {
+            arena.finalizingObjects.add(pointer)
+        }
+        return pointer
     }
 
     public func PeekValueOfGlobal(index: Int64): InterpreterValue {

@@ -3,6 +3,8 @@ package cjcj::chir
 import std.collection.*
 
 public class InterpreterArena {
+    // Mirrors C++ InterpreterArena.h:22-23.
+    public let finalizingObjects: ArrayList<InterpreterValue> = ArrayList<InterpreterValue>()
     private let values: ArrayList<InterpreterValue> = ArrayList<InterpreterValue>()
 
     public init() {}
