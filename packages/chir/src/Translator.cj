@@ -1436,8 +1436,22 @@ public class Translator {
             var argValue: Value
             if (arg.withInout) {
                 let argExpr = RequireFuncArgExpr(arg, "pointer argument")
-                argValue = GeneratePointerInoutArg(TranslateExprAsLeftValue(argExpr),
-                    chirTy.TranslateType(RequireAstTy(argExpr)))
+                let argLeftValInfo = TranslateExprAsLeftValue(argExpr)
+                argValue = argLeftValInfo.base.getOrThrow()
+                if (!argLeftValInfo.path.isEmpty()) {
+                    let argValueTy = argValue.GetType().getOrThrow()
+                    let lhsCustomType = (argValueTy.StripAllRefs() as CustomType).getOrThrow()
+                    if (argValueTy.IsRef()) {
+                        argValue = CreateGetElementRefWithPath(TranslateLocation(expr), argValue,
+                            argLeftValInfo.path, CurrentBlock(), lhsCustomType)
+                    } else {
+                        let memberType = GetInstMemberTypeByName(lhsCustomType, argLeftValInfo.path, builder)
+                        let getMember = builder.CreateFieldByName(memberType, argValue, argLeftValInfo.path,
+                            CurrentBlock())
+                        getMember.SetDebugLocation(TranslateLocation(expr))
+                        argValue = RequireResult(getMember)
+                    }
+                }
                 let inoutArgs = ArrayList<Value>()
                 inoutArgs.add(argValue)
                 argValue = RequireResult(builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(arg)),
@@ -9322,20 +9336,6 @@ public class Translator {
             }
         }
         return value
-    }
-
-    private func GeneratePointerInoutArg(info: FaithfulLeftValueInfo, expectedTy: Type): Value {
-        let base = info.base.getOrThrow()
-        if (info.path.isEmpty()) {
-            return base
-        }
-        let baseTy = base.GetType() ??
-            throw IllegalStateException("faithful AST2CHIR pointer inout base has no type: ${base.GetIdentifier()}")
-        if (baseTy.IsRef()) {
-            return RequireResult(builder.CreateGetElementByName(builder.context.GetRefTy(expectedTy), base,
-                info.path, CurrentBlock()))
-        }
-        return RequireResult(builder.CreateFieldByName(expectedTy, base, info.path, CurrentBlock()))
     }
 
     private func CurrentBlock(): Block {
