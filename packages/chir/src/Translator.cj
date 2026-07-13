@@ -2963,7 +2963,7 @@ public class Translator {
             let target = loopTargetStack[loopTargetStack.size - 1]
             let targetBlock = if (expr.isBreak) { target.breakBlock } else { target.continueBlock }
             destination = Some(targetBlock)
-            targetBlock.GetDebugLocation()
+            target.breakBlock.GetDebugLocation()
         }
         if (!finallyContext.isEmpty()) {
             let tryLocInfo = CurrentFinallyContext().finallyBlock.GetDebugLocation()
