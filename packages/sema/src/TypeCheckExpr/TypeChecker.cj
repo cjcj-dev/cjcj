@@ -4219,6 +4219,29 @@ extend TypeChecker {
         return ce.GetTy()
     }
 
+    // C++ src/Sema/TypeCheckCall.cpp:2286-2295 TypeCheckerImpl::SynTrailingClosure.
+    private func SynTrailingClosure(ctx: ASTContext, tc: TrailingClosureExpr): Ty {
+        if (let Some(desugarExpr) <- tc.desugarExpr) {
+            tc.SetTy(Synthesize(ctx, SynPos.EXPR_ARG, desugarExpr))
+        } else {
+            tc.SetTy(TypeManager.GetInvalidTy())
+        }
+        return tc.GetTy().getOrThrow()
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:2297-2309 TypeCheckerImpl::ChkTrailingClosureExpr.
+    private func ChkTrailingClosureExpr(ctx: ASTContext, target: Ty, tc: TrailingClosureExpr): Bool {
+        if (let Some(desugarExpr) <- tc.desugarExpr) {
+            if (Check(ctx, target, desugarExpr)) {
+                tc.SetTy(desugarExpr.GetTy().getOrThrow())
+                return true
+            }
+            desugarExpr.SetTy(TypeManager.GetInvalidTy())
+        }
+        tc.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+
     private func Check(ctx: ASTContext, target: Ty, typeNode: Type): Bool {
         if (!Ty.IsTyCorrect(target)) {
             typeNode.SetTy(TypeManager.GetInvalidTy())
@@ -7343,6 +7366,9 @@ extend TypeChecker {
                 synthesizer: Some({ node: Node => SynthesizeNode(ctx, SynPos.EXPR_ARG, node) }),
                 trySynthesizer: Some({ tryExpr: TryExpr => Synthesize(ctx, tryExpr) })))
         }
+        if (let Some(trailingClosure) <- (expr as TrailingClosureExpr)) {
+            return FinishSynthesize(ctx, trailingClosure, SynTrailingClosure(ctx, trailingClosure))
+        }
         if (let Some(desugar) <- expr.desugarExpr) {
             let _ = Synthesize(ctx, pos, desugar)
         }
@@ -7576,6 +7602,9 @@ extend TypeChecker {
             typeCheckExprPutTargetType(ctx, callExpr, target)
             let ok = ChkCallExpr(ctx, Some(target), callExpr)
             return FinishCheck(ctx, callExpr, ok)
+        }
+        if (let Some(trailingClosure) <- (expr as TrailingClosureExpr)) {
+            return FinishCheck(ctx, trailingClosure, ChkTrailingClosureExpr(ctx, target, trailingClosure))
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
             return FinishCheck(ctx, ifExpr, ChkIfExpr(ctx, target, ifExpr))
