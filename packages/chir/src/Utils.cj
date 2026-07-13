@@ -243,7 +243,7 @@ private func CheckParentTy(fn: Function, funcInfo: FuncInfo): Bool {
             return true
         }
         if (let Some(customTy) <- (parentTy as CustomType)) {
-            return customTy.GetCustomTypeDef().GetIdentifier() == funcInfo.parentTy
+            return customTy.GetCustomTypeDef().GetSrcCodeIdentifier() == funcInfo.parentTy
         }
         return parentTy.ToSrcCodeString() == funcInfo.parentTy
     }
