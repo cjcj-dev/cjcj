@@ -3656,7 +3656,7 @@ public class FaithfulAST2CHIR {
                 IntLiteral(expr.constNumValue.asInt.Uint64())
             case AstTypeKind.TYPE_INT8 | AstTypeKind.TYPE_INT16 | AstTypeKind.TYPE_INT32 |
                 AstTypeKind.TYPE_INT64 | AstTypeKind.TYPE_INT_NATIVE | AstTypeKind.TYPE_IDEAL_INT =>
-                IntLiteral(UInt64(expr.constNumValue.asInt.`Int64`()))
+                IntLiteral(expr.constNumValue.asInt.`Int64`())
             case AstTypeKind.TYPE_RUNE => RuneLiteral(Rune(expr.codepoint[0]))
             case AstTypeKind.TYPE_BOOLEAN => BoolLiteral(expr.stringValue == "true")
             case AstTypeKind.TYPE_STRUCT =>
