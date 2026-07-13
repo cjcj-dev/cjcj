@@ -382,6 +382,36 @@ private class FrontendCjoFlatBufferWriter {
         return next
     }
 
+    // ASTWriter.cpp:1610-1613 PlannedToBeSerialized.
+    private func PlannedToBeSerialized(decl: Decl): Bool {
+        return declKeyToIndex.contains(decl)
+    }
+
+    // ASTWriter.cpp:1617-1642 CollectInitializationDependencies.
+    private func CollectInitializationDependencies(decl: Decl, visited: HashSet<Decl>): ArrayList<FlatBufferOffset> {
+        if (visited.contains(decl)) {
+            return ArrayList<FlatBufferOffset>()
+        }
+        let currentVisited = HashSet<Decl>()
+        for (visitedDecl in visited) {
+            currentVisited.add(visitedDecl)
+        }
+        currentVisited.add(decl)
+
+        let dependencies = ArrayList<FlatBufferOffset>()
+        for (dependencyOpt in decl.dependencies) {
+            let dependency = dependencyOpt.getOrThrow()
+            if (PlannedToBeSerialized(dependency)) {
+                dependencies.add(CreateFullIdForDecl(dependency))
+            } else {
+                for (transitiveFullId in CollectInitializationDependencies(dependency, currentVisited)) {
+                    dependencies.add(transitiveFullId)
+                }
+            }
+        }
+        return dependencies
+    }
+
     private func SaveDeclBody(decl: Decl, key: Node, index: UInt32, isTopLevel: Bool): Unit {
         if (completedDeclKeys.contains(key)) {
             return
@@ -405,8 +435,14 @@ private class FrontendCjoFlatBufferWriter {
         let hash = DeclHashBytes(decl.hash)
         let declKind = DeclKindToFlat(decl)
         let infoType = DeclInfoTypeToFlat(decl)
+        let dependencies = if (serializingCommon) {
+            builder.CreateVectorOffsets(CollectInitializationDependencies(decl, HashSet<Decl>()))
+        } else {
+            0u32
+        }
 
         builder.StartTable(19)
+        builder.AddOffset(18, dependencies)
         builder.AddOffset(17, info)
         builder.AddU8(16, infoType)
         builder.AddStruct(15, hash, 8)
