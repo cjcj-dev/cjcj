@@ -729,6 +729,13 @@ public class MockUtils {
         return zeroValueCall
     }
 
+    // C++: Sema/Test/MockUtils.cpp:830-837.
+    public func CreateTypeCastOrZeroValue(selector: Expr, castTy: Ty): Expr {
+        let createValueBranch = { varDecl: VarDecl => CreateRefExpr(varDecl) }
+        let zeroValueExpression = CreateZeroValue(castTy, selector.curFile.getOrThrow())
+        return CreateTypeCast(selector, castTy, createValueBranch, zeroValueExpression, castTy)
+    }
+
     // C++: Sema/Test/MockUtils.cpp:532-546.
     public func CreateGetTypeForTypeParameterCall(genericParam: GenericParamDecl): Expr {
         let funcDecl = getTypeForTypeParamDecl.getOrThrow()
