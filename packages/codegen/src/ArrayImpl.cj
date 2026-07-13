@@ -41,7 +41,23 @@ public func GenerateRawArrayAllocate(irBuilder: IRBuilder2, chirExpr: Expression
                     }
                 }
             }
-            return GenerateCheckedRawArrayAllocate(irBuilder, rawArrayTy, lengthValue)
+            let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>(
+                [GenNameForBB("arr.alloc.throw"), GenNameForBB("arr.alloc.body")]))
+            CJC_ASSERT(blocks.size == 2)
+            let throwBlock = blocks[0]
+            let bodyBlock = blocks[1]
+            let zeroValue = unsafe { LLVMConstInt(LLVMTypeOf(lengthValue), 0u64, 0) }
+            let isValidLength = irBuilder.CreateICmp(LLVMIntPredicate.SGE, lengthValue, zeroValue,
+                name: "arr.alloc.size.valid")
+            let expectedValidLength = irBuilder.GenerateCallExpectFunction(isValidLength, irBuilder.GetTrue())
+            irBuilder.CreateCondBr(expectedValidLength, bodyBlock, throwBlock)
+
+            irBuilder.SetInsertPoint(throwBlock)
+            irBuilder.CreateNegativeArraySizeException()
+            irBuilder.CreateUnreachable()
+
+            irBuilder.SetInsertPoint(bodyBlock)
+            return irBuilder.AllocateArray(rawArrayTy, lengthValue)
         }
     }
     return LLVMNullValue()
@@ -174,26 +190,6 @@ public func GenerateRawArrayInitByValue(irBuilder: IRBuilder2, chirExpr: Express
     }
     irBuilder.CallArrayInit(array, sizeVal, elemValue.GetRawValue(), arrTy)
     return array
-}
-
-private func GenerateCheckedRawArrayAllocate(irBuilder: IRBuilder2, rawArrayTy: RawArrayType,
-    lengthValue: LLVMValueRef): LLVMValueRef {
-    let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>(
-        [GenNameForBB("arr.alloc.throw"), GenNameForBB("arr.alloc.body")]))
-    CJC_ASSERT(blocks.size == 2)
-    let throwBlock = blocks[0]
-    let bodyBlock = blocks[1]
-    let zeroValue = unsafe { LLVMConstInt(LLVMTypeOf(lengthValue), 0u64, 0) }
-    let isValidLength = irBuilder.CreateICmp(LLVMIntPredicate.SGE, lengthValue, zeroValue,
-        name: "arr.alloc.size.valid")
-    let expectedValidLength = irBuilder.GenerateCallExpectFunction(isValidLength, irBuilder.GetTrue())
-    irBuilder.CreateCondBr(expectedValidLength, bodyBlock, throwBlock)
-
-    irBuilder.SetInsertPoint(throwBlock)
-    irBuilder.CreateNegativeArraySizeException()
-
-    irBuilder.SetInsertPoint(bodyBlock)
-    return irBuilder.AllocateArray(rawArrayTy, lengthValue)
 }
 
 private func FindRawArrayType(ty: Type): Option<RawArrayType> {

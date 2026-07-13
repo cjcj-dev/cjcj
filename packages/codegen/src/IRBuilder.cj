@@ -4532,7 +4532,6 @@ public class IRBuilder2 <: Resource {
             GetOrInsertRuntimeFunction(THROW_NEGATIVE_ARRAY_SIZE_EXCEPTION_FUNC_NAME, helperType)
         }
         let _ = CreateCallOrInvoke(helper, ArrayList<LLVMValueRef>())
-        let _ = CreateUnreachable()
     }
 
     public func CreateOutOfBoundException(): Unit {
