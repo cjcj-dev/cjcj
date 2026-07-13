@@ -3222,6 +3222,16 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR nested FuncDecl lambda has no result")
         localValSymbolTable.Set(funcDecl, lambdaValue)
         BindLambdaParams(funcBody, lambda, funcTy)
+        for (param in funcBody.paramLists[0].params) {
+            if (let Some(desugarDecl) <- param.desugarDecl) {
+                // C++ Translator::TranslateNestedFunc recursively translates a local function's default-parameter
+                // functions and records their host lambda (TranslateFuncDecl.cpp:505-514).
+                let defaultArgFunc = TranslateNestedFunc(desugarDecl).getOrThrow()
+                let defaultArgLambda = (defaultArgFunc.AsLocalVar().getOrThrow().GetExpr().getOrThrow() as Lambda)
+                    .getOrThrow()
+                defaultArgLambda.SetParamDftValHostFunc(lambda)
+            }
+        }
 
         let savedBlock = currentBlock
         let savedLambda = currentLambda
