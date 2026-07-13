@@ -727,12 +727,13 @@ private func NeedsUIntToIntConversion(irBuilder: IRBuilder2, sourceTy: IntType, 
     }
 }
 
-private func GenerateCondCheckUpperBound(irBuilder: IRBuilder2, sourceValue: LLVMValueRef, sourceTy: IntType,
-    targetTy: IntType): LLVMValueRef {
+private func GenerateCondCheckUpperBound(irBuilder: IRBuilder2, targetType: CGType,
+    sourceValue: LLVMValueRef, sourceTy: IntType): LLVMValueRef {
+    let targetTy = StaticCast<IntType>(targetType.GetOriginal())
     let targetTyKind = irBuilder.GetTypeKindFromType(targetTy)
     let sourceTyKind = irBuilder.GetTypeKindFromType(sourceTy)
-    if (!IsSignedIntegerLikeType(sourceTy) && IsSignedIntegerLikeType(targetTy)) {
-        let targetLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType()
+    if (IsUInt2Int(sourceTy, targetTy)) {
+        let targetLLVMType = targetType.GetLLVMType()
         let needsConversion = NeedsUIntToIntConversion(irBuilder, sourceTy, targetTyKind)
         let maxType = if (needsConversion) { targetLLVMType } else { unsafe { LLVMTypeOf(sourceValue) } }
         let maxVal = SignedIntegerConst(maxType, GetIntMaxOrMin(irBuilder, targetTy, true))
@@ -742,9 +743,8 @@ private func GenerateCondCheckUpperBound(irBuilder: IRBuilder2, sourceValue: LLV
             sourceValue
         }
         return irBuilder.CreateICmp(LLVMIntPredicate.ULE, valueToCompare, maxVal, name: "ui2i.upper")
-    }
-    if (IsSignedIntegerLikeType(sourceTy) && !IsSignedIntegerLikeType(targetTy)) {
-        let targetLLVMType = CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType()
+    } else if (IsInt2UInt(sourceTy, targetTy)) {
+        let targetLLVMType = targetType.GetLLVMType()
         let needsConversion = NeedsIntToUIntConversion(irBuilder, sourceTy, targetTyKind)
         let maxType = if (needsConversion) { targetLLVMType } else { unsafe { LLVMTypeOf(sourceValue) } }
         let maxVal = UnsignedIntegerConst(maxType, GetUIntMax(irBuilder, targetTy))
@@ -754,8 +754,7 @@ private func GenerateCondCheckUpperBound(irBuilder: IRBuilder2, sourceValue: LLV
             sourceValue
         }
         return irBuilder.CreateICmp(LLVMIntPredicate.ULE, valueToCompare, maxVal, name: "i2ui.upper")
-    }
-    if (IsSignedIntegerLikeType(sourceTy) && IsSignedIntegerLikeType(targetTy)) {
+    } else if (IsInt2Int(sourceTy, targetTy)) {
         if (TypeKindIndex(targetTyKind) > TypeKindIndex(sourceTyKind)) {
             return irBuilder.GetTrue()
         }
@@ -763,6 +762,7 @@ private func GenerateCondCheckUpperBound(irBuilder: IRBuilder2, sourceValue: LLV
             GetIntMaxOrMin(irBuilder, targetTy, true))
         return irBuilder.CreateICmp(LLVMIntPredicate.SLE, sourceValue, maxVal, name: "i2i.upper")
     }
+    CJC_ASSERT_WITH_MSG(IsUInt2UInt(sourceTy, targetTy), "expected UInt-to-UInt conversion")
     if (TypeKindIndex(targetTyKind) > TypeKindIndex(sourceTyKind)) {
         return irBuilder.GetTrue()
     }
@@ -857,7 +857,7 @@ private func GenerateIntegerConversionExpr(irBuilder: IRBuilder2, strategy: Over
         GenerateCondCheckLowerBound(irBuilder, targetType, sourceValue, sourceTy)
     }
     let checkUpperBound = { =>
-        GenerateCondCheckUpperBound(irBuilder, sourceValue, sourceTy, targetTy)
+        GenerateCondCheckUpperBound(irBuilder, targetType, sourceValue, sourceTy)
     }
     if (strategy == OverflowStrategy.SATURATING) {
         return GenerateOverflowSaturatingBasicBlock(irBuilder, targetType, checkLowerBound, checkUpperBound, typecast)
