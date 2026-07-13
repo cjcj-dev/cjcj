@@ -2085,7 +2085,7 @@ public class IRBuilder2 <: Resource {
         if (blocks.size < 2) {
             return slot
         }
-        CreateCondBr(CreateTypeInfoIsReferenceCall(typeInfo), blocks[1], blocks[0])
+        CreateCondBr(CreateTypeInfoIsReferenceCall(resultTy), blocks[1], blocks[0])
         SetInsertPoint(blocks[0])
         CreateStore(CallAllocaGenericWithTypeInfo(resultTy, typeInfo), slot)
         CreateBr(blocks[1])
