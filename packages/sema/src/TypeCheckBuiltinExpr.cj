@@ -387,6 +387,9 @@ public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit
         }
     } else if (!Ty.IsTyCorrect(targetTy) || (!targetTy.IsStructArray() && (let None <- (targetTy as VArrayTy)))) {
         arrayLit.SetTy(TypeManager.GetInvalidTy())
+        if (let Some(diagValue) <- diag) {
+            DiagMismatchedTypesWithFoundTy(diagValue, arrayLit, targetTy.String(), "Array")
+        }
         return false
     }
     if (arrayLit.children.isEmpty()) {
