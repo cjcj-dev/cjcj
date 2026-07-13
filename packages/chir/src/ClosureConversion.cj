@@ -143,7 +143,7 @@ private class LambdaInline {
 
     public init(builder: CHIRBuilder, opts: GlobalOptions) {
         this.opts = opts
-        inlinePass = FunctionInline(builder, opts.optimizationLevel, opts.chirDebugOptimizer)
+        inlinePass = FunctionInline(builder, OptimizationLevel.O2, opts.chirDebugOptimizer)
     }
 
     public func InlineLambda(funcs: ArrayList<Lambda>): Unit {
@@ -151,8 +151,7 @@ private class LambdaInline {
             return
         }
         for (lambdaFunc in funcs) {
-            let funcTy = lambdaFunc.GetFuncType()
-            if (funcTy.isNone() || funcTy.getOrThrow().IsCFunc()) {
+            if (lambdaFunc.GetFuncType().getOrThrow().IsCFunc()) {
                 continue
             }
             RunOnLambda(lambdaFunc)
