@@ -1614,8 +1614,7 @@ public class Translator {
 
     private func TranslateLetPatternConditionAsMatch(letPattern: AstLetPatternDestructor, trueBlock: Block,
         falseBlock: Block): Unit {
-        let selector = Translator.TranslateASTNode(RequireExpr(letPattern.initializer, "if-let initializer"), this) ??
-            throw IllegalStateException("faithful AST2CHIR if-let initializer produced no value")
+        let selector = TranslateExprArg(RequireExpr(letPattern.initializer, "if-let initializer"))
         let originLoc = TranslateLocation(letPattern)
         scopeInfo.add(-1)
         scopeInfo[scopeInfo.size - 1] = scopeInfo[scopeInfo.size - 1] + 1
@@ -1632,8 +1631,7 @@ public class Translator {
     private func TranslateLetPatternConditionAsTable(letPattern: AstLetPatternDestructor, trueBlock: Block,
         falseBlock: Block): Unit {
         let selectorTy = RequireAstTy(RequireExpr(letPattern.initializer, "if-let initializer"))
-        let selectorVal = Translator.TranslateASTNode(RequireExpr(letPattern.initializer, "if-let initializer"), this) ??
-            throw IllegalStateException("faithful AST2CHIR if-let initializer produced no value")
+        let selectorVal = TranslateExprArg(RequireExpr(letPattern.initializer, "if-let initializer"))
         var enumDecl: Option<AstEnumDecl> = None
         if (let Some(decl) <- AstTy.GetDeclOfTy(Some(selectorTy))) {
             enumDecl = decl as AstEnumDecl
