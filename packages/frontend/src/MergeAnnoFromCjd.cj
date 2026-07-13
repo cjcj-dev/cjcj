@@ -54,10 +54,12 @@ public func IsSameType(left: Type, right: Type): Bool {
             if (leftRefType.typeArguments.size != rightTy.typeArgs.size) {
                 return false
             }
-            for (idx in 0..leftRefType.typeArguments.size) {
+            var idx: Int64 = 0
+            while (idx < leftRefType.typeArguments.size) {
                 if (!IsSameType(leftRefType.typeArguments[idx], rightTy.typeArgs[idx])) {
                     return false
                 }
+                idx++
             }
         case ASTKind.QUALIFIED_TYPE =>
             let leftQualifiedType = (left as QualifiedType).getOrThrow()
@@ -104,10 +106,12 @@ public func IsSameType(left: Type, rightTy: Ty): Bool {
             if (leftRefType.typeArguments.size != rightTy.typeArgs.size) {
                 return false
             }
-            for (idx in 0..leftRefType.typeArguments.size) {
+            var idx: Int64 = 0
+            while (idx < leftRefType.typeArguments.size) {
                 if (!IsSameType(leftRefType.typeArguments[idx], rightTy.typeArgs[idx])) {
                     return false
                 }
+                idx++
             }
         case ASTKind.QUALIFIED_TYPE =>
             let leftQualifiedType = (left as QualifiedType).getOrThrow()
@@ -123,10 +127,12 @@ public func IsSameType(left: Type, rightTy: Ty): Bool {
             if (leftFuncType.paramTypes.size != rightFuncTy.paramTys.size) {
                 return false
             }
-            for (idx in 0..leftFuncType.paramTypes.size) {
+            var idx: Int64 = 0
+            while (idx < leftFuncType.paramTypes.size) {
                 if (!IsSameType(leftFuncType.paramTypes[idx], rightFuncTy.paramTys[idx])) {
                     return false
                 }
+                idx++
             }
             if (!IsSameType(leftFuncType.retType.getOrThrow(), rightFuncTy.retTy)) {
                 return false
@@ -140,10 +146,12 @@ public func IsSameType(left: Type, rightTy: Ty): Bool {
             if (leftTupleType.fieldTypes.size != rightTupleTy.typeArgs.size) {
                 return false
             }
-            for (idx in 0..leftTupleType.fieldTypes.size) {
+            var idx: Int64 = 0
+            while (idx < leftTupleType.fieldTypes.size) {
                 if (!IsSameType(leftTupleType.fieldTypes[idx], rightTupleTy.typeArgs[idx])) {
                     return false
                 }
+                idx++
             }
         case ASTKind.OPTION_TYPE =>
             if (!rightTy.IsCoreOptionType()) {
@@ -187,10 +195,12 @@ public func IsSameGeneric(left: Generic, right: Generic): Bool {
     if (left.typeParameters.size != right.typeParameters.size) {
         return false
     }
-    for (idx in 0..left.typeParameters.size) {
+    var idx: Int64 = 0
+    while (idx < left.typeParameters.size) {
         if (left.typeParameters[idx].identifier.Val() != right.typeParameters[idx].identifier.Val()) {
             return false
         }
+        idx++
     }
     if (left.genericConstraints.isEmpty() != right.genericConstraints.isEmpty()) {
         return false
@@ -200,7 +210,8 @@ public func IsSameGeneric(left: Generic, right: Generic): Bool {
     }
     let leftGenericConstraints = left.genericConstraints
     let rightGenericConstraints = right.genericConstraints
-    for (idx in 0..left.genericConstraints.size) {
+    idx = 0
+    while (idx < left.genericConstraints.size) {
         if (!IsSameType(leftGenericConstraints[idx].refType.getOrThrow(),
             rightGenericConstraints[idx].refType.getOrThrow().GetTy().getOrThrow())) {
             return false
@@ -208,12 +219,15 @@ public func IsSameGeneric(left: Generic, right: Generic): Bool {
         if (leftGenericConstraints[idx].upperBounds.size != rightGenericConstraints[idx].upperBounds.size) {
             return false
         }
-        for (boundIdx in 0..leftGenericConstraints[idx].upperBounds.size) {
+        var boundIdx: Int64 = 0
+        while (boundIdx < leftGenericConstraints[idx].upperBounds.size) {
             if (!IsSameType(leftGenericConstraints[idx].upperBounds[boundIdx],
                 rightGenericConstraints[idx].upperBounds[boundIdx].GetTy().getOrThrow())) {
                 return false
             }
+            boundIdx++
         }
+        idx++
     }
     return true
 }
@@ -231,7 +245,8 @@ public func IsSameFuncByIdentifier(leftBody: FuncBody, rightBody: FuncBody): Boo
     if (leftBody.paramLists[0].params.size != rightBody.paramLists[0].params.size) {
         return false
     }
-    for (idx in 0..leftBody.paramLists[0].params.size) {
+    var idx: Int64 = 0
+    while (idx < leftBody.paramLists[0].params.size) {
         var expandedParam = leftBody.paramLists[0].params[idx]
         if (let Some(macroExpandParam) <- (leftBody.paramLists[0].params[idx] as MacroExpandParam)) {
             if (macroExpandParam.invocation.macroCallDiagInfo.identifier == "APILevel") {
@@ -256,6 +271,7 @@ public func IsSameFuncByIdentifier(leftBody: FuncBody, rightBody: FuncBody): Boo
                 return false
             }
         }
+        idx++
     }
     return true
 }
@@ -327,10 +343,12 @@ public func IsSameDeclByIdentifier(left: Decl, right: Decl): Bool {
             if (leftExtendDecl.inheritedTypes.size != rightExtendDecl.inheritedTypes.size) {
                 return false
             }
-            for (idx in 0..leftExtendDecl.inheritedTypes.size) {
+            var idx: Int64 = 0
+            while (idx < leftExtendDecl.inheritedTypes.size) {
                 if (!IsSameType(leftExtendDecl.inheritedTypes[idx], rightExtendDecl.inheritedTypes[idx])) {
                     return false
                 }
+                idx++
             }
         case ASTKind.MACRO_EXPAND_DECL =>
             let leftMacroExpandDecl = (left as MacroExpandDecl).getOrThrow()
@@ -449,7 +467,8 @@ public func MergeMemberDecl(declPair: (Decl, Decl)): Unit {
             let targetFuncDecl = (targetMemberDecl as FuncDecl).getOrThrow()
             let sourceParams = sourceFuncDecl.funcBody.getOrThrow().paramLists[0].params
             let targetParams = targetFuncDecl.funcBody.getOrThrow().paramLists[0].params
-            for (idx in 0..sourceParams.size) {
+            var idx: Int64 = 0
+            while (idx < sourceParams.size) {
                 var expandedParam = sourceParams[idx]
                 if (let Some(macroExpandParam) <- (sourceParams[idx] as MacroExpandParam)) {
                     if (macroExpandParam.invocation.macroCallDiagInfo.identifier == "APILevel") {
@@ -467,6 +486,7 @@ public func MergeMemberDecl(declPair: (Decl, Decl)): Unit {
                     targetParams[idx].annotations.add(annotation)
                 }
                 expandedParam.annotations.clear()
+                idx++
             }
         }
     }
