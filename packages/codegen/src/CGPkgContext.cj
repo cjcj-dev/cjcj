@@ -1,6 +1,7 @@
 package cjcj::codegen
 
 import std.collection.*
+import std.sync.Mutex
 import cjcj::chir.CHIRContext
 import cjcj::chir.CHIRBuilder
 import cjcj::chir.ClassType
@@ -11,6 +12,24 @@ import cjcj::chir.Package
 import cjcj::chir.Type
 import cjcj::chir.Value
 import cjcj::option.GlobalOptions
+
+// Mirrors CodeGen/CGPkgContext.h:19-31 ObjectLocker.
+public class ObjectLocker<T> {
+    private let locker = Mutex()
+    private let object: T
+
+    // C++ default-constructs ObjectType as an ObjectLocker field; Cangjie receives
+    // that same freshly constructed object explicitly.
+    public init(object: T) {
+        this.object = object
+    }
+
+    public func Do<R>(function: (T) -> R): R {
+        return synchronized(locker) {
+            function(object)
+        }
+    }
+}
 
 public class CachedMangleMap {
     public let importedInlineDecls: HashSet<String> = HashSet<String>()
@@ -67,8 +86,10 @@ public class CGPkgContext {
     private let correctedCachedMangleMap: CachedMangleMap = CachedMangleMap()
     private let cgMods: ArrayList<CGModule> = ArrayList<CGModule>()
     private let subTypeMap: HashMap<Int64, HashMap<Int64, Type>> = HashMap<Int64, HashMap<Int64, Type>>()
-    private let quickCHIRValues: HashMap<String, Value> = HashMap<String, Value>()
-    private let localizedSymbols: HashSet<String> = HashSet<String>()
+    private let quickCHIRValues: ObjectLocker<HashMap<String, Value>> =
+        ObjectLocker<HashMap<String, Value>>(HashMap<String, Value>())
+    private let localizedSymbols: ObjectLocker<HashSet<String>> =
+        ObjectLocker<HashSet<String>>(HashSet<String>())
 
     public init(chirData: CHIRData, options: GlobalOptions, enableIncrement: Bool,
         noHeapAllocChecker: NoHeapAllocChecker, noWriteBarrierRecChecker: NoWriteBarrierRecChecker,
@@ -95,8 +116,8 @@ public class CGPkgContext {
         }
         subTypeMap.clear()
         correctedCachedMangleMap.Clear()
-        quickCHIRValues.clear()
-        localizedSymbols.clear()
+        quickCHIRValues.Do({ object => object.clear() })
+        localizedSymbols.Do({ object => object.clear() })
         cgMods.clear()
     }
 
@@ -170,13 +191,16 @@ public class CGPkgContext {
     }
 
     public func AddLocalizedSymbol(symName: String): Unit {
-        localizedSymbols.add(symName)
+        localizedSymbols.Do({ object => object.add(symName) })
     }
 
     public func GetLocalizedSymbols(): HashSet<String> {
-        let out = HashSet<String>()
-        for (symbol in localizedSymbols) { out.add(symbol) }
-        return out
+        return localizedSymbols.Do({ object =>
+            // A copy preserves the const-reference contract of CGPkgContext.cpp:88-91.
+            let out = HashSet<String>()
+            for (symbol in object) { out.add(symbol) }
+            out
+        })
     }
 
     public func CollectSubTypeMap(): Unit {
@@ -218,26 +242,22 @@ public class CGPkgContext {
     }
 
     public func FindCHIRGlobalValue(mangledName: String): Option<Value> {
-        PopulateQuickCHIRValues()
-        if (quickCHIRValues.contains(mangledName)) {
-            return quickCHIRValues[mangledName]
-        }
-        return None
+        let chirPackage = GetCHIRPackage()
+        return quickCHIRValues.Do({ object =>
+            if (object.isEmpty()) {
+                for (chirFunc in chirPackage.GetGlobalFunctions()) {
+                    object[chirFunc.GetIdentifierWithoutPrefix()] = chirFunc
+                }
+                for (chirGlobal in chirPackage.GetGlobalVars()) {
+                    object[chirGlobal.GetIdentifierWithoutPrefix()] = chirGlobal
+                }
+            }
+            object.get(mangledName)
+        })
     }
 
     private func implicitFuncsContains(name: String): Bool {
         return chirData.GetImplicitFuncs().contains(name)
     }
 
-    private func PopulateQuickCHIRValues(): Unit {
-        if (!quickCHIRValues.isEmpty()) {
-            return
-        }
-        for (chirFunc in GetCHIRPackage().GetGlobalFunctions(includePureAbstract: true)) {
-            quickCHIRValues[GetCodeGenGlobalName(chirFunc)] = chirFunc
-        }
-        for (chirGlobal in GetCHIRPackage().GetGlobalVars()) {
-            quickCHIRValues[GetCodeGenGlobalName(chirGlobal)] = chirGlobal
-        }
-    }
 }
