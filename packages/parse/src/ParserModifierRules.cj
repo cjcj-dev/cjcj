@@ -1,5 +1,6 @@
 package cjcj::parse
 
+import cjcj::ast.SortModifierByPos
 import std.collection.*
 
 extend ParserImpl {
@@ -22,16 +23,31 @@ extend ParserImpl {
             }
             return attrs
         }
+        let modifiersVec = SortModifierByPos(modifiers)
         if (IsScopeRulesEmpty(defKind, scopeKind)) {
-            DiagIllegalModifierInScope(modifiers[0])
+            DiagIllegalModifierInScope(modifiersVec[0])
             return attrs
         }
         if (!MPParserImpl(this).CheckCJMPModifiers(modifiers)) {
             return attrs
         }
+        return GetModifierAttrs(defKind, scopeKind, modifiersVec)
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseModifiers.cpp:85-132
+    private func GetModifierAttrs(
+        defKind: DefKind,
+        scopeKind: ScopeKind,
+        modifiersVec: ArrayList<Modifier>
+    ): ArrayList<Attribute> {
+        let traversedModifiers = ArrayList<Modifier>()
+        let attrs = ArrayList<Attribute>()
         let validModifiers = ArrayList<Modifier>()
-        for (modifier in modifiers) {
+        for (modifier in modifiersVec) {
             if (!IsModifierAllowed(defKind, scopeKind, modifier.modifier)) {
+                if (diag.ignoreScopeCheck) {
+                    continue
+                }
                 DiagIllegalModifierInScope(modifier)
                 if (let Some(attr) <- GetAttributeByModifier(modifier.modifier)) {
                     AddAttrIfAbsent(attrs, attr)
@@ -40,17 +56,21 @@ extend ParserImpl {
             }
             var hasCollision = false
             let conflicts = GetConflictingModifiers(defKind, scopeKind, modifier.modifier)
-            for (other in modifiers) {
-                if (other.begin < modifier.begin) {
-                    for (conflict in conflicts.data) {
-                        if (other.modifier == conflict) {
-                            DiagConflictedModifier(other, modifier)
-                            hasCollision = true
-                            RemoveModifierKind(validModifiers, conflict)
-                        }
+            for (conflict in conflicts.data) {
+                var previousModifier: Option<Modifier> = None
+                for (traversedModifier in traversedModifiers) {
+                    if (traversedModifier.modifier == conflict) {
+                        previousModifier = traversedModifier
+                        break
                     }
                 }
+                if (let Some(previous) <- previousModifier) {
+                    DiagConflictedModifier(previous, modifier)
+                    hasCollision = true
+                    RemoveModifierKind(validModifiers, conflict)
+                }
             }
+            traversedModifiers.add(modifier)
             if (!hasCollision) {
                 validModifiers.add(modifier)
             }
@@ -84,7 +104,7 @@ extend ParserImpl {
         for (modifier in modifiers) {
             let conflicts = GetWarningConflicts(defKind, scopeKind, modifier.modifier)
             for (higher in conflicts.data) {
-                if (higher == TokenKind.ILLEGAL) {
+                if (higher == TokenKind.ILLEGAL && !diag.ignoreScopeCheck) {
                     DiagRedundantModifiers(modifier)
                     break
                 }
