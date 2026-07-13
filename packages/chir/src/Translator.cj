@@ -5519,8 +5519,7 @@ public class Translator {
 
     private func HandleConstPattern(constPattern: AstConstPattern, value: Value, originLoc: DebugLocation): Value {
         if (constPattern.operatorCallExpr.isNone()) {
-            let litVal = Translator.TranslateASTNode(RequireExpr(constPattern.literal, "const pattern literal"), this) ??
-                throw IllegalStateException("faithful AST2CHIR const pattern literal produced no value")
+            let litVal = TranslateExprArg(RequireExpr(constPattern.literal, "const pattern literal"))
             SetSkipPrintWarning(litVal)
             let cond = RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), value,
                 litVal, CurrentBlock()))
@@ -5530,8 +5529,7 @@ public class Translator {
         let operatorCallExpr = constPattern.operatorCallExpr.getOrThrow()
         let base = ConstPatternOperatorBase(operatorCallExpr)
         SetExprValue(base, value)
-        return Translator.TranslateASTNode(operatorCallExpr, this) ??
-            throw IllegalStateException("faithful AST2CHIR const pattern operator call produced no value")
+        return TranslateExprArg(operatorCallExpr)
     }
 
     private func HandleTypePattern(typePattern: AstTypePattern, value: Value,
