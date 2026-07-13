@@ -498,6 +498,8 @@ public func ChkMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
         return false
     }
     let selector = me.selector.getOrThrow()
+    // C++ TypeCheckMatchExpr.cpp:228-230 concretizes the synthesized selector before checking patterns.
+    let _ = ReplaceIdealTy(typeManager, selector, diag: diag)
     if (!Ty.IsTyCorrect(selector.GetTy())) {
         let _ = InvalidMatchTy(me)
         return false
