@@ -10,6 +10,8 @@ public class ParserImpl {
     public let diag: BasicDiagnosticEngine
     public let sourceManager: SourceManager
     public let lexer: Lexer
+    // C++ anchor: cangjie_compiler/src/Parse/ParserImpl.h:150
+    var inputString: String = ""
     private let tokenLines: HashSet<Int64> = HashSet<Int64>()
     public var lookahead: Token = Token(TokenKind.SENTINEL, "", INVALID_POSITION, INVALID_POSITION)
     public var lastToken: Token = Token(TokenKind.SENTINEL, "", INVALID_POSITION, INVALID_POSITION)
