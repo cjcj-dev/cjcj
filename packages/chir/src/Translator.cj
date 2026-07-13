@@ -3209,8 +3209,13 @@ public class Translator {
         if (currentBlock.isNone()) {
             return globalSymbolTable.TryGet(decl)
         }
+        if (localConstVars.HasElement(decl)) {
+            return None
+        }
         let initValue: Option<Value> = if (let Some(initializer) <- decl.initializer) {
-            Translator.TranslateASTNode(initializer, this)
+            let value = TranslateExprArg(initializer)
+            value.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+            Some(value)
         } else {
             None
         }
