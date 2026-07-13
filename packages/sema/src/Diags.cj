@@ -96,18 +96,20 @@ private func DiagWrongNumberOfArgumentsCommon(diag: BasicDiagnosticEngine, ce: C
     } else {
         ce.end
     }
-    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_wrong_number_of_arguments,
-        MakeRange(beginPos, endPos), arguments: [symptom, lst])
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_wrong_number_of_arguments,
+        ce, MakeRange(beginPos, endPos), arguments: [symptom, lst])
     builder.AddMainHintArguments([expected, foundNum.toString()])
     if (let Some(funcDecl) <- fd) {
         if (funcDecl.ShouldDiagnose()) {
-            builder.AddNote(MakeRange(funcDecl.identifier.Begin(), funcDecl.identifier.End()), "found candidate")
+            AddNote(builder, funcDecl,
+                MakeRange(funcDecl.identifier.Begin(), funcDecl.identifier.End()), "found candidate")
         }
     } else if (let Some(baseFunc) <- ce.baseFunc) {
         if (let Some(target) <- baseFunc.GetTarget()) {
             if (let Some(varDecl) <- (target as VarDecl)) {
                 if (varDecl.ShouldDiagnose()) {
-                    builder.AddNote(MakeRange(varDecl.identifier.Begin(), varDecl.identifier.End()), "found candidate")
+                    AddNote(builder, varDecl,
+                        MakeRange(varDecl.identifier.Begin(), varDecl.identifier.End()), "found candidate")
                 }
             }
         }
