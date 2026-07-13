@@ -4,6 +4,7 @@ import std.math.*
 import std.overflow.*
 
 public class FloatFormat {
+    @OverflowWrapping
     public static func Float32ToFloat16(value: Float32): UInt16 {
         let bit32 = value.toBits()
         var result: UInt16 = 0u16
