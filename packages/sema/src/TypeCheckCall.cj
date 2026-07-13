@@ -4070,46 +4070,111 @@ private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagno
     return true
 }
 
-internal func CheckNonNormalCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
-    ce: CallExpr, argChecker!: Option<CallArgChecker> = None): Bool {
-    if (let Some(base) <- ce.baseFunc) {
-        if (let Some(baseTy) <- base.GetTy()) {
-            if (let Some(funcTy) <- (baseTy as FuncTy)) {
-                if (IsPossibleVariadicFunction(funcTy, ce) && !CheckArgsOrder(diag, ce)) {
-                    ce.SetTy(TypeManager.GetInvalidTy())
-                    return false
+private func MakePlaceholderFuncTy(arity: Int64, tyMgr: TypeManager): FuncTy {
+    let paramTys = ArrayList<Ty>()
+    let retTy = tyMgr.AllocTyVar()
+    var idx: Int64 = 0
+    while (idx < arity) {
+        paramTys.add(tyMgr.AllocTyVar())
+        idx++
+    }
+    return tyMgr.GetFunctionTy(paramTys.toArray(), retTy)
+}
+
+private func TryCastingToFuncTy(ty: Option<Ty>, arity: Int64, tyMgr: TypeManager): Option<FuncTy> {
+    if (let Some(value) <- ty) {
+        if (let Some(funcTy) <- (value as FuncTy)) {
+            return Some(funcTy)
+        }
+        if (let Some(genTy) <- (value as GenericsTy)) {
+            if (genTy.isPlaceholder) {
+                if (let Some(placeholderFuncTy) <-
+                    tyMgr.ConstrainByCtor(genTy, MakePlaceholderFuncTy(arity, tyMgr))) {
+                    return placeholderFuncTy as FuncTy
                 }
-                var res = CheckFuncPtrCall(typeManager, diag, target, ce, funcTy, argChecker: argChecker)
-                // VArray must be modified by 'inout' in a CFunc lambda call. (C++ TypeCheckCall.cpp:2928)
-                if (funcTy.IsCFunc()) {
-                    for (arg in ce.args) {
-                        if (IsVArrayTy(GetExprTy(arg)) && !arg.withInout) {
-                            if (let Some(diagValue) <- diag) {
-                                DiagRef(diagValue, arg, BasicDiagKindRefactor.sema_inout_mismatch, args: ["VArray"])
-                            }
-                            res = false
-                            break
-                        }
-                    }
+                return None
+            }
+            for (upperBound in genTy.upperBounds) {
+                if (let Some(funcTy) <- (upperBound as FuncTy)) {
+                    return Some(funcTy)
                 }
-                // An unsafe CFunc lambda call must appear in an unsafe context; CheckUnsafeInvoke only
-                // covers calls with a resolvedFunction, so the function-pointer path enforces it here.
-                // (C++ TypeCheckCall.cpp:2937)
-                if (funcTy.isC && !ce.TestAttr(Attribute.UNSAFE) && !IsValidCFuncConstructorCall(ce)) {
-                    if (let Some(diagValue) <- diag) {
-                        DiagOld(diagValue, ce, BasicDiagKind.sema_unsafe_function_invoke_failed)
-                    }
-                    res = false
-                }
-                if (!res) {
-                    ce.SetTy(TypeManager.GetInvalidTy())
-                }
-                return res
             }
         }
     }
-    ce.SetTy(TypeManager.GetInvalidTy())
-    return false
+    return None
+}
+
+internal func CheckNonNormalCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, target: Option<Ty>,
+    ce: CallExpr, functionCallChecker: (Option<Ty>, CallExpr) -> Bool,
+    variadicDesugar: (CallExpr, Int64) -> Unit,
+    argChecker!: Option<CallArgChecker> = None): Bool {
+    let base = ce.baseFunc.getOrThrow()
+    var res = false
+    if (let Some(funcTy) <- TryCastingToFuncTy(base.GetTy(), ce.args.size, typeManager)) {
+        let maybeVariadic = IsPossibleVariadicFunction(funcTy, ce)
+        let diagnostics = ArrayList<BasicDiagnostic>()
+        if (maybeVariadic) {
+            try (ds = DiagSuppressor(diag)) {
+                res = CheckFuncPtrCall(typeManager, diag, target, ce, funcTy, argChecker: argChecker)
+                for (diagnostic in ds.GetSuppressedDiag()) {
+                    diagnostics.add(diagnostic)
+                }
+            }
+        } else {
+            res = CheckFuncPtrCall(typeManager, diag, target, ce, funcTy, argChecker: argChecker)
+        }
+        if (!res && maybeVariadic) {
+            variadicDesugar(ce, funcTy.paramTys.size - 1)
+            var success = false
+            try (ds = DiagSuppressor(diag)) {
+                let desugarCallExpr = (ce.desugarExpr.getOrThrow() as CallExpr).getOrThrow()
+                success = CheckFuncPtrCall(typeManager, diag, target, desugarCallExpr, funcTy,
+                    argChecker: argChecker)
+                if (diagnostics.isEmpty()) {
+                    for (diagnostic in ds.GetSuppressedDiag()) {
+                        diagnostics.add(diagnostic)
+                    }
+                }
+            }
+            if (success) {
+                ce.SetTy(ce.desugarExpr.getOrThrow().GetTy().getOrThrow())
+                res = true
+            } else {
+                RecoverFromVariadicCallExpr(ce)
+                if (let Some(diagValue) <- diag) {
+                    for (diagnostic in diagnostics) {
+                        diagValue.Diagnose(diagnostic).Emit()
+                    }
+                }
+                ce.SetTy(TypeManager.GetInvalidTy())
+                res = false
+            }
+        }
+        if (funcTy.IsCFunc()) {
+            for (arg in ce.args) {
+                if (IsVArrayTy(GetExprTy(arg)) && !arg.withInout) {
+                    if (let Some(diagValue) <- diag) {
+                        DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_inout_mismatch, arg,
+                            arguments: ["VArray"]).Emit()
+                    }
+                    res = false
+                    break
+                }
+            }
+        }
+        if (funcTy.isC && !ce.TestAttr(Attribute.UNSAFE) && !IsValidCFuncConstructorCall(ce)) {
+            if (let Some(diagValue) <- diag) {
+                Diagnose(diagValue, ce, BasicDiagKind.sema_unsafe_function_invoke_failed).Emit()
+            }
+            res = false
+        }
+    } else if (functionCallChecker(target, ce)) {
+        res = true
+    }
+    if (!res) {
+        ce.SetTy(TypeManager.GetInvalidTy())
+    }
+    return res
 }
 
 internal func DiagnoseForCall(diag: Option<BasicDiagnosticEngine>, candidatesBeforeCheck: ArrayList<FuncDecl>,

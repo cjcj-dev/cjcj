@@ -4481,6 +4481,8 @@ extend TypeChecker {
         let mayRetryAsTypeCtor = MayRetryCallAsShadowedTypeConstruction(ctx, ce)
         if (let None <- baseResult[1]) {
             return CheckNonNormalCall(impl.typeManager, impl.diag, target, ce,
+                { targetTy, callExpr => ChkFunctionCallExpr(ctx, targetTy, callExpr) },
+                { callExpr, arity => DesugarVariadicCallExpr(callExpr, arity) },
                 argChecker: Some({ expectedTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, expectedTy, arg) }))
         }
         let decl = baseResult[1].getOrThrow()
@@ -4489,6 +4491,8 @@ extend TypeChecker {
                 return true
             }
             return CheckNonNormalCall(impl.typeManager, impl.diag, target, ce,
+                { targetTy, callExpr => ChkFunctionCallExpr(ctx, targetTy, callExpr) },
+                { callExpr, arity => DesugarVariadicCallExpr(callExpr, arity) },
                 argChecker: Some({ expectedTy4: Ty, arg9: FuncArg => CheckCallArgFromContext(ctx, expectedTy4, arg9) }))
         }
         if (ce.callKind == CallKind.CALL_INVALID) {
