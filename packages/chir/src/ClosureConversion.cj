@@ -85,6 +85,34 @@ private func GenerateSrcCodeIdentifier(memberVar: Value): String {
     return memberName
 }
 
+// C++: CHIR/Transformation/ClosureConversion.cpp:171-190.
+private func IsCFuncOrInCFunc(srcFunc: Lambda): Bool {
+    let srcFuncTy = srcFunc.GetFuncType() ??
+        throw IllegalStateException("ClosureConversion lambda has no function type")
+    if (srcFuncTy.IsCFunc()) {
+        return true
+    }
+    var blockGroup = srcFunc.GetParentBlockGroup() ??
+        throw IllegalStateException("ClosureConversion lambda has no parent block group")
+    while (blockGroup.GetOwnerFunc().isNone()) {
+        let ownedExpr = blockGroup.GetOwnerExpression() ??
+            throw IllegalStateException("ClosureConversion block group has no owner")
+        if (let Some(lambda) <- (ownedExpr as Lambda)) {
+            let lambdaTy = lambda.GetFuncType() ??
+                throw IllegalStateException("ClosureConversion enclosing lambda has no function type")
+            if (lambdaTy.IsCFunc()) {
+                return true
+            }
+            blockGroup = lambda.GetParentBlockGroup() ??
+                throw IllegalStateException("ClosureConversion enclosing lambda has no parent block group")
+        } else {
+            blockGroup = ownedExpr.GetParentBlockGroup() ??
+                throw IllegalStateException("ClosureConversion owner expression has no parent block group")
+        }
+    }
+    return false
+}
+
 private func LiftCustomDefType(def: CustomTypeDef, converter: TypeConverterForCC): Unit {
     let preVisit = { expr: Expression =>
         converter.VisitExpr(expr)
@@ -1739,10 +1767,8 @@ public class ClosureConversion {
         let local = srcFunc.AsLocalVar() ?? return false
         let expr = local.GetExpr() ?? return false
         let lambda = (expr as Lambda) ?? return false
-        if (let Some(lambdaTy) <- lambda.GetFuncType()) {
-            if (lambdaTy.IsCFunc()) {
-                return false
-            }
+        if (IsCFuncOrInCFunc(lambda)) {
+            return false
         }
         let topLevelFunc = local.GetTopLevelFunc() ?? return false
         let outerDecl = topLevelFunc.GetParentCustomTypeDef() ?? return false
