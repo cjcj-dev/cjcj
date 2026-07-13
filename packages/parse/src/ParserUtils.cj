@@ -169,6 +169,14 @@ extend ParserImpl {
         return true
     }
 
+    // C++ anchor: cangjie_compiler/src/Parse/ParserUtils.cpp:331-337
+    public func SpreadAttrAndConsume(source: Node, target: Node, kinds: Array<TokenKind>): Unit {
+        if (source.TestAttr(Attribute.IS_BROKEN)) {
+            target.EnableAttr(Attribute.IS_BROKEN)
+            TryConsumeUntilAny(kinds)
+        }
+    }
+
     public func ConsumeUntilAny(functor: () -> Bool, targetTokenConsumed!: Bool = true): Unit {
         skipNL = false
         var flag = false
@@ -652,6 +660,7 @@ extend ParserImpl {
                 }
                 let refTy = ParseRefType(true)
                 constraint.refType = refTy
+                SpreadAttrAndConsume(refTy, constraint, [TokenKind.UPPERBOUND])
                 if (!Skip(TokenKind.UPPERBOUND)) {
                     DiagExpectCharacter("'<:'")
                 } else {

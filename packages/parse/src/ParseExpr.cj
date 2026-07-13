@@ -229,6 +229,7 @@ extend ParserImpl {
                 let op = Peek()
                 Next()
                 let incOrDec = IncOrDecExpr()
+                SpreadAttrAndConsume(base, incOrDec, [])
                 incOrDec.expr = base
                 incOrDec.op = op.kind
                 incOrDec.operatorPos = op.Begin()
@@ -336,6 +337,7 @@ extend ParserImpl {
             if (op.kind == TokenKind.IS || op.kind == TokenKind.AS) {
                 if (op.kind == TokenKind.IS) {
                     let expr = IsExpr()
+                    SpreadAttrAndConsume(lhs, expr, [])
                     expr.leftExpr = lhs
                     expr.isPos = op.Begin()
                     expr.begin = lhs.begin
@@ -347,6 +349,7 @@ extend ParserImpl {
                     lhs = expr
                 } else {
                     let expr = AsExpr()
+                    SpreadAttrAndConsume(lhs, expr, [])
                     expr.leftExpr = lhs
                     expr.asPos = op.Begin()
                     expr.begin = lhs.begin
@@ -383,6 +386,7 @@ extend ParserImpl {
                 expr.begin = lhs.begin
                 expr
             }
+            SpreadAttrAndConsume(lhs, node, [])
             try (cs = ChainScope(this, node)) {
                 var rhs = ParseUnaryExpr(ek)
                 var nextOp = Peek()
