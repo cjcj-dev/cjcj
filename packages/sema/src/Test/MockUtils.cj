@@ -777,6 +777,45 @@ public class MockUtils {
         }
     }
 
+    // C++: Sema/Test/MockUtils.cpp:691-733.
+    public func AddGenericIfNeeded(originalDecl: Decl, mockedDecl: Decl): ArrayList<Ty> {
+        let typeParamTys = ArrayList<Ty>()
+        if (!originalDecl.TestAttr(Attribute.GENERIC)) {
+            return typeParamTys
+        }
+        mockedDecl.EnableAttr(Attribute.GENERIC)
+        let originalFuncDecl = originalDecl as FuncDecl
+        let generic = if (let Some(funcDecl) <- originalFuncDecl) {
+            funcDecl.funcBody.getOrThrow().generic.getOrThrow()
+        } else {
+            originalDecl.generic.getOrThrow()
+        }
+        let newGeneric = CloneGeneric(generic)
+        for (typeParam in newGeneric.typeParameters) {
+            typeParam.outerDecl = mockedDecl
+            typeParam.SetTy(typeManager.GetGenericsTy(typeParam))
+            typeParam.fullPackageName = mockedDecl.fullPackageName
+            typeParam.curFile = mockedDecl.curFile
+            typeParam.DisableAttr(Attribute.IMPORTED)
+            typeParamTys.add(typeParam.GetTy().getOrThrow())
+        }
+        if (originalFuncDecl.isSome()) {
+            let mockedFuncDecl = (mockedDecl as FuncDecl).getOrThrow()
+            CJC_ASSERT(mockedFuncDecl.funcBody.isSome())
+            let mockedFuncBody = mockedFuncDecl.funcBody.getOrThrow()
+            UpdateRefTypesTarget(mockedFuncBody.retType.getOrThrow(), generic, newGeneric)
+            mockedFuncBody.generic = newGeneric
+        } else {
+            mockedDecl.generic = newGeneric
+            if (let Some(classDecl) <- (mockedDecl as ClassDecl)) {
+                mockedDecl.SetTy(typeManager.GetClassTy(classDecl, typeParamTys.toArray()))
+            } else if (let Some(interfaceDecl) <- (mockedDecl as InterfaceDecl)) {
+                mockedDecl.SetTy(typeManager.GetInterfaceTy(interfaceDecl, typeParamTys.toArray()))
+            }
+        }
+        return typeParamTys
+    }
+
     public static func PrependFuncGenericSubst(originalGeneric: Option<Generic>, mockedGeneric: Option<Generic>,
         classSubsts: ArrayList<TypeSubst>): Unit {
         if (originalGeneric.isNone() || mockedGeneric.isNone()) {
