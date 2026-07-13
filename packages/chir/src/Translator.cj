@@ -1500,6 +1500,18 @@ public class Translator {
             instTypeArgs: instTypeArgs), loc: TranslateLocation(expr))
     }
 
+    // C++ CHIR/AST2CHIR/TranslateASTNode/TranslateCallExpr.cpp:1260-1272.
+    private func PrintDevirtualizationMessage(expr: AstCallExpr, nodeType: String): Unit {
+        if (!opts.chirDebugOptimizer) {
+            return
+        }
+        let resolvedFunction = expr.resolvedFunction.getOrThrow()
+        let message = "The function call to " + resolvedFunction.identifier.Val() + " in the line " +
+            expr.begin.line.toString() + " and the column " + expr.begin.column.toString() + " was an " +
+            nodeType + " call."
+        println(message)
+    }
+
     public func Visit(expr: AstLambdaExpr): Option<Value> {
         let funcBody = expr.funcBody ??
             throw IllegalStateException("faithful AST2CHIR LambdaExpr has no FuncBody")
