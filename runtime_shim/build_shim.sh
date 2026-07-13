@@ -24,11 +24,10 @@ else
     exit 1
 fi
 
+# 0713: single object. The shim used to build two .o files; a missing
+# binsecinfo_llvmshim.o failed the top-level link with an error that pointed
+# nowhere near the real cause (it cost a full migration dry-run to find).
 # -fno-rtti / -fno-exceptions to match the LLVM build ABI.
-"$CXX" -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
-  -c "$HERE/binsecinfo_llvmshim.cpp" -o "$HERE/binsecinfo_llvmshim.o" \
-  "${LLVM_INCLUDE_ARGS[@]}"
-
 if [ -d "$FLATBUFFERS_INC" ] && [ -d "$SCHEMA_GEN_INC/flatbuffers" ]; then
     "$CXX" -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
       -c "$HERE/cjselfhost_llvmshim.cpp" -o "$HERE/cjselfhost_llvmshim.o" \
@@ -39,9 +38,8 @@ elif [ ! -f "$HERE/cjselfhost_llvmshim.o" ]; then
 fi
 
 echo "built: $HERE/cjselfhost_llvmshim.o"
-echo "built: $HERE/binsecinfo_llvmshim.o"
-nm -C "$HERE/cjselfhost_llvmshim.o" | grep -E ' T (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost)' || true
-nm -C "$HERE/binsecinfo_llvmshim.o" | grep -E ' T LLVMSelfhost' || true
+nm -C "$HERE/cjselfhost_llvmshim.o" | grep -cE ' T (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost)' \
+  | sed 's/^/exported LLVMSelfhost* symbols: /' || true
 
 # Macro runtime layout. The self-host cjc resolves the Cangjie runtime lib relative to its own
 # binary (CompilerInvocation.GetRuntimeLibPath: <cjc>/../runtime/lib/<host>, a faithful 1:1 port of

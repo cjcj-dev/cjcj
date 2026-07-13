@@ -57,6 +57,7 @@
 #include "llvm/IR/Value.h"
 
 #include "flatbuffers/ModuleFormat_generated.h"
+#include "llvm/Analysis/CallGraph.h"
 
 using namespace llvm;
 
@@ -530,4 +531,48 @@ extern "C" int CJOFVerifyPackageBuffer(const unsigned char *Data, size_t Size)
     }
     flatbuffers::Verifier verifier(Data, Size, CJOF_FB_MAX_DEPTH, CJOF_FB_MAX_TABLES);
     return PackageFormat::VerifyPackageBuffer(verifier) ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// LLVM CallGraph C bindings for GenerateBinarySectionInfo.
+// Merged in from the former binsecinfo_llvmshim.cpp (0713): keeping the shim as
+// two objects meant a missing binsecinfo_llvmshim.o failed the top-level link
+// with an error that pointed nowhere near the real cause.
+// ---------------------------------------------------------------------------
+
+extern "C" CallGraphWrapperPass *LLVMSelfhostCreateCallGraphWrapperPass(LLVMModuleRef ModuleRef)
+{
+    auto *callGraph = new CallGraphWrapperPass();
+    callGraph->runOnModule(*unwrap(ModuleRef));
+    return callGraph;
+}
+
+extern "C" void LLVMSelfhostDisposeCallGraphWrapperPass(CallGraphWrapperPass *CallGraph)
+{
+    delete CallGraph;
+}
+
+extern "C" CallGraphNode *LLVMSelfhostCallGraphGetNode(CallGraphWrapperPass *CallGraph, LLVMValueRef FunctionRef)
+{
+    return (*CallGraph)[unwrap<Function>(FunctionRef)];
+}
+
+extern "C" unsigned LLVMSelfhostCallGraphNodeSize(CallGraphNode *Node)
+{
+    return Node->size();
+}
+
+extern "C" CallGraphNode *LLVMSelfhostCallGraphNodeGetCallee(CallGraphNode *Node, unsigned Index)
+{
+    return (*Node)[Index];
+}
+
+extern "C" LLVMValueRef LLVMSelfhostCallGraphNodeGetFunction(CallGraphNode *Node)
+{
+    return wrap(Node->getFunction());
+}
+
+extern "C" int LLVMSelfhostGlobalObjectHasEmptySection(LLVMValueRef GlobalObjectRef)
+{
+    return unwrap<GlobalObject>(GlobalObjectRef)->getSection().empty() ? 1 : 0;
 }
