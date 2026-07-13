@@ -2194,15 +2194,29 @@ public class Translator {
         var thisType = chirTy.TranslateType(RequireAstTy(baseExpr))
         thisType = AddRefIfFuncIsMutOrClass(thisType, funcDecl)
 
-        let memberFuncTy = MemberAccessFuncType(member)
-        let instParamTys = memberFuncTy.GetParamTypes()
-        if (!funcDecl.TestAttr(AstAttribute.STATIC)) {
-            instParamTys.add(thisType, at: 0)
+        let thisDerefTy = thisType.StripAllRefs()
+        var isVirtualFuncCall = false
+        var isSuper = false
+        if (let Some(base) <- (baseExpr as AstRefExpr)) {
+            isSuper = base.isSuper
         }
-        let instRetTy = memberFuncTy.GetReturnType()
-        let instParentTy = InstantiateMemberOwnerType(funcDecl, thisType)
-        return FaithfulInstCalleeInfo(instParentTy, thisType, instParamTys, instRetTy,
-            TranslateMemberAccessInstArgs(member), ShouldUseVirtualMemberDispatchForMemberAccess(member, funcDecl))
+        if (let Some(customType) <- (thisDerefTy as CustomType)) {
+            if (!funcDecl.TestAttr(AstAttribute.STATIC)) {
+                isVirtualFuncCall = IsVirtualFuncCall(customType.GetCustomTypeDef(), funcDecl, isSuper)
+            }
+        } else if (let Some(genericType) <- (thisDerefTy as GenericType)) {
+            isVirtualFuncCall = true
+            for (ty in genericType.GetUpperBounds()) {
+                let classType = (ty.StripAllRefs() as ClassType).getOrThrow()
+                isVirtualFuncCall = isVirtualFuncCall &&
+                    IsVirtualFuncCall(classType.GetClassDef(), funcDecl, isSuper)
+            }
+        }
+
+        let (parentType, funcType, instantiatedTypeArgs, isVirtualFromHelper) =
+            GetExactParentTypeAndFuncType(member, thisType, funcDecl, isVirtualFuncCall)
+        return FaithfulInstCalleeInfo(parentType, thisType, funcType.GetParamTypes(), funcType.GetReturnType(),
+            instantiatedTypeArgs, isVirtualFromHelper)
     }
 
     private func GetInstCalleeInfoFromVarInit(expr: AstRefExpr, calleeDecl: AstFuncDecl): FaithfulInstCalleeInfo {
@@ -2221,7 +2235,7 @@ public class Translator {
             instantiatedTypeArgs, false)
     }
 
-    private func GetExactParentTypeAndFuncType(expr: AstRefExpr, thisType: Type, calleeDecl: AstFuncDecl,
+    private func GetExactParentTypeAndFuncType(expr: AstNameReferenceExpr, thisType: Type, calleeDecl: AstFuncDecl,
         isVirtualFuncCall: Bool): (Type, FuncType, ArrayList<Type>, Bool) {
         let funcType = RequireFuncType(chirTy.TranslateType(RequireAstTy(expr)))
         let paramTys = ArrayList<Type>()
@@ -7484,7 +7498,7 @@ public class Translator {
             }
             thisType = expectedThisObjTy
             let obj = if (let Some(expectedTy) <- expectedThisObjTy) {
-                CoerceValueForExpectedType(rawObj, expectedTy)
+                TypeCastOrBoxIfNeeded(rawObj, expectedTy, INVALID_LOCATION)
             } else {
                 rawObj
             }
