@@ -145,7 +145,11 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
             return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(selectedFuncTy, castedCallee,
                 argValues, None, instTypeArgs, thisTypeInfoArg: thisTypeInfoArg, name: "call")
         }
-        return irBuilder.CreateCallOrInvoke(cgFunctionValue, args: argValues, name: "call")
+        let functionType = (CGType.GetOrCreateWithNode(cgMod, callee) as CGFunctionType).getOrThrow()
+        let typedCallee = irBuilder.CreateBitCast(cgFunctionValue.GetRawFunction(),
+            unsafe { LLVMPointerType(functionType.GetLLVMFunctionType(), 0u32) }, name: "call.callee")
+        return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(functionType, typedCallee, argValues,
+            None, instTypeArgs, thisTypeInfoArg: thisTypeInfoArg, name: "call")
     }
     if (let Some(calleeType) <- calleeValue.GetCGType()) {
         if (let Some(functionType) <- (calleeType as CGFunctionType)) {
