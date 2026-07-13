@@ -94,6 +94,11 @@ public class CGModule {
     private let functions: HashMap<Value, CGFunction> = HashMap<Value, CGFunction>()
     private let globalVariables: HashMap<String, CGValue> = HashMap<String, CGValue>()
     private let localValueMapping: HashMap<Value, CGValue> = HashMap<Value, CGValue>()
+    // Mirrors CodeGen/CGModule.h:309-310.
+    private let valuesToLoad: HashMap<Value, (LLVMTypeRef, LLVMValueRef)> =
+        HashMap<Value, (LLVMTypeRef, LLVMValueRef)>()
+    private let boxedValuesToLoad: HashMap<Value, (LLVMTypeRef, LLVMValueRef)> =
+        HashMap<Value, (LLVMTypeRef, LLVMValueRef)>()
     private let basicBlocks: HashMap<Int64, LLVMBasicBlockRef> = HashMap<Int64, LLVMBasicBlockRef>()
     private let linkNameUsedInMeta: HashSet<String> = HashSet<String>()
     private let externalExtensionDefs: ArrayList<LLVMValueRef> = ArrayList<LLVMValueRef>()
@@ -303,6 +308,8 @@ public class CGModule {
         functions.clear()
         globalVariables.clear()
         localValueMapping.clear()
+        valuesToLoad.clear()
+        boxedValuesToLoad.clear()
         basicBlocks.clear()
         linkNameUsedInMeta.clear()
         externalExtensionDefs.clear()
@@ -731,6 +738,26 @@ public class CGModule {
             return localValueMapping[chirValue]
         }
         return None
+    }
+
+    // Mirrors CodeGen/CGModule.h:185-188 CGModule::SetValuesToLoad.
+    public func SetValuesToLoad(chirValue: Value, ty: LLVMTypeRef, value: LLVMValueRef): Unit {
+        valuesToLoad[chirValue] = (ty, value)
+    }
+
+    // Mirrors CodeGen/CGModule.h:190-194 CGModule::GetValuesToLoad.
+    public func GetValuesToLoad(chirValue: Value): Option<(LLVMTypeRef, LLVMValueRef)> {
+        return valuesToLoad.get(chirValue)
+    }
+
+    // Mirrors CodeGen/CGModule.h:196-199 CGModule::SetBoxedValuesToLoad.
+    public func SetBoxedValuesToLoad(chirValue: Value, ty: LLVMTypeRef, value: LLVMValueRef): Unit {
+        boxedValuesToLoad[chirValue] = (ty, value)
+    }
+
+    // Mirrors CodeGen/CGModule.h:201-205 CGModule::GetBoxedValuesToLoad.
+    public func GetBoxedValuesToLoad(chirValue: Value): Option<(LLVMTypeRef, LLVMValueRef)> {
+        return boxedValuesToLoad.get(chirValue)
     }
 
     public func SetOrUpdateMappedCGValue(chirValue: Value, value: CGValue): Unit {
