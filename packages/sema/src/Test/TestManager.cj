@@ -208,7 +208,8 @@ public class TestManager {
         mockCompatibleIfNeeded = testEnabled && mockMode == MockMode.DEFAULT
         mockCompatible = mockCompatibleIfNeeded || mockMode == MockMode.ON
         exportForTest = compilationOptions.exportForTest
-        mockUtils = Some(MockUtils())
+        // C++: Sema/Test/TestManager.cpp:74.
+        mockUtils = Some(MockUtils(importManager, typeManager, ctx.mangler))
         if (mockCompatible && testEnabled) {
             if (let Some(utils) <- mockUtils) {
                 mockManager = Some(MockManager(importManager, typeManager, utils))
@@ -264,6 +265,10 @@ public class TestManager {
     public func PrepareToMock(pkg: Package): Unit {
         if (pkg.files.isEmpty()) {
             return
+        }
+        // C++: Sema/Test/TestManager.cpp:834-837.
+        if (let Some(utils) <- mockUtils) {
+            utils.LoadStdDecls()
         }
         if (let Some(manager) <- mockManager) {
             manager.LoadMockLibDecls()

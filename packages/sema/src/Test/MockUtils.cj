@@ -2,13 +2,16 @@ package cjcj::sema.Test
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::mangle.BaseMangler
+import cjcj::modules.SemaImportManager
 import cjcj::sema.GetUsableGetterForProperty
 import cjcj::sema.GetUsableSetterForProperty
 import cjcj::sema.GenerateTypeMapping
 import cjcj::sema.SameTy
 import cjcj::sema.TypeSubst
 import cjcj::sema.TypeManager
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, GetRootPackageName}
+import cjcj::utils.{CLASS_EXCEPTION, CJC_ABORT, CJC_ASSERT, GetRootPackageName, OBJECT_NAME, STD_LIB_ARRAY,
+    STD_LIB_OPTION, STD_LIB_STRING, TOSTRING_NAME}
 import cjcj::utils.DynamicCast
 
 foreign {
@@ -18,6 +21,7 @@ foreign {
 private let MOCKED_ACCESSOR_SUFFIX: String = "$ToMock"
 private let GETTER_SUFFIX: String = "$get"
 private let SETTER_SUFFIX: String = "$set"
+private let ZERO_VALUE_INTRINSIC_NAME: String = "zeroValue"
 
 public enum AccessorKind {
     | FIELD_GETTER
@@ -87,7 +91,47 @@ public class MockUtils {
     private let localsByOuter: HashMap<Decl, HashMap<String, Decl>> =
         HashMap<Decl, HashMap<String, Decl>>()
 
-    public init() {}
+    // C++: Sema/Test/MockUtils.h:163-175.
+    private let importManager: SemaImportManager
+    private let typeManager: TypeManager
+    private let mangler: BaseMangler
+    private var getTypeForTypeParamDecl: Option<FuncDecl> = None
+    private var isSubtypeTypesDecl: Option<FuncDecl> = None
+    private var arrayDecl: Option<StructDecl> = None
+    private var stringDecl: Option<StructDecl> = None
+    private var optionDecl: Option<EnumDecl> = None
+    private var toStringDecl: Option<InheritableDecl> = None
+    private var objectDecl: Option<ClassDecl> = None
+    private var zeroValueDecl: Option<FuncDecl> = None
+    private var exceptionClassDecl: Option<ClassDecl> = None
+
+    // C++: Sema/Test/MockUtils.cpp:43-46.
+    public init(importManager: SemaImportManager, typeManager: TypeManager, mangler: BaseMangler) {
+        this.importManager = importManager
+        this.typeManager = typeManager
+        this.mangler = mangler
+    }
+
+    // C++: Sema/Test/MockUtils.cpp:48-57.
+    public func LoadStdDecls(): Unit {
+        arrayDecl = importManager.GetCoreDecl<StructDecl>(STD_LIB_ARRAY)
+        stringDecl = importManager.GetCoreDecl<StructDecl>(STD_LIB_STRING)
+        optionDecl = importManager.GetCoreDecl<EnumDecl>(STD_LIB_OPTION)
+        toStringDecl = importManager.GetCoreDecl<InheritableDecl>(TOSTRING_NAME)
+        objectDecl = importManager.GetCoreDecl<ClassDecl>(OBJECT_NAME)
+        zeroValueDecl = importManager.GetCoreDecl<FuncDecl>(ZERO_VALUE_INTRINSIC_NAME)
+        exceptionClassDecl = importManager.GetCoreDecl<ClassDecl>(CLASS_EXCEPTION)
+    }
+
+    // C++: Sema/Test/MockUtils.cpp:64-67.
+    public func Mangle(decl: Decl): String {
+        return mangler.Mangle(decl)
+    }
+
+    // C++: Sema/Test/MockUtils.h:61-66.
+    public func WrapTy2CPointer(ty: Ty): PointerTy {
+        return typeManager.GetPointerTy(ty)
+    }
 
     public static func CanMock(node: Node): Bool {
         if (node.TestAnyAttr(Attribute.COMMON, Attribute.SPECIFIC, Attribute.FROM_COMMON_PART)) {
