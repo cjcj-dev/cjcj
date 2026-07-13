@@ -904,12 +904,43 @@ public func ResolveNames(typeManager: TypeManager, ctx: ASTContext,
     }
 }
 
+// C++: src/Sema/PreCheck.cpp:1751-1769 TypeCheckerImpl::ReplaceThisTypeInFunc.
+func ReplaceThisTypeInFunc(typeManager: TypeManager, funcDecl: FuncDecl): Unit {
+    let funcBody = funcDecl.funcBody.getOrThrow()
+    let classDecl: Option<ClassDecl> = if (let Some(outerDecl) <- funcDecl.outerDecl) {
+        outerDecl as ClassDecl
+    } else {
+        None
+    }
+    if ((let None <- classDecl) || !Ty.IsTyCorrect(classDecl.getOrThrow().GetTy())) {
+        return
+    }
+    if (let Some(retType) <- funcBody.retType) {
+        if (let Some(thisType) <- (retType as ThisType)) {
+            let cd = classDecl.getOrThrow()
+            let refType = RefType()
+            refType.ref.target = Some(cd)
+            refType.ref.identifier = SrcIdentifier("This")
+            refType.ref.identifier.SetPos(thisType.begin, thisType.begin + "This".size)
+            CopyBasicInfo(thisType, refType)
+            refType.SetTy(typeManager.GetClassThisTy(cd, cd.GetTy().getOrThrow().typeArgs.toArray()))
+            funcBody.retType = Some(refType)
+        }
+    }
+}
+
 public func PreSetDeclType(typeManager: TypeManager, ctx: ASTContext,
     importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Unit {
     ResolveDecls(typeManager, ctx, importManager: importManager, diag: diag)
     ResolveTypeAlias(typeManager, ctx, importManager: importManager, diag: diag)
     MarkAliasGenericParameters(ctx)
     ResolveNames(typeManager, ctx, importManager: importManager, diag: diag)
+    // C++: src/Sema/PreCheck.cpp:1795-1800 calls ReplaceThisTypeInFunc for every FuncDecl.
+    let syms = ctx.searcher.Search(ctx, ASTKindQuery(ASTKind.FUNC_DECL), order: SearchOrder.POS_ASC)
+    for (sym in syms) {
+        let funcDecl = (sym.node.getOrThrow() as FuncDecl).getOrThrow()
+        ReplaceThisTypeInFunc(typeManager, funcDecl)
+    }
 }
 
 public func SelfhostPortStatus_TypeCheck(): Bool {
