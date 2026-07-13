@@ -180,4 +180,15 @@ public class MinGW_CJNATIVE <: Gnu {
         tool.AppendArg("-lmingwex")
         tool.AppendArg("-lmsvcrt")
     }
+
+    // C++: Driver/Toolchains/CJNATIVE/MinGW_CJNATIVE.cpp:214-222.
+    protected func FindCangjieMinGWToolPath(toolName: String): String {
+        let paths = ArrayList<String>()
+        paths.add(FileUtil.JoinPath(driver.cangjieHome, "third_party/mingw/bin/"))
+        let toolPath = FindToolPath(toolName, paths)
+        if (toolPath.isEmpty()) {
+            eprintln("error: not found `" + toolName + "` in search paths. Your Cangjie installation might be broken.")
+        }
+        return toolPath
+    }
 }
