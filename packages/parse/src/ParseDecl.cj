@@ -1065,7 +1065,13 @@ extend ParserImpl {
             }
             if (Skip(TokenKind.COLON)) {
                 body.colonPos = lastToken.Begin()
+                if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) && Seeing(TokenKind.THISTYPE)) {
+                    enableThis = true
+                }
                 body.retType = ParseType()
+                if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY)) {
+                    enableThis = false
+                }
             }
             var constraintsEnd = INVALID_POSITION
             for (constraint in ParseGenericConstraints()) {

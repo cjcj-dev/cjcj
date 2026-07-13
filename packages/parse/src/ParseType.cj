@@ -50,7 +50,12 @@ extend ParserImpl {
             return PrimitiveType(token.Value(), token.Begin(), token.End())
         }
         if (Skip(TokenKind.THISTYPE)) {
-            return ThisType(token.Begin())
+            if (enableThis) {
+                return ThisType(token.Begin())
+            } else {
+                DiagThisTypeNotAllow()
+                return InvalidType(token.Begin())
+            }
         }
         if (Seeing(TokenKind.VARRAY)) {
             return ParseVarrayType()

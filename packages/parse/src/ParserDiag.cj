@@ -988,7 +988,7 @@ extend ParserImpl {
     }
 
     public func DiagThisTypeNotAllow(): Unit {
-        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_this_type_not_allow, lookahead)
+        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_this_type_not_allow, lastToken)
         let note = SubDiagnostic("'This' type can only be used as the return type of an instance member function in class")
         builder.AddNote(note)
         builder.Emit()

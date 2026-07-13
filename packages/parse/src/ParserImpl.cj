@@ -19,6 +19,8 @@ public class ParserImpl {
     public var newlineSkipped: Bool = true
     public var skipNL: Bool = true
     public var firstNLPosition: Position = DEFAULT_POSITION
+    // C++ anchor: cangjie_compiler/src/Parse/ParserImpl.h:140-144
+    public var enableThis: Bool = false
     public var deadlocked: Bool = false
     public var enableCustomAnno: Bool = false
     public var forImport: Bool = false
