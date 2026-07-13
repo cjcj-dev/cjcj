@@ -2,6 +2,7 @@ package cjcj::codegen
 
 import std.collection.*
 import std.sort.*
+import cjcj::basic.CANGJIE_VERSION
 import cjcj::chir.Attribute
 import cjcj::chir.CustomDefKind
 import cjcj::chir.EnumType
@@ -20,13 +21,10 @@ import cjcj::mangle.SPECIAL_NAME_FOR_INIT_RESET_FUNCTION
 import cjcj::option.GlobalOptions
 import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, StaticCast}
 
-// GAP_TODO(sdk-version-injection): C++ derives this from the CJ_SDK_VERSION build macro
-// (src/Basic/Version.cpp:18 CANGJIE_VERSION = CJ_SDK_VERSION), so it always matches the
-// toolchain that builds the compiler. The self-host build has no equivalent build-time
-// injection yet, so the value is hard-coded to the current toolchain version; it must be
-// bumped in lock-step with the runtime until an injection mechanism exists, otherwise the
-// runtime's CheckPackageCompatibility rejects (or, when absent, null-derefs on) the .so.
-private let CANGJIE_SDK_VERSION: String = "1.2.0-alpha.20260619020029"
+// Mirror EmitPackageIR.cpp:48-52: the SDK global is sourced from the compiler build-version
+// configuration. Version.cj is the selfhost compile-time configuration carrier for the same
+// CANGJIE_VERSION value used by all compiler packages.
+private let CANGJIE_SDK_VERSION: String = CANGJIE_VERSION
 private let PKG_INIT_FUNC_METADATA: String = "pkg_init_func"
 private let HAS_INVOKED_PKG_INIT_LITERAL: String = "has_invoked_pkg_init_literal"
 
