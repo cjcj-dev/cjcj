@@ -9,6 +9,7 @@ import cjcj::option.OSType
 import cjcj::option.OutputMode
 import std.collection.*
 import std.convert.*
+import std.core.Box as CoreBox
 import std.sort.*
 
 import cjcj::ast.ASTKind
@@ -59,13 +60,107 @@ import cjcj::ast.IsImpl as AstIsImpl
 import cjcj::ast.IsMirror as AstIsMirror
 import cjcj::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, MAIN_INVOKE, ProfileRecorder, STATIC_INIT_FUNC, STATIC_INIT_VAR}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CORE_PACKAGE_NAME, MAIN_INVOKE, ProfileRecorder, STATIC_INIT_FUNC,
+    STATIC_INIT_VAR}
 
 foreign {
     func CJSelfhostStrtoldToFloat32(value: CString): Float64
 }
 
 private let USER_MAIN_MANGLED_NAME: String = "user.main"
+
+private class ImplicitImportedFunc {
+    public let parentKind: ASTKind
+    public let identifier: String
+    public let parentName: String
+
+    public init(parentKind: ASTKind, identifier: String, parentName!: String = "") {
+        this.parentKind = parentKind
+        this.identifier = identifier
+        this.parentName = parentName
+    }
+}
+
+private enum ImplicitImportedFuncMgrFuncKind {
+    | GENERIC
+    | NONE_GENERIC
+}
+
+private class ImplicitImportedFuncMgr {
+    private static let instance: ImplicitImportedFuncMgr = ImplicitImportedFuncMgr()
+    private let implicitImportedGenericFuncs: ArrayList<ImplicitImportedFunc> = ArrayList<ImplicitImportedFunc>()
+    private let implicitImportedNonGenericFuncs: ArrayList<ImplicitImportedFunc> = ArrayList<ImplicitImportedFunc>()
+
+    private init() {
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "init", parentName: "SpawnException"),
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "init", parentName: "Exception"),
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "init", parentName: "IndexOutOfBoundsException"),
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "init", parentName: "NegativeArraySizeException"),
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "init", parentName: "OutOfMemoryError"),
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "printStackTrace", parentName: "Exception"),
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "printStackTrace", parentName: "Error"),
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.INVALID_DECL, "getCommandLineArgs"),
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.INVALID_DECL, "createArithmeticExceptionMsg"),
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.INVALID_DECL, "createOverflowExceptionMsg"),
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.INVALID_DECL, "CJ_CORE_ExecAtexitCallbacks"),
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.INVALID_DECL, "handleException"),
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.INVALID_DECL, "eprintln"),
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "setRuntimeCJThreadHandle", parentName: "Thread"),
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "execute", parentName: "Future"),
+            ImplicitImportedFuncMgrFuncKind.GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "executeClosure", parentName: "Future"),
+            ImplicitImportedFuncMgrFuncKind.GENERIC)
+        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "get", parentName: "Future"),
+            ImplicitImportedFuncMgrFuncKind.GENERIC)
+    }
+
+    public static func Instance(): ImplicitImportedFuncMgr { return instance }
+
+    public func RegImplicitImportedFunc(funcInfo: ImplicitImportedFunc,
+        funcKind: ImplicitImportedFuncMgrFuncKind): Unit {
+        match (funcKind) {
+            case ImplicitImportedFuncMgrFuncKind.GENERIC => implicitImportedGenericFuncs.add(funcInfo)
+            case ImplicitImportedFuncMgrFuncKind.NONE_GENERIC => implicitImportedNonGenericFuncs.add(funcInfo)
+            case _ => CJC_ASSERT(false)
+        }
+    }
+
+    public func GetImplicitImportedFuncs(funcKind: ImplicitImportedFuncMgrFuncKind): ArrayList<ImplicitImportedFunc> {
+        let funcs = match (funcKind) {
+            case ImplicitImportedFuncMgrFuncKind.GENERIC => implicitImportedGenericFuncs
+            case ImplicitImportedFuncMgrFuncKind.NONE_GENERIC => implicitImportedNonGenericFuncs
+            case _ =>
+                CJC_ASSERT(false)
+                ArrayList<ImplicitImportedFunc>()
+        }
+        sort(funcs, by: { left: ImplicitImportedFunc, right: ImplicitImportedFunc =>
+            let leftName = left.parentName + left.identifier
+            let rightName = right.parentName + right.identifier
+            if (leftName < rightName) {
+                Ordering.LT
+            } else if (leftName > rightName) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        })
+        return funcs
+    }
+}
 
 private class FaithfulInitFileVars {
     public let file: AstFile
@@ -1003,9 +1098,10 @@ public class FaithfulAST2CHIR {
     private var failureReason: String = ""
 
     private let globalCache: FaithfulAST2CHIRNodeMap = FaithfulAST2CHIRNodeMap()
-    // GAP_TODO(ASTPackage2CHIR.cpp:1673-1681): populate this table from binary CHIR deserialization.
-    // Non-incremental translation starts with the same empty table as C++.
     private let deserializedVals: HashMap<String, Value> = HashMap<String, Value>()
+    private let noNeedToTranslateDecls: HashSet<AstDecl> = HashSet<AstDecl>()
+    private let implicitDecls: HashSet<AstDecl> = HashSet<AstDecl>()
+    private let implicitFuncs: HashMap<String, Function> = HashMap<String, Function>()
     private let allTopLevelNodes: ArrayList<AstDecl> = ArrayList<AstDecl>()
     private let allTopLevelNodeSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let pkgFiles: ArrayList<AstFile> = ArrayList<AstFile>()
@@ -1062,8 +1158,16 @@ public class FaithfulAST2CHIR {
     }
 
     public func ToCHIRPackage(node: AstPackage): Bool {
-        outputPackage = builder.CreatePackage(node.fullPackageName)
+        if (!opts.IsCompilingCJMPSpecific()) {
+            outputPackage = builder.CreatePackage(node.fullPackageName)
+        } else if (TryToDeserializeCHIR()) {
+            outputPackage = builder.context.GetCurPackage()
+            BuildDeserializedTable()
+        } else {
+            return false
+        }
         CurrentPackage().SetPackageAccessLevel(BuildPackageAccessLevel(node.accessible))
+        CollectImplicitFuncs(node)
         CollectImportedDecls(node)
         CollectDeclsInCurPkg(node)
         let initOrder = GlobalDeclAnalysis(node)
@@ -1113,6 +1217,10 @@ public class FaithfulAST2CHIR {
 
     public func GetGlobalCache(): FaithfulAST2CHIRNodeMap {
         return globalCache
+    }
+
+    public func GetImplicitFuncs(): HashMap<String, Function> {
+        return implicitFuncs
     }
 
     public func GetSrcCodeImportedFuncs(): ArrayList<Function> {
@@ -1171,6 +1279,81 @@ public class FaithfulAST2CHIR {
 
     private func CurrentPackage(): Package {
         return outputPackage ?? throw IllegalStateException("faithful AST2CHIR package has not been created")
+    }
+
+    private func AddToImplicitFuncs(funcDecl: AstFuncDecl,
+        registeredImplicitFuncs: ArrayList<ImplicitImportedFunc>): Unit {
+        if (opts.sancovOption.IsSancovEnabled() &&
+            (funcDecl.mangledName == FUNC_MANGLE_NAME_MALLOC_CSTRING ||
+                funcDecl.mangledName == FUNC_MANGLE_NAME_CSTRING_SIZE)) {
+            implicitDecls.add(funcDecl)
+            return
+        }
+        for (funcInfo in registeredImplicitFuncs) {
+            let parentDecl = funcDecl.outerDecl
+            let parentMatches = if (funcInfo.parentName.isEmpty()) {
+                parentDecl.isNone()
+            } else if (let Some(parent) <- parentDecl) {
+                parent.identifier.Val() == funcInfo.parentName && parent.astKind == funcInfo.parentKind
+            } else {
+                false
+            }
+            if (funcDecl.identifier.Val() == funcInfo.identifier && parentMatches) {
+                implicitDecls.add(funcDecl)
+                return
+            }
+        }
+    }
+
+    private func CollectImplicitFuncs(node: AstPackage): Unit {
+        let genericFuncs = ImplicitImportedFuncMgr.Instance().GetImplicitImportedFuncs(
+            ImplicitImportedFuncMgrFuncKind.GENERIC)
+        let collectImplicitDecls = { astNode: AstNode =>
+            if (let Some(funcDecl) <- (astNode as AstFuncDecl)) {
+                AddToImplicitFuncs(funcDecl, genericFuncs)
+                return AstVisitAction.SKIP_CHILDREN
+            }
+            return AstVisitAction.WALK_CHILDREN
+        }
+        for (importedPkg in importedPackages) {
+            for (instantiatedDecl in importedPkg.genericInstantiatedDecls) {
+                AstWalker(instantiatedDecl, visitPre: collectImplicitDecls).Walk()
+            }
+        }
+
+        let nonGenericFuncs = ImplicitImportedFuncMgr.Instance().GetImplicitImportedFuncs(
+            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
+        var stdCorePkg: Option<AstPackage> = None
+        if (node.fullPackageName == CORE_PACKAGE_NAME) {
+            stdCorePkg = Some(node)
+        } else {
+            for (importedPkg in importedPackages) {
+                if (importedPkg.fullPackageName == CORE_PACKAGE_NAME) {
+                    stdCorePkg = Some(importedPkg)
+                    break
+                }
+            }
+        }
+        let corePkg = stdCorePkg ??
+            throw IllegalStateException("faithful AST2CHIR cannot find imported std.core package")
+        let collectNonGenericDecls = { astNode: AstNode =>
+            if (let Some(funcDecl) <- (astNode as AstFuncDecl)) {
+                AddToImplicitFuncs(funcDecl, nonGenericFuncs)
+                return AstVisitAction.SKIP_CHILDREN
+            }
+            return AstVisitAction.WALK_CHILDREN
+        }
+        for (file in corePkg.files) {
+            for (decl in file.decls) {
+                AstWalker(decl, visitPre: collectNonGenericDecls).Walk()
+            }
+            for (decl in file.exportedInternalDecls) {
+                AstWalker(decl, visitPre: collectNonGenericDecls).Walk()
+            }
+        }
+        for (implicitDecl in implicitDecls) {
+            CJC_ASSERT(implicitDecl.IsFunc())
+        }
     }
 
     private func CollectImportedDecls(node: AstPackage): Unit {
@@ -2107,8 +2290,69 @@ public class FaithfulAST2CHIR {
 
     private func TranslateVecDecl(decls: ArrayList<AstDecl>, trans: Translator): Unit {
         for (decl in decls) {
+            if (noNeedToTranslateDecls.contains(decl)) {
+                continue
+            }
             let _ = Translator.TranslateASTNode(decl, trans)
         }
+    }
+
+    private func TryToDeserializeCHIR(): Bool {
+        CJC_ASSERT(!opts.commonPartChirs.isEmpty())
+        let phase = CoreBox<ToCHIRPhase>(ToCHIRPhase.RAW)
+        var success = true
+        for (chirFile in opts.commonPartChirs) {
+            success = CHIRDeserializer.Deserialize(chirFile, builder, phase, compilePlatform: true) && success
+        }
+        return success
+    }
+
+    private func BuildDeserializedTable(): Unit {
+        for (globalVar in CurrentPackage().GetGlobalVars()) {
+            let identifier = globalVar.GetIdentifier()
+            if (!deserializedVals.contains(identifier)) {
+                deserializedVals.add(identifier, globalVar)
+            }
+        }
+        for (fn in CurrentPackage().GetGlobalFunctions(includePureAbstract: true)) {
+            let identifier = if (fn.TestAttr(Attribute.FOREIGN)) {
+                fn.GetRawMangledName()
+            } else {
+                fn.GetIdentifier()
+            }
+            if (!deserializedVals.contains(identifier)) {
+                deserializedVals.add(identifier, fn)
+            }
+        }
+    }
+
+    private func MaybeDeserialized(decl: AstDecl): Bool {
+        if (opts.IsCompilingCJMPSpecific() &&
+            (decl.TestAttr(AstAttribute.SPECIFIC) || decl.TestAttr(AstAttribute.FROM_COMMON_PART) ||
+                decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED) || decl.TestAttr(AstAttribute.IMPORTED))) {
+            return true
+        }
+        if (let Some(outerDecl) <- decl.outerDecl) {
+            return outerDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)
+        }
+        return false
+    }
+
+    private func TryGetDeserialized<T>(decl: AstDecl): Option<T> where T <: Value {
+        if (!MaybeDeserialized(decl)) {
+            return None
+        }
+        let key = if (decl.TestAttr(AstAttribute.FOREIGN) && decl.IsFunc()) {
+            decl.rawMangleName
+        } else {
+            GLOBAL_VALUE_PREFIX + decl.mangledName
+        }
+        let result = TryGetFromCache<T>(key, deserializedVals)
+        if (result.isSome() && !decl.TestAttr(AstAttribute.SPECIFIC) &&
+            !(decl.TestAttr(AstAttribute.COMMON) && decl.TestAttr(AstAttribute.IMPORTED))) {
+            noNeedToTranslateDecls.add(decl)
+        }
+        return result
     }
 
     private func CreateTranslator(): Translator {
@@ -3947,39 +4191,141 @@ public class FaithfulAST2CHIR {
             throw IllegalStateException("faithful AST2CHIR initializer function has no entry block")
     }
 
+    private func IsLocalConstFuncInStaticMember(funcDecl: AstFuncDecl): Bool {
+        if (!funcDecl.isConst || !IsLocalFunc(funcDecl)) {
+            return false
+        }
+        let outerDecl = GetOuterDecl(funcDecl) ??
+            throw IllegalStateException("faithful local const function has no outer declaration")
+        return outerDecl.TestAttr(AstAttribute.STATIC)
+    }
+
+    private func TranslateFunctionGenericUpperBounds(funcDecl: AstFuncDecl): Unit {
+        let funcBody = funcDecl.funcBody ??
+            throw IllegalStateException("faithful generic function has no body")
+        if (let Some(generic) <- funcBody.generic) {
+            for (typeParam in generic.typeParameters) {
+                let _ = chirType.TranslateType(RequireAstTy(typeParam))
+            }
+            for (typeParam in generic.typeParameters) {
+                chirType.FillGenericArgType((RequireAstTy(typeParam) as AstGenericsTy).getOrThrow())
+            }
+        }
+    }
+
+    private func SetFuncAttributeAndLinkageType(funcDecl: AstFuncDecl, fn: Function): Unit {
+        fn.AppendAttributeInfo(BuildAttr(funcDecl.GetAttrs()))
+        if (funcDecl.HasAnno(AstAnnotationKind.NO_HEAP_ALLOC)) { fn.EnableAttr(Attribute.NO_HEAP_ALLOC) }
+        if (funcDecl.HasAnno(AstAnnotationKind.NO_WRITE_BARRIER)) { fn.EnableAttr(Attribute.NO_WRITE_BARRIER) }
+        if (funcDecl.HasAnno(AstAnnotationKind.NO_WRITE_BARRIER_REC)) {
+            fn.EnableAttr(Attribute.NO_WRITE_BARRIER_REC)
+        }
+        if (funcDecl.HasAnno(AstAnnotationKind.NO_STACK_GROW)) { fn.EnableAttr(Attribute.NO_STACK_GROW) }
+        if (funcDecl.HasAnno(AstAnnotationKind.SYSTEM_STACK)) { fn.EnableAttr(Attribute.SYSTEM_STACK) }
+        if (funcDecl.isConst) {
+            fn.EnableAttr(Attribute.CONST)
+        }
+        if (IsLocalConstFuncInStaticMember(funcDecl)) {
+            fn.DisableAttr(Attribute.STATIC)
+        }
+        if (IsStaticInit(funcDecl)) {
+            fn.DisableAttr(Attribute.STATIC)
+            fn.DisableAttr(Attribute.PRIVATE)
+            fn.EnableAttr(Attribute.INTERNAL)
+        }
+        if (opts.enIncrementalCompilation && !funcDecl.toBeCompiled) {
+            fn.EnableAttr(Attribute.NON_RECOMPILE)
+            fn.EnableAttr(Attribute.IMPORTED)
+        }
+        if (funcDecl.TestAttr(AstAttribute.IN_EXTEND) || funcDecl.TestAttr(AstAttribute.UNSAFE) ||
+            funcDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED) || !funcDecl.TestAttr(AstAttribute.PUBLIC)) {
+            fn.EnableAttr(Attribute.NO_REFLECT_INFO)
+        }
+        if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY) || funcDecl.mangledName == USER_MAIN_MANGLED_NAME ||
+            FaithfulStartsWith(funcDecl.mangledName, "rt$")) {
+            fn.EnableAttr(Attribute.NO_INLINE)
+        }
+        if (funcDecl.TestAttr(AstAttribute.FOREIGN)) {
+            fn.EnableAttr(Attribute.IMPORTED)
+        }
+        fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
+        fn.SetFuncKind(GetFuncKindFromAST(funcDecl))
+        if (fn.GetFuncKind() == FuncKind.DEFAULT_PARAMETER_FUNC) {
+            let ownerFunc = funcDecl.ownerFunc ??
+                throw IllegalStateException("faithful default parameter function has no owner")
+            fn.SetParamDftValHostFunc((globalCache.Get(ownerFunc) as Function).getOrThrow())
+        }
+        fn.SetFastNative(funcDecl.isFastNative)
+    }
+
     private func CreateFuncSignatureAndSetGlobalCache(funcDecl: AstFuncDecl): Unit {
+        if (funcDecl.TestAttr(AstAttribute.GENERIC)) {
+            TranslateFunctionGenericUpperBounds(funcDecl)
+        }
+        if (opts.enIncrementalCompilation && !funcDecl.toBeCompiled && !IsSrcCodeImportedGlobalDecl(funcDecl)) {
+            CreatePseudoImportedFuncSignatureAndSetGlobalCache(funcDecl)
+            return
+        }
+        if (let Some(fn) <- TryGetDeserialized<Function>(funcDecl)) {
+            if (funcDecl.TestAttr(AstAttribute.SPECIFIC)) {
+                ResetSpecificFunc(funcDecl, fn)
+            }
+            globalCache.Set(funcDecl, fn)
+            if (implicitDecls.contains(funcDecl)) {
+                implicitFuncs[fn.GetIdentifierWithoutPrefix()] = fn
+            }
+            if (let Some(file) <- funcDecl.curFile) {
+                fn.SetFeatures(file.GetFeatures())
+            }
+            return
+        }
         let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl))))
         let fn = builder.CreateFunction(funcTy, EffectiveFunctionIdentifier(funcDecl),
             srcCodeIdentifier: EffectiveFunctionSrcIdentifier(funcDecl), rawMangledName: EffectiveFunctionRawName(funcDecl),
             packageName: EffectivePackageName(funcDecl))
         fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.keywordPos, funcDecl.end))
         AttachFunctionGenericParams(funcDecl, fn)
-        ApplyDeclAttrs(fn, funcDecl)
-        fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
-        if (funcDecl.TestAttr(AstAttribute.IN_EXTEND) || funcDecl.TestAttr(AstAttribute.UNSAFE) ||
-            funcDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED) || !funcDecl.TestAttr(AstAttribute.PUBLIC)) {
-            fn.EnableAttr(Attribute.NO_REFLECT_INFO)
-        }
-        ApplyFuncKind(fn, funcDecl)
-        if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) {
-            fn.SetFuncKind(FuncKind.MAIN_ENTRY)
-        }
-        let mangledName = EffectiveMangledName(funcDecl)
-        if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY) || mangledName == USER_MAIN_MANGLED_NAME ||
-            FaithfulStartsWith(mangledName, "rt$")) {
-            fn.EnableAttr(Attribute.NO_INLINE)
-        }
         if (!funcDecl.TestAttr(AstAttribute.ABSTRACT)) {
             let body = builder.CreateBlockGroup(fn)
             fn.InitBody(body)
             let entry = builder.CreateBlock(body)
             body.SetEntryBlock(entry)
         }
+        SetFuncAttributeAndLinkageType(funcDecl, fn)
         TranslateFuncParams(funcDecl, fn)
         if (!funcDecl.TestAttr(AstAttribute.ABSTRACT)) {
             let entry = fn.GetEntryBlock() ??
                 throw IllegalStateException("faithful AST2CHIR function has no entry block: ${fn.GetIdentifier()}")
             CreateFunctionEntryDebugs(funcDecl, fn, entry)
+        }
+        if (implicitDecls.contains(funcDecl)) {
+            implicitFuncs[fn.GetIdentifierWithoutPrefix()] = fn
+        }
+        globalCache.Set(funcDecl, fn)
+    }
+
+    private func CreatePseudoImportedFuncSignatureAndSetGlobalCache(funcDecl: AstFuncDecl): Unit {
+        let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl))))
+        let fn = builder.CreateFunction(funcTy, funcDecl.mangledName, srcCodeIdentifier: funcDecl.identifier.Val(),
+            rawMangledName: funcDecl.rawMangleName, packageName: funcDecl.fullPackageName)
+        AttachFunctionGenericParams(funcDecl, fn)
+        fn.EnableAttr(Attribute.IMPORTED)
+        SetFuncAttributeAndLinkageType(funcDecl, fn)
+        if (HasImplicitThisParam(funcDecl)) {
+            let thisParam = builder.CreateParameter(funcTy.GetParamTypes()[0], INVALID_LOCATION, fn)
+            thisParam.SetSrcCodeIdentifier("this")
+        }
+        let body = funcDecl.funcBody ??
+            throw IllegalStateException("faithful pseudo imported function has no body")
+        CJC_ASSERT(body.paramLists.size == 1)
+        for (param in body.paramLists[0].params) {
+            let paramTy = chirType.TranslateType(RequireAstTy(param))
+            let paramLoc = TranslateLocationWithoutScope(builder.context, param.begin, param.end)
+            let chirParam = builder.CreateParameter(paramTy, paramLoc, fn)
+            chirParam.SetSrcCodeIdentifier(param.identifier.GetRawText())
+        }
+        if (implicitDecls.contains(funcDecl)) {
+            implicitFuncs[fn.GetIdentifierWithoutPrefix()] = fn
         }
         globalCache.Set(funcDecl, fn)
     }
@@ -4054,6 +4400,18 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreateImportedFuncSignatureAndSetGlobalCache(funcDecl: AstFuncDecl): Unit {
+        if (let Some(fn) <- TryGetDeserialized<Function>(funcDecl)) {
+            ConvertImportedFunctionType(fn, funcDecl)
+            globalCache.Set(funcDecl, fn)
+            if (implicitDecls.contains(funcDecl)) {
+                implicitFuncs[fn.GetIdentifierWithoutPrefix()] = fn
+            }
+            fn.SetDebugLocation(GetDeclLoc(builder.context, funcDecl))
+            return
+        }
+        if (funcDecl.TestAttr(AstAttribute.GENERIC)) {
+            TranslateFunctionGenericUpperBounds(funcDecl)
+        }
         let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl))))
         let fn = builder.CreateFunction(funcTy, EffectiveMangledName(funcDecl),
             srcCodeIdentifier: funcDecl.identifier.Val(), rawMangledName: EffectiveRawMangledName(funcDecl),
@@ -4061,14 +4419,90 @@ public class FaithfulAST2CHIR {
         fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.keywordPos, funcDecl.end))
         AttachFunctionGenericParams(funcDecl, fn)
         fn.EnableAttr(Attribute.IMPORTED)
-        ApplyDeclAttrs(fn, funcDecl)
-        fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
-        ApplyFuncKind(fn, funcDecl)
-        TranslateFuncParams(funcDecl, fn)
+        SetFuncAttributeAndLinkageType(funcDecl, fn)
+        if (implicitDecls.contains(funcDecl)) {
+            implicitFuncs[fn.GetIdentifierWithoutPrefix()] = fn
+        }
+        if (HasImplicitThisParam(funcDecl)) {
+            let thisParam = builder.CreateParameter(funcTy.GetParamTypes()[0], INVALID_LOCATION, fn)
+            thisParam.SetSrcCodeIdentifier("this")
+        }
+        let body = funcDecl.funcBody ??
+            throw IllegalStateException("faithful imported function has no body")
+        CJC_ASSERT(!body.paramLists.isEmpty())
+        for (param in body.paramLists[0].params) {
+            let paramTy = chirType.TranslateType(RequireAstTy(param))
+            let paramLoc = TranslateLocationWithoutScope(builder.context, param.begin, param.end)
+            let chirParam = builder.CreateParameter(paramTy, paramLoc, fn)
+            chirParam.SetSrcCodeIdentifier(param.identifier.GetRawText())
+        }
         globalCache.Set(funcDecl, fn)
     }
 
+    private func ConvertImportedFunctionType(fn: Function, funcDecl: AstFuncDecl): Unit {
+        let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl))))
+        if (fn.GetFuncType().getOrThrow() == funcTy) {
+            return
+        }
+        let replaceTable = fn.GetFuncType().getOrThrow().CalculateGenericTyMapping(funcTy)[1]
+        let converter = PrivateTypeConverter({ ty: Type => ReplaceRawGenericArgType(ty, replaceTable, builder) }, builder)
+        converter.VisitSubValue(fn)
+    }
+
+    private func ResetSpecificFunc(funcDecl: AstFuncDecl, fn: Function): Unit {
+        fn.DestroyFuncBody()
+        if (!funcDecl.TestAttr(AstAttribute.ABSTRACT)) {
+            let body = builder.CreateBlockGroup(fn)
+            fn.InitBody(body)
+            fn.DisableAttr(Attribute.ABSTRACT)
+        }
+        fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.begin, funcDecl.end))
+        SetFuncAttributeAndLinkageType(funcDecl, fn)
+        fn.EnableAttr(Attribute.SPECIFIC)
+        fn.DisableAttr(Attribute.COMMON)
+        fn.DisableAttr(Attribute.SKIP_ANALYSIS)
+
+        let newGenericParamTys = GetGenericParamType(funcDecl)
+        let oldGenericParamTys = fn.GetGenericTypeParams()
+        if (oldGenericParamTys.isEmpty()) {
+            return
+        }
+        CJC_ASSERT(newGenericParamTys.size == oldGenericParamTys.size)
+        let replaceTable = HashMap<GenericType, Type>()
+        var idx: Int64 = 0
+        while (idx < oldGenericParamTys.size) {
+            if (oldGenericParamTys[idx] != newGenericParamTys[idx]) {
+                replaceTable[oldGenericParamTys[idx]] = newGenericParamTys[idx]
+            }
+            idx++
+        }
+        if (replaceTable.isEmpty()) {
+            return
+        }
+        let converter = PrivateTypeConverter({ ty: Type => ReplaceRawGenericArgType(ty, replaceTable, builder) }, builder)
+        converter.VisitSubValue(fn)
+    }
+
+    private func GetGenericParamType(funcDecl: AstFuncDecl): ArrayList<GenericType> {
+        let genericParamTys = ArrayList<GenericType>()
+        if (!funcDecl.TestAttr(AstAttribute.GENERIC)) {
+            return genericParamTys
+        }
+        let funcBody = funcDecl.funcBody ??
+            throw IllegalStateException("faithful generic function has no body")
+        let generic = funcBody.generic ??
+            throw IllegalStateException("faithful generic function has no generic parameters")
+        for (genericTy in generic.typeParameters) {
+            genericParamTys.add((chirType.TranslateType(RequireAstTy(genericTy)) as GenericType).getOrThrow())
+        }
+        return genericParamTys
+    }
+
     private func CreateImportedValueSignatureAndSetGlobalCache(varDecl: AstVarDecl): Unit {
+        if (let Some(globalVar) <- TryGetDeserialized<GlobalVar>(varDecl)) {
+            globalCache.Set(varDecl, globalVar)
+            return
+        }
         let varTy = chirType.TranslateType(RequireAstTy(varDecl))
         let globalVar = builder.CreateGlobalVar(builder.context.GetRefTy(varTy), EffectiveMangledName(varDecl),
             srcCodeIdentifier: varDecl.identifier.Val(), rawMangledName: EffectiveRawMangledName(varDecl),
@@ -4128,6 +4562,11 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreateAndCacheGlobalVar(decl: AstVarDecl, isLocalConst!: Bool = false): GlobalVar {
+        if (let Some(globalVar) <- TryGetDeserialized<GlobalVar>(decl)) {
+            globalCache.Set(decl, globalVar)
+            globalVar.SetDebugLocation(GetDeclLoc(builder.context, decl))
+            return globalVar
+        }
         let varTy = chirType.TranslateType(RequireAstTy(decl))
         let globalVar = builder.CreateGlobalVar(builder.context.GetRefTy(varTy), EffectiveMangledName(decl),
             srcCodeIdentifier: decl.identifier.Val(), rawMangledName: EffectiveRawMangledName(decl),
@@ -4269,69 +4708,43 @@ public class FaithfulAST2CHIR {
         return thisTy
     }
 
-    private func ApplyFuncKind(fn: Function, funcDecl: AstFuncDecl): Unit {
+    private func GetFuncKindFromAST(funcDecl: AstFuncDecl): FuncKind {
         if (funcDecl.isGetter) {
-            fn.SetFuncKind(FuncKind.GETTER)
-            return
+            return FuncKind.GETTER
         }
         if (funcDecl.isSetter) {
-            fn.SetFuncKind(FuncKind.SETTER)
-            return
+            return FuncKind.SETTER
         }
         if (funcDecl.IsFinalizer()) {
-            fn.SetFuncKind(FuncKind.FINALIZER)
-            return
+            return FuncKind.FINALIZER
         }
         if (funcDecl.TestAttr(AstAttribute.MAIN_ENTRY)) {
-            fn.SetFuncKind(FuncKind.MAIN_ENTRY)
-            return
+            return FuncKind.MAIN_ENTRY
         }
         if (funcDecl.TestAttr(AstAttribute.MACRO_FUNC)) {
-            fn.SetFuncKind(FuncKind.MACRO_FUNC)
-            return
+            return FuncKind.MACRO_FUNC
         }
         if (funcDecl.TestAttr(AstAttribute.PRIMARY_CONSTRUCTOR)) {
-            if (IsStructMemberFunc(funcDecl)) {
-                fn.SetFuncKind(FuncKind.PRIMAL_STRUCT_CONSTRUCTOR)
-                return
-            }
-            if (IsClassLikeMemberFunc(funcDecl)) {
-                fn.SetFuncKind(FuncKind.PRIMAL_CLASS_CONSTRUCTOR)
-                return
+            if (funcDecl.TestAttr(AstAttribute.IN_STRUCT)) {
+                return FuncKind.PRIMAL_STRUCT_CONSTRUCTOR
+            } else if (funcDecl.TestAttr(AstAttribute.IN_CLASSLIKE)) {
+                return FuncKind.PRIMAL_CLASS_CONSTRUCTOR
+            } else {
+                CJC_ABORT()
             }
         } else if (funcDecl.TestAttr(AstAttribute.CONSTRUCTOR)) {
-            if (IsStructMemberFunc(funcDecl)) {
-                fn.SetFuncKind(FuncKind.STRUCT_CONSTRUCTOR)
-                return
-            }
-            if (IsClassLikeMemberFunc(funcDecl)) {
-                fn.SetFuncKind(FuncKind.CLASS_CONSTRUCTOR)
-                return
+            if (funcDecl.TestAttr(AstAttribute.IN_STRUCT)) {
+                return FuncKind.STRUCT_CONSTRUCTOR
+            } else if (funcDecl.TestAttr(AstAttribute.IN_CLASSLIKE)) {
+                return FuncKind.CLASS_CONSTRUCTOR
+            } else {
+                CJC_ABORT()
             }
         }
         if (funcDecl.TestAttr(AstAttribute.HAS_INITIAL)) {
-            fn.SetFuncKind(FuncKind.DEFAULT_PARAMETER_FUNC)
+            return FuncKind.DEFAULT_PARAMETER_FUNC
         }
-    }
-
-    private func IsStructMemberFunc(funcDecl: AstFuncDecl): Bool {
-        if (funcDecl.TestAttr(AstAttribute.IN_STRUCT)) {
-            return true
-        }
-        if (let Some(outerDecl) <- funcDecl.outerDecl) {
-            return outerDecl.astKind == ASTKind.STRUCT_DECL
-        }
-        return false
-    }
-
-    private func IsClassLikeMemberFunc(funcDecl: AstFuncDecl): Bool {
-        if (funcDecl.TestAttr(AstAttribute.IN_CLASSLIKE)) {
-            return true
-        }
-        if (let Some(outerDecl) <- funcDecl.outerDecl) {
-            return outerDecl.astKind == ASTKind.CLASS_DECL || outerDecl.astKind == ASTKind.INTERFACE_DECL
-        }
-        return false
+        return FuncKind.DEFAULT
     }
 
     private func AddGlobalVarToPackage(globalVar: GlobalVar): Unit {

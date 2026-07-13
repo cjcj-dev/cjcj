@@ -114,6 +114,7 @@ private class ToCHIR {
             case Some(value) => value
             case None => return None
         }
+        instance.chirData.SetImplicitFuncs(lowered, ast2chir.GetImplicitFuncs())
         chirPkg = Some(lowered)
         RulesChecking(lowered, builder, instance.invocation.globalOptions,
             instance.diag.AsBasicDiagnosticEngine(), effectMap)
@@ -565,7 +566,9 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
         let realPackage = packagesToEmit[packageIndex]
         instance.chirData.SetCurrentRealCHIRPackage(Some(realPackage))
         let codegenData = CodegenCHIRData(instance.chirData.GetRealCHIRContext(), realPackage)
-        PopulateRealCodegenImplicitFuncs(codegenData, realPackage)
+        for ((mangledName, fn) in instance.chirData.GetImplicitFuncs(realPackage)) {
+            codegenData.AddImplicitFunc(mangledName, fn)
+        }
         PruneImportedFunctionBodiesForRealCodegen(realPackage)
         let noHeapAllocChecker = NoHeapAllocChecker(instance.diag.AsBasicDiagnosticEngine())
         noHeapAllocChecker.RunOnPackage(realPackage)
@@ -594,15 +597,6 @@ private func PruneImportedFunctionBodiesForRealCodegen(pkg: RealCHIRPackage): Un
         kept.add(fn)
     }
     pkg.SetAllGlobalFuncs(kept)
-}
-
-private func PopulateRealCodegenImplicitFuncs(codegenData: CodegenCHIRData, pkg: RealCHIRPackage): Unit {
-    for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
-        codegenData.AddImplicitFunc(fn.GetIdentifierWithoutPrefix(), fn)
-        if (!fn.GetRawMangledName().isEmpty()) {
-            codegenData.AddImplicitFunc(fn.GetRawMangledName(), fn)
-        }
-    }
 }
 
 private func BuildRealCodeGenPackages(realPackages: ArrayList<RealCHIRPackage>): ArrayList<RealCHIRPackage> {

@@ -15,6 +15,7 @@ import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.FaithfulUnorderedMap
 import cjcj::basic.Range as BasicRange
 import cjcj::chir.CHIRContext as RealCHIRContext
+import cjcj::chir.Function as RealCHIRFunction
 import cjcj::chir.Package as RealCHIRPackage
 import cjcj::modules.SemaCjoManager
 import cjcj::modules.SemaImportManager
@@ -198,6 +199,8 @@ public class CHIRData {
     private let constVarInitFuncs: ArrayList<String> = ArrayList<String>()
     private let implicitFuncsPerPkg: HashMap<String, HashMap<String, String>> =
         HashMap<String, HashMap<String, String>>()
+    private let realImplicitFuncsPerPkg: HashMap<String, HashMap<String, RealCHIRFunction>> =
+        HashMap<String, HashMap<String, RealCHIRFunction>>()
     private let constVarInitFuncsPerPkg: HashMap<String, ArrayList<String>> =
         HashMap<String, ArrayList<String>>()
 
@@ -286,6 +289,18 @@ public class CHIRData {
 
     public func GetImplicitFuncs(): HashMap<String, String> {
         return implicitFuncs
+    }
+
+    public func SetImplicitFuncs(pkg: RealCHIRPackage, funcs: HashMap<String, RealCHIRFunction>): Unit {
+        let copy = HashMap<String, RealCHIRFunction>()
+        for ((key, value) in funcs) {
+            copy.add(key, value)
+        }
+        realImplicitFuncsPerPkg[pkg.GetName()] = copy
+    }
+
+    public func GetImplicitFuncs(pkg: RealCHIRPackage): HashMap<String, RealCHIRFunction> {
+        return realImplicitFuncsPerPkg.get(pkg.GetName()) ?? HashMap<String, RealCHIRFunction>()
     }
 
     public func SetConstVarInitFuncs(pkg: CHIRPackage, funcs: ArrayList<String>): Unit {
