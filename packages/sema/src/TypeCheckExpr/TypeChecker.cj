@@ -1614,6 +1614,16 @@ extend TypeChecker {
                 let _ = CheckDeclAttributesForPackage(pkg, impl.diag.getOrThrow(), opts: GlobalOptions())
                 let _ = PreCheckPackage(ctx, pkg, typeManager: impl.typeManager,
                     importManager: impl.importManager, diag: impl.diag)
+                // C++ src/Sema/PreCheck.cpp:1281-1321,1843-1844 checks nominal declarations after name resolution.
+                for (sym in impl.GetAllStructDecls(ctx)) {
+                    if (let Some(node) <- sym.node) {
+                        if ((node.astKind == ASTKind.CLASS_DECL || node.astKind == ASTKind.INTERFACE_DECL ||
+                            node.astKind == ASTKind.STRUCT_DECL || node.astKind == ASTKind.ENUM_DECL) &&
+                            (let Some(inheritableDecl) <- (node as InheritableDecl))) {
+                            impl.CheckDupInterfaceInStructDecl(inheritableDecl)
+                        }
+                    }
+                }
                 // C2e[A]: overload-conflict detection runs after PreCheckPackage so parameter types
                 // are resolved (the func return type may still be uninferred, matching C++).
                 if (let Some(diagValue) <- impl.diag) {
@@ -1771,6 +1781,8 @@ extend TypeChecker {
                 }
                 RunInheritanceCheck(pkg)
                 SetConstructorCalls(pkg)
+                // C++ src/Sema/TypeChecker.cpp:2050-2051 checks instantiated duplicate super interfaces.
+                impl.CheckInstDupSuperInterfacesEntry(pkg)
                 // Check legality of usage after sema type completed.
                 // Mirrors C++ TypeChecker.cpp:2053 (CheckLegalityOfUsage).
                 RunLegalityOfUsageCheck(ctx, pkg)

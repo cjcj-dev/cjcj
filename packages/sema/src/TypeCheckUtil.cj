@@ -494,6 +494,14 @@ public func GetRealTarget(decl: Option<Decl>): Option<Decl> {
     return None
 }
 
+// C++ src/Sema/TypeCheckUtil.h:86-90 TypeCheckUtil::GetInstanationTys.
+public func GetInstanationTys(expr: Expr): ArrayList<Ty> {
+    if (let Some(refExpr) <- (expr as NameReferenceExpr)) {
+        return refExpr.instTys
+    }
+    return ArrayList<Ty>()
+}
+
 public func GetRealTarget(decl: Decl): Decl {
     let visited = HashSet<String>()
     return GetRealTargetVisit(decl, visited)

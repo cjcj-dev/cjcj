@@ -2,6 +2,8 @@ package cjcj::sema
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::modules.SemaImportManager
 import cjcj::option.GetHardwareConcurrency
@@ -229,6 +231,14 @@ public class TypeCheckerImpl {
             "ast_kind : extend_decl", order: SearchOrder.POS_ASC)
     }
 
+    // C++ src/Sema/PreCheck.cpp:1323-1330 TypeCheckerImpl::CheckDupInterfaceInStructDecl.
+    public func CheckDupInterfaceInStructDecl(decl: InheritableDecl): Unit {
+        if (!Ty.IsTyCorrect(decl.GetTy())) {
+            return
+        }
+        CheckInstDupSuperInterfaces(decl, decl, TypeSubst(), checkExtend: false)
+    }
+
     public func GetDupInterfaceRecursively(triggerNode: Node, interfaceTy: Ty, instantiateMap: TypeSubst,
         res: ArrayList<InterfaceTy>, passedClassLikeDecls: ArrayList<ClassLikeDecl>): Option<Decl> {
         let insTy = typeManager.GetInstantiatedTy(interfaceTy, instantiateMap)
@@ -310,6 +320,88 @@ public class TypeCheckerImpl {
                 passedClassLikeDecls)
         }
         return None
+    }
+
+    // C++ src/Sema/TypeChecker.cpp:2639-2651 TypeCheckerImpl::CheckInstDupSuperInterfaces.
+    public func CheckInstDupSuperInterfaces(triggerNode: Node, decl: InheritableDecl, instantiateMap: TypeSubst,
+        checkExtend!: Bool = true): Unit {
+        let passedClassLikeDecls = ArrayList<ClassLikeDecl>()
+        let interfaceDecl = GetDupSuperInterface(triggerNode, decl, instantiateMap, passedClassLikeDecls,
+            checkExtend: checkExtend)
+        let baseDecl = Ty.GetDeclPtrOfTy(decl.GetTy())
+        let name = if (let Some(value) <- baseDecl) { value.identifier.Val() } else { Ty.ToString(decl.GetTy()) }
+        if (let Some(value) <- interfaceDecl) {
+            Diagnose(diag.getOrThrow(), triggerNode, BasicDiagKind.sema_inherit_duplicate_interface,
+                args: [BasicDiagArgument(DeclKindToString(decl)), BasicDiagArgument(name),
+                    BasicDiagArgument(value.identifier.Val())]).Emit()
+        }
+    }
+
+    // C++ src/Sema/TypeChecker.cpp:2653-2670 TypeCheckerImpl::CheckInstDupSuperInterfaces(Type).
+    public func CheckInstDupSuperInterfaces(typeNode: Type): VisitAction {
+        if (!Ty.IsTyCorrect(typeNode.GetTy())) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        let typeTarget = GetRealTarget(typeNode.GetTarget())
+        if ((let None <- typeTarget) || !typeTarget.getOrThrow().IsNominalDecl()) {
+            return VisitAction.WALK_CHILDREN
+        }
+        let target = typeTarget.getOrThrow()
+        let typeMapping = GenerateTypeMapping(target, typeNode.GetTy().getOrThrow().typeArgs)
+        if (typeMapping.IsEmpty()) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        CheckInstDupSuperInterfaces(typeNode, (target as InheritableDecl).getOrThrow(), typeMapping,
+            checkExtend: false)
+        return VisitAction.WALK_CHILDREN
+    }
+
+    // C++ src/Sema/TypeChecker.cpp:2672-2692 TypeCheckerImpl::CheckInstDupSuperInterfaces(Expr).
+    public func CheckInstDupSuperInterfaces(expr: Expr): VisitAction {
+        if (!Ty.IsTyCorrect(expr.GetTy())) {
+            return VisitAction.WALK_CHILDREN
+        }
+        var target = GetRealTarget(expr.GetTarget())
+        let instTys = GetInstanationTys(expr)
+        if ((let None <- target) || instTys.isEmpty()) {
+            return VisitAction.WALK_CHILDREN
+        }
+        if (IsClassOrEnumConstructor(target.getOrThrow())) {
+            target = target.getOrThrow().outerDecl
+        }
+        if ((let None <- target) || !target.getOrThrow().IsNominalDecl()) {
+            return VisitAction.WALK_CHILDREN
+        }
+        let nominalTarget = target.getOrThrow()
+        let instantiateMap = GenerateTypeMapping(nominalTarget, instTys)
+        if (instantiateMap.IsEmpty()) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        CheckInstDupSuperInterfaces(expr, (nominalTarget as InheritableDecl).getOrThrow(), instantiateMap)
+        return VisitAction.WALK_CHILDREN
+    }
+
+    // C++ src/Sema/TypeChecker.cpp:2694-2722 TypeCheckerImpl::CheckInstDupSuperInterfacesEntry.
+    public func CheckInstDupSuperInterfacesEntry(node: Node): Unit {
+        try (recorder = ProfileRecorder("Post TypeCheck", "CheckInstDupSuperInterfacesEntry")) {
+            let visitor = Box<(Node) -> VisitAction>({ _: Node => VisitAction.WALK_CHILDREN })
+            visitor.value = { current: Node =>
+                if (let Some(pkg) <- (current as Package)) {
+                    for (file in pkg.files) {
+                        let _ = Walker(file, visitPre: visitor.value).Walk()
+                    }
+                    return VisitAction.STOP_NOW
+                }
+                if (current.astKind == ASTKind.REF_TYPE || current.astKind == ASTKind.QUALIFIED_TYPE) {
+                    return CheckInstDupSuperInterfaces((current as Type).getOrThrow())
+                }
+                if (current.astKind == ASTKind.REF_EXPR || current.astKind == ASTKind.MEMBER_ACCESS) {
+                    return CheckInstDupSuperInterfaces((current as Expr).getOrThrow())
+                }
+                return VisitAction.WALK_CHILDREN
+            }
+            let _ = Walker(node, visitPre: visitor.value).Walk()
+        }
     }
 
     public func GetSymsByASTKind(ctx: ASTContext, astKind: ASTKind,
