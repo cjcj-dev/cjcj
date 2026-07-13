@@ -5107,8 +5107,7 @@ public class Translator {
     }
 
     private func TranslateMatchWithSelector(matchExpr: AstMatchExpr, retVal: Option<Value>): Unit {
-        let selectorVal = Translator.TranslateASTNode(RequireExpr(matchExpr.selector, "match selector"), this) ??
-            throw IllegalStateException("faithful AST2CHIR match selector produced no value")
+        let selectorVal = TranslateExprArg(RequireExpr(matchExpr.selector, "match selector"))
         SetSkipPrintWarning(selectorVal)
         let endBlock = CreateBlock()
         let caseNum = matchExpr.matchCases.size
