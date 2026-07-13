@@ -3,6 +3,15 @@ package cjcj::codegen
 import std.collection.*
 import cjcj::basic.Linkage
 import cjcj::chir.GenericType
+import cjcj::chir.TypeKind
+
+public let INTEGER_CONVERT_MAP = HashMap<TypeKind, TypeKind>([
+    (TypeKind.TYPE_UINT8, TypeKind.TYPE_INT8),
+    (TypeKind.TYPE_UINT16, TypeKind.TYPE_INT16),
+    (TypeKind.TYPE_UINT32, TypeKind.TYPE_INT32),
+    (TypeKind.TYPE_UINT64, TypeKind.TYPE_INT64),
+    (TypeKind.TYPE_UINT_NATIVE, TypeKind.TYPE_INT_NATIVE)
+])
 
 public enum TypeInfoFields {
     | TYPEINFO_NAME

@@ -2,7 +2,10 @@ package cjcj::codegen
 
 import std.collection.*
 import cjcj::chir.ExprKind
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
+import cjcj::chir.ExprKindIndex
+import cjcj::chir.IntType
+import cjcj::chir.TypeKindIndex
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
 private func GetCodeGenTypeName(llvmType: LLVMTypeRef): String {
     if (unsafe { LLVMGetTypeKind(llvmType) } == 10) {
@@ -189,6 +192,160 @@ private func CreateFastPowerCallForInt64PowerUInt64(irBuilder: IRBuilder2, leftV
     return irBuilder.CreateCallOrInvoke(function, args)
 }
 
+private func GenerateIntegerConvExpr(irBuilder: IRBuilder2, binOp: CHIRBinaryExprWrapper,
+    srcValue: LLVMValueRef): LLVMValueRef {
+    let leftArg = binOp.binaryExpr.GetOperand(0)
+    let rightArg = binOp.binaryExpr.GetOperand(1)
+
+    let targetTy = leftArg.GetType().getOrThrow()
+    let srcTy = rightArg.GetType().getOrThrow()
+    let targetTyKind = irBuilder.GetTypeKindFromType(targetTy)
+    let srcTyKind = irBuilder.GetTypeKindFromType(srcTy)
+    // convert signed integer to signed integer.
+    if (targetTy.IsInteger() && (targetTy as IntType).getOrThrow().IsSigned() &&
+        srcTy.IsInteger() && (srcTy as IntType).getOrThrow().IsSigned()) {
+        // target type is bigger than source type.
+        if (TypeKindIndex(targetTyKind) > TypeKindIndex(srcTyKind)) {
+            return irBuilder.CreateSExt(srcValue,
+                CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType())
+        }
+        // target type is smaller than source type.
+        return irBuilder.CreateTrunc(srcValue,
+            CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType())
+    }
+
+    // convert unsigned integer to signed integer.
+    if (targetTy.IsInteger() && (targetTy as IntType).getOrThrow().IsSigned()) {
+        if (TypeKindIndex(targetTyKind) == TypeKindIndex(INTEGER_CONVERT_MAP.get(srcTyKind).getOrThrow())) {
+            return srcValue
+        }
+        // Target type is bigger than source type.
+        if (TypeKindIndex(targetTyKind) > TypeKindIndex(INTEGER_CONVERT_MAP.get(srcTyKind).getOrThrow())) {
+            return irBuilder.CreateZExt(srcValue,
+                CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType())
+        }
+        // target type is smaller than source type.
+        return irBuilder.CreateTrunc(srcValue,
+            CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType())
+    }
+
+    // convert signed integer to unsigned integer.
+    if (srcTy.IsInteger() && (srcTy as IntType).getOrThrow().IsSigned()) {
+        if (TypeKindIndex(INTEGER_CONVERT_MAP.get(targetTyKind).getOrThrow()) == TypeKindIndex(srcTyKind)) {
+            return srcValue
+        }
+        // target type is bigger than source type.
+        if (TypeKindIndex(INTEGER_CONVERT_MAP.get(targetTyKind).getOrThrow()) > TypeKindIndex(srcTyKind)) {
+            return irBuilder.CreateZExt(srcValue,
+                CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType())
+        }
+        // target type is smaller than source type.
+        return irBuilder.CreateTrunc(srcValue,
+            CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType())
+    }
+
+    // convert unsigned integer to unsigned integer.
+    // target type is bigger than source type.
+    if (TypeKindIndex(targetTyKind) > TypeKindIndex(srcTyKind)) {
+        return irBuilder.CreateZExt(srcValue,
+            CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType())
+    }
+    // target type is smaller than source type.
+    return irBuilder.CreateTrunc(srcValue,
+        CGType.GetOrCreate(irBuilder.GetCGModule(), targetTy).GetLLVMType())
+}
+
+private func GenerateOverShiftCheck(irBuilder: IRBuilder2, binOp: CHIRBinaryExprWrapper, lValue: CGValue,
+    rValue: CGValue): LLVMValueRef {
+    let cgMod = irBuilder.GetCGModule()
+    let rightTy = binOp.binaryExpr.GetOperand(1).GetType().getOrThrow()
+    // cond: if right value of the right operand is negative
+    let zero = unsafe { LLVMConstInt(CGType.GetOrCreate(cgMod, rightTy).GetLLVMType(), 0u64, 0) }
+    let cmpResult = irBuilder.CreateICmp(LLVMIntPredicate.SLT, rValue.GetRawValue(), zero,
+        name: "if.cond.rightValue.negative")
+
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>([GenNameForBB("if.then"),
+        GenNameForBB("if.else"), GenNameForBB("if.end")]))
+    CJC_ASSERT(blocks.size == 3)
+    let thenBB = blocks[0]
+    let elseBB = blocks[1]
+    let endBB = blocks[2]
+    irBuilder.CreateCondBr(cmpResult, thenBB, elseBB)
+
+    // then: throw ArithmeticException("Overshift: Negative shift count!")
+    irBuilder.SetInsertPoint(thenBB)
+    irBuilder.CreateOverflowOrArithmeticException("Overshift: Negative shift count!", isOverflow: false)
+    irBuilder.CreateUnreachable()
+
+    irBuilder.SetInsertPoint(elseBB)
+    // cond : if the value of right operand is greater than or equal to the width of left operand
+    let leftBitWidth = unsafe {
+        LLVMConstInt(rValue.GetCGType().getOrThrow().GetLLVMType(),
+            UInt64(LLVMGetIntTypeWidth(lValue.GetCGType().getOrThrow().GetLLVMType())), 0)
+    }
+    let cmpResult2 = irBuilder.CreateICmp(LLVMIntPredicate.SGE, rValue.GetRawValue(), leftBitWidth,
+        name: "if.cond.bitwidth.compare")
+
+    let blocks1 = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>([GenNameForBB("if.then"),
+        GenNameForBB("if.else")]))
+    CJC_ASSERT(blocks1.size == 2)
+    let then1BB = blocks1[0]
+    let else1BB = blocks1[1]
+    irBuilder.CreateCondBr(cmpResult2, then1BB, else1BB)
+
+    // then1: throw ArithmeticException("Overshift: Value of right operand is greater than or equal to the width of left operand!")
+    irBuilder.SetInsertPoint(then1BB)
+    irBuilder.CreateOverflowOrArithmeticException(
+        "Overshift: Value of right operand is greater than or equal to the width of left operand!", isOverflow: false)
+    irBuilder.CreateUnreachable()
+
+    // else1BB: normal shift
+    irBuilder.SetInsertPoint(else1BB)
+    var ret = LLVMNullValue()
+    let rConvValue = GenerateIntegerConvExpr(irBuilder, binOp, rValue.GetRawValue())
+    if (binOp.binaryExpr.GetExprKind() == ExprKind.LSHIFT) {
+        ret = irBuilder.CreateBinaryTyped(ExprKind.LSHIFT, lValue.GetRawValue(), rConvValue, None, None, name: "shl")
+    } else if (binOp.binaryExpr.GetExprKind() == ExprKind.RSHIFT) {
+        let opTy = binOp.binaryExpr.GetResult().getOrThrow().GetType().getOrThrow()
+        if (opTy.IsInteger() && (opTy as IntType).getOrThrow().IsSigned()) {
+            ret = irBuilder.CreateBinaryTyped(ExprKind.RSHIFT, lValue.GetRawValue(), rConvValue, Some(opTy), Some(opTy),
+                name: "ashr")
+        } else {
+            ret = irBuilder.CreateBinaryTyped(ExprKind.RSHIFT, lValue.GetRawValue(), rConvValue, Some(opTy), Some(opTy),
+                name: "lshr")
+        }
+    } else {
+        CJC_ABORT()
+    }
+    irBuilder.CreateBr(endBB)
+
+    // endBB
+    irBuilder.SetInsertPoint(endBB)
+    return ret
+}
+
+public func GenerateBitwiseOperation(irBuilder: IRBuilder2, binExpr: CHIRBinaryExprWrapper): LLVMValueRef {
+    let cgMod = irBuilder.GetCGModule()
+    let valLeft = cgMod.GetMappedCGValue(binExpr.binaryExpr.GetOperand(0))
+    let valRight = cgMod.GetMappedCGValue(binExpr.binaryExpr.GetOperand(1))
+    irBuilder.EmitLocation(binExpr)
+    let kind = binExpr.binaryExpr.GetExprKind()
+    if (kind == ExprKind.BITAND) {
+        return irBuilder.CreateBinaryTyped(kind, valLeft.GetRawValue(), valRight.GetRawValue(), None, None, name: "and")
+    }
+    if (kind == ExprKind.BITOR) {
+        return irBuilder.CreateBinaryTyped(kind, valLeft.GetRawValue(), valRight.GetRawValue(), None, None, name: "or")
+    }
+    if (kind == ExprKind.BITXOR) {
+        return irBuilder.CreateBinaryTyped(kind, valLeft.GetRawValue(), valRight.GetRawValue(), None, None, name: "xor")
+    }
+    if (kind == ExprKind.LSHIFT || kind == ExprKind.RSHIFT) {
+        return GenerateOverShiftCheck(irBuilder, binExpr, valLeft, valRight)
+    }
+    CJC_ASSERT_WITH_MSG(false, "Unexpected CHIRBinaryExprKind: ${ExprKindIndex(kind)}\n")
+    return LLVMNullValue()
+}
+
 public func GenerateArithmeticOperation(irBuilder: IRBuilder2, chirExpr: CHIRBinaryExprWrapper): LLVMValueRef {
     if (chirExpr.binaryExpr.GetNumOfOperands() < 2) {
         return LLVMNullValue()
@@ -197,21 +354,10 @@ public func GenerateArithmeticOperation(irBuilder: IRBuilder2, chirExpr: CHIRBin
     let rightOperand = chirExpr.binaryExpr.GetOperand(1)
     let leftValue = irBuilder.GetCGModule().GetMappedCGValue(leftOperand)
     let rightValue = irBuilder.GetCGModule().GetMappedCGValue(rightOperand)
-    var rightRawValue = rightValue.GetRawValue()
     let operandType = leftOperand.GetType()
     let resultType = chirExpr.binaryExpr.GetResultType()
     let kind = chirExpr.binaryExpr.GetExprKind()
-    if (kind == ExprKind.LSHIFT || kind == ExprKind.RSHIFT) {
-        if (let Some(leftTy) <- leftOperand.GetType()) {
-            if (let Some(rightTy) <- rightOperand.GetType()) {
-                if (!leftTy.IsEqual(rightTy)) {
-                    let targetType = CGType.GetOrCreate(irBuilder.GetCGModule(), leftTy).GetLLVMType()
-                    rightRawValue = CastValueToType(irBuilder, rightRawValue, rightTy, leftTy, targetType)
-                }
-            }
-        }
-    }
-    return irBuilder.CreateBinaryTyped(kind, leftValue.GetRawValue(), rightRawValue, operandType, resultType,
+    return irBuilder.CreateBinaryTyped(kind, leftValue.GetRawValue(), rightValue.GetRawValue(), operandType, resultType,
         name: chirExpr.binaryExpr.GetExprKindName())
 }
 
