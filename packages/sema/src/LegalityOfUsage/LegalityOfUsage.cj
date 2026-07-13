@@ -584,10 +584,11 @@ public func CheckLegalityOfUsage(
     pkg: Package,
     diag: BasicDiagnosticEngine,
     typeManager: TypeManager,
+    impl: TypeCheckerImpl,
     opts!: OptionGlobalOptions = OptionGlobalOptions()
 ): LegalityOfUsageResult {
     let result = LegalityOfUsageResult()
-    TypeCheckReferenceCheckLegalityOfReference(diag, typeManager, ctx, pkg)
+    TypeCheckReferenceCheckLegalityOfReference(diag, typeManager, impl, ctx, pkg)
     AppendStaticMemberGenericIssues(result.staticMemberGenericIssues, CheckStaticMembersWithGeneric(pkg))
     TypeCheckReferenceCheckUsageOfDeprecated(diag, typeManager, pkg)
     AppendInitializationIssues(result.initializationIssues, CheckInitialization(ctx, diag, pkg, opts: opts))

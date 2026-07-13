@@ -1081,6 +1081,89 @@ private func TypeCheckReferenceIsNamespaceMemberAccessLegal(
     return valid
 }
 
+extend TypeCheckerImpl {
+    // C++ src/Sema/TypeCheckExpr.cpp:193-208 TypeCheckerImpl::CheckImmutableFuncAccessMutableFunc.
+    func CheckImmutableFuncAccessMutableFunc(
+        pos: Position,
+        srcNode: Node,
+        destNode: Decl,
+        isLeftStructValue: Bool
+    ): Unit {
+        let accessMutableTarget =
+            (destNode.astKind == ASTKind.FUNC_DECL && destNode.TestAttr(Attribute.MUT)) ||
+            (destNode.astKind == ASTKind.PROP_DECL && isLeftStructValue &&
+                (destNode as PropDecl).getOrThrow().isVar)
+        let bothInstance = !srcNode.TestAttr(Attribute.STATIC) && !destNode.TestAttr(Attribute.STATIC)
+        if ((let Some(fdSrc) <- (srcNode as FuncDecl)) && !fdSrc.TestAttr(Attribute.MUT) &&
+            fdSrc.outerDecl.isSome() && bothInstance && !fdSrc.TestAttr(Attribute.CONSTRUCTOR) &&
+            !fdSrc.TestAttr(Attribute.PRIMARY_CONSTRUCTOR) && accessMutableTarget) {
+            let srcName = if (fdSrc.isGetter) { "get" } else { fdSrc.identifier.Val() }
+            let dstName = if (destNode.astKind == ASTKind.PROP_DECL) {
+                "set"
+            } else {
+                destNode.identifier.Val()
+            }
+            Diagnose(diag.getOrThrow(), srcNode, pos,
+                BasicDiagKind.sema_immutable_function_cannot_access_mutable_function,
+                args: [BasicDiagArgument(srcName), BasicDiagArgument(dstName)]).Emit()
+        }
+    }
+
+    // C++ src/Sema/TypeCheckExpr.cpp:210-231 TypeCheckerImpl::CheckForbiddenFuncReferenceAccess.
+    func CheckForbiddenFuncReferenceAccess(
+        pos: Position,
+        fd: FuncDecl,
+        decl: Decl
+    ): Unit {
+        if (fd.outerDecl.isNone() || decl.outerDecl.isNone() || !decl.IsFuncOrProp() ||
+            decl.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.STATIC)) {
+            return
+        }
+        let fdOuterDecl = fd.outerDecl.getOrThrow()
+        let declOuterDecl = decl.outerDecl.getOrThrow()
+        let inOpenClassCtor = fdOuterDecl.astKind == ASTKind.CLASS_DECL &&
+            fd.TestAttr(Attribute.CONSTRUCTOR) &&
+            fdOuterDecl.TestAnyAttr(Attribute.OPEN, Attribute.ABSTRACT)
+        let useMemberInCtor = inOpenClassCtor &&
+            decl.TestAnyAttr(Attribute.IN_CLASSLIKE, Attribute.IN_EXTEND)
+        if (useMemberInCtor) {
+            Diagnose(diag.getOrThrow(), fd, pos, BasicDiagKind.sema_illegal_member_used_in_open_constructor,
+                args: [BasicDiagArgument(DeclKindToString(decl)), BasicDiagArgument(decl.identifier.Val()),
+                    BasicDiagArgument(fdOuterDecl.identifier.Val())]).Emit()
+        }
+        if (fd.IsFinalizer() && typeManager.IsSubtype(
+            fdOuterDecl.GetTy().getOrThrow(), declOuterDecl.GetTy().getOrThrow())) {
+            let memberType = if (decl.astKind == ASTKind.PROP_DECL) { "property" } else { "function" }
+            diag.getOrThrow().DiagnoseRefactor(
+                BasicDiagKindRefactor.sema_instance_func_cannot_be_used_in_finalizer, pos, memberType).Emit()
+        }
+    }
+
+    // C++ src/Sema/TypeCheckExpr/NameReferenceExpr.cpp:1158-1173 TypeCheckerImpl::CheckForbiddenMemberAccess.
+    func CheckForbiddenMemberAccess(
+        ctx: ASTContext,
+        ma: MemberAccess,
+        target: Decl
+    ): Unit {
+        let funcSrc = ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC, ma.scopeName)
+        if ((let Some(baseExpr) <- ma.baseExpr) && (let Some(re) <- (baseExpr as RefExpr)) &&
+            (let Some(funcSymbol) <- funcSrc)) {
+            let isThisOrSuper = re.GetTy().isSome() && (re.isThis || re.isSuper)
+            if (re.isThis) {
+                let accessStructLeftValue = ma.TestAttr(Attribute.LEFT_VALUE) && re.GetTy().isSome() &&
+                    re.GetTy().getOrThrow().IsStruct()
+                CheckImmutableFuncAccessMutableFunc(ma.begin, funcSymbol.node.getOrThrow(), target,
+                    accessStructLeftValue)
+            }
+            let funcDecl = (funcSymbol.node.getOrThrow() as FuncDecl).getOrThrow()
+            if (isThisOrSuper) {
+                let pos = if (ma.field.ZeroPos()) { ma.begin } else { ma.field.Begin() }
+                CheckForbiddenFuncReferenceAccess(pos, funcDecl, target)
+            }
+        }
+    }
+}
+
 public func TypeCheckReferenceCheckStaticMemberAccessLegality(
     diag: BasicDiagnosticEngine,
     ma: MemberAccess,
@@ -1103,11 +1186,15 @@ public func TypeCheckReferenceCheckStaticMemberAccessLegality(
 
 public func TypeCheckReferenceCheckInstanceMemberAccessLegality(
     diag: BasicDiagnosticEngine,
+    tm: TypeManager,
+    impl: TypeCheckerImpl,
     ctx: ASTContext,
     ma: MemberAccess,
     target: Decl
 ): Bool {
     var valid = true
+    // C++ src/Sema/TypeCheckReference.cpp:718-723 CheckInstanceMemberAccessLegality.
+    impl.CheckForbiddenMemberAccess(ctx, ma, target)
     CheckLetInstanceAccessMutableFunc(diag, ctx, ma, target)
     if (let Some(baseExpr) <- ma.baseExpr) {
         if (let Some(refExpr) <- (baseExpr as RefExpr)) {
@@ -1126,6 +1213,7 @@ public func TypeCheckReferenceCheckInstanceMemberAccessLegality(
 public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
+    impl: TypeCheckerImpl,
     ctx: ASTContext,
     ma: MemberAccess
 ): Bool {
@@ -1186,7 +1274,7 @@ public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
         if (!TypeCheckReferenceCheckStaticMemberAccessLegality(diag, ma, decl)) {
             valid = false
         }
-    } else if (!TypeCheckReferenceCheckInstanceMemberAccessLegality(diag, ctx, ma, decl)) {
+    } else if (!TypeCheckReferenceCheckInstanceMemberAccessLegality(diag, tm, impl, ctx, ma, decl)) {
         valid = false
     }
     return valid
@@ -1217,6 +1305,7 @@ private func TypeCheckReferenceCopyTargetsOrSingle(targets: ArrayList<Option<Dec
 public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
+    impl: TypeCheckerImpl,
     ctx: ASTContext,
     re: RefExpr
 ): Bool {
@@ -1233,6 +1322,15 @@ public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
     if (let Some(funcDecl) <- (decl as FuncDecl)) {
         if (let Some(propDecl) <- funcDecl.propDecl) {
             decl = propDecl
+        }
+    }
+    // C++ src/Sema/TypeCheckReference.cpp:600-608 CheckAccessLegalityOfRefExpr.
+    if (let Some(funcSrc) <- ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC, re.scopeName)) {
+        if (let Some(outerFd) <- (funcSrc.node.getOrThrow() as FuncDecl)) {
+            let accessStructLeftValue = re.TestAttr(Attribute.LEFT_VALUE) && outerFd.funcBody.isSome() &&
+                outerFd.funcBody.getOrThrow().parentStruct.isSome()
+            impl.CheckImmutableFuncAccessMutableFunc(re.begin, outerFd, decl, accessStructLeftValue)
+            impl.CheckForbiddenFuncReferenceAccess(re.begin, outerFd, decl)
         }
     }
     var valid = true
@@ -1497,6 +1595,7 @@ private func TypeCheckReferenceCheckLegalityIsSkip(node: Node): Bool {
 private func TypeCheckReferenceCheckLegalityForNameReferenceExpr(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
+    impl: TypeCheckerImpl,
     ctx: ASTContext,
     nameRef: NameReferenceExpr
 ): Unit {
@@ -1506,7 +1605,7 @@ private func TypeCheckReferenceCheckLegalityForNameReferenceExpr(
         } else if (refExpr.isSuper) {
             let _ = TypeCheckReferenceCheckUsageOfSuper(diag, ctx, refExpr)
         } else {
-            let _ = TypeCheckReferenceCheckAccessLegalityOfRefExpr(diag, tm, ctx, refExpr)
+            let _ = TypeCheckReferenceCheckAccessLegalityOfRefExpr(diag, tm, impl, ctx, refExpr)
         }
     }
 }
@@ -1684,16 +1783,17 @@ private func TypeCheckReferenceCheckMemberAccessInCtorParamOrCtorArg(
 private func TypeCheckReferenceCheckLegalityForExpr(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
+    impl: TypeCheckerImpl,
     ctx: ASTContext,
     walkerID: UInt32,
     expr: Expr
 ): VisitAction {
     if (let Some(desugarExpr) <- expr.desugarExpr) {
-        TypeCheckReferenceCheckLegalityOfReferenceInternal(diag, tm, ctx, desugarExpr, walkerID)
+        TypeCheckReferenceCheckLegalityOfReferenceInternal(diag, tm, impl, ctx, desugarExpr, walkerID)
         return VisitAction.SKIP_CHILDREN
     }
     if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
-        TypeCheckReferenceCheckLegalityForNameReferenceExpr(diag, tm, ctx, nameRef)
+        TypeCheckReferenceCheckLegalityForNameReferenceExpr(diag, tm, impl, ctx, nameRef)
         return VisitAction.WALK_CHILDREN
     }
     if (let Some(assignExpr) <- (expr as AssignExpr)) {
@@ -1711,6 +1811,7 @@ private func TypeCheckReferenceCheckLegalityForExpr(
 private func TypeCheckReferenceCheckLegalityOfReferenceInternal(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
+    impl: TypeCheckerImpl,
     ctx: ASTContext,
     root: Node,
     walkerID: UInt32
@@ -1723,7 +1824,7 @@ private func TypeCheckReferenceCheckLegalityOfReferenceInternal(
             ctx.currentCheckingNodes.add(current)
         }
         if (let Some(expr) <- (current as Expr)) {
-            return TypeCheckReferenceCheckLegalityForExpr(diag, tm, ctx, walkerID, expr)
+            return TypeCheckReferenceCheckLegalityForExpr(diag, tm, impl, ctx, walkerID, expr)
         }
         if (let Some(funcArg) <- (current as FuncArg)) {
             if (funcArg.withInout) {
@@ -1742,7 +1843,7 @@ private func TypeCheckReferenceCheckLegalityOfReferenceInternal(
             ctx.currentCheckingNodes.remove(at: ctx.currentCheckingNodes.size - 1)
         }
         if (let Some(memberAccess) <- (current as MemberAccess)) {
-            let _ = TypeCheckReferenceCheckAccessLegalityOfMemberAccess(diag, tm, ctx, memberAccess)
+            let _ = TypeCheckReferenceCheckAccessLegalityOfMemberAccess(diag, tm, impl, ctx, memberAccess)
         }
         return VisitAction.KEEP_DECISION
     })
@@ -1752,10 +1853,11 @@ private func TypeCheckReferenceCheckLegalityOfReferenceInternal(
 public func TypeCheckReferenceCheckLegalityOfReference(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
+    impl: TypeCheckerImpl,
     ctx: ASTContext,
     root: Node
 ): Unit {
-    TypeCheckReferenceCheckLegalityOfReferenceInternal(diag, tm, ctx, root, GetNextWalkerID())
+    TypeCheckReferenceCheckLegalityOfReferenceInternal(diag, tm, impl, ctx, root, GetNextWalkerID())
 }
 
 public func TypeCheckReferenceAddFuncTargetsForMemberAccess(memberAccess: MemberAccess, targets: ArrayList<Decl>): Unit {

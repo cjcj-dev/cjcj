@@ -2445,7 +2445,8 @@ extend TypeChecker {
     private func RunLegalityOfUsageCheck(ctx: ASTContext, pkg: Package): Unit {
         if (let Some(diagValue) <- impl.diag) {
             CheckClosures(ctx, pkg)
-            let result = CheckLegalityOfUsage(ctx, pkg, diagValue, impl.typeManager, opts: GlobalOptions())
+            let result = CheckLegalityOfUsage(
+                ctx, pkg, diagValue, impl.typeManager, impl, opts: GlobalOptions())
             EmitLegalityOfUsage(diagValue, result)
         }
     }
