@@ -2823,6 +2823,7 @@ public class Translator {
         let conditionBlock = builder.CreateBlock(group)
         let bodyBlock = builder.CreateBlock(group)
         let endBlock = builder.CreateBlock(group)
+        endBlock.SetDebugLocation(TranslateLocation(expr))
         builder.CreateGoTo(conditionBlock, parentBlock)
 
         loopTargetStack.add(FaithfulLoopTarget(conditionBlock, endBlock))
