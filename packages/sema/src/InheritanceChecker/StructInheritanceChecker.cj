@@ -2163,7 +2163,7 @@ public class StructInheritanceChecker {
                                     DeclIdentifierRange(targetFunc),
                                     "'" + childFuncTy.retTy.String() + "' is not a subtype of " + inconsistentTypesText
                                 )
-                                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                                builder.Emit()
                             }
                             if (!childFunc.IsConst() && parentDecl.IsConst()) {
                                 let inheritance = if (!checkingDecls.isEmpty() && checkingDecls[0].astKind == ASTKind.EXTEND_DECL) {
