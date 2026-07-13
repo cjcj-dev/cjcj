@@ -1838,6 +1838,11 @@ extend ParserImpl {
             }
             if (!member.IsInvalid()) {
                 member.outerDecl = ret
+                if ((ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) ||
+                    ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) &&
+                    (let Some(propDecl) <- (member as PropDecl))) {
+                    CheckClassLikePropAbstractness(propDecl)
+                }
                 AddBodyMember(ret, member)
             }
             SkipNLOrSemi()
@@ -1943,11 +1948,7 @@ extend ParserImpl {
             ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
             CheckDeclarationInScope(scopeKind, DefKind.EXTEND)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.EXTEND))
-            if (let Some(generic) <- ParseOptionalGeneric()) {
-                ret.generic = generic
-                ret.EnableAttr(Attribute.GENERIC)
-            }
-            ret.extendedType = ParseType()
+            ParseExtendedType(ret)
             if (Skip(TokenKind.UPPERBOUND)) {
                 ParseInheritedTypes(ret)
             }
@@ -1957,6 +1958,20 @@ extend ParserImpl {
             ParseClassLikeBody(ret, ScopeKind.EXTEND_BODY)
         }
         return ret
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/Parser.cpp:505-516
+    private func ParseExtendedType(extendDecl: ExtendDecl): Unit {
+        if (let Some(generic) <- ParseOptionalGeneric()) {
+            extendDecl.EnableAttr(Attribute.GENERIC)
+            extendDecl.generic = generic
+        }
+        let extendedType = ParseType()
+        extendDecl.extendedType = extendedType
+        if (extendedType.astKind == ASTKind.PAREN_TYPE) {
+            DiagUnexpectedTypeIn(extendedType, extendDecl.keywordPos, "extend",
+                "Extend declaration cannot extend paren type")
+        }
     }
 
     public func ParseTypeAlias(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): TypeAliasDecl {
@@ -2033,6 +2048,55 @@ extend ParserImpl {
             }
         }
         return ret
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/Parser.cpp:444-490
+    private func CheckClassLikePropAbstractness(property: PropDecl): Unit {
+        let outerDecl = property.outerDecl.getOrThrow()
+        if (outerDecl.TestAttr(Attribute.JAVA_MIRROR)) {
+            property.DisableAttr(Attribute.ABSTRACT)
+            return
+        }
+        let isJavaMirrorOrJavaMirrorSubtype =
+            outerDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)
+        let isCommon = property.TestAttr(Attribute.COMMON)
+        let outerModifiers = outerDecl.modifiers
+        let inAbstract = HasModifierToken(outerModifiers, TokenKind.ABSTRACT)
+        let inCJMP = HasModifierToken(outerModifiers, TokenKind.SPECIFIC) ||
+            HasModifierToken(outerModifiers, TokenKind.COMMON)
+        let inAbstractCJMP = inAbstract && inCJMP
+        let inClass = outerDecl.astKind == ASTKind.CLASS_DECL
+        let inAbstractCJMPClass = inAbstractCJMP && inClass
+        let inObjCMirror = outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)
+
+        if (HasModifierToken(property.modifiers, TokenKind.ABSTRACT) && !isCommon && !inAbstractCJMP &&
+            !isJavaMirrorOrJavaMirrorSubtype) {
+            ParseDiagnoseRefactor(
+                DiagKindRefactor.parse_explicitly_abstract_only_for_cjmp_abstract_class,
+                lastToken.End(), "property").Emit()
+        }
+        if (inObjCMirror) {
+            property.DisableAttr(Attribute.ABSTRACT)
+            return
+        }
+        if (inAbstractCJMPClass && property.TestAttr(Attribute.ABSTRACT) &&
+            !HasModifierToken(property.modifiers, TokenKind.ABSTRACT)) {
+            property.DisableAttr(Attribute.ABSTRACT)
+            return
+        }
+        if (HasModifierToken(property.modifiers, TokenKind.ABSTRACT) && !inAbstractCJMPClass) {
+            var abstractModifier: Option<Modifier> = None
+            for (modifier in property.modifiers) {
+                if (modifier.modifier == TokenKind.ABSTRACT) {
+                    abstractModifier = modifier
+                }
+            }
+            if (let Some(modifier) <- abstractModifier) {
+                try (cs = ChainScope(this, property)) {
+                    DiagIllegalModifierInScope(modifier)
+                }
+            }
+        }
     }
 
     private func CheckGetterAnnotations(annos: ArrayList<Annotation>, getter: Node): Unit {
