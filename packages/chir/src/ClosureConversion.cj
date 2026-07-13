@@ -46,6 +46,27 @@ private func IsArkInteropLambdaSignature(srcFunc: Function): Bool {
         getTypeName(Some(funcType.GetReturnType())) == "JSValue"
 }
 
+// C++: CHIR/Transformation/ClosureConversion.cpp:306-311.
+private func PrintMutableVarInfo(pos: Position): Unit {
+    let posMsg = " in the line:" + pos.line.toString() + " and the column:" + pos.column.toString()
+    let message = "The mut var" + posMsg + " was boxed"
+    println(message)
+}
+
+// C++: CHIR/Transformation/ClosureConversion.cpp:313-318.
+private func PrintNestedFuncInfo(pos: Position): Unit {
+    let posMsg = " in the line:" + pos.line.toString() + " and the column:" + pos.column.toString()
+    let message = "The nested func" + posMsg + " was closure converted"
+    println(message)
+}
+
+// C++: CHIR/Transformation/ClosureConversion.cpp:554-559.
+private func PrintGlobalFuncInfo(pos: Position): Unit {
+    let posMsg = " in the line:" + pos.line.toString() + " and the column:" + pos.column.toString()
+    let message = "The top level func" + posMsg + " was closure converted"
+    println(message)
+}
+
 private func LiftCustomDefType(def: CustomTypeDef, converter: TypeConverterForCC): Unit {
     let preVisit = { expr: Expression =>
         converter.VisitExpr(expr)
@@ -350,6 +371,10 @@ public class ClosureConversion {
                     ReplaceUserPoint(lambdaFunc, user, boxedEnvs, autoEnvImplDef)
                 }
             }
+            // C++: CHIR/Transformation/ClosureConversion.cpp:1313-1315.
+            if (opts.chirDebugOptimizer) {
+                PrintNestedFuncInfo(lambdaFunc.GetDebugLocation().GetBeginPos())
+            }
             RemoveGetInstantiateValue(users)
             lambdaFunc.DetachLiftedBodyAndRemoveSelf()
         }
@@ -428,6 +453,10 @@ public class ClosureConversion {
                 let autoEnvImplDef = GetOrCreateAutoEnvImplDef(fn, autoEnvBaseDef)
                 ReplaceUserPoint(fn, user, autoEnvImplDef)
                 convertFlag = true
+                // C++: CHIR/Transformation/ClosureConversion.cpp:2206-2208.
+                if (opts.chirDebugOptimizer) {
+                    PrintGlobalFuncInfo(fn.GetDebugLocation().GetBeginPos())
+                }
             }
             // C++: CHIR/Transformation/ClosureConversion.cpp:2209-2214.
             if (opts.enIncrementalCompilation && convertFlag && !fn.GetRawMangledName().isEmpty()) {
@@ -1831,6 +1860,10 @@ public class ClosureConversion {
                 throw IllegalStateException("ClosureConversion mutable capture has no type"), boxObj, path, userParent)
             fieldRef.MoveBefore(user)
             user.ReplaceOperand(env, RequireResult(fieldRef))
+        }
+        // C++: CHIR/Transformation/ClosureConversion.cpp:1130-1132.
+        if (opts.chirDebugOptimizer) {
+            PrintMutableVarInfo(envExpr.GetDebugLocation().GetBeginPos())
         }
         envExpr.RemoveSelfFromBlock()
         return boxObj
