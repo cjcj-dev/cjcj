@@ -8,7 +8,7 @@ import cjcj::sema.GenerateTypeMapping
 import cjcj::sema.SameTy
 import cjcj::sema.TypeSubst
 import cjcj::sema.TypeManager
-import cjcj::utils.CJC_ASSERT
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, GetRootPackageName}
 import cjcj::utils.DynamicCast
 
 foreign {
@@ -72,6 +72,8 @@ private func AbortForInvalidMockAccessor(): Unit {
 }
 
 public class MockUtils {
+    // C++: Sema/Test/MockUtils.h:50.
+    public var isWalking: Bool = false
     public static let mockAccessorSuffix: String = MOCKED_ACCESSOR_SUFFIX
     public static let spyObjVarName: String = "spiedObjectRef"
     public static let spyCallMarkerVarName: String = "shouldReturnZeroForSpy"
@@ -448,6 +450,61 @@ public class MockUtils {
             return DynamicCast<T>(member)
         }
         return None
+    }
+
+    // C++: Sema/Test/MockUtils.cpp:183-216.
+    public func AttachGeneratedDecl(decl: Decl): Unit {
+        CJC_ASSERT(!isWalking)
+        decl.EnableAttr(Attribute.GENERATED_TO_MOCK)
+        if (let Some(outerDecl) <- decl.outerDecl) {
+            let index = DemandIndex(outerDecl)
+            index[decl.identifier.Val()] = decl
+            if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                index[decl.identifier.Val() + BuildArgumentList(funcDecl)] = decl
+            }
+            if (let Some(classDecl) <- (outerDecl as ClassDecl)) {
+                classDecl.body.getOrThrow().decls.add(decl)
+                return
+            }
+            if (let Some(interfaceDecl) <- (outerDecl as InterfaceDecl)) {
+                interfaceDecl.body.getOrThrow().decls.add(decl)
+                return
+            }
+            if (let Some(extendDecl) <- (outerDecl as ExtendDecl)) {
+                extendDecl.members.add(decl)
+                return
+            }
+            CJC_ABORT()
+        }
+        let curFile = decl.curFile.getOrThrow()
+        if (!decl.TestAttr(Attribute.PRIVATE) && !decl.TestAttr(Attribute.INTERNAL) &&
+            !decl.TestAttr(Attribute.PROTECTED) && !decl.TestAttr(Attribute.PUBLIC)) {
+            decl.EnableAttr(Attribute.PUBLIC)
+        }
+        DemandIndex(curFile)[decl.identifier.Val()] = decl
+        DemandIndex(curFile.curPackage.getOrThrow())[decl.identifier.Val()] = decl
+        curFile.decls.add(decl)
+    }
+
+    // C++: Sema/Test/MockUtils.cpp:218-227.
+    public func AttachGeneratedDecl(decl: Decl, originPackage: Package): Unit {
+        let originFile = originPackage.files[0]
+        decl.curFile = originFile
+        decl.begin = originFile.GetBegin()
+        decl.end = originFile.GetBegin()
+        decl.fullPackageName = originPackage.fullPackageName
+        decl.moduleName = GetRootPackageName(originPackage.fullPackageName)
+        AttachGeneratedDecl(decl)
+    }
+
+    // C++: Sema/Test/MockUtils.cpp:229-238.
+    public func AttachGeneratedDecl(decl: Decl, originDecl: Decl): Unit {
+        decl.curFile = originDecl.curFile
+        decl.fullPackageName = originDecl.fullPackageName
+        decl.moduleName = originDecl.moduleName
+        decl.begin = originDecl.begin
+        decl.end = originDecl.end
+        AttachGeneratedDecl(decl)
     }
 
     public func FindAccessor(outerClass: ClassDecl, member: Decl, kind: AccessorKind): Option<Decl> {
