@@ -158,6 +158,16 @@ private func GetExprTy(arg: FuncArg): Ty {
     return arg.GetTy() ?? TypeManager.GetInvalidTy()
 }
 
+private func GetInoutTargetTy(arg: FuncArg): Ty {
+    let exprTy = arg.expr.getOrThrow().GetTy()
+    if (Ty.IsTyCorrect(exprTy)) {
+        return exprTy.getOrThrow()
+    }
+    let argTy = arg.GetTy().getOrThrow()
+    CJC_ASSERT(argTy.IsPointer() && argTy.typeArgs.size == 1)
+    return argTy.typeArgs[0]
+}
+
 private func IsVArrayTy(ty: Ty): Bool {
     if (let Some(_) <- (ty as VArrayTy)) {
         return true
@@ -308,22 +318,41 @@ private func CheckNameArgInParams(diag: Option<BasicDiagnosticEngine>, arg: Func
         }
         if (!param.isNamedParam) {
             if (let Some(diagValue) <- diag) {
-                DiagOld(diagValue, arg, BasicDiagKind.sema_invalid_named_arguments)
+                Diagnose(diagValue, arg, BasicDiagKind.sema_invalid_named_arguments,
+                    args: [BasicDiagArgument(argName)]).Emit()
             }
             return None
         }
         if (marks[idx]) {
             if (let Some(diagValue) <- diag) {
-                DiagOld(diagValue, arg, BasicDiagKind.sema_multiple_named_argument)
+                Diagnose(diagValue, arg, BasicDiagKind.sema_multiple_named_argument,
+                    args: [BasicDiagArgument(argName)]).Emit()
             }
             return None
         }
         return Some(idx)
     }
     if (let Some(diagValue) <- diag) {
-        DiagOld(diagValue, arg, BasicDiagKind.sema_unknown_named_argument)
+        Diagnose(diagValue, arg, BasicDiagKind.sema_unknown_named_argument,
+            args: [BasicDiagArgument(argName)]).Emit()
     }
     return None
+}
+
+private func ProcessParamToArg(typeManager: TypeManager, atu: LocTyArgSynArgPack): Unit {
+    let argSize = atu.argTys.size
+    var idx: Int64 = 0
+    while (idx < argSize) {
+        let argTy = atu.argTys[idx]
+        let paramTy = typeManager.InstOf(atu.paramTys[idx])
+        atu.paramTys[idx] = paramTy
+        if (argTy.IsInteger() && paramTy.IsNumeric()) {
+            atu.argTys[idx] = TypeManager.GetPrimitiveTy(TypeKind.TYPE_IDEAL_INT)
+        } else if (argTy.IsFloating() && paramTy.IsNumeric()) {
+            atu.argTys[idx] = TypeManager.GetPrimitiveTy(TypeKind.TYPE_IDEAL_FLOAT)
+        }
+        idx++
+    }
 }
 
 private func CheckArgsWithParamName(diag: Option<BasicDiagnosticEngine>, ce: CallExpr, fd: FuncDecl): Bool {
@@ -1112,6 +1141,7 @@ private func CompareGenericCandidate(typeManager: TypeManager, left: FunctionMat
         pack.paramTys.add(typeManager.ApplySubstPack(right.tysInArgOrder[idx], typeMapping))
         idx++
     }
+    ProcessParamToArg(typeManager, pack)
     if (let None <- LocalTypeArgumentSynthesis(typeManager, pack, GCBlames()).SynthesizeTypeArguments()) {
         return Some(false)
     }
@@ -1302,16 +1332,14 @@ private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<Fun
 }
 
 private func SortCallArgumentByParamOrder(fd: FuncDecl, ce: CallExpr, out: ArrayList<FuncArg>): Unit {
-    if (let None <- BodyParamList(fd)) {
-        return
-    }
-    let params = BodyParamList(fd).getOrThrow().params
+    let body = fd.funcBody.getOrThrow()
+    CJC_ASSERT(!body.paramLists.isEmpty())
+    let params = body.paramLists[0].params
     var namedArgFound = false
     var pos: Int64 = 0
     for (arg in ce.args) {
-        if (let Some(expr) <- arg.expr) {
-            expr.SetTy(GetExprTy(arg))
-        }
+        let expr = arg.expr.getOrThrow()
+        expr.SetTy(if (arg.withInout) { GetInoutTargetTy(arg) } else { arg.GetTy().getOrThrow() })
         let argName = GetArgName(fd, arg)
         if (argName.isEmpty()) {
             if (namedArgFound) {
@@ -2536,7 +2564,7 @@ internal func RecoverCallArgs(ce: CallExpr, argsTys: ArrayList<Option<Ty>>, argC
         return
     }
     if (let Some(fd) <- ce.resolvedFunction) {
-        UpdateCallTargets(ce, fd)
+        UpdateCallTargetsForLSP(ce, fd)
     }
     let checker = argChecker ?? return
     var idx: Int64 = 0
@@ -2873,21 +2901,19 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     }
 }
 
-internal func UpdateCallTargets(ce: CallExpr, fd: FuncDecl): Unit {
-    if (let Some(base) <- ce.baseFunc) {
-        ReplaceTarget(base, Some(fd))
+internal func UpdateCallTargetsForLSP(ce: CallExpr, fd: FuncDecl): Unit {
+    ReplaceTarget(ce.baseFunc.getOrThrow(), Some(fd))
+    let body = fd.funcBody.getOrThrow()
+    CJC_ASSERT(!body.paramLists.isEmpty())
+    let namedParams = HashMap<String, FuncParam>()
+    for (param in body.paramLists[0].params) {
+        if (param.isNamedParam) {
+            namedParams[param.identifier.Val()] = param
+        }
     }
-    if (let Some(params) <- BodyParamList(fd)) {
-        for (arg in ce.args) {
-            if (arg.name.Empty()) {
-                continue
-            }
-            for (param in params.params) {
-                if (param.isNamedParam && param.identifier.Val() == arg.name.Val()) {
-                    ReplaceTarget(arg, Some(param), insertTarget: false)
-                    break
-                }
-            }
+    for (arg in ce.args) {
+        if (!arg.name.Empty() && namedParams.contains(arg.name.Val())) {
+            ReplaceTarget(arg, Some(namedParams.get(arg.name.Val()).getOrThrow()))
         }
     }
 }
@@ -3661,7 +3687,7 @@ internal func PostCheckCallExpr(typeManager: TypeManager, diag: Option<BasicDiag
         }
     }
     ce.resolvedFunction = Some(fd)
-    UpdateCallTargets(ce, fd)
+    UpdateCallTargetsForLSP(ce, fd)
     let _ = DynamicBindingThisType(typeManager, ce, fd, typeMapping)
     if (!fd.TestAttr(Attribute.FOREIGN) && !fd.TestAttr(Attribute.C)) {
         var valid = true

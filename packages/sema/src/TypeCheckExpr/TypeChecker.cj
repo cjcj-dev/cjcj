@@ -4236,7 +4236,7 @@ extend TypeChecker {
     // C++ src/Sema/TypeCheckCall.cpp:2950-2961 TypeCheckerImpl::PostProcessForLSP.
     private func PostProcessForLSP(ce: CallExpr, result: ArrayList<FuncDecl>): Unit {
         if (result.size > 1) {
-            UpdateCallTargets(ce, result[0])
+            UpdateCallTargetsForLSP(ce, result[0])
             ce.resolvedFunction = Some(result[0])
         } else {
             ReplaceTarget(ce.baseFunc.getOrThrow(), None)
@@ -4250,7 +4250,7 @@ extend TypeChecker {
             return
         }
         if (let Some(resolvedFunction) <- ce.resolvedFunction) {
-            UpdateCallTargets(ce, resolvedFunction)
+            UpdateCallTargetsForLSP(ce, resolvedFunction)
         }
         var idx: Int64 = 0
         while (idx < argsTys.size) {
