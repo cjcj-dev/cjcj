@@ -353,3 +353,132 @@ public func IsSameDeclByIdentifier(left: Decl, right: Decl): Bool {
     }
     return true
 }
+
+// Faithful port of C++ MergeTopLevelDecl (Frontend/MergeAnnoFromCjd.cpp:421-466).
+public func MergeTopLevelDecl(target: Package, source: Package,
+    topDeclMapping: HashMap<Decl, Option<Decl>>): Unit {
+    let topDeclMapInsert = { topLevelDecl: Decl =>
+        var expandedDecl = topLevelDecl
+        if (let Some(macroExpandDecl) <- (topLevelDecl as MacroExpandDecl)) {
+            if (macroExpandDecl.invocation.macroCallDiagInfo.identifier == "APILevel") {
+                ExpandToAPILevel(macroExpandDecl.invocation)
+                let invocationDecl = macroExpandDecl.invocation.decl.getOrThrow()
+                CopyBasicInfo(macroExpandDecl, invocationDecl.annotations[invocationDecl.annotations.size - 1])
+                expandedDecl = invocationDecl
+            }
+        }
+        if (expandedDecl.astKind == ASTKind.MAIN_DECL) {
+            return
+        }
+        if (let Some(varWithPatternDecl) <- (expandedDecl as VarWithPatternDecl)) {
+            ColllectPattern(varWithPatternDecl.irrefutablePattern.getOrThrow(), topDeclMapping,
+                varWithPatternDecl.annotations)
+            return
+        }
+        topDeclMapping[expandedDecl] = None
+    }
+    IterateToplevelDecls(source, topDeclMapInsert)
+    let topDeclMapMatch = { topLevelDecl: Decl =>
+        if (topLevelDecl.astKind == ASTKind.BUILTIN_DECL || !topLevelDecl.IsExportedDecl()) {
+            return
+        }
+        var found: Option<Decl> = None
+        for ((sourceDecl, targetDecl) in topDeclMapping) {
+            if (targetDecl.isSome()) {
+                continue
+            }
+            if (IsSameDeclByIdentifier(sourceDecl, topLevelDecl)) {
+                found = Some(sourceDecl)
+                break
+            }
+        }
+        if (let Some(sourceDecl) <- found) {
+            topDeclMapping[sourceDecl] = Some(topLevelDecl)
+            for (annotation in sourceDecl.annotations) {
+                if (annotation.kind != AstAnnotationKind.CUSTOM) {
+                    continue
+                }
+                topLevelDecl.annotations.add(annotation)
+            }
+            sourceDecl.annotations.clear()
+        }
+    }
+    IterateToplevelDecls(target, topDeclMapMatch)
+}
+
+// Faithful port of C++ MergeMemberDecl (Frontend/MergeAnnoFromCjd.cpp:475-530).
+public func MergeMemberDecl(declPair: (Decl, Decl)): Unit {
+    let memberMapping = HashMap<Decl, Option<Decl>>()
+    for (member in declPair[0].GetMemberDeclPtrs()) {
+        var expandedDecl = member
+        if (let Some(macroExpandDecl) <- (member as MacroExpandDecl)) {
+            if (macroExpandDecl.invocation.macroCallDiagInfo.identifier == "APILevel") {
+                ExpandToAPILevel(macroExpandDecl.invocation)
+                let invocationDecl = macroExpandDecl.invocation.decl.getOrThrow()
+                CopyBasicInfo(macroExpandDecl, invocationDecl.annotations[invocationDecl.annotations.size - 1])
+                expandedDecl = invocationDecl
+            }
+        }
+        memberMapping[expandedDecl] = None
+    }
+    for (member in declPair[1].GetMemberDeclPtrs()) {
+        var found: Option<Decl> = None
+        for ((sourceMember, _) in memberMapping) {
+            if (IsSameDeclByIdentifier(sourceMember, member)) {
+                found = Some(sourceMember)
+                break
+            }
+        }
+        if (let Some(sourceMember) <- found) {
+            memberMapping[sourceMember] = Some(member)
+            for (annotation in sourceMember.annotations) {
+                if (annotation.kind != AstAnnotationKind.CUSTOM) {
+                    continue
+                }
+                member.annotations.add(annotation)
+            }
+            sourceMember.annotations.clear()
+        }
+    }
+    for ((sourceMember, targetMember) in memberMapping) {
+        if (let Some(targetMemberDecl) <- targetMember) {
+            if (!sourceMember.IsFunc()) {
+                continue
+            }
+            let sourceFuncDecl = (sourceMember as FuncDecl).getOrThrow()
+            let targetFuncDecl = (targetMemberDecl as FuncDecl).getOrThrow()
+            let sourceParams = sourceFuncDecl.funcBody.getOrThrow().paramLists[0].params
+            let targetParams = targetFuncDecl.funcBody.getOrThrow().paramLists[0].params
+            for (idx in 0..sourceParams.size) {
+                var expandedParam = sourceParams[idx]
+                if (let Some(macroExpandParam) <- (sourceParams[idx] as MacroExpandParam)) {
+                    if (macroExpandParam.invocation.macroCallDiagInfo.identifier == "APILevel") {
+                        ExpandToAPILevel(macroExpandParam.invocation)
+                        let invocationDecl = macroExpandParam.invocation.decl.getOrThrow()
+                        CopyBasicInfo(macroExpandParam,
+                            invocationDecl.annotations[invocationDecl.annotations.size - 1])
+                        expandedParam = (invocationDecl as FuncParam).getOrThrow()
+                    }
+                }
+                for (annotation in expandedParam.annotations) {
+                    if (annotation.kind != AstAnnotationKind.CUSTOM) {
+                        continue
+                    }
+                    targetParams[idx].annotations.add(annotation)
+                }
+                expandedParam.annotations.clear()
+            }
+        }
+    }
+}
+
+// Faithful port of C++ MergeCusAnno (Frontend/MergeAnnoFromCjd.cpp:533-545).
+public func MergeCusAnno(target: Package, source: Package): Unit {
+    let topDeclMapping = HashMap<Decl, Option<Decl>>()
+    MergeTopLevelDecl(target, source, topDeclMapping)
+    for ((sourceDecl, targetDecl) in topDeclMapping) {
+        if (let Some(targetDeclValue) <- targetDecl) {
+            MergeMemberDecl((sourceDecl, targetDeclValue))
+        }
+    }
+}
