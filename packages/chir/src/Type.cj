@@ -1328,9 +1328,9 @@ public open class CustomType <: Type {
             args.add(ty.ToSrcCodeString())
         }
         if (args.isEmpty()) {
-            return def.GetIdentifier()
+            return def.GetSrcCodeIdentifier()
         }
-        return def.GetIdentifier() + "<" + JoinStrings(args, ",") + ">"
+        return def.GetSrcCodeIdentifier() + "<" + JoinStrings(args, ",") + ">"
     }
 
     public override func Hash(): Int64 {
