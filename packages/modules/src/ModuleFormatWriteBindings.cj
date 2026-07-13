@@ -526,28 +526,28 @@ func CreateImports(builder: FlatBufferBuilder, importSpecs: FlatBufferOffset): F
 }
 
 // ModuleFormat_generated.h (CreateFeatureId).
-func CreateFeatureId(builder: FlatBufferBuilder, identifiers: FlatBufferOffset): FlatBufferOffset {
+public func CreateFeatureId(builder: FlatBufferBuilder, identifiers: FlatBufferOffset): FlatBufferOffset {
     builder.StartTable(1)
     builder.AddOffset(0, identifiers)
     return builder.EndTable()
 }
 
 // ModuleFormat_generated.h (CreateFeaturesSet).
-func CreateFeaturesSet(builder: FlatBufferBuilder, features: FlatBufferOffset): FlatBufferOffset {
+public func CreateFeaturesSet(builder: FlatBufferBuilder, features: FlatBufferOffset): FlatBufferOffset {
     builder.StartTable(1)
     builder.AddOffset(0, features)
     return builder.EndTable()
 }
 
 // ModuleFormat_generated.h (CreateFeaturesDirective).
-func CreateFeaturesDirective(builder: FlatBufferBuilder, featuresSet: FlatBufferOffset): FlatBufferOffset {
+public func CreateFeaturesDirective(builder: FlatBufferBuilder, featuresSet: FlatBufferOffset): FlatBufferOffset {
     builder.StartTable(1)
     builder.AddOffset(0, featuresSet)
     return builder.EndTable()
 }
 
 // ModuleFormat_generated.h (CreateFileInfo).
-func CreateFileInfo(builder: FlatBufferBuilder, fileID: UInt32, begin: ArrayList<UInt8>, end: ArrayList<UInt8>,
+public func CreateFileInfo(builder: FlatBufferBuilder, fileID: UInt32, begin: ArrayList<UInt8>, end: ArrayList<UInt8>,
     feature: FlatBufferOffset): FlatBufferOffset {
     builder.StartTable(4)
     builder.AddOffset(3, feature)

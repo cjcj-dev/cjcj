@@ -9,6 +9,10 @@ import cjcj::mangle.BaseMangler as RealBaseMangler
 import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
 import cjcj::modules.SemaCjoManager
 import cjcj::modules.CreateFullId as CreateModuleFullId
+import cjcj::modules.CreateFeatureId as CreateModuleFeatureId
+import cjcj::modules.CreateFeaturesDirective as CreateModuleFeaturesDirective
+import cjcj::modules.CreateFeaturesSet as CreateModuleFeaturesSet
+import cjcj::modules.CreateFileInfo as CreateModuleFileInfo
 import cjcj::modules.{CreateArrayInfo, CreateAssignInfo, CreateBinaryInfo, CreateBlockInfo, CreateCallInfo,
     CreateExpr, CreateForInInfo, CreateFuncArgInfo, CreateIncOrDecInfo, CreateJumpInfo, CreateLambdaInfo,
     CreateLetPatternDestructorInfo, CreateLitConstInfo, CreateMatchCaseInfo, CreateMatchInfo, CreatePattern,
@@ -183,11 +187,27 @@ private class FrontendCjoFlatBufferWriter {
     private func SaveFileInfo(file: File): FlatBufferOffset {
         let begin = PositionBytes(file.begin)
         let end = PositionBytes(file.end)
-        builder.StartTable(4)
-        builder.AddStruct(2, end, 4)
-        builder.AddStruct(1, begin, 4)
-        builder.AddU32(0, UInt32(file.begin.fileID))
-        return builder.EndTable()
+        let feature = if (let Some(fd) <- file.feature) { SaveFeaturesDirective(fd) } else { 0u32 }
+        return CreateModuleFileInfo(builder, UInt32(file.begin.fileID), begin, end, feature)
+    }
+
+    // ASTWriter.cpp:911-919 CreateFeatureId.
+    private func CreateFeatureId(featureId: FeatureId): FlatBufferOffset {
+        let identifiers = ArrayList<String>()
+        for (identifier in featureId.identifiers) {
+            identifiers.add(identifier.Val())
+        }
+        return CreateModuleFeatureId(builder, builder.CreateVectorOfStrings(identifiers))
+    }
+
+    // ASTWriter.cpp:921-930 SaveFeaturesDirective.
+    private func SaveFeaturesDirective(fd: FeaturesDirective): FlatBufferOffset {
+        let features = ArrayList<FlatBufferOffset>()
+        for (featureId in fd.featuresSet.getOrThrow().content) {
+            features.add(CreateFeatureId(featureId))
+        }
+        let featuresSet = CreateModuleFeaturesSet(builder, builder.CreateVectorOffsets(features))
+        return CreateModuleFeaturesDirective(builder, featuresSet)
     }
 
     private func SaveFileImports(file: File): FlatBufferOffset {
