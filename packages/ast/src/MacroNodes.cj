@@ -64,6 +64,15 @@ public class MacroExpandExpr <: Expr {
         }
         return None
     }
+
+    // Mirrors AST/Node.cpp:728-733 MacroExpandExpr::Decompose.
+    public func Decompose(): (FuncArg, LambdaExpr, LambdaExpr) {
+        let namedArg = (invocation.nodes[0] as FuncArg).getOrThrow()
+        let lambda1 = (invocation.nodes[1] as LambdaExpr).getOrThrow()
+        let lambda2 = (invocation.nodes[2] as LambdaExpr).getOrThrow()
+        invocation.nodes.clear()
+        return (namedArg, lambda1, lambda2)
+    }
 }
 
 public class MacroExpandDecl <: Decl {
