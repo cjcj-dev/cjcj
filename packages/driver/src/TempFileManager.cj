@@ -1,13 +1,53 @@
 package cjcj::driver
 
 import std.collection.*
-import std.env.*
 import std.fs.Directory as FSDirectory
+import cjcj::basic.Errorln
 
-private let CANGJIE_TMP_DIR_PREFIX: String = "cangjie-tmp-"
+@When[os == "Windows"]
+private let TMP_DIR_ENVIRONMENT_KEY: String = "TMP"
+@When[os != "Windows"]
+private let TMP_DIR_ENVIRONMENT_KEY: String = "TMPDIR"
+@When[os == "Windows"]
+private let DEFAULT_TMP_DIR: String = "C:\\Windows\\Temp"
+@When[os != "Windows"]
+private let DEFAULT_TMP_DIR: String = "/tmp"
+private let CANGJIE_TMP_DIR_PERFIX: String = "/cangjie-tmp-"
 private let NOT_DELETED: UInt8 = 0u8
 private let DELETING: UInt8 = 1u8
 private let DELETED: UInt8 = 2u8
+
+// C++: Driver/TempFileManager.cpp:49-73.
+private func TempDirLegalityCheck(path: String, fromEnvSetting: Bool): Option<String> {
+    let absPath = FileUtil.GetAbsPath(path)
+    if (let None <- absPath) {
+        let pathKind = if (fromEnvSetting) {
+            "Temporary directory path set by environment variable"
+        } else {
+            "Temporary directory path"
+        }
+        let pathName = if (fromEnvSetting) { TMP_DIR_ENVIRONMENT_KEY } else { DEFAULT_TMP_DIR }
+        Errorln(pathKind + " (" + pathName + ") does not exist.")
+        return None
+    }
+    if (fromEnvSetting && !FileUtil.IsDir(path)) {
+        Errorln("Temporary directory path set by environment variable(" + TMP_DIR_ENVIRONMENT_KEY +
+            ") is not a directory.")
+        return None
+    }
+    let temp = absPath.getOrThrow()
+    if (!FileUtil.CanWrite(temp)) {
+        let pathKind = if (fromEnvSetting) {
+            "Temporary directory path set by environment variable"
+        } else {
+            "Temporary directory path"
+        }
+        let pathName = if (fromEnvSetting) { TMP_DIR_ENVIRONMENT_KEY } else { DEFAULT_TMP_DIR }
+        Errorln(pathKind + " (" + pathName + ") does not have write permission.")
+        return None
+    }
+    return temp
+}
 
 public class TempFileManager {
     private static let singleton = TempFileManager()
@@ -113,21 +153,20 @@ public class TempFileManager {
             eprintln("error: temporary directory '${tempDir}' does not exist.")
             return false
         }
-        var baseTemp = "/tmp"
-        if (let Some(tmpDir) <- opts.environment.allVariables.get("TMPDIR")) {
-            if (!tmpDir.isEmpty()) {
-                baseTemp = tmpDir
-            }
-        } else if (let Some(envTmp) <- getVariable("TMPDIR")) {
-            baseTemp = envTmp
+        var baseTemp = DEFAULT_TMP_DIR
+        var fromEnvSetting = false
+        if (let Some(tmpDir) <- opts.environment.allVariables.get(TMP_DIR_ENVIRONMENT_KEY)) {
+            baseTemp = tmpDir
+            fromEnvSetting = true
         }
-        if (!FileUtil.IsDir(baseTemp) || !FileUtil.CanWrite(baseTemp)) {
-            eprintln("error: temporary directory '${baseTemp}' is not writable.")
+        let checkedTemp = TempDirLegalityCheck(baseTemp, fromEnvSetting)
+        if (let None <- checkedTemp) {
             return false
         }
+        baseTemp = checkedTemp.getOrThrow()
         var attempts: Int64 = 0
         while (attempts < 10) {
-            let candidate = FileUtil.JoinPath(baseTemp, CANGJIE_TMP_DIR_PREFIX + GenerateRandomHexString() +
+            let candidate = FileUtil.JoinPath(baseTemp, CANGJIE_TMP_DIR_PERFIX + GenerateRandomHexString() +
                 "-" + attempts.toString())
             try {
                 FSDirectory.create(candidate, recursive: true)
