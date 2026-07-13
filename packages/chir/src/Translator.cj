@@ -6501,9 +6501,8 @@ public class Translator {
             IntLiteral(Int64(expr.children.size)), CurrentBlock()))
         let rawArrayTy = builder.context.GetRawArrayTy(elementTy)
         let rawArrayRefTy = builder.context.GetRefTy(rawArrayTy)
-        let rawArrayExpr = builder.CreateRawArrayAllocate(rawArrayRefTy, elementTy, elementSize, CurrentBlock())
-        rawArrayExpr.SetDebugLocation(TranslateLocation(expr))
-        let rawArrayRef = RequireResult(rawArrayExpr)
+        let rawArrayRef = RequireResult(TryCreate(CurrentBlock(), TranslateLocation(expr), rawArrayRefTy,
+            elementTy, elementSize))
         if (IsArrayElementPrimitiveForLiteral(elementTy)) {
             let elements = ArrayList<Value>()
             for (child in expr.children) {
@@ -6539,6 +6538,27 @@ public class Translator {
         let _ = CreateApplyMaybeWithException(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
             FuncCallContext(args: args, thisType: thisTy))
         return RequireResult(builder.CreateLoad(arrayTy, result, CurrentBlock()))
+    }
+
+    private func TryCreate(parent: Block, loc: DebugLocation, resultTy: Type, elementTy: Type,
+        size: Value): Expression {
+        if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
+            let successBlock = CreateBlock()
+            let exceptionBlock = DelayExitExceptionBlock(errorBlock)
+            let term = if (let Some(exceptBlock) <- exceptionBlock) {
+                builder.CreateRawArrayAllocateWithException(resultTy, elementTy, size, successBlock, exceptBlock,
+                    parent)
+            } else {
+                builder.CreateRawArrayAllocateWithException(resultTy, elementTy, size, successBlock, errorBlock,
+                    parent)
+            }
+            term.SetDebugLocation(loc)
+            FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
+            return term
+        }
+        let rawArrayAllocate = builder.CreateRawArrayAllocate(resultTy, elementTy, size, parent)
+        rawArrayAllocate.SetDebugLocation(loc)
+        return rawArrayAllocate
     }
 
     private func TranslateRawArrayByCollection(expr: AstArrayExpr, arrayTy: Type, rawArrayTy: RawArrayType): Value {
