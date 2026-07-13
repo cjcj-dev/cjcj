@@ -8,7 +8,10 @@ import cjcj::parse.Parser as RealParser
 import cjcj::basic.GetHash
 import cjcj::basic.DiagCategory
 import cjcj::macro_pkg.MacroExpansion
+import cjcj::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
+import cjcj::utils.CJC_ASSERT
 import cjcj::utils.FileUtil
+import cjcj::utils.OverflowStrategy as FaithfulOverflowStrategy
 import cjcj::utils.CJ_D_FILE_EXTENSION
 import cjcj::utils.InternalError
 import cjcj::utils.ProfileRecorder
@@ -190,6 +193,9 @@ public open class CompileStrategy {
     }
 
     public func OverflowStrategy(): Bool {
+        let typeChecker = FaithfulSemaTypeChecker(ci.faithfulSemaInstance)
+        CJC_ASSERT(ci.invocation.globalOptions.overflowStrategy != FaithfulOverflowStrategy.NA)
+        typeChecker.SetOverflowStrategy(ci.GetSourcePackages())
         return true
     }
 }
