@@ -1190,13 +1190,7 @@ extend ParserImpl {
                         builder.Emit()
                     }
                     matchCase.arrowPos = lastToken.Begin()
-                    let block = Block()
-                    block.begin = Peek().Begin()
-                    while (!Seeing(TokenKind.END) && !Seeing(TokenKind.CASE) && !Seeing(TokenKind.RCURL)) {
-                        block.body.add(ParseExprOrDecl(ScopeKind.FUNC_BODY))
-                        SkipNLOrSemi()
-                    }
-                    block.end = lastToken.End()
+                    let block = ParseExprOrDeclsInMatchCase()
                     matchCase.exprOrDecls = block
                     matchCase.end = block.end
                     ret.matchCases.add(matchCase)
@@ -1236,13 +1230,7 @@ extend ParserImpl {
                 builder.Emit()
             }
             matchCase.arrowPos = lastToken.Begin()
-            let block = Block()
-            block.begin = Peek().Begin()
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.CASE) && !Seeing(TokenKind.RCURL)) {
-                block.body.add(ParseExprOrDecl(ScopeKind.FUNC_BODY))
-                SkipNLOrSemi()
-            }
-            block.end = lastToken.End()
+            let block = ParseExprOrDeclsInMatchCase()
             matchCase.exprOrDecls = block
             matchCase.end = block.end
             ret.matchCaseOthers.add(matchCase)
@@ -1250,6 +1238,38 @@ extend ParserImpl {
         }
         ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after match").Begin()
         ret.end = ret.rightCurlPos + 1
+    }
+
+    public func ParseExprOrDeclsInMatchCase(): Block {
+        let exprOrDecls = Block()
+        exprOrDecls.begin = lookahead.Begin()
+        var flag = false
+        var hasSemi = false
+        while (!SeeingAny([TokenKind.CASE, TokenKind.RCURL])) {
+            if (flag && !newlineSkipped && !hasSemi && !exprOrDecls.TestAttr(Attribute.HAS_BROKEN)) {
+                DiagExpectSemiOrNewline()
+            }
+            flag = true
+            SkipBlank(TokenKind.SEMI)
+            if (DetectPrematureEnd()) {
+                break
+            }
+            if (SeeingMacroCallDecl() || SeeingDecl() || SeeingExpr()) {
+                let node = ParseExprOrDecl(ScopeKind.FUNC_BODY)
+                if (exprOrDecls.body.isEmpty()) {
+                    exprOrDecls.begin = node.begin
+                }
+                exprOrDecls.body.add(node)
+            } else {
+                DiagMatchCaseExpectedExprOrDecl()
+                exprOrDecls.EnableAttr(Attribute.HAS_BROKEN)
+                ConsumeUntilAny([TokenKind.CASE, TokenKind.RCURL, TokenKind.NL], targetTokenConsumed: false)
+            }
+            hasSemi = Seeing(TokenKind.SEMI)
+            SkipBlank(TokenKind.SEMI)
+        }
+        exprOrDecls.end = lastToken.End()
+        return exprOrDecls
     }
 
     public func ParseTryExpr(): TryExpr {

@@ -1765,20 +1765,29 @@ extend ParserImpl {
         }
         let leftCurl = lastToken.Begin()
         SetDeclBodyLeftCurl(ret, leftCurl)
-        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
-            if (DetectPrematureEnd()) {
-                if (let Some(classDecl) <- (ret as ClassDecl)) {
-                    classDecl.body.getOrThrow().EnableAttr(Attribute.IS_BROKEN)
-                } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
-                    interfaceDecl.body.getOrThrow().EnableAttr(Attribute.IS_BROKEN)
-                } else if (let Some(structDecl) <- (ret as StructDecl)) {
-                    structDecl.body.getOrThrow().EnableAttr(Attribute.IS_BROKEN)
-                } else if (let Some(extendDecl) <- (ret as ExtendDecl)) {
-                    extendDecl.EnableAttr(Attribute.IS_BROKEN)
+        while (true) {
+            if (let Some(classDecl) <- (ret as ClassDecl)) {
+                if (CheckSkipRcurOrPrematureEnd(classDecl.body.getOrThrow())) {
+                    break
                 }
-                DiagExpectedRightDelimiter("{", leftCurl)
-                ret.end = lastToken.End()
-                return
+            } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+                if (CheckSkipRcurOrPrematureEnd(interfaceDecl.body.getOrThrow())) {
+                    break
+                }
+            } else if (let Some(structDecl) <- (ret as StructDecl)) {
+                if (CheckSkipRcurOrPrematureEnd(structDecl.body.getOrThrow())) {
+                    break
+                }
+            } else if (let Some(extendDecl) <- (ret as ExtendDecl)) {
+                if (Skip(TokenKind.RCURL)) {
+                    extendDecl.rightCurlPos = lastToken.Begin()
+                    break
+                }
+                if (DetectPrematureEnd()) {
+                    extendDecl.EnableAttr(Attribute.IS_BROKEN)
+                    DiagExpectedRightDelimiter("{", extendDecl.leftCurlPos)
+                    break
+                }
             }
             let member = ParseDecl(scopeKind)
             if (let Some(ctor) <- (member as FuncDecl)) {
@@ -1805,9 +1814,57 @@ extend ParserImpl {
             }
             SkipNLOrSemi()
         }
-        let rightCurl = Expect(TokenKind.RCURL, "expected '}' after declaration body").Begin()
-        SetDeclBodyRightCurl(ret, rightCurl)
-        ret.end = rightCurl + 1
+        if (let Some(classDecl) <- (ret as ClassDecl)) {
+            classDecl.body.getOrThrow().end = lastToken.End()
+        } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+            let body = interfaceDecl.body.getOrThrow()
+            body.end = body.rightCurlPos + 1
+        } else if (let Some(structDecl) <- (ret as StructDecl)) {
+            let body = structDecl.body.getOrThrow()
+            body.rightCurlPos = lastToken.Begin()
+            body.end = lastToken.End()
+        } else if (let Some(extendDecl) <- (ret as ExtendDecl)) {
+            extendDecl.end = lastToken.End()
+        }
+    }
+
+    private func CheckSkipRcurOrPrematureEnd(ret: ClassBody): Bool {
+        if (Skip(TokenKind.RCURL)) {
+            ret.rightCurlPos = lastToken.Begin()
+            return true
+        }
+        if (DetectPrematureEnd() && !ret.TestAttr(Attribute.HAS_BROKEN)) {
+            ret.EnableAttr(Attribute.IS_BROKEN)
+            DiagExpectedRightDelimiter("{", ret.leftCurlPos)
+            return true
+        }
+        return false
+    }
+
+    private func CheckSkipRcurOrPrematureEnd(ret: InterfaceBody): Bool {
+        if (Skip(TokenKind.RCURL)) {
+            ret.rightCurlPos = lastToken.Begin()
+            return true
+        }
+        if (DetectPrematureEnd() && !ret.TestAttr(Attribute.HAS_BROKEN)) {
+            ret.EnableAttr(Attribute.IS_BROKEN)
+            DiagExpectedRightDelimiter("{", ret.leftCurlPos)
+            return true
+        }
+        return false
+    }
+
+    private func CheckSkipRcurOrPrematureEnd(ret: StructBody): Bool {
+        if (Skip(TokenKind.RCURL)) {
+            ret.rightCurlPos = lastToken.Begin()
+            return true
+        }
+        if (DetectPrematureEnd() && !ret.TestAttr(Attribute.HAS_BROKEN)) {
+            ret.EnableAttr(Attribute.IS_BROKEN)
+            DiagExpectedRightDelimiter("{", ret.leftCurlPos)
+            return true
+        }
+        return false
     }
 
     private func SetDeclBodyLeftCurl(ret: InheritableDecl, pos: Position): Unit {
@@ -1828,27 +1885,6 @@ extend ParserImpl {
             structDecl.body = body
         } else if (let Some(extendDecl) <- (ret as ExtendDecl)) {
             extendDecl.leftCurlPos = pos
-        }
-    }
-
-    private func SetDeclBodyRightCurl(ret: InheritableDecl, pos: Position): Unit {
-        if (let Some(classDecl) <- (ret as ClassDecl)) {
-            if (let Some(body) <- classDecl.body) {
-                body.rightCurlPos = pos
-                body.end = pos + 1
-            }
-        } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
-            if (let Some(body) <- interfaceDecl.body) {
-                body.rightCurlPos = pos
-                body.end = pos + 1
-            }
-        } else if (let Some(structDecl) <- (ret as StructDecl)) {
-            if (let Some(body) <- structDecl.body) {
-                body.rightCurlPos = pos
-                body.end = pos + 1
-            }
-        } else if (let Some(extendDecl) <- (ret as ExtendDecl)) {
-            extendDecl.rightCurlPos = pos
         }
     }
 
