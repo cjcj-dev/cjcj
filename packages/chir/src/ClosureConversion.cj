@@ -10,7 +10,6 @@ import cjcj::utils.ProfileRecorder
 private let GENERIC_VIRTUAL_FUNC: String = "$GenericVirtualFunc"
 private let INST_VIRTUAL_FUNC: String = "$InstVirtualFunc"
 private let CC_GENERIC_BASE_PREFIX: String = "$Cg"
-private let CC_INSTANTIATED_BASE_PREFIX: String = "$Ci"
 private let CC_FUNC_IMPL_PREFIX: String = "$Cf"
 private let CC_LAMBDA_IMPL_PREFIX: String = "$Cl"
 private let CC_CAPTURED_PREFIX: String = "$Captured_"
@@ -574,7 +573,7 @@ public class ClosureConversion {
     }
 
     private func GetOrCreateInstAutoEnvBaseDef(funcTy: FuncType, superClass: ClassDef): ClassDef {
-        let className = CC_INSTANTIATED_BASE_PREFIX + TypeKey(funcTy)
+        let className = GenerateInstantiatedBaseClassMangleName(funcTy)
         if (let Some(found) <- instAutoEnvBaseDefs.get(className)) {
             return found
         }
