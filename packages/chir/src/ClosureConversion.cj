@@ -67,6 +67,24 @@ private func PrintGlobalFuncInfo(pos: Position): Unit {
     println(message)
 }
 
+// C++: CHIR/Transformation/ClosureConversion.cpp:411-431.
+private func GenerateSrcCodeIdentifier(memberVar: Value): String {
+    var memberName = memberVar.GetSrcCodeIdentifier()
+    if (memberName.isEmpty()) {
+        if (let Some(envLocalVar) <- memberVar.AsLocalVar()) {
+            if (let Some(expr) <- envLocalVar.GetExpr()) {
+                if (let Some(loadEnvVar) <- (expr as Load)) {
+                    memberName = loadEnvVar.GetLocation().GetSrcCodeIdentifier()
+                }
+            }
+        }
+    }
+    if (memberName.isEmpty()) {
+        memberName = memberVar.GetIdentifier()
+    }
+    return memberName
+}
+
 private func LiftCustomDefType(def: CustomTypeDef, converter: TypeConverterForCC): Unit {
     let preVisit = { expr: Expression =>
         converter.VisitExpr(expr)
@@ -835,7 +853,7 @@ public class ClosureConversion {
             let envTy = env.GetType() ??
                 throw IllegalStateException("ClosureConversion captured value has no type")
             let memberTy = SubstituteGenericTypes(envTy, genericMap)
-            let memberName = GenerateCapturedMemberName(env)
+            let memberName = GenerateSrcCodeIdentifier(env)
             let info = MemberVarInfo(memberName, memberTy, isStatic: false, isReadOnly: false,
                 rawMangledName: memberName)
             info.attributeInfo.Enable(Attribute.PUBLIC)
@@ -2947,14 +2965,6 @@ public class ClosureConversion {
 
     private func InstOverrideFuncName(srcFunc: Function): String {
         return ReplaceManglePrefixWith(srcFunc.GetIdentifierWithoutPrefix(), CC_FUNC_PREFIX) + "$i"
-    }
-
-    private func GenerateCapturedMemberName(value: Value): String {
-        let srcName = value.GetSrcCodeIdentifier()
-        if (!srcName.isEmpty()) {
-            return srcName
-        }
-        return value.GetIdentifier()
     }
 
     private func IsClosureConversionGeneratedFunction(fn: Function): Bool {
