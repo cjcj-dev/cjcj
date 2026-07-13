@@ -3968,18 +3968,6 @@ public class FaithfulAST2CHIR {
             throw IllegalStateException("faithful AST2CHIR initializer function has no entry block")
     }
 
-    private func EnsureReturnSlot(fn: Function, entry: Block): Unit {
-        if (let Some(returnTy) <- fn.GetReturnType()) {
-            if (returnTy.IsVoid()) {
-                return
-            }
-            if (let Some(retValue) <- builder.CreateAllocate(builder.context.GetRefTy(returnTy), returnTy,
-                entry).GetResult()) {
-                fn.SetReturnValue(retValue)
-            }
-        }
-    }
-
     private func CreateFuncSignatureAndSetGlobalCache(funcDecl: AstFuncDecl): Unit {
         let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl))))
         let fn = builder.CreateFunction(funcTy, EffectiveFunctionIdentifier(funcDecl),
@@ -3988,7 +3976,7 @@ public class FaithfulAST2CHIR {
         fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.keywordPos, funcDecl.end))
         AttachFunctionGenericParams(funcDecl, fn)
         ApplyDeclAttrs(fn, funcDecl)
-fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
+        fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
         if (funcDecl.TestAttr(AstAttribute.IN_EXTEND) || funcDecl.TestAttr(AstAttribute.UNSAFE) ||
             funcDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED) || !funcDecl.TestAttr(AstAttribute.PUBLIC)) {
             fn.EnableAttr(Attribute.NO_REFLECT_INFO)
@@ -4013,7 +4001,6 @@ fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
             let entry = fn.GetEntryBlock() ??
                 throw IllegalStateException("faithful AST2CHIR function has no entry block: ${fn.GetIdentifier()}")
             CreateFunctionEntryDebugs(funcDecl, fn, entry)
-            EnsureReturnSlot(fn, entry)
         }
         globalCache.Set(funcDecl, fn)
     }

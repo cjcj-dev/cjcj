@@ -698,6 +698,13 @@ public class Translator {
         let savedBlock = currentBlock
         let entry = body.GetEntryBlock() ?? builder.CreateBlock(body)
         body.SetEntryBlock(entry)
+        if (let Some(returnType) <- fn.GetReturnType()) {
+            if (!returnType.IsVoid()) {
+                let retValue = builder.CreateAllocate(builder.context.GetRefTy(returnType), returnType, entry)
+                let returnSlot = RequireResult(retValue)
+                fn.SetReturnValue(returnSlot)
+            }
+        }
         currentBlock = entry
         BindFuncParams(funcDecl, fn)
         if (let Some(funcBody) <- funcDecl.funcBody) {
