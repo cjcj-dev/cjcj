@@ -1698,7 +1698,7 @@ public class IRBuilder2 <: Resource {
         args: ArrayList<CGValue>, methodTypeInfoArg: Option<LLVMValueRef>, instTypeArgs: ArrayList<Type>,
         sretTypeInfoArg: Option<LLVMValueRef>, thisTypeInfoArg: Option<LLVMValueRef>,
         name!: String = ""): LLVMValueRef {
-        let callArgs = TransformCGFunctionArgs(calleeType, args, methodTypeInfoArg, instTypeArgs, sretTypeInfoArg,
+        let callArgs = TransformFuncArgs(calleeType, args, methodTypeInfoArg, instTypeArgs, sretTypeInfoArg,
             thisTypeInfoArg, name: name)
         let llvmCallArgs = TransformLLVMCallArgs(calleeType, callArgs, name: name)
         CallSetLocation()
@@ -1774,7 +1774,7 @@ public class IRBuilder2 <: Resource {
         return result
     }
 
-    private func TransformCGFunctionArgs(calleeType: CGFunctionType, args: ArrayList<CGValue>,
+    private func TransformFuncArgs(calleeType: CGFunctionType, args: ArrayList<CGValue>,
         methodTypeInfoArg: Option<LLVMValueRef>, instTypeArgs: ArrayList<Type>,
         sretTypeInfoArg: Option<LLVMValueRef>, thisTypeInfoArg: Option<LLVMValueRef>,
         name!: String = ""): ArrayList<LLVMValueRef> {
@@ -1820,6 +1820,16 @@ public class IRBuilder2 <: Resource {
                     callArgs.add(unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) })
                 }
                 idx++
+            }
+            if (callExprWrapper.isNone() && chirExpr.isSome() &&
+                chirExpr.getOrThrow().GetExpression().GetExprKind() == ExprKind.VARRAY_BUILDER) {
+                let varrayBuilder = (chirExpr.getOrThrow().GetExpression() as VArrayBuilder).getOrThrow()
+                let autoEnvOfInitFunc = varrayBuilder.GetInitFunc()
+                let autoEnvVal = cgMod.GetMappedCGValue(autoEnvOfInitFunc).GetRawValue()
+                let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
+                let typeInfo = CreateBitCast(GetTypeInfoFromObject(autoEnvVal), typeInfoPtrType)
+                callArgs.add(typeInfo)
+                return callArgs
             }
             let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
             for (instTy in instTypeArgs) {
