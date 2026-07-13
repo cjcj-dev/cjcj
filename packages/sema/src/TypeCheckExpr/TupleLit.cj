@@ -82,11 +82,12 @@ public func SynTupleLit(typeManager: TypeManager, tl: TupleLit): Ty {
     return tupleTy
 }
 
-public func ChkTupleLit(typeManager: TypeManager, target: Ty, tl: TupleLit,
+public func ChkTupleLit(typeManager: TypeManager, target: Ty, tl: TupleLit, synthesizer: (TupleLit) -> Ty,
     check!: Option<(Ty, Expr) -> Bool> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (target.IsAny()) {
-        let actualTy = SynTupleLit(typeManager, tl)
-        return !actualTy.HasInvalidTy()
+        tl.SetTy(synthesizer(tl))
+        let _ = ReplaceIdealTy(typeManager, tl, diag: diag)
+        return Ty.IsTyCorrect(tl.GetTy())
     }
 
     let targetTy = unboxOptionType(target)

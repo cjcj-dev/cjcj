@@ -7224,6 +7224,7 @@ extend TypeChecker {
 
     private func CheckTupleLit(ctx: ASTContext, target: Ty, tupleLit: TupleLit): Bool {
         return ChkTupleLit(impl.typeManager, target, tupleLit,
+            { tuple: TupleLit => Synthesize(ctx, SynPos.EXPR_ARG, tuple) },
             check: Some({ targetTy: Ty, child: Expr => Check(ctx, targetTy, child) }), diag: impl.diag)
     }
 
