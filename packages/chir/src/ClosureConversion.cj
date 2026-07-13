@@ -220,6 +220,8 @@ public class ClosureConversion {
     private let boxClassMap: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
     private let convertedCache: HashMap<Int64, Function> = HashMap<Int64, Function>()
     private let duplicateLambdaName: HashMap<String, Int64> = HashMap<String, Int64>()
+    // C++: CHIR/Transformation/ClosureConversion.h:147.
+    private let ccOutFuncsRawMangle: HashSet<String> = HashSet<String>()
     private let typeConvertMap: HashMap<Type, Type> = HashMap<Type, Type>()
     private let needConvertedGenericTys: HashSet<Type> = HashSet<Type>()
     private let srcCodeImportedFuncs: ArrayList<Function> = ArrayList<Function>()
@@ -241,6 +243,15 @@ public class ClosureConversion {
 
     public func GetUselessLambda(): ArrayList<Function> {
         return uselessLambda.clone()
+    }
+
+    // C++: CHIR/Transformation/ClosureConversion.cpp:931-934.
+    public func GetCCOutFuncsRawMangle(): HashSet<String> {
+        let result = HashSet<String>()
+        for (rawMangledName in ccOutFuncsRawMangle) {
+            result.add(rawMangledName)
+        }
+        return result
     }
 
     public func RunOnPackage(pkg: Package): Unit {
@@ -267,8 +278,14 @@ public class ClosureConversion {
     private func CollectNestedFunctions(pkg: Package): ArrayList<Lambda> {
         let nestedFuncs = ArrayList<Lambda>()
         for (fn in pkg.GetGlobalFuncsWithBody()) {
+            let oldNestedFuncNum = nestedFuncs.size
             if (let Some(body) <- fn.GetBody()) {
                 CollectNestedFunctionsInBlockGroup(body, nestedFuncs)
+            }
+            // C++: CHIR/Transformation/ClosureConversion.cpp:956-961.
+            if (opts.enIncrementalCompilation && nestedFuncs.size != oldNestedFuncNum &&
+                !fn.GetRawMangledName().isEmpty()) {
+                ccOutFuncsRawMangle.add(fn.GetRawMangledName())
             }
         }
         return nestedFuncs
@@ -399,6 +416,7 @@ public class ClosureConversion {
                 continue
             }
             let users = fn.GetUsers()
+            var convertFlag = false
             for (user in users) {
                 if (IsCalleeOfApply(user, fn)) {
                     continue
@@ -409,6 +427,11 @@ public class ClosureConversion {
                 let autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(funcTy)
                 let autoEnvImplDef = GetOrCreateAutoEnvImplDef(fn, autoEnvBaseDef)
                 ReplaceUserPoint(fn, user, autoEnvImplDef)
+                convertFlag = true
+            }
+            // C++: CHIR/Transformation/ClosureConversion.cpp:2209-2214.
+            if (opts.enIncrementalCompilation && convertFlag && !fn.GetRawMangledName().isEmpty()) {
+                ccOutFuncsRawMangle.add(fn.GetRawMangledName())
             }
             RemoveGetInstantiateValue(users)
         }

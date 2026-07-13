@@ -125,6 +125,11 @@ private class ToCHIR {
         let closure = ClosureConversion(builder, opts: instance.invocation.globalOptions,
             srcCodeImportedFuncs: ast2chir.GetSrcCodeImportedFuncs())
         closure.RunOnPackage(lowered)
+        // C++: Frontend/CompilerInstance.cpp:981 and CHIR/CHIR.cpp:253-255.
+        instance.chirInfo.ccOutFuncsRawMangle.clear()
+        for (rawMangledName in closure.GetCCOutFuncsRawMangle()) {
+            instance.chirInfo.ccOutFuncsRawMangle.add(rawMangledName)
+        }
         ast2chir.ReplaceSrcCodeImportedValAfterClosureConversion(lowered, closure.GetUselessClassDef(),
             closure.GetUselessLambda())
         EraseDebugExpr()
