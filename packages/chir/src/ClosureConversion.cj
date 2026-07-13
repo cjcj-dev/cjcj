@@ -17,6 +17,35 @@ private let CC_FUNC_PREFIX: String = "_CC"
 private let MANGLE_CANGJIE_PREFIX: String = "_C"
 private let GENERIC_THIS_SRC_NAME: String = "This"
 
+// C++: CHIR/Transformation/ClosureConversion.cpp:29-58.
+private func IsArkInteropLambdaSignature(srcFunc: Function): Bool {
+    let originalType = srcFunc.GetOriginalLambdaType()
+    if (originalType.isNone()) {
+        return false
+    }
+    let funcType = originalType.getOrThrow()
+    let paramTypes = funcType.GetParamTypes()
+    if (paramTypes.size != 2) {
+        return false
+    }
+    let getTypeName = { rawTy: Option<Type> =>
+        if (rawTy.isNone()) {
+            return ""
+        }
+        var ty = rawTy.getOrThrow()
+        if (let Some(refTy) <- (ty as RefType)) {
+            ty = refTy.GetRootBaseType()
+        }
+        if (let Some(customTy) <- (ty as CustomType)) {
+            return customTy.GetCustomTypeDef().GetSrcCodeIdentifier()
+        }
+        return ""
+    }
+    return getTypeName(Some(paramTypes[0])) == "JSContext" &&
+        getTypeName(Some(paramTypes[1])) == "JSCallInfo" &&
+        getTypeName(Some(funcType.GetReturnType())) == "JSValue"
+}
+
 private func LiftCustomDefType(def: CustomTypeDef, converter: TypeConverterForCC): Unit {
     let preVisit = { expr: Expression =>
         converter.VisitExpr(expr)
@@ -780,6 +809,12 @@ public class ClosureConversion {
         let methodTy = builder.context.GetFuncTy(params, boxedRetTy)
         let method = CreateCCFunction(methodTy, GenericOverrideFuncName(srcFunc), GENERIC_VIRTUAL_FUNC,
             genericTypeParams: ArrayList<GenericType>())
+        // C++: CHIR/Transformation/ClosureConversion.cpp:1576.
+        method.SetDebugLocation(if (IsArkInteropLambdaSignature(srcFunc)) {
+            srcFunc.GetDebugLocation()
+        } else {
+            INVALID_LOCATION
+        })
         SetMemberMethodAttr(method, srcFunc.TestAttr(Attribute.CONST))
         classDef.AddMethod(method)
         CreateGenericOverrideMethodBody(method, srcFunc, boxedRetTy, genericMap)
@@ -806,6 +841,12 @@ public class ClosureConversion {
         let methodTy = builder.context.GetFuncTy(params, retTy)
         let method = CreateCCFunction(methodTy, InstOverrideFuncName(srcFunc), INST_VIRTUAL_FUNC,
             genericTypeParams: ArrayList<GenericType>())
+        // C++: CHIR/Transformation/ClosureConversion.cpp:1728.
+        method.SetDebugLocation(if (IsArkInteropLambdaSignature(srcFunc)) {
+            srcFunc.GetDebugLocation()
+        } else {
+            INVALID_LOCATION
+        })
         SetMemberMethodAttr(method, srcFunc.TestAttr(Attribute.CONST))
         classDef.AddMethod(method)
         CreateOverrideMethodBody(method, srcFunc, retTy, genericMap, directParamsStart: 0)
@@ -944,6 +985,10 @@ public class ClosureConversion {
         let apply = builder.CreateApply(applyRetTy, srcFunc, FuncCallContext(args: applyArgs,
             instTypeArgs: CreateSubstitutedInstTypeArgs(srcFunc, genericMap),
             thisType: CreateSubstitutedThisType(srcFunc, genericMap)), entry)
+        // C++: CHIR/Transformation/ClosureConversion.cpp:1699-1701.
+        if (IsArkInteropLambdaSignature(srcFunc)) {
+            apply.SetDebugLocation(srcFunc.GetDebugLocation())
+        }
         let applyResult = TypeCastOrBoxIfNeeded(RequireResult(apply), methodRetTy, builder, entry, INVALID_LOCATION)
         if (!methodRetTy.IsUnit() && !methodRetTy.IsVoid() && !methodRetTy.IsNothing()) {
             builder.CreateStore(applyResult, retSlot, entry)
@@ -976,6 +1021,10 @@ public class ClosureConversion {
         let apply = builder.CreateApply(retTy, srcFunc, FuncCallContext(args: applyArgs,
             instTypeArgs: CreateSubstitutedInstTypeArgs(srcFunc, genericMap),
             thisType: CreateSubstitutedThisType(srcFunc, genericMap)), entry)
+        // C++: CHIR/Transformation/ClosureConversion.cpp:1768-1770.
+        if (IsArkInteropLambdaSignature(srcFunc)) {
+            apply.SetDebugLocation(srcFunc.GetDebugLocation())
+        }
         if (!retTy.IsUnit() && !retTy.IsVoid() && !retTy.IsNothing()) {
             builder.CreateStore(RequireResult(apply), retSlot, entry)
         }
