@@ -225,19 +225,6 @@ extend ParserImpl {
                 base = sub
                 continue
             }
-            if ((Seeing(TokenKind.INCR) || Seeing(TokenKind.DECR)) && !newlineSkipped) {
-                let op = Peek()
-                Next()
-                let incOrDec = IncOrDecExpr()
-                SpreadAttrAndConsume(base, incOrDec, [])
-                incOrDec.expr = base
-                incOrDec.op = op.kind
-                incOrDec.operatorPos = op.Begin()
-                incOrDec.begin = base.begin
-                incOrDec.end = op.End()
-                base = incOrDec
-                continue
-            }
             if (!newlineSkipped && Seeing(TokenKind.LCURL)) {
                 let trailing = TrailingClosureExpr()
                 trailing.lambda = ParseLambdaExprWithTrailingClosure()
@@ -253,12 +240,37 @@ extend ParserImpl {
         if (hasQuestSuffix) {
             base.hasQuestSuffix = true
         }
+        base = ParseIncOrDec(base)
         if (IsNeedToCreateOptionalChain(GetExprOperator().kind, base)) {
             let chain = OptionalChainExpr()
             chain.expr = base
             chain.begin = base.begin
             chain.end = base.end
             base = chain
+        }
+        return base
+    }
+
+    private func ParseIncOrDec(baseExpr: Expr): Expr {
+        var base = baseExpr
+        while (SeeingAny([TokenKind.INCR, TokenKind.DECR]) && !newlineSkipped) {
+            let validSuffix = [ASTKind.REF_EXPR, ASTKind.MEMBER_ACCESS, ASTKind.SUBSCRIPT_EXPR]
+            if (!validSuffix.contains(base.astKind) && !base.TestAttr(Attribute.HAS_BROKEN) &&
+                !base.TestAttr(Attribute.IS_BROKEN)) {
+                base.EnableAttr(Attribute.HAS_BROKEN)
+                DiagInvalidIncreExpr(base)
+            }
+            let op = Peek()
+            let incOrDec = IncOrDecExpr()
+            SpreadAttrAndConsume(base, incOrDec, [])
+            incOrDec.begin = base.begin
+            incOrDec.expr = base
+            incOrDec.op = op.kind
+            Next()
+            incOrDec.begin = base.begin
+            incOrDec.operatorPos = op.Begin()
+            incOrDec.end = op.End()
+            base = incOrDec
         }
         return base
     }
