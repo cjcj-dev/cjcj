@@ -2521,14 +2521,6 @@ extend TypeChecker {
             }
             return
         }
-        if (let Some(primaryCtor) <- (decl as PrimaryCtorDecl)) {
-            if (let Some(body4) <- primaryCtor.funcBody) {
-                SetFunctionBodyOwner(primaryCtor, body4)
-                let ctorTy = PrepareFuncBodySignature(ctx, body4)
-                primaryCtor.SetTy(ctorTy)
-            }
-            return
-        }
         if (let Some(classDecl) <- (decl as ClassDecl)) {
             SynthesizeInheritedTypes(ctx, classDecl)
             if (let Some(body5) <- classDecl.body) {
@@ -3074,14 +3066,6 @@ extend TypeChecker {
                 let macroTy = SynthesizeFuncBody(ctx, body)
                 macroDecl.SetTy(macroTy)
                 return macroTy
-            }
-        }
-        if (let Some(primaryCtor) <- (decl as PrimaryCtorDecl)) {
-            if (let Some(body) <- primaryCtor.funcBody) {
-                SetFunctionBodyOwner(primaryCtor, body)
-                let primaryTy = SynthesizeFuncBody(ctx, body)
-                primaryCtor.SetTy(primaryTy)
-                return primaryTy
             }
         }
         if (let Some(classDecl) <- (decl as ClassDecl)) {
