@@ -64,6 +64,13 @@ _SUBS = [
     # (差异的 40%) 因此被误判成真差异。已核实这些 metadata 的内容恒为空 `!{}`，编号纯粹由 LLVM
     # 按出现顺序分配、无语义，与 !dbg 同理，应当归一化。
     (re.compile(r", ![a-zA-Z._]+ ![0-9]+"), ""),
+    # 0713: 上一条只覆盖【逗号分隔】的指令级 metadata。LLVM 打印【函数级】metadata 附着时是
+    # 空格分隔、无逗号（`define ... personality ... !ReflectionFunc !48 {`），整个漏网 ——
+    # 262 个 codegen 函数（该包差异的 72%）因此被误判成真差异。
+    # 已核实（metadiff：269/269 递归展开后内容完全相同，真差异 0）：编号由 LLVM 按出现顺序分配、
+    # 无语义。这里【只抹编号、保留附着名】——若直接整条删除，门就再也看不出自举是否根本没发
+    # 反射元数据（那是真回归）。保留名字后，"有没有这个附着"仍然是可见的红线。
+    (re.compile(r" !([a-zA-Z_][a-zA-Z0-9_.]*) ![0-9]+"), r" !\1"),
     (re.compile(r" #[0-9]+ "), " "),
     # collapse the alignment padding before an inline `; preds = ...` comment (its width depends on the
     # original block-label length, which differs between the two backends) to a single space
