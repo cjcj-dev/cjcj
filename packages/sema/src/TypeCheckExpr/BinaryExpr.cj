@@ -845,7 +845,7 @@ private func SynRelationalExpr(impl: TypeCheckerImpl, be: BinaryExpr,
         let rightTy = tys[1]
         if (leftTy.IsTuple() || rightTy.IsTuple()) {
             if ((be.op == TokenKind.EQUAL || be.op == TokenKind.NOTEQ) && leftTy.IsTuple() && rightTy.IsTuple()) {
-                if (CheckTupleCanEqual(typeManager, be, leftTy, rightTy)) {
+                if (CheckTupleCanEqual(typeManager, be, leftTy, rightTy, synthesizer.getOrThrow(), diag)) {
                     let boolTy = TcBoolTy()
                     be.SetTy(boolTy)
                     return boolTy
@@ -909,7 +909,8 @@ private func GetTupleElements(expr: Expr): ArrayList<Expr> {
     return elements
 }
 
-private func CheckTupleCanEqual(typeManager: TypeManager, be: BinaryExpr, leftTy: Ty, rightTy: Ty): Bool {
+private func CheckTupleCanEqual(typeManager: TypeManager, be: BinaryExpr, leftTy: Ty, rightTy: Ty,
+    synthesizer: BinaryOperandSynthesizer, diag: Option<BasicDiagnosticEngine>): Bool {
     if (let Some(leftTuple) <- (leftTy as TupleTy)) {
         if (let Some(rightTuple) <- (rightTy as TupleTy)) {
             if (leftTuple.typeArgs.size != rightTuple.typeArgs.size) {
@@ -936,7 +937,10 @@ private func CheckTupleCanEqual(typeManager: TypeManager, be: BinaryExpr, leftTy
                 let elementCmpExpr = CreateBinaryExpr(leftElements[idx], rightElements[idx], be.op)
                 elementCmpExpr.EnableAttr(Attribute.IMPLICIT_ADD)
                 CopyBasicInfo(be, elementCmpExpr)
-                let returnTy = SynBinaryExpr(typeManager, elementCmpExpr)
+                var returnTy: Ty = TypeManager.GetInvalidTy()
+                try (ds = DiagSuppressor(diag)) {
+                    returnTy = synthesizer(elementCmpExpr)
+                }
                 if (!Ty.IsTyCorrect(returnTy) || !returnTy.IsBoolean()) {
                     be.SetTy(TypeManager.GetInvalidTy())
                     return false
@@ -1638,7 +1642,7 @@ extend TypeChecker {
                 (let Some(leftExpr2) <- be.leftExpr) && (let Some(rightExpr2) <- be.rightExpr) &&
                 (let Some(leftTy) <- leftExpr2.GetTy()) && (let Some(rightTy) <- rightExpr2.GetTy()) &&
                 leftTy.IsTuple() && rightTy.IsTuple()) {
-                if (!CheckTupleCanEqual(impl.typeManager, be, leftTy, rightTy)) {
+                if (!CheckTupleCanEqual(impl.typeManager, be, leftTy, rightTy, synthesizer, impl.diag)) {
                     inferRet = TypeManager.GetInvalidTy()
                 } else {
                     inferRet = be.GetTy().getOrThrow()
