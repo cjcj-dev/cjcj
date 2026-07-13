@@ -37,6 +37,360 @@ import cjcj::utils.VARRAY_NAME
 private let INOUT_TEMP_VALUE: String = "temporary value"
 private let INOUT_IMMUTABLE: String = "is a immutable variable"
 
+// C++ src/Sema/TypeCheckExpr.cpp:22-30.
+private func IsLocalDeclOutOfFuncBody(decl: Decl, curFuncBody: FuncBody): Bool {
+    if (let Some(outerDecl) <- decl.outerDecl) {
+        if (outerDecl.IsNominalDecl()) {
+            return false
+        }
+    }
+    return decl.scopeLevel > 0 && decl.scopeLevel < curFuncBody.scopeLevel
+}
+
+extend TypeChecker {
+    // C++ src/Sema/TypeCheckExpr.cpp:98-134.
+    public func SetCaptureKind(ctx: ASTContext, nre: NameReferenceExpr, curFuncBody: FuncBody): Unit {
+        let decl = nre.GetTarget().getOrThrow()
+        let targetFuncBody = GetCurFuncBody(ctx, decl.scopeName)
+        let isLocal = !decl.TestAttr(Attribute.GLOBAL) && decl.outerDecl.isNone()
+        if (targetFuncBody.isSome() || isLocal) {
+            if ((let Some(target) <- targetFuncBody) && target == curFuncBody) {
+                return
+            }
+            if (let Some(varDecl) <- (decl as VarDecl)) {
+                varDecl.EnableAttr(Attribute.IS_CAPTURE)
+                if (varDecl.isVar) {
+                    curFuncBody.capturedVars.add(nre)
+                    curFuncBody.captureKind = CaptureKind.CAPTURE_VAR
+                }
+            } else if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                funcDecl.EnableAttr(Attribute.IS_CAPTURE)
+            }
+            return
+        }
+        if (IsLocalDeclOutOfFuncBody(decl, curFuncBody)) {
+            if (let Some(varDecl2) <- (decl as VarDecl)) {
+                if (varDecl2.isVar) {
+                    curFuncBody.captureKind = CaptureKind.CAPTURE_VAR
+                }
+                if (!varDecl2.TestAttr(Attribute.GLOBAL) && !varDecl2.TestAttr(Attribute.IS_CAPTURE) &&
+                    varDecl2.outerDecl.isNone()) {
+                    varDecl2.EnableAttr(Attribute.IS_CAPTURE)
+                }
+            } else if (let Some(funcDecl2) <- (decl as FuncDecl)) {
+                if (!funcDecl2.TestAttr(Attribute.GLOBAL) && funcDecl2.outerDecl.isNone()) {
+                    funcDecl2.EnableAttr(Attribute.IS_CAPTURE)
+                }
+            }
+        }
+    }
+
+    // C++ src/Sema/TypeCheckExpr.cpp:136-141.
+    public func CanTargetOfRefBeCaptured(ctx: ASTContext, nre: NameReferenceExpr, decl: Decl,
+        curFuncBody: FuncBody): Unit {
+        CanTargetOfRefBeCapturedCaseNominalDecl(ctx, nre, decl, curFuncBody)
+        CanTargetOfRefBeCapturedCaseMutFunc(ctx, nre, decl, curFuncBody)
+    }
+
+    // C++ src/Sema/TypeCheckExpr.cpp:143-168.
+    public func CanTargetOfRefBeCapturedCaseNominalDecl(ctx: ASTContext, nre: NameReferenceExpr, decl: Decl,
+        curFuncBody: FuncBody): Unit {
+        let funcSource = match (ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC, nre.scopeName)) {
+            case Some(value) => value
+            case None => return
+        }
+        let funcDecl = (funcSource.node.getOrThrow() as FuncDecl).getOrThrow()
+        if (GetCurFuncBody(ctx, decl.scopeName).isSome()) {
+            return
+        }
+        if ((let Some(currentFuncDecl) <- curFuncBody.funcDecl) &&
+            currentFuncDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+            return
+        }
+        if (decl.TestAttr(Attribute.CONSTRUCTOR) || decl.TestAttr(Attribute.STATIC) ||
+            !funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+            return
+        }
+        let funcOuter = funcDecl.outerDecl.getOrThrow()
+        let needCheck = decl.TestAttr(Attribute.IN_STRUCT) ||
+            (funcOuter.astKind == ASTKind.CLASS_DECL &&
+                (funcOuter.TestAttr(Attribute.ABSTRACT) || funcOuter.TestAttr(Attribute.OPEN)))
+        if (needCheck && (let Some(declOuter) <- decl.outerDecl) && funcOuter == declOuter) {
+            if (let Some(diagValue) <- impl.diag) {
+                Diagnose(diagValue, nre, BasicDiagKind.sema_illegal_capture_this,
+                    args: [BasicDiagArgument(if (decl.TestAttr(Attribute.IN_STRUCT)) {
+                        "struct"
+                    } else {
+                        "inheritable class"
+                    })]).Emit()
+            }
+        }
+    }
+
+    // C++ src/Sema/TypeCheckExpr.cpp:170-191.
+    public func CanTargetOfRefBeCapturedCaseMutFunc(ctx: ASTContext, nre: NameReferenceExpr, decl: Decl,
+        curFuncBody: FuncBody): Unit {
+        if (let Some(funcSource) <- ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC, nre.scopeName)) {
+            if ((let Some(node) <- funcSource.node) && (let Some(funcDecl) <- (node as FuncDecl))) {
+                let isNested = match (curFuncBody.funcDecl) {
+                    case Some(currentDecl) => currentDecl != funcDecl
+                    case None => true
+                }
+                if (funcDecl.TestAttr(Attribute.MUT) && isNested && decl.TestAttr(Attribute.IN_STRUCT) &&
+                    decl.astKind == ASTKind.VAR_DECL) {
+                    if (let Some(diagValue) <- impl.diag) {
+                        Diagnose(diagValue, nre, BasicDiagKind.sema_capture_this_or_instance_field_in_func,
+                            args: [BasicDiagArgument(decl.identifier.Val()),
+                                BasicDiagArgument("mutable function '" + funcDecl.identifier.Val() + "'")]).Emit()
+                    }
+                }
+                if (funcDecl.IsFinalizer() &&
+                    (decl.TestAttr(Attribute.IN_CLASSLIKE) || decl.TestAttr(Attribute.IN_EXTEND)) &&
+                    !decl.TestAttr(Attribute.CONSTRUCTOR) &&
+                    (decl.astKind == ASTKind.FUNC_DECL || decl.astKind == ASTKind.PROP_DECL) &&
+                    !decl.TestAttr(Attribute.STATIC)) {
+                    if (let Some(diagValue2) <- impl.diag) {
+                        Diagnose(diagValue2, nre, BasicDiagKind.sema_capture_this_or_instance_field_in_func,
+                            args: [BasicDiagArgument(decl.identifier.Val()), BasicDiagArgument("finalizer")]).Emit()
+                    }
+                }
+            }
+        }
+    }
+
+    // C++ src/Sema/TypeCheckExpr.cpp:233-253.
+    public func MarkAndCheckRefExprVarCaptureStatus(ctx: ASTContext, nre: NameReferenceExpr): Unit {
+        let target = match (nre.GetTarget()) {
+            case Some(value) => value
+            case None => return
+        }
+        if (target.IsTypeDecl()) {
+            return
+        }
+        let curFuncBody = match (GetCurFuncBody(ctx, nre.scopeName)) {
+            case Some(value) => value
+            case None => return
+        }
+        if (!target.TestAttr(Attribute.STATIC) && !target.TestAttr(Attribute.GLOBAL)) {
+            CanTargetOfRefBeCaptured(ctx, nre, target, curFuncBody)
+            SetCaptureKind(ctx, nre, curFuncBody)
+        }
+        if (let Some(refExpr) <- (nre as RefExpr)) {
+            CheckWarningOfCaptureVariable(ctx, refExpr)
+        }
+    }
+
+    // C++ src/Sema/TypeCheckExpr.cpp:367-387.
+    public func CheckWarningOfCaptureVariable(ctx: ASTContext, re: RefExpr): Unit {
+        let target = match (re.GetTarget()) {
+            case Some(value) => value
+            case None => return
+        }
+        if (target.astKind != ASTKind.VAR_DECL || target.astKind == ASTKind.FUNC_PARAM) {
+            return
+        }
+        var funcSymbol = ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, re.scopeName)
+        while ((let Some(currentFuncSymbol) <- funcSymbol) && currentFuncSymbol.scopeLevel > target.scopeLevel) {
+            let separator = currentFuncSymbol.scopeName.indexOf(CHILD_SCOPE_SEPARATOR) ?? -1
+            let funcScope = if (separator >= 0) {
+                currentFuncSymbol.scopeName[0..separator]
+            } else {
+                currentFuncSymbol.scopeName
+            }
+            for (decl in ctx.GetDeclsByName(Names(target.identifier.Val(), funcScope))) {
+                if (decl.astKind != ASTKind.VAR_DECL || decl.identifier != target.identifier) {
+                    continue
+                }
+                if (let Some(diagValue) <- impl.diag) {
+                    Diagnose(diagValue, re, BasicDiagKind.sema_capture_has_shadow_variable,
+                        args: [BasicDiagArgument(target.identifier.Val()), BasicDiagArgument(target.begin),
+                            BasicDiagArgument(decl.begin)]).Emit()
+                }
+                return
+            }
+            funcSymbol = ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, currentFuncSymbol.scopeName)
+        }
+    }
+
+    // C++ src/Sema/TypeChecker.cpp:1666-1696.
+    public func IsCapturedInCFuncLambda(ctx: ASTContext, re: RefExpr): Bool {
+        let target = match (re.GetTarget()) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (target.fullPackageName != ctx.fullPackageName) {
+            return false
+        }
+        let funcBody = match (GetCurFuncBody(ctx, re.scopeName)) {
+            case Some(value) => value
+            case None => return false
+        }
+        let targetFuncBody = match (GetCurFuncBody(ctx, target.scopeName)) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (funcBody == targetFuncBody || target.TestAttr(Attribute.GLOBAL)) {
+            return false
+        }
+        if ((let Some(funcTy) <- (funcBody.GetTy() as FuncTy)) && funcTy.isC) {
+            return true
+        }
+        if (target.astKind != ASTKind.VAR_DECL && target.astKind != ASTKind.FUNC_DECL) {
+            return false
+        }
+        var outerFuncBody = GetCurFuncBody(ctx, GetParentScopeName(funcBody.scopeName))
+        while (let Some(outer) <- outerFuncBody) {
+            if (outer == targetFuncBody) {
+                return false
+            }
+            if ((let Some(outerFuncTy) <- (outer.GetTy() as FuncTy)) && outerFuncTy.isC) {
+                return true
+            }
+            outerFuncBody = GetCurFuncBody(ctx, GetParentScopeName(outer.scopeName))
+        }
+        return false
+    }
+
+    // C++ src/Sema/TypeChecker.cpp:1698-1719.
+    public func CheckLegalUseOfClosure(expr: Expr, kind: BasicDiagKind, lambdaSource: LambdaSource): Unit {
+        if (expr.TestAttr(Attribute.IS_BROKEN)) {
+            return
+        }
+        if (let Some(lambdaExpr) <- (expr as LambdaExpr)) {
+            if (let Some(funcBody) <- lambdaExpr.funcBody) {
+                if (let CaptureKind.CAPTURE_VAR <- funcBody.captureKind) {
+                    if (let Some(diagValue) <- impl.diag) {
+                        DiagUseClosureCaptureVarAlone(diagValue, expr, lambdaSource)
+                    }
+                } else if (let CaptureKind.TRANSITIVE_CAPTURE <- funcBody.captureKind) {
+                    if (let Some(diagValue2) <- impl.diag) {
+                        Diagnose(diagValue2, expr, kind,
+                            args: [BasicDiagArgument("lambda"), BasicDiagArgument("transitively"),
+                                BasicDiagArgument("lambda")]).Emit()
+                    }
+                }
+            }
+        }
+        if (let Some(refExpr) <- (expr as RefExpr)) {
+            if ((let Some(target) <- refExpr.GetTarget()) && (let Some(funcDecl) <- (target as FuncDecl))) {
+                let funcBody2 = funcDecl.funcBody.getOrThrow()
+                if (let CaptureKind.CAPTURE_VAR <- funcBody2.captureKind) {
+                    if (let Some(diagValue3) <- impl.diag) {
+                        DiagUseClosureCaptureVarAlone(diagValue3, expr, lambdaSource)
+                    }
+                } else if (let CaptureKind.TRANSITIVE_CAPTURE <- funcBody2.captureKind) {
+                    if (let Some(diagValue4) <- impl.diag) {
+                        Diagnose(diagValue4, expr, kind,
+                            args: [BasicDiagArgument(funcDecl.identifier.Val()), BasicDiagArgument("transitively"),
+                                BasicDiagArgument(funcDecl.identifier.Val())]).Emit()
+                    }
+                }
+            }
+        }
+    }
+
+    // C++ src/Sema/TypeChecker.cpp:1721-1753.
+    public func CheckLegalUseOfClosure(ctx: ASTContext, node: Node, lambdaSource: LambdaSource): Unit {
+        if (let Some(varDecl) <- (node as VarDecl)) {
+            if (let Some(initializer) <- varDecl.initializer) {
+                CheckLegalUseOfClosure(initializer, BasicDiagKind.sema_func_capture_var_cannot_assign, lambdaSource)
+            }
+        } else if (let Some(returnExpr) <- (node as ReturnExpr)) {
+            if (let Some(expr) <- returnExpr.expr) {
+                CheckLegalUseOfClosure(expr, BasicDiagKind.sema_func_capture_var_cannot_return, lambdaSource)
+            }
+        } else if (let Some(callExpr) <- (node as CallExpr)) {
+            if ((let Some(baseExpr) <- callExpr.baseFunc) && (let Some(baseRef) <- (baseExpr as RefExpr)) &&
+                IsCapturedInCFuncLambda(ctx, baseRef)) {
+                if (let Some(diagValue) <- impl.diag) {
+                    Diagnose(diagValue, baseRef, BasicDiagKind.sema_cfunc_cannot_capture_var,
+                        args: [BasicDiagArgument(baseRef.ref.identifier.Val())]).Emit()
+                }
+            }
+            for (arg in callExpr.args) {
+                if (let Some(argExpr) <- arg.expr) {
+                    CheckLegalUseOfClosure(argExpr, BasicDiagKind.sema_func_capture_var_cannot_param, lambdaSource)
+                }
+            }
+        } else if (let Some(refExpr) <- (node as RefExpr)) {
+            if (!refExpr.isBaseFunc) {
+                CheckLegalUseOfClosure(refExpr, BasicDiagKind.sema_func_capture_var_cannot_expr, lambdaSource)
+                if ((let Some(target) <- refExpr.GetTarget()) && (let Some(varDecl2) <- (target as VarDecl)) &&
+                    IsCapturedCStructOfClosure(varDecl2)) {
+                    if (let Some(diagValue2) <- impl.diag) {
+                        Diagnose(diagValue2, refExpr, BasicDiagKind.sema_func_capture_var_not_ctype).Emit()
+                    }
+                }
+                if (IsCapturedInCFuncLambda(ctx, refExpr)) {
+                    if (let Some(diagValue3) <- impl.diag) {
+                        Diagnose(diagValue3, refExpr, BasicDiagKind.sema_cfunc_cannot_capture_var,
+                            args: [BasicDiagArgument(refExpr.ref.identifier.Val())]).Emit()
+                    }
+                }
+            }
+        } else if (let Some(lambdaExpr) <- (node as LambdaExpr)) {
+            if (!lambdaExpr.isBaseFunc) {
+                CheckLegalUseOfClosure(lambdaExpr, BasicDiagKind.sema_func_capture_var_cannot_expr, lambdaSource)
+            }
+        }
+    }
+
+    // C++ src/Sema/TypeChecker.cpp:1755-1758.
+    public func IsCapturedCStructOfClosure(decl: VarDecl): Bool {
+        if (!decl.TestAttr(Attribute.IS_CAPTURE)) {
+            return false
+        }
+        if (let Some(declTy) <- decl.GetTy()) {
+            return Ty.IsCTypeConstraint(declTy)
+        }
+        return false
+    }
+
+    // C++ src/Sema/LegalityOfUsage/LegalityOfUsage.cpp:202-259.
+    public func CheckClosures(ctx: ASTContext, node: Node): Unit {
+        let markCaptureWalker = Walker(node, visitPre: { current: Node =>
+            if (let Some(memberAccess) <- (current as MemberAccess)) {
+                if ((let Some(baseExpr) <- memberAccess.baseExpr) && IsThisOrSuper(baseExpr)) {
+                    MarkAndCheckRefExprVarCaptureStatus(ctx, memberAccess)
+                }
+            } else if (let Some(refExpr) <- (current as RefExpr)) {
+                MarkAndCheckRefExprVarCaptureStatus(ctx, refExpr)
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        markCaptureWalker.Walk()
+
+        let setCaptureKindWalker = Walker(node, visitPost: { current: Node =>
+            if (let Some(funcBody) <- (current as FuncBody)) {
+                SetFuncBodyCaptureKind(funcBody)
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        setCaptureKindWalker.Walk()
+
+        let asLambdaSource = { current: Node =>
+            if (current.astKind == ASTKind.SPAWN_EXPR) {
+                LambdaSource.SPAWN
+            } else if (current.astKind == ASTKind.TRY_EXPR) {
+                LambdaSource.TRY_HANDLE
+            } else {
+                LambdaSource.USER
+            }
+        }
+        let lambdaSourceStack = ArrayList<LambdaSource>()
+        lambdaSourceStack.add(asLambdaSource(node))
+        let diagnoseWalker = Walker(node, visitPre: { current: Node =>
+            CheckLegalUseOfClosure(ctx, current, lambdaSourceStack[lambdaSourceStack.size - 1])
+            lambdaSourceStack.add(asLambdaSource(current))
+            VisitAction.WALK_CHILDREN
+        }, visitPost: { _: Node =>
+            lambdaSourceStack.remove(at: lambdaSourceStack.size - 1)
+            VisitAction.WALK_CHILDREN
+        })
+        diagnoseWalker.Walk()
+    }
+}
+
 private func contextPackage(ctx: ASTContext): Option<Package> {
     return ctx.curPackage
 }
@@ -2090,6 +2444,7 @@ extend TypeChecker {
 
     private func RunLegalityOfUsageCheck(ctx: ASTContext, pkg: Package): Unit {
         if (let Some(diagValue) <- impl.diag) {
+            CheckClosures(ctx, pkg)
             let result = CheckLegalityOfUsage(ctx, pkg, diagValue, impl.typeManager, opts: GlobalOptions())
             EmitLegalityOfUsage(diagValue, result)
         }

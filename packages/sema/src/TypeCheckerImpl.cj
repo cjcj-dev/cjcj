@@ -25,6 +25,13 @@ public enum MatchResult {
     | AMBIGUOUS
 }
 
+// C++ src/Sema/TypeCheckerImpl.h:102-104.
+public enum LambdaSource {
+    | USER
+    | SPAWN
+    | TRY_HANDLE
+}
+
 private func SynPosIndex(value: SynPos): Int64 {
     return match (value) {
         case SynPos.NONE => 0

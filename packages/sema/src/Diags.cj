@@ -7,6 +7,55 @@ import cjcj::basic.Range as BasicRange
 import cjcj::ast.*
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
 
+// C++ src/Sema/Diags.cpp:644-676.
+public func DiagUseClosureCaptureVarAlone(diag: BasicDiagnosticEngine, expr: Expr,
+    lambdaSource: LambdaSource): Unit {
+    let builder = if (expr.astKind == ASTKind.LAMBDA_EXPR) {
+        if (let LambdaSource.SPAWN <- lambdaSource) {
+            DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_spawn_capture_var, expr)
+        } else if (let LambdaSource.TRY_HANDLE <- lambdaSource) {
+            DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_try_handle_capture_var, expr)
+        } else {
+            DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_use_func_capture_var_alone, expr, "lambda")
+        }
+    } else {
+        DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_use_func_capture_var_alone, expr, "function")
+    }
+    let funcBody: Option<FuncBody> = if (let Some(lambdaExpr) <- (expr as LambdaExpr)) {
+        lambdaExpr.funcBody
+    } else if (let Some(refExpr) <- (expr as RefExpr)) {
+        if (let Some(target) <- refExpr.GetTarget()) {
+            if (let Some(funcDecl) <- (target as FuncDecl)) {
+                funcDecl.funcBody
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+    let body = funcBody.getOrThrow()
+    let capturedVars = ArrayList<NameReferenceExpr>()
+    for (captured in body.capturedVars) {
+        var index: Int64 = 0
+        while (index < capturedVars.size &&
+            (capturedVars[index].begin.fileID < captured.begin.fileID ||
+                (capturedVars[index].begin.fileID == captured.begin.fileID &&
+                    !(captured.begin < capturedVars[index].begin)))) {
+            index++
+        }
+        capturedVars.add(captured, at: index)
+    }
+    for (captured in capturedVars) {
+        let target = captured.GetTarget().getOrThrow()
+        AddNote(builder, captured, MakeRange(captured.begin, captured.end),
+            "'" + target.identifier.Val() + "' is mutable")
+    }
+    builder.Emit()
+}
+
 private func GetParamsType(typeList: Array<Option<Ty>>): String {
     let result = StringBuilder()
     result.append("(")

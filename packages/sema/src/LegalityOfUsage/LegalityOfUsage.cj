@@ -596,7 +596,6 @@ public func CheckLegalityOfUsage(
     typeManager: TypeManager,
     opts!: OptionGlobalOptions = OptionGlobalOptions()
 ): LegalityOfUsageResult {
-    SetAllFuncBodyCaptureKinds(pkg)
     let result = LegalityOfUsageResult()
     TypeCheckReferenceCheckLegalityOfReference(diag, typeManager, ctx, pkg)
     AppendStaticMemberGenericIssues(result.staticMemberGenericIssues, CheckStaticMembersWithGeneric(pkg))
