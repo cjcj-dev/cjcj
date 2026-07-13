@@ -16,7 +16,7 @@ import cjcj::chir.StoreElementByName
 import cjcj::chir.StoreElementRef
 import cjcj::chir.Type
 import cjcj::chir.Value
-import cjcj::utils.CJC_ASSERT
+import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
 private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
 private let LLVM_ARRAY_TYPE_KIND: Int32 = 11
@@ -24,43 +24,38 @@ private let LLVM_VECTOR_TYPE_KIND: Int32 = 13
 private let LLVM_SCALABLE_VECTOR_TYPE_KIND: Int32 = 17
 
 public func GenerateRawArrayAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
-    if (chirExpr.GetNumOfOperands() != 1) {
-        return LLVMNullValue()
-    }
-    if (let Some(resultTy) <- chirExpr.GetResultType()) {
-        if (let Some(rawArrayTy) <- FindRawArrayType(resultTy)) {
-            let length = chirExpr.GetOperand(0)
-            let lengthValue = irBuilder.GetCGModule().GetMappedCGValue(length).GetRawValue()
-            if (let Some(lengthLocal) <- (length as LocalVar)) {
-                if (let Some(lengthExpr) <- lengthLocal.GetExpr()) {
-                    if (lengthExpr.IsConstant()) {
-                        let constExpr = (lengthExpr as Constant).getOrThrow()
-                        if (constExpr.GetSignedIntLitVal() >= 0) {
-                            return irBuilder.AllocateArray(rawArrayTy, lengthValue)
-                        }
-                    }
+    CJC_ASSERT_WITH_MSG(chirExpr.GetNumOfOperands() == 1,
+        "RawArrayAllocate's argument size is not equal to 1.")
+    let rawArrayTy = FindRawArrayType(chirExpr.GetResultType().getOrThrow()).getOrThrow()
+    let length = chirExpr.GetOperand(0)
+    let lengthValue = irBuilder.GetCGModule().GetMappedCGValue(length).GetRawValue()
+    if (let Some(lengthLocal) <- (length as LocalVar)) {
+        if (let Some(lengthExpr) <- lengthLocal.GetExpr()) {
+            if (lengthExpr.IsConstant()) {
+                let constExpr = (lengthExpr as Constant).getOrThrow()
+                if (constExpr.GetSignedIntLitVal() >= 0) {
+                    return irBuilder.AllocateArray(rawArrayTy, lengthValue)
                 }
             }
-            let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>(
-                [GenNameForBB("arr.alloc.throw"), GenNameForBB("arr.alloc.body")]))
-            CJC_ASSERT(blocks.size == 2)
-            let throwBlock = blocks[0]
-            let bodyBlock = blocks[1]
-            let zeroValue = unsafe { LLVMConstInt(LLVMTypeOf(lengthValue), 0u64, 0) }
-            let isValidLength = irBuilder.CreateICmp(LLVMIntPredicate.SGE, lengthValue, zeroValue,
-                name: "arr.alloc.size.valid")
-            let expectedValidLength = irBuilder.GenerateCallExpectFunction(isValidLength, irBuilder.GetTrue())
-            irBuilder.CreateCondBr(expectedValidLength, bodyBlock, throwBlock)
-
-            irBuilder.SetInsertPoint(throwBlock)
-            irBuilder.CreateNegativeArraySizeException()
-            irBuilder.CreateUnreachable()
-
-            irBuilder.SetInsertPoint(bodyBlock)
-            return irBuilder.AllocateArray(rawArrayTy, lengthValue)
         }
     }
-    return LLVMNullValue()
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>(
+        [GenNameForBB("arr.alloc.throw"), GenNameForBB("arr.alloc.body")]))
+    CJC_ASSERT(blocks.size == 2)
+    let throwBlock = blocks[0]
+    let bodyBlock = blocks[1]
+    let zeroValue = unsafe { LLVMConstInt(LLVMTypeOf(lengthValue), 0u64, 0) }
+    let isValidLength = irBuilder.CreateICmp(LLVMIntPredicate.SGE, lengthValue, zeroValue,
+        name: "arr.alloc.size.valid")
+    let expectedValidLength = irBuilder.GenerateCallExpectFunction(isValidLength, irBuilder.GetTrue())
+    irBuilder.CreateCondBr(expectedValidLength, bodyBlock, throwBlock)
+
+    irBuilder.SetInsertPoint(throwBlock)
+    irBuilder.CreateNegativeArraySizeException()
+    irBuilder.CreateUnreachable()
+
+    irBuilder.SetInsertPoint(bodyBlock)
+    return irBuilder.AllocateArray(rawArrayTy, lengthValue)
 }
 
 public func GenerateRawArrayLiteralInit(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
