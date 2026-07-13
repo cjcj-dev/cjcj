@@ -332,7 +332,7 @@ public class DiagnosticEmitter {
         if (end < start) {
             end = start
         }
-        let substr = source[start - 1..end - 1]
+        let substr = source.toArray()[start - 1..end - 1]
         let disWidth = DisplayWidth(substr)
         return if (disWidth > 0) { disWidth } else { defaultWidth }
     }

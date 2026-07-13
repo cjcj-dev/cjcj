@@ -269,8 +269,7 @@ private func hasUtf8Continuation(bytes: Array<UInt8>, index: Int64): Bool {
     return index < bytes.size && isUtf8Continuation(bytes[index])
 }
 
-private func isValidDisplayUtf8(str: String): Bool {
-    let bytes = str.toArray()
+private func isValidDisplayUtf8(bytes: Array<UInt8>): Bool {
     var idx: Int64 = 0
     while (idx < bytes.size) {
         let first = bytes[idx]
@@ -377,11 +376,15 @@ public func DisplayWidth(pwcs: Array<UInt32>): Int64 {
     return if (width < 0) { -width } else { width }
 }
 
-public func DisplayWidth(str: String): Int64 {
-    if (!isValidDisplayUtf8(str)) {
-        return str.size
+public func DisplayWidth(bytes: Array<UInt8>): Int64 {
+    if (!isValidDisplayUtf8(bytes)) {
+        return bytes.size
     }
-    return DisplayWidth(UTF8ToChar32(str))
+    return DisplayWidth(UTF8ToChar32(String.fromUtf8(bytes)))
+}
+
+public func DisplayWidth(str: String): Int64 {
+    return DisplayWidth(str.toArray())
 }
 
 public func GetSpaceBeforeTarget(content: String, column: Int64): String {
