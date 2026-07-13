@@ -79,7 +79,7 @@ private class FrontendCjoFlatBufferWriter {
     private var currentPackageName: String = ""
     private let packageNameToIndex: HashMap<String, UInt32> = HashMap<String, UInt32>()
     private let packageNameOffsets: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
-    private let fileIdToIndex: HashMap<UInt64, UInt32> = HashMap<UInt64, UInt32>()
+    private let fileIdToIndex: HashMap<UInt64, (UInt32, UInt32)> = HashMap<UInt64, (UInt32, UInt32)>()
     private let allFiles: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let allFileImports: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let allFileInfo: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
@@ -170,7 +170,7 @@ private class FrontendCjoFlatBufferWriter {
     private func SaveFiles(pkg: Package): Unit {
         for (file in pkg.files) {
             let fileIndex = UInt32(allFiles.size + 1)
-            fileIdToIndex[file.begin.fileID] = fileIndex
+            fileIdToIndex[file.begin.fileID] = (0u32, fileIndex)
             allFiles.add(builder.CreateString(StoredFilePath(pkg, file)))
             allFileImports.add(SaveFileImports(file))
             allFileInfo.add(SaveFileInfo(file))
@@ -225,6 +225,11 @@ private class FrontendCjoFlatBufferWriter {
         builder.StartTable(1)
         builder.AddOffset(0, specsVec)
         return builder.EndTable()
+    }
+
+    // ASTWriter.cpp:961-965 GetFileIndex.
+    private func GetFileIndex(fileId: UInt64): (UInt32, UInt32) {
+        return if (let Some(index) <- fileIdToIndex.get(fileId)) { index } else { (0u32, 0u32) }
     }
 
     private func SaveImportSpec(importSpec: ImportSpec, content: ImportContent): FlatBufferOffset {
@@ -2428,9 +2433,9 @@ private class FrontendCjoFlatBufferWriter {
 
     private func PositionBytes(pos: Position): ArrayList<UInt8> {
         let out = ArrayList<UInt8>()
-        let fileIndex = if (fileIdToIndex.contains(pos.fileID)) { fileIdToIndex[pos.fileID] } else { 0u32 }
+        let (packageIndex, fileIndex) = GetFileIndex(pos.fileID)
         AppendU32(out, fileIndex)
-        AppendU32(out, 0u32)
+        AppendU32(out, packageIndex)
         AppendI32(out, pos.line)
         AppendI32(out, pos.column)
         AppendU8(out, if (IsIgnoredPosition(pos)) { 1u8 } else { 0u8 })
