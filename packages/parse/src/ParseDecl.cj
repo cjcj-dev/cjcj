@@ -1065,6 +1065,7 @@ extend ParserImpl {
             }
             if (Skip(TokenKind.COLON)) {
                 body.colonPos = lastToken.Begin()
+                // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:2327-2341
                 if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) && Seeing(TokenKind.THISTYPE)) {
                     enableThis = true
                 }
