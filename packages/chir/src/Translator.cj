@@ -7514,24 +7514,6 @@ public class Translator {
         return RequireResult(builder.CreateTypeCast(enumType, selector, CurrentBlock()))
     }
 
-    // The instantiated this-type for a member call, taken from the base expression's (sema-resolved) type,
-    // mirroring C++ GetInstCalleeInfoFromMemberAccess (TranslateMemberAccess.cpp:272). Returns None when the base
-    // is not a member access or its type is unresolved, so the caller can fall back to the this-object's type.
-    private func MemberCallInstantiatedThisType(expr: AstCallExpr, funcDecl: AstFuncDecl): Option<Type> {
-        if (let Some(base) <- expr.baseFunc) {
-            if (let Some(member) <- (base as AstMemberAccess)) {
-                if (let Some(baseExpr) <- member.baseExpr) {
-                    if (let Some(astTy) <- baseExpr.GetTy()) {
-                        if (AstTy.IsTyCorrect(astTy)) {
-                            return Some(AddRefIfFuncIsMutOrClass(chirTy.TranslateType(astTy), funcDecl))
-                        }
-                    }
-                }
-            }
-        }
-        return None
-    }
-
     private func TranslateMemberFuncCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
         let loc = TranslateLocation(expr)
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
@@ -7549,9 +7531,6 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR member call has no base")
         }
         var thisType: Option<Type> = Some(calleeInfo.thisType)
-        if (calleeDecl.TestAttr(AstAttribute.STATIC)) {
-            thisType = MemberCallInstantiatedThisType(expr, calleeDecl)
-        }
         var dispatchReceiverType: Option<Type> = None
         var funcCallThisType: Option<Type> = None
         var thisObj: Option<Value> = None
