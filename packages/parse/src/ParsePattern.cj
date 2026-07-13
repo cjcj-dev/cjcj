@@ -4,6 +4,7 @@ import std.collection.*
 import cjcj::ast.Expr as AstExpr
 import cjcj::ast.MemberAccess as AstMemberAccess
 import cjcj::ast.RefExpr as AstRefExpr
+import cjcj::utils.CJC_ASSERT
 
 extend ParserImpl {
     public func ParsePattern(): Pattern {
@@ -149,6 +150,7 @@ extend ParserImpl {
             ParseEnumPatternTypeArguments(constructor, enumPat)
         }
         enumPat.constructor = Some(constructor)
+        CheckTypeArgumentsInEnumPattern(enumPat)
         if (Seeing(TokenKind.LPAREN)) {
             let tuplePattern = ParseTuplePattern(true, attributes, isVar, inDecl)
             enumPat.leftParenPos = tuplePattern.leftParenPos
@@ -164,12 +166,59 @@ extend ParserImpl {
         return enumPat
     }
 
+    // C++ anchor: cangjie_compiler/src/Parse/ParsePattern.cpp:152-186
+    private func CheckTypeArgumentsInEnumPattern(enumPattern: EnumPattern): Unit {
+        let constructor = enumPattern.constructor.getOrThrow()
+        if (constructor.IsInvalid()) {
+            return
+        }
+        if (let Some(refExpr) <- (constructor as AstRefExpr)) {
+            if (!refExpr.typeArguments.isEmpty()) {
+                let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_declaration_in_scope,
+                    refExpr.leftAnglePos, "'<'", "enum pattern")
+                builder.AddMainHintArguments("'<'")
+                builder.Emit()
+            }
+        } else {
+            CJC_ASSERT(constructor.astKind == ASTKind.MEMBER_ACCESS)
+            let constructorMember = (constructor as AstMemberAccess).getOrThrow()
+            let constructorBase = constructorMember.baseExpr.getOrThrow()
+            var expr = constructor
+            while (expr.astKind == ASTKind.MEMBER_ACCESS) {
+                let memberAccess = (expr as AstMemberAccess).getOrThrow()
+                if (!memberAccess.typeArguments.isEmpty() && expr != constructorBase) {
+                    let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_declaration_in_scope,
+                        memberAccess.leftAnglePos, "'<'", "enum pattern")
+                    builder.AddMainHintArguments("'<'")
+                    builder.Emit()
+                }
+                expr = memberAccess.baseExpr.getOrThrow()
+            }
+            CJC_ASSERT(expr.astKind == ASTKind.REF_EXPR)
+            if (expr != constructorBase) {
+                let refExpr = (expr as AstRefExpr).getOrThrow()
+                if (!refExpr.typeArguments.isEmpty()) {
+                    let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_declaration_in_scope,
+                        refExpr.leftAnglePos, "'<'", "enum pattern")
+                    builder.AddMainHintArguments("'<'")
+                    builder.Emit()
+                }
+            }
+        }
+    }
+
     private func ParseEnumPatternTypeArguments(constructor: AstExpr, enumPat: EnumPattern): Unit {
         if (!Skip(TokenKind.LT)) {
             return
         }
         let leftAnglePos = lastToken.Begin()
         enumPat.leftAnglePos = leftAnglePos
+        // C++ anchors: Parse/ParseAtom.cpp:1337 and Parse/ParseExpr.cpp:891,911.
+        if (let Some(refExpr) <- (constructor as AstRefExpr)) {
+            refExpr.leftAnglePos = leftAnglePos
+        } else if (let Some(memberAccess) <- (constructor as AstMemberAccess)) {
+            memberAccess.leftAnglePos = leftAnglePos
+        }
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
             let typeArg = ParseType()
             enumPat.typeArguments.add(typeArg)
@@ -182,7 +231,16 @@ extend ParserImpl {
                 break
             }
         }
-        enumPat.rightAnglePos = Expect(TokenKind.GT, "expected '>' after enum pattern type arguments").Begin()
+        let rightAnglePos = Expect(TokenKind.GT, "expected '>' after enum pattern type arguments").Begin()
+        enumPat.rightAnglePos = rightAnglePos
+        // C++ anchors: Parse/ParseAtom.cpp:1345,1355 and Parse/ParseExpr.cpp:912,871.
+        if (let Some(refExpr) <- (constructor as AstRefExpr)) {
+            refExpr.rightAnglePos = rightAnglePos
+            refExpr.end = rightAnglePos + 1
+        } else if (let Some(memberAccess) <- (constructor as AstMemberAccess)) {
+            memberAccess.rightAnglePos = rightAnglePos
+            memberAccess.end = rightAnglePos
+        }
         enumPat.end = enumPat.rightAnglePos + 1
     }
 
