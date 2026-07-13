@@ -2460,12 +2460,36 @@ public class Translator {
     }
 
     private func GenerateInvokeCallContext(instFuncType: FaithfulInstCalleeInfo, caller: Value,
-        callee: AstFuncDecl, args: ArrayList<Value>): InvokeCallContext {
-        let methodType = BuildMethodFuncTypeForMemberAccess(callee)
-        let genericParams = TranslateFuncGenericParams(callee)
+        callee: AstFuncDecl, args: ArrayList<Value>, strategy!: OverflowStrategy = OverflowStrategy.NA
+    ): InvokeCallContext {
+        // C++ CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:207-227.
+        let originalFuncDecl = if (let Some(resolver) <- overrideSrcFuncResolver) {
+            resolver(callee) ?? callee
+        } else {
+            callee
+        }
+        let methodType = BuildMethodFuncTypeForMemberAccess(originalFuncDecl)
+        let genericParams = TranslateFuncGenericParams(originalFuncDecl)
+        var funcName = originalFuncDecl.identifier.Val()
+        if (IsOverflowOpCall(originalFuncDecl)) {
+            funcName = OverflowStrategyPrefix(strategy) + funcName
+        }
         return InvokeCallContext(caller, FuncCallContext(args: args,
             instTypeArgs: instFuncType.instantiatedTypeArgs, thisType: Some(instFuncType.thisType)),
-            FuncSigInfo(methodType, funcName: callee.identifier.Val(), genericTypeParams: genericParams))
+            FuncSigInfo(methodType, funcName: funcName, genericTypeParams: genericParams))
+    }
+
+    // C++ CHIR/AST2CHIR/TranslateASTNode/TranslateCallExpr.cpp:829-835.
+    private func IsOverflowOpCall(funcDecl: AstFuncDecl): Bool {
+        if (let Some(outerDecl) <- funcDecl.outerDecl) {
+            if ((outerDecl as AstInterfaceDecl).isNone()) {
+                return false
+            }
+        } else {
+            return false
+        }
+        return IsOverflowOperator(funcDecl.identifier.Val(),
+            RequireFuncType(chirTy.TranslateType(RequireAstTy(funcDecl))))
     }
 
     private func BuildMethodFuncTypeForMemberAccess(funcDecl: AstFuncDecl): FuncType {
@@ -7472,10 +7496,9 @@ public class Translator {
                 let parentTy = thisType ?? TranslateMemberOwnerType(calleeDecl)
                 let rtti = RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
                     parentTy.StripAllRefs(), CurrentBlock()))
-                let instTypeArgs = calleeInfo.instantiatedTypeArgs
-                let invokeCtx = InvokeCallContext(rtti, FuncCallContext(args: argValues,
-                    instTypeArgs: instTypeArgs, thisType: parentTy),
-                    FuncSigInfo(BuildMethodFuncTypeForMemberAccess(calleeDecl), funcName: calleeDecl.identifier.Val()))
+                // C++ TranslateCallExpr.cpp:910-911 delegates overflow-name selection to GenerateInvokeCallContext.
+                let invokeCtx = GenerateInvokeCallContext(calleeInfo, rtti, calleeDecl, argValues,
+                    strategy: expr.overflowStrategy)
                 let invoke = CreateInvokeStaticMaybeWithException(resultTy, invokeCtx, loc: loc)
                 if (HasNothingTypeArg(argValues)) {
                     invoke.AsLocalVar().getOrThrow().GetExpr().getOrThrow().SetDebugLocationInfoForWarning(TranslateLocation(
@@ -7484,12 +7507,9 @@ public class Translator {
                 return invoke
             }
             let obj = thisObj ?? throw IllegalStateException("faithful AST2CHIR virtual member call has no this object")
-            let objTy = thisType ?? throw IllegalStateException("faithful AST2CHIR virtual member call this has no type")
-            let callThisTy = funcCallThisType ?? objTy
-            let instTypeArgs = calleeInfo.instantiatedTypeArgs
-            let invokeCtx = InvokeCallContext(obj, FuncCallContext(args: argValues,
-                instTypeArgs: instTypeArgs, thisType: callThisTy),
-                FuncSigInfo(BuildMethodFuncTypeForMemberAccess(calleeDecl), funcName: calleeDecl.identifier.Val()))
+            // C++ TranslateCallExpr.cpp:918-919 delegates overflow-name selection to GenerateInvokeCallContext.
+            let invokeCtx = GenerateInvokeCallContext(calleeInfo, obj, calleeDecl, argValues,
+                strategy: expr.overflowStrategy)
             let invoke = CreateInvokeMaybeWithException(resultTy, invokeCtx, loc: loc)
             if (HasNothingTypeArg(argValues)) {
                 invoke.AsLocalVar().getOrThrow().GetExpr().getOrThrow().SetDebugLocationInfoForWarning(TranslateLocation(
