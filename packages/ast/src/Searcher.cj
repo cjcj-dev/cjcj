@@ -11,7 +11,7 @@ public class TrieNode {
     public var parent: Option<TrieNode> = None
     public let next: HashMap<String, TrieNode> = HashMap<String, TrieNode>()
     public let suffixes: HashSet<String> = HashSet<String>()
-    public let ids: HashMap<String, Symbol> = HashMap<String, Symbol>()
+    public let ids: TreeSet<Ptr<Symbol>> = TreeSet<Ptr<Symbol>>()
     public init() {}
 
     public init(c: String) {
@@ -24,19 +24,6 @@ public class Trie {
 
     public init() {}
 
-    private func symbolKey(symbol: Symbol): String {
-        if (symbol.hashID.hash64 != 0u64 || symbol.hashID.fieldID != 0u32) {
-            return symbol.hashID.hash64.toString() + ":" + symbol.hashID.fieldID.toString()
-        }
-        if (let Some(node) <- symbol.node) {
-            return symbol.name + "|" + symbol.scopeName + "|" + node.begin.fileID.toString() + ":" +
-                node.begin.line.toString() + ":" + node.begin.column.toString() + "|" +
-                node.end.fileID.toString() + ":" + node.end.line.toString() + ":" + node.end.column.toString() +
-                "|" + ASTKindIndex(node.astKind).toString()
-        }
-        return symbol.name + "|" + symbol.scopeName + "|" + ASTKindIndex(symbol.astKind).toString()
-    }
-
     public func Reset(): Unit {
         root = TrieNode("R")
     }
@@ -47,7 +34,28 @@ public class Trie {
     }
 
     public func Insert(value: String): Unit {
-        Insert(value, Symbol(value))
+        var node = root
+        var prefix = ""
+        var idx: Int64 = 0
+        for (byte in value.toArray()) {
+            let key = String.fromUtf8([byte])
+            prefix += key
+            if (!node.next.contains(key)) {
+                let child = TrieNode(key)
+                child.prefix = prefix
+                child.depth = node.depth + 1u32
+                child.parent = node
+                node.next[key] = child
+            }
+            if (let Some(child) <- node.next.get(key)) {
+                node = child
+                if (idx + 1 < value.size) {
+                    node.suffixes.add(value[(idx + 1)..])
+                }
+            }
+            idx++
+        }
+        node.value = value
     }
 
     public func Insert(value: String, symbol: Symbol): Unit {
@@ -66,7 +74,7 @@ public class Trie {
             }
             if (let Some(child) <- node.next.get(key)) {
                 node = child
-                node.ids[symbolKey(symbol)] = symbol
+                node.ids.add(Ptr<Symbol>(symbol))
                 if (idx + 1 < value.size) {
                     node.suffixes.add(value[(idx + 1)..])
                 }
@@ -81,10 +89,7 @@ public class Trie {
         for (byte in value.toArray()) {
             let key = String.fromUtf8([byte])
             if (let Some(child) <- node.next.get(key)) {
-                let keyForSymbol = symbolKey(symbol)
-                if (child.ids.contains(keyForSymbol)) {
-                    child.ids.remove(keyForSymbol)
-                }
+                child.ids.remove(Ptr<Symbol>(symbol))
                 node = child
             } else {
                 return
@@ -193,18 +198,26 @@ public class PosSearchApi {
     }
 
     public static func GetIDsWithinPosXByRange(posTrie: Trie, startPos: Position, endPos: Position,
-        isLeftClose!: Bool = true, isRightClose!: Bool = false): ArrayList<Symbol> {
+        isLeftClose!: Bool = true, isRightClose!: Bool = false): TreeSet<Ptr<Symbol>> {
+        let out = TreeSet<Ptr<Symbol>>()
         if (endPos <= startPos) {
-            return ArrayList<Symbol>()
+            return out
         }
-        return intersection(GetIDsGreaterThanPos(posTrie, startPos, isClose: isLeftClose),
-            GetIDsLessThanPos(posTrie, endPos, isClose: isRightClose))
+        let left = GetIDsGreaterThanPos(posTrie, startPos, isClose: isLeftClose)
+        let right = GetIDsLessThanPos(posTrie, endPos, isClose: isRightClose)
+        for (symbol in left) {
+            if (right.contains(symbol)) {
+                out.add(symbol)
+            }
+        }
+        return out
     }
 
-    public static func GetIDsGreaterThanPos(posTrie: Trie, pos: Position, isClose!: Bool = true): ArrayList<Symbol> {
+    public static func GetIDsGreaterThanPos(posTrie: Trie, pos: Position,
+        isClose!: Bool = true): TreeSet<Ptr<Symbol>> {
         let posStr = PosToStr(pos)
         var node = FindCommonRootInPosTrie(posTrie, posStr)
-        let out = ArrayList<Symbol>()
+        let out = TreeSet<Ptr<Symbol>>()
         var close = isClose
         while (Int64(node.depth) > MAX_DIGITS_FILE) {
             if (Int64(node.depth) == GetMaxDigitsPostion()) {
@@ -218,7 +231,9 @@ public class PosSearchApi {
             for ((key, child) in node.next) {
                 let selected = if (close) { !(key < target) } else { target < key }
                 if (selected) {
-                    addAllUnique(out, child.ids)
+                    for (symbol in child.ids) {
+                        out.add(symbol)
+                    }
                 }
             }
             close = false
@@ -231,10 +246,11 @@ public class PosSearchApi {
         return out
     }
 
-    public static func GetIDsLessThanPos(posTrie: Trie, pos: Position, isClose!: Bool = true): ArrayList<Symbol> {
+    public static func GetIDsLessThanPos(posTrie: Trie, pos: Position,
+        isClose!: Bool = true): TreeSet<Ptr<Symbol>> {
         let posStr = PosToStr(pos)
         var node = FindCommonRootInPosTrie(posTrie, posStr)
-        let out = ArrayList<Symbol>()
+        let out = TreeSet<Ptr<Symbol>>()
         let close = Box<Bool>(isClose)
         while (Int64(node.depth) > MAX_DIGITS_FILE) {
             if (Int64(node.depth) == GetMaxDigitsPostion()) {
@@ -256,7 +272,7 @@ public class PosSearchApi {
     }
 
     public static func GetIDsLessThanPosOfDepth(
-        n: TrieNode, posStr: String, ids: ArrayList<Symbol>, isClose: Box<Bool>): Unit {
+        n: TrieNode, posStr: String, ids: TreeSet<Ptr<Symbol>>, isClose: Box<Bool>): Unit {
         let target = digitAt(posStr, n.depth)
         var endIter = ""
         var foundEndIter = false
@@ -277,37 +293,11 @@ public class PosSearchApi {
         }
         for ((key, child) in n.next) {
             if (!foundEndIter || key < endIter || (includeEndIter && key == endIter)) {
-                addAllUnique(ids, child.ids)
-            }
-        }
-    }
-
-    private static func addUniqueSymbol(values: ArrayList<Symbol>, symbol: Symbol): Unit {
-        for (value in values) {
-            if (SameSymbol(value, symbol)) {
-                return
-            }
-        }
-        values.add(symbol)
-    }
-
-    private static func addAllUnique(values: ArrayList<Symbol>, symbols: HashMap<String, Symbol>): Unit {
-        for (symbol in symbols.values()) {
-            addUniqueSymbol(values, symbol)
-        }
-    }
-
-    private static func intersection(left: ArrayList<Symbol>, right: ArrayList<Symbol>): ArrayList<Symbol> {
-        let out = ArrayList<Symbol>()
-        for (symbol in left) {
-            for (candidate in right) {
-                if (SameSymbol(symbol, candidate)) {
-                    addUniqueSymbol(out, symbol)
-                    break
+                for (symbol in child.ids) {
+                    ids.add(symbol)
                 }
             }
         }
-        return out
     }
 
     private static func digitAt(value: String, depth: UInt32): String {
@@ -519,10 +509,11 @@ public class Searcher {
         return (results, false)
     }
 
-    private func FilterAndSortSearchResult(ids: ArrayList<Symbol>, query: Query,
+    private func FilterAndSortSearchResult(ids: TreeSet<Ptr<Symbol>>, query: Query,
         order!: SearchOrder = SearchOrder.POS_DESC): ArrayList<Symbol> {
         let out = ArrayList<Symbol>()
-        for (symbol in ids) {
+        for (id in ids) {
+            let symbol = id.value
             if (!symbol.invertedIndexBeenDeleted && InFiles(query, symbol)) {
                 insertByPosition(out, symbol, order: order)
             }
@@ -534,15 +525,40 @@ public class Searcher {
         return !query.HasFileHashFilter() || query.fileHashes.contains(symbol.hashID.hash64)
     }
 
-    private func PerformSearch(ctx: ASTContext, query: Query): ArrayList<Symbol> {
+    private func PerformSearch(ctx: ASTContext, query: Query): TreeSet<Ptr<Symbol>> {
         if (let Some(compound) <- (query as CompoundQuery)) {
-            return PerformCompoundSearch(ctx, compound)
+            if (compound.children.isEmpty()) {
+                return AllLiveSymbols(ctx)
+            }
+            if (compound.kind == QueryKind.AND) {
+                var out = PerformSearch(ctx, compound.children[0])
+                var idx: Int64 = 1
+                while (idx < compound.children.size) {
+                    out = Intersection(out, PerformSearch(ctx, compound.children[idx]))
+                    idx++
+                }
+                return out
+            }
+            if (compound.kind == QueryKind.OR) {
+                var out = TreeSet<Ptr<Symbol>>()
+                for (child in compound.children) {
+                    out = Union(out, PerformSearch(ctx, child))
+                }
+                return out
+            }
+            if (compound.kind == QueryKind.NOT) {
+                if (compound.children.size == 1) {
+                    return Difference(AllLiveSymbols(ctx), PerformSearch(ctx, compound.children[0]))
+                }
+                return Difference(PerformSearch(ctx, compound.children[0]), PerformSearch(ctx, compound.children[1]))
+            }
+            return FilterByMatcher(ctx, compound)
         }
         return GetIDs(ctx, query)
     }
 
     // Mirrors AST/Searcher.cpp:634-656 Searcher::GetIDs.
-    private func GetIDs(ctx: ASTContext, query: Query): ArrayList<Symbol> {
+    private func GetIDs(ctx: ASTContext, query: Query): TreeSet<Ptr<Symbol>> {
         if (let Some(nameQuery) <- (query as NameQuery)) {
             return GetIDsByName(ctx, nameQuery)
         }
@@ -561,36 +577,7 @@ public class Searcher {
         return FilterByMatcher(ctx, query)
     }
 
-    private func PerformCompoundSearch(ctx: ASTContext, query: CompoundQuery): ArrayList<Symbol> {
-        if (query.children.isEmpty()) {
-            return AllLiveSymbols(ctx)
-        }
-        if (query.kind == QueryKind.AND) {
-            var out = PerformSearch(ctx, query.children[0])
-            var idx: Int64 = 1
-            while (idx < query.children.size) {
-                out = Intersection(out, PerformSearch(ctx, query.children[idx]))
-                idx++
-            }
-            return out
-        }
-        if (query.kind == QueryKind.OR) {
-            var out = ArrayList<Symbol>()
-            for (child in query.children) {
-                out = Union(out, PerformSearch(ctx, child))
-            }
-            return out
-        }
-        if (query.kind == QueryKind.NOT) {
-            if (query.children.size == 1) {
-                return Difference(AllLiveSymbols(ctx), PerformSearch(ctx, query.children[0]))
-            }
-            return Difference(PerformSearch(ctx, query.children[0]), PerformSearch(ctx, query.children[1]))
-        }
-        return FilterByMatcher(ctx, query)
-    }
-
-    private func GetIDsByName(ctx: ASTContext, query: NameQuery): ArrayList<Symbol> {
+    private func GetIDsByName(ctx: ASTContext, query: NameQuery): TreeSet<Ptr<Symbol>> {
         if (ctx.invertedIndex.nameIndexes.isEmpty()) {
             return FilterByMatcher(ctx, query)
         }
@@ -607,21 +594,21 @@ public class Searcher {
     }
 
     // Mirrors AST/Searcher.cpp:384-392 Searcher::GetIDsByNamePrefix.
-    private func GetIDsByNamePrefix(ctx: ASTContext, prefix: String): ArrayList<Symbol> {
+    private func GetIDsByNamePrefix(ctx: ASTContext, prefix: String): TreeSet<Ptr<Symbol>> {
         return SymbolsForKeys(ctx.invertedIndex.nameIndexes, ctx.invertedIndex.nameTrie.PrefixMatch(prefix))
     }
 
     // Mirrors AST/Searcher.cpp:394-402 Searcher::GetIDsByNameSuffix.
-    private func GetIDsByNameSuffix(ctx: ASTContext, suffix: String): ArrayList<Symbol> {
+    private func GetIDsByNameSuffix(ctx: ASTContext, suffix: String): TreeSet<Ptr<Symbol>> {
         return SymbolsForKeys(ctx.invertedIndex.nameIndexes, ctx.invertedIndex.nameTrie.SuffixMatch(suffix))
     }
 
-    private func GetIDsByScopeName(ctx: ASTContext, query: ScopeQuery): ArrayList<Symbol> {
+    private func GetIDsByScopeName(ctx: ASTContext, query: ScopeQuery): TreeSet<Ptr<Symbol>> {
         if (ctx.invertedIndex.scopeNameIndexes.isEmpty()) {
             return FilterByMatcher(ctx, query)
         }
         if (query.matchKind == MatchKind.SUFFIX) {
-            return ArrayList<Symbol>()
+            return TreeSet<Ptr<Symbol>>()
         }
         if (query.value.isEmpty()) {
             return ValuesFromStringIndex(ctx.invertedIndex.scopeNameIndexes)
@@ -629,21 +616,21 @@ public class Searcher {
         if (query.matchKind == MatchKind.PRECISE) {
             return SymbolsForKey(ctx.invertedIndex.scopeNameIndexes, query.value)
         }
-        let out = ArrayList<Symbol>()
+        var out = TreeSet<Ptr<Symbol>>()
         for (scopeName in ctx.invertedIndex.scopeNameTrie.PrefixMatch(query.value)) {
-            AddAllUnique(out, SymbolsForKey(ctx.invertedIndex.scopeNameIndexes, scopeName))
+            out = Union(out, SymbolsForKey(ctx.invertedIndex.scopeNameIndexes, scopeName))
         }
         return out
     }
 
-    private func GetIDsByScopeLevel(ctx: ASTContext, query: ScopeLevelQuery): ArrayList<Symbol> {
+    private func GetIDsByScopeLevel(ctx: ASTContext, query: ScopeLevelQuery): TreeSet<Ptr<Symbol>> {
         if (ctx.invertedIndex.scopeLevelIndexes.isEmpty()) {
             return FilterByMatcher(ctx, query)
         }
-        var out = ArrayList<Symbol>()
+        var out = TreeSet<Ptr<Symbol>>()
         if (query.comparator == PositionCompare.EQ) {
             if (let Some(values) <- ctx.invertedIndex.scopeLevelIndexes.get(query.level)) {
-                AddAllUnique(out, values)
+                out = Union(out, values)
             }
             return out
         }
@@ -662,12 +649,12 @@ public class Searcher {
         return out
     }
 
-    private func GetIDsByASTKind(ctx: ASTContext, query: ASTKindQuery): ArrayList<Symbol> {
+    private func GetIDsByASTKind(ctx: ASTContext, query: ASTKindQuery): TreeSet<Ptr<Symbol>> {
         if (ctx.invertedIndex.astKindIndexes.isEmpty()) {
             return FilterByMatcher(ctx, query)
         }
         if (query.matchKind == MatchKind.PREFIX) {
-            return ArrayList<Symbol>()
+            return TreeSet<Ptr<Symbol>>()
         }
         if (query.valueText.isEmpty()) {
             return ValuesFromStringIndex(ctx.invertedIndex.astKindIndexes)
@@ -683,7 +670,7 @@ public class Searcher {
         return ctx.invertedIndex.astKindTrie.SuffixMatch(suffix)
     }
 
-    private func GetIDsByPos(ctx: ASTContext, query: PositionQuery): ArrayList<Symbol> {
+    private func GetIDsByPos(ctx: ASTContext, query: PositionQuery): TreeSet<Ptr<Symbol>> {
         if (ctx.invertedIndex.posBeginTrie.root.next.isEmpty() || ctx.invertedIndex.posEndTrie.root.next.isEmpty()) {
             return FilterByMatcher(ctx, query)
         }
@@ -703,20 +690,25 @@ public class Searcher {
     }
 
     private func GetIDsByPosEQ(ctx: ASTContext, pos: Position, isLeftClose!: Bool = true,
-        isRightClose!: Bool = true): ArrayList<Symbol> {
+        isRightClose!: Bool = true): TreeSet<Ptr<Symbol>> {
         let beginIDs = PosSearchApi.GetIDsLessThanPos(ctx.invertedIndex.posBeginTrie, pos, isClose: isLeftClose)
         let endIDs = PosSearchApi.GetIDsGreaterThanPos(ctx.invertedIndex.posEndTrie, pos, isClose: isRightClose)
         if (!endIDs.isEmpty()) {
             return Intersection(beginIDs, endIDs)
         }
         if (beginIDs.isEmpty()) {
-            return ArrayList<Symbol>()
+            return TreeSet<Ptr<Symbol>>()
         }
-        let out = ArrayList<Symbol>()
-        var remaining = Int64(beginIDs[0].scopeLevel)
+        let out = TreeSet<Ptr<Symbol>>()
+        var remaining: Int64 = -1
+        var initialized = false
         for (symbol in beginIDs) {
+            if (!initialized) {
+                remaining = Int64(symbol.value.scopeLevel)
+                initialized = true
+            }
             if (remaining >= 0) {
-                AddUnique(out, symbol)
+                out.add(symbol)
                 remaining--
             } else {
                 break
@@ -725,7 +717,8 @@ public class Searcher {
         return out
     }
 
-    private func GetIDsByPosLT(ctx: ASTContext, pos: Position, contain!: Bool = false): ArrayList<Symbol> {
+    private func GetIDsByPosLT(ctx: ASTContext, pos: Position,
+        contain!: Bool = false): TreeSet<Ptr<Symbol>> {
         let out = PosSearchApi.GetIDsLessThanPos(ctx.invertedIndex.posEndTrie, pos, isClose: false)
         if (contain) {
             return Union(out, GetIDsByPosEQ(ctx, pos))
@@ -733,7 +726,8 @@ public class Searcher {
         return out
     }
 
-    private func GetIDsByPosGT(ctx: ASTContext, pos: Position, contain!: Bool = false): ArrayList<Symbol> {
+    private func GetIDsByPosGT(ctx: ASTContext, pos: Position,
+        contain!: Bool = false): TreeSet<Ptr<Symbol>> {
         let out = PosSearchApi.GetIDsGreaterThanPos(ctx.invertedIndex.posBeginTrie, pos, isClose: false)
         if (contain) {
             return Union(out, GetIDsByPosEQ(ctx, pos))
@@ -741,148 +735,89 @@ public class Searcher {
         return out
     }
 
-    private func SymbolsForKeys(map: HashMap<String, ArrayList<Symbol>>, keys: ArrayList<String>): ArrayList<Symbol> {
-        var out = ArrayList<Symbol>()
+    private func SymbolsForKeys(map: HashMap<String, TreeSet<Ptr<Symbol>>>,
+        keys: ArrayList<String>): TreeSet<Ptr<Symbol>> {
+        var out = TreeSet<Ptr<Symbol>>()
         for (key in keys) {
             out = Union(out, SymbolsForKey(map, key))
         }
         return out
     }
 
-    private func SymbolsForKey(map: HashMap<String, ArrayList<Symbol>>, key: String): ArrayList<Symbol> {
-        let out = ArrayList<Symbol>()
+    private func SymbolsForKey(map: HashMap<String, TreeSet<Ptr<Symbol>>>,
+        key: String): TreeSet<Ptr<Symbol>> {
+        let out = TreeSet<Ptr<Symbol>>()
         if (let Some(values) <- map.get(key)) {
-            AddAllUnique(out, values)
+            for (value in values) {
+                out.add(value)
+            }
         }
         return out
     }
 
-    private func ValuesFromStringIndex(map: HashMap<String, ArrayList<Symbol>>): ArrayList<Symbol> {
-        let out = ArrayList<Symbol>()
+    private func ValuesFromStringIndex(
+        map: HashMap<String, TreeSet<Ptr<Symbol>>>): TreeSet<Ptr<Symbol>> {
+        let out = TreeSet<Ptr<Symbol>>()
         for ((_, values) in map) {
-            AddAllUnique(out, values)
+            for (value in values) {
+                out.add(value)
+            }
         }
         return out
     }
 
-    private func FilterByMatcher(ctx: ASTContext, query: Query): ArrayList<Symbol> {
-        let out = ArrayList<Symbol>()
+    private func FilterByMatcher(ctx: ASTContext, query: Query): TreeSet<Ptr<Symbol>> {
+        let out = TreeSet<Ptr<Symbol>>()
         for (symbol in ctx.symbolTable) {
             if (!symbol.invertedIndexBeenDeleted && query.Match(symbol)) {
-                AddUnique(out, symbol)
+                out.add(Ptr<Symbol>(symbol))
             }
         }
         return out
     }
 
-    private func AllLiveSymbols(ctx: ASTContext): ArrayList<Symbol> {
-        let out = ArrayList<Symbol>()
+    private func AllLiveSymbols(ctx: ASTContext): TreeSet<Ptr<Symbol>> {
+        let out = TreeSet<Ptr<Symbol>>()
         for (symbol in ctx.symbolTable) {
             if (!symbol.invertedIndexBeenDeleted) {
-                AddUnique(out, symbol)
+                out.add(Ptr<Symbol>(symbol))
             }
         }
         return out
     }
 
-    private func Intersection(left: ArrayList<Symbol>, right: ArrayList<Symbol>): ArrayList<Symbol> {
-        let out = ArrayList<Symbol>()
-        let outIDs = HashSet<UInt32>()
-        let rightIDs = HashSet<UInt32>()
-        let rightWithoutHashID = ArrayList<Symbol>()
+    private func Intersection(left: TreeSet<Ptr<Symbol>>,
+        right: TreeSet<Ptr<Symbol>>): TreeSet<Ptr<Symbol>> {
+        let out = TreeSet<Ptr<Symbol>>()
         for (item in right) {
-            if (item.hashID.hash64 != 0u64 || item.hashID.fieldID != 0u32) {
-                rightIDs.add(item.hashID.fieldID)
-            } else {
-                rightWithoutHashID.add(item)
-            }
-        }
-        for (item in left) {
-            if (item.hashID.hash64 != 0u64 || item.hashID.fieldID != 0u32) {
-                if (rightIDs.contains(item.hashID.fieldID) && !outIDs.contains(item.hashID.fieldID)) {
-                    out.add(item)
-                    outIDs.add(item.hashID.fieldID)
-                }
-            } else if (ContainsSymbol(rightWithoutHashID, item)) {
-                AddUnique(out, item)
+            if (left.contains(item)) {
+                out.add(item)
             }
         }
         return out
     }
 
-    private func Union(left: ArrayList<Symbol>, right: ArrayList<Symbol>): ArrayList<Symbol> {
-        let out = ArrayList<Symbol>()
-        let outIDs = HashSet<UInt32>()
+    private func Union(left: TreeSet<Ptr<Symbol>>,
+        right: TreeSet<Ptr<Symbol>>): TreeSet<Ptr<Symbol>> {
+        let out = TreeSet<Ptr<Symbol>>()
         for (item in left) {
-            if (item.hashID.hash64 != 0u64 || item.hashID.fieldID != 0u32) {
-                if (!outIDs.contains(item.hashID.fieldID)) {
-                    out.add(item)
-                    outIDs.add(item.hashID.fieldID)
-                }
-            } else {
-                AddUnique(out, item)
-            }
+            out.add(item)
         }
         for (item in right) {
-            if (item.hashID.hash64 != 0u64 || item.hashID.fieldID != 0u32) {
-                if (!outIDs.contains(item.hashID.fieldID)) {
-                    out.add(item)
-                    outIDs.add(item.hashID.fieldID)
-                }
-            } else {
-                AddUnique(out, item)
-            }
+            out.add(item)
         }
         return out
     }
 
-    private func Difference(left: ArrayList<Symbol>, right: ArrayList<Symbol>): ArrayList<Symbol> {
-        let out = ArrayList<Symbol>()
-        let outIDs = HashSet<UInt32>()
-        let rightIDs = HashSet<UInt32>()
-        let rightWithoutHashID = ArrayList<Symbol>()
-        for (item in right) {
-            if (item.hashID.hash64 != 0u64 || item.hashID.fieldID != 0u32) {
-                rightIDs.add(item.hashID.fieldID)
-            } else {
-                rightWithoutHashID.add(item)
-            }
-        }
+    private func Difference(left: TreeSet<Ptr<Symbol>>,
+        right: TreeSet<Ptr<Symbol>>): TreeSet<Ptr<Symbol>> {
+        let out = TreeSet<Ptr<Symbol>>()
         for (item in left) {
-            if (item.hashID.hash64 != 0u64 || item.hashID.fieldID != 0u32) {
-                if (!rightIDs.contains(item.hashID.fieldID) && !outIDs.contains(item.hashID.fieldID)) {
-                    out.add(item)
-                    outIDs.add(item.hashID.fieldID)
-                }
-            } else if (!ContainsSymbol(rightWithoutHashID, item)) {
-                AddUnique(out, item)
+            if (!right.contains(item)) {
+                out.add(item)
             }
         }
         return out
-    }
-
-    private func AddAllUnique(out: ArrayList<Symbol>, values: ArrayList<Symbol>): Unit {
-        for (value in values) {
-            AddUnique(out, value)
-        }
-    }
-
-    private func AddUnique(out: ArrayList<Symbol>, symbol: Symbol): Unit {
-        if (symbol.invertedIndexBeenDeleted) {
-            return
-        }
-        if (!ContainsSymbol(out, symbol)) {
-            out.add(symbol)
-        }
-    }
-
-    private func ContainsSymbol(values: ArrayList<Symbol>, symbol: Symbol): Bool {
-        for (value in values) {
-            if (SameSymbol(value, symbol)) {
-                return true
-            }
-        }
-        return false
     }
 
     private func AddUniqueString(out: ArrayList<String>, value: String): Unit {

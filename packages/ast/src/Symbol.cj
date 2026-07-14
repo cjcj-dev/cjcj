@@ -2,6 +2,7 @@ package cjcj::ast
 
 import std.collection.*
 import std.sync.AtomicUInt32
+import cjcj::utils.Identifiable
 
 public struct HashID <: Hashable & Equatable<HashID> {
     public var hash64: UInt64 = 0
@@ -31,7 +32,7 @@ public struct HashID <: Hashable & Equatable<HashID> {
     }
 }
 
-public class Symbol {
+public class Symbol <: Identifiable {
     public var name: String = ""
     public var id: Option<Symbol> = None
     public var node: Option<Node> = None
@@ -43,6 +44,9 @@ public class Symbol {
     public var invertedIndexBeenDeleted: Bool = false
     public var isNeedExposedToInterop: Bool = false
     public let children: ArrayList<Symbol> = ArrayList<Symbol>()
+    public prop objectId: Int64 {
+        get() { Int64(hashID.fieldID) }
+    }
 
     public init() {}
 

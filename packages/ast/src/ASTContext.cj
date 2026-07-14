@@ -3,11 +3,11 @@ package cjcj::ast
 import std.collection.*
 
 public class InvertedIndex {
-    public let nameIndexes: HashMap<String, ArrayList<Symbol>> = HashMap<String, ArrayList<Symbol>>()
-    public let scopeNameIndexes: HashMap<String, ArrayList<Symbol>> = HashMap<String, ArrayList<Symbol>>()
-    public let astKindIndexes: HashMap<String, ArrayList<Symbol>> = HashMap<String, ArrayList<Symbol>>()
+    public let nameIndexes: HashMap<String, TreeSet<Ptr<Symbol>>> = HashMap<String, TreeSet<Ptr<Symbol>>>()
+    public let scopeNameIndexes: HashMap<String, TreeSet<Ptr<Symbol>>> = HashMap<String, TreeSet<Ptr<Symbol>>>()
+    public let astKindIndexes: HashMap<String, TreeSet<Ptr<Symbol>>> = HashMap<String, TreeSet<Ptr<Symbol>>>()
     public let scopeGateMap: HashMap<String, Symbol> = HashMap<String, Symbol>()
-    public let scopeLevelIndexes: HashMap<UInt32, ArrayList<Symbol>> = HashMap<UInt32, ArrayList<Symbol>>()
+    public let scopeLevelIndexes: HashMap<UInt32, TreeSet<Ptr<Symbol>>> = HashMap<UInt32, TreeSet<Ptr<Symbol>>>()
     public let nameTrie: Trie = Trie()
     public let scopeNameTrie: Trie = Trie()
     public let astKindTrie: Trie = Trie()
@@ -78,47 +78,33 @@ public class InvertedIndex {
         symbol.invertedIndexBeenDeleted = true
     }
 
-    private func putString(map: HashMap<String, ArrayList<Symbol>>, key: String, symbol: Symbol): Unit {
+    private func putString(map: HashMap<String, TreeSet<Ptr<Symbol>>>, key: String, symbol: Symbol): Unit {
         if (!map.contains(key)) {
-            map[key] = ArrayList<Symbol>()
+            map[key] = TreeSet<Ptr<Symbol>>()
         }
         if (let Some(values) <- map.get(key)) {
-            values.add(symbol)
+            values.add(Ptr<Symbol>(symbol))
         }
     }
 
-    private func putLevel(map: HashMap<UInt32, ArrayList<Symbol>>, key: UInt32, symbol: Symbol): Unit {
+    private func putLevel(map: HashMap<UInt32, TreeSet<Ptr<Symbol>>>, key: UInt32, symbol: Symbol): Unit {
         if (!map.contains(key)) {
-            map[key] = ArrayList<Symbol>()
+            map[key] = TreeSet<Ptr<Symbol>>()
         }
         if (let Some(values) <- map.get(key)) {
-            values.add(symbol)
-        }
-    }
-
-    private func removeString(map: HashMap<String, ArrayList<Symbol>>, key: String, symbol: Symbol): Unit {
-        if (let Some(values) <- map.get(key)) {
-            var idx: Int64 = 0
-            while (idx < values.size) {
-                if (SameSymbol(values[idx], symbol)) {
-                    values.remove(at: idx)
-                } else {
-                    idx++
-                }
-            }
+            values.add(Ptr<Symbol>(symbol))
         }
     }
 
-    private func removeLevel(map: HashMap<UInt32, ArrayList<Symbol>>, key: UInt32, symbol: Symbol): Unit {
+    private func removeString(map: HashMap<String, TreeSet<Ptr<Symbol>>>, key: String, symbol: Symbol): Unit {
         if (let Some(values) <- map.get(key)) {
-            var idx: Int64 = 0
-            while (idx < values.size) {
-                if (SameSymbol(values[idx], symbol)) {
-                    values.remove(at: idx)
-                } else {
-                    idx++
-                }
-            }
+            values.remove(Ptr<Symbol>(symbol))
+        }
+    }
+
+    private func removeLevel(map: HashMap<UInt32, TreeSet<Ptr<Symbol>>>, key: UInt32, symbol: Symbol): Unit {
+        if (let Some(values) <- map.get(key)) {
+            values.remove(Ptr<Symbol>(symbol))
         }
     }
 

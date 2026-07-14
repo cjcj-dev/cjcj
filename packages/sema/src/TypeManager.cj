@@ -186,19 +186,46 @@ public class InstCtxScope {
     }
 }
 
-private class OverrideCacheEntry {
-    public var src: FuncDecl
-    public var target: FuncDecl
-    public var baseTy: Option<Ty>
-    public var expectInstParent: Option<Ty>
-    public var value: Bool
+// C++ TypeManager.h:510-537 OverrideOrShadowKey and its pointer-tuple equality.
+private struct OverrideOrShadowKey <: Comparable<OverrideOrShadowKey> & Equatable<OverrideOrShadowKey> {
+    private let src: Int64
+    private let target: Int64
+    private let baseTy: Int64
+    private let expectInstParent: Int64
 
-    public init(src: FuncDecl, target: FuncDecl, baseTy: Option<Ty>, expectInstParent: Option<Ty>, value: Bool) {
-        this.src = src
-        this.target = target
-        this.baseTy = baseTy
-        this.expectInstParent = expectInstParent
-        this.value = value
+    public init(s: FuncDecl, t: FuncDecl, b: Option<Ty>, e: Option<Ty>) {
+        src = s.objectId
+        target = t.objectId
+        baseTy = match (b) {
+            case Some(value) => value.objectId
+            case None => 0
+        }
+        expectInstParent = match (e) {
+            case Some(value) => value.objectId
+            case None => 0
+        }
+    }
+
+    public operator func ==(right: OverrideOrShadowKey): Bool {
+        return src == right.src && target == right.target && baseTy == right.baseTy &&
+            expectInstParent == right.expectInstParent
+    }
+
+    public operator func !=(right: OverrideOrShadowKey): Bool {
+        return !(this == right)
+    }
+
+    public func compare(right: OverrideOrShadowKey): Ordering {
+        if (src != right.src) {
+            return src.compare(right.src)
+        }
+        if (target != right.target) {
+            return target.compare(right.target)
+        }
+        if (baseTy != right.baseTy) {
+            return baseTy.compare(right.baseTy)
+        }
+        return expectInstParent.compare(right.expectInstParent)
     }
 }
 
@@ -305,7 +332,7 @@ public class TypeManager {
 
     private var anyTy: Ty = theAnyTy
     private var ctypeTy: Option<Ty> = None
-    private let overrideCache: ArrayList<OverrideCacheEntry> = ArrayList<OverrideCacheEntry>()
+    private let overrideCache: TreeMap<OverrideOrShadowKey, Bool> = TreeMap<OverrideOrShadowKey, Bool>()
     private let topOverrideMap: ArrayList<TopOverrideEntry> = ArrayList<TopOverrideEntry>()
     private let boxUsedExtends: ArrayList<ExtendDecl> = ArrayList<ExtendDecl>()
     private let boxedNonGenericDecls: ArrayList<InheritableDecl> = ArrayList<InheritableDecl>()
@@ -1903,12 +1930,7 @@ public class TypeManager {
         expectInstParent: Option<Ty>): Option<Bool> {
         if (let Some(srcDecl) <- src) {
             if (let Some(targetDecl) <- target) {
-                for (entry in overrideCache) {
-                    if (SameDecl(entry.src, srcDecl) && SameDecl(entry.target, targetDecl) &&
-                        SameTy(entry.baseTy, baseTy) && SameTy(entry.expectInstParent, expectInstParent)) {
-                        return entry.value
-                    }
-                }
+                return overrideCache.get(OverrideOrShadowKey(srcDecl, targetDecl, baseTy, expectInstParent))
             }
         }
         return None
@@ -1916,7 +1938,10 @@ public class TypeManager {
 
     public func AddOverrideCache(src: FuncDecl, target: FuncDecl, baseTy: Option<Ty>, expectInstParent: Option<Ty>,
         value: Bool): Unit {
-        overrideCache.add(OverrideCacheEntry(src, target, baseTy, expectInstParent, value))
+        let key = OverrideOrShadowKey(src, target, baseTy, expectInstParent)
+        if (!overrideCache.contains(key)) {
+            overrideCache.add(key, value)
+        }
     }
 
     public func AddDeclExtendsEntry(entry: DeclExtendsEntry): Unit {
