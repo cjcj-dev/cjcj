@@ -264,11 +264,7 @@ private class DeclAttributeCheckerImpl {
         let isInheritableClass = classDecl.TestAttr(Attribute.OPEN) || classDecl.TestAttr(Attribute.ABSTRACT)
         if (member.TestAttr(Attribute.OPEN)) {
             if (!isInheritableClass) {
-                AddIssue(
-                    DeclAttributeIssueKind.INVALID_OPEN_MEMBER,
-                    member,
-                    "open ${memberKind} requires an open or abstract class"
-                )
+                Diagnose(diag, member, BasicDiagKind.sema_ignore_open).Emit()
             } else if (!member.TestAttr(Attribute.PUBLIC) && !member.TestAttr(Attribute.PROTECTED)) {
                 AddIssue(
                     DeclAttributeIssueKind.INVALID_OPEN_MEMBER_VISIBILITY,
