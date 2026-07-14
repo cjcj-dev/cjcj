@@ -2308,7 +2308,6 @@ extend ParserImpl {
         let ret = PrimaryCtorDecl()
         try (cs = ChainScope(this, ret)) {
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
-            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.PRIMARY_CONSTRUCTOR))
             let id = ExpectIdentifierWithPos(ret)
             ret.identifier = id
             ret.keywordPos = id.Begin()
@@ -2324,6 +2323,7 @@ extend ParserImpl {
             }
             ret.funcBody = ParseFuncBody(bodyScope)
             ret.EnableAttr(Attribute.CONSTRUCTOR)
+            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.PRIMARY_CONSTRUCTOR))
             ret.EnableAttr(Attribute.PRIMARY_CONSTRUCTOR)
             if (ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) {
                 ret.EnableAttr(Attribute.IN_STRUCT)
