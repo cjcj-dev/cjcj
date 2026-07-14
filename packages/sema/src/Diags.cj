@@ -7,6 +7,37 @@ import cjcj::basic.Range as BasicRange
 import cjcj::ast.*
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
 
+// C++ src/Sema/Diags.cpp:189-215 DiagRedefinitionWithFoundNode.
+public func DiagRedefinitionWithFoundNode(
+    diag: BasicDiagnosticEngine,
+    current: Decl,
+    previous: Decl
+): Unit {
+    if (current.TestAttr(Attribute.IS_BROKEN)) {
+        return
+    }
+    CJC_ASSERT(current.identifier.Val() == previous.identifier.Val())
+    var declUp = previous
+    var declDown = current
+    var rangeUp = MakeRangeForDeclIdentifier(previous)
+    var rangeDown = MakeRangeForDeclIdentifier(current)
+    if (rangeUp.begin > rangeDown.begin ||
+        (previous.TestAttr(Attribute.GLOBAL) && previous.TestAttr(Attribute.PRIVATE) &&
+            current.curFile != previous.curFile)) {
+        declUp = current
+        declDown = previous
+        rangeUp = MakeRangeForDeclIdentifier(current)
+        rangeDown = MakeRangeForDeclIdentifier(previous)
+    }
+    if (IgnoreCJMPFalsePositiveRedefinition(current, previous)) {
+        return
+    }
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_redefinition,
+        declDown, rangeDown, arguments: [declDown.identifier.Val()])
+    AddNote(builder, declUp, rangeUp, "'" + declDown.identifier.Val() + "' is previously declared here")
+    builder.Emit()
+}
+
 // C++ src/Sema/Diags.cpp:644-676.
 public func DiagUseClosureCaptureVarAlone(diag: BasicDiagnosticEngine, expr: Expr,
     lambdaSource: LambdaSource): Unit {

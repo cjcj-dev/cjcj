@@ -674,7 +674,8 @@ public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
     return true
 }
 
-public func ChkVarPattern(ctx: ASTContext, target: Ty, pattern: VarPattern): Bool {
+public func ChkVarPattern(ctx: ASTContext, target: Ty, pattern: VarPattern,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let Some(varDecl) <- pattern.varDecl) {
         let name = varDecl.identifier.Val()
         if (name != V_COMPILER) {
@@ -685,6 +686,9 @@ public func ChkVarPattern(ctx: ASTContext, target: Ty, pattern: VarPattern): Boo
                 }
                 if (varDecl.TestAttr(Attribute.SPECIFIC) && decl.TestAttr(Attribute.COMMON)) {
                     continue
+                }
+                if (let Some(diagValue) <- diag) {
+                    DiagRedefinitionWithFoundNode(diagValue, varDecl, decl)
                 }
                 pattern.SetTy(TypeManager.GetInvalidTy())
                 varDecl.SetTy(TypeManager.GetInvalidTy())
@@ -889,7 +893,7 @@ public func ChkPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
             desugarCallExpr: desugarCallExpr, diag: diag)
     }
     if (let Some(varPattern) <- (pattern as VarPattern)) {
-        return ChkVarPattern(ctx, target, varPattern)
+        return ChkVarPattern(ctx, target, varPattern, diag: diag)
     }
     if (let Some(enumPattern) <- (pattern as EnumPattern)) {
         return ChkEnumPattern(typeManager, ctx, target, enumPattern, exprChecker: exprChecker,

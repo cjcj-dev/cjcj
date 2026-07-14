@@ -7,46 +7,12 @@ import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cjcj::basic.Range as BasicRange
+import cjcj::basic.Position as BasicPosition
 import cjcj::modules.SemaImportManager
 import cjcj::utils.FileUtil
 
 private let PRECHECK_CORE_PACKAGE_NAME: String = "std.core"
 private let PRECHECK_OBJECT_NAME: String = "Object"
-
-private func preCheckDeclIdentifierRange(decl: Decl): BasicRange {
-    if (let Some(funcDecl) <- (decl as FuncDecl)) {
-        if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
-            if (let Some(outerDecl) <- funcDecl.outerDecl) {
-                if (funcDecl.identifier.Begin().IsZero()) {
-                    return MakeRange(outerDecl.identifier.Begin(), outerDecl.identifier.End())
-                }
-                if (funcDecl.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
-                    return MakeRange(funcDecl.identifier.Begin(), outerDecl.identifier.End())
-                }
-            }
-            return MakeRange(funcDecl.identifier.Begin(), funcDecl.identifier.End())
-        }
-        if (funcDecl.isGetter || funcDecl.isSetter) {
-            return MakeRange(funcDecl.identifier.Begin(), funcDecl.identifier.Begin() + 3)
-        }
-    } else if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-        if (let Some(extendedType) <- extendDecl.extendedType) {
-            if (extendDecl.TestAttr(Attribute.FROM_COMMON_PART)) {
-                return MakeRange(extendDecl.begin, extendDecl.end)
-            }
-            return MakeRange(extendedType.begin, extendedType.end)
-        }
-    } else if (let Some(vpd) <- (decl as VarWithPatternDecl)) {
-        if (let Some(pattern) <- vpd.irrefutablePattern) {
-            return MakeRange(pattern.begin, pattern.end)
-        }
-    }
-    if (decl.identifier.Begin().IsZero()) {
-        return MakeRange(decl.begin, decl.end)
-    }
-    return MakeRange(decl.identifier.Begin(), decl.identifier.End())
-}
 
 private func preCheckSameFile(left: Decl, right: Decl): Bool {
     if (let Some(leftFile) <- left.curFile) {
@@ -75,7 +41,7 @@ private func preCheckFeatureSuperset(left: ArrayList<String>, right: ArrayList<S
     return true
 }
 
-private func preCheckIsFeatureSupersetRelation(left: Decl, right: Decl): Bool {
+public func IsFeatureSupersetRelation(left: Decl, right: Decl): Bool {
     if (let Some(leftFile) <- left.curFile) {
         if (let Some(rightFile) <- right.curFile) {
             let leftFeatures = leftFile.GetFeatures()
@@ -87,46 +53,26 @@ private func preCheckIsFeatureSupersetRelation(left: Decl, right: Decl): Bool {
     return false
 }
 
-private func preCheckIsSameDeserializedFunction(left: Decl, right: Decl): Bool {
-    return left.begin == right.begin && left.begin.fileID == right.begin.fileID &&
+private func IsSamePosition(pos1: BasicPosition, pos2: BasicPosition): Bool {
+    return pos1 == pos2 && pos1.fileID == pos2.fileID
+}
+
+private func IsSameDeserializedFunction(left: Decl, right: Decl): Bool {
+    return IsSamePosition(left.begin, right.begin) &&
         (left.TestAttr(Attribute.ALREADY_LOADED) || right.TestAttr(Attribute.ALREADY_LOADED))
 }
 
-private func preCheckIgnoreCJMPFalsePositiveRedefinition(left: Decl, right: Decl): Bool {
+public func IgnoreCJMPFalsePositiveRedefinition(left: Decl, right: Decl): Bool {
     if (!left.TestAttr(Attribute.FROM_COMMON_PART) || !right.TestAttr(Attribute.FROM_COMMON_PART)) {
         return false
     }
-    if (preCheckIsSameDeserializedFunction(left, right)) {
+    if (IsSameDeserializedFunction(left, right)) {
         return true
     }
-    return preCheckIsFeatureSupersetRelation(left, right)
-}
-
-private func preCheckDiagRedefinitionWithFoundNode(
-    diag: BasicDiagnosticEngine,
-    current: Decl,
-    previous: Decl
-): Unit {
-    if (current.TestAttr(Attribute.IS_BROKEN)) {
-        return
+    if (IsFeatureSupersetRelation(left, right)) {
+        return true
     }
-    var declDown = current
-    var rangeUp = preCheckDeclIdentifierRange(previous)
-    var rangeDown = preCheckDeclIdentifierRange(current)
-    if (rangeUp.begin > rangeDown.begin ||
-        (previous.TestAttr(Attribute.GLOBAL) && previous.TestAttr(Attribute.PRIVATE) &&
-            !preCheckSameFile(current, previous))) {
-        declDown = previous
-        rangeUp = preCheckDeclIdentifierRange(current)
-        rangeDown = preCheckDeclIdentifierRange(previous)
-    }
-    if (preCheckIgnoreCJMPFalsePositiveRedefinition(current, previous)) {
-        return
-    }
-    let builder = DiagnoseRefactor(diag,
-        BasicDiagKindRefactor.sema_redefinition, declDown, rangeDown, arguments: [declDown.identifier.Val()])
-    builder.AddNote(rangeUp, "'" + declDown.identifier.Val() + "' is previously declared here")
-    builder.Emit()
+    return false
 }
 
 private func scopeForDecl(decl: Decl): String {
@@ -399,7 +345,7 @@ private func preCheckCollectDeclMapAndCheckRedefinitionForOneSymbol(
     if (!found.isEmpty()) {
         let previous = found[0]
         if (!preCheckIsPrivateGlobalDifferentFile(decl, previous) && !preCheckIsMultiPlatformPair(decl, previous)) {
-            preCheckDiagRedefinitionWithFoundNode(diag, decl, previous)
+            DiagRedefinitionWithFoundNode(diag, decl, previous)
         }
     }
     ctx.AddDeclName(names, decl)
@@ -907,7 +853,7 @@ private func preCheckFuncSameSignature(typeManager: TypeManager, left: FuncDecl,
         fd.TestAttr(Attribute.STATIC) == left.TestAttr(Attribute.STATIC) &&
         fd.TestAttr(Attribute.CONSTRUCTOR) == left.TestAttr(Attribute.CONSTRUCTOR) &&
         fd.TestAttr(Attribute.MAIN_ENTRY) == left.TestAttr(Attribute.MAIN_ENTRY) &&
-        !preCheckIsSameDeserializedFunction(fd, left)
+        !IsSameDeserializedFunction(fd, left)
 }
 
 // C++ src/Sema/Diags.cpp:217 DiagOverloadConflict.
@@ -1019,7 +965,7 @@ private func preCheckFuncRedefinitionForEnum(diag: BasicDiagnosticEngine, funcs:
     for (funcDecl in funcs) {
         if (!funcDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
             if (let Some(constructorDecl) <- ctorNames.get(funcDecl.identifier.Val())) {
-                preCheckDiagRedefinitionWithFoundNode(diag, funcDecl, constructorDecl)
+                DiagRedefinitionWithFoundNode(diag, funcDecl, constructorDecl)
             }
             continue
         }
@@ -1051,7 +997,7 @@ private func preCheckFuncRedefinitionForFFI(diag: BasicDiagnosticEngine, funcs: 
     while (idx < nativeDuplicates.size) {
         let fd = nativeDuplicates[idx]
         if (fd.ShouldDiagnose() && !fd.TestAttr(Attribute.CONSTRUCTOR)) {
-            preCheckDiagRedefinitionWithFoundNode(diag, fd, nativeDuplicates[0])
+            DiagRedefinitionWithFoundNode(diag, fd, nativeDuplicates[0])
         }
         idx++
     }
