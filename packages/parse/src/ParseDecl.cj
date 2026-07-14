@@ -2421,6 +2421,7 @@ extend ParserImpl {
             ret.funcBody = ParseFuncBody(scopeKind)
             if (let Some(body) <- ret.funcBody) { ret.end = body.end }
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.CONSTRUCTOR))
+            CheckVariableParams(ret)
             if (ret.TestAttr(Attribute.STATIC)) {
                 ret.EnableAttr(Attribute.PRIVATE)
                 let body = ret.funcBody.getOrThrow()
