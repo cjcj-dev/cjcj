@@ -117,7 +117,9 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
                 }
             case ASTKind.LIT_CONST_EXPR =>
                 if (let Some(litConstExpr) <- (node as LitConstExpr)) {
-                    DesugarStrInterpolationExpr(typeManager, pkg, litConstExpr, context: context)
+                    if (litConstExpr.siExpr.isSome() && Ty.IsTyCorrect(litConstExpr.GetTy())) {
+                        DesugarStrInterpolationExpr(typeManager, pkg, litConstExpr, context: context)
+                    }
                 }
             case _ => ()
         }
