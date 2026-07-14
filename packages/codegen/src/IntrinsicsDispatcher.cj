@@ -131,12 +131,7 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
         return LLVMNullValue()
     }
     if (kind == IntrinsicKind.INOUT_PARAM) {
-        if (!args.isEmpty()) {
-            let rawArg = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
-            return CastPointerLikeIfNeeded(irBuilder, rawArg,
-                unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) })
-        }
-        return LLVMNullValue()
+        return GenerateInout(irBuilder, args)
     }
     if (kind == IntrinsicKind.IS_NULL) {
         if (!args.isEmpty()) {
@@ -294,6 +289,25 @@ private func GeneratePreInitializeIntrinsic(irBuilder: IRBuilder2): LLVMValueRef
     let args = ArrayList<LLVMValueRef>()
     args.add(unsafe { LLVMConstNull(i8PtrType) })
     return irBuilder.CreateIntrinsicCall("llvm.cj.pre.initialize.package", ArrayList<LLVMTypeRef>(), args)
+}
+
+private func GenerateInout(irBuilder: IRBuilder2, args: ArrayList<Value>): LLVMValueRef {
+    let compileOptions = irBuilder.GetCGModule().GetCGContext().GetCompileOptions()
+    if (compileOptions.EnableAsan() || compileOptions.EnableHwAsan()) {
+        let function = irBuilder.GetInsertFunction()
+        CJC_ASSERT(!function.isNull())
+        AddFnAttr(function, "address_sanitize_stack")
+    }
+    let cgMod = irBuilder.GetCGModule()
+    CJC_ASSERT(args.size == 1)
+    let argVal = cgMod.GetMappedCGValue(args[0]).GetRawValue()
+    let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(cgMod.GetLLVMContext().raw), 0u32) }
+    if (!unsafe { LLVMIsALoadInst(argVal) }.isNull()) {
+        let addr = unsafe { LLVMGetOperand(argVal, 0u32) }
+        return irBuilder.CreatePointerCast(addr, i8PtrTy)
+    }
+    CJC_ASSERT(unsafe { LLVMGetTypeKind(LLVMTypeOf(argVal)) } == LLVM_POINTER_TYPE_KIND_FOR_INTRINSICS)
+    return irBuilder.CreatePointerCast(argVal, i8PtrTy)
 }
 
 private func GenerateFuncRefEq(irBuilder: IRBuilder2, args: ArrayList<Value>): LLVMValueRef {

@@ -384,6 +384,7 @@ foreign {
     func LLVMIsAFunction(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAArgument(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAInstruction(value: LLVMValueRef): LLVMValueRef
+    func LLVMIsALoadInst(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAConstantPointerNull(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAGetElementPtrInst(value: LLVMValueRef): LLVMValueRef
     func LLVMIsABitCastInst(value: LLVMValueRef): LLVMValueRef
