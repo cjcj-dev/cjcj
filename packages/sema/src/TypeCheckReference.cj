@@ -1610,44 +1610,10 @@ private func TypeCheckReferenceCheckLegalityForNameReferenceExpr(
     }
 }
 
-private func TypeCheckReferenceCtorIllegalMemberName(nre: NameReferenceExpr): String {
-    if (let Some(refExpr) <- (nre as RefExpr)) {
-        return refExpr.ref.identifier.Val()
-    }
-    if (let Some(memberAccess) <- (nre as MemberAccess)) {
-        return memberAccess.field.Val()
-    }
-    return ""
-}
-
-private func TypeCheckReferenceCtorIllegalMemberPos(nre: NameReferenceExpr): Position {
-    if (let Some(refExpr) <- (nre as RefExpr)) {
-        return refExpr.GetBegin()
-    }
-    if (let Some(memberAccess) <- (nre as MemberAccess)) {
-        let fieldPos = memberAccess.GetFieldPos()
-        if (!fieldPos.IsZero()) {
-            return fieldPos
-        }
-    }
-    return nre.begin
-}
-
-private func TypeCheckReferenceEmitCtorIllegalMemberDiagnostic(
+// C++ src/Sema/TypeCheckAccess.cpp:199-231.
+private func CheckIllegalMemberHelper(
     diag: BasicDiagnosticEngine,
-    pos: Position,
-    name: String,
-    errorStr: String
-): Unit {
-    let builder = diag.Diagnose(
-        pos,
-        BasicDiagKind.sema_assignment_of_member_variable_cannot_use_this_or_super,
-        args: [BasicDiagArgument(name), BasicDiagArgument(errorStr)])
-    builder.Emit()
-}
-
-private func TypeCheckReferenceCheckIllegalMemberHelper(
-    diag: BasicDiagnosticEngine,
+    tm: TypeManager,
     ctx: ASTContext,
     reportThis: Bool,
     errorStr: String,
@@ -1674,17 +1640,32 @@ private func TypeCheckReferenceCheckIllegalMemberHelper(
     }
     let exprStruct = ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, nre.scopeName).getOrThrow()
     let declStruct = ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, target.scopeName).getOrThrow()
-    if (SameSymbol(exprStruct, declStruct) && reportThis) {
-        TypeCheckReferenceEmitCtorIllegalMemberDiagnostic(
-            diag,
-            TypeCheckReferenceCtorIllegalMemberPos(nre),
-            TypeCheckReferenceCtorIllegalMemberName(nre),
-            errorStr)
+    let inSameDecl = SameSymbol(exprStruct, declStruct)
+    var identifier = ""
+    var pos = nre.GetBegin()
+    if (nre.astKind == ASTKind.REF_EXPR) {
+        identifier = (nre as RefExpr).getOrThrow().ref.identifier.Val()
+    } else {
+        let memberAccess = (nre as MemberAccess).getOrThrow()
+        identifier = memberAccess.field.Val()
+        pos = memberAccess.GetFieldPos()
+    }
+    if (inSameDecl && reportThis) {
+        diag.Diagnose(pos, BasicDiagKind.sema_assignment_of_member_variable_cannot_use_this_or_super,
+            args: [BasicDiagArgument(identifier), BasicDiagArgument(errorStr)]).Emit()
+    } else if (!inSameDecl) {
+        let exprStructTy = exprStruct.node.getOrThrow().GetTy().getOrThrow()
+        if (tm.IsSubtype(exprStructTy, exprStructTy)) {
+            diag.Diagnose(pos, BasicDiagKind.sema_assignment_of_member_variable_cannot_use_this_or_super,
+                args: [BasicDiagArgument(identifier), BasicDiagArgument(errorStr)]).Emit()
+        }
     }
 }
 
-private func TypeCheckReferenceCheckIllegalMemberWalker(
+// C++ src/Sema/TypeCheckAccess.cpp:169-197.
+private func CheckIllegalMemberWalker(
     diag: BasicDiagnosticEngine,
+    tm: TypeManager,
     ctx: ASTContext,
     node: Node,
     reportThis: Bool,
@@ -1693,28 +1674,23 @@ private func TypeCheckReferenceCheckIllegalMemberWalker(
     let walker = Walker(node, visitPre: { current: Node =>
         if (let Some(refExpr) <- (current as RefExpr)) {
             if (reportThis && refExpr.isThis && refExpr.isAlone) {
-                TypeCheckReferenceEmitCtorIllegalMemberDiagnostic(
-                    diag,
-                    refExpr.GetBegin(),
-                    refExpr.ref.identifier.Val(),
-                    errorStr)
+                Diagnose(diag, refExpr, BasicDiagKind.sema_assignment_of_member_variable_cannot_use_this_or_super,
+                    args: [BasicDiagArgument(refExpr.ref.identifier.Val()), BasicDiagArgument(errorStr)]).Emit()
             }
-            TypeCheckReferenceCheckIllegalMemberHelper(diag, ctx, reportThis, errorStr, refExpr)
+            CheckIllegalMemberHelper(diag, tm, ctx, reportThis, errorStr, refExpr)
             return VisitAction.WALK_CHILDREN
         }
         if (let Some(memberAccess) <- (current as MemberAccess)) {
             if (let Some(baseExpr) <- memberAccess.baseExpr) {
                 if (let Some(refExpr) <- (baseExpr as RefExpr)) {
                     if ((refExpr.isThis && reportThis) || refExpr.isSuper) {
-                        TypeCheckReferenceEmitCtorIllegalMemberDiagnostic(
-                            diag,
-                            memberAccess.GetFieldPos(),
-                            refExpr.ref.identifier.Val(),
-                            errorStr)
+                        Diagnose(diag, memberAccess,
+                            BasicDiagKind.sema_assignment_of_member_variable_cannot_use_this_or_super,
+                            args: [BasicDiagArgument(refExpr.ref.identifier.Val()), BasicDiagArgument(errorStr)]).Emit()
                         return VisitAction.SKIP_CHILDREN
                     }
                     if (refExpr.isThis || refExpr.isSuper) {
-                        TypeCheckReferenceCheckIllegalMemberHelper(diag, ctx, reportThis, errorStr, memberAccess)
+                        CheckIllegalMemberHelper(diag, tm, ctx, reportThis, errorStr, memberAccess)
                     }
                 }
             }
@@ -1725,16 +1701,10 @@ private func TypeCheckReferenceCheckIllegalMemberWalker(
     let _ = walker.Walk()
 }
 
-private func TypeCheckReferenceIsNoConstructorCall(call: ConstructorCall): Bool {
-    return match (call) {
-        case ConstructorCall.NONE => true
-        case ConstructorCall.OTHER_INIT => false
-        case ConstructorCall.SUPER => false
-    }
-}
-
-private func TypeCheckReferenceCheckMemberAccessInCtorParamOrCtorArg(
+// C++ src/Sema/TypeCheckAccess.cpp:144-167.
+private func CheckMemberAccessInCtorParamOrCtorArg(
     diag: BasicDiagnosticEngine,
+    tm: TypeManager,
     ctx: ASTContext,
     fd: FuncDecl
 ): Unit {
@@ -1745,38 +1715,33 @@ private func TypeCheckReferenceCheckMemberAccessInCtorParamOrCtorArg(
     for (paramList in funcBody.paramLists) {
         for (param in paramList.params) {
             if (let Some(assignment) <- param.assignment) {
-                TypeCheckReferenceCheckIllegalMemberWalker(
-                    diag, ctx, assignment, true, "default parameter value of the constructor")
+                CheckIllegalMemberWalker(
+                    diag, tm, ctx, assignment, true, "default parameter value of the constructor")
             }
         }
     }
-    if (TypeCheckReferenceIsNoConstructorCall(fd.constructorCall)) {
-        return
-    }
-    if (let None <- funcBody.body) {
-        return
-    }
     let body = funcBody.body.getOrThrow()
-    if (body.body.isEmpty()) {
-        return
+    let hasConstructorCall = match (fd.constructorCall) {
+        case ConstructorCall.NONE => false
+        case ConstructorCall.OTHER_INIT => true
+        case ConstructorCall.SUPER => true
     }
-    if (let None <- (body.body[0] as CallExpr)) {
-        return
-    }
-    let callExpr = (body.body[0] as CallExpr).getOrThrow()
-    if (let None <- callExpr.baseFunc) {
-        return
-    }
-    if (let None <- (callExpr.baseFunc.getOrThrow() as RefExpr)) {
-        return
-    }
-    let refExpr = (callExpr.baseFunc.getOrThrow() as RefExpr).getOrThrow()
-    if (!refExpr.isThis && !refExpr.isSuper) {
-        return
-    }
-    for (arg in callExpr.args) {
-        TypeCheckReferenceCheckIllegalMemberWalker(
-            diag, ctx, arg, refExpr.isThis, "arguments of constructor call")
+    if (hasConstructorCall && !body.body.isEmpty()) {
+        if (let Some(callExpr) <- (body.body[0] as CallExpr)) {
+            if (let None <- callExpr.baseFunc) {
+                return
+            }
+            if (let None <- (callExpr.baseFunc.getOrThrow() as RefExpr)) {
+                return
+            }
+            let refExpr = (callExpr.baseFunc.getOrThrow() as RefExpr).getOrThrow()
+            if (!refExpr.isThis && !refExpr.isSuper) {
+                return
+            }
+            for (arg in callExpr.args) {
+                CheckIllegalMemberWalker(diag, tm, ctx, arg, refExpr.isThis, "arguments of constructor call")
+            }
+        }
     }
 }
 
@@ -1834,7 +1799,7 @@ private func TypeCheckReferenceCheckLegalityOfReferenceInternal(
             }
         } else if (let Some(funcDecl) <- (current as FuncDecl)) {
             if (IsInstanceConstructor(funcDecl)) {
-                TypeCheckReferenceCheckMemberAccessInCtorParamOrCtorArg(diag, ctx, funcDecl)
+                CheckMemberAccessInCtorParamOrCtorArg(diag, tm, ctx, funcDecl)
             }
         }
         return VisitAction.WALK_CHILDREN
