@@ -2259,6 +2259,14 @@ extend ParserImpl {
             ret.funcBody = ParseFuncBody(scopeKind)
             if (let Some(body) <- ret.funcBody) { ret.end = body.end }
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.CONSTRUCTOR))
+            if (ret.TestAttr(Attribute.STATIC)) {
+                ret.EnableAttr(Attribute.PRIVATE)
+                let body = ret.funcBody.getOrThrow()
+                if (!body.paramLists.isEmpty() && !body.paramLists[0].params.isEmpty()) {
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_static_init_can_not_accept_any_parameter,
+                        body.paramLists[0]).Emit()
+                }
+            }
         }
         CheckConstructorBody(ret, scopeKind)
         return ret
