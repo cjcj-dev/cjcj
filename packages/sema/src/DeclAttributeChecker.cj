@@ -241,11 +241,13 @@ private class DeclAttributeCheckerImpl {
             if (!isInheritableClass) {
                 Diagnose(diag, member, BasicDiagKind.sema_ignore_open).Emit()
             } else if (!member.TestAttr(Attribute.PUBLIC) && !member.TestAttr(Attribute.PROTECTED)) {
-                AddIssue(
-                    DeclAttributeIssueKind.INVALID_OPEN_MEMBER_VISIBILITY,
+                DiagnoseRefactor(
+                    diag,
+                    BasicDiagKindRefactor.sema_invalid_member_visibility_in_class,
                     member,
-                    "open ${memberKind} in a class must be public or protected"
-                )
+                    MakeRange(member.identifier.Begin(), member.identifier.End()),
+                    arguments: ["open", memberKind]
+                ).Emit()
             } else if (let Some(propDecl) <- (member as PropDecl)) {
                 for (setter in propDecl.setters) {
                     setter.EnableAttr(Attribute.OPEN)
