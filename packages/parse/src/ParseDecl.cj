@@ -2019,6 +2019,10 @@ extend ParserImpl {
             if (Skip(TokenKind.COLON)) {
                 ret.colonPos = lastToken.Begin()
                 ret.typeNode = ParseType()
+            } else {
+                // C++ anchor: cangjie_compiler/src/Parse/Parser.cpp:416-419
+                ret.typeNode = InvalidType(Peek().Begin())
+                DiagExpectCharacter("':'", noteStr: "property declaration must declare type explicitly")
             }
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.PROPERTY))
             if (ret.TestAttr(Attribute.MUT)) {
