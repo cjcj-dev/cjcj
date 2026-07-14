@@ -1258,7 +1258,9 @@ public class Translator {
             return None
         }
         let literal = TranslateLitConstant(expr)
-        return RequireResult(builder.CreateConstant(resultTy, literal, CurrentBlock()))
+        let constant = builder.CreateConstant(resultTy, literal, CurrentBlock())
+        constant.SetDebugLocation(TranslateLocation(expr))
+        return RequireResult(constant)
     }
 
     public func Visit(expr: AstRefExpr): Option<Value> {
