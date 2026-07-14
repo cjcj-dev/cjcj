@@ -404,7 +404,8 @@ public func SynNormalMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
     return me.GetTy() ?? TypeManager.GetInvalidTy()
 }
 
-public func SynQuestSugarMatchCaseBody(typeManager: TypeManager, ctx: ASTContext, me: MatchExpr,
+public func SynQuestSugarMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
+    diag: Option<BasicDiagnosticEngine>, me: MatchExpr,
     exprChecker!: Option<ConstPatternExprChecker> = None,
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Ty {
     if (let None <- me.selector) {
@@ -416,6 +417,12 @@ public func SynQuestSugarMatchCaseBody(typeManager: TypeManager, ctx: ASTContext
     }
     let selectorTy = selector.GetTy().getOrThrow()
     if (!selectorTy.IsCoreOptionType()) {
+        if (let Some(engine) <- diag) {
+            let builder = DiagnoseRefactor(engine,
+                BasicDiagKindRefactor.sema_optional_chain_non_optional, me)
+            builder.AddMainHintArguments([selectorTy.String()])
+            builder.Emit()
+        }
         return InvalidMatchTy(me)
     }
     if (me.matchCases.size != 2) {
@@ -443,7 +450,7 @@ public func SynMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
     exprChecker!: Option<ConstPatternExprChecker> = None,
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Ty {
     if (SugarKindEq(me.sugarKind, SugarKind.QUEST)) {
-        return SynQuestSugarMatchCaseBody(typeManager, ctx, me, exprChecker: exprChecker,
+        return SynQuestSugarMatchCaseBody(typeManager, ctx, diag, me, exprChecker: exprChecker,
             desugarCallExpr: desugarCallExpr)
     }
     return SynNormalMatchCaseBody(typeManager, ctx, diag, me, exprChecker: exprChecker,
