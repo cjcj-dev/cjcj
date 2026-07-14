@@ -6645,6 +6645,30 @@ extend TypeChecker {
         return target.GetTy().getOrThrow().HasQuestTy()
     }
 
+    internal func ChkOperatorFuncIfTyCannotBeInferred(ctx: ASTContext, be: BinaryExpr): Bool {
+        let callExpr = (be.desugarExpr.getOrThrow() as CallExpr).getOrThrow()
+        var operatorFuncDecl = callExpr.resolvedFunction
+        if (let None <- operatorFuncDecl) {
+            let baseFunc = callExpr.baseFunc.getOrThrow()
+            if (let Some(target) <- baseFunc.GetTarget()) {
+                operatorFuncDecl = target as FuncDecl
+            }
+        }
+        if (let Some(funcDecl) <- operatorFuncDecl) {
+            if (NeedSynOnUsed(funcDecl)) {
+                let targetTy = SynthesizeDecl(ctx, funcDecl)
+                if (targetTy.HasQuestTy()) {
+                    be.SetTy(TypeManager.GetInvalidTy())
+                    be.EnableAttr(Attribute.IS_BROKEN)
+                    funcDecl.EnableAttr(Attribute.IS_BROKEN)
+                    DiagUnableToInferReturnType(impl.diag.getOrThrow(), funcDecl, be)
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     private func SynTargetOnUsed(ctx: ASTContext, nameReference: NameReferenceExpr, target: Decl): Bool {
         if (NeedSynOnUsed(target)) {
             var declToSynthesize = target

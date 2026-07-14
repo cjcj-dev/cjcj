@@ -1550,6 +1550,29 @@ public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
 }
 
 extend TypeChecker {
+    private func TrySynthesizeOperatorOverload(ctx: ASTContext, be: BinaryExpr): Bool {
+        DesugarOperatorOverloadExpr(be, ctx: Some(ctx))
+        let desugar = be.desugarExpr.getOrThrow()
+        try (ds = DiagSuppressor(impl.diag)) {
+            if (Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, desugar))) {
+                ds.ReportDiag()
+                be.SetTy(desugar.GetTy().getOrThrow())
+                let callExpr = (desugar as CallExpr).getOrThrow()
+                if (let Some(resolvedFunction) <- callExpr.resolvedFunction) {
+                    ReplaceTarget(be, Some<Decl>(resolvedFunction))
+                } else {
+                    ReplaceTarget(be, None)
+                }
+                return true
+            }
+        }
+        let _ = ChkOperatorFuncIfTyCannotBeInferred(ctx, be)
+        RecoverToBinaryExpr(be)
+        be.SetTy(TypeManager.GetInvalidTy())
+        impl.typeManager.constraints.Reset()
+        return false
+    }
+
     func SynBinaryExpr(ctx: ASTContext, be: BinaryExpr): Ty {
         if (let Some(desugar) <- be.desugarExpr) {
             return desugar.GetTy().getOrThrow()
@@ -1576,14 +1599,7 @@ extend TypeChecker {
             }
             impl.typeManager.constraints.Reset()
             if (IsOverloadableOperator(be.op)) {
-                let overloadSynthesizer: BinaryOperandSynthesizer = { operand0: Expr =>
-                    SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand0)
-                }
-                let overloadChecker: BinaryOperandChecker = { expected0: Ty, operand1: Expr =>
-                    CheckWithNegCache(ctx, expected0, operand1)
-                }
-                let _ = TrySynBinaryOverload(impl.typeManager, be, ctx: Some(ctx),
-                    synthesizer: Some(overloadSynthesizer), checker: Some(overloadChecker))
+                let _ = TrySynthesizeOperatorOverload(ctx, be)
             } else {
                 be.SetTy(TypeManager.GetInvalidTy())
             }
