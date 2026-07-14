@@ -7798,6 +7798,9 @@ extend TypeChecker {
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
             return FinishSynthesize(ctx, binaryExpr, SynBinaryExpr(ctx, binaryExpr))
         }
+        if (let Some(quoteExpr) <- (expr as QuoteExpr)) {
+            return FinishSynthesize(ctx, quoteExpr, this.SynQuoteExpr(ctx, quoteExpr))
+        }
         if (let Some(refExpr) <- (expr as RefExpr)) {
             this.InferRefExpr(ctx, refExpr)
             return FinishSynthesize(ctx, refExpr, refExpr.GetTy().getOrThrow())
@@ -8031,6 +8034,9 @@ extend TypeChecker {
         }
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
             return FinishCheck(ctx, binaryExpr, CheckBinaryExpr(ctx, target, binaryExpr))
+        }
+        if (let Some(quoteExpr) <- (expr as QuoteExpr)) {
+            return FinishCheck(ctx, quoteExpr, this.ChkQuoteExpr(ctx, target, quoteExpr))
         }
         if (let Some(incOrDec) <- (expr as IncOrDecExpr)) {
             return FinishCheck(ctx, incOrDec, ChkIncOrDecExpr(impl.typeManager, target, incOrDec,
