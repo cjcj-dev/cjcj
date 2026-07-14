@@ -3497,8 +3497,8 @@ internal func CheckCallKind(diag: Option<BasicDiagnosticEngine>, ce: CallExpr, d
     match (decl.astKind) {
         case ASTKind.INTERFACE_DECL =>
             if (let Some(diagValue) <- diag) {
-                DiagOldStrings(diagValue, ce, BasicDiagKind.sema_interface_can_not_be_instantiated,
-                    [decl.identifier.Val()])
+                Diagnose(diagValue, ce, BasicDiagKind.sema_interface_can_not_be_instantiated,
+                    args: [BasicDiagArgument(decl.identifier.Val())]).Emit()
             }
             ce.callKind = CallKind.CALL_INVALID
             true
@@ -3513,8 +3513,8 @@ internal func CheckCallKind(diag: Option<BasicDiagnosticEngine>, ce: CallExpr, d
             }
             if (decl.TestAttr(Attribute.ABSTRACT) && !isSuper && !isThis) {
                 if (let Some(diagValue) <- diag) {
-                    DiagOldStrings(diagValue, ce, BasicDiagKind.sema_abstract_class_can_not_be_instantiated,
-                        [decl.identifier.Val()])
+                    Diagnose(diagValue, ce, BasicDiagKind.sema_abstract_class_can_not_be_instantiated,
+                        args: [BasicDiagArgument(decl.identifier.Val())]).Emit()
                 }
                 ce.callKind = CallKind.CALL_INVALID
                 return true
