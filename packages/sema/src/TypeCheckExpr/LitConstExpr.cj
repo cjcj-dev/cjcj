@@ -173,7 +173,8 @@ public func ChkLitConstExprOfTypeFloat(typeManager: TypeManager, target: Ty, lce
     return false
 }
 
-public func ChkLitConstExprOfTypeChar(typeManager: TypeManager, target: Ty, lce: LitConstExpr): Bool {
+public func ChkLitConstExprOfTypeChar(typeManager: TypeManager, target: Ty, lce: LitConstExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let runeTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_RUNE)
     if (target.IsRune()) {
         lce.SetTy(target)
@@ -182,6 +183,10 @@ public func ChkLitConstExprOfTypeChar(typeManager: TypeManager, target: Ty, lce:
     if (IsSameOrBoxable(typeManager, runeTy, target) || target.IsAny()) {
         lce.SetTy(runeTy)
         return true
+    }
+    if (let Some(diagValue) <- diag) {
+        Diagnose(diagValue, lce, BasicDiagKind.sema_cannot_convert_literal,
+            args: [BasicDiagArgument("a character"), BasicDiagArgument(target.String())]).Emit()
     }
     lce.SetTy(TypeManager.GetNonNullTy(lce.GetTy() ?? TypeManager.GetInvalidTy()))
     return false
@@ -346,7 +351,7 @@ public func ChkLitConstExpr(typeManager: TypeManager, target: Ty, lce: LitConstE
         case LitConstKind.INTEGER => ChkLitConstExprOfTypeInteger(typeManager, target, lce, diag: diag)
         case LitConstKind.RUNE_BYTE => ChkLitConstExprOfTypeInteger(typeManager, target, lce, diag: diag)
         case LitConstKind.FLOAT => ChkLitConstExprOfTypeFloat(typeManager, target, lce, diag: diag)
-        case LitConstKind.RUNE => ChkLitConstExprOfTypeChar(typeManager, target, lce)
+        case LitConstKind.RUNE => ChkLitConstExprOfTypeChar(typeManager, target, lce, diag: diag)
         case LitConstKind.STRING => ChkLitConstExprOfTypeString(typeManager, target, lce, stringTy: stringTy,
             toStringTy: toStringTy, ctx: ctx, synthesizer: synthesizer, checker: checker, diag: diag)
         case LitConstKind.JSTRING => ChkLitConstExprOfTypeString(typeManager, target, lce, stringTy: stringTy,
