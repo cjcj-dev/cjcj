@@ -1246,6 +1246,11 @@ extend ParserImpl {
                     SkipNLOrSemi()
                 }
             }
+            if (ret.matchCases.isEmpty()) {
+                let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_case, Peek(), ConvertToken(Peek()))
+                builder.AddHint(MakeRange(ret.begin, "match"))
+                builder.Emit()
+            }
             ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after match").Begin()
             ret.end = ret.rightCurlPos + 1
         }
