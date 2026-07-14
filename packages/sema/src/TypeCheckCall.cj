@@ -424,7 +424,7 @@ private func GetPositionalParamSize(fd: FuncDecl): Int64 {
     return params.size - namedSize
 }
 
-private func GetInitializedNameParamSize(fd: FuncDecl): Int64 {
+private func GetInitializedlNameParamSize(fd: FuncDecl): Int64 {
     if (let None <- BodyParamList(fd)) {
         return 0
     }
@@ -744,7 +744,7 @@ private func FilterIncompatibleCandidatesForCall(diag: Option<BasicDiagnosticEng
     }
     if (out.isEmpty()) {
         if (let Some(bad) <- badCandidate) {
-            let initializedParamSize = GetInitializedNameParamSize(bad)
+            let initializedParamSize = GetInitializedlNameParamSize(bad)
             let paramSize = if (let Some(params) <- BodyParamList(bad)) {
                 params.params.size
             } else {
@@ -753,7 +753,7 @@ private func FilterIncompatibleCandidatesForCall(diag: Option<BasicDiagnosticEng
             if (ce.args.size >= paramSize - initializedParamSize && ce.args.size <= paramSize) {
                 let _ = CheckArgsWithParamName(diag, ce, bad)
             } else if (let Some(diagValue) <- diag) {
-                DiagOld(diagValue, ce, BasicDiagKind.sema_parameters_and_arguments_mismatch)
+                DiagWrongNumberOfArguments(diagValue, ce, bad)
             }
         }
     }
@@ -2835,7 +2835,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     }) && !HasSamePositionalArgsSize(fd, ce)
     if (wrongNormalArgSize) {
         if (let Some(diagValue) <- diag) {
-            DiagOld(diagValue, ce, BasicDiagKind.sema_parameters_and_arguments_mismatch)
+            DiagWrongNumberOfArguments(diagValue, ce, fd)
         }
         return None
     }
@@ -4003,7 +4003,7 @@ private func CheckCallArgs(diag: Option<BasicDiagnosticEngine>, typeManager: Typ
     }
     if (paramTys.size != ce.args.size) {
         if (let Some(diagValue) <- diag) {
-            DiagOld(diagValue, ce, BasicDiagKind.sema_parameters_and_arguments_mismatch)
+            DiagWrongNumberOfArguments(diagValue, ce, paramTys.toArray())
         }
         return None
     }
