@@ -147,10 +147,14 @@ public class EnumSugarChecker {
         } else {
             refExpr.SetTy(TypeManager.GetInvalidTy())
         }
-        let enumDecl = target.outerDecl as EnumDecl
         if (refExpr.typeArguments.isEmpty()) {
-            CheckGenericEnumSugarWithoutTypeArgs(enumDecl)
+            CheckGenericEnumSugarWithoutTypeArgs(target.outerDecl as EnumDecl)
         } else {
+            let enumDecl = if (let Some(outerDecl) <- target.outerDecl) {
+                outerDecl as EnumDecl
+            } else {
+                None<EnumDecl>
+            }
             CheckGenericEnumSugarWithTypeArgs(enumDecl)
         }
         return target
