@@ -1832,28 +1832,11 @@ extend TypeChecker {
         ctx.mem2Decls.clear()
         ctx.subtypeDeclsMap.clear()
         let allTops = ArrayList<Decl>()
-        let processedDecls = ArrayList<Decl>()
+        let processedDecls = HashSet<Decl>()
         let collectDecl = { top: Decl =>
-            var alreadyProcessed = false
-            for (processed in processedDecls) {
-                if (SameDecl(processed, top)) {
-                    alreadyProcessed = true
-                    break
-                }
-            }
-            if (!alreadyProcessed) {
-                processedDecls.add(top)
+            if (processedDecls.add(top)) {
                 if (IsTypeDeclKind(top.astKind)) {
-                    var foundTop = false
-                    for (existingTop in allTops) {
-                        if (SameDecl(existingTop, top)) {
-                            foundTop = true
-                            break
-                        }
-                    }
-                    if (!foundTop) {
-                        allTops.add(top)
-                    }
+                    allTops.add(top)
                 }
                 for (member in top.GetMemberDecls()) {
                     if (!IsMemberDeclKind(member.astKind)) {
