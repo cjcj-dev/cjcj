@@ -2121,7 +2121,7 @@ public class StructInheritanceChecker {
                                     DeclIdentifierRange(childFunc)
                                 )
                                 builder.AddNote(DeclIdentifierRange(parentFunc), "the overriden function")
-                                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                                builder.Emit()
                             } else if (AreReturnTypesCompatible(parentFuncTy, childFuncTy, inconsistentTypes: parent.inconsistentTypes)) {
                                 var diagNode: Decl = childFunc
                                 if (!checkingDecls.isEmpty()) {
