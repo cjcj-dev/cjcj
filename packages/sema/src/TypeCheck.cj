@@ -596,6 +596,15 @@ public func GetTyFromASTRefType(typeManager: TypeManager, ctx: ASTContext, rt: R
         if (!ctx.packageDecls.isEmpty()) {
             return TypeManager.GetInvalidTy()
         }
+        if (let Some(diagValue) <- diag) {
+            if (found.isEmpty()) {
+                Diagnose(diagValue, rt, BasicDiagKind.sema_undeclared_type_name,
+                    args: [BasicDiagArgument(rt.ref.identifier.Val())]).Emit()
+            } else {
+                Diagnose(diagValue, rt, BasicDiagKind.sema_not_a_type,
+                    args: [BasicDiagArgument(rt.ref.identifier.Val())]).Emit()
+            }
+        }
         return TypeManager.GetInvalidTy()
     }
     if (targets.size > 1 && targets[0].scopeLevel == targets[1].scopeLevel &&
