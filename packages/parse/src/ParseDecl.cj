@@ -2053,6 +2053,7 @@ extend ParserImpl {
                     ret.identifier.End()
                 }
             }
+            SetDefaultFunc(scopeKind, ret)
         }
         return ret
     }

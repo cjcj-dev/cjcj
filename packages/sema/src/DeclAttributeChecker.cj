@@ -125,13 +125,6 @@ private class DeclAttributeCheckerImpl {
                 if (!member.TestAttr(Attribute.STATIC)) {
                     member.EnableAttr(Attribute.OPEN)
                 }
-                if (member.IsFuncOrProp()) {
-                    if (InterfaceMemberHasImplementation(member)) {
-                        member.EnableAttr(Attribute.DEFAULT)
-                    } else {
-                        member.EnableAttr(Attribute.ABSTRACT)
-                    }
-                }
                 if (let Some(propDecl) <- (member as PropDecl)) {
                     for (setter in propDecl.setters) {
                         if (!setter.TestAttr(Attribute.STATIC)) {
@@ -142,24 +135,6 @@ private class DeclAttributeCheckerImpl {
             }
         }
         SetCommonAttributes(interfaceDecl)
-    }
-
-    private func InterfaceMemberHasImplementation(member: Decl): Bool {
-        if (let Some(funcDecl) <- (member as FuncDecl)) {
-            if (let Some(funcBody) <- funcDecl.funcBody) {
-                if (let Some(_) <- funcBody.body) {
-                    return true
-                }
-            }
-            return false
-        }
-        if (let Some(propDecl) <- (member as PropDecl)) {
-            if (let Some(_) <- propDecl.initializer) {
-                return true
-            }
-            return !propDecl.getters.isEmpty() || !propDecl.setters.isEmpty()
-        }
-        return false
     }
 
     private func CheckEnumAttribute(enumDecl: EnumDecl): Unit {
@@ -335,11 +310,7 @@ private class DeclAttributeCheckerImpl {
             if (((instNeedsOverride || staticNeedsRedef) &&
                 (propDecl.setters.isEmpty() || propDecl.getters.isEmpty())) ||
                 (!propDecl.TestAttr(Attribute.ABSTRACT) && propDecl.setters.isEmpty() && propDecl.getters.isEmpty())) {
-                AddIssue(
-                    DeclAttributeIssueKind.PROP_MISSING_ACCESSOR,
-                    propDecl,
-                    "mutable property must have required accessors"
-                )
+                DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_property_must_have_accessors, propDecl).Emit()
             }
         } else {
             if (!propDecl.setters.isEmpty()) {
@@ -350,11 +321,7 @@ private class DeclAttributeCheckerImpl {
                 )
             }
             if (propDecl.getters.isEmpty()) {
-                AddIssue(
-                    DeclAttributeIssueKind.PROP_MISSING_ACCESSOR,
-                    propDecl,
-                    "immutable property must have a getter"
-                )
+                DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_property_must_have_accessors, propDecl).Emit()
             }
         }
     }
