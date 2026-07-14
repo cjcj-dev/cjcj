@@ -66,7 +66,6 @@ extend ParserImpl {
         if (SeeingMacroCall() || SeeingBuiltinAnnotation()) { return ParseMacroExprOrLambdaExpr() }
         let token = Peek()
         DiagExpectedExpression()
-        Next()
         return InvalidExpr(token.Begin())
     }
 

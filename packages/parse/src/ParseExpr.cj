@@ -1597,10 +1597,16 @@ extend ParserImpl {
         ret.body = ParseBlock(ScopeKind.FUNC_BODY)
         let whileTok = Expect(TokenKind.WHILE, "expected 'while' after do body")
         ret.whilePos = whileTok.Begin()
-        Expect(TokenKind.LPAREN, "expected '(' after while")
-        ret.condExpr = ParseExpr(ExprKind.WHILE_COND_EXPR)
-        let right = Expect(TokenKind.RPAREN, "expected ')' after condition")
-        ret.end = right.End()
+        ret.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' after while").Begin()
+        ret.condExpr = ParseExpr()
+        if (!Skip(TokenKind.RPAREN)) {
+            if (!ret.leftParenPos.IsZero()) {
+                DiagExpectedRightDelimiter("(", ret.leftParenPos)
+            }
+            ConsumeUntil(TokenKind.NL)
+        }
+        ret.rightParenPos = lastToken.Begin()
+        ret.end = lastToken.End()
         return ret
     }
 
