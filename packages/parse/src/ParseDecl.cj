@@ -968,6 +968,34 @@ extend ParserImpl {
         }
     }
 
+    // C++: Parse/ParseDecl.cpp:2264-2284 ParserImpl::CheckVariableParams(AST::PrimaryCtorDecl&).
+    private func CheckVariableParams(decl: PrimaryCtorDecl): Unit {
+        if (let None <- decl.funcBody) {
+            return
+        }
+        let body = decl.funcBody.getOrThrow()
+        if (body.paramLists.size != 1) {
+            return
+        }
+        let paramList = body.paramLists[0]
+        let params = paramList.params
+        let ellipsis = TokenKindLiteral(TokenKind.ELLIPSIS)
+        var index = 0
+        while (index < params.size) {
+            if (params[index].identifier.Val() == ellipsis) {
+                decl.hasVariableLenArg = true
+                paramList.hasVariableLenArg = true
+                paramList.variadicArgIndex = UInt64(index)
+                ParseDiagnoseRefactor(
+                    DiagKindRefactor.parse_variable_length_parameter_only_in_the_foreign_function,
+                    MakeRange(decl.keywordPos, decl.identifier.End())).Emit()
+                decl.EnableAttr(Attribute.IS_BROKEN)
+                break
+            }
+            index++
+        }
+    }
+
     private func SetDefaultFunc(scopeKind: ScopeKind, decl: Decl): Unit {
         if (!ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) {
             return
@@ -2432,6 +2460,8 @@ extend ParserImpl {
                 ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS
             }
             ret.funcBody = ParseFuncBody(bodyScope)
+            // C++: Parse/ParseDecl.cpp:1051-1057 ParserImpl::ParsePrimaryConstructor.
+            CheckVariableParams(ret)
             ret.EnableAttr(Attribute.CONSTRUCTOR)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.PRIMARY_CONSTRUCTOR))
             ret.EnableAttr(Attribute.PRIMARY_CONSTRUCTOR)
