@@ -21,7 +21,6 @@ public class LegalityOfUsageResult {
     public let initializationIssues: ArrayList<InitializationIssue> = ArrayList<InitializationIssue>()
     public let globalVarInitializationIssues: ArrayList<GlobalVarInitializationIssue> =
         ArrayList<GlobalVarInitializationIssue>()
-    public let accessLevelViolations: ArrayList<AccessLevelViolation> = ArrayList<AccessLevelViolation>()
     public let subscriptLegalityIssues: ArrayList<SubscriptLegalityIssue> = ArrayList<SubscriptLegalityIssue>()
     public let staticMemberGenericIssues: ArrayList<StaticMemberGenericIssue> =
         ArrayList<StaticMemberGenericIssue>()
@@ -246,12 +245,6 @@ private func AppendInitializationIssues(dst: ArrayList<InitializationIssue>, src
 
 private func AppendGlobalIssues(dst: ArrayList<GlobalVarInitializationIssue>,
     src: ArrayList<GlobalVarInitializationIssue>): Unit {
-    for (issue in src) {
-        dst.add(issue)
-    }
-}
-
-private func AppendAccessIssues(dst: ArrayList<AccessLevelViolation>, src: ArrayList<AccessLevelViolation>): Unit {
     for (issue in src) {
         dst.add(issue)
     }
@@ -594,7 +587,7 @@ public func CheckLegalityOfUsage(
     AppendInitializationIssues(result.initializationIssues, CheckInitialization(ctx, diag, pkg, opts: opts))
     AppendGlobalIssues(result.globalVarInitializationIssues, CheckGlobalVarInitialization(pkg))
     CheckLegalityOfUnsafeAndInout(pkg, diag, backendType: opts.backend)
-    AppendAccessIssues(result.accessLevelViolations, CheckAccessLevelValidity(pkg))
+    CheckAccessLevelValidity(pkg, diag)
     CheckAllInvocationHasImpl(ctx, pkg, diag, typeManager)
     AppendSubscriptIssues(result.subscriptLegalityIssues, CheckSubscriptLegality(pkg))
     return result

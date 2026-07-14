@@ -241,6 +241,69 @@ public func MakeRangeForDeclIdentifier(decl: Decl): BasicRange {
     return MakeRange(decl.identifier.Begin(), decl.identifier.End())
 }
 
+public func DiagLowerAccessLevelTypesUse(diag: BasicDiagnosticEngine, outDecl: Decl,
+    limitedDecls: ArrayList<(Node, Decl)>, hintDecls!: ArrayList<Decl> = ArrayList<Decl>()): Unit {
+    let noHint = hintDecls.isEmpty()
+    if (limitedDecls.isEmpty() && noHint) {
+        return
+    }
+    let kind = if (noHint) {
+        BasicDiagKindRefactor.sema_accessibility
+    } else {
+        BasicDiagKindRefactor.sema_accessibility_with_main_hint
+    }
+    let range = MakeRangeForDeclIdentifier(outDecl)
+    let lowerLevelStr = if (limitedDecls.size + hintDecls.size != 1) {
+        "lower access level"
+    } else if (limitedDecls.isEmpty()) {
+        GetAccessLevelStr(hintDecls[0], "'")
+    } else {
+        GetAccessLevelStr(limitedDecls[0][1], "'")
+    }
+    let builder = DiagnoseRefactor(diag, kind, outDecl, range,
+        GetAccessLevelStr(outDecl), lowerLevelStr)
+    if (!noHint && Ty.IsTyCorrect(outDecl.GetTy())) {
+        let outTy = outDecl.GetTy().getOrThrow()
+        let inferredTy = if (let Some(funcTy) <- (outTy as FuncTy)) {
+            funcTy.retTy.String()
+        } else {
+            outTy.String()
+        }
+        builder.AddMainHintArguments("inferred type", inferredTy, lowerLevelStr)
+        for (hintDecl in hintDecls) {
+            AddNote(builder, hintDecl, MakeRangeForDeclIdentifier(hintDecl),
+                "the " + GetAccessLevelStr(hintDecl, "'") + " type is '" +
+                Ty.ToString(hintDecl.GetTy()) + "'")
+        }
+    }
+    for ((node, decl) in limitedDecls) {
+        let usedVisibility = GetAccessLevelStr(decl, "'")
+        if (!node.begin.IsZero() && !node.end.IsZero()) {
+            AddNote(builder, node, MakeRange(node.begin, node.end),
+                "type '" + Ty.ToString(node.GetTy()) + "' contains " + usedVisibility + " type")
+        }
+        AddNote(builder, decl, MakeRangeForDeclIdentifier(decl),
+            "the " + usedVisibility + " type is '" + Ty.ToString(decl.GetTy()) + "'")
+    }
+    builder.Emit()
+}
+
+public func DiagPatternInternalTypesUse(diag: BasicDiagnosticEngine,
+    inDecls: ArrayList<(Node, Decl)>): Unit {
+    for ((node, used) in inDecls) {
+        if (!node.begin.IsZero() && !node.end.IsZero()) {
+            let usedVisibility = GetAccessLevelStr(used, "'")
+            let range = MakeRange(node.begin, node.end)
+            let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_accessibility_with_main_hint,
+                node, range, GetAccessLevelStr(node), usedVisibility)
+            builder.AddMainHintArguments("inferred type", Ty.ToString(node.GetTy()), usedVisibility)
+            AddNote(builder, used, MakeRangeForDeclIdentifier(used),
+                "the " + usedVisibility + " type is '" + Ty.ToString(used.GetTy()) + "'")
+            builder.Emit()
+        }
+    }
+}
+
 public func DiagInvalidAssign(diag: BasicDiagnosticEngine, node: Node, name: String): Unit {
     let range = MakeRange(node.begin, node.end)
     DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_unqualified_left_value_assigned,
