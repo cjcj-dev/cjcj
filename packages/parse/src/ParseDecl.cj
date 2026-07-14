@@ -765,6 +765,9 @@ extend ParserImpl {
             ret.funcBody = body
             ret.end = body.end
             ret.identifier = SrcIdentifier("main", "main", ret.keywordPos, ret.keywordPos + 4, false)
+            if (let None <- body.body) {
+                DiagMissingBody("main function", "", lastToken.End())
+            }
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.MAIN))
             if (ret.TestAttr(Attribute.UNSAFE)) {
                 SetUnsafe(ret, modifiers: modifiers)
