@@ -232,18 +232,6 @@ private func emitGenericArgumentNoMatch(diag: Option<BasicDiagnosticEngine>, nod
     }
 }
 
-private func emitGenericConstraintMismatch(diag: Option<BasicDiagnosticEngine>, node: Node,
-    declTy: Ty, instTy: Ty, upperBoundTy: Ty, constraint: GenericConstraint): Unit {
-    if (let Some(diagEngine) <- diag) {
-        let builder = diagEngine.Diagnose(node.begin, node.end,
-            BasicDiagKind.sema_generic_type_argument_not_match_constraint,
-            args: [BasicDiagArgument(declTy.String())])
-        builder.AddNote(constraint.begin, BasicDiagKind.sema_which_constraint_not_match,
-            args: [BasicDiagArgument(instTy.String()), BasicDiagArgument("'" + upperBoundTy.String() + "'")])
-        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-    }
-}
-
 public func getGenericConstraintDiagNode(checkNode: Node, typeNodes: ArrayList<Type>, instTy: Ty): Node {
     for (typeNode in typeNodes) {
         if (!typeNode.TestAttr(Attribute.COMPILER_ADD)) {
@@ -661,7 +649,15 @@ extend TypeCheckerImpl {
                 if (!typeManager.IsSubtype(instTy, upperBoundTy, implicitBoxed: true, allowOptionBox: false) ||
                     sameTyButCType) {
                     if (let Some(declTy) <- targetDecl.GetTy()) {
-                        emitGenericConstraintMismatch(diag, checkNode, declTy, instTy, upperBoundTy, constraint)
+                        if (let Some(diagEngine) <- diag) {
+                            let builder = Diagnose(diagEngine, checkNode,
+                                BasicDiagKind.sema_generic_type_argument_not_match_constraint,
+                                args: [BasicDiagArgument(declTy.String())])
+                            AddNote(builder, constraint, BasicDiagKind.sema_which_constraint_not_match,
+                                args: [BasicDiagArgument(instTy.String()),
+                                    BasicDiagArgument("'" + upperBoundTy.String() + "'")])
+                            builder.Emit()
+                        }
                     }
                     return false
                 }
@@ -732,7 +728,15 @@ extend TypeCheckerImpl {
                     sameTyButCType) {
                     if (let Some(declTy) <- decl.GetTy()) {
                         let diagNode = getGenericConstraintDiagNode(checkNode, typeNodes, instTy)
-                        emitGenericConstraintMismatch(diag, diagNode, declTy, instTy, upperBoundTy, constraint)
+                        if (let Some(diagEngine) <- diag) {
+                            let builder = Diagnose(diagEngine, diagNode,
+                                BasicDiagKind.sema_generic_type_argument_not_match_constraint,
+                                args: [BasicDiagArgument(declTy.String())])
+                            AddNote(builder, constraint, BasicDiagKind.sema_which_constraint_not_match,
+                                args: [BasicDiagArgument(instTy.String()),
+                                    BasicDiagArgument("'" + upperBoundTy.String() + "'")])
+                            builder.Emit()
+                        }
                     }
                     return false
                 }
@@ -754,9 +758,7 @@ extend TypeCheckerImpl {
         }
         let effectiveTypeArgs = filteredTypeArgsForTarget(target, rawTypeArgs)
         expr.SetTy(GetGenericType(typeManager, realTarget, effectiveTypeArgs))
-        let checkTys = if (!instTys.isEmpty()) { instTys } else { exprInstantiationTys(expr) }
-        let realTargetOpt: Option<Decl> = realTarget
-        if (!CheckGenericDeclInstantiation(realTargetOpt, checkTys, expr)) {
+        if (!CheckGenericDeclInstantiation(realTarget, effectiveTypeArgs, expr)) {
             expr.SetTy(TypeManager.GetInvalidTy())
         }
     }
