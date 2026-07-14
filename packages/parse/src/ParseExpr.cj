@@ -405,10 +405,13 @@ extend ParserImpl {
                 if (let Some(nextCombined) <- LookupSeenCombinator()) {
                     nextOp = nextCombined
                 }
-                let nextPrec = Precedence(nextOp.kind)
+                var nextPrec = Precedence(nextOp.kind)
                 if (prec < nextPrec) {
                     rhs = ParseExprRhsWithPre(prec + 1, rhs, ek, op)
-                } else if (prec == nextPrec && (nextOp.kind == TokenKind.COALESCING || nextOp.kind == TokenKind.EXP)) {
+                    nextOp = GetExprOperator()
+                    nextPrec = Precedence(nextOp.kind)
+                }
+                if (prec == nextPrec && (nextOp.kind == TokenKind.COALESCING || nextOp.kind == TokenKind.EXP)) {
                     rhs = ParseExprRhsWithPre(prec, rhs, ek, op)
                 } else if (prec == nextPrec && IsNoneAssociative(nextOp.kind) && !rhs.isBroken) {
                     DiagNoneAssociativeOp(op, nextOp)
@@ -555,10 +558,13 @@ extend ParserImpl {
                 if (let Some(nextCombined) <- LookupSeenCombinator()) {
                     nextOp = nextCombined
                 }
-                let nextPrec = Precedence(nextOp.kind)
+                var nextPrec = Precedence(nextOp.kind)
                 if (prec < nextPrec) {
                     rhs = ParseExprRhsWithPre(prec + 1, rhs, ek, op)
-                } else if (prec == nextPrec && (nextOp.kind == TokenKind.COALESCING || nextOp.kind == TokenKind.EXP)) {
+                    nextOp = GetExprOperator()
+                    nextPrec = Precedence(nextOp.kind)
+                }
+                if (prec == nextPrec && (nextOp.kind == TokenKind.COALESCING || nextOp.kind == TokenKind.EXP)) {
                     rhs = ParseExprRhsWithPre(prec, rhs, ek, op)
                 } else if (prec == nextPrec && IsNoneAssociative(nextOp.kind) && !rhs.isBroken) {
                     DiagNoneAssociativeOp(op, nextOp)
