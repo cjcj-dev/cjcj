@@ -315,14 +315,6 @@ private func markInvalidInheritanceForNonClassLike(decl: InheritableDecl): Unit 
     }
 }
 
-private func resolveOuterFunctionDecl(decl: Decl): Unit {
-    if (let Some(funcDecl) <- (decl as FuncDecl)) {
-        if (let Some(outer) <- funcDecl.outerDecl) {
-            funcDecl.ownerFunc = outer as FuncDecl
-        }
-    }
-}
-
 private func storeOuterVarWithPatternDecl(ctx: ASTContext, vpd: VarWithPatternDecl): Unit {
     if (let Some(pattern) <- vpd.irrefutablePattern) {
         let walker = Walker(pattern, visitPre: { node: Node =>
@@ -794,10 +786,10 @@ public func ResolveOneDecl(typeManager: TypeManager, ctx: ASTContext, decl: Decl
 
 public func ResolveDecls(typeManager: TypeManager, ctx: ASTContext,
     importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Unit {
-    let decls = if (let Some(pkg) <- ctx.curPackage) { collectDeclsFromPackage(pkg) } else { GetAllDecls(ctx) }
+    let decls = GetAllDecls(ctx)
     for (decl in decls) {
         if (decl.astKind == ASTKind.VAR_DECL || decl.astKind == ASTKind.FUNC_DECL) {
-            resolveOuterFunctionDecl(decl)
+            SetOuterFunctionDecl(decl)
         }
     }
     for (decl in decls) {
