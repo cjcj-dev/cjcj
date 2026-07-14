@@ -4965,15 +4965,29 @@ extend TypeChecker {
         return false
     }
 
-    private func CheckLambdaExprWithTarget(ctx: ASTContext, target: Ty, le: LambdaExpr): Bool {
-        if (let None <- le.funcBody) {
-            let _ = TcInvalid(le)
-            return false
-        }
-        CJC_ASSERT(!le.funcBody.getOrThrow().paramLists.isEmpty())
+    private func ChkLamExpr(ctx: ASTContext, target: Ty, le: LambdaExpr): Bool {
+        CJC_ASSERT(le.funcBody.isSome() && !le.funcBody.getOrThrow().paramLists.isEmpty())
         ClearInvalidTypeCheckCache(ctx, le, target)
         ctx.lastTargetTypeMap[le] = target
+        if (target.IsAny() || (le.TestAttr(Attribute.C) && target.IsCType())) {
+            le.SetTy(Synthesize(ctx, SynPos.EXPR_ARG, le))
+            let _ = ReplaceIdealTy(impl.typeManager, le, diag: impl.diag)
+            return Ty.IsTyCorrect(le.GetTy())
+        }
         let targetTy = UnboxOptionType(target)
+        if (!Ty.IsTyCorrect(targetTy) || (targetTy as FuncTy).isNone()) {
+            try (ds = DiagSuppressor(impl.diag)) {
+                let synTy = Synthesize(ctx, SynPos.EXPR_ARG, le)
+                le.SetTy(TypeManager.GetInvalidTy())
+                if (!ds.HasError() && Ty.IsTyCorrect(synTy)) {
+                    if (let Some(diagValue) <- impl.diag) {
+                        DiagMismatchedTypesWithFoundTy(diagValue, le, target, synTy)
+                    }
+                }
+                ds.ReportDiag()
+            }
+            return false
+        }
         if (let Some(targetFuncTy) <- (targetTy as FuncTy)) {
             try (ds = DiagSuppressor(impl.diag)) {
                 let paramTys = ArrayList<Ty>()
@@ -5006,11 +5020,6 @@ extend TypeChecker {
             }
             let _ = TcInvalid(le)
             return false
-        }
-        let synTy = Synthesize(ctx, le)
-        if (Ty.IsTyCorrect(synTy) && impl.typeManager.CheckTypeCompatibility(target, synTy) !=
-            TypeCompatibility.INCOMPATIBLE) {
-            return true
         }
         let _ = TcInvalid(le)
         return false
@@ -7956,7 +7965,7 @@ extend TypeChecker {
         }
         GetTypeCheckCache(ctx, expr).lastKey = GetCacheKeyForChk(ctx, expr, target)
         if (let Some(lambda) <- (expr as LambdaExpr)) {
-            return FinishCheck(ctx, lambda, CheckLambdaExprWithTarget(ctx, target, lambda))
+            return FinishCheck(ctx, lambda, ChkLamExpr(ctx, target, lambda))
         }
         if (let Some(block) <- (expr as Block)) {
             MarkUnsafeBlockChildren(block)
