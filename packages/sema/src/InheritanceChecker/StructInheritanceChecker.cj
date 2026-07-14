@@ -1966,13 +1966,12 @@ public class StructInheritanceChecker {
                 // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
             }
         } else if (parentDecl.astKind == ASTKind.VAR_DECL) {
-            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-            diag.Diagnose(
-                child.begin,
-                child.end,
+            Diagnose(
+                diag,
+                child,
                 DiagKind.sema_member_variable_can_not_shadow,
                 args: [DiagArgument(name)]
-            )
+            ).Emit()
         }
     }
 
