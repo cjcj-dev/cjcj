@@ -1145,7 +1145,13 @@ private func SynCoalescingExpr(impl: TypeCheckerImpl, be: BinaryExpr,
         }
         var concreteLeftTy = TcReplaceIdeal(typeManager, leftExpr)
         if (!IsCoalescingLeftTyValid(impl, concreteLeftTy)) {
-            return BinaryInvalid(be)
+            let invalidTy = BinaryInvalid(be)
+            if (!CanSkipDiag(leftExpr)) {
+                if (let Some(diagValue) <- impl.diag) {
+                    Diagnose(diagValue, leftExpr, BasicDiagKind.sema_invalid_coalescing).Emit()
+                }
+            }
+            return invalidTy
         }
         concreteLeftTy = typeManager.TryGreedySubst(concreteLeftTy)
         leftExpr.SetTy(concreteLeftTy)
@@ -1176,6 +1182,11 @@ private func ChkCoalescingExpr(impl: TypeCheckerImpl, target: Ty, be: BinaryExpr
         var concreteLeftTy = TcReplaceIdeal(typeManager, leftExpr)
         if (!IsCoalescingLeftTyValid(impl, concreteLeftTy)) {
             let _ = BinaryInvalid(be)
+            if (!CanSkipDiag(leftExpr)) {
+                if (let Some(diagValue) <- impl.diag) {
+                    Diagnose(diagValue, leftExpr, BasicDiagKind.sema_invalid_coalescing).Emit()
+                }
+            }
             return false
         }
         concreteLeftTy = typeManager.TryGreedySubst(concreteLeftTy)
