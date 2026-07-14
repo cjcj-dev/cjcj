@@ -516,13 +516,23 @@ private func SetTyForEnumPatternConstructor(typeManager: TypeManager, targetTy: 
 }
 
 public func FindEnumPatternTarget(typeManager: TypeManager, ctx: ASTContext,
-    enumDecl: Option<EnumDecl>, pattern: EnumPattern): Bool {
+    enumDecl: Option<EnumDecl>, pattern: EnumPattern,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- pattern.constructor) {
         pattern.SetTy(TypeManager.GetInvalidTy())
         return false
     }
     let constructor = pattern.constructor.getOrThrow()
     let candidates = FindEnumPatternTargets(typeManager, ctx, enumDecl, pattern)
+    // C++: TypeCheckPattern.cpp:526-530 TypeCheckerImpl::FindEnumPatternTarget.
+    if (candidates.isEmpty()) {
+        if (let Some(diagValue) <- diag) {
+            Diagnose(diagValue, pattern, BasicDiagKind.sema_undeclared_identifier,
+                args: [BasicDiagArgument(pattern.GetIdentifier())]).Emit()
+        }
+        constructor.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
     ReplaceTarget(constructor, None)
     for (candidate in candidates) {
         if (CandidateMatchesEnumPattern(candidate, pattern) && Ty.IsTyCorrect(candidate.GetTy())) {
@@ -541,7 +551,7 @@ public func FindEnumPatternTarget(typeManager: TypeManager, ctx: ASTContext,
                                         if (let Some(subEnumDecl) <- (paramDecl as EnumDecl)) {
                                             if (let Some(subEnumPattern) <- (pattern.patterns[idx] as EnumPattern)) {
                                                 let _ = FindEnumPatternTarget(typeManager, ctx, subEnumDecl,
-                                                    subEnumPattern)
+                                                    subEnumPattern, diag: diag)
                                             }
                                         }
                                     }
@@ -555,6 +565,10 @@ public func FindEnumPatternTarget(typeManager: TypeManager, ctx: ASTContext,
             let _ = typeManager
             return true
         }
+    }
+    // C++: TypeCheckPattern.cpp:553-557 TypeCheckerImpl::FindEnumPatternTarget.
+    if (let Some(diagValue) <- diag) {
+        Diagnose(diagValue, pattern, BasicDiagKind.sema_enum_pattern_param_size_error).Emit()
     }
     constructor.SetTy(TypeManager.GetInvalidTy())
     return false
@@ -709,11 +723,11 @@ public func ChkEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
     var mayMatch = false
     let maybeInferred = typeManager.TryGreedySubst(target)
     if (let Some(enumTy) <- (maybeInferred as EnumTy)) {
-        let _ = FindEnumPatternTarget(typeManager, ctx, enumTy.declPtr, pattern)
+        let _ = FindEnumPatternTarget(typeManager, ctx, enumTy.declPtr, pattern, diag: diag)
         SetTyForEnumPatternConstructor(typeManager, enumTy, pattern)
         mayMatch = true
     } else if (target.IsPlaceholder()) {
-        mayMatch = FindEnumPatternTarget(typeManager, ctx, None, pattern)
+        mayMatch = FindEnumPatternTarget(typeManager, ctx, None, pattern, diag: diag)
         if (mayMatch) {
             if (let Some(constructor) <- pattern.constructor) {
                 let constructorTy = constructor.GetTy() ?? TypeManager.GetInvalidTy()
