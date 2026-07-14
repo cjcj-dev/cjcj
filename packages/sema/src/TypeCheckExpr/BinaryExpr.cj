@@ -375,33 +375,6 @@ private func IsFlowOperator(op: TokenKind): Bool {
     return op == TokenKind.PIPELINE || op == TokenKind.COMPOSITION
 }
 
-private func IsAloneThisOrSuperExpr(expr: Expr): Bool {
-    if (let Some(refExpr) <- (expr as RefExpr)) {
-        return refExpr.isAlone && (refExpr.isThis || refExpr.isSuper)
-    }
-    return false
-}
-
-private func FlowOperandsValid(be: BinaryExpr): Bool {
-    if (let Some(rightExpr) <- be.rightExpr) {
-        if (IsAloneThisOrSuperExpr(rightExpr)) {
-            return false
-        }
-    } else {
-        return false
-    }
-    if (be.op == TokenKind.COMPOSITION) {
-        if (let Some(leftExpr) <- be.leftExpr) {
-            if (IsAloneThisOrSuperExpr(leftExpr)) {
-                return false
-            }
-        } else {
-            return false
-        }
-    }
-    return true
-}
-
 private func CheckFlowOperandsHaveNamedParam(typeManager: TypeManager, be: BinaryExpr,
     synthesizer: BinaryOperandSynthesizer): Bool {
     if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
@@ -420,7 +393,7 @@ private func CheckFlowOperandsHaveNamedParam(typeManager: TypeManager, be: Binar
         ClearExprKeepTargets(leftValue)
         ClearExprKeepTargets(rightValue)
     }
-    return FlowOperandsValid(be)
+    return true
 }
 
 private func FuncDeclHasNamedParam(fd: FuncDecl): Bool {
@@ -459,9 +432,27 @@ private func FlowOperandsHaveNamedParam(callExpr: CallExpr): Bool {
 }
 
 private func SynFlowExpr(typeManager: TypeManager, be: BinaryExpr,
-    synthesizer: BinaryOperandSynthesizer): (Bool, Ty) {
+    synthesizer: BinaryOperandSynthesizer, diag: Option<BasicDiagnosticEngine>): (Bool, Ty) {
     if (!CheckFlowOperandsHaveNamedParam(typeManager, be, synthesizer)) {
         return (true, TypeManager.GetInvalidTy())
+    }
+    // C++ src/Sema/TypeCheckExpr/BinaryExpr.cpp:1093-1108 TypeCheckerImpl::ChkFlowExpr.
+    let isThisExpr = { exp: Expr =>
+        if (let Some(refExpr) <- (exp as RefExpr)) {
+            if (refExpr.isAlone && refExpr.isThis) {
+                if (let Some(diagValue) <- diag) {
+                    Diagnose(diagValue, refExpr, BasicDiagKind.sema_flow_expressions_use_this_or_super,
+                        args: [BasicDiagArgument(refExpr.ref.identifier.Val())]).Emit()
+                }
+                return false
+            }
+        }
+        return true
+    }
+    let leftExpr = be.leftExpr.getOrThrow()
+    let rightExpr = be.rightExpr.getOrThrow()
+    if ((be.op == TokenKind.COMPOSITION && !isThisExpr(leftExpr)) || !isThisExpr(rightExpr)) {
+        return (true, BinaryInvalid(be))
     }
     DesugarInTypeCheck(be)
     if (let Some(desugar) <- be.desugarExpr) {
@@ -1037,7 +1028,7 @@ private func SynCompositionExpr(typeManager: TypeManager, be: BinaryExpr,
 private func SynFlowExpr(typeManager: TypeManager, be: BinaryExpr,
     synthesizer!: Option<BinaryOperandSynthesizer> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Ty {
-    let desugarResult = SynFlowExpr(typeManager, be, synthesizer.getOrThrow())
+    let desugarResult = SynFlowExpr(typeManager, be, synthesizer.getOrThrow(), diag)
     if (desugarResult[0]) {
         return desugarResult[1]
     }
@@ -1047,13 +1038,33 @@ private func SynFlowExpr(typeManager: TypeManager, be: BinaryExpr,
 }
 
 private func ChkFlowExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
-    synthesizer: BinaryOperandSynthesizer, checker: BinaryOperandChecker): Bool {
+    synthesizer: BinaryOperandSynthesizer, checker: BinaryOperandChecker,
+    diag: Option<BasicDiagnosticEngine>): Bool {
     if (let Some(existingTy) <- be.GetTy()) {
         if (Ty.IsTyCorrect(existingTy)) {
             return typeManager.CheckTypeCompatibility(target, existingTy) != TypeCompatibility.INCOMPATIBLE
         }
     }
     if (!CheckFlowOperandsHaveNamedParam(typeManager, be, synthesizer)) {
+        return false
+    }
+    // C++ src/Sema/TypeCheckExpr/BinaryExpr.cpp:1093-1108 TypeCheckerImpl::ChkFlowExpr.
+    let isThisExpr = { exp: Expr =>
+        if (let Some(refExpr) <- (exp as RefExpr)) {
+            if (refExpr.isAlone && refExpr.isThis) {
+                if (let Some(diagValue) <- diag) {
+                    Diagnose(diagValue, refExpr, BasicDiagKind.sema_flow_expressions_use_this_or_super,
+                        args: [BasicDiagArgument(refExpr.ref.identifier.Val())]).Emit()
+                }
+                return false
+            }
+        }
+        return true
+    }
+    let leftExpr = be.leftExpr.getOrThrow()
+    let rightExpr = be.rightExpr.getOrThrow()
+    if ((be.op == TokenKind.COMPOSITION && !isThisExpr(leftExpr)) || !isThisExpr(rightExpr)) {
+        let _ = BinaryInvalid(be)
         return false
     }
     DesugarInTypeCheck(be)
@@ -1539,7 +1550,7 @@ public func ChkBinaryExpr(impl: TypeCheckerImpl, target: Ty, be: BinaryExpr,
         return ChkCoalescingExpr(impl, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
     }
     if (IsFlowOperator(be.op)) {
-        return ChkFlowExpr(typeManager, target, be, synthesizer.getOrThrow(), checker.getOrThrow())
+        return ChkFlowExpr(typeManager, target, be, synthesizer.getOrThrow(), checker.getOrThrow(), diag)
     }
     try (ds = DiagSuppressor(diag)) {
         if (ChkBuiltinBinaryExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker,
