@@ -642,7 +642,19 @@ extend ParserImpl {
                 DiagExpectPublicBeforeMacroCall(ret)
                 ret.EnableAttr(Attribute.IS_BROKEN)
             }
-            CheckMacroDeclPackage(ret)
+            if (let Some(file) <- currentFile) {
+                if ((let None <- file.packageSpec) || !file.packageSpec.getOrThrow().hasMacro) {
+                    if (ret.identifier.Begin().IsZero()) {
+                        ParseDiagnoseRefactor(
+                            DiagKindRefactor.parse_expected_macro_decl_define_in_macro_package,
+                            MakeRange(ret.begin, lastToken.End())).Emit()
+                    } else {
+                        ParseDiagnoseRefactor(
+                            DiagKindRefactor.parse_expected_macro_decl_define_in_macro_package,
+                            MakeRange(ret.identifier.Begin(), ret.identifier.End())).Emit()
+                    }
+                }
+            }
         }
         return ret
     }
@@ -735,21 +747,6 @@ extend ParserImpl {
         typeNode.end = pos
         typeNode.ref.identifier = SrcIdentifier("Tokens", "Tokens", pos, pos, false)
         return typeNode
-    }
-
-    private func CheckMacroDeclPackage(macroDecl: MacroDecl): Unit {
-        if (let Some(file) <- currentFile) {
-            var inMacroPackage = false
-            if (let Some(pkg) <- file.packageSpec) {
-                inMacroPackage = pkg.hasMacro
-            }
-            if (!inMacroPackage) {
-                ParseDiagnoseRefactor(
-                    DiagKindRefactor.parse_expected_macro_decl_define_in_macro_package,
-                    MakeRange(macroDecl.identifier.Begin(), macroDecl.identifier.End())).Emit()
-                macroDecl.EnableAttr(Attribute.IS_BROKEN)
-            }
-        }
     }
 
     private func IsBuiltinMacroDeclName(identifier: String): Bool {
