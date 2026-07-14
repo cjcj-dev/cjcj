@@ -2880,6 +2880,11 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
         let normalizedRetTy = typeManager.SubstituteTypeAliasInTy(instRetTy)
         let normalizedTargetTy = typeManager.SubstituteTypeAliasInTy(targetTy)
         if (!instRetTy.HasIdealTy() && !typeManager.IsSubtype(normalizedRetTy, normalizedTargetTy)) {
+            if (ce.sourceExpr.isNone()) {
+                if (let Some(diagValue) <- diag) {
+                    DiagMismatchedTypesWithFoundTy(diagValue, ce, targetTy, instRetTy)
+                }
+            }
             return None
         }
     }
