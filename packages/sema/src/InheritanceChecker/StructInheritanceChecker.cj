@@ -2035,16 +2035,12 @@ public class StructInheritanceChecker {
                     } else {
                         DiagKindRefactor.sema_property_have_same_declaration_in_inherit_immut
                     }
-                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                    diag.DiagnoseRefactor(kind, DeclRange(child), arguments: [child.identifier.Val()])
+                    DiagnoseRefactor(diag, kind, childProp,
+                        arguments: [childProp.identifier.Val()]).Emit()
                 } else if (childProp.isVar && (childProp.getters.isEmpty() || childProp.setters.isEmpty()) &&
                     parentProp.TestAnyAttr(Attribute.DEFAULT, Attribute.ABSTRACT)) {
-                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                    diag.DiagnoseRefactor(
-                        DiagKindRefactor.sema_property_must_implement_both,
-                        DeclRange(child),
-                        arguments: [child.identifier.Val()]
-                    )
+                    DiagnoseRefactor(diag, DiagKindRefactor.sema_property_must_implement_both, childProp,
+                        arguments: [childProp.identifier.Val()]).Emit()
                 }
             }
         }
