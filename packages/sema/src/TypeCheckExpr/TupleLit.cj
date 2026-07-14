@@ -98,7 +98,8 @@ public func ChkTupleLit(typeManager: TypeManager, target: Ty, tl: TupleLit, synt
     }
     if (let Some(targetTuple) <- (targetTy as TupleTy)) {
         if (targetTuple.typeArgs.size != tl.children.size) {
-            let _ = SynTupleLit(typeManager, tl)
+            tl.SetTy(synthesizer(tl))
+            let _ = ReplaceIdealTy(typeManager, tl, diag: diag)
             diagMismatchedTypes(diag, tl, targetTy)
             return false
         }
@@ -107,7 +108,8 @@ public func ChkTupleLit(typeManager: TypeManager, target: Ty, tl: TupleLit, synt
             if (let Some(checkFunc) <- check) {
                 if (!checkFunc(targetTuple.typeArgs[idx], child)) {
                     diagMismatchedTypes(diag, child, targetTuple.typeArgs[idx])
-                    let _ = SynTupleLit(typeManager, tl)
+                    tl.SetTy(synthesizer(tl))
+                    let _ = ReplaceIdealTy(typeManager, tl, diag: diag)
                     return false
                 }
                 continue
