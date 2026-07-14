@@ -3,6 +3,7 @@ package cjcj::sema.TypeCheckExpr
 import std.collection.*
 import cjcj::ast.*
 import cjcj::basic.Diagnostic
+import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::sema.*
@@ -659,7 +660,7 @@ private func ChkExpoExprExponent(typeManager: TypeManager, exponent: Expr, exTys
     }
     if (answers > 1) {
         if (let Some(diagValue) <- diag) {
-            diagValue.Diagnose(exponent.begin, BasicDiagKind.sema_ambiguous_expo_right_operand_type).Emit()
+            Diagnose(diagValue, exponent, BasicDiagKind.sema_ambiguous_expo_right_operand_type).Emit()
         }
         isWellTyped = false
     } else if (answers == 1) {
@@ -1206,52 +1207,75 @@ private func ChkConcreteBinaryOperandPair(typeManager: TypeManager, candidateTy:
     return false
 }
 
-private func ChkExpoExprWithTarget(typeManager: TypeManager, target: Ty, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None, checker!: Option<BinaryOperandChecker> = None): Bool {
+private func ChkExpoExprBase(typeManager: TypeManager, be: BinaryExpr, baseTy: Ty,
+    ctx!: Option<ASTContext> = None, checker!: Option<BinaryOperandChecker> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
+        return false
+    }
+    let leftExpr = be.leftExpr.getOrThrow()
+    let noteMsg = "the context requires this exponentiation expression to be of type '" + baseTy.String() +
+        "'; the type of the left operand must also be '" + baseTy.String() + "' in this case"
+    if (!ChkBinaryOperand(typeManager, baseTy, leftExpr, ctx, checker)) {
+        if (!CanSkipDiag(leftExpr)) {
+            if (let Some(diagValue) <- diag) {
+                DiagMismatchedTypes(diagValue, leftExpr, baseTy, note: noteMsg)
+            }
+        }
+        return false
+    }
+    return true
+}
+
+private func ChkExpoExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
         let _ = BinaryInvalid(be)
         return false
     }
     let i64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
-    let u64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT64)
     let f64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_FLOAT64)
-    let leftExpr = be.leftExpr.getOrThrow()
+    let u64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT64)
     let rightExpr = be.rightExpr.getOrThrow()
-    if (typeManager.IsSubtype(i64Ty, target)) {
-        ClearExprKeepTargets(leftExpr)
-        ClearExprKeepTargets(rightExpr)
-        let leftI64Ok = ChkBinaryOperand(typeManager, i64Ty, leftExpr, ctx, checker)
-        let rightU64Ok = ChkBinaryOperand(typeManager, u64Ty, rightExpr, ctx, checker)
-        if (leftI64Ok && rightU64Ok) {
-            be.SetTy(i64Ty)
+    var isBaseWellTyped = false
+    var isExponentWellTyped = false
+    let i64Compatible = typeManager.IsSubtype(i64Ty, target)
+    let f64Compatible = typeManager.IsSubtype(f64Ty, target)
+    var maybeF64 = f64Compatible
+    try (cs = typeManager.constraints.CommitScope()) {
+        if (i64Compatible) {
+            try (ds = DiagSuppressor(diag)) {
+                isBaseWellTyped = ChkExpoExprBase(typeManager, be, i64Ty, ctx: ctx, checker: checker, diag: diag)
+                let exponentTys = ArrayList<Ty>()
+                exponentTys.add(u64Ty)
+                isExponentWellTyped = ChkExpoExprExponent(typeManager, rightExpr, exponentTys, ctx: ctx,
+                    synthesizer: synthesizer, checker: checker, diag: diag)
+                maybeF64 = maybeF64 && !(isBaseWellTyped && isExponentWellTyped)
+                if (!maybeF64) {
+                    ds.ReportDiag()
+                } else {
+                    typeManager.constraints.Reset()
+                }
+            }
+        }
+        if (maybeF64) {
+            isBaseWellTyped = ChkExpoExprBase(typeManager, be, f64Ty, ctx: ctx, checker: checker, diag: diag)
+            let exponentTys = ArrayList<Ty>()
+            exponentTys.add(i64Ty)
+            exponentTys.add(f64Ty)
+            isExponentWellTyped = ChkExpoExprExponent(typeManager, rightExpr, exponentTys, ctx: ctx,
+                synthesizer: synthesizer, checker: checker, diag: diag)
+        }
+        if (!i64Compatible && !f64Compatible) {
+            if (let Some(diagValue) <- diag) {
+                Diagnose(diagValue, be, BasicDiagKind.sema_incompatible_expo_target_type,
+                    args: [BasicDiagArgument(target.String())]).Emit()
+            }
+        }
+        if (isBaseWellTyped && isExponentWellTyped) {
+            be.SetTy(be.leftExpr.getOrThrow().GetTy().getOrThrow())
             return true
-        }
-    }
-    if (typeManager.IsSubtype(f64Ty, target)) {
-        ClearExprKeepTargets(leftExpr)
-        ClearExprKeepTargets(rightExpr)
-        let leftF64Ok = ChkBinaryOperand(typeManager, f64Ty, leftExpr, ctx, checker)
-        ClearExprKeepTargets(rightExpr)
-        let rightI64Ok = ChkBinaryOperand(typeManager, i64Ty, rightExpr, ctx, checker)
-        ClearExprKeepTargets(rightExpr)
-        let rightF64Ok = ChkBinaryOperand(typeManager, f64Ty, rightExpr, ctx, checker)
-        if (leftF64Ok && rightI64Ok && !rightF64Ok) {
-            ClearExprKeepTargets(rightExpr)
-            if (ChkBinaryOperand(typeManager, i64Ty, rightExpr, ctx, checker)) {
-                be.SetTy(f64Ty)
-                return true
-            }
-        }
-        if (leftF64Ok && rightF64Ok && !rightI64Ok) {
-            ClearExprKeepTargets(rightExpr)
-            if (ChkBinaryOperand(typeManager, f64Ty, rightExpr, ctx, checker)) {
-                be.SetTy(f64Ty)
-                return true
-            }
-        }
-        if (leftF64Ok && rightI64Ok && rightF64Ok) {
-            let _ = BinaryInvalid(be)
-            return false
         }
     }
     let _ = BinaryInvalid(be)
@@ -1266,7 +1290,7 @@ private func ChkArithmeticExprBuiltin(typeManager: TypeManager, target: Ty, be: 
         return false
     }
     if (be.op == TokenKind.EXP) {
-        return ChkExpoExprWithTarget(typeManager, targetTy, be, ctx: ctx, checker: checker)
+        return ChkExpoExpr(typeManager, targetTy, be, ctx: ctx, checker: checker, diag: diag)
     }
     let candidateKinds = GetConcreteBinaryCandidateKinds(be.op)
     let thisDiags = ArrayList<Diagnostic>()
