@@ -250,18 +250,16 @@ extend ParserImpl {
         tuple.leftBracePos = tuple.leftParenPos
         tuple.begin = tuple.leftParenPos
         try (cs = ChainScope(this, tuple)) {
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
+            do {
                 tuple.patterns.add(ParsePattern(attributes, isVar, inDecl))
                 if (Seeing(TokenKind.BITOR)) {
                     DiagOrPattern()
                     ConsumeUntilAny([TokenKind.COMMA, TokenKind.RPAREN], targetTokenConsumed: false)
                 }
-                if (Skip(TokenKind.COMMA)) {
-                    tuple.commaPosVector.add(lastToken.Begin())
-                } else {
-                    break
+                if (Seeing(TokenKind.COMMA)) {
+                    tuple.commaPosVector.add(Peek().Begin())
                 }
-            }
+            } while (Skip(TokenKind.COMMA))
             if (!Skip(TokenKind.RPAREN)) {
                 var hasBrokenChild = false
                 for (tupleChild in tuple.patterns) {
