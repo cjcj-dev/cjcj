@@ -1829,13 +1829,12 @@ public class StructInheritanceChecker {
             if (memberDecl.TestAttr(Attribute.ABSTRACT) && !isAbstractDecl) {
                 unimplementedMembers.add(member.Clone())
             } else if (member.shouldBeImplemented) {
-                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                diag.Diagnose(
-                    structDecl.begin,
-                    structDecl.end,
+                Diagnose(
+                    diag,
+                    structDecl,
                     DiagKind.sema_interface_member_must_be_implemented,
                     args: [DiagArgument(DeclKindText(memberDecl)), DiagArgument(entry.name), DiagArgument(structName)]
-                )
+                ).Emit()
             } else if (let Some(outer) <- memberDecl.outerDecl) {
                 if (!SameDecl(outer, structDecl)) {
                     if (isStaticAbsMember && isAbstractClass) {
