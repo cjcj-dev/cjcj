@@ -38,6 +38,25 @@ private func DiagExpectConstExpr(diag: BasicDiagnosticEngine, expr: Expr, isWeak
     builder.Emit()
 }
 
+private func DiagNoConstInit(diag: BasicDiagnosticEngine, fd: FuncDecl): Unit {
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_no_const_init,
+        fd, MakeRangeForDeclIdentifier(fd))
+    var outerDecl = fd.outerDecl
+    if (let Some(decl) <- outerDecl) {
+        if (let Some(extendDecl) <- (decl as ExtendDecl)) {
+            let extendedType = extendDecl.extendedType.getOrThrow()
+            outerDecl = Ty.GetDeclPtrOfTy(extendedType.GetTy())
+        }
+    }
+    if (let Some(decl) <- outerDecl) {
+        if (!decl.TestAttr(Attribute.IMPORTED)) {
+            AddNote(builder, decl, MakeRangeForDeclIdentifier(decl),
+                "consider add a 'const' constructor to this " + DeclKindToString(decl))
+        }
+    }
+    builder.Emit()
+}
+
 public enum ConstEvaluationIssueKind {
     | EXPECT_CONST_FUNCTION
     | EXPECT_CONST_EXPRESSION
@@ -456,7 +475,7 @@ public class ConstEvaluationChecker {
         var result = true
         for (decl in decls) {
             if (decl.IsConst() && decl.IsFunc() && !decl.TestAttr(Attribute.STATIC)) {
-                AddIssue(ConstEvaluationIssueKind.NO_CONST_INIT, decl, target: decl)
+                DiagNoConstInit(diag, (decl as FuncDecl).getOrThrow())
                 result = false
             }
         }
