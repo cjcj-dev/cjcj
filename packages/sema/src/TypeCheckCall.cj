@@ -10,7 +10,6 @@ import cjcj::basic.DiagSeverity as BasicDiagSeverity
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagArgument as BasicDiagArgument
-import cjcj::basic.Position as BasicPosition
 import cjcj::modules.SemaImportManager
 
 public type CallArgChecker = (Ty, FuncArg) -> Bool
@@ -87,14 +86,9 @@ private class CallInferenceFailure {
     public init() {}
 }
 
-private func ToBasicPosition(pos: Position): BasicPosition {
-    return BasicPosition(pos.fileID, pos.line, pos.column)
-}
-
 private func DiagOld(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind,
     args!: Array<BasicDiagArgument> = Array<BasicDiagArgument>()): Unit {
-    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-    let _ = diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind, args: args)
+    Diagnose(diag, node, kind, args: args).Emit()
 }
 
 private func StringDiagArgs(values: Array<String>): Array<BasicDiagArgument> {
@@ -111,14 +105,12 @@ private func DiagOldStrings(diag: BasicDiagnosticEngine, node: Node, kind: Basic
 
 private func DiagRef(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKindRefactor,
     args!: Array<String> = Array<String>()): Unit {
-    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-    let _ = DiagnoseRefactor(diag, kind, node, arguments: args)
+    DiagnoseRefactor(diag, kind, node, arguments: args).Emit()
 }
 
 private func DiagRefEmit(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKindRefactor,
     args!: Array<String> = Array<String>()): Unit {
-    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-    let _ = DiagnoseRefactor(diag, kind, node, arguments: args)
+    DiagnoseRefactor(diag, kind, node, arguments: args).Emit()
 }
 
 private func DiagUnableToInferReturnType(diag: BasicDiagnosticEngine, funcDecl: FuncDecl, expr: Expr): Unit {
@@ -4183,30 +4175,54 @@ internal func DiagnoseForCall(diag: Option<BasicDiagnosticEngine>, candidatesBef
         return
     }
     let diagValue = diag.getOrThrow()
-    let isConstructorCall = ce.callKind == CallKind.CALL_OBJECT_CREATION || ce.callKind == CallKind.CALL_STRUCT_CREATION
+    let baseFunc = ce.baseFunc.getOrThrow()
+    if (ce.sourceExpr.isSome() || baseFunc.TestAttr(Attribute.MACRO_INVOKE_BODY)) {
+        return
+    }
+    if (!candidatesBeforeCheck.isEmpty() && candidatesAfterCheck.isEmpty() && Ty.IsTyCorrect(baseFunc.GetTy())) {
+        for (arg in ce.args) {
+            if (!Ty.IsTyCorrect(arg.GetTy())) {
+                return
+            }
+        }
+    }
+    let isSuperCreation = ce.callKind == CallKind.CALL_SUPER_FUNCTION && decl.astKind != ASTKind.FUNC_DECL
+    var identifier = if (isSuperCreation) { "super" } else { decl.identifier.Val() }
+    var identifierPos = ce.begin
+    if (let Some(refExpr) <- (baseFunc as RefExpr)) {
+        identifier = refExpr.ref.identifier.Val()
+    } else if ((let Some(memberAccess) <- (baseFunc as MemberAccess)) && !memberAccess.field.ZeroPos()) {
+        identifierPos = memberAccess.field.Begin()
+    }
+    let isConstructorCall = ce.callKind == CallKind.CALL_OBJECT_CREATION ||
+        ce.callKind == CallKind.CALL_STRUCT_CREATION
     if (candidatesBeforeCheck.isEmpty()) {
         ce.callKind = CallKind.CALL_INVALID
-        if (isConstructorCall) {
-            DiagOld(diagValue, ce, BasicDiagKind.sema_no_match_constructor)
+        let errorKind = if (isConstructorCall) {
+            BasicDiagKind.sema_no_match_constructor
         } else {
-            DiagOld(diagValue, ce, BasicDiagKind.sema_no_match_function_declaration_for_call)
+            BasicDiagKind.sema_no_match_function_declaration_for_call
         }
+        Diagnose(diagValue, ce, identifierPos, errorKind,
+            args: [BasicDiagArgument(identifier)]).Emit()
         return
     }
     if (candidatesAfterCheck.isEmpty() && candidatesBeforeCheck.size == 1) {
         return
     }
-    if (candidatesAfterCheck.isEmpty()) {
+    let errorKind = if (candidatesAfterCheck.isEmpty()) {
         if (isConstructorCall) {
-            DiagOld(diagValue, ce, BasicDiagKind.sema_no_match_constructor)
+            BasicDiagKind.sema_no_match_constructor
         } else {
-            DiagOld(diagValue, ce, BasicDiagKind.sema_no_match_function_declaration_for_call)
+            BasicDiagKind.sema_no_match_function_declaration_for_call
         }
     } else if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.STRUCT_DECL) {
-        DiagOld(diagValue, ce, BasicDiagKind.sema_ambiguous_constructor_match)
+        BasicDiagKind.sema_ambiguous_constructor_match
     } else {
-        DiagOld(diagValue, ce, BasicDiagKind.sema_ambiguous_match)
+        BasicDiagKind.sema_ambiguous_match
     }
+    Diagnose(diagValue, ce, identifierPos, errorKind,
+        args: [BasicDiagArgument(identifier)]).Emit()
 }
 
 private func ResolveDeclForCallBase(ce: CallExpr, candidates: ArrayList<FuncDecl>): Option<Decl> {
