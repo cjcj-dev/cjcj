@@ -100,37 +100,6 @@ private func PatternKindForDiag(ctx: ASTContext, pattern: Pattern): String {
     return text + " pattern"
 }
 
-private func FindBindingPattern(ctx: ASTContext, pattern: Pattern): Option<Pattern> {
-    if (pattern.astKind == ASTKind.VAR_PATTERN) {
-        return Some(pattern)
-    }
-    if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
-        if (!ctx.IsEnumConstructor(varOrEnum.identifier.Val())) {
-            return Some(pattern)
-        }
-    }
-    if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
-        for (subPattern in tuplePattern.patterns) {
-            if (let Some(found) <- FindBindingPattern(ctx, subPattern)) {
-                return Some(found)
-            }
-        }
-    }
-    if (let Some(enumPattern) <- (pattern as EnumPattern)) {
-        for (subPattern in enumPattern.patterns) {
-            if (let Some(found) <- FindBindingPattern(ctx, subPattern)) {
-                return Some(found)
-            }
-        }
-    }
-    if (let Some(typePattern) <- (pattern as TypePattern)) {
-        if (let Some(inner) <- typePattern.pattern) {
-            return FindBindingPattern(ctx, inner)
-        }
-    }
-    return None
-}
-
 public func ChkNoVarPatternInOrPattern(ctx: ASTContext, patterns: ArrayList<Pattern>,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (patterns.size <= 1) {
@@ -138,9 +107,16 @@ public func ChkNoVarPatternInOrPattern(ctx: ASTContext, patterns: ArrayList<Patt
     }
     let varPatterns = ArrayList<Pattern>()
     for (pattern in patterns) {
-        if (let Some(varPattern) <- FindBindingPattern(ctx, pattern)) {
-            varPatterns.add(varPattern)
-        }
+        let _ = Walker(pattern, visitPre: { node: Node =>
+            let isVarPattern = node.astKind == ASTKind.VAR_PATTERN ||
+                (node.astKind == ASTKind.VAR_OR_ENUM_PATTERN &&
+                    !ctx.IsEnumConstructor((node as VarOrEnumPattern).getOrThrow().identifier.Val()))
+            if (isVarPattern) {
+                varPatterns.add((node as Pattern).getOrThrow())
+                return VisitAction.SKIP_CHILDREN
+            }
+            return VisitAction.WALK_CHILDREN
+        }).Walk()
     }
     if (varPatterns.isEmpty()) {
         return true
@@ -153,7 +129,7 @@ public func ChkNoVarPatternInOrPattern(ctx: ASTContext, patterns: ArrayList<Patt
             AddHint(builder, varPatterns[idx])
             idx++
         }
-        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+        builder.Emit()
     }
     return false
 }
