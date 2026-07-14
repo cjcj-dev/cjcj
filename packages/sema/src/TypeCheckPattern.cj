@@ -2,6 +2,8 @@ package cjcj::sema
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.Position as BasicPosition
@@ -823,9 +825,12 @@ public func ChkTuplePattern(typeManager: TypeManager, ctx: ASTContext, target: T
     exprChecker!: Option<ConstPatternExprChecker> = None,
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
-    let _ = isPatternInMatch
+    // C++: src/Sema/TypeCheckPattern.cpp:467-492 TypeCheckerImpl::ChkTuplePattern.
     if (let Some(tupleTy) <- (target as TupleTy)) {
         if (tupleTy.typeArgs.size != pattern.patterns.size) {
+            if (let Some(diagValue) <- diag) {
+                Diagnose(diagValue, pattern, BasicDiagKind.sema_tuple_pattern_with_correct_size_expected).Emit()
+            }
             return InvalidPatternTy(pattern)
         }
         var idx: Int64 = 0
@@ -838,6 +843,14 @@ public func ChkTuplePattern(typeManager: TypeManager, ctx: ASTContext, target: T
         }
         pattern.SetTy(target)
         return true
+    }
+    if (let Some(diagValue) <- diag) {
+        if (isPatternInMatch) {
+            DiagMismatchedTypesWithFoundTy(diagValue, pattern, target.String(), "Tuple")
+        } else {
+            Diagnose(diagValue, pattern, BasicDiagKind.sema_tuple_pattern_not_match,
+                args: [BasicDiagArgument("initializer")]).Emit()
+        }
     }
     return InvalidPatternTy(pattern)
 }
