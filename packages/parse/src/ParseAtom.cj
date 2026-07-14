@@ -368,6 +368,10 @@ extend ParserImpl {
         if (!Skip(TokenKind.LT)) {
             return (false, out)
         }
+        if (Skip(TokenKind.GT)) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_type_argument, lastToken.Begin()).Emit()
+            return (true, out)
+        }
         while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
             out.add(ParseType())
             if (!Skip(TokenKind.COMMA)) { break }
