@@ -2,6 +2,7 @@ package cjcj::parse
 
 import cjcj::ast.ASTCloner
 import cjcj::ast.Node
+import cjcj::ast.IsMirror
 import cjcj::ast.SortModifierByPos
 import cjcj::ast.VisitAction
 import cjcj::ast.Walker
@@ -1845,10 +1846,13 @@ extend ParserImpl {
             }
             if (!member.IsInvalid()) {
                 member.outerDecl = ret
-                if ((ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) ||
-                    ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) &&
-                    (let Some(propDecl) <- (member as PropDecl))) {
-                    CheckClassLikePropAbstractness(propDecl)
+                if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) ||
+                    ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) {
+                    if (let Some(funcDecl) <- (member as FuncDecl)) {
+                        CheckClassLikeFuncBodyAbstractness(funcDecl)
+                    } else if (let Some(propDecl) <- (member as PropDecl)) {
+                        CheckClassLikePropAbstractness(propDecl)
+                    }
                 }
                 AddBodyMember(ret, member)
             }
@@ -2056,6 +2060,107 @@ extend ParserImpl {
             SetDefaultFunc(scopeKind, ret)
         }
         return ret
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:2129-2221
+    private func CheckClassLikeFuncBodyAbstractness(decl: FuncDecl): Unit {
+        let isCommon = decl.TestAttr(Attribute.COMMON)
+        let outerDecl = decl.outerDecl.getOrThrow()
+        let outerModifiers = outerDecl.modifiers
+        let inAbstract = HasModifierToken(outerModifiers, TokenKind.ABSTRACT)
+        let inCJMP = HasModifierToken(outerModifiers, TokenKind.SPECIFIC) ||
+            HasModifierToken(outerModifiers, TokenKind.COMMON)
+        let inAbstractCJMP = inAbstract && inCJMP
+        let inObjCMirror = outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)
+        let isJavaMirrorOrJavaMirrorSubtype =
+            outerDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)
+
+        if (HasModifierToken(decl.modifiers, TokenKind.ABSTRACT) && !isCommon && !inAbstractCJMP &&
+            !isJavaMirrorOrJavaMirrorSubtype) {
+            ParseDiagnoseRefactor(
+                DiagKindRefactor.parse_explicitly_abstract_only_for_cjmp_abstract_class,
+                decl, "function").Emit()
+        }
+
+        if (let Some(funcBody) <- decl.funcBody) {
+            if (funcBody.body.isSome()) {
+                return
+            }
+        }
+        if (decl.TestAttr(Attribute.CONSTRUCTOR)) {
+            return
+        }
+        if (inObjCMirror) {
+            decl.DisableAttr(Attribute.ABSTRACT)
+            return
+        }
+
+        let inClass = outerDecl.astKind == ASTKind.CLASS_DECL
+        let inAbstractCJMPClass = inAbstractCJMP && inClass
+        if (inAbstractCJMP && !HasModifierToken(decl.modifiers, TokenKind.ABSTRACT)) {
+            if (HasModifierToken(decl.modifiers, TokenKind.OPEN) && inAbstractCJMP &&
+                !HasModifierToken(decl.modifiers, TokenKind.COMMON)) {
+                DiagMissingBody(
+                    "function",
+                    if (!decl.identifier.Valid()) { "" } else { " '${decl.identifier.Val()}'" },
+                    lastToken.End())
+            }
+            decl.DisableAttr(Attribute.ABSTRACT)
+        }
+
+        let hasAbstractModifier = HasModifierToken(decl.modifiers, TokenKind.ABSTRACT)
+        if (isJavaMirrorOrJavaMirrorSubtype) {
+            let ffiParser = FFIParserImpl(this)
+            if (ffiParser.Java().IsAbstractFunction(decl, outerDecl)) {
+                decl.EnableAttr(Attribute.ABSTRACT)
+                return
+            } else if (IsMirror(outerDecl)) {
+                decl.DisableAttr(Attribute.ABSTRACT)
+            }
+        }
+
+        if (hasAbstractModifier && !inAbstractCJMPClass) {
+            var abstractModifier: Option<Modifier> = None
+            for (modifier in decl.modifiers) {
+                if (modifier.modifier == TokenKind.ABSTRACT) {
+                    abstractModifier = modifier
+                }
+            }
+            let modifier = abstractModifier.getOrThrow()
+            try (cs = ChainScope(this, decl)) {
+                DiagIllegalModifierInScope(modifier)
+            }
+            return
+        }
+
+        if (isJavaMirrorOrJavaMirrorSubtype) {
+            return
+        }
+        if (isCommon && outerDecl.astKind == ASTKind.INTERFACE_DECL) {
+            decl.EnableAttr(Attribute.ABSTRACT)
+            return
+        }
+        if (decl.TestAnyAttr(Attribute.FOREIGN, Attribute.INTRINSIC)) {
+            return
+        }
+
+        let funcBody = decl.funcBody.getOrThrow()
+        if (funcBody.TestAttr(Attribute.HAS_BROKEN)) {
+            return
+        }
+        if (decl.TestAttr(Attribute.ABSTRACT) ||
+            (funcBody.body.isNone() && !decl.TestAttr(Attribute.FINALIZER))) {
+            if (funcBody.retType.isNone()) {
+                ParseDiagnoseRefactor(
+                    DiagKindRefactor.parse_abstract_func_must_have_return_type, lastToken.End()).Emit()
+            }
+        } else if (!isCommon) {
+            decl.DisableAttr(Attribute.ABSTRACT)
+            DiagMissingBody(
+                "function",
+                if (!decl.identifier.Valid()) { "" } else { " '${decl.identifier.Val()}'" },
+                lastToken.End())
+        }
     }
 
     // C++ anchor: cangjie_compiler/src/Parse/Parser.cpp:444-490
