@@ -1176,7 +1176,7 @@ public class FaithfulAST2CHIR {
         }
         CacheTopLevelDeclToGlobalSymbolTable()
         TranslateNominalDecls(node)
-        SetInitFuncForStaticVar(initOrder)
+        TranslateInitOfGlobalVars(initOrder)
         TranslateOtherTopLevelDecls(node)
         FlatForInExpr(builder).RunOnPackage(CurrentPackage())
         try (recorder = ProfileRecorder("Canonicalization", "GenerateVTable")) {
@@ -2240,9 +2240,28 @@ public class FaithfulAST2CHIR {
         }
     }
 
-    private func SetInitFuncForStaticVar(initOrder: ArrayList<FaithfulInitFileVars>): Unit {
+    private func TranslateInitOfGlobalVars(initOrder: ArrayList<FaithfulInitFileVars>): Unit {
         CreatePackageInit(nodeInitOrder: initOrder, suffix: "")
         CreatePackageInit(nodeInitOrder: initOrder, suffix: "_literal")
+        SetInitFuncForStaticVar()
+    }
+
+    private func SetInitFuncForStaticVar(): Unit {
+        for (skippedStaticVar in globalAndStaticVars) {
+            if (!varsInitedByStaticInitFunc.Contains(skippedStaticVar)) {
+                continue
+            }
+            let skippedStaticVarValue = globalCache.TryGet(skippedStaticVar)
+            if (skippedStaticVarValue.isNone() || skippedStaticVar.specificImplementation.isSome()) {
+                continue
+            }
+            CJC_ASSERT(skippedStaticVar.astKind == ASTKind.VAR_DECL)
+            let skippedStaticVarInCHIR = (skippedStaticVarValue.getOrThrow() as GlobalVar).getOrThrow()
+            let outerDecl = skippedStaticVar.outerDecl.getOrThrow()
+            let staticInitInfo = staticInitFuncInfoMap.Get(outerDecl).getOrThrow()
+            let staticInitFuncInCHIR = (globalCache.Get(staticInitInfo.staticInitFunc) as Function).getOrThrow()
+            skippedStaticVarInCHIR.SetInitFunc(staticInitFuncInCHIR)
+        }
     }
 
     private func AST2CHIRCheck(): Unit {
