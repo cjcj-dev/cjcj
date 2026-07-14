@@ -488,8 +488,12 @@ public class CHIRContext {
     }
 
     public func GetAllNodesNum(): Int64 {
-        return allocatedValues.size + allocatedExpressions.size + allocatedStructs.size + allocatedClasses.size +
+        var count = allocatedValues.size + allocatedExpressions.size + allocatedStructs.size + allocatedClasses.size +
             allocatedEnums.size + allocatedExtends.size
+        for ((_, ptrs) in allocatedPtrInFuncOrLambda) {
+            count += ptrs.size + 1
+        }
+        return count
     }
 
     public func MergeAllocatedPtrInFuncOrLambda(input: HashMap<Int64, ArrayList<Base>>): Unit {
@@ -504,24 +508,6 @@ public class CHIRContext {
 
     public func FreeMemoryInFunc(funcBody: BlockGroup): Unit {
         if (let Some(ptrs) <- allocatedPtrInFuncOrLambda.get(funcBody.nodeId)) {
-            let allocatedIds = HashSet<Int64>()
-            for (ptr in ptrs) {
-                allocatedIds.add(ptr.nodeId)
-            }
-            var exprIdx = allocatedExpressions.size - 1
-            while (exprIdx >= 0) {
-                if (allocatedIds.contains(allocatedExpressions[exprIdx].nodeId)) {
-                    allocatedExpressions.remove(at: exprIdx)
-                }
-                exprIdx--
-            }
-            var valueIdx = allocatedValues.size - 1
-            while (valueIdx >= 0) {
-                if (allocatedIds.contains(allocatedValues[valueIdx].nodeId)) {
-                    allocatedValues.remove(at: valueIdx)
-                }
-                valueIdx--
-            }
             ptrs.clear()
         }
     }
