@@ -408,6 +408,11 @@ public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit
     }
     if (let Some(varrayTy) <- (targetTy as VArrayTy)) {
         if (varrayTy.size != arrayLit.children.size) {
+            if (let Some(diagValue) <- diag) {
+                let builder = DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_varray_size_match, arrayLit)
+                builder.AddMainHintArguments([varrayTy.size.toString(), arrayLit.children.size.toString()])
+                builder.Emit()
+            }
             arrayLit.SetTy(TypeManager.GetInvalidTy())
             return false
         }
