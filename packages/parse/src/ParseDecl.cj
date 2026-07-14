@@ -6,10 +6,30 @@ import cjcj::ast.IsMirror
 import cjcj::ast.SortModifierByPos
 import cjcj::ast.VisitAction
 import cjcj::ast.Walker
-import cjcj::utils.{CJC_ASSERT, FileUtil}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, FileUtil}
 import std.collection.*
 
 extend ParserImpl {
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:141-164
+    private func ParseIrrefutablePattern(attributes: ArrayList<Attribute>, isVar: Bool, inDecl: Bool): Pattern {
+        if (Skip(TokenKind.WILDCARD)) {
+            return WildcardPattern(lastToken.Begin())
+        }
+        if (Seeing(TokenKind.LPAREN)) {
+            return ParseTuplePattern(false, attributes, isVar, inDecl)
+        }
+        if (SeeingIdentifierAndTargetOp([TokenKind.LPAREN, TokenKind.DOT, TokenKind.LT])) {
+            return ParseEnumPattern(attributes, isVar, inDecl)
+        }
+        if (Seeing(TokenKind.IDENTIFIER) || SeeingContextualKeyword()) {
+            let begin = Peek().Begin()
+            let identifier = ParseIdentifierFromToken(Peek())
+            return ParseVarPattern(attributes, identifier, begin, isVar)
+        }
+        CJC_ABORT()
+        return InvalidPattern(Peek().Begin())
+    }
+
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:1926-1947
     private func ParseForImportToGetContentBetween(
         fileID: UInt64,
@@ -1438,7 +1458,7 @@ extend ParserImpl {
     ): VarWithPatternDecl {
         let decl = VarWithPatternDecl()
         try (cs = ChainScope(this, decl)) {
-            let pattern = ParsePattern(ArrayList<Attribute>(), isVar, true)
+            let pattern = ParseIrrefutablePattern(ArrayList<Attribute>(), isVar, true)
             ApplyModifiersAndAnnotations(decl, modifiers, annos)
             decl.keywordPos = key.Begin()
             decl.irrefutablePattern = pattern
