@@ -2480,8 +2480,10 @@ private func CheckCallArgCompatible(typeManager: TypeManager, diag: Option<Basic
         if (checker(paramTy, ce.args[idx])) {
             return true
         }
-        if (let Some(diagValue) <- diag) {
-            DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_parameters_and_arguments_mismatch)
+        if (ce.args[idx].ShouldDiagnose() && !CanSkipDiag(ce.args[idx])) {
+            if (let Some(diagValue) <- diag) {
+                DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_parameters_and_arguments_mismatch)
+            }
         }
         return false
     }

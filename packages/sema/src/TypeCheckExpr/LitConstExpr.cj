@@ -64,7 +64,8 @@ private func DefaultFloatKind(suffixKind: TypeKind): TypeKind {
     return if (suffixKind == TypeKind.TYPE_IDEAL_FLOAT) { TypeKind.TYPE_FLOAT64 } else { suffixKind }
 }
 
-public func ChkLitConstExprOfTypeBool(typeManager: TypeManager, target: Ty, lce: LitConstExpr): Bool {
+public func ChkLitConstExprOfTypeBool(typeManager: TypeManager, target: Ty, lce: LitConstExpr,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
     if (target.IsBooleanSubType()) {
         lce.SetTy(target)
@@ -73,6 +74,10 @@ public func ChkLitConstExprOfTypeBool(typeManager: TypeManager, target: Ty, lce:
     if (IsSameOrBoxable(typeManager, boolTy, target) || target.IsAny() || target.IsCType()) {
         lce.SetTy(boolTy)
         return true
+    }
+    if (let Some(diagValue) <- diag) {
+        Diagnose(diagValue, lce, BasicDiagKind.sema_cannot_convert_literal,
+            args: [BasicDiagArgument("a boolean"), BasicDiagArgument(target.String())]).Emit()
     }
     lce.SetTy(TypeManager.GetNonNullTy(lce.GetTy() ?? TypeManager.GetInvalidTy()))
     return false
@@ -336,7 +341,7 @@ public func ChkLitConstExpr(typeManager: TypeManager, target: Ty, lce: LitConstE
     checker!: Option<(Ty, Expr) -> Bool> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let isWellTyped = match (lce.kind) {
-        case LitConstKind.BOOL => ChkLitConstExprOfTypeBool(typeManager, target, lce)
+        case LitConstKind.BOOL => ChkLitConstExprOfTypeBool(typeManager, target, lce, diag: diag)
         case LitConstKind.UNIT => ChkLitConstExprOfTypeUnit(typeManager, target, lce, diag: diag)
         case LitConstKind.INTEGER => ChkLitConstExprOfTypeInteger(typeManager, target, lce, diag: diag)
         case LitConstKind.RUNE_BYTE => ChkLitConstExprOfTypeInteger(typeManager, target, lce, diag: diag)
