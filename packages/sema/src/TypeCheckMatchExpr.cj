@@ -6,19 +6,9 @@ import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cjcj::basic.Position as BasicPosition
 
 private func BoolTy(): Ty {
     return TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
-}
-
-private func ToBasicPosition(pos: Position): BasicPosition {
-    return BasicPosition(pos.fileID, pos.line, pos.column)
-}
-
-private func DiagOld(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind): Unit {
-    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-    let _ = diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind)
 }
 
 private func SugarKindIndex(kind: SugarKind): Int64 {
@@ -295,7 +285,7 @@ public func CheckMatchExprNoSelectorExhaustiveness(me: MatchExpr, hasDefault!: B
         if (Ty.IsInitialTy(matchCaseOther.GetTy())) {
             ok = false
             if (let Some(diagValue) <- diag) {
-                DiagOld(diagValue, matchCaseOther, BasicDiagKind.sema_match_case_has_no_type)
+                Diagnose(diagValue, matchCaseOther, BasicDiagKind.sema_match_case_has_no_type).Emit()
             }
         }
         idx++
@@ -303,7 +293,7 @@ public func CheckMatchExprNoSelectorExhaustiveness(me: MatchExpr, hasDefault!: B
     if (!foundDefault) {
         ok = false
         if (let Some(diagValue) <- diag) {
-            DiagOld(diagValue, me, BasicDiagKind.sema_match_case_must_have_default)
+            Diagnose(diagValue, me, BasicDiagKind.sema_match_case_must_have_default).Emit()
         }
     }
     var unreachableIdx = defaultCase + 1
