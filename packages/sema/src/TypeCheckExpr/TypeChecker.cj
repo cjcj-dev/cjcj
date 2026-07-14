@@ -3319,7 +3319,7 @@ extend TypeChecker {
             return SynthesizeFuncParam(ctx, funcParam)
         }
         if (let Some(vpd) <- (decl as VarWithPatternDecl)) {
-            return SynthesizeVarWithPatternDecl(ctx, vpd)
+            return CheckVarWithPatternDecl(ctx, vpd)
         }
         if (let Some(propDecl) <- (decl as PropDecl)) {
             return SynthesizePropDecl(ctx, propDecl)
@@ -3497,7 +3497,7 @@ extend TypeChecker {
         return tyOrInvalid(decl)
     }
 
-    private func SynthesizeVarWithPatternDecl(ctx: ASTContext, vpd: VarWithPatternDecl): Ty {
+    private func CheckVarWithPatternDecl(ctx: ASTContext, vpd: VarWithPatternDecl): Ty {
         if (vpd.TestAttr(Attribute.IS_CHECK_VISITED)) {
             if (vpd.TestAttr(Attribute.GLOBAL) && Ty.IsInitialTy(vpd.GetTy())) {
                 if (let Some(diagValue) <- impl.diag) {
@@ -3527,13 +3527,46 @@ extend TypeChecker {
             }
         }
         if (let Some(pattern) <- vpd.irrefutablePattern) {
+            var patternMatches = false
             if (Ty.IsTyCorrect(declTy)) {
-                let ok = ChkPattern(impl.typeManager, ctx, declTy, pattern, isPatternInMatch: false,
+                patternMatches = ChkPattern(impl.typeManager, ctx, declTy, pattern, isPatternInMatch: false,
                     exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
                         Check(ctx, patternExpectedTy, patternExpr)
                     }), diag: impl.diag)
-                if (ok && IsIrrefutablePattern(pattern)) {
-                    BindPatternBindings(ctx, pattern)
+                if (!patternMatches) {
+                    if (let Some(diagValue) <- impl.diag) {
+                        Diagnose(diagValue, pattern,
+                            BasicDiagKind.sema_mismatched_type_for_pattern_in_vardecl).Emit()
+                    }
+                }
+            }
+            let isIrrefutable = IsIrrefutablePattern(pattern)
+            if (!isIrrefutable) {
+                if (let Some(diagValue) <- impl.diag) {
+                    Diagnose(diagValue, pattern, BasicDiagKind.sema_pattern_can_not_be_assigned).Emit()
+                }
+            }
+            if (patternMatches && isIrrefutable) {
+                BindPatternBindings(ctx, pattern)
+            }
+            if (vpd.isConst) {
+                if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
+                    if (let Some(initializer3) <- vpd.initializer) {
+                        if (let Some(tupleLit) <- (initializer3 as TupleLit)) {
+                            if (tuplePattern.patterns.size != tupleLit.children.size) {
+                                return declTy
+                            }
+                            var idx: Int64 = 0
+                            while (idx < tuplePattern.patterns.size) {
+                                if (let Some(varPattern) <- (tuplePattern.patterns[idx] as VarPattern)) {
+                                    if (let Some(varDecl) <- varPattern.varDecl) {
+                                        varDecl.initializer = ASTCloner.Clone(tupleLit.children[idx]) as Expr
+                                    }
+                                }
+                                idx++
+                            }
+                        }
+                    }
                 }
             }
         }
