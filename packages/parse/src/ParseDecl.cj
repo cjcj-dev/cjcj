@@ -1767,7 +1767,11 @@ extend ParserImpl {
         decl.upperBoundPos = lastToken.Begin()
         while (true) {
             let inheritedType = ParseType()
-            if (IsValidInheritedType(inheritedType)) {
+            // C++: Parse/ParseDecl.cpp:1295-1304 ParserImpl::ParseInheritedTypes.
+            if (let Some(refType) <- (inheritedType as RefType) &&
+                refType.ref.identifier == decl.identifier) {
+                DiagDeclCannotInheritTheirSelf(decl, refType)
+            } else if (IsValidInheritedType(inheritedType)) {
                 decl.inheritedTypes.add(inheritedType)
             } else if (!inheritedType.TestAttr(Attribute.IS_BROKEN)) {
                 DiagInvalidInheritType(inheritedType)
