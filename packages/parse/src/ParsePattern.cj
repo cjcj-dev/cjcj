@@ -33,7 +33,6 @@ extend ParserImpl {
         }
         let token = Peek()
         ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_pattern, token, ConvertToken(token)).Emit()
-        Next()
         return InvalidPattern(token.Begin())
     }
 

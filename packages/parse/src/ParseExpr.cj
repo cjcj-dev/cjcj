@@ -1220,13 +1220,14 @@ extend ParserImpl {
                 Expect(TokenKind.CASE, "expected 'case'")
                 matchCase.begin = lastToken.Begin()
                 try (caseScope = ChainScope(this, matchCase)) {
-                    while (!Seeing(TokenKind.END) && !SeeingDoubleArrow() && !Seeing(TokenKind.WHERE)) {
-                        matchCase.patterns.add(ParsePattern())
-                        if (Skip(TokenKind.BITOR)) {
-                            matchCase.bitOrPosVector.add(lastToken.Begin())
-                        } else {
-                            break
-                        }
+                    let first = ParsePattern()
+                    first.ctxExpr = ret.selector
+                    matchCase.patterns.add(first)
+                    while (Skip(TokenKind.BITOR)) {
+                        matchCase.bitOrPosVector.add(lastToken.Begin())
+                        let pattern = ParsePattern()
+                        pattern.ctxExpr = ret.selector
+                        matchCase.patterns.add(pattern)
                     }
                     if (Skip(TokenKind.WHERE)) {
                         matchCase.wherePos = lastToken.Begin()
