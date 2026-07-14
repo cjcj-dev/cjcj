@@ -205,7 +205,9 @@ public class StringConvertor {
                         point = point * 16u32 + hexValue(bytes[idx])
                         idx++
                     }
-                    builder.append(CodepointToUTF8(point))
+                    if (point <= 0xd7ffu32 || (point >= 0xe000u32 && point <= UTF8_4_MAX)) {
+                        builder.append(CodepointToUTF8(point))
+                    }
                     if (idx < bytes.size) {
                         idx++
                     }
