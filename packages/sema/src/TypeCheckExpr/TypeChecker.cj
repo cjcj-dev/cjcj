@@ -3448,6 +3448,8 @@ extend TypeChecker {
         }
         if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
             SynthesizeInheritedTypes(ctx, interfaceDecl)
+            let _ = TypeCheckClassLikeCheckInterfaceInheritedTypes(
+                impl.diag.getOrThrow(), impl.typeManager, interfaceDecl)
             if (let Some(body3) <- interfaceDecl.body) {
                 SynthesizeDeclList(ctx, body3.decls)
             }
