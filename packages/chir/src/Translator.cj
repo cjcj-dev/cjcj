@@ -3230,7 +3230,9 @@ public class Translator {
             values.add(value)
             idx++
         }
-        return RequireResult(builder.CreateTuple(chirTy.TranslateType(RequireAstTy(expr)), values, CurrentBlock()))
+        let tuple = builder.CreateTuple(chirTy.TranslateType(RequireAstTy(expr)), values, CurrentBlock())
+        tuple.SetDebugLocation(TranslateLocation(expr))
+        return RequireResult(tuple)
     }
 
     public func Visit(expr: AstSubscriptExpr): Option<Value> {
