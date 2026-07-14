@@ -211,16 +211,16 @@ public func ChkMatchCasePatterns(typeManager: TypeManager, ctx: ASTContext, targ
     return ok
 }
 
-public func ChkMatchCasePatGuard(typeManager: TypeManager, ctx: ASTContext, mc: MatchCase): Bool {
+public func ChkMatchCasePatGuard(typeManager: TypeManager, ctx: ASTContext, mc: MatchCase,
+    exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
+    let _ = typeManager
     let _ = ctx
+    var ret = true
     if (let Some(guardExpr) <- mc.patternGuard) {
-        if (let Some(guardTy) <- guardExpr.GetTy()) {
-            return typeManager.CheckTypeCompatibility(BoolTy(), guardTy) != TypeCompatibility.INCOMPATIBLE
-        }
-        guardExpr.SetTy(TypeManager.GetInvalidTy())
-        return false
+        let boolTy = BoolTy()
+        ret = exprChecker.getOrThrow()(boolTy, guardExpr)
     }
-    return true
+    return ret
 }
 
 public func ChkMatchCaseActions(typeManager: TypeManager, target: Option<Ty>, mc: MatchCase,
@@ -356,7 +356,7 @@ public func SynNormalMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
         mc.SetCtxExprForPatterns(selector)
         let patternOk = ChkMatchCasePatterns(typeManager, ctx, selectorTy, mc, diag: diag,
             exprChecker: exprChecker, desugarCallExpr: desugarCallExpr)
-        let guardOk = ChkMatchCasePatGuard(typeManager, ctx, mc)
+        let guardOk = ChkMatchCasePatGuard(typeManager, ctx, mc, exprChecker: exprChecker)
         let actionOk = ChkMatchCaseActions(typeManager, None, mc, exprChecker: exprChecker)
         if (patternOk && guardOk && actionOk) {
             if (let Some(caseTy) <- mc.GetTy()) {
@@ -518,7 +518,7 @@ public func ChkMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
         mc.SetCtxExprForPatterns(selector)
         let patternOk = ChkMatchCasePatterns(typeManager, ctx, selectorTy, mc, diag: diag,
             exprChecker: exprChecker, desugarCallExpr: desugarCallExpr)
-        let guardOk = ChkMatchCasePatGuard(typeManager, ctx, mc)
+        let guardOk = ChkMatchCasePatGuard(typeManager, ctx, mc, exprChecker: exprChecker)
         let actionOk = ChkMatchCaseActions(typeManager, target, mc, exprChecker: exprChecker)
         if (patternOk && guardOk && actionOk) {
             if (let Some(caseTy) <- mc.GetTy()) {
