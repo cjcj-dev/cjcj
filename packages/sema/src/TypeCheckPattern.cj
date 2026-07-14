@@ -618,6 +618,10 @@ public func ChkConstPattern(typeManager: TypeManager, ctx: ASTContext, target: T
     }
     if (let Some(lit) <- (literal as LitConstExpr)) {
         if (let Some(_) <- lit.siExpr) {
+            if (let Some(diagValue) <- diag) {
+                DiagnoseRefactor(diagValue,
+                    BasicDiagKindRefactor.sema_interpolation_in_const_pattern, pattern).Emit()
+            }
             return InvalidPatternTy(pattern)
         }
     }
