@@ -1344,6 +1344,13 @@ extend ParserImpl {
         if (Skip(TokenKind.FINALLY)) {
             ret.finallyPos = lastToken.Begin()
             ret.finallyBlock = ParseBlock(ScopeKind.FUNC_BODY)
+        } else {
+            // C++: src/Parse/ParseAtom.cpp:647-651 ParserImpl::ParseTryExpr.
+            if (ret.catchBlocks.isEmpty() && ret.handlers.isEmpty() && ret.resourceSpec.isEmpty() &&
+                !ret.isBroken) {
+                DiagExpectedCatchOrHandleOrFinallyAfterTry(ret)
+                ret.isBroken = true
+            }
         }
         if (let Some(finallyBlock) <- ret.finallyBlock) {
             ret.end = finallyBlock.end
