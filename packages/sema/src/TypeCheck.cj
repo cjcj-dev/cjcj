@@ -593,7 +593,7 @@ public func GetTyFromASTRefType(typeManager: TypeManager, ctx: ASTContext, rt: R
     let found = LookupTopLevel(typeManager, ctx, rt.ref.identifier.Val(), lookupScope, rt)
     let targets = rankTypeLookupTargets(found)
     if (targets.isEmpty()) {
-        if (!ctx.packageDecls.isEmpty()) {
+        if (findImportedPackageDecl(ctx, rt.ref.identifier.Val()).decl.isSome()) {
             return TypeManager.GetInvalidTy()
         }
         if (let Some(diagValue) <- diag) {
