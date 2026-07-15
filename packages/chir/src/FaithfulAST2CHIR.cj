@@ -1194,6 +1194,7 @@ public class FaithfulAST2CHIR {
         MarkClassHasInited(builder).RunOnPackage(CurrentPackage())
         UpdateMemberVarPath(builder).RunOnPackage(CurrentPackage())
         NoSideEffectMarker().RunOnPackage(CurrentPackage())
+        BoxRecursionValueType(CurrentPackage(), builder).Run()
         if (!failure && opts.IsConstEvalEnabled() && !opts.enIncrementalCompilation && opts.commonPartCjos.isEmpty()) {
             let bchirPackages = ArrayList<BCHIR>()
             ConstEvalPass(builder, opts: opts).RunOnPackage(CurrentPackage(), initFuncsForConstVar, bchirPackages)

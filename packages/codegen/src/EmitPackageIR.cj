@@ -322,7 +322,7 @@ private func EmitTIOrTTForCustomDefs(cgMod: CGModule): Unit {
             if ((!cgEnumType.IsTrivial() && !cgEnumType.IsZeroSizeEnum()) ||
                 (!cgMod.GetCGContext().GetCompileOptions().disableReflection &&
                     cgMod.GetCGContext().GetCompileOptions().target.env != EnvironmentType.OHOS)) {
-                let ctors = enumTy.GetEnumDef().GetConstructorInfos(builder: Some(cgMod.GetCGContext().GetCHIRBuilder()))
+                let ctors = enumTy.GetConstructorInfos(cgMod.GetCGContext().GetCHIRBuilder())
                 var idx: Int64 = 0
                 while (idx < ctors.size) {
                     cgMod.GetOrCreateEnumCtorTIOrTT(enumTy, idx)

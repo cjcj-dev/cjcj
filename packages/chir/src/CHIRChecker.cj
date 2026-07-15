@@ -1854,7 +1854,7 @@ public class CHIRChecker {
                 } else {
                     constantExpr.GetUnsignedIntLitVal()
                 }
-                let ctors = enumDef.GetConstructorInfos(builder: builder)
+                let ctors = enumTy.GetConstructorInfos(builder)
                 if (ctorIndex >= UInt64(ctors.size)) {
                         Errorln("in function ${topLevelFunc.GetIdentifier()}, index out of range, in `" +
                             GetExpressionString(expr) + "` its enum constructor's number is ${ctors.size} " +

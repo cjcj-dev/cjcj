@@ -112,7 +112,7 @@ public class EnumCtorTIOrTTGenerator {
 
         let className = cgMod.GetEnumCaseClassName(chirEnumType, ctorIndex)
         let tiName = className + ".ti"
-        let ctors = chirEnumType.GetEnumDef().GetConstructorInfos(builder: Some(cgCtx.GetCHIRBuilder()))
+        let ctors = chirEnumType.GetConstructorInfos(cgCtx.GetCHIRBuilder())
         CJC_ASSERT(ctorIndex >= 0 && ctorIndex < ctors.size)
         let paramTypes = ctors[ctorIndex].funcType.getOrThrow().GetParamTypes()
         let cgEnumType = (CGType.GetOrCreate(cgMod, chirEnumType) as CGEnumType).getOrThrow()
@@ -215,7 +215,7 @@ public class EnumCtorTIOrTTGenerator {
 
         let className = cgMod.GetEnumCaseClassName(chirEnumType, ctorIndex)
         let ttName = className + ".tt"
-        let ctors = chirEnumType.GetEnumDef().GetConstructorInfos(builder: Some(cgCtx.GetCHIRBuilder()))
+        let ctors = chirEnumType.GetConstructorInfos(cgCtx.GetCHIRBuilder())
         CJC_ASSERT(ctorIndex >= 0 && ctorIndex < ctors.size)
         let paramTypes = ctors[ctorIndex].funcType.getOrThrow().GetParamTypes()
         let cgEnumType = (CGType.GetOrCreate(cgMod, chirEnumType) as CGEnumType).getOrThrow()
@@ -317,7 +317,7 @@ public class EnumCtorTIOrTTGenerator {
         if (cgEnumType.IsOptionLikeT()) {
             layout.fieldTypes.add(CGType.GetRefTypeOfCHIRInt8(cgCtx.GetCHIRBuilder()))
         } else {
-            let ctors = chirEnumType.GetEnumDef().GetConstructorInfos(builder: Some(cgCtx.GetCHIRBuilder()))
+            let ctors = chirEnumType.GetConstructorInfos(cgCtx.GetCHIRBuilder())
             let associatedValueType = if (cgEnumType.IsAntiOptionLike()) {
                 ctors[1].funcType.getOrThrow().GetParamTypes()[0]
             } else {

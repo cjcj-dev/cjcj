@@ -1,19 +1,10 @@
 package cjcj::codegen
 
 import std.collection.*
-import cjcj::chir.BoxType
-import cjcj::chir.CPointerType
-import cjcj::chir.ClassType
 import cjcj::chir.EnumCtorInfo
 import cjcj::chir.EnumType
 import cjcj::chir.FuncType
-import cjcj::chir.GenericType
-import cjcj::chir.RawArrayType
-import cjcj::chir.RefType
-import cjcj::chir.StructType
 import cjcj::chir.Type
-import cjcj::chir.TupleType
-import cjcj::chir.VArrayType
 import cjcj::chir.GetTypeQualifiedName
 import cjcj::option.{ArchType, EnvironmentType, TripleInfo}
 import cjcj::utils.CJC_ASSERT
@@ -566,7 +557,7 @@ public class CGEnumType <: CGCustomType {
             }
             let (hasRefAssociatedValue, constructorUnionSize) = ObtainingAuxiliaryInformation(enumTy)
             sizeOfConstructorUnion = constructorUnionSize
-            let ctors = enumDef.GetCtors()
+            let ctors = enumTy.GetConstructorInfos(cgMod.GetCGContext().GetCHIRBuilder())
             if (ctors.size == 1 && enumTy.GetGenericArgs().isEmpty()) {
                 if (let Some(unionSize) <- constructorUnionSize) {
                     if (unionSize == 0) {
@@ -578,7 +569,7 @@ public class CGEnumType <: CGCustomType {
                 return CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED
             }
             if (IsOptionLikeByConstructors(ctors)) {
-                return ClassifyOptionLikeEnum(enumTy, ctors)
+                return ClassifyOptionLikeEnum(ctors)
             }
             if (!hasRefAssociatedValue && enumTy.GetGenericArgs().isEmpty()) {
                 return CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_NONREF
@@ -588,19 +579,20 @@ public class CGEnumType <: CGCustomType {
         return CGEnumTypeKind.EXHAUSTIVE_UNASSOCIATED
     }
 
-    private func ClassifyOptionLikeEnum(enumTy: EnumType, ctors: ArrayList<EnumCtorInfo>): CGEnumTypeKind {
-        isAntiOptionLike = ctors[0].payloadTypes.isEmpty()
+    private func ClassifyOptionLikeEnum(ctors: ArrayList<EnumCtorInfo>): CGEnumTypeKind {
+        let firstParamTypes = ctors[0].funcType.getOrThrow().GetParamTypes()
+        let secondParamTypes = ctors[1].funcType.getOrThrow().GetParamTypes()
+        isAntiOptionLike = firstParamTypes.isEmpty()
         let associatedTy = if (isAntiOptionLike) {
-            ctors[1].payloadTypes[0]
+            secondParamTypes[0]
         } else {
-            ctors[0].payloadTypes[0]
+            firstParamTypes[0]
         }
-        let instantiatedAssociatedTy = InstantiateEnumPayloadType(enumTy, associatedTy)
-        optionLikeAssociatedValueType = Some(instantiatedAssociatedTy)
-        if (instantiatedAssociatedTy.IsGeneric()) {
+        optionLikeAssociatedValueType = Some(associatedTy)
+        if (associatedTy.IsGeneric()) {
             return CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_T
         }
-        let baseType = instantiatedAssociatedTy.StripAllRefs()
+        let baseType = associatedTy.StripAllRefs()
         if (let Some(baseEnumTy) <- (baseType as EnumType)) {
             if (let Some(baseEnumCGType) <- (CGType.GetOrCreate(cgMod, baseEnumTy) as CGEnumType)) {
                 if (baseEnumCGType.IsCommonEnum()) {
@@ -618,17 +610,20 @@ public class CGEnumType <: CGCustomType {
         if (ctors.size != 2) {
             return false
         }
-        return (ctors[0].payloadTypes.isEmpty() && ctors[1].payloadTypes.size == 1) ||
-            (ctors[0].payloadTypes.size == 1 && ctors[1].payloadTypes.isEmpty())
+        let firstParamTypes = ctors[0].funcType.getOrThrow().GetParamTypes()
+        let secondParamTypes = ctors[1].funcType.getOrThrow().GetParamTypes()
+        return (firstParamTypes.isEmpty() && secondParamTypes.size == 1) ||
+            (firstParamTypes.size == 1 && secondParamTypes.isEmpty())
     }
 
     private func ObtainingAuxiliaryInformation(enumTy: EnumType): (Bool, Option<Int64>) {
         var hasRefAssociatedValue = false
         var maxUnionSize: Option<Int64> = Some(0)
-        for (ctor in GetInstantiatedCtorInfos(enumTy)) {
-            hasRefAssociatedValue = hasRefAssociatedValue || HasRefAssociatedValue(ctor.payloadTypes)
+        for (ctor in enumTy.GetConstructorInfos(cgMod.GetCGContext().GetCHIRBuilder())) {
+            let paramTypes = ctor.funcType.getOrThrow().GetParamTypes()
+            hasRefAssociatedValue = hasRefAssociatedValue || HasRefAssociatedValue(paramTypes)
             if (let Some(currentMax) <- maxUnionSize) {
-                if (let Some(candidateSize) <- TryComputeConstructorUnionSize(ctor.payloadTypes)) {
+                if (let Some(candidateSize) <- TryComputeConstructorUnionSize(paramTypes)) {
                     maxUnionSize = Some(if (currentMax < candidateSize) { candidateSize } else { currentMax })
                 } else {
                     maxUnionSize = None
@@ -636,29 +631,6 @@ public class CGEnumType <: CGCustomType {
             }
         }
         return (hasRefAssociatedValue, maxUnionSize)
-    }
-
-    private func GetInstantiatedCtorInfos(enumTy: EnumType): ArrayList<EnumCtorInfo> {
-        let out = ArrayList<EnumCtorInfo>()
-        for (ctor in enumTy.GetEnumDef().GetCtors()) {
-            let payloadTypes = ArrayList<Type>()
-            for (payloadTy in ctor.payloadTypes) {
-                payloadTypes.add(InstantiateEnumPayloadType(enumTy, payloadTy))
-            }
-            out.add(EnumCtorInfo(ctor.name, payloadTypes, mangledName: ctor.mangledName,
-                funcType: InstantiateEnumCtorFuncType(enumTy, ctor, payloadTypes), annoInfo: ctor.annoInfo))
-        }
-        return out
-    }
-
-    private func InstantiateEnumCtorFuncType(enumTy: EnumType, ctor: EnumCtorInfo,
-        payloadTypes: ArrayList<Type>): Option<FuncType> {
-        if (let Some(funcTy) <- ctor.funcType) {
-            if (let Some(instFuncTy) <- (InstantiateEnumPayloadType(enumTy, funcTy) as FuncType)) {
-                return Some(instFuncTy)
-            }
-        }
-        return Some(FuncType(payloadTypes, enumTy))
     }
 
     private func HasRefAssociatedValue(paramTypes: ArrayList<Type>): Bool {
@@ -762,69 +734,5 @@ public class CGEnumType <: CGCustomType {
         return false
     }
 
-    private func InstantiateEnumPayloadType(enumTy: EnumType, payloadTy: Type): Type {
-        return SubstituteGenericType(payloadTy, enumTy.GetEnumDef().GetGenericTypeParams(), enumTy.GetGenericArgs())
-    }
-
-    private func SubstituteGenericType(ty: Type, genericParams: ArrayList<GenericType>,
-        replacements: ArrayList<Type>): Type {
-        if (let Some(genericTy) <- (ty as GenericType)) {
-            var idx: Int64 = 0
-            while (idx < genericParams.size && idx < replacements.size) {
-                if (genericTy.IsEqual(genericParams[idx])) {
-                    return replacements[idx]
-                }
-                idx++
-            }
-            return ty
-        }
-        if (let Some(refTy) <- (ty as RefType)) {
-            return RefType(SubstituteGenericType(refTy.GetBaseType(), genericParams, replacements))
-        }
-        if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
-            return RawArrayType(SubstituteGenericType(rawArrayTy.GetElementType(), genericParams, replacements),
-                dims: rawArrayTy.GetDims())
-        }
-        if (let Some(varrayTy) <- (ty as VArrayType)) {
-            return VArrayType(SubstituteGenericType(varrayTy.GetElementType(), genericParams, replacements),
-                varrayTy.size)
-        }
-        if (let Some(pointerTy) <- (ty as CPointerType)) {
-            return CPointerType(SubstituteGenericType(pointerTy.GetElementType(), genericParams, replacements))
-        }
-        if (let Some(boxTy) <- (ty as BoxType)) {
-            return BoxType(SubstituteGenericType(boxTy.GetBaseType(), genericParams, replacements))
-        }
-        if (let Some(tupleTy) <- (ty as TupleType)) {
-            return TupleType(SubstituteGenericTypeArgs(tupleTy.GetTypeArgs(), genericParams, replacements))
-        }
-        if (let Some(funcTy) <- (ty as FuncType)) {
-            let params = SubstituteGenericTypeArgs(funcTy.GetParamTypes(), genericParams, replacements)
-            let retTy = SubstituteGenericType(funcTy.GetReturnType(), genericParams, replacements)
-            return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
-        }
-        if (let Some(structTy) <- (ty as StructType)) {
-            return StructType(structTy.GetStructDef(),
-                SubstituteGenericTypeArgs(structTy.GetGenericArgs(), genericParams, replacements))
-        }
-        if (let Some(classTy) <- (ty as ClassType)) {
-            return ClassType(classTy.GetClassDef(),
-                SubstituteGenericTypeArgs(classTy.GetGenericArgs(), genericParams, replacements))
-        }
-        if (let Some(enumTy) <- (ty as EnumType)) {
-            return EnumType(enumTy.GetEnumDef(),
-                SubstituteGenericTypeArgs(enumTy.GetGenericArgs(), genericParams, replacements))
-        }
-        return ty
-    }
-
-    private func SubstituteGenericTypeArgs(args: ArrayList<Type>, genericParams: ArrayList<GenericType>,
-        replacements: ArrayList<Type>): ArrayList<Type> {
-        let out = ArrayList<Type>()
-        for (arg in args) {
-            out.add(SubstituteGenericType(arg, genericParams, replacements))
-        }
-        return out
-    }
 
 }

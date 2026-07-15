@@ -173,7 +173,6 @@ public open class CGType {
     }
 
     public func GetLLVMType(): LLVMTypeRef {
-        Complete()
         if (let Some(rawType) <- llvmType) {
             return rawType
         }
@@ -181,7 +180,6 @@ public open class CGType {
     }
 
     public func GetLayoutType(): LLVMTypeRef {
-        Complete()
         if (let Some(rawLayout) <- layoutType) {
             return rawLayout
         }
@@ -290,8 +288,8 @@ public open class CGType {
         return unsafe { LLVMGetTypeKind(elementType) } == LLVM_ARRAY_TYPE_KIND
     }
     public func GetAddrspace(): UInt32 { return addrspace }
-    public func GetSize(): Option<Int64> { Complete(); return size }
-    public func GetAlign(): Option<Int64> { Complete(); return align }
+    public func GetSize(): Option<Int64> { return size }
+    public func GetAlign(): Option<Int64> { return align }
     public func IsConcrete(): Bool { return cgGenericKind == CGGenericKind.CONCRETE }
     public func IsStaticGI(): Bool { return cgGenericKind == CGGenericKind.STATIC_GI }
     public func IsDynamicGI(): Bool { return cgGenericKind == CGGenericKind.DYNAMIC_GI }

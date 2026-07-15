@@ -72,11 +72,6 @@ public class EnumDef <: CustomTypeDef {
         }
     }
 
-    public func GetConstructorInfos(builder!: Option<CHIRBuilder> = None): ArrayList<EnumCtorInfo> {
-        let _ = builder
-        return GetCtors()
-    }
-
     public func SetNonExhaustive(value: Bool): Unit {
         nonExhaustive = value
     }

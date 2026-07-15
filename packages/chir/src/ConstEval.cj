@@ -355,7 +355,7 @@ private class IVal2CHIR {
             elements.add(ConvertToChir(selectorTy, elementVals[0], parent) ?? return None)
             elementVals[0].GetInt()
         }
-        let ctorInfos = ty.GetEnumDef().GetConstructorInfos(builder: builder)
+        let ctorInfos = ty.GetConstructorInfos(builder)
         if (variantIndex < 0 || variantIndex >= ctorInfos.size) {
             return None
         }

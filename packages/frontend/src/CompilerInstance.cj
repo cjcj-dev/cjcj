@@ -443,6 +443,12 @@ public class CompilerInstance {
                 }
             }
         }
+        let semaInstance = faithfulSemaInstance.getOrThrow()
+        let typeChecker = FaithfulSemaTypeChecker(Some(semaInstance))
+        for (pkg in srcPkgs) {
+            let astCtx = semaInstance.GetASTContextByPackage(Some(pkg)).getOrThrow()
+            typeChecker.PerformDesugarAfterInstantiation(astCtx, pkg)
+        }
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "genericinst")
         }

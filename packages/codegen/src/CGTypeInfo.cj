@@ -433,7 +433,7 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
         return
     }
     if (!(chirTy.IsClass() || chirTy.IsStruct() || chirTy.IsEnum() || chirTy.IsTuple() || chirTy.IsFunc() ||
-        chirTy.IsVArray() || chirTy.IsCPointer())) {
+        chirTy.IsVArray() || chirTy.IsCPointer() || chirTy.IsBox())) {
         return
     }
     if (let Some(customTy) <- (chirTy as CustomType)) {
@@ -1486,6 +1486,7 @@ private func TypeInfoKind(cgMod: CGModule, chirTy: Type): UInt64 {
     if (chirTy.IsVArray()) { return UG_VARRAY }
     if (chirTy.IsCPointer()) { return UG_CPOINTER }
     if (chirTy.IsCString()) { return UG_CSTRING }
+    if (chirTy.IsBox()) { return UG_CLASS_KIND }
     if (let Some(classTy) <- (chirTy as ClassType)) {
         if (IsWeakRefClass(classTy)) {
             return UG_WEAKREF_KIND

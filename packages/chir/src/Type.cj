@@ -1818,6 +1818,27 @@ public class EnumType <: CustomType {
         throw IllegalStateException("EnumType does not reference an EnumDef")
     }
 
+    public func GetConstructorInfos(builder: CHIRBuilder): ArrayList<EnumCtorInfo> {
+        let ctors = ArrayList<EnumCtorInfo>()
+        let genericTypeParams = GetEnumDef().GetGenericTypeParams()
+        CJC_ASSERT(genericTypeParams.size == argTys.size)
+        let replaceTable = HashMap<GenericType, Type>()
+        for (i in 0..genericTypeParams.size) {
+            replaceTable[genericTypeParams[i]] = argTys[i]
+        }
+        for (ctor in GetEnumDef().GetCtors()) {
+            let funcType = (ReplaceRawGenericArgType(ctor.funcType.getOrThrow(), replaceTable, builder) as FuncType)
+                .getOrThrow()
+            let payloadTypes = ArrayList<Type>()
+            for (payloadType in ctor.payloadTypes) {
+                payloadTypes.add(payloadType)
+            }
+            ctors.add(EnumCtorInfo(ctor.name, payloadTypes, mangledName: ctor.mangledName,
+                funcType: Some(funcType), annoInfo: ctor.annoInfo))
+        }
+        return ctors
+    }
+
     public func IsOption(): Bool {
         return GetEnumDef().GetPackageName() == "std.core" && GetEnumDef().GetIdentifier() == "Option"
     }

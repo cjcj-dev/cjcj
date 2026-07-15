@@ -2324,7 +2324,6 @@ extend TypeChecker {
 
     private func PostTypeCheck(activeContexts: ArrayList<ASTContext>): Unit {
         let recursivePkgs = BuildRecursiveEliminationPackages(activeContexts)
-        PerformRecursiveTypesElimination(recursivePkgs, impl.typeManager)
         let implicitUsedDecls = GetImplicitUsedCoreDecls()
         let activePkgs = ArrayList<Package>()
         for (ctx in activeContexts) {
@@ -2356,8 +2355,6 @@ extend TypeChecker {
                     }), callChecker: Some({ checkCtx: ASTContext, target: Ty, call: CallExpr =>
                         ChkCallExpr(checkCtx, Some(target), call)
                     }), diag: impl.diag)
-                DesugarAfterInstantiation(impl.typeManager, recursivePkgs, pkg,
-                    implicitUsedDecls: Some(implicitUsedDecls))
                 CollectMainFunctionsFromMainDecls(pkg)
             }
         }
@@ -2606,6 +2603,24 @@ extend TypeChecker {
             let builder = diagValue.Diagnose(file.begin, BasicDiagKind.sema_missing_entry)
             builder.Emit()
         }
+    }
+
+    public func PerformDesugarAfterInstantiation(ctx: ASTContext, pkg: Package): Unit {
+        let activeContexts = ArrayList<ASTContext>()
+        if (let Some(instance) <- ci) {
+            for (sourcePackage in instance.sourcePackages) {
+                if (let Some(sourceContext) <- instance.GetASTContextByPackage(Some(sourcePackage))) {
+                    activeContexts.add(sourceContext)
+                }
+            }
+        } else {
+            activeContexts.add(ctx)
+        }
+        let recursivePkgs = BuildRecursiveEliminationPackages(activeContexts)
+        let options = GlobalOptions()
+        DesugarAfterInstantiation(impl.typeManager, recursivePkgs, pkg,
+            exportForTest: options.exportForTest, enableCoverage: options.enableCoverage,
+            implicitUsedDecls: Some(GetImplicitUsedCoreDecls()))
     }
 
     private func GetImplicitUsedCoreDecls(): ArrayList<Decl> {
