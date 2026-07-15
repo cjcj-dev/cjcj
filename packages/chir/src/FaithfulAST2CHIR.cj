@@ -1213,11 +1213,6 @@ public class FaithfulAST2CHIR {
         UpdateMemberVarPath(builder).RunOnPackage(CurrentPackage())
         NoSideEffectMarker().RunOnPackage(CurrentPackage())
         BoxRecursionValueType(CurrentPackage(), builder).Run()
-        if (!failure && opts.IsConstEvalEnabled() && !opts.enIncrementalCompilation && opts.commonPartCjos.isEmpty()) {
-            let bchirPackages = ArrayList<BCHIR>()
-            ConstEvalPass(builder, diag.getOrThrow(), opts: opts).RunOnPackage(
-                CurrentPackage(), initFuncsForConstVar, bchirPackages)
-        }
         if (chirWFC) {
             AST2CHIRCheck()
         }
@@ -1255,6 +1250,13 @@ public class FaithfulAST2CHIR {
 
     public func GetImplicitFuncs(): HashMap<String, Function> {
         return implicitFuncs
+    }
+
+    public func GetInitFuncsForConstVar(): ArrayList<Function> {
+        for (fn in initFuncsForAnnoFactory) {
+            initFuncsForConstVar.add(fn)
+        }
+        return initFuncsForConstVar
     }
 
     public func GetMaybeUnreachableBlocks(): HashMap<Block, Terminator> {

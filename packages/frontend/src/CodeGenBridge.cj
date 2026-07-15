@@ -13,8 +13,10 @@ import cjcj::chir.CHIRSerializer
 import cjcj::chir.CHIRType
 import cjcj::chir.CHIRTypeCache
 import cjcj::chir.CallGraphAnalysis
+import cjcj::chir.BCHIR
 import cjcj::chir.ClosureConversion
 import cjcj::chir.ConstAnalysisWrapper
+import cjcj::chir.ConstEvalPass
 import cjcj::chir.ConstPropagation
 import cjcj::chir.DeadCodeElimination
 import cjcj::chir.DebugLocation as ChirDebugLocation
@@ -149,6 +151,10 @@ private class ToCHIR {
         instance.chirInfo.ccOutFuncsRawMangle.clear()
         for (rawMangledName in closure.GetCCOutFuncsRawMangle()) {
             instance.chirInfo.ccOutFuncsRawMangle.add(rawMangledName)
+        }
+        if (!RunConstantEvaluation(lowered, builder, instance.diag.AsBasicDiagnosticEngine(),
+            instance.invocation.globalOptions, ast2chir.GetInitFuncsForConstVar())) {
+            return None
         }
         ast2chir.ReplaceSrcCodeImportedValAfterClosureConversion(lowered, closure.GetUselessClassDef(),
             closure.GetUselessLambda())
@@ -591,6 +597,16 @@ private func RunVarInitChecking(pkg: RealCHIRPackage, diag: BasicDiagnosticEngin
     let vic = VarInitCheck(diag)
     let _ = vic.RunOnPackage(pkg, threadNum: Int64(jobs))
     return diag.GetErrorCount() == 0
+}
+
+private func RunConstantEvaluation(pkg: RealCHIRPackage, builder: ChirBuilder, diag: BasicDiagnosticEngine,
+    options: GlobalOptions, initFuncsForConstVar: ArrayList<ChirFunction>): Bool {
+    if (!options.IsConstEvalEnabled() || options.enIncrementalCompilation || !options.commonPartCjos.isEmpty()) {
+        return true
+    }
+    let bchirPackages = ArrayList<BCHIR>()
+    ConstEvalPass(builder, diag, opts: options).RunOnPackage(pkg, initFuncsForConstVar, bchirPackages)
+    return true
 }
 
 public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
