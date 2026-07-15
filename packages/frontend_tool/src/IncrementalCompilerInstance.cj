@@ -6,6 +6,7 @@ import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::incremental_compilation.IncreKind
 import cjcj::incremental_compilation.IncrementalCompilationLogger
 import cjcj::option.OutputMode
+import cjcj::option.TempFileInfo
 import cjcj::utils.FileUtil
 import cjcj::utils.ProfileRecorder
 
@@ -181,8 +182,11 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     private func LoadCachedCodegenResult(): Unit {
-        // TODO(selfhost:frontend_tool): C++ replays cachedInfo.bitcodeFilesName into frontendOutputFiles.
-        // frontend.CompilationCache in the stable DAG does not expose bitcode file names yet.
+        for (fileName in core.cachedInfo.bitcodeFilesName) {
+            let cachePath = invocation.globalOptions.GenerateCachedPathNameForCodeGen(fileName, ".bc")
+            let bcFileInfo = TempFileInfo(fileName: fileName, filePath: cachePath, isFrontendOutput: true)
+            invocation.globalOptions.frontendOutputFiles.add(bcFileInfo)
+        }
     }
 
     private func LogIncrementalAnalysisResult(): Unit {
