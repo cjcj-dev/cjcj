@@ -2,8 +2,7 @@ package cjcj::sema.InheritanceChecker
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::basic.{DiagArgument, DiagKind, DiagKindRefactor, MakeRange}
-import cjcj::basic.Range as BasicRange
+import cjcj::basic.{DiagArgument, DiagKind, DiagKindRefactor}
 import cjcj::sema.*
 
 public class InstantiationTriggerInfo {
@@ -64,13 +63,6 @@ func InstantiationKey(decl: Decl, instTys: ArrayList<Ty>): String {
         parts.add(ty.String())
     }
     return "${decl.fullPackageName}:${decl.identifier.Val()}:${decl.begin.ToString()}:${JoinStrings(parts, ",")}"
-}
-
-private func InstantiatedDeclNoteRange(decl: Decl): BasicRange {
-    if (!decl.identifier.Empty() && !decl.identifier.ZeroPos()) {
-        return MakeRange(decl.identifier.Begin(), decl.identifier.End())
-    }
-    return MakeRange(decl.begin, decl.end)
 }
 
 private func IsImportedInstantiationBoundary(decl: Decl): Bool {
@@ -396,11 +388,9 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
             checker.CheckInstWithCStructTypeArg(node)
             var instTys = checker.typeManager.GetTypeArgs(baseTy)
             if (let Some(nameRef) <- (node as NameReferenceExpr)) {
-                if (!nameRef.instTys.isEmpty()) {
-                    instTys = ArrayList<Ty>()
-                    for (ty in nameRef.instTys) {
-                        instTys.add(ty)
-                    }
+                instTys = ArrayList<Ty>()
+                for (ty in nameRef.instTys) {
+                    instTys.add(ty)
                 }
             }
             let typeMapping = GenerateTypeMapping(target, instTys)
@@ -589,11 +579,8 @@ func DiagnoseForInstantiatedMemberImpl(
                 if (let Some(childFuncTy) <- FuncTyFromOption(child.ty)) {
                     let sameStatic = parentDecl.TestAttr(Attribute.STATIC) == childDecl.TestAttr(Attribute.STATIC)
                     if (sameStatic && checker.typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)) {
-                        let triggerTyParts = ArrayList<String>()
-                        for (instTy in trigger.instTys) {
-                            triggerTyParts.add(instTy.String())
-                        }
-                        let triggeredDeclType = trigger.decl.identifier.Val() + "<" + JoinStrings(triggerTyParts, ", ") + ">"
+                        let triggeredDeclType = trigger.decl.identifier.Val() + "<" +
+                            Ty.GetTypesToStr(trigger.instTys, ", ") + ">"
                         let builder = DiagnoseRefactor(checker.diag,
                             DiagKindRefactor.sema_generic_instantiation_causes_ambiguous_functions,
                             trigger.node,
@@ -603,9 +590,9 @@ func DiagnoseForInstantiatedMemberImpl(
                         AddInheritanceDeclUniqueByPosition(candidates, parentDecl)
                         AddInheritanceDeclUniqueByPosition(candidates, childDecl)
                         for (candidate in candidates) {
-                            builder.AddNote(InstantiatedDeclNoteRange(candidate), "found candidate")
+                            AddNote(builder, candidate, MakeRangeForDeclIdentifier(candidate), "found candidate")
                         }
-                        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                        builder.Emit()
                     }
                 }
             }
