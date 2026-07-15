@@ -35,7 +35,8 @@ import cjcj::chir.TypeKind
 import cjcj::chir.VArrayType
 import cjcj::chir.GetCustomTypeIdentifier
 import cjcj::chir.GetFuncTypeWithoutThisPtrFromAutoEnvBaseType
-import cjcj::utils.{CJC_ASSERT, OBJECT_NAME, StaticCast}
+import cjcj::chir.IsClosureConversionEnvClass
+import cjcj::utils.{CC_DEF_PREFIX, CJC_ASSERT, OBJECT_NAME, StaticCast}
 
 // GAP_TODO(C07-debug-location-parity):
 // - EmitExpressionIR.cpp:64-66 enableCompileDebug parameter loads
@@ -805,6 +806,61 @@ public class DIBuilder {
         fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(elements))
         return createTypedef(fwdDecl, GenerateCustomTypeName(interfaceTy, needPkgPrefix: false), diFile, 0u32,
             compileUnit)
+    }
+
+    private func GetClassSize(classLayout: LLVMTypeRef): UInt64 {
+        return GetTypeSize(classLayout)
+    }
+
+    private func CreateCapturedVars(classTy: ClassType): LLVMMetadataRef {
+        let classLayout = (CGType.GetOrCreate(cgMod, classTy) as CGClassType).getOrThrow().GetLayoutType()
+        let classSize = GetClassSize(classLayout) + 64u64
+        let tag = DW_TAG_class_type
+        var fwdDecl = createReplaceableCompositeType(tag, "$CapturedVars", namespaceScope, defaultFile, 0u32,
+            0u32, classSize, 0u32, FlagTypePassByReference, classTy.ToString())
+        fwdDecl = replaceWithDistinct(fwdDecl)
+        let elements = ArrayList<LLVMMetadataRef>()
+        let superDiType = GetOrCreateObjectClassType()
+        let inheritType = createInheritance(fwdDecl, superDiType, 0u64, 0u32, FlagZero)
+        elements.add(inheritType)
+        typeCache[classTy.objectId] = fwdDecl
+        CreateClassMemberType(classTy, classLayout, elements, fwdDecl)
+        fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(elements))
+        return fwdDecl
+    }
+
+    private func CreateClassMemberType(classTy: ClassType, classLayout: LLVMTypeRef,
+        elements: ArrayList<LLVMMetadataRef>, fwdDecl: LLVMMetadataRef): Unit {
+        let classDef = classTy.GetClassDef()
+        let position = classDef.GetDebugLocation()
+        let diFile = GetOrCreateFile(position)
+        // the new objLayout of Class does not have object.
+        let chirBuilder = cgMod.GetCGContext().GetCHIRBuilder()
+        let superClassTy = classTy.GetSuperClassTy(builder: chirBuilder).getOrThrow()
+        var idx = superClassTy.GetInstantiatedMemberTys(chirBuilder).size
+        CJC_ASSERT(superClassTy.GetInstantiatedMemberTys(chirBuilder).size + classDef.GetDirectInstanceVarNum() ==
+            classTy.GetInstantiatedMemberTys(chirBuilder).size)
+        for (member in classDef.GetDirectInstanceVars()) {
+            if (member.TestAttr(Attribute.NO_DEBUG_INFO) &&
+                classDef.GetSrcCodeIdentifier().startsWith(CC_DEF_PREFIX)) {
+                idx++
+                continue
+            }
+            let elementIndex = if (IsClosureConversionEnvClass(classDef)) { idx + 2 } else { idx }
+            let elementTy = classTy.GetInstantiatedMemberTys(chirBuilder)[idx]
+            var elemType = GetOrCreateType(elementTy)
+            let cgElemType = unsafe { LLVMStructGetTypeAtIndex(classLayout, UInt32(elementIndex)) }
+            if (IsReferenceType(elementTy, cgMod) && !IsOption(elementTy)) {
+                elemType = CreatePointerType(elemType, sizeInBits: GetSizeInBits(CreateRefType()))
+            }
+            let bitInSize = GetTypeSize(cgElemType)
+            let offset = cgMod.GetOffsetOfElement(classLayout, UInt32(elementIndex)) * 8u64 + 64u64
+            let align = cgMod.GetABITypeAlignment(classLayout)
+            let memberType = createMemberType(fwdDecl, member.name, diFile, member.loc.GetBeginPos().line,
+                bitInSize, align, offset, FlagZero, elemType)
+            elements.add(memberType)
+            idx++
+        }
     }
 
     private func GenerateTypeName(ty: Type): String {
