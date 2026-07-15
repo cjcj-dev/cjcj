@@ -198,7 +198,7 @@ private func GenerateCommonEnum(irBuilder: IRBuilder2, chirExpr: Expression): LL
         getTypeInfoArgs.add(enumCaseTi)
         getTypeInfoArgs.add(irBuilder.GetInt32(typeArgs.size))
         getTypeInfoArgs.add(typeArgsArr)
-        enumCaseTi = irBuilder.CallGetTypeInfoIntrinsic(getTypeInfoArgs)
+        enumCaseTi = irBuilder.CallIntrinsicGetTypeInfo(getTypeInfoArgs)
     }
     let allocArgs = ArrayList<LLVMValueRef>()
     allocArgs.add(enumCaseTi)

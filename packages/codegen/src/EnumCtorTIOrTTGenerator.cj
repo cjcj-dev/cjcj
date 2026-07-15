@@ -289,7 +289,7 @@ public class EnumCtorTIOrTTGenerator {
             let entryBB = irBuilder.CreateEntryBasicBlock(superTiFn, "entry")
             irBuilder.SetInsertPoint(entryBB)
             let tt = CGType.GetOrCreate(cgMod, chirEnumType).GetOrCreateTypeTemplate()
-            let ti = irBuilder.CallGetTypeInfoIntrinsic(ArrayList<LLVMValueRef>(
+            let ti = irBuilder.CallIntrinsicGetTypeInfo(ArrayList<LLVMValueRef>(
                 [tt, unsafe { LLVMGetParam(superTiFn, 0u32) }, unsafe { LLVMGetParam(superTiFn, 1u32) }]))
             irBuilder.CreateRet(irBuilder.CreateBitCast(ti, i8PtrTy))
         }

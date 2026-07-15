@@ -739,7 +739,7 @@ private class EnumMetadataInfo <: MetadataInfo {
                         args.add(module.GetOrCreateEnumCtorTIOrTT(chirEnumType, index))
                         args.add(unsafe { LLVMGetParam(getTiFn, 0u32) })
                         args.add(unsafe { LLVMGetParam(getTiFn, 1u32) })
-                        irBuilder.CallGetTypeInfoIntrinsic(args)
+                        irBuilder.CallIntrinsicGetTypeInfo(args)
                     } else {
                         module.GetOrCreateEnumCtorTIOrTT(chirEnumType, index)
                     }

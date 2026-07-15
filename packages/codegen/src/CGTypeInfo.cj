@@ -632,11 +632,6 @@ private func GenerateSourceGenericOfTypeInfo(cgMod: CGModule, chirTy: Type, i8Pt
     return unsafe { LLVMConstNull(i8PtrType) }
 }
 
-public func EnsureSourceGenericTypeTemplate(cgMod: CGModule, customTy: CustomType): LLVMValueRef {
-    let sourceTy = StaticCast<CustomType>(customTy.GetCustomTypeDef().GetType().getOrThrow())
-    return CGType.GetOrCreate(cgMod, sourceTy).GetOrCreateTypeTemplate()
-}
-
 public func DefineCustomTypeTemplateIfNeeded(cgMod: CGModule, customTy: CustomType,
     typeTemplate: LLVMValueRef): Unit {
     let sourceTy = SourceCustomType(customTy)
