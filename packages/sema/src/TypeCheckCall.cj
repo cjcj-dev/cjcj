@@ -1918,13 +1918,15 @@ private func TryReplaceIdeal(ty: Option<Ty>): Option<Ty> {
 
 // Mirrors C++ TypeArgumentInference.cpp:53-70.
 private func MakeOneBlameHint(blame: Blame): String {
-    let lb = TryReplaceIdeal(blame.lb).getOrThrow()
-    let ub = TryReplaceIdeal(blame.ub).getOrThrow()
+    let lb = TryReplaceIdeal(blame.lb)
+    let ub = TryReplaceIdeal(blame.ub)
     return match (blame.style) {
         case BlameStyle.ARGUMENT =>
-            "of type '" + lb.String() + "', should match parameter type '" + ub.String() + "'"
+            "of type '" + lb.getOrThrow().String() +
+                "', should match parameter type '" + ub.getOrThrow().String() + "'"
         case BlameStyle.RETURN =>
-            "of return type '" + lb.String() + "', should match expected type '" + ub.String() + "'"
+            "of return type '" + lb.getOrThrow().String() +
+                "', should match expected type '" + ub.getOrThrow().String() + "'"
         case BlameStyle.CONSTRAINT => ""
     }
 }
