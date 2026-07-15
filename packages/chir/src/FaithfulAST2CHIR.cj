@@ -1135,6 +1135,7 @@ public class FaithfulAST2CHIR {
     private let initFuncsForConstVar: ArrayList<Function> = ArrayList<Function>()
     private let initFuncsForAnnoFactory: ArrayList<Function> = ArrayList<Function>()
     private let annoFactoryFuncs: ArrayList<(AstDecl, Function)> = ArrayList<(AstDecl, Function)>()
+    private let maybeUnreachable: HashMap<Block, Terminator> = HashMap<Block, Terminator>()
     private let isComputingAnnos: Bool
 
     public init(builder: CHIRBuilder, chirType: CHIRType,
@@ -1221,6 +1222,10 @@ public class FaithfulAST2CHIR {
 
     public func GetImplicitFuncs(): HashMap<String, Function> {
         return implicitFuncs
+    }
+
+    public func GetMaybeUnreachableBlocks(): HashMap<Block, Terminator> {
+        return maybeUnreachable
     }
 
     public func GetSrcCodeImportedFuncs(): ArrayList<Function> {
@@ -2377,7 +2382,8 @@ public class FaithfulAST2CHIR {
     private func CreateTranslator(): Translator {
         return Translator(builder, chirType, globalCache, localConstVars: localConstVars, localConstFuncs: localConstFuncs,
             deserializedVals: deserializedVals, overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts,
-            annoFactoryFuncs: annoFactoryFuncs, isComputingAnnos: isComputingAnnos,
+            annoFactoryFuncs: annoFactoryFuncs, maybeUnreachable: maybeUnreachable,
+            isComputingAnnos: isComputingAnnos,
             initFuncsForAnnoFactory: initFuncsForAnnoFactory)
     }
 

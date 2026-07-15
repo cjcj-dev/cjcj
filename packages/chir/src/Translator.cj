@@ -342,6 +342,7 @@ public class Translator {
     private let mergingSpecific: Bool
     private var genericFuncMap: GenericFuncMap = GenericFuncMap()
     private let annoFactoryFuncs: ArrayList<(AstDecl, Function)>
+    private let maybeUnreachable: HashMap<Block, Terminator>
     private let isComputingAnnos: Bool
     private let initFuncsForAnnoFactory: ArrayList<Function>
 
@@ -351,18 +352,21 @@ public class Translator {
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None,
         opts!: GlobalOptions = GlobalOptions(),
         annoFactoryFuncs!: ArrayList<(AstDecl, Function)> = ArrayList<(AstDecl, Function)>(),
+        maybeUnreachable!: HashMap<Block, Terminator> = HashMap<Block, Terminator>(),
         isComputingAnnos!: Bool = false,
         initFuncsForAnnoFactory!: ArrayList<Function> = ArrayList<Function>()) {
         this(builder, chirTy, globalSymbolTable, localConstVars: localConstVars, localConstFuncs: localConstFuncs,
             deserializedVals: deserializedVals, overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts,
             mergingSpecific: opts.IsCompilingCJMPSpecific(), annoFactoryFuncs: annoFactoryFuncs,
+            maybeUnreachable: maybeUnreachable,
             isComputingAnnos: isComputingAnnos, initFuncsForAnnoFactory: initFuncsForAnnoFactory)
     }
 
     private init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap,
         localConstVars!: ElementList, localConstFuncs!: ElementList, deserializedVals!: HashMap<String, Value>,
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>>, opts!: GlobalOptions,
-        mergingSpecific!: Bool, annoFactoryFuncs!: ArrayList<(AstDecl, Function)>, isComputingAnnos!: Bool,
+        mergingSpecific!: Bool, annoFactoryFuncs!: ArrayList<(AstDecl, Function)>,
+        maybeUnreachable!: HashMap<Block, Terminator>, isComputingAnnos!: Bool,
         initFuncsForAnnoFactory!: ArrayList<Function>) {
         this.builder = builder
         this.chirTy = chirTy
@@ -374,6 +378,7 @@ public class Translator {
         this.opts = opts
         this.mergingSpecific = mergingSpecific
         this.annoFactoryFuncs = annoFactoryFuncs
+        this.maybeUnreachable = maybeUnreachable
         this.isComputingAnnos = isComputingAnnos
         this.initFuncsForAnnoFactory = initFuncsForAnnoFactory
     }
@@ -394,6 +399,7 @@ public class Translator {
         return Translator(builder, chirTy, globalSymbolTable, localConstVars: localConstVars,
             localConstFuncs: localConstFuncs, deserializedVals: deserializedVals,
             overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts, annoFactoryFuncs: annoFactoryFuncs,
+            maybeUnreachable: maybeUnreachable,
             isComputingAnnos: isComputingAnnos, initFuncsForAnnoFactory: initFuncsForAnnoFactory)
     }
 
@@ -401,7 +407,8 @@ public class Translator {
         let copied = Translator(builder, chirTy, globalSymbolTable, localConstVars: localConstVars,
             localConstFuncs: localConstFuncs, deserializedVals: deserializedVals,
             overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts, mergingSpecific: mergingSpecific,
-            annoFactoryFuncs: annoFactoryFuncs, isComputingAnnos: isComputingAnnos,
+            annoFactoryFuncs: annoFactoryFuncs, maybeUnreachable: maybeUnreachable,
+            isComputingAnnos: isComputingAnnos,
             initFuncsForAnnoFactory: initFuncsForAnnoFactory)
         copied.astNodeSymbolTable = AST2CHIRNodeMap<Value>(astNodeSymbolTable)
         copied.localValSymbolTable = AST2CHIRNodeMap<Value>(localValSymbolTable)
@@ -1288,6 +1295,7 @@ public class Translator {
 
     public func Visit(expr: AstReturnExpr): Option<Value> {
         let loc = TranslateLocation(expr)
+        var terminator: Option<Terminator> = None
         if (let Some(retExpr) <- expr.expr) {
             let value = TranslateExprArg(retExpr)
             StoreReturnExprValueIfNeeded(expr, value)
@@ -1297,9 +1305,12 @@ public class Translator {
                 currentBlock = CreateBlock()
                 CurrentFinallyContext().controlFlowBlocks[ControlType.RETURN].add((prevBlock, CurrentBlock()))
             }
-            builder.CreateExit(None, CurrentBlock()).SetDebugLocation(loc)
+            let exit = builder.CreateExit(None, CurrentBlock())
+            exit.SetDebugLocation(loc)
+            terminator = Some(exit)
             let group = RequireParentBlockGroup(CurrentBlock(), "return continuation")
             currentBlock = builder.CreateBlock(group)
+            maybeUnreachable[CurrentBlock()] = terminator.getOrThrow()
             return None
         }
         UpdateDelayExitSignalForReturnIfNeeded()
@@ -1308,9 +1319,12 @@ public class Translator {
             currentBlock = CreateBlock()
             CurrentFinallyContext().controlFlowBlocks[ControlType.RETURN].add((prevBlock, CurrentBlock()))
         }
-        builder.CreateExit(None, CurrentBlock()).SetDebugLocation(loc)
+        let exit = builder.CreateExit(None, CurrentBlock())
+        exit.SetDebugLocation(loc)
+        terminator = Some(exit)
         let group = RequireParentBlockGroup(CurrentBlock(), "return continuation")
         currentBlock = builder.CreateBlock(group)
+        maybeUnreachable[CurrentBlock()] = terminator.getOrThrow()
         return None
     }
 
@@ -2993,6 +3007,7 @@ public class Translator {
     }
 
     public func Visit(expr: AstJumpExpr): Option<Value> {
+        let loc = TranslateLocation(expr)
         let isForIn = if (let Some(refLoop) <- expr.refLoop) {
             refLoop.astKind == ASTKind.FOR_IN_EXPR && delayExitSignal.isSome()
         } else {
@@ -3021,7 +3036,7 @@ public class Translator {
                 CurrentFinallyContext().controlFlowBlocks[controlIndex].add((prevBlock, CurrentBlock()))
             }
         }
-        if (isForIn) {
+        let terminator = if (isForIn) {
             UpdateDelayExitSignal(if (expr.isBreak) {
                 CalculateDelayExitLevelForBreak()
             } else {
@@ -3031,8 +3046,10 @@ public class Translator {
         } else {
             builder.CreateGoTo(destination.getOrThrow(), CurrentBlock())
         }
+        terminator.SetDebugLocation(loc)
         let group = RequireParentBlockGroup(CurrentBlock(), "jump continuation")
         currentBlock = builder.CreateBlock(group)
+        maybeUnreachable[CurrentBlock()] = terminator
         return None
     }
 
@@ -3151,16 +3168,19 @@ public class Translator {
     }
 
     public func Visit(expr: AstThrowExpr): Option<Value> {
+        let loc = TranslateLocation(expr)
         let thrownExpr = RequireExpr(expr.expr, "throw operand")
         let thrownValue = Translator.TranslateASTNode(thrownExpr, this) ??
             throw IllegalStateException("faithful AST2CHIR throw operand produced no value")
-        if (let Some(exceptionBlock) <- CurrentTryCatchBlock()) {
+        let terminator = if (let Some(exceptionBlock) <- CurrentTryCatchBlock()) {
             builder.CreateRaiseException(thrownValue, exceptionBlock, CurrentBlock())
         } else {
             builder.CreateRaiseException(thrownValue, CurrentBlock())
         }
+        terminator.SetDebugLocation(loc)
         let group = RequireParentBlockGroup(CurrentBlock(), "throw continuation")
         currentBlock = builder.CreateBlock(group)
+        maybeUnreachable[CurrentBlock()] = terminator
         return None
     }
 

@@ -6,6 +6,7 @@ import cjcj::chir.Apply as ChirApply
 import cjcj::chir.ApplyWithException as ChirApplyWithException
 import cjcj::chir.AnalysisWrapper
 import cjcj::chir.Attribute as ChirAttribute
+import cjcj::chir.Block as ChirBlock
 import cjcj::chir.CHIRBuilder as ChirBuilder
 import cjcj::chir.CHIRPrinter as ChirCHIRPrinter
 import cjcj::chir.CHIRType
@@ -44,6 +45,7 @@ import cjcj::chir.IsTrackedGVForRangeAnalysis
 import cjcj::chir.rangeStateGlobals
 import cjcj::chir.ReplaceUsesWithWrapper
 import cjcj::chir.ShouldReportUnusedCodeWarnings
+import cjcj::chir.Terminator as ChirTerminator
 import cjcj::chir.UnitUnify
 import cjcj::chir.UpdateMemberVarPath
 import cjcj::chir.UselessAllocateElimination
@@ -80,6 +82,7 @@ private class ToCHIR {
     private let outputPath: String
     private let builder: ChirBuilder
     private let effectMap: ChirOptEffectCHIRMap = ChirOptEffectCHIRMap()
+    private var maybeUnreachable: HashMap<ChirBlock, ChirTerminator> = HashMap<ChirBlock, ChirTerminator>()
     private var chirPkg: Option<RealCHIRPackage> = None
     private var debugFileIndex: UInt64 = 0u64
     private var isComputingAnnos: Bool = false
@@ -115,9 +118,10 @@ private class ToCHIR {
             case None => return None
         }
         instance.chirData.SetImplicitFuncs(lowered, ast2chir.GetImplicitFuncs())
+        maybeUnreachable = ast2chir.GetMaybeUnreachableBlocks()
         chirPkg = Some(lowered)
         RulesChecking(lowered, builder, instance.invocation.globalOptions,
-            instance.diag.AsBasicDiagnosticEngine(), effectMap)
+            instance.diag.AsBasicDiagnosticEngine(), effectMap, maybeUnreachable)
         RunOptimizationPass(lowered)
         if (!TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)) {
             instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
@@ -511,13 +515,16 @@ private class ToCHIR {
 }
 
 private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions,
-    diag: BasicDiagnosticEngine, effectMap: ChirOptEffectCHIRMap): Unit {
+    diag: BasicDiagnosticEngine, effectMap: ChirOptEffectCHIRMap,
+    maybeUnreachable: HashMap<ChirBlock, ChirTerminator>): Unit {
     // Canonicalize member-var paths over the whole package before analysis, mirroring C++
     // ToCHIR::Canonicalization() at CHIR.cpp:1150 ("after this pass, the CHIR is ready for
     // analysis and optimization"). Generic instantiation adds function bodies after
     // FaithfulAST2CHIR ran UpdateMemberVarPath, so their GetElementByName/StoreElementByName/
     // FieldByName nodes would otherwise reach ConstAnalysis (memory-major but unhandled).
     UpdateMemberVarPath(builder).RunOnPackage(pkg)
+    DeadCodeElimination(builder, diag, pkg).UnreachableBlockWarningReporter(pkg,
+        Int64(options.GetJobs()), maybeUnreachable)
     DeadCodeElimination(builder).ClearUnreachableMarkBlock(pkg)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
         enableCoverage: options.enableCoverage)

@@ -1,8 +1,10 @@
 package cjcj::basic
 
 import std.collection.*
+import std.sync.Mutex
 
 public class DiagnosticEngineImpl {
+    private let mux: Mutex = Mutex()
     private var errorCount: UInt64 = 0
     private var warningCount: UInt64 = 0
     private var errorPrintCount: UInt64 = 0
@@ -93,13 +95,17 @@ public class DiagnosticEngineImpl {
     }
 
     public func IncreaseWarningCount(category: DiagCategory): Unit {
-        let index = DiagCategoryIndex(category)
-        warningByCategory[index] = warningByCategory[index] + 1
-        warningCount++
+        synchronized(mux) {
+            let index = DiagCategoryIndex(category)
+            warningByCategory[index] = warningByCategory[index] + 1
+            warningCount++
+        }
     }
 
     public func IncreaseErrorCount(): Unit {
-        errorCount++
+        synchronized(mux) {
+            errorCount++
+        }
     }
 
     public func GetWarningCount(): UInt64 {

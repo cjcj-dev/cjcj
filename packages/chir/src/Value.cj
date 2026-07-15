@@ -344,7 +344,7 @@ public class LocalVar <: Value {
     }
 }
 
-public class Block <: Value {
+public class Block <: Value & Hashable & Equatable<Block> {
     private var parentGroup: Option<BlockGroup> = None
     private let exprs: ArrayList<Expression> = ArrayList<Expression>()
     private let predecessors: ArrayList<Block> = ArrayList<Block>()
@@ -356,6 +356,14 @@ public class Block <: Value {
         if (let Some(group) <- parentGroup) {
             group.AddBlock(this)
         }
+    }
+
+    public operator func ==(right: Block): Bool {
+        return nodeId == right.nodeId
+    }
+
+    public operator func !=(right: Block): Bool {
+        return nodeId != right.nodeId
     }
 
     public override func AsBlock(): Option<Block> { return this }

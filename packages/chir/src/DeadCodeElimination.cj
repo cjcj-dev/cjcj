@@ -1,6 +1,7 @@
 package cjcj::chir
 
 import std.collection.*
+import std.core.Box as CoreBox
 import cjcj::basic.DiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Linkage as BasicLinkage
@@ -11,10 +12,54 @@ import cjcj::basic.WarnGroupIndex
 import cjcj::basic.WarningOptionMgr
 import cjcj::option.{CompileTarget, GlobalOptions, OutputMode}
 import cjcj::utils.{ANNOTATION_VAR_POSTFIX, CJC_ABORT, CJC_ASSERT, InternalError, OverflowStrategy,
-    REFLECT_PACKAGE_NAME}
+    REFLECT_PACKAGE_NAME, TaskQueue}
 
 private let STD_CORE_FUTURE_MANGLED_NAME: String = "_CNat6Future"
 private let USER_MAIN_MANGLED_NAME: String = "user.main"
+
+private func AllUsersIsExprKind(users: ArrayList<Expression>, kind: ExprKind): Bool {
+    for (user in users) {
+        if (user.GetExprKind() != kind) {
+            return false
+        }
+        var hasNothingOperand = false
+        var index: Int64 = 0
+        while (index < user.GetNumOfOperands()) {
+            if (user.GetOperand(index).GetType().getOrThrow().IsNothing()) {
+                hasNothingOperand = true
+                break
+            }
+            index++
+        }
+        if (!hasNothingOperand) {
+            return false
+        }
+    }
+    return true
+}
+
+private func CheckUsersOfExpr(expr: Expression): Bool {
+    if (let Some(result) <- expr.GetResult()) {
+        let users = result.GetUsersRef()
+        if (AllUsersIsExprKind(users, ExprKind.TUPLE)) {
+            return true
+        }
+        if (AllUsersIsExprKind(users, ExprKind.APPLY)) {
+            return true
+        }
+        if (AllUsersIsExprKind(users, ExprKind.RAW_ARRAY_LITERAL_INIT)) {
+            return true
+        }
+        if (users.size == 1 && users[0].GetExprKind() == ExprKind.STORE) {
+            let storeNodeRange = ToRangeIfNotZero(users[0].GetDebugLocation())
+            if (!storeNodeRange[0]) {
+                return true
+            }
+        }
+        return false
+    }
+    return true
+}
 
 public func ShouldReportUnusedCodeWarnings(): Bool {
     return !WarningOptionMgr.GetInstance().IsSuppressed(UInt64(WarnGroupIndex(WarnGroup.UNUSED)))
@@ -498,6 +543,55 @@ public class DeadCodeElimination {
         }
     }
 
+    public func UnreachableBlockWarningReporter(pkg: Package, threadsNum: Int64,
+        maybeUnreachableBlocks: HashMap<Block, Terminator>): Unit {
+        if (threadsNum == 1) {
+            UnreachableBlockWarningReporterInSerial(pkg, maybeUnreachableBlocks)
+        } else {
+            UnreachableBlockWarningReporterInParallel(pkg, threadsNum, maybeUnreachableBlocks)
+        }
+    }
+
+    private func UnreachableBlockWarningReporterInSerial(pkg: Package,
+        maybeUnreachableBlocks: HashMap<Block, Terminator>): Unit {
+        for (fn in pkg.GetGlobalFunctionsRef()) {
+            if (fn.GetBody().isNone()) {
+                continue
+            }
+            let isPrinted = CoreBox<Bool>(false)
+            Visitor.Visit(fn, { block: Block =>
+                if (let Some(terminator) <- maybeUnreachableBlocks.get(block)) {
+                    if (CheckUselessBlock(block)) {
+                        PrintUnreachableBlockWarning(block, terminator, isPrinted)
+                    }
+                }
+                VisitResult.CONTINUE
+            })
+        }
+    }
+
+    private func UnreachableBlockWarningReporterInParallel(pkg: Package, threadsNum: Int64,
+        maybeUnreachableBlocks: HashMap<Block, Terminator>): Unit {
+        let taskQueue = TaskQueue(threadsNum)
+        for (fn in pkg.GetGlobalFunctionsRef()) {
+            if (fn.GetBody().isNone() || fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
+                continue
+            }
+            let _ = taskQueue.AddTask<Unit>({ =>
+                let isPrinted = CoreBox<Bool>(false)
+                Visitor.Visit(fn, { block: Block =>
+                    if (let Some(terminator) <- maybeUnreachableBlocks.get(block)) {
+                        if (CheckUselessBlock(block)) {
+                            PrintUnreachableBlockWarning(block, terminator, isPrinted)
+                        }
+                    }
+                    VisitResult.CONTINUE
+                })
+            })
+        }
+        taskQueue.RunAndWaitForAllTasksCompleted()
+    }
+
     public func UnreachableBlockEliminationForFunc(body: BlockGroup, isDebug!: Bool = false): Unit {
         let entryBlock = body.GetEntryBlock().getOrThrow()
         let unreachable = body.GetBlocks()
@@ -630,6 +724,92 @@ public class DeadCodeElimination {
 
     private func CheckUselessBlock(block: Block): Bool {
         return !block.IsEntry() && block.GetPredecessorsRef().isEmpty() && !block.TestAttr(Attribute.UNREACHABLE)
+    }
+
+    private func GetUnreachableExpression(block: Block): (Option<Expression>, Bool) {
+        let expressions = block.GetExpressionsRef()
+        var isNormal = true
+        for (expression in expressions) {
+            let posForWarning = expression.GetDebugLocationInfoForWarning()
+            let warningRange = ToRangeIfNotZero(posForWarning)
+            if (warningRange[0]) {
+                if (expression.IsBinaryExpr() || expression.IsIntOpWithException()) {
+                    var hasNothingOperand = false
+                    var index: Int64 = 0
+                    while (index < expression.GetNumOfOperands()) {
+                        if (expression.GetOperand(index).GetType().getOrThrow().IsNothing()) {
+                            hasNothingOperand = true
+                            break
+                        }
+                        index++
+                    }
+                    if (!hasNothingOperand) {
+                        return (Some(expression), true)
+                    }
+                }
+                if (expression.GetExprKind() != ExprKind.DEBUGEXPR) {
+                    return (Some(expression), false)
+                }
+            }
+            if (!CheckUsersOfExpr(expression)) {
+                continue
+            }
+            let debugRange = ToRangeIfNotZero(expression.GetDebugLocation())
+            if (debugRange[0] && !IsCrossPackage(debugRange[1].begin, curPkgName, diag.getOrThrow())) {
+                return (Some(expression), true)
+            }
+        }
+        return (None, isNormal)
+    }
+
+    private func PrintUnreachableBlockWarning(block: Block, terminator: Terminator,
+        isPrinted: CoreBox<Bool>): Unit {
+        let terminalNodeRange = ToRangeIfNotZero(terminator.GetDebugLocation())
+        if (terminalNodeRange[0] && !isPrinted.value) {
+            let unreachableResult = GetUnreachableExpression(block)
+            if (let Some(unreachableExpr) <- unreachableResult[0]) {
+                let isNormal = unreachableResult[1]
+                let range = if (isNormal) {
+                    ToRange(unreachableExpr.GetDebugLocation())
+                } else {
+                    ToRange(unreachableExpr.GetDebugLocationInfoForWarning())
+                }
+                if (terminalNodeRange[1].begin == range.begin) {
+                    return
+                }
+                if (IsCrossPackage(terminalNodeRange[1].begin, curPkgName, diag.getOrThrow())) {
+                    return
+                }
+                if (unreachableExpr.GetSkipCheck() == SkipKind.SKIP_DCE_WARNING) {
+                    return
+                }
+                if (unreachableExpr.GetExprKind() == ExprKind.CONSTANT &&
+                    (unreachableExpr as Constant).getOrThrow().IsUnitLit()) {
+                    if (unreachableExpr.GetResult().getOrThrow().TestAttr(Attribute.COMPILER_ADD)) {
+                        return
+                    }
+                }
+                if (!isNormal && (unreachableExpr.IsBinaryExpr() || unreachableExpr.IsUnaryExpr())) {
+                    let diagBuilder = diag.getOrThrow().DiagnoseRefactor(
+                        DiagKindRefactor.chir_dce_unreachable, range, "operator")
+                    diagBuilder.AddMainHintArguments("operator")
+                    diagBuilder.AddHint(terminalNodeRange[1])
+                    diagBuilder.Emit()
+                } else if (!isNormal && unreachableExpr.GetExprKind() == ExprKind.APPLY) {
+                    let diagBuilder = diag.getOrThrow().DiagnoseRefactor(
+                        DiagKindRefactor.chir_dce_unreachable, range, "call")
+                    diagBuilder.AddMainHintArguments("call")
+                    diagBuilder.AddHint(terminalNodeRange[1])
+                    diagBuilder.Emit()
+                } else {
+                    let diagBuilder = diag.getOrThrow().DiagnoseRefactor(
+                        DiagKindRefactor.chir_dce_unreachable_expression_hint, range)
+                    diagBuilder.AddHint(terminalNodeRange[1])
+                    diagBuilder.Emit()
+                }
+                isPrinted.value = true
+            }
+        }
     }
 
     private func CheckUselessExpr(expr: Expression, isReportWarning!: Bool = false): Bool {

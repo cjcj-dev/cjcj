@@ -2,6 +2,7 @@ package cjcj::basic
 
 import std.collection.*
 import std.sort.*
+import std.sync.Mutex
 
 public let MAIN_HINT_COLOR: DiagColor = DiagColor.RED
 public let OTHER_HINT_COLOR: DiagColor = DiagColor.CYAN
@@ -469,6 +470,7 @@ public open class DiagnosticHandler {
     protected let diag: DiagnosticEngine
     private let kind: DiagHandlerKind
     private let prevDiags: ArrayList<(Position, String)> = ArrayList<(Position, String)>()
+    protected let mtx: Mutex = Mutex()
 
     public init(diag: DiagnosticEngine, kind: DiagHandlerKind) {
         this.diag = diag
@@ -524,16 +526,23 @@ public open class DiagnosticHandler {
     }
 
     public func SetPrevDiag(pos: Position, str: String): Unit {
-        prevDiags.add((pos, str))
+        synchronized(mtx) {
+            prevDiags.add((pos, str))
+        }
     }
 
     public func HasPrevDiag(pos: Position, str: String): Bool {
-        for ((oldPos, oldStr) in prevDiags) {
-            if (oldPos.fileID == pos.fileID && oldPos.line == pos.line && oldPos.column == pos.column && oldStr == str) {
-                return true
+        var found = false
+        synchronized(mtx) {
+            for ((oldPos, oldStr) in prevDiags) {
+                if (oldPos.fileID == pos.fileID && oldPos.line == pos.line && oldPos.column == pos.column &&
+                    oldStr == str) {
+                    found = true
+                    break
+                }
             }
         }
-        return false
+        return found
     }
 
     public func GetKind(): DiagHandlerKind {
@@ -590,15 +599,21 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
     }
 
     public func SaveCategoryDiagnostic(diagnostic: Diagnostic): Bool {
-        for (oldDiag in diagnostics) {
-            if (oldDiag.diagCategory == diagnostic.diagCategory &&
-                oldDiag.mainHint.range.EqualForHash(diagnostic.mainHint.range) &&
-                oldDiag.diagSeverity == diagnostic.diagSeverity) {
-                return false
+        var success = true
+        synchronized(mtx) {
+            for (oldDiag in diagnostics) {
+                if (oldDiag.diagCategory == diagnostic.diagCategory &&
+                    oldDiag.mainHint.range.EqualForHash(diagnostic.mainHint.range) &&
+                    oldDiag.diagSeverity == diagnostic.diagSeverity) {
+                    success = false
+                    break
+                }
+            }
+            if (success) {
+                diagnostics.add(diagnostic)
             }
         }
-        diagnostics.add(diagnostic)
-        return true
+        return success
     }
 
     private func ShouldSaveDiagnosticCategory(category: DiagCategory): Bool {
