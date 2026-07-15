@@ -54,7 +54,7 @@ public let FILE_HASH_LEN: Int64 = 13
 
 public let MAIN_INVOKE: String = "$mainInvoke"
 public let TEST_ENTRY_NAME: String = "$test.entry"
-public let STATIC_INIT_FUNC: String = "<clinit>"
+public let STATIC_INIT_FUNC: String = "static.init"
 public let CORE_PACKAGE_NAME: String = "std.core"
 
 public func StartsWith(value: String, prefix: String): Bool {

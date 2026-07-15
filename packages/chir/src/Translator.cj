@@ -1643,8 +1643,8 @@ public class Translator {
         if (let Some(cstrCtor) <- TranslateCStringCtorCall(expr)) {
             return Some(cstrCtor)
         }
-        if (IsFunctionValueCall(expr)) {
-            return Some(TranslateFunctionValueCall(expr))
+        if (let Some(funcTypeValueCall) <- TranslateFuncTypeValueCall(expr)) {
+            return Some(funcTypeValueCall)
         }
         let calleeDecl = expr.resolvedFunction ?? ResolveCalleeFromBase(expr)
         if (calleeDecl.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
@@ -1658,9 +1658,8 @@ public class Translator {
         }
         let callee = GetSymbolTable(calleeDecl)
         let argValues = ArrayList<Value>()
-        let expectedParamTys = FuncParamTypes(expr, calleeDecl)
+        let (expectedParamTys, resultTy) = GetMemberFuncParamAndRetInstTypes(expr)
         AppendTranslatedCallArgs(expr, calleeDecl, argValues, expectedParamTys, ArrayList<Value>())
-        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
         return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
             instTypeArgs: instTypeArgs), loc: TranslateLocation(expr))
@@ -7561,13 +7560,20 @@ public class Translator {
             !resolvedFunction.TestAttr(AstAttribute.STATIC)
     }
 
-    private func GetMemberFuncParamAndRetInstTypes(expr: AstCallExpr,
-        calleeDecl: AstFuncDecl): (ArrayList<Type>, Type) {
-        let paramInstTys = FuncParamTypes(expr, calleeDecl)
-        let retInstTy = if (calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR) || calleeDecl.IsFinalizer()) {
+    private func GetMemberFuncParamAndRetInstTypes(expr: AstCallExpr): (ArrayList<Type>, Type) {
+        let baseTy = RequireAstTy(RequireExpr(expr.baseFunc, "call base"))
+        let funcType = if (let Some(genericTy) <- (baseTy as AstGenericsTy)) {
+            CJC_ASSERT(genericTy.upperBounds.size == 1)
+            RequireFuncType(chirTy.TranslateType(genericTy.upperBounds[0]))
+        } else {
+            RequireFuncType(chirTy.TranslateType(baseTy))
+        }
+        let resolvedFunction = expr.resolvedFunction.getOrThrow()
+        let paramInstTys = funcType.GetParamTypes()
+        let retInstTy = if (resolvedFunction.TestAttr(AstAttribute.CONSTRUCTOR) || resolvedFunction.IsFinalizer()) {
             builder.context.GetUnitTy()
         } else {
-            chirTy.TranslateType(CallBaseFuncTy(expr, calleeDecl).retTy)
+            funcType.GetReturnType()
         }
         return (paramInstTys, retInstTy)
     }
@@ -7613,7 +7619,7 @@ public class Translator {
         if (needExactTy) {
             if (let Some(curCallerType) <- callerType) {
                 if (let Some(resolvedFunction) <- expr.resolvedFunction) {
-                    var (paramInstTys, retInstTy) = GetMemberFuncParamAndRetInstTypes(expr, resolvedFunction)
+                    var (paramInstTys, retInstTy) = GetMemberFuncParamAndRetInstTypes(expr)
                     if (!resolvedFunction.TestAttr(AstAttribute.STATIC)) {
                         paramInstTys.add(curCallerType, at: 0)
                     }
@@ -7729,52 +7735,25 @@ public class Translator {
         return None
     }
 
-    private func IsFunctionValueCall(expr: AstCallExpr): Bool {
+    private func TranslateFuncTypeValueCall(expr: AstCallExpr): Option<Value> {
         if (expr.resolvedFunction.isSome()) {
-            return false
+            return None
         }
-        if (let Some(base) <- expr.baseFunc) {
-            if (let Some(baseTy) <- base.GetTy()) {
-                if ((baseTy as AstFuncTy).isSome()) {
-                    if (let Some(refExpr) <- (base as AstRefExpr)) {
-                        if (let Some(target) <- refExpr.ref.target) {
-                            return (target as AstFuncDecl).isNone()
-                        }
-                    }
-                    if (let Some(member) <- (base as AstMemberAccess)) {
-                        if (let Some(target) <- member.target) {
-                            return (target as AstFuncDecl).isNone()
-                        }
-                    }
-                    return true
-                }
-            }
-        }
-        return false
-    }
-
-    private func TranslateFunctionValueCall(expr: AstCallExpr): Value {
         let base = RequireExpr(expr.baseFunc, "function-value call base")
-        let baseTy = base.GetTy() ??
-            throw IllegalStateException("faithful AST2CHIR function-value call base has no type")
-        let baseFuncTy = (baseTy as AstFuncTy) ??
-            throw IllegalStateException("faithful AST2CHIR function-value call base is not a function type")
-        let callee = Translator.TranslateASTNode(base, this) ??
-            throw IllegalStateException("faithful AST2CHIR function-value call base produced no value")
+        let callee = TranslateExprArg(base)
+        let funcType = RequireFuncType(callee.GetType().getOrThrow())
+        let paramInstTys = funcType.GetParamTypes()
         let argValues = ArrayList<Value>()
         var idx: Int64 = 0
-        for (arg in expr.args) {
+        for (arg in ActiveCallArgs(expr)) {
             if (arg.expr.isSome()) {
-                var value = TranslateTrivialArgWithNoSugar(arg, None)
-                if (idx < baseFuncTy.paramTys.size) {
-                    value = CoerceValueForExpectedType(value, chirTy.TranslateType(baseFuncTy.paramTys[idx]))
-                }
-                argValues.add(value)
+                let expectedTy: Option<Type> = if (idx < paramInstTys.size) { Some(paramInstTys[idx]) } else { None }
+                argValues.add(TranslateTrivialArgWithNoSugar(arg, expectedTy))
             }
             idx++
         }
-        return CreateApplyMaybeWithException(chirTy.TranslateType(RequireAstTy(expr)), callee,
-            FuncCallContext(args: argValues), loc: TranslateLocation(expr))
+        return Some(CreateApplyMaybeWithException(funcType.GetReturnType(), callee,
+            FuncCallContext(args: argValues), loc: TranslateLocation(expr)))
     }
 
     private func CreateInvokeMaybeWithException(resultTy: Type, callContext: InvokeCallContext,
