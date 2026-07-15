@@ -131,8 +131,10 @@ private class ToCHIR {
             CHIRSerializer.Serialize(lowered, fileName, ToCHIRPhase.RAW)
             return Some(lowered)
         }
-        RulesChecking(lowered, builder, instance.invocation.globalOptions,
-            instance.diag.AsBasicDiagnosticEngine(), effectMap, maybeUnreachable)
+        if (!RulesChecking(lowered, builder, instance.invocation.globalOptions,
+            instance.diag.AsBasicDiagnosticEngine(), effectMap, maybeUnreachable)) {
+            return None
+        }
         RunOptimizationPass(lowered)
         if (!TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)) {
             instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
@@ -527,7 +529,7 @@ private class ToCHIR {
 
 private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions,
     diag: BasicDiagnosticEngine, effectMap: ChirOptEffectCHIRMap,
-    maybeUnreachable: HashMap<ChirBlock, ChirTerminator>): Unit {
+    maybeUnreachable: HashMap<ChirBlock, ChirTerminator>): Bool {
     // Canonicalize member-var paths over the whole package before analysis, mirroring C++
     // ToCHIR::Canonicalization() at CHIR.cpp:1150 ("after this pass, the CHIR is ready for
     // analysis and optimization"). Generic instantiation adds function bodies after
@@ -542,7 +544,9 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     DeadCodeElimination(builder).NothingTypeExprElimination(pkg, isDebug: options.chirDebugOptimizer)
     let wrapper = ConstAnalysisWrapper(builder)
     wrapper.RunOnPackage(pkg, diag, isDebug: options.chirDebugOptimizer)
-    let _ = VarInitCheck(diag).RunOnPackage(pkg)
+    if (!RunVarInitChecking(pkg, diag, options.GetJobs())) {
+        return false
+    }
     UnreachableBranchCheck(wrapper, diag, pkg.GetName()).RunOnPackage(pkg, Int64(options.GetJobs()))
     DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(pkg, isDebug: options.chirDebugOptimizer)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
@@ -562,6 +566,13 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     cp.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer, isCJLint: false)
     DeadCodeElimination(builder).UnreachableBlockElimination(cp.GetFuncsNeedRemoveBlocks(),
         isDebug: options.chirDebugOptimizer)
+    return diag.GetErrorCount() == 0
+}
+
+private func RunVarInitChecking(pkg: RealCHIRPackage, diag: BasicDiagnosticEngine, jobs: UInt64): Bool {
+    let vic = VarInitCheck(diag)
+    let _ = vic.RunOnPackage(pkg, threadNum: Int64(jobs))
+    return diag.GetErrorCount() == 0
 }
 
 public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
