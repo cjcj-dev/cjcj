@@ -338,6 +338,9 @@ public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit): Ty {
 public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit, arrayStruct: Option<StructDecl>,
     diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (arrayLit.children.isEmpty()) {
+        if (let Some(diagValue) <- diag) {
+            Diagnose(diagValue, arrayLit, BasicDiagKind.sema_empty_arrayLit_type_undefined).Emit()
+        }
         return InvalidExprTy(arrayLit)
     }
     let elemTys = ArrayList<Ty>()
@@ -380,6 +383,9 @@ public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit
         targetTy = GetArrayTypeByInterface(typeManager, arrayStruct, targetTy)
         if (targetTy.IsInvalid()) {
             if (arrayLit.children.isEmpty()) {
+                if (let Some(diagValue) <- diag) {
+                    Diagnose(diagValue, arrayLit, BasicDiagKind.sema_empty_arrayLit_type_undefined).Emit()
+                }
                 return false
             }
             let synTy = SynArrayLit(typeManager, arrayLit, arrayStruct, diag: diag)
