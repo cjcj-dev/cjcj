@@ -764,9 +764,6 @@ extend ParserImpl {
 
     public func ParseGenericConstraints(): ArrayList<GenericConstraint> {
         let out = ArrayList<GenericConstraint>()
-        if (!Skip(TokenKind.WHERE)) {
-            return out
-        }
         while (true) {
             let constraint = GenericConstraint()
             try (cs = ChainScope(this, constraint)) {

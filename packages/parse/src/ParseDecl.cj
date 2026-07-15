@@ -1133,16 +1133,12 @@ extend ParserImpl {
                     enableThis = false
                 }
             }
-            var constraintsEnd = INVALID_POSITION
-            for (constraint in ParseGenericConstraints()) {
-                EnsureFuncBodyGeneric(body).genericConstraints.add(constraint)
-                constraintsEnd = constraint.end
-            }
+            ParseFuncGenericConstraints(body)
             if (Seeing(TokenKind.LCURL)) {
                 body.body = ParseBlock(ScopeKind.FUNC_BODY)
                 if (let Some(block) <- body.body) { body.end = block.end }
-            } else if (!constraintsEnd.IsZero()) {
-                body.end = constraintsEnd
+            } else if (let Some(generic) <- body.generic && !generic.genericConstraints.isEmpty()) {
+                body.end = generic.genericConstraints[0].end
             } else if (let Some(retType) <- body.retType) {
                 body.end = retType.end
             } else {
@@ -1150,6 +1146,22 @@ extend ParserImpl {
             }
         }
         return body
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:2368-2379
+    public func ParseFuncGenericConstraints(fb: FuncBody): Unit {
+        if (Skip(TokenKind.WHERE)) {
+            if (let None <- fb.generic) {
+                DiagUnexpectedWhere(lastToken)
+            } else if (let Some(generic) <- fb.generic) {
+                for (constraint in ParseGenericConstraints()) {
+                    generic.genericConstraints.add(constraint)
+                }
+            }
+        } else if (fb.generic.isSome() && Seeing(TokenKind.IDENTIFIER)) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_where_brace, lookahead,
+                ConvertToken(lookahead)).Emit()
+        }
     }
 
     public func ParseFuncParameters(scopeKind: ScopeKind, body: FuncBody): Unit {
@@ -1178,15 +1190,6 @@ extend ParserImpl {
             ParseDiagnoseRefactor(kind, Peek(), ConvertToken(Peek())).Emit()
             body.EnableAttr(Attribute.HAS_BROKEN)
         }
-    }
-
-    private func EnsureFuncBodyGeneric(body: FuncBody): Generic {
-        if (let Some(generic) <- body.generic) {
-            return generic
-        }
-        let generic = Generic()
-        body.generic = generic
-        return generic
     }
 
     public func ParseParameterList(scopeKind: ScopeKind): FuncParamList {
@@ -1823,8 +1826,8 @@ extend ParserImpl {
         if (Skip(TokenKind.UPPERBOUND)) {
             ParseInheritedTypes(ret)
         }
-        for (constraint in ParseGenericConstraints()) {
-            EnsureDeclGeneric(ret).genericConstraints.add(constraint)
+        if (Skip(TokenKind.WHERE)) {
+            ParseConstraints(ret)
         }
         ret.end = ret.identifier.End()
     }
@@ -1914,15 +1917,6 @@ extend ParserImpl {
 
     private func IsValidInheritedType(ty: Type): Bool {
         return ty.astKind == ASTKind.REF_TYPE || ty.astKind == ASTKind.QUALIFIED_TYPE
-    }
-
-    private func EnsureDeclGeneric(decl: Decl): Generic {
-        if (let Some(generic) <- decl.generic) {
-            return generic
-        }
-        let generic = Generic()
-        decl.generic = generic
-        return generic
     }
 
     public func ParseClassLikeBody(ret: InheritableDecl, scopeKind: ScopeKind): Unit {
