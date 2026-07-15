@@ -7902,15 +7902,11 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR member call has no base")
         }
         var thisType: Option<Type> = Some(calleeInfo.thisType)
-        var dispatchReceiverType: Option<Type> = None
-        var funcCallThisType: Option<Type> = None
         var thisObj: Option<Value> = None
         var expectedThisObjTy: Option<Type> = None
         if (!calleeDecl.TestAttr(AstAttribute.STATIC)) {
             let rawObj = TranslateThisObjectForNonStaticMemberFuncCall(expr,
                 calleeDecl.TestAttr(AstAttribute.MUT))
-            dispatchReceiverType = rawObj.GetType()
-            funcCallThisType = rawObj.GetType()
             expectedThisObjTy = if (calleeInfo.isVirtualFuncCall) {
                 var virtualTy = calleeInfo.instParentCustomTy
                 if (virtualTy.IsClassOrArray() || (virtualTy.IsStruct() && calleeDecl.TestAttr(AstAttribute.MUT))) {
@@ -7938,7 +7934,7 @@ public class Translator {
             previousDefaultArgs.add(obj)
         }
         AppendTranslatedCallArgs(expr, calleeDecl, argValues, expectedParamTys, previousDefaultArgs)
-        if (ShouldUseVirtualMemberDispatchForCall(expr, calleeDecl, dispatchReceiverType)) {
+        if (calleeInfo.isVirtualFuncCall) {
             if (calleeDecl.TestAttr(AstAttribute.STATIC)) {
                 let parentTy = thisType ?? TranslateMemberOwnerType(calleeDecl)
                 let rtti = RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
@@ -7968,12 +7964,8 @@ public class Translator {
             argValues.add(obj, at: 0)
         }
         let instTypeArgs = calleeInfo.instantiatedTypeArgs
-        let applyThisType = match (funcCallThisType) {
-            case Some(value) => Some(value)
-            case None => thisType
-        }
         return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
-            instTypeArgs: instTypeArgs, thisType: applyThisType), loc: loc)
+            instTypeArgs: instTypeArgs, thisType: Some(calleeInfo.thisType)), loc: loc)
     }
 
     private func TranslateFuncInstArgs(expr: AstCallExpr, calleeDecl: AstFuncDecl): ArrayList<Type> {
@@ -8267,47 +8259,6 @@ public class Translator {
             }
         }
         return funcHasOpenFlag && funcDecl.TestAnyAttr(AstAttribute.PUBLIC, AstAttribute.PROTECTED)
-    }
-
-    private func ShouldUseVirtualMemberDispatchForCall(expr: AstCallExpr, funcDecl: AstFuncDecl,
-        receiverTy: Option<Type>): Bool {
-        if (!ShouldUseVirtualMemberDispatch(funcDecl)) {
-            return false
-        }
-        if (let Some(base) <- expr.baseFunc) {
-            if (let Some(member) <- (base as AstMemberAccess)) {
-                if (let Some(baseExpr) <- member.baseExpr) {
-                    if (let Some(refExpr) <- (baseExpr as AstRefExpr)) {
-                        if (refExpr.isSuper) {
-                            return false
-                        }
-                    }
-                    let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr)).StripAllRefs()
-                    if (baseTy.IsCustomType() && funcDecl.TestAttr(AstAttribute.STATIC)) {
-                        return false
-                    }
-                }
-            }
-        }
-        if (funcDecl.TestAttr(AstAttribute.STATIC)) {
-            if (let Some(callerDef) <- CurrentFunction().GetOuterDeclaredOrExtendedDef()) {
-                if (let Some(classDef) <- (callerDef as ClassDef)) {
-                    if (!classDef.IsInterface() && !classDef.CanBeInherited()) {
-                        return false
-                    }
-                }
-            }
-            return true
-        }
-        if (let Some(ty) <- receiverTy) {
-            if (let Some(classTy) <- (ty.StripAllRefs() as ClassType)) {
-                let classDef = classTy.GetClassDef()
-                if (!classDef.IsInterface() && !classDef.CanBeInherited()) {
-                    return false
-                }
-            }
-        }
-        return true
     }
 
     private func InheritedChainHasCommon(def: CustomTypeDef): Bool {
