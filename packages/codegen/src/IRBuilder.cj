@@ -4076,7 +4076,10 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildBitCast(builder.raw, value, destType, nameCString.value) }
         }
-        PropagateBasePtr(value, result)
+        if (let Some(basePtr) <- GetCGContext().GetBasePtrOf(value)) {
+            CJC_ASSERT((GetPointerAddressSpace(value) ?? 0u32) == 1u32)
+            GetCGContext().SetBasePtr(result, basePtr)
+        }
         return result
     }
 
@@ -4199,7 +4202,10 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMSelfhostCreatePointerCast(builder.raw, value, destType, nameCString.value) }
         }
-        PropagateBasePtr(value, result)
+        if (let Some(basePtr) <- GetCGContext().GetBasePtrOf(value)) {
+            CJC_ASSERT((GetPointerAddressSpace(value) ?? 0u32) == 1u32)
+            GetCGContext().SetBasePtr(result, basePtr)
+        }
         return result
     }
 
