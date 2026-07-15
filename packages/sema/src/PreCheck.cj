@@ -9,6 +9,7 @@ import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Position as BasicPosition
 import cjcj::modules.SemaImportManager
+import cjcj::utils.CTYPE_NAME
 import cjcj::utils.FileUtil
 
 private let PRECHECK_CORE_PACKAGE_NAME: String = "std.core"
@@ -1114,5 +1115,32 @@ public func PreCheckFuncRedefinition(pkg: Package, syms: ArrayList<Symbol>, diag
         preCheckFuncRedefinitionForFFI(diag, funcs)
         preCheckFuncStaticConflict(diag, funcs)
         preCheckFuncRedefinitionWithSameSignature(typeManager, diag, funcs)
+    }
+}
+
+extend TypeCheckerImpl {
+    // C++ src/Sema/PreCheck.cpp:1869-1895 TypeCheckerImpl::PreCheckInvalidInherit.
+    public func PreCheckInvalidInherit(ctx: ASTContext, pkg: Package): Unit {
+        if (pkg.TestAttr(Attribute.IMPORTED)) {
+            return
+        }
+        for (sym in GetAllStructDecls(ctx)) {
+            let node = sym.node ?? continue
+            let inheritableDecl = (node as InheritableDecl) ?? continue
+            if (inheritableDecl.astKind == ASTKind.EXTEND_DECL) {
+                continue
+            }
+            let kind = if (inheritableDecl.astKind == ASTKind.INTERFACE_DECL) {
+                BasicDiagKind.sema_interface_is_not_inheritable
+            } else {
+                BasicDiagKind.sema_interface_is_not_implementable
+            }
+            for (inheritedType in inheritableDecl.inheritedTypes) {
+                if (inheritedType.GetTy().getOrThrow().IsCType()) {
+                    Diagnose(diag.getOrThrow(), inheritedType, kind,
+                        args: [BasicDiagArgument(CTYPE_NAME)]).Emit()
+                }
+            }
+        }
     }
 }

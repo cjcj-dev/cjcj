@@ -2220,6 +2220,7 @@ extend TypeChecker {
                         impl.typeManager)
                 }
                 CheckReturnAndJump(ctx)
+                impl.PreCheckInvalidInherit(ctx, pkg)
             }
         }
         impl.typeManager.ClearMapCache()
