@@ -539,6 +539,15 @@ extend ParserImpl {
         return IsIdentifierOrContextualKeyword(Peek().kind)
     }
 
+    public func SkipKeyWordIdentifier(): Bool {
+        for (kind in GetContextualKeyword()) {
+            if (Skip(kind)) {
+                return true
+            }
+        }
+        return false
+    }
+
     public func SeeingIdentifierAndTargetOp(tokenKinds: Array<TokenKind>): Bool {
         if (!IsIdentifierOrContextualKeyword(Peek().kind)) {
             return false
@@ -665,17 +674,18 @@ extend ParserImpl {
     }
 
     public func ExpectIdentifierWithPos(node: Node): SrcIdentifier {
-        let token = Peek()
-        if (SeeingIdentifierLike()) {
-            Next()
-            return ParseIdentifierFromToken(token)
+        if (node.astKind == ASTKind.FUNC_DECL && Skip(TokenKind.MAIN)) {
+            return ParseIdentifierFromToken(lastToken)
+        }
+        if (Skip(TokenKind.IDENTIFIER) || SkipKeyWordIdentifier()) {
+            return ParseIdentifierFromToken(lastToken)
         }
         var pos = INVALID_POSITION
-        if (!node.isBroken) {
+        if (!node.hasBroken) {
             pos = lastToken.Begin()
             DiagExpectedIdentifierWithNode(node)
+            node.hasBroken = true
         }
-        node.isBroken = true
         return SrcIdentifier("", "", pos, pos, false)
     }
 
