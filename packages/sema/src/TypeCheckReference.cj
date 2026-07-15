@@ -478,7 +478,7 @@ private func TypeCheckReferenceCheckInvalidThisOrSuperInCFunc(
     builder.Emit()
 }
 
-private func TypeCheckReferenceRecommendImportForMemberAccess(
+private func RecommendImportForMemberAccess(
     tm: TypeManager,
     importManager: Option<SemaImportManager>,
     ma: MemberAccess,
@@ -507,7 +507,7 @@ private func TypeCheckReferenceRecommendImportForMemberAccess(
     }
 }
 
-public func TypeCheckReferenceDiagMemberAccessNotFound(
+public func DiagMemberAccessNotFound(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
     ma: MemberAccess,
@@ -544,7 +544,7 @@ public func TypeCheckReferenceDiagMemberAccessNotFound(
                 TypeCheckReferenceNominalKindName(baseTy),
                 TypeCheckReferenceDisplayTyName(baseTy)
             ])
-        TypeCheckReferenceRecommendImportForMemberAccess(tm, importManager, ma, builder)
+        RecommendImportForMemberAccess(tm, importManager, ma, builder)
         builder.Emit()
         return
     }
@@ -554,7 +554,7 @@ public func TypeCheckReferenceDiagMemberAccessNotFound(
     let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_undeclared_identifier, ma,
         TypeCheckReferenceFieldRange(ma),
         arguments: [ma.field.Val()])
-    TypeCheckReferenceRecommendImportForMemberAccess(tm, importManager, ma, builder)
+    RecommendImportForMemberAccess(tm, importManager, ma, builder)
     builder.Emit()
 }
 
@@ -855,7 +855,7 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
     importManager!: Option<SemaImportManager> = None
 ): Bool {
     if (targets.isEmpty()) {
-        TypeCheckReferenceDiagMemberAccessNotFound(diag, tm, ma, importManager)
+        DiagMemberAccessNotFound(diag, tm, ma, importManager)
         return false
     }
     var idx: Int64 = 0
@@ -886,7 +886,7 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
         baseTy = baseExpr.GetTy()
     }
     if (!TypeCheckReferenceFilterTargetsInExtend(tm, ma, baseTy, targets)) {
-        TypeCheckReferenceDiagMemberAccessNotFound(diag, tm, ma, importManager)
+        DiagMemberAccessNotFound(diag, tm, ma, importManager)
         return false
     }
     nullableTargets.clear()
@@ -900,7 +900,7 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
     targets.clear()
     for (candidate in nullableTargets) { targets.add(candidate.getOrThrow()) }
     if (targets.isEmpty()) {
-        TypeCheckReferenceDiagMemberAccessNotFound(diag, tm, ma, importManager)
+        DiagMemberAccessNotFound(diag, tm, ma, importManager)
         return false
     }
     var hasCallOrPattern = false
@@ -946,12 +946,12 @@ public func TypeCheckReferenceFilterAndGetTargetsOfObjAccess(
     importManager!: Option<SemaImportManager> = None
 ): Option<Decl> {
     if (targets.isEmpty()) {
-        TypeCheckReferenceDiagMemberAccessNotFound(diag, tm, ma, importManager)
+        DiagMemberAccessNotFound(diag, tm, ma, importManager)
         return None
     }
     let baseExpr = ma.baseExpr.getOrThrow()
     if (!TypeCheckReferenceFilterTargetsInExtend(tm, ma, baseExpr.GetTy(), targets)) {
-        TypeCheckReferenceDiagMemberAccessNotFound(diag, tm, ma, importManager)
+        DiagMemberAccessNotFound(diag, tm, ma, importManager)
         return None
     }
     var idx: Int64 = 0

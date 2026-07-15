@@ -6424,7 +6424,7 @@ extend TypeChecker {
             }
             return Some(candidates[0])
         }
-        TypeCheckReferenceDiagMemberAccessNotFound(impl.diag.getOrThrow(), impl.typeManager, ma, impl.importManager)
+        DiagMemberAccessNotFound(impl.diag.getOrThrow(), impl.typeManager, ma, impl.importManager)
         return None
     }
 
@@ -6476,7 +6476,7 @@ extend TypeChecker {
                 ma.desugarExpr = literalExpr
                 literalExpr.SetTy(ma.GetTy().getOrThrow())
             } else {
-                TypeCheckReferenceDiagMemberAccessNotFound(
+                DiagMemberAccessNotFound(
                     impl.diag.getOrThrow(), impl.typeManager, ma, impl.importManager)
             }
             return None
@@ -6766,7 +6766,7 @@ extend TypeChecker {
             if (isStaticAccess) {
                 DiagForGenericParamMemberNotFound(impl.diag.getOrThrow(), ma, genericsTy.decl.getOrThrow())
             } else {
-                TypeCheckReferenceDiagMemberAccessNotFound(
+                DiagMemberAccessNotFound(
                     impl.diag.getOrThrow(), impl.typeManager, ma, impl.importManager)
             }
             return None
@@ -6863,7 +6863,7 @@ extend TypeChecker {
                         DiagPackageMemberNotFound(ma, (targetOfBaseExpr as PackageDecl).getOrThrow())
                     }
                 } else {
-                    TypeCheckReferenceDiagMemberAccessNotFound(
+                    DiagMemberAccessNotFound(
                         impl.diag.getOrThrow(), impl.typeManager, ma, impl.importManager)
                 }
                 return
