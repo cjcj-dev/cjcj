@@ -5,7 +5,49 @@ import cjcj::ast.*
 import cjcj::sema.*
 import cjcj::sema.InheritanceChecker.*
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::utils.CJC_ASSERT
 import cjcj::utils.CJC_ASSERT_WITH_MSG
+
+private func GetTypeNameFromTy(ty: Ty, forCJMPMatch: Bool, genericIdx: HashMap<Ptr<Ty>, UInt32>): String {
+    CJC_ASSERT(Ty.IsTyCorrect(Some(ty)))
+    if (ty.IsPrimitive()) {
+        return ty.String()
+    } else if (ty.IsGeneric()) {
+        if (forCJMPMatch) {
+            let tyPtr = Ptr<Ty>(ty)
+            CJC_ASSERT(genericIdx.contains(tyPtr))
+            return "T" + genericIdx.get(tyPtr).getOrThrow().toString()
+        } else {
+            return ty.name
+        }
+    } else {
+        var str = ""
+        var first = true
+        for (typeArg in ty.typeArgs) {
+            if (first) {
+                str += GetTypeNameFromTy(typeArg, forCJMPMatch, genericIdx)
+                first = false
+            } else {
+                str += "," + GetTypeNameFromTy(typeArg, forCJMPMatch, genericIdx)
+            }
+        }
+        if (!ty.typeArgs.isEmpty()) {
+            str = "<" + str + ">"
+        }
+        if (forCJMPMatch) {
+            if (ty.kind == TypeKind.TYPE_TUPLE || ty.kind == TypeKind.TYPE_FUNC ||
+                ty.kind == TypeKind.TYPE_VARRAY || ty.kind == TypeKind.TYPE_POINTER ||
+                ty.kind == TypeKind.TYPE_CSTRING) {
+                return ty.name + str
+            }
+            let decl = Ty.GetDeclOfTy(Some(ty))
+            CJC_ASSERT(decl.isSome())
+            return decl.getOrThrow().fullPackageName + "." + ty.name + str
+        } else {
+            return ty.name + str
+        }
+    }
+}
 
 private func IsCommon(node: Node): Bool {
     return node.TestAttr(Attribute.COMMON)
