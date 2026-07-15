@@ -766,13 +766,12 @@ public func TypeCheckDeclCollectNominalMembers(decl: Decl): ArrayList<Decl> {
     return out
 }
 
-public func TypeCheckDeclCheckTypeAliasAccess(diag: BasicDiagnosticEngine, tad: TypeAliasDecl): Bool {
+public func CheckTypeAliasAccess(diag: BasicDiagnosticEngine, tad: TypeAliasDecl): Unit {
     if (tad.TestAttr(Attribute.PRIVATE)) {
-        return true
+        return
     }
     let tadLevel = GetAccessLevel(tad)
     let tadLevelStr = GetAccessLevelStr(tad)
-    var valid = true
     for (typeNode in TypeCheckDeclGetTypeArgsOfType(tad.typeNode)) {
         if (typeNode.astKind != ASTKind.REF_TYPE) {
             continue
@@ -781,52 +780,46 @@ public func TypeCheckDeclCheckTypeAliasAccess(diag: BasicDiagnosticEngine, tad: 
             if (let Some(target) <- refType.ref.target) {
                 if (target.astKind != ASTKind.GENERIC_PARAM_DECL &&
                     !TypeCheckDeclIsCompatibleAccessLevel(tadLevel, GetAccessLevel(target))) {
-                    TypeCheckDeclEmitDiag(diag, tad, BasicDiagKind.sema_typealias_external_refer_internal,
+                    Diagnose(diag, tad, BasicDiagKind.sema_typealias_external_refer_internal,
                         args: [
                             BasicDiagArgument(tadLevelStr),
                             BasicDiagArgument(tad.identifier.Val()),
                             BasicDiagArgument(GetAccessLevelStr(target)),
                             BasicDiagArgument(target.identifier.Val())
-                        ])
-                    valid = false
+                        ]).Emit()
                 }
             }
         }
     }
-    return valid
 }
 
-public func TypeCheckDeclCheckTypeAlias(
+public func CheckTypeAlias(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
     tad: TypeAliasDecl
-): Bool {
+): Unit {
     if (tad.TestAttr(Attribute.IS_CHECK_VISITED)) {
-        return true
+        return
     }
     tad.EnableAttr(Attribute.IS_CHECK_VISITED)
     if (let None <- tad.typeNode) {
-        return false
+        return
     }
     let typeNode = tad.typeNode.getOrThrow()
     if (!Ty.IsTyCorrect(typeNode.GetTy())) {
-        return false
+        return
     }
-    var valid = TypeCheckDeclCheckTypeAliasAccess(diag, tad)
+    CheckTypeAliasAccess(diag, tad)
     if (let Some(_) <- tad.generic) {
         let unusedTys = TypeCheckDeclGetUnusedTysInTypeAlias(tad)
         if (!unusedTys.isEmpty()) {
-            TypeCheckDeclEmitDiag(diag, tad, BasicDiagKind.typealias_unused_type_parameters,
-                args: [BasicDiagArgument(Ty.GetTypesToStr(unusedTys, ","))])
-            valid = false
+            Diagnose(diag, tad, BasicDiagKind.typealias_unused_type_parameters,
+                args: [BasicDiagArgument(Ty.GetTypesToStr(unusedTys, ","))]).Emit()
         }
     }
     if (!typeNode.TestAttr(Attribute.IS_CHECK_VISITED)) {
-        if (!TypeCheckTypeCheckReferenceTypeLegality(diag, tm, typeNode)) {
-            valid = false
-        }
+        let _ = TypeCheckTypeCheckReferenceTypeLegality(diag, tm, typeNode)
     }
-    return valid
 }
 
 private func TypeCheckDeclAddSubtypeToInterface(interfaceDecl: InterfaceDecl, decl: Decl): Unit {

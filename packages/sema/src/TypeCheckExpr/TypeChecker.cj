@@ -3763,6 +3763,9 @@ extend TypeChecker {
         }
         if (let Some(typeAlias) <- (decl as TypeAliasDecl)) {
             SynthesizeTypeNode(ctx, typeAlias.typeNode)
+            if (let Some(diagValue) <- impl.diag) {
+                CheckTypeAlias(diagValue, impl.typeManager, typeAlias)
+            }
             return tyOrInvalid(typeAlias)
         }
         return tyOrInvalid(decl)
