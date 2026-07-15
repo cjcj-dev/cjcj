@@ -100,7 +100,7 @@ private class ToCHIR {
 
     public func Run(): Option<RealCHIRPackage> {
         let chirType = CHIRType(builder, CHIRTypeCache())
-        let ast2chir = FaithfulAST2CHIR(builder, chirType,
+        let ast2chir = FaithfulAST2CHIR(builder, chirType, instance.GetSourceManager(),
             gim: instance.gim,
             importedPkgs: instance.importManager.GetAllImportedPackages(),
             directImportedPkgs: instance.importManager.GetCurImportedPackages(pkg.fullPackageName),

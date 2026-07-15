@@ -4,6 +4,7 @@ import cjcj::basic.Linkage as BasicLinkage
 import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.SourceManager as BasicSourceManager
 import cjcj::option.GlobalOptions
 import cjcj::option.OSType
 import cjcj::option.OutputMode
@@ -60,8 +61,8 @@ import cjcj::ast.IsImpl as AstIsImpl
 import cjcj::ast.IsMirror as AstIsMirror
 import cjcj::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CORE_PACKAGE_NAME, MAIN_INVOKE, ProfileRecorder, STATIC_INIT_FUNC,
-    STATIC_INIT_VAR}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CORE_PACKAGE_NAME, FileUtil, MAIN_INVOKE, ProfileRecorder,
+    STATIC_INIT_FUNC, STATIC_INIT_VAR}
 
 foreign {
     func CJSelfhostStrtoldToFloat32(value: CString): Float64
@@ -1046,6 +1047,7 @@ func TranslateLocationWithoutScope(context: CHIRContext, beginPos: AstPosition,
 public class FaithfulAST2CHIRBuilder {
     private var builder: Option<CHIRBuilder> = None
     private var chirType: Option<CHIRType> = None
+    private var sourceManager: Option<BasicSourceManager> = None
     private var gim: Option<GenericInstantiationManager> = None
     private var overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None
 
@@ -1058,6 +1060,11 @@ public class FaithfulAST2CHIRBuilder {
 
     public func SetCHIRType(value: CHIRType): FaithfulAST2CHIRBuilder {
         chirType = value
+        return this
+    }
+
+    public func SetSourceManager(value: BasicSourceManager): FaithfulAST2CHIRBuilder {
+        sourceManager = value
         return this
     }
 
@@ -1077,6 +1084,7 @@ public class FaithfulAST2CHIRBuilder {
         return FaithfulAST2CHIR(
             builder ?? throw IllegalStateException("FaithfulAST2CHIRBuilder requires CHIRBuilder"),
             chirType ?? throw IllegalStateException("FaithfulAST2CHIRBuilder requires CHIRType"),
+            sourceManager ?? throw IllegalStateException("FaithfulAST2CHIRBuilder requires SourceManager"),
             gim: gim,
             overrideSrcFuncResolver: overrideSrcFuncResolver)
     }
@@ -1085,6 +1093,7 @@ public class FaithfulAST2CHIRBuilder {
 public class FaithfulAST2CHIR {
     private let builder: CHIRBuilder
     private let chirType: CHIRType
+    private let sourceManager: BasicSourceManager
     private let importedPackages: ArrayList<AstPackage>
     private let directImportedPackages: ArrayList<AstPackage>
     private let gim: Option<GenericInstantiationManager>
@@ -1138,7 +1147,7 @@ public class FaithfulAST2CHIR {
     private let maybeUnreachable: HashMap<Block, Terminator> = HashMap<Block, Terminator>()
     private let isComputingAnnos: Bool
 
-    public init(builder: CHIRBuilder, chirType: CHIRType,
+    public init(builder: CHIRBuilder, chirType: CHIRType, sourceManager: BasicSourceManager,
         importedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(),
         directImportedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(),
         gim!: Option<GenericInstantiationManager> = None,
@@ -1147,6 +1156,7 @@ public class FaithfulAST2CHIR {
         diag!: Option<BasicDiagnosticEngine> = None, isComputingAnnos!: Bool = false) {
         this.builder = builder
         this.chirType = chirType
+        this.sourceManager = sourceManager
         this.importedPackages = importedPkgs
         this.directImportedPackages = directImportedPkgs
         this.gim = gim
@@ -1168,6 +1178,7 @@ public class FaithfulAST2CHIR {
             return false
         }
         CurrentPackage().SetPackageAccessLevel(BuildPackageAccessLevel(node.accessible))
+        RegisterAllSources()
         CollectImplicitFuncs(node)
         CollectImportedDecls(node)
         CollectDeclsInCurPkg(node)
@@ -1204,6 +1215,19 @@ public class FaithfulAST2CHIR {
             AST2CHIRCheck()
         }
         return !failure
+    }
+
+    private func RegisterAllSources(): Unit {
+        let sources = sourceManager.GetSources()
+        for ((_, source) in sources) {
+            var filePath = source.path
+            if (let Some(absPath) <- FileUtil.GetAbsPath(source.path)) {
+                filePath = absPath
+            } else {
+                filePath = FileUtil.Normalize(filePath)
+            }
+            builder.context.RegisterSourceFileName(UInt32(source.fileID), filePath)
+        }
     }
 
     public func HasFailed(): Bool {
