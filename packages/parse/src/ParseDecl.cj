@@ -2180,11 +2180,11 @@ extend ParserImpl {
     public func ParsePropDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): PropDecl {
         let ret = PropDecl()
         try (cs = ChainScope(this, ret)) {
-            ApplyModifiersAndAnnotations(ret, modifiers, annos)
             let key = Expect(TokenKind.PROP, "expected 'prop'")
             ret.keywordPos = key.Begin()
-            ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
+            ret.begin = key.Begin()
             CheckDeclarationInScope(scopeKind, DefKind.PROPERTY)
+            ApplyModifiersAndAnnotations(ret, modifiers, annos)
             ret.identifier = ExpectIdentifierWithPos(ret)
             if (Skip(TokenKind.COLON)) {
                 ret.colonPos = lastToken.Begin()
