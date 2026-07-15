@@ -4,7 +4,7 @@ import std.collection.*
 import cjcj::ast.Diagnose
 
 public let TEST_REGISTER_ATTR: String = "TEST_REGISTER"
-public let TEST_ENTRY_NAME: String = "test_entry"
+public let TEST_ENTRY_NAME: String = "$test.entry"
 private let TEST_PACKAGE_SUFFIX: String = "$test"
 
 public func MakeOwnedNodeDecl(kind: ASTKind): Decl {
