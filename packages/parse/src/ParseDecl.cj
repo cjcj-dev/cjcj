@@ -1239,10 +1239,10 @@ extend ParserImpl {
     }
 
     public func ParseFuncParam(): FuncParam {
-        return ParseFuncParam(ScopeKind.UNKNOWN_SCOPE)
+        return ParseParameter(ScopeKind.UNKNOWN_SCOPE)
     }
 
-    public func ParseFuncParam(scopeKind: ScopeKind): FuncParam {
+    public func ParseParameter(scopeKind: ScopeKind): FuncParam {
         let param = FuncParam()
         try (cs = ChainScope(this, param)) {
             ParseAnnotations(param.annotations)
@@ -1283,6 +1283,15 @@ extend ParserImpl {
             param.identifier = ExpectIdentifierWithPos(param)
         }
         param.begin = if (!param.modifiers.isEmpty()) { param.modifiers[0].begin } else { param.identifier.Begin() }
+        if (param.identifier.Empty()) {
+            param.begin = Peek().Begin()
+            param.typeNode = InvalidType(Peek().Begin())
+            param.assignment = InvalidExpr(Peek().Begin())
+            param.end = Peek().End()
+            param.EnableAttr(Attribute.HAS_BROKEN)
+            param.EnableAttr(Attribute.IS_BROKEN)
+            return param
+        }
         if (param.isMemberParam) {
             param.begin = memberStart
         }
@@ -1348,7 +1357,7 @@ extend ParserImpl {
         if (SeeingMacroCallDecl() && !enableCustomAnno) {
             return (ParseMacroCall(scopeKind), meetNamedParameter, meetMemberParams)
         }
-        let param = ParseFuncParam(scopeKind)
+        let param = ParseParameter(scopeKind)
         var namedParameter = meetNamedParameter
         var memberParameter = meetMemberParams
         try (cs = ChainScope(this, param)) {
