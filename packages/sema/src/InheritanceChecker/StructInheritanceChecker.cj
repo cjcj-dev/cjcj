@@ -1946,13 +1946,12 @@ public class StructInheritanceChecker {
             "parent class or interfaces"
         }
         if (child.TestAttr(Attribute.STATIC) != parentDecl.TestAttr(Attribute.STATIC)) {
-            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-            diag.Diagnose(
-                child.begin,
-                child.end,
+            Diagnose(
+                diag,
+                child,
                 DiagKind.sema_static_and_non_static_member_cannot_have_same_name,
                 args: [DiagArgument(childStatic), DiagArgument(name), DiagArgument(parentStatic), DiagArgument(inheritance)]
-            )
+            ).Emit()
             return
         }
         if (child.astKind != parentDecl.astKind) {
@@ -1963,7 +1962,7 @@ public class StructInheritanceChecker {
                     arguments: [DeclKindText(child), name, DeclKindText(parentDecl), inheritance]
                 )
                 builder.AddNote(DeclIdentifierRange(parentDecl), "found conflict here")
-                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                builder.Emit()
             }
         } else if (parentDecl.astKind == ASTKind.VAR_DECL) {
             Diagnose(
@@ -2175,7 +2174,7 @@ public class StructInheritanceChecker {
                                     arguments: ["non-constant function", childFunc.identifier.Val(), "'const' function", inheritance]
                                 )
                                 builder.AddNote(DeclIdentifierRange(parentDecl), "found 'const' function here")
-                                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                                builder.Emit()
                             }
                         }
                         return sameSignature
