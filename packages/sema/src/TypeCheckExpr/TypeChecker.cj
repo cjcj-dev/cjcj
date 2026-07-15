@@ -2427,6 +2427,7 @@ extend TypeChecker {
 
     private func RunLegalityOfUsageCheck(ctx: ASTContext, pkg: Package): Unit {
         if (let Some(diagValue) <- impl.diag) {
+            impl.CheckValueTypeRecursive(pkg)
             CheckClosures(ctx, pkg)
             let result = CheckLegalityOfUsage(
                 ctx, pkg, diagValue, impl.typeManager, impl, opts: GlobalOptions())
@@ -3436,6 +3437,7 @@ extend TypeChecker {
             }
             if (let Some(body) <- classDecl.body) {
                 SynthesizeDeclList(ctx, body.decls)
+                impl.CheckRecursiveConstructorCall(body.decls)
             }
             return tyOrInvalid(classDecl)
         }
@@ -3443,6 +3445,7 @@ extend TypeChecker {
             SynthesizeInheritedTypes(ctx, structDecl)
             if (let Some(body2) <- structDecl.body) {
                 SynthesizeDeclList(ctx, body2.decls)
+                impl.CheckRecursiveConstructorCall(body2.decls)
             }
             return tyOrInvalid(structDecl)
         }

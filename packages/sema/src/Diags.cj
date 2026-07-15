@@ -245,7 +245,7 @@ public func MakeRangeForDeclIdentifier(decl: Decl): BasicRange {
             if (funcDecl.identifier.Begin().IsZero()) {
                 return MakeRange(outerDecl.identifier.Begin(), outerDecl.identifier.End())
             } else if (funcDecl.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
-                return MakeRange(funcDecl.identifier.Begin(), outerDecl.identifier.End())
+                return MakeRange(funcDecl.identifier.Begin(), outerDecl.identifier.Val())
             } else {
                 return MakeRange(funcDecl.identifier.Begin(), funcDecl.identifier.End())
             }
