@@ -513,6 +513,84 @@ extend MPTypeCheckerImpl {
         MergeCJMPNominalsExceptExtension(this, pkg)
     }
 
+    public func PrepareTypeCheck4CJMPExtension(ci: CompilerInstance, scopeManager: ScopeManager,
+        ctx: ASTContext, extends: HashSet<Node>): Unit {
+        if (!compilePlatform) {
+            return
+        }
+        MergeCJMPExtensions(ci, scopeManager, ctx, extends)
+    }
+
+    public func MergeCJMPExtensions(ci: CompilerInstance, scopeManager: ScopeManager,
+        ctx: ASTContext, extends: HashSet<Node>): Unit {
+        let specificExtendDecls = HashMap<String, ExtendDecl>()
+        let commonExtendDecls = HashMap<String, HashSet<Node>>()
+        for (node in extends) {
+            let extendDecl = (node as ExtendDecl).getOrThrow()
+            if (!Ty.IsTyCorrect(extendDecl.GetTy()) ||
+                !extendDecl.TestAnyAttr(Attribute.COMMON, Attribute.SPECIFIC)) {
+                continue
+            }
+
+            let genericIdx = HashMap<Ptr<Ty>, UInt32>()
+            if (let Some(generic) <- extendDecl.generic) {
+                var idx = 0u32
+                for (typeParameter in generic.typeParameters) {
+                    genericIdx[Ptr<Ty>(typeParameter.GetTy().getOrThrow())] = idx
+                    idx++
+                }
+            }
+
+            var key = GetTypeNameFromTy(
+                extendDecl.extendedType.getOrThrow().GetTy().getOrThrow(), true, genericIdx)
+            let inheritedTypeStrings = TreeSet<String>()
+            for (inheritedType in extendDecl.inheritedTypes) {
+                inheritedTypeStrings.add(GetTypeNameFromTy(inheritedType.GetTy().getOrThrow(), true, genericIdx))
+            }
+            if (!inheritedTypeStrings.isEmpty()) {
+                key += "<:"
+            }
+            for (inheritedTypeString in inheritedTypeStrings) {
+                key += inheritedTypeString
+            }
+            if (let Some(generic) <- extendDecl.generic) {
+                key += CalculatedGenericConstraintsStr(generic.genericConstraints, genericIdx)
+            }
+
+            if (extendDecl.TestAttr(Attribute.COMMON)) {
+                if (let Some(specificExtendDecl) <- specificExtendDecls.get(key)) {
+                    MergeCommonIntoSpecific(this, extendDecl, specificExtendDecl)
+                    Collector(scopeManager: scopeManager, enableMacroInLsp: ci.globalOptions.enableMacroInLSP).
+                        BuildSymbolTable(ctx, specificExtendDecl, Some(diag), buildTrie: ci.IsBuildTrie())
+                    UpdateDeclMap(diag, ctx, specificExtendDecl)
+                }
+                if (!commonExtendDecls.contains(key)) {
+                    commonExtendDecls[key] = HashSet<Node>()
+                }
+                commonExtendDecls.get(key).getOrThrow().add(extendDecl)
+            } else {
+                if (specificExtendDecls.contains(key)) {
+                    let builder = DiagnoseRefactor(
+                        diag,
+                        BasicDiagKindRefactor.sema_specific_has_duplicate_extensions,
+                        extendDecl,
+                        arguments: [extendDecl.extendedType.getOrThrow().ToString()])
+                    builder.Emit()
+                    continue
+                } else if (let Some(commonExtends) <- commonExtendDecls.get(key)) {
+                    for (commonNode in commonExtends) {
+                        let commonExtendDecl = (commonNode as ExtendDecl).getOrThrow()
+                        MergeCommonIntoSpecific(this, commonExtendDecl, extendDecl)
+                    }
+                    Collector(scopeManager: scopeManager, enableMacroInLsp: ci.globalOptions.enableMacroInLSP).
+                        BuildSymbolTable(ctx, extendDecl, Some(diag), buildTrie: ci.IsBuildTrie())
+                    UpdateDeclMap(diag, ctx, extendDecl)
+                }
+                specificExtendDecls[key] = extendDecl
+            }
+        }
+    }
+
     public func PreCheck4CJMP(pkg: Package): Unit {
         if (!compileCommon) {
             return

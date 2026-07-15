@@ -10,6 +10,7 @@ import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
 public class CompilerInstance {
     public var typeManager: TypeManager = TypeManager()
     public var globalOptions: OptionGlobalOptions = OptionGlobalOptions()
+    public var buildTrie: Bool = true
     public var frontendDumpActionIsTypeCheck: Bool = false
     public var diag: Option<BasicDiagnosticEngine> = None
     public var importManager: Option<SemaImportManager> = None
@@ -31,6 +32,14 @@ public class CompilerInstance {
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
     public let pkgCtxMap: HashMap<Node, ASTContext> = HashMap<Node, ASTContext>()
     public init() {}
+
+    public func IsBuildTrie(): Bool {
+        return buildTrie
+    }
+
+    public func SetBuildTrie(flag: Bool): Unit {
+        buildTrie = flag
+    }
 
     public func GetASTContextByPackage(pkg: Option<Package>): Option<ASTContext> {
         if (let None <- pkg) {
