@@ -129,9 +129,8 @@ public class EnumSugarChecker {
                     let referenceNeedTypeInfer = !ctx.HasTargetTy(refExpr) && !refExpr.isInFlowExpr
                     if (referenceNeedTypeInfer && refExpr.OuterArgSize() == 0) {
                         if (let Some(diag) <- typeChecker.diag) {
-                            let builder = diag.Diagnose(refExpr.begin, refExpr.end,
-                                BasicDiagKind.sema_generic_type_without_type_argument)
-                            builder.Emit()
+                            Diagnose(diag, refExpr,
+                                BasicDiagKind.sema_generic_type_without_type_argument).Emit()
                         }
                         enumSugarTargets.clear()
                     }
@@ -147,14 +146,14 @@ public class EnumSugarChecker {
         } else {
             refExpr.SetTy(TypeManager.GetInvalidTy())
         }
-        if (refExpr.typeArguments.isEmpty()) {
-            CheckGenericEnumSugarWithoutTypeArgs(target.outerDecl as EnumDecl)
+        let enumDecl = if (let Some(outerDecl) <- target.outerDecl) {
+            outerDecl as EnumDecl
         } else {
-            let enumDecl = if (let Some(outerDecl) <- target.outerDecl) {
-                outerDecl as EnumDecl
-            } else {
-                None<EnumDecl>
-            }
+            None<EnumDecl>
+        }
+        if (refExpr.typeArguments.isEmpty()) {
+            CheckGenericEnumSugarWithoutTypeArgs(enumDecl)
+        } else {
             CheckGenericEnumSugarWithTypeArgs(enumDecl)
         }
         return target

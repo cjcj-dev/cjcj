@@ -5837,20 +5837,6 @@ extend TypeChecker {
                     }
                 }
             }
-            if (let Some(patternGuard) <- matchCase.patternGuard) {
-                let _ = Synthesize(ctx, patternGuard)
-            }
-            if (let Some(action) <- matchCase.exprOrDecls) {
-                let _ = SynthesizeBlock(ctx, action)
-            }
-        }
-        for (matchCaseOther in matchExpr.matchCaseOthers) {
-            if (let Some(matchCaseExpr) <- matchCaseOther.matchExpr) {
-                let _ = Synthesize(ctx, matchCaseExpr)
-            }
-            if (let Some(otherAction) <- matchCaseOther.exprOrDecls) {
-                let _ = SynthesizeBlock(ctx, otherAction)
-            }
         }
         return allBoundDecls
     }

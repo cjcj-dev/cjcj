@@ -190,7 +190,8 @@ public func ChkMatchCasePatGuard(typeManager: TypeManager, ctx: ASTContext, mc: 
 }
 
 public func ChkMatchCaseActions(typeManager: TypeManager, target: Option<Ty>, mc: MatchCase,
-    exprChecker!: Option<ConstPatternExprChecker> = None): Bool {
+    exprChecker!: Option<ConstPatternExprChecker> = None,
+    exprSynthesizer!: Option<(Expr) -> Ty> = None): Bool {
     if (let None <- mc.exprOrDecls) {
         mc.SetTy(TypeManager.GetInvalidTy())
         return false
@@ -212,6 +213,9 @@ public func ChkMatchCaseActions(typeManager: TypeManager, target: Option<Ty>, mc
         }
         mc.SetTy(blockTy)
         return Ty.IsTyCorrect(blockTy)
+    }
+    if (let Some(synthesizer) <- exprSynthesizer) {
+        block.SetTy(synthesizer(block))
     }
     let blockTy = BlockTy(block)
     mc.SetTy(blockTy)
@@ -259,6 +263,7 @@ public func CheckMatchExprNoSelectorExhaustiveness(me: MatchExpr, hasDefault!: B
 public func SynNormalMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
     diag: Option<BasicDiagnosticEngine>, me: MatchExpr,
     exprChecker!: Option<ConstPatternExprChecker> = None,
+    exprSynthesizer!: Option<(Expr) -> Ty> = None,
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Ty {
     if (let None <- me.selector) {
         return InvalidMatchTy(me)
@@ -275,7 +280,8 @@ public func SynNormalMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
         let patternOk = ChkMatchCasePatterns(typeManager, ctx, selectorTy, mc, diag: diag,
             exprChecker: exprChecker, desugarCallExpr: desugarCallExpr)
         let guardOk = ChkMatchCasePatGuard(typeManager, ctx, mc, exprChecker: exprChecker)
-        let actionOk = ChkMatchCaseActions(typeManager, None, mc, exprChecker: exprChecker)
+        let actionOk = ChkMatchCaseActions(typeManager, None, mc, exprChecker: exprChecker,
+            exprSynthesizer: exprSynthesizer)
         if (patternOk && guardOk && actionOk) {
             if (let Some(caseTy) <- mc.GetTy()) {
                 caseTys.add(caseTy)
@@ -325,6 +331,7 @@ public func SynNormalMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
 public func SynQuestSugarMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
     diag: Option<BasicDiagnosticEngine>, me: MatchExpr,
     exprChecker!: Option<ConstPatternExprChecker> = None,
+    exprSynthesizer!: Option<(Expr) -> Ty> = None,
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Ty {
     if (let None <- me.selector) {
         return InvalidMatchTy(me)
@@ -352,7 +359,8 @@ public func SynQuestSugarMatchCaseBody(typeManager: TypeManager, ctx: ASTContext
     secondCase.SetCtxExprForPatterns(selector)
     let _ = ChkMatchCasePatterns(typeManager, ctx, selectorTy, firstCase, exprChecker: exprChecker,
         desugarCallExpr: desugarCallExpr)
-    let _ = ChkMatchCaseActions(typeManager, None, firstCase, exprChecker: exprChecker)
+    let _ = ChkMatchCaseActions(typeManager, None, firstCase, exprChecker: exprChecker,
+        exprSynthesizer: exprSynthesizer)
     if (let Some(firstTy) <- firstCase.GetTy()) {
         let _ = ChkMatchCasePatterns(typeManager, ctx, selectorTy, secondCase, exprChecker: exprChecker,
             desugarCallExpr: desugarCallExpr)
@@ -366,13 +374,14 @@ public func SynQuestSugarMatchCaseBody(typeManager: TypeManager, ctx: ASTContext
 public func SynMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
     diag: Option<BasicDiagnosticEngine>, me: MatchExpr,
     exprChecker!: Option<ConstPatternExprChecker> = None,
+    exprSynthesizer!: Option<(Expr) -> Ty> = None,
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Ty {
     if (SugarKindEq(me.sugarKind, SugarKind.QUEST)) {
         return SynQuestSugarMatchCaseBody(typeManager, ctx, diag, me, exprChecker: exprChecker,
-            desugarCallExpr: desugarCallExpr)
+            exprSynthesizer: exprSynthesizer, desugarCallExpr: desugarCallExpr)
     }
     return SynNormalMatchCaseBody(typeManager, ctx, diag, me, exprChecker: exprChecker,
-        desugarCallExpr: desugarCallExpr)
+        exprSynthesizer: exprSynthesizer, desugarCallExpr: desugarCallExpr)
 }
 
 public func ChkMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,

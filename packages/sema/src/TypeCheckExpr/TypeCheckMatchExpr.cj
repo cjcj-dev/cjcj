@@ -26,6 +26,7 @@ extend TypeChecker {
         if (let Some(_) <- me.selector) {
             return SynMatchExprHasSelector(impl.typeManager, ctx, impl.diag, me,
                 exprChecker: Some({ target: Ty, expr: Expr => Check(ctx, target, expr) }),
+                exprSynthesizer: Some({ expr: Expr => Synthesize(ctx, SynPos.EXPR_ARG, expr) }),
                 desugarCallExpr: Some({ callExpr: CallExpr => DesugarCallExpr(callExpr) }))
         }
         return SynMatchExprNoSelector(ctx, me)
