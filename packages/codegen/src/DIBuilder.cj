@@ -688,6 +688,48 @@ public class DIBuilder {
         return fwdDecl
     }
 
+    private func CreateTupleType(tupleTy: TupleType, boxTy: Option<BoxType>): LLVMMetadataRef {
+        let tupleTypeName = GenerateTypeName(tupleTy)
+        let scope = compileUnit
+        let diFile = defaultFile
+        let llvmType = CGType.GetOrCreate(cgMod, tupleTy).GetLLVMType()
+        let identifier = tupleTy.ToString()
+        let elements = ArrayList<LLVMMetadataRef>() // SmallVector Size: 16.
+        if (CGType.GetOrCreate(cgMod, tupleTy).GetSize().isNone()) {
+            var fwdDecl = createStructType(scope, tupleTypeName, diFile, 0u32, 64u64, 0u32, FlagZero,
+                LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), identifier)
+            let memberType = CreateTypeInfoMember(fwdDecl, diFile)
+            elements.add(memberType)
+            fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(elements))
+            return fwdDecl
+        }
+        // Tuple type is a temporary type which do no have fixed definition file & line.
+        let boxOffset = if (boxTy.isSome()) { 64u64 } else { 0u64 }
+        let totalSize = GetTypeSize(llvmType) + boxOffset
+        var fwdDecl = createStructType(scope, tupleTypeName, diFile, 0u32, totalSize, 0u32, FlagZero,
+            LLVMNullMetadata(), elements, 0u32, LLVMNullMetadata(),
+            "$" + boxOffset.toString() + "_" + identifier)
+        if (let Some(box) <- boxTy) {
+            typeCache[box.objectId] = fwdDecl
+        }
+        let align = cgMod.GetABITypeAlignment(llvmType)
+        var idx: Int64 = 0
+        for (ty in tupleTy.GetElementTypes()) {
+            var elemType = GetOrCreateType(ty)
+            let bitInSize = GetTypeSize(unsafe { LLVMStructGetTypeAtIndex(llvmType, UInt32(idx)) })
+            let offset = cgMod.GetOffsetOfElement(llvmType, UInt32(idx)) * 8u64 + boxOffset
+            if (IsReferenceType(ty, cgMod)) {
+                elemType = CreatePointerType(elemType, sizeInBits: GetSizeInBits(CreateRefType()))
+            }
+            let memberType = createMemberType(fwdDecl, "_" + idx.toString(), diFile, 0u32, bitInSize, align,
+                offset, FlagZero, elemType)
+            elements.add(memberType)
+            idx++
+        }
+        fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(elements))
+        return fwdDecl
+    }
+
     private func GenerateTypeName(ty: Type): String {
         if (ty.IsPrimitive()) {
             return ty.ToString()
