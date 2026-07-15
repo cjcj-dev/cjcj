@@ -3,7 +3,6 @@ package cjcj::macro_pkg
 import std.collection.*
 import std.sort.*
 import cjcj::ast.DiagnoseRefactor
-import cjcj::ast.AddMacroAttr
 import cjcj::ast.AnnotationKind as RealAnnotationKind
 import cjcj::ast.ExprKind as ParsedAstExprKind
 import cjcj::ast.Node as ParsedAstNode
@@ -31,6 +30,7 @@ import cjcj::parse.Modifier as ParsedModifier
 import cjcj::parse.Node as ParsedNode
 import cjcj::parse.Parser as GeneratedParser
 import cjcj::parse.Pattern as ParsedPattern
+import cjcj::parse.ExprKind as ParsedExprKind
 import cjcj::parse.ScopeKind as ParsedScopeKind
 import cjcj::parse.StringKind as ParsedStringKind
 import cjcj::parse.Type as ParsedType
@@ -157,18 +157,6 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall,
     if (tokens.isEmpty()) {
         return out
     }
-    if (ASTKindEquals(macroNode.RequireNode().astKind, ASTKind.MACRO_EXPAND_PARAM)) {
-        let firstParamToken = tokens[0]
-        let paramNode = FuncParam()
-        paramNode.identifier = SrcIdentifier(firstParamToken.Value(), firstParamToken.Begin(), firstParamToken.End(), false)
-        paramNode.begin = firstParamToken.Begin()
-        paramNode.end = tokens[tokens.size - 1].End()
-        paramNode.curFile = macroNode.RequireNode().curFile
-        paramNode.curMacroCall = macroNode.RequireNode()
-        AddMacroAttr(paramNode)
-        out.add(paramNode)
-        return out
-    }
     let parserDiag = ParsedDiagnosticEngine()
     let generatedParser = GeneratedParser(tokens.toArray(), parserDiag, ci.GetDiag().GetSourceManager(),
         attachComment: ci.GetGlobalOptions().enableAddCommentToAst,
@@ -176,12 +164,30 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall,
     generatedParser.SetCompileOptions(ci.GetGlobalOptions())
     generatedParser.SetPrimaryDecl(macroNode.RequireInvocation().outerDeclIdent)
     generatedParser.EnableCustomAnno()
-    let parsedScope = if (ASTKindEquals(macroNode.RequireNode().astKind, ASTKind.MACRO_EXPAND_EXPR)) {
-        ParsedScopeKind.FUNC_BODY
+    let invocation = macroNode.RequireInvocation()
+    let parsedNodes = if (invocation.scopeKind != ScopeKind.UNKNOWN_SCOPE) {
+        generatedParser.ParseNodes(toParsedScopeKind(invocation.scopeKind), macroNode.RequireNode(),
+            modifiers: macroNode.GetModifiers(), annos: macroNode.GetAnnotations())
     } else {
-        toParsedScopeKind(macroNode.RequireInvocation().scopeKind)
+        let parsedExprKind = match (invocation.exprKind) {
+            case ExprKind.ALL => ParsedExprKind.ALL
+            case ExprKind.VAR_INIT => ParsedExprKind.VAR_INIT
+            case ExprKind.INDEX_EXPR => ParsedExprKind.INDEX_EXPR
+            case ExprKind.IF_COND_EXPR => ParsedExprKind.IF_COND_EXPR
+            case ExprKind.WHILE_COND_EXPR => ParsedExprKind.WHILE_COND_EXPR
+            case ExprKind.LET_PATTERN => ParsedExprKind.LET_PATTERN
+            case ExprKind.LEFT_EXPR => ParsedExprKind.LEFT_EXPR
+            case ExprKind.EXPR_IN_TUPLE => ParsedExprKind.EXPR_IN_TUPLE
+            case ExprKind.EXPR_IN_IF_COND_TUPLE => ParsedExprKind.EXPR_IN_IF_COND_TUPLE
+            case ExprKind.EXPR_IN_WHILE_COND_TUPLE => ParsedExprKind.EXPR_IN_WHILE_COND_TUPLE
+            case ExprKind.EXPR_IN_ARRAY => ParsedExprKind.EXPR_IN_ARRAY
+            case ExprKind.EXPR_IN_CALLSUFFIX => ParsedExprKind.EXPR_IN_CALLSUFFIX
+            case ExprKind.EXPR_IN_ANNOTATION => ParsedExprKind.EXPR_IN_ANNOTATION
+            case ExprKind.UNKNOWN_EXPR => ParsedExprKind.UNKNOWN_EXPR
+        }
+        generatedParser.ParseNodes(parsedExprKind, macroNode.RequireNode(), modifiers: macroNode.GetModifiers(),
+            annos: macroNode.GetAnnotations())
     }
-    let parsedNodes = generatedParser.ParseNodes(parsedScope, macroNode.RequireNode())
     let hasParseError = parserDiag.GetErrorCount() > 0u64
     forwardParserDiagnostics(parserDiag, ci.GetDiag())
     if (hasParseError) {

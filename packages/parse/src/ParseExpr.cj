@@ -7,6 +7,7 @@ import cjcj::ast.FuncBody as AstFuncBody
 import cjcj::ast.FuncParam as AstFuncParam
 import cjcj::ast.FuncParamList as AstFuncParamList
 import cjcj::ast.MacroInvocation as AstMacroInvocation
+import cjcj::ast.ScopeKind as AstScopeKind
 import cjcj::ast.VarDecl as AstVarDecl
 import cjcj::utils.CJC_ASSERT
 import cjcj::utils.IF_AVAILABLE
@@ -104,6 +105,7 @@ extend ParserImpl {
             ret.semiPos = Peek().Begin()
         }
         if (let Some(macroExpr) <- (ret as MacroExpandExpr)) {
+            macroExpr.invocation.scopeKind = AstScopeKind.UNKNOWN_SCOPE
             macroExpr.invocation.exprKind = match (ek) {
                 case ExprKind.ALL => AstExprKind.ALL
                 case ExprKind.VAR_INIT => AstExprKind.VAR_INIT
@@ -1210,7 +1212,21 @@ extend ParserImpl {
                 }
                 return ParseDecl(scopeKind)
             }
-            return ParseExpr()
+            let expr = MacroExpandExpr()
+            try (cs = ChainScope(this, expr)) {
+                if (let Some(file) <- currentFile) {
+                    expr.curFile = file
+                    file.hasMacro = true
+                }
+                expr.begin = Peek().Begin()
+                ParseMacroInvocation(scopeKind, ArrayList<Modifier>(), expr.invocation, expr)
+                expr.identifier = Identifier(
+                    expr.invocation.macroCallDiagInfo.identifier,
+                    expr.invocation.macroNamePos,
+                    expr.invocation.macroNamePos + expr.invocation.macroCallDiagInfo.identifier.size)
+                expr.end = if (let Some(inputDecl) <- expr.invocation.decl) { inputDecl.end } else { lastToken.End() }
+            }
+            return ParseExprRhs(0, ParseBaseExpr(expr, ExprKind.ALL), ExprKind.ALL)
         } else if (SeeingMacroCallDecl()) {
             return ParseDecl(scopeKind)
         } else if (CheckIfSeeingDecl(scopeKind)) {

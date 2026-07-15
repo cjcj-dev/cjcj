@@ -35,8 +35,22 @@ public class Parser {
     public func ParseAnnotationArguments(anno: Annotation): Unit { impl.ParseAnnotationArguments(anno) }
     public func ParseCustomAnnotation(): Annotation { return impl.ParseCustomAnnotation() }
 
-    public func ParseNodes(scope: ScopeKind, currentMacroCall: Node): ArrayList<Node> {
-        return impl.ParseNodes(scope, currentMacroCall)
+    public func ParseNodes(
+        scope: ScopeKind,
+        currentMacroCall: Node,
+        modifiers!: ArrayList<Modifier> = ArrayList<Modifier>(),
+        annos!: ArrayList<Annotation> = ArrayList<Annotation>()
+    ): ArrayList<Node> {
+        return impl.ParseNodes(scope, currentMacroCall, modifiers: modifiers, annos: annos)
+    }
+
+    public func ParseNodes(
+        scope: ExprKind,
+        currentMacroCall: Node,
+        modifiers!: ArrayList<Modifier> = ArrayList<Modifier>(),
+        annos!: ArrayList<Annotation> = ArrayList<Annotation>()
+    ): ArrayList<Node> {
+        return impl.ParseNodes(scope, currentMacroCall, modifiers: modifiers, annos: annos)
     }
 
     public func EnableCustomAnno(): Parser {

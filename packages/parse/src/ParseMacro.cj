@@ -2,10 +2,15 @@ package cjcj::parse
 
 import std.collection.*
 import cjcj::ast.AddMacroAttr
+import cjcj::ast.ExprKind as AstExprKind
 import cjcj::ast.Identifier as AstIdentifier
 import cjcj::ast.ScopeKind as AstScopeKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
+
+private let G_EXPRS_CONNECTED_BY_COMMA_LIST: Array<ASTKind> = [
+    ASTKind.ARRAY_LIT, ASTKind.TUPLE_LIT, ASTKind.FUNC_ARG
+]
 
 extend ParserImpl {
     private func IsMacroIdentifierStart(kind: TokenKind): Bool {
@@ -187,6 +192,7 @@ extend ParserImpl {
         }
 
         invocation.scopeKind = ToAstScopeKind(scopeKind)
+        invocation.exprKind = AstExprKind.UNKNOWN_EXPR
         if (Skip(TokenKind.LPAREN)) {
             ParseMacroCallArgsWithParen(invocation)
         } else if (Seeing(TokenKind.LCURL)) {
@@ -451,25 +457,108 @@ extend ParserImpl {
         }
     }
 
-    public func ParseNodes(scope: ScopeKind, currentMacroCall: Node): ArrayList<Node> {
+    public func ParseNodes(
+        scope: ScopeKind,
+        currentMacroCall: Node,
+        modifiers!: ArrayList<Modifier> = ArrayList<Modifier>(),
+        annos!: ArrayList<Annotation> = ArrayList<Annotation>()
+    ): ArrayList<Node> {
+        return ParseNodesImpl(Some(scope), None, currentMacroCall, modifiers, annos)
+    }
+
+    public func ParseNodes(
+        scope: ExprKind,
+        currentMacroCall: Node,
+        modifiers!: ArrayList<Modifier> = ArrayList<Modifier>(),
+        annos!: ArrayList<Annotation> = ArrayList<Annotation>()
+    ): ArrayList<Node> {
+        return ParseNodesImpl(None, Some(scope), currentMacroCall, modifiers, annos)
+    }
+
+    // Mirrors ParseMacro.cpp:57-125; split only to represent C++'s std::variant<ScopeKind, ExprKind>.
+    private func ParseNodesImpl(
+        scopeKind: Option<ScopeKind>,
+        exprKind: Option<ExprKind>,
+        currentMacroCall: Node,
+        modifiers: ArrayList<Modifier>,
+        annos: ArrayList<Annotation>
+    ): ArrayList<Node> {
         currentFile = currentMacroCall.curFile
         curMacroCall = currentMacroCall
-        let invocation = currentMacroCall.GetConstInvocation()
-        CJC_NULLPTR_CHECK(invocation)
-        let out = ArrayList<Node>()
-        while (!Seeing(TokenKind.END)) {
-            let node = if (ScopeKindEquals(scope, ScopeKind.FUNC_BODY)) {
-                ParseExprOrDecl(scope)
+        let invocationOption = currentMacroCall.GetConstInvocation()
+        CJC_NULLPTR_CHECK(invocationOption)
+        let invocation = invocationOption.getOrThrow()
+        var isConnectedByComma = false
+        var isParamMacro = false
+        var namedParameter: Option<FuncParam> = None
+        var memberParam: Option<FuncParam> = None
+        if (let Some(parent) <- invocation.parent) {
+            if (G_EXPRS_CONNECTED_BY_COMMA_LIST.contains(parent.astKind)) {
+                isConnectedByComma = true
+            }
+            if (parent.astKind == ASTKind.FUNC_PARAM_LIST) {
+                isParamMacro = true
+            }
+        }
+        let nodes = ArrayList<Node>()
+        while (!Seeing(TokenKind.END) && !DetectPrematureEnd()) {
+            let hasNode = !nodes.isEmpty()
+            if (hasNode && isConnectedByComma && !Skip(TokenKind.COMMA)) {
+                DiagExpectCharacter("','")
+                break
+            }
+            if (isParamMacro) {
+                isConnectedByComma = Skip(TokenKind.COMMA)
+            }
+            if (scopeKind.isSome() || hasNode) {
+                let hasNLorSEMI = SkipNLOrSemi()
+                if (hasNode && !isConnectedByComma && !hasNLorSEMI) {
+                    DiagExpectSemiOrNewline()
+                    break
+                }
+            }
+            if (Seeing(TokenKind.END)) {
+                break
+            }
+            var node: Node
+            if (let Some(scope) <- scopeKind) {
+                if (isParamMacro) {
+                    let (param, nextNamedParameter, nextMemberParam) =
+                        ParseParamInParamList(scope, namedParameter, memberParam)
+                    node = param
+                    namedParameter = nextNamedParameter
+                    memberParam = nextMemberParam
+                } else if (CheckIfSeeingDecl(scope)) {
+                    node = if (nodes.isEmpty()) {
+                        ParseDecl(scope, modifiers, annos)
+                    } else {
+                        ParseDecl(scope)
+                    }
+                } else {
+                    node = ParseExpr()
+                }
+                if (let Some(ctor) <- (node as FuncDecl)) {
+                    if (ctor.TestAttr(Attribute.CONSTRUCTOR)) {
+                        CheckConstructorBody(ctor, scope, inMacro: true)
+                    }
+                }
             } else {
-                ParseDecl(scope)
+                if (let Some(parent) <- invocation.parent) {
+                    if (let Some(funcArg) <- (parent as FuncArg)) {
+                        if (Seeing(TokenKind.INOUT)) {
+                            funcArg.withInout = true
+                            Next()
+                        }
+                    }
+                }
+                node = ParseExpr(exprKind.getOrThrow())
             }
             node.curFile = currentFile
             node.curMacroCall = curMacroCall
             AddMacroAttr(node)
-            out.add(node)
-            SkipNLOrSemi()
+            nodes.add(node)
         }
-        AttachCommentToNodes(out)
-        return out
+        AttachCommentToNodes(nodes)
+        return nodes
     }
 }
