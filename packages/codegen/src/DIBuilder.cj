@@ -772,6 +772,41 @@ public class DIBuilder {
         return fwdDecl
     }
 
+    private func CreateInterfaceType(interfaceTy: ClassType): LLVMMetadataRef {
+        let interfaceDef = interfaceTy.GetClassDef()
+        let mangledName = interfaceTy.ToString()
+
+        let position = interfaceDef.GetDebugLocation()
+        let name = "Interface$" + GenerateCustomTypeName(interfaceTy, needPkgPrefix: false)
+        let diFile = GetOrCreateFile(position)
+        let classSize = 64u64
+        let defPackage = createNameSpace(compileUnit, interfaceDef.GetPackageName(), false)
+        let tag = DW_TAG_class_type
+        var fwdDecl = createReplaceableCompositeType(tag, name, defPackage, diFile,
+            position.GetBeginPos().line, 0u32, classSize, 0u32, FlagTypePassByReference, mangledName)
+        fwdDecl = replaceWithDistinct(fwdDecl)
+        typeCache[interfaceTy.objectId] = fwdDecl
+        let elements = ArrayList<LLVMMetadataRef>()
+        CreateInheritedInterface(elements, fwdDecl, interfaceTy)
+        let builder = cgMod.GetCGContext().GetCHIRBuilder()
+        for ((method, instFuncType) in GetInstAbstractMethodTypes(interfaceTy, builder)) {
+            let funcIdentifier = GenerateGenericFuncName(method.GetSrcCodeIdentifier(), method.GetGenericTypeParams())
+            let funcName = method.GetIdentifierWithoutPrefix()
+            let hasThis = !method.TestAttr(Attribute.STATIC)
+            let funcType = CreateFuncType(instFuncType, hasThis: hasThis)
+            let flags = FlagPrototyped
+            let spFlags = if (method.TestAttr(Attribute.ABSTRACT)) { SPFlagPureVirtual } else { 0u32 }
+            let funcElement = createFunction(fwdDecl, funcIdentifier, funcName, diFile, 0u32, funcType, 0u32,
+                flags, spFlags)
+            elements.add(funcElement)
+            unsafe { LLVMDIBuilderFinalizeSubprogram(raw, funcElement) }
+        }
+        CreateGetGenericFunc(interfaceTy, fwdDecl, elements)
+        fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(elements))
+        return createTypedef(fwdDecl, GenerateCustomTypeName(interfaceTy, needPkgPrefix: false), diFile, 0u32,
+            compileUnit)
+    }
+
     private func GenerateTypeName(ty: Type): String {
         if (ty.IsPrimitive()) {
             return ty.ToString()
