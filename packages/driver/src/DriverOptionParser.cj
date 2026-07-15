@@ -436,6 +436,10 @@ private func ParseOptionWithValue(opts: DriverOptions, optionArg: OptionArgInsta
         return false
     }
     if (arg == "--common-part-chir") {
+        if (!FileUtil.FileExist(value)) {
+            addFrontendSeparated(opts, arg, value)
+            return true
+        }
         if (let Some(path) <- opts.ValidateInputFilePath(value)) {
             opts.commonPartChirs.add(path)
             addFrontendSeparated(opts, arg, path)
