@@ -259,11 +259,10 @@ private class DeclAttributeCheckerImpl {
         }
         if (let Some(funcDecl) <- (member as FuncDecl)) {
             if (funcDecl.IsFinalizer() && isInheritableClass) {
-                AddIssue(
-                    DeclAttributeIssueKind.FINALIZER_IN_INHERITABLE_CLASS,
-                    funcDecl,
-                    "finalizers are forbidden in open or abstract classes"
-                )
+                Diagnose(diag, funcDecl, BasicDiagKind.sema_finalizer_forbidden_in_class,
+                    args: [BasicDiagArgument(classDecl.identifier.Val()),
+                        BasicDiagArgument(if (classDecl.TestAttr(Attribute.OPEN)) { "open" } else { "abstract" })]
+                ).Emit()
             }
         }
     }
