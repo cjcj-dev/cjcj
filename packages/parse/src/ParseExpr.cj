@@ -404,6 +404,12 @@ extend ParserImpl {
             if (prec < minPrec || prec == INVALID_PRECEDENCE) {
                 return lhs
             }
+            if (newlineSkipped) {
+                let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_nl_warning, firstNLPosition)
+                builder.AddHint(MakeRange(lastNoneNLToken.Begin(), Peek().Begin() + 1),
+                    arguments: [lastNoneNLToken.Value(), op.Value()])
+                builder.Emit()
+            }
             if (ExprKindEquals(ek, ExprKind.LET_PATTERN) && prec < Precedence(TokenKind.RANGEOP)) {
                 return lhs
             }
@@ -559,6 +565,12 @@ extend ParserImpl {
             let prec = Precedence(op.kind)
             if (prec <= prePrec || prec == INVALID_PRECEDENCE) {
                 return lhs
+            }
+            if (newlineSkipped) {
+                let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_nl_warning, firstNLPosition)
+                builder.AddHint(MakeRange(lastNoneNLToken.Begin(), Peek().Begin() + 1),
+                    arguments: [lastNoneNLToken.Value(), op.Value()])
+                builder.Emit()
             }
             if (ExprKindEquals(ek, ExprKind.LET_PATTERN) && prec < Precedence(TokenKind.RANGEOP)) {
                 return lhs
@@ -1721,6 +1733,17 @@ extend ParserImpl {
                 ret.semiPos = Peek().Begin()
             }
         } else {
+            if (newlineSkipped) {
+                let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_nl_warning, firstNLPosition)
+                let tokenValue = if (let Some(combInfo) <- LookupSeenCombinator()) {
+                    combInfo.Value()
+                } else {
+                    Peek().Value()
+                }
+                builder.AddHint(MakeRange(lastNoneNLToken.Begin(), Peek().Begin() + 1),
+                    arguments: [lastNoneNLToken.Value(), tokenValue])
+                builder.Emit()
+            }
             ret.expr = ParseExpr()
         }
         ret.end = ret.expr.getOrThrow().end
