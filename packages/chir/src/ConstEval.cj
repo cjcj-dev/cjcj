@@ -26,7 +26,8 @@ public class ConstEvalPass {
     private func RunInterpreter(pkg: Package, bchirPackages: ArrayList<BCHIR>,
         initFuncsForConstVar: ArrayList<Function>): Unit {
         let packageBchir = BCHIR()
-        CHIR2BCHIR.CompilePackage(pkg, packageBchir, initFuncsForConstVar: initFuncsForConstVar,
+        CHIR2BCHIR.CompilePackage(pkg, packageBchir, diag.GetSourceManager(),
+            initFuncsForConstVar: initFuncsForConstVar,
             forConstEval: true)
         bchirPackages.add(packageBchir)
 

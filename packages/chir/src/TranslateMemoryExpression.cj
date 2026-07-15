@@ -1,10 +1,11 @@
 package cjcj::chir
 
 import cjcj::utils.CJC_ASSERT
+import std.collection.*
 
-public func TranslateMemoryExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
+public func TranslateMemoryExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext, expr: Expression): Unit {
     match (expr.GetExprKind()) {
-        case ExprKind.ALLOCATE => TranslateAllocateExpression(context, expr, false)
+        case ExprKind.ALLOCATE => TranslateAllocateExpression(compiler, context, expr, false)
         case ExprKind.LOAD => context.definition.PushOp(OpCode.DEREF)
         case ExprKind.STORE => context.definition.PushOp(OpCode.ASG)
         case ExprKind.GET_ELEMENT_REF => TranslateGetElementRef(context, expr)
@@ -21,7 +22,8 @@ public func CHIR2BCHIRTranslateStructuredExpression(context: CHIR2BCHIRContext, 
     context.definition.PushOp(OpCode.ABORT)
 }
 
-public func TranslateAllocateExpression(context: CHIR2BCHIRContext, expr: Expression, withException: Bool): Unit {
+public func TranslateAllocateExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
+    expr: Expression, withException: Bool): Unit {
     let maybeType: Option<Type> = if (let Some(allocate) <- (expr as Allocate)) {
         Some(allocate.GetType())
     } else if (let Some(allocateWithException) <- (expr as AllocateWithException)) {
@@ -32,14 +34,17 @@ public func TranslateAllocateExpression(context: CHIR2BCHIRContext, expr: Expres
     if (let Some(ty) <- maybeType) {
         if (let Some(classTy) <- (ty as ClassType)) {
             let opCode = if (withException) { OpCode.ALLOCATE_CLASS_EXC } else { OpCode.ALLOCATE_CLASS }
-            BCHIRPushOpWithName(context.definition, opCode, BCHIRMangledName(classTy.GetClassDef()))
-            context.definition.PushCell(0)
-            context.definition.PushCell(classTy.GetClassDef().GetAllInstanceVarNum())
+            let opIndex = context.definition.NextIndex()
+            compiler.PushOpCodeWithAnnotations(context, opCode, expr,
+                args: ArrayList<Int64>([0, classTy.GetClassDef().GetAllInstanceVarNum()]), storeCodePos: true)
+            context.definition.AddMangledNameAnnotation(opIndex, BCHIRMangledName(classTy.GetClassDef()))
         } else if (let Some(structTy) <- (ty as StructType)) {
-            context.definition.PushOp(if (withException) { OpCode.ALLOCATE_STRUCT_EXC } else { OpCode.ALLOCATE_STRUCT })
-            context.definition.PushCell(structTy.GetStructDef().GetAllInstanceVarNum())
+            compiler.PushOpCodeWithAnnotations(context,
+                if (withException) { OpCode.ALLOCATE_STRUCT_EXC } else { OpCode.ALLOCATE_STRUCT }, expr,
+                args: ArrayList<Int64>([structTy.GetStructDef().GetAllInstanceVarNum()]))
         } else {
-            context.definition.PushOp(if (withException) { OpCode.ALLOCATE_EXC } else { OpCode.ALLOCATE })
+            compiler.PushOpCodeWithAnnotations(context,
+                if (withException) { OpCode.ALLOCATE_EXC } else { OpCode.ALLOCATE }, expr)
         }
     } else {
         context.definition.PushOp(OpCode.NOT_SUPPORTED)

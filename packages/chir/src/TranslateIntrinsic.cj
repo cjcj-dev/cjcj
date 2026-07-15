@@ -43,13 +43,13 @@ public func TranslateIntrinsicExpression(compiler: CHIR2BCHIR, context: CHIR2BCH
             case _ => ()
         }
         if (kind == IntrinsicKind.VARRAY_GET) {
-            context.definition.PushOp(OpCode.VARRAY_GET)
-            context.definition.PushCell(expr.GetNumOfOperands() - 1)
+            compiler.PushOpCodeWithAnnotations(context, OpCode.VARRAY_GET, expr,
+                args: ArrayList<Int64>([expr.GetNumOfOperands() - 1]), storeCodePos: true)
             return
         }
         let opCode = IntrinsicOpCode(auxInfo.size, withException)
-        context.definition.PushOp(opCode)
-        context.definition.PushCell(BCHIRIntrinsic.ToByteCodeKind(kind))
+        compiler.PushOpCodeWithAnnotations(context, opCode, expr,
+            args: ArrayList<Int64>([BCHIRIntrinsic.ToByteCodeKind(kind)]), storeCodePos: true)
         if (auxInfo.size > 0) {
             context.definition.PushCell(auxInfo[0])
             if (auxInfo.size > 1) {

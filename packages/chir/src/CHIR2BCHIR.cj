@@ -1,6 +1,7 @@
 package cjcj::chir
 
 import std.collection.*
+import cjcj::basic.SourceManager as BasicSourceManager
 import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME}
 
 private let CONST_EXCEPTIONS: Array<String> = [
@@ -40,19 +41,22 @@ public class CHIR2BCHIRContext {
 
 public class CHIR2BCHIR {
     let bchir: BCHIR
+    private let sourceManager: BasicSourceManager
     private let isIncremental: Bool
     private let stringMemo: HashMap<String, Int64> = HashMap<String, Int64>()
     private let typeMemo: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
+    private let fileNameToIndexMemoization: HashMap<String, Int64> = HashMap<String, Int64>()
 
-    public init(bchir: BCHIR, isIncremental!: Bool = false) {
+    public init(bchir: BCHIR, sourceManager: BasicSourceManager, isIncremental!: Bool = false) {
         this.bchir = bchir
+        this.sourceManager = sourceManager
         this.isIncremental = isIncremental
     }
 
-    public static func CompilePackage(chirPkg: Package, destBchir: BCHIR,
+    public static func CompilePackage(chirPkg: Package, destBchir: BCHIR, sourceManager: BasicSourceManager,
         initFuncsForConstVar!: ArrayList<Function> = ArrayList<Function>(), forConstEval!: Bool = false,
         incremental!: Bool = false): Unit {
-        let compiler = CHIR2BCHIR(destBchir, isIncremental: incremental)
+        let compiler = CHIR2BCHIR(destBchir, sourceManager, isIncremental: incremental)
         compiler.TranslatePackage(chirPkg, initFuncsForConstVar: initFuncsForConstVar, forConstEval: forConstEval)
     }
 
@@ -300,12 +304,74 @@ public class CHIR2BCHIR {
         }
         match (expr.GetExprMajorKind()) {
             case ExprMajorKind.TERMINATOR => TranslateTerminatorExpression(this, context, expr)
-            case ExprMajorKind.UNARY_EXPR => TranslateUnaryExpression(context, expr)
-            case ExprMajorKind.BINARY_EXPR => TranslateBinaryExpression(context, expr)
-            case ExprMajorKind.MEMORY_EXPR => TranslateMemoryExpression(context, expr)
+            case ExprMajorKind.UNARY_EXPR => TranslateUnaryExpression(this, context, expr)
+            case ExprMajorKind.BINARY_EXPR => TranslateBinaryExpression(this, context, expr)
+            case ExprMajorKind.MEMORY_EXPR => TranslateMemoryExpression(this, context, expr)
             case ExprMajorKind.STRUCTURED_CTRL_FLOW_EXPR => CHIR2BCHIRTranslateStructuredExpression(context, expr)
             case ExprMajorKind.OTHERS => CHIR2BCHIRTranslateOtherExpression(this, context, expr)
         }
+    }
+
+    func PushArgs(context: CHIR2BCHIRContext, args: ArrayList<Int64>): Unit {
+        for (arg in args) {
+            context.definition.PushCell(arg)
+        }
+    }
+
+    func CHIRPos2BCHIRPos(loc: DebugLocation): BCHIRCodePosition {
+        let fileName = sourceManager.GetSource(UInt64(loc.GetFileID())).path
+        let fileIndex = if (let Some(index) <- fileNameToIndexMemoization.get(fileName)) {
+            index
+        } else {
+            let index = bchir.AddFileName(fileName)
+            fileNameToIndexMemoization[fileName] = index
+            index
+        }
+        return BCHIRCodePosition(fileIndex, Int64(loc.GetBeginPos().line), Int64(loc.GetBeginPos().column))
+    }
+
+    func AddAnnotations(context: CHIR2BCHIRContext, expr: Expression, opCodeIndex: Int64,
+        storeMangledName!: Bool = false, storeCodePos!: Bool = false): Unit {
+        if (storeMangledName) {
+            if (let Some(result) <- expr.GetResult()) {
+                context.definition.AddMangledNameAnnotation(opCodeIndex, result.GetIdentifierWithoutPrefix())
+            }
+        }
+        if (storeCodePos) {
+            context.definition.AddCodePositionAnnotation(opCodeIndex, CHIRPos2BCHIRPos(expr.GetDebugLocation()))
+        }
+    }
+
+    func AddAnnotations(context: CHIR2BCHIRContext, value: Value, opCodeIndex: Int64,
+        storeMangledName!: Bool = false, storeCodePos!: Bool = false): Unit {
+        if (storeMangledName) {
+            context.definition.AddMangledNameAnnotation(opCodeIndex, value.GetIdentifierWithoutPrefix())
+        }
+        if (storeCodePos) {
+            context.definition.AddCodePositionAnnotation(opCodeIndex, CHIRPos2BCHIRPos(value.GetDebugLocation()))
+        }
+    }
+
+    func PushOpCodeWithAnnotations(context: CHIR2BCHIRContext, opCode: OpCode, expr: Expression,
+        args!: ArrayList<Int64> = ArrayList<Int64>(), storeMangledName!: Bool = false,
+        storeCodePos!: Bool = false): Unit {
+        let opIndex = context.definition.NextIndex()
+        context.definition.PushOp(opCode)
+        if (storeMangledName || storeCodePos) {
+            AddAnnotations(context, expr, opIndex, storeMangledName: storeMangledName, storeCodePos: storeCodePos)
+        }
+        PushArgs(context, args)
+    }
+
+    func PushOpCodeWithAnnotations(context: CHIR2BCHIRContext, opCode: OpCode, value: Value,
+        args!: ArrayList<Int64> = ArrayList<Int64>(), storeMangledName!: Bool = false,
+        storeCodePos!: Bool = false): Unit {
+        let opIndex = context.definition.NextIndex()
+        context.definition.PushOp(opCode)
+        if (storeMangledName || storeCodePos) {
+            AddAnnotations(context, value, opIndex, storeMangledName: storeMangledName, storeCodePos: storeCodePos)
+        }
+        PushArgs(context, args)
     }
 
     public func TranslateLiteralValue(context: CHIR2BCHIRContext, literal: LiteralValue): Unit {

@@ -1,6 +1,7 @@
 package cjcj::chir
 
 import cjcj::utils.{OverflowStrategy, OverflowStrategyIndex}
+import std.collection.*
 
 public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
@@ -15,10 +16,10 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
             context.definition.PushOp(OpCode.TUPLE)
             context.definition.PushCell(expr.GetNumOfOperands())
         case ExprKind.FIELD => TranslateField(context, expr)
-        case ExprKind.APPLY => TranslateApplyExpression(context, expr)
-        case ExprKind.INVOKE => TranslateInvokeExpression(context, expr, false)
+        case ExprKind.APPLY => TranslateApplyExpression(compiler, context, expr)
+        case ExprKind.INVOKE => TranslateInvokeExpression(compiler, context, expr, false)
         case ExprKind.INSTANCEOF => TranslateInstanceOf(context, expr)
-        case ExprKind.TYPECAST => TranslateTypecastExpression(context, expr, false)
+        case ExprKind.TYPECAST => TranslateTypecastExpression(compiler, context, expr, false)
         case ExprKind.INTRINSIC => TranslateIntrinsicExpression(compiler, context, expr, false)
         case ExprKind.GET_EXCEPTION => context.definition.PushOp(OpCode.GET_EXCEPTION)
         case ExprKind.RAW_ARRAY_ALLOCATE => context.definition.PushOp(OpCode.ALLOCATE_RAW_ARRAY)
@@ -39,20 +40,22 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
     }
 }
 
-private func TranslateApplyExpression(context: CHIR2BCHIRContext, expr: Expression): Unit {
+private func TranslateApplyExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
+    expr: Expression): Unit {
     if (let Some(apply) <- (expr as Apply)) {
         let callee = apply.GetCallee()
         if (callee.GetSrcCodeIdentifier() == "std.core:CJ_CORE_CanUseSIMD" ||
             callee.GetSrcCodeIdentifier() == "CJ_CORE_CanUseSIMD" ||
             callee.GetIdentifier().contains("CJ_CORE_CanUseSIMD")) {
-            context.definition.PushOp(OpCode.INTRINSIC1)
-            context.definition.PushCell(BCHIRIntrinsic.ToByteCodeKind(IntrinsicKind.CJ_CORE_CAN_USE_SIMD))
-            context.definition.PushCell(0xffffffff)
+            compiler.PushOpCodeWithAnnotations(context, OpCode.INTRINSIC1, expr,
+                args: ArrayList<Int64>([
+                    BCHIRIntrinsic.ToByteCodeKind(IntrinsicKind.CJ_CORE_CAN_USE_SIMD), 0xffffffff
+                ]), storeCodePos: true)
             return
         }
     }
-    context.definition.PushOp(OpCode.APPLY)
-    context.definition.PushCell(expr.GetNumOfOperands())
+    compiler.PushOpCodeWithAnnotations(context, OpCode.APPLY, expr,
+        args: ArrayList<Int64>([expr.GetNumOfOperands()]), storeCodePos: true)
 }
 
 private func TranslateField(context: CHIR2BCHIRContext, expr: Expression): Unit {
@@ -75,25 +78,29 @@ private func TranslateField(context: CHIR2BCHIRContext, expr: Expression): Unit 
     }
 }
 
-public func TranslateInvokeExpression(context: CHIR2BCHIRContext, expr: Expression, withException: Bool): Unit {
+public func TranslateInvokeExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
+    expr: Expression, withException: Bool): Unit {
     if (let Some(invoke) <- (expr as Invoke)) {
         let opCode = if (withException) { OpCode.INVOKE_EXC } else { OpCode.INVOKE }
-        BCHIRPushOpWithName(context.definition, opCode,
+        let opIndex = context.definition.NextIndex()
+        compiler.PushOpCodeWithAnnotations(context, opCode, expr,
+            args: ArrayList<Int64>([expr.GetNumOfOperands(), 0]), storeCodePos: true)
+        context.definition.AddMangledNameAnnotation(opIndex,
             MangleMethodName(invoke.GetMethodName(), invoke.GetMethodType(), omitFirstArg: true))
-        context.definition.PushCell(expr.GetNumOfOperands())
-        context.definition.PushCell(0)
     } else if (let Some(invokeWithException) <- (expr as InvokeWithException)) {
         let opCode = if (withException) { OpCode.INVOKE_EXC } else { OpCode.INVOKE }
-        BCHIRPushOpWithName(context.definition, opCode,
-            MangleMethodName(invokeWithException.GetMethodName(), invokeWithException.GetMethodType(), omitFirstArg: true))
-        context.definition.PushCell(expr.GetNumOfOperands())
-        context.definition.PushCell(0)
+        let opIndex = context.definition.NextIndex()
+        compiler.PushOpCodeWithAnnotations(context, opCode, expr,
+            args: ArrayList<Int64>([expr.GetNumOfOperands(), 0]), storeCodePos: true)
+        context.definition.AddMangledNameAnnotation(opIndex, MangleMethodName(invokeWithException.GetMethodName(),
+            invokeWithException.GetMethodType(), omitFirstArg: true))
     } else {
         context.definition.PushOp(OpCode.NOT_SUPPORTED)
     }
 }
 
-public func TranslateTypecastExpression(context: CHIR2BCHIRContext, expr: Expression, withException: Bool): Unit {
+public func TranslateTypecastExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
+    expr: Expression, withException: Bool): Unit {
     let sourceTy: Option<Type> = if (let Some(typeCast) <- (expr as TypeCast)) {
         typeCast.GetSourceTy()
     } else if (let Some(typeCastWithException) <- (expr as TypeCastWithException)) {
@@ -111,15 +118,16 @@ public func TranslateTypecastExpression(context: CHIR2BCHIRContext, expr: Expres
     if (let Some(src) <- sourceTy) {
         if (let Some(dst) <- targetTy) {
             if (src.IsPrimitive() && dst.IsPrimitive()) {
-                context.definition.PushOp(if (withException) { OpCode.TYPECAST_EXC } else { OpCode.TYPECAST })
-                context.definition.PushCell(BCHIRTypeKindCell(src))
-                context.definition.PushCell(BCHIRTypeKindCell(dst))
                 let overflowStrategy = if (let Some(typeCast) <- (expr as TypeCast)) {
                     typeCast.GetOverflowStrategy()
                 } else {
                     OverflowStrategy.THROWING
                 }
-                context.definition.PushCell(OverflowStrategyIndex(overflowStrategy))
+                compiler.PushOpCodeWithAnnotations(context,
+                    if (withException) { OpCode.TYPECAST_EXC } else { OpCode.TYPECAST }, expr,
+                    args: ArrayList<Int64>([
+                        BCHIRTypeKindCell(src), BCHIRTypeKindCell(dst), OverflowStrategyIndex(overflowStrategy)
+                    ]))
             }
         }
     }

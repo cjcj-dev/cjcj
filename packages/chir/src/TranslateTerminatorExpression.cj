@@ -126,14 +126,14 @@ private func TranslateRaiseTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRC
 
 private func TranslateApplyWithExceptionTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
-    context.definition.PushOp(OpCode.APPLY_EXC)
-    context.definition.PushCell(expr.GetNumOfOperands())
+    compiler.PushOpCodeWithAnnotations(context, OpCode.APPLY_EXC, expr,
+        args: ArrayList<Int64>([expr.GetNumOfOperands()]), storeCodePos: true)
     TranslateTryTerminatorJumps(compiler, context, expr.AsTerminator().getOrThrow())
 }
 
 private func TranslateInvokeWithExceptionTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
-    TranslateInvokeExpression(context, expr, true)
+    TranslateInvokeExpression(compiler, context, expr, true)
     TranslateTryTerminatorJumps(compiler, context, expr.AsTerminator().getOrThrow())
 }
 
@@ -145,9 +145,11 @@ private func TranslateIntOpWithException(compiler: CHIR2BCHIR, context: CHIR2BCH
             context.definition.PushOp(OpCode.NOT_SUPPORTED)
             return
         }
-        context.definition.PushOp(opCode)
-        context.definition.PushCell(BCHIRTypeKindCell(intOp.GetOperand(0).GetType()))
-        context.definition.PushCell(OverflowStrategyIndex(OverflowStrategy.THROWING))
+        compiler.PushOpCodeWithAnnotations(context, opCode, expr,
+            args: ArrayList<Int64>([
+                BCHIRTypeKindCell(intOp.GetOperand(0).GetType()),
+                OverflowStrategyIndex(OverflowStrategy.THROWING)
+            ]), storeCodePos: true)
         if (opCode == OpCode.BIN_LSHIFT_EXC || opCode == OpCode.BIN_RSHIFT_EXC) {
             if (let Some(rhs) <- intOp.GetRHSOperand()) {
                 context.definition.PushCell(BCHIRTypeKindCell(rhs.GetType()))
@@ -163,7 +165,7 @@ private func TranslateIntOpWithException(compiler: CHIR2BCHIR, context: CHIR2BCH
 
 private func TranslateAllocateWithExceptionTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
-    TranslateAllocateExpression(context, expr, true)
+    TranslateAllocateExpression(compiler, context, expr, true)
     TranslateTryTerminatorJumps(compiler, context, expr.AsTerminator().getOrThrow())
 }
 
