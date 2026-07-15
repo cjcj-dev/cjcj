@@ -18,6 +18,7 @@
   "cjcj::basic" = { path = "../basic" }
   "cjcj::flatbuffers" = { path = "../flatbuffers" }
   "cjcj::incremental_compilation" = { path = "../incremental_compilation" }
+  "cjcj::mangle" = { path = "../mangle" }
   "cjcj::modules" = { path = "../modules" }
   "cjcj::option" = { path = "../option" }
   "cjcj::sema" = { path = "../sema" }

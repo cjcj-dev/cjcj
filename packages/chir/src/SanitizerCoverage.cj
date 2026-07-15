@@ -2,8 +2,11 @@ package cjcj::chir
 
 import std.collection.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.Linkage as BasicLinkage
+import cjcj::mangle.{MANGLE_CANGJIE_PREFIX, MANGLE_FUNC_PARAM_TYPE_PREFIX, MANGLE_GLOBAL_FILE_INIT_PREFIX,
+    MANGLE_GLOBAL_VARIABLE_INIT_PREFIX, MANGLE_VOID_TY_SUFFIX, MangleName}
 import cjcj::option.{GlobalOptions, SanitizerCoverageOptions, SanitizerCoverageType}
-import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK, OverflowStrategy}
+import cjcj::utils.{CJC_ASSERT, OverflowStrategy}
 
 // C++: CHIR/Transformation/SanitizerCoverage.cpp:23-37.
 private func CreateNonMemberApply(resultTy: Type, callee: Value, args: ArrayList<Value>, parent: Block,
@@ -743,5 +746,192 @@ public class SanitizerCoverage {
         function.EnableAttr(Attribute.FOREIGN)
         funcBag[globalFuncName] = function
         return function
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:1036-1049.
+    private func CreateInitFunc(name: String, funcType: FuncType, loc: DebugLocation): Function {
+        let `func` = builder.CreateFunction(funcType, name, srcCodeIdentifier: name, packageName: packageName)
+        `func`.SetDebugLocation(loc)
+        let body = builder.CreateBlockGroup(`func`)
+        `func`.InitBody(body)
+        `func`.EnableAttr(Attribute.NO_INLINE)
+        `func`.EnableAttr(Attribute.NO_REFLECT_INFO)
+        `func`.EnableAttr(Attribute.COMPILER_ADD)
+        `func`.SetFuncKind(FuncKind.GLOBALVAR_INIT)
+        `func`.SetLinkTypeInfo(BasicLinkage.INTERNAL)
+        return `func`
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:1051-1079.
+    private func CreateArrayInitFunc(initItemName: String, initType: Type): Function {
+        let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetVoidTy())
+        let initName = MANGLE_CANGJIE_PREFIX + MANGLE_GLOBAL_VARIABLE_INIT_PREFIX + MangleName("default") +
+            MangleName("0." + SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(initItemName).getOrThrow()) +
+            MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX
+        let `func` = CreateInitFunc(initName, funcTy, INVALID_LOCATION)
+        let body = `func`.GetBody().getOrThrow()
+        let block0 = builder.CreateBlock(body)
+        body.SetEntryBlock(block0)
+        let counterVal = builder.CreateConstant(builder.context.GetUInt64Ty(), IntLiteral(UInt64(bbCounter)), block0)
+        counterVal.SetDebugLocation(INVALID_LOCATION)
+        block0.AppendExpression(counterVal)
+        let cPointTy = builder.context.GetCPointerTy(initType)
+        let guardCtorTy = builder.context.GetFuncTy(ArrayList<Type>([builder.context.GetUInt64Ty()]),
+            cPointTy, isCFunc: true)
+        let guardCtorFunc = GenerateForeignFunc(initItemName, INVALID_LOCATION, guardCtorTy, packName: packageName)
+        let apply = CreateNonMemberApply(cPointTy, guardCtorFunc,
+            ArrayList<Value>([counterVal.GetResult().getOrThrow()]), block0, builder, loc: INVALID_LOCATION)
+        block0.AppendExpression(apply)
+        let globalVal = GetGlobalVar(SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(initItemName).getOrThrow()).getOrThrow()
+        let store = builder.CreateStore(apply.GetResult().getOrThrow(), globalVal, block0)
+        store.SetDebugLocation(INVALID_LOCATION)
+        block0.AppendExpression(store)
+        globalVal.SetInitFunc(`func`)
+        let exit = builder.CreateExit(None, block0)
+        exit.SetDebugLocation(INVALID_LOCATION)
+        return `func`
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:1081-1149.
+    private func CreatePCTableInitFunc(): Function {
+        let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetVoidTy())
+        let `func` = CreateInitFunc(MANGLE_CANGJIE_PREFIX + MANGLE_GLOBAL_VARIABLE_INIT_PREFIX +
+            MangleName("default") + MangleName("0.pc_table") + MANGLE_FUNC_PARAM_TYPE_PREFIX +
+            MANGLE_VOID_TY_SUFFIX, funcTy, INVALID_LOCATION)
+        let body = `func`.GetBody().getOrThrow()
+        let block0 = builder.CreateBlock(body)
+        body.SetEntryBlock(block0)
+        let mallocStringFunc = GetImportedFunc(FUNC_MANGLE_NAME_MALLOC_CSTRING)
+        let funcSize = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(Int64(pcArray.size)), block0)
+        funcSize.SetDebugLocation(INVALID_LOCATION)
+        block0.AppendExpression(funcSize)
+        let stringTy = builder.context.GetStringTy().getOrThrow()
+        let packExpr = builder.CreateConstant(stringTy, StringLiteral(packageName), block0)
+        packExpr.SetDebugLocation(INVALID_LOCATION)
+        block0.AppendExpression(packExpr)
+        let libc = builder.GetStructType("std.core", "LibC").getOrThrow()
+        let libcRef = builder.context.GetRefTy(libc)
+        let packCString = CreateMemberApply(builder.context.GetCStringTy(), mallocStringFunc, libcRef,
+            ArrayList<Value>([packExpr.GetResult().getOrThrow()]), block0, builder, loc: INVALID_LOCATION)
+        block0.AppendExpression(packCString)
+        let funcNameArray = ArrayList<Value>()
+        let fileNameArray = ArrayList<Value>()
+        let lineNumberArray = ArrayList<Value>()
+        for ((pcName, pcLocation) in pcArray) {
+            let funcName = builder.CreateConstant(stringTy, StringLiteral(pcName), block0)
+            funcName.SetDebugLocation(INVALID_LOCATION)
+            block0.AppendExpression(funcName)
+            let cString = CreateMemberApply(builder.context.GetCStringTy(), mallocStringFunc, libcRef,
+                ArrayList<Value>([funcName.GetResult().getOrThrow()]), block0, builder, loc: INVALID_LOCATION)
+            block0.AppendExpression(cString)
+            funcNameArray.add(cString.GetResult().getOrThrow())
+            let fileName = builder.CreateConstant(stringTy,
+                StringLiteral(builder.context.GetSourceFileName(pcLocation.GetFileID())), block0)
+            fileName.SetDebugLocation(INVALID_LOCATION)
+            block0.AppendExpression(fileName)
+            let fileNameCString = CreateMemberApply(builder.context.GetCStringTy(), mallocStringFunc, libcRef,
+                ArrayList<Value>([fileName.GetResult().getOrThrow()]), block0, builder, loc: INVALID_LOCATION)
+            block0.AppendExpression(fileNameCString)
+            fileNameArray.add(fileNameCString.GetResult().getOrThrow())
+            let lineId = builder.CreateConstant(builder.context.GetUInt64Ty(),
+                IntLiteral(UInt64(pcLocation.GetBeginPos().line)), block0)
+            lineId.SetDebugLocation(INVALID_LOCATION)
+            block0.AppendExpression(lineId)
+            lineNumberArray.add(lineId.GetResult().getOrThrow())
+        }
+        let rawDataAcquireString = CreateRawDataAcquire(builder.context.GetCStringTy(), funcNameArray,
+            funcSize.GetResult().getOrThrow(), block0)
+        let rawDataAcquireFileName = CreateRawDataAcquire(builder.context.GetCStringTy(), fileNameArray,
+            funcSize.GetResult().getOrThrow(), block0)
+        let rawDataAcquireLine = CreateRawDataAcquire(builder.context.GetUInt64Ty(), lineNumberArray,
+            funcSize.GetResult().getOrThrow(), block0)
+        let paramTypeList = ArrayList<Type>([builder.context.GetCStringTy(), builder.context.GetUInt64Ty(),
+            rawDataAcquireString.GetResult().getOrThrow().GetType().getOrThrow(),
+            rawDataAcquireFileName.GetResult().getOrThrow().GetType().getOrThrow(),
+            rawDataAcquireLine.GetResult().getOrThrow().GetType().getOrThrow()])
+        let pcInitType = builder.context.GetFuncTy(paramTypeList, builder.context.GetUnitTy(), isCFunc: true)
+        let pcInitFunc = GenerateForeignFunc(SanCovCreatePCTable, INVALID_LOCATION, pcInitType,
+            packName: packageName)
+        let typecast = builder.CreateTypeCast(builder.context.GetUInt64Ty(), funcSize.GetResult().getOrThrow(), block0)
+        block0.AppendExpression(typecast)
+        let pcInitApply = CreateNonMemberApply(builder.context.GetUnitTy(), pcInitFunc,
+            ArrayList<Value>([packCString.GetResult().getOrThrow(), typecast.GetResult().getOrThrow(),
+                rawDataAcquireString.GetResult().getOrThrow(), rawDataAcquireFileName.GetResult().getOrThrow(),
+                rawDataAcquireLine.GetResult().getOrThrow()]), block0, builder, loc: INVALID_LOCATION)
+        block0.AppendExpression(pcInitApply)
+        let exit = builder.CreateExit(None, block0)
+        exit.SetDebugLocation(INVALID_LOCATION)
+        return `func`
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:1151-1168.
+    private func CreateRawDataAcquire(`type`: Type, list: ArrayList<Value>, size: Value,
+        block: Block): Intrinsic {
+        let arrayTy = builder.context.GetRefTy(builder.context.GetRawArrayTy(`type`))
+        let expr = builder.CreateRawArrayAllocate(arrayTy, `type`, size, block)
+        block.AppendExpression(expr)
+        let arrayVar = expr.GetResult().getOrThrow()
+        let literalInit = builder.CreateRawArrayLiteralInit(builder.context.GetUnitTy(), arrayVar, list, block)
+        block.AppendExpression(literalInit)
+        let cPointerTy = builder.context.GetCPointerTy(`type`)
+        let callContext = IntrisicCallContext(kind: IntrinsicKind.ARRAY_ACQUIRE_RAW_DATA,
+            args: ArrayList<Value>([arrayVar]), instTypeArgs: ArrayList<Type>([`type`]))
+        let rawDataAcquire = builder.CreateIntrinsic(cPointerTy, callContext, block)
+        rawDataAcquire.SetDebugLocation(INVALID_LOCATION)
+        block.AppendExpression(rawDataAcquire)
+        return rawDataAcquire
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:1170-1192.
+    private func CreateTopLevelInitFunc(initFuncs: ArrayList<Function>, globalInitFunc: Function): Unit {
+        if (initFuncs.isEmpty()) {
+            return
+        }
+        let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetVoidTy())
+        let initName = MANGLE_CANGJIE_PREFIX + MANGLE_GLOBAL_FILE_INIT_PREFIX + MangleName("default") +
+            MangleName("0.sancov") + MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX
+        let initFunc = CreateInitFunc(initName, funcTy, INVALID_LOCATION)
+        let body = initFunc.GetBody().getOrThrow()
+        let block0 = builder.CreateBlock(body)
+        body.SetEntryBlock(block0)
+        for (initFuncItem in initFuncs) {
+            let apply = CreateNonMemberApply(initFuncItem.GetReturnType().getOrThrow(), initFuncItem,
+                ArrayList<Value>(), block0, builder, loc: INVALID_LOCATION)
+            block0.AppendExpression(apply)
+        }
+        let exit = builder.CreateExit(None, block0)
+        exit.SetDebugLocation(INVALID_LOCATION)
+        let initExpr = CreateNonMemberApply(builder.context.GetVoidTy(), initFunc,
+            ArrayList<Value>(), globalInitFunc.GetEntryBlock().getOrThrow(), builder, loc: INVALID_LOCATION)
+        AddExpressionsToGlobalInitFunc(globalInitFunc, ArrayList<Expression>([initExpr]))
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:1194-1225.
+    private func GenerateInitFunc(globalInitFunc: Function, isDebug: Bool): Unit {
+        let needInsertArray = sanCovOption.inlineBoolFlag || sanCovOption.inline8bitCounters ||
+            sanCovOption.tracePCGuard
+        if (!needInsertArray) {
+            return
+        }
+        let initFuncs = ArrayList<Function>()
+        if (sanCovOption.inlineBoolFlag &&
+            GetGlobalVar(SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(SanCovBoolFlagInitName).getOrThrow()).isSome()) {
+            initFuncs.add(CreateArrayInitFunc(SanCovBoolFlagInitName, builder.context.GetBoolTy()))
+        }
+        if (sanCovOption.inline8bitCounters &&
+            GetGlobalVar(SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(SanCovCharArrayInitName).getOrThrow()).isSome()) {
+            initFuncs.add(CreateArrayInitFunc(SanCovCharArrayInitName, builder.context.GetUInt8Ty()))
+        }
+        if (sanCovOption.tracePCGuard && funcBag.contains(SAN_COV_PC_GUARD) &&
+            GetGlobalVar(SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(SanCovUInt32ArrayInitName).getOrThrow()).isSome()) {
+            initFuncs.add(CreateArrayInitFunc(SanCovUInt32ArrayInitName, builder.context.GetUInt32Ty()))
+        }
+        if (sanCovOption.pcTable && !pcArray.isEmpty()) {
+            initFuncs.add(CreatePCTableInitFunc())
+            if (isDebug) {
+                println("[SanitizerCoverage] Add trace pc table" + ToPosInfo(INVALID_LOCATION) + ".")
+            }
+        }
+        CreateTopLevelInitFunc(initFuncs, globalInitFunc)
     }
 }
