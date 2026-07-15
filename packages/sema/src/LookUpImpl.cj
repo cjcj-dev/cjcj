@@ -909,9 +909,6 @@ private func lookupImpl(typeManager: TypeManager, ctx: ASTContext, name: String,
     while (!scopeName.isEmpty()) {
         let targetDecls = ArrayList<Decl>()
         for (decl in ctx.GetDeclsByName(Names(name, scopeName))) {
-            if ((onlyLookUpTopLevel || node.astKind == ASTKind.REF_TYPE) && !decl.IsTypeDecl()) {
-                continue
-            }
             if (isTargetVisibleToNode(decl, node)) {
                 addDeclUnique(targetDecls, decl)
             }
