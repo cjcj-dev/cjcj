@@ -601,12 +601,6 @@ public class TypeManager {
     }
 
     public func GetIntersectionTy(tys: Array<Ty>): Ty {
-        if (tys.size == 0) {
-            return GetInvalidTy()
-        }
-        if (tys.size == 1) {
-            return tys[0]
-        }
         let ty = IntersectionTy(tys)
         return internAllocatedTy(ty)
     }
