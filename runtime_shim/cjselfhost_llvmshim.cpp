@@ -24,12 +24,15 @@
 //         src/CodeGen/Utils/CGUtils.cpp:250-255  llvm::dyn_cast<llvm::Constant>(value).
 //   DIBuilder subprogram support:
 //         src/CodeGen/DIBuilder.cpp:204-207, 282-283, 455-476  C++ overloads not exposed exactly by LLVM-C.
+//   DIBuilder composite type support:
+//         src/CodeGen/DIBuilder.cpp:718-722, 899-917, 1102-1539.
 //   CGFunction::RemoveUnreachableBlocks support:
 //         src/CodeGen/CGFunction.cpp:211-217  llvm::removeUnreachableBlocks(Function&).
 
 #include <llvm-c/Core.h>
 #include <llvm-c/DebugInfo.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <vector>
 
@@ -471,6 +474,77 @@ extern "C" LLVMMetadataRef LLVMSelfhostDIBuilderCreateFunction(LLVMDIBuilderRef 
     auto *declaration = Decl == nullptr ? nullptr : unwrap<DISubprogram>(Decl);
     return wrap(builder->createFunction(scope, StringRef(Name, NameLen), StringRef(LinkageName, LinkageNameLen),
         file, LineNo, type, ScopeLine, diFlags, spFlags, templateParams, declaration));
+}
+
+extern "C" LLVMMetadataRef LLVMSelfhostDIBuilderCreateMethod(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope,
+    const char *Name, size_t NameLen, const char *LinkageName, size_t LinkageNameLen, LLVMMetadataRef File,
+    unsigned LineNo, LLVMMetadataRef Ty, unsigned VTableIndex, int ThisAdjustment, LLVMMetadataRef VTableHolder,
+    unsigned Flags, unsigned SPFlags)
+{
+    auto *builder = unwrap(Builder);
+    auto *scope = unwrap<DIScope>(Scope);
+    auto *file = unwrap<DIFile>(File);
+    auto *type = unwrap<DISubroutineType>(Ty);
+    auto *vtableHolder = VTableHolder == nullptr ? nullptr : unwrap<DIType>(VTableHolder);
+    auto diFlags = static_cast<DINode::DIFlags>(Flags);
+    auto spFlags = static_cast<DISubprogram::DISPFlags>(SPFlags);
+    return wrap(builder->createMethod(scope, StringRef(Name, NameLen), StringRef(LinkageName, LinkageNameLen), file,
+        LineNo, type, VTableIndex, ThisAdjustment, vtableHolder, diFlags, spFlags));
+}
+
+extern "C" LLVMMetadataRef LLVMSelfhostDIBuilderReplaceArrays(
+    LLVMDIBuilderRef Builder, LLVMMetadataRef Composite, LLVMMetadataRef Elements)
+{
+    auto *builder = unwrap(Builder);
+    auto *composite = unwrap<DICompositeType>(Composite);
+    auto *elements = Elements == nullptr ? nullptr : unwrap<MDTuple>(Elements);
+    builder->replaceArrays(composite, DINodeArray(elements));
+    return wrap(composite);
+}
+
+extern "C" LLVMMetadataRef LLVMSelfhostDIBuilderCreateEnumerationType(LLVMDIBuilderRef Builder,
+    LLVMMetadataRef Scope, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned LineNo,
+    uint64_t SizeInBits, uint32_t AlignInBits, LLVMMetadataRef *Elements, size_t Count,
+    LLVMMetadataRef UnderlyingType, const char *UniqueIdentifier, size_t UniqueIdentifierLen, bool IsScoped)
+{
+    auto *builder = unwrap(Builder);
+    std::vector<Metadata*> elements;
+    elements.reserve(Count);
+    for (size_t idx = 0; idx < Count; ++idx) {
+        elements.push_back(unwrap(Elements[idx]));
+    }
+    return wrap(builder->createEnumerationType(unwrap<DIScope>(Scope), StringRef(Name, NameLen),
+        unwrap<DIFile>(File), LineNo, SizeInBits, AlignInBits, builder->getOrCreateArray(elements),
+        unwrap<DIType>(UnderlyingType), StringRef(UniqueIdentifier, UniqueIdentifierLen), IsScoped));
+}
+
+extern "C" size_t LLVMSelfhostDICompositeTypeGetElements(
+    LLVMMetadataRef Composite, LLVMMetadataRef *Elements, size_t Capacity)
+{
+    auto elements = unwrap<DICompositeType>(Composite)->getElements();
+    size_t count = elements.size();
+    size_t outputCount = std::min(count, Capacity);
+    for (size_t idx = 0; idx < outputCount; ++idx) {
+        Elements[idx] = wrap(elements[idx]);
+    }
+    return count;
+}
+
+extern "C" unsigned LLVMSelfhostDINodeGetTag(LLVMMetadataRef Node)
+{
+    return unwrap<DINode>(Node)->getTag();
+}
+
+extern "C" LLVMMetadataRef LLVMSelfhostDIDerivedTypeGetBaseType(LLVMMetadataRef Type)
+{
+    return wrap(unwrap<DIDerivedType>(Type)->getBaseType());
+}
+
+extern "C" const char *LLVMSelfhostDISubprogramGetLinkageName(LLVMMetadataRef Subprogram, size_t *Length)
+{
+    StringRef name = unwrap<DISubprogram>(Subprogram)->getLinkageName();
+    *Length = name.size();
+    return name.data();
 }
 
 extern "C" LLVMMetadataRef LLVMSelfhostDILocationGet(LLVMContextRef Context, unsigned Line, unsigned Column,

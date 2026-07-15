@@ -203,6 +203,7 @@ foreign {
     func LLVMFunctionType(returnType: LLVMTypeRef, paramTypes: CPointer<LLVMTypeRef>, paramCount: UInt32, isVarArg: Int32): LLVMTypeRef
     func LLVMGetTypeKind(valueType: LLVMTypeRef): Int32
     func LLVMCountStructElementTypes(structTy: LLVMTypeRef): UInt32
+    func LLVMStructGetTypeAtIndex(structTy: LLVMTypeRef, index: UInt32): LLVMTypeRef
     func LLVMGetStructElementTypes(structTy: LLVMTypeRef, dest: CPointer<LLVMTypeRef>): Unit
     func LLVMGetArrayLength(arrayTy: LLVMTypeRef): UInt32
     func LLVMGetReturnType(functionType: LLVMTypeRef): LLVMTypeRef
@@ -558,6 +559,27 @@ foreign {
         expression: LLVMMetadataRef, declaration: LLVMMetadataRef, alignInBits: UInt32): LLVMMetadataRef
     func LLVMDIBuilderCreateBasicType(builder: LLVMDIBuilderRef, name: CString, nameLen: UIntNative,
         sizeInBits: UInt64, encoding: UInt32, flags: UInt32): LLVMMetadataRef
+    func LLVMDIBuilderCreateQualifiedType(builder: LLVMDIBuilderRef, tag: UInt32,
+        fromTy: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMDIBuilderCreateTypedef(builder: LLVMDIBuilderRef, ty: LLVMMetadataRef, name: CString,
+        nameLen: UIntNative, file: LLVMMetadataRef, lineNo: UInt32, scope: LLVMMetadataRef,
+        alignInBits: UInt32): LLVMMetadataRef
+    func LLVMDIBuilderCreateStructType(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef, name: CString,
+        nameLen: UIntNative, file: LLVMMetadataRef, lineNo: UInt32, sizeInBits: UInt64, alignInBits: UInt32,
+        flags: UInt32, derivedFrom: LLVMMetadataRef, elements: CPointer<LLVMMetadataRef>, numElements: UInt32,
+        runtimeLang: UInt32, vtableHolder: LLVMMetadataRef, uniqueId: CString,
+        uniqueIdLen: UIntNative): LLVMMetadataRef
+    func LLVMDIBuilderGetOrCreateArray(builder: LLVMDIBuilderRef, data: CPointer<LLVMMetadataRef>,
+        numElements: UIntNative): LLVMMetadataRef
+    func LLVMDIBuilderCreateInheritance(builder: LLVMDIBuilderRef, ty: LLVMMetadataRef,
+        baseTy: LLVMMetadataRef, baseOffset: UInt64, vbPtrOffset: UInt32, flags: UInt32): LLVMMetadataRef
+    func LLVMDIBuilderCreateEnumerator(builder: LLVMDIBuilderRef, name: CString, nameLen: UIntNative,
+        value: Int64, isUnsigned: Int32): LLVMMetadataRef
+    func LLVMDIBuilderCreateEnumerationType(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef, name: CString,
+        nameLen: UIntNative, file: LLVMMetadataRef, lineNo: UInt32, sizeInBits: UInt64, alignInBits: UInt32,
+        elements: CPointer<LLVMMetadataRef>, numElements: UInt32, classTy: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMDITypeGetSizeInBits(diType: LLVMMetadataRef): UInt64
+    func LLVMDITypeGetAlignInBits(diType: LLVMMetadataRef): UInt32
     func LLVMDIBuilderCreatePointerType(builder: LLVMDIBuilderRef, pointeeTy: LLVMMetadataRef, sizeInBits: UInt64,
         alignInBits: UInt32, addressSpace: UInt32, name: CString, nameLen: UIntNative): LLVMMetadataRef
     func LLVMDIBuilderCreateMemberPointerType(builder: LLVMDIBuilderRef, pointeeType: LLVMMetadataRef,
@@ -574,6 +596,23 @@ foreign {
         nameLen: UIntNative, linkageName: CString, linkageNameLen: UIntNative, file: LLVMMetadataRef,
         lineNo: UInt32, ty: LLVMMetadataRef, scopeLine: UInt32, flags: UInt32, spFlags: UInt32,
         templateParams: LLVMMetadataRef, declaration: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMSelfhostDIBuilderCreateMethod(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef, name: CString,
+        nameLen: UIntNative, linkageName: CString, linkageNameLen: UIntNative, file: LLVMMetadataRef,
+        lineNo: UInt32, ty: LLVMMetadataRef, vtableIndex: UInt32, thisAdjustment: Int32,
+        vtableHolder: LLVMMetadataRef, flags: UInt32, spFlags: UInt32): LLVMMetadataRef
+    func LLVMSelfhostDIBuilderReplaceArrays(builder: LLVMDIBuilderRef, composite: LLVMMetadataRef,
+        elements: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMSelfhostDIBuilderCreateEnumerationType(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef,
+        name: CString, nameLen: UIntNative, file: LLVMMetadataRef, lineNo: UInt32, sizeInBits: UInt64,
+        alignInBits: UInt32, elements: CPointer<LLVMMetadataRef>, count: UIntNative,
+        underlyingType: LLVMMetadataRef, uniqueIdentifier: CString, uniqueIdentifierLen: UIntNative,
+        isScoped: Bool): LLVMMetadataRef
+    func LLVMSelfhostDICompositeTypeGetElements(composite: LLVMMetadataRef,
+        elements: CPointer<LLVMMetadataRef>, capacity: UIntNative): UIntNative
+    func LLVMSelfhostDINodeGetTag(node: LLVMMetadataRef): UInt32
+    func LLVMSelfhostDIDerivedTypeGetBaseType(diType: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMSelfhostDISubprogramGetLinkageName(subprogram: LLVMMetadataRef,
+        length: CPointer<UIntNative>): CString
     func LLVMSelfhostDILocationGet(context: LLVMContextRef, line: UInt32, column: UInt32,
         scope: LLVMMetadataRef, inlinedAt: LLVMMetadataRef, isImplicitCode: Bool): LLVMMetadataRef
 }

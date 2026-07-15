@@ -158,6 +158,12 @@ public class CGEnumType <: CGCustomType {
         return sizeOfConstructorUnion
     }
 
+    public func GetsizeOfConstructorUnion(): Int64 {
+        EnsureClassified()
+        CJC_ASSERT(sizeOfConstructorUnion.isSome())
+        return sizeOfConstructorUnion.getOrThrow() * 8
+    }
+
     public func GenFieldsFnsOfTypeTemplateForOptionLikeT(cgMod: CGModule, funcPrefixName: String): LLVMValueRef {
         let llvmCtx = cgMod.GetLLVMContext()
         let i8Type = unsafe { LLVMInt8TypeInContext(llvmCtx.raw) }

@@ -4,6 +4,7 @@ import std.collection.*
 import cjcj::chir.Attribute
 import cjcj::chir.CHIRBuilder
 import cjcj::chir.CustomType
+import cjcj::chir.EnumType
 import cjcj::chir.FuncType
 import cjcj::chir.Function
 import cjcj::chir.GenericType
@@ -13,6 +14,8 @@ import cjcj::chir.Type
 import cjcj::chir.TypeKind
 import cjcj::chir.Value
 import cjcj::chir.GetCustomTypeIdentifier
+import cjcj::chir.GetCustomTypeDefIdentifier
+import cjcj::chir.GetTypeArgsQualifiedName
 import cjcj::chir.GetTypeQualifiedName
 import cjcj::option.ArchType
 import cjcj::utils.CJC_ASSERT
@@ -410,6 +413,34 @@ public open class CGType {
 
     public static func GetOrCreate(cgModule: CGModule, chirTy: Type, extraInfo!: TypeExtraInfo = TypeExtraInfo()): CGType {
         return cgModule.GetCGContext().GetOrCreateCGType(cgModule, chirTy, extraInfo)
+    }
+
+    public static func GetOrCreateEnumCtorLayoutType(cgModule: CGModule, enumTy: EnumType,
+        ctorIndex: Int64, paramTypes: ArrayList<Type>): LLVMTypeRef {
+        var className = enumTy.GetEnumDef().GetPackageName() + ":" +
+            GetCustomTypeDefIdentifier(enumTy.GetEnumDef()) + ":" + ctorIndex.toString()
+        if (!enumTy.GetTypeArgs().isEmpty()) {
+            className += "<" + GetTypeArgsQualifiedName(enumTy.GetTypeArgs()) + ">"
+        }
+        let layoutName = GetClassObjLayoutName(className)
+        var enumCtorLayoutType = LLVMNullType()
+        try (nameCString = unsafe { LibC.mallocCString(layoutName) }.asResource()) {
+            enumCtorLayoutType = unsafe { LLVMGetTypeByName2(cgModule.GetLLVMContext().raw, nameCString.value) }
+        }
+        if (!enumCtorLayoutType.isNull()) {
+            return enumCtorLayoutType
+        }
+        let fieldTypes = ArrayList<Type>()
+        let cgEnumType = (CGType.GetOrCreate(cgModule, enumTy) as CGEnumType).getOrThrow()
+        fieldTypes.add(if (cgEnumType.IsOptionLike()) {
+            cgModule.GetCGContext().GetCHIRBuilder().context.GetBoolTy()
+        } else {
+            cgModule.GetCGContext().GetCHIRBuilder().context.GetInt32Ty()
+        })
+        for (paramType in paramTypes) {
+            fieldTypes.add(paramType)
+        }
+        return GetLLVMStructType(cgModule, fieldTypes, layoutName)
     }
 
     public static func GetOrCreateWithNode(cgModule: CGModule, chirNode: Value, allowBasePtr!: Bool = true,

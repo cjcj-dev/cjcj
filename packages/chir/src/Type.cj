@@ -503,6 +503,11 @@ public open class Type <: Hashable & Equatable<Type> {
         return GetExtends()
     }
 
+    public open func GetDeclareAndExtendMethods(builder: CHIRBuilder): ArrayList<Function> {
+        let _ = builder
+        return ArrayList<Function>()
+    }
+
     public open func GetSuperTypesRecusively(builder: CHIRBuilder,
         visited: Option<HashSet<String>>): ArrayList<ClassType> {
         let _ = builder
@@ -1095,6 +1100,19 @@ public open class CustomType <: Type {
         return GetExtends()
     }
 
+    public override func GetDeclareAndExtendMethods(builder: CHIRBuilder): ArrayList<Function> {
+        let allMethods = def.GetMethods()
+        for (extendDef in def.GetExtends()) {
+            if (!IsEqualOrInstantiatedTypeOf(extendDef.GetExtendedType().getOrThrow(), builder)) {
+                continue
+            }
+            for (method in extendDef.GetMethods()) {
+                allMethods.add(method)
+            }
+        }
+        return allMethods
+    }
+
     public override func GetSuperTypesRecusively(builder: CHIRBuilder,
         visited: Option<HashSet<String>>): ArrayList<ClassType> {
         let inheritanceList = ArrayList<ClassType>()
@@ -1167,6 +1185,24 @@ public open class CustomType <: Type {
             }
         }
         return result
+    }
+
+    public func GetImplementedInterfaceTysWithoutExtend(builder: CHIRBuilder): ArrayList<ClassType> {
+        let genericTypes = def.GetGenericTypeParams()
+        if (!genericTypes.isEmpty()) {
+            CJC_ASSERT(argTys.size == genericTypes.size)
+        }
+        let instSuperInterfaceTys = ArrayList<ClassType>()
+        let replaceTable = HashMap<Int64, Type>()
+        var typeIdx: Int64 = 0
+        while (typeIdx < genericTypes.size) {
+            replaceTable[genericTypes[typeIdx].objectId] = argTys[typeIdx]
+            typeIdx++
+        }
+        for (ty in def.GetImplementedInterfaceTys()) {
+            instSuperInterfaceTys.add((ReplaceRawGenericArgType(ty, replaceTable, builder) as ClassType).getOrThrow())
+        }
+        return instSuperInterfaceTys
     }
 
     public func GetInstMap(instMap: HashMap<Int64, (GenericType, Type)>, builder: CHIRBuilder): Unit {
@@ -1816,6 +1852,43 @@ public class EnumType <: CustomType {
             return enumDef
         }
         throw IllegalStateException("EnumType does not reference an EnumDef")
+    }
+
+    private func CheckIsBoxed(original: EnumType, curType: Type, builder: CHIRBuilder,
+        doCheck: Bool, visited: HashSet<Type>): Bool {
+        if (doCheck && curType == original) {
+            return true
+        }
+        if (visited.contains(curType)) {
+            return false
+        }
+        visited.add(curType)
+        if (let Some(enumType) <- (curType as EnumType)) {
+            for (ctorInfo in enumType.GetConstructorInfos(builder)) {
+                for (ty in ctorInfo.funcType.getOrThrow().GetParamTypes()) {
+                    if (CheckIsBoxed(original, ty, builder, true, visited)) {
+                        return true
+                    }
+                }
+            }
+        } else if (let Some(structType) <- (curType as StructType)) {
+            for (ty in structType.GetInstantiatedMemberTys(builder)) {
+                if (CheckIsBoxed(original, ty, builder, true, visited)) {
+                    return true
+                }
+            }
+        } else if (let Some(tupleType) <- (curType as TupleType)) {
+            for (ty in tupleType.GetElementTypes()) {
+                if (CheckIsBoxed(original, ty, builder, true, visited)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    public func IsBoxed(builder: CHIRBuilder): Bool {
+        return CheckIsBoxed(this, this, builder, false, HashSet<Type>())
     }
 
     public func GetConstructorInfos(builder: CHIRBuilder): ArrayList<EnumCtorInfo> {

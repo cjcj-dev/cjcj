@@ -20,6 +20,7 @@ import cjcj::chir.IntType
 import cjcj::chir.LocalVar
 import cjcj::chir.Parameter
 import cjcj::chir.RawArrayLiteralInit
+import cjcj::chir.RefType
 import cjcj::chir.Tuple
 import cjcj::chir.Type
 import cjcj::chir.TypeKind
@@ -586,4 +587,15 @@ public func IsVArrayRef(chirTy: Type): Bool {
 
 public func IsUnitOrNothing(chirTy: Type): Bool {
     return chirTy.IsUnit() || chirTy.IsNothing()
+}
+
+public func IsReferenceType(ty: Type, cgMod: CGModule): Bool {
+    if (let Some(refTy) <- (ty as RefType)) {
+        return IsReferenceType(refTy.GetBaseType(), cgMod)
+    }
+    if (let Some(enumTy) <- (ty as EnumType)) {
+        let enumCGType = (CGType.GetOrCreate(cgMod, enumTy) as CGEnumType).getOrThrow()
+        return enumCGType.IsCommonEnum() || enumCGType.IsOptionLikeRef() || enumCGType.IsOptionLikeT()
+    }
+    return ty.IsClass() || ty.IsBox() || ty.IsRawArray()
 }
