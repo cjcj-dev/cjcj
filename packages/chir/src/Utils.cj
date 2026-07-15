@@ -11,6 +11,8 @@ import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, CORE_PACKAGE_NAME,
 
 public let ANY_TYPE: String = "ANY_TYPE"
 public let NOT_CARE: String = "NOT_CARE"
+// C++: CHIR/Utils/Utils.h:119.
+public let GV_PKG_INIT_ONCE_FLAG: String = "$has_applied_pkg_init_func"
 private let STD_PACKAGE_PREFIX: String = "std."
 
 public func IsCoreFuture(def: CustomTypeDef): Bool {
@@ -712,6 +714,26 @@ public func ToPosInfo(loc: DebugLocation, isPrintFileName!: Bool = false): Strin
     let beginPos = loc.GetBeginPos()
     let fileName = if (isPrintFileName) { FileUtil.GetFileName(loc.GetAbsPath()) + "," } else { "" }
     return " at [" + fileName + beginPos.line.toString() + "," + beginPos.column.toString() + "]"
+}
+
+// C++: CHIR/Utils/Utils.cpp:301-319.
+public func AddExpressionsToGlobalInitFunc(initFunc: Function, insertExpr: ArrayList<Expression>): Unit {
+    let visitAction: VisitExprActionFunc = { expr =>
+        if (expr.GetExprKind() != ExprKind.STORE) {
+            return VisitResult.CONTINUE
+        }
+        let storeNode = (expr as Store).getOrThrow()
+        if (storeNode.GetLocation().GetSrcCodeIdentifier() != GV_PKG_INIT_ONCE_FLAG) {
+            return VisitResult.CONTINUE
+        }
+        let parent = expr.GetParentBlock().getOrThrow()
+        let exprs = parent.GetExpressions()
+        for (item in insertExpr) {
+            item.MoveBefore(exprs[exprs.size - 1])
+        }
+        return VisitResult.STOP
+    }
+    Visitor.Visit(initFunc, visitAction)
 }
 
 public func ToPosition(loc: DebugLocation): BasicPosition {
