@@ -2160,11 +2160,17 @@ extend TypeChecker {
                 }
             }
         }
-        if (extends.isEmpty()) {
-            return
-        }
         if (let Some(diagValue) <- impl.diag) {
-            TypeCheckExtendBuildMap(diagValue, impl.typeManager, ctx, extends)
+            let extendNodes = HashSet<Node>()
+            for (extendDecl in extends) {
+                TypeCheckExtendPreCheckExtend(diagValue, impl.typeManager, ctx, extendDecl)
+                extendNodes.add(extendDecl)
+            }
+            mpImpl.PrepareTypeCheck4CJMPExtension(
+                ci.getOrThrow(), impl.scopeManager, ctx, extendNodes)
+            TypeCheckExtendUpdateExtendMap(impl.typeManager, extends)
+            let _ = TypeCheckExtendCheckDuplicateInterfaces(diagValue, impl.typeManager, extends)
+            let _ = TypeCheckExtendCheckBuiltinPointerSpecializations(diagValue, impl.typeManager)
             return
         }
         for (extendDecl in extends) {
