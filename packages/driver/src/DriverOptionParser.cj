@@ -6,6 +6,8 @@ import cjcj::basic.{DEFAULT_POSITION, DiagnosticEngine, DiagKindRefactor}
 import cjcj::option.{
     ArgInstanceType, ArgList, CreateOptionTable, GetHardwareConcurrency, Group, ID, Kind, OptionArgInstance, OptionTable
 }
+import cjcj::option.GlobalOptions as OptionGlobalOptions
+import cjcj::option.ParseTargetTriple as OptionParseTargetTriple
 import cjcj::utils.Semaphore as UtilsSemaphore
 
 private let g_driverOptionTable: OptionTable = CreateOptionTable(frontendMode: false)
@@ -342,7 +344,12 @@ private func ParseOptionWithValue(opts: DriverOptions, optionArg: OptionArgInsta
             addFrontendSeparated(opts, arg, value)
             return true
         }
-        eprintln("error: unsupported target triple '${value}'")
+        let optionOpts = OptionGlobalOptions()
+        if (OptionParseTargetTriple(optionOpts, value)) {
+            opts.target = optionOpts.target
+            addFrontendSeparated(opts, arg, value)
+            return true
+        }
         return false
     }
     if (arg == "--target-cpu") { opts.targetCPU = value; return true }
@@ -662,11 +669,11 @@ public func TryParseTriple(value: String): Option<TripleInfo> {
     let info = TripleInfo()
     info.vendor = Vendor.UNKNOWN
     info.apiLevel = ""
-    let parts = SplitString(value.toAsciiLower(), "-")
+    let parts = SplitString(value, "-")
     if (parts.size != 3 && parts.size != 4) {
         return None
     }
-    if (parts[0] == "x86_64" || parts[0] == "amd64") {
+    if (parts[0] == "x86_64") {
         info.arch = ArchType.X86_64
     } else if (parts[0] == "aarch64" || parts[0] == "arm64") {
         info.arch = ArchType.AARCH64
