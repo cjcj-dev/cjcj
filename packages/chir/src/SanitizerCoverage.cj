@@ -235,6 +235,296 @@ public class SanitizerCoverage {
         }
     }
 
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:401-460.
+    private func GenerateCStringMemCmp(fuzzName: String, oper1: Value, oper2: Value,
+        apply: Apply): ArrayList<Value> {
+        let parent = apply.GetParentBlock().getOrThrow()
+        let loc = apply.GetDebugLocation()
+        let res = ArrayList<Value>()
+        let cPointerType = builder.context.GetCPointerTy(builder.context.GetUInt8Ty())
+        let callContext1 = IntrisicCallContext(kind: IntrinsicKind.CSTRING_CONVERT_CSTR_TO_PTR,
+            args: ArrayList<Value>([oper1]))
+        var cPointer = builder.CreateIntrinsic(cPointerType, callContext1, parent)
+        cPointer.SetDebugLocation(loc)
+        cPointer.MoveBefore(apply)
+        let callContext2 = IntrisicCallContext(kind: IntrinsicKind.CSTRING_CONVERT_CSTR_TO_PTR,
+            args: ArrayList<Value>([oper2]))
+        var cPointer2 = builder.CreateIntrinsic(cPointerType, callContext2, parent)
+        cPointer2.SetDebugLocation(loc)
+        cPointer2.MoveBefore(apply)
+        if (fuzzName == SAN_COV_TRACE_MEM_CMP) {
+            let typeTarget = builder.context.GetCPointerTy(builder.context.GetVoidTy())
+            let callContext3 = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_INIT1,
+                args: ArrayList<Value>([cPointer.GetResult().getOrThrow()]))
+            cPointer = builder.CreateIntrinsic(typeTarget, callContext3, parent)
+            cPointer.SetDebugLocation(loc)
+            cPointer.MoveBefore(apply)
+            let callContext4 = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_INIT1,
+                args: ArrayList<Value>([cPointer2.GetResult().getOrThrow()]))
+            cPointer2 = builder.CreateIntrinsic(typeTarget, callContext4, parent)
+            cPointer2.SetDebugLocation(loc)
+            cPointer2.MoveBefore(apply)
+        }
+        res.add(cPointer.GetResult().getOrThrow())
+        res.add(cPointer2.GetResult().getOrThrow())
+        if (HAS_N_PARAMETER_MEM_CMP_SET.contains(fuzzName)) {
+            let getSize = GetImportedFunc(FUNC_MANGLE_NAME_CSTRING_SIZE)
+            let sizeN = CreateMemberApply(builder.context.GetInt64Ty(), getSize,
+                oper1.GetType().getOrThrow(), ArrayList<Value>([oper1]), parent, builder, loc: loc)
+            sizeN.MoveBefore(apply)
+            let sizeNCasted = builder.CreateTypeCast(builder.context.GetUInt32Ty(),
+                sizeN.GetResult().getOrThrow(), parent)
+            sizeNCasted.SetDebugLocation(loc)
+            sizeNCasted.MoveBefore(apply)
+            res.add(sizeNCasted.GetResult().getOrThrow())
+        }
+        return res
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:462-501.
+    private func CreateOneCPointFromList(array: Value, apply: Apply, elementType: Type,
+        startType: Type): Expression {
+        let parent = apply.GetParentBlock().getOrThrow()
+        let loc = apply.GetDebugLocation()
+        let rawArrayType = builder.context.GetRefTy(builder.context.GetRawArrayTy(elementType))
+        let rawArray = builder.CreateField(rawArrayType, array, ArrayList<UInt64>([0u64]), parent)
+        rawArray.SetDebugLocation(loc)
+        rawArray.MoveBefore(apply)
+        let start = builder.CreateField(startType, array, ArrayList<UInt64>([1u64]), parent)
+        start.SetDebugLocation(loc)
+        start.MoveBefore(apply)
+        var startRes = start.GetResult().getOrThrow()
+        if (startRes.GetType().getOrThrow() != builder.context.GetInt64Ty()) {
+            let castToInt64 = builder.CreateTypeCast(builder.context.GetInt64Ty(), startRes, parent)
+            castToInt64.SetDebugLocation(loc)
+            castToInt64.MoveBefore(apply)
+            startRes = castToInt64.GetResult().getOrThrow()
+        }
+        let origPointerType = builder.context.GetCPointerTy(elementType)
+        let callContext1 = IntrisicCallContext(kind: IntrinsicKind.ARRAY_ACQUIRE_RAW_DATA,
+            args: ArrayList<Value>([rawArray.GetResult().getOrThrow()]),
+            instTypeArgs: ArrayList<Type>([elementType]))
+        let cPointerAcquire = builder.CreateIntrinsic(origPointerType, callContext1, parent)
+        cPointerAcquire.SetDebugLocation(loc)
+        cPointerAcquire.MoveBefore(apply)
+        let callContext2 = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_ADD,
+            args: ArrayList<Value>([cPointerAcquire.GetResult().getOrThrow(), startRes]),
+            instTypeArgs: ArrayList<Type>([elementType]))
+        let pointAdd = builder.CreateIntrinsic(origPointerType, callContext2, parent)
+        pointAdd.SetDebugLocation(loc)
+        pointAdd.MoveBefore(apply)
+        return pointAdd
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:503-556.
+    private func GenerateStringMemCmp(fuzzName: String, oper1: Value, oper2: Value,
+        apply: Apply): ArrayList<Value> {
+        let res = ArrayList<Value>()
+        let parent = apply.GetParentBlock().getOrThrow()
+        let loc = apply.GetDebugLocation()
+        var cPoint1 = CreateOneCPointFromList(oper1, apply, builder.context.GetUInt8Ty(),
+            builder.context.GetUInt32Ty())
+        var cPoint2 = CreateOneCPointFromList(oper2, apply, builder.context.GetUInt8Ty(),
+            builder.context.GetUInt32Ty())
+        if (fuzzName == SAN_COV_TRACE_MEM_CMP) {
+            let typeTarget = builder.context.GetCPointerTy(builder.context.GetVoidTy())
+            let callContext1 = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_INIT1,
+                args: ArrayList<Value>([cPoint1.GetResult().getOrThrow()]))
+            cPoint1 = builder.CreateIntrinsic(typeTarget, callContext1, parent)
+            cPoint1.SetDebugLocation(loc)
+            cPoint1.MoveBefore(apply)
+            let callContext2 = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_INIT1,
+                args: ArrayList<Value>([cPoint2.GetResult().getOrThrow()]))
+            cPoint2 = builder.CreateIntrinsic(typeTarget, callContext2, parent)
+            cPoint2.SetDebugLocation(loc)
+            cPoint2.MoveBefore(apply)
+        }
+        res.add(cPoint1.GetResult().getOrThrow())
+        res.add(cPoint2.GetResult().getOrThrow())
+        if (HAS_N_PARAMETER_MEM_CMP_SET.contains(fuzzName)) {
+            let sizeN = builder.CreateField(builder.context.GetUInt32Ty(), oper1,
+                ArrayList<UInt64>([2u64]), parent)
+            sizeN.SetDebugLocation(loc)
+            sizeN.MoveBefore(apply)
+            res.add(sizeN.GetResult().getOrThrow())
+        }
+        return res
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:558-629.
+    private func GenerateArrayCmp(fuzzName: String, oper1: Value, oper2: Value,
+        apply: Apply): ArrayList<Value> {
+        let res = ArrayList<Value>()
+        let parent = apply.GetParentBlock().getOrThrow()
+        let loc = apply.GetDebugLocation()
+        CJC_ASSERT(oper1.GetType().getOrThrow().GetTypeKind() == TypeKind.TYPE_STRUCT)
+        let arrayType = (oper1.GetType().getOrThrow() as StructType).getOrThrow()
+        CJC_ASSERT(arrayType.GetGenericArgs().size == 1)
+        let elementType = arrayType.GetGenericArgs()[0]
+        let cPointer1 = CreateOneCPointFromList(oper1, apply, elementType, builder.context.GetInt64Ty())
+        let cPointer2 = CreateOneCPointFromList(oper2, apply, elementType, builder.context.GetInt64Ty())
+        var typeTarget: Type = builder.context.GetCPointerTy(builder.context.GetUInt8Ty())
+        if (fuzzName == SAN_COV_TRACE_MEM_CMP) {
+            typeTarget = builder.context.GetCPointerTy(builder.context.GetVoidTy())
+        }
+        let callContext1 = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_INIT1,
+            args: ArrayList<Value>([cPointer1.GetResult().getOrThrow()]))
+        let typeCast1 = builder.CreateIntrinsic(typeTarget, callContext1, parent)
+        typeCast1.SetDebugLocation(loc)
+        typeCast1.MoveBefore(apply)
+        let callContext2 = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_INIT1,
+            args: ArrayList<Value>([cPointer2.GetResult().getOrThrow()]))
+        let typeCast2 = builder.CreateIntrinsic(typeTarget, callContext2, parent)
+        typeCast2.SetDebugLocation(loc)
+        typeCast2.MoveBefore(apply)
+        res.add(typeCast1.GetResult().getOrThrow())
+        res.add(typeCast2.GetResult().getOrThrow())
+        if (HAS_N_PARAMETER_MEM_CMP_SET.contains(fuzzName)) {
+            let sizeN = builder.CreateField(builder.context.GetInt64Ty(), oper1,
+                ArrayList<UInt64>([2u64]), parent)
+            sizeN.SetDebugLocation(loc)
+            sizeN.MoveBefore(apply)
+            let elementSizeContext = IntrisicCallContext(kind: IntrinsicKind.SIZE_OF,
+                args: ArrayList<Value>(), instTypeArgs: ArrayList<Type>([elementType]))
+            let elementSize = builder.CreateIntrinsic(builder.context.GetInt64Ty(), elementSizeContext, parent)
+            elementSize.SetDebugLocation(loc)
+            elementSize.MoveBefore(apply)
+            let calSize = builder.CreateBinaryExpression(ExprKind.MUL, builder.context.GetInt64Ty(),
+                sizeN.GetResult().getOrThrow(), elementSize.GetResult().getOrThrow(), parent,
+                overflowStrategy: OverflowStrategy.WRAPPING)
+            calSize.SetDebugLocation(loc)
+            calSize.MoveBefore(apply)
+            let sizeNCasted = builder.CreateTypeCast(builder.context.GetUInt32Ty(),
+                calSize.GetResult().getOrThrow(), parent)
+            sizeNCasted.SetDebugLocation(loc)
+            sizeNCasted.MoveBefore(apply)
+            res.add(sizeNCasted.GetResult().getOrThrow())
+        }
+        return res
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:631-669.
+    private func CastArrayListToArray(oper1: Value, oper2: Value, apply: Apply): (Value, Value) {
+        let loc = apply.GetDebugLocation()
+        let refType = (oper1.GetType().getOrThrow() as RefType).getOrThrow()
+        let rawArrayType = (refType.GetBaseType() as ClassType).getOrThrow()
+        CJC_ASSERT(rawArrayType.GetGenericArgs().size == 1)
+        let elementType = rawArrayType.GetGenericArgs()[0]
+        let arrayGeneric = builder.GetStructType("std.core", "Array").getOrThrow()
+        CJC_ASSERT(arrayGeneric.GetGenericArgs().size == 1)
+        let genericType = (arrayGeneric.GetGenericArgs()[0] as GenericType).getOrThrow()
+        let table = HashMap<GenericType, Type>([(genericType, elementType)])
+        let arrayType = ReplaceRawGenericArgType(arrayGeneric, table, builder)
+        let arrayRefType = builder.context.GetRefTy(arrayType)
+        let parent = apply.GetParentBlock().getOrThrow()
+        let arrayRef1 = builder.CreateGetElementRef(arrayRefType, oper1, ArrayList<UInt64>([0u64]), parent)
+        arrayRef1.SetDebugLocation(loc)
+        arrayRef1.MoveBefore(apply)
+        let arrayRef2 = builder.CreateGetElementRef(arrayRefType, oper2, ArrayList<UInt64>([0u64]), parent)
+        arrayRef2.SetDebugLocation(loc)
+        arrayRef2.MoveBefore(apply)
+        let array1 = builder.CreateLoad(arrayType, arrayRef1.GetResult().getOrThrow(), parent)
+        array1.SetDebugLocation(loc)
+        array1.MoveBefore(apply)
+        let array2 = builder.CreateLoad(arrayType, arrayRef2.GetResult().getOrThrow(), parent)
+        array2.SetDebugLocation(loc)
+        array2.MoveBefore(apply)
+        return (array1.GetResult().getOrThrow(), array2.GetResult().getOrThrow())
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:671-682.
+    private func CreateMemCmpFunc(intrinsicName: String, paramsType: Type, params: ArrayList<Value>,
+        loc: DebugLocation, parent: Block): Expression {
+        let paramType = ArrayList<Type>([paramsType, paramsType])
+        if (HAS_N_PARAMETER_MEM_CMP_SET.contains(intrinsicName)) {
+            paramType.add(builder.context.GetUInt32Ty())
+        }
+        let funcTy = builder.context.GetFuncTy(paramType, builder.context.GetUnitTy(), isCFunc: true)
+        let memCmpFunc = GenerateForeignFunc(intrinsicName, loc, funcTy, packName: packageName)
+        return CreateNonMemberApply(builder.context.GetUnitTy(), memCmpFunc, params, parent, builder, loc: loc)
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:684-735.
+    private func GetMemFuncSymbols(oper1: Value, oper2: Value, apply: Apply): (String, ArrayList<Value>) {
+        var intrinsicName: Option<String> = Some("")
+        var params = ArrayList<Value>()
+        let defaultValue = ("", ArrayList<Value>())
+        let applyCallName = apply.GetCallee().GetSrcCodeIdentifier()
+        if (oper1.GetType().getOrThrow().GetTypeKind() == TypeKind.TYPE_CSTRING) {
+            intrinsicName = GetStringSanConvFunc(MemCmpType.CSTRING_TYPE, applyCallName)
+            if (let None <- intrinsicName) {
+                return defaultValue
+            }
+            params = GenerateCStringMemCmp(intrinsicName.getOrThrow(), oper1, oper2, apply)
+        } else if (oper1.GetType().getOrThrow().GetTypeKind() == TypeKind.TYPE_STRUCT) {
+            let structType = (oper1.GetType().getOrThrow() as StructType).getOrThrow()
+            if (structType.GetStructDef().GetPackageName() != "std.core") {
+                return defaultValue
+            } else if (structType.GetStructDef().GetSrcCodeIdentifier() == "String") {
+                intrinsicName = GetStringSanConvFunc(MemCmpType.STRING_TYPE, applyCallName)
+                if (let None <- intrinsicName) {
+                    return defaultValue
+                }
+                if (!oper2.GetType().getOrThrow().IsString()) {
+                    return defaultValue
+                }
+                params = GenerateStringMemCmp(intrinsicName.getOrThrow(), oper1, oper2, apply)
+            } else if (structType.GetStructDef().GetSrcCodeIdentifier() == "Array") {
+                intrinsicName = GetStringSanConvFunc(MemCmpType.ARRAY_TYPE, applyCallName)
+                if (let None <- intrinsicName) {
+                    return defaultValue
+                }
+                params = GenerateArrayCmp(intrinsicName.getOrThrow(), oper1, oper2, apply)
+            }
+        } else if (oper1.GetType().getOrThrow().GetTypeKind() == TypeKind.TYPE_REFTYPE) {
+            let refType = (oper1.GetType().getOrThrow() as RefType).getOrThrow()
+            if (refType.GetBaseType().GetTypeKind() != TypeKind.TYPE_CLASS) {
+                return defaultValue
+            }
+            let classType = (refType.GetBaseType() as ClassType).getOrThrow()
+            if (classType.GetClassDef().GetPackageName() != "std.collection" ||
+                classType.GetClassDef().GetSrcCodeIdentifier() != "ArrayList") {
+                return defaultValue
+            }
+            intrinsicName = GetStringSanConvFunc(MemCmpType.ARRAYLIST_TYPE, applyCallName)
+            if (let None <- intrinsicName) {
+                return defaultValue
+            }
+            let (cast0, cast1) = CastArrayListToArray(oper1, oper2, apply)
+            params = GenerateArrayCmp(intrinsicName.getOrThrow(), cast0, cast1, apply)
+        }
+        return (intrinsicName.getOrThrow(), params)
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:737-766.
+    private func InjectTraceMemCmp(expr: Expression, isDebug: Bool): Unit {
+        if (expr.GetExprKind() != ExprKind.APPLY) {
+            return
+        }
+        let applyNode = (expr as Apply).getOrThrow()
+        if (applyNode.GetOperands().size < 3) {
+            return
+        }
+        let oper1 = applyNode.GetOperand(1)
+        let oper2 = applyNode.GetOperand(2)
+        let (intrinsicName, params) = GetMemFuncSymbols(oper1, oper2, applyNode)
+        if (intrinsicName == "" || params.isEmpty()) {
+            return
+        }
+        let parent = expr.GetParentBlock().getOrThrow()
+        let syscall = if (intrinsicName == SAN_COV_TRACE_MEM_CMP) {
+            let voidPointerType = builder.context.GetCPointerTy(builder.context.GetVoidTy())
+            CreateMemCmpFunc(intrinsicName, voidPointerType, params, expr.GetDebugLocation(), parent)
+        } else {
+            let charPointerType = builder.context.GetCPointerTy(builder.context.GetUInt8Ty())
+            CreateMemCmpFunc(intrinsicName, charPointerType, params, expr.GetDebugLocation(), parent)
+        }
+        syscall.MoveBefore(expr)
+        if (isDebug) {
+            println("[SanitizerCoverage] Add trace Memory Compare" + ToPosInfo(expr.GetDebugLocation()) + ".")
+        }
+    }
+
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:794-834.
     private func CreateArrayForSwitchCaseList(multiBranch: MultiBranch): RawArrayAllocate {
         let cases = multiBranch.GetCaseVals()
@@ -275,6 +565,12 @@ public class SanitizerCoverage {
         let result = builder.CreateIntrinsic(cPointerTy, callContext, dataList.GetParentBlock().getOrThrow())
         result.SetDebugLocation(dataList.GetDebugLocation())
         return result
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:1029-1034.
+    private func GetImportedFunc(mangledName: String): Function {
+        CJC_ASSERT(funcBag.contains(mangledName))
+        return funcBag.get(mangledName).getOrThrow()
     }
 
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:1016-1027.
