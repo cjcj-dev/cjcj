@@ -2674,7 +2674,10 @@ private func FillTypeArgumentsTy(typeManager: TypeManager, fd: FuncDecl, ce: Cal
         }
         case None => return
     }
-    let outerDecl = fd.outerDecl ?? return
+    let outerDecl = match (fd.outerDecl) {
+        case Some(value) => value
+        case None => return
+    }
     if (fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
         FillEnumTypeArgumentsTy(typeManager, fd, typeMapping, memberAccess)
         return
@@ -2689,10 +2692,22 @@ private func FillTypeArgumentsTy(typeManager: TypeManager, fd: FuncDecl, ce: Cal
         }
     }
 
-    let baseExpr = memberAccess.baseExpr ?? return
-    let baseDecl = GetRealTarget(baseExpr.GetTarget()) ?? return
-    let ref = (baseExpr as NameReferenceExpr) ?? return
-    let baseGeneric = baseDecl.GetGeneric() ?? return
+    let baseExpr = match (memberAccess.baseExpr) {
+        case Some(value) => value
+        case None => return
+    }
+    let baseDecl = match (GetRealTarget(baseExpr.GetTarget())) {
+        case Some(value) => value
+        case None => return
+    }
+    let ref = match (baseExpr as NameReferenceExpr) {
+        case Some(value) => value
+        case None => return
+    }
+    let baseGeneric = match (baseDecl.GetGeneric()) {
+        case Some(value) => value
+        case None => return
+    }
     let typeAccessOmitTypeArgs =
         (fd.TestAttr(Attribute.STATIC) || baseDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) && ref.instTys.isEmpty()
     if (!typeAccessOmitTypeArgs) {
@@ -2701,8 +2716,11 @@ private func FillTypeArgumentsTy(typeManager: TypeManager, fd: FuncDecl, ce: Cal
     if (baseDecl != outerDecl) {
         var mapping = TypeSubst()
         let outerDeclTy = typeManager.GetInstantiatedTy(outerDecl.GetTy().getOrThrow(), mapping)
-        if ((let Some(baseDeclTy) <- baseDecl.GetTy()) && (let Some(_) <- outerDecl.GetTy())) {
-            mapping = MultiTypeSubstToTypeSubst(Promotion(typeManager).GetDowngradeTypeMapping(baseDeclTy, outerDeclTy))
+        if (let Some(baseDeclTy) <- baseDecl.GetTy()) {
+            if (outerDecl.GetTy().isSome()) {
+                mapping = MultiTypeSubstToTypeSubst(
+                    Promotion(typeManager).GetDowngradeTypeMapping(baseDeclTy, outerDeclTy))
+            }
         }
         typeManager.PackMapping(typeMapping, mapping)
     }
