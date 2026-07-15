@@ -167,40 +167,46 @@ private func ChkOpOverloadForConstPattern(typeManager: TypeManager, ctx: ASTCont
     return false
 }
 
+private func IsTupleSubtypeBoxed(typeManager: TypeManager, leaf: TupleTy, root: TupleTy): Bool {
+    if (leaf.typeArgs.size != root.typeArgs.size) {
+        return false
+    }
+    var idx: Int64 = 0
+    while (idx < leaf.typeArgs.size) {
+        if (!IsSubtypeBoxed(typeManager, leaf.typeArgs[idx], root.typeArgs[idx])) {
+            return false
+        }
+        idx++
+    }
+    return true
+}
+
+private func IsFuncSubTypeBoxed(typeManager: TypeManager, leaf: FuncTy, root: FuncTy): Bool {
+    if (leaf.paramTys.size != root.paramTys.size) {
+        return false
+    }
+    var idx: Int64 = 0
+    while (idx < leaf.paramTys.size) {
+        if (!IsSubtypeBoxed(typeManager, root.paramTys[idx], leaf.paramTys[idx])) {
+            return false
+        }
+        idx++
+    }
+    return leaf.isC == root.isC && leaf.hasVariableLenArg == root.hasVariableLenArg &&
+        IsSubtypeBoxed(typeManager, leaf.retTy, root.retTy)
+}
+
 private func IsSubtypeBoxed(typeManager: TypeManager, leaf: Ty, root: Ty): Bool {
     if (let Some(leafTuple) <- (leaf as TupleTy)) {
         if (let Some(rootTuple) <- (root as TupleTy)) {
-            if (leafTuple.typeArgs.size != rootTuple.typeArgs.size) {
-                return false
-            }
-            var idx: Int64 = 0
-            while (idx < leafTuple.typeArgs.size) {
-                if (!IsSubtypeBoxed(typeManager, leafTuple.typeArgs[idx], rootTuple.typeArgs[idx])) {
-                    return false
-                }
-                idx++
-            }
-            return true
+            return IsTupleSubtypeBoxed(typeManager, leafTuple, rootTuple)
         }
-    }
-    if (let Some(leafFunc) <- (leaf as FuncTy)) {
+    } else if (let Some(leafFunc) <- (leaf as FuncTy)) {
         if (let Some(rootFunc) <- (root as FuncTy)) {
-            if (leafFunc.paramTys.size != rootFunc.paramTys.size) {
-                return false
-            }
-            var idx: Int64 = 0
-            while (idx < leafFunc.paramTys.size) {
-                if (!IsSubtypeBoxed(typeManager, rootFunc.paramTys[idx], leafFunc.paramTys[idx])) {
-                    return false
-                }
-                idx++
-            }
-            return leafFunc.isC == rootFunc.isC &&
-                leafFunc.hasVariableLenArg == rootFunc.hasVariableLenArg &&
-                IsSubtypeBoxed(typeManager, leafFunc.retTy, rootFunc.retTy)
+            return IsFuncSubTypeBoxed(typeManager, leafFunc, rootFunc)
         }
     }
-    return typeManager.IsSubtype(leaf, root, allowOptionBox: false)
+    return typeManager.IsSubtype(leaf, root, implicitBoxed: true, allowOptionBox: false)
 }
 
 private func RuntimeDeclOfTy(ty: Ty): Option<Decl> {
@@ -653,8 +659,6 @@ public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
         pattern.needRuntimeTypeCheck = false
         pattern.matchBeforeRuntime = true
     } else {
-        pattern.needRuntimeTypeCheck = IsNeedRuntimeCheckForPattern(typeManager, target, patternTy)
-        pattern.matchBeforeRuntime = false
         if (IsSubtypeBoxed(typeManager, target, patternTy)) {
             if (let Some(diagValue) <- diag) {
                 let builder = DiagnoseRefactor(diagValue,
@@ -662,9 +666,11 @@ public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
                     pattern)
                 builder.AddNote("the selector is of type '" + target.String() +
                     "', which is not a subtype of '" + patternTy.String())
-                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                builder.Emit()
             }
         }
+        pattern.needRuntimeTypeCheck = IsNeedRuntimeCheckForPattern(typeManager, target, patternTy)
+        pattern.matchBeforeRuntime = false
     }
     if (!ChkPattern(typeManager, ctx, patternTy, pattern.pattern.getOrThrow(), exprChecker: exprChecker,
         desugarCallExpr: desugarCallExpr, diag: diag)) {
