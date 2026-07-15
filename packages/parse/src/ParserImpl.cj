@@ -125,6 +125,7 @@ public class ParserImpl {
         compileOptions = opts
         scanDepPkg = opts.scanDepPkg
         enableEH = opts.enableEH
+        lexer.SetEHEnabled(opts.enableEH)
     }
 
     public func GetDiagnosticEngine(): BasicDiagnosticEngine {

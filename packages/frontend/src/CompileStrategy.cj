@@ -375,6 +375,7 @@ private class FullCompileStrategyImpl {
         let parseDiag = s.ci.diag.AsBasicDiagnosticEngine()
         let errorCountBefore = s.ci.diag.GetErrorCount()
         let parser = RealParser(fileID, sourceCode, parseDiag, s.ci.GetSourceManager())
+        parser.SetCompileOptions(s.ci.invocation.globalOptions)
         let realFile = parser.ParseTopLevel()
         realFile.filePath = NormalizePath(filePath)
         realFile.fileName = GetFileName(realFile.filePath)

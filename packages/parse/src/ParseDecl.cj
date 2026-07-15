@@ -2013,7 +2013,11 @@ extend ParserImpl {
             ret.keywordPos = key.Begin()
             ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
             CheckDeclarationInScope(scopeKind, DefKind.EXTEND)
-            EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.EXTEND))
+            if (modifiers.size == 1 && MPParserImpl(this).HasCJMPModifiers(modifiers[0])) {
+                MPParserImpl(this).CheckCJMPModifiers(modifiers)
+            } else if (!modifiers.isEmpty() && !ret.TestAttr(Attribute.IS_BROKEN)) {
+                DiagExpectNoModifier(modifiers[0])
+            }
             ParseExtendedType(ret)
             if (Skip(TokenKind.UPPERBOUND)) {
                 ParseInheritedTypes(ret)

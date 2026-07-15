@@ -24,18 +24,35 @@ public class MPParserImpl {
     }
 
     public func CheckCJMPModifiers(modifiers: ArrayList<Modifier>): Bool {
-        var ok = true
         for (modifier in modifiers) {
-            if (HasCJMPModifiers(modifier) && !CompilePlatform() && !CompileCommon()) {
-                if (let Some(file) <- parser.currentFile) {
-                    parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_cjmp_decl, file).Emit()
-                } else {
-                    parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_cjmp_decl, modifier).Emit()
+            if (modifier.modifier == TokenKind.SPECIFIC) {
+                let currentFile = parser.currentFile.getOrThrow()
+                if (!CompilePlatform() && !CompileCommon()) {
+                    parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_cjmp_decl, currentFile).Emit()
+                    return false
                 }
-                ok = false
+                if (let Some(packageSpec) <- currentFile.packageSpec) {
+                    packageSpec.hasSpecific = true
+                }
+                currentFile.isSpecific = true
+                break
             }
         }
-        return ok
+        for (modifier in modifiers) {
+            if (modifier.modifier == TokenKind.COMMON) {
+                let currentFile = parser.currentFile.getOrThrow()
+                if (!CompilePlatform() && !CompileCommon()) {
+                    parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_cjmp_decl, currentFile).Emit()
+                    return false
+                }
+                if (let Some(packageSpec) <- currentFile.packageSpec) {
+                    packageSpec.hasCommon = true
+                }
+                currentFile.isCommon = true
+                break
+            }
+        }
+        return true
     }
 
     public func CheckCJMPDecl(decl: Decl): Unit {
