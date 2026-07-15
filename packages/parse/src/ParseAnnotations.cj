@@ -140,7 +140,17 @@ extend ParserImpl {
                 if (backArgsIsInvalid) {
                     break
                 }
-                DiagExpectedRightDelimiter("[", pos)
+                let builder = if (lookahead.kind == TokenKind.NL) {
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_right_delimiter, lastToken, "[")
+                } else {
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_right_delimiter, lastToken.End(), "[")
+                }
+                builder.AddMainHintArguments("]")
+                builder.AddHint(pos, arguments: ["["])
+                if (anno.kind == AnnotationKind.CUSTOM) {
+                    builder.AddNote("Argument syntax error. May be caused by missing macro definitions. If not, verify the annotation arguments are valid.")
+                }
+                builder.Emit()
                 anno.isBroken = true
             }
             anno.args.add(arg)
