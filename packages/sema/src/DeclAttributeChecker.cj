@@ -315,11 +315,7 @@ private class DeclAttributeCheckerImpl {
             }
         } else {
             if (!propDecl.setters.isEmpty()) {
-                AddIssue(
-                    DeclAttributeIssueKind.IMMUTABLE_PROP_WITH_SETTER,
-                    propDecl,
-                    "immutable property cannot define a setter"
-                )
+                DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_immutable_property_with_setter, propDecl).Emit()
             }
             if (propDecl.getters.isEmpty()) {
                 DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_property_must_have_accessors, propDecl).Emit()
