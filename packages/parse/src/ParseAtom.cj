@@ -401,8 +401,12 @@ extend ParserImpl {
                 break
             }
         }
-        array.rightSquarePos = Expect(TokenKind.RSQUARE, "expected ']' after array literal").Begin()
-        array.end = array.rightSquarePos + 1
+        if (!Skip(TokenKind.RSQUARE)) {
+            DiagExpectedRightDelimiter("[", array.leftSquarePos)
+            ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RSQUARE])
+        }
+        array.rightSquarePos = lastToken.Begin()
+        array.end = lastToken.End()
         return array
     }
 }

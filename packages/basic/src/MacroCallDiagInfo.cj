@@ -35,7 +35,7 @@ private func getMacroCallEndPosForLsp(newPos: UInt32, first: UInt32, second: Pos
 }
 
 public class DescPositionMap {
-    private let entries: ArrayList<(UInt32, Position)> = ArrayList<(UInt32, Position)>()
+    private let entries: TreeMap<UInt32, Position> = TreeMap<UInt32, Position>()
 
     public init() {}
 
@@ -48,32 +48,15 @@ public class DescPositionMap {
     }
 
     public func contains(key: UInt32): Bool {
-        if (let Some(_) <- get(key)) {
-            return true
-        }
-        return false
+        return entries.contains(key)
     }
 
     public func get(key: UInt32): Option<Position> {
-        for ((entryKey, entryValue) in entries) {
-            if (entryKey == key) {
-                return Some(entryValue)
-            }
-        }
-        return None
+        return entries.get(key)
     }
 
     public func put(key: UInt32, value: Position): Unit {
-        var idx: Int64 = 0
-        while (idx < entries.size) {
-            let current = entries[idx]
-            if (current[0] == key) {
-                entries.remove(at: idx)
-                break
-            }
-            idx++
-        }
-        entries.add((key, value))
+        entries[key] = value
     }
 
     public func lowerBound(key: UInt32): Option<(UInt32, Position)> {

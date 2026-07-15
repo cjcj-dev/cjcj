@@ -142,7 +142,9 @@ extend ParserImpl {
 
     public func TargetTokenConsumedControl(flag: Bool, targetTokenConsumed: Bool): Unit {
         var resultFlag = flag
-        if (Seeing(TokenKind.NL)) {
+        let seeingNL = Seeing(TokenKind.NL)
+        skipNL = true
+        if (seeingNL) {
             resultFlag = true
             Next()
         } else if (targetTokenConsumed) {
@@ -151,7 +153,6 @@ extend ParserImpl {
         if (resultFlag) {
             newlineSkipped = true
         }
-        skipNL = true
     }
 
     public func ConsumeUntil(kind: TokenKind, targetTokenConsumed!: Bool = true): Unit {

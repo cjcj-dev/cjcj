@@ -1668,9 +1668,23 @@ extend ParserImpl {
         ret.doPos = token.Begin()
         ret.begin = token.Begin()
         ret.body = ParseBlock(ScopeKind.FUNC_BODY)
-        let whileTok = Expect(TokenKind.WHILE, "expected 'while' after do body")
-        ret.whilePos = whileTok.Begin()
-        ret.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' after while").Begin()
+        if (!Skip(TokenKind.WHILE)) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_while_in_do_while, lookahead,
+                ConvertToken(lookahead)).Emit()
+            ConsumeUntilAny([TokenKind.NL, TokenKind.WHILE])
+            if (!Skip(TokenKind.WHILE)) {
+                ret.EnableAttr(Attribute.IS_BROKEN)
+                ret.end = lastToken.End()
+                return ret
+            }
+        }
+        ret.whilePos = lookahead.Begin()
+        if (!Skip(TokenKind.LPAREN)) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_paren, lookahead,
+                ConvertToken(lookahead)).Emit()
+        } else {
+            ret.leftParenPos = lastToken.Begin()
+        }
         ret.condExpr = ParseExpr()
         if (!Skip(TokenKind.RPAREN)) {
             if (!ret.leftParenPos.IsZero()) {

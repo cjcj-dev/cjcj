@@ -235,22 +235,17 @@ extend ParserImpl {
         } else {
             parsedDecl = ParseDecl(scopeKind, modifiers, ArrayList<Annotation>())
         }
-        if (let Some(ctor) <- (parsedDecl as FuncDecl)) {
-            if (ctor.TestAttr(Attribute.CONSTRUCTOR)) {
-                CheckConstructorBody(ctor, scopeKind, inMacro: true)
-            }
+        if (parsedDecl.TestAttr(Attribute.IS_BROKEN)) {
+            chainedAST[chainedAST.size - 1].EnableAttr(Attribute.HAS_BROKEN)
         }
         lexer.StopCollectTokens(collectStarted)
-        if (IsValidMacroInputDeclKind(parsedDecl.astKind)) {
+        if (IsValidMacroInputDeclKind(parsedDecl.astKind) && parsedDecl.astKind != ASTKind.MACRO_DECL) {
             ParseNodeToTokens(parsedDecl, beginToken, invocation.args)
-            SyncMacroArgTokens(invocation)
-            invocation.decl = parsedDecl
-            invocation.hasParenthesis = false
-            invocation.macroCallDiagInfo.macroCallEnd = parsedDecl.end
-            PopulateMacroOriginPositions(invocation)
-            return
+        } else {
+            ParseDiagnoseRefactor(
+                DiagKindRefactor.parse_illegal_macro_expand_input_args_without_paren, parsedDecl.begin).Emit()
         }
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_illegal_macro_expand_input_args_without_paren, parsedDecl.begin).Emit()
+        invocation.decl = parsedDecl
     }
 
     private func IsValidMacroInputDeclKind(kind: ASTKind): Bool {
@@ -288,10 +283,7 @@ extend ParserImpl {
         if (collectedTokens[startIndex].Begin() == beginToken.Begin()) {
             startIndex++
         }
-        while (startIndex < endIndex) {
-            tokens.add(collectedTokens[startIndex])
-            startIndex++
-        }
+        tokens.add(all: collectedTokens[startIndex..endIndex])
         if (tokens[tokens.size - 1].kind == TokenKind.NL || tokens[tokens.size - 1].kind == TokenKind.END) {
             tokens.remove(at: tokens.size - 1)
         }
