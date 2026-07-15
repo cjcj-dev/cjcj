@@ -264,20 +264,35 @@ extend ParserImpl {
     private func ParseNodeToTokens(node: Node, beginToken: Token, tokens: ArrayList<Token>): Unit {
         tokens.add(beginToken)
         let collectedTokens = lexer.GetCollectTokens()
-        for (token in collectedTokens) {
-            if (token.Begin() == beginToken.Begin()) {
-                continue
-            }
-            if (!node.end.IsZero() && (node.end < token.Begin() || token.Begin() == node.end)) {
-                break
-            }
-            tokens.add(token)
-            if (!node.end.IsZero() && token.End() == node.end) {
-                break
-            }
+        if (collectedTokens.isEmpty() || beginToken.End() == node.end) {
+            return
         }
-        while (!tokens.isEmpty() &&
-            (tokens[tokens.size - 1].kind == TokenKind.NL || tokens[tokens.size - 1].kind == TokenKind.END)) {
+        var startIndex: Int64 = 0
+        var endIndex: Int64 = collectedTokens.size
+        var index: Int64 = 0
+        while (index < collectedTokens.size) {
+            let token = collectedTokens[index]
+            if (token.Begin() == beginToken.Begin()) {
+                startIndex = index
+            }
+            if (token.Begin() == node.end) {
+                endIndex = index
+                break
+            }
+            if (token.End() == node.end) {
+                endIndex = index + 1
+                break
+            }
+            index++
+        }
+        if (collectedTokens[startIndex].Begin() == beginToken.Begin()) {
+            startIndex++
+        }
+        while (startIndex < endIndex) {
+            tokens.add(collectedTokens[startIndex])
+            startIndex++
+        }
+        if (tokens[tokens.size - 1].kind == TokenKind.NL || tokens[tokens.size - 1].kind == TokenKind.END) {
             tokens.remove(at: tokens.size - 1)
         }
     }

@@ -1567,6 +1567,7 @@ extend ParserImpl {
             SetPrimaryDecl(ret.identifier.Val(), isRawId: ret.identifier.IsRaw())
             ParseClassLikeBody(ret, ScopeKind.CLASS_BODY)
             RevertPrimaryDecl()
+            ret.end = lastToken.End()
         }
         return ret
     }
@@ -1578,6 +1579,7 @@ extend ParserImpl {
             CheckDeclarationInScope(scopeKind, DefKind.INTERFACE)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.INTERFACE))
             ParseClassLikeBody(ret, ScopeKind.INTERFACE_BODY)
+            ret.end = lastToken.End()
         }
         return ret
     }
@@ -1591,6 +1593,7 @@ extend ParserImpl {
             SetPrimaryDecl(ret.identifier.Val(), isRawId: ret.identifier.IsRaw())
             ParseClassLikeBody(ret, ScopeKind.STRUCT_BODY)
             RevertPrimaryDecl()
+            ret.end = lastToken.End()
         }
         return ret
     }
