@@ -4,12 +4,9 @@ import cjcj::basic.SplitQualifiedName as BasicSplitQualifiedName
 import cjcj::basic.DiagCategory as EvalParsedDiagCategory
 import cjcj::basic.DiagnosticEngine as EvalParsedDiagnosticEngine
 import cjcj::lex.{Lexer as RealLexer, StringPartKind}
-import cjcj::parse.File as EvalParsedFile
 import cjcj::parse.IsBuiltinAnnotation as ParseIsBuiltinAnnotation
-import cjcj::parse.PackageSpec as EvalParsedPackageSpec
 import cjcj::parse.Parser as EvalParser
 import cjcj::parse.ScopeKind as EvalParsedScopeKind
-import cjcj::parse.SrcIdentifier as EvalParsedSrcIdentifier
 import cjcj::ast.{VisitAction, Walker}
 import cjcj::utils.FileUtil
 import std.collection.*
@@ -198,37 +195,6 @@ private func toEvaluationParsedScopeKind(scope: ScopeKind): EvalParsedScopeKind 
         case ScopeKind.MAIN_BODY => EvalParsedScopeKind.MAIN_BODY
         case ScopeKind.UNKNOWN_SCOPE => EvalParsedScopeKind.UNKNOWN_SCOPE
     }
-}
-
-private func makeEvaluationParsedFile(macroFile: File): EvalParsedFile {
-    let parsedFile = EvalParsedFile()
-    parsedFile.begin = macroFile.begin
-    parsedFile.end = macroFile.end
-    let parsedPackage = EvalParsedPackageSpec()
-    parsedPackage.begin = macroFile.begin
-    parsedPackage.end = macroFile.begin
-    parsedPackage.hasMacro = macroFile.hasMacro
-    if (let Some(pkg) <- macroFile.curPackage) {
-        parsedPackage.hasMacro = parsedPackage.hasMacro || pkg.isMacroPackage
-        let names = BasicSplitQualifiedName(pkg.fullPackageName)
-        var nameIdx: Int64 = 0
-        var cursor = macroFile.begin
-        while (nameIdx < names.size) {
-            let part = names[nameIdx]
-            let identEnd = cursor + part.size
-            let parsedIdent = EvalParsedSrcIdentifier(part, part, cursor, identEnd, false)
-            if (nameIdx + 1 == names.size) {
-                parsedPackage.packageName = parsedIdent
-            } else {
-                parsedPackage.prefixPaths.add(part)
-                parsedPackage.prefixPoses.add(cursor)
-            }
-            cursor = identEnd + 1
-            nameIdx++
-        }
-    }
-    parsedFile.packageSpec = Some(parsedPackage)
-    return parsedFile
 }
 
 private func isInPrimaryFuncParam(decl: Decl, mcPos: Position): Bool {
@@ -464,7 +430,7 @@ private func forwardEvaluationParserDiagnostics(parserDiag: EvalParsedDiagnostic
     }
 }
 
-private func checkMacroCallArgs(macCall: MacroCall, diag: DiagnosticEngine, compileCjd: Bool): Unit {
+private func CheckMacroCallArgs(macCall: MacroCall, diag: DiagnosticEngine, compileCjd: Bool): Unit {
     if (macCall.status != MacroEvalStatus.READY) {
         return
     }
@@ -478,7 +444,7 @@ private func checkMacroCallArgs(macCall: MacroCall, diag: DiagnosticEngine, comp
     let parser = EvalParser(refreshedTokens.toArray(), parserDiag, diag.GetSourceManager(), parseDeclFile: compileCjd)
     parser.SetPrimaryDecl(getPrimaryName(invocation))
     if (let Some(macroFile) <- macCall.RequireNode().curFile) {
-        parser.SetCurFile(makeEvaluationParsedFile(macroFile))
+        parser.SetCurFile(macroFile)
     }
     let _ = parser.ParseDecl(toEvaluationParsedScopeKind(invocation.scopeKind))
     let hasParseError = parserDiag.GetErrorCount() > 0u64
@@ -557,7 +523,7 @@ private func isMacroCallReadyForEval(macCall: MacroCall, diag: DiagnosticEngine,
             refreshMacroCallArgs(macCall, diag)
         }
     }
-    checkMacroCallArgs(macCall, diag, compileCjd)
+    CheckMacroCallArgs(macCall, diag, compileCjd)
     if (macCall.status == MacroEvalStatus.READY) {
         macCall.status = MacroEvalStatus.EVAL
         return true
@@ -1019,7 +985,7 @@ public class MacroEvaluation {
             parseDeclFile: ci.GetGlobalOptions().compileCjd)
         parser.SetPrimaryDecl(primaryName)
         if (let Some(macroFile) <- macCall.RequireNode().curFile) {
-            parser.SetCurFile(makeEvaluationParsedFile(macroFile))
+            parser.SetCurFile(macroFile)
         }
         parser.SetCompileOptions(ci.GetGlobalOptions())
         let decl = parser.ParseDecl(toEvaluationParsedScopeKind(scopeKind))
@@ -1259,8 +1225,7 @@ public class MacroEvaluation {
             CreateMacroCallsTree(reEval: true)
         }
         for (macCall in macroCollector.macCalls) {
-            if (macCall.status == MacroEvalStatus.FINISH || macCall.status == MacroEvalStatus.REEVALFAILED ||
-                macCall.status == MacroEvalStatus.SUCCESS) {
+            if (macCall.status == MacroEvalStatus.FINISH || macCall.status == MacroEvalStatus.REEVALFAILED) {
                 ProcessNewTokens(macCall)
             }
         }
