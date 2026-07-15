@@ -1,5 +1,9 @@
 package cjcj::chir
 
+import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
+import cjcj::basic.DiagKind as BasicDiagKind
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.Position as BasicPosition
 import cjcj::utils.OverflowStrategy
 import std.collection.*
 
@@ -8,6 +12,7 @@ public class BCHIRInterpreter {
     public static let EXTERNAL_PLAYGROUND_SIZE: Int64 = 20
 
     private let bchir: BCHIR
+    private let diag: BasicDiagnosticEngine
     private let interpStack: InterpreterStack = InterpreterStack()
     private let arena: InterpreterArena = InterpreterArena()
     private let env: InterpreterEnv
@@ -16,8 +21,9 @@ public class BCHIRInterpreter {
     private var lastResult: IResult = INotRun
     private var currentException: Option<InterpreterValue> = None
 
-    public init(bchir: BCHIR) {
+    public init(bchir: BCHIR, diag: BasicDiagnosticEngine) {
         this.bchir = bchir
+        this.diag = diag
         this.env = InterpreterEnv(bchir.GetNumGlobalVars())
     }
 
@@ -371,7 +377,7 @@ public class BCHIRInterpreter {
                 }
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (IsBinaryOp(opCode)) {
-                if (!EvaluateBinary(opCode)) {
+                if (!EvaluateBinary(opCode, pc)) {
                     return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 pc += 1 + GetOpCodeArgSize(opCode)
@@ -463,6 +469,30 @@ public class BCHIRInterpreter {
     // Mirrors C++ BCHIRInterpreter.cpp:738-741.
     private func RaiseError(_opIndex: Int64, _message: String): Unit {
         interpreterError = true
+    }
+
+    // Mirrors C++ BCHIRInterpreter.cpp:743-747.
+    private func RaiseArithmeticExceptionMsg(sourcePc: Int64, str: String): Unit {
+        ReportConstEvalException(sourcePc, "ArithmeticException: " + str)
+        interpreterError = true
+    }
+
+    // Mirrors C++ BCHIRInterpreter.cpp:774-788.
+    private func ReportConstEvalException(opIndex: Int64, exceptionName: String): Unit {
+        interpreterError = true
+        var errorPosition = BasicDefaultPosition
+        let applyPosition = bchir.GetLinkedByteCode().GetCodePositionAnnotation(opIndex) ??
+            BCHIRCodePosition(0, 0, 0)
+        let fileName = bchir.GetFileName(applyPosition.fileID)
+        let sourceManager = diag.GetSourceManager()
+        if (let Some(fileID) <- sourceManager.TryGetFileID(fileName)) {
+            if (!sourceManager.GetSource(fileID).buffer.isEmpty()) {
+                errorPosition = BasicPosition(fileID, applyPosition.line, applyPosition.column)
+            }
+        }
+        let error = diag.Diagnose(errorPosition, BasicDiagKind.const_eval_exception)
+        error.AddNote(exceptionName)
+        error.Emit()
     }
 
     private func CurrentFrameName(code: BCHIRDefinition, pc: Int64): String {
@@ -881,11 +911,11 @@ public class BCHIRInterpreter {
         return false
     }
 
-    private func EvaluateBinary(opCode: OpCode): Bool {
+    private func EvaluateBinary(opCode: OpCode, opIndex: Int64): Bool {
         let right = interpStack.ArgsPopIVal()
         let left = interpStack.ArgsPopIVal()
         if (left.IsIntLike() && right.IsIntLike()) {
-            return EvaluateIntBinary(opCode, left, right)
+            return EvaluateIntBinary(opCode, left, right, opIndex)
         }
         if (left.IsFloatLike() && right.IsFloatLike()) {
             return EvaluateFloatBinary(opCode, left, right)
@@ -911,9 +941,15 @@ public class BCHIRInterpreter {
         return false
     }
 
-    private func EvaluateIntBinary(opCode: OpCode, left: InterpreterValue, right: InterpreterValue): Bool {
+    private func EvaluateIntBinary(
+        opCode: OpCode, left: InterpreterValue, right: InterpreterValue, opIndex: Int64
+    ): Bool {
         let lhs = left.GetInt()
         let rhs = right.GetInt()
+        if (opCode == OpCode.BIN_LSHIFT || opCode == OpCode.BIN_LSHIFT_EXC ||
+            opCode == OpCode.BIN_RSHIFT || opCode == OpCode.BIN_RSHIFT_EXC) {
+            return BinShiftOpIntCase(opCode, left, right, opIndex)
+        }
         let result = match (opCode) {
             case OpCode.BIN_ADD => InterpreterValue.MakeInt(left.kind, lhs + rhs)
             case OpCode.BIN_ADD_EXC => InterpreterValue.MakeInt(left.kind, lhs + rhs)
@@ -930,10 +966,6 @@ public class BCHIRInterpreter {
             case OpCode.BIN_BITAND => InterpreterValue.MakeInt(left.kind, lhs & rhs)
             case OpCode.BIN_BITOR => InterpreterValue.MakeInt(left.kind, lhs | rhs)
             case OpCode.BIN_BITXOR => InterpreterValue.MakeInt(left.kind, lhs ^ rhs)
-            case OpCode.BIN_LSHIFT => if (rhs < 0) { InterpreterValue.MakeInvalid() } else { InterpreterValue.MakeInt(left.kind, lhs << rhs) }
-            case OpCode.BIN_LSHIFT_EXC => if (rhs < 0) { InterpreterValue.MakeInvalid() } else { InterpreterValue.MakeInt(left.kind, lhs << rhs) }
-            case OpCode.BIN_RSHIFT => if (rhs < 0) { InterpreterValue.MakeInvalid() } else { InterpreterValue.MakeInt(left.kind, lhs >> rhs) }
-            case OpCode.BIN_RSHIFT_EXC => if (rhs < 0) { InterpreterValue.MakeInvalid() } else { InterpreterValue.MakeInt(left.kind, lhs >> rhs) }
             case OpCode.BIN_LT => InterpreterValue.MakeBool(lhs < rhs)
             case OpCode.BIN_GT => InterpreterValue.MakeBool(lhs > rhs)
             case OpCode.BIN_LE => InterpreterValue.MakeBool(lhs <= rhs)
@@ -946,6 +978,31 @@ public class BCHIRInterpreter {
             return false
         }
         interpStack.ArgsPush(result)
+        return true
+    }
+
+    // Mirrors C++ BCHIRInterpreter.cpp:1244-1273.
+    private func BinShiftOpIntCase(
+        opCode: OpCode, left: InterpreterValue, right: InterpreterValue, opIndex: Int64
+    ): Bool {
+        let shiftValue = right.GetInt()
+        if ((right.kind == InterpreterValueKind.IINT8 || right.kind == InterpreterValueKind.IINT16 ||
+            right.kind == InterpreterValueKind.IINT32 || right.kind == InterpreterValueKind.IINT64 ||
+            right.kind == InterpreterValueKind.IINTNAT) && shiftValue < 0) {
+            RaiseArithmeticExceptionMsg(opIndex, "Overshift: Value of right operand is less than 0!")
+            return false
+        }
+        if (shiftValue >= IValUtils.SizeOf(left.kind)) {
+            RaiseArithmeticExceptionMsg(opIndex,
+                "Overshift: Value of right operand is greater than or equal to the width of left operand!")
+            return false
+        }
+        let result = if (opCode == OpCode.BIN_LSHIFT || opCode == OpCode.BIN_LSHIFT_EXC) {
+            left.GetInt() << shiftValue
+        } else {
+            left.GetInt() >> shiftValue
+        }
+        interpStack.ArgsPush(InterpreterValue.MakeInt(left.kind, result))
         return true
     }
 

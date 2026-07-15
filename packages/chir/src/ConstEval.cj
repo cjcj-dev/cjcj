@@ -1,5 +1,6 @@
 package cjcj::chir
 
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::option.GlobalOptions
 import cjcj::utils.CJC_ASSERT
 import cjcj::utils.FileUtil
@@ -9,9 +10,11 @@ import std.collection.*
 public class ConstEvalPass {
     private let builder: CHIRBuilder
     private let opts: GlobalOptions
+    private let diag: BasicDiagnosticEngine
 
-    public init(builder: CHIRBuilder, opts!: GlobalOptions = GlobalOptions()) {
+    public init(builder: CHIRBuilder, diag: BasicDiagnosticEngine, opts!: GlobalOptions = GlobalOptions()) {
         this.builder = builder
+        this.diag = diag
         this.opts = opts
     }
 
@@ -34,7 +37,7 @@ public class ConstEvalPass {
         let extraReqSpace = BCHIRInterpreter.INTERNAL_PLAYGROUND_SIZE + BCHIRInterpreter.EXTERNAL_PLAYGROUND_SIZE
         linkedBchir.Resize(fePlayground + extraReqSpace)
 
-        let interpreter = BCHIRInterpreter(linkedBchir)
+        let interpreter = BCHIRInterpreter(linkedBchir, diag)
         interpreter.SetGlobalVars(globalInitValues)
         let result = interpreter.Run(baseIndex: 0, expectsReturn: false)
         match (result) {

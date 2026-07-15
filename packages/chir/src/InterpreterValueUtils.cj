@@ -4,6 +4,32 @@ import cjcj::utils.CJC_ABORT
 import std.collection.*
 
 public class IValUtils {
+    // Mirrors C++ InterpreterValueUtils.h:153-170.
+    @When[arch == "x86_64" || arch == "aarch64"]
+    public static func SizeOf(kind: InterpreterValueKind): Int64 {
+        return match (kind) {
+            case InterpreterValueKind.IINT8 | InterpreterValueKind.IUINT8 => 8
+            case InterpreterValueKind.IINT16 | InterpreterValueKind.IUINT16 => 16
+            case InterpreterValueKind.IINT32 | InterpreterValueKind.IUINT32 => 32
+            case InterpreterValueKind.IINT64 | InterpreterValueKind.IUINT64 |
+                InterpreterValueKind.IINTNAT | InterpreterValueKind.IUINTNAT => 64
+            case _ => CJC_ABORT(); 0
+        }
+    }
+
+    // Mirrors C++ InterpreterValueUtils.h:153-170.
+    @When[arch != "x86_64" && arch != "aarch64"]
+    public static func SizeOf(kind: InterpreterValueKind): Int64 {
+        return match (kind) {
+            case InterpreterValueKind.IINT8 | InterpreterValueKind.IUINT8 => 8
+            case InterpreterValueKind.IINT16 | InterpreterValueKind.IUINT16 => 16
+            case InterpreterValueKind.IINT32 | InterpreterValueKind.IUINT32 |
+                InterpreterValueKind.IINTNAT | InterpreterValueKind.IUINTNAT => 32
+            case InterpreterValueKind.IINT64 | InterpreterValueKind.IUINT64 => 64
+            case _ => CJC_ABORT(); 0
+        }
+    }
+
     @When[arch == "x86_64" || arch == "aarch64"]
     public static func PrimitiveUIntNat(value: Int64): InterpreterValue {
         return InterpreterValue.MakeUInt(InterpreterValueKind.IUINTNAT, value)

@@ -1197,7 +1197,8 @@ public class FaithfulAST2CHIR {
         BoxRecursionValueType(CurrentPackage(), builder).Run()
         if (!failure && opts.IsConstEvalEnabled() && !opts.enIncrementalCompilation && opts.commonPartCjos.isEmpty()) {
             let bchirPackages = ArrayList<BCHIR>()
-            ConstEvalPass(builder, opts: opts).RunOnPackage(CurrentPackage(), initFuncsForConstVar, bchirPackages)
+            ConstEvalPass(builder, diag.getOrThrow(), opts: opts).RunOnPackage(
+                CurrentPackage(), initFuncsForConstVar, bchirPackages)
         }
         if (chirWFC) {
             AST2CHIRCheck()
