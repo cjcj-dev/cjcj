@@ -3580,7 +3580,6 @@ public class FaithfulAST2CHIR {
         initFlag.EnableAttr(Attribute.NO_DEBUG_INFO)
         initFlag.SetLinkTypeInfo(BasicLinkage.INTERNAL)
         initFlag.SetInitializer(builder.CreateLiteralValue(BoolLiteral(false), boolTy))
-        AddGlobalVarToPackage(initFlag)
         return initFlag
     }
 
@@ -4467,7 +4466,6 @@ public class FaithfulAST2CHIR {
             let globalVar = builder.CreateGlobalVar(builder.context.GetRefTy(builder.context.GetInt64Ty()),
                 decl.mangledName, srcCodeIdentifier: decl.identifier.Val(), rawMangledName: decl.rawMangleName,
                 packageName: decl.fullPackageName)
-            AddGlobalVarToPackage(globalVar)
             globalVar.SetDebugLocation(loc)
             value = globalVar
         }
@@ -4602,7 +4600,6 @@ public class FaithfulAST2CHIR {
             globalVar.EnableAttr(Attribute.CONST)
         }
         globalCache.Set(varDecl, globalVar)
-        AddGlobalVarToPackage(globalVar)
     }
 
     private func CreateGlobalVarSignature(decls: ArrayList<AstDecl>, isLocalConst!: Bool = false): Unit {
@@ -4674,7 +4671,6 @@ public class FaithfulAST2CHIR {
             globalVar.EnableAttr(Attribute.COMMON)
         }
         globalCache.Set(decl, globalVar)
-        AddGlobalVarToPackage(globalVar)
         return globalVar
     }
 
@@ -4798,10 +4794,6 @@ public class FaithfulAST2CHIR {
             return FuncKind.DEFAULT_PARAMETER_FUNC
         }
         return FuncKind.DEFAULT
-    }
-
-    private func AddGlobalVarToPackage(globalVar: GlobalVar): Unit {
-        CurrentPackage().AddGlobalVar(globalVar)
     }
 
     private func ApplyDeclAttrs(target: Base, decl: AstDecl): Unit {

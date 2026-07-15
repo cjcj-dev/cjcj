@@ -166,6 +166,7 @@ public class CHIRBuilder {
         rawMangledName!: String = "", packageName!: String = ""): GlobalVar {
         let globalVar = GlobalVar(ty, GLOBAL_VALUE_PREFIX + identifier, srcCodeIdentifier, rawMangledName, packageName)
         allocatedValues.add(globalVar)
+        context.GetCurPackage().getOrThrow().AddGlobalVar(globalVar)
         return globalVar
     }
 

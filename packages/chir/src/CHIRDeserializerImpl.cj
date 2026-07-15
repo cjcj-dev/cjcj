@@ -396,7 +396,6 @@ class CHIRDeserializerImpl {
                         globalVar.AddFeature(feature)
                     }
                 }
-                pkg.AddGlobalVar(globalVar)
             }
         }
     }
@@ -1837,7 +1836,6 @@ class CHIRDeserializerImpl {
             srcCodeIdentifier: globalValue.GetSrcCodeIdentifier().getOrThrow().str(),
             rawMangledName: globalValue.GetRawMangledName().getOrThrow().str(),
             packageName: globalValue.GetPackageName().getOrThrow().str())
-        builder.context.GetCurPackage().getOrThrow().AddGlobalVar(result)
         result.SetFeatures(GetFeatures(globalValue))
         if (compilePlatform) { result.EnableAttr(Attribute.DESERIALIZED) }
         return result
