@@ -299,7 +299,10 @@ private func ReconcileFrontendOutputs(opts: DriverOptions): Bool {
 }
 
 private func PublishFrontendCjoOutputs(opts: DriverOptions): Bool {
-    if (!HasFrontendSourceInput(opts) || opts.IsEmitCHIREnable() || opts.frontendOnlyAction ||
+    // C++: Option/Option.h:1199-1202 and FrontendTool/FrontendTool.cpp:108,152-155.
+    // DriverOptions folds OutputMode.CHIR into IsEmitCHIREnable; C++ only tests emitCHIRPhase here.
+    if (!HasFrontendSourceInput(opts) || (opts.IsEmitCHIREnable() && opts.outputMode != OutputMode.CHIR) ||
+        opts.frontendOnlyAction ||
         opts.cjoOutputFiles.isEmpty()) {
         return true
     }

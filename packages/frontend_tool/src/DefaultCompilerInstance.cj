@@ -143,7 +143,12 @@ public open class DefaultCompilerInstance {
                 return true
             }
             if (invocation.globalOptions.outputMode == OutputMode.CHIR || invocation.frontendOptions.chirDeserialize) {
-                return SaveCjos(core.GetSourcePackages())
+                let pkgs = core.GetSourcePackages()
+                let saved = SaveCjos(pkgs)
+                if (saved) {
+                    RegisterCjoOutputs(pkgs)
+                }
+                return saved
             }
             return true
         })
@@ -211,7 +216,8 @@ public open class DefaultCompilerInstance {
     }
 
     private func ShouldPublishCjo(): Bool {
-        return ShouldSaveCjoForOutputMode()
+        // C++: FrontendTool/DefaultCompilerInstance.cpp:177-218 DefaultCIImpl::SaveCjo.
+        return invocation.globalOptions.outputMode == OutputMode.CHIR || ShouldSaveCjoForOutputMode()
     }
 
     private func ShouldSaveCjoForOutputMode(): Bool {

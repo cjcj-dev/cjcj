@@ -9,6 +9,7 @@ import cjcj::chir.Attribute as ChirAttribute
 import cjcj::chir.Block as ChirBlock
 import cjcj::chir.CHIRBuilder as ChirBuilder
 import cjcj::chir.CHIRPrinter as ChirCHIRPrinter
+import cjcj::chir.CHIRSerializer
 import cjcj::chir.CHIRType
 import cjcj::chir.CHIRTypeCache
 import cjcj::chir.CallGraphAnalysis
@@ -46,6 +47,7 @@ import cjcj::chir.rangeStateGlobals
 import cjcj::chir.ReplaceUsesWithWrapper
 import cjcj::chir.ShouldReportUnusedCodeWarnings
 import cjcj::chir.Terminator as ChirTerminator
+import cjcj::chir.ToCHIRPhase
 import cjcj::chir.UnitUnify
 import cjcj::chir.UpdateMemberVarPath
 import cjcj::chir.UselessAllocateElimination
@@ -60,9 +62,11 @@ import cjcj::codegen.LLVMModuleHandle as LLVMModuleHandle
 import cjcj::codegen.SavePackageModule
 import cjcj::meta_transformation.TryRunCHIRMetaTransforms
 import cjcj::option.OptimizationFlag
+import cjcj::option.OutputMode
 import cjcj::option.TempFileInfo
 import cjcj::utils.CFFI_FUNC_SUFFIX
 import cjcj::utils.CHIR_READABLE_FILE_EXTENSION
+import cjcj::utils.CHIR_SERIALIZATION_FILE_EXTENSION
 import cjcj::utils.CJC_ASSERT
 import cjcj::utils.DEFAULT_PACKAGE_NAME
 import cjcj::utils.FileUtil
@@ -120,6 +124,12 @@ private class ToCHIR {
         instance.chirData.SetImplicitFuncs(lowered, ast2chir.GetImplicitFuncs())
         maybeUnreachable = ast2chir.GetMaybeUnreachableBlocks()
         chirPkg = Some(lowered)
+        // C++: CHIR/CHIR.cpp:1133-1140 ToCHIR::Run.
+        if (instance.invocation.globalOptions.outputMode == OutputMode.CHIR) {
+            let fileName = FileUtil.JoinPath(outputPath, lowered.GetName()) + CHIR_SERIALIZATION_FILE_EXTENSION
+            CHIRSerializer.Serialize(lowered, fileName, ToCHIRPhase.RAW)
+            return Some(lowered)
+        }
         RulesChecking(lowered, builder, instance.invocation.globalOptions,
             instance.diag.AsBasicDiagnosticEngine(), effectMap, maybeUnreachable)
         RunOptimizationPass(lowered)
