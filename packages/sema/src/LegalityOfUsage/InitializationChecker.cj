@@ -1363,24 +1363,31 @@ public class InitializationChecker {
         if (node.astKind != ASTKind.RETURN_EXPR) {
             return
         }
-        if (let Some(currentFunc) <- CurrentNamedFuncDecl()) {
-            if (!IsInstanceConstructor(currentFunc)) {
-                return
-            }
-            if (let Some(_) <- FindCtorUninitVars(ctorUninitVars, currentFunc)) {
-                return
-            }
-            let ctorVars = CtorUninitVars(currentFunc)
-            if (let Some(typeDecl) <- currentFunc.outerDecl) {
-                for (member in typeDecl.GetMemberDecls()) {
-                    if (member.astKind == ASTKind.VAR_DECL && !member.TestAttr(Attribute.STATIC) &&
-                        !member.TestAttr(Attribute.INITIALIZED)) {
-                        AddUniqueDecl(ctorVars.decls, member)
-                    }
+        let funcSymbol = match (ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, node.scopeName)) {
+            case Some(value) => value
+            case None => return
+        }
+        let funcNode = match (funcSymbol.node) {
+            case Some(value) => value
+            case None => return
+        }
+        if (!IsInstanceConstructor(funcNode)) {
+            return
+        }
+        let ctor = (funcNode as FuncDecl).getOrThrow()
+        if (let Some(_) <- FindCtorUninitVars(ctorUninitVars, ctor)) {
+            return
+        }
+        let ctorVars = CtorUninitVars(ctor)
+        if (let Some(typeDecl) <- ctor.outerDecl) {
+            for (member in typeDecl.GetMemberDecls()) {
+                if (member.astKind == ASTKind.VAR_DECL && !member.TestAttr(Attribute.STATIC) &&
+                    !member.TestAttr(Attribute.INITIALIZED)) {
+                    AddUniqueDecl(ctorVars.decls, member)
                 }
             }
-            ctorUninitVars.add(ctorVars)
         }
+        ctorUninitVars.add(ctorVars)
     }
 
     private func UpdateInitializationStatus(assign: AssignExpr, decl: Decl): Unit {
