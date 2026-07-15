@@ -1,6 +1,7 @@
 package cjcj::utils
 
 import std.collection.*
+import std.env.atExit
 
 public class UserCodeInfo <: UserBase {
     private static let singleton = UserCodeInfo()
@@ -8,6 +9,7 @@ public class UserCodeInfo <: UserBase {
 
     private init() {
         super()
+        atExit({ => OutputResult() })
     }
 
     public static func Instance(): UserCodeInfo {
@@ -39,4 +41,3 @@ public class UserCodeInfo <: UserBase {
         return ".info.prof"
     }
 }
-

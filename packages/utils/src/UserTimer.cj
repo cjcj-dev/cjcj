@@ -1,6 +1,7 @@
 package cjcj::utils
 
 import std.collection.*
+import std.env.atExit
 import std.time.*
 
 @When[os == "macOS" || os == "Windows" || env == "ohos"]
@@ -43,6 +44,7 @@ public class UserTimer <: UserBase {
 
     private init() {
         super()
+        atExit({ => OutputResult() })
     }
 
     public static func Instance(): UserTimer {

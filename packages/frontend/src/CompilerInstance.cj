@@ -20,6 +20,7 @@ import cjcj::lex.TokenKind as CangjieTokenKind
 import cjcj::lex.TokenKindValue
 import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::utils.FreeIdleMemoryToOS
+import cjcj::utils.ProfileRecorder
 import cjcj::chir.CHIRBuilder as ChirBuilder
 import cjcj::chir.CHIRDeserializer as ChirDeserializer
 import cjcj::chir.CHIRPrinter as ChirPrinter
@@ -314,6 +315,8 @@ public class CompilerInstance {
         if (!srcPkgs.isEmpty()) {
             let globalOpts = invocation.globalOptions
             srcPkgs[0].noSubPkg = globalOpts.noSubPkg
+            ProfileRecorder.SetPackageName(srcPkgs[0].fullPackageName)
+            ProfileRecorder.SetOutputDir(globalOpts.output)
             if (IsNeedSaveIncrCompilationLogFile(globalOpts, invocation.frontendOptions)) {
                 let incrLogPath = globalOpts.GenerateCachedPathName(srcPkgs[0].fullPackageName, CACHED_LOG_EXTENSION)
                 let _ = WriteFileContent(incrLogPath, "")

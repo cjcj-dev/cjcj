@@ -2,6 +2,7 @@ package cjcj::utils
 
 import std.collection.*
 import std.convert.*
+import std.env.atExit
 import std.fs.File
 
 private let DISPLAY_PRECISION: Int64 = 2
@@ -28,6 +29,7 @@ public class UserMemoryUsage <: UserBase {
 
     private init() {
         super()
+        atExit({ => OutputResult() })
     }
 
     public static func Instance(): UserMemoryUsage {
