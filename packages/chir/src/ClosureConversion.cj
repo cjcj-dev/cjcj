@@ -847,8 +847,15 @@ public class ClosureConversion {
         while (idx < genericTypes.size) {
             let newGeneric = (classTypeArgs[idx] as GenericType).getOrThrow()
             let newBounds = ArrayList<Type>()
-            for (bound in genericTypes[idx].GetUpperBounds()) {
-                newBounds.add(SubstituteGenericTypes(bound, genericMap))
+            if (newGeneric.GetSrcCodeIdentifier() == GENERIC_THIS_SRC_NAME) {
+                let parentCustomType = GetTopLevelFunc(srcFunc).GetParentCustomTypeDef().getOrThrow().
+                    GetType().getOrThrow()
+                let parentRef = builder.context.GetRefTy(parentCustomType)
+                newBounds.add(SubstituteGenericTypes(parentRef, genericMap))
+            } else {
+                for (bound in genericTypes[idx].GetUpperBounds()) {
+                    newBounds.add(SubstituteGenericTypes(bound, genericMap))
+                }
             }
             newGeneric.SetUpperBounds(newBounds)
             idx++
