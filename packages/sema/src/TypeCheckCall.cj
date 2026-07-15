@@ -2627,7 +2627,10 @@ private func FillEnumTypeArgumentsTy(typeManager: TypeManager, ctorDecl: Decl, t
         }
         case None => return
     }
-    let generic = enumDecl.generic ?? return
+    let generic = match (enumDecl.generic) {
+        case Some(value) => value
+        case None => return
+    }
     if (let Some(baseExpr) <- ma.baseExpr) {
         if (let Some(ref) <- (baseExpr as NameReferenceExpr)) {
             if (ref.typeArguments.isEmpty()) {
