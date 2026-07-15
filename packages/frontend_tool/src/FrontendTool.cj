@@ -97,7 +97,8 @@ public func ExecuteFrontendWithResult(
     exePath: String,
     args: Array<String>,
     environmentVars: HashMap<String, String>,
-    compileTarget!: Option<CompileTarget> = None
+    compileTarget!: Option<CompileTarget> = None,
+    tempFolderPath!: Option<String> = None
 ): FrontendExecutionResult {
     let diag = DiagnosticEngine()
     let invocation = CompilerInvocation()
@@ -107,6 +108,9 @@ public func ExecuteFrontendWithResult(
     }
     if (let Some(target) <- compileTarget) {
         invocation.globalOptions.compileTarget = target
+    }
+    if (let Some(path) <- tempFolderPath) {
+        invocation.globalOptions.tempFolderPath = path
     }
 
     let globalOptions = invocation.globalOptions

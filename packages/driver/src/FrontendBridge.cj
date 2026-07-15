@@ -17,7 +17,8 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
         PrintFrontendCommand(driver.cangjieHome, frontendOptions)
     }
     let result = ExecuteFrontendWithResult(driver.executableName, frontendArgs,
-        driver.driverOptions.environment.allVariables, compileTarget: Some(driver.driverOptions.compileTarget))
+        driver.driverOptions.environment.allVariables, compileTarget: Some(driver.driverOptions.compileTarget),
+        tempFolderPath: Some(TempFileManager.Instance().GetTempFolder()))
     if (result.exitCode != 0) {
         return false
     }

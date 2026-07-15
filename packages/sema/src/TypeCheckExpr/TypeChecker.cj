@@ -2583,7 +2583,7 @@ extend TypeChecker {
             return
         }
         if ((!options.CompileExecutable() && !outputCHIR) || packageHasMain.TestAttr(Attribute.IMPORTED) ||
-            options.enIncrementalCompilation || !Ty.IsTyCorrect(funcTy.retTy) || mainBody.paramLists.isEmpty()) {
+            !Ty.IsTyCorrect(funcTy.retTy) || mainBody.paramLists.isEmpty()) {
             return
         }
 

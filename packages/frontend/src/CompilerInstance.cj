@@ -20,6 +20,7 @@ import cjcj::lex.Lexer as CangjieLexer
 import cjcj::lex.TokenKind as CangjieTokenKind
 import cjcj::lex.TokenKindValue
 import cjcj::incremental_compilation.CachedMangleMap
+import cjcj::incremental_compilation.IncreKind
 import cjcj::option.OutputMode
 import cjcj::utils.FreeIdleMemoryToOS
 import cjcj::utils.ProfileRecorder
@@ -176,6 +177,7 @@ public class CompilerInstance {
     public var currentPkg: Option<Package> = None
     public var mangler: RealBaseMangler = RealCHIRMangler(false)
     public let mangledName2DeclMap: HashMap<String, Decl> = HashMap<String, Decl>()
+    public var kind: IncreKind = IncreKind.INVALID
     public var releaseCHIRMemory: Bool = true
     public var needToOptString: Bool = false
     public var needToOptGenericDecl: Bool = false

@@ -358,22 +358,11 @@ private func EmitCJSDKVersion(cgMod: CGModule): Unit {
 }
 
 private func EmitMain(cgMod: CGModule): Unit {
-    // Mirror C++ EmitMain (EmitPackageIR.cpp:253): the executable entry is only emitted when
-    // compiling an executable; for a library the runtime provides no `main`.
     if (!cgMod.GetCGContext().GetCompileOptions().CompileExecutable()) {
         return
     }
-    // Mirror C++ EmitMain (EmitPackageIR.cpp:258-267): only the package that actually defines the
-    // user main emits `main`/`cj_entry$`. When mutually-dependent source packages are compiled
-    // together into one executable, a sibling package may *find* the user main as an IMPORTED
-    // declaration in its own CHIR; emitting the entry for it causes "multiple definition of
-    // `main`/`cj_entry$`" at link time. Skip when no user main is visible, or the visible one is
-    // imported from another package.
-    let userMainEntry = FindUserMainFunction(cgMod)
-    if (userMainEntry.isNone() || userMainEntry.getOrThrow().TestAttr(Attribute.IMPORTED)) {
-        return
-    }
-    let userMainFunc = cgMod.GetOrInsertCGFunction(userMainEntry.getOrThrow())
+    let chirUserMain = cgMod.GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(USER_MAIN_MANGLED_NAME).getOrThrow()
+    let userMainFunc = cgMod.GetOrInsertCGFunction(chirUserMain)
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
         var mainFunc = LLVMNullValue()
         try (mainName = unsafe { LibC.mallocCString("main") }.asResource()) {
@@ -982,13 +971,6 @@ private func SetLLVMValueName(parent: LLVMValueRef, paramIndex: UInt32, name: St
     try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
         unsafe { setName(value, nameCString.value, UIntNative(name.size)) }
     }
-}
-
-private func FindUserMainFunction(cgMod: CGModule): Option<Function> {
-    if (let Some(value) <- cgMod.GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(USER_MAIN_MANGLED_NAME)) {
-        return value as Function
-    }
-    return None
 }
 
 private func BuildLLVMFunctionType(returnType: LLVMTypeRef, paramTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {

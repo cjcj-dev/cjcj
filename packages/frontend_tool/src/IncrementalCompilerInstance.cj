@@ -52,6 +52,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         } else {
             kind = AnalyseCurrentFrontendCache()
         }
+        core.kind = kind
         LogIncrementalAnalysisResult()
         recorder.close()
         return true

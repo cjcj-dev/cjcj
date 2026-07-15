@@ -1102,6 +1102,7 @@ public class FaithfulAST2CHIR {
     private let gim: Option<GenericInstantiationManager>
     private let overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>>
     private let opts: GlobalOptions
+    private let kind: IncreKind
     private let chirWFC: Bool
     private let chirOptOverO2: Bool
     private let diag: Option<BasicDiagnosticEngine>
@@ -1156,7 +1157,8 @@ public class FaithfulAST2CHIR {
         directImportedPkgs!: ArrayList<AstPackage> = ArrayList<AstPackage>(),
         gim!: Option<GenericInstantiationManager> = None,
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None,
-        opts!: GlobalOptions = GlobalOptions(), chirWFC!: Bool = false, chirOptOverO2!: Bool = false,
+        opts!: GlobalOptions = GlobalOptions(), kind!: IncreKind = IncreKind.INVALID,
+        chirWFC!: Bool = false, chirOptOverO2!: Bool = false,
         diag!: Option<BasicDiagnosticEngine> = None, isComputingAnnos!: Bool = false) {
         this.builder = builder
         this.chirType = chirType
@@ -1166,6 +1168,7 @@ public class FaithfulAST2CHIR {
         this.gim = gim
         this.overrideSrcFuncResolver = overrideSrcFuncResolver
         this.opts = opts
+        this.kind = kind
         this.chirWFC = chirWFC
         this.chirOptOverO2 = chirOptOverO2
         this.diag = diag
@@ -1825,7 +1828,7 @@ public class FaithfulAST2CHIR {
                     "faithful AST2CHIR CreateCustomTypeDef expected nominal decl, got ${ASTKindName(decl.astKind)}")
         }
         let def = customTypeDef.getOrThrow()
-        if (opts.enIncrementalCompilation && decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED) &&
+        if (kind == IncreKind.INCR && decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED) &&
             !decl.toBeCompiled) {
             def.EnableAttr(Attribute.NON_RECOMPILE)
         }
@@ -2464,7 +2467,7 @@ public class FaithfulAST2CHIR {
 
         let nodesWithDeps = ElementList()
         for (element in funcsAndVars.stableOrderValue) {
-            if (opts.enIncrementalCompilation && !element.toBeCompiled && element.identifier.Val() != STATIC_INIT_VAR) {
+            if (kind == IncreKind.INCR && !element.toBeCompiled && element.identifier.Val() != STATIC_INIT_VAR) {
                 continue
             }
             nodesWithDeps.AddElement(element)
@@ -2724,7 +2727,7 @@ public class FaithfulAST2CHIR {
             failureReason = "chir file might circular dependency"
             return ArrayList<AstFile>()
         }
-        if (opts.enIncrementalCompilation) {
+        if (kind == IncreKind.INCR) {
             for (fileVars in fileAndVarMap) {
                 CheckUseBeforeInit(fileVars.vars, var2varDepsInFile)
             }
@@ -3491,7 +3494,7 @@ public class FaithfulAST2CHIR {
                     InsertInitializerIntoPackageInitializer(fileLiteralInit, packageInit)
                 }
             } else {
-                if (!fileVars.vars.isEmpty() || opts.enIncrementalCompilation) {
+                if (!fileVars.vars.isEmpty() || kind == IncreKind.INCR) {
                     if (!fileVars.vars.isEmpty() && IsSymbolImportedDecl(fileVars.vars[0])) {
                         continue
                     }
@@ -3858,7 +3861,7 @@ public class FaithfulAST2CHIR {
     }
 
     private func IsIncrementalNoChange(varDecl: AstVarDecl): Bool {
-        return opts.enIncrementalCompilation && !varDecl.toBeCompiled
+        return kind == IncreKind.INCR && !varDecl.toBeCompiled
     }
 
     private func TranslateIncrementalNoChangeVar(varDecl: AstVarDecl): Function {
@@ -4312,7 +4315,7 @@ public class FaithfulAST2CHIR {
             fn.DisableAttr(Attribute.PRIVATE)
             fn.EnableAttr(Attribute.INTERNAL)
         }
-        if (opts.enIncrementalCompilation && !funcDecl.toBeCompiled) {
+        if (kind == IncreKind.INCR && !funcDecl.toBeCompiled) {
             fn.EnableAttr(Attribute.NON_RECOMPILE)
             fn.EnableAttr(Attribute.IMPORTED)
         }
@@ -4341,7 +4344,7 @@ public class FaithfulAST2CHIR {
         if (funcDecl.TestAttr(AstAttribute.GENERIC)) {
             TranslateFunctionGenericUpperBounds(funcDecl)
         }
-        if (opts.enIncrementalCompilation && !funcDecl.toBeCompiled && !IsSrcCodeImportedGlobalDecl(funcDecl)) {
+        if (kind == IncreKind.INCR && !funcDecl.toBeCompiled && !IsSrcCodeImportedGlobalDecl(funcDecl)) {
             CreatePseudoImportedFuncSignatureAndSetGlobalCache(funcDecl)
             return
         }

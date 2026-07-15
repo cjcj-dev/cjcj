@@ -113,6 +113,7 @@ private class ToCHIR {
                 }
             }),
             opts: instance.invocation.globalOptions,
+            kind: instance.kind,
             chirWFC: instance.invocation.globalOptions.chirWFC,
             chirOptOverO2: instance.invocation.globalOptions.IsCHIROptimizationLevelOverO2(),
             diag: Some(instance.diag.AsBasicDiagnosticEngine()))
