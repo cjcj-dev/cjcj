@@ -829,19 +829,31 @@ public class DiagnosticBuilder <: Resource {
     }
 
     public func AddHint(pos: Position, arguments!: Array<String> = Array<String>()): Unit {
+        let argumentList = ArrayList<String>()
+        for (argument in arguments) {
+            argumentList.add(argument)
+        }
         var finalPos = pos
         if (let Some(info) <- diagnostic.macroDiagInfo) {
             finalPos = info.MapPos(pos, isLowerBound: true)
         }
-        AddHint(MakeRange(finalPos, finalPos + 1), arguments: arguments)
+        AddHint(MakeRange(finalPos, finalPos + 1), argumentList)
     }
 
     public func AddHint(range: Range, arguments!: Array<String> = Array<String>()): Unit {
+        let argumentList = ArrayList<String>()
+        for (argument in arguments) {
+            argumentList.add(argument)
+        }
         if (let Some(info) <- diagnostic.macroDiagInfo) {
             let newRange = MakeRange(info.MapPos(range.begin), info.MapPos(range.end, isLowerBound: true))
-            AddHint(newRange, arguments: arguments)
+            AddHint(newRange, argumentList)
             return
         }
+        AddHint(range, argumentList)
+    }
+
+    public func AddHint(range: Range, arguments: ArrayList<String>): Unit {
         diag.CheckRange(diagnostic.GetDiagCategory(), range)
         let errData = errorData[DiagKindRefactorIndex(diagnostic.rKind)]
         if (diagnostic.otherHints.size >= errData.otherHints.size) {
@@ -853,7 +865,7 @@ public class DiagnosticBuilder <: Resource {
             return
         }
         let template = errData.otherHints[diagnostic.otherHints.size]
-        let inserted = Diagnostic.InsertArguments(template, arguments)
+        let inserted = Diagnostic.InsertArguments(template, arguments.toArray())
         diagnostic.otherHints.add(IntegratedString(range, inserted, OTHER_HINT_COLOR))
     }
 
