@@ -229,15 +229,15 @@ public class SanitizerCoverage {
         let isSancovLevelVaild = sanCovOption.coverageType == SanitizerCoverageType.SCK_FUNCTION ||
             sanCovOption.coverageType == SanitizerCoverageType.SCK_BB
         if (!isSancov && sanCovOption.pcTable) {
-            diag.Diagnose(BasicDiagKind.chir_sancov_illegal_usage_of_pc_table)
+            diag.Diagnose(BasicDiagKind.chir_sancov_illegal_usage_of_pc_table).Emit()
             return false
         }
         if (isSancov && sanCovOption.coverageType == SanitizerCoverageType.SCK_NONE) {
-            diag.Diagnose(BasicDiagKind.chir_sancov_illegal_usage_of_level)
+            diag.Diagnose(BasicDiagKind.chir_sancov_illegal_usage_of_level).Emit()
             return false
         }
         if (!isSancov && isSancovLevelVaild) {
-            diag.Diagnose(BasicDiagKind.chir_sancov_illegal_usage_of_level)
+            diag.Diagnose(BasicDiagKind.chir_sancov_illegal_usage_of_level).Emit()
             return false
         }
         return true
