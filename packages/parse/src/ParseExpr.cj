@@ -1469,6 +1469,7 @@ extend ParserImpl {
             ParseTryWithResource(ret, ScopeKind.FUNC_BODY)
         } else {
             DiagExpectCharacter("'{' or '('", noteStr: "try expression must have block or resources")
+            ret.hasBroken = true
             ret.isBroken = true
         }
         while (Seeing(TokenKind.HANDLE) || Seeing(TokenKind.CATCH)) {
@@ -1484,9 +1485,9 @@ extend ParserImpl {
         } else {
             // C++: src/Parse/ParseAtom.cpp:647-651 ParserImpl::ParseTryExpr.
             if (ret.catchBlocks.isEmpty() && ret.handlers.isEmpty() && ret.resourceSpec.isEmpty() &&
-                !ret.isBroken) {
+                !ret.hasBroken) {
                 DiagExpectedCatchOrHandleOrFinallyAfterTry(ret)
-                ret.isBroken = true
+                ret.hasBroken = true
             }
         }
         if (let Some(finallyBlock) <- ret.finallyBlock) {
