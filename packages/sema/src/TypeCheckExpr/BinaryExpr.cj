@@ -1348,15 +1348,17 @@ private func ChkExpoExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     return false
 }
 
-private func ChkArithmeticExprBuiltin(typeManager: TypeManager, target: Ty, be: BinaryExpr,
-    ctx!: Option<ASTContext> = None, checker!: Option<BinaryOperandChecker> = None,
+private func ChkArithmeticExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
+    ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
+    checker!: Option<BinaryOperandChecker> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let targetTy = UnboxOptionType(target)
     if (!Ty.IsTyCorrect(targetTy)) {
         return false
     }
     if (be.op == TokenKind.EXP) {
-        return ChkExpoExpr(typeManager, targetTy, be, ctx: ctx, checker: checker, diag: diag)
+        return ChkExpoExpr(typeManager, targetTy, be, ctx: ctx, synthesizer: synthesizer,
+            checker: checker, diag: diag)
     }
     let candidateKinds = GetConcreteBinaryCandidateKinds(be.op)
     let thisDiags = ArrayList<Diagnostic>()
@@ -1457,11 +1459,12 @@ private func ChkShiftExprBuiltin(typeManager: TypeManager, target: Ty, be: Binar
     return false
 }
 
-private func ChkBuiltinBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
+private func CheckBinaryExprCaseBuiltIn(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (IsArithmeticOperator(be.op)) {
-        return ChkArithmeticExprBuiltin(typeManager, target, be, ctx: ctx, checker: checker, diag: diag)
+        return ChkArithmeticExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer,
+            checker: checker, diag: diag)
     }
     if (IsRelationalOperator(be.op)) {
         return ChkRelationalExprBuiltin(typeManager, target, be, ctx: ctx,
@@ -1608,7 +1611,8 @@ public func ChkBinaryExpr(impl: TypeCheckerImpl, target: Ty, be: BinaryExpr,
         return ChkFlowExpr(typeManager, target, be, synthesizer.getOrThrow(), checker.getOrThrow(), diag)
     }
     try (ds = DiagSuppressor(diag)) {
-        if (ChkBuiltinBinaryExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker,
+        if (CheckBinaryExprCaseBuiltIn(typeManager, target, be, ctx: ctx, synthesizer: synthesizer,
+            checker: checker,
             diag: diag)) {
             ds.ReportDiag()
             return true
