@@ -4334,6 +4334,52 @@ internal func CheckNonNormalCall(typeManager: TypeManager, diag: Option<BasicDia
     return res
 }
 
+private func IsSearchTargetInMemberAccessUpperBound(ce: CallExpr): Bool {
+    if (let Some(baseFunc) <- ce.baseFunc) {
+        if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+            return memberAccess.isExposedAccess
+        }
+    }
+    return false
+}
+
+private func GetErrorKindForCall(candidatesBeforeCheck: ArrayList<FuncDecl>,
+    candidatesAfterCheck: ArrayList<FuncDecl>, ce: CallExpr): BasicDiagKind {
+    let hasEmpty = candidatesBeforeCheck.isEmpty() || candidatesAfterCheck.isEmpty()
+    var target: Option<Decl> = None
+    if (let Some(baseFunc) <- ce.baseFunc) {
+        target = baseFunc.GetTarget()
+    }
+    if (hasEmpty) {
+        if (IsSearchTargetInMemberAccessUpperBound(ce)) {
+            return BasicDiagKind.sema_generic_no_method_match_in_upper_bounds
+        }
+        if (let Some(targetDecl) <- target) {
+            if (targetDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                return BasicDiagKind.sema_enum_constructor_type_not_match
+            }
+        }
+        if (ce.callKind == CallKind.CALL_OBJECT_CREATION ||
+            ce.callKind == CallKind.CALL_STRUCT_CREATION) {
+            return BasicDiagKind.sema_no_match_constructor
+        }
+        return BasicDiagKind.sema_no_match_function_declaration_for_call
+    }
+    if (IsSearchTargetInMemberAccessUpperBound(ce)) {
+        return BasicDiagKind.sema_generic_ambiguous_method_match_in_upper_bounds
+    }
+    if (let Some(targetDecl) <- target) {
+        if (targetDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            return BasicDiagKind.sema_multiple_constructor_in_enum
+        }
+    }
+    if (ce.callKind == CallKind.CALL_OBJECT_CREATION ||
+        ce.callKind == CallKind.CALL_STRUCT_CREATION) {
+        return BasicDiagKind.sema_ambiguous_constructor_match
+    }
+    return BasicDiagKind.sema_ambiguous_match
+}
+
 internal func DiagnoseForCall(diag: Option<BasicDiagnosticEngine>, candidatesBeforeCheck: ArrayList<FuncDecl>,
     candidatesAfterCheck: ArrayList<FuncDecl>, ce: CallExpr, decl: Decl): Unit {
     if (let None <- diag) {
@@ -4359,32 +4405,15 @@ internal func DiagnoseForCall(diag: Option<BasicDiagnosticEngine>, candidatesBef
     } else if ((let Some(memberAccess) <- (baseFunc as MemberAccess)) && !memberAccess.field.ZeroPos()) {
         identifierPos = memberAccess.field.Begin()
     }
-    let isConstructorCall = ce.callKind == CallKind.CALL_OBJECT_CREATION ||
-        ce.callKind == CallKind.CALL_STRUCT_CREATION
+    let errorKind = GetErrorKindForCall(candidatesBeforeCheck, candidatesAfterCheck, ce)
     if (candidatesBeforeCheck.isEmpty()) {
         ce.callKind = CallKind.CALL_INVALID
-        let errorKind = if (isConstructorCall) {
-            BasicDiagKind.sema_no_match_constructor
-        } else {
-            BasicDiagKind.sema_no_match_function_declaration_for_call
-        }
         Diagnose(diagValue, ce, identifierPos, errorKind,
             args: [BasicDiagArgument(identifier)]).Emit()
         return
     }
-    if (candidatesAfterCheck.isEmpty() && candidatesBeforeCheck.size == 1) {
+    if (candidatesBeforeCheck.size == 1) {
         return
-    }
-    let errorKind = if (candidatesAfterCheck.isEmpty()) {
-        if (isConstructorCall) {
-            BasicDiagKind.sema_no_match_constructor
-        } else {
-            BasicDiagKind.sema_no_match_function_declaration_for_call
-        }
-    } else if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.STRUCT_DECL) {
-        BasicDiagKind.sema_ambiguous_constructor_match
-    } else {
-        BasicDiagKind.sema_ambiguous_match
     }
     Diagnose(diagValue, ce, identifierPos, errorKind,
         args: [BasicDiagArgument(identifier)]).Emit()
