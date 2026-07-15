@@ -160,6 +160,30 @@ private func frontendDiagnosticColor(severity: DiagSeverity): DiagColor {
     }
 }
 
+private func IsAllFuncDecl(results: ArrayList<Decl>): Bool {
+    for (decl in results) {
+        if (decl.astKind != ASTKind.FUNC_DECL && decl.astKind != ASTKind.MACRO_DECL) {
+            return false
+        }
+    }
+    return true
+}
+
+private func WarnUselessImport(diag: DiagnosticEngine, importRange: BasicRange, decl: Decl): Unit {
+    let name = decl.identifier.Val()
+    let builder = diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
+        DiagKindRefactor.package_shadowed_import, importRange, arguments: [name])
+    builder.AddNote(MakeRange(decl.identifier.Begin(), name), "'" + name + "' is declared here")
+    builder.Emit()
+}
+
+private func WarnConflictImport(diag: DiagnosticEngine, name: String, current: BasicRange, previous: BasicRange): Unit {
+    let builder = diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
+        DiagKindRefactor.package_conflict_import, current, arguments: [name])
+    builder.AddNote(previous, "The previous was imported here")
+    builder.Emit()
+}
+
 public class CompilationCache {
     public var compileArgs: String = ""
     public var lambdaCounter: Int64 = 0
@@ -6989,6 +7013,69 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                             nameRange,
                             arguments: [im.identifier.Val(), fullPackageName]).Emit()
                     }
+                }
+            }
+            CheckRedefinition(pkg)
+        }
+    }
+
+    private func CheckRedefinition(pkg: Package): Unit {
+        let pkgImportNamePos = HashMap<String, BasicRange>()
+        let fileImportNamePos = HashMap<File, HashMap<String, BasicRange>>()
+        for (file in pkg.files) {
+            for (importSpec in file.imports) {
+                if (importSpec.IsImportMulti() || importSpec.IsImportAll()) {
+                    continue
+                }
+                let im = importSpec.content
+                let name = if (importSpec.IsImportSingle()) { im.identifier.Val() } else { im.aliasName.Val() }
+                let decls = GetImportedDeclsByName(file, name)
+                if (decls.isEmpty()) {
+                    continue
+                }
+                let range = if (importSpec.IsImportSingle()) {
+                    MakeRange(im.identifier.Begin(), im.identifier.Val())
+                } else {
+                    MakeRange(im.aliasName.Begin(), im.aliasName.Val())
+                }
+                let posMap = if (importSpec.IsReExport()) {
+                    pkgImportNamePos
+                } else {
+                    if (!fileImportNamePos.contains(file)) {
+                        fileImportNamePos[file] = HashMap<String, BasicRange>()
+                    }
+                    fileImportNamePos.get(file).getOrThrow()
+                }
+                var success = !posMap.contains(name)
+                var previous = posMap.get(name)
+                if (success) {
+                    posMap[name] = range
+                }
+                if (importSpec.IsReExport() && success) {
+                    if (!fileImportNamePos.contains(file)) {
+                        fileImportNamePos[file] = HashMap<String, BasicRange>()
+                    }
+                    let filePosMap = fileImportNamePos.get(file).getOrThrow()
+                    success = !filePosMap.contains(name)
+                    previous = filePosMap.get(name)
+                    if (success) {
+                        filePosMap[name] = range
+                    }
+                }
+                let sourceDecls = ArrayList<Decl>()
+                for (decl in GetPackageMembersByName(pkg.fullPackageName, name)) {
+                    if (let Some(declFile) <- decl.curFile) {
+                        if (let Some(declPackage) <- declFile.curPackage) {
+                            if (declPackage == pkg) {
+                                sourceDecls.add(decl)
+                            }
+                        }
+                    }
+                }
+                if (!IsAllFuncDecl(sourceDecls)) {
+                    WarnUselessImport(diag, range, sourceDecls[0])
+                } else if (!success) {
+                    WarnConflictImport(diag, name, range, previous.getOrThrow())
                 }
             }
         }
