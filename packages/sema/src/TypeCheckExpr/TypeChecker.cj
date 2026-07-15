@@ -8057,13 +8057,13 @@ extend TypeChecker {
             return this.SynIfExpr(CheckerContext(ctx, pos), ifExpr)
         }
         if (let Some(matchExpr) <- (expr as MatchExpr)) {
+            if (let None <- matchExpr.selector) {
+                let matchTy = this.SynMatchExpr(ctx, matchExpr)
+                ctx.SkipSynForCorrectTy(matchExpr)
+                return matchTy
+            }
             let boundDecls = SynthesizeMatchChildren(ctx, matchExpr)
-            let matchTy = SynMatchExpr(impl.typeManager, ctx, matchExpr, diag: impl.diag,
-                exprChecker: Some({ target: Ty, expr: Expr =>
-                    Check(ctx, target, expr)
-                }), desugarCallExpr: Some({ callExprForDesugar: CallExpr =>
-                    DesugarCallExpr(callExprForDesugar)
-                }))
+            let matchTy = this.SynMatchExpr(ctx, matchExpr)
             ctx.SkipSynForCorrectTy(matchExpr)
             RemovePatternBindings(ctx, boundDecls)
             return matchTy
@@ -8282,13 +8282,16 @@ extend TypeChecker {
             return FinishCheck(ctx, ifExpr, ChkIfExpr(ctx, target, ifExpr))
         }
         if (let Some(matchExpr) <- (expr as MatchExpr)) {
+            if (let None <- matchExpr.selector) {
+                let matchOk = this.ChkMatchExpr(ctx, target, matchExpr)
+                if (matchOk) {
+                    ctx.SkipSynForCorrectTy(matchExpr)
+                }
+                typeCheckExprClearTargetType(ctx, matchExpr)
+                return matchOk
+            }
             let boundDecls = SynthesizeMatchChildren(ctx, matchExpr)
-            let matchOk = ChkMatchExpr(impl.typeManager, ctx, target, matchExpr, diag: impl.diag,
-                exprChecker: Some({ target2: Ty, expr: Expr =>
-                    Check(ctx, target2, expr)
-                }), desugarCallExpr: Some({ callExprForDesugar: CallExpr =>
-                    DesugarCallExpr(callExprForDesugar)
-                }))
+            let matchOk = this.ChkMatchExpr(ctx, target, matchExpr)
             if (matchOk) {
                 ctx.SkipSynForCorrectTy(matchExpr)
             }

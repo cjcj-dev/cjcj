@@ -218,54 +218,6 @@ public func ChkMatchCaseActions(typeManager: TypeManager, target: Option<Ty>, mc
     return Ty.IsTyCorrect(blockTy)
 }
 
-public func SynMatchCaseNoSelector(typeManager: TypeManager, ctx: ASTContext, mco: MatchCaseOther): Ty {
-    if (let Some(matchExpr) <- mco.matchExpr) {
-        if (let Some(wildcard) <- (matchExpr as WildcardExpr)) {
-            wildcard.SetTy(BoolTy())
-        } else if (let Some(matchTy) <- matchExpr.GetTy()) {
-            if (typeManager.CheckTypeCompatibility(BoolTy(), matchTy) == TypeCompatibility.INCOMPATIBLE) {
-                matchExpr.SetTy(TypeManager.GetInvalidTy())
-            }
-        } else {
-            matchExpr.SetTy(TypeManager.GetInvalidTy())
-        }
-    }
-    let _ = ctx
-    if (let Some(block) <- mco.exprOrDecls) {
-        let ty = BlockTy(block)
-        mco.SetTy(ty)
-        return ty
-    }
-    let invalidTy = TypeManager.GetInvalidTy()
-    mco.SetTy(invalidTy)
-    return invalidTy
-}
-
-public func ChkMatchCaseNoSelector(typeManager: TypeManager, ctx: ASTContext, target: Ty,
-    mco: MatchCaseOther): Bool {
-    var ok = true
-    let conditionTy = SynMatchCaseNoSelector(typeManager, ctx, mco)
-    let _ = conditionTy
-    if (let Some(matchExpr) <- mco.matchExpr) {
-        if (let Some(matchTy) <- matchExpr.GetTy()) {
-            ok = typeManager.CheckTypeCompatibility(BoolTy(), matchTy) != TypeCompatibility.INCOMPATIBLE
-        } else {
-            ok = false
-        }
-    }
-    if (let Some(block) <- mco.exprOrDecls) {
-        let blockTy = BlockTy(block)
-        if (typeManager.CheckTypeCompatibility(target, blockTy) == TypeCompatibility.INCOMPATIBLE) {
-            mco.SetTy(TypeManager.GetInvalidTy())
-            return false
-        }
-        mco.SetTy(blockTy)
-        return ok
-    }
-    mco.SetTy(TypeManager.GetInvalidTy())
-    return false
-}
-
 public func CheckMatchExprNoSelectorExhaustiveness(me: MatchExpr, hasDefault!: Bool = false,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     var ok = true
@@ -423,45 +375,6 @@ public func SynMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
         desugarCallExpr: desugarCallExpr)
 }
 
-public func SynMatchExprNoSelector(typeManager: TypeManager, ctx: ASTContext, me: MatchExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Ty {
-    let caseTys = ArrayList<Ty>()
-    var hasInvalidCase = false
-    for (mco in me.matchCaseOthers) {
-        let caseTy = SynMatchCaseNoSelector(typeManager, ctx, mco)
-        if (!Ty.IsTyCorrect(caseTy)) {
-            hasInvalidCase = true
-        } else {
-            caseTys.add(caseTy)
-        }
-    }
-    if (hasInvalidCase || !CheckMatchExprNoSelectorExhaustiveness(me, diag: diag)) {
-        return InvalidMatchTy(me)
-    }
-    let joinRes = JoinCaseTys(typeManager, caseTys, me.curFile)
-    let (optErrs, joinedTy) = SetJoinedType(me.GetTy() ?? TypeManager.GetInvalidTy(), joinRes)
-    me.SetTy(joinedTy)
-    if (let Some(errMsg) <- optErrs) {
-        if (let Some(engine) <- diag) {
-            let builder = Diagnose(engine, me, BasicDiagKind.sema_type_incompatible,
-                args: [BasicDiagArgument("MatchCase")])
-            builder.AddNote(errMsg)
-            builder.Emit()
-        }
-    }
-    return joinedTy
-}
-
-public func SynMatchExpr(typeManager: TypeManager, ctx: ASTContext, me: MatchExpr,
-    diag!: Option<BasicDiagnosticEngine> = None, exprChecker!: Option<ConstPatternExprChecker> = None,
-    desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Ty {
-    if (let Some(_) <- me.selector) {
-        return SynMatchExprHasSelector(typeManager, ctx, diag, me, exprChecker: exprChecker,
-            desugarCallExpr: desugarCallExpr)
-    }
-    return SynMatchExprNoSelector(typeManager, ctx, me, diag: diag)
-}
-
 public func ChkMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
     diag: Option<BasicDiagnosticEngine>, target: Ty, me: MatchExpr,
     exprChecker!: Option<ConstPatternExprChecker> = None,
@@ -516,47 +429,6 @@ public func ChkMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
     return ok
 }
 
-public func ChkMatchExprNoSelector(typeManager: TypeManager, ctx: ASTContext, target: Ty, me: MatchExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
-    let caseTys = ArrayList<Ty>()
-    var ok = true
-    for (mco in me.matchCaseOthers) {
-        if (ChkMatchCaseNoSelector(typeManager, ctx, target, mco)) {
-            if (let Some(caseTy) <- mco.GetTy()) {
-                caseTys.add(caseTy)
-            }
-        } else {
-            ok = false
-        }
-    }
-    if (ok) {
-        if (caseTysContains(typeManager, caseTys, target)) {
-            me.SetTy(target)
-        } else {
-            let joinRes = JoinCaseTys(typeManager, caseTys, me.curFile)
-            match (joinRes) {
-                case ErrOrTy.TY(joinedTy) => me.SetTy(joinedTy)
-                case ErrOrTy.ERR(_) => me.SetTy(target)
-            }
-        }
-        ok = CheckMatchExprNoSelectorExhaustiveness(me, diag: diag)
-    }
-    if (!ok) {
-        let _ = InvalidMatchTy(me)
-    }
-    return ok
-}
-
-public func ChkMatchExpr(typeManager: TypeManager, ctx: ASTContext, target: Ty, me: MatchExpr,
-    diag!: Option<BasicDiagnosticEngine> = None, exprChecker!: Option<ConstPatternExprChecker> = None,
-    desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Bool {
-    if (let Some(_) <- me.selector) {
-        return ChkMatchExprHasSelector(typeManager, ctx, diag, target, me, exprChecker: exprChecker,
-            desugarCallExpr: desugarCallExpr)
-    }
-    return ChkMatchExprNoSelector(typeManager, ctx, target, me, diag: diag)
-}
-
 private func caseTysContains(typeManager: TypeManager, tys: ArrayList<Ty>, target: Ty): Bool {
     let _ = typeManager
     for (ty in tys) {
@@ -565,22 +437,4 @@ private func caseTysContains(typeManager: TypeManager, tys: ArrayList<Ty>, targe
         }
     }
     return false
-}
-
-public func ChkMatchExprWithDiag(diag: BasicDiagnosticEngine, typeManager: TypeManager, ctx: ASTContext,
-    target: Ty, me: MatchExpr, exprChecker!: Option<ConstPatternExprChecker> = None,
-    desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Bool {
-    let ok = ChkMatchExpr(typeManager, ctx, target, me, diag: diag, exprChecker: exprChecker,
-        desugarCallExpr: desugarCallExpr)
-    if (!ok && me.ShouldDiagnose()) {
-        DiagMismatchedTypesWithFoundTy(diag, me, target.String(), Ty.ToString(me.GetTy()))
-    }
-    return ok
-}
-
-public func SynMatchExprWithDiag(diag: BasicDiagnosticEngine, typeManager: TypeManager,
-    ctx: ASTContext, me: MatchExpr, exprChecker!: Option<ConstPatternExprChecker> = None,
-    desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Ty {
-    return SynMatchExpr(typeManager, ctx, me, diag: diag, exprChecker: exprChecker,
-        desugarCallExpr: desugarCallExpr)
 }
