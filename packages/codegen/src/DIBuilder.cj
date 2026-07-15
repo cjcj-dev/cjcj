@@ -618,6 +618,60 @@ public class DIBuilder {
         return fwdDecl
     }
 
+    private func CreateArrayType(arrTy: RawArrayType): LLVMMetadataRef {
+        let identifier = arrTy.ToString()
+        let dims = arrTy.GetDims()
+        CJC_ASSERT(dims != 0u64)
+        let arrayTypeName = GenerateTypeName(arrTy)
+        let diFile = defaultFile
+        let scope = compileUnit
+        let elements = ArrayList<LLVMMetadataRef>() // Array.Type has 3 elements.
+        let elemTy = arrTy.GetElementType()
+        let elemType = GetOrCreateType(elemTy)
+        let arrayLayout = (CGType.GetOrCreate(cgMod, arrTy) as CGArrayType).getOrThrow().GetLayoutType()
+        // when arrayLayout is nullptr, means this rawArray is not sized.
+        let arrayLayoutSize = if (arrayLayout.isNull()) { 64u64 } else { GetTypeSize(arrayLayout) }
+        // %ArrayBase is not include object now, so we should add 64bit for the object.
+        let totalSize = 64u64 + arrayLayoutSize + GetSizeInBits(elemType)
+        // Array type is a temporary type which do no have fixed definition file nor line.
+        // type struct: {klass*, i32 arrayLength, [0 x T]}, where 'klass*' is invisible for user.
+        var fwdDecl = createStructType(scope, arrayTypeName, diFile, 0u32, totalSize, 0u32, FlagZero,
+            LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), identifier)
+        if (arrayLayout.isNull()) {
+            elements.add(CreateTypeInfoMember(fwdDecl, diFile))
+            fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(elements))
+            return fwdDecl
+        }
+        CreateArrayMemberType(arrTy, fwdDecl, elements, arrayLayout)
+        return fwdDecl
+    }
+
+    // Array.Type has 3 elements.
+    private func CreateArrayMemberType(arrTy: RawArrayType, fwdDecl: LLVMMetadataRef,
+        elements: ArrayList<LLVMMetadataRef>, arrayLayout: LLVMTypeRef): Unit {
+        let pointerSize = GetSizeInBits(CreateRefType())
+        let sizeType = createBasicType("Int64", 64u64, DW_ATE_unsigned) // int64 type : size.
+        CJC_ASSERT(!sizeType.isNull())
+        elements.add(createMemberType(fwdDecl, "$ti", defaultFile, 0u32, pointerSize, 0u32, 0u64,
+            FlagArtificial, CreateRefType()))
+        elements.add(createMemberType(fwdDecl, "size", defaultFile, 0u32, GetSizeInBits(sizeType), 0u32,
+            pointerSize, FlagZero, sizeType))
+        // Offset for element is size of ArrayBase for chir2llvm.
+        let elemTy = arrTy.GetElementType()
+        var elemType = GetOrCreateType(elemTy)
+        // Multi-dimension array or class/enum is pointer element.
+        if (arrTy.GetDims() > 1u64 || IsReferenceType(elemTy, cgMod)) {
+            elemType = CreatePointerType(elemType, sizeInBits: GetSizeInBits(CreateRefType()))
+        }
+        let bitInSize = GetSizeInBits(elemType)
+        // layout is %ArrayBase, which is behind an object.
+        let offset = cgMod.GetOffsetOfElement(arrayLayout, 1u32) * 8u64 + 64u64
+        let align = cgMod.GetABITypeAlignment(arrayLayout)
+        elements.add(createMemberType(fwdDecl, "elements", defaultFile, 0u32, bitInSize, align, offset,
+            FlagZero, elemType))
+        let _ = replaceArrays(fwdDecl, getOrCreateArray(elements))
+    }
+
     private func GenerateTypeName(ty: Type): String {
         if (ty.IsPrimitive()) {
             return ty.ToString()
