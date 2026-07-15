@@ -1100,31 +1100,27 @@ private func ChkFlowExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
             return false
         }
         DesugarInTypeCheck(be)
-        if (let Some(desugar) <- be.desugarExpr) {
-            if (checker(target, desugar)) {
-                if (let Some(callExpr) <- (desugar as CallExpr)) {
-                    if (CheckFlowOperandsHaveNamedParam(callExpr, diag)) {
-                        RecoverToBinaryExpr(be)
-                        let _ = BinaryInvalid(be)
-                        return false
-                    }
-                }
-                PropagateBinaryDesugarTarget(be, desugar)
-                be.SetTy(TcTyOrInvalid(desugar))
-                return true
+        let desugar = be.desugarExpr.getOrThrow()
+        try (ds = DiagSuppressor(diag)) {
+            if (!checker(target, desugar)) {
+                let _ = ds.GetSuppressedDiag()
+                RecoverToBinaryExpr(be)
+                let _ = BinaryInvalid(be)
+                DiagnoseForBinaryExpr(typeManager, be, Some(synthesizer), diag)
+                ds.ReportDiag()
+                return false
             }
+            ds.ReportDiag()
+        }
+        let callExpr = (desugar as CallExpr).getOrThrow()
+        if (CheckFlowOperandsHaveNamedParam(callExpr, diag)) {
             RecoverToBinaryExpr(be)
+            let _ = BinaryInvalid(be)
+            return false
         }
-        let actualTy = if (be.op == TokenKind.PIPELINE) {
-            SynPipelineExpr(typeManager, be)
-        } else {
-            SynCompositionExpr(typeManager, be)
-        }
-        if (Ty.IsTyCorrect(actualTy) &&
-            typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
-            return true
-        }
-        let _ = BinaryInvalid(be)
+        PropagateBinaryDesugarTarget(be, desugar)
+        be.SetTy(TcTyOrInvalid(desugar))
+        return true
     }
     return false
 }
