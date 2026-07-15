@@ -770,7 +770,7 @@ extend ParserImpl {
             ret.keywordPos = keywordToken.Begin()
             if (ret.begin.IsZero()) { ret.begin = keywordToken.Begin() }
             CheckDeclarationInScope(scopeKind, DefKind.MAIN)
-            let body = ParseFuncBody(scopeKind)
+            let body = ParseFuncBody(ScopeKind.MAIN_BODY)
             ret.funcBody = body
             ret.end = body.end
             ret.identifier = SrcIdentifier("main", "main", ret.keywordPos, ret.keywordPos + 4, false)
