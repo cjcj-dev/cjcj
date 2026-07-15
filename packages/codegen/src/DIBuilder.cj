@@ -505,12 +505,21 @@ public class DIBuilder {
                 TypeKind.TYPE_INT64 | TypeKind.TYPE_INT_NATIVE => encoding = DW_ATE_signed
             case TypeKind.TYPE_FLOAT16 | TypeKind.TYPE_FLOAT32 | TypeKind.TYPE_FLOAT64 => encoding = DW_ATE_float
             case TypeKind.TYPE_BOOLEAN => encoding = DW_ATE_boolean
+            case TypeKind.TYPE_FUNC => return CreateVarFuncType((ty as FuncType).getOrThrow())
+            case TypeKind.TYPE_TUPLE =>
+                return CreateTupleType((baseTy as TupleType).getOrThrow(), boxTy)
+            case TypeKind.TYPE_RAWARRAY => return CreateArrayType((ty as RawArrayType).getOrThrow())
+            case TypeKind.TYPE_VARRAY => return CreateVArrayType((ty as VArrayType).getOrThrow())
+            case TypeKind.TYPE_CPOINTER => return CreateCPointerType((ty as CPointerType).getOrThrow())
+            case TypeKind.TYPE_CSTRING => return CreateCStringType((ty as CStringType).getOrThrow())
+            case TypeKind.TYPE_CLASS => return CreateClassType((ty as ClassType).getOrThrow())
             case TypeKind.TYPE_STRUCT =>
                 return CreateStructType((baseTy as StructType).getOrThrow(), boxTy: boxTy)
             case TypeKind.TYPE_ENUM =>
                 return CreateEnumType((baseTy as EnumType).getOrThrow(), boxTy: boxTy)
-            case _ =>
-                throw IllegalStateException("DIBuilder CreateDIType slice 2 is not ported for " + baseTy.ToString())
+            case TypeKind.TYPE_GENERIC => return CreateGenericType((ty as GenericType).getOrThrow())
+            case TypeKind.TYPE_INVALID => return createNullPtrType()
+            case _ => return createNullPtrType()
         }
         let tyName = baseTy.ToString()
         let size = GetBasicTypeSize(baseTy)
