@@ -1341,7 +1341,7 @@ public class Translator {
                 }
             }
             let value = GetSymbolTable(target)
-            return GetDerefedValue(value)
+            return GetDerefedValue(value, TranslateLocation(expr))
         }
         throw IllegalStateException("faithful AST2CHIR RefExpr has no Sema target: ${expr.ref.identifier.Val()}")
     }
@@ -2376,15 +2376,37 @@ public class Translator {
             if (let Some(propDecl) <- (target as AstPropDecl)) {
                 return TranslatePropertyGetter(expr, propDecl)
             }
-            if (let Some(varDecl) <- (target as AstVarDecl)) {
-                let leftValueInfo = TranslateMemberAccessAsLeftValue(expr)
-                return LoadLeftValue(leftValueInfo, MemberAccessValueType(expr, target))
+            if ((target as AstVarDecl).isSome()) {
+                return TranslateVarMemberAccess(expr)
             }
             if (let Some(funcDecl) <- (target as AstFuncDecl)) {
                 return Some(TranslateFuncMemberAccess(expr, funcDecl))
             }
         }
         InternalError("translating unsupported MemberAccess")
+        return None
+    }
+
+    private func TranslateVarMemberAccess(member: AstMemberAccess): Option<Value> {
+        let loc = TranslateLocation(member)
+        let leftValueInfo = TranslateMemberAccessAsLeftValue(member)
+        let base = leftValueInfo.base.getOrThrow()
+        CJC_ASSERT(!leftValueInfo.path.isEmpty())
+        let baseType = base.GetType().getOrThrow()
+        let customType = (baseType.StripAllRefs() as CustomType).getOrThrow()
+        if (baseType.IsReferenceTypeWithRefDims(1) || baseType.IsValueOrGenericTypeWithRefDims(1)) {
+            let memberRef = CreateGetElementRefWithPath(loc, base, leftValueInfo.path, CurrentBlock(), customType)
+            let memberType = RequireRefBaseType(memberRef)
+            let loadMemberValue = builder.CreateLoad(memberType, memberRef, CurrentBlock())
+            loadMemberValue.SetDebugLocation(loc)
+            return Some(RequireResult(loadMemberValue))
+        } else if (baseType.IsValueOrGenericTypeWithRefDims(0)) {
+            let memberType = GetInstMemberTypeByName(customType, leftValueInfo.path, builder)
+            let getMember = builder.CreateFieldByName(memberType, base, leftValueInfo.path, CurrentBlock())
+            getMember.SetDebugLocation(loc)
+            return Some(RequireResult(getMember))
+        }
+        CJC_ABORT()
         return None
     }
 
@@ -8192,7 +8214,7 @@ public class Translator {
         return false
     }
 
-    private func TranslateStructOrClassCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
+    private func TranslateStructOrClassCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Option<Value> {
         let loc = TranslateLocation(expr)
         let thisTy = chirTy.TranslateType(RequireAstTy(expr)).StripAllRefs()
         let thisRefTy = builder.context.GetRefTy(thisTy)
@@ -8216,12 +8238,18 @@ public class Translator {
             FuncCallContext(args: args, thisType: thisRefTy), expr)
         if (let Some(outerDecl) <- calleeDecl.outerDecl) {
             if (outerDecl.astKind == ASTKind.STRUCT_DECL) {
+                if (IsSuperOrThisCtorCall(expr)) {
+                    return None
+                }
                 let load = builder.CreateLoad(thisTy, thisObj, CurrentBlock())
                 load.SetDebugLocation(loc)
-                return RequireResult(load)
+                if (IsSuperOrThisCtorCall(expr)) {
+                    load.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+                }
+                return Some(RequireResult(load))
             }
         }
-        return thisObj
+        return Some(thisObj)
     }
 
     private func GetCurrentConstructorThisObject(): Value {
@@ -9284,8 +9312,10 @@ public class Translator {
         let targetNode = GetSymbolTable(target)
         if (let Some(_) <- (target as AstVarDecl)) {
             let targetTy = chirTy.TranslateType(RequireAstTy(target))
-            let loaded = RequireResult(builder.CreateLoad(targetTy, targetNode, CurrentBlock()))
-            return Some(TypeCastOrBoxIfNeeded(loaded, chirTy.TranslateType(RequireAstTy(expr)), TranslateLocation(expr)))
+            let loc = TranslateLocation(expr)
+            let load = builder.CreateLoad(targetTy, targetNode, CurrentBlock())
+            load.SetDebugLocation(loc)
+            return Some(TypeCastOrBoxIfNeeded(RequireResult(load), chirTy.TranslateType(RequireAstTy(expr)), loc))
         }
         if ((target as AstFuncDecl).isSome()) {
             return targetNode
