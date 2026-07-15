@@ -81,6 +81,9 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
                 }
                 setIdx++
             }
+            if (block.TestAttr(Attribute.UNREACHABLE)) {
+                continue
+            }
 
             let state = (entryStates.get(block.nodeId) ??
                 throw IllegalStateException("Engine IterateSingleUnitToFixpoint expected block state")).Clone()
@@ -128,10 +131,12 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
             }
             let successors = if (let Some(target) <- targetSucc) {
                 let out = ArrayList<Block>()
-                out.add(target)
+                if (!target.TestAttr(Attribute.UNREACHABLE)) {
+                    out.add(target)
+                }
                 out
             } else {
-                block.GetSuccessors()
+                GetReachableSuccessors(block)
             }
             for (successor in successors) {
                 let successorState = entryStates.get(successor.nodeId) ??

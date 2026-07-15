@@ -835,6 +835,16 @@ public func TryGetInstanceVarInitFromApply(expr: Expression): Option<Function> {
     return None
 }
 
+public func GetReachableSuccessors(block: Block): ArrayList<Block> {
+    let successors = ArrayList<Block>()
+    for (successor in block.GetSuccessors()) {
+        if (!successor.TestAttr(Attribute.UNREACHABLE)) {
+            successors.add(successor)
+        }
+    }
+    return successors
+}
+
 private class VisitStackElem {
     public let block: Block
     public let successors: ArrayList<Block>
@@ -847,10 +857,13 @@ private class VisitStackElem {
 
 public func TopologicalSort(entryBlock: Block): ArrayList<Block> {
     let result = ArrayList<Block>()
+    if (entryBlock.TestAttr(Attribute.UNREACHABLE)) {
+        return result
+    }
     let visited = ArrayList<Int64>()
     let visitStack = ArrayList<VisitStackElem>()
     visited.add(entryBlock.nodeId)
-    visitStack.add(VisitStackElem(entryBlock, entryBlock.GetSuccessors()))
+    visitStack.add(VisitStackElem(entryBlock, GetReachableSuccessors(entryBlock)))
 
     while (!visitStack.isEmpty()) {
         while (!visitStack[visitStack.size - 1].successors.isEmpty()) {
@@ -866,7 +879,7 @@ public func TopologicalSort(entryBlock: Block): ArrayList<Block> {
             }
             if (!hasVisited) {
                 visited.add(lastSuccessor.nodeId)
-                visitStack.add(VisitStackElem(lastSuccessor, lastSuccessor.GetSuccessors()))
+                visitStack.add(VisitStackElem(lastSuccessor, GetReachableSuccessors(lastSuccessor)))
             }
         }
 
