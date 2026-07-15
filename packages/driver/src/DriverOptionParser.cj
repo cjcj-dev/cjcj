@@ -428,6 +428,10 @@ private func ParseOptionWithValue(opts: DriverOptions, optionArg: OptionArgInsta
     if (arg == "--import-path") { addFrontendSeparated(opts, arg, value); return true }
     if (arg == "--plugin") { addFrontendSeparated(opts, arg, value); return true }
     if (arg == "--common-part-cjo") {
+        if (!FileUtil.FileExist(value)) {
+            addFrontendSeparated(opts, arg, value)
+            return true
+        }
         if (let Some(path) <- opts.ValidateInputFilePath(value)) {
             opts.commonPartCjos.add(path)
             addFrontendSeparated(opts, arg, path)
