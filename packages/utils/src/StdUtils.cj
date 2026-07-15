@@ -225,7 +225,7 @@ public func Stold(s: String): Option<Float64> {
             let endValue = unsafe { endPtr.value.read() }
             result = if (endValue.isNull() ||
                 unsafe { strlen(endValue) } == unsafe { strlen(cInput.value) } ||
-                stdUtilsErrno() == ERANGE_ERRNO) {
+                (stdUtilsErrno() == ERANGE_ERRNO && parsed == 0.0)) {
                 None
             } else {
                 parsed
