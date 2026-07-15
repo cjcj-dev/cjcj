@@ -74,7 +74,7 @@ private class FunctionCandidate {
     }
 }
 
-private class FuncTyPair {
+internal class FuncTyPair {
     public var genericIgnored: Bool = false
     public let candidates: ArrayList<(FuncDecl, Ty, TypeSubst)> = ArrayList<(FuncDecl, Ty, TypeSubst)>()
 
@@ -1783,7 +1783,7 @@ private func TypeCheckCallIsTypeObjectCreation(fd: FuncDecl, ce: CallExpr): Bool
 }
 
 // Mirrors C++ TypeCheckUtil.cpp:382-392.
-private func IsGenericUpperBoundCall(expr: Expr, target: Decl): Bool {
+internal func IsGenericUpperBoundCall(expr: Expr, target: Decl): Bool {
     let memberAccess = match (expr as MemberAccess) {
         case Some(value) => value
         case None => return false
@@ -3320,7 +3320,7 @@ private func FilterTypeMappings(typeManager: TypeManager, ctx: ASTContext, expr:
 }
 
 // C++ src/Sema/TypeCheckCall.cpp:1547 CollectValidFuncTys.
-private func CollectValidFuncTys(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: ASTContext,
+internal func CollectValidFuncTys(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: ASTContext,
     funcs: ArrayList<FuncDecl>, expr: Expr, targetTy!: Option<FuncTy> = None,
     declSynthesizer!: Option<CallDeclSynthesizer> = None): FuncTyPair {
     let pair = FuncTyPair()

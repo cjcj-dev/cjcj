@@ -4106,7 +4106,7 @@ extend TypeChecker {
     }
 
     // C++ src/Sema/TypeCheckUtil.h:92-102 RemoveDuplicateElements.
-    private func RemoveDuplicateElements(candidates: ArrayList<Option<FuncDecl>>): Unit {
+    internal func RemoveDuplicateElements(candidates: ArrayList<Option<FuncDecl>>): Unit {
         let uniqueCandidates = ArrayList<FuncDecl>()
         var hasNull = false
         var idx: Int64 = 0
@@ -7047,7 +7047,7 @@ extend TypeChecker {
         return None
     }
 
-    private func InstantiateReferenceType(ctx: ASTContext, expr: NameReferenceExpr,
+    internal func InstantiateReferenceType(ctx: ASTContext, expr: NameReferenceExpr,
         instantiateMap!: TypeSubst = TypeSubst()): Unit {
         if (expr.compilerAddedTyArgs) {
             expr.typeArguments.clear()

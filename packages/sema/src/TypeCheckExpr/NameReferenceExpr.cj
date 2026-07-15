@@ -10,6 +10,7 @@ import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::modules.SemaImportManager
 import cjcj::sema.*
 import cjcj::sema.Desugar.*
+import cjcj::utils.CJC_ASSERT
 
 func TcUnitTy(): Ty {
     return TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
@@ -465,56 +466,6 @@ private func CheckNonFunctionReference(diag: Option<BasicDiagnosticEngine>, type
     return isWellTyped
 }
 
-private func EnumConstructorOuterDecl(nre: NameReferenceExpr): Option<EnumDecl> {
-    if (let Some(target) <- nre.GetTarget()) {
-        if (target.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
-            if (let Some(outer) <- target.outerDecl) {
-                return outer as EnumDecl
-            }
-        }
-    }
-    return None
-}
-
-private func SameEnumDeclAsTarget(enumDecl: EnumDecl, target: Ty): Bool {
-    if (let Some(enumTy) <- (target as EnumTy)) {
-        if (let Some(targetDecl) <- enumTy.declPtr) {
-            return SameDecl(enumDecl, targetDecl)
-        }
-    }
-    return false
-}
-
-private func InstantiateEnumConstructorRefFromTarget(
-    typeManager: TypeManager,
-    target: Ty,
-    nre: NameReferenceExpr,
-    actualTy: Ty
-): Ty {
-    if (!actualTy.HasGeneric()) {
-        return actualTy
-    }
-    if (let None <- EnumConstructorOuterDecl(nre)) {
-        return actualTy
-    }
-    let enumDecl = EnumConstructorOuterDecl(nre).getOrThrow()
-    if (!SameEnumDeclAsTarget(enumDecl, target)) {
-        return actualTy
-    }
-    let typeMapping = GenerateTypeMapping(enumDecl, target.typeArgs)
-    let instTy = typeManager.GetInstantiatedTy(actualTy, typeMapping)
-    if (Ty.IsTyCorrect(instTy)) {
-        for (argTy in target.typeArgs) {
-            if (!containsTy(nre.instTys, argTy)) {
-                nre.instTys.add(argTy)
-            }
-        }
-        nre.SetTy(instTy)
-        return instTy
-    }
-    return actualTy
-}
-
 private func containsTy(values: ArrayList<Ty>, ty: Ty): Bool {
     for (value in values) {
         if (SameTy(value, ty)) {
@@ -526,40 +477,75 @@ private func containsTy(values: ArrayList<Ty>, ty: Ty): Bool {
 
 extend TypeChecker {
     public func ChkRefExpr(ctx: ASTContext, target: Ty, nre: NameReferenceExpr): Bool {
-        let _ = ctx
-        var actualTy = nre.GetTy().getOrThrow()
-        if (!Ty.IsTyCorrect(actualTy)) {
-            return false
-        }
+        let _ = Synthesize(ctx, SynPos.EXPR_ARG, nre)
         let targets = GetFuncTargets(nre)
         if (targets.isEmpty()) {
             return CheckNonFunctionReference(impl.diag, impl.typeManager, target, nre)
         }
-        if (nre.callOrPattern.isNone()) {
-            actualTy = InstantiateEnumConstructorRefFromTarget(impl.typeManager, target, nre, actualTy)
+        var matched: UInt32 = 0u32
+        CJC_ASSERT(nre.IsReferenceExpr())
+        RemoveDuplicateElements(targets)
+        let funcTargets = ArrayList<FuncDecl>()
+        for (candidate in targets) {
+            funcTargets.add(candidate.getOrThrow())
         }
-        if (nre.callOrPattern.isNone() && (actualTy as FuncTy).isNone() &&
-            (let Some(refTarget) <- nre.GetTarget()) && refTarget.TestAttr(Attribute.ENUM_CONSTRUCTOR) &&
-            IsEnumNeedSynthesis(nre, refTarget)) {
-            return CheckNonFunctionReference(impl.diag, impl.typeManager, target, nre)
-        }
-        if (actualTy.IsQuest()) {
-            for (funcDeclOpt in GetFuncTargets(nre)) {
-                let funcDecl = funcDeclOpt.getOrThrow()
-                if ((let Some(funcTy) <- funcDecl.GetTy()) &&
-                    impl.typeManager.CheckTypeCompatibility(target, funcTy) != TypeCompatibility.INCOMPATIBLE) {
-                    ReplaceTarget(nre, Some<Decl>(funcDecl))
-                    nre.SetTy(funcTy)
-                    return true
+        mpImpl.RemoveCommonCandidatesIfHasSpecific(funcTargets)
+        let pair = CollectValidFuncTys(impl.typeManager, impl.diag, ctx, funcTargets, nre,
+            targetTy: target as FuncTy)
+        var resultMapping = TypeSubst()
+        var matchedFd: Option<FuncDecl> = None
+        var validCandidateTy: Option<Ty> = None
+        for ((fd, fdTy, mapping) in pair.candidates) {
+            if (!impl.typeManager.IsSubtype(fdTy, target)) {
+                if (validCandidateTy.isNone() && Ty.IsTyCorrect(fdTy) &&
+                    !(fdTy as FuncTy).getOrThrow().retTy.IsQuest()) {
+                    validCandidateTy = Some(fdTy)
                 }
+                continue
             }
-            let _ = TcInvalid(nre)
-            return false
+            if (matched != 0u32) {
+                matched++
+                break
+            }
+            matched++
+            ReplaceTarget(nre, Some<Decl>(fd))
+            matchedFd = Some(fd)
+            nre.SetTy(fdTy)
+            resultMapping = mapping
         }
-        if (impl.typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
-            return true
+        nre.SetTy(TypeManager.GetNonNullTy(nre.GetTy().getOrThrow()))
+        if (nre.GetTy().getOrThrow().IsQuest()) {
+            nre.SetTy(TypeManager.GetInvalidTy())
         }
-        let _ = TcInvalid(nre)
-        return false
+        if (matched > 1u32) {
+            if (let Some(diag) <- impl.diag) {
+                Diagnose(diag, nre, BasicDiagKind.sema_ambiguous_func_ref,
+                    args: [BasicDiagArgument(funcTargets[0].identifier.Val())]).Emit()
+            }
+        } else if (matched == 0u32) {
+            if (Ty.IsTyCorrect(nre.GetTy()) && nre.GetTy().getOrThrow().HasQuestTy()) {
+                DiagUnableToInferReturnType(impl.diag.getOrThrow(), funcTargets[0], nre)
+            } else if (pair.genericIgnored) {
+                if (let Some(diag2) <- impl.diag) {
+                    Diagnose(diag2, nre, BasicDiagKind.sema_generic_type_without_type_argument).Emit()
+                }
+            } else if (let Some(candidateTy) <- validCandidateTy) {
+                DiagMismatchedTypesWithFoundTy(impl.diag.getOrThrow(), nre, target, candidateTy)
+            } else if (let Some(diag3) <- impl.diag) {
+                Diagnose(diag3, nre, BasicDiagKind.sema_no_match_function_declaration_for_ref,
+                    args: [BasicDiagArgument(funcTargets[0].identifier.Val())]).Emit()
+            }
+            if (funcTargets.size > 1) {
+                ReplaceTarget(nre, None)
+            }
+        } else {
+            let selected = matchedFd.getOrThrow()
+            if (IsGenericUpperBoundCall(nre, selected)) {
+                nre.matchedParentTy = Some(impl.typeManager.GetInstantiatedTy(
+                    selected.outerDecl.getOrThrow().GetTy().getOrThrow(), resultMapping))
+            }
+            InstantiateReferenceType(ctx, nre, instantiateMap: resultMapping)
+        }
+        return matched != 0u32
     }
 }
