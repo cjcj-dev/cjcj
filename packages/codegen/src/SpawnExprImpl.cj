@@ -77,7 +77,7 @@ private func GenerateSpawnWithExecuteClosure(irBuilder: IRBuilder2, spawnInfo: S
     if (let Some(executeClosureFunc) <- spawnInfo.executeClosure) {
         let cgFunc = irBuilder.GetCGModule().GetOrInsertCGFunction(executeClosureFunc)
         if (let Some(resultTy) <- spawnInfo.resultType) {
-            let futureTypeInfo = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetOrCreateTypeInfo()
+            let futureTypeInfo = irBuilder.CreateTypeInfo(resultTy)
             let cjThreadHandle = irBuilder.CallSpawnIntrinsic(closureObj, cgFunc, threadCtx, false,
                 Some(futureTypeInfo))
             GenerateCheckSpawnResult(irBuilder, cjThreadHandle)
