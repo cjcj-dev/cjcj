@@ -742,6 +742,36 @@ public class DIBuilder {
         return objDIType
     }
 
+    private func CreateClosureType(ty: Type): LLVMMetadataRef {
+        let classTy = (ty as ClassType).getOrThrow()
+        let identifier = ty.ToString()
+        let name = GenerateTypeName(classTy)
+        let position = classTy.GetClassDef().GetDebugLocation()
+        let diFile = GetOrCreateFile(position)
+        let tag = DW_TAG_class_type
+        var fwdDecl = createReplaceableCompositeType(tag, name, namespaceScope, diFile,
+            position.GetBeginPos().line, 0u32, 128u64, 0u32, FlagTypePassByReference, identifier)
+        fwdDecl = replaceWithDistinct(fwdDecl)
+
+        // SmallVector Size: 8.
+        let eltTys = ArrayList<LLVMMetadataRef>()
+        let (paramTypes, retType) = GetFuncTypeWithoutThisPtrFromAutoEnvBaseType(classTy)
+        eltTys.add(GetOrCreateType(retType))
+        for (paramType in paramTypes) {
+            eltTys.add(GetOrCreateType(paramType))
+        }
+        let subroutineType = CreateSubroutineType(eltTys)
+        let funcType = CreatePointerType(subroutineType, sizeInBits: 64u64)
+
+        let tiType = createMemberType(fwdDecl, "$ti", diFile, 0u32, GetSizeInBits(CreateRefType()), 0u32, 0u64,
+            FlagZero, CreateRefType())
+        let classPointerType = createMemberType(fwdDecl, "ptr", diFile, 0u32, GetSizeInBits(CreateRefType()), 0u32,
+            64u64, FlagZero, funcType)
+        fwdDecl = replaceArrays(fwdDecl,
+            getOrCreateArray(ArrayList<LLVMMetadataRef>([tiType, classPointerType])))
+        return fwdDecl
+    }
+
     private func GenerateTypeName(ty: Type): String {
         if (ty.IsPrimitive()) {
             return ty.ToString()
