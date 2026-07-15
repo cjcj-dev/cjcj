@@ -2348,7 +2348,7 @@ extend TypeChecker {
                 CheckLegalityOfUsage(ctx, pkg)
                 // C++ TypeChecker.cpp:2060-2062 desugars property access in sema before const checking.
                 DesugarForPropDecl(impl.typeManager, pkg)
-                let _ = CheckConstEvaluation(pkg, impl.diag.getOrThrow())
+                CheckConstEvaluation(pkg, impl.diag.getOrThrow())
                 PerformDesugarAfterTypeCheck(impl.typeManager, pkg, context: Some(ctx), options: GlobalOptions(),
                     synthesizer: Some({ synCtx: ASTContext, pos: SynPos, node: Node =>
                         SynthesizeWithoutRecover(synCtx, pos, node)

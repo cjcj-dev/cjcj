@@ -5,6 +5,7 @@ import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::utils.CJC_ASSERT
 
 private let CORE_PACKAGE_NAME: String = "std.core"
 
@@ -38,6 +39,11 @@ private func DiagExpectConstExpr(diag: BasicDiagnosticEngine, expr: Expr, isWeak
     builder.Emit()
 }
 
+private func DiagDefineVarInConstFunction(diag: BasicDiagnosticEngine, vda: VarDeclAbstract): Unit {
+    let range = MakeRangeForDeclIdentifier(vda)
+    DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_cannot_define_var_in_const_funciton, vda, range).Emit()
+}
+
 private func DiagNoConstInit(diag: BasicDiagnosticEngine, fd: FuncDecl): Unit {
     let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_no_const_init,
         fd, MakeRangeForDeclIdentifier(fd))
@@ -57,46 +63,20 @@ private func DiagNoConstInit(diag: BasicDiagnosticEngine, fd: FuncDecl): Unit {
     builder.Emit()
 }
 
-public enum ConstEvaluationIssueKind {
-    | EXPECT_CONST_FUNCTION
-    | EXPECT_CONST_EXPRESSION
-    | CANNOT_DEFINE_VAR_IN_CONST_FUNCTION
-    | NO_CONST_INIT
-    | CONST_INIT_WITH_VAR_MEMBER
-}
-
-private func ConstEvaluationIssueKindIndex(kind: ConstEvaluationIssueKind): Int64 {
-    return match (kind) {
-        case ConstEvaluationIssueKind.EXPECT_CONST_FUNCTION => 0
-        case ConstEvaluationIssueKind.EXPECT_CONST_EXPRESSION => 1
-        case ConstEvaluationIssueKind.CANNOT_DEFINE_VAR_IN_CONST_FUNCTION => 2
-        case ConstEvaluationIssueKind.NO_CONST_INIT => 3
-        case ConstEvaluationIssueKind.CONST_INIT_WITH_VAR_MEMBER => 4
+private func DiagCannotDefineConstInit(diag: BasicDiagnosticEngine, constInits: ArrayList<Decl>,
+    vars: ArrayList<VarDeclAbstract>): Unit {
+    CJC_ASSERT(!constInits.isEmpty())
+    let firstConstInit = constInits[0]
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_class_const_init_with_var,
+        firstConstInit, MakeRangeForDeclIdentifier(firstConstInit))
+    for (idx in 1..constInits.size) {
+        let constInit = constInits[idx]
+        AddNote(builder, constInit, MakeRangeForDeclIdentifier(constInit), "cannot define 'const' constructor")
     }
-}
-
-extend ConstEvaluationIssueKind <: Equatable<ConstEvaluationIssueKind> {
-    public operator func ==(right: ConstEvaluationIssueKind): Bool {
-        return ConstEvaluationIssueKindIndex(this) == ConstEvaluationIssueKindIndex(right)
+    for (variable in vars) {
+        AddNote(builder, variable, MakeRangeForDeclIdentifier(variable), "member variable declared with 'var'")
     }
-
-    public operator func !=(right: ConstEvaluationIssueKind): Bool {
-        return !(this == right)
-    }
-}
-
-public class ConstEvaluationIssue {
-    public var kind: ConstEvaluationIssueKind
-    public var node: Node
-    public var target: Option<Decl>
-    public var message: String
-
-    public init(kind: ConstEvaluationIssueKind, node: Node, target!: Option<Decl> = None, message!: String = "") {
-        this.kind = kind
-        this.node = node
-        this.target = target
-        this.message = message
-    }
+    builder.Emit()
 }
 
 private class ConstBoolBox {
@@ -231,7 +211,6 @@ private func HasConstInit(decls: ArrayList<Decl>): Bool {
 
 public class ConstEvaluationChecker {
     private let diag: BasicDiagnosticEngine
-    private let issues: ArrayList<ConstEvaluationIssue> = ArrayList<ConstEvaluationIssue>()
     private let inConstContext: ArrayList<Node> = ArrayList<Node>()
     private let inConstFunc: ArrayList<Decl> = ArrayList<Decl>()
     private let constThisOrSuper: ArrayList<RefExpr> = ArrayList<RefExpr>()
@@ -242,14 +221,8 @@ public class ConstEvaluationChecker {
         this.diag = diag
     }
 
-    public func Check(pkg: Package): ArrayList<ConstEvaluationIssue> {
+    public func Check(pkg: Package): Unit {
         ChkAllDeclsByWalk(pkg)
-        return issues
-    }
-
-    private func AddIssue(kind: ConstEvaluationIssueKind, node: Node, target!: Option<Decl> = None,
-        message!: String = ""): Unit {
-        issues.add(ConstEvaluationIssue(kind, node, target: target, message: message))
     }
 
     private func ChkAllDeclsByWalk(root: Node): Bool {
@@ -343,7 +316,7 @@ public class ConstEvaluationChecker {
     private func ChkVarDeclAbstract(vd: VarDeclAbstract): Bool {
         MarkConstContextForVar(vd)
         if (vd.isVar) {
-            AddIssue(ConstEvaluationIssueKind.CANNOT_DEFINE_VAR_IN_CONST_FUNCTION, vd)
+            DiagDefineVarInConstFunction(diag, vd)
             vd.isConst = true
             return false
         }
@@ -501,7 +474,7 @@ public class ConstEvaluationChecker {
 
     private func ChkClassDeclHasConstInitNoVarMember(cd: ClassDecl): Bool {
         let members = cd.GetMemberDecls()
-        let vars = ArrayList<Decl>()
+        let vars = ArrayList<VarDeclAbstract>()
         for (decl in members) {
             if (let Some(vda) <- (decl as VarDeclAbstract)) {
                 if (vda.isVar && vda.astKind != ASTKind.PROP_DECL) {
@@ -512,12 +485,14 @@ public class ConstEvaluationChecker {
         if (vars.isEmpty()) {
             return true
         }
+        let constInits = ArrayList<Decl>()
         for (decl in members) {
             if (decl.IsConst() && decl.TestAttr(Attribute.CONSTRUCTOR) &&
                 !decl.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
-                AddIssue(ConstEvaluationIssueKind.CONST_INIT_WITH_VAR_MEMBER, decl, target: decl)
+                constInits.add(decl)
             }
         }
+        DiagCannotDefineConstInit(diag, constInits, vars)
         return false
     }
 
@@ -918,6 +893,6 @@ public class ConstEvaluationChecker {
 
 }
 
-public func CheckConstEvaluation(pkg: Package, diag: BasicDiagnosticEngine): ArrayList<ConstEvaluationIssue> {
-    return ConstEvaluationChecker(diag).Check(pkg)
+public func CheckConstEvaluation(pkg: Package, diag: BasicDiagnosticEngine): Unit {
+    ConstEvaluationChecker(diag).Check(pkg)
 }
