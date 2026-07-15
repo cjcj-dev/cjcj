@@ -863,6 +863,32 @@ public class DIBuilder {
         }
     }
 
+    private func CreateGenericClassType(classTy: ClassType): LLVMMetadataRef {
+        let classDef = classTy.GetClassDef()
+        let identifier = classTy.ToString()
+        let position = classDef.GetDebugLocation()
+        let diFile = GetOrCreateFile(position)
+        let defPackage = createNameSpace(compileUnit, classDef.GetPackageName(), false)
+        let name = GenerateCustomTypeName(classTy, needPkgPrefix: false)
+        let tag = DW_TAG_class_type
+        let size = 64u64 + UInt64(classDef.GetDirectInstanceVars().size) * 64u64
+        var fwdDecl = createReplaceableCompositeType(tag, name, defPackage, diFile,
+            position.GetBeginPos().line, 0u32, size, 0u32, FlagTypePassByReference, identifier)
+        fwdDecl = replaceWithDistinct(fwdDecl)
+        typeCache[classTy.objectId] = fwdDecl
+        let elements = ArrayList<LLVMMetadataRef>()
+        let builder = cgMod.GetCGContext().GetCHIRBuilder()
+        let superDiType = GetOrCreateType(classTy.GetSuperClassTy(builder: builder).getOrThrow())
+        let inheritType = createInheritance(fwdDecl, superDiType, 0u64, 0u32, FlagZero)
+        elements.add(inheritType)
+        CreateInheritedInterface(elements, fwdDecl, classTy)
+        CreateCustomTypeMember(classDef.GetDirectInstanceVars(), elements, fwdDecl, diFile)
+        CreateMethodType(classDef, elements, fwdDecl)
+        CreateGetGenericFunc(classTy, fwdDecl, elements)
+        fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(elements))
+        return fwdDecl
+    }
+
     private func GenerateTypeName(ty: Type): String {
         if (ty.IsPrimitive()) {
             return ty.ToString()
