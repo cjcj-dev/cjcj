@@ -8,6 +8,7 @@ import cjcj::ast.FuncParam as AstFuncParam
 import cjcj::ast.FuncParamList as AstFuncParamList
 import cjcj::ast.MacroInvocation as AstMacroInvocation
 import cjcj::ast.VarDecl as AstVarDecl
+import cjcj::utils.CJC_ASSERT
 import cjcj::utils.IF_AVAILABLE
 
 private let G_NO_NEED_SEMI_EXPR_LIST: Array<ASTKind> = [
@@ -16,6 +17,63 @@ private let G_NO_NEED_SEMI_EXPR_LIST: Array<ASTKind> = [
 ]
 
 extend ParserImpl {
+    public func TypeArgsMaybeConfusedWithExprWithComma(typeArgs: ArrayList<Type>): Bool {
+        if (typeArgs.size <= 1) {
+            return false
+        }
+        return TypesMaybeConfusedWithExprWithComma(typeArgs)
+    }
+
+    public func TypesMaybeConfusedWithExprWithComma(types: ArrayList<Type>): Bool {
+        var index = types.size - 1
+        while (index >= 0) {
+            let ty = types[index]
+            if (let Some(tupleType) <- (ty as TupleType)) {
+                if (!TypesMaybeConfusedWithExprWithComma(tupleType.fieldTypes)) {
+                    return false
+                }
+            } else if (let Some(parenType) <- (ty as ParenType)) {
+                let innerTypes = ArrayList<Type>()
+                innerTypes.add(parenType.innerType.getOrThrow())
+                if (!TypesMaybeConfusedWithExprWithComma(innerTypes)) {
+                    return false
+                }
+            } else if (ty.astKind == ASTKind.REF_TYPE || ty.astKind == ASTKind.QUALIFIED_TYPE) {
+                if (ty.GetTypeArgs().isEmpty()) {
+                    index--
+                    continue
+                }
+                if (!TypesMaybeConfusedWithExprWithComma(ty.GetTypeArgs())) {
+                    return false
+                }
+            } else {
+                return false
+            }
+            index--
+        }
+        return true
+    }
+
+    public func IsLegFollowForGenArgInExprWithComma(ek: ExprKind): Bool {
+        CJC_ASSERT(IsExprFollowedComma(ek))
+        let followedCommas = LookupExprsFollowedCommas(ek).getOrThrow()
+        if (Seeing(followedCommas[1])) {
+            return true
+        }
+        if (newlineSkipped && SeeingAny(
+            [TokenKind.LCURL, TokenKind.QUEST, TokenKind.LPAREN, TokenKind.LSQUARE, TokenKind.SUB])) {
+            return false
+        }
+        if (SeeingAny(
+            [TokenKind.LPAREN, TokenKind.LSQUARE, TokenKind.COMMA, TokenKind.DOT, TokenKind.LCURL])) {
+            return true
+        }
+        if (LookupSeenCombinator().isSome()) {
+            return true
+        }
+        return Precedence(Peek().kind) != INVALID_PRECEDENCE
+    }
+
     public func ParseExpr(): Expr {
         return ParseExpr(ExprKind.ALL)
     }
@@ -185,21 +243,7 @@ extend ParserImpl {
                 continue
             }
             if (Skip(TokenKind.DOT)) {
-                let member = MemberAccess()
-                try (cs = ChainScope(this, member)) {
-                    member.baseExpr = base
-                    member.dotPos = lastToken.Begin()
-                    member.begin = base.begin
-                    member.field = ExpectIdentifierWithPos(member)
-                    if (Seeing(TokenKind.LT) && LooksLikeTypeArguments()) {
-                        let parsed = ParseTypeArguments(ek)
-                        if (parsed[0]) {
-                            for (ty in parsed[1]) { member.typeArguments.add(ty) }
-                        }
-                    }
-                    member.end = member.field.End()
-                }
-                base = member
+                base = ParseMemberAccess(base, ek)
                 continue
             }
             if (!newlineSkipped && Skip(TokenKind.LSQUARE)) {
@@ -249,6 +293,38 @@ extend ParserImpl {
             base = chain
         }
         return base
+    }
+
+    public func ParseMemberAccess(baseExpr: Expr, ek: ExprKind): MemberAccess {
+        let ret = MemberAccess()
+        try (cs = ChainScope(this, ret)) {
+            ret.begin = baseExpr.begin
+            ret.baseExpr = baseExpr
+            ret.dotPos = lastToken.Begin()
+            ret.field = ExpectIdentifierWithPos(ret)
+            if (Seeing(TokenKind.LT)) {
+                let leftAnglePos = Peek().Begin()
+                let scope = ParserScope(this)
+                Next()
+                diag.Prepare()
+                let parsed = ParseTypeArguments(ek)
+                if (parsed[0]) {
+                    for (ty in parsed[1]) { ret.typeArguments.add(ty) }
+                    diag.Commit()
+                } else {
+                    diag.ClearTransaction()
+                    scope.ResetParserScope()
+                    ret.leftAnglePos = INVALID_POSITION
+                    ret.rightAnglePos = INVALID_POSITION
+                    GetMemberAccessEndPos(ret)
+                    return ret
+                }
+                ret.leftAnglePos = leftAnglePos
+                ret.rightAnglePos = lastToken.Begin()
+            }
+            GetMemberAccessEndPos(ret)
+        }
+        return ret
     }
 
     private func ParseIncOrDec(baseExpr: Expr): Expr {

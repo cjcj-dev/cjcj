@@ -19,7 +19,53 @@ func LookupMatchingOpenBracket(kind: TokenKind): TokenKind {
     return TokenKind.ILLEGAL
 }
 
+func GetMemberAccessEndPos(memberAccess: MemberAccess): Unit {
+    if (!memberAccess.field.Valid()) {
+        memberAccess.end = memberAccess.field.Begin() + 2
+    } else if (memberAccess.rightAnglePos.IsZero()) {
+        memberAccess.end = memberAccess.field.GetRawEndPos()
+    } else {
+        memberAccess.end = memberAccess.rightAnglePos
+    }
+}
+
 extend ParserImpl {
+    public func LookupExprsFollowedCommas(ek: ExprKind): Option<(TokenKind, TokenKind)> {
+        if (ExprKindEquals(ek, ExprKind.EXPR_IN_TUPLE)) {
+            return Some((TokenKind.LPAREN, TokenKind.RPAREN))
+        }
+        if (ExprKindEquals(ek, ExprKind.EXPR_IN_ARRAY)) {
+            return Some((TokenKind.LSQUARE, TokenKind.RSQUARE))
+        }
+        if (ExprKindEquals(ek, ExprKind.EXPR_IN_CALLSUFFIX)) {
+            return Some((TokenKind.LPAREN, TokenKind.RPAREN))
+        }
+        if (ExprKindEquals(ek, ExprKind.EXPR_IN_ANNOTATION)) {
+            return Some((TokenKind.LSQUARE, TokenKind.RSQUARE))
+        }
+        return None
+    }
+
+    public func IsExprFollowedComma(ek: ExprKind): Bool {
+        return LookupExprsFollowedCommas(ek).isSome()
+    }
+
+    public func ParseOneOrMoreSepTrailing(
+        storeSeparator: (Position) -> Unit,
+        parseElement: () -> Unit,
+        end: TokenKind,
+        separator!: TokenKind = TokenKind.COMMA
+    ): Unit {
+        do {
+            parseElement()
+            if (Skip(separator)) {
+                storeSeparator(lastToken.Begin())
+            } else {
+                break
+            }
+        } while (!Seeing(end))
+    }
+
     public func CanMatchBracketInStack(): Bool {
         let matchingBracket = LookupMatchingOpenBracket(lookahead.kind)
         if (matchingBracket != TokenKind.ILLEGAL) {
