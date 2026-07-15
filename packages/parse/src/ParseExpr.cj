@@ -316,26 +316,7 @@ extend ParserImpl {
                 continue
             }
             if (!newlineSkipped && Skip(TokenKind.LSQUARE)) {
-                let sub = SubscriptExpr()
-                try (cs = ChainScope(this, sub)) {
-                    sub.baseExpr = base
-                    sub.leftParenPos = lastToken.Begin()
-                    sub.begin = base.begin
-                    while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RSQUARE)) {
-                        if (!sub.indexExprs.isEmpty()) {
-                            sub.commaPos.add(lastToken.Begin())
-                        }
-                        sub.indexExprs.add(ParseExpr(ExprKind.INDEX_EXPR))
-                        if (!Skip(TokenKind.COMMA)) { break }
-                    }
-                    if (!Skip(TokenKind.RSQUARE)) {
-                        DiagExpectedRightDelimiter("[", sub.leftParenPos)
-                        sub.EnableAttr(Attribute.HAS_BROKEN)
-                    }
-                    sub.rightParenPos = lastToken.Begin()
-                    sub.end = lastToken.End()
-                }
-                base = sub
+                base = ParseSubscriptExpr(base)
                 continue
             }
             if (!newlineSkipped && Seeing(TokenKind.LCURL)) {
@@ -362,6 +343,28 @@ extend ParserImpl {
             base = chain
         }
         return base
+    }
+
+    public func ParseSubscriptExpr(baseExpr: Expr): Expr {
+        let ret = SubscriptExpr()
+        try (cs = ChainScope(this, ret)) {
+            ret.begin = baseExpr.begin
+            ret.leftParenPos = lastToken.Begin()
+            ret.baseExpr = baseExpr
+            do {
+                if (lastToken.kind == TokenKind.COMMA) {
+                    ret.commaPos.add(lastToken.Begin())
+                }
+                ret.indexExprs.add(ParseExpr(ExprKind.INDEX_EXPR))
+            } while (Skip(TokenKind.COMMA))
+            if (!Skip(TokenKind.RSQUARE)) {
+                DiagExpectedRightDelimiter("[", ret.leftParenPos)
+                ret.hasBroken = true
+            }
+            ret.rightParenPos = lastToken.Begin()
+            ret.end = lastToken.End()
+        }
+        return ret
     }
 
     public func ParseMemberAccess(baseExpr: Expr, ek: ExprKind): MemberAccess {

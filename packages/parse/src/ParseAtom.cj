@@ -64,9 +64,24 @@ extend ParserImpl {
         if (Seeing(TokenKind.SYNCHRONIZED)) { return ParseSynchronizedExpr() }
         if (Seeing(TokenKind.QUOTE)) { return ParseQuoteExpr() }
         if (SeeingMacroCall() || SeeingBuiltinAnnotation()) { return ParseMacroExprOrLambdaExpr() }
-        let token = Peek()
-        DiagExpectedExpression()
-        return InvalidExpr(token.Begin())
+        return GetInvalidExprInAtom(Peek().Begin())
+    }
+
+    public func GetInvalidExprInAtom(pos: Position): Expr {
+        let ret = InvalidExpr(pos)
+        ret.isBroken = true
+        if (chainedAST.isEmpty()) {
+            DiagExpectedExpression()
+        }
+        if (!chainedAST.isEmpty() && !chainedAST[chainedAST.size - 1].hasBroken) {
+            DiagExpectedExpression()
+            chainedAST[chainedAST.size - 1].hasBroken = true
+        }
+        ret.value = Peek().Value()
+        if (ret.end.column == 1) {
+            ret.end = Peek().End()
+        }
+        return ret
     }
 
     private func NormalizeLitConst(lit: LitConstExpr, token: Token, isRawString!: Bool = false): LitConstExpr {
