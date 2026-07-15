@@ -1324,6 +1324,7 @@ extend ParserImpl {
             invalidType.isBroken = true
             param.typeNode = invalidType
             param.end = invalidType.end
+            param.EnableAttr(Attribute.HAS_BROKEN)
             param.EnableAttr(Attribute.IS_BROKEN)
             return param
         } else {
