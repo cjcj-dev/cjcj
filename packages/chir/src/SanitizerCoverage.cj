@@ -525,6 +525,164 @@ public class SanitizerCoverage {
         }
     }
 
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:768-792.
+    private func InsertCoverageAheadBlock(block: Block, isDebug: Bool): Unit {
+        if (sanCovOption.pcTable) {
+            let topLevelFunc = block.GetTopLevelFunc().getOrThrow()
+            var blockLocation = topLevelFunc.GetDebugLocation()
+            for (expr in block.GetExpressions()) {
+                if (!expr.GetDebugLocation().IsInvalidPos()) {
+                    blockLocation = expr.GetDebugLocation()
+                    break
+                }
+            }
+            pcArray.add((topLevelFunc.GetSrcCodeIdentifier(), blockLocation))
+        }
+        CJC_ASSERT(block.GetExpressions().size > 0)
+        let callList = GenerateCoverageCallByOption(INVALID_LOCATION, isDebug, block)
+        if (sanCovOption.stackDepth && block.IsEntry()) {
+            let stackDepth = GenerateStackDepthExpr(INVALID_LOCATION, isDebug, block)
+            callList.add(all: stackDepth)
+        }
+        let firstExpr = block.GetExpressions()[0]
+        for (call in callList) {
+            call.MoveBefore(firstExpr)
+        }
+        bbCounter++
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:848-867.
+    private func GenerateCoverageCallByOption(loc: DebugLocation, isDebug: Bool,
+        parent: Block): ArrayList<Expression> {
+        let callList = ArrayList<Expression>()
+        if (sanCovOption.tracePCGuard) {
+            let guardList = GeneratePCGuardExpr(loc, isDebug, parent)
+            callList.add(all: guardList)
+        }
+        if (sanCovOption.inline8bitCounters) {
+            let inline8bitList = GenerateInline8bitExpr(loc, isDebug, parent)
+            callList.add(all: inline8bitList)
+        }
+        if (sanCovOption.inlineBoolFlag) {
+            let inlineBoolFlag = GenerateInlineBoolExpr(loc, isDebug, parent)
+            callList.add(all: inlineBoolFlag)
+        }
+        return callList
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:869-904.
+    private func GeneratePCGuardExpr(loc: DebugLocation, isDebug: Bool,
+        parent: Block): ArrayList<Expression> {
+        let cPointTy = builder.context.GetCPointerTy(builder.context.GetUInt32Ty())
+        let funcTy = builder.context.GetFuncTy(ArrayList<Type>([cPointTy]),
+            builder.context.GetUnitTy(), isCFunc: true)
+        let pcGuardFunc = GenerateForeignFunc(SAN_COV_PC_GUARD, loc, funcTy, packName: packageName)
+        let globalVarType = builder.context.GetCPointerTy(builder.context.GetUInt32Ty())
+        let mangleName = SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(SanCovUInt32ArrayInitName).getOrThrow()
+        let charArrayTest = GenerateGlobalVar(mangleName, loc, globalVarType)
+        let offset = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(UInt64(bbCounter)), parent)
+        offset.SetDebugLocation(loc)
+        let arrayTestLoad = builder.CreateLoad(globalVarType, charArrayTest, parent)
+        arrayTestLoad.SetDebugLocation(loc)
+        let callContext = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_ADD,
+            args: ArrayList<Value>([arrayTestLoad.GetResult().getOrThrow(), offset.GetResult().getOrThrow()]),
+            instTypeArgs: ArrayList<Type>([builder.context.GetUInt32Ty()]))
+        let addPoint = builder.CreateIntrinsic(cPointTy, callContext, parent)
+        addPoint.SetDebugLocation(loc)
+        let syscall = CreateNonMemberApply(builder.context.GetUnitTy(), pcGuardFunc,
+            ArrayList<Value>([addPoint.GetResult().getOrThrow()]), parent, builder, loc: loc)
+        if (isDebug) {
+            println("[SanitizerCoverage] Add trace pc guard" + ToPosInfo(loc) + ".")
+        }
+        return ArrayList<Expression>([arrayTestLoad, offset, addPoint, syscall])
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:906-948.
+    private func GenerateInline8bitExpr(loc: DebugLocation, isDebug: Bool,
+        parent: Block): ArrayList<Expression> {
+        let globalVarType = builder.context.GetCPointerTy(builder.context.GetUInt8Ty())
+        let mangleName = SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(SanCovCharArrayInitName).getOrThrow()
+        let charArrayTest = GenerateGlobalVar(mangleName, loc, globalVarType)
+        let loadGlobal = builder.CreateLoad(globalVarType, charArrayTest, parent)
+        loadGlobal.SetDebugLocation(loc)
+        let offset = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(UInt64(bbCounter)), parent)
+        offset.SetDebugLocation(loc)
+        let callContext1 = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_READ,
+            args: ArrayList<Value>([loadGlobal.GetResult().getOrThrow(), offset.GetResult().getOrThrow()]),
+            instTypeArgs: ArrayList<Type>([builder.context.GetUInt8Ty()]))
+        let readPoint = builder.CreateIntrinsic(builder.context.GetUInt8Ty(), callContext1, parent)
+        readPoint.SetDebugLocation(loc)
+        let one = builder.CreateConstant(builder.context.GetUInt8Ty(), IntLiteral(1u64), parent)
+        one.SetDebugLocation(loc)
+        let addRes = builder.CreateBinaryExpression(ExprKind.ADD, builder.context.GetUInt8Ty(),
+            readPoint.GetResult().getOrThrow(), one.GetResult().getOrThrow(), parent,
+            overflowStrategy: OverflowStrategy.WRAPPING)
+        addRes.SetDebugLocation(loc)
+        let callContext2 = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_WRITE,
+            args: ArrayList<Value>([loadGlobal.GetResult().getOrThrow(), offset.GetResult().getOrThrow(),
+                addRes.GetResult().getOrThrow()]), instTypeArgs: ArrayList<Type>([builder.context.GetUInt8Ty()]))
+        let writePoint = builder.CreateIntrinsic(builder.context.GetUnitTy(), callContext2, parent)
+        writePoint.SetDebugLocation(loc)
+        if (isDebug) {
+            println("[SanitizerCoverage] Add trace inline 8 bit" + ToPosInfo(loc) + ".")
+        }
+        return ArrayList<Expression>([loadGlobal, offset, readPoint, one, addRes, writePoint])
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:950-980.
+    private func GenerateInlineBoolExpr(loc: DebugLocation, isDebug: Bool,
+        parent: Block): ArrayList<Expression> {
+        let globalVarType = builder.context.GetCPointerTy(builder.context.GetBoolTy())
+        let mangleName = SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(SanCovBoolFlagInitName).getOrThrow()
+        let charArrayTest = GenerateGlobalVar(mangleName, loc, globalVarType)
+        let loadGlobal = builder.CreateLoad(globalVarType, charArrayTest, parent)
+        loadGlobal.SetDebugLocation(loc)
+        let offset = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(UInt64(bbCounter)), parent)
+        offset.SetDebugLocation(loc)
+        let boolTrue = builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(true), parent)
+        boolTrue.SetDebugLocation(loc)
+        let callContext = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_WRITE,
+            args: ArrayList<Value>([loadGlobal.GetResult().getOrThrow(), offset.GetResult().getOrThrow(),
+                boolTrue.GetResult().getOrThrow()]), instTypeArgs: ArrayList<Type>([builder.context.GetBoolTy()]))
+        let writePoint = builder.CreateIntrinsic(builder.context.GetUnitTy(), callContext, parent)
+        writePoint.SetDebugLocation(loc)
+        if (isDebug) {
+            println("[SanitizerCoverage] Add trace inline bool" + ToPosInfo(loc) + ".")
+        }
+        return ArrayList<Expression>([loadGlobal, offset, boolTrue, writePoint])
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:982-996.
+    private func GenerateStackDepthExpr(loc: DebugLocation, isDebug: Bool,
+        parent: Block): ArrayList<Expression> {
+        let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetUnitTy(), isCFunc: true)
+        let callee = GenerateForeignFunc(SanCovUpdateStackDepth, loc, funcTy, packName: packageName)
+        let syscall = CreateNonMemberApply(builder.context.GetUnitTy(), callee,
+            ArrayList<Value>(), parent, builder, loc: loc)
+        if (isDebug) {
+            println("[SanitizerCoverage] Add trace stage depth" + ToPosInfo(loc) + ".")
+        }
+        return ArrayList<Expression>([syscall])
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:998-1014.
+    private func GenerateGlobalVar(globalVarName: String, loc: DebugLocation, globalType: Type): GlobalVar {
+        if (let Some(value) <- globalVarBag.get(globalVarName)) {
+            return value
+        }
+        let globalVar = builder.CreateGlobalVar(builder.context.GetRefTy(globalType), globalVarName,
+            srcCodeIdentifier: globalVarName, packageName: packageName)
+        globalVar.SetDebugLocation(loc)
+        globalVar.EnableAttr(Attribute.READONLY)
+        globalVar.EnableAttr(Attribute.COMPILER_ADD)
+        globalVarBag[globalVarName] = globalVar
+        return globalVar
+    }
+
+    private func GetGlobalVar(globalVarName: String): Option<GlobalVar> {
+        return globalVarBag.get(globalVarName)
+    }
+
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:794-834.
     private func CreateArrayForSwitchCaseList(multiBranch: MultiBranch): RawArrayAllocate {
         let cases = multiBranch.GetCaseVals()
