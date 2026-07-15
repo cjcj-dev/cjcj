@@ -1443,35 +1443,27 @@ public class Translator {
 
     public func Visit(expr: AstReturnExpr): Option<Value> {
         let loc = TranslateLocation(expr)
+        let retExpr = RequireExpr(expr.expr, "return expression")
+        let value = TranslateExprArg(retExpr)
+        StoreReturnExprValueIfNeeded(expr, value)
+        UpdateDelayExitSignalForReturnIfNeeded()
         var terminator: Option<Terminator> = None
-        if (let Some(retExpr) <- expr.expr) {
-            let value = TranslateExprArg(retExpr)
-            StoreReturnExprValueIfNeeded(expr, value)
-            UpdateDelayExitSignalForReturnIfNeeded()
-            if (!finallyContext.isEmpty()) {
-                let prevBlock = CurrentBlock()
-                currentBlock = CreateBlock()
-                CurrentFinallyContext().controlFlowBlocks[ControlType.RETURN].add((prevBlock, CurrentBlock()))
+        if (finallyContext.isEmpty()) {
+            let exit = builder.CreateExit(None, CurrentBlock())
+            exit.SetDebugLocation(loc)
+            if (expr.TestAttr(AstAttribute.COMPILER_ADD)) {
+                exit.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
             }
+            terminator = Some(exit)
+        } else {
+            let prevBlock = CurrentBlock()
+            currentBlock = CreateBlock()
             let exit = builder.CreateExit(None, CurrentBlock())
             exit.SetDebugLocation(loc)
             terminator = Some(exit)
-            let group = RequireParentBlockGroup(CurrentBlock(), "return continuation")
-            currentBlock = builder.CreateBlock(group)
-            maybeUnreachable[CurrentBlock()] = terminator.getOrThrow()
-            return None
-        }
-        UpdateDelayExitSignalForReturnIfNeeded()
-        if (!finallyContext.isEmpty()) {
-            let prevBlock = CurrentBlock()
-            currentBlock = CreateBlock()
             CurrentFinallyContext().controlFlowBlocks[ControlType.RETURN].add((prevBlock, CurrentBlock()))
         }
-        let exit = builder.CreateExit(None, CurrentBlock())
-        exit.SetDebugLocation(loc)
-        terminator = Some(exit)
-        let group = RequireParentBlockGroup(CurrentBlock(), "return continuation")
-        currentBlock = builder.CreateBlock(group)
+        currentBlock = CreateBlock()
         maybeUnreachable[CurrentBlock()] = terminator.getOrThrow()
         return None
     }
@@ -1592,7 +1584,7 @@ public class Translator {
     }
 
     public func Visit(expr: AstParenExpr): Option<Value> {
-        return Translator.TranslateASTNode(RequireExpr(expr.expr, "parenthesized expression"), this)
+        return Some(TranslateExprArg(RequireExpr(expr.expr, "parenthesized expression")))
     }
 
     public func Visit(expr: AstPointerExpr): Option<Value> {
