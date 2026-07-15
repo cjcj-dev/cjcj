@@ -4,6 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::sema.*
 import cjcj::sema.InheritanceChecker.*
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::utils.CJC_ASSERT
 import cjcj::utils.CJC_ASSERT_WITH_MSG
@@ -87,6 +88,40 @@ private func CalculatedGenericConstraintsStr(genericConstraints: ArrayList<Gener
         ret += genericConstraintString
     }
     return ret
+}
+
+private func UpdateDeclMap(diag: BasicDiagnosticEngine, ctx: ASTContext, extendDecl: ExtendDecl): Unit {
+    let symbols = ArrayList<Symbol>()
+    let collector = { node: Node =>
+        CJC_ASSERT(node.astKind != ASTKind.PRIMARY_CTOR_DECL && node.astKind != ASTKind.VAR_WITH_PATTERN_DECL)
+        if (let Some(decl) <- (node as Decl)) {
+            if (!decl.TestAttr(Attribute.IS_BROKEN) && decl.symbol.isSome() && decl.identifier.Val() != "_") {
+                symbols.add(decl.symbol.getOrThrow())
+            }
+        }
+        VisitAction.WALK_CHILDREN
+    }
+    let _ = Walker(extendDecl, visitPre: collector).Walk()
+
+    for (symbol in symbols) {
+        let node = symbol.node.getOrThrow()
+        if (node.astKind == ASTKind.MACRO_EXPAND_DECL || node.TestAttr(Attribute.MACRO_INVOKE_FUNC)) {
+            continue
+        }
+
+        let names = Names(symbol.name, GetScopeNameWithoutTail(symbol.scopeName))
+        if (symbol.astKind == ASTKind.PROP_DECL) {
+            let found = ctx.GetDeclsByName(names)
+            if (!found.isEmpty()) {
+                let multiPlatform = (node.TestAttr(Attribute.COMMON) && found[0].TestAttr(Attribute.SPECIFIC)) ||
+                    (node.TestAttr(Attribute.SPECIFIC) && found[0].TestAttr(Attribute.COMMON))
+                if (!multiPlatform) {
+                    DiagRedefinitionWithFoundNode(diag, (node as Decl).getOrThrow(), found[0])
+                }
+            }
+        }
+        ctx.AddDeclName(names, (node as Decl).getOrThrow())
+    }
 }
 
 private func IsCommon(node: Node): Bool {
