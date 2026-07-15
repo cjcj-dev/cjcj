@@ -354,11 +354,12 @@ private func refreshMacroCallArgs(macCall: MacroCall, diag: DiagnosticEngine): U
     macCall.status = MacroEvalStatus.READY
 }
 
-private func setMacroCallEvalResult(macCall: MacroCall, diag: DiagnosticEngine): Unit {
+private func SetMacroCallEvalResult(macCall: MacroCall, diag: DiagnosticEngine): Unit {
     let invocation = macCall.RequireInvocation()
     if (MacroExpandFailed(invocation.newTokens) || macCall.status == MacroEvalStatus.FAIL) {
         macCall.status = MacroEvalStatus.FAIL
-        diag.Diagnose(macCall.GetBeginPos(), "macro evaluation has failed for macro call '" + macCall.GetFullName() + "'")
+        diag.Diagnose(macCall.GetBeginPos(), DiagKind.macro_evaluate_failed,
+            args: [DiagArgument(macCall.GetFullName())]).Emit()
     } else {
         macCall.status = MacroEvalStatus.SUCCESS
     }
@@ -557,9 +558,6 @@ private func writeNativeBytes(ptr: CPointer<UInt8>, bytes: ArrayList<UInt8>): Un
 }
 
 private func installNativeMacroResult(macCall: MacroCall, resultPtr: CPointer<UInt8>): Bool {
-    if (resultPtr.isNull()) {
-        return false
-    }
     let invocation = macCall.RequireInvocation()
     let tokens = TokenSerialization.GetTokensFromNativeBuffer(resultPtr)
     FreeNativeBuffer(resultPtr)
@@ -1185,7 +1183,7 @@ public class MacroEvaluation {
             for (macCall in pMacroCalls) {
                 if (isMacroCallReadyForEval(macCall, ci.GetDiag(), ci.GetGlobalOptions().compileCjd)) {
                     EvalOneMacroCall(macCall)
-                    setMacroCallEvalResult(macCall, ci.GetDiag())
+                    SetMacroCallEvalResult(macCall, ci.GetDiag())
                     progress = true
                 }
             }
