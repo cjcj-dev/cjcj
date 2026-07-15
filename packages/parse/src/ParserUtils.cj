@@ -67,6 +67,23 @@ extend ParserImpl {
         } while (!Seeing(end))
     }
 
+    // C++: Parse/ParserUtils.cpp:303-314 ParserImpl::ParseZeroOrMoreSepTrailing.
+    public func ParseZeroOrMoreSepTrailing(
+        storeSeparator: (Position) -> Unit,
+        parseElement: () -> Unit,
+        end: TokenKind,
+        separator!: TokenKind = TokenKind.COMMA
+    ): Unit {
+        while (!Seeing(end)) {
+            parseElement()
+            if (Skip(separator)) {
+                storeSeparator(lastToken.Begin())
+            } else {
+                break
+            }
+        }
+    }
+
     // C++: Parse/ParserUtils.cpp:279-288 ParserImpl::ParseOneOrMoreWithSeparator.
     public func ParseOneOrMoreWithSeparator(
         separator: TokenKind,

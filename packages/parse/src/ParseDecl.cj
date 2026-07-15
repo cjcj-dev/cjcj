@@ -1204,26 +1204,24 @@ extend ParserImpl {
         }
         let list = FuncParamList()
         try (cs = ChainScope(this, list)) {
-            list.begin = lookahead.Begin()
+            list.begin = lastToken.Begin()
             list.leftParenPos = lastToken.Begin()
-            var namedParameter: Option<FuncParam> = None
-            var memberParameter: Option<FuncParam> = None
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-                let parsed = ParseParamInParamList(scopeKind, namedParameter, memberParameter)
-                let param = parsed[0]
-                namedParameter = parsed[1]
-                memberParameter = parsed[2]
-                if (param.identifier.Val() == "...") {
-                    list.hasVariableLenArg = true
-                    list.variadicArgIndex = UInt64(list.params.size)
-                }
-                list.params.add(param)
-                if (Skip(TokenKind.COMMA)) {
-                    param.commaPos = lastToken.Begin()
-                } else {
-                    break
-                }
-            }
+            let namedParameter = Box<Option<FuncParam>>(None)
+            let memberParameter = Box<Option<FuncParam>>(None)
+            ParseZeroOrMoreSepTrailing(
+                { pos: Position => list.params[list.params.size - 1].commaPos = pos },
+                { =>
+                    let parsed = ParseParamInParamList(scopeKind, namedParameter.value, memberParameter.value)
+                    let param = parsed[0]
+                    namedParameter.value = parsed[1]
+                    memberParameter.value = parsed[2]
+                    if (param.identifier.Val() == "...") {
+                        list.hasVariableLenArg = true
+                        list.variadicArgIndex = UInt64(list.params.size)
+                    }
+                    list.params.add(param)
+                },
+                TokenKind.RPAREN)
             if (!Skip(TokenKind.RPAREN)) {
                 DiagExpectedRightDelimiter("(", list.leftParenPos)
                 list.end = lookahead.End()
