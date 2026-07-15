@@ -16,6 +16,7 @@
 [dependencies]
   "cjcj::ast" = { path = "../ast" }
   "cjcj::basic" = { path = "../basic" }
+  "cjcj::incremental_compilation" = { path = "../incremental_compilation" }
   "cjcj::mangle" = { path = "../mangle" }
   "cjcj::macro_pkg" = { path = "../macro" }
   "cjcj::modules" = { path = "../modules" }

@@ -10,6 +10,7 @@ import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
 import cjcj::basic.DiagnosticCache
 import cjcj::basic.Diagnostic
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::incremental_compilation.IncreKind
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::option.OutputMode as OptionOutputMode
 import cjcj::option.IsUnsafeBackend as OptionIsUnsafeBackend
@@ -2577,13 +2578,14 @@ extend TypeChecker {
             options = instance.globalOptions
         }
         let outputCHIR = options.outputMode == OptionOutputMode.CHIR
+        let incrementalCompile = if (let Some(instance) <- ci) { instance.kind == IncreKind.INCR } else { false }
         let mainBody = if (let Some(value6) <- mainFunc.funcBody) {
             value6
         } else {
             return
         }
         if ((!options.CompileExecutable() && !outputCHIR) || packageHasMain.TestAttr(Attribute.IMPORTED) ||
-            !Ty.IsTyCorrect(funcTy.retTy) || mainBody.paramLists.isEmpty()) {
+            incrementalCompile || !Ty.IsTyCorrect(funcTy.retTy) || mainBody.paramLists.isEmpty()) {
             return
         }
 

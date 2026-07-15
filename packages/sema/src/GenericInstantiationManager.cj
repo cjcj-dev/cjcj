@@ -3,6 +3,7 @@ package cjcj::sema
 import std.collection.*
 import cjcj::ast.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::incremental_compilation.IncreKind
 import cjcj::modules.SemaImportManager
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
@@ -10,6 +11,7 @@ import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
 public class CompilerInstance {
     public var typeManager: TypeManager = TypeManager()
     public var globalOptions: OptionGlobalOptions = OptionGlobalOptions()
+    public var kind: IncreKind = IncreKind.INVALID
     public var buildTrie: Bool = true
     public var frontendDumpActionIsTypeCheck: Bool = false
     public var diag: Option<BasicDiagnosticEngine> = None
