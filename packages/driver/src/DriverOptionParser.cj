@@ -731,10 +731,10 @@ public func TryParseTriple(value: String): Option<TripleInfo> {
         info.apiLevel = envPart[7..]
         if (let Some(api) <- TryParseUInt64(info.apiLevel)) {
             if (api < 23u64 || api > 10000u64) {
-                return None
+                ()
             }
         } else {
-            return None
+            ()
         }
     } else if (envPart == "gnu" || envPart == "mingw32") {
         info.env = EnvironmentType.GNU
