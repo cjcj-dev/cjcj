@@ -2616,6 +2616,16 @@ extend ParserImpl {
             if (HasModifierToken(modifiers, TokenKind.CONST)) {
                 ret.isConst = true
             }
+            let missingBody = match (ret.funcBody) {
+                case Some(funcBody) => funcBody.body.isNone()
+                case None => true
+            }
+            if (missingBody && !ret.TestAttr(Attribute.COMMON)) {
+                DiagMissingBody(
+                    "main constructor",
+                    if (!ret.identifier.Valid()) { "" } else { " '${ret.identifier.Val()}'" },
+                    lastToken.End())
+            }
             if (let Some(body) <- ret.funcBody) {
                 if (let Some(retType) <- body.retType) {
                     ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_return_type, retType,
