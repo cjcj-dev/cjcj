@@ -1352,24 +1352,32 @@ private func ChkArithmeticExpr(typeManager: TypeManager, target: Ty, be: BinaryE
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    if (!IsBinaryOperator(be.op)) {
+        return false
+    }
     let targetTy = UnboxOptionType(target)
     if (!Ty.IsTyCorrect(targetTy)) {
         return false
     }
     if (be.op == TokenKind.EXP) {
-        return ChkExpoExpr(typeManager, targetTy, be, ctx: ctx, synthesizer: synthesizer,
+        return Ty.IsTyCorrect(target) && ChkExpoExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer,
             checker: checker, diag: diag)
     }
-    let candidateKinds = GetConcreteBinaryCandidateKinds(be.op)
+    let typeCandidates = GetBinaryOpTypeCandidates(be.op)
     let thisDiags = ArrayList<Diagnostic>()
-    for (kindValue in candidateKinds) {
-        let candidateTy = TypeManager.GetPrimitiveTy(kindValue)
-        if (!typeManager.IsSubtype(candidateTy, targetTy)) {
+    for (typeCandidate in typeCandidates) {
+        let candidateTy = TypeManager.GetPrimitiveTy(typeCandidate[1])
+        if (candidateTy.IsIdeal() || !typeManager.IsSubtype(candidateTy, targetTy)) {
             continue
         }
         try (ds = DiagSuppressor(diag)) {
-            if (ChkConcreteBinaryOperandPair(typeManager, candidateTy, be, ctx: ctx, checker: checker)) {
+            let leftExpr = be.leftExpr.getOrThrow()
+            let rightExpr = be.rightExpr.getOrThrow()
+            var isWellTyped = ChkBinaryOperand(typeManager, candidateTy, leftExpr, ctx, checker)
+            isWellTyped = ChkBinaryOperand(typeManager, candidateTy, rightExpr, ctx, checker) && isWellTyped
+            if (isWellTyped) {
                 ds.ReportDiag()
+                be.SetTy(candidateTy)
                 return true
             }
             for (diagnostic in ds.GetSuppressedDiag()) {
@@ -1459,7 +1467,7 @@ private func ChkShiftExprBuiltin(typeManager: TypeManager, target: Ty, be: Binar
     return false
 }
 
-private func CheckBinaryExprCaseBuiltIn(typeManager: TypeManager, target: Ty, be: BinaryExpr,
+private func ChkBuiltinBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (IsArithmeticOperator(be.op)) {
@@ -1611,8 +1619,7 @@ public func ChkBinaryExpr(impl: TypeCheckerImpl, target: Ty, be: BinaryExpr,
         return ChkFlowExpr(typeManager, target, be, synthesizer.getOrThrow(), checker.getOrThrow(), diag)
     }
     try (ds = DiagSuppressor(diag)) {
-        if (CheckBinaryExprCaseBuiltIn(typeManager, target, be, ctx: ctx, synthesizer: synthesizer,
-            checker: checker,
+        if (ChkBuiltinBinaryExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker,
             diag: diag)) {
             ds.ReportDiag()
             return true
