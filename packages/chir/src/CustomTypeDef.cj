@@ -449,7 +449,7 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
     }
 
     public func GetIdentifierWithoutPrefix(): String {
-        if (identifier.size > 0 && identifier[0] == b'_') {
+        if (identifier.size > 0 && (identifier[0] == b'_' || identifier[0] == b'@')) {
             return identifier[1..]
         }
         return identifier

@@ -25,8 +25,10 @@ import cjcj::ast.Attribute as AstAttribute
 import cjcj::ast.CallExpr as AstCallExpr
 import cjcj::ast.ClassDecl as AstClassDecl
 import cjcj::ast.ClassLikeDecl as AstClassLikeDecl
+import cjcj::ast.ClassLikeTy as AstClassLikeTy
 import cjcj::ast.Decl as AstDecl
 import cjcj::ast.EnumDecl as AstEnumDecl
+import cjcj::ast.EnumTy as AstEnumTy
 import cjcj::ast.EnumPattern as AstEnumPattern
 import cjcj::ast.ExtendDecl as AstExtendDecl
 import cjcj::ast.Expr as AstExpr
@@ -45,6 +47,7 @@ import cjcj::ast.Pattern as AstPattern
 import cjcj::ast.PropDecl as AstPropDecl
 import cjcj::ast.RefExpr as AstRefExpr
 import cjcj::ast.StructDecl as AstStructDecl
+import cjcj::ast.StructTy as AstStructTy
 import cjcj::ast.TuplePattern as AstTuplePattern
 import cjcj::ast.Ty as AstTy
 import cjcj::ast.TypeKind as AstTypeKind
@@ -1107,6 +1110,7 @@ public class FaithfulAST2CHIR {
     private var failureReason: String = ""
 
     private let globalCache: FaithfulAST2CHIRNodeMap = FaithfulAST2CHIRNodeMap()
+    private let deserializedDefs: HashMap<String, CustomTypeDef> = HashMap<String, CustomTypeDef>()
     private let deserializedVals: HashMap<String, Value> = HashMap<String, Value>()
     private let noNeedToTranslateDecls: HashSet<AstDecl> = HashSet<AstDecl>()
     private let implicitDecls: HashSet<AstDecl> = HashSet<AstDecl>()
@@ -1773,52 +1777,74 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreateCustomTypeDef(decl: AstDecl, isImported!: Bool): Unit {
-        if (chirType.Has(decl)) {
-            return
+        let loc = TranslateLocationWithoutScope(builder.context, decl.begin, decl.end)
+        let packageName = if (let Some(genericDecl) <- decl.genericDecl) {
+            genericDecl.fullPackageName
+        } else {
+            decl.fullPackageName
         }
-        let packageName = EffectivePackageName(decl)
-        let identifier = EffectiveMangledName(decl)
+        let identifier = decl.mangledName
         let srcIdentifier = decl.identifier.Val()
-        var customTypeDef: CustomTypeDef
+        var uniqueDecl: Option<AstDecl> = None
+        var customTypeDef = TryGetDeserialized<CustomTypeDef>(decl)
+        if (let Some(def) <- customTypeDef) {
+            def.SetDebugLocation(loc)
+        }
         match (decl.astKind) {
             case ASTKind.STRUCT_DECL =>
-                let def = builder.CreateStructDef(packageName, identifier)
-                def.SetSrcCodeIdentifier(srcIdentifier)
-                customTypeDef = def
-                if (isImported) { CurrentPackage().AddImportedStruct(def) } else { CurrentPackage().AddStruct(def) }
-            case ASTKind.CLASS_DECL =>
-                let def = builder.CreateClassDef(packageName, identifier)
-                def.SetSrcCodeIdentifier(srcIdentifier)
-                customTypeDef = def
-                if (isImported) { CurrentPackage().AddImportedClass(def) } else { CurrentPackage().AddClass(def) }
-            case ASTKind.INTERFACE_DECL =>
-                let def = builder.CreateClassDef(packageName, identifier, isClass: false)
-                def.SetSrcCodeIdentifier(srcIdentifier)
-                def.EnableAttr(Attribute.ABSTRACT)
-                customTypeDef = def
-                if (isImported) { CurrentPackage().AddImportedClass(def) } else { CurrentPackage().AddClass(def) }
+                if (customTypeDef.isNone()) {
+                    customTypeDef = builder.CreateStruct(loc, srcIdentifier, identifier, packageName, isImported)
+                }
+                if (let Some(unique) <- (RequireAstTy(decl) as AstStructTy).getOrThrow().decl) {
+                    uniqueDecl = unique as AstDecl
+                }
+            case ASTKind.CLASS_DECL | ASTKind.INTERFACE_DECL =>
+                if (customTypeDef.isNone()) {
+                    customTypeDef = builder.CreateClass(loc, srcIdentifier, identifier, packageName,
+                        decl.astKind == ASTKind.CLASS_DECL, isImported)
+                }
+                if (let Some(unique) <- (RequireAstTy(decl) as AstClassLikeTy).getOrThrow().commonDecl) {
+                    uniqueDecl = unique as AstDecl
+                }
             case ASTKind.ENUM_DECL =>
-                let def = builder.CreateEnumDef(packageName, identifier)
-                def.SetSrcCodeIdentifier(srcIdentifier)
-                customTypeDef = def
-                if (isImported) { CurrentPackage().AddImportedEnum(def) } else { CurrentPackage().AddEnum(def) }
+                if (customTypeDef.isNone()) {
+                    let enumDecl = (decl as AstEnumDecl).getOrThrow()
+                    customTypeDef = builder.CreateEnum(loc, srcIdentifier, identifier, packageName, isImported,
+                        enumDecl.hasEllipsis)
+                }
+                if (let Some(unique) <- (RequireAstTy(decl) as AstEnumTy).getOrThrow().decl) {
+                    uniqueDecl = unique as AstDecl
+                }
             case ASTKind.EXTEND_DECL =>
-                let def = builder.CreateExtendDef(packageName, identifier)
-                def.SetSrcCodeIdentifier(srcIdentifier)
-                customTypeDef = def
-                if (isImported) { CurrentPackage().AddImportedExtend(def) } else { CurrentPackage().AddExtend(def) }
+                if (customTypeDef.isNone()) {
+                    customTypeDef = builder.CreateExtend(loc, identifier, packageName, isImported,
+                        GetGenericParamType(decl))
+                }
             case _ =>
                 throw IllegalArgumentException(
                     "faithful AST2CHIR CreateCustomTypeDef expected nominal decl, got ${ASTKindName(decl.astKind)}")
         }
-        if (isImported) {
-            customTypeDef.EnableAttr(Attribute.IMPORTED)
+        let def = customTypeDef.getOrThrow()
+        if (opts.enIncrementalCompilation && decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED) &&
+            !decl.toBeCompiled) {
+            def.EnableAttr(Attribute.NON_RECOMPILE)
         }
-        ApplyDeclAttrs(customTypeDef, decl)
-        MaybeSetCoreBuiltinClassTy(customTypeDef)
-        chirType.SetGlobalNominalCache(decl, customTypeDef)
-        if (decl.astKind == ASTKind.EXTEND_DECL) {
-            AttachCustomTypeGenericParams(decl)
+        if (!def.TestAttr(Attribute.DESERIALIZED)) {
+            ApplyDeclAttrs(def, decl)
+        }
+        MaybeSetCoreBuiltinClassTy(def)
+        chirType.SetGlobalNominalCache(decl, def)
+        if (let Some(unique) <- uniqueDecl) {
+            if (unique != decl) {
+                chirType.SetGlobalNominalCache(unique, def)
+            }
+        }
+        if (decl.TestAttr(AstAttribute.COMMON) && !decl.TestAttr(AstAttribute.FROM_COMMON_PART)) {
+            def.EnableAttr(Attribute.COMMON)
+        }
+        if (decl.TestAttr(AstAttribute.SPECIFIC)) {
+            def.EnableAttr(Attribute.SPECIFIC)
+            def.DisableAttr(Attribute.COMMON)
         }
     }
 
@@ -2358,6 +2384,12 @@ public class FaithfulAST2CHIR {
     }
 
     private func BuildDeserializedTable(): Unit {
+        for (def in CurrentPackage().GetAllCustomTypeDef()) {
+            let identifier = def.GetIdentifier()
+            if (!deserializedDefs.contains(identifier)) {
+                deserializedDefs.add(identifier, def)
+            }
+        }
         for (globalVar in CurrentPackage().GetGlobalVars()) {
             let identifier = globalVar.GetIdentifier()
             if (!deserializedVals.contains(identifier)) {
@@ -2388,7 +2420,7 @@ public class FaithfulAST2CHIR {
         return false
     }
 
-    private func TryGetDeserialized<T>(decl: AstDecl): Option<T> where T <: Value {
+    private func TryGetDeserialized<T>(decl: AstDecl): Option<T> where T <: Base {
         if (!MaybeDeserialized(decl)) {
             return None
         }
@@ -2397,7 +2429,15 @@ public class FaithfulAST2CHIR {
         } else {
             GLOBAL_VALUE_PREFIX + decl.mangledName
         }
-        let result = TryGetFromCache<T>(key, deserializedVals)
+        var result: Option<T> = None
+        if (let Some(def) <- deserializedDefs.get(key)) {
+            result = def as T
+        }
+        if (result.isNone()) {
+            if (let Some(value) <- deserializedVals.get(key)) {
+                result = value as T
+            }
+        }
         if (result.isSome() && !decl.TestAttr(AstAttribute.SPECIFIC) &&
             !(decl.TestAttr(AstAttribute.COMMON) && decl.TestAttr(AstAttribute.IMPORTED))) {
             noNeedToTranslateDecls.add(decl)
@@ -4536,6 +4576,18 @@ public class FaithfulAST2CHIR {
             throw IllegalStateException("faithful generic function has no body")
         let generic = funcBody.generic ??
             throw IllegalStateException("faithful generic function has no generic parameters")
+        for (genericTy in generic.typeParameters) {
+            genericParamTys.add((chirType.TranslateType(RequireAstTy(genericTy)) as GenericType).getOrThrow())
+        }
+        return genericParamTys
+    }
+
+    private func GetGenericParamType(decl: AstDecl): ArrayList<GenericType> {
+        let genericParamTys = ArrayList<GenericType>()
+        if (!decl.TestAttr(AstAttribute.GENERIC)) {
+            return genericParamTys
+        }
+        let generic = decl.GetGeneric().getOrThrow()
         for (genericTy in generic.typeParameters) {
             genericParamTys.add((chirType.TranslateType(RequireAstTy(genericTy)) as GenericType).getOrThrow())
         }
