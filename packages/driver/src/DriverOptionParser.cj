@@ -2,6 +2,7 @@ package cjcj::driver
 
 import std.collection.*
 import std.convert.*
+import cjcj::basic.{DEFAULT_POSITION, DiagnosticEngine, DiagKindRefactor}
 import cjcj::option.{
     ArgInstanceType, ArgList, CreateOptionTable, GetHardwareConcurrency, Group, ID, Kind, OptionArgInstance, OptionTable
 }
@@ -148,6 +149,7 @@ private func ParseJobsValue(optionName: String, value: String): Option<UInt64> {
 }
 
 private func ParseOption(opts: DriverOptions, optionArg: OptionArgInstance, optionIndex: UInt64): Bool {
+    DeprecatedOptionCheck(optionArg)
     let arg = optionArg.name
     let value = optionArg.value
     if (arg == "-h" || arg == "--help") { opts.showUsage = true; return true }
@@ -216,6 +218,18 @@ private func ParseOption(opts: DriverOptions, optionArg: OptionArgInstance, opti
     if (ParseWarningFlag(opts, optionArg)) { return true }
     if (ParseObfuscationFlag(opts, arg)) { return true }
     return ParseOptionWithValue(opts, optionArg, optionIndex)
+}
+
+private func DeprecatedOptionCheck(arg: OptionArgInstance): Unit {
+    let id = arg.info.GetID()
+    if (id == ID.STATIC_LIBS || id == ID.DY_LIBS || id == ID.COMPILE_AS_EXE) {
+        let diag = DiagnosticEngine()
+        diag.DiagnoseRefactor(
+            DiagKindRefactor.driver_deprecated_option,
+            DEFAULT_POSITION,
+            arguments: [arg.str, ""]
+        ).Emit()
+    }
 }
 
 private func ParseOptimization(opts: DriverOptions, optionArg: OptionArgInstance): Bool {
