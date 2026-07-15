@@ -67,6 +67,19 @@ extend ParserImpl {
         } while (!Seeing(end))
     }
 
+    // C++: Parse/ParserUtils.cpp:279-288 ParserImpl::ParseOneOrMoreWithSeparator.
+    public func ParseOneOrMoreWithSeparator(
+        separator: TokenKind,
+        storeSeparator: (Position) -> Unit,
+        parseElement: () -> Unit
+    ): Unit {
+        parseElement()
+        while (Skip(separator)) {
+            storeSeparator(lastToken.Begin())
+            parseElement()
+        }
+    }
+
     public func CanMatchBracketInStack(): Bool {
         let matchingBracket = LookupMatchingOpenBracket(lookahead.kind)
         if (matchingBracket != TokenKind.ILLEGAL) {

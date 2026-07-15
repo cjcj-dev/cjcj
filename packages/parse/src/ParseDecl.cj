@@ -1758,19 +1758,25 @@ extend ParserImpl {
             let paramList = FuncParamList()
             paramList.leftParenPos = lastToken.Begin()
             paramList.begin = paramList.leftParenPos
-            var index: Int64 = 1
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-                let param = FuncParam()
-                let ty = ParseType()
-                param.identifier = SrcIdentifier("p${index}", "p${index}", ty.begin, ty.begin, false)
-                param.isIdentifierCompilerAdd = true
-                param.typeNode = ty
-                param.begin = ty.begin
-                param.end = ty.end
-                paramList.params.add(param)
-                index++
-                if (!Skip(TokenKind.COMMA)) { break }
-            }
+            let index = Box<Int64>(1)
+            // C++: Parse/ParseDecl.cpp:1227-1250 ParserImpl::ParseEnumConstructorWithArgs.
+            ParseOneOrMoreWithSeparator(
+                TokenKind.COMMA,
+                { commaPos: Position =>
+                    paramList.params[paramList.params.size - 1].commaPos = commaPos
+                },
+                { =>
+                    let param = FuncParam()
+                    let ty = ParseType()
+                    param.identifier = SrcIdentifier(
+                        "p${index.value}", "p${index.value}", ty.begin, ty.begin, false)
+                    param.isIdentifierCompilerAdd = true
+                    param.typeNode = ty
+                    param.begin = ty.begin
+                    param.end = ty.end
+                    paramList.params.add(param)
+                    index.value++
+                })
             paramList.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after enum constructor").Begin()
             paramList.end = paramList.rightParenPos + 1
             let body = FuncBody()
