@@ -47,6 +47,45 @@ private func IsLocalDeclOutOfFuncBody(decl: Decl, curFuncBody: FuncBody): Bool {
     return decl.scopeLevel > 0 && decl.scopeLevel < curFuncBody.scopeLevel
 }
 
+// C++ src/Sema/TypeChecker.cpp:1518-1549.
+private func HasNonParamCtorForClass(classDecl: ClassDecl): Bool {
+    let body = classDecl.body.getOrThrow()
+    for (decl in body.decls) {
+        let fd = match (decl as FuncDecl) {
+            case Some(value) => value
+            case None => continue
+        }
+        if (!IsInstanceConstructor(fd)) {
+            continue
+        }
+        let funcBody = fd.funcBody.getOrThrow()
+        if (funcBody.paramLists.isEmpty()) {
+            return false
+        }
+        let params = funcBody.paramLists[0].params
+        if (params.isEmpty()) {
+            if (fd.TestAttr(Attribute.PRIVATE)) {
+                return false
+            }
+            return true
+        }
+        var allHasDefaultValue = true
+        for (param in params) {
+            if (param.assignment.isNone()) {
+                allHasDefaultValue = false
+                break
+            }
+        }
+        if (allHasDefaultValue) {
+            if (fd.TestAttr(Attribute.PRIVATE)) {
+                continue
+            }
+            return true
+        }
+    }
+    return false
+}
+
 extend TypeChecker {
     // C++ src/Sema/TypeCheckExpr.cpp:98-134.
     public func SetCaptureKind(ctx: ASTContext, nre: NameReferenceExpr, curFuncBody: FuncBody): Unit {
@@ -1034,6 +1073,191 @@ extend TypeChecker {
             if (!hasDesugared) {
                 DesugarPrimaryCtor(inheritableDecl, primaryCtorDecl)
             }
+        }
+    }
+
+    // C++ src/Sema/TypeChecker.cpp:1297-1329.
+    private func CheckConstructor(ctx: ASTContext, decl: Decl, fd: FuncDecl): Unit {
+        if (decl.astKind != ASTKind.CLASS_DECL && decl.astKind != ASTKind.STRUCT_DECL) {
+            return
+        }
+        let funcBody = match (fd.funcBody) {
+            case Some(value) => value
+            case None => return
+        }
+        var hasBrokenBody = funcBody.generic.isSome() && !fd.TestAttr(Attribute.STATIC) && HasJavaAttr(decl).isNone()
+        if (hasBrokenBody) {
+            Diagnose(impl.diag.getOrThrow(), fd, BasicDiagKind.sema_forbid_generic_constructor,
+                args: [BasicDiagArgument(fd.identifier.Val())]).Emit()
+        }
+        if (funcBody.paramLists.size > 1) {
+            Diagnose(impl.diag.getOrThrow(), funcBody.paramLists[0], BasicDiagKind.sema_cannot_currying,
+                args: [BasicDiagArgument("constructor")]).Emit()
+            hasBrokenBody = true
+        }
+        if (hasBrokenBody) {
+            funcBody.EnableAttr(Attribute.IS_BROKEN)
+            fd.EnableAttr(Attribute.HAS_BROKEN)
+        }
+        let body = match (funcBody.body) {
+            case Some(value) => value
+            case None => return
+        }
+        if (hasBrokenBody || body.body.isEmpty()) {
+            return
+        }
+        let firstExprOrDecl = body.body[0]
+        var needEraseSuper = false
+        if (let Some(callExpr) <- (firstExprOrDecl as CallExpr)) {
+            needEraseSuper = CheckConstructorSuper(callExpr, decl, fd)
+        }
+        CheckCallsInConstructor(ctx, decl, fd, firstExprOrDecl, needEraseSuper)
+    }
+
+    // C++ src/Sema/TypeChecker.cpp:1331-1380.
+    private func CheckCallsInConstructor(ctx: ASTContext, decl: Decl, fd: FuncDecl,
+        firstExprOrDecl: Node, needEraseSuper: Bool): Unit {
+        let funcBody = fd.funcBody.getOrThrow()
+        let body = funcBody.body.getOrThrow()
+        CJC_ASSERT(!body.body.isEmpty())
+        var firstExprOrDeclPtr: Option<Node> = Some(firstExprOrDecl)
+        let calls = ArrayList<CallExpr>()
+        let _ = Walker(funcBody, visitPre: { node: Node =>
+            if (let Some(callExpr) <- (node as CallExpr)) {
+                calls.add(callExpr)
+            }
+            VisitAction.WALK_CHILDREN
+        }).Walk()
+        var eraseSuper = needEraseSuper
+        for (callExpr in calls) {
+            let baseFunc = match (callExpr.baseFunc) {
+                case Some(value) => value
+                case None => continue
+            }
+            let refExpr = match (baseFunc as RefExpr) {
+                case Some(value) => value
+                case None => continue
+            }
+            if (!refExpr.isThis && !refExpr.isSuper) {
+                continue
+            }
+            if (refExpr.isThis && fd.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
+                Diagnose(impl.diag.getOrThrow(), callExpr,
+                    BasicDiagKind.sema_illegal_place_of_calling_this_primary_constructor).Emit()
+            } else if (match (firstExprOrDeclPtr) {
+                case Some(first) => callExpr != first
+                case None => true
+            }) {
+                var trailingClosure: Option<TrailingClosureExpr> = None
+                if ((let Some(first) <- firstExprOrDeclPtr) && (let Some(value) <- (first as TrailingClosureExpr))) {
+                    trailingClosure = Some(value)
+                }
+                let notIllegalPlace = match (trailingClosure) {
+                    case None => true
+                    case Some(value) => callExpr.TestAttr(Attribute.COMPILER_ADD) && match (value.desugarExpr) {
+                        case Some(desugar) => callExpr != desugar
+                        case None => true
+                    }
+                }
+                if (notIllegalPlace) {
+                    Diagnose(impl.diag.getOrThrow(), callExpr,
+                        BasicDiagKind.sema_illegal_place_of_calling_this_or_super,
+                        args: [BasicDiagArgument(refExpr.ref.identifier.Val()),
+                            BasicDiagArgument(if (decl.astKind == ASTKind.CLASS_DECL) { "class" } else { "struct" }),
+                            BasicDiagArgument(decl.identifier.Val())]).Emit()
+                }
+            }
+            let needReset = eraseSuper && refExpr.isSuper && callExpr.TestAttr(Attribute.COMPILER_ADD) &&
+                callExpr.args.isEmpty() && decl.astKind == ASTKind.CLASS_DECL && callExpr == body.body[0]
+            if (needReset) {
+                eraseSuper = false
+                ctx.DeleteInvertedIndexes(body.body[0])
+                body.body.remove(at: 0)
+                firstExprOrDeclPtr = None
+            }
+            if (decl.astKind == ASTKind.STRUCT_DECL) {
+                fd.constructorCall = ConstructorCall.OTHER_INIT
+            }
+        }
+    }
+
+    // C++ src/Sema/TypeChecker.cpp:1551-1576.
+    private func CheckConstructorSuper(ce: CallExpr, decl: Decl, fd: FuncDecl): Bool {
+        let baseFunc = match (ce.baseFunc) {
+            case Some(value) => value
+            case None => return false
+        }
+        let refExpr = match (baseFunc as RefExpr) {
+            case Some(value) => value
+            case None => return false
+        }
+        if (!refExpr.isSuper || !ce.TestAttr(Attribute.COMPILER_ADD) || !ce.args.isEmpty()) {
+            return false
+        }
+        let classDecl = match (decl as ClassDecl) {
+            case Some(value) => value
+            case None => return false
+        }
+        let needEraseSuper = match (classDecl.GetSuperClassDecl()) {
+            case Some(superClassDecl) => !HasNonParamCtorForClass(superClassDecl)
+            case None => false
+        }
+        if (!needEraseSuper) {
+            return false
+        }
+        let fdName = if (fd.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) { fd.identifierForLsp } else {
+            fd.identifier.Val()
+        }
+        let range = if (fd.TestAttr(Attribute.IMPLICIT_ADD)) {
+            MakeRange(decl.identifier.Begin(), decl.identifier.End())
+        } else {
+            MakeRange(fd.identifier.Begin(), fdName)
+        }
+        DiagnoseRefactor(impl.diag.getOrThrow(),
+            BasicDiagKindRefactor.sema_no_non_param_constructor_in_super_class, fd, range).Emit()
+        fd.constructorCall = ConstructorCall.NONE
+        return true
+    }
+
+    // C++ src/Sema/TypeChecker.cpp:1578-1596.
+    private func CheckFinalizer(fd: FuncDecl): Unit {
+        let funcBody = match (fd.funcBody) {
+            case Some(value) => value
+            case None => return
+        }
+        let invalidGeneric = funcBody.generic.isSome() && !fd.TestAttr(Attribute.STATIC) && match (fd.outerDecl) {
+            case Some(outerDecl) => HasJavaAttr(outerDecl).isNone()
+            case None => false
+        }
+        if (invalidGeneric) {
+            Diagnose(impl.diag.getOrThrow(), fd, BasicDiagKind.sema_forbid_generic_finalizer,
+                args: [BasicDiagArgument(fd.identifier.Val())]).Emit()
+        }
+        if (!funcBody.paramLists.isEmpty()) {
+            if (funcBody.paramLists.size > 1) {
+                Diagnose(impl.diag.getOrThrow(), funcBody.paramLists[0], BasicDiagKind.sema_cannot_currying,
+                    args: [BasicDiagArgument("finalizer")]).Emit()
+            }
+            if (!funcBody.paramLists[0].params.isEmpty()) {
+                Diagnose(impl.diag.getOrThrow(), fd, BasicDiagKind.sema_cannot_have_parameter,
+                    args: [BasicDiagArgument("finalizer")]).Emit()
+            }
+        }
+    }
+
+    // C++ src/Sema/TypeChecker.cpp:1632-1646.
+    private func TypeCheckCompositeBody(ctx: ASTContext, structDecl: Decl, body: ArrayList<Decl>): Unit {
+        for (decl in body) {
+            if (let Some(fd) <- (decl as FuncDecl)) {
+                if (fd.TestAttr(Attribute.CONSTRUCTOR)) {
+                    CheckConstructor(ctx, structDecl, fd)
+                }
+                if (fd.IsFinalizer()) {
+                    CheckFinalizer(fd)
+                }
+            }
+            let _ = SynthesizeDecl(ctx, decl)
+            CheckCTypeMember(decl, impl.diag.getOrThrow())
         }
     }
 
@@ -3436,7 +3660,7 @@ extend TypeChecker {
                 }
             }
             if (let Some(body) <- classDecl.body) {
-                SynthesizeDeclList(ctx, body.decls)
+                TypeCheckCompositeBody(ctx, classDecl, body.decls)
                 impl.CheckRecursiveConstructorCall(body.decls)
             }
             return tyOrInvalid(classDecl)
@@ -3444,7 +3668,7 @@ extend TypeChecker {
         if (let Some(structDecl) <- (decl as StructDecl)) {
             SynthesizeInheritedTypes(ctx, structDecl)
             if (let Some(body2) <- structDecl.body) {
-                SynthesizeDeclList(ctx, body2.decls)
+                TypeCheckCompositeBody(ctx, structDecl, body2.decls)
                 impl.CheckRecursiveConstructorCall(body2.decls)
             }
             return tyOrInvalid(structDecl)
@@ -3454,7 +3678,7 @@ extend TypeChecker {
             let _ = TypeCheckClassLikeCheckInterfaceInheritedTypes(
                 impl.diag.getOrThrow(), impl.typeManager, interfaceDecl)
             if (let Some(body3) <- interfaceDecl.body) {
-                SynthesizeDeclList(ctx, body3.decls)
+                TypeCheckCompositeBody(ctx, interfaceDecl, body3.decls)
             }
             return tyOrInvalid(interfaceDecl)
         }
