@@ -3607,8 +3607,8 @@ extend TypeChecker {
             SynthesizeTypeNode(ctx, vd.typeNode)
             if (let Some(initializer) <- vd.initializer) {
                 if (let Some(typeNode) <- vd.typeNode) {
-                    if (let None <- typeNode.GetTy()) {
-                        let _ = Synthesize(ctx, initializer)
+                    if (!Ty.IsTyCorrect(typeNode.GetTy())) {
+                        let _ = Synthesize(ctx, SynPos.EXPR_ARG, initializer)
                     }
                 } else {
                     let _ = SynthesizeAndReplaceIdealTy(ctx, SynPos.EXPR_ARG, initializer)

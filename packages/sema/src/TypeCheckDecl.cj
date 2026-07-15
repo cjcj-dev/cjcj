@@ -503,20 +503,22 @@ public func TypeCheckDeclSynchronizeTypeAndInitializer(
 ): Ty {
     if (let Some(typeNode) <- vd.typeNode) {
         if (let Some(typeTy) <- typeNode.GetTy()) {
-            vd.SetTy(typeTy)
-            if (let Some(initializer) <- vd.initializer) {
-                if (typeTy.IsRune() && IsSingleRuneStringLiteral(initializer)) {
-                    initializer.SetTy(typeTy)
-                } else if (typeTy.kind == TypeKind.TYPE_UINT8 && IsSingleByteStringLiteral(initializer)) {
-                    initializer.SetTy(typeTy)
-                    if (let Some(lit) <- (initializer as LitConstExpr)) {
-                        let _ = ChkLitConstExprRange(lit, diag: diag)
+            if (Ty.IsTyCorrect(typeTy)) {
+                vd.SetTy(typeTy)
+                if (let Some(initializer) <- vd.initializer) {
+                    if (typeTy.IsRune() && IsSingleRuneStringLiteral(initializer)) {
+                        initializer.SetTy(typeTy)
+                    } else if (typeTy.kind == TypeKind.TYPE_UINT8 && IsSingleByteStringLiteral(initializer)) {
+                        initializer.SetTy(typeTy)
+                        if (let Some(lit) <- (initializer as LitConstExpr)) {
+                            let _ = ChkLitConstExprRange(lit, diag: diag)
+                        }
+                    } else if (let Some(check) <- checker) {
+                        let _ = check(typeTy, initializer)
                     }
-                } else if (let Some(check) <- checker) {
-                    let _ = check(typeTy, initializer)
                 }
+                return typeTy
             }
-            return typeTy
         }
         vd.SetTy(TypeManager.GetInvalidTy())
         return TypeManager.GetInvalidTy()

@@ -498,7 +498,13 @@ public func TypeCheckTypeCheckRefType(
                 }
             }
         }
-        if (!CheckGenericDeclInstantiation(tm, checkTarget, checkTypeArgs)) {
+        let checker = TypeCheckerImpl(typeManager: tm, diag: Some(diag))
+        let constraintsMatched = if (resolvedAliasTarget) {
+            checker.CheckGenericDeclInstantiation(checkTarget, checkTypeArgs, refType)
+        } else {
+            checker.CheckGenericDeclInstantiation(checkTarget, typeArgs, refType)
+        }
+        if (!constraintsMatched) {
             refType.SetTy(TypeManager.GetInvalidTy())
             return false
         }
@@ -547,7 +553,9 @@ public func TypeCheckTypeCheckQualifiedType(
         return false
     }
     if (Ty.IsTyCorrect(qualifiedType.GetTy()) && !qualifiedType.GetTypeArgs().isEmpty()) {
-        if (!CheckGenericDeclInstantiation(tm, qualifiedType.target.getOrThrow(), qualifiedType.GetTypeArgs())) {
+        let checker = TypeCheckerImpl(typeManager: tm, diag: Some(diag))
+        if (!checker.CheckGenericDeclInstantiation(
+            qualifiedType.target.getOrThrow(), qualifiedType.GetTypeArgs(), qualifiedType)) {
             qualifiedType.SetTy(TypeManager.GetInvalidTy())
             return false
         }

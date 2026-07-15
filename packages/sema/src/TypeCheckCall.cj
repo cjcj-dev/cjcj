@@ -2807,9 +2807,7 @@ private func CheckGenericDeclInstantiationForCall(typeManager: TypeManager, diag
     if (CheckGenericDeclInstantiation(typeManager, decl, typeArgs)) {
         return true
     }
-    if (checkNode.ShouldDiagnose()) {
-        EmitGenericInstantiationFailureForCall(typeManager, diag, decl, typeArgs, checkNode)
-    }
+    EmitGenericInstantiationFailureForCall(typeManager, diag, decl, typeArgs, checkNode)
     return false
 }
 
@@ -2823,15 +2821,11 @@ private func CheckGenericDeclInstantiationForCall(typeManager: TypeManager, diag
         if (let Some(ty) <- typeNode.GetTy()) {
             typeArgs.add(ty)
         } else {
-            if (checkNode.ShouldDiagnose()) {
-                EmitGenericInstantiationFailureForCall(typeManager, diag, decl, typeArgs, checkNode)
-            }
+            EmitGenericInstantiationFailureForCall(typeManager, diag, decl, typeArgs, checkNode)
             return false
         }
     }
-    if (checkNode.ShouldDiagnose()) {
-        EmitGenericInstantiationFailureForCall(typeManager, diag, decl, typeArgs, checkNode, typeNodes: typeNodes)
-    }
+    EmitGenericInstantiationFailureForCall(typeManager, diag, decl, typeArgs, checkNode, typeNodes: typeNodes)
     return false
 }
 
