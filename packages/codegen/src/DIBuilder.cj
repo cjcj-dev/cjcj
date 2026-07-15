@@ -35,7 +35,7 @@ import cjcj::chir.TypeKind
 import cjcj::chir.VArrayType
 import cjcj::chir.GetCustomTypeIdentifier
 import cjcj::chir.GetFuncTypeWithoutThisPtrFromAutoEnvBaseType
-import cjcj::utils.{CJC_ASSERT, StaticCast}
+import cjcj::utils.{CJC_ASSERT, OBJECT_NAME, StaticCast}
 
 // GAP_TODO(C07-debug-location-parity):
 // - EmitExpressionIR.cpp:64-66 enableCompileDebug parameter loads
@@ -84,6 +84,7 @@ public class DIBuilder {
     private var compileUnit: LLVMMetadataRef = LLVMNullMetadata()
     private var namespaceScope: LLVMMetadataRef = LLVMNullMetadata()
     private var refDIType: LLVMMetadataRef = LLVMNullMetadata()
+    private var objDIType: LLVMMetadataRef = LLVMNullMetadata()
     private var curScope: LLVMMetadataRef = LLVMNullMetadata()
     private var curLocation: Position = Position()
     private var needSubprogram: Bool = false
@@ -729,6 +730,16 @@ public class DIBuilder {
         }
         fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(elements))
         return fwdDecl
+    }
+
+    private func GetOrCreateObjectClassType(): LLVMMetadataRef {
+        if (objDIType.isNull()) {
+            let tag = DW_TAG_class_type
+            let fwdDecl = createReplaceableCompositeType(tag, OBJECT_NAME, compileUnit, defaultFile, 0u32, 0u32,
+                64u64, 0u32, FlagTypePassByReference, OBJECT_NAME)
+            objDIType = replaceWithDistinct(fwdDecl)
+        }
+        return objDIType
     }
 
     private func GenerateTypeName(ty: Type): String {
