@@ -7836,11 +7836,17 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     }
 
     private func AddImplicitImports(pkg: Package, opts: GlobalOptions): Unit {
-        if (!opts.implicitPrelude) {
-            return
-        }
         for (file in pkg.files) {
-            AddImplicitImportAll(file, "std.core")
+            if (opts.implicitPrelude) {
+                AddImplicitImportAll(file, "std.core")
+            }
+            if (opts.enableCompileTest) {
+                AddImplicitImportAll(file, "std.unittest")
+                AddImplicitImportAll(file, "std.unittest.testmacro")
+            }
+            if (opts.compileTestsOnly && IsTestPackage(pkg.fullPackageName)) {
+                AddImplicitImportAll(file, GetMainPartPkgNameForTestPkg(pkg.fullPackageName))
+            }
         }
     }
 
