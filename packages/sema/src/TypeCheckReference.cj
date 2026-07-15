@@ -1716,13 +1716,13 @@ private func CheckMemberAccessInCtorParamOrCtorArg(
             }
         }
     }
-    let body = funcBody.body.getOrThrow()
     let hasConstructorCall = match (fd.constructorCall) {
         case ConstructorCall.NONE => false
         case ConstructorCall.OTHER_INIT => true
         case ConstructorCall.SUPER => true
     }
-    if (hasConstructorCall && !body.body.isEmpty()) {
+    if (hasConstructorCall && !funcBody.body.getOrThrow().body.isEmpty()) {
+        let body = funcBody.body.getOrThrow()
         if (let Some(callExpr) <- (body.body[0] as CallExpr)) {
             if (let None <- callExpr.baseFunc) {
                 return
