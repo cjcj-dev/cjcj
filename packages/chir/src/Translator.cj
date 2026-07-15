@@ -6728,15 +6728,20 @@ public class Translator {
         if (IsArrayElementPrimitiveForLiteral(elementTy)) {
             let elements = ArrayList<Value>()
             for (child in expr.children) {
-                elements.add(Translator.TranslateASTNode(child, this) ??
-                    throw IllegalStateException("faithful AST2CHIR ArrayLit element produced no value"))
+                let element = TranslateExprArg(child, elementTy)
+                if (child.TestAttr(AstAttribute.NO_REFLECT_INFO)) {
+                    element.EnableAttr(Attribute.NO_REFLECT_INFO)
+                }
+                elements.add(element)
             }
             builder.CreateRawArrayLiteralInit(builder.context.GetUnitTy(), rawArrayRef, elements, CurrentBlock())
         } else {
             var idx: Int64 = 0
             for (child in expr.children) {
-                let element = Translator.TranslateASTNode(child, this) ??
-                    throw IllegalStateException("faithful AST2CHIR ArrayLit element produced no value")
+                let element = TranslateExprArg(child, elementTy, deref: false)
+                if (child.TestAttr(AstAttribute.NO_REFLECT_INFO)) {
+                    element.EnableAttr(Attribute.NO_REFLECT_INFO)
+                }
                 let path = ArrayList<UInt64>()
                 path.add(UInt64(idx))
                 builder.CreateStoreElementRef(element, rawArrayRef, path, CurrentBlock())
